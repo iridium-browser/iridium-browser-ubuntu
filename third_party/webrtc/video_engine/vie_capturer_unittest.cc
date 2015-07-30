@@ -18,7 +18,6 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webrtc/base/scoped_ptr.h"
 #include "webrtc/common.h"
-#include "webrtc/common_video/interface/native_handle.h"
 #include "webrtc/modules/utility/interface/mock/mock_process_thread.h"
 #include "webrtc/modules/video_capture/include/mock/mock_video_capture.h"
 #include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
@@ -48,56 +47,37 @@ bool EqualFramesVector(const ScopedVector<I420VideoFrame>& frames1,
                        const ScopedVector<I420VideoFrame>& frames2);
 I420VideoFrame* CreateI420VideoFrame(uint8_t length);
 
-class FakeNativeHandle : public NativeHandle {
- public:
-  FakeNativeHandle() {}
-  virtual ~FakeNativeHandle() {}
-  virtual void* GetHandle() { return NULL; }
-};
-
 class ViECapturerTest : public ::testing::Test {
  protected:
   ViECapturerTest()
-      : mock_capture_module_(new NiceMock<MockVideoCaptureModule>()),
-        mock_process_thread_(new NiceMock<MockProcessThread>),
+      : mock_process_thread_(new NiceMock<MockProcessThread>),
         mock_frame_callback_(new NiceMock<MockViEFrameCallback>),
-        data_callback_(NULL),
-        output_frame_event_(EventWrapper::Create()) {
-  }
+        output_frame_event_(EventWrapper::Create()) {}
 
   virtual void SetUp() {
-    EXPECT_CALL(*mock_capture_module_, RegisterCaptureDataCallback(_))
-        .WillRepeatedly(Invoke(this, &ViECapturerTest::SetCaptureDataCallback));
     EXPECT_CALL(*mock_frame_callback_, DeliverFrame(_, _, _))
         .WillRepeatedly(
             WithArg<1>(Invoke(this, &ViECapturerTest::AddOutputFrame)));
 
     Config config;
-    vie_capturer_.reset(
-        ViECapturer::CreateViECapture(
-            0, 0, config, mock_capture_module_.get(), *mock_process_thread_));
-    vie_capturer_->RegisterFrameCallback(0, mock_frame_callback_.get());
+    vie_capturer_.reset(new ViECapturer(mock_process_thread_.get(),
+                                        mock_frame_callback_.get()));
   }
 
   virtual void TearDown() {
-    vie_capturer_->DeregisterFrameCallback(mock_frame_callback_.get());
     // ViECapturer accesses |mock_process_thread_| in destructor and should
     // be deleted first.
     vie_capturer_.reset();
   }
 
-  void SetCaptureDataCallback(VideoCaptureDataCallback& data_callback) {
-    data_callback_ = &data_callback;
-  }
-
   void AddInputFrame(I420VideoFrame* frame) {
-    data_callback_->OnIncomingCapturedFrame(0, *frame);
+    vie_capturer_->IncomingFrame(*frame);
   }
 
-  void AddOutputFrame(const I420VideoFrame* frame) {
-    if (frame->native_handle() == NULL)
-      output_frame_ybuffers_.push_back(frame->buffer(kYPlane));
-    output_frames_.push_back(new I420VideoFrame(*frame));
+  void AddOutputFrame(const I420VideoFrame& frame) {
+    if (frame.native_handle() == NULL)
+      output_frame_ybuffers_.push_back(frame.buffer(kYPlane));
+    output_frames_.push_back(new I420VideoFrame(frame));
     output_frame_event_->Set();
   }
 
@@ -105,13 +85,10 @@ class ViECapturerTest : public ::testing::Test {
     EXPECT_EQ(kEventSignaled, output_frame_event_->Wait(FRAME_TIMEOUT_MS));
   }
 
-  rtc::scoped_ptr<MockVideoCaptureModule> mock_capture_module_;
   rtc::scoped_ptr<MockProcessThread> mock_process_thread_;
   rtc::scoped_ptr<MockViEFrameCallback> mock_frame_callback_;
 
   // Used to send input capture frames to ViECapturer.
-  VideoCaptureDataCallback* data_callback_;
-
   rtc::scoped_ptr<ViECapturer> vie_capturer_;
 
   // Input capture frames of ViECapturer.
@@ -181,13 +158,14 @@ TEST_F(ViECapturerTest, TestRtpTimeStampSet) {
 TEST_F(ViECapturerTest, TestTextureFrames) {
   const int kNumFrame = 3;
   for (int i = 0 ; i < kNumFrame; ++i) {
-    webrtc::RefCountImpl<FakeNativeHandle>* handle =
-              new webrtc::RefCountImpl<FakeNativeHandle>();
+    void* dummy_handle = reinterpret_cast<void*>(i+1);
     // Add one to |i| so that width/height > 0.
     input_frames_.push_back(
-        new I420VideoFrame(handle, i + 1, i + 1, i + 1, i + 1));
+        new I420VideoFrame(dummy_handle, i + 1, i + 1, i + 1, i + 1,
+                           webrtc::kVideoRotation_0, rtc::Callback0<void>()));
     AddInputFrame(input_frames_[i]);
     WaitOutputFrame();
+    EXPECT_EQ(dummy_handle, output_frames_[i]->native_handle());
   }
 
   EXPECT_TRUE(EqualFramesVector(input_frames_, output_frames_));
@@ -211,11 +189,13 @@ TEST_F(ViECapturerTest, TestI420Frames) {
 }
 
 TEST_F(ViECapturerTest, TestI420FrameAfterTextureFrame) {
-  webrtc::RefCountImpl<FakeNativeHandle>* handle =
-      new webrtc::RefCountImpl<FakeNativeHandle>();
-  input_frames_.push_back(new I420VideoFrame(handle, 1, 1, 1, 1));
+  void* dummy_handle = &input_frames_;
+  input_frames_.push_back(new I420VideoFrame(dummy_handle, 1, 1, 1, 1,
+                                             webrtc::kVideoRotation_0,
+                                             rtc::Callback0<void>()));
   AddInputFrame(input_frames_[0]);
   WaitOutputFrame();
+  EXPECT_EQ(dummy_handle, output_frames_[0]->native_handle());
 
   input_frames_.push_back(CreateI420VideoFrame(2));
   AddInputFrame(input_frames_[1]);
@@ -229,9 +209,10 @@ TEST_F(ViECapturerTest, TestTextureFrameAfterI420Frame) {
   AddInputFrame(input_frames_[0]);
   WaitOutputFrame();
 
-  webrtc::RefCountImpl<FakeNativeHandle>* handle =
-      new webrtc::RefCountImpl<FakeNativeHandle>();
-  input_frames_.push_back(new I420VideoFrame(handle, 1, 1, 2, 2));
+  void* dummy_handle = &input_frames_;
+  input_frames_.push_back(new I420VideoFrame(dummy_handle, 1, 1, 2, 2,
+                                             webrtc::kVideoRotation_0,
+                                             rtc::Callback0<void>()));
   AddInputFrame(input_frames_[1]);
   WaitOutputFrame();
 

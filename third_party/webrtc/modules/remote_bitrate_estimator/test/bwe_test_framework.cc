@@ -151,13 +151,22 @@ MediaPacket::MediaPacket() {
 MediaPacket::MediaPacket(int flow_id,
                          int64_t send_time_us,
                          size_t payload_size,
+                         uint16_t sequence_number)
+    : Packet(flow_id, send_time_us, payload_size) {
+  header_ = RTPHeader();
+  header_.sequenceNumber = sequence_number;
+}
+
+MediaPacket::MediaPacket(int flow_id,
+                         int64_t send_time_us,
+                         size_t payload_size,
                          const RTPHeader& header)
     : Packet(flow_id, send_time_us, payload_size), header_(header) {
 }
 
 MediaPacket::MediaPacket(int64_t send_time_us, uint32_t sequence_number)
     : Packet(0, send_time_us, 0) {
-  memset(&header_, 0, sizeof(header_));
+  header_ = RTPHeader();
   header_.sequenceNumber = sequence_number;
 }
 
@@ -169,9 +178,10 @@ void MediaPacket::SetAbsSendTimeMs(int64_t abs_send_time_ms) {
 
 RembFeedback::RembFeedback(int flow_id,
                            int64_t send_time_us,
+                           int64_t last_send_time_ms,
                            uint32_t estimated_bps,
                            RTCPReportBlock report_block)
-    : FeedbackPacket(flow_id, send_time_us),
+    : FeedbackPacket(flow_id, send_time_us, last_send_time_ms),
       estimated_bps_(estimated_bps),
       report_block_(report_block) {
 }
@@ -179,8 +189,9 @@ RembFeedback::RembFeedback(int flow_id,
 SendSideBweFeedback::SendSideBweFeedback(
     int flow_id,
     int64_t send_time_us,
+    int64_t last_send_time_ms,
     const std::vector<PacketInfo>& packet_feedback_vector)
-    : FeedbackPacket(flow_id, send_time_us),
+    : FeedbackPacket(flow_id, send_time_us, last_send_time_ms),
       packet_feedback_vector_(packet_feedback_vector) {
 }
 
@@ -198,8 +209,7 @@ bool IsTimeSorted(const Packets& packets) {
 PacketProcessor::PacketProcessor(PacketProcessorListener* listener,
                                  int flow_id,
                                  ProcessorType type)
-    : listener_(listener) {
-  flow_ids_.insert(flow_id);
+    : listener_(listener), flow_ids_(&flow_id, &flow_id + 1) {
   if (listener_) {
     listener_->AddPacketProcessor(this, type);
   }
@@ -227,7 +237,10 @@ RateCounterFilter::RateCounterFilter(PacketProcessorListener* listener,
       rate_counter_(new RateCounter()),
       packets_per_second_stats_(),
       kbps_stats_(),
-      name_(name) {
+      name_() {
+  std::stringstream ss;
+  ss << name << "_" << flow_id;
+  name_ = ss.str();
 }
 
 RateCounterFilter::RateCounterFilter(PacketProcessorListener* listener,
@@ -237,9 +250,9 @@ RateCounterFilter::RateCounterFilter(PacketProcessorListener* listener,
       rate_counter_(new RateCounter()),
       packets_per_second_stats_(),
       kbps_stats_(),
-      name_(name) {
+      name_() {
   std::stringstream ss;
-  ss << name_ << "_";
+  ss << name << "_";
   for (int flow_id : flow_ids) {
     ss << flow_id << ",";
   }
@@ -270,14 +283,15 @@ Stats<double> RateCounterFilter::GetBitrateStats() const {
 
 void RateCounterFilter::Plot(int64_t timestamp_ms) {
   BWE_TEST_LOGGING_CONTEXT(name_.c_str());
-  BWE_TEST_LOGGING_PLOT("Throughput_#1", timestamp_ms,
+  BWE_TEST_LOGGING_PLOT(0, "Throughput_#1", timestamp_ms,
                         rate_counter_->bits_per_second() / 1000.0);
 }
 
 void RateCounterFilter::RunFor(int64_t /*time_ms*/, Packets* in_out) {
   assert(in_out);
   for (const Packet* packet : *in_out) {
-    rate_counter_->UpdateRates(packet->send_time_us(), packet->payload_size());
+    rate_counter_->UpdateRates(packet->send_time_us(),
+                               static_cast<int>(packet->payload_size()));
   }
   packets_per_second_stats_.Push(rate_counter_->packets_per_second());
   kbps_stats_.Push(rate_counter_->bits_per_second() / 1000.0);
@@ -329,7 +343,7 @@ DelayFilter::DelayFilter(PacketProcessorListener* listener,
       last_send_time_us_(0) {
 }
 
-void DelayFilter::SetDelay(int64_t delay_ms) {
+void DelayFilter::SetDelayMs(int64_t delay_ms) {
   BWE_TEST_LOGGING_ENABLE(false);
   BWE_TEST_LOGGING_LOG1("Delay", "%d ms", static_cast<int>(delay_ms));
   assert(delay_ms >= 0);
@@ -549,7 +563,7 @@ void TraceBasedDeliveryFilter::Plot(int64_t timestamp_ms) {
   BWE_TEST_LOGGING_CONTEXT(name_.c_str());
   // This plots the max possible throughput of the trace-based delivery filter,
   // which will be reached if a packet sent on every packet slot of the trace.
-  BWE_TEST_LOGGING_PLOT("MaxThroughput_#1", timestamp_ms,
+  BWE_TEST_LOGGING_PLOT(0, "MaxThroughput_#1", timestamp_ms,
                         rate_counter_->bits_per_second() / 1000.0);
 }
 
@@ -637,6 +651,9 @@ uint32_t VideoSource::NextPacketSize(uint32_t frame_size,
 
 void VideoSource::RunFor(int64_t time_ms, Packets* in_out) {
   assert(in_out);
+  std::stringstream ss;
+  ss << "SendEstimate_" << flow_id_ << "#1";
+  BWE_TEST_LOGGING_PLOT(0, ss.str(), now_ms_, bits_per_second_ / 1000);
   now_ms_ += time_ms;
   Packets new_packets;
   while (now_ms_ >= next_frame_ms_) {

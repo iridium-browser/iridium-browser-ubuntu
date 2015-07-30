@@ -77,7 +77,7 @@ void WorkerThread::ThreadMain() {
   const std::string name = base::StringPrintf(
       "%s/%d", name_prefix_.c_str(), PlatformThread::CurrentId());
   // Note |name.c_str()| must remain valid for for the whole life of the thread.
-  PlatformThread::SetName(name.c_str());
+  PlatformThread::SetName(name);
 
   for (;;) {
     PendingTask pending_task = pool_->WaitForTask();
@@ -87,7 +87,6 @@ void WorkerThread::ThreadMain() {
         "src_file", pending_task.posted_from.file_name(),
         "src_func", pending_task.posted_from.function_name());
 
-    tracked_objects::ThreadData::PrepareForStartOfRun(pending_task.birth_tally);
     tracked_objects::TaskStopwatch stopwatch;
     stopwatch.Start();
     pending_task.task.Run();

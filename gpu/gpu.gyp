@@ -203,8 +203,11 @@
         'command_buffer/service/command_buffer_service_unittest.cc',
         'command_buffer/service/common_decoder_unittest.cc',
         'command_buffer/service/context_group_unittest.cc',
+        'command_buffer/service/context_state_unittest.cc',
         'command_buffer/service/feature_info_unittest.cc',
         'command_buffer/service/framebuffer_manager_unittest.cc',
+        'command_buffer/service/gl_context_mock.cc',
+        'command_buffer/service/gl_context_mock.h',
         'command_buffer/service/gl_surface_mock.cc',
         'command_buffer/service/gl_surface_mock.h',
         'command_buffer/service/gles2_cmd_decoder_unittest.cc',
@@ -221,6 +224,7 @@
         'command_buffer/service/gles2_cmd_decoder_unittest_base.cc',
         'command_buffer/service/gles2_cmd_decoder_unittest_base.h',
         'command_buffer/service/gles2_cmd_decoder_unittest_buffers.cc',
+        'command_buffer/service/gles2_cmd_decoder_unittest_context_lost.cc',
         'command_buffer/service/gles2_cmd_decoder_unittest_context_state.cc',
         'command_buffer/service/gles2_cmd_decoder_unittest_drawing.cc',
         'command_buffer/service/gles2_cmd_decoder_unittest_extensions.cc',
@@ -502,6 +506,7 @@
           'dependencies': [
             'command_buffer_common',
             'disk_cache_proto',
+            'gpu_config',
           ],
           # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
           'msvs_disabled_warnings': [4267, ],
@@ -749,6 +754,15 @@
           ],
           'sources': [
             'gpu_unittests.isolate',
+          ],
+          'conditions': [
+            ['use_x11==1',
+              {
+                'dependencies': [
+                  '../tools/xdisplaycheck/xdisplaycheck.gyp:xdisplaycheck',
+                ],
+              }
+            ],
           ],
         },
       ],

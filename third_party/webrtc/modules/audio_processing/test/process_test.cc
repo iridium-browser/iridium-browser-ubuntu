@@ -20,6 +20,7 @@
 #include "webrtc/base/scoped_ptr.h"
 #include "webrtc/common.h"
 #include "webrtc/modules/audio_processing/include/audio_processing.h"
+#include "webrtc/modules/audio_processing/test/protobuf_utils.h"
 #include "webrtc/modules/audio_processing/test/test_utils.h"
 #include "webrtc/modules/interface/module_common_types.h"
 #include "webrtc/system_wrappers/interface/cpu_features_wrapper.h"
@@ -171,6 +172,7 @@ void void_main(int argc, char* argv[]) {
   bool raw_output = false;
   int extra_delay_ms = 0;
   int override_delay_ms = 0;
+  Config config;
 
   ASSERT_EQ(apm->kNoError, apm->level_estimator()->Enable(true));
   for (int i = 1; i < argc; i++) {
@@ -256,14 +258,10 @@ void void_main(int argc, char* argv[]) {
                         suppression_level)));
 
     } else if (strcmp(argv[i], "--extended_filter") == 0) {
-      Config config;
       config.Set<DelayCorrection>(new DelayCorrection(true));
-      apm->SetExtraOptions(config);
 
     } else if (strcmp(argv[i], "--no_reported_delay") == 0) {
-      Config config;
       config.Set<ReportedDelay>(new ReportedDelay(false));
-      apm->SetExtraOptions(config);
 
     } else if (strcmp(argv[i], "-aecm") == 0) {
       ASSERT_EQ(apm->kNoError, apm->echo_control_mobile()->Enable(true));
@@ -402,9 +400,7 @@ void void_main(int argc, char* argv[]) {
       vad_out_filename = argv[i];
 
     } else if (strcmp(argv[i], "-expns") == 0) {
-      Config config;
       config.Set<ExperimentalNs>(new ExperimentalNs(true));
-      apm->SetExtraOptions(config);
 
     } else if (strcmp(argv[i], "--noasm") == 0) {
       WebRtc_GetCPUInfo = WebRtc_GetCPUInfoNoASM;
@@ -440,6 +436,8 @@ void void_main(int argc, char* argv[]) {
       FAIL() << "Unrecognized argument " << argv[i];
     }
   }
+  apm->SetExtraOptions(config);
+
   // If we're reading a protobuf file, ensure a simulation hasn't also
   // been requested (which makes no sense...)
   ASSERT_FALSE(pb_filename && simulating);
@@ -908,7 +906,7 @@ void void_main(int argc, char* argv[]) {
             // not reaching end-of-file.
             EXPECT_EQ(0, fseek(near_file, read_count * sizeof(int16_t),
                       SEEK_CUR));
-            break; // This is expected.
+            break;  // This is expected.
           }
         } else {
           ASSERT_EQ(size, read_count);
@@ -951,7 +949,7 @@ void void_main(int argc, char* argv[]) {
         }
         if (simulating) {
           if (read_count != size) {
-            break; // This is expected.
+            break;  // This is expected.
           }
 
           delay_ms = 0;
@@ -1043,8 +1041,7 @@ void void_main(int argc, char* argv[]) {
                      size,
                      output_wav_file.get(),
                      output_raw_file.get());
-      }
-      else {
+      } else {
         FAIL() << "Event " << event << " is unrecognized";
       }
     }
@@ -1139,8 +1136,7 @@ void void_main(int argc, char* argv[]) {
 }  // namespace
 }  // namespace webrtc
 
-int main(int argc, char* argv[])
-{
+int main(int argc, char* argv[]) {
   webrtc::void_main(argc, argv);
 
   // Optional, but removes memory leak noise from Valgrind.

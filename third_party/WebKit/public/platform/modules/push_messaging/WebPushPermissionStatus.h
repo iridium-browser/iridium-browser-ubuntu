@@ -10,10 +10,10 @@ namespace blink {
 enum WebPushPermissionStatus {
     WebPushPermissionStatusGranted = 0,
     WebPushPermissionStatusDenied,
-    WebPushPermissionStatusDefault,
+    WebPushPermissionStatusPrompt,
 
     // Used for IPC message range checks.
-    WebPushPermissionStatusLast = WebPushPermissionStatusDefault
+    WebPushPermissionStatusLast = WebPushPermissionStatusPrompt
 };
 
 } // namespace blink

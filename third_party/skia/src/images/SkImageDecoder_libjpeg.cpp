@@ -242,9 +242,9 @@ protected:
     bool onDecodeSubset(SkBitmap* bitmap, const SkIRect& rect) override;
 #endif
     Result onDecode(SkStream* stream, SkBitmap* bm, Mode) override;
-    virtual bool onDecodeYUV8Planes(SkStream* stream, SkISize componentSizes[3],
-                                    void* planes[3], size_t rowBytes[3],
-                                    SkYUVColorSpace* colorSpace) override;
+    bool onDecodeYUV8Planes(SkStream* stream, SkISize componentSizes[3],
+                            void* planes[3], size_t rowBytes[3],
+                            SkYUVColorSpace* colorSpace) override;
 
 private:
 #ifdef SK_BUILD_FOR_ANDROID
@@ -1125,11 +1125,11 @@ bool SkJPEGImageDecoder::onDecodeSubset(SkBitmap* bm, const SkIRect& region) {
 
         if (swapOnly) {
             bm->swap(bitmap);
-        } else {
-            cropBitmap(bm, &bitmap, actualSampleSize, region.x(), region.y(),
-                       region.width(), region.height(), startX, startY);
+            return true;
         }
-        return true;
+
+        return cropBitmap(bm, &bitmap, actualSampleSize, region.x(), region.y(),
+                          region.width(), region.height(), startX, startY);
     }
 #endif
 
@@ -1184,11 +1184,10 @@ bool SkJPEGImageDecoder::onDecodeSubset(SkBitmap* bm, const SkIRect& region) {
     }
     if (swapOnly) {
         bm->swap(bitmap);
-    } else {
-        cropBitmap(bm, &bitmap, actualSampleSize, region.x(), region.y(),
-                   region.width(), region.height(), startX, startY);
+        return true;
     }
-    return true;
+    return cropBitmap(bm, &bitmap, actualSampleSize, region.x(), region.y(),
+                      region.width(), region.height(), startX, startY);
 }
 #endif
 

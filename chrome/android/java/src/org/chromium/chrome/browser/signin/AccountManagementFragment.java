@@ -218,6 +218,7 @@ public class AccountManagementFragment extends PreferenceFragment
             signOutSwitch.setOnPreferenceChangeListener(new OnPreferenceChangeListener() {
                 @Override
                 public boolean onPreferenceChange(Preference preference, Object newValue) {
+                    if (!isVisible() || !isResumed()) return false;
                     if ((boolean) newValue) return true;
 
                     if (ChromeSigninController.get(getActivity()).isSignedIn()
@@ -252,6 +253,8 @@ public class AccountManagementFragment extends PreferenceFragment
             addAccount.setOnPreferenceClickListener(new OnPreferenceClickListener() {
                 @Override
                 public boolean onPreferenceClick(Preference preference) {
+                    if (!isVisible() || !isResumed()) return false;
+
                     AccountManagementScreenHelper.logEvent(
                             ProfileAccountManagementMetrics.ADD_ACCOUNT,
                             mGaiaServiceType);
@@ -284,6 +287,7 @@ public class AccountManagementFragment extends PreferenceFragment
             goIncognito.setOnPreferenceClickListener(new OnPreferenceClickListener() {
                 @Override
                 public boolean onPreferenceClick(Preference preference) {
+                    if (!isVisible() || !isResumed()) return false;
                     if (!PrefServiceBridge.getInstance().isIncognitoModeEnabled()) return false;
 
                     AccountManagementFragmentDelegate delegate = getDelegate();
@@ -345,7 +349,7 @@ public class AccountManagementFragment extends PreferenceFragment
             childContent.setSelectable(false);
 
             final String safeSearchText = res.getString(
-                    prefService.isForceSafeSearch() ? R.string.text_on : R.string.text_off);
+                    prefService.isForceGoogleSafeSearch() ? R.string.text_on : R.string.text_off);
             childSafeSearch.setSummary(safeSearchText);
             childSafeSearch.setSelectable(false);
         } else {
@@ -389,6 +393,8 @@ public class AccountManagementFragment extends PreferenceFragment
                 pref.setOnPreferenceClickListener(new OnPreferenceClickListener() {
                     @Override
                     public boolean onPreferenceClick(Preference preference) {
+                        if (!isVisible() || !isResumed()) return false;
+
                         AccountManagementScreenHelper.logEvent(
                                 ProfileAccountManagementMetrics.CLICK_PRIMARY_ACCOUNT,
                                 mGaiaServiceType);

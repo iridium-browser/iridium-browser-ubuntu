@@ -6,6 +6,8 @@
 
 #include "base/values.h"
 #include "components/crx_file/id_util.h"
+#include "components/guest_view/browser/guest_view_event.h"
+#include "components/guest_view/browser/guest_view_manager.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/site_instance.h"
@@ -18,7 +20,6 @@
 #include "extensions/browser/extension_web_contents_observer.h"
 #include "extensions/browser/guest_view/extension_options/extension_options_constants.h"
 #include "extensions/browser/guest_view/extension_options/extension_options_guest_delegate.h"
-#include "extensions/browser/guest_view/guest_view_manager.h"
 #include "extensions/common/api/extension_options_internal.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
@@ -29,6 +30,8 @@
 #include "ipc/ipc_message_macros.h"
 
 using content::WebContents;
+using guest_view::GuestViewBase;
+using guest_view::GuestViewEvent;
 using namespace extensions::core_api;
 
 namespace extensions {
@@ -48,7 +51,7 @@ ExtensionOptionsGuest::~ExtensionOptionsGuest() {
 }
 
 // static
-extensions::GuestViewBase* ExtensionOptionsGuest::Create(
+GuestViewBase* ExtensionOptionsGuest::Create(
     content::WebContents* owner_web_contents) {
   return new ExtensionOptionsGuest(owner_web_contents);
 }
@@ -127,7 +130,7 @@ void ExtensionOptionsGuest::DidInitialize(
 
 void ExtensionOptionsGuest::GuestViewDidStopLoading() {
   scoped_ptr<base::DictionaryValue> args(new base::DictionaryValue());
-  DispatchEventToView(new GuestViewBase::Event(
+  DispatchEventToView(new GuestViewEvent(
       extension_options_internal::OnLoad::kEventName, args.Pass()));
 }
 
@@ -152,7 +155,7 @@ void ExtensionOptionsGuest::OnPreferredSizeChanged(const gfx::Size& pref_size) {
   // Convert the size from physical pixels to logical pixels.
   options.width = PhysicalPixelsToLogicalPixels(pref_size.width());
   options.height = PhysicalPixelsToLogicalPixels(pref_size.height());
-  DispatchEventToView(new GuestViewBase::Event(
+  DispatchEventToView(new GuestViewEvent(
       extension_options_internal::OnPreferredSizeChanged::kEventName,
       options.ToValue()));
 }
@@ -185,8 +188,8 @@ content::WebContents* ExtensionOptionsGuest::OpenURLFromTab(
 
 void ExtensionOptionsGuest::CloseContents(content::WebContents* source) {
   DispatchEventToView(
-      new GuestViewBase::Event(extension_options_internal::OnClose::kEventName,
-                               make_scoped_ptr(new base::DictionaryValue())));
+      new GuestViewEvent(extension_options_internal::OnClose::kEventName,
+                         make_scoped_ptr(new base::DictionaryValue())));
 }
 
 bool ExtensionOptionsGuest::HandleContextMenu(

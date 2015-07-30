@@ -22,8 +22,6 @@
 #include "webrtc/system_wrappers/interface/scoped_refptr.h"
 #include "webrtc/system_wrappers/interface/tick_util.h"
 #include "webrtc/typedefs.h"
-#include "webrtc/video_engine/include/vie_network.h"
-#include "webrtc/video_engine/include/vie_rtp_rtcp.h"
 #include "webrtc/video_engine/vie_defines.h"
 #include "webrtc/video_engine/vie_frame_provider_base.h"
 #include "webrtc/video_engine/vie_receiver.h"
@@ -38,6 +36,7 @@ class Config;
 class CriticalSectionWrapper;
 class EncodedImageCallback;
 class I420FrameCallback;
+class IncomingVideoStream;
 class PacedSender;
 class PacketRouter;
 class PayloadRouter;
@@ -48,13 +47,51 @@ class RtcpRttStats;
 class ThreadWrapper;
 class ViEChannelProtectionCallback;
 class ViEDecoderObserver;
-class ViEEffectFilter;
 class ViERTPObserver;
 class VideoCodingModule;
 class VideoDecoder;
 class VideoRenderCallback;
 class VoEVideoSync;
 
+enum StreamType {
+  kViEStreamTypeNormal = 0,  // Normal media stream
+  kViEStreamTypeRtx = 1      // Retransmission media stream
+};
+
+// This class declares an abstract interface for a user defined observer. It is
+// up to the VideoEngine user to implement a derived class which implements the
+// observer class. The observer is registered using RegisterDecoderObserver()
+// and deregistered using DeregisterDecoderObserver().
+class ViEDecoderObserver {
+ public:
+  // This method is called when a new incoming stream is detected, normally
+  // triggered by a new incoming SSRC or payload type.
+  virtual void IncomingCodecChanged(const int video_channel,
+                                    const VideoCodec& video_codec) = 0;
+
+  // This method is called once per second containing the frame rate and bit
+  // rate for the incoming stream
+  virtual void IncomingRate(const int video_channel,
+                            const unsigned int framerate,
+                            const unsigned int bitrate) = 0;
+
+  // Called periodically with decoder timing information.  All values are
+  // "current" snapshots unless decorated with a min_/max_ prefix.
+  virtual void DecoderTiming(int decode_ms,
+                             int max_decode_ms,
+                             int current_delay_ms,
+                             int target_delay_ms,
+                             int jitter_buffer_ms,
+                             int min_playout_delay_ms,
+                             int render_delay_ms) = 0;
+
+  // This method is called when the decoder needs a new key frame from encoder
+  // on the sender.
+  virtual void RequestNewKeyFrame(const int video_channel) = 0;
+
+ protected:
+  virtual ~ViEDecoderObserver() {}
+};
 class ViEChannel
     : public VCMFrameTypeCallback,
       public VCMReceiveCallback,
@@ -154,8 +191,8 @@ class ViEChannel
   // Gets the CSRC for the incoming stream.
   int32_t GetRemoteCSRC(uint32_t CSRCs[kRtpCsrcSize]);
 
-  int SetRtxSendPayloadType(int payload_type);
-  void SetRtxReceivePayloadType(int payload_type);
+  int SetRtxSendPayloadType(int payload_type, int associated_payload_type);
+  void SetRtxReceivePayloadType(int payload_type, int associated_payload_type);
 
   // Sets the starting sequence number, must be called before StartSend.
   int32_t SetStartSequenceNumber(uint16_t sequence_number);
@@ -168,7 +205,6 @@ class ViEChannel
 
   // Gets the CName of the incoming stream.
   int32_t GetRemoteRTCPCName(char rtcp_cname[]);
-  int32_t RegisterRtpObserver(ViERTPObserver* observer);
   int32_t SendApplicationDefinedRTCPPacket(
       const uint8_t sub_type,
       uint32_t name,
@@ -307,8 +343,6 @@ class ViEChannel
   int32_t SetMaxPacketBurstSize(uint16_t max_number_of_packets);
   int32_t SetPacketBurstSpreadState(bool enable, const uint16_t frame_periodMS);
 
-  int32_t EnableColorEnhancement(bool enable);
-
   // Gets the modules used by the channel.
   RtpRtcp* rtp_rtcp();
   scoped_refptr<PayloadRouter> send_payload_router();
@@ -359,8 +393,6 @@ class ViEChannel
   // Implements ViEFrameProviderBase.
   virtual int FrameCallbackChanged() {return -1;}
 
-  int32_t RegisterEffectFilter(ViEEffectFilter* effect_filter);
-
   // New-style callbacks, used by VideoReceiveStream.
   void RegisterPreRenderCallback(I420FrameCallback* pre_render_callback);
   void RegisterPreDecodeImageCallback(
@@ -371,8 +403,7 @@ class ViEChannel
       RtcpPacketTypeCounterObserver* observer);
   void RegisterReceiveStatisticsProxy(
       ReceiveStatisticsProxy* receive_statistics_proxy);
-  void ReceivedBWEPacket(int64_t arrival_time_ms, size_t payload_size,
-                         const RTPHeader& header);
+  void SetIncomingVideoStream(IncomingVideoStream* incoming_video_stream);
 
  protected:
   static bool ChannelDecodeThreadFunction(void* obj);
@@ -522,10 +553,10 @@ class ViEChannel
   VCMReceiveStatisticsCallback* vcm_receive_stats_callback_
       GUARDED_BY(callback_cs_);
   FrameCounts receive_frame_counts_ GUARDED_BY(callback_cs_);
+  IncomingVideoStream* incoming_video_stream_ GUARDED_BY(callback_cs_);
   ProcessThread& module_process_thread_;
   ViEDecoderObserver* codec_observer_;
   bool do_key_frame_callbackRequest_;
-  ViERTPObserver* rtp_observer_;
   RtcpIntraFrameObserver* intra_frame_observer_;
   RtcpRttStats* rtt_stats_;
   PacedSender* paced_sender_;
@@ -543,9 +574,6 @@ class ViEChannel
   VideoCodec receive_codec_;
   bool wait_for_key_frame_;
   rtc::scoped_ptr<ThreadWrapper> decode_thread_;
-
-  ViEEffectFilter* effect_filter_;
-  bool color_enhancement_;
 
   // User set MTU, -1 if not set.
   uint16_t mtu_;

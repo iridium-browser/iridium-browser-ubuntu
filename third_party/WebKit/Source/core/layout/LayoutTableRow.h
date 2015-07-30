@@ -25,6 +25,7 @@
 #ifndef LayoutTableRow_h
 #define LayoutTableRow_h
 
+#include "core/CoreExport.h"
 #include "core/layout/LayoutTableSection.h"
 
 namespace blink {
@@ -32,7 +33,7 @@ namespace blink {
 static const unsigned unsetRowIndex = 0x7FFFFFFF;
 static const unsigned maxRowIndex = 0x7FFFFFFE; // 2,147,483,646
 
-class LayoutTableRow final : public LayoutBox {
+class CORE_EXPORT LayoutTableRow final : public LayoutBox {
 public:
     explicit LayoutTableRow(Element*);
 
@@ -49,10 +50,10 @@ public:
     LayoutTable* table() const { return toLayoutTable(parent()->parent()); }
 
     static LayoutTableRow* createAnonymous(Document*);
-    static LayoutTableRow* createAnonymousWithParentRenderer(const LayoutObject*);
+    static LayoutTableRow* createAnonymousWithParent(const LayoutObject*);
     virtual LayoutBox* createAnonymousBoxWithSameTypeAs(const LayoutObject* parent) const override
     {
-        return createAnonymousWithParentRenderer(parent);
+        return createAnonymousWithParent(parent);
     }
 
     void setRowIndex(unsigned rowIndex)
@@ -94,7 +95,7 @@ public:
 
     void addOverflowFromCell(const LayoutTableCell*);
 
-    virtual const char* name() const override { return isAnonymous() ? "LayoutTableRow (anonymous)" : "LayoutTableRow"; }
+    virtual const char* name() const override { return "LayoutTableRow"; }
 
 private:
     virtual LayoutObjectChildList* virtualChildren() override { return children(); }
@@ -109,7 +110,7 @@ private:
 
     virtual DeprecatedPaintLayerType layerTypeRequired() const override
     {
-        if (hasTransformRelatedProperty() || hasHiddenBackface() || hasClipPath() || createsGroup() || style()->shouldCompositeForCurrentAnimations())
+        if (hasTransformRelatedProperty() || hasHiddenBackface() || hasClipPath() || createsGroup() || style()->shouldCompositeForCurrentAnimations() || style()->hasCompositorProxy())
             return NormalDeprecatedPaintLayer;
 
         if (hasOverflowClip())

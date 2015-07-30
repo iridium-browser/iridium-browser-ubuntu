@@ -32,6 +32,7 @@
 
 #include "bindings/core/v8/ScriptController.h"
 #include "core/dom/DocumentType.h"
+#include "core/dom/WeakIdentifierMap.h"
 #include "core/editing/Editor.h"
 #include "core/editing/FrameSelection.h"
 #include "core/editing/InputMethodController.h"
@@ -132,15 +133,7 @@ PassRefPtrWillBeRawPtr<LocalFrame> LocalFrame::create(FrameLoaderClient* client,
 void LocalFrame::setView(PassRefPtrWillBeRawPtr<FrameView> view)
 {
     ASSERT(!m_view || m_view != view);
-    detachView();
-
-    // Prepare for destruction now, so any unload event handlers get run and the LocalDOMWindow is
-    // notified. If we wait until the view is destroyed, then things won't be hooked up enough for
-    // these calls to work.
-    if (!view && document() && document()->isActive()) {
-        // FIXME: We don't call willRemove here. Why is that OK?
-        document()->prepareForDestruction();
-    }
+    ASSERT(!document() || !document()->isActive());
 
     eventHandler().clear();
 
@@ -267,6 +260,8 @@ void LocalFrame::detach()
     // handlers might start a new subresource load in this frame.
     m_loader.stopAllLoaders();
     m_loader.detach();
+    document()->detach();
+    m_loader.clear();
     if (!client())
         return;
 
@@ -279,15 +274,12 @@ void LocalFrame::detach()
     willDetachFrameHost();
     InspectorInstrumentation::frameDetachedFromParent(this);
     Frame::detach();
-    // Clear the FrameLoader right here rather than during
-    // finalization. Too late to access various heap objects at that
-    // stage.
-    m_loader.clear();
 
     // Signal frame destruction here rather than in the destructor.
     // Main motivation is to avoid being dependent on its exact timing (Oilpan.)
     LocalFrameLifecycleNotifier::notifyContextDestroyed();
     m_supplements.clear();
+    WeakIdentifierMap<LocalFrame>::notifyObjectDestroyed(this);
 }
 
 SecurityContext* LocalFrame::securityContext() const
@@ -297,14 +289,12 @@ SecurityContext* LocalFrame::securityContext() const
 
 void LocalFrame::printNavigationErrorMessage(const Frame& targetFrame, const char* reason)
 {
-    if (!targetFrame.isLocalFrame())
-        return;
+    // URLs aren't available for RemoteFrames, so the error message uses their
+    // origin instead.
+    String targetFrameDescription = targetFrame.isLocalFrame() ? "with URL '" + toLocalFrame(targetFrame).document()->url().string() + "'" : "with origin '" + targetFrame.securityContext()->securityOrigin()->toString() + "'";
+    String message = "Unsafe JavaScript attempt to initiate navigation for frame " + targetFrameDescription + " from frame with URL '" + document()->url().string() + "'. " + reason + "\n";
 
-    const LocalFrame& targetLocalFrame = toLocalFrameTemporary(targetFrame);
-    String message = "Unsafe JavaScript attempt to initiate navigation for frame with URL '" + targetLocalFrame.document()->url().string() + "' from frame with URL '" + document()->url().string() + "'. " + reason + "\n";
-
-    // FIXME: should we print to the console of the document performing the navigation instead?
-    targetLocalFrame.localDOMWindow()->printErrorMessage(message);
+    localDOMWindow()->printErrorMessage(message);
 }
 
 bool LocalFrame::isLoadingAsChild() const
@@ -384,7 +374,7 @@ void LocalFrame::setPagePopupOwner(Element& owner)
     m_pagePopupOwner = &owner;
 }
 
-LayoutView* LocalFrame::contentRenderer() const
+LayoutView* LocalFrame::contentLayoutObject() const
 {
     return document() ? document()->layoutView() : nullptr;
 }
@@ -483,10 +473,10 @@ bool LocalFrame::shouldUsePrintingLayout() const
 FloatSize LocalFrame::resizePageRectsKeepingRatio(const FloatSize& originalSize, const FloatSize& expectedSize)
 {
     FloatSize resultSize;
-    if (!contentRenderer())
+    if (!contentLayoutObject())
         return FloatSize();
 
-    if (contentRenderer()->style()->isHorizontalWritingMode()) {
+    if (contentLayoutObject()->style()->isHorizontalWritingMode()) {
         ASSERT(fabs(originalSize.width()) > std::numeric_limits<float>::epsilon());
         float ratio = originalSize.height() / originalSize.width();
         resultSize.setWidth(floorf(expectedSize.width()));
@@ -650,13 +640,13 @@ String LocalFrame::selectedTextForClipboard() const
 VisiblePosition LocalFrame::visiblePositionForPoint(const IntPoint& framePoint)
 {
     HitTestResult result = eventHandler().hitTestResultAtPoint(framePoint);
-    Node* node = result.innerNonSharedNode();
+    Node* node = result.innerNodeOrImageMapImage();
     if (!node)
         return VisiblePosition();
-    LayoutObject* renderer = node->layoutObject();
-    if (!renderer)
+    LayoutObject* layoutObject = node->layoutObject();
+    if (!layoutObject)
         return VisiblePosition();
-    VisiblePosition visiblePos = VisiblePosition(renderer->positionForPoint(result.localPoint()));
+    VisiblePosition visiblePos = VisiblePosition(layoutObject->positionForPoint(result.localPoint()));
     if (visiblePos.isNull())
         visiblePos = VisiblePosition(firstPositionInOrBeforeNode(node));
     return visiblePos;
@@ -669,7 +659,7 @@ Document* LocalFrame::documentAtPoint(const IntPoint& pointInRootFrame)
 
     IntPoint pt = view()->rootFrameToContents(pointInRootFrame);
 
-    if (!contentRenderer())
+    if (!contentLayoutObject())
         return nullptr;
     HitTestResult result = eventHandler().hitTestResultAtPoint(pt, HitTestRequest::ReadOnly | HitTestRequest::Active);
     return result.innerNode() ? &result.innerNode()->document() : nullptr;
@@ -703,8 +693,6 @@ bool LocalFrame::isURLAllowed(const KURL& url) const
 {
     // We allow one level of self-reference because some sites depend on that,
     // but we don't allow more than one.
-    if (host()->subframeCount() >= FrameHost::maxNumberOfFrames)
-        return false;
     bool foundSelfReference = false;
     for (const Frame* frame = this; frame; frame = frame->tree().parent()) {
         if (!frame->isLocalFrame())
@@ -744,19 +732,10 @@ bool LocalFrame::applyScrollDelta(const FloatSize& delta, bool isScrollBegin)
     if (!view() || delta.isZero())
         return false;
 
-    // If this is main frame, allow top controls to scroll first.
-    bool giveToTopControls = false;
-    if (isMainFrame()) {
-        // Always give the delta to the top controls if the scroll is in
-        // the direction to show the top controls. If it's in the
-        // direction to hide the top controls, only give the delta to the
-        // top controls when the frame can scroll.
-        giveToTopControls = delta.height() > 0
-            || view()->scrollPosition().y() < view()->maximumScrollPosition().y();
-    }
-
     FloatSize remainingDelta = delta;
-    if (giveToTopControls)
+
+    // If this is main frame, allow top controls to scroll first.
+    if (shouldScrollTopControls(delta))
         remainingDelta = host()->topControls().scrollBy(remainingDelta);
 
     if (remainingDelta.isZero())
@@ -764,17 +743,27 @@ bool LocalFrame::applyScrollDelta(const FloatSize& delta, bool isScrollBegin)
 
     bool consumed = remainingDelta != delta;
 
-    if (scrollAreaOnBothAxes(remainingDelta, *view()))
-        return true;
-
-    // If this is the main frame and it didn't scroll, propagate up to the pinch viewport.
-    if (!isMainFrame())
-        return consumed;
-
-    if (scrollAreaOnBothAxes(remainingDelta, page()->frameHost().pinchViewport()))
+    if (scrollAreaOnBothAxes(remainingDelta, *view()->scrollableArea()))
         return true;
 
     return consumed;
+}
+
+bool LocalFrame::shouldScrollTopControls(const FloatSize& delta) const
+{
+    if (!isMainFrame())
+        return false;
+
+    // Always give the delta to the top controls if the scroll is in
+    // the direction to show the top controls. If it's in the
+    // direction to hide the top controls, only give the delta to the
+    // top controls when the frame can scroll.
+    DoublePoint maximumScrollPosition =
+        host()->pinchViewport().maximumScrollPositionDouble() +
+        toDoubleSize(view()->maximumScrollPositionDouble());
+    DoublePoint scrollPosition = host()->pinchViewport()
+        .visibleRectInDocument().location();
+    return delta.height() > 0 || scrollPosition.y() < maximumScrollPosition.y();
 }
 
 #if ENABLE(OILPAN)
@@ -793,7 +782,7 @@ void LocalFrame::clearWeakMembers(Visitor* visitor)
 {
     Vector<HTMLPlugInElement*> deadPlugins;
     for (const auto& pluginElement : m_pluginElements) {
-        if (!visitor->isAlive(pluginElement)) {
+        if (!visitor->isHeapObjectAlive(pluginElement)) {
             pluginElement->shouldDisposePlugin();
             deadPlugins.append(pluginElement);
         }
@@ -805,10 +794,10 @@ void LocalFrame::clearWeakMembers(Visitor* visitor)
 
 String LocalFrame::localLayerTreeAsText(unsigned flags) const
 {
-    if (!contentRenderer())
+    if (!contentLayoutObject())
         return String();
 
-    return contentRenderer()->compositor()->layerTreeAsText(static_cast<LayerTreeFlags>(flags));
+    return contentLayoutObject()->compositor()->layerTreeAsText(static_cast<LayerTreeFlags>(flags));
 }
 
 inline LocalFrame::LocalFrame(FrameLoaderClient* client, FrameHost* host, FrameOwner* owner)
@@ -825,24 +814,11 @@ inline LocalFrame::LocalFrame(FrameLoaderClient* client, FrameHost* host, FrameO
     , m_pageZoomFactor(parentPageZoomFactor(this))
     , m_textZoomFactor(parentTextZoomFactor(this))
     , m_inViewSourceMode(false)
-    , m_shouldSendDPRHint(false)
-    , m_shouldSendRWHint(false)
 {
     if (isLocalRoot())
         m_instrumentingAgents = InstrumentingAgents::create();
     else
         m_instrumentingAgents = localFrameRoot()->m_instrumentingAgents;
-}
-
-void LocalFrame::detachView()
-{
-    // We detach the FrameView's custom scroll bars as early as
-    // possible to prevent m_doc->detach() from messing with the view
-    // such that its scroll bars won't be torn down.
-    //
-    // FIXME: We should revisit this.
-    if (m_view)
-        m_view->prepareForDetach();
 }
 
 } // namespace blink

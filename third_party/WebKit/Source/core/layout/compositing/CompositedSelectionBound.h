@@ -37,19 +37,11 @@
 namespace blink {
 
 struct CompositedSelectionBound {
-    enum Type {
-        Caret,
-        SelectionLeft,
-        SelectionRight
-    };
-
     CompositedSelectionBound()
-        : type(Caret)
-        , layer(nullptr)
+        : layer(nullptr)
+        , isTextDirectionRTL(false)
     {
     }
-
-    Type type;
 
     // The structure describes the position of a caret in space of the GraphicsLayer the caret resides in.
     // Where edgeTopInLayer is the top point of the caret, usually on the ascend line of the line box,
@@ -57,6 +49,8 @@ struct CompositedSelectionBound {
     GraphicsLayer* layer;
     FloatPoint edgeTopInLayer;
     FloatPoint edgeBottomInLayer;
+
+    bool isTextDirectionRTL;
 };
 
 } // namespace blink

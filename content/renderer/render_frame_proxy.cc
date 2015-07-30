@@ -131,11 +131,7 @@ RenderFrameProxy::~RenderFrameProxy() {
 
   render_view()->UnregisterRenderFrameProxy(this);
 
-  FrameMap::iterator it = g_frame_map.Get().find(web_frame_);
-  CHECK(it != g_frame_map.Get().end());
-  CHECK_EQ(it->second, this);
-  g_frame_map.Get().erase(it);
-
+  CHECK(!web_frame_);
   RenderThread::Get()->RemoveRoute(routing_id_);
   g_routing_id_proxy_map.Get().erase(routing_id_);
 }
@@ -211,6 +207,7 @@ bool RenderFrameProxy::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(FrameMsg_DidUpdateSandboxFlags, OnDidUpdateSandboxFlags)
     IPC_MESSAGE_HANDLER(FrameMsg_DispatchLoad, OnDispatchLoad)
     IPC_MESSAGE_HANDLER(FrameMsg_DidUpdateName, OnDidUpdateName)
+    IPC_MESSAGE_HANDLER(FrameMsg_DidUpdateOrigin, OnDidUpdateOrigin)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -303,11 +300,31 @@ void RenderFrameProxy::OnDidUpdateName(const std::string& name) {
   web_frame_->setReplicatedName(blink::WebString::fromUTF8(name));
 }
 
+void RenderFrameProxy::OnDidUpdateOrigin(const url::Origin& origin) {
+  web_frame_->setReplicatedOrigin(blink::WebSecurityOrigin::createFromString(
+      blink::WebString::fromUTF8(origin.string())));
+}
+
 void RenderFrameProxy::frameDetached() {
-  if (web_frame_->parent())
+  if (web_frame_->parent()) {
     web_frame_->parent()->removeChild(web_frame_);
 
+    // Let the browser process know this subframe is removed, so that it is
+    // destroyed in its current process.
+    Send(new FrameHostMsg_Detach(routing_id_));
+  }
+
   web_frame_->close();
+
+  // Remove the entry in the WebFrame->RenderFrameProxy map, as the |web_frame_|
+  // is no longer valid.
+  FrameMap::iterator it = g_frame_map.Get().find(web_frame_);
+  CHECK(it != g_frame_map.Get().end());
+  CHECK_EQ(it->second, this);
+  g_frame_map.Get().erase(it);
+
+  web_frame_ = nullptr;
+
   delete this;
 }
 
@@ -318,7 +335,7 @@ void RenderFrameProxy::postMessageEvent(
     blink::WebDOMMessageEvent event) {
   DCHECK(!web_frame_ || web_frame_ == target_frame);
 
-  ViewMsg_PostMessage_Params params;
+  FrameMsg_PostMessage_Params params;
   params.is_data_raw_string = false;
   params.data = event.data().toString();
   params.source_origin = event.origin();
@@ -333,13 +350,14 @@ void RenderFrameProxy::postMessageEvent(
   // frame in the target process.
   params.source_routing_id = MSG_ROUTING_NONE;
   if (source_frame) {
-    RenderViewImpl* source_view =
-        RenderViewImpl::FromWebView(source_frame->view());
-    if (source_view)
-      params.source_routing_id = source_view->routing_id();
+    RenderFrameImpl* source_render_frame =
+        RenderFrameImpl::FromWebFrame(source_frame);
+    if (source_render_frame)
+      params.source_routing_id = source_render_frame->GetRoutingID();
   }
+  params.source_view_routing_id = MSG_ROUTING_NONE;
 
-  Send(new ViewHostMsg_RouteMessageEvent(render_view_->GetRoutingID(), params));
+  Send(new FrameHostMsg_RouteMessageEvent(routing_id_, params));
 }
 
 void RenderFrameProxy::initializeChildFrame(

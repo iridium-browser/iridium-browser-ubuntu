@@ -11,6 +11,7 @@
 #include "ui/events/ozone/evdev/cursor_delegate_evdev.h"
 #include "ui/events/ozone/evdev/event_factory_evdev.h"
 #include "ui/events/ozone/layout/keyboard_layout_engine_manager.h"
+#include "ui/ozone/platform/drm/common/drm_util.h"
 #include "ui/ozone/platform/drm/drm_surface_factory.h"
 #include "ui/ozone/platform/drm/gpu/drm_buffer.h"
 #include "ui/ozone/platform/drm/gpu/drm_device.h"
@@ -18,12 +19,10 @@
 #include "ui/ozone/platform/drm/gpu/drm_device_manager.h"
 #include "ui/ozone/platform/drm/gpu/drm_gpu_display_manager.h"
 #include "ui/ozone/platform/drm/gpu/drm_gpu_platform_support.h"
-#include "ui/ozone/platform/drm/gpu/drm_util.h"
 #include "ui/ozone/platform/drm/gpu/drm_window.h"
-#include "ui/ozone/platform/drm/gpu/gpu_lock.h"
 #include "ui/ozone/platform/drm/gpu/screen_manager.h"
-#include "ui/ozone/platform/drm/host/display_manager.h"
 #include "ui/ozone/platform/drm/host/drm_cursor.h"
+#include "ui/ozone/platform/drm/host/drm_display_host_manager.h"
 #include "ui/ozone/platform/drm/host/drm_gpu_platform_support_host.h"
 #include "ui/ozone/platform/drm/host/drm_native_display_delegate.h"
 #include "ui/ozone/platform/drm/host/drm_window_host.h"
@@ -49,8 +48,7 @@ namespace {
 class OzonePlatformDrm : public OzonePlatform {
  public:
   OzonePlatformDrm()
-      : drm_(new DrmDevice(GetPrimaryDisplayCardPath())),
-        buffer_generator_(new DrmBufferGenerator()),
+      : buffer_generator_(new DrmBufferGenerator()),
         screen_manager_(new ScreenManager(buffer_generator_.get())),
         device_manager_(CreateDeviceManager()) {}
   ~OzonePlatformDrm() override {}
@@ -85,32 +83,23 @@ class OzonePlatformDrm : public OzonePlatform {
     return platform_window.Pass();
   }
   scoped_ptr<NativeDisplayDelegate> CreateNativeDisplayDelegate() override {
-    return make_scoped_ptr(new DrmNativeDisplayDelegate(
-        gpu_platform_support_host_.get(), device_manager_.get(),
-        display_manager_.get(), drm_->device_path()));
+    return make_scoped_ptr(
+        new DrmNativeDisplayDelegate(display_manager_.get()));
   }
   void InitializeUI() override {
-#if defined(OS_CHROMEOS)
-    gpu_lock_.reset(new GpuLock());
-#endif
-    if (!drm_->Initialize())
-      LOG(FATAL) << "Failed to initialize primary DRM device";
-
-    // This makes sure that simple targets that do not handle display
-    // configuration can still use the primary display.
-    ForceInitializationOfPrimaryDisplay(drm_, screen_manager_.get());
-    drm_device_manager_.reset(new DrmDeviceManager(drm_));
-    display_manager_.reset(new DisplayManager());
+    drm_device_manager_.reset(new DrmDeviceManager(
+        scoped_ptr<DrmDeviceGenerator>(new DrmDeviceGenerator())));
     window_manager_.reset(new DrmWindowHostManager());
     cursor_.reset(new DrmCursor(window_manager_.get()));
     surface_factory_ozone_.reset(new DrmSurfaceFactory(screen_manager_.get()));
     scoped_ptr<DrmGpuDisplayManager> ndd(new DrmGpuDisplayManager(
-        screen_manager_.get(), drm_,
-        scoped_ptr<DrmDeviceGenerator>(new DrmDeviceGenerator())));
+        screen_manager_.get(), drm_device_manager_.get()));
     gpu_platform_support_.reset(new DrmGpuPlatformSupport(
         drm_device_manager_.get(), screen_manager_.get(), ndd.Pass()));
     gpu_platform_support_host_.reset(
         new DrmGpuPlatformSupportHost(cursor_.get()));
+    display_manager_.reset(new DrmDisplayHostManager(
+        gpu_platform_support_host_.get(), device_manager_.get()));
     cursor_factory_ozone_.reset(new BitmapCursorFactoryOzone);
 #if defined(USE_XKBCOMMON)
     KeyboardLayoutEngineManager::SetKeyboardLayoutEngine(make_scoped_ptr(
@@ -132,8 +121,6 @@ class OzonePlatformDrm : public OzonePlatform {
 
  private:
   // Objects in the "GPU" process.
-  scoped_ptr<GpuLock> gpu_lock_;
-  scoped_refptr<DrmDevice> drm_;
   scoped_ptr<DrmDeviceManager> drm_device_manager_;
   scoped_ptr<DrmBufferGenerator> buffer_generator_;
   scoped_ptr<ScreenManager> screen_manager_;
@@ -145,8 +132,8 @@ class OzonePlatformDrm : public OzonePlatform {
   scoped_ptr<DrmWindowHostManager> window_manager_;
   scoped_ptr<DrmCursor> cursor_;
   scoped_ptr<EventFactoryEvdev> event_factory_ozone_;
-  scoped_ptr<DisplayManager> display_manager_;
   scoped_ptr<DrmGpuPlatformSupportHost> gpu_platform_support_host_;
+  scoped_ptr<DrmDisplayHostManager> display_manager_;
 
 #if defined(USE_XKBCOMMON)
   XkbEvdevCodes xkb_evdev_code_converter_;

@@ -161,6 +161,20 @@ static const ExpectedCipher kExpected8[] = {
   { 0, 0 },
 };
 
+// Exact ciphers may not be used in multi-part rules; they are treated
+// as unknown aliases.
+static const char kRule9[] =
+    "ECDHE-ECDSA-CHACHA20-POLY1305:"
+    "ECDHE-RSA-CHACHA20-POLY1305:"
+    "!ECDHE-RSA-CHACHA20-POLY1305+RSA:"
+    "!ECDSA+ECDHE-ECDSA-CHACHA20-POLY1305";
+
+static const ExpectedCipher kExpected9[] = {
+  { TLS1_CK_ECDHE_ECDSA_CHACHA20_POLY1305, 0 },
+  { TLS1_CK_ECDHE_RSA_CHACHA20_POLY1305, 0 },
+  { 0, 0 },
+};
+
 static CipherTest kCipherTests[] = {
   { kRule1, kExpected1 },
   { kRule2, kExpected2 },
@@ -170,6 +184,7 @@ static CipherTest kCipherTests[] = {
   { kRule6, kExpected6 },
   { kRule7, kExpected7 },
   { kRule8, kExpected8 },
+  { kRule9, kExpected9 },
   { NULL, NULL },
 };
 
@@ -185,6 +200,8 @@ static const char *kBadRules[] = {
   // Empty cipher lists error at SSL_CTX_set_cipher_list.
   "",
   "BOGUS",
+  // COMPLEMENTOFDEFAULT is empty.
+  "COMPLEMENTOFDEFAULT",
   // Invalid command.
   "?BAR",
   // Special operators are not allowed if groups are used.
@@ -233,14 +250,14 @@ static bool TestCipherRule(CipherTest *t) {
         sk_SSL_CIPHER_value(ctx->cipher_list->ciphers, i);
     if (t->expected[i].id != SSL_CIPHER_get_id(cipher) ||
         t->expected[i].in_group_flag != ctx->cipher_list->in_group_flags[i]) {
-      fprintf(stderr, "Error: cipher rule '%s' evaluted to:\n", t->rule);
+      fprintf(stderr, "Error: cipher rule '%s' evaluated to:\n", t->rule);
       PrintCipherPreferenceList(ctx->cipher_list);
       return false;
     }
   }
 
   if (t->expected[i].id != 0) {
-    fprintf(stderr, "Error: cipher rule '%s' evaluted to:\n", t->rule);
+    fprintf(stderr, "Error: cipher rule '%s' evaluated to:\n", t->rule);
     PrintCipherPreferenceList(ctx->cipher_list);
     return false;
   }
@@ -413,9 +430,8 @@ static bool CipherGetRFCName(std::string *out, uint16_t value) {
   if (cipher == NULL) {
     return false;
   }
-  char *rfc_name = SSL_CIPHER_get_rfc_name(cipher);
-  out->assign(rfc_name);
-  OPENSSL_free(rfc_name);
+  ScopedOpenSSLString rfc_name(SSL_CIPHER_get_rfc_name(cipher));
+  out->assign(rfc_name.get());
   return true;
 }
 
@@ -428,12 +444,9 @@ static const CIPHER_RFC_NAME_TEST kCipherRFCNameTests[] = {
   { SSL3_CK_RSA_DES_192_CBC3_SHA, "TLS_RSA_WITH_3DES_EDE_CBC_SHA" },
   { SSL3_CK_RSA_RC4_128_MD5, "TLS_RSA_WITH_RC4_MD5" },
   { TLS1_CK_RSA_WITH_AES_128_SHA, "TLS_RSA_WITH_AES_128_CBC_SHA" },
-  { TLS1_CK_ADH_WITH_AES_128_SHA, "TLS_DH_anon_WITH_AES_128_CBC_SHA" },
   { TLS1_CK_DHE_RSA_WITH_AES_256_SHA, "TLS_DHE_RSA_WITH_AES_256_CBC_SHA" },
   { TLS1_CK_DHE_RSA_WITH_AES_256_SHA256,
     "TLS_DHE_RSA_WITH_AES_256_CBC_SHA256" },
-  { TLS1_CK_ECDH_anon_WITH_AES_128_CBC_SHA,
-    "TLS_ECDH_anon_WITH_AES_128_CBC_SHA" },
   { TLS1_CK_ECDHE_RSA_WITH_AES_128_SHA256,
     "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256" },
   { TLS1_CK_ECDHE_RSA_WITH_AES_256_SHA384,
@@ -487,7 +500,7 @@ int main(void) {
       !TestDefaultVersion(DTLS1_VERSION, &DTLSv1_method) ||
       !TestDefaultVersion(DTLS1_2_VERSION, &DTLSv1_2_method) ||
       !TestCipherGetRFCName()) {
-    BIO_print_errors_fp(stderr);
+    ERR_print_errors_fp(stderr);
     return 1;
   }
 

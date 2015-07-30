@@ -260,11 +260,21 @@ void CreateTestYUVVideoDrawQuad_FromVideoFrame(
                               video_frame->coded_size()));
   }
 
+  gfx::RectF ya_tex_coord_rect(tex_coord_rect.x() * ya_tex_size.width(),
+                               tex_coord_rect.y() * ya_tex_size.height(),
+                               tex_coord_rect.width() * ya_tex_size.width(),
+                               tex_coord_rect.height() * ya_tex_size.height());
+  gfx::RectF uv_tex_coord_rect(tex_coord_rect.x() * uv_tex_size.width(),
+                               tex_coord_rect.y() * uv_tex_size.height(),
+                               tex_coord_rect.width() * uv_tex_size.width(),
+                               tex_coord_rect.height() * uv_tex_size.height());
+
   YUVVideoDrawQuad* yuv_quad =
       render_pass->CreateAndAppendDrawQuad<YUVVideoDrawQuad>();
   yuv_quad->SetNew(shared_state, rect, opaque_rect, visible_rect,
-                   tex_coord_rect, ya_tex_size, uv_tex_size, y_resource,
-                   u_resource, v_resource, a_resource, color_space);
+                   ya_tex_coord_rect, uv_tex_coord_rect, ya_tex_size,
+                   uv_tex_size, y_resource, u_resource, v_resource, a_resource,
+                   color_space);
 }
 
 void CreateTestYUVVideoDrawQuad_Striped(
@@ -1337,10 +1347,11 @@ TYPED_TEST(RendererPixelTest, FastPassSaturateFilter) {
   pass_list.push_back(child_pass.Pass());
   pass_list.push_back(root_pass.Pass());
 
+  // This test blends slightly differently with the software renderer vs. the gl
+  // renderer so use a fuzzy comparator.
   EXPECT_TRUE(this->RunPixelTest(
-      &pass_list,
-      base::FilePath(FILE_PATH_LITERAL("blue_yellow_alpha.png")),
-      ExactPixelComparator(true)));
+      &pass_list, base::FilePath(FILE_PATH_LITERAL("blue_yellow_alpha.png")),
+      FuzzyForSoftwareOnlyPixelComparator<TypeParam>(false)));
 }
 
 TYPED_TEST(RendererPixelTest, FastPassFilterChain) {
@@ -1408,10 +1419,12 @@ TYPED_TEST(RendererPixelTest, FastPassFilterChain) {
   pass_list.push_back(child_pass.Pass());
   pass_list.push_back(root_pass.Pass());
 
+  // This test blends slightly differently with the software renderer vs. the gl
+  // renderer so use a fuzzy comparator.
   EXPECT_TRUE(this->RunPixelTest(
       &pass_list,
       base::FilePath(FILE_PATH_LITERAL("blue_yellow_filter_chain.png")),
-      ExactPixelComparator(true)));
+      FuzzyForSoftwareOnlyPixelComparator<TypeParam>(false)));
 }
 
 TYPED_TEST(RendererPixelTest, FastPassColorFilterAlphaTranslation) {

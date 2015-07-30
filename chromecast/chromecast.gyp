@@ -7,9 +7,14 @@
     'android_support_v13_target%':
         '../third_party/android_tools/android_tools.gyp:android_support_v13_javalib',
     'cast_build_release': 'internal/build/cast_build_release',
+    'cast_is_debug_build%': 0,
+    # Refers to enum CastProductType in components/metrics/proto/cast_logs.proto
+    'cast_product_type%': 0,  # CAST_PRODUCT_TYPE_UNKNOWN
     'chromium_code': 1,
     'chromecast_branding%': 'Chromium',
     'disable_display%': 0,
+    'enable_default_cast_graphics%': 1,
+    'ozone_platform_cast%': 0,
     'use_chromecast_webui%': 0,
   },
   'includes': [
@@ -31,7 +36,17 @@
       'target_name': 'cast_public_api',
       'type': '<(component)',
       'sources': [
+        'public/cast_egl_platform.h',
+        'public/cast_egl_platform_shlib.h',
+        'public/cast_media_shlib.h',
+        'public/cast_sys_info.h',
         'public/chromecast_export.h',
+        'public/graphics_properties_shlib.h',
+        'public/graphics_types.h',
+        'public/media/decoder_config.h',
+        'public/osd_plane.h',
+        'public/osd_plane_shlib.h',
+        'public/osd_surface.h',
       ],
     },
     # TODO(gunsch): Remove this fake target once it's either added or no
@@ -51,7 +66,9 @@
         'base/metrics/cast_metrics_helper.cc',
         'base/metrics/cast_metrics_helper.h',
         'base/metrics/grouped_histogram.cc',
-        'base/metrics/grouped_histogram.h'
+        'base/metrics/grouped_histogram.h',
+        'base/serializers.cc',
+        'base/serializers.h'
       ],
     },  # end of target 'cast_base'
     {
@@ -87,22 +104,16 @@
         'net/connectivity_checker.h',
         'net/net_switches.cc',
         'net/net_switches.h',
+        'net/net_util_cast.cc',
+        'net/net_util_cast.h',
       ],
-    },
-    {
-      'target_name': 'cast_ozone',
-      'type': '<(component)',
-      'sources': [
-        'ozone/gpu_platform_support_cast.cc',
-        'ozone/gpu_platform_support_cast.h',
-        'ozone/ozone_platform_cast.cc',
-        'ozone/ozone_platform_cast.h',
-        'ozone/platform_window_cast.cc',
-        'ozone/platform_window_cast.h',
-        'ozone/surface_factory_cast.cc',
-        'ozone/surface_factory_cast.h',
-        'ozone/surface_ozone_egl_cast.cc',
-        'ozone/surface_ozone_egl_cast.h',
+      'conditions': [
+        ['OS!="android"', {
+          'sources': [
+            'net/network_change_notifier_factory_cast.cc',
+            'net/network_change_notifier_factory_cast.h',
+          ],
+        }],
       ],
     },
     {
@@ -185,15 +196,19 @@
         'cast_net',
         'cast_shell_pak',
         'cast_shell_resources',
+        'cast_sys_info',
         'cast_version_header',
         'chromecast_locales.gyp:chromecast_locales_pak',
         'chromecast_locales.gyp:chromecast_settings',
         'media/media.gyp:media_base',
+        'media/media.gyp:media_cdm',
         '../base/base.gyp:base',
         '../components/components.gyp:breakpad_host',
         '../components/components.gyp:cdm_renderer',
         '../components/components.gyp:component_metrics_proto',
         '../components/components.gyp:crash_component',
+        '../components/components.gyp:devtools_discovery',
+        '../components/components.gyp:devtools_http_handler',
         '../components/components.gyp:network_hints_browser',
         '../components/components.gyp:network_hints_renderer',
         '../components/components.gyp:metrics',
@@ -227,6 +242,8 @@
         'browser/cast_network_delegate.h',
         'browser/cast_permission_manager.cc',
         'browser/cast_permission_manager.h',
+        'browser/cast_quota_permission_context.cc',
+        'browser/cast_quota_permission_context.h',
         'browser/cast_resource_dispatcher_host_delegate.cc',
         'browser/cast_resource_dispatcher_host_delegate.h',
         'browser/devtools/cast_dev_tools_delegate.cc',
@@ -235,6 +252,8 @@
         'browser/devtools/remote_debugging_server.h',
         'browser/geolocation/cast_access_token_store.cc',
         'browser/geolocation/cast_access_token_store.h',
+        'browser/media/cast_media_client_android.cc',
+        'browser/media/cast_media_client_android.h',
         'browser/metrics/cast_metrics_prefs.cc',
         'browser/metrics/cast_metrics_prefs.h',
         'browser/metrics/cast_metrics_service_client.cc',
@@ -312,10 +331,36 @@
           ],
           'dependencies': [
             '../components/components.gyp:metrics_serialization',
+            '../ui/aura/aura.gyp:aura_test_support',
+          ],
+        }],
+        ['OS=="android"', {
+          'dependencies': [
+            '../components/components.gyp:cdm_browser',
           ],
         }],
       ],
     },
+    {
+      'target_name': 'cast_sys_info',
+      'type': '<(component)',
+      'dependencies': [
+        'cast_public_api',
+        '../base/base.gyp:base',
+      ],
+      'sources': [
+        'base/cast_sys_info_util.h',
+        'base/cast_sys_info_dummy.cc',
+        'base/cast_sys_info_dummy.h',
+      ],
+      'conditions': [
+        ['chromecast_branding!="Chrome"', {
+          'sources': [
+            'base/cast_sys_info_util_simple.cc',
+          ],
+        }],
+      ],
+    },  # end of target 'cast_sys_info'
     {
       'target_name': 'cast_version_header',
       'type': 'none',
@@ -345,7 +390,8 @@
             # CAST_BUILD_RELEASE is taken from cast_build_release file if exist;
             # otherwise, a dev string is used.
             '-e', 'CAST_BUILD_RELEASE="<!(if test -f <(cast_build_release); then cat <(cast_build_release); else echo eng.${USER}; fi)"',
-            '-e', 'CAST_IS_DEBUG_BUILD=1 if "<(CONFIGURATION_NAME)" == "Debug" else 0',
+            '-e', 'CAST_IS_DEBUG_BUILD=1 if "<(CONFIGURATION_NAME)" == "Debug" or <(cast_is_debug_build) == 1 else 0',
+            '-e', 'CAST_PRODUCT_TYPE=<(cast_product_type)',
             'common/version.h.in',
             '<@(_outputs)',
           ],
@@ -366,10 +412,15 @@
           'type': 'none',
           'dependencies': [
             '../third_party/icu/icu.gyp:icudata',
+            '../v8/tools/gyp/v8.gyp:v8_external_snapshot',
           ],
           'copies': [{
             'destination': '<(PRODUCT_DIR)/assets',
-            'files': ['<(PRODUCT_DIR)/icudtl.dat'],
+            'files': [
+              '<(PRODUCT_DIR)/icudtl.dat',
+              '<(PRODUCT_DIR)/natives_blob.bin',
+              '<(PRODUCT_DIR)/snapshot_blob.bin',
+            ],
           }],
         },
         {
@@ -385,6 +436,7 @@
             '../breakpad/breakpad.gyp:breakpad_client',
             '../components/components.gyp:breakpad_host',
             '../components/components.gyp:crash_component',
+            '../components/components.gyp:external_video_surface',
             '../content/content.gyp:content',
             '../skia/skia.gyp:skia',
             '../ui/gfx/gfx.gyp:gfx',
@@ -404,8 +456,6 @@
             'browser/android/cast_window_android.h',
             'browser/android/cast_window_manager.cc',
             'browser/android/cast_window_manager.h',
-            'browser/android/external_video_surface_container_impl.cc',
-            'browser/android/external_video_surface_container_impl.h',
             'crash/android/cast_crash_reporter_client_android.cc',
             'crash/android/cast_crash_reporter_client_android.h',
             'crash/android/crash_handler.cc',
@@ -484,7 +534,6 @@
             'browser/android/apk/src/org/chromium/chromecast/shell/CastCrashHandler.java',
             'browser/android/apk/src/org/chromium/chromecast/shell/CastWindowAndroid.java',
             'browser/android/apk/src/org/chromium/chromecast/shell/CastWindowManager.java',
-            'browser/android/apk/src/org/chromium/chromecast/shell/ExternalVideoSurfaceContainer.java',
           ],
           'direct_dependent_settings': {
             'include_dirs': [
@@ -546,18 +595,12 @@
           'target_name': 'cast_shell_core',
           'type': '<(component)',
           'dependencies': [
-            'cast_ozone',
             'cast_shell_media',
             'cast_shell_common',
             'media/media.gyp:cast_media',
-            '../ui/aura/aura.gyp:aura_test_support',
           ],
           'conditions': [
-            ['chromecast_branding=="Chrome"', {
-              'dependencies': [
-                'internal/chromecast_internal.gyp:cast_gfx_internal',
-              ],
-            }, {
+            ['ozone_platform_egltest==1', {
               'dependencies': [
                 '../ui/ozone/ozone.gyp:eglplatform_shim_x11',
               ],
@@ -573,13 +616,34 @@
           'sources': [
             'app/cast_main.cc',
           ],
-          # TODO(dougsteed): remove when Chromecast moves to boringssl.
-          # Allow the cast shell to find the NSS module in the same directory.
           'ldflags': [
+            # Allow  OEMs to override default libraries that are shipped with
+            # cast receiver package by installed OEM-specific libraries in
+            # /oem_cast_shlib.
+            '-Wl,-rpath=/oem_cast_shlib',
+            # TODO(dougsteed): remove when Chromecast moves to boringssl.
+            # Allow the cast shell to find the NSS module in the same
+            # directory.
             '-Wl,-rpath=\$$ORIGIN'
           ],
         },
       ],  # end of targets
+    }],
+    ['enable_default_cast_graphics==1', {
+      'targets': [
+        {
+          'target_name': 'libcast_graphics_1.0',
+          'type': 'shared_library',
+          'dependencies': [
+            'cast_public_api'
+          ],
+          'sources': [
+            'graphics/cast_egl_platform_default.cc',
+            'graphics/graphics_properties_default.cc',
+            'graphics/osd_plane_default.cc'
+          ],
+        }
+      ]
     }],
   ],  # end of conditions
 }

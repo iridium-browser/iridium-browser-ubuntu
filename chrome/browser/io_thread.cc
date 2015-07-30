@@ -96,8 +96,8 @@
 #include "chrome/browser/extensions/event_router_forwarder.h"
 #endif
 
-#if defined(USE_NSS) || defined(OS_IOS)
-#include "net/ocsp/nss_ocsp.h"
+#if defined(USE_NSS_CERTS) || defined(OS_IOS)
+#include "net/cert_net/nss_ocsp.h"
 #endif
 
 #if defined(OS_ANDROID)
@@ -152,7 +152,7 @@ void ObserveKeychainEvents() {
 class SystemURLRequestContext : public net::URLRequestContext {
  public:
   SystemURLRequestContext() {
-#if defined(USE_NSS) || defined(OS_IOS)
+#if defined(USE_NSS_CERTS) || defined(OS_IOS)
     net::SetURLRequestContextForNSSHttpIO(this);
 #endif
   }
@@ -160,7 +160,7 @@ class SystemURLRequestContext : public net::URLRequestContext {
  private:
   ~SystemURLRequestContext() override {
     AssertNoURLRequests();
-#if defined(USE_NSS) || defined(OS_IOS)
+#if defined(USE_NSS_CERTS) || defined(OS_IOS)
     net::SetURLRequestContextForNSSHttpIO(NULL);
 #endif
   }
@@ -309,43 +309,23 @@ bool IsStaleWhileRevalidateEnabled(const base::CommandLine& command_line) {
   return group_name == "Enabled";
 }
 
-bool IsCertificateTransparencyRequiredForEV(
-    const base::CommandLine& command_line) {
-  const std::string group_name =
-      base::FieldTrialList::FindFullName("CTRequiredForEVTrial");
-  if (command_line.HasSwitch(
-        switches::kDisableCertificateTransparencyRequirementForEV))
-    return false;
-
-  return group_name == "RequirementEnforced";
-}
-
 // Parse kUseSpdy command line flag options, which may contain the following:
 //
 //   "off"                      : Disables SPDY support entirely.
-//   "ssl"                      : Forces SPDY for all HTTPS requests.
-//   "no-ssl"                   : Forces SPDY for all HTTP requests.
 //   "no-ping"                  : Disables SPDY ping connection testing.
 //   "exclude=<host>"           : Disables SPDY support for the host <host>.
 //   "no-compress"              : Disables SPDY header compression.
 //   "no-alt-protocols          : Disables alternate protocol support.
-//   "force-alt-protocols       : Forces an alternate protocol of SPDY/3
-//                                on port 443.
-//   "single-domain"            : Forces all spdy traffic to a single domain.
 //   "init-max-streams=<limit>" : Specifies the maximum number of concurrent
 //                                streams for a SPDY session, unless the
 //                                specifies a different value via SETTINGS.
 void ConfigureSpdyGlobalsFromUseSpdyArgument(const std::string& mode,
                                              IOThread::Globals* globals) {
   static const char kOff[] = "off";
-  static const char kSSL[] = "ssl";
-  static const char kDisableSSL[] = "no-ssl";
   static const char kDisablePing[] = "no-ping";
   static const char kExclude[] = "exclude";  // Hosts to exclude
   static const char kDisableCompression[] = "no-compress";
   static const char kDisableAltProtocols[] = "no-alt-protocols";
-  static const char kSingleDomain[] = "single-domain";
-
   static const char kInitialMaxConcurrentStreams[] = "init-max-streams";
 
   std::vector<std::string> spdy_options;
@@ -363,18 +343,6 @@ void ConfigureSpdyGlobalsFromUseSpdyArgument(const std::string& mode,
       net::HttpStreamFactory::set_spdy_enabled(false);
       continue;
     }
-    if (option == kDisableSSL) {
-      globals->spdy_default_protocol.set(net::kProtoSPDY31);
-      globals->force_spdy_over_ssl.set(false);
-      globals->force_spdy_always.set(true);
-      continue;
-    }
-    if (option == kSSL) {
-      globals->spdy_default_protocol.set(net::kProtoSPDY31);
-      globals->force_spdy_over_ssl.set(true);
-      globals->force_spdy_always.set(true);
-      continue;
-    }
     if (option == kDisablePing) {
       globals->enable_spdy_ping_based_connection_checking.set(false);
       continue;
@@ -390,11 +358,6 @@ void ConfigureSpdyGlobalsFromUseSpdyArgument(const std::string& mode,
     }
     if (option == kDisableAltProtocols) {
       globals->use_alternate_protocols.set(false);
-      continue;
-    }
-    if (option == kSingleDomain) {
-      DVLOG(1) << "FORCING SINGLE DOMAIN";
-      globals->force_spdy_single_domain.set(true);
       continue;
     }
     if (option == kInitialMaxConcurrentStreams) {
@@ -565,7 +528,6 @@ IOThread::IOThread(
       NULL,
       NULL,
       NULL,
-      NULL,
       local_state);
   ssl_config_service_manager_.reset(
       SSLConfigServiceManager::CreateDefaultManager(local_state));
@@ -658,7 +620,7 @@ void IOThread::InitAsync() {
   TRACE_EVENT0("startup", "IOThread::InitAsync");
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
-#if defined(USE_NSS) || defined(OS_IOS)
+#if defined(USE_NSS_CERTS) || defined(OS_IOS)
   net::SetMessageLoopForNSSHttpIO();
 #endif
 
@@ -760,17 +722,19 @@ void IOThread::InitAsync() {
     for (std::vector<std::string>::iterator it = logs.begin(); it != logs.end();
          ++it) {
       const std::string& curr_log = *it;
-      size_t delim_pos = curr_log.find(":");
-      CHECK(delim_pos != std::string::npos)
-          << "CT log description not provided (switch format"
-             " is 'description:base64_key')";
-      std::string log_description(curr_log.substr(0, delim_pos));
+      std::vector<std::string> log_metadata;
+      base::SplitString(curr_log, ':', &log_metadata);
+      CHECK_GE(log_metadata.size(), 3u)
+          << "CT log metadata missing: Switch format is "
+          << "'description:base64_key:url_without_schema'.";
+      std::string log_description(log_metadata[0]);
+      std::string log_url(std::string("https://") + log_metadata[2]);
       std::string ct_public_key_data;
-      CHECK(base::Base64Decode(curr_log.substr(delim_pos + 1),
-                               &ct_public_key_data))
+      CHECK(base::Base64Decode(log_metadata[1], &ct_public_key_data))
           << "Unable to decode CT public key.";
       scoped_ptr<net::CTLogVerifier> external_log_verifier(
-          net::CTLogVerifier::Create(ct_public_key_data, log_description));
+          net::CTLogVerifier::Create(ct_public_key_data, log_description,
+                                     log_url));
       CHECK(external_log_verifier) << "Unable to parse CT public key.";
       VLOG(1) << "Adding log with description " << log_description;
       ct_verifier->AddLog(external_log_verifier.Pass());
@@ -782,9 +746,7 @@ void IOThread::InitAsync() {
   tracked_objects::ScopedTracker tracking_profile10(
       FROM_HERE_WITH_EXPLICIT_FUNCTION(
           "466432 IOThread::InitAsync::CertPolicyEnforcer"));
-  net::CertPolicyEnforcer* policy_enforcer = NULL;
-  policy_enforcer = new net::CertPolicyEnforcer(
-      IsCertificateTransparencyRequiredForEV(command_line));
+  net::CertPolicyEnforcer* policy_enforcer = new net::CertPolicyEnforcer;
   globals_->cert_policy_enforcer.reset(policy_enforcer);
 
   globals_->ssl_config_service = GetSSLConfigService();
@@ -813,10 +775,30 @@ void IOThread::InitAsync() {
       new net::ChannelIDService(
           new net::DefaultChannelIDStore(NULL),
           base::WorkerPool::GetTaskRunner(true)));
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/466432
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile12_1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "466432 IOThread::InitAsync::CreateDnsProbeService"));
   globals_->dns_probe_service.reset(new chrome_browser_net::DnsProbeService());
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/466432
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile12_2(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "466432 IOThread::InitAsync::CreateHostMappingRules"));
   globals_->host_mapping_rules.reset(new net::HostMappingRules());
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/466432
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile12_3(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "466432 IOThread::InitAsync::CreateHTTPUserAgentSettings"));
   globals_->http_user_agent_settings.reset(
       new net::StaticHttpUserAgentSettings(std::string(), GetUserAgent()));
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/466432
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile12_4(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "466432 IOThread::InitAsync::CommandLineConfiguration"));
   if (command_line.HasSwitch(switches::kHostRules)) {
     TRACE_EVENT_BEGIN0("startup", "IOThread::InitAsync:SetRulesFromString");
     globals_->host_mapping_rules->SetRulesFromString(
@@ -835,6 +817,11 @@ void IOThread::InitAsync() {
     globals_->testing_fixed_https_port =
         GetSwitchValueAsInt(command_line, switches::kTestingFixedHttpsPort);
   }
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/466432
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile12_5(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "466432 IOThread::InitAsync::QuicConfiguration"));
   ConfigureQuic(command_line);
   if (command_line.HasSwitch(
           switches::kEnableUserAlternateProtocolPorts)) {
@@ -930,7 +917,7 @@ void IOThread::InitAsync() {
 void IOThread::CleanUp() {
   base::debug::LeakTracker<SafeBrowsingURLRequestContext>::CheckForLeaks();
 
-#if defined(USE_NSS) || defined(OS_IOS)
+#if defined(USE_NSS_CERTS) || defined(OS_IOS)
   net::ShutdownNSSHttpIO();
 #endif
 
@@ -1036,18 +1023,6 @@ void IOThread::ConfigureSpdyGlobals(
   globals->enable_quic.CopyToIfSet(&enable_quic);
   if (enable_quic) {
     globals->next_protos.push_back(net::kProtoQUIC1SPDY3);
-  }
-
-  if (command_line.HasSwitch(switches::kEnableSpdy4)) {
-    globals->next_protos.push_back(net::kProtoSPDY31);
-    globals->next_protos.push_back(net::kProtoSPDY4_14);
-    globals->next_protos.push_back(net::kProtoSPDY4);
-    globals->use_alternate_protocols.set(true);
-    return;
-  }
-  if (command_line.HasSwitch(switches::kEnableNpnHttpOnly)) {
-    globals->use_alternate_protocols.set(false);
-    return;
   }
 
   // No SPDY command-line flags have been specified. Examine trial groups.
@@ -1180,8 +1155,6 @@ void IOThread::InitializeNetworkSessionParamsFromGlobals(
 
   globals.initial_max_spdy_concurrent_streams.CopyToIfSet(
       &params->spdy_initial_max_concurrent_streams);
-  globals.force_spdy_single_domain.CopyToIfSet(
-      &params->force_spdy_single_domain);
   globals.enable_spdy_compression.CopyToIfSet(
       &params->enable_spdy_compression);
   globals.enable_spdy_ping_based_connection_checking.CopyToIfSet(
@@ -1190,15 +1163,14 @@ void IOThread::InitializeNetworkSessionParamsFromGlobals(
       &params->spdy_default_protocol);
   params->next_protos = globals.next_protos;
   globals.trusted_spdy_proxy.CopyToIfSet(&params->trusted_spdy_proxy);
-  globals.force_spdy_over_ssl.CopyToIfSet(&params->force_spdy_over_ssl);
-  globals.force_spdy_always.CopyToIfSet(&params->force_spdy_always);
   params->forced_spdy_exclusions = globals.forced_spdy_exclusions;
   globals.use_alternate_protocols.CopyToIfSet(
       &params->use_alternate_protocols);
-  globals.alternate_protocol_probability_threshold.CopyToIfSet(
-      &params->alternate_protocol_probability_threshold);
+  globals.alternative_service_probability_threshold.CopyToIfSet(
+      &params->alternative_service_probability_threshold);
 
   globals.enable_quic.CopyToIfSet(&params->enable_quic);
+  globals.disable_insecure_quic.CopyToIfSet(&params->disable_insecure_quic);
   globals.enable_quic_for_proxies.CopyToIfSet(&params->enable_quic_for_proxies);
   globals.quic_always_require_handshake_confirmation.CopyToIfSet(
       &params->quic_always_require_handshake_confirmation);
@@ -1335,6 +1307,8 @@ void IOThread::ConfigureQuicGlobals(
       command_line, quic_trial_group, quic_allowed_by_policy);
   globals->enable_quic_for_proxies.set(enable_quic_for_proxies);
   if (enable_quic) {
+    globals->disable_insecure_quic.set(
+        ShouldDisableInsecureQuic(quic_trial_params));
     globals->quic_always_require_handshake_confirmation.set(
         ShouldQuicAlwaysRequireHandshakeConfirmation(quic_trial_params));
     globals->quic_disable_connection_pooling.set(
@@ -1368,9 +1342,6 @@ void IOThread::ConfigureQuicGlobals(
         ShouldEnableQuicPortSelection(command_line));
     globals->quic_connection_options =
         GetQuicConnectionOptions(command_line, quic_trial_params);
-    if (ShouldEnableQuicPacing(command_line, quic_trial_params)) {
-      globals->quic_connection_options.push_back(net::kPACE);
-    }
   }
 
   size_t max_packet_length = GetQuicMaxPacketLength(command_line,
@@ -1394,11 +1365,11 @@ void IOThread::ConfigureQuicGlobals(
     globals->quic_supported_versions.set(supported_versions);
   }
 
-  double threshold =
-      GetAlternateProtocolProbabilityThreshold(command_line, quic_trial_params);
+  double threshold = GetAlternativeProtocolProbabilityThreshold(
+      command_line, quic_trial_params);
   if (threshold >=0 && threshold <= 1) {
-    globals->alternate_protocol_probability_threshold.set(threshold);
-    globals->http_server_properties->SetAlternateProtocolProbabilityThreshold(
+    globals->alternative_service_probability_threshold.set(threshold);
+    globals->http_server_properties->SetAlternativeServiceProbabilityThreshold(
         threshold);
   }
 
@@ -1446,6 +1417,14 @@ bool IOThread::ShouldEnableQuicForDataReductionProxy() {
       IsIncludedInQuicFieldTrial();
 }
 
+// static
+bool IOThread::ShouldDisableInsecureQuic(
+    const VariationParameters& quic_trial_params) {
+  return LowerCaseEqualsASCII(
+      GetVariationParam(quic_trial_params, "disable_insecure_quic"),
+      "true");
+}
+
 bool IOThread::ShouldEnableQuicPortSelection(
     const base::CommandLine& command_line) {
   if (command_line.HasSwitch(switches::kDisableQuicPortSelection))
@@ -1455,20 +1434,6 @@ bool IOThread::ShouldEnableQuicPortSelection(
     return true;
 
   return false;  // Default to disabling port selection on all channels.
-}
-
-bool IOThread::ShouldEnableQuicPacing(
-    const base::CommandLine& command_line,
-    const VariationParameters& quic_trial_params) {
-  if (command_line.HasSwitch(switches::kEnableQuicPacing))
-    return true;
-
-  if (command_line.HasSwitch(switches::kDisableQuicPacing))
-    return false;
-
-  return LowerCaseEqualsASCII(
-      GetVariationParam(quic_trial_params, "enable_pacing"),
-      "true");
 }
 
 net::QuicTagVector IOThread::GetQuicConnectionOptions(
@@ -1489,15 +1454,15 @@ net::QuicTagVector IOThread::GetQuicConnectionOptions(
 }
 
 // static
-double IOThread::GetAlternateProtocolProbabilityThreshold(
+double IOThread::GetAlternativeProtocolProbabilityThreshold(
     const base::CommandLine& command_line,
     const VariationParameters& quic_trial_params) {
   double value;
   if (command_line.HasSwitch(
-          switches::kAlternateProtocolProbabilityThreshold)) {
+          switches::kAlternativeServiceProbabilityThreshold)) {
     if (base::StringToDouble(
             command_line.GetSwitchValueASCII(
-                switches::kAlternateProtocolProbabilityThreshold),
+                switches::kAlternativeServiceProbabilityThreshold),
             &value)) {
       return value;
     }
@@ -1505,9 +1470,17 @@ double IOThread::GetAlternateProtocolProbabilityThreshold(
   if (command_line.HasSwitch(switches::kEnableQuic)) {
     return 0;
   }
+  // TODO(bnc): Remove when new parameter name rolls out and server
+  // configuration is changed.
   if (base::StringToDouble(
           GetVariationParam(quic_trial_params,
                             "alternate_protocol_probability_threshold"),
+          &value)) {
+    return value;
+  }
+  if (base::StringToDouble(
+          GetVariationParam(quic_trial_params,
+                            "alternative_service_probability_threshold"),
           &value)) {
     return value;
   }

@@ -222,9 +222,9 @@ void AudioBuffer::copyFromChannel(DOMFloat32Array* destination, long channelNumb
             ExceptionMessages::indexOutsideRange(
                 "channelNumber",
                 channelNumber,
-                1L,
+                0L,
                 ExceptionMessages::InclusiveBound,
-                static_cast<long>(m_channels.size()),
+                static_cast<long>(m_channels.size() - 1),
                 ExceptionMessages::InclusiveBound));
         return;
     }
@@ -279,9 +279,9 @@ void AudioBuffer::copyToChannel(DOMFloat32Array* source, long channelNumber, uns
             ExceptionMessages::indexOutsideRange(
                 "channelNumber",
                 channelNumber,
-                1L,
+                0L,
                 ExceptionMessages::InclusiveBound,
-                static_cast<long>(m_channels.size()),
+                static_cast<long>(m_channels.size() - 1),
                 ExceptionMessages::InclusiveBound));
         return;
     }
@@ -322,7 +322,7 @@ void AudioBuffer::zero()
     }
 }
 
-v8::Handle<v8::Object> AudioBuffer::associateWithWrapper(v8::Isolate* isolate, const WrapperTypeInfo* wrapperType, v8::Handle<v8::Object> wrapper)
+v8::Local<v8::Object> AudioBuffer::associateWithWrapper(v8::Isolate* isolate, const WrapperTypeInfo* wrapperType, v8::Local<v8::Object> wrapper)
 {
     ScriptWrappable::associateWithWrapper(isolate, wrapperType, wrapper);
 

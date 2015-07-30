@@ -16,6 +16,7 @@ Http/MediaTest.VideoBearTheora/0
 Http/MediaTest.VideoTulipWebm/0
 IndexedDBBrowserTest.DeleteCompactsBackingStore
 MSE_ClearKey/EncryptedMediaTest.FrameSizeChangeVideo/0
+MSE_ClearKey/EncryptedMediaTest.Playback_VideoAudio_WebM/0
 OutOfProcessPPAPITest.MediaStreamAudioTrack
 OutOfProcessPPAPITest.NetworkProxy
 OutOfProcessPPAPITest.VideoDecoder
@@ -51,3 +52,9 @@ WebRtcBrowserTest.CanSetupVideoCallWith1To1AspectRatio
 WebRtcBrowserTest.CanSetupVideoCallWith4To3AspectRatio
 WebRtcBrowserTest.NegotiateOfferWithBLine
 WebRtcBrowserTest.CanMakeAudioCallAndThenRenegotiateToVideo
+
+# https://crbug.com/480750
+*_ClearKey/EncryptedMediaTest.Playback_*
+
+# https://crbug.com/487501
+*/MediaTest.VideoBearSilentWebm/0

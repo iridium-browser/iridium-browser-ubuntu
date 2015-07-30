@@ -76,16 +76,19 @@ void NativeDisplayDelegateOzone::CreateFrameBuffer(const gfx::Size& size) {
   NOTIMPLEMENTED();
 }
 
-bool NativeDisplayDelegateOzone::GetHDCPState(const ui::DisplaySnapshot& output,
-                                              ui::HDCPState* state) {
+void NativeDisplayDelegateOzone::GetHDCPState(
+    const ui::DisplaySnapshot& output,
+    const GetHDCPStateCallback& callback) {
   NOTIMPLEMENTED();
-  return false;
+  callback.Run(false, HDCP_STATE_UNDESIRED);
 }
 
-bool NativeDisplayDelegateOzone::SetHDCPState(const ui::DisplaySnapshot& output,
-                                              ui::HDCPState state) {
+void NativeDisplayDelegateOzone::SetHDCPState(
+    const ui::DisplaySnapshot& output,
+    ui::HDCPState state,
+    const SetHDCPStateCallback& callback) {
   NOTIMPLEMENTED();
-  return false;
+  callback.Run(false);
 }
 
 std::vector<ui::ColorCalibrationProfile>
@@ -98,6 +101,13 @@ NativeDisplayDelegateOzone::GetAvailableColorCalibrationProfiles(
 bool NativeDisplayDelegateOzone::SetColorCalibrationProfile(
     const ui::DisplaySnapshot& output,
     ui::ColorCalibrationProfile new_profile) {
+  NOTIMPLEMENTED();
+  return false;
+}
+
+bool NativeDisplayDelegateOzone::SetGammaRamp(
+    const ui::DisplaySnapshot& output,
+    const std::vector<GammaRampRGBEntry>& lut) {
   NOTIMPLEMENTED();
   return false;
 }

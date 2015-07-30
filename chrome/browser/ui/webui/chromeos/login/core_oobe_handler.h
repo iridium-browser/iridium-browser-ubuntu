@@ -53,7 +53,8 @@ class CoreOobeHandler : public BaseScreenHandler,
   // VersionInfoUpdater::Delegate implementation:
   void OnOSVersionLabelTextUpdated(
       const std::string& os_version_label_text) override;
-  void OnEnterpriseInfoUpdated(const std::string& message_text) override;
+  void OnEnterpriseInfoUpdated(const std::string& message_text,
+                               const std::string& asset_id) override;
 
   // Show or hide OOBE UI.
   void ShowOobeUI(bool show);
@@ -78,7 +79,8 @@ class CoreOobeHandler : public BaseScreenHandler,
   void ResetSignInUI(bool force_online) override;
   void ClearUserPodPassword() override;
   void RefocusCurrentPod() override;
-  void ShowPasswordChangedScreen(bool show_password_error) override;
+  void ShowPasswordChangedScreen(bool show_password_error,
+                                 const std::string& email) override;
   void SetUsageStats(bool checked) override;
   void SetOemEulaUrl(const std::string& oem_eula_url) override;
   void SetTpmPassword(const std::string& tmp_password) override;

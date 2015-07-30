@@ -26,6 +26,11 @@ bool GetUrlFromClient(int index, const GURL& url, history::URLRow* row);
 // Gets the visits for a URL from a specific sync profile.
 history::VisitVector GetVisitsFromClient(int index, history::URLID id);
 
+// Gets the visits for a URL from a specific sync profile. Like above, but
+// takes a GURL instead of URLID. Returns empty vector if |url| is not returned
+// by GetUrlFromClient().
+history::VisitVector GetVisitsForURLFromClient(int index, const GURL& url);
+
 // Removes the passed |visits| from a specific sync profile.
 void RemoveVisitsFromClient(int index, const history::VisitVector& visits);
 
@@ -55,6 +60,9 @@ void DeleteUrlFromHistory(int index, const GURL& url);
 // Deletes a list of URLs from the history DB for a specific sync
 // profile.
 void DeleteUrlsFromHistory(int index, const std::vector<GURL>& urls);
+
+// Modifies an URL stored in history by setting a new title.
+void SetPageTitle(int index, const GURL& url, const std::string& title);
 
 // Returns true if all clients match the verifier profile.
 bool CheckAllProfilesHaveSameURLsAsVerifier();

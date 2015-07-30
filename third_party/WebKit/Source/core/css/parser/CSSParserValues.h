@@ -98,19 +98,6 @@ struct CSSParserString {
         return str[length()] == '\0';
     }
 
-    template <size_t strLength>
-    bool startsWithIgnoringCase(const char (&str)[strLength]) const
-    {
-        return startsWithIgnoringCase(str, strLength - 1);
-    }
-
-    bool startsWithIgnoringCase(const char* str, size_t strLength) const
-    {
-        if (length() < strLength)
-            return false;
-        return is8Bit() ? WTF::equalIgnoringCase(str, characters8(), strLength) : WTF::equalIgnoringCase(str, characters16(), strLength);
-    }
-
     operator String() const { return is8Bit() ? String(m_data.characters8, m_length) : StringImpl::create8BitIfPossible(m_data.characters16, m_length); }
     operator AtomicString() const { return is8Bit() ? AtomicString(m_data.characters8, m_length) : AtomicString(m_data.characters16, m_length); }
 
@@ -162,7 +149,7 @@ struct CSSParserValue {
     inline void setFromValueList(PassOwnPtr<CSSParserValueList>);
 };
 
-class CSSParserValueList {
+class CORE_EXPORT CSSParserValueList {
     WTF_MAKE_FAST_ALLOCATED(CSSParserValueList);
 public:
     CSSParserValueList()
@@ -215,10 +202,10 @@ class CSSParserSelector {
     WTF_MAKE_NONCOPYABLE(CSSParserSelector); WTF_MAKE_FAST_ALLOCATED(CSSParserSelector);
 public:
     CSSParserSelector();
-    explicit CSSParserSelector(const QualifiedName&);
+    explicit CSSParserSelector(const QualifiedName&, bool isImplicit = false);
 
     static PassOwnPtr<CSSParserSelector> create() { return adoptPtr(new CSSParserSelector); }
-    static PassOwnPtr<CSSParserSelector> create(const QualifiedName& name) { return adoptPtr(new CSSParserSelector(name)); }
+    static PassOwnPtr<CSSParserSelector> create(const QualifiedName& name, bool isImplicit = false) { return adoptPtr(new CSSParserSelector(name, isImplicit)); }
 
     ~CSSParserSelector();
 
@@ -252,7 +239,7 @@ public:
     void clearTagHistory() { m_tagHistory.clear(); }
     void insertTagHistory(CSSSelector::Relation before, PassOwnPtr<CSSParserSelector>, CSSSelector::Relation after);
     void appendTagHistory(CSSSelector::Relation, PassOwnPtr<CSSParserSelector>);
-    void prependTagSelector(const QualifiedName&, bool tagIsForNamespaceRule = false);
+    void prependTagSelector(const QualifiedName&, bool tagIsImplicit = false);
 
 private:
     OwnPtr<CSSSelector> m_selector;
@@ -268,11 +255,8 @@ inline void CSSParserValue::setFromNumber(double value, int unit)
 {
     id = CSSValueInvalid;
     isInt = false;
-    if (std::isfinite(value))
-        fValue = value;
-    else
-        fValue = 0;
-    this->unit = unit;
+    fValue = value;
+    this->unit = std::isfinite(value) ? unit : CSSPrimitiveValue::CSS_UNKNOWN;
 }
 
 inline void CSSParserValue::setFromOperator(UChar c)

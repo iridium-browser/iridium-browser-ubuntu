@@ -6,14 +6,17 @@
 
 #include "base/compiler_specific.h"
 #include "base/stl_util.h"
+#include "chrome/browser/extensions/extension_message_bubble_controller.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/extensions/extension_toolbar_icon_surfacing_bubble_delegate.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_controller.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/extensions/browser_action_drag_data.h"
+#include "chrome/browser/ui/views/extensions/extension_message_bubble_view.h"
 #include "chrome/browser/ui/views/extensions/extension_toolbar_icon_surfacing_bubble_views.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/toolbar/browser_actions_container_observer.h"
@@ -33,6 +36,7 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/resources/grit/ui_resources.h"
+#include "ui/views/bubble/bubble_delegate.h"
 #include "ui/views/controls/resize_area.h"
 #include "ui/views/painter.h"
 #include "ui/views/widget/widget.h"
@@ -75,7 +79,6 @@ BrowserActionsContainer::BrowserActionsContainer(
               main_container->toolbar_actions_bar_.get() : nullptr)),
       browser_(browser),
       main_container_(main_container),
-      popup_owner_(NULL),
       container_width_(0),
       resize_area_(NULL),
       chevron_(NULL),
@@ -83,7 +86,8 @@ BrowserActionsContainer::BrowserActionsContainer(
       added_to_view_(false),
       shown_bubble_(false),
       resize_amount_(0),
-      animation_target_size_(0) {
+      animation_target_size_(0),
+      active_bubble_(nullptr) {
   set_id(VIEW_ID_BROWSER_ACTION_TOOLBAR);
 
   bool overflow_experiment =
@@ -112,6 +116,12 @@ BrowserActionsContainer::BrowserActionsContainer(
 }
 
 BrowserActionsContainer::~BrowserActionsContainer() {
+  if (active_bubble_)
+    active_bubble_->GetWidget()->Close();
+  // We should synchronously receive the OnWidgetClosing() event, so we should
+  // always have cleared the active bubble by now.
+  DCHECK(!active_bubble_);
+
   FOR_EACH_OBSERVER(BrowserActionsContainerObserver,
                     observers_,
                     OnBrowserActionsContainerDestroyed());
@@ -191,43 +201,12 @@ views::MenuButton* BrowserActionsContainer::GetOverflowReferenceView() {
           browser_)->toolbar()->app_menu());
 }
 
-void BrowserActionsContainer::SetPopupOwner(ToolbarActionView* popup_owner) {
-  // We should never be setting a popup owner when one already exists, and
-  // never unsetting one when one wasn't set.
-  DCHECK((!popup_owner_ && popup_owner) ||
-         (popup_owner_ && !popup_owner));
-  popup_owner_ = popup_owner;
-}
-
-void BrowserActionsContainer::HideActivePopup() {
-  if (popup_owner_)
-    popup_owner_->view_controller()->HidePopup();
-}
-
-ToolbarActionView* BrowserActionsContainer::GetMainViewForAction(
-    ToolbarActionView* view) {
-  if (!in_overflow_mode())
-    return view;  // This is the main view.
-
-  // The overflow container and main container each have the same views and
-  // view indices, so we can return the view of the index that |view| has in
-  // this container.
-  ToolbarActionViews::const_iterator iter =
-      std::find(toolbar_action_views_.begin(),
-                toolbar_action_views_.end(),
-                view);
-  DCHECK(iter != toolbar_action_views_.end());
-  size_t index = iter - toolbar_action_views_.begin();
-  return main_container_->toolbar_action_views_[index];
-}
-
 void BrowserActionsContainer::AddViewForAction(
    ToolbarActionViewController* view_controller,
    size_t index) {
   if (chevron_)
     chevron_->CloseMenu();
 
-      view_controller->GetActionName();
   ToolbarActionView* view =
       new ToolbarActionView(view_controller, browser_->profile(), this);
   toolbar_action_views_.insert(toolbar_action_views_.begin() + index, view);
@@ -250,7 +229,6 @@ void BrowserActionsContainer::RemoveViewForAction(
 }
 
 void BrowserActionsContainer::RemoveAllViews() {
-  HideActivePopup();
   STLDeleteElements(&toolbar_action_views_);
 }
 
@@ -262,7 +240,7 @@ void BrowserActionsContainer::Redraw(bool order_changed) {
   }
 
   std::vector<ToolbarActionViewController*> actions =
-      toolbar_actions_bar_->toolbar_actions();
+      toolbar_actions_bar_->GetActions();
   if (order_changed) {
     // Run through the views and compare them to the desired order. If something
     // is out of place, find the correct spot for it.
@@ -327,16 +305,43 @@ int BrowserActionsContainer::GetChevronWidth() const {
   return chevron_ ? chevron_->GetPreferredSize().width() + kChevronSpacing : 0;
 }
 
-bool BrowserActionsContainer::IsPopupRunning() const {
-  return popup_owner_ != nullptr;
-}
-
 void BrowserActionsContainer::OnOverflowedActionWantsToRunChanged(
     bool overflowed_action_wants_to_run) {
   DCHECK(!in_overflow_mode());
   BrowserView::GetBrowserViewForBrowser(browser_)->toolbar()->
       app_menu()->SetOverflowedToolbarActionWantsToRun(
           overflowed_action_wants_to_run);
+}
+
+void BrowserActionsContainer::ShowExtensionMessageBubble(
+    scoped_ptr<extensions::ExtensionMessageBubbleController> controller,
+    ToolbarActionViewController* anchor_action) {
+  // The container shouldn't be asked to show a bubble if it's animating.
+  DCHECK(!animating());
+
+  views::View* reference_view = anchor_action ?
+      static_cast<views::View*>(GetViewForId(anchor_action->GetId())) :
+      BrowserView::GetBrowserViewForBrowser(browser_)->toolbar()->app_menu();
+
+  extensions::ExtensionMessageBubbleController* weak_controller =
+      controller.get();
+  extensions::ExtensionMessageBubbleView* bubble =
+      new extensions::ExtensionMessageBubbleView(
+          reference_view,
+          views::BubbleBorder::TOP_RIGHT,
+          controller.Pass());
+  views::BubbleDelegateView::CreateBubble(bubble);
+  active_bubble_ = bubble;
+  active_bubble_->GetWidget()->AddObserver(this);
+  weak_controller->Show(bubble);
+}
+
+void BrowserActionsContainer::OnWidgetClosing(views::Widget* widget) {
+  ClearActiveBubble(widget);
+}
+
+void BrowserActionsContainer::OnWidgetDestroying(views::Widget* widget) {
+  ClearActiveBubble(widget);
 }
 
 void BrowserActionsContainer::AddObserver(
@@ -413,7 +418,7 @@ void BrowserActionsContainer::Layout() {
   // The range of visible icons, from start_index (inclusive) to end_index
   // (exclusive).
   size_t start_index = in_overflow_mode() ?
-      main_container_->toolbar_actions_bar_->GetIconCount() : 0u;
+      toolbar_action_views_.size() - toolbar_actions_bar_->GetIconCount() : 0u;
   // For the main container's last visible icon, we calculate how many icons we
   // can display with the given width. We add an extra item_spacing because the
   // last icon doesn't need padding, but we want it to divide easily.
@@ -450,12 +455,15 @@ void BrowserActionsContainer::Layout() {
 
 void BrowserActionsContainer::OnMouseEntered(const ui::MouseEvent& event) {
   if (!shown_bubble_ && !toolbar_action_views_.empty() &&
-      toolbar_actions_bar_->ShouldShowInfoBubble()) {
+      ExtensionToolbarIconSurfacingBubbleDelegate::ShouldShowForProfile(
+          browser_->profile())) {
     ExtensionToolbarIconSurfacingBubble* bubble =
-        new ExtensionToolbarIconSurfacingBubble(toolbar_action_views_[0],
-                                                toolbar_actions_bar_.get());
+        new ExtensionToolbarIconSurfacingBubble(
+            toolbar_action_views_[0],
+            make_scoped_ptr(new ExtensionToolbarIconSurfacingBubbleDelegate(
+                browser_->profile())));
     views::BubbleDelegateView::CreateBubble(bubble);
-    bubble->GetWidget()->Show();
+    bubble->Show();
   }
   shown_bubble_ = true;
 }
@@ -668,6 +676,8 @@ void BrowserActionsContainer::AnimationEnded(const gfx::Animation* animation) {
   FOR_EACH_OBSERVER(BrowserActionsContainerObserver,
                     observers_,
                     OnBrowserActionsContainerAnimationEnded());
+
+  toolbar_actions_bar_->OnAnimationEnded();
 }
 
 content::WebContents* BrowserActionsContainer::GetCurrentWebContents() {
@@ -681,12 +691,6 @@ extensions::ActiveTabPermissionGranter*
     return NULL;
   return extensions::TabHelper::FromWebContents(web_contents)->
       active_tab_permission_granter();
-}
-
-gfx::NativeView BrowserActionsContainer::TestGetPopup() {
-  return popup_owner_ ?
-      popup_owner_->view_controller()->GetPopupNativeView() :
-      NULL;
 }
 
 void BrowserActionsContainer::OnPaint(gfx::Canvas* canvas) {
@@ -779,4 +783,11 @@ void BrowserActionsContainer::LoadImages() {
 
   const int kImages[] = IMAGE_GRID(IDR_DEVELOPER_MODE_HIGHLIGHT);
   highlight_painter_.reset(views::Painter::CreateImageGridPainter(kImages));
+}
+
+void BrowserActionsContainer::ClearActiveBubble(views::Widget* widget) {
+  DCHECK(active_bubble_);
+  DCHECK_EQ(active_bubble_->GetWidget(), widget);
+  widget->RemoveObserver(this);
+  active_bubble_ = nullptr;
 }

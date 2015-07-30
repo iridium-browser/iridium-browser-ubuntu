@@ -123,6 +123,9 @@ public:
     void addEditedStyleSheet(const String& url, const String& content);
     bool getEditedStyleSheet(const String& url, String* content);
 
+    void addEditedStyleElement(int backendNodeId, const String& content);
+    bool getEditedStyleElement(int backendNodeId, String* content);
+
     void enable(ErrorString*, PassRefPtrWillBeRawPtr<EnableCallback>) override;
     virtual void getComputedStyleForNode(ErrorString*, int nodeId, RefPtr<TypeBuilder::Array<TypeBuilder::CSS::CSSComputedStyleProperty> >&) override;
     virtual void getPlatformFontsForNode(ErrorString*, int nodeId, String* cssFamilyName, RefPtr<TypeBuilder::Array<TypeBuilder::CSS::PlatformFontUsage> >&) override;
@@ -168,7 +171,7 @@ private:
     void updateActiveStyleSheets(Document*, StyleSheetsUpdateType);
     void setActiveStyleSheets(Document*, const WillBeHeapVector<RawPtrWillBeMember<CSSStyleSheet> >&, StyleSheetsUpdateType);
 
-    void collectPlatformFontsForRenderer(LayoutText*, HashCountedSet<String>*);
+    void collectPlatformFontsForLayoutObject(LayoutText*, HashCountedSet<String>*);
 
     InspectorStyleSheet* bindStyleSheet(CSSStyleSheet*);
     String unbindStyleSheet(InspectorStyleSheet*);
@@ -211,6 +214,7 @@ private:
 
     RefPtrWillBeMember<CSSStyleSheet> m_inspectorUserAgentStyleSheet;
     HashMap<String, String> m_editedStyleSheets;
+    HashMap<int, String> m_editedStyleElements;
 
     int m_lastStyleSheetId;
     int m_styleSheetsPendingMutation;

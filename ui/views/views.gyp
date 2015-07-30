@@ -32,6 +32,7 @@
       'cocoa/bridged_content_view.mm',
       'cocoa/bridged_native_widget.h',
       'cocoa/bridged_native_widget.mm',
+      'cocoa/bridged_native_widget_owner.h',
       'cocoa/cocoa_mouse_capture.h',
       'cocoa/cocoa_mouse_capture.mm',
       'cocoa/cocoa_mouse_capture_delegate.h',
@@ -39,6 +40,8 @@
       'cocoa/native_widget_mac_nswindow.mm',
       'cocoa/views_nswindow_delegate.h',
       'cocoa/views_nswindow_delegate.mm',
+      'cocoa/widget_owner_nswindow_adapter.h',
+      'cocoa/widget_owner_nswindow_adapter.mm',
       'color_chooser/color_chooser_listener.h',
       'color_chooser/color_chooser_view.cc',
       'color_chooser/color_chooser_view.h',
@@ -347,6 +350,8 @@
       'win/hwnd_util_aurawin.cc',
       'win/scoped_fullscreen_visibility.cc',
       'win/scoped_fullscreen_visibility.h',
+      'win/windows_session_change_observer.cc',
+      'win/windows_session_change_observer.h',
     ],
     'views_aura_sources': [
       'accessibility/ax_aura_obj_cache.cc',
@@ -726,6 +731,12 @@
           'dependencies': [
             '../accelerated_widget_mac/accelerated_widget_mac.gyp:accelerated_widget_mac',
           ],
+          'link_settings': {
+            'libraries': [
+              # Required by bridged_native_widget.mm.
+              '$(SDKROOT)/System/Library/Frameworks/QuartzCore.framework',
+            ],
+          },
         }],
       ],
     }, # target_name: views

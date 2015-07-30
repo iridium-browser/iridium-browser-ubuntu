@@ -158,8 +158,6 @@ LOCAL_CFLAGS += \
 
 LOCAL_MODULE := libvpx
 
-LOCAL_LDLIBS := -llog
-
 ifeq ($(CONFIG_RUNTIME_CPU_DETECT),yes)
   LOCAL_STATIC_LIBRARIES := cpufeatures
 endif
@@ -172,6 +170,7 @@ ifeq ($(CONFIG_VP9), yes)
 $(foreach file, $(LOCAL_SRC_FILES), $(LOCAL_PATH)/$(file)): vp9_rtcd.h
 endif
 $(foreach file, $(LOCAL_SRC_FILES), $(LOCAL_PATH)/$(file)): vpx_scale_rtcd.h
+$(foreach file, $(LOCAL_SRC_FILES), $(LOCAL_PATH)/$(file)): vpx_dsp_rtcd.h
 
 ifeq ($(TARGET_ARCH_ABI),x86)
 $(foreach file, $(LOCAL_SRC_FILES), $(LOCAL_PATH)/$(file)): vpx_config.asm
@@ -184,7 +183,11 @@ clean:
 	@$(RM) -r $(ASM_CNV_PATH)
 	@$(RM) $(CLEAN-OBJS)
 
-include $(BUILD_SHARED_LIBRARY)
+ifeq ($(ENABLE_SHARED),1)
+  include $(BUILD_SHARED_LIBRARY)
+else
+  include $(BUILD_STATIC_LIBRARY)
+endif
 
 ifeq ($(CONFIG_RUNTIME_CPU_DETECT),yes)
 $(call import-module,cpufeatures)

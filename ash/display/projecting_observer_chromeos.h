@@ -6,6 +6,7 @@
 #define ASH_DISPLAY_PROJECTING_OBSERVER_CHROMEOS_H_
 
 #include "ash/ash_export.h"
+#include "ash/shell_observer.h"
 #include "ui/display/chromeos/display_configurator.h"
 
 namespace chromeos {
@@ -14,19 +15,20 @@ class PowerManagerClient;
 
 namespace ash {
 
-class ASH_EXPORT ProjectingObserver : public ui::DisplayConfigurator::Observer {
+class ASH_EXPORT ProjectingObserver : public ui::DisplayConfigurator::Observer,
+                                      public ShellObserver {
  public:
   // |power_manager_client| must outlive this object.
   explicit ProjectingObserver(
       chromeos::PowerManagerClient* power_manager_client);
   ~ProjectingObserver() override;
 
-  // Called when a casting session is started or stopped.
-  void OnCastingSessionStartedOrStopped(bool started);
-
   // DisplayConfigurator::Observer implementation:
   void OnDisplayModeChanged(
       const ui::DisplayConfigurator::DisplayStateList& outputs) override;
+
+  // ash::ShellObserver implementation:
+  void OnCastingSessionStartedOrStopped(bool started) override;
 
  private:
   // Sends the current projecting state to power manager.
@@ -44,14 +46,6 @@ class ASH_EXPORT ProjectingObserver : public ui::DisplayConfigurator::Observer {
 
   // Weak pointer to the DBusClient PowerManagerClient;
   chromeos::PowerManagerClient* power_manager_client_;
-
-#if defined(USE_OZONE)
-  // TODO(dnicoara) Remove once merged to M43.
-  // Used to skip the first call to the power management during the initial
-  // display configuration to avoid changing power settings due to possibly
-  // invalid display configuration.
-  bool is_initial_configuration_;
-#endif
 
   DISALLOW_COPY_AND_ASSIGN(ProjectingObserver);
 };

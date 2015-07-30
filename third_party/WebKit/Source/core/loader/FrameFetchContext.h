@@ -31,6 +31,7 @@
 #ifndef FrameFetchContext_h
 #define FrameFetchContext_h
 
+#include "core/CoreExport.h"
 #include "core/fetch/FetchContext.h"
 #include "core/fetch/ResourceFetcher.h"
 #include "platform/heap/Handle.h"
@@ -47,18 +48,23 @@ class ResourceLoader;
 class ResourceResponse;
 class ResourceRequest;
 
-class FrameFetchContext final : public FetchContext {
+class CORE_EXPORT FrameFetchContext final : public FetchContext {
 public:
     static PassRefPtrWillBeRawPtr<ResourceFetcher> createContextAndFetcher(DocumentLoader* loader)
     {
         return ResourceFetcher::create(adoptPtrWillBeNoop(new FrameFetchContext(loader)));
     }
 
+    static void provideDocumentToContext(FetchContext& context, Document* document)
+    {
+        ASSERT(document);
+        RELEASE_ASSERT(context.isLiveContext());
+        static_cast<FrameFetchContext&>(context).m_document = document;
+    }
+
     ~FrameFetchContext();
 
-    Document* document() const { return m_document; } // Can be null
-    void setDocument(Document* document) { m_document = document; }
-    void clearDocumentLoader() { m_documentLoader = nullptr; }
+    bool isLiveContext() { return true; }
 
     void addAdditionalRequestHeaders(ResourceRequest&, FetchResourceType) override;
     void setFirstPartyForCookies(ResourceRequest&) override;

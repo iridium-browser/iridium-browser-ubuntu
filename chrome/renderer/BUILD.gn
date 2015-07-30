@@ -36,6 +36,7 @@ static_library("renderer") {
     "//chrome:resources",
     "//chrome:strings",
     "//components/autofill/content/renderer",
+    "//components/content_settings/content/common",
     "//components/cdm/renderer",
     "//components/data_reduction_proxy/content/common",
     "//components/network_hints/renderer",
@@ -85,26 +86,20 @@ static_library("renderer") {
     ]
   }
 
-  if (safe_browsing_mode == 1) {
-    sources += rebase_path(gypi_values.chrome_renderer_safe_browsing_sources,
-                           ".",
-                           "..")
+  if (safe_browsing_mode != 0) {
     sources +=
         rebase_path(gypi_values.chrome_renderer_basic_safe_browsing_sources,
                     ".",
                     "..")
-    defines += [ "FULL_SAFE_BROWSING" ]
-    deps += [
-      "//chrome/common/safe_browsing:proto",
-      "//third_party/smhasher:murmurhash3",
-    ]
-  }
-  if (safe_browsing_mode == 2) {
-    sources +=
-        rebase_path(gypi_values.chrome_renderer_basic_safe_browsing_sources,
-                    ".",
-                    "..")
-    defines += [ "MOBILE_SAFE_BROWSING" ]
+    if (safe_browsing_mode == 1) {
+      sources += rebase_path(gypi_values.chrome_renderer_safe_browsing_sources,
+                             ".",
+                             "..")
+      deps += [
+        "//chrome/common/safe_browsing:proto",
+        "//third_party/smhasher:murmurhash3",
+      ]
+    }
   }
 
   if (enable_extensions) {
@@ -143,7 +138,7 @@ static_library("renderer") {
   if (enable_spellcheck) {
     sources +=
         rebase_path(gypi_values.chrome_renderer_spellchecker_sources, ".", "..")
-    deps += [ "//third_party/hunspell" ]
+    deps += [ "//third_party/hunspell_new" ]
   }
 
   if (enable_basic_printing || enable_print_preview) {

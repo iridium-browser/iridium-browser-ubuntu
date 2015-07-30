@@ -61,8 +61,14 @@ class ComponentsTestSuite : public base::TestSuite {
 #else
     PathService::Get(base::DIR_MODULE, &pak_path);
 #endif
-    ui::ResourceBundle::InitSharedInstanceWithPakPath(
-        pak_path.AppendASCII("components_tests_resources.pak"));
+
+    base::FilePath ui_test_pak_path;
+    ASSERT_TRUE(PathService::Get(ui::UI_TEST_PAK, &ui_test_pak_path));
+    ui::ResourceBundle::InitSharedInstanceWithPakPath(ui_test_pak_path);
+
+    ui::ResourceBundle::GetSharedInstance().AddDataPackFromPath(
+        pak_path.AppendASCII("components_tests_resources.pak"),
+        ui::SCALE_FACTOR_NONE);
 
     // These schemes need to be added globally to pass tests of
     // autocomplete_input_unittest.cc and content_settings_pattern*
@@ -88,13 +94,13 @@ class ComponentsTestSuite : public base::TestSuite {
 class ComponentsUnitTestEventListener : public testing::EmptyTestEventListener {
  public:
   ComponentsUnitTestEventListener() {}
-  virtual ~ComponentsUnitTestEventListener() {}
+  ~ComponentsUnitTestEventListener() override {}
 
-  virtual void OnTestStart(const testing::TestInfo& test_info) override {
+  void OnTestStart(const testing::TestInfo& test_info) override {
     content_initializer_.reset(new content::TestContentClientInitializer());
   }
 
-  virtual void OnTestEnd(const testing::TestInfo& test_info) override {
+  void OnTestEnd(const testing::TestInfo& test_info) override {
     content_initializer_.reset();
   }
 

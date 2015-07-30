@@ -6,7 +6,6 @@
 #include "core/paint/ScrollableAreaPainter.h"
 
 #include "core/layout/LayoutView.h"
-#include "core/layout/PaintInfo.h"
 #include "core/page/Page.h"
 #include "core/paint/DeprecatedPaintLayer.h"
 #include "core/paint/DeprecatedPaintLayerScrollableArea.h"
@@ -33,7 +32,7 @@ void ScrollableAreaPainter::paintResizer(GraphicsContext* context, const IntPoin
         return;
     }
 
-    DrawingRecorder recorder(*context, m_scrollableArea, DisplayItem::Resizer, damageRect);
+    DrawingRecorder recorder(*context, m_scrollableArea.box(), DisplayItem::Resizer, absRect);
     if (recorder.canUseCachedDrawing())
         return;
 
@@ -100,7 +99,7 @@ void ScrollableAreaPainter::paintOverflowControls(GraphicsContext* context, cons
     // will be false, and we should just tell the root layer that there are overlay scrollbars
     // that need to be painted. That will cause the second pass through the layer tree to run,
     // and we'll paint the scrollbars then. In the meantime, cache tx and ty so that the
-    // second pass doesn't need to re-enter the RenderTree to get it right.
+    // second pass doesn't need to re-enter the LayoutTree to get it right.
     if (m_scrollableArea.hasOverlayScrollbars() && !paintingOverlayControls) {
         m_scrollableArea.setCachedOverlayScrollbarOffset(paintOffset);
         // It's not necessary to do the second pass if the scrollbars paint into layers.
@@ -124,11 +123,14 @@ void ScrollableAreaPainter::paintOverflowControls(GraphicsContext* context, cons
         return;
 
     {
-        TransformRecorder translateRecorder(*context, m_scrollableArea, AffineTransform::translation(adjustedPaintOffset.x(), adjustedPaintOffset.y()));
-        if (m_scrollableArea.horizontalScrollbar() && !m_scrollableArea.layerForHorizontalScrollbar())
+        if (m_scrollableArea.horizontalScrollbar() && !m_scrollableArea.layerForHorizontalScrollbar()) {
+            TransformRecorder translateRecorder(*context, *m_scrollableArea.horizontalScrollbar(), AffineTransform::translation(adjustedPaintOffset.x(), adjustedPaintOffset.y()));
             m_scrollableArea.horizontalScrollbar()->paint(context, localDamageRect);
-        if (m_scrollableArea.verticalScrollbar() && !m_scrollableArea.layerForVerticalScrollbar())
+        }
+        if (m_scrollableArea.verticalScrollbar() && !m_scrollableArea.layerForVerticalScrollbar()) {
+            TransformRecorder translateRecorder(*context, *m_scrollableArea.verticalScrollbar(), AffineTransform::translation(adjustedPaintOffset.x(), adjustedPaintOffset.y()));
             m_scrollableArea.verticalScrollbar()->paint(context, localDamageRect);
+        }
     }
 
     if (m_scrollableArea.layerForScrollCorner())
@@ -174,7 +176,7 @@ void ScrollableAreaPainter::paintScrollCorner(GraphicsContext* context, const In
         return;
     }
 
-    DrawingRecorder recorder(*context, m_scrollableArea, DisplayItem::ScrollbarCorner, damageRect);
+    DrawingRecorder recorder(*context, m_scrollableArea.box(), DisplayItem::ScrollbarCorner, absRect);
     if (recorder.canUseCachedDrawing())
         return;
 

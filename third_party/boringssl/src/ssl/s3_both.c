@@ -116,6 +116,7 @@
 #include <string.h>
 
 #include <openssl/buf.h>
+#include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/mem.h>
 #include <openssl/md5.h>
@@ -124,7 +125,7 @@
 #include <openssl/sha.h>
 #include <openssl/x509.h>
 
-#include "ssl_locl.h"
+#include "internal.h"
 
 
 /* ssl3_do_write sends |s->init_buf| in records of type 'type'
@@ -304,7 +305,13 @@ int ssl3_output_cert_chain(SSL *s, CERT_PKEY *cpk) {
   uint8_t *p;
   unsigned long l = 3 + SSL_HM_HEADER_LENGTH(s);
 
-  if (!ssl_add_cert_chain(s, cpk, &l)) {
+  if (cpk == NULL) {
+    /* TLSv1 sends a chain with nothing in it, instead of an alert. */
+    if (!BUF_MEM_grow_clean(s->init_buf, l)) {
+      OPENSSL_PUT_ERROR(SSL, ssl3_output_cert_chain, ERR_R_BUF_LIB);
+      return 0;
+    }
+  } else if (!ssl_add_cert_chain(s, cpk, &l)) {
     return 0;
   }
 
@@ -353,7 +360,6 @@ long ssl3_get_message(SSL *s, int header_state, int body_state, int msg_type,
         int bytes_read = s->method->ssl_read_bytes(
             s, SSL3_RT_HANDSHAKE, &p[s->init_num], 4 - s->init_num, 0);
         if (bytes_read <= 0) {
-          s->rwstate = SSL_READING;
           *ok = 0;
           return bytes_read;
         }
@@ -590,8 +596,7 @@ int ssl3_setup_read_buffer(SSL *s) {
 #endif
 
   if (s->s3->rbuf.buf == NULL) {
-    len = SSL3_RT_MAX_PLAIN_LENGTH + SSL3_RT_MAX_ENCRYPTED_OVERHEAD +
-          headerlen + align;
+    len = SSL3_RT_MAX_ENCRYPTED_LENGTH + headerlen + align;
     if (s->options & SSL_OP_MICROSOFT_BIG_SSLV3_BUFFER) {
       s->s3->init_extra = 1;
       len += SSL3_RT_MAX_EXTRA;
@@ -649,28 +654,16 @@ err:
   return 0;
 }
 
-
-int ssl3_setup_buffers(SSL *s) {
-  if (!ssl3_setup_read_buffer(s) ||
-      !ssl3_setup_write_buffer(s)) {
-    return 0;
-  }
-  return 1;
-}
-
 int ssl3_release_write_buffer(SSL *s) {
-  if (s->s3->wbuf.buf != NULL) {
-    OPENSSL_free(s->s3->wbuf.buf);
-    s->s3->wbuf.buf = NULL;
-  }
+  OPENSSL_free(s->s3->wbuf.buf);
+  s->s3->wbuf.buf = NULL;
   return 1;
 }
 
 int ssl3_release_read_buffer(SSL *s) {
-  if (s->s3->rbuf.buf != NULL) {
-    OPENSSL_free(s->s3->rbuf.buf);
-    s->s3->rbuf.buf = NULL;
-  }
+  OPENSSL_free(s->s3->rbuf.buf);
+  s->s3->rbuf.buf = NULL;
+  s->packet = NULL;
   return 1;
 }
 

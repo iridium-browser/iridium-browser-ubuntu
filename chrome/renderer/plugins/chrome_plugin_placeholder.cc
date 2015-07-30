@@ -13,16 +13,16 @@
 #include "chrome/grit/renderer_resources.h"
 #include "chrome/renderer/chrome_content_renderer_client.h"
 #include "chrome/renderer/custom_menu_commands.h"
+#include "chrome/renderer/plugins/plugin_preroller.h"
 #include "chrome/renderer/plugins/plugin_uma.h"
+#include "components/content_settings/content/common/content_settings_messages.h"
 #include "content/app/strings/grit/content_strings.h"
 #include "content/public/common/context_menu_params.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_thread.h"
-#include "gin/handle.h"
 #include "gin/object_template_builder.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
-#include "third_party/WebKit/public/web/WebKit.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebScriptSource.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -64,7 +64,7 @@ ChromePluginPlaceholder::ChromePluginPlaceholder(
                                          params,
                                          html_data,
                                          GURL(kPluginPlaceholderDataURL)),
-      status_(new ChromeViewHostMsg_GetPluginInfo_Status),
+      status_(ChromeViewHostMsg_GetPluginInfo_Status::kAllowed),
       title_(title),
 #if defined(ENABLE_PLUGIN_INSTALLATION)
       placeholder_routing_id_(MSG_ROUTING_NONE),
@@ -186,8 +186,8 @@ ChromePluginPlaceholder* ChromePluginPlaceholder::CreateBlockedPlugin(
 }
 
 void ChromePluginPlaceholder::SetStatus(
-    const ChromeViewHostMsg_GetPluginInfo_Status& status) {
-  status_->value = status.value;
+    ChromeViewHostMsg_GetPluginInfo_Status status) {
+  status_ = status;
 }
 
 #if defined(ENABLE_PLUGIN_INSTALLATION)
@@ -242,7 +242,7 @@ void ChromePluginPlaceholder::OnDidNotFindMissingPlugin() {
 
 void ChromePluginPlaceholder::OnFoundMissingPlugin(
     const base::string16& plugin_name) {
-  if (status_->value == ChromeViewHostMsg_GetPluginInfo_Status::kNotFound)
+  if (status_ == ChromeViewHostMsg_GetPluginInfo_Status::kNotFound)
     SetMessage(l10n_util::GetStringFUTF16(IDS_PLUGIN_FOUND, plugin_name));
   has_host_ = true;
   plugin_name_ = plugin_name;
@@ -254,7 +254,7 @@ void ChromePluginPlaceholder::OnStartedDownloadingPlugin() {
 
 void ChromePluginPlaceholder::OnFinishedDownloadingPlugin() {
   bool is_installing =
-      status_->value == ChromeViewHostMsg_GetPluginInfo_Status::kNotFound;
+      status_ == ChromeViewHostMsg_GetPluginInfo_Status::kNotFound;
   SetMessage(l10n_util::GetStringFUTF16(
       is_installing ? IDS_PLUGIN_INSTALLING : IDS_PLUGIN_UPDATING,
       plugin_name_));
@@ -287,7 +287,7 @@ void ChromePluginPlaceholder::PluginListChanged() {
                                           document.url(),
                                           mime_type,
                                           &output));
-  if (output.status.value == status_->value)
+  if (output.status == status_)
     return;
   WebPlugin* new_plugin = ChromeContentRendererClient::CreatePlugin(
       render_frame(),  GetFrame(), GetPluginParams(), output);
@@ -367,16 +367,22 @@ void ChromePluginPlaceholder::ShowContextMenu(const WebMouseEvent& event) {
 #endif  // OS_ANDROID
 }
 
-void ChromePluginPlaceholder::BindWebFrame(blink::WebFrame* frame) {
-  v8::Isolate* isolate = blink::mainThreadIsolate();
-  v8::HandleScope handle_scope(isolate);
-  v8::Handle<v8::Context> context = frame->mainWorldScriptContext();
-  DCHECK(!context.IsEmpty());
-
-  v8::Context::Scope context_scope(context);
-  v8::Handle<v8::Object> global = context->Global();
-  global->Set(gin::StringToV8(isolate, "plugin"),
-              gin::CreateHandle(isolate, this).ToV8());
+blink::WebPlugin* ChromePluginPlaceholder::CreatePlugin() {
+  scoped_ptr<content::PluginInstanceThrottler> throttler;
+#if defined(ENABLE_PLUGINS)
+  // If the plugin has already been marked essential in its placeholder form,
+  // we shouldn't create a new throttler and start the process all over again.
+  if (power_saver_enabled()) {
+    throttler = content::PluginInstanceThrottler::Create();
+    // PluginPreroller manages its own lifetime.
+    new PluginPreroller(render_frame(), GetFrame(), GetPluginParams(),
+                        GetPluginInfo(), GetIdentifier(), title_,
+                        l10n_util::GetStringFUTF16(IDS_PLUGIN_BLOCKED, title_),
+                        throttler.get());
+  }
+#endif
+  return render_frame()->CreatePlugin(GetFrame(), GetPluginInfo(),
+                                      GetPluginParams(), throttler.Pass());
 }
 
 gin::ObjectTemplateBuilder ChromePluginPlaceholder::GetObjectTemplateBuilder(

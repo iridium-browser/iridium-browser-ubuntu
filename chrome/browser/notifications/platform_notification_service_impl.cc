@@ -19,6 +19,8 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/desktop_notification_delegate.h"
 #include "content/public/browser/notification_event_dispatcher.h"
+#include "content/public/browser/platform_notification_context.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/common/platform_notification_data.h"
 #include "net/base/net_util.h"
 #include "ui/message_center/notifier_settings.h"
@@ -36,10 +38,30 @@
 #include "extensions/common/permissions/permissions_data.h"
 #endif
 
+#if defined(OS_ANDROID)
+#include "base/strings/string_number_conversions.h"
+#endif
+
+using content::BrowserContext;
 using content::BrowserThread;
+using content::PlatformNotificationContext;
 using message_center::NotifierId;
 
 namespace {
+
+// Callback to provide when deleting the data associated with persistent Web
+// Notifications from the notification database.
+void OnPersistentNotificationDataDeleted(bool success) {
+  // TODO(peter): Record UMA for notification deletion requests created by the
+  // PlatformNotificationService.
+}
+
+// Persistent notifications fired through the delegate do not care about the
+// lifetime of the Service Worker responsible for executing the event.
+void OnEventDispatchComplete(content::PersistentNotificationStatus status) {
+  // TODO(peter): Record UMA statistics about the result status of running
+  // events for persistent Web Notifications.
+}
 
 void CancelNotification(const std::string& id, ProfileID profile_id) {
   PlatformNotificationServiceImpl::GetInstance()
@@ -60,27 +82,40 @@ PlatformNotificationServiceImpl::PlatformNotificationServiceImpl()
 PlatformNotificationServiceImpl::~PlatformNotificationServiceImpl() {}
 
 void PlatformNotificationServiceImpl::OnPersistentNotificationClick(
-    content::BrowserContext* browser_context,
-    int64 service_worker_registration_id,
-    const std::string& notification_id,
-    const GURL& origin,
-    const content::PlatformNotificationData& notification_data,
-    const base::Callback<void(content::PersistentNotificationStatus)>&
-        callback) const {
+    BrowserContext* browser_context,
+    int64_t persistent_notification_id,
+    const GURL& origin) const {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   content::NotificationEventDispatcher::GetInstance()
       ->DispatchNotificationClickEvent(
             browser_context,
+            persistent_notification_id,
             origin,
-            service_worker_registration_id,
-            notification_id,
-            notification_data,
-            callback);
+            base::Bind(&OnEventDispatchComplete));
+}
+
+void PlatformNotificationServiceImpl::OnPersistentNotificationClose(
+    BrowserContext* browser_context,
+    int64_t persistent_notification_id,
+    const GURL& origin) const {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  PlatformNotificationContext* context =
+      BrowserContext::GetStoragePartitionForSite(browser_context, origin)
+          ->GetPlatformNotificationContext();
+
+  BrowserThread::PostTask(
+      BrowserThread::IO,
+      FROM_HERE,
+      base::Bind(&PlatformNotificationContext::DeleteNotificationData,
+                 context,
+                 persistent_notification_id,
+                 origin,
+                 base::Bind(&OnPersistentNotificationDataDeleted)));
 }
 
 blink::WebNotificationPermission
 PlatformNotificationServiceImpl::CheckPermissionOnUIThread(
-    content::BrowserContext* browser_context,
+    BrowserContext* browser_context,
     const GURL& origin,
     int render_process_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
@@ -179,7 +214,7 @@ PlatformNotificationServiceImpl::CheckPermissionOnIOThread(
       origin,
       origin,
       CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
-      NO_RESOURCE_IDENTIFIER);
+      content_settings::ResourceIdentifier());
 
   if (setting == CONTENT_SETTING_ALLOW)
     return blink::WebNotificationPermissionAllowed;
@@ -190,7 +225,7 @@ PlatformNotificationServiceImpl::CheckPermissionOnIOThread(
 }
 
 void PlatformNotificationServiceImpl::DisplayNotification(
-    content::BrowserContext* browser_context,
+    BrowserContext* browser_context,
     const GURL& origin,
     const SkBitmap& icon,
     const content::PlatformNotificationData& notification_data,
@@ -217,8 +252,8 @@ void PlatformNotificationServiceImpl::DisplayNotification(
 }
 
 void PlatformNotificationServiceImpl::DisplayPersistentNotification(
-    content::BrowserContext* browser_context,
-    int64 service_worker_registration_id,
+    BrowserContext* browser_context,
+    int64_t persistent_notification_id,
     const GURL& origin,
     const SkBitmap& icon,
     const content::PlatformNotificationData& notification_data) {
@@ -228,13 +263,14 @@ void PlatformNotificationServiceImpl::DisplayPersistentNotification(
   DCHECK(profile);
 
   PersistentNotificationDelegate* delegate = new PersistentNotificationDelegate(
-      browser_context,
-      service_worker_registration_id,
-      origin,
-      notification_data);
+      browser_context, persistent_notification_id, origin);
 
   Notification notification = CreateNotificationFromData(
       profile, origin, icon, notification_data, delegate);
+
+  // TODO(peter): Remove this mapping when we have reliable id generation for
+  // the message_center::Notification objects.
+  persistent_notifications_[persistent_notification_id] = notification.id();
 
   GetNotificationUIManager()->Add(notification, profile);
 
@@ -243,15 +279,53 @@ void PlatformNotificationServiceImpl::DisplayPersistentNotification(
 }
 
 void PlatformNotificationServiceImpl::ClosePersistentNotification(
-    content::BrowserContext* browser_context,
-    const std::string& persistent_notification_id) {
+    BrowserContext* browser_context,
+    int64_t persistent_notification_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   Profile* profile = Profile::FromBrowserContext(browser_context);
   DCHECK(profile);
 
+#if defined(OS_ANDROID)
+  // TODO(peter): Remove this conversion when the notification ids are being
+  // generated by the caller of this method.
+  std::string textual_persistent_notification_id =
+      base::Int64ToString(persistent_notification_id);
   GetNotificationUIManager()->CancelById(
-      persistent_notification_id, NotificationUIManager::GetProfileID(profile));
+      textual_persistent_notification_id,
+      NotificationUIManager::GetProfileID(profile));
+#else
+  auto iter = persistent_notifications_.find(persistent_notification_id);
+  if (iter == persistent_notifications_.end())
+    return;
+
+  GetNotificationUIManager()->CancelById(
+      iter->second, NotificationUIManager::GetProfileID(profile));
+
+  persistent_notifications_.erase(iter);
+#endif
+}
+
+bool PlatformNotificationServiceImpl::GetDisplayedPersistentNotifications(
+    BrowserContext* browser_context,
+    std::set<std::string>* displayed_notifications) {
+  DCHECK(displayed_notifications);
+
+#if !defined(OS_ANDROID)
+  Profile* profile = Profile::FromBrowserContext(browser_context);
+  if (!profile || profile->AsTestingProfile())
+    return false;  // Tests will not have a message center.
+
+  // TODO(peter): Filter for persistent notifications only.
+  *displayed_notifications =
+      GetNotificationUIManager()->GetAllIdsByProfile(profile);
+
+  return true;
+#else
+  // Android cannot reliably return the notifications that are currently being
+  // displayed on the platform, see the comment in NotificationUIManagerAndroid.
+  return false;
+#endif  // !defined(OS_ANDROID)
 }
 
 Notification PlatformNotificationServiceImpl::CreateNotificationFromData(
@@ -271,6 +345,7 @@ Notification PlatformNotificationServiceImpl::CreateNotificationFromData(
       display_source, notification_data.tag, delegate);
 
   notification.set_context_message(display_source);
+  notification.set_vibration_pattern(notification_data.vibration_pattern);
   notification.set_silent(notification_data.silent);
 
   // Web Notifications do not timeout.

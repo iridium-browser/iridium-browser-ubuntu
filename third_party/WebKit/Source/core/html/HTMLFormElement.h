@@ -24,6 +24,7 @@
 #ifndef HTMLFormElement_h
 #define HTMLFormElement_h
 
+#include "core/CoreExport.h"
 #include "core/html/HTMLElement.h"
 #include "core/html/HTMLFormControlElement.h"
 #include "core/html/forms/RadioButtonGroupScope.h"
@@ -41,7 +42,7 @@ class HTMLFormControlsCollection;
 class HTMLImageElement;
 class RadioNodeListOrElement;
 
-class HTMLFormElement final : public HTMLElement {
+class CORE_EXPORT HTMLFormElement final : public HTMLElement {
     DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<HTMLFormElement> create(Document&);
@@ -72,7 +73,6 @@ public:
     void didAssociateByParser();
 
     void prepareForSubmission(Event*);
-    void submit();
     void submitFromJavaScript();
     void reset();
 
@@ -138,7 +138,7 @@ private:
     virtual void copyNonAttributePropertiesFromElement(const Element&) override;
 
     void submitDialog(PassRefPtrWillBeRawPtr<FormSubmission>);
-    void submit(Event*, bool activateSubmitButton, bool processingUserGesture, FormSubmissionTrigger);
+    void submit(Event*, bool activateSubmitButton, bool processingUserGesture);
 
     void scheduleFormSubmission(PassRefPtrWillBeRawPtr<FormSubmission>);
 

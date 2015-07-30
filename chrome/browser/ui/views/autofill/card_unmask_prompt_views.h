@@ -10,14 +10,16 @@
 #include "ui/gfx/animation/animation_delegate.h"
 #include "ui/gfx/animation/slide_animation.h"
 #include "ui/views/controls/combobox/combobox_listener.h"
+#include "ui/views/controls/link_listener.h"
 #include "ui/views/controls/textfield/textfield_controller.h"
 #include "ui/views/window/dialog_delegate.h"
 
 namespace views {
+class Checkbox;
 class ImageView;
 class Label;
-class Checkbox;
-class CheckmarkThrobber;
+class Link;
+class Throbber;
 }
 
 namespace autofill {
@@ -28,6 +30,7 @@ class CardUnmaskPromptViews : public CardUnmaskPromptView,
                               views::ComboboxListener,
                               views::DialogDelegateView,
                               views::TextfieldController,
+                              views::LinkListener,
                               gfx::AnimationDelegate {
  public:
   explicit CardUnmaskPromptViews(CardUnmaskPromptController* controller);
@@ -65,8 +68,12 @@ class CardUnmaskPromptViews : public CardUnmaskPromptView,
   // views::TextfieldController
   void ContentsChanged(views::Textfield* sender,
                        const base::string16& new_contents) override;
+
   // views::ComboboxListener
   void OnPerformAction(views::Combobox* combobox) override;
+
+  // views::LinkListener
+  void LinkClicked(views::Link* source, int event_flags) override;
 
   // gfx::AnimationDelegate
   void AnimationProgressed(const gfx::Animation* animation) override;
@@ -87,16 +94,17 @@ class CardUnmaskPromptViews : public CardUnmaskPromptView,
     void set_fade_everything(bool fade_everything) {
       fade_everything_ = fade_everything;
     }
-    void SetOpacity(double opacity);
+
+    // Set the alpha channel for this view. 0 is transparent and 255 is opaque.
+    void SetAlpha(uint8_t alpha);
 
    private:
     // Controls whether the background and border are faded out as well. Default
     // is false, meaning only children are faded.
     bool fade_everything_;
 
-    // On a scale of 0-1, how much to fade out the contents of this view. 0 is
-    // totally invisible, 1 is totally visible.
-    double opacity_;
+    // The alpha channel for this view. 0 is transparent and 255 is opaque.
+    uint8_t alpha_;
 
     DISALLOW_COPY_AND_ASSIGN(FadeOutView);
   };
@@ -105,6 +113,7 @@ class CardUnmaskPromptViews : public CardUnmaskPromptView,
   void SetRetriableErrorMessage(const base::string16& message);
   bool ExpirationDateIsValid() const;
   void SetInputsEnabled(bool enabled);
+  void ShowNewCardLink();
   void ClosePrompt();
 
   CardUnmaskPromptController* controller_;
@@ -119,12 +128,13 @@ class CardUnmaskPromptViews : public CardUnmaskPromptView,
 
   DecoratedTextfield* cvc_input_;
 
-  // These will be null when expiration date is not required.
   views::Combobox* month_input_;
   views::Combobox* year_input_;
 
   MonthComboboxModel month_combobox_model_;
   YearComboboxModel year_combobox_model_;
+
+  views::Link* new_card_link_;
 
   // The error icon and label for most errors, which live beneath the inputs.
   views::ImageView* error_icon_;
@@ -134,7 +144,7 @@ class CardUnmaskPromptViews : public CardUnmaskPromptView,
   views::Checkbox* storage_checkbox_;
 
   FadeOutView* progress_overlay_;
-  views::CheckmarkThrobber* progress_throbber_;
+  views::Throbber* progress_throbber_;
   views::Label* progress_label_;
 
   gfx::SlideAnimation overlay_animation_;

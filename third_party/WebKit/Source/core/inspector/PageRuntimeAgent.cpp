@@ -32,13 +32,14 @@
 #include "core/inspector/PageRuntimeAgent.h"
 
 #include "bindings/core/v8/DOMWrapperWorld.h"
-#include "bindings/core/v8/PageScriptDebugServer.h"
+#include "bindings/core/v8/MainThreadDebugger.h"
 #include "bindings/core/v8/ScriptController.h"
 #include "bindings/core/v8/ScriptState.h"
 #include "core/frame/FrameConsole.h"
 #include "core/frame/LocalFrame.h"
 #include "core/inspector/InjectedScript.h"
 #include "core/inspector/InjectedScriptManager.h"
+#include "core/inspector/InspectorIdentifiers.h"
 #include "core/inspector/InspectorPageAgent.h"
 #include "core/inspector/InstrumentingAgents.h"
 #include "core/page/Page.h"
@@ -105,13 +106,13 @@ void PageRuntimeAgent::didCreateScriptContext(LocalFrame* frame, ScriptState* sc
 
     // Name the context for debugging.
     String type = isMainWorld ? "page" : "injected";
-    PageScriptDebugServer::setContextDebugData(scriptState->context(), type, m_debuggerId);
+    MainThreadDebugger::setContextDebugData(scriptState->context(), type, m_debuggerId);
 
     if (!m_enabled)
         return;
     ASSERT(frontend());
     String originString = origin ? origin->toRawString() : "";
-    String frameId = m_pageAgent->frameId(frame);
+    String frameId = InspectorIdentifiers<LocalFrame>::identifier(frame);
     addExecutionContextToFrontend(scriptState, isMainWorld, originString, frameId);
 }
 
@@ -160,7 +161,7 @@ void PageRuntimeAgent::reportExecutionContextCreation()
         LocalFrame* localFrame = toLocalFrame(frame);
         if (!localFrame->script().canExecuteScripts(NotAboutToExecuteScript))
             continue;
-        String frameId = m_pageAgent->frameId(localFrame);
+        String frameId = InspectorIdentifiers<LocalFrame>::identifier(localFrame);
 
         // Ensure execution context is created.
         // If initializeMainWorld returns true, then is registered by didCreateScriptContext

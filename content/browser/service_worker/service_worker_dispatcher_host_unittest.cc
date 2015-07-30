@@ -148,7 +148,9 @@ class ServiceWorkerTestContentBrowserClient : public TestContentBrowserClient {
   ServiceWorkerTestContentBrowserClient() {}
   bool AllowServiceWorker(const GURL& scope,
                           const GURL& first_party,
-                          content::ResourceContext* context) override {
+                          content::ResourceContext* context,
+                          int render_process_id,
+                          int render_frame_id) override {
     return false;
   }
 };
@@ -508,6 +510,10 @@ TEST_F(ServiceWorkerDispatcherHostTest, CleanupOnRendererCrash) {
                                GURL("http://www.example.com/service_worker.js"),
                                1L,
                                helper_->context()->AsWeakPtr()));
+  std::vector<ServiceWorkerDatabase::ResourceRecord> records;
+  records.push_back(
+      ServiceWorkerDatabase::ResourceRecord(10, version->script_url(), 100));
+  version->script_cache_map()->SetResources(records);
 
   // Make the registration findable via storage functions.
   helper_->context()->storage()->LazyInitialize(base::Bind(&base::DoNothing));

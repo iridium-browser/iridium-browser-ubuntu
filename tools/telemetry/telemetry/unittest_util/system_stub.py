@@ -26,7 +26,8 @@ class Override(object):
              'thermal_throttle': ThermalThrottleModuleStub,
              'logging': LoggingStub,
              'certutils': CertUtilsStub,
-             'adb_install_cert': AdbInstallCertStub
+             'adb_install_cert': AdbInstallCertStub,
+             'platformsettings': PlatformSettingsStub,
     }
     self.adb_commands = None
     self.os = None
@@ -59,24 +60,22 @@ class Override(object):
     self._overrides = {}
 
 
-class AndroidCommands(object):
-
-  def __init__(self):
-    self.can_access_protected_file_contents = False
-
-  def CanAccessProtectedFileContents(self):
-    return self.can_access_protected_file_contents
-
-
 class AdbDevice(object):
 
   def __init__(self):
+    self.has_root = False
+    self.needs_su = False
     self.shell_command_handlers = {}
     self.mock_content = []
     self.system_properties = {}
     if self.system_properties.get('ro.product.cpu.abi') == None:
       self.system_properties['ro.product.cpu.abi'] = 'armeabi-v7a'
-    self.old_interface = AndroidCommands()
+
+  def HasRoot(self):
+    return self.has_root
+
+  def NeedsSU(self):
+    return self.needs_su
 
   def RunShellCommand(self, args, **_kwargs):
     if isinstance(args, basestring):
@@ -205,7 +204,7 @@ class CloudStorageModuleStub(object):
     elif bucket == CloudStorageModuleStub.INTERNAL_BUCKET:
       if self.permission_level < CloudStorageModuleStub.INTERNAL_PERMISSION:
         raise CloudStorageModuleStub.PermissionError()
-    else:
+    elif bucket not in self.remote_paths:
       raise CloudStorageModuleStub.NotFoundError()
 
   def SetRemotePathsForTesting(self, remote_path_dict=None):
@@ -525,10 +524,6 @@ class CertUtilsStub(object):
   def generate_dummy_ca_cert():
     return '-', '-'
 
-  @staticmethod
-  def has_sni():
-    return True
-
 class AdbInstallCertStub(object):
   class AndroidCertInstaller(object):
     def __init__(self, device_id, _cert_name, _cert_path):
@@ -539,3 +534,8 @@ class AdbInstallCertStub(object):
 
     def install_cert(self, overwrite_cert=False):
       pass
+
+class PlatformSettingsStub(object):
+  @staticmethod
+  def HasSniSupport():
+    return True

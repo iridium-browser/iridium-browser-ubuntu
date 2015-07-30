@@ -35,16 +35,21 @@ PrefService* ChromeBrowserProvider::GetLocalState() {
   return nullptr;
 }
 
+UpdatableResourceProvider*
+ChromeBrowserProvider::GetUpdatableResourceProvider() {
+  return nullptr;
+}
+
 InfoBarViewPlaceholder* ChromeBrowserProvider::CreateInfoBarView() {
   return nullptr;
 }
 
-infobars::InfoBarManager* ChromeBrowserProvider::GetInfoBarManager(
-    web::WebState* web_state) {
+StringProvider* ChromeBrowserProvider::GetStringProvider() {
   return nullptr;
 }
 
-StringProvider* ChromeBrowserProvider::GetStringProvider() {
+GeolocationUpdaterProvider*
+ChromeBrowserProvider::GetGeolocationUpdaterProvider() {
   return nullptr;
 }
 

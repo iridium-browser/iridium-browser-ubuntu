@@ -32,7 +32,6 @@ bool fillLayersEqual(const FillLayer& aLayers, const FillLayer& bLayers)
                 return false;
             break;
         case CSSPropertyBackgroundSize:
-        case CSSPropertyWebkitBackgroundSize:
         case CSSPropertyWebkitMaskSize:
             if (!(aLayer->sizeLength() == bLayer->sizeLength()))
                 return false;
@@ -246,14 +245,10 @@ bool CSSPropertyEquality::propertiesEqual(CSSPropertyID prop, const ComputedStyl
             && (a.verticalAlign() != LENGTH || a.verticalAlignLength() == b.verticalAlignLength());
     case CSSPropertyVisibility:
         return a.visibility() == b.visibility();
-    case CSSPropertyWebkitBackgroundSize:
-        return fillLayersEqual<CSSPropertyWebkitBackgroundSize>(a.backgroundLayers(), b.backgroundLayers());
     case CSSPropertyWebkitBorderHorizontalSpacing:
         return a.horizontalBorderSpacing() == b.horizontalBorderSpacing();
     case CSSPropertyWebkitBorderVerticalSpacing:
         return a.verticalBorderSpacing() == b.verticalBorderSpacing();
-    case CSSPropertyWebkitBoxShadow:
-        return dataEquivalent(a.boxShadow(), b.boxShadow());
     case CSSPropertyWebkitClipPath:
         return dataEquivalent(a.clipPath(), b.clipPath());
     case CSSPropertyWebkitColumnCount:

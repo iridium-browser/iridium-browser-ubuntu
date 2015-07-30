@@ -19,9 +19,11 @@ QuicServerSession::QuicServerSession(const QuicConfig& config,
                                      QuicServerSessionVisitor* visitor)
     : QuicSession(connection, config),
       visitor_(visitor),
+      bandwidth_resumption_enabled_(false),
       bandwidth_estimate_sent_to_client_(QuicBandwidth::Zero()),
       last_scup_time_(QuicTime::Zero()),
-      last_scup_sequence_number_(0) {}
+      last_scup_sequence_number_(0) {
+}
 
 QuicServerSession::~QuicServerSession() {}
 
@@ -48,11 +50,13 @@ void QuicServerSession::OnConfigNegotiated() {
   // bandwidth resumption.
   const CachedNetworkParameters* cached_network_params =
       crypto_stream_->previous_cached_network_params();
+  const bool last_bandwidth_resumption =
+      ContainsQuicTag(config()->ReceivedConnectionOptions(), kBWRE);
   const bool max_bandwidth_resumption =
       ContainsQuicTag(config()->ReceivedConnectionOptions(), kBWMX);
-  if (cached_network_params != nullptr &&
-      (ContainsQuicTag(config()->ReceivedConnectionOptions(), kBWRE) ||
-       max_bandwidth_resumption) &&
+  bandwidth_resumption_enabled_ =
+      last_bandwidth_resumption || max_bandwidth_resumption;
+  if (cached_network_params != nullptr && bandwidth_resumption_enabled_ &&
       cached_network_params->serving_region() == serving_region_) {
     connection()->ResumeConnectionState(*cached_network_params,
                                         max_bandwidth_resumption);
@@ -83,6 +87,9 @@ void QuicServerSession::OnWriteBlocked() {
 }
 
 void QuicServerSession::OnCongestionWindowChange(QuicTime now) {
+  if (!bandwidth_resumption_enabled_) {
+    return;
+  }
   // Only send updates when the application has no data to write.
   if (HasDataToWrite()) {
     return;
@@ -168,6 +175,11 @@ void QuicServerSession::OnCongestionWindowChange(QuicTime now) {
 }
 
 bool QuicServerSession::ShouldCreateIncomingDataStream(QuicStreamId id) {
+  if (!connection()->connected()) {
+    LOG(DFATAL) << "ShouldCreateIncomingDataStream called when disconnected";
+    return false;
+  }
+
   if (id % 2 == 0) {
     DVLOG(1) << "Invalid incoming even stream_id:" << id;
     connection()->SendConnectionClose(QUIC_INVALID_STREAM_ID);

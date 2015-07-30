@@ -24,7 +24,6 @@
 #include "core/HTMLNames.h"
 #include "core/dom/Element.h"
 #include "core/html/HTMLElement.h"
-#include "core/layout/PaintInfo.h"
 #include "core/paint/DetailsMarkerPainter.h"
 
 namespace blink {
@@ -66,12 +65,12 @@ void LayoutDetailsMarker::paint(const PaintInfo& paintInfo, const LayoutPoint& p
 
 bool LayoutDetailsMarker::isOpen() const
 {
-    for (LayoutObject* renderer = parent(); renderer; renderer = renderer->parent()) {
-        if (!renderer->node())
+    for (LayoutObject* layoutObject = parent(); layoutObject; layoutObject = layoutObject->parent()) {
+        if (!layoutObject->node())
             continue;
-        if (isHTMLDetailsElement(*renderer->node()))
-            return !toElement(renderer->node())->getAttribute(openAttr).isNull();
-        if (isHTMLInputElement(*renderer->node()))
+        if (isHTMLDetailsElement(*layoutObject->node()))
+            return !toElement(layoutObject->node())->getAttribute(openAttr).isNull();
+        if (isHTMLInputElement(*layoutObject->node()))
             return true;
     }
 

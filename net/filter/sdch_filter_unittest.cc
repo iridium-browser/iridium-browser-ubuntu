@@ -13,6 +13,8 @@
 #include "base/test/histogram_tester.h"
 #include "base/test/simple_test_clock.h"
 #include "net/base/io_buffer.h"
+#include "net/base/sdch_dictionary.h"
+#include "net/base/sdch_manager.h"
 #include "net/base/sdch_observer.h"
 #include "net/filter/mock_filter_context.h"
 #include "net/filter/sdch_filter.h"
@@ -173,7 +175,7 @@ static std::string NewSdchExpiredDictionary(const std::string& domain) {
     dictionary.append(domain);
     dictionary.append("\n");
   }
-  dictionary.append("Max-Age: 0\n");
+  dictionary.append("Max-Age: -1\n");
   dictionary.append("\n");
   dictionary.append(kTestVcdiffDictionary, sizeof(kTestVcdiffDictionary) - 1);
   return dictionary;
@@ -1209,20 +1211,12 @@ TEST_F(SdchFilterTest, UnexpectedDictionary) {
   std::string server_hash;
   SdchManager::GenerateHash(expired_dictionary, &client_hash, &server_hash);
 
-  // Make sure Max-Age: 0 shows up as expired.
-  scoped_ptr<base::SimpleTestClock> clock(new base::SimpleTestClock);
-  clock->SetNow(base::Time::Now());
-  clock->Advance(base::TimeDelta::FromMinutes(5));
   SdchProblemCode problem_code;
   scoped_ptr<SdchManager::DictionarySet> hash_set(
       sdch_manager_->GetDictionarySetByHash(
           url, server_hash, &problem_code).Pass());
   ASSERT_TRUE(hash_set);
   ASSERT_EQ(SDCH_OK, problem_code);
-
-  const_cast<SdchManager::Dictionary*>(
-      hash_set->GetDictionary(server_hash))->SetClockForTesting(
-      clock.Pass());
 
   // Encode output with the second dictionary.
   std::string sdch_compressed(NewSdchCompressedData(expired_dictionary));
@@ -1242,8 +1236,7 @@ class SimpleSdchObserver : public SdchObserver {
   ~SimpleSdchObserver() override { manager_->RemoveObserver(this); }
 
   // SdchObserver
-  void OnDictionaryUsed(SdchManager* manager,
-                        const std::string& server_hash) override {
+  void OnDictionaryUsed(const std::string& server_hash) override {
     dictionary_used_++;
     last_server_hash_ = server_hash;
   }
@@ -1251,10 +1244,12 @@ class SimpleSdchObserver : public SdchObserver {
   int dictionary_used_calls() const { return dictionary_used_; }
   std::string last_server_hash() const { return last_server_hash_; }
 
-  void OnGetDictionary(SdchManager* /* manager */,
-                       const GURL& /* request_url */,
+  void OnDictionaryAdded(const GURL& /* dictionary_url */,
+                         const std::string& /* server_hash */) override {}
+  void OnDictionaryRemoved(const std::string& /* server_hash */) override {}
+  void OnGetDictionary(const GURL& /* request_url */,
                        const GURL& /* dictionary_url */) override {}
-  void OnClearDictionaries(SdchManager* /* manager */) override {}
+  void OnClearDictionaries() override {}
 
  private:
   int dictionary_used_;

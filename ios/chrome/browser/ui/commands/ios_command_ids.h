@@ -16,10 +16,11 @@
 // avoid conflicts.
 // TODO(droger): Remove this comment once iOS no longer depends on //chrome.
 #define IDC_SHOW_TOOLS_MENU                            40900
-#define IDC_TOGGLE_STACK_VIEW                          40901
+#define IDC_TOGGLE_TAB_SWITCHER                        40901
 #define IDC_VOICE_SEARCH                               40902
 #define IDC_NEW_INCOGNITO_TAB                          40903
 #define IDC_CLOSE_ALL_TABS                             40904
+#define IDC_SHOW_SIGNIN_IOS                            40905
 #define IDC_SWITCH_BROWSER_MODES                       40906
 #define IDC_FIND_CLOSE                                 40907
 #define IDC_FIND_UPDATE                                40908

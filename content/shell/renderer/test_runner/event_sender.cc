@@ -8,7 +8,6 @@
 #include "base/logging.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
-#include "content/public/common/page_zoom.h"
 #include "content/shell/renderer/test_runner/mock_spell_check.h"
 #include "content/shell/renderer/test_runner/test_interfaces.h"
 #include "content/shell/renderer/test_runner/web_test_delegate.h"
@@ -23,7 +22,7 @@
 #include "third_party/WebKit/public/web/WebKit.h"
 #include "third_party/WebKit/public/web/WebPagePopup.h"
 #include "third_party/WebKit/public/web/WebView.h"
-#include "ui/events/keycodes/dom4/keycode_converter.h"
+#include "ui/events/keycodes/dom/keycode_converter.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "v8/include/v8.h"
 
@@ -117,7 +116,7 @@ int GetKeyModifiers(const std::vector<std::string>& modifier_names) {
   return modifiers;
 }
 
-int GetKeyModifiersFromV8(v8::Handle<v8::Value> value) {
+int GetKeyModifiersFromV8(v8::Local<v8::Value> value) {
   std::vector<std::string> modifier_names;
   if (value->IsString()) {
     modifier_names.push_back(gin::V8ToString(value));
@@ -483,7 +482,7 @@ void EventSenderBindings::Install(base::WeakPtr<EventSender> sender,
                                   WebFrame* frame) {
   v8::Isolate* isolate = blink::mainThreadIsolate();
   v8::HandleScope handle_scope(isolate);
-  v8::Handle<v8::Context> context = frame->mainWorldScriptContext();
+  v8::Local<v8::Context> context = frame->mainWorldScriptContext();
   if (context.IsEmpty())
     return;
 
@@ -493,7 +492,7 @@ void EventSenderBindings::Install(base::WeakPtr<EventSender> sender,
       gin::CreateHandle(isolate, new EventSenderBindings(sender));
   if (bindings.IsEmpty())
     return;
-  v8::Handle<v8::Object> global = context->Global();
+  v8::Local<v8::Object> global = context->Global();
   global->Set(gin::StringToV8(isolate, "eventSender"), bindings.ToV8());
 }
 
@@ -931,7 +930,7 @@ void EventSenderBindings::ScheduleAsynchronousKeyDown(gin::Arguments* args) {
   int location = DOMKeyLocationStandard;
   args->GetNext(&code_str);
   if (!args->PeekNext().IsEmpty()) {
-    v8::Handle<v8::Value> value;
+    v8::Local<v8::Value> value;
     args->GetNext(&value);
     modifiers = GetKeyModifiersFromV8(value);
     if (!args->PeekNext().IsEmpty())
@@ -978,7 +977,7 @@ void EventSenderBindings::KeyDown(gin::Arguments* args) {
   int location = DOMKeyLocationStandard;
   args->GetNext(&code_str);
   if (!args->PeekNext().IsEmpty()) {
-    v8::Handle<v8::Value> value;
+    v8::Local<v8::Value> value;
     args->GetNext(&value);
     modifiers = GetKeyModifiersFromV8(value);
     if (!args->PeekNext().IsEmpty())
@@ -1563,7 +1562,7 @@ void EventSender::SetPageZoomFactor(double zoom_factor) {
 
   for (size_t i = 0; i < window_list.size(); ++i) {
     window_list.at(i)->GetWebView()->setZoomLevel(
-        ZoomFactorToZoomLevel(zoom_factor));
+        std::log(zoom_factor) / std::log(1.2));
   }
 }
 
@@ -2381,7 +2380,7 @@ void EventSender::InitMouseWheelEvent(gin::Arguments* args,
     if (!args->PeekNext().IsEmpty()) {
       args->GetNext(&has_precise_scrolling_deltas);
       if (!args->PeekNext().IsEmpty()) {
-        v8::Handle<v8::Value> value;
+        v8::Local<v8::Value> value;
         args->GetNext(&value);
         modifiers = GetKeyModifiersFromV8(value);
         if (!args->PeekNext().IsEmpty())

@@ -10,13 +10,14 @@
 #include "../fsdk_define.h"  // For FX_UINT
 #include "../fsdk_mgr.h"  // For CPDFDoc_Environment
 #include "../fx_systemhandler.h"  // For IFX_SystemHandler
+#include "../jsapi/fxjs_v8.h"
 
 class CPDFSDK_PageView;
 class CJS_Object;
 class CJS_Timer;
 class CJS_Context;
 
-class CJS_EmbedObj : public CFX_Object
+class CJS_EmbedObj 
 {
 public:
 	CJS_EmbedObj(CJS_Object* pJSObject);
@@ -38,13 +39,14 @@ protected:
 	CJS_Object*					m_pJSObject;
 };
 
-class CJS_Object : public CFX_Object
+class CJS_Object 
 {
 public:
 	CJS_Object(JSFXObject pObject);
 	virtual ~CJS_Object(void);
 
 	void						MakeWeak();
+        void                                            Dispose();
 
 	virtual FX_BOOL				IsType(FX_LPCSTR sClassName){return TRUE;};
 	virtual CFX_ByteString		GetClassName(){return "";};

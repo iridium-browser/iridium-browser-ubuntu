@@ -133,6 +133,7 @@ ALWAYS_INLINE bool StyleInvalidator::checkInvalidationSetsAgainstElement(Element
             if (UNLIKELY(*s_tracingEnabled)) {
                 TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline.invalidationTracking"),
                     "StyleInvalidatorInvalidationTracking",
+                    TRACE_EVENT_SCOPE_THREAD,
                     "data", InspectorStyleInvalidatorInvalidateEvent::invalidationList(element, *invalidationList));
             }
             return true;
@@ -177,8 +178,8 @@ bool StyleInvalidator::invalidate(Element& element, StyleInvalidator::RecursionD
         element.setNeedsStyleRecalc(LocalStyleChange, StyleChangeReasonForTracing::create(StyleChangeReason::StyleInvalidator));
     } else if (recursionData.hasInvalidationSets() && someChildrenNeedStyleRecalc) {
         // Clone the ComputedStyle in order to preserve correct style sharing, if possible. Otherwise recalc style.
-        if (LayoutObject* renderer = element.layoutObject()) {
-            renderer->setStyleInternal(ComputedStyle::clone(renderer->styleRef()));
+        if (LayoutObject* layoutObject = element.layoutObject()) {
+            layoutObject->setStyleInternal(ComputedStyle::clone(layoutObject->styleRef()));
         } else {
             TRACE_STYLE_INVALIDATOR_INVALIDATION_IF_ENABLED(element, PreventStyleSharingForParent);
             element.setNeedsStyleRecalc(LocalStyleChange, StyleChangeReasonForTracing::create(StyleChangeReason::StyleInvalidator));

@@ -103,6 +103,7 @@ component("aura") {
     "//ui/base/ime",
     "//ui/compositor",
     "//ui/events",
+    "//ui/events:events_base",
     "//ui/events/platform",
     "//ui/gfx",
     "//ui/gfx/geometry",
@@ -132,7 +133,7 @@ component("aura") {
     deps += [
       "//ipc",
       "//ui/metro_viewer",
-      "//ui/platform_window/win:win_window",
+      "//ui/platform_window/win",
     ]
   }
 

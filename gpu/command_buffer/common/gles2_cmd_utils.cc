@@ -203,8 +203,6 @@ int GLES2Util::GLGetNumValuesReturned(int id) const {
       return 1;
     case GL_TEXTURE_BINDING_RECTANGLE_ARB:
       return 1;
-    case GL_TEXTURE_IMMUTABLE_FORMAT_EXT:
-      return 1;
     case GL_UNPACK_ALIGNMENT:
       return 1;
     case GL_VIEWPORT:
@@ -306,14 +304,32 @@ int GLES2Util::GLGetNumValuesReturned(int id) const {
       return 1;
     case GL_TEXTURE_MIN_FILTER:
       return 1;
+    case GL_TEXTURE_WRAP_R:
+      return 1;
     case GL_TEXTURE_WRAP_S:
       return 1;
     case GL_TEXTURE_WRAP_T:
       return 1;
+    case GL_TEXTURE_COMPARE_FUNC:
+      return 1;
+    case GL_TEXTURE_COMPARE_MODE:
+      return 1;
+    case GL_TEXTURE_MAX_LOD:
+      return 1;
+    case GL_TEXTURE_MIN_LOD:
+      return 1;
+    case GL_TEXTURE_BASE_LEVEL:
+      return 1;
+    case GL_TEXTURE_MAX_LEVEL:
+      return 1;
+    case GL_TEXTURE_IMMUTABLE_FORMAT:
+      return 1;
+    case GL_TEXTURE_IMMUTABLE_LEVELS:
+      return 1;
     case GL_TEXTURE_MAX_ANISOTROPY_EXT:
       return 1;
 
-    // -- glGetVertexAttribfv, glGetVertexAttribiv
+    // -- glGetVertexAttrib
     case GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING:
       return 1;
     case GL_VERTEX_ATTRIB_ARRAY_ENABLED:
@@ -328,6 +344,10 @@ int GLES2Util::GLGetNumValuesReturned(int id) const {
       return 1;
     case GL_CURRENT_VERTEX_ATTRIB:
       return 4;
+    case GL_VERTEX_ATTRIB_ARRAY_INTEGER:
+      return 1;
+    case GL_VERTEX_ATTRIB_ARRAY_DIVISOR:
+      return 1;
 
     // -- glGetSynciv
     case GL_OBJECT_TYPE:
@@ -523,46 +543,123 @@ size_t GLES2Util::RenderbufferBytesPerPixel(int format) {
   }
 }
 
-uint32 GLES2Util::GetGLDataTypeSizeForUniforms(int type) {
+uint32 GLES2Util::GetElementSizeForUniformType(int type) {
   switch (type) {
     case GL_FLOAT:
-      return sizeof(GLfloat);              // NOLINT
     case GL_FLOAT_VEC2:
-      return sizeof(GLfloat) * 2;          // NOLINT
     case GL_FLOAT_VEC3:
-      return sizeof(GLfloat) * 3;          // NOLINT
     case GL_FLOAT_VEC4:
-      return sizeof(GLfloat) * 4;          // NOLINT
-    case GL_INT:
-      return sizeof(GLint);                // NOLINT
-    case GL_INT_VEC2:
-      return sizeof(GLint) * 2;            // NOLINT
-    case GL_INT_VEC3:
-      return sizeof(GLint) * 3;            // NOLINT
-    case GL_INT_VEC4:
-      return sizeof(GLint) * 4;            // NOLINT
-    case GL_BOOL:
-      return sizeof(GLint);                // NOLINT
-    case GL_BOOL_VEC2:
-      return sizeof(GLint) * 2;            // NOLINT
-    case GL_BOOL_VEC3:
-      return sizeof(GLint) * 3;            // NOLINT
-    case GL_BOOL_VEC4:
-      return sizeof(GLint) * 4;            // NOLINT
     case GL_FLOAT_MAT2:
-      return sizeof(GLfloat) * 2 * 2;      // NOLINT
     case GL_FLOAT_MAT3:
-      return sizeof(GLfloat) * 3 * 3;      // NOLINT
     case GL_FLOAT_MAT4:
-      return sizeof(GLfloat) * 4 * 4;      // NOLINT
+      return sizeof(GLfloat);
+    case GL_INT:
+    case GL_INT_VEC2:
+    case GL_INT_VEC3:
+    case GL_INT_VEC4:
+    case GL_BOOL:
+    case GL_BOOL_VEC2:
+    case GL_BOOL_VEC3:
+    case GL_BOOL_VEC4:
     case GL_SAMPLER_2D:
-      return sizeof(GLint);                // NOLINT
-    case GL_SAMPLER_2D_RECT_ARB:
-      return sizeof(GLint);                // NOLINT
     case GL_SAMPLER_CUBE:
-      return sizeof(GLint);                // NOLINT
-    case GL_SAMPLER_EXTERNAL_OES:
-      return sizeof(GLint);                // NOLINT
+    case GL_SAMPLER_2D_RECT_ARB:  // extension.
+    case GL_SAMPLER_EXTERNAL_OES:  // extension.
+      return sizeof(GLint);
+
+    // ES3 types.
+    case GL_UNSIGNED_INT:
+    case GL_UNSIGNED_INT_VEC2:
+    case GL_UNSIGNED_INT_VEC3:
+    case GL_UNSIGNED_INT_VEC4:
+      return sizeof(GLuint);
+    case GL_SAMPLER_3D:
+    case GL_SAMPLER_2D_SHADOW:
+    case GL_SAMPLER_2D_ARRAY:
+    case GL_SAMPLER_2D_ARRAY_SHADOW:
+    case GL_SAMPLER_CUBE_SHADOW:
+    case GL_INT_SAMPLER_2D:
+    case GL_INT_SAMPLER_3D:
+    case GL_INT_SAMPLER_CUBE:
+    case GL_INT_SAMPLER_2D_ARRAY:
+    case GL_UNSIGNED_INT_SAMPLER_2D:
+    case GL_UNSIGNED_INT_SAMPLER_3D:
+    case GL_UNSIGNED_INT_SAMPLER_CUBE:
+    case GL_UNSIGNED_INT_SAMPLER_2D_ARRAY:
+      return sizeof(GLint);
+    case GL_FLOAT_MAT2x3:
+    case GL_FLOAT_MAT3x2:
+    case GL_FLOAT_MAT2x4:
+    case GL_FLOAT_MAT4x2:
+    case GL_FLOAT_MAT3x4:
+    case GL_FLOAT_MAT4x3:
+      return sizeof(GLfloat);
+
+    default:
+      return 0;
+  }
+}
+
+uint32 GLES2Util::GetElementCountForUniformType(int type) {
+  switch (type) {
+    case GL_FLOAT:
+    case GL_INT:
+    case GL_BOOL:
+    case GL_SAMPLER_2D:
+    case GL_SAMPLER_CUBE:
+    case GL_SAMPLER_2D_RECT_ARB:  // extension.
+    case GL_SAMPLER_EXTERNAL_OES:  // extension.
+      return 1;
+    case GL_FLOAT_VEC2:
+    case GL_INT_VEC2:
+    case GL_BOOL_VEC2:
+      return 2;
+    case GL_FLOAT_VEC3:
+    case GL_INT_VEC3:
+    case GL_BOOL_VEC3:
+      return 3;
+    case GL_FLOAT_VEC4:
+    case GL_INT_VEC4:
+    case GL_BOOL_VEC4:
+    case GL_FLOAT_MAT2:
+      return 4;
+    case GL_FLOAT_MAT3:
+      return 9;
+    case GL_FLOAT_MAT4:
+      return 16;
+
+    // ES3 types.
+    case GL_UNSIGNED_INT:
+    case GL_SAMPLER_3D:
+    case GL_SAMPLER_2D_SHADOW:
+    case GL_SAMPLER_2D_ARRAY:
+    case GL_SAMPLER_2D_ARRAY_SHADOW:
+    case GL_SAMPLER_CUBE_SHADOW:
+    case GL_INT_SAMPLER_2D:
+    case GL_INT_SAMPLER_3D:
+    case GL_INT_SAMPLER_CUBE:
+    case GL_INT_SAMPLER_2D_ARRAY:
+    case GL_UNSIGNED_INT_SAMPLER_2D:
+    case GL_UNSIGNED_INT_SAMPLER_3D:
+    case GL_UNSIGNED_INT_SAMPLER_CUBE:
+    case GL_UNSIGNED_INT_SAMPLER_2D_ARRAY:
+      return 1;
+    case GL_UNSIGNED_INT_VEC2:
+      return 2;
+    case GL_UNSIGNED_INT_VEC3:
+      return 3;
+    case GL_UNSIGNED_INT_VEC4:
+      return 4;
+    case GL_FLOAT_MAT2x3:
+    case GL_FLOAT_MAT3x2:
+      return 6;
+    case GL_FLOAT_MAT2x4:
+    case GL_FLOAT_MAT4x2:
+      return 8;
+    case GL_FLOAT_MAT3x4:
+    case GL_FLOAT_MAT4x3:
+      return 12;
+
     default:
       return 0;
   }
@@ -648,6 +745,8 @@ size_t GLES2Util::GLTargetToFaceIndex(uint32 target) {
     case GL_TEXTURE_2D:
     case GL_TEXTURE_EXTERNAL_OES:
     case GL_TEXTURE_RECTANGLE_ARB:
+    case GL_TEXTURE_3D:
+    case GL_TEXTURE_2D_ARRAY:
       return 0;
     case GL_TEXTURE_CUBE_MAP_POSITIVE_X:
       return 0;

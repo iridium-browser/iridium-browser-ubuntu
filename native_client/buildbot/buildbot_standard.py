@@ -195,7 +195,7 @@ def BuildScript(status, context):
     TryToCleanContents(tmp_dir, file_name_filter)
 
     # Recreate TEMP, as it may have been clobbered.
-    if not os.path.exists(os.environ['TEMP']):
+    if 'TEMP' in os.environ and not os.path.exists(os.environ['TEMP']):
       os.makedirs(os.environ['TEMP'])
 
     # Mac has an additional temporary directory; clean it up.
@@ -255,6 +255,11 @@ def BuildScript(status, context):
       'use_clang_newlib=' + gn_newlib,
     ]
 
+    # If this is a 32-bit build but the kernel reports as 64-bit,
+    # then gn will set host_cpu=x64 when we want host_cpu=x86.
+    if context['arch'] == '32':
+      gn_gen_args.append('host_cpu="x86"')
+
     gn_cmd = [
       'gn',
       '--dotfile=../native_client/.gn', '--root=..',
@@ -266,15 +271,6 @@ def BuildScript(status, context):
       '--args=%s' % ' '.join(gn_gen_args),
       'gen', gn_out,
       ]
-
-    # If this is a 32-bit build but the kernel reports as 64-bit,
-    # then gn will set build_cpu_arch=x64 when we want build_cpu_arch=x32.
-    # TODO(mcgrathr): dpranke said he'll change gn so that you can override
-    # this on the command line; when that gn arrives, we'll use that argument
-    # rather than this kludge.  The 'linux32' utility runs a command with
-    # the process "personality" set to report i686 rather than x86_64.
-    if context['arch'] == '32' and platform.machine() == 'x86_64':
-      gn_cmd.insert(0, 'linux32')
 
     with Step('gn_compile', status):
       Command(context, cmd=gn_cmd)
@@ -357,12 +353,15 @@ def BuildScript(status, context):
     return
 
   ### BEGIN tests ###
-  with Step('small_tests', status, halt_on_fail=False):
-    SCons(context, args=['small_tests'])
-  with Step('medium_tests', status, halt_on_fail=False):
-    SCons(context, args=['medium_tests'])
-  with Step('large_tests', status, halt_on_fail=False):
-    SCons(context, args=['large_tests'])
+  if not context['use_glibc']:
+    # Bypassing the IRT with glibc is not a supported case,
+    # and in fact does not work at all with the new glibc.
+    with Step('small_tests', status, halt_on_fail=False):
+      SCons(context, args=['small_tests'])
+    with Step('medium_tests', status, halt_on_fail=False):
+      SCons(context, args=['medium_tests'])
+    with Step('large_tests', status, halt_on_fail=False):
+      SCons(context, args=['large_tests'])
 
   with Step('compile IRT tests', status):
     SCons(context, parallel=True, mode=['nacl_irt_test'])

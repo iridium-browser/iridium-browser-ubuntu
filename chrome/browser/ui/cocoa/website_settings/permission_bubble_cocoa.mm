@@ -10,6 +10,7 @@
 #import "chrome/browser/ui/cocoa/website_settings/permission_bubble_controller.h"
 #import "chrome/browser/ui/website_settings/permission_bubble_view.h"
 #include "content/public/browser/web_contents.h"
+#import "ui/base/cocoa/nsview_additions.h"
 
 PermissionBubbleCocoa::PermissionBubbleCocoa(NSWindow* parent_window)
     : parent_window_(parent_window), delegate_(NULL), bubbleController_(nil) {}
@@ -53,9 +54,7 @@ void PermissionBubbleCocoa::SetDelegate(Delegate* delegate) {
 }
 
 bool PermissionBubbleCocoa::CanAcceptRequestUpdate() {
-  // TODO(gbillock): implement. Should return true if the mouse is not over the
-  // dialog.
-  return false;
+  return ![[[bubbleController_ window] contentView] cr_isMouseInView];
 }
 
 void PermissionBubbleCocoa::OnBubbleClosing() {
@@ -63,10 +62,18 @@ void PermissionBubbleCocoa::OnBubbleClosing() {
 }
 
 NSPoint PermissionBubbleCocoa::GetAnchorPoint() {
-  LocationBarViewMac* location_bar =
-      [[parent_window_ windowController] locationBarBridge];
-  DCHECK(location_bar);
-  NSPoint anchor = location_bar->GetPageInfoBubblePoint();
+  NSPoint anchor;
+  if (HasLocationBar()) {
+    LocationBarViewMac* location_bar =
+        [[parent_window_ windowController] locationBarBridge];
+    anchor = location_bar->GetPageInfoBubblePoint();
+  } else {
+    // Center the bubble if there's no location bar.
+    NSView* content_view = [parent_window_ contentView];
+    anchor.y = NSMaxY(content_view.frame);
+    anchor.x = NSMidX(content_view.frame);
+  }
+
   return [parent_window_ convertBaseToScreen:anchor];
 }
 
@@ -76,4 +83,21 @@ NSWindow* PermissionBubbleCocoa::window() {
 
 void PermissionBubbleCocoa::SwitchParentWindow(NSWindow* parent) {
   parent_window_ = parent;
+}
+
+bool PermissionBubbleCocoa::HasLocationBar() {
+  LocationBarViewMac* location_bar_bridge =
+      [[parent_window_ windowController] locationBarBridge];
+  if (location_bar_bridge) {
+    // It is necessary to check that the location bar bridge will actually
+    // support the location bar. This is important because an application window
+    // will have a location_bar_bridge but not have a location bar.
+    return location_bar_bridge->browser()->SupportsWindowFeature(
+        Browser::FEATURE_LOCATIONBAR);
+  }
+  return false;
+}
+
+info_bubble::BubbleArrowLocation PermissionBubbleCocoa::GetArrowLocation() {
+  return HasLocationBar() ? info_bubble::kTopLeft : info_bubble::kNoArrow;
 }

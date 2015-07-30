@@ -2,12 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/profiler/stack_sampling_profiler.h"
+#include "base/profiler/native_stack_sampler.h"
 
 namespace base {
 
-scoped_ptr<StackSamplingProfiler::NativeStackSampler>
-StackSamplingProfiler::NativeStackSampler::Create(PlatformThreadId thread_id) {
+scoped_ptr<NativeStackSampler> NativeStackSampler::Create(
+    PlatformThreadId thread_id) {
   return scoped_ptr<NativeStackSampler>();
 }
 

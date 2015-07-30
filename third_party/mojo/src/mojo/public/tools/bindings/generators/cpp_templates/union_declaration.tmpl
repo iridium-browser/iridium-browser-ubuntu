@@ -4,10 +4,22 @@
 
 class {{class_name}} {
  public:
+  // Used to identify Mojom Union Data Classes.
+  typedef void MojomUnionDataType;
   static {{class_name}}* New(mojo::internal::Buffer* buf);
+  {{class_name}}();
+  // Do nothing in the destructor since it won't be called.
+  ~{{class_name}}() {}
 
   static bool Validate(const void* data,
-                       mojo::internal::BoundsChecker* bounds_checker);
+                       mojo::internal::BoundsChecker* bounds_checker,
+                       bool inlined);
+
+  bool is_null() const {
+    return size == 0;
+  }
+
+  void set_null();
 
   enum class {{enum_name}} : uint32_t {
 {%  for field in union.fields %}
@@ -20,29 +32,21 @@ class {{class_name}} {
   // a struct." - Section 9.5.2 ISO/IEC 14882:2011 (The C++ Spec)
   union MOJO_ALIGNAS(8) Union_ {
 {%- for field in union.fields %}
-{%-   if field.kind|is_string_kind %}
-    uint64_t f_{{field.name}};
-{%-   elif field.kind.spec == 'b' %}
+{%-   if field.kind.spec == 'b' %}
     uint8_t f_{{field.name}} : 1;
-{%-   elif field.kind|is_enum_kind %}
-    int32_t f_{{field.name}};
 {%-   else %}
-    {{field.kind|cpp_pod_type}} f_{{field.name}};
+    {{field.kind|cpp_union_field_type}} f_{{field.name}};
 {%-   endif %}
 {%- endfor %}
     uint64_t unknown;
   };
 
-  uint32_t reserved;
+  uint32_t size;
   {{enum_name}} tag;
   Union_ data;
 
   void EncodePointersAndHandles(std::vector<mojo::Handle>* handles);
   void DecodePointersAndHandles(std::vector<mojo::Handle>* handles);
- 
- private:
-  {{class_name}}();
-  ~{{class_name}}() = delete;
 };
 static_assert(sizeof({{class_name}}) == 16,
               "Bad sizeof({{class_name}})");

@@ -47,19 +47,6 @@ config("pdfium_config") {
 
 static_library("pdfium") {
   sources = [
-    "fpdfsdk/include/fpdf_dataavail.h",
-    "fpdfsdk/include/fpdf_ext.h",
-    "fpdfsdk/include/fpdf_flatten.h",
-    "fpdfsdk/include/fpdf_progressive.h",
-    "fpdfsdk/include/fpdf_searchex.h",
-    "fpdfsdk/include/fpdf_sysfontinfo.h",
-    "fpdfsdk/include/fpdf_sysfontinfo.h",
-    "fpdfsdk/include/fpdf_transformpage.h",
-    "fpdfsdk/include/fpdfdoc.h",
-    "fpdfsdk/include/fpdfedit.h",
-    "fpdfsdk/include/fpdfformfill.h",
-    "fpdfsdk/include/fpdftext.h",
-    "fpdfsdk/include/fpdfview.h",
     "fpdfsdk/include/fsdk_actionhandler.h",
     "fpdfsdk/include/fsdk_annothandler.h",
     "fpdfsdk/include/fsdk_baseannot.h",
@@ -87,6 +74,21 @@ static_library("pdfium") {
     "fpdfsdk/src/fsdk_mgr.cpp",
     "fpdfsdk/src/fsdk_rendercontext.cpp",
     "fpdfsdk/src/resource.h",
+    "public/fpdf_dataavail.h",
+    "public/fpdf_doc.h",
+    "public/fpdf_edit.h",
+    "public/fpdf_ext.h",
+    "public/fpdf_flatten.h",
+    "public/fpdf_formfill.h",
+    "public/fpdf_fwlevent.h",
+    "public/fpdf_ppo.h",
+    "public/fpdf_progressive.h",
+    "public/fpdf_save.h",
+    "public/fpdf_searchex.h",
+    "public/fpdf_sysfontinfo.h",
+    "public/fpdf_text.h",
+    "public/fpdf_transformpage.h",
+    "public/fpdfview.h",
   ]
 
   libs = []
@@ -135,8 +137,12 @@ static_library("pdfium") {
   }
 }
 
-# Targets below this are only visible within this file.
-visibility = [ ":*" ]
+# Targets below this are only visible within this file (and to the
+# top-level gn_visibility target used to help gn_all build everything).
+visibility = [
+  ":*",
+  "//:gn_visibility",
+]
 
 static_library("fdrm") {
   sources = [
@@ -171,6 +177,7 @@ static_library("fpdfdoc") {
     "core/src/fpdfdoc/doc_ocg.cpp",
     "core/src/fpdfdoc/doc_tagged.cpp",
     "core/src/fpdfdoc/doc_utils.cpp",
+    "core/src/fpdfdoc/doc_utils.h",
     "core/src/fpdfdoc/doc_viewerPreferences.cpp",
     "core/src/fpdfdoc/doc_vt.cpp",
     "core/src/fpdfdoc/doc_vtmodule.cpp",
@@ -739,7 +746,6 @@ static_library("javascript") {
     "fpdfsdk/include/javascript/JS_Define.h",
     "fpdfsdk/include/javascript/JS_EventHandler.h",
     "fpdfsdk/include/javascript/JS_GlobalData.h",
-    "fpdfsdk/include/javascript/JS_Module.h",
     "fpdfsdk/include/javascript/JS_Object.h",
     "fpdfsdk/include/javascript/JS_Runtime.h",
     "fpdfsdk/include/javascript/JS_Value.h",
@@ -845,9 +851,9 @@ static_library("formfiller") {
 
 test("pdfium_unittests") {
   sources = [
-    "core/src/fpdfapi/fpdf_parser/fpdf_parser_decode_unittest.cpp",
     "core/src/fxcodec/codec/fx_codec_jpx_unittest.cpp",
     "core/src/fxcrt/fx_basic_bstring_unittest.cpp",
+    "core/src/fxcrt/fx_basic_memmgr_unittest.cpp",
     "core/src/fxcrt/fx_basic_wstring_unittest.cpp",
     "testing/fx_string_testhelpers.cpp",
     "testing/fx_string_testhelpers.h",
@@ -867,11 +873,14 @@ test("pdfium_unittests") {
 
 test("pdfium_embeddertests") {
   sources = [
+    "core/src/fpdfapi/fpdf_parser/fpdf_parser_decode_embeddertest.cpp",
     "core/src/fpdfapi/fpdf_parser/fpdf_parser_parser_embeddertest.cpp",
     "fpdfsdk/src/fpdf_dataavail_embeddertest.cpp",
     "fpdfsdk/src/fpdfdoc_embeddertest.cpp",
     "fpdfsdk/src/fpdfformfill_embeddertest.cpp",
     "fpdfsdk/src/fpdftext_embeddertest.cpp",
+    "fpdfsdk/src/fpdfview_c_api_test.c",
+    "fpdfsdk/src/fpdfview_c_api_test.h",
     "fpdfsdk/src/fpdfview_embeddertest.cpp",
     "testing/embedder_test.cpp",
     "testing/embedder_test.h",

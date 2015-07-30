@@ -42,33 +42,6 @@ const char kSpdyProxyRealm[] = "/SpdyProxy";
 // already.
 typedef autofill::SavePasswordProgressLogger Logger;
 
-// This routine is called when PasswordManagers are constructed.
-//
-// Currently we report metrics only once at startup. We require
-// that this is only ever called from a single thread in order to
-// avoid needing to lock (a static boolean flag is then sufficient to
-// guarantee running only once).
-void ReportMetrics(bool password_manager_enabled,
-                   PasswordManagerClient* client) {
-  static base::PlatformThreadId initial_thread_id =
-      base::PlatformThread::CurrentId();
-  DCHECK(initial_thread_id == base::PlatformThread::CurrentId());
-
-  static bool ran_once = false;
-  if (ran_once)
-    return;
-  ran_once = true;
-
-  PasswordStore* store = client->GetPasswordStore();
-  // May be null in tests.
-  if (store) {
-    store->ReportMetrics(client->GetSyncUsername(),
-                         client->IsPasswordSyncEnabled(
-                             password_manager::ONLY_CUSTOM_PASSPHRASE));
-  }
-  UMA_HISTOGRAM_BOOLEAN("PasswordManager.Enabled", password_manager_enabled);
-}
-
 bool ShouldDropSyncCredential() {
   std::string group_name =
       base::FieldTrialList::FindFullName("PasswordManagerDropSyncCredential");
@@ -123,14 +96,10 @@ void PasswordManager::RegisterProfilePrefs(
       prefs::kPasswordManagerSavingEnabled,
       true,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kPasswordManagerAutoSignin, true,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kPasswordManagerAllowShowPasswords, true,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterListPref(prefs::kPasswordManagerGroupsForDomains,
-                             user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kPasswordManagerAutoSignin, true);
+  registry->RegisterBooleanPref(prefs::kPasswordManagerAllowShowPasswords,
+                                true);
+  registry->RegisterListPref(prefs::kPasswordManagerGroupsForDomains);
 }
 
 #if defined(OS_WIN)
@@ -144,63 +113,45 @@ void PasswordManager::RegisterLocalPrefs(PrefRegistrySimple* registry) {
 PasswordManager::PasswordManager(PasswordManagerClient* client)
     : client_(client) {
   DCHECK(client_);
-  saving_passwords_enabled_.Init(prefs::kPasswordManagerSavingEnabled,
-                                 client_->GetPrefs());
-
-  ReportMetrics(*saving_passwords_enabled_, client_);
 }
 
 PasswordManager::~PasswordManager() {
   FOR_EACH_OBSERVER(LoginModelObserver, observers_, OnLoginModelDestroying());
 }
 
-void PasswordManager::SetFormHasGeneratedPassword(
+void PasswordManager::SetHasGeneratedPasswordForForm(
     password_manager::PasswordManagerDriver* driver,
-    const PasswordForm& form) {
-  DCHECK(IsSavingEnabledForCurrentPage());
+    const PasswordForm& form,
+    bool password_is_generated) {
+  DCHECK(client_->IsSavingEnabledForCurrentPage());
 
   for (ScopedVector<PasswordFormManager>::iterator iter =
            pending_login_managers_.begin();
        iter != pending_login_managers_.end(); ++iter) {
     if ((*iter)->DoesManage(form) ==
         PasswordFormManager::RESULT_COMPLETE_MATCH) {
-      (*iter)->SetHasGeneratedPassword();
+      (*iter)->set_has_generated_password(password_is_generated);
       return;
     }
   }
+
+  if (!password_is_generated) {
+    return;
+  }
+
   // If there is no corresponding PasswordFormManager, we create one. This is
   // not the common case, and should only happen when there is a bug in our
   // ability to detect forms.
-  bool ssl_valid = form.origin.SchemeIsSecure();
+  bool ssl_valid = form.origin.SchemeIsCryptographic();
   PasswordFormManager* manager = new PasswordFormManager(
       this, client_, driver->AsWeakPtr(), form, ssl_valid);
   pending_login_managers_.push_back(manager);
-  manager->SetHasGeneratedPassword();
+  manager->set_has_generated_password(true);
   // TODO(gcasto): Add UMA stats to track this.
 }
 
-bool PasswordManager::IsEnabledForCurrentPage() const {
-  bool ssl_errors = client_->DidLastPageLoadEncounterSSLErrors();
-  bool client_check = client_->IsPasswordManagerEnabledForCurrentPage();
-
-  scoped_ptr<BrowserSavePasswordProgressLogger> logger;
-  if (client_->IsLoggingActive()) {
-    logger.reset(new BrowserSavePasswordProgressLogger(client_));
-    logger->LogMessage(Logger::STRING_ENABLED_FOR_CURRENT_PAGE_METHOD);
-    logger->LogBoolean(Logger::STRING_SSL_ERRORS_PRESENT, ssl_errors);
-    logger->LogBoolean(Logger::STRING_CLIENT_CHECK_PRESENT, client_check);
-  }
-
-  return !ssl_errors && client_check;
-}
-
-bool PasswordManager::IsSavingEnabledForCurrentPage() const {
-  return *saving_passwords_enabled_ && !client_->IsOffTheRecord() &&
-         IsEnabledForCurrentPage();
-}
-
 void PasswordManager::ProvisionallySavePassword(const PasswordForm& form) {
-  bool is_saving_enabled = IsSavingEnabledForCurrentPage();
+  bool is_saving_enabled = client_->IsSavingEnabledForCurrentPage();
 
   scoped_ptr<BrowserSavePasswordProgressLogger> logger;
   if (client_->IsLoggingActive()) {
@@ -208,9 +159,6 @@ void PasswordManager::ProvisionallySavePassword(const PasswordForm& form) {
     logger->LogMessage(Logger::STRING_PROVISIONALLY_SAVE_PASSWORD_METHOD);
     logger->LogPasswordForm(Logger::STRING_PROVISIONALLY_SAVE_PASSWORD_FORM,
                             form);
-    logger->LogBoolean(Logger::STRING_IS_SAVING_ENABLED, is_saving_enabled);
-    logger->LogBoolean(Logger::STRING_SSL_ERRORS_PRESENT,
-                       client_->DidLastPageLoadEncounterSSLErrors());
   }
 
   if (!is_saving_enabled) {
@@ -311,7 +259,7 @@ void PasswordManager::ProvisionallySavePassword(const PasswordForm& form) {
 
   PasswordForm provisionally_saved_form(form);
   provisionally_saved_form.ssl_valid =
-      form.origin.SchemeIsSecure() &&
+      form.origin.SchemeIsCryptographic() &&
       !client_->DidLastPageLoadEncounterSSLErrors();
   provisionally_saved_form.preferred = true;
   if (logger) {
@@ -426,7 +374,8 @@ void PasswordManager::CreatePendingLoginManagers(
     logger->LogMessage(Logger::STRING_CREATE_LOGIN_MANAGERS_METHOD);
   }
 
-  if (!IsEnabledForCurrentPage())
+  if (client_->DidLastPageLoadEncounterSSLErrors() ||
+      !client_->IsPasswordManagementEnabledForCurrentPage())
     return;
 
   if (logger) {
@@ -458,7 +407,21 @@ void PasswordManager::CreatePendingLoginManagers(
     if (old_manager_found)
       continue;  // The current form is already managed.
 
-    bool ssl_valid = iter->origin.SchemeIsSecure();
+    UMA_HISTOGRAM_BOOLEAN("PasswordManager.EmptyUsernames.ParsedUsernameField",
+                          iter->username_element.empty());
+
+    // Out of the forms not containing a username field, determine how many
+    // are password change forms.
+    if (iter->username_element.empty()) {
+      UMA_HISTOGRAM_BOOLEAN(
+          "PasswordManager.EmptyUsernames."
+          "FormWithoutUsernameFieldIsPasswordChangeForm",
+          !iter->new_password_element.empty());
+    }
+
+    if (logger)
+      logger->LogFormSignatures(Logger::STRING_ADDING_SIGNATURE, *iter);
+    bool ssl_valid = iter->origin.SchemeIsCryptographic();
     PasswordFormManager* manager = new PasswordFormManager(
         this, client_, driver->AsWeakPtr(), *iter, ssl_valid);
     pending_login_managers_.push_back(manager);
@@ -475,10 +438,46 @@ void PasswordManager::CreatePendingLoginManagers(
   }
 }
 
+bool PasswordManager::CanProvisionalManagerSave() {
+  scoped_ptr<BrowserSavePasswordProgressLogger> logger;
+  if (client_->IsLoggingActive()) {
+    logger.reset(new BrowserSavePasswordProgressLogger(client_));
+    logger->LogMessage(Logger::STRING_CAN_PROVISIONAL_MANAGER_SAVE_METHOD);
+  }
+
+  if (!provisional_save_manager_.get()) {
+    if (logger) {
+      logger->LogMessage(Logger::STRING_NO_PROVISIONAL_SAVE_MANAGER);
+    }
+    return false;
+  }
+
+  if (!provisional_save_manager_->HasCompletedMatching()) {
+    // We have a provisional save manager, but it didn't finish matching yet.
+    // We just give up.
+    RecordFailure(MATCHING_NOT_COMPLETE,
+                  provisional_save_manager_->observed_form().origin,
+                  logger.get());
+    provisional_save_manager_.reset();
+    return false;
+  }
+
+  // Also get out of here if the user told us to 'never remember' passwords for
+  // this form.
+  if (provisional_save_manager_->IsBlacklisted()) {
+    RecordFailure(FORM_BLACKLISTED,
+                  provisional_save_manager_->observed_form().origin,
+                  logger.get());
+    provisional_save_manager_.reset();
+    return false;
+  }
+  return true;
+}
+
 bool PasswordManager::ShouldPromptUserToSavePassword() const {
   return !client_->IsAutomaticPasswordSavingEnabled() &&
          provisional_save_manager_->IsNewLogin() &&
-         !provisional_save_manager_->HasGeneratedPassword() &&
+         !provisional_save_manager_->has_generated_password() &&
          !provisional_save_manager_->IsPendingCredentialsPublicSuffixMatch();
 }
 
@@ -493,34 +492,10 @@ void PasswordManager::OnPasswordFormsRendered(
     logger->LogMessage(Logger::STRING_ON_PASSWORD_FORMS_RENDERED_METHOD);
   }
 
-  if (!provisional_save_manager_.get()) {
-    if (logger) {
-      logger->LogMessage(Logger::STRING_NO_PROVISIONAL_SAVE_MANAGER);
-    }
+  if (!CanProvisionalManagerSave())
     return;
-  }
 
-  if (!provisional_save_manager_->HasCompletedMatching()) {
-    // We have a provisional save manager, but it didn't finish matching yet.
-    // We just give up.
-    RecordFailure(MATCHING_NOT_COMPLETE,
-                  provisional_save_manager_->observed_form().origin,
-                  logger.get());
-    provisional_save_manager_.reset();
-    return;
-  }
-
-  // Also get out of here if the user told us to 'never remember' passwords for
-  // this form.
-  if (provisional_save_manager_->IsBlacklisted()) {
-    RecordFailure(FORM_BLACKLISTED,
-                  provisional_save_manager_->observed_form().origin,
-                  logger.get());
-    provisional_save_manager_.reset();
-    return;
-  }
-
-  DCHECK(IsSavingEnabledForCurrentPage());
+  DCHECK(client_->IsSavingEnabledForCurrentPage());
 
   // If the server throws an internal error, access denied page, page not
   // found etc. after a login attempt, we do not save the credentials.
@@ -546,6 +521,9 @@ void PasswordManager::OnPasswordFormsRendered(
   if (did_stop_loading) {
     if (provisional_save_manager_->pending_credentials().scheme ==
         PasswordForm::SCHEME_HTML) {
+      // Generated passwords should always be saved.
+      if (provisional_save_manager_->has_generated_password())
+        all_visible_forms_.clear();
       for (size_t i = 0; i < all_visible_forms_.size(); ++i) {
         // TODO(vabr): The similarity check is just action equality up to
         // HTTP<->HTTPS substitution for now. If it becomes more complex, it may
@@ -594,12 +572,9 @@ void PasswordManager::OnInPageNavigation(
 
   ProvisionallySavePassword(password_form);
 
-  if (!provisional_save_manager_) {
-    if (logger) {
-      logger->LogMessage(Logger::STRING_NO_PROVISIONAL_SAVE_MANAGER);
-    }
+  if (!CanProvisionalManagerSave())
     return;
-  }
+
   AskUserOrSavePassword();
 }
 
@@ -631,7 +606,7 @@ void PasswordManager::AskUserOrSavePassword() {
       logger->LogMessage(Logger::STRING_DECISION_SAVE);
     provisional_save_manager_->Save();
 
-    if (provisional_save_manager_->HasGeneratedPassword()) {
+    if (provisional_save_manager_->has_generated_password()) {
       client_->AutomaticPasswordSave(provisional_save_manager_.Pass());
     } else {
       provisional_save_manager_.reset();

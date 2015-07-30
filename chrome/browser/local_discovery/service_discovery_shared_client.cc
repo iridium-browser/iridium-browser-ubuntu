@@ -75,10 +75,17 @@ ServiceDiscoverySharedClient::~ServiceDiscoverySharedClient() {
 
 scoped_refptr<ServiceDiscoverySharedClient>
     ServiceDiscoverySharedClient::GetInstance() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   if (g_service_discovery_client)
     return g_service_discovery_client;
+
+#if defined(OS_WIN)
+  if (!g_is_firewall_state_reported) {
+    BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
+                            base::Bind(&ReportFirewallStats));
+  }
+#endif  // OS_WIN
 
 #if defined(OS_MACOSX)
   return ServiceDiscoveryClientMacFactory::CreateInstance();
@@ -97,7 +104,7 @@ void ServiceDiscoverySharedClient::GetInstanceWithoutAlert(
   return callback.Run(result);
 
 #else   // OS_WIN
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   // TODO(vitalybuka): Switch to |ServiceDiscoveryClientMdns| after we find what
   // to do with firewall for user-level installs. crbug.com/366408
   scoped_refptr<ServiceDiscoverySharedClient> result =
@@ -125,7 +132,7 @@ void ServiceDiscoverySharedClient::GetInstanceWithoutAlert(
 
 scoped_refptr<ServiceDiscoverySharedClient>
     ServiceDiscoverySharedClient::GetInstance() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   NOTIMPLEMENTED();
   return NULL;
 }

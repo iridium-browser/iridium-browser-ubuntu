@@ -39,7 +39,6 @@
 #include "core/dom/DocumentLifecycle.h"
 #include "core/dom/DocumentLifecycleNotifier.h"
 #include "core/dom/DocumentLifecycleObserver.h"
-#include "core/dom/DocumentSupplementable.h"
 #include "core/dom/DocumentTiming.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/dom/MutationObserver.h"
@@ -48,6 +47,7 @@
 #include "core/dom/UserActionElementSet.h"
 #include "core/dom/ViewportDescription.h"
 #include "core/dom/custom/CustomElement.h"
+#include "core/fetch/ClientHintsPreferences.h"
 #include "core/frame/DOMTimerCoordinator.h"
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/OriginsUsingFeatures.h"
@@ -108,6 +108,7 @@ class FrameHost;
 class FrameRequestCallback;
 class FrameView;
 class HTMLAllCollection;
+class HTMLBodyElement;
 class HTMLCanvasElement;
 class HTMLCollection;
 class HTMLDialogElement;
@@ -129,6 +130,7 @@ class MediaQueryListListener;
 class MediaQueryMatcher;
 class NodeFilter;
 class NodeIterator;
+class NthIndexCache;
 class Page;
 class PlatformMouseEvent;
 class ProcessingInstruction;
@@ -199,7 +201,7 @@ using DocumentClassFlags = unsigned char;
 
 class Document;
 
-class DocumentVisibilityObserver : public WillBeGarbageCollectedMixin {
+class CORE_EXPORT DocumentVisibilityObserver : public WillBeGarbageCollectedMixin {
 public:
     DocumentVisibilityObserver(Document&);
     virtual ~DocumentVisibilityObserver();
@@ -222,7 +224,7 @@ private:
 };
 
 class CORE_EXPORT Document : public ContainerNode, public TreeScope, public SecurityContext, public ExecutionContext
-    , public DocumentSupplementable, public DocumentLifecycleNotifier {
+    , public WillBeHeapSupplementable<Document>, public DocumentLifecycleNotifier {
     DEFINE_WRAPPERTYPEINFO();
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(Document);
 public:
@@ -281,9 +283,6 @@ public:
 
     bool hasLegacyViewportTag() const { return m_legacyViewportDescription.isLegacyViewportType(); }
 
-    void setReferrerPolicy(ReferrerPolicy);
-    ReferrerPolicy referrerPolicy() const { return m_referrerPolicy; }
-
     String outgoingReferrer();
     String outgoingOrigin() const;
 
@@ -314,11 +313,10 @@ public:
     PassRefPtrWillBeRawPtr<Element> createElementNS(const AtomicString& namespaceURI, const AtomicString& qualifiedName, ExceptionState&);
     PassRefPtrWillBeRawPtr<Element> createElement(const QualifiedName&, bool createdByParser);
 
-    bool regionBasedColumnsEnabled() const;
-
     Element* elementFromPoint(int x, int y) const;
     Vector<Element*> elementsFromPoint(int x, int y) const;
     PassRefPtrWillBeRawPtr<Range> caretRangeFromPoint(int x, int y);
+    Element* scrollingElement();
 
     String readyState() const;
 
@@ -471,9 +469,9 @@ public:
 
     void setupFontBuilder(ComputedStyle& documentStyle);
 
-    bool needsRenderTreeUpdate() const;
-    void updateRenderTreeIfNeeded() { updateRenderTree(NoChange); }
-    void updateRenderTreeForNodeIfNeeded(Node*);
+    bool needsLayoutTreeUpdate() const;
+    void updateLayoutTreeIfNeeded() { updateLayoutTree(NoChange); }
+    void updateLayoutTreeForNodeIfNeeded(Node*);
     void updateLayout();
     enum RunPostLayoutTasks {
         RunPostLayoutTasksAsyhnchronously,
@@ -494,9 +492,8 @@ public:
 
     ResourceFetcher* fetcher() { return m_fetcher.get(); }
 
-    virtual void attach(const AttachContext& = AttachContext()) override;
-    virtual void detach(const AttachContext& = AttachContext()) override;
-    void prepareForDestruction();
+    void attach(const AttachContext& = AttachContext()) override;
+    void detach(const AttachContext& = AttachContext()) override;
 
     // If you have a Document, use layoutView() instead which is faster.
     void layoutObject() const = delete;
@@ -631,6 +628,8 @@ public:
     void setActiveHoverElement(PassRefPtrWillBeRawPtr<Element>);
     Element* activeHoverElement() const { return m_activeHoverElement.get(); }
 
+    Node* hoverNode() const { return m_hoverNode.get(); }
+
     void removeFocusedElementOfSubtree(Node*, bool amongChildrenOnly = false);
     void hoveredNodeDetached(Node*);
     void activeChainNodeDetached(Node*);
@@ -641,7 +640,7 @@ public:
     void setCSSTarget(Element*);
     Element* cssTarget() const { return m_cssTarget; }
 
-    void scheduleRenderTreeUpdateIfNeeded();
+    void scheduleLayoutTreeUpdateIfNeeded();
     bool hasPendingForcedStyleRecalc() const;
 
     void registerNodeList(const LiveNodeListBase*);
@@ -780,7 +779,14 @@ public:
     static bool hasValidNamespaceForElements(const QualifiedName&);
     static bool hasValidNamespaceForAttributes(const QualifiedName&);
 
+    // "body element" as defined by HTML5 (https://html.spec.whatwg.org/multipage/dom.html#the-body-element-2).
+    // That is, the first body or frameset child of the document element.
     HTMLElement* body() const;
+
+    // "HTML body element" as defined by CSSOM View spec (http://dev.w3.org/csswg/cssom-view/#the-html-body-element).
+    // That is, the first body child of the document element.
+    HTMLBodyElement* firstBodyElement() const;
+
     void setBody(PassRefPtrWillBeRawPtr<HTMLElement>, ExceptionState&);
 
     HTMLHeadElement* head() const;
@@ -1056,10 +1062,17 @@ public:
 
     virtual DOMTimerCoordinator* timers() override final;
 
-    virtual v8::Handle<v8::Object> wrap(v8::Handle<v8::Object> creationContext, v8::Isolate*) override;
-    virtual v8::Handle<v8::Object> associateWithWrapper(v8::Isolate*, const WrapperTypeInfo*, v8::Handle<v8::Object> wrapper) override;
+    virtual v8::Local<v8::Object> wrap(v8::Isolate*, v8::Local<v8::Object> creationContext) override;
+    virtual v8::Local<v8::Object> associateWithWrapper(v8::Isolate*, const WrapperTypeInfo*, v8::Local<v8::Object> wrapper) override;
 
     OriginsUsingFeatures::Value& originsUsingFeaturesValue() { return m_originsUsingFeaturesValue; }
+
+    NthIndexCache* nthIndexCache() const { return m_nthIndexCache; }
+
+    bool isPrivilegedContext(String& errorMessage, const PrivilegeContextCheck = StandardPrivilegeCheck) const override;
+
+    void setClientHintsPreferences(const ClientHintsPreferences& preferences) { m_clientHintsPreferences.set(preferences); }
+    const ClientHintsPreferences& clientHintsPreferences() const { return m_clientHintsPreferences; }
 
 protected:
     Document(const DocumentInit&, DocumentClassFlags = DefaultDocumentClass);
@@ -1080,22 +1093,23 @@ protected:
 
 private:
     friend class IgnoreDestructiveWriteCountIncrementer;
+    friend class NthIndexCache;
 
     bool isDocumentFragment() const = delete; // This will catch anyone doing an unnecessary check.
     bool isDocumentNode() const = delete; // This will catch anyone doing an unnecessary check.
     bool isElementNode() const = delete; // This will catch anyone doing an unnecessary check.
 
     ScriptedAnimationController& ensureScriptedAnimationController();
-    virtual SecurityContext& securityContext() override final { return *this; }
+    virtual const SecurityContext& securityContext() const override final { return *this; }
     virtual EventQueue* eventQueue() const override final;
 
-    // FIXME: Rename the StyleRecalc state to RenderTreeUpdate.
+    // FIXME: Rename the StyleRecalc state to LayoutTreeUpdate.
     bool hasPendingStyleRecalc() const { return m_lifecycle.state() == DocumentLifecycle::VisualUpdatePending; }
 
-    bool shouldScheduleRenderTreeUpdate() const;
-    void scheduleRenderTreeUpdate();
+    bool shouldScheduleLayoutTreeUpdate() const;
+    void scheduleLayoutTreeUpdate();
 
-    bool needsFullRenderTreeUpdate() const;
+    bool needsFullLayoutTreeUpdate() const;
 
     void inheritHtmlAndBodyElementStyles(StyleRecalcChange);
 
@@ -1104,8 +1118,9 @@ private:
     void updateUseShadowTreesIfNeeded();
     void evaluateMediaQueryListIfNeeded();
 
-    void updateRenderTree(StyleRecalcChange);
+    void updateLayoutTree(StyleRecalcChange);
     void updateStyle(StyleRecalcChange);
+    void notifyLayoutTreeOfSubtreeChanges();
 
     void detachParser();
 
@@ -1165,12 +1180,13 @@ private:
     bool haveStylesheetsLoaded() const;
 
     void setHoverNode(PassRefPtrWillBeRawPtr<Node>);
-    Node* hoverNode() const { return m_hoverNode.get(); }
 
     using EventFactorySet = HashSet<OwnPtr<EventFactoryBase>>;
     static EventFactorySet& eventFactories();
 
     void updateElementOpacity(const AtomicString& cssSelector, double opacity);
+
+    void setNthIndexCache(NthIndexCache* nthIndexCache) { ASSERT(!m_nthIndexCache || !nthIndexCache); m_nthIndexCache = nthIndexCache; }
 
     DocumentLifecycle m_lifecycle;
 
@@ -1318,6 +1334,14 @@ private:
 
     OwnPtr<SelectorQueryCache> m_selectorQueryCache;
 
+    // It is safe to keep a raw, untraced pointer to this stack-allocated
+    // cache object: it is set upon the cache object being allocated on
+    // the stack and cleared upon leaving its allocated scope. Hence it
+    // is acceptable not to trace it -- should a conservative GC occur,
+    // the cache object's references will be traced by a stack walk.
+    GC_PLUGIN_IGNORE("461878")
+    NthIndexCache* m_nthIndexCache = nullptr;
+
     bool m_useSecureKeyboardEntryWhenActive;
 
     DocumentClassFlags m_documentClasses;
@@ -1397,7 +1421,11 @@ private:
     ParserSynchronizationPolicy m_parserSyncPolicy;
 
     OriginsUsingFeatures::Value m_originsUsingFeaturesValue;
+
+    ClientHintsPreferences m_clientHintsPreferences;
 };
+
+extern template class CORE_TEMPLATE_EXPORT WillBeHeapSupplement<Document>;
 
 inline bool Document::shouldOverrideLegacyDescription(ViewportDescription::Type origin)
 {
@@ -1407,13 +1435,13 @@ inline bool Document::shouldOverrideLegacyDescription(ViewportDescription::Type 
     return origin >= m_legacyViewportDescription.type;
 }
 
-inline void Document::scheduleRenderTreeUpdateIfNeeded()
+inline void Document::scheduleLayoutTreeUpdateIfNeeded()
 {
     // Inline early out to avoid the function calls below.
     if (hasPendingStyleRecalc())
         return;
-    if (shouldScheduleRenderTreeUpdate() && needsRenderTreeUpdate())
-        scheduleRenderTreeUpdate();
+    if (shouldScheduleLayoutTreeUpdate() && needsLayoutTreeUpdate())
+        scheduleLayoutTreeUpdate();
 }
 
 DEFINE_TYPE_CASTS(Document, ExecutionContext, context, context->isDocument(), context.isDocument());
@@ -1440,7 +1468,7 @@ DEFINE_TYPE_CASTS(TreeScope, Document, document, true, true);
 
 #ifndef NDEBUG
 // Outside the WebCore namespace for ease of invocation from gdb.
-void showLiveDocumentInstances();
+CORE_EXPORT void showLiveDocumentInstances();
 #endif
 
 #endif // Document_h

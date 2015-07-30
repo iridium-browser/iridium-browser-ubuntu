@@ -32,15 +32,14 @@ class URLRequestContext;
 // exposes interface for setting SDCH policy.  It should be instantiated by
 // the net/ embedder.
 // TODO(rdsmith): Implement dictionary prioritization.
-class NET_EXPORT SdchOwner : public net::SdchObserver,
-                             public PrefStore::Observer {
+class NET_EXPORT SdchOwner : public SdchObserver, public PrefStore::Observer {
  public:
   static const size_t kMaxTotalDictionarySize;
   static const size_t kMinSpaceForDictionaryFetch;
 
   // Consumer must guarantee that |sdch_manager| and |context| outlive
   // this object.
-  SdchOwner(net::SdchManager* sdch_manager, net::URLRequestContext* context);
+  SdchOwner(SdchManager* sdch_manager, URLRequestContext* context);
   ~SdchOwner() override;
 
   // Enables use of pref persistence.  Note that |pref_store| is owned
@@ -57,12 +56,13 @@ class NET_EXPORT SdchOwner : public net::SdchObserver,
   void SetMinSpaceForDictionaryFetch(size_t min_space_for_dictionary_fetch);
 
   // SdchObserver implementation.
-  void OnDictionaryUsed(SdchManager* manager,
-                        const std::string& server_hash) override;
-  void OnGetDictionary(net::SdchManager* manager,
-                       const GURL& request_url,
+  void OnDictionaryAdded(const GURL& dictionary_url,
+                         const std::string& server_hash) override;
+  void OnDictionaryRemoved(const std::string& server_hash) override;
+  void OnDictionaryUsed(const std::string& server_hash) override;
+  void OnGetDictionary(const GURL& request_url,
                        const GURL& dictionary_url) override;
-  void OnClearDictionaries(net::SdchManager* manager) override;
+  void OnClearDictionaries() override;
 
   // PrefStore::Observer implementation.
   void OnPrefValueChanged(const std::string& key) override;
@@ -76,7 +76,7 @@ class NET_EXPORT SdchOwner : public net::SdchObserver,
                            int use_count,
                            const std::string& dictionary_text,
                            const GURL& dictionary_url,
-                           const net::BoundNetLog& net_log,
+                           const BoundNetLog& net_log,
                            bool was_from_cache);
 
   void SetClockForTesting(scoped_ptr<base::Clock> clock);
@@ -116,9 +116,55 @@ class NET_EXPORT SdchOwner : public net::SdchObserver,
 
   bool IsPersistingDictionaries() const;
 
+  enum DictionaryFate {
+    // A Get-Dictionary header wasn't acted on.
+    DICTIONARY_FATE_GET_IGNORED = 1,
+
+    // A fetch was attempted, but failed.
+    // TODO(rdsmith): Actually record this case.
+    DICTIONARY_FATE_FETCH_FAILED = 2,
+
+    // A successful fetch was dropped on the floor, no space.
+    DICTIONARY_FATE_FETCH_IGNORED_NO_SPACE = 3,
+
+    // A successful fetch was refused by the SdchManager.
+    DICTIONARY_FATE_FETCH_MANAGER_REFUSED = 4,
+
+    // A dictionary was successfully added based on
+    // a Get-Dictionary header in a response.
+    DICTIONARY_FATE_ADD_RESPONSE_TRIGGERED = 5,
+
+    // A dictionary was evicted by an incoming dict.
+    DICTIONARY_FATE_EVICT_FOR_DICT = 6,
+
+    // A dictionary was evicted by memory pressure.
+    DICTIONARY_FATE_EVICT_FOR_MEMORY = 7,
+
+    // A dictionary was evicted on destruction.
+    DICTIONARY_FATE_EVICT_FOR_DESTRUCTION = 8,
+
+    // A dictionary was successfully added based on
+    // persistence from a previous browser revision.
+    DICTIONARY_FATE_ADD_PERSISTENCE_TRIGGERED = 9,
+
+    // A dictionary was unloaded on destruction, but is still present on disk.
+    DICTIONARY_FATE_UNLOAD_FOR_DESTRUCTION = 10,
+
+    DICTIONARY_FATE_MAX = 11
+  };
+
+  void RecordDictionaryFate(DictionaryFate fate);
+
+  // Record the lifetime memory use of a specified dictionary, identified by
+  // server hash.
+  void RecordDictionaryEvictionOrUnload(
+      const std::string& server_hash,
+      size_t size,
+      int use_count, DictionaryFate fate);
+
   // For investigation of http://crbug.com/454198; remove when resolved.
-  base::WeakPtr<net::SdchManager> manager_;
-  scoped_ptr<net::SdchDictionaryFetcher> fetcher_;
+  base::WeakPtr<SdchManager> manager_;
+  scoped_ptr<SdchDictionaryFetcher> fetcher_;
 
   size_t total_dictionary_bytes_;
 
@@ -157,6 +203,18 @@ class NET_EXPORT SdchOwner : public net::SdchObserver,
   // since the UMA histogram for use counts is only supposed to be since last
   // load.
   std::map<std::string, int> use_counts_at_load_;
+
+  // Load times for loaded dictionaries, keyed by server hash. These are used to
+  // track the durations that dictionaries are in memory.
+  std::map<std::string, base::Time> load_times_;
+
+  // Byte-seconds consumed by dictionaries that have been unloaded. These are
+  // stored for later uploading in the SdchOwner destructor.
+  std::vector<int64> consumed_byte_seconds_;
+
+  // Creation time for this SdchOwner object, used for reporting temporal memory
+  // pressure.
+  base::Time creation_time_;
 
   DISALLOW_COPY_AND_ASSIGN(SdchOwner);
 };

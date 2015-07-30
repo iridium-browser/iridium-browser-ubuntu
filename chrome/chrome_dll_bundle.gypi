@@ -101,14 +101,8 @@
     },
   ],
   'variables': {
-    'conditions': [
-      ['branding=="Chrome"', {
-        'theme_dir_name': 'google_chrome',
-      }, {  # else: 'branding!="Chrome"
-        'theme_dir_name': 'chromium',
-      }],
-    ],
     'libpeer_target_type%': 'static_library',
+    'theme_dir_name': '<(branding_path_component)',
   },
   'postbuilds': [
     {
@@ -142,7 +136,6 @@
       'destination': '<(PRODUCT_DIR)/$(CONTENTS_FOLDER_PATH)/Libraries',
       'files': [
         '<(PRODUCT_DIR)/exif.so',
-        '<(PRODUCT_DIR)/ffmpegsumo.so',
       ],
     },
     {

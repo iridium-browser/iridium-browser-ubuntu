@@ -30,6 +30,8 @@
 #ifndef DocumentLoader_h
 #define DocumentLoader_h
 
+#include "core/CoreExport.h"
+#include "core/fetch/ClientHintsPreferences.h"
 #include "core/fetch/RawResource.h"
 #include "core/fetch/ResourceLoaderOptions.h"
 #include "core/fetch/ResourcePtr.h"
@@ -55,7 +57,7 @@ namespace blink {
     class ResourceLoader;
     class ThreadedDataReceiver;
 
-    class DocumentLoader : public RefCounted<DocumentLoader>, private RawResourceClient {
+    class CORE_EXPORT DocumentLoader : public RefCounted<DocumentLoader>, private RawResourceClient {
         WTF_MAKE_FAST_ALLOCATED(DocumentLoader);
     public:
         static PassRefPtr<DocumentLoader> create(LocalFrame* frame, const ResourceRequest& request, const SubstituteData& data)
@@ -124,6 +126,7 @@ namespace blink {
 
         PassRefPtr<ContentSecurityPolicy> releaseContentSecurityPolicy() { return m_contentSecurityPolicy.release(); }
 
+        ClientHintsPreferences& clientHintsPreferences() { return m_clientHintsPreferences; }
 
         struct InitialScrollState {
             InitialScrollState()
@@ -216,6 +219,7 @@ namespace blink {
         OwnPtrWillBePersistent<ApplicationCacheHost> m_applicationCacheHost;
 
         RefPtr<ContentSecurityPolicy> m_contentSecurityPolicy;
+        ClientHintsPreferences m_clientHintsPreferences;
         InitialScrollState m_initialScrollState;
     };
 }

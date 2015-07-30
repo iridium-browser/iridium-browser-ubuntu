@@ -11,9 +11,11 @@
 #include "base/debug/profiler.h"
 #include "base/files/file_util.h"
 #include "base/hash.h"
+#include "base/memory/shared_memory.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/path_service.h"
 #include "base/process/launch.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/trace_event/trace_event.h"
@@ -24,6 +26,7 @@
 #include "content/common/content_switches_internal.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/dwrite_font_platform_win.h"
 #include "content/public/common/sandbox_init.h"
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
 #include "sandbox/win/src/process_mitigations.h"
@@ -58,6 +61,7 @@ const wchar_t* const kTroublesomeDlls[] = {
   L"cmcsyshk.dll",                // CMC Internet Security.
   L"cmsetac.dll",                 // Unknown (suspected malware).
   L"cooliris.dll",                // CoolIris.
+  L"cplushook.dll",               // Unknown (suspected malware).
   L"dockshellhook.dll",           // Stardock Objectdock.
   L"easyhook32.dll",              // GDIPP and others.
   L"esspd.dll",                   // Samsung Smart Security ESCORT.
@@ -353,6 +357,27 @@ bool AddGenericPolicy(sandbox::TargetPolicy* policy) {
                            pdb_path.value().c_str());
   if (result != sandbox::SBOX_ALL_OK)
     return false;
+#endif
+
+#if defined(SANITIZER_COVERAGE)
+  DWORD coverage_dir_size =
+      ::GetEnvironmentVariable(L"SANITIZER_COVERAGE_DIR", NULL, 0);
+  if (coverage_dir_size == 0) {
+    LOG(WARNING) << "SANITIZER_COVERAGE_DIR was not set, coverage won't work.";
+  } else {
+    std::wstring coverage_dir;
+    wchar_t* coverage_dir_str = WriteInto(&coverage_dir, coverage_dir_size);
+    coverage_dir_size = ::GetEnvironmentVariable(
+        L"SANITIZER_COVERAGE_DIR", coverage_dir_str, coverage_dir_size);
+    CHECK(coverage_dir.size() == coverage_dir_size);
+    base::FilePath sancov_path =
+        base::FilePath(coverage_dir).Append(L"*.sancov");
+    result = policy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
+                             sandbox::TargetPolicy::FILES_ALLOW_ANY,
+                             sancov_path.value().c_str());
+    if (result != sandbox::SBOX_ALL_OK)
+      return false;
+  }
 #endif
 
   AddGenericDllEvictionPolicy(policy);
@@ -676,6 +701,22 @@ base::Process StartSandboxedProcess(
                   true,
                   sandbox::TargetPolicy::FILES_ALLOW_READONLY,
                   policy);
+
+      // If DirectWrite is enabled for font rendering then open the font cache
+      // section which is created by the browser and pass the handle to the
+      // renderer process. This is needed because renderer processes on
+      // Windows 8+ may be running in an AppContainer sandbox and hence their
+      // kernel object namespace may be partitioned.
+      std::string name(content::kFontCacheSharedSectionName);
+      name.append(base::UintToString(base::GetCurrentProcId()));
+
+      base::SharedMemory direct_write_font_cache_section;
+      if (direct_write_font_cache_section.Open(name, true)) {
+        void* shared_handle =
+            policy->AddHandleToShare(direct_write_font_cache_section.handle());
+        cmd_line->AppendSwitchASCII(switches::kFontCacheSharedHandle,
+            base::UintToString(reinterpret_cast<unsigned int>(shared_handle)));
+      }
     }
 #endif
   } else {
@@ -728,7 +769,6 @@ base::Process StartSandboxedProcess(
                cmd_line->GetCommandLineString().c_str(),
                policy, &temp_process_info);
   DWORD last_error = ::GetLastError();
-  policy->Release();
   base::win::ScopedProcessInformation target(temp_process_info);
 
   TRACE_EVENT_END_ETW("StartProcessWithAccess::LAUNCHPROCESS", 0, 0);
@@ -747,8 +787,11 @@ base::Process StartSandboxedProcess(
                                   last_error);
     } else
       DLOG(ERROR) << "Failed to launch process. Error: " << result;
+
+    policy->Release();
     return base::Process();
   }
+  policy->Release();
 
   if (delegate)
     delegate->PostSpawnTarget(target.process_handle());

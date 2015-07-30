@@ -46,12 +46,6 @@ AudioDestinationHandler::~AudioDestinationHandler()
     ASSERT(!isInitialized());
 }
 
-void AudioDestinationHandler::dispose()
-{
-    uninitialize();
-    AudioHandler::dispose();
-}
-
 void AudioDestinationHandler::render(AudioBus* sourceBus, AudioBus* destinationBus, size_t numberOfFrames)
 {
     // We don't want denormals slowing down any of the audio processing
@@ -59,7 +53,7 @@ void AudioDestinationHandler::render(AudioBus* sourceBus, AudioBus* destinationB
     // This will take care of all AudioNodes because they all process within this scope.
     DenormalDisabler denormalDisabler;
 
-    context()->handler().setAudioThread(currentThread());
+    context()->deferredTaskHandler().setAudioThread(currentThread());
 
     if (!context()->isInitialized()) {
         destinationBus->zero();
@@ -80,7 +74,7 @@ void AudioDestinationHandler::render(AudioBus* sourceBus, AudioBus* destinationB
     }
     // This will cause the node(s) connected to us to process, which in turn will pull on their input(s),
     // all the way backwards through the rendering graph.
-    AudioBus* renderedBus = input(0)->pull(destinationBus, numberOfFrames);
+    AudioBus* renderedBus = input(0).pull(destinationBus, numberOfFrames);
 
     if (!renderedBus) {
         destinationBus->zero();
@@ -90,7 +84,7 @@ void AudioDestinationHandler::render(AudioBus* sourceBus, AudioBus* destinationB
     }
 
     // Process nodes which need a little extra help because they are not connected to anything, but still need to process.
-    context()->handler().processAutomaticPullNodes(numberOfFrames);
+    context()->deferredTaskHandler().processAutomaticPullNodes(numberOfFrames);
 
     // Let the context take care of any business at the end of each render quantum.
     context()->handlePostRenderTasks();

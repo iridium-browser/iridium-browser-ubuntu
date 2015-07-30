@@ -61,6 +61,12 @@ var whitelistedExtensionIds = [
   '4F4A25F31413D9B9F80E61D096DEB09082515267', // http://crbug.com/470411
   'FBA0DE4D3EFB5485FC03760F01F821466907A743', // http://crbug.com/470411
   'E216473E4D15C5FB14522D32C5F8DEAAB2CECDC6', // http://crbug.com/470411
+  '676A08383D875E51CE4C2308D875AE77199F1413', // http://crbug.com/473845
+  '869A23E11B308AF45A68CC386C36AADA4BE44A01', // http://crbug.com/473845
+  'A4577D8C2AF4CF26F40CBCA83FFA4251D6F6C8F8', // http://crbug.com/478929
+  'A8208CCC87F8261AFAEB6B85D5E8D47372DDEA6B', // http://crbug.com/478929
+  'B620CF4203315F9F2E046EDED22C7571A935958D', // http://crbug.com/510270
+  'B206D8716769728278D2D300349C6CB7D7DE2EF9', // http://crbug.com/510270
 ];
 
 
@@ -121,6 +127,11 @@ function requestFeedbackHandler(request, sender, sendResponse) {
  */
 function startFeedbackUI(feedbackInfo) {
   initialFeedbackInfo = feedbackInfo;
+  var win = chrome.app.window.get('default_window');
+  if (win) {
+    win.show();
+    return;
+  }
   chrome.app.window.create('html/default.html', {
       frame: 'none',
       id: 'default_window',

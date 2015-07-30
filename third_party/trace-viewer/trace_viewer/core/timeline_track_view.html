@@ -20,6 +20,7 @@ found in the LICENSE file.
 <link rel="import" href="/core/timeline_display_transform_animations.html">
 <link rel="import" href="/core/timing_tool.html">
 <link rel="import" href="/core/trace_model/event.html">
+<link rel="import" href="/core/trace_model/x_marker_annotation.html">
 <link rel="import" href="/core/tracks/drawing_container.html">
 <link rel="import" href="/core/tracks/trace_model_track.html">
 <link rel="import" href="/core/tracks/ruler_track.html">
@@ -79,9 +80,11 @@ tv.exportTo('tv.c', function() {
 
     model_: null,
 
-    decorate: function() {
+    decorate: function(timelineView) {
 
       this.classList.add('timeline-track-view');
+
+      this.timelineView_ = timelineView;
 
       this.viewport_ = new Viewport(this);
       this.viewportDisplayTransformAtMouseDown_ = null;
@@ -127,6 +130,7 @@ tv.exportTo('tv.c', function() {
 
       this.bindEventListener_(this, 'dblclick', this.onDblClick_, this);
       this.bindEventListener_(this, 'mousewheel', this.onMouseWheel_, this);
+      this.bindEventListener_(this, 'mousedown', this.onMouseDown_, this);
 
       this.addEventListener('mousemove', this.onMouseMove_);
 
@@ -327,6 +331,8 @@ tv.exportTo('tv.c', function() {
         return false;
       if (document.activeElement instanceof TracingFindControl)
         return false;
+      if (document.activeElement instanceof TracingScriptingControl)
+        return false;
       if (!this.focusElement_)
         return true;
       if (this.focusElement.tabIndex >= 0) {
@@ -489,7 +495,8 @@ tv.exportTo('tv.c', function() {
 
       var selection = new Selection();
       var filter = new tv.c.ExactTitleFilter(this.selection[0].title);
-      this.addAllObjectsMatchingFilterToSelection(filter, selection);
+      this.modelTrack_.addAllObjectsMatchingFilterToSelection(filter,
+                                                              selection);
 
       this.setSelectionAndClearHighlight(selection);
     },
@@ -502,6 +509,55 @@ tv.exportTo('tv.c', function() {
       var zoomScale = Math.pow(1.5, delta);
       this.zoomBy_(zoomScale);
       e.preventDefault();
+    },
+
+    onMouseDown_: function(e) {
+      if (this.mouseModeSelector_.mode !==
+          tv.b.ui.MOUSE_SELECTOR_MODE.SELECTION)
+        return;
+      // Mouse down must start on ruler track for crosshair guide lines to draw.
+      if (e.target !== this.rulerTrack_)
+        return;
+
+      // Make sure we don't start a selection drag event here.
+      this.dragBeginEvent_ = undefined;
+
+      // Remove nav string marker if it exists, since we're clearing the
+      // find control box.
+      if (this.xNavStringMarker_) {
+        this.model.removeAnnotation(this.xNavStringMarker_);
+        this.xNavStringMarker_ = undefined;
+      }
+
+      var dt = this.viewport_.currentDisplayTransform;
+      tv.b.ui.trackMouseMovesUntilMouseUp(function(e) { // Mouse move handler.
+        // If mouse event is on ruler, don't do anything.
+        if (e.target === this.rulerTrack_)
+          return;
+
+        var relativePosition = this.extractRelativeMousePosition_(e);
+        var loc = tv.c.Location.fromViewCoordinates(
+            this.viewport_, relativePosition.x, relativePosition.y);
+        // Not all points on the timeline represents a valid location.
+        // ex. process header tracks, letter dot tracks.
+        if (!loc)
+          return;
+
+        if (this.guideLineAnnotation_ === undefined) {
+          this.guideLineAnnotation_ =
+              new tv.c.trace_model.XMarkerAnnotation(loc.xWorld);
+          this.model.addAnnotation(this.guideLineAnnotation_);
+        } else {
+          this.guideLineAnnotation_.timestamp = loc.xWorld;
+          this.modelTrackContainer_.invalidate();
+        }
+
+        // Set the findcontrol's text to nav string of current state.
+        var state = new tv.c.UIState(loc,
+            this.viewport_.currentDisplayTransform.scaleX);
+        this.timelineView_.setFindCtlText(
+            state.toUserFriendlyString(this.viewport_));
+      }.bind(this));
     },
 
     queueSmoothPan_: function(viewDeltaX, deltaY) {
@@ -608,10 +664,10 @@ tv.exportTo('tv.c', function() {
       this.viewport_.queueDisplayTransformAnimation(animation);
     },
 
-    navToPosition: function(uiState) {
+    navToPosition: function(uiState, showNavLine) {
       var location = uiState.location;
       var scaleX = uiState.scaleX;
-      var track = location.containingTrack;
+      var track = location.getContainingTrack(this.viewport_);
 
       var worldCenter = location.xWorld;
       var viewCenter = this.modelTrackContainer_.canvas.width / 5;
@@ -627,6 +683,27 @@ tv.exportTo('tv.c', function() {
           this.viewport_.currentDisplayTransform.panY,
           zoomInRatio);
       this.viewport_.queueDisplayTransformAnimation(animation);
+
+      if (!showNavLine)
+        return;
+      // Add an X Marker Annotation at the specified timestamp.
+      if (this.xNavStringMarker_)
+        this.model.removeAnnotation(this.xNavStringMarker_);
+      this.xNavStringMarker_ =
+          new tv.c.trace_model.XMarkerAnnotation(worldCenter);
+      this.model.addAnnotation(this.xNavStringMarker_);
+    },
+
+    findTextCleared: function() {
+      if (this.xNavStringMarker_ !== undefined) {
+        this.model.removeAnnotation(this.xNavStringMarker_);
+        this.xNavStringMarker_ = undefined;
+      }
+
+      if (this.guideLineAnnotation_ !== undefined) {
+        this.model.removeAnnotation(this.guideLineAnnotation_);
+        this.guideLineAnnotation_ = undefined;
+      }
     },
 
     setCurrentSelectionAsInterestRange_: function() {
@@ -827,6 +904,7 @@ tv.exportTo('tv.c', function() {
       this.dragBox_.style.width = finalDragBox.width + 'px';
       this.dragBox_.style.top = finalDragBox.top + 'px';
       this.dragBox_.style.height = finalDragBox.height + 'px';
+      this.dragBox_.style.whiteSpace = 'nowrap';
 
       var pixelRatio = window.devicePixelRatio || 1;
       var canv = this.modelTrackContainer_.canvas;
@@ -836,8 +914,7 @@ tv.exportTo('tv.c', function() {
       var hiWX = dt.xViewToWorld(
           (hiX - canv.offsetLeft) * pixelRatio);
 
-      var roundedDuration = Math.round((hiWX - loWX) * 100) / 100;
-      this.dragBox_.textContent = roundedDuration + 'ms';
+      this.dragBox_.textContent = tv.c.analysis.tsString((hiWX - loWX));
 
       var e = new tv.b.Event('selectionChanging');
       e.loWX = loWX;

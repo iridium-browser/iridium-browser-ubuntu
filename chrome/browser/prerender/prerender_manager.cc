@@ -12,26 +12,19 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/logging.h"
-#include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/pref_service.h"
-#include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "base/timer/elapsed_timer.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/net/chrome_cookie_notification_details.h"
 #include "chrome/browser/net/prediction_options.h"
-#include "chrome/browser/predictors/predictor_database.h"
-#include "chrome/browser/predictors/predictor_database_factory.h"
 #include "chrome/browser/prerender/prerender_contents.h"
 #include "chrome/browser/prerender/prerender_field_trial.h"
 #include "chrome/browser/prerender/prerender_final_status.h"
 #include "chrome/browser/prerender/prerender_handle.h"
 #include "chrome/browser/prerender/prerender_histograms.h"
 #include "chrome/browser/prerender/prerender_history.h"
-#include "chrome/browser/prerender/prerender_local_predictor.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/prerender/prerender_tab_helper.h"
 #include "chrome/browser/prerender/prerender_util.h"
@@ -42,7 +35,6 @@
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper_delegate.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/prerender_messages.h"
 #include "chrome/common/prerender_types.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/devtools_agent_host.h"
@@ -59,14 +51,11 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/url_constants.h"
 #include "extensions/common/constants.h"
-#include "net/url_request/url_request_context.h"
-#include "net/url_request/url_request_context_getter.h"
 
 using content::BrowserThread;
 using content::RenderViewHost;
 using content::SessionStorageNamespace;
 using content::WebContents;
-using predictors::LoggedInPredictorTable;
 
 namespace prerender {
 
@@ -118,37 +107,6 @@ bool NeedMatchCompleteDummyForFinalStatus(FinalStatus final_status) {
       final_status != FINAL_STATUS_PAGE_BEING_CAPTURED &&
       final_status != FINAL_STATUS_NAVIGATION_UNCOMMITTED &&
       final_status != FINAL_STATUS_NON_EMPTY_BROWSING_INSTANCE;
-}
-
-void CheckIfCookiesExistForDomainResultOnUIThread(
-    const net::CookieMonster::HasCookiesForETLDP1Callback& callback,
-    bool cookies_exist) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  callback.Run(cookies_exist);
-}
-
-void CheckIfCookiesExistForDomainResultOnIOThread(
-    const net::CookieMonster::HasCookiesForETLDP1Callback& callback,
-    bool cookies_exist) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  BrowserThread::PostTask(
-      BrowserThread::UI,
-      FROM_HERE,
-      base::Bind(&CheckIfCookiesExistForDomainResultOnUIThread,
-                 callback,
-                 cookies_exist));
-}
-
-void CheckIfCookiesExistForDomainOnIOThread(
-    net::URLRequestContextGetter* rq_context,
-    const std::string& domain_key,
-    const net::CookieMonster::HasCookiesForETLDP1Callback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  net::CookieStore* cookie_store =
-      rq_context->GetURLRequestContext()->cookie_store();
-  cookie_store->GetCookieMonster()->HasCookiesForETLDP1Async(
-      domain_key,
-      base::Bind(&CheckIfCookiesExistForDomainResultOnIOThread, callback));
 }
 
 }  // namespace
@@ -236,28 +194,7 @@ PrerenderManager::PrerenderManager(Profile* profile)
   // There are some assumptions that the PrerenderManager is on the UI thread.
   // Any other checks simply make sure that the PrerenderManager is accessed on
   // the same thread that it was created on.
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  if (IsLocalPredictorEnabled())
-    local_predictor_.reset(new PrerenderLocalPredictor(this));
-
-  if (IsLoggedInPredictorEnabled() && !profile_->IsOffTheRecord()) {
-    predictors::PredictorDatabase* predictor_db =
-        predictors::PredictorDatabaseFactory::GetForProfile(profile);
-    if (predictor_db) {
-      logged_in_predictor_table_ = predictor_db->logged_in_table();
-      scoped_ptr<LoggedInStateMap> new_state_map(new LoggedInStateMap);
-      LoggedInStateMap* new_state_map_ptr = new_state_map.get();
-      BrowserThread::PostTaskAndReply(
-          BrowserThread::DB, FROM_HERE,
-          base::Bind(&LoggedInPredictorTable::GetAllData,
-                     logged_in_predictor_table_,
-                     new_state_map_ptr),
-          base::Bind(&PrerenderManager::LoggedInPredictorDataReceived,
-                     AsWeakPtr(),
-                     base::Passed(&new_state_map)));
-    }
-  }
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   // Certain experiments override our default config_ values.
   switch (PrerenderManager::GetMode()) {
@@ -271,10 +208,6 @@ PrerenderManager::PrerenderManager(Profile* profile)
     default:
       break;
   }
-
-  notification_registrar_.Add(
-      this, chrome::NOTIFICATION_COOKIE_CHANGED,
-      content::NotificationService::AllBrowserContextsAndSources());
 
   notification_registrar_.Add(
       this, chrome::NOTIFICATION_PROFILE_DESTROYED,
@@ -302,10 +235,6 @@ PrerenderManager::~PrerenderManager() {
 void PrerenderManager::Shutdown() {
   DestroyAllContents(FINAL_STATUS_MANAGER_SHUTDOWN);
   on_close_web_contents_deleters_.clear();
-  // Must happen before |profile_| is set to NULL as
-  // |local_predictor_| accesses it.
-  if (local_predictor_)
-    local_predictor_->Shutdown();
   profile_ = NULL;
 
   DCHECK(active_prerenders_.empty());
@@ -353,14 +282,6 @@ PrerenderHandle* PrerenderManager::AddPrerenderFromOmnibox(
     return NULL;
   return AddPrerender(ORIGIN_OMNIBOX, url, content::Referrer(), size,
                       session_storage_namespace);
-}
-
-PrerenderHandle* PrerenderManager::AddPrerenderFromLocalPredictor(
-    const GURL& url,
-    SessionStorageNamespace* session_storage_namespace,
-    const gfx::Size& size) {
-  return AddPrerender(ORIGIN_LOCAL_PREDICTOR, url, content::Referrer(),
-                      size, session_storage_namespace);
 }
 
 PrerenderHandle* PrerenderManager::AddPrerenderFromExternalRequest(
@@ -445,9 +366,6 @@ WebContents* PrerenderManager::SwapInternal(
     NOTREACHED();
     return NULL;
   }
-
-  if (IsNoSwapInExperiment(prerender_data->contents()->experiment_id()))
-    return NULL;
 
   if (WebContents* new_web_contents =
       prerender_data->contents()->prerender_contents()) {
@@ -637,7 +555,7 @@ void PrerenderManager::RecordPageLoadTimeNotSwappedIn(
     Origin origin,
     base::TimeDelta page_load_time,
     const GURL& url) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   histograms_->RecordPageLoadTimeNotSwappedIn(origin, page_load_time, url);
 }
 
@@ -647,7 +565,7 @@ void PrerenderManager::RecordPerceivedPageLoadTime(
     base::TimeDelta perceived_page_load_time,
     double fraction_plt_elapsed_at_swap_in,
     const GURL& url) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (!IsEnabled())
     return;
 
@@ -657,9 +575,6 @@ void PrerenderManager::RecordPerceivedPageLoadTime(
   if (navigation_type == NAVIGATION_TYPE_PRERENDERED) {
     histograms_->RecordPercentLoadDoneAtSwapin(
         origin, fraction_plt_elapsed_at_swap_in);
-  }
-  if (local_predictor_) {
-    local_predictor_->OnPLTEventForURL(url, perceived_page_load_time);
   }
 }
 
@@ -706,13 +621,12 @@ bool PrerenderManager::IsPrerenderingPossible() {
 
 // static
 bool PrerenderManager::ActuallyPrerendering() {
-  return IsPrerenderingPossible() && !IsControlGroup(kNoExperiment);
+  return IsPrerenderingPossible() && !IsControlGroup();
 }
 
 // static
-bool PrerenderManager::IsControlGroup(uint8 experiment_id) {
-  return GetMode() == PRERENDER_MODE_EXPERIMENT_CONTROL_GROUP ||
-      IsControlGroupExperiment(experiment_id);
+bool PrerenderManager::IsControlGroup() {
+  return GetMode() == PRERENDER_MODE_EXPERIMENT_CONTROL_GROUP;
 }
 
 // static
@@ -856,7 +770,7 @@ base::DictionaryValue* PrerenderManager::GetAsValue() const {
   dict_value->SetBoolean("omnibox_enabled", IsOmniboxEnabled(profile_));
   // If prerender is disabled via a flag this method is not even called.
   std::string enabled_note;
-  if (IsControlGroup(kNoExperiment))
+  if (IsControlGroup())
     enabled_note += "(Control group: Not actually prerendering) ";
   if (IsNoUseGroup())
     enabled_note += "(No-use group: Not swapping in prerendered pages) ";
@@ -879,13 +793,9 @@ void PrerenderManager::ClearData(int clear_flags) {
 
 void PrerenderManager::RecordFinalStatusWithMatchCompleteStatus(
     Origin origin,
-    uint8 experiment_id,
     PrerenderContents::MatchCompleteStatus mc_status,
     FinalStatus final_status) const {
-  histograms_->RecordFinalStatus(origin,
-                                 experiment_id,
-                                 mc_status,
-                                 final_status);
+  histograms_->RecordFinalStatus(origin, mc_status, final_status);
 }
 
 void PrerenderManager::RecordNavigation(const GURL& url) {
@@ -998,11 +908,8 @@ PrerenderHandle* PrerenderManager::AddPrerender(
 
   GURL url = url_arg;
   GURL alias_url;
-  uint8 experiment = GetQueryStringBasedExperiment(url_arg);
-  if (IsControlGroup(experiment) &&
-      MaybeGetQueryStringBasedAliasURL(url, &alias_url)) {
+  if (IsControlGroup() && MaybeGetQueryStringBasedAliasURL(url, &alias_url))
     url = alias_url;
-  }
 
   // From here on, we will record a FinalStatus so we need to register with the
   // histogram tracking.
@@ -1011,7 +918,7 @@ PrerenderHandle* PrerenderManager::AddPrerender(
   if (PrerenderData* preexisting_prerender_data =
           FindPrerenderData(url, session_storage_namespace)) {
     RecordFinalStatusWithoutCreatingPrerenderContents(
-        url, origin, experiment, FINAL_STATUS_DUPLICATE);
+        url, origin, FINAL_STATUS_DUPLICATE);
     return new PrerenderHandle(preexisting_prerender_data);
   }
 
@@ -1030,7 +937,7 @@ PrerenderHandle* PrerenderManager::AddPrerender(
           profile_, url) &&
       !content::RenderProcessHost::run_renderer_in_process()) {
     RecordFinalStatusWithoutCreatingPrerenderContents(
-        url, origin, experiment, FINAL_STATUS_TOO_MANY_PROCESSES);
+        url, origin, FINAL_STATUS_TOO_MANY_PROCESSES);
     return NULL;
   }
 
@@ -1040,12 +947,12 @@ PrerenderHandle* PrerenderManager::AddPrerender(
     // this doesn't make sense as the next prerender request will be triggered
     // by a navigation and is unlikely to be the same site.
     RecordFinalStatusWithoutCreatingPrerenderContents(
-        url, origin, experiment, FINAL_STATUS_RATE_LIMIT_EXCEEDED);
+        url, origin, FINAL_STATUS_RATE_LIMIT_EXCEEDED);
     return NULL;
   }
 
-  PrerenderContents* prerender_contents = CreatePrerenderContents(
-      url, referrer, origin, experiment);
+  PrerenderContents* prerender_contents = CreatePrerenderContents(url, referrer,
+                                                                  origin);
   DCHECK(prerender_contents);
   active_prerenders_.push_back(
       new PrerenderData(this, prerender_contents,
@@ -1071,10 +978,7 @@ PrerenderHandle* PrerenderManager::AddPrerender(
   prerender_contents->StartPrerendering(contents_size,
                                         session_storage_namespace);
 
-  DCHECK(IsControlGroup(experiment) ||
-         prerender_contents->prerendering_has_started() ||
-         (origin == ORIGIN_LOCAL_PREDICTOR &&
-          IsLocalPredictorPrerenderAlwaysControlEnabled()));
+  DCHECK(IsControlGroup() || prerender_contents->prerendering_has_started());
 
   if (GetMode() == PRERENDER_MODE_EXPERIMENT_MULTI_PRERENDER_GROUP)
     histograms_->RecordConcurrency(active_prerenders_.size());
@@ -1144,10 +1048,7 @@ void PrerenderManager::PostCleanupTask() {
 
 base::TimeTicks PrerenderManager::GetExpiryTimeForNewPrerender(
     Origin origin) const {
-  base::TimeDelta ttl = config_.time_to_live;
-  if (origin == ORIGIN_LOCAL_PREDICTOR)
-    ttl = base::TimeDelta::FromSeconds(GetLocalPredictorTTLSeconds());
-  return GetCurrentTimeTicks() + ttl;
+  return GetCurrentTimeTicks() + config_.time_to_live;
 }
 
 base::TimeTicks PrerenderManager::GetExpiryTimeForNavigatedAwayPrerender()
@@ -1179,11 +1080,10 @@ base::TimeTicks PrerenderManager::GetCurrentTimeTicks() const {
 PrerenderContents* PrerenderManager::CreatePrerenderContents(
     const GURL& url,
     const content::Referrer& referrer,
-    Origin origin,
-    uint8 experiment_id) {
+    Origin origin) {
   DCHECK(CalledOnValidThread());
   return prerender_contents_factory_->CreatePrerenderContents(
-      this, profile_, url, referrer, origin, experiment_id);
+      this, profile_, url, referrer, origin);
 }
 
 void PrerenderManager::SortActivePrerenders() {
@@ -1219,10 +1119,6 @@ bool PrerenderManager::DoesRateLimitAllowPrerender(Origin origin) const {
       GetCurrentTimeTicks() - last_prerender_start_time_;
   histograms_->RecordTimeBetweenPrerenderRequests(origin, elapsed_time);
   if (!config_.rate_limit_enabled)
-    return true;
-  // The LocalPredictor may issue multiple prerenders simultaneously (if so
-  // configured), so no throttling.
-  if (origin == ORIGIN_LOCAL_PREDICTOR)
     return true;
   return elapsed_time >=
       base::TimeDelta::FromMilliseconds(kMinTimeBetweenPrerendersMs);
@@ -1300,36 +1196,23 @@ void PrerenderManager::DestroyAndMarkMatchCompleteAsUsed(
   prerender_contents->set_match_complete_status(
       PrerenderContents::MATCH_COMPLETE_REPLACED);
   histograms_->RecordFinalStatus(prerender_contents->origin(),
-                                 prerender_contents->experiment_id(),
                                  PrerenderContents::MATCH_COMPLETE_REPLACEMENT,
                                  FINAL_STATUS_WOULD_HAVE_BEEN_USED);
   prerender_contents->Destroy(final_status);
 }
 
 void PrerenderManager::RecordFinalStatusWithoutCreatingPrerenderContents(
-    const GURL& url, Origin origin, uint8 experiment_id,
-    FinalStatus final_status) const {
+    const GURL& url, Origin origin, FinalStatus final_status) const {
   PrerenderHistory::Entry entry(url, final_status, origin, base::Time::Now());
   prerender_history_->AddEntry(entry);
   RecordFinalStatusWithMatchCompleteStatus(
-      origin, experiment_id,
-      PrerenderContents::MATCH_COMPLETE_DEFAULT,
-      final_status);
+      origin, PrerenderContents::MATCH_COMPLETE_DEFAULT, final_status);
 }
 
 void PrerenderManager::Observe(int type,
                                const content::NotificationSource& source,
                                const content::NotificationDetails& details) {
   switch (type) {
-    case chrome::NOTIFICATION_COOKIE_CHANGED: {
-      Profile* profile = content::Source<Profile>(source).ptr();
-      if (!profile || !profile_->IsSameProfile(profile) ||
-          profile->IsOffTheRecord()) {
-        return;
-      }
-      CookieChanged(content::Details<ChromeCookieDetails>(details).ptr());
-      break;
-    }
     case chrome::NOTIFICATION_PROFILE_DESTROYED:
       DestroyAllContents(FINAL_STATUS_PROFILE_DESTROYED);
       on_close_web_contents_deleters_.clear();
@@ -1353,109 +1236,6 @@ void PrerenderManager::OnCreatingAudioStream(int render_process_id,
     return;
 
   prerender_contents->Destroy(prerender::FINAL_STATUS_CREATING_AUDIO_STREAM);
-}
-
-void PrerenderManager::RecordLikelyLoginOnURL(const GURL& url) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (!url.SchemeIsHTTPOrHTTPS())
-    return;
-  if (logged_in_predictor_table_.get()) {
-    BrowserThread::PostTask(
-        BrowserThread::DB,
-        FROM_HERE,
-        base::Bind(&LoggedInPredictorTable::AddDomainFromURL,
-                   logged_in_predictor_table_,
-                   url));
-  }
-  std::string key = LoggedInPredictorTable::GetKey(url);
-  if (!logged_in_state_.get())
-    return;
-  if (logged_in_state_->count(key))
-    return;
-  (*logged_in_state_)[key] = base::Time::Now().ToInternalValue();
-}
-
-void PrerenderManager::CheckIfLikelyLoggedInOnURL(
-    const GURL& url,
-    bool* lookup_result,
-    bool* database_was_present,
-    const base::Closure& result_cb) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (!logged_in_predictor_table_.get()) {
-    *database_was_present = false;
-    *lookup_result = false;
-    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, result_cb);
-    return;
-  }
-  BrowserThread::PostTaskAndReply(
-      BrowserThread::DB, FROM_HERE,
-      base::Bind(&LoggedInPredictorTable::HasUserLoggedIn,
-                 logged_in_predictor_table_,
-                 url,
-                 lookup_result,
-                 database_was_present),
-      result_cb);
-}
-
-
-void PrerenderManager::CookieChanged(ChromeCookieDetails* details) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  if (!logged_in_predictor_table_.get())
-    return;
-
-  // We only care when a cookie has been removed.
-  if (!details->removed)
-    return;
-
-  std::string domain_key =
-      LoggedInPredictorTable::GetKeyFromDomain(details->cookie->Domain());
-
-  // If we have no record of this domain as a potentially logged in domain,
-  // nothing to do here.
-  if (logged_in_state_.get() && logged_in_state_->count(domain_key) < 1)
-    return;
-
-  net::URLRequestContextGetter* rq_context = profile_->GetRequestContext();
-  if (!rq_context)
-    return;
-
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      base::Bind(&CheckIfCookiesExistForDomainOnIOThread,
-                 base::Unretained(rq_context),
-                 domain_key,
-                 base::Bind(
-                     &PrerenderManager::CookieChangedAnyCookiesLeftLookupResult,
-                     AsWeakPtr(),
-                     domain_key)
-                 ));
-}
-
-void PrerenderManager::CookieChangedAnyCookiesLeftLookupResult(
-    const std::string& domain_key,
-    bool cookies_exist) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  if (cookies_exist)
-    return;
-
-  if (logged_in_predictor_table_.get()) {
-    BrowserThread::PostTask(BrowserThread::DB,
-                            FROM_HERE,
-                            base::Bind(&LoggedInPredictorTable::DeleteDomain,
-                                       logged_in_predictor_table_,
-                                       domain_key));
-  }
-
-  if (logged_in_state_.get())
-    logged_in_state_->erase(domain_key);
-}
-
-void PrerenderManager::LoggedInPredictorDataReceived(
-    scoped_ptr<LoggedInStateMap> new_map) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  logged_in_state_.swap(new_map);
 }
 
 void PrerenderManager::RecordNetworkBytes(Origin origin,
@@ -1485,7 +1265,7 @@ void PrerenderManager::AddProfileNetworkBytesIfEnabled(int64 bytes) {
 
 void PrerenderManager::AddPrerenderProcessHost(
     content::RenderProcessHost* process_host) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(prerender_process_hosts_.find(process_host) ==
          prerender_process_hosts_.end());
   prerender_process_hosts_.insert(process_host);
@@ -1494,7 +1274,7 @@ void PrerenderManager::AddPrerenderProcessHost(
 
 bool PrerenderManager::MayReuseProcessHost(
     content::RenderProcessHost* process_host) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   // Isolate prerender processes to make the resource monitoring check more
   // accurate.
   return (prerender_process_hosts_.find(process_host) ==
@@ -1503,7 +1283,7 @@ bool PrerenderManager::MayReuseProcessHost(
 
 void PrerenderManager::RenderProcessHostDestroyed(
     content::RenderProcessHost* host) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   size_t erased = prerender_process_hosts_.erase(host);
   DCHECK_EQ(1u, erased);
 }

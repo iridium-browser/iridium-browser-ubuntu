@@ -5,6 +5,8 @@
 #ifndef CONTENT_PUBLIC_BROWSER_PLATFORM_NOTIFICATION_SERVICE_H_
 #define CONTENT_PUBLIC_BROWSER_PLATFORM_NOTIFICATION_SERVICE_H_
 
+#include <stdint.h>
+#include <set>
 #include <string>
 
 #include "base/callback_forward.h"
@@ -61,7 +63,7 @@ class CONTENT_EXPORT PlatformNotificationService {
   // the user. This method must be called on the UI thread.
   virtual void DisplayPersistentNotification(
       BrowserContext* browser_context,
-      int64 service_worker_registration_id,
+      int64_t persistent_notification_id,
       const GURL& origin,
       const SkBitmap& icon,
       const PlatformNotificationData& notification_data) = 0;
@@ -70,7 +72,14 @@ class CONTENT_EXPORT PlatformNotificationService {
   // |persistent_notification_id|. This method must be called on the UI thread.
   virtual void ClosePersistentNotification(
       BrowserContext* browser_context,
-      const std::string& persistent_notification_id) = 0;
+      int64_t persistent_notification_id) = 0;
+
+  // Writes the ids of all currently displaying persistent notifications for the
+  // given |browser_context| to |displayed_notifications|. Returns whether the
+  // platform is able to provide such a set.
+  virtual bool GetDisplayedPersistentNotifications(
+      BrowserContext* browser_context,
+      std::set<std::string>* displayed_notifications) = 0;
 };
 
 }  // namespace content

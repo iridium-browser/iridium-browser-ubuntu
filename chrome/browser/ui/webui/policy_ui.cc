@@ -36,6 +36,7 @@
 #include "components/policy/core/common/policy_namespace.h"
 #include "components/policy/core/common/policy_service.h"
 #include "components/policy/core/common/policy_types.h"
+#include "components/policy/core/common/remote_commands/remote_commands_service.h"
 #include "components/policy/core/common/schema.h"
 #include "components/policy/core/common/schema_map.h"
 #include "components/policy/core/common/schema_registry.h"
@@ -52,6 +53,7 @@
 #include "ui/base/l10n/time_format.h"
 
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_manager_chromeos.h"
 #include "chrome/browser/chromeos/policy/device_local_account_policy_service.h"
@@ -90,6 +92,10 @@ content::WebUIDataSource* CreatePolicyUIHTMLSource() {
   source->AddLocalizedString("labelDomain", IDS_POLICY_LABEL_DOMAIN);
   source->AddLocalizedString("labelUsername", IDS_POLICY_LABEL_USERNAME);
   source->AddLocalizedString("labelClientId", IDS_POLICY_LABEL_CLIENT_ID);
+  source->AddLocalizedString("labelAssetId", IDS_POLICY_LABEL_ASSET_ID);
+  source->AddLocalizedString("labelLocation", IDS_POLICY_LABEL_LOCATION);
+  source->AddLocalizedString("labelDirectoryApiId",
+                             IDS_POLICY_LABEL_DIRECTORY_API_ID);
   source->AddLocalizedString("labelTimeSinceLastRefresh",
                              IDS_POLICY_LABEL_TIME_SINCE_LAST_REFRESH);
   source->AddLocalizedString("labelRefreshInterval",
@@ -113,6 +119,7 @@ content::WebUIDataSource* CreatePolicyUIHTMLSource() {
   source->AddLocalizedString("ok", IDS_POLICY_OK);
   source->AddLocalizedString("unset", IDS_POLICY_UNSET);
   source->AddLocalizedString("unknown", IDS_POLICY_UNKNOWN);
+  source->AddLocalizedString("notSpecified", IDS_POLICY_NOT_SPECIFIED);
 
   source->SetJsonPath("strings.js");
 
@@ -168,6 +175,14 @@ void GetStatusFromCore(const policy::CloudPolicyCore* core,
   const em::PolicyData* policy = store->policy();
   std::string client_id = policy ? policy->device_id() : std::string();
   std::string username = policy ? policy->username() : std::string();
+
+  if (policy && policy->has_annotated_asset_id())
+    dict->SetString("assetId", policy->annotated_asset_id());
+  if (policy && policy->has_annotated_location())
+    dict->SetString("location", policy->annotated_location());
+  if (policy && policy->has_directory_api_id())
+    dict->SetString("directoryApiId", policy->directory_api_id());
+
   base::TimeDelta refresh_interval =
       base::TimeDelta::FromMilliseconds(refresh_scheduler ?
           refresh_scheduler->refresh_delay() :
@@ -365,7 +380,6 @@ class PolicyUIHandler : public content::WebUIMessageHandler,
                        const policy::PolicyMap& current) override;
 
   // policy::SchemaRegistry::Observer implementation.
-  void OnSchemaRegistryReady() override;
   void OnSchemaRegistryUpdated(bool has_new_schemas) override;
 
  private:
@@ -624,10 +638,6 @@ void PolicyUIHandler::OnExtensionUnloaded(
 }
 #endif
 
-// TODO(limasdf): Add default implementation and remove this override.
-void PolicyUIHandler::OnSchemaRegistryReady() {
-}
-
 void PolicyUIHandler::OnSchemaRegistryUpdated(bool has_new_schemas) {
   // Update UI when new schema is added.
   if (has_new_schemas) {
@@ -799,9 +809,22 @@ void PolicyUIHandler::HandleInitialized(const base::ListValue* args) {
 }
 
 void PolicyUIHandler::HandleReloadPolicies(const base::ListValue* args) {
-  GetPolicyService()->RefreshPolicies(
-      base::Bind(&PolicyUIHandler::OnRefreshPoliciesDone,
-                 weak_factory_.GetWeakPtr()));
+#if defined(OS_CHROMEOS)
+  // Allow user to manually fetch remote commands, in case invalidation
+  // service is not working properly.
+  // TODO(binjin): evaluate and possibly remove this after invalidation
+  // service is landed and tested. http://crbug.com/480982
+  policy::BrowserPolicyConnectorChromeOS* connector =
+      g_browser_process->platform_part()->browser_policy_connector_chromeos();
+  policy::RemoteCommandsService* remote_commands_service =
+      connector->GetDeviceCloudPolicyManager()
+          ->core()
+          ->remote_commands_service();
+  if (remote_commands_service)
+    remote_commands_service->FetchRemoteCommands();
+#endif
+  GetPolicyService()->RefreshPolicies(base::Bind(
+      &PolicyUIHandler::OnRefreshPoliciesDone, weak_factory_.GetWeakPtr()));
 }
 
 void PolicyUIHandler::OnRefreshPoliciesDone() const {

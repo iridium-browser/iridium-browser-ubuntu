@@ -49,14 +49,18 @@ class ChromeContentUtilityClient : public content::ContentUtilityClient {
   void OnDecodeImage(const std::vector<unsigned char>& encoded_data,
                      bool shrink_to_fit,
                      int request_id);
+#if defined(OS_CHROMEOS)
   void OnRobustJPEGDecodeImage(const std::vector<unsigned char>& encoded_data,
                                int request_id);
 
-#if defined(OS_CHROMEOS)
   void OnCreateZipFile(const base::FilePath& src_dir,
                        const std::vector<base::FilePath>& src_relative_paths,
                        const base::FileDescriptor& dest_fd);
 #endif  // defined(OS_CHROMEOS)
+
+#if defined(OS_ANDROID) && defined(USE_SECCOMP_BPF)
+  void OnDetectSeccompSupport();
+#endif
 
   void OnParseJSON(const std::string& json);
   void OnPatchFileBsdiff(const base::FilePath& input_file,

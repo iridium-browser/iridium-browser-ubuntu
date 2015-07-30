@@ -15,7 +15,7 @@
 #include "remoting/proto/event.pb.h"
 #include "remoting/protocol/input_event_tracker.h"
 #include "remoting/protocol/input_stub.h"
-#include "ui/events/keycodes/dom4/keycode_converter.h"
+#include "ui/events/keycodes/dom/keycode_converter.h"
 
 namespace remoting {
 
@@ -118,11 +118,13 @@ PepperInputHandler::PepperInputHandler(
       wheel_delta_x_(0),
       wheel_delta_y_(0),
       wheel_ticks_x_(0),
-      wheel_ticks_y_(0) {
+      wheel_ticks_y_(0),
+      detect_stuck_modifiers_(false) {
 }
 
 bool PepperInputHandler::HandleInputEvent(const pp::InputEvent& event) {
-  ReleaseAllIfModifiersStuck(event);
+  if (detect_stuck_modifiers_)
+    ReleaseAllIfModifiersStuck(event);
 
   switch (event.GetType()) {
     // Touch input cases.

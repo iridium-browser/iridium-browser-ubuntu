@@ -16,9 +16,8 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.chrome.browser.ContentSettingsType;
 import org.chromium.chrome.browser.UrlUtilities;
 import org.chromium.chrome.browser.preferences.website.ContentSetting;
+import org.chromium.chrome.browser.preferences.website.ContentSettingException;
 import org.chromium.chrome.browser.preferences.website.GeolocationInfo;
-import org.chromium.chrome.browser.preferences.website.JavaScriptExceptionInfo;
-import org.chromium.chrome.browser.preferences.website.PopupExceptionInfo;
 import org.chromium.chrome.browser.preferences.website.WebsitePreferenceBridge;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService;
 
@@ -44,7 +43,7 @@ public final class PrefServiceBridge {
     public static final int SUPERVISED_USER_FILTERING_BLOCK = 2;
 
     private static final String MIGRATION_PREF_KEY = "PrefMigrationVersion";
-    private static final int MIGRATION_CURRENT_VERSION = 2;
+    private static final int MIGRATION_CURRENT_VERSION = 3;
 
     private static String sProfilePath;
 
@@ -153,6 +152,10 @@ public final class PrefServiceBridge {
             nativeMigrateJavascriptPreference();
         }
         // Step 2 intentionally skipped.
+        if (currentVersion < 3) {
+            nativeMigrateLocationPreference();
+            nativeMigrateProtectedMediaPreference();
+        }
         preferences.edit().putInt(MIGRATION_PREF_KEY, MIGRATION_CURRENT_VERSION).commit();
     }
 
@@ -246,6 +249,53 @@ public final class PrefServiceBridge {
         callback.onGotProfilePath(profilePath);
     }
 
+    /**
+     * Returns whether a particular content setting type is enabled.
+     * @param contentSettingsType The content setting type to check.
+     */
+    public boolean isContentSettingEnabled(int contentSettingsType) {
+        return nativeIsContentSettingEnabled(contentSettingsType);
+    }
+
+    /**
+     * @return whether a particular content setting type is managed by policy.
+     * @param contentSettingsType The content setting type to check.
+     */
+    public boolean isContentSettingManaged(int contentSettingsType) {
+        return nativeIsContentSettingManaged(contentSettingsType);
+    }
+
+    /**
+     * Sets a default value for content setting type.
+     * @param contentSettingsType The content setting type to check.
+     * @param enabled Whether the default value should be disabled or enabled.
+     */
+    public void setContentSettingEnabled(int contentSettingsType, boolean enabled) {
+        nativeSetContentSettingEnabled(contentSettingsType, enabled);
+    }
+
+    /**
+     * Returns all the currently saved exceptions for a given content settings type.
+     * @param contentSettingsType The type to fetch exceptions for.
+     */
+    public List<ContentSettingException> getContentSettingsExceptions(int contentSettingsType) {
+        List<ContentSettingException> list = new ArrayList<ContentSettingException>();
+        nativeGetContentSettingsExceptions(contentSettingsType, list);
+        return list;
+    }
+
+    @CalledByNative
+    private static void addContentSettingExceptionToList(
+            ArrayList<ContentSettingException> list,
+            int contentSettingsType,
+            String pattern,
+            String setting,
+            String source) {
+        ContentSettingException exception = new ContentSettingException(
+                contentSettingsType, pattern, setting, source);
+        list.add(exception);
+    }
+
     public boolean isAcceptCookiesEnabled() {
         return nativeGetAcceptCookiesEnabled();
     }
@@ -295,10 +345,17 @@ public final class PrefServiceBridge {
     }
 
     /**
-     * @return whether geolocation information can be shared with content
+     * @return whether geolocation information can be shared with content.
      */
     public boolean isAllowLocationEnabled() {
         return nativeGetAllowLocationEnabled();
+    }
+
+    /**
+     * @return whether geolocation information access is set to be shared with all sites, by policy.
+     */
+    public boolean isLocationAllowedByPolicy() {
+        return nativeGetLocationAllowedByPolicy();
     }
 
     /**
@@ -339,14 +396,14 @@ public final class PrefServiceBridge {
      * {@link #setJavaScriptEnabled}. The default is true.
      */
     public boolean javaScriptEnabled() {
-        return nativeGetJavaScriptEnabled();
+        return isContentSettingEnabled(ContentSettingsType.CONTENT_SETTINGS_TYPE_JAVASCRIPT);
     }
 
     /**
-     * @return whether JavaScript is managed by policy
+     * @return whether JavaScript is managed by policy.
      */
     public boolean javaScriptManaged() {
-        return nativeGetJavaScriptManaged();
+        return isContentSettingManaged(ContentSettingsType.CONTENT_SETTINGS_TYPE_JAVASCRIPT);
     }
 
     /**
@@ -381,7 +438,7 @@ public final class PrefServiceBridge {
      * Enable or disable JavaScript.
      */
     public void setJavaScriptEnabled(boolean enabled) {
-        nativeSetJavaScriptEnabled(enabled);
+        setContentSettingEnabled(ContentSettingsType.CONTENT_SETTINGS_TYPE_JAVASCRIPT, enabled);
     }
 
     /**
@@ -677,14 +734,14 @@ public final class PrefServiceBridge {
      * @return The setting if popups are enabled
      */
     public boolean popupsEnabled() {
-        return nativeGetAllowPopupsEnabled();
+        return isContentSettingEnabled(ContentSettingsType.CONTENT_SETTINGS_TYPE_POPUPS);
     }
 
     /**
      * @return Whether the setting to allow popups is configured by policy
      */
     public boolean isPopupsManaged() {
-        return nativeGetAllowPopupsManaged();
+        return isContentSettingManaged(ContentSettingsType.CONTENT_SETTINGS_TYPE_POPUPS);
     }
 
     /**
@@ -693,36 +750,86 @@ public final class PrefServiceBridge {
      * @param allow attribute to enable/disable popups
      */
     public void setAllowPopupsEnabled(boolean allow) {
-        nativeSetAllowPopupsEnabled(allow);
+        setContentSettingEnabled(ContentSettingsType.CONTENT_SETTINGS_TYPE_POPUPS, allow);
     }
 
     /**
-     * @return Whether the camera/microphone permission is enabled.
+     * @return Whether the images permission is enabled.
      */
-    public boolean isCameraMicEnabled() {
-        return nativeGetCameraMicEnabled();
+    public boolean imagesEnabled() {
+        return isContentSettingEnabled(ContentSettingsType.CONTENT_SETTINGS_TYPE_IMAGES);
     }
 
     /**
-     * Sets the preferences on whether to enable/disable camera and microphone
+     * @return whether Images is managed by policy
      */
-    public void setCameraMicEnabled(boolean enabled) {
-        nativeSetCameraMicEnabled(enabled);
+    public boolean imagesManaged() {
+        return isContentSettingManaged(ContentSettingsType.CONTENT_SETTINGS_TYPE_IMAGES);
+    }
+
+    /**
+     * Sets whether webpages are allowed to load images.
+     */
+    public void setImagesEnabled(boolean enabled) {
+        setContentSettingEnabled(ContentSettingsType.CONTENT_SETTINGS_TYPE_IMAGES, enabled);
+    }
+
+    /**
+     * @return Whether the camera permission is enabled.
+     */
+    public boolean isCameraEnabled() {
+        return nativeGetCameraEnabled();
+    }
+
+    /**
+     * Sets the preferences on whether to enable/disable camera.
+     */
+    public void setCameraEnabled(boolean enabled) {
+        nativeSetCameraEnabled(enabled);
     }
 
     /**
      * @return Whether the camera/microphone permission is managed
      * by the custodian of the supervised account.
      */
-    public boolean isCameraMicManagedByCustodian() {
-        return nativeGetCameraMicManagedByCustodian();
+    public boolean isCameraManagedByCustodian() {
+        return nativeGetCameraManagedByCustodian();
     }
 
     /**
-     * @return Whether the camera/microphone permission is editable by the user.
+     * @return Whether the camera permission is editable by the user.
      */
-    public boolean isCameraMicUserModifiable() {
-        return nativeGetCameraMicUserModifiable();
+    public boolean isCameraUserModifiable() {
+        return nativeGetCameraUserModifiable();
+    }
+
+    /**
+     * @return Whether the microphone permission is enabled.
+     */
+    public boolean isMicEnabled() {
+        return nativeGetMicEnabled();
+    }
+
+    /**
+     * Sets the preferences on whether to enable/disable microphone.
+     */
+    public void setMicEnabled(boolean enabled) {
+        nativeSetMicEnabled(enabled);
+    }
+
+    /**
+     * @return Whether the microphone permission is managed by the custodian of
+     * the supervised account.
+     */
+    public boolean isMicManagedByCustodian() {
+        return nativeGetMicManagedByCustodian();
+    }
+
+    /**
+     * @return Whether the microphone permission is editable by the user.
+     */
+    public boolean isMicUserModifiable() {
+        return nativeGetMicUserModifiable();
     }
 
     /**
@@ -766,36 +873,6 @@ public final class PrefServiceBridge {
     }
 
     /**
-     * Removes a JavaScript exception.
-     *
-     * @param pattern attribute for the popup exception pattern
-     */
-    public void removeJavaScriptException(String pattern) {
-        nativeSetJavaScriptAllowed(pattern, ContentSetting.DEFAULT.toInt());
-    }
-
-    /**
-     * get all the currently saved JavaScript exceptions.
-     *
-     * @return List of all the exceptions and their settings
-     */
-    public List<JavaScriptExceptionInfo> getJavaScriptExceptions() {
-        List<JavaScriptExceptionInfo> list = new ArrayList<JavaScriptExceptionInfo>();
-        nativeGetJavaScriptExceptions(list);
-        return list;
-    }
-
-    @CalledByNative
-    private static void addJavaScriptExceptionToList(
-            ArrayList<JavaScriptExceptionInfo> list,
-            String pattern,
-            String setting,
-            String source) {
-        JavaScriptExceptionInfo exception = new JavaScriptExceptionInfo(pattern, setting, source);
-        list.add(exception);
-    }
-
-    /**
      * Adds/Edit a popup exception
      *
      * @param pattern attribute for the popup exception pattern
@@ -805,33 +882,6 @@ public final class PrefServiceBridge {
         nativeSetPopupException(pattern, allow
                 ? ContentSetting.ALLOW.toInt()
                 : ContentSetting.BLOCK.toInt());
-    }
-
-    /**
-     * Removes a popup exception
-     *
-     * @param pattern attribute for the popup exception pattern
-     */
-    public void removePopupException(String pattern) {
-        nativeSetPopupException(pattern, ContentSetting.DEFAULT.toInt());
-    }
-
-    /**
-     * get all the currently saved popup exceptions
-     *
-     * @return List of all the exceptions and their settings
-     */
-    public List<PopupExceptionInfo> getPopupExceptions() {
-        List<PopupExceptionInfo> list = new ArrayList<PopupExceptionInfo>();
-        nativeGetPopupExceptions(list);
-        return list;
-    }
-
-    @CalledByNative
-    private static void insertPopupExceptionToList(
-            ArrayList<PopupExceptionInfo> list, String pattern, String setting, String source) {
-        PopupExceptionInfo exception = new PopupExceptionInfo(pattern, setting, source);
-        list.add(exception);
     }
 
     /**
@@ -852,10 +902,10 @@ public final class PrefServiceBridge {
     }
 
     /**
-     * @return whether ForceSafeSearch is set
+     * @return whether ForceGoogleSafeSearch is set
      */
-    public boolean isForceSafeSearch() {
-        return nativeGetForceSafeSearch();
+    public boolean isForceGoogleSafeSearch() {
+        return nativeGetForceGoogleSafeSearch();
     }
 
     /**
@@ -889,6 +939,35 @@ public final class PrefServiceBridge {
         return nativeGetSupervisedUserSecondCustodianProfileImageURL();
     }
 
+    private native boolean nativeIsContentSettingEnabled(int contentSettingType);
+    private native boolean nativeIsContentSettingManaged(int contentSettingType);
+    private native void nativeSetContentSettingEnabled(int contentSettingType, boolean allow);
+    private native void nativeGetContentSettingsExceptions(
+            int contentSettingsType, List<ContentSettingException> list);
+    public native void nativeSetContentSettingForPattern(
+            int contentSettingType, String pattern, int setting);
+
+    /**
+      * @return whether Metrics reporting is enabled.
+      */
+    public boolean isMetricsReportingEnabled() {
+        return nativeGetMetricsReportingEnabled();
+    }
+
+    /**
+     * Sets whether the metrics reporting should be enabled.
+     */
+    public void setMetricsReportingEnabled(boolean enabled) {
+        nativeSetMetricsReportingEnabled(enabled);
+    }
+
+    /**
+     * @return whether the metrics reporting preference has been set by user.
+     */
+    public boolean hasSetMetricsReporting() {
+        return nativeHasSetMetricsReporting();
+    }
+
     private native boolean nativeGetAcceptCookiesEnabled();
     private native boolean nativeGetAcceptCookiesManaged();
     private native boolean nativeGetBlockThirdPartyCookiesEnabled();
@@ -898,13 +977,19 @@ public final class PrefServiceBridge {
     private native boolean nativeGetRememberPasswordsManaged();
     private native boolean nativeGetPasswordManagerAutoSigninManaged();
     private native boolean nativeGetAllowLocationUserModifiable();
+    private native boolean nativeGetLocationAllowedByPolicy();
     private native boolean nativeGetAllowLocationManagedByCustodian();
     private native boolean nativeGetDoNotTrackEnabled();
     private native boolean nativeGetPasswordEchoEnabled();
     private native boolean nativeGetFirstRunEulaAccepted();
-    private native boolean nativeGetJavaScriptManaged();
-    private native boolean nativeGetCameraMicUserModifiable();
-    private native boolean nativeGetCameraMicManagedByCustodian();
+    private native boolean nativeGetCameraEnabled();
+    private native void nativeSetCameraEnabled(boolean allow);
+    private native boolean nativeGetCameraUserModifiable();
+    private native boolean nativeGetCameraManagedByCustodian();
+    private native boolean nativeGetMicEnabled();
+    private native void nativeSetMicEnabled(boolean allow);
+    private native boolean nativeGetMicUserModifiable();
+    private native boolean nativeGetMicManagedByCustodian();
     private native boolean nativeGetFullscreenAllowed();
     private native boolean nativeGetFullscreenManaged();
     private native boolean nativeGetTranslateEnabled();
@@ -917,14 +1002,13 @@ public final class PrefServiceBridge {
     private native boolean nativeGetIncognitoModeManaged();
     private native boolean nativeGetPrintingEnabled();
     private native boolean nativeGetPrintingManaged();
-    private native boolean nativeGetForceSafeSearch();
+    private native boolean nativeGetForceGoogleSafeSearch();
     private native void nativeSetTranslateEnabled(boolean enabled);
     private native void nativeResetTranslateDefaults();
-    private native boolean nativeGetJavaScriptEnabled();
-    private native void nativeSetJavaScriptEnabled(boolean enabled);
     private native void nativeMigrateJavascriptPreference();
+    private native void nativeMigrateLocationPreference();
+    private native void nativeMigrateProtectedMediaPreference();
     private native void nativeSetJavaScriptAllowed(String pattern, int setting);
-    private native void nativeGetJavaScriptExceptions(List<JavaScriptExceptionInfo> list);
     private native void nativeClearBrowsingData(boolean history, boolean cache,
             boolean cookiesAndSiteData, boolean passwords, boolean formData);
     private native boolean nativeCanDeleteBrowsingHistory();
@@ -938,15 +1022,9 @@ public final class PrefServiceBridge {
     private native boolean nativeGetAllowLocationEnabled();
     private native boolean nativeGetPushNotificationsEnabled();
     private native void nativeSetAllowLocationEnabled(boolean allow);
-    private native void nativeSetCameraMicEnabled(boolean allow);
     private native void nativeSetPushNotificationsEnabled(boolean allow);
     private native void nativeSetPasswordEchoEnabled(boolean enabled);
-    private native boolean nativeGetAllowPopupsEnabled();
-    private native boolean nativeGetAllowPopupsManaged();
-    private native void nativeSetAllowPopupsEnabled(boolean allow);
     private native void nativeSetPopupException(String pattern, int setting);
-    private native void nativeGetPopupExceptions(Object list);
-    private native boolean nativeGetCameraMicEnabled();
     private native boolean nativeGetAutologinEnabled();
     private native void nativeSetAutologinEnabled(boolean autologinEnabled);
     private native void nativeSetCrashReporting(boolean reporting);
@@ -976,4 +1054,7 @@ public final class PrefServiceBridge {
     private native String nativeGetSupervisedUserSecondCustodianName();
     private native String nativeGetSupervisedUserSecondCustodianEmail();
     private native String nativeGetSupervisedUserSecondCustodianProfileImageURL();
+    private native boolean nativeGetMetricsReportingEnabled();
+    private native void nativeSetMetricsReportingEnabled(boolean enabled);
+    private native boolean nativeHasSetMetricsReporting();
 }

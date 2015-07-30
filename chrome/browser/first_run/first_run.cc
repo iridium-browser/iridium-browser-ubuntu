@@ -376,9 +376,11 @@ void FirstRunBubbleLauncher::Observe(
   }
 
   if (contents && contents->GetURL().SchemeIs(content::kChromeUIScheme)) {
+#if defined(OS_WIN)
     // Suppress the first run bubble if 'make chrome metro' flow is showing.
     if (contents->GetURL().host() == chrome::kChromeUIMetroFlowHost)
       return;
+#endif
 
     // Suppress the first run bubble if the NTP sync promo bubble is showing
     // or if sign in is in progress.
@@ -549,6 +551,13 @@ void SetupMasterPrefsFromInstallPrefs(
   install_prefs.GetString(
       installer::master_preferences::kDistroSuppressDefaultBrowserPromptPref,
       &out_prefs->suppress_default_browser_prompt_for_version);
+
+  if (install_prefs.GetBool(
+          installer::master_preferences::kDistroWelcomePageOnOSUpgradeEnabled,
+          &value) &&
+      !value) {
+    out_prefs->welcome_page_on_os_upgrade_enabled = false;
+  }
 }
 
 bool GetFirstRunSentinelFilePath(base::FilePath* path) {
@@ -583,7 +592,8 @@ MasterPrefs::MasterPrefs()
       do_import_items(0),
       dont_import_items(0),
       make_chrome_default_for_user(false),
-      suppress_first_run_default_browser_prompt(false) {
+      suppress_first_run_default_browser_prompt(false),
+      welcome_page_on_os_upgrade_enabled(true) {
 }
 
 MasterPrefs::~MasterPrefs() {}
@@ -620,10 +630,7 @@ std::string GetPingDelayPrefName() {
 }
 
 void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterIntegerPref(
-      GetPingDelayPrefName().c_str(),
-      0,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterIntegerPref(GetPingDelayPrefName().c_str(), 0);
 }
 
 bool SetShowFirstRunBubblePref(FirstRunBubbleOptions show_bubble_option) {

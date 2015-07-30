@@ -7,7 +7,6 @@
 
 from __future__ import print_function
 
-import logging
 import multiprocessing
 import os
 import socket
@@ -19,16 +18,20 @@ import urllib2
 import urlparse
 
 from chromite.cbuildbot import constants
+from chromite.cli import command
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import osutils
-from chromite.lib import timeout_util
+from chromite.lib import path_util
 from chromite.lib import remote_access
+from chromite.lib import timeout_util
+from chromite.lib import workspace_lib
 
 
 DEFAULT_PORT = 8080
 
 DEVSERVER_PKG_DIR = os.path.join(constants.SOURCE_ROOT, 'src/platform/dev')
-DEFAULT_STATIC_DIR = cros_build_lib.FromChrootPath(
+DEFAULT_STATIC_DIR = path_util.FromChrootPath(
     os.path.join(constants.SOURCE_ROOT, 'src', 'platform', 'dev', 'static'))
 
 IMAGE_NAME_TO_TYPE = {
@@ -50,6 +53,10 @@ XBUDDY_LOCAL = 'local'
 
 ROOTFS_FILENAME = 'update.gz'
 STATEFUL_FILENAME = 'stateful.tgz'
+
+
+class ImagePathError(Exception):
+  """Raised when the provided path can't be resolved to an image."""
 
 
 def ConvertTranslatedPath(original_path, translated_path):
@@ -107,21 +114,27 @@ def GetXbuddyPath(path):
 
 
 # pylint: disable=import-error
-def GetImagePathWithXbuddy(path, board, static_dir=DEFAULT_STATIC_DIR,
-                           device='<DEVICE>'):
-  """Gets image path using xbuddy.
+def GetImagePathWithXbuddy(path, board, version=None,
+                           static_dir=DEFAULT_STATIC_DIR, lookup_only=False):
+  """Gets image path and resolved XBuddy path using xbuddy.
 
   Ask xbuddy to translate |path|, and if necessary, download and stage the
-  image, then return a translated path to the image.
+  image, then return a translated path to the image. Also returns the resolved
+  XBuddy path, which may be useful for subsequent calls in case the argument is
+  an alias.
 
   Args:
     path: The xbuddy path.
     board: The default board to use if board is not specified in |path|.
+    version: The default version to use if one is not specified in |path|.
     static_dir: Static directory to stage the image in.
-    device: The device specified by the user.
+    lookup_only: Caller only wants to translate the path not download the
+      artifact.
 
   Returns:
-    A translated path to the image: build-id/version/image_name.
+    A tuple consisting of a translated path to the image
+    (build-id/version/image_name) as well as the fully resolved XBuddy path (in
+    the case where |path| is an XBuddy alias).
   """
   # Import xbuddy for translating, downloading and staging the image.
   if not os.path.exists(DEVSERVER_PKG_DIR):
@@ -129,20 +142,28 @@ def GetImagePathWithXbuddy(path, board, static_dir=DEFAULT_STATIC_DIR,
                     'does not exist: %s' % DEVSERVER_PKG_DIR)
   sys.path.append(DEVSERVER_PKG_DIR)
   import xbuddy
+  import cherrypy
 
-  xb = xbuddy.XBuddy(static_dir=static_dir, board=board,
+  # If we are using the progress bar, quiet the logging output of cherrypy.
+  if command.UseProgressBar():
+    cherrypy.log.access_log.setLevel(logging.NOTICE)
+    cherrypy.log.error_log.setLevel(logging.NOTICE)
+
+  xb = xbuddy.XBuddy(static_dir=static_dir, board=board, version=version,
                      log_screen=False)
   path_list = GetXbuddyPath(path).rsplit(os.path.sep)
-
   try:
-    build_id, file_name = xb.Get(path_list)
-    return os.path.join(build_id, file_name)
+    if lookup_only:
+      build_id, file_name = xb.Translate(path_list)
+    else:
+      build_id, file_name = xb.Get(path_list)
+
+    resolved_path, _ = xb.LookupAlias(os.path.sep.join(path_list))
+    return os.path.join(build_id, file_name), resolved_path
   except xbuddy.XBuddyException as e:
     logging.error('Locating image "%s" failed. The path might not be valid or '
-                  'the image might not exist. To get the latest remote image, '
-                  'please run:\ncros flash --board=%s %s remote/latest', path,
-                  board, device)
-    raise ValueError('Cannot locate image %s: %s' % (path, e))
+                  'the image might not exist.', path)
+    raise ImagePathError('Cannot locate image %s: %s' % (path, e))
 
 
 def GenerateXbuddyRequest(path, req_type):
@@ -170,13 +191,15 @@ def GenerateXbuddyRequest(path, req_type):
     raise ValueError('Does not support xbuddy request type %s' % req_type)
 
 
-def TranslatedPathToLocalPath(translated_path, static_dir):
+def TranslatedPathToLocalPath(translated_path, static_dir,
+                              workspace_path=None):
   """Convert the translated path to a local path to the image file.
 
   Args:
     translated_path: the translated xbuddy path
       (e.g., peppy-release/R36-5760.0.0/chromiumos_image).
     static_dir: The static directory used by the devserver.
+    workspace_path: Path to workspace root; None means we don't use one.
 
   Returns:
     A local path to the image file.
@@ -186,12 +209,13 @@ def TranslatedPathToLocalPath(translated_path, static_dir):
   if os.path.exists(real_path):
     return real_path
   else:
-    return cros_build_lib.FromChrootPath(real_path)
+    return path_util.FromChrootPath(real_path, workspace_path=workspace_path)
 
 
 def GetUpdatePayloadsFromLocalPath(path, payload_dir,
                                    src_image_to_delta=None,
-                                   static_dir=DEFAULT_STATIC_DIR):
+                                   static_dir=DEFAULT_STATIC_DIR,
+                                   workspace_path=None):
   """Generates update payloads from a local image path.
 
   This function wraps around ConvertLocalPathToXbuddy and GetUpdatePayloads,
@@ -204,11 +228,14 @@ def GetUpdatePayloadsFromLocalPath(path, payload_dir,
                  log will be copied to |payload_dir|.
     src_image_to_delta: Image used as the base to generate the delta payloads.
     static_dir: Devserver static dir to use.
+    workspace_path: Path to workspace root; None means we don't use one.
   """
 
   with cros_build_lib.ContextManagerStack() as stack:
     image_tempdir = stack.Add(
-        osutils.TempDir, base_dir=cros_build_lib.FromChrootPath('/tmp'),
+        osutils.TempDir,
+        base_dir=path_util.FromChrootPath('/tmp',
+                                          workspace_path=workspace_path),
         prefix='dev_server_wrapper_local_image', sudo_rm=True)
     static_tempdir = stack.Add(osutils.TempDir,
                                base_dir=static_dir,
@@ -221,7 +248,8 @@ def GetUpdatePayloadsFromLocalPath(path, payload_dir,
 
 
 def ConvertLocalPathToXbuddyPath(path, image_tempdir, static_tempdir,
-                                 static_dir=DEFAULT_STATIC_DIR):
+                                 static_dir=DEFAULT_STATIC_DIR,
+                                 workspace_path=None):
   """Converts |path| to an xbuddy path.
 
   This function copies the image into a temprary directory in chroot
@@ -238,6 +266,7 @@ def ConvertLocalPathToXbuddyPath(path, image_tempdir, static_tempdir,
     static_tempdir: osutils.TempDir instance to be symlinked to by the static
                     directory.
     static_dir: Static directory to create the symlink in.
+    workspace_path: Path to workspace root; None means we don't use one.
 
   Returns:
     The xbuddy path for |path|
@@ -249,7 +278,8 @@ def ConvertLocalPathToXbuddyPath(path, image_tempdir, static_tempdir,
   TEMP_IMAGE_TYPE = 'test'
   shutil.copy(path,
               os.path.join(tempdir_path, IMAGE_TYPE_TO_NAME[TEMP_IMAGE_TYPE]))
-  chroot_path = cros_build_lib.ToChrootPath(tempdir_path)
+  chroot_path = path_util.ToChrootPath(tempdir_path,
+                                       workspace_path=workspace_path)
   # Create and link static_dir/local_imagexxxx/link to the image
   # folder, so that xbuddy/devserver can understand the path.
   relative_dir = os.path.join(os.path.basename(static_tempdir.tempdir), 'link')
@@ -261,7 +291,7 @@ def ConvertLocalPathToXbuddyPath(path, image_tempdir, static_tempdir,
 
 def GetUpdatePayloads(path, payload_dir, board=None,
                       src_image_to_delta=None, timeout=60 * 15,
-                      static_dir=DEFAULT_STATIC_DIR):
+                      workspace_path=None, static_dir=DEFAULT_STATIC_DIR):
   """Launch devserver to get the update payloads.
 
   Args:
@@ -271,9 +301,10 @@ def GetUpdatePayloads(path, payload_dir, board=None,
     board: The default board to use when |path| is None.
     src_image_to_delta: Image used as the base to generate the delta payloads.
     timeout: Timeout for launching devserver (seconds).
+    workspace_path: Path to workspace root; None means we don't use one.
     static_dir: Devserver static dir to use.
   """
-  ds = DevServerWrapper(static_dir=static_dir,
+  ds = DevServerWrapper(workspace_path=workspace_path, static_dir=static_dir,
                         src_image=src_image_to_delta, board=board)
   req = GenerateXbuddyRequest(path, 'update')
   logging.info('Starting local devserver to generate/serve payloads...')
@@ -347,7 +378,7 @@ class DevServerWrapper(multiprocessing.Process):
   KILL_TIMEOUT = 10
 
   def __init__(self, static_dir=None, port=None, log_dir=None, src_image=None,
-               board=None):
+               board=None, workspace_path=None):
     """Initialize a DevServerWrapper instance.
 
     Args:
@@ -357,6 +388,7 @@ class DevServerWrapper(multiprocessing.Process):
       src_image: The path to the image to be used as the base to
         generate delta payloads.
       board: Override board to pass to the devserver for xbuddy pathing.
+      workspace_path: Path to workspace root; None means we don't use one.
     """
     super(DevServerWrapper, self).__init__()
     self.devserver_bin = 'start_devserver'
@@ -367,9 +399,11 @@ class DevServerWrapper(multiprocessing.Process):
     self.board = board
     self.tempdir = None
     self.log_dir = log_dir
+    self.workspace_path = workspace_path
     if not self.log_dir:
       self.tempdir = osutils.TempDir(
-          base_dir=cros_build_lib.FromChrootPath('/tmp'),
+          base_dir=path_util.FromChrootPath(
+              '/tmp', workspace_path=self.workspace_path),
           prefix='devserver_wrapper',
           sudo_rm=True)
       self.log_dir = self.tempdir.tempdir
@@ -437,21 +471,25 @@ class DevServerWrapper(multiprocessing.Process):
     """
     # Wipe the payload cache.
     cls.WipePayloadCache(static_dir=static_dir)
-    cros_build_lib.Info('Cleaning up directory %s', static_dir)
+    logging.info('Cleaning up directory %s', static_dir)
     osutils.RmDir(static_dir, ignore_missing=True, sudo=True)
 
   @classmethod
-  def WipePayloadCache(cls, devserver_bin='start_devserver', static_dir=None):
+  def WipePayloadCache(cls, devserver_bin='start_devserver', static_dir=None,
+                       workspace_path=None):
     """Cleans up devserver cache of payloads.
 
     Args:
       devserver_bin: path to the devserver binary.
       static_dir: path to use as the static directory of the devserver instance.
+      workspace_path: Path to workspace root; None means we don't use one.
     """
-    cros_build_lib.Info('Cleaning up previously generated payloads.')
+    logging.info('Cleaning up previously generated payloads.')
     cmd = [devserver_bin, '--clear_cache', '--exit']
     if static_dir:
-      cmd.append('--static_dir=%s' % cros_build_lib.ToChrootPath(static_dir))
+      cmd.append('--static_dir=%s' %
+                 path_util.ToChrootPath(static_dir,
+                                        workspace_path=workspace_path))
 
     cros_build_lib.SudoRunCommand(
         cmd, enter_chroot=True, print_cmd=False, combine_stdout_stderr=True,
@@ -515,27 +553,35 @@ class DevServerWrapper(multiprocessing.Process):
     if os.path.exists(self.log_file):
       osutils.SafeUnlink(self.log_file, sudo=True)
 
+    path_resolver = path_util.ChrootPathResolver(
+        workspace_path=self.workspace_path)
+
     port = self.port if self.port else 0
     cmd = [self.devserver_bin,
-           '--pidfile', cros_build_lib.ToChrootPath(self._pid_file),
-           '--logfile', cros_build_lib.ToChrootPath(self.log_file),
+           '--pidfile', path_resolver.ToChroot(self._pid_file),
+           '--logfile', path_resolver.ToChroot(self.log_file),
            '--port=%d' % port]
 
     if not self.port:
-      cmd.append('--portfile=%s' % cros_build_lib.ToChrootPath(self.port_file))
+      cmd.append('--portfile=%s' % path_resolver.ToChroot(self.port_file))
 
     if self.static_dir:
       cmd.append(
-          '--static_dir=%s' % cros_build_lib.ToChrootPath(self.static_dir))
+          '--static_dir=%s' % path_resolver.ToChroot(self.static_dir))
 
     if self.src_image:
-      cmd.append('--src_image=%s' % cros_build_lib.ToChrootPath(self.src_image))
+      cmd.append('--src_image=%s' % path_resolver.ToChroot(self.src_image))
 
     if self.board:
       cmd.append('--board=%s' % self.board)
 
+    chroot_args = ['--no-ns-pid']
+    if self.workspace_path:
+      chroot_dir = workspace_lib.ChrootPath(self.workspace_path)
+      chroot_args += ['--workspace=%s' % self.workspace_path,
+                      '--chroot=%s' % chroot_dir]
     result = self._RunCommand(
-        cmd, enter_chroot=True, chroot_args=['--no-ns-pid'],
+        cmd, enter_chroot=True, chroot_args=chroot_args,
         cwd=constants.SOURCE_ROOT, error_code_ok=True,
         redirect_stdout=True, combine_stdout_stderr=True)
     if result.returncode != 0:
@@ -732,7 +778,8 @@ You can fix this with one of the following three options:
                                 sub_dir=sub_dir)
 
   @classmethod
-  def WipePayloadCache(cls, devserver_bin='start_devserver', static_dir=None):
+  def WipePayloadCache(cls, devserver_bin='start_devserver', static_dir=None,
+                       workspace_path=None):
     """Cleans up devserver cache of payloads."""
     raise NotImplementedError()
 

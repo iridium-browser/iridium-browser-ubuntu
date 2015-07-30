@@ -19,9 +19,6 @@ class LayoutTestPushMessagingService : public PushMessagingService {
   LayoutTestPushMessagingService();
   ~LayoutTestPushMessagingService() override;
 
-  void SetPermission(const GURL& origin, bool allowed);
-  void ClearPermissions();
-
   // PushMessagingService implementation:
   GURL GetPushEndpoint() override;
   void RegisterFromDocument(
@@ -42,15 +39,13 @@ class LayoutTestPushMessagingService : public PushMessagingService {
       const GURL& requesting_origin,
       const GURL& embedding_origin,
       bool user_visible) override;
+  bool SupportNonVisibleMessages() override;
   void Unregister(const GURL& requesting_origin,
                   int64 service_worker_registration_id,
                   const std::string& sender_id,
                   const UnregisterCallback& callback) override;
 
  private:
-  // Map from origin to permission status.
-  std::map<GURL, blink::WebPushPermissionStatus> permission_map_;
-
   DISALLOW_COPY_AND_ASSIGN(LayoutTestPushMessagingService);
 };
 

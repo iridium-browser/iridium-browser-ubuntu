@@ -21,6 +21,7 @@
 #include "components/search_engines/search_engines_pref_names.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_service.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
@@ -44,6 +45,7 @@ class DefaultSearchPrefMigrationTest : public testing::Test {
   }
 
  private:
+  content::TestBrowserThreadBundle thread_bundle_;
   base::ScopedTempDir temp_dir_;
   scoped_ptr<TestingProfile> profile_;
   scoped_ptr<DefaultSearchManager> default_search_manager_;
@@ -137,7 +139,7 @@ scoped_ptr<TemplateURL> DefaultSearchPrefMigrationTest::CreateKeyword(
     const std::string& keyword,
     const std::string& url) {
   TemplateURLData data;
-  data.short_name = base::ASCIIToUTF16(short_name);
+  data.SetShortName(base::ASCIIToUTF16(short_name));
   data.SetKeyword(base::ASCIIToUTF16(keyword));
   data.SetURL(url);
   scoped_ptr<TemplateURL> t_url(new TemplateURL(data));
@@ -159,7 +161,7 @@ TEST_F(DefaultSearchPrefMigrationTest, MigrateUserSelectedValue) {
       default_search_manager()->GetDefaultSearchEngine(&source);
   ASSERT_TRUE(modern_default);
   EXPECT_EQ(DefaultSearchManager::FROM_USER, source);
-  EXPECT_EQ(t_url->short_name(), modern_default->short_name);
+  EXPECT_EQ(t_url->short_name(), modern_default->short_name());
   EXPECT_EQ(t_url->keyword(), modern_default->keyword());
   EXPECT_EQ(t_url->url(), modern_default->url());
 }
@@ -179,7 +181,7 @@ TEST_F(DefaultSearchPrefMigrationTest, MigrateOnlyOnce) {
       default_search_manager()->GetDefaultSearchEngine(&source);
   ASSERT_TRUE(modern_default);
   EXPECT_EQ(DefaultSearchManager::FROM_USER, source);
-  EXPECT_EQ(t_url->short_name(), modern_default->short_name);
+  EXPECT_EQ(t_url->short_name(), modern_default->short_name());
   EXPECT_EQ(t_url->keyword(), modern_default->keyword());
   EXPECT_EQ(t_url->url(), modern_default->url());
   default_search_manager()->ClearUserSelectedDefaultSearchEngine();
@@ -213,7 +215,7 @@ TEST_F(DefaultSearchPrefMigrationTest, ModernValuePresent) {
       default_search_manager()->GetDefaultSearchEngine(&source);
   ASSERT_TRUE(modern_default);
   EXPECT_EQ(DefaultSearchManager::FROM_USER, source);
-  EXPECT_EQ(t_url2->short_name(), modern_default->short_name);
+  EXPECT_EQ(t_url2->short_name(), modern_default->short_name());
   EXPECT_EQ(t_url2->keyword(), modern_default->keyword());
   EXPECT_EQ(t_url2->url(), modern_default->url());
 }

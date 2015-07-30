@@ -7,12 +7,13 @@
 #include <string>
 
 #include "base/bind.h"
+#include "components/guest_view/common/guest_view_constants.h"
 #include "content/public/child/v8_value_converter.h"
 #include "content/public/renderer/render_view.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_messages.h"
-#include "extensions/common/guest_view/guest_view_constants.h"
 #include "extensions/renderer/guest_view/extensions_guest_view_container.h"
+#include "extensions/renderer/guest_view/guest_view_request.h"
 #include "extensions/renderer/script_context.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebScopedUserGesture.h"
@@ -64,9 +65,8 @@ void GuestViewInternalCustomBindings::AttachGuest(
   CHECK(args.Length() < 4 || args[3]->IsFunction());
 
   int element_instance_id = args[0]->Int32Value();
-  // An element instance ID uniquely identifies a ExtensionsGuestViewContainer.
-  ExtensionsGuestViewContainer* guest_view_container =
-      ExtensionsGuestViewContainer::FromID(element_instance_id);
+  // An element instance ID uniquely identifies a GuestViewContainer.
+  auto guest_view_container = GuestViewContainer::FromID(element_instance_id);
 
   // TODO(fsamuel): Should we be reporting an error if the element instance ID
   // is invalid?
@@ -87,15 +87,13 @@ void GuestViewInternalCustomBindings::AttachGuest(
 
   // Add flag to |params| to indicate that the element size is specified in
   // logical units.
-  params->SetBoolean(guestview::kElementSizeIsLogical, true);
+  params->SetBoolean(guest_view::kElementSizeIsLogical, true);
 
-  linked_ptr<ExtensionsGuestViewContainer::Request> request(
-      new ExtensionsGuestViewContainer::AttachRequest(
-          guest_view_container,
-          guest_instance_id,
-          params.Pass(),
-          args.Length() == 4 ? args[3].As<v8::Function>() :
-              v8::Handle<v8::Function>(),
+  linked_ptr<GuestViewRequest> request(
+      new GuestViewAttachRequest(
+          guest_view_container, guest_instance_id, params.Pass(),
+          args.Length() == 4 ? args[3].As<v8::Function>()
+                             : v8::Local<v8::Function>(),
           args.GetIsolate()));
   guest_view_container->IssueRequest(request);
 
@@ -112,20 +110,18 @@ void GuestViewInternalCustomBindings::DetachGuest(
   CHECK(args.Length() < 2 || args[1]->IsFunction());
 
   int element_instance_id = args[0]->Int32Value();
-  // An element instance ID uniquely identifies a ExtensionsGuestViewContainer.
-  ExtensionsGuestViewContainer* guest_view_container =
-      ExtensionsGuestViewContainer::FromID(element_instance_id);
+  // An element instance ID uniquely identifies a GuestViewContainer.
+  auto guest_view_container = GuestViewContainer::FromID(element_instance_id);
 
   // TODO(fsamuel): Should we be reporting an error if the element instance ID
   // is invalid?
   if (!guest_view_container)
     return;
 
-  linked_ptr<ExtensionsGuestViewContainer::Request> request(
-      new ExtensionsGuestViewContainer::DetachRequest(
-          guest_view_container,
-          args.Length() == 2 ? args[1].As<v8::Function>() :
-              v8::Handle<v8::Function>(),
+  linked_ptr<GuestViewRequest> request(
+      new GuestViewDetachRequest(
+          guest_view_container, args.Length() == 2 ? args[1].As<v8::Function>()
+                                                   : v8::Local<v8::Function>(),
           args.GetIsolate()));
   guest_view_container->IssueRequest(request);
 
@@ -169,8 +165,8 @@ void GuestViewInternalCustomBindings::RegisterDestructionCallback(
   int element_instance_id = args[0]->Int32Value();
   // An element instance ID uniquely identifies a ExtensionsGuestViewContainer
   // within a RenderView.
-  ExtensionsGuestViewContainer* guest_view_container =
-      ExtensionsGuestViewContainer::FromID(element_instance_id);
+  auto guest_view_container = static_cast<ExtensionsGuestViewContainer*>(
+      GuestViewContainer::FromID(element_instance_id));
   if (!guest_view_container)
     return;
 
@@ -192,8 +188,8 @@ void GuestViewInternalCustomBindings::RegisterElementResizeCallback(
   int element_instance_id = args[0]->Int32Value();
   // An element instance ID uniquely identifies a ExtensionsGuestViewContainer
   // within a RenderView.
-  ExtensionsGuestViewContainer* guest_view_container =
-      ExtensionsGuestViewContainer::FromID(element_instance_id);
+  auto guest_view_container = static_cast<ExtensionsGuestViewContainer*>(
+      GuestViewContainer::FromID(element_instance_id));
   if (!guest_view_container)
     return;
 
@@ -209,8 +205,8 @@ void GuestViewInternalCustomBindings::RunWithGesture(
   blink::WebScopedUserGesture user_gesture;
   CHECK_EQ(args.Length(), 1);
   CHECK(args[0]->IsFunction());
-  v8::Handle<v8::Value> no_args;
-  context()->CallFunction(v8::Handle<v8::Function>::Cast(args[0]), 0, &no_args);
+  v8::Local<v8::Value> no_args;
+  context()->CallFunction(v8::Local<v8::Function>::Cast(args[0]), 0, &no_args);
 }
 
 }  // namespace extensions

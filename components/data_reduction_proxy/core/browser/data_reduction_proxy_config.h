@@ -5,6 +5,9 @@
 #ifndef COMPONENTS_DATA_REDUCTION_PROXY_CORE_BROWSER_DATA_REDUCTION_PROXY_CONFIG_H_
 #define COMPONENTS_DATA_REDUCTION_PROXY_CORE_BROWSER_DATA_REDUCTION_PROXY_CONFIG_H_
 
+#include <string>
+
+#include "base/callback.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
@@ -17,24 +20,32 @@
 #include "net/proxy/proxy_config.h"
 #include "net/proxy/proxy_retry_info.h"
 
+class GURL;
+
 namespace base {
-class SingleThreadTaskRunner;
 class TimeDelta;
 }
 
 namespace net {
 class HostPortPair;
 class NetLog;
+class URLFetcher;
 class URLRequest;
+class URLRequestContextGetter;
 class URLRequestStatus;
 }
 
 namespace data_reduction_proxy {
 
+typedef base::Callback<void(const std::string&,
+                            const net::URLRequestStatus&,
+                            int)> FetcherResponseCallback;
+
 class DataReductionProxyConfigValues;
 class DataReductionProxyConfigurator;
-class DataReductionProxyEventStore;
+class DataReductionProxyEventCreator;
 class DataReductionProxyService;
+class SecureProxyChecker;
 struct DataReductionProxyTypeInfo;
 
 // Values of the UMA DataReductionProxy.ProbeURL histogram.
@@ -59,8 +70,29 @@ enum SecureProxyCheckFetchResult {
   // The secure proxy check succeeded, but the proxy was already restricted.
   SUCCEEDED_PROXY_ALREADY_ENABLED,
 
+  // The secure proxy has been disabled on a network change until the check
+  // succeeds.
+  PROXY_DISABLED_BEFORE_CHECK,
+
   // This must always be last.
   SECURE_PROXY_CHECK_FETCH_RESULT_COUNT
+};
+
+// Auto LoFi current status.
+enum AutoLoFiStatus {
+  // Auto LoFi is either off or the current network conditions are not worse
+  // than the ones specified in Auto LoFi field trial parameters.
+  AUTO_LOFI_STATUS_DISABLED = 0,
+
+  // Auto LoFi is off but the current network conditions are worse than the
+  // ones specified in Auto LoFi field trial parameters.
+  AUTO_LOFI_STATUS_OFF,
+
+  // Auto LoFi is on and but the current network conditions are worse than the
+  // ones specified in Auto LoFi field trial parameters.
+  AUTO_LOFI_STATUS_ON,
+
+  AUTO_LOFI_STATUS_LAST = AUTO_LOFI_STATUS_ON
 };
 
 // Central point for holding the Data Reduction Proxy configuration.
@@ -70,25 +102,35 @@ class DataReductionProxyConfig
     : public net::NetworkChangeNotifier::IPAddressObserver {
  public:
   // The caller must ensure that all parameters remain alive for the lifetime
-  // of the |DataReductionProxyConfig| instance, with the exception of |params|
-  // which this instance will own.
+  // of the |DataReductionProxyConfig| instance, with the exception of
+  // |config_values| which is owned by |this|. |io_task_runner| is used to
+  // validate calls on the correct thread. |event_creator| is used for logging
+  // the start and end of a secure proxy check; |net_log| is used to create a
+  // net::BoundNetLog for correlating the start and end of the check.
+  // |config_values| contains the Data Reduction Proxy configuration values.
+  // |configurator| is the target for a configuration update.
   DataReductionProxyConfig(
-      scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
-      scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
       net::NetLog* net_log,
       scoped_ptr<DataReductionProxyConfigValues> config_values,
       DataReductionProxyConfigurator* configurator,
-      DataReductionProxyEventStore* event_store);
+      DataReductionProxyEventCreator* event_creator);
   ~DataReductionProxyConfig() override;
 
-  void SetDataReductionProxyService(
-      base::WeakPtr<DataReductionProxyService> data_reduction_proxy_service);
+  // Performs initialization on the IO thread.
+  void InitializeOnIOThread(const scoped_refptr<net::URLRequestContextGetter>&
+                                url_request_context_getter);
 
-  // This method expects to run on the UI thread. It permits the Data Reduction
-  // Proxy configuration to change based on changes initiated by the user.
-  virtual void SetProxyPrefs(bool enabled,
-                             bool alternative_enabled,
-                             bool at_startup);
+  // Sets the proxy configs, enabling or disabling the proxy according to
+  // the value of |enabled| and |alternative_enabled|. Use the alternative
+  // configuration only if |enabled| and |alternative_enabled| are true. If
+  // |restricted| is true, only enable the fallback proxy. |at_startup| is true
+  // when this method is called from InitDataReductionProxySettings.
+  // TODO(jeremyim): Change enabled/alternative_enabled to be a single enum,
+  // since there are only 3 valid states - also update in
+  // DataReductionProxyIOData.
+  void SetProxyConfig(bool enabled,
+                      bool alternative_enabled,
+                      bool at_startup);
 
   // Provides a mechanism for an external object to force |this| to refresh
   // the Data Reduction Proxy configuration from |config_values_| and apply to
@@ -165,16 +207,11 @@ class DataReductionProxyConfig
   // tied to whether the Data Reduction Proxy is enabled.
   bool promo_allowed() const;
 
- protected:
-  // Sets the proxy configs, enabling or disabling the proxy according to
-  // the value of |enabled| and |alternative_enabled|. Use the alternative
-  // configuration only if |enabled| and |alternative_enabled| are true. If
-  // |restricted| is true, only enable the fallback proxy. |at_startup| is true
-  // when this method is called from InitDataReductionProxySettings.
-  void SetProxyConfigOnIOThread(bool enabled,
-                                bool alternative_enabled,
-                                bool at_startup);
+  // Returns the Auto LoFi status. Enabling LoFi from command line switch has
+  // no effect on Auto LoFi.
+  AutoLoFiStatus GetAutoLoFiStatus() const;
 
+ protected:
   // Writes a warning to the log that is used in backend processing of
   // customer feedback. Virtual so tests can mock it for verification.
   virtual void LogProxyState(bool enabled, bool restricted, bool at_startup);
@@ -198,6 +235,8 @@ class DataReductionProxyConfig
   FRIEND_TEST_ALL_PREFIXES(DataReductionProxyConfigTest,
                            TestOnIPAddressChanged);
   FRIEND_TEST_ALL_PREFIXES(DataReductionProxyConfigTest,
+                           TestOnIPAddressChanged_SecureProxyDisabledByDefault);
+  FRIEND_TEST_ALL_PREFIXES(DataReductionProxyConfigTest,
                            TestSetProxyConfigsHoldback);
   FRIEND_TEST_ALL_PREFIXES(DataReductionProxyConfigTest,
                            AreProxiesBypassed);
@@ -207,25 +246,23 @@ class DataReductionProxyConfig
   // NetworkChangeNotifier::IPAddressObserver:
   void OnIPAddressChanged() override;
 
-  // Performs initialization on the IO thread.
-  void InitOnIOThread();
-
   // Updates the Data Reduction Proxy configurator with the current config.
   virtual void UpdateConfigurator(bool enabled,
                                   bool alternative_enabled,
                                   bool restricted,
                                   bool at_startup);
 
-  // Begins a secure proxy check to determine if the Data Reduction Proxy is
-  // permitted to use the HTTPS proxy servers.
-  void StartSecureProxyCheck();
+  // Requests the given |secure_proxy_check_url|. Upon completion, returns the
+  // results to the caller via the |fetcher_callback|. Virtualized for unit
+  // testing.
+  virtual void SecureProxyCheck(const GURL& secure_proxy_check_url,
+                                FetcherResponseCallback fetcher_callback);
 
   // Parses the secure proxy check responses and appropriately configures the
   // Data Reduction Proxy rules.
-  virtual void HandleSecureProxyCheckResponse(
-      const std::string& response, const net::URLRequestStatus& status);
-  virtual void HandleSecureProxyCheckResponseOnIOThread(
-      const std::string& response, const net::URLRequestStatus& status);
+  void HandleSecureProxyCheckResponse(const std::string& response,
+                                      const net::URLRequestStatus& status,
+                                      int http_response_code);
 
   // Adds the default proxy bypass rules for the Data Reduction Proxy.
   void AddDefaultProxyBypassRules();
@@ -247,7 +284,24 @@ class DataReductionProxyConfig
       bool is_https,
       base::TimeDelta* min_retry_delay) const;
 
-  bool restricted_by_carrier_;
+  // Returns true if this client is part of LoFi enabled field trial.
+  // Virtualized for mocking.
+  virtual bool IsIncludedInLoFiEnabledFieldTrial() const;
+
+  // Returns true if this client is part of LoFi control field trial.
+  // Virtualized for mocking.
+  virtual bool IsIncludedInLoFiControlFieldTrial() const;
+
+  // Returns true if current network conditions are worse than the ones
+  // specified in the enabled or control field trial group parameters.
+  // Virtualized for mocking.
+  virtual bool IsNetworkBad() const;
+
+  scoped_ptr<SecureProxyChecker> secure_proxy_checker_;
+
+  // Indicates if the secure Data Reduction Proxy can be used or not.
+  bool secure_proxy_allowed_;
+
   bool disabled_on_vpn_;
   bool unreachable_;
   bool enabled_by_user_;
@@ -255,14 +309,6 @@ class DataReductionProxyConfig
 
   // Contains the configuration data being used.
   scoped_ptr<DataReductionProxyConfigValues> config_values_;
-
-  // |io_task_runner_| should be the task runner for running operations on the
-  // IO thread.
-  scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
-
-  // |ui_task_runner_| should be the task runner for running operations on the
-  // UI thread.
-  scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner_;
 
   // The caller must ensure that the |net_log_|, if set, outlives this instance.
   // It is used to create new instances of |bound_net_log_| on secure proxy
@@ -275,15 +321,11 @@ class DataReductionProxyConfig
   // The caller must ensure that the |configurator_| outlives this instance.
   DataReductionProxyConfigurator* configurator_;
 
-  // The caller must ensure that the |event_store_| outlives this instance.
-  DataReductionProxyEventStore* event_store_;
+  // The caller must ensure that the |event_creator_| outlives this instance.
+  DataReductionProxyEventCreator* event_creator_;
 
+  // Enforce usage on the IO thread.
   base::ThreadChecker thread_checker_;
-
-  // A weak pointer to a |DataReductionProxyService| to perform secure proxy
-  // checks. The weak pointer is required since the |DataReductionProxyService|
-  // is destroyed before this instance of the |DataReductionProxyConfig|.
-  base::WeakPtr<DataReductionProxyService> data_reduction_proxy_service_;
 
   DISALLOW_COPY_AND_ASSIGN(DataReductionProxyConfig);
 };

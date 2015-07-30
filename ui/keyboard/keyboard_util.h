@@ -52,14 +52,11 @@ enum KeyboardShowOverride {
   KEYBOARD_SHOW_OVERRIDE_NONE,
 };
 
-// Gets the default keyboard bounds from |window_bounds|.
-KEYBOARD_EXPORT gfx::Rect DefaultKeyboardBoundsFromWindowBounds(
-    const gfx::Rect& window_bounds);
-
-// Gets the caculated keyboard bounds from |window_bounds|. The keyboard height
-// is specified by |keyboard_height|.
-KEYBOARD_EXPORT gfx::Rect KeyboardBoundsFromWindowBounds(
-    const gfx::Rect& window_bounds, int keyboard_height);
+// Gets the caculated keyboard bounds from |root_bounds|. The keyboard height
+// is specified by |keyboard_height|. This should be only called when keyboard
+// is in FULL_WDITH mode.
+KEYBOARD_EXPORT gfx::Rect FullWidthKeyboardBoundsFromRootBounds(
+    const gfx::Rect& root_bounds, int keyboard_height);
 
 // Sets the state of the a11y onscreen keyboard.
 KEYBOARD_EXPORT void SetAccessibilityKeyboardEnabled(bool enabled);
@@ -96,14 +93,20 @@ KEYBOARD_EXPORT bool IsInputViewEnabled();
 // Returns true if experimental features are enabled for IME input-views.
 KEYBOARD_EXPORT bool IsExperimentalInputViewEnabled();
 
+// Returns true if floating virtual keyboard feature is enabled.
+KEYBOARD_EXPORT bool IsFloatingVirtualKeyboardEnabled();
+
 // Returns true if gesture typing is enabled for virtual keyboard.
 KEYBOARD_EXPORT bool IsGestureTypingEnabled();
 
-// Returns true if gesture deletion is enabled for virtual keyboard.
-KEYBOARD_EXPORT bool IsGestureDeletionEnabled();
+// Returns true if gesture editing option is enabled for virtual keyboard.
+KEYBOARD_EXPORT bool IsGestureEditingEnabled();
 
-// Returns true if gesture selection is enabled for virtual keyboard.
-KEYBOARD_EXPORT bool IsGestureSelectionEnabled();
+// Returns true if material design is enabled for the keyboard.
+KEYBOARD_EXPORT bool IsMaterialDesignEnabled();
+
+// Returns true if voice input is enabled for the keyboard.
+KEYBOARD_EXPORT bool IsVoiceInputEnabled();
 
 // Insert |text| into the active TextInputClient if there is one. Returns true
 // if |text| was successfully inserted.

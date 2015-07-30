@@ -9,6 +9,7 @@
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/sparse_histogram.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/values.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_errors.h"
@@ -33,7 +34,6 @@ SSLSocketParams::SSLSocketParams(
     const SSLConfig& ssl_config,
     PrivacyMode privacy_mode,
     int load_flags,
-    bool force_spdy_over_ssl,
     bool want_spdy_over_npn)
     : direct_params_(direct_params),
       socks_proxy_params_(socks_proxy_params),
@@ -42,7 +42,6 @@ SSLSocketParams::SSLSocketParams(
       ssl_config_(ssl_config),
       privacy_mode_(privacy_mode),
       load_flags_(load_flags),
-      force_spdy_over_ssl_(force_spdy_over_ssl),
       want_spdy_over_npn_(want_spdy_over_npn),
       ignore_limits_(false) {
   if (direct_params_.get()) {
@@ -164,6 +163,10 @@ void SSLConnectJob::GetAdditionalErrorState(ClientSocketHandle* handle) {
   handle->set_ssl_error_response_info(error_response_info_);
   if (!connect_timing_.ssl_start.is_null())
     handle->set_is_ssl_error(true);
+  if (ssl_socket_)
+    handle->set_ssl_failure_state(ssl_socket_->GetSSLFailureState());
+
+  handle->set_connection_attempts(connection_attempts_);
 }
 
 void SSLConnectJob::OnIOComplete(int result) {
@@ -230,8 +233,11 @@ int SSLConnectJob::DoTransportConnect() {
 }
 
 int SSLConnectJob::DoTransportConnectComplete(int result) {
-  if (result == OK)
+  connection_attempts_ = transport_socket_handle_->connection_attempts();
+  if (result == OK) {
     next_state_ = STATE_SSL_CONNECT;
+    transport_socket_handle_->socket()->GetPeerAddress(&server_address_);
+  }
 
   return result;
 }
@@ -327,44 +333,23 @@ int SSLConnectJob::DoSSLConnectComplete(int result) {
 
   connect_timing_.ssl_end = base::TimeTicks::Now();
 
-  SSLClientSocket::NextProtoStatus status =
-      SSLClientSocket::kNextProtoUnsupported;
-  std::string proto;
-  // GetNextProto will fail and and trigger a NOTREACHED if we pass in a socket
-  // that hasn't had SSL_ImportFD called on it. If we get a certificate error
-  // here, then we know that we called SSL_ImportFD.
-  if (result == OK || IsCertificateError(result)) {
-    status = ssl_socket_->GetNextProto(&proto);
-    ssl_socket_->RecordNegotiationExtension();
+  if (result != OK && !server_address_.address().empty()) {
+    connection_attempts_.push_back(ConnectionAttempt(server_address_, result));
+    server_address_ = IPEndPoint();
   }
 
-  // If we want spdy over npn, make sure it succeeded.
-  if (status == SSLClientSocket::kNextProtoNegotiated) {
-    ssl_socket_->set_was_npn_negotiated(true);
-    NextProto protocol_negotiated =
-        SSLClientSocket::NextProtoFromString(proto);
-    ssl_socket_->set_protocol_negotiated(protocol_negotiated);
-    // If we negotiated a SPDY version, it must have been present in
-    // SSLConfig::next_protos.
-    // TODO(mbelshe): Verify this.
-    if (protocol_negotiated >= kProtoSPDYMinimumVersion &&
-        protocol_negotiated <= kProtoSPDYMaximumVersion) {
-      ssl_socket_->set_was_spdy_negotiated(true);
-    }
-  }
-  if (params_->want_spdy_over_npn() && !ssl_socket_->was_spdy_negotiated())
+  // If we want SPDY over ALPN/NPN, make sure it succeeded.
+  if (params_->want_spdy_over_npn() &&
+      !NextProtoIsSPDY(ssl_socket_->GetNegotiatedProtocol())) {
     return ERR_NPN_NEGOTIATION_FAILED;
-
-  // Spdy might be turned on by default, or it might be over npn.
-  bool using_spdy = params_->force_spdy_over_ssl() ||
-      params_->want_spdy_over_npn();
+  }
 
   if (result == OK ||
       ssl_socket_->IgnoreCertError(result, params_->load_flags())) {
     DCHECK(!connect_timing_.ssl_start.is_null());
     base::TimeDelta connect_duration =
         connect_timing_.ssl_end - connect_timing_.ssl_start;
-    if (using_spdy) {
+    if (params_->want_spdy_over_npn()) {
       UMA_HISTOGRAM_CUSTOM_TIMES("Net.SpdyConnectionLatency_2",
                                  connect_duration,
                                  base::TimeDelta::FromMilliseconds(1),

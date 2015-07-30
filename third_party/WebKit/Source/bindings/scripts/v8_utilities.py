@@ -37,7 +37,6 @@ from idl_types import IdlTypeBase
 import idl_types
 from idl_definitions import Exposure, IdlInterface
 from v8_globals import includes
-import v8_types
 
 ACRONYMS = [
     'CSSOM',  # must come *before* CSS to match full acronym
@@ -132,7 +131,7 @@ def scoped_name(interface, definition, base_name):
 
 
 def v8_class_name(interface):
-    return v8_types.v8_type(interface.name)
+    return 'V8' + interface.name
 
 
 def v8_class_name_or_partial(interface):
@@ -372,15 +371,6 @@ def measure_as(definition_or_member, interface):
             measure_as_name = '%s_%s' % (capitalize(interface.name), measure_as_name)
         return lambda suffix: 'V8%s_%s' % (measure_as_name, suffix)
     return None
-
-
-# [PerContextEnabled]
-def per_context_enabled_function_name(definition_or_member):
-    extended_attributes = definition_or_member.extended_attributes
-    if 'PerContextEnabled' not in extended_attributes:
-        return None
-    feature_name = extended_attributes['PerContextEnabled']
-    return 'ContextFeatures::%sEnabled' % uncapitalize(feature_name)
 
 
 # [RuntimeEnabled]

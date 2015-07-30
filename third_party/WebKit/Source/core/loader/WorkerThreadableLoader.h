@@ -35,6 +35,7 @@
 #include "core/loader/ThreadableLoaderClient.h"
 #include "core/loader/ThreadableLoaderClientWrapper.h"
 #include "platform/heap/Handle.h"
+#include "platform/weborigin/Referrer.h"
 #include "wtf/PassOwnPtr.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/RefPtr.h"
@@ -87,7 +88,7 @@ namespace blink {
         class MainThreadBridge final : public ThreadableLoaderClient {
         public:
             // All executed on the worker context's thread.
-            MainThreadBridge(PassRefPtr<ThreadableLoaderClientWrapper>, PassOwnPtr<ThreadableLoaderClient>, PassRefPtr<WorkerLoaderProxy>, const ResourceRequest&, const ThreadableLoaderOptions&, const ResourceLoaderOptions&, const String& outgoingReferrer);
+            MainThreadBridge(PassRefPtr<ThreadableLoaderClientWrapper>, PassOwnPtr<ThreadableLoaderClient>, PassRefPtr<WorkerLoaderProxy>, const ResourceRequest&, const ThreadableLoaderOptions&, const ResourceLoaderOptions&, const ReferrerPolicy, const String& outgoingReferrer);
             void overrideTimeout(unsigned long timeoutMilliseconds);
             void cancel();
             void destroy();
@@ -97,12 +98,12 @@ namespace blink {
             void clearClientWrapper();
 
             // All executed on the main thread.
-            static void mainThreadDestroy(ExecutionContext*, MainThreadBridge*);
+            void mainThreadDestroy(ExecutionContext*);
             virtual ~MainThreadBridge();
 
-            static void mainThreadCreateLoader(ExecutionContext*, MainThreadBridge*, PassOwnPtr<CrossThreadResourceRequestData>, ThreadableLoaderOptions, ResourceLoaderOptions, const String& outgoingReferrer);
-            static void mainThreadOverrideTimeout(ExecutionContext*, MainThreadBridge*, unsigned long timeoutMilliseconds);
-            static void mainThreadCancel(ExecutionContext*, MainThreadBridge*);
+            void mainThreadCreateLoader(PassOwnPtr<CrossThreadResourceRequestData>, ThreadableLoaderOptions, ResourceLoaderOptions, const ReferrerPolicy, const String& outgoingReferrer, ExecutionContext*);
+            void mainThreadOverrideTimeout(unsigned long timeoutMilliseconds, ExecutionContext*);
+            void mainThreadCancel(ExecutionContext*);
             virtual void didSendData(unsigned long long bytesSent, unsigned long long totalBytesToBeSent) override;
             virtual void didReceiveResponse(unsigned long identifier, const ResourceResponse&, PassOwnPtr<WebDataConsumerHandle>) override;
             virtual void didReceiveData(const char*, unsigned dataLength) override;

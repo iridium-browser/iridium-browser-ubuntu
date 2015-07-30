@@ -35,7 +35,7 @@
 
 class GrContext;
 class SkBitmap;
-struct FrameMsg_NewFrame_WidgetParams;
+struct FrameMsg_NewFrame_Params;
 struct ViewMsg_New_Params;
 struct WorkerProcessMsg_CreateWorker_Params;
 
@@ -70,6 +70,10 @@ class AudioHardwareConfig;
 class GpuVideoAcceleratorFactories;
 }
 
+namespace scheduler {
+class RendererScheduler;
+}
+
 namespace v8 {
 class Extension;
 }
@@ -102,7 +106,6 @@ class PeerConnectionTracker;
 class RenderProcessObserver;
 class RendererBlinkPlatformImpl;
 class RendererDemuxerAndroid;
-class RendererScheduler;
 class ResourceDispatchThrottler;
 class ResourceSchedulingFilter;
 class V8SamplingProfiler;
@@ -197,7 +200,7 @@ class CONTENT_EXPORT RenderThreadImpl
   scoped_refptr<base::SingleThreadTaskRunner>
   GetCompositorImplThreadTaskRunner() override;
   gpu::GpuMemoryBufferManager* GetGpuMemoryBufferManager() override;
-  RendererScheduler* GetRendererScheduler() override;
+  scheduler::RendererScheduler* GetRendererScheduler() override;
   cc::ContextProvider* GetSharedMainThreadContextProvider() override;
   scoped_ptr<cc::BeginFrameSource> CreateExternalBeginFrameSource(
       int routing_id) override;
@@ -211,12 +214,11 @@ class CONTENT_EXPORT RenderThreadImpl
   GpuChannelHost* EstablishGpuChannelSync(CauseForGpuLaunch);
 
 
-  // These methods modify how the next message is sent.  Normally, when sending
+  // This method modifies how the next message is sent.  Normally, when sending
   // a synchronous message that runs a nested message loop, we need to suspend
   // callbacks into WebKit.  This involves disabling timers and deferring
   // resource loads.  However, there are exceptions when we need to customize
   // the behavior.
-  void DoNotSuspendWebKitSharedTimer();
   void DoNotNotifyWebKitOfModalLoop();
 
   // True if we are running layout tests. This currently disables forwarding
@@ -401,6 +403,8 @@ class CONTENT_EXPORT RenderThreadImpl
   // Called by a RenderWidget when it is created or destroyed. This
   // allows the process to know when there are no visible widgets.
   void WidgetCreated();
+  // Note: A widget must not be hidden when it is destroyed - ensure that
+  // WidgetRestored is called before WidgetDestroyed for any hidden widget.
   void WidgetDestroyed();
   void WidgetHidden();
   void WidgetRestored();
@@ -423,8 +427,7 @@ class CONTENT_EXPORT RenderThreadImpl
 
   // GpuChannelHostFactory implementation:
   bool IsMainThread() override;
-  base::MessageLoop* GetMainLoop() override;
-  scoped_refptr<base::MessageLoopProxy> GetIOLoopProxy() override;
+  scoped_refptr<base::SingleThreadTaskRunner> GetIOThreadTaskRunner() override;
   scoped_ptr<base::SharedMemory> AllocateSharedMemory(size_t size) override;
   CreateCommandBufferResult CreateViewCommandBuffer(
       int32 surface_id,
@@ -433,11 +436,7 @@ class CONTENT_EXPORT RenderThreadImpl
 
   void Init();
 
-  void OnCreateNewFrame(int routing_id,
-                        int parent_routing_id,
-                        int proxy_routing_id,
-                        const FrameReplicationState& replicated_state,
-                        FrameMsg_NewFrame_WidgetParams params);
+  void OnCreateNewFrame(FrameMsg_NewFrame_Params params);
   void OnCreateNewFrameProxy(int routing_id,
                              int parent_routing_id,
                              int render_view_routing_id,
@@ -453,7 +452,7 @@ class CONTENT_EXPORT RenderThreadImpl
   void OnNetworkTypeChanged(net::NetworkChangeNotifier::ConnectionType type);
   void OnGetAccessibilityTree();
   void OnTempCrashWithData(const GURL& data);
-  void OnUpdateTimezone();
+  void OnUpdateTimezone(const std::string& zoneId);
   void OnMemoryPressure(
       base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level);
 #if defined(OS_ANDROID)
@@ -468,6 +467,9 @@ class CONTENT_EXPORT RenderThreadImpl
 #endif
   void OnCreateNewSharedWorker(
       const WorkerProcessMsg_CreateWorker_Params& params);
+  bool RendererIsHidden() const;
+  void OnRendererHidden();
+  void OnRendererVisible();
 
   scoped_ptr<WebGraphicsContext3DCommandBufferImpl> CreateOffscreenContext3d();
 
@@ -475,7 +477,7 @@ class CONTENT_EXPORT RenderThreadImpl
   scoped_ptr<AppCacheDispatcher> appcache_dispatcher_;
   scoped_ptr<DomStorageDispatcher> dom_storage_dispatcher_;
   scoped_ptr<IndexedDBDispatcher> main_thread_indexed_db_dispatcher_;
-  scoped_ptr<RendererScheduler> renderer_scheduler_;
+  scoped_ptr<scheduler::RendererScheduler> renderer_scheduler_;
   scoped_ptr<RendererBlinkPlatformImpl> blink_platform_impl_;
   scoped_ptr<ResourceDispatchThrottler> resource_dispatch_throttler_;
   scoped_ptr<CacheStorageDispatcher> main_thread_cache_storage_dispatcher_;
@@ -529,7 +531,6 @@ class CONTENT_EXPORT RenderThreadImpl
   // The number of idle handler calls that skip sending idle notifications.
   int idle_notifications_to_skip_;
 
-  bool suspend_webkit_shared_timer_;
   bool notify_webkit_of_modal_loop_;
   bool webkit_shared_timer_suspended_;
 
@@ -544,7 +545,7 @@ class CONTENT_EXPORT RenderThreadImpl
 
   // Cache of variables that are needed on the compositor thread by
   // GpuChannelHostFactory methods.
-  scoped_refptr<base::MessageLoopProxy> io_message_loop_proxy_;
+  scoped_refptr<base::SingleThreadTaskRunner> io_thread_task_runner_;
 
   // The message loop of the renderer main thread.
   // This message loop should be destructed before the RenderThreadImpl

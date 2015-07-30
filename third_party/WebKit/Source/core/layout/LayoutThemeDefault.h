@@ -29,13 +29,15 @@
 #ifndef LayoutThemeDefault_h
 #define LayoutThemeDefault_h
 
+#include "core/CoreExport.h"
 #include "core/layout/LayoutTheme.h"
+#include "core/paint/ThemePainterDefault.h"
 
 namespace blink {
 
 class LayoutProgress;
 
-class LayoutThemeDefault : public LayoutTheme {
+class CORE_EXPORT LayoutThemeDefault : public LayoutTheme {
 public:
     virtual String extraDefaultStyleSheet() override;
     virtual String extraQuirksStyleSheet() override;
@@ -61,27 +63,13 @@ public:
 
     static void setCaretBlinkInterval(double);
 
-    virtual bool paintCheckbox(LayoutObject*, const PaintInfo&, const IntRect&) override;
     virtual void setCheckboxSize(ComputedStyle&) const override;
-
-    virtual bool paintRadio(LayoutObject*, const PaintInfo&, const IntRect&) override;
     virtual void setRadioSize(ComputedStyle&) const override;
-
-    virtual bool paintButton(LayoutObject*, const PaintInfo&, const IntRect&) override;
-    virtual bool paintTextField(LayoutObject*, const PaintInfo&, const IntRect&) override;
-    virtual bool paintMenuList(LayoutObject*, const PaintInfo&, const IntRect&) override;
-    virtual bool paintMenuListButton(LayoutObject*, const PaintInfo&, const IntRect&) override;
-    virtual bool paintSliderTrack(LayoutObject*, const PaintInfo&, const IntRect&) override;
-    virtual bool paintSliderThumb(LayoutObject*, const PaintInfo&, const IntRect&) override;
-
     virtual void adjustInnerSpinButtonStyle(ComputedStyle&, Element*) const override;
-    virtual bool paintInnerSpinButton(LayoutObject*, const PaintInfo&, const IntRect&) override;
 
     virtual bool popsMenuBySpaceKey() const override final { return true; }
     virtual bool popsMenuByReturnKey() const override final { return true; }
     virtual bool popsMenuByAltDownUpOrF4Key() const override { return true; }
-
-    virtual bool paintProgressBar(LayoutObject*, const PaintInfo&, const IntRect&) override;
 
     virtual bool shouldOpenPickerWithF4Key() const override;
 
@@ -104,32 +92,10 @@ public:
     virtual int minimumMenuListSize(const ComputedStyle&) const override;
 
     virtual void adjustButtonStyle(ComputedStyle&, Element*) const override;
-
-    virtual bool paintTextArea(LayoutObject*, const PaintInfo&, const IntRect&) override;
-
     virtual void adjustSearchFieldStyle(ComputedStyle&, Element*) const override;
-    virtual bool paintSearchField(LayoutObject*, const PaintInfo&, const IntRect&) override;
-
     virtual void adjustSearchFieldCancelButtonStyle(ComputedStyle&, Element*) const override;
-    virtual bool paintSearchFieldCancelButton(LayoutObject*, const PaintInfo&, const IntRect&) override;
-
     virtual void adjustSearchFieldDecorationStyle(ComputedStyle&, Element*) const override;
-
     virtual void adjustSearchFieldResultsDecorationStyle(ComputedStyle&, Element*) const override;
-    virtual bool paintSearchFieldResultsDecoration(LayoutObject*, const PaintInfo&, const IntRect&) override;
-
-    virtual bool paintMediaSliderTrack(LayoutObject*, const PaintInfo&, const IntRect&) override;
-    virtual bool paintMediaVolumeSliderTrack(LayoutObject*, const PaintInfo&, const IntRect&) override;
-    virtual bool paintMediaSliderThumb(LayoutObject*, const PaintInfo&, const IntRect&) override;
-    virtual bool paintMediaToggleClosedCaptionsButton(LayoutObject*, const PaintInfo&, const IntRect&) override;
-    virtual bool paintMediaCastButton(LayoutObject*, const PaintInfo&, const IntRect&) override;
-    virtual bool paintMediaVolumeSliderThumb(LayoutObject*, const PaintInfo&, const IntRect&) override;
-    virtual bool paintMediaPlayButton(LayoutObject*, const PaintInfo&, const IntRect&) override;
-    virtual bool paintMediaOverlayPlayButton(LayoutObject*, const PaintInfo&, const IntRect&) override;
-    virtual bool paintMediaMuteButton(LayoutObject*, const PaintInfo&, const IntRect&) override;
-    virtual String formatMediaControlsTime(float time) const override;
-    virtual String formatMediaControlsCurrentTime(float currentTime, float duration) const override;
-    virtual bool paintMediaFullscreenButton(LayoutObject*, const PaintInfo&, const IntRect&) override;
 
     // MenuList refers to an unstyled menulist (meaning a menulist without
     // background-color or border set) and MenuListButton refers to a styled
@@ -138,7 +104,7 @@ public:
     // possibly can, which is something we don't want to replicate.
     //
     // In short, we either go down the MenuList code path or the MenuListButton
-    // codepath. We never go down both. And in both cases, they render the
+    // codepath. We never go down both. And in both cases, they layout the
     // entire menulist.
     virtual void adjustMenuListStyle(ComputedStyle&, Element*) const override;
     virtual void adjustMenuListButtonStyle(ComputedStyle&, Element*) const override;
@@ -153,7 +119,7 @@ public:
     virtual int popupInternalPaddingBottom(const ComputedStyle&) const override;
 
     // Provide a way to pass the default font size from the Settings object
-    // to the render theme. FIXME: http://b/1129186 A cleaner way would be
+    // to the layout theme. FIXME: http://b/1129186 A cleaner way would be
     // to remove the default font size from this object and have callers
     // that need the value to get it directly from the appropriate Settings
     // object.
@@ -169,24 +135,13 @@ protected:
 
     IntRect determinateProgressValueRectFor(LayoutProgress*, const IntRect&) const;
     IntRect indeterminateProgressValueRectFor(LayoutProgress*, const IntRect&) const;
-    IntRect progressValueRectFor(LayoutProgress*, const IntRect&) const;
-
-    class DirectionFlippingScope {
-    public:
-        DirectionFlippingScope(LayoutObject*, const PaintInfo&, const IntRect&);
-        ~DirectionFlippingScope();
-
-    private:
-        bool m_needsFlipping;
-        const PaintInfo& m_paintInfo;
-    };
 
 private:
     virtual bool shouldShowPlaceholderWhenFocused() const override;
 
+    virtual ThemePainter& painter() override { return m_painter; }
+
     int menuListInternalPadding(const ComputedStyle&, int paddingType) const;
-    bool paintMediaButtonInternal(GraphicsContext*, const IntRect&, Image*);
-    IntRect convertToPaintingRect(LayoutObject* inputRenderer, const LayoutObject* partRenderer, LayoutRect partRect, const IntRect& localOffset) const;
 
     static const RGBA32 defaultTapHighlightColor = 0x2e000000; // 18% black.
     static double m_caretBlinkInterval;
@@ -195,6 +150,8 @@ private:
     static unsigned m_activeSelectionForegroundColor;
     static unsigned m_inactiveSelectionBackgroundColor;
     static unsigned m_inactiveSelectionForegroundColor;
+
+    ThemePainterDefault m_painter;
 };
 
 } // namespace blink

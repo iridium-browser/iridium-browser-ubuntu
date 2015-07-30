@@ -15,7 +15,6 @@
 #include "chrome/browser/chromeos/login/app_launch_controller.h"
 #include "chrome/browser/chromeos/login/auth/auth_prewarmer.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
-#include "chrome/browser/chromeos/login/signin/token_handle_util.h"
 #include "chrome/browser/chromeos/login/signin_screen_controller.h"
 #include "chrome/browser/chromeos/login/ui/login_display.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
@@ -197,10 +196,6 @@ class LoginDisplayHostImpl : public LoginDisplayHost,
   // Called when login-prompt-visible signal is caught.
   void OnLoginPromptVisible();
 
-  // Called when user oauth token handler check is completed.
-  void OnTokenHandlerChecked(const user_manager::UserID& user_id,
-                             TokenHandleUtil::TokenHandleStatus token_status);
-
   // Used to calculate position of the screens and background.
   gfx::Rect background_bounds_;
 
@@ -293,9 +288,6 @@ class LoginDisplayHostImpl : public LoginDisplayHost,
   // Handles special keys for keyboard driven oobe.
   scoped_ptr<KeyboardDrivenOobeKeyHandler> keyboard_driven_oobe_key_handler_;
 
-  // Handles token handle operations.
-  scoped_ptr<TokenHandleUtil> token_handle_util_;
-
   FinalizeAnimationType finalize_animation_type_;
 
   // Time when login prompt visible signal is received. Used for
@@ -313,9 +305,6 @@ class LoginDisplayHostImpl : public LoginDisplayHost,
 
   // True is subscribed as keyboard controller observer.
   bool is_observing_keyboard_;
-
-  // The bounds of the virtual keyboard.
-  gfx::Rect keyboard_bounds_;
 
   // True if the host is showing a new version of OOBE screen.
   bool is_new_oobe_;

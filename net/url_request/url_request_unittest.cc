@@ -45,6 +45,7 @@
 #include "net/cert/ev_root_ca_metadata.h"
 #include "net/cert/mock_cert_verifier.h"
 #include "net/cert/test_root_certs.h"
+#include "net/cert_net/nss_ocsp.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/cookies/cookie_store_test_helpers.h"
 #include "net/disk_cache/disk_cache.h"
@@ -57,10 +58,10 @@
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_util.h"
-#include "net/log/capturing_net_log.h"
 #include "net/log/net_log.h"
-#include "net/log/net_log_unittest.h"
-#include "net/ocsp/nss_ocsp.h"
+#include "net/log/test_net_log.h"
+#include "net/log/test_net_log_entry.h"
+#include "net/log/test_net_log_util.h"
 #include "net/proxy/proxy_service.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/ssl/ssl_cipher_suite_names.h"
@@ -176,6 +177,7 @@ void TestLoadTimingReusedWithProxy(
   EXPECT_LE(load_timing_info.send_end, load_timing_info.receive_headers_end);
 }
 
+#if !defined(DISABLE_FILE_SUPPORT)
 // Tests load timing information in the case of a cache hit, when no cache
 // validation request was sent over the wire.
 base::StringPiece TestNetResourceProvider(int key) {
@@ -196,6 +198,7 @@ void FillBuffer(char* buffer, size_t len) {
       buffer[i] = 'g';
   }
 }
+#endif
 
 #if !defined(OS_IOS)
 void TestLoadTimingCacheHitNoNetwork(
@@ -215,6 +218,7 @@ void TestLoadTimingCacheHitNoNetwork(
   EXPECT_TRUE(load_timing_info.proxy_resolve_end.is_null());
 }
 
+#if !defined(DISABLE_FTP_SUPPORT)
 // Tests load timing in the case that there is no HTTP response.  This can be
 // used to test in the case of errors or non-HTTP requests.
 void TestLoadTimingNoHttpResponse(
@@ -234,6 +238,7 @@ void TestLoadTimingNoHttpResponse(
   EXPECT_TRUE(load_timing_info.send_end.is_null());
   EXPECT_TRUE(load_timing_info.receive_headers_end.is_null());
 }
+#endif
 
 // Do a case-insensitive search through |haystack| for |needle|.
 bool ContainsString(const std::string& haystack, const char* needle) {
@@ -651,7 +656,7 @@ class URLRequestTest : public PlatformTest {
   }
 
  protected:
-  CapturingNetLog net_log_;
+  TestNetLog net_log_;
   TestNetworkDelegate default_network_delegate_;  // Must outlive URLRequest.
   URLRequestJobFactoryImpl* job_factory_impl_;
   scoped_ptr<URLRequestJobFactory> job_factory_;
@@ -2129,21 +2134,22 @@ TEST_F(URLRequestTest, PriorityIgnoreLimits) {
 
 // TODO(droger): Support SpawnedTestServer on iOS (see http://crbug.com/148666).
 #if !defined(OS_IOS)
-// A subclass of SpawnedTestServer that uses a statically-configured hostname.
-// This is to work around mysterious failures in chrome_frame_net_tests. See:
-// http://crbug.com/114369
-// TODO(erikwright): remove or update as needed; see http://crbug.com/334634.
+namespace {
+
+// Less verbose way of running a simple testserver for the tests below.
 class LocalHttpTestServer : public SpawnedTestServer {
  public:
   explicit LocalHttpTestServer(const base::FilePath& document_root)
       : SpawnedTestServer(SpawnedTestServer::TYPE_HTTP,
-                          ScopedCustomUrlRequestTestHttpHost::value(),
+                          SpawnedTestServer::kLocalhost,
                           document_root) {}
   LocalHttpTestServer()
       : SpawnedTestServer(SpawnedTestServer::TYPE_HTTP,
-                          ScopedCustomUrlRequestTestHttpHost::value(),
+                          SpawnedTestServer::kLocalhost,
                           base::FilePath()) {}
 };
+
+}  // namespace
 
 TEST_F(URLRequestTest, DelayedCookieCallback) {
   LocalHttpTestServer test_server;
@@ -4159,8 +4165,8 @@ class AsyncDelegateLogger : public base::RefCounted<AsyncDelegateLogger> {
   // DELEGATE_INFO NetLog events that an AsyncDelegateLogger should have
   // recorded.  Returns the index of entry after the expected number of
   // events this logged, or entries.size() if there aren't enough entries.
-  static size_t CheckDelegateInfo(
-      const CapturingNetLog::CapturedEntryList& entries, size_t log_position) {
+  static size_t CheckDelegateInfo(const TestNetLogEntry::List& entries,
+                                  size_t log_position) {
     // There should be 4 DELEGATE_INFO events: Two begins and two ends.
     if (log_position + 3 >= entries.size()) {
       ADD_FAILURE() << "Not enough log entries";
@@ -4193,9 +4199,8 @@ class AsyncDelegateLogger : public base::RefCounted<AsyncDelegateLogger> {
 
   // Find delegate request begin and end messages for OnBeforeNetworkStart.
   // Returns the position of the end message.
-  static size_t ExpectBeforeNetworkEvents(
-      const CapturingNetLog::CapturedEntryList& entries,
-      size_t log_position) {
+  static size_t ExpectBeforeNetworkEvents(const TestNetLogEntry::List& entries,
+                                          size_t log_position) {
     log_position =
         ExpectLogContainsSomewhereAfter(entries,
                                         log_position,
@@ -4461,7 +4466,7 @@ TEST_F(URLRequestTestHTTP, DelegateInfoBeforeStart) {
     EXPECT_EQ(URLRequestStatus::SUCCESS, r->status().status());
   }
 
-  CapturingNetLog::CapturedEntryList entries;
+  TestNetLogEntry::List entries;
   net_log_.GetEntries(&entries);
   size_t log_position = ExpectLogContainsSomewhereAfter(
       entries,
@@ -4506,7 +4511,7 @@ TEST_F(URLRequestTestHTTP, NetworkDelegateInfo) {
   EXPECT_EQ(1, network_delegate.destroyed_requests());
 
   size_t log_position = 0;
-  CapturingNetLog::CapturedEntryList entries;
+  TestNetLogEntry::List entries;
   net_log_.GetEntries(&entries);
   for (size_t i = 0; i < 3; ++i) {
     log_position = ExpectLogContainsSomewhereAfter(
@@ -4563,7 +4568,7 @@ TEST_F(URLRequestTestHTTP, NetworkDelegateInfoRedirect) {
   EXPECT_EQ(1, network_delegate.destroyed_requests());
 
   size_t log_position = 0;
-  CapturingNetLog::CapturedEntryList entries;
+  TestNetLogEntry::List entries;
   net_log_.GetEntries(&entries);
   // The NetworkDelegate logged information in OnBeforeURLRequest,
   // OnBeforeSendHeaders, and OnHeadersReceived.
@@ -4645,7 +4650,7 @@ TEST_F(URLRequestTestHTTP, NetworkDelegateInfoAuth) {
   EXPECT_EQ(1, network_delegate.destroyed_requests());
 
   size_t log_position = 0;
-  CapturingNetLog::CapturedEntryList entries;
+  TestNetLogEntry::List entries;
   net_log_.GetEntries(&entries);
   // The NetworkDelegate should have logged information in OnBeforeURLRequest,
   // OnBeforeSendHeaders, OnHeadersReceived, OnAuthRequired, and then again in
@@ -4702,7 +4707,7 @@ TEST_F(URLRequestTestHTTP, URLRequestDelegateInfo) {
     EXPECT_EQ(URLRequestStatus::SUCCESS, r->status().status());
   }
 
-  CapturingNetLog::CapturedEntryList entries;
+  TestNetLogEntry::List entries;
   net_log_.GetEntries(&entries);
 
   size_t log_position = 0;
@@ -4755,7 +4760,7 @@ TEST_F(URLRequestTestHTTP, URLRequestDelegateInfoOnRedirect) {
     EXPECT_EQ(URLRequestStatus::SUCCESS, r->status().status());
   }
 
-  CapturingNetLog::CapturedEntryList entries;
+  TestNetLogEntry::List entries;
   net_log_.GetEntries(&entries);
 
   // Delegate info should only have been logged in OnReceivedRedirect and
@@ -4802,7 +4807,7 @@ TEST_F(URLRequestTestHTTP, URLRequestDelegateOnRedirectCancelled) {
        ++test_case) {
     AsyncLoggingUrlRequestDelegate request_delegate(kCancelStages[test_case]);
     TestURLRequestContext context(true);
-    CapturingNetLog net_log;
+    TestNetLog net_log;
     context.set_network_delegate(NULL);
     context.set_net_log(&net_log);
     context.Init();
@@ -4817,7 +4822,7 @@ TEST_F(URLRequestTestHTTP, URLRequestDelegateOnRedirectCancelled) {
       EXPECT_EQ(URLRequestStatus::CANCELED, r->status().status());
     }
 
-    CapturingNetLog::CapturedEntryList entries;
+    TestNetLogEntry::List entries;
     net_log.GetEntries(&entries);
 
     // Delegate info is always logged in both OnReceivedRedirect and
@@ -5258,12 +5263,15 @@ TEST_F(URLRequestTestHTTP, ResponseHeadersTest) {
 }
 
 TEST_F(URLRequestTestHTTP, ProcessSTS) {
-  SpawnedTestServer::SSLOptions ssl_options;
+  SpawnedTestServer::SSLOptions ssl_options(
+      SpawnedTestServer::SSLOptions::CERT_COMMON_NAME_IS_DOMAIN);
   SpawnedTestServer https_test_server(
       SpawnedTestServer::TYPE_HTTPS,
       ssl_options,
       base::FilePath(FILE_PATH_LITERAL("net/data/url_request_unittest")));
   ASSERT_TRUE(https_test_server.Start());
+
+  std::string test_server_hostname = https_test_server.GetURL("").host();
 
   TestDelegate d;
   scoped_ptr<URLRequest> request(default_context_.CreateRequest(
@@ -5275,8 +5283,8 @@ TEST_F(URLRequestTestHTTP, ProcessSTS) {
   TransportSecurityState* security_state =
       default_context_.transport_security_state();
   TransportSecurityState::DomainState domain_state;
-  EXPECT_TRUE(security_state->GetDynamicDomainState(
-      SpawnedTestServer::kLocalhost, &domain_state));
+  EXPECT_TRUE(security_state->GetDynamicDomainState(test_server_hostname,
+                                                    &domain_state));
   EXPECT_EQ(TransportSecurityState::DomainState::MODE_FORCE_HTTPS,
             domain_state.sts.upgrade_mode);
   EXPECT_TRUE(domain_state.sts.include_subdomains);
@@ -5286,6 +5294,30 @@ TEST_F(URLRequestTestHTTP, ProcessSTS) {
 #else
   EXPECT_FALSE(domain_state.HasPublicKeyPins());
 #endif
+}
+
+TEST_F(URLRequestTestHTTP, STSNotProcessedOnIP) {
+  SpawnedTestServer https_test_server(
+      SpawnedTestServer::TYPE_HTTPS, SpawnedTestServer::SSLOptions(),
+      base::FilePath(FILE_PATH_LITERAL("net/data/url_request_unittest")));
+  ASSERT_TRUE(https_test_server.Start());
+  // Make sure this test fails if the test server is changed to not
+  // listen on an IP by default.
+  ASSERT_TRUE(https_test_server.GetURL("").HostIsIPAddress());
+  std::string test_server_hostname = https_test_server.GetURL("").host();
+
+  TestDelegate d;
+  scoped_ptr<URLRequest> request(default_context_.CreateRequest(
+      https_test_server.GetURL("files/hsts-headers.html"), DEFAULT_PRIORITY,
+      &d));
+  request->Start();
+  base::RunLoop().Run();
+
+  TransportSecurityState* security_state =
+      default_context_.transport_security_state();
+  TransportSecurityState::DomainState domain_state;
+  EXPECT_FALSE(security_state->GetDynamicDomainState(test_server_hostname,
+                                                     &domain_state));
 }
 
 // Android's CertVerifyProc does not (yet) handle pins. Therefore, it will
@@ -5300,12 +5332,15 @@ TEST_F(URLRequestTestHTTP, ProcessSTS) {
 // Tests that enabling HPKP on a domain does not affect the HSTS
 // validity/expiration.
 TEST_F(URLRequestTestHTTP, MAYBE_ProcessPKP) {
-  SpawnedTestServer::SSLOptions ssl_options;
+  SpawnedTestServer::SSLOptions ssl_options(
+      SpawnedTestServer::SSLOptions::CERT_COMMON_NAME_IS_DOMAIN);
   SpawnedTestServer https_test_server(
       SpawnedTestServer::TYPE_HTTPS,
       ssl_options,
       base::FilePath(FILE_PATH_LITERAL("net/data/url_request_unittest")));
   ASSERT_TRUE(https_test_server.Start());
+
+  std::string test_server_hostname = https_test_server.GetURL("").host();
 
   TestDelegate d;
   scoped_ptr<URLRequest> request(default_context_.CreateRequest(
@@ -5317,8 +5352,8 @@ TEST_F(URLRequestTestHTTP, MAYBE_ProcessPKP) {
   TransportSecurityState* security_state =
       default_context_.transport_security_state();
   TransportSecurityState::DomainState domain_state;
-  EXPECT_TRUE(security_state->GetDynamicDomainState(
-      SpawnedTestServer::kLocalhost, &domain_state));
+  EXPECT_TRUE(security_state->GetDynamicDomainState(test_server_hostname,
+                                                    &domain_state));
   EXPECT_EQ(TransportSecurityState::DomainState::MODE_DEFAULT,
             domain_state.sts.upgrade_mode);
   EXPECT_FALSE(domain_state.sts.include_subdomains);
@@ -5327,13 +5362,40 @@ TEST_F(URLRequestTestHTTP, MAYBE_ProcessPKP) {
   EXPECT_NE(domain_state.sts.expiry, domain_state.pkp.expiry);
 }
 
+TEST_F(URLRequestTestHTTP, PKPNotProcessedOnIP) {
+  SpawnedTestServer https_test_server(
+      SpawnedTestServer::TYPE_HTTPS, SpawnedTestServer::SSLOptions(),
+      base::FilePath(FILE_PATH_LITERAL("net/data/url_request_unittest")));
+  ASSERT_TRUE(https_test_server.Start());
+  // Make sure this test fails if the test server is changed to not
+  // listen on an IP by default.
+  ASSERT_TRUE(https_test_server.GetURL("").HostIsIPAddress());
+  std::string test_server_hostname = https_test_server.GetURL("").host();
+
+  TestDelegate d;
+  scoped_ptr<URLRequest> request(default_context_.CreateRequest(
+      https_test_server.GetURL("files/hpkp-headers.html"), DEFAULT_PRIORITY,
+      &d));
+  request->Start();
+  base::RunLoop().Run();
+
+  TransportSecurityState* security_state =
+      default_context_.transport_security_state();
+  TransportSecurityState::DomainState domain_state;
+  EXPECT_FALSE(security_state->GetDynamicDomainState(test_server_hostname,
+                                                     &domain_state));
+}
+
 TEST_F(URLRequestTestHTTP, ProcessSTSOnce) {
-  SpawnedTestServer::SSLOptions ssl_options;
+  SpawnedTestServer::SSLOptions ssl_options(
+      SpawnedTestServer::SSLOptions::CERT_COMMON_NAME_IS_DOMAIN);
   SpawnedTestServer https_test_server(
       SpawnedTestServer::TYPE_HTTPS,
       ssl_options,
       base::FilePath(FILE_PATH_LITERAL("net/data/url_request_unittest")));
   ASSERT_TRUE(https_test_server.Start());
+
+  std::string test_server_hostname = https_test_server.GetURL("").host();
 
   TestDelegate d;
   scoped_ptr<URLRequest> request(default_context_.CreateRequest(
@@ -5346,8 +5408,8 @@ TEST_F(URLRequestTestHTTP, ProcessSTSOnce) {
   TransportSecurityState* security_state =
       default_context_.transport_security_state();
   TransportSecurityState::DomainState domain_state;
-  EXPECT_TRUE(security_state->GetDynamicDomainState(
-      SpawnedTestServer::kLocalhost, &domain_state));
+  EXPECT_TRUE(security_state->GetDynamicDomainState(test_server_hostname,
+                                                    &domain_state));
   EXPECT_EQ(TransportSecurityState::DomainState::MODE_FORCE_HTTPS,
             domain_state.sts.upgrade_mode);
   EXPECT_FALSE(domain_state.sts.include_subdomains);
@@ -5355,12 +5417,15 @@ TEST_F(URLRequestTestHTTP, ProcessSTSOnce) {
 }
 
 TEST_F(URLRequestTestHTTP, ProcessSTSAndPKP) {
-  SpawnedTestServer::SSLOptions ssl_options;
+  SpawnedTestServer::SSLOptions ssl_options(
+      SpawnedTestServer::SSLOptions::CERT_COMMON_NAME_IS_DOMAIN);
   SpawnedTestServer https_test_server(
       SpawnedTestServer::TYPE_HTTPS,
       ssl_options,
       base::FilePath(FILE_PATH_LITERAL("net/data/url_request_unittest")));
   ASSERT_TRUE(https_test_server.Start());
+
+  std::string test_server_hostname = https_test_server.GetURL("").host();
 
   TestDelegate d;
   scoped_ptr<URLRequest> request(default_context_.CreateRequest(
@@ -5373,8 +5438,8 @@ TEST_F(URLRequestTestHTTP, ProcessSTSAndPKP) {
   TransportSecurityState* security_state =
       default_context_.transport_security_state();
   TransportSecurityState::DomainState domain_state;
-  EXPECT_TRUE(security_state->GetDynamicDomainState(
-      SpawnedTestServer::kLocalhost, &domain_state));
+  EXPECT_TRUE(security_state->GetDynamicDomainState(test_server_hostname,
+                                                    &domain_state));
   EXPECT_EQ(TransportSecurityState::DomainState::MODE_FORCE_HTTPS,
             domain_state.sts.upgrade_mode);
 #if defined(OS_ANDROID)
@@ -5394,12 +5459,15 @@ TEST_F(URLRequestTestHTTP, ProcessSTSAndPKP) {
 // Tests that when multiple HPKP headers are present, asserting different
 // policies, that only the first such policy is processed.
 TEST_F(URLRequestTestHTTP, ProcessSTSAndPKP2) {
-  SpawnedTestServer::SSLOptions ssl_options;
+  SpawnedTestServer::SSLOptions ssl_options(
+      SpawnedTestServer::SSLOptions::CERT_COMMON_NAME_IS_DOMAIN);
   SpawnedTestServer https_test_server(
       SpawnedTestServer::TYPE_HTTPS,
       ssl_options,
       base::FilePath(FILE_PATH_LITERAL("net/data/url_request_unittest")));
   ASSERT_TRUE(https_test_server.Start());
+
+  std::string test_server_hostname = https_test_server.GetURL("").host();
 
   TestDelegate d;
   scoped_ptr<URLRequest> request(default_context_.CreateRequest(
@@ -5411,8 +5479,8 @@ TEST_F(URLRequestTestHTTP, ProcessSTSAndPKP2) {
   TransportSecurityState* security_state =
       default_context_.transport_security_state();
   TransportSecurityState::DomainState domain_state;
-  EXPECT_TRUE(security_state->GetDynamicDomainState(
-      SpawnedTestServer::kLocalhost, &domain_state));
+  EXPECT_TRUE(security_state->GetDynamicDomainState(test_server_hostname,
+                                                    &domain_state));
   EXPECT_EQ(TransportSecurityState::DomainState::MODE_FORCE_HTTPS,
             domain_state.sts.upgrade_mode);
 #if defined(OS_ANDROID)
@@ -6755,6 +6823,59 @@ TEST_F(URLRequestTestHTTP, NetworkSuspendTestNoCache) {
   EXPECT_EQ(ERR_NETWORK_IO_SUSPENDED, req->status().error());
 }
 
+TEST_F(URLRequestTestHTTP, NetworkAccessedSetOnNetworkRequest) {
+  ASSERT_TRUE(test_server_.Start());
+
+  TestDelegate d;
+  GURL test_url(test_server_.GetURL(std::string()));
+  scoped_ptr<URLRequest> req(
+      default_context_.CreateRequest(test_url, DEFAULT_PRIORITY, &d));
+
+  req->Start();
+  base::RunLoop().Run();
+
+  EXPECT_TRUE(req->response_info().network_accessed);
+}
+
+TEST_F(URLRequestTestHTTP, NetworkAccessedClearOnCachedResponse) {
+  ASSERT_TRUE(test_server_.Start());
+
+  // Populate the cache.
+  TestDelegate d;
+  scoped_ptr<URLRequest> req(default_context_.CreateRequest(
+      test_server_.GetURL("cachetime"), DEFAULT_PRIORITY, &d));
+  req->Start();
+  base::RunLoop().Run();
+
+  EXPECT_EQ(URLRequestStatus::SUCCESS, req->status().status());
+  EXPECT_TRUE(req->response_info().network_accessed);
+  EXPECT_FALSE(req->response_info().was_cached);
+
+  req = default_context_.CreateRequest(test_server_.GetURL("cachetime"),
+                                       DEFAULT_PRIORITY, &d);
+  req->Start();
+  base::RunLoop().Run();
+
+  EXPECT_EQ(URLRequestStatus::SUCCESS, req->status().status());
+  EXPECT_FALSE(req->response_info().network_accessed);
+  EXPECT_TRUE(req->response_info().was_cached);
+}
+
+TEST_F(URLRequestTestHTTP, NetworkAccessedClearOnLoadOnlyFromCache) {
+  ASSERT_TRUE(test_server_.Start());
+
+  TestDelegate d;
+  GURL test_url(test_server_.GetURL(std::string()));
+  scoped_ptr<URLRequest> req(
+      default_context_.CreateRequest(test_url, DEFAULT_PRIORITY, &d));
+  req->SetLoadFlags(LOAD_ONLY_FROM_CACHE);
+
+  req->Start();
+  base::RunLoop().Run();
+
+  EXPECT_FALSE(req->response_info().network_accessed);
+}
+
 class URLRequestInterceptorTestHTTP : public URLRequestTestHTTP {
  public:
   // TODO(bengr): Merge this with the URLRequestInterceptorHTTPTest fixture,
@@ -7198,7 +7319,7 @@ TEST_F(HTTPSRequestTest, HTTPSExpiredTest) {
 
 // Tests that servers which require a deprecated cipher suite still work.
 TEST_F(HTTPSRequestTest, CipherFallbackTest) {
-  CapturingNetLog net_log;
+  TestNetLog net_log;
   default_context_.set_net_log(&net_log);
 
   SpawnedTestServer::SSLOptions ssl_options;
@@ -7234,7 +7355,7 @@ TEST_F(HTTPSRequestTest, CipherFallbackTest) {
   EXPECT_EQ(expected_version,
             SSLConnectionStatusToVersion(r->ssl_info().connection_status));
 
-  CapturingNetLog::CapturedEntryList entries;
+  TestNetLogEntry::List entries;
   net_log.GetEntries(&entries);
   ExpectLogContainsSomewhere(entries, 0, NetLog::TYPE_SSL_CIPHER_FALLBACK,
                              NetLog::PHASE_NONE);
@@ -7828,7 +7949,6 @@ class FallbackTestURLRequestContext : public TestURLRequestContext {
                                  false /* online revocation checking */,
                                  false /* require rev. checking for local
                                           anchors */);
-    ssl_config_service->set_min_version(SSL_PROTOCOL_VERSION_SSL3);
     ssl_config_service->set_fallback_min_version(version);
     set_ssl_config_service(ssl_config_service);
   }
@@ -7956,7 +8076,7 @@ TEST_F(HTTPSFallbackTest, FallbackSCSVClosed) {
   ExpectFailure(ERR_CONNECTION_CLOSED);
 }
 
-// Tests that the SSLv3 fallback doesn't happen by default.
+// Tests that the SSLv3 fallback doesn't happen.
 TEST_F(HTTPSFallbackTest, SSLv3Fallback) {
   SpawnedTestServer::SSLOptions ssl_options(
       SpawnedTestServer::SSLOptions::CERT_OK);
@@ -7967,39 +8087,25 @@ TEST_F(HTTPSFallbackTest, SSLv3Fallback) {
   ExpectFailure(ERR_SSL_VERSION_OR_CIPHER_MISMATCH);
 }
 
-// Tests that the SSLv3 fallback works when explicitly enabled.
-TEST_F(HTTPSFallbackTest, SSLv3FallbackEnabled) {
-  SpawnedTestServer::SSLOptions ssl_options(
-      SpawnedTestServer::SSLOptions::CERT_OK);
-  ssl_options.tls_intolerant =
-      SpawnedTestServer::SSLOptions::TLS_INTOLERANT_ALL;
-  set_fallback_min_version(SSL_PROTOCOL_VERSION_SSL3);
-
-  ASSERT_NO_FATAL_FAILURE(DoFallbackTest(ssl_options));
-  ExpectConnection(SSL_CONNECTION_VERSION_SSL3);
-}
-
-// Tests that the SSLv3 fallback triggers on closed connections when explicitly
-// enabled.
+// Tests that the TLSv1 fallback triggers on closed connections.
 TEST_F(HTTPSFallbackTest, SSLv3FallbackClosed) {
   SpawnedTestServer::SSLOptions ssl_options(
       SpawnedTestServer::SSLOptions::CERT_OK);
   ssl_options.tls_intolerant =
-      SpawnedTestServer::SSLOptions::TLS_INTOLERANT_ALL;
+      SpawnedTestServer::SSLOptions::TLS_INTOLERANT_TLS1_1;
   ssl_options.tls_intolerance_type =
       SpawnedTestServer::SSLOptions::TLS_INTOLERANCE_CLOSE;
-  set_fallback_min_version(SSL_PROTOCOL_VERSION_SSL3);
 
   ASSERT_NO_FATAL_FAILURE(DoFallbackTest(ssl_options));
-  ExpectConnection(SSL_CONNECTION_VERSION_SSL3);
+  ExpectConnection(SSL_CONNECTION_VERSION_TLS1);
 }
 
-// Test that SSLv3 fallback probe connections don't cause sessions to be cached.
-TEST_F(HTTPSRequestTest, SSLv3FallbackNoCache) {
+// Test that fallback probe connections don't cause sessions to be cached.
+TEST_F(HTTPSRequestTest, FallbackProbeNoCache) {
   SpawnedTestServer::SSLOptions ssl_options(
       SpawnedTestServer::SSLOptions::CERT_OK);
   ssl_options.tls_intolerant =
-      SpawnedTestServer::SSLOptions::TLS_INTOLERANT_ALL;
+      SpawnedTestServer::SSLOptions::TLS_INTOLERANT_TLS1_1;
   ssl_options.tls_intolerance_type =
       SpawnedTestServer::SSLOptions::TLS_INTOLERANCE_CLOSE;
   ssl_options.record_resume = true;
@@ -8012,14 +8118,14 @@ TEST_F(HTTPSRequestTest, SSLv3FallbackNoCache) {
 
   SSLClientSocket::ClearSessionCache();
 
-  // Make a connection that does a probe fallback to SSLv3 but fails because
-  // SSLv3 fallback is disabled. We don't wish a session for this connection to
+  // Make a connection that does a probe fallback to TLSv1 but fails because
+  // TLSv1 fallback is disabled. We don't wish a session for this connection to
   // be inserted locally.
   {
     TestDelegate delegate;
     FallbackTestURLRequestContext context(true);
 
-    context.set_fallback_min_version(SSL_PROTOCOL_VERSION_TLS1);
+    context.set_fallback_min_version(SSL_PROTOCOL_VERSION_TLS1_2);
     context.Init();
     scoped_ptr<URLRequest> request(context.CreateRequest(
         test_server.GetURL(std::string()), DEFAULT_PRIORITY, &delegate));
@@ -8034,11 +8140,11 @@ TEST_F(HTTPSRequestTest, SSLv3FallbackNoCache) {
               request->status().error());
   }
 
-  // Now allow SSLv3 connections and request the session cache log.
+  // Now allow TLSv1 fallback connections and request the session cache log.
   {
     TestDelegate delegate;
     FallbackTestURLRequestContext context(true);
-    context.set_fallback_min_version(SSL_PROTOCOL_VERSION_SSL3);
+    context.set_fallback_min_version(SSL_PROTOCOL_VERSION_TLS1);
 
     context.Init();
     scoped_ptr<URLRequest> request(context.CreateRequest(
@@ -8049,8 +8155,9 @@ TEST_F(HTTPSRequestTest, SSLv3FallbackNoCache) {
 
     EXPECT_EQ(1, delegate.response_started_count());
     EXPECT_NE(0, delegate.bytes_received());
-    EXPECT_EQ(SSL_CONNECTION_VERSION_SSL3, SSLConnectionStatusToVersion(
-        request->ssl_info().connection_status));
+    EXPECT_EQ(
+        SSL_CONNECTION_VERSION_TLS1,
+        SSLConnectionStatusToVersion(request->ssl_info().connection_status));
     EXPECT_TRUE(request->ssl_info().connection_status &
                 SSL_CONNECTION_VERSION_FALLBACK);
 
@@ -8060,23 +8167,6 @@ TEST_F(HTTPSRequestTest, SSLv3FallbackNoCache) {
     AssertTwoDistinctSessionsInserted(delegate.data_received());
   }
 }
-
-// This test is disabled on Android because the remote test server doesn't cause
-// a TCP reset.
-#if !defined(OS_ANDROID)
-// Tests that a reset connection does not fallback down to SSL3.
-TEST_F(HTTPSFallbackTest, SSLv3NoFallbackReset) {
-  SpawnedTestServer::SSLOptions ssl_options(
-      SpawnedTestServer::SSLOptions::CERT_OK);
-  ssl_options.tls_intolerant =
-      SpawnedTestServer::SSLOptions::TLS_INTOLERANT_ALL;
-  ssl_options.tls_intolerance_type =
-      SpawnedTestServer::SSLOptions::TLS_INTOLERANCE_RESET;
-
-  ASSERT_NO_FATAL_FAILURE(DoFallbackTest(ssl_options));
-  ExpectFailure(ERR_CONNECTION_RESET);
-}
-#endif  // !OS_ANDROID
 
 class HTTPSSessionTest : public testing::Test {
  public:
@@ -8195,7 +8285,7 @@ class HTTPSOCSPTest : public HTTPSRequestTest {
     CHECK_NE(static_cast<X509Certificate*>(NULL), root_cert.get());
     test_root_.reset(new ScopedTestRoot(root_cert.get()));
 
-#if defined(USE_NSS) || defined(OS_IOS)
+#if defined(USE_NSS_CERTS) || defined(OS_IOS)
     SetURLRequestContextForNSSHttpIO(&context_);
     EnsureNSSHttpIOInit();
 #endif
@@ -8224,7 +8314,7 @@ class HTTPSOCSPTest : public HTTPSRequestTest {
   }
 
   ~HTTPSOCSPTest() override {
-#if defined(USE_NSS) || defined(OS_IOS)
+#if defined(USE_NSS_CERTS) || defined(OS_IOS)
     ShutdownNSSHttpIO();
 #endif
   }
@@ -8264,7 +8354,7 @@ static CertStatus ExpectedCertStatusForFailedOnlineRevocationCheck() {
 // If it does not, then tests which rely on 'hard fail' behaviour should be
 // skipped.
 static bool SystemSupportsHardFailRevocationChecking() {
-#if defined(OS_WIN) || defined(USE_NSS) || defined(OS_IOS)
+#if defined(OS_WIN) || defined(USE_NSS_CERTS) || defined(OS_IOS)
   return true;
 #else
   return false;
@@ -8303,7 +8393,7 @@ static bool SystemSupportsOCSP() {
 }
 
 static bool SystemSupportsOCSPStapling() {
-#if defined(USE_NSS)
+#if defined(USE_NSS_CERTS)
   return true;
 #elif defined(OS_WIN)
   return base::win::GetVersion() >= base::win::VERSION_VISTA;
@@ -8400,7 +8490,7 @@ TEST_F(HTTPSOCSPTest, ValidStapled) {
 }
 
 // Disabled on NSS ports. See https://crbug.com/431716.
-#if defined(USE_NSS)
+#if defined(USE_NSS_CERTS)
 #define MAYBE_RevokedStapled DISABLED_RevokedStapled
 #else
 #define MAYBE_RevokedStapled RevokedStapled
@@ -9051,5 +9141,58 @@ TEST_F(URLRequestTestFTP, DISABLED_FTPCacheLoginBoxCredentials) {
   }
 }
 #endif  // !defined(DISABLE_FTP_SUPPORT)
+
+TEST_F(URLRequestTest, NetworkAccessedClearBeforeNetworkStart) {
+  TestDelegate d;
+  scoped_ptr<URLRequest> req(default_context_.CreateRequest(
+      GURL("http://test_intercept/foo"), DEFAULT_PRIORITY, &d));
+  d.set_quit_on_network_start(true);
+
+  EXPECT_FALSE(req->response_info().network_accessed);
+
+  req->Start();
+  base::RunLoop().Run();
+
+  EXPECT_EQ(1, d.received_before_network_start_count());
+  EXPECT_EQ(0, d.response_started_count());
+  EXPECT_FALSE(req->response_info().network_accessed);
+
+  req->ResumeNetworkStart();
+  base::RunLoop().Run();
+}
+
+TEST_F(URLRequestTest, NetworkAccessedClearOnDataRequest) {
+  TestDelegate d;
+  scoped_ptr<URLRequest> req(
+      default_context_.CreateRequest(GURL("data:,"), DEFAULT_PRIORITY, &d));
+
+  EXPECT_FALSE(req->response_info().network_accessed);
+
+  req->Start();
+  base::RunLoop().Run();
+
+  EXPECT_EQ(1, default_network_delegate_.completed_requests());
+  EXPECT_FALSE(req->response_info().network_accessed);
+}
+
+TEST_F(URLRequestTest, NetworkAccessedSetOnHostResolutionFailure) {
+  MockHostResolver host_resolver;
+  TestNetworkDelegate network_delegate;  // Must outlive URLRequest.
+  TestURLRequestContext context(true);
+  context.set_network_delegate(&network_delegate);
+  context.set_host_resolver(&host_resolver);
+  host_resolver.rules()->AddSimulatedFailure("*");
+  context.Init();
+
+  TestDelegate d;
+  scoped_ptr<URLRequest> req(context.CreateRequest(
+      GURL("http://test_intercept/foo"), DEFAULT_PRIORITY, &d));
+
+  EXPECT_FALSE(req->response_info().network_accessed);
+
+  req->Start();
+  base::RunLoop().Run();
+  EXPECT_TRUE(req->response_info().network_accessed);
+}
 
 }  // namespace net

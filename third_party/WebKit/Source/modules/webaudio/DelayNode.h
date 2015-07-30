@@ -25,9 +25,7 @@
 #ifndef DelayNode_h
 #define DelayNode_h
 
-#include "modules/webaudio/AudioBasicProcessorNode.h"
-#include "modules/webaudio/DelayProcessor.h"
-#include "wtf/PassRefPtr.h"
+#include "modules/webaudio/AudioNode.h"
 
 namespace blink {
 
@@ -36,12 +34,12 @@ class ExceptionState;
 class DelayNode final : public AudioNode {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static DelayNode* create(AudioContext*, float sampleRate, double maxDelayTime, ExceptionState&);
+    static DelayNode* create(AudioContext&, float sampleRate, double maxDelayTime, ExceptionState&);
     DECLARE_VIRTUAL_TRACE();
     AudioParam* delayTime();
 
 private:
-    DelayNode(AudioContext*, float sampleRate, double maxDelayTime);
+    DelayNode(AudioContext&, float sampleRate, double maxDelayTime);
 
     Member<AudioParam> m_delayTime;
 };

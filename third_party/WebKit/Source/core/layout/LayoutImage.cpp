@@ -41,13 +41,13 @@
 #include "core/layout/HitTestResult.h"
 #include "core/layout/LayoutPart.h"
 #include "core/layout/LayoutView.h"
-#include "core/layout/PaintInfo.h"
 #include "core/layout/TextRunConstructor.h"
 #include "core/page/Page.h"
 #include "core/paint/ImagePainter.h"
 #include "core/svg/graphics/SVGImage.h"
 #include "platform/fonts/Font.h"
 #include "platform/fonts/FontCache.h"
+#include "platform/geometry/DoubleRect.h"
 
 namespace blink {
 
@@ -138,7 +138,7 @@ void LayoutImage::invalidatePaintAndMarkForLayoutIfNeeded()
     updateIntrinsicSizeIfNeeded(newIntrinsicSize);
 
     // In the case of generated image content using :before/:after/content, we might not be
-    // in the render tree yet. In that case, we just need to update our intrinsic size.
+    // in the layout tree yet. In that case, we just need to update our intrinsic size.
     // layout() will be called after we are inserted in the tree which will take care of
     // what we are doing here.
     if (!containingBlock())
@@ -154,7 +154,7 @@ void LayoutImage::invalidatePaintAndMarkForLayoutIfNeeded()
     // FIXME: We only need to recompute the containing block's preferred size if the containing block's size
     // depends on the image's size (i.e., the container uses shrink-to-fit sizing).
     // There's no easy way to detect that shrink-to-fit is needed, always force a layout.
-    bool containingBlockNeedsToRecomputePreferredSize = style()->logicalWidth().isPercent() || style()->logicalMaxWidth().isPercent()  || style()->logicalMinWidth().isPercent();
+    bool containingBlockNeedsToRecomputePreferredSize = style()->logicalWidth().hasPercent() || style()->logicalMaxWidth().hasPercent()  || style()->logicalMinWidth().hasPercent();
 
     if (imageSourceHasChangedSize && (!imageSizeIsConstrained || containingBlockNeedsToRecomputePreferredSize)) {
         setNeedsLayoutAndFullPaintInvalidation(LayoutInvalidationReason::SizeChanged);
@@ -183,14 +183,11 @@ bool LayoutImage::intersectsVisibleViewport()
     while (layoutView->frame()->ownerLayoutObject())
         layoutView = layoutView->frame()->ownerLayoutObject()->view();
     mapRectToPaintInvalidationBacking(layoutView, rect, 0);
-    return rect.intersects(LayoutRect(layoutView->frameView()->visualViewportRect()));
+    return rect.intersects(LayoutRect(layoutView->frameView()->scrollableArea()->visibleContentRectDouble()));
 }
 
 PaintInvalidationReason LayoutImage::invalidatePaintIfNeeded(PaintInvalidationState& paintInvalidationState, const LayoutBoxModelObject& paintInvalidationContainer)
 {
-    if (!RuntimeEnabledFeatures::slimmingPaintEnabled())
-        return LayoutReplaced::invalidatePaintIfNeeded(paintInvalidationState, paintInvalidationContainer);
-
     if (!imageResource() || !imageResource()->image() || !imageResource()->image()->maybeAnimated()
         || intersectsVisibleViewport()) {
         return LayoutReplaced::invalidatePaintIfNeeded(paintInvalidationState, paintInvalidationContainer);
@@ -299,18 +296,6 @@ bool LayoutImage::nodeAtPoint(HitTestResult& result, const HitTestLocation& loca
     HitTestResult tempResult(result.hitTestRequest(), result.hitTestLocation());
     bool inside = LayoutReplaced::nodeAtPoint(tempResult, locationInContainer, accumulatedOffset, hitTestAction);
 
-    if (tempResult.innerNode() && node()) {
-        if (HTMLMapElement* map = imageMap()) {
-            LayoutRect contentBox = contentBoxRect();
-            float scaleFactor = 1 / style()->effectiveZoom();
-            LayoutPoint mapLocation = locationInContainer.point() - toLayoutSize(accumulatedOffset) - locationOffset() - toLayoutSize(contentBox.location());
-            mapLocation.scale(scaleFactor, scaleFactor);
-
-            if (map->mapMouseEvent(mapLocation, contentBox.size(), tempResult))
-                tempResult.setInnerNonSharedNode(node());
-        }
-    }
-
     if (!inside && result.hitTestRequest().listBased())
         result.append(tempResult);
     if (inside)
@@ -358,7 +343,7 @@ void LayoutImage::computeIntrinsicRatioInformation(FloatSize& intrinsicSize, dou
 {
     LayoutReplaced::computeIntrinsicRatioInformation(intrinsicSize, intrinsicRatio);
 
-    // Our intrinsicSize is empty if we're rendering generated images with relative width/height. Figure out the right intrinsic size to use.
+    // Our intrinsicSize is empty if we're laying out generated images with relative width/height. Figure out the right intrinsic size to use.
     if (intrinsicSize.isEmpty() && (m_imageResource->imageHasRelativeWidth() || m_imageResource->imageHasRelativeHeight())) {
         LayoutObject* containingBlock = isOutOfFlowPositioned() ? container() : this->containingBlock();
         if (containingBlock->isBox()) {

@@ -27,6 +27,13 @@ struct SkDCubic {
         kYAxis
     };
 
+    enum CubicType {
+        kUnsplit_SkDCubicType,
+        kSplitAtLoop_SkDCubicType,
+        kSplitAtInflection_SkDCubicType,
+        kSplitAtMaxCurvature_SkDCubicType,
+    };
+
     bool collapsed() const {
         return fPts[0].approximatelyEqual(fPts[1]) && fPts[0].approximatelyEqual(fPts[2])
                 && fPts[0].approximatelyEqual(fPts[3]);
@@ -50,27 +57,34 @@ struct SkDCubic {
     double binarySearch(double min, double max, double axisIntercept, SearchAxis xAxis) const;
     double calcPrecision() const;
     SkDCubicPair chopAt(double t) const;
-    bool clockwise() const;
     static void Coefficients(const double* cubic, double* A, double* B, double* C, double* D);
-    static bool ComplexBreak(const SkPoint pts[4], SkScalar* t);
+    static bool ComplexBreak(const SkPoint pts[4], SkScalar* t, CubicType* cubicType);
     int convexHull(char order[kPointCount]) const;
+
+    void debugInit() {
+        sk_bzero(fPts, sizeof(fPts));
+    }
+
     void dump() const;  // callable from the debugger when the implementation code is linked in
     void dumpID(int id) const;
     void dumpInner() const;
     SkDVector dxdyAtT(double t) const;
     bool endsAreExtremaInXOrY() const;
-    static int FindExtrema(double a, double b, double c, double d, double tValue[2]);
+    static int FindExtrema(const double src[], double tValue[2]);
     int findInflections(double tValues[2]) const;
 
     static int FindInflections(const SkPoint a[kPointCount], double tValues[2]) {
         SkDCubic cubic;
-        cubic.set(a);
-        return cubic.findInflections(tValues);
+        return cubic.set(a).findInflections(tValues);
     }
 
     int findMaxCurvature(double tValues[]) const;
     bool hullIntersects(const SkDCubic& c2, bool* isLinear) const;
+    bool hullIntersects(const SkDConic& c, bool* isLinear) const;
+    bool hullIntersects(const SkDQuad& c2, bool* isLinear) const;
+    bool hullIntersects(const SkDPoint* pts, int ptCount, bool* isLinear) const;
     bool isLinear(int startIndex, int endIndex) const;
+    bool monotonicInX() const;
     bool monotonicInY() const;
     void otherPts(int index, const SkDPoint* o1Pts[kPointCount - 1]) const;
     SkDPoint ptAtT(double t) const;
@@ -80,19 +94,30 @@ struct SkDCubic {
     int searchRoots(double extremes[6], int extrema, double axisIntercept,
                     SearchAxis xAxis, double* validRoots) const;
 
-    void set(const SkPoint pts[kPointCount]) {
+    /**
+     *  Return the number of valid roots (0 < root < 1) for this cubic intersecting the
+     *  specified horizontal line.
+     */
+    int horizontalIntersect(double yIntercept, double roots[3]) const;
+    /**
+     *  Return the number of valid roots (0 < root < 1) for this cubic intersecting the
+     *  specified vertical line.
+     */
+    int verticalIntersect(double xIntercept, double roots[3]) const;
+
+    const SkDCubic& set(const SkPoint pts[kPointCount]) {
         fPts[0] = pts[0];
         fPts[1] = pts[1];
         fPts[2] = pts[2];
         fPts[3] = pts[3];
+        return *this;
     }
 
     SkDCubic subDivide(double t1, double t2) const;
 
     static SkDCubic SubDivide(const SkPoint a[kPointCount], double t1, double t2) {
         SkDCubic cubic;
-        cubic.set(a);
-        return cubic.subDivide(t1, t2);
+        return cubic.set(a).subDivide(t1, t2);
     }
 
     void subDivide(const SkDPoint& a, const SkDPoint& d, double t1, double t2, SkDPoint p[2]) const;
@@ -100,11 +125,10 @@ struct SkDCubic {
     static void SubDivide(const SkPoint pts[kPointCount], const SkDPoint& a, const SkDPoint& d, double t1,
                           double t2, SkDPoint p[2]) {
         SkDCubic cubic;
-        cubic.set(pts);
-        cubic.subDivide(a, d, t1, t2, p);
+        cubic.set(pts).subDivide(a, d, t1, t2, p);
     }
 
-    SkDPoint top(double startT, double endT) const;
+    double top(const SkDCubic& dCurve, double startT, double endT, SkDPoint*topPt) const;
     SkDQuad toQuad() const;
 
     static const int gPrecisionUnit;

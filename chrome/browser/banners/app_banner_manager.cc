@@ -6,11 +6,13 @@
 
 #include "base/metrics/field_trial.h"
 #include "chrome/browser/banners/app_banner_data_fetcher.h"
+#include "chrome/browser/banners/app_banner_debug_log.h"
 #include "chrome/browser/banners/app_banner_settings_helper.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/frame_navigate_params.h"
+#include "content/public/common/origin_util.h"
 #include "net/base/load_flags.h"
 #include "ui/gfx/screen.h"
 
@@ -47,10 +49,13 @@ void AppBannerManager::DidFinishLoad(
     return;
   }
 
-  // A secure scheme is required to show banners, so exit early if we see the
+  // A secure origin is required to show banners, so exit early if we see the
   // URL is invalid.
-  if (!validated_url.SchemeIsSecure() && !gDisableSecureCheckForTesting)
+  if (!content::IsOriginSecure(validated_url) &&
+      !gDisableSecureCheckForTesting) {
+    OutputDeveloperNotShownMessage(web_contents(), kNotServedFromSecureOrigin);
     return;
+  }
 
   // Kick off the data retrieval pipeline.
   data_fetcher_ = CreateAppBannerDataFetcher(weak_factory_.GetWeakPtr(),
@@ -59,7 +64,9 @@ void AppBannerManager::DidFinishLoad(
 }
 
 
-bool AppBannerManager::OnInvalidManifest(AppBannerDataFetcher* fetcher) {
+bool AppBannerManager::HandleNonWebApp(const std::string& platform,
+                                       const GURL& url,
+                                       const std::string& id) {
   return false;
 }
 

@@ -6,10 +6,14 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/callback_helpers.h"
+#include "base/logging.h"
 #include "crypto/secure_util.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
+#include "net/cert/cert_status_flags.h"
+#include "net/cert/cert_verifier.h"
 #include "net/cert/x509_certificate.h"
 #include "net/http/transport_security_state.h"
 #include "net/socket/client_socket_factory.h"
@@ -23,6 +27,31 @@
 
 namespace remoting {
 namespace protocol {
+
+namespace {
+
+// A CertVerifier which rejects every certificate.
+class FailingCertVerifier : public net::CertVerifier {
+ public:
+  FailingCertVerifier() {}
+  ~FailingCertVerifier() override {}
+
+  int Verify(net::X509Certificate* cert,
+             const std::string& hostname,
+             const std::string& ocsp_response,
+             int flags,
+             net::CRLSet* crl_set,
+             net::CertVerifyResult* verify_result,
+             const net::CompletionCallback& callback,
+             scoped_ptr<Request>* out_req,
+             const net::BoundNetLog& net_log) override {
+    verify_result->verified_cert = cert;
+    verify_result->cert_status = net::CERT_STATUS_INVALID;
+    return net::ERR_CERT_INVALID;
+  }
+};
+
+}  // namespace
 
 // static
 scoped_ptr<SslHmacChannelAuthenticator>
@@ -80,7 +109,7 @@ void SslHmacChannelAuthenticator::SecureAndAuthenticate(
     }
 
     net::SSLConfig ssl_config;
-    ssl_config.require_forward_secrecy = true;
+    ssl_config.require_ecdhe = true;
 
     scoped_ptr<net::SSLServerSocket> server_socket =
         net::CreateSSLServerSocket(socket.Pass(),
@@ -95,6 +124,7 @@ void SslHmacChannelAuthenticator::SecureAndAuthenticate(
 #endif
   } else {
     transport_security_state_.reset(new net::TransportSecurityState);
+    cert_verifier_.reset(new FailingCertVerifier);
 
     net::SSLConfig::CertAndStatus cert_and_status;
     cert_and_status.cert_status = net::CERT_STATUS_AUTHORITY_INVALID;
@@ -112,6 +142,7 @@ void SslHmacChannelAuthenticator::SecureAndAuthenticate(
     net::HostPortPair host_and_port(kSslFakeHostName, 0);
     net::SSLClientSocketContext context;
     context.transport_security_state = transport_security_state_.get();
+    context.cert_verifier = cert_verifier_.get();
     scoped_ptr<net::ClientSocketHandle> socket_handle(
         new net::ClientSocketHandle);
     socket_handle->SetSocket(socket.Pass());
@@ -280,20 +311,12 @@ void SslHmacChannelAuthenticator::CheckDone(bool* callback_called) {
     if (callback_called)
       *callback_called = true;
 
-    CallDoneCallback(net::OK, socket_.Pass());
+    base::ResetAndReturn(&done_callback_).Run(net::OK, socket_.Pass());
   }
 }
 
 void SslHmacChannelAuthenticator::NotifyError(int error) {
-  CallDoneCallback(error, nullptr);
-}
-
-void SslHmacChannelAuthenticator::CallDoneCallback(
-    int error,
-    scoped_ptr<net::StreamSocket> socket) {
-  DoneCallback callback = done_callback_;
-  done_callback_.Reset();
-  callback.Run(error, socket.Pass());
+  base::ResetAndReturn(&done_callback_).Run(error, nullptr);
 }
 
 }  // namespace protocol

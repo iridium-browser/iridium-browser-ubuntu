@@ -15,6 +15,7 @@
 #include "base/observer_list.h"
 #include "chrome/browser/chromeos/base/locale_util.h"
 #include "chrome/browser/chromeos/login/signin/oauth2_login_manager.h"
+#include "chrome/browser/chromeos/login/signin/token_handle_util.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "chromeos/login/auth/authenticator.h"
 #include "chromeos/login/auth/user_context.h"
@@ -191,6 +192,10 @@ class UserSessionManager
       const user_manager::User* user,
       const locale_util::SwitchLanguageCallback& callback) const;
 
+  // Switch to the locale that |profile| wishes to use and invoke |callback|.
+  void RespectLocalePreferenceWrapper(Profile* profile,
+                                      const base::Closure& callback);
+
   // Restarts Chrome if needed. This happens when user session has custom
   // flags/switches enabled. Another case when owner has setup custom flags,
   // they are applied on login screen as well but not to user session.
@@ -214,6 +219,9 @@ class UserSessionManager
 
   void ActiveUserChanged(const user_manager::User* active_user) override;
 
+  // This method will be called when user have obtained oauth2 tokens.
+  void OnOAuth2TokensFetched(UserContext context);
+
   // Returns default IME state for user session.
   scoped_refptr<input_method::InputMethodManager::State> GetDefaultIMEState(
       Profile* profile);
@@ -230,7 +238,10 @@ class UserSessionManager
   // Removes a profile from the per-user input methods states map.
   void RemoveProfileForTesting(Profile* profile);
 
+  const UserContext& user_context() const { return user_context_; }
   bool has_auth_cookies() const { return has_auth_cookies_; }
+
+  void Shutdown();
 
  private:
   friend class test::UserSessionManagerTestApi;
@@ -350,14 +361,17 @@ class UserSessionManager
                                LoginDisplayHost* login_host,
                                bool locale_pref_checked);
 
-  // Switch to the locale that |profile| wishes to use and invoke |callback|.
-  void RespectLocalePreferenceWrapper(Profile* profile,
-                                      const base::Closure& callback);
-
   static void RunCallbackOnLocaleLoaded(
       const base::Closure& callback,
       InputEventsBlocker* input_events_blocker,
       const locale_util::LanguageSwitchResult& result);
+
+  // Callback invoked when |token_handle_util_| has finished.
+  void OnTokenHandleObtained(const user_manager::UserID& id,
+                             TokenHandleUtil::TokenHandleStatus status);
+
+  // Returns |true| if token handles should be used on this device.
+  bool TokenHandlesEnabled();
 
   // Test API methods.
 
@@ -370,6 +384,23 @@ class UserSessionManager
   void set_should_launch_browser_in_tests(bool should_launch_browser) {
     should_launch_browser_ = should_launch_browser;
   }
+
+  // The user pods display type for histogram.
+  enum UserPodsDisplay {
+    // User pods enabling or disabling is possible either via local settings or
+    // via domain policy. The former method only applies to regular devices,
+    // whereas the latter is for enterprise-managed devices. Therefore, we have
+    // four possible combiations.
+    USER_PODS_DISPLAY_ENABLED_REGULAR = 0,
+    USER_PODS_DISPLAY_ENABLED_MANAGED = 1,
+    USER_PODS_DISPLAY_DISABLED_REGULAR = 2,
+    USER_PODS_DISPLAY_DISABLED_MANAGED = 3,
+    // Maximum histogram value.
+    NUM_USER_PODS_DISPLAY = 4
+  };
+
+  // Sends metrics for user pods display when existing user has logged in.
+  void SendUserPodsMetrics();
 
   UserSessionManagerDelegate* delegate_;
 
@@ -425,6 +456,8 @@ class UserSessionManager
   scoped_ptr<EasyUnlockKeyManager> easy_unlock_key_manager_;
   bool running_easy_unlock_key_ops_;
   base::Closure easy_unlock_key_ops_finished_callback_;
+
+  scoped_ptr<TokenHandleUtil> token_handle_util_;
 
   // Whether should launch browser, tests may override this value.
   bool should_launch_browser_;

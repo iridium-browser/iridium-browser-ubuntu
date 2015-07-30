@@ -133,12 +133,15 @@
             },
           },
         }],
-        ['OS!="win" and OS!="mac" and use_openssl==1', {
-          'sources!': [
-            'utility/importer/nss_decryptor.cc',
-          ]
+        ['OS!="android"', {
+          'dependencies': [
+            '../net/net.gyp:net_utility_services',
+          ],
+          'sources': [
+            '<@(chrome_utility_importer_sources)',
+          ],
         }],
-        ['OS!="win" and OS!="mac" and use_openssl==0', {
+        ['use_nss_certs==1', {
           'dependencies': [
             '../crypto/crypto.gyp:crypto',
           ],
@@ -147,13 +150,11 @@
             'utility/importer/nss_decryptor_system_nss.h',
           ],
         }],
-        ['OS!="android"', {
+        ['OS=="android" and use_seccomp_bpf==1', {
           'dependencies': [
-            '../net/net.gyp:net_utility_services',
+            '../sandbox/sandbox.gyp:seccomp_bpf',
           ],
-          'sources': [
-            '<@(chrome_utility_importer_sources)',
-          ],
+          'defines': ['USE_SECCOMP_BPF'],
         }],
         ['enable_extensions==1', {
           'dependencies': [
@@ -199,9 +200,6 @@
             'utility/local_discovery/service_discovery_message_handler.cc',
             'utility/local_discovery/service_discovery_message_handler.h',
           ]
-        }],
-        ['safe_browsing==1', {
-          'defines': [ 'FULL_SAFE_BROWSING' ],
         }],
       ],
       # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.

@@ -8,6 +8,7 @@
 
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "components/autofill/content/renderer/form_autofill_util.h"
 #include "components/autofill/core/common/form_data_predictions.h"
@@ -142,13 +143,17 @@ bool LocateSpecificPasswords(std::vector<WebInputElement> passwords,
       *current_password = passwords[0];
       break;
     case 2:
-      if (passwords[0].value() == passwords[1].value()) {
-        // Two identical passwords: assume we are seeing a new password with a
-        // confirmation. This can be either a sign-up form or a password change
-        // form that does not ask for the old password.
+      if (!passwords[0].value().isEmpty() &&
+          passwords[0].value() == passwords[1].value()) {
+        // Two identical non-empty passwords: assume we are seeing a new
+        // password with a confirmation. This can be either a sign-up form or a
+        // password change form that does not ask for the old password.
         *new_password = passwords[0];
       } else {
         // Assume first is old password, second is new (no choice but to guess).
+        // This case also includes empty passwords in order to allow filling of
+        // password change forms (that also could autofill for sign up form, but
+        // we can't do anything with this using only client side information).
         *current_password = passwords[0];
         *new_password = passwords[1];
       }
@@ -187,9 +192,10 @@ void FindPredictedUsernameElement(
     WebVector<WebFormControlElement>* control_elements,
     WebInputElement* predicted_username_element) {
   FormData form_data;
-  if (!WebFormElementToFormData(form, WebFormControlElement(), REQUIRE_NONE,
-                                EXTRACT_NONE, &form_data, nullptr))
+  if (!WebFormElementToFormData(form, WebFormControlElement(), EXTRACT_NONE,
+                                &form_data, nullptr)) {
     return;
+  }
 
   // Matching only requires that action and name of the form match to allow
   // the username to be updated even if the form is changed after page load.
@@ -207,7 +213,7 @@ void FindPredictedUsernameElement(
     return;
 
   std::vector<blink::WebFormControlElement> autofillable_elements =
-      ExtractAutofillableElementsFromSet(*control_elements, REQUIRE_NONE);
+      ExtractAutofillableElementsFromSet(*control_elements);
 
   const autofill::FormFieldData& username_field = predictions_iterator->second;
   for (size_t i = 0; i < autofillable_elements.size(); ++i) {
@@ -260,7 +266,19 @@ void GetPasswordForm(
         layout_sequence.push_back('N');
     }
 
-    if (input_element->isPasswordField()) {
+    // If the password field is readonly, the page is likely using a virtual
+    // keyboard and bypassing the password field value (see
+    // http://crbug.com/475488). There is nothing Chrome can do to fill
+    // passwords for now. Continue processing in case when the password field
+    // was made readonly by JavaScript before submission. We can do this by
+    // checking whether password element was updated not from JavaScript.
+    if (input_element->isPasswordField() &&
+        (!input_element->isReadOnly() ||
+         (nonscript_modified_values &&
+          nonscript_modified_values->find(*input_element) !=
+              nonscript_modified_values->end()) ||
+         HasAutocompleteAttributeValue(*input_element, "current_password") ||
+         HasAutocompleteAttributeValue(*input_element, "new-password"))) {
       passwords.push_back(*input_element);
       // If we have not yet considered any element to be the username so far,
       // provisionally select the input element just before the first password
@@ -396,6 +414,14 @@ void GetPasswordForm(
       password_form->new_password_marked_by_site = true;
   }
 
+  if (username_element.isNull()) {
+    // To get a better idea on how password forms without a username field
+    // look like, report the total number of text and password fields.
+    UMA_HISTOGRAM_COUNTS_100(
+        "PasswordManager.EmptyUsernames.TextAndPasswordFieldCount",
+        layout_sequence.size());
+  }
+
   password_form->scheme = PasswordForm::SCHEME_HTML;
   password_form->ssl_valid = false;
   password_form->preferred = false;
@@ -447,7 +473,6 @@ scoped_ptr<PasswordForm> CreatePasswordForm(
 
   WebFormElementToFormData(web_form,
                            blink::WebFormControlElement(),
-                           REQUIRE_NONE,
                            EXTRACT_NONE,
                            &password_form->form_data,
                            NULL /* FormFieldData */);

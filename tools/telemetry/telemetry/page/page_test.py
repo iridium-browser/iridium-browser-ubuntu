@@ -142,13 +142,6 @@ class PageTest(object):
     """Sets the BrowserFinderOptions instance to use."""
     self.options = options
 
-  def DidRunTest(self, browser, results): # pylint: disable=W0613
-    """Override to do operations after all page set(s) are completed.
-
-    This will occur before the browser is torn down.
-    """
-    self.options = None
-
   def WillNavigateToPage(self, page, tab):
     """Override to do operations before the page is navigated, notably Telemetry
     will already have performed the following operations on the browser before
@@ -159,12 +152,6 @@ class PageTest(object):
   def DidNavigateToPage(self, page, tab):
     """Override to do operations right after the page is navigated and after
     all waiting for completion has occurred."""
-
-  def WillRunActions(self, page, tab):
-    """Override to do operations before running the actions on the page."""
-
-  def DidRunActions(self, page, tab):
-    """Override to do operations after running the actions on the page."""
 
   def CleanUpAfterPage(self, page, tab):
     """Called after the test run method was run, even if it failed."""
@@ -207,15 +194,9 @@ class PageTest(object):
 
   def RunPage(self, page, tab, results):
     # Run actions.
-    interactive = self.options and self.options.interactive
     action_runner = action_runner_module.ActionRunner(
         tab, skip_waits=page.skip_waits)
-    self.WillRunActions(page, tab)
-    if interactive:
-      action_runner.PauseInteractive()
-    else:
-      page.RunPageInteractions(action_runner)
-    self.DidRunActions(page, tab)
+    page.RunPageInteractions(action_runner)
     self.ValidateAndMeasurePage(page, tab, results)
 
   def RunNavigateSteps(self, page, tab):

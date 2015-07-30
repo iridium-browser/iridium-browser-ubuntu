@@ -58,9 +58,6 @@ const int kMaxConcurrentPushedStreams = 1000;
 // yielding.
 const int kMaxReadBytesWithoutYielding = 32 * 1024;
 
-// The initial receive window size for both streams and sessions.
-const int32 kDefaultInitialRecvWindowSize = 10 * 1024 * 1024;  // 10MB
-
 // First and last valid stream IDs. As we always act as the client,
 // start at 1 for the first stream id.
 const SpdyStreamId kFirstStreamId = 1;
@@ -245,9 +242,9 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
               bool enable_compression,
               bool enable_ping_based_connection_checking,
               NextProto default_protocol,
-              size_t stream_initial_recv_window_size,
+              size_t session_max_recv_window_size,
+              size_t stream_max_recv_window_size,
               size_t initial_max_concurrent_streams,
-              size_t max_concurrent_streams_limit,
               TimeFunc time_func,
               const HostPortPair& trusted_spdy_proxy,
               NetLog* net_log);
@@ -361,10 +358,6 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
                   bool* was_npn_negotiated,
                   NextProto* protocol_negotiated);
 
-  // Fills SSL Certificate Request info |cert_request_info| and returns
-  // true when SSL is in use.
-  bool GetSSLCertRequestInfo(SSLCertRequestInfo* cert_request_info);
-
   // Send a WINDOW_UPDATE frame for a stream. Called by a stream
   // whenever receive window size is increased.
   void SendStreamWindowUpdate(SpdyStreamId stream_id,
@@ -463,11 +456,6 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
     return stream_initial_send_window_size_;
   }
 
-  // Returns the current |stream_initial_recv_window_size_|.
-  int32 stream_initial_recv_window_size() const {
-    return stream_initial_recv_window_size_;
-  }
-
   // Returns true if no stream in the session can send data due to
   // session flow control.
   bool IsSendStalled() const {
@@ -511,7 +499,9 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
     return buffered_spdy_framer_->GetDataFrameMaximumPayload();
   }
 
-  static int32 GetInitialWindowSize(NextProto protocol) {
+  // Default value of SETTINGS_INITIAL_WINDOW_SIZE per protocol specification.
+  // A session is always created with this initial window size.
+  static int32 GetDefaultInitialWindowSize(NextProto protocol) {
     return protocol < kProtoSPDY4MinimumVersion ? 65536 : 65535;
   }
 
@@ -541,6 +531,10 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
   FRIEND_TEST_ALL_PREFIXES(SpdySessionTest, AdjustSendWindowSize);
   FRIEND_TEST_ALL_PREFIXES(SpdySessionTest, SessionFlowControlInactiveStream);
   FRIEND_TEST_ALL_PREFIXES(SpdySessionTest, SessionFlowControlPadding);
+  FRIEND_TEST_ALL_PREFIXES(SpdySessionTest,
+                           SessionFlowControlTooMuchDataTwoDataFrames);
+  FRIEND_TEST_ALL_PREFIXES(SpdySessionTest,
+                           StreamFlowControlTooMuchDataTwoDataFrames);
   FRIEND_TEST_ALL_PREFIXES(SpdySessionTest, SessionFlowControlNoReceiveLeaks);
   FRIEND_TEST_ALL_PREFIXES(SpdySessionTest, SessionFlowControlNoSendLeaks);
   FRIEND_TEST_ALL_PREFIXES(SpdySessionTest, SessionFlowControlEndToEnd);
@@ -1065,7 +1059,6 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
 
   // Limits
   size_t max_concurrent_streams_;  // 0 if no limit
-  size_t max_concurrent_streams_limit_;
   size_t max_concurrent_pushed_streams_;
 
   // Some statistics counters for the session.
@@ -1112,6 +1105,25 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
   // The (version-dependent) flow control state.
   FlowControlState flow_control_state_;
 
+  // Current send window size.  Zero unless session flow control is turned on.
+  int32 session_send_window_size_;
+
+  // Maximum receive window size.  Each time a WINDOW_UPDATE is sent, it
+  // restores the receive window size to this value.  Zero unless session flow
+  // control is turned on.
+  int32 session_max_recv_window_size_;
+
+  // Sum of |session_unacked_recv_window_bytes_| and current receive window
+  // size.  Zero unless session flow control is turned on.
+  // TODO(bnc): Rename or change semantics so that |window_size_| is actual
+  // window size.
+  int32 session_recv_window_size_;
+
+  // When bytes are consumed, SpdyIOBuffer destructor calls back to SpdySession,
+  // and this member keeps count of them until the corresponding WINDOW_UPDATEs
+  // are sent.  Zero unless session flow control is turned on.
+  int32 session_unacked_recv_window_bytes_;
+
   // Initial send window size for this session's streams. Can be
   // changed by an arriving SETTINGS frame. Newly created streams use
   // this value for the initial send window size.
@@ -1122,13 +1134,7 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
   // frame with window size announcement to be sent on startup. Newly
   // created streams will use this value for the initial receive
   // window size.
-  int32 stream_initial_recv_window_size_;
-
-  // Session flow control variables. All zero unless session flow
-  // control is turned on.
-  int32 session_send_window_size_;
-  int32 session_recv_window_size_;
-  int32 session_unacked_recv_window_bytes_;
+  int32 stream_max_recv_window_size_;
 
   // A queue of stream IDs that have been send-stalled at some point
   // in the past.

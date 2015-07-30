@@ -39,16 +39,17 @@ DEFAULT_OPTIONS = cros_test_lib.EasyAttr(
     debug=False,
     postsync_patch=True,
 )
-DEFAULT_CONFIG = cbuildbot_config._config(
+DEFAULT_CONFIG = cbuildbot_config.BuildConfig(
     name=DEFAULT_BOT_NAME,
     master=True,
     boards=[DEFAULT_BOARD],
     postsync_patch=True,
-    child_configs=[cbuildbot_config._config(name='foo', postsync_patch=False,
-                                            boards=[]),
-                   cbuildbot_config._config(name='bar', postsync_patch=False,
-                                            boards=[]),
-                  ],
+    child_configs=[
+        cbuildbot_config.BuildConfig(
+            name='foo', postsync_patch=False, boards=[]),
+        cbuildbot_config.BuildConfig(
+            name='bar', postsync_patch=False, boards=[]),
+    ],
 )
 
 DEFAULT_VERSION = '6543.2.1'
@@ -65,7 +66,7 @@ def _ExtendDefaultConfig(**kwargs):
   """Extend DEFAULT_CONFIG with keys/values in kwargs."""
   config_kwargs = DEFAULT_CONFIG.copy()
   config_kwargs.update(kwargs)
-  return cbuildbot_config._config(**config_kwargs)
+  return cbuildbot_config.BuildConfig(**config_kwargs)
 
 
 class ExceptionsTest(cros_test_lib.TestCase):
@@ -149,7 +150,7 @@ class BuilderRunPickleTest(_BuilderRunTestCase):
   """Make sure BuilderRun objects can be pickled."""
 
   def setUp(self):
-    self.real_config = cbuildbot_config.config['x86-alex-release-group']
+    self.real_config = cbuildbot_config.GetConfig()['x86-alex-release-group']
     self.PatchObject(cbuildbot_run._BuilderRunBase, 'GetVersion',
                      return_value=DEFAULT_VERSION)
 
@@ -338,19 +339,22 @@ class BuilderRunTest(_BuilderRunTestCase):
 
 class GetVersionTest(_BuilderRunTestCase):
   """Test the GetVersion and GetVersionInfo methods of BuilderRun class."""
-  # Access to protected member.
-  # pylint: disable=W0212
+
+  # pylint: disable=protected-access
+
+  def testGetVersionInfoNotSet(self):
+    """Verify we throw an error when the version hasn't been set."""
+    run = self._NewBuilderRun()
+    self.assertRaises(RuntimeError, run.GetVersionInfo)
 
   def testGetVersionInfo(self):
+    """Verify we return the right version info value."""
+    # Prepare a real BuilderRun object with a version_info tag.
+    run = self._NewBuilderRun()
     verinfo = object()
-
-    target = ('chromite.cbuildbot.cbuildbot_run.manifest_version.'
-              'VersionInfo.from_repo')
-    with mock.patch(target, return_value=verinfo) as m:
-      result = cbuildbot_run._BuilderRunBase.GetVersionInfo(DEFAULT_BUILDROOT)
-      self.assertEquals(result, verinfo)
-
-      m.assert_called_once_with(DEFAULT_BUILDROOT)
+    run.attrs.version_info = verinfo
+    result = run.GetVersionInfo()
+    self.assertEquals(verinfo, result)
 
   def _TestGetVersionReleaseTag(self, release_tag):
     with mock.patch.object(cbuildbot_run._BuilderRunBase,
@@ -366,7 +370,7 @@ class GetVersionTest(_BuilderRunTestCase):
 
       # Run the test return the result.
       result = run.GetVersion()
-      m.assert_called_once_with(DEFAULT_BUILDROOT)
+      m.assert_called_once_with()
       if release_tag is None:
         verinfo_mock.VersionString.assert_called_once()
 

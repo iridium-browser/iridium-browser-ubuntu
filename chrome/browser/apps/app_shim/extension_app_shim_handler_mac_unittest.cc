@@ -11,6 +11,7 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "extensions/common/extension.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -116,16 +117,16 @@ class FakeHost : public apps::AppShimHandler::Host {
 
   MOCK_METHOD1(OnAppLaunchComplete, void(AppShimLaunchResult));
 
-  virtual void OnAppClosed() override {
+  void OnAppClosed() override {
     handler_->OnShimClose(this);
     ++close_count_;
   }
-  virtual void OnAppHide() override {}
-  virtual void OnAppRequestUserAttention(AppShimAttentionType type) override {}
-  virtual base::FilePath GetProfilePath() const override {
+  void OnAppHide() override {}
+  void OnAppRequestUserAttention(AppShimAttentionType type) override {}
+  base::FilePath GetProfilePath() const override {
     return profile_path_;
   }
-  virtual std::string GetAppId() const override { return app_id_; }
+  std::string GetAppId() const override { return app_id_; }
 
   int close_count() { return close_count_; }
 
@@ -200,6 +201,7 @@ class ExtensionAppShimHandlerTest : public testing::Test {
                            std::vector<base::FilePath>());
   }
 
+  content::TestBrowserThreadBundle thread_bundle_;
   MockDelegate* delegate_;
   scoped_ptr<TestingExtensionAppShimHandler> handler_;
   base::FilePath profile_path_a_;

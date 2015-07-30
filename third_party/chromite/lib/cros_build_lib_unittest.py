@@ -12,7 +12,6 @@ import difflib
 import errno
 import functools
 import itertools
-import logging
 import mock
 import os
 import signal
@@ -25,8 +24,9 @@ import __builtin__
 from chromite.cbuildbot import constants
 from chromite.cbuildbot import repository
 from chromite.lib import cros_build_lib
-from chromite.lib import git
+from chromite.lib import cros_logging as logging
 from chromite.lib import cros_test_lib
+from chromite.lib import git
 from chromite.lib import osutils
 from chromite.lib import partial_mock
 from chromite.lib import retry_util
@@ -195,15 +195,40 @@ class TestRunCommandNoMock(cros_test_lib.TestCase):
     self.assertRaises(cros_build_lib.RunCommandError, cros_build_lib.RunCommand,
                       ['/does/not/exist'], error_code_ok=True)
 
+  def testInputString(self):
+    """Verify input argument when it is a string."""
+    for data in ('', 'foo', 'bar\nhigh'):
+      result = cros_build_lib.RunCommand(['cat'], input=data)
+      self.assertEqual(result.output, data)
+
+  def testInputFileObject(self):
+    """Verify input argument when it is a file object."""
+    result = cros_build_lib.RunCommand(['cat'], input=open('/dev/null'))
+    self.assertEqual(result.output, '')
+
+    result = cros_build_lib.RunCommand(['cat'], input=open(__file__))
+    self.assertEqual(result.output, osutils.ReadFile(__file__))
+
+  def testInputFileDescriptor(self):
+    """Verify input argument when it is a file descriptor."""
+    with open('/dev/null') as f:
+      result = cros_build_lib.RunCommand(['cat'], input=f.fileno())
+      self.assertEqual(result.output, '')
+
+    with open(__file__) as f:
+      result = cros_build_lib.RunCommand(['cat'], input=f.fileno())
+      self.assertEqual(result.output, osutils.ReadFile(__file__))
+
 
 def _ForceLoggingLevel(functor):
   def inner(*args, **kwargs):
-    current = cros_build_lib.logger.getEffectiveLevel()
+    logger = logging.getLogger()
+    current = logger.getEffectiveLevel()
     try:
-      cros_build_lib.logger.setLevel(logging.INFO)
+      logger.setLevel(logging.INFO)
       return functor(*args, **kwargs)
     finally:
-      cros_build_lib.logger.setLevel(current)
+      logger.setLevel(current)
   return inner
 
 
@@ -625,6 +650,15 @@ class TestRunCommandOutput(cros_test_lib.TempDirTestCase,
     # Never mute: we should get 'foo\n' and 'bar\n'.
     self.assertEqual(self._CaptureRunCommand(command, mute_output=False),
                      ('foo\n', 'bar\n'))
+
+  def testRunCommandAtNoticeLevel(self):
+    """Ensure that RunCommand prints output when mute_output is False."""
+    # Needed by cros_sdk and brillo/cros chroot.
+    with self.OutputCapturer():
+      cros_build_lib.RunCommand(['echo', 'foo'], mute_output=False,
+                                error_code_ok=True, print_cmd=False,
+                                debug_level=logging.NOTICE)
+    self.AssertOutputContainsLine('foo')
 
 
 class TestRetries(cros_test_lib.MockTempDirTestCase):
@@ -1540,46 +1574,6 @@ class TestGetChrootVersion(cros_test_lib.MockTestCase):
     """Verify we don't blow up when there is no chroot yet"""
     ret = cros_build_lib.GetChrootVersion(chroot='/.$om3/place/nowhere')
     self.assertEqual(ret, None)
-
-
-class TestChrootPathHelpers(cros_test_lib.TestCase):
-  """Verify we correctly reinterpret paths to be used inside/outside chroot."""
-
-  @mock.patch('chromite.lib.cros_build_lib.IsInsideChroot', return_value=True)
-  def testToChrootPathInChroot(self, _inchroot_mock):
-    """Test we return the original path to be used in chroot while in chroot."""
-    path = '/foo/woo/bar'
-    self.assertEqual(cros_build_lib.ToChrootPath(path), path)
-
-  @mock.patch('chromite.lib.cros_build_lib.IsInsideChroot', return_value=False)
-  def testToChrootPathOutChroot(self, _inchroot_mock):
-    """Test we convert the path to be used in chroot while outside chroot."""
-    subpath = 'bar/haa/ooo'
-    path = os.path.join(constants.SOURCE_ROOT, subpath)
-    chroot_path = git.ReinterpretPathForChroot(path)
-    self.assertEqual(cros_build_lib.ToChrootPath(path), chroot_path)
-
-  @mock.patch('chromite.lib.cros_build_lib.IsInsideChroot', return_value=True)
-  def testFromChrootInChroot(self, _inchroot_mock):
-    """Test we return the original chroot path while in chroot."""
-    path = '/foo/woo/bar'
-    self.assertEqual(cros_build_lib.FromChrootPath(path), path)
-
-  @mock.patch('chromite.lib.cros_build_lib.IsInsideChroot', return_value=False)
-  def testFromChrootOutChroot(self, _inchroot_mock):
-    """Test we convert the chroot path to be used outside chroot."""
-    # Test that chroot source root has been replaced in the path.
-    subpath = 'foo/woo/bar'
-    chroot_path = os.path.join(constants.CHROOT_SOURCE_ROOT, subpath)
-    path = os.path.join(constants.SOURCE_ROOT, subpath)
-    self.assertEqual(cros_build_lib.FromChrootPath(chroot_path), path)
-
-    # Test that a chroot path has been converted.
-    chroot_path = '/foo/woo/bar'
-    path = os.path.join(constants.SOURCE_ROOT,
-                        constants.DEFAULT_CHROOT_DIR,
-                        chroot_path.strip(os.path.sep))
-    self.assertEqual(cros_build_lib.FromChrootPath(chroot_path), path)
 
 
 class CollectionTest(cros_test_lib.TestCase):

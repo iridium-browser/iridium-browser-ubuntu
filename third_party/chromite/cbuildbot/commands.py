@@ -11,23 +11,25 @@ import collections
 import fnmatch
 import glob
 import json
-import logging
 import multiprocessing
 import os
 import re
 import shutil
 import tempfile
 
+from chromite.cbuildbot import autotest_rpc_errors
 from chromite.cbuildbot import failures_lib
 from chromite.cbuildbot import constants
-from chromite.cros.tests import cros_vm_test
+from chromite.cli.cros.tests import cros_vm_test
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import git
 from chromite.lib import gob_util
 from chromite.lib import gs
 from chromite.lib import locking
 from chromite.lib import osutils
 from chromite.lib import parallel
+from chromite.lib import path_util
 from chromite.lib import portage_util
 from chromite.lib import retry_util
 from chromite.lib import timeout_util
@@ -83,7 +85,7 @@ def RunBuildScript(buildroot, cmd, chromite_cmd=False, **kwargs):
     cmd = cmd[:]
     cmd[0] = os.path.join(buildroot, constants.CHROMITE_BIN_SUBDIR, cmd[0])
     if enter_chroot:
-      cmd[0] = git.ReinterpretPathForChroot(cmd[0])
+      cmd[0] = path_util.ToChrootPath(cmd[0])
 
   # If we are entering the chroot, create status file for tracking what
   # packages failed to build.
@@ -94,7 +96,7 @@ def RunBuildScript(buildroot, cmd, chromite_cmd=False, **kwargs):
       kwargs['extra_env'] = (kwargs.get('extra_env') or {}).copy()
       status_file = stack.Add(tempfile.NamedTemporaryFile, dir=chroot_tmp)
       kwargs['extra_env']['PARALLEL_EMERGE_STATUS_FILE'] = \
-          git.ReinterpretPathForChroot(status_file.name)
+          path_util.ToChrootPath(status_file.name)
     runcmd = cros_build_lib.RunCommand
     if sudo:
       runcmd = cros_build_lib.SudoRunCommand
@@ -102,7 +104,7 @@ def RunBuildScript(buildroot, cmd, chromite_cmd=False, **kwargs):
       return runcmd(cmd, **kwargs)
     except cros_build_lib.RunCommandError as ex:
       # Print the original exception.
-      cros_build_lib.Error('\n%s', ex)
+      logging.error('\n%s', ex)
 
       # Check whether a specific package failed. If so, wrap the exception
       # appropriately. These failures are usually caused by a recent CL, so we
@@ -392,9 +394,29 @@ def VerifyBinpkg(buildroot, board, pkg, packages, extra_env=None):
   pattern = r'^\[(ebuild|binary).*%s' % re.escape(pkg)
   m = re.search(pattern, result.output, re.MULTILINE)
   if m and m.group(1) == 'ebuild':
-    cros_build_lib.Info('(output):\n%s', result.output)
+    logging.info('(output):\n%s', result.output)
     msg = 'Cannot find prebuilts for %s on %s' % (pkg, board)
     raise MissingBinpkg(msg)
+
+
+def RunBinhostTest(buildroot):
+  """Test prebuilts for all boards, making sure everybody gets Chrome prebuilts.
+
+  Args:
+    buildroot: The buildroot of the current build.
+  """
+  cmd = ['../cbuildbot/binhost_test', '--log-level=debug']
+  RunBuildScript(buildroot, cmd, chromite_cmd=True, enter_chroot=True)
+
+
+def UpdateBinhostJson(buildroot):
+  """Test prebuilts for all boards, making sure everybody gets Chrome prebuilts.
+
+  Args:
+    buildroot: The buildroot of the current build.
+  """
+  cmd = ['../cbuildbot/update_binhost_json']
+  RunBuildScript(buildroot, cmd, chromite_cmd=True, enter_chroot=True)
 
 
 def Build(buildroot, board, build_autotest, usepkg, chrome_binhost_only,
@@ -467,7 +489,7 @@ def GetFirmwareVersions(buildroot, board):
                          'usr', 'sbin', 'chromeos-firmwareupdate')
   if not os.path.isfile(updater):
     return FirmwareVersions(None, None)
-  updater = git.ReinterpretPathForChroot(updater)
+  updater = path_util.ToChrootPath(updater)
 
   result = cros_build_lib.RunCommand([updater, '-V'], enter_chroot=True,
                                      capture_output=True, log_output=True,
@@ -511,7 +533,7 @@ def GenerateAuZip(buildroot, image_dir, extra_env=None):
   Raises:
     failures_lib.BuildScriptFailure if the called script fails.
   """
-  chroot_image_dir = git.ReinterpretPathForChroot(image_dir)
+  chroot_image_dir = path_util.ToChrootPath(image_dir)
   cmd = ['./build_library/generate_au_zip.py', '-o', chroot_image_dir]
   RunBuildScript(buildroot, cmd, extra_env=extra_env, enter_chroot=True)
 
@@ -557,8 +579,8 @@ def RunTestImage(buildroot, board, image_dir, results_dir):
   cmd = [
       'test_image',
       '--board', board,
-      '--test_results_root', cros_build_lib.ToChrootPath(results_dir),
-      cros_build_lib.ToChrootPath(image_dir),
+      '--test_results_root', path_util.ToChrootPath(results_dir),
+      path_util.ToChrootPath(image_dir),
   ]
   RunBuildScript(buildroot, cmd, enter_chroot=True, chromite_cmd=True,
                  sudo=True)
@@ -576,7 +598,8 @@ def RunUnitTests(buildroot, board, full, blacklist=None, extra_env=None):
   #   uprev noticed were changed.
   if not full:
     package_file = _PACKAGE_FILE % {'buildroot': buildroot}
-    cmd += ['--package_file=%s' % git.ReinterpretPathForChroot(package_file)]
+    cmd += ['--package_file=%s' %
+            path_util.ToChrootPath(package_file)]
 
   if blacklist:
     cmd += ['--blacklist_packages=%s' % ' '.join(blacklist)]
@@ -612,6 +635,7 @@ def RunTestSuite(buildroot, board, image_dir, results_dir, test_type,
       cmd.append('--only_verify')
       cmd.append('--suite=smoke')
     elif test_type == constants.TELEMETRY_SUITE_TEST_TYPE:
+      cmd.append('--only_verify')
       cmd.append('--suite=telemetry_unit')
     else:
       cmd.append('--quick_update')
@@ -641,9 +665,9 @@ def RunDevModeTest(buildroot, board, image_dir):
 
 
 def RunCrosVMTest(board, image_dir):
-  """Runs cros_vm_test script to verify cros flash/deploy works."""
+  """Runs cros_vm_test script to verify cros commands work."""
   image_path = os.path.join(image_dir, 'chromiumos_test_image.bin')
-  test = cros_vm_test.CrosCommandTest(board, image_path)
+  test = cros_vm_test.CrosVMTest(board, image_path)
   test.Run()
 
 
@@ -668,7 +692,7 @@ def ListFailedTests(results_path):
   failed_tests = []
   processed_tests = []
   for report in reports:
-    cros_build_lib.Info('Parsing test report %s', report)
+    logging.info('Parsing test report %s', report)
     # Format used in the report:
     #   /path/to/base/dir/test_harness/all/SimpleTestUpdateAndVerify/ \
     #     2_autotest_tests/results-01-security_OpenSSLBlacklist [  FAILED  ]
@@ -834,7 +858,62 @@ def RunHWTestSuite(build, suite, board, pool=None, num=None, file_bugs=None,
                     a suite that has higher priority.
     debug: Whether we are in debug mode.
   """
-  # TODO(scottz): RPC client option names are misnomers crosbug.com/26445.
+  cmd = _CreateRunSuiteCommand(build, suite, board, pool, num, file_bugs,
+                               wait_for_results, priority, timeout_mins, retry,
+                               max_retries, minimum_duts, suite_min_duts)
+  try:
+    HWTestCreateAndWait(cmd, debug)
+  except cros_build_lib.RunCommandError as e:
+    result = e.result
+    # run_suite error codes:
+    #   0 - OK: Tests ran and passed.
+    #   1 - ERROR: Tests ran and failed (or timed out).
+    #   2 - WARNING: Tests ran and passed with warning(s). Note that 2
+    #         may also be CLIENT_HTTP_CODE error returned by
+    #         autotest_rpc_client.py. We ignore that case for now.
+    #   3 - INFRA_FAILURE: Tests did not complete due to lab issues.
+    #   4 - SUITE_TIMEOUT: Suite timed out. This could be caused by
+    #         infrastructure failures or by test failures.
+    # 11, 12, 13 for cases when rpc is down, see autotest_rpc_errors.py.
+    lab_warning_codes = (2,)
+    infra_error_codes = (3,
+                         autotest_rpc_errors.PROXY_CANNOT_SEND_REQUEST,
+                         autotest_rpc_errors.PROXY_CONNECTION_LOST,
+                         autotest_rpc_errors.PROXY_TIMED_OUT,)
+    timeout_codes = (4,)
+    board_not_available_codes = (5,)
+
+    if result.returncode in lab_warning_codes:
+      raise failures_lib.TestWarning('** Suite passed with a warning code **')
+    elif result.returncode in infra_error_codes:
+      raise failures_lib.TestLabFailure(
+          '** HWTest did not complete due to infrastructure issues '
+          '(code %d) **' % result.returncode)
+    elif result.returncode in timeout_codes:
+      raise failures_lib.SuiteTimedOut(
+          '** Suite timed out before completion **')
+    elif result.returncode in board_not_available_codes:
+      raise failures_lib.BoardNotAvailable(
+          '** Board was not availble in the lab **')
+    elif result.returncode != 0:
+      raise failures_lib.TestFailure(
+          '** HWTest failed (code %d) **' % result.returncode)
+
+
+# pylint: disable=docstring-missing-args
+def _CreateRunSuiteCommand(build, suite, board, pool=None, num=None,
+                           file_bugs=None, wait_for_results=None,
+                           priority=None, timeout_mins=None,
+                           retry=None, max_retries=None, minimum_duts=0,
+                           suite_min_duts=0):
+  """Create a proxied run_suite command for the given arguments.
+
+  Args:
+    See RunHWTestSuite.
+
+  Returns:
+    Proxied run_suite command.
+  """
   cmd = [_AUTOTEST_RPC_CLIENT,
          _AUTOTEST_RPC_HOSTNAME,
          'RunSuite',
@@ -873,47 +952,74 @@ def RunHWTestSuite(build, suite, board, pool=None, num=None, file_bugs=None,
   if suite_min_duts != 0:
     cmd += ['--suite_min_duts', str(suite_min_duts)]
 
+  return cmd
+# pylint: enable=docstring-missing-args
+
+
+# TODO(akeshet): This function exists solely to support a caller in
+# paygen_build_lib. That caller should be refactored to use RunHWTestSuite, at
+# which point this can be folded into RunHWTestSuite.
+def HWTestCreateAndWait(cmd, debug=False):
+  """Start and wait on HWTest suite in the lab, retrying on proxy failures.
+
+  Args:
+    cmd: Proxied run_suite command as returned by _CreateRunSuiteCommand.
+    debug: If True, log command rather than running it.
+  """
+  job_id = _HWTestStart(cmd, debug)
+  if job_id is not None:
+    _HWTestWait(cmd, job_id)
+
+
+def _HWTestStart(cmd, debug=True):
+  """Start a suite in the HWTest lab, and return its id.
+
+  Args:
+    cmd: The base run_suite command, as created by _CreateRunSuiteCommand.
+    debug: If True, log command that would have run rather than starting suite.
+
+  Returns:
+    Job id of created suite. Returned id will be None if no job id was created.
+  """
+  cmd = list(cmd)
+  cmd += ['-c']
+
   if debug:
-    cros_build_lib.Info('RunHWTestSuite would run: %s',
-                        cros_build_lib.CmdToStr(cmd))
+    logging.info('RunHWTestSuite would run: %s', cros_build_lib.CmdToStr(cmd))
   else:
-    if timeout_mins is None:
-      result = cros_build_lib.RunCommand(cmd, error_code_ok=True)
-    else:
-      with timeout_util.Timeout(
-          timeout_mins * 60 + constants.HWTEST_TIMEOUT_EXTENSION):
-        result = cros_build_lib.RunCommand(cmd, error_code_ok=True)
+    max_retry = 10
+    retry_on = (autotest_rpc_errors.PROXY_CANNOT_SEND_REQUEST,)
+    try:
+      result = retry_util.RunCommandWithRetries(max_retry, cmd,
+                                                retry_on=retry_on,
+                                                capture_output=True,
+                                                combine_stdout_stderr=True)
+    except cros_build_lib.RunCommandError as e:
+      logging.error('%s', e.result.output)
+      raise
 
-    # run_suite error codes:
-    #   0 - OK: Tests ran and passed.
-    #   1 - ERROR: Tests ran and failed (or timed out).
-    #   2 - WARNING: Tests ran and passed with warning(s). Note that 2
-    #         may also be CLIENT_HTTP_CODE error returned by
-    #         autotest_rpc_client.py. We ignore that case for now.
-    #   3 - INFRA_FAILURE: Tests did not complete due to lab issues.
-    #   4 - SUITE_TIMEOUT: Suite timed out. This could be caused by
-    #         infrastructure failures or by test failures.
-    # 11, 12, 13 for cases when rpc is down, see autotest_rpc_errors.py.
-    lab_warning_codes = (2,)
-    infra_error_codes = (3, 11, 12, 13)
-    timeout_codes = (4,)
-    board_not_available_codes = (5,)
+    logging.info('%s', result.output)
+    m = re.search(r'Created suite job:.*object_id=(?P<job_id>\d*)',
+                  result.output)
+    if m:
+      return m.group('job_id')
 
-    if result.returncode in lab_warning_codes:
-      raise failures_lib.TestWarning('** Suite passed with a warning code **')
-    elif result.returncode in infra_error_codes:
-      raise failures_lib.TestLabFailure(
-          '** HWTest did not complete due to infrastructure issues '
-          '(code %d) **' % result.returncode)
-    elif result.returncode in timeout_codes:
-      raise failures_lib.SuiteTimedOut(
-          '** Suite timed out before completion **')
-    elif result.returncode in board_not_available_codes:
-      raise failures_lib.BoardNotAvailable(
-          '** Board was not availble in the lab **')
-    elif result.returncode != 0:
-      raise failures_lib.TestFailure(
-          '** HWTest failed (code %d) **' % result.returncode)
+
+def _HWTestWait(cmd, job_id):
+  """Wait for HWTest suite to complete, retrying rpc failures.
+
+  Args:
+    cmd: The base run_suite command that was used to launcht the suite, as
+         created by _CreateRunSuiteCommand.
+    job_id: The job id of the suite that was created.
+  """
+  cmd = list(cmd)
+  cmd += ['-m', str(job_id)]
+
+  retry_on = (autotest_rpc_errors.PROXY_CANNOT_SEND_REQUEST,
+              autotest_rpc_errors.PROXY_CONNECTION_LOST,)
+  max_retry = 10
+  retry_util.RunCommandWithRetries(max_retry, cmd, retry_on=retry_on)
 
 
 def AbortHWTests(config_type_or_name, version, debug, suite=''):
@@ -939,13 +1045,12 @@ def AbortHWTests(config_type_or_name, version, debug, suite=''):
          '-i', substr,
          '-s', suite]
   if debug:
-    cros_build_lib.Info('AbortHWTests would run: %s',
-                        cros_build_lib.CmdToStr(cmd))
+    logging.info('AbortHWTests would run: %s', cros_build_lib.CmdToStr(cmd))
   else:
     try:
       cros_build_lib.RunCommand(cmd)
     except cros_build_lib.RunCommandError:
-      cros_build_lib.Warning('AbortHWTests failed', exc_info=True)
+      logging.warning('AbortHWTests failed', exc_info=True)
 
 
 def GenerateStackTraces(buildroot, board, test_results_dir,
@@ -979,7 +1084,7 @@ def GenerateStackTraces(buildroot, board, test_results_dir,
         if not got_symbols or curr_file.find('crasher_nobreakpad') == 0:
           continue
         # Precess the minidump from within chroot.
-        minidump = git.ReinterpretPathForChroot(full_file_path)
+        minidump = path_util.ToChrootPath(full_file_path)
         cwd = os.path.join(buildroot, 'src', 'scripts')
         cros_build_lib.RunCommand(
             ['minidump_stackwalk', minidump, symbol_dir], cwd=cwd,
@@ -1012,8 +1117,7 @@ def GenerateStackTraces(buildroot, board, test_results_dir,
         # Ex: crbug.com/167497
         if not asan_log_signaled:
           asan_log_signaled = True
-          cros_build_lib.Error(
-              'Asan crash occurred. See asan_logs in Artifacts.')
+          logging.error('Asan crash occurred. See asan_logs in Artifacts.')
           cros_build_lib.PrintBuildbotStepFailure()
 
       # Append the processed file to archive.
@@ -1071,7 +1175,7 @@ def MarkChromeAsStable(buildroot,
   if portage_atom_string:
     chrome_atom = portage_atom_string.splitlines()[-1].partition('=')[-1]
   if not chrome_atom:
-    cros_build_lib.Info('Found nothing to rev.')
+    logging.info('Found nothing to rev.')
     return None
 
   for board in boards:
@@ -1095,8 +1199,8 @@ def MarkChromeAsStable(buildroot,
           ['emerge-%s' % board, '-p', '--quiet', '=%s' % chrome_atom],
           enter_chroot=True, combine_stdout_stderr=True, capture_output=True)
     except cros_build_lib.RunCommandError:
-      cros_build_lib.Error('Cannot emerge-%s =%s\nIs Chrome pinned to an '
-                           'older version?' % (board, chrome_atom))
+      logging.error('Cannot emerge-%s =%s\nIs Chrome pinned to an older '
+                    'version?' % (board, chrome_atom))
       raise
 
   return chrome_atom
@@ -1115,8 +1219,8 @@ def UprevPackages(buildroot, boards, overlays, enter_chroot=True):
   """Uprevs non-browser chromium os packages that have changed."""
   drop_file = _PACKAGE_FILE % {'buildroot': buildroot}
   if enter_chroot:
-    overlays = [git.ReinterpretPathForChroot(x) for x in overlays]
-    drop_file = git.ReinterpretPathForChroot(drop_file)
+    overlays = [path_util.ToChrootPath(x) for x in overlays]
+    drop_file = path_util.ToChrootPath(drop_file)
   cmd = ['cros_mark_as_stable', '--all',
          '--boards=%s' % ':'.join(boards),
          '--overlays=%s' % ':'.join(overlays),
@@ -1177,7 +1281,7 @@ def ExtractDependencies(buildroot, packages, board=None, useflags=None,
   # the deps into a file.
   with tempfile.NamedTemporaryFile(
       dir=os.path.join(buildroot, 'chroot', 'tmp')) as f:
-    cmd += ['--output-path', cros_build_lib.ToChrootPath(f.name)]
+    cmd += ['--output-path', path_util.ToChrootPath(f.name)]
     RunBuildScript(buildroot, cmd, enter_chroot=True,
                    chromite_cmd=True, capture_output=True, extra_env=env)
     return json.loads(f.read())
@@ -1392,7 +1496,7 @@ def PushImages(board, archive_url, dryrun, profile, sign_types=()):
     log_cmd.append('--sign-types=%s' % ' '.join(sign_types))
 
   log_cmd.append(archive_url)
-  cros_build_lib.Info('Running: %s' % cros_build_lib.CmdToStr(log_cmd))
+  logging.info('Running: %s' % cros_build_lib.CmdToStr(log_cmd))
 
   try:
     return pushimage.PushImage(archive_url, board, profile=profile,
@@ -1438,7 +1542,7 @@ def MakeNetboot(buildroot, board, image_dir):
   """
   cmd = ['./make_netboot.sh',
          '--board=%s' % board,
-         '--image_dir=%s' % git.ReinterpretPathForChroot(image_dir)]
+         '--image_dir=%s' % path_util.ToChrootPath(image_dir)]
   RunBuildScript(buildroot, cmd, capture_output=True, enter_chroot=True)
 
 
@@ -1453,7 +1557,7 @@ def MakeFactoryToolkit(buildroot, board, output_dir, version=None):
   """
   cmd = ['./make_factory_toolkit.sh',
          '--board=%s' % board,
-         '--output_dir=%s' % git.ReinterpretPathForChroot(output_dir)]
+         '--output_dir=%s' % path_util.ToChrootPath(output_dir)]
   if version is not None:
     cmd.extend(['--version', version])
   RunBuildScript(buildroot, cmd, capture_output=True, enter_chroot=True)
@@ -1471,7 +1575,7 @@ def BuildRecoveryImage(buildroot, board, image_dir, extra_env):
   image = os.path.join(image_dir, constants.BASE_IMAGE_BIN)
   cmd = ['./mod_image_for_recovery.sh',
          '--board=%s' % board,
-         '--image=%s' % git.ReinterpretPathForChroot(image)]
+         '--image=%s' % path_util.ToChrootPath(image)]
   RunBuildScript(buildroot, cmd, extra_env=extra_env, capture_output=True,
                  enter_chroot=True)
 
@@ -1774,6 +1878,30 @@ def BuildStandaloneArchive(archive_dir, image_dir, artifact_info):
   return [filename]
 
 
+def BuildGceTarball(archive_dir, image_dir, image, output):
+  """Builds a tarball that can be converted into a GCE image.
+
+  GCE has some very specific requirements about the format of VM
+  images. The full list can be found at
+  https://cloud.google.com/compute/docs/tutorials/building-images#requirements
+
+  Args:
+    archive_dir: Directory to store the output tarball.
+    image_dir: Directory where raw disk file can be found.
+    image: Name of raw disk file.
+    output: Basename of the resulting tarball.
+  """
+  with osutils.TempDir() as tempdir:
+    temp_disk_raw = os.path.join(tempdir, 'disk.raw')
+    output_file = os.path.join(archive_dir, output)
+    os.symlink(os.path.join(image_dir, image), temp_disk_raw)
+
+    cros_build_lib.CreateTarball(
+        output_file, tempdir, inputs=['disk.raw'],
+        compression=cros_build_lib.COMP_GZIP, extra_args=['--dereference'])
+    return output_file
+
+
 def BuildFirmwareArchive(buildroot, board, archive_dir):
   """Build firmware_from_source.tar.bz2 in archive_dir from build root.
 
@@ -1915,11 +2043,11 @@ def GeneratePayloads(build_root, target_image_path, archive_dir, full=False,
   suffix = 'dev.bin'
 
   cwd = os.path.join(build_root, 'src', 'scripts')
-  path = git.ReinterpretPathForChroot(
+  path = path_util.ToChrootPath(
       os.path.join(build_root, 'src', 'platform', 'dev', 'host'))
   chroot_dir = os.path.join(build_root, 'chroot')
   chroot_tmp = os.path.join(chroot_dir, 'tmp')
-  chroot_target = git.ReinterpretPathForChroot(target_image_path)
+  chroot_target = path_util.ToChrootPath(target_image_path)
 
   with osutils.TempDir(base_dir=chroot_tmp,
                        prefix='generate_payloads') as temp_dir:
@@ -1994,10 +2122,10 @@ def SyncChrome(build_root, chrome_root, useflags, tag=None, revision=None):
 def PatchChrome(chrome_root, patch, subdir):
   """Apply a patch to Chrome.
 
-   Args:
-     chrome_root: The directory where chrome is stored.
-     patch: Rietveld issue number to apply.
-     subdir: Subdirectory to apply patch in.
+  Args:
+    chrome_root: The directory where chrome is stored.
+    patch: Rietveld issue number to apply.
+    subdir: Subdirectory to apply patch in.
   """
   cmd = ['apply_issue', '-i', patch]
   cros_build_lib.RunCommand(cmd, cwd=os.path.join(chrome_root, subdir))

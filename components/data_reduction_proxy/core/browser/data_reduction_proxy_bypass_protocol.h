@@ -18,7 +18,6 @@ class URLRequest;
 namespace data_reduction_proxy {
 
 class DataReductionProxyConfig;
-class DataReductionProxyEventStore;
 
 // Class responsible for determining when a response should or should not cause
 // the data reduction proxy to be bypassed, and to what degree. Owned by the
@@ -26,10 +25,21 @@ class DataReductionProxyEventStore;
 class DataReductionProxyBypassProtocol
     : public net::NetworkChangeNotifier::IPAddressObserver {
  public:
-  // Constructs a DataReductionProxyBypassProtocol object. |config| and
-  // |event_store| must be non-NULL and outlive |this|.
-  DataReductionProxyBypassProtocol(DataReductionProxyConfig* config,
-                                   DataReductionProxyEventStore* event_store);
+  // Enum values that can be reported for the
+  // DataReductionProxy.ResponseProxyServerStatus histogram. These values must
+  // be kept in sync with their counterparts in histograms.xml. Visible here for
+  // testing purposes.
+  enum ResponseProxyServerStatus {
+    RESPONSE_PROXY_SERVER_STATUS_EMPTY = 0,
+    RESPONSE_PROXY_SERVER_STATUS_DRP,
+    RESPONSE_PROXY_SERVER_STATUS_NON_DRP_NO_VIA,
+    RESPONSE_PROXY_SERVER_STATUS_NON_DRP_WITH_VIA,
+    RESPONSE_PROXY_SERVER_STATUS_MAX
+  };
+
+  // Constructs a DataReductionProxyBypassProtocol object. |config| must be
+  // non-NULL and outlive |this|.
+  DataReductionProxyBypassProtocol(DataReductionProxyConfig* config);
 
   ~DataReductionProxyBypassProtocol() override;
 
@@ -40,7 +50,8 @@ class DataReductionProxyBypassProtocol
   // "block-once". Returns the DataReductionProxyBypassType (if not NULL).
   bool MaybeBypassProxyAndPrepareToRetry(
       net::URLRequest* request,
-      DataReductionProxyBypassType* proxy_bypass_type);
+      DataReductionProxyBypassType* proxy_bypass_type,
+      DataReductionProxyInfo* data_reduction_proxy_info);
 
   // Returns true if the request method is idempotent. Only idempotent requests
   // are retried on a bypass. Visible as part of the public API for testing.
@@ -52,9 +63,6 @@ class DataReductionProxyBypassProtocol
 
   // Must outlive |this|.
   DataReductionProxyConfig* config_;
-
-  // Must outlive |this|.
-  DataReductionProxyEventStore* event_store_;
 
   // The set of data reduction proxies through which a response has come back
   // with the data reduction proxy via header since the last network change.

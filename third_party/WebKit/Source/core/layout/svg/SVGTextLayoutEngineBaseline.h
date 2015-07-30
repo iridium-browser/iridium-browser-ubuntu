@@ -36,17 +36,22 @@ class SVGTextMetrics;
 class SVGTextLayoutEngineBaseline {
     WTF_MAKE_NONCOPYABLE(SVGTextLayoutEngineBaseline);
 public:
-    SVGTextLayoutEngineBaseline(const Font&);
+    SVGTextLayoutEngineBaseline(const Font&, float effectiveZoom);
 
     float calculateBaselineShift(const ComputedStyle&) const;
-    float calculateAlignmentBaselineShift(bool isVerticalText, const LayoutObject* textRenderer) const;
+    float calculateAlignmentBaselineShift(bool isVerticalText, const LayoutObject* textLayoutObject) const;
     float calculateGlyphOrientationAngle(bool isVerticalText, const SVGComputedStyle&, const UChar& character) const;
     float calculateGlyphAdvanceAndOrientation(bool isVerticalText, const SVGTextMetrics&, float angle, float& xOrientationShift, float& yOrientationShift) const;
 
 private:
-    EAlignmentBaseline dominantBaselineToAlignmentBaseline(bool isVerticalText, const LayoutObject* textRenderer) const;
+    EAlignmentBaseline dominantBaselineToAlignmentBaseline(bool isVerticalText, const LayoutObject* textLayoutObject) const;
 
     const Font& m_font;
+
+    // Everything we read from the m_font's font descriptor during layout is scaled by the effective
+    // zoom, as fonts always are in computed style. Since layout inside SVG takes place in unzoomed
+    // coordinates we have to compensate for zoom when reading values from the font descriptor.
+    float m_effectiveZoom;
 };
 
 } // namespace blink

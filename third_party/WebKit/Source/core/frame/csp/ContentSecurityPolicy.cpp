@@ -51,12 +51,14 @@
 #include "platform/network/ContentSecurityPolicyParsers.h"
 #include "platform/network/ContentSecurityPolicyResponseHeaders.h"
 #include "platform/network/FormData.h"
+#include "platform/network/ResourceRequest.h"
 #include "platform/network/ResourceResponse.h"
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/KnownPorts.h"
 #include "platform/weborigin/SchemeRegistry.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "public/platform/Platform.h"
+#include "public/platform/WebURLRequest.h"
 #include "wtf/StringHasher.h"
 #include "wtf/text/StringBuilder.h"
 #include "wtf/text/StringUTF8Adaptor.h"
@@ -85,8 +87,8 @@ const char ContentSecurityPolicy::PluginTypes[] = "plugin-types";
 const char ContentSecurityPolicy::ReflectedXSS[] = "reflected-xss";
 const char ContentSecurityPolicy::Referrer[] = "referrer";
 
-// Manifest Directives
-// https://w3c.github.io/manifest/#content-security-policy
+// CSP Editor's Draft:
+// https://w3c.github.io/webappsec/specs/content-security-policy
 const char ContentSecurityPolicy::ManifestSrc[] = "manifest-src";
 
 // Mixed Content Directive
@@ -166,7 +168,10 @@ void ContentSecurityPolicy::applyPolicySideEffectsToExecutionContext()
     m_selfProtocol = securityOrigin()->protocol();
     m_selfSource = adoptPtr(new CSPSource(this, m_selfProtocol, securityOrigin()->host(), securityOrigin()->port(), String(), CSPSource::NoWildcard, CSPSource::NoWildcard));
 
-    // If we're in a Document, set the referrer policy, mixed content checking, and sandbox
+    if (didSetReferrerPolicy())
+        m_executionContext->setReferrerPolicy(m_referrerPolicy);
+
+    // If we're in a Document, set mixed content checking and sandbox
     // flags, then dump all the parsing error messages, then poke at histograms.
     if (Document* document = this->document()) {
         if (m_sandboxMask != SandboxNone) {
@@ -175,8 +180,6 @@ void ContentSecurityPolicy::applyPolicySideEffectsToExecutionContext()
         }
         if (m_enforceStrictMixedContentChecking)
             document->enforceStrictMixedContentChecking();
-        if (didSetReferrerPolicy())
-            document->setReferrerPolicy(m_referrerPolicy);
         if (m_insecureRequestsPolicy == SecurityContext::InsecureRequestsUpgrade) {
             UseCounter::count(document, UseCounter::UpgradeInsecureRequestsEnabled);
             document->setInsecureRequestsPolicy(m_insecureRequestsPolicy);
@@ -934,6 +937,31 @@ bool ContentSecurityPolicy::shouldBypassMainWorld(const ExecutionContext* contex
             return document->frame()->script().shouldBypassMainWorldCSP();
     }
     return false;
+}
+
+bool ContentSecurityPolicy::isScriptResource(const ResourceRequest& resourceRequest)
+{
+    return WebURLRequest::RequestContextScript == resourceRequest.requestContext() || WebURLRequest::RequestContextImport == resourceRequest.requestContext() || WebURLRequest::RequestContextXSLT == resourceRequest.requestContext() || WebURLRequest::RequestContextPrefetch == resourceRequest.requestContext();
+}
+
+bool ContentSecurityPolicy::isStyleResource(const ResourceRequest& resourceRequest)
+{
+    return WebURLRequest::RequestContextStyle == resourceRequest.requestContext() || WebURLRequest::RequestContextPrefetch == resourceRequest.requestContext();
+}
+
+bool ContentSecurityPolicy::isImageResource(const ResourceRequest& resourceRequest)
+{
+    return WebURLRequest::RequestContextImage == resourceRequest.requestContext() || WebURLRequest::RequestContextFavicon == resourceRequest.requestContext() || WebURLRequest::RequestContextImageSet == resourceRequest.requestContext() || WebURLRequest::RequestContextPrefetch == resourceRequest.requestContext();
+}
+
+bool ContentSecurityPolicy::isFontResource(const ResourceRequest& resourceRequest)
+{
+    return WebURLRequest::RequestContextFont == resourceRequest.requestContext() || WebURLRequest::RequestContextPrefetch == resourceRequest.requestContext();
+}
+
+bool ContentSecurityPolicy::isMediaResource(const ResourceRequest& resourceRequest)
+{
+    return WebURLRequest::RequestContextAudio == resourceRequest.requestContext() || WebURLRequest::RequestContextVideo == resourceRequest.requestContext() || WebURLRequest::RequestContextTrack == resourceRequest.requestContext() || WebURLRequest::RequestContextPrefetch == resourceRequest.requestContext();
 }
 
 bool ContentSecurityPolicy::shouldSendViolationReport(const String& report) const

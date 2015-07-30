@@ -76,7 +76,7 @@ void DragCaretController::setCaretPosition(const VisiblePosition& position)
     if (m_position.isNull() || m_position.isOrphan()) {
         clearCaretRect();
     } else {
-        document->updateRenderTreeIfNeeded();
+        document->updateLayoutTreeIfNeeded();
         updateCaretRect(document, m_position);
     }
 }
@@ -123,37 +123,37 @@ static inline bool caretRendersInsideNode(Node* node)
     return node && !isRenderedTableElement(node) && !editingIgnoresContent(node);
 }
 
-LayoutBlock* CaretBase::caretRenderer(Node* node)
+LayoutBlock* CaretBase::caretLayoutObject(Node* node)
 {
     if (!node)
         return 0;
 
-    LayoutObject* renderer = node->layoutObject();
-    if (!renderer)
+    LayoutObject* layoutObject = node->layoutObject();
+    if (!layoutObject)
         return 0;
 
     // if caretNode is a block and caret is inside it then caret should be painted by that block
-    bool paintedByBlock = renderer->isLayoutBlock() && caretRendersInsideNode(node);
-    return paintedByBlock ? toLayoutBlock(renderer) : renderer->containingBlock();
+    bool paintedByBlock = layoutObject->isLayoutBlock() && caretRendersInsideNode(node);
+    return paintedByBlock ? toLayoutBlock(layoutObject) : layoutObject->containingBlock();
 }
 
-static void mapCaretRectToCaretPainter(LayoutObject* caretRenderer, LayoutBlock* caretPainter, LayoutRect& caretRect)
+static void mapCaretRectToCaretPainter(LayoutObject* caretLayoutObject, LayoutBlock* caretPainter, LayoutRect& caretRect)
 {
     // FIXME: This shouldn't be called on un-rooted subtrees.
     // FIXME: This should probably just use mapLocalToContainer.
-    // Compute an offset between the caretRenderer and the caretPainter.
+    // Compute an offset between the caretLayoutObject and the caretPainter.
 
-    ASSERT(caretRenderer->isDescendantOf(caretPainter));
+    ASSERT(caretLayoutObject->isDescendantOf(caretPainter));
 
     bool unrooted = false;
-    while (caretRenderer != caretPainter) {
-        LayoutObject* containerObject = caretRenderer->container();
+    while (caretLayoutObject != caretPainter) {
+        LayoutObject* containerObject = caretLayoutObject->container();
         if (!containerObject) {
             unrooted = true;
             break;
         }
-        caretRect.move(caretRenderer->offsetFromContainer(containerObject, caretRect.location()));
-        caretRenderer = containerObject;
+        caretRect.move(caretLayoutObject->offsetFromContainer(containerObject, caretRect.location()));
+        caretLayoutObject = containerObject;
     }
 
     if (unrooted)
@@ -169,15 +169,15 @@ bool CaretBase::updateCaretRect(Document* document, const PositionWithAffinity& 
 
     ASSERT(caretPosition.position().deprecatedNode()->layoutObject());
 
-    // First compute a rect local to the renderer at the selection start.
-    LayoutObject* renderer;
-    m_caretLocalRect = localCaretRectOfPosition(caretPosition, renderer);
+    // First compute a rect local to the layoutObject at the selection start.
+    LayoutObject* layoutObject;
+    m_caretLocalRect = localCaretRectOfPosition(caretPosition, layoutObject);
 
-    // Get the renderer that will be responsible for painting the caret
-    // (which is either the renderer we just found, or one of its containers).
-    LayoutBlock* caretPainter = caretRenderer(caretPosition.position().deprecatedNode());
+    // Get the layoutObject that will be responsible for painting the caret
+    // (which is either the layoutObject we just found, or one of its containers).
+    LayoutBlock* caretPainter = caretLayoutObject(caretPosition.position().deprecatedNode());
 
-    mapCaretRectToCaretPainter(renderer, caretPainter, m_caretLocalRect);
+    mapCaretRectToCaretPainter(layoutObject, caretPainter, m_caretLocalRect);
 
     return true;
 }
@@ -187,14 +187,14 @@ bool CaretBase::updateCaretRect(Document* document, const VisiblePosition& caret
     return updateCaretRect(document, PositionWithAffinity(caretPosition.deepEquivalent(), caretPosition.affinity()));
 }
 
-LayoutBlock* DragCaretController::caretRenderer() const
+LayoutBlock* DragCaretController::caretLayoutObject() const
 {
-    return CaretBase::caretRenderer(m_position.deepEquivalent().deprecatedNode());
+    return CaretBase::caretLayoutObject(m_position.deepEquivalent().deprecatedNode());
 }
 
 IntRect CaretBase::absoluteBoundsForLocalRect(Node* node, const LayoutRect& rect) const
 {
-    LayoutBlock* caretPainter = caretRenderer(node);
+    LayoutBlock* caretPainter = caretLayoutObject(node);
     if (!caretPainter)
         return IntRect();
 
@@ -205,7 +205,7 @@ IntRect CaretBase::absoluteBoundsForLocalRect(Node* node, const LayoutRect& rect
 
 void CaretBase::invalidateLocalCaretRect(Node* node, const LayoutRect& rect)
 {
-    LayoutBlock* caretPainter = caretRenderer(node);
+    LayoutBlock* caretPainter = caretLayoutObject(node);
     if (!caretPainter)
         return;
 
@@ -257,8 +257,8 @@ void CaretBase::paintCaret(Node* node, GraphicsContext* context, const LayoutPoi
         return;
 
     LayoutRect drawingRect = localCaretRectWithoutUpdate();
-    if (LayoutBlock* renderer = caretRenderer(node))
-        renderer->flipForWritingMode(drawingRect);
+    if (LayoutBlock* layoutObject = caretLayoutObject(node))
+        layoutObject->flipForWritingMode(drawingRect);
     drawingRect.moveBy(roundedIntPoint(paintOffset));
     LayoutRect caret = intersection(drawingRect, clipRect);
     if (caret.isEmpty())

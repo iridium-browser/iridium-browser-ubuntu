@@ -61,7 +61,7 @@ public:
     static bool IsOpaque(ResultAlpha r) {
         return kOpaque_ResultAlpha == r;
     }
-    
+
     /*
      *
      * Constructs the proper result code based on accumulated alpha masks
@@ -128,6 +128,41 @@ public:
                                       const SkImageInfo&, void* dst,
                                       size_t dstRowBytes,
                                       SkImageGenerator::ZeroInitialized);
+
+    /**
+     * Fill the remainder of the destination with a single color
+     *
+     * @param dstStartRow
+     * The destination row to fill from.
+     *
+     * @param numRows
+     * The number of rows to fill.
+     *
+     * @param colorOrIndex
+     * @param colorTable
+     * If dstInfo.colorType() is kIndex8, colorOrIndex is assumed to be a uint8_t
+     * index, and colorTable is ignored. Each 8-bit pixel will be set to (uint8_t)
+     * index.
+     *
+     * If dstInfo.colorType() is kN32, colorOrIndex is treated differently depending on
+     * whether colorTable is NULL:
+     *
+     * A NULL colorTable means colorOrIndex is treated as an SkPMColor (premul or
+     * unpremul, depending on dstInfo.alphaType()). Each 4-byte pixel will be set to
+     * colorOrIndex.
+
+     * A non-NULL colorTable means colorOrIndex is treated as a uint8_t index into
+     * the colorTable. i.e. each 4-byte pixel will be set to
+     * colorTable[(uint8_t) colorOrIndex].
+     *
+     * If dstInfo.colorType() is kGray, colorOrIndex is always treated as an 8-bit color.
+     *
+     * Other SkColorTypes are not supported.
+     *
+     */
+    static void Fill(void* dstStartRow, const SkImageInfo& dstInfo, size_t dstRowBytes,
+            uint32_t numRows, uint32_t colorOrIndex, const SkPMColor* colorTable);
+
     /**
      *  Swizzle the next line. Call height times, once for each row of source.
      *  @param src The next row of the source data.
@@ -156,6 +191,18 @@ public:
      *  destination?
      */
     void setDstRow(void* dst) { fDstRow = dst; }
+
+    /**
+     *  Get the next destination row to decode to
+     */
+    void* getDstRow() {
+        // kDesignateRow_NextMode does not update the fDstRow ptr.  This function is
+        // unnecessary in that case since fDstRow will always be equal to the pointer
+        // passed to CreateSwizzler().
+        SkASSERT(kDesignateRow_NextMode != fNextMode);
+        return fDstRow;
+    }
+
 private:
 
 #ifdef SK_DEBUG

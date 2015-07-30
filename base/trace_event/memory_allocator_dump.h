@@ -8,54 +8,70 @@
 #include "base/base_export.h"
 #include "base/basictypes.h"
 #include "base/logging.h"
-#include "base/trace_event/memory_allocator_attributes.h"
 #include "base/values.h"
 
 namespace base {
 namespace trace_event {
 
 class MemoryDumpManager;
+class ProcessMemoryDump;
 class TracedValue;
 
 // Data model for user-land memory allocator dumps.
 class BASE_EXPORT MemoryAllocatorDump {
  public:
-  MemoryAllocatorDump(const std::string& name, MemoryAllocatorDump* parent);
+  // MemoryAllocatorDump is owned by ProcessMemoryDump.
+  MemoryAllocatorDump(const std::string& absolute_name,
+                      ProcessMemoryDump* process_memory_dump);
   ~MemoryAllocatorDump();
 
-  const std::string& name() const { return name_; }
-  const MemoryAllocatorDump* parent() const { return parent_; }
+  // Standard attribute name to model total space requested by the allocator
+  // (e.g., amount of pages requested to the system).
+  static const char kNameOuterSize[];
 
-  void set_physical_size_in_bytes(uint64 value) {
-    physical_size_in_bytes_ = value;
-  }
-  uint64 physical_size_in_bytes() const { return physical_size_in_bytes_; }
+  // Standard attribute name to model space for allocated objects, without
+  // taking into account allocator metadata or fragmentation.
+  static const char kNameInnerSize[];
 
-  void set_allocated_objects_count(uint64 value) {
-    allocated_objects_count_ = value;
-  }
-  uint64 allocated_objects_count() const { return allocated_objects_count_; }
+  // Standard attribute name to model the number of objects allocated.
+  static const char kNameObjectsCount[];
 
-  void set_allocated_objects_size_in_bytes(uint64 value) {
-    allocated_objects_size_in_bytes_ = value;
-  }
-  uint64 allocated_objects_size_in_bytes() const {
-    return allocated_objects_size_in_bytes_;
-  }
+  static const char kTypeScalar[];    // Type name for scalar attributes.
+  static const char kTypeString[];    // Type name for string attributes.
+  static const char kUnitsBytes[];    // Unit name to represent bytes.
+  static const char kUnitsObjects[];  // Unit name to represent #objects.
 
-  void SetExtraAttribute(const std::string& name, int value);
-  int GetExtraIntegerAttribute(const std::string& name) const;
+  // Absolute name, unique within the scope of an entire ProcessMemoryDump.
+  const std::string& absolute_name() const { return absolute_name_; }
+
+  // Generic attribute setter / getter.
+  void Add(const std::string& name,
+           const char* type,
+           const char* units,
+           scoped_ptr<Value> value);
+  bool Get(const std::string& name,
+           const char** out_type,
+           const char** out_units,
+           const Value** out_value) const;
+
+  // Helper setter for scalar attributes.
+  void AddScalar(const std::string& name, const char* units, uint64 value);
+  void AddString(const std::string& name,
+                 const char* units,
+                 const std::string& value);
 
   // Called at trace generation time to populate the TracedValue.
   void AsValueInto(TracedValue* value) const;
 
+  // Get the ProcessMemoryDump instance that owns this.
+  ProcessMemoryDump* process_memory_dump() const {
+    return process_memory_dump_;
+  }
+
  private:
-  const std::string name_;
-  MemoryAllocatorDump* const parent_;  // Not owned.
-  uint64 physical_size_in_bytes_;
-  uint64 allocated_objects_count_;
-  uint64 allocated_objects_size_in_bytes_;
-  DictionaryValue extra_attributes_;
+  const std::string absolute_name_;
+  ProcessMemoryDump* const process_memory_dump_;  // Not owned (PMD owns this).
+  DictionaryValue attributes_;
 
   DISALLOW_COPY_AND_ASSIGN(MemoryAllocatorDump);
 };

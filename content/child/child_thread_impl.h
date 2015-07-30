@@ -223,8 +223,8 @@ class CONTENT_EXPORT ChildThreadImpl
   // IPC message handlers.
   void OnShutdown();
   void OnSetProfilerStatus(tracked_objects::ThreadData::Status status);
-  void OnGetChildProfilerData(int sequence_number);
-  void OnDumpHandles();
+  void OnGetChildProfilerData(int sequence_number, int current_profiling_phase);
+  void OnProfilingPhaseCompleted(int profiling_phase);
   void OnProcessBackgrounded(bool background);
 #ifdef IPC_MESSAGE_LOG_ENABLED
   void OnSetIPCLoggingEnabled(bool enable);
@@ -235,15 +235,6 @@ class CONTENT_EXPORT ChildThreadImpl
 
   void EnsureConnected();
 
-  class SingleProcessChannelDelegate;
-  class SingleProcessChannelDelegateDeleter {
-   public:
-    void operator()(SingleProcessChannelDelegate* delegate) const;
-  };
-
-  scoped_ptr<IPC::ScopedIPCSupport> ipc_support_;
-  scoped_ptr<SingleProcessChannelDelegate, SingleProcessChannelDelegateDeleter>
-      single_process_channel_delegate_;
   scoped_ptr<MojoApplication> mojo_application_;
 
   std::string channel_name_;

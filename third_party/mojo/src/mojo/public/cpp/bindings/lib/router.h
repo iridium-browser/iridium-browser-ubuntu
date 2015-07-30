@@ -24,7 +24,7 @@ class Router : public MessageReceiverWithResponder {
 
   // Sets the receiver to handle messages read from the message pipe that do
   // not have the kMessageIsResponse flag set.
-  void set_incoming_receiver(MessageReceiverWithResponder* receiver) {
+  void set_incoming_receiver(MessageReceiverWithResponderStatus* receiver) {
     incoming_receiver_ = receiver;
   }
 
@@ -38,6 +38,9 @@ class Router : public MessageReceiverWithResponder {
   // waiting to read from the pipe.
   bool encountered_error() const { return connector_.encountered_error(); }
 
+  // Is the router bound to a MessagePipe handle?
+  bool is_valid() const { return connector_.is_valid(); }
+
   void CloseMessagePipe() { connector_.CloseMessagePipe(); }
 
   ScopedMessagePipeHandle PassMessagePipe() {
@@ -49,9 +52,11 @@ class Router : public MessageReceiverWithResponder {
   bool AcceptWithResponder(Message* message,
                            MessageReceiver* responder) override;
 
-  // Blocks the current thread for the first incoming method call, i.e., either
-  // a call to a client method or a callback method.
-  bool WaitForIncomingMessage() { return connector_.WaitForIncomingMessage(); }
+  // Blocks the current thread until the first incoming method call, i.e.,
+  // either a call to a client method or a callback method, or |deadline|.
+  bool WaitForIncomingMessage(MojoDeadline deadline) {
+    return connector_.WaitForIncomingMessage(deadline);
+  }
 
   // Sets this object to testing mode.
   // In testing mode:
@@ -59,6 +64,8 @@ class Router : public MessageReceiverWithResponder {
   // - the connector continues working after seeing errors from its incoming
   //   receiver.
   void EnableTestingMode();
+
+  MessagePipeHandle handle() const { return connector_.handle(); }
 
  private:
   typedef std::map<uint64_t, MessageReceiver*> ResponderMap;
@@ -81,7 +88,7 @@ class Router : public MessageReceiverWithResponder {
   FilterChain filters_;
   Connector connector_;
   SharedData<Router*> weak_self_;
-  MessageReceiverWithResponder* incoming_receiver_;
+  MessageReceiverWithResponderStatus* incoming_receiver_;
   ResponderMap responders_;
   uint64_t next_request_id_;
   bool testing_mode_;

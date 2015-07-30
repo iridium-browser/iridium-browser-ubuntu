@@ -12,6 +12,7 @@
     'mojom_generated_outputs': [
       '<!@(python <(DEPTH)/third_party/mojo/src/mojo/public/tools/bindings/mojom_list_outputs.py --basedir <(mojom_base_output_dir) <@(mojom_files))',
     ],
+    'require_interface_bindings%': 1,
   },
   # Given mojom files as inputs, generate sources.  These sources will be
   # exported to another target (via dependent_settings) to be compiled.  This
@@ -60,9 +61,17 @@
         '<@(mojom_import_args)',
         '-o', '<(SHARED_INTERMEDIATE_DIR)',
         '--java_output_directory=<(java_out_dir)',
+        '--dart_mojo_root=//third_party/mojo/src',
       ],
       'message': 'Generating Mojo bindings from <@(mojom_files)',
     }
+  ],
+  'conditions': [
+    ['require_interface_bindings==1', {
+      'dependencies': [
+        '<(DEPTH)/third_party/mojo/mojo_public.gyp:mojo_interface_bindings_generation',
+      ],
+    }],
   ],
   # Prevent the generated sources from being injected into the "all" target by
   # preventing the code generator from being directly depended on by the "all"
@@ -101,6 +110,7 @@
           '<@(mojom_bindings_generator_sources)',
           '<@(mojom_files)',
         ],
+        'mojom_generated_sources': [ '<@(mojom_generated_outputs)' ],
       },
     }
   },

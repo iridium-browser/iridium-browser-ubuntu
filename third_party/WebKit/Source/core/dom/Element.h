@@ -32,6 +32,7 @@
 #include "core/css/CSSSelector.h"
 #include "core/dom/Attribute.h"
 #include "core/dom/ContainerNode.h"
+#include "core/dom/Document.h"
 #include "core/dom/ElementData.h"
 #include "core/dom/SpaceSplitString.h"
 #include "core/html/CollectionType.h"
@@ -50,7 +51,6 @@ class CustomElementDefinition;
 class DOMStringMap;
 class DOMTokenList;
 class Dictionary;
-class Document;
 class ElementRareData;
 class ElementShadow;
 class ExceptionState;
@@ -83,6 +83,8 @@ enum ElementFlags {
 
     NumberOfElementFlags = 7, // Required size of bitfield used to store the flags.
 };
+
+typedef WillBeHeapVector<RefPtrWillBeMember<Attr>> AttrNodeList;
 
 class CORE_EXPORT Element : public ContainerNode {
     DEFINE_WRAPPERTYPEINFO();
@@ -196,8 +198,8 @@ public:
 
     IntRect boundsInViewportSpace();
 
-    PassRefPtrWillBeRawPtr<ClientRectList> getClientRects();
-    PassRefPtrWillBeRawPtr<ClientRect> getBoundingClientRect();
+    ClientRectList* getClientRects();
+    ClientRect* getBoundingClientRect();
 
     const AtomicString& computedRole();
     String computedName();
@@ -221,7 +223,7 @@ public:
     PassRefPtrWillBeRawPtr<Attr> attrIfExists(const QualifiedName&);
     PassRefPtrWillBeRawPtr<Attr> ensureAttr(const QualifiedName&);
 
-    WillBeHeapVector<RefPtrWillBeMember<Attr>>* attrNodeList();
+    AttrNodeList* attrNodeList();
 
     CSSStyleDeclaration* style();
 
@@ -239,6 +241,7 @@ public:
     bool hasLocalName(const AtomicString& other) const { return m_tagName.localName() == other; }
 
     virtual const AtomicString& localName() const override final { return m_tagName.localName(); }
+    AtomicString localNameForSelectorMatching() const;
     const AtomicString& prefix() const { return m_tagName.prefix(); }
     virtual const AtomicString& namespaceURI() const override final { return m_tagName.namespaceURI(); }
 
@@ -331,8 +334,8 @@ public:
     ShadowRoot* youngestShadowRoot() const;
 
     bool hasOpenShadowRoot() const { return shadowRoot(); }
-    ShadowRoot* closedShadowRoot() const;
-    ShadowRoot& ensureClosedShadowRoot();
+    ShadowRoot* userAgentShadowRoot() const;
+    ShadowRoot& ensureUserAgentShadowRoot();
     virtual void willAddFirstOpenShadowRoot() { }
 
     bool isInDescendantTreeOf(const Element* shadowHost) const;
@@ -372,13 +375,14 @@ public:
     // Whether this element can receive focus at all. Most elements are not
     // focusable but some elements, such as form controls and links, are. Unlike
     // layoutObjectIsFocusable(), this method may be called when layout is not up to
-    // date, so it must not use the renderer to determine focusability.
+    // date, so it must not use the layoutObject to determine focusability.
     virtual bool supportsFocus() const;
     // Whether the node can actually be focused.
     bool isFocusable() const;
     bool tabStop() const;
     void setTabStop(bool);
     void setTabStopInternal(bool);
+    bool isFocusedElementInDocument() const;
     virtual bool isKeyboardFocusable() const;
     virtual bool isMouseFocusable() const;
     virtual void dispatchFocusEvent(Element* oldFocusedElement, WebFocusType);
@@ -421,7 +425,7 @@ public:
     void beginParsingChildren() { setIsFinishedParsingChildren(false); }
 
     PseudoElement* pseudoElement(PseudoId) const;
-    LayoutObject* pseudoElementRenderer(PseudoId) const;
+    LayoutObject* pseudoElementLayoutObject(PseudoId) const;
 
     virtual bool matchesReadOnlyPseudoClass() const { return false; }
     virtual bool matchesReadWritePseudoClass() const { return false; }
@@ -502,6 +506,9 @@ public:
     void setTabIndex(int);
     virtual short tabIndex() const override;
 
+    void incrementProxyCount();
+    void decrementProxyCount();
+
     DECLARE_VIRTUAL_TRACE();
 
     SpellcheckAttributeState spellcheckAttributeState() const;
@@ -533,8 +540,8 @@ protected:
     void setTabIndexExplicitly(short);
     // Subclasses may override this method to affect focusability. Unlike
     // supportsFocus, this method must be called on an up-to-date layout, so it
-    // may use the renderer to reason about focusability. This method cannot be
-    // moved to LayoutObject because some focusable nodes don't have renderers,
+    // may use the layoutObject to reason about focusability. This method cannot be
+    // moved to LayoutObject because some focusable nodes don't have layoutObjects,
     // e.g., HTMLOptionElement.
     virtual bool layoutObjectIsFocusable() const;
 
@@ -583,8 +590,8 @@ private:
 
     // FIXME: Everyone should allow author shadows.
     virtual bool areAuthorShadowsAllowed() const { return true; }
-    virtual void didAddClosedShadowRoot(ShadowRoot&) { }
-    virtual bool alwaysCreateClosedShadowRoot() const { return false; }
+    virtual void didAddUserAgentShadowRoot(ShadowRoot&) { }
+    virtual bool alwaysCreateUserAgentShadowRoot() const { return false; }
 
     // FIXME: Remove the need for Attr to call willModifyAttribute/didModifyAttribute.
     friend class Attr;
@@ -642,7 +649,7 @@ private:
     ElementRareData* elementRareData() const;
     ElementRareData& ensureElementRareData();
 
-    WillBeHeapVector<RefPtrWillBeMember<Attr>>& ensureAttrNodeList();
+    AttrNodeList& ensureAttrNodeList();
     void removeAttrNodeList();
     void detachAllAttrNodesFromElement();
     void detachAttrNodeFromElementWithValue(Attr*, const AtomicString& value);
@@ -650,7 +657,7 @@ private:
 
     bool isJavaScriptURLAttribute(const Attribute&) const;
 
-    v8::Handle<v8::Object> wrapCustomElement(v8::Isolate*, v8::Handle<v8::Object> creationContext);
+    v8::Local<v8::Object> wrapCustomElement(v8::Isolate*, v8::Local<v8::Object> creationContext);
 
     RefPtrWillBeMember<ElementData> m_elementData;
 };
@@ -842,6 +849,13 @@ inline void Element::setTagNameForCreateElementNS(const QualifiedName& tagName)
     m_tagName = tagName;
 }
 
+inline AtomicString Element::localNameForSelectorMatching() const
+{
+    if (isHTMLElement() || !document().isHTMLDocument())
+        return localName();
+    return localName().lower();
+}
+
 inline bool isShadowHost(const Node* node)
 {
     return node && node->isElementNode() && toElement(node)->shadow();
@@ -868,6 +882,17 @@ inline bool isAtShadowBoundary(const Element* element)
         return false;
     ContainerNode* parentNode = element->parentNode();
     return parentNode && parentNode->isShadowRoot();
+}
+
+inline bool shadowHostContainsFocusedElement(const Element* host)
+{
+    ASSERT(isShadowHost(host));
+    Element* element = host->document().focusedElement();
+    for (; element; element = element->shadowHost()) {
+        if (host == element)
+            return true;
+    }
+    return false;
 }
 
 // These macros do the same as their NODE equivalents but additionally provide a template specialization

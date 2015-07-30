@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/local_discovery/privet_url_fetcher.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_request_test_util.h"
@@ -28,19 +29,19 @@ class MockPrivetURLFetcherDelegate : public PrivetURLFetcher::Delegate {
   MockPrivetURLFetcherDelegate() : raw_mode_(false) {
   }
 
-  virtual ~MockPrivetURLFetcherDelegate() {
+  ~MockPrivetURLFetcherDelegate() override {
   }
 
-  virtual void OnError(PrivetURLFetcher* fetcher,
-                       PrivetURLFetcher::ErrorType error) override {
+  void OnError(PrivetURLFetcher* fetcher,
+               PrivetURLFetcher::ErrorType error) override {
     OnErrorInternal(error);
   }
 
   MOCK_METHOD1(OnErrorInternal, void(PrivetURLFetcher::ErrorType error));
 
-  virtual void OnParsedJson(PrivetURLFetcher* fetcher,
-                            const base::DictionaryValue& value,
-                            bool has_error) override {
+  void OnParsedJson(PrivetURLFetcher* fetcher,
+                    const base::DictionaryValue& value,
+                    bool has_error) override {
     saved_value_.reset(value.DeepCopy());
     OnParsedJsonInternal(has_error);
   }
@@ -88,8 +89,8 @@ class MockPrivetURLFetcherDelegate : public PrivetURLFetcher::Delegate {
 class PrivetURLFetcherTest : public ::testing::Test {
  public:
   PrivetURLFetcherTest() {
-    request_context_= new net::TestURLRequestContextGetter(
-        base::MessageLoopProxy::current());
+    request_context_ = new net::TestURLRequestContextGetter(
+        base::ThreadTaskRunnerHandle::Get());
     privet_urlfetcher_.reset(new PrivetURLFetcher(
         GURL(kSamplePrivetURL),
         net::URLFetcher::POST,

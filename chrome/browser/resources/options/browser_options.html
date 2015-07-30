@@ -241,13 +241,17 @@
 <if expr="not chromeos">
       <div id="profiles-enable-guest" class="checkbox">
         <label>
-          <input pref="profile.browser_guest_enabled" type="checkbox">
+          <input pref="profile.browser_guest_enabled"
+                 type="checkbox"
+                 metric="Options_BrowserGuestEnabled">
           <span i18n-content="profileBrowserGuestEnable"></span>
         </label>
       </div>
       <div id="profiles-enable-add-person" class="checkbox">
         <label>
-          <input pref="profile.add_person_enabled" type="checkbox">
+          <input pref="profile.add_person_enabled"
+                 type="checkbox"
+                 metric="Options_AddPersonEnabled">
           <span i18n-content="profileAddPersonEnable"></span>
         </label>
       </div>
@@ -753,7 +757,7 @@
   <section>
       <h3 i18n-content="advancedSectionTitleCertificates"></h3>
       <div>
-<if expr="use_nss or is_win or is_macosx">
+<if expr="use_nss_certs or is_win or is_macosx">
         <div class="settings-row">
           <button id="certificatesManageButton"
               i18n-content="certificatesManageButton"></button>

@@ -118,6 +118,7 @@ void StyleElement::clearDocumentData(Document& document, Element* element)
     if (m_registeredAsCandidate) {
         ASSERT(element->inDocument());
         document.styleEngine().removeStyleSheetCandidateNode(element, element->treeScope());
+        m_registeredAsCandidate = false;
     }
 }
 
@@ -164,7 +165,7 @@ static bool shouldBypassMainWorldCSP(Element* element)
 
     // Main world CSP is bypassed for style elements in user agent shadow DOM.
     ShadowRoot* root = element->containingShadowRoot();
-    if (root && root->type() == ShadowRoot::ClosedShadowRoot)
+    if (root && root->type() == ShadowRoot::UserAgentShadowRoot)
         return true;
 
     return false;

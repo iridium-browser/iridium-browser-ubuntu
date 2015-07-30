@@ -35,11 +35,10 @@ class ExceptionState;
 
 class AnalyserHandler final : public AudioBasicInspectorHandler {
 public:
-    AnalyserHandler(AudioNode&, float sampleRate);
+    static PassRefPtr<AnalyserHandler> create(AudioNode&, float sampleRate);
     virtual ~AnalyserHandler();
 
     // AudioHandler
-    virtual void dispose() override;
     virtual void process(size_t framesToProcess) override;
 
     unsigned fftSize() const { return m_analyser.fftSize(); }
@@ -62,13 +61,15 @@ public:
     void getByteTimeDomainData(DOMUint8Array* array) { m_analyser.getByteTimeDomainData(array); }
 
 private:
+    AnalyserHandler(AudioNode&, float sampleRate);
+
     RealtimeAnalyser m_analyser;
 };
 
-class AnalyserNode final : public AudioNode {
+class AnalyserNode final : public AudioBasicInspectorNode {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static AnalyserNode* create(AudioContext*, float sampleRate);
+    static AnalyserNode* create(AudioContext&, float sampleRate);
 
     unsigned fftSize() const;
     void setFftSize(unsigned size, ExceptionState&);

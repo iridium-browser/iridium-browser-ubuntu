@@ -114,11 +114,7 @@ void ScaleRowDown2_SSE2(const uint8* src_ptr, ptrdiff_t src_stride,
   : "+r"(src_ptr),    // %0
     "+r"(dst_ptr),    // %1
     "+r"(dst_width)   // %2
-  :
-  : "memory", "cc"
-#if defined(__SSE2__)
-    , "xmm0", "xmm1"
-#endif
+  :: "memory", "cc", "xmm0", "xmm1"
   );
 }
 
@@ -149,11 +145,7 @@ void ScaleRowDown2Linear_SSE2(const uint8* src_ptr, ptrdiff_t src_stride,
   : "+r"(src_ptr),    // %0
     "+r"(dst_ptr),    // %1
     "+r"(dst_width)   // %2
-  :
-  : "memory", "cc"
-#if defined(__SSE2__)
-    , "xmm0", "xmm1", "xmm5"
-#endif
+  :: "memory", "cc", "xmm0", "xmm1", "xmm5"
   );
 }
 
@@ -189,13 +181,8 @@ void ScaleRowDown2Box_SSE2(const uint8* src_ptr, ptrdiff_t src_stride,
     "+r"(dst_ptr),    // %1
     "+r"(dst_width)   // %2
   : "r"((intptr_t)(src_stride))   // %3
-  : "memory", "cc"
-#if defined(__native_client__) && defined(__x86_64__)
-    , "r14"
-#endif
-#if defined(__SSE2__)
-    , "xmm0", "xmm1", "xmm2", "xmm3", "xmm5"
-#endif
+  : "memory", "cc", NACL_R14
+    "xmm0", "xmm1", "xmm2", "xmm3", "xmm5"
   );
 }
 
@@ -223,11 +210,7 @@ void ScaleRowDown4_SSE2(const uint8* src_ptr, ptrdiff_t src_stride,
   : "+r"(src_ptr),    // %0
     "+r"(dst_ptr),    // %1
     "+r"(dst_width)   // %2
-  :
-  : "memory", "cc"
-#if defined(__SSE2__)
-    , "xmm0", "xmm1", "xmm5"
-#endif
+  :: "memory", "cc", "xmm0", "xmm1", "xmm5"
   );
 }
 
@@ -279,13 +262,8 @@ void ScaleRowDown4Box_SSE2(const uint8* src_ptr, ptrdiff_t src_stride,
     "+r"(dst_width),   // %2
     "+r"(stridex3)     // %3
   : "r"((intptr_t)(src_stride))    // %4
-  : "memory", "cc"
-#if defined(__native_client__) && defined(__x86_64__)
-    , "r14"
-#endif
-#if defined(__SSE2__)
-    , "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm7"
-#endif
+  : "memory", "cc", NACL_R14
+    "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm7"
   );
 }
 
@@ -320,11 +298,7 @@ void ScaleRowDown34_SSSE3(const uint8* src_ptr, ptrdiff_t src_stride,
   : "+r"(src_ptr),   // %0
     "+r"(dst_ptr),   // %1
     "+r"(dst_width)  // %2
-  :
-  : "memory", "cc"
-#if defined(__SSE2__)
-    , "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5"
-#endif
+  :: "memory", "cc", "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5"
   );
 }
 
@@ -388,13 +362,8 @@ void ScaleRowDown34_1_Box_SSSE3(const uint8* src_ptr,
     "+r"(dst_width)  // %2
   : "r"((intptr_t)(src_stride)),  // %3
     "m"(kMadd21)     // %4
-  : "memory", "cc"
-#if defined(__native_client__) && defined(__x86_64__)
-    , "r14"
-#endif
-#if defined(__SSE2__)
-    , "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7"
-#endif
+  : "memory", "cc", NACL_R14
+    "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7"
   );
 }
 
@@ -462,13 +431,8 @@ void ScaleRowDown34_0_Box_SSSE3(const uint8* src_ptr,
       "+r"(dst_width)  // %2
     : "r"((intptr_t)(src_stride)),  // %3
       "m"(kMadd21)     // %4
-    : "memory", "cc"
-#if defined(__native_client__) && defined(__x86_64__)
-    , "r14"
-#endif
-#if defined(__SSE2__)
-    , "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7"
-#endif
+    : "memory", "cc", NACL_R14
+      "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7"
   );
 }
 
@@ -497,10 +461,7 @@ void ScaleRowDown38_SSSE3(const uint8* src_ptr, ptrdiff_t src_stride,
     "+r"(dst_width)  // %2
   : "m"(kShuf38a),   // %3
     "m"(kShuf38b)    // %4
-  : "memory", "cc"
-#if defined(__SSE2__)
-      , "xmm0", "xmm1", "xmm4", "xmm5"
-#endif
+  : "memory", "cc", "xmm0", "xmm1", "xmm4", "xmm5"
   );
 }
 
@@ -534,23 +495,18 @@ void ScaleRowDown38_2_Box_SSSE3(const uint8* src_ptr,
     "paddusw   %%xmm0,%%xmm1                   \n"
     "pmulhuw   %%xmm5,%%xmm1                   \n"
     "packuswb  %%xmm1,%%xmm1                   \n"
-    "sub       $0x6,%2                         \n"
     "movd      %%xmm1," MEMACCESS(1) "         \n"
     "psrlq     $0x10,%%xmm1                    \n"
     "movd      %%xmm1," MEMACCESS2(0x2,1) "    \n"
     "lea       " MEMLEA(0x6,1) ",%1            \n"
+    "sub       $0x6,%2                         \n"
     "jg        1b                              \n"
   : "+r"(src_ptr),     // %0
     "+r"(dst_ptr),     // %1
     "+r"(dst_width)    // %2
   : "r"((intptr_t)(src_stride))  // %3
-  : "memory", "cc"
-#if defined(__native_client__) && defined(__x86_64__)
-    , "r14"
-#endif
-#if defined(__SSE2__)
-    , "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6"
-#endif
+  : "memory", "cc", NACL_R14
+    "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6"
   );
 }
 
@@ -602,64 +558,53 @@ void ScaleRowDown38_3_Box_SSSE3(const uint8* src_ptr,
     "paddusw   %%xmm7,%%xmm6                   \n"
     "pmulhuw   %%xmm4,%%xmm6                   \n"
     "packuswb  %%xmm6,%%xmm6                   \n"
-    "sub       $0x6,%2                         \n"
     "movd      %%xmm6," MEMACCESS(1) "         \n"
     "psrlq     $0x10,%%xmm6                    \n"
     "movd      %%xmm6," MEMACCESS2(0x2,1) "    \n"
     "lea       " MEMLEA(0x6,1) ",%1            \n"
+    "sub       $0x6,%2                         \n"
     "jg        1b                              \n"
   : "+r"(src_ptr),    // %0
     "+r"(dst_ptr),    // %1
     "+r"(dst_width)   // %2
   : "r"((intptr_t)(src_stride))   // %3
-  : "memory", "cc"
-#if defined(__native_client__) && defined(__x86_64__)
-    , "r14"
-#endif
-#if defined(__SSE2__)
-    , "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7"
-#endif
+  : "memory", "cc", NACL_R14
+    "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7"
   );
 }
 
+// Reads 16xN bytes and produces 16 shorts at a time.
 void ScaleAddRows_SSE2(const uint8* src_ptr, ptrdiff_t src_stride,
                        uint16* dst_ptr, int src_width, int src_height) {
   int tmp_height = 0;
   intptr_t tmp_src = 0;
   asm volatile (
+    "mov       %0,%3                           \n"  // row pointer
+    "mov       %5,%2                           \n"  // height
+    "pxor      %%xmm0,%%xmm0                   \n"  // clear accumulators
+    "pxor      %%xmm1,%%xmm1                   \n"
     "pxor      %%xmm4,%%xmm4                   \n"
-    "sub       $0x1,%5                         \n"
 
     LABELALIGN
   "1:                                          \n"
-    "movdqu    " MEMACCESS(0) ",%%xmm0         \n"
-    "mov       %0,%3                           \n"
-    "add       %6,%0                           \n"
-    "movdqa    %%xmm0,%%xmm1                   \n"
-    "punpcklbw %%xmm4,%%xmm0                   \n"
-    "punpckhbw %%xmm4,%%xmm1                   \n"
-    "mov       %5,%2                           \n"
-    "test      %2,%2                           \n"
-    "je        3f                              \n"
-
-    LABELALIGN
-  "2:                                          \n"
-    "movdqu    " MEMACCESS(0) ",%%xmm2         \n"
-    "add       %6,%0                           \n"
+    "movdqu    " MEMACCESS(3) ",%%xmm2         \n"
+    "add       %6,%3                           \n"
     "movdqa    %%xmm2,%%xmm3                   \n"
     "punpcklbw %%xmm4,%%xmm2                   \n"
     "punpckhbw %%xmm4,%%xmm3                   \n"
     "paddusw   %%xmm2,%%xmm0                   \n"
     "paddusw   %%xmm3,%%xmm1                   \n"
     "sub       $0x1,%2                         \n"
-    "jg        2b                              \n"
+    "jg        1b                              \n"
 
-    LABELALIGN
-  "3:                                          \n"
     "movdqu    %%xmm0," MEMACCESS(1) "         \n"
     "movdqu    %%xmm1," MEMACCESS2(0x10,1) "   \n"
-    "lea       " MEMLEA(0x10,3) ",%0           \n"
     "lea       " MEMLEA(0x20,1) ",%1           \n"
+    "lea       " MEMLEA(0x10,0) ",%0           \n"  // src_ptr += 16
+    "mov       %0,%3                           \n"  // row pointer
+    "mov       %5,%2                           \n"  // height
+    "pxor      %%xmm0,%%xmm0                   \n"  // clear accumulators
+    "pxor      %%xmm1,%%xmm1                   \n"
     "sub       $0x10,%4                        \n"
     "jg        1b                              \n"
   : "+r"(src_ptr),     // %0
@@ -669,10 +614,7 @@ void ScaleAddRows_SSE2(const uint8* src_ptr, ptrdiff_t src_stride,
     "+r"(src_width),   // %4
     "+rm"(src_height)  // %5
   : "rm"((intptr_t)(src_stride))  // %6
-  : "memory", "cc"
-#if defined(__SSE2__)
-    , "xmm0", "xmm1", "xmm2", "xmm3", "xmm4"
-#endif
+  : "memory", "cc", "xmm0", "xmm1", "xmm2", "xmm3", "xmm4"
   );
 }
 
@@ -743,13 +685,8 @@ void ScaleFilterCols_SSSE3(uint8* dst_ptr, const uint8* src_ptr,
     "+rm"(dst_width)   // %5
   : "rm"(x),           // %6
     "rm"(dx)           // %7
-  : "memory", "cc"
-#if defined(__native_client__) && defined(__x86_64__)
-    , "r14"
-#endif
-#if defined(__SSE2__)
-    , "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6"
-#endif
+  : "memory", "cc", NACL_R14
+    "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6"
   );
 }
 
@@ -765,20 +702,16 @@ void ScaleColsUp2_SSE2(uint8* dst_ptr, const uint8* src_ptr,
     "movdqa    %%xmm0,%%xmm1                   \n"
     "punpcklbw %%xmm0,%%xmm0                   \n"
     "punpckhbw %%xmm1,%%xmm1                   \n"
-    "sub       $0x20,%2                         \n"
     "movdqu    %%xmm0," MEMACCESS(0) "         \n"
     "movdqu    %%xmm1," MEMACCESS2(0x10,0) "   \n"
     "lea       " MEMLEA(0x20,0) ",%0           \n"
+    "sub       $0x20,%2                         \n"
     "jg        1b                              \n"
 
   : "+r"(dst_ptr),     // %0
     "+r"(src_ptr),     // %1
     "+r"(dst_width)    // %2
-  :
-  : "memory", "cc"
-#if defined(__SSE2__)
-    , "xmm0", "xmm1"
-#endif
+  :: "memory", "cc", "xmm0", "xmm1"
   );
 }
 
@@ -792,18 +725,14 @@ void ScaleARGBRowDown2_SSE2(const uint8* src_argb,
     "movdqu    " MEMACCESS2(0x10,0) ",%%xmm1   \n"
     "lea       " MEMLEA(0x20,0) ",%0           \n"
     "shufps    $0xdd,%%xmm1,%%xmm0             \n"
-    "sub       $0x4,%2                         \n"
     "movdqu    %%xmm0," MEMACCESS(1) "         \n"
     "lea       " MEMLEA(0x10,1) ",%1           \n"
+    "sub       $0x4,%2                         \n"
     "jg        1b                              \n"
   : "+r"(src_argb),  // %0
     "+r"(dst_argb),  // %1
     "+r"(dst_width)  // %2
-  :
-  : "memory", "cc"
-#if defined(__SSE2__)
-    , "xmm0", "xmm1"
-#endif
+  :: "memory", "cc", "xmm0", "xmm1"
   );
 }
 
@@ -820,18 +749,14 @@ void ScaleARGBRowDown2Linear_SSE2(const uint8* src_argb,
     "shufps    $0x88,%%xmm1,%%xmm0             \n"
     "shufps    $0xdd,%%xmm1,%%xmm2             \n"
     "pavgb     %%xmm2,%%xmm0                   \n"
-    "sub       $0x4,%2                         \n"
     "movdqu    %%xmm0," MEMACCESS(1) "         \n"
     "lea       " MEMLEA(0x10,1) ",%1           \n"
+    "sub       $0x4,%2                         \n"
     "jg        1b                              \n"
   : "+r"(src_argb),  // %0
     "+r"(dst_argb),  // %1
     "+r"(dst_width)  // %2
-  :
-  : "memory", "cc"
-#if defined(__SSE2__)
-    , "xmm0", "xmm1"
-#endif
+  :: "memory", "cc", "xmm0", "xmm1"
   );
 }
 
@@ -852,29 +777,23 @@ void ScaleARGBRowDown2Box_SSE2(const uint8* src_argb,
     "shufps    $0x88,%%xmm1,%%xmm0             \n"
     "shufps    $0xdd,%%xmm1,%%xmm2             \n"
     "pavgb     %%xmm2,%%xmm0                   \n"
-    "sub       $0x4,%2                         \n"
     "movdqu    %%xmm0," MEMACCESS(1) "         \n"
     "lea       " MEMLEA(0x10,1) ",%1           \n"
+    "sub       $0x4,%2                         \n"
     "jg        1b                              \n"
   : "+r"(src_argb),   // %0
     "+r"(dst_argb),   // %1
     "+r"(dst_width)   // %2
   : "r"((intptr_t)(src_stride))   // %3
-  : "memory", "cc"
-#if defined(__native_client__) && defined(__x86_64__)
-    , "r14"
-#endif
-#if defined(__SSE2__)
-    , "xmm0", "xmm1", "xmm2", "xmm3"
-#endif
+  : "memory", "cc", NACL_R14
+    "xmm0", "xmm1", "xmm2", "xmm3"
   );
 }
 
 // Reads 4 pixels at a time.
 // Alignment requirement: dst_argb 16 byte aligned.
 void ScaleARGBRowDownEven_SSE2(const uint8* src_argb, ptrdiff_t src_stride,
-                               int src_stepx,
-                               uint8* dst_argb, int dst_width) {
+                               int src_stepx, uint8* dst_argb, int dst_width) {
   intptr_t src_stepx_x4 = (intptr_t)(src_stepx);
   intptr_t src_stepx_x12 = 0;
   asm volatile (
@@ -890,23 +809,17 @@ void ScaleARGBRowDownEven_SSE2(const uint8* src_argb, ptrdiff_t src_stride,
     "lea       " MEMLEA4(0x00,0,1,4) ",%0      \n"
     "punpckldq %%xmm3,%%xmm2                   \n"
     "punpcklqdq %%xmm2,%%xmm0                  \n"
-    "sub       $0x4,%3                         \n"
     "movdqu    %%xmm0," MEMACCESS(2) "         \n"
     "lea       " MEMLEA(0x10,2) ",%2           \n"
+    "sub       $0x4,%3                         \n"
     "jg        1b                              \n"
   : "+r"(src_argb),      // %0
     "+r"(src_stepx_x4),  // %1
     "+r"(dst_argb),      // %2
     "+r"(dst_width),     // %3
     "+r"(src_stepx_x12)  // %4
-  :
-  : "memory", "cc"
-#if defined(__native_client__) && defined(__x86_64__)
-    , "r14"
-#endif
-#if defined(__SSE2__)
-    , "xmm0", "xmm1", "xmm2", "xmm3"
-#endif
+  :: "memory", "cc", NACL_R14
+    "xmm0", "xmm1", "xmm2", "xmm3"
   );
 }
 
@@ -941,9 +854,9 @@ void ScaleARGBRowDownEvenBox_SSE2(const uint8* src_argb,
     "shufps    $0x88,%%xmm1,%%xmm0             \n"
     "shufps    $0xdd,%%xmm1,%%xmm2             \n"
     "pavgb     %%xmm2,%%xmm0                   \n"
-    "sub       $0x4,%3                         \n"
     "movdqu    %%xmm0," MEMACCESS(2) "         \n"
     "lea       " MEMLEA(0x10,2) ",%2           \n"
+    "sub       $0x4,%3                         \n"
     "jg        1b                              \n"
   : "+r"(src_argb),       // %0
     "+r"(src_stepx_x4),   // %1
@@ -951,14 +864,8 @@ void ScaleARGBRowDownEvenBox_SSE2(const uint8* src_argb,
     "+rm"(dst_width),     // %3
     "+r"(src_stepx_x12),  // %4
     "+r"(row1)            // %5
-  :
-  : "memory", "cc"
-#if defined(__native_client__) && defined(__x86_64__)
-    , "r14"
-#endif
-#if defined(__SSE2__)
-    , "xmm0", "xmm1", "xmm2", "xmm3"
-#endif
+  :: "memory", "cc", NACL_R14
+    "xmm0", "xmm1", "xmm2", "xmm3"
   );
 }
 
@@ -997,9 +904,9 @@ void ScaleARGBCols_SSE2(uint8* dst_argb, const uint8* src_argb,
     "pextrw    $0x3,%%xmm2,%k1                 \n"
     "punpckldq %%xmm4,%%xmm1                   \n"
     "punpcklqdq %%xmm1,%%xmm0                  \n"
-    "sub       $0x4,%4                         \n"
     "movdqu    %%xmm0," MEMACCESS(2) "         \n"
     "lea       " MEMLEA(0x10,2) ",%2           \n"
+    "sub       $0x4,%4                         \n"
     "jge       40b                             \n"
 
   "49:                                         \n"
@@ -1024,13 +931,8 @@ void ScaleARGBCols_SSE2(uint8* dst_argb, const uint8* src_argb,
     "+r"(dst_width)    // %4
   : "rm"(x),           // %5
     "rm"(dx)           // %6
-  : "memory", "cc"
-#if defined(__native_client__) && defined(__x86_64__)
-    , "r14"
-#endif
-#if defined(__SSE2__)
-    , "xmm0", "xmm1", "xmm2", "xmm3", "xmm4"
-#endif
+  : "memory", "cc", NACL_R14
+    "xmm0", "xmm1", "xmm2", "xmm3", "xmm4"
   );
 }
 
@@ -1046,23 +948,17 @@ void ScaleARGBColsUp2_SSE2(uint8* dst_argb, const uint8* src_argb,
     "movdqa    %%xmm0,%%xmm1                   \n"
     "punpckldq %%xmm0,%%xmm0                   \n"
     "punpckhdq %%xmm1,%%xmm1                   \n"
-    "sub       $0x8,%2                         \n"
     "movdqu    %%xmm0," MEMACCESS(0) "         \n"
     "movdqu    %%xmm1," MEMACCESS2(0x10,0) "   \n"
     "lea       " MEMLEA(0x20,0) ",%0           \n"
+    "sub       $0x8,%2                         \n"
     "jg        1b                              \n"
 
   : "+r"(dst_argb),    // %0
     "+r"(src_argb),    // %1
     "+r"(dst_width)    // %2
-  :
-  : "memory", "cc"
-#if defined(__native_client__) && defined(__x86_64__)
-    , "r14"
-#endif
-#if defined(__SSE2__)
-    , "xmm0", "xmm1"
-#endif
+  :: "memory", "cc", NACL_R14
+    "xmm0", "xmm1"
   );
 }
 
@@ -1147,13 +1043,8 @@ void ScaleARGBFilterCols_SSSE3(uint8* dst_argb, const uint8* src_argb,
     "+r"(x1)           // %4
   : "rm"(x),           // %5
     "rm"(dx)           // %6
-  : "memory", "cc"
-#if defined(__native_client__) && defined(__x86_64__)
-    , "r14"
-#endif
-#if defined(__SSE2__)
-    , "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6"
-#endif
+  : "memory", "cc", NACL_R14
+    "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6"
   );
 }
 

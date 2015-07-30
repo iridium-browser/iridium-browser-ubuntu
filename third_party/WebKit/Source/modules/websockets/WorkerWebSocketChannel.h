@@ -64,10 +64,14 @@ public:
 
     // WebSocketChannel functions.
     virtual bool connect(const KURL&, const String& protocol) override;
-    virtual void send(const String& message) override;
+    virtual void send(const CString&) override;
     virtual void send(const DOMArrayBuffer&, unsigned byteOffset, unsigned byteLength) override;
     virtual void send(PassRefPtr<BlobDataHandle>) override;
-    virtual void send(PassOwnPtr<Vector<char>>) override
+    virtual void sendTextAsCharVector(PassOwnPtr<Vector<char>>) override
+    {
+        ASSERT_NOT_REACHED();
+    }
+    virtual void sendBinaryAsCharVector(PassOwnPtr<Vector<char>>) override
     {
         ASSERT_NOT_REACHED();
     }
@@ -88,14 +92,11 @@ public:
 
         // sourceURLAtConnection and lineNumberAtConnection parameters may
         // be shown when the connection fails.
-        static void initialize(ExecutionContext* executionContext, Peer* peer, const String& sourceURLAtConnection, unsigned lineNumberAtConnection)
-        {
-            peer->initializeInternal(executionContext, sourceURLAtConnection, lineNumberAtConnection);
-        }
+        void initialize(const String& sourceURLAtConnection, unsigned lineNumberAtConnection, ExecutionContext*);
 
         void connect(const KURL&, const String& protocol);
-        void send(const String& message);
-        void sendArrayBuffer(PassOwnPtr<Vector<char>>);
+        void sendTextAsCharVector(PassOwnPtr<Vector<char>>);
+        void sendBinaryAsCharVector(PassOwnPtr<Vector<char>>);
         void sendBlob(PassRefPtr<BlobDataHandle>);
         void close(int code, const String& reason);
         void fail(const String& reason, MessageLevel, const String& sourceURL, unsigned lineNumber);
@@ -113,8 +114,6 @@ public:
         virtual void didError() override;
 
     private:
-        void initializeInternal(ExecutionContext*, const String& sourceURLAtConnection, unsigned lineNumberAtConnection);
-
         Member<Bridge> m_bridge;
         RefPtr<WorkerLoaderProxy> m_loaderProxy;
         Member<WebSocketChannel> m_mainWebSocketChannel;
@@ -131,7 +130,7 @@ public:
         // be shown when the connection fails.
         void initialize(const String& sourceURLAtConnection, unsigned lineNumberAtConnection);
         bool connect(const KURL&, const String& protocol);
-        void send(const String& message);
+        void send(const CString& message);
         void send(const DOMArrayBuffer&, unsigned byteOffset, unsigned byteLength);
         void send(PassRefPtr<BlobDataHandle>);
         void close(int code, const String& reason);

@@ -8,20 +8,25 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "content/public/child/v8_value_converter.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
+#include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_api.h"
+#include "extensions/common/extension_set.h"
 #include "extensions/common/extension_urls.h"
 #include "extensions/common/features/base_feature_provider.h"
+#include "extensions/common/manifest_handlers/sandboxed_page_info.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "gin/per_context_data.h"
 #include "third_party/WebKit/public/web/WebDataSource.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebScopedMicrotaskSuppression.h"
 #include "third_party/WebKit/public/web/WebSecurityOrigin.h"
 #include "third_party/WebKit/public/web/WebView.h"
@@ -64,23 +69,24 @@ class ScriptContext::Runner : public gin::Runner {
   // gin::Runner overrides.
   void Run(const std::string& source,
            const std::string& resource_name) override;
-  v8::Handle<v8::Value> Call(v8::Handle<v8::Function> function,
-                             v8::Handle<v8::Value> receiver,
-                             int argc,
-                             v8::Handle<v8::Value> argv[]) override;
+  v8::Local<v8::Value> Call(v8::Local<v8::Function> function,
+                            v8::Local<v8::Value> receiver,
+                            int argc,
+                            v8::Local<v8::Value> argv[]) override;
   gin::ContextHolder* GetContextHolder() override;
 
  private:
   ScriptContext* context_;
 };
 
-ScriptContext::ScriptContext(const v8::Handle<v8::Context>& v8_context,
-                             blink::WebFrame* web_frame,
+ScriptContext::ScriptContext(const v8::Local<v8::Context>& v8_context,
+                             blink::WebLocalFrame* web_frame,
                              const Extension* extension,
                              Feature::Context context_type,
                              const Extension* effective_extension,
                              Feature::Context effective_context_type)
-    : v8_context_(v8_context->GetIsolate(), v8_context),
+    : is_valid_(true),
+      v8_context_(v8_context->GetIsolate(), v8_context),
       web_frame_(web_frame),
       extension_(extension),
       context_type_(context_type),
@@ -99,7 +105,9 @@ ScriptContext::ScriptContext(const v8::Handle<v8::Context>& v8_context,
           << (effective_extension_.get() ? effective_extension_->id() : "")
           << "  effective context type: "
           << GetEffectiveContextTypeDescription();
-  gin::PerContextData::From(v8_context)->set_runner(runner_.get());
+  gin::PerContextData* gin_data = gin::PerContextData::From(v8_context);
+  CHECK(gin_data);  // may fail if the v8::Context hasn't been registered yet
+  gin_data->set_runner(runner_.get());
 }
 
 ScriptContext::~ScriptContext() {
@@ -107,17 +115,48 @@ ScriptContext::~ScriptContext() {
           << "  extension id: " << GetExtensionID() << "\n"
           << "  effective extension id: "
           << (effective_extension_.get() ? effective_extension_->id() : "");
-  Invalidate();
+  CHECK(!is_valid_) << "ScriptContexts must be invalidated before destruction";
+}
+
+// static
+bool ScriptContext::IsSandboxedPage(const ExtensionSet& extensions,
+                                    const GURL& url) {
+  // TODO(kalman): This is checking the wrong thing. See comment in
+  // HasAccessOrThrowError.
+  if (url.SchemeIs(kExtensionScheme)) {
+    const Extension* extension = extensions.GetByID(url.host());
+    if (extension) {
+      return SandboxedPageInfo::IsSandboxedPage(extension, url.path());
+    }
+  }
+  return false;
 }
 
 void ScriptContext::Invalidate() {
-  if (!is_valid())
-    return;
+  CHECK(is_valid_);
+  is_valid_ = false;
+
+  // TODO(kalman): Make ModuleSystem use AddInvalidationObserver.
+  // Ownership graph is a bit weird here.
   if (module_system_)
     module_system_->Invalidate();
-  web_frame_ = NULL;
-  v8_context_.Reset();
+
+  // Swap |invalidate_observers_| to a local variable to clear it, and to make
+  // sure it's not mutated as we iterate.
+  std::vector<base::Closure> observers;
+  observers.swap(invalidate_observers_);
+  for (const base::Closure& observer : observers) {
+    observer.Run();
+  }
+  DCHECK(invalidate_observers_.empty())
+      << "Invalidation observers cannot be added during invalidation";
+
   runner_.reset();
+  v8_context_.Reset();
+}
+
+void ScriptContext::AddInvalidationObserver(const base::Closure& observer) {
+  invalidate_observers_.push_back(observer);
 }
 
 const std::string& ScriptContext::GetExtensionID() const {
@@ -137,19 +176,19 @@ content::RenderFrame* ScriptContext::GetRenderFrame() const {
 }
 
 v8::Local<v8::Value> ScriptContext::CallFunction(
-    v8::Handle<v8::Function> function,
+    v8::Local<v8::Function> function,
     int argc,
-    v8::Handle<v8::Value> argv[]) const {
+    v8::Local<v8::Value> argv[]) const {
   v8::EscapableHandleScope handle_scope(isolate());
   v8::Context::Scope scope(v8_context());
 
   blink::WebScopedMicrotaskSuppression suppression;
-  if (!is_valid()) {
+  if (!is_valid_) {
     return handle_scope.Escape(
         v8::Local<v8::Primitive>(v8::Undefined(isolate())));
   }
 
-  v8::Handle<v8::Object> global = v8_context()->Global();
+  v8::Local<v8::Object> global = v8_context()->Global();
   if (!web_frame_)
     return handle_scope.Escape(function->Call(global, argc, argv));
   return handle_scope.Escape(
@@ -173,12 +212,12 @@ Feature::Availability ScriptContext::GetAvailability(
 }
 
 void ScriptContext::DispatchEvent(const char* event_name,
-                                  v8::Handle<v8::Array> args) const {
+                                  v8::Local<v8::Array> args) const {
   v8::HandleScope handle_scope(isolate());
   v8::Context::Scope context_scope(v8_context());
 
-  v8::Handle<v8::Value> argv[] = {
-      v8::String::NewFromUtf8(isolate(), event_name), args};
+  v8::Local<v8::Value> argv[] = {v8::String::NewFromUtf8(isolate(), event_name),
+                                 args};
   module_system_->CallModuleMethod(
       kEventBindings, "dispatchEvent", arraysize(argv), argv);
 }
@@ -261,7 +300,7 @@ void ScriptContext::OnResponseReceived(const std::string& name,
   v8::HandleScope handle_scope(isolate());
 
   scoped_ptr<V8ValueConverter> converter(V8ValueConverter::create());
-  v8::Handle<v8::Value> argv[] = {
+  v8::Local<v8::Value> argv[] = {
       v8::Integer::New(isolate(), request_id),
       v8::String::NewFromUtf8(isolate(), name.c_str()),
       v8::Boolean::New(isolate(), success),
@@ -269,7 +308,7 @@ void ScriptContext::OnResponseReceived(const std::string& name,
                            v8::Local<v8::Context>::New(isolate(), v8_context_)),
       v8::String::NewFromUtf8(isolate(), error.c_str())};
 
-  v8::Handle<v8::Value> retval = module_system()->CallModuleMethod(
+  v8::Local<v8::Value> retval = module_system()->CallModuleMethod(
       "sendRequest", "handleResponse", arraysize(argv), argv);
 
   // In debug, the js will validate the callback parameters and return a
@@ -297,18 +336,51 @@ bool ScriptContext::HasAPIPermission(APIPermission::ID permission) const {
   return false;
 }
 
+bool ScriptContext::HasAccessOrThrowError(const std::string& name) {
+  // Theoretically[1] we could end up with bindings being injected into
+  // sandboxed frames, for example content scripts. Don't let them execute API
+  // functions.
+  //
+  // In any case, this check is silly. The frame's document's security origin
+  // already tells us if it's sandboxed. The only problem is that until
+  // crbug.com/466373 is fixed, we don't know the security origin up-front and
+  // may not know it here, either.
+  //
+  // [1] citation needed. This ScriptContext should already be in a state that
+  // doesn't allow this, from ScriptContextSet::ClassifyJavaScriptContext.
+  if (extension() &&
+      SandboxedPageInfo::IsSandboxedPage(extension(), url_.path())) {
+    static const char kMessage[] =
+        "%s cannot be used within a sandboxed frame.";
+    std::string error_msg = base::StringPrintf(kMessage, name.c_str());
+    isolate()->ThrowException(v8::Exception::Error(
+        v8::String::NewFromUtf8(isolate(), error_msg.c_str())));
+    return false;
+  }
+
+  Feature::Availability availability = GetAvailability(name);
+  if (!availability.is_available()) {
+    isolate()->ThrowException(v8::Exception::Error(
+        v8::String::NewFromUtf8(isolate(), availability.message().c_str())));
+    return false;
+  }
+
+  return true;
+}
+
 ScriptContext::Runner::Runner(ScriptContext* context) : context_(context) {
 }
+
 void ScriptContext::Runner::Run(const std::string& source,
                                 const std::string& resource_name) {
   context_->module_system()->RunString(source, resource_name);
 }
 
-v8::Handle<v8::Value> ScriptContext::Runner::Call(
-    v8::Handle<v8::Function> function,
-    v8::Handle<v8::Value> receiver,
+v8::Local<v8::Value> ScriptContext::Runner::Call(
+    v8::Local<v8::Function> function,
+    v8::Local<v8::Value> receiver,
     int argc,
-    v8::Handle<v8::Value> argv[]) {
+    v8::Local<v8::Value> argv[]) {
   return context_->CallFunction(function, argc, argv);
 }
 

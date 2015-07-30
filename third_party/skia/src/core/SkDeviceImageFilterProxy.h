@@ -8,6 +8,7 @@
 #ifndef SkDeviceImageFilterProxy_DEFINED
 #define SkDeviceImageFilterProxy_DEFINED
 
+#include "SkBitmapDevice.h"
 #include "SkDevice.h"
 #include "SkImageFilter.h"
 #include "SkSurfaceProps.h"
@@ -21,10 +22,14 @@ public:
 
     SkBaseDevice* createDevice(int w, int h) override {
         SkBaseDevice::CreateInfo cinfo(SkImageInfo::MakeN32Premul(w, h),
-                                       SkBaseDevice::kPossible_TileUsage,
+                                       SkBaseDevice::kNever_TileUsage,
                                        kUnknown_SkPixelGeometry,
                                        true /*forImageFilter*/);
-        return fDevice->onCreateDevice(cinfo, NULL);
+        SkBaseDevice* dev = fDevice->onCreateDevice(cinfo, NULL);
+        if (NULL == dev) {
+            dev = SkBitmapDevice::Create(cinfo.fInfo);
+        }
+        return dev;
     }
     bool canHandleImageFilter(const SkImageFilter* filter) override {
         return fDevice->canHandleImageFilter(filter);

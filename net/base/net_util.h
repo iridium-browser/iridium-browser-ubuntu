@@ -210,9 +210,7 @@ NET_EXPORT std::string CanonicalizeHost(const std::string& host,
 // rules based on RFC 1738 and tweaked to be compatible with the real world.
 // The rules are:
 //   * One or more components separated by '.'
-//   * Each component begins with an alphanumeric character or '-'
 //   * Each component contains only alphanumeric characters and '-' or '_'
-//   * Each component ends with an alphanumeric character or '-'
 //   * The last component begins with an alphanumeric character
 //   * Optional trailing dot after last component (means "treat as FQDN")
 //
@@ -442,6 +440,10 @@ NET_EXPORT_PRIVATE int GetPortFromSockaddr(const struct sockaddr* address,
 NET_EXPORT_PRIVATE bool IsLocalhost(const std::string& host);
 
 NET_EXPORT_PRIVATE bool IsLocalhostTLD(const std::string& host);
+
+// Returns true if the url's host is a Google server. This should only be used
+// for histograms and shouldn't be used to affect behavior.
+NET_EXPORT_PRIVATE bool HasGoogleHost(const GURL& url);
 
 // A subset of IP address attributes which are actionable by the
 // application layer. Currently unimplemented for all hosts;

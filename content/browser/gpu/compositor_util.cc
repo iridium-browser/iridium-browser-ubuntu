@@ -285,7 +285,13 @@ bool IsGpuRasterizationEnabled() {
     return false;
   }
 
+#if defined(OS_ANDROID)
   return true;
+#endif
+
+  // explicitly disable GPU rasterization on all non-android devices until we
+  // have full test coverage.
+  return false;
 }
 
 bool IsForceGpuRasterizationEnabled() {
@@ -321,7 +327,11 @@ int GpuRasterizationMSAASampleCount() {
       *base::CommandLine::ForCurrentProcess();
 
   if (!command_line.HasSwitch(switches::kGpuRasterizationMSAASampleCount))
-    return 0;
+#if defined(OS_ANDROID)
+    return 4;
+#else
+    return 8;
+#endif
   std::string string_value = command_line.GetSwitchValueASCII(
       switches::kGpuRasterizationMSAASampleCount);
   int msaa_sample_count = 0;

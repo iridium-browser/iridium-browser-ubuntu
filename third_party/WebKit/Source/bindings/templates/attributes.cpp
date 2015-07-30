@@ -18,7 +18,15 @@ const v8::PropertyCallbackInfo<v8::Value>& info
     {% endif %}
     {# holder #}
     {% if not attribute.is_static %}
+    {% if attribute.is_lenient_this %}
+    v8::Local<v8::Object> holder = {{v8_class}}::findInstanceInPrototypeChain(info.This(), info.GetIsolate());
+    if (holder.IsEmpty())
+        return; // Return silently because of [LenientThis].
+    // Note that it's okay to use |holder|, but |info.Holder()| is still unsafe
+    // and must not be used.
+    {% else %}
     v8::Local<v8::Object> holder = info.Holder();
+    {% endif %}
     {% endif %}
     {# impl #}
     {% if attribute.cached_attribute_validation_method %}
@@ -258,7 +266,15 @@ v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info
            not attribute.is_replaceable and
            not attribute.constructor_type) or
           raise_exception %}
+    {% if attribute.is_lenient_this %}
+    v8::Local<v8::Object> holder = {{v8_class}}::findInstanceInPrototypeChain(info.This(), info.GetIsolate());
+    if (holder.IsEmpty())
+        return; // Return silently because of [LenientThis].
+    // Note that it's okay to use |holder|, but |info.Holder()| is still unsafe
+    // and must not be used.
+    {% else %}
     v8::Local<v8::Object> holder = info.Holder();
+    {% endif %}
     {% endif %}
     {% if raise_exception %}
     ExceptionState exceptionState(ExceptionState::SetterContext, "{{attribute.name}}", "{{interface_name}}", holder, info.GetIsolate());
@@ -353,6 +369,9 @@ v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info
           attribute.is_setter_call_with_execution_context %}
     ExecutionContext* executionContext = currentExecutionContext(info.GetIsolate());
     {% endif %}
+    {% if attribute.is_call_with_script_state %}
+    ScriptState* scriptState = ScriptState::current(info.GetIsolate());
+    {% endif %}
     {# Set #}
     {% if attribute.cpp_setter %}
     {{attribute.cpp_setter}};
@@ -432,6 +451,8 @@ bool {{v8_class}}::PrivateScript::{{attribute.name}}AttributeGetter(LocalFrame* 
 
     ScriptState::Scope scope(scriptState);
     v8::Local<v8::Value> holder = toV8(holderImpl, scriptState->context()->Global(), scriptState->isolate());
+    if (holder.IsEmpty())
+        return false;
 
     ExceptionState exceptionState(ExceptionState::GetterContext, "{{attribute.name}}", "{{cpp_class}}", scriptState->context()->Global(), scriptState->isolate());
     v8::Local<v8::Value> v8Value = PrivateScriptRunner::runDOMAttributeGetter(scriptState, scriptStateInUserScript, "{{cpp_class}}", "{{attribute.name}}", holder);
@@ -462,6 +483,8 @@ bool {{v8_class}}::PrivateScript::{{attribute.name}}AttributeSetter(LocalFrame* 
 
     ScriptState::Scope scope(scriptState);
     v8::Local<v8::Value> holder = toV8(holderImpl, scriptState->context()->Global(), scriptState->isolate());
+    if (holder.IsEmpty())
+        return false;
 
     ExceptionState exceptionState(ExceptionState::SetterContext, "{{attribute.name}}", "{{cpp_class}}", scriptState->context()->Global(), scriptState->isolate());
     return PrivateScriptRunner::runDOMAttributeSetter(scriptState, scriptStateInUserScript, "{{cpp_class}}", "{{attribute.name}}", holder, {{attribute.private_script_cpp_value_to_v8_value}});
@@ -508,6 +531,8 @@ bool {{v8_class}}::PrivateScript::{{attribute.name}}AttributeSetter(LocalFrame* 
 {% set on_prototype = 'V8DOMConfiguration::OnPrototype'
        if interface_name == 'Window' and attribute.idl_type == 'EventHandler'
        else 'V8DOMConfiguration::OnInstance' %}
+{% set holder_check = 'V8DOMConfiguration::DoNotCheckHolder'
+       if attribute.is_lenient_this else 'V8DOMConfiguration::CheckHolder' %}
 {% set attribute_configuration_list = [
        '"%s"' % attribute.name,
        getter_callback,
@@ -519,7 +544,10 @@ bool {{v8_class}}::PrivateScript::{{attribute.name}}AttributeSetter(LocalFrame* 
        property_attribute,
        only_exposed_to_private_script,
    ] %}
-{% if not attribute.is_expose_js_accessors %}
+{% if attribute.is_expose_js_accessors %}
+{% set attribute_configuration_list = attribute_configuration_list
+                                    + [holder_check] %}
+{% else %}
 {% set attribute_configuration_list = attribute_configuration_list
                                     + [on_prototype] %}
 {% endif %}

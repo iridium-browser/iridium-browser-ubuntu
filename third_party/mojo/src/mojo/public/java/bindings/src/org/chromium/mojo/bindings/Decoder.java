@@ -436,7 +436,8 @@ public class Decoder {
         if (!handle.isValid()) {
             return null;
         }
-        return manager.attachProxy(handle);
+        int version = readInt(offset + BindingsHelper.SERIALIZED_HANDLE_SIZE);
+        return manager.attachProxy(handle, version);
     }
 
     /**
@@ -588,14 +589,15 @@ public class Decoder {
         if (d == null) {
             return null;
         }
-        DataHeader si = d.readDataHeaderForArray(4, expectedLength);
+        DataHeader si =
+                d.readDataHeaderForArray(BindingsHelper.SERIALIZED_INTERFACE_SIZE, expectedLength);
         S[] result = manager.buildArray(si.elementsOrVersion);
         for (int i = 0; i < result.length; ++i) {
             // This cast is necessary because java 6 doesn't handle wildcard correctly when using
             // Manager<S, ? extends S>
             @SuppressWarnings("unchecked")
             S value = (S) d.readServiceInterface(
-                    DataHeader.HEADER_SIZE + BindingsHelper.SERIALIZED_HANDLE_SIZE * i,
+                    DataHeader.HEADER_SIZE + BindingsHelper.SERIALIZED_INTERFACE_SIZE * i,
                     BindingsHelper.isElementNullable(arrayNullability), manager);
             result[i] = value;
         }

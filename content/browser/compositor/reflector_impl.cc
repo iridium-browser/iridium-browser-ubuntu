@@ -8,19 +8,26 @@
 #include "base/location.h"
 #include "content/browser/compositor/browser_compositor_output_surface.h"
 #include "content/browser/compositor/owned_mailbox.h"
-#include "content/common/gpu/client/gl_helper.h"
+//#include "content/common/gpu/client/gl_helper.h"
 #include "ui/compositor/layer.h"
 
 namespace content {
 
+struct ReflectorImpl::LayerData {
+  LayerData(ui::Layer* layer) : layer(layer) {}
+
+  ui::Layer* layer;
+  bool needs_set_mailbox = false;
+};
+
 ReflectorImpl::ReflectorImpl(ui::Compositor* mirrored_compositor,
                              ui::Layer* mirroring_layer)
     : mirrored_compositor_(mirrored_compositor),
-      mirroring_layer_(mirroring_layer),
-      mirrored_compositor_gl_helper_texture_id_(0),
-      needs_set_mailbox_(false),
       flip_texture_(false),
+      composition_count_(0),
       output_surface_(nullptr) {
+  if (mirroring_layer)
+    AddMirroringLayer(mirroring_layer);
 }
 
 ReflectorImpl::~ReflectorImpl() {
@@ -30,7 +37,7 @@ void ReflectorImpl::Shutdown() {
   if (output_surface_)
     DetachFromOutputSurface();
   // Prevent the ReflectorImpl from picking up a new output surface.
-  mirroring_layer_ = nullptr;
+  mirroring_layers_.clear();
 }
 
 void ReflectorImpl::DetachFromOutputSurface() {
@@ -39,89 +46,116 @@ void ReflectorImpl::DetachFromOutputSurface() {
   DCHECK(mailbox_.get());
   mailbox_ = nullptr;
   output_surface_ = nullptr;
-  mirrored_compositor_gl_helper_->DeleteTexture(
-      mirrored_compositor_gl_helper_texture_id_);
-  mirrored_compositor_gl_helper_texture_id_ = 0;
-  mirrored_compositor_gl_helper_ = nullptr;
-  mirroring_layer_->SetShowSolidColorContent();
+  for (LayerData* layer_data : mirroring_layers_)
+    layer_data->layer->SetShowSolidColorContent();
 }
 
 void ReflectorImpl::OnSourceSurfaceReady(
     BrowserCompositorOutputSurface* output_surface) {
-  if (!mirroring_layer_)
+  if (mirroring_layers_.empty())
     return;  // Was already Shutdown().
   if (output_surface == output_surface_)
     return;  // Is already attached.
   if (output_surface_)
     DetachFromOutputSurface();
 
-  // Use the GLHelper from the ImageTransportFactory for our OwnedMailbox so we
-  // don't have to manage the lifetime of the GLHelper relative to the lifetime
-  // of the mailbox.
-  GLHelper* shared_helper = ImageTransportFactory::GetInstance()->GetGLHelper();
-  mailbox_ = new OwnedMailbox(shared_helper);
-  needs_set_mailbox_ = true;
+  output_surface_ = output_surface;
 
-  // Create a GLHelper attached to the mirrored compositor's output surface for
-  // copying the output of the mirrored compositor.
-  mirrored_compositor_gl_helper_.reset(
-      new GLHelper(output_surface->context_provider()->ContextGL(),
-                   output_surface->context_provider()->ContextSupport()));
-  // Create a texture id in the name space of the new GLHelper to update the
-  // mailbox being held by the |mirroring_layer_|.
-  mirrored_compositor_gl_helper_texture_id_ =
-      mirrored_compositor_gl_helper_->ConsumeMailboxToTexture(
-          mailbox_->mailbox(), mailbox_->sync_point());
+  composition_started_callback_ =
+      output_surface_->CreateCompositionStartedCallback();
 
   flip_texture_ = !output_surface->capabilities().flipped_output_surface;
 
-  // The texture doesn't have the data. Request full redraw on mirrored
-  // compositor so that the full content will be copied to mirroring compositor.
-  // This full redraw should land us in OnSourceSwapBuffers() to resize the
-  // texture appropriately.
-  mirrored_compositor_->ScheduleFullRedraw();
-
-  output_surface_ = output_surface;
   output_surface_->SetReflector(this);
 }
 
 void ReflectorImpl::OnMirroringCompositorResized() {
-  mirroring_layer_->SchedulePaint(mirroring_layer_->bounds());
+  for (LayerData* layer_data : mirroring_layers_)
+    layer_data->layer->SchedulePaint(layer_data->layer->bounds());
+}
+
+void ReflectorImpl::AddMirroringLayer(ui::Layer* layer) {
+  DCHECK(layer->GetCompositor());
+  DCHECK(mirroring_layers_.end() == FindLayerData(layer));
+
+  LayerData* layer_data = new LayerData(layer);
+  if (mailbox_)
+    layer_data->needs_set_mailbox = true;
+  mirroring_layers_.push_back(layer_data);
+  mirrored_compositor_->ScheduleFullRedraw();
+
+  layer->GetCompositor()->AddObserver(this);
+}
+
+void ReflectorImpl::RemoveMirroringLayer(ui::Layer* layer) {
+  DCHECK(layer->GetCompositor());
+
+  ScopedVector<LayerData>::iterator iter = FindLayerData(layer);
+  DCHECK(iter != mirroring_layers_.end());
+  (*iter)->layer->SetShowSolidColorContent();
+  mirroring_layers_.erase(iter);
+
+  layer->GetCompositor()->RemoveObserver(this);
+  composition_count_--;
+  if (composition_count_ == 0 && !composition_started_callback_.is_null())
+    composition_started_callback_.Run();
+
+  if (mirroring_layers_.empty() && output_surface_)
+    DetachFromOutputSurface();
+}
+
+void ReflectorImpl::OnCompositingStarted(ui::Compositor* compositor,
+                                         base::TimeTicks start_time) {
+  if (composition_count_ > 0 && --composition_count_ == 0 &&
+      !composition_started_callback_.is_null()) {
+    composition_started_callback_.Run();
+  }
+}
+
+void ReflectorImpl::OnSourceTextureMailboxUpdated(
+    scoped_refptr<OwnedMailbox> mailbox) {
+  mailbox_ = mailbox;
+  if (mailbox_.get()) {
+    for (LayerData* layer_data : mirroring_layers_)
+      layer_data->needs_set_mailbox = true;
+
+    // The texture doesn't have the data. Request full redraw on mirrored
+    // compositor so that the full content will be copied to mirroring
+    // compositor. This full redraw should land us in OnSourceSwapBuffers() to
+    // resize the texture appropriately.
+    mirrored_compositor_->ScheduleFullRedraw();
+  }
 }
 
 void ReflectorImpl::OnSourceSwapBuffers() {
-  if (!mirroring_layer_)
+  if (mirroring_layers_.empty()) {
+    if (!composition_started_callback_.is_null())
+      composition_started_callback_.Run();
     return;
+  }
+
   // Should be attached to the source output surface already.
   DCHECK(mailbox_.get());
 
   gfx::Size size = output_surface_->SurfaceSize();
-  mirrored_compositor_gl_helper_->CopyTextureFullImage(
-      mirrored_compositor_gl_helper_texture_id_, size);
-  // Insert a barrier to make the copy show up in the mirroring compositor's
-  // mailbox. Since the the compositor contexts and the ImageTransportFactory's
-  // GLHelper are all on the same GPU channel, this is sufficient instead of
-  // plumbing through a sync point.
-  mirrored_compositor_gl_helper_->InsertOrderingBarrier();
 
   // Request full redraw on mirroring compositor.
-  UpdateTexture(size, mirroring_layer_->bounds());
+  for (LayerData* layer_data : mirroring_layers_)
+    UpdateTexture(layer_data, size, layer_data->layer->bounds());
+  composition_count_ = mirroring_layers_.size();
 }
 
 void ReflectorImpl::OnSourcePostSubBuffer(const gfx::Rect& rect) {
-  if (!mirroring_layer_)
+  if (mirroring_layers_.empty()) {
+    if (!composition_started_callback_.is_null())
+      composition_started_callback_.Run();
     return;
+  }
+
   // Should be attached to the source output surface already.
   DCHECK(mailbox_.get());
 
   gfx::Size size = output_surface_->SurfaceSize();
-  mirrored_compositor_gl_helper_->CopyTextureSubImage(
-      mirrored_compositor_gl_helper_texture_id_, rect);
-  // Insert a barrier to make the copy show up in the mirroring compositor's
-  // mailbox. Since the the compositor contexts and the ImageTransportFactory's
-  // GLHelper are all on the same GPU channel, this is sufficient instead of
-  // plumbing through a sync point.
-  mirrored_compositor_gl_helper_->InsertOrderingBarrier();
 
   int y = rect.y();
   // Flip the coordinates to compositor's one.
@@ -130,7 +164,9 @@ void ReflectorImpl::OnSourcePostSubBuffer(const gfx::Rect& rect) {
   gfx::Rect mirroring_rect(rect.x(), y, rect.width(), rect.height());
 
   // Request redraw of the dirty portion in mirroring compositor.
-  UpdateTexture(size, mirroring_rect);
+  for (LayerData* layer_data : mirroring_layers_)
+    UpdateTexture(layer_data, size, mirroring_rect);
+  composition_count_ = mirroring_layers_.size();
 }
 
 static void ReleaseMailbox(scoped_refptr<OwnedMailbox> mailbox,
@@ -139,20 +175,29 @@ static void ReleaseMailbox(scoped_refptr<OwnedMailbox> mailbox,
   mailbox->UpdateSyncPoint(sync_point);
 }
 
-void ReflectorImpl::UpdateTexture(const gfx::Size& source_size,
+ScopedVector<ReflectorImpl::LayerData>::iterator ReflectorImpl::FindLayerData(
+    ui::Layer* layer) {
+  return std::find_if(mirroring_layers_.begin(), mirroring_layers_.end(),
+                      [layer](const LayerData* layer_data) {
+                        return layer_data->layer == layer;
+                      });
+}
+
+void ReflectorImpl::UpdateTexture(ReflectorImpl::LayerData* layer_data,
+                                  const gfx::Size& source_size,
                                   const gfx::Rect& redraw_rect) {
-  if (needs_set_mailbox_) {
-    mirroring_layer_->SetTextureMailbox(
+  if (layer_data->needs_set_mailbox) {
+    layer_data->layer->SetTextureMailbox(
         cc::TextureMailbox(mailbox_->holder()),
         cc::SingleReleaseCallback::Create(base::Bind(ReleaseMailbox, mailbox_)),
         source_size);
-    needs_set_mailbox_ = false;
+    layer_data->needs_set_mailbox = false;
   } else {
-    mirroring_layer_->SetTextureSize(source_size);
+    layer_data->layer->SetTextureSize(source_size);
   }
-  mirroring_layer_->SetBounds(gfx::Rect(source_size));
-  mirroring_layer_->SetTextureFlipped(flip_texture_);
-  mirroring_layer_->SchedulePaint(redraw_rect);
+  layer_data->layer->SetBounds(gfx::Rect(source_size));
+  layer_data->layer->SetTextureFlipped(flip_texture_);
+  layer_data->layer->SchedulePaint(redraw_rect);
 }
 
 }  // namespace content

@@ -18,6 +18,7 @@
 #include "ui/views/controls/resize_area_delegate.h"
 #include "ui/views/drag_controller.h"
 #include "ui/views/view.h"
+#include "ui/views/widget/widget_observer.h"
 
 class BrowserActionsContainerObserver;
 class ExtensionPopup;
@@ -29,6 +30,7 @@ class Extension;
 }
 
 namespace views {
+class BubbleDelegateView;
 class ResizeArea;
 }
 
@@ -125,6 +127,7 @@ class BrowserActionsContainer
       public views::ResizeAreaDelegate,
       public gfx::AnimationDelegate,
       public ToolbarActionView::Delegate,
+      public views::WidgetObserver,
       public extensions::ExtensionKeybindingRegistry::Delegate {
  public:
   // Constructs a BrowserActionContainer for a particular |browser| object. For
@@ -187,9 +190,6 @@ class BrowserActionsContainer
   void ExecuteExtensionCommand(const extensions::Extension* extension,
                                const extensions::Command& command);
 
-  // Hides the currently-active popup, if there is one.
-  void HideActivePopup();
-
   // Add or remove an observer.
   void AddObserver(BrowserActionsContainerObserver* observer);
   void RemoveObserver(BrowserActionsContainerObserver* observer);
@@ -232,8 +232,6 @@ class BrowserActionsContainer
   bool ShownInsideMenu() const override;
   void OnToolbarActionViewDragDone() override;
   views::MenuButton* GetOverflowReferenceView() override;
-  void SetPopupOwner(ToolbarActionView* popup_owner) override;
-  ToolbarActionView* GetMainViewForAction(ToolbarActionView* view) override;
 
   // ToolbarActionsBarDelegate:
   void AddViewForAction(ToolbarActionViewController* action,
@@ -249,16 +247,21 @@ class BrowserActionsContainer
   bool IsAnimating() const override;
   void StopAnimating() override;
   int GetChevronWidth() const override;
-  bool IsPopupRunning() const override;
   void OnOverflowedActionWantsToRunChanged(
       bool overflowed_action_wants_to_run) override;
+  void ShowExtensionMessageBubble(
+      scoped_ptr<extensions::ExtensionMessageBubbleController> controller,
+      ToolbarActionViewController* anchor_action) override;
+
+  // views::WidgetObserver:
+  void OnWidgetClosing(views::Widget* widget) override;
+  void OnWidgetDestroying(views::Widget* widget) override;
 
   // Overridden from extension::ExtensionKeybindingRegistry::Delegate:
   extensions::ActiveTabPermissionGranter* GetActiveTabPermissionGranter()
       override;
 
-  // Retrieve the current popup.  This should only be used by unit tests.
-  gfx::NativeView TestGetPopup();
+  views::BubbleDelegateView* active_bubble() { return active_bubble_; }
 
  protected:
   // Overridden from views::View:
@@ -274,6 +277,9 @@ class BrowserActionsContainer
   typedef std::vector<ToolbarActionView*> ToolbarActionViews;
 
   void LoadImages();
+
+  // Clears the |active_bubble_|, and unregisters the container as an observer.
+  void ClearActiveBubble(views::Widget* widget);
 
   const ToolbarActionsBar::PlatformSettings& platform_settings() const {
     return toolbar_actions_bar_->platform_settings();
@@ -296,10 +302,6 @@ class BrowserActionsContainer
   // class is the the main container. See class comments for details on
   // the difference between main and overflow.
   BrowserActionsContainer* main_container_;
-
-  // The view that triggered the current popup (just a reference to a view
-  // from toolbar_action_views_).
-  ToolbarActionView* popup_owner_;
 
   // The current width of the container.
   int container_width_;
@@ -341,6 +343,9 @@ class BrowserActionsContainer
 
   // The class that registers for keyboard shortcuts for extension commands.
   scoped_ptr<ExtensionKeybindingRegistryViews> extension_keybinding_registry_;
+
+  // The extension bubble that is actively showing, if any.
+  views::BubbleDelegateView* active_bubble_;
 
   ObserverList<BrowserActionsContainerObserver> observers_;
 

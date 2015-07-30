@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/chrome_build.gni")
 import("//build/config/crypto.gni")
 import("//build/config/features.gni")
 import("//build/config/ui.gni")
@@ -31,6 +32,8 @@ source_set("test_support") {
     "base/chrome_test_suite.h",
     "base/chrome_unit_test_suite.cc",
     "base/chrome_unit_test_suite.h",
+    "base/dialog_test_browser_window.cc",
+    "base/dialog_test_browser_window.h",
     "base/find_in_page_observer.cc",
     "base/find_in_page_observer.h",
     "base/history_index_restore_observer.cc",
@@ -94,6 +97,7 @@ source_set("test_support") {
     "//chrome/renderer:test_support",
     "//components/bookmarks/test",
     "//components/gcm_driver:test_support",
+    "//components/gcm_driver/instance_id:test_support",
     "//components/history/core/test:test",
     "//components/metrics:test_support",
     "//components/omnibox:test_support",
@@ -132,6 +136,7 @@ source_set("test_support") {
       "//content/public/utility",
       "//components/autofill/core/browser:test_support",
       "//components/captive_portal:test_support",
+      "//components/guest_view:test_support",
       "//components/infobars/core",
       "//components/sessions:test_support",
       "//components/user_manager:test_support",
@@ -252,7 +257,7 @@ if (!is_android) {
       "//sync",
       "//testing/gmock",
       "//testing/gtest",
-      "//third_party/hunspell",
+      "//third_party/hunspell_new",
       "//third_party/icu",
       "//third_party/libpng",
       "//third_party/npapi",
@@ -373,13 +378,18 @@ if (!is_android) {
               chrome_tests_gypi_values.chrome_interactive_ui_test_win_sources,
               ".",
               "//chrome")
-      sources += [ "$root_gen_dir/chrome/other_version.rc" ]
       deps += [
-        "//chrome:chrome_version_resources",
+        "//chrome:other_version",
         "//third_party/isimpledom",
         "//third_party/wtl",
         "//ui/resources",
       ]
+
+      configs -= [ "//build/config/win:default_incremental_linking" ]
+      configs +=
+          [ "//build/config/win:default_large_module_incremental_linking" ]
+
+      libs = [ "oleacc.lib" ]
     }
 
     if (is_mac) {
@@ -626,6 +636,7 @@ if (!is_android) {
       "//components/captive_portal:test_support",
       "//components/dom_distiller/content",
       "//components/dom_distiller/core:test_support",
+      "//components/guest_view:test_support",
       "//components/resources",
       "//components/strings",
       "//components/translate/core/common",
@@ -716,7 +727,6 @@ if (!is_android) {
           # "../ppapi/tests/extensions/extensions.gyp:ppapi_tests_extensions_background_keepalive",  # TODO(GYP)
           # "../ppapi/tests/extensions/extensions.gyp:ppapi_tests_extensions_media_galleries",  # TODO(GYP)
           # "../ppapi/tests/extensions/extensions.gyp:ppapi_tests_extensions_packaged_app",  # TODO(GYP)
-          # "../ppapi/ppapi_tests_mojo.gyp:ppapi_tests_mojo",  # TODO(GYP)
         ]
         if (is_chromeos) {
           sources += [ "//third_party/liblouis/nacl_wrapper/liblouis_wrapper_browsertest.cc" ]
@@ -737,6 +747,9 @@ if (!is_android) {
         deps += [
           #'chrome.gyp:chrome_nacl_win64',  TODO(GYP)
         ]
+        configs -= [ "//build/config/win:default_incremental_linking" ]
+        configs +=
+            [ "//build/config/win:default_large_module_incremental_linking" ]
       }
       if (is_linux) {
         deps += [
@@ -826,7 +839,6 @@ if (!is_android) {
               chrome_tests_gypi_values.chrome_browser_tests_full_safe_browsing_sources,
               ".",
               "//chrome")
-      defines += [ "FULL_SAFE_BROWSING" ]
     }
     if (enable_captive_portal_detection) {
       sources += [ "../browser/captive_portal/captive_portal_browsertest.cc" ]
@@ -840,10 +852,16 @@ if (!is_android) {
         "../browser/media/chrome_webrtc_getmediadevices_browsertest.cc",
       ]
     }
+    if (enable_media_router) {
+      sources += rebase_path(
+              chrome_tests_gypi_values.chrome_browser_tests_media_router_sources,
+              ".",
+              "//chrome")
+      deps += [ "//chrome/browser/media/router:test_support" ]
+    }
     if (is_win) {
-      sources += [ "$root_gen_dir/chrome/other_version.rc" ]
       deps += [
-        "//chrome:chrome_version_resources",
+        "//chrome:other_version",
         "//third_party/wtl",
         "//ui/resources",
       ]
@@ -969,7 +987,7 @@ if (!is_android) {
       # Runtime dependencies.
       data_deps += [
         "//media/cdm/ppapi:clearkeycdmadapter",
-        "//third_party/widevine/cdm:adapter",
+        "//third_party/widevine/cdm:widevinecdmadapter",
       ]
     }
     if (!enable_print_preview) {
@@ -1065,12 +1083,15 @@ if (!is_android) {
       ldflags = [ "-Wl,-ObjC" ]
     }
     if (is_win) {
-      sources += [ "$root_gen_dir/chrome/other_version.rc" ]
       deps += [
-        "//chrome:chrome_version_resources",
+        "//chrome:other_version",
         "//third_party/wtl",
         "//ui/resources",
       ]
+
+      configs -= [ "//build/config/win:default_incremental_linking" ]
+      configs +=
+          [ "//build/config/win:default_large_module_incremental_linking" ]
     } else {
       sources -= [ "../app/chrome_version.rc.version" ]
     }
@@ -1130,12 +1151,15 @@ if (!is_android) {
       ldflags = [ "-Wl,-ObjC" ]
     }
     if (is_win) {
-      sources += [ "$root_gen_dir/chrome/other_version.rc" ]
       deps += [
-        "//chrome:chrome_version_resources",
+        "//chrome:other_version",
+        "//chrome/installer/util:strings",
         "//third_party/wtl",
         "//ui/resources",
       ]
+      configs -= [ "//build/config/win:default_incremental_linking" ]
+      configs +=
+          [ "//build/config/win:default_large_module_incremental_linking" ]
     } else {
       sources -= [ "../app/chrome_version.rc.version" ]
     }
@@ -1161,7 +1185,7 @@ if (!is_android) {
     if (enable_pepper_cdms) {
       data_deps = [
         "//media/cdm/ppapi:clearkeycdmadapter",
-        "//third_party/widevine/cdm:adapter",
+        "//third_party/widevine/cdm:widevinecdmadapter",
       ]
     }
   }
@@ -1253,14 +1277,13 @@ if (!is_android) {
       # Some android targets still depend on --gc-sections to link.
       # TODO: remove --gc-sections for Debug builds (crbug.com/159847).
       ldflags = [ "-Wl,--gc-sections" ]
-      deps += [ "//testing/android:native_test_native_code" ]
+      deps += [ "//testing/android/native_test:native_test_native_code" ]
     } else {
       sources +=
           rebase_path(unit_gypi_values.chrome_unit_tests_non_android_sources,
                       ".",
                       "//chrome")
     }
-
     if (is_ios || is_chromeos) {
       sources -=
           [ "../browser/metrics/signin_status_metrics_provider_unittest.cc" ]
@@ -1277,24 +1300,15 @@ if (!is_android) {
                       ".",
                       "//chrome")
       if (is_mac && !is_ios) {
-        deps += [ "//third_party/hunspell" ]
+        deps += [ "//third_party/hunspell_new" ]
       }
     }
 
     if (enable_one_click_signin) {
-      sources += rebase_path(
-              unit_gypi_values.chrome_unit_tests_one_click_signin_sources,
-              ".",
-              "//chrome")
-      if (is_chromeos) {
-        sources -= [
-          "../browser/ui/sync/one_click_signin_helper_unittest.cc",
-          "../browser/ui/sync/one_click_signin_sync_starter_unittest.cc",
-        ]
-      }
-      if (!toolkit_views) {
-        sources -= [ "../browser/ui/views/sync/one_click_signin_bubble_view_unittest.cc" ]
-      }
+      sources += [
+        "../browser/ui/sync/one_click_signin_sync_observer_unittest.cc",
+        "../browser/ui/sync/one_click_signin_sync_starter_unittest.cc",
+      ]
     }
 
     if (enable_extensions) {
@@ -1304,6 +1318,7 @@ if (!is_android) {
                       "//chrome")
       deps += [
         "//chrome/common/extensions/api",
+        "//device/usb:mocks",
         "//extensions:extensions_resources",
         "//extensions/strings",
       ]
@@ -1369,13 +1384,6 @@ if (!is_android) {
         "//chrome/browser/ui/libgtk2ui",
         "//build/config/linux:gio",
       ]
-      if (!is_component_build) {
-        # TODO(erg): This file does not compile in shared library mode because
-        # it is reaching into the internals of libgtk2ui, which shouldn't be
-        # linked with the rest of chrome. This should either be fixed by
-        # creating a separate unit test target, or by deleting the test.
-        sources += [ "../browser/ui/libgtk2ui/x11_input_method_context_impl_gtk2_unittest.cc" ]
-      }
     }
 
     if (enable_task_manager) {
@@ -1439,7 +1447,6 @@ if (!is_android) {
               unit_gypi_values.chrome_unit_tests_full_safe_browsing_sources,
               ".",
               "//chrome")
-      defines += [ "FULL_SAFE_BROWSING" ]
       deps += [ ":test_proto" ]
       if (is_android) {
         deps -= [ ":test_proto" ]
@@ -1483,13 +1490,17 @@ if (!is_android) {
               ".",
               "//chrome")
     }
+    if (enable_media_router) {
+      sources +=
+          rebase_path(unit_gypi_values.chrome_unit_tests_media_router_sources,
+                      ".",
+                      "//chrome")
+      deps += [ "//chrome/browser/media/router:test_support" ]
+    }
     if (enable_webrtc) {
       sources += rebase_path(unit_gypi_values.chrome_unit_tests_webrtc_sources,
                              ".",
                              "//chrome")
-    }
-    if (enable_media_router) {
-      deps += [ "//chrome/browser/media/router:unit_tests" ]
     }
     if (is_chromeos) {
       sources +=
@@ -1503,14 +1514,10 @@ if (!is_android) {
       sources -= [
         "../browser/signin/signin_global_error_unittest.cc",
         "../browser/signin/signin_manager_unittest.cc",
-        "../browser/signin/signin_names_io_thread_unittest.cc",
         "../browser/ui/views/app_list/linux/app_list_linux_unittest.cc",
         "../browser/ui/views/frame/opaque_browser_frame_view_layout_unittest.cc",
+        "../browser/ui/views/sync/one_click_signin_bubble_view_unittest.cc",
       ]
-      if (use_ozone) {
-        # crbug.com/354036
-        sources -= [ "../browser/chromeos/events/event_rewriter_unittest.cc" ]
-      }
     }
     if (use_x11) {
       deps += [ "//ui/events/devices" ]
@@ -1571,7 +1578,7 @@ if (!is_android) {
     }
     if (!is_mac && !is_ios) {
       deps += [
-        "//third_party/hunspell",
+        "//third_party/hunspell_new",
         "//chrome:packed_extra_resources",
         "//chrome:packed_resources",
         "//chrome/tools/convert_dict:lib",
@@ -1600,26 +1607,21 @@ if (!is_android) {
       sources += rebase_path(unit_gypi_values.chrome_unit_tests_win_sources,
                              ".",
                              "//chrome")
-      sources += [
-        # TODO:  It would be nice to have these pulled in
-        # automatically from direct_dependent_settings in
-        # their various targets (net.gyp:net_resources, etc.),
-        # but that causes errors in other targets when
-        # resulting .res files get referenced multiple times.
-        #'<(SHARED_INTERMEDIATE_DIR)/chrome_version/other_version.rc',  TODO(GYP)
-        #'<(SHARED_INTERMEDIATE_DIR)/installer_util_strings/installer_util_strings.rc',  TODO(GYP)
-        #'<(SHARED_INTERMEDIATE_DIR)/ui/resources/ui_unscaled_resources.rc',  TODO(GYP)
-      ]
-
       deps += [
-        #'browser/safe_browsing/verifier_test/verifier_unittest.gyp:verifier_test_dll_1',  TODO(GYP)
-        #'browser/safe_browsing/verifier_test/verifier_unittest.gyp:verifier_test_dll_2',  TODO(GYP)
-        #'chrome_version_resources',  TODO(GYP)
+        #'browser/safe_browsing/incident_reporting/verifier_test/verifier_unittest.gyp:verifier_test_dll_1',  TODO(GYP)
+        #'browser/safe_browsing/incident_reporting/verifier_test/verifier_unittest.gyp:verifier_test_dll_2',  TODO(GYP)
+        "//chrome:other_version",
         "//chrome_elf:blacklist_test_dll_1",
+        "//chrome/installer/util:strings",
         "//third_party/iaccessible2",
         "//third_party/isimpledom",
         "//third_party/wtl",
+        "//ui/resources",
       ]
+
+      configs -= [ "//build/config/win:default_incremental_linking" ]
+      configs +=
+          [ "//build/config/win:default_large_module_incremental_linking" ]
 
       libs = [
         "comsupp.lib",
@@ -1676,12 +1678,18 @@ if (!is_android) {
                       "//chrome")
       deps += [ "//ui/app_list:test_support" ]
     }
+    if (enable_app_list && is_chromeos) {
+      sources += rebase_path(
+              unit_gypi_values.chrome_unit_tests_app_list_chromeos_sources,
+              ".",
+              "//chrome")
+    }
     if (!enable_plugin_installation) {
       sources -= [ "../browser/plugins/plugin_installer_unittest.cc" ]
     }
   }
 
-  if (is_linux && !is_chromeos) {
+  if (is_win || (is_linux && !is_chromeos)) {
     # TODO(GYP): Figure out which of these work and are needed on other
     # platforms.
     test("chrome_app_unittests") {
@@ -1702,6 +1710,7 @@ if (!is_android) {
 
       deps = [
         ":test_support",
+        "//breakpad:client",
         "//chrome/browser",
         "//chrome/child",
         "//base/test:run_all_unittests",
@@ -1734,7 +1743,11 @@ if (!is_android) {
         "//testing/perf",
       ]
 
-      if (!is_win) {
+      if (is_win) {
+        configs -= [ "//build/config/win:default_incremental_linking" ]
+        configs +=
+            [ "//build/config/win:default_large_module_incremental_linking" ]
+      } else {
         sources -= [
           "../app/chrome_command_ids.h",
 

@@ -45,6 +45,10 @@
 #include "ui/events/latency_info.h"
 #include "ui/gl/gl_switches.h"
 
+#if defined(OS_ANDROID)
+#include "base/android/build_info.h"
+#endif
+
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
 #include "content/common/sandbox_win.h"
@@ -77,10 +81,14 @@ static const char* const kSwitchNames[] = {
   switches::kDisableBreakpad,
   switches::kDisableGpuSandbox,
   switches::kDisableGpuWatchdog,
+  switches::kDisableGLExtensions,
   switches::kDisableLogging,
   switches::kDisableSeccompFilterSandbox,
 #if defined(ENABLE_WEBRTC)
   switches::kDisableWebRtcHWEncoding,
+#endif
+#if defined(OS_WIN)
+  switches::kEnableAcceleratedVpxDecode,
 #endif
   switches::kEnableLogging,
   switches::kEnableShareGroupAsyncTextureUpload,
@@ -91,7 +99,6 @@ static const char* const kSwitchNames[] = {
   switches::kGpuSandboxAllowSysVShm,
   switches::kGpuSandboxFailuresFatal,
   switches::kGpuSandboxStartEarly,
-  switches::kIgnoreResolutionLimitsForAcceleratedVideoDecode,
   switches::kLoggingLevel,
   switches::kEnableLowEndDeviceMode,
   switches::kDisableLowEndDeviceMode,
@@ -158,7 +165,7 @@ class GpuSandboxedProcessLauncherDelegate
   ~GpuSandboxedProcessLauncherDelegate() override {}
 
 #if defined(OS_WIN)
-  virtual bool ShouldSandbox() override {
+  bool ShouldSandbox() override {
     bool sandbox = !cmd_line_->HasSwitch(switches::kDisableGpuSandbox);
     if(! sandbox) {
       DVLOG(1) << "GPU sandbox is disabled";
@@ -166,8 +173,8 @@ class GpuSandboxedProcessLauncherDelegate
     return sandbox;
   }
 
-  virtual void PreSandbox(bool* disable_default_policy,
-                          base::FilePath* exposed_dir) override {
+  void PreSandbox(bool* disable_default_policy,
+                  base::FilePath* exposed_dir) override {
     *disable_default_policy = true;
   }
 
@@ -175,8 +182,7 @@ class GpuSandboxedProcessLauncherDelegate
   // which is USER_RESTRICTED breaks both the DirectX backend and the OpenGL
   // backend. Note that the GPU process is connected to the interactive
   // desktop.
-  virtual void PreSpawnTarget(sandbox::TargetPolicy* policy,
-                              bool* success) {
+  void PreSpawnTarget(sandbox::TargetPolicy* policy, bool* success) override {
     if (base::win::GetVersion() > base::win::VERSION_XP) {
       if (cmd_line_->GetSwitchValueASCII(switches::kUseGL) ==
           gfx::kGLImplementationDesktopName) {
@@ -1051,6 +1057,9 @@ std::string GpuProcessHost::GetShaderPrefixKey() {
     gpu::GPUInfo info = GpuDataManagerImpl::GetInstance()->GetGPUInfo();
 
     std::string in_str = GetContentClient()->GetProduct() + "-" +
+#if defined(OS_ANDROID)
+        base::android::BuildInfo::GetInstance()->android_build_fp() + "-" +
+#endif
         info.gl_vendor + "-" + info.gl_renderer + "-" +
         info.driver_version + "-" + info.driver_vendor;
 

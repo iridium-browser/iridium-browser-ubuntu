@@ -12,15 +12,19 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_registry.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
 #include "components/content_settings/core/browser/content_settings_rule.h"
 #include "components/content_settings/core/browser/content_settings_utils.h"
+#include "components/content_settings/core/browser/plugins_field_trial.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/content_settings/core/common/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "url/gurl.h"
+
+namespace content_settings {
 
 namespace {
 
@@ -30,53 +34,52 @@ struct DefaultContentSettingInfo {
 
   // The default value of this default setting.
   const ContentSetting default_value;
-
-  // Whether this preference should be synced.
-  const bool syncable;
 };
 
 // The corresponding preference, default value and syncability for each
 // default content setting. This array must be kept in sync with the enum
 // |ContentSettingsType|.
 const DefaultContentSettingInfo kDefaultSettings[] = {
-    {prefs::kDefaultCookiesSetting, CONTENT_SETTING_ALLOW, true},
-    {prefs::kDefaultImagesSetting, CONTENT_SETTING_ALLOW, true},
-    {prefs::kDefaultJavaScriptSetting, CONTENT_SETTING_ALLOW, true},
-    {prefs::kDefaultPluginsSetting, CONTENT_SETTING_ALLOW, true},
-    {prefs::kDefaultPopupsSetting, CONTENT_SETTING_BLOCK, true},
-    {prefs::kDefaultGeolocationSetting, CONTENT_SETTING_ASK, false},
-    {prefs::kDefaultNotificationsSetting, CONTENT_SETTING_ASK, false},
-    {prefs::kDefaultAutoSelectCertificateSetting, CONTENT_SETTING_DEFAULT,
-        false},
-    {prefs::kDefaultFullScreenSetting, CONTENT_SETTING_ASK, true},
-    {prefs::kDefaultMouseLockSetting, CONTENT_SETTING_ASK, true},
-    {prefs::kDefaultMixedScriptSetting, CONTENT_SETTING_DEFAULT, true},
-    {prefs::kDefaultMediaStreamSetting, CONTENT_SETTING_ASK, false},
-    {prefs::kDefaultMediaStreamMicSetting, CONTENT_SETTING_ASK, false},
-    {prefs::kDefaultMediaStreamCameraSetting, CONTENT_SETTING_ASK, false},
-    {prefs::kDefaultProtocolHandlersSetting, CONTENT_SETTING_DEFAULT, true},
-    {prefs::kDefaultPpapiBrokerSetting, CONTENT_SETTING_ASK, false},
-    {prefs::kDefaultAutomaticDownloadsSetting, CONTENT_SETTING_ASK, true},
-    {prefs::kDefaultMidiSysexSetting, CONTENT_SETTING_ASK, true},
-    {prefs::kDefaultPushMessagingSetting, CONTENT_SETTING_ASK, true},
-    {prefs::kDefaultSSLCertDecisionsSetting, CONTENT_SETTING_ALLOW, false},
+  {prefs::kDefaultCookiesSetting, CONTENT_SETTING_ALLOW},
+  {prefs::kDefaultImagesSetting, CONTENT_SETTING_ALLOW},
+  {prefs::kDefaultJavaScriptSetting, CONTENT_SETTING_ALLOW},
+  {prefs::kDefaultPluginsSetting, CONTENT_SETTING_DEFAULT},
+  {prefs::kDefaultPopupsSetting, CONTENT_SETTING_BLOCK},
+  {prefs::kDefaultGeolocationSetting, CONTENT_SETTING_ASK},
+  {prefs::kDefaultNotificationsSetting, CONTENT_SETTING_ASK},
+  {prefs::kDefaultAutoSelectCertificateSetting, CONTENT_SETTING_DEFAULT},
+  {prefs::kDefaultFullScreenSetting, CONTENT_SETTING_ASK},
+  {prefs::kDefaultMouseLockSetting, CONTENT_SETTING_ASK},
+  {prefs::kDefaultMixedScriptSetting, CONTENT_SETTING_DEFAULT},
+  {prefs::kDefaultMediaStreamSetting, CONTENT_SETTING_ASK},
+  {prefs::kDefaultMediaStreamMicSetting, CONTENT_SETTING_ASK},
+  {prefs::kDefaultMediaStreamCameraSetting, CONTENT_SETTING_ASK},
+  {prefs::kDefaultProtocolHandlersSetting, CONTENT_SETTING_DEFAULT},
+  {prefs::kDefaultPpapiBrokerSetting, CONTENT_SETTING_ASK},
+  {prefs::kDefaultAutomaticDownloadsSetting, CONTENT_SETTING_ASK},
+  {prefs::kDefaultMidiSysexSetting, CONTENT_SETTING_ASK},
+  {prefs::kDefaultPushMessagingSetting, CONTENT_SETTING_ASK},
+  {prefs::kDefaultSSLCertDecisionsSetting, CONTENT_SETTING_ALLOW},
 #if defined(OS_WIN)
-    {prefs::kDefaultMetroSwitchToDesktopSetting, CONTENT_SETTING_ASK, true},
+  {prefs::kDefaultMetroSwitchToDesktopSetting, CONTENT_SETTING_ASK},
 #elif defined(OS_ANDROID) || defined(OS_CHROMEOS)
-    {prefs::kDefaultProtectedMediaIdentifierSetting, CONTENT_SETTING_ASK,
-        false},
+  {prefs::kDefaultProtectedMediaIdentifierSetting, CONTENT_SETTING_ASK},
 #endif
-    {prefs::kDefaultAppBannerSetting, CONTENT_SETTING_DEFAULT, false}
+  {prefs::kDefaultAppBannerSetting, CONTENT_SETTING_DEFAULT}
 };
 static_assert(arraysize(kDefaultSettings) == CONTENT_SETTINGS_NUM_TYPES,
               "kDefaultSettings should have CONTENT_SETTINGS_NUM_TYPES "
               "elements");
 
-}  // namespace
+ContentSetting GetDefaultValue(ContentSettingsType type) {
+  if (type == CONTENT_SETTINGS_TYPE_PLUGINS)
+    return PluginsFieldTrial::GetDefaultPluginsContentSetting();
+  return kDefaultSettings[type].default_value;
+}
 
-namespace content_settings {
-
-namespace {
+const char* GetPrefName(ContentSettingsType type) {
+  return kDefaultSettings[type].pref_name;
+}
 
 class DefaultRuleIterator : public RuleIterator {
  public:
@@ -118,13 +121,14 @@ void DefaultProvider::RegisterProfilePrefs(
   // Register individual default setting preferences.
   // TODO(msramek): The aggregate preference above is deprecated. Remove it
   // after two stable releases.
-  for (size_t i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
-    registry->RegisterIntegerPref(
-        kDefaultSettings[i].pref_name,
-        kDefaultSettings[i].default_value,
-        kDefaultSettings[i].syncable
-            ? user_prefs::PrefRegistrySyncable::SYNCABLE_PREF
-            : user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  for (int i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
+    ContentSettingsType type = static_cast<ContentSettingsType>(i);
+    if (IsContentSettingsTypeSyncable(type)) {
+      registry->RegisterIntegerPref(GetPrefName(type), GetDefaultValue(type),
+          user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+    } else {
+      registry->RegisterIntegerPref(GetPrefName(type), GetDefaultValue(type));
+    }
   }
 
   // Whether the deprecated dictionary preference has already been migrated
@@ -136,10 +140,8 @@ void DefaultProvider::RegisterProfilePrefs(
 
   // Whether the deprecated mediastream default setting has already been
   // migrated into microphone and camera default settings.
-  registry->RegisterBooleanPref(
-      prefs::kMigratedDefaultMediaStreamSetting,
-      false,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kMigratedDefaultMediaStreamSetting,
+                                false);
 }
 
 DefaultProvider::DefaultProvider(PrefService* prefs, bool incognito)
@@ -162,57 +164,57 @@ DefaultProvider::DefaultProvider(PrefService* prefs, bool incognito)
   UMA_HISTOGRAM_ENUMERATION(
       "ContentSettings.DefaultCookiesSetting",
       IntToContentSetting(prefs_->GetInteger(
-          kDefaultSettings[CONTENT_SETTINGS_TYPE_COOKIES].pref_name)),
+          GetPrefName(CONTENT_SETTINGS_TYPE_COOKIES))),
       CONTENT_SETTING_NUM_SETTINGS);
   UMA_HISTOGRAM_ENUMERATION(
       "ContentSettings.DefaultImagesSetting",
       IntToContentSetting(prefs_->GetInteger(
-          kDefaultSettings[CONTENT_SETTINGS_TYPE_IMAGES].pref_name)),
+          GetPrefName(CONTENT_SETTINGS_TYPE_IMAGES))),
       CONTENT_SETTING_NUM_SETTINGS);
   UMA_HISTOGRAM_ENUMERATION(
       "ContentSettings.DefaultJavaScriptSetting",
       IntToContentSetting(prefs_->GetInteger(
-          kDefaultSettings[CONTENT_SETTINGS_TYPE_JAVASCRIPT].pref_name)),
+          GetPrefName(CONTENT_SETTINGS_TYPE_JAVASCRIPT))),
       CONTENT_SETTING_NUM_SETTINGS);
   UMA_HISTOGRAM_ENUMERATION(
       "ContentSettings.DefaultPluginsSetting",
       IntToContentSetting(prefs_->GetInteger(
-          kDefaultSettings[CONTENT_SETTINGS_TYPE_PLUGINS].pref_name)),
+          GetPrefName(CONTENT_SETTINGS_TYPE_PLUGINS))),
       CONTENT_SETTING_NUM_SETTINGS);
   UMA_HISTOGRAM_ENUMERATION(
       "ContentSettings.DefaultPopupsSetting",
       IntToContentSetting(prefs_->GetInteger(
-          kDefaultSettings[CONTENT_SETTINGS_TYPE_POPUPS].pref_name)),
+          GetPrefName(CONTENT_SETTINGS_TYPE_POPUPS))),
       CONTENT_SETTING_NUM_SETTINGS);
   UMA_HISTOGRAM_ENUMERATION(
       "ContentSettings.DefaultLocationSetting",
       IntToContentSetting(prefs_->GetInteger(
-          kDefaultSettings[CONTENT_SETTINGS_TYPE_GEOLOCATION].pref_name)),
+          GetPrefName(CONTENT_SETTINGS_TYPE_GEOLOCATION))),
       CONTENT_SETTING_NUM_SETTINGS);
   UMA_HISTOGRAM_ENUMERATION(
       "ContentSettings.DefaultNotificationsSetting",
       IntToContentSetting(prefs_->GetInteger(
-          kDefaultSettings[CONTENT_SETTINGS_TYPE_NOTIFICATIONS].pref_name)),
+          GetPrefName(CONTENT_SETTINGS_TYPE_NOTIFICATIONS))),
       CONTENT_SETTING_NUM_SETTINGS);
   UMA_HISTOGRAM_ENUMERATION(
       "ContentSettings.DefaultMouseCursorSetting",
       IntToContentSetting(prefs_->GetInteger(
-          kDefaultSettings[CONTENT_SETTINGS_TYPE_MOUSELOCK].pref_name)),
+          GetPrefName(CONTENT_SETTINGS_TYPE_MOUSELOCK))),
       CONTENT_SETTING_NUM_SETTINGS);
   UMA_HISTOGRAM_ENUMERATION(
       "ContentSettings.DefaultMediaStreamSetting",
       IntToContentSetting(prefs_->GetInteger(
-          kDefaultSettings[CONTENT_SETTINGS_TYPE_MEDIASTREAM].pref_name)),
+          GetPrefName(CONTENT_SETTINGS_TYPE_MEDIASTREAM))),
       CONTENT_SETTING_NUM_SETTINGS);
   UMA_HISTOGRAM_ENUMERATION(
       "ContentSettings.DefaultMIDISysExSetting",
       IntToContentSetting(prefs_->GetInteger(
-          kDefaultSettings[CONTENT_SETTINGS_TYPE_MIDI_SYSEX].pref_name)),
+          GetPrefName(CONTENT_SETTINGS_TYPE_MIDI_SYSEX))),
       CONTENT_SETTING_NUM_SETTINGS);
   UMA_HISTOGRAM_ENUMERATION(
       "ContentSettings.DefaultPushMessagingSetting",
       IntToContentSetting(prefs_->GetInteger(
-          kDefaultSettings[CONTENT_SETTINGS_TYPE_PUSH_MESSAGING].pref_name)),
+          GetPrefName(CONTENT_SETTINGS_TYPE_PUSH_MESSAGING))),
       CONTENT_SETTING_NUM_SETTINGS);
 
   pref_change_registrar_.Init(prefs_);
@@ -220,8 +222,10 @@ DefaultProvider::DefaultProvider(PrefService* prefs, bool incognito)
       &DefaultProvider::OnPreferenceChanged, base::Unretained(this));
   pref_change_registrar_.Add(prefs::kDefaultContentSettings, callback);
 
-  for (size_t i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i)
-    pref_change_registrar_.Add(kDefaultSettings[i].pref_name, callback);
+  for (int i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
+    ContentSettingsType type = static_cast<ContentSettingsType>(i);
+    pref_change_registrar_.Add(GetPrefName(type), callback);
+  }
 }
 
 DefaultProvider::~DefaultProvider() {
@@ -265,14 +269,14 @@ bool DefaultProvider::SetWebsiteSetting(
     // If the changed setting is syncable, write it to the old dictionary
     // preference as well, so it can be synced to older versions of Chrome.
     // TODO(msramek): Remove this after two stable releases.
-    if (kDefaultSettings[content_type].syncable)
+    if (IsContentSettingsTypeSyncable(content_type))
       WriteDictionaryPref(content_type, value.get());
   }
 
   NotifyObservers(ContentSettingsPattern(),
                   ContentSettingsPattern(),
                   content_type,
-                  std::string());
+                  ResourceIdentifier());
 
   return true;
 }
@@ -310,27 +314,23 @@ void DefaultProvider::ShutdownOnUIThread() {
 
 void DefaultProvider::ReadDefaultSettings() {
   base::AutoLock lock(lock_);
-  for (size_t i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
-    ContentSettingsType content_type = ContentSettingsType(i);
-    ChangeSetting(content_type, ReadIndividualPref(content_type).get());
+  for (int i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
+    ContentSettingsType type = static_cast<ContentSettingsType>(i);
+    ChangeSetting(type, ReadIndividualPref(type).get());
   }
 }
 
 bool DefaultProvider::IsValueEmptyOrDefault(ContentSettingsType content_type,
-                                       base::Value* value) {
-  return (value == NULL ||
-          ValueToContentSetting(value)
-              == kDefaultSettings[content_type].default_value);
+                                            base::Value* value) {
+  if (!value) return true;
+  return ValueToContentSetting(value) == GetDefaultValue(content_type);
 }
 
 void DefaultProvider::ChangeSetting(ContentSettingsType content_type,
                                     base::Value* value) {
   if (!value) {
     default_settings_[content_type].reset(
-        kDefaultSettings[content_type].default_value != CONTENT_SETTING_DEFAULT
-            ? new base::FundamentalValue(
-                kDefaultSettings[content_type].default_value)
-            : NULL);
+        ContentSettingToValue(GetDefaultValue(content_type)).release());
   } else {
     default_settings_[content_type].reset(value->DeepCopy());
   }
@@ -339,14 +339,14 @@ void DefaultProvider::ChangeSetting(ContentSettingsType content_type,
 void DefaultProvider::WriteIndividualPref(ContentSettingsType content_type,
                                           base::Value* value) {
   if (IsValueEmptyOrDefault(content_type, value)) {
-    prefs_->ClearPref(kDefaultSettings[content_type].pref_name);
+    prefs_->ClearPref(GetPrefName(content_type));
     return;
   }
 
-  int int_value = kDefaultSettings[content_type].default_value;
+  int int_value = GetDefaultValue(content_type);
   bool is_integer = value->GetAsInteger(&int_value);
   DCHECK(is_integer);
-  prefs_->SetInteger(kDefaultSettings[content_type].pref_name, int_value);
+  prefs_->SetInteger(GetPrefName(content_type), int_value);
 }
 
 void DefaultProvider::WriteDictionaryPref(ContentSettingsType content_type,
@@ -396,7 +396,7 @@ void DefaultProvider::OnPreferenceChanged(const std::string& name) {
     {
       base::AutoLock lock(lock_);
       for (const auto& it : *dictionary) {
-        if (!kDefaultSettings[it.first].syncable)
+        if (!IsContentSettingsTypeSyncable(it.first))
           continue;
 
         DCHECK(default_settings_.find(it.first) != default_settings_.end());
@@ -407,7 +407,7 @@ void DefaultProvider::OnPreferenceChanged(const std::string& name) {
 
     // When the lock is released, write the new settings to preferences.
     for (const auto& it : *dictionary) {
-      if (!kDefaultSettings[it.first].syncable)
+      if (!IsContentSettingsTypeSyncable(it.first))
         continue;
       WriteIndividualPref(it.first, it.second.get());
     }
@@ -415,9 +415,10 @@ void DefaultProvider::OnPreferenceChanged(const std::string& name) {
     // Find out which content setting the preference corresponds to.
     ContentSettingsType content_type = CONTENT_SETTINGS_TYPE_DEFAULT;
 
-    for (size_t i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
-      if (kDefaultSettings[i].pref_name == name) {
-        content_type = ContentSettingsType(i);
+    for (int i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
+      ContentSettingsType type = static_cast<ContentSettingsType>(i);
+      if (GetPrefName(type) == name) {
+        content_type = type;
         break;
       }
     }
@@ -440,27 +441,23 @@ void DefaultProvider::OnPreferenceChanged(const std::string& name) {
       base::AutoLock lock(lock_);
       ChangeSetting(content_type, ReadIndividualPref(content_type).get());
     }
-    if (kDefaultSettings[content_type].syncable)
+    if (IsContentSettingsTypeSyncable(content_type))
       WriteDictionaryPref(content_type, default_settings_[content_type].get());
     to_notify.push_back(content_type);
   }
 
-  for (size_t i = 0; i < to_notify.size(); ++i) {
+  for (const ContentSettingsType content_type : to_notify) {
     NotifyObservers(ContentSettingsPattern(),
                     ContentSettingsPattern(),
-                    to_notify[i],
-                    std::string());
+                    content_type,
+                    ResourceIdentifier());
   }
 }
 
 scoped_ptr<base::Value> DefaultProvider::ReadIndividualPref(
     ContentSettingsType content_type) {
-  int int_value = prefs_->GetInteger(kDefaultSettings[content_type].pref_name);
-
-  if (int_value == CONTENT_SETTING_DEFAULT)
-    return make_scoped_ptr((base::Value*)NULL);
-  else
-    return make_scoped_ptr(new base::FundamentalValue(int_value));
+  int int_value = prefs_->GetInteger(GetPrefName(content_type));
+  return ContentSettingToValue(IntToContentSetting(int_value)).Pass();
 }
 
 scoped_ptr<DefaultProvider::ValueMap> DefaultProvider::ReadDictionaryPref() {
@@ -493,11 +490,10 @@ scoped_ptr<DefaultProvider::ValueMap> DefaultProvider::ReadDictionaryPref() {
 
 void DefaultProvider::ForceDefaultsToBeExplicit(ValueMap* value_map) {
   for (int i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
-    ContentSettingsType type = ContentSettingsType(i);
-    if (!(*value_map)[type].get() &&
-        kDefaultSettings[i].default_value != CONTENT_SETTING_DEFAULT) {
-      (*value_map)[type].reset(
-          new base::FundamentalValue(kDefaultSettings[i].default_value));
+    ContentSettingsType type = static_cast<ContentSettingsType>(i);
+    if (!(*value_map)[type].get()) {
+      (*value_map)[type].reset(ContentSettingToValue(
+          GetDefaultValue(type)).release());
     }
   }
 }
@@ -505,26 +501,26 @@ void DefaultProvider::ForceDefaultsToBeExplicit(ValueMap* value_map) {
 scoped_ptr<DefaultProvider::ValueMap>
     DefaultProvider::GetSettingsFromDictionary(
         const base::DictionaryValue* dictionary) {
+  scoped_ptr<ValueMap> value_map(new ValueMap());
   if (!dictionary)
-    return make_scoped_ptr(new ValueMap());
-  ValueMap* value_map = new ValueMap();
+    return value_map.Pass();
 
   for (base::DictionaryValue::Iterator i(*dictionary);
        !i.IsAtEnd(); i.Advance()) {
     const std::string& content_type(i.key());
-    for (size_t type = 0; type < CONTENT_SETTINGS_NUM_TYPES; ++type) {
+    for (int type = 0; type < CONTENT_SETTINGS_NUM_TYPES; ++type) {
       if (content_type == GetTypeName(ContentSettingsType(type))) {
         int int_value = CONTENT_SETTING_DEFAULT;
         bool is_integer = i.value().GetAsInteger(&int_value);
         DCHECK(is_integer);
         (*value_map)[ContentSettingsType(type)].reset(
-            new base::FundamentalValue(int_value));
+            ContentSettingToValue(IntToContentSetting(int_value)).release());
         break;
       }
     }
   }
 
-  return make_scoped_ptr(value_map);
+  return value_map.Pass();
 }
 
 void DefaultProvider::MigrateDefaultSettings() {
@@ -534,9 +530,9 @@ void DefaultProvider::MigrateDefaultSettings() {
 
   scoped_ptr<DefaultProvider::ValueMap> value_map = ReadDictionaryPref();
 
-  for (size_t i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
-    ContentSettingsType content_type = ContentSettingsType(i);
-    WriteIndividualPref(content_type, (*value_map)[content_type].get());
+  for (int i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
+    ContentSettingsType type = static_cast<ContentSettingsType>(i);
+    WriteIndividualPref(type, (*value_map)[type].get());
   }
 
   prefs_->SetBoolean(prefs::kMigratedDefaultContentSettings, true);

@@ -213,8 +213,7 @@ void SecurityOrigin::setDomainFromDOM(const String& newDomain)
 
 bool SecurityOrigin::isSecure(const KURL& url)
 {
-    // Invalid URLs are secure, as are URLs which have a secure protocol.
-    if (!url.isValid() || SchemeRegistry::shouldTreatURLSchemeAsSecure(url.protocol()))
+    if (SchemeRegistry::shouldTreatURLSchemeAsSecure(url.protocol()))
         return true;
 
     // URLs that wrap inner URLs are secure if those inner URLs are secure.
@@ -376,13 +375,16 @@ bool SecurityOrigin::canDisplay(const KURL& url) const
     return true;
 }
 
-bool SecurityOrigin::canAccessFeatureRequiringSecureOrigin(String& errorMessage) const
+bool SecurityOrigin::isPotentiallyTrustworthy(String& errorMessage) const
 {
     ASSERT(m_protocol != "data");
     if (SchemeRegistry::shouldTreatURLSchemeAsSecure(m_protocol) || isLocal() || isLocalhost())
         return true;
 
-    errorMessage = "Only secure origins are allowed. http://goo.gl/lq4gCo";
+    if (SecurityPolicy::isOriginWhiteListedTrustworthy(*this))
+        return true;
+
+    errorMessage = "Only secure origins are allowed (see: https://goo.gl/Y0ZkNV).";
     return false;
 }
 

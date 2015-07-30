@@ -35,7 +35,7 @@ protected:
     }
     void onFilterRec(SkScalerContextRec*) const override { }
     virtual SkAdvancedTypefaceMetrics* onGetAdvancedTypefaceMetrics(
-                                SkAdvancedTypefaceMetrics::PerGlyphInfo,
+                                PerGlyphInfo,
                                 const uint32_t*, uint32_t) const override { return NULL; }
     void onGetFontDescriptor(SkFontDescriptor*, bool*) const override { }
     virtual int onCharsToGlyphs(const void* chars, Encoding encoding,
@@ -76,7 +76,7 @@ SkTypeface* sk_create_default_typeface(int style) {
     SkAutoMutexAcquire lock(&gCreateDefaultMutex);
 
     SkAutoTUnref<SkFontMgr> fm(SkFontMgr::RefDefault());
-    SkTypeface* t = fm->legacyCreateTypeface(NULL, style);;
+    SkTypeface* t = fm->legacyCreateTypeface(NULL, style);
     return t ? t : SkEmptyTypeface::Create();
 }
 
@@ -265,7 +265,7 @@ void SkTypeface::getFamilyName(SkString* name) const {
 }
 
 SkAdvancedTypefaceMetrics* SkTypeface::getAdvancedTypefaceMetrics(
-                                SkAdvancedTypefaceMetrics::PerGlyphInfo info,
+                                PerGlyphInfo info,
                                 const uint32_t* glyphIDs,
                                 uint32_t glyphIDsCount) const {
     SkAdvancedTypefaceMetrics* result =

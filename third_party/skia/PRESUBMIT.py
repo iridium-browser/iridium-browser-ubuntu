@@ -140,6 +140,17 @@ def _CopyrightChecks(input_api, output_api, source_file_filter=None):
   return results
 
 
+def _ToolFlags(input_api, output_api):
+  """Make sure `{dm,nanobench}_flags.py test` passes if modified."""
+  results = []
+  sources = lambda x: ('dm_flags.py'        in x.LocalPath() or
+                       'nanobench_flags.py' in x.LocalPath())
+  for f in input_api.AffectedSourceFiles(sources):
+    if 0 != subprocess.call(['python', f.LocalPath(), 'test']):
+      results.append(output_api.PresubmitError('`python %s test` failed' % f))
+  return results
+
+
 def _CommonChecks(input_api, output_api):
   """Presubmit checks common to upload and commit."""
   results = []
@@ -161,6 +172,7 @@ def _CommonChecks(input_api, output_api):
   results.extend(_IfDefChecks(input_api, output_api))
   results.extend(_CopyrightChecks(input_api, output_api,
                                   source_file_filter=sources))
+  results.extend(_ToolFlags(input_api, output_api))
   return results
 
 
@@ -283,8 +295,11 @@ def _CheckLGTMsForPublicAPI(input_api, output_api):
       # It is a revert CL, ignore the public api owners check.
       return results
 
-    if re.search(r'^COMMIT=false$', issue_properties['description'], re.M):
-      # Ignore public api owners check for COMMIT=false CLs since they are not
+    # TODO(rmistry): Stop checking for COMMIT=false once crbug/470609 is
+    # resolved.
+    if issue_properties['cq_dry_run'] or re.search(
+        r'^COMMIT=false$', issue_properties['description'], re.M):
+      # Ignore public api owners check for dry run CLs since they are not
       # going to be committed.
       return results
 
@@ -328,6 +343,8 @@ def PostUploadHook(cl, change, output_api):
     need to be gated on the master branch's tree.
   * Adds 'NOTRY=true' for non master branch changes since trybots do not yet
     work on them.
+  * Adds 'NOPRESUBMIT=true' for non master branch changes since those don't
+    run the presubmit checks.
   """
 
   results = []
@@ -390,6 +407,12 @@ def PostUploadHook(cl, change, output_api):
             output_api.PresubmitNotifyResult(
                 'Trybots do not yet work for non-master branches. '
                 'Automatically added \'NOTRY=true\' to the CL\'s description'))
+      if not re.search(
+          r'^NOPRESUBMIT=true$', new_description, re.M | re.I):
+        new_description += "\nNOPRESUBMIT=true"
+        results.append(
+            output_api.PresubmitNotifyResult(
+                'Branch changes do not run the presubmit checks.'))
 
     # Read and process the HASHTAGS file.
     hashtags_fullpath = os.path.join(change._local_root, 'HASHTAGS')

@@ -634,7 +634,7 @@ void ScaleAddRows_C(const uint8* src_ptr, ptrdiff_t src_stride,
       sum += s[0];
       s += src_stride;
     }
-    // TODO(fbarchard): Consider limitting height to 256 to avoid overflow.
+    // TODO(fbarchard): Consider limiting height to 256 to avoid overflow.
     dst_ptr[x] = sum < 65535u ? sum : 65535u;
   }
 }
@@ -916,7 +916,7 @@ void ScalePlaneVertical(int src_height,
     }
   }
 #endif
-#if defined(HAS_INTERPOLATEROWS_MIPS_DSPR2)
+#if defined(HAS_INTERPOLATEROW_MIPS_DSPR2)
   if (TestCpuFlag(kCpuHasMIPS_DSPR2) &&
       IS_ALIGNED(src_argb, 4) && IS_ALIGNED(src_stride, 4) &&
       IS_ALIGNED(dst_argb, 4) && IS_ALIGNED(dst_stride, 4)) {
@@ -990,7 +990,7 @@ void ScalePlaneVertical_16(int src_height,
     }
   }
 #endif
-#if defined(HAS_INTERPOLATEROWS_16_MIPS_DSPR2)
+#if defined(HAS_INTERPOLATEROW_16_MIPS_DSPR2)
   if (TestCpuFlag(kCpuHasMIPS_DSPR2) &&
       IS_ALIGNED(src_argb, 4) && IS_ALIGNED(src_stride, 4) &&
       IS_ALIGNED(dst_argb, 4) && IS_ALIGNED(dst_stride, 4)) {
@@ -1028,10 +1028,6 @@ enum FilterMode ScaleFilterReduce(int src_width, int src_height,
   if (filtering == kFilterBox) {
     // If scaling both axis to 0.5 or larger, switch from Box to Bilinear.
     if (dst_width * 2 >= src_width && dst_height * 2 >= src_height) {
-      filtering = kFilterBilinear;
-    }
-    // If scaling to larger, switch from Box to Bilinear.
-    if (dst_width >= src_width || dst_height >= src_height) {
       filtering = kFilterBilinear;
     }
   }

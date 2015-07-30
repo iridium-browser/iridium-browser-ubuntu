@@ -9,6 +9,7 @@
 #include "base/callback_list.h"
 #include "base/time/time.h"
 #include "components/keyed_service/core/keyed_service.h"
+#include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/webdata/token_web_data.h"
 #include "net/cookies/cookie_store.h"
 #include "url/gurl.h"
@@ -86,6 +87,7 @@ class SigninClient : public KeyedService {
 
   // Called after Google signin has succeeded.
   virtual void OnSignedIn(const std::string& account_id,
+                          const std::string& gaia_id,
                           const std::string& username,
                           const std::string& password) {}
 
@@ -107,11 +109,24 @@ class SigninClient : public KeyedService {
   virtual void RemoveContentSettingsObserver(
       content_settings::Observer* observer) = 0;
 
+  // Allows this sign-in client to update the account info before attempting
+  // to fetch it from GAIA. This avoids fetching the account info from
+  // GAIA when the data it already available on the client.
+  // |out_account_info->account_id| is not-empty and corresponds to an existing
+  // account.
+  //
+  // Returns true if |out_account_info| was updated.
+  virtual bool UpdateAccountInfo(
+      AccountTrackerService::AccountInfo* out_account_info) = 0;
+
 #if defined(OS_IOS)
   // TODO(msarda): http://crbug.com/358544 Remove this iOS specific code from
   // the core SigninClient.
   virtual ios::ProfileOAuth2TokenServiceIOSProvider* GetIOSProvider() = 0;
 #endif
+
+  // Execute |callback| if and when there is a network connection.
+  virtual void DelayNetworkCall(const base::Closure& callback) = 0;
 };
 
 #endif  // COMPONENTS_SIGNIN_CORE_BROWSER_SIGNIN_CLIENT_H_

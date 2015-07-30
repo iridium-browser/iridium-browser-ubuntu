@@ -91,15 +91,7 @@ WebInspector.SourceMap = function(sourceMappingURL, payload)
  */
 WebInspector.SourceMap.load = function(sourceMapURL, compiledURL, callback)
 {
-    var parsedURL = new WebInspector.ParsedURL(sourceMapURL);
-    if (parsedURL.isDataURL()) {
-        var xhr = new XMLHttpRequest();
-        xhr.open("GET", sourceMapURL, false);
-        xhr.send(null);
-        contentLoaded(xhr.status, {}, xhr.responseText);
-        return;
-    }
-    WebInspector.NetworkManager.loadResourceForFrontend(sourceMapURL, null, contentLoaded);
+    WebInspector.ResourceLoader.load(sourceMapURL, null, contentLoaded);
 
     /**
      * @param {number} statusCode
@@ -222,6 +214,8 @@ WebInspector.SourceMap.prototype = {
     findEntryReversed: function(sourceURL, lineNumber, span)
     {
         var mappings = this._reverseMappingsBySourceURL[sourceURL];
+        if (!mappings)
+            return null;
         var maxLineNumber = typeof span === "number" ? Math.min(lineNumber + span + 1, mappings.length) : mappings.length;
         for ( ; lineNumber < maxLineNumber; ++lineNumber) {
             var mapping = mappings[lineNumber];

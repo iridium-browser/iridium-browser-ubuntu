@@ -69,6 +69,7 @@ component("views") {
   if (is_win) {
     sources += gypi_values.views_win_sources
     libs = [
+      "dwmapi.lib",
       "imm32.lib",
       "oleacc.lib",
     ]
@@ -118,6 +119,10 @@ component("views") {
 
   if (is_mac) {
     deps += [ "//ui/accelerated_widget_mac" ]
+    libs = [
+      # Required by bridged_native_widget.mm.
+      "QuartzCore.framework",
+    ]
   }
 }
 

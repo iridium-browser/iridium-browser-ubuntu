@@ -4,6 +4,7 @@
 
 #include <string>
 
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/logging.h"
 #include "base/run_loop.h"
@@ -34,6 +35,13 @@ namespace {
 
 typedef ServiceWorkerDatabase::RegistrationData RegistrationData;
 typedef ServiceWorkerDatabase::ResourceRecord ResourceRecord;
+
+void StatusAndQuitCallback(ServiceWorkerStatusCode* result,
+                           const base::Closure& quit_closure,
+                           ServiceWorkerStatusCode status) {
+  *result = status;
+  quit_closure.Run();
+}
 
 void StatusCallback(bool* was_called,
                     ServiceWorkerStatusCode* result,
@@ -526,7 +534,7 @@ TEST_F(ServiceWorkerStorageTest, StoreFindUpdateDeleteRegistration) {
           live_registration.get(), kScript, kVersionId, context_ptr_);
   live_version->SetStatus(ServiceWorkerVersion::INSTALLED);
   live_version->script_cache_map()->SetResources(resources);
-  live_registration->SetWaitingVersion(live_version.get());
+  live_registration->SetWaitingVersion(live_version);
   live_registration->set_last_update_check(kYesterday);
   EXPECT_EQ(SERVICE_WORKER_OK,
             StoreRegistration(live_registration, live_version));
@@ -617,7 +625,7 @@ TEST_F(ServiceWorkerStorageTest, StoreFindUpdateDeleteRegistration) {
   scoped_refptr<ServiceWorkerVersion> temp_version =
       found_registration->waiting_version();
   temp_version->SetStatus(ServiceWorkerVersion::ACTIVATED);
-  found_registration->SetActiveVersion(temp_version.get());
+  found_registration->SetActiveVersion(temp_version);
   temp_version = NULL;
   EXPECT_EQ(SERVICE_WORKER_OK, UpdateToActiveState(found_registration));
   found_registration->set_last_update_check(kToday);
@@ -683,7 +691,7 @@ TEST_F(ServiceWorkerStorageTest, InstallingRegistrationsAreFindable) {
       new ServiceWorkerVersion(
           live_registration.get(), kScript, kVersionId, context_ptr_);
   live_version->SetStatus(ServiceWorkerVersion::INSTALLING);
-  live_registration->SetWaitingVersion(live_version.get());
+  live_registration->SetWaitingVersion(live_version);
 
   // Should not be findable, including by GetAllRegistrations.
   EXPECT_EQ(SERVICE_WORKER_ERROR_NOT_FOUND,
@@ -804,8 +812,12 @@ TEST_F(ServiceWorkerStorageTest, StoreUserData) {
   scoped_refptr<ServiceWorkerVersion> live_version =
       new ServiceWorkerVersion(
           live_registration.get(), kScript, kVersionId, context_ptr_);
+  std::vector<ServiceWorkerDatabase::ResourceRecord> records;
+  records.push_back(ServiceWorkerDatabase::ResourceRecord(
+      1, live_version->script_url(), 100));
+  live_version->script_cache_map()->SetResources(records);
   live_version->SetStatus(ServiceWorkerVersion::INSTALLED);
-  live_registration->SetWaitingVersion(live_version.get());
+  live_registration->SetWaitingVersion(live_version);
   EXPECT_EQ(SERVICE_WORKER_OK,
             StoreRegistration(live_registration, live_version));
 
@@ -1116,7 +1128,6 @@ TEST_F(ServiceWorkerResourceStorageTest, DeleteRegistration_ActiveVersion) {
                  &verify_ids,
                  &was_called,
                  &result));
-  registration_->active_version()->Doom();
   base::RunLoop().RunUntilIdle();
   ASSERT_TRUE(was_called);
   EXPECT_EQ(SERVICE_WORKER_OK, result);
@@ -1131,6 +1142,7 @@ TEST_F(ServiceWorkerResourceStorageTest, DeleteRegistration_ActiveVersion) {
 
   // Removing the controllee should cause the resources to be deleted.
   registration_->active_version()->RemoveControllee(host.get());
+  registration_->active_version()->Doom();
   base::RunLoop().RunUntilIdle();
   verify_ids.clear();
   EXPECT_EQ(ServiceWorkerDatabase::STATUS_OK,
@@ -1237,6 +1249,82 @@ TEST_F(ServiceWorkerResourceStorageDiskTest, CleanupOnRestart) {
   EXPECT_TRUE(VerifyBasicResponse(storage(), kNewResourceId, true));
 }
 
+TEST_F(ServiceWorkerResourceStorageDiskTest, DeleteAndStartOver) {
+  EXPECT_FALSE(storage()->IsDisabled());
+  ASSERT_TRUE(base::DirectoryExists(storage()->GetDiskCachePath()));
+  ASSERT_TRUE(base::DirectoryExists(storage()->GetDatabasePath()));
+
+  base::RunLoop run_loop;
+  ServiceWorkerStatusCode status = SERVICE_WORKER_ERROR_ABORT;
+  storage()->DeleteAndStartOver(
+      base::Bind(&StatusAndQuitCallback, &status, run_loop.QuitClosure()));
+  run_loop.Run();
+
+  EXPECT_EQ(SERVICE_WORKER_OK, status);
+  EXPECT_TRUE(storage()->IsDisabled());
+  EXPECT_FALSE(base::DirectoryExists(storage()->GetDiskCachePath()));
+  EXPECT_FALSE(base::DirectoryExists(storage()->GetDatabasePath()));
+}
+
+TEST_F(ServiceWorkerResourceStorageDiskTest,
+       DeleteAndStartOver_UnrelatedFileExists) {
+  EXPECT_FALSE(storage()->IsDisabled());
+  ASSERT_TRUE(base::DirectoryExists(storage()->GetDiskCachePath()));
+  ASSERT_TRUE(base::DirectoryExists(storage()->GetDatabasePath()));
+
+  // Create an unrelated file in the database directory to make sure such a file
+  // does not prevent DeleteAndStartOver.
+  base::FilePath file_path;
+  ASSERT_TRUE(
+      base::CreateTemporaryFileInDir(storage()->GetDatabasePath(), &file_path));
+  ASSERT_TRUE(base::PathExists(file_path));
+
+  base::RunLoop run_loop;
+  ServiceWorkerStatusCode status = SERVICE_WORKER_ERROR_ABORT;
+  storage()->DeleteAndStartOver(
+      base::Bind(&StatusAndQuitCallback, &status, run_loop.QuitClosure()));
+  run_loop.Run();
+
+  EXPECT_EQ(SERVICE_WORKER_OK, status);
+  EXPECT_TRUE(storage()->IsDisabled());
+  EXPECT_FALSE(base::DirectoryExists(storage()->GetDiskCachePath()));
+  EXPECT_FALSE(base::DirectoryExists(storage()->GetDatabasePath()));
+}
+
+TEST_F(ServiceWorkerResourceStorageDiskTest,
+       DeleteAndStartOver_OpenedFileExists) {
+  EXPECT_FALSE(storage()->IsDisabled());
+  ASSERT_TRUE(base::DirectoryExists(storage()->GetDiskCachePath()));
+  ASSERT_TRUE(base::DirectoryExists(storage()->GetDatabasePath()));
+
+  // Create an unrelated opened file in the database directory to make sure such
+  // a file does not prevent DeleteAndStartOver on non-Windows platforms.
+  base::FilePath file_path;
+  base::ScopedFILE file(base::CreateAndOpenTemporaryFileInDir(
+      storage()->GetDatabasePath(), &file_path));
+  ASSERT_TRUE(file);
+  ASSERT_TRUE(base::PathExists(file_path));
+
+  base::RunLoop run_loop;
+  ServiceWorkerStatusCode status = SERVICE_WORKER_ERROR_ABORT;
+  storage()->DeleteAndStartOver(
+      base::Bind(&StatusAndQuitCallback, &status, run_loop.QuitClosure()));
+  run_loop.Run();
+
+#if defined(OS_WIN)
+  // On Windows, deleting the directory containing an opened file should fail.
+  EXPECT_EQ(SERVICE_WORKER_ERROR_FAILED, status);
+  EXPECT_TRUE(storage()->IsDisabled());
+  EXPECT_TRUE(base::DirectoryExists(storage()->GetDiskCachePath()));
+  EXPECT_TRUE(base::DirectoryExists(storage()->GetDatabasePath()));
+#else
+  EXPECT_EQ(SERVICE_WORKER_OK, status);
+  EXPECT_TRUE(storage()->IsDisabled());
+  EXPECT_FALSE(base::DirectoryExists(storage()->GetDiskCachePath()));
+  EXPECT_FALSE(base::DirectoryExists(storage()->GetDatabasePath()));
+#endif
+}
+
 TEST_F(ServiceWorkerResourceStorageTest, UpdateRegistration) {
   // Promote the worker to active worker and add a controllee.
   registration_->SetActiveVersion(registration_->waiting_version());
@@ -1256,7 +1344,11 @@ TEST_F(ServiceWorkerResourceStorageTest, UpdateRegistration) {
   scoped_refptr<ServiceWorkerVersion> live_version = new ServiceWorkerVersion(
       registration_.get(), script_, storage()->NewVersionId(), context_ptr_);
   live_version->SetStatus(ServiceWorkerVersion::NEW);
-  registration_->SetWaitingVersion(live_version.get());
+  registration_->SetWaitingVersion(live_version);
+  std::vector<ServiceWorkerDatabase::ResourceRecord> records;
+  records.push_back(ServiceWorkerDatabase::ResourceRecord(
+      10, live_version->script_url(), 100));
+  live_version->script_cache_map()->SetResources(records);
 
   // Writing the registration should move the old version's resources to the
   // purgeable list but keep them available.
@@ -1268,7 +1360,6 @@ TEST_F(ServiceWorkerResourceStorageTest, UpdateRegistration) {
                  &verify_ids,
                  &was_called,
                  &result));
-  registration_->active_version()->Doom();
   base::RunLoop().RunUntilIdle();
   ASSERT_TRUE(was_called);
   EXPECT_EQ(SERVICE_WORKER_OK, result);
@@ -1284,6 +1375,7 @@ TEST_F(ServiceWorkerResourceStorageTest, UpdateRegistration) {
   // Removing the controllee should cause the old version's resources to be
   // deleted.
   registration_->active_version()->RemoveControllee(host.get());
+  registration_->active_version()->Doom();
   base::RunLoop().RunUntilIdle();
   verify_ids.clear();
   EXPECT_EQ(ServiceWorkerDatabase::STATUS_OK,
@@ -1309,8 +1401,12 @@ TEST_F(ServiceWorkerStorageTest, FindRegistration_LongestScopeMatch) {
   scoped_refptr<ServiceWorkerVersion> live_version1 =
       new ServiceWorkerVersion(
           live_registration1.get(), kScript1, kVersionId1, context_ptr_);
+  std::vector<ServiceWorkerDatabase::ResourceRecord> records1;
+  records1.push_back(ServiceWorkerDatabase::ResourceRecord(
+      1, live_version1->script_url(), 100));
+  live_version1->script_cache_map()->SetResources(records1);
   live_version1->SetStatus(ServiceWorkerVersion::INSTALLED);
-  live_registration1->SetWaitingVersion(live_version1.get());
+  live_registration1->SetWaitingVersion(live_version1);
 
   // Registration for "/scope/foo".
   const GURL kScope2("http://www.example.com/scope/foo");
@@ -1323,8 +1419,12 @@ TEST_F(ServiceWorkerStorageTest, FindRegistration_LongestScopeMatch) {
   scoped_refptr<ServiceWorkerVersion> live_version2 =
       new ServiceWorkerVersion(
           live_registration2.get(), kScript2, kVersionId2, context_ptr_);
+  std::vector<ServiceWorkerDatabase::ResourceRecord> records2;
+  records2.push_back(ServiceWorkerDatabase::ResourceRecord(
+      2, live_version2->script_url(), 100));
+  live_version2->script_cache_map()->SetResources(records2);
   live_version2->SetStatus(ServiceWorkerVersion::INSTALLED);
-  live_registration2->SetWaitingVersion(live_version2.get());
+  live_registration2->SetWaitingVersion(live_version2);
 
   // Registration for "/scope/foobar".
   const GURL kScope3("http://www.example.com/scope/foobar");
@@ -1337,8 +1437,12 @@ TEST_F(ServiceWorkerStorageTest, FindRegistration_LongestScopeMatch) {
   scoped_refptr<ServiceWorkerVersion> live_version3 =
       new ServiceWorkerVersion(
           live_registration3.get(), kScript3, kVersionId3, context_ptr_);
+  std::vector<ServiceWorkerDatabase::ResourceRecord> records3;
+  records3.push_back(ServiceWorkerDatabase::ResourceRecord(
+      3, live_version3->script_url(), 100));
+  live_version3->script_cache_map()->SetResources(records3);
   live_version3->SetStatus(ServiceWorkerVersion::INSTALLED);
-  live_registration3->SetWaitingVersion(live_version3.get());
+  live_registration3->SetWaitingVersion(live_version3);
 
   // Notify storage of they being installed.
   storage()->NotifyInstallingRegistration(live_registration1.get());

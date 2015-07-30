@@ -179,6 +179,7 @@ void TextureLayerImpl::AppendQuads(RenderPass* render_pass,
                vertex_opacity_,
                flipped_,
                nearest_neighbor_);
+  ValidateQuadResources(quad);
 }
 
 SimpleEnclosedRegion TextureLayerImpl::VisibleContentOpaqueRegion() const {
@@ -218,12 +219,12 @@ void TextureLayerImpl::SetNearestNeighbor(bool nearest_neighbor) {
   SetNeedsPushProperties();
 }
 
-void TextureLayerImpl::SetUVTopLeft(const gfx::PointF top_left) {
+void TextureLayerImpl::SetUVTopLeft(const gfx::PointF& top_left) {
   uv_top_left_ = top_left;
   SetNeedsPushProperties();
 }
 
-void TextureLayerImpl::SetUVBottomRight(const gfx::PointF bottom_right) {
+void TextureLayerImpl::SetUVBottomRight(const gfx::PointF& bottom_right) {
   uv_bottom_right_ = bottom_right;
   SetNeedsPushProperties();
 }

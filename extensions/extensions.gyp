@@ -124,7 +124,9 @@
       'dependencies': [
         '../base/base.gyp:base',
         '../base/base.gyp:base_prefs',
+        '../components/components.gyp:browsing_data',
         '../components/components.gyp:device_event_log_component',
+        '../components/components.gyp:guest_view',
         '../components/components.gyp:keyed_service_content',
         '../components/components.gyp:keyed_service_core',
         '../components/components.gyp:onc_component',
@@ -132,6 +134,7 @@
         '../components/components.gyp:sessions_content',
         '../components/components.gyp:storage_monitor',
         '../components/components.gyp:ui_zoom',
+        '../components/components.gyp:variations',
         '../components/components.gyp:web_cache_browser',
         '../components/components.gyp:web_modal',
         '../content/content.gyp:content_browser',
@@ -205,6 +208,7 @@
       'type': 'static_library',
       'dependencies': [
         'extensions_resources.gyp:extensions_resources',
+        '../components/components.gyp:guest_view',
         '../content/content.gyp:content_resources',
         '../gin/gin.gyp:gin',
         '../third_party/WebKit/public/blink.gyp:blink',

@@ -67,47 +67,53 @@
  * Sheueling Chang Shantz and Douglas Stebila of Sun Microsystems
  * Laboratories. */
 
+/* For BIGNUM format macros. */
+#if !defined(__STDC_FORMAT_MACROS)
+#define __STDC_FORMAT_MACROS
+#endif
+
 #include <stdio.h>
 #include <string.h>
 
-#include <openssl/bio.h>
 #include <openssl/bn.h>
 #include <openssl/crypto.h>
 #include <openssl/err.h>
 #include <openssl/mem.h>
 
 #include "../crypto/test/scoped_types.h"
-#include "internal.h"
 
 
 static const int num0 = 100; // number of tests
 static const int num1 = 50;  // additional tests for some functions
 static const int num2 = 5;   // number of tests for slow functions
 
-static bool test_add(BIO *bp);
-static bool test_sub(BIO *bp);
-static bool test_lshift1(BIO *bp);
-static bool test_lshift(BIO *bp, BN_CTX *ctx, ScopedBIGNUM a);
-static bool test_rshift1(BIO *bp);
-static bool test_rshift(BIO *bp, BN_CTX *ctx);
-static bool test_sqr(BIO *bp, BN_CTX *ctx);
-static bool test_mul(BIO *bp);
-static bool test_div(BIO *bp, BN_CTX *ctx);
+static bool test_add(FILE *fp);
+static bool test_sub(FILE *fp);
+static bool test_lshift1(FILE *fp);
+static bool test_lshift(FILE *fp, BN_CTX *ctx, ScopedBIGNUM a);
+static bool test_rshift1(FILE *fp);
+static bool test_rshift(FILE *fp, BN_CTX *ctx);
+static bool test_sqr(FILE *fp, BN_CTX *ctx);
+static bool test_mul(FILE *fp);
+static bool test_div(FILE *fp, BN_CTX *ctx);
 static int rand_neg();
 
-static bool test_div_word(BIO *bp);
-static bool test_mont(BIO *bp, BN_CTX *ctx);
-static bool test_mod(BIO *bp, BN_CTX *ctx);
-static bool test_mod_mul(BIO *bp, BN_CTX *ctx);
-static bool test_mod_exp(BIO *bp, BN_CTX *ctx);
-static bool test_mod_exp_mont_consttime(BIO *bp, BN_CTX *ctx);
-static bool test_exp(BIO *bp, BN_CTX *ctx);
-static bool test_mod_sqrt(BIO *bp, BN_CTX *ctx);
+static bool test_div_word(FILE *fp);
+static bool test_mont(FILE *fp, BN_CTX *ctx);
+static bool test_mod(FILE *fp, BN_CTX *ctx);
+static bool test_mod_mul(FILE *fp, BN_CTX *ctx);
+static bool test_mod_exp(FILE *fp, BN_CTX *ctx);
+static bool test_mod_exp_mont_consttime(FILE *fp, BN_CTX *ctx);
+static bool test_exp(FILE *fp, BN_CTX *ctx);
+static bool test_mod_sqrt(FILE *fp, BN_CTX *ctx);
 static bool test_exp_mod_zero(void);
-static bool test_small_prime(BIO *bp, BN_CTX *ctx);
-static bool test_mod_exp_mont5(BIO *bp, BN_CTX *ctx);
-static bool test_sqrt(BIO *bp, BN_CTX *ctx);
-static bool test_bn2bin_padded(BIO *bp, BN_CTX *ctx);
+static bool test_small_prime(FILE *fp, BN_CTX *ctx);
+static bool test_mod_exp_mont5(FILE *fp, BN_CTX *ctx);
+static bool test_sqrt(FILE *fp, BN_CTX *ctx);
+static bool test_bn2bin_padded(FILE *fp, BN_CTX *ctx);
+static bool test_dec2bn(FILE *fp, BN_CTX *ctx);
+static bool test_hex2bn(FILE *fp, BN_CTX *ctx);
+static bool test_asc2bn(FILE *fp, BN_CTX *ctx);
 
 // g_results can be set to true to cause the result of each computation to be
 // printed.
@@ -117,15 +123,19 @@ static const uint8_t kSample[] =
     "\xC6\x4F\x43\x04\x2A\xEA\xCA\x6E\x58\x36\x80\x5B\xE8\xC9"
     "\x9B\x04\x5D\x48\x36\xC2\xFD\x16\xC9\x64\xF0";
 
-static void message(BIO *out, const char *m) {
-  BIO_puts(out, "print \"test ");
-  BIO_puts(out, m);
-  BIO_puts(out, "\\n\"\n");
+// A wrapper around puts that takes its arguments in the same order as our *_fp
+// functions.
+static void puts_fp(FILE *out, const char *m) {
+  fputs(m, out);
+}
+
+static void message(FILE *out, const char *m) {
+  puts_fp(out, "print \"test ");
+  puts_fp(out, m);
+  puts_fp(out, "\\n\"\n");
 }
 
 int main(int argc, char *argv[]) {
-  char *outfile = NULL;
-
   CRYPTO_library_init();
 
   argc--;
@@ -133,11 +143,6 @@ int main(int argc, char *argv[]) {
   while (argc >= 1) {
     if (strcmp(*argv, "-results") == 0) {
       g_results = true;
-    } else if (strcmp(*argv, "-out") == 0) {
-      if (--argc < 1) {
-        break;
-      }
-      outfile = *(++argv);
     }
     argc--;
     argv++;
@@ -149,161 +154,165 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  ScopedBIO out(BIO_new(BIO_s_file()));
-  if (!out) {
-    return 1;
-  }
-
-  if (outfile == NULL) {
-    BIO_set_fp(out.get(), stdout, BIO_NOCLOSE);
-  } else {
-    if (!BIO_write_filename(out.get(), outfile)) {
-      perror(outfile);
-      return 1;
-    }
-  }
-
   if (!g_results) {
-    BIO_puts(out.get(), "obase=16\nibase=16\n");
+    puts_fp(stdout, "obase=16\nibase=16\n");
   }
 
-  message(out.get(), "BN_add");
-  if (!test_add(out.get())) {
+  message(stdout, "BN_add");
+  if (!test_add(stdout)) {
     return 1;
   }
-  (void)BIO_flush(out.get());
+  fflush(stdout);
 
-  message(out.get(), "BN_sub");
-  if (!test_sub(out.get())) {
+  message(stdout, "BN_sub");
+  if (!test_sub(stdout)) {
     return 1;
   }
-  (void)BIO_flush(out.get());
+  fflush(stdout);
 
-  message(out.get(), "BN_lshift1");
-  if (!test_lshift1(out.get())) {
+  message(stdout, "BN_lshift1");
+  if (!test_lshift1(stdout)) {
     return 1;
   }
-  (void)BIO_flush(out.get());
+  fflush(stdout);
 
-  message(out.get(), "BN_lshift (fixed)");
+  message(stdout, "BN_lshift (fixed)");
   ScopedBIGNUM sample(BN_bin2bn(kSample, sizeof(kSample) - 1, NULL));
   if (!sample) {
     return 1;
   }
-  if (!test_lshift(out.get(), ctx.get(), bssl::move(sample))) {
+  if (!test_lshift(stdout, ctx.get(), bssl::move(sample))) {
     return 1;
   }
-  (void)BIO_flush(out.get());
+  fflush(stdout);
 
-  message(out.get(), "BN_lshift");
-  if (!test_lshift(out.get(), ctx.get(), nullptr)) {
+  message(stdout, "BN_lshift");
+  if (!test_lshift(stdout, ctx.get(), nullptr)) {
     return 1;
   }
-  (void)BIO_flush(out.get());
+  fflush(stdout);
 
-  message(out.get(), "BN_rshift1");
-  if (!test_rshift1(out.get())) {
+  message(stdout, "BN_rshift1");
+  if (!test_rshift1(stdout)) {
     return 1;
   }
-  (void)BIO_flush(out.get());
+  fflush(stdout);
 
-  message(out.get(), "BN_rshift");
-  if (!test_rshift(out.get(), ctx.get())) {
+  message(stdout, "BN_rshift");
+  if (!test_rshift(stdout, ctx.get())) {
     return 1;
   }
-  (void)BIO_flush(out.get());
+  fflush(stdout);
 
-  message(out.get(), "BN_sqr");
-  if (!test_sqr(out.get(), ctx.get())) {
+  message(stdout, "BN_sqr");
+  if (!test_sqr(stdout, ctx.get())) {
     return 1;
   }
-  (void)BIO_flush(out.get());
+  fflush(stdout);
 
-  message(out.get(), "BN_mul");
-  if (!test_mul(out.get())) {
+  message(stdout, "BN_mul");
+  if (!test_mul(stdout)) {
     return 1;
   }
-  (void)BIO_flush(out.get());
+  fflush(stdout);
 
-  message(out.get(), "BN_div");
-  if (!test_div(out.get(), ctx.get())) {
+  message(stdout, "BN_div");
+  if (!test_div(stdout, ctx.get())) {
     return 1;
   }
-  (void)BIO_flush(out.get());
+  fflush(stdout);
 
-  message(out.get(), "BN_div_word");
-  if (!test_div_word(out.get())) {
+  message(stdout, "BN_div_word");
+  if (!test_div_word(stdout)) {
     return 1;
   }
-  (void)BIO_flush(out.get());
+  fflush(stdout);
 
-  message(out.get(), "BN_mod");
-  if (!test_mod(out.get(), ctx.get())) {
+  message(stdout, "BN_mod");
+  if (!test_mod(stdout, ctx.get())) {
     return 1;
   }
-  (void)BIO_flush(out.get());
+  fflush(stdout);
 
-  message(out.get(), "BN_mod_mul");
-  if (!test_mod_mul(out.get(), ctx.get())) {
+  message(stdout, "BN_mod_mul");
+  if (!test_mod_mul(stdout, ctx.get())) {
     return 1;
   }
-  (void)BIO_flush(out.get());
+  fflush(stdout);
 
-  message(out.get(), "BN_mont");
-  if (!test_mont(out.get(), ctx.get())) {
+  message(stdout, "BN_mont");
+  if (!test_mont(stdout, ctx.get())) {
     return 1;
   }
-  (void)BIO_flush(out.get());
+  fflush(stdout);
 
-  message(out.get(), "BN_mod_exp");
-  if (!test_mod_exp(out.get(), ctx.get())) {
+  message(stdout, "BN_mod_exp");
+  if (!test_mod_exp(stdout, ctx.get())) {
     return 1;
   }
-  (void)BIO_flush(out.get());
+  fflush(stdout);
 
-  message(out.get(), "BN_mod_exp_mont_consttime");
-  if (!test_mod_exp_mont_consttime(out.get(), ctx.get()) ||
-      !test_mod_exp_mont5(out.get(), ctx.get())) {
+  message(stdout, "BN_mod_exp_mont_consttime");
+  if (!test_mod_exp_mont_consttime(stdout, ctx.get()) ||
+      !test_mod_exp_mont5(stdout, ctx.get())) {
     return 1;
   }
-  (void)BIO_flush(out.get());
+  fflush(stdout);
 
-  message(out.get(), "BN_exp");
-  if (!test_exp(out.get(), ctx.get()) ||
+  message(stdout, "BN_exp");
+  if (!test_exp(stdout, ctx.get()) ||
       !test_exp_mod_zero()) {
     return 1;
   }
-  (void)BIO_flush(out.get());
+  fflush(stdout);
 
-  message(out.get(), "BN_mod_sqrt");
-  if (!test_mod_sqrt(out.get(), ctx.get())) {
+  message(stdout, "BN_mod_sqrt");
+  if (!test_mod_sqrt(stdout, ctx.get())) {
     return 1;
   }
-  (void)BIO_flush(out.get());
+  fflush(stdout);
 
-  message(out.get(), "Small prime generation");
-  if (!test_small_prime(out.get(), ctx.get())) {
+  message(stdout, "Small prime generation");
+  if (!test_small_prime(stdout, ctx.get())) {
     return 1;
   }
-  (void)BIO_flush(out.get());
+  fflush(stdout);
 
-  message(out.get(), "BN_sqrt");
-  if (!test_sqrt(out.get(), ctx.get())) {
+  message(stdout, "BN_sqrt");
+  if (!test_sqrt(stdout, ctx.get())) {
     return 1;
   }
-  (void)BIO_flush(out.get());
+  fflush(stdout);
 
-  message(out.get(), "BN_bn2bin_padded");
-  if (!test_bn2bin_padded(out.get(), ctx.get())) {
+  message(stdout, "BN_bn2bin_padded");
+  if (!test_bn2bin_padded(stdout, ctx.get())) {
     return 1;
   }
-  (void)BIO_flush(out.get());
+  fflush(stdout);
+
+  message(stdout, "BN_dec2bn");
+  if (!test_dec2bn(stdout, ctx.get())) {
+    return 1;
+  }
+  fflush(stdout);
+
+  message(stdout, "BN_hex2bn");
+  if (!test_hex2bn(stdout, ctx.get())) {
+    return 1;
+  }
+  fflush(stdout);
+
+  message(stdout, "BN_asc2bn");
+  if (!test_asc2bn(stdout, ctx.get())) {
+    return 1;
+  }
+  fflush(stdout);
 
   printf("PASS\n");
   return 0;
 }
 
-static bool test_add(BIO *bp) {
+static bool test_add(FILE *fp) {
   ScopedBIGNUM a(BN_new());
   ScopedBIGNUM b(BN_new());
   ScopedBIGNUM c(BN_new());
@@ -320,15 +329,15 @@ static bool test_add(BIO *bp) {
     if (!BN_add(c.get(), a.get(), b.get())) {
       return false;
     }
-    if (bp != NULL) {
+    if (fp != NULL) {
       if (!g_results) {
-        BN_print(bp, a.get());
-        BIO_puts(bp, " + ");
-        BN_print(bp, b.get());
-        BIO_puts(bp, " - ");
+        BN_print_fp(fp, a.get());
+        puts_fp(fp, " + ");
+        BN_print_fp(fp, b.get());
+        puts_fp(fp, " - ");
       }
-      BN_print(bp, c.get());
-      BIO_puts(bp, "\n");
+      BN_print_fp(fp, c.get());
+      puts_fp(fp, "\n");
     }
     a->neg = !a->neg;
     b->neg = !b->neg;
@@ -344,7 +353,7 @@ static bool test_add(BIO *bp) {
   return true;
 }
 
-static bool test_sub(BIO *bp) {
+static bool test_sub(FILE *fp) {
   ScopedBIGNUM a(BN_new());
   ScopedBIGNUM b(BN_new());
   ScopedBIGNUM c(BN_new());
@@ -370,15 +379,15 @@ static bool test_sub(BIO *bp) {
     if (!BN_sub(c.get(), a.get(), b.get())) {
       return false;
     }
-    if (bp != NULL) {
+    if (fp != NULL) {
       if (!g_results) {
-        BN_print(bp, a.get());
-        BIO_puts(bp, " - ");
-        BN_print(bp, b.get());
-        BIO_puts(bp, " - ");
+        BN_print_fp(fp, a.get());
+        puts_fp(fp, " - ");
+        BN_print_fp(fp, b.get());
+        puts_fp(fp, " - ");
       }
-      BN_print(bp, c.get());
-      BIO_puts(bp, "\n");
+      BN_print_fp(fp, c.get());
+      puts_fp(fp, "\n");
     }
     if (!BN_add(c.get(), c.get(), b.get()) ||
         !BN_sub(c.get(), c.get(), a.get())) {
@@ -392,7 +401,7 @@ static bool test_sub(BIO *bp) {
   return true;
 }
 
-static bool test_div(BIO *bp, BN_CTX *ctx) {
+static bool test_div(FILE *fp, BN_CTX *ctx) {
   ScopedBIGNUM a(BN_new());
   ScopedBIGNUM b(BN_new());
   ScopedBIGNUM c(BN_new());
@@ -418,24 +427,24 @@ static bool test_div(BIO *bp, BN_CTX *ctx) {
     if (!BN_div(d.get(), c.get(), a.get(), b.get(), ctx)) {
       return false;
     }
-    if (bp != NULL) {
+    if (fp != NULL) {
       if (!g_results) {
-        BN_print(bp, a.get());
-        BIO_puts(bp, " / ");
-        BN_print(bp, b.get());
-        BIO_puts(bp, " - ");
+        BN_print_fp(fp, a.get());
+        puts_fp(fp, " / ");
+        BN_print_fp(fp, b.get());
+        puts_fp(fp, " - ");
       }
-      BN_print(bp, d.get());
-      BIO_puts(bp, "\n");
+      BN_print_fp(fp, d.get());
+      puts_fp(fp, "\n");
 
       if (!g_results) {
-        BN_print(bp, a.get());
-        BIO_puts(bp, " % ");
-        BN_print(bp, b.get());
-        BIO_puts(bp, " - ");
+        BN_print_fp(fp, a.get());
+        puts_fp(fp, " % ");
+        BN_print_fp(fp, b.get());
+        puts_fp(fp, " - ");
       }
-      BN_print(bp, c.get());
-      BIO_puts(bp, "\n");
+      BN_print_fp(fp, c.get());
+      puts_fp(fp, "\n");
     }
     if (!BN_mul(e.get(), d.get(), b.get(), ctx) ||
         !BN_add(d.get(), e.get(), c.get()) ||
@@ -447,10 +456,37 @@ static bool test_div(BIO *bp, BN_CTX *ctx) {
       return false;
     }
   }
+
+  // Test that BN_div never gives negative zero in the quotient.
+  if (!BN_set_word(a.get(), 1) ||
+      !BN_set_word(b.get(), 2)) {
+    return false;
+  }
+  BN_set_negative(a.get(), 1);
+  if (!BN_div(d.get(), c.get(), a.get(), b.get(), ctx)) {
+    return false;
+  }
+  if (!BN_is_zero(d.get()) || BN_is_negative(d.get())) {
+    fprintf(stderr, "Division test failed!\n");
+    return false;
+  }
+
+  // Test that BN_div never gives negative zero in the remainder.
+  if (!BN_set_word(b.get(), 1)) {
+    return false;
+  }
+  if (!BN_div(d.get(), c.get(), a.get(), b.get(), ctx)) {
+    return false;
+  }
+  if (!BN_is_zero(c.get()) || BN_is_negative(c.get())) {
+    fprintf(stderr, "Division test failed!\n");
+    return false;
+  }
+
   return true;
 }
 
-static bool test_lshift1(BIO *bp) {
+static bool test_lshift1(FILE *fp) {
   ScopedBIGNUM a(BN_new());
   ScopedBIGNUM b(BN_new());
   ScopedBIGNUM c(BN_new());
@@ -462,14 +498,14 @@ static bool test_lshift1(BIO *bp) {
     if (!BN_lshift1(b.get(), a.get())) {
       return false;
     }
-    if (bp != NULL) {
+    if (fp != NULL) {
       if (!g_results) {
-        BN_print(bp, a.get());
-        BIO_puts(bp, " * 2");
-        BIO_puts(bp, " - ");
+        BN_print_fp(fp, a.get());
+        puts_fp(fp, " * 2");
+        puts_fp(fp, " - ");
       }
-      BN_print(bp, b.get());
-      BIO_puts(bp, "\n");
+      BN_print_fp(fp, b.get());
+      puts_fp(fp, "\n");
     }
     if (!BN_add(c.get(), a.get(), a.get()) ||
         !BN_sub(a.get(), b.get(), c.get())) {
@@ -487,7 +523,7 @@ static bool test_lshift1(BIO *bp) {
   return true;
 }
 
-static bool test_rshift(BIO *bp, BN_CTX *ctx) {
+static bool test_rshift(FILE *fp, BN_CTX *ctx) {
   ScopedBIGNUM a(BN_new());
   ScopedBIGNUM b(BN_new());
   ScopedBIGNUM c(BN_new());
@@ -503,15 +539,15 @@ static bool test_rshift(BIO *bp, BN_CTX *ctx) {
         !BN_add(c.get(), c.get(), c.get())) {
       return false;
     }
-    if (bp != NULL) {
+    if (fp != NULL) {
       if (!g_results) {
-        BN_print(bp, a.get());
-        BIO_puts(bp, " / ");
-        BN_print(bp, c.get());
-        BIO_puts(bp, " - ");
+        BN_print_fp(fp, a.get());
+        puts_fp(fp, " / ");
+        BN_print_fp(fp, c.get());
+        puts_fp(fp, " - ");
       }
-      BN_print(bp, b.get());
-      BIO_puts(bp, "\n");
+      BN_print_fp(fp, b.get());
+      puts_fp(fp, "\n");
     }
     if (!BN_div(d.get(), e.get(), a.get(), c.get(), ctx) ||
         !BN_sub(d.get(), d.get(), b.get())) {
@@ -525,7 +561,7 @@ static bool test_rshift(BIO *bp, BN_CTX *ctx) {
   return true;
 }
 
-static bool test_rshift1(BIO *bp) {
+static bool test_rshift1(FILE *fp) {
   ScopedBIGNUM a(BN_new());
   ScopedBIGNUM b(BN_new());
   ScopedBIGNUM c(BN_new());
@@ -538,14 +574,14 @@ static bool test_rshift1(BIO *bp) {
     if (!BN_rshift1(b.get(), a.get())) {
       return false;
     }
-    if (bp != NULL) {
+    if (fp != NULL) {
       if (!g_results) {
-        BN_print(bp, a.get());
-        BIO_puts(bp, " / 2");
-        BIO_puts(bp, " - ");
+        BN_print_fp(fp, a.get());
+        puts_fp(fp, " / 2");
+        puts_fp(fp, " - ");
       }
-      BN_print(bp, b.get());
-      BIO_puts(bp, "\n");
+      BN_print_fp(fp, b.get());
+      puts_fp(fp, "\n");
     }
     if (!BN_sub(c.get(), a.get(), b.get()) ||
         !BN_sub(c.get(), c.get(), b.get())) {
@@ -562,7 +598,7 @@ static bool test_rshift1(BIO *bp) {
   return true;
 }
 
-static bool test_lshift(BIO *bp, BN_CTX *ctx, ScopedBIGNUM a) {
+static bool test_lshift(FILE *fp, BN_CTX *ctx, ScopedBIGNUM a) {
   if (!a) {
     a.reset(BN_new());
     if (!a || !BN_rand(a.get(), 200, 0, 0)) {
@@ -583,15 +619,15 @@ static bool test_lshift(BIO *bp, BN_CTX *ctx, ScopedBIGNUM a) {
         !BN_add(c.get(), c.get(), c.get())) {
       return false;
     }
-    if (bp != NULL) {
+    if (fp != NULL) {
       if (!g_results) {
-        BN_print(bp, a.get());
-        BIO_puts(bp, " * ");
-        BN_print(bp, c.get());
-        BIO_puts(bp, " - ");
+        BN_print_fp(fp, a.get());
+        puts_fp(fp, " * ");
+        BN_print_fp(fp, c.get());
+        puts_fp(fp, " - ");
       }
-      BN_print(bp, b.get());
-      BIO_puts(bp, "\n");
+      BN_print_fp(fp, b.get());
+      puts_fp(fp, "\n");
     }
     if (!BN_mul(d.get(), a.get(), c.get(), ctx) ||
         !BN_sub(d.get(), d.get(), b.get())) {
@@ -614,7 +650,7 @@ static bool test_lshift(BIO *bp, BN_CTX *ctx, ScopedBIGNUM a) {
   return true;
 }
 
-static bool test_mul(BIO *bp) {
+static bool test_mul(FILE *fp) {
   ScopedBN_CTX ctx(BN_CTX_new());
   ScopedBIGNUM a(BN_new());
   ScopedBIGNUM b(BN_new());
@@ -639,15 +675,15 @@ static bool test_mul(BIO *bp) {
     if (!BN_mul(c.get(), a.get(), b.get(), ctx.get())) {
       return false;
     }
-    if (bp != NULL) {
+    if (fp != NULL) {
       if (!g_results) {
-        BN_print(bp, a.get());
-        BIO_puts(bp, " * ");
-        BN_print(bp, b.get());
-        BIO_puts(bp, " - ");
+        BN_print_fp(fp, a.get());
+        puts_fp(fp, " * ");
+        BN_print_fp(fp, b.get());
+        puts_fp(fp, " - ");
       }
-      BN_print(bp, c.get());
-      BIO_puts(bp, "\n");
+      BN_print_fp(fp, c.get());
+      puts_fp(fp, "\n");
     }
     if (!BN_div(d.get(), e.get(), c.get(), a.get(), ctx.get()) ||
         !BN_sub(d.get(), d.get(), b.get())) {
@@ -658,10 +694,25 @@ static bool test_mul(BIO *bp) {
       return false;
     }
   }
+
+  // Test that BN_mul never gives negative zero.
+  if (!BN_set_word(a.get(), 1)) {
+    return false;
+  }
+  BN_set_negative(a.get(), 1);
+  BN_zero(b.get());
+  if (!BN_mul(c.get(), a.get(), b.get(), ctx.get())) {
+    return false;
+  }
+  if (!BN_is_zero(c.get()) || BN_is_negative(c.get())) {
+    fprintf(stderr, "Multiplication test failed!\n");
+    return false;
+  }
+
   return true;
 }
 
-static bool test_sqr(BIO *bp, BN_CTX *ctx) {
+static bool test_sqr(FILE *fp, BN_CTX *ctx) {
   ScopedBIGNUM a(BN_new());
   ScopedBIGNUM c(BN_new());
   ScopedBIGNUM d(BN_new());
@@ -678,15 +729,15 @@ static bool test_sqr(BIO *bp, BN_CTX *ctx) {
     if (!BN_sqr(c.get(), a.get(), ctx)) {
       return false;
     }
-    if (bp != NULL) {
+    if (fp != NULL) {
       if (!g_results) {
-        BN_print(bp, a.get());
-        BIO_puts(bp, " * ");
-        BN_print(bp, a.get());
-        BIO_puts(bp, " - ");
+        BN_print_fp(fp, a.get());
+        puts_fp(fp, " * ");
+        BN_print_fp(fp, a.get());
+        puts_fp(fp, " - ");
       }
-      BN_print(bp, c.get());
-      BIO_puts(bp, "\n");
+      BN_print_fp(fp, c.get());
+      puts_fp(fp, "\n");
     }
     if (!BN_div(d.get(), e.get(), c.get(), a.get(), ctx) ||
         !BN_sub(d.get(), d.get(), a.get())) {
@@ -706,15 +757,15 @@ static bool test_sqr(BIO *bp, BN_CTX *ctx) {
       !BN_sqr(c.get(), a.get(), ctx)) {
     return false;
   }
-  if (bp != NULL) {
+  if (fp != NULL) {
     if (!g_results) {
-      BN_print(bp, a.get());
-      BIO_puts(bp, " * ");
-      BN_print(bp, a.get());
-      BIO_puts(bp, " - ");
+      BN_print_fp(fp, a.get());
+      puts_fp(fp, " * ");
+      BN_print_fp(fp, a.get());
+      puts_fp(fp, " - ");
     }
-    BN_print(bp, c.get());
-    BIO_puts(bp, "\n");
+    BN_print_fp(fp, c.get());
+    puts_fp(fp, "\n");
   }
   if (!BN_mul(d.get(), a.get(), a.get(), ctx)) {
     return false;
@@ -734,15 +785,15 @@ static bool test_sqr(BIO *bp, BN_CTX *ctx) {
       !BN_sqr(c.get(), a.get(), ctx)) {
     return false;
   }
-  if (bp != NULL) {
+  if (fp != NULL) {
     if (!g_results) {
-      BN_print(bp, a.get());
-      BIO_puts(bp, " * ");
-      BN_print(bp, a.get());
-      BIO_puts(bp, " - ");
+      BN_print_fp(fp, a.get());
+      puts_fp(fp, " * ");
+      BN_print_fp(fp, a.get());
+      puts_fp(fp, " - ");
     }
-    BN_print(bp, c.get());
-    BIO_puts(bp, "\n");
+    BN_print_fp(fp, c.get());
+    puts_fp(fp, "\n");
   }
   if (!BN_mul(d.get(), a.get(), a.get(), ctx)) {
     return false;
@@ -765,11 +816,11 @@ static int rand_neg() {
   return sign[(neg++) % 8];
 }
 
-static void print_word(BIO *bp, BN_ULONG w) {
-  BIO_printf(bp, BN_HEX_FMT1, w);
+static void print_word(FILE *fp, BN_ULONG w) {
+  fprintf(fp, BN_HEX_FMT1, w);
 }
 
-static bool test_div_word(BIO *bp) {
+static bool test_div_word(FILE *fp) {
   ScopedBIGNUM a(BN_new());
   ScopedBIGNUM b(BN_new());
   if (!a || !b) {
@@ -794,24 +845,24 @@ static bool test_div_word(BIO *bp) {
       return false;
     }
 
-    if (bp != NULL) {
+    if (fp != NULL) {
       if (!g_results) {
-        BN_print(bp, a.get());
-        BIO_puts(bp, " / ");
-        print_word(bp, s);
-        BIO_puts(bp, " - ");
+        BN_print_fp(fp, a.get());
+        puts_fp(fp, " / ");
+        print_word(fp, s);
+        puts_fp(fp, " - ");
       }
-      BN_print(bp, b.get());
-      BIO_puts(bp, "\n");
+      BN_print_fp(fp, b.get());
+      puts_fp(fp, "\n");
 
       if (!g_results) {
-        BN_print(bp, a.get());
-        BIO_puts(bp, " % ");
-        print_word(bp, s);
-        BIO_puts(bp, " - ");
+        BN_print_fp(fp, a.get());
+        puts_fp(fp, " % ");
+        print_word(fp, s);
+        puts_fp(fp, " - ");
       }
-      print_word(bp, r);
-      BIO_puts(bp, "\n");
+      print_word(fp, r);
+      puts_fp(fp, "\n");
     }
     if (!BN_mul_word(b.get(), s) ||
         !BN_add_word(b.get(), r) ||
@@ -826,7 +877,7 @@ static bool test_div_word(BIO *bp) {
   return true;
 }
 
-static bool test_mont(BIO *bp, BN_CTX *ctx) {
+static bool test_mont(FILE *fp, BN_CTX *ctx) {
   ScopedBIGNUM a(BN_new());
   ScopedBIGNUM b(BN_new());
   ScopedBIGNUM c(BN_new());
@@ -857,17 +908,17 @@ static bool test_mont(BIO *bp, BN_CTX *ctx) {
         !BN_from_montgomery(A.get(), c.get(), mont.get(), ctx)) {
       return false;
     }
-    if (bp != NULL) {
+    if (fp != NULL) {
       if (!g_results) {
-        BN_print(bp, a.get());
-        BIO_puts(bp, " * ");
-        BN_print(bp, b.get());
-        BIO_puts(bp, " % ");
-        BN_print(bp, &mont->N);
-        BIO_puts(bp, " - ");
+        BN_print_fp(fp, a.get());
+        puts_fp(fp, " * ");
+        BN_print_fp(fp, b.get());
+        puts_fp(fp, " % ");
+        BN_print_fp(fp, &mont->N);
+        puts_fp(fp, " - ");
       }
-      BN_print(bp, A.get());
-      BIO_puts(bp, "\n");
+      BN_print_fp(fp, A.get());
+      puts_fp(fp, "\n");
     }
     if (!BN_mod_mul(d.get(), a.get(), b.get(), n.get(), ctx) ||
         !BN_sub(d.get(), d.get(), A.get())) {
@@ -881,7 +932,7 @@ static bool test_mont(BIO *bp, BN_CTX *ctx) {
   return true;
 }
 
-static bool test_mod(BIO *bp, BN_CTX *ctx) {
+static bool test_mod(FILE *fp, BN_CTX *ctx) {
   ScopedBIGNUM a(BN_new());
   ScopedBIGNUM b(BN_new());
   ScopedBIGNUM c(BN_new());
@@ -901,15 +952,15 @@ static bool test_mod(BIO *bp, BN_CTX *ctx) {
     if (!BN_mod(c.get(), a.get(), b.get(), ctx)) {
       return false;
     }
-    if (bp != NULL) {
+    if (fp != NULL) {
       if (!g_results) {
-        BN_print(bp, a.get());
-        BIO_puts(bp, " % ");
-        BN_print(bp, b.get());
-        BIO_puts(bp, " - ");
+        BN_print_fp(fp, a.get());
+        puts_fp(fp, " % ");
+        BN_print_fp(fp, b.get());
+        puts_fp(fp, " - ");
       }
-      BN_print(bp, c.get());
-      BIO_puts(bp, "\n");
+      BN_print_fp(fp, c.get());
+      puts_fp(fp, "\n");
     }
     if (!BN_div(d.get(), e.get(), a.get(), b.get(), ctx) ||
         !BN_sub(e.get(), e.get(), c.get())) {
@@ -923,7 +974,7 @@ static bool test_mod(BIO *bp, BN_CTX *ctx) {
   return true;
 }
 
-static bool test_mod_mul(BIO *bp, BN_CTX *ctx) {
+static bool test_mod_mul(FILE *fp, BN_CTX *ctx) {
   ScopedBIGNUM a(BN_new());
   ScopedBIGNUM b(BN_new());
   ScopedBIGNUM c(BN_new());
@@ -945,28 +996,28 @@ static bool test_mod_mul(BIO *bp, BN_CTX *ctx) {
       a->neg = rand_neg();
       b->neg = rand_neg();
       if (!BN_mod_mul(e.get(), a.get(), b.get(), c.get(), ctx)) {
-        BIO_print_errors_fp(stderr);
+        ERR_print_errors_fp(stderr);
         return false;
       }
-      if (bp != NULL) {
+      if (fp != NULL) {
         if (!g_results) {
-          BN_print(bp, a.get());
-          BIO_puts(bp, " * ");
-          BN_print(bp, b.get());
-          BIO_puts(bp, " % ");
-          BN_print(bp, c.get());
+          BN_print_fp(fp, a.get());
+          puts_fp(fp, " * ");
+          BN_print_fp(fp, b.get());
+          puts_fp(fp, " % ");
+          BN_print_fp(fp, c.get());
           if (a->neg != b->neg && !BN_is_zero(e.get())) {
             // If  (a*b) % c  is negative,  c  must be added
             // in order to obtain the normalized remainder
             // (new with OpenSSL 0.9.7, previous versions of
             // BN_mod_mul could generate negative results)
-            BIO_puts(bp, " + ");
-            BN_print(bp, c.get());
+            puts_fp(fp, " + ");
+            BN_print_fp(fp, c.get());
           }
-          BIO_puts(bp, " - ");
+          puts_fp(fp, " - ");
         }
-        BN_print(bp, e.get());
-        BIO_puts(bp, "\n");
+        BN_print_fp(fp, e.get());
+        puts_fp(fp, "\n");
       }
       if (!BN_mul(d.get(), a.get(), b.get(), ctx) ||
           !BN_sub(d.get(), d.get(), e.get()) ||
@@ -975,7 +1026,7 @@ static bool test_mod_mul(BIO *bp, BN_CTX *ctx) {
       }
       if (!BN_is_zero(b.get())) {
         fprintf(stderr, "Modulo multiply test failed!\n");
-        BIO_print_errors_fp(stderr);
+        ERR_print_errors_fp(stderr);
         return false;
       }
     }
@@ -983,7 +1034,7 @@ static bool test_mod_mul(BIO *bp, BN_CTX *ctx) {
   return true;
 }
 
-static bool test_mod_exp(BIO *bp, BN_CTX *ctx) {
+static bool test_mod_exp(FILE *fp, BN_CTX *ctx) {
   ScopedBIGNUM a(BN_new());
   ScopedBIGNUM b(BN_new());
   ScopedBIGNUM c(BN_new());
@@ -1000,17 +1051,17 @@ static bool test_mod_exp(BIO *bp, BN_CTX *ctx) {
       return false;
     }
 
-    if (bp != NULL) {
+    if (fp != NULL) {
       if (!g_results) {
-        BN_print(bp, a.get());
-        BIO_puts(bp, " ^ ");
-        BN_print(bp, b.get());
-        BIO_puts(bp, " % ");
-        BN_print(bp, c.get());
-        BIO_puts(bp, " - ");
+        BN_print_fp(fp, a.get());
+        puts_fp(fp, " ^ ");
+        BN_print_fp(fp, b.get());
+        puts_fp(fp, " % ");
+        BN_print_fp(fp, c.get());
+        puts_fp(fp, " - ");
       }
-      BN_print(bp, d.get());
-      BIO_puts(bp, "\n");
+      BN_print_fp(fp, d.get());
+      puts_fp(fp, "\n");
     }
     if (!BN_exp(e.get(), a.get(), b.get(), ctx) ||
         !BN_sub(e.get(), e.get(), d.get()) ||
@@ -1025,7 +1076,7 @@ static bool test_mod_exp(BIO *bp, BN_CTX *ctx) {
   return true;
 }
 
-static bool test_mod_exp_mont_consttime(BIO *bp, BN_CTX *ctx) {
+static bool test_mod_exp_mont_consttime(FILE *fp, BN_CTX *ctx) {
   ScopedBIGNUM a(BN_new());
   ScopedBIGNUM b(BN_new());
   ScopedBIGNUM c(BN_new());
@@ -1043,17 +1094,17 @@ static bool test_mod_exp_mont_consttime(BIO *bp, BN_CTX *ctx) {
       return false;
     }
 
-    if (bp != NULL) {
+    if (fp != NULL) {
       if (!g_results) {
-        BN_print(bp, a.get());
-        BIO_puts(bp, " ^ ");
-        BN_print(bp, b.get());
-        BIO_puts(bp, " % ");
-        BN_print(bp, c.get());
-        BIO_puts(bp, " - ");
+        BN_print_fp(fp, a.get());
+        puts_fp(fp, " ^ ");
+        BN_print_fp(fp, b.get());
+        puts_fp(fp, " % ");
+        BN_print_fp(fp, c.get());
+        puts_fp(fp, " - ");
       }
-      BN_print(bp, d.get());
-      BIO_puts(bp, "\n");
+      BN_print_fp(fp, d.get());
+      puts_fp(fp, "\n");
     }
     if (!BN_exp(e.get(), a.get(), b.get(), ctx) ||
         !BN_sub(e.get(), e.get(), d.get()) ||
@@ -1070,7 +1121,7 @@ static bool test_mod_exp_mont_consttime(BIO *bp, BN_CTX *ctx) {
 
 // Test constant-time modular exponentiation with 1024-bit inputs,
 // which on x86_64 cause a different code branch to be taken.
-static bool test_mod_exp_mont5(BIO *bp, BN_CTX *ctx) {
+static bool test_mod_exp_mont5(FILE *fp, BN_CTX *ctx) {
   ScopedBIGNUM a(BN_new());
   ScopedBIGNUM p(BN_new());
   ScopedBIGNUM m(BN_new());
@@ -1135,7 +1186,7 @@ static bool test_mod_exp_mont5(BIO *bp, BN_CTX *ctx) {
   return true;
 }
 
-static bool test_exp(BIO *bp, BN_CTX *ctx) {
+static bool test_exp(FILE *fp, BN_CTX *ctx) {
   ScopedBIGNUM a(BN_new());
   ScopedBIGNUM b(BN_new());
   ScopedBIGNUM d(BN_new());
@@ -1151,15 +1202,15 @@ static bool test_exp(BIO *bp, BN_CTX *ctx) {
       return false;
     }
 
-    if (bp != NULL) {
+    if (fp != NULL) {
       if (!g_results) {
-        BN_print(bp, a.get());
-        BIO_puts(bp, " ^ ");
-        BN_print(bp, b.get());
-        BIO_puts(bp, " - ");
+        BN_print_fp(fp, a.get());
+        puts_fp(fp, " ^ ");
+        BN_print_fp(fp, b.get());
+        puts_fp(fp, " - ");
       }
-      BN_print(bp, d.get());
-      BIO_puts(bp, "\n");
+      BN_print_fp(fp, d.get());
+      puts_fp(fp, "\n");
     }
     if (!BN_one(e.get())) {
       return false;
@@ -1222,7 +1273,7 @@ static int genprime_cb(int p, int n, BN_GENCB *arg) {
   return 1;
 }
 
-static bool test_mod_sqrt(BIO *bp, BN_CTX *ctx) {
+static bool test_mod_sqrt(FILE *fp, BN_CTX *ctx) {
   ScopedBIGNUM a(BN_new());
   ScopedBIGNUM p(BN_new());
   ScopedBIGNUM r(BN_new());
@@ -1292,7 +1343,7 @@ static bool test_mod_sqrt(BIO *bp, BN_CTX *ctx) {
   return true;
 }
 
-static bool test_small_prime(BIO *bp, BN_CTX *ctx) {
+static bool test_small_prime(FILE *fp, BN_CTX *ctx) {
   static const int kBits = 10;
 
   ScopedBIGNUM r(BN_new());
@@ -1300,15 +1351,15 @@ static bool test_small_prime(BIO *bp, BN_CTX *ctx) {
     return false;
   }
   if (BN_num_bits(r.get()) != kBits) {
-    BIO_printf(bp, "Expected %d bit prime, got %d bit number\n", kBits,
-               BN_num_bits(r.get()));
+    fprintf(fp, "Expected %d bit prime, got %d bit number\n", kBits,
+            BN_num_bits(r.get()));
     return false;
   }
 
   return true;
 }
 
-static bool test_sqrt(BIO *bp, BN_CTX *ctx) {
+static bool test_sqrt(FILE *fp, BN_CTX *ctx) {
   ScopedBIGNUM n(BN_new());
   ScopedBIGNUM nn(BN_new());
   ScopedBIGNUM sqrt(BN_new());
@@ -1323,7 +1374,7 @@ static bool test_sqrt(BIO *bp, BN_CTX *ctx) {
                  0 /* don't modify bottom bit */) ||
         !BN_mul(nn.get(), n.get(), n.get(), ctx) ||
         !BN_sqrt(sqrt.get(), nn.get(), ctx)) {
-      BIO_print_errors_fp(stderr);
+      ERR_print_errors_fp(stderr);
       return false;
     }
     if (BN_cmp(n.get(), sqrt.get()) != 0) {
@@ -1339,7 +1390,7 @@ static bool test_sqrt(BIO *bp, BN_CTX *ctx) {
                  0 /* don't modify bottom bit */) ||
         !BN_mul(nn.get(), n.get(), n.get(), ctx) ||
         !BN_add(nn.get(), nn.get(), BN_value_one())) {
-      BIO_print_errors_fp(stderr);
+      ERR_print_errors_fp(stderr);
       return false;
     }
 
@@ -1353,7 +1404,7 @@ static bool test_sqrt(BIO *bp, BN_CTX *ctx) {
   return true;
 }
 
-static bool test_bn2bin_padded(BIO *bp, BN_CTX *ctx) {
+static bool test_bn2bin_padded(FILE *fp, BN_CTX *ctx) {
   uint8_t zeros[256], out[256], reference[128];
 
   memset(zeros, 0, sizeof(zeros));
@@ -1380,7 +1431,7 @@ static bool test_bn2bin_padded(BIO *bp, BN_CTX *ctx) {
   for (size_t bytes = 128 - 7; bytes <= 128; bytes++) {
     if (!BN_rand(n.get(), bytes * 8, 0 /* make sure top bit is 1 */,
                  0 /* don't modify bottom bit */)) {
-      BIO_print_errors_fp(stderr);
+      ERR_print_errors_fp(stderr);
       return false;
     }
     if (BN_num_bytes(n.get()) != bytes ||
@@ -1418,6 +1469,150 @@ static bool test_bn2bin_padded(BIO *bp, BN_CTX *ctx) {
       fprintf(stderr, "BN_bn2bin_padded gave a bad result.\n");
       return false;
     }
+  }
+
+  return true;
+}
+
+static int DecimalToBIGNUM(ScopedBIGNUM *out, const char *in) {
+  BIGNUM *raw = NULL;
+  int ret = BN_dec2bn(&raw, in);
+  out->reset(raw);
+  return ret;
+}
+
+static bool test_dec2bn(FILE *fp, BN_CTX *ctx) {
+  ScopedBIGNUM bn;
+  int ret = DecimalToBIGNUM(&bn, "0");
+  if (ret != 1 || !BN_is_zero(bn.get()) || BN_is_negative(bn.get())) {
+    fprintf(stderr, "BN_dec2bn gave a bad result.\n");
+    return false;
+  }
+
+  ret = DecimalToBIGNUM(&bn, "256");
+  if (ret != 3 || !BN_is_word(bn.get(), 256) || BN_is_negative(bn.get())) {
+    fprintf(stderr, "BN_dec2bn gave a bad result.\n");
+    return false;
+  }
+
+  ret = DecimalToBIGNUM(&bn, "-42");
+  if (ret != 3 || !BN_abs_is_word(bn.get(), 42) || !BN_is_negative(bn.get())) {
+    fprintf(stderr, "BN_dec2bn gave a bad result.\n");
+    return false;
+  }
+
+  ret = DecimalToBIGNUM(&bn, "-0");
+  if (ret != 2 || !BN_is_zero(bn.get()) || BN_is_negative(bn.get())) {
+    fprintf(stderr, "BN_dec2bn gave a bad result.\n");
+    return false;
+  }
+
+  ret = DecimalToBIGNUM(&bn, "42trailing garbage is ignored");
+  if (ret != 2 || !BN_abs_is_word(bn.get(), 42) || BN_is_negative(bn.get())) {
+    fprintf(stderr, "BN_dec2bn gave a bad result.\n");
+    return false;
+  }
+
+  return true;
+}
+
+static int HexToBIGNUM(ScopedBIGNUM *out, const char *in) {
+  BIGNUM *raw = NULL;
+  int ret = BN_hex2bn(&raw, in);
+  out->reset(raw);
+  return ret;
+}
+
+static bool test_hex2bn(FILE *fp, BN_CTX *ctx) {
+  ScopedBIGNUM bn;
+  int ret = HexToBIGNUM(&bn, "0");
+  if (ret != 1 || !BN_is_zero(bn.get()) || BN_is_negative(bn.get())) {
+    fprintf(stderr, "BN_hex2bn gave a bad result.\n");
+    return false;
+  }
+
+  ret = HexToBIGNUM(&bn, "256");
+  if (ret != 3 || !BN_is_word(bn.get(), 0x256) || BN_is_negative(bn.get())) {
+    fprintf(stderr, "BN_hex2bn gave a bad result.\n");
+    return false;
+  }
+
+  ret = HexToBIGNUM(&bn, "-42");
+  if (ret != 3 || !BN_abs_is_word(bn.get(), 0x42) || !BN_is_negative(bn.get())) {
+    fprintf(stderr, "BN_hex2bn gave a bad result.\n");
+    return false;
+  }
+
+  ret = HexToBIGNUM(&bn, "-0");
+  if (ret != 2 || !BN_is_zero(bn.get()) || BN_is_negative(bn.get())) {
+    fprintf(stderr, "BN_hex2bn gave a bad result.\n");
+    return false;
+  }
+
+  ret = HexToBIGNUM(&bn, "abctrailing garbage is ignored");
+  if (ret != 3 || !BN_is_word(bn.get(), 0xabc) || BN_is_negative(bn.get())) {
+    fprintf(stderr, "BN_hex2bn gave a bad result.\n");
+    return false;
+  }
+
+  return true;
+}
+
+static ScopedBIGNUM ASCIIToBIGNUM(const char *in) {
+  BIGNUM *raw = NULL;
+  if (!BN_asc2bn(&raw, in)) {
+    return nullptr;
+  }
+  return ScopedBIGNUM(raw);
+}
+
+static bool test_asc2bn(FILE *fp, BN_CTX *ctx) {
+  ScopedBIGNUM bn = ASCIIToBIGNUM("0");
+  if (!bn || !BN_is_zero(bn.get()) || BN_is_negative(bn.get())) {
+    fprintf(stderr, "BN_asc2bn gave a bad result.\n");
+    return false;
+  }
+
+  bn = ASCIIToBIGNUM("256");
+  if (!bn || !BN_is_word(bn.get(), 256) || BN_is_negative(bn.get())) {
+    fprintf(stderr, "BN_asc2bn gave a bad result.\n");
+    return false;
+  }
+
+  bn = ASCIIToBIGNUM("-42");
+  if (!bn || !BN_abs_is_word(bn.get(), 42) || !BN_is_negative(bn.get())) {
+    fprintf(stderr, "BN_asc2bn gave a bad result.\n");
+    return false;
+  }
+
+  bn = ASCIIToBIGNUM("0x1234");
+  if (!bn || !BN_is_word(bn.get(), 0x1234) || BN_is_negative(bn.get())) {
+    fprintf(stderr, "BN_asc2bn gave a bad result.\n");
+    return false;
+  }
+
+  bn = ASCIIToBIGNUM("0X1234");
+  if (!bn || !BN_is_word(bn.get(), 0x1234) || BN_is_negative(bn.get())) {
+    fprintf(stderr, "BN_asc2bn gave a bad result.\n");
+    return false;
+  }
+
+  bn = ASCIIToBIGNUM("-0xabcd");
+  if (!bn || !BN_abs_is_word(bn.get(), 0xabcd) || !BN_is_negative(bn.get())) {
+    fprintf(stderr, "BN_asc2bn gave a bad result.\n");
+    return false;
+  }
+
+  bn = ASCIIToBIGNUM("-0");
+  if (!bn || !BN_is_zero(bn.get()) || BN_is_negative(bn.get())) {
+    fprintf(stderr, "BN_asc2bn gave a bad result.\n");
+    return false;
+  }
+
+  bn = ASCIIToBIGNUM("123trailing garbage is ignored");
+  if (!bn || !BN_is_word(bn.get(), 123) || BN_is_negative(bn.get())) {
+    fprintf(stderr, "BN_asc2bn gave a bad result.\n");
+    return false;
   }
 
   return true;

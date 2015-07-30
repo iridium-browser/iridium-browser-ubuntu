@@ -20,13 +20,19 @@ void ChromeNativeAppWindowViewsMac::OnBeforeWidgetInit(
     views::Widget::InitParams* init_params,
     views::Widget* widget) {
   DCHECK(!init_params->native_widget);
-  init_params->native_widget = new AppWindowNativeWidgetMac(widget);
+  init_params->remove_standard_frame = IsFrameless();
+  init_params->native_widget = new AppWindowNativeWidgetMac(widget, this);
   ChromeNativeAppWindowViews::OnBeforeWidgetInit(create_params, init_params,
                                                  widget);
 }
 
 views::NonClientFrameView*
 ChromeNativeAppWindowViewsMac::CreateStandardDesktopAppFrame() {
+  return new NativeAppWindowFrameViewMac(widget());
+}
+
+views::NonClientFrameView*
+ChromeNativeAppWindowViewsMac::CreateNonStandardAppFrame() {
   return new NativeAppWindowFrameViewMac(widget());
 }
 
@@ -48,6 +54,12 @@ void ChromeNativeAppWindowViewsMac::ShowInactive() {
     return;
 
   ChromeNativeAppWindowViews::ShowInactive();
+}
+
+void ChromeNativeAppWindowViewsMac::FlashFrame(bool flash) {
+  apps::ExtensionAppShimHandler::RequestUserAttentionForWindow(
+      app_window(), flash ? apps::APP_SHIM_ATTENTION_CRITICAL
+                          : apps::APP_SHIM_ATTENTION_CANCEL);
 }
 
 void ChromeNativeAppWindowViewsMac::ShowWithApp() {

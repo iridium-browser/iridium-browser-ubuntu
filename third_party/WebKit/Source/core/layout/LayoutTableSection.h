@@ -117,13 +117,13 @@ public:
     struct RowStruct {
     public:
         RowStruct()
-            : rowRenderer(nullptr)
-            , baseline()
+            : rowLayoutObject(nullptr)
+            , baseline(-1)
         {
         }
 
         Row row;
-        LayoutTableRow* rowRenderer;
+        LayoutTableRow* rowLayoutObject;
         LayoutUnit baseline;
         Length logicalHeight;
     };
@@ -175,7 +175,7 @@ public:
         return c.primaryCell();
     }
 
-    LayoutTableRow* rowRendererAt(unsigned row) const { return m_grid[row].rowRenderer; }
+    LayoutTableRow* rowLayoutObjectAt(unsigned row) const { return m_grid[row].rowLayoutObject; }
 
     void appendColumn(unsigned pos);
     void splitColumn(unsigned pos, unsigned first);
@@ -215,10 +215,10 @@ public:
     // FIXME: We may want to introduce a structure holding the in-flux layout information.
     int distributeExtraLogicalHeightToRows(int extraLogicalHeight);
 
-    static LayoutTableSection* createAnonymousWithParentRenderer(const LayoutObject*);
+    static LayoutTableSection* createAnonymousWithParent(const LayoutObject*);
     virtual LayoutBox* createAnonymousBoxWithSameTypeAs(const LayoutObject* parent) const override
     {
-        return createAnonymousWithParentRenderer(parent);
+        return createAnonymousWithParent(parent);
     }
 
     virtual void paint(const PaintInfo&, const LayoutPoint&) override;
@@ -231,7 +231,7 @@ public:
     HashSet<LayoutTableCell*>& overflowingCells() { return m_overflowingCells; }
     bool hasMultipleCellLevels() { return m_hasMultipleCellLevels; }
 
-    virtual const char* name() const override { return isAnonymous() ? "LayoutTableSection (anonymous)" : "LayoutTableSection"; }
+    virtual const char* name() const override { return "LayoutTableSection"; }
 
 protected:
     virtual void styleDidChange(StyleDifference, const ComputedStyle* oldStyle) override;
@@ -251,7 +251,7 @@ private:
 
     virtual void imageChanged(WrappedImagePtr, const IntRect* = 0) override;
 
-    int borderSpacingForRow(unsigned row) const { return m_grid[row].rowRenderer ? table()->vBorderSpacing() : 0; }
+    int borderSpacingForRow(unsigned row) const { return m_grid[row].rowLayoutObject ? table()->vBorderSpacing() : 0; }
 
     void ensureRows(unsigned);
 
@@ -261,7 +261,7 @@ private:
 
     void populateSpanningRowsHeightFromCell(LayoutTableCell*, struct SpanningRowsHeight&);
     void distributeExtraRowSpanHeightToPercentRows(LayoutTableCell*, int, int&, Vector<int>&);
-    void distributeWholeExtraRowSpanHeightToPercentRows(LayoutTableCell*, int, int&, Vector<int>&);
+    void distributeWholeExtraRowSpanHeightToPercentRows(LayoutTableCell*, float, int&, Vector<int>&);
     void distributeExtraRowSpanHeightToAutoRows(LayoutTableCell*, int, int&, Vector<int>&);
     void distributeExtraRowSpanHeightToRemainingRows(LayoutTableCell*, int, int&, Vector<int>&);
     void distributeRowSpanHeightToRows(SpanningLayoutTableCells& rowSpanCells);

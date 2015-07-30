@@ -22,12 +22,24 @@ remoting.experimental = {};
  * @param {number} desktopScale Scale factor to apply.
  */
 remoting.experimental.setDesktopScale = function(desktopScale) {
-  var mode = remoting.app.getConnectionMode();
-  if (mode == remoting.Application.Mode.IT2ME ||
-      mode == remoting.Application.Mode.ME2ME) {
-    var drApp = /** @type {remoting.DesktopRemoting} */ (remoting.app);
+  var drApp = /** @type {remoting.DesktopRemoting} */ (remoting.app);
+  if (drApp instanceof remoting.DesktopRemoting) {
     var connectedView = drApp.getConnectedViewForTesting();
     var viewport = connectedView.getViewportForTesting();
     viewport.setDesktopScale(desktopScale);
+  }
+};
+
+/**
+ * Sets and stores the key remapping setting for the current host. If set,
+ * these mappings override the defaults for the client platform.
+ *
+ * @param {string} remappings Comma-separated list of key remappings.
+ */
+remoting.experimental.setRemapKeys = function(remappings) {
+  var drApp = /** @type {remoting.DesktopRemoting} */ (remoting.app);
+  if (drApp instanceof remoting.DesktopRemoting) {
+    var connectedView = drApp.getConnectedViewForTesting();
+    connectedView.setRemapKeys(remappings);
   }
 };

@@ -18,6 +18,12 @@ var hostId = '@pending';
 var connectionStats = '';
 
 /**
+ * @type {string} The most recent id for the session (unless the session is
+ *     longer than 24hrs, this will be the only session id).
+ */
+var sessionId = '';
+
+/**
  * @type {string} "no" => user did not request a VM reset; "yes" => VM was
  *     successfully reset; "failed" => user requested a reset, but it failed.
  */
@@ -33,6 +39,12 @@ var applicationWindow = null;
  *     logs uploaded by the host.
  */
 var crashServiceReportId = '';
+
+/**
+ * @type {string} The user-selected feedback category, represented by its
+ *     l10n tag.
+ */
+var selectedCategory = '';
 
 /**
  * @param {string} email
@@ -59,7 +71,9 @@ function onUserInfo(email, realName) {
               '&psd_hostId=' + escape(hostId) +
               '&psd_abandonHost=' + escape(abandonHost) +
               '&psd_crashServiceReportId=' + escape(crashServiceReportId) +
-              '&psd_connectionStats=' + escape(connectionStats));
+              '&psd_connectionStats=' + escape(connectionStats) +
+              '&psd_category=' + escape(selectedCategory) +
+              '&psd_sessionId=' + escape(sessionId));
   window.close();
 
   // If the VM was successfully abandoned, close the application.
@@ -94,7 +108,7 @@ function showError() {
   abandonHost = 'failed';
   crashServiceReportId = '';
   formBody.hidden = true;
-  resizeWindow();
+  base.resizeWindowToContent(true);
 }
 
 /**
@@ -191,12 +205,20 @@ function onLearnMore(event) {
   var learnMoreInfobox = document.getElementById('privacy-info');
   learnMoreLink.hidden = true;
   learnMoreInfobox.hidden = false;
-  resizeWindow();
+  base.resizeWindowToContent(true);
 }
 
-function resizeWindow() {
-  var borderY = window.outerHeight - window.innerHeight;
-  window.resizeTo(window.outerWidth, document.body.clientHeight + borderY);
+function onCategorySelect() {
+  var feedbackCategory = /** @type {HTMLSelectElement} */
+      (document.getElementById('feedback-category'));
+  base.debug.assert(feedbackCategory.selectedOptions.length == 1);
+  var selectedOption = /** @type {HTMLElement} */
+      (feedbackCategory.selectedOptions[0]);
+  selectedCategory = selectedOption.getAttribute('i18n-content');
+  var selected = selectedCategory != 'FEEDBACK_CATEGORY_SELECT';
+  document.getElementById('feedback-consent-ok').disabled = !selected;
+  document.getElementById('form-body').hidden = !selected;
+  base.resizeWindowToContent(false);
 }
 
 function onLoad() {
@@ -208,12 +230,14 @@ function onLoad() {
   var abandon = document.getElementById('abandon-host-label');
   var includeLogs = document.getElementById('include-logs-label');
   var learnMoreLink = document.getElementById('learn-more');
+  var feedbackCategory = document.getElementById('feedback-category');
   ok.addEventListener('click', onOk, false);
   cancel.addEventListener('click', onCancel, false);
   abandon.addEventListener('click', onToggleAbandon, false);
   includeLogs.addEventListener('click', onToggleLogs, false);
   learnMoreLink.addEventListener('click', onLearnMore, false);
-  resizeWindow();
+  feedbackCategory.addEventListener('change', onCategorySelect, false);
+  base.resizeWindowToContent(true);
 }
 
 /** @param {Event} event */
@@ -225,6 +249,7 @@ function onWindowMessage(event) {
       hostId = /** @type {string} */ (event.data['hostId']);
     }
     connectionStats = /** @type {string} */ (event.data['connectionStats']);
+    sessionId = /** @type {string} */ (event.data['sessionId']);
   }
 };
 

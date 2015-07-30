@@ -14,6 +14,7 @@
 #include "base/files/file_path.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "content/browser/service_worker/service_worker_context_core.h"
 #include "content/browser/service_worker/service_worker_context_observer.h"
@@ -71,6 +72,10 @@ void StartActiveWorkerOnIO(
 
 void ServiceWorkerContext::AddExcludedHeadersForFetchEvent(
     const std::set<std::string>& header_names) {
+  // TODO(pkasting): Remove ScopedTracker below once crbug.com/477117 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "477117 ServiceWorkerContext::AddExcludedHeadersForFetchEvent"));
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   g_excluded_header_name_set.Get().insert(header_names.begin(),
                                           header_names.end());
@@ -147,11 +152,6 @@ void ServiceWorkerContextWrapper::DeleteAndStartOver() {
   }
   context_core_->DeleteAndStartOver(
       base::Bind(&ServiceWorkerContextWrapper::DidDeleteAndStartOver, this));
-}
-
-ServiceWorkerContextCore* ServiceWorkerContextWrapper::context() {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  return context_core_.get();
 }
 
 StoragePartitionImpl* ServiceWorkerContextWrapper::storage_partition() const {
@@ -244,6 +244,24 @@ void ServiceWorkerContextWrapper::UnregisterServiceWorker(
       base::Bind(&FinishUnregistrationOnIO, continuation));
 }
 
+void ServiceWorkerContextWrapper::UpdateRegistration(const GURL& pattern) {
+  if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
+        base::Bind(&ServiceWorkerContextWrapper::UpdateRegistration, this,
+                   pattern));
+    return;
+  }
+  if (!context_core_.get()) {
+    LOG(ERROR) << "ServiceWorkerContextCore is no longer alive.";
+    return;
+  }
+  context_core_->storage()->FindRegistrationForPattern(
+      pattern,
+      base::Bind(&ServiceWorkerContextWrapper::DidFindRegistrationForUpdate,
+                 this));
+}
+
 void ServiceWorkerContextWrapper::StartServiceWorker(
     const GURL& pattern,
     const StatusCallback& callback) {
@@ -262,6 +280,29 @@ void ServiceWorkerContextWrapper::StartServiceWorker(
   }
   context_core_->storage()->FindRegistrationForPattern(
       pattern, base::Bind(&StartActiveWorkerOnIO, callback));
+}
+
+void ServiceWorkerContextWrapper::SimulateSkipWaiting(int64_t version_id) {
+  if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
+        base::Bind(&ServiceWorkerContextWrapper::SimulateSkipWaiting, this,
+                   version_id));
+    return;
+  }
+  if (!context_core_.get()) {
+    LOG(ERROR) << "ServiceWorkerContextCore is no longer alive.";
+    return;
+  }
+  ServiceWorkerVersion* version = GetLiveVersion(version_id);
+  if (!version || version->skip_waiting())
+    return;
+  ServiceWorkerRegistration* registration =
+      GetLiveRegistration(version->registration_id());
+  if (!registration || version != registration->waiting_version())
+    return;
+  version->set_skip_waiting(true);
+  registration->ActivateWaitingVersionWhenReady();
 }
 
 static void DidFindRegistrationForDocument(
@@ -345,6 +386,22 @@ void ServiceWorkerContextWrapper::DidFindRegistrationForCheckHasServiceWorker(
                                    registration->pattern(), other_url)));
 }
 
+void ServiceWorkerContextWrapper::DidFindRegistrationForUpdate(
+    ServiceWorkerStatusCode status,
+    const scoped_refptr<ServiceWorkerRegistration>& registration) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+
+  if (status != SERVICE_WORKER_OK)
+    return;
+  if (!context_core_.get()) {
+    LOG(ERROR) << "ServiceWorkerContextCore is no longer alive.";
+    return;
+  }
+  DCHECK(registration);
+  context_core_->UpdateServiceWorker(registration.get(),
+                                     true /* force_bypass_cache */);
+}
+
 namespace {
 void StatusCodeToBoolCallbackAdapter(
     const ServiceWorkerContext::ResultCallback& callback,
@@ -400,6 +457,125 @@ void ServiceWorkerContextWrapper::CheckHasServiceWorker(
                                this, other_url, callback));
 }
 
+ServiceWorkerRegistration* ServiceWorkerContextWrapper::GetLiveRegistration(
+    int64_t registration_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  if (!context_core_)
+    return nullptr;
+  return context_core_->GetLiveRegistration(registration_id);
+}
+
+ServiceWorkerVersion* ServiceWorkerContextWrapper::GetLiveVersion(
+    int64_t version_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  if (!context_core_)
+    return nullptr;
+  return context_core_->GetLiveVersion(version_id);
+}
+
+std::vector<ServiceWorkerRegistrationInfo>
+ServiceWorkerContextWrapper::GetAllLiveRegistrationInfo() {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  if (!context_core_)
+    return std::vector<ServiceWorkerRegistrationInfo>();
+  return context_core_->GetAllLiveRegistrationInfo();
+}
+
+std::vector<ServiceWorkerVersionInfo>
+ServiceWorkerContextWrapper::GetAllLiveVersionInfo() {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  if (!context_core_)
+    return std::vector<ServiceWorkerVersionInfo>();
+  return context_core_->GetAllLiveVersionInfo();
+}
+
+void ServiceWorkerContextWrapper::FindRegistrationForDocument(
+    const GURL& document_url,
+    const FindRegistrationCallback& callback) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  if (!context_core_) {
+    // FindRegistrationForDocument() can run the callback synchronously.
+    callback.Run(SERVICE_WORKER_ERROR_ABORT, nullptr);
+    return;
+  }
+  context_core_->storage()->FindRegistrationForDocument(document_url, callback);
+}
+
+void ServiceWorkerContextWrapper::FindRegistrationForId(
+    int64_t registration_id,
+    const GURL& origin,
+    const FindRegistrationCallback& callback) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  if (!context_core_) {
+    // FindRegistrationForId() can run the callback synchronously.
+    callback.Run(SERVICE_WORKER_ERROR_ABORT, nullptr);
+    return;
+  }
+  context_core_->storage()->FindRegistrationForId(registration_id, origin,
+                                                  callback);
+}
+
+void ServiceWorkerContextWrapper::GetAllRegistrations(
+    const GetRegistrationsInfosCallback& callback) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  if (!context_core_) {
+    RunSoon(base::Bind(callback, std::vector<ServiceWorkerRegistrationInfo>()));
+    return;
+  }
+  context_core_->storage()->GetAllRegistrations(callback);
+}
+
+void ServiceWorkerContextWrapper::GetRegistrationUserData(
+    int64_t registration_id,
+    const std::string& key,
+    const GetUserDataCallback& callback) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  if (!context_core_) {
+    RunSoon(base::Bind(callback, std::string(), SERVICE_WORKER_ERROR_ABORT));
+    return;
+  }
+  context_core_->storage()->GetUserData(registration_id, key, callback);
+}
+
+void ServiceWorkerContextWrapper::StoreRegistrationUserData(
+    int64_t registration_id,
+    const GURL& origin,
+    const std::string& key,
+    const std::string& data,
+    const StatusCallback& callback) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  if (!context_core_) {
+    RunSoon(base::Bind(callback, SERVICE_WORKER_ERROR_ABORT));
+    return;
+  }
+  context_core_->storage()->StoreUserData(registration_id, origin, key, data,
+                                          callback);
+}
+
+void ServiceWorkerContextWrapper::ClearRegistrationUserData(
+    int64_t registration_id,
+    const std::string& key,
+    const StatusCallback& callback) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  if (!context_core_) {
+    RunSoon(base::Bind(callback, SERVICE_WORKER_ERROR_ABORT));
+    return;
+  }
+  context_core_->storage()->ClearUserData(registration_id, key, callback);
+}
+
+void ServiceWorkerContextWrapper::GetUserDataForAllRegistrations(
+    const std::string& key,
+    const GetUserDataForAllRegistrationsCallback& callback) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  if (!context_core_) {
+    RunSoon(base::Bind(callback, std::vector<std::pair<int64_t, std::string>>(),
+                       SERVICE_WORKER_ERROR_ABORT));
+    return;
+  }
+  context_core_->storage()->GetUserDataForAllRegistrations(key, callback);
+}
+
 void ServiceWorkerContextWrapper::AddObserver(
     ServiceWorkerContextObserver* observer) {
   observer_list_->AddObserver(observer);
@@ -429,6 +605,10 @@ void ServiceWorkerContextWrapper::InitInternal(
                    make_scoped_refptr(special_storage_policy)));
     return;
   }
+  // TODO(pkasting): Remove ScopedTracker below once crbug.com/477117 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "477117 ServiceWorkerContextWrapper::InitInternal"));
   DCHECK(!context_core_);
   if (quota_manager_proxy) {
     quota_manager_proxy->RegisterClient(new ServiceWorkerQuotaClient(this));
@@ -459,6 +639,11 @@ void ServiceWorkerContextWrapper::DidDeleteAndStartOver(
 
   observer_list_->Notify(FROM_HERE,
                          &ServiceWorkerContextObserver::OnStorageWiped);
+}
+
+ServiceWorkerContextCore* ServiceWorkerContextWrapper::context() {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  return context_core_.get();
 }
 
 }  // namespace content

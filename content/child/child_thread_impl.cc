@@ -13,6 +13,7 @@
 #include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/debug/leak_annotations.h"
+#include "base/debug/profiler.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
@@ -25,6 +26,7 @@
 #include "base/synchronization/condition_variable.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_local.h"
+#include "base/trace_event/memory_dump_manager.h"
 #include "base/tracked_objects.h"
 #include "components/tracing/child_trace_message_filter.h"
 #include "content/child/bluetooth/bluetooth_message_filter.h"
@@ -56,10 +58,9 @@
 #include "ipc/ipc_sync_channel.h"
 #include "ipc/ipc_sync_message_filter.h"
 #include "ipc/mojo/ipc_channel_mojo.h"
-#include "ipc/mojo/scoped_ipc_support.h"
 
-#if defined(OS_WIN)
-#include "content/common/handle_enumerator_win.h"
+#if defined(OS_ANDROID)
+#include "base/thread_task_runner_handle.h"
 #endif
 
 #if defined(TCMALLOC_TRACE_MEMORY_SUPPORTED)
@@ -139,6 +140,7 @@ class SuicideOnChannelErrorFilter : public IPC::MessageFilter {
     //
     // So, we install a filter on the sender so that we can process this event
     // here and kill the process.
+    base::debug::StopProfiling();
 #if defined(ADDRESS_SANITIZER) || defined(LEAK_SANITIZER) || \
     defined(MEMORY_SANITIZER) || defined(THREAD_SANITIZER) || \
     defined(UNDEFINED_SANITIZER)
@@ -163,85 +165,63 @@ class SuicideOnChannelErrorFilter : public IPC::MessageFilter {
 #endif  // OS(POSIX)
 
 #if defined(OS_ANDROID)
-ChildThreadImpl* g_child_thread = NULL;
-bool g_child_thread_initialized = false;
+// A class that allows for triggering a clean shutdown from another
+// thread through draining the main thread's msg loop.
+class QuitClosure {
+ public:
+  QuitClosure();
+  ~QuitClosure();
 
-// A lock protects g_child_thread.
-base::LazyInstance<base::Lock>::Leaky g_lazy_child_thread_lock =
-    LAZY_INSTANCE_INITIALIZER;
+  void BindToMainThread();
+  void PostQuitFromNonMainThread();
 
-// base::ConditionVariable has an explicit constructor that takes
-// a base::Lock pointer as parameter. The base::DefaultLazyInstanceTraits
-// doesn't handle the case. Thus, we need our own class here.
-struct CondVarLazyInstanceTraits {
-  static const bool kRegisterOnExit = false;
-#ifndef NDEBUG
-  static const bool kAllowedToAccessOnNonjoinableThread = true;
-#endif
+ private:
+  static void PostClosure(
+      const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
+      base::Closure closure);
 
-  static base::ConditionVariable* New(void* instance) {
-    return new (instance) base::ConditionVariable(
-        g_lazy_child_thread_lock.Pointer());
-  }
-  static void Delete(base::ConditionVariable* instance) {
-    instance->~ConditionVariable();
-  }
+  base::Lock lock_;
+  base::ConditionVariable cond_var_;
+  base::Closure closure_;
 };
 
-// A condition variable that synchronize threads initializing and waiting
-// for g_child_thread.
-base::LazyInstance<base::ConditionVariable, CondVarLazyInstanceTraits>
-    g_lazy_child_thread_cv = LAZY_INSTANCE_INITIALIZER;
-
-void QuitMainThreadMessageLoop() {
-  base::MessageLoop::current()->Quit();
+QuitClosure::QuitClosure() : cond_var_(&lock_) {
 }
 
+QuitClosure::~QuitClosure() {
+}
+
+void QuitClosure::PostClosure(
+    const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
+    base::Closure closure) {
+  task_runner->PostTask(FROM_HERE, closure);
+}
+
+void QuitClosure::BindToMainThread() {
+  base::AutoLock lock(lock_);
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner(
+      base::ThreadTaskRunnerHandle::Get());
+  base::Closure quit_closure =
+      base::MessageLoop::current()->QuitWhenIdleClosure();
+  closure_ = base::Bind(&QuitClosure::PostClosure, task_runner, quit_closure);
+  cond_var_.Signal();
+}
+
+void QuitClosure::PostQuitFromNonMainThread() {
+  base::AutoLock lock(lock_);
+  while (closure_.is_null())
+    cond_var_.Wait();
+
+  closure_.Run();
+}
+
+base::LazyInstance<QuitClosure> g_quit_closure = LAZY_INSTANCE_INITIALIZER;
 #endif
 
 }  // namespace
 
 ChildThread* ChildThread::Get() {
   return ChildThreadImpl::current();
-}
-
-// Mojo client channel delegate to be used in single process mode.
-class ChildThreadImpl::SingleProcessChannelDelegate
-    : public IPC::ChannelMojo::Delegate {
- public:
-  explicit SingleProcessChannelDelegate(
-      scoped_refptr<base::SequencedTaskRunner> io_runner)
-      : io_runner_(io_runner), weak_factory_(this) {}
-
-  ~SingleProcessChannelDelegate() override {}
-
-  base::WeakPtr<IPC::ChannelMojo::Delegate> ToWeakPtr() override {
-    return weak_factory_.GetWeakPtr();
-  }
-
-  scoped_refptr<base::TaskRunner> GetIOTaskRunner() override {
-    return io_runner_;
-  }
-
-  void OnChannelCreated(base::WeakPtr<IPC::ChannelMojo> channel) override {}
-
-  void DeleteSoon() {
-    io_runner_->PostTask(
-        FROM_HERE,
-        base::Bind(&base::DeletePointer<SingleProcessChannelDelegate>,
-                   base::Unretained(this)));
-  }
-
- private:
-  scoped_refptr<base::SequencedTaskRunner> io_runner_;
-  base::WeakPtrFactory<IPC::ChannelMojo::Delegate> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(SingleProcessChannelDelegate);
-};
-
-void ChildThreadImpl::SingleProcessChannelDelegateDeleter::operator()(
-    SingleProcessChannelDelegate* delegate) const {
-  delegate->DeleteSoon();
 }
 
 ChildThreadImpl::Options::Options()
@@ -321,15 +301,9 @@ void ChildThreadImpl::ConnectChannel(bool use_mojo_channel) {
     VLOG(1) << "Mojo is enabled on child";
     scoped_refptr<base::SequencedTaskRunner> io_task_runner = GetIOTaskRunner();
     DCHECK(io_task_runner);
-    if (IsInBrowserProcess())
-      single_process_channel_delegate_.reset(
-          new SingleProcessChannelDelegate(io_task_runner));
-    ipc_support_.reset(new IPC::ScopedIPCSupport(io_task_runner));
-    channel_->Init(
-        IPC::ChannelMojo::CreateClientFactory(
-            single_process_channel_delegate_.get(),
-            channel_name_),
-        create_pipe_now);
+    channel_->Init(IPC::ChannelMojo::CreateClientFactory(
+                       nullptr, io_task_runner, channel_name_),
+                   create_pipe_now);
     return;
   }
 
@@ -401,8 +375,7 @@ void ChildThreadImpl::Init(const Options& options) {
   channel_->AddFilter(bluetooth_message_filter_->GetFilter());
   channel_->AddFilter(navigator_connect_dispatcher_->GetFilter());
 
-  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kSingleProcess)) {
+  if (!IsInBrowserProcess()) {
     // In single process mode, browser-side tracing will cover the whole
     // process including renderers.
     channel_->AddFilter(new tracing::ChildTraceMessageFilter(
@@ -450,14 +423,7 @@ void ChildThreadImpl::Init(const Options& options) {
       base::TimeDelta::FromSeconds(connection_timeout));
 
 #if defined(OS_ANDROID)
-  {
-    base::AutoLock lock(g_lazy_child_thread_lock.Get());
-    g_child_thread = this;
-    g_child_thread_initialized = true;
-  }
-  // Signalling without locking is fine here because only
-  // one thread can wait on the condition variable.
-  g_lazy_child_thread_cv.Get().Signal();
+  g_quit_closure.Get().BindToMainThread();
 #endif
 
 #if defined(TCMALLOC_TRACE_MEMORY_SUPPORTED)
@@ -465,6 +431,8 @@ void ChildThreadImpl::Init(const Options& options) {
       message_loop_->message_loop_proxy(), ::HeapProfilerWithPseudoStackStart,
       ::HeapProfilerStop, ::GetHeapProfile));
 #endif
+
+  base::trace_event::MemoryDumpManager::GetInstance()->Initialize();
 
   shared_bitmap_manager_.reset(
       new ChildSharedBitmapManager(thread_safe_sender()));
@@ -480,13 +448,6 @@ ChildThreadImpl::~ChildThreadImpl() {
   // ChildDiscardableSharedMemoryManager has to be destroyed while
   // |thread_safe_sender_| is still valid.
   discardable_shared_memory_manager_.reset();
-
-#if defined(OS_ANDROID)
-  {
-    base::AutoLock lock(g_lazy_child_thread_lock.Get());
-    g_child_thread = nullptr;
-  }
-#endif
 
 #ifdef IPC_MESSAGE_LOG_ENABLED
   IPC::Logging::GetInstance()->SetIPCSender(NULL);
@@ -609,7 +570,8 @@ bool ChildThreadImpl::OnMessageReceived(const IPC::Message& msg) {
                         OnSetProfilerStatus)
     IPC_MESSAGE_HANDLER(ChildProcessMsg_GetChildProfilerData,
                         OnGetChildProfilerData)
-    IPC_MESSAGE_HANDLER(ChildProcessMsg_DumpHandles, OnDumpHandles)
+    IPC_MESSAGE_HANDLER(ChildProcessMsg_ProfilingPhaseCompleted,
+                        OnProfilingPhaseCompleted)
     IPC_MESSAGE_HANDLER(ChildProcessMsg_SetProcessBackgrounded,
                         OnProcessBackgrounded)
 #if defined(USE_TCMALLOC)
@@ -648,25 +610,17 @@ void ChildThreadImpl::OnSetProfilerStatus(ThreadData::Status status) {
   ThreadData::InitializeAndSetTrackingStatus(status);
 }
 
-void ChildThreadImpl::OnGetChildProfilerData(int sequence_number) {
+void ChildThreadImpl::OnGetChildProfilerData(int sequence_number,
+                                             int current_profiling_phase) {
   tracked_objects::ProcessDataSnapshot process_data;
-  ThreadData::Snapshot(&process_data);
+  ThreadData::Snapshot(current_profiling_phase, &process_data);
 
   Send(
       new ChildProcessHostMsg_ChildProfilerData(sequence_number, process_data));
 }
 
-void ChildThreadImpl::OnDumpHandles() {
-#if defined(OS_WIN)
-  scoped_refptr<HandleEnumerator> handle_enum(
-      new HandleEnumerator(
-          base::CommandLine::ForCurrentProcess()->HasSwitch(
-              switches::kAuditAllHandles)));
-  handle_enum->EnumerateHandles();
-  Send(new ChildProcessHostMsg_DumpHandlesDone);
-#else
-  NOTIMPLEMENTED();
-#endif
+void ChildThreadImpl::OnProfilingPhaseCompleted(int profiling_phase) {
+  ThreadData::OnProfilingPhaseCompleted(profiling_phase);
 }
 
 #if defined(USE_TCMALLOC)
@@ -689,20 +643,7 @@ ChildThreadImpl* ChildThreadImpl::current() {
 void ChildThreadImpl::ShutdownThread() {
   DCHECK(!ChildThreadImpl::current()) <<
       "this method should NOT be called from child thread itself";
-  {
-    base::AutoLock lock(g_lazy_child_thread_lock.Get());
-    while (!g_child_thread_initialized)
-      g_lazy_child_thread_cv.Get().Wait();
-
-    // g_child_thread may already have been destructed while we didn't hold the
-    // lock.
-    if (!g_child_thread)
-      return;
-
-    DCHECK_NE(base::MessageLoop::current(), g_child_thread->message_loop());
-    g_child_thread->message_loop()->PostTask(
-        FROM_HERE, base::Bind(&QuitMainThreadMessageLoop));
-  }
+  g_quit_closure.Get().PostQuitFromNonMainThread();
 }
 #endif
 
@@ -736,23 +677,6 @@ void ChildThreadImpl::OnProcessBackgrounded(bool background) {
   if (background)
     timer_slack = base::TIMER_SLACK_MAXIMUM;
   base::MessageLoop::current()->SetTimerSlack(timer_slack);
-
-#ifdef OS_WIN
-  // Windows Vista+ has a fancy process backgrounding mode that can only be set
-  // from within the process. This used to be how chrome set its renderers into
-  // background mode on Windows but was removed due to http://crbug.com/398103.
-  // As we experiment with bringing back some other form of background mode for
-  // hidden renderers, add a bucket to allow us to trigger this undesired method
-  // of setting background state in order to confirm that the metrics which were
-  // added to prevent regressions on the aforementioned issue indeed catch such
-  // regressions and are thus a reliable way to confirm that our latest proposal
-  // doesn't cause such issues. TODO(gab): Remove this once the experiment is
-  // over (http://crbug.com/458594).
-  base::FieldTrial* trial =
-      base::FieldTrialList::Find("BackgroundRendererProcesses");
-  if (trial && trial->group_name() == "AllowBackgroundModeFromRenderer")
-    base::Process::Current().SetProcessBackgrounded(background);
-#endif  // OS_WIN
 }
 
 }  // namespace content

@@ -19,6 +19,7 @@
 #include "base/strings/string_piece.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/extensions/event_router_forwarder.h"
@@ -45,7 +46,7 @@
 #include "net/base/upload_bytes_element_reader.h"
 #include "net/base/upload_file_element_reader.h"
 #include "net/dns/mock_host_resolver.h"
-#include "net/log/capturing_net_log.h"
+#include "net/log/test_net_log.h"
 #include "net/url_request/url_request_job_factory_impl.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest-message.h"
@@ -181,7 +182,7 @@ class ExtensionWebRequestTest : public testing::Test {
   void SetUp() override {
     ASSERT_TRUE(profile_manager_.SetUp());
     ChromeNetworkDelegate::InitializePrefsOnUIThread(
-        &enable_referrers_, NULL, NULL, NULL, NULL,
+        &enable_referrers_, NULL, NULL, NULL,
         profile_.GetTestingPrefService());
     network_delegate_.reset(
         new ChromeNetworkDelegate(event_router_.get(), &enable_referrers_));
@@ -511,7 +512,9 @@ void ExtensionWebRequestTest::FireURLRequestWithData(
   element_readers.push_back(new net::UploadBytesElementReader(
       &(bytes_1[0]), bytes_1.size()));
   element_readers.push_back(
-      new net::UploadFileElementReader(base::MessageLoopProxy::current().get(),
+      new net::UploadFileElementReader(
+                                       base::ThreadTaskRunnerHandle::Get()
+                                       .get(),
                                        base::FilePath(),
                                        0,
                                        0,
@@ -781,7 +784,7 @@ class ExtensionWebRequestHeaderModificationTest
   void SetUp() override {
     ASSERT_TRUE(profile_manager_.SetUp());
     ChromeNetworkDelegate::InitializePrefsOnUIThread(
-        &enable_referrers_, NULL, NULL, NULL, NULL,
+        &enable_referrers_, NULL, NULL, NULL,
         profile_.GetTestingPrefService());
     network_delegate_.reset(
         new ChromeNetworkDelegate(event_router_.get(), &enable_referrers_));
@@ -1321,7 +1324,7 @@ TEST(ExtensionWebRequestHelpersTest, TestCalculateOnAuthRequiredDelta) {
 
 TEST(ExtensionWebRequestHelpersTest, TestMergeCancelOfResponses) {
   EventResponseDeltas deltas;
-  net::CapturingBoundNetLog capturing_net_log;
+  net::BoundTestNetLog capturing_net_log;
   net::BoundNetLog net_log = capturing_net_log.bound();
   bool canceled = false;
 
@@ -1347,7 +1350,7 @@ TEST(ExtensionWebRequestHelpersTest, TestMergeCancelOfResponses) {
 
 TEST(ExtensionWebRequestHelpersTest, TestMergeOnBeforeRequestResponses) {
   EventResponseDeltas deltas;
-  net::CapturingBoundNetLog capturing_net_log;
+  net::BoundTestNetLog capturing_net_log;
   net::BoundNetLog net_log = capturing_net_log.bound();
   WarningSet warning_set;
   GURL effective_new_url;
@@ -1428,7 +1431,7 @@ TEST(ExtensionWebRequestHelpersTest, TestMergeOnBeforeRequestResponses) {
 // a kind of cancelling requests.
 TEST(ExtensionWebRequestHelpersTest, TestMergeOnBeforeRequestResponses2) {
   EventResponseDeltas deltas;
-  net::CapturingBoundNetLog capturing_net_log;
+  net::BoundTestNetLog capturing_net_log;
   net::BoundNetLog net_log = capturing_net_log.bound();
   WarningSet warning_set;
   GURL effective_new_url;
@@ -1497,7 +1500,7 @@ TEST(ExtensionWebRequestHelpersTest, TestMergeOnBeforeRequestResponses2) {
 // a kind of cancelling requests.
 TEST(ExtensionWebRequestHelpersTest, TestMergeOnBeforeRequestResponses3) {
   EventResponseDeltas deltas;
-  net::CapturingBoundNetLog capturing_net_log;
+  net::BoundTestNetLog capturing_net_log;
   net::BoundNetLog net_log = capturing_net_log.bound();
   WarningSet warning_set;
   GURL effective_new_url;
@@ -1533,7 +1536,7 @@ TEST(ExtensionWebRequestHelpersTest, TestMergeOnBeforeSendHeadersResponses) {
   net::HttpRequestHeaders base_headers;
   base_headers.AddHeaderFromString("key1: value 1");
   base_headers.AddHeaderFromString("key2: value 2");
-  net::CapturingBoundNetLog capturing_net_log;
+  net::BoundTestNetLog capturing_net_log;
   net::BoundNetLog net_log = capturing_net_log.bound();
   WarningSet warning_set;
   std::string header_value;
@@ -1629,7 +1632,7 @@ TEST(ExtensionWebRequestHelpersTest,
   net::HttpRequestHeaders base_headers;
   base_headers.AddHeaderFromString(
       "Cookie: name=value; name2=value2; name3=\"value3\"");
-  net::CapturingBoundNetLog capturing_net_log;
+  net::BoundTestNetLog capturing_net_log;
   net::BoundNetLog net_log = capturing_net_log.bound();
   WarningSet warning_set;
   std::string header_value;
@@ -1713,7 +1716,7 @@ std::string GetCookieExpirationDate(int delta_secs) {
 
 TEST(ExtensionWebRequestHelpersTest,
      TestMergeCookiesInOnHeadersReceivedResponses) {
-  net::CapturingBoundNetLog capturing_net_log;
+  net::BoundTestNetLog capturing_net_log;
   net::BoundNetLog net_log = capturing_net_log.bound();
   WarningSet warning_set;
   std::string header_value;
@@ -1948,7 +1951,7 @@ TEST(ExtensionWebRequestHelpersTest,
 }
 
 TEST(ExtensionWebRequestHelpersTest, TestMergeOnHeadersReceivedResponses) {
-  net::CapturingBoundNetLog capturing_net_log;
+  net::BoundTestNetLog capturing_net_log;
   net::BoundNetLog net_log = capturing_net_log.bound();
   WarningSet warning_set;
   std::string header_value;
@@ -2048,7 +2051,7 @@ TEST(ExtensionWebRequestHelpersTest, TestMergeOnHeadersReceivedResponses) {
 // Check that we do not delete too much
 TEST(ExtensionWebRequestHelpersTest,
      TestMergeOnHeadersReceivedResponsesDeletion) {
-  net::CapturingBoundNetLog capturing_net_log;
+  net::BoundTestNetLog capturing_net_log;
   net::BoundNetLog net_log = capturing_net_log.bound();
   WarningSet warning_set;
   std::string header_value;
@@ -2102,7 +2105,7 @@ TEST(ExtensionWebRequestHelpersTest,
 TEST(ExtensionWebRequestHelpersTest,
      TestMergeOnHeadersReceivedResponsesRedirect) {
   EventResponseDeltas deltas;
-  net::CapturingBoundNetLog capturing_net_log;
+  net::BoundTestNetLog capturing_net_log;
   net::BoundNetLog net_log = capturing_net_log.bound();
   WarningSet warning_set;
 
@@ -2155,7 +2158,7 @@ TEST(ExtensionWebRequestHelpersTest,
 }
 
 TEST(ExtensionWebRequestHelpersTest, TestMergeOnAuthRequiredResponses) {
-  net::CapturingBoundNetLog capturing_net_log;
+  net::BoundTestNetLog capturing_net_log;
   net::BoundNetLog net_log = capturing_net_log.bound();
   WarningSet warning_set;
   EventResponseDeltas deltas;

@@ -8,6 +8,7 @@
 #include <set>
 #include <vector>
 
+#include "Options.h"
 #include "clang/AST/ASTConsumer.h"
 #include "clang/AST/TypeLoc.h"
 #include "clang/Frontend/CompilerInstance.h"
@@ -16,7 +17,8 @@
 // headers to subclasses which implement CheckChromeClass().
 class ChromeClassTester : public clang::ASTConsumer {
  public:
-  explicit ChromeClassTester(clang::CompilerInstance& instance);
+  ChromeClassTester(clang::CompilerInstance& instance,
+                    const chrome_checker::Options& options);
   virtual ~ChromeClassTester();
 
   // clang::ASTConsumer:
@@ -24,6 +26,8 @@ class ChromeClassTester : public clang::ASTConsumer {
   virtual bool HandleTopLevelDecl(clang::DeclGroupRef group_ref);
 
   void CheckTag(clang::TagDecl*);
+
+  clang::DiagnosticsEngine::Level getErrorLevel();
 
  protected:
   clang::CompilerInstance& instance() { return instance_; }
@@ -37,6 +41,10 @@ class ChromeClassTester : public clang::ASTConsumer {
   // namespace.
   bool InBannedNamespace(const clang::Decl* record);
 
+  // Utility method for subclasses to check if the source location is in a
+  // directory the plugin should ignore.
+  bool InBannedDirectory(clang::SourceLocation loc);
+
   // Utility method for subclasses to determine the namespace of the
   // specified record, if any. Unnamed namespaces will be identified as
   // "<anonymous namespace>".
@@ -45,6 +53,9 @@ class ChromeClassTester : public clang::ASTConsumer {
   // Utility method for subclasses to check if this class is within an
   // implementation (.cc, .cpp, .mm) file.
   bool InImplementationFile(clang::SourceLocation location);
+
+  // Options.
+  const chrome_checker::Options options_;
 
  private:
   void BuildBannedLists();
@@ -64,7 +75,6 @@ class ChromeClassTester : public clang::ASTConsumer {
   // deliberately ignore) in HandleTagDeclDefinition().
   std::string GetNamespaceImpl(const clang::DeclContext* context,
                                const std::string& candidate);
-  bool InBannedDirectory(clang::SourceLocation loc);
   bool IsIgnoredType(const std::string& base_name);
 
   // Attempts to determine the filename for the given SourceLocation.

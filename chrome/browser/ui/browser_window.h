@@ -178,6 +178,9 @@ class BrowserWindow : public ui::BaseWindow {
   // Focuses the toolbar (for accessibility).
   virtual void FocusToolbar() = 0;
 
+  // Called from toolbar subviews during their show/hide animations.
+  virtual void ToolbarSizeChanged(bool is_animating) = 0;
+
   // Focuses the app menu like it was a menu bar.
   //
   // Not used on the Mac, which has a "normal" menu bar.
@@ -298,10 +301,6 @@ class BrowserWindow : public ui::BaseWindow {
   // indicating that it's time to redraw everything.
   virtual void UserChangedTheme() = 0;
 
-  // Notification that |contents| got the focus through user action (click
-  // on the page).
-  virtual void WebContentsFocused(content::WebContents* contents) = 0;
-
   // Shows the website settings using the specified information. |url| is the
   // url of the page/frame the info applies to, |ssl| is the SSL information for
   // that page/frame.  If |show_history| is true, a section showing how many
@@ -329,9 +328,7 @@ class BrowserWindow : public ui::BaseWindow {
       const content::NativeWebKeyboardEvent& event) = 0;
 
   // Clipboard commands applied to the whole browser window.
-  virtual void Cut() = 0;
-  virtual void Copy() = 0;
-  virtual void Paste() = 0;
+  virtual void CutCopyPaste(int command_id) = 0;
 
   // Return the correct disposition for a popup window based on |bounds|.
   virtual WindowOpenDisposition GetDispositionForPopupBounds(

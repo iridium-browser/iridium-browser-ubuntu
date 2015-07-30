@@ -74,8 +74,7 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
       const GURL& manifest_url,
       base::File nexe_file,
       const NaClFileToken& nexe_token,
-      const std::vector<
-        nacl::NaClResourceFileInfo>& prefetched_resource_files_info,
+      const std::vector<NaClResourcePrefetchResult>& prefetched_resource_files,
       ppapi::PpapiPermissions permissions,
       int render_view_id,
       uint32 permission_bits,
@@ -112,6 +111,8 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
   content::BrowserPpapiHost* browser_ppapi_host() { return ppapi_host_.get(); }
 
  private:
+  class ScopedChannelHandle;
+
   void LaunchNaClGdb();
 
   // Mark the process as using a particular GDB debug stub port and notify
@@ -143,10 +144,10 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
 
   // Sends the reply message to the renderer who is waiting for the plugin
   // to load. Returns true on success.
-  bool ReplyToRenderer(
-      const IPC::ChannelHandle& ppapi_channel_handle,
-      const IPC::ChannelHandle& trusted_channel_handle,
-      const IPC::ChannelHandle& manifest_service_channel_handle);
+  void ReplyToRenderer(
+      ScopedChannelHandle ppapi_channel_handle,
+      ScopedChannelHandle trusted_channel_handle,
+      ScopedChannelHandle manifest_service_channel_handle);
 
   // Sends the reply with error message to the renderer.
   void SendErrorToRenderer(const std::string& error_message);
@@ -198,7 +199,7 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
   GURL manifest_url_;
   base::File nexe_file_;
   NaClFileToken nexe_token_;
-  std::vector<nacl::NaClResourceFileInfo> prefetched_resource_files_info_;
+  std::vector<NaClResourcePrefetchResult> prefetched_resource_files_;
 
   ppapi::PpapiPermissions permissions_;
 

@@ -59,8 +59,8 @@ namespace component_updater {
 
 namespace {
 
-// These values are used to send UMA information and are replicated in the
-// histograms.xml file, so the order MUST NOT CHANGE.
+// These two sets of values are used to send UMA information and are replicated
+// in the histograms.xml file, so the order MUST NOT CHANGE.
 enum SwReporterUmaValue {
   SW_REPORTER_EXPLICIT_REQUEST = 0,        // Deprecated.
   SW_REPORTER_STARTUP_RETRY = 1,           // Deprecated.
@@ -70,7 +70,18 @@ enum SwReporterUmaValue {
   SW_REPORTER_REGISTRY_EXIT_CODE = 5,
   SW_REPORTER_RESET_RETRIES = 6,  // Deprecated.
   SW_REPORTER_DOWNLOAD_START = 7,
+  SW_REPORTER_NO_BROWSER = 8,
+  SW_REPORTER_NO_LOCAL_STATE = 9,
+  SW_REPORTER_NO_PROMPT_NEEDED = 10,
+  SW_REPORTER_NO_PROMPT_FIELD_TRIAL = 11,
+  SW_REPORTER_ALREADY_PROMPTED = 12,
   SW_REPORTER_MAX,
+};
+enum SRTCompleted {
+  SRT_COMPLETED_NOT_YET = 0,
+  SRT_COMPLETED_YES = 1,
+  SRT_COMPLETED_LATER = 2,
+  SRT_COMPLETED_MAX,
 };
 
 // The maximum number of times to retry a download on startup.
@@ -113,6 +124,11 @@ const int kDelayedPostRebootCleanupNeeded = 15;
 
 void ReportUmaStep(SwReporterUmaValue value) {
   UMA_HISTOGRAM_ENUMERATION("SoftwareReporter.Step", value, SW_REPORTER_MAX);
+}
+
+void SRTHasCompleted(SRTCompleted value) {
+  UMA_HISTOGRAM_ENUMERATION("SoftwareReporter.Cleaner.HasCompleted", value,
+                            SRT_COMPLETED_MAX);
 }
 
 void ReportVersionWithUma(const base::Version& version) {
@@ -190,8 +206,15 @@ void ReportAndClearExitCode(int exit_code, const std::string& version) {
                             KEY_SET_VALUE);
   srt_key.DeleteValue(kExitCodeValueName);
 
-  if ((exit_code != kPostRebootCleanupNeeded && exit_code != kCleanupNeeded) ||
-      !IsInSRTPromptFieldTrialGroups()) {
+  if (!IsInSRTPromptFieldTrialGroups()) {
+    // Knowing about disabled field trial is more important than reporter not
+    // finding anything to remove.
+    ReportUmaStep(SW_REPORTER_NO_PROMPT_FIELD_TRIAL);
+    return;
+  }
+
+  if (exit_code != kPostRebootCleanupNeeded && exit_code != kCleanupNeeded) {
+    ReportUmaStep(SW_REPORTER_NO_PROMPT_NEEDED);
     return;
   }
 
@@ -201,8 +224,10 @@ void ReportAndClearExitCode(int exit_code, const std::string& version) {
   // have a profile.
   chrome::HostDesktopType desktop_type = chrome::GetActiveDesktop();
   Browser* browser = chrome::FindLastActiveWithHostDesktopType(desktop_type);
-  if (!browser)
+  if (!browser) {
+    ReportUmaStep(SW_REPORTER_NO_BROWSER);
     return;
+  }
 
   Profile* profile = browser->profile();
   DCHECK(profile);
@@ -214,8 +239,10 @@ void ReportAndClearExitCode(int exit_code, const std::string& version) {
   // and for the current Finch seed.
   std::string incoming_seed = safe_browsing::GetIncomingSRTSeed();
   std::string old_seed = prefs->GetString(prefs::kSwReporterPromptSeed);
-  if (!incoming_seed.empty() && incoming_seed == old_seed)
+  if (!incoming_seed.empty() && incoming_seed == old_seed) {
+    ReportUmaStep(SW_REPORTER_ALREADY_PROMPTED);
     return;
+  }
 
   if (!incoming_seed.empty())
     prefs->SetString(prefs::kSwReporterPromptSeed, incoming_seed);
@@ -290,24 +317,24 @@ class SwReporterInstallerTraits : public ComponentInstallerTraits {
  public:
   explicit SwReporterInstallerTraits(PrefService* prefs) : prefs_(prefs) {}
 
-  virtual ~SwReporterInstallerTraits() {}
+  ~SwReporterInstallerTraits() override {}
 
-  virtual bool VerifyInstallation(const base::DictionaryValue& manifest,
-                                  const base::FilePath& dir) const {
+  bool VerifyInstallation(const base::DictionaryValue& manifest,
+                          const base::FilePath& dir) const override {
     return base::PathExists(dir.Append(kSwReporterExeName));
   }
 
-  virtual bool CanAutoUpdate() const { return true; }
+  bool CanAutoUpdate() const override { return true; }
 
-  virtual bool OnCustomInstall(const base::DictionaryValue& manifest,
-                               const base::FilePath& install_dir) {
+  bool OnCustomInstall(const base::DictionaryValue& manifest,
+                       const base::FilePath& install_dir) override {
     return true;
   }
 
-  virtual void ComponentReady(const base::Version& version,
-                              const base::FilePath& install_dir,
-                              scoped_ptr<base::DictionaryValue> manifest) {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  void ComponentReady(const base::Version& version,
+                      const base::FilePath& install_dir,
+                      scoped_ptr<base::DictionaryValue> manifest) override {
+    DCHECK_CURRENTLY_ON(BrowserThread::UI);
     ReportVersionWithUma(version);
 
     wcsncpy_s(version_dir_,
@@ -329,8 +356,10 @@ class SwReporterInstallerTraits : public ComponentInstallerTraits {
 
     // If we can't access local state, we can't see when we last ran, so
     // just exit without running.
-    if (!g_browser_process || !g_browser_process->local_state())
+    if (!g_browser_process || !g_browser_process->local_state()) {
+      ReportUmaStep(SW_REPORTER_NO_LOCAL_STATE);
       return;
+    }
 
     // Run the reporter if it hasn't been triggered in the
     // kDaysBetweenSwReporterRuns days.
@@ -352,11 +381,11 @@ class SwReporterInstallerTraits : public ComponentInstallerTraits {
     }
   }
 
-  virtual base::FilePath GetBaseDirectory() const { return install_dir(); }
+  base::FilePath GetBaseDirectory() const override { return install_dir(); }
 
-  virtual void GetHash(std::vector<uint8_t>* hash) const { GetPkHash(hash); }
+  void GetHash(std::vector<uint8_t>* hash) const override { GetPkHash(hash); }
 
-  virtual std::string GetName() const { return "Software Reporter Tool"; }
+  std::string GetName() const override { return "Software Reporter Tool"; }
 
   static base::FilePath install_dir() {
     // The base directory on windows looks like:
@@ -404,58 +433,67 @@ void RegisterSwReporterComponent(ComponentUpdateService* cus,
   base::win::RegKey cleaner_key(
       HKEY_CURRENT_USER, cleaner_key_name.c_str(), KEY_ALL_ACCESS);
   // Cleaner is assumed to have run if we have a start time.
-  if (cleaner_key.Valid() && cleaner_key.HasValue(kStartTimeValueName)) {
-    // Get version number.
-    if (cleaner_key.HasValue(kVersionValueName)) {
-      DWORD version;
-      cleaner_key.ReadValueDW(kVersionValueName, &version);
-      UMA_HISTOGRAM_SPARSE_SLOWLY("SoftwareReporter.Cleaner.Version", version);
-      cleaner_key.DeleteValue(kVersionValueName);
-    }
-    // Get start & end time. If we don't have an end time, we can assume the
-    // cleaner has not completed.
-    int64 start_time_value;
-    cleaner_key.ReadInt64(kStartTimeValueName, &start_time_value);
+  if (cleaner_key.Valid()) {
+    if (cleaner_key.HasValue(kStartTimeValueName)) {
+      // Get version number.
+      if (cleaner_key.HasValue(kVersionValueName)) {
+        DWORD version;
+        cleaner_key.ReadValueDW(kVersionValueName, &version);
+        UMA_HISTOGRAM_SPARSE_SLOWLY("SoftwareReporter.Cleaner.Version",
+                                    version);
+        cleaner_key.DeleteValue(kVersionValueName);
+      }
+      // Get start & end time. If we don't have an end time, we can assume the
+      // cleaner has not completed.
+      int64 start_time_value;
+      cleaner_key.ReadInt64(kStartTimeValueName, &start_time_value);
 
-    bool completed = cleaner_key.HasValue(kEndTimeValueName);
-    UMA_HISTOGRAM_BOOLEAN("SoftwareReporter.Cleaner.HasCompleted", completed);
-    if (completed) {
-      int64 end_time_value;
-      cleaner_key.ReadInt64(kEndTimeValueName, &end_time_value);
-      cleaner_key.DeleteValue(kEndTimeValueName);
-      base::TimeDelta run_time(base::Time::FromInternalValue(end_time_value) -
-          base::Time::FromInternalValue(start_time_value));
-      UMA_HISTOGRAM_LONG_TIMES("SoftwareReporter.Cleaner.RunningTime",
-          run_time);
-    }
-    // Get exit code. Assume nothing was found if we can't read the exit code.
-    DWORD exit_code = kNothingFound;
-    if (cleaner_key.HasValue(kExitCodeValueName)) {
-      cleaner_key.ReadValueDW(kExitCodeValueName, &exit_code);
-      UMA_HISTOGRAM_SPARSE_SLOWLY("SoftwareReporter.Cleaner.ExitCode",
-          exit_code);
-      cleaner_key.DeleteValue(kExitCodeValueName);
-    }
-    cleaner_key.DeleteValue(kStartTimeValueName);
+      bool completed = cleaner_key.HasValue(kEndTimeValueName);
+      SRTHasCompleted(completed ? SRT_COMPLETED_YES : SRT_COMPLETED_NOT_YET);
+      if (completed) {
+        int64 end_time_value;
+        cleaner_key.ReadInt64(kEndTimeValueName, &end_time_value);
+        cleaner_key.DeleteValue(kEndTimeValueName);
+        base::TimeDelta run_time(
+            base::Time::FromInternalValue(end_time_value) -
+            base::Time::FromInternalValue(start_time_value));
+        UMA_HISTOGRAM_LONG_TIMES("SoftwareReporter.Cleaner.RunningTime",
+                                 run_time);
+      }
+      // Get exit code. Assume nothing was found if we can't read the exit code.
+      DWORD exit_code = kNothingFound;
+      if (cleaner_key.HasValue(kExitCodeValueName)) {
+        cleaner_key.ReadValueDW(kExitCodeValueName, &exit_code);
+        UMA_HISTOGRAM_SPARSE_SLOWLY("SoftwareReporter.Cleaner.ExitCode",
+                                    exit_code);
+        cleaner_key.DeleteValue(kExitCodeValueName);
+      }
+      cleaner_key.DeleteValue(kStartTimeValueName);
 
-    if (exit_code == kPostRebootCleanupNeeded ||
-        exit_code == kDelayedPostRebootCleanupNeeded) {
-      // Check if we are running after the user has rebooted.
-      base::TimeDelta elapsed(base::Time::Now() -
-                              base::Time::FromInternalValue(start_time_value));
-      DCHECK_GT(elapsed.InMilliseconds(), 0);
-      UMA_HISTOGRAM_BOOLEAN(
-          "SoftwareReporter.Cleaner.HasRebooted",
-          static_cast<uint64>(elapsed.InMilliseconds()) > ::GetTickCount());
-    }
+      if (exit_code == kPostRebootCleanupNeeded ||
+          exit_code == kDelayedPostRebootCleanupNeeded) {
+        // Check if we are running after the user has rebooted.
+        base::TimeDelta elapsed(
+            base::Time::Now() -
+            base::Time::FromInternalValue(start_time_value));
+        DCHECK_GT(elapsed.InMilliseconds(), 0);
+        UMA_HISTOGRAM_BOOLEAN(
+            "SoftwareReporter.Cleaner.HasRebooted",
+            static_cast<uint64>(elapsed.InMilliseconds()) > ::GetTickCount());
+      }
 
-    if (cleaner_key.HasValue(kUploadResultsValueName)) {
-      base::string16 upload_results;
-      cleaner_key.ReadValue(kUploadResultsValueName, &upload_results);
-      ReportUploadsWithUma(upload_results);
+      if (cleaner_key.HasValue(kUploadResultsValueName)) {
+        base::string16 upload_results;
+        cleaner_key.ReadValue(kUploadResultsValueName, &upload_results);
+        ReportUploadsWithUma(upload_results);
+      }
+    } else {
+      if (cleaner_key.HasValue(kEndTimeValueName)) {
+        SRTHasCompleted(SRT_COMPLETED_LATER);
+        cleaner_key.DeleteValue(kEndTimeValueName);
+      }
     }
   }
-
   ReportFoundUwS();
 
   // Install the component.
@@ -474,17 +512,11 @@ void RegisterPrefsForSwReporter(PrefRegistrySimple* registry) {
 
 void RegisterProfilePrefsForSwReporter(
     user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterIntegerPref(
-      prefs::kSwReporterPromptReason, -1,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterIntegerPref(prefs::kSwReporterPromptReason, -1);
 
-  registry->RegisterStringPref(
-      prefs::kSwReporterPromptVersion, "",
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterStringPref(prefs::kSwReporterPromptVersion, "");
 
-  registry->RegisterStringPref(
-      prefs::kSwReporterPromptSeed, "",
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterStringPref(prefs::kSwReporterPromptSeed, "");
 }
 
 }  // namespace component_updater

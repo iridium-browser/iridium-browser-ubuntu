@@ -26,6 +26,7 @@
 #ifndef ResourceFetcher_h
 #define ResourceFetcher_h
 
+#include "core/CoreExport.h"
 #include "core/fetch/CachePolicy.h"
 #include "core/fetch/FetchContext.h"
 #include "core/fetch/FetchInitiatorInfo.h"
@@ -64,7 +65,7 @@ class ResourceLoaderSet;
 // RefPtr<ResourceFetcher> for their lifetime (and will create one if they
 // are initialized without a LocalFrame), so a Document can keep a ResourceFetcher
 // alive past detach if scripts still reference the Document.
-class ResourceFetcher final : public RefCountedWillBeGarbageCollectedFinalized<ResourceFetcher>, public ResourceLoaderHost {
+class CORE_EXPORT ResourceFetcher final : public RefCountedWillBeGarbageCollectedFinalized<ResourceFetcher>, public ResourceLoaderHost {
     WTF_MAKE_NONCOPYABLE(ResourceFetcher); WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(ResourceFetcher);
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(ResourceFetcher);
 public:
@@ -87,6 +88,7 @@ public:
     ResourcePtr<DocumentResource> fetchSVGDocument(FetchRequest&);
     ResourcePtr<XSLStyleSheetResource> fetchXSLStyleSheet(FetchRequest&);
     ResourcePtr<Resource> fetchLinkResource(Resource::Type, FetchRequest&);
+    ResourcePtr<Resource> fetchLinkPreloadResource(Resource::Type, FetchRequest&);
     ResourcePtr<RawResource> fetchImport(FetchRequest&);
     ResourcePtr<RawResource> fetchMedia(FetchRequest&);
     ResourcePtr<RawResource> fetchTextTrack(FetchRequest&);
@@ -103,7 +105,8 @@ public:
 
     bool shouldDeferImageLoad(const KURL&) const;
 
-    FetchContext& context() const { return *m_context.get(); }
+    FetchContext& context() const { return m_context ? *m_context.get() : FetchContext::nullInstance(); }
+    void clearContext() { m_context.clear(); }
 
     void garbageCollectDocumentResources();
 

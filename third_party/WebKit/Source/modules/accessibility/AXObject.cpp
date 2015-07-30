@@ -29,11 +29,12 @@
 #include "config.h"
 #include "modules/accessibility/AXObject.h"
 
-#include "core/dom/NodeTraversal.h"
 #include "core/editing/VisibleUnits.h"
 #include "core/editing/htmlediting.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
+#include "core/html/HTMLDialogElement.h"
+#include "core/html/HTMLFrameOwnerElement.h"
 #include "core/layout/LayoutListItem.h"
 #include "core/layout/LayoutTheme.h"
 #include "core/layout/LayoutView.h"
@@ -117,7 +118,7 @@ const RoleEntry roles[] = {
     { "tablist", TabListRole },
     { "tabpanel", TabPanelRole },
     { "text", StaticTextRole },
-    { "textbox", TextAreaRole },
+    { "textbox", TextFieldRole },
     { "timer", TimerRole },
     { "toolbar", ToolbarRole },
     { "tooltip", UserInterfaceTooltipRole },
@@ -125,6 +126,133 @@ const RoleEntry roles[] = {
     { "treegrid", TreeGridRole },
     { "treeitem", TreeItemRole }
 };
+
+struct InternalRoleEntry {
+    AccessibilityRole webcoreRole;
+    const char* internalRoleName;
+};
+
+const InternalRoleEntry internalRoles[] = {
+    { UnknownRole, "Unknown" },
+    { AlertDialogRole, "AlertDialog" },
+    { AlertRole, "Alert" },
+    { AnnotationRole, "Annotation" },
+    { ApplicationRole, "Application" },
+    { ArticleRole, "Article" },
+    { BannerRole, "Banner" },
+    { BlockquoteRole, "Blockquote" },
+    { BusyIndicatorRole, "BusyIndicator" },
+    { ButtonRole, "Button" },
+    { CanvasRole, "Canvas" },
+    { CaptionRole, "Caption" },
+    { CellRole, "Cell" },
+    { CheckBoxRole, "CheckBox" },
+    { ColorWellRole, "ColorWell" },
+    { ColumnHeaderRole, "ColumnHeader" },
+    { ColumnRole, "Column" },
+    { ComboBoxRole, "ComboBox" },
+    { ComplementaryRole, "Complementary" },
+    { ContentInfoRole, "ContentInfo" },
+    { DateRole, "Date" },
+    { DateTimeRole, "DateTime" },
+    { DefinitionRole, "Definition" },
+    { DescriptionListDetailRole, "DescriptionListDetail" },
+    { DescriptionListRole, "DescriptionList" },
+    { DescriptionListTermRole, "DescriptionListTerm" },
+    { DetailsRole, "Details" },
+    { DialogRole, "Dialog" },
+    { DirectoryRole, "Directory" },
+    { DisclosureTriangleRole, "DisclosureTriangle" },
+    { DivRole, "Div" },
+    { DocumentRole, "Document" },
+    { EmbeddedObjectRole, "EmbeddedObject" },
+    { FigcaptionRole, "Figcaption" },
+    { FigureRole, "Figure" },
+    { FooterRole, "Footer" },
+    { FormRole, "Form" },
+    { GridRole, "Grid" },
+    { GroupRole, "Group" },
+    { HeadingRole, "Heading" },
+    { IframePresentationalRole, "IframePresentational" },
+    { IframeRole, "Iframe" },
+    { IgnoredRole, "Ignored" },
+    { ImageMapLinkRole, "ImageMapLink" },
+    { ImageMapRole, "ImageMap" },
+    { ImageRole, "Image" },
+    { InlineTextBoxRole, "InlineTextBox" },
+    { LabelRole, "Label" },
+    { LegendRole, "Legend" },
+    { LinkRole, "Link" },
+    { ListBoxOptionRole, "ListBoxOption" },
+    { ListBoxRole, "ListBox" },
+    { ListItemRole, "ListItem" },
+    { ListMarkerRole, "ListMarker" },
+    { ListRole, "List" },
+    { LogRole, "Log" },
+    { MainRole, "Main" },
+    { MarqueeRole, "Marquee" },
+    { MathRole, "Math" },
+    { MenuBarRole, "MenuBar" },
+    { MenuButtonRole, "MenuButton" },
+    { MenuItemRole, "MenuItem" },
+    { MenuItemCheckBoxRole, "MenuItemCheckBox" },
+    { MenuItemRadioRole, "MenuItemRadio" },
+    { MenuListOptionRole, "MenuListOption" },
+    { MenuListPopupRole, "MenuListPopup" },
+    { MenuRole, "Menu" },
+    { MeterRole, "Meter" },
+    { NavigationRole, "Navigation" },
+    { NoneRole, "None" },
+    { NoteRole, "Note" },
+    { OutlineRole, "Outline" },
+    { ParagraphRole, "Paragraph" },
+    { PopUpButtonRole, "PopUpButton" },
+    { PreRole, "Pre" },
+    { PresentationalRole, "Presentational" },
+    { ProgressIndicatorRole, "ProgressIndicator" },
+    { RadioButtonRole, "RadioButton" },
+    { RadioGroupRole, "RadioGroup" },
+    { RegionRole, "Region" },
+    { RootWebAreaRole, "RootWebArea" },
+    { RowHeaderRole, "RowHeader" },
+    { RowRole, "Row" },
+    { RubyRole, "Ruby" },
+    { RulerRole, "Ruler" },
+    { SVGRootRole, "SVGRoot" },
+    { ScrollAreaRole, "ScrollArea" },
+    { ScrollBarRole, "ScrollBar" },
+    { SeamlessWebAreaRole, "SeamlessWebArea" },
+    { SearchRole, "Search" },
+    { SearchBoxRole, "SearchBox" },
+    { SliderRole, "Slider" },
+    { SliderThumbRole, "SliderThumb" },
+    { SpinButtonPartRole, "SpinButtonPart" },
+    { SpinButtonRole, "SpinButton" },
+    { SplitterRole, "Splitter" },
+    { StaticTextRole, "StaticText" },
+    { StatusRole, "Status" },
+    { SwitchRole, "Switch" },
+    { TabGroupRole, "TabGroup" },
+    { TabListRole, "TabList" },
+    { TabPanelRole, "TabPanel" },
+    { TabRole, "Tab" },
+    { TableHeaderContainerRole, "TableHeaderContainer" },
+    { TableRole, "Table" },
+    { TextFieldRole, "TextField" },
+    { TimeRole, "Time" },
+    { TimerRole, "Timer" },
+    { ToggleButtonRole, "ToggleButton" },
+    { ToolbarRole, "Toolbar" },
+    { TreeGridRole, "TreeGrid" },
+    { TreeItemRole, "TreeItem" },
+    { TreeRole, "Tree" },
+    { UserInterfaceTooltipRole, "UserInterfaceTooltip" },
+    { WebAreaRole, "WebArea" },
+    { LineBreakRole, "LineBreak" },
+    { WindowRole, "Window" }
+};
+
+static_assert(WTF_ARRAY_LENGTH(internalRoles) == NumRoles, "Not all internal roles have an entry in internalRoles array");
 
 // Roles which we need to map in the other direction
 const RoleEntry reverseRoles[] = {
@@ -159,6 +287,15 @@ static Vector<AtomicString>* createRoleNameVector()
         (*roleNameVector)[reverseRoles[i].webcoreRole] = AtomicString(reverseRoles[i].ariaRole);
 
     return roleNameVector;
+}
+
+static Vector<AtomicString>* createInternalRoleNameVector()
+{
+    Vector<AtomicString>* internalRoleNameVector = new Vector<AtomicString>(NumRoles);
+    for (size_t i = 0; i < WTF_ARRAY_LENGTH(internalRoles); i++)
+        (*internalRoleNameVector)[internalRoles[i].webcoreRole] = AtomicString(internalRoles[i].internalRoleName);
+
+    return internalRoleNameVector;
 }
 
 const char* ariaWidgets[] = {
@@ -223,6 +360,12 @@ const char* ariaInteractiveWidgetAttributes[] = {
     "aria-selected"
 };
 
+
+HTMLDialogElement* getActiveDialogElement(Node* node)
+{
+    return node->document().activeModalDialog();
+}
+
 } // namespace
 
 AXObject::AXObject(AXObjectCacheImpl* axObjectCache)
@@ -235,9 +378,10 @@ AXObject::AXObject(AXObjectCacheImpl* axObjectCache)
     , m_lastModificationCount(-1)
     , m_cachedIsIgnored(false)
     , m_cachedIsInertOrAriaHidden(false)
-    , m_cachedIsDescendantOfBarrenParent(false)
+    , m_cachedIsDescendantOfLeafNode(false)
     , m_cachedIsDescendantOfDisabledNode(false)
     , m_cachedHasInheritedPresentationalRole(false)
+    , m_cachedIsPresentationalChild(false)
     , m_cachedLiveRegionRoot(0)
     , m_axObjectCache(axObjectCache)
 {
@@ -264,7 +408,7 @@ bool AXObject::isDetached() const
 
 bool AXObject::isARIATextControl() const
 {
-    return ariaRoleAttribute() == TextAreaRole || ariaRoleAttribute() == TextFieldRole || ariaRoleAttribute() == SearchBoxRole;
+    return ariaRoleAttribute() == TextFieldRole || ariaRoleAttribute() == SearchBoxRole;
 }
 
 bool AXObject::isButton() const
@@ -318,19 +462,6 @@ bool AXObject::isPasswordFieldAndShouldHideValue() const
     return isPasswordField();
 }
 
-bool AXObject::isTextControl() const
-{
-    switch (roleValue()) {
-    case TextAreaRole:
-    case TextFieldRole:
-    case ComboBoxRole:
-    case SearchBoxRole:
-        return true;
-    default:
-        return false;
-    }
-}
-
 bool AXObject::isClickable() const
 {
     switch (roleValue()) {
@@ -346,7 +477,6 @@ bool AXObject::isClickable() const
     case RadioButtonRole:
     case SpinButtonRole:
     case TabRole:
-    case TextAreaRole:
     case TextFieldRole:
     case ToggleButtonRole:
         return true;
@@ -372,18 +502,19 @@ void AXObject::updateCachedAttributeValuesIfNeeded() const
 
     m_lastModificationCount = cache->modificationCount();
     m_cachedIsInertOrAriaHidden = computeIsInertOrAriaHidden();
-    m_cachedIsDescendantOfBarrenParent = computeIsDescendantOfBarrenParent();
-    m_cachedIsDescendantOfDisabledNode = computeIsDescendantOfDisabledNode();
-    m_cachedHasInheritedPresentationalRole = computeHasInheritedPresentationalRole();
+    m_cachedIsDescendantOfLeafNode = (leafNodeAncestor() != 0);
+    m_cachedIsDescendantOfDisabledNode = (disabledAncestor() != 0);
+    m_cachedHasInheritedPresentationalRole = (inheritsPresentationalRoleFrom() != 0);
+    m_cachedIsPresentationalChild = (ancestorForWhichThisIsAPresentationalChild() != 0);
     m_cachedIsIgnored = computeAccessibilityIsIgnored();
     m_cachedLiveRegionRoot = isLiveRegion() ?
         this :
         (parentObjectIfExists() ? parentObjectIfExists()->liveRegionRoot() : 0);
 }
 
-bool AXObject::accessibilityIsIgnoredByDefault() const
+bool AXObject::accessibilityIsIgnoredByDefault(IgnoredReasons* ignoredReasons) const
 {
-    return defaultObjectInclusion() == IgnoreObject;
+    return defaultObjectInclusion(ignoredReasons) == IgnoreObject;
 }
 
 AXObjectInclusion AXObject::accessibilityPlatformIncludesObject() const
@@ -394,13 +525,21 @@ AXObjectInclusion AXObject::accessibilityPlatformIncludesObject() const
     return DefaultBehavior;
 }
 
-AXObjectInclusion AXObject::defaultObjectInclusion() const
+AXObjectInclusion AXObject::defaultObjectInclusion(IgnoredReasons* ignoredReasons) const
 {
-    if (isInertOrAriaHidden())
+    if (isInertOrAriaHidden()) {
+        if (ignoredReasons)
+            computeIsInertOrAriaHidden(ignoredReasons);
         return IgnoreObject;
+    }
 
-    if (isPresentationalChildOfAriaRole())
+    if (isPresentationalChild()) {
+        if (ignoredReasons) {
+            AXObject* ancestor = ancestorForWhichThisIsAPresentationalChild();
+            ignoredReasons->append(IgnoredReason(AXAncestorDisallowsChild, ancestor));
+        }
         return IgnoreObject;
+    }
 
     return accessibilityPlatformIncludesObject();
 }
@@ -411,36 +550,64 @@ bool AXObject::isInertOrAriaHidden() const
     return m_cachedIsInertOrAriaHidden;
 }
 
-bool AXObject::computeIsInertOrAriaHidden() const
+bool AXObject::computeIsInertOrAriaHidden(IgnoredReasons* ignoredReasons) const
 {
-    if (equalIgnoringCase(getAttribute(aria_hiddenAttr), "true"))
-        return true;
-    if (node() && node()->isInert())
-        return true;
-
-    AXObject* parent = parentObject();
-    if (parent)
-        return parent->isInertOrAriaHidden();
-
-    return false;
-}
-
-bool AXObject::isDescendantOfBarrenParent() const
-{
-    updateCachedAttributeValuesIfNeeded();
-    return m_cachedIsDescendantOfBarrenParent;
-}
-
-bool AXObject::computeIsDescendantOfBarrenParent() const
-{
-    if (AXObject* parent = parentObject()) {
-        if (!parent->canHaveChildren())
+    if (node()) {
+        if (node()->isInert()) {
+            if (ignoredReasons) {
+                HTMLDialogElement* dialog = getActiveDialogElement(node());
+                if (dialog) {
+                    AXObject* dialogObject = axObjectCache()->getOrCreate(dialog);
+                    if (dialogObject)
+                        ignoredReasons->append(IgnoredReason(AXActiveModalDialog, dialogObject));
+                    else
+                        ignoredReasons->append(IgnoredReason(AXInert));
+                } else {
+                    // TODO(aboxhall): handle inert attribute if it eventuates
+                    ignoredReasons->append(IgnoredReason(AXInert));
+                }
+            }
             return true;
+        }
+    } else {
+        AXObject* parent = parentObject();
+        if (parent && parent->isInertOrAriaHidden()) {
+            if (ignoredReasons)
+                parent->computeIsInertOrAriaHidden(ignoredReasons);
+            return true;
+        }
+    }
 
-        return parent->isDescendantOfBarrenParent();
+    const AXObject* hiddenRoot = ariaHiddenRoot();
+    if (hiddenRoot) {
+        if (ignoredReasons) {
+            if (hiddenRoot == this)
+                ignoredReasons->append(IgnoredReason(AXAriaHidden));
+            else
+                ignoredReasons->append(IgnoredReason(AXAriaHiddenRoot, hiddenRoot));
+        }
+        return true;
     }
 
     return false;
+}
+
+bool AXObject::isDescendantOfLeafNode() const
+{
+    updateCachedAttributeValuesIfNeeded();
+    return m_cachedIsDescendantOfLeafNode;
+}
+
+AXObject* AXObject::leafNodeAncestor() const
+{
+    if (AXObject* parent = parentObject()) {
+        if (!parent->canHaveChildren())
+            return parent;
+
+        return parent->leafNodeAncestor();
+    }
+
+    return 0;
 }
 
 const AXObject* AXObject::ariaHiddenRoot() const
@@ -459,18 +626,18 @@ bool AXObject::isDescendantOfDisabledNode() const
     return m_cachedIsDescendantOfDisabledNode;
 }
 
-bool AXObject::computeIsDescendantOfDisabledNode() const
+const AXObject* AXObject::disabledAncestor() const
 {
     const AtomicString& disabled = getAttribute(aria_disabledAttr);
     if (equalIgnoringCase(disabled, "true"))
-        return true;
+        return this;
     if (equalIgnoringCase(disabled, "false"))
-        return false;
+        return 0;
 
     if (AXObject* parent = parentObject())
-        return parent->isDescendantOfDisabledNode();
+        return parent->disabledAncestor();
 
-    return false;
+    return 0;
 }
 
 bool AXObject::lastKnownIsIgnoredValue()
@@ -484,6 +651,24 @@ bool AXObject::lastKnownIsIgnoredValue()
 void AXObject::setLastKnownIsIgnoredValue(bool isIgnored)
 {
     m_lastKnownIsIgnoredValue = isIgnored ? IgnoreObject : IncludeObject;
+}
+
+bool AXObject::hasInheritedPresentationalRole() const
+{
+    updateCachedAttributeValuesIfNeeded();
+    return m_cachedHasInheritedPresentationalRole;
+}
+
+bool AXObject::isPresentationalChild() const
+{
+    updateCachedAttributeValuesIfNeeded();
+    return m_cachedIsPresentationalChild;
+}
+
+String AXObject::name(AXNameFrom& nameFrom, Vector<AXObject*>& nameObjects)
+{
+    HashSet<AXObject*> visited;
+    return textAlternative(false, false, visited, &nameFrom, &nameObjects);
 }
 
 // In ARIA 1.1, the default value for aria-orientation changed from horizontal to undefined.
@@ -506,7 +691,6 @@ String AXObject::actionVerb() const
     case ToggleButtonRole:
         return queryString(WebLocalizedString::AXButtonActionVerb);
     case TextFieldRole:
-    case TextAreaRole:
         return queryString(WebLocalizedString::AXTextFieldActionVerb);
     case RadioButtonRole:
         return queryString(WebLocalizedString::AXRadioButtonActionVerb);
@@ -544,8 +728,21 @@ AccessibilityButtonState AXObject::checkboxOrRadioValue() const
     return ButtonStateOff;
 }
 
-bool AXObject::ariaIsMultiline() const
+bool AXObject::isMultiline() const
 {
+    Node* node = this->node();
+    if (!node)
+        return false;
+
+    if (isHTMLTextAreaElement(*node))
+        return true;
+
+    if (node->hasEditableStyle())
+        return true;
+
+    if (!isNativeTextControl() && !isNonNativeTextControl())
+        return false;
+
     return equalIgnoringCase(getAttribute(aria_multilineAttr), "true");
 }
 
@@ -571,6 +768,42 @@ bool AXObject::supportsRangeValue() const
         || isSlider()
         || isScrollbar()
         || isSpinButton();
+}
+
+bool AXObject::supportsSetSizeAndPosInSet() const
+{
+    AXObject* parent = parentObject();
+    if (!parent)
+        return false;
+
+    int role = roleValue();
+    int parentRole = parent->roleValue();
+
+    if ((role == ListBoxOptionRole && parentRole == ListBoxRole)
+        || (role == ListItemRole && parentRole == ListRole)
+        || (role == MenuItemRole && parentRole == MenuRole)
+        || (role == RadioButtonRole && parentRole == RadioGroupRole)
+        || (role == TabRole && parentRole == TabListRole)
+        || (role == TreeItemRole && parentRole == TreeRole))
+        return true;
+
+    return false;
+}
+
+int AXObject::indexInParent() const
+{
+    if (!parentObject())
+        return 0;
+
+    const auto& siblings = parentObject()->children();
+    int childCount = siblings.size();
+
+    for (int index = 0; index < childCount; ++index) {
+        if (siblings[index].get() == this) {
+            return index;
+        }
+    }
+    return 0;
 }
 
 void AXObject::ariaTreeRows(AccessibilityChildrenVector& result)
@@ -807,6 +1040,55 @@ const AtomicString& AXObject::getAttribute(const QualifiedName& attribute) const
     return element->fastGetAttribute(attribute);
 }
 
+//
+// Scrollable containers.
+//
+
+bool AXObject::isScrollableContainer() const
+{
+    return !!getScrollableAreaIfScrollable();
+}
+
+IntPoint AXObject::scrollOffset() const
+{
+    ScrollableArea* area = getScrollableAreaIfScrollable();
+    if (!area)
+        return IntPoint();
+
+    return IntPoint(area->scrollPosition().x(), area->scrollPosition().y());
+}
+
+IntPoint AXObject::minimumScrollOffset() const
+{
+    ScrollableArea* area = getScrollableAreaIfScrollable();
+    if (!area)
+        return IntPoint();
+
+    return IntPoint(area->minimumScrollPosition().x(), area->minimumScrollPosition().y());
+}
+
+IntPoint AXObject::maximumScrollOffset() const
+{
+    ScrollableArea* area = getScrollableAreaIfScrollable();
+    if (!area)
+        return IntPoint();
+
+    return IntPoint(area->maximumScrollPosition().x(), area->maximumScrollPosition().y());
+}
+
+void AXObject::setScrollOffset(const IntPoint& offset) const
+{
+    ScrollableArea* area = getScrollableAreaIfScrollable();
+    if (!area)
+        return;
+
+    area->setScrollPosition(DoublePoint(offset.x(), offset.y()));
+}
+
+//
+// Modify or take an action on an object.
+//
+
 bool AXObject::press() const
 {
     Element* actionElem = actionElement();
@@ -922,7 +1204,7 @@ void AXObject::scrollToMakeVisibleWithSubFocus(const IntRect& subfocus) const
     ScrollableArea* scrollableArea = 0;
     while (scrollParent) {
         scrollableArea = scrollParent->getScrollableAreaIfScrollable();
-        if (scrollableArea)
+        if (scrollableArea && !scrollParent->isAXScrollView())
             break;
         scrollParent = scrollParent->parentObject();
     }
@@ -934,7 +1216,7 @@ void AXObject::scrollToMakeVisibleWithSubFocus(const IntRect& subfocus) const
     IntRect scrollVisibleRect = scrollableArea->visibleContentRect();
 
     // Convert the object rect into local coordinates.
-    if (!scrollParent->isAXScrollView()) {
+    if (!scrollParent->isWebArea()) {
         objectRect.moveBy(scrollPosition);
         objectRect.moveBy(-pixelSnappedIntRect(scrollParent->elementRect()).location());
     }
@@ -950,7 +1232,7 @@ void AXObject::scrollToMakeVisibleWithSubFocus(const IntRect& subfocus) const
         objectRect.y(), objectRect.maxY(),
         0, scrollVisibleRect.height());
 
-    scrollParent->scrollTo(IntPoint(desiredX, desiredY));
+    scrollParent->setScrollOffset(IntPoint(desiredX, desiredY));
 
     // Convert the subfocus into the coordinates of the scroll parent.
     IntRect newSubfocus = subfocus;
@@ -971,7 +1253,7 @@ void AXObject::scrollToGlobalPoint(const IntPoint& globalPoint) const
     Vector<const AXObject*> objects;
     AXObject* parentObject;
     for (parentObject = this->parentObject(); parentObject; parentObject = parentObject->parentObject()) {
-        if (parentObject->getScrollableAreaIfScrollable())
+        if (parentObject->getScrollableAreaIfScrollable() && !parentObject->isAXScrollView())
             objects.prepend(parentObject);
     }
     objects.append(this);
@@ -984,16 +1266,15 @@ void AXObject::scrollToGlobalPoint(const IntPoint& globalPoint) const
     for (size_t i = 0; i < levels; i++) {
         const AXObject* outer = objects[i];
         const AXObject* inner = objects[i + 1];
-
         ScrollableArea* scrollableArea = outer->getScrollableAreaIfScrollable();
 
-        IntRect innerRect = inner->isAXScrollView() ? pixelSnappedIntRect(inner->parentObject()->elementRect()) : pixelSnappedIntRect(inner->elementRect());
+        IntRect innerRect = inner->isWebArea() ? pixelSnappedIntRect(inner->parentObject()->elementRect()) : pixelSnappedIntRect(inner->elementRect());
         IntRect objectRect = innerRect;
         IntPoint scrollPosition = scrollableArea->scrollPosition();
 
         // Convert the object rect into local coordinates.
         objectRect.move(offsetX, offsetY);
-        if (!outer->isAXScrollView())
+        if (!outer->isWebArea())
             objectRect.move(scrollPosition.x(), scrollPosition.y());
 
         int desiredX = computeBestScrollOffset(
@@ -1006,18 +1287,18 @@ void AXObject::scrollToGlobalPoint(const IntPoint& globalPoint) const
             objectRect.y(), objectRect.maxY(),
             objectRect.y(), objectRect.maxY(),
             point.y(), point.y());
-        outer->scrollTo(IntPoint(desiredX, desiredY));
+        outer->setScrollOffset(IntPoint(desiredX, desiredY));
 
-        if (outer->isAXScrollView() && !inner->isAXScrollView()) {
-            // If outer object we just scrolled is a scroll view (main window or iframe) but the
-            // inner object is not, keep track of the coordinate transformation to apply to
+        if (outer->isWebArea() && !inner->isWebArea()) {
+            // If outer object we just scrolled is a web area (frame) but the inner object
+            // is not, keep track of the coordinate transformation to apply to
             // future nested calculations.
             scrollPosition = scrollableArea->scrollPosition();
             offsetX -= (scrollPosition.x() + point.x());
             offsetY -= (scrollPosition.y() + point.y());
             point.move(scrollPosition.x() - innerRect.x(), scrollPosition.y() - innerRect.y());
-        } else if (inner->isAXScrollView()) {
-            // Otherwise, if the inner object is a scroll view, reset the coordinate transformation.
+        } else if (inner->isWebArea()) {
+            // Otherwise, if the inner object is a web area, reset the coordinate transformation.
             offsetX = 0;
             offsetY = 0;
         }
@@ -1068,7 +1349,7 @@ int AXObject::lineForPosition(const VisiblePosition& visiblePos) const
 
 bool AXObject::isARIAControl(AccessibilityRole ariaRole)
 {
-    return isARIAInput(ariaRole) || ariaRole == TextAreaRole || ariaRole == ButtonRole
+    return isARIAInput(ariaRole) || ariaRole == ButtonRole
         || ariaRole == ComboBoxRole || ariaRole == SliderRole;
 }
 
@@ -1138,6 +1419,32 @@ bool AXObject::includesARIAWidgetRole(const String& role)
     return false;
 }
 
+bool AXObject::nameFromContents() const
+{
+    switch (roleValue()) {
+    case ButtonRole:
+    case CheckBoxRole:
+    case CellRole:
+    case ColumnHeaderRole:
+    case DirectoryRole:
+    case LinkRole:
+    case ListItemRole:
+    case MenuItemRole:
+    case MenuItemCheckBoxRole:
+    case MenuItemRadioRole:
+    case MenuListOptionRole:
+    case RadioButtonRole:
+    case RowHeaderRole:
+    case StaticTextRole:
+    case StatusRole:
+    case SwitchRole:
+    case TreeItemRole:
+        return true;
+    default:
+        return false;
+    }
+}
+
 AccessibilityRole AXObject::buttonRoleType() const
 {
     // If aria-pressed is present, then it should be exposed as a toggle button.
@@ -1157,6 +1464,13 @@ const AtomicString& AXObject::roleName(AccessibilityRole role)
     static const Vector<AtomicString>* roleNameVector = createRoleNameVector();
 
     return roleNameVector->at(role);
+}
+
+const AtomicString& AXObject::internalRoleName(AccessibilityRole role)
+{
+    static const Vector<AtomicString>* internalRoleNameVector = createInternalRoleNameVector();
+
+    return internalRoleNameVector->at(role);
 }
 
 } // namespace blink

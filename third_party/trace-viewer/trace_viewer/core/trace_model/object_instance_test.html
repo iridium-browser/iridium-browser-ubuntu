@@ -20,16 +20,16 @@ tv.b.unittest.testSuite(function() {
     instance.wasDeleted(60);
 
     var s1 = instance.getSnapshotAt(1);
-    assertEquals(s10, s1);
+    assert.equal(s1, s10);
 
     var s10 = instance.getSnapshotAt(10);
-    assertEquals('a', s10.args);
-    assertEquals(s10, instance.getSnapshotAt(15));
+    assert.equal(s10.args, 'a');
+    assert.equal(instance.getSnapshotAt(15), s10);
 
     var s40 = instance.getSnapshotAt(40);
-    assertEquals('b', s40.args);
-    assertEquals(s40, instance.getSnapshotAt(50));
-    assertEquals(s40, instance.getSnapshotAt(59.9));
+    assert.equal(s40.args, 'b');
+    assert.equal(instance.getSnapshotAt(50), s40);
+    assert.equal(instance.getSnapshotAt(59.9), s40);
   });
 
   test('getSnapshotAtWithExplicitCreation', function() {
@@ -39,13 +39,13 @@ tv.b.unittest.testSuite(function() {
     instance.addSnapshot(10, 'a');
     instance.wasDeleted(60);
 
-    assertThrows(function() {
+    assert.throws(function() {
       instance.getSnapshotAt(1);
     });
 
     var s10 = instance.getSnapshotAt(10);
-    assertEquals('a', s10.args);
-    assertEquals(s10, instance.getSnapshotAt(15));
+    assert.equal(s10.args, 'a');
+    assert.equal(instance.getSnapshotAt(15), s10);
   });
 
   test('getSnapshotBeforeFirstSnapshot', function() {
@@ -54,7 +54,7 @@ tv.b.unittest.testSuite(function() {
     var s15 = instance.addSnapshot(15, 'a');
     instance.wasDeleted(40);
 
-    assertEquals(s15, instance.getSnapshotAt(10));
+    assert.equal(instance.getSnapshotAt(10), s15);
   });
 
   test('getSnapshotAfterLastSnapshot', function() {
@@ -63,7 +63,7 @@ tv.b.unittest.testSuite(function() {
     var s15 = instance.addSnapshot(15, 'a');
     instance.wasDeleted(40);
 
-    assertEquals(s15, instance.getSnapshotAt(20));
+    assert.equal(instance.getSnapshotAt(20), s15);
   });
 });
 </script>

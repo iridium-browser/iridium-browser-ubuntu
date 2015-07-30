@@ -36,7 +36,7 @@ WebInspector.ApplicationCacheItemsView = function(model, frameId)
     this.element.classList.add("storage-view", "table");
 
     // FIXME: Needs better tooltip. (Localized)
-    this.deleteButton = new WebInspector.StatusBarButton(WebInspector.UIString("Delete"), "delete-status-bar-item");
+    this.deleteButton = new WebInspector.ToolbarButton(WebInspector.UIString("Delete"), "delete-toolbar-item");
     this.deleteButton.setVisible(false);
     this.deleteButton.addEventListener("click", this._deleteButtonClicked, this);
 
@@ -51,8 +51,8 @@ WebInspector.ApplicationCacheItemsView = function(model, frameId)
 
     this._frameId = frameId;
 
-    this._emptyView = new WebInspector.EmptyView(WebInspector.UIString("No Application Cache information available."));
-    this._emptyView.show(this.element);
+    this._emptyWidget = new WebInspector.EmptyWidget(WebInspector.UIString("No Application Cache information available."));
+    this._emptyWidget.show(this.element);
 
     this._markDirty();
 
@@ -68,16 +68,16 @@ WebInspector.ApplicationCacheItemsView = function(model, frameId)
 
 WebInspector.ApplicationCacheItemsView.prototype = {
     /**
-     * @return {!Array.<!WebInspector.StatusBarItem>}
+     * @return {!Array.<!WebInspector.ToolbarItem>}
      */
-    statusBarItems: function()
+    toolbarItems: function()
     {
         return [
             this.deleteButton,
-            new WebInspector.StatusBarItem(this.connectivityIcon),
-            new WebInspector.StatusBarItem(this.connectivityMessage),
-            new WebInspector.StatusBarItem(this.statusIcon),
-            new WebInspector.StatusBarItem(this.statusMessage)
+            new WebInspector.ToolbarItem(this.connectivityIcon),
+            new WebInspector.ToolbarItem(this.connectivityMessage),
+            new WebInspector.ToolbarItem(this.statusIcon),
+            new WebInspector.ToolbarItem(this.statusMessage)
         ];
     },
 
@@ -163,7 +163,7 @@ WebInspector.ApplicationCacheItemsView.prototype = {
             delete this._size;
             delete this._resources;
 
-            this._emptyView.show(this.element);
+            this._emptyWidget.show(this.element);
             this.deleteButton.setVisible(false);
             if (this._dataGrid)
                 this._dataGrid.element.classList.add("hidden");
@@ -182,7 +182,7 @@ WebInspector.ApplicationCacheItemsView.prototype = {
         this._populateDataGrid();
         this._dataGrid.autoSizeColumns(20, 80);
         this._dataGrid.element.classList.remove("hidden");
-        this._emptyView.detach();
+        this._emptyWidget.detach();
         this.deleteButton.setVisible(true);
 
         // FIXME: For Chrome, put creationTime and updateTime somewhere.

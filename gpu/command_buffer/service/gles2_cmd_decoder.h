@@ -171,6 +171,10 @@ class GPU_EXPORT GLES2Decoder : public base::SupportsWeakPtr<GLES2Decoder>,
 
   virtual void SetIgnoreCachedStateForTest(bool ignore) = 0;
 
+  // Allow the decoder to exit the current process.
+  // Defaults to |false|.
+  virtual void SetAllowExit(bool allow_exit) = 0;
+
   // Gets the QueryManager for this context.
   virtual QueryManager* GetQueryManager() = 0;
 
@@ -241,13 +245,13 @@ class GPU_EXPORT GLES2Decoder : public base::SupportsWeakPtr<GLES2Decoder>,
 
   // Returns true if the context was lost either by GL_ARB_robustness, forced
   // context loss or command buffer parse error.
-  virtual bool WasContextLost() = 0;
+  virtual bool WasContextLost() const = 0;
 
   // Returns true if the context was lost specifically by GL_ARB_robustness.
-  virtual bool WasContextLostByRobustnessExtension() = 0;
+  virtual bool WasContextLostByRobustnessExtension() const = 0;
 
   // Lose this context.
-  virtual void LoseContext(uint32 reset_status) = 0;
+  virtual void MarkContextLost(error::ContextLostReason reason) = 0;
 
   virtual Logger* GetLogger() = 0;
 

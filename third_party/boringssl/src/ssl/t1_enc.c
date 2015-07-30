@@ -133,8 +133,9 @@
  * OTHER ENTITY BASED ON INFRINGEMENT OF INTELLECTUAL PROPERTY RIGHTS OR
  * OTHERWISE. */
 
-#include <stdio.h>
 #include <assert.h>
+#include <stdio.h>
+#include <string.h>
 
 #include <openssl/err.h>
 #include <openssl/evp.h>
@@ -144,7 +145,7 @@
 #include <openssl/obj.h>
 #include <openssl/rand.h>
 
-#include "ssl_locl.h"
+#include "internal.h"
 
 
 /* tls1_P_hash computes the TLS P_<hash> function as described in RFC 5246,
@@ -225,7 +226,7 @@ int tls1_prf(SSL *s, uint8_t *out, size_t out_len, const uint8_t *secret,
              const uint8_t *seed2, size_t seed2_len) {
   size_t idx, len, count, i;
   const uint8_t *S1;
-  long m;
+  uint32_t m;
   const EVP_MD *md;
   int ret = 0;
   uint8_t *tmp;
@@ -243,7 +244,7 @@ int tls1_prf(SSL *s, uint8_t *out, size_t out_len, const uint8_t *secret,
 
   /* Count number of digests and partition |secret| evenly. */
   count = 0;
-  for (idx = 0; ssl_get_handshake_digest(idx, &m, &md); idx++) {
+  for (idx = 0; ssl_get_handshake_digest(&m, &md, idx); idx++) {
     if ((m << TLS1_PRF_DGST_SHIFT) & ssl_get_algorithm2(s)) {
       count++;
     }
@@ -258,7 +259,7 @@ int tls1_prf(SSL *s, uint8_t *out, size_t out_len, const uint8_t *secret,
   }
   S1 = secret;
   memset(out, 0, out_len);
-  for (idx = 0; ssl_get_handshake_digest(idx, &m, &md); idx++) {
+  for (idx = 0; ssl_get_handshake_digest(&m, &md, idx); idx++) {
     if ((m << TLS1_PRF_DGST_SHIFT) & ssl_get_algorithm2(s)) {
       /* If |count| is 2 and |secret_len| is odd, |secret| is partitioned into
        * two halves with an overlapping byte. */
@@ -352,6 +353,8 @@ static int tls1_change_cipher_state_aead(SSL *s, char is_read,
     }
     aead_ctx = s->aead_write_ctx;
   }
+
+  aead_ctx->cipher = s->session->cipher;
 
   if (!EVP_AEAD_CTX_init_with_direction(
           &aead_ctx->ctx, aead, key, key_len, EVP_AEAD_DEFAULT_TAG_LENGTH,
@@ -597,13 +600,9 @@ int tls1_enc(SSL *s, int send) {
     memcpy(p, &seq[2], 6);
     memcpy(ad, dtlsseq, 8);
   } else {
-    int i;
     memcpy(ad, seq, 8);
-    for (i = 7; i >= 0; i--) {
-      ++seq[i];
-      if (seq[i] != 0) {
-        break;
-      }
+    if (!ssl3_record_sequence_update(seq, 8)) {
+      return 0;
     }
   }
 
@@ -758,11 +757,11 @@ int tls1_handshake_digest(SSL *s, uint8_t *out, size_t out_len) {
   EVP_MD_CTX ctx;
   int err = 0, len = 0;
   size_t i;
-  long mask;
+  uint32_t mask;
 
   EVP_MD_CTX_init(&ctx);
 
-  for (i = 0; ssl_get_handshake_digest(i, &mask, &md); i++) {
+  for (i = 0; ssl_get_handshake_digest(&mask, &md, i); i++) {
     size_t hash_size;
     unsigned int digest_len;
     EVP_MD_CTX *hdgst = s->s3->handshake_dgst[i];
@@ -865,82 +864,42 @@ int tls1_generate_master_secret(SSL *s, uint8_t *out, const uint8_t *premaster,
   return SSL3_MASTER_SECRET_SIZE;
 }
 
-int tls1_export_keying_material(SSL *s, uint8_t *out, size_t olen,
-                                const char *label, size_t llen,
-                                const uint8_t *context, size_t contextlen,
+int tls1_export_keying_material(SSL *s, uint8_t *out, size_t out_len,
+                                const char *label, size_t label_len,
+                                const uint8_t *context, size_t context_len,
                                 int use_context) {
-  uint8_t *val = NULL;
-  size_t vallen, currentvalpos;
-  int ret;
-
-  /* construct PRF arguments we construct the PRF argument ourself rather than
-   * passing separate values into the TLS PRF to ensure that the concatenation
-   * of values does not create a prohibited label. */
-  vallen = llen + SSL3_RANDOM_SIZE * 2;
-  if (use_context) {
-    vallen += 2 + contextlen;
+  if (!s->s3->have_version || s->version == SSL3_VERSION) {
+    OPENSSL_PUT_ERROR(SSL, tls1_export_keying_material,
+                      ERR_R_SHOULD_NOT_HAVE_BEEN_CALLED);
+    return 0;
   }
 
-  val = OPENSSL_malloc(vallen);
-  if (val == NULL) {
-    goto err2;
-  }
-
-  currentvalpos = 0;
-  memcpy(val + currentvalpos, (uint8_t *)label, llen);
-  currentvalpos += llen;
-  memcpy(val + currentvalpos, s->s3->client_random, SSL3_RANDOM_SIZE);
-  currentvalpos += SSL3_RANDOM_SIZE;
-  memcpy(val + currentvalpos, s->s3->server_random, SSL3_RANDOM_SIZE);
-  currentvalpos += SSL3_RANDOM_SIZE;
-
+  size_t seed_len = 2 * SSL3_RANDOM_SIZE;
   if (use_context) {
-    val[currentvalpos] = (contextlen >> 8) & 0xff;
-    currentvalpos++;
-    val[currentvalpos] = contextlen & 0xff;
-    currentvalpos++;
-    if (contextlen > 0 || context != NULL) {
-      memcpy(val + currentvalpos, context, contextlen);
+    if (context_len >= 1u << 16) {
+      OPENSSL_PUT_ERROR(SSL, tls1_export_keying_material, ERR_R_OVERFLOW);
+      return 0;
     }
+    seed_len += 2 + context_len;
+  }
+  uint8_t *seed = OPENSSL_malloc(seed_len);
+  if (seed == NULL) {
+    OPENSSL_PUT_ERROR(SSL, tls1_export_keying_material, ERR_R_MALLOC_FAILURE);
+    return 0;
   }
 
-  /* disallow prohibited labels note that SSL3_RANDOM_SIZE > max(prohibited
-   * label len) = 15, so size of val > max(prohibited label len) = 15 and the
-   * comparisons won't have buffer overflow. */
-  if (memcmp(val, TLS_MD_CLIENT_FINISH_CONST,
-             TLS_MD_CLIENT_FINISH_CONST_SIZE) == 0 ||
-      memcmp(val, TLS_MD_SERVER_FINISH_CONST,
-             TLS_MD_SERVER_FINISH_CONST_SIZE) == 0 ||
-      memcmp(val, TLS_MD_MASTER_SECRET_CONST,
-             TLS_MD_MASTER_SECRET_CONST_SIZE) == 0 ||
-      memcmp(val, TLS_MD_KEY_EXPANSION_CONST,
-             TLS_MD_KEY_EXPANSION_CONST_SIZE) == 0) {
-    goto err1;
+  memcpy(seed, s->s3->client_random, SSL3_RANDOM_SIZE);
+  memcpy(seed + SSL3_RANDOM_SIZE, s->s3->server_random, SSL3_RANDOM_SIZE);
+  if (use_context) {
+    seed[2 * SSL3_RANDOM_SIZE] = (uint8_t)(context_len >> 8);
+    seed[2 * SSL3_RANDOM_SIZE + 1] = (uint8_t)context_len;
+    memcpy(seed + 2 * SSL3_RANDOM_SIZE + 2, context, context_len);
   }
 
-  /* SSL_export_keying_material is not implemented for SSLv3, so passing
-   * everything through the label parameter works. */
-  assert(s->version != SSL3_VERSION);
-  ret = s->enc_method->prf(s, out, olen, s->session->master_key,
-                           s->session->master_key_length, (const char *)val,
-                           vallen, NULL, 0, NULL, 0);
-  goto out;
-
-err1:
-  OPENSSL_PUT_ERROR(SSL, tls1_export_keying_material,
-                    SSL_R_TLS_ILLEGAL_EXPORTER_LABEL);
-  ret = 0;
-  goto out;
-
-err2:
-  OPENSSL_PUT_ERROR(SSL, tls1_export_keying_material, ERR_R_MALLOC_FAILURE);
-  ret = 0;
-
-out:
-  if (val != NULL) {
-    OPENSSL_free(val);
-  }
-
+  int ret = s->enc_method->prf(s, out, out_len, s->session->master_key,
+                               s->session->master_key_length, label, label_len,
+                               seed, seed_len, NULL, 0);
+  OPENSSL_free(seed);
   return ret;
 }
 

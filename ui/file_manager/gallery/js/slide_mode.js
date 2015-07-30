@@ -20,7 +20,6 @@
  * @param {function(function())} toggleMode Function to toggle the Gallery mode.
  * @param {function(string):string} displayStringFunction String formatting
  *     function.
-
  * @constructor
  * @struct
  * @suppress {checkStructDictInheritance}
@@ -517,12 +516,12 @@ SlideMode.prototype.enter = function(
 
   // The latest |leave| call might have left the image animating. Remove it.
   this.unloadImage_();
+  this.errorBanner_.clear();
 
   new Promise(function(fulfill) {
     // If the items are empty, just show the error message.
     if (this.getItemCount_() === 0) {
       this.displayedItem_ = null;
-      //TODO(hirono) Show this message in the grid mode too.
       this.errorBanner_.show('GALLERY_NO_IMAGES');
       fulfill();
       return;
@@ -992,8 +991,11 @@ SlideMode.prototype.itemLoaded_ = function(
     return Math.round(number / (1000 * 1000));
   };
 
-  ImageUtil.metrics.recordSmallCount(ImageUtil.getMetricName('Size.MB'),
-      toMillions(item.getMetadataItem().size));
+  var metadata = item.getMetadataItem();
+  if (metadata) {
+    ImageUtil.metrics.recordSmallCount(ImageUtil.getMetricName('Size.MB'),
+        toMillions(metadata.size));
+  }
 
   var canvas = this.imageView_.getCanvas();
   ImageUtil.metrics.recordSmallCount(ImageUtil.getMetricName('Size.MPix'),
@@ -1017,7 +1019,9 @@ SlideMode.prototype.itemLoaded_ = function(
 
   // For once edited image, disallow the 'overwrite' setting change.
   ImageUtil.setAttribute(this.overwriteOriginalBox_, 'disabled',
-      !this.getSelectedItem().isOriginal() || FileType.isRaw(item.getEntry()));
+      !this.getSelectedItem().isOriginal() ||
+      FileType.isRaw(item.getEntry()) ||
+      GalleryUtil.isOnMTPVolume(item.getEntry(), this.volumeManager_));
 
   var keys = {};
   keys[SlideMode.OVERWRITE_BUBBLE_KEY] = 0;

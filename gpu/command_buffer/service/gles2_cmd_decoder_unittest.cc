@@ -16,12 +16,12 @@
 #include "gpu/command_buffer/service/context_state.h"
 #include "gpu/command_buffer/service/gl_surface_mock.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
-#include "gpu/command_buffer/service/gpu_switches.h"
 #include "gpu/command_buffer/service/image_manager.h"
 #include "gpu/command_buffer/service/mailbox_manager.h"
 #include "gpu/command_buffer/service/mocks.h"
 #include "gpu/command_buffer/service/program_manager.h"
 #include "gpu/command_buffer/service/test_helper.h"
+#include "gpu/config/gpu_switches.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_mock.h"
@@ -88,6 +88,23 @@ void GLES2DecoderManualInitTest::EnableDisableTest(GLenum cap,
     EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
     EXPECT_EQ(GL_NO_ERROR, GetGLError());
   }
+}
+
+void GLES3DecoderTest::SetUp() {
+  base::CommandLine command_line(0, NULL);
+  command_line.AppendSwitch(switches::kEnableUnsafeES3APIs);
+  InitState init;
+  init.gl_version = "OpenGL ES 3.0";
+  init.bind_generates_resource = true;
+  InitDecoderWithCommandLine(init, &command_line);
+}
+
+
+TEST_P(GLES3DecoderTest, Basic) {
+  // Make sure the setup is correct for ES3.
+  EXPECT_TRUE(decoder_->unsafe_es3_apis_enabled());
+  EXPECT_TRUE(feature_info()->validators()->texture_bind_target.IsValid(
+      GL_TEXTURE_3D));
 }
 
 TEST_P(GLES2DecoderTest, GetIntegervCached) {
@@ -1125,17 +1142,30 @@ TEST_P(GLES2DecoderManualInitTest, ImmutableCopyTexImage2D) {
   EXPECT_EQ(GL_INVALID_OPERATION, GetGLError());
 }
 
-TEST_P(GLES2DecoderTest, LoseContextCHROMIUMValidArgs) {
-  EXPECT_CALL(*mock_decoder_, LoseContext(GL_GUILTY_CONTEXT_RESET_ARB))
+TEST_P(GLES2DecoderTest, LoseContextCHROMIUMGuilty) {
+  EXPECT_CALL(*mock_decoder_, MarkContextLost(error::kInnocent))
       .Times(1);
   cmds::LoseContextCHROMIUM cmd;
-  cmd.Init(GL_GUILTY_CONTEXT_RESET_ARB, GL_GUILTY_CONTEXT_RESET_ARB);
+  cmd.Init(GL_GUILTY_CONTEXT_RESET_ARB, GL_INNOCENT_CONTEXT_RESET_ARB);
   EXPECT_EQ(error::kLostContext, ExecuteCmd(cmd));
   EXPECT_EQ(GL_NO_ERROR, GetGLError());
+  EXPECT_TRUE(decoder_->WasContextLost());
+  EXPECT_TRUE(decoder_->WasContextLostByRobustnessExtension());
+}
+
+TEST_P(GLES2DecoderTest, LoseContextCHROMIUMUnkown) {
+  EXPECT_CALL(*mock_decoder_, MarkContextLost(error::kUnknown))
+      .Times(1);
+  cmds::LoseContextCHROMIUM cmd;
+  cmd.Init(GL_UNKNOWN_CONTEXT_RESET_ARB, GL_UNKNOWN_CONTEXT_RESET_ARB);
+  EXPECT_EQ(error::kLostContext, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+  EXPECT_TRUE(decoder_->WasContextLost());
+  EXPECT_TRUE(decoder_->WasContextLostByRobustnessExtension());
 }
 
 TEST_P(GLES2DecoderTest, LoseContextCHROMIUMInvalidArgs0_0) {
-  EXPECT_CALL(*mock_decoder_, LoseContext(_))
+  EXPECT_CALL(*mock_decoder_, MarkContextLost(_))
       .Times(0);
   cmds::LoseContextCHROMIUM cmd;
   cmd.Init(GL_NONE, GL_GUILTY_CONTEXT_RESET_ARB);
@@ -1144,7 +1174,7 @@ TEST_P(GLES2DecoderTest, LoseContextCHROMIUMInvalidArgs0_0) {
 }
 
 TEST_P(GLES2DecoderTest, LoseContextCHROMIUMInvalidArgs1_0) {
-  EXPECT_CALL(*mock_decoder_, LoseContext(_))
+  EXPECT_CALL(*mock_decoder_, MarkContextLost(_))
       .Times(0);
   cmds::LoseContextCHROMIUM cmd;
   cmd.Init(GL_GUILTY_CONTEXT_RESET_ARB, GL_NONE);
@@ -1261,6 +1291,8 @@ INSTANTIATE_TEST_CASE_P(Service,
                         ::testing::Bool());
 
 INSTANTIATE_TEST_CASE_P(Service, GLES2DecoderDoCommandsTest, ::testing::Bool());
+
+INSTANTIATE_TEST_CASE_P(Service, GLES3DecoderTest, ::testing::Bool());
 
 }  // namespace gles2
 }  // namespace gpu

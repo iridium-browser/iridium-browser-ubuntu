@@ -11,8 +11,10 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/prefs/testing_pref_service.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/chromeos/drive/test_util.h"
 #include "chrome/browser/drive/event_logger.h"
 #include "chrome/browser/drive/fake_drive_service.h"
@@ -142,10 +144,11 @@ class JobSchedulerTest : public testing::Test {
     test_util::SetUpTestEntries(fake_drive_service_.get());
     fake_drive_service_->LoadAppListForDriveApi("drive/applist.json");
 
-    scheduler_.reset(new JobScheduler(pref_service_.get(),
-                                      logger_.get(),
-                                      fake_drive_service_.get(),
-                                      base::MessageLoopProxy::current().get()));
+    scheduler_.reset(new JobScheduler(
+        pref_service_.get(),
+        logger_.get(),
+        fake_drive_service_.get(),
+        base::ThreadTaskRunnerHandle::Get().get()));
     scheduler_->SetDisableThrottling(true);
   }
 
@@ -928,7 +931,7 @@ TEST_F(JobSchedulerTest, JobInfoProgress) {
   scoped_ptr<google_apis::FileResource> entry;
 
   scheduler_->UploadNewFile(
-      fake_drive_service_->GetRootResourceId(),
+      fake_drive_service_->GetRootResourceId(), std::string("Hello").size(),
       base::FilePath::FromUTF8Unsafe("drive/new_file.txt"), path, "dummy title",
       "plain/plain", UploadNewFileOptions(), ClientContext(BACKGROUND),
       google_apis::test_util::CreateCopyResultCallback(&upload_error, &entry));
@@ -957,7 +960,7 @@ TEST_F(JobSchedulerTest, CancelPendingJob) {
   google_apis::DriveApiErrorCode error1 = google_apis::DRIVE_OTHER_ERROR;
   scoped_ptr<google_apis::FileResource> entry;
   scheduler_->UploadNewFile(
-      fake_drive_service_->GetRootResourceId(),
+      fake_drive_service_->GetRootResourceId(), std::string("Hello").size(),
       base::FilePath::FromUTF8Unsafe("dummy/path"), upload_path,
       "dummy title 1", "text/plain", UploadNewFileOptions(),
       ClientContext(BACKGROUND),
@@ -971,7 +974,7 @@ TEST_F(JobSchedulerTest, CancelPendingJob) {
   // Start the second job.
   google_apis::DriveApiErrorCode error2 = google_apis::DRIVE_OTHER_ERROR;
   scheduler_->UploadNewFile(
-      fake_drive_service_->GetRootResourceId(),
+      fake_drive_service_->GetRootResourceId(), std::string("Hello").size(),
       base::FilePath::FromUTF8Unsafe("dummy/path"), upload_path,
       "dummy title 2", "text/plain", UploadNewFileOptions(),
       ClientContext(BACKGROUND),
@@ -1001,7 +1004,7 @@ TEST_F(JobSchedulerTest, CancelRunningJob) {
   google_apis::DriveApiErrorCode error1 = google_apis::DRIVE_OTHER_ERROR;
   scoped_ptr<google_apis::FileResource> entry;
   scheduler_->UploadNewFile(
-      fake_drive_service_->GetRootResourceId(),
+      fake_drive_service_->GetRootResourceId(), std::string("Hello").size(),
       base::FilePath::FromUTF8Unsafe("dummy/path"), upload_path,
       "dummy title 1", "text/plain", UploadNewFileOptions(),
       ClientContext(USER_INITIATED),
@@ -1016,7 +1019,7 @@ TEST_F(JobSchedulerTest, CancelRunningJob) {
   fake_drive_service_->set_upload_new_file_cancelable(false);
   google_apis::DriveApiErrorCode error2 = google_apis::DRIVE_OTHER_ERROR;
   scheduler_->UploadNewFile(
-      fake_drive_service_->GetRootResourceId(),
+      fake_drive_service_->GetRootResourceId(), std::string("Hello").size(),
       base::FilePath::FromUTF8Unsafe("dummy/path"), upload_path,
       "dummy title 2", "text/plain", UploadNewFileOptions(),
       ClientContext(USER_INITIATED),

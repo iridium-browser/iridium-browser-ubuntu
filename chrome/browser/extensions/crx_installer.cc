@@ -163,11 +163,11 @@ CrxInstaller::CrxInstaller(base::WeakPtr<ExtensionService> service_weak,
 }
 
 CrxInstaller::~CrxInstaller() {
-  // Make sure the UI is deleted on the ui thread.
-  if (client_) {
-    BrowserThread::DeleteSoon(BrowserThread::UI, FROM_HERE, client_);
-    client_ = NULL;
-  }
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  // Ensure |client_| and |install_checker_| data members are destroyed on the
+  // UI thread. The |client_| dialog has a weak reference as |this| is its
+  // delegate, and |install_checker_| owns WeakPtrs, so must be destroyed on the
+  // same thread that created it.
 }
 
 void CrxInstaller::InstallCrx(const base::FilePath& source_file) {
@@ -666,11 +666,10 @@ void CrxInstaller::InstallUIAbort(bool user_initiated) {
   // and if it is false, this function is called in response to
   // ExtensionInstallPrompt::ConfirmInstall().
   if (!update_from_settings_page_) {
-    std::string histogram_name = user_initiated
-                                     ? "Extensions.Permissions_InstallCancel2"
-                                     : "Extensions.Permissions_InstallAbort2";
+    const char* histogram_name = user_initiated ? "InstallCancel"
+                                                : "InstallAbort";
     ExtensionService::RecordPermissionMessagesHistogram(
-        extension(), histogram_name.c_str());
+        extension(), histogram_name);
 
     NotifyCrxInstallComplete(false);
   }

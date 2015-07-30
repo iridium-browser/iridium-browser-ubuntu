@@ -115,6 +115,9 @@ const char GaiaAuthFetcher::kOAuth2CodeToTokenPairBodyFormat[] =
     "client_secret=%s&"
     "code=%s";
 // static
+const char GaiaAuthFetcher::kOAuth2CodeToTokenPairDeviceIdParam[] =
+    "device_id=%s&device_type=chrome";
+// static
 const char GaiaAuthFetcher::kOAuth2RevokeTokenBodyFormat[] =
     "token=%s";
 // static
@@ -225,16 +228,15 @@ void GaiaAuthFetcher::CancelRequest() {
 }
 
 // static
-net::URLFetcher* GaiaAuthFetcher::CreateGaiaFetcher(
+scoped_ptr<net::URLFetcher> GaiaAuthFetcher::CreateGaiaFetcher(
     net::URLRequestContextGetter* getter,
     const std::string& body,
     const std::string& headers,
     const GURL& gaia_gurl,
     int load_flags,
     net::URLFetcherDelegate* delegate) {
-  net::URLFetcher* to_return = net::URLFetcher::Create(
-      0, gaia_gurl,
-      body.empty() ? net::URLFetcher::GET : net::URLFetcher::POST,
+  scoped_ptr<net::URLFetcher> to_return = net::URLFetcher::Create(
+      0, gaia_gurl, body.empty() ? net::URLFetcher::GET : net::URLFetcher::POST,
       delegate);
   to_return->SetRequestContext(getter);
   to_return->SetUploadData("application/x-www-form-urlencoded", body);
@@ -342,7 +344,8 @@ std::string GaiaAuthFetcher::MakeGetAuthCodeBody(bool include_device_type) {
 
 // static
 std::string GaiaAuthFetcher::MakeGetTokenPairBody(
-    const std::string& auth_code) {
+    const std::string& auth_code,
+    const std::string& device_id) {
   std::string encoded_scope = net::EscapeUrlEncodedData(
       GaiaConstants::kOAuth1LoginScope, true);
   std::string encoded_client_id = net::EscapeUrlEncodedData(
@@ -350,11 +353,15 @@ std::string GaiaAuthFetcher::MakeGetTokenPairBody(
   std::string encoded_client_secret = net::EscapeUrlEncodedData(
       GaiaUrls::GetInstance()->oauth2_chrome_client_secret(), true);
   std::string encoded_auth_code = net::EscapeUrlEncodedData(auth_code, true);
-  return base::StringPrintf(kOAuth2CodeToTokenPairBodyFormat,
-                            encoded_scope.c_str(),
-                            encoded_client_id.c_str(),
-                            encoded_client_secret.c_str(),
-                            encoded_auth_code.c_str());
+  std::string body = base::StringPrintf(
+      kOAuth2CodeToTokenPairBodyFormat, encoded_scope.c_str(),
+      encoded_client_id.c_str(), encoded_client_secret.c_str(),
+      encoded_auth_code.c_str());
+  if (!device_id.empty()) {
+    body += "&" + base::StringPrintf(kOAuth2CodeToTokenPairDeviceIdParam,
+                                     device_id.c_str());
+  }
+  return body;
 }
 
 // static
@@ -410,9 +417,9 @@ void GaiaAuthFetcher::ParseClientLoginResponse(const std::string& data,
   sid->clear();
   lsid->clear();
   token->clear();
-  vector<pair<string, string> > tokens;
+  base::StringPairs tokens;
   base::SplitStringIntoKeyValuePairs(data, '=', '\n', &tokens);
-  for (vector<pair<string, string> >::iterator i = tokens.begin();
+  for (base::StringPairs::iterator i = tokens.begin();
       i != tokens.end(); ++i) {
     if (i->first == "SID") {
       sid->assign(i->second);
@@ -485,9 +492,9 @@ void GaiaAuthFetcher::ParseClientLoginFailure(const std::string& data,
   using std::pair;
   using std::string;
 
-  vector<pair<string, string> > tokens;
+  base::StringPairs tokens;
   base::SplitStringIntoKeyValuePairs(data, '=', '\n', &tokens);
-  for (vector<pair<string, string> >::iterator i = tokens.begin();
+  for (base::StringPairs::iterator i = tokens.begin();
        i != tokens.end(); ++i) {
     if (i->first == kErrorParam) {
       error->assign(i->second);
@@ -593,12 +600,9 @@ void GaiaAuthFetcher::StartClientLogin(
                                       login_token,
                                       login_captcha,
                                       allow_hosted_accounts);
-  fetcher_.reset(CreateGaiaFetcher(getter_,
-                                   request_body_,
-                                   std::string(),
-                                   client_login_gurl_,
-                                   kLoadFlagsIgnoreCookies,
-                                   this));
+  fetcher_ =
+      CreateGaiaFetcher(getter_, request_body_, std::string(),
+                        client_login_gurl_, kLoadFlagsIgnoreCookies, this);
   fetch_pending_ = true;
   fetcher_->Start();
 }
@@ -611,12 +615,9 @@ void GaiaAuthFetcher::StartIssueAuthToken(const std::string& sid,
   DVLOG(1) << "Starting IssueAuthToken for: " << service;
   requested_service_ = service;
   request_body_ = MakeIssueAuthTokenBody(sid, lsid, service);
-  fetcher_.reset(CreateGaiaFetcher(getter_,
-                                   request_body_,
-                                   std::string(),
-                                   issue_auth_token_gurl_,
-                                   kLoadFlagsIgnoreCookies,
-                                   this));
+  fetcher_ =
+      CreateGaiaFetcher(getter_, request_body_, std::string(),
+                        issue_auth_token_gurl_, kLoadFlagsIgnoreCookies, this);
   fetch_pending_ = true;
   fetcher_->Start();
 }
@@ -630,12 +631,9 @@ void GaiaAuthFetcher::StartLsoForOAuthLoginTokenExchange(
   client_login_to_oauth2_gurl_ =
       GaiaUrls::GetInstance()->client_login_to_oauth2_url();
 
-  fetcher_.reset(CreateGaiaFetcher(getter_,
-                                   request_body_,
-                                   MakeGetAuthCodeHeader(auth_token),
-                                   client_login_to_oauth2_gurl_,
-                                   kLoadFlagsIgnoreCookies,
-                                   this));
+  fetcher_ = CreateGaiaFetcher(
+      getter_, request_body_, MakeGetAuthCodeHeader(auth_token),
+      client_login_to_oauth2_gurl_, kLoadFlagsIgnoreCookies, this);
   fetch_pending_ = true;
   fetcher_->Start();
 }
@@ -645,12 +643,9 @@ void GaiaAuthFetcher::StartRevokeOAuth2Token(const std::string& auth_token) {
 
   DVLOG(1) << "Starting OAuth2 token revocation";
   request_body_ = MakeRevokeTokenBody(auth_token);
-  fetcher_.reset(CreateGaiaFetcher(getter_,
-                                   request_body_,
-                                   std::string(),
-                                   oauth2_revoke_gurl_,
-                                   kLoadFlagsIgnoreCookies,
-                                   this));
+  fetcher_ =
+      CreateGaiaFetcher(getter_, request_body_, std::string(),
+                        oauth2_revoke_gurl_, kLoadFlagsIgnoreCookies, this);
   fetch_pending_ = true;
   fetcher_->Start();
 }
@@ -682,28 +677,28 @@ void GaiaAuthFetcher::StartCookieForOAuthLoginTokenExchangeWithDeviceId(
         base::StringPrintf(kDeviceIdHeaderFormat, device_id.c_str());
   }
 
-  fetcher_.reset(CreateGaiaFetcher(getter_,
-                                   request_body_,
-                                   device_id_header,
-                                   client_login_to_oauth2_gurl_,
-                                   net::LOAD_NORMAL,
-                                   this));
+  fetcher_ =
+      CreateGaiaFetcher(getter_, request_body_, device_id_header,
+                        client_login_to_oauth2_gurl_, net::LOAD_NORMAL, this);
   fetch_pending_ = true;
   fetcher_->Start();
 }
 
 void GaiaAuthFetcher::StartAuthCodeForOAuth2TokenExchange(
     const std::string& auth_code) {
+  StartAuthCodeForOAuth2TokenExchangeWithDeviceId(auth_code, std::string());
+}
+
+void GaiaAuthFetcher::StartAuthCodeForOAuth2TokenExchangeWithDeviceId(
+    const std::string& auth_code,
+    const std::string& device_id) {
   DCHECK(!fetch_pending_) << "Tried to fetch two things at once!";
 
   DVLOG(1) << "Starting OAuth token pair fetch";
-  request_body_ = MakeGetTokenPairBody(auth_code);
-  fetcher_.reset(CreateGaiaFetcher(getter_,
-                                   request_body_,
-                                   std::string(),
-                                   oauth2_token_gurl_,
-                                   kLoadFlagsIgnoreCookies,
-                                   this));
+  request_body_ = MakeGetTokenPairBody(auth_code, device_id);
+  fetcher_ =
+      CreateGaiaFetcher(getter_, request_body_, std::string(),
+                        oauth2_token_gurl_, kLoadFlagsIgnoreCookies, this);
   fetch_pending_ = true;
   fetcher_->Start();
 }
@@ -713,12 +708,9 @@ void GaiaAuthFetcher::StartGetUserInfo(const std::string& lsid) {
 
   DVLOG(1) << "Starting GetUserInfo for lsid=" << lsid;
   request_body_ = MakeGetUserInfoBody(lsid);
-  fetcher_.reset(CreateGaiaFetcher(getter_,
-                                   request_body_,
-                                   std::string(),
-                                   get_user_info_gurl_,
-                                   kLoadFlagsIgnoreCookies,
-                                   this));
+  fetcher_ =
+      CreateGaiaFetcher(getter_, request_body_, std::string(),
+                        get_user_info_gurl_, kLoadFlagsIgnoreCookies, this);
   fetch_pending_ = true;
   fetcher_->Start();
 }
@@ -740,12 +732,8 @@ void GaiaAuthFetcher::StartMergeSession(const std::string& uber_token,
   std::string continue_url("http://www.google.com");
   request_body_ = MakeMergeSessionBody(uber_token, external_cc_result,
       continue_url, source_);
-  fetcher_.reset(CreateGaiaFetcher(getter_,
-                                   request_body_,
-                                   std::string(),
-                                   merge_session_gurl_,
-                                   net::LOAD_NORMAL,
-                                   this));
+  fetcher_ = CreateGaiaFetcher(getter_, request_body_, std::string(),
+                               merge_session_gurl_, net::LOAD_NORMAL, this);
   fetch_pending_ = true;
   fetcher_->Start();
 }
@@ -758,12 +746,8 @@ void GaiaAuthFetcher::StartTokenFetchForUberAuthExchange(
            << access_token;
   std::string authentication_header =
       base::StringPrintf(kOAuthHeaderFormat, access_token.c_str());
-  fetcher_.reset(CreateGaiaFetcher(getter_,
-                                   std::string(),
-                                   authentication_header,
-                                   uberauth_token_gurl_,
-                                   net::LOAD_NORMAL,
-                                   this));
+  fetcher_ = CreateGaiaFetcher(getter_, std::string(), authentication_header,
+                               uberauth_token_gurl_, net::LOAD_NORMAL, this);
   fetch_pending_ = true;
   fetcher_->Start();
 }
@@ -775,12 +759,8 @@ void GaiaAuthFetcher::StartOAuthLogin(const std::string& access_token,
   request_body_ = MakeOAuthLoginBody(service, source_);
   std::string authentication_header =
       base::StringPrintf(kOAuth2BearerHeaderFormat, access_token.c_str());
-  fetcher_.reset(CreateGaiaFetcher(getter_,
-                                   request_body_,
-                                   authentication_header,
-                                   oauth_login_gurl_,
-                                   net::LOAD_NORMAL,
-                                   this));
+  fetcher_ = CreateGaiaFetcher(getter_, request_body_, authentication_header,
+                               oauth_login_gurl_, net::LOAD_NORMAL, this);
   fetch_pending_ = true;
   fetcher_->Start();
 }
@@ -788,12 +768,10 @@ void GaiaAuthFetcher::StartOAuthLogin(const std::string& access_token,
 void GaiaAuthFetcher::StartListAccounts() {
   DCHECK(!fetch_pending_) << "Tried to fetch two things at once!";
 
-  fetcher_.reset(CreateGaiaFetcher(getter_,
-                                   " ",  // To force an HTTP POST.
-                                   "Origin: https://www.google.com",
-                                   list_accounts_gurl_,
-                                   net::LOAD_NORMAL,
-                                   this));
+  fetcher_ = CreateGaiaFetcher(getter_,
+                               " ",  // To force an HTTP POST.
+                               "Origin: https://www.google.com",
+                               list_accounts_gurl_, net::LOAD_NORMAL, this);
   fetch_pending_ = true;
   fetcher_->Start();
 }
@@ -801,12 +779,9 @@ void GaiaAuthFetcher::StartListAccounts() {
 void GaiaAuthFetcher::StartGetCheckConnectionInfo() {
   DCHECK(!fetch_pending_) << "Tried to fetch two things at once!";
 
-  fetcher_.reset(CreateGaiaFetcher(getter_,
-                                   std::string(),
-                                   std::string(),
-                                   get_check_connection_info_url_,
-                                   kLoadFlagsIgnoreCookies,
-                                   this));
+  fetcher_ = CreateGaiaFetcher(getter_, std::string(), std::string(),
+                               get_check_connection_info_url_,
+                               kLoadFlagsIgnoreCookies, this);
   fetch_pending_ = true;
   fetcher_->Start();
 }
@@ -816,12 +791,8 @@ void GaiaAuthFetcher::StartListIDPSessions(const std::string& scopes,
   DCHECK(!fetch_pending_) << "Tried to fetch two things at once!";
 
   request_body_ = MakeListIDPSessionsBody(scopes, domain);
-  fetcher_.reset(CreateGaiaFetcher(getter_,
-                                   request_body_,
-                                   std::string(),
-                                   oauth2_iframe_url_,
-                                   net::LOAD_NORMAL,
-                                   this));
+  fetcher_ = CreateGaiaFetcher(getter_, request_body_, std::string(),
+                               oauth2_iframe_url_, net::LOAD_NORMAL, this);
   requested_service_ = kListIdpServiceRequested;
   fetch_pending_ = true;
   fetcher_->Start();
@@ -833,12 +804,8 @@ void GaiaAuthFetcher::StartGetTokenResponse(const std::string& scopes,
   DCHECK(!fetch_pending_) << "Tried to fetch two things at once!";
 
   request_body_ = MakeGetTokenResponseBody(scopes, domain, login_hint);
-  fetcher_.reset(CreateGaiaFetcher(getter_,
-                                   request_body_,
-                                   std::string(),
-                                   oauth2_iframe_url_,
-                                   net::LOAD_NORMAL,
-                                   this));
+  fetcher_ = CreateGaiaFetcher(getter_, request_body_, std::string(),
+                               oauth2_iframe_url_, net::LOAD_NORMAL, this);
 
   requested_service_ = kGetTokenResponseRequested;
   fetch_pending_ = true;

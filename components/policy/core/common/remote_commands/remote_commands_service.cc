@@ -9,7 +9,7 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/time/clock.h"
+#include "base/time/tick_clock.h"
 #include "base/time/time.h"
 #include "components/policy/core/common/cloud/cloud_policy_client.h"
 #include "components/policy/core/common/remote_commands/remote_commands_factory.h"
@@ -22,6 +22,7 @@ RemoteCommandsService::RemoteCommandsService(
     scoped_ptr<RemoteCommandsFactory> factory,
     CloudPolicyClient* client)
     : factory_(factory.Pass()), client_(client), weak_factory_(this) {
+  DCHECK(client_);
   queue_.AddObserver(this);
 }
 
@@ -30,6 +31,9 @@ RemoteCommandsService::~RemoteCommandsService() {
 }
 
 bool RemoteCommandsService::FetchRemoteCommands() {
+  if (!client_->is_registered())
+    return false;
+
   if (command_fetch_in_progress_) {
     has_enqueued_fetch_request_ = true;
     return false;
@@ -65,7 +69,8 @@ bool RemoteCommandsService::FetchRemoteCommands() {
   return true;
 }
 
-void RemoteCommandsService::SetClockForTesting(scoped_ptr<base::Clock> clock) {
+void RemoteCommandsService::SetClockForTesting(
+    scoped_ptr<base::TickClock> clock) {
   queue_.SetClockForTesting(clock.Pass());
 }
 
@@ -86,7 +91,7 @@ void RemoteCommandsService::EnqueueCommand(
 
   scoped_ptr<RemoteCommandJob> job = factory_->BuildJobForType(command.type());
 
-  if (!job || !job->Init(command)) {
+  if (!job || !job->Init(queue_.GetNowTicks(), command)) {
     em::RemoteCommandResult ignored_result;
     ignored_result.set_result(
         em::RemoteCommandResult_ResultType_RESULT_IGNORED);
@@ -112,10 +117,14 @@ void RemoteCommandsService::OnJobFinished(RemoteCommandJob* command) {
   em::RemoteCommandResult result;
   result.set_unique_id(command->unique_id());
   result.set_timestamp((command->execution_started_time() -
-                        base::Time::UnixEpoch()).InMilliseconds());
+                        base::TimeTicks::UnixEpoch()).InMilliseconds());
 
-  if (command->status() == RemoteCommandJob::SUCCEEDED) {
-    result.set_result(em::RemoteCommandResult_ResultType_RESULT_SUCCESS);
+  if (command->status() == RemoteCommandJob::SUCCEEDED ||
+      command->status() == RemoteCommandJob::FAILED) {
+    if (command->status() == RemoteCommandJob::SUCCEEDED)
+      result.set_result(em::RemoteCommandResult_ResultType_RESULT_SUCCESS);
+    else
+      result.set_result(em::RemoteCommandResult_ResultType_RESULT_FAILURE);
     const scoped_ptr<std::string> result_payload = command->GetResultPayload();
     if (result_payload)
       result.set_payload(*result_payload);
@@ -123,7 +132,7 @@ void RemoteCommandsService::OnJobFinished(RemoteCommandJob* command) {
              command->status() == RemoteCommandJob::INVALID) {
     result.set_result(em::RemoteCommandResult_ResultType_RESULT_IGNORED);
   } else {
-    result.set_result(em::RemoteCommandResult_ResultType_RESULT_FAILURE);
+    NOTREACHED();
   }
 
   unsent_results_.push_back(result);

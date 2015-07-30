@@ -15,7 +15,7 @@
 const char kFamilyApiUrl[] = "https://www.googleapis.com/kidsmanagement/v1/";
 const char kGetFamilyProfileApiSuffix[] = "families/mine?alt=json";
 const char kGetFamilyMembersApiSuffix[] = "families/mine/members?alt=json";
-const char kScope[] = "https://www.googleapis.com/auth/kid.family";
+const char kScope[] = "https://www.googleapis.com/auth/kid.family.readonly";
 const char kAuthorizationHeaderFormat[] = "Authorization: Bearer %s";
 const int kNumRetries = 1;
 
@@ -167,8 +167,7 @@ void FamilyInfoFetcher::OnGetTokenSuccess(
 
   GURL url(kFamilyApiUrl + request_suffix_);
   const int id = 0;
-  url_fetcher_.reset(
-      net::URLFetcher::Create(id, url, request_type_, this));
+  url_fetcher_ = net::URLFetcher::Create(id, url, request_type_, this);
 
   url_fetcher_->SetRequestContext(request_context_);
   url_fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |

@@ -110,6 +110,10 @@ class ProfileManager : public base::NonThreadSafe,
   // profile.
   base::FilePath GetLastUsedProfileDir(const base::FilePath& user_data_dir);
 
+  // Get the name of the last used profile, or if that's undefined, the default
+  // profile.
+  std::string GetLastUsedProfileName();
+
   // Get the Profiles which are currently open, i.e., have open browsers, or
   // were open the last time Chrome was running. The Profiles appear in the
   // order they were opened. The last used profile will be on the list, but its
@@ -168,14 +172,12 @@ class ProfileManager : public base::NonThreadSafe,
   void ScheduleProfileForDeletion(const base::FilePath& profile_dir,
                                   const CreateCallback& callback);
 
-  // Called on start-up if there are any stale ephemeral profiles to be deleted.
-  // This can be the case if the browser has crashed and the clean-up code had
-  // no chance to run then.
-  static void CleanUpStaleProfiles(
-      const std::vector<base::FilePath>& profile_paths);
-
   // Autoloads profiles if they are running background apps.
   void AutoloadProfiles();
+
+  // Checks if any ephemeral profiles are left behind (e.g. because of a browser
+  // crash) and schedule them for deletion.
+  void CleanUpEphemeralProfiles();
 
   // Initializes user prefs of |profile|. This includes profile name and
   // avatar values.
@@ -284,8 +286,9 @@ class ProfileManager : public base::NonThreadSafe,
   // Adds |profile| to the profile info cache if it hasn't been added yet.
   void AddProfileToCache(Profile* profile);
 
-  // Apply settings for (desktop) Guest User profile.
-  void SetGuestProfilePrefs(Profile* profile);
+  // Apply settings for profiles created by the system rather than users: The
+  // (desktop) Guest User profile and (desktop) System Profile.
+  void SetNonPersonalProfilePrefs(Profile* profile);
 
   // For ChromeOS, determines if profile should be otr.
   bool ShouldGoOffTheRecord(Profile* profile);
@@ -329,6 +332,13 @@ class ProfileManager : public base::NonThreadSafe,
       Profile* loaded_profile,
       Profile::CreateStatus status);
 
+  // Object to cache various information about profiles. Contains information
+  // about every profile which has been created for this instance of Chrome,
+  // if it has not been explicitly deleted. It must be destroyed after
+  // |profiles_info_| because ~ProfileInfo can trigger a chain of events leading
+  // to an access to this member.
+  scoped_ptr<ProfileInfoCache> profile_info_cache_;
+
   content::NotificationRegistrar registrar_;
 
   // The path to the user data directory (DIR_USER_DATA).
@@ -348,11 +358,6 @@ class ProfileManager : public base::NonThreadSafe,
   // objects in a running instance of Chrome.
   typedef std::map<base::FilePath, linked_ptr<ProfileInfo> > ProfilesInfoMap;
   ProfilesInfoMap profiles_info_;
-
-  // Object to cache various information about profiles. Contains information
-  // about every profile which has been created for this instance of Chrome,
-  // if it has not been explicitly deleted.
-  scoped_ptr<ProfileInfoCache> profile_info_cache_;
 
   // Manages the process of creating, deleteing and updating Desktop shortcuts.
   scoped_ptr<ProfileShortcutManager> profile_shortcut_manager_;

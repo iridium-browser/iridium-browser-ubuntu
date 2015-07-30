@@ -2,7 +2,6 @@
 <translation id="3595596368722241419">Pil tam dolu</translation>
 <translation id="6895424601869865703"><ph name="GIVEN_NAME"/> için bir hesap ekle</translation>
 <translation id="1270290102613614947">Dokunmatik klavye devre dışı</translation>
-<translation id="1057289296854808272">Döndürme açık (Değiştirmek için buraya hafifçe vurun)</translation>
 <translation id="5548285847212963613">&quot;<ph name="EXTENSION_NAME"/>&quot; uzantısı bu ağa bağlanmaya yardımcı olabilir.</translation>
 <translation id="7814236020522506259"><ph name="HOUR"/> ve <ph name="MINUTE"/></translation>
 <translation id="30155388420722288">Taşma Düğmesi</translation>
@@ -32,6 +31,7 @@
 <translation id="2297568595583585744">Durum tepsisi</translation>
 <translation id="2248649616066688669">Chromebook'unuz harici bir ekrana bağlıyken, kapağı kapalı olsa da cihazınızı kullanmaya devam edebilirsiniz.</translation>
 <translation id="2946640296642327832">Bluetooth'u etkinleştir</translation>
+<translation id="5537725057119320332">Yayınla</translation>
 <translation id="6459472438155181876">Ekran şuraya genişletiliyor: <ph name="DISPLAY_NAME"/></translation>
 <translation id="8206859287963243715">Cep telefonu</translation>
 <translation id="6596816719288285829">IP Adresi</translation>
@@ -40,7 +40,6 @@
 Geçiş yapmak için ÜstKrktr + Alt tuşlarına basın.</translation>
 <translation id="6043994281159824495">Şimdi çıkış yap</translation>
 <translation id="2127372758936585790">Düşük güçlü şarj cihazı</translation>
-<translation id="4625920103690741805">Döndürme kilitli (Değiştirmek için buraya hafifçe vurun)</translation>
 <translation id="3799026279081545374">Şarj cihazınız sorunlu olabilir. ABD'de yaşıyorsanız yardım almak ve cihazı yenisiyle değiştirmek için lütfen 866-628-1371 numaralı telefonu arayın. İngiltere'de yaşıyorsanız 0800-026-0613 numaralı telefonu, İrlanda'da yaşıyorsanız 1-800-832-664 numaralı telefonu, Kanada'da yaşıyorsanız 866-628-1372 numaralı telefonu, Avustralya'da yaşıyorsanız lütfen 1-800-067-460 numaralı telefonu arayın.</translation>
 <translation id="3891340733213178823">Oturumu kapatmak için Ctrl+ÜstKrktr+Q tuşlarına iki defa basın.</translation>
 <translation id="5871632337994001636">Cihazları yönet...</translation>
@@ -73,6 +72,7 @@ Geçiş yapmak için ÜstKrktr + Alt tuşlarına basın.</translation>
 <translation id="2509468283778169019">CAPS LOCK açık</translation>
 <translation id="3892641579809465218">Dahili Ekran</translation>
 <translation id="7823564328645135659">Ayarlarınız senkronize edildikten sonra &quot;<ph name="FROM_LOCALE"/>&quot; olan dil &quot;<ph name="TO_LOCALE"/>&quot; olarak değiştirildi.</translation>
+<translation id="7113420380180868673">$1 yayınlanıyor</translation>
 <translation id="3606978283550408104">Braille ekranı bağlandı.</translation>
 <translation id="8654520615680304441">Kablosuz'u aç...</translation>
 <translation id="4421231901400348175">Ekranınızın kontrolü, Uzaktan Yardım kullanılarak <ph name="HELPER_NAME"/> ile paylaşılıyor.</translation>
@@ -97,15 +97,18 @@ Geçiş yapmak için ÜstKrktr + Alt tuşlarına basın.</translation>
 <translation id="3626637461649818317">%<ph name="PERCENTAGE"/> kaldı</translation>
 <translation id="9089416786594320554">Giriş yöntemleri</translation>
 <translation id="2700058918926273959">Oturumun süresi <ph name="SESSION_TIME_REMAINING"/> içinde bitiyor. Süre dolduğunda oturumunuz kapatılacaktır.</translation>
+<translation id="5807965672380739016">Masaüstünü şuraya yayınla:</translation>
 <translation id="6247708409970142803">%<ph name="PERCENTAGE"/></translation>
 <translation id="3963445509666917109">Hoparlör (Dahili)</translation>
 <translation id="1747827819627189109">Dokunmatik klavye etkin</translation>
+<translation id="2208323208084708176">Birleştirilmiş masaüstü modu</translation>
 <translation id="2825619548187458965">Raf</translation>
 <translation id="2614835198358683673">Chromebook'unuz açıkken şarj edilemeyebilir. Orijinal şarj cihazını kullanmayı düşünün.</translation>
 <translation id="4430019312045809116">Ses</translation>
 <translation id="544691375626129091">Mevcut tüm kullanıcılar zaten bu oturuma eklenmiş.</translation>
 <translation id="1383876407941801731">Ara</translation>
 <translation id="2204305834655267233">Ağ Bilgisi</translation>
+<translation id="137180024469554212">Döndürme kilidini devre dışı bırak</translation>
 <translation id="1621499497873603021">Pilin boşalması için kalan süre, <ph name="TIME_LEFT"/></translation>
 <translation id="5980301590375426705">Misafir oturumundan çık</translation>
 <translation id="8308637677604853869">Önceki menü</translation>
@@ -113,6 +116,7 @@ Geçiş yapmak için ÜstKrktr + Alt tuşlarına basın.</translation>
 <translation id="3625258641415618104">Ekran görüntüleri devre dışı</translation>
 <translation id="1346748346194534595">Sağa</translation>
 <translation id="8528322925433439945">Mobile...</translation>
+<translation id="3157169093162779309">Döndürme kilidini etkinleştir</translation>
 <translation id="8428213095426709021">Ayarlar</translation>
 <translation id="2372145515558759244">Uygulamalar senkronize ediliyor...</translation>
 <translation id="1987317783729300807">Hesaplar</translation>
@@ -123,6 +127,7 @@ Geçiş yapmak için ÜstKrktr + Alt tuşlarına basın.</translation>
 <translation id="4527045527269911712">&quot;<ph name="DEVICE_NAME"/>&quot; adlı Bluetooth cihaz eşleme izni istiyor.</translation>
 <translation id="8814190375133053267">Kablosuz</translation>
 <translation id="1923539912171292317">Otomatik tıklamalar</translation>
+<translation id="703171847531699602">Yayın cihazı yok</translation>
 <translation id="2692809339924654275"><ph name="BLUETOOTH"/>: Bağlanıyor...</translation>
 <translation id="6062360702481658777"><ph name="LOGOUT_TIME_LEFT"/> içinde otomatik olarak çıkış yapacaksınız.</translation>
 <translation id="252373100621549798">Bilinmeyen Görünüm</translation>
@@ -132,6 +137,7 @@ Geçiş yapmak için ÜstKrktr + Alt tuşlarına basın.</translation>
 <translation id="2761704814324807722">Durum tepsisi, saat: <ph name="TIME"/>, <ph name="BATTERY"/></translation>
 <translation id="3784455785234192852">Kilitle</translation>
 <translation id="2805756323405976993">Uygulamalar</translation>
+<translation id="8697119993436624257">Yeni giriş kullanıcı arayüzü KAPALI</translation>
 <translation id="2872961005593481000">Kapat</translation>
 <translation id="3433830597744061105">Hesapları yönet</translation>
 <translation id="742594950370306541">Kamera kullanımda.</translation>
@@ -150,6 +156,7 @@ Geçiş yapmak için ÜstKrktr + Alt tuşlarına basın.</translation>
 <translation id="5977415296283489383">Kulaklık</translation>
 <translation id="225680501294068881">Cihazlar taranıyor...</translation>
 <translation id="5597451508971090205"><ph name="SHORT_WEEKDAY"/>, <ph name="DATE"/></translation>
+<translation id="3527846106059622359">Yeni giriş kullanıcı arayüzü AÇIK</translation>
 <translation id="5978382165065462689">Ekranınızın kontrolü Uzaktan Yardım kullanılarak paylaşılıyor.</translation>
 <translation id="737451040872859086">Mikrofon (Dahili)</translation>
 <translation id="2475982808118771221">Bir hata oluştu</translation>
@@ -169,7 +176,6 @@ Geçiş yapmak için ÜstKrktr + Alt tuşlarına basın.</translation>
 <translation id="112308213915226829">Rafı otomatik gizle</translation>
 <translation id="7573962313813535744">Yuva modu</translation>
 <translation id="2792498699870441125">Alt+Arama</translation>
-<translation id="8660803626959853127"><ph name="COUNT"/> dosya senkronize ediliyor</translation>
 <translation id="5958529069007801266">Denetlenen kullanıcı</translation>
 <translation id="3709443003275901162">9+</translation>
 <translation id="639644700271529076">CAPS LOCK kapalı</translation>
@@ -189,6 +195,7 @@ Geçiş yapmak için ÜstKrktr + Alt tuşlarına basın.</translation>
 <translation id="6165508094623778733">Daha fazla bilgi edinin</translation>
 <translation id="7168224885072002358"><ph name="TIMEOUT_SECONDS"/> saniye içinde eski çözünürlüğe dönülüyor</translation>
 <translation id="743058460480092004">Kamera ve mikrofon kullanımda.</translation>
+<translation id="6550675742724504774">Seçenekler</translation>
 <translation id="6406704438230478924">altgr</translation>
 <translation id="3573179567135747900">Tekrar &quot;<ph name="FROM_LOCALE"/>&quot; ayarına dön (yeniden başlatmak gerekir)</translation>
 <translation id="8103386449138765447">SMS mesajları: <ph name="MESSAGE_COUNT"/></translation>
@@ -204,6 +211,7 @@ Devre dışı bırakmak için Ctrl+Alt+Z tuşlarına basın.</translation>
 <translation id="3009178788565917040">Çıkış</translation>
 <translation id="3147142846278915599">Launcher (uygulamalar senkronize ediliyor...)</translation>
 <translation id="6911468394164995108">Başka ağa katıl...</translation>
+<translation id="4373966964907728675">Masaüstü yayınlanıyor</translation>
 <translation id="3678715477168044796"><ph name="DISPLAY_NAME"/>: <ph name="ANNOTATION"/></translation>
 <translation id="412065659894267608">Tam dolana kadar <ph name="HOUR"/> sa <ph name="MINUTE"/> dk var</translation>
 <translation id="3077734595579995578">üstkrktr</translation>

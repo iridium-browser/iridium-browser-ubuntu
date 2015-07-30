@@ -12,8 +12,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "content/browser/devtools/ipc_devtools_agent_host.h"
 #include "content/common/content_export.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_observer.h"
 
 namespace cc {
@@ -45,8 +43,7 @@ namespace tracing { class TracingHandler; }
 
 class CONTENT_EXPORT RenderFrameDevToolsAgentHost
     : public IPCDevToolsAgentHost,
-      private WebContentsObserver,
-      public NotificationObserver {
+      private WebContentsObserver {
  public:
   static void AddAllAgentHosts(DevToolsAgentHost::List* result);
 
@@ -81,7 +78,7 @@ class CONTENT_EXPORT RenderFrameDevToolsAgentHost
 
   // IPCDevToolsAgentHost overrides.
   void SendMessageToAgent(IPC::Message* msg) override;
-  void OnClientAttached() override;
+  void OnClientAttached(bool reattached) override;
   void OnClientDetached() override;
 
   // WebContentsObserver overrides.
@@ -90,24 +87,17 @@ class CONTENT_EXPORT RenderFrameDevToolsAgentHost
   void RenderFrameHostChanged(RenderFrameHost* old_host,
                               RenderFrameHost* new_host) override;
   void FrameDeleted(RenderFrameHost* rfh) override;
+  void RenderFrameDeleted(RenderFrameHost* rfh) override;
   void RenderProcessGone(base::TerminationStatus status) override;
   bool OnMessageReceived(const IPC::Message& message,
                          RenderFrameHost* render_frame_host) override;
   bool OnMessageReceived(const IPC::Message& message) override;
   void DidAttachInterstitialPage() override;
   void DidDetachInterstitialPage() override;
-  void TitleWasSet(NavigationEntry* entry, bool explicit_set) override;
-  void NavigationEntryCommitted(
-      const LoadCommittedDetails& load_details) override;
   void DidCommitProvisionalLoadForFrame(
       RenderFrameHost* render_frame_host,
       const GURL& url,
       ui::PageTransition transition_type) override;
-
-  // NotificationObserver overrides:
-  void Observe(int type,
-               const NotificationSource& source,
-               const NotificationDetails& details) override;
 
   void DisconnectRenderFrameHost();
   void ConnectRenderFrameHost(RenderFrameHost* rvh);
@@ -145,7 +135,6 @@ class CONTENT_EXPORT RenderFrameDevToolsAgentHost
 #if defined(OS_ANDROID)
   scoped_ptr<PowerSaveBlockerImpl> power_save_blocker_;
 #endif
-  NotificationRegistrar registrar_;
   bool reattaching_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderFrameDevToolsAgentHost);

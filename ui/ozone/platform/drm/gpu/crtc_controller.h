@@ -12,14 +12,14 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "ui/ozone/ozone_export.h"
+#include "ui/ozone/platform/drm/common/scoped_drm_types.h"
 #include "ui/ozone/platform/drm/gpu/hardware_display_plane_manager.h"
 #include "ui/ozone/platform/drm/gpu/overlay_plane.h"
-#include "ui/ozone/platform/drm/gpu/scoped_drm_types.h"
 
 namespace ui {
 
 class DrmDevice;
-class PageFlipObserver;
+class PageFlipRequest;
 
 // Wrapper around a CRTC.
 //
@@ -39,7 +39,6 @@ class OZONE_EXPORT CrtcController
   uint32_t connector() const { return connector_; }
   const scoped_refptr<DrmDevice>& drm() const { return drm_; }
   bool is_disabled() const { return is_disabled_; }
-  bool page_flip_pending() const { return page_flip_pending_; }
   uint64_t time_of_last_flip() const { return time_of_last_flip_; }
 
   // Perform the initial modesetting operation using |plane| as the buffer for
@@ -51,7 +50,8 @@ class OZONE_EXPORT CrtcController
 
   // Schedule a page flip event and present the overlays in |planes|.
   bool SchedulePageFlip(HardwareDisplayPlaneList* plane_list,
-                        const OverlayPlaneList& planes);
+                        const OverlayPlaneList& planes,
+                        scoped_refptr<PageFlipRequest> page_flip_request);
 
   // Called if the page flip for this CRTC fails after being scheduled.
   void PageFlipFailed();
@@ -67,13 +67,13 @@ class OZONE_EXPORT CrtcController
                        unsigned int useconds);
 
   bool SetCursor(const scoped_refptr<ScanoutBuffer>& buffer);
-  bool UnsetCursor();
   bool MoveCursor(const gfx::Point& location);
 
-  void AddObserver(PageFlipObserver* observer);
-  void RemoveObserver(PageFlipObserver* observer);
-
  private:
+  bool ResetCursor();
+
+  void SignalPageFlipRequest();
+
   scoped_refptr<DrmDevice> drm_;
 
   HardwareDisplayPlaneManager* overlay_plane_manager_;  // Not owned.
@@ -83,6 +83,7 @@ class OZONE_EXPORT CrtcController
   OverlayPlaneList current_planes_;
   OverlayPlaneList pending_planes_;
   scoped_refptr<ScanoutBuffer> cursor_buffer_;
+  scoped_refptr<PageFlipRequest> page_flip_request_;
 
   uint32_t crtc_;
 
@@ -95,14 +96,8 @@ class OZONE_EXPORT CrtcController
   // is set to false. Otherwise it is true.
   bool is_disabled_;
 
-  // True if a successful SchedulePageFlip occurred. Reset to false by a modeset
-  // operation or when the OnPageFlipEvent callback is triggered.
-  bool page_flip_pending_;
-
   // The time of the last page flip event as reported by the kernel callback.
   uint64_t time_of_last_flip_;
-
-  ObserverList<PageFlipObserver> observers_;
 
   DISALLOW_COPY_AND_ASSIGN(CrtcController);
 };

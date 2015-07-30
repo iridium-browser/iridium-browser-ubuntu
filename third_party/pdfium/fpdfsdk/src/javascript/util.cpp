@@ -38,11 +38,11 @@ BEGIN_JS_STATIC_PROP(CJS_Util)
 END_JS_STATIC_PROP()
 
 BEGIN_JS_STATIC_METHOD(CJS_Util)
-	JS_STATIC_METHOD_ENTRY(printd, 3)
-	JS_STATIC_METHOD_ENTRY(printf, 20)
-	JS_STATIC_METHOD_ENTRY(printx, 2)
-	JS_STATIC_METHOD_ENTRY(scand, 2)
-	JS_STATIC_METHOD_ENTRY(byteToChar, 1)
+	JS_STATIC_METHOD_ENTRY(printd)
+	JS_STATIC_METHOD_ENTRY(printf)
+	JS_STATIC_METHOD_ENTRY(printx)
+	JS_STATIC_METHOD_ENTRY(scand)
+	JS_STATIC_METHOD_ENTRY(byteToChar)
 END_JS_STATIC_METHOD()
 
 IMPLEMENT_JS_CLASS(CJS_Util,util)
@@ -142,7 +142,7 @@ FX_BOOL util::printf(IFXJS_Context* cc, const CJS_Parameters& params, CJS_Value&
 	int iSize = params.size();
 	if (iSize < 1)
 		return FALSE;
-	std::wstring  c_ConvChar((const wchar_t*)(FX_LPCWSTR)params[0].operator CFX_WideString());
+	std::wstring c_ConvChar(params[0].ToCFXWideString().c_str());
 	std::vector<std::wstring> c_strConvers;
 	int iOffset = 0;
 	int iOffend = 0;
@@ -182,13 +182,13 @@ FX_BOOL util::printf(IFXJS_Context* cc, const CJS_Parameters& params, CJS_Value&
 		switch (ParstDataType(&c_strFormat))
 		{
 			case UTIL_INT:
-				strSegment.Format(c_strFormat.c_str(),(int)params[iIndex]);
+				strSegment.Format(c_strFormat.c_str(), params[iIndex].ToInt());
 				break;
 			case UTIL_DOUBLE:
-				strSegment.Format(c_strFormat.c_str(),(double)params[iIndex]);
+				strSegment.Format(c_strFormat.c_str(), params[iIndex].ToDouble());
 				break;
 			case UTIL_STRING:
-				strSegment.Format(c_strFormat.c_str(),(FX_LPCWSTR)params[iIndex].operator CFX_WideString());
+				strSegment.Format(c_strFormat.c_str(), params[iIndex].ToCFXWideString().c_str());
 				break;
 			default:
 				strSegment.Format(L"%S", c_strFormat.c_str());
@@ -229,8 +229,7 @@ FX_BOOL util::printd(IFXJS_Context* cc, const CJS_Parameters& params, CJS_Value&
 
 	if (p1.GetType() == VT_number)
 	{
-		int nFormat = p1;
-
+		int nFormat = p1.ToInt();
 		CFX_WideString swResult;
 
 		switch (nFormat)
@@ -266,18 +265,17 @@ FX_BOOL util::printd(IFXJS_Context* cc, const CJS_Parameters& params, CJS_Value&
 			return FALSE;
 		}
 
-		vRet = swResult;
+		vRet = swResult.c_str();
 		return TRUE;
 	}
 	else if (p1.GetType() == VT_string)
 	{
-		std::basic_string<wchar_t> cFormat = (FX_LPCWSTR)p1.operator CFX_WideString();		
+		std::basic_string<wchar_t> cFormat = p1.ToCFXWideString().c_str();
 
 		bool bXFAPicture = false;
 		if (iSize > 2)
 		{
-			//CJS_Value value;
-			bXFAPicture = params[2];
+			bXFAPicture = params[2].ToBool();
 		}
 
 		if (bXFAPicture)
@@ -290,9 +288,9 @@ FX_BOOL util::printd(IFXJS_Context* cc, const CJS_Parameters& params, CJS_Value&
 		{
 			int iStart = 0;
 			int iEnd;
-			while((iEnd = cFormat.find((CFX_WideString)fcTable[iIndex].lpszJSMark, iStart)) != -1)
+			while((iEnd = cFormat.find(fcTable[iIndex].lpszJSMark, iStart)) != -1)
 			{
-				cFormat.replace(iEnd, FXSYS_wcslen(fcTable[iIndex].lpszJSMark), (CFX_WideString)fcTable[iIndex].lpszCppMark);
+				cFormat.replace(iEnd, FXSYS_wcslen(fcTable[iIndex].lpszJSMark), fcTable[iIndex].lpszCppMark);
 				iStart = iEnd;
 			}
 		}
@@ -344,7 +342,7 @@ FX_BOOL util::printd(IFXJS_Context* cc, const CJS_Parameters& params, CJS_Value&
 			//strFormat.Format(strFormat,cTableAd[iIndex].iValue);
 			int iStart = 0;
 			int iEnd;
-			while((iEnd = cFormat.find((CFX_WideString)cTableAd[iIndex].lpszJSMark,iStart)) != -1)
+			while((iEnd = cFormat.find(cTableAd[iIndex].lpszJSMark, iStart)) != -1)
 			{
 				if (iEnd > 0)
 				{
@@ -386,9 +384,9 @@ void util::printd(const std::wstring &cFormat2, CJS_Date jsDate, bool bXFAPictur
 	{
 		int iStart = 0;
 		int iEnd;
-		while((iEnd = cFormat.find((CFX_WideString)fcTable[iIndex].lpszJSMark,iStart)) != -1)
+		while((iEnd = cFormat.find(fcTable[iIndex].lpszJSMark, iStart)) != -1)
 		{
-			cFormat.replace(iEnd,FXSYS_wcslen(fcTable[iIndex].lpszJSMark), (CFX_WideString)fcTable[iIndex].lpszCppMark);
+			cFormat.replace(iEnd,FXSYS_wcslen(fcTable[iIndex].lpszJSMark), fcTable[iIndex].lpszCppMark);
 			iStart = iEnd;
 		}
 	}
@@ -440,7 +438,7 @@ void util::printd(const std::wstring &cFormat2, CJS_Date jsDate, bool bXFAPictur
 		//strFormat.Format(strFormat,cTableAd[iIndex].iValue);
 		int iStart = 0;
 		int iEnd;
-		while((iEnd = cFormat.find((CFX_WideString)cTableAd[iIndex].lpszJSMark,iStart)) != -1)
+		while((iEnd = cFormat.find(cTableAd[iIndex].lpszJSMark, iStart)) != -1)
 		{
 			if (iEnd > 0)
 			{
@@ -467,8 +465,8 @@ FX_BOOL util::printx(IFXJS_Context* cc, const CJS_Parameters& params, CJS_Value&
 	int iSize = params.size();
 	if (iSize<2)
 		return FALSE;
-	CFX_WideString sFormat = params[0].operator CFX_WideString();
-	CFX_WideString sSource = params[1].operator CFX_WideString();
+	CFX_WideString sFormat = params[0].ToCFXWideString();
+	CFX_WideString sSource = params[1].ToCFXWideString();
 	std::string cFormat = CFX_ByteString::FromUnicode(sFormat).c_str();
 	std::string cSource = CFX_ByteString::FromUnicode(sSource).c_str();
 	std::string cDest;
@@ -582,9 +580,9 @@ FX_BOOL util::scand(IFXJS_Context* cc, const CJS_Parameters& params, CJS_Value& 
 	int iSize = params.size();
 	if (iSize < 2)
 		return FALSE;
-	CFX_WideString sFormat = params[0].operator CFX_WideString();
-	CFX_WideString sDate = params[1].operator CFX_WideString();
 
+	CFX_WideString sFormat = params[0].ToCFXWideString();
+	CFX_WideString sDate = params[1].ToCFXWideString();
 	double dDate = JS_GetDateTime();
 	if (sDate.GetLength() > 0)
 	{
@@ -638,10 +636,10 @@ FX_BOOL util::byteToChar(IFXJS_Context* cc, const CJS_Parameters& params, CJS_Va
 	int iSize = params.size();
 	if (iSize == 0)
 		return FALSE;
-	int nByte = (int)params[0];
+	int nByte = params[0].ToInt();
 	unsigned char cByte = (unsigned char)nByte;
 	CFX_WideString csValue;
 	csValue.Format(L"%c", cByte);
-	vRet = csValue; 
+	vRet = csValue.c_str();
 	return TRUE;
 }

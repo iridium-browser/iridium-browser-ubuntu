@@ -14,12 +14,11 @@ from telemetry.core import util
 from telemetry.core import wpr_modes
 from telemetry import decorators
 from telemetry.page import page_test
-from telemetry.user_story import shared_user_story_state
+from telemetry.story import shared_state
 from telemetry.util import exception_formatter
 from telemetry.util import file_handle
 from telemetry.value import skip
 from telemetry.web_perf import timeline_based_measurement
-from telemetry.web_perf import timeline_based_page_test
 
 
 def _PrepareFinderOptions(finder_options, test, device_type):
@@ -33,13 +32,15 @@ def _PrepareFinderOptions(finder_options, test, device_type):
     profiler_class.CustomizeBrowserOptions(browser_options.browser_type,
                                            finder_options)
 
-class SharedPageState(shared_user_story_state.SharedUserStoryState):
+class SharedPageState(shared_state.SharedState):
 
   _device_type = None
 
   def __init__(self, test, finder_options, user_story_set):
     super(SharedPageState, self).__init__(test, finder_options, user_story_set)
     if isinstance(test, timeline_based_measurement.TimelineBasedMeasurement):
+      # This is to avoid the cyclic-import caused by timeline_based_page_test.
+      from telemetry.web_perf import timeline_based_page_test
       self._test = timeline_based_page_test.TimelineBasedPageTest(test)
     else:
       self._test = test
@@ -85,16 +86,20 @@ class SharedPageState(shared_user_story_state.SharedUserStoryState):
   def DidRunUserStory(self, results):
     if self._finder_options.profiler:
       self._StopProfiling(results)
-    if self._current_tab and self._current_tab.IsAlive():
-      self._current_tab.CloseConnections()
-    self._test.CleanUpAfterPage(self._current_page, self._current_tab)
-    if self._current_page.credentials and self._did_login_for_current_page:
-      self.browser.credentials.LoginNoLongerNeeded(
-          self._current_tab, self._current_page.credentials)
-    if self._test.StopBrowserAfterPage(self.browser, self._current_page):
-      self._StopBrowser()
-    self._current_page = None
-    self._current_tab = None
+    # We might hang while trying to close the connection, and need to guarantee
+    # the page will get cleaned up to avoid future tests failing in weird ways.
+    try:
+      if self._current_tab and self._current_tab.IsAlive():
+        self._current_tab.CloseConnections()
+    finally:
+      self._test.CleanUpAfterPage(self._current_page, self._current_tab)
+      if self._current_page.credentials and self._did_login_for_current_page:
+        self.browser.credentials.LoginNoLongerNeeded(
+            self._current_tab, self._current_page.credentials)
+      if self._test.StopBrowserAfterPage(self.browser, self._current_page):
+        self._StopBrowser()
+      self._current_page = None
+      self._current_tab = None
 
   @property
   def platform(self):
@@ -262,11 +267,7 @@ class SharedPageState(shared_user_story_state.SharedUserStoryState):
         raise page_test.MultiTabTestAppCrashError
       raise
 
-  def TearDownState(self, results):
-    # NOTE: this is a HACK to get user_story_runner to be generic enough for any
-    # user_story while maintaining existing use cases of page tests. Other
-    # SharedUserStory should not call DidRunTest this way.
-    self._test.DidRunTest(self.browser, results)
+  def TearDownState(self):
     self._StopBrowser()
 
   def _StopBrowser(self):

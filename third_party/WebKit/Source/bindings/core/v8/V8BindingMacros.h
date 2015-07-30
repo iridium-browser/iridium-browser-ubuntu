@@ -33,37 +33,6 @@
 
 namespace blink {
 
-// Naming scheme:
-// TO*_RETURNTYPE[_ARGTYPE]...
-// ...using _DEFAULT instead of _ANY..._ANY when returing a default value.
-
-#define TONATIVE_VOID(type, var, value)        \
-    type var;                                  \
-    {                                          \
-        v8::TryCatch block;                    \
-        var = (value);                         \
-        if (UNLIKELY(block.HasCaught())) {     \
-            block.ReThrow();                   \
-            return;                            \
-        }                                      \
-    }
-
-#define TONATIVE_DEFAULT(type, var, value, retVal) \
-    type var;                                      \
-    {                                              \
-        v8::TryCatch block;                        \
-        var = (value);                             \
-        if (UNLIKELY(block.HasCaught())) {         \
-            block.ReThrow();                       \
-            return retVal;                         \
-        }                                          \
-    }
-
-#define TONATIVE_VOID_EXCEPTIONSTATE(type, var, value, exceptionState)  \
-    type var(value);                                                    \
-    if (UNLIKELY(exceptionState.throwIfNeeded()))                       \
-        return;
-
 // type is an instance of class template V8StringResource<>,
 // but Mode argument varies; using type (not Mode) for consistency
 // with other macros and ease of code generation
@@ -106,6 +75,12 @@ inline bool v8Call(v8::MaybeLocal<T> maybeLocal, v8::Local<T>& outVariable, v8::
     bool success = maybeLocal.ToLocal(&outVariable);
     ASSERT(success || tryCatch.HasCaught());
     return success;
+}
+
+template <typename T>
+inline T v8CallOrCrash(v8::Maybe<T> maybe)
+{
+    return maybe.FromJust();
 }
 
 // The last "else" is to avoid dangling else problem.

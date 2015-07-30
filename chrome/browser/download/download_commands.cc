@@ -4,8 +4,10 @@
 
 #include "chrome/browser/download/download_commands.h"
 
+#include "base/strings/stringprintf.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_crx_util.h"
+#include "chrome/browser/download/download_extensions.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -15,7 +17,9 @@
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/google/core/browser/google_util.h"
 #include "grit/theme_resources.h"
+#include "net/base/url_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -29,7 +33,7 @@ DownloadCommands::DownloadCommands(content::DownloadItem* download_item)
   DCHECK(download_item);
 }
 
-int DownloadCommands::GetCommandIconId(Command command) {
+int DownloadCommands::GetCommandIconId(Command command) const {
   switch (command) {
     case PAUSE:
       return IDR_DOWNLOAD_NOTIFICATION_MENU_PAUSE;
@@ -37,21 +41,34 @@ int DownloadCommands::GetCommandIconId(Command command) {
       return IDR_DOWNLOAD_NOTIFICATION_MENU_RESUME;
     case SHOW_IN_FOLDER:
       return IDR_DOWNLOAD_NOTIFICATION_MENU_FOLDER;
-    case RETRY:
     case KEEP:
       return IDR_DOWNLOAD_NOTIFICATION_MENU_DOWNLOAD;
     case DISCARD:
       return IDR_DOWNLOAD_NOTIFICATION_MENU_DELETE;
+    case CANCEL:
+      // TODO(yoshiki): This is a temporary image for Download Notification
+      // feature behind the flag. We have to replace the image with proper one
+      // before the feature launch. http://crbug.com/468559
+      return IDR_DOWNLOAD_NOTIFICATION_MENU_DELETE;
     case OPEN_WHEN_COMPLETE:
     case ALWAYS_OPEN_TYPE:
     case PLATFORM_OPEN:
-    case CANCEL:
     case LEARN_MORE_SCANNING:
     case LEARN_MORE_INTERRUPTED:
       return -1;
   }
   NOTREACHED();
   return -1;
+}
+
+GURL DownloadCommands::GetLearnMoreURLForInterruptedDownload() const {
+  GURL learn_more_url(chrome::kDownloadInterruptedLearnMoreURL);
+  learn_more_url = google_util::AppendGoogleLocaleParam(
+      learn_more_url, g_browser_process->GetApplicationLocale());
+  return net::AppendQueryParameter(
+      learn_more_url, "ctx",
+      base::StringPrintf("%d",
+                         static_cast<int>(download_item_->GetLastReason())));
 }
 
 gfx::Image DownloadCommands::GetCommandIcon(Command command) {
@@ -72,6 +89,8 @@ bool DownloadCommands::IsCommandEnabled(Command command) const {
       // filename. Don't base an "Always open" decision based on it. Also
       // exclude extensions.
       return download_item_->CanOpenDownload() &&
+             download_util::IsAllowedToOpenAutomatically(
+                 download_item_->GetTargetFilePath()) &&
              !download_crx_util::IsExtensionDownload(*download_item_);
     case CANCEL:
       return !download_item_->IsDone();
@@ -86,7 +105,6 @@ bool DownloadCommands::IsCommandEnabled(Command command) const {
     case KEEP:
     case LEARN_MORE_SCANNING:
     case LEARN_MORE_INTERRUPTED:
-    case RETRY:
       return true;
   }
   NOTREACHED();
@@ -116,7 +134,6 @@ bool DownloadCommands::IsCommandChecked(Command command) const {
     case CANCEL:
     case DISCARD:
     case KEEP:
-    case RETRY:
     case LEARN_MORE_SCANNING:
     case LEARN_MORE_INTERRUPTED:
       return false;
@@ -190,7 +207,7 @@ void DownloadCommands::ExecuteCommand(Command command) {
     }
     case LEARN_MORE_INTERRUPTED:
       GetBrowser()->OpenURL(content::OpenURLParams(
-          GURL(chrome::kDownloadInterruptedLearnMoreURL), content::Referrer(),
+          GetLearnMoreURLForInterruptedDownload(), content::Referrer(),
           NEW_FOREGROUND_TAB, ui::PAGE_TRANSITION_LINK, false));
       break;
     case PAUSE:
@@ -198,13 +215,6 @@ void DownloadCommands::ExecuteCommand(Command command) {
       break;
     case RESUME:
       download_item_->Resume();
-      break;
-    case RETRY:
-      if (download_item_->CanResume()) {
-        download_item_->Resume();
-      } else {
-        // TODO(yoshiki): Implement retry logic.
-      }
       break;
   }
 }

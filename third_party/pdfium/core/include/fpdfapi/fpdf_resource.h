@@ -39,7 +39,7 @@ typedef struct FT_FaceRec_* FXFT_Face;
 class CFX_CTTGSUBTable;
 class CPDF_Page;
 
-template <class ObjClass> class CPDF_CountedObject : public CFX_Object
+template <class ObjClass> class CPDF_CountedObject 
 {
 public:
     ObjClass	m_Obj;
@@ -76,23 +76,16 @@ typedef CFX_MapPtrTemplate<CPDF_Stream*, CPDF_CountedStreamAcc*>    CPDF_FontFil
 #define PDFFONT_USEEXTERNATTR	0x80000
 FX_WCHAR PDF_UnicodeFromAdobeName(const FX_CHAR* name);
 CFX_ByteString PDF_AdobeNameFromUnicode(FX_WCHAR unicode);
-class CPDF_Font : public CFX_Object
+class CPDF_Font
 {
 public:
-
     static CPDF_Font*		CreateFontF(CPDF_Document* pDoc, CPDF_Dictionary* pFontDict);
-
     static CPDF_Font*		GetStockFont(CPDF_Document* pDoc, FX_BSTR fontname);
 
     virtual ~CPDF_Font();
 
-
-
-
-    int						GetFontType() const
-    {
-        return m_FontType;
-    }
+    bool IsFontType(int fonttype) const { return fonttype == m_FontType; }
+    int	GetFontType() const { return m_FontType;  }
 
     CFX_ByteString			GetFontTypeName() const;
 
@@ -256,9 +249,9 @@ public:
     class CFX_PathData*		LoadGlyphPath(FX_DWORD charcode, int dest_width = 0);
 
     CFX_Font				m_Font;
-protected:
 
-    CPDF_Font();
+protected:
+    explicit CPDF_Font(int fonttype);
 
     FX_BOOL					Initialize();
 
@@ -285,8 +278,6 @@ protected:
 
 
 
-    int						m_FontType;
-
     CFX_ByteString			m_BaseFont;
 
     CPDF_StreamAcc*			m_pFontFile;
@@ -312,6 +303,8 @@ protected:
 
     int						m_ItalicAngle;
 
+private:
+    const int				m_FontType;
 };
 #define PDFFONT_ENCODING_BUILTIN		0
 #define PDFFONT_ENCODING_WINANSI		1
@@ -323,7 +316,7 @@ protected:
 #define PDFFONT_ENCODING_PDFDOC			7
 #define PDFFONT_ENCODING_MS_SYMBOL		8
 #define PDFFONT_ENCODING_UNICODE		9
-class CPDF_FontEncoding : public CFX_Object
+class CPDF_FontEncoding 
 {
 public:
 
@@ -355,10 +348,8 @@ public:
 class CPDF_SimpleFont : public CPDF_Font
 {
 public:
-
-    CPDF_SimpleFont();
-
-    virtual ~CPDF_SimpleFont();
+    explicit CPDF_SimpleFont(int fonttype);
+    ~CPDF_SimpleFont() override;
 
     CPDF_FontEncoding*		GetEncoding()
     {
@@ -438,7 +429,7 @@ protected:
     virtual FX_BOOL			_Load();
     virtual void			LoadGlyphMap();
 };
-class CPDF_Type3Char : public CFX_Object
+class CPDF_Type3Char 
 {
 public:
 
@@ -469,7 +460,7 @@ class CPDF_Type3Font : public CPDF_SimpleFont
 {
 public:
     CPDF_Type3Font();
-    virtual ~CPDF_Type3Font();
+    ~CPDF_Type3Font() override;
     void					SetPageResources(CPDF_Dictionary* pResources)
     {
         m_pPageResources = pResources;
@@ -582,7 +573,8 @@ protected:
 #define PDFCS_DEVICEN           9
 #define PDFCS_INDEXED           10
 #define PDFCS_PATTERN           11
-class CPDF_ColorSpace : public CFX_Object
+
+class CPDF_ColorSpace
 {
 public:
 
@@ -677,7 +669,7 @@ protected:
 
     FX_DWORD				m_dwStdConversion;
 };
-class CPDF_Color : public CFX_Object
+class CPDF_Color 
 {
 public:
 
@@ -726,7 +718,7 @@ protected:
 };
 #define PATTERN_TILING		1
 #define PATTERN_SHADING		2
-class CPDF_Pattern : public CFX_Object
+class CPDF_Pattern 
 {
 public:
    
@@ -803,7 +795,7 @@ struct CPDF_MeshVertex {
     FX_FLOAT x, y;
     FX_FLOAT r, g, b;
 };
-class CPDF_MeshStream : public CFX_Object
+class CPDF_MeshStream 
 {
 public:
 
@@ -843,7 +835,7 @@ public:
     FX_ARGB* pMatteColor;
     FX_INT32 nQuality;
 };
-class CPDF_Image : public CFX_Object
+class CPDF_Image 
 {
 public:
 

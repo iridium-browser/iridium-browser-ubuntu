@@ -133,10 +133,15 @@ class LoginDisplay {
 
   // Show password changed dialog. If |show_password_error| is not null
   // user already tried to enter old password but it turned out to be incorrect.
-  virtual void ShowPasswordChangedDialog(bool show_password_error) = 0;
+  virtual void ShowPasswordChangedDialog(bool show_password_error,
+                                         const std::string& email) = 0;
 
   // Shows signin UI with specified email.
   virtual void ShowSigninUI(const std::string& email) = 0;
+
+  // Show whitelist check failed error. Happens after user completes online
+  // signin but whitelist check fails.
+  virtual void ShowWhitelistCheckFailedError() = 0;
 
   gfx::Rect background_bounds() const { return background_bounds_; }
   void set_background_bounds(const gfx::Rect& background_bounds) {

@@ -68,7 +68,7 @@ enum MediaControlElementType {
 };
 
 CORE_EXPORT HTMLMediaElement* toParentMediaElement(Node*);
-inline HTMLMediaElement* toParentMediaElement(LayoutObject* renderer) { return toParentMediaElement(renderer->node()); }
+inline HTMLMediaElement* toParentMediaElement(LayoutObject* layoutObject) { return toParentMediaElement(layoutObject->node()); }
 
 CORE_EXPORT MediaControlElementType mediaControlElementType(Node*);
 
@@ -114,7 +114,7 @@ private:
 // ----------------------------
 
 class MediaControlInputElement : public HTMLInputElement, public MediaControlElement {
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN_NESTED(MediaControlInputElement, HTMLFormControlElement);
+    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(MediaControlInputElement);
 public:
     DECLARE_VIRTUAL_TRACE();
 

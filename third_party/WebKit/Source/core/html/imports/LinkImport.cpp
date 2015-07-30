@@ -107,14 +107,12 @@ void LinkImport::didFinish()
     m_owner->scheduleEvent();
 }
 
-#if !ENABLE(OILPAN)
-void LinkImport::importChildWasDestroyed(HTMLImportChild* child)
+void LinkImport::importChildWasDisposed(HTMLImportChild* child)
 {
     ASSERT(m_child == child);
     m_child = nullptr;
     m_owner = nullptr;
 }
-#endif
 
 bool LinkImport::isSync() const
 {
@@ -128,9 +126,7 @@ HTMLLinkElement* LinkImport::link()
 
 bool LinkImport::hasLoaded() const
 {
-    // Should never be called after importChildWasDestroyed was called.
-    ASSERT(m_owner);
-    return m_child && m_child->hasFinishedLoading() && !m_child->loader()->hasError();
+    return m_owner && m_child && m_child->hasFinishedLoading() && !m_child->loader()->hasError();
 }
 
 void LinkImport::ownerInserted()

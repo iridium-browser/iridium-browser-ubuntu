@@ -67,10 +67,12 @@
 #include <openssl/mem.h>
 #include <openssl/obj.h>
 #include <openssl/rsa.h>
+#include <openssl/thread.h>
 
 #include "internal.h"
 
 
+extern const EVP_PKEY_ASN1_METHOD dsa_asn1_meth;
 extern const EVP_PKEY_ASN1_METHOD ec_asn1_meth;
 extern const EVP_PKEY_ASN1_METHOD hmac_asn1_meth;
 extern const EVP_PKEY_ASN1_METHOD rsa_asn1_meth;
@@ -112,6 +114,11 @@ void EVP_PKEY_free(EVP_PKEY *pkey) {
   OPENSSL_free(pkey);
 }
 
+EVP_PKEY *EVP_PKEY_up_ref(EVP_PKEY *pkey) {
+  CRYPTO_add(&pkey->references, 1, CRYPTO_LOCK_EVP_PKEY);
+  return pkey;
+}
+
 int EVP_PKEY_is_opaque(const EVP_PKEY *pkey) {
   if (pkey->ameth && pkey->ameth->pkey_opaque) {
     return pkey->ameth->pkey_opaque(pkey);
@@ -147,11 +154,6 @@ int EVP_PKEY_cmp(const EVP_PKEY *a, const EVP_PKEY *b) {
   }
 
   return -2;
-}
-
-EVP_PKEY *EVP_PKEY_dup(EVP_PKEY *pkey) {
-  CRYPTO_add(&pkey->references, 1, CRYPTO_LOCK_EVP_PKEY);
-  return pkey;
 }
 
 int EVP_PKEY_copy_parameters(EVP_PKEY *to, const EVP_PKEY *from) {
@@ -208,6 +210,8 @@ const EVP_PKEY_ASN1_METHOD *EVP_PKEY_asn1_find(ENGINE **pengine, int nid) {
       return &hmac_asn1_meth;
     case EVP_PKEY_EC:
       return &ec_asn1_meth;
+    case EVP_PKEY_DSA:
+      return &dsa_asn1_meth;
     default:
       return NULL;
   }
@@ -319,7 +323,7 @@ int EVP_PKEY_set1_DH(EVP_PKEY *pkey, DH *key) {
 }
 
 int EVP_PKEY_assign_DH(EVP_PKEY *pkey, DH *key) {
-  return EVP_PKEY_assign(pkey, EVP_PKEY_EC, key);
+  return EVP_PKEY_assign(pkey, EVP_PKEY_DH, key);
 }
 
 DH *EVP_PKEY_get1_DH(EVP_PKEY *pkey) {
@@ -429,6 +433,10 @@ int EVP_PKEY_CTX_set_signature_md(EVP_PKEY_CTX *ctx, const EVP_MD *md) {
 int EVP_PKEY_CTX_get_signature_md(EVP_PKEY_CTX *ctx, const EVP_MD **out_md) {
   return EVP_PKEY_CTX_ctrl(ctx, -1, EVP_PKEY_OP_TYPE_SIG, EVP_PKEY_CTRL_GET_MD,
                            0, (void *)out_md);
+}
+
+EVP_PKEY *EVP_PKEY_dup(EVP_PKEY *pkey) {
+  return EVP_PKEY_up_ref(pkey);
 }
 
 void OpenSSL_add_all_algorithms(void) {}

@@ -24,15 +24,17 @@
 
 #include "core/HTMLNames.h"
 #include "core/dom/DocumentMarkerController.h"
-#include "core/dom/NodeRenderingTraversal.h"
+#include "core/dom/PseudoElement.h"
 #include "core/dom/shadow/ComposedTreeTraversal.h"
 #include "core/dom/shadow/ShadowRoot.h"
 #include "core/editing/FrameSelection.h"
 #include "core/fetch/ImageResource.h"
 #include "core/frame/LocalFrame.h"
 #include "core/html/HTMLAnchorElement.h"
+#include "core/html/HTMLAreaElement.h"
 #include "core/html/HTMLImageElement.h"
 #include "core/html/HTMLInputElement.h"
+#include "core/html/HTMLMapElement.h"
 #include "core/html/HTMLMediaElement.h"
 #include "core/html/HTMLTextAreaElement.h"
 #include "core/html/parser/HTMLParserIdioms.h"
@@ -81,7 +83,6 @@ HitTestResult::HitTestResult(const HitTestResult& other)
     , m_hitTestRequest(other.m_hitTestRequest)
     , m_innerNode(other.innerNode())
     , m_innerPossiblyPseudoNode(other.m_innerPossiblyPseudoNode)
-    , m_innerNonSharedNode(other.innerNonSharedNode())
     , m_pointInInnerNodeFrame(other.m_pointInInnerNodeFrame)
     , m_localPoint(other.localPoint())
     , m_innerURLElement(other.URLElement())
@@ -102,7 +103,6 @@ HitTestResult& HitTestResult::operator=(const HitTestResult& other)
     m_hitTestRequest = other.m_hitTestRequest;
     m_innerNode = other.innerNode();
     m_innerPossiblyPseudoNode = other.innerPossiblyPseudoNode();
-    m_innerNonSharedNode = other.innerNonSharedNode();
     m_pointInInnerNodeFrame = other.m_pointInInnerNodeFrame;
     m_localPoint = other.localPoint();
     m_innerURLElement = other.URLElement();
@@ -119,7 +119,6 @@ DEFINE_TRACE(HitTestResult)
 {
     visitor->trace(m_innerNode);
     visitor->trace(m_innerPossiblyPseudoNode);
-    visitor->trace(m_innerNonSharedNode);
     visitor->trace(m_innerURLElement);
     visitor->trace(m_scrollbar);
 #if ENABLE(OILPAN)
@@ -131,12 +130,12 @@ PositionWithAffinity HitTestResult::position() const
 {
     if (!m_innerPossiblyPseudoNode)
         return PositionWithAffinity();
-    LayoutObject* renderer = this->layoutObject();
-    if (!renderer)
+    LayoutObject* layoutObject = this->layoutObject();
+    if (!layoutObject)
         return PositionWithAffinity();
     if (m_innerPossiblyPseudoNode->isPseudoElement() && m_innerPossiblyPseudoNode->pseudoId() == BEFORE)
         return Position(m_innerNode, Position::PositionIsBeforeChildren).downstream();
-    return renderer->positionForPoint(localPoint());
+    return layoutObject->positionForPoint(localPoint());
 }
 
 LayoutObject* HitTestResult::layoutObject() const
@@ -144,36 +143,53 @@ LayoutObject* HitTestResult::layoutObject() const
     return m_innerNode ? m_innerNode->layoutObject() : 0;
 }
 
-void HitTestResult::setToShadowHostIfInClosedShadowRoot()
+void HitTestResult::setToShadowHostIfInUserAgentShadowRoot()
 {
     if (Node* node = innerNode()) {
         if (ShadowRoot* containingShadowRoot = node->containingShadowRoot()) {
-            if (containingShadowRoot->type() == ShadowRoot::ClosedShadowRoot)
+            if (containingShadowRoot->type() == ShadowRoot::UserAgentShadowRoot)
                 setInnerNode(node->shadowHost());
         }
     }
+}
 
-    if (Node* node = innerNonSharedNode()) {
-        if (ShadowRoot* containingShadowRoot = node->containingShadowRoot()) {
-            if (containingShadowRoot->type() == ShadowRoot::ClosedShadowRoot)
-                setInnerNonSharedNode(node->shadowHost());
+HTMLAreaElement* HitTestResult::imageAreaForImage() const
+{
+    ASSERT(m_innerNode);
+    HTMLImageElement* imageElement = nullptr;
+    if (isHTMLImageElement(m_innerNode)) {
+        imageElement = toHTMLImageElement(m_innerNode);
+    } else if (m_innerNode->isInShadowTree()) {
+        if (m_innerNode->containingShadowRoot()->type() == ShadowRoot::UserAgentShadowRoot) {
+            if (isHTMLImageElement(m_innerNode->shadowHost()))
+                imageElement = toHTMLImageElement(m_innerNode->shadowHost());
         }
     }
+
+    if (!imageElement || !imageElement->layoutObject())
+        return nullptr;
+
+    HTMLMapElement* map = imageElement->treeScope().getImageMap(imageElement->fastGetAttribute(usemapAttr));
+    if (!map)
+        return nullptr;
+
+    LayoutBox* box = toLayoutBox(imageElement->layoutObject());
+    LayoutRect contentBox = box->contentBoxRect();
+    float scaleFactor = 1 / box->style()->effectiveZoom();
+    LayoutPoint location = localPoint();
+    location.scale(scaleFactor, scaleFactor);
+
+    return map->areaForPoint(location, contentBox.size());
 }
 
 void HitTestResult::setInnerNode(Node* n)
 {
     m_innerPossiblyPseudoNode = n;
     if (n && n->isPseudoElement())
-        n = n->parentOrShadowHostNode();
+        n = toPseudoElement(n)->findAssociatedNode();
     m_innerNode = n;
-}
-
-void HitTestResult::setInnerNonSharedNode(Node* n)
-{
-    if (n && n->isPseudoElement())
-        n = n->parentOrShadowHostNode();
-    m_innerNonSharedNode = n;
+    if (HTMLAreaElement* area = imageAreaForImage())
+        m_innerNode = area;
 }
 
 void HitTestResult::setURLElement(Element* n)
@@ -188,8 +204,6 @@ void HitTestResult::setScrollbar(Scrollbar* s)
 
 LocalFrame* HitTestResult::innerNodeFrame() const
 {
-    if (m_innerNonSharedNode)
-        return m_innerNonSharedNode->document().frame();
     if (m_innerNode)
         return m_innerNode->document().frame();
     return 0;
@@ -197,10 +211,10 @@ LocalFrame* HitTestResult::innerNodeFrame() const
 
 bool HitTestResult::isSelected() const
 {
-    if (!m_innerNonSharedNode)
+    if (!m_innerNode)
         return false;
 
-    if (LocalFrame* frame = m_innerNonSharedNode->document().frame())
+    if (LocalFrame* frame = m_innerNode->document().frame())
         return frame->selection().contains(m_hitTestLocation.point());
     return false;
 }
@@ -210,15 +224,15 @@ String HitTestResult::spellingToolTip(TextDirection& dir) const
     dir = LTR;
     // Return the tool tip string associated with this point, if any. Only markers associated with bad grammar
     // currently supply strings, but maybe someday markers associated with misspelled words will also.
-    if (!m_innerNonSharedNode)
+    if (!m_innerNode)
         return String();
 
-    DocumentMarker* marker = m_innerNonSharedNode->document().markers().markerContainingPoint(m_hitTestLocation.point(), DocumentMarker::Grammar);
+    DocumentMarker* marker = m_innerNode->document().markers().markerContainingPoint(m_hitTestLocation.point(), DocumentMarker::Grammar);
     if (!marker)
         return String();
 
-    if (LayoutObject* renderer = m_innerNonSharedNode->layoutObject())
-        dir = renderer->style()->direction();
+    if (LayoutObject* layoutObject = m_innerNode->layoutObject())
+        dir = layoutObject->style()->direction();
     return marker->description();
 }
 
@@ -231,8 +245,8 @@ String HitTestResult::title(TextDirection& dir) const
         if (titleNode->isElementNode()) {
             String title = toElement(titleNode)->title();
             if (!title.isNull()) {
-                if (LayoutObject* renderer = titleNode->layoutObject())
-                    dir = renderer->style()->direction();
+                if (LayoutObject* layoutObject = titleNode->layoutObject())
+                    dir = layoutObject->style()->direction();
                 return title;
             }
         }
@@ -242,16 +256,17 @@ String HitTestResult::title(TextDirection& dir) const
 
 const AtomicString& HitTestResult::altDisplayString() const
 {
-    if (!m_innerNonSharedNode)
+    Node* innerNodeOrImageMapImage = this->innerNodeOrImageMapImage();
+    if (!innerNodeOrImageMapImage)
         return nullAtom;
 
-    if (isHTMLImageElement(*m_innerNonSharedNode)) {
-        HTMLImageElement& image = toHTMLImageElement(*m_innerNonSharedNode);
+    if (isHTMLImageElement(*innerNodeOrImageMapImage)) {
+        HTMLImageElement& image = toHTMLImageElement(*innerNodeOrImageMapImage);
         return image.getAttribute(altAttr);
     }
 
-    if (isHTMLInputElement(*m_innerNonSharedNode)) {
-        HTMLInputElement& input = toHTMLInputElement(*m_innerNonSharedNode);
+    if (isHTMLInputElement(*innerNodeOrImageMapImage)) {
+        HTMLInputElement& input = toHTMLInputElement(*innerNodeOrImageMapImage);
         return input.alt();
     }
 
@@ -260,47 +275,49 @@ const AtomicString& HitTestResult::altDisplayString() const
 
 Image* HitTestResult::image() const
 {
-    if (!m_innerNonSharedNode)
-        return 0;
+    Node* innerNodeOrImageMapImage = this->innerNodeOrImageMapImage();
+    if (!innerNodeOrImageMapImage)
+        return nullptr;
 
-    LayoutObject* renderer = m_innerNonSharedNode->layoutObject();
-    if (renderer && renderer->isImage()) {
-        LayoutImage* image = toLayoutImage(renderer);
+    LayoutObject* layoutObject = innerNodeOrImageMapImage->layoutObject();
+    if (layoutObject && layoutObject->isImage()) {
+        LayoutImage* image = toLayoutImage(layoutObject);
         if (image->cachedImage() && !image->cachedImage()->errorOccurred())
             return image->cachedImage()->imageForLayoutObject(image);
     }
 
-    return 0;
+    return nullptr;
 }
 
 IntRect HitTestResult::imageRect() const
 {
     if (!image())
         return IntRect();
-    return m_innerNonSharedNode->layoutBox()->absoluteContentQuad().enclosingBoundingBox();
+    return innerNodeOrImageMapImage()->layoutBox()->absoluteContentQuad().enclosingBoundingBox();
 }
 
 KURL HitTestResult::absoluteImageURL() const
 {
-    if (!m_innerNonSharedNode)
+    Node* innerNodeOrImageMapImage = this->innerNodeOrImageMapImage();
+    if (!innerNodeOrImageMapImage)
         return KURL();
 
-    LayoutObject* renderer = m_innerNonSharedNode->layoutObject();
-    if (!(renderer && renderer->isImage()))
+    LayoutObject* layoutObject = innerNodeOrImageMapImage->layoutObject();
+    if (!(layoutObject && layoutObject->isImage()))
         return KURL();
 
     AtomicString urlString;
-    if (isHTMLEmbedElement(*m_innerNonSharedNode)
-        || isHTMLImageElement(*m_innerNonSharedNode)
-        || isHTMLInputElement(*m_innerNonSharedNode)
-        || isHTMLObjectElement(*m_innerNonSharedNode)
-        || isSVGImageElement(*m_innerNonSharedNode)) {
-        urlString = toElement(*m_innerNonSharedNode).imageSourceURL();
+    if (isHTMLEmbedElement(*innerNodeOrImageMapImage)
+        || isHTMLImageElement(*innerNodeOrImageMapImage)
+        || isHTMLInputElement(*innerNodeOrImageMapImage)
+        || isHTMLObjectElement(*innerNodeOrImageMapImage)
+        || isSVGImageElement(*innerNodeOrImageMapImage)) {
+        urlString = toElement(*innerNodeOrImageMapImage).imageSourceURL();
     } else {
         return KURL();
     }
 
-    return m_innerNonSharedNode->document().completeURL(stripLeadingAndTrailingHTMLSpaces(urlString));
+    return innerNodeOrImageMapImage->document().completeURL(stripLeadingAndTrailingHTMLSpaces(urlString));
 }
 
 KURL HitTestResult::absoluteMediaURL() const
@@ -312,14 +329,14 @@ KURL HitTestResult::absoluteMediaURL() const
 
 HTMLMediaElement* HitTestResult::mediaElement() const
 {
-    if (!m_innerNonSharedNode)
+    if (!m_innerNode)
         return 0;
 
-    if (!(m_innerNonSharedNode->layoutObject() && m_innerNonSharedNode->layoutObject()->isMedia()))
+    if (!(m_innerNode->layoutObject() && m_innerNode->layoutObject()->isMedia()))
         return 0;
 
-    if (isHTMLMediaElement(*m_innerNonSharedNode))
-        return toHTMLMediaElement(m_innerNonSharedNode);
+    if (isHTMLMediaElement(*m_innerNode))
+        return toHTMLMediaElement(m_innerNode);
     return 0;
 }
 
@@ -342,7 +359,7 @@ bool HitTestResult::isMisspelled() const
     VisiblePosition pos(innerNode()->layoutObject()->positionForPoint(localPoint()));
     if (pos.isNull())
         return false;
-    return m_innerNonSharedNode->document().markers().markersInRange(
+    return m_innerNode->document().markers().markersInRange(
         makeRange(pos, pos).get(), DocumentMarker::MisspellingMarkers()).size() > 0;
 }
 
@@ -364,18 +381,18 @@ String HitTestResult::textContent() const
 // hooks into it. Anyway, we should architect this better.
 bool HitTestResult::isContentEditable() const
 {
-    if (!m_innerNonSharedNode)
+    if (!m_innerNode)
         return false;
 
-    if (isHTMLTextAreaElement(*m_innerNonSharedNode))
-        return !toHTMLTextAreaElement(*m_innerNonSharedNode).isDisabledOrReadOnly();
+    if (isHTMLTextAreaElement(*m_innerNode))
+        return !toHTMLTextAreaElement(*m_innerNode).isDisabledOrReadOnly();
 
-    if (isHTMLInputElement(*m_innerNonSharedNode)) {
-        HTMLInputElement& inputElement = toHTMLInputElement(*m_innerNonSharedNode);
+    if (isHTMLInputElement(*m_innerNode)) {
+        HTMLInputElement& inputElement = toHTMLInputElement(*m_innerNode);
         return !inputElement.isDisabledOrReadOnly() && inputElement.isTextField();
     }
 
-    return m_innerNonSharedNode->hasEditableStyle();
+    return m_innerNode->hasEditableStyle();
 }
 
 bool HitTestResult::addNodeToListBasedTestResult(Node* node, const HitTestLocation& locationInContainer, const LayoutRect& rect)
@@ -427,7 +444,6 @@ void HitTestResult::append(const HitTestResult& other)
     if (!m_innerNode && other.innerNode()) {
         m_innerNode = other.innerNode();
         m_innerPossiblyPseudoNode = other.innerPossiblyPseudoNode();
-        m_innerNonSharedNode = other.innerNonSharedNode();
         m_localPoint = other.localPoint();
         m_pointInInnerNodeFrame = other.m_pointInInnerNodeFrame;
         m_innerURLElement = other.URLElement();
@@ -462,7 +478,6 @@ void HitTestResult::resolveRectBasedTest(Node* resolvedInnerNode, const LayoutPo
     m_hitTestLocation = HitTestLocation(resolvedPointInMainFrame);
     m_pointInInnerNodeFrame = resolvedPointInMainFrame;
     m_innerNode = nullptr;
-    m_innerNonSharedNode = nullptr;
     m_innerPossiblyPseudoNode = nullptr;
     m_listBasedTestResult = nullptr;
 
@@ -475,12 +490,29 @@ void HitTestResult::resolveRectBasedTest(Node* resolvedInnerNode, const LayoutPo
 
 Element* HitTestResult::innerElement() const
 {
-    for (Node* node = m_innerNode.get(); node; node = NodeRenderingTraversal::parent(*node)) {
+    for (Node* node = m_innerNode.get(); node; node = ComposedTreeTraversal::parent(*node)) {
         if (node->isElementNode())
             return toElement(node);
     }
 
     return 0;
+}
+
+Node* HitTestResult::innerNodeOrImageMapImage() const
+{
+    if (!m_innerNode)
+        return nullptr;
+
+    HTMLImageElement* imageMapImageElement = nullptr;
+    if (isHTMLAreaElement(m_innerNode))
+        imageMapImageElement = toHTMLAreaElement(m_innerNode)->imageElement();
+    else if (isHTMLMapElement(m_innerNode))
+        imageMapImageElement = toHTMLMapElement(m_innerNode)->imageElement();
+
+    if (!imageMapImageElement)
+        return m_innerNode.get();
+
+    return imageMapImageElement;
 }
 
 } // namespace blink

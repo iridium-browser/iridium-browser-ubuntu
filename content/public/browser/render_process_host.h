@@ -128,9 +128,6 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // Returns true if fast shutdown was started for the renderer.
   virtual bool FastShutdownStarted() const = 0;
 
-  // Dump the child process' handle table before shutting down.
-  virtual void DumpHandles() = 0;
-
   // Returns the process object associated with the child process.  In certain
   // tests or single-process mode, this will actually represent the current
   // process.
@@ -241,7 +238,7 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
 
   // Notifies the renderer that the timezone configuration of the system might
   // have changed.
-  virtual void NotifyTimezoneChange() = 0;
+  virtual void NotifyTimezoneChange(const std::string& zone_id) = 0;
 
   // Returns the ServiceRegistry for this process.
   virtual ServiceRegistry* GetServiceRegistry() = 0;

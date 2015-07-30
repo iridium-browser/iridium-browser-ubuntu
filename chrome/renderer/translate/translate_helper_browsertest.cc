@@ -27,7 +27,7 @@ class TestTranslateHelper : public translate::TranslateHelper {
             0,
             extensions::kExtensionScheme) {}
 
-  virtual base::TimeDelta AdjustDelay(int delayInMs) override {
+  base::TimeDelta AdjustDelay(int delayInMs) override {
     // Just returns base::TimeDelta() which has initial value 0.
     // Tasks doesn't need to be delayed in tests.
     return base::TimeDelta();

@@ -34,6 +34,8 @@
 #include "bindings/core/v8/SerializedScriptValue.h"
 #include "core/dom/ActiveDOMObject.h"
 #include "modules/EventTargetModules.h"
+#include "modules/ModulesExport.h"
+#include "modules/vibration/NavigatorVibration.h"
 #include "platform/AsyncMethodRunner.h"
 #include "platform/heap/Handle.h"
 #include "platform/text/TextDirection.h"
@@ -52,9 +54,10 @@ class NotificationOptions;
 class NotificationPermissionCallback;
 class ScriptState;
 class ScriptValue;
+class UnsignedLongOrUnsignedLongSequence;
 struct WebNotificationData;
 
-class Notification final : public RefCountedGarbageCollectedEventTargetWithInlineData<Notification>, public ActiveDOMObject, public WebNotificationDelegate {
+class MODULES_EXPORT Notification final : public RefCountedGarbageCollectedEventTargetWithInlineData<Notification>, public ActiveDOMObject, public WebNotificationDelegate {
     DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollected<Notification>);
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(Notification);
     DEFINE_WRAPPERTYPEINFO();
@@ -64,7 +67,7 @@ public:
     static Notification* create(ExecutionContext*, const String& title, const NotificationOptions&, ExceptionState&);
 
     // Used for embedder-created Notification objects. Will initialize the Notification's state as showing.
-    static Notification* create(ExecutionContext*, const String& persistentId, const WebNotificationData&);
+    static Notification* create(ExecutionContext*, int64_t persistentId, const WebNotificationData&);
 
     virtual ~Notification();
 
@@ -87,6 +90,7 @@ public:
     String body() const { return m_body; }
     String tag() const { return m_tag; }
     String icon() const { return m_iconUrl; }
+    NavigatorVibration::VibrationPattern vibrate(bool& isNull) const;
     bool silent() const { return m_silent; }
     ScriptValue data(ScriptState*) const;
 
@@ -127,10 +131,11 @@ private:
     void setBody(const String& body) { m_body = body; }
     void setIconUrl(KURL iconUrl) { m_iconUrl = iconUrl; }
     void setTag(const String& tag) { m_tag = tag; }
+    void setVibrate(const NavigatorVibration::VibrationPattern& vibrate) { m_vibrate = vibrate; }
     void setSilent(bool silent) { m_silent = silent; }
     void setSerializedData(PassRefPtr<SerializedScriptValue> data) { m_serializedData = data; }
 
-    void setPersistentId(const String& persistentId) { m_persistentId = persistentId; }
+    void setPersistentId(int64_t persistentId) { m_persistentId = persistentId; }
 
 private:
     String m_title;
@@ -138,6 +143,7 @@ private:
     String m_lang;
     String m_body;
     String m_tag;
+    NavigatorVibration::VibrationPattern m_vibrate;
     bool m_silent;
     RefPtr<SerializedScriptValue> m_serializedData;
 
@@ -146,7 +152,7 @@ private:
     // Notifications can either be bound to the page, which means they're identified by
     // their delegate, or persistent, which means they're identified by a persistent Id
     // given to us by the embedder. This influences how we close the notification.
-    String m_persistentId;
+    int64_t m_persistentId;
 
     enum NotificationState {
         NotificationStateIdle,

@@ -32,7 +32,8 @@
 #include "cc/base/switches.h"
 #include "cc/blink/web_external_bitmap_impl.h"
 #include "cc/blink/web_layer_impl.h"
-#include "cc/resources/tile_task_worker_pool.h"
+#include "cc/raster/task_graph_runner.h"
+#include "components/scheduler/renderer/renderer_scheduler.h"
 #include "content/child/appcache/appcache_dispatcher.h"
 #include "content/child/appcache/appcache_frontend_impl.h"
 #include "content/child/child_discardable_shared_memory_manager.h"
@@ -104,7 +105,6 @@
 #include "content/renderer/render_process_impl.h"
 #include "content/renderer/render_view_impl.h"
 #include "content/renderer/renderer_blink_platform_impl.h"
-#include "content/renderer/scheduler/renderer_scheduler.h"
 #include "content/renderer/scheduler/resource_dispatch_throttler.h"
 #include "content/renderer/service_worker/embedded_worker_context_message_filter.h"
 #include "content/renderer/service_worker/embedded_worker_dispatcher.h"
@@ -137,6 +137,7 @@
 #include "third_party/WebKit/public/web/WebScriptController.h"
 #include "third_party/WebKit/public/web/WebSecurityPolicy.h"
 #include "third_party/WebKit/public/web/WebView.h"
+#include "third_party/icu/source/i18n/unicode/timezone.h"
 #include "third_party/skia/include/core/SkGraphics.h"
 #include "ui/base/layout.h"
 #include "ui/base/ui_base_switches.h"
@@ -488,7 +489,6 @@ void RenderThreadImpl::Init() {
   ChildProcess::current()->set_main_thread(this);
 
   // In single process the single process is all there is.
-  suspend_webkit_shared_timer_ = true;
   notify_webkit_of_modal_loop_ = true;
   webkit_shared_timer_suspended_ = false;
   widget_count_ = 0;
@@ -502,7 +502,7 @@ void RenderThreadImpl::Init() {
   dom_storage_dispatcher_.reset(new DomStorageDispatcher());
   main_thread_indexed_db_dispatcher_.reset(new IndexedDBDispatcher(
       thread_safe_sender()));
-  renderer_scheduler_ = RendererScheduler::Create();
+  renderer_scheduler_ = scheduler::RendererScheduler::Create();
   channel()->SetListenerTaskRunner(renderer_scheduler_->DefaultTaskRunner());
   main_thread_cache_storage_dispatcher_.reset(
       new CacheStorageDispatcher(thread_safe_sender()));
@@ -636,10 +636,7 @@ void RenderThreadImpl::Init() {
 
   // Note that under Linux, the media library will normally already have
   // been initialized by the Zygote before this instance became a Renderer.
-  base::FilePath media_path;
-  PathService::Get(DIR_MEDIA_LIBS, &media_path);
-  if (!media_path.empty())
-    media::InitializeMediaLibrary(media_path);
+  media::InitializeMediaLibrary();
 
   memory_pressure_listener_.reset(new base::MemoryPressureListener(
       base::Bind(&RenderThreadImpl::OnMemoryPressure, base::Unretained(this))));
@@ -683,6 +680,9 @@ void RenderThreadImpl::Init() {
     }
   }
 
+  // TODO(boliu): In single process, browser main loop should set up the
+  // discardable memory manager, and should skip this if kSingleProcess.
+  // See crbug.com/503724.
   base::DiscardableMemoryAllocator::SetInstance(
       ChildThreadImpl::discardable_shared_memory_manager());
 
@@ -785,6 +785,7 @@ void RenderThreadImpl::Shutdown() {
 
   // Context providers must be released prior to destroying the GPU channel.
   gpu_va_context_provider_ = nullptr;
+  shared_main_thread_contexts_ = nullptr;
 
   if (gpu_channel_.get())
     gpu_channel_->DestroyChannel();
@@ -825,9 +826,6 @@ bool RenderThreadImpl::Send(IPC::Message* msg) {
     }
   }
 
-  bool suspend_webkit_shared_timer = true;  // default value
-  std::swap(suspend_webkit_shared_timer, suspend_webkit_shared_timer_);
-
   bool notify_webkit_of_modal_loop = true;  // default value
   std::swap(notify_webkit_of_modal_loop, notify_webkit_of_modal_loop_);
 
@@ -836,8 +834,9 @@ bool RenderThreadImpl::Send(IPC::Message* msg) {
 #endif
 
   if (pumping_events) {
-    if (suspend_webkit_shared_timer)
-      blink_platform_impl_->SuspendSharedTimer();
+    // TODO(alexclarke): Remove the shared timer.
+    blink_platform_impl_->SuspendSharedTimer();
+    renderer_scheduler_->SuspendTimerQueue();
 
     if (notify_webkit_of_modal_loop)
       WebView::willEnterModalLoop();
@@ -865,8 +864,9 @@ bool RenderThreadImpl::Send(IPC::Message* msg) {
     if (notify_webkit_of_modal_loop)
       WebView::didExitModalLoop();
 
-    if (suspend_webkit_shared_timer)
-      blink_platform_impl_->ResumeSharedTimer();
+    // TODO(alexclarke): Remove the shared timer.
+    blink_platform_impl_->ResumeSharedTimer();
+    renderer_scheduler_->ResumeTimerQueue();
   }
 
   return rv;
@@ -1094,10 +1094,6 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
   EnableBlinkPlatformLogChannels(
       command_line.GetSwitchValueASCII(switches::kBlinkPlatformLogChannels));
 
-  if (!media::IsMediaLibraryInitialized()) {
-    WebRuntimeFeatures::enableWebAudio(false);
-  }
-
   RenderMediaClient::Initialize();
 
   FOR_EACH_OBSERVER(RenderProcessObserver, observers_, WebKitInitialized());
@@ -1124,6 +1120,12 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
   if (command_line.HasSwitch(switches::kMemoryMetrics)) {
     memory_observer_.reset(new MemoryObserver());
     message_loop()->AddTaskObserver(memory_observer_.get());
+  }
+
+  if (command_line.HasSwitch(switches::kExplicitlyAllowedPorts)) {
+    std::string allowed_ports =
+        command_line.GetSwitchValueASCII(switches::kExplicitlyAllowedPorts);
+    net::SetExplicitlyAllowedPorts(allowed_ports);
   }
 }
 
@@ -1278,7 +1280,7 @@ RenderThreadImpl::GetGpuFactories() {
                   GURL("chrome://gpu/RenderThreadImpl::GetGpuVDAContext3D"),
                   WebGraphicsContext3DCommandBufferImpl::SharedMemoryLimits(),
                   NULL)),
-          "GPU-VideoAccelerator-Offscreen");
+          GPU_VIDEO_ACCELERATOR_CONTEXT);
     }
   }
   if (gpu_va_context_provider_.get()) {
@@ -1320,7 +1322,7 @@ RenderThreadImpl::SharedMainThreadContextProvider() {
 #endif
     if (!shared_main_thread_contexts_.get()) {
       shared_main_thread_contexts_ = ContextProviderCommandBuffer::Create(
-          CreateOffscreenContext3d(), "Offscreen-MainThread");
+          CreateOffscreenContext3d(), RENDERER_MAINTHREAD_CONTEXT);
     }
     if (shared_main_thread_contexts_.get() &&
         !shared_main_thread_contexts_->BindToCurrentThread())
@@ -1405,8 +1407,9 @@ bool RenderThreadImpl::IsElasticOverscrollEnabled() {
 }
 
 bool RenderThreadImpl::UseSingleThreadScheduler() {
-  base::CommandLine* cmd = base::CommandLine::ForCurrentProcess();
-  return !cmd->HasSwitch(switches::kDisableSingleThreadProxyScheduler);
+  // TODO(enne): using the scheduler introduces additional composite steps
+  // that create flakiness.  This should go away eventually.
+  return !layout_test_mode_;
 }
 
 uint32 RenderThreadImpl::GetImageTextureTarget() {
@@ -1427,7 +1430,7 @@ gpu::GpuMemoryBufferManager* RenderThreadImpl::GetGpuMemoryBufferManager() {
   return gpu_memory_buffer_manager();
 }
 
-RendererScheduler* RenderThreadImpl::GetRendererScheduler() {
+scheduler::RendererScheduler* RenderThreadImpl::GetRendererScheduler() {
   return renderer_scheduler_.get();
 }
 
@@ -1459,12 +1462,9 @@ bool RenderThreadImpl::IsMainThread() {
   return !!current();
 }
 
-base::MessageLoop* RenderThreadImpl::GetMainLoop() {
-  return message_loop();
-}
-
-scoped_refptr<base::MessageLoopProxy> RenderThreadImpl::GetIOLoopProxy() {
-  return io_message_loop_proxy_;
+scoped_refptr<base::SingleThreadTaskRunner>
+RenderThreadImpl::GetIOThreadTaskRunner() {
+  return io_thread_task_runner_;
 }
 
 scoped_ptr<base::SharedMemory> RenderThreadImpl::AllocateSharedMemory(
@@ -1493,10 +1493,6 @@ CreateCommandBufferResult RenderThreadImpl::CreateViewCommandBuffer(
   thread_safe_sender()->Send(message);
 
   return result;
-}
-
-void RenderThreadImpl::DoNotSuspendWebKitSharedTimer() {
-  suspend_webkit_shared_timer_ = false;
 }
 
 void RenderThreadImpl::DoNotNotifyWebKitOfModalLoop() {
@@ -1546,15 +1542,12 @@ bool RenderThreadImpl::OnControlMessageReceived(const IPC::Message& msg) {
   return handled;
 }
 
-void RenderThreadImpl::OnCreateNewFrame(
-    int routing_id,
-    int parent_routing_id,
-    int proxy_routing_id,
-    const FrameReplicationState& replicated_state,
-    FrameMsg_NewFrame_WidgetParams params) {
+void RenderThreadImpl::OnCreateNewFrame(FrameMsg_NewFrame_Params params) {
   CompositorDependencies* compositor_deps = this;
-  RenderFrameImpl::CreateFrame(routing_id, parent_routing_id, proxy_routing_id,
-                               replicated_state, compositor_deps, params);
+  RenderFrameImpl::CreateFrame(
+      params.routing_id, params.parent_routing_id,
+      params.previous_sibling_routing_id, params.proxy_routing_id,
+      params.replication_state, compositor_deps, params.widget_params);
 }
 
 void RenderThreadImpl::OnCreateNewFrameProxy(
@@ -1591,6 +1584,7 @@ GpuChannelHost* RenderThreadImpl::EstablishGpuChannelSync(
       return gpu_channel_.get();
 
     // Recreate the channel if it has been lost.
+    gpu_channel_->DestroyChannel();
     gpu_channel_ = NULL;
   }
 
@@ -1614,7 +1608,7 @@ GpuChannelHost* RenderThreadImpl::EstablishGpuChannelSync(
 
   // Cache some variables that are needed on the compositor thread for our
   // implementation of GpuChannelHostFactory.
-  io_message_loop_proxy_ = ChildProcess::current()->io_message_loop_proxy();
+  io_thread_task_runner_ = ChildProcess::current()->io_message_loop_proxy();
 
   gpu_channel_ =
       GpuChannelHost::Create(this,
@@ -1695,23 +1689,30 @@ void RenderThreadImpl::OnTempCrashWithData(const GURL& data) {
   CHECK(false);
 }
 
-void RenderThreadImpl::OnUpdateTimezone() {
+void RenderThreadImpl::OnUpdateTimezone(const std::string& zone_id) {
   if (!blink_platform_impl_)
     return;
+  if (!zone_id.empty()) {
+    icu::TimeZone *new_zone = icu::TimeZone::createTimeZone(
+        icu::UnicodeString::fromUTF8(zone_id));
+    icu::TimeZone::adoptDefault(new_zone);
+    VLOG(1) << "ICU default timezone is set to " << zone_id;
+  }
   NotifyTimezoneChange();
 }
 
 #if defined(OS_ANDROID)
 void RenderThreadImpl::OnSetWebKitSharedTimersSuspended(bool suspend) {
-  if (suspend_webkit_shared_timer_) {
-    EnsureWebKitInitialized();
-    if (suspend) {
-      blink_platform_impl_->SuspendSharedTimer();
-    } else {
-      blink_platform_impl_->ResumeSharedTimer();
-    }
-    webkit_shared_timer_suspended_ = suspend;
+  EnsureWebKitInitialized();
+  // TODO(alexclarke): Remove the shared timer.
+  if (suspend) {
+    blink_platform_impl_->SuspendSharedTimer();
+    renderer_scheduler_->SuspendTimerQueue();
+  } else {
+    blink_platform_impl_->ResumeSharedTimer();
+    renderer_scheduler_->ResumeTimerQueue();
   }
+  webkit_shared_timer_suspended_ = suspend;
 }
 #endif
 
@@ -1805,31 +1806,56 @@ void RenderThreadImpl::SampleGamepads(blink::WebGamepads* data) {
   blink_platform_impl_->sampleGamepads(*data);
 }
 
+bool RenderThreadImpl::RendererIsHidden() const {
+  return widget_count_ > 0 && hidden_widget_count_ == widget_count_;
+}
+
 void RenderThreadImpl::WidgetCreated() {
+  bool renderer_was_hidden = RendererIsHidden();
   widget_count_++;
+  if (renderer_was_hidden)
+    OnRendererVisible();
 }
 
 void RenderThreadImpl::WidgetDestroyed() {
+  // TODO(rmcilroy): Remove the restriction that destroyed widgets must be
+  // unhidden before WidgetDestroyed is called.
+  DCHECK_GT(widget_count_, 0);
+  DCHECK_GT(widget_count_, hidden_widget_count_);
   widget_count_--;
+  if (RendererIsHidden())
+    OnRendererHidden();
 }
 
 void RenderThreadImpl::WidgetHidden() {
   DCHECK_LT(hidden_widget_count_, widget_count_);
   hidden_widget_count_++;
-
-  if (widget_count_ && hidden_widget_count_ == widget_count_) {
-    if (GetContentClient()->renderer()->RunIdleHandlerWhenWidgetsHidden())
-      ScheduleIdleHandler(kInitialIdleHandlerDelayMs);
-  }
+  if (RendererIsHidden())
+    OnRendererHidden();
 }
 
 void RenderThreadImpl::WidgetRestored() {
+  bool renderer_was_hidden = RendererIsHidden();
   DCHECK_GT(hidden_widget_count_, 0);
   hidden_widget_count_--;
+  if (renderer_was_hidden)
+    OnRendererVisible();
+}
 
-  if (!GetContentClient()->renderer()->RunIdleHandlerWhenWidgetsHidden()) {
+void RenderThreadImpl::OnRendererHidden() {
+  renderer_scheduler_->OnRendererHidden();
+
+  // TODO(rmcilroy): Remove IdleHandler and replace it with an IdleTask
+  // scheduled by the RendererScheduler - http://crbug.com/469210.
+  if (GetContentClient()->renderer()->RunIdleHandlerWhenWidgetsHidden())
+    ScheduleIdleHandler(kInitialIdleHandlerDelayMs);
+}
+
+void RenderThreadImpl::OnRendererVisible() {
+  renderer_scheduler_->OnRendererVisible();
+
+  if (!GetContentClient()->renderer()->RunIdleHandlerWhenWidgetsHidden())
     return;
-  }
 
   ScheduleIdleHandler(kLongIdleHandlerDelayMs);
 }

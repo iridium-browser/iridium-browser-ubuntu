@@ -281,8 +281,10 @@ void Program::ClearUniforms(
     }
     GLint location = uniform_info.element_locations[0];
     GLsizei size = uniform_info.size;
-    uint32 unit_size =  GLES2Util::GetGLDataTypeSizeForUniforms(
-        uniform_info.type);
+    uint32 unit_size =
+        GLES2Util::GetElementCountForUniformType(uniform_info.type) *
+        GLES2Util::GetElementSizeForUniformType(uniform_info.type);
+    DCHECK_LT(0u, unit_size);
     uint32 size_needed = size * unit_size;
     if (size_needed > zero_buffer->size()) {
       zero_buffer->resize(size_needed, 0u);
@@ -305,9 +307,8 @@ void Program::ClearUniforms(
     case GL_BOOL:
     case GL_SAMPLER_2D:
     case GL_SAMPLER_CUBE:
-    case GL_SAMPLER_EXTERNAL_OES:
-    case GL_SAMPLER_3D_OES:
-    case GL_SAMPLER_2D_RECT_ARB:
+    case GL_SAMPLER_EXTERNAL_OES:  // extension.
+    case GL_SAMPLER_2D_RECT_ARB:  // extension.
       glUniform1iv(location, size, reinterpret_cast<const GLint*>(zero));
       break;
     case GL_INT_VEC2:
@@ -334,6 +335,60 @@ void Program::ClearUniforms(
       glUniformMatrix4fv(
           location, size, false, reinterpret_cast<const GLfloat*>(zero));
       break;
+
+    // ES3 types.
+    case GL_UNSIGNED_INT:
+      glUniform1uiv(location, size, reinterpret_cast<const GLuint*>(zero));
+      break;
+    case GL_SAMPLER_3D:
+    case GL_SAMPLER_2D_SHADOW:
+    case GL_SAMPLER_2D_ARRAY:
+    case GL_SAMPLER_2D_ARRAY_SHADOW:
+    case GL_SAMPLER_CUBE_SHADOW:
+    case GL_INT_SAMPLER_2D:
+    case GL_INT_SAMPLER_3D:
+    case GL_INT_SAMPLER_CUBE:
+    case GL_INT_SAMPLER_2D_ARRAY:
+    case GL_UNSIGNED_INT_SAMPLER_2D:
+    case GL_UNSIGNED_INT_SAMPLER_3D:
+    case GL_UNSIGNED_INT_SAMPLER_CUBE:
+    case GL_UNSIGNED_INT_SAMPLER_2D_ARRAY:
+      glUniform1iv(location, size, reinterpret_cast<const GLint*>(zero));
+      break;
+    case GL_UNSIGNED_INT_VEC2:
+      glUniform2uiv(location, size, reinterpret_cast<const GLuint*>(zero));
+      break;
+    case GL_UNSIGNED_INT_VEC3:
+      glUniform3uiv(location, size, reinterpret_cast<const GLuint*>(zero));
+      break;
+    case GL_UNSIGNED_INT_VEC4:
+      glUniform4uiv(location, size, reinterpret_cast<const GLuint*>(zero));
+      break;
+    case GL_FLOAT_MAT2x3:
+      glUniformMatrix2x3fv(
+          location, size, false, reinterpret_cast<const GLfloat*>(zero));
+      break;
+    case GL_FLOAT_MAT3x2:
+      glUniformMatrix3x2fv(
+          location, size, false, reinterpret_cast<const GLfloat*>(zero));
+      break;
+    case GL_FLOAT_MAT2x4:
+      glUniformMatrix2x4fv(
+          location, size, false, reinterpret_cast<const GLfloat*>(zero));
+      break;
+    case GL_FLOAT_MAT4x2:
+      glUniformMatrix4x2fv(
+          location, size, false, reinterpret_cast<const GLfloat*>(zero));
+      break;
+    case GL_FLOAT_MAT3x4:
+      glUniformMatrix3x4fv(
+          location, size, false, reinterpret_cast<const GLfloat*>(zero));
+      break;
+    case GL_FLOAT_MAT4x3:
+      glUniformMatrix4x3fv(
+          location, size, false, reinterpret_cast<const GLfloat*>(zero));
+      break;
+
     default:
       NOTREACHED();
       break;
@@ -383,19 +438,16 @@ void Program::Update() {
         service_id_, ii, max_len, &length, &size, &type, name_buffer.get());
     DCHECK(max_len == 0 || length < max_len);
     DCHECK(length == 0 || name_buffer[length] == '\0');
-    if (!ProgramManager::IsInvalidPrefix(name_buffer.get(), length)) {
-      std::string original_name;
-      GetVertexAttribData(name_buffer.get(), &original_name, &type);
-      // TODO(gman): Should we check for error?
-      GLint location = glGetAttribLocation(service_id_, name_buffer.get());
-      if (location > max_location) {
-        max_location = location;
-      }
-      attrib_infos_.push_back(
-          VertexAttrib(1, type, original_name, location));
-      max_attrib_name_length_ = std::max(
-          max_attrib_name_length_, static_cast<GLsizei>(original_name.size()));
+    std::string original_name;
+    GetVertexAttribData(name_buffer.get(), &original_name, &type);
+    // TODO(gman): Should we check for error?
+    GLint location = glGetAttribLocation(service_id_, name_buffer.get());
+    if (location > max_location) {
+      max_location = location;
     }
+    attrib_infos_.push_back(VertexAttrib(1, type, original_name, location));
+    max_attrib_name_length_ = std::max(
+        max_attrib_name_length_, static_cast<GLsizei>(original_name.size()));
   }
 
   // Create attrib location to index map.
@@ -438,13 +490,10 @@ void Program::Update() {
         &data.size, &data.type, name_buffer.get());
     DCHECK(max_len == 0 || length < max_len);
     DCHECK(length == 0 || name_buffer[length] == '\0');
-    if (!ProgramManager::IsInvalidPrefix(name_buffer.get(), length)) {
-      data.queried_name = std::string(name_buffer.get());
-      GetCorrectedUniformData(
-          data.queried_name,
-          &data.corrected_name, &data.original_name, &data.size, &data.type);
-      uniform_data.push_back(data);
-    }
+    data.queried_name = std::string(name_buffer.get());
+    GetCorrectedUniformData(data.queried_name, &data.corrected_name,
+                            &data.original_name, &data.size, &data.type);
+    uniform_data.push_back(data);
   }
 
   // NOTE: We don't care if 2 uniforms are bound to the same location.
@@ -459,8 +508,14 @@ void Program::Update() {
   size_t next_available_index = 0;
   for (size_t ii = 0; ii < uniform_data.size(); ++ii) {
     UniformData& data = uniform_data[ii];
-    data.location = glGetUniformLocation(
-        service_id_, data.queried_name.c_str());
+    // Force builtin uniforms (gl_DepthRange) to have invalid location.
+    if (ProgramManager::IsInvalidPrefix(data.queried_name.c_str(),
+                                        data.queried_name.size())) {
+      data.location = -1;
+    } else {
+      data.location =
+          glGetUniformLocation(service_id_, data.queried_name.c_str());
+    }
     // remove "[0]"
     std::string short_name;
     int element_index = 0;
@@ -556,6 +611,10 @@ bool Program::Link(ShaderManager* manager,
 
     if (!CanLink()) {
       set_log_info("invalid shaders");
+      return false;
+    }
+    if (DetectShaderVersionMismatch()) {
+      set_log_info("Versions of linked shaders have to match.");
       return false;
     }
     if (DetectAttribLocationBindingConflicts()) {
@@ -1032,6 +1091,22 @@ bool Program::CanLink() const {
     }
   }
   return true;
+}
+
+bool Program::DetectShaderVersionMismatch() const {
+  int version = Shader::kUndefinedShaderVersion;
+  for (int ii = 0; ii < kMaxAttachedShaders; ++ii) {
+    Shader* shader = attached_shaders_[ii].get();
+    if (shader) {
+      if (version != Shader::kUndefinedShaderVersion &&
+          shader->shader_version() != version) {
+        return true;
+      }
+      version = shader->shader_version();
+      DCHECK(version != Shader::kUndefinedShaderVersion);
+    }
+  }
+  return false;
 }
 
 bool Program::DetectAttribLocationBindingConflicts() const {

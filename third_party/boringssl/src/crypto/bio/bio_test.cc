@@ -36,6 +36,7 @@
 #include <openssl/bio.h>
 #include <openssl/crypto.h>
 #include <openssl/err.h>
+#include <openssl/mem.h>
 
 #include <algorithm>
 
@@ -111,7 +112,7 @@ static bool TestSocketConnect() {
   if (BIO_write(bio.get(), kTestMessage, sizeof(kTestMessage)) !=
       sizeof(kTestMessage)) {
     fprintf(stderr, "BIO_write failed.\n");
-    BIO_print_errors_fp(stderr);
+    ERR_print_errors_fp(stderr);
     return false;
   }
 

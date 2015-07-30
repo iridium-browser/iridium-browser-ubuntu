@@ -13,7 +13,8 @@
 #include "net/base/test_completion_callback.h"
 #include "net/http/http_cache.h"
 #include "net/http/http_transaction.h"
-#include "net/log/capturing_net_log_observer.h"
+#include "net/log/test_net_log.h"
+#include "net/log/test_net_log_entry.h"
 #include "net/test/spawned_test_server/spawned_test_server.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -31,7 +32,7 @@ TEST(NetLogUtil, GetNetConstants) {
 // caches, and they have the same number of elements.
 TEST(NetLogUtil, GetNetInfo) {
   TestURLRequestContext context;
-  net::HttpCache* http_cache = context.http_transaction_factory()->GetCache();
+  HttpCache* http_cache = context.http_transaction_factory()->GetCache();
 
   // Get NetInfo when there's no cache backend (It's only created on first use).
   EXPECT_FALSE(http_cache->GetCurrentBackend());
@@ -71,10 +72,10 @@ TEST(NetLogUtil, CreateNetLogEntriesForActiveObjectsOneContext) {
     }
     std::set<URLRequestContext*> contexts;
     contexts.insert(&context);
-    CapturingNetLogObserver capturing_observer;
-    CreateNetLogEntriesForActiveObjects(contexts, &capturing_observer);
-    CapturedNetLogEntry::List entry_list;
-    capturing_observer.GetEntries(&entry_list);
+    TestNetLog test_net_log;
+    CreateNetLogEntriesForActiveObjects(contexts, test_net_log.GetObserver());
+    TestNetLogEntry::List entry_list;
+    test_net_log.GetEntries(&entry_list);
     ASSERT_EQ(num_requests, entry_list.size());
 
     for (size_t i = 0; i < num_requests; ++i) {
@@ -88,9 +89,9 @@ TEST(NetLogUtil, CreateNetLogEntriesForActiveObjectsOneContext) {
 TEST(NetLogUtil, CreateNetLogEntriesForActiveObjectsMultipleContexts) {
   TestDelegate delegate;
   for (size_t num_requests = 0; num_requests < 5; ++num_requests) {
+    NetLog net_log;
     ScopedVector<TestURLRequestContext> contexts;
     ScopedVector<URLRequest> requests;
-    NetLog net_log;
     std::set<URLRequestContext*> context_set;
     for (size_t i = 0; i < num_requests; ++i) {
       contexts.push_back(new TestURLRequestContext(true));
@@ -102,10 +103,11 @@ TEST(NetLogUtil, CreateNetLogEntriesForActiveObjectsMultipleContexts) {
               ->CreateRequest(GURL("about:hats"), DEFAULT_PRIORITY, &delegate)
               .release());
     }
-    CapturingNetLogObserver capturing_observer;
-    CreateNetLogEntriesForActiveObjects(context_set, &capturing_observer);
-    CapturedNetLogEntry::List entry_list;
-    capturing_observer.GetEntries(&entry_list);
+    TestNetLog test_net_log;
+    CreateNetLogEntriesForActiveObjects(context_set,
+                                        test_net_log.GetObserver());
+    TestNetLogEntry::List entry_list;
+    test_net_log.GetEntries(&entry_list);
     ASSERT_EQ(num_requests, entry_list.size());
 
     for (size_t i = 0; i < num_requests; ++i) {

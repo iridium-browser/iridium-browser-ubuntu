@@ -10,7 +10,7 @@
 #include "base/bind_helpers.h"
 #include "base/test/test_mock_time_task_runner.h"
 #include "base/thread_task_runner_handle.h"
-#include "base/time/clock.h"
+#include "base/time/tick_clock.h"
 #include "components/policy/core/common/cloud/cloud_policy_client.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "components/policy/core/common/remote_commands/remote_command_job.h"
@@ -32,6 +32,7 @@ namespace {
 
 namespace em = enterprise_management;
 
+const char kDMToken[] = "dmtoken";
 const char kTestPayload[] = "_testing_payload_";
 const int kTestCommandExecutionTimeInSeconds = 1;
 const int kTestClientServerCommunicationDelayInSeconds = 3;
@@ -82,7 +83,9 @@ class TestingCloudPolicyClientForRemoteCommands : public CloudPolicyClient {
                           USER_AFFILIATION_NONE,
                           nullptr,
                           nullptr),
-        server_(server) {}
+        server_(server) {
+    dm_token_ = kDMToken;
+  }
 
   ~TestingCloudPolicyClientForRemoteCommands() override {
     EXPECT_TRUE(expected_fetch_commands_calls_.empty());
@@ -242,7 +245,7 @@ class RemoteCommandsServiceTest : public testing::Test {
 
   void SetUp() override {
     server_.reset(new TestingRemoteCommandsServer());
-    server_->SetClock(task_runner_->GetMockClock().Pass());
+    server_->SetClock(task_runner_->GetMockTickClock().Pass());
     cloud_policy_client_.reset(
         new TestingCloudPolicyClientForRemoteCommands(server_.get()));
   }
@@ -256,7 +259,8 @@ class RemoteCommandsServiceTest : public testing::Test {
   void StartService(scoped_ptr<RemoteCommandsFactory> factory) {
     remote_commands_service_.reset(
         new RemoteCommandsService(factory.Pass(), cloud_policy_client_.get()));
-    remote_commands_service_->SetClockForTesting(task_runner_->GetMockClock());
+    remote_commands_service_->SetClockForTesting(
+        task_runner_->GetMockTickClock());
   }
 
   void FlushAllTasks() {

@@ -599,6 +599,35 @@ error::Error GLES2DecoderImpl::HandleCompressedTexSubImage2D(
   return error::kNoError;
 }
 
+error::Error GLES2DecoderImpl::HandleCompressedTexSubImage3D(
+    uint32_t immediate_data_size,
+    const void* cmd_data) {
+  if (!unsafe_es3_apis_enabled())
+    return error::kUnknownCommand;
+  const gles2::cmds::CompressedTexSubImage3D& c =
+      *static_cast<const gles2::cmds::CompressedTexSubImage3D*>(cmd_data);
+  (void)c;
+  GLenum target = static_cast<GLenum>(c.target);
+  GLint level = static_cast<GLint>(c.level);
+  GLint xoffset = static_cast<GLint>(c.xoffset);
+  GLint yoffset = static_cast<GLint>(c.yoffset);
+  GLint zoffset = static_cast<GLint>(c.zoffset);
+  GLsizei width = static_cast<GLsizei>(c.width);
+  GLsizei height = static_cast<GLsizei>(c.height);
+  GLsizei depth = static_cast<GLsizei>(c.depth);
+  GLenum format = static_cast<GLenum>(c.format);
+  GLsizei imageSize = static_cast<GLsizei>(c.imageSize);
+  uint32_t data_size = imageSize;
+  const void* data = GetSharedMemoryAs<const void*>(
+      c.data_shm_id, c.data_shm_offset, data_size);
+  if (data == NULL) {
+    return error::kOutOfBounds;
+  }
+  DoCompressedTexSubImage3D(target, level, xoffset, yoffset, zoffset, width,
+                            height, depth, format, imageSize, data);
+  return error::kNoError;
+}
+
 error::Error GLES2DecoderImpl::HandleCopyBufferSubData(
     uint32_t immediate_data_size,
     const void* cmd_data) {
@@ -1492,6 +1521,105 @@ error::Error GLES2DecoderImpl::HandleGetFramebufferAttachmentParameteriv(
   return error::kNoError;
 }
 
+error::Error GLES2DecoderImpl::HandleGetInteger64v(uint32_t immediate_data_size,
+                                                   const void* cmd_data) {
+  if (!unsafe_es3_apis_enabled())
+    return error::kUnknownCommand;
+  const gles2::cmds::GetInteger64v& c =
+      *static_cast<const gles2::cmds::GetInteger64v*>(cmd_data);
+  (void)c;
+  GLenum pname = static_cast<GLenum>(c.pname);
+  typedef cmds::GetInteger64v::Result Result;
+  GLsizei num_values = 0;
+  GetNumValuesReturnedForGLGet(pname, &num_values);
+  Result* result = GetSharedMemoryAs<Result*>(
+      c.params_shm_id, c.params_shm_offset, Result::ComputeSize(num_values));
+  GLint64* params = result ? result->GetData() : NULL;
+  if (params == NULL) {
+    return error::kOutOfBounds;
+  }
+  LOCAL_COPY_REAL_GL_ERRORS_TO_WRAPPER("GetInteger64v");
+  // Check that the client initialized the result.
+  if (result->size != 0) {
+    return error::kInvalidArguments;
+  }
+  DoGetInteger64v(pname, params);
+  GLenum error = glGetError();
+  if (error == GL_NO_ERROR) {
+    result->SetNumResults(num_values);
+  } else {
+    LOCAL_SET_GL_ERROR(error, "GetInteger64v", "");
+  }
+  return error::kNoError;
+}
+
+error::Error GLES2DecoderImpl::HandleGetIntegeri_v(uint32_t immediate_data_size,
+                                                   const void* cmd_data) {
+  if (!unsafe_es3_apis_enabled())
+    return error::kUnknownCommand;
+  const gles2::cmds::GetIntegeri_v& c =
+      *static_cast<const gles2::cmds::GetIntegeri_v*>(cmd_data);
+  (void)c;
+  GLenum pname = static_cast<GLenum>(c.pname);
+  GLuint index = static_cast<GLuint>(c.index);
+  typedef cmds::GetIntegeri_v::Result Result;
+  GLsizei num_values = 0;
+  GetNumValuesReturnedForGLGet(pname, &num_values);
+  Result* result = GetSharedMemoryAs<Result*>(c.data_shm_id, c.data_shm_offset,
+                                              Result::ComputeSize(num_values));
+  GLint* data = result ? result->GetData() : NULL;
+  if (data == NULL) {
+    return error::kOutOfBounds;
+  }
+  LOCAL_COPY_REAL_GL_ERRORS_TO_WRAPPER("GetIntegeri_v");
+  // Check that the client initialized the result.
+  if (result->size != 0) {
+    return error::kInvalidArguments;
+  }
+  glGetIntegeri_v(pname, index, data);
+  GLenum error = glGetError();
+  if (error == GL_NO_ERROR) {
+    result->SetNumResults(num_values);
+  } else {
+    LOCAL_SET_GL_ERROR(error, "GetIntegeri_v", "");
+  }
+  return error::kNoError;
+}
+
+error::Error GLES2DecoderImpl::HandleGetInteger64i_v(
+    uint32_t immediate_data_size,
+    const void* cmd_data) {
+  if (!unsafe_es3_apis_enabled())
+    return error::kUnknownCommand;
+  const gles2::cmds::GetInteger64i_v& c =
+      *static_cast<const gles2::cmds::GetInteger64i_v*>(cmd_data);
+  (void)c;
+  GLenum pname = static_cast<GLenum>(c.pname);
+  GLuint index = static_cast<GLuint>(c.index);
+  typedef cmds::GetInteger64i_v::Result Result;
+  GLsizei num_values = 0;
+  GetNumValuesReturnedForGLGet(pname, &num_values);
+  Result* result = GetSharedMemoryAs<Result*>(c.data_shm_id, c.data_shm_offset,
+                                              Result::ComputeSize(num_values));
+  GLint64* data = result ? result->GetData() : NULL;
+  if (data == NULL) {
+    return error::kOutOfBounds;
+  }
+  LOCAL_COPY_REAL_GL_ERRORS_TO_WRAPPER("GetInteger64i_v");
+  // Check that the client initialized the result.
+  if (result->size != 0) {
+    return error::kInvalidArguments;
+  }
+  glGetInteger64i_v(pname, index, data);
+  GLenum error = glGetError();
+  if (error == GL_NO_ERROR) {
+    result->SetNumResults(num_values);
+  } else {
+    LOCAL_SET_GL_ERROR(error, "GetInteger64i_v", "");
+  }
+  return error::kNoError;
+}
+
 error::Error GLES2DecoderImpl::HandleGetIntegerv(uint32_t immediate_data_size,
                                                  const void* cmd_data) {
   const gles2::cmds::GetIntegerv& c =
@@ -1942,6 +2070,74 @@ error::Error GLES2DecoderImpl::HandleGetVertexAttribiv(
   return error::kNoError;
 }
 
+error::Error GLES2DecoderImpl::HandleGetVertexAttribIiv(
+    uint32_t immediate_data_size,
+    const void* cmd_data) {
+  if (!unsafe_es3_apis_enabled())
+    return error::kUnknownCommand;
+  const gles2::cmds::GetVertexAttribIiv& c =
+      *static_cast<const gles2::cmds::GetVertexAttribIiv*>(cmd_data);
+  (void)c;
+  GLuint index = static_cast<GLuint>(c.index);
+  GLenum pname = static_cast<GLenum>(c.pname);
+  typedef cmds::GetVertexAttribIiv::Result Result;
+  GLsizei num_values = 0;
+  GetNumValuesReturnedForGLGet(pname, &num_values);
+  Result* result = GetSharedMemoryAs<Result*>(
+      c.params_shm_id, c.params_shm_offset, Result::ComputeSize(num_values));
+  GLint* params = result ? result->GetData() : NULL;
+  if (params == NULL) {
+    return error::kOutOfBounds;
+  }
+  LOCAL_COPY_REAL_GL_ERRORS_TO_WRAPPER("GetVertexAttribIiv");
+  // Check that the client initialized the result.
+  if (result->size != 0) {
+    return error::kInvalidArguments;
+  }
+  DoGetVertexAttribIiv(index, pname, params);
+  GLenum error = glGetError();
+  if (error == GL_NO_ERROR) {
+    result->SetNumResults(num_values);
+  } else {
+    LOCAL_SET_GL_ERROR(error, "GetVertexAttribIiv", "");
+  }
+  return error::kNoError;
+}
+
+error::Error GLES2DecoderImpl::HandleGetVertexAttribIuiv(
+    uint32_t immediate_data_size,
+    const void* cmd_data) {
+  if (!unsafe_es3_apis_enabled())
+    return error::kUnknownCommand;
+  const gles2::cmds::GetVertexAttribIuiv& c =
+      *static_cast<const gles2::cmds::GetVertexAttribIuiv*>(cmd_data);
+  (void)c;
+  GLuint index = static_cast<GLuint>(c.index);
+  GLenum pname = static_cast<GLenum>(c.pname);
+  typedef cmds::GetVertexAttribIuiv::Result Result;
+  GLsizei num_values = 0;
+  GetNumValuesReturnedForGLGet(pname, &num_values);
+  Result* result = GetSharedMemoryAs<Result*>(
+      c.params_shm_id, c.params_shm_offset, Result::ComputeSize(num_values));
+  GLuint* params = result ? result->GetData() : NULL;
+  if (params == NULL) {
+    return error::kOutOfBounds;
+  }
+  LOCAL_COPY_REAL_GL_ERRORS_TO_WRAPPER("GetVertexAttribIuiv");
+  // Check that the client initialized the result.
+  if (result->size != 0) {
+    return error::kInvalidArguments;
+  }
+  DoGetVertexAttribIuiv(index, pname, params);
+  GLenum error = glGetError();
+  if (error == GL_NO_ERROR) {
+    result->SetNumResults(num_values);
+  } else {
+    LOCAL_SET_GL_ERROR(error, "GetVertexAttribIuiv", "");
+  }
+  return error::kNoError;
+}
+
 error::Error GLES2DecoderImpl::HandleHint(uint32_t immediate_data_size,
                                           const void* cmd_data) {
   const gles2::cmds::Hint& c = *static_cast<const gles2::cmds::Hint*>(cmd_data);
@@ -2215,7 +2411,7 @@ error::Error GLES2DecoderImpl::HandleLineWidth(uint32_t immediate_data_size,
       *static_cast<const gles2::cmds::LineWidth*>(cmd_data);
   (void)c;
   GLfloat width = static_cast<GLfloat>(c.width);
-  if (width <= 0.0f || base::IsNaN(width)) {
+  if (width <= 0.0f || std::isnan(width)) {
     LOCAL_SET_GL_ERROR(GL_INVALID_VALUE, "LineWidth", "width out of range");
     return error::kNoError;
   }
@@ -3752,7 +3948,7 @@ error::Error GLES2DecoderImpl::HandleVertexAttribI4i(
   GLint y = static_cast<GLint>(c.y);
   GLint z = static_cast<GLint>(c.z);
   GLint w = static_cast<GLint>(c.w);
-  glVertexAttribI4i(indx, x, y, z, w);
+  DoVertexAttribI4i(indx, x, y, z, w);
   return error::kNoError;
 }
 
@@ -3777,7 +3973,7 @@ error::Error GLES2DecoderImpl::HandleVertexAttribI4ivImmediate(
   if (values == NULL) {
     return error::kOutOfBounds;
   }
-  glVertexAttribI4iv(indx, values);
+  DoVertexAttribI4iv(indx, values);
   return error::kNoError;
 }
 
@@ -3794,7 +3990,7 @@ error::Error GLES2DecoderImpl::HandleVertexAttribI4ui(
   GLuint y = static_cast<GLuint>(c.y);
   GLuint z = static_cast<GLuint>(c.z);
   GLuint w = static_cast<GLuint>(c.w);
-  glVertexAttribI4ui(indx, x, y, z, w);
+  DoVertexAttribI4ui(indx, x, y, z, w);
   return error::kNoError;
 }
 
@@ -3819,7 +4015,7 @@ error::Error GLES2DecoderImpl::HandleVertexAttribI4uivImmediate(
   if (values == NULL) {
     return error::kOutOfBounds;
   }
-  glVertexAttribI4uiv(indx, values);
+  DoVertexAttribI4uiv(indx, values);
   return error::kNoError;
 }
 
@@ -4876,6 +5072,14 @@ bool GLES2DecoderImpl::SetCapabilityState(GLenum cap, bool enabled) {
       if (state_.enable_flags.cached_rasterizer_discard != enabled ||
           state_.ignore_cached_state) {
         state_.enable_flags.cached_rasterizer_discard = enabled;
+        return true;
+      }
+      return false;
+    case GL_PRIMITIVE_RESTART_FIXED_INDEX:
+      state_.enable_flags.primitive_restart_fixed_index = enabled;
+      if (state_.enable_flags.cached_primitive_restart_fixed_index != enabled ||
+          state_.ignore_cached_state) {
+        state_.enable_flags.cached_primitive_restart_fixed_index = enabled;
         return true;
       }
       return false;

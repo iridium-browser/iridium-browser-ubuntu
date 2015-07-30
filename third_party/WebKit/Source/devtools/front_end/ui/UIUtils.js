@@ -131,6 +131,11 @@ WebInspector._unregisterDragEvents = function()
  */
 WebInspector._elementDragMove = function(event)
 {
+    if (event.buttons !== 1) {
+        WebInspector._elementDragEnd(event);
+        return;
+    }
+
     if (WebInspector._elementDraggingEventListener(/** @type {!MouseEvent} */ (event)))
         WebInspector._cancelDragEvents(event);
 }
@@ -192,7 +197,7 @@ WebInspector.GlassPane.prototype = {
 }
 
 /**
- * @type {!Array.<!WebInspector.View|!WebInspector.Dialog>}
+ * @type {!Array.<!WebInspector.Widget|!WebInspector.Dialog>}
  */
 WebInspector.GlassPane.DefaultFocusedViewStack = [];
 
@@ -558,14 +563,28 @@ Number.withThousandsSeparator = function(num)
 /**
  * @param {string} format
  * @param {?ArrayLike} substitutions
- * @param {!Object.<string, function(string, ...):*>} formatters
- * @param {string} initialValue
- * @param {function(string, string): ?} append
- * @return {!{formattedResult: string, unusedSubstitutions: ?ArrayLike}};
+ * @param {?string} initialValue
+ * @return {!Element}
  */
-WebInspector.formatLocalized = function(format, substitutions, formatters, initialValue, append)
+WebInspector.formatLocalized = function(format, substitutions, initialValue)
 {
-    return String.format(WebInspector.UIString(format), substitutions, formatters, initialValue, append);
+    var element = createElement("span");
+    var formatters = {
+        s: function(substitution)
+        {
+            return substitution;
+        }
+    };
+    function append(a, b)
+    {
+        if (typeof b === "string")
+            b = createTextNode(b);
+        else if (b.shadowRoot)
+            b = createTextNode(b.shadowRoot.lastChild.textContent);
+        element.appendChild(b);
+    }
+    String.format(WebInspector.UIString(format), substitutions, formatters, initialValue, append);
+    return element;
 }
 
 /**
@@ -621,6 +640,8 @@ WebInspector.installComponentRootStyles = function(element)
     if (wasInstalled)
         return false;
     element.classList.add("component-root", "platform-" + WebInspector.platform());
+    if (Runtime.experiments.isEnabled("materialDesign"))
+        element.classList.add("material");
     return true;
 }
 
@@ -630,6 +651,8 @@ WebInspector.installComponentRootStyles = function(element)
 WebInspector.uninstallComponentRootStyles = function(element)
 {
     element.classList.remove("component-root", "platform-" + WebInspector.platform());
+    if (Runtime.experiments.isEnabled("materialDesign"))
+        element.classList.remove("material");
 }
 
 /**
@@ -766,11 +789,11 @@ WebInspector.setToolbarColors = function(document, backgroundColor, color)
              "   color: %s;" +
              "}", prefix, color) +
         String.sprintf(
-             "%s .inspector-view-toolbar.status-bar::shadow .status-bar-item {" +
+             "%s .inspector-view-toolbar.toolbar::shadow .toolbar-item {" +
              "   color: %s;" +
              "}", prefix, colorWithAlpha) +
         String.sprintf(
-             "%s .inspector-view-toolbar.status-bar::shadow .status-bar-button-theme {" +
+             "%s .inspector-view-toolbar.toolbar::shadow .toolbar-button-theme {" +
              "   background-color: %s;" +
              "}", prefix, colorWithAlpha);
 }
@@ -1268,7 +1291,7 @@ function createCheckboxLabel(title, checked)
         {
             this.type = "button";
             var root = this.createShadowRoot();
-            root.appendChild(WebInspector.View.createStyleElement("ui/textButton.css"));
+            root.appendChild(WebInspector.Widget.createStyleElement("ui/textButton.css"));
             root.createChild("content");
         },
 
@@ -1285,7 +1308,7 @@ function createCheckboxLabel(title, checked)
             this.radioElement.type = "radio";
 
             var root = this.createShadowRoot();
-            root.appendChild(WebInspector.View.createStyleElement("ui/radioButton.css"));
+            root.appendChild(WebInspector.Widget.createStyleElement("ui/radioButton.css"));
             root.createChild("content").select = ".dt-radio-button";
             root.createChild("content");
             this.addEventListener("click", radioClickHandler, false);
@@ -1314,7 +1337,7 @@ function createCheckboxLabel(title, checked)
         createdCallback: function()
         {
             var root = this.createShadowRoot();
-            root.appendChild(WebInspector.View.createStyleElement("ui/checkboxTextLabel.css"));
+            root.appendChild(WebInspector.Widget.createStyleElement("ui/checkboxTextLabel.css"));
             this.checkboxElement = this.createChild("input", "dt-checkbox-button");
             this.checkboxElement.type = "checkbox";
             root.createChild("content").select = ".dt-checkbox-button";
@@ -1331,7 +1354,7 @@ function createCheckboxLabel(title, checked)
         createdCallback: function()
         {
             var root = this.createShadowRoot();
-            root.appendChild(WebInspector.View.createStyleElement("ui/smallIcon.css"));
+            root.appendChild(WebInspector.Widget.createStyleElement("ui/smallIcon.css"));
             this._iconElement = root.createChild("div");
             root.createChild("content");
         },
@@ -1346,6 +1369,29 @@ function createCheckboxLabel(title, checked)
         },
 
         __proto__: HTMLLabelElement.prototype
+    });
+
+    registerCustomElement("div", "dt-close-button", {
+        /**
+         * @this {Element}
+         */
+        createdCallback: function()
+        {
+            var root = this.createShadowRoot();
+            root.appendChild(WebInspector.Widget.createStyleElement("ui/closeButton.css"));
+            this._buttonElement = root.createChild("div", "close-button");
+        },
+
+        /**
+         * @param {boolean} gray
+         * @this {Element}
+         */
+        set gray(gray)
+        {
+            this._buttonElement.className = gray ? "close-button-gray" : "close-button";
+        },
+
+        __proto__: HTMLDivElement.prototype
     });
 })();
 

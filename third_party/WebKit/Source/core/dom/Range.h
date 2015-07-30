@@ -74,7 +74,7 @@ public:
     bool collapsed() const { return m_start == m_end; }
 
     Node* commonAncestorContainer() const;
-    static Node* commonAncestorContainer(Node* containerA, Node* containerB);
+    static Node* commonAncestorContainer(const Node* containerA, const Node* containerB);
     void setStart(PassRefPtrWillBeRawPtr<Node> container, int offset, ExceptionState& = ASSERT_NO_EXCEPTION);
     void setEnd(PassRefPtrWillBeRawPtr<Node> container, int offset, ExceptionState& = ASSERT_NO_EXCEPTION);
     void collapse(bool toStart);
@@ -151,8 +151,8 @@ public:
     // for details.
     void expand(const String&, ExceptionState&);
 
-    PassRefPtrWillBeRawPtr<ClientRectList> getClientRects() const;
-    PassRefPtrWillBeRawPtr<ClientRect> getBoundingClientRect() const;
+    ClientRectList* getClientRects() const;
+    ClientRect* getBoundingClientRect() const;
 
 #ifndef NDEBUG
     void formatForDebugger(char* buffer, unsigned length) const;
@@ -182,9 +182,9 @@ private:
     RangeBoundaryPoint m_end;
 };
 
-PassRefPtrWillBeRawPtr<Range> rangeOfContents(Node*);
+CORE_EXPORT PassRefPtrWillBeRawPtr<Range> rangeOfContents(Node*);
 
-bool areRangesEqual(const Range*, const Range*);
+CORE_EXPORT bool areRangesEqual(const Range*, const Range*);
 
 } // namespace blink
 

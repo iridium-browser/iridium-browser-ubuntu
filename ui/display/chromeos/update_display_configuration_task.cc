@@ -5,6 +5,7 @@
 #include "ui/display/chromeos/update_display_configuration_task.h"
 
 #include "ui/display/chromeos/configure_displays_task.h"
+#include "ui/display/chromeos/display_layout_manager.h"
 #include "ui/display/chromeos/display_util.h"
 #include "ui/display/types/display_snapshot.h"
 #include "ui/display/types/native_display_delegate.h"
@@ -13,7 +14,7 @@ namespace ui {
 
 UpdateDisplayConfigurationTask::UpdateDisplayConfigurationTask(
     NativeDisplayDelegate* delegate,
-    DisplayConfigurator::DisplayLayoutManager* layout_manager,
+    DisplayLayoutManager* layout_manager,
     MultipleDisplayState new_display_state,
     chromeos::DisplayPowerState new_power_state,
     int power_flags,
@@ -110,7 +111,8 @@ void UpdateDisplayConfigurationTask::OnStateEntered(
     if (!success && new_display_state_ == MULTIPLE_DISPLAY_STATE_DUAL_MIRROR) {
       if (layout_manager_->GetDisplayState() !=
               MULTIPLE_DISPLAY_STATE_DUAL_EXTENDED ||
-          layout_manager_->GetPowerState() != new_power_state_) {
+          layout_manager_->GetPowerState() != new_power_state_ ||
+          force_configure_) {
         new_display_state_ = MULTIPLE_DISPLAY_STATE_DUAL_EXTENDED;
         EnterState(base::Bind(
             &UpdateDisplayConfigurationTask::OnEnableSoftwareMirroring,

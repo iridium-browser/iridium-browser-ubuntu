@@ -21,8 +21,10 @@ int WindowFormat(gfx::GpuMemoryBuffer::Format format) {
     case gfx::GpuMemoryBuffer::DXT1:
     case gfx::GpuMemoryBuffer::DXT5:
     case gfx::GpuMemoryBuffer::ETC1:
+    case gfx::GpuMemoryBuffer::R_8:
     case gfx::GpuMemoryBuffer::RGBX_8888:
     case gfx::GpuMemoryBuffer::BGRA_8888:
+    case gfx::GpuMemoryBuffer::YUV_420:
       NOTREACHED();
       return 0;
   }
@@ -80,12 +82,13 @@ bool GpuMemoryBufferImplSurfaceTexture::Map(void** data) {
     return false;
   }
 
-  size_t stride_in_bytes = 0;
-  if (!StrideInBytes(buffer.stride, format_, &stride_in_bytes))
-    return false;
-
   DCHECK_LE(size_.width(), buffer.stride);
-  stride_ = stride_in_bytes;
+  size_t row_size_in_bytes = 0;
+  bool valid_row_size =
+      RowSizeInBytes(buffer.stride, format_, 0, &row_size_in_bytes);
+  DCHECK(valid_row_size);
+
+  stride_ = row_size_in_bytes;
   mapped_ = true;
   *data = buffer.bits;
   return true;
@@ -99,7 +102,7 @@ void GpuMemoryBufferImplSurfaceTexture::Unmap() {
   mapped_ = false;
 }
 
-void GpuMemoryBufferImplSurfaceTexture::GetStride(uint32* stride) const {
+void GpuMemoryBufferImplSurfaceTexture::GetStride(int* stride) const {
   *stride = stride_;
 }
 

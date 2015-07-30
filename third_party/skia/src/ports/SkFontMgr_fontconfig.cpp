@@ -420,7 +420,6 @@ public:
         desc->setFamilyName(get_string(fPattern, FC_FAMILY));
         desc->setFullName(get_string(fPattern, FC_FULLNAME));
         desc->setPostscriptName(get_string(fPattern, FC_POSTSCRIPT_NAME));
-        desc->setFontFileName(get_string(fPattern, FC_FILE));
         desc->setFontIndex(get_int(fPattern, FC_INDEX, 0));
         *serialize = false;
     }
@@ -772,7 +771,12 @@ protected:
         FCLocker lock;
 
         SkAutoFcPattern pattern;
-        FcPatternAddString(pattern, FC_FAMILY, (FcChar8*)familyName);
+        if (familyName) {
+            FcValue familyNameValue;
+            familyNameValue.type = FcTypeString;
+            familyNameValue.u.s = reinterpret_cast<const FcChar8*>(familyName);
+            FcPatternAddWeak(pattern, FC_FAMILY, familyNameValue, FcFalse);
+        }
         fcpattern_from_skfontstyle(style, pattern);
 
         SkAutoFcCharSet charSet;

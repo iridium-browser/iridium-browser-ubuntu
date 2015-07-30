@@ -23,6 +23,7 @@ namespace media {
 class DemuxerStreamProvider;
 class TimeDeltaInterpolator;
 class VideoFrame;
+class VideoRendererSink;
 }
 
 namespace chromecast {
@@ -34,7 +35,8 @@ class VideoPipeline;
 
 class CmaRenderer : public ::media::Renderer {
  public:
-  explicit CmaRenderer(scoped_ptr<MediaPipeline> media_pipeline);
+  CmaRenderer(scoped_ptr<MediaPipeline> media_pipeline,
+              ::media::VideoRendererSink* video_renderer_sink);
   ~CmaRenderer() override;
 
   // ::media::Renderer implementation:
@@ -43,13 +45,12 @@ class CmaRenderer : public ::media::Renderer {
       const ::media::PipelineStatusCB& init_cb,
       const ::media::StatisticsCB& statistics_cb,
       const ::media::BufferingStateCB& buffering_state_cb,
-      const PaintCB& paint_cb,
       const base::Closure& ended_cb,
       const ::media::PipelineStatusCB& error_cb,
       const base::Closure& waiting_for_decryption_key_cb) override;
   void Flush(const base::Closure& flush_cb) override;
   void StartPlayingFrom(base::TimeDelta time) override;
-  void SetPlaybackRate(float playback_rate) override;
+  void SetPlaybackRate(double playback_rate) override;
   void SetVolume(float volume) override;
   base::TimeDelta GetMediaTime() override;
   bool HasAudio() override;
@@ -98,11 +99,11 @@ class CmaRenderer : public ::media::Renderer {
   scoped_ptr<MediaPipeline> media_pipeline_;
   AudioPipeline* audio_pipeline_;
   VideoPipeline* video_pipeline_;
+  ::media::VideoRendererSink* video_renderer_sink_;
 
   ::media::DemuxerStreamProvider* demuxer_stream_provider_;
 
   // Set of callbacks.
-  PaintCB paint_cb_;
   ::media::PipelineStatusCB init_cb_;
   ::media::StatisticsCB statistics_cb_;
   base::Closure ended_cb_;
@@ -136,7 +137,7 @@ class CmaRenderer : public ::media::Renderer {
   // as playback progresses.
   scoped_ptr< ::media::TimeDeltaInterpolator> time_interpolator_;
 
-  float playback_rate_;
+  double playback_rate_;
 
   base::WeakPtr<CmaRenderer> weak_this_;
   base::WeakPtrFactory<CmaRenderer> weak_factory_;

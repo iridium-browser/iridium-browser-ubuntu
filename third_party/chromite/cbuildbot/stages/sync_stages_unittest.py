@@ -34,6 +34,7 @@ from chromite.lib import fake_cidb
 from chromite.lib import gerrit
 from chromite.lib import git
 from chromite.lib import git_unittest
+from chromite.lib import gs_unittest
 from chromite.lib import gob_util
 from chromite.lib import osutils
 from chromite.lib import patch as cros_patch
@@ -42,7 +43,8 @@ from chromite.lib import timeout_util
 # It's normal for unittests to access protected members.
 # pylint: disable=protected-access
 
-class ManifestVersionedSyncStageTest(generic_stages_unittest.AbstractStageTest):
+class ManifestVersionedSyncStageTest(
+    generic_stages_unittest.AbstractStageTestCase):
   """Tests the ManifestVersionedSync stage."""
   # pylint: disable=abstract-method
 
@@ -82,6 +84,14 @@ class ManifestVersionedSyncStageTest(generic_stages_unittest.AbstractStageTest):
     self.PatchObject(manifest_version.BuildSpecsManager, 'GetLatestPassingSpec')
     self.PatchObject(sync_stages.SyncStage, 'ManifestCheckout',
                      return_value=self.next_version)
+    self.PatchObject(sync_stages.ManifestVersionedSyncStage,
+                     '_GetMasterVersion', return_value='foo',
+                     autospec=True)
+    self.PatchObject(sync_stages.ManifestVersionedSyncStage,
+                     '_VerifyMasterId', autospec=True)
+    self.PatchObject(manifest_version.BuildSpecsManager, 'BootstrapFromVersion',
+                     autospec=True)
+    self.PatchObject(repository.RepoRepository, 'Sync', autospec=True)
 
     self.sync_stage.Run()
 
@@ -89,6 +99,9 @@ class ManifestVersionedSyncStageTest(generic_stages_unittest.AbstractStageTest):
   @mock.patch.object(git, 'PushWithRetry')
   def testCommitProjectSDKManifest(self, _mock_push):
     """Tests that we can 'push' an SDK manifest."""
+    gs_mock = self.StartPatcher(gs_unittest.GSContextMock())
+    gs_mock.SetDefaultCmdResult()
+
     # Create test manifest
     MANIFEST_CONTENTS = 'bogus value'
     manifest = os.path.join(self.tempdir, 'sdk.xml')
@@ -109,6 +122,13 @@ class ManifestVersionedSyncStageTest(generic_stages_unittest.AbstractStageTest):
     # Ensure link to latest manifest was updated.
     self.assertTrue(os.path.exists(latest_path))
     self.assertEqual(os.path.realpath(latest_path), manifest_path)
+
+    # Verify pushes to GS.
+    gs_mock.assertCommandContains(
+        ('cp', manifest, 'gs://brillo-releases/sdk-releases/test_version.xml'))
+
+    gs_mock.assertCommandContains(
+        ('cp', 'gs://brillo-releases/sdk-releases/latest'))
 
 class MockPatch(mock.MagicMock):
   """MagicMock for a GerritPatch-like object."""
@@ -166,7 +186,7 @@ class MockPatch(mock.MagicMock):
   def GetDiffStatus(self, _):
     return self.mock_diff_status
 
-class BaseCQTestCase(generic_stages_unittest.StageTest):
+class BaseCQTestCase(generic_stages_unittest.StageTestCase):
   """Helper class for testing the CommitQueueSync stage"""
   MANIFEST_CONTENTS = '<manifest/>'
 
@@ -312,10 +332,19 @@ class SlaveCQSyncTest(BaseCQTestCase):
   """Tests the CommitQueueSync stage for the paladin slaves."""
   BOT_ID = 'x86-alex-paladin'
 
+  def setUp(self):
+    self._run.options.master_build_id = 1234
+    self.PatchObject(sync_stages.ManifestVersionedSyncStage,
+                     '_GetMasterVersion', return_value='foo',
+                     autospec=True)
+    self.PatchObject(sync_stages.MasterSlaveLKGMSyncStage,
+                     '_VerifyMasterId', autospec=True)
+    self.PatchObject(lkgm_manager.LKGMManager, 'BootstrapFromVersion',
+                     return_value=self.manifest_path, autospec=True)
+    self.PatchObject(repository.RepoRepository, 'Sync', autospec=True)
+
   def testReload(self):
     """Test basic ability to sync and reload the patches from disk."""
-    self.PatchObject(lkgm_manager.LKGMManager, 'GetLatestCandidate',
-                     return_value=self.manifest_path, autospec=True)
     self.sync_stage.PerformStage()
     self.ReloadPool()
 
@@ -464,40 +493,90 @@ class PreCQLauncherStageTest(MasterCQSyncTestCase):
 
   def testVerificationsForChangeValidConfig(self):
     change = MockPatch()
-    configs_to_test = cbuildbot_config.config.keys()[:5]
+    configs_to_test = cbuildbot_config.GetConfig().keys()[:5]
     return_string = ' '.join(configs_to_test)
     self.PatchObject(triage_lib, 'GetOptionForChange',
                      return_value=return_string)
-    self.assertEqual(self.sync_stage.VerificationsForChange(change),
-                     configs_to_test)
+    self.assertItemsEqual(self.sync_stage.VerificationsForChange(change),
+                          configs_to_test)
 
   def testVerificationsForChangeMalformedConfigFile(self):
     change = MockPatch()
     self.PatchObject(triage_lib, 'GetOptionForChange',
                      side_effect=ConfigParser.Error)
-    self.assertEqual(self.sync_stage.VerificationsForChange(change),
-                     constants.PRE_CQ_DEFAULT_CONFIGS)
+    self.assertItemsEqual(self.sync_stage.VerificationsForChange(change),
+                          constants.PRE_CQ_DEFAULT_CONFIGS)
 
   def testVerificationsForChangeNoSuchConfig(self):
     change = MockPatch()
     self.PatchObject(triage_lib, 'GetOptionForChange',
                      return_value='this_config_does_not_exist')
-    self.assertEqual(self.sync_stage.VerificationsForChange(change),
-                     constants.PRE_CQ_DEFAULT_CONFIGS)
+    self.assertItemsEqual(self.sync_stage.VerificationsForChange(change),
+                          constants.PRE_CQ_DEFAULT_CONFIGS)
 
   def testVerificationsForChangeEmptyField(self):
     change = MockPatch()
     self.PatchObject(triage_lib, 'GetOptionForChange',
                      return_value=' ')
-    self.assertEqual(self.sync_stage.VerificationsForChange(change),
-                     constants.PRE_CQ_DEFAULT_CONFIGS)
+    self.assertItemsEqual(self.sync_stage.VerificationsForChange(change),
+                          constants.PRE_CQ_DEFAULT_CONFIGS)
 
   def testVerificationsForChangeNoneField(self):
     change = MockPatch()
     self.PatchObject(triage_lib, 'GetOptionForChange',
                      return_value=None)
-    self.assertEqual(self.sync_stage.VerificationsForChange(change),
-                     constants.PRE_CQ_DEFAULT_CONFIGS)
+    self.assertItemsEqual(self.sync_stage.VerificationsForChange(change),
+                          constants.PRE_CQ_DEFAULT_CONFIGS)
+
+  def testOverlayVerifications(self):
+    change = MockPatch(project='chromiumos/overlays/chromiumos-overlay')
+    self.PatchObject(triage_lib, 'GetOptionForChange',
+                     return_value=None)
+    configs = constants.PRE_CQ_DEFAULT_CONFIGS + [constants.BINHOST_PRE_CQ]
+    self.assertItemsEqual(self.sync_stage.VerificationsForChange(change),
+                          configs)
+
+  def testRequestedDefaultVerifications(self):
+    change = MockPatch()
+    self.PatchObject(triage_lib, 'GetOptionForChange',
+                     return_value='default x86-zgb-pre-cq')
+    configs = constants.PRE_CQ_DEFAULT_CONFIGS + ['x86-zgb-pre-cq']
+    self.assertItemsEqual(self.sync_stage.VerificationsForChange(change),
+                          configs)
+
+  def testVerificationsForChangeFromInvalidCommitMessage(self):
+    change = MockPatch(commit_message="""First line.
+
+Third line.
+pre-cq-configs: insect-pre-cq
+""")
+    self.PatchObject(triage_lib, 'GetOptionForChange',
+                     return_value='lumpy-pre-cq')
+    self.assertItemsEqual(self.sync_stage.VerificationsForChange(change),
+                          ['lumpy-pre-cq'])
+
+  def testVerificationsForChangeFromCommitMessage(self):
+    change = MockPatch(commit_message="""First line.
+
+Third line.
+pre-cq-configs: stumpy-pre-cq
+""")
+    self.PatchObject(triage_lib, 'GetOptionForChange',
+                     return_value='lumpy-pre-cq')
+    self.assertItemsEqual(self.sync_stage.VerificationsForChange(change),
+                          ['stumpy-pre-cq'])
+
+  def testMultiVerificationsForChangeFromCommitMessage(self):
+    change = MockPatch(commit_message="""First line.
+
+Third line.
+pre-cq-configs: stumpy-pre-cq
+pre-cq-configs: link-pre-cq
+""")
+    self.PatchObject(triage_lib, 'GetOptionForChange',
+                     return_value='lumpy-pre-cq')
+    self.assertItemsEqual(self.sync_stage.VerificationsForChange(change),
+                          ['stumpy-pre-cq', 'link-pre-cq'])
 
   def _PrepareChangesWithPendingVerifications(self, verifications=None):
     """Prepare changes and pending verifications for them.
@@ -553,7 +632,8 @@ class PreCQLauncherStageTest(MasterCQSyncTestCase):
     # Change should be submitted by the pre-cq-launcher.
     m = self.PatchObject(validation_pool.ValidationPool, 'SubmitChanges')
     self.PerformSync(pre_cq_status=None, changes=[change], patch_objects=False)
-    m.assert_called_with(set([change]), check_tree_open=False)
+    m.assert_called_with(set([change]), reason=constants.STRATEGY_PRECQ_SUBMIT,
+                         check_tree_open=False)
 
 
   def testSubmitUnableInPreCQ(self):
@@ -588,6 +668,47 @@ class PreCQLauncherStageTest(MasterCQSyncTestCase):
     # Change should be launched now.
     self.PerformSync(pre_cq_status=None, changes=[change], runs=2)
     self.assertAllStatuses([change], constants.CL_PRECQ_CONFIG_STATUS_LAUNCHED)
+
+  def testLaunchPerCycleLimit(self):
+    # Create 4x as many changes as we can launch in one cycle.
+    change_count = (
+        sync_stages.PreCQLauncherStage.MAX_LAUNCHES_PER_CYCLE_DERIVATIVE * 4)
+    changes = self._PrepareChangesWithPendingVerifications(
+        [['lumpy-pre-cq']] * change_count)
+    for c in changes:
+      c.approval_timestamp = 0
+
+    def count_launches():
+      action_history = self.fake_db.GetActionsForChanges(changes)
+      return len(
+          [a for a in action_history
+           if a.action == constants.CL_ACTION_TRYBOT_LAUNCHING])
+
+    # After one cycle of the launcher, exactly MAX_LAUNCHES_PER_CYCLE_DERIVATIVE
+    # should have launched.
+    self.PerformSync(pre_cq_status=None, changes=changes, runs=1)
+    self.assertEqual(
+        count_launches(),
+        sync_stages.PreCQLauncherStage.MAX_LAUNCHES_PER_CYCLE_DERIVATIVE)
+
+    # After the next cycle, exactly 3 * MAX_LAUNCHES_PER_CYCLE_DERIVATIVE should
+    # have launched in total.
+    self.PerformSync(pre_cq_status=None, changes=changes, runs=1,
+                     patch_objects=False)
+    self.assertEqual(
+        count_launches(),
+        3 * sync_stages.PreCQLauncherStage.MAX_LAUNCHES_PER_CYCLE_DERIVATIVE)
+
+  def testNoLaunchClosedTree(self):
+    self.PatchObject(tree_status, 'IsTreeOpen', return_value=False)
+
+    # Create a change that is ready to be tested.
+    change = self._PrepareChangesWithPendingVerifications()[0]
+    change.approval_timestamp = 0
+
+    # Change should still be pending.
+    self.PerformSync(pre_cq_status=None, changes=[change], runs=2)
+    self.assertAllStatuses([change], constants.CL_PRECQ_CONFIG_STATUS_PENDING)
 
   def testDontTestSubmittedPatches(self):
     # Create a change that has been submitted.

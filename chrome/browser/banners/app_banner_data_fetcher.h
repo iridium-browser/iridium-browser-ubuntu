@@ -43,9 +43,11 @@ class AppBannerDataFetcher
 
   class Delegate {
    public:
-    // Called when no valid manifest was found.  Returns |true| if the fetcher
-    // needs to remain active and wait for a callback.
-    virtual bool OnInvalidManifest(AppBannerDataFetcher* fetcher) = 0;
+    // Called to handle a non-web app. Returns |true| if the non-web app can be
+    // handled, and the fetcher needs to remain active and wait for a callback.
+    virtual bool HandleNonWebApp(const std::string& platform,
+                                 const GURL& url,
+                                 const std::string& id) = 0;
   };
 
   // Returns the current time.
@@ -106,6 +108,7 @@ class AppBannerDataFetcher
   virtual std::string GetAppIdentifier();
   const content::Manifest& web_app_data() { return web_app_data_; }
   void set_app_title(const base::string16& title) { app_title_ = title; }
+  int event_request_id() { return event_request_id_; }
 
   // Fetches the icon at the given URL asynchronously, returning |false| if a
   // load could not be started.
@@ -135,14 +138,20 @@ class AppBannerDataFetcher
   // Returns whether the banner should be shown.
   bool CheckIfShouldShowBanner();
 
+  // Returns whether the fetcher is active and web contents have not been
+  // closed.
+  bool CheckFetcherIsStillAlive(content::WebContents* web_contents);
+
   // Returns whether the given Manifest is following the requirements to show
   // a web app banner.
-  static bool IsManifestValid(const content::Manifest& manifest);
+  static bool IsManifestValidForWebApp(const content::Manifest& manifest,
+                                       content::WebContents* web_contents);
 
   const int ideal_icon_size_;
   const base::WeakPtr<Delegate> weak_delegate_;
   ObserverList<Observer> observer_list_;
   bool is_active_;
+  int event_request_id_;
   scoped_ptr<chrome::BitmapFetcher> bitmap_fetcher_;
   scoped_ptr<SkBitmap> app_icon_;
 

@@ -12,6 +12,8 @@ elseif(UNIX)
     # The "armx" Perl scripts look for "64" in the style argument
     # in order to decide whether to generate 32- or 64-bit asm.
     set(PERLASM_STYLE linux64)
+  elseif (${ARCH} STREQUAL "arm")
+    set(PERLASM_STYLE linux32)
   elseif (${ARCH} STREQUAL "x86")
     set(PERLASM_FLAGS "-fPIC -DOPENSSL_IA32_SSE2")
     set(PERLASM_STYLE elf)
@@ -41,6 +43,7 @@ function(perlasm dest src)
     COMMAND ${PERL_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/${src} ${PERLASM_STYLE} ${PERLASM_FLAGS} ${ARGN} > ${dest}
     DEPENDS
     ${src}
+    ${PROJECT_SOURCE_DIR}/crypto/perlasm/arm-xlate.pl
     ${PROJECT_SOURCE_DIR}/crypto/perlasm/x86_64-xlate.pl
     ${PROJECT_SOURCE_DIR}/crypto/perlasm/x86asm.pl
     ${PROJECT_SOURCE_DIR}/crypto/perlasm/x86gas.pl
@@ -125,6 +128,7 @@ add_subdirectory(ecdsa)
 add_subdirectory(hmac)
 
 # Level 3
+add_subdirectory(cmac)
 add_subdirectory(evp)
 add_subdirectory(hkdf)
 add_subdirectory(pem)
@@ -134,16 +138,19 @@ add_subdirectory(x509v3)
 # Level 4
 add_subdirectory(pkcs8)
 
+# Test support code
+add_subdirectory(test)
+
 add_library(
   crypto
 
   crypto.c
   mem.c
   thread.c
+  thread_none.c
   thread_pthread.c
   thread_win.c
   ex_data.c
-  ex_data_impl.c
   time_support.c
   directory_posix.c
   directory_win.c
@@ -181,6 +188,7 @@ add_library(
   $<TARGET_OBJECTS:ecdh>
   $<TARGET_OBJECTS:ecdsa>
   $<TARGET_OBJECTS:hmac>
+  $<TARGET_OBJECTS:cmac>
   $<TARGET_OBJECTS:evp>
   $<TARGET_OBJECTS:hkdf>
   $<TARGET_OBJECTS:pem>
@@ -189,7 +197,7 @@ add_library(
   $<TARGET_OBJECTS:pkcs8>
 )
 
-if(NOT MSVC)
+if(NOT MSVC AND NOT ANDROID)
   target_link_libraries(crypto pthread)
 endif()
 

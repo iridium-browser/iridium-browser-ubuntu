@@ -94,7 +94,7 @@ public class PassphraseCreationDialogFragment extends DialogFragment {
             }
         });
 
-        return new AlertDialog.Builder(getActivity(), AlertDialog.THEME_HOLO_LIGHT)
+        return new AlertDialog.Builder(getActivity())
                 .setView(view)
                 .setTitle(R.string.sync_passphrase_type_custom)
                 .setPositiveButton(R.string.ok, null)

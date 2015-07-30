@@ -18,7 +18,8 @@
 #include "base/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "third_party/skia/include/core/SkImageInfo.h"
-#include "ui/ozone/platform/drm/gpu/drm_util.h"
+#include "ui/display/types/gamma_ramp_rgb_entry.h"
+#include "ui/ozone/platform/drm/common/drm_util.h"
 #include "ui/ozone/platform/drm/gpu/hardware_display_plane_manager_legacy.h"
 
 #if defined(USE_DRM_ATOMIC)
@@ -28,6 +29,11 @@
 namespace ui {
 
 namespace {
+
+typedef base::Callback<void(uint32_t /* frame */,
+                            uint32_t /* seconds */,
+                            uint32_t /* useconds */,
+                            uint64_t /* id */)> DrmEventHandler;
 
 struct PageFlipPayload {
   PageFlipPayload(const scoped_refptr<base::TaskRunner>& task_runner,
@@ -66,30 +72,48 @@ bool DrmCreateDumbBuffer(int fd,
   return true;
 }
 
-void DrmDestroyDumbBuffer(int fd, uint32_t handle) {
+bool DrmDestroyDumbBuffer(int fd, uint32_t handle) {
   struct drm_mode_destroy_dumb destroy_request;
   memset(&destroy_request, 0, sizeof(destroy_request));
   destroy_request.handle = handle;
-  drmIoctl(fd, DRM_IOCTL_MODE_DESTROY_DUMB, &destroy_request);
+  return !drmIoctl(fd, DRM_IOCTL_MODE_DESTROY_DUMB, &destroy_request);
 }
 
-void HandlePageFlipEventOnIO(int fd,
-                             unsigned int frame,
-                             unsigned int seconds,
-                             unsigned int useconds,
-                             void* data) {
-  scoped_ptr<PageFlipPayload> payload(static_cast<PageFlipPayload*>(data));
-  payload->task_runner->PostTask(
-      FROM_HERE, base::Bind(payload->callback, frame, seconds, useconds));
-}
+bool ProcessDrmEvent(int fd, const DrmEventHandler& callback) {
+  char buffer[1024];
+  int len = read(fd, buffer, sizeof(buffer));
+  if (len == 0)
+    return false;
 
-void HandlePageFlipEventOnUI(int fd,
-                             unsigned int frame,
-                             unsigned int seconds,
-                             unsigned int useconds,
-                             void* data) {
-  scoped_ptr<PageFlipPayload> payload(static_cast<PageFlipPayload*>(data));
-  payload->callback.Run(frame, seconds, useconds);
+  if (len < static_cast<int>(sizeof(drm_event))) {
+    PLOG(ERROR) << "Failed to read DRM event";
+    return false;
+  }
+
+  int idx = 0;
+  while (idx < len) {
+    DCHECK_LE(static_cast<int>(sizeof(drm_event)), len - idx);
+    drm_event event;
+    memcpy(&event, &buffer[idx], sizeof(event));
+    switch (event.type) {
+      case DRM_EVENT_FLIP_COMPLETE: {
+        DCHECK_LE(static_cast<int>(sizeof(drm_event_vblank)), len - idx);
+        drm_event_vblank vblank;
+        memcpy(&vblank, &buffer[idx], sizeof(vblank));
+        callback.Run(vblank.sequence, vblank.tv_sec, vblank.tv_usec,
+                     vblank.user_data);
+      } break;
+      case DRM_EVENT_VBLANK:
+        break;
+      default:
+        NOTREACHED();
+        break;
+    }
+
+    idx += event.length;
+  }
+
+  return true;
 }
 
 bool CanQueryForResources(int fd) {
@@ -100,23 +124,72 @@ bool CanQueryForResources(int fd) {
   return !drmIoctl(fd, DRM_IOCTL_MODE_GETRESOURCES, &resources);
 }
 
-bool Authenticate(int fd) {
-  drm_magic_t magic;
-  memset(&magic, 0, sizeof(magic));
-  // We need to make sure the DRM device has enough privilege. Use the DRM
-  // authentication logic to figure out if the device has enough permissions.
-  return !drmGetMagic(fd, &magic) && !drmAuthMagic(fd, magic);
-}
-
 }  // namespace
+
+class DrmDevice::PageFlipManager
+    : public base::RefCountedThreadSafe<DrmDevice::PageFlipManager> {
+ public:
+  PageFlipManager() : next_id_(0) {}
+
+  void OnPageFlip(uint32_t frame,
+                  uint32_t seconds,
+                  uint32_t useconds,
+                  uint64_t id) {
+    auto it =
+        std::find_if(callbacks_.begin(), callbacks_.end(), FindCallback(id));
+    if (it == callbacks_.end()) {
+      LOG(WARNING) << "Could not find callback for page flip id=" << id;
+      return;
+    }
+
+    DrmDevice::PageFlipCallback callback = it->callback;
+    callbacks_.erase(it);
+    callback.Run(frame, seconds, useconds);
+  }
+
+  uint64_t GetNextId() { return next_id_++; }
+
+  void RegisterCallback(uint64_t id,
+                        const DrmDevice::PageFlipCallback& callback) {
+    callbacks_.push_back({id, callback});
+  }
+
+ private:
+  friend class base::RefCountedThreadSafe<DrmDevice::PageFlipManager>;
+  ~PageFlipManager() {}
+
+  struct PageFlip {
+    uint64_t id;
+    DrmDevice::PageFlipCallback callback;
+  };
+
+  struct FindCallback {
+    FindCallback(uint64_t id) : id(id) {}
+
+    bool operator()(const PageFlip& flip) const { return flip.id == id; }
+
+    uint64_t id;
+  };
+
+  uint64_t next_id_;
+
+  std::vector<PageFlip> callbacks_;
+
+  DISALLOW_COPY_AND_ASSIGN(PageFlipManager);
+};
 
 class DrmDevice::IOWatcher
     : public base::RefCountedThreadSafe<DrmDevice::IOWatcher>,
       public base::MessagePumpLibevent::Watcher {
  public:
   IOWatcher(int fd,
-            const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner)
-      : io_task_runner_(io_task_runner), paused_(true), fd_(fd) {}
+            const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner,
+            const scoped_refptr<DrmDevice::PageFlipManager>& page_flip_manager)
+      : main_task_runner_(base::ThreadTaskRunnerHandle::Get()),
+        io_task_runner_(io_task_runner),
+        page_flip_manager_(page_flip_manager),
+        paused_(true),
+        fd_(fd) {}
 
   void SetPaused(bool paused) {
     if (paused_ == paused)
@@ -160,22 +233,32 @@ class DrmDevice::IOWatcher
     done->Signal();
   }
 
+  void OnPageFlipOnIO(uint32_t frame,
+                      uint32_t seconds,
+                      uint32_t useconds,
+                      uint64_t id) {
+    main_task_runner_->PostTask(
+        FROM_HERE,
+        base::Bind(&DrmDevice::PageFlipManager::OnPageFlip, page_flip_manager_,
+                   frame, seconds, useconds, id));
+  }
+
   // base::MessagePumpLibevent::Watcher overrides:
   void OnFileCanReadWithoutBlocking(int fd) override {
     DCHECK(base::MessageLoopForIO::IsCurrent());
     TRACE_EVENT1("drm", "OnDrmEvent", "socket", fd);
 
-    drmEventContext event;
-    event.version = DRM_EVENT_CONTEXT_VERSION;
-    event.page_flip_handler = HandlePageFlipEventOnIO;
-    event.vblank_handler = nullptr;
-
-    drmHandleEvent(fd, &event);
+    if (!ProcessDrmEvent(
+            fd, base::Bind(&DrmDevice::IOWatcher::OnPageFlipOnIO, this)))
+      UnregisterOnIO();
   }
 
   void OnFileCanWriteWithoutBlocking(int fd) override { NOTREACHED(); }
 
+  scoped_refptr<base::SingleThreadTaskRunner> main_task_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
+
+  scoped_refptr<DrmDevice::PageFlipManager> page_flip_manager_;
 
   base::MessagePumpLibevent::FileDescriptorWatcher controller_;
 
@@ -189,14 +272,17 @@ DrmDevice::DrmDevice(const base::FilePath& device_path)
     : device_path_(device_path),
       file_(device_path,
             base::File::FLAG_OPEN | base::File::FLAG_READ |
-                base::File::FLAG_WRITE) {
+                base::File::FLAG_WRITE),
+      page_flip_manager_(new PageFlipManager()) {
   LOG_IF(FATAL, !file_.IsValid())
       << "Failed to open '" << device_path_.value()
       << "': " << base::File::ErrorToString(file_.error_details());
 }
 
 DrmDevice::DrmDevice(const base::FilePath& device_path, base::File file)
-    : device_path_(device_path), file_(file.Pass()) {
+    : device_path_(device_path),
+      file_(file.Pass()),
+      page_flip_manager_(new PageFlipManager()) {
 }
 
 DrmDevice::~DrmDevice() {
@@ -210,26 +296,6 @@ bool DrmDevice::Initialize() {
     VLOG(2) << "Cannot query for resources for '" << device_path_.value()
             << "'";
     return false;
-  }
-
-  bool print_warning = true;
-  // TODO(dnicoara) Ugly hack to block until getting master. This is needed
-  // since DRM devices from an old GPU process may be getting deallocated while
-  // the new GPU process tries to take them.
-  // Move ownership of devices in the Browser process and just have the GPU
-  // processes authenticate.
-  while (!Authenticate(file_.GetPlatformFile())) {
-    PLOG_IF(WARNING, print_warning) << "Failed to take master on "
-                                    << device_path_.value();
-    print_warning = false;
-
-    usleep(100000);
-    file_ =
-        base::File(device_path_, base::File::FLAG_OPEN | base::File::FLAG_READ |
-                                     base::File::FLAG_WRITE);
-    LOG_IF(FATAL, !file_.IsValid())
-        << "Failed to open '" << device_path_.value()
-        << "': " << base::File::ErrorToString(file_.error_details());
   }
 
 #if defined(USE_DRM_ATOMIC)
@@ -251,7 +317,8 @@ void DrmDevice::InitializeTaskRunner(
     const scoped_refptr<base::SingleThreadTaskRunner>& task_runner) {
   DCHECK(!task_runner_);
   task_runner_ = task_runner;
-  watcher_ = new IOWatcher(file_.GetPlatformFile(), task_runner_);
+  watcher_ =
+      new IOWatcher(file_.GetPlatformFile(), task_runner_, page_flip_manager_);
 }
 
 ScopedDrmCrtcPtr DrmDevice::GetCrtc(uint32_t crtc_id) {
@@ -335,24 +402,20 @@ bool DrmDevice::PageFlip(uint32_t crtc_id,
 
   // NOTE: Calling drmModeSetCrtc will immediately update the state, though
   // callbacks to already scheduled page flips will be honored by the kernel.
-  scoped_ptr<PageFlipPayload> payload(
-      new PageFlipPayload(base::ThreadTaskRunnerHandle::Get(), callback));
+  uint64_t id = page_flip_manager_->GetNextId();
   if (!drmModePageFlip(file_.GetPlatformFile(), crtc_id, framebuffer,
-                       DRM_MODE_PAGE_FLIP_EVENT, payload.get())) {
+                       DRM_MODE_PAGE_FLIP_EVENT, reinterpret_cast<void*>(id))) {
     // If successful the payload will be removed by a PageFlip event.
-    ignore_result(payload.release());
+    page_flip_manager_->RegisterCallback(id, callback);
 
     // If the flip was requested synchronous or if no watcher has been installed
     // yet, then synchronously handle the page flip events.
     if (is_sync || !watcher_) {
       TRACE_EVENT1("drm", "OnDrmEvent", "socket", file_.GetPlatformFile());
 
-      drmEventContext event;
-      event.version = DRM_EVENT_CONTEXT_VERSION;
-      event.page_flip_handler = HandlePageFlipEventOnUI;
-      event.vblank_handler = nullptr;
-
-      drmHandleEvent(file_.GetPlatformFile(), &event);
+      ProcessDrmEvent(
+          file_.GetPlatformFile(),
+          base::Bind(&PageFlipManager::OnPageFlip, page_flip_manager_));
     }
 
     return true;
@@ -449,31 +512,41 @@ bool DrmDevice::MoveCursor(uint32_t crtc_id, const gfx::Point& point) {
 
 bool DrmDevice::CreateDumbBuffer(const SkImageInfo& info,
                                  uint32_t* handle,
-                                 uint32_t* stride,
-                                 void** pixels) {
+                                 uint32_t* stride) {
   DCHECK(file_.IsValid());
 
   TRACE_EVENT0("drm", "DrmDevice::CreateDumbBuffer");
-  if (!DrmCreateDumbBuffer(file_.GetPlatformFile(), info, handle, stride))
-    return false;
+  return DrmCreateDumbBuffer(file_.GetPlatformFile(), info, handle, stride);
+}
 
-  if (!MapDumbBuffer(file_.GetPlatformFile(), *handle,
-                     info.getSafeSize(*stride), pixels)) {
-    DrmDestroyDumbBuffer(file_.GetPlatformFile(), *handle);
+bool DrmDevice::DestroyDumbBuffer(uint32_t handle) {
+  DCHECK(file_.IsValid());
+  TRACE_EVENT1("drm", "DrmDevice::DestroyDumbBuffer", "handle", handle);
+  return DrmDestroyDumbBuffer(file_.GetPlatformFile(), handle);
+}
+
+bool DrmDevice::MapDumbBuffer(uint32_t handle, size_t size, void** pixels) {
+  struct drm_mode_map_dumb map_request;
+  memset(&map_request, 0, sizeof(map_request));
+  map_request.handle = handle;
+  if (drmIoctl(file_.GetPlatformFile(), DRM_IOCTL_MODE_MAP_DUMB,
+               &map_request)) {
+    PLOG(ERROR) << "Cannot prepare dumb buffer for mapping";
+    return false;
+  }
+
+  *pixels = mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED,
+                 file_.GetPlatformFile(), map_request.offset);
+  if (*pixels == MAP_FAILED) {
+    PLOG(ERROR) << "Cannot mmap dumb buffer";
     return false;
   }
 
   return true;
 }
 
-void DrmDevice::DestroyDumbBuffer(const SkImageInfo& info,
-                                  uint32_t handle,
-                                  uint32_t stride,
-                                  void* pixels) {
-  DCHECK(file_.IsValid());
-  TRACE_EVENT1("drm", "DrmDevice::DestroyDumbBuffer", "handle", handle);
-  munmap(pixels, info.getSafeSize(stride));
-  DrmDestroyDumbBuffer(file_.GetPlatformFile(), handle);
+bool DrmDevice::UnmapDumbBuffer(void* pixels, size_t size) {
+  return !munmap(pixels, size);
 }
 
 bool DrmDevice::CloseBufferHandle(uint32_t handle) {
@@ -486,20 +559,35 @@ bool DrmDevice::CloseBufferHandle(uint32_t handle) {
 
 bool DrmDevice::CommitProperties(drmModePropertySet* properties,
                                  uint32_t flags,
+                                 bool is_sync,
                                  const PageFlipCallback& callback) {
 #if defined(USE_DRM_ATOMIC)
+  flags |= DRM_MODE_PAGE_FLIP_EVENT;
   scoped_ptr<PageFlipPayload> payload(
       new PageFlipPayload(base::ThreadTaskRunnerHandle::Get(), callback));
+  uint64_t id = page_flip_manager_->GetNextId();
   if (!drmModePropertySetCommit(file_.GetPlatformFile(), flags, payload.get(),
                                 properties)) {
-    // If successful the payload will be removed by the event
-    ignore_result(payload.release());
+    page_flip_manager_->RegisterCallback(id, callback);
+
+    // If the flip was requested synchronous or if no watcher has been installed
+    // yet, then synchronously handle the page flip events.
+    if (is_sync || !watcher_) {
+      TRACE_EVENT1("drm", "OnDrmEvent", "socket", file_.GetPlatformFile());
+
+      ProcessDrmEvent(
+          file_.GetPlatformFile(),
+          base::Bind(&PageFlipManager::OnPageFlip, page_flip_manager_));
+    }
     return true;
   }
-  return false;
-#else
-  return false;
 #endif  // defined(USE_DRM_ATOMIC)
+  return false;
+}
+
+bool DrmDevice::SetCapability(uint64_t capability, uint64_t value) {
+  DCHECK(file_.IsValid());
+  return !drmSetClientCap(file_.GetPlatformFile(), capability, value);
 }
 
 bool DrmDevice::SetMaster() {
@@ -510,6 +598,34 @@ bool DrmDevice::SetMaster() {
 bool DrmDevice::DropMaster() {
   DCHECK(file_.IsValid());
   return (drmDropMaster(file_.GetPlatformFile()) == 0);
+}
+
+bool DrmDevice::SetGammaRamp(uint32_t crtc_id,
+                             const std::vector<GammaRampRGBEntry>& lut) {
+  ScopedDrmCrtcPtr crtc = GetCrtc(crtc_id);
+
+  // TODO(robert.bradford) resample the incoming ramp to match what the kernel
+  // expects.
+  if (static_cast<size_t>(crtc->gamma_size) != lut.size()) {
+    LOG(ERROR) << "Gamma table size mismatch: supplied " << lut.size()
+               << " expected " << crtc->gamma_size;
+  }
+
+  std::vector<uint16_t> r, g, b;
+  r.reserve(lut.size());
+  g.reserve(lut.size());
+  b.reserve(lut.size());
+
+  for (size_t i = 0; i < lut.size(); ++i) {
+    r.push_back(lut[i].r);
+    g.push_back(lut[i].g);
+    b.push_back(lut[i].b);
+  }
+
+  DCHECK(file_.IsValid());
+  TRACE_EVENT0("drm", "DrmDevice::SetGamma");
+  return (drmModeCrtcSetGamma(file_.GetPlatformFile(), crtc_id, r.size(), &r[0],
+                              &g[0], &b[0]) == 0);
 }
 
 }  // namespace ui

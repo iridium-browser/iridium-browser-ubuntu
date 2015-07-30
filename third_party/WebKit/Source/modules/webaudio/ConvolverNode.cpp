@@ -60,20 +60,19 @@ ConvolverHandler::ConvolverHandler(AudioNode& node, float sampleRate)
     initialize();
 }
 
-ConvolverHandler::~ConvolverHandler()
+PassRefPtr<ConvolverHandler> ConvolverHandler::create(AudioNode& node, float sampleRate)
 {
-    ASSERT(!isInitialized());
+    return adoptRef(new ConvolverHandler(node, sampleRate));
 }
 
-void ConvolverHandler::dispose()
+ConvolverHandler::~ConvolverHandler()
 {
     uninitialize();
-    AudioHandler::dispose();
 }
 
 void ConvolverHandler::process(size_t framesToProcess)
 {
-    AudioBus* outputBus = output(0)->bus();
+    AudioBus* outputBus = output(0).bus();
     ASSERT(outputBus);
 
     // Synchronize with possible dynamic changes to the impulse response.
@@ -86,29 +85,12 @@ void ConvolverHandler::process(size_t framesToProcess)
             // Note that we can handle the case where nothing is connected to the input, in which case we'll just feed silence into the convolver.
             // FIXME:  If we wanted to get fancy we could try to factor in the 'tail time' and stop processing once the tail dies down if
             // we keep getting fed silence.
-            m_reverb->process(input(0)->bus(), outputBus, framesToProcess);
+            m_reverb->process(input(0).bus(), outputBus, framesToProcess);
         }
     } else {
         // Too bad - the tryLock() failed.  We must be in the middle of setting a new impulse response.
         outputBus->zero();
     }
-}
-
-void ConvolverHandler::initialize()
-{
-    if (isInitialized())
-        return;
-
-    AudioHandler::initialize();
-}
-
-void ConvolverHandler::uninitialize()
-{
-    if (!isInitialized())
-        return;
-
-    m_reverb.clear();
-    AudioHandler::uninitialize();
 }
 
 void ConvolverHandler::setBuffer(AudioBuffer* buffer, ExceptionState& exceptionState)
@@ -124,6 +106,7 @@ void ConvolverHandler::setBuffer(AudioBuffer* buffer, ExceptionState& exceptionS
             "The buffer sample rate of " + String::number(buffer->sampleRate())
             + " does not match the context rate of " + String::number(context()->sampleRate())
             + " Hz.");
+        return;
     }
 
     unsigned numberOfChannels = buffer->numberOfChannels();
@@ -181,23 +164,17 @@ double ConvolverHandler::latencyTime() const
     return std::numeric_limits<double>::infinity();
 }
 
-DEFINE_TRACE(ConvolverHandler)
-{
-    visitor->trace(m_buffer);
-    AudioHandler::trace(visitor);
-}
-
 // ----------------------------------------------------------------
 
 ConvolverNode::ConvolverNode(AudioContext& context, float sampleRate)
     : AudioNode(context)
 {
-    setHandler(new ConvolverHandler(*this, sampleRate));
+    setHandler(ConvolverHandler::create(*this, sampleRate));
 }
 
-ConvolverNode* ConvolverNode::create(AudioContext* context, float sampleRate)
+ConvolverNode* ConvolverNode::create(AudioContext& context, float sampleRate)
 {
-    return new ConvolverNode(*context, sampleRate);
+    return new ConvolverNode(context, sampleRate);
 }
 
 ConvolverHandler& ConvolverNode::convolverHandler() const

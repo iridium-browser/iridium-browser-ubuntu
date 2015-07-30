@@ -37,36 +37,29 @@ WebInspector.StylesSidebarPane = function(computedStylePane, requestShowCallback
 {
     WebInspector.ElementsSidebarPane.call(this, WebInspector.UIString("Styles"));
 
-    if (!Runtime.experiments.isEnabled("animationInspection")) {
-        this._animationsControlButton = createElement("button");
-        this._animationsControlButton.className = "pane-title-button animations-controls";
-        this._animationsControlButton.title = WebInspector.UIString("Animations Controls");
-        this._animationsControlButton.addEventListener("click", this._toggleAnimationsControlPane.bind(this), false);
-        this.titleElement.appendChild(this._animationsControlButton);
-    }
-
-    this._elementStateButton = createElement("button");
-    this._elementStateButton.className = "pane-title-button element-state";
-    this._elementStateButton.title = WebInspector.UIString("Toggle Element State");
-    this._elementStateButton.addEventListener("click", this._toggleElementStatePane.bind(this), false);
-    this.titleElement.appendChild(this._elementStateButton);
-
-    var addButton = createElement("button");
-    addButton.className = "pane-title-button add";
-    addButton.id = "add-style-button-test-id";
-    addButton.title = WebInspector.UIString("New Style Rule");
-    addButton.addEventListener("click", this._createNewRuleInViaInspectorStyleSheet.bind(this), false);
-    this.titleElement.appendChild(addButton);
-    addButton.createChild("div", "long-click-glyph fill");
-
-    this._addButtonLongClickController = new WebInspector.LongClickController(addButton);
-    this._addButtonLongClickController.addEventListener(WebInspector.LongClickController.Events.LongClick, this._onAddButtonLongClick.bind(this));
-    this._addButtonLongClickController.enable();
-
     this._computedStylePane = computedStylePane;
     computedStylePane.setHostingPane(this);
     this.element.addEventListener("contextmenu", this._contextMenuEventFired.bind(this), true);
-    WebInspector.settings.colorFormat.addChangeListener(this._colorFormatSettingChanged.bind(this));
+    WebInspector.moduleSetting("colorFormat").addChangeListener(this.update.bind(this));
+    WebInspector.moduleSetting("textEditorIndent").addChangeListener(this.update.bind(this));
+
+    var toolbar = new WebInspector.Toolbar(this.titleElement);
+    toolbar.element.classList.add("styles-pane-toolbar");
+    toolbar.makeNarrow();
+
+    var addNewStyleRuleButton = new WebInspector.ToolbarButton(WebInspector.UIString("New Style Rule"), "add-toolbar-item");
+    addNewStyleRuleButton.makeLongClickEnabled();
+    addNewStyleRuleButton.addEventListener("click", this._createNewRuleInViaInspectorStyleSheet, this);
+    addNewStyleRuleButton.addEventListener("longClickDown", this._onAddButtonLongClick, this);
+    toolbar.appendToolbarItem(addNewStyleRuleButton);
+
+    this._elementStateButton = new WebInspector.ToolbarButton(WebInspector.UIString("Toggle Element State"), "element-state-toolbar-item");
+    this._elementStateButton.addEventListener("click", this._toggleElementStatePane, this);
+    toolbar.appendToolbarItem(this._elementStateButton);
+
+    this._animationsControlButton = new WebInspector.ToolbarButton(WebInspector.UIString("Animations Controls"), "animation-toolbar-item");
+    this._animationsControlButton.addEventListener("click", this._toggleAnimationsControlPane, this);
+    toolbar.appendToolbarItem(this._animationsControlButton);
 
     this._requestShowCallback = requestShowCallback;
 
@@ -165,8 +158,7 @@ WebInspector.StylesSidebarPane.prototype = {
      */
     _onAddButtonLongClick: function(event)
     {
-        this._addButtonLongClickController.reset();
-        var cssModel = this._target.cssModel;
+        var cssModel = this._cssModel;
         var headers = cssModel.styleSheetHeaders().filter(styleSheetResourceHeader);
 
         /** @type {!Array.<{text: string, handler: function()}>} */
@@ -330,8 +322,8 @@ WebInspector.StylesSidebarPane.prototype = {
             return;
 
         var hasPseudoType = !!node.pseudoType();
-        this._elementStateButton.classList.toggle("hidden", hasPseudoType);
-        this._elementStatePane.classList.toggle("expanded", !hasPseudoType && this._elementStateButton.classList.contains("toggled"));
+        this._elementStateButton.setEnabled(!hasPseudoType);
+        this._elementStatePane.classList.toggle("expanded", !hasPseudoType && this._elementStateButton.toggled());
 
         var nodePseudoState = this._forcedPseudoClasses();
         if (!nodePseudoState)
@@ -365,8 +357,7 @@ WebInspector.StylesSidebarPane.prototype = {
         if (node && node.nodeType() !== Node.ELEMENT_NODE)
             node = null;
 
-        if (node)
-            this._updateTarget(node.target());
+        this._updateTarget(node ? node.target() : null);
 
         this._resetCache();
         this._computedStylePane.setNode(node);
@@ -375,29 +366,35 @@ WebInspector.StylesSidebarPane.prototype = {
     },
 
     /**
-     * @param {!WebInspector.Target} target
+     * @param {?WebInspector.Target} target
      */
     _updateTarget: function(target)
     {
         if (this._target === target)
             return;
         if (this._target) {
-            this._target.cssModel.removeEventListener(WebInspector.CSSStyleModel.Events.StyleSheetAdded, this._styleSheetOrMediaQueryResultChanged, this);
-            this._target.cssModel.removeEventListener(WebInspector.CSSStyleModel.Events.StyleSheetRemoved, this._styleSheetOrMediaQueryResultChanged, this);
-            this._target.cssModel.removeEventListener(WebInspector.CSSStyleModel.Events.StyleSheetChanged, this._styleSheetOrMediaQueryResultChanged, this);
-            this._target.cssModel.removeEventListener(WebInspector.CSSStyleModel.Events.MediaQueryResultChanged, this._styleSheetOrMediaQueryResultChanged, this);
-            this._target.domModel.removeEventListener(WebInspector.DOMModel.Events.AttrModified, this._attributeChanged, this);
-            this._target.domModel.removeEventListener(WebInspector.DOMModel.Events.AttrRemoved, this._attributeChanged, this);
+            this._cssModel.removeEventListener(WebInspector.CSSStyleModel.Events.StyleSheetAdded, this._styleSheetOrMediaQueryResultChanged, this);
+            this._cssModel.removeEventListener(WebInspector.CSSStyleModel.Events.StyleSheetRemoved, this._styleSheetOrMediaQueryResultChanged, this);
+            this._cssModel.removeEventListener(WebInspector.CSSStyleModel.Events.StyleSheetChanged, this._styleSheetOrMediaQueryResultChanged, this);
+            this._cssModel.removeEventListener(WebInspector.CSSStyleModel.Events.MediaQueryResultChanged, this._styleSheetOrMediaQueryResultChanged, this);
+            this._cssModel.removeEventListener(WebInspector.CSSStyleModel.Events.PseudoStateForced, this._styleSheetOrMediaQueryResultChanged, this);
+            this._domModel.removeEventListener(WebInspector.DOMModel.Events.AttrModified, this._attributeChanged, this);
+            this._domModel.removeEventListener(WebInspector.DOMModel.Events.AttrRemoved, this._attributeChanged, this);
             this._target.resourceTreeModel.removeEventListener(WebInspector.ResourceTreeModel.EventTypes.FrameResized, this._frameResized, this);
         }
         this._target = target;
-        this._target.cssModel.addEventListener(WebInspector.CSSStyleModel.Events.StyleSheetAdded, this._styleSheetOrMediaQueryResultChanged, this);
-        this._target.cssModel.addEventListener(WebInspector.CSSStyleModel.Events.StyleSheetRemoved, this._styleSheetOrMediaQueryResultChanged, this);
-        this._target.cssModel.addEventListener(WebInspector.CSSStyleModel.Events.StyleSheetChanged, this._styleSheetOrMediaQueryResultChanged, this);
-        this._target.cssModel.addEventListener(WebInspector.CSSStyleModel.Events.MediaQueryResultChanged, this._styleSheetOrMediaQueryResultChanged, this);
-        this._target.domModel.addEventListener(WebInspector.DOMModel.Events.AttrModified, this._attributeChanged, this);
-        this._target.domModel.addEventListener(WebInspector.DOMModel.Events.AttrRemoved, this._attributeChanged, this);
-        this._target.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.FrameResized, this._frameResized, this);
+        if (target) {
+            this._domModel = WebInspector.DOMModel.fromTarget(target);
+            this._cssModel = WebInspector.CSSStyleModel.fromTarget(target);
+            this._cssModel.addEventListener(WebInspector.CSSStyleModel.Events.StyleSheetAdded, this._styleSheetOrMediaQueryResultChanged, this);
+            this._cssModel.addEventListener(WebInspector.CSSStyleModel.Events.StyleSheetRemoved, this._styleSheetOrMediaQueryResultChanged, this);
+            this._cssModel.addEventListener(WebInspector.CSSStyleModel.Events.StyleSheetChanged, this._styleSheetOrMediaQueryResultChanged, this);
+            this._cssModel.addEventListener(WebInspector.CSSStyleModel.Events.MediaQueryResultChanged, this._styleSheetOrMediaQueryResultChanged, this);
+            this._cssModel.addEventListener(WebInspector.CSSStyleModel.Events.PseudoStateForced, this._styleSheetOrMediaQueryResultChanged, this);
+            this._domModel.addEventListener(WebInspector.DOMModel.Events.AttrModified, this._attributeChanged, this);
+            this._domModel.addEventListener(WebInspector.DOMModel.Events.AttrRemoved, this._attributeChanged, this);
+            this._target.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.FrameResized, this._frameResized, this);
+        }
     },
 
     /**
@@ -487,6 +484,8 @@ WebInspector.StylesSidebarPane.prototype = {
         var node = this.node();
         if (!node)
             return Promise.resolve(/** @type {?WebInspector.CSSStyleDeclaration} */(null));
+
+        var cssModel = this._cssModel;
         if (!this._computedStylePromise)
             this._computedStylePromise = new Promise(getComputedStyle.bind(null, node)).then(verifyOutdated.bind(this, node));
 
@@ -498,7 +497,7 @@ WebInspector.StylesSidebarPane.prototype = {
          */
         function getComputedStyle(node, resolve)
         {
-            node.target().cssModel.getComputedStyleAsync(node.id, resolve);
+            cssModel.getComputedStyleAsync(node.id, resolve);
         }
 
         /**
@@ -520,8 +519,8 @@ WebInspector.StylesSidebarPane.prototype = {
     _getMatchedStylesForNode: function(node, callback)
     {
         var target = node.target();
-        target.cssModel.getInlineStylesAsync(node.id, inlineCallback);
-        target.cssModel.getMatchedStylesAsync(node.id, false, false, matchedCallback);
+        this._cssModel.getInlineStylesAsync(node.id, inlineCallback);
+        this._cssModel.getMatchedStylesAsync(node.id, false, false, matchedCallback);
 
         var payload = new WebInspector.StylesSidebarPane.MatchedRulesPayload();
 
@@ -800,23 +799,9 @@ WebInspector.StylesSidebarPane.prototype = {
         return false;
     },
 
-    /**
-     * @param {!WebInspector.Event} event
-     */
-    _colorFormatSettingChanged: function(event)
+    _createNewRuleInViaInspectorStyleSheet: function()
     {
-        for (var block of this._sectionBlocks) {
-            for (var section of block.sections)
-                section.update(true);
-        }
-    },
-
-    /**
-     * @param {?Event} event
-     */
-    _createNewRuleInViaInspectorStyleSheet: function(event)
-    {
-        var cssModel = this._target.cssModel;
+        var cssModel = this._cssModel;
         this._userOperation = true;
         cssModel.requestViaInspectorStylesheet(this.node(), onViaInspectorStyleSheet.bind(this));
 
@@ -889,19 +874,14 @@ WebInspector.StylesSidebarPane.prototype = {
         }
     },
 
-    /**
-     * @param {!Event} event
-     */
-    _toggleElementStatePane: function(event)
+    _toggleElementStatePane: function()
     {
-        event.consume();
-
-        var buttonToggled = !this._elementStateButton.classList.contains("toggled");
+        var buttonToggled = !this._elementStateButton.toggled();
         if (buttonToggled)
             this.expand();
-        this._elementStateButton.classList.toggle("toggled", buttonToggled);
+        this._elementStateButton.setToggled(buttonToggled);
         this._elementStatePane.classList.toggle("expanded", buttonToggled);
-        this._animationsControlButton.classList.remove("toggled");
+        this._animationsControlButton.setToggled(false);
         this._animationsControlPane.element.classList.remove("expanded");
     },
 
@@ -923,7 +903,7 @@ WebInspector.StylesSidebarPane.prototype = {
             var node = this.node();
             if (!node)
                 return;
-            node.target().cssModel.forcePseudoState(node, event.target.state, event.target.checked);
+            WebInspector.CSSStyleModel.fromNode(node).forcePseudoState(node, event.target.state, event.target.checked);
         }
 
         /**
@@ -954,19 +934,14 @@ WebInspector.StylesSidebarPane.prototype = {
         this._elementStatePane.appendChild(table);
     },
 
-        /**
-     * @param {!Event} event
-     */
-    _toggleAnimationsControlPane: function(event)
+    _toggleAnimationsControlPane: function()
     {
-        event.consume();
-
-        var buttonToggled = !this._animationsControlButton.classList.contains("toggled");
+        var buttonToggled = !this._animationsControlButton.toggled();
         if (buttonToggled)
             this.expand();
-        this._animationsControlButton.classList.toggle("toggled", buttonToggled);
+        this._animationsControlButton.setToggled(buttonToggled);
         this._animationsControlPane.element.classList.toggle("expanded", buttonToggled);
-        this._elementStateButton.classList.remove("toggled");
+        this._elementStateButton.setToggled(false);
         this._elementStatePane.classList.remove("expanded");
     },
 
@@ -1778,7 +1753,7 @@ WebInspector.StylePropertiesSection.prototype = {
 
         // This gets deleted in finishOperation(), which is called both on success and failure.
         this._parentPane._userOperation = true;
-        this._parentPane._target.cssModel.setMediaText(media, newContent, successCallback.bind(this), finishOperation.bind(this));
+        this._parentPane._cssModel.setMediaText(media, newContent, successCallback.bind(this), finishOperation.bind(this));
     },
 
     _editingMediaTextCommittedForTest: function() { },
@@ -1790,9 +1765,9 @@ WebInspector.StylePropertiesSection.prototype = {
     {
         if (WebInspector.KeyboardShortcut.eventHasCtrlOrMeta(/** @type {!MouseEvent} */(event)) && this.navigable && event.target.classList.contains("simple-selector")) {
             var index = event.target._selectorIndex;
-            var target = this._parentPane._target;
+            var cssModel = this._parentPane._cssModel;
             var rule = this.rule();
-            var rawLocation = new WebInspector.CSSLocation(target, /** @type {string} */(rule.styleSheetId), rule.sourceURL, rule.lineNumberInSource(index), rule.columnNumberInSource(index));
+            var rawLocation = new WebInspector.CSSLocation(cssModel, /** @type {string} */(rule.styleSheetId), rule.sourceURL, rule.lineNumberInSource(index), rule.columnNumberInSource(index));
             var uiLocation = WebInspector.cssWorkspaceBinding.rawLocationToUILocation(rawLocation);
             if (uiLocation)
                 WebInspector.Revealer.reveal(uiLocation);
@@ -1939,7 +1914,7 @@ WebInspector.StylePropertiesSection.prototype = {
         // This gets deleted in finishOperationAndMoveEditor(), which is called both on success and failure.
         this._parentPane._userOperation = true;
         var selectedNode = this._parentPane.node();
-        this._parentPane._target.cssModel.setRuleSelector(this.rule(), selectedNode ? selectedNode.id : 0, newContent, successCallback.bind(this), finishOperationAndMoveEditor.bind(this, moveDirection));
+        this._parentPane._cssModel.setRuleSelector(this.rule(), selectedNode ? selectedNode.id : 0, newContent, successCallback.bind(this), finishOperationAndMoveEditor.bind(this, moveDirection));
     },
 
     _editingSelectorCommittedForTest: function() { },
@@ -1947,7 +1922,7 @@ WebInspector.StylePropertiesSection.prototype = {
     _updateRuleOrigin: function()
     {
         this._selectorRefElement.removeChildren();
-        this._selectorRefElement.appendChild(WebInspector.StylePropertiesSection.createRuleOriginNode(this._parentPane._target, this._parentPane._linkifier, this.rule()));
+        this._selectorRefElement.appendChild(WebInspector.StylePropertiesSection.createRuleOriginNode(this._parentPane._cssModel, this._parentPane._linkifier, this.rule()));
     },
 
     _editingSelectorEnded: function()
@@ -1967,12 +1942,12 @@ WebInspector.StylePropertiesSection.prototype = {
 }
 
 /**
- * @param {!WebInspector.Target} target
+ * @param {!WebInspector.CSSStyleModel} cssModel
  * @param {!WebInspector.Linkifier} linkifier
  * @param {?WebInspector.CSSRule} rule
  * @return {!Node}
  */
-WebInspector.StylePropertiesSection.createRuleOriginNode = function(target, linkifier, rule)
+WebInspector.StylePropertiesSection.createRuleOriginNode = function(cssModel, linkifier, rule)
 {
     if (!rule)
         return createTextNode("");
@@ -1980,9 +1955,9 @@ WebInspector.StylePropertiesSection.createRuleOriginNode = function(target, link
     var firstMatchingIndex = rule.matchingSelectors && rule.matchingSelectors.length ? rule.matchingSelectors[0] : 0;
     var ruleLocation = rule.selectors[firstMatchingIndex].range;
 
-    var header = rule.styleSheetId ? target.cssModel.styleSheetHeaderForId(rule.styleSheetId) : null;
+    var header = rule.styleSheetId ? cssModel.styleSheetHeaderForId(rule.styleSheetId) : null;
     if (ruleLocation && rule.styleSheetId && header && header.resourceURL())
-        return WebInspector.StylePropertiesSection._linkifyRuleLocation(target, linkifier, rule.styleSheetId, ruleLocation);
+        return WebInspector.StylePropertiesSection._linkifyRuleLocation(cssModel, linkifier, rule.styleSheetId, ruleLocation);
 
     if (rule.isUserAgent)
         return createTextNode(WebInspector.UIString("user agent stylesheet"));
@@ -2001,19 +1976,19 @@ WebInspector.StylePropertiesSection.createRuleOriginNode = function(target, link
 }
 
 /**
- * @param {!WebInspector.Target} target
+ * @param {!WebInspector.CSSStyleModel} cssModel
  * @param {!WebInspector.Linkifier} linkifier
  * @param {string} styleSheetId
  * @param {!WebInspector.TextRange} ruleLocation
  * @return {!Node}
  */
-WebInspector.StylePropertiesSection._linkifyRuleLocation = function(target, linkifier, styleSheetId, ruleLocation)
+WebInspector.StylePropertiesSection._linkifyRuleLocation = function(cssModel, linkifier, styleSheetId, ruleLocation)
 {
-    var styleSheetHeader = target.cssModel.styleSheetHeaderForId(styleSheetId);
+    var styleSheetHeader = cssModel.styleSheetHeaderForId(styleSheetId);
     var sourceURL = styleSheetHeader.resourceURL();
     var lineNumber = styleSheetHeader.lineNumberInSource(ruleLocation.startLine);
     var columnNumber = styleSheetHeader.columnNumberInSource(ruleLocation.startLine, ruleLocation.startColumn);
-    var matchingSelectorLocation = new WebInspector.CSSLocation(target, styleSheetId, sourceURL, lineNumber, columnNumber);
+    var matchingSelectorLocation = new WebInspector.CSSLocation(cssModel, styleSheetId, sourceURL, lineNumber, columnNumber);
     return linkifier.linkifyCSSLocation(matchingSelectorLocation);
 }
 
@@ -2029,13 +2004,13 @@ WebInspector.StylePropertiesSection._linkifyRuleLocation = function(target, link
 WebInspector.BlankStylePropertiesSection = function(stylesPane, defaultSelectorText, styleSheetId, ruleLocation, insertAfterStyleRule)
 {
     var dummyCascade = new WebInspector.SectionCascade();
-    var blankSectionModel = dummyCascade.appendModelFromStyle(WebInspector.CSSStyleDeclaration.createDummyStyle(stylesPane._target), defaultSelectorText);
+    var blankSectionModel = dummyCascade.appendModelFromStyle(WebInspector.CSSStyleDeclaration.createDummyStyle(stylesPane._cssModel), defaultSelectorText);
     blankSectionModel.setEditable(true);
     WebInspector.StylePropertiesSection.call(this, stylesPane, blankSectionModel);
     this._ruleLocation = ruleLocation;
     this._styleSheetId = styleSheetId;
     this._selectorRefElement.removeChildren();
-    this._selectorRefElement.appendChild(WebInspector.StylePropertiesSection._linkifyRuleLocation(this._parentPane._target, this._parentPane._linkifier, styleSheetId, this._actualRuleLocation()));
+    this._selectorRefElement.appendChild(WebInspector.StylePropertiesSection._linkifyRuleLocation(this._parentPane._cssModel, this._parentPane._linkifier, styleSheetId, this._actualRuleLocation()));
     if (insertAfterStyleRule)
         this._createMediaList(insertAfterStyleRule.media());
     this._insertAfterStyleRule = insertAfterStyleRule;
@@ -2127,7 +2102,7 @@ WebInspector.BlankStylePropertiesSection.prototype = {
             newContent = newContent.trim();
         this._parentPane._userOperation = true;
 
-        var cssModel = this._parentPane._target.cssModel;
+        var cssModel = this._parentPane._cssModel;
         var ruleText = this._rulePrefix() + newContent + " {}";
         cssModel.addRule(this._styleSheetId, this._parentPane.node(), ruleText, this._ruleLocation, successCallback.bind(this), failureCallback.bind(this));
     },
@@ -2303,7 +2278,8 @@ WebInspector.StylePropertyTreeElementBase.prototype = {
         if (!this.treeOutline)
             return;
 
-        this.listItemElement.createChild("span", "styles-clipboard-only").createTextChild(this.disabled ? "  /* " : "  ");
+        var indent = WebInspector.moduleSetting("textEditorIndent").get();
+        this.listItemElement.createChild("span", "styles-clipboard-only").createTextChild(indent + (this.disabled ? "/* " : ""));
         this.listItemElement.appendChild(this.nameElement);
         this.listItemElement.createTextChild(": ");
         this.listItemElement.appendChild(this._expandElement);

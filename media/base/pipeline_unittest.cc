@@ -84,7 +84,6 @@ class PipelineTest : public ::testing::Test {
     MOCK_METHOD1(OnError, void(PipelineStatus));
     MOCK_METHOD1(OnMetadata, void(PipelineMetadata));
     MOCK_METHOD1(OnBufferingStateChange, void(BufferingState));
-    MOCK_METHOD1(OnVideoFramePaint, void(const scoped_refptr<VideoFrame>&));
     MOCK_METHOD0(OnDurationChange, void());
 
    private:
@@ -170,9 +169,9 @@ class PipelineTest : public ::testing::Test {
 
   // Sets up expectations to allow the video renderer to initialize.
   void SetRendererExpectations() {
-    EXPECT_CALL(*renderer_, Initialize(_, _, _, _, _, _, _, _))
+    EXPECT_CALL(*renderer_, Initialize(_, _, _, _, _, _, _))
         .WillOnce(DoAll(SaveArg<3>(&buffering_state_cb_),
-                        SaveArg<5>(&ended_cb_),
+                        SaveArg<4>(&ended_cb_),
                         PostCallback<1>(PIPELINE_OK)));
     EXPECT_CALL(*renderer_, HasAudio()).WillRepeatedly(Return(audio_stream()));
     EXPECT_CALL(*renderer_, HasVideo()).WillRepeatedly(Return(video_stream()));
@@ -196,8 +195,6 @@ class PipelineTest : public ::testing::Test {
         base::Bind(&CallbackHelper::OnMetadata, base::Unretained(&callbacks_)),
         base::Bind(&CallbackHelper::OnBufferingStateChange,
                    base::Unretained(&callbacks_)),
-        base::Bind(&CallbackHelper::OnVideoFramePaint,
-                   base::Unretained(&callbacks_)),
         base::Bind(&CallbackHelper::OnDurationChange,
                    base::Unretained(&callbacks_)),
         base::Bind(&PipelineTest::OnAddTextTrack, base::Unretained(this)),
@@ -212,7 +209,7 @@ class PipelineTest : public ::testing::Test {
 
     if (start_status == PIPELINE_OK) {
       EXPECT_CALL(callbacks_, OnMetadata(_)).WillOnce(SaveArg<0>(&metadata_));
-      EXPECT_CALL(*renderer_, SetPlaybackRate(0.0f));
+      EXPECT_CALL(*renderer_, SetPlaybackRate(0.0));
       EXPECT_CALL(*renderer_, SetVolume(1.0f));
       EXPECT_CALL(*renderer_, StartPlayingFrom(start_time_))
           .WillOnce(SetBufferingState(&buffering_state_cb_,
@@ -340,9 +337,9 @@ TEST_F(PipelineTest, NotStarted) {
 
   // Setting should still work.
   EXPECT_EQ(0.0f, pipeline_->GetPlaybackRate());
-  pipeline_->SetPlaybackRate(-1.0f);
+  pipeline_->SetPlaybackRate(-1.0);
   EXPECT_EQ(0.0f, pipeline_->GetPlaybackRate());
-  pipeline_->SetPlaybackRate(1.0f);
+  pipeline_->SetPlaybackRate(1.0);
   EXPECT_EQ(1.0f, pipeline_->GetPlaybackRate());
 
   // Setting should still work.
@@ -630,9 +627,6 @@ TEST_F(PipelineTest, EndedCallback) {
   message_loop_.RunUntilIdle();
 
   EXPECT_CALL(callbacks_, OnEnded());
-  // Since the |ended_cb_| is manually invoked above, the duration does not
-  // match the expected duration and is updated upon ended.
-  EXPECT_CALL(callbacks_, OnDurationChange());
   text_stream()->SendEosNotification();
   message_loop_.RunUntilIdle();
 }
@@ -646,7 +640,7 @@ TEST_F(PipelineTest, ErrorDuringSeek) {
   SetRendererExpectations();
   StartPipelineAndExpect(PIPELINE_OK);
 
-  float playback_rate = 1.0f;
+  double playback_rate = 1.0;
   EXPECT_CALL(*renderer_, SetPlaybackRate(playback_rate));
   pipeline_->SetPlaybackRate(playback_rate);
   message_loop_.RunUntilIdle();
@@ -681,7 +675,7 @@ static void TestNoCallsAfterError(
   EXPECT_TRUE(message_loop->IsIdleForTesting());
 
   // Make calls on pipeline after error has occurred.
-  pipeline->SetPlaybackRate(0.5f);
+  pipeline->SetPlaybackRate(0.5);
   pipeline->SetVolume(0.5f);
 
   // No additional tasks should be queued as a result of these calls.
@@ -861,13 +855,13 @@ class PipelineTeardownTest : public PipelineTest {
 
     if (state == kInitRenderer) {
       if (stop_or_error == kStop) {
-        EXPECT_CALL(*renderer_, Initialize(_, _, _, _, _, _, _, _))
+        EXPECT_CALL(*renderer_, Initialize(_, _, _, _, _, _, _))
             .WillOnce(DoAll(Stop(pipeline_.get(), stop_cb),
                             PostCallback<1>(PIPELINE_OK)));
         ExpectPipelineStopAndDestroyPipeline();
       } else {
         status = PIPELINE_ERROR_INITIALIZATION_FAILED;
-        EXPECT_CALL(*renderer_, Initialize(_, _, _, _, _, _, _, _))
+        EXPECT_CALL(*renderer_, Initialize(_, _, _, _, _, _, _))
             .WillOnce(PostCallback<1>(status));
       }
 
@@ -876,14 +870,14 @@ class PipelineTeardownTest : public PipelineTest {
       return status;
     }
 
-    EXPECT_CALL(*renderer_, Initialize(_, _, _, _, _, _, _, _))
+    EXPECT_CALL(*renderer_, Initialize(_, _, _, _, _, _, _))
         .WillOnce(DoAll(SaveArg<3>(&buffering_state_cb_),
                         PostCallback<1>(PIPELINE_OK)));
 
     EXPECT_CALL(callbacks_, OnMetadata(_));
 
     // If we get here it's a successful initialization.
-    EXPECT_CALL(*renderer_, SetPlaybackRate(0.0f));
+    EXPECT_CALL(*renderer_, SetPlaybackRate(0.0));
     EXPECT_CALL(*renderer_, SetVolume(1.0f));
     EXPECT_CALL(*renderer_, StartPlayingFrom(base::TimeDelta()))
         .WillOnce(SetBufferingState(&buffering_state_cb_,

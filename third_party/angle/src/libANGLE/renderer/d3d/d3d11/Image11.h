@@ -31,8 +31,6 @@ class Image11 : public ImageD3D
     Image11(Renderer11 *renderer);
     virtual ~Image11();
 
-    static Image11 *makeImage11(ImageD3D *img);
-
     static gl::Error generateMipmap(Image11 *dest, Image11 *src);
 
     virtual bool isDirty() const;
@@ -67,7 +65,6 @@ class Image11 : public ImageD3D
     void releaseStagingTexture();
 
     Renderer11 *mRenderer;
-    D3D_FEATURE_LEVEL mFeatureLevel;
 
     DXGI_FORMAT mDXGIFormat;
     ID3D11Resource *mStagingTexture;

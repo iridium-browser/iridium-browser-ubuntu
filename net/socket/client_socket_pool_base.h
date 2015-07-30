@@ -183,7 +183,16 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
     Flags flags() const { return flags_; }
     const BoundNetLog& net_log() const { return net_log_; }
 
+    // TODO(eroman): Temporary until crbug.com/467797 is solved.
+    void CrashIfInvalid() const;
+
    private:
+    // TODO(eroman): Temporary until crbug.com/467797 is solved.
+    enum Liveness {
+      ALIVE = 0xCA11AB13,
+      DEAD = 0xDEADBEEF,
+    };
+
     ClientSocketHandle* const handle_;
     const CompletionCallback callback_;
     // TODO(akalin): Support reprioritization.
@@ -191,6 +200,9 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
     const bool ignore_limits_;
     const Flags flags_;
     const BoundNetLog net_log_;
+
+    // TODO(eroman): Temporary until crbug.com/467797 is solved.
+    Liveness liveness_ = ALIVE;
 
     DISALLOW_COPY_AND_ASSIGN(Request);
   };
@@ -450,7 +462,7 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
     void DecrementActiveSocketCount() { active_socket_count_--; }
 
     int unassigned_job_count() const { return unassigned_job_count_; }
-    const std::set<ConnectJob*>& jobs() const { return jobs_; }
+    const std::list<ConnectJob*>& jobs() const { return jobs_; }
     const std::list<IdleSocket>& idle_sockets() const { return idle_sockets_; }
     int active_socket_count() const { return active_socket_count_; }
     std::list<IdleSocket>* mutable_idle_sockets() { return &idle_sockets_; }
@@ -479,7 +491,7 @@ class NET_EXPORT_PRIVATE ClientSocketPoolBaseHelper
     size_t unassigned_job_count_;
 
     std::list<IdleSocket> idle_sockets_;
-    std::set<ConnectJob*> jobs_;
+    std::list<ConnectJob*> jobs_;
     RequestQueue pending_requests_;
     int active_socket_count_;  // number of active sockets used by clients
     // A timer for when to start the backup job.
@@ -846,9 +858,9 @@ class ClientSocketPoolBase {
 
     explicit ConnectJobFactoryAdaptor(ConnectJobFactory* connect_job_factory)
         : connect_job_factory_(connect_job_factory) {}
-    virtual ~ConnectJobFactoryAdaptor() {}
+    ~ConnectJobFactoryAdaptor() override {}
 
-    virtual scoped_ptr<ConnectJob> NewConnectJob(
+    scoped_ptr<ConnectJob> NewConnectJob(
         const std::string& group_name,
         const internal::ClientSocketPoolBaseHelper::Request& request,
         ConnectJob::Delegate* delegate) const override {

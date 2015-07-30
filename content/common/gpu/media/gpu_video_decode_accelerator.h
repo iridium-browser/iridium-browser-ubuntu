@@ -14,14 +14,11 @@
 #include "base/synchronization/waitable_event.h"
 #include "content/common/gpu/gpu_command_buffer_stub.h"
 #include "gpu/command_buffer/service/texture_manager.h"
+#include "gpu/config/gpu_info.h"
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_sender.h"
 #include "media/video/video_decode_accelerator.h"
 #include "ui/gfx/geometry/size.h"
-
-namespace base {
-class MessageLoopProxy;
-}
 
 namespace content {
 
@@ -37,7 +34,7 @@ class GpuVideoDecodeAccelerator
   GpuVideoDecodeAccelerator(
       int32 host_route_id,
       GpuCommandBufferStub* stub,
-      const scoped_refptr<base::MessageLoopProxy>& io_message_loop);
+      const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner);
 
   // IPC::Listener implementation.
   bool OnMessageReceived(const IPC::Message& message) override;
@@ -65,6 +62,11 @@ class GpuVideoDecodeAccelerator
   // VDA can decode on IO thread.
   void Initialize(const media::VideoCodecProfile profile,
                   IPC::Message* init_done_msg);
+
+  // Static query for supported profiles. This query calls the appropriate
+  // platform-specific version. The returned supported profiles vector will
+  // not contain duplicates.
+  static gpu::VideoDecodeAcceleratorSupportedProfiles GetSupportedProfiles();
 
  private:
   typedef scoped_ptr<media::VideoDecodeAccelerator>(
@@ -134,11 +136,11 @@ class GpuVideoDecodeAccelerator
   // destroy the VDA.
   base::WaitableEvent filter_removed_;
 
-  // GPU child message loop.
-  const scoped_refptr<base::MessageLoopProxy> child_message_loop_;
+  // GPU child thread task runner.
+  const scoped_refptr<base::SingleThreadTaskRunner> child_task_runner_;
 
-  // GPU IO message loop.
-  const scoped_refptr<base::MessageLoopProxy> io_message_loop_;
+  // GPU IO thread task runner.
+  const scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
 
   // Weak pointers will be invalidated on IO thread.
   base::WeakPtrFactory<Client> weak_factory_for_io_;

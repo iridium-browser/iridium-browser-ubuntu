@@ -19,6 +19,7 @@ var FileTask;
  *   size: (number|undefined),
  *   modificationTime: (number|undefined),
  *   thumbnailUrl: (string|undefined),
+ *   croppedThumbnailUrl: (string|undefined),
  *   externalFileUrl: (string|undefined),
  *   imageWidth: (number|undefined),
  *   imageHeight: (number|undefined),
@@ -59,6 +60,7 @@ var ProfileInfo;
  *   volumeId: string,
  *   fileSystemId: (string|undefined),
  *   extensionId: (string|undefined),
+ *   source: string,
  *   volumeLabel: (string|undefined),
  *   profile: ProfileInfo,
  *   sourcePath: (string|undefined),
@@ -68,6 +70,7 @@ var ProfileInfo;
  *   isParentDevice: (boolean|undefined),
  *   isReadOnly: boolean,
  *   hasMedia: boolean,
+ *   configurable: boolean,
  *   mountCondition: (string|undefined),
  *   mountContext: (string|undefined)
  * }}
@@ -199,6 +202,17 @@ var DriveConnectionState;
  * }}
  */
 var DeviceEvent;
+
+/**
+ * @typedef {{
+ *   extensionId: string,
+ *   name: string,
+ *   configurable: boolean,
+ *   multipleMounts: boolean,
+ *   source: string
+ * }}
+ */
+var ProvidingExtension;
 
 /**
  * @const
@@ -579,6 +593,29 @@ chrome.fileManagerPrivate.setEntryTag = function(entryURL, visibility, key, valu
  * @param {function(boolean)} callback
  */
 chrome.fileManagerPrivate.isPiexLoaderEnabled = function(callback) {};
+
+/**
+ * Returns list of available providing extensions.
+ * @param {function(!Array<!ProvidingExtension>)} callback
+ */
+chrome.fileManagerPrivate.getProvidingExtensions = function(callback) {};
+
+/**
+ * Requests adding a new provided file system. If not possible, then an error
+ * via chrome.runtime.lastError is returned.
+ * @param {string} extensionId
+ * @param {function()} callback
+ */
+chrome.fileManagerPrivate.addProvidedFileSystem =
+    function(extensionId, callback) {};
+
+/**
+ * Requests configuring an existing file system. If not possible, then returns
+ * an error via chrome.runtime.lastError.
+ * @param {string} volumeId
+ * @param {function()} callback
+ */
+chrome.fileManagerPrivate.configureVolume = function(volumeId, callback) {};
 
 /** @type {!ChromeEvent} */
 chrome.fileManagerPrivate.onMountCompleted;

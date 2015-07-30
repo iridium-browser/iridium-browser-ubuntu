@@ -59,9 +59,9 @@ class NodeRareData : public NoBaseWillBeGarbageCollectedFinalized<NodeRareData>,
     WTF_MAKE_NONCOPYABLE(NodeRareData);
     WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(NodeRareData);
 public:
-    static NodeRareData* create(LayoutObject* renderer)
+    static NodeRareData* create(LayoutObject* layoutObject)
     {
-        return new NodeRareData(renderer);
+        return new NodeRareData(layoutObject);
     }
 
     void clearNodeLists() { m_nodeLists.clear(); }
@@ -82,10 +82,7 @@ public:
     }
 
     unsigned connectedSubframeCount() const { return m_connectedFrameCount; }
-    void incrementConnectedSubframeCount(unsigned amount)
-    {
-        m_connectedFrameCount += amount;
-    }
+    void incrementConnectedSubframeCount(unsigned amount);
     void decrementConnectedSubframeCount(unsigned amount)
     {
         ASSERT(m_connectedFrameCount);
@@ -112,8 +109,8 @@ public:
     void finalizeGarbageCollectedObject();
 
 protected:
-    explicit NodeRareData(LayoutObject* renderer)
-        : NodeRareDataBase(renderer)
+    explicit NodeRareData(LayoutObject* layoutObject)
+        : NodeRareDataBase(layoutObject)
         , m_connectedFrameCount(0)
         , m_elementFlags(0)
         , m_restyleFlags(0)

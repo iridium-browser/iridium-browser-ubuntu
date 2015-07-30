@@ -70,7 +70,6 @@
 #include "talk/media/webrtc/webrtcvideocapturer.h"
 #include "talk/media/webrtc/webrtcvideodecoderfactory.h"
 #include "talk/media/webrtc/webrtcvideoencoderfactory.h"
-#include "third_party/icu/source/common/unicode/unistr.h"
 #include "webrtc/base/bind.h"
 #include "webrtc/base/checks.h"
 #include "webrtc/base/logging.h"
@@ -79,7 +78,6 @@
 #include "webrtc/base/stringutils.h"
 #include "webrtc/system_wrappers/interface/field_trial_default.h"
 #include "webrtc/system_wrappers/interface/trace.h"
-#include "webrtc/video_engine/include/vie_base.h"
 #include "webrtc/voice_engine/include/voe_base.h"
 
 #if defined(ANDROID) && !defined(WEBRTC_CHROMIUM_BUILD)
@@ -105,7 +103,6 @@ using webrtc::DataChannelInit;
 using webrtc::DataChannelInterface;
 using webrtc::DataChannelObserver;
 using webrtc::IceCandidateInterface;
-using webrtc::NativeHandle;
 using webrtc::MediaConstraintsInterface;
 using webrtc::MediaSourceInterface;
 using webrtc::MediaStreamInterface;
@@ -582,7 +579,7 @@ class DataChannelObserverWrapper : public DataChannelObserver {
   void OnMessage(const DataBuffer& buffer) override {
     ScopedLocalRefFrame local_ref_frame(jni());
     jobject byte_buffer = jni()->NewDirectByteBuffer(
-        const_cast<char*>(buffer.data.data()), buffer.data.size());
+        const_cast<char*>(buffer.data.data<char>()), buffer.data.size());
     jobject j_buffer = jni()->NewObject(*j_buffer_class_, j_buffer_ctor_,
                                         byte_buffer, buffer.binary);
     jni()->CallVoidMethod(*j_observer_global_, j_on_message_mid_, j_buffer);
@@ -713,7 +710,7 @@ class VideoRendererWrapper : public VideoRendererInterface {
 
  private:
   explicit VideoRendererWrapper(cricket::VideoRenderer* renderer)
-    : renderer_(renderer), width_(0), height_(0) {}
+    : width_(0), height_(0), renderer_(renderer) {}
   int width_, height_;
   scoped_ptr<cricket::VideoRenderer> renderer_;
 };
@@ -1166,6 +1163,76 @@ JOW(void, PeerConnectionFactory_nativeSetOptions)(
   factory->SetOptions(options_to_set);
 }
 
+static std::string
+GetJavaEnumName(JNIEnv* jni, const std::string& className, jobject j_enum) {
+  jclass enumClass = FindClass(jni, className.c_str());
+  jmethodID nameMethod =
+      GetMethodID(jni, enumClass, "name", "()Ljava/lang/String;");
+  jstring name =
+      reinterpret_cast<jstring>(jni->CallObjectMethod(j_enum, nameMethod));
+  CHECK_EXCEPTION(jni) << "error during CallObjectMethod for "
+                       << className << ".name";
+  return JavaToStdString(jni, name);
+}
+
+static PeerConnectionInterface::IceTransportsType
+JavaIceTransportsTypeToNativeType(JNIEnv* jni, jobject j_ice_transports_type) {
+  std::string enum_name = GetJavaEnumName(
+      jni, "org/webrtc/PeerConnection$IceTransportsType",
+      j_ice_transports_type);
+
+  if (enum_name == "ALL")
+    return PeerConnectionInterface::kAll;
+
+  if (enum_name == "RELAY")
+    return PeerConnectionInterface::kRelay;
+
+  if (enum_name == "NOHOST")
+    return PeerConnectionInterface::kNoHost;
+
+  if (enum_name == "NONE")
+    return PeerConnectionInterface::kNone;
+
+  CHECK(false) << "Unexpected IceTransportsType enum_name " << enum_name;
+  return PeerConnectionInterface::kAll;
+}
+
+static PeerConnectionInterface::BundlePolicy
+JavaBundlePolicyToNativeType(JNIEnv* jni, jobject j_bundle_policy) {
+  std::string enum_name = GetJavaEnumName(
+      jni, "org/webrtc/PeerConnection$BundlePolicy",
+      j_bundle_policy);
+
+  if (enum_name == "BALANCED")
+    return PeerConnectionInterface::kBundlePolicyBalanced;
+
+  if (enum_name == "MAXBUNDLE")
+    return PeerConnectionInterface::kBundlePolicyMaxBundle;
+
+  if (enum_name == "MAXCOMPAT")
+    return PeerConnectionInterface::kBundlePolicyMaxCompat;
+
+  CHECK(false) << "Unexpected BundlePolicy enum_name " << enum_name;
+  return PeerConnectionInterface::kBundlePolicyBalanced;
+}
+
+static PeerConnectionInterface::TcpCandidatePolicy
+JavaTcpCandidatePolicyToNativeType(
+    JNIEnv* jni, jobject j_tcp_candidate_policy) {
+  std::string enum_name = GetJavaEnumName(
+      jni, "org/webrtc/PeerConnection$TcpCandidatePolicy",
+      j_tcp_candidate_policy);
+
+  if (enum_name == "ENABLED")
+    return PeerConnectionInterface::kTcpCandidatePolicyEnabled;
+
+  if (enum_name == "DISABLED")
+    return PeerConnectionInterface::kTcpCandidatePolicyDisabled;
+
+  CHECK(false) << "Unexpected TcpCandidatePolicy enum_name " << enum_name;
+  return PeerConnectionInterface::kTcpCandidatePolicyEnabled;
+}
+
 static void JavaIceServersToJsepIceServers(
     JNIEnv* jni, jobject j_ice_servers,
     PeerConnectionInterface::IceServers* ice_servers) {
@@ -1205,17 +1272,55 @@ static void JavaIceServersToJsepIceServers(
 }
 
 JOW(jlong, PeerConnectionFactory_nativeCreatePeerConnection)(
-    JNIEnv *jni, jclass, jlong factory, jobject j_ice_servers,
+    JNIEnv *jni, jclass, jlong factory, jobject j_rtc_config,
     jobject j_constraints, jlong observer_p) {
   rtc::scoped_refptr<PeerConnectionFactoryInterface> f(
       reinterpret_cast<PeerConnectionFactoryInterface*>(
           factoryFromJava(factory)));
-  PeerConnectionInterface::IceServers servers;
-  JavaIceServersToJsepIceServers(jni, j_ice_servers, &servers);
+
+  jclass j_rtc_config_class = GetObjectClass(jni, j_rtc_config);
+
+  jfieldID j_ice_transports_type_id = GetFieldID(
+      jni, j_rtc_config_class, "iceTransportsType",
+      "Lorg/webrtc/PeerConnection$IceTransportsType;");
+  jobject j_ice_transports_type = GetObjectField(
+      jni, j_rtc_config, j_ice_transports_type_id);
+
+  jfieldID j_bundle_policy_id = GetFieldID(
+      jni, j_rtc_config_class, "bundlePolicy",
+      "Lorg/webrtc/PeerConnection$BundlePolicy;");
+  jobject j_bundle_policy = GetObjectField(
+      jni, j_rtc_config, j_bundle_policy_id);
+
+  jfieldID j_tcp_candidate_policy_id = GetFieldID(
+      jni, j_rtc_config_class, "tcpCandidatePolicy",
+      "Lorg/webrtc/PeerConnection$TcpCandidatePolicy;");
+  jobject j_tcp_candidate_policy = GetObjectField(
+      jni, j_rtc_config, j_tcp_candidate_policy_id);
+
+  jfieldID j_ice_servers_id = GetFieldID(
+      jni, j_rtc_config_class, "iceServers",
+      "Ljava/util/List;");
+  jobject j_ice_servers = GetObjectField(jni, j_rtc_config, j_ice_servers_id);
+
+  jfieldID j_audio_jitter_buffer_max_packets_id = GetFieldID(
+      jni, j_rtc_config_class, "audioJitterBufferMaxPackets",
+      "I");
+  PeerConnectionInterface::RTCConfiguration rtc_config;
+
+  rtc_config.type =
+      JavaIceTransportsTypeToNativeType(jni, j_ice_transports_type);
+  rtc_config.bundle_policy = JavaBundlePolicyToNativeType(jni, j_bundle_policy);
+  rtc_config.tcp_candidate_policy =
+      JavaTcpCandidatePolicyToNativeType(jni, j_tcp_candidate_policy);
+  JavaIceServersToJsepIceServers(jni, j_ice_servers, &rtc_config.servers);
+  rtc_config.audio_jitter_buffer_max_packets =
+      GetIntField(jni, j_rtc_config, j_audio_jitter_buffer_max_packets_id);
+
   PCOJava* observer = reinterpret_cast<PCOJava*>(observer_p);
   observer->SetConstraints(new ConstraintsWrapper(jni, j_constraints));
   rtc::scoped_refptr<PeerConnectionInterface> pc(f->CreatePeerConnection(
-      servers, observer->constraints(), NULL, NULL, observer));
+      rtc_config, observer->constraints(), NULL, NULL, observer));
   return (jlong)pc.release();
 }
 

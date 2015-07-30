@@ -7,27 +7,33 @@ package org.chromium.chrome.browser.child_accounts;
 import android.app.Activity;
 
 import org.chromium.base.CalledByNative;
+import org.chromium.base.ThreadUtils;
+import org.chromium.chrome.browser.ChromiumApplication;
 import org.chromium.ui.base.WindowAndroid;
 
 /**
  * Java implementation of ChildAccountFeedbackReporterAndroid.
  */
 public final class ChildAccountFeedbackReporter {
-
-    private ChildAccountFeedbackReporter() {}
-
-    private static ExternalFeedbackReporter sExternalFeedbackReporter = null;
-
-    public static void setExternalFeedbackReporter(ExternalFeedbackReporter reporter) {
-        sExternalFeedbackReporter = reporter;
+    /**
+     * An {@link ExternalFeedbackReporter} that does nothing.
+     */
+    public static class NoOpExternalFeedbackReporter implements ExternalFeedbackReporter {
+        @Override
+        public void reportFeedback(Activity activity, String description, String url) {}
     }
+
+    private static ExternalFeedbackReporter sExternalFeedbackReporter;
 
     public static void reportFeedback(Activity activity,
                                       String description,
                                       String url) {
-        if (sExternalFeedbackReporter != null) {
-            sExternalFeedbackReporter.reportFeedback(activity, description, url);
+        ThreadUtils.assertOnUiThread();
+        if (sExternalFeedbackReporter == null) {
+            ChromiumApplication application = (ChromiumApplication) activity.getApplication();
+            sExternalFeedbackReporter = application.createChildAccountFeedbackLauncher();
         }
+        sExternalFeedbackReporter.reportFeedback(activity, description, url);
     }
 
     @CalledByNative
@@ -36,4 +42,6 @@ public final class ChildAccountFeedbackReporter {
                                                 String url) {
         reportFeedback(window.getActivity().get(), description, url);
     }
+
+    private ChildAccountFeedbackReporter() {}
 }

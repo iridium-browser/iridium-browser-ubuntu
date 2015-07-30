@@ -6,7 +6,6 @@
 
 from __future__ import print_function
 
-import functools
 import os
 
 from chromite.cbuildbot import constants
@@ -33,6 +32,8 @@ def GetParser():
   parser.add_argument('--gclient', help=commandline.argparse.SUPPRESS,
                       default=None)
   parser.add_argument('--gclient_template', help='Template gclient input file')
+  parser.add_argument('--skip_cache', help='Skip using git cache',
+                      dest='use_cache', action='store_false')
   parser.add_argument('chrome_root', help='Directory to sync chrome in')
 
   return parser
@@ -59,29 +60,7 @@ def main(argv):
   # Sync new Chrome.
   gclient.WriteConfigFile(gclient_path, options.chrome_root,
                           options.internal, options.version,
-                          options.gclient_template)
-  sync_fn = functools.partial(
-      gclient.Sync, gclient_path, options.chrome_root, reset=options.reset)
+                          options.gclient_template, options.use_cache)
+  gclient.Sync(gclient_path, options.chrome_root, reset=options.reset)
 
-  # Sync twice when run with --reset, which implies 'gclient sync -D'.
-  #
-  # There's a bug with 'gclient sync -D' that gets hit when the location of a
-  # dependency checkout (in the DEPS file) is moved to a path that contains
-  # (in a directory fashion) its old path.  E.g., when Blink is moved from
-  # Webkit/Source/ to Webkit/.  When this happens, a 'gclient sync -D' will
-  # blow away Webkit/Source/ after the sync, since it is no longer in the
-  # DEPS file, leaving the Blink checkout missing a Source/ subdirectory.
-  #
-  # This bug also gets hit the other way around - E.g., if Blink moves from
-  # Webkit/ to Webkit/Source/.
-  #
-  # To work around this, we sync twice, so that any directories deleted by
-  # the first sync will be restored in the second.
-  #
-  # TODO(rcui): Remove this workaround when the bug is fixed in gclient, or
-  # replace with a more sophisticated solution that syncs twice only when any
-  # paths in the DEPS file cannot be found after initial sync.
-  if options.reset:
-    sync_fn()
-  sync_fn()
   return 0

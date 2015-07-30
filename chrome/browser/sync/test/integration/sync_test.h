@@ -177,6 +177,9 @@ class SyncTest : public InProcessBrowserTest {
   // Returns true if a quiescent state was successfully reached.
   bool AwaitQuiescence();
 
+  // Returns true if we are running tests against external servers.
+  bool UsingExternalServers();
+
   // Returns true if the server being used supports controlling
   // notifications.
   bool ServerSupportsNotificationControl() const;
@@ -218,6 +221,9 @@ class SyncTest : public InProcessBrowserTest {
   // Returns the FakeServer being used for the test or NULL if FakeServer is
   // not being used.
   fake_server::FakeServer* GetFakeServer() const;
+
+  // Triggers a sync for the given |model_types| for the Profile at |index|.
+  void TriggerSyncForModelTypes(int index, syncer::ModelTypeSet model_types);
 
  protected:
   // Add custom switches needed for running the test.

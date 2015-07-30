@@ -608,16 +608,12 @@ base::StringPiece GetSerializedHeaders(const SpdyFrame* frame,
 
 }  // namespace test
 
-}  // namespace net
-
-using net::test::SetFrameLength;
-using net::test::SetFrameFlags;
-using net::test::CompareCharArraysWithHexError;
-using net::test::SpdyFramerTestUtil;
-using net::test::TestSpdyVisitor;
-using net::test::GetSerializedHeaders;
-
-namespace net {
+using test::SetFrameLength;
+using test::SetFrameFlags;
+using test::CompareCharArraysWithHexError;
+using test::SpdyFramerTestUtil;
+using test::TestSpdyVisitor;
+using test::GetSerializedHeaders;
 
 class SpdyFramerTest : public ::testing::TestWithParam<SpdyMajorVersion> {
  protected:
@@ -5380,8 +5376,8 @@ TEST_P(SpdyFramerTest, PushPromiseFrameFlags) {
   do {
     SCOPED_TRACE(testing::Message() << "Flags " << flags);
 
-    testing::StrictMock<net::test::MockSpdyFramerVisitor> visitor;
-    testing::StrictMock<net::test::MockDebugVisitor> debug_visitor;
+    testing::StrictMock<test::MockSpdyFramerVisitor> visitor;
+    testing::StrictMock<test::MockDebugVisitor> debug_visitor;
     SpdyFramer framer(spdy_version_);
     framer.set_visitor(&visitor);
     framer.set_debug_visitor(&debug_visitor);
@@ -5430,7 +5426,7 @@ TEST_P(SpdyFramerTest, ContinuationFrameFlags) {
     SCOPED_TRACE(testing::Message() << "Flags " << flags);
 
     testing::StrictMock<test::MockSpdyFramerVisitor> visitor;
-    testing::StrictMock<net::test::MockDebugVisitor> debug_visitor;
+    testing::StrictMock<test::MockDebugVisitor> debug_visitor;
     SpdyFramer framer(spdy_version_);
     framer.set_visitor(&visitor);
     framer.set_debug_visitor(&debug_visitor);
@@ -5756,6 +5752,32 @@ TEST_P(SpdyFramerTest, OnAltSvcNoOrigin) {
 
   EXPECT_EQ(SpdyFramer::SPDY_RESET, framer.state());
   EXPECT_EQ(SpdyFramer::SPDY_NO_ERROR, framer.error_code())
+      << SpdyFramer::ErrorCodeToString(framer.error_code());
+}
+
+TEST_P(SpdyFramerTest, OnAltSvcEmptyProtocolId) {
+  if (spdy_version_ <= SPDY3) {
+    return;
+  }
+
+  testing::StrictMock<test::MockSpdyFramerVisitor> visitor;
+  SpdyFramer framer(spdy_version_);
+  framer.set_visitor(&visitor);
+
+  EXPECT_CALL(visitor, OnError(testing::Eq(&framer)));
+
+  SpdyAltSvcIR altsvc_ir(1);
+  altsvc_ir.set_max_age(10);
+  altsvc_ir.set_port(443);
+  altsvc_ir.set_host("h1");
+  altsvc_ir.set_origin("o1");
+  scoped_ptr<SpdySerializedFrame> frame(framer.SerializeFrame(altsvc_ir));
+  framer.ProcessInput(frame->data(), framer.GetAltSvcMinimumSize() +
+                      altsvc_ir.protocol_id().length() +
+                      altsvc_ir.host().length());
+
+  EXPECT_EQ(SpdyFramer::SPDY_ERROR, framer.state());
+  EXPECT_EQ(SpdyFramer::SPDY_INVALID_CONTROL_FRAME, framer.error_code())
       << SpdyFramer::ErrorCodeToString(framer.error_code());
 }
 

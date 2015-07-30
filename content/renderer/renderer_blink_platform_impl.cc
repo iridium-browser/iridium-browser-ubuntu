@@ -15,6 +15,9 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "cc/blink/context_provider_web_context.h"
+#include "components/scheduler/child/web_scheduler_impl.h"
+#include "components/scheduler/renderer/renderer_scheduler.h"
+#include "components/scheduler/renderer/webthread_impl_for_renderer_scheduler.h"
 #include "content/child/database_util.h"
 #include "content/child/file_info_util.h"
 #include "content/child/fileapi/webfilesystem_impl.h"
@@ -51,9 +54,6 @@
 #include "content/renderer/media/renderer_webmidiaccessor_impl.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/renderer_clipboard_delegate.h"
-#include "content/renderer/scheduler/renderer_scheduler.h"
-#include "content/renderer/scheduler/web_scheduler_impl.h"
-#include "content/renderer/scheduler/webthread_impl_for_scheduler.h"
 #include "content/renderer/screen_orientation/screen_orientation_observer.h"
 #include "content/renderer/webclipboard_impl.h"
 #include "content/renderer/webgraphicscontext3d_provider_impl.h"
@@ -72,8 +72,6 @@
 #include "third_party/WebKit/public/platform/WebBatteryStatusListener.h"
 #include "third_party/WebKit/public/platform/WebBlobRegistry.h"
 #include "third_party/WebKit/public/platform/WebDeviceLightListener.h"
-#include "third_party/WebKit/public/platform/WebDeviceMotionListener.h"
-#include "third_party/WebKit/public/platform/WebDeviceOrientationListener.h"
 #include "third_party/WebKit/public/platform/WebFileInfo.h"
 #include "third_party/WebKit/public/platform/WebGamepads.h"
 #include "third_party/WebKit/public/platform/WebMediaStreamCenter.h"
@@ -81,6 +79,8 @@
 #include "third_party/WebKit/public/platform/WebPluginListBuilder.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/platform/WebVector.h"
+#include "third_party/WebKit/public/platform/modules/device_orientation/WebDeviceMotionListener.h"
+#include "third_party/WebKit/public/platform/modules/device_orientation/WebDeviceOrientationListener.h"
 #include "ui/gfx/color_profile.h"
 #include "url/gurl.h"
 
@@ -221,10 +221,10 @@ class RendererBlinkPlatformImpl::SandboxSupport
 //------------------------------------------------------------------------------
 
 RendererBlinkPlatformImpl::RendererBlinkPlatformImpl(
-    RendererScheduler* renderer_scheduler)
+    scheduler::RendererScheduler* renderer_scheduler)
     : BlinkPlatformImpl(renderer_scheduler->DefaultTaskRunner()),
-      web_scheduler_(new WebSchedulerImpl(renderer_scheduler)),
-      main_thread_(new WebThreadImplForScheduler(renderer_scheduler)),
+      main_thread_(
+          new scheduler::WebThreadImplForRendererScheduler(renderer_scheduler)),
       clipboard_delegate_(new RendererClipboardDelegate),
       clipboard_(new WebClipboardImpl(clipboard_delegate_.get())),
       mime_registry_(new RendererBlinkPlatformImpl::MimeRegistry),
@@ -257,10 +257,6 @@ RendererBlinkPlatformImpl::~RendererBlinkPlatformImpl() {
 }
 
 //------------------------------------------------------------------------------
-
-blink::WebScheduler* RendererBlinkPlatformImpl::scheduler() {
-  return web_scheduler_.get();
-}
 
 blink::WebThread* RendererBlinkPlatformImpl::currentThread() {
   if (main_thread_->isCurrentThread())
@@ -621,6 +617,12 @@ long long RendererBlinkPlatformImpl::databaseGetSpaceAvailableForOrigin(
     const WebString& origin_identifier) {
   return DatabaseUtil::DatabaseGetSpaceAvailable(origin_identifier,
                                                  sync_message_filter_.get());
+}
+
+bool RendererBlinkPlatformImpl::databaseSetFileSize(
+    const WebString& vfs_file_name, long long size) {
+  return DatabaseUtil::DatabaseSetFileSize(
+      vfs_file_name, size, sync_message_filter_.get());
 }
 
 bool RendererBlinkPlatformImpl::canAccelerate2dCanvas() {
@@ -1017,6 +1019,18 @@ blink::WebString RendererBlinkPlatformImpl::convertIDNToUnicode(
     const blink::WebString& host,
     const blink::WebString& languages) {
   return net::IDNToUnicode(host.utf8(), languages.utf8());
+}
+
+//------------------------------------------------------------------------------
+
+void RendererBlinkPlatformImpl::recordRappor(const char* metric,
+                                             const blink::WebString& sample) {
+  GetContentClient()->renderer()->RecordRappor(metric, sample.utf8());
+}
+
+void RendererBlinkPlatformImpl::recordRapporURL(const char* metric,
+                                                const blink::WebURL& url) {
+  GetContentClient()->renderer()->RecordRapporURL(metric, url);
 }
 
 //------------------------------------------------------------------------------

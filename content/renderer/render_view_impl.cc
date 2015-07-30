@@ -134,7 +134,6 @@
 #include "third_party/WebKit/public/web/WebDataSource.h"
 #include "third_party/WebKit/public/web/WebDateTimeChooserCompletion.h"
 #include "third_party/WebKit/public/web/WebDateTimeChooserParams.h"
-#include "third_party/WebKit/public/web/WebDevToolsAgent.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebElement.h"
 #include "third_party/WebKit/public/web/WebFileChooserParams.h"
@@ -147,7 +146,6 @@
 #include "third_party/WebKit/public/web/WebHitTestResult.h"
 #include "third_party/WebKit/public/web/WebInputElement.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
-#include "third_party/WebKit/public/web/WebKit.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebMediaPlayerAction.h"
 #include "third_party/WebKit/public/web/WebNavigationPolicy.h"
@@ -164,7 +162,6 @@
 #include "third_party/WebKit/public/web/WebSearchableFormData.h"
 #include "third_party/WebKit/public/web/WebSecurityOrigin.h"
 #include "third_party/WebKit/public/web/WebSecurityPolicy.h"
-#include "third_party/WebKit/public/web/WebSerializedScriptValue.h"
 #include "third_party/WebKit/public/web/WebSettings.h"
 #include "third_party/WebKit/public/web/WebUserGestureIndicator.h"
 #include "third_party/WebKit/public/web/WebView.h"
@@ -224,8 +221,6 @@ using blink::WebConsoleMessage;
 using blink::WebData;
 using blink::WebDataSource;
 using blink::WebDocument;
-using blink::WebDOMEvent;
-using blink::WebDOMMessageEvent;
 using blink::WebDragData;
 using blink::WebDragOperation;
 using blink::WebDragOperationsMask;
@@ -265,7 +260,6 @@ using blink::WebScriptSource;
 using blink::WebSearchableFormData;
 using blink::WebSecurityOrigin;
 using blink::WebSecurityPolicy;
-using blink::WebSerializedScriptValue;
 using blink::WebSettings;
 using blink::WebSize;
 using blink::WebStorageNamespace;
@@ -405,12 +399,6 @@ static void ConvertToFaviconSizes(
   sizes->reserve(web_sizes.size());
   for (size_t i = 0; i < web_sizes.size(); ++i)
     sizes->push_back(gfx::Size(web_sizes[i]));
-}
-
-static blink::WebDevToolsAgent* GetWebDevToolsAgent(WebView* webview) {
-  if (!webview || !webview->mainFrame()->isWebLocalFrame())
-    return nullptr;
-  return webview->mainFrame()->toWebLocalFrame()->devToolsAgent();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -606,6 +594,24 @@ void ApplyFontsFromMap(const ScriptFontFamilyMap& map,
   }
 }
 
+void ApplyBlinkSettings(const base::CommandLine& command_line,
+                        WebSettings* settings) {
+  if (!command_line.HasSwitch(switches::kBlinkSettings))
+    return;
+
+  std::vector<std::string> blink_settings;
+  base::SplitString(
+      command_line.GetSwitchValueASCII(switches::kBlinkSettings), ',',
+      &blink_settings);
+  for (const std::string& setting : blink_settings) {
+    size_t pos = setting.find('=');
+    settings->setFromStrings(
+        blink::WebString::fromLatin1(setting.substr(0, pos)),
+        blink::WebString::fromLatin1(
+            pos == std::string::npos ? "" : setting.substr(pos + 1)));
+  }
+}
+
 }  // namespace
 
 RenderViewImpl::RenderViewImpl(const ViewMsg_New_Params& params)
@@ -658,15 +664,16 @@ void RenderViewImpl::Initialize(const ViewMsg_New_Params& params,
   surface_id_ = params.surface_id;
   if (params.opener_route_id != MSG_ROUTING_NONE && was_created_by_renderer)
     opener_id_ = params.opener_route_id;
+  display_mode_= params.initial_size.display_mode;
 
   // Ensure we start with a valid next_page_id_ from the browser.
   DCHECK_GE(next_page_id_, 0);
 
-  main_render_frame_.reset(RenderFrameImpl::Create(
-      this, params.main_frame_routing_id));
+  main_render_frame_ = RenderFrameImpl::Create(
+      this, params.main_frame_routing_id);
   // The main frame WebLocalFrame object is closed by
   // RenderFrameImpl::frameDetached().
-  WebLocalFrame* web_frame = WebLocalFrame::create(main_render_frame_.get());
+  WebLocalFrame* web_frame = WebLocalFrame::create(main_render_frame_);
   main_render_frame_->SetWebFrame(web_frame);
 
   compositor_deps_ = compositor_deps;
@@ -694,7 +701,8 @@ void RenderViewImpl::Initialize(const ViewMsg_New_Params& params,
 
   RenderThread::Get()->AddRoute(routing_id_, this);
   // Take a reference on behalf of the RenderThread.  This will be balanced
-  // when we receive ViewMsg_ClosePage.
+  // when we receive ViewMsg_Close in the RenderWidget (which RenderView
+  // inherits from).
   AddRef();
   if (RenderThreadImpl::current()) {
     RenderThreadImpl::current()->WidgetCreated();
@@ -712,6 +720,7 @@ void RenderViewImpl::Initialize(const ViewMsg_New_Params& params,
   g_view_map.Get().insert(std::make_pair(webview(), this));
   g_routing_id_view_map.Get().insert(std::make_pair(routing_id_, this));
   webview()->setDeviceScaleFactor(device_scale_factor_);
+  webview()->setDisplayMode(display_mode_);
   webview()->settings()->setPreferCompositingToLCDTextEnabled(
       PreferCompositingToLCDText(compositor_deps_, device_scale_factor_));
   webview()->settings()->setThreadedScrollingEnabled(
@@ -725,7 +734,7 @@ void RenderViewImpl::Initialize(const ViewMsg_New_Params& params,
   if (params.proxy_routing_id != MSG_ROUTING_NONE) {
     CHECK(params.swapped_out);
     proxy = RenderFrameProxy::CreateProxyToReplaceFrame(
-        main_render_frame_.get(), params.proxy_routing_id);
+        main_render_frame_, params.proxy_routing_id);
     main_render_frame_->set_render_frame_proxy(proxy);
   }
 
@@ -746,6 +755,15 @@ void RenderViewImpl::Initialize(const ViewMsg_New_Params& params,
   if (switches::IsTouchEditingEnabled())
     webview()->settings()->setTouchEditingEnabled(true);
 
+  WebSettings::SelectionStrategyType selection_strategy =
+      WebSettings::SelectionStrategyType::Character;
+  const std::string selection_strategy_str =
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          switches::kTouchTextSelectionStrategy);
+  if (selection_strategy_str == "direction")
+    selection_strategy = WebSettings::SelectionStrategyType::Direction;
+  webview()->settings()->setSelectionStrategy(selection_strategy);
+
   if (!params.frame_name.empty())
     webview()->mainFrame()->setName(params.frame_name);
 
@@ -754,6 +772,8 @@ void RenderViewImpl::Initialize(const ViewMsg_New_Params& params,
     webview()->setOpenedByDOM();
 
   OnSetRendererPrefs(params.renderer_preferences);
+
+  ApplyBlinkSettings(command_line, webview()->settings());
 
   if (!params.enable_auto_resize) {
     OnResize(params.initial_size);
@@ -765,12 +785,6 @@ void RenderViewImpl::Initialize(const ViewMsg_New_Params& params,
 #if defined(OS_MACOSX)
   new TextInputClientObserver(this);
 #endif  // defined(OS_MACOSX)
-
-  // TODO(dgozman): do this not for main frame, but for local frame roots.
-  if (blink::WebDevToolsAgent* devToolsAgent = GetWebDevToolsAgent(webview())) {
-    if (RenderWidgetCompositor* rwc = compositor())
-      devToolsAgent->setLayerTreeId(rwc->GetLayerTreeId());
-  }
 
   // The next group of objects all implement RenderViewObserver, so are deleted
   // along with the RenderView automatically.
@@ -908,8 +922,6 @@ void RenderView::ApplyWebPreferences(const WebPreferences& prefs,
   settings->setImagesEnabled(prefs.images_enabled);
   settings->setPluginsEnabled(prefs.plugins_enabled);
   settings->setDOMPasteAllowed(prefs.dom_paste_enabled);
-  settings->setShrinksStandaloneImagesToFit(
-      prefs.shrinks_standalone_images_to_fit);
   settings->setUsesEncodingDetector(prefs.uses_universal_detector);
   settings->setTextAreasAreResizable(prefs.text_areas_are_resizable);
   settings->setAllowScriptsToCloseWindows(prefs.allow_scripts_to_close_windows);
@@ -1014,6 +1026,8 @@ void RenderView::ApplyWebPreferences(const WebPreferences& prefs,
   settings->setDeviceSupportsTouch(prefs.device_supports_touch);
   settings->setDeviceSupportsMouse(prefs.device_supports_mouse);
   settings->setEnableTouchAdjustment(prefs.touch_adjustment_enabled);
+  settings->setMultiTargetTapNotificationEnabled(
+      switches::IsLinkDisambiguationPopupEnabled());
 
   settings->setDeferredImageDecodingEnabled(
       prefs.deferred_image_decoding_enabled);
@@ -1093,7 +1107,6 @@ void RenderView::ApplyWebPreferences(const WebPreferences& prefs,
           : false;
   settings->setMainFrameClipsContent(!record_full_layer);
 
-  settings->setShrinksStandaloneImagesToFit(false);
   settings->setShrinksViewportContentToFit(true);
   settings->setUseMobileViewportStyle(true);
 #endif
@@ -1280,7 +1293,6 @@ bool RenderViewImpl::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(ViewMsg_SetPageEncoding, OnSetPageEncoding)
     IPC_MESSAGE_HANDLER(ViewMsg_ResetPageEncodingToDefault,
                         OnResetPageEncodingToDefault)
-    IPC_MESSAGE_HANDLER(ViewMsg_PostMessageEvent, OnPostMessageEvent)
     IPC_MESSAGE_HANDLER(DragMsg_TargetDragEnter, OnDragTargetDragEnter)
     IPC_MESSAGE_HANDLER(DragMsg_TargetDragOver, OnDragTargetDragOver)
     IPC_MESSAGE_HANDLER(DragMsg_TargetDragLeave, OnDragTargetDragLeave)
@@ -1338,6 +1350,7 @@ bool RenderViewImpl::OnMessageReceived(const IPC::Message& message) {
                         OnGetRenderedText)
     IPC_MESSAGE_HANDLER(ViewMsg_PluginImeCompositionCompleted,
                         OnPluginImeCompositionCompleted)
+    IPC_MESSAGE_HANDLER(ViewMsg_Close, OnClose)
     IPC_MESSAGE_HANDLER(ViewMsg_SetInLiveResize, OnSetInLiveResize)
     IPC_MESSAGE_HANDLER(ViewMsg_SetWindowVisibility, OnSetWindowVisibility)
     IPC_MESSAGE_HANDLER(ViewMsg_WindowFrameChanged, OnWindowFrameChanged)
@@ -2012,9 +2025,6 @@ void RenderViewImpl::initializeLayerTreeView() {
   RenderWidgetCompositor* rwc = compositor();
   if (!rwc)
     return;
-  // TODO(dgozman): do this not for main frame, but for local frame roots.
-  if (blink::WebDevToolsAgent* devToolsAgent = GetWebDevToolsAgent(webview()))
-    devToolsAgent->setLayerTreeId(rwc->GetLayerTreeId());
 
   bool use_threaded_event_handling = true;
 #if defined(OS_MACOSX) && !defined(OS_IOS)
@@ -2150,7 +2160,7 @@ bool RenderViewImpl::Send(IPC::Message* message) {
 }
 
 RenderFrameImpl* RenderViewImpl::GetMainRenderFrame() {
-  return main_render_frame_.get();
+  return main_render_frame_;
 }
 
 int RenderViewImpl::GetRoutingID() const {
@@ -2530,61 +2540,6 @@ void RenderViewImpl::OnResetPageEncodingToDefault() {
   webview()->setPageEncoding(no_encoding);
 }
 
-void RenderViewImpl::OnPostMessageEvent(
-    const ViewMsg_PostMessage_Params& params) {
-  // TODO(nasko): Support sending to subframes.
-  WebFrame* frame = webview()->mainFrame();
-
-  // Find the source frame if it exists.
-  WebFrame* source_frame = NULL;
-  if (params.source_routing_id != MSG_ROUTING_NONE) {
-    RenderViewImpl* source_view = FromRoutingID(params.source_routing_id);
-    if (source_view)
-      source_frame = source_view->webview()->mainFrame();
-  }
-
-  // If the message contained MessagePorts, create the corresponding endpoints.
-  blink::WebMessagePortChannelArray channels =
-      WebMessagePortChannelImpl::CreatePorts(
-          params.message_ports, params.new_routing_ids,
-          base::MessageLoopProxy::current().get());
-
-  WebSerializedScriptValue serialized_script_value;
-  if (params.is_data_raw_string) {
-    v8::HandleScope handle_scope(blink::mainThreadIsolate());
-    v8::Local<v8::Context> context = frame->mainWorldScriptContext();
-    v8::Context::Scope context_scope(context);
-    V8ValueConverterImpl converter;
-    converter.SetDateAllowed(true);
-    converter.SetRegExpAllowed(true);
-    scoped_ptr<base::Value> value(new base::StringValue(params.data));
-    v8::Handle<v8::Value> result_value = converter.ToV8Value(value.get(),
-                                                             context);
-    serialized_script_value = WebSerializedScriptValue::serialize(result_value);
-  } else {
-    serialized_script_value = WebSerializedScriptValue::fromString(params.data);
-  }
-
-  // Create an event with the message.  The final parameter to initMessageEvent
-  // is the last event ID, which is not used with postMessage.
-  WebDOMEvent event = frame->document().createEvent("MessageEvent");
-  WebDOMMessageEvent msg_event = event.to<WebDOMMessageEvent>();
-  msg_event.initMessageEvent("message",
-                             // |canBubble| and |cancellable| are always false
-                             false, false,
-                             serialized_script_value,
-                             params.source_origin, source_frame, "", channels);
-
-  // We must pass in the target_origin to do the security check on this side,
-  // since it may have changed since the original postMessage call was made.
-  WebSecurityOrigin target_origin;
-  if (!params.target_origin.empty()) {
-    target_origin =
-        WebSecurityOrigin::createFromString(WebString(params.target_origin));
-  }
-  frame->dispatchMessageEventWithOriginCheck(target_origin, msg_event);
-}
-
 void RenderViewImpl::OnAllowBindings(int enabled_bindings_flags) {
   if ((enabled_bindings_flags & BINDINGS_POLICY_WEB_UI) &&
       !(enabled_bindings_ & BINDINGS_POLICY_WEB_UI)) {
@@ -2728,7 +2683,8 @@ void RenderViewImpl::OnDisableAutoResize(const gfx::Size& new_size) {
            top_controls_height_,
            visible_viewport_size_,
            resizer_rect_,
-           is_fullscreen_,
+           is_fullscreen_granted_,
+           display_mode_,
            NO_RESIZE_ACK);
   }
 }
@@ -2754,7 +2710,9 @@ void RenderViewImpl::OnSetRendererPrefs(
   std::string old_accept_languages = renderer_preferences_.accept_languages;
 
   renderer_preferences_ = renderer_prefs;
+
   UpdateFontRenderingFromRendererPrefs();
+  UpdateThemePrefs();
 
 #if defined(USE_DEFAULT_RENDER_THEME)
   if (renderer_prefs.use_custom_colors) {
@@ -2887,6 +2845,12 @@ void RenderViewImpl::OnClosePage() {
   Send(new ViewHostMsg_ClosePage_ACK(routing_id_));
 }
 
+void RenderViewImpl::OnClose() {
+  if (closing_)
+    RenderThread::Get()->Send(new ViewHostMsg_Close_ACK(routing_id_));
+  RenderWidget::OnClose();
+}
+
 void RenderViewImpl::OnThemeChanged() {
 #if defined(USE_AURA)
   // Aura doesn't care if we switch themes.
@@ -2913,6 +2877,10 @@ void RenderViewImpl::OnResize(const ViewMsg_Resize_Params& params) {
       webview()->mainFrame()->setCanHaveScrollbars(
           ShouldDisplayScrollbars(params.new_size.width(),
                                   params.new_size.height()));
+    }
+    if (display_mode_ != params.display_mode) {
+      display_mode_ = params.display_mode;
+      webview()->setDisplayMode(display_mode_);
     }
   }
 
@@ -3055,12 +3023,6 @@ void RenderViewImpl::OnPluginImeCompositionCompleted(const base::string16& text,
 }
 #endif  // OS_MACOSX
 
-void RenderViewImpl::OnClose() {
-  if (closing_)
-    RenderThread::Get()->Send(new ViewHostMsg_Close_ACK(routing_id_));
-  RenderWidget::OnClose();
-}
-
 void RenderViewImpl::Close() {
   // We need to grab a pointer to the doomed WebView before we destroy it.
   WebView* doomed = webview();
@@ -3107,10 +3069,6 @@ bool RenderViewImpl::WillHandleGestureEvent(
 
 void RenderViewImpl::DidHandleMouseEvent(const WebMouseEvent& event) {
   FOR_EACH_OBSERVER(RenderViewObserver, observers_, DidHandleMouseEvent(event));
-}
-
-void RenderViewImpl::DidHandleTouchEvent(const WebTouchEvent& event) {
-  FOR_EACH_OBSERVER(RenderViewObserver, observers_, DidHandleTouchEvent(event));
 }
 
 bool RenderViewImpl::HasTouchEventHandlersAt(const gfx::Point& point) const {
@@ -3524,7 +3482,7 @@ blink::WebPageVisibilityState RenderViewImpl::visibilityState() const {
   blink::WebPageVisibilityState override_state = current_state;
   // TODO(jam): move this method to WebFrameClient.
   if (GetContentClient()->renderer()->
-          ShouldOverridePageVisibilityState(main_render_frame_.get(),
+          ShouldOverridePageVisibilityState(main_render_frame_,
                                             &override_state))
     return override_state;
   return current_state;
@@ -3624,8 +3582,7 @@ bool RenderViewImpl::didTapMultipleTargets(
     const WebSize& inner_viewport_offset,
     const WebRect& touch_rect,
     const WebVector<WebRect>& target_rects) {
-  if (!switches::IsLinkDisambiguationPopupEnabled())
-    return false;
+  DCHECK(switches::IsLinkDisambiguationPopupEnabled());
 
   // Never show a disambiguation popup when accessibility is enabled,
   // as this interferes with "touch exploration".
@@ -3737,7 +3694,8 @@ void RenderViewImpl::SetDeviceScaleFactorForTesting(float factor) {
   params.top_controls_shrink_blink_size = false;
   params.top_controls_height = 0.f;
   params.resizer_rect = WebRect();
-  params.is_fullscreen = is_fullscreen();
+  params.is_fullscreen_granted = is_fullscreen_granted();
+  params.display_mode = display_mode_;
   OnResize(params);
 }
 

@@ -11,16 +11,20 @@
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_view.h"
 #include "chrome/browser/extensions/extension_view_host.h"
+#include "chrome/browser/extensions/extension_view_host_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/extensions/accelerator_priority.h"
 #include "chrome/browser/ui/extensions/extension_action_platform_delegate.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_delegate.h"
+#include "chrome/browser/ui/toolbar/toolbar_actions_bar.h"
+#include "chrome/browser/ui/toolbar/toolbar_actions_bar.h"
 #include "chrome/common/extensions/api/extension_action/action_info.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/feature_switch.h"
 #include "extensions/common/manifest_constants.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_operations.h"
@@ -31,10 +35,12 @@ using extensions::CommandService;
 ExtensionActionViewController::ExtensionActionViewController(
     const extensions::Extension* extension,
     Browser* browser,
-    ExtensionAction* extension_action)
+    ExtensionAction* extension_action,
+    ToolbarActionsBar* toolbar_actions_bar)
     : extension_(extension),
       browser_(browser),
       extension_action_(extension_action),
+      toolbar_actions_bar_(toolbar_actions_bar),
       popup_host_(nullptr),
       view_delegate_(nullptr),
       platform_delegate_(ExtensionActionPlatformDelegate::Create(this)),
@@ -42,7 +48,8 @@ ExtensionActionViewController::ExtensionActionViewController(
       icon_observer_(nullptr),
       extension_registry_(
           extensions::ExtensionRegistry::Get(browser_->profile())),
-      popup_host_observer_(this) {
+      popup_host_observer_(this),
+      weak_factory_(this) {
   DCHECK(extension_action);
   DCHECK(extension_action->action_type() == ActionInfo::TYPE_PAGE ||
          extension_action->action_type() == ActionInfo::TYPE_BROWSER);
@@ -159,14 +166,27 @@ ui::MenuModel* ExtensionActionViewController::GetContextMenu() {
   if (!ExtensionIsValid() || !extension()->ShowConfigureContextMenus())
     return nullptr;
 
+  ExtensionContextMenuModel::ButtonVisibility visibility =
+      ExtensionContextMenuModel::VISIBLE;
+  if (toolbar_actions_bar_) {
+    if (toolbar_actions_bar_->popped_out_action() == this)
+      visibility = ExtensionContextMenuModel::TRANSITIVELY_VISIBLE;
+    else if (!toolbar_actions_bar_->IsActionVisible(this))
+      visibility = ExtensionContextMenuModel::OVERFLOWED;
+    // Else, VISIBLE is correct.
+  }
   // Reconstruct the menu every time because the menu's contents are dynamic.
   context_menu_model_ = make_scoped_refptr(new ExtensionContextMenuModel(
-      extension(), browser_, this));
+      extension(), browser_, visibility, this));
   return context_menu_model_.get();
 }
 
-bool ExtensionActionViewController::IsMenuRunning() const {
-  return platform_delegate_->IsMenuRunning();
+void ExtensionActionViewController::OnContextMenuClosed() {
+  if (toolbar_actions_bar_ &&
+      toolbar_actions_bar_->popped_out_action() == this &&
+      !is_showing_popup()) {
+    toolbar_actions_bar_->UndoPopOut();
+  }
 }
 
 bool ExtensionActionViewController::CanDrag() const {
@@ -191,13 +211,12 @@ bool ExtensionActionViewController::ExecuteAction(PopupShowAction show_action,
 
   if (extensions::ExtensionActionAPI::Get(browser_->profile())
           ->ExecuteExtensionAction(
-              extension_, browser_, grant_tab_permissions) ==
+              extension_.get(), browser_, grant_tab_permissions) ==
       ExtensionAction::ACTION_SHOW_POPUP) {
     GURL popup_url = extension_action_->GetPopupUrl(
         SessionTabHelper::IdForTab(view_delegate_->GetCurrentWebContents()));
-    return static_cast<ExtensionActionViewController*>(
-               view_delegate_->GetPreferredPopupViewController())
-        ->ShowPopupWithUrl(show_action, popup_url, grant_tab_permissions);
+    return GetPreferredPopupViewController()
+        ->TriggerPopupWithUrl(show_action, popup_url, grant_tab_permissions);
   }
   return false;
 }
@@ -241,6 +260,17 @@ bool ExtensionActionViewController::ExtensionIsValid() const {
   return extension_registry_->enabled_extensions().Contains(extension_->id());
 }
 
+void ExtensionActionViewController::HideActivePopup() {
+  if (toolbar_actions_bar_) {
+    toolbar_actions_bar_->HideActivePopup();
+  } else {
+    DCHECK_EQ(ActionInfo::TYPE_PAGE, extension_action_->action_type());
+    // In the traditional toolbar, page actions only know how to close their own
+    // popups.
+    HidePopup();
+  }
+}
+
 bool ExtensionActionViewController::GetExtensionCommand(
     extensions::Command* command) {
   DCHECK(command);
@@ -256,7 +286,17 @@ bool ExtensionActionViewController::GetExtensionCommand(
       extension_->id(), CommandService::ACTIVE, command, NULL);
 }
 
-bool ExtensionActionViewController::ShowPopupWithUrl(
+ExtensionActionViewController*
+ExtensionActionViewController::GetPreferredPopupViewController() {
+  if (toolbar_actions_bar_ && toolbar_actions_bar_->in_overflow_mode()) {
+    return static_cast<ExtensionActionViewController*>(
+        toolbar_actions_bar_->GetMainControllerForAction(this));
+  }
+
+  return this;
+}
+
+bool ExtensionActionViewController::TriggerPopupWithUrl(
     PopupShowAction show_action,
     const GURL& popup_url,
     bool grant_tab_permissions) {
@@ -267,7 +307,7 @@ bool ExtensionActionViewController::ShowPopupWithUrl(
 
   // Always hide the current popup, even if it's not owned by this extension.
   // Only one popup should be visible at a time.
-  platform_delegate_->CloseActivePopup();
+  HideActivePopup();
 
   // If we were showing a popup already, then we treat the action to open the
   // same one as a desire to close it (like clicking a menu button that was
@@ -275,17 +315,56 @@ bool ExtensionActionViewController::ShowPopupWithUrl(
   if (already_showing)
     return false;
 
-  popup_host_ = platform_delegate_->ShowPopupWithUrl(
-      show_action, popup_url, grant_tab_permissions);
-  if (popup_host_) {
-    popup_host_observer_.Add(popup_host_);
-    view_delegate_->OnPopupShown(grant_tab_permissions);
+  scoped_ptr<extensions::ExtensionViewHost> host(
+      extensions::ExtensionViewHostFactory::CreatePopupHost(popup_url,
+                                                            browser_));
+  if (!host)
+    return false;
+
+  popup_host_ = host.get();
+  popup_host_observer_.Add(popup_host_);
+  if (toolbar_actions_bar_)
+    toolbar_actions_bar_->SetPopupOwner(this);
+
+  if (toolbar_actions_bar_ &&
+      !toolbar_actions_bar_->IsActionVisible(this) &&
+      extensions::FeatureSwitch::extension_action_redesign()->IsEnabled()) {
+    platform_delegate_->CloseOverflowMenu();
+    toolbar_actions_bar_->PopOutAction(
+        this,
+        base::Bind(&ExtensionActionViewController::ShowPopup,
+                   weak_factory_.GetWeakPtr(),
+                   base::Passed(host.Pass()),
+                   grant_tab_permissions,
+                   show_action));
+  } else {
+    ShowPopup(host.Pass(), grant_tab_permissions, show_action);
   }
-  return is_showing_popup();
+
+  return true;
+}
+
+void ExtensionActionViewController::ShowPopup(
+    scoped_ptr<extensions::ExtensionViewHost> popup_host,
+    bool grant_tab_permissions,
+    PopupShowAction show_action) {
+  // It's possible that the popup should be closed before it finishes opening
+  // (since it can open asynchronously). Check before proceeding.
+  if (!popup_host_)
+    return;
+  platform_delegate_->ShowPopup(
+      popup_host.Pass(), grant_tab_permissions, show_action);
+  view_delegate_->OnPopupShown(grant_tab_permissions);
 }
 
 void ExtensionActionViewController::OnPopupClosed() {
   popup_host_observer_.Remove(popup_host_);
   popup_host_ = nullptr;
+  if (toolbar_actions_bar_) {
+    toolbar_actions_bar_->SetPopupOwner(nullptr);
+    if (toolbar_actions_bar_->popped_out_action() == this &&
+        !view_delegate_->IsMenuRunning())
+      toolbar_actions_bar_->UndoPopOut();
+  }
   view_delegate_->OnPopupClosed();
 }

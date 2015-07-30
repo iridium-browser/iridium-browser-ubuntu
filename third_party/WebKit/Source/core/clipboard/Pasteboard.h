@@ -49,7 +49,7 @@ public:
     static Pasteboard* generalPasteboard();
     void writePlainText(const String&, SmartReplaceOption);
     void writeImage(Image*, const KURL&, const String& title);
-    void writeDataObject(PassRefPtrWillBeRawPtr<DataObject>);
+    void writeDataObject(DataObject*);
     bool canSmartReplace();
     bool isHTMLAvailable();
     String plainText();
@@ -66,12 +66,12 @@ public:
     bool isSelectionMode() const;
     void setSelectionMode(bool);
 
-    blink::WebClipboard::Buffer buffer() const { return m_buffer; }
+    WebClipboard::Buffer buffer() const { return m_buffer; }
 
 private:
     Pasteboard();
 
-    blink::WebClipboard::Buffer m_buffer;
+    WebClipboard::Buffer m_buffer;
 };
 
 } // namespace blink

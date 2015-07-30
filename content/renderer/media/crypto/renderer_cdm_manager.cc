@@ -49,12 +49,17 @@ bool RendererCdmManager::OnMessageReceived(const IPC::Message& msg) {
 }
 
 void RendererCdmManager::InitializeCdm(int cdm_id,
+                                       uint32_t promise_id,
                                        ProxyMediaKeys* media_keys,
                                        const std::string& key_system,
-                                       const GURL& security_origin) {
+                                       const GURL& security_origin,
+                                       bool use_hw_secure_codecs) {
   DCHECK(GetMediaKeys(cdm_id)) << "|cdm_id| not registered.";
-  Send(new CdmHostMsg_InitializeCdm(
-      routing_id(), cdm_id, key_system, security_origin));
+  CdmHostMsg_InitializeCdm_Params params;
+  params.key_system = key_system;
+  params.security_origin = security_origin;
+  params.use_hw_secure_codecs = use_hw_secure_codecs;
+  Send(new CdmHostMsg_InitializeCdm(routing_id(), cdm_id, promise_id, params));
 }
 
 void RendererCdmManager::SetServerCertificate(

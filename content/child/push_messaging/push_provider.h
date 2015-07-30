@@ -44,31 +44,15 @@ class PushProvider : public blink::WebPushProvider,
       blink::WebServiceWorkerRegistration* service_worker_registration,
       const blink::WebPushSubscriptionOptions& options,
       blink::WebPushSubscriptionCallbacks* callbacks);
-  // TODO(peter): Remove this method when Blink switched over to the above.
-  virtual void registerPushMessaging(
-      blink::WebServiceWorkerRegistration* service_worker_registration,
-      blink::WebPushSubscriptionCallbacks* callbacks);
   virtual void unsubscribe(
-      blink::WebServiceWorkerRegistration* service_worker_registration,
-      blink::WebPushUnsubscribeCallbacks* callbacks);
-  // TODO(peter): Remove this method when Blink switched over to the above.
-  virtual void unregister(
       blink::WebServiceWorkerRegistration* service_worker_registration,
       blink::WebPushUnsubscribeCallbacks* callbacks);
   virtual void getSubscription(
       blink::WebServiceWorkerRegistration* service_worker_registration,
       blink::WebPushSubscriptionCallbacks* callbacks);
-  // TODO(peter): Remove this method when Blink switched over to the above.
-  virtual void getRegistration(
-      blink::WebServiceWorkerRegistration* service_worker_registration,
-      blink::WebPushSubscriptionCallbacks* callbacks);
   virtual void getPermissionStatus(
       blink::WebServiceWorkerRegistration* service_worker_registration,
       const blink::WebPushSubscriptionOptions& options,
-      blink::WebPushPermissionStatusCallbacks* callbacks);
-  // TODO(peter): Remove this method when Blink switched over to the above.
-  virtual void getPermissionStatus(
-      blink::WebServiceWorkerRegistration* service_worker_registration,
       blink::WebPushPermissionStatusCallbacks* callbacks);
 
   // Called by the PushDispatcher.
@@ -93,7 +77,8 @@ class PushProvider : public blink::WebPushProvider,
   void OnGetRegistrationError(int request_id, PushGetRegistrationStatus status);
   void OnGetPermissionStatusSuccess(int request_id,
                                     blink::WebPushPermissionStatus status);
-  void OnGetPermissionStatusError(int request_id);
+  void OnGetPermissionStatusError(int request_id,
+                                  blink::WebPushError::ErrorType error);
 
   scoped_refptr<ThreadSafeSender> thread_safe_sender_;
   scoped_refptr<PushDispatcher> push_dispatcher_;

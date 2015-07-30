@@ -6,6 +6,7 @@
 #define BodyStreamBuffer_h
 
 #include "core/dom/DOMException.h"
+#include "modules/ModulesExport.h"
 #include "platform/blob/BlobData.h"
 #include "platform/heap/Heap.h"
 #include "wtf/Deque.h"
@@ -16,7 +17,7 @@ namespace blink {
 
 class DOMArrayBuffer;
 
-class BodyStreamBuffer final : public GarbageCollectedFinalized<BodyStreamBuffer> {
+class MODULES_EXPORT BodyStreamBuffer final : public GarbageCollectedFinalized<BodyStreamBuffer> {
 public:
     class Observer : public GarbageCollectedFinalized<Observer> {
     public:
@@ -37,7 +38,7 @@ public:
     public:
         virtual ~BlobHandleCreatorClient() { }
         virtual void didCreateBlobHandle(PassRefPtr<BlobDataHandle>) = 0;
-        virtual void didFail(PassRefPtrWillBeRawPtr<DOMException>) = 0;
+        virtual void didFail(DOMException*) = 0;
         DEFINE_INLINE_VIRTUAL_TRACE() { }
     };
     explicit BodyStreamBuffer(Canceller*);
@@ -46,14 +47,14 @@ public:
     PassRefPtr<DOMArrayBuffer> read();
     bool isClosed() const { return m_isClosed; }
     bool hasError() const { return m_exception; }
-    PassRefPtrWillBeRawPtr<DOMException> exception() const { return m_exception; }
+    DOMException* exception() const { return m_exception; }
 
     // Can't call after close() or error() was called.
     void write(PassRefPtr<DOMArrayBuffer>);
     // Can't call after close() or error() was called.
     void close();
     // Can't call after close() or error() was called.
-    void error(PassRefPtrWillBeRawPtr<DOMException>);
+    void error(DOMException*);
     void cancel() { m_canceller->cancel(); }
 
     // This function registers an observer so it fails and returns false when an
@@ -73,7 +74,7 @@ public:
 private:
     Deque<RefPtr<DOMArrayBuffer>> m_queue;
     bool m_isClosed;
-    RefPtrWillBeMember<DOMException> m_exception;
+    Member<DOMException> m_exception;
     Member<Observer> m_observer;
     Member<Canceller> m_canceller;
 };

@@ -16,6 +16,7 @@
 #include "core/page/Page.h"
 #include "core/paint/DeprecatedPaintLayer.h"
 #include "core/paint/DeprecatedPaintLayerPainter.h"
+#include "core/paint/PaintInfo.h"
 #include "core/paint/ScrollbarPainter.h"
 #include "core/paint/TransformRecorder.h"
 #include "platform/fonts/FontCache.h"
@@ -45,8 +46,6 @@ void FramePainter::paint(GraphicsContext* context, const IntRect& rect)
         documentDirtyRect.moveBy(-m_frameView.location() + m_frameView.scrollPosition());
         paintContents(context, documentDirtyRect);
     }
-
-    calculateAndPaintOverhangAreas(context, rect);
 
     // Now paint the scrollbars.
     if (!m_frameView.scrollbarsSuppressed() && (m_frameView.horizontalScrollbar() || m_frameView.verticalScrollbar())) {
@@ -97,7 +96,7 @@ void FramePainter::paintContents(GraphicsContext* context, const IntRect& rect)
 
     LayoutView* layoutView = m_frameView.layoutView();
     if (!layoutView) {
-        WTF_LOG_ERROR("called FramePainter::paint with nil renderer");
+        WTF_LOG_ERROR("called FramePainter::paint with nil layoutObject");
         return;
     }
 
@@ -118,9 +117,6 @@ void FramePainter::paintContents(GraphicsContext* context, const IntRect& rect)
             m_frameView.setPaintBehavior(m_frameView.paintBehavior() | PaintBehaviorFlattenCompositingLayers);
     }
 
-    if (m_frameView.paintBehavior() == PaintBehaviorNormal)
-        document->markers().invalidateRenderedRectsForMarkersInRect(LayoutRect(rect));
-
     if (document->printing())
         m_frameView.setPaintBehavior(m_frameView.paintBehavior() | PaintBehaviorFlattenCompositingLayers);
 
@@ -128,7 +124,7 @@ void FramePainter::paintContents(GraphicsContext* context, const IntRect& rect)
     m_frameView.setIsPainting(true);
 
     // m_frameView.nodeToDraw() is used to draw only one element (and its descendants)
-    LayoutObject* renderer = m_frameView.nodeToDraw() ? m_frameView.nodeToDraw()->layoutObject() : 0;
+    LayoutObject* layoutObject = m_frameView.nodeToDraw() ? m_frameView.nodeToDraw()->layoutObject() : 0;
     DeprecatedPaintLayer* rootLayer = layoutView->layer();
 
 #if ENABLE(ASSERT)
@@ -141,10 +137,10 @@ void FramePainter::paintContents(GraphicsContext* context, const IntRect& rect)
     float deviceScaleFactor = blink::deviceScaleFactor(rootLayer->layoutObject()->frame());
     context->setDeviceScaleFactor(deviceScaleFactor);
 
-    layerPainter.paint(context, LayoutRect(rect), m_frameView.paintBehavior(), renderer);
+    layerPainter.paint(context, LayoutRect(rect), m_frameView.paintBehavior(), layoutObject);
 
     if (rootLayer->containsDirtyOverlayScrollbars())
-        layerPainter.paintOverlayScrollbars(context, LayoutRect(rect), m_frameView.paintBehavior(), renderer);
+        layerPainter.paintOverlayScrollbars(context, LayoutRect(rect), m_frameView.paintBehavior(), layoutObject);
 
     m_frameView.setIsPainting(false);
 
@@ -175,9 +171,6 @@ void FramePainter::paintScrollbars(GraphicsContext* context, const IntRect& rect
     if (m_frameView.layerForScrollCorner())
         return;
 
-    // FIXME: This is wrong. scroll corners are currently painted in the local space of the scroll corner,
-    // not the space of the frame. Either change scroll corners to paint in the frame's coordinate space,
-    // or adjust for the location of the scroll corner.
     paintScrollCorner(context, m_frameView.scrollCornerRect());
 }
 
@@ -194,7 +187,7 @@ void FramePainter::paintScrollCorner(GraphicsContext* context, const IntRect& co
         return;
     }
 
-    ScrollbarTheme::theme()->paintScrollCorner(context, m_frameView, cornerRect);
+    ScrollbarTheme::theme()->paintScrollCorner(context, *m_frameView.layoutView(), cornerRect);
 }
 
 void FramePainter::paintScrollbar(GraphicsContext* context, Scrollbar* bar, const IntRect& rect)
@@ -207,35 +200,6 @@ void FramePainter::paintScrollbar(GraphicsContext* context, Scrollbar* bar, cons
     }
 
     bar->paint(context, rect);
-}
-
-void FramePainter::paintOverhangAreas(GraphicsContext* context, const IntRect& horizontalOverhangArea, const IntRect& verticalOverhangArea, const IntRect& dirtyRect)
-{
-    if (m_frameView.frame().document()->printing())
-        return;
-
-    if (m_frameView.frame().isMainFrame()) {
-        if (m_frameView.frame().page()->chrome().client().paintCustomOverhangArea(context, horizontalOverhangArea, verticalOverhangArea, dirtyRect))
-            return;
-    }
-
-    paintOverhangAreasInternal(context, horizontalOverhangArea, verticalOverhangArea, dirtyRect);
-}
-
-void FramePainter::paintOverhangAreasInternal(GraphicsContext* context, const IntRect& horizontalOverhangRect, const IntRect& verticalOverhangRect, const IntRect& dirtyRect)
-{
-    ScrollbarTheme::theme()->paintOverhangBackground(context, horizontalOverhangRect, verticalOverhangRect, dirtyRect);
-    ScrollbarTheme::theme()->paintOverhangShadows(context, m_frameView.scrollOffset(), horizontalOverhangRect, verticalOverhangRect, dirtyRect);
-}
-
-void FramePainter::calculateAndPaintOverhangAreas(GraphicsContext* context, const IntRect& dirtyRect)
-{
-    IntRect horizontalOverhangRect;
-    IntRect verticalOverhangRect;
-    m_frameView.calculateOverhangAreasForPainting(horizontalOverhangRect, verticalOverhangRect);
-
-    if (dirtyRect.intersects(horizontalOverhangRect) || dirtyRect.intersects(verticalOverhangRect))
-        paintOverhangAreas(context, horizontalOverhangRect, verticalOverhangRect, dirtyRect);
 }
 
 } // namespace blink

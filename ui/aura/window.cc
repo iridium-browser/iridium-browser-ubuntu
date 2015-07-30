@@ -30,7 +30,6 @@
 #include "ui/aura/window_tree_host.h"
 #include "ui/compositor/compositor.h"
 #include "ui/compositor/layer.h"
-#include "ui/compositor/paint_context.h"
 #include "ui/events/event_target_iterator.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/path.h"
@@ -433,7 +432,6 @@ void Window::SetBoundsInScreen(const gfx::Rect& new_bounds_in_screen,
                                const gfx::Display& dst_display) {
   Window* root = GetRootWindow();
   if (root) {
-    gfx::Point origin = new_bounds_in_screen.origin();
     aura::client::ScreenPositionClient* screen_position_client =
         aura::client::GetScreenPositionClient(root);
     screen_position_client->SetBounds(this, new_bounds_in_screen, dst_display);
@@ -675,12 +673,6 @@ void Window::Focus() {
   client::FocusClient* client = client::GetFocusClient(this);
   DCHECK(client);
   client->FocusWindow(this);
-}
-
-void Window::Blur() {
-  client::FocusClient* client = client::GetFocusClient(this);
-  DCHECK(client);
-  client->FocusWindow(NULL);
 }
 
 bool Window::HasFocus() const {

@@ -218,7 +218,7 @@ void SyncManagerImpl::ConfigureSyncer(
                              ready_task,
                              retry_task);
 
-  scheduler_->Start(SyncScheduler::CONFIGURATION_MODE);
+  scheduler_->Start(SyncScheduler::CONFIGURATION_MODE, base::Time());
   scheduler_->ScheduleConfiguration(params);
 }
 
@@ -291,8 +291,7 @@ void SyncManagerImpl::Init(InitArgs* args) {
   connection_manager_.reset(new SyncAPIServerConnectionManager(
       args->service_url.host() + args->service_url.path(),
       args->service_url.EffectiveIntPort(),
-      args->service_url.SchemeIsSecure(),
-      args->post_factory.release(),
+      args->service_url.SchemeIsCryptographic(), args->post_factory.release(),
       args->cancelation_signal));
   connection_manager_->set_client_id(directory()->cache_guid());
   connection_manager_->AddListener(this);
@@ -335,7 +334,7 @@ void SyncManagerImpl::Init(InitArgs* args) {
   scheduler_ = args->internal_components_factory->BuildScheduler(
       name_, session_context_.get(), args->cancelation_signal).Pass();
 
-  scheduler_->Start(SyncScheduler::CONFIGURATION_MODE);
+  scheduler_->Start(SyncScheduler::CONFIGURATION_MODE, base::Time());
 
   initialized_ = true;
 
@@ -407,7 +406,8 @@ void SyncManagerImpl::OnPassphraseTypeChanged(
 }
 
 void SyncManagerImpl::StartSyncingNormally(
-    const ModelSafeRoutingInfo& routing_info) {
+    const ModelSafeRoutingInfo& routing_info,
+    base::Time last_poll_time) {
   // Start the sync scheduler.
   // TODO(sync): We always want the newest set of routes when we switch back
   // to normal mode. Figure out how to enforce set_routing_info is always
@@ -415,7 +415,8 @@ void SyncManagerImpl::StartSyncingNormally(
   // mode.
   DCHECK(thread_checker_.CalledOnValidThread());
   session_context_->SetRoutingInfo(routing_info);
-  scheduler_->Start(SyncScheduler::NORMAL_MODE);
+  scheduler_->Start(SyncScheduler::NORMAL_MODE,
+                    last_poll_time);
 }
 
 syncable::Directory* SyncManagerImpl::directory() {

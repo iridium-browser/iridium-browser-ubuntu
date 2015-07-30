@@ -37,25 +37,16 @@ ScopedJavaLocalRef<jstring> ToolbarModelAndroid::GetText(JNIEnv* env,
                                                  toolbar_model_->GetText());
 }
 
-ScopedJavaLocalRef<jstring> ToolbarModelAndroid::GetQueryExtractionParam(
-    JNIEnv* env,
-    jobject obj) {
-  content::WebContents* web_contents = GetActiveWebContents();
-  if (!web_contents)
-    return ScopedJavaLocalRef<jstring>();
-  Profile* profile =
-      Profile::FromBrowserContext(web_contents->GetBrowserContext());
-  UIThreadSearchTermsData search_terms_data(profile);
-  return base::android::ConvertUTF8ToJavaString(
-      env, chrome::InstantExtendedEnabledParam(true));
-}
-
 ScopedJavaLocalRef<jstring> ToolbarModelAndroid::GetCorpusChipText(
     JNIEnv* env,
     jobject obj) {
   return base::android::ConvertUTF16ToJavaString(
       env,
       toolbar_model_->GetCorpusNameForMobile());
+}
+
+jboolean ToolbarModelAndroid::WouldReplaceURL(JNIEnv* env, jobject obj) {
+  return toolbar_model_->WouldReplaceURL();
 }
 
 content::WebContents* ToolbarModelAndroid::GetActiveWebContents() const {
@@ -77,16 +68,6 @@ bool ToolbarModelAndroid::RegisterToolbarModelAndroid(JNIEnv* env) {
 jlong Init(JNIEnv* env, jobject obj, jobject delegate) {
   ToolbarModelAndroid* toolbar_model = new ToolbarModelAndroid(env, delegate);
   return reinterpret_cast<intptr_t>(toolbar_model);
-}
-
-// static
-jint GetSecurityLevelForWebContents(JNIEnv* env,
-                                    jclass jcaller,
-                                    jobject jweb_contents) {
-  content::WebContents* web_contents =
-      content::WebContents::FromJavaWebContents(jweb_contents);
-  DCHECK(web_contents);
-  return ToolbarModelImpl::GetSecurityLevelForWebContents(web_contents);
 }
 
 // Temporary method to allow us to surface a SHA-1 deprecation string on Android
@@ -117,11 +98,7 @@ jboolean IsDeprecatedSHA1Present(JNIEnv* env,
     static const int64_t kJanuary2016 = INT64_C(13096080000000000);
     if (content::CertStore::GetInstance()->RetrieveCert(ssl.cert_id, &cert) &&
         (ssl.cert_status & net::CERT_STATUS_SHA1_SIGNATURE_PRESENT) &&
-        cert->valid_expiry() > base::Time::FromInternalValue(kJanuary2016) &&
-        // NOTE: This use of SHA1IdentityUIWarning needs to be kept in sync
-        // with WebsiteSettings::Init().
-        base::FieldTrialList::FindFullName("SHA1IdentityUIWarning") ==
-            "Enabled") {
+        cert->valid_expiry() > base::Time::FromInternalValue(kJanuary2016)) {
       return true;
     }
   }

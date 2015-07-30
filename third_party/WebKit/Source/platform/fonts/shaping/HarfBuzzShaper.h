@@ -50,7 +50,7 @@ class Font;
 class GlyphBuffer;
 class SimpleFontData;
 
-class HarfBuzzShaper final : public Shaper {
+class PLATFORM_EXPORT HarfBuzzShaper final : public Shaper {
 public:
     HarfBuzzShaper(const Font*, const TextRun&, const GlyphData* emphasisData = nullptr,
         HashSet<const SimpleFontData*>* fallbackFonts = nullptr, FloatRect* = nullptr);
@@ -61,8 +61,25 @@ public:
     int offsetForPosition(float targetX);
     FloatRect selectionRect(const FloatPoint&, int height, int from, int to);
 
+    unsigned numberOfRunsForTesting() const
+    {
+        return m_harfBuzzRuns.size();
+    }
+
+    bool runInfoForTesting(unsigned runIndex, unsigned& startIndex,
+        unsigned& numGlyphs, hb_script_t& script)
+    {
+        if (runIndex < m_harfBuzzRuns.size()) {
+            startIndex = m_harfBuzzRuns[runIndex]->startIndex();
+            numGlyphs = m_harfBuzzRuns[runIndex]->numGlyphs();
+            script = m_harfBuzzRuns[runIndex]->script();
+            return true;
+        }
+        return false;
+    }
+
 private:
-    class HarfBuzzRun {
+    class PLATFORM_EXPORT HarfBuzzRun {
     public:
         HarfBuzzRun(const HarfBuzzRun&);
         ~HarfBuzzRun();

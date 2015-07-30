@@ -166,10 +166,8 @@ void AutofillManager::RegisterProfilePrefs(
       prefs::kAutofillEnabled,
       true,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kAutofillWalletSyncExperimentEnabled,
-      false,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kAutofillWalletSyncExperimentEnabled,
+                                false);
   // TODO(estade): Should this be syncable?
   registry->RegisterBooleanPref(
       prefs::kAutofillWalletImportEnabled,
@@ -177,44 +175,27 @@ void AutofillManager::RegisterProfilePrefs(
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   // This choice is made on a per-device basis, so it's not syncable.
   registry->RegisterBooleanPref(
-      prefs::kAutofillWalletImportStorageCheckboxState,
-      true,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+      prefs::kAutofillWalletImportStorageCheckboxState, true);
 #if defined(OS_MACOSX)
   registry->RegisterBooleanPref(
       prefs::kAutofillAuxiliaryProfilesEnabled,
       true,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
 #else  // defined(OS_MACOSX)
-  registry->RegisterBooleanPref(
-      prefs::kAutofillAuxiliaryProfilesEnabled,
-      false,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kAutofillAuxiliaryProfilesEnabled,
+                                false);
 #endif  // defined(OS_MACOSX)
 #if defined(OS_MACOSX)
-  registry->RegisterBooleanPref(
-      prefs::kAutofillMacAddressBookQueried,
-      false,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kAutofillMacAddressBookQueried, false);
 #endif  // defined(OS_MACOSX)
-  registry->RegisterDoublePref(
-      prefs::kAutofillPositiveUploadRate,
-      kAutofillPositiveUploadRateDefaultValue,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterDoublePref(
-      prefs::kAutofillNegativeUploadRate,
-      kAutofillNegativeUploadRateDefaultValue,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterDoublePref(prefs::kAutofillPositiveUploadRate,
+                               kAutofillPositiveUploadRateDefaultValue);
+  registry->RegisterDoublePref(prefs::kAutofillNegativeUploadRate,
+                               kAutofillNegativeUploadRateDefaultValue);
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
-  registry->RegisterBooleanPref(
-      prefs::kAutofillUseMacAddressBook,
-      false,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterIntegerPref(
-      prefs::kAutofillMacAddressBookShowedCount,
-      0,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kAutofillUseMacAddressBook, false);
+  registry->RegisterIntegerPref(prefs::kAutofillMacAddressBookShowedCount, 0);
 #endif  // defined(OS_MACOSX) && !defined(OS_IOS)
 }
 
@@ -472,18 +453,13 @@ void AutofillManager::OnTextFieldDidChange(const FormData& form,
 void AutofillManager::OnQueryFormFieldAutofill(int query_id,
                                                const FormData& form,
                                                const FormFieldData& field,
-                                               const gfx::RectF& bounding_box,
-                                               bool display_warning) {
+                                               const gfx::RectF& bounding_box) {
   if (!IsValidFormData(form) || !IsValidFormFieldData(field))
     return;
 
   std::vector<Suggestion> suggestions;
 
-  external_delegate_->OnQuery(query_id,
-                              form,
-                              field,
-                              bounding_box,
-                              display_warning);
+  external_delegate_->OnQuery(query_id, form, field, bounding_box);
 
   // Need to refresh models before using the form_event_loggers.
   bool is_autofill_possible = RefreshDataModels();
@@ -515,15 +491,11 @@ void AutofillManager::OnQueryFormFieldAutofill(int query_id,
           GetProfileSuggestions(*form_structure, field, *autofill_field);
     }
     if (!suggestions.empty()) {
-      // Don't provide Autofill suggestions when Autofill is disabled, and don't
-      // provide credit card suggestions for non-HTTPS pages. However, provide a
-      // warning to the user in these cases.
-      int warning = 0;
+      // Don't provide credit card suggestions for non-HTTPS pages. However,
+      // do provide a warning to the user.
       if (is_filling_credit_card && !FormIsHTTPS(*form_structure)) {
-        warning = IDS_AUTOFILL_WARNING_INSECURE_CONNECTION;
-      }
-      if (warning) {
-        Suggestion warning_suggestion(l10n_util::GetStringUTF16(warning));
+        Suggestion warning_suggestion(l10n_util::GetStringUTF16(
+            IDS_AUTOFILL_WARNING_INSECURE_CONNECTION));
         warning_suggestion.frontend_id = POPUP_ITEM_ID_WARNING_MESSAGE;
         suggestions.assign(1, warning_suggestion);
       } else {
@@ -728,27 +700,34 @@ void AutofillManager::OnHidePopup() {
   client_->HideAutofillPopup();
 }
 
-void AutofillManager::RemoveAutofillProfileOrCreditCard(int unique_id) {
+bool AutofillManager::RemoveAutofillProfileOrCreditCard(int unique_id) {
   std::string guid;
   size_t variant = 0;
   const CreditCard* credit_card = nullptr;
   const AutofillProfile* profile = nullptr;
   if (GetCreditCard(unique_id, &credit_card)) {
+    if (credit_card->record_type() != CreditCard::LOCAL_CARD)
+      return false;
+
     guid = credit_card->guid();
   } else if (GetProfile(unique_id, &profile, &variant)) {
+    if (profile->record_type() != AutofillProfile::LOCAL_PROFILE)
+      return false;
+
     guid = profile->guid();
   } else {
     NOTREACHED();
-    return;
+    return false;
   }
 
   // TODO(csharp): If we are dealing with a variant only the variant should
   // be deleted, instead of doing nothing.
   // http://crbug.com/124211
   if (variant != 0)
-    return;
+    return false;
 
   personal_data_->RemoveByGUID(guid);
+  return true;
 }
 
 void AutofillManager::RemoveAutocompleteEntry(const base::string16& name,

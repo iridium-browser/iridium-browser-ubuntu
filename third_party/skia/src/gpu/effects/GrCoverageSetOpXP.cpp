@@ -29,20 +29,20 @@ public:
 
     bool hasSecondaryOutput() const override { return false; }
 
-    GrXferProcessor::OptFlags getOptimizations(const GrProcOptInfo& colorPOI,
-                                               const GrProcOptInfo& coveragePOI,
-                                               bool doesStencilWrite,
-                                               GrColor* color,
-                                               const GrDrawTargetCaps& caps) override;
-
-    void getBlendInfo(GrXferProcessor::BlendInfo* blendInfo) const override;
-
     bool invertCoverage() const { return fInvertCoverage; }
 
 private:
     CoverageSetOpXP(SkRegion::Op regionOp, bool fInvertCoverage);
 
-    void onGetGLProcessorKey(const GrGLCaps& caps, GrProcessorKeyBuilder* b) const override;
+    GrXferProcessor::OptFlags onGetOptimizations(const GrProcOptInfo& colorPOI,
+                                                 const GrProcOptInfo& coveragePOI,
+                                                 bool doesStencilWrite,
+                                                 GrColor* color,
+                                                 const GrDrawTargetCaps& caps) override;
+
+    void onGetGLProcessorKey(const GrGLSLCaps& caps, GrProcessorKeyBuilder* b) const override;
+
+    void onGetBlendInfo(GrXferProcessor::BlendInfo* blendInfo) const override;
 
     bool onIsEqual(const GrXferProcessor& xpBase) const override {
         const CoverageSetOpXP& xp = xpBase.cast<CoverageSetOpXP>();
@@ -64,7 +64,7 @@ public:
 
     ~GLCoverageSetOpXP() override {}
 
-    static void GenKey(const GrProcessor& processor, const GrGLCaps& caps,
+    static void GenKey(const GrProcessor& processor, const GrGLSLCaps& caps,
                        GrProcessorKeyBuilder* b) {
         const CoverageSetOpXP& xp = processor.cast<CoverageSetOpXP>();
         uint32_t key = xp.invertCoverage() ?  0x0 : 0x1;
@@ -74,7 +74,7 @@ public:
 private:
     void onEmitCode(const EmitArgs& args) override {
         const CoverageSetOpXP& xp = args.fXP.cast<CoverageSetOpXP>();
-        GrGLFPFragmentBuilder* fsBuilder = args.fPB->getFragmentShaderBuilder();
+        GrGLXPFragmentBuilder* fsBuilder = args.fPB->getFragmentShaderBuilder();
 
         if (xp.invertCoverage()) {
             fsBuilder->codeAppendf("%s = 1.0 - %s;", args.fOutputPrimary, args.fInputCoverage);
@@ -99,7 +99,7 @@ CoverageSetOpXP::CoverageSetOpXP(SkRegion::Op regionOp, bool invertCoverage)
 CoverageSetOpXP::~CoverageSetOpXP() {
 }
 
-void CoverageSetOpXP::onGetGLProcessorKey(const GrGLCaps& caps, GrProcessorKeyBuilder* b) const {
+void CoverageSetOpXP::onGetGLProcessorKey(const GrGLSLCaps& caps, GrProcessorKeyBuilder* b) const {
     GLCoverageSetOpXP::GenKey(*this, caps, b);
 }
 
@@ -108,16 +108,16 @@ GrGLXferProcessor* CoverageSetOpXP::createGLInstance() const {
 }
 
 GrXferProcessor::OptFlags
-CoverageSetOpXP::getOptimizations(const GrProcOptInfo& colorPOI,
-                                  const GrProcOptInfo& coveragePOI,
-                                  bool doesStencilWrite,
-                                  GrColor* color,
-                                  const GrDrawTargetCaps& caps) {
+CoverageSetOpXP::onGetOptimizations(const GrProcOptInfo& colorPOI,
+                                    const GrProcOptInfo& coveragePOI,
+                                    bool doesStencilWrite,
+                                    GrColor* color,
+                                    const GrDrawTargetCaps& caps) {
     // We never look at the color input
     return GrXferProcessor::kIgnoreColor_OptFlag; 
 }
 
-void CoverageSetOpXP::getBlendInfo(GrXferProcessor::BlendInfo* blendInfo) const {
+void CoverageSetOpXP::onGetBlendInfo(GrXferProcessor::BlendInfo* blendInfo) const {
     switch (fRegionOp) {
         case SkRegion::kReplace_Op:
             blendInfo->fSrcBlend = kOne_GrBlendCoeff;

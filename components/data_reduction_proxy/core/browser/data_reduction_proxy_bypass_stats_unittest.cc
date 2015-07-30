@@ -70,16 +70,7 @@ class DataReductionProxyBypassStatsTest : public testing::Test {
     context_.set_job_factory(&test_job_factory_);
 
     test_context_ =
-        DataReductionProxyTestContext::Builder()
-            .WithParamsFlags(DataReductionProxyParams::kAllowed |
-                             DataReductionProxyParams::kFallbackAllowed |
-                             DataReductionProxyParams::kPromoAllowed)
-            .WithParamsDefinitions(
-                TestDataReductionProxyParams::HAS_EVERYTHING &
-                    ~TestDataReductionProxyParams::HAS_DEV_ORIGIN &
-                    ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN)
-            .WithMockConfig()
-            .Build();
+        DataReductionProxyTestContext::Builder().WithMockConfig().Build();
     mock_url_request_ = context_.CreateRequest(GURL(), net::IDLE, &delegate_);
   }
 
@@ -114,8 +105,7 @@ class DataReductionProxyBypassStatsTest : public testing::Test {
     return make_scoped_ptr(
         new DataReductionProxyBypassStats(
             test_context_->config(),
-            test_context_->unreachable_callback(),
-            test_context_->task_runner())).Pass();
+            test_context_->unreachable_callback()));
   }
 
   net::URLRequest* url_request() {
@@ -131,6 +121,7 @@ class DataReductionProxyBypassStatsTest : public testing::Test {
   }
 
  private:
+  base::MessageLoopForIO message_loop_;
   net::TestURLRequestContext context_;
   net::TestDelegate delegate_;
   scoped_ptr<net::URLRequest> mock_url_request_;
@@ -565,10 +556,6 @@ class DataReductionProxyBypassStatsEndToEndTest : public testing::Test {
     drp_test_context_ =
         DataReductionProxyTestContext::Builder()
             .WithParamsFlags(DataReductionProxyParams::kAllowed)
-            .WithParamsDefinitions(
-                 TestDataReductionProxyParams::HAS_EVERYTHING &
-                 ~TestDataReductionProxyParams::HAS_DEV_ORIGIN &
-                 ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN)
             .WithURLRequestContext(&context_)
             .WithMockClientSocketFactory(&mock_socket_factory_)
             .Build();
@@ -586,7 +573,7 @@ class DataReductionProxyBypassStatsEndToEndTest : public testing::Test {
                                const char* retry_response_body) {
     // Support HTTPS URLs.
     net::SSLSocketDataProvider ssl_socket_data_provider(net::ASYNC, net::OK);
-    if (url.SchemeIsSecure()) {
+    if (url.SchemeIsCryptographic()) {
       mock_socket_factory_.AddSSLSocketDataProvider(&ssl_socket_data_provider);
     }
 
@@ -658,6 +645,8 @@ class DataReductionProxyBypassStatsEndToEndTest : public testing::Test {
         "DataReductionProxy.BypassedBytes.LocalBypassRules",
         "DataReductionProxy.BypassedBytes.ProxyOverridden",
         "DataReductionProxy.BypassedBytes.Current",
+        "DataReductionProxy.BypassedBytes.CurrentAudioVideo",
+        "DataReductionProxy.BypassedBytes.CurrentApplicationOctetStream",
         "DataReductionProxy.BypassedBytes.ShortAll",
         "DataReductionProxy.BypassedBytes.ShortTriggeringRequest",
         "DataReductionProxy.BypassedBytes.ShortAudioVideo",
@@ -703,6 +692,7 @@ class DataReductionProxyBypassStatsEndToEndTest : public testing::Test {
   }
 
  private:
+  base::MessageLoopForIO message_loop_;
   net::TestDelegate delegate_;
   net::MockClientSocketFactory mock_socket_factory_;
   net::TestURLRequestContext context_;
@@ -765,18 +755,34 @@ TEST_F(DataReductionProxyBypassStatsEndToEndTest,
 
 TEST_F(DataReductionProxyBypassStatsEndToEndTest, BypassedBytesCurrent) {
   InitializeContext();
-  base::HistogramTester histogram_tester;
-  CreateAndExecuteRequest(GURL("http://foo.com"),
-                          "HTTP/1.1 502 Bad Gateway\r\n"
-                          "Via: 1.1 Chrome-Compression-Proxy\r\n"
-                          "Chrome-Proxy: block-once\r\n\r\n",
-                          kErrorBody.c_str(), "HTTP/1.1 200 OK\r\n\r\n",
-                          kBody.c_str());
+  struct TestCase {
+    const char* histogram_name;
+    const char* retry_response_headers;
+  };
+  const TestCase test_cases[] = {
+      {"DataReductionProxy.BypassedBytes.Current", "HTTP/1.1 200 OK\r\n\r\n"},
+      {"DataReductionProxy.BypassedBytes.CurrentAudioVideo",
+       "HTTP/1.1 200 OK\r\n"
+       "Content-Type: video/mp4\r\n\r\n"},
+      {"DataReductionProxy.BypassedBytes.CurrentApplicationOctetStream",
+       "HTTP/1.1 200 OK\r\n"
+       "Content-Type: application/octet-stream\r\n\r\n"},
+  };
+  for (const TestCase& test_case : test_cases) {
+    ClearBadProxies();
+    base::HistogramTester histogram_tester;
+    CreateAndExecuteRequest(GURL("http://foo.com"),
+                            "HTTP/1.1 502 Bad Gateway\r\n"
+                            "Via: 1.1 Chrome-Compression-Proxy\r\n"
+                            "Chrome-Proxy: block-once\r\n\r\n",
+                            kErrorBody.c_str(),
+                            test_case.retry_response_headers, kBody.c_str());
 
-  histogram_tester.ExpectUniqueSample(
-      "DataReductionProxy.BypassedBytes.Current", kBody.size(), 1);
-  ExpectOtherBypassedBytesHistogramsEmpty(
-      histogram_tester, "DataReductionProxy.BypassedBytes.Current");
+    histogram_tester.ExpectUniqueSample(test_case.histogram_name, kBody.size(),
+                                        1);
+    ExpectOtherBypassedBytesHistogramsEmpty(histogram_tester,
+                                            test_case.histogram_name);
+  }
 }
 
 TEST_F(DataReductionProxyBypassStatsEndToEndTest,

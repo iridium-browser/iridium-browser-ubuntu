@@ -6,6 +6,7 @@
 #define PresentationController_h
 
 #include "core/frame/LocalFrameLifecycleObserver.h"
+#include "modules/ModulesExport.h"
 #include "modules/presentation/Presentation.h"
 #include "platform/Supplementable.h"
 #include "platform/heap/Handle.h"
@@ -20,7 +21,7 @@ enum class WebPresentationSessionState;
 
 // The coordinator between the various page exposed properties and the content
 // layer represented via |WebPresentationClient|.
-class PresentationController final
+class MODULES_EXPORT PresentationController final
     : public NoBaseWillBeGarbageCollectedFinalized<PresentationController>
     , public WillBeHeapSupplement<LocalFrame>
     , public LocalFrameLifecycleObserver
@@ -45,6 +46,7 @@ public:
     virtual bool isAvailableChangeWatched() const override;
     virtual void didStartDefaultSession(WebPresentationSessionClient*) override;
     virtual void didChangeSessionState(WebPresentationSessionClient*, WebPresentationSessionState) override;
+    virtual void didReceiveSessionTextMessage(WebPresentationSessionClient*, const WebString&) override;
 
     // Called when the first listener was added to or the last listener was removed from the
     // |availablechange| event.
@@ -55,6 +57,12 @@ public:
 
     // Called when the frame wants to join an existing presentation.
     void joinSession(const String& presentationUrl, const String& presentationId, WebPresentationSessionClientCallbacks*);
+
+    // Called when the frame wants to send String message to an existing presentation.
+    void send(const String& presentationUrl, const String& presentationId, const String& message);
+
+    // Called when the frame wants to send ArrayBuffer/View data to an existing presentation.
+    void send(const String& presentationUrl, const String& presentationId, const uint8_t* data, size_t length);
 
     // Called when the frame wants to close an existing presentation.
     void closeSession(const String& url, const String& presentationId);

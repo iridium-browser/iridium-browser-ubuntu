@@ -11,7 +11,6 @@
 #include "webrtc/modules/audio_coding/codecs/opus/interface/opus_interface.h"
 #include "webrtc/modules/audio_coding/codecs/opus/opus_inst.h"
 #include "webrtc/modules/audio_coding/neteq/tools/neteq_quality_test.h"
-#include "webrtc/test/testsupport/fileutils.h"
 
 using google::RegisterFlagValidator;
 using google::ParseCommandLineFlags;
@@ -20,44 +19,25 @@ using testing::InitGoogleTest;
 
 namespace webrtc {
 namespace test {
+namespace {
 
 static const int kOpusBlockDurationMs = 20;
 static const int kOpusSamplingKhz = 48;
 
-// Define switch for input file name.
-static bool ValidateInFilename(const char* flagname, const string& value) {
-  FILE* fid = fopen(value.c_str(), "rb");
-  if (fid != NULL) {
-    fclose(fid);
+// Define switch for sample rate.
+static bool ValidateSampleRate(const char* flagname, int32_t value) {
+  if (value == 8000 || value == 16000 || value == 32000 || value == 48000)
     return true;
-  }
-  printf("Invalid input filename.");
+  printf("Invalid sample rate should be 8000, 16000, 32000 or 48000 Hz.");
   return false;
 }
 
-DEFINE_string(in_filename,
-              ResourcePath("audio_coding/speech_mono_32_48kHz", "pcm"),
-              "Filename for input audio (should be 48 kHz sampled raw data).");
+DEFINE_int32(input_sample_rate,
+             kOpusSamplingKhz * 1000,
+             "Sample rate of input file.");
 
-static const bool in_filename_dummy =
-    RegisterFlagValidator(&FLAGS_in_filename, &ValidateInFilename);
-
-// Define switch for output file name.
-static bool ValidateOutFilename(const char* flagname, const string& value) {
-  FILE* fid = fopen(value.c_str(), "wb");
-  if (fid != NULL) {
-    fclose(fid);
-    return true;
-  }
-  printf("Invalid output filename.");
-  return false;
-}
-
-DEFINE_string(out_filename, OutputPath() + "neteq_opus_quality_test.pcm",
-              "Name of output audio file.");
-
-static const bool out_filename_dummy =
-    RegisterFlagValidator(&FLAGS_out_filename, &ValidateOutFilename);
+static const bool sample_rate_dummy =
+    RegisterFlagValidator(&FLAGS_input_sample_rate, &ValidateSampleRate);
 
 // Define switch for channels.
 static bool ValidateChannels(const char* flagname, int32_t value) {
@@ -98,18 +78,6 @@ DEFINE_int32(reported_loss_rate, 10, "Reported percentile of packet loss.");
 static const bool reported_loss_rate_dummy =
     RegisterFlagValidator(&FLAGS_reported_loss_rate, &ValidatePacketLossRate);
 
-// Define switch for runtime.
-static bool ValidateRuntime(const char* flagname, int32_t value) {
-  if (value > 0)
-    return true;
-  printf("Invalid runtime, should be greater than 0.");
-  return false;
-}
-
-DEFINE_int32(runtime_ms, 10000, "Simulated runtime (milliseconds).");
-static const bool runtime_dummy =
-    RegisterFlagValidator(&FLAGS_runtime_ms, &ValidateRuntime);
-
 DEFINE_bool(fec, true, "Whether to enable FEC for encoding.");
 
 DEFINE_bool(dtx, true, "Whether to enable DTX for encoding.");
@@ -124,6 +92,8 @@ static bool ValidateSubPackets(const char* flagname, int32_t value) {
 DEFINE_int32(sub_packets, 1, "Number of sub packets to repacketize.");
 static const bool sub_packets_dummy =
     RegisterFlagValidator(&FLAGS_sub_packets, &ValidateSubPackets);
+
+}  // namepsace
 
 class NetEqOpusQualityTest : public NetEqQualityTest {
  protected:
@@ -149,9 +119,7 @@ NetEqOpusQualityTest::NetEqOpusQualityTest()
                        kOpusSamplingKhz,
                        kOpusSamplingKhz,
                        (FLAGS_channels == 1) ? kDecoderOpus : kDecoderOpus_2ch,
-                       FLAGS_channels,
-                       FLAGS_in_filename,
-                       FLAGS_out_filename),
+                       FLAGS_channels),
       opus_encoder_(NULL),
       repacketizer_(NULL),
       sub_block_size_samples_(kOpusBlockDurationMs * kOpusSamplingKhz),
@@ -217,7 +185,7 @@ int NetEqOpusQualityTest::EncodeBlock(int16_t* in_data,
 }
 
 TEST_F(NetEqOpusQualityTest, Test) {
-  Simulate(FLAGS_runtime_ms);
+  Simulate();
 }
 
 }  // namespace test

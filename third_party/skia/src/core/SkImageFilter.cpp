@@ -24,7 +24,11 @@
 #include "SkGr.h"
 #endif
 
-enum { kDefaultCacheSize = 128 * 1024 * 1024 };
+#ifdef SK_BUILD_FOR_IOS
+  enum { kDefaultCacheSize = 2 * 1024 * 1024 };
+#else 
+  enum { kDefaultCacheSize = 128 * 1024 * 1024 };
+#endif 
 
 static int32_t next_image_filter_unique_id() {
     static int32_t gImageFilterUniqueID;
@@ -193,7 +197,6 @@ bool SkImageFilter::filterImage(Proxy* proxy, const SkBitmap& src,
 
 bool SkImageFilter::filterBounds(const SkIRect& src, const SkMatrix& ctm,
                                  SkIRect* dst) const {
-    SkASSERT(&src);
     SkASSERT(dst);
     return this->onFilterBounds(src, ctm, dst);
 }
@@ -254,8 +257,8 @@ bool SkImageFilter::filterImageGPU(Proxy* proxy, const SkBitmap& src, const Cont
     desc.fHeight = bounds.height();
     desc.fConfig = kRGBA_8888_GrPixelConfig;
 
-    SkAutoTUnref<GrTexture> dst(
-        context->refScratchTexture(desc, GrContext::kApprox_ScratchTexMatch));
+    SkAutoTUnref<GrTexture> dst(context->textureProvider()->refScratchTexture(
+        desc, GrTextureProvider::kApprox_ScratchTexMatch));
     if (!dst) {
         return false;
     }

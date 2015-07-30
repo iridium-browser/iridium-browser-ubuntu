@@ -5,6 +5,7 @@
 #ifndef InterpolationEffect_h
 #define InterpolationEffect_h
 
+#include "core/CoreExport.h"
 #include "core/animation/Interpolation.h"
 #include "core/animation/Keyframe.h"
 #include "platform/RuntimeEnabledFeatures.h"
@@ -14,7 +15,7 @@
 
 namespace blink {
 
-class InterpolationEffect : public RefCountedWillBeGarbageCollected<InterpolationEffect> {
+class CORE_EXPORT InterpolationEffect : public RefCountedWillBeGarbageCollected<InterpolationEffect> {
 public:
     static PassRefPtrWillBeRawPtr<InterpolationEffect> create()
     {
@@ -28,7 +29,7 @@ public:
         m_interpolations.append(InterpolationRecord::create(interpolation, easing, start, end, applyFrom, applyTo));
     }
 
-    void addInterpolationsFromKeyframes(CSSPropertyID, Element*, const ComputedStyle* baseStyle, Keyframe::PropertySpecificKeyframe& keyframeA, Keyframe::PropertySpecificKeyframe& keyframeB, double applyFrom, double applyTo);
+    void addInterpolationsFromKeyframes(PropertyHandle, Element*, const ComputedStyle* baseStyle, Keyframe::PropertySpecificKeyframe& keyframeA, Keyframe::PropertySpecificKeyframe& keyframeB, double applyFrom, double applyTo);
 
     template<typename T>
     inline void forEachInterpolation(const T& callback)

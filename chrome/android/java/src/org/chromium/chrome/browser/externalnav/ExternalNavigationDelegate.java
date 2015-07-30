@@ -16,7 +16,7 @@ import java.util.List;
  * A delegate for the class responsible for navigating to external applications from Chrome. Used
  * by {@link ExternalNavigationHandler}.
  */
-public interface ExternalNavigationDelegate {
+interface ExternalNavigationDelegate {
     /**
      * Get the list of component name of activities which can resolve |intent|.
      */
@@ -59,9 +59,28 @@ public interface ExternalNavigationDelegate {
 
     /**
      * Display a dialog warning the user that they may be leaving Chrome by starting this
-     * intent. Give the user the opportunity to cancel the action.
+     * intent. Give the user the opportunity to cancel the action. And if it is canceled, a
+     * navigation will happen in Chrome.
      */
-    void startIncognitoIntent(Intent intent);
+    void startIncognitoIntent(Intent intent, String referrerUrl, String fallbackUrl, Tab tab,
+            boolean needsToCloseTab);
+
+    /**
+     * @param tab The current tab.
+     * @return Whether we should block the navigation and request file access before proceeding.
+     */
+    boolean shouldRequestFileAccess(Tab tab);
+
+    /**
+     * Trigger a UI affordance that will ask the user to grant file access.  After the access
+     * has been granted or denied, continue loading the specified file URL.
+     *
+     * @param intent The intent to continue loading the file URL.
+     * @param referrerUrl The HTTP referrer URL.
+     * @param tab The current tab.
+     * @param needsToCloseTab Whether this action should close the current tab.
+     */
+    void startFileIntent(Intent intent, String referrerUrl, Tab tab, boolean needsToCloseTab);
 
     /**
      * Clobber the current tab and try not to pass an intent when it should be handled by Chrome

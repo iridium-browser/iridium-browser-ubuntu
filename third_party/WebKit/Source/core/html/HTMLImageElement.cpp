@@ -257,8 +257,8 @@ void HTMLImageElement::setBestFitURLAndDPRFromImageCandidate(const ImageCandidat
 void HTMLImageElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
 {
     if (name == altAttr || name == titleAttr) {
-        if (closedShadowRoot()) {
-            Element* text = closedShadowRoot()->getElementById("alttext");
+        if (userAgentShadowRoot()) {
+            Element* text = userAgentShadowRoot()->getElementById("alttext");
             String value = altText();
             if (text && text->textContent() != value)
                 text->setTextContent(altText());
@@ -320,12 +320,7 @@ ImageCandidate HTMLImageElement::findBestFitImageFromPictureParent()
         if (!source->mediaQueryMatches())
             continue;
 
-        String sizes = source->fastGetAttribute(sizesAttr);
-        if (!sizes.isNull())
-            UseCounter::count(document(), UseCounter::Sizes);
-        SizesAttributeParser parser = SizesAttributeParser(MediaValuesDynamic::create(document()), sizes);
-        float effectiveSize = parser.length();
-        ImageCandidate candidate = bestFitSourceForSrcsetAttribute(document().devicePixelRatio(), effectiveSize, source->fastGetAttribute(srcsetAttr), &document());
+        ImageCandidate candidate = bestFitSourceForSrcsetAttribute(document().devicePixelRatio(), sourceSize(*source), source->fastGetAttribute(srcsetAttr), &document());
         if (candidate.isEmpty())
             continue;
         return candidate;
@@ -335,11 +330,11 @@ ImageCandidate HTMLImageElement::findBestFitImageFromPictureParent()
 
 LayoutObject* HTMLImageElement::createLayoutObject(const ComputedStyle& style)
 {
-    if (style.hasContent())
-        return LayoutObject::createObject(this, style);
-
     if (m_useFallbackContent)
         return new LayoutBlockFlow(this);
+
+    if (style.hasContent())
+        return LayoutObject::createObject(this, style);
 
     LayoutImage* image = new LayoutImage(this);
     image->setImageResource(LayoutImageResource::create());
@@ -377,7 +372,7 @@ Node::InsertionNotificationRequest HTMLImageElement::insertedInto(ContainerNode*
         document().mediaQueryMatcher().addViewportListener(m_listener);
 
     bool imageWasModified = false;
-    if (RuntimeEnabledFeatures::pictureEnabled() && document().isActive()) {
+    if (document().isActive()) {
         ImageCandidate candidate = findBestFitImageFromPictureParent();
         if (!candidate.isEmpty()) {
             setBestFitURLAndDPRFromImageCandidate(candidate);
@@ -385,7 +380,7 @@ Node::InsertionNotificationRequest HTMLImageElement::insertedInto(ContainerNode*
         }
     }
 
-    // If we have been inserted from a renderer-less document,
+    // If we have been inserted from a layoutObject-less document,
     // our loader may have not fetched the image, so do it now.
     if ((insertionPoint->inDocument() && !imageLoader().image()) || imageWasModified)
         imageLoader().updateFromElement(ImageLoader::UpdateNormal);
@@ -598,7 +593,7 @@ PassRefPtr<Image> HTMLImageElement::getSourceImageForCanvas(SourceImageMode, Sou
 
     RefPtr<Image> sourceImage = cachedImage()->imageForLayoutObject(layoutObject());
 
-    // We need to synthesize a container size if a renderer is not available to provide one.
+    // We need to synthesize a container size if a layoutObject is not available to provide one.
     if (!layoutObject() && sourceImage->usesContainerSize())
         sourceImage->setContainerSize(sourceImage->size());
 
@@ -614,7 +609,7 @@ bool HTMLImageElement::wouldTaintOrigin(SecurityOrigin* destinationSecurityOrigi
     return !image->isAccessAllowed(destinationSecurityOrigin);
 }
 
-FloatSize HTMLImageElement::sourceSize() const
+FloatSize HTMLImageElement::elementSize() const
 {
     ImageResource* image = cachedImage();
     if (!image)
@@ -635,27 +630,33 @@ FloatSize HTMLImageElement::defaultDestinationSize() const
     return FloatSize(size);
 }
 
+float HTMLImageElement::sourceSize(Element& element)
+{
+    String sizes = element.fastGetAttribute(sizesAttr);
+    if (!sizes.isNull())
+        UseCounter::count(document(), UseCounter::Sizes);
+    return SizesAttributeParser(MediaValuesDynamic::create(document()), sizes).length();
+}
+
+void HTMLImageElement::forceReload() const
+{
+    imageLoader().updateFromElement(ImageLoader::UpdateForcedReload);
+}
+
 void HTMLImageElement::selectSourceURL(ImageLoader::UpdateFromElementBehavior behavior)
 {
     if (!document().isActive())
         return;
 
     bool foundURL = false;
-    if (RuntimeEnabledFeatures::pictureEnabled()) {
-        ImageCandidate candidate = findBestFitImageFromPictureParent();
-        if (!candidate.isEmpty()) {
-            setBestFitURLAndDPRFromImageCandidate(candidate);
-            foundURL = true;
-        }
+    ImageCandidate candidate = findBestFitImageFromPictureParent();
+    if (!candidate.isEmpty()) {
+        setBestFitURLAndDPRFromImageCandidate(candidate);
+        foundURL = true;
     }
 
     if (!foundURL) {
-        String sizes = fastGetAttribute(sizesAttr);
-        if (!sizes.isNull())
-            UseCounter::count(document(), UseCounter::Sizes);
-        SizesAttributeParser parser = SizesAttributeParser(MediaValuesDynamic::create(document()), sizes);
-        float effectiveSize = parser.length();
-        ImageCandidate candidate = bestFitSourceForImageAttributes(document().devicePixelRatio(), effectiveSize, fastGetAttribute(srcAttr), fastGetAttribute(srcsetAttr), &document());
+        candidate = bestFitSourceForImageAttributes(document().devicePixelRatio(), sourceSize(*this), fastGetAttribute(srcAttr), fastGetAttribute(srcsetAttr), &document());
         setBestFitURLAndDPRFromImageCandidate(candidate);
     }
     if (m_intrinsicSizingViewportDependant && !m_listener) {
@@ -675,7 +676,7 @@ const KURL& HTMLImageElement::sourceURL() const
     return cachedImage()->response().url();
 }
 
-void HTMLImageElement::didAddClosedShadowRoot(ShadowRoot&)
+void HTMLImageElement::didAddUserAgentShadowRoot(ShadowRoot&)
 {
     HTMLImageFallbackHelper::createAltTextShadowTree(*this);
 }
@@ -723,7 +724,7 @@ void HTMLImageElement::setUseFallbackContent()
     if (document().inStyleRecalc())
         return;
     EventDispatchForbiddenScope::AllowUserAgentEvents allowEvents;
-    ensureClosedShadowRoot();
+    ensureUserAgentShadowRoot();
 }
 
 bool HTMLImageElement::isOpaque() const

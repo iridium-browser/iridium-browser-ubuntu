@@ -32,7 +32,7 @@
 #include "core/animation/KeyframeEffectModel.h"
 
 #include "core/StylePropertyShorthand.h"
-#include "core/animation/AnimationNode.h"
+#include "core/animation/AnimationEffect.h"
 #include "core/animation/CompositorAnimations.h"
 #include "core/animation/css/CSSAnimatableValueFactory.h"
 #include "core/animation/css/CSSPropertyEquality.h"
@@ -45,9 +45,9 @@
 
 namespace blink {
 
-PropertySet KeyframeEffectModelBase::properties() const
+PropertyHandleSet KeyframeEffectModelBase::properties() const
 {
-    PropertySet result;
+    PropertyHandleSet result;
     for (const auto& keyframe : m_keyframes) {
         for (const auto& property : keyframe->properties())
             result.add(property);
@@ -57,7 +57,7 @@ PropertySet KeyframeEffectModelBase::properties() const
 
 void KeyframeEffectModelBase::setFrames(KeyframeVector& keyframes)
 {
-    // TODO(samli): Should also notify/invalidate the player
+    // TODO(samli): Should also notify/invalidate the animation
     m_keyframes = keyframes;
     m_keyframeGroups = nullptr;
     m_interpolationEffect = nullptr;
@@ -83,11 +83,12 @@ void KeyframeEffectModelBase::forceConversionsToAnimatableValues(Element& elemen
 void KeyframeEffectModelBase::snapshotCompositableProperties(Element& element, const ComputedStyle* baseStyle)
 {
     ensureKeyframeGroups();
-    for (CSSPropertyID property : CompositorAnimations::CompositableProperties) {
+    for (CSSPropertyID id : CompositorAnimations::CompositableProperties) {
+        PropertyHandle property = PropertyHandle(id);
         if (!affects(property))
             continue;
         for (auto& keyframe : m_keyframeGroups->get(property)->m_keyframes)
-            keyframe->populateAnimatableValue(property, element, baseStyle);
+            keyframe->populateAnimatableValue(id, element, baseStyle);
     }
 }
 
@@ -99,11 +100,11 @@ bool KeyframeEffectModelBase::updateNeutralKeyframeAnimatableValues(CSSPropertyI
         return false;
 
     ensureKeyframeGroups();
-    auto& keyframes = m_keyframeGroups->get(property)->m_keyframes;
+    auto& keyframes = m_keyframeGroups->get(PropertyHandle(property))->m_keyframes;
     ASSERT(keyframes.size() >= 2);
 
-    auto& first = toStringPropertySpecificKeyframe(*keyframes.first());
-    auto& last = toStringPropertySpecificKeyframe(*keyframes.last());
+    auto& first = toCSSPropertySpecificKeyframe(*keyframes.first());
+    auto& last = toCSSPropertySpecificKeyframe(*keyframes.last());
 
     if (!first.value())
         first.setAnimatableValue(value);
@@ -161,8 +162,9 @@ void KeyframeEffectModelBase::ensureKeyframeGroups() const
 
     m_keyframeGroups = adoptPtrWillBeNoop(new KeyframeGroupMap);
     for (const auto& keyframe : normalizedKeyframes(getFrames())) {
-        for (CSSPropertyID property : keyframe->properties()) {
-            ASSERT_WITH_MESSAGE(!isShorthandProperty(property), "Web Animations: Encountered shorthand CSS property (%d) in normalized keyframes.", property);
+        for (const PropertyHandle& property : keyframe->properties()) {
+            if (property.isCSSProperty())
+                ASSERT_WITH_MESSAGE(!isShorthandProperty(property.cssProperty()), "Web Animations: Encountered shorthand CSS property (%d) in normalized keyframes.", property.cssProperty());
             KeyframeGroupMap::iterator groupIter = m_keyframeGroups->find(property);
             PropertySpecificKeyframeGroup* group;
             if (groupIter == m_keyframeGroups->end())
@@ -208,7 +210,7 @@ bool KeyframeEffectModelBase::isReplaceOnly()
     ensureKeyframeGroups();
     for (const auto& entry : *m_keyframeGroups) {
         for (const auto& keyframe : entry.value->keyframes()) {
-            if (keyframe->composite() != AnimationEffect::CompositeReplace)
+            if (keyframe->composite() != EffectModel::CompositeReplace)
                 return false;
         }
     }
@@ -222,10 +224,10 @@ DEFINE_TRACE(KeyframeEffectModelBase)
     visitor->trace(m_keyframeGroups);
 #endif
     visitor->trace(m_interpolationEffect);
-    AnimationEffect::trace(visitor);
+    EffectModel::trace(visitor);
 }
 
-Keyframe::PropertySpecificKeyframe::PropertySpecificKeyframe(double offset, PassRefPtr<TimingFunction> easing, AnimationEffect::CompositeOperation composite)
+Keyframe::PropertySpecificKeyframe::PropertySpecificKeyframe(double offset, PassRefPtr<TimingFunction> easing, EffectModel::CompositeOperation composite)
     : m_offset(offset)
     , m_easing(easing)
     , m_composite(composite)

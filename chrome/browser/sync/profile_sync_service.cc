@@ -22,6 +22,7 @@
 #include "base/profiler/scoped_tracker.h"
 #include "base/strings/string16.h"
 #include "base/strings/stringprintf.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -293,8 +294,8 @@ bool ProfileSyncService::IsSyncEnabledAndLoggedIn() {
   if (IsManaged() || sync_prefs_.IsStartSuppressed())
     return false;
 
-  // Sync is logged in if there is a non-empty effective username.
-  return !signin_->GetEffectiveUsername().empty();
+  // Sync is logged in if there is a non-empty effective account id.
+  return !signin_->GetAccountIdToUse().empty();
 }
 
 bool ProfileSyncService::IsOAuthRefreshTokenAvailable() {
@@ -321,7 +322,7 @@ void ProfileSyncService::Initialize() {
 
   RegisterAuthNotifications();
 
-  if (!HasSyncSetupCompleted() || signin_->GetEffectiveUsername().empty()) {
+  if (!HasSyncSetupCompleted() || signin_->GetAccountIdToUse().empty()) {
     // Clean up in case of previous crash / setup abort / signout.
     DisableForUser();
   }
@@ -347,7 +348,7 @@ void ProfileSyncService::Initialize() {
   if (browser_sync::BackupRollbackController::IsBackupEnabled()) {
     // Backup is needed if user's not signed in or signed in but previous
     // backup didn't finish, i.e. backend didn't switch from backup to sync.
-    need_backup_ = signin_->GetEffectiveUsername().empty() ||
+    need_backup_ = signin_->GetAccountIdToUse().empty() ||
         sync_prefs_.GetFirstSyncTime().is_null();
 
     // Try to resume rollback if it didn't finish in last session.
@@ -357,13 +358,15 @@ void ProfileSyncService::Initialize() {
   }
 
 #if defined(ENABLE_PRE_SYNC_BACKUP)
-  if (!running_rollback && signin_->GetEffectiveUsername().empty()) {
+  if (!running_rollback && signin_->GetAccountIdToUse().empty()) {
     CleanUpBackup();
   }
 #else
   DCHECK(!running_rollback);
 #endif
 
+  memory_pressure_listener_.reset(new base::MemoryPressureListener(base::Bind(
+      &ProfileSyncService::OnMemoryPressure, weak_factory_.GetWeakPtr())));
   startup_controller_->Reset(GetRegisteredDataTypes());
   startup_controller_->TryStart();
 }
@@ -701,6 +704,8 @@ void ProfileSyncService::StartUpSlowBackendComponents(
   InitializeBackend(ShouldDeleteSyncFolder());
 
   UpdateFirstSyncTimePref();
+
+  ReportPreviousSessionMemoryWarningCount();
 }
 
 void ProfileSyncService::OnGetTokenSuccess(
@@ -911,6 +916,9 @@ void ProfileSyncService::ShutdownImpl(syncer::ShutdownReason reason) {
     UpdateAuthErrorState(GoogleServiceAuthError::AuthErrorNone());
 
   NotifyObservers();
+
+  // Mark this as a clean shutdown(without crash).
+  sync_prefs_.SetCleanShutdown(true);
 }
 
 void ProfileSyncService::DisableForUser() {
@@ -2146,7 +2154,9 @@ bool ProfileSyncService::SetDecryptionPassphrase(
     const std::string& passphrase) {
   if (IsPassphraseRequired()) {
     DVLOG(1) << "Setting passphrase for decryption.";
-    return backend_->SetDecryptionPassphrase(passphrase);
+    bool result = backend_->SetDecryptionPassphrase(passphrase);
+    UMA_HISTOGRAM_BOOLEAN("Sync.PassphraseDecryptionSucceeded", result);
+    return result;
   } else {
     NOTREACHED() << "SetDecryptionPassphrase must not be called when "
                     "IsPassphraseRequired() is false.";
@@ -2554,7 +2564,7 @@ bool ProfileSyncService::HasSyncingBackend() const {
 }
 
 void ProfileSyncService::UpdateFirstSyncTimePref() {
-  if (signin_->GetEffectiveUsername().empty()) {
+  if (signin_->GetAccountIdToUse().empty()) {
     // Clear if user's not signed in and rollback is done.
     if (backend_mode_ != ROLLBACK)
       sync_prefs_.ClearFirstSyncTime();
@@ -2638,7 +2648,7 @@ void ProfileSyncService::CheckSyncBackupIfNeeded() {
           FROM_HERE,
           base::Bind(syncer::CheckSyncDbLastModifiedTime,
                      profile_->GetPath().Append(kSyncBackupDataFolderName),
-                     base::MessageLoopProxy::current(),
+                     base::ThreadTaskRunnerHandle::Get(),
                      base::Bind(&ProfileSyncService::CheckSyncBackupCallback,
                                 weak_factory_.GetWeakPtr())));
     } else {
@@ -2646,7 +2656,7 @@ void ProfileSyncService::CheckSyncBackupIfNeeded() {
           content::BrowserThread::FILE, FROM_HERE,
           base::Bind(syncer::CheckSyncDbLastModifiedTime,
                      profile_->GetPath().Append(kSyncBackupDataFolderName),
-                     base::MessageLoopProxy::current(),
+                     base::ThreadTaskRunnerHandle::Get(),
                      base::Bind(&ProfileSyncService::CheckSyncBackupCallback,
                                 weak_factory_.GetWeakPtr())));
     }
@@ -2716,4 +2726,32 @@ void ProfileSyncService::RemoveClientFromServer() const {
     sync_stopped_reporter_->ReportSyncStopped(
         access_token_, cache_guid, birthday);
   }
+}
+
+void ProfileSyncService::OnMemoryPressure(
+    base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level) {
+  if (memory_pressure_level ==
+      base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_CRITICAL) {
+    sync_prefs_.SetMemoryPressureWarningCount(
+        sync_prefs_.GetMemoryPressureWarningCount() + 1);
+  }
+}
+
+void ProfileSyncService::ReportPreviousSessionMemoryWarningCount() {
+  int warning_received = sync_prefs_.GetMemoryPressureWarningCount();
+
+  if (-1 != warning_received) {
+    // -1 means it is new client.
+    if (!sync_prefs_.DidSyncShutdownCleanly()) {
+      UMA_HISTOGRAM_COUNTS("Sync.MemoryPressureWarningBeforeUncleanShutdown",
+                           warning_received);
+    } else {
+      UMA_HISTOGRAM_COUNTS("Sync.MemoryPressureWarningBeforeCleanShutdown",
+                           warning_received);
+    }
+  }
+  sync_prefs_.SetMemoryPressureWarningCount(0);
+  // Will set to true during a clean shutdown, so crash or something else will
+  // remain this as false.
+  sync_prefs_.SetCleanShutdown(false);
 }

@@ -5,7 +5,7 @@
 #include "cc/test/fake_picture_layer_impl.h"
 
 #include <vector>
-#include "cc/resources/tile.h"
+#include "cc/tiles/tile.h"
 #include "cc/trees/layer_tree_impl.h"
 
 namespace cc {
@@ -147,38 +147,6 @@ void FakePictureLayerImpl::CreateAllTiles() {
     tilings_->tiling_at(i)->CreateAllTilesForTesting();
 }
 
-void FakePictureLayerImpl::SetAllTilesVisible() {
-  WhichTree tree =
-      layer_tree_impl()->IsActiveTree() ? ACTIVE_TREE : PENDING_TREE;
-
-  for (size_t tiling_idx = 0; tiling_idx < tilings_->num_tilings();
-       ++tiling_idx) {
-    PictureLayerTiling* tiling = tilings_->tiling_at(tiling_idx);
-    std::vector<Tile*> tiles = tiling->AllTilesForTesting();
-    for (size_t tile_idx = 0; tile_idx < tiles.size(); ++tile_idx) {
-      Tile* tile = tiles[tile_idx];
-      TilePriority priority;
-      priority.resolution = HIGH_RESOLUTION;
-      priority.priority_bin = TilePriority::NOW;
-      priority.distance_to_visible = 0.f;
-      tile->SetPriority(tree, priority);
-    }
-  }
-}
-
-void FakePictureLayerImpl::ResetAllTilesPriorities() {
-  for (size_t tiling_idx = 0; tiling_idx < tilings_->num_tilings();
-       ++tiling_idx) {
-    PictureLayerTiling* tiling = tilings_->tiling_at(tiling_idx);
-    std::vector<Tile*> tiles = tiling->AllTilesForTesting();
-    for (size_t tile_idx = 0; tile_idx < tiles.size(); ++tile_idx) {
-      Tile* tile = tiles[tile_idx];
-      tile->SetPriority(ACTIVE_TREE, TilePriority());
-      tile->SetPriority(PENDING_TREE, TilePriority());
-    }
-  }
-}
-
 void FakePictureLayerImpl::SetAllTilesReady() {
   for (size_t tiling_idx = 0; tiling_idx < tilings_->num_tilings();
        ++tiling_idx) {
@@ -199,7 +167,7 @@ void FakePictureLayerImpl::SetAllTilesReadyInTiling(
 void FakePictureLayerImpl::SetTileReady(Tile* tile) {
   TileDrawInfo& draw_info = tile->draw_info();
   draw_info.SetSolidColorForTesting(true);
-  DCHECK(tile->IsReadyToDraw());
+  DCHECK(draw_info.IsReadyToDraw());
 }
 
 void FakePictureLayerImpl::DidBecomeActive() {
@@ -260,16 +228,14 @@ size_t FakePictureLayerImpl::CountTilesRequiredForActivation() const {
   if (!layer_tree_impl()->IsPendingTree())
     return 0;
 
-  return CountTilesRequired(
-      &PictureLayerTiling::IsTileRequiredForActivationIfVisible);
+  return CountTilesRequired(&PictureLayerTiling::IsTileRequiredForActivation);
 }
 
 size_t FakePictureLayerImpl::CountTilesRequiredForDraw() const {
   if (!layer_tree_impl()->IsActiveTree())
     return 0;
 
-  return CountTilesRequired(
-      &PictureLayerTiling::IsTileRequiredForDrawIfVisible);
+  return CountTilesRequired(&PictureLayerTiling::IsTileRequiredForDraw);
 }
 
 void FakePictureLayerImpl::ReleaseResources() {

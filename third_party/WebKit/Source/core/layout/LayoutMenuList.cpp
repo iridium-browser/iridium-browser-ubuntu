@@ -1,5 +1,5 @@
 /*
- * This file is part of the select element renderer in WebCore.
+ * This file is part of the select element layoutObject in WebCore.
  *
  * Copyright (C) 2010 Nokia Corporation and/or its subsidiary(-ies).
  * Copyright (C) 2006, 2007, 2008, 2009, 2010, 2011 Apple Inc. All rights reserved.
@@ -104,13 +104,15 @@ void LayoutMenuList::adjustInnerStyle()
     ComputedStyle& innerStyle = m_innerBlock->mutableStyleRef();
     innerStyle.setFlexGrow(1);
     innerStyle.setFlexShrink(1);
+    // min-width: 0; is needed for correct shrinking.
+    innerStyle.setMinWidth(Length(0, Fixed));
     // Use margin:auto instead of align-items:center to get safe centering, i.e.
     // when the content overflows, treat it the same as align-items: flex-start.
     // But we only do that for the cases where html.css would otherwise use center.
-    if (style()->alignItems() == ItemPositionCenter) {
+    if (style()->alignItemsPosition() == ItemPositionCenter) {
         innerStyle.setMarginTop(Length());
         innerStyle.setMarginBottom(Length());
-        innerStyle.setAlignSelf(ItemPositionFlexStart);
+        innerStyle.setAlignSelfPosition(ItemPositionFlexStart);
     }
 
     innerStyle.setPaddingLeft(Length(LayoutTheme::theme().popupInternalPaddingLeft(styleRef()), Fixed));
@@ -157,7 +159,7 @@ void LayoutMenuList::styleDidChange(StyleDifference diff, const ComputedStyle* o
     LayoutBlock::styleDidChange(diff, oldStyle);
 
     if (m_buttonText)
-        m_buttonText->setStyle(style());
+        m_buttonText->setStyle(mutableStyle());
     if (m_innerBlock) // LayoutBlock handled updating the anonymous block's style.
         adjustInnerStyle();
 
@@ -286,26 +288,26 @@ void LayoutMenuList::setText(const String& s)
 {
     if (s.isEmpty()) {
         if (!m_buttonText || !m_buttonText->isBR()) {
-            // FIXME: We should not modify the structure of the render tree
+            // FIXME: We should not modify the structure of the layout tree
             // during layout. crbug.com/370462
-            DeprecatedDisableModifyRenderTreeStructureAsserts disabler;
+            DeprecatedDisableModifyLayoutTreeStructureAsserts disabler;
             if (m_buttonText)
                 m_buttonText->destroy();
             m_buttonText = new LayoutBR(&document());
-            m_buttonText->setStyle(style());
+            m_buttonText->setStyle(mutableStyle());
             addChild(m_buttonText);
         }
     } else {
         if (m_buttonText && !m_buttonText->isBR()) {
             m_buttonText->setText(s.impl(), true);
         } else {
-            // FIXME: We should not modify the structure of the render tree
+            // FIXME: We should not modify the structure of the layout tree
             // during layout. crbug.com/370462
-            DeprecatedDisableModifyRenderTreeStructureAsserts disabler;
+            DeprecatedDisableModifyLayoutTreeStructureAsserts disabler;
             if (m_buttonText)
                 m_buttonText->destroy();
             m_buttonText = new LayoutText(&document(), s.impl());
-            m_buttonText->setStyle(style());
+            m_buttonText->setStyle(mutableStyle());
             // We need to set the text explicitly though it was specified in the
             // constructor because LayoutText doesn't refer to the text
             // specified in the constructor in a case of re-transforming.
@@ -339,7 +341,7 @@ LayoutRect LayoutMenuList::controlClipRect(const LayoutPoint& additionalOffset) 
 void LayoutMenuList::computeIntrinsicLogicalWidths(LayoutUnit& minLogicalWidth, LayoutUnit& maxLogicalWidth) const
 {
     maxLogicalWidth = std::max(m_optionsWidth, LayoutTheme::theme().minimumMenuListSize(styleRef())) + m_innerBlock->paddingLeft() + m_innerBlock->paddingRight();
-    if (!style()->width().isPercent())
+    if (!style()->width().hasPercent())
         minLogicalWidth = maxLogicalWidth;
 }
 
@@ -363,6 +365,9 @@ void LayoutMenuList::showPopup()
     IntSize size = pixelSnappedIntRect(frameRect()).size();
     HTMLSelectElement* select = selectElement();
     m_popup->show(quad, size, select->optionToListIndex(select->selectedIndex()));
+    if (AXObjectCache* cache = document().existingAXObjectCache())
+        cache->didShowMenuListPopup(this);
+
 }
 
 void LayoutMenuList::hidePopup()
@@ -588,6 +593,8 @@ int LayoutMenuList::selectedIndex() const
 void LayoutMenuList::popupDidHide()
 {
     m_popupIsVisible = false;
+    if (AXObjectCache* cache = document().existingAXObjectCache())
+        cache->didHideMenuListPopup(this);
 }
 
 void LayoutMenuList::popupDidCancel()

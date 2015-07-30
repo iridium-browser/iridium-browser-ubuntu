@@ -110,9 +110,7 @@ void LayoutSVGResourceContainer::markAllClientsForInvalidation(InvalidationMode 
     bool needsLayout = mode == LayoutAndBoundariesInvalidation;
     bool markForInvalidation = mode != ParentOnlyInvalidation;
 
-    HashSet<LayoutObject*>::iterator end = m_clients.end();
-    for (HashSet<LayoutObject*>::iterator it = m_clients.begin(); it != end; ++it) {
-        LayoutObject* client = *it;
+    for (auto* client : m_clients) {
         if (client->isSVGResourceContainer()) {
             toLayoutSVGResourceContainer(client)->removeAllClientsFromCache(markForInvalidation);
             continue;
@@ -131,9 +129,8 @@ void LayoutSVGResourceContainer::markAllClientsForInvalidation(InvalidationMode 
 
 void LayoutSVGResourceContainer::markAllClientLayersForInvalidation()
 {
-    HashSet<DeprecatedPaintLayer*>::iterator layerEnd = m_clientLayers.end();
-    for (HashSet<DeprecatedPaintLayer*>::iterator it = m_clientLayers.begin(); it != layerEnd; ++it)
-        (*it)->filterNeedsPaintInvalidation();
+    for (auto* layer : m_clientLayers)
+        layer->filterNeedsPaintInvalidation();
 }
 
 void LayoutSVGResourceContainer::markClientForInvalidation(LayoutObject* client, InvalidationMode mode)
@@ -223,6 +220,13 @@ void LayoutSVGResourceContainer::registerResource()
         if (!layoutObject)
             continue;
 
+        // If the client has a layer (is a non-SVGElement) we need to signal
+        // invalidation in the same way as is done in markAllClientLayersForInvalidation above.
+        if (layoutObject->hasLayer() && resourceType() == FilterResourceType) {
+            toLayoutBoxModelObject(layoutObject)->layer()->filterNeedsPaintInvalidation();
+            continue;
+        }
+
         StyleDifference diff;
         diff.setNeedsFullLayout();
         SVGResourcesCache::clientStyleChanged(layoutObject, diff, layoutObject->styleRef());
@@ -246,6 +250,7 @@ static inline void removeFromCacheAndInvalidateDependencies(LayoutObject* object
 
     if (!object->node() || !object->node()->isSVGElement())
         return;
+
     SVGElementSet* dependencies = toSVGElement(object->node())->setOfIncomingReferences();
     if (!dependencies)
         return;
@@ -254,19 +259,17 @@ static inline void removeFromCacheAndInvalidateDependencies(LayoutObject* object
     // reference graph adjustments on changes, so we need to break possible cycles here.
     // This strong reference is safe, as it is guaranteed that this set will be emptied
     // at the end of recursion.
-    typedef WillBeHeapHashSet<RawPtrWillBeMember<SVGElement>> SVGElementSet;
     DEFINE_STATIC_LOCAL(OwnPtrWillBePersistent<SVGElementSet>, invalidatingDependencies, (adoptPtrWillBeNoop(new SVGElementSet)));
 
-    SVGElementSet::iterator end = dependencies->end();
-    for (SVGElementSet::iterator it = dependencies->begin(); it != end; ++it) {
-        if (LayoutObject* layoutObject = (*it)->layoutObject()) {
-            if (UNLIKELY(!invalidatingDependencies->add(*it).isNewEntry)) {
+    for (SVGElement* element : *dependencies) {
+        if (LayoutObject* layoutObject = element->layoutObject()) {
+            if (UNLIKELY(!invalidatingDependencies->add(element).isNewEntry)) {
                 // Reference cycle: we are in process of invalidating this dependant.
                 continue;
             }
 
             LayoutSVGResourceContainer::markForLayoutAndParentResourceInvalidation(layoutObject, needsLayout);
-            invalidatingDependencies->remove(*it);
+            invalidatingDependencies->remove(element);
         }
     }
 }

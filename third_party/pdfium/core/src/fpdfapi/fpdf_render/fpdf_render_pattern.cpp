@@ -887,7 +887,7 @@ static CFX_DIBitmap* DrawPatternBitmap(CPDF_Document* pDoc, CPDF_PageRenderCache
                                        CPDF_TilingPattern* pPattern, const CFX_AffineMatrix* pObject2Device,
                                        int width, int height, int flags)
 {
-    CFX_DIBitmap* pBitmap = FX_NEW CFX_DIBitmap;
+    CFX_DIBitmap* pBitmap = new CFX_DIBitmap;
     if (!pBitmap->Create(width, height, pPattern->m_bColored ? FXDIB_Argb : FXDIB_8bppMask)) {
         delete pBitmap;
         return NULL;
@@ -1095,13 +1095,11 @@ void CPDF_RenderStatus::DrawPathWithPattern(CPDF_PathObject* pPathObj, const CFX
 }
 void CPDF_RenderStatus::ProcessPathPattern(CPDF_PathObject* pPathObj, const CFX_AffineMatrix* pObj2Device, int& filltype, FX_BOOL& bStroke)
 {
-    FX_BOOL bPattern = FALSE;
     if(filltype) {
         CPDF_Color& FillColor = *pPathObj->m_ColorState.GetFillColor();
         if(FillColor.m_pCS && FillColor.m_pCS->GetFamily() == PDFCS_PATTERN) {
             DrawPathWithPattern(pPathObj, pObj2Device, &FillColor, FALSE);
             filltype = 0;
-            bPattern = TRUE;
         }
     }
     if(bStroke) {
@@ -1109,7 +1107,6 @@ void CPDF_RenderStatus::ProcessPathPattern(CPDF_PathObject* pPathObj, const CFX_
         if(StrokeColor.m_pCS && StrokeColor.m_pCS->GetFamily() == PDFCS_PATTERN) {
             DrawPathWithPattern(pPathObj, pObj2Device, &StrokeColor, TRUE);
             bStroke = FALSE;
-            bPattern = TRUE;
         }
     }
 }

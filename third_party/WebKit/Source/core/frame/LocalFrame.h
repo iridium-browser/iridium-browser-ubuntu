@@ -103,7 +103,7 @@ namespace blink {
         void setPagePopupOwner(Element&);
         Element* pagePopupOwner() const { return m_pagePopupOwner.get(); }
 
-        LayoutView* contentRenderer() const; // Root of the render tree for the document contained in this frame.
+        LayoutView* contentLayoutObject() const; // Root of the layout tree for the document contained in this frame.
 
         Editor& editor() const;
         EventHandler& eventHandler() const;
@@ -165,6 +165,7 @@ namespace blink {
         // FIXME: once scroll customization is enabled everywhere
         // (crbug.com/416862), this should take a ScrollState object.
         bool applyScrollDelta(const FloatSize& delta, bool isScrollBegin);
+        bool shouldScrollTopControls(const FloatSize& delta) const;
 
 #if ENABLE(OILPAN)
         void registerPluginElement(HTMLPlugInElement*);
@@ -173,11 +174,6 @@ namespace blink {
 #endif
         DisplayItemClient displayItemClient() const { return toDisplayItemClient(this); }
         String debugName() const { return "LocalFrame"; }
-
-        void setShouldSendDPRHint() { m_shouldSendDPRHint = true; }
-        void setShouldSendRWHint() { m_shouldSendRWHint = true; }
-        bool shouldSendDPRHint() { return m_shouldSendDPRHint; }
-        bool shouldSendRWHint() { return m_shouldSendRWHint; }
 
     // ========
 
@@ -188,8 +184,6 @@ namespace blink {
         WindowProxyManager* windowProxyManager() const override;
 
         String localLayerTreeAsText(unsigned flags) const;
-
-        void detachView();
 
         // Paints the area for the given rect into a DragImage, with the given displayItemClient id attached.
         // The rect is in the coordinate space of the frame.
@@ -234,9 +228,6 @@ namespace blink {
         bool m_inViewSourceMode;
 
         RefPtrWillBeMember<InstrumentingAgents> m_instrumentingAgents;
-
-        bool m_shouldSendDPRHint;
-        bool m_shouldSendRWHint;
     };
 
     inline void LocalFrame::init()

@@ -10,12 +10,16 @@ found in the LICENSE file.
 <link rel="import" href="/base/range.html">
 <link rel="import" href="/core/trace_model/trace_model.html">
 <link rel="import" href="/core/importer/importer.html">
+<link rel="import" href="/core/trace_model/attribute.html">
+<link rel="import" href="/core/trace_model/comment_box_annotation.html">
 <link rel="import" href="/core/trace_model/instant_event.html">
 <link rel="import" href="/core/trace_model/flow_event.html">
 <link rel="import" href="/core/trace_model/counter_series.html">
 <link rel="import" href="/core/trace_model/slice_group.html">
 <link rel="import" href="/core/trace_model/global_memory_dump.html">
 <link rel="import" href="/core/trace_model/process_memory_dump.html">
+<link rel="import" href="/core/trace_model/rect_annotation.html">
+<link rel="import" href="/core/trace_model/x_marker_annotation.html">
 
 <script>
 'use strict';
@@ -94,6 +98,8 @@ tv.exportTo('tv.e.importer', function() {
       this.events_ = eventData;
     }
 
+    this.traceAnnotations_ = this.events_.traceAnnotations;
+
     // Some trace_event implementations put the actual trace events
     // inside a container. E.g { ... , traceEvents: [ ] }
     // If we see that, just pull out the trace events.
@@ -113,7 +119,8 @@ tv.exportTo('tv.e.importer', function() {
       // Any other fields in the container should be treated as metadata.
       for (var fieldName in container) {
         if (fieldName === 'traceEvents' || fieldName === 'systemTraceEvents' ||
-            fieldName === 'samples' || fieldName === 'stackFrames')
+            fieldName === 'samples' || fieldName === 'stackFrames' ||
+            fieldName === 'traceAnnotations')
           continue;
         this.model_.metadata.push({name: fieldName,
           value: container[fieldName]});
@@ -299,17 +306,21 @@ tv.exportTo('tv.e.importer', function() {
         }
         slice.endStackFrame = this.getStackFrameForEvent_(event);
 
-        for (var arg in event.args) {
-          if (slice.args[arg] !== undefined) {
-            this.model_.importWarning({
-              type: 'duration_parse_error',
-              message: 'Both the B and E phases of ' + slice.name +
-                  ' provided values for argument ' + arg + '.' +
-                  ' The value of the E phase event will be used.'
-            });
-          }
-          slice.args[arg] = this.deepCopyIfNeeded_(event.args[arg]);
+        this.mergeArgsInto_(slice.args, event.args, slice.title);
+      }
+    },
+
+    mergeArgsInto_: function(dstArgs, srcArgs, eventName) {
+      for (var arg in srcArgs) {
+        if (dstArgs[arg] !== undefined) {
+          this.model_.importWarning({
+            type: 'arg_merge_error',
+            message: 'Different phases of ' + eventName +
+                ' provided values for argument ' + arg + '.' +
+                ' The last provided value will be used.'
+          });
         }
+        dstArgs[arg] = this.deepCopyIfNeeded_(srcArgs[arg]);
       }
     },
 
@@ -473,8 +484,13 @@ tv.exportTo('tv.e.importer', function() {
      * model_.
      */
     importEvents: function() {
+      var csr = new tv.c.ClockSyncRecord('linux_perf_importer', 0, {});
+      this.model_.clockSyncRecords.push(csr);
       if (this.stackFrameEvents_)
         this.importStackFrames_();
+
+      if (this.traceAnnotations_)
+        this.importAnnotations_();
 
       var events = this.events_;
       for (var eI = 0; eI < events.length; eI++) {
@@ -553,6 +569,22 @@ tv.exportTo('tv.e.importer', function() {
             throw new Error('omg');
         }
         frame.parentFrame = parentFrame;
+      }
+    },
+
+    importAnnotations_: function() {
+      for (var id in this.traceAnnotations_) {
+        var annotation = tv.c.trace_model.Annotation.fromDictIfPossible(
+           this.traceAnnotations_[id]);
+        if (!annotation) {
+          this.model_.importWarning({
+            type: 'annotation_warning',
+            message: 'Unrecognized traceAnnotation typeName \"' +
+                this.traceAnnotations_[id].typeName + '\"'
+          });
+          continue;
+        }
+        this.model_.addAnnotation(annotation);
       }
     },
 
@@ -852,8 +884,6 @@ tv.exportTo('tv.e.importer', function() {
           if (isTopLevel) {
             topLevelSlices.push(slice);
           } else if (eventStateEntry.parentEntry.slice !== undefined) {
-            if (eventStateEntry.parentEntry.slice.subSlices === undefined)
-              eventStateEntry.parentEntry.slice.subSlices = [];
             eventStateEntry.parentEntry.slice.subSlices.push(slice);
           }
         }
@@ -953,7 +983,6 @@ tv.exportTo('tv.e.importer', function() {
             slice.startThread = events[0].thread;
             slice.endThread = asyncEventState.thread;
             slice.id = id;
-            slice.subSlices = [];
 
             var stepType = events[1].event.ph;
             var isValid = true;
@@ -1041,6 +1070,70 @@ tv.exportTo('tv.e.importer', function() {
       if (this.allFlowEvents_.length === 0)
         return;
 
+      var that = this;
+
+      function validateFlowEvent() {
+        if (event.name === undefined) {
+          that.model_.importWarning({
+            type: 'flow_slice_parse_error',
+            message: 'Flow events (ph: s, t or f) require a name parameter.'
+          });
+          return false;
+        }
+
+        if (event.id === undefined) {
+          that.model_.importWarning({
+            type: 'flow_slice_parse_error',
+            message: 'Flow events (ph: s, t or f) require an id parameter.'
+          });
+          return false;
+        }
+        return true;
+      }
+
+      function createFlowEvent(thread, event) {
+        // TODO(nduca): Figure out startSlice from ts and binding point,
+        // instead of making a join point.
+        var startSlice = new tv.c.trace_model.ThreadSlice(
+            event.cat,
+            event.name,
+            tv.b.ui.getColorIdForGeneralPurposeString(event.name),
+            event.ts / 1000,
+            that.deepCopyIfNeeded_(event.args));
+        startSlice.duration = 0;
+
+        thread.sliceGroup.pushSlice(startSlice);
+
+        var flowEvent = new tv.c.trace_model.FlowEvent(
+            event.cat,
+            event.id,
+            event.name,
+            tv.b.ui.getColorIdForGeneralPurposeString(event.name),
+            event.ts / 1000,
+            that.deepCopyIfNeeded_(event.args));
+        flowEvent.startSlice = startSlice;
+        return flowEvent;
+      }
+
+      function finishFlowEventWith(flowEvent, thread, event) {
+        // TODO(nduca): Figure out endSlice from ts and binding point.
+        var endSlice = new tv.c.trace_model.ThreadSlice(
+            event.cat,
+            event.name,
+            tv.b.ui.getColorIdForGeneralPurposeString(event.name),
+            event.ts / 1000,
+            that.deepCopyIfNeeded_(event.args));
+        endSlice.duration = 0;
+
+        thread.sliceGroup.pushSlice(endSlice);
+
+        // Modify the flowEvent with the new data.
+        flowEvent.endSlice = endSlice;
+        flowEvent.duration = (event.ts / 1000) - flowEvent.start;
+        that.mergeArgsInto_(flowEvent.args, event.args, flowEvent.title);
+      }
+
+      // Actual import.
       this.allFlowEvents_.sort(function(x, y) {
         var d = x.event.ts - y.event.ts;
         if (d != 0)
@@ -1053,44 +1146,24 @@ tv.exportTo('tv.e.importer', function() {
         var data = this.allFlowEvents_[i];
         var event = data.event;
         var thread = data.thread;
-
-        if (event.name === undefined) {
-          this.model_.importWarning({
-            type: 'flow_slice_parse_error',
-            message: 'Flow events (ph: s, t or f) require a name parameter.'
-          });
+        if (!validateFlowEvent(event))
           continue;
-        }
 
-        if (event.id === undefined) {
-          this.model_.importWarning({
-            type: 'flow_slice_parse_error',
-            message: 'Flow events (ph: s, t or f) require an id parameter.'
-          });
-          continue;
-        }
-
-        var slice = new tv.c.trace_model.FlowEvent(
-            event.cat,
-            event.id,
-            event.name,
-            tv.b.ui.getColorIdForGeneralPurposeString(event.name),
-            event.ts / 1000,
-            this.deepCopyIfNeeded_(event.args));
-        thread.sliceGroup.pushSlice(slice);
-
+        var flowEvent;
         if (event.ph === 's') {
-          if (flowIdToEvent[event.id] !== undefined) {
+          if (flowIdToEvent[event.id]) {
             this.model_.importWarning({
               type: 'flow_slice_start_error',
               message: 'event id ' + event.id + ' already seen when ' +
                   'encountering start of flow event.'});
+            continue;
           }
-          flowIdToEvent[event.id] = slice;
+          flowEvent = createFlowEvent(thread, event);
+          flowIdToEvent[event.id] = flowEvent;
 
         } else if (event.ph === 't' || event.ph === 'f') {
-          var flowPosition = flowIdToEvent[event.id];
-          if (flowPosition === undefined) {
+          flowEvent = flowIdToEvent[event.id];
+          if (flowEvent === undefined) {
             this.model_.importWarning({
               type: 'flow_slice_ordering_error',
               message: 'Found flow phase ' + event.ph + ' for id: ' + event.id +
@@ -1098,18 +1171,17 @@ tv.exportTo('tv.e.importer', function() {
             });
             continue;
           }
-          this.model_.flowEvents.push([flowPosition, slice]);
 
-          if (flowPosition)
-            flowPosition.nextFlowEvent = slice;
-          if (slice)
-            slice.previousFlowEvent = flowPosition;
+          finishFlowEventWith(flowEvent, thread, event);
 
-          if (event.ph === 'f') {
-            flowIdToEvent[event.id] = undefined;
-          } else {
-            // Make this slice the next start event in this flow.
-            flowIdToEvent[event.id] = slice;
+          that.model_.flowEvents.push(flowEvent);
+
+          flowIdToEvent[event.id] = undefined;
+
+          // If this is a step, then create another flow event.
+          if (event.ph === 't') {
+            flowEvent = createFlowEvent(thread, event);
+            flowIdToEvent[event.id] = flowEvent;
           }
         }
       }
@@ -1361,9 +1433,9 @@ tv.exportTo('tv.e.importer', function() {
         // Calculate the range of the global memory dump.
         var range = new tv.b.Range();
         if (events.global !== undefined)
-          range.addValue(events.global.ts);
+          range.addValue(events.global.ts / 1000);
         for (var i = 0; i < events.process.length; i++)
-          range.addValue(events.process[i].ts);
+          range.addValue(events.process[i].ts / 1000);
 
         // Create the global memory dump.
         var globalMemoryDump = new tv.c.trace_model.GlobalMemoryDump(
@@ -1392,10 +1464,132 @@ tv.exportTo('tv.e.importer', function() {
             continue;
           }
 
+          var dumps = processEvent.args.dumps;
+          if (dumps === undefined) {
+            this.model_.importWarning({
+                type: 'memory_dump_parse_error',
+                message: 'dumps not found in process memory dump for ' +
+                    'pid=' + pid + ' and dump id=' + id + '.'
+            });
+            continue;
+          }
+
           var process = this.model_.getOrCreateProcess(pid);
           var processMemoryDump = new tv.c.trace_model.ProcessMemoryDump(
-              globalMemoryDump, process, processEvent.ts,
-              this.deepCopyIfNeeded_(processEvent.args));
+              globalMemoryDump, process, processEvent.ts / 1000);
+
+          // Parse the totals, which are mandatory.
+          if (dumps.process_totals === undefined ||
+              dumps.process_totals.resident_set_bytes === undefined) {
+            this.model_.importWarning({
+                type: 'memory_dump_parse_error',
+                message: 'Mandatory field resident_set_bytes not found in' +
+                    ' process memory dump for pid=' + pid +
+                    ' and dump id=' + id + '.'
+            });
+            processMemoryDump.totalResidentBytes = undefined;
+          } else {
+            processMemoryDump.totalResidentBytes = parseInt(
+                dumps.process_totals.resident_set_bytes, 16);
+          }
+
+          // Populate the vmRegions, if present.
+          if (dumps.process_mmaps && dumps.process_mmaps.vm_regions) {
+            processMemoryDump.vmRegions = dumps.process_mmaps.vm_regions.map(
+              function(rawRegion) {
+                // See //base/trace_event/process_memory_maps.cc in Chromium.
+                var byteStats = new tv.c.trace_model.VMRegionByteStats(
+                    parseInt(rawRegion.bs.prv, 16),  // privateResident
+                    parseInt(rawRegion.bs.shr, 16),  // sharedResident
+                    parseInt(rawRegion.bs.pss, 16)  // proportionalResident
+                );
+                return new tv.c.trace_model.VMRegion(
+                    parseInt(rawRegion.sa, 16),  // startAddress
+                    parseInt(rawRegion.sz, 16),  // sizeInBytes
+                    rawRegion.pf,  // protectionFlags
+                    rawRegion.mf,  // mappedFile
+                    byteStats
+                );
+              }
+            );
+          }
+
+          // Populate the allocator dumps, if present, in two passes.
+          if (dumps.allocators !== undefined) {
+            var memoryAllocatorDumpsByFullName = {};
+            var memoryAllocatorDumps = [];
+
+            // 1) Construct the MemoryAllocatorDump objects without parent links
+            //    and add them to the memoryAllocatorDumpsByFullName index.
+            tv.b.iterItems(dumps.allocators,
+                function(fullName, rawAllocatorDump) {
+              var allocatorDump = new tv.c.trace_model.MemoryAllocatorDump(
+                  fullName);
+              var attributes = rawAllocatorDump.attrs;
+              tv.b.iterItems(attributes, function(attrName, attrArgs) {
+                var attrValue =
+                    tv.c.trace_model.Attribute.fromDictIfPossible(attrArgs);
+                allocatorDump.addAttribute(attrName, attrValue);
+              }, this);
+              memoryAllocatorDumpsByFullName[fullName] = allocatorDump;
+            }, this);
+
+            // 2) Find the roots allocator dumps and establish the parent links.
+            var fullNames = Object.keys(dumps.allocators);
+            fullNames.sort();
+            fullNames.forEach(function(fullName) {
+              var allocatorDump = memoryAllocatorDumpsByFullName[fullName];
+
+              // This is a loop because we might need to build implicit
+              // ancestors in case they were not present in the trace.
+              while (true) {
+                var lastSlashIndex = fullName.lastIndexOf('/');
+                if (lastSlashIndex === -1) {
+                  // If the dump is a root, add it to the top-level
+                  // memoryAllocatorDumps list.
+                  memoryAllocatorDumps.push(allocatorDump);
+                  break;
+                }
+
+                // If the dump is not a root, find its parent.
+                var parentFullName = fullName.substring(0, lastSlashIndex);
+                var parentAllocatorDump = memoryAllocatorDumpsByFullName[
+                    parentFullName];
+
+                // If the parent dump does not exist yet, we build an implicit
+                // one and continue up the ancestor chain.
+                var parentAlreadyExisted;
+                if (parentAllocatorDump !== undefined) {
+                  parentAlreadyExisted = true;
+                } else {
+                  parentAlreadyExisted = false;
+                  parentAllocatorDump =
+                      new tv.c.trace_model.MemoryAllocatorDump(
+                          parentFullName, undefined, undefined, undefined);
+                  memoryAllocatorDumpsByFullName[parentFullName] =
+                      parentAllocatorDump;
+                }
+
+                // Setup the parent <-> children relationships
+                allocatorDump.parent = parentAllocatorDump;
+                parentAllocatorDump.children.push(allocatorDump);
+
+                // If the parent already existed, then so did all the other
+                // ancestors so we can stop.
+                if (parentAlreadyExisted) {
+                  break;
+                }
+
+                fullName = parentFullName;
+                allocatorDump = parentAllocatorDump;
+              }
+            }, this);
+            memoryAllocatorDumps.forEach(function(dump) {
+              dump.aggregateAttributes(this.model_);
+            }, this);
+            processMemoryDump.memoryAllocatorDumps = memoryAllocatorDumps;
+          }
+
           process.memoryDumps.push(processMemoryDump);
           globalMemoryDump.processMemoryDumps[pid] = processMemoryDump;
         }

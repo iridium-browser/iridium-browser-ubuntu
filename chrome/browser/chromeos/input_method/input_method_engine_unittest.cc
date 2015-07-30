@@ -11,6 +11,7 @@
 #include "chrome/browser/chromeos/input_method/input_method_engine.h"
 #include "chrome/browser/chromeos/input_method/input_method_engine_interface.h"
 #include "chrome/browser/chromeos/input_method/mock_input_method_manager.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/ime/chromeos/extension_ime_util.h"
 #include "ui/base/ime/chromeos/mock_component_extension_ime_manager_delegate.h"
@@ -79,6 +80,7 @@ class TestObserver : public InputMethodEngineInterface::Observer {
     calls_bitmap_ |= ONFOCUS;
   }
   void OnBlur(int context_id) override { calls_bitmap_ |= ONBLUR; }
+  bool IsInterestedInKeyEvent() const override { return true; }
   void OnKeyEvent(const std::string& engine_id,
                   const InputMethodEngineInterface::KeyboardEvent& event,
                   input_method::KeyEventHandle* key_data) override {}
@@ -135,14 +137,15 @@ class InputMethodEngineTest :  public testing::Test {
     observer_ = new TestObserver();
     scoped_ptr<InputMethodEngineInterface::Observer> observer_ptr(observer_);
     engine_->Initialize(observer_ptr.Pass(),
-                        whitelisted ? kTestExtensionId : kTestExtensionId2);
+                        whitelisted ? kTestExtensionId : kTestExtensionId2,
+                        ProfileManager::GetActiveUserProfile());
   }
 
   void FocusIn(ui::TextInputType input_type) {
     IMEEngineHandlerInterface::InputContext input_context(
         input_type, ui::TEXT_INPUT_MODE_DEFAULT, ui::TEXT_INPUT_FLAG_NONE);
     engine_->FocusIn(input_context);
-    IMEBridge::Get()->SetCurrentTextInputType(input_type);
+    IMEBridge::Get()->SetCurrentInputContext(input_context);
   }
 
   scoped_ptr<InputMethodEngine> engine_;

@@ -12,6 +12,7 @@
 #include "sync/syncable/syncable_write_transaction.h"
 #include "sync/test/engine/test_syncable_utils.h"
 #include "sync/test/test_directory_backing_store.h"
+#include "sync/util/mock_unrecoverable_error_handler.h"
 
 using base::ExpectDictBooleanValue;
 using base::ExpectDictStringValue;
@@ -1624,36 +1625,6 @@ TEST_F(SyncableDirectoryTest, ToValue) {
   dir()->SaveChanges();
 }
 
-// Test that the bookmark tag generation algorithm remains unchanged.
-TEST_F(SyncableDirectoryTest, BookmarkTagTest) {
-  // This test needs its own InMemoryDirectoryBackingStore because it needs to
-  // call request_consistent_cache_guid().
-  InMemoryDirectoryBackingStore* store = new InMemoryDirectoryBackingStore("x");
-
-  // The two inputs that form the bookmark tag are the directory's cache_guid
-  // and its next_id value.  We don't need to take any action to ensure
-  // consistent next_id values, but we do need to explicitly request that our
-  // InMemoryDirectoryBackingStore always return the same cache_guid.
-  store->request_consistent_cache_guid();
-
-  Directory dir(store, unrecoverable_error_handler(), NULL, NULL, NULL);
-  ASSERT_EQ(
-      OPENED,
-      dir.Open("x", directory_change_delegate(), NullTransactionObserver()));
-
-  {
-    WriteTransaction wtrans(FROM_HERE, UNITTEST, &dir);
-    MutableEntry bm(&wtrans, CREATE, BOOKMARKS, wtrans.root_id(), "bm");
-    bm.PutIsUnsynced(true);
-
-    // If this assertion fails, that might indicate that the algorithm used to
-    // generate bookmark tags has been modified.  This could have implications
-    // for bookmark ordering.  Please make sure you know what you're doing if
-    // you intend to make such a change.
-    ASSERT_EQ("6wHRAb3kbnXV5GHrejp4/c1y5tw=", bm.GetUniqueBookmarkTag());
-  }
-}
-
 // A thread that creates a bunch of directory entries.
 class StressTransactionsDelegate : public base::PlatformThread::Delegate {
  public:
@@ -2004,6 +1975,49 @@ TEST_F(SyncableDirectoryTest, MutableEntry_ImplicitParentId_Siblings) {
     EXPECT_EQ(item1_id, item2.GetPredecessorId());
     EXPECT_EQ(Id(), item2.GetSuccessorId());
   }
+}
+
+TEST_F(SyncableDirectoryTest, SaveChangesSnapshot_HasUnsavedMetahandleChanges) {
+  EntryKernel kernel;
+  Directory::SaveChangesSnapshot snapshot;
+  EXPECT_FALSE(snapshot.HasUnsavedMetahandleChanges());
+  snapshot.dirty_metas.insert(&kernel);
+  EXPECT_TRUE(snapshot.HasUnsavedMetahandleChanges());
+  snapshot.dirty_metas.clear();
+
+  EXPECT_FALSE(snapshot.HasUnsavedMetahandleChanges());
+  snapshot.metahandles_to_purge.insert(1);
+  EXPECT_TRUE(snapshot.HasUnsavedMetahandleChanges());
+  snapshot.metahandles_to_purge.clear();
+
+  EXPECT_FALSE(snapshot.HasUnsavedMetahandleChanges());
+  snapshot.delete_journals.insert(&kernel);
+  EXPECT_TRUE(snapshot.HasUnsavedMetahandleChanges());
+  snapshot.delete_journals.clear();
+
+  EXPECT_FALSE(snapshot.HasUnsavedMetahandleChanges());
+  snapshot.delete_journals_to_purge.insert(1);
+  EXPECT_TRUE(snapshot.HasUnsavedMetahandleChanges());
+  snapshot.delete_journals_to_purge.clear();
+}
+
+// Verify that Directory triggers an unrecoverable error when a catastrophic
+// DirectoryBackingStore error is detected.
+TEST_F(SyncableDirectoryTest, CatastrophicError) {
+  MockUnrecoverableErrorHandler unrecoverable_error_handler;
+  Directory dir(new InMemoryDirectoryBackingStore("catastrophic_error"),
+                &unrecoverable_error_handler, nullptr, nullptr, nullptr);
+  ASSERT_EQ(OPENED, dir.Open(kDirectoryName, directory_change_delegate(),
+                             NullTransactionObserver()));
+  ASSERT_EQ(0, unrecoverable_error_handler.invocation_count());
+
+  // Fire off two catastrophic errors. Call it twice to ensure Directory is
+  // tolerant of multiple invocations since that may happen in the real world.
+  dir.OnCatastrophicError();
+  dir.OnCatastrophicError();
+
+  // See that the unrecoverable error handler has been invoked twice.
+  ASSERT_EQ(2, unrecoverable_error_handler.invocation_count());
 }
 
 }  // namespace syncable

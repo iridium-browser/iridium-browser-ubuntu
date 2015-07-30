@@ -524,18 +524,8 @@ bool FontFaceSet::resolveFontStyle(const String& fontString, Font& font)
 
     style->font().update(style->font().fontSelector());
 
-    // Now map the font property longhands into the style.
-    CSSPropertyValue properties[] = {
-        CSSPropertyValue(CSSPropertyFontFamily, *parsedStyle),
-        CSSPropertyValue(CSSPropertyFontStretch, *parsedStyle),
-        CSSPropertyValue(CSSPropertyFontStyle, *parsedStyle),
-        CSSPropertyValue(CSSPropertyFontVariant, *parsedStyle),
-        CSSPropertyValue(CSSPropertyFontWeight, *parsedStyle),
-        CSSPropertyValue(CSSPropertyFontSize, *parsedStyle),
-        CSSPropertyValue(CSSPropertyLineHeight, *parsedStyle),
-    };
-    StyleResolver& styleResolver = document()->ensureStyleResolver();
-    styleResolver.applyPropertiesToStyle(properties, WTF_ARRAY_LENGTH(properties), style.get());
+    document()->updateLayoutTreeIfNeeded();
+    document()->ensureStyleResolver().computeFont(style.get(), *parsedStyle);
 
     font = style->font();
     font.update(document()->styleEngine().fontSelector());
@@ -556,10 +546,10 @@ void FontFaceSet::FontLoadHistogram::record()
 {
     if (!m_recorded) {
         m_recorded = true;
-        blink::Platform::current()->histogramCustomCounts("WebFont.WebFontsInPage", m_count, 1, 100, 50);
+        Platform::current()->histogramCustomCounts("WebFont.WebFontsInPage", m_count, 1, 100, 50);
     }
     if (m_status == HadBlankText || m_status == DidNotHaveBlankText) {
-        blink::Platform::current()->histogramEnumeration("WebFont.HadBlankText", m_status == HadBlankText ? 1 : 0, 2);
+        Platform::current()->histogramEnumeration("WebFont.HadBlankText", m_status == HadBlankText ? 1 : 0, 2);
         m_status = Reported;
     }
 }
@@ -594,7 +584,7 @@ DEFINE_TRACE(FontFaceSet)
     visitor->trace(m_loadedFonts);
     visitor->trace(m_failedFonts);
     visitor->trace(m_nonCSSConnectedFaces);
-    DocumentSupplement::trace(visitor);
+    WillBeHeapSupplement<Document>::trace(visitor);
 #endif
     EventTargetWithInlineData::trace(visitor);
     ActiveDOMObject::trace(visitor);

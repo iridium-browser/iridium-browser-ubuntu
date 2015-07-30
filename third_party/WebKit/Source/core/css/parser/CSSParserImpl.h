@@ -16,6 +16,8 @@
 
 namespace blink {
 
+class CSSParserObserver;
+class CSSParserObserverWrapper;
 class StyleRule;
 class StyleRuleBase;
 class StyleRuleCharset;
@@ -48,18 +50,22 @@ public:
         AllowImportRules,
         AllowNamespaceRules,
         RegularRules,
-        KeyframeRules
+        KeyframeRules,
+        NoRules, // For parsing at-rules inside declaration lists
     };
 
     static bool parseValue(MutableStylePropertySet*, CSSPropertyID, const String&, bool important, const CSSParserContext&);
     static PassRefPtrWillBeRawPtr<ImmutableStylePropertySet> parseInlineStyleDeclaration(const String&, Element*);
     static bool parseDeclarationList(MutableStylePropertySet*, const String&, const CSSParserContext&);
-    static PassRefPtrWillBeRawPtr<StyleRuleBase> parseRule(const String&, const CSSParserContext&, AllowedRulesType);
+    static PassRefPtrWillBeRawPtr<StyleRuleBase> parseRule(const String&, const CSSParserContext&, StyleSheetContents*, AllowedRulesType);
     static void parseStyleSheet(const String&, const CSSParserContext&, StyleSheetContents*);
 
     static PassOwnPtr<Vector<double>> parseKeyframeKeyList(const String&);
 
     bool supportsDeclaration(CSSParserTokenRange&);
+
+    static void parseDeclarationListForInspector(const String&, const CSSParserContext&, CSSParserObserver&);
+    static void parseStyleSheetForInspector(const String&, const CSSParserContext&, CSSParserObserver&);
 
 private:
     enum RuleListType {
@@ -102,6 +108,9 @@ private:
 
     AtomicString m_defaultNamespace;
     RawPtrWillBeMember<StyleSheetContents> m_styleSheet;
+
+    // For the inspector
+    CSSParserObserverWrapper* m_observerWrapper;
 };
 
 } // namespace blink

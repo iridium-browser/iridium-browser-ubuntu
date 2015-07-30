@@ -10,6 +10,7 @@
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "google_apis/drive/drive_api_parser.h"
 #include "google_apis/drive/drive_api_requests.h"
@@ -57,6 +58,59 @@ void AppendContent(std::string* out,
   out->append(*content);
 }
 
+class TestBatchableDelegate : public BatchableDelegate {
+ public:
+  TestBatchableDelegate(const GURL url,
+                        const std::string& content_type,
+                        const std::string& content_data,
+                        const base::Closure& callback)
+      : url_(url),
+        content_type_(content_type),
+        content_data_(content_data),
+        callback_(callback) {}
+  GURL GetURL() const override { return url_; }
+  net::URLFetcher::RequestType GetRequestType() const override {
+    return net::URLFetcher::PUT;
+  }
+  std::vector<std::string> GetExtraRequestHeaders() const override {
+    return std::vector<std::string>();
+  }
+  void Prepare(const PrepareCallback& callback) override {
+    callback.Run(HTTP_SUCCESS);
+  }
+  bool GetContentData(std::string* upload_content_type,
+                      std::string* upload_content) override {
+    upload_content_type->assign(content_type_);
+    upload_content->assign(content_data_);
+    return true;
+  }
+  void NotifyError(DriveApiErrorCode code) override { callback_.Run(); }
+  void NotifyResult(DriveApiErrorCode code,
+                    const std::string& body,
+                    const base::Closure& closure) override {
+    callback_.Run();
+    closure.Run();
+  }
+  void NotifyUploadProgress(const net::URLFetcher* source,
+                            int64 current,
+                            int64 total) override {
+    progress_values_.push_back(current);
+  }
+  const std::vector<int64>& progress_values() const { return progress_values_; }
+
+ private:
+  GURL url_;
+  std::string content_type_;
+  std::string content_data_;
+  base::Closure callback_;
+  std::vector<int64> progress_values_;
+};
+
+void EmptyPreapreCallback(DriveApiErrorCode) {
+}
+void EmptyClosure() {
+}
+
 }  // namespace
 
 class DriveApiRequestsTest : public testing::Test {
@@ -99,6 +153,9 @@ class DriveApiRequestsTest : public testing::Test {
                    base::Unretained(this)));
     test_server_.RegisterRequestHandler(
         base::Bind(&DriveApiRequestsTest::HandleDownloadRequest,
+                   base::Unretained(this)));
+    test_server_.RegisterRequestHandler(
+        base::Bind(&DriveApiRequestsTest::HandleBatchUploadRequest,
                    base::Unretained(this)));
 
     GURL test_base_url = test_util::GetBaseUrlForTesting(test_server_.port());
@@ -394,6 +451,44 @@ class DriveApiRequestsTest : public testing::Test {
     return response.Pass();
   }
 
+  scoped_ptr<net::test_server::HttpResponse> HandleBatchUploadRequest(
+      const net::test_server::HttpRequest& request) {
+    http_request_ = request;
+
+    const GURL absolute_url = test_server_.GetURL(request.relative_url);
+    std::string id;
+    if (absolute_url.path() != "/upload/drive")
+      return scoped_ptr<net::test_server::HttpResponse>();
+
+    scoped_ptr<net::test_server::BasicHttpResponse> response(
+        new net::test_server::BasicHttpResponse);
+    response->set_code(net::HTTP_OK);
+    response->set_content_type("multipart/mixed; boundary=BOUNDARY");
+    response->set_content(
+        "--BOUNDARY\r\n"
+        "Content-Type: application/http\r\n"
+        "\r\n"
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: application/json; charset=UTF-8\r\n"
+        "\r\n"
+        "{\r\n"
+        " \"kind\": \"drive#file\",\r\n"
+        " \"id\": \"file_id_1\"\r\n"
+        "}\r\n"
+        "\r\n"
+        "--BOUNDARY\r\n"
+        "Content-Type: application/http\r\n"
+        "\r\n"
+        "HTTP/1.1 403 Forbidden\r\n"
+        "Content-Type: application/json; charset=UTF-8\r\n"
+        "\r\n"
+        "{\"error\":{\"errors\": ["
+        " {\"reason\": \"userRateLimitExceeded\"}]}}\r\n"
+        "\r\n"
+        "--BOUNDARY--\r\n");
+    return response.Pass();
+  }
+
   // These are for the current upload file status.
   int64 received_bytes_;
   int64 content_length_;
@@ -418,8 +513,8 @@ TEST_F(DriveApiRequestsTest, DriveApiDataRequest_Fields) {
         test_util::CreateQuitCallback(
             &run_loop,
             test_util::CreateCopyResultCallback(&error, &about_resource)));
-    request->set_fields(
-        "kind,quotaBytesTotal,quotaBytesUsed,largestChangeId,rootFolderId");
+    request->set_fields("kind,quotaBytesTotal,quotaBytesUsedAggregate,"
+                        "largestChangeId,rootFolderId");
     request_sender_->StartRequestWithRetry(request);
     run_loop.Run();
   }
@@ -427,7 +522,7 @@ TEST_F(DriveApiRequestsTest, DriveApiDataRequest_Fields) {
   EXPECT_EQ(HTTP_SUCCESS, error);
   EXPECT_EQ(net::test_server::METHOD_GET, http_request_.method);
   EXPECT_EQ("/drive/v2/about?"
-            "fields=kind%2CquotaBytesTotal%2CquotaBytesUsed%2C"
+            "fields=kind%2CquotaBytesTotal%2CquotaBytesUsedAggregate%2C"
             "largestChangeId%2CrootFolderId",
             http_request_.relative_url);
 
@@ -437,7 +532,8 @@ TEST_F(DriveApiRequestsTest, DriveApiDataRequest_Fields) {
   ASSERT_TRUE(about_resource.get());
   EXPECT_EQ(expected->largest_change_id(), about_resource->largest_change_id());
   EXPECT_EQ(expected->quota_bytes_total(), about_resource->quota_bytes_total());
-  EXPECT_EQ(expected->quota_bytes_used(), about_resource->quota_bytes_used());
+  EXPECT_EQ(expected->quota_bytes_used_aggregate(),
+            about_resource->quota_bytes_used_aggregate());
   EXPECT_EQ(expected->root_folder_id(), about_resource->root_folder_id());
 }
 
@@ -588,7 +684,8 @@ TEST_F(DriveApiRequestsTest, AboutGetRequest_ValidJson) {
   ASSERT_TRUE(about_resource.get());
   EXPECT_EQ(expected->largest_change_id(), about_resource->largest_change_id());
   EXPECT_EQ(expected->quota_bytes_total(), about_resource->quota_bytes_total());
-  EXPECT_EQ(expected->quota_bytes_used(), about_resource->quota_bytes_used());
+  EXPECT_EQ(expected->quota_bytes_used_aggregate(),
+            about_resource->quota_bytes_used_aggregate());
   EXPECT_EQ(expected->root_folder_id(), about_resource->root_folder_id());
 }
 
@@ -1888,4 +1985,305 @@ TEST_F(DriveApiRequestsTest, PermissionsInsertRequest) {
   EXPECT_TRUE(base::Value::Equals(expected.get(), result.get()));
 }
 
+TEST_F(DriveApiRequestsTest, BatchUploadRequest) {
+  // Preapre constants.
+  const char kTestContentType[] = "text/plain";
+  const std::string kTestContent(10, 'a');
+  const base::FilePath kTestFilePath =
+      temp_dir_.path().AppendASCII("upload_file.txt");
+  ASSERT_TRUE(test_util::WriteStringToFile(kTestFilePath, kTestContent));
+
+  // Create batch request.
+  drive::BatchUploadRequest* const request =
+      new drive::BatchUploadRequest(request_sender_.get(), *url_generator_);
+  request->SetBoundaryForTesting("OUTERBOUNDARY");
+  request_sender_->StartRequestWithRetry(request);
+
+  // Create child request.
+  DriveApiErrorCode errors[] = {DRIVE_OTHER_ERROR, DRIVE_OTHER_ERROR};
+  scoped_ptr<FileResource> file_resources[2];
+  base::RunLoop run_loop[2];
+  for (int i = 0; i < 2; ++i) {
+    const FileResourceCallback callback = test_util::CreateQuitCallback(
+        &run_loop[i],
+        test_util::CreateCopyResultCallback(&errors[i], &file_resources[i]));
+    drive::MultipartUploadNewFileDelegate* const child_request =
+        new drive::MultipartUploadNewFileDelegate(
+            request_sender_->blocking_task_runner(),
+            base::StringPrintf("new file title %d", i),
+            "parent_resource_id", kTestContentType, kTestContent.size(),
+            base::Time(), base::Time(), kTestFilePath, drive::Properties(),
+            *url_generator_, callback, ProgressCallback());
+    child_request->SetBoundaryForTesting("INNERBOUNDARY");
+    request->AddRequest(child_request);
+  }
+  request->Commit();
+  run_loop[0].Run();
+  run_loop[1].Run();
+
+  EXPECT_EQ(net::test_server::METHOD_PUT, http_request_.method);
+  EXPECT_EQ("batch", http_request_.headers["X-Goog-Upload-Protocol"]);
+  EXPECT_EQ("multipart/mixed; boundary=OUTERBOUNDARY",
+            http_request_.headers["Content-Type"]);
+  EXPECT_EQ(
+      "--OUTERBOUNDARY\n"
+      "Content-Type: application/http\n"
+      "\n"
+      "POST /upload/drive/v2/files HTTP/1.1\n"
+      "Host: 127.0.0.1\n"
+      "X-Goog-Upload-Protocol: multipart\n"
+      "Content-Type: multipart/related; boundary=INNERBOUNDARY\n"
+      "\n"
+      "--INNERBOUNDARY\n"
+      "Content-Type: application/json\n"
+      "\n"
+      "{\"parents\":[{\"id\":\"parent_resource_id\","
+      "\"kind\":\"drive#fileLink\"}],\"title\":\"new file title 0\"}\n"
+      "--INNERBOUNDARY\n"
+      "Content-Type: text/plain\n"
+      "\n"
+      "aaaaaaaaaa\n"
+      "--INNERBOUNDARY--\n"
+      "--OUTERBOUNDARY\n"
+      "Content-Type: application/http\n"
+      "\n"
+      "POST /upload/drive/v2/files HTTP/1.1\n"
+      "Host: 127.0.0.1\n"
+      "X-Goog-Upload-Protocol: multipart\n"
+      "Content-Type: multipart/related; boundary=INNERBOUNDARY\n"
+      "\n"
+      "--INNERBOUNDARY\n"
+      "Content-Type: application/json\n"
+      "\n"
+      "{\"parents\":[{\"id\":\"parent_resource_id\","
+      "\"kind\":\"drive#fileLink\"}],\"title\":\"new file title 1\"}\n"
+      "--INNERBOUNDARY\n"
+      "Content-Type: text/plain\n"
+      "\n"
+      "aaaaaaaaaa\n"
+      "--INNERBOUNDARY--\n"
+      "--OUTERBOUNDARY--",
+      http_request_.content);
+  EXPECT_EQ(HTTP_SUCCESS, errors[0]);
+  ASSERT_TRUE(file_resources[0]);
+  EXPECT_EQ("file_id_1", file_resources[0]->file_id());
+  ASSERT_FALSE(file_resources[1]);
+  EXPECT_EQ(HTTP_SERVICE_UNAVAILABLE, errors[1]);
+}
+
+TEST_F(DriveApiRequestsTest, EmptyBatchUploadRequest) {
+  drive::BatchUploadRequest* const request =
+      new drive::BatchUploadRequest(request_sender_.get(), *url_generator_);
+  base::WeakPtr<drive::BatchUploadRequest> weak_ptr =
+      request->GetWeakPtrAsBatchUploadRequest();
+  request->Commit();
+  ASSERT_FALSE(weak_ptr.get());
+}
+
+TEST_F(DriveApiRequestsTest, BatchUploadRequestWithBodyIncludingZero) {
+  // Create batch request.
+  drive::BatchUploadRequest* const request =
+      new drive::BatchUploadRequest(request_sender_.get(), *url_generator_);
+  request->SetBoundaryForTesting("OUTERBOUNDARY");
+  request_sender_->StartRequestWithRetry(request);
+
+  // Create child request.
+  {
+    base::RunLoop loop;
+    TestBatchableDelegate* const child_request = new TestBatchableDelegate(
+        GURL("http://example.com/test"), "application/binary",
+        std::string("Apple\0Orange\0", 13), loop.QuitClosure());
+    request->AddRequest(child_request);
+    request->Commit();
+    loop.Run();
+  }
+
+  EXPECT_EQ(net::test_server::METHOD_PUT, http_request_.method);
+  EXPECT_EQ("batch", http_request_.headers["X-Goog-Upload-Protocol"]);
+  EXPECT_EQ("multipart/mixed; boundary=OUTERBOUNDARY",
+            http_request_.headers["Content-Type"]);
+  EXPECT_EQ(
+      "--OUTERBOUNDARY\n"
+      "Content-Type: application/http\n"
+      "\n"
+      "PUT /test HTTP/1.1\n"
+      "Host: 127.0.0.1\n"
+      "X-Goog-Upload-Protocol: multipart\n"
+      "Content-Type: application/binary\n"
+      "\n" +
+          std::string("Apple\0Orange\0", 13) +
+          "\n"
+          "--OUTERBOUNDARY--",
+      http_request_.content);
+}
+
+TEST_F(DriveApiRequestsTest, BatchUploadRequestProgress) {
+  // Create batch request.
+  drive::BatchUploadRequest* const request =
+      new drive::BatchUploadRequest(request_sender_.get(), *url_generator_);
+  TestBatchableDelegate* requests[] = {
+      new TestBatchableDelegate(GURL("http://example.com/test"),
+                                "application/binary", std::string(100, 'a'),
+                                base::Bind(&EmptyClosure)),
+      new TestBatchableDelegate(GURL("http://example.com/test"),
+                                "application/binary", std::string(50, 'b'),
+                                base::Bind(&EmptyClosure)),
+      new TestBatchableDelegate(GURL("http://example.com/test"),
+                                "application/binary", std::string(0, 'c'),
+                                base::Bind(&EmptyClosure))};
+  const size_t kExpectedUploadDataPosition[] = {208, 517, 776};
+  const size_t kExpectedUploadDataSize = 851;
+  request->AddRequest(requests[0]);
+  request->AddRequest(requests[1]);
+  request->AddRequest(requests[2]);
+  request->Commit();
+  request->Prepare(base::Bind(&EmptyPreapreCallback));
+
+  request->OnURLFetchUploadProgress(nullptr, 0, kExpectedUploadDataSize);
+  request->OnURLFetchUploadProgress(nullptr, 150, kExpectedUploadDataSize);
+  EXPECT_EQ(0u, requests[0]->progress_values().size());
+  EXPECT_EQ(0u, requests[1]->progress_values().size());
+  EXPECT_EQ(0u, requests[2]->progress_values().size());
+  request->OnURLFetchUploadProgress(nullptr, kExpectedUploadDataPosition[0],
+                                    kExpectedUploadDataSize);
+  EXPECT_EQ(1u, requests[0]->progress_values().size());
+  EXPECT_EQ(0u, requests[1]->progress_values().size());
+  EXPECT_EQ(0u, requests[2]->progress_values().size());
+  request->OnURLFetchUploadProgress(
+      nullptr, kExpectedUploadDataPosition[0] + 50, kExpectedUploadDataSize);
+  EXPECT_EQ(2u, requests[0]->progress_values().size());
+  EXPECT_EQ(0u, requests[1]->progress_values().size());
+  EXPECT_EQ(0u, requests[2]->progress_values().size());
+  request->OnURLFetchUploadProgress(
+      nullptr, kExpectedUploadDataPosition[1] + 20, kExpectedUploadDataSize);
+  EXPECT_EQ(3u, requests[0]->progress_values().size());
+  EXPECT_EQ(1u, requests[1]->progress_values().size());
+  EXPECT_EQ(0u, requests[2]->progress_values().size());
+  request->OnURLFetchUploadProgress(nullptr, kExpectedUploadDataPosition[2],
+                                    kExpectedUploadDataSize);
+  EXPECT_EQ(3u, requests[0]->progress_values().size());
+  EXPECT_EQ(2u, requests[1]->progress_values().size());
+  EXPECT_EQ(1u, requests[2]->progress_values().size());
+  request->OnURLFetchUploadProgress(nullptr, kExpectedUploadDataSize,
+                                    kExpectedUploadDataSize);
+  ASSERT_EQ(3u, requests[0]->progress_values().size());
+  EXPECT_EQ(0, requests[0]->progress_values()[0]);
+  EXPECT_EQ(50, requests[0]->progress_values()[1]);
+  EXPECT_EQ(100, requests[0]->progress_values()[2]);
+  ASSERT_EQ(2u, requests[1]->progress_values().size());
+  EXPECT_EQ(20, requests[1]->progress_values()[0]);
+  EXPECT_EQ(50, requests[1]->progress_values()[1]);
+  ASSERT_EQ(1u, requests[2]->progress_values().size());
+  EXPECT_EQ(0, requests[2]->progress_values()[0]);
+
+  request->Cancel();
+}
+
+TEST(ParseMultipartResponseTest, Empty) {
+  std::vector<drive::MultipartHttpResponse> parts;
+  EXPECT_FALSE(drive::ParseMultipartResponse(
+      "multipart/mixed; boundary=BOUNDARY", "", &parts));
+  EXPECT_FALSE(drive::ParseMultipartResponse("multipart/mixed; boundary=",
+                                             "CONTENT", &parts));
+}
+
+TEST(ParseMultipartResponseTest, Basic) {
+  std::vector<drive::MultipartHttpResponse> parts;
+  ASSERT_TRUE(
+      drive::ParseMultipartResponse("multipart/mixed; boundary=BOUNDARY",
+                                    "--BOUNDARY\r\n"
+                                    "Content-Type: application/http\r\n"
+                                    "\r\n"
+                                    "HTTP/1.1 200 OK\r\n"
+                                    "Header: value\r\n"
+                                    "\r\n"
+                                    "First line\r\n"
+                                    "Second line\r\n"
+                                    "--BOUNDARY\r\n"
+                                    "Content-Type: application/http\r\n"
+                                    "\r\n"
+                                    "HTTP/1.1 404 Not Found\r\n"
+                                    "Header: value\r\n"
+                                    "--BOUNDARY--",
+                                    &parts));
+  ASSERT_EQ(2u, parts.size());
+  EXPECT_EQ(HTTP_SUCCESS, parts[0].code);
+  EXPECT_EQ("First line\r\nSecond line", parts[0].body);
+  EXPECT_EQ(HTTP_NOT_FOUND, parts[1].code);
+  EXPECT_EQ("", parts[1].body);
+}
+
+TEST(ParseMultipartResponseTest, InvalidStatusLine) {
+  std::vector<drive::MultipartHttpResponse> parts;
+  ASSERT_TRUE(
+      drive::ParseMultipartResponse("multipart/mixed; boundary=BOUNDARY",
+                                    "--BOUNDARY\r\n"
+                                    "Content-Type: application/http\r\n"
+                                    "\r\n"
+                                    "InvalidStatusLine 200 \r\n"
+                                    "Header: value\r\n"
+                                    "\r\n"
+                                    "{}\r\n"
+                                    "--BOUNDARY--",
+                                    &parts));
+  ASSERT_EQ(1u, parts.size());
+  EXPECT_EQ(DRIVE_PARSE_ERROR, parts[0].code);
+  EXPECT_EQ("{}", parts[0].body);
+}
+
+TEST(ParseMultipartResponseTest, BoundaryInTheBodyAndPreamble) {
+  std::vector<drive::MultipartHttpResponse> parts;
+  ASSERT_TRUE(
+      drive::ParseMultipartResponse("multipart/mixed; boundary=BOUNDARY",
+                                    "BOUNDARY\r\n"
+                                    "PREUMBLE\r\n"
+                                    "--BOUNDARY\r\n"
+                                    "Content-Type: application/http\r\n"
+                                    "\r\n"
+                                    "HTTP/1.1 200 OK\r\n"
+                                    "Header: value\r\n"
+                                    "\r\n"
+                                    "{--BOUNDARY}\r\n"
+                                    "--BOUNDARY--",
+                                    &parts));
+  ASSERT_EQ(1u, parts.size());
+  EXPECT_EQ(HTTP_SUCCESS, parts[0].code);
+  EXPECT_EQ("{--BOUNDARY}", parts[0].body);
+}
+
+TEST(ParseMultipartResponseTest, QuatedBoundary) {
+  std::vector<drive::MultipartHttpResponse> parts;
+  ASSERT_TRUE(
+      drive::ParseMultipartResponse("multipart/mixed; boundary=\"BOUNDARY\"",
+                                    "--BOUNDARY\r\n"
+                                    "Content-Type: application/http\r\n"
+                                    "\r\n"
+                                    "HTTP/1.1 200 OK\r\n"
+                                    "Header: value\r\n"
+                                    "\r\n"
+                                    "BODY\r\n"
+                                    "--BOUNDARY--",
+                                    &parts));
+  ASSERT_EQ(1u, parts.size());
+  EXPECT_EQ(HTTP_SUCCESS, parts[0].code);
+  EXPECT_EQ("BODY", parts[0].body);
+}
+
+TEST(ParseMultipartResponseTest, BoundaryWithTransportPadding) {
+  std::vector<drive::MultipartHttpResponse> parts;
+  ASSERT_TRUE(
+      drive::ParseMultipartResponse("multipart/mixed; boundary=BOUNDARY",
+                                    "--BOUNDARY \t\r\n"
+                                    "Content-Type: application/http\r\n"
+                                    "\r\n"
+                                    "HTTP/1.1 200 OK\r\n"
+                                    "Header: value\r\n"
+                                    "\r\n"
+                                    "BODY\r\n"
+                                    "--BOUNDARY-- \t",
+                                    &parts));
+  ASSERT_EQ(1u, parts.size());
+  EXPECT_EQ(HTTP_SUCCESS, parts[0].code);
+  EXPECT_EQ("BODY", parts[0].body);
+}
 }  // namespace google_apis

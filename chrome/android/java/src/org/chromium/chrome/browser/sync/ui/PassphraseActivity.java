@@ -45,7 +45,7 @@ public class PassphraseActivity extends FragmentActivity implements
         // process and this wouldn't be necessary.
         try {
             ((ChromiumApplication) getApplication())
-                    .startBrowserProcessesAndLoadLibrariesSync(this, true);
+                    .startBrowserProcessesAndLoadLibrariesSync(true);
         } catch (ProcessInitException e) {
             Log.e(TAG, "Failed to start browser process.", e);
             ChromiumApplication.reportStartupErrorAndExit(e);
@@ -123,16 +123,18 @@ public class PassphraseActivity extends FragmentActivity implements
     }
 
     @Override
-    public void onPassphraseEntered(String password, boolean isGaia, boolean isUpdate) {
+    public boolean onPassphraseEntered(String password, boolean isGaia, boolean isUpdate) {
         if (!password.isEmpty() && ProfileSyncService.get(this).setDecryptionPassphrase(password)) {
             // The passphrase was correct - close this activity.
             finish();
+            return true;
         } else {
             // Invalid passphrase - display an error.
             Fragment fragment = getFragmentManager().findFragmentByTag(FRAGMENT_PASSWORD);
             if (fragment instanceof PassphraseDialogFragment) {
                 ((PassphraseDialogFragment) fragment).invalidPassphrase();
             }
+            return false;
         }
     }
 

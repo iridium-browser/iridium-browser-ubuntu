@@ -40,6 +40,7 @@
 #include "platform/fonts/VDMXParser.h"
 #include "platform/geometry/FloatRect.h"
 #include "wtf/MathExtras.h"
+#include "wtf/unicode/CharacterNames.h"
 #include "wtf/unicode/Unicode.h"
 #include <unicode/normlzr.h>
 
@@ -57,7 +58,6 @@ SimpleFontData::SimpleFontData(const FontPlatformData& platformData, PassRefPtr<
     : m_maxCharWidth(-1)
     , m_avgCharWidth(-1)
     , m_platformData(platformData)
-    , m_pitch(UnknownPitchFont)
     , m_isTextOrientationFallback(isTextOrientationFallback)
     , m_isBrokenIdeographFallback(false)
     , m_verticalData(nullptr)
@@ -74,7 +74,6 @@ SimpleFontData::SimpleFontData(const FontPlatformData& platformData, PassRefPtr<
 
 SimpleFontData::SimpleFontData(PassRefPtr<CustomFontData> customData, float fontSize, bool syntheticBold, bool syntheticItalic)
     : m_platformData(FontPlatformData(fontSize, syntheticBold, syntheticItalic))
-    , m_pitch(UnknownPitchFont)
     , m_isTextOrientationFallback(false)
     , m_isBrokenIdeographFallback(false)
     , m_verticalData(nullptr)
@@ -173,6 +172,23 @@ void SimpleFontData::platformInit()
     float xHeight;
     if (metrics.fXHeight) {
         xHeight = metrics.fXHeight;
+#if OS(MACOSX)
+        // Mac OS CTFontGetXHeight reports the bounding box height of x,
+        // including parts extending below the baseline and apparently no x-height
+        // value from the OS/2 table. However, the CSS ex unit
+        // expects only parts above the baseline, hence measuring the glyph:
+        // http://www.w3.org/TR/css3-values/#ex-unit
+        GlyphPage* glyphPageZero = GlyphPageTreeNode::getRootChild(this, 0)->page();
+        if (glyphPageZero) {
+            static const UChar32 xChar = 'x';
+            const Glyph xGlyph = glyphPageZero->glyphForCharacter(xChar);
+            if (xGlyph) {
+                FloatRect glyphBounds(boundsForGlyph(xGlyph));
+                // SkGlyph bounds, y down, based on rendering at (0,0).
+                xHeight = - glyphBounds.y();
+            }
+        }
+#endif
         m_fontMetrics.setXHeight(xHeight);
     } else {
         xHeight = ascent * 0.56; // Best guess from Windows font metrics.
@@ -254,30 +270,28 @@ void SimpleFontData::platformGlyphInit()
         m_spaceGlyph = 0;
         m_spaceWidth = 0;
         m_zeroGlyph = 0;
-        determinePitch();
         m_zeroWidthSpaceGlyph = 0;
         m_missingGlyphData.fontData = this;
         m_missingGlyphData.glyph = 0;
         return;
     }
 
+    // Ask for the glyph for 0 to avoid paging in ZERO WIDTH SPACE. Control characters, including 0,
+    // are mapped to the ZERO WIDTH SPACE glyph.
     m_zeroWidthSpaceGlyph = glyphPageZero->glyphForCharacter(0);
 
     // Nasty hack to determine if we should round or ceil space widths.
     // If the font is monospace or fake monospace we ceil to ensure that
     // every character and the space are the same width.  Otherwise we round.
-    m_spaceGlyph = glyphPageZero->glyphForCharacter(' ');
+    m_spaceGlyph = glyphPageZero->glyphForCharacter(spaceCharacter);
     float width = widthForGlyph(m_spaceGlyph);
     m_spaceWidth = width;
     m_zeroGlyph = glyphPageZero->glyphForCharacter('0');
     m_fontMetrics.setZeroWidth(widthForGlyph(m_zeroGlyph));
-    determinePitch();
 
     // Force the glyph for ZERO WIDTH SPACE to have zero width, unless it is shared with SPACE.
     // Helvetica is an example of a non-zero width ZERO WIDTH SPACE glyph.
     // See <http://bugs.webkit.org/show_bug.cgi?id=13178>
-    // Ask for the glyph for 0 to avoid paging in ZERO WIDTH SPACE. Control characters, including 0,
-    // are mapped to the ZERO WIDTH SPACE glyph.
     if (m_zeroWidthSpaceGlyph == m_spaceGlyph) {
         m_zeroWidthSpaceGlyph = 0;
         WTF_LOG_ERROR("Font maps SPACE and ZERO WIDTH SPACE to the same glyph. Glyph width will not be overridden.");
@@ -395,11 +409,6 @@ PassRefPtr<SimpleFontData> SimpleFontData::platformCreateScaledFontData(const Fo
 {
     const float scaledSize = lroundf(fontDescription.computedSize() * scaleFactor);
     return SimpleFontData::create(FontPlatformData(m_platformData, scaledSize), isCustomFont() ? CustomFontData::create() : nullptr);
-}
-
-void SimpleFontData::determinePitch()
-{
-    m_pitch = platformData().isFixedPitch() ? FixedPitchFont : VariablePitchFont;
 }
 
 static inline void getSkiaBoundsForGlyph(SkPaint& paint, Glyph glyph, SkRect& bounds)

@@ -68,13 +68,13 @@ void LayoutTextControl::styleDidChange(StyleDifference diff, const ComputedStyle
     Element* innerEditor = innerEditorElement();
     if (!innerEditor)
         return;
-    LayoutBlock* innerEditorRenderer = toLayoutBlock(innerEditor->layoutObject());
-    if (innerEditorRenderer) {
+    LayoutBlock* innerEditorLayoutObject = toLayoutBlock(innerEditor->layoutObject());
+    if (innerEditorLayoutObject) {
         // We may have set the width and the height in the old style in layout().
         // Reset them now to avoid getting a spurious layout hint.
-        innerEditorRenderer->style()->setHeight(Length());
-        innerEditorRenderer->style()->setWidth(Length());
-        innerEditorRenderer->setStyle(createInnerEditorStyle(styleRef()));
+        innerEditorLayoutObject->mutableStyleRef().setHeight(Length());
+        innerEditorLayoutObject->mutableStyleRef().setWidth(Length());
+        innerEditorLayoutObject->setStyle(createInnerEditorStyle(styleRef()));
         innerEditor->setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::create(StyleChangeReason::Control));
     }
     textFormControlElement()->updatePlaceholderVisibility(false);
@@ -158,9 +158,7 @@ void LayoutTextControl::hitInnerEditorElement(HitTestResult& result, const Layou
     LayoutPoint localPoint = pointInContainer - toLayoutSize(adjustedLocation + innerEditor->layoutBox()->location());
     if (hasOverflowClip())
         localPoint += scrolledContentOffset();
-    result.setInnerNode(innerEditor);
-    result.setInnerNonSharedNode(innerEditor);
-    result.setLocalPoint(localPoint);
+    result.setNodeAndPosition(innerEditor, localPoint);
 }
 
 static const char* const fontFamiliesWithInvalidCharWidth[] = {
@@ -248,7 +246,7 @@ void LayoutTextControl::computeIntrinsicLogicalWidths(LayoutUnit& minLogicalWidt
     maxLogicalWidth = preferredContentLogicalWidth(const_cast<LayoutTextControl*>(this)->getAvgCharWidth(family));
     if (LayoutBox* innerEditorLayoutBox = innerEditorElement()->layoutBox())
         maxLogicalWidth += innerEditorLayoutBox->paddingStart() + innerEditorLayoutBox->paddingEnd();
-    if (!style()->logicalWidth().isPercent())
+    if (!style()->logicalWidth().hasPercent())
         minLogicalWidth = maxLogicalWidth;
 }
 
@@ -292,12 +290,12 @@ void LayoutTextControl::addFocusRingRects(Vector<LayoutRect>& rects, const Layou
 LayoutObject* LayoutTextControl::layoutSpecialExcludedChild(bool relayoutChildren, SubtreeLayoutScope& layoutScope)
 {
     HTMLElement* placeholder = toHTMLTextFormControlElement(node())->placeholderElement();
-    LayoutObject* placeholderRenderer = placeholder ? placeholder->layoutObject() : 0;
-    if (!placeholderRenderer)
+    LayoutObject* placeholderLayoutObject = placeholder ? placeholder->layoutObject() : 0;
+    if (!placeholderLayoutObject)
         return 0;
     if (relayoutChildren)
-        layoutScope.setChildNeedsLayout(placeholderRenderer);
-    return placeholderRenderer;
+        layoutScope.setChildNeedsLayout(placeholderLayoutObject);
+    return placeholderLayoutObject;
 }
 
 } // namespace blink

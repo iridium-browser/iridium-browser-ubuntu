@@ -31,20 +31,24 @@
 
 namespace blink {
 
-StringCacheMapTraits::MapType* StringCacheMapTraits::MapFromWeakCallbackData(
-    const v8::WeakCallbackData<v8::String, WeakCallbackDataType>& data)
+StringCacheMapTraits::MapType* StringCacheMapTraits::MapFromWeakCallbackInfo(
+    const v8::WeakCallbackInfo<WeakCallbackDataType>& data)
 {
     return &(V8PerIsolateData::from(data.GetIsolate())->stringCache()->m_stringCache);
 }
 
-
 void StringCacheMapTraits::Dispose(
-    v8::Isolate* isolate, v8::UniquePersistent<v8::String> value, StringImpl* key)
+    v8::Isolate* isolate, v8::Global<v8::String> value, StringImpl* key)
 {
     V8PerIsolateData::from(isolate)->stringCache()->InvalidateLastString();
     key->deref();
 }
 
+void StringCacheMapTraits::DisposeWeak(const v8::WeakCallbackInfo<WeakCallbackDataType>& data)
+{
+    V8PerIsolateData::from(data.GetIsolate())->stringCache()->InvalidateLastString();
+    data.GetParameter()->deref();
+}
 
 StringCache::~StringCache()
 {
@@ -54,7 +58,7 @@ StringCache::~StringCache()
     m_stringCache.Clear();
 }
 
-static v8::Local<v8::String> makeExternalString(const String& string, v8::Isolate* isolate)
+static v8::Local<v8::String> makeExternalString(v8::Isolate* isolate, const String& string)
 {
     if (string.is8Bit()) {
         WebCoreStringResource8* stringResource = new WebCoreStringResource8(string);
@@ -75,7 +79,7 @@ static v8::Local<v8::String> makeExternalString(const String& string, v8::Isolat
     return newString;
 }
 
-v8::Handle<v8::String> StringCache::v8ExternalStringSlow(v8::Isolate* isolate, StringImpl* stringImpl)
+v8::Local<v8::String> StringCache::v8ExternalStringSlow(v8::Isolate* isolate, StringImpl* stringImpl)
 {
     if (!stringImpl->length())
         return v8::String::Empty(isolate);
@@ -113,7 +117,7 @@ v8::Local<v8::String> StringCache::createStringAndInsertIntoCache(v8::Isolate* i
     ASSERT(!m_stringCache.Contains(stringImpl));
     ASSERT(stringImpl->length());
 
-    v8::Local<v8::String> newString = makeExternalString(String(stringImpl), isolate);
+    v8::Local<v8::String> newString = makeExternalString(isolate, String(stringImpl));
     ASSERT(!newString.IsEmpty());
     ASSERT(newString->Length());
 

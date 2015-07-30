@@ -8,13 +8,16 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
+#include "base/thread_task_runner_handle.h"
 
 #include "content/common/gpu/gpu_channel.h"
 #include "content/common/gpu/gpu_messages.h"
+#include "content/common/gpu/media/gpu_video_accelerator_util.h"
 #include "content/public/common/content_switches.h"
 #include "gpu/command_buffer/common/command_buffer.h"
 #include "ipc/ipc_message_macros.h"
@@ -126,13 +129,13 @@ class GpuVideoDecodeAccelerator::MessageFilter : public IPC::MessageFilter {
 GpuVideoDecodeAccelerator::GpuVideoDecodeAccelerator(
     int32 host_route_id,
     GpuCommandBufferStub* stub,
-    const scoped_refptr<base::MessageLoopProxy>& io_message_loop)
+    const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner)
     : host_route_id_(host_route_id),
       stub_(stub),
       texture_target_(0),
       filter_removed_(true, false),
-      child_message_loop_(base::MessageLoopProxy::current()),
-      io_message_loop_(io_message_loop),
+      child_task_runner_(base::ThreadTaskRunnerHandle::Get()),
+      io_task_runner_(io_task_runner),
       weak_factory_for_io_(this) {
   DCHECK(stub_);
   stub_->AddDestructionObserver(this);
@@ -204,10 +207,10 @@ void GpuVideoDecodeAccelerator::PictureReady(
   // VDA may call PictureReady on IO thread. SetTextureCleared should run on
   // the child thread. VDA is responsible to call PictureReady on the child
   // thread when a picture buffer is delivered the first time.
-  if (child_message_loop_->BelongsToCurrentThread()) {
+  if (child_task_runner_->BelongsToCurrentThread()) {
     SetTextureCleared(picture);
   } else {
-    DCHECK(io_message_loop_->BelongsToCurrentThread());
+    DCHECK(io_task_runner_->BelongsToCurrentThread());
     DebugAutoLock auto_lock(debug_uncleared_textures_lock_);
     DCHECK_EQ(0u, uncleared_textures_.count(picture.picture_buffer_id()));
   }
@@ -249,7 +252,8 @@ void GpuVideoDecodeAccelerator::Initialize(
 #endif
 
   // Array of Create..VDA() function pointers, maybe applicable to the current
-  // platform. This list is ordered by priority of use.
+  // platform. This list is ordered by priority of use and it should be the
+  // same as the order of querying supported profiles of VDAs.
   const GpuVideoDecodeAccelerator::CreateVDAFp create_vda_fps[] = {
       &GpuVideoDecodeAccelerator::CreateDXVAVDA,
       &GpuVideoDecodeAccelerator::CreateV4L2VDA,
@@ -304,7 +308,7 @@ GpuVideoDecodeAccelerator::CreateV4L2VDA() {
         weak_factory_for_io_.GetWeakPtr(),
         make_context_current_,
         device,
-        io_message_loop_));
+        io_task_runner_));
   }
 #endif
   return decoder.Pass();
@@ -322,7 +326,7 @@ GpuVideoDecodeAccelerator::CreateV4L2SliceVDA() {
         stub_->decoder()->GetGLContext()->GetHandle(),
         weak_factory_for_io_.GetWeakPtr(),
         make_context_current_,
-        io_message_loop_));
+        io_task_runner_));
   }
 #endif
   return decoder.Pass();
@@ -383,6 +387,39 @@ GpuVideoDecodeAccelerator::CreateAndroidVDA() {
   return decoder.Pass();
 }
 
+// static
+gpu::VideoDecodeAcceleratorSupportedProfiles
+GpuVideoDecodeAccelerator::GetSupportedProfiles() {
+  media::VideoDecodeAccelerator::SupportedProfiles profiles;
+  const base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
+  if (cmd_line->HasSwitch(switches::kDisableAcceleratedVideoDecode))
+    return gpu::VideoDecodeAcceleratorSupportedProfiles();
+
+  // Query supported profiles for each VDA. The order of querying VDAs should
+  // be the same as the order of initializing VDAs. Then the returned profile
+  // can be initialized by corresponding VDA successfully.
+#if defined(OS_WIN)
+  profiles = DXVAVideoDecodeAccelerator::GetSupportedProfiles();
+#elif defined(OS_CHROMEOS)
+  media::VideoDecodeAccelerator::SupportedProfiles vda_profiles;
+#if defined(USE_V4L2_CODEC)
+  vda_profiles = V4L2VideoDecodeAccelerator::GetSupportedProfiles();
+  GpuVideoAcceleratorUtil::InsertUniqueDecodeProfiles(vda_profiles, &profiles);
+  vda_profiles = V4L2SliceVideoDecodeAccelerator::GetSupportedProfiles();
+  GpuVideoAcceleratorUtil::InsertUniqueDecodeProfiles(vda_profiles, &profiles);
+#endif
+#if defined(ARCH_CPU_X86_FAMILY)
+  vda_profiles = VaapiVideoDecodeAccelerator::GetSupportedProfiles();
+  GpuVideoAcceleratorUtil::InsertUniqueDecodeProfiles(vda_profiles, &profiles);
+#endif
+#elif defined(OS_MACOSX)
+  profiles = VTVideoDecodeAccelerator::GetSupportedProfiles();
+#elif defined(OS_ANDROID)
+  profiles = AndroidVideoDecodeAccelerator::GetSupportedProfiles();
+#endif
+  return GpuVideoAcceleratorUtil::ConvertMediaToGpuDecodeProfiles(profiles);
+}
+
 // Runs on IO thread if video_decode_accelerator_->CanDecodeOnIOThread() is
 // true, otherwise on the main thread.
 void GpuVideoDecodeAccelerator::OnDecode(
@@ -390,10 +427,10 @@ void GpuVideoDecodeAccelerator::OnDecode(
   DCHECK(video_decode_accelerator_.get());
   if (id < 0) {
     DLOG(ERROR) << "BitstreamBuffer id " << id << " out of range";
-    if (child_message_loop_->BelongsToCurrentThread()) {
+    if (child_task_runner_->BelongsToCurrentThread()) {
       NotifyError(media::VideoDecodeAccelerator::INVALID_ARGUMENT);
     } else {
-      child_message_loop_->PostTask(
+      child_task_runner_->PostTask(
           FROM_HERE,
           base::Bind(&GpuVideoDecodeAccelerator::NotifyError,
                      base::Unretained(this),
@@ -456,7 +493,7 @@ void GpuVideoDecodeAccelerator::OnAssignPictureBuffers(
     } else {
       // For other targets, texture dimensions should already be defined.
       GLsizei width = 0, height = 0;
-      info->GetLevelSize(texture_target_, 0, &width, &height);
+      info->GetLevelSize(texture_target_, 0, &width, &height, nullptr);
       if (width != texture_dimensions_.width() ||
           height != texture_dimensions_.height()) {
         DLOG(ERROR) << "Size mismatch for texture id " << texture_ids[i];
@@ -553,7 +590,7 @@ void GpuVideoDecodeAccelerator::OnWillDestroyStub() {
 
 void GpuVideoDecodeAccelerator::SetTextureCleared(
     const media::Picture& picture) {
-  DCHECK(child_message_loop_->BelongsToCurrentThread());
+  DCHECK(child_task_runner_->BelongsToCurrentThread());
   DebugAutoLock auto_lock(debug_uncleared_textures_lock_);
   std::map<int32, scoped_refptr<gpu::gles2::TextureRef> >::iterator it;
   it = uncleared_textures_.find(picture.picture_buffer_id());
@@ -570,9 +607,9 @@ void GpuVideoDecodeAccelerator::SetTextureCleared(
 }
 
 bool GpuVideoDecodeAccelerator::Send(IPC::Message* message) {
-  if (filter_.get() && io_message_loop_->BelongsToCurrentThread())
+  if (filter_.get() && io_task_runner_->BelongsToCurrentThread())
     return filter_->SendOnIOThread(message);
-  DCHECK(child_message_loop_->BelongsToCurrentThread());
+  DCHECK(child_task_runner_->BelongsToCurrentThread());
   return stub_->channel()->Send(message);
 }
 

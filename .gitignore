@@ -1,4 +1,3 @@
-*.gypcmd
 *.mk
 *.ncb
 *.opensdf
@@ -305,7 +304,6 @@ v8.log
 /third_party/gperf
 /third_party/httpcomponents-client
 /third_party/httpcomponents-core
-/third_party/hunspell
 /third_party/hunspell_dictionaries
 /third_party/icu
 /third_party/jarjar
@@ -374,7 +372,6 @@ v8.log
 /third_party/snappy/src
 /third_party/stp/src
 /third_party/swiftshader/include/
-/third_party/swig
 /third_party/syzygy
 /third_party/syzygy/binaries
 /third_party/trace-viewer
@@ -409,6 +406,7 @@ v8.log
 /third_party/yasm/generate_files.xml
 /third_party/yasm/source/patched-yasm
 /third_party/yasm/yasm.xml
+/tools/.bisect-builds-cache.json
 /tools/deps2git/
 /tools/distcc
 /tools/gn/bin/linux
@@ -431,14 +429,6 @@ v8.log
 /ui/surface/surface.xml
 /ui/surface/surface_gpu_tests.xml
 /v8
-/webkit/data/bmp_decoder
-/webkit/data/ico_decoder
-/webkit/data/layout_tests/LayoutTests
-/webkit/data/test_shell/plugins
-/webkit/data/xbm_decoder
-/webkit/Debug
-/webkit/Release
-/webkit/renderer/media/crypto/ppapi/cdm
 /webpagereplay_logs/
 /win8/delegate_execute/delegate_execute_version_resources.xml
 /win8/metro_driver/metro_driver_version_resources.xml

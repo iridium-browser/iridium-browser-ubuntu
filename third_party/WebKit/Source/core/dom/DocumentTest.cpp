@@ -72,7 +72,7 @@ void DocumentTest::SetUp()
 void DocumentTest::setHtmlInnerHTML(const char* htmlContent)
 {
     document().documentElement()->setInnerHTML(String::fromUTF8(htmlContent), ASSERT_NO_EXCEPTION);
-    document().view()->updateLayoutAndStyleIfNeededRecursive();
+    document().view()->updateLayoutAndStyleForPainting();
 }
 
 class MockDocumentVisibilityObserver
@@ -342,6 +342,7 @@ TEST_F(DocumentTest, referrerPolicyParsing)
         { "not-a-real-policy", ReferrerPolicyDefault },
         { "origin", ReferrerPolicyOrigin },
         { "origin-when-crossorigin", ReferrerPolicyOriginWhenCrossOrigin },
+        { "origin-when-cross-origin", ReferrerPolicyOriginWhenCrossOrigin },
         { "unsafe-url", ReferrerPolicyAlways },
     };
 

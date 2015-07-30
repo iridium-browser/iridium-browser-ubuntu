@@ -44,6 +44,8 @@
 #include "chrome/browser/extensions/updater/extension_cache_fake.h"
 #include "chrome/browser/extensions/updater/extension_updater.h"
 #include "chrome/browser/infobars/infobar_service.h"
+#include "chrome/browser/interstitials/security_interstitial_page.h"
+#include "chrome/browser/interstitials/security_interstitial_page_test_utils.h"
 #include "chrome/browser/media/media_capture_devices_dispatcher.h"
 #include "chrome/browser/media/media_stream_devices_controller.h"
 #include "chrome/browser/metrics/variations/variations_service.h"
@@ -106,6 +108,7 @@
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/gpu_data_manager.h"
+#include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -113,6 +116,7 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/plugin_service.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
@@ -144,6 +148,7 @@
 #include "net/http/http_stream_factory.h"
 #include "net/ssl/ssl_config.h"
 #include "net/ssl/ssl_config_service.h"
+#include "net/test/spawned_test_server/spawned_test_server.h"
 #include "net/test/url_request/url_request_failed_job.h"
 #include "net/test/url_request/url_request_mock_http_job.h"
 #include "net/url_request/url_request.h"
@@ -790,6 +795,47 @@ class PolicyTest : public InProcessBrowserTest {
     contents->GetRenderViewHost()->ForwardMouseEvent(click_event);
   }
 
+  void SetPolicy(PolicyMap* policies, const char* key, base::Value* value) {
+    if (value) {
+      policies->Set(key,
+                    POLICY_LEVEL_MANDATORY,
+                    POLICY_SCOPE_USER,
+                    value,
+                    nullptr);
+    } else {
+      policies->Erase(key);
+    }
+  }
+
+  void ApplySafeSearchPolicy(base::FundamentalValue* legacy_safe_search,
+                             base::FundamentalValue* google_safe_search,
+                             base::FundamentalValue* youtube_safety_mode) {
+    PolicyMap policies;
+    SetPolicy(&policies, key::kForceSafeSearch, legacy_safe_search);
+    SetPolicy(&policies, key::kForceGoogleSafeSearch, google_safe_search);
+    SetPolicy(&policies, key::kForceYouTubeSafetyMode, youtube_safety_mode);
+    UpdateProviderPolicy(policies);
+  }
+
+  void CheckSafeSearch(bool expect_safe_search) {
+    content::WebContents* web_contents =
+        browser()->tab_strip_model()->GetActiveWebContents();
+    content::TestNavigationObserver observer(web_contents);
+    chrome::FocusLocationBar(browser());
+    LocationBar* location_bar = browser()->window()->GetLocationBar();
+    ui_test_utils::SendToOmniboxAndSubmit(location_bar, "http://google.com/");
+    OmniboxEditModel* model = location_bar->GetOmniboxView()->model();
+    observer.Wait();
+    EXPECT_TRUE(model->CurrentMatch(NULL).destination_url.is_valid());
+
+    std::string expected_url("http://google.com/");
+    if (expect_safe_search) {
+      expected_url += "?" + std::string(chrome::kSafeSearchSafeParameter) +
+                      "&" + chrome::kSafeSearchSsuiParameter;
+    }
+    EXPECT_EQ(GURL(expected_url), web_contents->GetURL());
+  }
+
   MockConfigurationPolicyProvider provider_;
   scoped_ptr<extensions::ExtensionCacheFake> test_extension_cache_;
 #if defined(OS_CHROMEOS)
@@ -804,9 +850,9 @@ class PolicyTest : public InProcessBrowserTest {
 class LocalePolicyTest : public PolicyTest {
  public:
   LocalePolicyTest() {}
-  virtual ~LocalePolicyTest() {}
+  ~LocalePolicyTest() override {}
 
-  virtual void SetUpInProcessBrowserTestFixture() override {
+  void SetUpInProcessBrowserTestFixture() override {
     PolicyTest::SetUpInProcessBrowserTestFixture();
     PolicyMap policies;
     policies.Set(key::kApplicationLocaleValue,
@@ -1079,54 +1125,39 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, ForceSafeSearch) {
 
   // Verifies that requests to Google Search engine with the SafeSearch
   // enabled set the safe=active&ssui=on parameters at the end of the query.
-  TemplateURLService* service = TemplateURLServiceFactory::GetForProfile(
-      browser()->profile());
-  ui_test_utils::WaitForTemplateURLServiceToLoad(service);
-
   // First check that nothing happens.
-  content::TestNavigationObserver no_safesearch_observer(
-      browser()->tab_strip_model()->GetActiveWebContents());
-  chrome::FocusLocationBar(browser());
-  LocationBar* location_bar = browser()->window()->GetLocationBar();
-  ui_test_utils::SendToOmniboxAndSubmit(location_bar, "http://google.com/");
-  OmniboxEditModel* model = location_bar->GetOmniboxView()->model();
-  no_safesearch_observer.Wait();
-  EXPECT_TRUE(model->CurrentMatch(NULL).destination_url.is_valid());
-  content::WebContents* web_contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  GURL expected_without("http://google.com/");
-  EXPECT_EQ(expected_without, web_contents->GetURL());
+  CheckSafeSearch(false);
 
-  PrefService* prefs = browser()->profile()->GetPrefs();
-  EXPECT_FALSE(prefs->IsManagedPreference(prefs::kForceSafeSearch));
-  EXPECT_FALSE(prefs->GetBoolean(prefs::kForceSafeSearch));
+  // Go over all combinations of (undefined,true,false) for the three policies.
+  for (int i = 0; i < 3 * 3 * 3; i++) {
+    int legacy = i % 3;
+    int google = (i / 3) % 3;
+    int youtube = i / (3 * 3);
 
-  // Override the default SafeSearch setting using policies.
-  PolicyMap policies;
-  policies.Set(key::kForceSafeSearch,
-               POLICY_LEVEL_MANDATORY,
-               POLICY_SCOPE_USER,
-               new base::FundamentalValue(true),
-               NULL);
-  UpdateProviderPolicy(policies);
+    // Override the default SafeSearch setting using policies.
+    ApplySafeSearchPolicy(
+        legacy == 0 ? nullptr : new base::FundamentalValue(legacy == 1),
+        google == 0 ? nullptr : new base::FundamentalValue(google == 1),
+        youtube == 0 ? nullptr : new base::FundamentalValue(youtube == 1));
 
-  EXPECT_TRUE(prefs->IsManagedPreference(prefs::kForceSafeSearch));
-  EXPECT_TRUE(prefs->GetBoolean(prefs::kForceSafeSearch));
+    // The legacy policy should only have an effect if both google and youtube
+    // are undefined.
+    bool legacy_in_effect = (google == 0 && youtube == 0 && legacy != 0);
+    bool legacy_enabled = legacy_in_effect && legacy == 1;
 
-  content::TestNavigationObserver safesearch_observer(
-      browser()->tab_strip_model()->GetActiveWebContents());
+    PrefService* prefs = browser()->profile()->GetPrefs();
+    EXPECT_EQ(google != 0 || legacy_in_effect,
+              prefs->IsManagedPreference(prefs::kForceGoogleSafeSearch));
+    EXPECT_EQ(google == 1 || legacy_enabled,
+              prefs->GetBoolean(prefs::kForceGoogleSafeSearch));
 
-  // Verify that searching from google.com works.
-  chrome::FocusLocationBar(browser());
-  ui_test_utils::SendToOmniboxAndSubmit(location_bar, "http://google.com/");
-  safesearch_observer.Wait();
-  EXPECT_TRUE(model->CurrentMatch(NULL).destination_url.is_valid());
-  web_contents = browser()->tab_strip_model()->GetActiveWebContents();
-  std::string expected_url("http://google.com/?");
-  expected_url += std::string(chrome::kSafeSearchSafeParameter) + "&" +
-                  chrome::kSafeSearchSsuiParameter;
-  GURL expected_with_parameters(expected_url);
-  EXPECT_EQ(expected_with_parameters, web_contents->GetURL());
+    EXPECT_EQ(youtube != 0 || legacy_in_effect,
+              prefs->IsManagedPreference(prefs::kForceYouTubeSafetyMode));
+    EXPECT_EQ(youtube == 1 || legacy_enabled,
+              prefs->GetBoolean(prefs::kForceYouTubeSafetyMode));
+
+    CheckSafeSearch(google == 1 || legacy_enabled);
+  }
 }
 
 IN_PROC_BROWSER_TEST_F(PolicyTest, ReplaceSearchTerms) {
@@ -2428,6 +2459,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, URLBlacklist) {
     "http://bbb.com/empty.html",
     "http://sub.bbb.com/empty.html",
     "http://bbb.com/policy/blank.html",
+    "http://bbb.com./policy/blank.html",
   };
   {
     base::RunLoop loop;
@@ -2465,6 +2497,7 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, URLBlacklist) {
   CheckURLIsBlocked(browser(), kURLS[1]);
   CheckCanOpenURL(browser(), kURLS[2]);
   CheckCanOpenURL(browser(), kURLS[3]);
+  CheckCanOpenURL(browser(), kURLS[4]);
 
   {
     base::RunLoop loop;
@@ -2661,7 +2694,15 @@ IN_PROC_BROWSER_TEST_F(PolicyTest, FullscreenAllowedApp) {
 #endif
 
 #if defined(OS_CHROMEOS)
-IN_PROC_BROWSER_TEST_F(PolicyTest, DisableScreenshotsFile) {
+
+// Flaky http://crbug.com/476964
+#if defined(MEMORY_SANITIZER)
+#define MAYBE_DisableScreenshotsFile DISABLED_DisableScreenshotsFile
+#else
+#define MAYBE_DisableScreenshotsFile DisableScreenshotsFile
+#endif
+
+IN_PROC_BROWSER_TEST_F(PolicyTest, MAYBE_DisableScreenshotsFile) {
   int screenshot_count = CountScreenshots();
 
   // Make sure screenshots are counted correctly.
@@ -3528,6 +3569,125 @@ IN_PROC_BROWSER_TEST_P(MediaStreamDevicesControllerBrowserTest,
 INSTANTIATE_TEST_CASE_P(MediaStreamDevicesControllerBrowserTestInstance,
                         MediaStreamDevicesControllerBrowserTest,
                         testing::Bool());
+
+// Test that when extended reporting opt-in is disabled by policy, the
+// opt-in checkbox does not appear on SSL blocking pages.
+IN_PROC_BROWSER_TEST_F(PolicyTest, SafeBrowsingExtendedReportingOptInAllowed) {
+  net::SpawnedTestServer https_server_expired(
+      net::SpawnedTestServer::TYPE_HTTPS,
+      net::SpawnedTestServer::SSLOptions(
+          net::SpawnedTestServer::SSLOptions::CERT_EXPIRED),
+      base::FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+  ASSERT_TRUE(https_server_expired.Start());
+
+  // Set the enterprise policy to disallow opt-in.
+  const PrefService* const prefs = browser()->profile()->GetPrefs();
+  EXPECT_TRUE(
+      prefs->GetBoolean(prefs::kSafeBrowsingExtendedReportingOptInAllowed));
+  PolicyMap policies;
+  policies.Set(key::kSafeBrowsingExtendedReportingOptInAllowed,
+               POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
+               new base::FundamentalValue(false), NULL);
+  UpdateProviderPolicy(policies);
+  EXPECT_FALSE(
+      prefs->GetBoolean(prefs::kSafeBrowsingExtendedReportingOptInAllowed));
+
+  // Navigate to an SSL error page.
+  ui_test_utils::NavigateToURL(browser(), https_server_expired.GetURL("/"));
+
+  const content::InterstitialPage* const interstitial =
+      content::InterstitialPage::GetInterstitialPage(
+          browser()->tab_strip_model()->GetActiveWebContents());
+  ASSERT_TRUE(interstitial);
+  ASSERT_TRUE(content::WaitForRenderFrameReady(interstitial->GetMainFrame()));
+  content::RenderViewHost* const rvh =
+      interstitial->GetMainFrame()->GetRenderViewHost();
+  ASSERT_TRUE(rvh);
+
+  // Check that the checkbox is not visible.
+  int result = 0;
+  const std::string command = base::StringPrintf(
+      "var node = document.getElementById('extended-reporting-opt-in');"
+      "if (node) {"
+      "  window.domAutomationController.send(node.offsetWidth > 0 || "
+      "      node.offsetHeight > 0 ? %d : %d);"
+      "} else {"
+      // The node should be present but not visible, so trigger an error
+      // by sending false if it's not present.
+      "  window.domAutomationController.send(%d);"
+      "}",
+      SecurityInterstitialPage::CMD_TEXT_FOUND,
+      SecurityInterstitialPage::CMD_TEXT_NOT_FOUND,
+      SecurityInterstitialPage::CMD_ERROR);
+  EXPECT_TRUE(content::ExecuteScriptAndExtractInt(rvh, command, &result));
+  EXPECT_EQ(SecurityInterstitialPage::CMD_TEXT_NOT_FOUND, result);
+}
+
+// Test that when SSL error overriding is allowed by policy (default), the
+// proceed link appears on SSL blocking pages.
+IN_PROC_BROWSER_TEST_F(PolicyTest, SSLErrorOverridingAllowed) {
+  net::SpawnedTestServer https_server_expired(
+      net::SpawnedTestServer::TYPE_HTTPS,
+      net::SpawnedTestServer::SSLOptions(
+          net::SpawnedTestServer::SSLOptions::CERT_EXPIRED),
+      base::FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+  ASSERT_TRUE(https_server_expired.Start());
+
+  const PrefService* const prefs = browser()->profile()->GetPrefs();
+
+  // Policy should allow overriding by default.
+  EXPECT_TRUE(prefs->GetBoolean(prefs::kSSLErrorOverrideAllowed));
+
+  // Policy allows overriding - navigate to an SSL error page and expect the
+  // proceed link.
+  ui_test_utils::NavigateToURL(browser(), https_server_expired.GetURL("/"));
+
+  const content::InterstitialPage* const interstitial =
+      content::InterstitialPage::GetInterstitialPage(
+          browser()->tab_strip_model()->GetActiveWebContents());
+  ASSERT_TRUE(interstitial);
+  EXPECT_TRUE(content::WaitForRenderFrameReady(interstitial->GetMainFrame()));
+
+  // The interstitial should display the proceed link.
+  EXPECT_TRUE(chrome_browser_interstitials::IsInterstitialDisplayingText(
+      interstitial, "proceed-link"));
+}
+
+// Test that when SSL error overriding is disallowed by policy, the
+// proceed link does not appear on SSL blocking pages.
+IN_PROC_BROWSER_TEST_F(PolicyTest, SSLErrorOverridingDisallowed) {
+  net::SpawnedTestServer https_server_expired(
+      net::SpawnedTestServer::TYPE_HTTPS,
+      net::SpawnedTestServer::SSLOptions(
+          net::SpawnedTestServer::SSLOptions::CERT_EXPIRED),
+      base::FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+  ASSERT_TRUE(https_server_expired.Start());
+
+  const PrefService* const prefs = browser()->profile()->GetPrefs();
+  EXPECT_TRUE(prefs->GetBoolean(prefs::kSSLErrorOverrideAllowed));
+
+  // Disallowing the proceed link by setting the policy to |false|.
+  PolicyMap policies;
+  policies.Set(key::kSSLErrorOverrideAllowed, POLICY_LEVEL_MANDATORY,
+               POLICY_SCOPE_USER, new base::FundamentalValue(false), NULL);
+  UpdateProviderPolicy(policies);
+
+  // Policy should not allow overriding anymore.
+  EXPECT_FALSE(prefs->GetBoolean(prefs::kSSLErrorOverrideAllowed));
+
+  // Policy disallows overriding - navigate to an SSL error page and expect no
+  // proceed link.
+  ui_test_utils::NavigateToURL(browser(), https_server_expired.GetURL("/"));
+  const content::InterstitialPage* const interstitial =
+      content::InterstitialPage::GetInterstitialPage(
+          browser()->tab_strip_model()->GetActiveWebContents());
+  ASSERT_TRUE(interstitial);
+  EXPECT_TRUE(content::WaitForRenderFrameReady(interstitial->GetMainFrame()));
+
+  // The interstitial should not display the proceed link.
+  EXPECT_FALSE(chrome_browser_interstitials::IsInterstitialDisplayingText(
+      interstitial, "proceed-link"));
+}
 
 #if !defined(OS_CHROMEOS)
 // Similar to PolicyTest but sets the proper policy before the browser is

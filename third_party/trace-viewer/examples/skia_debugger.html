@@ -9,7 +9,7 @@ found in the LICENSE file.
 <title>Skia Debugger</title>
 <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
 
-<script src="/components/platform/platform.js"></script>
+<script src="/components/webcomponentsjs/webcomponents.js"></script>
 
 <link rel="import" href="/components/polymer/polymer.html">
 <link rel="import" href="/extras/cc/picture.html">
@@ -38,7 +38,7 @@ found in the LICENSE file.
     if (!tv.e.cc.PictureSnapshot.CanGetInfo()) {
       console.error(tv.e.cc.PictureSnapshot.HowToEnablePictureDebugging());
 
-      var infoBar = new tv.b.ui.InfoBar();
+      var infoBar = document.createElement('tv-b-ui-info-bar');
       var view = document.querySelector('.view');
 
       view.removeChild(debuggerEl);

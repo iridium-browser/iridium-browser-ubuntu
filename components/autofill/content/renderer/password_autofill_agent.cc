@@ -625,30 +625,6 @@ bool PasswordAutofillAgent::TextDidChangeInTextField(
   // TODO(vabr): Get a mutable argument instead. http://crbug.com/397083
   blink::WebInputElement mutable_element = element;  // We need a non-const.
 
-  if (element.isTextField())
-    nonscript_modified_values_[element] = element.value();
-
-  DCHECK_EQ(element.document().frame(), render_frame()->GetWebFrame());
-
-  if (element.isPasswordField()) {
-    // Some login forms have event handlers that put a hash of the password into
-    // a hidden field and then clear the password (http://crbug.com/28910,
-    // http://crbug.com/391693). This method gets called before any of those
-    // handlers run, so save away a copy of the password in case it gets lost.
-    // To honor the user having explicitly cleared the password, even an empty
-    // password will be saved here.
-    ProvisionallySavePassword(element.form(), RESTRICTION_NONE);
-
-    PasswordToLoginMap::iterator iter = password_to_username_.find(element);
-    if (iter != password_to_username_.end()) {
-      login_to_password_info_[iter->second].password_was_edited_last = true;
-      // Note that the suggested value of |mutable_element| was reset when its
-      // value changed.
-      mutable_element.setAutofilled(false);
-    }
-    return false;
-  }
-
   LoginToPasswordInfoMap::iterator iter = login_to_password_info_.find(element);
   if (iter == login_to_password_info_.end())
     return false;
@@ -709,6 +685,41 @@ bool PasswordAutofillAgent::TextFieldHandlingKeyDown(
   iter->second.backspace_pressed_last =
       (win_key_code == ui::VKEY_BACK || win_key_code == ui::VKEY_DELETE);
   return true;
+}
+
+void PasswordAutofillAgent::UpdateStateForTextChange(
+    const blink::WebInputElement& element) {
+  // TODO(vabr): Get a mutable argument instead. http://crbug.com/397083
+  blink::WebInputElement mutable_element = element;  // We need a non-const.
+
+  if (element.isTextField())
+    nonscript_modified_values_[element] = element.value();
+
+  LoginToPasswordInfoMap::iterator password_info_iter =
+      login_to_password_info_.find(element);
+  if (password_info_iter != login_to_password_info_.end()) {
+    password_info_iter->second.username_was_edited = true;
+  }
+
+  DCHECK_EQ(element.document().frame(), render_frame()->GetWebFrame());
+
+  if (element.isPasswordField()) {
+    // Some login forms have event handlers that put a hash of the password into
+    // a hidden field and then clear the password (http://crbug.com/28910,
+    // http://crbug.com/391693). This method gets called before any of those
+    // handlers run, so save away a copy of the password in case it gets lost.
+    // To honor the user having explicitly cleared the password, even an empty
+    // password will be saved here.
+    ProvisionallySavePassword(element.form(), RESTRICTION_NONE);
+
+    PasswordToLoginMap::iterator iter = password_to_username_.find(element);
+    if (iter != password_to_username_.end()) {
+      login_to_password_info_[iter->second].password_was_edited_last = true;
+      // Note that the suggested value of |mutable_element| was reset when its
+      // value changed.
+      mutable_element.setAutofilled(false);
+    }
+  }
 }
 
 bool PasswordAutofillAgent::FillSuggestion(
@@ -806,7 +817,8 @@ bool PasswordAutofillAgent::FindPasswordInfoForElement(
 
 bool PasswordAutofillAgent::ShowSuggestions(
     const blink::WebInputElement& element,
-    bool show_all) {
+    bool show_all,
+    bool generation_popup_showing) {
   const blink::WebInputElement* username_element;
   PasswordInfo* password_info;
   if (!FindPasswordInfoForElement(element, &username_element, &password_info))
@@ -826,8 +838,17 @@ bool PasswordAutofillAgent::ShowSuggestions(
   // is no username or the corresponding username element is not editable since
   // it is only in that case that the username element does not have a
   // suggestions popup.
-  if (element.isPasswordField() && username_is_available)
+  if (element.isPasswordField() && username_is_available &&
+      (!password_info->fill_data.is_possible_change_password_form ||
+       password_info->username_was_edited))
     return true;
+
+  UMA_HISTOGRAM_BOOLEAN(
+      "PasswordManager.AutocompletePopupSuppressedByGeneration",
+      generation_popup_showing);
+
+  if (generation_popup_showing)
+    return false;
 
   // Chrome should never show more than one account for a password element since
   // this implies that the username element cannot be modified. Thus even if
@@ -1060,7 +1081,7 @@ void PasswordAutofillAgent::WillSubmitForm(const blink::WebFormElement& form) {
   }
 
   scoped_ptr<PasswordForm> submitted_form =
-      CreatePasswordForm(form, nullptr, &form_predictions_);
+      CreatePasswordForm(form, &nonscript_modified_values_, &form_predictions_);
 
   // If there is a provisionally saved password, copy over the previous
   // password value so we get the user's typed password, not the value that
@@ -1245,7 +1266,9 @@ void PasswordAutofillAgent::OnAutofillUsernameDataReceived(
 // PasswordAutofillAgent, private:
 
 PasswordAutofillAgent::PasswordInfo::PasswordInfo()
-    : backspace_pressed_last(false), password_was_edited_last(false) {
+    : backspace_pressed_last(false),
+      password_was_edited_last(false),
+      username_was_edited(false) {
 }
 
 bool PasswordAutofillAgent::ShowSuggestionPopup(
@@ -1264,8 +1287,7 @@ bool PasswordAutofillAgent::ShowSuggestionPopup(
 
   FormData form;
   FormFieldData field;
-  FindFormAndFieldForFormControlElement(
-      user_input, &form, &field, REQUIRE_NONE);
+  FindFormAndFieldForFormControlElement(user_input, &form, &field);
 
   blink::WebInputElement selected_element = user_input;
   if (show_on_password_field && !selected_element.isPasswordField()) {

@@ -53,16 +53,16 @@ SurfaceAggregator::~SurfaceAggregator() {}
 SurfaceAggregator::ClipData SurfaceAggregator::CalculateClipRect(
     const ClipData& surface_clip,
     const ClipData& quad_clip,
-    const gfx::Transform& content_to_target_transform) {
+    const gfx::Transform& target_transform) {
   ClipData out_clip;
   if (surface_clip.is_clipped)
     out_clip = surface_clip;
 
   if (quad_clip.is_clipped) {
-    // TODO(jamesr): This only works if content_to_target_transform maps integer
+    // TODO(jamesr): This only works if target_transform maps integer
     // rects to integer rects.
-    gfx::Rect final_clip = MathUtil::MapEnclosingClippedRect(
-        content_to_target_transform, quad_clip.rect);
+    gfx::Rect final_clip =
+        MathUtil::MapEnclosingClippedRect(target_transform, quad_clip.rect);
     if (out_clip.is_clipped)
       out_clip.rect.Intersect(final_clip);
     else
@@ -120,6 +120,10 @@ int SurfaceAggregator::ChildIdForSurface(Surface* surface) {
   if (it == surface_id_to_resource_child_id_.end()) {
     int child_id =
         provider_->CreateChild(base::Bind(&UnrefHelper, surface->factory()));
+    if (surface->factory()) {
+      provider_->SetChildNeedsSyncPoints(
+          child_id, surface->factory()->needs_sync_points());
+    }
     surface_id_to_resource_child_id_[surface->surface_id()] = child_id;
     return child_id;
   } else {
@@ -128,27 +132,35 @@ int SurfaceAggregator::ChildIdForSurface(Surface* surface) {
 }
 
 static ResourceProvider::ResourceId ResourceRemapHelper(
+    const ResourceProvider::ResourceIdMap& child_to_parent_map,
+    ResourceProvider::ResourceId id) {
+  ResourceProvider::ResourceIdMap::const_iterator it =
+      child_to_parent_map.find(id);
+  DCHECK(it != child_to_parent_map.end());
+
+  DCHECK_EQ(it->first, id);
+  ResourceProvider::ResourceId remapped_id = it->second;
+  return remapped_id;
+}
+
+static ResourceProvider::ResourceId ValidateResourceHelper(
     bool* invalid_frame,
     const ResourceProvider::ResourceIdMap& child_to_parent_map,
-    ResourceProvider::ResourceIdArray* resources_in_frame,
+    ResourceProvider::ResourceIdSet* resources_in_frame,
     ResourceProvider::ResourceId id) {
   ResourceProvider::ResourceIdMap::const_iterator it =
       child_to_parent_map.find(id);
   if (it == child_to_parent_map.end()) {
     *invalid_frame = true;
-    return 0;
+    return id;
   }
-
-  DCHECK_EQ(it->first, id);
-  ResourceProvider::ResourceId remapped_id = it->second;
-  resources_in_frame->push_back(id);
-  return remapped_id;
+  resources_in_frame->insert(id);
+  return id;
 }
 
-bool SurfaceAggregator::TakeResources(Surface* surface,
-                                      const DelegatedFrameData* frame_data,
-                                      RenderPassList* render_pass_list) {
-  RenderPass::CopyAll(frame_data->render_pass_list, render_pass_list);
+bool SurfaceAggregator::ValidateResources(
+    Surface* surface,
+    const DelegatedFrameData* frame_data) {
   if (!provider_)  // TODO(jamesr): hack for unit tests that don't set up rp
     return false;
 
@@ -157,16 +169,25 @@ bool SurfaceAggregator::TakeResources(Surface* surface,
     surface->factory()->RefResources(frame_data->resource_list);
   provider_->ReceiveFromChild(child_id, frame_data->resource_list);
 
-  typedef ResourceProvider::ResourceIdArray IdArray;
-  IdArray referenced_resources;
+  ResourceProvider::ResourceIdSet referenced_resources;
+  size_t reserve_size = frame_data->resource_list.size();
+#if defined(COMPILER_MSVC)
+  referenced_resources.reserve(reserve_size);
+#elif defined(COMPILER_GCC)
+  // Pre-standard hash-tables only implement resize, which behaves similarly
+  // to reserve for these keys. Resizing to 0 may also be broken (particularly
+  // on stlport).
+  // TODO(jbauman): Replace with reserve when C++11 is supported everywhere.
+  if (reserve_size)
+    referenced_resources.resize(reserve_size);
+#endif
 
   bool invalid_frame = false;
   DrawQuad::ResourceIteratorCallback remap =
-      base::Bind(&ResourceRemapHelper,
-                 &invalid_frame,
-                 provider_->GetChildToParentMap(child_id),
+      base::Bind(&ValidateResourceHelper, &invalid_frame,
+                 base::ConstRef(provider_->GetChildToParentMap(child_id)),
                  &referenced_resources);
-  for (const auto& render_pass : *render_pass_list) {
+  for (const auto& render_pass : frame_data->render_pass_list) {
     for (const auto& quad : render_pass->quad_list)
       quad->IterateResources(remap);
   }
@@ -190,7 +211,7 @@ gfx::Rect SurfaceAggregator::DamageRectForSurface(const Surface* surface,
 
 void SurfaceAggregator::HandleSurfaceQuad(
     const SurfaceDrawQuad* surface_quad,
-    const gfx::Transform& content_to_target_transform,
+    const gfx::Transform& target_transform,
     const ClipData& clip_rect,
     RenderPass* dest_pass) {
   SurfaceId surface_id = surface_quad->surface_id;
@@ -214,8 +235,8 @@ void SurfaceAggregator::HandleSurfaceQuad(
   std::multimap<RenderPassId, CopyOutputRequest*> copy_requests;
   surface->TakeCopyOutputRequests(&copy_requests);
 
-  RenderPassList render_pass_list;
-  bool invalid_frame = TakeResources(surface, frame_data, &render_pass_list);
+  const RenderPassList& render_pass_list = frame_data->render_pass_list;
+  bool invalid_frame = ValidateResources(surface, frame_data);
   if (invalid_frame) {
     for (auto& request : copy_requests) {
       request.second->SendEmptyResult();
@@ -225,6 +246,13 @@ void SurfaceAggregator::HandleSurfaceQuad(
   }
 
   SurfaceSet::iterator it = referenced_surfaces_.insert(surface_id).first;
+  DrawQuad::ResourceIteratorCallback remap;
+  if (provider_) {
+    int child_id = ChildIdForSurface(surface);
+    remap =
+        base::Bind(&ResourceRemapHelper,
+                   base::ConstRef(provider_->GetChildToParentMap(child_id)));
+  }
 
   bool merge_pass = surface_quad->opacity() == 1.f && copy_requests.empty();
 
@@ -253,12 +281,11 @@ void SurfaceAggregator::HandleSurfaceQuad(
     // the root surface.
     copy_pass->transform_to_root_target.ConcatTransform(
         surface_quad->quadTransform());
-    copy_pass->transform_to_root_target.ConcatTransform(
-        content_to_target_transform);
+    copy_pass->transform_to_root_target.ConcatTransform(target_transform);
     copy_pass->transform_to_root_target.ConcatTransform(
         dest_pass->transform_to_root_target);
 
-    CopyQuadsToPass(source.quad_list, source.shared_quad_state_list,
+    CopyQuadsToPass(source.quad_list, source.shared_quad_state_list, remap,
                     gfx::Transform(), ClipData(), copy_pass.get(), surface_id);
 
     if (j == referenced_passes.size() - 1)
@@ -273,7 +300,7 @@ void SurfaceAggregator::HandleSurfaceQuad(
     const QuadList& quads = last_pass.quad_list;
 
     gfx::Transform surface_transform = surface_quad->quadTransform();
-    surface_transform.ConcatTransform(content_to_target_transform);
+    surface_transform.ConcatTransform(target_transform);
 
     // Intersect the transformed visible rect and the clip rect to create a
     // smaller cliprect for the quad.
@@ -283,16 +310,16 @@ void SurfaceAggregator::HandleSurfaceQuad(
     if (surface_quad->isClipped())
       surface_quad_clip_rect.rect.Intersect(surface_quad->clipRect());
 
-    ClipData quads_clip = CalculateClipRect(clip_rect, surface_quad_clip_rect,
-                                            content_to_target_transform);
+    ClipData quads_clip =
+        CalculateClipRect(clip_rect, surface_quad_clip_rect, target_transform);
 
-    CopyQuadsToPass(quads, last_pass.shared_quad_state_list, surface_transform,
-                    quads_clip, dest_pass, surface_id);
+    CopyQuadsToPass(quads, last_pass.shared_quad_state_list, remap,
+                    surface_transform, quads_clip, dest_pass, surface_id);
   } else {
     RenderPassId remapped_pass_id = RemapPassId(last_pass.id, surface_id);
 
-    CopySharedQuadState(surface_quad->shared_quad_state,
-                        content_to_target_transform, clip_rect, dest_pass);
+    CopySharedQuadState(surface_quad->shared_quad_state, target_transform,
+                        clip_rect, dest_pass);
 
     SharedQuadState* shared_quad_state =
         dest_pass->shared_quad_state_list.back();
@@ -319,24 +346,24 @@ void SurfaceAggregator::HandleSurfaceQuad(
 
 void SurfaceAggregator::CopySharedQuadState(
     const SharedQuadState* source_sqs,
-    const gfx::Transform& content_to_target_transform,
+    const gfx::Transform& target_transform,
     const ClipData& clip_rect,
     RenderPass* dest_render_pass) {
   SharedQuadState* copy_shared_quad_state =
       dest_render_pass->CreateAndAppendSharedQuadState();
   copy_shared_quad_state->CopyFrom(source_sqs);
-  // content_to_target_transform contains any transformation that may exist
+  // target_transform contains any transformation that may exist
   // between the context that these quads are being copied from (i.e. the
   // surface's draw transform when aggregated from within a surface) to the
   // target space of the pass. This will be identity except when copying the
   // root draw pass from a surface into a pass when the surface draw quad's
   // transform is not identity.
   copy_shared_quad_state->content_to_target_transform.ConcatTransform(
-      content_to_target_transform);
+      target_transform);
 
   ClipData new_clip_rect = CalculateClipRect(
       clip_rect, ClipData(source_sqs->is_clipped, source_sqs->clip_rect),
-      content_to_target_transform);
+      target_transform);
   copy_shared_quad_state->is_clipped = new_clip_rect.is_clipped;
   copy_shared_quad_state->clip_rect = new_clip_rect.rect;
 }
@@ -344,7 +371,8 @@ void SurfaceAggregator::CopySharedQuadState(
 void SurfaceAggregator::CopyQuadsToPass(
     const QuadList& source_quad_list,
     const SharedQuadStateList& source_shared_quad_state_list,
-    const gfx::Transform& content_to_target_transform,
+    const DrawQuad::ResourceIteratorCallback& remap,
+    const gfx::Transform& target_transform,
     const ClipData& clip_rect,
     RenderPass* dest_pass,
     SurfaceId surface_id) {
@@ -361,14 +389,14 @@ void SurfaceAggregator::CopyQuadsToPass(
 
     if (quad->material == DrawQuad::SURFACE_CONTENT) {
       const SurfaceDrawQuad* surface_quad = SurfaceDrawQuad::MaterialCast(quad);
-      HandleSurfaceQuad(surface_quad, content_to_target_transform, clip_rect,
-                        dest_pass);
+      HandleSurfaceQuad(surface_quad, target_transform, clip_rect, dest_pass);
     } else {
       if (quad->shared_quad_state != last_copied_source_shared_quad_state) {
-        CopySharedQuadState(quad->shared_quad_state,
-                            content_to_target_transform, clip_rect, dest_pass);
+        CopySharedQuadState(quad->shared_quad_state, target_transform,
+                            clip_rect, dest_pass);
         last_copied_source_shared_quad_state = quad->shared_quad_state;
       }
+      DrawQuad* dest_quad;
       if (quad->material == DrawQuad::RENDER_PASS) {
         const RenderPassDrawQuad* pass_quad =
             RenderPassDrawQuad::MaterialCast(quad);
@@ -384,31 +412,43 @@ void SurfaceAggregator::CopyQuadsToPass(
           }
         }
 
-        DrawQuad* rpdq = dest_pass->CopyFromAndAppendRenderPassDrawQuad(
+        dest_quad = dest_pass->CopyFromAndAppendRenderPassDrawQuad(
             pass_quad, dest_pass->shared_quad_state_list.back(),
             remapped_pass_id);
-        dest_pass->damage_rect = gfx::UnionRects(
-            dest_pass->damage_rect, MathUtil::MapEnclosingClippedRect(
-                                        rpdq->quadTransform(), pass_damage));
+        dest_pass->damage_rect =
+            gfx::UnionRects(dest_pass->damage_rect,
+                            MathUtil::MapEnclosingClippedRect(
+                                dest_quad->quadTransform(), pass_damage));
       } else {
-        dest_pass->CopyFromAndAppendDrawQuad(
+        dest_quad = dest_pass->CopyFromAndAppendDrawQuad(
             quad, dest_pass->shared_quad_state_list.back());
       }
+      if (!remap.is_null())
+        dest_quad->IterateResources(remap);
     }
   }
 }
 
 void SurfaceAggregator::CopyPasses(const DelegatedFrameData* frame_data,
                                    Surface* surface) {
-  RenderPassList source_pass_list;
-
   // The root surface is allowed to have copy output requests, so grab them
   // off its render passes.
   std::multimap<RenderPassId, CopyOutputRequest*> copy_requests;
   surface->TakeCopyOutputRequests(&copy_requests);
 
-  bool invalid_frame = TakeResources(surface, frame_data, &source_pass_list);
+  const RenderPassList& source_pass_list = frame_data->render_pass_list;
+  bool invalid_frame = ValidateResources(surface, frame_data);
   DCHECK(!invalid_frame);
+  if (invalid_frame)
+    return;
+
+  DrawQuad::ResourceIteratorCallback remap;
+  if (provider_) {
+    int child_id = ChildIdForSurface(surface);
+    remap =
+        base::Bind(&ResourceRemapHelper,
+                   base::ConstRef(provider_->GetChildToParentMap(child_id)));
+  }
 
   for (size_t i = 0; i < source_pass_list.size(); ++i) {
     const RenderPass& source = *source_pass_list[i];
@@ -430,7 +470,7 @@ void SurfaceAggregator::CopyPasses(const DelegatedFrameData* frame_data,
                       source.transform_to_root_target,
                       source.has_transparent_background);
 
-    CopyQuadsToPass(source.quad_list, source.shared_quad_state_list,
+    CopyQuadsToPass(source.quad_list, source.shared_quad_state_list, remap,
                     gfx::Transform(), ClipData(), copy_pass.get(),
                     surface->surface_id());
 
@@ -508,6 +548,14 @@ void SurfaceAggregator::ReleaseResources(SurfaceId surface_id) {
     provider_->DestroyChild(it->second);
     surface_id_to_resource_child_id_.erase(it);
   }
+}
+
+void SurfaceAggregator::SetFullDamageForSurface(SurfaceId surface_id) {
+  auto it = previous_contained_surfaces_.find(surface_id);
+  if (it == previous_contained_surfaces_.end())
+    return;
+  // Set the last drawn index as 0 to ensure full damage next time it's drawn.
+  it->second = 0;
 }
 
 }  // namespace cc

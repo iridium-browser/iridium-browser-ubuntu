@@ -9,7 +9,7 @@ import android.text.Editable;
 import android.text.InputType;
 import android.text.Selection;
 import android.text.TextUtils;
-import android.util.Log;
+import android.view.KeyCharacterMap;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.inputmethod.BaseInputConnection;
@@ -17,6 +17,7 @@ import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.ExtractedText;
 import android.view.inputmethod.ExtractedTextRequest;
 
+import org.chromium.base.Log;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.blink_public.web.WebInputEventType;
 import org.chromium.blink_public.web.WebTextInputFlags;
@@ -28,7 +29,7 @@ import org.chromium.ui.base.ime.TextInputType;
  * native ImeAdapterAndroid via the class ImeAdapter.
  */
 public class AdapterInputConnection extends BaseInputConnection {
-    private static final String TAG = "AdapterInputConnection";
+    private static final String TAG = "cr.InputConnection";
     private static final boolean DEBUG = false;
     /**
      * Selection value should be -1 if not known. See EditorInfo.java for details.
@@ -42,6 +43,7 @@ public class AdapterInputConnection extends BaseInputConnection {
 
     private boolean mSingleLine;
     private int mNumNestedBatchEdits = 0;
+    private int mPendingAccent;
 
     private int mLastUpdateSelectionStart = INVALID_SELECTION;
     private int mLastUpdateSelectionEnd = INVALID_SELECTION;
@@ -56,10 +58,12 @@ public class AdapterInputConnection extends BaseInputConnection {
         mImeAdapter = imeAdapter;
         mImeAdapter.setInputConnection(this);
         mEditable = editable;
+
         // The editable passed in might have been in use by a prior keyboard and could have had
         // prior composition spans set.  To avoid keyboard conflicts, remove all composing spans
         // when taking ownership of an existing Editable.
-        removeComposingSpans(mEditable);
+        finishComposingText();
+
         mSingleLine = true;
         outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN
                 | EditorInfo.IME_FLAG_NO_EXTRACT_UI;
@@ -138,6 +142,7 @@ public class AdapterInputConnection extends BaseInputConnection {
         outAttrs.initialSelEnd = Selection.getSelectionEnd(mEditable);
         mLastUpdateSelectionStart = outAttrs.initialSelStart;
         mLastUpdateSelectionEnd = outAttrs.initialSelEnd;
+        if (DEBUG) Log.w(TAG, "Constructor called with outAttrs: " + outAttrs);
 
         Selection.setSelection(mEditable, outAttrs.initialSelStart, outAttrs.initialSelEnd);
         updateSelectionIfRequired();
@@ -227,8 +232,8 @@ public class AdapterInputConnection extends BaseInputConnection {
         }
         // updateSelection should be called every time the selection or composition changes
         // if it happens not within a batch edit, or at the end of each top level batch edit.
-        getInputMethodManagerWrapper().updateSelection(mInternalView,
-                selectionStart, selectionEnd, compositionStart, compositionEnd);
+        getInputMethodManagerWrapper().updateSelection(
+                mInternalView, selectionStart, selectionEnd, compositionStart, compositionEnd);
         mLastUpdateSelectionStart = selectionStart;
         mLastUpdateSelectionEnd = selectionEnd;
         mLastUpdateCompositionStart = compositionStart;
@@ -242,6 +247,7 @@ public class AdapterInputConnection extends BaseInputConnection {
     public boolean setComposingText(CharSequence text, int newCursorPosition) {
         if (DEBUG) Log.w(TAG, "setComposingText [" + text + "] [" + newCursorPosition + "]");
         if (maybePerformEmptyCompositionWorkaround(text)) return true;
+        mPendingAccent = 0;
         super.setComposingText(text, newCursorPosition);
         updateSelectionIfRequired();
         return mImeAdapter.checkCompositionQueueAndCallNative(text, newCursorPosition, false);
@@ -254,6 +260,7 @@ public class AdapterInputConnection extends BaseInputConnection {
     public boolean commitText(CharSequence text, int newCursorPosition) {
         if (DEBUG) Log.w(TAG, "commitText [" + text + "] [" + newCursorPosition + "]");
         if (maybePerformEmptyCompositionWorkaround(text)) return true;
+        mPendingAccent = 0;
         super.commitText(text, newCursorPosition);
         updateSelectionIfRequired();
         return mImeAdapter.checkCompositionQueueAndCallNative(text, newCursorPosition,
@@ -346,17 +353,47 @@ public class AdapterInputConnection extends BaseInputConnection {
         return deleteSurroundingTextImpl(beforeLength, afterLength, false);
     }
 
+    /**
+     * Check if the given {@code index} is between UTF-16 surrogate pair.
+     * @param str The String.
+     * @param index The index
+     * @return True if the index is between UTF-16 surrogate pair, false otherwise.
+     */
+    @VisibleForTesting
+    static boolean isIndexBetweenUtf16SurrogatePair(CharSequence str, int index) {
+        return index > 0 && index < str.length() && Character.isHighSurrogate(str.charAt(index - 1))
+                && Character.isLowSurrogate(str.charAt(index));
+    }
+
     private boolean deleteSurroundingTextImpl(
             int beforeLength, int afterLength, boolean fromPhysicalKey) {
         if (DEBUG) {
-            Log.w(TAG, "deleteSurroundingText [" + beforeLength + " " + afterLength + "]");
+            Log.w(TAG, "deleteSurroundingText [" + beforeLength + " " + afterLength + " "
+                            + fromPhysicalKey + "]");
         }
+
+        if (mPendingAccent != 0) {
+            finishComposingText();
+        }
+
         int originalBeforeLength = beforeLength;
         int originalAfterLength = afterLength;
-        int availableBefore = Selection.getSelectionStart(mEditable);
-        int availableAfter = mEditable.length() - Selection.getSelectionEnd(mEditable);
+        int selectionStart = Selection.getSelectionStart(mEditable);
+        int selectionEnd = Selection.getSelectionEnd(mEditable);
+        int availableBefore = selectionStart;
+        int availableAfter = mEditable.length() - selectionEnd;
         beforeLength = Math.min(beforeLength, availableBefore);
         afterLength = Math.min(afterLength, availableAfter);
+
+        // Adjust these values even before calling super.deleteSurroundingText() to be consistent
+        // with the super class.
+        if (isIndexBetweenUtf16SurrogatePair(mEditable, selectionStart - beforeLength)) {
+            beforeLength += 1;
+        }
+        if (isIndexBetweenUtf16SurrogatePair(mEditable, selectionEnd + afterLength)) {
+            afterLength += 1;
+        }
+
         super.deleteSurroundingText(beforeLength, afterLength);
         updateSelectionIfRequired();
 
@@ -396,42 +433,75 @@ public class AdapterInputConnection extends BaseInputConnection {
     @Override
     public boolean sendKeyEvent(KeyEvent event) {
         if (DEBUG) {
-            Log.w(TAG, "sendKeyEvent [" + event.getAction() + "] [" + event.getKeyCode() + "]");
+            Log.w(TAG, "sendKeyEvent [" + event.getAction() + "] [" + event.getKeyCode() + "] ["
+                            + event.getUnicodeChar() + "]");
         }
 
         int action = event.getAction();
         int keycode = event.getKeyCode();
         int unicodeChar = event.getUnicodeChar();
 
+        // If this isn't a KeyDown event, no need to update composition state; just pass the key
+        // event through and return. But note that some keys, such as enter, may actually be
+        // handled on ACTION_UP in Blink.
+        if (action != KeyEvent.ACTION_DOWN) {
+            mImeAdapter.translateAndSendNativeEvents(event);
+            return true;
+        }
+
         // If this is backspace/del or if the key has a character representation,
         // need to update the underlying Editable (i.e. the local representation of the text
         // being edited).  Some IMEs like Jellybean stock IME and Samsung IME mix in delete
         // KeyPress events instead of calling deleteSurroundingText.
-        if (action == KeyEvent.ACTION_DOWN && keycode == KeyEvent.KEYCODE_DEL) {
+        if (keycode == KeyEvent.KEYCODE_DEL) {
             deleteSurroundingTextImpl(1, 0, true);
-        } else if (action == KeyEvent.ACTION_DOWN && keycode == KeyEvent.KEYCODE_FORWARD_DEL) {
+        } else if (keycode == KeyEvent.KEYCODE_FORWARD_DEL) {
             deleteSurroundingTextImpl(0, 1, true);
-        } else if (action == KeyEvent.ACTION_DOWN && keycode == KeyEvent.KEYCODE_ENTER) {
+        } else if (keycode == KeyEvent.KEYCODE_ENTER) {
             // Finish text composition when pressing enter, as that may submit a form field.
             // TODO(aurimas): remove this workaround when crbug.com/278584 is fixed.
-            beginBatchEdit();
             finishComposingText();
-            mImeAdapter.translateAndSendNativeEvents(event);
-            endBatchEdit();
+        } else if ((unicodeChar & KeyCharacterMap.COMBINING_ACCENT) != 0) {
+            // Store a pending accent character and make it the current composition.
+            int pendingAccent = unicodeChar & KeyCharacterMap.COMBINING_ACCENT_MASK;
+            StringBuilder builder = new StringBuilder();
+            builder.appendCodePoint(pendingAccent);
+            setComposingText(builder.toString(), 1);
+            mPendingAccent = pendingAccent;
             return true;
-        } else if (action == KeyEvent.ACTION_UP && unicodeChar != 0) {
-            int selectionStart = Selection.getSelectionStart(mEditable);
-            int selectionEnd = Selection.getSelectionEnd(mEditable);
-            if (selectionStart > selectionEnd) {
-                int temp = selectionStart;
-                selectionStart = selectionEnd;
-                selectionEnd = temp;
+        } else if (mPendingAccent != 0 && unicodeChar != 0) {
+            int combined = KeyEvent.getDeadChar(mPendingAccent, unicodeChar);
+            if (combined != 0) {
+                StringBuilder builder = new StringBuilder();
+                builder.appendCodePoint(combined);
+                commitText(builder.toString(), 1);
+                return true;
             }
-            mEditable.replace(selectionStart, selectionEnd,
-                    Character.toString((char) unicodeChar));
+            // Noncombinable character; commit the accent character and fall through to sending
+            // the key event for the character afterwards.
+            finishComposingText();
         }
+        replaceSelectionWithUnicodeChar(unicodeChar);
         mImeAdapter.translateAndSendNativeEvents(event);
         return true;
+    }
+
+    /**
+     * Update the mEditable state to reflect what Blink will do in response to the KeyDown
+     * for a unicode-mapped key event.
+     * @param unicodeChar The Unicode character to update selection with.
+     */
+    private void replaceSelectionWithUnicodeChar(int unicodeChar) {
+        if (unicodeChar == 0) return;
+        int selectionStart = Selection.getSelectionStart(mEditable);
+        int selectionEnd = Selection.getSelectionEnd(mEditable);
+        if (selectionStart > selectionEnd) {
+            int temp = selectionStart;
+            selectionStart = selectionEnd;
+            selectionEnd = temp;
+        }
+        mEditable.replace(selectionStart, selectionEnd, Character.toString((char) unicodeChar));
+        updateSelectionIfRequired();
     }
 
     /**
@@ -440,6 +510,9 @@ public class AdapterInputConnection extends BaseInputConnection {
     @Override
     public boolean finishComposingText() {
         if (DEBUG) Log.w(TAG, "finishComposingText");
+
+        mPendingAccent = 0;
+
         if (getComposingSpanStart(mEditable) == getComposingSpanEnd(mEditable)) {
             return true;
         }
@@ -472,6 +545,7 @@ public class AdapterInputConnection extends BaseInputConnection {
         if (DEBUG) Log.w(TAG, "restartInput");
         getInputMethodManagerWrapper().restartInput(mInternalView);
         mNumNestedBatchEdits = 0;
+        mPendingAccent = 0;
     }
 
     /**

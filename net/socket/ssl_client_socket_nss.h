@@ -21,6 +21,7 @@
 #include "net/base/host_port_pair.h"
 #include "net/base/net_export.h"
 #include "net/base/nss_memio.h"
+#include "net/cert/cert_verifier.h"
 #include "net/cert/cert_verify_result.h"
 #include "net/cert/ct_verify_result.h"
 #include "net/cert/x509_certificate.h"
@@ -41,7 +42,6 @@ class CertVerifier;
 class ChannelIDService;
 class CTVerifier;
 class ClientSocketHandle;
-class SingleRequestCertVerifier;
 class TransportSecurityState;
 class X509Certificate;
 
@@ -69,7 +69,7 @@ class SSLClientSocketNSS : public SSLClientSocket {
 
   // SSLClientSocket implementation.
   void GetSSLCertRequestInfo(SSLCertRequestInfo* cert_request_info) override;
-  NextProtoStatus GetNextProto(std::string* proto) override;
+  NextProtoStatus GetNextProto(std::string* proto) const override;
 
   // SSLSocket implementation.
   int ExportKeyingMaterial(const base::StringPiece& label,
@@ -92,6 +92,9 @@ class SSLClientSocketNSS : public SSLClientSocket {
   bool WasEverUsed() const override;
   bool UsingTCPFastOpen() const override;
   bool GetSSLInfo(SSLInfo* ssl_info) override;
+  void GetConnectionAttempts(ConnectionAttempts* out) const override;
+  void ClearConnectionAttempts() override {}
+  void AddConnectionAttempts(const ConnectionAttempts& attempts) override {}
 
   // Socket implementation.
   int Read(IOBuffer* buf,
@@ -102,7 +105,10 @@ class SSLClientSocketNSS : public SSLClientSocket {
             const CompletionCallback& callback) override;
   int SetReceiveBufferSize(int32 size) override;
   int SetSendBufferSize(int32 size) override;
+
+  // SSLClientSocket implementation.
   ChannelIDService* GetChannelIDService() const override;
+  SSLFailureState GetSSLFailureState() const override;
 
  protected:
   // SSLClientSocket implementation.
@@ -167,7 +173,7 @@ class SSLClientSocketNSS : public SSLClientSocket {
   CertVerifyResult server_cert_verify_result_;
 
   CertVerifier* const cert_verifier_;
-  scoped_ptr<SingleRequestCertVerifier> verifier_;
+  scoped_ptr<CertVerifier::Request> cert_verifier_request_;
 
   // Certificate Transparency: Verifier and result holder.
   ct::CTVerifyResult ct_verify_result_;

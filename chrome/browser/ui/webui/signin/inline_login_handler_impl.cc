@@ -306,13 +306,10 @@ void InlineSigninHelper::OnClientOAuthSuccess(const ClientOAuthResult& result) {
       AboutSigninInternalsFactory::GetForProfile(profile_);
   about_signin_internals->OnRefreshTokenReceived("Successful");
 
-  AccountTrackerService* account_tracker =
-      AccountTrackerServiceFactory::GetForProfile(profile_);
-  std::string account_id =
-      account_tracker->PickAccountIdForAccount(gaia_id_, email_);
-
   // Prime the account tracker with this combination of gaia id/display email.
-  account_tracker->SeedAccountInfo(gaia_id_, email_);
+  std::string account_id =
+      AccountTrackerServiceFactory::GetForProfile(profile_)
+          ->SeedAccountInfo(gaia_id_, email_);
 
   signin_metrics::Source source = signin::GetSourceForPromoURL(current_url_);
 
@@ -387,7 +384,7 @@ void InlineSigninHelper::OnClientOAuthSuccess(const ClientOAuthResult& result) {
       // OneClickSigninSyncStarter will delete itself once the job is done.
       new OneClickSigninSyncStarter(
           profile_, browser,
-          email_, password_, result.refresh_token,
+          gaia_id_, email_, password_, result.refresh_token,
           start_mode,
           contents,
           confirmation_required,
@@ -448,7 +445,7 @@ void InlineSigninHelper::ConfirmEmailAction(
       break;
     case ConfirmEmailDialogDelegate::START_SYNC:
       new OneClickSigninSyncStarter(
-          profile_, browser, email_, password_, refresh_token,
+          profile_, browser, gaia_id_, email_, password_, refresh_token,
           start_mode, web_contents, confirmation_required, GURL(),
           base::Bind(&InlineLoginHandlerImpl::SyncStarterCallback, handler_));
       break;
@@ -496,9 +493,9 @@ void InlineLoginHandlerImpl::DidCommitProvisionalLoadForFrame(
   // Returns early if this is not a gaia iframe navigation.
   const GURL kGaiaExtOrigin(
       "chrome-extension://mfffpogegjflfpflabcdkioaeobkgjik/");
-  content::RenderFrameHost* gaia_iframe = InlineLoginUI::GetAuthIframe(
+  content::RenderFrameHost* gaia_frame = InlineLoginUI::GetAuthFrame(
       web_contents(), kGaiaExtOrigin, "signin-frame");
-  if (render_frame_host != gaia_iframe)
+  if (render_frame_host != gaia_frame)
     return;
 
   // Loading any untrusted (e.g., HTTP) URLs in the privileged sign-in process
@@ -516,6 +513,7 @@ void InlineLoginHandlerImpl::DidCommitProvisionalLoadForFrame(
 // static
 bool InlineLoginHandlerImpl::CanOffer(Profile* profile,
                                       CanOfferFor can_offer_for,
+                                      const std::string& gaia_id,
                                       const std::string& email,
                                       std::string* error_message) {
   if (error_message)
@@ -571,9 +569,14 @@ bool InlineLoginHandlerImpl::CanOffer(Profile* profile,
       if (profile_manager) {
         ProfileInfoCache& cache = profile_manager->GetProfileInfoCache();
         for (size_t i = 0; i < cache.GetNumberOfProfiles(); ++i) {
+          // For backward compatibility, need to also check the username of the
+          // profile, since the GAIA ID may not have been set yet for the
+          // profile cache info.  It will get set once the profile is opened.
+          std::string profile_gaia_id = cache.GetGAIAIdOfProfileAtIndex(i);
           std::string profile_email =
               base::UTF16ToUTF8(cache.GetUserNameOfProfileAtIndex(i));
-          if (gaia::AreEmailsSame(email, profile_email)) {
+          if (gaia_id == profile_gaia_id ||
+              gaia::AreEmailsSame(email, profile_email)) {
             if (error_message) {
               error_message->assign(
                   l10n_util::GetStringUTF8(IDS_SYNC_USER_NAME_IN_USE_ERROR));
@@ -645,7 +648,9 @@ void InlineLoginHandlerImpl::CompleteLogin(const base::ListValue* args) {
                                  &validate_email) &&
       validate_email == "1") {
     if (!gaia::AreEmailsSame(email, default_email)) {
-      SyncStarterCallback(OneClickSigninSyncStarter::SYNC_SETUP_FAILURE);
+      HandleLoginError(
+          l10n_util::GetStringFUTF8(IDS_SYNC_WRONG_EMAIL,
+                                    base::UTF8ToUTF16(default_email)));
       return;
     }
   }
@@ -686,7 +691,7 @@ void InlineLoginHandlerImpl::CompleteLogin(const base::ListValue* args) {
 
   std::string error_msg;
   bool can_offer = CanOffer(Profile::FromWebUI(web_ui()), can_offer_for,
-      email, &error_msg);
+      gaia_id, email, &error_msg);
   if (!can_offer) {
     HandleLoginError(error_msg);
     return;

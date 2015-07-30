@@ -46,6 +46,12 @@ BOT_ASSIGNMENT = {
     'mac10.7-newlib-dbg-asan':
         python + ' buildbot/buildbot_standard.py opt 32 newlib --asan',
 
+    # Sanitizer Pnacl toolchain buildbot.
+    'asan':
+        python +
+        ' buildbot/buildbot_pnacl_toolchain.py --buildbot --tests-arch x86-64 '
+        ' --sanitize address --skip-tests',
+
     # PNaCl.
     'oneiric_32-newlib-arm_hw-pnacl-panda-dbg':
         bash + ' buildbot/buildbot_pnacl.sh mode-buildbot-arm-hw-dbg',
@@ -178,7 +184,7 @@ BOT_ASSIGNMENT = {
     'win7-toolchain_x86': 'buildbot\\buildbot_toolchain_win.bat',
     'mac-toolchain_x86': bash + ' buildbot/buildbot_toolchain.sh mac',
     'precise64-toolchain_x86': bash + ' buildbot/buildbot_toolchain.sh linux',
-    # Toolchain newlib arm.
+    # Toolchain (glibc) ARM.
     'win7-toolchain_arm':
         python +
         ' buildbot/buildbot_toolchain_build.py'
@@ -193,7 +199,7 @@ BOT_ASSIGNMENT = {
         python +
         ' buildbot/buildbot_toolchain_build.py'
         ' --buildbot'
-        ' --test_toolchain nacl_arm_newlib'
+        ' --test_toolchain nacl_arm_glibc_raw'
         ' toolchain_build',
 
     # BIONIC toolchain builders.
@@ -234,18 +240,18 @@ BOT_ASSIGNMENT = {
         bash + ' buildbot/buildbot_toolchain.sh linux',
     'nacl-toolchain-mac-newlib': bash + ' buildbot/buildbot_toolchain.sh mac',
     'nacl-toolchain-win7-newlib': 'buildbot\\buildbot_toolchain_win.bat',
-    'nacl-toolchain-precise64-newlib-arm':
+    'nacl-toolchain-precise64-newlib-arm': # TODO(bradnelson): rename
         python +
         ' buildbot/buildbot_toolchain_build.py'
         ' --trybot'
-        ' --test_toolchain nacl_arm_newlib'
+        ' --test_toolchain nacl_arm_glibc_raw'
         ' toolchain_build',
-    'nacl-toolchain-mac-newlib-arm':
+    'nacl-toolchain-mac-newlib-arm': # TODO(bradnelson): rename
         python +
         ' buildbot/buildbot_toolchain_build.py'
         ' --trybot'
         ' toolchain_build',
-    'nacl-toolchain-win7-newlib-arm':
+    'nacl-toolchain-win7-newlib-arm': # TODO(bradnelson): rename
         python +
         ' buildbot/buildbot_toolchain_build.py'
         ' --trybot'

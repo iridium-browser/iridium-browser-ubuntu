@@ -21,6 +21,7 @@
 namespace content {
 
 class FrameTree;
+class NavigationRequest;
 class Navigator;
 class RenderFrameHostImpl;
 
@@ -30,18 +31,9 @@ class RenderFrameHostImpl;
 // are frame-specific (as opposed to page-specific).
 class CONTENT_EXPORT FrameTreeNode {
  public:
-  // These values indicate the loading progress status. The minimum progress
-  // value matches what Blink's ProgressTracker has traditionally used for a
-  // minimum progress value.
-  // TODO(fdegans): Move these values to the implementation when the relevant
-  // IPCs are moved from WebContentsImpl to RenderFrameHost.
-  static const double kLoadingProgressNotStarted;
-  static const double kLoadingProgressMinimum;
-  static const double kLoadingProgressDone;
-
   // Returns the FrameTreeNode with the given global |frame_tree_node_id|,
   // regardless of which FrameTree it is in.
-  static FrameTreeNode* GloballyFindByID(int64 frame_tree_node_id);
+  static FrameTreeNode* GloballyFindByID(int frame_tree_node_id);
 
   FrameTreeNode(FrameTree* frame_tree,
                 Navigator* navigator,
@@ -49,7 +41,8 @@ class CONTENT_EXPORT FrameTreeNode {
                 RenderViewHostDelegate* render_view_delegate,
                 RenderWidgetHostDelegate* render_widget_delegate,
                 RenderFrameHostManager::Delegate* manager_delegate,
-                const std::string& name);
+                const std::string& name,
+                SandboxFlags sandbox_flags);
 
   ~FrameTreeNode();
 
@@ -75,7 +68,7 @@ class CONTENT_EXPORT FrameTreeNode {
     return &render_manager_;
   }
 
-  int64 frame_tree_node_id() const {
+  int frame_tree_node_id() const {
     return frame_tree_node_id_;
   }
 
@@ -101,10 +94,10 @@ class CONTENT_EXPORT FrameTreeNode {
     current_url_ = url;
   }
 
-  void set_current_origin(const url::Origin& origin) {
-    replication_state_.origin = origin;
-  }
+  // Set the current origin and notify proxies about the update.
+  void SetCurrentOrigin(const url::Origin& origin);
 
+  // Set the current name and notify proxies about the update.
   void SetFrameName(const std::string& name);
 
   SandboxFlags effective_sandbox_flags() { return effective_sandbox_flags_; }
@@ -131,22 +124,55 @@ class CONTENT_EXPORT FrameTreeNode {
 
   bool IsDescendantOf(FrameTreeNode* other) const;
 
+  // Return the node immediately preceding this node in its parent's
+  // |children_|, or nullptr if there is no such node.
+  FrameTreeNode* PreviousSibling() const;
+
   // Returns true if this node is in a loading state.
   bool IsLoading() const;
 
-  // Sets this node's loading progress (from 0 to 1).
-  void set_loading_progress(double loading_progress) {
-    loading_progress_ = loading_progress;
-  }
-
   // Returns this node's loading progress.
   double loading_progress() const { return loading_progress_; }
+
+  NavigationRequest* navigation_request() { return navigation_request_.get(); }
+
+  // PlzNavigate
+  // Takes ownership of |navigation_request| and makes it the current
+  // NavigationRequest of this frame. This corresponds to the start of a new
+  // navigation. If there was an ongoing navigation request before calling this
+  // function, it is canceled. |navigation_request| should not be null.
+  void SetNavigationRequest(scoped_ptr<NavigationRequest> navigation_request);
+
+  // PlzNavigate
+  // Resets the current navigation request. |is_commit| is true if the reset is
+  // due to the commit of the navigation.
+  void ResetNavigationRequest(bool is_commit);
+
+  // Returns true if this node is in a state where the loading progress is being
+  // tracked.
+  bool has_started_loading() const;
+
+  // Resets this node's loading progress.
+  void reset_loading_progress();
+
+  // A RenderFrameHost in this node started loading.
+  // |to_different_document| will be true unless the load is a fragment
+  // navigation, or triggered by history.pushState/replaceState.
+  void DidStartLoading(bool to_different_document);
+
+  // A RenderFrameHost in this node stopped loading.
+  void DidStopLoading();
+
+  // The load progress for a RenderFrameHost in this node was updated to
+  // |load_progress|. This will notify the FrameTree which will in turn notify
+  // the WebContents.
+  void DidChangeLoadProgress(double load_progress);
 
  private:
   void set_parent(FrameTreeNode* parent) { parent_ = parent; }
 
   // The next available browser-global FrameTreeNode ID.
-  static int64 next_frame_tree_node_id_;
+  static int next_frame_tree_node_id_;
 
   // The FrameTree that owns us.
   FrameTree* frame_tree_;  // not owned.
@@ -163,7 +189,7 @@ class CONTENT_EXPORT FrameTreeNode {
 
   // A browser-global identifier for the frame in the page, which stays stable
   // even if the frame does a cross-process navigation.
-  const int64 frame_tree_node_id_;
+  const int frame_tree_node_id_;
 
   // The parent node of this frame. NULL if this node is the root or if it has
   // not yet been attached to the frame tree.
@@ -194,6 +220,11 @@ class CONTENT_EXPORT FrameTreeNode {
 
   // Used to track this node's loading progress (from 0 to 1).
   double loading_progress_;
+
+  // PlzNavigate
+  // Owns an ongoing NavigationRequest until it is ready to commit. It will then
+  // be reset and a RenderFrameHost will be responsible for the navigation.
+  scoped_ptr<NavigationRequest> navigation_request_;
 
   DISALLOW_COPY_AND_ASSIGN(FrameTreeNode);
 };

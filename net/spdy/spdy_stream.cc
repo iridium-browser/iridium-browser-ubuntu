@@ -20,10 +20,11 @@ namespace net {
 
 namespace {
 
-base::Value* NetLogSpdyStreamErrorCallback(SpdyStreamId stream_id,
-                                           int status,
-                                           const std::string* description,
-                                           NetLog::LogLevel /* log_level */) {
+base::Value* NetLogSpdyStreamErrorCallback(
+    SpdyStreamId stream_id,
+    int status,
+    const std::string* description,
+    NetLogCaptureMode /* capture_mode */) {
   base::DictionaryValue* dict = new base::DictionaryValue();
   dict->SetInteger("stream_id", static_cast<int>(stream_id));
   dict->SetInteger("status", status);
@@ -35,7 +36,7 @@ base::Value* NetLogSpdyStreamWindowUpdateCallback(
     SpdyStreamId stream_id,
     int32 delta,
     int32 window_size,
-    NetLog::LogLevel /* log_level */) {
+    NetLogCaptureMode /* capture_mode */) {
   base::DictionaryValue* dict = new base::DictionaryValue();
   dict->SetInteger("stream_id", stream_id);
   dict->SetInteger("delta", delta);
@@ -83,7 +84,7 @@ SpdyStream::SpdyStream(SpdyStreamType type,
                        const GURL& url,
                        RequestPriority priority,
                        int32 initial_send_window_size,
-                       int32 initial_recv_window_size,
+                       int32 max_recv_window_size,
                        const BoundNetLog& net_log)
     : type_(type),
       stream_id_(0),
@@ -91,7 +92,8 @@ SpdyStream::SpdyStream(SpdyStreamType type,
       priority_(priority),
       send_stalled_by_flow_control_(false),
       send_window_size_(initial_send_window_size),
-      recv_window_size_(initial_recv_window_size),
+      max_recv_window_size_(max_recv_window_size),
+      recv_window_size_(max_recv_window_size),
       unacked_recv_window_bytes_(0),
       session_(session),
       delegate_(NULL),
@@ -333,8 +335,7 @@ void SpdyStream::IncreaseRecvWindowSize(int32 delta_window_size) {
                  delta_window_size, recv_window_size_));
 
   unacked_recv_window_bytes_ += delta_window_size;
-  if (unacked_recv_window_bytes_ >
-      session_->stream_initial_recv_window_size() / 2) {
+  if (unacked_recv_window_bytes_ > max_recv_window_size_ / 2) {
     session_->SendStreamWindowUpdate(
         stream_id_, static_cast<uint32>(unacked_recv_window_bytes_));
     unacked_recv_window_bytes_ = 0;
@@ -346,12 +347,12 @@ void SpdyStream::DecreaseRecvWindowSize(int32 delta_window_size) {
   DCHECK_GE(session_->flow_control_state(), SpdySession::FLOW_CONTROL_STREAM);
   DCHECK_GE(delta_window_size, 1);
 
-  // Since we never decrease the initial receive window size,
-  // |delta_window_size| should never cause |recv_window_size_| to go
-  // negative. If we do, the receive window isn't being respected.
-  if (delta_window_size > recv_window_size_) {
+  // The receiving window size as the peer knows it is
+  // |recv_window_size_ - unacked_recv_window_bytes_|, if more data are sent by
+  // the peer, that means that the receive window is not being respected.
+  if (delta_window_size > recv_window_size_ - unacked_recv_window_bytes_) {
     session_->ResetStream(
-        stream_id_, RST_STREAM_PROTOCOL_ERROR,
+        stream_id_, RST_STREAM_FLOW_CONTROL_ERROR,
         "delta_window_size is " + base::IntToString(delta_window_size) +
             " in DecreaseRecvWindowSize, which is larger than the receive " +
             "window size of " + base::IntToString(recv_window_size_));
@@ -509,7 +510,11 @@ void SpdyStream::OnDataReceived(scoped_ptr<SpdyBuffer> buffer) {
   size_t length = buffer->GetRemainingSize();
   DCHECK_LE(length, session_->GetDataFrameMaximumPayload());
   if (session_->flow_control_state() >= SpdySession::FLOW_CONTROL_STREAM) {
+    base::WeakPtr<SpdyStream> weak_this = GetWeakPtr();
+    // May close the stream.
     DecreaseRecvWindowSize(static_cast<int32>(length));
+    if (!weak_this)
+      return;
     buffer->AddConsumeCallback(
         base::Bind(&SpdyStream::OnReadBufferConsumed, GetWeakPtr()));
   }
@@ -526,9 +531,13 @@ void SpdyStream::OnPaddingConsumed(size_t len) {
   if (session_->flow_control_state() >= SpdySession::FLOW_CONTROL_STREAM) {
     // Decrease window size because padding bytes are received.
     // Increase window size because padding bytes are consumed (by discarding).
-    // Net result: |session_unacked_recv_window_bytes_| increases by |len|,
-    // |session_recv_window_size_| does not change.
+    // Net result: |unacked_recv_window_bytes_| increases by |len|,
+    // |recv_window_size_| does not change.
+    base::WeakPtr<SpdyStream> weak_this = GetWeakPtr();
+    // May close the stream.
     DecreaseRecvWindowSize(static_cast<int32>(len));
+    if (!weak_this)
+      return;
     IncreaseRecvWindowSize(static_cast<int32>(len));
   }
 }
@@ -699,10 +708,6 @@ bool SpdyStream::GetSSLInfo(SSLInfo* ssl_info,
                             NextProto* protocol_negotiated) {
   return session_->GetSSLInfo(
       ssl_info, was_npn_negotiated, protocol_negotiated);
-}
-
-bool SpdyStream::GetSSLCertRequestInfo(SSLCertRequestInfo* cert_request_info) {
-  return session_->GetSSLCertRequestInfo(cert_request_info);
 }
 
 void SpdyStream::PossiblyResumeIfSendStalled() {

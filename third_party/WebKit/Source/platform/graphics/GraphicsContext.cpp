@@ -30,6 +30,7 @@
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/TraceEvent.h"
 #include "platform/geometry/IntRect.h"
+#include "platform/graphics/ColorSpace.h"
 #include "platform/graphics/Gradient.h"
 #include "platform/graphics/ImageBuffer.h"
 #include "platform/weborigin/KURL.h"
@@ -56,6 +57,8 @@ class GraphicsContext::RecordingState {
 public:
     static PassOwnPtr<RecordingState> Create(SkCanvas* canvas, const SkMatrix& matrix)
     {
+        // Slimmming Paint uses m_pictureRecorder on GraphicsContext instead.
+        ASSERT(!RuntimeEnabledFeatures::slimmingPaintEnabled());
         return adoptPtr(new RecordingState(canvas, matrix));
     }
 
@@ -74,10 +77,22 @@ private:
     const SkMatrix m_savedMatrix;
 };
 
+GraphicsContext::GraphicsContext(DisplayItemList* displayItemList, DisabledMode disableContextOrPainting)
+    : GraphicsContext(nullptr, displayItemList, disableContextOrPainting)
+{
+    // TODO(chrishtr): switch the type of the parameter to DisplayItemList&.
+    ASSERT(displayItemList);
+}
+
+PassOwnPtr<GraphicsContext> GraphicsContext::deprecatedCreateWithCanvas(SkCanvas* canvas, DisabledMode disableContextOrPainting)
+{
+    return adoptPtr(new GraphicsContext(canvas, nullptr, disableContextOrPainting));
+}
+
 GraphicsContext::GraphicsContext(SkCanvas* canvas, DisplayItemList* displayItemList, DisabledMode disableContextOrPainting)
     : m_canvas(canvas)
+    , m_originalCanvas(canvas)
     , m_displayItemList(displayItemList)
-    , m_clipRecorderStack(0)
     , m_paintStateStack()
     , m_paintStateIndex(0)
     , m_annotationMode(0)
@@ -463,6 +478,11 @@ void GraphicsContext::beginRecording(const FloatRect& bounds, uint32_t recordFla
     if (contextDisabled())
         return;
 
+    if (RuntimeEnabledFeatures::slimmingPaintEnabled()) {
+        m_canvas = m_pictureRecorder.beginRecording(bounds, 0, recordFlags);
+        return;
+    }
+
     m_recordingStateStack.append(
         RecordingState::Create(m_canvas, getTotalMatrix()));
     m_canvas = m_recordingStateStack.last()->recorder().beginRecording(bounds, 0, recordFlags);
@@ -472,6 +492,13 @@ PassRefPtr<const SkPicture> GraphicsContext::endRecording()
 {
     if (contextDisabled())
         return nullptr;
+
+    if (RuntimeEnabledFeatures::slimmingPaintEnabled()) {
+        RefPtr<const SkPicture> picture = adoptRef(m_pictureRecorder.endRecordingAsPicture());
+        m_canvas = m_originalCanvas;
+        ASSERT(picture);
+        return picture.release();
+    }
 
     ASSERT(!m_recordingStateStack.isEmpty());
     RecordingState* recording = m_recordingStateStack.last().get();
@@ -486,6 +513,9 @@ PassRefPtr<const SkPicture> GraphicsContext::endRecording()
 
 bool GraphicsContext::isRecording() const
 {
+    if (RuntimeEnabledFeatures::slimmingPaintEnabled())
+        return m_canvas != m_originalCanvas;
+
     return !m_recordingStateStack.isEmpty();
 }
 
@@ -651,10 +681,7 @@ void GraphicsContext::drawInnerShadow(const FloatRoundedRect& rect, const Color&
     holeRect.inflate(-shadowSpread);
 
     if (holeRect.isEmpty()) {
-        if (rect.isRounded())
-            fillRoundedRect(rect, shadowColor);
-        else
-            fillRect(rect.rect(), shadowColor);
+        fillRoundedRect(rect, shadowColor);
         return;
     }
 
@@ -943,6 +970,14 @@ void GraphicsContext::drawRect(const IntRect& rect)
     }
 }
 
+void GraphicsContext::drawText(const Font& font, const TextRunPaintInfo& runInfo, const FloatPoint& point, const SkPaint& paint)
+{
+    if (contextDisabled())
+        return;
+
+    font.drawText(m_canvas, runInfo, point, m_deviceScaleFactor, paint);
+}
+
 template<typename DrawTextFunc>
 void GraphicsContext::drawTextPasses(const DrawTextFunc& drawText)
 {
@@ -1155,6 +1190,66 @@ void GraphicsContext::fillRect(const FloatRect& rect, const Color& color, SkXfer
     drawRect(rect, paint);
 }
 
+void GraphicsContext::fillRoundedRect(const FloatRoundedRect& rrect, const Color& color)
+{
+    if (contextDisabled())
+        return;
+
+    if (!rrect.isRounded() || !rrect.isRenderable()) {
+        fillRect(rrect.rect(), color);
+        return;
+    }
+
+    if (color == fillColor()) {
+        drawRRect(rrect, immutableState()->fillPaint());
+        return;
+    }
+
+    SkPaint paint = immutableState()->fillPaint();
+    paint.setColor(color.rgb());
+
+    drawRRect(rrect, paint);
+}
+
+namespace {
+
+bool isSimpleDRRect(const FloatRoundedRect& outer, const FloatRoundedRect& inner)
+{
+    // A DRRect is "simple" (i.e. can be drawn as a rrect stroke) if
+    //   1) all sides have the same width
+    const FloatSize strokeSize = inner.rect().minXMinYCorner() - outer.rect().minXMinYCorner();
+    if (!WebCoreFloatNearlyEqual(strokeSize.aspectRatio(), 1)
+        || !WebCoreFloatNearlyEqual(strokeSize.width(), outer.rect().maxX() - inner.rect().maxX())
+        || !WebCoreFloatNearlyEqual(strokeSize.height(), outer.rect().maxY() - inner.rect().maxY()))
+        return false;
+
+    // and
+    //   2) the inner radii are not constrained
+    const FloatRoundedRect::Radii& oRadii = outer.radii();
+    const FloatRoundedRect::Radii& iRadii = inner.radii();
+    if (!WebCoreFloatNearlyEqual(oRadii.topLeft().width() - strokeSize.width(), iRadii.topLeft().width())
+        || !WebCoreFloatNearlyEqual(oRadii.topLeft().height() - strokeSize.height(), iRadii.topLeft().height())
+        || !WebCoreFloatNearlyEqual(oRadii.topRight().width() - strokeSize.width(), iRadii.topRight().width())
+        || !WebCoreFloatNearlyEqual(oRadii.topRight().height() - strokeSize.height(), iRadii.topRight().height())
+        || !WebCoreFloatNearlyEqual(oRadii.bottomRight().width() - strokeSize.width(), iRadii.bottomRight().width())
+        || !WebCoreFloatNearlyEqual(oRadii.bottomRight().height() - strokeSize.height(), iRadii.bottomRight().height())
+        || !WebCoreFloatNearlyEqual(oRadii.bottomLeft().width() - strokeSize.width(), iRadii.bottomLeft().width())
+        || !WebCoreFloatNearlyEqual(oRadii.bottomLeft().height() - strokeSize.height(), iRadii.bottomLeft().height()))
+        return false;
+
+    // We also ignore DRRects with a very thick relative stroke (shapes which are mostly filled by
+    // the stroke): Skia's stroke outline can diverge significantly from the outer/inner contours
+    // in some edge cases, so we fall back to drawDRRect instead.
+    static float kMaxStrokeToSizeRatio = 0.75f;
+    if (2 * strokeSize.width() / outer.rect().width() > kMaxStrokeToSizeRatio
+        || 2 * strokeSize.height() / outer.rect().height() > kMaxStrokeToSizeRatio)
+        return false;
+
+    return true;
+}
+
+} // anonymous namespace
+
 void GraphicsContext::fillDRRect(const FloatRoundedRect& outer,
     const FloatRoundedRect& inner, const Color& color)
 {
@@ -1162,53 +1257,29 @@ void GraphicsContext::fillDRRect(const FloatRoundedRect& outer,
         return;
     ASSERT(m_canvas);
 
-    SkVector outerRadii[4];
-    SkVector innerRadii[4];
-    setRadii(outerRadii, outer.radii().topLeft(), outer.radii().topRight(),
-        outer.radii().bottomRight(), outer.radii().bottomLeft());
-    setRadii(innerRadii, inner.radii().topLeft(), inner.radii().topRight(),
-        inner.radii().bottomRight(), inner.radii().bottomLeft());
+    if (!isSimpleDRRect(outer, inner)) {
+        if (color == fillColor()) {
+            m_canvas->drawDRRect(outer, inner, immutableState()->fillPaint());
+        } else {
+            SkPaint paint(immutableState()->fillPaint());
+            paint.setColor(color.rgb());
+            m_canvas->drawDRRect(outer, inner, paint);
+        }
 
-    SkRRect rrOuter;
-    SkRRect rrInner;
-    rrOuter.setRectRadii(outer.rect(), outerRadii);
-    rrInner.setRectRadii(inner.rect(), innerRadii);
-
-    SkPaint paint(immutableState()->fillPaint());
-    paint.setColor(color.rgb());
-
-    m_canvas->drawDRRect(rrOuter, rrInner, paint);
-}
-
-void GraphicsContext::fillRoundedRect(const FloatRect& rect, const FloatSize& topLeft, const FloatSize& topRight,
-    const FloatSize& bottomLeft, const FloatSize& bottomRight, const Color& color)
-{
-    if (contextDisabled())
-        return;
-    ASSERT(m_canvas);
-
-    if (topLeft.width() + topRight.width() > rect.width()
-            || bottomLeft.width() + bottomRight.width() > rect.width()
-            || topLeft.height() + bottomLeft.height() > rect.height()
-            || topRight.height() + bottomRight.height() > rect.height()) {
-        // Not all the radii fit, return a rect. This matches the behavior of
-        // Path::createRoundedRectangle. Without this we attempt to draw a round
-        // shadow for a square box.
-        // FIXME: this fallback code is wrong, and also duplicates related code in FloatRoundedRect::constrainRadii, Path and SKRRect.
-        fillRect(rect, color);
         return;
     }
 
-    SkVector radii[4];
-    setRadii(radii, topLeft, topRight, bottomRight, bottomLeft);
+    // We can draw this as a stroked rrect.
+    float strokeWidth = inner.rect().x() - outer.rect().x();
+    SkRRect strokeRRect = outer;
+    strokeRRect.inset(strokeWidth / 2, strokeWidth / 2);
 
-    SkRRect rr;
-    rr.setRectRadii(rect, radii);
+    SkPaint strokePaint(immutableState()->fillPaint());
+    strokePaint.setColor(color.rgb());
+    strokePaint.setStyle(SkPaint::kStroke_Style);
+    strokePaint.setStrokeWidth(strokeWidth);
 
-    SkPaint paint(immutableState()->fillPaint());
-    paint.setColor(color.rgb());
-
-    m_canvas->drawRRect(rr, paint);
+    m_canvas->drawRRect(strokeRRect, strokePaint);
 }
 
 void GraphicsContext::fillEllipse(const FloatRect& ellipse)
@@ -1270,24 +1341,17 @@ void GraphicsContext::strokeEllipse(const FloatRect& ellipse)
     drawOval(ellipse, immutableState()->strokePaint());
 }
 
-void GraphicsContext::clipRoundedRect(const FloatRoundedRect& rect, SkRegion::Op regionOp)
+void GraphicsContext::clipRoundedRect(const FloatRoundedRect& rrect, SkRegion::Op regionOp)
 {
     if (contextDisabled())
         return;
 
-    if (!rect.isRounded()) {
-        clipRect(rect.rect(), NotAntiAliased, regionOp);
+    if (!rrect.isRounded()) {
+        clipRect(rrect.rect(), NotAntiAliased, regionOp);
         return;
     }
 
-    SkVector radii[4];
-    FloatRoundedRect::Radii wkRadii = rect.radii();
-    setRadii(radii, wkRadii.topLeft(), wkRadii.topRight(), wkRadii.bottomRight(), wkRadii.bottomLeft());
-
-    SkRRect r;
-    r.setRectRadii(rect.rect(), radii);
-
-    clipRRect(r, AntiAliased, regionOp);
+    clipRRect(rrect, AntiAliased, regionOp);
 }
 
 void GraphicsContext::clipOut(const Path& pathToClip)
@@ -1452,17 +1516,6 @@ void GraphicsContext::setCTM(const AffineTransform& affine)
     setMatrix(affineTransformToSkMatrix(affine));
 }
 
-void GraphicsContext::fillRoundedRect(const FloatRoundedRect& rect, const Color& color)
-{
-    if (contextDisabled())
-        return;
-
-    if (rect.isRounded())
-        fillRoundedRect(rect.rect(), rect.radii().topLeft(), rect.radii().topRight(), rect.radii().bottomLeft(), rect.radii().bottomRight(), color);
-    else
-        fillRect(rect.rect(), color);
-}
-
 void GraphicsContext::fillRectWithRoundedHole(const FloatRect& rect, const FloatRoundedRect& roundedHoleRect, const Color& color)
 {
     if (contextDisabled())
@@ -1539,27 +1592,15 @@ void GraphicsContext::setPathFromPoints(SkPath* path, size_t numPoints, const Fl
     }
 }
 
-void GraphicsContext::setRadii(SkVector* radii, FloatSize topLeft, FloatSize topRight, FloatSize bottomRight, FloatSize bottomLeft)
-{
-    radii[SkRRect::kUpperLeft_Corner].set(SkFloatToScalar(topLeft.width()),
-        SkFloatToScalar(topLeft.height()));
-    radii[SkRRect::kUpperRight_Corner].set(SkFloatToScalar(topRight.width()),
-        SkFloatToScalar(topRight.height()));
-    radii[SkRRect::kLowerRight_Corner].set(SkFloatToScalar(bottomRight.width()),
-        SkFloatToScalar(bottomRight.height()));
-    radii[SkRRect::kLowerLeft_Corner].set(SkFloatToScalar(bottomLeft.width()),
-        SkFloatToScalar(bottomLeft.height()));
-}
-
 PassRefPtr<SkColorFilter> GraphicsContext::WebCoreColorFilterToSkiaColorFilter(ColorFilter colorFilter)
 {
     switch (colorFilter) {
     case ColorFilterLuminanceToAlpha:
         return adoptRef(SkLumaColorFilter::Create());
     case ColorFilterLinearRGBToSRGB:
-        return ImageBuffer::createColorSpaceFilter(ColorSpaceLinearRGB, ColorSpaceDeviceRGB);
+        return ColorSpaceUtilities::createColorSpaceFilter(ColorSpaceLinearRGB, ColorSpaceDeviceRGB);
     case ColorFilterSRGBToLinearRGB:
-        return ImageBuffer::createColorSpaceFilter(ColorSpaceDeviceRGB, ColorSpaceLinearRGB);
+        return ColorSpaceUtilities::createColorSpaceFilter(ColorSpaceDeviceRGB, ColorSpaceLinearRGB);
     case ColorFilterNone:
         break;
     default:

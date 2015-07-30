@@ -23,6 +23,9 @@
 #include "core/loader/ImageLoader.h"
 
 #include "bindings/core/v8/ScriptController.h"
+#include "bindings/core/v8/ScriptState.h"
+#include "bindings/core/v8/V8Binding.h"
+#include "bindings/core/v8/V8PerIsolateData.h"
 #include "core/dom/Document.h"
 #include "core/dom/Element.h"
 #include "core/dom/IncrementLoadEventDelayCount.h"
@@ -33,11 +36,14 @@
 #include "core/fetch/MemoryCache.h"
 #include "core/fetch/ResourceFetcher.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/Settings.h"
+#include "core/frame/UseCounter.h"
 #include "core/html/HTMLImageElement.h"
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/layout/LayoutImage.h"
 #include "core/layout/LayoutVideo.h"
 #include "core/layout/svg/LayoutSVGImage.h"
+#include "core/svg/graphics/SVGImage.h"
 #include "platform/Logging.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "public/platform/WebURLRequest.h"
@@ -70,7 +76,7 @@ static ImageLoader::BypassMainWorldBehavior shouldBypassMainWorldCSP(ImageLoader
     return ImageLoader::DoNotBypassMainWorldCSP;
 }
 
-class ImageLoader::Task : public blink::WebThread::Task {
+class ImageLoader::Task : public WebThread::Task {
 public:
     static PassOwnPtr<Task> create(ImageLoader* loader, UpdateFromElementBehavior updateBehavior)
     {
@@ -83,9 +89,22 @@ public:
         , m_updateBehavior(updateBehavior)
         , m_weakFactory(this)
     {
+        v8::Isolate* isolate = V8PerIsolateData::mainThreadIsolate();
+        v8::HandleScope scope(isolate);
+        v8::Local<v8::Context> context = isolate->GetCurrentContext();
+        // If we're invoked from C++ without a V8 context on the stack, we should
+        // run the microtask in the context of the element's document's main world.
+        if (context.IsEmpty())
+            m_scriptState = ScriptState::from(toV8Context(&loader->element()->document(), DOMWrapperWorld::mainWorld()));
+        else
+            m_scriptState = ScriptState::from(context);
     }
 
-    virtual void run() override
+    ~Task() override
+    {
+    }
+
+    void run() override
     {
         if (m_loader) {
 #if ENABLE(OILPAN)
@@ -100,13 +119,19 @@ public:
             if (Heap::willObjectBeLazilySwept(m_loader))
                 return;
 #endif
-            m_loader->doUpdateFromElement(m_shouldBypassMainWorldCSP, m_updateBehavior);
+            if (m_scriptState->contextIsValid()) {
+                ScriptState::Scope scope(m_scriptState.get());
+                m_loader->doUpdateFromElement(m_shouldBypassMainWorldCSP, m_updateBehavior);
+            } else {
+                m_loader->doUpdateFromElement(m_shouldBypassMainWorldCSP, m_updateBehavior);
+            }
         }
     }
 
     void clearLoader()
     {
         m_loader = 0;
+        m_scriptState.clear();
     }
 
     WeakPtr<Task> createWeakPtr()
@@ -118,6 +143,7 @@ private:
     ImageLoader* m_loader;
     BypassMainWorldBehavior m_shouldBypassMainWorldCSP;
     UpdateFromElementBehavior m_updateBehavior;
+    RefPtr<ScriptState> m_scriptState;
     WeakPtrFactory<Task> m_weakFactory;
 };
 
@@ -196,7 +222,7 @@ void ImageLoader::setImageWithoutConsideringPendingLoadEvent(ImageResource* newI
         imageResource->resetAnimation();
 }
 
-static void configureRequest(FetchRequest& request, ImageLoader::BypassMainWorldBehavior bypassBehavior, Element& element)
+static void configureRequest(FetchRequest& request, ImageLoader::BypassMainWorldBehavior bypassBehavior, Element& element, const ClientHintsPreferences& clientHintsPreferences)
 {
     if (bypassBehavior == ImageLoader::BypassMainWorldCSP)
         request.setContentSecurityCheck(DoNotCheckContentSecurityPolicy);
@@ -204,6 +230,13 @@ static void configureRequest(FetchRequest& request, ImageLoader::BypassMainWorld
     AtomicString crossOriginMode = element.fastGetAttribute(HTMLNames::crossoriginAttr);
     if (!crossOriginMode.isNull())
         request.setCrossOriginAccessControl(element.document().securityOrigin(), crossOriginMode);
+
+    if (clientHintsPreferences.shouldSendRW() && isHTMLImageElement(element)) {
+        FetchRequest::ResourceWidth resourceWidth;
+        resourceWidth.width = toHTMLImageElement(element).sourceSize(element);
+        resourceWidth.isSet = true;
+        request.setResourceWidth(resourceWidth);
+    }
 }
 
 inline void ImageLoader::dispatchErrorEvent()
@@ -258,10 +291,12 @@ void ImageLoader::doUpdateFromElement(BypassMainWorldBehavior bypassBehavior, Up
         ResourceLoaderOptions resourceLoaderOptions = ResourceFetcher::defaultResourceOptions();
         ResourceRequest resourceRequest(url);
         resourceRequest.setFetchCredentialsMode(WebURLRequest::FetchCredentialsModeSameOrigin);
+        if (updateBehavior == UpdateForcedReload)
+            resourceRequest.setCachePolicy(ResourceRequestCachePolicy::ReloadBypassingCache);
         if (isHTMLPictureElement(element()->parentNode()) || !element()->fastGetAttribute(HTMLNames::srcsetAttr).isNull())
             resourceRequest.setRequestContext(WebURLRequest::RequestContextImageSet);
         FetchRequest request(resourceRequest, element()->localName(), resourceLoaderOptions);
-        configureRequest(request, bypassBehavior, *m_element);
+        configureRequest(request, bypassBehavior, *m_element, document.clientHintsPreferences());
 
         // Prevent the immediate creation of a ResourceLoader (and therefore a network
         // request) for ImageDocument loads. In this case, the image contents have already
@@ -315,7 +350,7 @@ void ImageLoader::doUpdateFromElement(BypassMainWorldBehavior bypassBehavior, Up
         m_hasPendingLoadEvent = newImage;
         m_imageComplete = !newImage;
 
-        updateRenderer();
+        updateLayoutObject();
         // If newImage exists and is cached, addClient() will result in the load event
         // being queued to fire. Ensure this happens after beforeload is dispatched.
         if (newImage)
@@ -356,7 +391,20 @@ void ImageLoader::updateFromElement(UpdateFromElementBehavior updateBehavior)
         doUpdateFromElement(DoNotBypassMainWorldCSP, updateBehavior);
         return;
     }
-    enqueueImageLoadingMicroTask(updateBehavior);
+    // Allow the idiom "img.src=''; img.src='.." to clear down the image before
+    // an asynchronous load completes.
+    if (imageSourceURL.isEmpty()) {
+        ImageResource* image = m_image.get();
+        if (image)
+            image->removeClient(this);
+        m_image = nullptr;
+    }
+
+    // Don't load images for inactive documents. We don't want to slow down the
+    // raw HTML parsing case by loading images we don't intend to display.
+    Document& document = m_element->document();
+    if (document.isActive())
+        enqueueImageLoadingMicroTask(updateBehavior);
 }
 
 KURL ImageLoader::imageSourceToKURL(AtomicString imageSourceURL) const
@@ -402,7 +450,10 @@ void ImageLoader::notifyFinished(Resource* resource)
     if (m_image)
         m_image->updateImageAnimationPolicy();
 
-    updateRenderer();
+    updateLayoutObject();
+
+    if (m_image && m_image->image() && m_image->image()->isSVGImage())
+        toSVGImage(m_image->image())->updateUseCounters(element()->document());
 
     if (!m_hasPendingLoadEvent)
         return;
@@ -436,33 +487,33 @@ void ImageLoader::notifyFinished(Resource* resource)
 
 LayoutImageResource* ImageLoader::layoutImageResource()
 {
-    LayoutObject* renderer = m_element->layoutObject();
+    LayoutObject* layoutObject = m_element->layoutObject();
 
-    if (!renderer)
+    if (!layoutObject)
         return 0;
 
     // We don't return style generated image because it doesn't belong to the ImageLoader.
     // See <https://bugs.webkit.org/show_bug.cgi?id=42840>
-    if (renderer->isImage() && !static_cast<LayoutImage*>(renderer)->isGeneratedContent())
-        return toLayoutImage(renderer)->imageResource();
+    if (layoutObject->isImage() && !static_cast<LayoutImage*>(layoutObject)->isGeneratedContent())
+        return toLayoutImage(layoutObject)->imageResource();
 
-    if (renderer->isSVGImage())
-        return toLayoutSVGImage(renderer)->imageResource();
+    if (layoutObject->isSVGImage())
+        return toLayoutSVGImage(layoutObject)->imageResource();
 
-    if (renderer->isVideo())
-        return toLayoutVideo(renderer)->imageResource();
+    if (layoutObject->isVideo())
+        return toLayoutVideo(layoutObject)->imageResource();
 
     return 0;
 }
 
-void ImageLoader::updateRenderer()
+void ImageLoader::updateLayoutObject()
 {
     LayoutImageResource* imageResource = layoutImageResource();
 
     if (!imageResource)
         return;
 
-    // Only update the renderer if it doesn't have an image or if what we have
+    // Only update the layoutObject if it doesn't have an image or if what we have
     // is a complete image.  This prevents flickering in the case where a dynamic
     // change is happening between two images.
     ImageResource* cachedImage = imageResource->cachedImage();
@@ -564,6 +615,15 @@ void ImageLoader::removeClient(ImageLoaderClient* client)
 {
     willRemoveClient(*client);
     m_clients.remove(client);
+}
+
+bool ImageLoader::getImageAnimationPolicy(ImageResource*, ImageAnimationPolicy& policy)
+{
+    if (!element()->document().settings())
+        return false;
+
+    policy = element()->document().settings()->imageAnimationPolicy();
+    return true;
 }
 
 void ImageLoader::dispatchPendingLoadEvents()

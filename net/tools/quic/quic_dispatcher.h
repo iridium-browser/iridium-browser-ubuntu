@@ -106,11 +106,11 @@ class QuicDispatcher : public QuicServerSessionVisitor,
   // Queues the blocked writer for later resumption.
   void OnWriteBlocked(QuicBlockedWriterInterface* blocked_writer) override;
 
-  // Called whenever the QuicTimeWaitListManager adds a new connection to the
+  // Called whenever the time wait list manager adds a new connection to the
   // time-wait list.
   void OnConnectionAddedToTimeWaitList(QuicConnectionId connection_id) override;
 
-  // Called whenever the QuicTimeWaitListManager removes an old connection from
+  // Called whenever the time wait list manager removes an old connection from
   // the time-wait list.
   void OnConnectionRemovedFromTimeWaitList(
       QuicConnectionId connection_id) override;
@@ -122,6 +122,22 @@ class QuicDispatcher : public QuicServerSessionVisitor,
   // Deletes all sessions on the closed session list and clears the list.
   void DeleteSessions();
 
+  // The largest packet sequence number we expect to receive with a connection
+  // ID for a connection that is not established yet.  The current design will
+  // send a handshake and then up to 50 or so data packets, and then it may
+  // resend the handshake packet up to 10 times.  (Retransmitted packets are
+  // sent with unique sequence numbers.)
+  static const QuicPacketSequenceNumber kMaxReasonableInitialSequenceNumber =
+      100;
+  static_assert(kMaxReasonableInitialSequenceNumber >=
+                    kInitialCongestionWindowSecure + 10,
+                "kMaxReasonableInitialSequenceNumber is unreasonably small "
+                "relative to kInitialCongestionWindowSecure.");
+  static_assert(kMaxReasonableInitialSequenceNumber >=
+                    kInitialCongestionWindowInsecure + 10,
+                "kMaxReasonableInitialSequenceNumber is unreasonably small "
+                "relative to kInitialCongestionWindowInsecure.");
+
  protected:
   virtual QuicServerSession* CreateQuicSession(
       QuicConnectionId connection_id,
@@ -132,16 +148,24 @@ class QuicDispatcher : public QuicServerSessionVisitor,
   virtual bool OnUnauthenticatedPublicHeader(
       const QuicPacketPublicHeader& header);
 
-  // Called by OnUnauthenticatedPublicHeader when the packet is not for a
-  // connection that the dispatcher has a record of, but is not handled by
-  // certain simple processing rules.  This method may apply validity checks to
-  // reject stray packets.  If the packet appears to be valid, it calls
-  // CreateQuicSession to create a new session for the packet.  Returns the
-  // QuicServerSession that was created, or nullptr if the packet failed the
-  // validity checks.
-  virtual QuicServerSession* AdditionalValidityChecksThenCreateSession(
-      const QuicPacketPublicHeader& header,
-      QuicConnectionId connection_id);
+  // Values to be returned by ValidityChecks() to indicate what should
+  // be done with a packet.  Fates with greater values are considered
+  // to be higher priority, in that if one validity test indicates a
+  // lower-valued fate and another validity test indicates a
+  // higher-valued fate, the higher-valued fate should be obeyed.
+  enum QuicPacketFate {
+    // Process the packet normally, which is usually to establish a connection.
+    kFateProcess,
+    // Put the connection ID into time-wait state and send a public reset.
+    kFateTimeWait,
+    // Drop the packet (ignore and give no response).
+    kFateDrop,
+  };
+
+  // This method is called by OnUnauthenticatedHeader on packets not associated
+  // with a known connection ID.  It applies validity checks and returns a
+  // QuicPacketFate to tell what should be done with the packet.
+  virtual QuicPacketFate ValidityChecks(const QuicPacketHeader& header);
 
   // Create and return the time wait list manager for this dispatcher, which
   // will be owned by the dispatcher as time_wait_list_manager_
@@ -167,9 +191,7 @@ class QuicDispatcher : public QuicServerSessionVisitor,
 
   const QuicConfig& config() const { return config_; }
 
-  const QuicCryptoServerConfig* crypto_config() const {
-    return crypto_config_;
-  }
+  const QuicCryptoServerConfig* crypto_config() const { return crypto_config_; }
 
   QuicFramer* framer() { return &framer_; }
 
@@ -204,9 +226,10 @@ class QuicDispatcher : public QuicServerSessionVisitor,
   // of a data packet that is destined for the time wait manager.
   void OnUnauthenticatedHeader(const QuicPacketHeader& header);
 
-  // Removes the session from the session map and write blocked list, and
-  // adds the ConnectionId to the time-wait list.
-  void CleanUpSession(SessionMap::iterator it);
+  // Removes the session from the session map and write blocked list, and adds
+  // the ConnectionId to the time-wait list.  If |session_closed_statelessly| is
+  // true, any future packets for the ConnectionId will be black-holed.
+  void CleanUpSession(SessionMap::iterator it, bool session_closed_statelessly);
 
   bool HandlePacketForTimeWait(const QuicPacketPublicHeader& header);
 

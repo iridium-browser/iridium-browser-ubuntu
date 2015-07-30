@@ -194,7 +194,7 @@ public:
 
     const char* name() const override { return "ColorCube"; }
 
-    virtual void getGLProcessorKey(const GrGLCaps& caps,
+    virtual void getGLProcessorKey(const GrGLSLCaps& caps,
                                    GrProcessorKeyBuilder* b) const override;
 
     GrGLFragmentProcessor* createGLInstance() const override;
@@ -215,7 +215,7 @@ public:
                               const TransformedCoordsArray&,
                               const TextureSamplerArray&) override;
 
-        static inline void GenKey(const GrProcessor&, const GrGLCaps&, GrProcessorKeyBuilder*);
+        static inline void GenKey(const GrProcessor&, const GrGLSLCaps&, GrProcessorKeyBuilder*);
 
         void setData(const GrGLProgramDataManager&, const GrProcessor&) override;
 
@@ -247,7 +247,7 @@ GrColorCubeEffect::GrColorCubeEffect(GrTexture* colorCube)
 GrColorCubeEffect::~GrColorCubeEffect() {
 }
 
-void GrColorCubeEffect::getGLProcessorKey(const GrGLCaps& caps, GrProcessorKeyBuilder* b) const {
+void GrColorCubeEffect::getGLProcessorKey(const GrGLSLCaps& caps, GrProcessorKeyBuilder* b) const {
     GLProcessor::GenKey(*this, caps, b);
 }
 
@@ -295,7 +295,7 @@ void GrColorCubeEffect::GLProcessor::emitCode(GrGLFPBuilder* builder,
     // Note: if implemented using texture3D in OpenGL ES older than OpenGL ES 3.0,
     //       the shader might need "#extension GL_OES_texture_3D : enable".
 
-    GrGLFPFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+    GrGLFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
 
     // Unpremultiply color
     fsBuilder->codeAppendf("\tfloat %s = max(%s.a, 0.00001);\n", nonZeroAlpha, inputColor);
@@ -334,7 +334,7 @@ void GrColorCubeEffect::GLProcessor::setData(const GrGLProgramDataManager& pdman
 }
 
 void GrColorCubeEffect::GLProcessor::GenKey(const GrProcessor& proc,
-                                            const GrGLCaps&, GrProcessorKeyBuilder* b) {
+                                            const GrGLSLCaps&, GrProcessorKeyBuilder* b) {
 }
 
 bool SkColorCubeFilter::asFragmentProcessors(GrContext* context,
@@ -351,11 +351,13 @@ bool SkColorCubeFilter::asFragmentProcessors(GrContext* context,
     desc.fHeight = fCache.cubeDimension() * fCache.cubeDimension();
     desc.fConfig = kRGBA_8888_GrPixelConfig;
 
-    SkAutoTUnref<GrTexture> textureCube(context->findAndRefCachedTexture(key));
+    SkAutoTUnref<GrTexture> textureCube(
+        context->textureProvider()->findAndRefTextureByUniqueKey(key));
     if (!textureCube) {
-        textureCube.reset(context->createTexture(desc, true, fCubeData->data(), 0));
+        textureCube.reset(context->textureProvider()->createTexture(
+            desc, true, fCubeData->data(), 0));
         if (textureCube) {
-            context->addResourceToCache(key, textureCube);
+            context->textureProvider()->assignUniqueKeyToTexture(key, textureCube);
         }
     }
 

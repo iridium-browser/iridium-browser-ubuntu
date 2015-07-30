@@ -157,6 +157,7 @@
 #include <openssl/dh.h>
 #include <openssl/ec.h>
 #include <openssl/ecdsa.h>
+#include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
 #include <openssl/md5.h>
@@ -166,7 +167,7 @@
 #include <openssl/sha.h>
 #include <openssl/x509.h>
 
-#include "ssl_locl.h"
+#include "internal.h"
 #include "../crypto/internal.h"
 #include "../crypto/dh/internal.h"
 
@@ -177,7 +178,7 @@
 
 int ssl3_accept(SSL *s) {
   BUF_MEM *buf = NULL;
-  unsigned long alg_a;
+  uint32_t alg_a;
   void (*cb)(const SSL *ssl, int type, int val) = NULL;
   int ret = -1;
   int new_state, state, skip = 0;
@@ -226,11 +227,6 @@ int ssl3_accept(SSL *s) {
         }
         s->init_num = 0;
 
-        if (!ssl3_setup_buffers(s)) {
-          ret = -1;
-          goto end;
-        }
-
         if (!s->s3->send_connection_binding &&
             !(s->options & SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION)) {
           /* Server attempting to renegotiate with client that doesn't support
@@ -275,6 +271,15 @@ int ssl3_accept(SSL *s) {
           cb(s, SSL_CB_HANDSHAKE_START, 1);
         }
 
+        if ((s->version >> 8) != 3) {
+          /* TODO(davidben): Some consumers clear |s->version| to break the
+           * handshake in a callback. Remove this when they're using proper
+           * APIs. */
+          OPENSSL_PUT_ERROR(SSL, ssl3_accept, ERR_R_INTERNAL_ERROR);
+          ret = -1;
+          goto end;
+        }
+
         if (s->init_buf == NULL) {
           buf = BUF_MEM_new();
           if (!buf || !BUF_MEM_grow(buf, SSL3_RT_MAX_PLAIN_LENGTH)) {
@@ -286,6 +291,13 @@ int ssl3_accept(SSL *s) {
         }
         s->init_num = 0;
 
+        /* Enable a write buffer. This groups handshake messages within a flight
+         * into a single write. */
+        if (!ssl_init_wbio_buffer(s, 1)) {
+          ret = -1;
+          goto end;
+        }
+
         if (!ssl3_init_finished_mac(s)) {
           OPENSSL_PUT_ERROR(SSL, ssl3_accept, ERR_R_INTERNAL_ERROR);
           ret = -1;
@@ -293,19 +305,8 @@ int ssl3_accept(SSL *s) {
         }
 
         if (!s->s3->have_version) {
-          /* This is the initial handshake. The record layer has not been
-           * initialized yet. Sniff for a V2ClientHello before reading a
-           * ClientHello normally. */
-          assert(s->s3->rbuf.buf == NULL);
-          assert(s->s3->wbuf.buf == NULL);
           s->state = SSL3_ST_SR_INITIAL_BYTES;
         } else {
-          /* Enable a write buffer. This groups handshake messages within a
-           * flight into a single write. */
-          if (!ssl3_setup_buffers(s) || !ssl_init_wbio_buffer(s, 1)) {
-            ret = -1;
-            goto end;
-          }
           s->state = SSL3_ST_SR_CLNT_HELLO_A;
         }
         break;
@@ -414,13 +415,6 @@ int ssl3_accept(SSL *s) {
              * don't request cert during re-negotiation: */
             ((s->session->peer != NULL) &&
              (s->verify_mode & SSL_VERIFY_CLIENT_ONCE)) ||
-            /* never request cert in anonymous ciphersuites
-             * (see section "Certificate request" in SSL 3 drafts
-             * and in RFC 2246): */
-            ((s->s3->tmp.new_cipher->algorithm_auth & SSL_aNULL) &&
-             /* ... except when the application insists on verification
-              * (against the specs, but s3_clnt.c accepts this for SSL 3) */
-             !(s->verify_mode & SSL_VERIFY_FAIL_IF_NO_PEER_CERT)) ||
             /* With normal PSK Certificates and
              * Certificate Requests are omitted */
             (s->s3->tmp.new_cipher->algorithm_mkey & SSL_kPSK)) {
@@ -641,7 +635,7 @@ int ssl3_accept(SSL *s) {
 
         /* If we aren't retaining peer certificates then we can discard it
          * now. */
-        if (s->session->peer && s->ctx->retain_only_sha256_of_client_certs) {
+        if (s->ctx->retain_only_sha256_of_client_certs) {
           X509_free(s->session->peer);
           s->session->peer = NULL;
         }
@@ -649,7 +643,7 @@ int ssl3_accept(SSL *s) {
         if (s->renegotiate == 2) {
           /* skipped if we just sent a HelloRequest */
           s->renegotiate = 0;
-          s->new_session = 0;
+          s->s3->initial_handshake_complete = 1;
 
           ssl_update_cache(s, SSL_SESS_CACHE_SERVER);
 
@@ -678,9 +672,7 @@ int ssl3_accept(SSL *s) {
 
 end:
   s->in_handshake--;
-  if (buf != NULL) {
-    BUF_MEM_free(buf);
-  }
+  BUF_MEM_free(buf);
   if (cb != NULL) {
     cb(s, SSL_CB_ACCEPT_EXIT, ret);
   }
@@ -750,10 +742,12 @@ int ssl3_get_initial_bytes(SSL *s) {
       p[5] == SSL3_MT_CLIENT_HELLO) {
     /* This is a ClientHello. Initialize the record layer with the already
      * consumed data and continue the handshake. */
-    if (!ssl3_setup_buffers(s) || !ssl_init_wbio_buffer(s, 1)) {
+    if (!ssl3_setup_read_buffer(s)) {
       return -1;
     }
     assert(s->rstate == SSL_ST_READ_HEADER);
+    /* There cannot have already been data in the record layer. */
+    assert(s->s3->rbuf.left == 0);
     memcpy(s->s3->rbuf.buf, p, s->s3->sniff_buffer_len);
     s->s3->rbuf.offset = 0;
     s->s3->rbuf.left = s->s3->sniff_buffer_len;
@@ -896,11 +890,6 @@ int ssl3_get_v2_client_hello(SSL *s) {
   /* The handshake message header is 4 bytes. */
   s->s3->tmp.message_size = len - 4;
 
-  /* Initialize the record layer. */
-  if (!ssl3_setup_buffers(s) || !ssl_init_wbio_buffer(s, 1)) {
-    return -1;
-  }
-
   /* Drop the sniff buffer. */
   BUF_MEM_free(s->s3->sniff_buffer);
   s->s3->sniff_buffer = NULL;
@@ -1022,6 +1011,11 @@ int ssl3_get_client_hello(SSL *s) {
     }
   }
 
+  /* Note: This codepath may run twice if |ssl_get_prev_session| completes
+   * asynchronously.
+   *
+   * TODO(davidben): Clean up the order of events around ClientHello
+   * processing. */
   if (!s->s3->have_version) {
     /* Select version to use */
     uint16_t version = ssl3_get_mutual_version(s, client_version);
@@ -1045,19 +1039,8 @@ int ssl3_get_client_hello(SSL *s) {
   }
 
   s->hit = 0;
-  /* Versions before 0.9.7 always allow clients to resume sessions in
-   * renegotiation. 0.9.7 and later allow this by default, but optionally
-   * ignore resumption requests with flag
-   * SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION (it's a new flag rather than
-   * a change to default behavior so that applications relying on this for
-   * security won't even compile against older library versions).
-   *
-   * 1.0.1 and later also have a function SSL_renegotiate_abbreviated() to
-   * request renegotiation but not a new session (s->new_session remains
-   * unset): for servers, this essentially just means that the
-   * SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION setting will be ignored. */
-  if (s->new_session &&
-      (s->options & SSL_OP_NO_SESSION_RESUMPTION_ON_RENEGOTIATION)) {
+  if (s->s3->initial_handshake_complete) {
+    /* Renegotiations do not participate in session resumption. */
     if (!ssl_get_new_session(s, 1)) {
       goto err;
     }
@@ -1090,22 +1073,12 @@ int ssl3_get_client_hello(SSL *s) {
   }
 
   if (!CBS_get_u16_length_prefixed(&client_hello, &cipher_suites) ||
+      CBS_len(&cipher_suites) == 0 ||
+      CBS_len(&cipher_suites) % 2 != 0 ||
       !CBS_get_u8_length_prefixed(&client_hello, &compression_methods) ||
       CBS_len(&compression_methods) == 0) {
     al = SSL_AD_DECODE_ERROR;
     OPENSSL_PUT_ERROR(SSL, ssl3_get_client_hello, SSL_R_DECODE_ERROR);
-    goto f_err;
-  }
-
-  /* TODO(davidben): Per spec, cipher_suites can never be empty (specified at
-   * the ClientHello structure level). This logic allows it to be empty if
-   * resuming a session. Can we always require non-empty? If a client sends
-   * empty cipher_suites because it's resuming a session, it could always fail
-   * to resume a session, so it's unlikely to actually work. */
-  if (CBS_len(&cipher_suites) == 0 && CBS_len(&session_id) != 0) {
-    /* We need a cipher if we are not resuming a session. */
-    al = SSL_AD_ILLEGAL_PARAMETER;
-    OPENSSL_PUT_ERROR(SSL, ssl3_get_client_hello, SSL_R_NO_CIPHERS_SPECIFIED);
     goto f_err;
   }
 
@@ -1115,10 +1088,10 @@ int ssl3_get_client_hello(SSL *s) {
   }
 
   /* If it is a hit, check that the cipher is in the list. */
-  if (s->hit && CBS_len(&cipher_suites) > 0) {
+  if (s->hit) {
     size_t j;
     int found_cipher = 0;
-    unsigned long id = s->session->cipher->id;
+    uint32_t id = s->session->cipher->id;
 
     for (j = 0; j < sk_SSL_CIPHER_num(ciphers); j++) {
       c = sk_SSL_CIPHER_value(ciphers, j);
@@ -1222,9 +1195,7 @@ int ssl3_get_client_hello(SSL *s) {
   }
 
 err:
-  if (ciphers != NULL) {
-    sk_SSL_CIPHER_free(ciphers);
-  }
+  sk_SSL_CIPHER_free(ciphers);
   return ret;
 }
 
@@ -1341,8 +1312,8 @@ int ssl3_send_server_key_exchange(SSL *s) {
   EVP_PKEY *pkey;
   uint8_t *p, *d;
   int al, i;
-  unsigned long alg_k;
-  unsigned long alg_a;
+  uint32_t alg_k;
+  uint32_t alg_a;
   int n;
   CERT *cert;
   BIGNUM *r[4];
@@ -1388,27 +1359,16 @@ int ssl3_send_server_key_exchange(SSL *s) {
                           ERR_R_INTERNAL_ERROR);
         goto err;
       }
-
       dh = DHparams_dup(dhp);
       if (dh == NULL) {
         OPENSSL_PUT_ERROR(SSL, ssl3_send_server_key_exchange, ERR_R_DH_LIB);
         goto err;
       }
-
       s->s3->tmp.dh = dh;
-      if (dhp->pub_key == NULL || dhp->priv_key == NULL ||
-          (s->options & SSL_OP_SINGLE_DH_USE)) {
-        if (!DH_generate_key(dh)) {
-          OPENSSL_PUT_ERROR(SSL, ssl3_send_server_key_exchange, ERR_R_DH_LIB);
-          goto err;
-        }
-      } else {
-        dh->pub_key = BN_dup(dhp->pub_key);
-        dh->priv_key = BN_dup(dhp->priv_key);
-        if (dh->pub_key == NULL || dh->priv_key == NULL) {
-          OPENSSL_PUT_ERROR(SSL, ssl3_send_server_key_exchange, ERR_R_DH_LIB);
-          goto err;
-        }
+
+      if (!DH_generate_key(dh)) {
+        OPENSSL_PUT_ERROR(SSL, ssl3_send_server_key_exchange, ERR_R_DH_LIB);
+        goto err;
       }
 
       r[0] = dh->p;
@@ -1615,9 +1575,7 @@ int ssl3_send_server_key_exchange(SSL *s) {
 f_err:
   ssl3_send_alert(s, SSL3_AL_FATAL, al);
 err:
-  if (encodedPoint != NULL) {
-    OPENSSL_free(encodedPoint);
-  }
+  OPENSSL_free(encodedPoint);
   BN_CTX_free(bn_ctx);
   EVP_MD_CTX_cleanup(&md_ctx);
   return -1;
@@ -1695,8 +1653,8 @@ int ssl3_get_client_key_exchange(SSL *s) {
   int al, ok;
   long n;
   CBS client_key_exchange;
-  unsigned long alg_k;
-  unsigned long alg_a;
+  uint32_t alg_k;
+  uint32_t alg_a;
   uint8_t *premaster_secret = NULL;
   size_t premaster_secret_len = 0;
   RSA *rsa = NULL;
@@ -2112,14 +2070,10 @@ err:
     }
     OPENSSL_free(premaster_secret);
   }
-  if (decrypt_buf) {
-    OPENSSL_free(decrypt_buf);
-  }
+  OPENSSL_free(decrypt_buf);
   EVP_PKEY_free(clnt_pub_pkey);
   EC_POINT_free(clnt_ecpoint);
-  if (srvr_ecdh != NULL) {
-    EC_KEY_free(srvr_ecdh);
-  }
+  EC_KEY_free(srvr_ecdh);
   BN_CTX_free(bn_ctx);
 
   return -1;
@@ -2237,7 +2191,7 @@ int ssl3_get_client_certificate(SSL *s) {
   int is_first_certificate = 1;
 
   n = s->method->ssl_get_message(s, SSL3_ST_SR_CERT_A, SSL3_ST_SR_CERT_B, -1,
-                                 s->max_cert_list, ssl_hash_message, &ok);
+                                 (long)s->max_cert_list, ssl_hash_message, &ok);
 
   if (!ok) {
     return n;
@@ -2358,11 +2312,7 @@ int ssl3_get_client_certificate(SSL *s) {
     }
   }
 
-  if (s->session->peer != NULL) {
-    /* This should not be needed */
-    X509_free(s->session->peer);
-  }
-
+  X509_free(s->session->peer);
   s->session->peer = sk_X509_shift(sk);
   s->session->verify_result = s->verify_result;
 
@@ -2375,9 +2325,7 @@ int ssl3_get_client_certificate(SSL *s) {
       goto err;
     }
   }
-  if (s->session->sess_cert->cert_chain != NULL) {
-    sk_X509_pop_free(s->session->sess_cert->cert_chain, X509_free);
-  }
+  sk_X509_pop_free(s->session->sess_cert->cert_chain, X509_free);
   s->session->sess_cert->cert_chain = sk;
   /* Inconsistency alert: cert_chain does *not* include the peer's own
    * certificate, while we do include it in s3_clnt.c */
@@ -2392,12 +2340,8 @@ int ssl3_get_client_certificate(SSL *s) {
   }
 
 err:
-  if (x != NULL) {
-    X509_free(x);
-  }
-  if (sk != NULL) {
-    sk_X509_pop_free(sk, X509_free);
-  }
+  X509_free(x);
+  sk_X509_pop_free(sk, X509_free);
   return ret;
 }
 
@@ -2486,7 +2430,8 @@ int ssl3_send_new_session_ticket(SSL *s) {
     /* Initialize HMAC and cipher contexts. If callback present it does all the
      * work otherwise use generated values from parent ctx. */
     if (tctx->tlsext_ticket_key_cb) {
-      if (tctx->tlsext_ticket_key_cb(s, key_name, iv, &ctx, &hctx, 1) < 0) {
+      if (tctx->tlsext_ticket_key_cb(s, key_name, iv, &ctx, &hctx,
+                                     1 /* encrypt */) < 0) {
         goto err;
       }
     } else {
@@ -2546,9 +2491,7 @@ int ssl3_send_new_session_ticket(SSL *s) {
   ret = ssl_do_write(s);
 
 err:
-  if (session != NULL) {
-    OPENSSL_free(session);
-  }
+  OPENSSL_free(session);
   EVP_CIPHER_CTX_cleanup(&ctx);
   HMAC_CTX_cleanup(&hctx);
   return ret;
@@ -2738,14 +2681,8 @@ err:
   BN_free(&y);
   BN_free(sig.r);
   BN_free(sig.s);
-  if (key) {
-    EC_KEY_free(key);
-  }
-  if (point) {
-    EC_POINT_free(point);
-  }
-  if (p256) {
-    EC_GROUP_free(p256);
-  }
+  EC_KEY_free(key);
+  EC_POINT_free(point);
+  EC_GROUP_free(p256);
   return ret;
 }

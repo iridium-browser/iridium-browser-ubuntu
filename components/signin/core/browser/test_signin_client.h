@@ -79,6 +79,9 @@ class TestSigninClient : public SigninClient {
       const std::string& name,
       const net::CookieStore::CookieChangedCallback& callback) override;
 
+  bool UpdateAccountInfo(
+      AccountTrackerService::AccountInfo* out_account_info) override;
+
 #if defined(OS_IOS)
   ios::FakeProfileOAuth2TokenServiceIOSProvider* GetIOSProviderAsFake();
 #endif
@@ -95,6 +98,7 @@ class TestSigninClient : public SigninClient {
       content_settings::Observer* observer) override;
   void RemoveContentSettingsObserver(
       content_settings::Observer* observer) override;
+  void DelayNetworkCall(const base::Closure& callback) override;
 
  private:
   // Loads the token database.

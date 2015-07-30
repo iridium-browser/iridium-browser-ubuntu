@@ -231,6 +231,7 @@ void NinePatchLayerImpl::AppendQuads(
                  vertex_opacity,
                  flipped,
                  nearest_neighbor);
+    ValidateQuadResources(quad);
   }
 
   visible_rect =
@@ -252,6 +253,7 @@ void NinePatchLayerImpl::AppendQuads(
                  vertex_opacity,
                  flipped,
                  nearest_neighbor);
+    ValidateQuadResources(quad);
   }
 
   visible_rect =
@@ -273,6 +275,7 @@ void NinePatchLayerImpl::AppendQuads(
                  vertex_opacity,
                  flipped,
                  nearest_neighbor);
+    ValidateQuadResources(quad);
   }
 
   visible_rect =
@@ -294,6 +297,7 @@ void NinePatchLayerImpl::AppendQuads(
                  vertex_opacity,
                  flipped,
                  nearest_neighbor);
+    ValidateQuadResources(quad);
   }
 
   visible_rect =
@@ -315,6 +319,7 @@ void NinePatchLayerImpl::AppendQuads(
                  vertex_opacity,
                  flipped,
                  nearest_neighbor);
+    ValidateQuadResources(quad);
   }
 
   visible_rect =
@@ -336,6 +341,7 @@ void NinePatchLayerImpl::AppendQuads(
                  vertex_opacity,
                  flipped,
                  nearest_neighbor);
+    ValidateQuadResources(quad);
   }
 
   visible_rect =
@@ -357,6 +363,7 @@ void NinePatchLayerImpl::AppendQuads(
                  vertex_opacity,
                  flipped,
                  nearest_neighbor);
+    ValidateQuadResources(quad);
   }
 
   visible_rect =
@@ -378,6 +385,7 @@ void NinePatchLayerImpl::AppendQuads(
                  vertex_opacity,
                  flipped,
                  nearest_neighbor);
+    ValidateQuadResources(quad);
   }
 
   if (fill_center_) {
@@ -400,6 +408,7 @@ void NinePatchLayerImpl::AppendQuads(
                    vertex_opacity,
                    flipped,
                    nearest_neighbor);
+      ValidateQuadResources(quad);
     }
   }
 }

@@ -38,6 +38,7 @@
 #include "core/dom/NodeTraversal.h"
 #include "core/dom/Text.h"
 #include "core/editing/Editor.h"
+#include "core/editing/GranularityStrategy.h"
 #include "core/editing/InputMethodController.h"
 #include "core/editing/RenderedPosition.h"
 #include "core/editing/SpellChecker.h"
@@ -222,6 +223,8 @@ void FrameSelection::setNonDirectionalSelectionIfNeeded(const VisibleSelection& 
 
 void FrameSelection::setSelection(const VisibleSelection& newSelection, SetSelectionOptions options, CursorAlignOnScroll align, TextGranularity granularity)
 {
+    if (m_granularityStrategy && (options & FrameSelection::DoNotClearStrategy) == 0)
+        m_granularityStrategy->Clear();
     bool closeTyping = options & CloseTyping;
     bool shouldClearTypingStyle = options & ClearTypingStyle;
     EUserTriggered userTriggered = selectionOptionsToUserTriggered(options);
@@ -262,7 +265,7 @@ void FrameSelection::setSelection(const VisibleSelection& newSelection, SetSelec
     if (m_selection == s) {
         // Even if selection was not changed, selection offsets may have been changed.
         m_frame->inputMethodController().cancelCompositionIfSelectionIsInvalid();
-        notifyRendererOfSelectionChange(userTriggered);
+        notifyLayoutObjectOfSelectionChange(userTriggered);
         return;
     }
 
@@ -284,7 +287,7 @@ void FrameSelection::setSelection(const VisibleSelection& newSelection, SetSelec
     // It will be restored by the vertical arrow navigation code if necessary.
     m_xPosForVerticalArrowNavigation = NoXPosForVerticalArrowNavigation();
     selectFrameElementInParentIfFullySelected();
-    notifyRendererOfSelectionChange(userTriggered);
+    notifyLayoutObjectOfSelectionChange(userTriggered);
     m_frame->editor().respondToChangedSelection(oldSelection, options);
     if (userTriggered == UserTriggered) {
         ScrollAlignment alignment;
@@ -332,7 +335,7 @@ void FrameSelection::respondToNodeModification(Node& node, bool baseRemoved, boo
 {
     ASSERT(node.document().isActive());
 
-    bool clearRenderTreeSelection = false;
+    bool clearLayoutTreeSelection = false;
     bool clearDOMTreeSelection = false;
 
     if (startRemoved || endRemoved) {
@@ -351,7 +354,7 @@ void FrameSelection::respondToNodeModification(Node& node, bool baseRemoved, boo
         } else
             clearDOMTreeSelection = true;
 
-        clearRenderTreeSelection = true;
+        clearLayoutTreeSelection = true;
     } else if (baseRemoved || extentRemoved) {
         // The base and/or extent are about to be removed, but the start and end aren't.
         // Change the base and extent to the start and end, but don't re-validate the
@@ -362,14 +365,14 @@ void FrameSelection::respondToNodeModification(Node& node, bool baseRemoved, boo
         else
             m_selection.setWithoutValidation(m_selection.end(), m_selection.start());
     } else if (m_selection.intersectsNode(&node)) {
-        // If we did nothing here, when this node's renderer was destroyed, the rect that it
+        // If we did nothing here, when this node's layoutObject was destroyed, the rect that it
         // occupied would be invalidated, but, selection gaps that change as a result of
         // the removal wouldn't be invalidated.
         // FIXME: Don't do so much unnecessary invalidation.
-        clearRenderTreeSelection = true;
+        clearLayoutTreeSelection = true;
     }
 
-    if (clearRenderTreeSelection)
+    if (clearLayoutTreeSelection)
         m_selection.start().document()->layoutView()->clearSelection();
 
     if (clearDOMTreeSelection)
@@ -1173,6 +1176,8 @@ LayoutUnit FrameSelection::lineDirectionPointForBlockDirectionNavigation(EPositi
 void FrameSelection::clear()
 {
     m_granularity = CharacterGranularity;
+    if (m_granularityStrategy)
+        m_granularityStrategy->Clear();
     setSelection(VisibleSelection());
 }
 
@@ -1182,7 +1187,7 @@ void FrameSelection::prepareForDestruction()
 
     m_caretBlinkTimer.stop();
 
-    LayoutView* view = m_frame->contentRenderer();
+    LayoutView* view = m_frame->contentLayoutObject();
     if (view)
         view->clearSelection();
 
@@ -1218,9 +1223,9 @@ void FrameSelection::setExtent(const VisiblePosition &pos, EUserTriggered userTr
     setSelection(VisibleSelection(m_selection.base(), pos.deepEquivalent(), pos.affinity(), selectionHasDirection), CloseTyping | ClearTypingStyle | userTriggered);
 }
 
-LayoutBlock* FrameSelection::caretRenderer() const
+LayoutBlock* FrameSelection::caretLayoutObject() const
 {
-    return CaretBase::caretRenderer(m_selection.start().deprecatedNode());
+    return CaretBase::caretLayoutObject(m_selection.start().deprecatedNode());
 }
 
 static bool isNonOrphanedCaret(const VisibleSelection& selection)
@@ -1248,13 +1253,13 @@ IntRect FrameSelection::absoluteCaretBounds()
     return absoluteBoundsForLocalRect(m_selection.start().deprecatedNode(), localCaretRectWithoutUpdate());
 }
 
-static LayoutRect localCaretRect(const VisibleSelection& m_selection, const PositionWithAffinity& caretPosition, LayoutObject*& renderer)
+static LayoutRect localCaretRect(const VisibleSelection& m_selection, const PositionWithAffinity& caretPosition, LayoutObject*& layoutObject)
 {
-    renderer = nullptr;
+    layoutObject = nullptr;
     if (!isNonOrphanedCaret(m_selection))
         return LayoutRect();
 
-    return localCaretRectOfPosition(caretPosition, renderer);
+    return localCaretRectOfPosition(caretPosition, layoutObject);
 }
 
 void FrameSelection::invalidateCaretRect()
@@ -1263,9 +1268,9 @@ void FrameSelection::invalidateCaretRect()
         return;
     m_caretRectDirty = false;
 
-    LayoutObject* renderer = nullptr;
-    LayoutRect newRect = localCaretRect(m_selection, PositionWithAffinity(m_selection.start(), m_selection.affinity()), renderer);
-    Node* newNode = renderer ? renderer->node() : nullptr;
+    LayoutObject* layoutObject = nullptr;
+    LayoutRect newRect = localCaretRect(m_selection, PositionWithAffinity(m_selection.start(), m_selection.affinity()), layoutObject);
+    Node* newNode = layoutObject ? layoutObject->node() : nullptr;
 
     if (!m_caretBlinkTimer.isActive() && newNode == m_previousCaretNode && newRect == m_previousCaretRect)
         return;
@@ -1408,7 +1413,7 @@ void FrameSelection::selectAll()
     VisibleSelection newSelection(VisibleSelection::selectionFromContentsOfNode(root.get()));
     setSelection(newSelection);
     selectFrameElementInParentIfFullySelected();
-    notifyRendererOfSelectionChange(UserTriggered);
+    notifyLayoutObjectOfSelectionChange(UserTriggered);
 }
 
 bool FrameSelection::setSelectedRange(Range* range, EAffinity affinity, DirectoinalOption directional, SetSelectionOptions options)
@@ -1465,7 +1470,7 @@ void FrameSelection::focusedOrActiveStateChanged()
     bool activeAndFocused = isFocusedAndActive();
 
     RefPtrWillBeRawPtr<Document> document = m_frame->document();
-    document->updateRenderTreeIfNeeded();
+    document->updateLayoutTreeIfNeeded();
 
     // Because LayoutObject::selectionBackgroundColor() and
     // LayoutObject::selectionForegroundColor() check if the frame is active,
@@ -1563,7 +1568,7 @@ void FrameSelection::updateAppearance(ResetCaretBlinkOption option)
     if (willNeedCaretRectUpdate)
         setCaretRectNeedsUpdate();
 
-    LayoutView* view = m_frame->contentRenderer();
+    LayoutView* view = m_frame->contentLayoutObject();
     if (view)
         view->setSelection(*this);
 }
@@ -1607,7 +1612,7 @@ void FrameSelection::caretBlinkTimerFired(Timer<FrameSelection>*)
     setCaretRectNeedsUpdate();
 }
 
-void FrameSelection::notifyRendererOfSelectionChange(EUserTriggered userTriggered)
+void FrameSelection::notifyLayoutObjectOfSelectionChange(EUserTriggered userTriggered)
 {
     if (HTMLTextFormControlElement* textControl = enclosingTextFormControl(start()))
         textControl->selectionChanged(userTriggered == UserTriggered);
@@ -1619,10 +1624,10 @@ static bool isFrameElement(const Node* n)
 {
     if (!n)
         return false;
-    LayoutObject* renderer = n->layoutObject();
-    if (!renderer || !renderer->isLayoutPart())
+    LayoutObject* layoutObject = n->layoutObject();
+    if (!layoutObject || !layoutObject->isLayoutPart())
         return false;
-    Widget* widget = toLayoutPart(renderer)->widget();
+    Widget* widget = toLayoutPart(layoutObject)->widget();
     return widget && widget->isFrameView();
 }
 
@@ -1692,10 +1697,10 @@ LayoutRect FrameSelection::bounds() const
 
 LayoutRect FrameSelection::unclippedBounds() const
 {
-    m_frame->document()->updateRenderTreeIfNeeded();
+    m_frame->document()->updateLayoutTreeIfNeeded();
 
     FrameView* view = m_frame->view();
-    LayoutView* layoutView = m_frame->contentRenderer();
+    LayoutView* layoutView = m_frame->contentLayoutObject();
 
     if (!view || !layoutView)
         return LayoutRect();
@@ -1913,21 +1918,38 @@ bool FrameSelection::selectWordAroundPosition(const VisiblePosition& position)
     return false;
 }
 
-void FrameSelection::moveRangeSelectionExtent(const VisiblePosition& extentPosition, TextGranularity granularity)
+GranularityStrategy* FrameSelection::granularityStrategy()
 {
+    // We do lazy initalization for m_granularityStrategy, because if we
+    // initialize it right in the constructor - the correct settings may not be
+    // set yet.
+    SelectionStrategy strategyType = SelectionStrategy::Character;
+    Settings* settings = m_frame ? m_frame->settings() : 0;
+    if (settings && settings->selectionStrategy() == SelectionStrategy::Direction)
+        strategyType = SelectionStrategy::Direction;
+
+    if (m_granularityStrategy && m_granularityStrategy->GetType() == strategyType)
+        return m_granularityStrategy.get();
+
+    if (strategyType == SelectionStrategy::Direction)
+        m_granularityStrategy = adoptPtr(new DirectionGranularityStrategy());
+    else
+        m_granularityStrategy = adoptPtr(new CharacterGranularityStrategy());
+    return m_granularityStrategy.get();
+}
+
+void FrameSelection::moveRangeSelectionExtent(const IntPoint& contentsPoint)
+{
+    TRACE_EVENT0("blink", "FrameSelection::moveRangeSelectionExtent");
     if (isNone())
         return;
 
-    const VisiblePosition basePosition = m_selection.isBaseFirst() ? m_selection.visibleStart() : m_selection.visibleEnd();
-    VisibleSelection newSelection(basePosition, extentPosition);
-    if (newSelection.isBaseFirst())
-        newSelection.setEndRespectingGranularity(granularity);
-    else
-        newSelection.setStartRespectingGranularity(granularity);
-    if (!newSelection.isRange())
-        return;
-
-    setSelection(newSelection, FrameSelection::CloseTyping | FrameSelection::ClearTypingStyle | UserTriggered, FrameSelection::AlignCursorOnScrollIfNeeded, granularity);
+    VisibleSelection newSelection = granularityStrategy()->updateExtent(contentsPoint, m_frame);
+    setSelection(
+        newSelection,
+        FrameSelection::CloseTyping | FrameSelection::ClearTypingStyle | FrameSelection::DoNotClearStrategy | UserTriggered,
+        FrameSelection::AlignCursorOnScrollIfNeeded,
+        CharacterGranularity);
 }
 
 void FrameSelection::moveRangeSelection(const VisiblePosition& basePosition, const VisiblePosition& extentPosition, TextGranularity granularity)
@@ -1954,6 +1976,8 @@ void showTree(const blink::FrameSelection* sel)
 {
     if (sel)
         sel->showTreeForThis();
+    else
+        fprintf(stderr, "Cannot showTree for (nil) FrameSelection.\n");
 }
 
 #endif

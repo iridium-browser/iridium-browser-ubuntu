@@ -114,17 +114,19 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <string.h>
 
 #include <openssl/bn.h>
 #include <openssl/buf.h>
 #include <openssl/dh.h>
 #include <openssl/evp.h>
+#include <openssl/err.h>
 #include <openssl/md5.h>
 #include <openssl/mem.h>
 #include <openssl/obj.h>
 #include <openssl/rand.h>
 
-#include "ssl_locl.h"
+#include "internal.h"
 
 static int dtls1_get_hello_verify(SSL *s);
 
@@ -174,8 +176,7 @@ int dtls1_connect(SSL *s) {
           buf = NULL;
         }
 
-        if (!ssl3_setup_buffers(s) ||
-            !ssl_init_wbio_buffer(s, 0)) {
+        if (!ssl_init_wbio_buffer(s, 0)) {
           ret = -1;
           goto end;
         }
@@ -472,7 +473,7 @@ int dtls1_connect(SSL *s) {
 
         s->init_num = 0;
         s->renegotiate = 0;
-        s->new_session = 0;
+        s->s3->initial_handshake_complete = 1;
 
         ssl_update_cache(s, SSL_SESS_CACHE_CLIENT);
 
@@ -508,9 +509,7 @@ int dtls1_connect(SSL *s) {
 end:
   s->in_handshake--;
 
-  if (buf != NULL) {
-    BUF_MEM_free(buf);
-  }
+  BUF_MEM_free(buf);
   if (cb != NULL) {
     cb(s, SSL_CB_CONNECT_EXIT, ret);
   }

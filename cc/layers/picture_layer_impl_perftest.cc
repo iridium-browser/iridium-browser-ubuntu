@@ -4,8 +4,8 @@
 
 #include "cc/layers/picture_layer_impl.h"
 
+#include "base/thread_task_runner_handle.h"
 #include "cc/debug/lap_timer.h"
-#include "cc/resources/tiling_set_raster_queue_all.h"
 #include "cc/test/fake_impl_proxy.h"
 #include "cc/test/fake_layer_tree_host_impl.h"
 #include "cc/test/fake_output_surface.h"
@@ -14,6 +14,7 @@
 #include "cc/test/impl_side_painting_settings.h"
 #include "cc/test/test_shared_bitmap_manager.h"
 #include "cc/test/test_task_graph_runner.h"
+#include "cc/tiles/tiling_set_raster_queue_all.h"
 #include "cc/trees/layer_tree_impl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/perf/perf_test.h"
@@ -39,7 +40,7 @@ void AddTiling(float scale,
 class PictureLayerImplPerfTest : public testing::Test {
  public:
   PictureLayerImplPerfTest()
-      : proxy_(base::MessageLoopProxy::current()),
+      : proxy_(base::ThreadTaskRunnerHandle::Get()),
         host_impl_(ImplSidePaintingSettings(),
                    &proxy_,
                    &shared_bitmap_manager_,
@@ -84,7 +85,7 @@ class PictureLayerImplPerfTest : public testing::Test {
           pending_layer_->picture_layer_tiling_set(), false));
       while (count--) {
         ASSERT_TRUE(!queue->IsEmpty()) << "count: " << count;
-        ASSERT_TRUE(queue->Top() != nullptr) << "count: " << count;
+        ASSERT_TRUE(queue->Top().tile()) << "count: " << count;
         queue->Pop();
       }
       timer_.NextLap();
@@ -121,22 +122,16 @@ class PictureLayerImplPerfTest : public testing::Test {
     bool update_lcd_text = false;
     host_impl_.pending_tree()->UpdateDrawProperties(update_lcd_text);
 
-    TreePriority priorities[] = {SAME_PRIORITY_FOR_BOTH_TREES,
-                                 SMOOTHNESS_TAKES_PRIORITY,
-                                 NEW_CONTENT_TAKES_PRIORITY};
-    int priority_count = 0;
     timer_.Reset();
     do {
       int count = num_tiles;
-      scoped_ptr<TilingSetEvictionQueue> queue(
-          new TilingSetEvictionQueue(pending_layer_->picture_layer_tiling_set(),
-                                     priorities[priority_count], false));
+      scoped_ptr<TilingSetEvictionQueue> queue(new TilingSetEvictionQueue(
+          pending_layer_->picture_layer_tiling_set()));
       while (count--) {
         ASSERT_TRUE(!queue->IsEmpty()) << "count: " << count;
-        ASSERT_TRUE(queue->Top() != nullptr) << "count: " << count;
+        ASSERT_TRUE(queue->Top().tile()) << "count: " << count;
         queue->Pop();
       }
-      priority_count = (priority_count + 1) % arraysize(priorities);
       timer_.NextLap();
     } while (!timer_.HasTimeLimitExpired());
 
@@ -153,16 +148,10 @@ class PictureLayerImplPerfTest : public testing::Test {
     bool update_lcd_text = false;
     host_impl_.pending_tree()->UpdateDrawProperties(update_lcd_text);
 
-    TreePriority priorities[] = {SAME_PRIORITY_FOR_BOTH_TREES,
-                                 SMOOTHNESS_TAKES_PRIORITY,
-                                 NEW_CONTENT_TAKES_PRIORITY};
-    int priority_count = 0;
     timer_.Reset();
     do {
-      scoped_ptr<TilingSetEvictionQueue> queue(
-          new TilingSetEvictionQueue(pending_layer_->picture_layer_tiling_set(),
-                                     priorities[priority_count], false));
-      priority_count = (priority_count + 1) % arraysize(priorities);
+      scoped_ptr<TilingSetEvictionQueue> queue(new TilingSetEvictionQueue(
+          pending_layer_->picture_layer_tiling_set()));
       timer_.NextLap();
     } while (!timer_.HasTimeLimitExpired());
 

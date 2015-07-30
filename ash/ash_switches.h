@@ -18,10 +18,8 @@ namespace switches {
 
 // Please keep alphabetized.
 ASH_EXPORT extern const char kAshAnimateFromBootSplashScreen[];
-ASH_EXPORT extern const char kAshConstrainPointerToRoot[];
 ASH_EXPORT extern const char kAshCopyHostBackgroundAtBoot[];
 ASH_EXPORT extern const char kAshDebugShortcuts[];
-ASH_EXPORT extern const char kAshDisableLockLayoutManager[];
 ASH_EXPORT extern const char kAshDisableMaximizeModeWindowBackdrop[];
 #if defined(OS_CHROMEOS)
 ASH_EXPORT extern const char kAshDisableScreenOrientationLock[];
@@ -30,6 +28,7 @@ ASH_EXPORT extern const char kAshDisableTouchExplorationMode[];
 #if defined(OS_CHROMEOS)
 ASH_EXPORT extern const char kAshEnableFullscreenAppList[];
 ASH_EXPORT extern const char kAshEnableMagnifierKeyScroller[];
+ASH_EXPORT extern const char kAshEnableUnifiedDesktop[];
 #endif
 ASH_EXPORT extern const char kAshEnableMirroredScreen[];
 ASH_EXPORT extern const char kAshEnablePowerButtonQuickLock[];
@@ -47,13 +46,11 @@ ASH_EXPORT extern const char kAuraLegacyPowerButton[];
 ASH_EXPORT extern const char kForceAshToDesktop[];
 #endif
 
-// Returns true if items can be dragged off the shelf to unpin.
-ASH_EXPORT bool UseDragOffShelf();
-
 #if defined(OS_CHROMEOS)
-// Returns true if a notification should appear when a low-power USB charger
-// is connected.
-ASH_EXPORT bool UseUsbChargerNotification();
+// True if the pointer (cursor) position should be kept inside root windows.
+ASH_EXPORT bool ConstrainPointerToRoot();
+
+ASH_EXPORT bool UnifiedDesktopEnabled();
 #endif
 
 }  // namespace switches

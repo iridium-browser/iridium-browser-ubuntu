@@ -31,7 +31,6 @@
 #include "ui/base/hit_test.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animation_observer.h"
-#include "ui/compositor/paint_context.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/compositor/test/test_layers.h"
@@ -1704,7 +1703,7 @@ TEST_F(WindowTest, SetBoundsInternalShouldCheckTargetBounds) {
   scoped_ptr<Window> w1(
       CreateTestWindowWithBounds(gfx::Rect(0, 0, 100, 100), root_window()));
 
-  EXPECT_FALSE(!w1->layer());
+  EXPECT_TRUE(w1->layer());
   w1->layer()->GetAnimator()->set_disable_timer_for_test(true);
   ui::LayerAnimator* animator = w1->layer()->GetAnimator();
 
@@ -1872,7 +1871,7 @@ TEST_F(WindowObserverTest, WindowObserver) {
   w1->RemoveObserver(this);
 }
 
-// Test if OnWindowVisibilityChagned is invoked with expected
+// Test if OnWindowVisibilityChanged is invoked with expected
 // parameters.
 TEST_F(WindowObserverTest, WindowVisibility) {
   scoped_ptr<Window> w1(CreateTestWindowWithId(1, root_window()));
@@ -1882,8 +1881,8 @@ TEST_F(WindowObserverTest, WindowVisibility) {
   // Hide should make the window invisible and the passed visible
   // parameter is false.
   w2->Hide();
-  EXPECT_FALSE(!GetVisibilityInfo());
-  EXPECT_FALSE(!GetVisibilityInfo());
+  EXPECT_TRUE(GetVisibilityInfo());
+  EXPECT_TRUE(GetVisibilityInfo());
   if (!GetVisibilityInfo())
     return;
   EXPECT_FALSE(GetVisibilityInfo()->window_visible);
@@ -1896,7 +1895,7 @@ TEST_F(WindowObserverTest, WindowVisibility) {
   ResetVisibilityInfo();
   EXPECT_TRUE(!GetVisibilityInfo());
   w2->Show();
-  EXPECT_FALSE(!GetVisibilityInfo());
+  EXPECT_TRUE(GetVisibilityInfo());
   if (!GetVisibilityInfo())
     return;
   EXPECT_FALSE(GetVisibilityInfo()->window_visible);
@@ -1909,7 +1908,7 @@ TEST_F(WindowObserverTest, WindowVisibility) {
   w2->Hide();
   ResetVisibilityInfo();
   w2->Show();
-  EXPECT_FALSE(!GetVisibilityInfo());
+  EXPECT_TRUE(GetVisibilityInfo());
   if (!GetVisibilityInfo())
     return;
   EXPECT_TRUE(GetVisibilityInfo()->window_visible);
@@ -2644,7 +2643,7 @@ TEST_F(WindowTest, DelegateDestroysSelfOnWindowDestroy) {
 
 class HierarchyObserver : public WindowObserver {
  public:
-  HierarchyObserver(Window* target) : target_(target) {
+  explicit HierarchyObserver(Window* target) : target_(target) {
     target_->AddObserver(this);
   }
   ~HierarchyObserver() override { target_->RemoveObserver(this); }
@@ -2836,49 +2835,7 @@ TEST_F(WindowTest, OnWindowHierarchyChange) {
     w1.reset();
     w2.reset();
   }
-
 }
-
-namespace {
-
-// Tracks the number of times paint is invoked along with what the clip and
-// translate was.
-class PaintWindowDelegate : public TestWindowDelegate {
- public:
-  PaintWindowDelegate() : paint_count_(0) {}
-  ~PaintWindowDelegate() override {}
-
-  const gfx::Rect& most_recent_paint_clip_bounds() const {
-    return most_recent_paint_clip_bounds_;
-  }
-
-  const gfx::Vector2d& most_recent_paint_matrix_offset() const {
-    return most_recent_paint_matrix_offset_;
-  }
-
-  void clear_paint_count() { paint_count_ = 0; }
-  int paint_count() const { return paint_count_; }
-
-  // TestWindowDelegate::
-  void OnPaint(const ui::PaintContext& context) override {
-    gfx::Canvas* canvas = context.canvas();
-    paint_count_++;
-    canvas->GetClipBounds(&most_recent_paint_clip_bounds_);
-    const SkMatrix& matrix = canvas->sk_canvas()->getTotalMatrix();
-    most_recent_paint_matrix_offset_ = gfx::Vector2d(
-        SkScalarFloorToInt(matrix.getTranslateX()),
-        SkScalarFloorToInt(matrix.getTranslateY()));
-  }
-
- private:
-  int paint_count_;
-  gfx::Rect most_recent_paint_clip_bounds_;
-  gfx::Vector2d most_recent_paint_matrix_offset_;
-
-  DISALLOW_COPY_AND_ASSIGN(PaintWindowDelegate);
-};
-
-}  // namespace
 
 namespace {
 
@@ -2916,7 +2873,7 @@ class TestLayerAnimationObserver : public ui::LayerAnimationObserver {
   DISALLOW_COPY_AND_ASSIGN(TestLayerAnimationObserver);
 };
 
-}
+}  // namespace
 
 TEST_F(WindowTest, WindowDestroyCompletesAnimations) {
   ui::ScopedAnimationDurationScaleMode test_duration_mode(

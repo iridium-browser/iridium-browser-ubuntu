@@ -25,6 +25,7 @@
 #include "components/history/core/browser/history_database.h"
 #include "components/history/core/browser/history_db_task.h"
 #include "components/history/core/browser/history_service.h"
+#include "components/mime_util/mime_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/resource_request_info.h"
@@ -246,9 +247,8 @@ bool ResourcePrefetchPredictor::IsHandledSubresource(
 
   std::string mime_type;
   response->GetMimeType(&mime_type);
-  if (!mime_type.empty() &&
-      !net::IsSupportedImageMimeType(mime_type.c_str()) &&
-      !net::IsSupportedJavascriptMimeType(mime_type.c_str()) &&
+  if (!mime_type.empty() && !mime_util::IsSupportedImageMimeType(mime_type) &&
+      !mime_util::IsSupportedJavascriptMimeType(mime_type) &&
       !net::MatchesMimeType("text/css", mime_type)) {
     resource_status |= RESOURCE_STATUS_UNSUPPORTED_MIME_TYPE;
   }
@@ -295,9 +295,9 @@ bool ResourcePrefetchPredictor::IsCacheable(const net::URLRequest* response) {
 content::ResourceType ResourcePrefetchPredictor::GetResourceTypeFromMimeType(
     const std::string& mime_type,
     content::ResourceType fallback) {
-  if (net::IsSupportedImageMimeType(mime_type.c_str()))
+  if (mime_util::IsSupportedImageMimeType(mime_type))
     return content::RESOURCE_TYPE_IMAGE;
-  else if (net::IsSupportedJavascriptMimeType(mime_type.c_str()))
+  else if (mime_util::IsSupportedJavascriptMimeType(mime_type))
     return content::RESOURCE_TYPE_SCRIPT;
   else if (net::MatchesMimeType("text/css", mime_type))
     return content::RESOURCE_TYPE_STYLESHEET;
@@ -513,17 +513,21 @@ void ResourcePrefetchPredictor::OnSubresourceResponse(
   nav_it->second->push_back(response);
 }
 
-void ResourcePrefetchPredictor::OnNavigationComplete(
-    const NavigationID& navigation_id) {
+base::TimeDelta ResourcePrefetchPredictor::OnNavigationComplete(
+    const NavigationID& nav_id_without_timing_info) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   NavigationMap::iterator nav_it =
-      inflight_navigations_.find(navigation_id);
+      inflight_navigations_.find(nav_id_without_timing_info);
   if (nav_it == inflight_navigations_.end()) {
     RecordNavigationEvent(NAVIGATION_EVENT_ONLOAD_UNTRACKED_URL);
-    return;
+    return base::TimeDelta();
   }
   RecordNavigationEvent(NAVIGATION_EVENT_ONLOAD_TRACKED_URL);
+
+  // Get and use the navigation ID stored in |inflight_navigations_| because it
+  // has the timing infomation.
+  const NavigationID navigation_id(nav_it->first);
 
   // Report any stats.
   base::TimeDelta plt = base::TimeTicks::Now() - navigation_id.creation_time;
@@ -580,6 +584,8 @@ void ResourcePrefetchPredictor::OnNavigationComplete(
               base::Bind(&ResourcePrefetchPredictor::OnVisitCountLookup,
                          AsWeakPtr()))),
       &history_lookup_consumer_);
+
+  return plt;
 }
 
 bool ResourcePrefetchPredictor::GetPrefetchData(

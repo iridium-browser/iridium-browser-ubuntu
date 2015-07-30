@@ -28,13 +28,14 @@ public:
 
     static inline void GenKey(const GrGeometryProcessor&,
                               const GrBatchTracker&,
-                              const GrGLCaps&,
+                              const GrGLSLCaps&,
                               GrProcessorKeyBuilder*);
 
     virtual void setData(const GrGLProgramDataManager& pdman,
                          const GrPrimitiveProcessor& primProc,
                          const GrBatchTracker& bt) override {
-        this->setUniformViewMatrix(pdman, primProc.viewMatrix());
+        const GrConicEffect& ce = primProc.cast<GrConicEffect>();
+        this->setUniformViewMatrix(pdman, ce.viewMatrix());
 
         const ConicBatchTracker& local = bt.cast<ConicBatchTracker>();
         if (kUniform_GrGPInput == local.fInputColorType && local.fColor != fColor) {
@@ -47,6 +48,13 @@ public:
             pdman.set1f(fCoverageScaleUniform, GrNormalizeByteToFloat(local.fCoverageScale));
             fCoverageScale = local.fCoverageScale;
         }
+    }
+
+    void setTransformData(const GrPrimitiveProcessor& primProc,
+                          const GrGLProgramDataManager& pdman,
+                          int index,
+                          const SkTArray<const GrCoordTransform*, true>& transforms) override {
+        this->setTransformDataHelper<GrConicEffect>(primProc, pdman, index, transforms);
     }
 
 private:
@@ -90,7 +98,7 @@ void GrGLConicEffect::onEmitCode(EmitArgs& args, GrGPArgs* gpArgs) {
     this->emitTransforms(pb, gpArgs->fPositionVar, gp.inPosition()->fName, gp.localMatrix(),
                          args.fTransformsIn, args.fTransformsOut);
 
-    GrGLGPFragmentBuilder* fsBuilder = args.fPB->getFragmentShaderBuilder();
+    GrGLFragmentBuilder* fsBuilder = args.fPB->getFragmentShaderBuilder();
     fsBuilder->codeAppend("float edgeAlpha;");
 
     switch (fEdgeType) {
@@ -162,15 +170,15 @@ void GrGLConicEffect::onEmitCode(EmitArgs& args, GrGPArgs* gpArgs) {
 
 void GrGLConicEffect::GenKey(const GrGeometryProcessor& gp,
                              const GrBatchTracker& bt,
-                             const GrGLCaps&,
+                             const GrGLSLCaps&,
                              GrProcessorKeyBuilder* b) {
     const GrConicEffect& ce = gp.cast<GrConicEffect>();
     const ConicBatchTracker& local = bt.cast<ConicBatchTracker>();
     uint32_t key = ce.isAntiAliased() ? (ce.isFilled() ? 0x0 : 0x1) : 0x2;
     key |= kUniform_GrGPInput == local.fInputColorType ? 0x4 : 0x0;
     key |= 0xff != local.fCoverageScale ? 0x8 : 0x0;
-    key |= local.fUsesLocalCoords && gp.localMatrix().hasPerspective() ? 0x10 : 0x0;
-    key |= ComputePosKey(gp.viewMatrix()) << 5;
+    key |= local.fUsesLocalCoords && ce.localMatrix().hasPerspective() ? 0x10 : 0x0;
+    key |= ComputePosKey(ce.viewMatrix()) << 5;
     b->add32(key);
 }
 
@@ -179,30 +187,28 @@ void GrGLConicEffect::GenKey(const GrGeometryProcessor& gp,
 GrConicEffect::~GrConicEffect() {}
 
 void GrConicEffect::getGLProcessorKey(const GrBatchTracker& bt,
-                                      const GrGLCaps& caps,
+                                      const GrGLSLCaps& caps,
                                       GrProcessorKeyBuilder* b) const {
     GrGLConicEffect::GenKey(*this, bt, caps, b);
 }
 
 GrGLPrimitiveProcessor* GrConicEffect::createGLInstance(const GrBatchTracker& bt,
-                                                        const GrGLCaps&) const {
+                                                        const GrGLSLCaps&) const {
     return SkNEW_ARGS(GrGLConicEffect, (*this, bt));
 }
 
 GrConicEffect::GrConicEffect(GrColor color, const SkMatrix& viewMatrix, uint8_t coverage,
                              GrPrimitiveEdgeType edgeType, const SkMatrix& localMatrix)
-    : INHERITED(color, viewMatrix, localMatrix)
+    : fColor(color)
+    , fViewMatrix(viewMatrix)
+    , fLocalMatrix(viewMatrix)
     , fCoverageScale(coverage)
     , fEdgeType(edgeType) {
     this->initClassID<GrConicEffect>();
-    fInPosition = &this->addVertexAttrib(Attribute("inPosition", kVec2f_GrVertexAttribType));
+    fInPosition = &this->addVertexAttrib(Attribute("inPosition", kVec2f_GrVertexAttribType,
+                                                   kHigh_GrSLPrecision));
     fInConicCoeffs = &this->addVertexAttrib(Attribute("inConicCoeffs",
                                                         kVec4f_GrVertexAttribType));
-}
-
-bool GrConicEffect::onIsEqual(const GrGeometryProcessor& other) const {
-    const GrConicEffect& ce = other.cast<GrConicEffect>();
-    return (ce.fEdgeType == fEdgeType);
 }
 
 void GrConicEffect::initBatchTracker(GrBatchTracker* bt, const GrPipelineInfo& init) const {
@@ -210,18 +216,6 @@ void GrConicEffect::initBatchTracker(GrBatchTracker* bt, const GrPipelineInfo& i
     local->fInputColorType = GetColorInputType(&local->fColor, this->color(), init, false);
     local->fCoverageScale = fCoverageScale;
     local->fUsesLocalCoords = init.fUsesLocalCoords;
-}
-
-bool GrConicEffect::onCanMakeEqual(const GrBatchTracker& m,
-                                   const GrGeometryProcessor& that,
-                                   const GrBatchTracker& t) const {
-    const ConicBatchTracker& mine = m.cast<ConicBatchTracker>();
-    const ConicBatchTracker& theirs = t.cast<ConicBatchTracker>();
-    return CanCombineLocalMatrices(*this, mine.fUsesLocalCoords,
-                                   that, theirs.fUsesLocalCoords) &&
-           CanCombineOutput(mine.fInputColorType, mine.fColor,
-                            theirs.fInputColorType, theirs.fColor) &&
-           mine.fCoverageScale == theirs.fCoverageScale;
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -236,9 +230,9 @@ GrGeometryProcessor* GrConicEffect::TestCreate(SkRandom* random,
     do {
         GrPrimitiveEdgeType edgeType = static_cast<GrPrimitiveEdgeType>(
                                                     random->nextULessThan(kGrProcessorEdgeTypeCnt));
-        gp = GrConicEffect::Create(GrRandomColor(random), GrProcessorUnitTest::TestMatrix(random),
+        gp = GrConicEffect::Create(GrRandomColor(random), GrTest::TestMatrix(random),
                                    edgeType, caps,
-                                   GrProcessorUnitTest::TestMatrix(random));
+                                   GrTest::TestMatrix(random));
     } while (NULL == gp);
     return gp;
 }
@@ -263,13 +257,14 @@ public:
 
     static inline void GenKey(const GrGeometryProcessor&,
                               const GrBatchTracker&,
-                              const GrGLCaps&,
+                              const GrGLSLCaps&,
                               GrProcessorKeyBuilder*);
 
     virtual void setData(const GrGLProgramDataManager& pdman,
                          const GrPrimitiveProcessor& primProc,
                          const GrBatchTracker& bt) override {
-        this->setUniformViewMatrix(pdman, primProc.viewMatrix());
+        const GrQuadEffect& qe = primProc.cast<GrQuadEffect>();
+        this->setUniformViewMatrix(pdman, qe.viewMatrix());
 
         const QuadBatchTracker& local = bt.cast<QuadBatchTracker>();
         if (kUniform_GrGPInput == local.fInputColorType && local.fColor != fColor) {
@@ -282,6 +277,13 @@ public:
             pdman.set1f(fCoverageScaleUniform, GrNormalizeByteToFloat(local.fCoverageScale));
             fCoverageScale = local.fCoverageScale;
         }
+    }
+
+    void setTransformData(const GrPrimitiveProcessor& primProc,
+                          const GrGLProgramDataManager& pdman,
+                          int index,
+                          const SkTArray<const GrCoordTransform*, true>& transforms) override {
+        this->setTransformDataHelper<GrQuadEffect>(primProc, pdman, index, transforms);
     }
 
 private:
@@ -325,7 +327,7 @@ void GrGLQuadEffect::onEmitCode(EmitArgs& args, GrGPArgs* gpArgs) {
     this->emitTransforms(pb, gpArgs->fPositionVar, gp.inPosition()->fName, gp.localMatrix(),
                          args.fTransformsIn, args.fTransformsOut);
 
-    GrGLGPFragmentBuilder* fsBuilder = args.fPB->getFragmentShaderBuilder();
+    GrGLFragmentBuilder* fsBuilder = args.fPB->getFragmentShaderBuilder();
     fsBuilder->codeAppendf("float edgeAlpha;");
 
     switch (fEdgeType) {
@@ -383,15 +385,15 @@ void GrGLQuadEffect::onEmitCode(EmitArgs& args, GrGPArgs* gpArgs) {
 
 void GrGLQuadEffect::GenKey(const GrGeometryProcessor& gp,
                             const GrBatchTracker& bt,
-                            const GrGLCaps&,
+                            const GrGLSLCaps&,
                             GrProcessorKeyBuilder* b) {
     const GrQuadEffect& ce = gp.cast<GrQuadEffect>();
     const QuadBatchTracker& local = bt.cast<QuadBatchTracker>();
     uint32_t key = ce.isAntiAliased() ? (ce.isFilled() ? 0x0 : 0x1) : 0x2;
     key |= kUniform_GrGPInput == local.fInputColorType ? 0x4 : 0x0;
     key |= 0xff != local.fCoverageScale ? 0x8 : 0x0;
-    key |= local.fUsesLocalCoords && gp.localMatrix().hasPerspective() ? 0x10 : 0x0;
-    key |= ComputePosKey(gp.viewMatrix()) << 5;
+    key |= local.fUsesLocalCoords && ce.localMatrix().hasPerspective() ? 0x10 : 0x0;
+    key |= ComputePosKey(ce.viewMatrix()) << 5;
     b->add32(key);
 }
 
@@ -400,30 +402,28 @@ void GrGLQuadEffect::GenKey(const GrGeometryProcessor& gp,
 GrQuadEffect::~GrQuadEffect() {}
 
 void GrQuadEffect::getGLProcessorKey(const GrBatchTracker& bt,
-                                     const GrGLCaps& caps,
+                                     const GrGLSLCaps& caps,
                                      GrProcessorKeyBuilder* b) const {
     GrGLQuadEffect::GenKey(*this, bt, caps, b);
 }
 
 GrGLPrimitiveProcessor* GrQuadEffect::createGLInstance(const GrBatchTracker& bt,
-                                                       const GrGLCaps&) const {
+                                                       const GrGLSLCaps&) const {
     return SkNEW_ARGS(GrGLQuadEffect, (*this, bt));
 }
 
 GrQuadEffect::GrQuadEffect(GrColor color, const SkMatrix& viewMatrix, uint8_t coverage,
                            GrPrimitiveEdgeType edgeType, const SkMatrix& localMatrix)
-    : INHERITED(color, viewMatrix, localMatrix)
+    : fColor(color)
+    , fViewMatrix(viewMatrix)
+    , fLocalMatrix(localMatrix)
     , fCoverageScale(coverage)
     , fEdgeType(edgeType) {
     this->initClassID<GrQuadEffect>();
-    fInPosition = &this->addVertexAttrib(Attribute("inPosition", kVec2f_GrVertexAttribType));
+    fInPosition = &this->addVertexAttrib(Attribute("inPosition", kVec2f_GrVertexAttribType,
+                                                   kHigh_GrSLPrecision));
     fInHairQuadEdge = &this->addVertexAttrib(Attribute("inHairQuadEdge",
                                                         kVec4f_GrVertexAttribType));
-}
-
-bool GrQuadEffect::onIsEqual(const GrGeometryProcessor& other) const {
-    const GrQuadEffect& ce = other.cast<GrQuadEffect>();
-    return (ce.fEdgeType == fEdgeType);
 }
 
 void GrQuadEffect::initBatchTracker(GrBatchTracker* bt, const GrPipelineInfo& init) const {
@@ -431,18 +431,6 @@ void GrQuadEffect::initBatchTracker(GrBatchTracker* bt, const GrPipelineInfo& in
     local->fInputColorType = GetColorInputType(&local->fColor, this->color(), init, false);
     local->fCoverageScale = fCoverageScale;
     local->fUsesLocalCoords = init.fUsesLocalCoords;
-}
-
-bool GrQuadEffect::onCanMakeEqual(const GrBatchTracker& m,
-                                  const GrGeometryProcessor& that,
-                                  const GrBatchTracker& t) const {
-    const QuadBatchTracker& mine = m.cast<QuadBatchTracker>();
-    const QuadBatchTracker& theirs = t.cast<QuadBatchTracker>();
-    return CanCombineLocalMatrices(*this, mine.fUsesLocalCoords,
-                                   that, theirs.fUsesLocalCoords) &&
-           CanCombineOutput(mine.fInputColorType, mine.fColor,
-                            theirs.fInputColorType, theirs.fColor) &&
-           mine.fCoverageScale == theirs.fCoverageScale;
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -458,9 +446,9 @@ GrGeometryProcessor* GrQuadEffect::TestCreate(SkRandom* random,
         GrPrimitiveEdgeType edgeType = static_cast<GrPrimitiveEdgeType>(
                 random->nextULessThan(kGrProcessorEdgeTypeCnt));
         gp = GrQuadEffect::Create(GrRandomColor(random),
-                                  GrProcessorUnitTest::TestMatrix(random),
+                                  GrTest::TestMatrix(random),
                                   edgeType, caps,
-                                  GrProcessorUnitTest::TestMatrix(random));
+                                  GrTest::TestMatrix(random));
     } while (NULL == gp);
     return gp;
 }
@@ -484,13 +472,14 @@ public:
 
     static inline void GenKey(const GrGeometryProcessor&,
                               const GrBatchTracker&,
-                              const GrGLCaps&,
+                              const GrGLSLCaps&,
                               GrProcessorKeyBuilder*);
 
     virtual void setData(const GrGLProgramDataManager& pdman,
                          const GrPrimitiveProcessor& primProc,
                          const GrBatchTracker& bt) override {
-        this->setUniformViewMatrix(pdman, primProc.viewMatrix());
+        const GrCubicEffect& ce = primProc.cast<GrCubicEffect>();
+        this->setUniformViewMatrix(pdman, ce.viewMatrix());
 
         const CubicBatchTracker& local = bt.cast<CubicBatchTracker>();
         if (kUniform_GrGPInput == local.fInputColorType && local.fColor != fColor) {
@@ -536,10 +525,10 @@ void GrGLCubicEffect::onEmitCode(EmitArgs& args, GrGPArgs* gpArgs) {
     this->setupPosition(args.fPB, gpArgs, gp.inPosition()->fName, gp.viewMatrix());
 
     // emit transforms with position
-    this->emitTransforms(args.fPB, gpArgs->fPositionVar, gp.inPosition()->fName, gp.localMatrix(),
-                         args.fTransformsIn, args.fTransformsOut);
+    this->emitTransforms(args.fPB, gpArgs->fPositionVar, gp.inPosition()->fName, args.fTransformsIn,
+                         args.fTransformsOut);
 
-    GrGLGPFragmentBuilder* fsBuilder = args.fPB->getFragmentShaderBuilder();
+    GrGLFragmentBuilder* fsBuilder = args.fPB->getFragmentShaderBuilder();
 
     GrGLShaderVar edgeAlpha("edgeAlpha", kFloat_GrSLType, 0, kHigh_GrSLPrecision);
     GrGLShaderVar dklmdx("dklmdx", kVec3f_GrSLType, 0, kHigh_GrSLPrecision);
@@ -628,14 +617,13 @@ void GrGLCubicEffect::onEmitCode(EmitArgs& args, GrGPArgs* gpArgs) {
 
 void GrGLCubicEffect::GenKey(const GrGeometryProcessor& gp,
                              const GrBatchTracker& bt,
-                             const GrGLCaps&,
+                             const GrGLSLCaps&,
                              GrProcessorKeyBuilder* b) {
     const GrCubicEffect& ce = gp.cast<GrCubicEffect>();
     const CubicBatchTracker& local = bt.cast<CubicBatchTracker>();
     uint32_t key = ce.isAntiAliased() ? (ce.isFilled() ? 0x0 : 0x1) : 0x2;
     key |= kUniform_GrGPInput == local.fInputColorType ? 0x4 : 0x8;
-    key |= local.fUsesLocalCoords && gp.localMatrix().hasPerspective() ? 0x10 : 0x0;
-    key |= ComputePosKey(gp.viewMatrix()) << 5;
+    key |= ComputePosKey(ce.viewMatrix()) << 5;
     b->add32(key);
 }
 
@@ -644,45 +632,32 @@ void GrGLCubicEffect::GenKey(const GrGeometryProcessor& gp,
 GrCubicEffect::~GrCubicEffect() {}
 
 void GrCubicEffect::getGLProcessorKey(const GrBatchTracker& bt,
-                                      const GrGLCaps& caps,
+                                      const GrGLSLCaps& caps,
                                       GrProcessorKeyBuilder* b) const {
     GrGLCubicEffect::GenKey(*this, bt, caps, b);
 }
 
 GrGLPrimitiveProcessor* GrCubicEffect::createGLInstance(const GrBatchTracker& bt,
-                                                        const GrGLCaps&) const {
+                                                        const GrGLSLCaps&) const {
     return SkNEW_ARGS(GrGLCubicEffect, (*this, bt));
 }
 
 GrCubicEffect::GrCubicEffect(GrColor color, const SkMatrix& viewMatrix,
                              GrPrimitiveEdgeType edgeType)
-    : INHERITED(color, viewMatrix), fEdgeType(edgeType) {
+    : fColor(color)
+    , fViewMatrix(viewMatrix)
+    , fEdgeType(edgeType) {
     this->initClassID<GrCubicEffect>();
-    fInPosition = &this->addVertexAttrib(Attribute("inPosition", kVec2f_GrVertexAttribType));
+    fInPosition = &this->addVertexAttrib(Attribute("inPosition", kVec2f_GrVertexAttribType,
+                                                   kHigh_GrSLPrecision));
     fInCubicCoeffs = &this->addVertexAttrib(Attribute("inCubicCoeffs",
                                                         kVec4f_GrVertexAttribType));
-}
-
-bool GrCubicEffect::onIsEqual(const GrGeometryProcessor& other) const {
-    const GrCubicEffect& ce = other.cast<GrCubicEffect>();
-    return (ce.fEdgeType == fEdgeType);
 }
 
 void GrCubicEffect::initBatchTracker(GrBatchTracker* bt, const GrPipelineInfo& init) const {
     CubicBatchTracker* local = bt->cast<CubicBatchTracker>();
     local->fInputColorType = GetColorInputType(&local->fColor, this->color(), init, false);
     local->fUsesLocalCoords = init.fUsesLocalCoords;
-}
-
-bool GrCubicEffect::onCanMakeEqual(const GrBatchTracker& m,
-                                   const GrGeometryProcessor& that,
-                                   const GrBatchTracker& t) const {
-    const CubicBatchTracker& mine = m.cast<CubicBatchTracker>();
-    const CubicBatchTracker& theirs = t.cast<CubicBatchTracker>();
-    return CanCombineLocalMatrices(*this, mine.fUsesLocalCoords,
-                                   that, theirs.fUsesLocalCoords) &&
-           CanCombineOutput(mine.fInputColorType, mine.fColor,
-                            theirs.fInputColorType, theirs.fColor);
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -698,7 +673,7 @@ GrGeometryProcessor* GrCubicEffect::TestCreate(SkRandom* random,
         GrPrimitiveEdgeType edgeType = static_cast<GrPrimitiveEdgeType>(
                                                     random->nextULessThan(kGrProcessorEdgeTypeCnt));
         gp = GrCubicEffect::Create(GrRandomColor(random),
-                                   GrProcessorUnitTest::TestMatrix(random), edgeType, caps);
+                                   GrTest::TestMatrix(random), edgeType, caps);
     } while (NULL == gp);
     return gp;
 }

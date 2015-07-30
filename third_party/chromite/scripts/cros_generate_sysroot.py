@@ -16,6 +16,7 @@ from chromite.lib import cros_build_lib
 from chromite.lib import commandline
 from chromite.lib import osutils
 from chromite.lib import sudo
+from chromite.lib import sysroot_lib
 
 DEFAULT_NAME = 'sysroot_%(package)s.tar.xz'
 PACKAGE_SEPARATOR = '/'
@@ -68,10 +69,12 @@ class GenerateSysroot(object):
     cros_build_lib.SudoRunCommand(cmd, **kwargs)
 
   def _InstallToolchain(self):
+    # Create the sysroot's config.
+    sysroot = sysroot_lib.Sysroot(self.sysroot)
+    sysroot.WriteConfig(sysroot.GenerateBoardConfig(self.options.board))
     cros_build_lib.RunCommand(
         [os.path.join(constants.CROSUTILS_DIR, 'install_toolchain'),
-         '--noconfigure', '--board_root', self.sysroot, '--board',
-         self.options.board])
+         '--noconfigure', '--sysroot', self.sysroot])
 
   def _InstallKernelHeaders(self):
     self._Emerge('sys-kernel/linux-headers')

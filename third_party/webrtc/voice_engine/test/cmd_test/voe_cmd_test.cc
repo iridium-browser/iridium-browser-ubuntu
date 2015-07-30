@@ -260,7 +260,7 @@ void RunTest(std::string out_path) {
     fflush(NULL);
   }
 
-  rtc::scoped_ptr<VoiceChannelTransport> voice_channel_transport(
+  VoiceChannelTransport* voice_channel_transport(
       new VoiceChannelTransport(netw, chan));
 
   char ip[64];
@@ -784,8 +784,9 @@ void RunTest(std::string out_path) {
         res = codec->GetSendCodec(chan, cinst);
         VALIDATE;
         printf("Current bit rate is %i bps, set to: ", cinst.rate);
-        ASSERT_EQ(1, scanf("%i", &cinst.rate));
-        res = codec->SetSendCodec(chan, cinst);
+        int new_bitrate_bps;
+        ASSERT_EQ(1, scanf("%i", &new_bitrate_bps));
+        res = codec->SetBitRate(chan, new_bitrate_bps);
         VALIDATE;
       } else if (option_selection == option_index++) {
         const char* kDebugFileName = "audio.aecdump";
@@ -844,6 +845,9 @@ void RunTest(std::string out_path) {
     newcall = (end_option == 1);
     // Call loop
   }
+
+  // Transports should be deleted before channel deletion.
+  delete voice_channel_transport;
   for (int i = 0; i < kMaxNumChannels; ++i) {
     delete voice_channel_transports[i];
     voice_channel_transports[i] = NULL;
@@ -854,7 +858,7 @@ void RunTest(std::string out_path) {
   VALIDATE;
 
   for (int i = 0; i < kMaxNumChannels; ++i) {
-    channels[i] = base1->DeleteChannel(channels[i]);
+    res = base1->DeleteChannel(channels[i]);
     VALIDATE;
   }
 }

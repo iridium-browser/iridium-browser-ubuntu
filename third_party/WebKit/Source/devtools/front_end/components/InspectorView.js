@@ -40,30 +40,18 @@ WebInspector.InspectorView = function()
     this.setMinimumSize(210, 72);
 
     // DevTools sidebar is a vertical split of panels tabbed pane and a drawer.
-    this._drawerSplitView = new WebInspector.SplitView(false, true, "Inspector.drawerSplitViewState", 200, 200);
-    this._drawerSplitView.hideSidebar();
-    this._drawerSplitView.enableShowModeSaving();
-    this._drawerSplitView.show(this.element);
+    this._drawerSplitWidget = new WebInspector.SplitWidget(false, true, "Inspector.drawerSplitViewState", 200, 200);
+    this._drawerSplitWidget.hideSidebar();
+    this._drawerSplitWidget.enableShowModeSaving();
+    this._drawerSplitWidget.show(this.element);
 
     this._tabbedPane = new WebInspector.TabbedPane();
     this._tabbedPane.element.classList.add("inspector-view-tabbed-pane");
     this._tabbedPane.setRetainTabOrder(true);
-    this._drawerSplitView.setMainView(this._tabbedPane);
-    this._drawer = new WebInspector.Drawer(this._drawerSplitView);
-
-    this._leftToolbar = new WebInspector.StatusBar();
-    this._leftToolbar.element.classList.add("inspector-view-toolbar", "inspector-view-toolbar-left");
-    this._leftToolbar.makeNarrow();
-    this._tabbedPane.insertBeforeTabStrip(this._leftToolbar.element);
-
-    this._rightToolbar = new WebInspector.StatusBar();
-    this._rightToolbar.element.classList.add("inspector-view-toolbar");
-    this._tabbedPane.appendAfterTabStrip(this._rightToolbar.element);
-
-    this._closeButtonToolbarItem = createElementWithClass("div", "inspector-view-close-button");
-    var closeButtonElement = this._closeButtonToolbarItem.createChild("div", "close-button");
-    closeButtonElement.addEventListener("click", InspectorFrontendHost.closeWindow.bind(InspectorFrontendHost), true);
-    this._rightToolbar.element.appendChild(this._closeButtonToolbarItem);
+    if (Runtime.experiments.isEnabled("materialDesign"))
+        this._tabbedPane.setTabSlider(true);
+    this._drawerSplitWidget.setMainWidget(this._tabbedPane);
+    this._drawer = new WebInspector.Drawer(this._drawerSplitWidget);
 
     this._panels = {};
     // Used by tests.
@@ -125,20 +113,22 @@ WebInspector.InspectorView.prototype = {
         WebInspector.endBatchUpdate();
     },
 
-    /**
-     * @param {!WebInspector.StatusBarItem} item
-     */
-    appendToLeftToolbar: function(item)
+    createToolbars: function()
     {
-        this._leftToolbar.appendStatusBarItem(item);
-    },
+        this._leftToolbar = new WebInspector.ExtensibleToolbar("main-toolbar-left");
+        this._leftToolbar.element.classList.add("inspector-view-toolbar", "inspector-view-toolbar-left");
+        this._leftToolbar.makeNarrow();
+        this._tabbedPane.insertBeforeTabStrip(this._leftToolbar.element);
 
-    /**
-     * @param {!WebInspector.StatusBarItem} item
-     */
-    appendToRightToolbar: function(item)
-    {
-        this._rightToolbar.appendStatusBarItem(item);
+        var rightToolbarContainer = createElementWithClass("div", "hbox flex-none flex-centered");
+        this._tabbedPane.appendAfterTabStrip(rightToolbarContainer);
+
+        this._rightToolbar = new WebInspector.ExtensibleToolbar("main-toolbar-right");
+        this._rightToolbar.element.classList.add("inspector-view-toolbar", "flex-none");
+        rightToolbarContainer.appendChild(this._rightToolbar.element);
+
+        var closeButtonElement = rightToolbarContainer.createChild("div", "inspector-view-close-button flex-none", "dt-close-button");
+        closeButtonElement.addEventListener("click", InspectorFrontendHost.closeWindow.bind(InspectorFrontendHost), true);
     },
 
     /**
@@ -148,7 +138,7 @@ WebInspector.InspectorView.prototype = {
     {
         var panelName = panelDescriptor.name();
         this._panelDescriptors[panelName] = panelDescriptor;
-        this._tabbedPane.appendTab(panelName, panelDescriptor.title(), new WebInspector.View());
+        this._tabbedPane.appendTab(panelName, panelDescriptor.title(), new WebInspector.Widget());
         if (this._lastActivePanelSetting.get() === panelName)
             this._tabbedPane.selectTab(panelName);
     },
@@ -202,8 +192,10 @@ WebInspector.InspectorView.prototype = {
     {
         this._currentPanelLocked = WebInspector.targetManager.allTargetsSuspended();
         this._tabbedPane.setCurrentTabLocked(this._currentPanelLocked);
-        this._leftToolbar.setEnabled(!this._currentPanelLocked);
-        this._rightToolbar.setEnabled(!this._currentPanelLocked);
+        if (this._leftToolbar)
+            this._leftToolbar.setEnabled(!this._currentPanelLocked);
+        if (this._rightToolbar)
+            this._rightToolbar.setEnabled(!this._currentPanelLocked);
     },
 
     /**
@@ -324,7 +316,7 @@ WebInspector.InspectorView.prototype = {
     /**
      * @param {string} id
      * @param {string} title
-     * @param {!WebInspector.View} view
+     * @param {!WebInspector.Widget} view
      */
     showCloseableViewInDrawer: function(id, title, view)
     {
@@ -392,7 +384,7 @@ WebInspector.InspectorView.prototype = {
 
         var keyboardEvent = /** @type {!KeyboardEvent} */ (event);
         // Ctrl/Cmd + 1-9 should show corresponding panel.
-        var panelShortcutEnabled = WebInspector.settings.shortcutPanelSwitch.get();
+        var panelShortcutEnabled = WebInspector.moduleSetting("shortcutPanelSwitch").get();
         if (panelShortcutEnabled && !event.shiftKey && !event.altKey) {
             var panelIndex = -1;
             if (event.keyCode > 0x30 && event.keyCode < 0x3A)
@@ -525,22 +517,21 @@ WebInspector.InspectorView.DrawerToggleActionDelegate = function()
 WebInspector.InspectorView.DrawerToggleActionDelegate.prototype = {
     /**
      * @override
-     * @return {boolean}
+     * @param {!WebInspector.Context} context
+     * @param {string} actionId
      */
-    handleAction: function()
+    handleAction: function(context, actionId)
     {
-        if (WebInspector.inspectorView.drawerVisible()) {
+        if (WebInspector.inspectorView.drawerVisible())
             WebInspector.inspectorView.closeDrawer();
-            return true;
-        }
-        WebInspector.inspectorView.showDrawer();
-        return true;
+        else
+            WebInspector.inspectorView.showDrawer();
     }
 }
 
 /**
  * @constructor
- * @implements {WebInspector.StatusBarItem.Provider}
+ * @implements {WebInspector.ToolbarItem.Provider}
  */
 WebInspector.InspectorView.ToggleDrawerButtonProvider = function()
 {
@@ -549,7 +540,7 @@ WebInspector.InspectorView.ToggleDrawerButtonProvider = function()
 WebInspector.InspectorView.ToggleDrawerButtonProvider.prototype = {
     /**
      * @override
-     * @return {?WebInspector.StatusBarItem}
+     * @return {?WebInspector.ToolbarItem}
      */
     item: function()
     {

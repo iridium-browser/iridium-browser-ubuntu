@@ -12,6 +12,7 @@
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
+#include "base/profiler/scoped_profile.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -36,6 +37,7 @@
 #include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_CHROMEOS)
+#include "components/chrome_apps/grit/chrome_apps_resources.h"
 #include "components/user_manager/user_manager.h"
 #include "grit/keyboard_resources.h"
 #include "ui/file_manager/grit/file_manager_resources.h"
@@ -133,6 +135,7 @@ ComponentLoader::~ComponentLoader() {
 
 void ComponentLoader::LoadAll() {
   TRACE_EVENT0("browser,startup", "ComponentLoader::LoadAll");
+  TRACK_SCOPED_REGION("Startup", "ComponentLoader::LoadAll");
   SCOPED_UMA_HISTOGRAM_TIMER("Extensions.LoadAllComponentTime");
 
   for (RegisteredComponentExtensions::iterator it =
@@ -326,6 +329,16 @@ void ComponentLoader::AddGalleryExtension() {
 #endif
 }
 
+void ComponentLoader::AddWebstoreWidgetExtension() {
+#if defined(OS_CHROMEOS)
+  AddWithNameAndDescription(
+      IDR_CHROME_APPS_WEBSTORE_WIDGET_MANIFEST,
+      base::FilePath(FILE_PATH_LITERAL("webstore_widget")),
+      IDS_WEBSTORE_WIDGET_APP_NAME,
+      IDS_WEBSTORE_WIDGET_APP_DESC);
+#endif
+}
+
 void ComponentLoader::AddHangoutServicesExtension() {
 #if defined(GOOGLE_CHROME_BUILD) || defined(ENABLE_HANGOUT_SERVICES_EXTENSION)
   Add(IDR_HANGOUT_SERVICES_MANIFEST,
@@ -501,6 +514,11 @@ void ComponentLoader::AddDefaultComponentExtensions(
   AddKeyboardApp();
 
   AddDefaultComponentExtensionsWithBackgroundPages(skip_session_components);
+
+#if defined(ENABLE_PLUGINS)
+  Add(pdf_extension_util::GetManifest(),
+      base::FilePath(FILE_PATH_LITERAL("pdf")));
+#endif
 }
 
 void ComponentLoader::AddDefaultComponentExtensionsForKioskMode(
@@ -514,6 +532,11 @@ void ComponentLoader::AddDefaultComponentExtensionsForKioskMode(
 
   // Add virtual keyboard.
   AddKeyboardApp();
+
+#if defined(ENABLE_PLUGINS)
+  Add(pdf_extension_util::GetManifest(),
+      base::FilePath(FILE_PATH_LITERAL("pdf")));
+#endif
 }
 
 void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
@@ -544,6 +567,7 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
     AddAudioPlayerExtension();
     AddFileManagerExtension();
     AddGalleryExtension();
+    AddWebstoreWidgetExtension();
 
     AddHangoutServicesExtension();
     AddHotwordAudioVerificationApp();
@@ -637,13 +661,6 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
 #endif
 
 #endif  // defined(GOOGLE_CHROME_BUILD)
-
-#if defined(ENABLE_PLUGINS)
-  if (switches::OutOfProcessPdfEnabled()) {
-    Add(pdf_extension_util::GetManifest(),
-        base::FilePath(FILE_PATH_LITERAL("pdf")));
-  }
-#endif
 
   Add(IDR_CRYPTOTOKEN_MANIFEST,
       base::FilePath(FILE_PATH_LITERAL("cryptotoken")));

@@ -115,12 +115,13 @@
 */
 
 #include <stdio.h>
+#include <string.h>
 
 #include <openssl/bytestring.h>
-#include <openssl/obj.h>
 #include <openssl/err.h>
+#include <openssl/obj.h>
 
-#include "ssl_locl.h"
+#include "internal.h"
 #include <openssl/srtp.h>
 
 
@@ -169,7 +170,7 @@ static int find_profile_by_num(unsigned profile_num,
 }
 
 static int ssl_ctx_make_profiles(const char *profiles_string,
-                                 STACK_OF(SRTP_PROTECTION_PROFILE) * *out) {
+                                 STACK_OF(SRTP_PROTECTION_PROFILE) **out) {
   STACK_OF(SRTP_PROTECTION_PROFILE) *profiles;
 
   const char *col;

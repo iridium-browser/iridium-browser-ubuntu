@@ -57,6 +57,8 @@
 #include "platform/graphics/ImageObserver.h"
 #include "platform/graphics/paint/ClipRecorder.h"
 #include "platform/graphics/paint/DisplayItemListContextRecorder.h"
+#include "platform/graphics/paint/DrawingRecorder.h"
+#include "platform/graphics/paint/SkPictureBuilder.h"
 #include "third_party/skia/include/core/SkPicture.h"
 #include "wtf/PassRefPtr.h"
 
@@ -126,7 +128,7 @@ bool SVGImage::currentFrameHasSingleSecurityOrigin() const
 static SVGSVGElement* svgRootElement(Page* page)
 {
     if (!page)
-        return 0;
+        return nullptr;
     LocalFrame* frame = toLocalFrame(page->mainFrame());
     return frame->document()->accessSVGExtensions().rootElement();
 }
@@ -143,10 +145,10 @@ void SVGImage::setContainerSize(const IntSize& size)
     FrameView* view = frameView();
     view->resize(this->containerSize());
 
-    LayoutSVGRoot* renderer = toLayoutSVGRoot(rootElement->layoutObject());
-    if (!renderer)
+    LayoutSVGRoot* layoutObject = toLayoutSVGRoot(rootElement->layoutObject());
+    if (!layoutObject)
         return;
-    renderer->setContainerSize(size);
+    layoutObject->setContainerSize(size);
 }
 
 IntSize SVGImage::containerSize() const
@@ -155,21 +157,21 @@ IntSize SVGImage::containerSize() const
     if (!rootElement)
         return IntSize();
 
-    LayoutSVGRoot* renderer = toLayoutSVGRoot(rootElement->layoutObject());
-    if (!renderer)
+    LayoutSVGRoot* layoutObject = toLayoutSVGRoot(rootElement->layoutObject());
+    if (!layoutObject)
         return IntSize();
 
     // If a container size is available it has precedence.
-    IntSize containerSize = renderer->containerSize();
+    IntSize containerSize = layoutObject->containerSize();
     if (!containerSize.isEmpty())
         return containerSize;
 
     // Assure that a container size is always given for a non-identity zoom level.
-    ASSERT(renderer->style()->effectiveZoom() == 1);
+    ASSERT(layoutObject->style()->effectiveZoom() == 1);
 
     FloatSize intrinsicSize;
     double intrinsicRatio = 0;
-    renderer->computeIntrinsicRatioInformation(intrinsicSize, intrinsicRatio);
+    layoutObject->computeIntrinsicRatioInformation(intrinsicSize, intrinsicRatio);
 
     if (intrinsicSize.isEmpty() && intrinsicRatio) {
         if (!intrinsicSize.width() && intrinsicSize.height())
@@ -243,26 +245,17 @@ void SVGImage::drawPatternForContainer(GraphicsContext* context, const FloatSize
     FloatRect spacedTile(tile);
     spacedTile.expand(repeatSpacing);
 
-    OwnPtr<DisplayItemList> displayItemList;
-    if (RuntimeEnabledFeatures::slimmingPaintEnabled())
-        displayItemList = DisplayItemList::create();
-
-    // Record using a dedicated GC, to avoid inheriting unwanted state (pending color filters
-    // for example must be applied atomically during the final fill/composite phase).
-    GraphicsContext recordingContext(nullptr, displayItemList.get());
-    recordingContext.beginRecording(spacedTile);
+    SkPictureBuilder patternPicture(spacedTile);
     {
-        // When generating an expanded tile, make sure we don't draw into the spacing area.
-        OwnPtr<FloatClipRecorder> clipRecorder;
-        if (tile != spacedTile)
-            clipRecorder = adoptPtr(new FloatClipRecorder(recordingContext, *this, PaintPhaseForeground, tile));
-        drawForContainer(&recordingContext, containerSize, zoom, tile, srcRect, SkXfermode::kSrcOver_Mode);
+        DrawingRecorder patternPictureRecorder(patternPicture.context(), *this, DisplayItem::Type::SVGImage, spacedTile);
+        if (!patternPictureRecorder.canUseCachedDrawing()) {
+            // When generating an expanded tile, make sure we don't draw into the spacing area.
+            if (tile != spacedTile)
+                patternPicture.context().clip(tile);
+            drawForContainer(&patternPicture.context(), containerSize, zoom, tile, srcRect, SkXfermode::kSrcOver_Mode);
+        }
     }
-
-    if (displayItemList)
-        displayItemList->commitNewDisplayItemsAndReplay(recordingContext);
-
-    RefPtr<const SkPicture> tilePicture = recordingContext.endRecording();
+    RefPtr<const SkPicture> tilePicture = patternPicture.endRecording();
 
     SkMatrix patternTransform;
     patternTransform.setTranslate(phase.x() + spacedTile.x(), phase.y() + spacedTile.y());
@@ -286,9 +279,8 @@ void SVGImage::draw(GraphicsContext* context, const FloatRect& dstRect, const Fl
 
     // TODO(fmalita): this recorder is only needed because CompositingRecorder below appears to be
     // dropping the current color filter on the floor. Find a proper fix and get rid of it.
-    GraphicsContext recordingContext(nullptr, nullptr);
-    recordingContext.beginRecording(dstRect);
-
+    OwnPtr<GraphicsContext> recordingContext = GraphicsContext::deprecatedCreateWithCanvas(nullptr);
+    recordingContext->beginRecording(dstRect);
 
     FrameView* view = frameView();
     view->resize(containerSize());
@@ -298,7 +290,7 @@ void SVGImage::draw(GraphicsContext* context, const FloatRect& dstRect, const Fl
     view->scrollToFragment(m_url);
 
     {
-        DisplayItemListContextRecorder contextRecorder(recordingContext);
+        DisplayItemListContextRecorder contextRecorder(*recordingContext);
         GraphicsContext& paintContext = contextRecorder.context();
 
         ClipRecorder clipRecorder(paintContext, *this, DisplayItem::ClipNodeImage, LayoutRect(enclosingIntRect(dstRect)));
@@ -321,7 +313,7 @@ void SVGImage::draw(GraphicsContext* context, const FloatRect& dstRect, const Fl
         view->paint(&paintContext, enclosingIntRect(srcRect));
         ASSERT(!view->needsLayout());
     }
-    RefPtr<const SkPicture> recording = recordingContext.endRecording();
+    RefPtr<const SkPicture> recording = recordingContext->endRecording();
     context->drawPicture(recording.get());
 
     if (imageObserver())
@@ -337,14 +329,14 @@ LayoutBox* SVGImage::embeddedContentBox() const
 {
     SVGSVGElement* rootElement = svgRootElement(m_page.get());
     if (!rootElement)
-        return 0;
+        return nullptr;
     return toLayoutBox(rootElement->layoutObject());
 }
 
 FrameView* SVGImage::frameView() const
 {
     if (!m_page)
-        return 0;
+        return nullptr;
 
     return toLocalFrame(m_page->mainFrame())->view();
 }
@@ -397,6 +389,14 @@ bool SVGImage::hasAnimations() const
     if (!rootElement)
         return false;
     return rootElement->timeContainer()->hasAnimations() || toLocalFrame(m_page->mainFrame())->document()->timeline().hasPendingUpdates();
+}
+
+void SVGImage::updateUseCounters(Document& document) const
+{
+    if (SVGSVGElement* rootElement = svgRootElement(m_page.get())) {
+        if (rootElement->timeContainer()->hasAnimations())
+            UseCounter::count(document, UseCounter::SVGSMILAnimationInImageRegardlessOfCache);
+    }
 }
 
 bool SVGImage::dataChanged(bool allDataReceived)
@@ -456,10 +456,6 @@ bool SVGImage::dataChanged(bool allDataReceived)
         TRACE_EVENT0("blink", "SVGImage::dataChanged::load");
         loader.load(FrameLoadRequest(0, blankURL(), SubstituteData(data(), AtomicString("image/svg+xml", AtomicString::ConstructFromLiteral),
             AtomicString("UTF-8", AtomicString::ConstructFromLiteral), KURL(), ForceSynchronousLoad)));
-
-        SVGSVGElement* rootElement = svgRootElement(m_page.get());
-        if (rootElement && rootElement->timeContainer()->hasAnimations())
-            UseCounter::count(frame->document(), UseCounter::SVGSMILAnimationInImage);
 
         // Set the intrinsic size before a container size is available.
         m_intrinsicSize = containerSize();

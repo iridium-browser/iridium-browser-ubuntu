@@ -31,7 +31,6 @@
 #include "core/layout/LayoutAnalyzer.h"
 #include "core/layout/LayoutTableCol.h"
 #include "core/layout/LayoutView.h"
-#include "core/layout/PaintInfo.h"
 #include "core/layout/SubtreeLayoutScope.h"
 #include "core/style/CollapsedBorderValue.h"
 #include "core/paint/TableCellPainter.h"
@@ -378,7 +377,10 @@ LayoutUnit LayoutTableCell::cellBaselinePosition() const
     LayoutUnit firstLineBaseline = firstLineBoxBaseline();
     if (firstLineBaseline != -1)
         return firstLineBaseline;
-    return paddingBefore() + borderBefore() + contentLogicalHeight();
+    LayoutUnit contentHeight = contentLogicalHeight();
+    if (contentHeight)
+        return borderBefore() + paddingBefore() + contentHeight;
+    return max(logicalHeightFromStyle() - computedCSSPaddingAfter() - borderAfter(), borderBefore() + paddingBefore());
 }
 
 void LayoutTableCell::styleDidChange(StyleDifference diff, const ComputedStyle* oldStyle)
@@ -961,7 +963,7 @@ void LayoutTableCell::collectBorderValues(LayoutTable::CollapsedBorderValues& bo
     // In slimming paint mode, we need to invalidate all cells with collapsed border changed.
     // FIXME: Need a way to invalidate/repaint the borders only. crbug.com/451090#c5.
     if (changed && RuntimeEnabledFeatures::slimmingPaintEnabled())
-        setShouldDoFullPaintInvalidation();
+        invalidateDisplayItemClient(*this);
 
     addBorderStyle(borderValues, startBorder);
     addBorderStyle(borderValues, endBorder);
@@ -1026,12 +1028,12 @@ void LayoutTableCell::scrollbarsChanged(bool horizontalScrollbarChanged, bool ve
 
 LayoutTableCell* LayoutTableCell::createAnonymous(Document* document)
 {
-    LayoutTableCell* renderer = new LayoutTableCell(0);
-    renderer->setDocumentForAnonymous(document);
-    return renderer;
+    LayoutTableCell* layoutObject = new LayoutTableCell(0);
+    layoutObject->setDocumentForAnonymous(document);
+    return layoutObject;
 }
 
-LayoutTableCell* LayoutTableCell::createAnonymousWithParentRenderer(const LayoutObject* parent)
+LayoutTableCell* LayoutTableCell::createAnonymousWithParent(const LayoutObject* parent)
 {
     LayoutTableCell* newCell = LayoutTableCell::createAnonymous(&parent->document());
     RefPtr<ComputedStyle> newStyle = ComputedStyle::createAnonymousStyleWithDisplay(parent->styleRef(), TABLE_CELL);

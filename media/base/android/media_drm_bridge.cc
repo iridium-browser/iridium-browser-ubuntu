@@ -14,11 +14,15 @@
 #include "base/lazy_instance.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/single_thread_task_runner.h"
+#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/sys_byteorder.h"
 #include "base/sys_info.h"
+#include "base/thread_task_runner_handle.h"
 #include "jni/MediaDrmBridge_jni.h"
+#include "media/base/android/media_client_android.h"
+#include "media/base/android/media_drm_bridge_delegate.h"
 #include "media/base/cdm_key_information.h"
 
 #include "widevine_cdm_version.h"  // In SHARED_INTERMEDIATE_DIR.
@@ -38,20 +42,6 @@ namespace {
 // here to report session expiration info.
 const char kDummyKeyId[] = "Dummy Key Id";
 
-uint32 ReadUint32(const uint8_t* data) {
-  uint32 value = 0;
-  for (int i = 0; i < 4; ++i)
-    value = (value << 8) | data[i];
-  return value;
-}
-
-uint64 ReadUint64(const uint8_t* data) {
-  uint64 value = 0;
-  for (int i = 0; i < 8; ++i)
-    value = (value << 8) | data[i];
-  return value;
-}
-
 // Returns string session ID from jbyteArray (byte[] in Java).
 std::string GetSessionId(JNIEnv* env, jbyteArray j_session_id) {
   std::vector<uint8> session_id_vector;
@@ -59,116 +49,9 @@ std::string GetSessionId(JNIEnv* env, jbyteArray j_session_id) {
   return std::string(session_id_vector.begin(), session_id_vector.end());
 }
 
-// The structure of an ISO CENC Protection System Specific Header (PSSH) box is
-// as follows. (See ISO/IEC FDIS 23001-7:2011(E).)
-// Note: ISO boxes use big-endian values.
-//
-// PSSH {
-//   uint32 Size
-//   uint32 Type
-//   uint64 LargeSize  # Field is only present if value(Size) == 1.
-//   uint32 VersionAndFlags
-//   uint8[16] SystemId
-//   uint32 DataSize
-//   uint8[DataSize] Data
-// }
-const int kBoxHeaderSize = 8;  // Box's header contains Size and Type.
-const int kBoxLargeSizeSize = 8;
-const int kPsshVersionFlagSize = 4;
-const int kPsshSystemIdSize = 16;
-const int kPsshDataSizeSize = 4;
-const uint32 kTencType = 0x74656e63;
-const uint32 kPsshType = 0x70737368;
 const uint8 kWidevineUuid[16] = {
     0xED, 0xEF, 0x8B, 0xA9, 0x79, 0xD6, 0x4A, 0xCE,
     0xA3, 0xC8, 0x27, 0xDC, 0xD5, 0x1D, 0x21, 0xED };
-
-typedef std::vector<uint8> UUID;
-
-// Tries to find a PSSH box whose "SystemId" is |uuid| in |data|, parses the
-// "Data" of the box and put it in |pssh_data|. Returns true if such a box is
-// found and successfully parsed. Returns false otherwise.
-// Notes:
-// 1, If multiple PSSH boxes are found,the "Data" of the first matching PSSH box
-// will be set in |pssh_data|.
-// 2, Only PSSH and TENC boxes are allowed in |data|. TENC boxes are skipped.
-bool GetPsshData(const uint8* data,
-                 int data_size,
-                 const UUID& uuid,
-                 std::vector<uint8>* pssh_data) {
-  const uint8* cur = data;
-  const uint8* data_end = data + data_size;
-  int bytes_left = data_size;
-
-  while (bytes_left > 0) {
-    const uint8* box_head = cur;
-
-    if (bytes_left < kBoxHeaderSize)
-      return false;
-
-    uint64_t box_size = ReadUint32(cur);
-    uint32 type = ReadUint32(cur + 4);
-    cur += kBoxHeaderSize;
-    bytes_left -= kBoxHeaderSize;
-
-    if (box_size == 1) {  // LargeSize is present.
-      if (bytes_left < kBoxLargeSizeSize)
-        return false;
-
-      box_size = ReadUint64(cur);
-      cur += kBoxLargeSizeSize;
-      bytes_left -= kBoxLargeSizeSize;
-    } else if (box_size == 0) {
-      box_size = bytes_left + kBoxHeaderSize;
-    }
-
-    const uint8* box_end = box_head + box_size;
-    if (data_end < box_end)
-      return false;
-
-    if (type == kTencType) {
-      // Skip 'tenc' box.
-      cur = box_end;
-      bytes_left = data_end - cur;
-      continue;
-    } else if (type != kPsshType) {
-      return false;
-    }
-
-    const int kPsshBoxMinimumSize =
-        kPsshVersionFlagSize + kPsshSystemIdSize + kPsshDataSizeSize;
-    if (box_end < cur + kPsshBoxMinimumSize)
-      return false;
-
-    uint32 version_and_flags = ReadUint32(cur);
-    cur += kPsshVersionFlagSize;
-    bytes_left -= kPsshVersionFlagSize;
-    if (version_and_flags != 0)
-      return false;
-
-    DCHECK_GE(bytes_left, kPsshSystemIdSize);
-    if (!std::equal(uuid.begin(), uuid.end(), cur)) {
-      cur = box_end;
-      bytes_left = data_end - cur;
-      continue;
-    }
-
-    cur += kPsshSystemIdSize;
-    bytes_left -= kPsshSystemIdSize;
-
-    uint32 data_size = ReadUint32(cur);
-    cur += kPsshDataSizeSize;
-    bytes_left -= kPsshDataSizeSize;
-
-    if (box_end < cur + data_size)
-      return false;
-
-    pssh_data->assign(cur, cur + data_size);
-    return true;
-  }
-
-  return false;
-}
 
 // Convert |init_data_type| to a string supported by MediaDRM.
 // "audio"/"video" does not matter, so use "video".
@@ -186,45 +69,37 @@ std::string ConvertInitDataType(media::EmeInitDataType init_data_type) {
   }
 }
 
-class KeySystemUuidManager {
+class KeySystemManager {
  public:
-  KeySystemUuidManager();
+  KeySystemManager();
   UUID GetUUID(const std::string& key_system);
-  void AddMapping(const std::string& key_system, const UUID& uuid);
   std::vector<std::string> GetPlatformKeySystemNames();
 
  private:
-  typedef base::hash_map<std::string, UUID> KeySystemUuidMap;
+  using KeySystemUuidMap = MediaClientAndroid::KeySystemUuidMap;
 
   KeySystemUuidMap key_system_uuid_map_;
 
-  DISALLOW_COPY_AND_ASSIGN(KeySystemUuidManager);
+  DISALLOW_COPY_AND_ASSIGN(KeySystemManager);
 };
 
-KeySystemUuidManager::KeySystemUuidManager() {
+KeySystemManager::KeySystemManager() {
   // Widevine is always supported in Android.
   key_system_uuid_map_[kWidevineKeySystem] =
       UUID(kWidevineUuid, kWidevineUuid + arraysize(kWidevineUuid));
+  MediaClientAndroid* client = GetMediaClientAndroid();
+  if (client)
+    client->AddKeySystemUUIDMappings(&key_system_uuid_map_);
 }
 
-UUID KeySystemUuidManager::GetUUID(const std::string& key_system) {
+UUID KeySystemManager::GetUUID(const std::string& key_system) {
   KeySystemUuidMap::iterator it = key_system_uuid_map_.find(key_system);
   if (it == key_system_uuid_map_.end())
     return UUID();
   return it->second;
 }
 
-void KeySystemUuidManager::AddMapping(const std::string& key_system,
-                                      const UUID& uuid) {
-  KeySystemUuidMap::iterator it = key_system_uuid_map_.find(key_system);
-  DCHECK(it == key_system_uuid_map_.end())
-      << "Shouldn't overwrite an existing key system.";
-  if (it != key_system_uuid_map_.end())
-    return;
-  key_system_uuid_map_[key_system] = uuid;
-}
-
-std::vector<std::string> KeySystemUuidManager::GetPlatformKeySystemNames() {
+std::vector<std::string> KeySystemManager::GetPlatformKeySystemNames() {
   std::vector<std::string> key_systems;
   for (KeySystemUuidMap::iterator it = key_system_uuid_map_.begin();
        it != key_system_uuid_map_.end(); ++it) {
@@ -235,7 +110,7 @@ std::vector<std::string> KeySystemUuidManager::GetPlatformKeySystemNames() {
   return key_systems;
 }
 
-base::LazyInstance<KeySystemUuidManager>::Leaky g_key_system_uuid_manager =
+base::LazyInstance<KeySystemManager>::Leaky g_key_system_manager =
     LAZY_INSTANCE_INITIALIZER;
 
 // Checks whether |key_system| is supported with |container_mime_type|. Only
@@ -248,7 +123,7 @@ bool IsKeySystemSupportedWithTypeImpl(const std::string& key_system,
   if (!MediaDrmBridge::IsAvailable())
     return false;
 
-  UUID scheme_uuid = g_key_system_uuid_manager.Get().GetUUID(key_system);
+  UUID scheme_uuid = g_key_system_manager.Get().GetUUID(key_system);
   if (scheme_uuid.empty())
     return false;
 
@@ -286,17 +161,6 @@ std::string GetSecurityLevelString(
 
 }  // namespace
 
-// Called by Java.
-static void AddKeySystemUuidMapping(JNIEnv* env,
-                                    jclass clazz,
-                                    jstring j_key_system,
-                                    jobject j_buffer) {
-  std::string key_system = ConvertJavaStringToUTF8(env, j_key_system);
-  uint8* buffer = static_cast<uint8*>(env->GetDirectBufferAddress(j_buffer));
-  UUID uuid(buffer, buffer + 16);
-  g_key_system_uuid_manager.Get().AddMapping(key_system, uuid);
-}
-
 // static
 bool MediaDrmBridge::IsAvailable() {
   if (base::android::BuildInfo::GetInstance()->sdk_int() < 19)
@@ -323,7 +187,7 @@ bool MediaDrmBridge::IsSecureDecoderRequired(SecurityLevel security_level) {
 
 // static
 std::vector<std::string> MediaDrmBridge::GetPlatformKeySystemNames() {
-  return g_key_system_uuid_manager.Get().GetPlatformKeySystemNames();
+  return g_key_system_manager.Get().GetPlatformKeySystemNames();
 }
 
 // static
@@ -384,7 +248,7 @@ scoped_ptr<MediaDrmBridge> MediaDrmBridge::Create(
   if (!IsAvailable())
     return media_drm_bridge.Pass();
 
-  UUID scheme_uuid = g_key_system_uuid_manager.Get().GetUUID(key_system);
+  UUID scheme_uuid = g_key_system_manager.Get().GetUUID(key_system);
   if (scheme_uuid.empty())
     return media_drm_bridge.Pass();
 
@@ -427,8 +291,7 @@ bool MediaDrmBridge::SetSecurityLevel(SecurityLevel security_level) {
 }
 
 void MediaDrmBridge::SetServerCertificate(
-    const uint8* certificate_data,
-    int certificate_data_length,
+    const std::vector<uint8_t>& certificate,
     scoped_ptr<media::SimpleCdmPromise> promise) {
   promise->reject(NOT_SUPPORTED_ERROR, 0,
                   "SetServerCertificate() is not supported.");
@@ -437,8 +300,7 @@ void MediaDrmBridge::SetServerCertificate(
 void MediaDrmBridge::CreateSessionAndGenerateRequest(
     SessionType session_type,
     media::EmeInitDataType init_data_type,
-    const uint8* init_data,
-    int init_data_length,
+    const std::vector<uint8_t>& init_data,
     scoped_ptr<media::NewSessionCdmPromise> promise) {
   DVLOG(1) << __FUNCTION__;
 
@@ -450,28 +312,44 @@ void MediaDrmBridge::CreateSessionAndGenerateRequest(
 
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jbyteArray> j_init_data;
+  ScopedJavaLocalRef<jobjectArray> j_optional_parameters;
 
-  // Widevine MediaDrm plugin only accepts the "data" part of the PSSH box as
-  // the init data when using MP4 container.
-  if (std::equal(scheme_uuid_.begin(), scheme_uuid_.end(), kWidevineUuid) &&
-      init_data_type == media::EmeInitDataType::CENC) {
-    std::vector<uint8> pssh_data;
-    if (!GetPsshData(init_data, init_data_length, scheme_uuid_, &pssh_data)) {
-      promise->reject(INVALID_ACCESS_ERROR, 0, "Invalid PSSH data.");
-      return;
+  MediaClientAndroid* client = GetMediaClientAndroid();
+  if (client) {
+    MediaDrmBridgeDelegate* delegate =
+        client->GetMediaDrmBridgeDelegate(scheme_uuid_);
+    if (delegate) {
+      std::vector<uint8> init_data_from_delegate;
+      std::vector<std::string> optional_parameters_from_delegate;
+      if (!delegate->OnCreateSession(init_data_type, init_data,
+                                     &init_data_from_delegate,
+                                     &optional_parameters_from_delegate)) {
+        promise->reject(INVALID_ACCESS_ERROR, 0, "Invalid init data.");
+      }
+      if (!init_data_from_delegate.empty()) {
+        j_init_data = base::android::ToJavaByteArray(
+            env, vector_as_array(&init_data_from_delegate),
+            init_data_from_delegate.size());
+      }
+      if (!optional_parameters_from_delegate.empty()) {
+        j_optional_parameters = base::android::ToJavaArrayOfStrings(
+            env, optional_parameters_from_delegate);
+      }
     }
-    j_init_data =
-        base::android::ToJavaByteArray(env, &pssh_data[0], pssh_data.size());
-  } else {
-    j_init_data =
-        base::android::ToJavaByteArray(env, init_data, init_data_length);
+  }
+
+  if (j_init_data.is_null()) {
+    j_init_data = base::android::ToJavaByteArray(
+        env, vector_as_array(&init_data), init_data.size());
   }
 
   ScopedJavaLocalRef<jstring> j_mime =
       ConvertUTF8ToJavaString(env, ConvertInitDataType(init_data_type));
   uint32_t promise_id = cdm_promise_adapter_.SavePromise(promise.Pass());
-  Java_MediaDrmBridge_createSession(env, j_media_drm_.obj(), j_init_data.obj(),
-                                    j_mime.obj(), promise_id);
+  Java_MediaDrmBridge_createSessionFromNative(env, j_media_drm_.obj(),
+                                              j_init_data.obj(), j_mime.obj(),
+                                              j_optional_parameters.obj(),
+                                              promise_id);
 }
 
 void MediaDrmBridge::LoadSession(
@@ -483,14 +361,13 @@ void MediaDrmBridge::LoadSession(
 
 void MediaDrmBridge::UpdateSession(
     const std::string& session_id,
-    const uint8* response,
-    int response_length,
+    const std::vector<uint8_t>& response,
     scoped_ptr<media::SimpleCdmPromise> promise) {
   DVLOG(1) << __FUNCTION__;
 
   JNIEnv* env = AttachCurrentThread();
-  ScopedJavaLocalRef<jbyteArray> j_response =
-      base::android::ToJavaByteArray(env, response, response_length);
+  ScopedJavaLocalRef<jbyteArray> j_response = base::android::ToJavaByteArray(
+      env, vector_as_array(&response), response.size());
   ScopedJavaLocalRef<jbyteArray> j_session_id = base::android::ToJavaByteArray(
       env, reinterpret_cast<const uint8_t*>(session_id.data()),
       session_id.size());
@@ -540,7 +417,7 @@ void MediaDrmBridge::SetMediaCryptoReadyCB(const base::Closure& closure) {
   DCHECK(media_crypto_ready_cb_.is_null());
 
   if (!GetMediaCrypto().is_null()) {
-    base::MessageLoopProxy::current()->PostTask(FROM_HERE, closure);
+    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, closure);
     return;
   }
 

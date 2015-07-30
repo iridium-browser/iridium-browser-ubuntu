@@ -12,7 +12,7 @@
     'protoc': '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)protoc<(EXECUTABLE_SUFFIX)',
     'proto_out_base': '<(SHARED_INTERMEDIATE_DIR)/protoc_out',
     'proto_out_dir': '<(proto_out_base)/remoting/proto',
-    'use_nss': 0,
+    'use_nss_certs': 0,
     'nacl_untrusted_build': 1,
     'chromium_code': 1,
   },
@@ -74,7 +74,6 @@
         'GOOGLE_PROTOBUF_HOST_ARCH_64_BIT=1'
       ],
       'dependencies': [
-        '../native_client/tools.gyp:prep_toolchain',
         '../third_party/protobuf/protobuf_nacl.gyp:protobuf_lite_nacl',
         'proto/chromotocol.gyp:chromotocol_proto_lib',
       ],
@@ -101,7 +100,6 @@
       'dependencies': [
         '../base/base_nacl.gyp:base_nacl',
         '../jingle/jingle_nacl.gyp:jingle_glue_nacl',
-        '../native_client/tools.gyp:prep_toolchain',
         '../native_client_sdk/native_client_sdk_untrusted.gyp:nacl_io_untrusted',
         '../net/net_nacl.gyp:net_nacl',
         '../third_party/boringssl/boringssl_nacl.gyp:boringssl_nacl',
@@ -115,7 +113,7 @@
         'remoting_webrtc_nacl',
       ],
       'sources': [
-        '../ui/events/keycodes/dom4/keycode_converter.cc',
+        '../ui/events/keycodes/dom/keycode_converter.cc',
         '<@(remoting_base_sources)',
         '<@(remoting_codec_sources)',
         '<@(remoting_client_plugin_sources)',
@@ -181,7 +179,6 @@
         '../crypto/crypto_nacl.gyp:crypto_nacl',
         '../jingle/jingle_nacl.gyp:jingle_glue_nacl',
         '../media/media_nacl.gyp:media_yuv_nacl',
-        '../native_client/tools.gyp:prep_toolchain',
         '../native_client_sdk/native_client_sdk_untrusted.gyp:nacl_io_untrusted',
         '../net/net_nacl.gyp:net_nacl',
         '../ppapi/native_client/native_client.gyp:ppapi_lib',

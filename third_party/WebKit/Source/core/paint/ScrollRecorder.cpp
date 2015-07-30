@@ -5,7 +5,6 @@
 #include "config.h"
 #include "core/paint/ScrollRecorder.h"
 
-#include "core/layout/PaintPhase.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/paint/DisplayItemList.h"
@@ -20,6 +19,8 @@ ScrollRecorder::ScrollRecorder(GraphicsContext& context, const DisplayItemClient
 {
     if (RuntimeEnabledFeatures::slimmingPaintEnabled()) {
         ASSERT(m_context.displayItemList());
+        if (m_context.displayItemList()->displayItemConstructionIsDisabled())
+            return;
         m_context.displayItemList()->add(BeginScrollDisplayItem::create(m_client, m_beginItemType, currentOffset));
     } else {
         BeginScrollDisplayItem scrollDisplayItem(m_client, m_beginItemType, currentOffset);
@@ -32,6 +33,8 @@ ScrollRecorder::~ScrollRecorder()
     DisplayItem::Type endItemType = DisplayItem::scrollTypeToEndScrollType(m_beginItemType);
     if (RuntimeEnabledFeatures::slimmingPaintEnabled()) {
         ASSERT(m_context.displayItemList());
+        if (m_context.displayItemList()->displayItemConstructionIsDisabled())
+            return;
         m_context.displayItemList()->add(EndScrollDisplayItem::create(m_client, endItemType));
     } else {
         EndScrollDisplayItem endScrollDisplayItem(m_client, endItemType);

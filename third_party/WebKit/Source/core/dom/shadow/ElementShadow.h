@@ -27,6 +27,7 @@
 #ifndef ElementShadow_h
 #define ElementShadow_h
 
+#include "core/CoreExport.h"
 #include "core/dom/shadow/InsertionPoint.h"
 #include "core/dom/shadow/SelectRuleFeatureSet.h"
 #include "core/dom/shadow/ShadowRoot.h"
@@ -38,7 +39,7 @@
 
 namespace blink {
 
-class ElementShadow final : public NoBaseWillBeGarbageCollectedFinalized<ElementShadow> {
+class CORE_EXPORT ElementShadow final : public NoBaseWillBeGarbageCollectedFinalized<ElementShadow> {
     WTF_MAKE_NONCOPYABLE(ElementShadow);
     WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(ElementShadow);
 public:
@@ -57,7 +58,6 @@ public:
     void attach(const Node::AttachContext&);
     void detach(const Node::AttachContext&);
 
-    void distributedNodePseudoStateChanged(CSSSelector::PseudoType);
     void willAffectSelector();
     const SelectRuleFeatureSet& ensureSelectFeatureSet();
 

@@ -55,7 +55,7 @@ WebInspector.SourceFrame = function(contentProvider)
     this._shortcuts = {};
     this.element.addEventListener("keydown", this._handleKeyDown.bind(this), false);
 
-    this._sourcePosition = new WebInspector.StatusBarText("", "source-frame-cursor-position");
+    this._sourcePosition = new WebInspector.ToolbarText("", "source-frame-cursor-position");
 
     this._errorPopoverHelper = new WebInspector.PopoverHelper(this.element, this._getErrorAnchor.bind(this), this._showErrorPopover.bind(this));
     this._errorPopoverHelper.setTimeout(100, 100);
@@ -111,7 +111,7 @@ WebInspector.SourceFrame.prototype = {
         this._editorAttached = true;
         for (var line in this._rowMessageBuckets) {
             var bucket = this._rowMessageBuckets[line];
-            bucket._updateDecorationPosition();
+            bucket._updateDecoration();
         }
         this._wasShownOrLoaded();
     },
@@ -126,15 +126,15 @@ WebInspector.SourceFrame.prototype = {
 
     willHide: function()
     {
-        WebInspector.View.prototype.willHide.call(this);
+        WebInspector.Widget.prototype.willHide.call(this);
 
         this._clearPositionToReveal();
     },
 
     /**
-     * @return {!WebInspector.StatusBarText}
+     * @return {!WebInspector.ToolbarText}
      */
-    statusBarText: function()
+    toolbarText: function()
     {
         return this._sourcePosition;
     },
@@ -331,35 +331,23 @@ WebInspector.SourceFrame.prototype = {
         }
 
         this._updateHighlighterType(content || "");
-
-        this._textEditor.beginUpdates();
-
-        this._setTextEditorDecorations();
-
+        this.clearMessages();
         this._wasShownOrLoaded();
 
         if (this._delayedFindSearchMatches) {
             this._delayedFindSearchMatches();
             delete this._delayedFindSearchMatches;
         }
-
         this.onTextEditorContentLoaded();
-
-        this._textEditor.endUpdates();
     },
 
     onTextEditorContentLoaded: function() {},
-
-    _setTextEditorDecorations: function()
-    {
-        this._rowMessageBuckets = {};
-    },
 
     /**
      * @param {!WebInspector.SearchableView.SearchConfig} searchConfig
      * @param {boolean} shouldJump
      * @param {boolean} jumpBackwards
-     * @param {function(!WebInspector.View, number)} searchFinishedCallback
+     * @param {function(!WebInspector.Widget, number)} searchFinishedCallback
      */
     _doFindSearchMatches: function(searchConfig, shouldJump, jumpBackwards, searchFinishedCallback)
     {
@@ -384,7 +372,7 @@ WebInspector.SourceFrame.prototype = {
      * @param {!WebInspector.SearchableView.SearchConfig} searchConfig
      * @param {boolean} shouldJump
      * @param {boolean} jumpBackwards
-     * @param {function(!WebInspector.View, number)} searchFinishedCallback
+     * @param {function(!WebInspector.Widget, number)} searchFinishedCallback
      * @param {function(number)} currentMatchChangedCallback
      * @param {function()} searchResultsChangedCallback
      */
@@ -718,13 +706,14 @@ WebInspector.SourceFrameMessage.Level = {
 /**
  * @param {!WebInspector.ConsoleMessage} consoleMessage
  * @param {number} lineNumber
+ * @param {number} columnNumber
  * @return {!WebInspector.SourceFrameMessage}
  */
-WebInspector.SourceFrameMessage.fromConsoleMessage = function(consoleMessage, lineNumber)
+WebInspector.SourceFrameMessage.fromConsoleMessage = function(consoleMessage, lineNumber, columnNumber)
 {
     console.assert(consoleMessage.level === WebInspector.ConsoleMessage.MessageLevel.Error || consoleMessage.level === WebInspector.ConsoleMessage.MessageLevel.Warning);
     var level = consoleMessage.level === WebInspector.ConsoleMessage.MessageLevel.Error ? WebInspector.SourceFrameMessage.Level.Error : WebInspector.SourceFrameMessage.Level.Warning;
-    return new WebInspector.SourceFrameMessage(consoleMessage.messageText, level, lineNumber, consoleMessage.column);
+    return new WebInspector.SourceFrameMessage(consoleMessage.messageText, level, lineNumber, columnNumber);
 }
 
 WebInspector.SourceFrameMessage.prototype = {
@@ -854,24 +843,21 @@ WebInspector.SourceFrame.RowMessageBucket = function(sourceFrame, textEditor, li
     /** @type {!Array.<!WebInspector.SourceFrame.RowMessage>} */
     this._messages = [];
 
-    this._updateDecorationPosition();
-
     this._level = null;
 }
 
 WebInspector.SourceFrame.RowMessageBucket.prototype = {
-    _updateDecorationPosition: function()
+    /**
+     * @param {number} lineNumber
+     * @param {number} columnNumber
+     */
+    _updateWavePosition: function(lineNumber, columnNumber)
     {
-        if (!this._sourceFrame._isEditorShowing())
-            return;
-        var position = this._lineHandle.resolve();
-        if (!position)
-            return;
-        var lineNumber = position.lineNumber;
         var lineText = this._textEditor.line(lineNumber);
         var lineIndent = WebInspector.TextUtils.lineIndent(lineText).length;
         var base = this._textEditor.cursorPositionToCoordinates(lineNumber, 0);
-        var start = this._textEditor.cursorPositionToCoordinates(lineNumber, lineIndent);
+
+        var start = this._textEditor.cursorPositionToCoordinates(lineNumber, Math.max(columnNumber - 1, lineIndent));
         var end = this._textEditor.cursorPositionToCoordinates(lineNumber, lineText.length);
         /** @const */
         var codeMirrorLinesLeftPadding = 4;
@@ -925,7 +911,7 @@ WebInspector.SourceFrame.RowMessageBucket.prototype = {
 
         var rowMessage = new WebInspector.SourceFrame.RowMessage(message);
         this._messages.push(rowMessage);
-        this._updateBucketLevel();
+        this._updateDecoration();
     },
 
     /**
@@ -940,13 +926,15 @@ WebInspector.SourceFrame.RowMessageBucket.prototype = {
             rowMessage.setRepeatCount(rowMessage.repeatCount() - 1);
             if (!rowMessage.repeatCount())
                 this._messages.splice(i, 1);
-            this._updateBucketLevel();
+            this._updateDecoration();
             return;
         }
     },
 
-    _updateBucketLevel: function()
+    _updateDecoration: function()
     {
+        if (!this._sourceFrame._isEditorShowing())
+            return;
         if (!this._messages.length)
             return;
         var position = this._lineHandle.resolve();
@@ -954,12 +942,15 @@ WebInspector.SourceFrame.RowMessageBucket.prototype = {
             return;
 
         var lineNumber = position.lineNumber;
+        var columnNumber = Number.MAX_VALUE;
         var maxMessage = null;
         for (var i = 0; i < this._messages.length; ++i) {
             var message = this._messages[i].message();
+            columnNumber = Math.min(columnNumber, message.columnNumber());
             if (!maxMessage || WebInspector.SourceFrameMessage.messageLevelComparator(maxMessage, message) < 0)
                 maxMessage = message;
         }
+        this._updateWavePosition(lineNumber, columnNumber);
 
         if (this._level) {
             this._textEditor.toggleLineClass(lineNumber, WebInspector.SourceFrame._lineClassPerLevel[this._level], false);

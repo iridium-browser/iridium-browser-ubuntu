@@ -22,9 +22,8 @@ remoting.gcd = remoting.gcd || {};
  *   id: string,
  *   robotAccountEmail: string,
  *   robotAccountAuthorizationCode: string,
- *   deviceDraft: {
- *     id: string
- *   }
+ *   deviceId: string,
+ *   deviceDraft: Object
  * }}
  */
 remoting.gcd.RegistrationTicket;
@@ -32,7 +31,8 @@ remoting.gcd.RegistrationTicket;
 /**
  * TODO: Flesh out with typical fields.
  * @typedef {{
- *   id:string
+ *   id:string,
+ *   name:string
  * }}
  */
 remoting.gcd.Device;
@@ -115,8 +115,7 @@ var responseAsGcdDeviceListResponse = function(response) {
  * specific base URL, and OAuth2 client ID.
  * @param {{
  *   apiKey: string,
- *   apiBaseUrl: (string|undefined),
- *   oauthClientId: (string|undefined)
+ *   apiBaseUrl: (string|undefined)
  * }} options
  * @constructor
  */
@@ -126,9 +125,6 @@ remoting.gcd.Client = function(options) {
   /** @const */
   this.apiBaseUrl_ = options.apiBaseUrl ||
       'https://www.googleapis.com/clouddevices/v1';
-  /** @const */
-  this.oauthClientId_ = options.oauthClientId ||
-      remoting.settings.OAUTH2_CLIENT_ID;
 };
 
 /**
@@ -157,18 +153,21 @@ remoting.gcd.Client.prototype.insertRegistrationTicket = function() {
  * TODO: Add link to GCD docs.
  * @param {string} ticketId
  * @param {!Object<string,*>} deviceDraft
+ * @param {string} oauthClientId
  * @return {!Promise<remoting.gcd.RegistrationTicket>}
  */
 remoting.gcd.Client.prototype.patchRegistrationTicket = function(
-    ticketId, deviceDraft) {
+    ticketId, deviceDraft, oauthClientId) {
   return new remoting.Xhr({
-    method: 'POST',
+    method: 'PATCH',
     url: this.apiBaseUrl_ + '/registrationTickets/' +
         encodeURIComponent(ticketId),
-    useIdentity: true,
+    urlParams: {
+      'key': this.apiKey_
+    },
     jsonContent: {
       'deviceDraft': deviceDraft,
-      'oauthClientId': this.oauthClientId_
+      'oauthClientId': oauthClientId
     },
     acceptJson: true
   }).start().then(function(response) {
@@ -207,17 +206,23 @@ remoting.gcd.Client.prototype.finalizeRegistrationTicket = function(ticketId) {
 /**
  * Lists devices user has access to.
  * TODO: Add link to GCD docs.
+ * @param {string=} opt_nameSubstring If present, the list of devices
+ *     is filtered by GCD such that every device returned contains
+ *     this string as as a substring of its |name| or |displayName|.
  * @return {!Promise<!Array<remoting.gcd.Device>>}
  */
-remoting.gcd.Client.prototype.listDevices = function() {
+remoting.gcd.Client.prototype.listDevices = function(opt_nameSubstring) {
   return new remoting.Xhr({
     method: 'GET',
     url: this.apiBaseUrl_ + '/devices',
+    urlParams: {
+      nameSubstring: opt_nameSubstring || null
+    },
     useIdentity: true,
     acceptJson: true
   }).start().then(function(response) {
     if (response.isError()) {
-      console.error('error patching registration ticket');
+      console.error('error getting device list');
       throw remoting.Error.unexpected();
     }
     var hosts = responseAsGcdDeviceListResponse(response);
@@ -242,7 +247,7 @@ remoting.gcd.Client.prototype.deleteDevice = function(deviceId) {
       return false;
     }
     if (response.isError()) {
-      console.warn('error deleting device');
+      console.error('error deleting device');
       throw remoting.Error.unexpected();
     }
     return true;

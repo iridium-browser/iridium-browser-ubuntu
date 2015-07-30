@@ -40,7 +40,7 @@ using namespace HTMLNames;
 
 static String emptyValueAXText()
 {
-    return Locale::defaultLocale().queryString(blink::WebLocalizedString::AXDateTimeFieldEmptyValueText);
+    return Locale::defaultLocale().queryString(WebLocalizedString::AXDateTimeFieldEmptyValueText);
 }
 
 DateTimeFieldElement::FieldOwner::~FieldOwner()
@@ -139,7 +139,10 @@ void DateTimeFieldElement::setFocus(bool value)
 {
     if (m_fieldOwner)
         value ? m_fieldOwner->didFocusOnField() : m_fieldOwner->didBlurFromField();
-    ContainerNode::setFocus(value);
+    if (focused() == value)
+        return;
+    Node::setFocus(value);
+    focusStateChanged();
 }
 
 void DateTimeFieldElement::focusOnNextField()

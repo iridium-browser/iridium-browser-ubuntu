@@ -7,13 +7,16 @@
 #include <string>
 
 #include "base/files/file_path.h"
-#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "sql/connection.h"
 #include "sql/statement.h"
+#include "sql/test/scoped_error_ignorer.h"
+#include "sql/test/test_helpers.h"
 #include "sync/base/sync_export.h"
 #include "sync/internal_api/public/base/node_ordinal.h"
 #include "sync/protocol/bookmark_specifics.pb.h"
@@ -22,12 +25,30 @@
 #include "sync/syncable/directory_backing_store.h"
 #include "sync/syncable/on_disk_directory_backing_store.h"
 #include "sync/syncable/syncable-inl.h"
+#include "sync/test/directory_backing_store_corruption_testing.h"
 #include "sync/test/test_directory_backing_store.h"
 #include "sync/util/time.h"
 #include "testing/gtest/include/gtest/gtest-param-test.h"
 
 namespace syncer {
 namespace syncable {
+namespace {
+
+// A handler that simply sets |catastrophic_error_handler_was_called| to true.
+void CatastrophicErrorHandler(bool* catastrophic_error_handler_was_called) {
+  *catastrophic_error_handler_was_called = true;
+}
+
+// Create a dirty EntryKernel with an ID derived from |id|.
+scoped_ptr<EntryKernel> CreateEntry(int id) {
+  scoped_ptr<EntryKernel> entry(new EntryKernel());
+  entry->put(ID, Id::CreateFromClientString(base::Int64ToString(id)));
+  entry->put(META_HANDLE, id);
+  entry->mark_dirty(NULL);
+  return entry;
+}
+
+}  // namespace
 
 SYNC_EXPORT_PRIVATE extern const int32 kCurrentDBVersion;
 
@@ -89,6 +110,7 @@ class MigrationTest : public testing::TestWithParam<int> {
   }
 
  private:
+  base::MessageLoop message_loop_;
   base::ScopedTempDir temp_dir_;
 };
 
@@ -3148,7 +3170,7 @@ TEST_F(DirectoryBackingStoreTest, MigrateVersion76To77) {
   ASSERT_FALSE(dbs->needs_column_refresh());
 
   EXPECT_EQ(GetExpectedLegacyMetaProtoTimes(INCLUDE_DELETED_ITEMS),
-            GetMetaProtoTimes(dbs->db_.get()));
+            GetMetaProtoTimes(&connection));
   // Since the proto times are expected to be in a legacy format, they may not
   // be compatible with ProtoTimeToTime, so we don't call ExpectTimes().
 
@@ -3156,7 +3178,7 @@ TEST_F(DirectoryBackingStoreTest, MigrateVersion76To77) {
   ASSERT_EQ(77, dbs->GetVersion());
 
   EXPECT_EQ(GetExpectedMetaProtoTimes(INCLUDE_DELETED_ITEMS),
-            GetMetaProtoTimes(dbs->db_.get()));
+            GetMetaProtoTimes(&connection));
   // Cannot actually load entries due to version 77 not having all required
   // columns.
   ASSERT_FALSE(dbs->needs_column_refresh());
@@ -3183,17 +3205,9 @@ TEST_F(DirectoryBackingStoreTest, MigrateVersion77To78) {
 }
 
 TEST_F(DirectoryBackingStoreTest, MigrateVersion78To79) {
-  const int kInitialNextId = -65542;
-
   sql::Connection connection;
   ASSERT_TRUE(connection.OpenInMemory());
   SetUpVersion78Database(&connection);
-
-  // Double-check the original next_id is what we think it is.
-  sql::Statement s(connection.GetUniqueStatement(
-      "SELECT next_id FROM share_info"));
-  s.Step();
-  ASSERT_EQ(kInitialNextId, s.ColumnInt(0));
 
   scoped_ptr<TestDirectoryBackingStore> dbs(
       new TestDirectoryBackingStore(GetUsername(), &connection));
@@ -3201,18 +3215,6 @@ TEST_F(DirectoryBackingStoreTest, MigrateVersion78To79) {
   ASSERT_TRUE(dbs->MigrateVersion78To79());
   ASSERT_EQ(79, dbs->GetVersion());
   ASSERT_FALSE(dbs->needs_column_refresh());
-
-  // Ensure the next_id has been incremented.
-  Directory::MetahandlesMap handles_map;
-  JournalIndex delete_journals;
-  MetahandleSet metahandles_to_purge;
-  STLValueDeleter<Directory::MetahandlesMap> deleter(&handles_map);
-  Directory::KernelLoadInfo load_info;
-
-  s.Clear();
-  ASSERT_TRUE(dbs->Load(&handles_map, &delete_journals, &metahandles_to_purge,
-                        &load_info));
-  EXPECT_LE(load_info.kernel_info.next_id, kInitialNextId - 65536);
 }
 
 TEST_F(DirectoryBackingStoreTest, MigrateVersion79To80) {
@@ -3993,6 +3995,112 @@ TEST_F(DirectoryBackingStoreTest, IncreaseDatabasePageSizeFrom4KTo32K) {
   pageSize = 0;
   dbs->GetDatabasePageSize(&pageSize);
   EXPECT_EQ(32768, pageSize);
+}
+
+// See that a catastrophic error handler remains set across instances of the
+// underlying sql:Connection.
+TEST_F(DirectoryBackingStoreTest, CatastrophicErrorHandler_KeptAcrossReset) {
+  scoped_ptr<OnDiskDirectoryBackingStoreForTest> dbs(
+      new OnDiskDirectoryBackingStoreForTest(GetUsername(), GetDatabasePath()));
+  // See that by default there is no catastrophic error handler.
+  ASSERT_FALSE(dbs->db_->has_error_callback());
+  // Set one and see that it was set.
+  dbs->SetCatastrophicErrorHandler(
+      base::Bind(&CatastrophicErrorHandler, nullptr));
+  ASSERT_TRUE(dbs->db_->has_error_callback());
+  // Recreate the Connection and see that the handler remains set.
+  dbs->ResetAndCreateConnection();
+  ASSERT_TRUE(dbs->db_->has_error_callback());
+}
+
+// Verify that database corruption encountered during Load will trigger the
+// catastrohpic error handler.
+TEST_F(DirectoryBackingStoreTest,
+       CatastrophicErrorHandler_InvocationDuringLoad) {
+  bool was_called = false;
+  const base::Closure handler =
+      base::Bind(&CatastrophicErrorHandler, &was_called);
+  {
+    scoped_ptr<OnDiskDirectoryBackingStoreForTest> dbs(
+        new OnDiskDirectoryBackingStoreForTest(GetUsername(),
+                                               GetDatabasePath()));
+    dbs->SetCatastrophicErrorHandler(handler);
+    ASSERT_TRUE(dbs->db_->has_error_callback());
+    // Load the DB, and save one entry.
+    ASSERT_TRUE(LoadAndIgnoreReturnedData(dbs.get()));
+    ASSERT_FALSE(dbs->DidFailFirstOpenAttempt());
+    Directory::SaveChangesSnapshot snapshot;
+    snapshot.dirty_metas.insert(CreateEntry(2).release());
+    ASSERT_TRUE(dbs->SaveChanges(snapshot));
+  }
+
+  base::RunLoop().RunUntilIdle();
+  // No catastrophic errors have happened. See that it hasn't be called yet.
+  ASSERT_FALSE(was_called);
+
+  // Corrupt the DB. Some forms of corruption (like this one) will be detected
+  // upon loading the Sync DB.
+  ASSERT_TRUE(sql::test::CorruptSizeInHeader(GetDatabasePath()));
+
+  {
+    scoped_ptr<OnDiskDirectoryBackingStoreForTest> dbs(
+        new OnDiskDirectoryBackingStoreForTest(GetUsername(),
+                                               GetDatabasePath()));
+    dbs->SetCatastrophicErrorHandler(handler);
+    ASSERT_TRUE(dbs->db_->has_error_callback());
+    {
+      // The corruption will be detected when we attempt to load the data. Use a
+      // ScopedErrorIgnorer to ensure we don't crash in debug builds.
+      sql::ScopedErrorIgnorer error_ignorer;
+      error_ignorer.IgnoreError(SQLITE_CORRUPT);
+      ASSERT_TRUE(LoadAndIgnoreReturnedData(dbs.get()));
+      ASSERT_TRUE(error_ignorer.CheckIgnoredErrors());
+    }
+    // See that the first open failed as expected.
+    ASSERT_TRUE(dbs->DidFailFirstOpenAttempt());
+  }
+
+  // At this point the handler has been posted but not executed.
+  ASSERT_FALSE(was_called);
+  // Pump the message loop and see that it is executed.
+  base::RunLoop().RunUntilIdle();
+  ASSERT_TRUE(was_called);
+}
+
+// Verify that database corruption encountered during SaveChanges will trigger
+// the catastrohpic error handler.
+TEST_F(DirectoryBackingStoreTest,
+       CatastrophicErrorHandler_InvocationDuringSaveChanges) {
+  bool was_called = false;
+  const base::Closure handler =
+      base::Bind(&CatastrophicErrorHandler, &was_called);
+  // Create a DB with many entries.
+  scoped_ptr<OnDiskDirectoryBackingStoreForTest> dbs(
+      new OnDiskDirectoryBackingStoreForTest(GetUsername(), GetDatabasePath()));
+  dbs->SetCatastrophicErrorHandler(handler);
+  ASSERT_TRUE(dbs->db_->has_error_callback());
+  ASSERT_TRUE(LoadAndIgnoreReturnedData(dbs.get()));
+  ASSERT_FALSE(dbs->DidFailFirstOpenAttempt());
+  Directory::SaveChangesSnapshot snapshot;
+  for (int i = 0; i < corruption_testing::kNumEntriesRequiredForCorruption;
+       ++i) {
+    snapshot.dirty_metas.insert(CreateEntry(i).release());
+  }
+  ASSERT_TRUE(dbs->SaveChanges(snapshot));
+  // Corrupt it.
+  ASSERT_TRUE(corruption_testing::CorruptDatabase(GetDatabasePath()));
+  // Attempt to save all those entries again. See that it fails (because of the
+  // corruption).
+  //
+  // If this test fails because SaveChanges returned true, it may mean you need
+  // to increase the number of entries written to the DB. See also
+  // |kNumEntriesRequiredForCorruption|.
+  ASSERT_FALSE(dbs->SaveChanges(snapshot));
+  // At this point the handler has been posted but not executed.
+  ASSERT_FALSE(was_called);
+  // Pump the message loop and see that it is executed.
+  base::RunLoop().RunUntilIdle();
+  ASSERT_TRUE(was_called);
 }
 
 }  // namespace syncable

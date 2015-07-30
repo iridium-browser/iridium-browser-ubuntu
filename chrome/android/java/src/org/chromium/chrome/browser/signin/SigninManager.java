@@ -6,7 +6,6 @@ package org.chromium.chrome.browser.signin;
 
 import android.accounts.Account;
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.app.Dialog;
 import android.app.DialogFragment;
 import android.app.ProgressDialog;
@@ -15,6 +14,7 @@ import android.content.DialogInterface;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Handler;
+import android.support.v7.app.AlertDialog;
 import android.util.Log;
 
 import org.chromium.base.ActivityState;
@@ -280,9 +280,10 @@ public class SigninManager {
      */
     public void startSignIn(Activity activity, final Account account, boolean passive,
             final SignInFlowObserver observer) {
-        assert mSignInActivity == null;
-        assert mSignInAccount == null;
-        assert mSignInFlowObserver == null;
+        if (mSignInAccount != null) {
+            Log.w(TAG, "Ignoring sign-in request as another sign-in request is pending.");
+            return;
+        }
 
         if (mFirstRunCheckIsPending) {
             Log.w(TAG, "Ignoring sign-in request until the First Run check completes.");
@@ -395,6 +396,11 @@ public class SigninManager {
     }
 
     private void finishSignIn(AccountIdsAndNames accountIdsAndNames) {
+        if (mSignInAccount == null) {
+            Log.w(TAG, "Sign in request was canceled; aborting finishSignIn().");
+            return;
+        }
+
         // Cache the signed-in account name.
         ChromeSigninController.get(mContext).setSignedInAccountName(mSignInAccount.name);
 

@@ -14,6 +14,7 @@
         '../../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '../../cc/cc.gyp:cc',
         '../../components/components.gyp:autofill_content_browser',
+        '../../components/components.gyp:devtools_http_handler',
         '../../components/components.gyp:web_contents_delegate_android',
         '../../content/content.gyp:content_common',
         '../../media/media.gyp:player_android',
@@ -102,9 +103,8 @@
       ],
       'conditions': [
         ['video_hole==1', {
-          'sources': [
-            'external_video_surface_container_impl.cc',
-            'external_video_surface_container_impl.h',
+          'dependencies': [
+            '../../components/components.gyp:external_video_surface',
           ],
         }],
       ],
@@ -141,7 +141,6 @@
           '../java/src/org/chromium/android_webview/AwSettings.java',
           '../java/src/org/chromium/android_webview/AwWebContentsDelegate.java',
           '../java/src/org/chromium/android_webview/AwWebResourceResponse.java',
-          '../java/src/org/chromium/android_webview/ExternalVideoSurfaceContainer.java',
           '../java/src/org/chromium/android_webview/InputStreamUtil.java',
           '../java/src/org/chromium/android_webview/JavaBrowserViewRendererHelper.java',
           '../java/src/org/chromium/android_webview/permission/AwPermissionRequest.java',

@@ -6,6 +6,7 @@
 
 #include "base/strings/string_util.h"
 #include "components/crx_file/id_util.h"
+#include "components/guest_view/browser/guest_view_event.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/result_codes.h"
 #include "extensions/browser/api/extensions_api_client.h"
@@ -16,6 +17,8 @@
 #include "extensions/strings/grit/extensions_strings.h"
 
 using content::WebContents;
+using guest_view::GuestViewBase;
+using guest_view::GuestViewEvent;
 using namespace extensions::core_api;
 
 namespace extensions {
@@ -35,7 +38,7 @@ ExtensionViewGuest::~ExtensionViewGuest() {
 }
 
 // static
-extensions::GuestViewBase* ExtensionViewGuest::Create(
+GuestViewBase* ExtensionViewGuest::Create(
     content::WebContents* owner_web_contents) {
   return new ExtensionViewGuest(owner_web_contents);
 }
@@ -140,9 +143,9 @@ void ExtensionViewGuest::DidCommitProvisionalLoadForFrame(
   ReplaceFirstSubstringAfterOffset(&relative_url, 0, prefix, "");
 
   scoped_ptr<base::DictionaryValue> args(new base::DictionaryValue());
-  args->SetString(guestview::kUrl, relative_url);
+  args->SetString(guest_view::kUrl, relative_url);
   DispatchEventToView(
-      new GuestViewBase::Event(extensionview::kEventLoadCommit, args.Pass()));
+      new GuestViewEvent(extensionview::kEventLoadCommit, args.Pass()));
 }
 
 void ExtensionViewGuest::DidNavigateMainFrame(

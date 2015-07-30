@@ -666,8 +666,8 @@ void DownloadItemImpl::DeleteFile(const base::Callback<void(bool)>& callback) {
 }
 
 bool DownloadItemImpl::IsDangerous() const {
-#if defined(OS_WIN)
-  // TODO(noelutz): At this point only the windows views UI supports
+#if defined(OS_WIN) || defined(OS_MACOSX)
+  // TODO(noelutz): At this point only the windows views and OSX UI supports
   // warnings based on dangerous content.
   return (danger_type_ == DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE ||
           danger_type_ == DOWNLOAD_DANGER_TYPE_DANGEROUS_URL ||
@@ -1055,7 +1055,7 @@ void DownloadItemImpl::DestinationUpdate(int64 bytes_so_far,
   if (received_bytes_ > total_bytes_)
     total_bytes_ = 0;
 
-  if (bound_net_log_.IsLogging()) {
+  if (bound_net_log_.IsCapturing()) {
     bound_net_log_.AddEvent(
         net::NetLog::TYPE_DOWNLOAD_ITEM_UPDATED,
         net::NetLog::Int64Callback("bytes_so_far", received_bytes_));
@@ -1106,8 +1106,8 @@ void DownloadItemImpl::Init(bool active,
       file_name = GetURL().ExtractFileName();
   }
 
-  base::Callback<base::Value*(net::NetLog::LogLevel)> active_data = base::Bind(
-      &ItemActivatedNetLogCallback, this, download_type, &file_name);
+  net::NetLog::ParametersCallback active_data =
+      base::Bind(&ItemActivatedNetLogCallback, this, download_type, &file_name);
   if (active) {
     bound_net_log_.BeginEvent(
         net::NetLog::TYPE_DOWNLOAD_ITEM_ACTIVE, active_data);

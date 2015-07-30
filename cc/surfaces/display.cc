@@ -4,7 +4,7 @@
 
 #include "cc/surfaces/display.h"
 
-#include "base/message_loop/message_loop.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "cc/debug/benchmark_instrumentation.h"
 #include "cc/output/compositor_frame.h"
@@ -13,7 +13,7 @@
 #include "cc/output/gl_renderer.h"
 #include "cc/output/renderer_settings.h"
 #include "cc/output/software_renderer.h"
-#include "cc/resources/texture_mailbox_deleter.h"
+#include "cc/output/texture_mailbox_deleter.h"
 #include "cc/surfaces/display_client.h"
 #include "cc/surfaces/surface.h"
 #include "cc/surfaces/surface_aggregator.h"
@@ -34,9 +34,9 @@ Display::Display(DisplayClient* client,
       settings_(settings),
       device_scale_factor_(1.f),
       blocking_main_thread_task_runner_(
-          BlockingTaskRunner::Create(base::MessageLoopProxy::current())),
+          BlockingTaskRunner::Create(base::ThreadTaskRunnerHandle::Get())),
       texture_mailbox_deleter_(
-          new TextureMailboxDeleter(base::MessageLoopProxy::current())) {
+          new TextureMailboxDeleter(base::ThreadTaskRunnerHandle::Get())) {
   manager_->AddObserver(this);
 }
 
@@ -198,6 +198,33 @@ void Display::SetMemoryPolicy(const ManagedMemoryPolicy& policy) {
 
 void Display::OnDraw() {
   NOTREACHED();
+}
+
+void Display::SetNeedsRedrawRect(const gfx::Rect& damage_rect) {
+  NOTREACHED();
+}
+
+void Display::ReclaimResources(const CompositorFrameAck* ack) {
+  NOTREACHED();
+}
+
+void Display::SetExternalDrawConstraints(
+    const gfx::Transform& transform,
+    const gfx::Rect& viewport,
+    const gfx::Rect& clip,
+    const gfx::Rect& viewport_rect_for_tile_priority,
+    const gfx::Transform& transform_for_tile_priority,
+    bool resourceless_software_draw) {
+  NOTREACHED();
+}
+
+void Display::SetTreeActivationCallback(const base::Closure& callback) {
+  NOTREACHED();
+}
+
+void Display::SetFullRootLayerDamage() {
+  if (aggregator_ && !current_surface_id_.is_null())
+    aggregator_->SetFullDamageForSurface(current_surface_id_);
 }
 
 void Display::OnSurfaceDamaged(SurfaceId surface_id, bool* changed) {

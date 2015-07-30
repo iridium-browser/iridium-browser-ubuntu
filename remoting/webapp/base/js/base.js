@@ -215,6 +215,28 @@ base.deepCopy = function(value) {
 };
 
 /**
+ * Returns a copy of the input object with all null/undefined fields
+ * removed.  Returns an empty object for a null/undefined input.
+ *
+ * @param {Object<string,?T>|undefined} input
+ * @return {!Object<string,T>}
+ * @template T
+ */
+base.copyWithoutNullFields = function(input) {
+  /** @const {!Object} */
+  var result = {};
+  if (input) {
+    for (var field in input) {
+      var value = /** @type {*} */ (input[field]);
+      if (value != null) {
+        result[field] = value;
+      }
+    }
+  }
+  return result;
+};
+
+/**
  * @type {boolean|undefined}
  * @private
  */
@@ -638,17 +660,51 @@ base.ChromeEventHook.prototype.dispose = function() {
 /**
  * A disposable repeating timer.
  *
+ * @param {Function} callback
+ * @param {number} interval
+ * @param {boolean=} opt_invokeNow Whether to invoke the callback now, default
+ *    to false.
+ *
  * @constructor
  * @implements {base.Disposable}
  */
-base.RepeatingTimer = function(/** Function */callback, /** number */interval) {
+base.RepeatingTimer = function(callback, interval, opt_invokeNow) {
   /** @private */
   this.intervalId_ = window.setInterval(callback, interval);
+  if (opt_invokeNow) {
+    callback();
+  }
 };
 
 base.RepeatingTimer.prototype.dispose = function() {
   window.clearInterval(this.intervalId_);
   this.intervalId_ = null;
+};
+
+/**
+ * A disposable one shot timer.
+ *
+ * @param {Function} callback
+ * @param {number} timeout
+ *
+ * @constructor
+ * @implements {base.Disposable}
+ */
+base.OneShotTimer = function(callback, timeout) {
+  var that = this;
+
+  /** @private */
+  this.timerId_ = window.setTimeout(function() {
+    that.timerId_ = null;
+    callback();
+  }, timeout);
+};
+
+base.OneShotTimer.prototype.dispose = function() {
+  if (this.timerId_ !== null) {
+    window.clearTimeout(this.timerId_);
+    this.timerId_ = null;
+  }
 };
 
 /**
@@ -688,6 +744,22 @@ base.generateXsrfToken = function() {
 };
 
 /**
+ * @return {string} A random UUID.
+ */
+base.generateUuid = function() {
+  var random = new Uint16Array(8);
+  window.crypto.getRandomValues(random);
+  /** @type {Array<string>} */
+  var e = new Array();
+  for (var i = 0; i < 8; i++) {
+    e[i] = (/** @type {number} */ (random[i]) + 0x10000).
+        toString(16).substring(1);
+  }
+  return e[0] + e[1] + '-' + e[2] + '-' + e[3] + '-' +
+      e[4] + '-' + e[5] + e[6] + e[7];
+};
+
+/**
  * @param {string} jsonString A JSON-encoded string.
  * @return {Object|undefined} The decoded object, or undefined if the string
  *     cannot be parsed.
@@ -701,14 +773,32 @@ base.jsonParseSafe = function(jsonString) {
 };
 
 /**
- * Size the current window to fit its content vertically.
+ * Return the current time as a formatted string suitable for logging.
+ *
+ * @return {string} The current time, formatted as the standard ISO string.
+ *     [yyyy-mm-ddDhh:mm:ss.xyz]
  */
-base.resizeWindowToContent = function() {
+base.timestamp = function() {
+  return '[' + new Date().toISOString() + ']';
+};
+
+/**
+ * Size the current window to fit its content.
+ * @param {boolean=} opt_centerWindow If true, position the window in the
+ *     center of the screen after resizing it.
+ */
+base.resizeWindowToContent = function(opt_centerWindow) {
   var appWindow = chrome.app.window.current();
-  var outerBounds = appWindow.outerBounds;
-  var borderY = outerBounds.height - appWindow.innerBounds.height;
-  appWindow.resizeTo(outerBounds.width, document.body.clientHeight + borderY);
-  // Sometimes, resizing the window causes its position to be reset to (0, 0),
-  // so restore it explicitly.
-  appWindow.moveTo(outerBounds.left, outerBounds.top);
+  var borderX = appWindow.outerBounds.width - appWindow.innerBounds.width;
+  var borderY = appWindow.outerBounds.height - appWindow.innerBounds.height;
+  var width = Math.ceil(document.documentElement.scrollWidth + borderX);
+  var height = Math.ceil(document.documentElement.scrollHeight + borderY);
+  appWindow.outerBounds.width = width;
+  appWindow.outerBounds.height = height;
+  if (opt_centerWindow) {
+    var screenWidth = screen.availWidth;
+    var screenHeight = screen.availHeight;
+    appWindow.outerBounds.left = Math.round((screenWidth - width) / 2);
+    appWindow.outerBounds.top = Math.round((screenHeight - height) / 2);
+  }
 };

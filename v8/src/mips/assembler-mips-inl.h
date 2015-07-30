@@ -123,7 +123,7 @@ void RelocInfo::apply(intptr_t delta, ICacheFlushMode icache_flush_mode) {
     uint32_t scope2 = reinterpret_cast<uint32_t>(pc_) & ~kImm28Mask;
 
     if (scope1 != scope2) {
-      Assembler::JumpLabelToJumpRegister(pc_);
+      Assembler::JumpToJumpRegister(pc_);
     }
   }
   if (IsInternalReference(rmode_) || IsInternalReferenceEncoded(rmode_)) {
@@ -500,8 +500,8 @@ void Assembler::CheckBuffer() {
 }
 
 
-void Assembler::CheckTrampolinePoolQuick() {
-  if (pc_offset() >= next_buffer_check_) {
+void Assembler::CheckTrampolinePoolQuick(int extra_instructions) {
+  if (pc_offset() >= next_buffer_check_ - extra_instructions * kInstrSize) {
     CheckTrampolinePool();
   }
 }

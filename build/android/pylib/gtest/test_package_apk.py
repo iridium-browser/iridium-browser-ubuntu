@@ -34,6 +34,10 @@ class TestPackageApk(TestPackage):
       self.suite_path = os.path.join(
           constants.GetOutDirectory(), 'apks', '%s.apk' % suite_name)
       self._package_info = constants.PACKAGE_INFO['content_browsertests']
+    elif suite_name == 'components_browsertests':
+      self.suite_path = os.path.join(
+          constants.GetOutDirectory(), 'apks', '%s.apk' % suite_name)
+      self._package_info = constants.PACKAGE_INFO['components_browsertests']
     else:
       self.suite_path = os.path.join(
           constants.GetOutDirectory(), '%s_apk' % suite_name,
@@ -46,8 +50,8 @@ class TestPackageApk(TestPackage):
 
   def _GetFifo(self):
     # The test.fifo path is determined by:
-    # testing/android/java/src/org/chromium/native_test/
-    #     ChromeNativeTestActivity.java and
+    # testing/android/native_test/java/src/org/chromium/native_test/
+    #     NativeTestActivity.java and
     # testing/android/native_test_launcher.cc
     return '/data/data/' + self._package_info.package + '/files/test.fifo'
 
@@ -85,6 +89,15 @@ class TestPackageApk(TestPackage):
       try:
         device.RunShellCommand(
             'rm -r %s/content_shell' % device.GetExternalStoragePath(),
+            timeout=60 * 2)
+      except device_errors.CommandFailedError:
+        # TODO(jbudorick) Handle this exception appropriately once the
+        #                 conversions are done.
+        pass
+    elif self.suite_name == 'components_browsertests':
+      try:
+        device.RunShellCommand(
+            'rm -r %s/components_shell' % device.GetExternalStoragePath(),
             timeout=60 * 2)
       except device_errors.CommandFailedError:
         # TODO(jbudorick) Handle this exception appropriately once the

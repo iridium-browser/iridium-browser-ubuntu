@@ -146,9 +146,6 @@ void DirectRenderer::SetEnlargePassTextureAmountForTesting(
 
 void DirectRenderer::DecideRenderPassAllocationsForFrame(
     const RenderPassList& render_passes_in_draw_order) {
-  if (!resource_provider_)
-    return;
-
   base::hash_map<RenderPassId, gfx::Size> render_passes_in_frame;
   for (size_t i = 0; i < render_passes_in_draw_order.size(); ++i)
     render_passes_in_frame.insert(std::pair<RenderPassId, gfx::Size>(
@@ -156,11 +153,8 @@ void DirectRenderer::DecideRenderPassAllocationsForFrame(
         RenderPassTextureSize(render_passes_in_draw_order[i])));
 
   std::vector<RenderPassId> passes_to_delete;
-  base::ScopedPtrHashMap<RenderPassId, ScopedResource>::const_iterator
-      pass_iter;
-  for (pass_iter = render_pass_textures_.begin();
-       pass_iter != render_pass_textures_.end();
-       ++pass_iter) {
+  for (auto pass_iter = render_pass_textures_.begin();
+       pass_iter != render_pass_textures_.end(); ++pass_iter) {
     base::hash_map<RenderPassId, gfx::Size>::const_iterator it =
         render_passes_in_frame.find(pass_iter->first);
     if (it == render_passes_in_frame.end()) {
@@ -217,9 +211,6 @@ void DirectRenderer::DrawFrame(RenderPassList* render_passes_in_draw_order,
   frame.disable_picture_quad_image_filtering =
       disable_picture_quad_image_filtering;
 
-  overlay_processor_->ProcessForOverlays(render_passes_in_draw_order,
-                                         &frame.overlay_list);
-
   EnsureBackbuffer();
 
   // Only reshape when we know we are going to draw. Otherwise, the reshape
@@ -228,6 +219,14 @@ void DirectRenderer::DrawFrame(RenderPassList* render_passes_in_draw_order,
   output_surface_->Reshape(device_viewport_rect.size(), device_scale_factor);
 
   BeginDrawingFrame(&frame);
+
+  // If we have any copy requests, we can't remove any quads for overlays,
+  // otherwise the framebuffer will be missing the overlay contents.
+  if (root_render_pass->copy_requests.empty()) {
+    overlay_processor_->ProcessForOverlays(render_passes_in_draw_order,
+                                           &frame.overlay_list);
+  }
+
   for (size_t i = 0; i < render_passes_in_draw_order->size(); ++i) {
     RenderPass* pass = render_passes_in_draw_order->at(i);
     DrawRenderPass(&frame, pass);
@@ -484,7 +483,6 @@ bool DirectRenderer::UseRenderPass(DrawingFrame* frame,
                                    const RenderPass* render_pass) {
   frame->current_render_pass = render_pass;
   frame->current_texture = NULL;
-
   if (render_pass == frame->root_render_pass) {
     BindFramebufferToOutputSurface(frame);
     InitializeViewport(frame,
@@ -500,9 +498,10 @@ bool DirectRenderer::UseRenderPass(DrawingFrame* frame,
   gfx::Size size = RenderPassTextureSize(render_pass);
   size.Enlarge(enlarge_pass_texture_amount_.x(),
                enlarge_pass_texture_amount_.y());
-  if (!texture->id())
+  if (!texture->id()) {
     texture->Allocate(
         size, ResourceProvider::TEXTURE_HINT_IMMUTABLE_FRAMEBUFFER, RGBA_8888);
+  }
   DCHECK(texture->id());
 
   if (BindFramebufferToTexture(frame, texture, render_pass->output_rect)) {

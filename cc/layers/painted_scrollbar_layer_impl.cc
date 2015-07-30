@@ -109,6 +109,7 @@ void PaintedScrollbarLayerImpl::AppendQuads(
                  scaled_visible_thumb_quad_rect, thumb_resource_id,
                  premultipled_alpha, uv_top_left, uv_bottom_right,
                  SK_ColorTRANSPARENT, opacity, flipped, nearest_neighbor);
+    ValidateQuadResources(quad);
   }
 
   gfx::Rect track_quad_rect(bounds());
@@ -128,6 +129,7 @@ void PaintedScrollbarLayerImpl::AppendQuads(
                  scaled_visible_track_quad_rect, track_resource_id,
                  premultipled_alpha, uv_top_left, uv_bottom_right,
                  SK_ColorTRANSPARENT, opacity, flipped, nearest_neighbor);
+    ValidateQuadResources(quad);
   }
 }
 

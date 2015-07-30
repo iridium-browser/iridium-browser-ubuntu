@@ -118,8 +118,6 @@ base::string16 PluginTypeToString(int type) {
       return l10n_util::GetStringUTF16(IDS_PLUGINS_PPAPI_IN_PROCESS);
     case WebPluginInfo::PLUGIN_TYPE_PEPPER_OUT_OF_PROCESS:
       return l10n_util::GetStringUTF16(IDS_PLUGINS_PPAPI_OUT_OF_PROCESS);
-    case WebPluginInfo::PLUGIN_TYPE_PEPPER_UNSANDBOXED:
-      return l10n_util::GetStringUTF16(IDS_PLUGINS_PPAPI_UNSANDBOXED);
     case WebPluginInfo::PLUGIN_TYPE_BROWSER_PLUGIN:
       return l10n_util::GetStringUTF16(IDS_PLUGINS_BROWSER_PLUGIN);
   }
@@ -523,10 +521,7 @@ base::RefCountedMemory* PluginsUI::GetFaviconResourceBytes(
 // static
 void PluginsUI::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterBooleanPref(
-      prefs::kPluginsShowDetails,
-      false,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kPluginsShowDetails, false);
   registry->RegisterDictionaryPref(
       prefs::kContentSettingsPluginWhitelist,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);

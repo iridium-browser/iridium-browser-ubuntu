@@ -14,6 +14,7 @@
 #include "base/time/time.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/signin/account_tracker_service_factory.h"
 #include "chrome/browser/ui/autofill/account_chooser_model.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_controller_impl.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_i18n_input.h"
@@ -43,6 +44,7 @@
 #include "components/autofill/core/common/autofill_switches.h"
 #include "components/autofill/core/common/form_data.h"
 #include "components/autofill/core/common/form_field_data.h"
+#include "components/signin/core/browser/account_tracker_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/navigation_details.h"
@@ -104,28 +106,31 @@ class TestAutofillDialogController : public AutofillDialogControllerImpl {
         use_validation_(false),
         sign_in_user_index_(0U),
         weak_ptr_factory_(this) {
+    Profile* profile =
+        Profile::FromBrowserContext(contents->GetBrowserContext());
     test_manager_.Init(
         NULL,
-        Profile::FromBrowserContext(contents->GetBrowserContext())->GetPrefs(),
+        profile->GetPrefs(),
+        AccountTrackerServiceFactory::GetForProfile(profile),
         false);
   }
 
-  virtual ~TestAutofillDialogController() {}
+  ~TestAutofillDialogController() override {}
 
   GURL FakeSignInUrl() const {
     return GURL(chrome::kChromeUIVersionURL);
   }
 
-  virtual void ShowSignIn(const GURL& url) override {
+  void ShowSignIn(const GURL& url) override {
     AutofillDialogControllerImpl::ShowSignIn(FakeSignInUrl());
   }
 
-  virtual void ViewClosed() override {
+  void ViewClosed() override {
     message_loop_runner_->Quit();
     AutofillDialogControllerImpl::ViewClosed();
   }
 
-  virtual base::string16 InputValidityMessage(
+  base::string16 InputValidityMessage(
       DialogSection section,
       ServerFieldType type,
       const base::string16& value) override {
@@ -135,7 +140,7 @@ class TestAutofillDialogController : public AutofillDialogControllerImpl {
         section, type, value);
   }
 
-  virtual ValidityMessages InputsAreValid(
+  ValidityMessages InputsAreValid(
       DialogSection section,
       const FieldValueMap& inputs) override {
     if (!use_validation_)
@@ -145,7 +150,7 @@ class TestAutofillDialogController : public AutofillDialogControllerImpl {
 
   // Saving to Chrome is tested in AutofillDialogControllerImpl unit tests.
   // TODO(estade): test that the view defaults to saving to Chrome.
-  virtual bool ShouldOfferToSaveInChrome() const override {
+  bool ShouldOfferToSaveInChrome() const override {
     return true;
   }
 
@@ -159,7 +164,7 @@ class TestAutofillDialogController : public AutofillDialogControllerImpl {
 
   MOCK_METHOD0(LoadRiskFingerprintData, void());
 
-  virtual std::vector<DialogNotification> CurrentNotifications() override {
+  std::vector<DialogNotification> CurrentNotifications() override {
     return notifications_;
   }
 
@@ -201,20 +206,19 @@ class TestAutofillDialogController : public AutofillDialogControllerImpl {
   }
 
  protected:
-  virtual PersonalDataManager* GetManager() const override {
+  PersonalDataManager* GetManager() const override {
     return &const_cast<TestAutofillDialogController*>(this)->test_manager_;
   }
 
-  virtual AddressValidator* GetValidator() override {
+  AddressValidator* GetValidator() override {
     return &mock_validator_;
   }
 
-  virtual wallet::WalletClient* GetWalletClient() override {
+  wallet::WalletClient* GetWalletClient() override {
     return &mock_wallet_client_;
   }
 
-  virtual bool IsSignInContinueUrl(const GURL& url, size_t* user_index) const
-      override {
+  bool IsSignInContinueUrl(const GURL& url, size_t* user_index) const override {
     *user_index = sign_in_user_index_;
     return url == wallet::GetSignInContinueUrl();
   }

@@ -1,11 +1,13 @@
 include_rules = [
   "+chromeos",
+  "+components/guest_view",
   "+components/keyed_service",
   "+components/pref_registry",
   "+components/sessions",
   "+components/storage_monitor",
   "+components/ui/zoom",
   "+components/update_client",
+  "+components/variations",
   "+components/web_cache",
   "+components/web_modal",
   "+content/public/browser",

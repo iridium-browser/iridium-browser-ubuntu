@@ -286,7 +286,7 @@ EGLint SwapChain9::swapRect(EGLint x, EGLint y, EGLint width, EGLint height)
         device->SetStreamSourceFreq(streamIndex, 1);
     }
 
-    D3DVIEWPORT9 viewport = {0, 0, mWidth, mHeight, 0.0f, 1.0f};
+    D3DVIEWPORT9 viewport = {0, 0, static_cast<DWORD>(mWidth), static_cast<DWORD>(mHeight), 0.0f, 1.0f};
     device->SetViewport(&viewport);
 
     float x1 = x - 0.5f;
@@ -382,12 +382,6 @@ IDirect3DTexture9 *SwapChain9::getOffscreenTexture()
     }
 
     return mOffscreenTexture;
-}
-
-SwapChain9 *SwapChain9::makeSwapChain9(SwapChainD3D *swapChain)
-{
-    ASSERT(HAS_DYNAMIC_TYPE(SwapChain9*, swapChain));
-    return static_cast<SwapChain9*>(swapChain);
 }
 
 void SwapChain9::recreate()

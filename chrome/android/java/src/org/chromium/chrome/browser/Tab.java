@@ -36,20 +36,19 @@ import org.chromium.chrome.browser.contextmenu.ContextMenuParams;
 import org.chromium.chrome.browser.contextmenu.ContextMenuPopulator;
 import org.chromium.chrome.browser.contextmenu.ContextMenuPopulatorWrapper;
 import org.chromium.chrome.browser.contextmenu.EmptyChromeContextMenuItemDelegate;
-import org.chromium.chrome.browser.dom_distiller.DomDistillerFeedbackReporter;
 import org.chromium.chrome.browser.fullscreen.FullscreenManager;
 import org.chromium.chrome.browser.infobar.InfoBarContainer;
 import org.chromium.chrome.browser.metrics.UmaSessionStats;
 import org.chromium.chrome.browser.metrics.UmaUtils;
 import org.chromium.chrome.browser.printing.TabPrinter;
 import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.ssl.ConnectionSecurityHelper;
+import org.chromium.chrome.browser.ssl.ConnectionSecurityHelperSecurityLevel;
 import org.chromium.chrome.browser.tab.SadTabViewFactory;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabSelectionType;
 import org.chromium.chrome.browser.tabmodel.TabModelBase;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
-import org.chromium.chrome.browser.toolbar.ToolbarModel;
-import org.chromium.chrome.browser.ui.toolbar.ToolbarModelSecurityLevel;
 import org.chromium.components.navigation_interception.InterceptNavigationDelegate;
 import org.chromium.content.browser.ContentView;
 import org.chromium.content.browser.ContentViewClient;
@@ -156,6 +155,9 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
     /** Manages app banners shown for this tab. */
     private AppBannerManager mAppBannerManager;
 
+    /** Controls overscroll pull-to-refresh behavior for this tab. */
+    private SwipeRefreshHandler mSwipeRefreshHandler;
+
     /** The sync id of the Tab if session sync is enabled. */
     private int mSyncId;
 
@@ -178,7 +180,6 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
     private ContentViewClient mContentViewClient;
     private WebContentsObserver mWebContentsObserver;
     private TabChromeWebContentsDelegateAndroid mWebContentsDelegate;
-    private DomDistillerFeedbackReporter mDomDistillerFeedbackReporter;
 
     /**
      * If this tab was opened from another tab, store the id of the tab that
@@ -387,6 +388,12 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
 
         @Override
         public void showRepostFormWarningDialog() {
+            // When the dialog is visible, keeping the refresh animation active
+            // in the background is distracting and unnecessary (and likely to
+            // jank when the dialog is shown).
+            if (mSwipeRefreshHandler != null) {
+                mSwipeRefreshHandler.reset();
+            }
             RepostFormWarningDialog warningDialog = new RepostFormWarningDialog(
                     new Runnable() {
                         @Override
@@ -417,7 +424,8 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
         @Override
         public void navigationStateChanged(int flags) {
             if ((flags & InvalidateTypes.TITLE) != 0) {
-                for (TabObserver observer : mObservers) observer.onTitleUpdated(Tab.this);
+                // Update cached title then notify observers.
+                updateTitle();
             }
             if ((flags & InvalidateTypes.URL) != 0) {
                 for (TabObserver observer : mObservers) observer.onUrlUpdated(Tab.this);
@@ -473,7 +481,7 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
      * ContentViewClient that provides basic tab functionality and is meant to be extended
      * by child classes.
      */
-    protected class TabContentViewClient extends ChromeContentViewClient {
+    protected class TabContentViewClient extends ContentViewClient {
         @Override
         public void onUpdateTitle(String title) {
             updateTitle(title);
@@ -633,7 +641,10 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
                 observer.onDidNavigateMainFrame(
                         Tab.this, url, baseUrl, isNavigationToDifferentPage,
                         isFragmentNavigation, statusCode);
+            }
 
+            if (mSwipeRefreshHandler != null) {
+                mSwipeRefreshHandler.didStopRefreshing();
             }
         }
 
@@ -1133,11 +1144,11 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
     }
 
     /**
-     * @return The current {ToolbarModelSecurityLevel} for the tab.
+     * @return The current {@link ConnectionSecurityHelperSecurityLevel} for the tab.
      */
     // TODO(tedchoc): Remove this and transition all clients to use ToolbarModel directly.
     public int getSecurityLevel() {
-        return ToolbarModel.getSecurityLevelForWebContents(getWebContents());
+        return ConnectionSecurityHelper.getSecurityLevelForWebContents(getWebContents());
     }
 
     /**
@@ -1200,7 +1211,13 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
      * on both cold and warm starts.
      */
     public void onActivityStart() {
-        show(TabSelectionType.FROM_USER);
+        if (isHidden()) {
+            show(TabSelectionType.FROM_USER);
+        } else {
+            // The visible Tab's renderer process may have died after the activity was paused.
+            // Ensure that it's restored appropriately.
+            loadIfNeeded();
+        }
 
         // When resuming the activity, force an update to the fullscreen state to ensure a
         // subactivity did not change the fullscreen configuration of this ChromeTab's renderer in
@@ -1212,7 +1229,7 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
      * Called on the foreground tab when the Activity is stopped.
      */
     public void onActivityStop() {
-        hide();
+        // TODO(jdduke): Remove this method when all downstream callers have been removed.
     }
 
     /**
@@ -1391,13 +1408,24 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
     }
 
     /**
+     * TODO(dtrainor): Remove after method is no longer used downstream.
      * Used to get a list of Android {@link View}s that represent both the normal content as well as
-     * overlays.
+     * overlays.  This does not return {@link View}s for {@link NativePage}s.
      * @param content A {@link List} that will be populated with {@link View}s that represent all of
      *                the content in this {@link Tab}.
      */
     public void getAllViews(List<View> content) {
-        content.add(getView());
+        getAllContentViews(content);
+    }
+
+    /**
+     * Used to get a list of Android {@link View}s that represent both the normal content as well as
+     * overlays.  This does not return {@link View}s for {@link NativePage}s.
+     * @param content A {@link List} that will be populated with {@link View}s that represent all of
+     *                the content in this {@link Tab}.
+     */
+    public void getAllContentViews(List<View> content) {
+        if (!isNativePage()) content.add(getView());
         for (int i = 0; i < mOverlayContentViewCores.size(); i++) {
             content.add(mOverlayContentViewCores.get(i).getContainerView());
         }
@@ -1478,10 +1506,6 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
         updateTitle();
         removeSadTabIfPresent();
 
-        if (getContentViewCore() != null) {
-            getContentViewCore().stopCurrentAccessibilityNotifications();
-        }
-
         clearHungRendererState();
 
         for (TabObserver observer : mObservers) observer.onPageLoadStarted(this);
@@ -1537,7 +1561,7 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
      */
     protected void initContentViewCore(WebContents webContents) {
         ContentViewCore cvc = new ContentViewCore(mContext);
-        ContentView cv = ContentView.newInstance(mContext, cvc);
+        ContentView cv = new ContentView(mContext, cvc);
         cv.setContentDescription(mContext.getResources().getString(
                 R.string.accessibility_content_view));
         cvc.initialize(cv, cv, webContents, getWindowAndroid());
@@ -1597,9 +1621,8 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
         }
         mInfoBarContainer.setContentViewCore(mContentViewCore);
 
-        if (DomDistillerFeedbackReporter.isEnabled() && mDomDistillerFeedbackReporter == null) {
-            mDomDistillerFeedbackReporter = new DomDistillerFeedbackReporter(this);
-        }
+        mSwipeRefreshHandler = new SwipeRefreshHandler(mContext);
+        mSwipeRefreshHandler.setContentViewCore(mContentViewCore);
 
         for (TabObserver observer : mObservers) observer.onContentChanged(this);
 
@@ -1809,6 +1832,7 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
      * @return The bitmap of the favicon scaled to 16x16dp. null if no favicon
      *         is specified or it requires the default favicon.
      */
+    @CalledByNative
     public Bitmap getFavicon() {
         // If we have no content or a native page, return null.
         if (getContentViewCore() == null) return null;
@@ -2034,6 +2058,10 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
             mInfoBarContainer.removeFromParentView();
             mInfoBarContainer.setContentViewCore(null);
         }
+        if (mSwipeRefreshHandler != null) {
+            mSwipeRefreshHandler.setContentViewCore(null);
+            mSwipeRefreshHandler = null;
+        }
         mContentViewParent = null;
         mContentViewCore.destroy();
         mContentViewCore = null;
@@ -2147,7 +2175,7 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
     public void swapWebContents(
             WebContents webContents, boolean didStartLoad, boolean didFinishLoad) {
         ContentViewCore cvc = new ContentViewCore(mContext);
-        ContentView cv = ContentView.newInstance(mContext, cvc);
+        ContentView cv = new ContentView(mContext, cvc);
         cv.setContentDescription(mContext.getResources().getString(
                 R.string.accessibility_content_view));
         cvc.initialize(cv, cv, webContents, getWindowAndroid());
@@ -2166,7 +2194,7 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
      * @param didFinishLoad Whether WebContentsObserver::DidFinishLoad() has
      *         already been called.
      */
-    protected void swapContentViewCore(ContentViewCore newContentViewCore,
+    public void swapContentViewCore(ContentViewCore newContentViewCore,
             boolean deleteOldNativeWebContents, boolean didStartLoad, boolean didFinishLoad) {
         int originalWidth = 0;
         int originalHeight = 0;
@@ -2423,8 +2451,9 @@ public class Tab implements ViewGroup.OnHierarchyChangeListener,
                 && !url.startsWith(UrlConstants.CHROME_NATIVE_SCHEME);
 
         int securityState = getSecurityLevel();
-        enableHidingTopControls &= (securityState != ToolbarModelSecurityLevel.SECURITY_ERROR
-                && securityState != ToolbarModelSecurityLevel.SECURITY_WARNING);
+        enableHidingTopControls &=
+                (securityState != ConnectionSecurityHelperSecurityLevel.SECURITY_ERROR
+                        && securityState != ConnectionSecurityHelperSecurityLevel.SECURITY_WARNING);
 
         enableHidingTopControls &=
                 !AccessibilityUtil.isAccessibilityEnabled(getApplicationContext());

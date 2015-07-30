@@ -43,7 +43,8 @@ class GCMClientFactory;
 class GCMDelayedTaskController;
 
 // GCMDriver implementation for desktop and Chrome OS, using GCMClient.
-class GCMDriverDesktop : public GCMDriver {
+class GCMDriverDesktop : public GCMDriver,
+                         public InstanceIDStore {
  public:
   GCMDriverDesktop(
       scoped_ptr<GCMClientFactory> gcm_client_factory,
@@ -83,6 +84,16 @@ class GCMDriverDesktop : public GCMDriver {
   base::Time GetLastTokenFetchTime() override;
   void SetLastTokenFetchTime(const base::Time& time) override;
   void WakeFromSuspendForHeartbeat(bool wake) override;
+  InstanceIDStore* GetInstanceIDStore() override;
+  void AddHeartbeatInterval(const std::string& scope, int interval_ms) override;
+  void RemoveHeartbeatInterval(const std::string& scope) override;
+
+  // InstanceIDStore overrides:
+  void AddInstanceIDData(const std::string& app_id,
+                         const std::string& instance_id_data) override;
+  void RemoveInstanceIDData(const std::string& app_id) override;
+  void GetInstanceIDData(const std::string& app_id,
+                         const GetInstanceIDDataCallback& callback) override;
 
   // Exposed for testing purpose.
   bool gcm_enabled() const { return gcm_enabled_; }
@@ -130,6 +141,8 @@ class GCMDriverDesktop : public GCMDriver {
   void OnDisconnected();
 
   void GetGCMStatisticsFinished(const GCMClient::GCMStatistics& stats);
+  void GetInstanceIDDataFinished(const std::string& app_id,
+                                 const std::string& instance_id_data);
 
   scoped_ptr<GCMChannelStatusSyncer> gcm_channel_status_syncer_;
 
@@ -171,6 +184,10 @@ class GCMDriverDesktop : public GCMDriver {
 
   // Callback for GetGCMStatistics.
   GetGCMStatisticsCallback request_gcm_statistics_callback_;
+
+  // Callbacks for GetInstanceIDData.
+  std::map<std::string, GetInstanceIDDataCallback>
+      get_instance_id_data_callbacks_;
 
   // Used to pass a weak pointer to the IO worker.
   base::WeakPtrFactory<GCMDriverDesktop> weak_ptr_factory_;

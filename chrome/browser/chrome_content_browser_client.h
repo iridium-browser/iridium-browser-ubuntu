@@ -50,6 +50,9 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
 
   content::BrowserMainParts* CreateBrowserMainParts(
       const content::MainFunctionParams& parameters) override;
+  void PostAfterStartupTask(const tracked_objects::Location& from_here,
+                            const scoped_refptr<base::TaskRunner>& task_runner,
+                            const base::Closure& task) override;
   std::string GetStoragePartitionIdForSite(
       content::BrowserContext* browser_context,
       const GURL& site) override;
@@ -117,7 +120,9 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
                      content::ResourceContext* context) override;
   bool AllowServiceWorker(const GURL& scope,
                           const GURL& first_party,
-                          content::ResourceContext* context) override;
+                          content::ResourceContext* context,
+                          int render_process_id,
+                          int render_frame_id) override;
   bool AllowGetCookie(const GURL& url,
                       const GURL& first_party,
                       const net::CookieList& cookie_list,
@@ -241,14 +246,12 @@ class ChromeContentBrowserClient : public content::ContentBrowserClient {
       content::FileDescriptorInfo* mappings) override;
 #endif
 #if defined(OS_WIN)
-  virtual const wchar_t* GetResourceDllName() override;
-  virtual void PreSpawnRenderer(sandbox::TargetPolicy* policy,
-                                bool* success) override;
+  const wchar_t* GetResourceDllName() override;
+  void PreSpawnRenderer(sandbox::TargetPolicy* policy, bool* success) override;
 #endif
-  bool CheckMediaAccessPermission(content::BrowserContext* browser_context,
-                                  const GURL& security_origin,
-                                  content::MediaStreamType type) override;
-
+  void OverrideRenderFrameMojoServices(
+      content::ServiceRegistry* registry,
+      content::RenderFrameHost* render_frame_host) override;
   void OpenURL(content::BrowserContext* browser_context,
                const content::OpenURLParams& params,
                const base::Callback<void(content::WebContents*)>& callback)

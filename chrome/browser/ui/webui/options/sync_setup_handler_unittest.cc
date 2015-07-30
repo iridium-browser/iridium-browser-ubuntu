@@ -276,7 +276,7 @@ class SyncSetupHandlerTest : public testing::Test {
         SigninManagerFactory::GetForProfile(profile_.get()));
     std::string username = GetTestUser();
     if (!username.empty())
-      mock_signin_->SetAuthenticatedUsername(username);
+      mock_signin_->SetAuthenticatedAccountInfo(username, username);
 
     mock_pss_ = static_cast<ProfileSyncServiceMock*>(
         ProfileSyncServiceFactory::GetInstance()->SetTestingFactoryAndUse(
@@ -865,10 +865,10 @@ TEST_F(SyncSetupHandlerTest, ShowSigninOnAuthError) {
       GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS);
 
   SetupInitializedProfileSyncService();
-  mock_signin_->SetAuthenticatedUsername(kTestUser);
+  mock_signin_->SetAuthenticatedAccountInfo(kTestUser, kTestUser);
   FakeAuthStatusProvider provider(
       SigninErrorControllerFactory::GetForProfile(profile_.get()));
-  provider.SetAuthError(kTestUser, kTestUser, error_);
+  provider.SetAuthError(kTestUser, error_);
   EXPECT_CALL(*mock_pss_, IsSyncEnabledAndLoggedIn())
       .WillRepeatedly(Return(true));
   EXPECT_CALL(*mock_pss_, IsOAuthRefreshTokenAvailable())

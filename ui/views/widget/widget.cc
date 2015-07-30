@@ -15,7 +15,6 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/compositor/compositor.h"
 #include "ui/compositor/layer.h"
-#include "ui/compositor/paint_context.h"
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
 #include "ui/gfx/image/image_skia.h"
@@ -390,6 +389,8 @@ gfx::NativeWindow Widget::GetNativeWindow() const {
 }
 
 void Widget::AddObserver(WidgetObserver* observer) {
+  // Make sure that there is no nullptr in observer list. crbug.com/471649.
+  CHECK(observer);
   observers_.AddObserver(observer);
 }
 
@@ -1169,15 +1170,6 @@ void Widget::OnNativeWidgetEndUserBoundsChange() {
 
 bool Widget::HasFocusManager() const {
   return !!focus_manager_.get();
-}
-
-bool Widget::OnNativeWidgetPaintAccelerated(const gfx::Rect& dirty_region) {
-  ui::Compositor* compositor = GetCompositor();
-  if (!compositor)
-    return false;
-
-  compositor->ScheduleRedrawRect(dirty_region);
-  return true;
 }
 
 void Widget::OnNativeWidgetPaint(const ui::PaintContext& context) {

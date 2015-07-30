@@ -4,7 +4,10 @@
 
 #include "content/child/notifications/notification_manager.h"
 
+#include <cmath>
+
 #include "base/lazy_instance.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/threading/thread_local.h"
@@ -89,11 +92,29 @@ void NotificationManager::showPersistent(
     blink::WebServiceWorkerRegistration* service_worker_registration,
     blink::WebNotificationShowCallbacks* callbacks) {
   DCHECK(service_worker_registration);
-  int64 service_worker_registration_id =
+  int64_t service_worker_registration_id =
       static_cast<WebServiceWorkerRegistrationImpl*>(
           service_worker_registration)->registration_id();
 
   scoped_ptr<blink::WebNotificationShowCallbacks> owned_callbacks(callbacks);
+
+  // Verify that the author-provided payload size does not exceed our limit.
+  // This is an implementation-defined limit to prevent abuse of notification
+  // data as a storage mechanism. A UMA histogram records the requested sizes,
+  // which enables us to track how much data authors are attempting to store.
+  //
+  // If the size exceeds this limit, reject the showNotification() promise. This
+  // is outside of the boundaries set by the specification, but it gives authors
+  // an indication that something has gone wrong.
+  size_t author_data_size = notification_data.data.size();
+  UMA_HISTOGRAM_MEMORY_KB("Notifications.AuthorDataSizeKB",
+                          static_cast<int>(ceil(author_data_size / 1024.0)));
+
+  if (author_data_size > PlatformNotificationData::kMaximumDeveloperDataSize) {
+    owned_callbacks->onError();
+    return;
+  }
+
   if (notification_data.icon.isEmpty()) {
     DisplayPersistentNotification(origin,
                                   notification_data,
@@ -125,7 +146,7 @@ void NotificationManager::getNotifications(
           service_worker_registration);
 
   GURL origin = GURL(service_worker_registration_impl->scope()).GetOrigin();
-  int64 service_worker_registration_id =
+  int64_t service_worker_registration_id =
       service_worker_registration_impl->registration_id();
 
   // TODO(peter): GenerateNotificationId is more of a request id. Consider
@@ -164,10 +185,10 @@ void NotificationManager::close(blink::WebNotificationDelegate* delegate) {
 
 void NotificationManager::closePersistent(
     const blink::WebSerializedOrigin& origin,
-    const blink::WebString& persistent_notification_id) {
+    int64_t persistent_notification_id) {
   thread_safe_sender_->Send(new PlatformNotificationHostMsg_ClosePersistent(
       GURL(origin.string()),
-      base::UTF16ToUTF8(persistent_notification_id)));
+      persistent_notification_id));
 }
 
 void NotificationManager::notifyDelegateDestroyed(
@@ -266,8 +287,7 @@ void NotificationManager::OnDidGetNotifications(
 
   for (size_t i = 0; i < notification_infos.size(); ++i) {
     blink::WebPersistentNotificationInfo web_notification_info;
-    web_notification_info.persistentNotificationId =
-        blink::WebString::fromUTF8(notification_infos[i].first);
+    web_notification_info.persistentId = notification_infos[i].first;
     web_notification_info.data =
         ToWebNotificationData(notification_infos[i].second);
 
@@ -299,7 +319,7 @@ void NotificationManager::DisplayPageNotification(
 void NotificationManager::DisplayPersistentNotification(
     const blink::WebSerializedOrigin& origin,
     const blink::WebNotificationData& notification_data,
-    int64 service_worker_registration_id,
+    int64_t service_worker_registration_id,
     scoped_ptr<blink::WebNotificationShowCallbacks> callbacks,
     const SkBitmap& icon) {
   // TODO(peter): GenerateNotificationId is more of a request id. Consider

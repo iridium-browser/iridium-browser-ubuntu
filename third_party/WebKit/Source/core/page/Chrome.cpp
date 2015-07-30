@@ -43,6 +43,7 @@
 #include "public/platform/WebScreenInfo.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/Vector.h"
+#include <algorithm>
 
 namespace blink {
 
@@ -74,7 +75,7 @@ IntRect Chrome::viewportToScreen(const IntRect& rect) const
     return m_client->viewportToScreen(rect);
 }
 
-blink::WebScreenInfo Chrome::screenInfo() const
+WebScreenInfo Chrome::screenInfo() const
 {
     return m_client->screenInfo();
 }
@@ -84,9 +85,22 @@ void Chrome::contentsSizeChanged(LocalFrame* frame, const IntSize& size) const
     m_client->contentsSizeChanged(frame, size);
 }
 
-void Chrome::setWindowRect(const IntRect& rect) const
+void Chrome::setWindowRect(const IntRect& pendingRect) const
 {
-    m_client->setWindowRect(rect);
+    IntRect screen = screenInfo().availableRect;
+    IntRect window = pendingRect;
+
+    IntSize minimumSize = m_client->minimumWindowSize();
+    // Let size 0 pass through, since that indicates default size, not minimum size.
+    if (window.width())
+        window.setWidth(std::min(std::max(minimumSize.width(), window.width()), screen.width()));
+    if (window.height())
+        window.setHeight(std::min(std::max(minimumSize.height(), window.height()), screen.height()));
+
+    // Constrain the window position within the valid screen area.
+    window.setX(std::max(screen.x(), std::min(window.x(), screen.maxX() - window.width())));
+    window.setY(std::max(screen.y(), std::min(window.y(), screen.maxY() - window.height())));
+    m_client->setWindowRect(window);
 }
 
 IntRect Chrome::windowRect() const
@@ -273,7 +287,7 @@ void Chrome::setToolTip(const HitTestResult& result)
 
     // Lastly, for <input type="file"> that allow multiple files, we'll consider a tooltip for the selected filenames
     if (toolTip.isEmpty()) {
-        if (Node* node = result.innerNonSharedNode()) {
+        if (Node* node = result.innerNode()) {
             if (isHTMLInputElement(*node)) {
                 HTMLInputElement* input = toHTMLInputElement(node);
                 toolTip = input->defaultToolTip();
@@ -336,7 +350,13 @@ void Chrome::dispatchViewportPropertiesDidChange(const ViewportDescription& desc
 
 void Chrome::setCursor(const Cursor& cursor)
 {
+    m_lastSetMouseCursorForTesting = cursor;
     m_client->setCursor(cursor);
+}
+
+Cursor Chrome::getLastSetCursorForTesting() const
+{
+    return m_lastSetMouseCursorForTesting;
 }
 
 void Chrome::scheduleAnimation()

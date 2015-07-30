@@ -35,6 +35,8 @@ class BluetoothDeviceMac : public BluetoothDevice {
   bool IsConnectable() const override;
   bool IsConnecting() const override;
   UUIDList GetUUIDs() const override;
+  int16 GetInquiryRSSI() const override;
+  int16 GetInquiryTxPower() const override;
   bool ExpectingPinCode() const override;
   bool ExpectingPasskey() const override;
   bool ExpectingConfirmation() const override;

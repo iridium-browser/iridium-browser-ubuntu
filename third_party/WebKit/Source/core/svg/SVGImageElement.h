@@ -35,7 +35,7 @@ namespace blink {
 class SVGImageElement final : public SVGGraphicsElement,
                               public SVGURIReference {
     DEFINE_WRAPPERTYPEINFO();
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN_NESTED(SVGImageElement, SVGGraphicsElement);
+    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(SVGImageElement);
 public:
     DECLARE_NODE_FACTORY(SVGImageElement);
     DECLARE_VIRTUAL_TRACE();
@@ -53,7 +53,6 @@ private:
 
     virtual bool isStructurallyExternal() const override { return !hrefString().isNull(); }
 
-    bool isSupportedAttribute(const QualifiedName&);
     virtual bool isPresentationAttribute(const QualifiedName&) const override;
     virtual bool isPresentationAttributeWithSVGDOM(const QualifiedName&) const override;
     virtual void collectStyleForPresentationAttribute(const QualifiedName&, const AtomicString&, MutableStylePropertySet*) override;

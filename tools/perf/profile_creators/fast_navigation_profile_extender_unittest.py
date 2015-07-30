@@ -6,9 +6,10 @@ import unittest
 from profile_creators.fast_navigation_profile_extender import (
     FastNavigationProfileExtender)
 from telemetry.core import util
+from telemetry.unittest_util import options_for_unittests
 
 util.AddDirToPythonPath(util.GetTelemetryDir(), 'third_party', 'mock')
-import mock
+import mock  # pylint: disable=import-error
 
 
 class FakeTab(object):
@@ -38,7 +39,8 @@ class FakeBrowser(object):
 class FastNavigationProfileExtenderTest(unittest.TestCase):
   def testPerformNavigations(self):
     maximum_batch_size = 15
-    extender = FastNavigationProfileExtender(maximum_batch_size)
+    options = options_for_unittests.GetCopy()
+    extender = FastNavigationProfileExtender(options, maximum_batch_size)
 
     navigation_urls = []
     for i in range(extender._NUM_TABS):

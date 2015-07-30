@@ -44,6 +44,11 @@ DefaultAudioDestinationHandler::DefaultAudioDestinationHandler(AudioNode& node)
     m_channelInterpretation = AudioBus::Speakers;
 }
 
+PassRefPtr<DefaultAudioDestinationHandler> DefaultAudioDestinationHandler::create(AudioNode& node)
+{
+    return adoptRef(new DefaultAudioDestinationHandler(node));
+}
+
 DefaultAudioDestinationHandler::~DefaultAudioDestinationHandler()
 {
     ASSERT(!isInitialized());
@@ -139,7 +144,7 @@ void DefaultAudioDestinationHandler::setChannelCount(unsigned long channelCount,
 DefaultAudioDestinationNode::DefaultAudioDestinationNode(AudioContext& context)
     : AudioDestinationNode(context)
 {
-    setHandler(new DefaultAudioDestinationHandler(*this));
+    setHandler(DefaultAudioDestinationHandler::create(*this));
 }
 
 DefaultAudioDestinationNode* DefaultAudioDestinationNode::create(AudioContext* context)

@@ -104,7 +104,7 @@ CompositingStateTransitionType CompositingLayerAssigner::computeCompositedLayerU
 
         if (!layer->subtreeIsInvisible() && m_compositor->canBeComposited(layer) && requiresSquashing(layer->compositingReasons())) {
             // We can't compute at this time whether the squashing layer update is a no-op,
-            // since that requires walking the render layer tree.
+            // since that requires walking the paint layer tree.
             update = PutInSquashingLayer;
         } else if (layer->groupedMapping() || layer->lostGroupedMapping()) {
             update = RemoveFromSquashingLayer;
@@ -156,6 +156,9 @@ CompositingReasons CompositingLayerAssigner::getReasonsPreventingSquashing(const
 
     if (layer->scrollsWithRespectTo(&squashingLayer))
         return CompositingReasonScrollsWithRespectToSquashingLayer;
+
+    if (layer->scrollParent() && layer->hasCompositingDescendant())
+        return CompositingReasonScrollChildWithCompositedDescendants;
 
     const DeprecatedPaintLayer::AncestorDependentCompositingInputs& compositingInputs = layer->ancestorDependentCompositingInputs();
     const DeprecatedPaintLayer::AncestorDependentCompositingInputs& squashingLayerCompositingInputs = squashingLayer.ancestorDependentCompositingInputs();

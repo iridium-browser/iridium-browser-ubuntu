@@ -22,6 +22,26 @@ class GCMAppHandler;
 class GCMConnectionObserver;
 struct AccountMapping;
 
+// Provides the capability to set/get InstanceID data in the GCM store.
+class InstanceIDStore {
+ public:
+  typedef base::Callback<void(const std::string& instance_id_data)>
+      GetInstanceIDDataCallback;
+
+  InstanceIDStore();
+  virtual ~InstanceIDStore();
+
+  virtual void AddInstanceIDData(const std::string& app_id,
+                                 const std::string& instance_id_data) = 0;
+  virtual void RemoveInstanceIDData(const std::string& app_id) = 0;
+  virtual void GetInstanceIDData(
+      const std::string& app_id,
+      const GetInstanceIDDataCallback& callback) = 0;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(InstanceIDStore);
+};
+
 // Bridge between GCM users in Chrome and the platform-specific implementation.
 class GCMDriver {
  public:
@@ -145,6 +165,31 @@ class GCMDriver {
   // Sets whether or not GCM should try to wake the system from suspend in order
   // to send a heartbeat message.
   virtual void WakeFromSuspendForHeartbeat(bool wake) = 0;
+
+  // Supports saving the Instance ID data in the GCM store.
+  virtual InstanceIDStore* GetInstanceIDStore() = 0;
+
+  // Adds or removes a custom client requested heartbeat interval. If multiple
+  // components set that setting, the lowest setting will be used. If the
+  // setting is outside of GetMax/MinClientHeartbeatIntervalMs() it will be
+  // ignored. If a new setting is less than the currently used, the connection
+  // will be reset with the new heartbeat. Client that no longer require
+  // aggressive heartbeats, should remove their requested interval. Heartbeats
+  // set this way survive connection/Chrome restart.
+  //
+  // GCM Driver can decide to postpone the action until Client is properly
+  // initialized, hence this setting can be called at any time.
+  //
+  // Server can overwrite the setting to a different value.
+  //
+  // |scope| is used to identify the component that requests a custom interval
+  // to be set, and allows that component to later revoke the setting.
+  // |interval_ms| should be between 2 minues and 15 minues (28 minues on
+  // cellular networks). For details check
+  // GetMin/MaxClientHeartbeatItnervalMs() in HeartbeatManager.
+  virtual void AddHeartbeatInterval(const std::string& scope,
+                                    int interval_ms) = 0;
+  virtual void RemoveHeartbeatInterval(const std::string& scope) = 0;
 
  protected:
   // Ensures that the GCM service starts (if necessary conditions are met).

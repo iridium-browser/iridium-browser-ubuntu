@@ -5,8 +5,6 @@
 
 WebInspector.TimelineJSProfileProcessor = { };
 
-WebInspector.TimelineJSProfileProcessor.JSFrameCoalesceThresholdMs = 1.5;
-
 /**
  * @param {!ProfilerAgent.CPUProfile} jsProfile
  * @param {!WebInspector.TracingModel.Thread} thread
@@ -83,25 +81,52 @@ WebInspector.TimelineJSProfileProcessor.generateJSFrameEvents = function(events)
 
     var jsFrameEvents = [];
     var jsFramesStack = [];
-    var coalesceThresholdMs = WebInspector.TimelineJSProfileProcessor.JSFrameCoalesceThresholdMs;
+    var lockedJsStackDepth = [];
+    var invocationEventsDepth = 0;
+    var currentSamplingIntervalMs = 0.1;
+    var lastStackSampleTime = 0;
+    var ordinal = 0;
+
+    /**
+     * @param {!WebInspector.TracingModel.Event} e
+     */
+    function updateSamplingInterval(e)
+    {
+        if (e.name !== WebInspector.TimelineModel.RecordType.JSSample)
+            return;
+        var time = e.startTime;
+        var interval = time - lastStackSampleTime;
+        lastStackSampleTime = time;
+        // Do not take into account intervals longer than 10ms.
+        if (!interval || interval > 10)
+            return;
+        // Use exponential moving average with a smoothing factor of 0.1
+        var alpha = 0.1;
+        currentSamplingIntervalMs += alpha * (interval - currentSamplingIntervalMs);
+    }
 
     /**
      * @param {!WebInspector.TracingModel.Event} e
      */
     function onStartEvent(e)
     {
+        e.ordinal = ++ordinal;
         extractStackTrace(e);
+        // For the duration of the event we cannot go beyond the stack associated with it.
+        lockedJsStackDepth.push(jsFramesStack.length);
+        if (isJSInvocationEvent(e))
+            ++invocationEventsDepth;
     }
 
     /**
      * @param {!WebInspector.TracingModel.Event} e
-     * @param {?WebInspector.TracingModel.Event} top
      */
-    function onInstantEvent(e, top)
+    function onInstantEvent(e)
     {
-        if (e.name === WebInspector.TimelineModel.RecordType.JSSample && top && !isJSInvocationEvent(top))
-            return;
-        extractStackTrace(e);
+        e.ordinal = ++ordinal;
+        updateSamplingInterval(e);
+        if (invocationEventsDepth)
+            extractStackTrace(e);
     }
 
     /**
@@ -109,15 +134,32 @@ WebInspector.TimelineJSProfileProcessor.generateJSFrameEvents = function(events)
      */
     function onEndEvent(e)
     {
-        if (!isJSInvocationEvent(e))
-            return;
-        var eventData = e.args["data"] || e.args["beginData"];
-        var stackTrace = eventData && eventData["stackTrace"];
-        var stackLength = stackTrace ? stackTrace.length : 0;
-        // FIXME: there shouldn't be such a case.
-        // The current stack should never go beyond the parent event's stack.
-        if (stackLength < jsFramesStack.length)
-            jsFramesStack.length = stackLength;
+        if (isJSInvocationEvent(e))
+            --invocationEventsDepth;
+        truncateJSStack(lockedJsStackDepth.pop(), e.endTime);
+    }
+
+    /**
+     * @param {number} depth
+     * @param {number} time
+     */
+    function truncateJSStack(depth, time)
+    {
+        if (lockedJsStackDepth.length) {
+            var lockedDepth = lockedJsStackDepth.peekLast();
+            if (depth < lockedDepth) {
+                console.error("Child stack is shallower (" + depth + ") than the parent stack (" + lockedDepth + ") at " + time);
+                depth = lockedDepth;
+            }
+        }
+        if (jsFramesStack.length < depth) {
+            console.error("Trying to truncate higher than the current stack size at " + time);
+            depth = jsFramesStack.length;
+        }
+        var minFrameDurationMs = currentSamplingIntervalMs / 2;
+        for (var k = depth; k < jsFramesStack.length; ++k)
+            jsFramesStack[k].setEndTime(Math.min(eventEndTime(jsFramesStack[k]) + minFrameDurationMs, time));
+        jsFramesStack.length = depth;
     }
 
     /**
@@ -125,8 +167,6 @@ WebInspector.TimelineJSProfileProcessor.generateJSFrameEvents = function(events)
      */
     function extractStackTrace(e)
     {
-        while (jsFramesStack.length && eventEndTime(jsFramesStack.peekLast()) + coalesceThresholdMs <= e.startTime)
-            jsFramesStack.pop();
         var eventData = e.args["data"] || e.args["beginData"];
         var stackTrace = eventData && eventData["stackTrace"];
         // GC events do not hold call stack, so make a copy of the current stack.
@@ -137,19 +177,20 @@ WebInspector.TimelineJSProfileProcessor.generateJSFrameEvents = function(events)
         var endTime = eventEndTime(e);
         var numFrames = stackTrace.length;
         var minFrames = Math.min(numFrames, jsFramesStack.length);
-        var j;
-        for (j = 0; j < minFrames; ++j) {
-            var newFrame = stackTrace[numFrames - 1 - j];
-            var oldFrame = jsFramesStack[j].args["data"];
+        var i;
+        for (i = lockedJsStackDepth.peekLast() || 0; i < minFrames; ++i) {
+            var newFrame = stackTrace[numFrames - 1 - i];
+            var oldFrame = jsFramesStack[i].args["data"];
             if (!equalFrames(newFrame, oldFrame))
                 break;
-            jsFramesStack[j].setEndTime(Math.max(jsFramesStack[j].endTime, endTime));
+            jsFramesStack[i].setEndTime(Math.max(jsFramesStack[i].endTime, endTime));
         }
-        jsFramesStack.length = j;
-        for (; j < numFrames; ++j) {
-            var frame = stackTrace[numFrames - 1 - j];
+        truncateJSStack(i, e.startTime);
+        for (; i < numFrames; ++i) {
+            var frame = stackTrace[numFrames - 1 - i];
             var jsFrameEvent = new WebInspector.TracingModel.Event(WebInspector.TracingModel.DevToolsTimelineEventCategory, WebInspector.TimelineModel.RecordType.JSFrame,
                 WebInspector.TracingModel.Phase.Complete, e.startTime, e.thread);
+            jsFrameEvent.ordinal = e.ordinal;
             jsFrameEvent.addArgs({ data: frame });
             jsFrameEvent.setEndTime(endTime);
             jsFramesStack.push(jsFrameEvent);
@@ -290,7 +331,12 @@ WebInspector.TimelineJSProfileProcessor.processRawV8Samples = function(events)
         return codeMap.lookupEntry(address) || unknownFrame;
     }
 
-    var reName = /^(\S*:)?~?(\S*)(?: (\S*))?$/;
+    // Code states:
+    // (empty) -> compiled
+    //    ~    -> optimizable
+    //    *    -> optimized
+    var reName = /^(\S*:)?[*~]?(\S*)(?: (\S*))?$/;
+
     /**
      * @param {string} name
      * @param {number} scriptId
@@ -340,6 +386,7 @@ WebInspector.TimelineJSProfileProcessor.processRawV8Samples = function(events)
                 WebInspector.TracingModel.DevToolsTimelineEventCategory,
                 WebInspector.TimelineModel.RecordType.JSSample,
                 WebInspector.TracingModel.Phase.Instant, e.startTime, e.thread);
+            sampleEvent.ordinal = e.ordinal;
             sampleEvent.args = {"data": {"stackTrace": stack }};
             samples.push(sampleEvent);
             break;

@@ -4,14 +4,16 @@
 
 #include "extensions/browser/guest_view/surface_worker/surface_worker_guest.h"
 
+#include "components/guest_view/browser/guest_view_manager.h"
 #include "content/public/common/url_constants.h"
-#include "extensions/browser/guest_view/guest_view_manager.h"
 #include "extensions/browser/guest_view/surface_worker/surface_worker_constants.h"
 #include "extensions/strings/grit/extensions_strings.h"
 #include "ipc/ipc_message_macros.h"
 
 using content::RenderFrameHost;
 using content::WebContents;
+using guest_view::GuestViewBase;
+using guest_view::GuestViewManager;
 
 namespace extensions {
 
@@ -65,9 +67,8 @@ void SurfaceWorkerGuest::CreateWebContents(
                                      content::kGuestScheme,
                                      GetOwnerSiteURL().host().c_str()));
 
-  GuestViewManager* guest_view_manager =
-      GuestViewManager::FromBrowserContext(
-          owner_web_contents()->GetBrowserContext());
+  GuestViewManager* guest_view_manager = GuestViewManager::FromBrowserContext(
+      owner_web_contents()->GetBrowserContext());
   content::SiteInstance* guest_site_instance =
       guest_view_manager->GetGuestSiteInstance(guest_site);
   WebContents::CreateParams params(

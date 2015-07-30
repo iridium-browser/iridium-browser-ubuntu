@@ -7,14 +7,17 @@
 #include <string>
 
 #include "base/bind.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/bitmap_fetcher/bitmap_fetcher.h"
 #include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/extensions/chrome_utility_extensions_messages.h"
+#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/utility_process_host.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_request.h"
+#include "ui/base/l10n/l10n_util.h"
 
 using content::BrowserThread;
 using content::UtilityProcessHost;
@@ -51,6 +54,9 @@ void WebstoreInstallHelper::Start() {
   if (icon_url_.is_empty()) {
     icon_decode_complete_ = true;
   } else {
+    // No existing |icon_fetcher_| to avoid unbalanced AddRef().
+    CHECK(!icon_fetcher_.get());
+    AddRef();  // Balanced in OnFetchComplete().
     icon_fetcher_.reset(new chrome::BitmapFetcher(icon_url_, this));
     icon_fetcher_->Start(
         context_getter_, std::string(),
@@ -67,7 +73,9 @@ void WebstoreInstallHelper::Start() {
 void WebstoreInstallHelper::StartWorkOnIOThread() {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   utility_host_ = UtilityProcessHost::Create(
-      this, base::MessageLoopProxy::current().get())->AsWeakPtr();
+      this, base::ThreadTaskRunnerHandle::Get().get())->AsWeakPtr();
+  utility_host_->SetName(l10n_util::GetStringUTF16(
+      IDS_UTILITY_PROCESS_JSON_PARSER_NAME));
   utility_host_->StartBatchMode();
 
   utility_host_->Send(new ChromeUtilityMsg_ParseJSON(manifest_));
@@ -88,6 +96,10 @@ bool WebstoreInstallHelper::OnMessageReceived(const IPC::Message& message) {
 void WebstoreInstallHelper::OnFetchComplete(const GURL& url,
                                             const SkBitmap* image) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  // OnFetchComplete should only be called as icon_fetcher_ delegate to avoid
+  // unbalanced Release().
+  CHECK(icon_fetcher_.get());
+
   if (image)
     icon_ = *image;
   icon_decode_complete_ = true;
@@ -100,6 +112,7 @@ void WebstoreInstallHelper::OnFetchComplete(const GURL& url,
       BrowserThread::IO,
       FROM_HERE,
       base::Bind(&WebstoreInstallHelper::ReportResultsIfComplete, this));
+  Release();  // Balanced in Start().
 }
 
 void WebstoreInstallHelper::OnJSONParseSucceeded(

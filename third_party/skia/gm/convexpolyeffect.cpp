@@ -13,7 +13,6 @@
 #if SK_SUPPORT_GPU
 
 #include "GrBatchTarget.h"
-#include "GrBufferAllocPool.h"
 #include "GrContext.h"
 #include "GrDefaultGeoProcFactory.h"
 #include "GrPathUtils.h"
@@ -42,7 +41,7 @@ public:
 
 private:
     ConvexPolyTestBatch(const GrGeometryProcessor* gp, const Geometry& geo)
-        : INHERITED(gp)
+        : INHERITED(gp, geo.fBounds)
         , fGeometry(geo) {
     }
 
@@ -51,45 +50,29 @@ private:
         return &fGeometry;
     }
 
+    const Geometry* geoData(int index) const override {
+        SkASSERT(0 == index);
+        return &fGeometry;
+    }
+
     void onGenerateGeometry(GrBatchTarget* batchTarget, const GrPipeline* pipeline) override {
         size_t vertexStride = this->geometryProcessor()->getVertexStride();
-
-        const GrVertexBuffer* vertexBuffer;
-        int firstVertex;
-
-        void* vertices = batchTarget->vertexPool()->makeSpace(vertexStride,
-                                                              kVertsPerCubic,
-                                                              &vertexBuffer,
-                                                              &firstVertex);
-
-        if (!vertices || !batchTarget->quadIndexBuffer()) {
-            SkDebugf("Could not allocate buffers\n");
+        SkASSERT(vertexStride == sizeof(SkPoint));
+        QuadHelper helper;
+        SkPoint* verts = reinterpret_cast<SkPoint*>(helper.init(batchTarget, vertexStride, 1));
+        if (!verts) {
             return;
         }
-
-        SkASSERT(vertexStride == sizeof(SkPoint));
-        SkPoint* verts = reinterpret_cast<SkPoint*>(vertices);
 
         // Make sure any artifacts around the exterior of path are visible by using overly
         // conservative bounding geometry.
         fGeometry.fBounds.outset(5.f, 5.f);
         fGeometry.fBounds.toQuad(verts);
 
-        GrDrawTarget::DrawInfo drawInfo;
-        drawInfo.setPrimitiveType(kTriangleFan_GrPrimitiveType);
-        drawInfo.setVertexBuffer(vertexBuffer);
-        drawInfo.setStartVertex(firstVertex);
-        drawInfo.setVertexCount(kVertsPerCubic);
-        drawInfo.setStartIndex(0);
-        drawInfo.setIndexCount(kIndicesPerCubic);
-        drawInfo.setIndexBuffer(batchTarget->quadIndexBuffer());
-        batchTarget->draw(drawInfo);
+        helper.issueDraw(batchTarget);
     }
 
     Geometry fGeometry;
-
-    static const int kVertsPerCubic = 4;
-    static const int kIndicesPerCubic = 6;
 
     typedef GrTestBatch INHERITED;
 };
@@ -173,9 +156,9 @@ protected:
             return;
         }
 
+        static const GrColor color = 0xff000000;
         SkAutoTUnref<const GrGeometryProcessor> gp(
-                GrDefaultGeoProcFactory::Create(GrDefaultGeoProcFactory::kPosition_GPType,
-                                                0xff000000));
+                GrDefaultGeoProcFactory::Create(GrDefaultGeoProcFactory::kPosition_GPType, color));
 
         SkScalar y = 0;
         for (SkTLList<SkPath>::Iter iter(fPaths, SkTLList<SkPath>::Iter::kHead_IterStart);
@@ -206,12 +189,12 @@ protected:
                 pipelineBuilder.setRenderTarget(rt);
 
                 ConvexPolyTestBatch::Geometry geometry;
-                geometry.fColor = gp->color();
+                geometry.fColor = color;
                 geometry.fBounds = p.getBounds();
 
                 SkAutoTUnref<GrBatch> batch(ConvexPolyTestBatch::Create(gp, geometry));
 
-                tt.target()->drawBatch(&pipelineBuilder, batch, NULL);
+                tt.target()->drawBatch(&pipelineBuilder, batch);
 
                 x += SkScalarCeilToScalar(path->getBounds().width() + 10.f);
             }
@@ -255,12 +238,12 @@ protected:
                 pipelineBuilder.setRenderTarget(rt);
 
                 ConvexPolyTestBatch::Geometry geometry;
-                geometry.fColor = gp->color();
+                geometry.fColor = color;
                 geometry.fBounds = rect;
 
                 SkAutoTUnref<GrBatch> batch(ConvexPolyTestBatch::Create(gp, geometry));
 
-                tt.target()->drawBatch(&pipelineBuilder, batch, NULL);
+                tt.target()->drawBatch(&pipelineBuilder, batch);
 
                 x += SkScalarCeilToScalar(rect.width() + 10.f);
             }

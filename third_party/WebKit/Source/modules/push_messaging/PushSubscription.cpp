@@ -40,6 +40,13 @@ PushSubscription::~PushSubscription()
 {
 }
 
+String PushSubscription::endpoint() const
+{
+    // TODO(peter): Remove all plumbing which separates the endpoint from the subscriptionId
+    // after the deprecation period has finished. https://crbug.com/477401.
+    return m_endpoint + "/" + m_subscriptionId;
+}
+
 ScriptPromise PushSubscription::unsubscribe(ScriptState* scriptState)
 {
     RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
@@ -48,15 +55,15 @@ ScriptPromise PushSubscription::unsubscribe(ScriptState* scriptState)
     WebPushProvider* webPushProvider = Platform::current()->pushProvider();
     ASSERT(webPushProvider);
 
-    webPushProvider->unregister(m_serviceWorkerRegistration->webRegistration(), new CallbackPromiseAdapter<bool, PushError>(resolver));
+    webPushProvider->unsubscribe(m_serviceWorkerRegistration->webRegistration(), new CallbackPromiseAdapter<bool, PushError>(resolver));
     return promise;
 }
 
 ScriptValue PushSubscription::toJSONForBinding(ScriptState* scriptState)
 {
     V8ObjectBuilder result(scriptState);
-    result.addString("endpoint", m_endpoint);
-    result.addString("subscriptionId", m_subscriptionId);
+    result.addString("endpoint", endpoint());
+    result.addString("subscriptionId", subscriptionId());
 
     return result.scriptValue();
 }

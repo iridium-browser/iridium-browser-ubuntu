@@ -14,12 +14,14 @@
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/threading/thread.h"
+#include "media/midi/midi_export.h"
 #include "media/midi/midi_manager.h"
 #include "media/midi/midi_port_info.h"
 
 namespace media {
+namespace midi {
 
-class MEDIA_EXPORT MidiManagerMac : public MidiManager {
+class MIDI_EXPORT MidiManagerMac final : public MidiManager {
  public:
   MidiManagerMac();
   ~MidiManagerMac() override;
@@ -85,6 +87,7 @@ class MEDIA_EXPORT MidiManagerMac : public MidiManager {
   DISALLOW_COPY_AND_ASSIGN(MidiManagerMac);
 };
 
+}  // namespace midi
 }  // namespace media
 
 #endif  // MEDIA_MIDI_MIDI_MANAGER_MAC_H_

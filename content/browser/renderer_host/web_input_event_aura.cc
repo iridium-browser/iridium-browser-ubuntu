@@ -11,7 +11,7 @@
 #include "ui/events/blink/blink_event_util.h"
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
-#include "ui/events/keycodes/dom4/keycode_converter.h"
+#include "ui/events/keycodes/dom/keycode_converter.h"
 
 namespace content {
 
@@ -52,6 +52,19 @@ blink::WebKeyboardEvent MakeWebKeyboardEventFromAuraEvent(
 
   webkit_event.timeStampSeconds = event.time_stamp().InSecondsF();
   webkit_event.modifiers = ui::EventFlagsToWebEventModifiers(event.flags());
+  switch (ui::KeycodeConverter::DomCodeToLocation(event.code())) {
+    case ui::DomKeyLocation::LEFT:
+      webkit_event.modifiers |= blink::WebInputEvent::IsLeft;
+      break;
+    case ui::DomKeyLocation::RIGHT:
+      webkit_event.modifiers |= blink::WebInputEvent::IsRight;
+      break;
+    case ui::DomKeyLocation::NUMPAD:
+      webkit_event.modifiers |= blink::WebInputEvent::IsKeyPad;
+      break;
+    case ui::DomKeyLocation::STANDARD:
+      break;
+  }
 
   switch (event.type()) {
     case ui::ET_KEY_PRESSED:
@@ -260,7 +273,10 @@ blink::WebKeyboardEvent MakeWebKeyboardEvent(const ui::KeyEvent& event) {
 #if defined(OS_WIN)
   if (event.HasNativeEvent()) {
     // Key events require no translation by the aura system.
-    return MakeWebKeyboardEventFromNativeEvent(event.native_event());
+    blink::WebKeyboardEvent webkit_event(
+        MakeWebKeyboardEventFromNativeEvent(event.native_event()));
+    webkit_event.domCode = static_cast<int>(event.code());
+    return webkit_event;
   }
 #endif
   return MakeWebKeyboardEventFromAuraEvent(event);

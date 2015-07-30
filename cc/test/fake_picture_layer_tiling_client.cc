@@ -16,30 +16,26 @@ FakePictureLayerTilingClient::FakePictureLayerTilingClient()
       pile_(FakePicturePileImpl::CreateInfiniteFilledPile()),
       twin_set_(nullptr),
       twin_tiling_(nullptr),
-      recycled_twin_tiling_(nullptr),
       max_tile_priority_bin_(TilePriority::NOW) {
 }
 
 FakePictureLayerTilingClient::FakePictureLayerTilingClient(
     ResourceProvider* resource_provider)
-    : resource_pool_(
-          ResourcePool::Create(resource_provider, GL_TEXTURE_2D)),
-      tile_manager_(new FakeTileManager(
-          &tile_manager_client_, resource_pool_.get())),
+    : resource_pool_(ResourcePool::Create(resource_provider, GL_TEXTURE_2D)),
+      tile_manager_(
+          new FakeTileManager(&tile_manager_client_, resource_pool_.get())),
       pile_(FakePicturePileImpl::CreateInfiniteFilledPile()),
       twin_set_(nullptr),
       twin_tiling_(nullptr),
-      recycled_twin_tiling_(nullptr),
       max_tile_priority_bin_(TilePriority::NOW) {
 }
 
 FakePictureLayerTilingClient::~FakePictureLayerTilingClient() {
 }
 
-scoped_refptr<Tile> FakePictureLayerTilingClient::CreateTile(
-    float content_scale,
-    const gfx::Rect& rect) {
-  return tile_manager_->CreateTile(pile_.get(), tile_size_, rect, 1, 0, 0, 0);
+ScopedTilePtr FakePictureLayerTilingClient::CreateTile(float content_scale,
+                                                       const gfx::Rect& rect) {
+  return tile_manager_->CreateTile(tile_size_, rect, 1, 0, 0, 0);
 }
 
 void FakePictureLayerTilingClient::SetTileSize(const gfx::Size& tile_size) {
@@ -70,15 +66,6 @@ FakePictureLayerTilingClient::GetPendingOrActiveTwinTiling(
       return twin_set_->tiling_at(i);
   }
   return nullptr;
-}
-
-PictureLayerTiling* FakePictureLayerTilingClient::GetRecycledTwinTiling(
-    const PictureLayerTiling* tiling) {
-  return recycled_twin_tiling_;
-}
-
-WhichTree FakePictureLayerTilingClient::GetTree() const {
-  return tree_;
 }
 
 bool FakePictureLayerTilingClient::RequiresHighResToDraw() const {

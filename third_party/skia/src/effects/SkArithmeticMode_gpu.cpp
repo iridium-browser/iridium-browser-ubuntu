@@ -20,7 +20,7 @@
 
 static const bool gUseUnpremul = false;
 
-static void add_arithmetic_code(GrGLFPFragmentBuilder* fsBuilder,
+static void add_arithmetic_code(GrGLFragmentBuilder* fsBuilder,
                                 const char* inputColor,
                                 const char* dstColor,
                                 const char* outputColor,
@@ -66,7 +66,7 @@ public:
                   const char* inputColor,
                   const TransformedCoordsArray& coords,
                   const TextureSamplerArray& samplers) override {
-        GrGLFPFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+        GrGLFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
         fsBuilder->codeAppend("vec4 bgColor = ");
         fsBuilder->appendTextureLookup(samplers[0], coords[0].c_str(), coords[0].getType());
         fsBuilder->codeAppendf(";");
@@ -86,7 +86,7 @@ public:
         fEnforcePMColor = arith.enforcePMColor();
     }
 
-    static void GenKey(const GrProcessor& proc, const GrGLCaps& caps, GrProcessorKeyBuilder* b) {
+    static void GenKey(const GrProcessor& proc, const GrGLSLCaps& caps, GrProcessorKeyBuilder* b) {
         const GrArithmeticFP& arith = proc.cast<GrArithmeticFP>();
         uint32_t key = arith.enforcePMColor() ? 1 : 0;
         b->add32(key);
@@ -115,7 +115,7 @@ GrArithmeticFP::GrArithmeticFP(float k1, float k2, float k3, float k4,
     this->addTextureAccess(&fBackgroundAccess);
 }
 
-void GrArithmeticFP::getGLProcessorKey(const GrGLCaps& caps, GrProcessorKeyBuilder* b) const {
+void GrArithmeticFP::getGLProcessorKey(const GrGLSLCaps& caps, GrProcessorKeyBuilder* b) const {
     GLArithmeticFP::GenKey(*this, caps, b);
 }
 
@@ -175,18 +175,6 @@ public:
 
     bool hasSecondaryOutput() const override { return false; }
 
-    GrXferProcessor::OptFlags getOptimizations(const GrProcOptInfo& colorPOI,
-                                               const GrProcOptInfo& coveragePOI,
-                                               bool doesStencilWrite,
-                                               GrColor* overrideColor,
-                                               const GrDrawTargetCaps& caps) override;
-
-    void getBlendInfo(GrXferProcessor::BlendInfo* blendInfo) const override {
-        blendInfo->fSrcBlend = kOne_GrBlendCoeff;
-        blendInfo->fDstBlend = kZero_GrBlendCoeff;
-        blendInfo->fBlendConstant = 0;
-    }
-
     float k1() const { return fK1; }
     float k2() const { return fK2; }
     float k3() const { return fK3; }
@@ -197,7 +185,13 @@ private:
     ArithmeticXP(float k1, float k2, float k3, float k4, bool enforcePMColor,
                    const GrDeviceCoordTexture* dstCopy, bool willReadDstColor);
 
-    void onGetGLProcessorKey(const GrGLCaps& caps, GrProcessorKeyBuilder* b) const override;
+    GrXferProcessor::OptFlags onGetOptimizations(const GrProcOptInfo& colorPOI,
+                                                 const GrProcOptInfo& coveragePOI,
+                                                 bool doesStencilWrite,
+                                                 GrColor* overrideColor,
+                                                 const GrDrawTargetCaps& caps) override;
+
+    void onGetGLProcessorKey(const GrGLSLCaps& caps, GrProcessorKeyBuilder* b) const override;
 
     bool onIsEqual(const GrXferProcessor& xpBase) const override {
         const ArithmeticXP& xp = xpBase.cast<ArithmeticXP>();
@@ -227,7 +221,7 @@ public:
 
     ~GLArithmeticXP() override {}
 
-    static void GenKey(const GrProcessor& processor, const GrGLCaps& caps,
+    static void GenKey(const GrProcessor& processor, const GrGLSLCaps& caps,
                        GrProcessorKeyBuilder* b) {
         const ArithmeticXP& arith = processor.cast<ArithmeticXP>();
         uint32_t key = arith.enforcePMColor() ? 1 : 0;
@@ -236,7 +230,7 @@ public:
 
 private:
     void onEmitCode(const EmitArgs& args) override {
-        GrGLFPFragmentBuilder* fsBuilder = args.fPB->getFragmentShaderBuilder();
+        GrGLXPFragmentBuilder* fsBuilder = args.fPB->getFragmentShaderBuilder();
 
         const char* dstColor = fsBuilder->dstColor();
 
@@ -279,7 +273,7 @@ ArithmeticXP::ArithmeticXP(float k1, float k2, float k3, float k4, bool enforceP
     this->initClassID<ArithmeticXP>();
 }
 
-void ArithmeticXP::onGetGLProcessorKey(const GrGLCaps& caps, GrProcessorKeyBuilder* b) const {
+void ArithmeticXP::onGetGLProcessorKey(const GrGLSLCaps& caps, GrProcessorKeyBuilder* b) const {
     GLArithmeticXP::GenKey(*this, caps, b);
 }
 
@@ -287,11 +281,11 @@ GrGLXferProcessor* ArithmeticXP::createGLInstance() const {
     return SkNEW_ARGS(GLArithmeticXP, (*this));
 }
 
-GrXferProcessor::OptFlags ArithmeticXP::getOptimizations(const GrProcOptInfo& colorPOI,
-                                                         const GrProcOptInfo& coveragePOI,
-                                                         bool doesStencilWrite,
-                                                         GrColor* overrideColor,
-                                                         const GrDrawTargetCaps& caps) {
+GrXferProcessor::OptFlags ArithmeticXP::onGetOptimizations(const GrProcOptInfo& colorPOI,
+                                                           const GrProcOptInfo& coveragePOI,
+                                                           bool doesStencilWrite,
+                                                           GrColor* overrideColor,
+                                                           const GrDrawTargetCaps& caps) {
    return GrXferProcessor::kNone_Opt;
 }
 

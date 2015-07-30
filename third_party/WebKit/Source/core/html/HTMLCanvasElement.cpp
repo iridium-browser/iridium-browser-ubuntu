@@ -50,6 +50,7 @@
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/graphics/BitmapImage.h"
 #include "platform/graphics/Canvas2DImageBufferSurface.h"
+#include "platform/graphics/ExpensiveCanvasHeuristicParameters.h"
 #include "platform/graphics/GraphicsContextStateSaver.h"
 #include "platform/graphics/ImageBuffer.h"
 #include "platform/graphics/RecordingImageBufferSurface.h"
@@ -221,7 +222,7 @@ void HTMLCanvasElement::getContext(const String& type, const CanvasContextCreati
         if (m_context && !m_context->is2d())
             return;
         if (!m_context) {
-            blink::Platform::current()->histogramEnumeration("Canvas.ContextType", Context2d, ContextTypeCount);
+            Platform::current()->histogramEnumeration("Canvas.ContextType", Context2d, ContextTypeCount);
 
             m_context = CanvasRenderingContext2D::create(this, attributes, document());
             setNeedsCompositingUpdate();
@@ -244,7 +245,7 @@ void HTMLCanvasElement::getContext(const String& type, const CanvasContextCreati
 
     if (is3dContext) {
         if (!m_context) {
-            blink::Platform::current()->histogramEnumeration("Canvas.ContextType", contextType, ContextTypeCount);
+            Platform::current()->histogramEnumeration("Canvas.ContextType", contextType, ContextTypeCount);
             if (contextType == ContextWebgl2) {
                 m_context = WebGL2RenderingContext::create(this, attributes);
             } else {
@@ -329,9 +330,15 @@ void HTMLCanvasElement::doDeferredPaintInvalidation()
         ASSERT(hasImageBuffer());
         FloatRect srcRect(0, 0, size().width(), size().height());
         m_dirtyRect.intersect(srcRect);
-        LayoutBox* ro = layoutBox();
-        if (ro) {
-            m_imageBuffer->finalizeFrame(mapRect(m_dirtyRect, srcRect, ro->contentBoxRect()));
+        LayoutBox* lb = layoutBox();
+        if (lb) {
+            FloatRect mappedDirtyRect = mapRect(m_dirtyRect, srcRect, lb->contentBoxRect());
+            if (m_context->isAccelerated()) {
+                // Accelerated 2D canvases need the dirty rect to be expressed relative to the
+                // content box, as opposed to the layout box.
+                mappedDirtyRect.move(-lb->contentBoxOffset());
+            }
+            m_imageBuffer->finalizeFrame(mappedDirtyRect);
         } else {
             m_imageBuffer->finalizeFrame(m_dirtyRect);
         }
@@ -390,15 +397,15 @@ void HTMLCanvasElement::reset()
     if (m_context && m_context->is3d() && oldSize != size())
         toWebGLRenderingContextBase(m_context.get())->reshape(width(), height());
 
-    if (LayoutObject* renderer = this->layoutObject()) {
-        if (renderer->isCanvas()) {
+    if (LayoutObject* layoutObject = this->layoutObject()) {
+        if (layoutObject->isCanvas()) {
             if (oldSize != size()) {
-                toLayoutHTMLCanvas(renderer)->canvasSizeChanged();
+                toLayoutHTMLCanvas(layoutObject)->canvasSizeChanged();
                 if (layoutBox() && layoutBox()->hasAcceleratedCompositing())
                     layoutBox()->contentChanged(CanvasChanged);
             }
             if (hadImageBuffer)
-                renderer->setShouldDoFullPaintInvalidation();
+                layoutObject->setShouldDoFullPaintInvalidation();
         }
     }
 
@@ -484,14 +491,15 @@ String HTMLCanvasElement::toDataURLInternal(const String& mimeType, const double
 
     String encodingMimeType = toEncodingMimeType(mimeType);
     if (!m_context) {
-        RefPtrWillBeRawPtr<ImageData> imageData = ImageData::create(m_size);
+        ImageData* imageData = ImageData::create(m_size);
+        ScopedDisposal<ImageData> disposer(imageData);
         return ImageDataBuffer(imageData->size(), imageData->data()->data()).toDataURL(encodingMimeType, quality);
     }
 
     if (m_context->is3d()) {
         // Get non-premultiplied data because of inaccurate premultiplied alpha conversion of buffer()->toDataURL().
-        RefPtrWillBeRawPtr<ImageData> imageData =
-            toWebGLRenderingContextBase(m_context.get())->paintRenderingResultsToImageData(sourceBuffer);
+        ImageData* imageData = toWebGLRenderingContextBase(m_context.get())->paintRenderingResultsToImageData(sourceBuffer);
+        ScopedDisposal<ImageData> disposer(imageData);
         if (imageData)
             return ImageDataBuffer(imageData->size(), imageData->data()->data()).toDataURL(encodingMimeType, quality);
         m_context->paintRenderingResultsToCanvas(sourceBuffer);
@@ -511,7 +519,7 @@ String HTMLCanvasElement::toDataURL(const String& mimeType, const ScriptValue& q
     if (!qualityArgument.isEmpty()) {
         v8::Local<v8::Value> v8Value = qualityArgument.v8Value();
         if (v8Value->IsNumber()) {
-            quality = v8Value->NumberValue();
+            quality = v8Value.As<v8::Number>()->Value();
             qualityPtr = &quality;
         }
     }
@@ -545,11 +553,28 @@ bool HTMLCanvasElement::shouldAccelerate(const IntSize& size) const
     if (!settings || !settings->accelerated2dCanvasEnabled())
         return false;
 
+    int canvasPixelCount = size.width() * size.height();
+
+    if (RuntimeEnabledFeatures::displayList2dCanvasEnabled()) {
+#if 0
+        // TODO(junov): re-enable this code once we solve the problem of recording
+        // GPU-backed images to an SkPicture for cross-context rendering crbug.com/490328
+
+        // If the compositor provides GPU acceleration to display list canvases, we
+        // prefer that over direct acceleration.
+        if (document().viewportDescription().matchesHeuristicsForGpuRasterization())
+            return false;
+#endif
+        // If the GPU resources would be very expensive, prefer a display list.
+        if (canvasPixelCount > ExpensiveCanvasHeuristicParameters::PreferDisplayListOverGpuSizeThreshold)
+            return false;
+    }
+
     // Do not use acceleration for small canvas.
-    if (size.width() * size.height() < settings->minimumAccelerated2dCanvasSize())
+    if (canvasPixelCount < settings->minimumAccelerated2dCanvasSize())
         return false;
 
-    if (!blink::Platform::current()->canAccelerate2dCanvas())
+    if (!Platform::current()->canAccelerate2dCanvas())
         return false;
 
     return true;
@@ -643,7 +668,7 @@ void HTMLCanvasElement::createImageBufferInternal(PassOwnPtr<ImageBufferSurface>
         return;
     m_imageBuffer->setClient(this);
 
-    document().updateRenderTreeIfNeeded();
+    document().updateLayoutTreeIfNeeded();
     const ComputedStyle* style = ensureComputedStyle();
     m_imageBuffer->setFilterQuality((style && (style->imageRendering() == ImageRenderingPixelated)) ? kNone_SkFilterQuality : kLow_SkFilterQuality);
 
@@ -750,9 +775,11 @@ ImageBuffer* HTMLCanvasElement::buffer() const
     return m_imageBuffer.get();
 }
 
-void HTMLCanvasElement::createImageBufferUsingSurface(PassOwnPtr<ImageBufferSurface> surface)
+void HTMLCanvasElement::createImageBufferUsingSurfaceForTesting(PassOwnPtr<ImageBufferSurface> surface)
 {
     discardImageBuffer();
+    setWidth(surface->size().width());
+    setHeight(surface->size().height());
     createImageBufferInternal(surface);
 }
 
@@ -867,7 +894,7 @@ bool HTMLCanvasElement::wouldTaintOrigin(SecurityOrigin*) const
     return !originClean();
 }
 
-FloatSize HTMLCanvasElement::sourceSize() const
+FloatSize HTMLCanvasElement::elementSize() const
 {
     return FloatSize(width(), height());
 }

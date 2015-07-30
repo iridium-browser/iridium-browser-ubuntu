@@ -6,6 +6,8 @@
 
 #include "base/bind.h"
 #include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/banners/app_banner_debug_log.h"
 #include "chrome/browser/banners/app_banner_metrics.h"
 #include "chrome/browser/banners/app_banner_settings_helper.h"
 #include "chrome/browser/bitmap_fetcher/bitmap_fetcher.h"
@@ -70,11 +72,12 @@ AppBannerDataFetcher::AppBannerDataFetcher(
     : WebContentsObserver(web_contents),
       ideal_icon_size_(ideal_icon_size),
       weak_delegate_(delegate),
-      is_active_(false) {
+      is_active_(false),
+      event_request_id_(-1) {
 }
 
 void AppBannerDataFetcher::Start(const GURL& validated_url) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   content::WebContents* web_contents = GetWebContents();
   DCHECK(web_contents);
@@ -86,7 +89,7 @@ void AppBannerDataFetcher::Start(const GURL& validated_url) {
 }
 
 void AppBannerDataFetcher::Cancel() {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   if (is_active_) {
     FOR_EACH_OBSERVER(Observer, observer_list_,
                       OnDecidedWhetherToShow(this, false));
@@ -138,15 +141,15 @@ void AppBannerDataFetcher::OnBannerPromptReply(
     int request_id,
     blink::WebAppBannerPromptReply reply) {
   content::WebContents* web_contents = GetWebContents();
-  if (!is_active_ || !web_contents || request_id != gCurrentRequestID) {
+  if (!CheckFetcherIsStillAlive(web_contents) ||
+      request_id != event_request_id_) {
     Cancel();
     return;
   }
 
   // The renderer might have requested the prompt to be canceled.
   if (reply == blink::WebAppBannerPromptReply::Cancel) {
-    // TODO(mlamouri,benwells): we should probably record that to behave
-    // differently with regard to showing the banner.
+    OutputDeveloperNotShownMessage(web_contents, kRendererRequestCancel);
     Cancel();
     return;
   }
@@ -231,14 +234,28 @@ void AppBannerDataFetcher::RecordDidShowBanner(const std::string& event_name) {
 void AppBannerDataFetcher::OnDidGetManifest(
     const content::Manifest& manifest) {
   content::WebContents* web_contents = GetWebContents();
-  if (!is_active_ || !web_contents) {
+  if (!CheckFetcherIsStillAlive(web_contents)) {
+    Cancel();
+    return;
+  }
+  if (manifest.IsEmpty()) {
+    OutputDeveloperNotShownMessage(web_contents, kManifestEmpty);
     Cancel();
     return;
   }
 
-  if (!IsManifestValid(manifest)) {
-    if (!weak_delegate_.get()->OnInvalidManifest(this))
-      Cancel();
+  if (manifest.prefer_related_applications &&
+      manifest.related_applications.size()) {
+    for (const auto& application : manifest.related_applications) {
+      std::string platform = base::UTF16ToUTF8(application.platform.string());
+      std::string id = base::UTF16ToUTF8(application.id.string());
+      if (weak_delegate_->HandleNonWebApp(platform, application.url, id))
+        return;
+    }
+  }
+
+  if (!IsManifestValidForWebApp(manifest, web_contents)) {
+    Cancel();
     return;
   }
 
@@ -265,7 +282,7 @@ void AppBannerDataFetcher::OnDidGetManifest(
 void AppBannerDataFetcher::OnDidCheckHasServiceWorker(
     bool has_service_worker) {
   content::WebContents* web_contents = GetWebContents();
-  if (!is_active_ || !web_contents) {
+  if (!CheckFetcherIsStillAlive(web_contents)) {
     Cancel();
     return;
   }
@@ -281,8 +298,10 @@ void AppBannerDataFetcher::OnDidCheckHasServiceWorker(
       FetchIcon(icon_url);
       return;
     }
+    OutputDeveloperNotShownMessage(web_contents, kCannotDetermineBestIcon);
   } else {
     TrackDisplayEvent(DISPLAY_EVENT_LACKS_SERVICE_WORKER);
+    OutputDeveloperNotShownMessage(web_contents, kNoMatchingServiceWorker);
   }
 
   Cancel();
@@ -298,22 +317,31 @@ void AppBannerDataFetcher::OnFetchComplete(const GURL& url,
 
 void AppBannerDataFetcher::ShowBanner(const SkBitmap* icon) {
   content::WebContents* web_contents = GetWebContents();
-  if (!is_active_ || !web_contents || !icon) {
+  if (!CheckFetcherIsStillAlive(web_contents)) {
+    Cancel();
+    return;
+  }
+  if (!icon) {
+    OutputDeveloperNotShownMessage(web_contents, kNoIconAvailable);
     Cancel();
     return;
   }
 
   RecordCouldShowBanner();
   if (!CheckIfShouldShowBanner()) {
+    // At this point, the only possible case is that the banner has been added
+    // to the homescreen, given all of the other checks that have been made.
+    OutputDeveloperNotShownMessage(web_contents, kBannerAlreadyAdded);
     Cancel();
     return;
   }
 
   app_icon_.reset(new SkBitmap(*icon));
+  event_request_id_ = ++gCurrentRequestID;
   web_contents->GetMainFrame()->Send(
       new ChromeViewMsg_AppBannerPromptRequest(
           web_contents->GetMainFrame()->GetRoutingID(),
-          ++gCurrentRequestID,
+          event_request_id_,
           GetBannerType()));
 }
 
@@ -335,17 +363,40 @@ bool AppBannerDataFetcher::CheckIfShouldShowBanner() {
       web_contents, validated_url_, GetAppIdentifier(), GetCurrentTime());
 }
 
+bool AppBannerDataFetcher::CheckFetcherIsStillAlive(
+    content::WebContents* web_contents) {
+  if (!is_active_) {
+    OutputDeveloperNotShownMessage(web_contents,
+                                   kUserNavigatedBeforeBannerShown);
+    return false;
+  }
+  if (!web_contents) {
+    return false; // We cannot show a message if |web_contents| is null
+  }
+  return true;
+}
+
 // static
-bool AppBannerDataFetcher::IsManifestValid(
-    const content::Manifest& manifest) {
-  if (manifest.IsEmpty())
+bool AppBannerDataFetcher::IsManifestValidForWebApp(
+    const content::Manifest& manifest,
+    content::WebContents* web_contents) {
+  if (manifest.IsEmpty()) {
+    OutputDeveloperNotShownMessage(web_contents, kManifestEmpty);
     return false;
-  if (!manifest.start_url.is_valid())
+  }
+  if (!manifest.start_url.is_valid()) {
+    OutputDeveloperNotShownMessage(web_contents, kStartURLNotValid);
     return false;
-  if (manifest.name.is_null() && manifest.short_name.is_null())
+  }
+  if (manifest.name.is_null() && manifest.short_name.is_null()) {
+    OutputDeveloperNotShownMessage(web_contents,
+                                   kManifestMissingNameOrShortName);
     return false;
-  if (!DoesManifestContainRequiredIcon(manifest))
+  }
+  if (!DoesManifestContainRequiredIcon(manifest)) {
+    OutputDeveloperNotShownMessage(web_contents, kManifestMissingSuitableIcon);
     return false;
+  }
   return true;
 }
 

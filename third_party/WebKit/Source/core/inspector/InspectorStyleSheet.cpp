@@ -47,7 +47,7 @@
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/inspector/ContentSearchUtils.h"
 #include "core/inspector/InspectorCSSAgent.h"
-#include "core/inspector/InspectorPageAgent.h"
+#include "core/inspector/InspectorIdentifiers.h"
 #include "core/inspector/InspectorResourceAgent.h"
 #include "core/svg/SVGStyleElement.h"
 #include "wtf/OwnPtr.h"
@@ -107,6 +107,7 @@ private:
 
     const String& m_parsedText;
     Document* m_document;
+    // TODO(timloh): Remove when Bison parser is gone.
     StyleSheetContents* m_styleSheetContents;
     RawPtrWillBeMember<RuleSourceDataList> m_result;
     RuleSourceDataList m_currentRuleDataStack;
@@ -978,15 +979,14 @@ bool InspectorStyleSheetBase::findPropertyByRange(const SourceRange& sourceRange
     return false;
 }
 
-PassRefPtrWillBeRawPtr<InspectorStyleSheet> InspectorStyleSheet::create(InspectorPageAgent* pageAgent, InspectorResourceAgent* resourceAgent, const String& id, PassRefPtrWillBeRawPtr<CSSStyleSheet> pageStyleSheet, TypeBuilder::CSS::StyleSheetOrigin::Enum origin, const String& documentURL, InspectorCSSAgent* cssAgent)
+PassRefPtrWillBeRawPtr<InspectorStyleSheet> InspectorStyleSheet::create(InspectorResourceAgent* resourceAgent, const String& id, PassRefPtrWillBeRawPtr<CSSStyleSheet> pageStyleSheet, TypeBuilder::CSS::StyleSheetOrigin::Enum origin, const String& documentURL, InspectorCSSAgent* cssAgent)
 {
-    return adoptRefWillBeNoop(new InspectorStyleSheet(pageAgent, resourceAgent, id, pageStyleSheet, origin, documentURL, cssAgent));
+    return adoptRefWillBeNoop(new InspectorStyleSheet(resourceAgent, id, pageStyleSheet, origin, documentURL, cssAgent));
 }
 
-InspectorStyleSheet::InspectorStyleSheet(InspectorPageAgent* pageAgent, InspectorResourceAgent* resourceAgent, const String& id, PassRefPtrWillBeRawPtr<CSSStyleSheet> pageStyleSheet, TypeBuilder::CSS::StyleSheetOrigin::Enum origin, const String& documentURL, InspectorCSSAgent* cssAgent)
+InspectorStyleSheet::InspectorStyleSheet(InspectorResourceAgent* resourceAgent, const String& id, PassRefPtrWillBeRawPtr<CSSStyleSheet> pageStyleSheet, TypeBuilder::CSS::StyleSheetOrigin::Enum origin, const String& documentURL, InspectorCSSAgent* cssAgent)
     : InspectorStyleSheetBase(id, cssAgent)
     , m_cssAgent(cssAgent)
-    , m_pageAgent(pageAgent)
     , m_resourceAgent(resourceAgent)
     , m_pageStyleSheet(pageStyleSheet)
     , m_origin(origin)
@@ -1002,7 +1002,6 @@ InspectorStyleSheet::~InspectorStyleSheet()
 DEFINE_TRACE(InspectorStyleSheet)
 {
     visitor->trace(m_cssAgent);
-    visitor->trace(m_pageAgent);
     visitor->trace(m_resourceAgent);
     visitor->trace(m_pageStyleSheet);
     visitor->trace(m_flatRules);
@@ -1376,7 +1375,9 @@ bool InspectorStyleSheet::deleteRule(const InspectorCSSId& id, const String& old
 void InspectorStyleSheet::updateText(const String& newText)
 {
     Element* element = ownerStyleElement();
-    if (!element)
+    if (element)
+        m_cssAgent->addEditedStyleElement(DOMNodeIds::idForNode(element), newText);
+    else
         m_cssAgent->addEditedStyleSheet(finalURL(), newText);
     m_parsedStyleSheet->setText(newText);
 }
@@ -1410,7 +1411,7 @@ PassRefPtr<TypeBuilder::CSS::CSSStyleSheetHeader> InspectorStyleSheet::buildObje
         .setDisabled(styleSheet->disabled())
         .setSourceURL(url())
         .setTitle(styleSheet->title())
-        .setFrameId(m_pageAgent->frameId(frame))
+        .setFrameId(frame ? InspectorIdentifiers<LocalFrame>::identifier(frame) : "")
         .setIsInline(styleSheet->isInline() && !startsAtZero())
         .setStartLine(styleSheet->startPositionInSource().m_line.zeroBasedInt())
         .setStartColumn(styleSheet->startPositionInSource().m_column.zeroBasedInt());
@@ -1857,6 +1858,8 @@ bool InspectorStyleSheet::inlineStyleSheetText(String* result) const
     Element* ownerElement = ownerStyleElement();
     if (!ownerElement)
         return false;
+    if (m_cssAgent->getEditedStyleElement(DOMNodeIds::idForNode(ownerElement), result))
+        return true;
     *result = ownerElement->textContent();
     return true;
 }

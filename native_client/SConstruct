@@ -311,10 +311,6 @@ def SetUpArgumentBits(env):
   BitFromArgument(env, 'running_on_valgrind', default=False,
     desc='Compile and test using valgrind')
 
-  BitFromArgument(env, 'enable_tmpfs_redirect_var', default=False,
-    desc='Allow redirecting tmpfs location for shared memory '
-         '(by default, /dev/shm is used)')
-
   BitFromArgument(env, 'pp', default=False,
     desc='Enable pretty printing')
 
@@ -835,31 +831,14 @@ tests_to_disable_qemu = set([
     # You should use the is_broken argument in preference to adding
     # tests to this list.
     #
-    # TODO(dschuff) some of these tests appear to work with the new QEMU.
-    # find out which
-    # http://code.google.com/p/nativeclient/issues/detail?id=2437
+    # See: http://code.google.com/p/nativeclient/issues/detail?id=2437
     # Note, for now these tests disable both the irt and non-irt variants
-    'run_atomic_ops_test',    # still broken with qemu 2012/06/12
-    'run_atomic_ops_nexe_test',
-    'run_egyptian_cotton_test',  # still broken with qemu 2012/06/12
+    'run_egyptian_cotton_test',
     'run_many_threads_sequential_test',
-    'run_mmap_atomicity_test',   # still broken with qemu 2012/06/12
-    # http://code.google.com/p/nativeclient/issues/detail?id=2142
-    'run_nacl_semaphore_test',
-    'run_nacl_tls_unittest',
     # subprocess needs to also have qemu prefix, which isn't supported
     'run_subprocess_test',
-    # The next 2 tests seem flaky on QEMU
-    'run_srpc_manifest_file_test',
-    'run_srpc_message_untrusted_test',
-    'run_thread_stack_alloc_test',
     'run_thread_suspension_test',
-    'run_thread_test',
     'run_dynamic_modify_test',
-    # qemu has bugs that make TestCatchingFault flaky (see
-    # http://code.google.com/p/nativeclient/issues/detail?id=3239), and
-    # we don't particularly need to measure performance under qemu.
-    'run_performance_test',
 ])
 
 tests_to_disable = set()
@@ -1384,6 +1363,19 @@ def GetIrtNexe(env, chrome_irt=False):
 
 pre_base_env.AddMethod(GetIrtNexe)
 
+
+# Note that we build elf_loader in the nacl_irt_env, not because it is
+# actually built like the IRT per se, but just because we need it always to
+# be built against newlib.
+def GetElfLoaderNexe(env):
+  elf_loader_env = nacl_env
+  if env.Bit('nacl_glibc'):
+    elf_loader_env = nacl_irt_env
+  return elf_loader_env.File('${STAGING_DIR}/elf_loader.nexe')
+
+pre_base_env.AddMethod(GetElfLoaderNexe)
+
+
 def ApplyTLSEdit(env, nexe_name, raw_nexe):
   # If the environment was built elsewhere, we do not need to apply tls_edit
   # since it only needs to be done during building.
@@ -1737,12 +1729,22 @@ def CommandSelLdrTestNacl(env, name, nexe,
   # line for those cases.
   if env.Bit('nacl_glibc') and env['NACL_BUILD_FAMILY'] != 'TRUSTED':
     if not glibc_static and not env.Bit('nacl_static_link'):
-      command = ['${NACL_SDK_LIB}/runnable-ld.so',
-                 # Locally-built shared libraries come from ${LIB_DIR}
-                 # while toolchain-provided ones come from ${NACL_SDK_LIB}.
-                 '--library-path', '${LIB_DIR}:${NACL_SDK_LIB}'] + command
-    # Enable file access.
-    sel_ldr_flags += ['-a']
+      # Enable file access so shared libraries can be loaded.
+      sel_ldr_flags.append('-a')
+      # Locally-built shared libraries come from ${LIB_DIR} while
+      # toolchain-provided ones come from ${NACL_SDK_LIB}.
+      library_path = '${LIB_DIR}:${NACL_SDK_LIB}'
+      if env.Bit('build_x86'):
+        # In the old glibc, we run via runnable-ld.so (the dynamic linker).
+        command = ['${NACL_SDK_LIB}/runnable-ld.so',
+                   '--library-path', library_path] + command
+      else:
+        # In the new glibc, we run via elf_loader and direct it where to
+        # find the dynamic linker in the toolchain.
+        command = [env.GetElfLoaderNexe(),
+                   '--interp-prefix',
+                   os.path.dirname(env.subst('${NACL_SDK_LIB}'))] + command
+        sel_ldr_flags.extend(['-E', 'LD_LIBRARY_PATH=' + library_path])
 
   # Turn off sandbox for mac so coverage files can be written out.
   if ('TRUSTED_ENV' in env and
@@ -2158,9 +2160,10 @@ def MakeGTestEnv(env):
   # Create an environment to run unit tests using Gtest.
   gtest_env = env.Clone()
 
-  # This became necessary for the arm cross TC v4.6
-  # but probable applies to all new gcc TCs
-  gtest_env.Append(LINKFLAGS=['-pthread'])
+  if gtest_env['NACL_BUILD_FAMILY'] != 'TRUSTED' or not gtest_env.Bit('mac'):
+    # This became necessary for the arm cross TC v4.6 but probable applies
+    # to all new gcc TCs.  MacOS does not have this switch.
+    gtest_env.Append(LINKFLAGS=['-pthread'])
 
   # Define compile-time flag that communicates that we are compiling in the test
   # environment (rather than for the TCB).
@@ -2532,10 +2535,9 @@ def MakeUnixLikeEnv(platform=None):
   if not unix_like_env.Bit('clang'):
     unix_like_env.Append(CCFLAGS=['--param', 'ssp-buffer-size=4'])
 
-  if unix_like_env.Bit('enable_tmpfs_redirect_var'):
-    unix_like_env.Append(CPPDEFINES=[['NACL_ENABLE_TMPFS_REDIRECT_VAR', '1']])
-  else:
-    unix_like_env.Append(CPPDEFINES=[['NACL_ENABLE_TMPFS_REDIRECT_VAR', '0']])
+  if unix_like_env.Bit('werror'):
+    unix_like_env.Append(LINKFLAGS=['-Werror'])
+
   return unix_like_env
 
 
@@ -2821,10 +2823,20 @@ def MakeGenericLinuxEnv(platform=None):
   # noexecstack: ensure that the executable does not get a PT_GNU_STACK
   #              header that causes the kernel to set the READ_IMPLIES_EXEC
   #              personality flag, which disables NX page protection.
-  linux_env.Prepend(
-      CPPDEFINES=[['-D_FORTIFY_SOURCE', '2']],
-      LINKFLAGS=['-pie', '-Wl,-z,relro', '-Wl,-z,now', '-Wl,-z,noexecstack'],
-      )
+  linux_env.Prepend(CPPDEFINES=[['-D_FORTIFY_SOURCE', '2']])
+  # By default SHLINKFLAGS uses $LINKFLAGS, but we do not want -pie
+  # in $SHLINKFLAGS, only in $LINKFLAGS.  So move LINKFLAGS over to
+  # COMMON_LINKFLAGS, and add the "hardening" options there.  Then
+  # make both LINKFLAGS and SHLINKFLAGS refer to that, and add -pie
+  # only to LINKFLAGS.
+  linux_env.Replace(COMMON_LINKFLAGS=linux_env['LINKFLAGS'],
+                    LINKFLAGS=['$COMMON_LINKFLAGS'])
+  linux_env.FilterOut(SHLINKFLAGS=['$LINKFLAGS'])
+  linux_env.Prepend(SHLINKFLAGS=['$COMMON_LINKFLAGS'])
+  linux_env.Prepend(COMMON_LINKFLAGS=['-Wl,-z,relro',
+                                      '-Wl,-z,now',
+                                      '-Wl,-z,noexecstack'])
+  linux_env.Prepend(LINKFLAGS=['-pie'])
   # The ARM toolchain has a linker that doesn't handle the code its
   # compiler generates under -fPIE.
   if linux_env.Bit('build_arm') or linux_env.Bit('build_mips32'):
@@ -2929,7 +2941,8 @@ nacl_env = nacl_env.Clone(
     RPATHLINKSUFFIX = '',
 
     LIBS = [],
-    LINKFLAGS = ['${RPATH_LINK_FLAGS}'],
+    LINKFLAGS = ['${RPATH_LINK_FLAGS}'] + (['-Werror'] if nacl_env.Bit('werror')
+                                           else []),
 
     # These are settings for in-tree, non-browser tests to use.
     # They use libraries that circumvent the IRT-based implementations
@@ -3231,6 +3244,7 @@ if not nacl_env.Bit('nacl_glibc'):
   nacl_env.Append(
       BUILD_SCONSCRIPTS = [
         ####  ALPHABETICALLY SORTED ####
+        'src/untrusted/elf_loader/nacl.scons',
         'src/untrusted/pthread/nacl.scons',
         'src/untrusted/stubs/nacl.scons',
         'src/untrusted/nosys/nacl.scons',
@@ -3263,6 +3277,7 @@ nacl_env.AddChromeFilesFromGroup('untrusted_scons_files')
 # These are tests that are worthwhile to run in IRT variant only.
 irt_only_tests = [
     #### ALPHABETICALLY SORTED ####
+    'tests/elf_loader/nacl.scons',
     'tests/irt/nacl.scons',
     'tests/irt_compatibility/nacl.scons',
     'tests/irt_ext/nacl.scons',
@@ -3662,6 +3677,7 @@ nacl_irt_env.Append(
         'src/shared/platform/nacl.scons',
         'src/shared/srpc/nacl.scons',
         'src/tools/tls_edit/build.scons',
+        'src/untrusted/elf_loader/nacl.scons',
         'src/untrusted/irt/nacl.scons',
         'src/untrusted/nacl/nacl.scons',
         'src/untrusted/stubs/nacl.scons',
@@ -3679,6 +3695,7 @@ nacl_irt_test_env = nacl_env.Clone(
     BUILD_TYPE = 'nacl_irt_test',
     BUILD_TYPE_DESCRIPTION = 'NaCl tests build with IRT',
     NACL_BUILD_FAMILY = 'UNTRUSTED_IRT_TESTS',
+    NACL_ENV = nacl_env,
 
     INCLUDE_DIR = nacl_env.Dir('${INCLUDE_DIR}'),
     LIB_DIR = nacl_env.Dir('${LIB_DIR}'),

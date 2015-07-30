@@ -19,13 +19,12 @@ class WorkerDevToolsAgentHost : public IPCDevToolsAgentHost,
   typedef std::pair<int, int> WorkerId;
 
   // DevToolsAgentHost override.
-  bool IsWorker() const override;
   BrowserContext* GetBrowserContext() override;
 
   // IPCDevToolsAgentHost implementation.
   void SendMessageToAgent(IPC::Message* message) override;
   void Attach() override;
-  void OnClientAttached() override;
+  void OnClientAttached(bool reattached) override;
   void OnClientDetached() override;
 
   // IPC::Listener implementation.

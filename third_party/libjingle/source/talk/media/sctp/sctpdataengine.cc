@@ -176,6 +176,18 @@ static bool GetDataMediaType(
   }
 }
 
+// Log the packet in text2pcap format, if log level is at LS_VERBOSE.
+static void VerboseLogPacket(void *addr, size_t length, int direction) {
+  if (LOG_CHECK_LEVEL(LS_VERBOSE) && length > 0) {
+    char *dump_buf;
+    if ((dump_buf = usrsctp_dumppacket(
+             addr, length, direction)) != NULL) {
+      LOG(LS_VERBOSE) << dump_buf;
+      usrsctp_freedumpbuffer(dump_buf);
+    }
+  }
+}
+
 // This is the callback usrsctp uses when there's data to send on the network
 // that has been wrapped appropriatly for the SCTP protocol.
 static int OnSctpOutboundPacket(void* addr, void* data, size_t length,
@@ -185,9 +197,11 @@ static int OnSctpOutboundPacket(void* addr, void* data, size_t length,
                   << "addr: " << addr << "; length: " << length
                   << "; tos: " << std::hex << static_cast<int>(tos)
                   << "; set_df: " << std::hex << static_cast<int>(set_df);
+
+  VerboseLogPacket(addr, length, SCTP_DUMP_OUTBOUND);
   // Note: We have to copy the data; the caller will delete it.
-  OutboundPacketMessage* msg =
-      new OutboundPacketMessage(new rtc::Buffer(data, length));
+  auto* msg = new OutboundPacketMessage(
+      new rtc::Buffer(reinterpret_cast<uint8_t*>(data), length));
   channel->worker_thread()->Post(channel, MSG_SCTPOUTBOUNDPACKET, msg);
   return 0;
 }
@@ -214,7 +228,7 @@ static int OnSctpInboundPacket(struct socket* sock, union sctp_sockstore addr,
                   << " on an SCTP packet.  Dropping.";
   } else {
     SctpInboundPacket* packet = new SctpInboundPacket;
-    packet->buffer.SetData(data, length);
+    packet->buffer.SetData(reinterpret_cast<uint8_t*>(data), length);
     packet->params.ssrc = rcv.rcv_sid;
     packet->params.seq_num = rcv.rcv_ssn;
     packet->params.timestamp = rcv.rcv_tsn;
@@ -379,7 +393,7 @@ bool SctpDataMediaChannel::OpenSctpSocket() {
   }
 
   // Disable MTU discovery
-  struct sctp_paddrparams params = {0};
+  struct sctp_paddrparams params = {{0}};
   params.spp_assoc_id = 0;
   params.spp_flags = SPP_PMTUD_DISABLE;
   params.spp_pathmtu = kSctpMtu;
@@ -594,6 +608,8 @@ void SctpDataMediaChannel::OnPacketReceived(
     // Pass received packet to SCTP stack. Once processed by usrsctp, the data
     // will be will be given to the global OnSctpInboundData, and then,
     // marshalled by a Post and handled with OnMessage.
+
+    VerboseLogPacket(packet->data(), packet->size(), SCTP_DUMP_INBOUND);
     usrsctp_conninput(this, packet->data(), packet->size(), 0);
   } else {
     // TODO(ldixon): Consider caching the packet for very slightly better
@@ -630,7 +646,7 @@ void SctpDataMediaChannel::OnDataFromSctpToChannel(
                     << " on stream " << params.ssrc;
     // Reports all received messages to upper layers, no matter whether the sid
     // is known.
-    SignalDataReceived(params, buffer->data(), buffer->size());
+    SignalDataReceived(params, buffer->data<char>(), buffer->size());
   } else {
     LOG(LS_WARNING) << debug_name_ << "->OnDataFromSctpToChannel(...): "
                     << "Not receiving packet with sid=" << params.ssrc

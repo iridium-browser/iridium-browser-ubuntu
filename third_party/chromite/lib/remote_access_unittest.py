@@ -8,16 +8,20 @@ from __future__ import print_function
 
 import os
 import re
+import socket
 
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_build_lib_unittest
 from chromite.lib import cros_test_lib
+from chromite.lib import debug_link
+from chromite.lib import mdns
+from chromite.lib import mdns_unittest
 from chromite.lib import osutils
 from chromite.lib import partial_mock
 from chromite.lib import remote_access
 
 
-# pylint: disable=W0212
+# pylint: disable=protected-access
 
 
 class TestNormalizePort(cros_test_lib.TestCase):
@@ -227,3 +231,246 @@ class CheckIfRebootedTest(RemoteAccessTest):
     """Test case of bad error code returned."""
     self.MockCheckReboot(2)
     self.assertRaises(Exception, self.host._CheckIfRebooted)
+
+
+class RemoteDeviceTest(cros_test_lib.MockTestCase):
+  """Tests for RemoteDevice class."""
+
+  def setUp(self):
+    self.rsh_mock = self.StartPatcher(RemoteShMock())
+    self.pingable_mock = self.PatchObject(
+        remote_access.RemoteDevice, 'Pingable', return_value=True)
+
+  def _SetupRemoteTempDir(self):
+    """Mock out the calls needed for a remote tempdir."""
+    self.rsh_mock.AddCmdResult(partial_mock.In('mkdir'))
+    self.rsh_mock.AddCmdResult(partial_mock.In('mktemp'))
+    self.rsh_mock.AddCmdResult(partial_mock.In('rm'))
+
+  def testCommands(self):
+    """Tests simple RunCommand() and BaseRunCommand() usage."""
+    command = ['echo', 'foo']
+    expected_output = 'foo'
+    self.rsh_mock.AddCmdResult(command, output=expected_output)
+    self._SetupRemoteTempDir()
+
+    with remote_access.RemoteDeviceHandler('1.1.1.1') as device:
+      self.assertEqual(expected_output,
+                       device.RunCommand(['echo', 'foo']).output)
+      self.assertEqual(expected_output,
+                       device.BaseRunCommand(['echo', 'foo']).output)
+
+  def testRunCommandShortCmdline(self):
+    """Verify short command lines execute env settings directly."""
+    with remote_access.RemoteDeviceHandler('1.1.1.1') as device:
+      self.PatchObject(remote_access.RemoteDevice, 'CopyToWorkDir',
+                       side_effect=Exception('should not be copying files'))
+      self.rsh_mock.AddCmdResult(partial_mock.In('runit'))
+      device.RunCommand(['runit'], extra_env={'VAR': 'val'})
+
+  def testRunCommandLongCmdline(self):
+    """Verify long command lines execute env settings via script."""
+    with remote_access.RemoteDeviceHandler('1.1.1.1') as device:
+      self._SetupRemoteTempDir()
+      m = self.PatchObject(remote_access.RemoteDevice, 'CopyToWorkDir')
+      self.rsh_mock.AddCmdResult(partial_mock.In('runit'))
+      device.RunCommand(['runit'], extra_env={'VAR': 'v' * 1024 * 1024})
+      # We'll assume that the test passed when it tries to copy a file to the
+      # remote side (the shell script to run indirectly).
+      self.assertEqual(m.call_count, 1)
+
+  def testNoDeviceBaseDir(self):
+    """Tests base_dir=None."""
+    command = ['echo', 'foo']
+    expected_output = 'foo'
+    self.rsh_mock.AddCmdResult(command, output=expected_output)
+
+    with remote_access.RemoteDeviceHandler('1.1.1.1', base_dir=None) as device:
+      self.assertEqual(expected_output,
+                       device.BaseRunCommand(['echo', 'foo']).output)
+
+  def testDelayedRemoteDirs(self):
+    """Tests the delayed creation of base_dir/work_dir."""
+    with remote_access.RemoteDeviceHandler('1.1.1.1', base_dir='/f') as device:
+      # Make sure we didn't talk to the remote yet.
+      self.assertEqual(self.rsh_mock.call_count, 0)
+
+      # The work dir will get automatically created when we use it.
+      self.rsh_mock.AddCmdResult(partial_mock.In('mkdir'))
+      self.rsh_mock.AddCmdResult(partial_mock.In('mktemp'))
+      _ = device.work_dir
+      self.assertEqual(self.rsh_mock.call_count, 2)
+
+      # Add a mock for the clean up logic.
+      self.rsh_mock.AddCmdResult(partial_mock.In('rm'))
+
+
+class USBDeviceTestCase(mdns_unittest.mDnsTestCase):
+  """Base class for USB device related tests."""
+
+  def setUp(self):
+    self.StartPatcher(RemoteDeviceMock())
+    self.initializedebuglink_mock = self.PatchObject(debug_link,
+                                                     'InitializeDebugLink')
+
+
+class TestGetUSBConnectedDevices(USBDeviceTestCase):
+  """Tests of the GetUSBConnectedDevices() function."""
+
+  def testDebugLinkInitialization(self):
+    """Test case to make sure the Debug Link is initialized."""
+    self.PatchObject(mdns, 'FindServices')
+    remote_access.GetUSBConnectedDevices()
+    self.initializedebuglink_mock.assert_called_once()
+
+  def testEnumeration(self):
+    """Test case to check correct enumeration results."""
+    services = [
+        mdns.Service('d1.local', '1.1.1.1', 0, 'd1.a.local', {'alias': 'd1'}),
+        mdns.Service('d2.local', '2.2.2.2', 0, 'd2.a.local', {'alias': 'd2'})]
+    self._MockNetworkResponse(services)
+    devices = remote_access.GetUSBConnectedDevices()
+    self.assertEqual(len(devices), len(services))
+    for index in range(len(devices)):
+      self.assertEqual(devices[index].hostname, services[index].ip)
+      self.assertEqual(devices[index].alias, services[index].text['alias'])
+
+
+class TestGetDefaultDevice(USBDeviceTestCase):
+  """Tests _GetDefaultDevice() function."""
+
+  SERVICE_1 = mdns.Service('d1.local', '1.1.1.1', 0, 'd1.a.local',
+                           {'alias': 'd1'})
+  SERVICE_2 = mdns.Service('d2.local', '2.2.2.2', 0, 'd2.a.local',
+                           {'alias': 'd2'})
+
+  def testNoDevices(self):
+    """Tests when no devices are found."""
+    self._MockNetworkResponse([])
+    with self.assertRaises(remote_access.DefaultDeviceError):
+      remote_access._GetDefaultService()
+
+  def testOneDevice(self):
+    """Tests when one device is found."""
+    self._MockNetworkResponse([self.SERVICE_1])
+    service = remote_access._GetDefaultService()
+    self.assertEqual(self.SERVICE_1.ip, service.ip)
+    self.assertEqual(
+        self.SERVICE_1.text[remote_access.BRILLO_DEVICE_PROPERTY_ALIAS],
+        service.text[remote_access.BRILLO_DEVICE_PROPERTY_ALIAS])
+
+  def testMultipleDevices(self):
+    """Tests when multiple devices are found."""
+    self._MockNetworkResponse([self.SERVICE_1, self.SERVICE_2])
+    with self.assertRaises(remote_access.DefaultDeviceError):
+      remote_access._GetDefaultService()
+
+  def testDefaultChromiumOSDevice(self):
+    """Tests finding the default ChromiumOSDevice."""
+    self._MockNetworkResponse([self.SERVICE_1])
+    device = remote_access.ChromiumOSDevice(None, ping=False, connect=False)
+    self.assertEqual(self.SERVICE_1.ip, device.hostname)
+    self.assertEqual(
+        self.SERVICE_1.text[remote_access.BRILLO_DEVICE_PROPERTY_ALIAS],
+        device.alias)
+
+
+class TestUSBDeviceIP(USBDeviceTestCase):
+  """Tests of the GetUSBDeviceIP() function."""
+
+  def testEmptyAlias(self):
+    """Test empty alias should resolve to None."""
+    ip = remote_access.GetUSBDeviceIP('')
+    self.assertEqual(ip, None)
+
+  def testDebugLinkInitialization(self):
+    """Test case to make sure the Debug Link is initialized."""
+    self.PatchObject(mdns, 'FindServices')
+    remote_access.GetUSBDeviceIP('dut')
+    self.initializedebuglink_mock.assert_called_once()
+
+  def testSuccessfulResolution(self):
+    """Test successful resolution of alias to IP."""
+    services = [
+        mdns.Service('d1.local', '1.1.1.1', 0, 'd1.a.local', {'alias': 'd1'}),
+        mdns.Service('d2.local', '2.2.2.2', 0, 'd2.a.local', {'alias': 'd2'}),
+        mdns.Service('d3.local', '3.3.3.3', 0, 'd3.a.local', {'alias': 'd3'})]
+    self._MockNetworkResponse(services)
+    ip = remote_access.GetUSBDeviceIP('d2')
+    self.assertEqual(ip, '2.2.2.2')
+
+  def testDuplicateAlias(self):
+    """Test resolution of alias to IP when duplicate aliases exist."""
+    services = [
+        mdns.Service('d1.local', '1.1.1.1', 0, 'd1.a.local', {'alias': 'd1'}),
+        mdns.Service('d2.local', '2.2.2.2', 0, 'd2.a.local', {'alias': 'd2'}),
+        mdns.Service('d2.local', '3.3.3.3', 0, 'd2.a.local', {'alias': 'd2'})]
+    self._MockNetworkResponse(services)
+    ip = remote_access.GetUSBDeviceIP('d2')
+    # Make sure the IP belongs to the first response that matches the alias.
+    self.assertEqual(ip, '2.2.2.2')
+
+  def testFailedResolution(self):
+    """Test failed resolution of alias to IP."""
+    services = [
+        mdns.Service('d1.local', '1.1.1.1', 0, 'd1.a.local', {'alias': 'd1'}),
+        mdns.Service('d2.local', '2.2.2.2', 0, 'd2.a.local', {'alias': 'd2'})]
+    self._MockNetworkResponse(services)
+    ip = remote_access.GetUSBDeviceIP('d3')
+    self.assertEqual(ip, None)
+
+
+class TestChromiumOSDeviceHostnameResolution(USBDeviceTestCase):
+  """Tests hostname resolution in ChromiumOSDevice."""
+
+  def testHostnameAsNetworkName(self):
+    """Test resolving a valid network name."""
+    self.PatchObject(socket, 'getaddrinfo')
+    hostname = 'good-hostname'
+    device = remote_access.ChromiumOSDevice(hostname, connect=False)
+    self.assertEqual(device.hostname, hostname)
+
+  def testHostnameAsAlias(self):
+    """Test resolving when hostname is used as an alias."""
+    hostname = 'good-alias'
+    ip = '1.1.1.1'
+    self.PatchObject(socket, 'getaddrinfo', side_effect=socket.gaierror)
+    self.PatchObject(remote_access, 'GetUSBDeviceIP', return_value=ip)
+    device = remote_access.ChromiumOSDevice(hostname, connect=False)
+    self.assertEqual(device.hostname, ip)
+    self.assertEqual(device._alias, hostname)
+
+  def testInvalidHostname(self):
+    """Test resolving a bad network name and bad alias."""
+    hostname = 'bad'
+    self.PatchObject(socket, 'getaddrinfo', side_effect=socket.gaierror)
+    self.PatchObject(remote_access, 'GetUSBDeviceIP', return_value=None)
+    device = remote_access.ChromiumOSDevice(hostname, connect=False)
+    # Hostname should be left alone if it's not resolvable.
+    self.assertEqual(device.hostname, hostname)
+
+class TestChromiumOSDeviceSetAlias(USBDeviceTestCase):
+  """Tests setting alias name in ChromiumOSDevice."""
+
+  def setUp(self):
+    """Set up test objects."""
+    self.device = remote_access.ChromiumOSDevice('1.1.1.1', connect=False)
+
+  def testAliasTooLong(self):
+    """Tests that error is raised when alias is too long."""
+    alias_too_long = 'a' * (remote_access.BRILLO_DEVICE_PROPERTY_MAX_LEN + 1)
+    with self.assertRaises(remote_access.InvalidDevicePropertyError):
+      self.device.SetAlias(alias_too_long)
+
+  def testAliasWithBadChars(self):
+    """Tests that error is raised when alias has bad chars."""
+    alias_bad_chars = 'bad*'
+    with self.assertRaises(remote_access.InvalidDevicePropertyError):
+      self.device.SetAlias(alias_bad_chars)
+
+  def testGoodAlias(self):
+    """Tests that command runs when good alias is provided."""
+    good_alias = 'good'
+    run_mock = self.PatchObject(remote_access.ChromiumOSDevice, 'RunCommand')
+    self.device.SetAlias(good_alias)
+    self.assertTrue(run_mock.called)

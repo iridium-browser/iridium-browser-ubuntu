@@ -6,7 +6,8 @@
   'variables': {
     'lastchange_path': '../build/util/LASTCHANGE',
     'libpeer_target_type%': 'static_library',
-    # 'branding_dir' is set in the 'conditions' section at the bottom.
+    'branding_dir': 'app/theme/<(branding_path_component)',
+    'branding_dir_100': 'app/theme/default_100_percent/<(branding_path_component)',
   },
   'conditions': [
     ['OS=="win"', {
@@ -75,6 +76,7 @@
           ],
         },
         {
+          # GN version: //chrome/installer/util:installer_util_unittests
           'target_name': 'installer_util_unittests',
           'type': 'executable',
           'dependencies': [
@@ -93,7 +95,9 @@
             '..',
           ],
           'sources': [
+            # List duplicated in GN build.
             '<(SHARED_INTERMEDIATE_DIR)/chrome_version/other_version.rc',
+            '<(SHARED_INTERMEDIATE_DIR)/chrome/installer/util/installer_util_strings.rc',
             'installer/setup/compat_checks_unittest.cc',
             'installer/setup/setup_constants.cc',
             'installer/util/advanced_firewall_manager_win_unittest.cc',
@@ -118,8 +122,6 @@
             'installer/util/installer_state_unittest.cc',
             'installer/util/installer_util_test_common.cc',
             'installer/util/installer_util_test_common.h',
-            'installer/util/installer_util_unittests.rc',
-            'installer/util/installer_util_unittests_resource.h',
             'installer/util/language_selector_unittest.cc',
             'installer/util/legacy_firewall_manager_win_unittest.cc',
             'installer/util/logging_installer_unittest.cc',
@@ -149,8 +151,6 @@
               ],
             },
           },
-          # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-          'msvs_disabled_warnings': [ 4267, ],
         },
         {
           # GN version: //chrome/installer/util:strings
@@ -161,41 +161,34 @@
               'action_name': 'installer_util_strings',
               'variables': {
                 'create_string_rc_py': 'installer/util/prebuild/create_string_rc.py',
+                'brand_strings': '<(branding_path_component)_strings',
+                'gen_dir': '<(SHARED_INTERMEDIATE_DIR)/chrome/installer/util',
               },
-              'conditions': [
-                ['branding=="Chrome"', {
-                  'variables': {
-                    'brand_strings': 'google_chrome_strings',
-                  },
-                }, {
-                  'variables': {
-                    'brand_strings': 'chromium_strings',
-                  },
-                }],
-              ],
+
               'inputs': [
                 '<(create_string_rc_py)',
                 'app/<(brand_strings).grd',
               ],
               'outputs': [
-                '<(SHARED_INTERMEDIATE_DIR)/installer_util_strings/installer_util_strings.h',
-                '<(SHARED_INTERMEDIATE_DIR)/installer_util_strings/installer_util_strings.rc',
+                '<(gen_dir)/installer_util_strings.h',
+                '<(gen_dir)/installer_util_strings.rc',
               ],
               'action': ['python',
                          '<(create_string_rc_py)',
                          '-i', 'app/<(brand_strings).grd:resources',
                          '-n', 'installer_util_strings',
-                         '-o', '<(SHARED_INTERMEDIATE_DIR)/installer_util_strings',],
+                         '-o', '<(gen_dir)',],
               'message': 'Generating installer_util_strings',
             },
           ],
           'direct_dependent_settings': {
             'include_dirs': [
-              '<(SHARED_INTERMEDIATE_DIR)/installer_util_strings',
+              '<(SHARED_INTERMEDIATE_DIR)',
             ],
           },
         },
         {
+          # GN version: //chrome/installer/launcher_support
           'target_name': 'launcher_support',
           'type': 'static_library',
           'include_dirs': [
@@ -238,7 +231,7 @@
             ],
           },
           'sources': [
-            '<(SHARED_INTERMEDIATE_DIR)/installer_util_strings/installer_util_strings.rc',
+            '<(SHARED_INTERMEDIATE_DIR)/chrome/installer/util/installer_util_strings.rc',
             'installer/mini_installer/chrome.release',
             'installer/setup/app_launcher_installer.cc',
             'installer/setup/app_launcher_installer.h',
@@ -260,6 +253,8 @@
             'installer/setup/setup_util.h',
             'installer/setup/uninstall.cc',
             'installer/setup/uninstall.h',
+            'installer/setup/update_active_setup_version_work_item.cc',
+            'installer/setup/update_active_setup_version_work_item.h',
           ],
           'msvs_settings': {
             'VCLinkerTool': {
@@ -303,24 +298,6 @@
             },
           ],
           'conditions': [
-            # TODO(mark):  <(branding_dir) should be defined by the
-            # global condition block at the bottom of the file, but
-            # this doesn't work due to the following issue:
-            #
-            #   http://code.google.com/p/gyp/issues/detail?id=22
-            #
-            # Remove this block once the above issue is fixed.
-            [ 'branding == "Chrome"', {
-              'variables': {
-                 'branding_dir': 'app/theme/google_chrome',
-                 'branding_dir_100': 'app/theme/default_100_percent/google_chrome',
-              },
-            }, { # else branding!="Chrome"
-              'variables': {
-                 'branding_dir': 'app/theme/chromium',
-                 'branding_dir_100': 'app/theme/default_100_percent/chromium',
-              },
-            }],
             ['target_arch=="ia32"', {
               'msvs_settings': {
                 'VCCLCompilerTool': {
@@ -381,6 +358,9 @@
             'installer/setup/setup_util.cc',
             'installer/setup/setup_util_unittest.cc',
             'installer/setup/setup_util_unittest.h',
+            'installer/setup/update_active_setup_version_work_item.cc',  # Move to lib
+            'installer/setup/update_active_setup_version_work_item.h',   # Move to lib
+            'installer/setup/update_active_setup_version_work_item_unittest.cc',
           ],
           # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
           'msvs_disabled_warnings': [ 4267, ],
@@ -463,7 +443,6 @@
           # files? (e.g. all locales, resources, etc.)
           '<(PRODUCT_DIR)/chrome',
           '<(PRODUCT_DIR)/chrome_sandbox',
-          '<(PRODUCT_DIR)/libffmpegsumo.so',
           '<(PRODUCT_DIR)/xdg-mime',
           '<(PRODUCT_DIR)/xdg-settings',
           '<(PRODUCT_DIR)/locales/en-US.pak',
@@ -1075,7 +1054,7 @@
           },
           'xcode_settings': {
             'ARCHS': [ 'i386', 'x86_64' ],
-            'MACOSX_DEPLOYMENT_TARGET': '10.4',
+            'MACOSX_DEPLOYMENT_TARGET': '10.5',
             'GCC_ENABLE_OBJC_GC': 'supported',
           },
         },
@@ -1094,16 +1073,5 @@
         },
       ],  # targets
     }],  # OS=="mac"
-    [ 'branding == "Chrome"', {
-      'variables': {
-         'branding_dir': 'app/theme/google_chrome',
-         'branding_dir_100': 'app/theme/default_100_percent/google_chrome',
-      },
-    }, { # else branding!="Chrome"
-      'variables': {
-         'branding_dir': 'app/theme/chromium',
-         'branding_dir_100': 'app/theme/default_100_percent/chromium',
-      },
-    }],
   ],
 }

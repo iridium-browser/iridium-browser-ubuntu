@@ -32,7 +32,7 @@ namespace blink {
 class SVGTextPositioningElement : public SVGTextContentElement {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static SVGTextPositioningElement* elementFromRenderer(LayoutObject&);
+    static SVGTextPositioningElement* elementFromLayoutObject(LayoutObject&);
 
     SVGAnimatedLengthList* x() { return m_x.get(); }
     SVGAnimatedLengthList* y() { return m_y.get(); }
@@ -45,7 +45,6 @@ public:
 protected:
     SVGTextPositioningElement(const QualifiedName&, Document&);
 
-    bool isSupportedAttribute(const QualifiedName&);
     virtual void svgAttributeChanged(const QualifiedName&) override final;
     virtual bool isTextPositioning() const override final { return true; }
 

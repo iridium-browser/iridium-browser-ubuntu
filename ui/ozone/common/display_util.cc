@@ -18,6 +18,7 @@ namespace ui {
 namespace {
 
 const int64_t kDummyDisplayId = 1;
+const int64_t kDummyProductId = 1;
 
 }  // namespace
 
@@ -58,6 +59,7 @@ DisplaySnapshot_Params GetDisplaySnapshotParams(
   if (params.has_native_mode)
     params.native_mode = GetDisplayModeParams(*display.native_mode());
 
+  params.product_id = display.product_id();
   params.string_representation = display.ToString();
 
   return params;
@@ -93,53 +95,8 @@ bool CreateSnapshotFromCommandLine(DisplaySnapshot_Params* snapshot_out) {
   snapshot_out->current_mode = mode_param;
   snapshot_out->has_native_mode = true;
   snapshot_out->native_mode = mode_param;
+  snapshot_out->product_id = kDummyProductId;
   return true;
-}
-
-bool CreateSnapshotFromEDID(bool internal,
-                            const std::vector<uint8_t>& edid,
-                            DisplaySnapshot_Params* snapshot_out) {
-  uint16_t manufacturer_id = 0;
-  gfx::Size resolution;
-
-  DisplayMode_Params mode_param;
-  mode_param.refresh_rate = 60.0f;
-
-  if (!ParseOutputDeviceData(edid, &manufacturer_id,
-                             &snapshot_out->display_name, &mode_param.size,
-                             &snapshot_out->physical_size) ||
-      !GetDisplayIdFromEDID(edid, 0, &snapshot_out->display_id)) {
-    return false;
-  }
-  ParseOutputOverscanFlag(edid, &snapshot_out->has_overscan);
-
-  snapshot_out->modes.push_back(mode_param);
-  // Use VGA for external display for now.
-  // TODO(oshima): frecon should set this value in the display_info.bin file.
-  snapshot_out->type =
-      internal ? DISPLAY_CONNECTION_TYPE_INTERNAL : DISPLAY_CONNECTION_TYPE_VGA;
-  snapshot_out->has_current_mode = true;
-  snapshot_out->current_mode = mode_param;
-  snapshot_out->has_native_mode = true;
-  snapshot_out->native_mode = mode_param;
-  return true;
-}
-
-bool CreateSnapshotFromEDIDFile(const base::FilePath& file,
-                                DisplaySnapshot_Params* snapshot_out) {
-  std::string raw_display_info;
-  const int kEDIDMaxSize = 128;
-  if (!base::ReadFileToString(file, &raw_display_info, kEDIDMaxSize + 1) ||
-      raw_display_info.size() < 10) {
-    return false;
-  }
-  std::vector<uint8_t> edid;
-  // The head of the file contains one byte flag that indicates the type of
-  // display.
-  bool internal = raw_display_info[0] == 1;
-  edid.assign(raw_display_info.c_str() + 1,
-              raw_display_info.c_str() + raw_display_info.size());
-  return CreateSnapshotFromEDID(internal, edid, snapshot_out);
 }
 
 }  // namespace ui

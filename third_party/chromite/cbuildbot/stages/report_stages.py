@@ -7,7 +7,6 @@
 
 from __future__ import print_function
 
-import logging
 import os
 import sys
 
@@ -22,6 +21,8 @@ from chromite.cbuildbot.stages import generic_stages
 from chromite.cbuildbot.stages import sync_stages
 from chromite.lib import cidb
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
+from chromite.lib import graphite
 from chromite.lib import gs
 from chromite.lib import osutils
 from chromite.lib import portage_util
@@ -137,6 +138,9 @@ class BuildStartStage(generic_stages.BuilderStage):
                    d['build_id'])
       return
 
+    counter_name = '.'.join([self._run.config['name'], 'build_started'])
+    graphite.StatsFactory.GetInstance().Counter(counter_name).increment()
+
     # Note: In other build stages we use self._run.GetCIDBHandle to fetch
     # a cidb handle. However, since we don't yet have a build_id, we can't
     # do that here.
@@ -209,7 +213,7 @@ class BuildReexecutionFinishedStage(generic_stages.BuilderStage,
         os.path.join(build_root, constants.SDK_VERSION_FILE),
         ignore_missing=True)
 
-    verinfo = self._run.GetVersionInfo(build_root)
+    verinfo = self._run.GetVersionInfo()
     platform_tag = getattr(self._run.attrs, 'release_tag')
     if not platform_tag:
       platform_tag = verinfo.VersionString()
@@ -317,24 +321,20 @@ class ReportStage(generic_stages.BuilderStage,
       builder_run: BuilderRun for this run.
       final_status: Final status string for this run.
     """
-
-    # Exclude tryjobs from streak counting.
-    if not builder_run.options.remote_trybot and not builder_run.options.local:
+    if builder_run.InProduction():
       streak_value = self._UpdateStreakCounter(
           final_status=final_status, counter_name=builder_run.config.name,
           dry_run=self._run.debug)
       verb = 'passed' if streak_value > 0 else 'failed'
-      cros_build_lib.Info('Builder %s has %s %s time(s) in a row.',
-                          builder_run.config.name, verb, abs(streak_value))
+      logging.info('Builder %s has %s %s time(s) in a row.',
+                   builder_run.config.name, verb, abs(streak_value))
       # See if updated streak should trigger a notification email.
       if (builder_run.config.health_alert_recipients and
           builder_run.config.health_threshold > 0 and
           streak_value <= -builder_run.config.health_threshold):
-        cros_build_lib.Info(
-            'Builder failed %i consecutive times, sending health alert email '
-            'to %s.',
-            -streak_value,
-            builder_run.config.health_alert_recipients)
+        logging.info('Builder failed %i consecutive times, sending health '
+                     'alert email to %s.', -streak_value,
+                     builder_run.config.health_alert_recipients)
 
         subject = '%s health alert' % builder_run.config.name
         body = self._HealthAlertMessage(-streak_value)
@@ -467,7 +467,7 @@ class ReportStage(generic_stages.BuilderStage,
                         sync_instance=None, completion_instance=None):
     """Generate ReportStage metadata.
 
-   Args:
+    Args:
       config: The build config for this run.  Defaults to self._run.config.
       stage: The stage name that this metadata file is being uploaded for.
       final_status: Whether the build passed or failed. If None, the build

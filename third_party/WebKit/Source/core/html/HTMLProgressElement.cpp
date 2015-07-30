@@ -54,7 +54,7 @@ HTMLProgressElement::~HTMLProgressElement()
 PassRefPtrWillBeRawPtr<HTMLProgressElement> HTMLProgressElement::create(Document& document)
 {
     RefPtrWillBeRawPtr<HTMLProgressElement> progress = adoptRefWillBeNoop(new HTMLProgressElement(document));
-    progress->ensureClosedShadowRoot();
+    progress->ensureUserAgentShadowRoot();
     return progress.release();
 }
 
@@ -70,7 +70,7 @@ LayoutProgress* HTMLProgressElement::layoutProgress() const
     if (layoutObject() && layoutObject()->isProgress())
         return toLayoutProgress(layoutObject());
 
-    LayoutObject* layoutObject = closedShadowRoot()->firstChild()->layoutObject();
+    LayoutObject* layoutObject = userAgentShadowRoot()->firstChild()->layoutObject();
     ASSERT_WITH_SECURITY_IMPLICATION(!layoutObject || layoutObject->isProgress());
     return toLayoutProgress(layoutObject);
 }
@@ -88,8 +88,8 @@ void HTMLProgressElement::parseAttribute(const QualifiedName& name, const Atomic
 void HTMLProgressElement::attach(const AttachContext& context)
 {
     LabelableElement::attach(context);
-    if (LayoutProgress* render = layoutProgress())
-        render->updateFromElement();
+    if (LayoutProgress* layoutObject = layoutProgress())
+        layoutObject->updateFromElement();
 }
 
 double HTMLProgressElement::value() const
@@ -138,15 +138,15 @@ bool HTMLProgressElement::isDeterminate() const
 void HTMLProgressElement::didElementStateChange()
 {
     m_value->setWidthPercentage(position() * 100);
-    if (LayoutProgress* render = layoutProgress()) {
-        bool wasDeterminate = render->isDeterminate();
-        render->updateFromElement();
+    if (LayoutProgress* layoutObject = layoutProgress()) {
+        bool wasDeterminate = layoutObject->isDeterminate();
+        layoutObject->updateFromElement();
         if (wasDeterminate != isDeterminate())
             pseudoStateChanged(CSSSelector::PseudoIndeterminate);
     }
 }
 
-void HTMLProgressElement::didAddClosedShadowRoot(ShadowRoot& root)
+void HTMLProgressElement::didAddUserAgentShadowRoot(ShadowRoot& root)
 {
     ASSERT(!m_value);
 

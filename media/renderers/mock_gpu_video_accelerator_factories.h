@@ -39,19 +39,27 @@ class MockGpuVideoAcceleratorFactories : public GpuVideoAcceleratorFactories {
   MOCK_METHOD1(DeleteTexture, void(uint32 texture_id));
   MOCK_METHOD1(WaitSyncPoint, void(uint32 sync_point));
   MOCK_METHOD0(GetTaskRunner, scoped_refptr<base::SingleThreadTaskRunner>());
+  MOCK_METHOD0(GetVideoDecodeAcceleratorSupportedProfiles,
+               VideoDecodeAccelerator::SupportedProfiles());
   MOCK_METHOD0(GetVideoEncodeAcceleratorSupportedProfiles,
-               std::vector<VideoEncodeAccelerator::SupportedProfile>());
+               VideoEncodeAccelerator::SupportedProfiles());
+
+  scoped_ptr<gfx::GpuMemoryBuffer> AllocateGpuMemoryBuffer(
+      const gfx::Size& size,
+      gfx::GpuMemoryBuffer::Format format,
+      gfx::GpuMemoryBuffer::Usage usage) override;
+
+  MOCK_METHOD0(IsTextureRGSupported, bool());
+  MOCK_METHOD0(GetGLES2Interface, gpu::gles2::GLES2Interface*());
 
   scoped_ptr<base::SharedMemory> CreateSharedMemory(size_t size) override;
 
-  virtual scoped_ptr<VideoDecodeAccelerator> CreateVideoDecodeAccelerator()
-      override;
+  scoped_ptr<VideoDecodeAccelerator> CreateVideoDecodeAccelerator() override;
 
-  virtual scoped_ptr<VideoEncodeAccelerator> CreateVideoEncodeAccelerator()
-      override;
+  scoped_ptr<VideoEncodeAccelerator> CreateVideoEncodeAccelerator() override;
 
  private:
-  virtual ~MockGpuVideoAcceleratorFactories();
+  ~MockGpuVideoAcceleratorFactories() override;
 
   DISALLOW_COPY_AND_ASSIGN(MockGpuVideoAcceleratorFactories);
 };

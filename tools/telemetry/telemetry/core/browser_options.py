@@ -117,10 +117,6 @@ class BrowserFinderOptions(optparse.Values):
         help='Record profiling data using this tool. Supported values: ' +
              ', '.join(profiler_choices))
     group.add_option(
-        '--interactive', dest='interactive', action='store_true',
-        help='Let the user interact with the page; the actions specified for '
-             'the page are not run.')
-    group.add_option(
         '-v', '--verbose', action='count', dest='verbosity',
         help='Increase verbosity level (repeat as needed)')
     group.add_option('--print-bootstrap-deps',
@@ -223,6 +219,10 @@ class BrowserOptions(object):
     self.wpr_mode = wpr_modes.WPR_OFF
     self.netsim = None
 
+    # The amount of time Telemetry should wait for the browser to start.
+    # This property is not exposed as a command line option.
+    self._browser_startup_timeout = 30
+
     self.disable_background_networking = True
     self.no_proxy_server = False
     self.browser_user_agent_type = None
@@ -296,17 +296,6 @@ class BrowserOptions(object):
         help='Ignored argument for compatibility with runtest.py harness')
     parser.add_option_group(group)
 
-    group = optparse.OptionGroup(parser, 'Synthetic gesture options')
-    synthetic_gesture_source_type_choices = ['default', 'mouse', 'touch']
-    group.add_option('--synthetic-gesture-source-type',
-        dest='synthetic_gesture_source_type',
-        default='default', type='choice',
-        choices=synthetic_gesture_source_type_choices,
-        help='Specify the source type for synthtic gestures. Note that some ' +
-             'actions only support a specific source type. ' +
-             'Supported values: ' +
-             ', '.join(synthetic_gesture_source_type_choices))
-    parser.add_option_group(group)
 
 
   def UpdateFromParseResults(self, finder_options):
@@ -318,7 +307,6 @@ class BrowserOptions(object):
         'profile_dir',
         'profile_type',
         'show_stdout',
-        'synthetic_gesture_source_type',
         'use_devtools_active_port',
         ]
     for o in browser_options_list:
@@ -365,6 +353,14 @@ class BrowserOptions(object):
   @property
   def extra_browser_args(self):
     return self._extra_browser_args
+
+  @property
+  def browser_startup_timeout(self):
+    return self._browser_startup_timeout
+
+  @browser_startup_timeout.setter
+  def browser_startup_timeout(self, value):
+    self._browser_startup_timeout = value
 
   def AppendExtraBrowserArgs(self, args):
     if isinstance(args, list):

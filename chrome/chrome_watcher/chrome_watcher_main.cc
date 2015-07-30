@@ -8,24 +8,31 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
+#include "base/file_version_info.h"
 #include "base/files/file_path.h"
 #include "base/logging_win.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/process/process.h"
 #include "base/run_loop.h"
 #include "base/sequenced_task_runner.h"
+#include "base/single_thread_task_runner.h"
+#include "base/strings/string16.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_piece.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/template_util.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/thread.h"
 #include "base/time/time.h"
 #include "base/win/scoped_handle.h"
 #include "chrome/chrome_watcher/chrome_watcher_main_api.h"
+#include "chrome/installer/util/util_constants.h"
 #include "components/browser_watcher/endsession_watcher_window_win.h"
 #include "components/browser_watcher/exit_code_watcher_win.h"
 #include "components/browser_watcher/exit_funnel_win.h"
+#include "components/browser_watcher/window_hang_monitor_win.h"
 
 #ifdef KASKO
 #include "syzygy/kasko/api/reporter.h"
@@ -97,7 +104,7 @@ BrowserMonitor::BrowserMonitor(base::RunLoop* run_loop,
                    base::Unretained(this))),
     background_thread_("BrowserWatcherThread"),
     run_loop_(run_loop),
-    main_thread_(base::MessageLoopProxy::current()) {
+    main_thread_(base::ThreadTaskRunnerHandle::Get()) {
 }
 
 BrowserMonitor::~BrowserMonitor() {
@@ -111,7 +118,7 @@ bool BrowserMonitor::StartWatching(
     return false;
 
   if (!exit_funnel_.Init(registry_path,
-                        exit_code_watcher_.process().Handle())) {
+                         exit_code_watcher_.process().Handle())) {
     return false;
   }
 
@@ -131,7 +138,7 @@ bool BrowserMonitor::StartWatching(
 }
 
 void BrowserMonitor::OnEndSessionMessage(UINT message, LPARAM lparam) {
-  DCHECK_EQ(main_thread_, base::MessageLoopProxy::current());
+  DCHECK_EQ(main_thread_, base::ThreadTaskRunnerHandle::Get());
 
   if (message == WM_QUERYENDSESSION) {
     exit_funnel_.RecordEvent(L"WatcherQueryEndSession");
@@ -158,7 +165,7 @@ void BrowserMonitor::OnEndSessionMessage(UINT message, LPARAM lparam) {
 
 void BrowserMonitor::Watch(base::win::ScopedHandle on_initialized_event) {
   // This needs to run on an IO thread.
-  DCHECK_NE(main_thread_, base::MessageLoopProxy::current());
+  DCHECK_NE(main_thread_, base::ThreadTaskRunnerHandle::Get());
 
   // Signal our client now that the Kasko reporter is initialized and we have
   // cleared all of the obstacles that might lead to an early exit.
@@ -177,7 +184,7 @@ void BrowserMonitor::Watch(base::win::ScopedHandle on_initialized_event) {
 
 void BrowserMonitor::BrowserExited() {
   // This runs in the main thread.
-  DCHECK_EQ(main_thread_, base::MessageLoopProxy::current());
+  DCHECK_EQ(main_thread_, base::ThreadTaskRunnerHandle::Get());
 
   // Our background thread has served it's purpose.
   background_thread_.Stop();
@@ -197,6 +204,79 @@ void BrowserMonitor::BrowserExited() {
   }
 }
 
+void OnWindowEvent(
+    const base::string16& registry_path,
+    base::Process process,
+    const base::Callback<void(const base::Process&)>& on_hung_callback,
+    browser_watcher::WindowHangMonitor::WindowEvent window_event) {
+  browser_watcher::ExitFunnel exit_funnel;
+  if (exit_funnel.Init(registry_path.c_str(), process.Handle())) {
+    switch (window_event) {
+      case browser_watcher::WindowHangMonitor::WINDOW_NOT_FOUND:
+        exit_funnel.RecordEvent(L"MessageWindowNotFound");
+        break;
+      case browser_watcher::WindowHangMonitor::WINDOW_HUNG:
+        exit_funnel.RecordEvent(L"MessageWindowHung");
+        if (!on_hung_callback.is_null())
+          on_hung_callback.Run(process);
+        break;
+      case browser_watcher::WindowHangMonitor::WINDOW_VANISHED:
+        exit_funnel.RecordEvent(L"MessageWindowVanished");
+        break;
+      default:
+        NOTREACHED();
+        break;
+    }
+  }
+}
+
+#ifdef KASKO
+void DumpHungBrowserProcess(const base::string16& channel,
+                            const base::Process& process) {
+  // TODO(erikwright): Rather than recreating these crash keys here, it would be
+  // ideal to read them directly from the browser process.
+
+  // This is looking up the version of chrome_watcher.dll, which is equivalent
+  // for our purposes to chrome.dll.
+  scoped_ptr<FileVersionInfo> version_info(
+      FileVersionInfo::CreateFileVersionInfoForModule(
+          reinterpret_cast<HMODULE>(&__ImageBase)));
+  using CrashKeyStrings = std::pair<base::string16, base::string16>;
+  std::vector<CrashKeyStrings> crash_key_strings;
+  if (version_info.get()) {
+    crash_key_strings.push_back(
+        CrashKeyStrings(L"prod", version_info->product_short_name()));
+    base::string16 version = version_info->product_version();
+    if (!version_info->is_official_build())
+      version.append(base::ASCIIToUTF16("-devel"));
+    crash_key_strings.push_back(CrashKeyStrings(L"ver", version));
+  } else {
+    // No version info found. Make up the values.
+    crash_key_strings.push_back(CrashKeyStrings(L"prod", L"Chrome"));
+    crash_key_strings.push_back(CrashKeyStrings(L"ver", L"0.0.0.0-devel"));
+  }
+  crash_key_strings.push_back(CrashKeyStrings(L"channel", channel));
+  crash_key_strings.push_back(CrashKeyStrings(L"plat", L"Win32"));
+  crash_key_strings.push_back(CrashKeyStrings(L"ptype", L"browser"));
+  crash_key_strings.push_back(
+      CrashKeyStrings(L"pid", base::IntToString16(process.Pid())));
+  crash_key_strings.push_back(CrashKeyStrings(L"hung-process", L"1"));
+
+  std::vector<const base::char16*> key_buffers;
+  std::vector<const base::char16*> value_buffers;
+  for (auto& strings : crash_key_strings) {
+    key_buffers.push_back(strings.first.c_str());
+    value_buffers.push_back(strings.second.c_str());
+  }
+  key_buffers.push_back(nullptr);
+  value_buffers.push_back(nullptr);
+  // TODO(erikwright): Make the dump-type channel-dependent.
+  kasko::api::SendReportForProcess(process.Handle(),
+                                   kasko::api::LARGER_DUMP_TYPE,
+                                   key_buffers.data(), value_buffers.data());
+}
+#endif  // KASKO
+
 }  // namespace
 
 // The main entry point to the watcher, declared as extern "C" to avoid name
@@ -204,7 +284,9 @@ void BrowserMonitor::BrowserExited() {
 extern "C" int WatcherMain(const base::char16* registry_path,
                            HANDLE process_handle,
                            HANDLE on_initialized_event_handle,
-                           const base::char16* browser_data_directory) {
+                           const base::char16* browser_data_directory,
+                           const base::char16* message_window_name,
+                           const base::char16* channel_name) {
   base::Process process(process_handle);
   base::win::ScopedHandle on_initialized_event(on_initialized_event_handle);
 
@@ -219,6 +301,8 @@ extern "C" int WatcherMain(const base::char16* registry_path,
   // chrome.exe in order to report its exit status.
   ::SetProcessShutdownParameters(0x100, SHUTDOWN_NORETRY);
 
+  base::Callback<void(const base::Process&)> on_hung_callback;
+
 #ifdef KASKO
   bool launched_kasko = kasko::api::InitializeReporter(
       GetKaskoEndpoint(process.Pid()).c_str(),
@@ -231,6 +315,10 @@ extern "C" int WatcherMain(const base::char16* registry_path,
           .Append(kPermanentlyFailedReportsSubdir)
           .value()
           .c_str());
+  if (launched_kasko &&
+      base::StringPiece16(channel_name) == installer::kChromeChannelCanary) {
+    on_hung_callback = base::Bind(&DumpHungBrowserProcess, channel_name);
+  }
 #endif  // KASKO
 
   // Run a UI message loop on the main thread.
@@ -239,12 +327,21 @@ extern "C" int WatcherMain(const base::char16* registry_path,
 
   base::RunLoop run_loop;
   BrowserMonitor monitor(&run_loop, registry_path);
-  if (!monitor.StartWatching(registry_path, process.Pass(),
+  if (!monitor.StartWatching(registry_path, process.Duplicate(),
                              on_initialized_event.Pass())) {
     return 1;
   }
 
-  run_loop.Run();
+  {
+    // Scoped to force |hang_monitor| destruction before Kasko is shut down.
+    browser_watcher::WindowHangMonitor hang_monitor(
+        base::TimeDelta::FromSeconds(60), base::TimeDelta::FromSeconds(20),
+        base::Bind(&OnWindowEvent, registry_path,
+                   base::Passed(process.Duplicate()), on_hung_callback));
+    hang_monitor.Initialize(process.Duplicate(), message_window_name);
+
+    run_loop.Run();
+  }
 
 #ifdef KASKO
   if (launched_kasko)

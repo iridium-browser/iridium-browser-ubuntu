@@ -21,6 +21,9 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/guest_view/browser/guest_view_manager.h"
+#include "components/guest_view/browser/guest_view_manager_factory.h"
+#include "components/guest_view/browser/test_guest_view_manager.h"
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/interstitial_page_delegate.h"
@@ -36,9 +39,7 @@
 #include "extensions/browser/api/declarative/test_rules_registry.h"
 #include "extensions/browser/api/declarative_webrequest/webrequest_constants.h"
 #include "extensions/browser/app_window/native_app_window.h"
-#include "extensions/browser/guest_view/guest_view_manager.h"
-#include "extensions/browser/guest_view/guest_view_manager_factory.h"
-#include "extensions/browser/guest_view/test_guest_view_manager.h"
+#include "extensions/browser/guest_view/extensions_guest_view_manager_delegate.h"
 #include "extensions/browser/guest_view/web_view/web_view_guest.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extensions_client.h"
@@ -53,6 +54,7 @@
 #if defined(ENABLE_PLUGINS)
 #include "content/public/browser/plugin_service.h"
 #include "content/public/common/webplugininfo.h"
+#include "content/public/test/ppapi_test_utils.h"
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -66,7 +68,11 @@
 #endif
 
 using extensions::ContextMenuMatcher;
+using extensions::ExtensionsGuestViewManagerDelegate;
 using extensions::MenuItem;
+using guest_view::GuestViewManager;
+using guest_view::TestGuestViewManager;
+using guest_view::TestGuestViewManagerFactory;
 using prerender::PrerenderLinkManager;
 using prerender::PrerenderLinkManagerFactory;
 using task_manager::browsertest_util::MatchAboutBlankTab;
@@ -84,17 +90,9 @@ namespace {
 const char kEmptyResponsePath[] = "/close-socket";
 const char kRedirectResponsePath[] = "/server-redirect";
 const char kUserAgentRedirectResponsePath[] = "/detect-user-agent";
+const char kCacheResponsePath[] = "/cache-control-response";
 const char kRedirectResponseFullPath[] =
     "/extensions/platform_apps/web_view/shim/guest_redirect.html";
-
-// Platform-specific filename relative to the chrome executable.
-#if defined(OS_WIN)
-const wchar_t library_name[] = L"ppapi_tests.dll";
-#elif defined(OS_MACOSX)
-const char library_name[] = "ppapi_tests.plugin";
-#elif defined(OS_POSIX)
-const char library_name[] = "libppapi_tests.so";
-#endif
 
 class EmptyHttpResponse : public net::test_server::HttpResponse {
  public:
@@ -137,7 +135,7 @@ class WebContentsHiddenObserver : public content::WebContentsObserver {
 // context menu was shown.
 class ContextMenuCallCountObserver {
  public:
-  ContextMenuCallCountObserver ()
+  ContextMenuCallCountObserver()
       : num_times_shown_(0),
         menu_observer_(chrome::NOTIFICATION_RENDER_VIEW_CONTEXT_MENU_SHOWN,
                        base::Bind(&ContextMenuCallCountObserver::OnMenuShown,
@@ -258,40 +256,6 @@ class MockWebContentsDelegate : public content::WebContentsDelegate {
   scoped_refptr<content::MessageLoopRunner> check_message_loop_runner_;
 
   DISALLOW_COPY_AND_ASSIGN(MockWebContentsDelegate);
-};
-
-class MockWebViewGuestDelegate : public extensions::WebViewGuestDelegate {
- public:
-  explicit MockWebViewGuestDelegate(extensions::WebViewGuest* web_view_guest)
-      : web_view_guest_(web_view_guest), clear_cache_called_(false) {}
-  ~MockWebViewGuestDelegate() override {}
-
-  // WebViewGuestDelegate implementation.
-  void ClearCache(base::Time remove_since,
-                  const base::Closure& callback) override {
-    clear_cache_called_ = true;
-    base::MessageLoop::current()->PostTask(FROM_HERE, callback);
-  }
-  bool HandleContextMenu(const content::ContextMenuParams& params) override {
-    return false;
-  }
-  void OnAttachWebViewHelpers(content::WebContents* contents) override {}
-  void OnDidCommitProvisionalLoadForFrame(bool is_main_frame) override {}
-  void OnDidInitialize() override {}
-  void OnDocumentLoadedInFrame(
-      content::RenderFrameHost* render_frame_host) override {}
-  void OnGuestDestroyed() override {}
-  void OnShowContextMenu(
-      int request_id,
-      const WebViewGuestDelegate::MenuItemVector* items) override {}
-
-  bool clear_cache_called() { return clear_cache_called_; }
-
- private:
-  extensions::WebViewGuest* web_view_guest_;
-  bool clear_cache_called_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockWebViewGuestDelegate);
 };
 
 // This class intercepts download request from the guest.
@@ -612,12 +576,25 @@ class WebViewTest : public extensions::PlatformAppBrowserTest {
   static scoped_ptr<net::test_server::HttpResponse> EmptyResponseHandler(
       const std::string& path,
       const net::test_server::HttpRequest& request) {
-    if (StartsWithASCII(path, request.relative_url, true)) {
-      return scoped_ptr<net::test_server::HttpResponse>(
-          new EmptyHttpResponse);
-    }
+    if (StartsWithASCII(path, request.relative_url, true))
+      return scoped_ptr<net::test_server::HttpResponse>(new EmptyHttpResponse);
 
     return scoped_ptr<net::test_server::HttpResponse>();
+  }
+
+  // Handles |request| by serving cache-able response.
+  static scoped_ptr<net::test_server::HttpResponse> CacheControlResponseHandler(
+      const std::string& path,
+      const net::test_server::HttpRequest& request) {
+    if (!StartsWithASCII(path, request.relative_url, true))
+      return scoped_ptr<net::test_server::HttpResponse>();
+
+    scoped_ptr<net::test_server::BasicHttpResponse> http_response(
+        new net::test_server::BasicHttpResponse);
+    http_response->AddCustomHeader("Cache-control", "max-age=3600");
+    http_response->set_content_type("text/plain");
+    http_response->set_content("dummy text");
+    return http_response.Pass();
   }
 
   // Shortcut to return the current MenuManager.
@@ -666,6 +643,9 @@ class WebViewTest : public extensions::PlatformAppBrowserTest {
               &WebViewTest::UserAgentResponseHandler,
               kUserAgentRedirectResponsePath,
               embedded_test_server()->GetURL(kRedirectResponseFullPath)));
+
+      embedded_test_server()->RegisterRequestHandler(base::Bind(
+          &WebViewTest::CacheControlResponseHandler, kCacheResponsePath));
     }
 
     LoadAndLaunchPlatformApp(app_location.c_str(), "Launched");
@@ -824,15 +804,25 @@ class WebViewTest : public extensions::PlatformAppBrowserTest {
     return embedder_web_contents_;
   }
 
-  extensions::TestGuestViewManager* GetGuestViewManager() {
-    return static_cast<extensions::TestGuestViewManager*>(
-        extensions::TestGuestViewManager::FromBrowserContext(
-            browser()->profile()));
+  TestGuestViewManager* GetGuestViewManager() {
+    TestGuestViewManager* manager = static_cast<TestGuestViewManager*>(
+        TestGuestViewManager::FromBrowserContext(browser()->profile()));
+    // TestGuestViewManager::WaitForSingleGuestCreated may and will get called
+    // before a guest is created.
+    if (!manager) {
+      manager = static_cast<TestGuestViewManager*>(
+          GuestViewManager::CreateWithDelegate(
+              browser()->profile(),
+              scoped_ptr<guest_view::GuestViewManagerDelegate>(
+                  new ExtensionsGuestViewManagerDelegate(
+                      browser()->profile()))));
+    }
+    return manager;
   }
 
   WebViewTest() : guest_web_contents_(NULL),
                   embedder_web_contents_(NULL) {
-    extensions::GuestViewManager::set_factory_for_testing(&factory_);
+    GuestViewManager::set_factory_for_testing(&factory_);
   }
 
  private:
@@ -848,7 +838,7 @@ class WebViewTest : public extensions::PlatformAppBrowserTest {
   scoped_ptr<content::FakeSpeechRecognitionManager>
       fake_speech_recognition_manager_;
 
-  extensions::TestGuestViewManagerFactory factory_;
+  TestGuestViewManagerFactory factory_;
   // Note that these are only set if you launch app using LoadAppWithGuest().
   content::WebContents* guest_web_contents_;
   content::WebContents* embedder_web_contents_;
@@ -1015,15 +1005,8 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestAutosizeRemoveAttributes) {
 }
 
 // This test is disabled due to being flaky. http://crbug.com/282116
-#if defined(OS_WIN) || defined(OS_MACOSX)
-#define MAYBE_Shim_TestAutosizeWithPartialAttributes \
-    DISABLED_Shim_TestAutosizeWithPartialAttributes
-#else
-#define MAYBE_Shim_TestAutosizeWithPartialAttributes \
-    Shim_TestAutosizeWithPartialAttributes
-#endif
 IN_PROC_BROWSER_TEST_F(WebViewTest,
-                       MAYBE_Shim_TestAutosizeWithPartialAttributes) {
+                       DISABLED_Shim_TestAutosizeWithPartialAttributes) {
   TestHelper("testAutosizeWithPartialAttributes",
              "web_view/shim",
              NO_TEST_SERVER);
@@ -1119,6 +1102,58 @@ IN_PROC_BROWSER_TEST_F(WebViewTest,
   TestHelper("testPartitionRemovalAfterNavigationFails",
              "web_view/shim",
              NO_TEST_SERVER);
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestAddContentScript) {
+  TestHelper("testAddContentScript", "web_view/shim", NEEDS_TEST_SERVER);
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestAddMultipleContentScripts) {
+  TestHelper("testAddMultipleContentScripts", "web_view/shim",
+             NEEDS_TEST_SERVER);
+}
+
+IN_PROC_BROWSER_TEST_F(
+    WebViewTest,
+    Shim_TestAddContentScriptWithSameNameShouldOverwriteTheExistingOne) {
+  TestHelper("testAddContentScriptWithSameNameShouldOverwriteTheExistingOne",
+             "web_view/shim", NEEDS_TEST_SERVER);
+}
+
+IN_PROC_BROWSER_TEST_F(
+    WebViewTest,
+    Shim_TestAddContentScriptToOneWebViewShouldNotInjectToTheOtherWebView) {
+  TestHelper("testAddContentScriptToOneWebViewShouldNotInjectToTheOtherWebView",
+             "web_view/shim", NEEDS_TEST_SERVER);
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestAddAndRemoveContentScripts) {
+  TestHelper("testAddAndRemoveContentScripts", "web_view/shim",
+             NEEDS_TEST_SERVER);
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest,
+                       Shim_TestAddContentScriptsWithNewWindowAPI) {
+  TestHelper("testAddContentScriptsWithNewWindowAPI", "web_view/shim",
+             NEEDS_TEST_SERVER);
+}
+
+IN_PROC_BROWSER_TEST_F(
+    WebViewTest,
+    Shim_TestContentScriptIsInjectedAfterTerminateAndReloadWebView) {
+  TestHelper("testContentScriptIsInjectedAfterTerminateAndReloadWebView",
+             "web_view/shim", NEEDS_TEST_SERVER);
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest,
+                       Shim_TestContentScriptExistsAsLongAsWebViewTagExists) {
+  TestHelper("testContentScriptExistsAsLongAsWebViewTagExists", "web_view/shim",
+             NEEDS_TEST_SERVER);
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestAddContentScriptWithCode) {
+  TestHelper("testAddContentScriptWithCode", "web_view/shim",
+             NEEDS_TEST_SERVER);
 }
 
 IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestExecuteScriptFail) {
@@ -1233,17 +1268,14 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestWebRequestAPIGoogleProperty) {
              NO_TEST_SERVER);
 }
 
-// This test is disabled due to being flaky. http://crbug.com/309451
-#if defined(OS_WIN)
-#define MAYBE_Shim_TestWebRequestListenerSurvivesReparenting \
-    DISABLED_Shim_TestWebRequestListenerSurvivesReparenting
-#else
-#define MAYBE_Shim_TestWebRequestListenerSurvivesReparenting \
-    Shim_TestWebRequestListenerSurvivesReparenting
-#endif
 IN_PROC_BROWSER_TEST_F(
-    WebViewTest,
-    MAYBE_Shim_TestWebRequestListenerSurvivesReparenting) {
+    WebViewTest, Shim_TestWebRequestListenerSurvivesReparenting) {
+#if defined(OS_WIN)
+  // Flaky on XP bot http://crbug.com/309451.
+  if (base::win::GetVersion() <= base::win::VERSION_XP)
+    return;
+#endif
+
   TestHelper("testWebRequestListenerSurvivesReparenting",
              "web_view/shim",
              NEEDS_TEST_SERVER);
@@ -1801,83 +1833,10 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, MAYBE_DOMStorageIsolation) {
 // This tests IndexedDB isolation for packaged apps with webview tags. It loads
 // an app with multiple webview tags and each tag creates an IndexedDB record,
 // which the test checks to ensure proper storage isolation is enforced.
-// This test is flaky. See http://crbug.com/248500.
-IN_PROC_BROWSER_TEST_F(WebViewTest, DISABLED_IndexedDBIsolation) {
+IN_PROC_BROWSER_TEST_F(WebViewTest, IndexedDBIsolation) {
   ASSERT_TRUE(StartEmbeddedTestServer());
-  GURL regular_url = embedded_test_server()->GetURL("/title1.html");
-
-  content::WebContents* default_tag_contents1;
-  content::WebContents* default_tag_contents2;
-  content::WebContents* storage_contents1;
-  content::WebContents* storage_contents2;
-
-  NavigateAndOpenAppForIsolation(regular_url, &default_tag_contents1,
-                                 &default_tag_contents2, &storage_contents1,
-                                 &storage_contents2, NULL, NULL, NULL);
-
-  // Initialize the storage for the first of the two tags that share a storage
-  // partition.
-  ExecuteScriptWaitForTitle(storage_contents1, "initIDB()", "idb created");
-  ExecuteScriptWaitForTitle(storage_contents1, "addItemIDB(7, 'page1')",
-                            "addItemIDB complete");
-  ExecuteScriptWaitForTitle(storage_contents1, "readItemIDB(7)",
-                            "readItemIDB complete");
-
-  std::string output;
-  std::string get_value(
-      "window.domAutomationController.send(getValueIDB() || 'badval')");
-
-  EXPECT_TRUE(ExecuteScriptAndExtractString(storage_contents1,
-                                            get_value.c_str(), &output));
-  EXPECT_STREQ("page1", output.c_str());
-
-  // Initialize the db in the second tag.
-  ExecuteScriptWaitForTitle(storage_contents2, "initIDB()", "idb open");
-
-  // Since we share a partition, reading the value should return the existing
-  // one.
-  ExecuteScriptWaitForTitle(storage_contents2, "readItemIDB(7)",
-                            "readItemIDB complete");
-  EXPECT_TRUE(ExecuteScriptAndExtractString(storage_contents2,
-                                            get_value.c_str(), &output));
-  EXPECT_STREQ("page1", output.c_str());
-
-  // Now write through the second tag and read it back.
-  ExecuteScriptWaitForTitle(storage_contents2, "addItemIDB(7, 'page2')",
-                            "addItemIDB complete");
-  ExecuteScriptWaitForTitle(storage_contents2, "readItemIDB(7)",
-                            "readItemIDB complete");
-  EXPECT_TRUE(ExecuteScriptAndExtractString(storage_contents2,
-                                            get_value.c_str(), &output));
-  EXPECT_STREQ("page2", output.c_str());
-
-  // Reset the document title, otherwise the next call will not see a change and
-  // will hang waiting for it.
-  EXPECT_TRUE(content::ExecuteScript(storage_contents1,
-                                     "document.title = 'foo'"));
-
-  // Read through the first tag to ensure we have the second value.
-  ExecuteScriptWaitForTitle(storage_contents1, "readItemIDB(7)",
-                            "readItemIDB complete");
-  EXPECT_TRUE(ExecuteScriptAndExtractString(storage_contents1,
-                                            get_value.c_str(), &output));
-  EXPECT_STREQ("page2", output.c_str());
-
-  // Now, let's confirm there is no database in the main browser and another
-  // tag that doesn't share the same partition. Due to the IndexedDB API design,
-  // open will succeed, but the version will be 1, since it creates the database
-  // if it is not found. The two tags use database version 3, so we avoid
-  // ambiguity.
-  const char* script =
-      "indexedDB.open('isolation').onsuccess = function(e) {"
-      "  if (e.target.result.version == 1)"
-      "    document.title = 'db not found';"
-      "  else "
-      "    document.title = 'error';"
-      "}";
-  ExecuteScriptWaitForTitle(browser()->tab_strip_model()->GetWebContentsAt(0),
-                            script, "db not found");
-  ExecuteScriptWaitForTitle(default_tag_contents1, script, "db not found");
+  ASSERT_TRUE(RunPlatformAppTest(
+      "platform_apps/web_view/isolation_indexeddb")) << message_;
 }
 
 // This test ensures that closing app window on 'loadcommit' does not crash.
@@ -2180,16 +2139,16 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, ChromeVoxInjection) {
   EXPECT_FALSE(
       chromeos::AccessibilityManager::Get()->IsSpokenFeedbackEnabled());
 
+  chromeos::SpeechMonitor monitor;
+  chromeos::AccessibilityManager::Get()->EnableSpokenFeedback(
+      true, ui::A11Y_NOTIFICATION_NONE);
+  EXPECT_TRUE(monitor.SkipChromeVoxEnabledMessage());
+
   ASSERT_TRUE(StartEmbeddedTestServer());
   content::WebContents* guest_web_contents = LoadGuest(
       "/extensions/platform_apps/web_view/chromevox_injection/guest.html",
       "web_view/chromevox_injection");
   ASSERT_TRUE(guest_web_contents);
-
-  chromeos::SpeechMonitor monitor;
-  chromeos::AccessibilityManager::Get()->EnableSpokenFeedback(
-      true, ui::A11Y_NOTIFICATION_NONE);
-  EXPECT_TRUE(monitor.SkipChromeVoxEnabledMessage());
 
   EXPECT_EQ("chrome vox test title", monitor.GetNextUtterance());
 }
@@ -2391,34 +2350,10 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, ClearData) {
 }
 
 IN_PROC_BROWSER_TEST_F(WebViewTest, ClearDataCache) {
-  LoadAppWithGuest("web_view/clear_data_cache");
-  content::WebContents* guest_web_contents = GetGuestWebContents();
-  auto guest = extensions::WebViewGuest::FromWebContents(guest_web_contents);
-  ASSERT_TRUE(guest);
-  scoped_ptr<extensions::WebViewGuestDelegate> mock_web_view_guest_delegate(
-      new MockWebViewGuestDelegate(guest));
-  scoped_ptr<extensions::WebViewGuestDelegate> orig_web_view_guest_delegate =
-      guest->SetDelegateForTesting(mock_web_view_guest_delegate.Pass());
-
-  ASSERT_TRUE(GetEmbedderWebContents());
-  ExtensionTestMessageListener clear_data_done_listener(
-      "WebViewTest.CLEAR_DATA_DONE", false);
-  EXPECT_TRUE(content::ExecuteScript(
-      GetEmbedderWebContents(), base::StringPrintf("testClearDataCache()")));
-  EXPECT_TRUE(clear_data_done_listener.WaitUntilSatisfied());
-
-  // Reset delegate back to original once we're done mocking.
-  mock_web_view_guest_delegate =
-      guest->SetDelegateForTesting(orig_web_view_guest_delegate.Pass());
+  TestHelper("testClearCache", "web_view/clear_data_cache", NEEDS_TEST_SERVER);
 }
 
-// This test is disabled on Win due to being flaky. http://crbug.com/294592
-#if defined(OS_WIN)
-#define MAYBE_ConsoleMessage DISABLED_ConsoleMessage
-#else
-#define MAYBE_ConsoleMessage ConsoleMessage
-#endif
-IN_PROC_BROWSER_TEST_F(WebViewTest, MAYBE_ConsoleMessage) {
+IN_PROC_BROWSER_TEST_F(WebViewTest, ConsoleMessage) {
   ASSERT_TRUE(RunPlatformAppTestWithArg(
       "platform_apps/web_view/common", "console_messages"))
           << message_;
@@ -2591,22 +2526,7 @@ class WebViewPluginTest : public WebViewTest {
  protected:
   void SetUpCommandLine(base::CommandLine* command_line) override {
     WebViewTest::SetUpCommandLine(command_line);
-
-    // Append the switch to register the pepper plugin.
-    // library name = <out dir>/<test_name>.<library_extension>
-    // MIME type = application/x-ppapi-<test_name>
-    base::FilePath plugin_lib = GetPluginPath();
-    EXPECT_TRUE(base::PathExists(plugin_lib));
-    base::FilePath::StringType pepper_plugin = plugin_lib.value();
-    pepper_plugin.append(FILE_PATH_LITERAL(";application/x-ppapi-tests"));
-    command_line->AppendSwitchNative(switches::kRegisterPepperPlugins,
-                                     pepper_plugin);
-  }
-
-  base::FilePath GetPluginPath() const {
-    base::FilePath plugin_dir;
-    EXPECT_TRUE(PathService::Get(base::DIR_MODULE, &plugin_dir));
-    return plugin_dir.Append(library_name);
+    ASSERT_TRUE(ppapi::RegisterTestPlugin(command_line));
   }
 };
 
@@ -2669,6 +2589,10 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestPerViewZoomMode) {
 
 IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestDisabledZoomMode) {
   TestHelper("testDisabledZoomMode", "web_view/shim", NO_TEST_SERVER);
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewTest, Shim_TestZoomBeforeNavigation) {
+  TestHelper("testZoomBeforeNavigation", "web_view/shim", NO_TEST_SERVER);
 }
 
 // This test verify that the set of rules registries of a webview will be
@@ -2781,10 +2705,9 @@ IN_PROC_BROWSER_TEST_F(WebViewTest, MAYBE_WebViewInBackgroundPage) {
 IN_PROC_BROWSER_TEST_F(WebViewTest, AllowTransparencyAndAllowScalingPropagate) {
   LoadAppWithGuest("web_view/simple");
 
-  ASSERT_TRUE(!!GetGuestWebContents());
+  ASSERT_TRUE(GetGuestWebContents());
   extensions::WebViewGuest* guest =
       extensions::WebViewGuest::FromWebContents(GetGuestWebContents());
   ASSERT_TRUE(guest->allow_transparency());
   ASSERT_TRUE(guest->allow_scaling());
 }
-

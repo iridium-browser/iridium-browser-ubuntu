@@ -23,11 +23,11 @@
 #include "components/history/core/browser/history_service_observer.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/keyed_service/core/keyed_service.h"
-#include "sql/connection.h"
 
 class HistoryQuickProviderTest;
 
 namespace base {
+class SequencedTaskRunner;
 class Time;
 }
 
@@ -287,6 +287,10 @@ class InMemoryURLIndex : public KeyedService,
   // Observers to notify upon restoral or save of the private data cache.
   RestoreCacheObserver* restore_cache_observer_;
   SaveCacheObserver* save_cache_observer_;
+
+  // Task runner from the worker pool, used for operations which require disk
+  // access.
+  scoped_refptr<base::SequencedTaskRunner> task_runner_;
 
   base::CancelableTaskTracker private_data_tracker_;
   base::CancelableTaskTracker cache_reader_tracker_;

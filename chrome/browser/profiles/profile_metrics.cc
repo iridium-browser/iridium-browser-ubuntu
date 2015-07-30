@@ -56,7 +56,7 @@ ProfileOpenState GetProfileOpenState(
 
 ProfileMetrics::ProfileType GetProfileType(
     const base::FilePath& profile_path) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   ProfileMetrics::ProfileType metric = ProfileMetrics::SECONDARY;
   ProfileManager* manager = g_browser_process->profile_manager();
   base::FilePath user_data_dir;
@@ -161,7 +161,7 @@ bool ProfileMetrics::CountProfileInformation(ProfileManager* manager,
     } else {
       if (info_cache.ProfileIsSupervisedAtIndex(i))
         counts->supervised++;
-      if (!info_cache.GetUserNameOfProfileAtIndex(i).empty()) {
+      if (info_cache.ProfileIsAuthenticatedAtIndex(i)) {
         counts->signedin++;
         if (info_cache.IsUsingGAIAPictureOfProfileAtIndex(i))
           counts->gaia_icon++;

@@ -7,9 +7,7 @@
 <translation id="1657479659644194568">Konfigurer Chrome</translation>
 <translation id="6448273550210938826">Forslag til søgning og webadresser</translation>
 <translation id="7998918019931843664">Åbn lukket fane igen</translation>
-<translation id="8425213833346101688">Skift</translation>
 <translation id="4996978546172906250">Del via</translation>
-<translation id="8607727265103077134">Fra Google Wallet</translation>
 <translation id="6292937202013477045">Hackere vil muligvis forsøge at stjæle dine oplysninger (f.eks. billeder, adgangskoder, meddelelser og kreditkort) fra <ph name="DOMAIN_NAME"/>.</translation>
 <translation id="5968595432776860642">Afspiller &quot;<ph name="VIDEO_TITLE"/>&quot;</translation>
 <translation id="1994173015038366702">Webadresse</translation>
@@ -17,10 +15,12 @@
 <translation id="1506061864768559482">Søgemaskine</translation>
 <translation id="346339498574870680">Kopiér billedwebadresse</translation>
 <translation id="5063480226653192405">Forbrug</translation>
-<translation id="6657585470893396449">Adgangskode</translation>
 <translation id="5578795271662203820">Søg efter billedet på <ph name="SEARCH_ENGINE"/></translation>
 <translation id="7764225426217299476">Tilføj adresse</translation>
 <translation id="4816465935029283692">Datatyper</translation>
+<translation id="5098185943924922330">Hjælp os med at prioritere de funktioner og forbedringer, vi bør arbejde på, ved at sende oplysninger til Google om, hvilke filer, applikationer og tjenester, der kører, når du oplever et nedbrud.
+
+        Brugsstatistik indeholder oplysninger såsom indstillinger, antal klik på knappen og hukommelsesforbrug. De omfatter ikke webadresser eller personlige oplysninger. Nedbrudsrapporter indeholder systemoplysninger på tidspunktet for nedbruddet og kan indeholde webadresser eller personlige oplysninger, afhængigt af hvad der skete på tidspunktet for nedbruddet.</translation>
 <translation id="4042870126885713738">Vis forslag, hvis en webadresse ikke bliver fundet, eller hvis der ikke kan oprettes forbindelse</translation>
 <translation id="8237438615979997762">De data, som er gemt på denne enhed og på din Google-konto, vil fortsat være gemt begge steder. Nye data eller ændringer, som du foretager, synkroniseres dog ikke imellem de to.</translation>
 <translation id="6831043979455480757">Oversæt</translation>
@@ -36,13 +36,13 @@
 <translation id="5676636989614905379">Videoen kan ikke afspilles på <ph name="SCREEN_NAME"/>.</translation>
 <translation id="8069239273282989646">Efter komprimering</translation>
 <translation id="1644574205037202324">Historik</translation>
+<translation id="3485544713029068372">Smart Lock til adgangskoder</translation>
 <translation id="6999892069268112724">Bekræft Google-konto</translation>
 <translation id="1446450296470737166">Tillad fuld kontrol over MIDI-enheder</translation>
 <translation id="1404122904123200417">Integreret i <ph name="WEBSITE_URL"/></translation>
 <translation id="3895926599014793903">Tving aktivering af zoom</translation>
 <translation id="4099578267706723511">Hjælp med at gøre Chrome bedre ved at sende brugsstatistik og nedbrudsrapporter til Google.</translation>
 <translation id="2440823041667407902">Placeringsadgang</translation>
-<translation id="6600253697437303777">Spørg, inden kamera og mikrofon bruges (anbefales)</translation>
 <translation id="1491151370853475546">Genindlæs denne side</translation>
 <translation id="5233638681132016545">Ny fane</translation>
 <translation id="641643625718530986">Udskriv…</translation>
@@ -80,7 +80,6 @@ Du logger ind med en administreret konto, og du giver administratoren kontrol ov
 <translation id="4684427112815847243">Synkroniser alt</translation>
 <translation id="563535393368633106">Spørg inden brug (anbefales)</translation>
 <translation id="666981079809192359">Erklæring om privatliv for Google Chrome</translation>
-<translation id="7142571697412577603">Vis adresser og kreditkort fra Google Wallet</translation>
 <translation id="1966710179511230534">Opdater dine loginoplysninger.</translation>
 <translation id="9099292894781394535">Sparet data</translation>
 <translation id="3410346880900521918">Hvis du ser dette jævnligt, kan du prøve disse <ph name="BEGIN_LINK"/>forslag<ph name="END_LINK"/>.</translation>
@@ -92,20 +91,20 @@ Du logger ind med en administreret konto, og du giver administratoren kontrol ov
 <translation id="2498359688066513246">Hjælp og feedback</translation>
 <translation id="1091134514807961917">Du er logget ind på følgende Google-konto.</translation>
 <translation id="7019652137705190998">Gå inkognito, hvis du vil browse privat eller logge ind midlertidigt</translation>
-<translation id="1426410128494586442">Ja</translation>
 <translation id="2206488550163399966"><ph name="APP_NAME"/>, webapp. <ph name="APP_URL"/></translation>
 <translation id="200669432486043882">Erstat fil</translation>
 <translation id="5595485650161345191">Rediger adresse</translation>
+<translation id="8413385045638830869">Spørg først (anbefales)</translation>
 <translation id="2100273922101894616">Automatisk login</translation>
 <translation id="5313967007315987356">Tilføj website</translation>
 <translation id="5733727110006255111">Når denne funktion er aktiveret, vil Chrome bruge Googles servere til at komprimere de sider, du besøger, før de downloades. SSL- og inkognitosider medtages ikke.</translation>
 <translation id="4256782883801055595">Open source-licenser</translation>
+<translation id="813082847718468539">Se websiteoplysninger</translation>
 <translation id="8218346974737627104">Bekræft login</translation>
 <translation id="3350687908700087792">Luk alle inkognitofaner</translation>
 <translation id="2902702728133930130">Der opstod en uventet fejl under start af Chrome.</translation>
 <translation id="5017989644593831205">Er du ikke <ph name="NOT_YOU_USER_NAME"/>?</translation>
 <translation id="8997842057643556822">Downloadindeks på USB-lager kan ikke oprettes.</translation>
-<translation id="6948694623901096205">Kamera eller mikrofon</translation>
 <translation id="8853345339104747198"><ph name="TAB_TITLE"/>, fane</translation>
 <translation id="8157532349231307196"><ph name="NUMBER_OF_ACCOUNTS"/> konti</translation>
 <translation id="1272079795634619415">Stop</translation>
@@ -119,6 +118,7 @@ Du logger ind med en administreret konto, og du giver administratoren kontrol ov
 <translation id="4378154925671717803">Telefon</translation>
 <translation id="988938288723502454">Downloadindeks på SD-kort kan ikke oprettes.</translation>
 <translation id="3896036286668839683">Certifikatvisning</translation>
+<translation id="8660471606262461360">Fra Google Payments</translation>
 <translation id="2321958826496381788">Træk i skyderen, indtil du kan læse dette uden problemer. Når du trykker to gange på et afsnit, skal teksten som minimum være på denne størrelse.</translation>
 <translation id="3282568296779691940">Log ind på Chrome</translation>
 <translation id="1098052486217676340">Afsluttet</translation>
@@ -126,7 +126,6 @@ Du logger ind med en administreret konto, og du giver administratoren kontrol ov
 <translation id="8583805026567836021">Kontodataene ryddes</translation>
 <translation id="5860033963881614850">Fra</translation>
 <translation id="2960796085439532066">Copyright <ph name="YEAR"/> Google Inc. Alle rettigheder forbeholdes.</translation>
-<translation id="4250680216510889253">Nej</translation>
 <translation id="6388207532828177975">Ryd og nulstil</translation>
 <translation id="3198916472715691905"><ph name="STORAGE_AMOUNT"/> gemte data</translation>
 <translation id="7473891865547856676">Nej tak</translation>
@@ -135,16 +134,12 @@ Du logger ind med en administreret konto, og du giver administratoren kontrol ov
 <translation id="7423098979219808738">Spørg først</translation>
 <translation id="8073388330009372546">Åbn billede på ny fane</translation>
 <translation id="9060538597317784206">Se appen <ph name="APP_NAME"/> i Google Play Butik. Klassificering: <ph name="APP_RATING"/>.</translation>
-<translation id="552553974213252141">Blev teksten trukket korrekt ud?</translation>
 <translation id="5317780077021120954">Gem</translation>
-<translation id="1151972924205500581">En adgangskode er påkrævet</translation>
 <translation id="2870560284913253234">Website</translation>
-<translation id="3101226206443094477">Log ind med din Google-konto:</translation>
 <translation id="2718352093833049315">Kun på Wi-Fi</translation>
 <translation id="7029809446516969842">Adgangskoder</translation>
 <translation id="5487729733663684359">Chrome understøtter ikke længere denne version af Android.</translation>
 <translation id="5100237604440890931">Skjult – klik for at udvide.</translation>
-<translation id="1201402288615127009">Næste</translation>
 <translation id="2414886740292270097">Mørk</translation>
 <translation id="2487368562788861256">Spar penge på data ved at bruge Google til at <ph name="BEGIN_LINK"/>optimere de sider, du besøger<ph name="END_LINK"/>.</translation>
 <translation id="5911030830365207728">Google Oversæt</translation>
@@ -157,18 +152,20 @@ Du logger ind med en administreret konto, og du giver administratoren kontrol ov
 <translation id="473775607612524610">Opdater</translation>
 <translation id="138361230106469022">Hej <ph name="FULL_NAME"/></translation>
 <translation id="6600954340915313787">Kopieret til Chrome</translation>
-<translation id="6317463785365643240">Kryptér ikke</translation>
 <translation id="8627706565932943526">Synkroniseringsfejl</translation>
 <translation id="1807246157184219062">Lys</translation>
+<translation id="9219103736887031265">Billeder</translation>
 <translation id="7053983685419859001">Bloker</translation>
 <translation id="8374821112118309944">Du skal opdatere TalkBack til en nyere version.</translation>
 <translation id="6406506848690869874">Synkronisering</translation>
 <translation id="6857778194843072568">Send kun via Wi-Fi</translation>
 <translation id="5380554235172449987">Send aldrig</translation>
 <translation id="5715468759630044318">Vælg konto</translation>
+<translation id="5000922062037820727">Blokeret (anbefales)</translation>
 <translation id="544291274896356069">Du forlader inkognitotilstand, hvis dette link åbnes i en ekstern applikation. Vil du fortsætte?</translation>
 <translation id="3917783807003067648">Placeringen er blokeret</translation>
 <translation id="1379156015317873965">Gør indlæsningen af siden bedre</translation>
+<translation id="5953603475187800576">Vis adresser og kreditkort fra Google Payments</translation>
 <translation id="8481940801237642152">Din forbindelse til dette website er privat, men andre på netværket vil muligvis kunne ændre sidens udseende.</translation>
 <translation id="2593272815202181319">Enkelt tegnafstand</translation>
 <translation id="4807098396393229769">Navn på kort</translation>
@@ -177,6 +174,7 @@ Du logger ind med en administreret konto, og du giver administratoren kontrol ov
 Nogle websites kan f.eks. reagere på denne anmodning ved at vise dig annoncer, som ikke er baseret på andre websites, du har besøgt. Mange websites vil fortsat indsamle og bruge browserdata til f.eks. at forbedre sikkerheden, til at føje indhold, annoncer og anbefalinger til websitet og til at generere rapporteringsstatistik.</translation>
 <translation id="656628257199996201">Oversæt altid <ph name="SOURCE_LANGUAGE"/></translation>
 <translation id="2387895666653383613">Skalering af tekst</translation>
+<translation id="3227137524299004712">Mikrofon</translation>
 <translation id="6447842834002726250">Cookies</translation>
 <translation id="2748463065602559597">Du får vist en sikker Google Chrome-side.</translation>
 <translation id="5511351932351731210">Send altid</translation>
@@ -202,6 +200,8 @@ Tryk på tilbagetasten for at afslutte.</translation>
 <translation id="5684874026226664614">Ups! Denne side kunne ikke oversættes.</translation>
 <translation id="1987317783729300807">Konti</translation>
 <translation id="6064211167623632605">Eksekverbar sti</translation>
+<translation id="4522570452068850558">Detaljer</translation>
+<translation id="1620510694547887537">Kamera</translation>
 <translation id="10614374240317010">Aldrig gemt</translation>
 <translation id="1312168552565502328">Cookies, websitedata</translation>
 <translation id="2903493209154104877">Adresser</translation>
@@ -212,7 +212,6 @@ Tryk på tilbagetasten for at afslutte.</translation>
 <translation id="6231464350722415003">Tillad JavaScript på de websites, du angiver, mens det blokeres på resten af internettet</translation>
 <translation id="7366340029385295517">Caster til <ph name="SCREEN_NAME"/></translation>
 <translation id="8026334261755873520">Ryd browserdata</translation>
-<translation id="8503813439785031346">Brugernavn</translation>
 <translation id="583891442612896534">Chrome kan ikke komme i kontakt med Googles servere i forbindelse med datakomprimering. Dine sparede data kan være begrænsede.</translation>
 <translation id="4827948050554950725">Tilføj kreditkort</translation>
 <translation id="3489120686474540259">Tilføj en konto for at få adgang til faner, bogmærker, historik og andre indstillinger på alle dine enheder.</translation>
@@ -235,11 +234,13 @@ Tryk på tilbagetasten for at afslutte.</translation>
 <translation id="3254409185687681395">Tilføj denne side som bogmærke</translation>
 <translation id="907015151729920253">Smart card</translation>
 <translation id="2482878487686419369">Underretninger</translation>
+<translation id="857943718398505171">Tilladt (anbefales)</translation>
 <translation id="4412992751769744546">Tillad tredjepartscookies</translation>
 <translation id="5016205925109358554">Serif</translation>
 <translation id="3063601790762993062">Gem video</translation>
 <translation id="8106211421800660735">Kreditkortnummer</translation>
 <translation id="6042308850641462728">Mere</translation>
+<translation id="4526249700380860531">Se og administrer gemte adgangskoder på <ph name="BEGIN_LINK"/>passwords.google.com<ph name="END_LINK"/></translation>
 <translation id="2496180316473517155">Browserhistorik</translation>
 <translation id="6108923351542677676">Konfigurationen er i gang...</translation>
 <translation id="7358682983403815415">Åbne faner, bogmærker, historik m.m. er ved at blive synkroniseret med din Google-konto.</translation>
@@ -255,7 +256,6 @@ Tryk på tilbagetasten for at afslutte.</translation>
 <translation id="5324858694974489420">Indstillinger for forældrekontrol</translation>
 <translation id="5435662027590074193"><ph name="SEARCH_ENGINE_NAME"/> (<ph name="SEARCH_ENGINE_DOMAIN"/>)</translation>
 <translation id="7521387064766892559">JavaScript</translation>
-<translation id="4065916988127915326">Bloker alle websites</translation>
 <translation id="8168435359814927499">Indhold</translation>
 <translation id="5424715742813396254">Rediger gemt navn/adgangskode eller undtagelse</translation>
 <translation id="6978479750597523876">Nulstil oversættelsesindstillingerne</translation>
@@ -267,11 +267,10 @@ Tryk på tilbagetasten for at afslutte.</translation>
 <translation id="2526148617758225454">Datasparefunktionen er slået til. Du kan administrere den under Indstillinger.</translation>
 <translation id="4195643157523330669">Åbn på ny fane</translation>
 <translation id="3102119246920354026">Cache</translation>
-<translation id="651048280540227067">Luk menuen</translation>
 <translation id="748127970106343339">Bekræft sletning af loginoplysningerne for enheden</translation>
 <translation id="3089395242580810162">Åbn i inkognitofane</translation>
 <translation id="5899349522111170522">Opret en ny fil</translation>
-<translation id="1082482054625560856">Administrer gemte adgangskoder på din <ph name="BEGIN_LINK"/>Google-konto<ph name="END_LINK"/></translation>
+<translation id="7232255641409319872">Tillad billeder på de websites, du angiver, mens det blokeres på resten af internettet</translation>
 <translation id="2360035970720276770">Der kan kun downloades webadresser med &quot;http&quot; eller &quot;https&quot;</translation>
 <translation id="6570560778840017462">Du bliver ikke logget ud af dine <ph name="BEGIN_LINK"/>Google-konti<ph name="END_LINK"/></translation>
 <translation id="5414836363063783498">Bekræfter...</translation>
@@ -283,7 +282,6 @@ Tryk på tilbagetasten for at afslutte.</translation>
 <translation id="7977858705483383621">Beskyttet søgning</translation>
 <translation id="8909135823018751308">Del…</translation>
 <translation id="1056898198331236512">Advarsel</translation>
-<translation id="3338301885994755905">Bloker (anbefales)</translation>
 <translation id="6575643671698722332">Nulstillingsfejl. Sørg for, at enheden er online, og prøv igen.</translation>
 <translation id="8987061207681586800">Gør Chrome til dit eget</translation>
 <translation id="654446541061731451">Vælg en fane, der skal overføres</translation>
@@ -342,13 +340,9 @@ Tryk på tilbagetasten for at afslutte.</translation>
 <translation id="5138299137310274655">Denne side er på <ph name="SOURCE_LANGUAGE"/>. Vil du oversætte til <ph name="TARGET_LANGUAGE"/>?</translation>
 <translation id="2913331724188855103">Tillad, at websites gemmer og læser cookiedata (anbefales)</translation>
 <translation id="5512137114520586844">Denne konto administreres af <ph name="PARENT_NAME"/>.</translation>
-<translation id="7649070708921625228">Hjælp</translation>
 <translation id="1373696734384179344">Der er ikke nok hukommelse til at downloade det valgte indhold.</translation>
 <translation id="969096075394517431">Skift sprog</translation>
 <translation id="5085880389019676122">USB-lager utilgængeligt</translation>
-<translation id="1614564776292091138">Når beskyttet indhold er slået TIL, kan websites bekræfte din enhed for at sikre, at din enhed er godkendt til at afspille beskyttet videoindhold i Premium-kvalitet.
-
-Hvis beskyttet indhold er slået FRA, kan du ikke afspille videoer i Premium-kvalitet på denne enhed.</translation>
 <translation id="8928220460877261598">Du er nu logget ind på Chrome.</translation>
 <translation id="7811044698839470685">Kun personer med din adgangssætning kan læse dine krypterede data. Adgangssætningen hverken sendes eller gemmes af Google. Hvis du glemmer din adgangssætning, skal du nulstille synkroniseringen.</translation>
 <translation id="8547287415299944404">Browserhistorikken kan ikke ryddes på børnekonti</translation>
@@ -368,6 +362,7 @@ Du kan få nye licenser ved at oprette forbindelse til internettet og afspille d
 <translation id="7961015016161918242">Aldrig</translation>
 <translation id="7607002721634913082">Sat på pause</translation>
 <translation id="5040262127954254034">Beskyttelse af personlige oplysninger</translation>
+<translation id="6112702117600201073">Opdaterer siden</translation>
 <translation id="6820607729870073286">Du har ingen gemte indstillinger for websites.</translation>
 <translation id="6990079615885386641">Hent appen i Google Play Butik: <ph name="APP_ACTION"/></translation>
 <translation id="1121094540300013208">Forbrugs- og nedbrudsrapporter</translation>
@@ -396,7 +391,6 @@ Du kan få nye licenser ved at oprette forbindelse til internettet og afspille d
 <translation id="6965382102122355670">OK</translation>
 <translation id="4440256989292146959">Flere data for færre penge</translation>
 <translation id="4023950129927433024">Hvis du har glemt din adgangssætning, skal du stoppe og nulstille synkroniseringen via <ph name="BEGIN_LINK"/>Google Betjeningspanel<ph name="END_LINK"/>.</translation>
-<translation id="6375900123462779979">Adgang til din mikrofon og dit kamera</translation>
 <translation id="7437998757836447326">Log ud af Chrome</translation>
 <translation id="1178581264944972037">Pause</translation>
 <translation id="5127805178023152808">Synkronisering er slået fra</translation>

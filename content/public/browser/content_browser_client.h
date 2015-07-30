@@ -140,6 +140,16 @@ class CONTENT_EXPORT ContentBrowserClient {
   virtual BrowserMainParts* CreateBrowserMainParts(
       const MainFunctionParams& parameters);
 
+  // Allows the embedder to change the default behavior of
+  // BrowserThread::PostAfterStartupTask to better match whatever
+  // definition of "startup" the embedder has in mind. This may be
+  // called on any thread.
+  // Note: see related BrowserThread::PostAfterStartupTask.
+  virtual void PostAfterStartupTask(
+      const tracked_objects::Location& from_here,
+      const scoped_refptr<base::TaskRunner>& task_runner,
+      const base::Closure& task);
+
   // If content creates the WebContentsView implementation, it will ask the
   // embedder to return an (optional) delegate to customize it. The view will
   // own the delegate.
@@ -282,7 +292,9 @@ class CONTENT_EXPORT ContentBrowserClient {
   // This is called on the IO thread.
   virtual bool AllowServiceWorker(const GURL& scope,
                                   const GURL& first_party,
-                                  content::ResourceContext* context);
+                                  content::ResourceContext* context,
+                                  int render_process_id,
+                                  int render_frame_id);
 
   // Allow the embedder to control if the given cookie can be read.
   // This is called on the IO thread.
@@ -556,16 +568,15 @@ class CONTENT_EXPORT ContentBrowserClient {
       BrowserContext* browser_context,
       const GURL& url);
 
-  // Checks if |security_origin| has permission to access the microphone or
-  // camera. Note that this does not query the user. |type| must be
-  // MEDIA_DEVICE_AUDIO_CAPTURE or MEDIA_DEVICE_VIDEO_CAPTURE.
-  virtual bool CheckMediaAccessPermission(BrowserContext* browser_context,
-                                          const GURL& security_origin,
-                                          MediaStreamType type);
-
   // Allows to override browser Mojo services exposed through the
   // RenderProcessHost.
   virtual void OverrideRenderProcessMojoServices(ServiceRegistry* registry) {}
+
+  // Allows to override browser Mojo services exposed through the
+  // RenderFrameHost.
+  virtual void OverrideRenderFrameMojoServices(
+      ServiceRegistry* registry,
+      RenderFrameHost* render_frame_host) {}
 
   // Registers additional navigator.connect service factories available in a
   // particular NavigatorConnectContext.

@@ -8,7 +8,7 @@
   display: block;
 }
 
-#outer {
+#mainContainer {
   box-sizing: border-box;
   height: 100%;
   overflow: auto;

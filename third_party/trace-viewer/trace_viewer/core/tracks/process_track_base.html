@@ -9,7 +9,9 @@ found in the LICENSE file.
 
 <link rel="import" href="/core/tracks/container_track.html">
 <link rel="import" href="/core/tracks/counter_track.html">
+<link rel="import" href="/core/tracks/frame_track.html">
 <link rel="import" href="/core/tracks/object_instance_group_track.html">
+<link rel="import" href="/core/tracks/process_summary_track.html">
 <link rel="import" href="/core/tracks/spacing_track.html">
 <link rel="import" href="/core/tracks/thread_track.html">
 <link rel="import" href="/core/trace_model/trace_model_settings.html">
@@ -65,14 +67,7 @@ tv.exportTo('tv.c.tracks', function() {
 
       if (this.processBase_) {
         var modelSettings = new TraceModelSettings(this.processBase_.model);
-        var defaultValue;
-        if (this.processBase_.labels !== undefined &&
-            this.processBase_.labels.length == 1 &&
-            this.processBase_.labels[0] == 'chrome://tracing') {
-          defaultValue = false;
-        } else {
-          defaultValue = true;
-        }
+        var defaultValue = this.processBase_.important;
         this.expanded = modelSettings.getSettingFor(
             this.processBase_, 'expanded', defaultValue);
       }
@@ -102,6 +97,9 @@ tv.exportTo('tv.c.tracks', function() {
 
       var modelSettings = new TraceModelSettings(this.processBase_.model);
       modelSettings.setSettingFor(this.processBase_, 'expanded', expanded);
+      this.updateContents_();
+      this.viewport.rebuildEventToTrackMap();
+      this.viewport.rebuildContainerToTrackMap();
     },
 
     get hasVisibleContent() {
@@ -129,9 +127,14 @@ tv.exportTo('tv.c.tracks', function() {
 
       // Create the object instance tracks for this process.
       this.willAppendTracks_();
-      this.appendObjectInstanceTracks_();
-      this.appendCounterTracks_();
-      this.appendThreadTracks_();
+      if (this.expanded) {
+        this.appendObjectInstanceTracks_();
+        this.appendCounterTracks_();
+        this.appendFrameTrack_();
+        this.appendThreadTracks_();
+      } else {
+        this.appendSummaryTrack_();
+      }
       this.didAppendTracks_();
     },
 
@@ -145,6 +148,26 @@ tv.exportTo('tv.c.tracks', function() {
     },
 
     didAppendTracks_: function() {
+    },
+
+    appendSummaryTrack_: function() {
+      var track = new tv.c.tracks.ProcessSummaryTrack(this.viewport);
+      track.process = this.process;
+      if (!track.hasVisibleContent)
+        return;
+      this.appendChild(track);
+      // no spacing track, since this track only shown in collapsed state
+    },
+
+    appendFrameTrack_: function() {
+      var frames = this.process ? this.process.frames : undefined;
+      if (!frames || !frames.length)
+        return;
+
+      var track = new tv.c.tracks.FrameTrack(this.viewport);
+      track.frames = frames;
+      this.appendChild(track);
+      this.backgroundProvider = track;
     },
 
     appendObjectInstanceTracks_: function() {

@@ -166,11 +166,11 @@ void BrowserWindowCocoa::Show() {
   }
 
   {
-    TRACE_EVENT0("ui", "BrowserWindowCocoa::Show makeKeyAndOrderFront");
+    TRACE_EVENT0("ui", "BrowserWindowCocoa::Show Activate");
     // This call takes up a substantial part of startup time, and an even more
     // substantial part of startup time when any CALayers are part of the
     // window's NSView heirarchy.
-    [window() makeKeyAndOrderFront:controller_];
+    Activate();
   }
 
   // When creating windows from nibs it is necessary to |makeKeyAndOrderFront:|
@@ -330,11 +330,13 @@ void BrowserWindowCocoa::OnActiveTabChanged(content::WebContents* old_contents,
                                             content::WebContents* new_contents,
                                             int index,
                                             int reason) {
+  [controller_ onActiveTabChanged:old_contents to:new_contents];
   // TODO(pkasting): Perhaps the code in
   // TabStripController::activateTabWithContents should move here?  Or this
   // should call that (instead of TabStripModelObserverBridge doing so)?  It's
   // not obvious to me why Mac doesn't handle tab changes in BrowserWindow the
   // way views and GTK do.
+  // See http://crbug.com/340720 for discussion.
 }
 
 void BrowserWindowCocoa::ZoomChangedForActiveTab(bool can_show_bubble) {
@@ -363,7 +365,10 @@ gfx::Rect BrowserWindowCocoa::GetBounds() const {
 }
 
 bool BrowserWindowCocoa::IsMaximized() const {
-  return [window() isZoomed];
+  // -isZoomed returns YES if the window's frame equals the rect returned by
+  // -windowWillUseStandardFrame:defaultFrame:, even if the window is in the
+  // dock, so have to explicitly check for miniaturization state first.
+  return ![window() isMiniaturized] && [window() isZoomed];
 }
 
 bool BrowserWindowCocoa::IsMinimized() const {
@@ -473,6 +478,10 @@ void BrowserWindowCocoa::ResetToolbarTabState(content::WebContents* contents) {
 }
 
 void BrowserWindowCocoa::FocusToolbar() {
+  // Not needed on the Mac.
+}
+
+void BrowserWindowCocoa::ToolbarSizeChanged(bool is_animating) {
   // Not needed on the Mac.
 }
 
@@ -683,10 +692,6 @@ void BrowserWindowCocoa::UserChangedTheme() {
   [controller_ userChangedTheme];
 }
 
-void BrowserWindowCocoa::WebContentsFocused(WebContents* contents) {
-  NOTIMPLEMENTED();
-}
-
 void BrowserWindowCocoa::ShowWebsiteSettings(
     Profile* profile,
     content::WebContents* web_contents,
@@ -730,16 +735,13 @@ void BrowserWindowCocoa::HandleKeyboardEvent(
     [BrowserWindowUtils handleKeyboardEvent:event.os_event inWindow:window()];
 }
 
-void BrowserWindowCocoa::Cut() {
-  [NSApp sendAction:@selector(cut:) to:nil from:nil];
-}
-
-void BrowserWindowCocoa::Copy() {
-  [NSApp sendAction:@selector(copy:) to:nil from:nil];
-}
-
-void BrowserWindowCocoa::Paste() {
-  [NSApp sendAction:@selector(paste:) to:nil from:nil];
+void BrowserWindowCocoa::CutCopyPaste(int command_id) {
+  if (command_id == IDC_CUT)
+    [NSApp sendAction:@selector(cut:) to:nil from:nil];
+  else if (command_id == IDC_COPY)
+    [NSApp sendAction:@selector(copy:) to:nil from:nil];
+  else
+    [NSApp sendAction:@selector(paste:) to:nil from:nil];
 }
 
 WindowOpenDisposition BrowserWindowCocoa::GetDispositionForPopupBounds(

@@ -9,6 +9,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "components/dom_distiller/core/distillable_page_detector.h"
+#include "components/dom_distiller/core/experiments.h"
 #include "components/dom_distiller/core/page_features.h"
 #include "content/public/browser/render_frame_host.h"
 #include "grit/components_resources.h"
@@ -48,9 +49,32 @@ void IsOpenGraphArticle(content::WebContents* web_contents,
 }
 
 void IsDistillablePage(content::WebContents* web_contents,
+                       bool is_mobile_optimized,
                        base::Callback<void(bool)> callback) {
-  IsDistillablePageForDetector(web_contents,
-                               DistillablePageDetector::GetDefault(), callback);
+  switch (GetDistillerHeuristicsType()) {
+    case DistillerHeuristicsType::ALWAYS_TRUE:
+      base::MessageLoop::current()->PostTask(FROM_HERE,
+                                             base::Bind(callback, true));
+      return;
+    case DistillerHeuristicsType::OG_ARTICLE:
+      IsOpenGraphArticle(web_contents, callback);
+      return;
+    case DistillerHeuristicsType::ADABOOST_MODEL:
+      // The adaboost model is only applied to non-mobile pages.
+      if (is_mobile_optimized) {
+        base::MessageLoop::current()->PostTask(FROM_HERE,
+                                               base::Bind(callback, false));
+        return;
+      }
+      IsDistillablePageForDetector(
+          web_contents, DistillablePageDetector::GetDefault(), callback);
+      return;
+    case DistillerHeuristicsType::NONE:
+    default:
+      base::MessageLoop::current()->PostTask(FROM_HERE,
+                                             base::Bind(callback, false));
+      return;
+  }
 }
 
 void IsDistillablePageForDetector(content::WebContents* web_contents,

@@ -40,7 +40,6 @@ const SkColor kResultDimmedTextColor = SkColorSetRGB(0x84, 0x84, 0x84);
 const SkColor kResultURLTextColor = SkColorSetRGB(0x00, 0x99, 0x33);
 
 const SkColor kGridTitleColor = SkColorSetRGB(0x33, 0x33, 0x33);
-const SkColor kGridTitleHoverColor = kGridTitleColor;
 
 const SkColor kFolderTitleColor = SkColorSetRGB(0x33, 0x33, 0x33);
 const SkColor kFolderTitleHintTextColor = SkColorSetRGB(0xA0, 0xA0, 0xA0);
@@ -128,6 +127,15 @@ const char kPageOpenedHistogram[] = "Apps.AppListPageOpened";
 // The UMA histogram that logs the type of search result opened.
 const char kSearchResultOpenDisplayTypeHistogram[] =
     "Apps.AppListSearchResultOpenDisplayType";
+
+// The UMA histogram that logs how long the search query was when a result was
+// opened.
+const char kSearchQueryLength[] = "Apps.AppListSearchQueryLength";
+
+// The UMA histogram that logs the Manhattan distance from the origin of the
+// search results to the selected result.
+const char kSearchResultDistanceFromOrigin[] =
+    "Apps.AppListSearchResultDistanceFromOrigin";
 
 #if defined(OS_LINUX)
 #if defined(GOOGLE_CHROME_BUILD)

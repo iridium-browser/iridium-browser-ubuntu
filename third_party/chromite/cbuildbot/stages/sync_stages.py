@@ -9,7 +9,6 @@ from __future__ import print_function
 import ConfigParser
 import contextlib
 import datetime
-import logging
 import os
 import shutil
 import sys
@@ -34,9 +33,12 @@ from chromite.cbuildbot.stages import build_stages
 from chromite.lib import clactions
 from chromite.lib import commandline
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import git
+from chromite.lib import gs
 from chromite.lib import osutils
 from chromite.lib import patch as cros_patch
+from chromite.lib import timeout_util
 from chromite.scripts import cros_mark_chrome_as_stable
 
 
@@ -86,7 +88,7 @@ class PatchChangesStage(generic_stages.BuilderStage):
     duplicates = []
     for change in changes:
       if change.id is None:
-        cros_build_lib.Warning(
+        logging.warning(
             "Change %s lacks a usable ChangeId; duplicate checking cannot "
             "be done for this change.  If cherry-picking fails, this is a "
             "potential cause.", change)
@@ -98,9 +100,9 @@ class PatchChangesStage(generic_stages.BuilderStage):
       return changes
 
     for conflict in duplicates:
-      cros_build_lib.Error(
-          "Changes %s conflict with each other- they have same id %s.",
-          ', '.join(map(str, conflict)), conflict[0].id)
+      logging.error(
+          "Changes %s conflict with each other- they have same id %s., "
+          .join(map(str, conflict)), conflict[0].id)
 
     cros_build_lib.Die("Duplicate patches were encountered: %s", duplicates)
 
@@ -218,8 +220,8 @@ class BootstrapStage(PatchChangesStage):
         parsed_args, filter_fn)
 
     if removed:
-      cros_build_lib.Warning('The following arguments were removed due to api: '
-                             "'%s'" % ' '.join(removed))
+      logging.warning("The following arguments were removed due to api: '%s'"
+                      % ' '.join(removed))
     return accepted
 
   @classmethod
@@ -247,8 +249,7 @@ class BootstrapStage(PatchChangesStage):
       # patches to the internal manifest, and this means we may flag a conflict
       # here even if the patch applies cleanly. TODO(davidjames): Fix this.
       cros_build_lib.PrintBuildbotStepWarnings()
-      cros_build_lib.Error('Failed applying patches: %s',
-                           '\n'.join(map(str, failures)))
+      logging.error('Failed applying patches: %s\n'.join(map(str, failures)))
     else:
       PatchChangesStage.HandleApplyFailures(self, failures)
 
@@ -320,10 +321,20 @@ class SyncStage(generic_stages.BuilderStage):
     # at self.internal when it can always be retrieved from config?
     self.internal = self._run.config.internal
 
-  def _GetManifestVersionsRepoUrl(self, read_only=False):
-    return cbuildbot_config.GetManifestVersionsRepoUrl(
-        self.internal,
-        read_only=read_only)
+  def _GetManifestVersionsRepoUrl(self, internal=None, test=False):
+    if internal is None:
+      internal = self._run.config.internal
+
+    if internal:
+      if test:
+        return constants.MANIFEST_VERSIONS_INT_GOB_URL_TEST
+      else:
+        return constants.MANIFEST_VERSIONS_INT_GOB_URL
+    else:
+      if test:
+        return constants.MANIFEST_VERSIONS_GOB_URL_TEST
+      else:
+        return constants.MANIFEST_VERSIONS_GOB_URL
 
   def Initialize(self):
     self._InitializeRepo()
@@ -385,7 +396,7 @@ class SyncStage(generic_stages.BuilderStage):
         try:
           old_contents = self.repo.ExportManifest()
         except cros_build_lib.RunCommandError as e:
-          cros_build_lib.Warning(str(e))
+          logging.warning(str(e))
         else:
           osutils.WriteFile(old_filename, old_contents)
           fresh_sync = False
@@ -420,7 +431,7 @@ class LKGMSyncStage(SyncStage):
       mv_dir = constants.EXTERNAL_MANIFEST_VERSIONS_PATH
 
     manifest_path = os.path.join(self._build_root, mv_dir)
-    manifest_repo = self._GetManifestVersionsRepoUrl(read_only=True)
+    manifest_repo = self._GetManifestVersionsRepoUrl()
     manifest_version.RefreshManifestCheckout(manifest_path, manifest_repo)
     return os.path.join(manifest_path, self._run.config.lkgm_manifest)
 
@@ -439,7 +450,7 @@ class ManifestVersionedSyncStage(SyncStage):
 
     # If a builder pushes changes (even with dryrun mode), we need a writable
     # repository. Otherwise, the push will be rejected by the server.
-    self.manifest_repo = self._GetManifestVersionsRepoUrl(read_only=False)
+    self.manifest_repo = self._GetManifestVersionsRepoUrl()
 
     # 1. If we're uprevving Chrome, Chrome might have changed even if the
     #    manifest has not, so we should force a build to double check. This
@@ -580,10 +591,8 @@ class ManifestVersionedSyncStage(SyncStage):
     # Use a static dir, but don't overlap with other users, we might conflict.
     git_repo = os.path.join(
         self._build_root, constants.PROJECT_SDK_MANIFEST_VERSIONS_PATH)
-    external_manifest_url = cbuildbot_config.GetManifestVersionsRepoUrl(
-        internal_build=False,
-        read_only=False,
-        test=debug)
+    external_manifest_url = self._GetManifestVersionsRepoUrl(
+        internal=False, test=debug)
 
     logging.info('Using manifest URL: %s', external_manifest_url)
     manifest_version.RefreshManifestCheckout(
@@ -618,24 +627,95 @@ class ManifestVersionedSyncStage(SyncStage):
     git.AddPath(latest_manifest_path)
     git.Commit(git_repo, 'Create project_sdk for %s.' % current_version)
 
-    # Push it.
+    # Push it to Gerrit.
     logging.info('Pushing Project SDK Manifest.')
     git.PushWithRetry(branch, git_repo)
 
+    # Push to GS.
+    gs_ctx = gs.GSContext(dry_run=self._run.debug)
+    publish_uri = os.path.join(constants.BRILLO_RELEASE_MANIFESTS_URL,
+                               sdk_manifest_name)
+
+    # We use the default ACL (public readable) for this file.
+    logging.info('Pushing Project SDK Manifest to: %s', publish_uri)
+    gs_ctx.Copy(manifest, publish_uri)
+
+    # Populate a file on GS with the newest version published.
+    with tempfile.NamedTemporaryFile() as latest:
+      osutils.WriteFile(latest.name, current_version)
+      gs_ctx.Copy(latest.name, constants.BRILLO_LATEST_RELEASE_URL)
+
+    # Log what we published.
     logging.info('Project SDK Manifest \'%s\' published:',
                  os.path.basename(sdk_manifest_path))
     logging.info('%s', osutils.ReadFile(manifest))
 
+  def _GetMasterVersion(self, master_id, timeout=5 * 60):
+    """Get the platform version associated with the master_build_id.
+
+    Args:
+      master_id: Our master build id.
+      timeout: How long to wait for the platform version to show up
+        in the database. This is needed because the slave builders are
+        triggered slightly before the platform version is written. Default
+        is 5 minutes.
+    """
+    # TODO(davidjames): Remove the wait loop here once we've updated slave
+    # builders to only get triggered after the platform version is written.
+    def _PrintRemainingTime(remaining):
+      logging.info('%s until timeout...', remaining)
+
+    def _GetPlatformVersion():
+      return db.GetBuildStatus(master_id)['platform_version']
+
+    # Retry until non-None version is returned.
+    def _ShouldRetry(x):
+      return not x
+
+    _, db = self._run.GetCIDBHandle()
+    return timeout_util.WaitForSuccess(_ShouldRetry,
+                                       _GetPlatformVersion,
+                                       timeout,
+                                       period=constants.SLEEP_TIMEOUT,
+                                       side_effect_func=_PrintRemainingTime)
+
+  def _VerifyMasterId(self, master_id):
+    """Verify that our master id is current and valid.
+
+    Args:
+      master_id: Our master build id.
+    """
+    _, db = self._run.GetCIDBHandle()
+    if db and master_id:
+      assert not self._run.options.force_version
+      master_build_status = db.GetBuildStatus(master_id)
+      latest = db.GetBuildHistory(master_build_status['build_config'], 1)
+      if latest and latest[0]['id'] != master_id:
+        raise failures_lib.MasterSlaveVersionMismatchFailure(
+            'This slave\'s master (id=%s) has been supplanted by a newer '
+            'master (id=%s). Aborting.' % (master_id, latest[0]['id']))
+
   @failures_lib.SetFailureType(failures_lib.InfrastructureFailure)
   def PerformStage(self):
     self.Initialize()
-    if self._run.options.force_version:
-      next_manifest = self.ForceVersion(self._run.options.force_version)
+
+    self._VerifyMasterId(self._run.options.master_build_id)
+    version = self._run.options.force_version
+    if self._run.options.master_build_id:
+      version = self._GetMasterVersion(self._run.options.master_build_id)
+
+    next_manifest = None
+    if version:
+      next_manifest = self.ForceVersion(version)
     else:
-      next_manifest = self.GetNextManifest()
+      self.skip_sync = True
+      try:
+        next_manifest = self.GetNextManifest()
+      except validation_pool.TreeIsClosedException as e:
+        logging.warning(str(e))
 
     if not next_manifest:
-      cros_build_lib.Info('Found no work to do.')
+      logging.info('Found no work to do.')
       if self._run.attrs.manifest_manager.DidLastBuildFail():
         raise failures_lib.StepFailure('The previous build failed.')
       else:
@@ -653,6 +733,7 @@ class ManifestVersionedSyncStage(SyncStage):
         next_manifest, filter_cros=self._run.options.local) as new_manifest:
       self.ManifestCheckout(new_manifest)
 
+    # TODO(dgarrett): Push this logic into it's own stage.
     # If we are a Canary Master, create an additional derivative Manifest for
     # the Project SDK builders.
     if (cbuildbot_config.IsCanaryType(self._run.config.build_type) and
@@ -689,9 +770,6 @@ class MasterSlaveLKGMSyncStage(ManifestVersionedSyncStage):
   candidates and their states.
   """
 
-  # Timeout for waiting on the latest candidate manifest.
-  LATEST_CANDIDATE_TIMEOUT_SECONDS = 20 * 60
-
   # TODO(mtennant): Turn this into self._run.attrs.sub_manager or similar.
   # An instance of lkgm_manager.LKGMManager for slave builds.
   sub_manager = None
@@ -700,7 +778,6 @@ class MasterSlaveLKGMSyncStage(ManifestVersionedSyncStage):
     super(MasterSlaveLKGMSyncStage, self).__init__(builder_run, **kwargs)
     # lkgm_manager deals with making sure we're synced to whatever manifest
     # we get back in GetNextManifest so syncing again is redundant.
-    self.skip_sync = True
     self._chrome_version = None
 
   def _GetInitializedManager(self, internal):
@@ -715,8 +792,7 @@ class MasterSlaveLKGMSyncStage(ManifestVersionedSyncStage):
     increment = self.VersionIncrementType()
     return lkgm_manager.LKGMManager(
         source_repo=self.repo,
-        manifest_repo=cbuildbot_config.GetManifestVersionsRepoUrl(
-            internal, read_only=False),
+        manifest_repo=self._GetManifestVersionsRepoUrl(internal=internal),
         manifest=self._run.config.manifest,
         build_names=self._run.GetBuilderIds(),
         build_type=self._run.config.build_type,
@@ -741,24 +817,30 @@ class MasterSlaveLKGMSyncStage(ManifestVersionedSyncStage):
 
     return manifest
 
+  def _VerifyMasterId(self, master_id):
+    """Verify that our master id is current and valid."""
+    super(MasterSlaveLKGMSyncStage, self)._VerifyMasterId(master_id)
+    if not self._run.config.master and not master_id:
+      raise failures_lib.StepFailure(
+          'Cannot start build without a master_build_id. Did you hit force '
+          'build on a slave? Please hit force build on the master instead.')
+
   def GetNextManifest(self):
     """Gets the next manifest using LKGM logic."""
     assert self.manifest_manager, \
         'Must run Initialize before we can get a manifest.'
     assert isinstance(self.manifest_manager, lkgm_manager.LKGMManager), \
         'Manifest manager instantiated with wrong class.'
+    assert self._run.config.master
 
-    if self._run.config.master:
-      build_id = self._run.attrs.metadata.GetDict().get('build_id')
-      manifest = self.manifest_manager.CreateNewCandidate(
-          chrome_version=self._chrome_version,
-          build_id=build_id)
-      if MasterSlaveLKGMSyncStage.sub_manager:
-        MasterSlaveLKGMSyncStage.sub_manager.CreateFromManifest(manifest)
-      return manifest
-    else:
-      return self.manifest_manager.GetLatestCandidate(
-          timeout=self.LATEST_CANDIDATE_TIMEOUT_SECONDS)
+    build_id = self._run.attrs.metadata.GetDict().get('build_id')
+    manifest = self.manifest_manager.CreateNewCandidate(
+        chrome_version=self._chrome_version,
+        build_id=build_id)
+    if MasterSlaveLKGMSyncStage.sub_manager:
+      MasterSlaveLKGMSyncStage.sub_manager.CreateFromManifest(manifest)
+
+    return manifest
 
   def GetLatestChromeVersion(self):
     """Returns the version of Chrome to uprev."""
@@ -843,9 +925,8 @@ class CommitQueueSyncStage(MasterSlaveLKGMSyncStage):
 
   def _SetPoolFromManifest(self, manifest):
     """Sets validation pool based on manifest path passed in."""
-    # Note that GetNextManifest() calls GetLatestCandidate() in this case,
-    # so the repo will already be sync'd appropriately. This means that
-    # AcquirePoolFromManifest does not need to sync.
+    # Note that this function is only called after the repo is already
+    # sync'd, so AcquirePoolFromManifest does not need to sync.
     self.pool = validation_pool.ValidationPool.AcquirePoolFromManifest(
         manifest, self._run.config.overlays, self.repo,
         self._run.buildnumber, self._run.GetBuilderName(),
@@ -867,69 +948,87 @@ class CommitQueueSyncStage(MasterSlaveLKGMSyncStage):
         'Must run Initialize before we can get a manifest.'
     assert isinstance(self.manifest_manager, lkgm_manager.LKGMManager), \
         'Manifest manager instantiated with wrong class.'
+    assert self._run.config.master
 
     build_id = self._run.attrs.metadata.GetDict().get('build_id')
 
-    if self._run.config.master:
-      try:
-        # In order to acquire a pool, we need an initialized buildroot.
-        if not git.FindRepoDir(self.repo.directory):
-          self.repo.Initialize()
+    try:
+      # In order to acquire a pool, we need an initialized buildroot.
+      if not git.FindRepoDir(self.repo.directory):
+        self.repo.Initialize()
 
-        query = constants.CQ_READY_QUERY
-        if self._run.options.cq_gerrit_override:
-          query = (self._run.options.cq_gerrit_override, None)
+      query = constants.CQ_READY_QUERY
+      if self._run.options.cq_gerrit_override:
+        query = (self._run.options.cq_gerrit_override, None)
 
-        self.pool = pool = validation_pool.ValidationPool.AcquirePool(
-            self._run.config.overlays, self.repo,
-            self._run.buildnumber, self._run.GetBuilderName(),
-            query,
-            dryrun=self._run.options.debug,
-            check_tree_open=(not self._run.options.debug or
-                             self._run.options.mock_tree_status),
-            change_filter=self._ChangeFilter, builder_run=self._run)
-      except validation_pool.TreeIsClosedException as e:
-        cros_build_lib.Warning(str(e))
-        return None
+      self.pool = pool = validation_pool.ValidationPool.AcquirePool(
+          self._run.config.overlays, self.repo,
+          self._run.buildnumber, self._run.GetBuilderName(),
+          query,
+          dryrun=self._run.options.debug,
+          check_tree_open=(not self._run.options.debug or
+                           self._run.options.mock_tree_status),
+          change_filter=self._ChangeFilter, builder_run=self._run)
+    except validation_pool.TreeIsClosedException as e:
+      logging.warning(str(e))
+      return None
 
-      # We must extend the builder deadline before publishing a new manifest to
-      # ensure that slaves have enough time to complete the builds about to
-      # start.
-      build_id, db = self._run.GetCIDBHandle()
-      if db:
-        timeout = constants.MASTER_BUILD_TIMEOUT_SECONDS.get(
-            self._run.config.build_type,
-            constants.MASTER_BUILD_TIMEOUT_DEFAULT_SECONDS)
-        db.ExtendDeadline(build_id, timeout)
+    # We must extend the builder deadline before publishing a new manifest to
+    # ensure that slaves have enough time to complete the builds about to
+    # start.
+    build_id, db = self._run.GetCIDBHandle()
+    if db:
+      timeout = constants.MASTER_BUILD_TIMEOUT_SECONDS.get(
+          self._run.config.build_type,
+          constants.MASTER_BUILD_TIMEOUT_DEFAULT_SECONDS)
+      db.ExtendDeadline(build_id, timeout)
 
-      manifest = self.manifest_manager.CreateNewCandidate(validation_pool=pool,
-                                                          build_id=build_id)
-      if MasterSlaveLKGMSyncStage.sub_manager:
-        MasterSlaveLKGMSyncStage.sub_manager.CreateFromManifest(
-            manifest, build_id=build_id)
+    manifest = self.manifest_manager.CreateNewCandidate(validation_pool=pool,
+                                                        build_id=build_id)
+    if MasterSlaveLKGMSyncStage.sub_manager:
+      MasterSlaveLKGMSyncStage.sub_manager.CreateFromManifest(
+          manifest, build_id=build_id)
 
-    else:
-      manifest = self.manifest_manager.GetLatestCandidate()
-      if manifest:
-        if self._run.config.build_before_patching:
-          pre_build_passed = self.RunPrePatchBuild()
-          cros_build_lib.PrintBuildbotStepName(
-              'CommitQueueSync : Apply Patches')
-          if not pre_build_passed:
-            cros_build_lib.PrintBuildbotStepText('Pre-patch build failed.')
+    return manifest
 
-        self._SetPoolFromManifest(manifest)
-        self.pool.ApplyPoolIntoRepo()
+  def ManifestCheckout(self, next_manifest):
+    """Checks out the repository to the given manifest."""
+    if self._run.config.build_before_patching:
+      assert not self._run.config.master
+      pre_build_passed = self.RunPrePatchBuild()
+      cros_build_lib.PrintBuildbotStepName(
+          'CommitQueueSync : Apply Patches')
+      if not pre_build_passed:
+        cros_build_lib.PrintBuildbotStepText('Pre-patch build failed.')
 
     # Make sure the chroot version is valid.
-    lkgm_version = self._GetLGKMVersionFromManifest(manifest)
+    lkgm_version = self._GetLGKMVersionFromManifest(next_manifest)
     chroot_manager = chroot_lib.ChrootManager(self._build_root)
     chroot_manager.EnsureChrootAtVersion(lkgm_version)
 
     # Clear the chroot version as we are in the middle of building it.
     chroot_manager.ClearChrootVersion()
 
-    return manifest
+    # Syncing to a pinned manifest ensures that we have the specified
+    # revisions, but, unfortunately, repo won't bother to update branches.
+    # Sync with an unpinned manifest first to ensure that branches are updated
+    # (e.g. in case somebody adds a new branch to a repo.) See crbug.com/482077
+    if not self.skip_sync:
+      self.repo.Sync(self._run.config.manifest, network_only=True)
+
+    # Sync to the provided manifest on slaves. On the master, we're
+    # already synced to this manifest, so self.skip_sync is set and
+    # this is a no-op.
+    super(CommitQueueSyncStage, self).ManifestCheckout(next_manifest)
+
+    # On slaves, initialize our pool and apply patches. On the master,
+    # we've already done that in GetNextManifest, so this is a no-op.
+    if not self._run.config.master:
+      # Print the list of CHUMP changes since the LKGM, then apply changes and
+      # print the list of applied changes.
+      self.manifest_manager.GenerateBlameListSinceLKGM()
+      self._SetPoolFromManifest(next_manifest)
+      self.pool.ApplyPoolIntoRepo()
 
   @failures_lib.SetFailureType(failures_lib.InfrastructureFailure)
   def PerformStage(self):
@@ -988,7 +1087,7 @@ class PreCQLauncherStage(SyncStage):
   LAUNCH_DELAY = 2
 
   # The number of minutes we allow before considering a launch attempt failed.
-  LAUNCH_TIMEOUT = 90
+  LAUNCH_TIMEOUT = 30
 
   # The number of minutes we allow before considering an in-flight job failed.
   INFLIGHT_TIMEOUT = 240
@@ -1003,9 +1102,15 @@ class PreCQLauncherStage(SyncStage):
   # once.
   MAX_PATCHES_PER_TRYBOT_RUN = 50
 
+  # The maximum derivative of the number of tryjobs we will launch in a given
+  # cycle of ProcessChanges. Used to rate-limit the launcher when reopening the
+  # tree after building up a large backlog.
+  MAX_LAUNCHES_PER_CYCLE_DERIVATIVE = 20
+
   def __init__(self, builder_run, **kwargs):
     super(PreCQLauncherStage, self).__init__(builder_run, **kwargs)
     self.skip_sync = True
+    self.last_cycle_launch_count = 0
 
 
   def _HasTimedOut(self, start, now, timeout_minutes):
@@ -1033,6 +1138,36 @@ class PreCQLauncherStage(SyncStage):
     )
     cros_build_lib.PrintBuildbotLink(' | '.join(items), patch.url)
 
+  def _ConfiguredVerificationsForChange(self, change):
+    """Determine which configs to test |change| with.
+
+    This method returns only the configs that are asked for by the config
+    file. It does not include special-case logic for adding additional bots
+    based on the type of the repository (see VerificationsForChange for that).
+
+    Args:
+      change: GerritPatch instance to get configs-to-test for.
+
+    Returns:
+      A set of configs to test.
+    """
+    configs_to_test = None
+    try:
+      # If a pre-cq config is specified in the commit message, use that.
+      # Otherwise, look in appropriate COMMIT-QUEUE.ini. Otherwise, default to
+      # constants.PRE_CQ_DEFAULT_CONFIGS
+      lines = cros_patch.GetOptionLinesFromCommitMessage(
+          change.commit_message, constants.PRE_CQ_CONFIGS_OPTION_REGEX)
+      if lines is not None:
+        configs_to_test = self._ParsePreCQOption(' '.join(lines))
+      configs_to_test = configs_to_test or self._ParsePreCQOption(
+          triage_lib.GetOptionForChange(
+              self._build_root, change, 'GENERAL',
+              constants.PRE_CQ_CONFIGS_OPTION))
+    except ConfigParser.Error:
+      logging.error('%s has malformed config file', change, exc_info=True)
+
+    return set(configs_to_test or constants.PRE_CQ_DEFAULT_CONFIGS)
 
   def VerificationsForChange(self, change):
     """Determine which configs to test |change| with.
@@ -1041,21 +1176,31 @@ class PreCQLauncherStage(SyncStage):
       change: GerritPatch instance to get configs-to-test for.
 
     Returns:
-      A list of configs.
+      A set of configs to test.
     """
-    configs_to_test = constants.PRE_CQ_DEFAULT_CONFIGS
-    try:
-      result = triage_lib.GetOptionForChange(
-          self._build_root, change, 'GENERAL', 'pre-cq-configs')
-      if (result and result.split() and
-          all(c in cbuildbot_config.config for c in result.split())):
-        configs_to_test = result.split()
-    except ConfigParser.Error:
-      cros_build_lib.Error('%s has malformed config file', change,
-                           exc_info=True)
+    configs_to_test = set(self._ConfiguredVerificationsForChange(change))
+
+    # Add the BINHOST_PRE_CQ to any changes that affect an overlay.
+    if '/overlays/' in change.project:
+      configs_to_test.add(constants.BINHOST_PRE_CQ)
 
     return configs_to_test
 
+  def _ParsePreCQOption(self, pre_cq_option):
+    """Gets a valid config list, or None, from |pre_cq_option|."""
+    if pre_cq_option and pre_cq_option.split():
+      configs_to_test = set(pre_cq_option.split())
+
+      # Replace 'default' with the default configs.
+      if 'default' in configs_to_test:
+        configs_to_test.discard('default')
+        configs_to_test.update(constants.PRE_CQ_DEFAULT_CONFIGS)
+
+      # Verify that all of the configs are valid.
+      if all(c in cbuildbot_config.GetConfig() for c in configs_to_test):
+        return configs_to_test
+
+    return None
 
   def ScreenChangeForPreCQ(self, change):
     """Record which pre-cq tryjobs to test |change| with.
@@ -1092,16 +1237,16 @@ class PreCQLauncherStage(SyncStage):
       change: Change to examine.
 
     Returns:
-      A list of stages to ignore for the given |change|.
+      Boolean indicating if this change is configured to be submitted
+      in the pre-CQ.
     """
     result = None
     try:
       result = triage_lib.GetOptionForChange(
           self._build_root, change, 'GENERAL', 'submit-in-pre-cq')
     except ConfigParser.Error:
-      cros_build_lib.Error('%s has malformed config file', change,
-                           exc_info=True)
-    return result and result.lower() == 'yes'
+      logging.error('%s has malformed config file', change, exc_info=True)
+    return bool(result and result.lower() == 'yes')
 
 
   def LaunchTrybot(self, plan, config):
@@ -1386,9 +1531,26 @@ class PreCQLauncherStage(SyncStage):
         k: v for k, v in progress_map.iteritems()
         if k.HasReadyFlag() or status_map[k] != constants.CL_STATUS_FAILED}
 
+    is_tree_open = tree_status.IsTreeOpen(throttled_ok=True)
+    launch_count = 0
+    launch_count_limit = (self.last_cycle_launch_count +
+                          self.MAX_LAUNCHES_PER_CYCLE_DERIVATIVE)
     for plan, config in self.GetDisjointTransactionsToTest(
         pool, launchable_progress_map):
-      self.LaunchTrybot(plan, config)
+      if is_tree_open:
+        if launch_count < launch_count_limit:
+          self.LaunchTrybot(plan, config)
+          launch_count += 1
+        else:
+          logging.info('Hit maximum launch count of %s this cycle, not '
+                       'launching config %s for plan %s.',
+                       launch_count_limit, config,
+                       cros_patch.GetChangesAsString(plan))
+      else:
+        logging.info('Tree is closed, not launching config %s for plan %s.',
+                     config, cros_patch.GetChangesAsString(plan))
+
+    self.last_cycle_launch_count = launch_count
 
     # Mark passed changes as passed
     self.UpdateChangeStatuses(will_pass, constants.CL_STATUS_PASSED)
@@ -1398,9 +1560,11 @@ class PreCQLauncherStage(SyncStage):
       self._ProcessExpiry(c, v[0], v[1], pool, current_db_time)
 
     # Submit changes that are ready to submit, if we can.
-    if tree_status.IsTreeOpen():
-      pool.SubmitNonManifestChanges(check_tree_open=False)
-      pool.SubmitChanges(will_submit, check_tree_open=False)
+    if tree_status.IsTreeOpen(throttled_ok=True):
+      pool.SubmitNonManifestChanges(check_tree_open=False,
+                                    reason=constants.STRATEGY_NONMANIFEST)
+      pool.SubmitChanges(will_submit, check_tree_open=False,
+                         reason=constants.STRATEGY_PRECQ_SUBMIT)
 
     # Tell ValidationPool to keep waiting for more changes until we hit
     # its internal timeout.

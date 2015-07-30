@@ -15,13 +15,13 @@
 #include "chrome/browser/plugins/plugin_finder.h"
 #include "chrome/browser/plugins/plugin_metadata.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
-#include "chrome/browser/plugins/plugins_field_trial.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_otr_state.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "components/content_settings/core/browser/content_settings_utils.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/content_settings/core/browser/plugins_field_trial.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/rappor/rappor_service.h"
 #include "content/public/browser/browser_thread.h"
@@ -34,8 +34,8 @@
 #include "widevine_cdm_version.h"  // In SHARED_INTERMEDIATE_DIR.
 
 #if defined(ENABLE_EXTENSIONS)
+#include "components/guest_view/browser/guest_view_base.h"
 #include "extensions/browser/extension_registry.h"
-#include "extensions/browser/guest_view/guest_view_base.h"
 #include "extensions/browser/guest_view/web_view/web_view_renderer_state.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
@@ -298,7 +298,7 @@ void PluginInfoMessageFilter::PluginsLoaded(
 
   ChromeViewHostMsg_GetPluginInfo::WriteReplyParams(reply_msg, output);
   Send(reply_msg);
-  if (output.status.value !=
+  if (output.status !=
       ChromeViewHostMsg_GetPluginInfo_Status::kNotFound) {
     main_thread_task_runner_->PostTask(
         FROM_HERE, base::Bind(&ReportMetrics, output.actual_mime_type,
@@ -352,8 +352,7 @@ void PluginInfoMessageFilter::Context::DecidePluginStatus(
 #if defined(OS_WIN)
   if (plugin.type == WebPluginInfo::PLUGIN_TYPE_NPAPI &&
       base::win::IsMetroProcess()) {
-    status->value =
-        ChromeViewHostMsg_GetPluginInfo_Status::kNPAPINotSupported;
+    *status = ChromeViewHostMsg_GetPluginInfo_Status::kNPAPINotSupported;
     return;
   }
 #endif
@@ -363,8 +362,7 @@ void PluginInfoMessageFilter::Context::DecidePluginStatus(
 #if defined(ENABLE_EXTENSIONS)
     if (extensions::WebViewRendererState::GetInstance()->IsGuest(
         render_process_id_)) {
-      status->value =
-          ChromeViewHostMsg_GetPluginInfo_Status::kNPAPINotSupported;
+      *status = ChromeViewHostMsg_GetPluginInfo_Status::kNPAPINotSupported;
       return;
     }
 #endif
@@ -379,8 +377,9 @@ void PluginInfoMessageFilter::Context::DecidePluginStatus(
                           plugin_metadata->identifier(), &plugin_setting,
                           &uses_default_content_setting, &is_managed);
 
+  // TODO(tommycli): Remove once we deprecate the plugin ASK policy.
   bool legacy_ask_user = plugin_setting == CONTENT_SETTING_ASK;
-  plugin_setting = PluginsFieldTrial::EffectiveContentSetting(
+  plugin_setting = content_settings::PluginsFieldTrial::EffectiveContentSetting(
       CONTENT_SETTINGS_TYPE_PLUGINS, plugin_setting);
 
   DCHECK(plugin_setting != CONTENT_SETTING_DEFAULT);
@@ -393,10 +392,9 @@ void PluginInfoMessageFilter::Context::DecidePluginStatus(
   if (plugin_status == PluginMetadata::SECURITY_STATUS_OUT_OF_DATE &&
       !allow_outdated_plugins_.GetValue()) {
     if (allow_outdated_plugins_.IsManaged()) {
-      status->value =
-          ChromeViewHostMsg_GetPluginInfo_Status::kOutdatedDisallowed;
+      *status = ChromeViewHostMsg_GetPluginInfo_Status::kOutdatedDisallowed;
     } else {
-      status->value = ChromeViewHostMsg_GetPluginInfo_Status::kOutdatedBlocked;
+      *status = ChromeViewHostMsg_GetPluginInfo_Status::kOutdatedBlocked;
     }
     return;
   }
@@ -420,7 +418,7 @@ void PluginInfoMessageFilter::Context::DecidePluginStatus(
       group_policy != PluginPrefs::POLICY_ENABLED &&
       !ChromePluginServiceFilter::GetInstance()->IsPluginRestricted(
           plugin.path)) {
-    status->value = ChromeViewHostMsg_GetPluginInfo_Status::kUnauthorized;
+    *status = ChromeViewHostMsg_GetPluginInfo_Status::kUnauthorized;
     return;
   }
 
@@ -429,7 +427,7 @@ void PluginInfoMessageFilter::Context::DecidePluginStatus(
       !always_authorize_plugins_.GetValue() &&
       plugin_setting != CONTENT_SETTING_BLOCK &&
       uses_default_content_setting) {
-    status->value = ChromeViewHostMsg_GetPluginInfo_Status::kUnauthorized;
+    *status = ChromeViewHostMsg_GetPluginInfo_Status::kUnauthorized;
     return;
   }
 
@@ -446,17 +444,16 @@ void PluginInfoMessageFilter::Context::DecidePluginStatus(
 #endif  // defined(ENABLE_EXTENSIONS)
 
   if (plugin_setting == CONTENT_SETTING_DETECT_IMPORTANT_CONTENT) {
-    status->value =
-        ChromeViewHostMsg_GetPluginInfo_Status::kPlayImportantContent;
+    *status = ChromeViewHostMsg_GetPluginInfo_Status::kPlayImportantContent;
   } else if (plugin_setting == CONTENT_SETTING_BLOCK) {
     // For managed users with the ASK policy, we allow manually running plugins
     // via context menu. This is the closest to admin intent.
-    status->value = is_managed && !legacy_ask_user
+    *status = is_managed && !legacy_ask_user
                   ? ChromeViewHostMsg_GetPluginInfo_Status::kBlockedByPolicy
                   : ChromeViewHostMsg_GetPluginInfo_Status::kBlocked;
   }
 
-  if (status->value == ChromeViewHostMsg_GetPluginInfo_Status::kAllowed) {
+  if (*status == ChromeViewHostMsg_GetPluginInfo_Status::kAllowed) {
     // Allow an embedder of <webview> to block a plugin from being loaded inside
     // the guest. In order to do this, set the status to 'Unauthorized' here,
     // and update the status as appropriate depending on the response from the
@@ -464,7 +461,7 @@ void PluginInfoMessageFilter::Context::DecidePluginStatus(
 #if defined(ENABLE_EXTENSIONS)
     if (extensions::WebViewRendererState::GetInstance()->IsGuest(
         render_process_id_))
-      status->value = ChromeViewHostMsg_GetPluginInfo_Status::kUnauthorized;
+      *status = ChromeViewHostMsg_GetPluginInfo_Status::kUnauthorized;
 
 #endif
   }
@@ -479,13 +476,15 @@ bool PluginInfoMessageFilter::Context::FindEnabledPlugin(
     WebPluginInfo* plugin,
     std::string* actual_mime_type,
     scoped_ptr<PluginMetadata>* plugin_metadata) const {
+  *status = ChromeViewHostMsg_GetPluginInfo_Status::kAllowed;
+
   bool allow_wildcard = true;
   std::vector<WebPluginInfo> matching_plugins;
   std::vector<std::string> mime_types;
   PluginService::GetInstance()->GetPluginInfoArray(
       url, mime_type, allow_wildcard, &matching_plugins, &mime_types);
   if (matching_plugins.empty()) {
-    status->value = ChromeViewHostMsg_GetPluginInfo_Status::kNotFound;
+    *status = ChromeViewHostMsg_GetPluginInfo_Status::kNotFound;
 #if defined(OS_WIN) || defined(OS_MACOSX)
     if (!PluginService::GetInstance()->NPAPIPluginsSupported()) {
       // At this point it is not known for sure this is an NPAPI plugin as it
@@ -521,7 +520,7 @@ bool PluginInfoMessageFilter::Context::FindEnabledPlugin(
   if (!enabled) {
     // Otherwise, we only found disabled plugins, so we take the first one.
     i = 0;
-    status->value = ChromeViewHostMsg_GetPluginInfo_Status::kDisabled;
+    *status = ChromeViewHostMsg_GetPluginInfo_Status::kDisabled;
   }
 
   *plugin = matching_plugins[i];
@@ -570,8 +569,13 @@ void PluginInfoMessageFilter::Context::GetPluginContentSetting(
 
     // If there is a plugin-specific setting, we use it, unless the general
     // setting was set by policy, in which case it takes precedence.
-    uses_plugin_specific_setting = specific_setting &&
-        (general_info.source != content_settings::SETTING_SOURCE_POLICY);
+    // TODO(tommycli): Remove once we deprecate the plugin ASK policy.
+    bool legacy_ask_user = content_settings::ValueToContentSetting(
+                               general_setting.get()) == CONTENT_SETTING_ASK;
+    bool use_policy =
+        general_info.source == content_settings::SETTING_SOURCE_POLICY &&
+        !legacy_ask_user;
+    uses_plugin_specific_setting = specific_setting && !use_policy;
     if (uses_plugin_specific_setting) {
       value = specific_setting.Pass();
       info = specific_info;
@@ -589,11 +593,10 @@ void PluginInfoMessageFilter::Context::GetPluginContentSetting(
 }
 
 void PluginInfoMessageFilter::Context::MaybeGrantAccess(
-    const ChromeViewHostMsg_GetPluginInfo_Status& status,
+    ChromeViewHostMsg_GetPluginInfo_Status status,
     const base::FilePath& path) const {
-  if (status.value == ChromeViewHostMsg_GetPluginInfo_Status::kAllowed ||
-      status.value ==
-          ChromeViewHostMsg_GetPluginInfo_Status::kPlayImportantContent) {
+  if (status == ChromeViewHostMsg_GetPluginInfo_Status::kAllowed ||
+      status == ChromeViewHostMsg_GetPluginInfo_Status::kPlayImportantContent) {
     ChromePluginServiceFilter::GetInstance()->AuthorizePlugin(
         render_process_id_, path);
   }

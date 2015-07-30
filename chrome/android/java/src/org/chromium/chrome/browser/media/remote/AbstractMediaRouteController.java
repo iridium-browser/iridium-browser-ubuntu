@@ -6,6 +6,7 @@ package org.chromium.chrome.browser.media.remote;
 
 import android.content.Context;
 import android.graphics.Bitmap;
+import android.net.Uri;
 import android.os.Handler;
 import android.support.v7.media.MediaControlIntent;
 import android.support.v7.media.MediaItemStatus;
@@ -19,8 +20,9 @@ import com.google.android.gms.cast.CastMediaControlIntent;
 
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.CommandLine;
-import org.chromium.chrome.ChromeSwitches;
+import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.media.remote.RemoteVideoInfo.PlayerState;
 
 import java.util.HashSet;
@@ -484,13 +486,8 @@ public abstract class AbstractMediaRouteController implements MediaRouteControll
         }
     }
 
-    protected void updateState(int state) {
-        if (mDebug) {
-            Log.d(TAG, "updateState oldState: " + this.mPlaybackState + " newState: " + state);
-        }
-
-        PlayerState oldState = this.mPlaybackState;
-
+    @VisibleForTesting
+    void setPlayerStateForMediaItemState(int state) {
         PlayerState playerState = PlayerState.STOPPED;
         switch (state) {
             case MediaItemStatus.PLAYBACK_STATE_BUFFERING:
@@ -525,13 +522,22 @@ public abstract class AbstractMediaRouteController implements MediaRouteControll
                 break;
         }
 
-        this.mPlaybackState = playerState;
+        mPlaybackState = playerState;
+    }
 
-        for (UiListener listener : mUiListeners) {
-            listener.onPlaybackStateChanged(oldState, playerState);
+    protected void updateState(int state) {
+        if (mDebug) {
+            Log.d(TAG, "updateState oldState: " + mPlaybackState + " newState: " + state);
         }
 
-        if (mMediaStateListener != null) mMediaStateListener.onPlaybackStateChanged(playerState);
+        PlayerState oldState = mPlaybackState;
+        setPlayerStateForMediaItemState(state);
+
+        for (UiListener listener : mUiListeners) {
+            listener.onPlaybackStateChanged(oldState, mPlaybackState);
+        }
+
+        if (mMediaStateListener != null) mMediaStateListener.onPlaybackStateChanged(mPlaybackState);
 
         if (oldState != mPlaybackState) {
             // We need to persist our state in case we get killed.
@@ -579,4 +585,19 @@ public abstract class AbstractMediaRouteController implements MediaRouteControll
         if (mMediaStateListener == null) return null;
         return mMediaStateListener.getPosterBitmap();
     }
+
+    // TODO(aberent): Temp to change args while avoiding need for two sided patch for YT.
+    @Override
+    public void setDataSource(Uri uri, String cookies, String userAgent) {
+        setDataSource(uri, cookies);
+    };
+
+    /**
+     * Temp default version to allow override in YouTubeMediaRouteController, while not
+     * requiring it in DefaultMediaRouteController.
+     * TODO(aberent): Fix YT and remove.
+     * @param uri
+     * @param cookies
+     */
+    public void setDataSource(Uri uri, String cookies) {};
 }

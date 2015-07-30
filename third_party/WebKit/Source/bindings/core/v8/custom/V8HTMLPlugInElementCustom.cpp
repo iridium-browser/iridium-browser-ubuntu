@@ -58,7 +58,9 @@ void getScriptableObjectProperty(PropertyType property, const v8::PropertyCallba
     if (instance.IsEmpty())
         return;
 
-    TONATIVE_VOID(v8::Local<v8::Value>, value, instance->Get(property));
+    v8::Local<v8::Value> value;
+    if (!instance->Get(info.GetIsolate()->GetCurrentContext(), property).ToLocal(&value))
+        return;
 
     // We quit here to allow the binding code to look up general HTMLObjectElement properties
     // if they are not overriden by plugin.
@@ -83,6 +85,7 @@ void callNpObjectSetter(v8::Local<v8::Object> self, uint32_t index, v8::Local<v8
 template <typename ElementType, typename PropertyType>
 void setScriptableObjectProperty(PropertyType property, v8::Local<v8::Value> value, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
+    ASSERT(!value.IsEmpty());
     HTMLPlugInElement* impl = ElementType::toImpl(info.Holder());
     RefPtr<SharedPersistent<v8::Object>> wrapper = impl->pluginWrapper();
     if (!wrapper)
@@ -110,7 +113,8 @@ void setScriptableObjectProperty(PropertyType property, v8::Local<v8::Value> val
     // DOM element will also be set. For plugin's that don't intercept the call
     // (all except gTalk) this makes no difference at all. For gTalk the fact
     // that the property on the DOM element also gets set is inconsequential.
-    instance->Set(property, value);
+    v8::Maybe<bool> unused = instance->Set(info.GetIsolate()->GetCurrentContext(), property, value);
+    ALLOW_UNUSED_LOCAL(unused);
 }
 } // namespace
 
@@ -200,11 +204,13 @@ void invokeOnScriptableObject(const v8::FunctionCallbackInfo<v8::Value>& info)
     if (instance.IsEmpty())
         return;
 
-    WTF::OwnPtr<v8::Handle<v8::Value>[] > arguments = adoptArrayPtr(new v8::Handle<v8::Value>[info.Length()]);
+    WTF::OwnPtr<v8::Local<v8::Value>[] > arguments = adoptArrayPtr(new v8::Local<v8::Value>[info.Length()]);
     for (int i = 0; i < info.Length(); ++i)
         arguments[i] = info[i];
 
-    TONATIVE_VOID(v8::Local<v8::Value>, retVal, instance->CallAsFunction(info.This(), info.Length(), arguments.get()));
+    v8::Local<v8::Value> retVal;
+    if (!instance->CallAsFunction(info.GetIsolate()->GetCurrentContext(), info.This(), info.Length(), arguments.get()).ToLocal(&retVal))
+        return;
     v8SetReturnValue(info, retVal);
 }
 

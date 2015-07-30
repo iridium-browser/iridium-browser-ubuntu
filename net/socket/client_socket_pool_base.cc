@@ -4,11 +4,12 @@
 
 #include "net/socket/client_socket_pool_base.h"
 
+#include <algorithm>
+
 #include "base/compiler_specific.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
-#include "base/profiler/scoped_tracker.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
@@ -144,7 +145,13 @@ ClientSocketPoolBaseHelper::Request::Request(
     DCHECK_EQ(priority_, MAXIMUM_PRIORITY);
 }
 
-ClientSocketPoolBaseHelper::Request::~Request() {}
+ClientSocketPoolBaseHelper::Request::~Request() {
+  liveness_ = DEAD;
+}
+
+void ClientSocketPoolBaseHelper::Request::CrashIfInvalid() const {
+  CHECK_EQ(liveness_, ALIVE);
+}
 
 ClientSocketPoolBaseHelper::ClientSocketPoolBaseHelper(
     HigherLayeredPool* pool,
@@ -482,6 +489,12 @@ bool ClientSocketPoolBaseHelper::AssignIdleSocketToRequest(
         idle_socket.socket->WasEverUsed() ?
             ClientSocketHandle::REUSED_IDLE :
             ClientSocketHandle::UNUSED_IDLE;
+
+    // If this socket took multiple attempts to obtain, don't report those
+    // every time it's reused, just to the first user.
+    if (idle_socket.socket->WasEverUsed())
+      idle_socket.socket->ClearConnectionAttempts();
+
     HandOutSocket(
         scoped_ptr<StreamSocket>(idle_socket.socket),
         reuse_type,
@@ -573,13 +586,8 @@ LoadState ClientSocketPoolBaseHelper::GetLoadState(
 
   const Group& group = *group_it->second;
   if (group.HasConnectJobForHandle(handle)) {
-    // Just return the state of the farthest along ConnectJob for the first
-    // group.jobs().size() pending requests.
-    LoadState max_state = LOAD_STATE_IDLE;
-    for (const auto& job : group.jobs()) {
-      max_state = std::max(max_state, job->GetLoadState());
-    }
-    return max_state;
+    // Just return the state of the oldest ConnectJob.
+    return (*group.jobs().begin())->GetLoadState();
   }
 
   if (group.CanUseAdditionalSocketSlot(max_sockets_per_group_))
@@ -629,7 +637,7 @@ base::DictionaryValue* ClientSocketPoolBaseHelper::GetInfoAsValue(
     group_dict->Set("idle_sockets", idle_socket_list);
 
     base::ListValue* connect_jobs_list = new base::ListValue();
-    std::set<ConnectJob*>::const_iterator job = group->jobs().begin();
+    std::list<ConnectJob*>::const_iterator job = group->jobs().begin();
     for (job = group->jobs().begin(); job != group->jobs().end(); job++) {
       int source_id = (*job)->net_log().source().id;
       connect_jobs_list->Append(new base::FundamentalValue(source_id));
@@ -864,11 +872,6 @@ bool ClientSocketPoolBaseHelper::FindTopStalledGroup(
 
 void ClientSocketPoolBaseHelper::OnConnectJobComplete(
     int result, ConnectJob* job) {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436634 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "436634 ClientSocketPoolBaseHelper::OnConnectJobComplete"));
-
   DCHECK_NE(ERR_IO_PENDING, result);
   const std::string group_name = job->group_name();
   GroupMap::iterator group_it = group_map_.find(group_name);
@@ -1198,19 +1201,16 @@ void ClientSocketPoolBaseHelper::Group::AddJob(scoped_ptr<ConnectJob> job,
 
   if (is_preconnect)
     ++unassigned_job_count_;
-  jobs_.insert(job.release());
+  jobs_.push_back(job.release());
 }
 
 void ClientSocketPoolBaseHelper::Group::RemoveJob(ConnectJob* job) {
   scoped_ptr<ConnectJob> owned_job(job);
   SanityCheck();
 
-  std::set<ConnectJob*>::iterator it = jobs_.find(job);
-  if (it != jobs_.end()) {
-    jobs_.erase(it);
-  } else {
-    NOTREACHED();
-  }
+  // Check that |job| is in the list.
+  DCHECK_EQ(*std::find(jobs_.begin(), jobs_.end(), job), job);
+  jobs_.remove(job);
   size_t job_count = jobs_.size();
   if (job_count < unassigned_job_count_)
     unassigned_job_count_ = job_count;
@@ -1330,11 +1330,14 @@ ClientSocketPoolBaseHelper::Group::FindAndRemovePendingRequest(
 scoped_ptr<const ClientSocketPoolBaseHelper::Request>
 ClientSocketPoolBaseHelper::Group::RemovePendingRequest(
     const RequestQueue::Pointer& pointer) {
+  // TODO(eroman): Temporary for debugging http://crbug.com/467797.
+  CHECK(!pointer.is_null());
   scoped_ptr<const Request> request(pointer.value());
   pending_requests_.Erase(pointer);
   // If there are no more requests, kill the backup timer.
   if (pending_requests_.empty())
     backup_job_timer_.Stop();
+  request->CrashIfInvalid();
   return request.Pass();
 }
 

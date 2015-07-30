@@ -9,7 +9,6 @@ from __future__ import print_function
 import glob
 import itertools
 import json
-import logging
 import multiprocessing
 import os
 import shutil
@@ -21,9 +20,11 @@ from chromite.cbuildbot import constants
 from chromite.cbuildbot import prebuilts
 from chromite.cbuildbot.stages import generic_stages
 from chromite.lib import cros_build_lib
-from chromite.lib import git
+from chromite.lib import cros_logging as logging
+from chromite.lib import dev_server_wrapper
 from chromite.lib import osutils
 from chromite.lib import parallel
+from chromite.lib import path_util
 from chromite.lib import portage_util
 
 
@@ -71,7 +72,7 @@ class ArchiveStage(generic_stages.BoardSpecificBuilderStage,
       True if artifacts created successfully.
       False otherwise.
     """
-    cros_build_lib.Info('Waiting for recovery image...')
+    logging.info('Waiting for recovery image...')
     status = self._recovery_image_status_queue.get()
     # Put the status back so other SignerTestStage instances don't starve.
     self._recovery_image_status_queue.put(status)
@@ -86,8 +87,8 @@ class ArchiveStage(generic_stages.BoardSpecificBuilderStage,
       raise NothingToArchiveException('No %s found!' % path_pattern)
     elif len(files) > 1:
       cros_build_lib.PrintBuildbotStepWarnings()
-      cros_build_lib.Warning('Expecting one result for %s package, but '
-                             'found multiple.', path_pattern)
+      logging.warning('Expecting one result for %s package, but found '
+                      'multiple.', path_pattern)
     return files[-1]
 
   def ArchiveStrippedChrome(self):
@@ -117,7 +118,7 @@ class ArchiveStage(generic_stages.BoardSpecificBuilderStage,
     extra_env = {}
     if self._run.config.useflags:
       extra_env['USE'] = ' '.join(self._run.config.useflags)
-    in_chroot_path = git.ReinterpretPathForChroot(self.archive_path)
+    in_chroot_path = path_util.ToChrootPath(self.archive_path)
     cmd = ['generate_delta_sysroot', '--out-dir', in_chroot_path,
            '--board', self._current_board]
     # TODO(mtennant): Make this condition into one run param.
@@ -288,7 +289,7 @@ class ArchiveStage(generic_stages.BoardSpecificBuilderStage,
       if config['hwqual'] and autotest_built:
         # Build the full autotest tarball for hwqual image. We don't upload it,
         # as it's fairly large and only needed by the hwqual tarball.
-        cros_build_lib.Info('Archiving full autotest tarball locally ...')
+        logging.info('Archiving full autotest tarball locally ...')
         tarball = commands.BuildFullAutotestTarball(self._build_root,
                                                     self._current_board,
                                                     image_dir)
@@ -314,12 +315,15 @@ class ArchiveStage(generic_stages.BoardSpecificBuilderStage,
 
       # For recovery image to be generated correctly, BuildRecoveryImage must
       # run before BuildAndArchiveFactoryImages.
-      if self.IsArchivedFile(constants.BASE_IMAGE_BIN):
+      if 'recovery' in config.images:
+        assert self.IsArchivedFile(constants.BASE_IMAGE_BIN)
         commands.BuildRecoveryImage(buildroot, board, image_dir, extra_env)
         self._recovery_image_status_queue.put(True)
         # Re-generate the artifacts list so we include the newly created
         # recovery image.
         self.LoadArtifactsList(self._current_board, image_dir)
+      else:
+        self._recovery_image_status_queue.put(False)
 
       if config['images']:
         parallel.RunParallelSteps([BuildAndArchiveFactoryImages,
@@ -349,6 +353,8 @@ class ArchiveStage(generic_stages.BoardSpecificBuilderStage,
       sign_types = []
       if config['name'].endswith('-%s' % cbuildbot_config.CONFIG_TYPE_FIRMWARE):
         sign_types += ['firmware']
+      if config['name'].endswith('-%s' % cbuildbot_config.CONFIG_TYPE_FACTORY):
+        sign_types += ['factory']
       urls = commands.PushImages(
           board=board,
           archive_url=upload_url,
@@ -443,7 +449,7 @@ class DebugSymbolsStage(generic_stages.BoardSpecificBuilderStage,
         self._build_root, self._current_board, self.archive_path,
         self._run.config.archive_build_debug)
     self.UploadArtifact(filename, archive=False)
-    cros_build_lib.Info('Announcing availability of debug tarball now.')
+    logging.info('Announcing availability of debug tarball now.')
     self.board_runattrs.SetParallel('debug_tarball_generated', True)
 
   def UploadSymbols(self, buildroot, board, failed_list):
@@ -567,6 +573,10 @@ class MasterUploadPrebuiltsStage(generic_stages.BuilderStage):
           category=self._prebuilt_type, chrome_rev=self._chrome_rev,
           private_bucket=True, buildroot=self._build_root, board=None,
           extra_args=generated_args + private_args)
+
+    # If we're the Chrome PFQ master, update our binhost JSON file.
+    if self._run.config.build_type == constants.CHROME_PFQ_TYPE:
+      commands.UpdateBinhostJson(self._build_root)
 
 
 class UploadPrebuiltsStage(generic_stages.BoardSpecificBuilderStage):
@@ -768,12 +778,14 @@ class UploadTestArtifactsStage(generic_stages.BoardSpecificBuilderStage,
     if not got_images:
       return
 
-    if 'test' in self._run.config.images:
-      image_name = 'chromiumos_test_image.bin'
-    elif 'dev' in self._run.config.images:
-      image_name = 'chromiumos_image.bin'
-    else:
-      image_name = 'chromiumos_base_image.bin'
+    payload_type = self._run.config.payload_image
+    if payload_type is None:
+      payload_type = 'base'
+      for t in ['test', 'dev']:
+        if t in self._run.config.images:
+          payload_type = t
+          break
+    image_name = dev_server_wrapper.IMAGE_TYPE_TO_NAME[payload_type]
     logging.info('Generating payloads to upload for %s', image_name)
     self._GeneratePayloads(image_name, full=True, stateful=True)
     self.board_runattrs.SetParallel('payloads_generated', True)

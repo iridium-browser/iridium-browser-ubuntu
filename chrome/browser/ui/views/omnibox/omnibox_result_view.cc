@@ -375,6 +375,9 @@ void OmniboxResultView::PaintMatch(const AutocompleteMatch& match,
     separator_width_ = separator_rendertext_->GetContentWidth();
   }
 
+  contents->SetDisplayRect(gfx::Rect(gfx::Size(INT_MAX, 0)));
+  if (description)
+    description->SetDisplayRect(gfx::Rect(gfx::Size(INT_MAX, 0)));
   int contents_max_width, description_max_width;
   OmniboxPopupModel::ComputeMatchMaxWidths(
       contents->GetContentWidth(),
@@ -544,7 +547,8 @@ scoped_ptr<gfx::RenderText> OmniboxResultView::CreateClassifiedRenderText(
 
 int OmniboxResultView::GetMatchContentsWidth() const {
   InitContentsRenderTextIfNecessary();
-  return contents_rendertext_ ? contents_rendertext_->GetContentWidth() : 0;
+  contents_rendertext_->SetDisplayRect(gfx::Rect(gfx::Size(INT_MAX, 0)));
+  return contents_rendertext_->GetContentWidth();
 }
 
 void OmniboxResultView::SetAnswerImage(const gfx::ImageSkia& image) {

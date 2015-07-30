@@ -118,7 +118,6 @@ private:
 
 CanvasRenderingContext2D::CanvasRenderingContext2D(HTMLCanvasElement* canvas, const CanvasContextCreationAttributes& attrs, Document& document)
     : CanvasRenderingContext(canvas)
-    , m_usesCSSCompatibilityParseMode(document.inQuirksMode())
     , m_clipAntialiasing(NotAntiAliased)
     , m_hasAlpha(attrs.alpha())
     , m_contextLostMode(NotLostContext)
@@ -1281,7 +1280,7 @@ static inline CanvasImageSource* toImageSourceInternal(const CanvasImageSourceUn
 void CanvasRenderingContext2D::drawImage(const CanvasImageSourceUnion& imageSource, float x, float y, ExceptionState& exceptionState)
 {
     CanvasImageSource* imageSourceInternal = toImageSourceInternal(imageSource);
-    FloatSize sourceRectSize = imageSourceInternal->sourceSize();
+    FloatSize sourceRectSize = imageSourceInternal->elementSize();
     FloatSize destRectSize = imageSourceInternal->defaultDestinationSize();
     drawImage(imageSourceInternal, 0, 0, sourceRectSize.width(), sourceRectSize.height(), x, y, destRectSize.width(), destRectSize.height(), exceptionState);
 }
@@ -1290,7 +1289,7 @@ void CanvasRenderingContext2D::drawImage(const CanvasImageSourceUnion& imageSour
     float x, float y, float width, float height, ExceptionState& exceptionState)
 {
     CanvasImageSource* imageSourceInternal = toImageSourceInternal(imageSource);
-    FloatSize sourceRectSize = imageSourceInternal->sourceSize();
+    FloatSize sourceRectSize = imageSourceInternal->elementSize();
     drawImage(imageSourceInternal, 0, 0, sourceRectSize.width(), sourceRectSize.height(), x, y, width, height, exceptionState);
 }
 
@@ -1359,6 +1358,9 @@ void CanvasRenderingContext2D::drawImage(CanvasImageSource* imageSource,
             exceptionState.throwDOMException(InvalidStateError, "The HTMLImageElement provided is in the 'broken' state.");
         if (!image || !image->width() || !image->height())
             return;
+    } else {
+        if (!static_cast<HTMLVideoElement*>(imageSource)->hasAvailableVideoFrame())
+            return;
     }
 
     if (!std::isfinite(dx) || !std::isfinite(dy) || !std::isfinite(dw) || !std::isfinite(dh)
@@ -1369,7 +1371,7 @@ void CanvasRenderingContext2D::drawImage(CanvasImageSource* imageSource,
     FloatRect srcRect = normalizeRect(FloatRect(sx, sy, sw, sh));
     FloatRect dstRect = normalizeRect(FloatRect(dx, dy, dw, dh));
 
-    clipRectsToImageRect(FloatRect(FloatPoint(), imageSource->sourceSize()), &srcRect, &dstRect);
+    clipRectsToImageRect(FloatRect(FloatPoint(), imageSource->elementSize()), &srcRect, &dstRect);
 
     imageSource->adjustDrawRects(&srcRect, &dstRect);
 
@@ -1403,7 +1405,15 @@ void CanvasRenderingContext2D::drawImage(CanvasImageSource* imageSource,
 
     validateStateStack();
 
-    if (ExpensiveCanvasHeuristicParameters::SVGImageSourcesAreExpensive && image && image->isSVGImage()) {
+    bool isExpensive = false;
+
+    if (ExpensiveCanvasHeuristicParameters::SVGImageSourcesAreExpensive && image && image->isSVGImage())
+        isExpensive = true;
+
+    if (imageSource->elementSize().width() * imageSource->elementSize().height() > canvas()->width() * canvas()->height() * ExpensiveCanvasHeuristicParameters::ExpensiveImageSizeRatio)
+        isExpensive = true;
+
+    if (isExpensive) {
         ImageBuffer* buffer = canvas()->buffer();
         if (buffer)
             buffer->setHasExpensiveOp();
@@ -1463,7 +1473,7 @@ PassRefPtrWillBeRawPtr<CanvasPattern> CanvasRenderingContext2D::createPattern(co
     case NormalSourceImageStatus:
         break;
     case ZeroSizeCanvasSourceImageStatus:
-        exceptionState.throwDOMException(InvalidStateError, String::format("The canvas %s is 0.", imageSourceInternal->sourceSize().width() ? "height" : "width"));
+        exceptionState.throwDOMException(InvalidStateError, String::format("The canvas %s is 0.", imageSourceInternal->elementSize().width() ? "height" : "width"));
         return nullptr;
     case UndecodableSourceImageStatus:
         exceptionState.throwDOMException(InvalidStateError, "Source image is in the 'broken' state.");
@@ -1543,12 +1553,12 @@ GraphicsContext* CanvasRenderingContext2D::drawingContext() const
     return canvas()->drawingContext();
 }
 
-PassRefPtrWillBeRawPtr<ImageData> CanvasRenderingContext2D::createImageData(PassRefPtrWillBeRawPtr<ImageData> imageData) const
+ImageData* CanvasRenderingContext2D::createImageData(ImageData* imageData) const
 {
     return ImageData::create(imageData->size());
 }
 
-PassRefPtrWillBeRawPtr<ImageData> CanvasRenderingContext2D::createImageData(float sw, float sh, ExceptionState& exceptionState) const
+ImageData* CanvasRenderingContext2D::createImageData(float sw, float sh, ExceptionState& exceptionState) const
 {
     if (!sw || !sh) {
         exceptionState.throwDOMException(IndexSizeError, String::format("The source %s is 0.", sw ? "height" : "width"));
@@ -1568,7 +1578,7 @@ PassRefPtrWillBeRawPtr<ImageData> CanvasRenderingContext2D::createImageData(floa
     return ImageData::create(size);
 }
 
-PassRefPtrWillBeRawPtr<ImageData> CanvasRenderingContext2D::getImageData(float sx, float sy, float sw, float sh, ExceptionState& exceptionState) const
+ImageData* CanvasRenderingContext2D::getImageData(float sx, float sy, float sw, float sh, ExceptionState& exceptionState) const
 {
     if (!canvas()->originClean())
         exceptionState.throwSecurityError("The canvas has been tainted by cross-origin data.");
@@ -1699,8 +1709,7 @@ void CanvasRenderingContext2D::setFont(const String& newFont)
         m_fetchedFontsLRUList.remove(newFont);
     } else {
         parsedStyle = MutableStylePropertySet::create();
-        CSSParserMode mode = m_usesCSSCompatibilityParseMode ? HTMLQuirksMode : HTMLStandardMode;
-        CSSParser::parseValue(parsedStyle.get(), CSSPropertyFont, newFont, true, mode, 0);
+        CSSParser::parseValue(parsedStyle.get(), CSSPropertyFont, newFont, true, HTMLStandardMode, 0);
         if (m_fetchedFonts.size() >= FetchedFontsCacheLimit) {
             m_fetchedFonts.remove(m_fetchedFontsLRUList.first());
             m_fetchedFontsLRUList.removeFirst();
@@ -1727,7 +1736,7 @@ void CanvasRenderingContext2D::setFont(const String& newFont)
     // Map the <canvas> font into the text style. If the font uses keywords like larger/smaller, these will work
     // relative to the canvas.
     RefPtr<ComputedStyle> newStyle = ComputedStyle::create();
-    canvas()->document().updateRenderTreeIfNeeded();
+    canvas()->document().updateLayoutTreeIfNeeded();
     if (const ComputedStyle* computedStyle = canvas()->ensureComputedStyle()) {
         FontDescription elementFontDescription(computedStyle->fontDescription());
         // Reset the computed size to avoid inheriting the zoom factor from the <canvas> element.
@@ -1747,18 +1756,7 @@ void CanvasRenderingContext2D::setFont(const String& newFont)
 
     newStyle->font().update(newStyle->font().fontSelector());
 
-    // Now map the font property longhands into the style.
-    CSSPropertyValue properties[] = {
-        CSSPropertyValue(CSSPropertyFontFamily, *parsedStyle),
-        CSSPropertyValue(CSSPropertyFontStyle, *parsedStyle),
-        CSSPropertyValue(CSSPropertyFontVariant, *parsedStyle),
-        CSSPropertyValue(CSSPropertyFontWeight, *parsedStyle),
-        CSSPropertyValue(CSSPropertyFontSize, *parsedStyle),
-        CSSPropertyValue(CSSPropertyLineHeight, *parsedStyle),
-    };
-
-    StyleResolver& styleResolver = canvas()->document().ensureStyleResolver();
-    styleResolver.applyPropertiesToStyle(properties, WTF_ARRAY_LENGTH(properties), newStyle.get());
+    canvas()->document().ensureStyleResolver().computeFont(newStyle.get(), *parsedStyle);
 
     modifiableState().setFont(newStyle->font(), canvas()->document().styleEngine().fontSelector());
 }
@@ -1815,7 +1813,7 @@ static inline TextDirection toTextDirection(CanvasRenderingContext2DState::Direc
 String CanvasRenderingContext2D::direction() const
 {
     if (state().direction() == CanvasRenderingContext2DState::DirectionInherit)
-        canvas()->document().updateRenderTreeIfNeeded();
+        canvas()->document().updateLayoutTreeIfNeeded();
     return toTextDirection(state().direction(), canvas()) == RTL ? rtl : ltr;
 }
 
@@ -1866,7 +1864,7 @@ PassRefPtrWillBeRawPtr<TextMetrics> CanvasRenderingContext2D::measureText(const 
     if (!canvas()->document().frame())
         return metrics.release();
 
-    canvas()->document().updateRenderTreeIfNeeded();
+    canvas()->document().updateLayoutTreeIfNeeded();
     const Font& font = accessFont();
 
     TextDirection direction;
@@ -1913,7 +1911,7 @@ void CanvasRenderingContext2D::drawTextInternal(const String& text, float x, flo
     // accessFont needs the style to be up to date, but updating style can cause script to run,
     // (e.g. due to autofocus) which can free the canvas (set size to 0, for example), so update
     // style before grabbing the drawingCanvas.
-    canvas()->document().updateRenderTreeIfNeeded();
+    canvas()->document().updateLayoutTreeIfNeeded();
 
     if (!drawingCanvas())
         return;

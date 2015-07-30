@@ -19,9 +19,7 @@ DOMWindowStorageController::DOMWindowStorageController(Document& document)
 {
 }
 
-DOMWindowStorageController::~DOMWindowStorageController()
-{
-}
+DEFINE_EMPTY_DESTRUCTOR_WILL_BE_REMOVED(DOMWindowStorageController);
 
 DEFINE_TRACE(DOMWindowStorageController)
 {
@@ -42,7 +40,7 @@ DOMWindowStorageController& DOMWindowStorageController::from(Document& document)
     DOMWindowStorageController* controller = static_cast<DOMWindowStorageController*>(WillBeHeapSupplement<Document>::from(document, supplementName()));
     if (!controller) {
         controller = new DOMWindowStorageController(document);
-        DocumentSupplement::provideTo(document, supplementName(), adoptPtrWillBeNoop(controller));
+        WillBeHeapSupplement<Document>::provideTo(document, supplementName(), adoptPtrWillBeNoop(controller));
     }
     return *controller;
 }

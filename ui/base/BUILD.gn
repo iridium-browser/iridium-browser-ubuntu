@@ -141,8 +141,6 @@ component("base") {
     "dragdrop/os_exchange_data_provider_mac.mm",
     "dragdrop/os_exchange_data_provider_win.cc",
     "dragdrop/os_exchange_data_provider_win.h",
-    "font_helper_chromeos.cc",
-    "font_helper_chromeos.h",
     "hit_test.h",
     "idle/idle.cc",
     "idle/idle.h",
@@ -684,6 +682,9 @@ test("ui_base_unittests") {
       "ime/win/imm32_manager_unittest.cc",
       "ime/win/tsf_input_scope_unittest.cc",
     ]
+    if (is_linux && use_aura && !is_chromeos) {
+      sources += [ "ime/input_method_auralinux_unittest.cc" ]
+    }
     if (use_x11) {
       sources += [ "ime/composition_text_util_pango_unittest.cc" ]
     }
@@ -799,7 +800,7 @@ test("ui_base_unittests") {
   if (is_chromeos) {
     deps += [
       "//chromeos",
-      "//ui/events:dom4_keycode_converter",
+      "//ui/events:dom_keycode_converter",
     ]
   }
 }

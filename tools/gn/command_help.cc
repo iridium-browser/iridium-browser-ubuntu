@@ -13,6 +13,7 @@
 #include "tools/gn/input_conversion.h"
 #include "tools/gn/label_pattern.h"
 #include "tools/gn/parser.h"
+#include "tools/gn/runtime_deps.h"
 #include "tools/gn/setup.h"
 #include "tools/gn/standard_out.h"
 #include "tools/gn/substitution_writer.h"
@@ -57,25 +58,76 @@ void PrintToplevelHelp() {
     PrintShortHelp(target.second.help_short);
 
   OutputString("\nOther help topics:\n");
+  PrintShortHelp("all: Print all the help at once");
   PrintShortHelp("buildargs: How build arguments work.");
   PrintShortHelp("dotfile: Info about the toplevel .gn file.");
   PrintShortHelp("grammar: Formal grammar for GN build files.");
-  PrintShortHelp("label_pattern: Matching more than one label.");
   PrintShortHelp(
       "input_conversion: Processing input from exec_script and read_file.");
+  PrintShortHelp("label_pattern: Matching more than one label.");
+  PrintShortHelp("runtime_deps: How runtime dependency computation works.");
   PrintShortHelp("source_expansion: Map sources to outputs for scripts.");
   PrintShortHelp("switches: Show available command-line switches.");
 }
 
 void PrintSwitchHelp() {
+  const base::CommandLine* cmdline = base::CommandLine::ForCurrentProcess();
+  bool use_markdown = cmdline->HasSwitch(switches::kMarkdown);
+
   OutputString("Available global switches\n", DECORATION_YELLOW);
   OutputString(
       "  Do \"gn help --the_switch_you_want_help_on\" for more. Individual\n"
       "  commands may take command-specific switches not listed here. See the\n"
       "  help on your specific command for more.\n\n");
 
+  if (use_markdown)
+    OutputString("```\n\n", DECORATION_NONE);
+
   for (const auto& s : switches::GetSwitches())
     PrintShortHelp(s.second.short_help);
+
+  if (use_markdown)
+    OutputString("\n```\n", DECORATION_NONE);
+}
+
+void PrintAllHelp() {
+  const base::CommandLine* cmdline = base::CommandLine::ForCurrentProcess();
+  if (cmdline->HasSwitch(switches::kMarkdown)) {
+    OutputString("# GN Reference\n\n");
+
+    // TODO: https://code.google.com/p/gitiles/issues/detail?id=75
+    // Gitiles crashes when rendering the table of contents, so we must omit
+    // it until the bug is fixed.
+    // OutputString("[TOC]\n\n");
+    OutputString("*This page is automatically generated from* "
+                 "`gn help --markdown all`.\n\n");
+  } else {
+    PrintToplevelHelp();
+  }
+
+  for (const auto& s : switches::GetSwitches())
+    PrintLongHelp(s.second.long_help);
+
+  for (const auto& c: commands::GetCommands())
+    PrintLongHelp(c.second.help);
+
+  for (const auto& f: functions::GetFunctions())
+    PrintLongHelp(f.second.help);
+
+  for (const auto& v: variables::GetBuiltinVariables())
+    PrintLongHelp(v.second.help);
+
+  for (const auto& v: variables::GetTargetVariables())
+    PrintLongHelp(v.second.help);
+
+  PrintLongHelp(kBuildArgs_Help);
+  PrintLongHelp(kDotfile_Help);
+  PrintLongHelp(kGrammar_Help);
+  PrintLongHelp(kInputConversion_Help);
+  PrintLongHelp(kLabelPattern_Help);
+  PrintLongHelp(kRuntimeDeps_Help);
+  PrintLongHelp(kSourceExpansion_Help);
+  PrintSwitchHelp();
 }
 
 // Prints help on the given switch. There should be no leading hyphens. Returns
@@ -163,6 +215,10 @@ int RunHelp(const std::vector<std::string>& args) {
   }
 
   // Random other topics.
+  if (what == "all") {
+    PrintAllHelp();
+    return 0;
+  }
   if (what == "buildargs") {
     PrintLongHelp(kBuildArgs_Help);
     return 0;
@@ -181,6 +237,10 @@ int RunHelp(const std::vector<std::string>& args) {
   }
   if (what == "label_pattern") {
     PrintLongHelp(kLabelPattern_Help);
+    return 0;
+  }
+  if (what == "runtime_deps") {
+    PrintLongHelp(kRuntimeDeps_Help);
     return 0;
   }
   if (what == "source_expansion") {

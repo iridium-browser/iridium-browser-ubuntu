@@ -15,8 +15,9 @@ import unittest
 
 from chromite.cbuildbot import commands
 from chromite.cbuildbot import constants
-from chromite.cbuildbot import cbuildbot_config as config
+from chromite.cbuildbot import cbuildbot_config
 from chromite.cbuildbot import failures_lib
+from chromite.cbuildbot import generate_chromeos_config
 from chromite.cbuildbot import results_lib
 from chromite.cbuildbot import cbuildbot_run
 from chromite.cbuildbot.stages import generic_stages
@@ -41,8 +42,8 @@ DEFAULT_BUILD_STAGE_ID = 313377
 
 # The inheritence order ensures the patchers are stopped before
 # cleaning up the temporary directories.
-class StageTest(cros_test_lib.MockOutputTestCase,
-                cros_test_lib.TempDirTestCase):
+class StageTestCase(cros_test_lib.MockOutputTestCase,
+                    cros_test_lib.TempDirTestCase):
   """Test running a single stage in isolation."""
 
   TARGET_MANIFEST_BRANCH = 'ooga_booga'
@@ -83,7 +84,7 @@ class StageTest(cros_test_lib.MockOutputTestCase,
 
     This will populate the following attributes on self:
       run: A BuilderRun object.
-      bot_id: The bot id (name) that was used from config.config.
+      bot_id: The bot id (name) that was used from cbuildbot_config.GetConfig().
       self._boards: Same as self._run.config.boards.  TODO(mtennant): remove.
       self._current_board: First board in list, if there is one.
 
@@ -126,12 +127,13 @@ class StageTest(cros_test_lib.MockOutputTestCase,
     cbuildbot._FinishParsing(options, args)
 
     # Populate build_config corresponding to self._bot_id.
-    build_config = copy.deepcopy(config.config[self._bot_id])
+    build_config = copy.deepcopy(cbuildbot_config.GetConfig()[self._bot_id])
     build_config['manifest_repo_url'] = 'fake_url'
     if extra_config:
       build_config.update(extra_config)
     if options.remote_trybot:
-      build_config = config.OverrideConfigForTrybot(build_config, options)
+      build_config = generate_chromeos_config.OverrideConfigForTrybot(
+          build_config, options)
     options.managed_chrome = build_config['sync_chrome']
 
     self._boards = build_config['boards']
@@ -209,7 +211,7 @@ class StageTest(cros_test_lib.MockOutputTestCase,
       self.fail('%s raised instead of %s' % (e, exception))
 
 
-class AbstractStageTest(StageTest):
+class AbstractStageTestCase(StageTestCase):
   """Base class for tests that test a particular build stage.
 
   Abstract base class that sets up the build config and options with some
@@ -258,7 +260,7 @@ def patches(*args):
     yield
 
 
-class BuilderStageTest(AbstractStageTest):
+class BuilderStageTest(AbstractStageTestCase):
   """Tests for BuilderStage class."""
 
   def setUp(self):
@@ -419,7 +421,7 @@ class BuilderStageTest(AbstractStageTest):
         constants.BUILDER_STATUS_FAILED)
 
 
-class BoardSpecificBuilderStageTest(AbstractStageTest):
+class BoardSpecificBuilderStageTest(AbstractStageTestCase):
   """Tests option/config settings on board-specific stages."""
 
   DEFAULT_BOARD_NAME = 'my_shiny_test_board'
@@ -456,8 +458,8 @@ class BoardSpecificBuilderStageTest(AbstractStageTest):
   #                    'cbuildbot_config._settings') % (attr, obj.config_name))
 
 
-class RunCommandAbstractStageTest(AbstractStageTest,
-                                  cros_build_lib_unittest.RunCommandTestCase):
+class RunCommandAbstractStageTestCase(
+    AbstractStageTestCase, cros_build_lib_unittest.RunCommandTestCase):
   """Base test class for testing a stage and mocking RunCommand."""
 
   # pylint: disable=abstract-method
@@ -466,7 +468,7 @@ class RunCommandAbstractStageTest(AbstractStageTest,
   BIN_BOT_ID = 'x86-generic-paladin'
 
   def _Prepare(self, bot_id, **kwargs):
-    super(RunCommandAbstractStageTest, self)._Prepare(bot_id, **kwargs)
+    super(RunCommandAbstractStageTestCase, self)._Prepare(bot_id, **kwargs)
 
   def _PrepareFull(self, **kwargs):
     self._Prepare(self.FULL_BOT_ID, **kwargs)

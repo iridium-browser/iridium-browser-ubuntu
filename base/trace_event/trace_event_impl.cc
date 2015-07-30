@@ -5,17 +5,17 @@
 #include "base/trace_event/trace_event_impl.h"
 
 #include <algorithm>
+#include <cmath>
 
 #include "base/base_switches.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/debug/leak_annotations.h"
-#include "base/float_util.h"
 #include "base/format_macros.h"
 #include "base/json/string_escape.h"
 #include "base/lazy_instance.h"
+#include "base/location.h"
 #include "base/memory/singleton.h"
-#include "base/message_loop/message_loop.h"
 #include "base/process/process_metrics.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
@@ -28,6 +28,7 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/sys_info.h"
 #include "base/third_party/dynamic_annotations/dynamic_annotations.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread_id_name_manager.h"
 #include "base/threading/worker_pool.h"
@@ -36,6 +37,7 @@
 #include "base/trace_event/trace_event_synthetic_delay.h"
 
 #if defined(OS_WIN)
+#include "base/trace_event/trace_event_etw_export_win.h"
 #include "base/trace_event/trace_event_win.h"
 #endif
 
@@ -646,7 +648,7 @@ void TraceEvent::AppendValueAsJSON(unsigned char type,
       //        should be made into a common method.
       std::string real;
       double val = value.as_double;
-      if (IsFinite(val)) {
+      if (std::isfinite(val)) {
         real = DoubleToString(val);
         // Ensure that the number has a .0 if there's no decimal or 'e'.  This
         // makes sure that when we read the JSON back, it's interpreted as a
@@ -664,7 +666,7 @@ void TraceEvent::AppendValueAsJSON(unsigned char type,
           // "-.1" bad "-0.1" good
           real.insert(1, "0");
         }
-      } else if (IsNaN(val)){
+      } else if (std::isnan(val)){
         // The JSON spec doesn't allow NaN and Infinity (since these are
         // objects in EcmaScript).  Use strings instead.
         real = "\"NaN\"";
@@ -738,6 +740,11 @@ void TraceEvent::AppendAsJSON(std::string* out) const {
   if (!thread_timestamp_.is_null()) {
     int64 thread_time_int64 = thread_timestamp_.ToInternalValue();
     StringAppendF(out, ",\"tts\":%" PRId64, thread_time_int64);
+  }
+
+  // Output async tts marker field if flag is set.
+  if (flags_ & TRACE_EVENT_FLAG_ASYNC_TTS) {
+    StringAppendF(out, ", \"use_async_tts\":1");
   }
 
   // If id_ is set, print it out as a hex string so we don't loose any
@@ -1292,6 +1299,11 @@ void TraceLog::UpdateCategoryGroupEnabledFlag(size_t category_index) {
   if (event_callback_ &&
       event_callback_category_filter_.IsCategoryGroupEnabled(category_group))
     enabled_flag |= ENABLED_FOR_EVENT_CALLBACK;
+#if defined(OS_WIN)
+  if (base::trace_event::TraceEventETWExport::isETWExportEnabled())
+    enabled_flag |= ENABLED_FOR_ETW_EXPORT;
+#endif
+
   g_category_group_enabled[category_index] = enabled_flag;
 }
 
@@ -1400,7 +1412,7 @@ void TraceLog::SetEnabled(const CategoryFilter& category_filter,
     AutoLock lock(lock_);
 
     // Can't enable tracing when Flush() is in progress.
-    DCHECK(!flush_message_loop_proxy_.get());
+    DCHECK(!flush_task_runner_);
 
     InternalTraceOptions new_options =
         GetInternalOptionsFromTraceOptions(options);
@@ -1674,9 +1686,9 @@ void TraceLog::SetEventCallbackDisabled() {
 }
 
 // Flush() works as the following:
-// 1. Flush() is called in threadA whose message loop is saved in
-//    flush_message_loop_proxy_;
-// 2. If thread_message_loops_ is not empty, threadA posts task to each message
+// 1. Flush() is called in thread A whose task runner is saved in
+//    flush_task_runner_;
+// 2. If thread_message_loops_ is not empty, thread A posts task to each message
 //    loop to flush the thread local buffers; otherwise finish the flush;
 // 3. FlushCurrentThread() deletes the thread local event buffer:
 //    - The last batch of events of the thread are flushed into the main buffer;
@@ -1704,9 +1716,11 @@ void TraceLog::Flush(const TraceLog::OutputCallback& cb,
       thread_message_loop_task_runners;
   {
     AutoLock lock(lock_);
-    DCHECK(!flush_message_loop_proxy_.get());
-    flush_message_loop_proxy_ = MessageLoopProxy::current();
-    DCHECK(!thread_message_loops_.size() || flush_message_loop_proxy_.get());
+    DCHECK(!flush_task_runner_);
+    flush_task_runner_ = ThreadTaskRunnerHandle::IsSet()
+                             ? ThreadTaskRunnerHandle::Get()
+                             : nullptr;
+    DCHECK_IMPLIES(thread_message_loops_.size(), flush_task_runner_);
     flush_output_callback_ = cb;
 
     if (thread_shared_chunk_) {
@@ -1729,7 +1743,7 @@ void TraceLog::Flush(const TraceLog::OutputCallback& cb,
           FROM_HERE,
           Bind(&TraceLog::FlushCurrentThread, Unretained(this), generation));
     }
-    flush_message_loop_proxy_->PostDelayedTask(
+    flush_task_runner_->PostDelayedTask(
         FROM_HERE,
         Bind(&TraceLog::OnFlushTimeout, Unretained(this), generation),
         TimeDelta::FromMilliseconds(kThreadFlushTimeoutMs));
@@ -1783,7 +1797,7 @@ void TraceLog::FinishFlush(int generation) {
     UseNextTraceBuffer();
     thread_message_loops_.clear();
 
-    flush_message_loop_proxy_ = NULL;
+    flush_task_runner_ = NULL;
     flush_output_callback = flush_output_callback_;
     flush_output_callback_.Reset();
   }
@@ -1806,7 +1820,7 @@ void TraceLog::FinishFlush(int generation) {
 void TraceLog::FlushCurrentThread(int generation) {
   {
     AutoLock lock(lock_);
-    if (!CheckGeneration(generation) || !flush_message_loop_proxy_.get()) {
+    if (!CheckGeneration(generation) || !flush_task_runner_) {
       // This is late. The corresponding flush has finished.
       return;
     }
@@ -1816,19 +1830,18 @@ void TraceLog::FlushCurrentThread(int generation) {
   delete thread_local_event_buffer_.Get();
 
   AutoLock lock(lock_);
-  if (!CheckGeneration(generation) || !flush_message_loop_proxy_.get() ||
+  if (!CheckGeneration(generation) || !flush_task_runner_ ||
       thread_message_loops_.size())
     return;
 
-  flush_message_loop_proxy_->PostTask(
-      FROM_HERE,
-      Bind(&TraceLog::FinishFlush, Unretained(this), generation));
+  flush_task_runner_->PostTask(
+      FROM_HERE, Bind(&TraceLog::FinishFlush, Unretained(this), generation));
 }
 
 void TraceLog::OnFlushTimeout(int generation) {
   {
     AutoLock lock(lock_);
-    if (!CheckGeneration(generation) || !flush_message_loop_proxy_.get()) {
+    if (!CheckGeneration(generation) || !flush_task_runner_) {
       // Flush has finished before timeout.
       return;
     }
@@ -1921,7 +1934,7 @@ TraceEventHandle TraceLog::AddTraceEventWithThreadIdAndTimestamp(
   DCHECK(!timestamp.is_null());
 
   if (flags & TRACE_EVENT_FLAG_MANGLE_ID)
-    id ^= process_id_hash_;
+    id = MangleEventId(id);
 
   TimeTicks offset_event_timestamp = OffsetTimestamp(timestamp);
   TimeTicks now = flags & TRACE_EVENT_FLAG_EXPLICIT_TIMESTAMP ?
@@ -1983,6 +1996,15 @@ TraceEventHandle TraceLog::AddTraceEventWithThreadIdAndTimestamp(
       }
     }
   }
+
+#if defined(OS_WIN)
+  // This is done sooner rather than later, to avoid creating the event and
+  // acquiring the lock, which is not needed for ETW as it's already threadsafe.
+  if (*category_group_enabled & ENABLED_FOR_ETW_EXPORT)
+    TraceEventETWExport::AddEvent(phase, category_group_enabled, name, id,
+                                  num_args, arg_names, arg_types, arg_values,
+                                  convertable_values);
+#endif  // OS_WIN
 
   std::string console_message;
   if (*category_group_enabled &
@@ -2188,6 +2210,10 @@ void TraceLog::CancelWatchEvent() {
   subtle::NoBarrier_Store(&watch_category_, 0);
   watch_event_name_ = "";
   watch_event_callback_.Reset();
+}
+
+uint64 TraceLog::MangleEventId(uint64 id) {
+  return id ^ process_id_hash_;
 }
 
 void TraceLog::AddMetadataEventsWhileLocked() {

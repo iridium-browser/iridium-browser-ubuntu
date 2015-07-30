@@ -9,6 +9,22 @@
 #define SkGeometry_DEFINED
 
 #include "SkMatrix.h"
+#include "SkNx.h"
+
+static inline Sk2s from_point(const SkPoint& point) {
+    return Sk2s::Load(&point.fX);
+}
+
+static inline SkPoint to_point(const Sk2s& x) {
+    SkPoint point;
+    x.store(&point.fX);
+    return point;
+}
+
+static inline Sk2s sk2s_cubic_eval(const Sk2s& A, const Sk2s& B, const Sk2s& C, const Sk2s& D,
+                                   const Sk2s& t) {
+    return ((A * t + B) * t + C) * t + D;
+}
 
 /** Given a quadratic equation Ax^2 + Bx + C = 0, return 0, 1, 2 roots for the
     equation.
@@ -24,6 +40,16 @@ SkPoint SkEvalQuadTangentAt(const SkPoint src[3], SkScalar t);
     0 <= t <= 1.0
 */
 void SkEvalQuadAt(const SkPoint src[3], SkScalar t, SkPoint* pt, SkVector* tangent = NULL);
+
+/**
+ *  output is : eval(t) == coeff[0] * t^2 + coeff[1] * t + coeff[2]
+ */
+void SkQuadToCoeff(const SkPoint pts[3], SkPoint coeff[3]);
+
+/**
+ *  output is : eval(t) == coeff[0] * t^3 + coeff[1] * t^2 + coeff[2] * t + coeff[3]
+ */
+void SkCubicToCoeff(const SkPoint pts[4], SkPoint coeff[4]);
 
 /** Given a src quadratic bezier, chop it at the specified t value,
     where 0 < t < 1, and return the two new quadratics in dst:
@@ -77,11 +103,6 @@ int SkChopQuadAtMaxCurvature(const SkPoint src[3], SkPoint dst[5]);
 SK_API void SkConvertQuadToCubic(const SkPoint src[3], SkPoint dst[4]);
 
 ///////////////////////////////////////////////////////////////////////////////
-
-/** Convert from parametric from (pts) to polynomial coefficients
-    coeff[0]*T^3 + coeff[1]*T^2 + coeff[2]*T + coeff[3]
-*/
-void SkGetCubicCoeff(const SkPoint pts[4], SkScalar cx[4], SkScalar cy[4]);
 
 /** Set pt to the point on the src cubic specified by t. t must be
     0 <= t <= 1.0
@@ -144,6 +165,9 @@ int SkChopCubicAtInflections(const SkPoint src[4], SkPoint dst[10]);
 int SkFindCubicMaxCurvature(const SkPoint src[4], SkScalar tValues[3]);
 int SkChopCubicAtMaxCurvature(const SkPoint src[4], SkPoint dst[13],
                               SkScalar tValues[3] = NULL);
+
+bool SkChopMonoCubicAtX(SkPoint src[4], SkScalar y, SkPoint dst[7]);
+bool SkChopMonoCubicAtY(SkPoint src[4], SkScalar x, SkPoint dst[7]);
 
 enum SkCubicType {
     kSerpentine_SkCubicType,

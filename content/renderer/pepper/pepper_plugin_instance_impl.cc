@@ -367,11 +367,11 @@ void InitLatencyInfo(ui::LatencyInfo* new_latency,
                      const ui::LatencyInfo* old_latency,
                      blink::WebInputEvent::Type type,
                      int64 input_sequence) {
-  new_latency->AddLatencyNumber(
+  new_latency->AddLatencyNumberWithTraceName(
       ui::INPUT_EVENT_LATENCY_BEGIN_PLUGIN_COMPONENT,
       0,
-      input_sequence);
-  new_latency->TraceEventType(WebInputEventTraits::GetName(type));
+      input_sequence,
+      WebInputEventTraits::GetName(type));
   if (old_latency) {
     new_latency->CopyLatencyFrom(*old_latency,
                                  ui::INPUT_EVENT_LATENCY_ORIGINAL_COMPONENT);
@@ -643,16 +643,16 @@ void PepperPluginInstanceImpl::MessageChannelDestroyed() {
 
 v8::Local<v8::Context> PepperPluginInstanceImpl::GetMainWorldContext() {
   if (!container_)
-    return v8::Handle<v8::Context>();
+    return v8::Local<v8::Context>();
 
   if (container_->element().isNull())
-    return v8::Handle<v8::Context>();
+    return v8::Local<v8::Context>();
 
   if (container_->element().document().isNull())
-    return v8::Handle<v8::Context>();
+    return v8::Local<v8::Context>();
 
   if (!container_->element().document().frame())
-    return v8::Handle<v8::Context>();
+    return v8::Local<v8::Context>();
 
   v8::Local<v8::Context> context =
       container_->element().document().frame()->mainWorldScriptContext();
@@ -670,12 +670,19 @@ void PepperPluginInstanceImpl::Delete() {
 
   // Keep a reference on the stack. See NOTE above.
   scoped_refptr<PepperPluginInstanceImpl> ref(this);
+
+  // It is important to destroy the throttler before anything else.
+  // The plugin instance may flush its graphics pipeline during its postmortem
+  // spasm, causing the throttler to engage and obtain new dangling reference
+  // to the plugin container being destroyed.
+  throttler_.reset();
+
   // Force the MessageChannel to release its "passthrough object" which should
   // release our last reference to the "InstanceObject" and will probably
   // destroy it. We want to do this prior to calling DidDestroy in case the
   // destructor of the instance object tries to use the instance.
   if (message_channel_)
-    message_channel_->SetPassthroughObject(v8::Handle<v8::Object>());
+    message_channel_->SetPassthroughObject(v8::Local<v8::Object>());
   // If this is a NaCl plugin instance, shut down the NaCl plugin by calling
   // its DidDestroy. Don't call DidDestroy on the untrusted plugin instance,
   // since there is little that it can do at this point.
@@ -1263,7 +1270,7 @@ void PepperPluginInstanceImpl::ViewChanged(
     WebDocument document = element.document();
     bool is_fullscreen_element = (element == document.fullScreenElement());
     if (!view_data_.is_fullscreen && desired_fullscreen_state_ &&
-        render_frame()->GetRenderWidget()->is_fullscreen() &&
+        render_frame()->GetRenderWidget()->is_fullscreen_granted() &&
         is_fullscreen_element) {
       // Entered fullscreen. Only possible via SetFullscreen().
       view_data_.is_fullscreen = true;
@@ -2031,7 +2038,10 @@ void PepperPluginInstanceImpl::UpdateLayer(bool device_changed) {
     else if (fullscreen_container_)
       fullscreen_container_->SetLayer(NULL);
     web_layer_.reset();
-    texture_layer_ = NULL;
+    if (texture_layer_) {
+      texture_layer_->ClearClient();
+      texture_layer_ = NULL;
+    }
     compositor_layer_ = NULL;
   }
 
@@ -2408,7 +2418,7 @@ PP_Var PepperPluginInstanceImpl::ExecuteScript(PP_Instance instance,
   std::string script_string = script_string_var->value();
   blink::WebScriptSource script(
       blink::WebString::fromUTF8(script_string.c_str()));
-  v8::Handle<v8::Value> result;
+  v8::Local<v8::Value> result;
   if (IsProcessingUserGesture()) {
     blink::WebScopedUserGesture user_gesture(CurrentUserGestureToken());
     result = frame->executeScriptAndReturnValue(script);
@@ -2617,8 +2627,19 @@ PP_Bool PepperPluginInstanceImpl::SetFullscreen(PP_Instance instance,
 
 PP_Bool PepperPluginInstanceImpl::GetScreenSize(PP_Instance instance,
                                                 PP_Size* size) {
-  blink::WebScreenInfo info = render_frame()->GetRenderWidget()->screenInfo();
-  *size = PP_MakeSize(info.rect.width, info.rect.height);
+  if (flash_fullscreen_) {
+    // Workaround for Flash rendering bug: Flash is assuming the fullscreen view
+    // size will be equal to the physical screen size.  However, the fullscreen
+    // view is sized by the browser UI, and may not be the same size as the
+    // screen or the desktop.  Therefore, report the view size as the screen
+    // size when in fullscreen mode.  http://crbug.com/506016
+    // TODO(miu): Remove this workaround once Flash has been fixed.
+    *size = view_data_.rect.size;
+  } else {
+    // All other cases: Report the screen size.
+    blink::WebScreenInfo info = render_frame()->GetRenderWidget()->screenInfo();
+    *size = PP_MakeSize(info.rect.width, info.rect.height);
+  }
   return PP_TRUE;
 }
 
@@ -3233,6 +3254,11 @@ void PepperPluginInstanceImpl::KeepSizeAttributesBeforeFullscreen() {
 void PepperPluginInstanceImpl::SetSizeAttributesForFullscreen() {
   if (!render_frame_)
     return;
+
+  // TODO(miu): Revisit this logic.  If the style must be modified for correct
+  // behavior, the width and height should probably be set to 100%, rather than
+  // a fixed screen size.
+
   blink::WebScreenInfo info = render_frame_->GetRenderWidget()->screenInfo();
   screen_size_for_fullscreen_ = gfx::Size(info.rect.width, info.rect.height);
   std::string width = StringPrintf("%d", screen_size_for_fullscreen_.width());

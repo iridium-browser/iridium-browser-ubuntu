@@ -21,12 +21,12 @@ class TestTaskExecutionTimePage(page_module.Page):
         'file://blank.html', page_set, base_dir)
 
   def RunPageInteractions(self, action_runner):
-    interaction = action_runner.BeginGestureInteraction(
-        'ScrollAction')
-    action_runner.ScrollPage()
-    interaction.End()
+    with action_runner.CreateGestureInteraction('ScrollAction'):
+      action_runner.ScrollPage()
 
 
+# Disable for accessing private API of task_execution_time.
+# pylint: disable=protected-access
 class TaskExecutionTimeUnitTest(page_test_test_case.PageTestTestCase):
 
   def setUp(self):
@@ -161,7 +161,7 @@ class TaskExecutionTimeUnitTest(page_test_test_case.PageTestTestCase):
       data.AddSlice('task' + str(duration), 0, duration)
 
     # Run the code we are testing.
-    self._measurement.ValidateAndMeasurePage(None, None, data.results)
+    self._measurement._AddResults(data.results)
 
     # Check that the last (i.e. biggest) _NUMBER_OF_RESULTS_TO_DISPLAY get
     # returned in the results.
@@ -187,7 +187,7 @@ class TaskExecutionTimeUnitTest(page_test_test_case.PageTestTestCase):
     data.AddSlice('slow', 0, 1000)
 
     # Run the code we are testing and return results.
-    self._measurement.ValidateAndMeasurePage(None, None, data.results)
+    self._measurement._AddResults(data.results)
     return data
 
   def _GenerateResultsFromMockedIdleData(self):
@@ -217,7 +217,7 @@ class TaskExecutionTimeUnitTest(page_test_test_case.PageTestTestCase):
     data.AddSlice('not_idle', slice_start_time, fast_slice_duration)
 
     # Run the code we are testing.
-    self._measurement.ValidateAndMeasurePage(None, None, data.results)
+    self._measurement._AddResults(data.results)
 
     return data
 

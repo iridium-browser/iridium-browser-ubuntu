@@ -16,6 +16,7 @@
 namespace nacl {
 class JsonManifest;
 class NexeLoadManager;
+struct NaClResourcePrefetchRequest;
 
 class JsonManifest {
  public:
@@ -43,7 +44,7 @@ class JsonManifest {
   // Gets all the keys and their URLs in the "files" section that are
   // prefetchable.
   void GetPrefetchableFiles(
-      std::vector<std::pair<std::string, std::string> >* out_files) const;
+      std::vector<NaClResourcePrefetchRequest>* out_files) const;
 
   // Resolves a key from the "files" section to a fully resolved URL,
   // i.e., relative URL values are fully expanded relative to the

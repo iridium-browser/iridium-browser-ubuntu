@@ -47,6 +47,8 @@ class EnrollmentScreenHandler
   void Show() override;
   void Hide() override;
   void ShowSigninScreen() override;
+  void ShowAttributePromptScreen(const std::string& asset_id,
+                                 const std::string& location) override;
   void ShowEnrollmentSpinnerScreen() override;
   void ShowAuthError(const GoogleServiceAuthError& error) override;
   void ShowEnrollmentStatus(policy::EnrollmentStatus status) override;
@@ -71,6 +73,9 @@ class EnrollmentScreenHandler
                            const std::string& auth_code);
   void HandleRetry();
   void HandleFrameLoadingCompleted(int status);
+  void HandleDeviceAttributesProvided(const std::string& asset_id,
+                          const std::string& location);
+  void HandleOnLearnMore();
 
   void UpdateStateInternal(NetworkError::ErrorReason reason, bool force_update);
   void SetupAndShowOfflineMessage(NetworkStateInformer::State state,
@@ -131,6 +136,9 @@ class EnrollmentScreenHandler
 
   // GAIA extension loader.
   scoped_ptr<ScopedGaiaAuthExtension> auth_extension_;
+
+  // Help application used for help dialogs.
+  scoped_refptr<HelpAppLauncher> help_app_;
 
   base::WeakPtrFactory<EnrollmentScreenHandler> weak_ptr_factory_;
 

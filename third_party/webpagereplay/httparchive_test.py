@@ -13,12 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import ast
 import calendar
 import email.utils
 import httparchive
-import os
-import time
 import unittest
 
 
@@ -77,6 +74,11 @@ class HttpArchiveTest(unittest.TestCase):
     header3 = {'referer': 'www.google.com', 'cookie': 'cookie_monster!',
                'hello': 'world'}
     self.assertEqual(request._TrimHeaders(header3), [('hello', 'world')])
+
+    # Tests that spaces and trailing comma get stripped.
+    header4 = {'accept-encoding': 'gzip, deflate,, '}
+    self.assertEqual(request._TrimHeaders(header4),
+                     [('accept-encoding', 'gzip,deflate')])
 
   def test_matches(self):
     headers = {}

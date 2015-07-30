@@ -18,15 +18,21 @@ namespace test {
 
 QuicTestPacketMaker::QuicTestPacketMaker(QuicVersion version,
                                          QuicConnectionId connection_id,
-                                         MockClock* clock)
+                                         MockClock* clock,
+                                         const std::string& host)
     : version_(version),
       connection_id_(connection_id),
       clock_(clock),
-      spdy_request_framer_(version > QUIC_VERSION_23 ? SPDY4 : SPDY3),
-      spdy_response_framer_(version > QUIC_VERSION_23 ? SPDY4 : SPDY3) {
+      host_(host),
+      spdy_request_framer_(SPDY4),
+      spdy_response_framer_(SPDY4) {
 }
 
 QuicTestPacketMaker::~QuicTestPacketMaker() {
+}
+
+void QuicTestPacketMaker::set_hostname(const std::string& host) {
+  host_.assign(host);
 }
 
 scoped_ptr<QuicEncryptedPacket> QuicTestPacketMaker::MakeRstPacket(
@@ -86,8 +92,12 @@ scoped_ptr<QuicEncryptedPacket> QuicTestPacketMaker::MakeAckAndRstPacket(
                     Perspective::IS_CLIENT);
   scoped_ptr<QuicPacket> packet(
       BuildUnsizedDataPacket(&framer, header, frames));
-  return scoped_ptr<QuicEncryptedPacket>(framer.EncryptPacket(
-      ENCRYPTION_NONE, header.packet_sequence_number, *packet));
+  char buffer[kMaxPacketSize];
+  scoped_ptr<QuicEncryptedPacket> encrypted(
+      framer.EncryptPacket(ENCRYPTION_NONE, header.packet_sequence_number,
+                           *packet, buffer, kMaxPacketSize));
+  EXPECT_TRUE(encrypted != nullptr);
+  return scoped_ptr<QuicEncryptedPacket>(encrypted->Clone());
 }
 
 scoped_ptr<QuicEncryptedPacket> QuicTestPacketMaker::MakeConnectionClosePacket(
@@ -140,8 +150,12 @@ scoped_ptr<QuicEncryptedPacket> QuicTestPacketMaker::MakeAckPacket(
 
   scoped_ptr<QuicPacket> packet(
       BuildUnsizedDataPacket(&framer, header, frames));
-  return scoped_ptr<QuicEncryptedPacket>(framer.EncryptPacket(
-      ENCRYPTION_NONE, header.packet_sequence_number, *packet));
+  char buffer[kMaxPacketSize];
+  scoped_ptr<QuicEncryptedPacket> encrypted(
+      framer.EncryptPacket(ENCRYPTION_NONE, header.packet_sequence_number,
+                           *packet, buffer, kMaxPacketSize));
+  EXPECT_TRUE(encrypted != nullptr);
+  return scoped_ptr<QuicEncryptedPacket>(encrypted->Clone());
 }
 
 // Returns a newly created packet to send kData on stream 1.
@@ -217,10 +231,16 @@ SpdyHeaderBlock QuicTestPacketMaker::GetRequestHeaders(
     const std::string& path) {
   SpdyHeaderBlock headers;
   headers[":method"] = method;
-  headers[":host"] = "www.google.com";
+  if (version_ <= QUIC_VERSION_24) {
+    headers[":host"] = host_;
+  } else {
+    headers[":authority"] = host_;
+  }
   headers[":path"] = path;
   headers[":scheme"] = scheme;
-  headers[":version"] = "HTTP/1.1";
+  if (version_ <= QUIC_VERSION_24) {
+    headers[":version"] = "HTTP/1.1";
+  }
   return headers;
 }
 
@@ -228,7 +248,9 @@ SpdyHeaderBlock QuicTestPacketMaker::GetResponseHeaders(
     const std::string& status) {
   SpdyHeaderBlock headers;
   headers[":status"] = status;
-  headers[":version"] = "HTTP/1.1";
+  if (version_ <= QUIC_VERSION_24) {
+    headers[":version"] = "HTTP/1.1";
+  }
   headers["content-type"] = "text/plain";
   return headers;
 }
@@ -242,8 +264,12 @@ scoped_ptr<QuicEncryptedPacket> QuicTestPacketMaker::MakePacket(
   frames.push_back(frame);
   scoped_ptr<QuicPacket> packet(
       BuildUnsizedDataPacket(&framer, header, frames));
-  return scoped_ptr<QuicEncryptedPacket>(framer.EncryptPacket(
-      ENCRYPTION_NONE, header.packet_sequence_number, *packet));
+  char buffer[kMaxPacketSize];
+  scoped_ptr<QuicEncryptedPacket> encrypted(
+      framer.EncryptPacket(ENCRYPTION_NONE, header.packet_sequence_number,
+                           *packet, buffer, kMaxPacketSize));
+  EXPECT_TRUE(encrypted != nullptr);
+  return scoped_ptr<QuicEncryptedPacket>(encrypted->Clone());
 }
 
 void QuicTestPacketMaker::InitializeHeader(

@@ -19,12 +19,12 @@
 #include "chrome/browser/extensions/extension_function_test_utils.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/signin/account_reconcilor_factory.h"
 #include "chrome/browser/signin/account_tracker_service_factory.h"
-#include "chrome/browser/signin/fake_account_reconcilor.h"
+#include "chrome/browser/signin/fake_gaia_cookie_manager_service.h"
 #include "chrome/browser/signin/fake_profile_oauth2_token_service.h"
 #include "chrome/browser/signin/fake_profile_oauth2_token_service_builder.h"
 #include "chrome/browser/signin/fake_signin_manager.h"
+#include "chrome/browser/signin/gaia_cookie_manager_service_factory.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/browser.h"
@@ -34,6 +34,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/test_switches.h"
 #include "components/crx_file/id_util.h"
+#include "components/guest_view/browser/guest_view_base.h"
 #include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/profile_management_switches.h"
@@ -42,7 +43,6 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/api_test_utils.h"
-#include "extensions/browser/guest_view/guest_view_base.h"
 #include "extensions/common/manifest_handlers/oauth2_manifest_handler.h"
 #include "extensions/common/test_util.h"
 #include "google_apis/gaia/google_service_auth_error.h"
@@ -52,6 +52,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
+using guest_view::GuestViewBase;
 using testing::_;
 using testing::Return;
 using testing::ReturnRef;
@@ -555,8 +556,8 @@ class IdentityTestWithSignin : public AsyncExtensionBrowserTest {
         context, &FakeSigninManagerBase::Build);
     ProfileOAuth2TokenServiceFactory::GetInstance()->SetTestingFactory(
         context, &BuildFakeProfileOAuth2TokenService);
-    AccountReconcilorFactory::GetInstance()->SetTestingFactory(
-        context, &FakeAccountReconcilor::Build);
+    GaiaCookieManagerServiceFactory::GetInstance()->SetTestingFactory(
+        context, &FakeGaiaCookieManagerService::Build);
   }
 
   void SetUpOnMainThread() override {
@@ -570,23 +571,27 @@ class IdentityTestWithSignin : public AsyncExtensionBrowserTest {
         ProfileOAuth2TokenServiceFactory::GetInstance()->GetForProfile(
             profile()));
     ASSERT_TRUE(token_service_);
+    GaiaCookieManagerServiceFactory::GetInstance()->GetForProfile(profile())
+        ->Init();
   }
 
  protected:
-  void SignIn(const std::string account_key) {
-#if defined(OS_CHROMEOS)
-    signin_manager_->SetAuthenticatedUsername(account_key);
-#else
-    signin_manager_->SignIn(account_key, "password");
-#endif
-    token_service_->IssueRefreshTokenForUser(account_key, "refresh_token");
+  void SignIn(const std::string& account_key) {
+    SignIn(account_key, account_key);
   }
 
-  void SignIn(const std::string& account_key, const std::string& gaia) {
+  void SignIn(const std::string& email, const std::string& gaia) {
     AccountTrackerService* account_tracker =
         AccountTrackerServiceFactory::GetForProfile(profile());
-    account_tracker->SeedAccountInfo(gaia, account_key);
-    SignIn(account_key);
+    std::string account_id =
+        account_tracker->SeedAccountInfo(gaia, email);
+
+#if defined(OS_CHROMEOS)
+    signin_manager_->SetAuthenticatedAccountInfo(gaia, email);
+#else
+    signin_manager_->SignIn(gaia, email, "password");
+#endif
+    token_service_->IssueRefreshTokenForUser(account_id, "refresh_token");
   }
 
   FakeSigninManagerForTesting* signin_manager_;
@@ -720,7 +725,7 @@ class GetAuthTokenFunctionTest : public IdentityTestWithSignin {
     return IdentityAPI::GetFactoryInstance()->Get(browser()->profile());
   }
 
-  const std::string GetPrimaryAccountId() {
+  const std::string& GetPrimaryAccountId() {
     SigninManagerBase* signin_manager =
         SigninManagerFactory::GetForProfile(browser()->profile());
     return signin_manager->GetAuthenticatedAccountId();

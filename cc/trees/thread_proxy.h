@@ -204,6 +204,7 @@ class CC_EXPORT ThreadProxy : public Proxy,
   void SetNeedsAnimateOnImplThread() override;
   void SetNeedsPrepareTilesOnImplThread() override;
   void SetNeedsCommitOnImplThread() override;
+  void SetVideoNeedsBeginFrames(bool needs_begin_frames) override;
   void PostAnimationEventsToMainThreadOnImplThread(
       scoped_ptr<AnimationEventsVector> queue) override;
   bool ReduceContentsTextureMemoryOnImplThread(size_t limit_bytes,
@@ -219,6 +220,7 @@ class CC_EXPORT ThreadProxy : public Proxy,
 
   // SchedulerClient implementation
   void WillBeginImplFrame(const BeginFrameArgs& args) override;
+  void DidFinishImplFrame() override;
   void ScheduledActionSendBeginMainFrame() override;
   DrawResult ScheduledActionDrawAndSwapIfPossible() override;
   DrawResult ScheduledActionDrawAndSwapForced() override;
@@ -232,7 +234,6 @@ class CC_EXPORT ThreadProxy : public Proxy,
   base::TimeDelta DrawDurationEstimate() override;
   base::TimeDelta BeginMainFrameToCommitDurationEstimate() override;
   base::TimeDelta CommitToActivateDurationEstimate() override;
-  void DidBeginImplFrameDeadline() override;
   void SendBeginFramesToChildren(const BeginFrameArgs& args) override;
   void SendBeginMainFrameNotExpectedSoon() override;
 

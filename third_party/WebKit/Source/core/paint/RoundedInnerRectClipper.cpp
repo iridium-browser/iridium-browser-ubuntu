@@ -6,7 +6,7 @@
 #include "core/paint/RoundedInnerRectClipper.h"
 
 #include "core/layout/LayoutBox.h"
-#include "core/layout/PaintInfo.h"
+#include "core/paint/PaintInfo.h"
 #include "platform/graphics/paint/ClipDisplayItem.h"
 #include "platform/graphics/paint/DisplayItemList.h"
 
@@ -51,6 +51,8 @@ RoundedInnerRectClipper::RoundedInnerRectClipper(LayoutObject& layoutObject, con
 
     if (m_useDisplayItemList) {
         ASSERT(m_paintInfo.context->displayItemList());
+        if (m_paintInfo.context->displayItemList()->displayItemConstructionIsDisabled())
+            return;
         m_paintInfo.context->displayItemList()->add(clipDisplayItem.release());
     } else {
         clipDisplayItem->replay(*paintInfo.context);
@@ -62,6 +64,8 @@ RoundedInnerRectClipper::~RoundedInnerRectClipper()
     DisplayItem::Type endType = DisplayItem::clipTypeToEndClipType(m_clipType);
     if (m_useDisplayItemList) {
         ASSERT(m_paintInfo.context->displayItemList());
+        if (m_paintInfo.context->displayItemList()->displayItemConstructionIsDisabled())
+            return;
         OwnPtr<EndClipDisplayItem> endClipDisplayItem = EndClipDisplayItem::create(m_layoutObject, endType);
         m_paintInfo.context->displayItemList()->add(endClipDisplayItem.release());
     } else {

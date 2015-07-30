@@ -33,6 +33,8 @@ const FieldTranslationEntry eap_fields[] = {
     {::onc::eap::kSaveCredentials, shill::kSaveCredentialsProperty},
     {::onc::eap::kServerCAPEMs, shill::kEapCaCertPemProperty},
     {::onc::eap::kUseSystemCAs, shill::kEapUseSystemCasProperty},
+    {::onc::eap::kUseProactiveKeyCaching,
+     shill::kEapUseProactiveKeyCachingProperty},
     {NULL}};
 
 const FieldTranslationEntry ipsec_fields[] = {
@@ -54,11 +56,12 @@ const FieldTranslationEntry xauth_fields[] = {
     {NULL}};
 
 const FieldTranslationEntry l2tp_fields[] = {
-    {::onc::vpn::kPassword, shill::kL2tpIpsecPasswordProperty},
+    {::onc::l2tp::kPassword, shill::kL2tpIpsecPasswordProperty},
     // We don't synchronize l2tp's SaveCredentials field for now, as Shill
     // doesn't support separate settings for ipsec and l2tp.
-    // { ::onc::vpn::kSaveCredentials, &kBoolSignature },
-    {::onc::vpn::kUsername, shill::kL2tpIpsecUserProperty},
+    // { ::onc::l2tp::kSaveCredentials, &kBoolSignature },
+    {::onc::l2tp::kUsername, shill::kL2tpIpsecUserProperty},
+    {::onc::l2tp::kLcpEchoDisabled, shill::kL2tpIpsecLcpEchoDisabledProperty},
     {NULL}};
 
 const FieldTranslationEntry openvpn_fields[] = {
@@ -119,6 +122,7 @@ const FieldTranslationEntry wifi_fields[] = {
     {::onc::wifi::kHexSSID, shill::kWifiHexSsid},
     {::onc::wifi::kHiddenSSID, shill::kWifiHiddenSsid},
     {::onc::wifi::kPassphrase, shill::kPassphraseProperty},
+    {::onc::wifi::kRoamThreshold, shill::kWifiRoamThresholdProperty},
     // This field is converted during translation, see onc_translator_*.
     // { ::onc::wifi::kSecurity, shill::kSecurityClassProperty },
     {::onc::wifi::kSignalStrength, shill::kSignalStrengthProperty},
@@ -148,6 +152,12 @@ const FieldTranslationEntry cellular_found_network_fields[] = {
     {::onc::cellular_found_network::kLongName, shill::kLongNameProperty},
     {NULL}};
 
+const FieldTranslationEntry cellular_payment_portal_fields[] = {
+    {::onc::cellular_payment_portal::kMethod, shill::kPaymentPortalMethod},
+    {::onc::cellular_payment_portal::kPostData, shill::kPaymentPortalPostData},
+    {::onc::cellular_payment_portal::kUrl, shill::kPaymentPortalURL},
+    {NULL}};
+
 const FieldTranslationEntry cellular_provider_fields[] = {
     {::onc::cellular_provider::kCode, shill::kOperatorCodeKey},
     {::onc::cellular_provider::kCountry, shill::kOperatorCountryKey},
@@ -171,6 +181,8 @@ const FieldTranslationEntry cellular_fields[] = {
     // { ::onc::cellular::kNetworkTechnology,
     //   shill::kNetworkTechnologyProperty},
     // This field is converted during translation, see onc_translator_*.
+    // { ::onc::cellular::kPaymentPortal, shill::kPaymentPortal},
+    // This field is converted during translation, see onc_translator_*.
     // { ::onc::cellular::kRoamingState, shill::kRoamingStateProperty},
     {::onc::cellular::kSignalStrength, shill::kSignalStrengthProperty},
     {NULL}};
@@ -178,24 +190,23 @@ const FieldTranslationEntry cellular_fields[] = {
 const FieldTranslationEntry network_fields[] = {
     {::onc::network_config::kGUID, shill::kGuidProperty},
     {::onc::network_config::kConnectable, shill::kConnectableProperty},
-    {::onc::network_config::kErrorState, shill::kErrorProperty},
     {::onc::network_config::kPriority, shill::kPriorityProperty},
 
     // Shill doesn't allow setting the name for non-VPN networks.
     // Name is conditionally translated, see onc_translator_*.
-    // { ::onc::network_config::kName, shill::kNameProperty },
+    // {::onc::network_config::kName, shill::kNameProperty },
 
     // Type is converted during translation, see onc_translator_*.
-    // { ::onc::network_config::kType, shill::kTypeProperty },
+    // {::onc::network_config::kType, shill::kTypeProperty },
 
     // These fields are converted during translation, see
     // onc_translator_shill_to_onc.cc. They are only converted when going from
     // Shill->ONC, and ignored otherwise.
-    // { ::onc::network_config::kConnectionState, shill::kStateProperty },
-    // { ::onc::network_config::kRestrictedConnectivity,
-    //   shill::kStateProperty },
-    // { ::onc::network_config::kSource, shill::kProfileProperty },
-    // { ::onc::network_config::kMacAddress, shill::kAddressProperty },
+    // {::onc::network_config::kConnectionState, shill::kStateProperty },
+    // {::onc::network_config::kErrorState, shill::kErrorProperty},
+    // {::onc::network_config::kRestrictedConnectivity, shill::kStateProperty },
+    // {::onc::network_config::kSource, shill::kProfileProperty },
+    // {::onc::network_config::kMacAddress, shill::kAddressProperty },
     {NULL}};
 
 const FieldTranslationEntry ipconfig_fields[] = {
@@ -236,6 +247,7 @@ const OncValueTranslationEntry onc_value_translation_table[] = {
     {&kWiMAXWithStateSignature, wimax_fields},
     {&kCellularApnSignature, cellular_apn_fields},
     {&kCellularFoundNetworkSignature, cellular_found_network_fields},
+    {&kCellularPaymentPortalSignature, cellular_payment_portal_fields},
     {&kCellularProviderSignature, cellular_provider_fields},
     {&kSIMLockStatusSignature, sim_lock_status_fields},
     {&kCellularSignature, cellular_fields},
@@ -299,6 +311,7 @@ const StringTranslationEntry kEAPOuterTable[] = {
 const StringTranslationEntry kEAP_PEAP_InnerTable[] = {
     {::onc::eap::kMD5, shill::kEapPhase2AuthPEAPMD5},
     {::onc::eap::kMSCHAPv2, shill::kEapPhase2AuthPEAPMSCHAPV2},
+    {::onc::eap::kGTC, shill::kEapPhase2AuthPEAPGTC},
     {NULL}};
 
 // Translation of the EAP.Inner field in case of EAP.Outer == TTLS
@@ -306,6 +319,7 @@ const StringTranslationEntry kEAP_TTLS_InnerTable[] = {
     {::onc::eap::kMD5, shill::kEapPhase2AuthTTLSMD5},
     {::onc::eap::kMSCHAPv2, shill::kEapPhase2AuthTTLSMSCHAPV2},
     {::onc::eap::kPAP, shill::kEapPhase2AuthTTLSPAP},
+    {::onc::eap::kGTC, shill::kEapPhase2AuthTTLSGTC},
     {NULL}};
 
 const StringTranslationEntry kActivationStateTable[] = {

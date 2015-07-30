@@ -5,8 +5,7 @@
 /**
  * @fileoverview ONC network configuration support class. Wraps a dictionary
  * object containing ONC managed or unmanaged dictionaries. Also provides
- * special accessors for ONC properties. See cr-onc-types for ONC types,
- * e.g. CrOnc.NetworkConfigType. Used by consumers of the
+ * special accessors for ONC properties. Used by consumers of the
  * chrome.networkingPrivate API. See components/onc/docs/onc_spec.html.
  */
 Polymer('cr-onc-data', {
@@ -16,7 +15,7 @@ Polymer('cr-onc-data', {
      * chrome.networkingPrivate.getProperties() call.
      *
      * @attribute data
-     * @type CrOnc.NetworkConfigType
+     * @type {chrome.networkingPrivate.NetworkStateProperties}
      * @default null
      */
     data: null,
@@ -24,7 +23,28 @@ Polymer('cr-onc-data', {
 
   /** @override */
   created: function() {
-    this.data = /** @type {CrOnc.NetworkConfigType} */({});
+    this.data =
+        /** @type {chrome.networkingPrivate.NetworkStateProperties} */({});
+  },
+
+  /**
+   * TODO(stevenjb): Handle Managed property dictionaries.
+   * @param {string} key The property key.
+   * @return {?} The property value if it exists, otherwise undefined.
+   */
+  getProperty: function(key) {
+    var data = this.data;
+    while (true) {
+      var index = key.indexOf('.');
+      if (index < 0)
+        break;
+      var keyComponent = key.substr(0, index);
+      if (!(keyComponent in data))
+        return undefined;
+      data = data[keyComponent];
+      key = key.substr(index + 1);
+    }
+    return data[key];
   },
 
   /** @return {boolean} True if the network is connected. */
@@ -37,35 +57,33 @@ Polymer('cr-onc-data', {
     return this.data.ConnectionState == CrOnc.ConnectionState.CONNECTING;
   },
 
+  /** @return {boolean} True if the network is disconnected. */
+  disconnected: function() {
+    return this.data.ConnectionState == CrOnc.ConnectionState.NOT_CONNECTED;
+  },
+
   /** @return {number} The signal strength of the network. */
   getStrength: function() {
     var type = this.data.Type;
-    var strength = 0;
-    if (type == 'WiFi')
-      strength = this.data.WiFi ? this.data.WiFi.SignalStrength : 0;
-    else if (type == 'Cellular')
-      strength = this.data.Cellular ? this.data.Cellular.SignalStrength : 0;
-    else if (type == 'WiMAX')
-      strength = this.data.WiMAX ? this.data.WiMAX.SignalStrength : 0;
-    return strength;
+    var key = type + '.SignalStrength';
+    return this.getProperty(key) || 0;
   },
 
   /** @return {CrOnc.Security} The ONC security type. */
   getWiFiSecurity: function() {
-    return (this.data.WiFi && this.data.WiFi.Security) ?
-        this.data.WiFi.Security : CrOnc.Security.NONE;
+    return this.getProperty('WiFi.Security') || CrOnc.Security.NONE;
   },
 
   /** @return {CrOnc.RoamingState} The ONC roaming state. */
   getCellularRoamingState: function() {
-    return (this.data.Cellular && this.data.Cellular.RoamingState) ?
-        this.data.Cellular.RoamingState : CrOnc.RoamingState.UNKNOWN;
+    return this.getProperty('Cellular.RoamingState') ||
+        CrOnc.RoamingState.UNKNOWN;
   },
 
   /** @return {CrOnc.NetworkTechnology} The ONC network technology. */
   getCellularTechnology: function() {
-    return (this.data.Cellular && this.data.Cellular.NetworkTechnology) ?
-        this.data.Cellular.NetworkTechnology : CrOnc.NetworkTechnology.UNKNOWN;
+    return this.getProperty('Cellular.NetworkTechnology') ||
+        CrOnc.NetworkTechnology.UNKNOWN;
   }
 });
 
@@ -78,7 +96,8 @@ var CrOncDataElement = {};
  * Helper method to create and return a typed cr-onc-data Polymer element.
  * Sets the data property of the element to |state|.
  *
- * @param {!CrOnc.NetworkConfigType} state The network state properties.
+ * @param {!chrome.networkingPrivate.NetworkStateProperties} state The network
+ *     state properties.
  * @return {!CrOncDataElement} A cr-onc-data element.
  */
 CrOncDataElement.create = function(state) {

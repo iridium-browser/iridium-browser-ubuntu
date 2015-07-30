@@ -23,6 +23,7 @@
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/signin/core/common/signin_pref_names.h"
 #include "components/signin/core/common/signin_switches.h"
+#include "google_apis/gaia/gaia_urls.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "url/gurl.h"
 
@@ -31,6 +32,8 @@
 #endif
 
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/net/delay_network_call.h"
+#include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "components/user_manager/user_manager.h"
 #endif
 
@@ -39,20 +42,54 @@
 #endif
 
 namespace {
-
-const char kGoogleAccountsUrl[] = "https://accounts.google.com";
-
-}  // namespace
+const char kEphemeralUserDeviceIDPrefix[] = "t_";
+}
 
 ChromeSigninClient::ChromeSigninClient(
     Profile* profile, SigninErrorController* signin_error_controller)
     : profile_(profile),
       signin_error_controller_(signin_error_controller) {
   signin_error_controller_->AddObserver(this);
+#if !defined(OS_CHROMEOS)
+  net::NetworkChangeNotifier::AddNetworkChangeObserver(this);
+#else
+  // UserManager may not exist in unit_tests.
+  if (!user_manager::UserManager::IsInitialized())
+    return;
+
+  const user_manager::User* user =
+      chromeos::ProfileHelper::Get()->GetUserByProfile(profile_);
+  if (!user)
+    return;
+  auto* user_manager = user_manager::UserManager::Get();
+  const std::string& user_id = user->GetUserID();
+  if (user_manager->GetKnownUserDeviceId(user_id).empty()) {
+    const std::string legacy_device_id =
+        GetPrefs()->GetString(prefs::kGoogleServicesSigninScopedDeviceId);
+    if (!legacy_device_id.empty()) {
+      // Need to move device ID from the old location to the new one, if it has
+      // not been done yet.
+      user_manager->SetKnownUserDeviceId(user_id, legacy_device_id);
+    } else {
+      user_manager->SetKnownUserDeviceId(
+          user_id,
+          GenerateSigninScopedDeviceID(
+              user_manager->IsUserNonCryptohomeDataEphemeral(user_id)));
+    }
+  }
+  GetPrefs()->SetString(prefs::kGoogleServicesSigninScopedDeviceId,
+                        std::string());
+#endif
 }
 
 ChromeSigninClient::~ChromeSigninClient() {
   signin_error_controller_->RemoveObserver(this);
+}
+
+void ChromeSigninClient::Shutdown() {
+#if !defined(OS_CHROMEOS)
+  net::NetworkChangeNotifier::RemoveNetworkChangeObserver(this);
+#endif
 }
 
 // static
@@ -65,9 +102,18 @@ bool ChromeSigninClient::ProfileAllowsSigninCookies(Profile* profile) {
 // static
 bool ChromeSigninClient::SettingsAllowSigninCookies(
     CookieSettings* cookie_settings) {
+  GURL gaia_url = GaiaUrls::GetInstance()->gaia_url();
+  GURL google_url = GaiaUrls::GetInstance()->google_url();
   return cookie_settings &&
-         cookie_settings->IsSettingCookieAllowed(GURL(kGoogleAccountsUrl),
-                                                 GURL(kGoogleAccountsUrl));
+         cookie_settings->IsSettingCookieAllowed(gaia_url, gaia_url) &&
+         cookie_settings->IsSettingCookieAllowed(google_url, google_url);
+}
+
+// static
+std::string ChromeSigninClient::GenerateSigninScopedDeviceID(
+    bool for_ephemeral) {
+  std::string guid = base::GenerateGUID();
+  return for_ephemeral ? kEphemeralUserDeviceIDPrefix + guid : guid;
 }
 
 PrefService* ChromeSigninClient::GetPrefs() { return profile_->GetPrefs(); }
@@ -106,16 +152,33 @@ std::string ChromeSigninClient::GetSigninScopedDeviceId() {
     return std::string();
   }
 
+#if !defined(OS_CHROMEOS)
   std::string signin_scoped_device_id =
       GetPrefs()->GetString(prefs::kGoogleServicesSigninScopedDeviceId);
   if (signin_scoped_device_id.empty()) {
     // If device_id doesn't exist then generate new and save in prefs.
-    signin_scoped_device_id = base::GenerateGUID();
+    signin_scoped_device_id = GenerateSigninScopedDeviceID(false);
     DCHECK(!signin_scoped_device_id.empty());
     GetPrefs()->SetString(prefs::kGoogleServicesSigninScopedDeviceId,
                           signin_scoped_device_id);
   }
   return signin_scoped_device_id;
+#else
+  // UserManager may not exist in unit_tests.
+  if (!user_manager::UserManager::IsInitialized())
+    return std::string();
+
+  const user_manager::User* user =
+      chromeos::ProfileHelper::Get()->GetUserByProfile(profile_);
+  if (!user)
+    return std::string();
+
+  const std::string signin_scoped_device_id =
+      user_manager::UserManager::Get()->GetKnownUserDeviceId(user->GetUserID());
+  LOG_IF(ERROR, signin_scoped_device_id.empty())
+      << "Device ID is not set for user.";
+  return signin_scoped_device_id;
+#endif
 }
 
 void ChromeSigninClient::OnSignedOut() {
@@ -130,7 +193,7 @@ void ChromeSigninClient::OnSignedOut() {
     return;
 
   cache.SetLocalAuthCredentialsOfProfileAtIndex(index, std::string());
-  cache.SetUserNameOfProfileAtIndex(index, base::string16());
+  cache.SetAuthInfoOfProfileAtIndex(index, std::string(), base::string16());
   cache.SetProfileSigninRequiredAtIndex(index, false);
 }
 
@@ -188,13 +251,15 @@ ChromeSigninClient::AddCookieChangedCallback(
 }
 
 void ChromeSigninClient::OnSignedIn(const std::string& account_id,
+                                    const std::string& gaia_id,
                                     const std::string& username,
                                     const std::string& password) {
   ProfileManager* profile_manager = g_browser_process->profile_manager();
   ProfileInfoCache& cache = profile_manager->GetProfileInfoCache();
   size_t index = cache.GetIndexOfProfileWithPath(profile_->GetPath());
   if (index != std::string::npos) {
-    cache.SetUserNameOfProfileAtIndex(index, base::UTF8ToUTF16(username));
+    cache.SetAuthInfoOfProfileAtIndex(index, gaia_id,
+                                      base::UTF8ToUTF16(username));
     ProfileMetrics::UpdateReportedProfilesStatistics(profile_manager);
   }
 }
@@ -207,6 +272,11 @@ void ChromeSigninClient::PostSignedIn(const std::string& account_id,
   if (!password.empty() && profiles::IsLockAvailable(profile_))
     LocalAuth::SetLocalAuthCredentials(profile_, password);
 #endif
+}
+
+bool ChromeSigninClient::UpdateAccountInfo(
+    AccountTrackerService::AccountInfo* out_account_info) {
+  return false;
 }
 
 void ChromeSigninClient::OnErrorChanged() {
@@ -222,4 +292,33 @@ void ChromeSigninClient::OnErrorChanged() {
 
   cache.SetProfileIsAuthErrorAtIndex(index,
       signin_error_controller_->HasError());
+}
+
+#if !defined(OS_CHROMEOS)
+void ChromeSigninClient::OnNetworkChanged(
+    net::NetworkChangeNotifier::ConnectionType type) {
+  if (type >= net::NetworkChangeNotifier::ConnectionType::CONNECTION_NONE)
+    return;
+
+  for (const base::Closure& callback : delayed_callbacks_)
+    callback.Run();
+
+  delayed_callbacks_.clear();
+}
+#endif
+
+void ChromeSigninClient::DelayNetworkCall(const base::Closure& callback) {
+#if defined(OS_CHROMEOS)
+  chromeos::DelayNetworkCall(
+      base::TimeDelta::FromMilliseconds(chromeos::kDefaultNetworkRetryDelayMS),
+      callback);
+  return;
+#else
+  // Don't bother if we don't have any kind of network connection.
+  if (net::NetworkChangeNotifier::IsOffline()) {
+    delayed_callbacks_.push_back(callback);
+  } else {
+    callback.Run();
+  }
+#endif
 }

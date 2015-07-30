@@ -80,6 +80,10 @@ const user_manager::UserList& WebUILoginDisplay::GetUsers() const {
   return SignInScreenController::Get()->GetUsers();
 }
 
+void WebUILoginDisplay::CheckUserStatus(const std::string& user_id) {
+  SignInScreenController::Get()->CheckUserStatus(user_id);
+}
+
 // ---- Gaia screen methods
 
 // ---- Not yet classified methods
@@ -181,14 +185,20 @@ void WebUILoginDisplay::ShowGaiaPasswordChanged(const std::string& username) {
     webui_handler_->ShowGaiaPasswordChanged(username);
 }
 
-void WebUILoginDisplay::ShowPasswordChangedDialog(bool show_password_error) {
+void WebUILoginDisplay::ShowPasswordChangedDialog(bool show_password_error,
+                                                  const std::string& email) {
   if (webui_handler_)
-    webui_handler_->ShowPasswordChangedDialog(show_password_error);
+    webui_handler_->ShowPasswordChangedDialog(show_password_error, email);
 }
 
 void WebUILoginDisplay::ShowSigninUI(const std::string& email) {
   if (webui_handler_)
     webui_handler_->ShowSigninUI(email);
+}
+
+void WebUILoginDisplay::ShowWhitelistCheckFailedError() {
+  if (webui_handler_)
+    webui_handler_->ShowWhitelistCheckFailedError();
 }
 
 // WebUILoginDisplay, NativeWindowDelegate implementation: ---------------------

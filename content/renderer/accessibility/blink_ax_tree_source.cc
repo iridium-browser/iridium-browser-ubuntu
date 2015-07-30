@@ -117,6 +117,10 @@ BlinkAXTreeSource::BlinkAXTreeSource(RenderFrameImpl* render_frame)
 BlinkAXTreeSource::~BlinkAXTreeSource() {
 }
 
+void BlinkAXTreeSource::SetRoot(blink::WebAXObject root) {
+  root_ = root;
+}
+
 bool BlinkAXTreeSource::IsInTree(blink::WebAXObject node) const {
   const blink::WebAXObject& root = GetRoot();
   while (IsValid(node)) {
@@ -136,6 +140,8 @@ void BlinkAXTreeSource::CollectChildFrameIdMapping(
 }
 
 blink::WebAXObject BlinkAXTreeSource::GetRoot() const {
+  if (!root_.isNull())
+    return root_;
   return GetMainDocument().accessibilityObject();
 }
 
@@ -218,7 +224,7 @@ void BlinkAXTreeSource::SerializeNode(blink::WebAXObject src,
   dst->state = AXStateFromBlink(src);
   dst->location = src.boundingBoxRect();
   dst->id = src.axID();
-  std::string name = UTF16ToUTF8(src.title());
+  std::string name = UTF16ToUTF8(src.deprecatedTitle());
 
   std::string value;
   if (src.valueDescription().length()) {
@@ -228,13 +234,20 @@ void BlinkAXTreeSource::SerializeNode(blink::WebAXObject src,
     dst->AddStringAttribute(ui::AX_ATTR_VALUE, UTF16ToUTF8(src.stringValue()));
   }
 
-  if (dst->role == ui::AX_ROLE_COLOR_WELL) {
-    int r, g, b;
-    src.colorValue(r, g, b);
-    dst->AddIntAttribute(ui::AX_ATTR_COLOR_VALUE_RED, r);
-    dst->AddIntAttribute(ui::AX_ATTR_COLOR_VALUE_GREEN, g);
-    dst->AddIntAttribute(ui::AX_ATTR_COLOR_VALUE_BLUE, b);
-  }
+  if (dst->role == ui::AX_ROLE_COLOR_WELL)
+    dst->AddIntAttribute(ui::AX_ATTR_COLOR_VALUE, src.colorValue());
+
+
+  // Text attributes.
+  if (src.backgroundColor())
+    dst->AddIntAttribute(ui::AX_ATTR_BACKGROUND_COLOR, src.backgroundColor());
+
+  if (src.color())
+    dst->AddIntAttribute(ui::AX_ATTR_COLOR, src.color());
+
+  // Font size is in pixels.
+  if (src.fontSize())
+    dst->AddFloatAttribute(ui::AX_ATTR_FONT_SIZE, src.fontSize());
 
   if (src.invalidState()) {
     dst->AddIntAttribute(ui::AX_ATTR_INVALID_STATE,
@@ -245,10 +258,18 @@ void BlinkAXTreeSource::SerializeNode(blink::WebAXObject src,
                             UTF16ToUTF8(src.ariaInvalidValue()));
   }
 
-  if (dst->role == ui::AX_ROLE_INLINE_TEXT_BOX) {
+  if (src.textDirection()) {
     dst->AddIntAttribute(ui::AX_ATTR_TEXT_DIRECTION,
                          AXTextDirectionFromBlink(src.textDirection()));
+  }
 
+  if (src.textStyle()) {
+    dst->AddIntAttribute(ui::AX_ATTR_TEXT_STYLE,
+                         AXTextStyleFromBlink(src.textStyle()));
+  }
+
+
+  if (dst->role == ui::AX_ROLE_INLINE_TEXT_BOX) {
     WebVector<int> src_character_offsets;
     src.characterOffsets(src_character_offsets);
     std::vector<int32> character_offsets;
@@ -288,27 +309,29 @@ void BlinkAXTreeSource::SerializeNode(blink::WebAXObject src,
     dst->AddBoolAttribute(ui::AX_ATTR_BUTTON_MIXED, true);
   if (src.canSetValueAttribute())
     dst->AddBoolAttribute(ui::AX_ATTR_CAN_SET_VALUE, true);
-  if (src.accessibilityDescription().length()) {
-    dst->AddStringAttribute(ui::AX_ATTR_DESCRIPTION,
-                            UTF16ToUTF8(src.accessibilityDescription()));
+  if (src.deprecatedAccessibilityDescription().length()) {
+    dst->AddStringAttribute(
+        ui::AX_ATTR_DESCRIPTION,
+        UTF16ToUTF8(src.deprecatedAccessibilityDescription()));
   }
   if (src.hasComputedStyle()) {
     dst->AddStringAttribute(ui::AX_ATTR_DISPLAY,
                             UTF16ToUTF8(src.computedStyleDisplay()));
   }
-  if (src.helpText().length())
-    dst->AddStringAttribute(ui::AX_ATTR_HELP, UTF16ToUTF8(src.helpText()));
-  if (src.placeholder().length()) {
+  if (src.deprecatedHelpText().length())
+    dst->AddStringAttribute(ui::AX_ATTR_HELP,
+                            UTF16ToUTF8(src.deprecatedHelpText()));
+  if (src.deprecatedPlaceholder().length()) {
     dst->AddStringAttribute(ui::AX_ATTR_PLACEHOLDER,
-                            UTF16ToUTF8(src.placeholder()));
+                            UTF16ToUTF8(src.deprecatedPlaceholder()));
   }
   if (src.keyboardShortcut().length()) {
     dst->AddStringAttribute(ui::AX_ATTR_SHORTCUT,
                             UTF16ToUTF8(src.keyboardShortcut()));
   }
-  if (!src.titleUIElement().isDetached()) {
+  if (!src.deprecatedTitleUIElement().isDetached()) {
     dst->AddIntAttribute(ui::AX_ATTR_TITLE_UI_ELEMENT,
-                         src.titleUIElement().axID());
+                         src.deprecatedTitleUIElement().axID());
   }
   if (!src.ariaActiveDescendant().isDetached()) {
     dst->AddIntAttribute(ui::AX_ATTR_ACTIVEDESCENDANT_ID,
@@ -326,6 +349,12 @@ void BlinkAXTreeSource::SerializeNode(blink::WebAXObject src,
     dst->AddIntAttribute(ui::AX_ATTR_HIERARCHICAL_LEVEL,
                          src.hierarchicalLevel());
   }
+
+  if (src.setSize())
+    dst->AddIntAttribute(ui::AX_ATTR_SET_SIZE, src.setSize());
+
+  if (src.posInSet())
+    dst->AddIntAttribute(ui::AX_ATTR_POS_IN_SET, src.posInSet());
 
   // Treat the active list box item as focused.
   if (dst->role == ui::AX_ROLE_LIST_BOX_OPTION &&
@@ -356,9 +385,7 @@ void BlinkAXTreeSource::SerializeNode(blink::WebAXObject src,
       dst->html_attributes.push_back(std::make_pair(name, value));
     }
 
-    if (!src.isReadOnly() ||
-        dst->role == ui::AX_ROLE_TEXT_AREA ||
-        dst->role == ui::AX_ROLE_TEXT_FIELD) {
+    if (!src.isReadOnly() || dst->role == ui::AX_ROLE_TEXT_FIELD) {
       dst->AddIntAttribute(ui::AX_ATTR_TEXT_SEL_START, src.selectionStart());
       dst->AddIntAttribute(ui::AX_ATTR_TEXT_SEL_END, src.selectionEnd());
 
@@ -576,7 +603,7 @@ void BlinkAXTreeSource::SerializeNode(blink::WebAXObject src,
     AddIntListAttributeFromWebObjects(ui::AX_ATTR_CONTROLS_IDS, controls, dst);
 
   WebVector<WebAXObject> describedby;
-  if (src.ariaDescribedby(describedby)) {
+  if (src.deprecatedAriaDescribedby(describedby)) {
     AddIntListAttributeFromWebObjects(
         ui::AX_ATTR_DESCRIBEDBY_IDS, describedby, dst);
   }
@@ -591,7 +618,7 @@ void BlinkAXTreeSource::SerializeNode(blink::WebAXObject src,
     AddIntListAttributeFromWebObjects(ui::AX_ATTR_FLOWTO_IDS, flowTo, dst);
 
   WebVector<WebAXObject> labelledby;
-  if (src.ariaLabelledby(labelledby)) {
+  if (src.deprecatedAriaLabelledby(labelledby)) {
     AddIntListAttributeFromWebObjects(
         ui::AX_ATTR_LABELLEDBY_IDS, labelledby, dst);
   }

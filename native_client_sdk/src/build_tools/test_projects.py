@@ -73,6 +73,10 @@ DISABLED_TESTS = [
     # http://crbug.com/262379.
     {'name': 'graphics_3d', 'platform': ('win', 'linux', 'mac')},
     {'name': 'video_decode', 'platform': ('win', 'linux', 'mac')},
+    {'name': 'video_encode', 'platform': ('win', 'linux', 'mac')},
+    # TODO(sbc): Disable pi_generator on linux/win/mac. See
+    # http://crbug.com/475255.
+    {'name': 'pi_generator', 'platform': ('win', 'linux', 'mac')},
     # media_stream_audio uses audio input devices which are not supported.
     {'name': 'media_stream_audio', 'platform': ('win', 'linux', 'mac')},
     # media_stream_video uses 3D and webcam which are not supported.

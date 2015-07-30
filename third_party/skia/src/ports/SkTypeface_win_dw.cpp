@@ -287,15 +287,17 @@ using namespace skia_advanced_typeface_metrics_utils;
 static void populate_glyph_to_unicode(IDWriteFontFace* fontFace,
                                       const unsigned glyphCount,
                                       SkTDArray<SkUnichar>* glyphToUnicode) {
-    HRESULT hr = S_OK;
-
     //Do this like free type instead
     SkAutoTMalloc<SkUnichar> glyphToUni(glyphCount);
     int maxGlyph = -1;
     for (UINT32 c = 0; c < 0x10FFFF; ++c) {
-        UINT16 glyph;
-        hr = fontFace->GetGlyphIndices(&c, 1, &glyph);
-        SkASSERT(glyph < glyphCount);
+        UINT16 glyph = 0;
+        HRVM(fontFace->GetGlyphIndices(&c, 1, &glyph),
+             "Failed to get glyph index.");
+        // Intermittent DW bug on Windows 10. See crbug.com/470146.
+        if (glyph >= glyphCount) {
+          return;
+        }
         if (0 < glyph) {
             maxGlyph = SkTMax(static_cast<int>(glyph), maxGlyph);
             glyphToUni[glyph] = c;
@@ -322,7 +324,7 @@ static bool getWidthAdvance(IDWriteFontFace* fontFace, int gId, int16_t* advance
 }
 
 SkAdvancedTypefaceMetrics* DWriteFontTypeface::onGetAdvancedTypefaceMetrics(
-        SkAdvancedTypefaceMetrics::PerGlyphInfo perGlyphInfo,
+        PerGlyphInfo perGlyphInfo,
         const uint32_t* glyphIDs,
         uint32_t glyphIDsCount) const {
 
@@ -355,7 +357,7 @@ SkAdvancedTypefaceMetrics* DWriteFontTypeface::onGetAdvancedTypefaceMetrics(
 
     hr = sk_wchar_to_skstring(familyName.get(), familyNameLen, &info->fFontName);
 
-    if (perGlyphInfo & SkAdvancedTypefaceMetrics::kToUnicode_PerGlyphInfo) {
+    if (perGlyphInfo & kToUnicode_PerGlyphInfo) {
         populate_glyph_to_unicode(fDWriteFontFace.get(), glyphCount, &(info->fGlyphToUnicode));
     }
 
@@ -366,7 +368,7 @@ SkAdvancedTypefaceMetrics* DWriteFontTypeface::onGetAdvancedTypefaceMetrics(
     } else {
         info->fType = SkAdvancedTypefaceMetrics::kOther_Font;
         info->fItalicAngle = 0;
-        info->fAscent = dwfm.ascent;;
+        info->fAscent = dwfm.ascent;
         info->fDescent = dwfm.descent;
         info->fStemV = 0;
         info->fCapHeight = dwfm.capHeight;
@@ -380,7 +382,7 @@ SkAdvancedTypefaceMetrics* DWriteFontTypeface::onGetAdvancedTypefaceMetrics(
     AutoTDWriteTable<SkOTTableOS2> os2Table(fDWriteFontFace.get());
     if (!headTable.fExists || !postTable.fExists || !hheaTable.fExists || !os2Table.fExists) {
         info->fItalicAngle = 0;
-        info->fAscent = dwfm.ascent;;
+        info->fAscent = dwfm.ascent;
         info->fDescent = dwfm.descent;
         info->fStemV = 0;
         info->fCapHeight = dwfm.capHeight;
@@ -442,7 +444,7 @@ SkAdvancedTypefaceMetrics* DWriteFontTypeface::onGetAdvancedTypefaceMetrics(
     }
     */
 
-    if (perGlyphInfo & SkAdvancedTypefaceMetrics::kHAdvance_PerGlyphInfo) {
+    if (perGlyphInfo & kHAdvance_PerGlyphInfo) {
         if (fixedWidth) {
             appendRange(&info->fGlyphWidths, 0);
             int16_t advance;

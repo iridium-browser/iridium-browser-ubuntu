@@ -6,7 +6,8 @@
 
 #include <algorithm>
 
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "remoting/base/capabilities.h"
 #include "remoting/base/logging.h"
 #include "remoting/codec/audio_encoder.h"
@@ -370,6 +371,8 @@ void ClientSession::OnConnectionClosed(
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(connection_.get(), connection);
 
+  HOST_LOG << "Client disconnected: " << client_jid_ << "; error = " << error;
+
   // Ignore any further callbacks.
   weak_factory_.InvalidateWeakPtrs();
 
@@ -391,7 +394,6 @@ void ClientSession::OnConnectionClosed(
   desktop_environment_.reset();
 
   // Notify the ChromotingHost that this client is disconnected.
-  // TODO(sergeyu): Log failure reason?
   event_handler_->OnSessionClosed(this);
 }
 
@@ -501,7 +503,7 @@ scoped_ptr<protocol::ClipboardStub> ClientSession::CreateClipboardProxy() {
 
   return make_scoped_ptr(
       new protocol::ClipboardThreadProxy(client_clipboard_factory_.GetWeakPtr(),
-                                         base::MessageLoopProxy::current()));
+                                         base::ThreadTaskRunnerHandle::Get()));
 }
 
 }  // namespace remoting

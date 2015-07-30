@@ -9,6 +9,7 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "third_party/khronos/EGL/egl.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/ozone/common/egl_util.h"
 #include "ui/ozone/platform/drm/gpu/drm_device_manager.h"
 #include "ui/ozone/platform/drm/gpu/drm_window.h"
@@ -47,8 +48,11 @@ class SingleOverlay : public OverlayCandidatesOzone {
         NOTREACHED();
         return;
       }
+      // 0.01 constant chosen to match DCHECKs in gfx::ToNearestRect and avoid
+      // that code asserting on quads that we accept.
       if (overlay->plane_z_order > 0 &&
-          IsTransformSupported(overlay->transform)) {
+          IsTransformSupported(overlay->transform) &&
+          gfx::IsNearestRectWithinDistance(overlay->display_rect, 0.01f)) {
         overlay->overlay_handled = true;
       }
     }
@@ -74,6 +78,7 @@ GbmSurfaceFactory::GbmSurfaceFactory(bool allow_surfaceless)
 }
 
 GbmSurfaceFactory::~GbmSurfaceFactory() {
+  DCHECK(thread_checker_.CalledOnValidThread());
 }
 
 void GbmSurfaceFactory::InitializeGpu(DrmDeviceManager* drm_device_manager,
@@ -83,23 +88,13 @@ void GbmSurfaceFactory::InitializeGpu(DrmDeviceManager* drm_device_manager,
 }
 
 intptr_t GbmSurfaceFactory::GetNativeDisplay() {
-#if defined(USE_MESA_PLATFORM_NULL)
+  DCHECK(thread_checker_.CalledOnValidThread());
   return EGL_DEFAULT_DISPLAY;
-#else
-  scoped_refptr<GbmDevice> gbm = GetGbmDevice(gfx::kNullAcceleratedWidget);
-  DCHECK(gbm);
-  return reinterpret_cast<intptr_t>(gbm->device());
-#endif
-}
-
-int GbmSurfaceFactory::GetDrmFd() {
-  scoped_refptr<GbmDevice> gbm = GetGbmDevice(gfx::kNullAcceleratedWidget);
-  DCHECK(gbm);
-  return gbm->get_fd();
 }
 
 const int32* GbmSurfaceFactory::GetEGLSurfaceProperties(
     const int32* desired_list) {
+  DCHECK(thread_checker_.CalledOnValidThread());
   static const int32 kConfigAttribs[] = {EGL_BUFFER_SIZE,
                                          32,
                                          EGL_ALPHA_SIZE,
@@ -122,17 +117,20 @@ const int32* GbmSurfaceFactory::GetEGLSurfaceProperties(
 bool GbmSurfaceFactory::LoadEGLGLES2Bindings(
     AddGLLibraryCallback add_gl_library,
     SetGLGetProcAddressProcCallback set_gl_get_proc_address) {
+  DCHECK(thread_checker_.CalledOnValidThread());
   return LoadDefaultEGLGLES2Bindings(add_gl_library, set_gl_get_proc_address);
 }
 
 scoped_ptr<SurfaceOzoneCanvas> GbmSurfaceFactory::CreateCanvasForWidget(
     gfx::AcceleratedWidget widget) {
+  DCHECK(thread_checker_.CalledOnValidThread());
   LOG(FATAL) << "Software rendering mode is not supported with GBM platform";
   return nullptr;
 }
 
 scoped_ptr<SurfaceOzoneEGL> GbmSurfaceFactory::CreateEGLSurfaceForWidget(
     gfx::AcceleratedWidget widget) {
+  DCHECK(thread_checker_.CalledOnValidThread());
   scoped_refptr<GbmDevice> gbm = GetGbmDevice(widget);
   DCHECK(gbm);
 
@@ -147,6 +145,7 @@ scoped_ptr<SurfaceOzoneEGL> GbmSurfaceFactory::CreateEGLSurfaceForWidget(
 scoped_ptr<SurfaceOzoneEGL>
 GbmSurfaceFactory::CreateSurfacelessEGLSurfaceForWidget(
     gfx::AcceleratedWidget widget) {
+  DCHECK(thread_checker_.CalledOnValidThread());
   if (!allow_surfaceless_)
     return nullptr;
 
@@ -179,6 +178,7 @@ scoped_refptr<ui::NativePixmap> GbmSurfaceFactory::CreateNativePixmap(
 
 OverlayCandidatesOzone* GbmSurfaceFactory::GetOverlayCandidates(
     gfx::AcceleratedWidget w) {
+  DCHECK(thread_checker_.CalledOnValidThread());
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kOzoneTestSingleOverlaySupport))
     return new SingleOverlay();
@@ -192,6 +192,7 @@ bool GbmSurfaceFactory::ScheduleOverlayPlane(
     scoped_refptr<NativePixmap> buffer,
     const gfx::Rect& display_bounds,
     const gfx::RectF& crop_rect) {
+  DCHECK(thread_checker_.CalledOnValidThread());
   scoped_refptr<GbmPixmap> pixmap = static_cast<GbmPixmap*>(buffer.get());
   if (!pixmap.get()) {
     LOG(ERROR) << "ScheduleOverlayPlane passed NULL buffer.";
@@ -204,10 +205,12 @@ bool GbmSurfaceFactory::ScheduleOverlayPlane(
 }
 
 bool GbmSurfaceFactory::CanShowPrimaryPlaneAsOverlay() {
+  DCHECK(thread_checker_.CalledOnValidThread());
   return allow_surfaceless_;
 }
 
 bool GbmSurfaceFactory::CanCreateNativePixmap(BufferUsage usage) {
+  DCHECK(thread_checker_.CalledOnValidThread());
   switch (usage) {
     case MAP:
       return false;

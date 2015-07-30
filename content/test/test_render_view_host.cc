@@ -28,9 +28,12 @@ namespace content {
 
 void InitNavigateParams(FrameHostMsg_DidCommitProvisionalLoad_Params* params,
                         int page_id,
+                        int nav_entry_id,
+                        bool did_create_new_entry,
                         const GURL& url,
                         ui::PageTransition transition) {
   params->page_id = page_id;
+  params->nav_entry_id = nav_entry_id;
   params->url = url;
   params->referrer = Referrer();
   params->transition = transition;
@@ -38,6 +41,7 @@ void InitNavigateParams(FrameHostMsg_DidCommitProvisionalLoad_Params* params,
   params->should_update_history = false;
   params->searchable_form_url = GURL();
   params->searchable_form_encoding = std::string();
+  params->did_create_new_entry = did_create_new_entry;
   params->security_info = std::string();
   params->gesture = NavigationGestureUser;
   params->was_within_same_page = false;
@@ -124,8 +128,8 @@ void TestRenderWidgetHostView::CopyFromCompositingSurface(
     const gfx::Rect& src_subrect,
     const gfx::Size& dst_size,
     ReadbackRequestCallback& callback,
-    const SkColorType color_type) {
-  callback.Run(SkBitmap(), content::READBACK_NOT_SUPPORTED);
+    const SkColorType preferred_color_type) {
+  callback.Run(SkBitmap(), content::READBACK_FAILED);
 }
 
 void TestRenderWidgetHostView::CopyFromCompositingSurfaceToVideoFrame(
@@ -219,7 +223,6 @@ TestRenderViewHost::TestRenderViewHost(
                          swapped_out,
                          false /* hidden */,
                          false /* has_initialized_audio_host */),
-      render_view_created_(false),
       delete_counter_(NULL),
       opener_route_id_(MSG_ROUTING_NONE) {
   // TestRenderWidgetHostView installs itself into this->view_ in its
@@ -239,18 +242,19 @@ bool TestRenderViewHost::CreateRenderView(
     int proxy_route_id,
     int32 max_page_id,
     bool window_was_created_with_opener) {
-  DCHECK(!render_view_created_);
-  render_view_created_ = true;
+  DCHECK(!IsRenderViewLive());
+  set_renderer_initialized(true);
+  DCHECK(IsRenderViewLive());
   opener_route_id_ = opener_route_id;
   return true;
 }
 
-bool TestRenderViewHost::IsRenderViewLive() const {
-  return render_view_created_;
+bool TestRenderViewHost::IsFullscreenGranted() const {
+  return RenderViewHostImpl::IsFullscreenGranted();
 }
 
-bool TestRenderViewHost::IsFullscreen() const {
-  return RenderViewHostImpl::IsFullscreen();
+MockRenderProcessHost* TestRenderViewHost::GetProcess() const {
+  return static_cast<MockRenderProcessHost*>(RenderViewHostImpl::GetProcess());
 }
 
 void TestRenderViewHost::SimulateWasHidden() {

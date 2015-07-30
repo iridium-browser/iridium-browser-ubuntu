@@ -114,7 +114,7 @@ URLRequestHttpJob::HttpFilterContext::SdchDictionariesAdvertised() const {
 }
 
 int64 URLRequestHttpJob::HttpFilterContext::GetByteReadCount() const {
-  return job_->filter_input_byte_count();
+  return job_->prefilter_bytes_read();
 }
 
 int URLRequestHttpJob::HttpFilterContext::GetResponseCode() const {
@@ -225,6 +225,10 @@ void URLRequestHttpJob::SetPriority(RequestPriority priority) {
 }
 
 void URLRequestHttpJob::Start() {
+  // TODO(mmenke): Remove ScopedTracker below once crbug.com/456327 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("456327 URLRequestHttpJob::Start"));
+
   DCHECK(!transaction_.get());
 
   // URLRequest::SetReferrer ensures that we do not send username and password
@@ -273,6 +277,13 @@ void URLRequestHttpJob::Kill() {
   weak_factory_.InvalidateWeakPtrs();
   DestroyTransaction();
   URLRequestJob::Kill();
+}
+
+void URLRequestHttpJob::GetConnectionAttempts(ConnectionAttempts* out) const {
+  if (transaction_)
+    transaction_->GetConnectionAttempts(out);
+  else
+    out->clear();
 }
 
 void URLRequestHttpJob::NotifyBeforeSendProxyHeadersCallback(
@@ -398,6 +409,11 @@ void URLRequestHttpJob::DestroyTransaction() {
 }
 
 void URLRequestHttpJob::StartTransaction() {
+  // TODO(mmenke): Remove ScopedTracker below once crbug.com/456327 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "456327 URLRequestHttpJob::StartTransaction"));
+
   if (network_delegate()) {
     OnCallToDelegate();
     int rv = network_delegate()->NotifyBeforeSendHeaders(
@@ -421,6 +437,11 @@ void URLRequestHttpJob::NotifyBeforeSendHeadersCallback(int result) {
 }
 
 void URLRequestHttpJob::MaybeStartTransactionInternal(int result) {
+  // TODO(mmenke): Remove ScopedTracker below once crbug.com/456327 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "456327 URLRequestHttpJob::MaybeStartTransactionInternal"));
+
   OnCallToDelegateComplete();
   if (result == OK) {
     StartTransactionInternal();
@@ -660,7 +681,7 @@ void URLRequestHttpJob::SaveCookiesAndNotifyHeadersComplete(int result) {
   // End of the call started in OnStartCompleted.
   OnCallToDelegateComplete();
 
-  if (result != net::OK) {
+  if (result != OK) {
     std::string source("delegate");
     request_->net_log().AddEvent(NetLog::TYPE_CANCELLED,
                                  NetLog::StringCallback("source", &source));
@@ -708,11 +729,9 @@ void URLRequestHttpJob::SaveNextCookie() {
     options.set_include_httponly();
     options.set_server_time(response_date_);
 
-    net::CookieStore::SetCookiesCallback callback(
-        base::Bind(&URLRequestHttpJob::OnCookieSaved,
-                   weak_factory_.GetWeakPtr(),
-                   save_next_cookie_running,
-                   callback_pending));
+    CookieStore::SetCookiesCallback callback(base::Bind(
+        &URLRequestHttpJob::OnCookieSaved, weak_factory_.GetWeakPtr(),
+        save_next_cookie_running, callback_pending));
 
     // Loop through the cookies as long as SetCookieWithOptionsAsync completes
     // synchronously.
@@ -794,6 +813,10 @@ void URLRequestHttpJob::ProcessStrictTransportSecurityHeader() {
       !security_state)
     return;
 
+  // Don't accept HSTS headers when the hostname is an IP address.
+  if (request_info_.url.HostIsIPAddress())
+    return;
+
   // http://tools.ietf.org/html/draft-ietf-websec-strict-transport-sec:
   //
   //   If a UA receives more than one STS header field in a HTTP response
@@ -817,6 +840,10 @@ void URLRequestHttpJob::ProcessPublicKeyPinsHeader() {
       !security_state)
     return;
 
+  // Don't accept HSTS headers when the hostname is an IP address.
+  if (request_info_.url.HostIsIPAddress())
+    return;
+
   // http://tools.ietf.org/html/draft-ietf-websec-key-pinning:
   //
   //   If a UA receives more than one PKP header field in an HTTP
@@ -829,11 +856,6 @@ void URLRequestHttpJob::ProcessPublicKeyPinsHeader() {
 }
 
 void URLRequestHttpJob::OnStartCompleted(int result) {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/424359 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "424359 URLRequestHttpJob::OnStartCompleted"));
-
   RecordTimer();
 
   // If the request was destroyed, then there is no more work to do.
@@ -881,8 +903,8 @@ void URLRequestHttpJob::OnStartCompleted(int result) {
           headers.get(),
           &override_response_headers_,
           &allowed_unsafe_redirect_url_);
-      if (error != net::OK) {
-        if (error == net::ERR_IO_PENDING) {
+      if (error != OK) {
+        if (error == ERR_IO_PENDING) {
           awaiting_callback_ = true;
         } else {
           std::string source("delegate");
@@ -896,7 +918,7 @@ void URLRequestHttpJob::OnStartCompleted(int result) {
       }
     }
 
-    SaveCookiesAndNotifyHeadersComplete(net::OK);
+    SaveCookiesAndNotifyHeadersComplete(OK);
   } else if (IsCertificateError(result)) {
     // We encountered an SSL certificate error.
     if (result == ERR_SSL_WEAK_SERVER_EPHEMERAL_DH_KEY ||
@@ -936,11 +958,6 @@ void URLRequestHttpJob::OnHeadersReceivedCallback(int result) {
 }
 
 void URLRequestHttpJob::OnReadCompleted(int result) {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/424359 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "424359 URLRequestHttpJob::OnReadCompleted"));
-
   read_in_progress_ = false;
 
   if (ShouldFixMismatchedContentLength(result))
@@ -1257,8 +1274,8 @@ bool URLRequestHttpJob::ShouldFixMismatchedContentLength(int rv) const {
   // the uncompressed size. Although this violates the HTTP spec we want to
   // support it (as IE and FireFox do), but *only* for an exact match.
   // See http://crbug.com/79694.
-  if (rv == net::ERR_CONTENT_LENGTH_MISMATCH ||
-      rv == net::ERR_INCOMPLETE_CHUNKED_ENCODING) {
+  if (rv == ERR_CONTENT_LENGTH_MISMATCH ||
+      rv == ERR_INCOMPLETE_CHUNKED_ENCODING) {
     if (request_ && request_->response_headers()) {
       int64 expected_length = request_->response_headers()->GetContentLength();
       VLOG(1) << __FUNCTION__ << "() "
@@ -1277,11 +1294,6 @@ bool URLRequestHttpJob::ShouldFixMismatchedContentLength(int rv) const {
 
 bool URLRequestHttpJob::ReadRawData(IOBuffer* buf, int buf_size,
                                     int* bytes_read) {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
-  tracked_objects::ScopedTracker tracking_profile1(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "423948 URLRequestHttpJob::ReadRawData1"));
-
   DCHECK_NE(buf_size, 0);
   DCHECK(bytes_read);
   DCHECK(!read_in_progress_);
@@ -1295,15 +1307,8 @@ bool URLRequestHttpJob::ReadRawData(IOBuffer* buf, int buf_size,
 
   if (rv >= 0) {
     *bytes_read = rv;
-    if (!rv) {
-      // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is
-      // fixed.
-      tracked_objects::ScopedTracker tracking_profile2(
-          FROM_HERE_WITH_EXPLICIT_FUNCTION(
-              "423948 URLRequestHttpJob::ReadRawData2"));
-
+    if (!rv)
       DoneWithRequest(FINISHED);
-    }
     return true;
   }
 
@@ -1392,17 +1397,14 @@ void URLRequestHttpJob::UpdatePacketReadTimes() {
   if (!packet_timing_enabled_)
     return;
 
-  if (filter_input_byte_count() <= bytes_observed_in_packets_) {
-    DCHECK_EQ(filter_input_byte_count(), bytes_observed_in_packets_);
-    return;  // No new bytes have arrived.
-  }
+  DCHECK_GT(prefilter_bytes_read(), bytes_observed_in_packets_);
 
   base::Time now(base::Time::Now());
   if (!bytes_observed_in_packets_)
     request_time_snapshot_ = now;
   final_packet_time_ = now;
 
-  bytes_observed_in_packets_ = filter_input_byte_count();
+  bytes_observed_in_packets_ = prefilter_bytes_read();
 }
 
 void URLRequestHttpJob::RecordPacketStats(
@@ -1457,10 +1459,37 @@ void URLRequestHttpJob::RecordPerfHistograms(CompletionCause reason) {
   }
 
   if (response_info_) {
+    bool is_google = request() && HasGoogleHost(request()->url());
+    bool used_quic = response_info_->DidUseQuic();
+    if (is_google) {
+      if (used_quic) {
+        UMA_HISTOGRAM_MEDIUM_TIMES("Net.HttpJob.TotalTime.Quic", total_time);
+      } else {
+        UMA_HISTOGRAM_MEDIUM_TIMES("Net.HttpJob.TotalTime.NotQuic", total_time);
+      }
+    }
     if (response_info_->was_cached) {
       UMA_HISTOGRAM_TIMES("Net.HttpJob.TotalTimeCached", total_time);
+      if (is_google) {
+        if (used_quic) {
+          UMA_HISTOGRAM_MEDIUM_TIMES("Net.HttpJob.TotalTimeCached.Quic",
+                                     total_time);
+        } else {
+          UMA_HISTOGRAM_MEDIUM_TIMES("Net.HttpJob.TotalTimeCached.NotQuic",
+                                     total_time);
+        }
+      }
     } else  {
       UMA_HISTOGRAM_TIMES("Net.HttpJob.TotalTimeNotCached", total_time);
+      if (is_google) {
+        if (used_quic) {
+          UMA_HISTOGRAM_MEDIUM_TIMES("Net.HttpJob.TotalTimeNotCached.Quic",
+                                     total_time);
+        } else {
+          UMA_HISTOGRAM_MEDIUM_TIMES("Net.HttpJob.TotalTimeNotCached.NotQuic",
+                                     total_time);
+        }
+      }
     }
   }
 

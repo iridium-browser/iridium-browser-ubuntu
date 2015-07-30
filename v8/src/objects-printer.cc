@@ -417,7 +417,12 @@ void Map::MapPrint(std::ostream& os) {  // NOLINT
   if (is_deprecated()) os << " - deprecated_map\n";
   if (is_stable()) os << " - stable_map\n";
   if (is_dictionary_map()) os << " - dictionary_map\n";
-  if (is_prototype_map()) os << " - prototype_map\n";
+  if (is_prototype_map()) {
+    os << " - prototype_map\n";
+    os << " - prototype info: " << Brief(prototype_info());
+  } else {
+    os << " - back pointer: " << Brief(GetBackPointer());
+  }
   if (is_hidden_prototype()) os << " - hidden_prototype\n";
   if (has_named_interceptor()) os << " - named_interceptor\n";
   if (has_indexed_interceptor()) os << " - indexed_interceptor\n";
@@ -426,7 +431,6 @@ void Map::MapPrint(std::ostream& os) {  // NOLINT
   if (is_access_check_needed()) os << " - access_check_needed\n";
   if (!is_extensible()) os << " - non-extensible\n";
   if (is_observed()) os << " - observed\n";
-  os << " - back pointer: " << Brief(GetBackPointer());
   os << "\n - instance descriptors " << (owns_descriptors() ? "(own) " : "")
      << "#" << NumberOfOwnDescriptors() << ": "
      << Brief(instance_descriptors());
@@ -716,6 +720,7 @@ void JSArrayBuffer::JSArrayBufferPrint(std::ostream& os) {  // NOLINT
   os << " - map = " << reinterpret_cast<void*>(map()) << "\n";
   os << " - backing_store = " << backing_store() << "\n";
   os << " - byte_length = " << Brief(byte_length());
+  if (was_neutered()) os << " - neutered\n";
   os << "\n";
 }
 
@@ -727,8 +732,9 @@ void JSTypedArray::JSTypedArrayPrint(std::ostream& os) {  // NOLINT
   os << "\n - byte_offset = " << Brief(byte_offset());
   os << "\n - byte_length = " << Brief(byte_length());
   os << "\n - length = " << Brief(length());
+  if (WasNeutered()) os << " - neutered\n";
   os << "\n";
-  PrintElements(os);
+  if (!WasNeutered()) PrintElements(os);
 }
 
 
@@ -738,6 +744,7 @@ void JSDataView::JSDataViewPrint(std::ostream& os) {  // NOLINT
   os << " - buffer =" << Brief(buffer());
   os << "\n - byte_offset = " << Brief(byte_offset());
   os << "\n - byte_length = " << Brief(byte_length());
+  if (WasNeutered()) os << " - neutered\n";
   os << "\n";
 }
 
@@ -870,6 +877,15 @@ void ExecutableAccessorInfo::ExecutableAccessorInfoPrint(
 void Box::BoxPrint(std::ostream& os) {  // NOLINT
   HeapObject::PrintHeader(os, "Box");
   os << "\n - value: " << Brief(value());
+  os << "\n";
+}
+
+
+void PrototypeInfo::PrototypeInfoPrint(std::ostream& os) {  // NOLINT
+  HeapObject::PrintHeader(os, "PrototypeInfo");
+  os << "\n - prototype users: " << Brief(prototype_users());
+  os << "\n - validity cell: " << Brief(validity_cell());
+  os << "\n - constructor name: " << Brief(constructor_name());
   os << "\n";
 }
 

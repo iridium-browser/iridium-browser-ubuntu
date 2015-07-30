@@ -5,7 +5,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/json/json_reader.h"
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/extensions/api/gcd_private/gcd_private_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -59,6 +59,8 @@ const char kGCDResponse[] =
     "   \"maxRole\": \"owner\""
     "  }}]}";
 
+#if defined(ENABLE_MDNS)
+
 const char kPrivetInfoResponse[] =
     "{\"version\":\"3.0\","
     "\"endpoints\":{\"httpsPort\": 443},"
@@ -67,8 +69,6 @@ const char kPrivetInfoResponse[] =
     "  \"pairing\":[\"embeddedCode\"],"
     "  \"crypto\":[\"p224_spake2\"]"
     "}}";
-
-#if defined(ENABLE_MDNS)
 
 const uint8 kAnnouncePacket[] = {
     // Header
@@ -283,15 +283,26 @@ IN_PROC_BROWSER_TEST_F(GcdPrivateAPITest, GetCloudList) {
   EXPECT_TRUE(RunExtensionSubtest("gcd_private/api", "get_cloud_list.html"));
 }
 
+#if defined(ENABLE_MDNS)
+IN_PROC_BROWSER_TEST_F(GcdPrivateAPITest, DeviceInfo) {
+  test_service_discovery_client_->SimulateReceive(kAnnouncePacket,
+                                                  sizeof(kAnnouncePacket));
+  url_fetcher_factory_.SetFakeResponse(GURL("http://1.2.3.4:8888/privet/info"),
+                                       kPrivetInfoResponse,
+                                       net::HTTP_OK,
+                                       net::URLRequestStatus::SUCCESS);
+  EXPECT_TRUE(RunExtensionSubtest("gcd_private/api", "device_info.html"));
+}
+
 IN_PROC_BROWSER_TEST_F(GcdPrivateAPITest, Session) {
-  url_fetcher_factory_.SetFakeResponse(GURL("http://1.2.3.4:9090/privet/info"),
+  test_service_discovery_client_->SimulateReceive(kAnnouncePacket,
+                                                  sizeof(kAnnouncePacket));
+  url_fetcher_factory_.SetFakeResponse(GURL("http://1.2.3.4:8888/privet/info"),
                                        kPrivetInfoResponse,
                                        net::HTTP_OK,
                                        net::URLRequestStatus::SUCCESS);
   EXPECT_TRUE(RunExtensionSubtest("gcd_private/api", "session.html"));
 }
-
-#if defined(ENABLE_MDNS)
 
 IN_PROC_BROWSER_TEST_F(GcdPrivateAPITest, AddBefore) {
   test_service_discovery_client_->SimulateReceive(kAnnouncePacket,
@@ -302,7 +313,7 @@ IN_PROC_BROWSER_TEST_F(GcdPrivateAPITest, AddBefore) {
 }
 
 IN_PROC_BROWSER_TEST_F(GcdPrivateAPITest, AddAfter) {
-  base::MessageLoopProxy::current()->PostDelayedTask(
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&local_discovery::TestServiceDiscoveryClient::SimulateReceive,
                  test_service_discovery_client_,
@@ -318,7 +329,7 @@ IN_PROC_BROWSER_TEST_F(GcdPrivateAPITest, AddRemove) {
   test_service_discovery_client_->SimulateReceive(kAnnouncePacket,
                                                   sizeof(kAnnouncePacket));
 
-  base::MessageLoopProxy::current()->PostDelayedTask(
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&local_discovery::TestServiceDiscoveryClient::SimulateReceive,
                  test_service_discovery_client_,

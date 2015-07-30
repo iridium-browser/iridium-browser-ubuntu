@@ -54,8 +54,8 @@ public:
     virtual Frame* frame() const = 0;
 
     // ScriptWrappable overrides:
-    v8::Handle<v8::Object> wrap(v8::Handle<v8::Object> creationContext, v8::Isolate*) override;
-    v8::Handle<v8::Object> associateWithWrapper(v8::Isolate*, const WrapperTypeInfo*, v8::Handle<v8::Object> wrapper) override;
+    v8::Local<v8::Object> wrap(v8::Isolate*, v8::Local<v8::Object> creationContext) override final;
+    v8::Local<v8::Object> associateWithWrapper(v8::Isolate*, const WrapperTypeInfo*, v8::Local<v8::Object> wrapper) override final;
 
     // EventTarget overrides:
     const AtomicString& interfaceName() const override;
@@ -188,11 +188,9 @@ public:
 
     void postMessage(PassRefPtr<SerializedScriptValue> message, const MessagePortArray*, const String& targetOrigin, LocalDOMWindow* source, ExceptionState&);
 
-    // FIXME: These should be non-virtual, but this is blocked on the security
-    // origin replication work.
-    virtual String sanitizedCrossDomainAccessErrorMessage(LocalDOMWindow* callingWindow) = 0;
-    virtual String crossDomainAccessErrorMessage(LocalDOMWindow* callingWindow) = 0;
-    virtual bool isInsecureScriptAccess(DOMWindow& callingWindow, const String& urlString);
+    String sanitizedCrossDomainAccessErrorMessage(LocalDOMWindow* callingWindow);
+    String crossDomainAccessErrorMessage(LocalDOMWindow* callingWindow);
+    bool isInsecureScriptAccess(LocalDOMWindow& callingWindow, const String& urlString);
 
     // FIXME: When this DOMWindow is no longer the active DOMWindow (i.e.,
     // when its document is no longer the document that is displayed in its
@@ -220,6 +218,16 @@ public:
     DEFINE_ATTRIBUTE_EVENT_LISTENER(touchmove);
     DEFINE_ATTRIBUTE_EVENT_LISTENER(touchend);
     DEFINE_ATTRIBUTE_EVENT_LISTENER(touchcancel);
+
+protected:
+    DOMWindow();
+
+    // Set to true when close() has been called. Needed for
+    // |window.closed| determinism; having it return 'true'
+    // only after the layout widget's deferred window close
+    // operation has been performed, exposes (confusing)
+    // implementation details to scripts.
+    bool m_windowIsClosing;
 
 private:
     mutable RefPtrWillBeMember<Location> m_location;

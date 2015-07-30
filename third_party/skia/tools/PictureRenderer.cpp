@@ -40,7 +40,7 @@
 #include "sk_tool_utils.h"
 
 static inline SkScalar scalar_log2(SkScalar x) {
-    static const SkScalar log2_conversion_factor = SkScalarDiv(1, SkScalarLog(2));
+    static const SkScalar log2_conversion_factor = SkScalarInvert(SkScalarLog(2));
 
     return SkScalarLog(x) * log2_conversion_factor;
 }
@@ -156,7 +156,7 @@ SkCanvas* PictureRenderer::setupCanvas(int width, int height) {
                 desc.fWidth = width;
                 desc.fHeight = height;
                 desc.fSampleCnt = fSampleCount;
-                target.reset(fGrContext->createTexture(desc, false, NULL, 0));
+                target.reset(fGrContext->textureProvider()->createTexture(desc, false, NULL, 0));
             }
 
             uint32_t flags = fUseDFText ? SkSurfaceProps::kUseDistanceFieldFonts_Flag : 0;

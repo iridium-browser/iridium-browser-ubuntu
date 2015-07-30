@@ -51,13 +51,11 @@ class GmailMouseScrollPage(KeyDesktopMoveCasesPage):
         'window.__scrollableElementForTelemetry != null')
     scrollbar_x, start_y, end_y = self._CalculateScrollBarRatios(action_runner)
 
-    interaction = action_runner.BeginGestureInteraction(
-        'DragAction')
-    action_runner.DragPage(left_start_ratio=scrollbar_x,
-        top_start_ratio=start_y, left_end_ratio=scrollbar_x,
-        top_end_ratio=end_y, speed_in_pixels_per_second=100,
-        element_function='window.__scrollableElementForTelemetry')
-    interaction.End()
+    with action_runner.CreateGestureInteraction('DragAction'):
+      action_runner.DragPage(left_start_ratio=scrollbar_x,
+          top_start_ratio=start_y, left_end_ratio=scrollbar_x,
+          top_end_ratio=end_y, speed_in_pixels_per_second=100,
+          element_function='window.__scrollableElementForTelemetry')
 
   def _CalculateScrollBarRatios(self, action_runner):
     viewport_height = float(action_runner.EvaluateJavaScript(
@@ -103,11 +101,10 @@ class GoogleMapsPage(KeyDesktopMoveCasesPage):
   def RunPageInteractions(self, action_runner):
     for _ in range(3):
       action_runner.Wait(2)
-      interaction = action_runner.BeginGestureInteraction(
-          'DragAction', repeatable=True)
-      action_runner.DragPage(left_start_ratio=0.5, top_start_ratio=0.75,
-                             left_end_ratio=0.75, top_end_ratio=0.5)
-      interaction.End()
+      with action_runner.CreateGestureInteraction(
+          'DragAction', repeatable=True):
+        action_runner.DragPage(left_start_ratio=0.5, top_start_ratio=0.75,
+                               left_end_ratio=0.75, top_end_ratio=0.5)
     # TODO(ssid): Add zoom gestures after fixing bug crbug.com/462214.
 
 

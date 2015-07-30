@@ -28,8 +28,7 @@ class UI_TOUCH_SELECTION_EXPORT TouchSelectionControllerClient {
   virtual void MoveRangeSelectionExtent(const gfx::PointF& extent) = 0;
   virtual void SelectBetweenCoordinates(const gfx::PointF& base,
                                         const gfx::PointF& extent) = 0;
-  virtual void OnSelectionEvent(SelectionEventType event,
-                                const gfx::PointF& position) = 0;
+  virtual void OnSelectionEvent(SelectionEventType event) = 0;
   virtual scoped_ptr<TouchHandleDrawable> CreateDrawable() = 0;
 };
 
@@ -37,6 +36,12 @@ class UI_TOUCH_SELECTION_EXPORT TouchSelectionControllerClient {
 class UI_TOUCH_SELECTION_EXPORT TouchSelectionController
     : public TouchHandleClient {
  public:
+  enum ActiveStatus {
+    INACTIVE,
+    INSERTION_ACTIVE,
+    SELECTION_ACTIVE,
+  };
+
   TouchSelectionController(TouchSelectionControllerClient* client,
                            base::TimeDelta tap_timeout,
                            float tap_slop,
@@ -56,11 +61,11 @@ class UI_TOUCH_SELECTION_EXPORT TouchSelectionController
 
   // To be called before forwarding a tap event. This allows automatically
   // showing the insertion handle from subsequent bounds changes.
-  void OnTapEvent();
+  bool WillHandleTapEvent(const gfx::PointF& location);
 
   // To be called before forwarding a longpress event. This allows automatically
   // showing the selection or insertion handles from subsequent bounds changes.
-  void OnLongPressEvent();
+  bool WillHandleLongPressEvent(const gfx::PointF& location);
 
   // Allow showing the selection handles from the most recent selection bounds
   // update (if valid), or a future valid bounds update.
@@ -83,6 +88,26 @@ class UI_TOUCH_SELECTION_EXPORT TouchSelectionController
   // Returns true if an animation is active and requires further ticking.
   bool Animate(base::TimeTicks animate_time);
 
+  // Returns the rect between the two active selection bounds. If just one of
+  // the bounds is visible, the rect is simply the (one-dimensional) rect of
+  // that bound. If no selection is active, an empty rect will be returned.
+  gfx::RectF GetRectBetweenBounds() const;
+
+  // Returns the visible rect of specified touch handle. For an active insertion
+  // these values will be identical.
+  gfx::RectF GetStartHandleRect() const;
+  gfx::RectF GetEndHandleRect() const;
+
+  // Returns the focal point of the start and end bounds, as defined by
+  // their bottom coordinate.
+  const gfx::PointF& GetStartPosition() const;
+  const gfx::PointF& GetEndPosition() const;
+
+  const SelectionBound& start() const { return start_; }
+  const SelectionBound& end() const { return end_; }
+
+  ActiveStatus active_status() const { return active_status_; }
+
  private:
   enum InputEventType { TAP, LONG_PRESS, INPUT_EVENT_TYPE_NONE };
 
@@ -99,18 +124,19 @@ class UI_TOUCH_SELECTION_EXPORT TouchSelectionController
 
   void ShowInsertionHandleAutomatically();
   void ShowSelectionHandlesAutomatically();
+  bool WillHandleTapOrLongPress(const gfx::PointF& location);
 
   void OnInsertionChanged();
   void OnSelectionChanged();
 
-  void ActivateInsertion();
+  // Returns true if insertion mode was newly (re)activated.
+  bool ActivateInsertionIfNecessary();
   void DeactivateInsertion();
-  void ActivateSelection();
+  // Returns true if selection mode was newly (re)activated.
+  bool ActivateSelectionIfNecessary();
   void DeactivateSelection();
-  void ResetCachedValuesIfInactive();
+  void ForceNextUpdateIfInactive();
 
-  const gfx::PointF& GetStartPosition() const;
-  const gfx::PointF& GetEndPosition() const;
   gfx::Vector2dF GetStartLineOffset() const;
   gfx::Vector2dF GetEndLineOffset() const;
   bool GetStartVisible() const;
@@ -123,6 +149,10 @@ class UI_TOUCH_SELECTION_EXPORT TouchSelectionController
   const base::TimeDelta tap_timeout_;
   const float tap_slop_;
 
+  // Whether to force an update on the next selection event even if the
+  // cached selection matches the new selection.
+  bool force_next_update_;
+
   // Controls whether an insertion handle is shown on a tap for an empty
   // editable text.
   bool show_on_tap_for_empty_editable_;
@@ -134,13 +164,13 @@ class UI_TOUCH_SELECTION_EXPORT TouchSelectionController
   TouchHandleOrientation start_orientation_;
   TouchHandleOrientation end_orientation_;
 
+  ActiveStatus active_status_;
+
   scoped_ptr<TouchHandle> insertion_handle_;
-  bool is_insertion_active_;
   bool activate_insertion_automatically_;
 
   scoped_ptr<TouchHandle> start_selection_handle_;
   scoped_ptr<TouchHandle> end_selection_handle_;
-  bool is_selection_active_;
   bool activate_selection_automatically_;
 
   bool selection_empty_;

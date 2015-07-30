@@ -92,10 +92,10 @@ private:
     bool inViewport() const { return m_inViewport; }
     bool parseViewportProperty(CSSPropertyID propId, bool important);
     bool parseViewportShorthand(CSSPropertyID propId, CSSPropertyID first, CSSPropertyID second, bool important);
+    bool parseFontFaceDescriptor(CSSPropertyID);
 
     KURL completeURL(const String& url) const;
 
-    void addPropertyWithPrefixingVariant(CSSPropertyID, PassRefPtrWillBeRawPtr<CSSValue>, bool important, bool implicit = false);
     void addProperty(CSSPropertyID, PassRefPtrWillBeRawPtr<CSSValue>, bool important, bool implicit = false);
     void rollbackLastProperties(int num);
     void addExpandedPropertyForValue(CSSPropertyID propId, PassRefPtrWillBeRawPtr<CSSValue>, bool);
@@ -143,10 +143,12 @@ private:
     PassRefPtrWillBeRawPtr<CSSValue> parseAnimationTimingFunction();
 
     bool parseCubicBezierTimingFunctionValue(CSSParserValueList*& args, double& result);
-    PassRefPtrWillBeRawPtr<CSSValue> parseAnimationProperty(CSSPropertyID);
-    PassRefPtrWillBeRawPtr<CSSValueList> parseAnimationPropertyList(CSSPropertyID);
-    bool parseTransitionShorthand(CSSPropertyID, bool important);
-    bool parseAnimationShorthand(CSSPropertyID, bool important);
+
+    // Legacy parsing allows <string>s for animation-name
+    PassRefPtrWillBeRawPtr<CSSValue> parseAnimationProperty(CSSPropertyID, bool useLegacyParsing);
+    PassRefPtrWillBeRawPtr<CSSValueList> parseAnimationPropertyList(CSSPropertyID, bool useLegacyParsing);
+    bool parseAnimationShorthand(bool useLegacyParsing, bool important);
+    bool parseTransitionShorthand(bool important);
 
     PassRefPtrWillBeRawPtr<CSSValue> parseColumnWidth();
     PassRefPtrWillBeRawPtr<CSSValue> parseColumnCount();
@@ -245,8 +247,8 @@ private:
     PassRefPtrWillBeRawPtr<CSSFunctionValue> parseBuiltinFilterArguments(CSSParserValueList*, CSSValueID);
 
     PassRefPtrWillBeRawPtr<CSSValueList> parseTransformOrigin();
-    PassRefPtrWillBeRawPtr<CSSValueList> parseTransform(CSSPropertyID);
-    PassRefPtrWillBeRawPtr<CSSValue> parseTransformValue(CSSPropertyID, CSSParserValue*);
+    PassRefPtrWillBeRawPtr<CSSValueList> parseTransform(bool useLegacyParsing);
+    PassRefPtrWillBeRawPtr<CSSValue> parseTransformValue(bool useLegacyParsing, CSSParserValue*);
 
     PassRefPtrWillBeRawPtr<CSSValue> parseMotionPath();
     PassRefPtrWillBeRawPtr<CSSValue> parseMotionRotation();
@@ -377,7 +379,7 @@ private:
     RefPtrWillBeMember<CSSCalcValue> m_parsedCalculation;
 };
 
-CSSPropertyID cssPropertyID(const CSSParserString&);
+CSSPropertyID unresolvedCSSPropertyID(const CSSParserString&);
 CSSPropertyID cssPropertyID(const String&);
 CSSValueID cssValueKeywordID(const CSSParserString&);
 

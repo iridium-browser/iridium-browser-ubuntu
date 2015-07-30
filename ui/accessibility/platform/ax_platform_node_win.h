@@ -33,7 +33,7 @@ AXPlatformNodeWin
     COM_INTERFACE_ENTRY(IServiceProvider)
   END_COM_MAP()
 
-  virtual ~AXPlatformNodeWin();
+  ~AXPlatformNodeWin() override;
 
   // AXPlatformNode overrides.
   void Destroy() override;
@@ -48,67 +48,69 @@ AXPlatformNodeWin
   //
 
   // Retrieves the child element or child object at a given point on the screen.
-  virtual STDMETHODIMP accHitTest(LONG x_left, LONG y_top, VARIANT* child);
+  STDMETHODIMP accHitTest(LONG x_left, LONG y_top, VARIANT* child) override;
 
   // Performs the object's default action.
-  STDMETHODIMP accDoDefaultAction(VARIANT var_id);
+  STDMETHODIMP accDoDefaultAction(VARIANT var_id) override;
 
   // Retrieves the specified object's current screen location.
   STDMETHODIMP accLocation(LONG* x_left,
                            LONG* y_top,
                            LONG* width,
                            LONG* height,
-                           VARIANT var_id);
+                           VARIANT var_id) override;
 
   // Traverses to another UI element and retrieves the object.
-  STDMETHODIMP accNavigate(LONG nav_dir, VARIANT start, VARIANT* end);
+  STDMETHODIMP accNavigate(LONG nav_dir, VARIANT start, VARIANT* end) override;
 
   // Retrieves an IDispatch interface pointer for the specified child.
-  virtual STDMETHODIMP get_accChild(VARIANT var_child, IDispatch** disp_child);
+  STDMETHODIMP get_accChild(VARIANT var_child, IDispatch** disp_child) override;
 
   // Retrieves the number of accessible children.
-  virtual STDMETHODIMP get_accChildCount(LONG* child_count);
+  STDMETHODIMP get_accChildCount(LONG* child_count) override;
 
   // Retrieves a string that describes the object's default action.
-  STDMETHODIMP get_accDefaultAction(VARIANT var_id, BSTR* default_action);
+  STDMETHODIMP get_accDefaultAction(VARIANT var_id,
+                                    BSTR* default_action) override;
 
   // Retrieves the tooltip description.
-  STDMETHODIMP get_accDescription(VARIANT var_id, BSTR* desc);
+  STDMETHODIMP get_accDescription(VARIANT var_id, BSTR* desc) override;
 
   // Retrieves the object that has the keyboard focus.
-  STDMETHODIMP get_accFocus(VARIANT* focus_child);
+  STDMETHODIMP get_accFocus(VARIANT* focus_child) override;
 
   // Retrieves the specified object's shortcut.
-  STDMETHODIMP get_accKeyboardShortcut(VARIANT var_id, BSTR* access_key);
+  STDMETHODIMP get_accKeyboardShortcut(VARIANT var_id,
+                                       BSTR* access_key) override;
 
   // Retrieves the name of the specified object.
-  STDMETHODIMP get_accName(VARIANT var_id, BSTR* name);
+  STDMETHODIMP get_accName(VARIANT var_id, BSTR* name) override;
 
   // Retrieves the IDispatch interface of the object's parent.
-  STDMETHODIMP get_accParent(IDispatch** disp_parent);
+  STDMETHODIMP get_accParent(IDispatch** disp_parent) override;
 
   // Retrieves information describing the role of the specified object.
-  STDMETHODIMP get_accRole(VARIANT var_id, VARIANT* role);
+  STDMETHODIMP get_accRole(VARIANT var_id, VARIANT* role) override;
 
   // Retrieves the current state of the specified object.
-  STDMETHODIMP get_accState(VARIANT var_id, VARIANT* state);
+  STDMETHODIMP get_accState(VARIANT var_id, VARIANT* state) override;
 
   // Gets the help string for the specified object.
-  STDMETHODIMP get_accHelp(VARIANT var_id, BSTR* help);
+  STDMETHODIMP get_accHelp(VARIANT var_id, BSTR* help) override;
 
   // Retrieve or set the string value associated with the specified object.
   // Setting the value is not typically used by screen readers, but it's
   // used frequently by automation software.
-  STDMETHODIMP get_accValue(VARIANT var_id, BSTR* value);
-  STDMETHODIMP put_accValue(VARIANT var_id, BSTR new_value);
+  STDMETHODIMP get_accValue(VARIANT var_id, BSTR* value) override;
+  STDMETHODIMP put_accValue(VARIANT var_id, BSTR new_value) override;
 
   // IAccessible methods not implemented.
-  STDMETHODIMP get_accSelection(VARIANT* selected);
-  STDMETHODIMP accSelect(LONG flags_sel, VARIANT var_id);
+  STDMETHODIMP get_accSelection(VARIANT* selected) override;
+  STDMETHODIMP accSelect(LONG flags_sel, VARIANT var_id) override;
   STDMETHODIMP get_accHelpTopic(BSTR* help_file,
                                 VARIANT var_id,
-                                LONG* topic_id);
-  STDMETHODIMP put_accName(VARIANT var_id, BSTR put_name);
+                                LONG* topic_id) override;
+  STDMETHODIMP put_accName(VARIANT var_id, BSTR put_name) override;
 
   //
   // IAccessible2 methods.
@@ -135,58 +137,34 @@ AXPlatformNodeWin
   // IAccessible2 methods not implemented.
   //
 
-  STDMETHODIMP get_attribute(BSTR name, VARIANT* attribute) override {
-    return E_NOTIMPL;
-  }
-  STDMETHODIMP get_extendedRole(BSTR* extended_role) override {
-    return E_NOTIMPL;
-  }
-  STDMETHODIMP get_nRelations(LONG* n_relations) override { return E_NOTIMPL; }
+  STDMETHODIMP get_attribute(BSTR name, VARIANT* attribute) override;
+  STDMETHODIMP get_extendedRole(BSTR* extended_role) override;
+  STDMETHODIMP get_nRelations(LONG* n_relations) override;
   STDMETHODIMP get_relation(LONG relation_index,
-                            IAccessibleRelation** relation) override {
-    return E_NOTIMPL;
-  }
+                            IAccessibleRelation** relation) override;
   STDMETHODIMP get_relations(LONG max_relations,
                              IAccessibleRelation** relations,
-                             LONG* n_relations) override {
-    return E_NOTIMPL;
-  }
-  STDMETHODIMP scrollTo(enum IA2ScrollType scroll_type) override {
-    return E_NOTIMPL;
-  }
+                             LONG* n_relations) override;
+  STDMETHODIMP scrollTo(enum IA2ScrollType scroll_type) override;
   STDMETHODIMP scrollToPoint(enum IA2CoordinateType coordinate_type,
                              LONG x,
-                             LONG y) override {
-    return E_NOTIMPL;
-  }
+                             LONG y) override;
   STDMETHODIMP get_groupPosition(LONG* group_level,
                                  LONG* similar_items_in_group,
-                                 LONG* position_in_group) override {
-    return E_NOTIMPL;
-  }
+                                 LONG* position_in_group) override;
   STDMETHODIMP get_localizedExtendedRole(
-      BSTR* localized_extended_role) override {
-    return E_NOTIMPL;
-  }
-  STDMETHODIMP get_nExtendedStates(LONG* n_extended_states) override {
-    return E_NOTIMPL;
-  }
+      BSTR* localized_extended_role) override;
+  STDMETHODIMP get_nExtendedStates(LONG* n_extended_states) override;
   STDMETHODIMP get_extendedStates(LONG max_extended_states,
                                   BSTR** extended_states,
-                                  LONG* n_extended_states) override {
-    return E_NOTIMPL;
-  }
+                                  LONG* n_extended_states) override;
   STDMETHODIMP get_localizedExtendedStates(
       LONG max_localized_extended_states,
       BSTR** localized_extended_states,
-      LONG* n_localized_extended_states) override {
-    return E_NOTIMPL;
-  }
-  STDMETHODIMP get_locale(IA2Locale* locale) override { return E_NOTIMPL; }
+      LONG* n_localized_extended_states) override;
+  STDMETHODIMP get_locale(IA2Locale* locale) override;
   STDMETHODIMP get_accessibleWithCaret(IUnknown** accessible,
-                                       long* caret_offset) override {
-    return E_NOTIMPL;
-  }
+                                       long* caret_offset) override;
 
   //
   // IAccessibleText methods.
@@ -233,56 +211,40 @@ AXPlatformNodeWin
   // IAccessibleText methods not implemented.
   //
 
-  STDMETHODIMP get_newText(IA2TextSegment* new_text) override {
-    return E_NOTIMPL;
-  }
-  STDMETHODIMP get_oldText(IA2TextSegment* old_text) override {
-    return E_NOTIMPL;
-  }
-  STDMETHODIMP addSelection(LONG start_offset, LONG end_offset) override {
-    return E_NOTIMPL;
-  }
+  STDMETHODIMP get_newText(IA2TextSegment* new_text) override;
+  STDMETHODIMP get_oldText(IA2TextSegment* old_text) override;
+  STDMETHODIMP addSelection(LONG start_offset, LONG end_offset) override;
   STDMETHODIMP get_attributes(LONG offset,
                               LONG* start_offset,
                               LONG* end_offset,
-                              BSTR* text_attributes) override {
-    return E_NOTIMPL;
-  }
+                              BSTR* text_attributes) override;
   STDMETHODIMP get_characterExtents(LONG offset,
                                     enum IA2CoordinateType coord_type,
                                     LONG* x,
                                     LONG* y,
                                     LONG* width,
-                                    LONG* height) override {
-    return E_NOTIMPL;
-  }
-  STDMETHODIMP removeSelection(LONG selection_index) override {
-    return E_NOTIMPL;
-  }
-  STDMETHODIMP setCaretOffset(LONG offset) override { return E_NOTIMPL; }
+                                    LONG* height) override;
+  STDMETHODIMP removeSelection(LONG selection_index) override;
+  STDMETHODIMP setCaretOffset(LONG offset) override;
   STDMETHODIMP setSelection(LONG selection_index,
                             LONG start_offset,
-                            LONG end_offset) override {
-    return E_NOTIMPL;
-  }
+                            LONG end_offset) override;
   STDMETHODIMP scrollSubstringTo(LONG start_index,
                                  LONG end_index,
-                                 enum IA2ScrollType scroll_type) override {
-    return E_NOTIMPL;
-  }
+                                 enum IA2ScrollType scroll_type) override;
   STDMETHODIMP scrollSubstringToPoint(LONG start_index,
                                       LONG end_index,
                                       enum IA2CoordinateType coordinate_type,
                                       LONG x,
-                                      LONG y) override {
-    return E_NOTIMPL;
-  }
+                                      LONG y) override;
 
   //
   // IServiceProvider methods.
   //
 
-  STDMETHODIMP QueryService(REFGUID guidService, REFIID riid, void** object);
+  STDMETHODIMP QueryService(REFGUID guidService,
+                            REFIID riid,
+                            void** object) override;
 
  protected:
   AXPlatformNodeWin();

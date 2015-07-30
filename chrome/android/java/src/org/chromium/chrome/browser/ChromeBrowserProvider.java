@@ -23,23 +23,22 @@ import android.os.Parcelable;
 import android.os.UserHandle;
 import android.preference.PreferenceManager;
 import android.provider.BaseColumns;
-import android.provider.Browser;
-import android.provider.Browser.BookmarkColumns;
-import android.provider.Browser.SearchColumns;
 import android.text.TextUtils;
 import android.util.Log;
+import android.util.LongSparseArray;
 
 import org.chromium.base.CalledByNative;
-import org.chromium.base.CalledByNativeUnchecked;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.annotations.CalledByNativeUnchecked;
 import org.chromium.base.annotations.SuppressFBWarnings;
+import org.chromium.chrome.browser.bookmark.BookmarkColumns;
+import org.chromium.chrome.browser.bookmark.SearchColumns;
 import org.chromium.chrome.browser.database.SQLiteCursor;
 import org.chromium.sync.AndroidSyncSettings;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Vector;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -50,6 +49,25 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public class ChromeBrowserProvider extends ContentProvider {
     private static final String TAG = "ChromeBrowserProvider";
+
+    /**
+     * A projection of {@link #SEARCHES_URI} that contains {@link SearchColumns#ID},
+     * {@link SearchColumns#SEARCH}, and {@link SearchColumns#DATE}.
+     */
+    @VisibleForTesting
+    @SuppressFBWarnings("MS_PKGPROTECT")
+    public static final String[] SEARCHES_PROJECTION = new String[] {
+            // if you change column order you must also change indices below
+            SearchColumns.ID, // 0
+            SearchColumns.SEARCH, // 1
+            SearchColumns.DATE, // 2
+    };
+
+    /* these indices dependent on SEARCHES_PROJECTION */
+    @VisibleForTesting
+    public static final int SEARCHES_PROJECTION_SEARCH_INDEX = 1;
+    @VisibleForTesting
+    public static final int SEARCHES_PROJECTION_DATE_INDEX = 2;
 
     // The permission required for using the bookmark folders API. Android build system does
     // not generate Manifest.java for java libraries, hence use the permission name string. When
@@ -151,13 +169,13 @@ public class ChromeBrowserProvider extends ContentProvider {
     // TODO : Using Android.provider.Browser.HISTORY_PROJECTION once THUMBNAIL,
     // TOUCH_ICON, and USER_ENTERED fields are supported.
     private static final String[] BOOKMARK_DEFAULT_PROJECTION = new String[] {
-        BookmarkColumns._ID, BookmarkColumns.URL, BookmarkColumns.VISITS,
+        BookmarkColumns.ID, BookmarkColumns.URL, BookmarkColumns.VISITS,
         BookmarkColumns.DATE, BookmarkColumns.BOOKMARK, BookmarkColumns.TITLE,
         BookmarkColumns.FAVICON, BookmarkColumns.CREATED
     };
 
     private static final String[] SUGGEST_PROJECTION = new String[] {
-        BookmarkColumns._ID,
+        BookmarkColumns.ID,
         BookmarkColumns.TITLE,
         BookmarkColumns.URL,
         BookmarkColumns.DATE,
@@ -273,7 +291,7 @@ public class ChromeBrowserProvider extends ContentProvider {
         return sb.toString();
     }
 
-    private String getReadWritePermissionNameForBookmarkFolders() {
+    protected String getReadWritePermissionNameForBookmarkFolders() {
         return getContext().getApplicationContext().getPackageName() + ".permission."
                 + PERMISSION_READ_WRITE_BOOKMARKS;
     }
@@ -482,10 +500,10 @@ public class ChromeBrowserProvider extends ContentProvider {
         switch (match) {
             case URI_MATCH_BOOKMARKS_ID:
                 String url = null;
-                if (values.containsKey(Browser.BookmarkColumns.URL)) {
-                    url = values.getAsString(Browser.BookmarkColumns.URL);
+                if (values.containsKey(BookmarkColumns.URL)) {
+                    url = values.getAsString(BookmarkColumns.URL);
                 }
-                String title = values.getAsString(Browser.BookmarkColumns.TITLE);
+                String title = values.getAsString(BookmarkColumns.TITLE);
                 long parentId = INVALID_BOOKMARK_ID;
                 if (values.containsKey(BOOKMARK_PARENT_ID_PARAM)) {
                     parentId = values.getAsLong(BOOKMARK_PARENT_ID_PARAM);
@@ -556,8 +574,8 @@ public class ChromeBrowserProvider extends ContentProvider {
     }
 
     private long addBookmark(ContentValues values) {
-        String url = values.getAsString(Browser.BookmarkColumns.URL);
-        String title = values.getAsString(Browser.BookmarkColumns.TITLE);
+        String url = values.getAsString(BookmarkColumns.URL);
+        String title = values.getAsString(BookmarkColumns.TITLE);
         boolean isFolder = false;
         if (values.containsKey(BOOKMARK_IS_FOLDER_PARAM)) {
             isFolder = values.getAsBoolean(BOOKMARK_IS_FOLDER_PARAM);
@@ -966,11 +984,11 @@ public class ChromeBrowserProvider extends ContentProvider {
         }
 
         public static final Creator<BookmarkNode> CREATOR = new Creator<BookmarkNode>() {
-            private HashMap<Long, BookmarkNode> mNodeMap;
+            private LongSparseArray<BookmarkNode> mNodeMap;
 
             @Override
             public BookmarkNode createFromParcel(Parcel source) {
-                mNodeMap = new HashMap<Long, BookmarkNode>();
+                mNodeMap = new LongSparseArray<>();
                 long currentNodeId = source.readLong();
                 readNodeContentsRecursive(source);
                 BookmarkNode node = getNode(currentNodeId);
@@ -986,7 +1004,7 @@ public class ChromeBrowserProvider extends ContentProvider {
             private BookmarkNode getNode(long id) {
                 if (id == INVALID_BOOKMARK_ID) return null;
                 Long nodeId = Long.valueOf(id);
-                if (!mNodeMap.containsKey(nodeId)) {
+                if (mNodeMap.indexOfKey(nodeId) < 0) {
                     Log.e(TAG, "Invalid BookmarkNode hierarchy. Unknown id " + id);
                     return null;
                 }
@@ -1018,7 +1036,7 @@ public class ChromeBrowserProvider extends ContentProvider {
                 if (node == null) return null;
 
                 Long nodeId = Long.valueOf(node.id());
-                if (mNodeMap.containsKey(nodeId)) {
+                if (mNodeMap.indexOfKey(nodeId) >= 0) {
                     Log.e(TAG, "Invalid BookmarkNode hierarchy. Duplicate id " + node.id());
                     return null;
                 }
@@ -1107,7 +1125,7 @@ public class ChromeBrowserProvider extends ContentProvider {
             String[] selectionArgs, String sortOrder) {
         String[] projection = null;
         if (projectionIn == null || projectionIn.length == 0) {
-            projection = android.provider.Browser.SEARCHES_PROJECTION;
+            projection = SEARCHES_PROJECTION;
         } else {
             projection = projectionIn;
         }

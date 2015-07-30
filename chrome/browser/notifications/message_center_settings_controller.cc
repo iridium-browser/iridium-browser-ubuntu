@@ -8,9 +8,9 @@
 
 #include "base/command_line.h"
 #include "base/i18n/string_compare.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/cancelable_task_tracker.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/app_icon_loader_impl.h"
@@ -104,7 +104,7 @@ class NotifierComparator {
       return n1->notifier_id.type < n2->notifier_id.type;
 
     if (collator_) {
-      return base::i18n::CompareString16WithCollator(collator_, n1->name,
+      return base::i18n::CompareString16WithCollator(*collator_, n1->name,
                                                      n2->name) == UCOL_LESS;
     }
     return n1->name < n2->name;
@@ -458,7 +458,7 @@ void MessageCenterSettingsController::OnProfileNameChanged(
     const base::string16& old_profile_name) {
   RebuildNotifierGroups(true);
 }
-void MessageCenterSettingsController::OnProfileUserNameChanged(
+void MessageCenterSettingsController::OnProfileAuthInfoChanged(
     const base::FilePath& profile_path) {
   RebuildNotifierGroups(true);
 }
@@ -540,7 +540,7 @@ void MessageCenterSettingsController::RebuildNotifierGroups(bool notify) {
     // registering it as the primary one, which causes this method which causes
     // another creating a primary profile, and causes an infinite loop.
     // Thus, it would be better to delay creating group for guest login.
-    base::MessageLoopProxy::current()->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::Bind(
             &MessageCenterSettingsController::CreateNotifierGroupForGuestLogin,

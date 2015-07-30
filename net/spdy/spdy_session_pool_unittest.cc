@@ -131,7 +131,7 @@ TEST_P(SpdySessionPoolTest, CloseCurrentSessions) {
   spdy_stream->SetDelegate(&delegate);
 
   // Close the current session.
-  spdy_session_pool_->CloseCurrentSessions(net::ERR_ABORTED);
+  spdy_session_pool_->CloseCurrentSessions(ERR_ABORTED);
 
   EXPECT_TRUE(HasSpdySession(spdy_session_pool_, test_key));
 }
@@ -520,7 +520,8 @@ TEST_P(SpdySessionPoolTest, IPAddressChanged) {
       spdy_util.ConstructSpdyGet("http://www.a.com", false, 1, MEDIUM));
   MockWrite writes[] = {CreateMockWrite(*req, 1)};
 
-  DelayedSocketData data(1, reads, arraysize(reads), writes, arraysize(writes));
+  StaticSocketDataProvider data(reads, arraysize(reads), writes,
+                                arraysize(writes));
   data.set_connect_data(connect_data);
   session_deps_.socket_factory->AddSocketDataProvider(&data);
 

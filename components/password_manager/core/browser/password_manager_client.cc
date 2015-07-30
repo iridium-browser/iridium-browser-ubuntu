@@ -10,7 +10,11 @@ bool PasswordManagerClient::IsAutomaticPasswordSavingEnabled() const {
   return false;
 }
 
-bool PasswordManagerClient::IsPasswordManagerEnabledForCurrentPage() const {
+bool PasswordManagerClient::IsPasswordManagementEnabledForCurrentPage() const {
+  return true;
+}
+
+bool PasswordManagerClient::IsSavingEnabledForCurrentPage() const {
   return true;
 }
 
@@ -25,9 +29,8 @@ void PasswordManagerClient::PasswordAutofillWasBlocked(
     const autofill::PasswordFormMap& best_matches) const {
 }
 
-bool PasswordManagerClient::IsPasswordSyncEnabled(
-    CustomPassphraseState state) const {
-  return false;
+PasswordSyncState PasswordManagerClient::GetPasswordSyncState() const {
+  return NOT_SYNCING_PASSWORDS;
 }
 
 void PasswordManagerClient::OnLogRouterAvailabilityChanged(

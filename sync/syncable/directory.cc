@@ -8,6 +8,8 @@
 #include <iterator>
 
 #include "base/base64.h"
+#include "base/guid.h"
+#include "base/metrics/histogram.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/trace_event/trace_event.h"
@@ -36,8 +38,7 @@ namespace syncable {
 const base::FilePath::CharType Directory::kSyncDatabaseFilename[] =
     FILE_PATH_LITERAL("SyncData.sqlite3");
 
-Directory::PersistedKernelInfo::PersistedKernelInfo()
-    : next_id(0) {
+Directory::PersistedKernelInfo::PersistedKernelInfo() {
   ModelTypeSet protocol_types = ProtocolTypes();
   for (ModelTypeSet::Iterator iter = protocol_types.First(); iter.Good();
        iter.Inc()) {
@@ -75,6 +76,11 @@ Directory::SaveChangesSnapshot::~SaveChangesSnapshot() {
   STLDeleteElements(&delete_journals);
 }
 
+bool Directory::SaveChangesSnapshot::HasUnsavedMetahandleChanges() const {
+  return !dirty_metas.empty() || !metahandles_to_purge.empty() ||
+         !delete_journals.empty() || !delete_journals_to_purge.empty();
+}
+
 Directory::Kernel::Kernel(
     const std::string& name,
     const KernelLoadInfo& info,
@@ -106,12 +112,12 @@ Directory::Directory(
     : kernel_(NULL),
       store_(store),
       unrecoverable_error_handler_(unrecoverable_error_handler),
-      report_unrecoverable_error_function_(
-          report_unrecoverable_error_function),
+      report_unrecoverable_error_function_(report_unrecoverable_error_function),
       unrecoverable_error_set_(false),
       nigori_handler_(nigori_handler),
       cryptographer_(cryptographer),
-      invariant_check_level_(VERIFY_CHANGES) {
+      invariant_check_level_(VERIFY_CHANGES),
+      weak_ptr_factory_(this) {
 }
 
 Directory::~Directory() {
@@ -191,17 +197,19 @@ DirOpenResult Directory::OpenImpl(
 
   DCHECK(!kernel_);
   kernel_ = new Kernel(name, info, delegate, transaction_observer);
+  kernel_->metahandles_to_purge.swap(metahandles_to_purge);
   delete_journal_.reset(new DeleteJournal(&delete_journals));
   InitializeIndices(&tmp_handles_map);
 
-  // Write back the share info to reserve some space in 'next_id'.  This will
-  // prevent local ID reuse in the case of an early crash.  See the comments in
-  // TakeSnapshotForSaveChanges() or crbug.com/142987 for more information.
-  kernel_->info_status = KERNEL_SHARE_INFO_DIRTY;
-
-  kernel_->metahandles_to_purge.swap(metahandles_to_purge);
+  // Save changes back in case there are any metahandles to purge.
   if (!SaveChanges())
     return FAILED_INITIAL_WRITE;
+
+  // Now that we've successfully opened the store, install an error handler to
+  // deal with catastrophic errors that may occur later on. Use a weak pointer
+  // because we cannot guarantee that this Directory will outlive the Closure.
+  store_->SetCatastrophicErrorHandler(base::Bind(
+      &Directory::OnCatastrophicError, weak_ptr_factory_.GetWeakPtr()));
 
   return OPENED;
 }
@@ -563,11 +571,6 @@ void Directory::TakeSnapshotForSaveChanges(SaveChangesSnapshot* snapshot) {
 
   // Fill kernel_info_status and kernel_info.
   snapshot->kernel_info = kernel_->persisted_info;
-  // To avoid duplicates when the process crashes, we record the next_id to be
-  // greater magnitude than could possibly be reached before the next save
-  // changes.  In other words, it's effectively impossible for the user to
-  // generate 65536 new bookmarks in 3 seconds.
-  snapshot->kernel_info.next_id -= 65536;
   snapshot->kernel_info_status = kernel_->info_status;
   // This one we reset on failure.
   kernel_->info_status = KERNEL_SHARE_INFO_VALID;
@@ -943,6 +946,7 @@ int64 Directory::GetTransactionVersion(ModelType type) const {
 void Directory::IncrementTransactionVersion(ModelType type) {
   kernel_->transaction_mutex.AssertAcquired();
   kernel_->persisted_info.transaction_version[type]++;
+  kernel_->info_status = KERNEL_SHARE_INFO_DIRTY;
 }
 
 void Directory::GetDataTypeContext(BaseTransaction* trans,
@@ -1327,17 +1331,9 @@ int64 Directory::NextMetahandle() {
   return metahandle;
 }
 
-// Always returns a client ID that is the string representation of a negative
-// number.
+// Generates next client ID based on a randomly generated GUID.
 Id Directory::NextId() {
-  int64 result;
-  {
-    ScopedKernelLock lock(this);
-    result = (kernel_->persisted_info.next_id)--;
-    kernel_->info_status = KERNEL_SHARE_INFO_DIRTY;
-  }
-  DCHECK_LT(result, 0);
-  return Id::CreateFromClientString(base::Int64ToString(result));
+  return Id::CreateFromClientString(base::GenerateGUID());
 }
 
 bool Directory::HasChildren(BaseTransaction* trans, const Id& id) {
@@ -1547,6 +1543,13 @@ void Directory::GetAttachmentIdsToUpload(BaseTransaction* trans,
   std::set_difference(not_on_server_id_set.begin(), not_on_server_id_set.end(),
                       on_server_id_set.begin(), on_server_id_set.end(),
                       std::back_inserter(*ids));
+}
+
+void Directory::OnCatastrophicError() {
+  UMA_HISTOGRAM_BOOLEAN("Sync.DirectoryCatastrophicError", true);
+  ReadTransaction trans(FROM_HERE, this);
+  OnUnrecoverableError(&trans, FROM_HERE,
+                       "Catastrophic error detected, Sync DB is unrecoverable");
 }
 
 Directory::Kernel* Directory::kernel() {

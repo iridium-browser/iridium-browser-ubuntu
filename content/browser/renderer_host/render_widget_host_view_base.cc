@@ -610,10 +610,6 @@ void RenderWidgetHostViewBase::FlushInput() {
   impl->FlushInput();
 }
 
-SkColorType RenderWidgetHostViewBase::PreferredReadbackFormat() {
-  return kN32_SkColorType;
-}
-
 void RenderWidgetHostViewBase::OnTextSurroundingSelectionResponse(
     const base::string16& content,
     size_t start_offset,
@@ -697,6 +693,10 @@ RenderWidgetHostViewBase::GetOrientationTypeForDesktop(
 }
 
 void RenderWidgetHostViewBase::OnDidNavigateMainFrameToNewPage() {
+}
+
+uint32_t RenderWidgetHostViewBase::GetSurfaceIdNamespace() {
+  return 0;
 }
 
 }  // namespace content

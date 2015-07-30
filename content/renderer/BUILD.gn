@@ -28,6 +28,7 @@ source_set("renderer") {
     "//base/allocator",
     "//cc",
     "//cc/blink",
+    "//components/scheduler:scheduler",
     "//content:resources",
     "//content/common:mojo_bindings",
     "//content/public/child:child_sources",
@@ -41,6 +42,7 @@ source_set("renderer") {
     "//jingle:jingle_glue",
     "//media",
     "//media/blink",
+    "//mojo/application/public/interfaces",
     "//mojo/environment:chromium",
     "//net",
     "//skia",
@@ -49,19 +51,17 @@ source_set("renderer") {
     "//third_party/libjingle",
     "//third_party/mojo/src/mojo/edk/js",
     "//third_party/mojo/src/mojo/public/js",
-    "//third_party/mojo/src/mojo/public/interfaces/application",
     "//third_party/npapi",
     "//third_party/WebKit/public:blink",
     "//third_party/widevine/cdm:version_h",
     "//ui/accessibility",
     "//ui/base",
     "//ui/events:events_base",
-    "//ui/events:dom4_keycode_converter",
+    "//ui/events:dom_keycode_converter",
     "//ui/gl",
     "//ui/native_theme",
     "//ui/surface",
     "//v8",
-    "//webkit/common/gpu",
   ]
 
   if (is_mac) {
@@ -148,10 +148,10 @@ source_set("renderer") {
             ".",
             "//content")
     deps += [
-      "//media/cast:sender",
       "//ppapi/host",
       "//ppapi/proxy",
       "//ppapi/shared_impl",
+      "//third_party/libvpx",
       "//third_party/libyuv",
     ]
   } else {

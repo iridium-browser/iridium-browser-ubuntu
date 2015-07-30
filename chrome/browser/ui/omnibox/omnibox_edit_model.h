@@ -174,7 +174,8 @@ class OmniboxEditModel {
 
   // Directs the popup to start autocomplete.
   void StartAutocomplete(bool has_selected_text,
-                         bool prevent_inline_autocomplete);
+                         bool prevent_inline_autocomplete,
+                         bool entering_keyword_mode);
 
   // Closes the popup and cancels any pending asynchronous queries.
   void StopAutocomplete();
@@ -242,9 +243,8 @@ class OmniboxEditModel {
   // Accepts the current temporary text as the user text.
   void AcceptTemporaryTextAsUserText();
 
-  // Clears the current keyword.  |visible_text| is the (non-keyword) text
-  // currently visible in the edit.
-  void ClearKeyword(const base::string16& visible_text);
+  // Clears the current keyword.
+  void ClearKeyword();
 
   // Returns the current autocomplete result.  This logic should in the future
   // live in AutocompleteController but resides here for now.  This method is
@@ -274,6 +274,11 @@ class OmniboxEditModel {
 
   // Called when the view is losing focus.  Resets some state.
   void OnKillFocus();
+
+  // Returns whether the omnibox will handle a press of the escape key.  The
+  // caller can use this to decide whether the browser should process escape as
+  // "stop current page load".
+  bool WillHandleEscapeKey() const;
 
   // Called when the user presses the escape key.  Decides what, if anything, to
   // revert about any current edits.  Returns whether the key was handled.

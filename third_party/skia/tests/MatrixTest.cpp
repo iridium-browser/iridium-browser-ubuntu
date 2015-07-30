@@ -270,8 +270,8 @@ static void test_matrix_min_max_scale(skiatest::Reporter* reporter) {
         mat.mapVectors(vectors, SK_ARRAY_COUNT(vectors));
         for (size_t i = 0; i < SK_ARRAY_COUNT(vectors); ++i) {
             SkScalar d = vectors[i].length();
-            REPORTER_ASSERT(reporter, SkScalarDiv(d, maxScale) < gVectorScaleTol);
-            REPORTER_ASSERT(reporter, SkScalarDiv(minScale, d) < gVectorScaleTol);
+            REPORTER_ASSERT(reporter, d / maxScale < gVectorScaleTol);
+            REPORTER_ASSERT(reporter, minScale / d < gVectorScaleTol);
             if (max < d) {
                 max = d;
             }
@@ -279,8 +279,8 @@ static void test_matrix_min_max_scale(skiatest::Reporter* reporter) {
                 min = d;
             }
         }
-        REPORTER_ASSERT(reporter, SkScalarDiv(max, maxScale) >= gCloseScaleTol);
-        REPORTER_ASSERT(reporter, SkScalarDiv(minScale, min) >= gCloseScaleTol);
+        REPORTER_ASSERT(reporter, max / maxScale >= gCloseScaleTol);
+        REPORTER_ASSERT(reporter, minScale / min >= gCloseScaleTol);
     }
 }
 
@@ -835,6 +835,13 @@ DEF_TEST(Matrix, reporter) {
     REPORTER_ASSERT(reporter, !mat.invert(NULL));
     REPORTER_ASSERT(reporter, !mat.invert(&inverse));
     mat.setScale(SK_Scalar1, 0);
+    REPORTER_ASSERT(reporter, !mat.invert(NULL));
+    REPORTER_ASSERT(reporter, !mat.invert(&inverse));
+
+    // Inverting this matrix results in a non-finite matrix
+    mat.setAll(0.0f, 1.0f, 2.0f,
+               0.0f, 1.0f, -3.40277175e+38f,
+               1.00003040f, 1.0f, 0.0f);
     REPORTER_ASSERT(reporter, !mat.invert(NULL));
     REPORTER_ASSERT(reporter, !mat.invert(&inverse));
 

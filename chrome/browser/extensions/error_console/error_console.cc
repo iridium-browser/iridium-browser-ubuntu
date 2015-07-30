@@ -13,6 +13,7 @@
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/extensions/error_console/error_console_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/features/feature_channel.h"
@@ -46,6 +47,13 @@ const char kAppsDeveloperToolsExtensionId[] =
 
 }  // namespace
 
+void ErrorConsole::Observer::OnErrorAdded(const ExtensionError* error) {
+}
+
+void ErrorConsole::Observer::OnErrorsRemoved(
+    const std::set<std::string>& extension_ids) {
+}
+
 void ErrorConsole::Observer::OnErrorConsoleDestroyed() {
 }
 
@@ -71,7 +79,7 @@ ErrorConsole::~ErrorConsole() {
 
 // static
 ErrorConsole* ErrorConsole::Get(content::BrowserContext* browser_context) {
-  return ExtensionSystem::Get(browser_context)->error_console();
+  return ErrorConsoleFactory::GetForBrowserContext(browser_context);
 }
 
 void ErrorConsole::SetReportingForExtension(const std::string& extension_id,
@@ -141,7 +149,9 @@ void ErrorConsole::ReportError(scoped_ptr<ExtensionError> error) {
 }
 
 void ErrorConsole::RemoveErrors(const ErrorMap::Filter& filter) {
-  errors_.RemoveErrors(filter);
+  std::set<std::string> affected_ids;
+  errors_.RemoveErrors(filter, &affected_ids);
+  FOR_EACH_OBSERVER(Observer, observers_, OnErrorsRemoved(affected_ids));
 }
 
 const ErrorList& ErrorConsole::GetErrorsForExtension(
@@ -160,9 +170,13 @@ void ErrorConsole::RemoveObserver(Observer* observer) {
 }
 
 bool ErrorConsole::IsEnabledForChromeExtensionsPage() const {
-  return profile_->GetPrefs()->GetBoolean(prefs::kExtensionsUIDeveloperMode) &&
-         (FeatureSwitch::error_console()->IsEnabled() ||
-          GetCurrentChannel() <= chrome::VersionInfo::CHANNEL_DEV);
+  if (!profile_->GetPrefs()->GetBoolean(prefs::kExtensionsUIDeveloperMode))
+    return false;  // Only enabled in developer mode.
+  if (GetCurrentChannel() > chrome::VersionInfo::CHANNEL_DEV &&
+      !FeatureSwitch::error_console()->IsEnabled())
+    return false;  // Restricted to dev channel or opt-in.
+
+  return true;
 }
 
 bool ErrorConsole::IsEnabledForAppsDeveloperTools() const {
@@ -231,7 +245,7 @@ void ErrorConsole::OnExtensionInstalled(
   // refresh of chrome:extensions, and we don't want to wipe our history
   // whenever that happens.
   errors_.RemoveErrors(ErrorMap::Filter::ErrorsForExtensionWithType(
-      extension->id(), ExtensionError::MANIFEST_ERROR));
+      extension->id(), ExtensionError::MANIFEST_ERROR), nullptr);
   AddManifestErrorsForExtension(extension);
 }
 
@@ -239,7 +253,8 @@ void ErrorConsole::OnExtensionUninstalled(
     content::BrowserContext* browser_context,
     const Extension* extension,
     extensions::UninstallReason reason) {
-  errors_.RemoveErrors(ErrorMap::Filter::ErrorsForExtension(extension->id()));
+  errors_.RemoveErrors(ErrorMap::Filter::ErrorsForExtension(extension->id()),
+                       nullptr);
 }
 
 void ErrorConsole::AddManifestErrorsForExtension(const Extension* extension) {
@@ -263,7 +278,7 @@ void ErrorConsole::Observe(int type,
   // If incognito profile which we are associated with is destroyed, also
   // destroy all incognito errors.
   if (profile->IsOffTheRecord() && profile_->IsSameProfile(profile))
-    errors_.RemoveErrors(ErrorMap::Filter::IncognitoErrors());
+    errors_.RemoveErrors(ErrorMap::Filter::IncognitoErrors(), nullptr);
 }
 
 int ErrorConsole::GetMaskForExtension(const std::string& extension_id) const {

@@ -257,8 +257,11 @@ void InlineFlowBox::attachLineBoxToLayoutObject()
 void InlineFlowBox::adjustPosition(FloatWillBeLayoutUnit dx, FloatWillBeLayoutUnit dy)
 {
     InlineBox::adjustPosition(dx, dy);
-    for (InlineBox* child = firstChild(); child; child = child->nextOnLine())
+    for (InlineBox* child = firstChild(); child; child = child->nextOnLine()) {
+        if (child->layoutObject().isOutOfFlowPositioned())
+            continue;
         child->adjustPosition(dx, dy);
+    }
     if (m_overflow)
         m_overflow->move(dx, dy); // FIXME: Rounding error here since overflow was pixel snapped, but nobody other than list markers passes non-integral values here.
 }
@@ -268,7 +271,7 @@ LineBoxList* InlineFlowBox::lineBoxes() const
     return toLayoutInline(layoutObject()).lineBoxes();
 }
 
-static inline bool isLastChildForRenderer(LayoutObject* ancestor, LayoutObject* child)
+static inline bool isLastChildForLayoutObject(LayoutObject* ancestor, LayoutObject* child)
 {
     if (!child)
         return false;
@@ -302,7 +305,7 @@ static bool isAnsectorAndWithinBlock(LayoutObject* ancestor, LayoutObject* child
     return false;
 }
 
-void InlineFlowBox::determineSpacingForFlowBoxes(bool lastLine, bool isLogicallyLastRunWrapped, LayoutObject* logicallyLastRunRenderer)
+void InlineFlowBox::determineSpacingForFlowBoxes(bool lastLine, bool isLogicallyLastRunWrapped, LayoutObject* logicallyLastRunLayoutObject)
 {
     // All boxes start off open.  They will not apply any margins/border/padding on
     // any side.
@@ -327,12 +330,12 @@ void InlineFlowBox::determineSpacingForFlowBoxes(bool lastLine, bool isLogically
 
         if (!lineBoxList->lastLineBox()->isConstructed()) {
             LayoutInline& inlineFlow = toLayoutInline(layoutObject());
-            bool isLastObjectOnLine = !isAnsectorAndWithinBlock(&layoutObject(), logicallyLastRunRenderer) || (isLastChildForRenderer(&layoutObject(), logicallyLastRunRenderer) && !isLogicallyLastRunWrapped);
+            bool isLastObjectOnLine = !isAnsectorAndWithinBlock(&layoutObject(), logicallyLastRunLayoutObject) || (isLastChildForLayoutObject(&layoutObject(), logicallyLastRunLayoutObject) && !isLogicallyLastRunWrapped);
 
             // We include the border under these conditions:
             // (1) The next line was not created, or it is constructed. We check the previous line for rtl.
-            // (2) The logicallyLastRun is not a descendant of this renderer.
-            // (3) The logicallyLastRun is a descendant of this renderer, but it is the last child of this renderer and it does not wrap to the next line.
+            // (2) The logicallyLastRun is not a descendant of this layout object.
+            // (3) The logicallyLastRun is a descendant of this layout object, but it is the last child of this layout object and it does not wrap to the next line.
             // (4) The decoration break is set to clone therefore there will be borders on every sides.
             if (layoutObject().style()->boxDecorationBreak() == DCLONE) {
                 includeLeftEdge = includeRightEdge = true;
@@ -354,7 +357,7 @@ void InlineFlowBox::determineSpacingForFlowBoxes(bool lastLine, bool isLogically
     for (InlineBox* currChild = firstChild(); currChild; currChild = currChild->nextOnLine()) {
         if (currChild->isInlineFlowBox()) {
             InlineFlowBox* currFlow = toInlineFlowBox(currChild);
-            currFlow->determineSpacingForFlowBoxes(lastLine, isLogicallyLastRunWrapped, logicallyLastRunRenderer);
+            currFlow->determineSpacingForFlowBoxes(lastLine, isLogicallyLastRunWrapped, logicallyLastRunLayoutObject);
         }
     }
 }
@@ -577,7 +580,7 @@ void InlineFlowBox::placeBoxesInBlockDirection(LayoutUnit top, LayoutUnit maxHei
     if (isRootBox) {
         const FontMetrics& fontMetrics = layoutObject().style(isFirstLineStyle())->fontMetrics();
         // RootInlineBoxes are always placed on at pixel boundaries in their logical y direction. Not doing
-        // so results in incorrect rendering of text decorations, most notably underlines.
+        // so results in incorrect layout of text decorations, most notably underlines.
         setLogicalTop(roundToInt(top + maxAscent - fontMetrics.ascent(baselineType)));
     }
 
@@ -975,41 +978,41 @@ bool InlineFlowBox::nodeAtPoint(HitTestResult& result, const HitTestLocation& lo
     if (!locationInContainer.intersects(overflowRect))
         return false;
 
-    // Check children first.
-    // We need to account for culled inline parents of the hit-tested nodes, so that they may also get included in area-based hit-tests.
-    LayoutObject* culledParent = 0;
-    for (InlineBox* curr = lastChild(); curr; curr = curr->prevOnLine()) {
-        if (curr->layoutObject().isText() || !curr->boxModelObject()->hasSelfPaintingLayer()) {
-            LayoutObject* newParent = 0;
-            // Culled parents are only relevant for area-based hit-tests, so ignore it in point-based ones.
-            if (locationInContainer.isRectBasedTest()) {
-                newParent = curr->layoutObject().parent();
-                if (newParent == layoutObject())
-                    newParent = 0;
-            }
-            // Check the culled parent after all its children have been checked, to do this we wait until
-            // we are about to test an element with a different parent.
-            if (newParent != culledParent) {
-                if (!newParent || !newParent->isDescendantOf(culledParent)) {
-                    while (culledParent && culledParent != layoutObject() && culledParent != newParent) {
-                        if (culledParent->isLayoutInline() && toLayoutInline(culledParent)->hitTestCulledInline(result, locationInContainer, accumulatedOffset))
-                            return true;
-                        culledParent = culledParent->parent();
-                    }
-                }
-                culledParent = newParent;
-            }
-            if (curr->nodeAtPoint(result, locationInContainer, accumulatedOffset, lineTop, lineBottom)) {
-                layoutObject().updateHitTestResult(result, locationInContainer.point() - toLayoutSize(accumulatedOffset));
-                return true;
-            }
-        }
-    }
-    // Check any culled ancestor of the final children tested.
-    while (culledParent && culledParent != layoutObject()) {
-        if (culledParent->isLayoutInline() && toLayoutInline(culledParent)->hitTestCulledInline(result, locationInContainer, accumulatedOffset))
+    // We need to hit test both our inline children (InlineBoxes) and culled inlines
+    // (LayoutObjects). We check our inlines in the same order as line layout but
+    // for each inline we additionally need to hit test its culled inline parents.
+    // While hit testing culled inline parents, we can stop once we reach
+    // a non-inline parent or a culled inline associated with a different inline box.
+    InlineBox* prev;
+    for (InlineBox* curr = lastChild(); curr; curr = prev) {
+        prev = curr->prevOnLine();
+
+        // Layers will handle hit testing themselves.
+        if (curr->boxModelObject() && curr->boxModelObject()->hasSelfPaintingLayer())
+            continue;
+
+        if (curr->nodeAtPoint(result, locationInContainer, accumulatedOffset, lineTop, lineBottom)) {
+            layoutObject().updateHitTestResult(result, locationInContainer.point() - toLayoutSize(accumulatedOffset));
             return true;
-        culledParent = culledParent->parent();
+        }
+
+        // If the current inlinebox's layout object and the previous inlinebox's layout object are same,
+        // we should yield the hit-test to the previous inlinebox.
+        if (prev && curr->layoutObject() == prev->layoutObject())
+            continue;
+
+        LayoutObject* culledParent = &curr->layoutObject();
+        while (true) {
+            LayoutObject* sibling = culledParent->style()->isLeftToRightDirection() ? culledParent->previousSibling() : culledParent->nextSibling();
+            culledParent = culledParent->parent();
+            ASSERT(culledParent);
+
+            if (culledParent == layoutObject() || (sibling && prev && prev->layoutObject().isDescendantOf(culledParent)))
+                break;
+
+            if (culledParent->isLayoutInline() && toLayoutInline(culledParent)->hitTestCulledInline(result, locationInContainer, accumulatedOffset))
+                return true;
+        }
     }
 
     if (layoutObject().style()->hasBorderRadius()) {

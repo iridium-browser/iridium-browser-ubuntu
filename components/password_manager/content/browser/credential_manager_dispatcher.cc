@@ -68,7 +68,11 @@ void CredentialManagerDispatcher::PendingRequestTask::OnGetPasswordStoreResults(
   autofill::PasswordForm* zero_click_form_to_return = nullptr;
   bool found_zero_clickable_credential = false;
   for (auto& form : results) {
-    if (form->origin == origin_) {
+    // PasswordFrom and GURL have different definition of origin.
+    // PasswordForm definition: scheme, host, port and path.
+    // GURL definition: scheme, host, and port.
+    // So we can't compare them directly.
+    if (form->origin.GetOrigin() == origin_.GetOrigin()) {
       local_results.push_back(form);
 
       // If this is a zero-clickable PasswordForm, and we haven't found any
@@ -220,7 +224,7 @@ void CredentialManagerDispatcher::OnNotifySignedIn(
       new CredentialManagerMsg_AcknowledgeSignedIn(
           web_contents()->GetRenderViewHost()->GetRoutingID(), request_id));
 
-  if (!IsSavingEnabledForCurrentPage())
+  if (!client_->IsSavingEnabledForCurrentPage())
     return;
 
   scoped_ptr<autofill::PasswordForm> form(CreatePasswordFormFromCredentialInfo(
@@ -236,8 +240,11 @@ void CredentialManagerDispatcher::OnNotifySignedIn(
 
 void CredentialManagerDispatcher::OnProvisionalSaveComplete() {
   DCHECK(form_manager_);
-  client_->PromptUserToSavePassword(
-      form_manager_.Pass(), CredentialSourceType::CREDENTIAL_SOURCE_API);
+  if (client_->IsSavingEnabledForCurrentPage() &&
+      !form_manager_->IsBlacklisted()) {
+    client_->PromptUserToSavePassword(
+        form_manager_.Pass(), CredentialSourceType::CREDENTIAL_SOURCE_API);
+  }
 }
 
 void CredentialManagerDispatcher::OnNotifySignedOut(int request_id) {
@@ -299,11 +306,6 @@ void CredentialManagerDispatcher::OnRequestCredential(
 
 PasswordStore* CredentialManagerDispatcher::GetPasswordStore() {
   return client_ ? client_->GetPasswordStore() : nullptr;
-}
-
-bool CredentialManagerDispatcher::IsSavingEnabledForCurrentPage() const {
-  // TODO(vasilii): add more, see http://crbug.com/450583.
-  return !client_->IsOffTheRecord();
 }
 
 bool CredentialManagerDispatcher::IsZeroClickAllowed() const {

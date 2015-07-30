@@ -23,11 +23,24 @@ namespace content {
 namespace {
 
 // Used with FrameTree::ForEach() to search for the FrameTreeNode
-// corresponding to |frame_tree_node_id| whithin a specific FrameTree.
-bool FrameTreeNodeForId(int64 frame_tree_node_id,
+// corresponding to |frame_tree_node_id| within a specific FrameTree.
+bool FrameTreeNodeForId(int frame_tree_node_id,
                         FrameTreeNode** out_node,
                         FrameTreeNode* node) {
   if (node->frame_tree_node_id() == frame_tree_node_id) {
+    *out_node = node;
+    // Terminate iteration once the node has been found.
+    return false;
+  }
+  return true;
+}
+
+// Used with FrameTree::ForEach() to search for the FrameTreeNode with the given
+// |name| within a specific FrameTree.
+bool FrameTreeNodeForName(const std::string& name,
+                          FrameTreeNode** out_node,
+                          FrameTreeNode* node) {
+  if (node->frame_name() == name) {
     *out_node = node;
     // Terminate iteration once the node has been found.
     return false;
@@ -52,19 +65,18 @@ bool CollectLoadProgress(double* progress,
                          int* frame_count,
                          FrameTreeNode* node) {
   // Ignore the current frame if it has not started loading.
-  double frame_progress = node->loading_progress();
-  if (frame_progress == FrameTreeNode::kLoadingProgressNotStarted)
+  if (!node->has_started_loading())
     return true;
 
   // Collect progress.
-  *progress += frame_progress;
+  *progress += node->loading_progress();
   (*frame_count)++;
   return true;
 }
 
 // Helper function used with FrameTree::ForEach() to reset the load progress.
 bool ResetNodeLoadProgress(FrameTreeNode* node) {
-  node->set_loading_progress(FrameTreeNode::kLoadingProgressNotStarted);
+  node->reset_loading_progress();
   return true;
 }
 
@@ -96,15 +108,17 @@ FrameTree::FrameTree(Navigator* navigator,
                               render_view_delegate,
                               render_widget_delegate,
                               manager_delegate,
-                              std::string())),
-      focused_frame_tree_node_id_(-1) {
+                              std::string(),
+                              SandboxFlags::NONE)),
+      focused_frame_tree_node_id_(-1),
+      load_progress_(0.0) {
 }
 
 FrameTree::~FrameTree() {
 }
 
-FrameTreeNode* FrameTree::FindByID(int64 frame_tree_node_id) {
-  FrameTreeNode* node = NULL;
+FrameTreeNode* FrameTree::FindByID(int frame_tree_node_id) {
+  FrameTreeNode* node = nullptr;
   ForEach(base::Bind(&FrameTreeNodeForId, frame_tree_node_id, &node));
   return node;
 }
@@ -126,12 +140,21 @@ FrameTreeNode* FrameTree::FindByRoutingID(int process_id, int routing_id) {
       return result;
   }
 
-  return NULL;
+  return nullptr;
+}
+
+FrameTreeNode* FrameTree::FindByName(const std::string& name) {
+  if (name.empty())
+    return root_.get();
+
+  FrameTreeNode* node = nullptr;
+  ForEach(base::Bind(&FrameTreeNodeForName, name, &node));
+  return node;
 }
 
 void FrameTree::ForEach(
     const base::Callback<bool(FrameTreeNode*)>& on_node) const {
-  ForEach(on_node, NULL);
+  ForEach(on_node, nullptr);
 }
 
 void FrameTree::ForEach(
@@ -157,7 +180,8 @@ void FrameTree::ForEach(
 RenderFrameHostImpl* FrameTree::AddFrame(FrameTreeNode* parent,
                                          int process_id,
                                          int new_routing_id,
-                                         const std::string& frame_name) {
+                                         const std::string& frame_name,
+                                         SandboxFlags sandbox_flags) {
   // A child frame always starts with an initial empty document, which means
   // it is in the same SiteInstance as the parent frame. Ensure that the process
   // which requested a child frame to be added is the same as the process of the
@@ -169,7 +193,7 @@ RenderFrameHostImpl* FrameTree::AddFrame(FrameTreeNode* parent,
 
   scoped_ptr<FrameTreeNode> node(new FrameTreeNode(
       this, parent->navigator(), render_frame_delegate_, render_view_delegate_,
-      render_widget_delegate_, manager_delegate_, frame_name));
+      render_widget_delegate_, manager_delegate_, frame_name, sandbox_flags));
   FrameTreeNode* node_ptr = node.get();
   // AddChild is what creates the RenderFrameHost.
   parent->AddChild(node.Pass(), process_id, new_routing_id);
@@ -211,11 +235,6 @@ void FrameTree::CreateProxiesForSiteInstance(
   // new SiteInstance. Since |source|'s navigation will replace the currently
   // loaded document, the entire subtree under |source| will be removed.
   ForEach(base::Bind(&CreateProxyForSiteInstance, instance), source);
-}
-
-void FrameTree::ResetForMainFrameSwap() {
-  root_->ResetForNewProcess();
-  focused_frame_tree_node_id_ = -1;
 }
 
 RenderFrameHostImpl* FrameTree::GetMainFrame() const {
@@ -275,9 +294,8 @@ RenderViewHostImpl* FrameTree::CreateRenderViewHost(SiteInstance* site_instance,
 RenderViewHostImpl* FrameTree::GetRenderViewHost(SiteInstance* site_instance) {
   RenderViewHostMap::iterator iter =
       render_view_host_map_.find(site_instance->GetId());
-  // TODO(creis): Mirror the frame tree so this check can't fail.
   if (iter == render_view_host_map_.end())
-    return NULL;
+    return nullptr;
   return iter->second;
 }
 
@@ -336,6 +354,9 @@ void FrameTree::UnregisterRenderFrameHost(
 }
 
 void FrameTree::FrameRemoved(FrameTreeNode* frame) {
+  if (frame->frame_tree_node_id() == focused_frame_tree_node_id_)
+    focused_frame_tree_node_id_ = -1;
+
   // No notification for the root frame.
   if (!frame->parent()) {
     CHECK_EQ(frame, root_.get());
@@ -347,18 +368,25 @@ void FrameTree::FrameRemoved(FrameTreeNode* frame) {
     on_frame_removed_.Run(frame->current_frame_host());
 }
 
-double FrameTree::GetLoadProgress() {
+void FrameTree::UpdateLoadProgress() {
   double progress = 0.0;
   int frame_count = 0;
 
   ForEach(base::Bind(&CollectLoadProgress, &progress, &frame_count));
   if (frame_count != 0)
     progress /= frame_count;
-  return progress;
+
+  if (progress <= load_progress_)
+    return;
+  load_progress_ = progress;
+
+  // Notify the WebContents.
+  root_->navigator()->GetDelegate()->DidChangeLoadProgress();
 }
 
 void FrameTree::ResetLoadProgress() {
   ForEach(base::Bind(&ResetNodeLoadProgress));
+  load_progress_ = 0.0;
 }
 
 bool FrameTree::IsLoading() {

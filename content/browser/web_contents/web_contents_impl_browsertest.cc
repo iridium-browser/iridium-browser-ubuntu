@@ -5,6 +5,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "content/browser/frame_host/navigation_entry_impl.h"
+#include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/browser/web_contents/web_contents_view.h"
 #include "content/common/frame_messages.h"
@@ -50,6 +51,10 @@ void ResizeWebContentsView(Shell* shell, const gfx::Size& size,
 class WebContentsImplBrowserTest : public ContentBrowserTest {
  public:
   WebContentsImplBrowserTest() {}
+  void SetUp() override {
+    RenderWidgetHostImpl::DisableResizeAckCheckForTesting();
+    ContentBrowserTest::SetUp();
+  }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(WebContentsImplBrowserTest);
@@ -347,7 +352,7 @@ IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest, OpenURLSubframe) {
   WebContentsImpl* wc = static_cast<WebContentsImpl*>(shell()->web_contents());
   FrameTreeNode* root = wc->GetFrameTree()->root();
   ASSERT_EQ(3UL, root->child_count());
-  int64 frame_tree_node_id = root->child_at(0)->frame_tree_node_id();
+  int frame_tree_node_id = root->child_at(0)->frame_tree_node_id();
   EXPECT_NE(-1, frame_tree_node_id);
 
   // Navigate with the subframe's FrameTreeNode ID.
@@ -576,16 +581,15 @@ IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
       new LoadProgressDelegateAndObserver(shell()));
   RenderFrameHost* main_frame = shell()->web_contents()->GetMainFrame();
   FrameHostMsg_DidStartLoading start_msg(main_frame->GetRoutingID(), true);
-  static_cast<WebContentsImpl*>(shell()->web_contents())->OnMessageReceived(
-      main_frame, start_msg);
+  static_cast<RenderFrameHostImpl*>(main_frame)->OnMessageReceived(start_msg);
   EXPECT_TRUE(delegate->did_start_loading);
   EXPECT_FALSE(delegate->did_stop_loading);
 
   // Also simulate a DidChangeLoadProgress, but not a DidStopLoading.
   FrameHostMsg_DidChangeLoadProgress progress_msg(main_frame->GetRoutingID(),
                                                   1.0);
-  static_cast<WebContentsImpl*>(shell()->web_contents())->OnMessageReceived(
-      main_frame, progress_msg);
+  static_cast<RenderFrameHostImpl*>(main_frame)->OnMessageReceived(
+      progress_msg);
   EXPECT_TRUE(delegate->did_start_loading);
   EXPECT_FALSE(delegate->did_stop_loading);
 
@@ -639,6 +643,96 @@ IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
 
   observer->WaitForDidFirstVisuallyNonEmptyPaint();
   ASSERT_TRUE(observer->did_fist_visually_non_empty_paint_);
+}
+
+namespace {
+
+class WebDisplayModeDelegate : public WebContentsDelegate {
+ public:
+  explicit WebDisplayModeDelegate(blink::WebDisplayMode mode) : mode_(mode) { }
+  ~WebDisplayModeDelegate() override { }
+
+  blink::WebDisplayMode GetDisplayMode(
+      const WebContents* source) const override { return mode_; }
+  void set_mode(blink::WebDisplayMode mode) { mode_ = mode; }
+ private:
+  blink::WebDisplayMode mode_;
+
+  DISALLOW_COPY_AND_ASSIGN(WebDisplayModeDelegate);
+};
+
+}
+
+IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest, ChangeDisplayMode) {
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  WebDisplayModeDelegate delegate(blink::WebDisplayModeMinimalUi);
+  shell()->web_contents()->SetDelegate(&delegate);
+
+  NavigateToURL(shell(), GURL("about://blank"));
+
+  ASSERT_TRUE(ExecuteScript(shell()->web_contents(),
+                            "document.title = "
+                            " window.matchMedia('(display-mode:"
+                            " minimal-ui)').matches"));
+  EXPECT_EQ(base::ASCIIToUTF16("true"), shell()->web_contents()->GetTitle());
+
+  delegate.set_mode(blink::WebDisplayModeFullscreen);
+  // Simulate widget is entering fullscreen (changing size is enough).
+  shell()->web_contents()->GetRenderViewHost()->WasResized();
+
+  ASSERT_TRUE(ExecuteScript(shell()->web_contents(),
+                            "document.title = "
+                            " window.matchMedia('(display-mode:"
+                            " fullscreen)').matches"));
+  EXPECT_EQ(base::ASCIIToUTF16("true"), shell()->web_contents()->GetTitle());
+}
+
+IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest, NewNamedWindow) {
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+
+  GURL url = embedded_test_server()->GetURL("/click-noreferrer-links.html");
+  EXPECT_TRUE(NavigateToURL(shell(), url));
+
+  {
+    ShellAddedObserver new_shell_observer;
+
+    // Open a new, named window.
+    EXPECT_TRUE(ExecuteScript(shell()->web_contents(),
+                              "window.open('about:blank','new_window');"));
+
+    Shell* new_shell = new_shell_observer.GetShell();
+    WaitForLoadStop(new_shell->web_contents());
+
+    EXPECT_EQ("new_window",
+              static_cast<WebContentsImpl*>(new_shell->web_contents())
+                  ->GetFrameTree()->root()->frame_name());
+
+    bool success = false;
+    EXPECT_TRUE(ExecuteScriptAndExtractBool(
+        new_shell->web_contents(),
+        "window.domAutomationController.send(window.name == 'new_window');",
+        &success));
+    EXPECT_TRUE(success);
+  }
+
+  {
+    ShellAddedObserver new_shell_observer;
+
+    // Test clicking a target=foo link.
+    bool success = false;
+    EXPECT_TRUE(ExecuteScriptAndExtractBool(
+        shell()->web_contents(),
+        "window.domAutomationController.send(clickSameSiteTargetedLink());",
+        &success));
+    EXPECT_TRUE(success);
+
+    Shell* new_shell = new_shell_observer.GetShell();
+    WaitForLoadStop(new_shell->web_contents());
+
+    EXPECT_EQ("foo",
+              static_cast<WebContentsImpl*>(new_shell->web_contents())
+                  ->GetFrameTree()->root()->frame_name());
+  }
 }
 
 }  // namespace content

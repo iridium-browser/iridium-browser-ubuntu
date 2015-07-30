@@ -45,10 +45,6 @@ void SetCommonCodecParameters(vpx_codec_enc_cfg_t* config,
   config->g_timebase.num = 1;
   config->g_timebase.den = 1000;
 
-  // Adjust default target bit-rate to account for actual desktop size.
-  config->rc_target_bitrate = size.width() * size.height() *
-      config->rc_target_bitrate / config->g_w / config->g_h;
-
   config->g_w = size.width();
   config->g_h = size.height();
   config->g_pass = VPX_RC_ONE_PASS;
@@ -71,6 +67,10 @@ void SetCommonCodecParameters(vpx_codec_enc_cfg_t* config,
 
 void SetVp8CodecParameters(vpx_codec_enc_cfg_t* config,
                            const webrtc::DesktopSize& size) {
+  // Adjust default target bit-rate to account for actual desktop size.
+  config->rc_target_bitrate = size.width() * size.height() *
+      config->rc_target_bitrate / config->g_w / config->g_h;
+
   SetCommonCodecParameters(config, size);
 
   // Value of 2 means using the real time profile. This is basically a
@@ -97,10 +97,14 @@ void SetVp9CodecParameters(vpx_codec_enc_cfg_t* config,
     // Disable quantization entirely, putting the encoder in "lossless" mode.
     config->rc_min_quantizer = 0;
     config->rc_max_quantizer = 0;
+    config->rc_end_usage = VPX_VBR;
   } else {
-    // Lossy encode using the same settings as for VP8.
-    config->rc_min_quantizer = 20;
+    config->rc_min_quantizer = 4;
     config->rc_max_quantizer = 30;
+    config->rc_end_usage = VPX_CBR;
+    // In the absence of a good bandwidth estimator set the target bitrate to a
+    // conservative default.
+    config->rc_target_bitrate = 500;
   }
 }
 
@@ -135,11 +139,28 @@ void SetVp9CodecOptions(vpx_codec_ctx_t* codec, bool lossless_encode) {
   DCHECK_EQ(VPX_CODEC_OK, ret) << "Failed to set screen content mode";
 }
 
+void FreeImageIfMismatched(bool use_i444,
+                           const webrtc::DesktopSize& size,
+                           scoped_ptr<vpx_image_t>* out_image,
+                           scoped_ptr<uint8[]>* out_image_buffer) {
+  if (*out_image) {
+    const vpx_img_fmt_t desired_fmt =
+        use_i444 ? VPX_IMG_FMT_I444 : VPX_IMG_FMT_I420;
+    if (!size.equals(webrtc::DesktopSize((*out_image)->w, (*out_image)->h)) ||
+        (*out_image)->fmt != desired_fmt) {
+      out_image_buffer->reset();
+      out_image->reset();
+    }
+  }
+}
+
 void CreateImage(bool use_i444,
                  const webrtc::DesktopSize& size,
                  scoped_ptr<vpx_image_t>* out_image,
                  scoped_ptr<uint8[]>* out_image_buffer) {
   DCHECK(!size.is_empty());
+  DCHECK(!*out_image_buffer);
+  DCHECK(!*out_image);
 
   scoped_ptr<vpx_image_t> image(new vpx_image_t());
   memset(image.get(), 0, sizeof(vpx_image_t));
@@ -216,7 +237,8 @@ void VideoEncoderVpx::SetLosslessEncode(bool want_lossless) {
   if (use_vp9_ && (want_lossless != lossless_encode_)) {
     lossless_encode_ = want_lossless;
     if (codec_)
-      Configure(webrtc::DesktopSize(image_->w, image_->h));
+      Configure(webrtc::DesktopSize(codec_->config.enc->g_w,
+                                    codec_->config.enc->g_h));
   }
 }
 
@@ -226,7 +248,8 @@ void VideoEncoderVpx::SetLosslessColor(bool want_lossless) {
     // TODO(wez): Switch to ConfigureCodec() path once libvpx supports it.
     // See https://code.google.com/p/webm/issues/detail?id=913.
     //if (codec_)
-    //  Configure(webrtc::DesktopSize(image_->w, image_->h));
+    //  Configure(webrtc::DesktopSize(codec_->config.enc->g_w,
+    //                                codec_->config.enc->g_h));
     codec_.reset();
   }
 }
@@ -240,7 +263,8 @@ scoped_ptr<VideoPacket> VideoEncoderVpx::Encode(
 
   // Create or reconfigure the codec to match the size of |frame|.
   if (!codec_ ||
-      !frame.size().equals(webrtc::DesktopSize(image_->w, image_->h))) {
+      (image_ &&
+       !frame.size().equals(webrtc::DesktopSize(image_->w, image_->h)))) {
     Configure(frame.size());
   }
 
@@ -321,8 +345,10 @@ void VideoEncoderVpx::Configure(const webrtc::DesktopSize& size) {
   DCHECK(use_vp9_ || !lossless_color_);
   DCHECK(use_vp9_ || !lossless_encode_);
 
-  // (Re)Create the VPX image structure and pixel buffer.
-  CreateImage(lossless_color_, size, &image_, &image_buffer_);
+  // Tear down |image_| if it no longer matches the size and color settings.
+  // PrepareImage() will then create a new buffer of the required dimensions if
+  // |image_| is not allocated.
+  FreeImageIfMismatched(lossless_color_, size, &image_, &image_buffer_);
 
   // Initialize active map.
   active_map_width_ = (size.width() + kMacroBlockSize - 1) / kMacroBlockSize;
@@ -383,30 +409,35 @@ void VideoEncoderVpx::PrepareImage(const webrtc::DesktopFrame& frame,
     return;
   }
 
-  // Pad each rectangle to avoid the block-artefact filters in libvpx from
-  // introducing artefacts; VP9 includes up to 8px either side, and VP8 up to
-  // 3px, so unchanged pixels up to that far out may still be affected by the
-  // changes in the updated region, and so must be listed in the active map.
-  // After padding we align each rectangle to 16x16 active-map macroblocks.
-  // This implicitly ensures all rects have even top-left coords, which is
-  // is required by ConvertRGBToYUVWithRect().
-  // TODO(wez): Do we still need 16x16 align, or is even alignment sufficient?
   updated_region->Clear();
-  int padding = use_vp9_ ? 8 : 3;
-  for (webrtc::DesktopRegion::Iterator r(frame.updated_region());
-       !r.IsAtEnd(); r.Advance()) {
-    const webrtc::DesktopRect& rect = r.rect();
-    updated_region->AddRect(AlignRect(webrtc::DesktopRect::MakeLTRB(
-        rect.left() - padding, rect.top() - padding, rect.right() + padding,
-        rect.bottom() + padding)));
-  }
-  DCHECK(!updated_region->is_empty());
+  if (image_) {
+    // Pad each rectangle to avoid the block-artefact filters in libvpx from
+    // introducing artefacts; VP9 includes up to 8px either side, and VP8 up to
+    // 3px, so unchanged pixels up to that far out may still be affected by the
+    // changes in the updated region, and so must be listed in the active map.
+    // After padding we align each rectangle to 16x16 active-map macroblocks.
+    // This implicitly ensures all rects have even top-left coords, which is
+    // is required by ConvertRGBToYUVWithRect().
+    // TODO(wez): Do we still need 16x16 align, or is even alignment sufficient?
+    int padding = use_vp9_ ? 8 : 3;
+    for (webrtc::DesktopRegion::Iterator r(frame.updated_region());
+         !r.IsAtEnd(); r.Advance()) {
+      const webrtc::DesktopRect& rect = r.rect();
+      updated_region->AddRect(AlignRect(webrtc::DesktopRect::MakeLTRB(
+          rect.left() - padding, rect.top() - padding, rect.right() + padding,
+          rect.bottom() + padding)));
+    }
+    DCHECK(!updated_region->is_empty());
 
-  // Clip back to the screen dimensions, in case they're not macroblock aligned.
-  // The conversion routines don't require even width & height, so this is safe
-  // even if the source dimensions are not even.
-  updated_region->IntersectWith(
-      webrtc::DesktopRect::MakeWH(image_->w, image_->h));
+    // Clip back to the screen dimensions, in case they're not macroblock
+    // aligned. The conversion routines don't require even width & height,
+    // so this is safe even if the source dimensions are not even.
+    updated_region->IntersectWith(
+        webrtc::DesktopRect::MakeWH(image_->w, image_->h));
+  } else {
+    CreateImage(lossless_color_, frame.size(), &image_, &image_buffer_);
+    updated_region->AddRect(webrtc::DesktopRect::MakeWH(image_->w, image_->h));
+  }
 
   // Convert the updated region to YUV ready for encoding.
   const uint8* rgb_data = frame.data();

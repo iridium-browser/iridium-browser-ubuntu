@@ -34,7 +34,6 @@
 #include "content/common/child_process_host_impl.h"
 #include "content/common/child_process_messages.h"
 #include "content/common/content_constants_internal.h"
-#include "content/common/cookie_data.h"
 #include "content/common/frame_messages.h"
 #include "content/common/gpu/client/gpu_memory_buffer_impl.h"
 #include "content/common/host_shared_bitmap_manager.h"
@@ -370,11 +369,9 @@ bool RenderMessageFilter::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(ViewHostMsg_CreateWidget, OnCreateWidget)
     IPC_MESSAGE_HANDLER(ViewHostMsg_CreateFullscreenWidget,
                         OnCreateFullscreenWidget)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_SetCookie, OnSetCookie)
-    IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_GetCookies, OnGetCookies)
-    IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_GetRawCookies, OnGetRawCookies)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_DeleteCookie, OnDeleteCookie)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_CookiesEnabled, OnCookiesEnabled)
+    IPC_MESSAGE_HANDLER(FrameHostMsg_SetCookie, OnSetCookie)
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(FrameHostMsg_GetCookies, OnGetCookies)
+    IPC_MESSAGE_HANDLER(FrameHostMsg_CookiesEnabled, OnCookiesEnabled)
 #if defined(OS_MACOSX)
     IPC_MESSAGE_HANDLER_DELAY_REPLY(ViewHostMsg_LoadFont, OnLoadFont)
 #endif
@@ -602,50 +599,14 @@ void RenderMessageFilter::OnGetCookies(int render_frame_id,
                       reply_msg));
 }
 
-void RenderMessageFilter::OnGetRawCookies(
-    const GURL& url,
-    const GURL& first_party_for_cookies,
-    IPC::Message* reply_msg) {
-  ChildProcessSecurityPolicyImpl* policy =
-      ChildProcessSecurityPolicyImpl::GetInstance();
-  // Only return raw cookies to trusted renderers or if this request is
-  // not targeted to an an external host like ChromeFrame.
-  // TODO(ananta) We need to support retreiving raw cookies from external
-  // hosts.
-  if (!policy->CanReadRawCookies(render_process_id_) ||
-      !policy->CanAccessCookiesForOrigin(render_process_id_, url)) {
-    SendGetRawCookiesResponse(reply_msg, net::CookieList());
-    return;
-  }
-
-  // We check policy here to avoid sending back cookies that would not normally
-  // be applied to outbound requests for the given URL.  Since this cookie info
-  // is visible in the developer tools, it is helpful to make it match reality.
-  net::URLRequestContext* context = GetRequestContextForURL(url);
-  context->cookie_store()->GetAllCookiesForURLAsync(
-      url, base::Bind(&RenderMessageFilter::SendGetRawCookiesResponse,
-                      this, reply_msg));
-}
-
-void RenderMessageFilter::OnDeleteCookie(const GURL& url,
-                                         const std::string& cookie_name) {
-  ChildProcessSecurityPolicyImpl* policy =
-      ChildProcessSecurityPolicyImpl::GetInstance();
-  if (!policy->CanAccessCookiesForOrigin(render_process_id_, url))
-    return;
-
-  net::URLRequestContext* context = GetRequestContextForURL(url);
-  context->cookie_store()->DeleteCookieAsync(url, cookie_name, base::Closure());
-}
-
 void RenderMessageFilter::OnCookiesEnabled(
     int render_frame_id,
     const GURL& url,
     const GURL& first_party_for_cookies,
     bool* cookies_enabled) {
-  // TODO(ananta): If this render view is associated with an automation channel,
-  // aka ChromeFrame then we need to retrieve cookie settings from the external
-  // host.
+  // TODO(ananta): If this render frame is associated with an automation
+  // channel, aka ChromeFrame then we need to retrieve cookie settings from the
+  // external host.
   *cookies_enabled = GetContentClient()->browser()->AllowGetCookie(
       url, first_party_for_cookies, net::CookieList(), resource_context_,
       render_process_id_, render_frame_id);
@@ -1014,7 +975,8 @@ void RenderMessageFilter::OnCacheableMetadataAvailable(
     const std::vector<char>& data) {
   net::HttpCache* cache = request_context_->GetURLRequestContext()->
       http_transaction_factory()->GetCache();
-  DCHECK(cache);
+  if (!cache)
+    return;
 
   // Use the same priority for the metadata write as for script
   // resources (see defaultPriorityForResourceType() in WebKit's
@@ -1117,17 +1079,7 @@ void RenderMessageFilter::CheckPolicyForCookies(
 
 void RenderMessageFilter::SendGetCookiesResponse(IPC::Message* reply_msg,
                                                  const std::string& cookies) {
-  ViewHostMsg_GetCookies::WriteReplyParams(reply_msg, cookies);
-  Send(reply_msg);
-}
-
-void RenderMessageFilter::SendGetRawCookiesResponse(
-    IPC::Message* reply_msg,
-    const net::CookieList& cookie_list) {
-  std::vector<CookieData> cookies;
-  for (size_t i = 0; i < cookie_list.size(); ++i)
-    cookies.push_back(CookieData(cookie_list[i]));
-  ViewHostMsg_GetRawCookies::WriteReplyParams(reply_msg, cookies);
+  FrameHostMsg_GetCookies::WriteReplyParams(reply_msg, cookies);
   Send(reply_msg);
 }
 

@@ -23,6 +23,12 @@
 
 @interface CustomFrameView : NSView
 
+// Clang emits a warning if designated initializers don't call the super
+// initializer, even if the method raises an exception.
+// http://www.crbug.com/479019.
+- (id)initWithFrame:(NSRect)frame UNAVAILABLE_ATTRIBUTE;
+- (id)initWithCoder:(NSCoder*)coder UNAVAILABLE_ATTRIBUTE;
+
 @end
 
 @implementation CustomFrameView

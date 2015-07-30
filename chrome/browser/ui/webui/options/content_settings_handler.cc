@@ -21,7 +21,6 @@
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
 #include "chrome/browser/notifications/desktop_notification_profile_util.h"
-#include "chrome/browser/plugins/plugins_field_trial.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
@@ -32,6 +31,7 @@
 #include "components/content_settings/core/browser/content_settings_details.h"
 #include "components/content_settings/core/browser/content_settings_utils.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/content_settings/core/browser/plugins_field_trial.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/google/core/browser/google_util.h"
@@ -527,12 +527,6 @@ void ContentSettingsHandler::InitializePage() {
   UpdateHandlersEnabledRadios();
   UpdateAllExceptionsViewsFromModel();
   UpdateProtectedContentExceptionsButton();
-
-  // For Plugins, allow flag to override displayed content setting.
-  if (PluginsFieldTrial::IsForcePluginPowerSaverEnabled()) {
-    web_ui()->CallJavascriptFunction(
-        "ContentSettings.disablePluginsAllowOption");
-  }
 }
 
 void ContentSettingsHandler::OnContentSettingChanged(
@@ -613,7 +607,8 @@ void ContentSettingsHandler::UpdateSettingDefaultFromModel(
 
 #if defined(ENABLE_PLUGINS)
   default_setting =
-      PluginsFieldTrial::EffectiveContentSetting(type, default_setting);
+      content_settings::PluginsFieldTrial::EffectiveContentSetting(
+          type, default_setting);
 #endif
 
   base::DictionaryValue filter_settings;
@@ -1177,8 +1172,12 @@ void ContentSettingsHandler::GetExceptionsFromHostContentSettingsMap(
   std::vector<std::vector<base::Value*> > all_provider_exceptions;
   all_provider_exceptions.resize(HostContentSettingsMap::NUM_PROVIDER_TYPES);
 
-  for (AllPatternsSettings::iterator i = all_patterns_settings.begin();
-       i != all_patterns_settings.end();
+  // The all_patterns_settings is sorted from the lowest precedence pattern to
+  // the highest (see operator< in ContentSettingsPattern), so traverse it in
+  // reverse to show the patterns with the highest precedence (the more specific
+  // ones) on the top.
+  for (AllPatternsSettings::reverse_iterator i = all_patterns_settings.rbegin();
+       i != all_patterns_settings.rend();
        ++i) {
     const ContentSettingsPattern& primary_pattern = i->first.first;
     const OnePatternSettings& one_settings = i->second;

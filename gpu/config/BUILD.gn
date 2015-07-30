@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/chrome_build.gni")
 import("//build/config/ui.gni")
 
 declare_args() {
@@ -9,7 +10,21 @@ declare_args() {
   use_libpci = true
 }
 
-source_set("config") {
+group("config") {
+  if (is_component_build) {
+    public_deps = [
+      "//gpu",
+    ]
+  } else {
+    public_deps = [
+      ":config_sources",
+    ]
+  }
+}
+
+source_set("config_sources") {
+  visibility = [ "//gpu/*" ]
+
   sources = [
     "dx_diag_node.cc",
     "dx_diag_node.h",
@@ -35,6 +50,8 @@ source_set("config") {
     "gpu_info_collector_ozone.cc",
     "gpu_info_collector_win.cc",
     "gpu_info_collector_x11.cc",
+    "gpu_switches.cc",
+    "gpu_switches.h",
     "gpu_test_config.cc",
     "gpu_test_config.h",
     "gpu_test_expectations_parser.cc",
@@ -52,7 +69,6 @@ source_set("config") {
 
   deps = [
     "//base",
-    "//gpu/command_buffer/service",
     "//third_party/re2",
     "//ui/gl",
   ]

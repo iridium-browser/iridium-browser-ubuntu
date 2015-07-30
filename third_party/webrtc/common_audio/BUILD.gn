@@ -85,6 +85,8 @@ source_set("common_audio") {
     "signal_processing/splitting_filter.c",
     "signal_processing/sqrt_of_one_minus_x_squared.c",
     "signal_processing/vector_scaling_operations.c",
+    "sparse_fir_filter.cc",
+    "sparse_fir_filter.h",
     "vad/include/vad.h",
     "vad/include/webrtc_vad.h",
     "vad/vad.cc",
@@ -114,7 +116,9 @@ source_set("common_audio") {
       "real_fourier_openmax.h",
     ]
     defines += [ "RTC_USE_OPENMAX_DL" ]
-    deps += [ "//third_party/openmax_dl/dl" ]
+    if (rtc_build_openmax_dl) {
+      deps += [ "//third_party/openmax_dl/dl" ]
+    }
   }
 
   if (current_cpu == "arm") {
@@ -193,7 +197,9 @@ if (current_cpu == "x86" || current_cpu == "x64") {
       "resampler/sinc_resampler_sse.cc",
     ]
 
-    cflags = [ "-msse2" ]
+    if (is_posix) {
+      cflags = [ "-msse2" ]
+    }
 
     configs += [ "..:common_inherited_config" ]
 

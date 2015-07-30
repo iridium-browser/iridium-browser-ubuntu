@@ -245,7 +245,7 @@ llvm-sb-setup() {
   # The LLVM sandboxed build uses the normally-disallowed external
   # function __nacl_get_arch().  Allow that for now.
   local flags="-static -I$(GetAbsolutePath ${NACL_ROOT}/..) \
-    --pnacl-disable-abi-check "
+    --pnacl-disable-abi-check -gline-tables-only "
 
   LLVM_SB_CONFIGURE_ENV=(
     AR="${PNACL_AR}" \
@@ -304,12 +304,25 @@ llvm-sb-configure() {
   local objdir="${LLVM_SB_OBJDIR}"
   local installdir="$(GetTranslatorInstallDir ${arch})"
   local targets=""
+  local subzero_targets=""
   # For LLVM, "x86" brings in both i686 and x86_64.
   case ${arch} in
-    i686) targets=x86 ;;
-    x86_64) targets=x86 ;;
-    armv7) targets=arm ;;
-    universal) targets=x86,arm ;;
+    i686)
+      targets=x86
+      subzero_targets=X8632
+      ;;
+    x86_64)
+      targets=x86
+      subzero_targets=X8664
+      ;;
+    armv7)
+      targets=arm
+      subzero_targets=ARM32
+      ;;
+    universal)
+      targets=x86,arm
+      subzero_targets=X8632,ARM32
+      ;;
   esac
 
   spushd "${objdir}"
@@ -328,6 +341,7 @@ llvm-sb-configure() {
         --prefix=${installdir} \
         --host=nacl \
         --enable-targets=${targets} \
+        --enable-subzero-targets=${subzero_targets} \
         --disable-assertions \
         --enable-pic=no \
         --enable-static \
@@ -420,14 +434,6 @@ translate-sb-tool() {
   local arches=$2
   local have_segment_gap=$3
   local pexe="${toolname}.pexe"
-  if ${PNACL_PRUNE}; then
-    # Only strip debug, to preserve symbol names for testing. This is okay
-    # because we strip the native nexe later anyway.
-    # So, why bother stripping here at all?
-    # It does appear to affect the size of the nexe:
-    # http://code.google.com/p/nativeclient/issues/detail?id=3305
-    ${PNACL_STRIP} --strip-debug "${pexe}"
-  fi
 
   local tarch
   for tarch in ${arches}; do
@@ -555,7 +561,7 @@ binutils-gold-sb-configure() {
   # function __nacl_get_arch().  Allow that for now.
   #
   local flags="-static -I$(GetAbsolutePath ${NACL_ROOT}/..) \
-    -fno-exceptions -O3 --pnacl-disable-abi-check "
+    -fno-exceptions -O3 --pnacl-disable-abi-check -gline-tables-only "
   local configure_env=(
     AR="${PNACL_AR}" \
     AS="${PNACL_AS}" \

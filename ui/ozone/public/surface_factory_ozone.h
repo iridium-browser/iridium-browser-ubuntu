@@ -63,7 +63,7 @@ class OZONE_BASE_EXPORT SurfaceFactoryOzone {
   // formats once we know what sorts of content, video, etc. we can support.
   enum BufferFormat {
     UNKNOWN,
-    RGBA_8888,
+    BGRA_8888,
     RGBX_8888,
     RGB_888,
   };
@@ -87,10 +87,6 @@ class OZONE_BASE_EXPORT SurfaceFactoryOzone {
   // Returns native platform display handle. This is used to obtain the EGL
   // display connection for the native display.
   virtual intptr_t GetNativeDisplay();
-
-  // Returns Drm file descriptor. This is used to obtain access to the
-  // driver interface by other API than GL.
-  virtual int GetDrmFd();
 
   // Create SurfaceOzoneEGL for the specified gfx::AcceleratedWidget.
   //
@@ -133,6 +129,7 @@ class OZONE_BASE_EXPORT SurfaceFactoryOzone {
   // Create a single native buffer to be used for overlay planes or zero copy
   // for |widget| representing a particular display controller or default
   // display controller for kNullAcceleratedWidget.
+  // It can be called on any thread.
   virtual scoped_refptr<NativePixmap> CreateNativePixmap(
       gfx::AcceleratedWidget widget,
       gfx::Size size,

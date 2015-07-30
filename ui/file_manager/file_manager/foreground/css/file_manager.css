@@ -179,6 +179,10 @@ div.splitter {
   padding: 0 3px;
 }
 
+#directory-tree .tree-row > .button {
+  display: flex;
+}
+
 #directory-tree .tree-row > .expand-icon {
   flex: none;
   height: 36px;
@@ -189,13 +193,13 @@ div.splitter {
   width: 36px;
 }
 
-#directory-tree .tree-row > .item-icon {
+#directory-tree .tree-row .item-icon {
   flex: none;
   height: 16px;
   width: 16px;
 }
 
-#directory-tree .tree-row > .label {
+#directory-tree .tree-row .label {
   display: block;
   flex: auto;
   margin: 0 6px;
@@ -285,7 +289,7 @@ body.check-select button:hover {
   background-repeat: no-repeat;
   background-size: 16px 16px;
   border: 0;
-  border-radius: 16px;
+  border-radius: 2px;
   flex: none;
   height: 32px;
   line-height: 16px;
@@ -398,6 +402,16 @@ body.check-select #view-button.thumbnail {
   display: none;
 }
 
+#sort-button {
+  background-image: -webkit-image-set(
+      url(../images/files/ui/sorting_white.png) 1x,
+      url(../images/files/ui/2x/sorting_white.png) 2x);
+}
+
+body.check-select #sort-button {
+  display: none;
+}
+
 #gear-button {
   background-image: -webkit-image-set(
       url(../images/files/ui/menu_white.png) 1x,
@@ -409,7 +423,12 @@ body.check-select #gear-button {
 }
 
 #cloud-import-details-button {
-  -webkit-margin-start: -15px;
+  -webkit-margin-start: -11px;
+  width: 24px;
+}
+
+#cloud-import-details-button core-icon {
+  margin: 8px 4px;
 }
 
 #cloud-import-details {
@@ -678,6 +697,11 @@ html[dir='rtl'] #search-box .clear {
   z-index: 0;
 }
 
+.dialog-footer button {
+  /* Use bold until we get Roboto medium. crbug.com/368442. */
+  font-weight: bold;
+}
+
 .dialog-footer button:hover {
   border-image: none;  /* Overrides the definition of common.css. */
 }
@@ -768,6 +792,10 @@ html[dir='rtl'] #search-box .clear {
   display: none;
 }
 
+.progressable .preparing-label {
+  -webkit-margin-start: 20px;
+}
+
 .progressable .progress-bar {
   -webkit-margin-end: 20px;
   -webkit-margin-start: 20px;
@@ -776,7 +804,7 @@ html[dir='rtl'] #search-box .clear {
 
 /* The container for breadcrumb elements. */
 .breadcrumbs {
-  -webkit-margin-start: 16px;
+  -webkit-margin-start: 12px;
   align-items: center;
   display: flex;
   flex: auto;
@@ -805,12 +833,13 @@ body.check-select .breadcrumbs {
   cursor: pointer;
   flex: none;
   font-size: 14px;
+  /* Use bold until we get Roboto medium. crbug.com/368442. */
   font-weight: bold;
   margin-left: 0;
   margin-right: 0;
   min-width: 0;
-  padding-left: 5px;
-  padding-right: 5px;
+  padding-left: 9px;
+  padding-right: 9px;
   text-overflow: ellipsis;
   text-transform: none;
   white-space: nowrap;
@@ -832,7 +861,7 @@ body.check-select .breadcrumbs {
       url(../images/files/ui/2x/arrow_right_white.png) 2x) center no-repeat;
   flex: none;
   height: 16px;
-  width: 16px;
+  width: 8px;
 }
 
 html[dir='rtl'] .breadcrumbs .separator {
@@ -843,12 +872,14 @@ html[dir='rtl'] .breadcrumbs .separator {
   display: flex;
   flex: auto;
   flex-direction: column;
+  min-width: 0;
 }
 
 #list-container {
   display: flex;
   flex: auto;
   flex-direction: column;
+  min-height: 0;
   position: relative;
 }
 
@@ -856,6 +887,7 @@ html[dir='rtl'] .breadcrumbs .separator {
   display: flex;
   flex: auto;
   flex-direction: column;
+  min-height: 0;
 }
 
 #detail-table > list,
@@ -879,7 +911,7 @@ html[dir='rtl'] .breadcrumbs .separator {
 }
 
 .spinner {
-  background: url(../images/common/spinner.svg) center/100% no-repeat;
+  background: url(chrome://resources/images/throbber.svg) center/100% no-repeat;
   height: 16px;
   left: 50%;
   margin-left: -8px;
@@ -888,16 +920,6 @@ html[dir='rtl'] .breadcrumbs .separator {
   position: absolute;
   top: 50%;
   width: 16px;
-}
-
-.spinner-layer {
-  background: url(../images/common/spinner.svg) center / 16px no-repeat;
-  bottom: 0;
-  left: 0;
-  position: absolute;
-  right: 0;
-  top: 0;
-  z-index: 525;
 }
 
 .loading-indicator {
@@ -1127,13 +1149,17 @@ body.check-select .thumbnail-grid .thumbnail-item[selected] .checkmark.active {
 }
 
 .thumbnail-grid .shield {
-  background-color: rgba(27, 168, 243, 0.5);
+  background-color: rgba(160, 160, 160, 0.5);
   bottom: 0;
   display: none;
   left: 0;
   position: absolute;
   right: 0;
   top: 0;
+}
+
+.thumbnail-grid:focus .shield {
+  background-color: rgba(27, 168, 243, 0.5);
 }
 
 .thumbnail-grid .thumbnail-item[selected] .shield {
@@ -1151,6 +1177,10 @@ body.check-select .thumbnail-grid .thumbnail-item[selected] .checkmark.active {
 }
 
 .thumbnail-grid .thumbnail-item[selected].directory .thumbnail-bottom {
+  background-color: rgb(232, 232, 232);
+}
+
+.thumbnail-grid:focus .thumbnail-item[selected].directory .thumbnail-bottom {
   background-color: rgb(232, 246, 253);
 }
 
@@ -1159,7 +1189,7 @@ body.check-select .thumbnail-grid .thumbnail-item[selected] .checkmark.active {
 }
 
 body:not(.check-select) .thumbnail-grid.image-dominant
-    .thumbnail-loaded:not([selected]) .thumbnail-bottom {
+    .can-hide-filename.thumbnail-loaded:not([selected]) .thumbnail-bottom {
   display: none;
 }
 
@@ -1511,6 +1541,7 @@ body.check-select #list-container list li[selected] .detail-thumbnail
 }
 
 #filename-input-box {
+  -webkit-margin-start: 30px;
   align-items: center;
   display: flex;
   flex: auto;
@@ -1737,7 +1768,6 @@ body[drive='error'] #unmounted-panel > .error,
 
 #new-folder-button {
   flex: none;
-  margin-right: 30px;
 }
 
 #default-action-dialog {
@@ -1804,7 +1834,8 @@ list.autocomplete-suggestions > [lead] {
   margin-top: 8px;
 }
 
-#gear-menu > cr-menu-item:not(.menuitem-button) {
+#gear-menu > cr-menu-item:not(.menuitem-button),
+#sort-menu > cr-menu-item {
   -webkit-margin-end: 50px;
 }
 
@@ -1815,7 +1846,7 @@ list.autocomplete-suggestions > [lead] {
   width: auto;
 }
 
-#suggest-app-dialog .cr-dialog-title {
+.suggest-apps-dialog-title.cr-dialog-title {
   /* Entire height: 44px (content-box 22px + padding 11px * 2) */
   font-size: 16px;
   height: 22px;
@@ -1823,65 +1854,9 @@ list.autocomplete-suggestions > [lead] {
   padding: 11px 18px;
 }
 
-#suggest-app-dialog #webview-container {
-  border-bottom: solid 1px #bbb;
-  border-top: solid 1px #bbb;
-  position: relative;
-}
-
-#suggest-app-dialog.show-spinner #webview-container webview {
-  pointer-events: none;
-}
-
-#suggest-app-dialog:not(.show-spinner) .spinner-layer {
-  display: none;
-}
-
-#suggest-app-dialog .spinner-layer {
-  background-color: rgba(255, 255, 255, 0.7);
-}
-
-#suggest-app-dialog .cr-dialog-buttons,
-#suggest-app-dialog .cr-dialog-ok,
-#suggest-app-dialog .cr-dialog-cancel {
-  display: none;
-}
-
-#suggest-app-dialog .cr-dialog-text {
+.suggest-apps-dialog-text.cr-dialog-text {
   padding: 0 20px 10px;
   margin: 0;
-}
-
-#suggest-app-dialog #buttons {
-  background: #eee;
-  width: 100%;
-}
-
-#suggest-app-dialog #buttons > #webstore-button {
-  -webkit-padding-end: 10px;
-  -webkit-padding-start: 12px;
-  color: #00f;
-  cursor: pointer;
-  display: flex;
-  height: 16px;
-  padding-bottom: 10px;
-  padding-top: 10px;
-}
-
-#suggest-app-dialog #buttons > #webstore-button > #webstore-button-icon {
-  -webkit-margin-end: 8px;
-  background-image: -webkit-image-set(
-    url(chrome://theme/IDR_WEBSTORE_ICON_16) 1x,
-    url(chrome://theme/IDR_WEBSTORE_ICON_16@2x) 2x);
-  background-repeat: no-repeat;
-  display: inline-block;
-  height: 16px;
-  width: 16px;
-}
-
-#suggest-app-dialog #buttons > #webstore-button > #webstore-button-label {
-  flex: 1;
-  line-height: 16px;
 }
 
 .cr-dialog-frame.error-dialog-frame {

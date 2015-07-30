@@ -37,6 +37,9 @@ extern const char kChromeAppId[];
 // The extension id of the Cloud Print component application.
 extern const char kCloudPrintAppId[];
 
+// The extension id of the Data Saver extension.
+extern const char kDataSaverExtensionId[];
+
 // The extension id of the Easy Unlock component application.
 extern const char kEasyUnlockAppId[];
 
@@ -90,6 +93,11 @@ extern const char kYoutubeAppId[];
 
 // The extension id of the in-app payments support application.
 extern const char kInAppPaymentsSupportAppId[];
+
+#if defined(ENABLE_MEDIA_ROUTER)
+// The extension id of the stable media router extension.
+extern const char kMediaRouterStableExtensionId[];
+#endif  // defined(ENABLE_MEDIA_ROUTER)
 
 // The buckets used for app launches.
 enum AppLaunchBucket {
@@ -195,16 +203,17 @@ extern const char kBrailleImeExtensionPath[];
 extern const char kBrailleImeEngineId[];
 // Path to preinstalled Connectivity Diagnostics extension.
 extern const char kConnectivityDiagnosticsPath[];
-extern const char kConnectivityDiagnosticsKioskPath[];
 extern const char kConnectivityDiagnosticsLauncherPath[];
+// The extension id of the first run dialog application.
+extern const char kFirstRunDialogId[];
 // Path to preinstalled speech synthesis extension.
 extern const char kSpeechSynthesisExtensionPath[];
 // The extension id of the speech synthesis extension.
 extern const char kSpeechSynthesisExtensionId[];
 // The extension id of the wallpaper manager application.
 extern const char kWallpaperManagerId[];
-// The extension id of the first run dialog application.
-extern const char kFirstRunDialogId[];
+// The app id of the webstore widget component app.
+extern const char kWebstoreWidgetAppId[];
 // The extension id of the new ZIP unpacker extension.
 extern const char kZIPUnpackerExtensionId[];
 #endif

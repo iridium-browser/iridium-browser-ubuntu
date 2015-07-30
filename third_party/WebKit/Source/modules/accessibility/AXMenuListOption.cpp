@@ -26,34 +26,35 @@
 #include "config.h"
 #include "modules/accessibility/AXMenuListOption.h"
 
-#include "core/html/HTMLOptionElement.h"
+#include "modules/accessibility/AXMenuListPopup.h"
 #include "modules/accessibility/AXObjectCacheImpl.h"
 
 namespace blink {
 
 using namespace HTMLNames;
 
-AXMenuListOption::AXMenuListOption(AXObjectCacheImpl* axObjectCache)
+AXMenuListOption::AXMenuListOption(HTMLOptionElement* element, AXObjectCacheImpl* axObjectCache)
     : AXMockObject(axObjectCache)
+    , m_element(element)
 {
 }
 
-void AXMenuListOption::setElement(HTMLElement* element)
+void AXMenuListOption::detach()
 {
-    ASSERT_ARG(element, isHTMLOptionElement(element));
-    m_element = element;
+    m_element = nullptr;
+    AXMockObject::detach();
 }
 
 Element* AXMenuListOption::actionElement() const
 {
-    return m_element.get();
+    return m_element;
 }
 
 bool AXMenuListOption::isEnabled() const
 {
     // isDisabledFormControl() returns true if the parent <select> element is disabled,
     // which we don't want.
-    return !toHTMLOptionElement(m_element)->ownElementDisabled();
+    return !m_element->ownElementDisabled();
 }
 
 bool AXMenuListOption::isVisible() const
@@ -74,7 +75,10 @@ bool AXMenuListOption::isOffScreen() const
 
 bool AXMenuListOption::isSelected() const
 {
-    return toHTMLOptionElement(m_element)->selected();
+    AXMenuListPopup* parent = static_cast<AXMenuListPopup*>(parentObject());
+    if (parent && !parent->isOffScreen())
+        return parent->activeChild() == this;
+    return m_element->selected();
 }
 
 void AXMenuListOption::setSelected(bool b)
@@ -82,7 +86,7 @@ void AXMenuListOption::setSelected(bool b)
     if (!canSetSelectedAttribute())
         return;
 
-    toHTMLOptionElement(m_element)->setSelected(b);
+    m_element->setSelected(b);
 }
 
 bool AXMenuListOption::canSetSelectedAttribute() const
@@ -90,17 +94,21 @@ bool AXMenuListOption::canSetSelectedAttribute() const
     return isEnabled();
 }
 
-bool AXMenuListOption::computeAccessibilityIsIgnored() const
+bool AXMenuListOption::computeAccessibilityIsIgnored(IgnoredReasons* ignoredReasons) const
 {
-    return accessibilityIsIgnoredByDefault();
+    return accessibilityIsIgnoredByDefault(ignoredReasons);
 }
 
 LayoutRect AXMenuListOption::elementRect() const
 {
     AXObject* parent = parentObject();
+    if (!parent)
+        return LayoutRect();
     ASSERT(parent->isMenuListPopup());
 
     AXObject* grandparent = parent->parentObject();
+    if (!grandparent)
+        return LayoutRect();
     ASSERT(grandparent->isMenuList());
 
     return grandparent->elementRect();
@@ -108,7 +116,7 @@ LayoutRect AXMenuListOption::elementRect() const
 
 String AXMenuListOption::stringValue() const
 {
-    return toHTMLOptionElement(m_element)->text();
+    return m_element->text();
 }
 
 } // namespace blink

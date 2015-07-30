@@ -23,9 +23,9 @@
  */
 
 #include "config.h"
-
 #include "core/svg/SVGAnimationElement.h"
 
+#include "bindings/core/v8/ExceptionState.h"
 #include "core/CSSPropertyNames.h"
 #include "core/SVGNames.h"
 #include "core/css/CSSComputedStyleDeclaration.h"
@@ -158,30 +158,8 @@ static bool parseKeySplines(const String& string, Vector<UnitBezier>& result)
     return true;
 }
 
-bool SVGAnimationElement::isSupportedAttribute(const QualifiedName& attrName)
-{
-    DEFINE_STATIC_LOCAL(HashSet<QualifiedName>, supportedAttributes, ());
-    if (supportedAttributes.isEmpty()) {
-        supportedAttributes.add(SVGNames::valuesAttr);
-        supportedAttributes.add(SVGNames::keyTimesAttr);
-        supportedAttributes.add(SVGNames::keyPointsAttr);
-        supportedAttributes.add(SVGNames::keySplinesAttr);
-        supportedAttributes.add(SVGNames::attributeTypeAttr);
-        supportedAttributes.add(SVGNames::calcModeAttr);
-        supportedAttributes.add(SVGNames::fromAttr);
-        supportedAttributes.add(SVGNames::toAttr);
-        supportedAttributes.add(SVGNames::byAttr);
-    }
-    return supportedAttributes.contains<SVGAttributeHashTranslator>(attrName);
-}
-
 void SVGAnimationElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
 {
-    if (!isSupportedAttribute(name)) {
-        SVGSMILElement::parseAttribute(name, value);
-        return;
-    }
-
     if (name == SVGNames::valuesAttr) {
         if (!parseValues(value, m_values)) {
             reportAttributeParsingError(ParsingAttributeFailedError, name, value);
@@ -228,17 +206,25 @@ void SVGAnimationElement::parseAttribute(const QualifiedName& name, const Atomic
         return;
     }
 
-    ASSERT_NOT_REACHED();
+    SVGSMILElement::parseAttribute(name, value);
 }
 
 void SVGAnimationElement::svgAttributeChanged(const QualifiedName& attrName)
 {
-    if (!isSupportedAttribute(attrName)) {
-        SVGSMILElement::svgAttributeChanged(attrName);
+    if (attrName == SVGNames::valuesAttr
+        || attrName == SVGNames::byAttr
+        || attrName == SVGNames::fromAttr
+        || attrName == SVGNames::toAttr
+        || attrName == SVGNames::calcModeAttr
+        || attrName == SVGNames::attributeTypeAttr
+        || attrName == SVGNames::keySplinesAttr
+        || attrName == SVGNames::keyPointsAttr
+        || attrName == SVGNames::keyTimesAttr) {
+        animationAttributeChanged();
         return;
     }
 
-    animationAttributeChanged();
+    SVGSMILElement::svgAttributeChanged(attrName);
 }
 
 void SVGAnimationElement::animationAttributeChanged()
@@ -250,9 +236,14 @@ void SVGAnimationElement::animationAttributeChanged()
     setInactive();
 }
 
-float SVGAnimationElement::getStartTime() const
+float SVGAnimationElement::getStartTime(ExceptionState& exceptionState) const
 {
-    return narrowPrecisionToFloat(intervalBegin().value());
+    SMILTime startTime = intervalBegin();
+    if (!startTime.isFinite()) {
+        exceptionState.throwDOMException(InvalidStateError, "No current interval.");
+        return 0;
+    }
+    return narrowPrecisionToFloat(startTime.value());
 }
 
 float SVGAnimationElement::getCurrentTime() const
@@ -260,9 +251,14 @@ float SVGAnimationElement::getCurrentTime() const
     return narrowPrecisionToFloat(elapsed().value());
 }
 
-float SVGAnimationElement::getSimpleDuration() const
+float SVGAnimationElement::getSimpleDuration(ExceptionState& exceptionState) const
 {
-    return narrowPrecisionToFloat(simpleDuration().value());
+    SMILTime duration = simpleDuration();
+    if (!duration.isFinite()) {
+        exceptionState.throwDOMException(NotSupportedError, "No simple duration defined.");
+        return 0;
+    }
+    return narrowPrecisionToFloat(duration.value());
 }
 
 void SVGAnimationElement::beginElement()

@@ -81,7 +81,7 @@ class MessageChannel :
   // related to postMessage. Note that this can be empty; it only gets set if
   // there is a scriptable 'InstanceObject' associated with this channel's
   // instance.
-  void SetPassthroughObject(v8::Handle<v8::Object> passthrough);
+  void SetPassthroughObject(v8::Local<v8::Object> passthrough);
 
   PepperPluginInstanceImpl* instance() { return instance_; }
 
@@ -124,7 +124,7 @@ class MessageChannel :
 
   PluginObject* GetPluginObject(v8::Isolate* isolate);
 
-  void EnqueuePluginMessage(v8::Handle<v8::Value> v8_value);
+  void EnqueuePluginMessage(v8::Local<v8::Value> v8_value);
 
   void FromV8ValueComplete(VarConversionResult* result_holder,
                            const ppapi::ScopedPPVar& result_var,
@@ -192,7 +192,7 @@ class MessageChannel :
   // Observers for sync messages.
   base::Closure unregister_observer_callback_;
 
-  v8::StdPersistentValueMap<std::string, v8::FunctionTemplate> template_cache_;
+  v8::StdGlobalValueMap<std::string, v8::FunctionTemplate> template_cache_;
 
   // This is used to ensure pending tasks will not fire after this object is
   // destroyed.

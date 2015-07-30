@@ -26,11 +26,11 @@
 #include "core/SVGNames.h"
 #include "core/dom/ElementTraversal.h"
 #include "core/layout/HitTestResult.h"
-#include "core/layout/PaintInfo.h"
 #include "core/layout/svg/SVGLayoutSupport.h"
 #include "core/layout/svg/SVGResources.h"
 #include "core/layout/svg/SVGResourcesCache.h"
 #include "core/paint/CompositingRecorder.h"
+#include "core/paint/PaintInfo.h"
 #include "core/paint/TransformRecorder.h"
 #include "core/svg/SVGUseElement.h"
 #include "platform/RuntimeEnabledFeatures.h"
@@ -38,6 +38,7 @@
 #include "platform/graphics/paint/CompositingDisplayItem.h"
 #include "platform/graphics/paint/DisplayItemList.h"
 #include "platform/graphics/paint/DrawingDisplayItem.h"
+#include "platform/graphics/paint/SkPictureBuilder.h"
 #include "third_party/skia/include/core/SkPicture.h"
 
 namespace blink {
@@ -126,7 +127,8 @@ bool LayoutSVGResourceClipper::tryPathOnlyClipping(const LayoutObject& layoutObj
         clipPath.addRect(FloatRect());
 
     if (RuntimeEnabledFeatures::slimmingPaintEnabled()) {
-        context->displayItemList()->add(BeginClipPathDisplayItem::create(layoutObject, clipPath, clipRule));
+        if (!context->displayItemList()->displayItemConstructionIsDisabled())
+            context->displayItemList()->add(BeginClipPathDisplayItem::create(layoutObject, clipPath, clipRule));
     } else {
         BeginClipPathDisplayItem clipPathDisplayItem(layoutObject, clipPath, clipRule);
         clipPathDisplayItem.replay(*context);
@@ -154,11 +156,7 @@ PassRefPtr<const SkPicture> LayoutSVGResourceClipper::createContentPicture(Affin
     // userSpaceOnUse units (http://crbug.com/294900).
     FloatRect bounds = strokeBoundingBox();
 
-    OwnPtr<DisplayItemList> displayItemList;
-    if (RuntimeEnabledFeatures::slimmingPaintEnabled())
-        displayItemList = DisplayItemList::create();
-    GraphicsContext context(nullptr, displayItemList.get());
-    context.beginRecording(bounds);
+    SkPictureBuilder pictureBuilder(bounds);
 
     for (SVGElement* childElement = Traversal<SVGElement>::firstChild(*element()); childElement; childElement = Traversal<SVGElement>::nextSibling(*childElement)) {
         LayoutObject* layoutObject = childElement->layoutObject();
@@ -169,22 +167,16 @@ PassRefPtr<const SkPicture> LayoutSVGResourceClipper::createContentPicture(Affin
         if (!style || style->display() == NONE || style->visibility() != VISIBLE)
             continue;
 
-        WindRule newClipRule = style->svgStyle().clipRule();
         bool isUseElement = isSVGUseElement(*childElement);
         if (isUseElement) {
-            SVGUseElement& useElement = toSVGUseElement(*childElement);
-            layoutObject = useElement.layoutObjectClipChild();
+            layoutObject = toSVGUseElement(*childElement).layoutObjectClipChild();
             if (!layoutObject)
                 continue;
-            if (!useElement.hasAttribute(SVGNames::clip_ruleAttr))
-                newClipRule = layoutObject->style()->svgStyle().clipRule();
         }
 
         // Only shapes, paths and texts are allowed for clipping.
         if (!layoutObject->isSVGShape() && !layoutObject->isSVGText())
             continue;
-
-        context.setFillRule(newClipRule);
 
         if (isUseElement)
             layoutObject = childElement->layoutObject();
@@ -194,13 +186,11 @@ PassRefPtr<const SkPicture> LayoutSVGResourceClipper::createContentPicture(Affin
         // - masker/filter not applied when laying out the children
         // - fill is set to the initial fill paint server (solid, black)
         // - stroke is set to the initial stroke paint server (none)
-        PaintInfo info(&context, LayoutRect::infiniteIntRect(), PaintPhaseForeground, PaintBehaviorRenderingClipPathAsMask);
+        PaintInfo info(&pictureBuilder.context(), LayoutRect::infiniteIntRect(), PaintPhaseForeground, PaintBehaviorRenderingClipPathAsMask);
         layoutObject->paint(info, IntPoint());
     }
 
-    if (displayItemList)
-        displayItemList->commitNewDisplayItemsAndReplay(context);
-    m_clipContentPicture = context.endRecording();
+    m_clipContentPicture = pictureBuilder.endRecording();
     return m_clipContentPicture;
 }
 

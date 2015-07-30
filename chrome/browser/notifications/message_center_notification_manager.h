@@ -61,6 +61,7 @@ class MessageCenterNotificationManager
   std::set<std::string> GetAllIdsByProfileAndSourceOrigin(
       Profile* profile,
       const GURL& source) override;
+  std::set<std::string> GetAllIdsByProfile(Profile* profile) override;
   bool CancelAllBySourceOrigin(const GURL& source_origin) override;
   bool CancelAllByProfile(ProfileID profile_id) override;
   void CancelAll() override;
@@ -138,9 +139,6 @@ class MessageCenterNotificationManager
   // The first-run balloon will be shown |first_run_idle_timeout_| after all
   // popups go away and the user has notifications in the message center.
   base::TimeDelta first_run_idle_timeout_;
-
-  // Provides weak pointers for the purpose of the first run timer.
-  base::WeakPtrFactory<MessageCenterNotificationManager> weak_factory_;
 #endif
 
   scoped_ptr<message_center::NotifierSettingsProvider> settings_provider_;
@@ -155,6 +153,11 @@ class MessageCenterNotificationManager
 
   // Keeps track of notifications specific to Google Now for UMA purposes.
   GoogleNowNotificationStatsCollector google_now_stats_collector_;
+
+#if defined(OS_WIN)
+  // Provides weak pointers for the purpose of the first run timer.
+  base::WeakPtrFactory<MessageCenterNotificationManager> weak_factory_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(MessageCenterNotificationManager);
 };

@@ -648,7 +648,7 @@ TEST_F(ServiceWorkerJobTest, UnregisterWaitingSetsRedundant) {
   ASSERT_EQ(SERVICE_WORKER_OK, status);
 
   version->SetStatus(ServiceWorkerVersion::INSTALLED);
-  registration->SetWaitingVersion(version.get());
+  registration->SetWaitingVersion(version);
   EXPECT_EQ(ServiceWorkerVersion::RUNNING,
             version->running_status());
   EXPECT_EQ(ServiceWorkerVersion::INSTALLED, version->status());
@@ -1058,7 +1058,7 @@ TEST_F(ServiceWorkerJobTest, Update_NewestVersionChanged) {
   ServiceWorkerVersion* active_version = registration->active_version();
 
   // Queue an Update, it should abort when it starts and sees the new version.
-  job_coordinator()->Update(registration.get());
+  job_coordinator()->Update(registration.get(), false);
 
   // Add a waiting version with new script.
   scoped_refptr<ServiceWorkerVersion> version =
@@ -1066,7 +1066,7 @@ TEST_F(ServiceWorkerJobTest, Update_NewestVersionChanged) {
                                GURL("http://www.example.com/new_worker.js"),
                                2L /* dummy version id */,
                                helper_->context()->AsWeakPtr());
-  registration->SetWaitingVersion(version.get());
+  registration->SetWaitingVersion(version);
 
   base::RunLoop().RunUntilIdle();
 
@@ -1122,7 +1122,7 @@ TEST_F(ServiceWorkerJobTest, Update_UninstallingRegistration) {
                                 SaveUnregistration(SERVICE_WORKER_OK, &called));
 
   // Update should abort after it starts and sees uninstalling.
-  job_coordinator()->Update(registration.get());
+  job_coordinator()->Update(registration.get(), false);
 
   EXPECT_FALSE(called);
   base::RunLoop().RunUntilIdle();

@@ -27,8 +27,6 @@
 #include "chrome/browser/history/chrome_history_client.h"
 #include "chrome/browser/history/chrome_history_client_factory.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/history/top_sites_factory.h"
-#include "chrome/browser/history/top_sites_impl.h"
 #include "chrome/browser/history/web_history_service_factory.h"
 #include "chrome/browser/net/pref_proxy_config_tracker.h"
 #include "chrome/browser/net/proxy_service_factory.h"
@@ -65,8 +63,6 @@
 #include "components/history/core/browser/history_database_params.h"
 #include "components/history/core/browser/history_db_task.h"
 #include "components/history/core/browser/history_service.h"
-#include "components/history/core/browser/top_sites.h"
-#include "components/history/core/browser/top_sites_observer.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/keyed_service/core/refcounted_keyed_service.h"
 #include "components/policy/core/common/policy_service.h"
@@ -103,8 +99,8 @@
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
 #include "chrome/browser/extensions/extension_system_factory.h"
 #include "chrome/browser/extensions/test_extension_system.h"
+#include "components/guest_view/browser/guest_view_manager.h"
 #include "extensions/browser/extension_system.h"
-#include "extensions/browser/guest_view/guest_view_manager.h"
 #endif
 
 #if defined(OS_ANDROID)
@@ -125,35 +121,6 @@ using testing::NiceMock;
 using testing::Return;
 
 namespace {
-
-// TopSitesImpl::Shutdown schedules some tasks (from TopSitesBackend) that
-// need to be run to properly shutdown. Run all pending tasks now. This is
-// normally handled by browser_process shutdown.
-
-void CleanupAfterTopSitesDestroyed() {
-  if (base::MessageLoop::current())
-    base::MessageLoop::current()->RunUntilIdle();
-}
-
-// Returns true if a TopSites service has been registered for |profile|.
-bool HasTopSites(Profile* profile) {
-  return !!TopSitesFactory::GetInstance()->GetForProfileIfExists(profile);
-}
-
-// Used to make sure TopSites has finished loading
-class WaitTopSitesLoadedObserver : public history::TopSitesObserver {
- public:
-  explicit WaitTopSitesLoadedObserver(content::MessageLoopRunner* runner)
-      : runner_(runner) {}
-  void TopSitesLoaded(history::TopSites* top_sites) override {
-    runner_->Quit();
-  }
-  void TopSitesChanged(history::TopSites* top_sites) override {}
-
- private:
-  // weak
-  content::MessageLoopRunner* runner_;
-};
 
 // Task used to make sure history has finished processing a request. Intended
 // for use with BlockUntilHistoryProcessesPendingRequests.
@@ -284,16 +251,6 @@ KeyedService* BuildWebDataService(content::BrowserContext* context) {
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB),
       sync_start_util::GetFlareForSyncableService(context_path),
       &TestProfileErrorCallback);
-}
-
-scoped_refptr<RefcountedKeyedService> BuildTopSites(
-    content::BrowserContext* profile) {
-  history::TopSitesImpl* top_sites = new history::TopSitesImpl(
-      static_cast<Profile*>(profile), history::PrepopulatedPageList());
-  top_sites->Init(
-      profile->GetPath().Append(chrome::kTopSitesFilename),
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB));
-  return make_scoped_refptr(top_sites);
 }
 
 }  // namespace
@@ -549,19 +506,10 @@ TestingProfile::~TestingProfile() {
 
   MaybeSendDestroyedNotification();
 
-  // Remember whether a TopSites has been created for the current profile,
-  // so that we can run cleanup after destroying all services.
-  bool had_top_sites = HasTopSites(this);
-
   browser_context_dependency_manager_->DestroyBrowserContextServices(this);
 
   if (host_content_settings_map_.get())
     host_content_settings_map_->ShutdownOnUIThread();
-
-  // Wait until TopSites shutdown tasks have completed if a TopSites has
-  // been created for the current profile.
-  if (had_top_sites)
-    CleanupAfterTopSitesDestroyed();
 
   if (pref_proxy_config_tracker_.get())
     pref_proxy_config_tracker_->DetachFromPrefService();
@@ -633,22 +581,6 @@ void TestingProfile::DestroyHistoryService() {
   base::MessageLoop::current()->Run();
 }
 
-void TestingProfile::CreateTopSites() {
-  DestroyTopSites();
-  TopSitesFactory::GetInstance()->SetTestingFactoryAndUse(this, BuildTopSites);
-}
-
-void TestingProfile::DestroyTopSites() {
-  TopSitesFactory* top_sites_factory = TopSitesFactory::GetInstance();
-  if (top_sites_factory->GetForProfileIfExists(this)) {
-    // BrowserContextKeyedServiceFactory will destroy the previous service when
-    // registering a new testing factory so use this to ensure that destroy the
-    // old service.
-    top_sites_factory->SetTestingFactory(this, nullptr);
-    CleanupAfterTopSitesDestroyed();
-  }
-}
-
 void TestingProfile::CreateBookmarkModel(bool delete_file) {
   if (delete_file) {
     base::FilePath path = GetPath().Append(bookmarks::kBookmarksFileName);
@@ -684,18 +616,6 @@ void TestingProfile::BlockUntilHistoryIndexIsRefreshed() {
   run_loop.Run();
   index->set_restore_cache_observer(NULL);
   DCHECK(index->restored());
-}
-
-// TODO(phajdan.jr): Doesn't this hang if Top Sites are already loaded?
-void TestingProfile::BlockUntilTopSitesLoaded() {
-  scoped_refptr<content::MessageLoopRunner> runner =
-      new content::MessageLoopRunner;
-  WaitTopSitesLoadedObserver observer(runner.get());
-  scoped_refptr<history::TopSites> top_sites =
-      TopSitesFactory::GetForProfile(this);
-  top_sites->AddObserver(&observer);
-  runner->Run();
-  top_sites->RemoveObserver(&observer);
 }
 
 void TestingProfile::SetGuestSession(bool guest) {
@@ -959,7 +879,7 @@ HostContentSettingsMap* TestingProfile::GetHostContentSettingsMap() {
 
 content::BrowserPluginGuestManager* TestingProfile::GetGuestManager() {
 #if defined(ENABLE_EXTENSIONS)
-  return extensions::GuestViewManager::FromBrowserContext(this);
+  return guest_view::GuestViewManager::FromBrowserContext(this);
 #else
   return NULL;
 #endif

@@ -31,10 +31,10 @@
 #include "config.h"
 #include "modules/filesystem/LocalFileSystem.h"
 
-#include "core/dom/CrossThreadTask.h"
 #include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
+#include "core/dom/ExecutionContextTask.h"
 #include "core/fileapi/FileError.h"
 #include "core/frame/LocalFrame.h"
 #include "core/workers/WorkerGlobalScope.h"
@@ -50,7 +50,7 @@ namespace blink {
 
 namespace {
 
-void reportFailure(ExecutionContext*, PassOwnPtr<AsyncFileSystemCallbacks> callbacks, FileError::ErrorCode error)
+void reportFailure(PassOwnPtr<AsyncFileSystemCallbacks> callbacks, FileError::ErrorCode error)
 {
     callbacks->didFail(error);
 }
@@ -143,14 +143,14 @@ void LocalFileSystem::fileSystemNotAvailable(
     PassRefPtrWillBeRawPtr<ExecutionContext> context,
     CallbackWrapper* callbacks)
 {
-    context->postTask(FROM_HERE, createCrossThreadTask(&reportFailure, callbacks->release(), FileError::ABORT_ERR));
+    context->postTask(FROM_HERE, createSameThreadTask(&reportFailure, callbacks->release(), FileError::ABORT_ERR));
 }
 
 void LocalFileSystem::fileSystemNotAllowedInternal(
     PassRefPtrWillBeRawPtr<ExecutionContext> context,
     CallbackWrapper* callbacks)
 {
-    context->postTask(FROM_HERE, createCrossThreadTask(&reportFailure, callbacks->release(), FileError::ABORT_ERR));
+    context->postTask(FROM_HERE, createSameThreadTask(&reportFailure, callbacks->release(), FileError::ABORT_ERR));
 }
 
 void LocalFileSystem::fileSystemAllowedInternal(

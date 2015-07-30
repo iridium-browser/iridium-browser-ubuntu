@@ -69,8 +69,7 @@ class ExtensionUninstallDialogDelegateView : public views::DialogDelegateView {
  public:
   ExtensionUninstallDialogDelegateView(
       ExtensionUninstallDialogViews* dialog_view,
-      const extensions::Extension* extension,
-      const extensions::Extension* triggering_extension,
+      bool triggered_by_extension,
       gfx::ImageSkia* image);
   ~ExtensionUninstallDialogDelegateView() override;
 
@@ -135,7 +134,7 @@ void ExtensionUninstallDialogViews::Show() {
   }
 
   view_ = new ExtensionUninstallDialogDelegateView(
-      this, extension_, triggering_extension_, &icon_);
+      this, triggering_extension_.get() != nullptr, &icon_);
   constrained_window::CreateBrowserModalDialogViews(view_, parent_)->Show();
 }
 
@@ -143,26 +142,29 @@ void ExtensionUninstallDialogViews::ExtensionUninstallAccepted(
     bool report_abuse_checked) {
   // The widget gets destroyed when the dialog is accepted.
   view_->DialogDestroyed();
-  view_ = NULL;
+  view_ = nullptr;
   if (report_abuse_checked)
     HandleReportAbuse();
+  OnDialogClosed(report_abuse_checked ?
+      CLOSE_ACTION_UNINSTALL_AND_REPORT_ABUSE : CLOSE_ACTION_UNINSTALL);
+
   delegate_->ExtensionUninstallAccepted();
 }
 
 void ExtensionUninstallDialogViews::ExtensionUninstallCanceled() {
   // The widget gets destroyed when the dialog is canceled.
   view_->DialogDestroyed();
-  view_ = NULL;
+  view_ = nullptr;
+  OnDialogClosed(CLOSE_ACTION_CANCELED);
   delegate_->ExtensionUninstallCanceled();
 }
 
 ExtensionUninstallDialogDelegateView::ExtensionUninstallDialogDelegateView(
     ExtensionUninstallDialogViews* dialog_view,
-    const extensions::Extension* extension,
-    const extensions::Extension* triggering_extension,
+    bool triggered_by_extension,
     gfx::ImageSkia* image)
     : dialog_(dialog_view),
-      triggered_by_extension_(triggering_extension != NULL),
+      triggered_by_extension_(triggered_by_extension),
       report_abuse_checkbox_(nullptr) {
   // Scale down to icon size, but allow smaller icons (don't scale up).
   gfx::Size size(image->width(), image->height());

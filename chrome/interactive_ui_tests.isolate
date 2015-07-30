@@ -35,7 +35,6 @@
     ['OS=="linux"', {
       'variables': {
         'files': [
-          '<(PRODUCT_DIR)/libffmpegsumo.so',
           '<(PRODUCT_DIR)/libosmesa.so',
           '<(PRODUCT_DIR)/libppapi_tests.so',
           '<(PRODUCT_DIR)/pyproto/google/',
@@ -48,7 +47,9 @@
           '../net/data/ssl/certificates/',
           '../net/tools/testserver/',
           '../ppapi/tests/test_case.html',
+          '../ppapi/tests/test_case.html.mock-http-headers',
           '../ppapi/tests/test_page.css',
+          '../ppapi/tests/test_page.css.mock-http-headers',
           '../testing/test_env.py',
           '../third_party/pyftpdlib/',
           '../third_party/pywebsocket/',
@@ -75,7 +76,6 @@
         'files': [
           '<(PRODUCT_DIR)/<(mac_product_name) Framework.framework/',
           '<(PRODUCT_DIR)/<(mac_product_name).app/',
-          '<(PRODUCT_DIR)/ffmpegsumo.so',
           '<(PRODUCT_DIR)/osmesa.so',
           '<(PRODUCT_DIR)/ppapi_tests.plugin/Contents/MacOS/ppapi_tests',
         ],
@@ -86,7 +86,6 @@
         'files': [
           '<(PRODUCT_DIR)/<(mac_product_name) Framework.framework/',
           '<(PRODUCT_DIR)/<(mac_product_name).app.dSYM/',
-          '<(PRODUCT_DIR)/ffmpegsumo.so.dSYM/',
           '<(PRODUCT_DIR)/interactive_ui_tests.dSYM/',
           '<(PRODUCT_DIR)/osmesa.so.dSYM/',
           '<(PRODUCT_DIR)/ppapi_tests.plugin.dSYM/',
@@ -98,7 +97,6 @@
         'files': [
           '<(PRODUCT_DIR)/chrome_elf.dll',
           '<(PRODUCT_DIR)/d3dcompiler_47.dll',
-          '<(PRODUCT_DIR)/ffmpegsumo.dll',
           '<(PRODUCT_DIR)/libEGL.dll',
           '<(PRODUCT_DIR)/libGLESv2.dll',
           '<(PRODUCT_DIR)/osmesa.dll',
@@ -121,6 +119,13 @@
         ],
       },
     }],
+    ['OS=="win" and kasko==1', {
+      'variables': {
+        'files': [
+          '<(PRODUCT_DIR)/kasko.dll',
+        ],
+      },
+    }],
     ['chromeos==1', {
       'variables': {
         'files': [
@@ -130,6 +135,7 @@
           '<(PRODUCT_DIR)/nacl_helper',
           '<(PRODUCT_DIR)/nacl_irt_x86_64.nexe',
           '<(PRODUCT_DIR)/resources/chromeos/',
+          'browser/chromeos/login/test/https_forwarder.py',
         ],
       },
     }],

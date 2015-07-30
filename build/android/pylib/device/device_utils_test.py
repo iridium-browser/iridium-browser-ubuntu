@@ -16,13 +16,13 @@ import datetime
 import logging
 import os
 import re
-import signal
 import sys
 import unittest
 
 from pylib import android_commands
 from pylib import cmd_helper
 from pylib import constants
+from pylib import device_signal
 from pylib.device import adb_wrapper
 from pylib.device import device_errors
 from pylib.device import device_utils
@@ -114,6 +114,10 @@ class MockTempFile(object):
   def __exit__(self, exc_type, exc_val, exc_tb):
     pass
 
+  @property
+  def name(self):
+    return self.file.name
+
 
 class _PatchedFunction(object):
   def __init__(self, patched=None, mocked=None):
@@ -155,6 +159,73 @@ class DeviceUtilsTest(mock_calls.TestCase):
       msg = 'Command failed'
     return mock.Mock(side_effect=device_errors.CommandFailedError(
         msg, str(self.device)))
+
+
+class DeviceUtilsEqTest(DeviceUtilsTest):
+
+  def testEq_equal_deviceUtils(self):
+    other = device_utils.DeviceUtils(_AdbWrapperMock('0123456789abcdef'))
+    self.assertTrue(self.device == other)
+    self.assertTrue(other == self.device)
+
+  def testEq_equal_adbWrapper(self):
+    other = adb_wrapper.AdbWrapper('0123456789abcdef')
+    self.assertTrue(self.device == other)
+    self.assertTrue(other == self.device)
+
+  def testEq_equal_string(self):
+    other = '0123456789abcdef'
+    self.assertTrue(self.device == other)
+    self.assertTrue(other == self.device)
+
+  def testEq_devicesNotEqual(self):
+    other = device_utils.DeviceUtils(_AdbWrapperMock('0123456789abcdee'))
+    self.assertFalse(self.device == other)
+    self.assertFalse(other == self.device)
+
+  def testEq_identity(self):
+    self.assertTrue(self.device == self.device)
+
+  def testEq_serialInList(self):
+    devices = [self.device]
+    self.assertTrue('0123456789abcdef' in devices)
+
+
+class DeviceUtilsLtTest(DeviceUtilsTest):
+
+  def testLt_lessThan(self):
+    other = device_utils.DeviceUtils(_AdbWrapperMock('ffffffffffffffff'))
+    self.assertTrue(self.device < other)
+    self.assertTrue(other > self.device)
+
+  def testLt_greaterThan_lhs(self):
+    other = device_utils.DeviceUtils(_AdbWrapperMock('0000000000000000'))
+    self.assertFalse(self.device < other)
+    self.assertFalse(other > self.device)
+
+  def testLt_equal(self):
+    other = device_utils.DeviceUtils(_AdbWrapperMock('0123456789abcdef'))
+    self.assertFalse(self.device < other)
+    self.assertFalse(other > self.device)
+
+  def testLt_sorted(self):
+    devices = [
+        device_utils.DeviceUtils(_AdbWrapperMock('ffffffffffffffff')),
+        device_utils.DeviceUtils(_AdbWrapperMock('0000000000000000')),
+    ]
+    sorted_devices = sorted(devices)
+    self.assertEquals('0000000000000000',
+                      sorted_devices[0].adb.GetDeviceSerial())
+    self.assertEquals('ffffffffffffffff',
+                      sorted_devices[1].adb.GetDeviceSerial())
+
+
+class DeviceUtilsStrTest(DeviceUtilsTest):
+
+  def testStr_returnsSerial(self):
+    with self.assertCalls(
+        (self.call.adb.GetDeviceSerial(), '0123456789abcdef')):
+      self.assertEqual('0123456789abcdef', str(self.device))
 
 
 class DeviceUtilsIsOnlineTest(DeviceUtilsTest):
@@ -582,75 +653,126 @@ class DeviceUtilsRunShellCommandTest(DeviceUtilsTest):
       self.assertEquals([output.rstrip()],
                         self.device.RunShellCommand(cmd, check_return=False))
 
-
-class DeviceUtilsGetDevicePieWrapper(DeviceUtilsTest):
-
-  def testGetDevicePieWrapper_jb(self):
-    with self.assertCall(
-        self.call.device.build_version_sdk(),
-        constants.ANDROID_SDK_VERSION_CODES.JELLY_BEAN):
-      self.assertEqual('', self.device.GetDevicePieWrapper())
-
-  def testGetDevicePieWrapper_ics(self):
+  def testRunShellCommand_largeOutput_enabled(self):
+    cmd = 'echo $VALUE'
+    temp_file = MockTempFile('/sdcard/temp-123')
+    cmd_redirect = '%s > %s' % (cmd, temp_file.name)
     with self.assertCalls(
-        (self.call.device.build_version_sdk(),
-         constants.ANDROID_SDK_VERSION_CODES.ICE_CREAM_SANDWICH),
-        (mock.call.pylib.constants.GetOutDirectory(), '/foo/bar'),
-        (mock.call.os.path.exists(mock.ANY), True),
-        (self.call.adb.Push(mock.ANY, mock.ANY), '')):
-      self.assertNotEqual('', self.device.GetDevicePieWrapper())
+        (mock.call.pylib.utils.device_temp_file.DeviceTempFile(self.adb),
+            temp_file),
+        (self.call.adb.Shell(cmd_redirect)),
+        (self.call.device.ReadFile(temp_file.name, force_pull=True),
+         'something')):
+      self.assertEquals(
+          ['something'],
+          self.device.RunShellCommand(
+              cmd, large_output=True, check_return=True))
+
+  def testRunShellCommand_largeOutput_disabledNoTrigger(self):
+    cmd = 'something'
+    with self.assertCall(self.call.adb.Shell(cmd), self.ShellError('')):
+      with self.assertRaises(device_errors.AdbCommandFailedError):
+        self.device.RunShellCommand(cmd, check_return=True)
+
+  def testRunShellCommand_largeOutput_disabledTrigger(self):
+    cmd = 'echo $VALUE'
+    temp_file = MockTempFile('/sdcard/temp-123')
+    cmd_redirect = '%s > %s' % (cmd, temp_file.name)
+    with self.assertCalls(
+        (self.call.adb.Shell(cmd), self.ShellError('', None)),
+        (mock.call.pylib.utils.device_temp_file.DeviceTempFile(self.adb),
+            temp_file),
+        (self.call.adb.Shell(cmd_redirect)),
+        (self.call.device.ReadFile(mock.ANY, force_pull=True),
+         'something')):
+      self.assertEquals(['something'],
+                        self.device.RunShellCommand(cmd, check_return=True))
+
+
+class DeviceUtilsRunPipedShellCommandTest(DeviceUtilsTest):
+
+  def testRunPipedShellCommand_success(self):
+    with self.assertCall(
+        self.call.device.RunShellCommand(
+            'ps | grep foo; echo "PIPESTATUS: ${PIPESTATUS[@]}"',
+            check_return=True),
+        ['This line contains foo', 'PIPESTATUS: 0 0']):
+      self.assertEquals(['This line contains foo'],
+                        self.device._RunPipedShellCommand('ps | grep foo'))
+
+  def testRunPipedShellCommand_firstCommandFails(self):
+    with self.assertCall(
+        self.call.device.RunShellCommand(
+            'ps | grep foo; echo "PIPESTATUS: ${PIPESTATUS[@]}"',
+            check_return=True),
+        ['PIPESTATUS: 1 0']):
+      with self.assertRaises(device_errors.AdbShellCommandFailedError) as ec:
+        self.device._RunPipedShellCommand('ps | grep foo')
+      self.assertEquals([1, 0], ec.exception.status)
+
+  def testRunPipedShellCommand_secondCommandFails(self):
+    with self.assertCall(
+        self.call.device.RunShellCommand(
+            'ps | grep foo; echo "PIPESTATUS: ${PIPESTATUS[@]}"',
+            check_return=True),
+        ['PIPESTATUS: 0 1']):
+      with self.assertRaises(device_errors.AdbShellCommandFailedError) as ec:
+        self.device._RunPipedShellCommand('ps | grep foo')
+      self.assertEquals([0, 1], ec.exception.status)
+
+  def testRunPipedShellCommand_outputCutOff(self):
+    with self.assertCall(
+        self.call.device.RunShellCommand(
+            'ps | grep foo; echo "PIPESTATUS: ${PIPESTATUS[@]}"',
+            check_return=True),
+        ['foo.bar'] * 256 + ['foo.ba']):
+      with self.assertRaises(device_errors.AdbShellCommandFailedError) as ec:
+        self.device._RunPipedShellCommand('ps | grep foo')
+      self.assertIs(None, ec.exception.status)
 
 
 @mock.patch('time.sleep', mock.Mock())
 class DeviceUtilsKillAllTest(DeviceUtilsTest):
 
-  def testKillAll_noMatchingProcesses(self):
-    with self.assertCall(self.call.adb.Shell('ps'),
-        'USER   PID   PPID  VSIZE  RSS   WCHAN    PC       NAME\n'):
+  def testKillAll_noMatchingProcessesFailure(self):
+    with self.assertCall(self.call.device.GetPids('test_process'), {}):
       with self.assertRaises(device_errors.CommandFailedError):
         self.device.KillAll('test_process')
 
+  def testKillAll_noMatchingProcessesQuiet(self):
+    with self.assertCall(self.call.device.GetPids('test_process'), {}):
+      self.assertEqual(0, self.device.KillAll('test_process', quiet=True))
+
   def testKillAll_nonblocking(self):
     with self.assertCalls(
-        (self.call.adb.Shell('ps'),
-         'USER   PID   PPID  VSIZE  RSS   WCHAN    PC       NAME\n'
-         'u0_a1  1234  174   123456 54321 ffffffff 456789ab some.process\n'),
+        (self.call.device.GetPids('some.process'), {'some.process': '1234'}),
         (self.call.adb.Shell('kill -9 1234'), '')):
-      self.assertEquals(1,
-          self.device.KillAll('some.process', blocking=False))
+      self.assertEquals(
+          1, self.device.KillAll('some.process', blocking=False))
 
   def testKillAll_blocking(self):
     with self.assertCalls(
-        (self.call.adb.Shell('ps'),
-         'USER   PID   PPID  VSIZE  RSS   WCHAN    PC       NAME\n'
-         'u0_a1  1234  174   123456 54321 ffffffff 456789ab some.process\n'),
+        (self.call.device.GetPids('some.process'), {'some.process': '1234'}),
         (self.call.adb.Shell('kill -9 1234'), ''),
-        (self.call.adb.Shell('ps'),
-         'USER   PID   PPID  VSIZE  RSS   WCHAN    PC       NAME\n'
-         'u0_a1  1234  174   123456 54321 ffffffff 456789ab some.process\n'),
-        (self.call.adb.Shell('ps'),
-         'USER   PID   PPID  VSIZE  RSS   WCHAN    PC       NAME\n')):
-      self.assertEquals(1,
-          self.device.KillAll('some.process', blocking=True))
+        (self.call.device.GetPids('some.process'), {'some.process': '1234'}),
+        (self.call.device.GetPids('some.process'), [])):
+      self.assertEquals(
+          1, self.device.KillAll('some.process', blocking=True))
 
   def testKillAll_root(self):
     with self.assertCalls(
-        (self.call.adb.Shell('ps'),
-         'USER   PID   PPID  VSIZE  RSS   WCHAN    PC       NAME\n'
-         'u0_a1  1234  174   123456 54321 ffffffff 456789ab some.process\n'),
+        (self.call.device.GetPids('some.process'), {'some.process': '1234'}),
         (self.call.device.NeedsSU(), True),
         (self.call.adb.Shell("su -c sh -c 'kill -9 1234'"), '')):
-      self.assertEquals(1,
-          self.device.KillAll('some.process', as_root=True))
+      self.assertEquals(
+          1, self.device.KillAll('some.process', as_root=True))
 
   def testKillAll_sigterm(self):
     with self.assertCalls(
-        (self.call.adb.Shell('ps'),
-         'USER   PID   PPID  VSIZE  RSS   WCHAN    PC       NAME\n'
-         'u0_a1  1234  174   123456 54321 ffffffff 456789ab some.process\n'),
+        (self.call.device.GetPids('some.process'), {'some.process': '1234'}),
         (self.call.adb.Shell('kill -15 1234'), '')):
-      self.assertEquals(1,
-          self.device.KillAll('some.process', signum=signal.SIGTERM))
+      self.assertEquals(
+          1, self.device.KillAll('some.process', signum=device_signal.SIGTERM))
 
 
 class DeviceUtilsStartActivityTest(DeviceUtilsTest):
@@ -1078,7 +1200,8 @@ class DeviceUtilsReadFileTest(DeviceUtilsTest):
             as_root=False, check_return=True),
          ['-rw-rw---- root foo 256 1970-01-01 00:00 file']),
         (self.call.device.RunShellCommand(
-            ['cat', '/read/this/test/file'], as_root=False, check_return=True),
+            ['cat', '/read/this/test/file'],
+            as_root=False, check_return=True),
          ['this is a test file'])):
       self.assertEqual('this is a test file\n',
                        self.device.ReadFile('/read/this/test/file'))
@@ -1091,6 +1214,17 @@ class DeviceUtilsReadFileTest(DeviceUtilsTest):
         self.CommandError('File does not exist')):
       with self.assertRaises(device_errors.CommandFailedError):
         self.device.ReadFile('/this/file/does.not.exist')
+
+  def testReadFile_zeroSize(self):
+    with self.assertCalls(
+        (self.call.device.RunShellCommand(
+            ['ls', '-l', '/this/file/has/zero/size'],
+            as_root=False, check_return=True),
+         ['-r--r--r-- root foo 0 1970-01-01 00:00 zero_size_file']),
+        (self.call.device._ReadFileWithPull('/this/file/has/zero/size'),
+         'but it has contents\n')):
+      self.assertEqual('but it has contents\n',
+                       self.device.ReadFile('/this/file/has/zero/size'))
 
   def testReadFile_withSU(self):
     with self.assertCalls(
@@ -1139,6 +1273,15 @@ class DeviceUtilsReadFileTest(DeviceUtilsTest):
           contents,
           self.device.ReadFile('/this/big/file/can.be.read.with.su',
                                as_root=True))
+
+  def testReadFile_forcePull(self):
+    contents = 'a' * 123456
+    with self.assertCall(
+        self.call.device._ReadFileWithPull('/read/this/big/test/file'),
+        contents):
+      self.assertEqual(
+          contents,
+          self.device.ReadFile('/read/this/big/test/file', force_pull=True))
 
 
 class DeviceUtilsWriteFileTest(DeviceUtilsTest):
@@ -1350,37 +1493,42 @@ class DeviceUtilsSetPropTest(DeviceUtilsTest):
 class DeviceUtilsGetPidsTest(DeviceUtilsTest):
 
   def testGetPids_noMatches(self):
-    with self.assertCall(self.call.adb.Shell('ps'),
-        'USER   PID   PPID  VSIZE  RSS   WCHAN    PC       NAME\n'
-        'user  1000    100   1024 1024   ffffffff 00000000 no.match\n'):
+    with self.assertCall(
+        self.call.device._RunPipedShellCommand('ps | grep -F does.not.match'),
+        []):
       self.assertEqual({}, self.device.GetPids('does.not.match'))
 
   def testGetPids_oneMatch(self):
-    with self.assertCall(self.call.adb.Shell('ps'),
-        'USER   PID   PPID  VSIZE  RSS   WCHAN    PC       NAME\n'
-        'user  1000    100   1024 1024   ffffffff 00000000 not.a.match\n'
-        'user  1001    100   1024 1024   ffffffff 00000000 one.match\n'):
+    with self.assertCall(
+        self.call.device._RunPipedShellCommand('ps | grep -F one.match'),
+        ['user  1001    100   1024 1024   ffffffff 00000000 one.match']):
       self.assertEqual({'one.match': '1001'}, self.device.GetPids('one.match'))
 
   def testGetPids_mutlipleMatches(self):
-    with self.assertCall(self.call.adb.Shell('ps'),
-        'USER   PID   PPID  VSIZE  RSS   WCHAN    PC       NAME\n'
-        'user  1000    100   1024 1024   ffffffff 00000000 not\n'
-        'user  1001    100   1024 1024   ffffffff 00000000 one.match\n'
-        'user  1002    100   1024 1024   ffffffff 00000000 two.match\n'
-        'user  1003    100   1024 1024   ffffffff 00000000 three.match\n'):
+    with self.assertCall(
+        self.call.device._RunPipedShellCommand('ps | grep -F match'),
+        ['user  1001    100   1024 1024   ffffffff 00000000 one.match',
+         'user  1002    100   1024 1024   ffffffff 00000000 two.match',
+         'user  1003    100   1024 1024   ffffffff 00000000 three.match']):
       self.assertEqual(
           {'one.match': '1001', 'two.match': '1002', 'three.match': '1003'},
           self.device.GetPids('match'))
 
   def testGetPids_exactMatch(self):
-    with self.assertCall(self.call.adb.Shell('ps'),
-        'USER   PID   PPID  VSIZE  RSS   WCHAN    PC       NAME\n'
-        'user  1000    100   1024 1024   ffffffff 00000000 not.exact.match\n'
-        'user  1234    100   1024 1024   ffffffff 00000000 exact.match\n'):
+    with self.assertCall(
+        self.call.device._RunPipedShellCommand('ps | grep -F exact.match'),
+        ['user  1000    100   1024 1024   ffffffff 00000000 not.exact.match',
+         'user  1234    100   1024 1024   ffffffff 00000000 exact.match']):
       self.assertEqual(
           {'not.exact.match': '1000', 'exact.match': '1234'},
           self.device.GetPids('exact.match'))
+
+  def testGetPids_quotable(self):
+    with self.assertCall(
+        self.call.device._RunPipedShellCommand("ps | grep -F 'my$process'"),
+        ['user  1234    100   1024 1024   ffffffff 00000000 my$process']):
+      self.assertEqual(
+          {'my$process': '1234'}, self.device.GetPids('my$process'))
 
 
 class DeviceUtilsTakeScreenshotTest(DeviceUtilsTest):
@@ -1404,8 +1552,8 @@ class DeviceUtilsGetMemoryUsageForPidTest(DeviceUtilsTest):
 
   def testGetMemoryUsageForPid_validPid(self):
     with self.assertCalls(
-        (self.call.device.RunShellCommand(
-            ['showmap', '1234'], as_root=True, check_return=True),
+        (self.call.device._RunPipedShellCommand(
+            'showmap 1234 | grep TOTAL', as_root=True),
          ['100 101 102 103 104 105 106 107 TOTAL']),
         (self.call.device.ReadFile('/proc/1234/status', as_root=True),
          'VmHWM: 1024 kB\n')):
@@ -1424,8 +1572,8 @@ class DeviceUtilsGetMemoryUsageForPidTest(DeviceUtilsTest):
 
   def testGetMemoryUsageForPid_noSmaps(self):
     with self.assertCalls(
-        (self.call.device.RunShellCommand(
-            ['showmap', '4321'], as_root=True, check_return=True),
+        (self.call.device._RunPipedShellCommand(
+            'showmap 4321 | grep TOTAL', as_root=True),
          ['cannot open /proc/4321/smaps: No such file or directory']),
         (self.call.device.ReadFile('/proc/4321/status', as_root=True),
          'VmHWM: 1024 kb\n')):
@@ -1433,8 +1581,8 @@ class DeviceUtilsGetMemoryUsageForPidTest(DeviceUtilsTest):
 
   def testGetMemoryUsageForPid_noStatus(self):
     with self.assertCalls(
-        (self.call.device.RunShellCommand(
-            ['showmap', '4321'], as_root=True, check_return=True),
+        (self.call.device._RunPipedShellCommand(
+            'showmap 4321 | grep TOTAL', as_root=True),
          ['100 101 102 103 104 105 106 107 TOTAL']),
         (self.call.device.ReadFile('/proc/4321/status', as_root=True),
          self.CommandError())):
@@ -1449,145 +1597,6 @@ class DeviceUtilsGetMemoryUsageForPidTest(DeviceUtilsTest):
             'Private_Dirty': 106,
           },
           self.device.GetMemoryUsageForPid(4321))
-
-
-class DeviceUtilsGetBatteryInfoTest(DeviceUtilsTest):
-  def testGetBatteryInfo_normal(self):
-    with self.assertCall(
-        self.call.device.RunShellCommand(
-            ['dumpsys', 'battery'], check_return=True),
-        [
-          'Current Battery Service state:',
-          '  AC powered: false',
-          '  USB powered: true',
-          '  level: 100',
-          '  temperature: 321',
-        ]):
-      self.assertEquals(
-          {
-            'AC powered': 'false',
-            'USB powered': 'true',
-            'level': '100',
-            'temperature': '321',
-          },
-          self.device.GetBatteryInfo())
-
-
-  def testGetBatteryInfo_nothing(self):
-    with self.assertCall(
-        self.call.device.RunShellCommand(
-            ['dumpsys', 'battery'], check_return=True), []):
-      self.assertEquals({}, self.device.GetBatteryInfo())
-
-
-class DeviceUtilsGetChargingTest(DeviceUtilsTest):
-  def testGetCharging_usb(self):
-    with self.assertCall(
-        self.call.device.GetBatteryInfo(), {'USB powered': 'true'}):
-      self.assertTrue(self.device.GetCharging())
-
-  def testGetCharging_usbFalse(self):
-    with self.assertCall(
-        self.call.device.GetBatteryInfo(), {'USB powered': 'false'}):
-      self.assertFalse(self.device.GetCharging())
-
-  def testGetCharging_ac(self):
-    with self.assertCall(
-        self.call.device.GetBatteryInfo(), {'AC powered': 'true'}):
-      self.assertTrue(self.device.GetCharging())
-
-  def testGetCharging_wireless(self):
-    with self.assertCall(
-        self.call.device.GetBatteryInfo(), {'Wireless powered': 'true'}):
-      self.assertTrue(self.device.GetCharging())
-
-  def testGetCharging_unknown(self):
-    with self.assertCall(
-        self.call.device.GetBatteryInfo(), {'level': '42'}):
-      self.assertFalse(self.device.GetCharging())
-
-
-class DeviceUtilsSetChargingTest(DeviceUtilsTest):
-
-  @mock.patch('time.sleep', mock.Mock())
-  def testSetCharging_enabled(self):
-    with self.assertCalls(
-        (self.call.device.FileExists(mock.ANY), True),
-        (self.call.device.RunShellCommand(mock.ANY, check_return=True), []),
-        (self.call.device.GetCharging(), False),
-        (self.call.device.RunShellCommand(mock.ANY, check_return=True), []),
-        (self.call.device.GetCharging(), True)):
-      self.device.SetCharging(True)
-
-  def testSetCharging_alreadyEnabled(self):
-    with self.assertCalls(
-        (self.call.device.FileExists(mock.ANY), True),
-        (self.call.device.RunShellCommand(mock.ANY, check_return=True), []),
-        (self.call.device.GetCharging(), True)):
-      self.device.SetCharging(True)
-
-  @mock.patch('time.sleep', mock.Mock())
-  def testSetCharging_disabled(self):
-    with self.assertCalls(
-        (self.call.device.FileExists(mock.ANY), True),
-        (self.call.device.RunShellCommand(mock.ANY, check_return=True), []),
-        (self.call.device.GetCharging(), True),
-        (self.call.device.RunShellCommand(mock.ANY, check_return=True), []),
-        (self.call.device.GetCharging(), False)):
-      self.device.SetCharging(False)
-
-
-class DeviceUtilsSetBatteryMeasurementTest(DeviceUtilsTest):
-
-  def testBatteryMeasurement(self):
-    with self.assertCalls(
-        (self.call.device.RunShellCommand(
-            mock.ANY, retries=0, single_line=True,
-            timeout=10, check_return=True), '22'),
-        (self.call.device.RunShellCommand(
-            ['dumpsys', 'batterystats', '--reset'], check_return=True), []),
-        (self.call.device.RunShellCommand(
-            ['dumpsys', 'batterystats', '--charged', '--checkin'],
-            check_return=True), []),
-        (self.call.device.RunShellCommand(
-            ['dumpsys', 'battery', 'set', 'usb', '0'], check_return=True), []),
-        (self.call.device.GetCharging(), False),
-        (self.call.device.RunShellCommand(
-            ['dumpsys', 'battery', 'set', 'usb', '1'], check_return=True), []),
-        (self.call.device.RunShellCommand(
-            ['dumpsys', 'battery', 'reset'], check_return=True), []),
-        (self.call.device.GetCharging(), True)):
-      with self.device.BatteryMeasurement():
-        pass
-
-
-class DeviceUtilsStrTest(DeviceUtilsTest):
-
-  def testStr_returnsSerial(self):
-    with self.assertCalls(
-        (self.call.adb.GetDeviceSerial(), '0123456789abcdef')):
-      self.assertEqual('0123456789abcdef', str(self.device))
-
-
-class DeviceUtilsParallelTest(mock_calls.TestCase):
-
-  def testParallel_default(self):
-    test_serials = ['0123456789abcdef', 'fedcba9876543210']
-    with self.assertCall(
-        mock.call.pylib.device.adb_wrapper.AdbWrapper.GetDevices(),
-        [_AdbWrapperMock(serial) for serial in test_serials]):
-      parallel_devices = device_utils.DeviceUtils.parallel()
-    for serial, device in zip(test_serials, parallel_devices.pGet(None)):
-      self.assertTrue(
-          isinstance(device, device_utils.DeviceUtils)
-          and serial == str(device),
-          'Expected a DeviceUtils object with serial %s' % serial)
-
-  def testParallel_noDevices(self):
-    with self.assertCall(
-        mock.call.pylib.device.adb_wrapper.AdbWrapper.GetDevices(), []):
-      with self.assertRaises(device_errors.NoDevicesError):
-        device_utils.DeviceUtils.parallel()
 
 
 class DeviceUtilsClientCache(DeviceUtilsTest):
@@ -1615,6 +1624,57 @@ class DeviceUtilsClientCache(DeviceUtilsTest):
     self.device._ClearCache()
     self.assertEqual(client_cache_one, {})
     self.assertEqual(client_cache_two, {})
+
+
+class DeviceUtilsParallelTest(mock_calls.TestCase):
+
+  def testParallel_default(self):
+    test_serials = ['0123456789abcdef', 'fedcba9876543210']
+    with self.assertCall(
+        mock.call.pylib.device.device_utils.DeviceUtils.HealthyDevices(),
+        [device_utils.DeviceUtils(s) for s in test_serials]):
+      parallel_devices = device_utils.DeviceUtils.parallel()
+    for serial, device in zip(test_serials, parallel_devices.pGet(None)):
+      self.assertTrue(isinstance(device, device_utils.DeviceUtils))
+      self.assertEquals(serial, device.adb.GetDeviceSerial())
+
+  def testParallel_noDevices(self):
+    with self.assertCall(
+        mock.call.pylib.device.device_utils.DeviceUtils.HealthyDevices(), []):
+      with self.assertRaises(device_errors.NoDevicesError):
+        device_utils.DeviceUtils.parallel()
+
+
+class DeviceUtilsHealthyDevicesTest(mock_calls.TestCase):
+
+  def _createAdbWrapperMock(self, serial, is_ready=True):
+    adb = _AdbWrapperMock(serial)
+    adb.is_ready = is_ready
+    return adb
+
+  def testHealthyDevices_default(self):
+    test_serials = ['0123456789abcdef', 'fedcba9876543210']
+    with self.assertCalls(
+        (mock.call.pylib.device.device_blacklist.ReadBlacklist(), []),
+        (mock.call.pylib.device.adb_wrapper.AdbWrapper.Devices(),
+         [self._createAdbWrapperMock(s) for s in test_serials])):
+      devices = device_utils.DeviceUtils.HealthyDevices()
+    for serial, device in zip(test_serials, devices):
+      self.assertTrue(isinstance(device, device_utils.DeviceUtils))
+      self.assertEquals(serial, device.adb.GetDeviceSerial())
+
+  def testHealthyDevices_blacklisted(self):
+    test_serials = ['0123456789abcdef', 'fedcba9876543210']
+    with self.assertCalls(
+        (mock.call.pylib.device.device_blacklist.ReadBlacklist(),
+         ['fedcba9876543210']),
+        (mock.call.pylib.device.adb_wrapper.AdbWrapper.Devices(),
+         [self._createAdbWrapperMock(s) for s in test_serials])):
+      devices = device_utils.DeviceUtils.HealthyDevices()
+    self.assertEquals(1, len(devices))
+    self.assertTrue(isinstance(devices[0], device_utils.DeviceUtils))
+    self.assertEquals('0123456789abcdef', devices[0].adb.GetDeviceSerial())
+
 
 if __name__ == '__main__':
   logging.getLogger().setLevel(logging.DEBUG)

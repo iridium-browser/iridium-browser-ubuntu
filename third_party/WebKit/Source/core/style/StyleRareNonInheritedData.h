@@ -25,6 +25,7 @@
 #ifndef StyleRareNonInheritedData_h
 #define StyleRareNonInheritedData_h
 
+#include "core/CoreExport.h"
 #include "core/css/StyleColor.h"
 #include "core/layout/ClipPathOperation.h"
 #include "core/style/BasicShapes.h"
@@ -36,6 +37,8 @@
 #include "core/style/LineClampValue.h"
 #include "core/style/NinePieceImage.h"
 #include "core/style/ShapeValue.h"
+#include "core/style/StyleContentAlignmentData.h"
+#include "core/style/StyleSelfAlignmentData.h"
 #include "platform/LengthPoint.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/PassRefPtr.h"
@@ -71,7 +74,7 @@ enum PageSizeType {
 // This struct is for rarely used non-inherited CSS3, CSS2, and WebKit-specific properties.
 // By grouping them together, we save space, and only allocate this object when someone
 // actually uses one of these properties.
-class StyleRareNonInheritedData : public RefCounted<StyleRareNonInheritedData> {
+class CORE_EXPORT StyleRareNonInheritedData : public RefCounted<StyleRareNonInheritedData> {
 public:
     static PassRefPtr<StyleRareNonInheritedData> create() { return adoptRef(new StyleRareNonInheritedData); }
     PassRefPtr<StyleRareNonInheritedData> copy() const { return adoptRef(new StyleRareNonInheritedData(*this)); }
@@ -94,7 +97,12 @@ public:
     float opacity; // Whether or not we're transparent.
 
     float m_perspective;
+    float m_shapeImageThreshold;
+
+    int m_order;
+
     LengthPoint m_perspectiveOrigin;
+    LengthPoint m_objectPosition;
 
     LineClampValue lineClamp; // An Apple extension.
     DraggableRegionMode m_draggableRegionMode;
@@ -112,24 +120,21 @@ public:
 
     OwnPtr<ContentData> m_content;
     OwnPtr<CounterDirectiveMap> m_counterDirectives;
+    OwnPtr<CSSAnimationData> m_animations;
+    OwnPtr<CSSTransitionData> m_transitions;
 
     RefPtr<ShadowList> m_boxShadow;
 
     RefPtr<StyleReflection> m_boxReflect;
 
-    OwnPtr<CSSAnimationData> m_animations;
-    OwnPtr<CSSTransitionData> m_transitions;
+    RefPtr<ShapeValue> m_shapeOutside;
+    RefPtr<ClipPathOperation> m_clipPath;
 
     FillLayer m_mask;
     NinePieceImage m_maskBoxImage;
 
-    LengthSize m_pageSize;
-
-    RefPtr<ShapeValue> m_shapeOutside;
+    FloatSize m_pageSize;
     Length m_shapeMargin;
-    float m_shapeImageThreshold;
-
-    RefPtr<ClipPathOperation> m_clipPath;
 
     StyleColor m_textDecorationColor;
     StyleColor m_visitedLinkTextDecorationColor;
@@ -140,26 +145,18 @@ public:
     StyleColor m_visitedLinkBorderTopColor;
     StyleColor m_visitedLinkBorderBottomColor;
 
-    int m_order;
-
-    LengthPoint m_objectPosition;
-
     Vector<String> m_callbackSelectors;
+
+    StyleContentAlignmentData m_alignContent;
+    StyleSelfAlignmentData m_alignItems;
+    StyleSelfAlignmentData m_alignSelf;
+    StyleContentAlignmentData m_justifyContent;
+    StyleSelfAlignmentData m_justifyItems;
+    StyleSelfAlignmentData m_justifySelf;
 
     unsigned m_pageSizeType : 2; // PageSizeType
     unsigned m_transformStyle3D : 1; // ETransformStyle3D
     unsigned m_backfaceVisibility : 1; // EBackfaceVisibility
-
-    unsigned m_alignContent : 4; // ContentPosition
-    unsigned m_alignContentDistribution : 3; // ContentDistributionType
-    unsigned m_alignContentOverflowAlignment : 2; // OverflowAlignment
-    unsigned m_alignItems : 4; // ItemPosition
-    unsigned m_alignItemsOverflowAlignment : 2; // OverflowAlignment
-    unsigned m_alignSelf : 4; // ItemPosition
-    unsigned m_alignSelfOverflowAlignment : 2; // OverflowAlignment
-    unsigned m_justifyContent : 4; // ContentPosition
-    unsigned m_justifyContentDistribution : 3; // ContentDistributionType
-    unsigned m_justifyContentOverflowAlignment : 2; // OverflowAlignment
 
     unsigned userDrag : 2; // EUserDrag
     unsigned textOverflow : 1; // Whether or not lines that spill out should be truncated with "..."
@@ -187,13 +184,6 @@ public:
 
     unsigned m_isolation : 1; // Isolation
 
-    unsigned m_justifyItems : 4; // ItemPosition
-    unsigned m_justifyItemsOverflowAlignment : 2; // OverflowAlignment
-    unsigned m_justifyItemsPositionType: 1; // Whether or not alignment uses the 'legacy' keyword.
-
-    unsigned m_justifySelf : 4; // ItemPosition
-    unsigned m_justifySelfOverflowAlignment : 2; // OverflowAlignment
-
     // ScrollBehavior. 'scroll-behavior' has 2 accepted values, but ScrollBehavior has a third
     // value (that can only be specified using CSSOM scroll APIs) so 2 bits are needed.
     unsigned m_scrollBehavior: 2;
@@ -209,6 +199,7 @@ public:
     // Whether the transform (if it exists) is stored in the element's inline style.
     unsigned m_hasInlineTransform : 1;
     unsigned m_resize : 2; // EResize
+    unsigned m_hasCompositorProxy : 1;
 
 private:
     StyleRareNonInheritedData();

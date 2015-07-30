@@ -5,7 +5,6 @@
 #ifndef COMPONENTS_FAVICON_CORE_FAVICON_HANDLER_H_
 #define COMPONENTS_FAVICON_CORE_FAVICON_HANDLER_H_
 
-#include <deque>
 #include <map>
 #include <vector>
 
@@ -19,9 +18,7 @@
 #include "ui/gfx/image/image.h"
 #include "url/gurl.h"
 
-class FaviconTabHelperTest;
 class SkBitmap;
-class TestFaviconHandler;
 
 namespace base {
 class RefCountedMemory;
@@ -31,6 +28,7 @@ namespace favicon {
 
 class FaviconDriver;
 class FaviconService;
+class TestFaviconHandler;
 
 // FaviconHandler works with FaviconDriver to fetch the specific type of
 // favicon.
@@ -118,6 +116,10 @@ class FaviconHandler {
     return image_urls_;
   }
 
+  // Returns whether the handler is waiting for a download to complete or for
+  // data from the FaviconService. Reserved for testing.
+  bool HasPendingTasksForTest();
+
  protected:
   // These virtual methods make FaviconHandler testable and are overridden by
   // TestFaviconHandler.
@@ -155,8 +157,7 @@ class FaviconHandler {
 
  private:
   // For testing:
-  friend class ::FaviconTabHelperTest;
-  friend class ::TestFaviconHandler;
+  friend class TestFaviconHandler;
 
   // Represents an in progress download of an image from the renderer.
   struct DownloadRequest {
@@ -211,9 +212,9 @@ class FaviconHandler {
 
   // Schedules a download for the specified entry. This adds the request to
   // download_requests_.
-  int ScheduleDownload(const GURL& url,
-                       const GURL& image_url,
-                       favicon_base::IconType icon_type);
+  void ScheduleDownload(const GURL& url,
+                        const GURL& image_url,
+                        favicon_base::IconType icon_type);
 
   // Updates |favicon_candidate_| and returns true if it is an exact match.
   bool UpdateFaviconCandidate(const GURL& url,
@@ -232,11 +233,9 @@ class FaviconHandler {
   // FaviconDriver::NotifyFaviconAvailable() for |is_active_favicon| in detail.
   void NotifyFaviconAvailable(
       const std::vector<favicon_base::FaviconRawBitmapResult>&
-          favicon_bitmap_results,
-      bool is_active_favicon);
+          favicon_bitmap_results);
   void NotifyFaviconAvailable(const GURL& icon_url,
-                              const gfx::Image& image,
-                              bool is_active_favicon);
+                              const gfx::Image& image);
 
   // Return the current candidate if any.
   favicon::FaviconURL* current_candidate() {
@@ -264,9 +263,6 @@ class FaviconHandler {
 
   // URL of the page we're requesting the favicon for.
   GURL url_;
-
-  // Whether we are waiting for data from the FaviconService.
-  bool waiting_for_favicon_service_data_;
 
   // Whether we got data back for the initial request to the FaviconService.
   bool got_favicon_from_history_;

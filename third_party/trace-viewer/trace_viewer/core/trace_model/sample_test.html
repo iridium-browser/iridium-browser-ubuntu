@@ -26,9 +26,9 @@ tv.b.unittest.testSuite(function() {
                        10, fABC, 10);
     var stackTrace = s.stackTrace;
     var stackTraceNames = stackTrace.map(function(f) { return f.title; });
-    assertArrayEquals(
-        ['a', 'b', 'c'],
-        stackTraceNames);
+    assert.deepEqual(
+        stackTraceNames,
+        ['a', 'b', 'c']);
   });
 });
 </script>

@@ -67,7 +67,7 @@ template("test") {
       }
       deps = []
       if (!defined(invoker.use_launcher) || invoker.use_launcher) {
-        deps += [ "//testing/android:native_test_native_code" ]
+        deps += [ "//testing/android/native_test:native_test_native_code" ]
       }
       if (defined(invoker.deps)) {
         deps += invoker.deps
@@ -117,8 +117,8 @@ template("test") {
       unittests_dep = ":$library_name"
       apk_name = main_target_name
       if (defined(invoker.output_name)) {
-        test_output_name = invoker.output_name
-        unittests_binary = "lib${test_output_name}.so"
+        apk_name = invoker.output_name
+        unittests_binary = "lib${apk_name}.so"
       }
       deps = [
         ":$library_name",

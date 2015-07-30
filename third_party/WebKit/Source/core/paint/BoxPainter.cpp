@@ -15,7 +15,6 @@
 #include "core/layout/LayoutTable.h"
 #include "core/layout/LayoutTheme.h"
 #include "core/layout/LayoutView.h"
-#include "core/layout/PaintInfo.h"
 #include "core/layout/compositing/CompositedDeprecatedPaintLayerMapping.h"
 #include "core/style/BorderEdge.h"
 #include "core/style/ShadowList.h"
@@ -23,9 +22,12 @@
 #include "core/paint/BoxDecorationData.h"
 #include "core/paint/DeprecatedPaintLayer.h"
 #include "core/paint/LayoutObjectDrawingRecorder.h"
+#include "core/paint/PaintInfo.h"
 #include "core/paint/RoundedInnerRectClipper.h"
+#include "core/paint/ThemePainter.h"
 #include "platform/LengthFunctions.h"
 #include "platform/geometry/LayoutPoint.h"
+#include "platform/geometry/LayoutRectOutsets.h"
 #include "platform/graphics/GraphicsContextStateSaver.h"
 #include "platform/graphics/paint/CompositingDisplayItem.h"
 
@@ -75,6 +77,15 @@ LayoutRect BoxPainter::scrolledBackgroundRect()
     return result;
 }
 
+namespace {
+
+bool bleedAvoidanceIsClipping(BackgroundBleedAvoidance bleedAvoidance)
+{
+    return bleedAvoidance == BackgroundBleedClipOnly || bleedAvoidance == BackgroundBleedClipLayer;
+}
+
+} // anonymous namespace
+
 void BoxPainter::paintBoxDecorationBackgroundWithRect(const PaintInfo& paintInfo, const LayoutPoint& paintOffset, const LayoutRect& paintRect)
 {
     LayoutObjectDrawingRecorder recorder(*paintInfo.context, m_layoutBox, DisplayItem::BoxDecorationBackground, boundsForDrawingRecorder(paintOffset));
@@ -82,51 +93,66 @@ void BoxPainter::paintBoxDecorationBackgroundWithRect(const PaintInfo& paintInfo
         return;
 
     const ComputedStyle& style = m_layoutBox.styleRef();
-    BoxDecorationData boxDecorationData(m_layoutBox, paintInfo.context);
+    BoxDecorationData boxDecorationData(m_layoutBox);
+
+#if ENABLE(ASSERT)
+    // For now we don't have notification on media buffered range change from media player
+    // and miss paint invalidation on buffered range chagne. crbug.com/484288.
+    if (style.appearance() == MediaSliderPart)
+        recorder.setSkipUnderInvalidationChecking();
+#endif
 
     // FIXME: Should eventually give the theme control over whether the box shadow should paint, since controls could have
     // custom shadows of their own.
-    if (!m_layoutBox.boxShadowShouldBeAppliedToBackground(boxDecorationData.bleedAvoidance()))
+    if (!m_layoutBox.boxShadowShouldBeAppliedToBackground(boxDecorationData.bleedAvoidance))
         paintBoxShadow(paintInfo, paintRect, style, Normal);
 
     GraphicsContextStateSaver stateSaver(*paintInfo.context, false);
-    if (boxDecorationData.bleedAvoidance() == BackgroundBleedClipBackground) {
+    if (bleedAvoidanceIsClipping(boxDecorationData.bleedAvoidance)) {
+
         stateSaver.save();
         FloatRoundedRect border = style.getRoundedBorderFor(paintRect);
         paintInfo.context->clipRoundedRect(border);
+
+        if (boxDecorationData.bleedAvoidance == BackgroundBleedClipLayer)
+            paintInfo.context->beginLayer();
     }
 
     // If we have a native theme appearance, paint that before painting our background.
     // The theme will tell us whether or not we should also paint the CSS background.
     IntRect snappedPaintRect(pixelSnappedIntRect(paintRect));
-    bool themePainted = boxDecorationData.hasAppearance && !LayoutTheme::theme().paint(&m_layoutBox, paintInfo, snappedPaintRect);
+    ThemePainter& themePainter = LayoutTheme::theme().painter();
+    bool themePainted = boxDecorationData.hasAppearance && !themePainter.paint(&m_layoutBox, paintInfo, snappedPaintRect);
     if (!themePainted) {
-        if (boxDecorationData.bleedAvoidance() == BackgroundBleedBackgroundOverBorder)
-            paintBorder(m_layoutBox, paintInfo, paintRect, style, boxDecorationData.bleedAvoidance());
+        if (boxDecorationData.bleedAvoidance == BackgroundBleedBackgroundOverBorder)
+            paintBorder(m_layoutBox, paintInfo, paintRect, style, boxDecorationData.bleedAvoidance);
 
-        paintBackground(paintInfo, paintRect, boxDecorationData.backgroundColor, boxDecorationData.bleedAvoidance());
+        paintBackground(paintInfo, paintRect, boxDecorationData.backgroundColor, boxDecorationData.bleedAvoidance);
 
         if (boxDecorationData.hasAppearance)
-            LayoutTheme::theme().paintDecorations(&m_layoutBox, paintInfo, snappedPaintRect);
+            themePainter.paintDecorations(&m_layoutBox, paintInfo, snappedPaintRect);
     }
     paintBoxShadow(paintInfo, paintRect, style, Inset);
 
     // The theme will tell us whether or not we should also paint the CSS border.
-    if (boxDecorationData.hasBorder && boxDecorationData.bleedAvoidance() != BackgroundBleedBackgroundOverBorder
-        && (!boxDecorationData.hasAppearance || (!themePainted && LayoutTheme::theme().paintBorderOnly(&m_layoutBox, paintInfo, snappedPaintRect)))
+    if (boxDecorationData.hasBorder && boxDecorationData.bleedAvoidance != BackgroundBleedBackgroundOverBorder
+        && (!boxDecorationData.hasAppearance || (!themePainted && LayoutTheme::theme().painter().paintBorderOnly(&m_layoutBox, paintInfo, snappedPaintRect)))
         && !(m_layoutBox.isTable() && toLayoutTable(&m_layoutBox)->collapseBorders()))
-        paintBorder(m_layoutBox, paintInfo, paintRect, style, boxDecorationData.bleedAvoidance());
+        paintBorder(m_layoutBox, paintInfo, paintRect, style, boxDecorationData.bleedAvoidance);
+
+    if (boxDecorationData.bleedAvoidance == BackgroundBleedClipLayer)
+        paintInfo.context->endLayer();
 }
 
-static bool skipBodyBackground(const LayoutBox* bodyElementRenderer)
+static bool skipBodyBackground(const LayoutBox* bodyElementLayoutObject)
 {
-    ASSERT(bodyElementRenderer->isBody());
+    ASSERT(bodyElementLayoutObject->isBody());
     // The <body> only paints its background if the root element has defined a background independent of the body,
-    // or if the <body>'s parent is not the document element's renderer (e.g. inside SVG foreignObject).
-    LayoutObject* documentElementRenderer = bodyElementRenderer->document().documentElement()->layoutObject();
-    return documentElementRenderer
-        && !documentElementRenderer->hasBackground()
-        && (documentElementRenderer == bodyElementRenderer->parent());
+    // or if the <body>'s parent is not the document element's layoutObject (e.g. inside SVG foreignObject).
+    LayoutObject* documentElementLayoutObject = bodyElementLayoutObject->document().documentElement()->layoutObject();
+    return documentElementLayoutObject
+        && !documentElementLayoutObject->hasBackground()
+        && (documentElementLayoutObject == bodyElementLayoutObject->parent());
 }
 
 void BoxPainter::paintBackground(const PaintInfo& paintInfo, const LayoutRect& paintRect, const Color& backgroundColor, BackgroundBleedAvoidance bleedAvoidance)
@@ -147,12 +173,12 @@ void BoxPainter::paintRootBoxFillLayers(const PaintInfo& paintInfo)
     if (paintInfo.skipRootBackground())
         return;
 
-    LayoutObject* rootBackgroundRenderer = m_layoutBox.rendererForRootBackground();
+    LayoutObject* rootBackgroundLayoutObject = m_layoutBox.layoutObjectForRootBackground();
 
-    const FillLayer& bgLayer = rootBackgroundRenderer->style()->backgroundLayers();
-    Color bgColor = rootBackgroundRenderer->resolveColor(CSSPropertyBackgroundColor);
+    const FillLayer& bgLayer = rootBackgroundLayoutObject->style()->backgroundLayers();
+    Color bgColor = rootBackgroundLayoutObject->resolveColor(CSSPropertyBackgroundColor);
 
-    paintFillLayers(paintInfo, bgColor, bgLayer, scrolledBackgroundRect(), BackgroundBleedNone, SkXfermode::kSrcOver_Mode, rootBackgroundRenderer);
+    paintFillLayers(paintInfo, bgColor, bgLayer, scrolledBackgroundRect(), BackgroundBleedNone, SkXfermode::kSrcOver_Mode, rootBackgroundLayoutObject);
 }
 
 void BoxPainter::paintFillLayers(const PaintInfo& paintInfo, const Color& c, const FillLayer& fillLayer, const LayoutRect& rect,
@@ -229,46 +255,66 @@ void BoxPainter::applyBoxShadowForBackground(GraphicsContext* context, LayoutObj
         if (boxShadow.style() != Normal)
             continue;
         FloatSize shadowOffset(boxShadow.x(), boxShadow.y());
-        context->setShadow(shadowOffset, boxShadow.blur(), boxShadow.color(),
+        context->setShadow(shadowOffset, boxShadow.blur(),
+            boxShadow.color().resolve(obj.resolveColor(CSSPropertyColor)),
             DrawLooperBuilder::ShadowRespectsTransforms, DrawLooperBuilder::ShadowIgnoresAlpha);
         return;
     }
 }
 
-// FIXME: See crbug.com/382491. The use of getCTM in this context is incorrect because the matrix returned does not
-// include scales applied at raster time, such as the device zoom.
-static LayoutRect shrinkRectByOnePixel(GraphicsContext* context, const LayoutRect& rect)
-{
-    ASSERT(!RuntimeEnabledFeatures::slimmingPaintEnabled());
-    LayoutRect shrunkRect = rect;
-    AffineTransform transform = context->getCTM();
-    shrunkRect.inflateX(-static_cast<LayoutUnit>(ceil(1 / transform.xScale())));
-    shrunkRect.inflateY(-static_cast<LayoutUnit>(ceil(1 / transform.yScale())));
-    return shrunkRect;
-}
-
-FloatRoundedRect BoxPainter::getBackgroundRoundedRect(LayoutObject& obj, const LayoutRect& borderRect, InlineFlowBox* box, LayoutUnit inlineBoxWidth, LayoutUnit inlineBoxHeight,
+FloatRoundedRect BoxPainter::getBackgroundRoundedRect(LayoutObject& obj, const LayoutRect& borderRect,
+    InlineFlowBox* box, LayoutUnit inlineBoxWidth, LayoutUnit inlineBoxHeight,
     bool includeLogicalLeftEdge, bool includeLogicalRightEdge)
 {
     FloatRoundedRect border = obj.style()->getRoundedBorderFor(borderRect, includeLogicalLeftEdge, includeLogicalRightEdge);
     if (box && (box->nextLineBox() || box->prevLineBox())) {
-        FloatRoundedRect segmentBorder = obj.style()->getRoundedBorderFor(LayoutRect(0, 0, inlineBoxWidth, inlineBoxHeight), includeLogicalLeftEdge, includeLogicalRightEdge);
+        FloatRoundedRect segmentBorder = obj.style()->getRoundedBorderFor(LayoutRect(0, 0, inlineBoxWidth, inlineBoxHeight),
+            includeLogicalLeftEdge, includeLogicalRightEdge);
         border.setRadii(segmentBorder.radii());
     }
-
     return border;
 }
 
-FloatRoundedRect BoxPainter::backgroundRoundedRectAdjustedForBleedAvoidance(LayoutObject& obj, GraphicsContext* context, const LayoutRect& borderRect, BackgroundBleedAvoidance bleedAvoidance, InlineFlowBox* box, const LayoutSize& boxSize, bool includeLogicalLeftEdge, bool includeLogicalRightEdge)
+FloatRoundedRect BoxPainter::backgroundRoundedRectAdjustedForBleedAvoidance(LayoutObject& obj,
+    const LayoutRect& borderRect, BackgroundBleedAvoidance bleedAvoidance, InlineFlowBox* box,
+    const LayoutSize& boxSize, bool includeLogicalLeftEdge, bool includeLogicalRightEdge)
 {
     if (bleedAvoidance == BackgroundBleedShrinkBackground) {
-        // We shrink the rectangle by one pixel on each side because the bleed is one pixel maximum.
-        return BoxPainter::getBackgroundRoundedRect(obj, shrinkRectByOnePixel(context, borderRect), box, boxSize.width(), boxSize.height(), includeLogicalLeftEdge, includeLogicalRightEdge);
+        // Inset the background rect by a "safe" amount: 1/2 border-width for opaque border styles,
+        // 1/6 border-width for double borders.
+
+        // TODO(fmalita): we should be able to fold these parameters into BoxBorderInfo or
+        // BoxDecorationData and avoid calling getBorderEdgeInfo redundantly here.
+        BorderEdge edges[4];
+        obj.style()->getBorderEdgeInfo(edges, includeLogicalLeftEdge, includeLogicalRightEdge);
+
+        // Use the most conservative inset to avoid mixed-style corner issues.
+        float fractionalInset = 1.0f / 2;
+        for (auto& edge : edges) {
+            if (edge.borderStyle() == DOUBLE) {
+                fractionalInset = 1.0f / 6;
+                break;
+            }
+        }
+
+        FloatRectOutsets insets(
+            -fractionalInset * edges[BSTop].width,
+            -fractionalInset * edges[BSRight].width,
+            -fractionalInset * edges[BSBottom].width,
+            -fractionalInset * edges[BSLeft].width);
+
+        FloatRoundedRect backgroundRoundedRect = getBackgroundRoundedRect(obj, borderRect, box, boxSize.width(), boxSize.height(),
+            includeLogicalLeftEdge, includeLogicalRightEdge);
+        FloatRect insetRect(backgroundRoundedRect.rect());
+        insetRect.expand(insets);
+        FloatRoundedRect::Radii insetRadii(backgroundRoundedRect.radii());
+        insetRadii.shrink(-insets.top(), -insets.bottom(), -insets.left(), -insets.right());
+        return FloatRoundedRect(insetRect, insetRadii);
     }
     if (bleedAvoidance == BackgroundBleedBackgroundOverBorder)
         return obj.style()->getRoundedInnerBorderFor(borderRect, includeLogicalLeftEdge, includeLogicalRightEdge);
 
-    return BoxPainter::getBackgroundRoundedRect(obj, borderRect, box, boxSize.width(), boxSize.height(), includeLogicalLeftEdge, includeLogicalRightEdge);
+    return getBackgroundRoundedRect(obj, borderRect, box, boxSize.width(), boxSize.height(), includeLogicalLeftEdge, includeLogicalRightEdge);
 }
 
 void BoxPainter::paintFillLayerExtended(LayoutBoxModelObject& obj, const PaintInfo& paintInfo, const Color& color, const FillLayer& bgLayer, const LayoutRect& rect,
@@ -284,7 +330,7 @@ void BoxPainter::paintFillLayerExtended(LayoutBoxModelObject& obj, const PaintIn
     bool hasRoundedBorder = obj.style()->hasBorderRadius() && (includeLeftEdge || includeRightEdge);
     bool clippedWithLocalScrolling = obj.hasOverflowClip() && bgLayer.attachment() == LocalBackgroundAttachment;
     bool isBorderFill = bgLayer.clip() == BorderFillBox;
-    bool isDocumentElementRenderer = obj.isDocumentElement();
+    bool isDocumentElementLayoutObject = obj.isDocumentElement();
     bool isBottomLayer = !bgLayer.next();
 
     Color bgColor = color;
@@ -305,7 +351,7 @@ void BoxPainter::paintFillLayerExtended(LayoutBoxModelObject& obj, const PaintIn
     // We don't try to avoid loading the background images, because this style flag is only set
     // when printing, and at that point we've already loaded the background images anyway. (To avoid
     // loading the background images we'd have to do this check when applying styles rather than
-    // while rendering.)
+    // while layout.)
     if (forceBackgroundToWhite) {
         // Note that we can't reuse this variable below because the bgColor might be changed
         bool shouldPaintBackgroundColor = isBottomLayer && bgColor.alpha();
@@ -318,7 +364,7 @@ void BoxPainter::paintFillLayerExtended(LayoutBoxModelObject& obj, const PaintIn
     bool colorVisible = bgColor.alpha();
 
     // Fast path for drawing simple color backgrounds.
-    if (!isDocumentElementRenderer && !clippedWithLocalScrolling && !shouldPaintBackgroundImage && isBorderFill && isBottomLayer) {
+    if (!isDocumentElementLayoutObject && !clippedWithLocalScrolling && !shouldPaintBackgroundImage && isBorderFill && isBottomLayer) {
         if (!colorVisible)
             return;
 
@@ -327,8 +373,10 @@ void BoxPainter::paintFillLayerExtended(LayoutBoxModelObject& obj, const PaintIn
         if (boxShadowShouldBeAppliedToBackground)
             BoxPainter::applyBoxShadowForBackground(context, obj);
 
-        if (hasRoundedBorder && bleedAvoidance != BackgroundBleedClipBackground) {
-            FloatRoundedRect border = backgroundRoundedRectAdjustedForBleedAvoidance(obj, context, rect, bleedAvoidance, box, boxSize, includeLeftEdge, includeRightEdge);
+        if (hasRoundedBorder && !bleedAvoidanceIsClipping(bleedAvoidance)) {
+            FloatRoundedRect border = backgroundRoundedRectAdjustedForBleedAvoidance(obj, rect,
+                bleedAvoidance, box, boxSize, includeLeftEdge, includeRightEdge);
+
             if (border.isRenderable()) {
                 context->fillRoundedRect(border, bgColor);
             } else {
@@ -342,17 +390,23 @@ void BoxPainter::paintFillLayerExtended(LayoutBoxModelObject& obj, const PaintIn
         return;
     }
 
-    // BorderFillBox radius clipping is taken care of by BackgroundBleedClipBackground
-    bool clipToBorderRadius = hasRoundedBorder && !(isBorderFill && bleedAvoidance == BackgroundBleedClipBackground);
+    // BorderFillBox radius clipping is taken care of by BackgroundBleedClip{Only,Layer}
+    bool clipToBorderRadius = hasRoundedBorder && !(isBorderFill && bleedAvoidanceIsClipping(bleedAvoidance));
     OwnPtr<RoundedInnerRectClipper> clipToBorder;
     if (clipToBorderRadius) {
-        FloatRoundedRect border = isBorderFill ? backgroundRoundedRectAdjustedForBleedAvoidance(obj, context, rect, bleedAvoidance, box, boxSize, includeLeftEdge, includeRightEdge) : getBackgroundRoundedRect(obj, rect, box, boxSize.width(), boxSize.height(), includeLeftEdge, includeRightEdge);
+        FloatRoundedRect border = isBorderFill
+            ? backgroundRoundedRectAdjustedForBleedAvoidance(obj, rect, bleedAvoidance, box, boxSize, includeLeftEdge, includeRightEdge)
+            : getBackgroundRoundedRect(obj, rect, box, boxSize.width(), boxSize.height(), includeLeftEdge, includeRightEdge);
 
         // Clip to the padding or content boxes as necessary.
         if (bgLayer.clip() == ContentFillBox) {
             border = obj.style()->getRoundedInnerBorderFor(LayoutRect(border.rect()),
-                obj.paddingTop() + obj.borderTop(), obj.paddingBottom() + obj.borderBottom(),
-                obj.paddingLeft() + obj.borderLeft(), obj.paddingRight() + obj.borderRight(), includeLeftEdge, includeRightEdge);
+                LayoutRectOutsets(
+                    -(obj.paddingTop() + obj.borderTop()),
+                    -(obj.paddingRight() + obj.borderRight()),
+                    -(obj.paddingBottom() + obj.borderBottom()),
+                    -(obj.paddingLeft() + obj.borderLeft())),
+                includeLeftEdge, includeRightEdge);
         } else if (bgLayer.clip() == PaddingFillBox) {
             border = obj.style()->getRoundedInnerBorderFor(LayoutRect(border.rect()), includeLeftEdge, includeRightEdge);
         }
@@ -403,7 +457,8 @@ void BoxPainter::paintFillLayerExtended(LayoutBoxModelObject& obj, const PaintIn
         // First figure out how big the mask has to be. It should be no bigger than what we need
         // to actually render, so we should intersect the dirty rect with the border box of the background.
         maskRect = pixelSnappedIntRect(rect);
-        maskRect.intersect(paintInfo.rect);
+        if (!RuntimeEnabledFeatures::slimmingPaintEnabled())
+            maskRect.intersect(paintInfo.rect);
 
         // We draw the background into a separate layer, to be later masked with yet another layer
         // holding the text content.
@@ -426,9 +481,9 @@ void BoxPainter::paintFillLayerExtended(LayoutBoxModelObject& obj, const PaintIn
     if (isBottomLayer) {
         IntRect backgroundRect(pixelSnappedIntRect(scrolledPaintRect));
         bool boxShadowShouldBeAppliedToBackground = obj.boxShadowShouldBeAppliedToBackground(bleedAvoidance, box);
-        bool isOpaqueRoot = (isDocumentElementRenderer && !bgColor.hasAlpha()) || isDocumentElementWithOpaqueBackground(obj);
+        bool isOpaqueRoot = (isDocumentElementLayoutObject && !bgColor.hasAlpha()) || isDocumentElementWithOpaqueBackground(obj);
         if (boxShadowShouldBeAppliedToBackground || !shouldPaintBackgroundImage || !bgLayer.hasOpaqueImage(&obj) || !bgLayer.hasRepeatXY() || (isOpaqueRoot && !toLayoutBox(&obj)->size().height()))  {
-            if (!boxShadowShouldBeAppliedToBackground)
+            if (!RuntimeEnabledFeatures::slimmingPaintEnabled() && !boxShadowShouldBeAppliedToBackground)
                 backgroundRect.intersect(paintInfo.rect);
 
             GraphicsContextStateSaver shadowStateSaver(*context, boxShadowShouldBeAppliedToBackground);
@@ -548,21 +603,23 @@ void BoxPainter::paintClippingMask(const PaintInfo& paintInfo, const LayoutPoint
     paintInfo.context->fillRect(paintRect, Color::black);
 }
 
-void BoxPainter::paintRootBackgroundColor(LayoutObject& obj, const PaintInfo& paintInfo, const LayoutRect& rect, const Color& bgColor)
+void BoxPainter::paintRootBackgroundColor(LayoutObject& obj, const PaintInfo& paintInfo, const LayoutRect& rootBackgroundRect, const Color& bgColor)
 {
-    GraphicsContext* context = paintInfo.context;
-    if (rect.isEmpty())
+    if (rootBackgroundRect.isEmpty())
         return;
 
     ASSERT(obj.isDocumentElement());
 
-    IntRect backgroundRect(pixelSnappedIntRect(rect));
-    backgroundRect.intersect(paintInfo.rect);
+    IntRect backgroundRect(pixelSnappedIntRect(rootBackgroundRect));
+    if (!RuntimeEnabledFeatures::slimmingPaintEnabled())
+        backgroundRect.intersect(paintInfo.rect);
 
     Color baseColor = obj.view()->frameView()->baseBackgroundColor();
     bool shouldClearDocumentBackground = obj.document().settings() && obj.document().settings()->shouldClearDocumentBackground();
     SkXfermode::Mode operation = shouldClearDocumentBackground ?
         SkXfermode::kSrc_Mode : SkXfermode::kSrcOver_Mode;
+
+    GraphicsContext* context = paintInfo.context;
 
     // If we have an alpha go ahead and blend with the base background color.
     if (baseColor.alpha()) {
@@ -588,9 +645,9 @@ bool BoxPainter::isDocumentElementWithOpaqueBackground(LayoutObject& obj)
     if (ownerElement) {
         if (!isHTMLFrameElement(*ownerElement)) {
             // Locate the <body> element using the DOM. This is easier than trying
-            // to crawl around a render tree with potential :before/:after content and
+            // to crawl around a layout tree with potential :before/:after content and
             // anonymous blocks created by inline <body> tags etc. We can locate the <body>
-            // render object very easily via the DOM.
+            // layout object very easily via the DOM.
             HTMLElement* body = obj.document().body();
             if (body) {
                 // Can't scroll a frameset document anyway.
@@ -667,7 +724,11 @@ void BoxPainter::calculateBackgroundImageGeometry(LayoutBoxModelObject& obj, con
         // the background positioning area.
         if (obj.isDocumentElement()) {
             positioningAreaSize = pixelSnappedIntSize(toLayoutBox(&obj)->size() - LayoutSize(left + right, top + bottom), toLayoutBox(&obj)->location());
-            left += obj.marginLeft();
+            // The positioning area is right aligned in paintRect if RightToLeftWritingMode, or left aligned otherwise.
+            if (obj.style()->writingMode() == RightToLeftWritingMode)
+                left = paintRect.width() - positioningAreaSize.width() - right - obj.marginRight();
+            else
+                left += obj.marginLeft();
             top += obj.marginTop();
         } else {
             positioningAreaSize = pixelSnappedIntSize(paintRect.size() - LayoutSize(left + right, top + bottom), paintRect.location());
@@ -824,12 +885,12 @@ IntSize BoxPainter::calculateFillTileSize(const LayoutBoxModelObject& obj, const
 
         if (layerWidth.isFixed())
             tileSize.setWidth(layerWidth.value());
-        else if (layerWidth.isPercent())
+        else if (layerWidth.hasPercent())
             tileSize.setWidth(valueForLength(layerWidth, positioningAreaSize.width()));
 
         if (layerHeight.isFixed())
             tileSize.setHeight(layerHeight.value());
-        else if (layerHeight.isPercent())
+        else if (layerHeight.hasPercent())
             tileSize.setHeight(valueForLength(layerHeight, positioningAreaSize.height()));
 
         applySubPixelHeuristicForTileSize(tileSize, positioningAreaSize);
@@ -1380,9 +1441,20 @@ bool allCornersClippedOut(const FloatRoundedRect& border, const IntRect& intClip
     return true;
 }
 
+// TODO(fmalita): Border painting is complex enough to warrant a standalone class. Move all related
+//                logic out into BoxBorderPainter or such.
+// TODO(fmalita): Move static BoxPainter border methods to anonymous ns and update to use a
+//                BoxBorderInfo argument.
 struct BoxBorderInfo {
-    BoxBorderInfo(const ComputedStyle& style, bool includeLogicalLeftEdge, bool includeLogicalRightEdge)
-        : visibleEdgeCount(0)
+    STACK_ALLOCATED();
+public:
+    BoxBorderInfo(const ComputedStyle& style, BackgroundBleedAvoidance bleedAvoidance,
+        bool includeLogicalLeftEdge, bool includeLogicalRightEdge)
+        : style(style)
+        , bleedAvoidance(bleedAvoidance)
+        , includeLogicalLeftEdge(includeLogicalLeftEdge)
+        , includeLogicalRightEdge(includeLogicalRightEdge)
+        , visibleEdgeCount(0)
         , firstVisibleEdge(0)
         , visibleEdgeSet(0)
         , isUniformStyle(true)
@@ -1421,6 +1493,11 @@ struct BoxBorderInfo {
         }
     }
 
+    const ComputedStyle& style;
+    const BackgroundBleedAvoidance bleedAvoidance;
+    const bool includeLogicalLeftEdge;
+    const bool includeLogicalRightEdge;
+
     BorderEdge edges[4];
 
     unsigned visibleEdgeCount;
@@ -1432,6 +1509,16 @@ struct BoxBorderInfo {
     bool isUniformColor;
     bool hasAlpha;
 };
+
+LayoutRectOutsets doubleStripeInsets(const BorderEdge edges[], BorderEdge::DoubleBorderStripe stripe)
+{
+    // Insets are representes as negative outsets.
+    return LayoutRectOutsets(
+        -edges[BSTop].getDoubleBorderStripeWidth(stripe),
+        -edges[BSRight].getDoubleBorderStripeWidth(stripe),
+        -edges[BSBottom].getDoubleBorderStripeWidth(stripe),
+        -edges[BSLeft].getDoubleBorderStripeWidth(stripe));
+}
 
 void drawSolidBorderRect(GraphicsContext* context, const FloatRect& borderRect,
     float borderWidth, const Color& color)
@@ -1452,51 +1539,122 @@ void drawSolidBorderRect(GraphicsContext* context, const FloatRect& borderRect,
         context->setShouldAntialias(wasAntialias);
 }
 
-void drawDoubleBorderRect(GraphicsContext* context, const BoxBorderInfo& borderInfo,
-    const FloatRect& outerBorder, const FloatRect& innerBorder)
+void drawBleedAdjustedDRRect(GraphicsContext* context, BackgroundBleedAvoidance bleedAvoidance,
+    const FloatRoundedRect& outer, const FloatRoundedRect& inner, Color color)
+{
+    switch (bleedAvoidance) {
+    case BackgroundBleedBackgroundOverBorder:
+        // BackgroundBleedBackgroundOverBorder draws an opaque background over the inner rrect,
+        // so we can simply fill the outer rect here to avoid backdrop bleeding.
+        context->fillRoundedRect(outer, color);
+        break;
+    case BackgroundBleedClipLayer: {
+        // BackgroundBleedClipLayer clips the outer rrect for the whole layer. Based on this,
+        // we can avoid background bleeding by filling the *outside* of inner rrect, all the
+        // way to the layer bounds (enclosing int rect for the clip, in device space).
+        ASSERT(outer.isRounded());
+
+        SkPath path;
+        path.addRRect(inner);
+        path.setFillType(SkPath::kInverseWinding_FillType);
+
+        SkPaint paint;
+        paint.setColor(color.rgb());
+        paint.setStyle(SkPaint::kFill_Style);
+        paint.setAntiAlias(true);
+        context->drawPath(path, paint);
+
+        break;
+    }
+    case BackgroundBleedClipOnly:
+        if (outer.isRounded()) {
+            // BackgroundBleedClipOnly clips the outer rrect corners for us.
+            FloatRoundedRect adjustedOuter = outer;
+            adjustedOuter.setRadii(FloatRoundedRect::Radii());
+            context->fillDRRect(adjustedOuter, inner, color);
+            break;
+        }
+        // fall through
+    default:
+        context->fillDRRect(outer, inner, color);
+        break;
+    }
+}
+
+void drawDoubleBorder(GraphicsContext* context, const BoxBorderInfo& borderInfo, const LayoutRect& borderRect,
+    const FloatRoundedRect& outerBorder, const FloatRoundedRect& innerBorder)
 {
     ASSERT(borderInfo.isUniformColor);
     ASSERT(borderInfo.isUniformStyle);
     ASSERT(borderInfo.edges[borderInfo.firstVisibleEdge].borderStyle() == DOUBLE);
     ASSERT(borderInfo.visibleEdgeSet == AllBorderEdges);
 
-    FloatRectOutsets innerThirdOutsets;
-    FloatRectOutsets outerThirdOutsets;
+    const Color color = borderInfo.edges[borderInfo.firstVisibleEdge].color;
 
-    int innerWidth;
-    int outerWidth;
+    // outer stripe
+    const LayoutRectOutsets outerThirdInsets =
+        doubleStripeInsets(borderInfo.edges, BorderEdge::DoubleBorderStripeOuter);
+    const FloatRoundedRect outerThirdRect = borderInfo.style.getRoundedInnerBorderFor(borderRect,
+        outerThirdInsets, borderInfo.includeLogicalLeftEdge, borderInfo.includeLogicalRightEdge);
+    drawBleedAdjustedDRRect(context, borderInfo.bleedAvoidance, outerBorder, outerThirdRect, color);
 
-    borderInfo.edges[BSLeft].getDoubleBorderStripeWidths(outerWidth, innerWidth);
-    innerThirdOutsets.setLeft(-innerWidth);
-    outerThirdOutsets.setLeft(-outerWidth);
+    // inner stripe
+    const LayoutRectOutsets innerThirdInsets =
+        doubleStripeInsets(borderInfo.edges, BorderEdge::DoubleBorderStripeInner);
+    const FloatRoundedRect innerThirdRect = borderInfo.style.getRoundedInnerBorderFor(borderRect,
+        innerThirdInsets, borderInfo.includeLogicalLeftEdge, borderInfo.includeLogicalRightEdge);
+    context->fillDRRect(innerThirdRect, innerBorder, color);
+}
 
-    borderInfo.edges[BSTop].getDoubleBorderStripeWidths(outerWidth, innerWidth);
-    innerThirdOutsets.setTop(-innerWidth);
-    outerThirdOutsets.setTop(-outerWidth);
+bool paintBorderFastPath(GraphicsContext* context, const BoxBorderInfo& info,
+    const LayoutRect& borderRect, const FloatRoundedRect& outer, const FloatRoundedRect& inner)
+{
+    if (!info.isUniformColor || !info.isUniformStyle || !inner.isRenderable())
+        return false;
 
-    borderInfo.edges[BSRight].getDoubleBorderStripeWidths(outerWidth, innerWidth);
-    innerThirdOutsets.setRight(-innerWidth);
-    outerThirdOutsets.setRight(-outerWidth);
+    const BorderEdge& firstEdge = info.edges[info.firstVisibleEdge];
+    if (firstEdge.borderStyle() != SOLID && firstEdge.borderStyle() != DOUBLE)
+        return false;
 
-    borderInfo.edges[BSBottom].getDoubleBorderStripeWidths(outerWidth, innerWidth);
-    innerThirdOutsets.setBottom(-innerWidth);
-    outerThirdOutsets.setBottom(-outerWidth);
+    if (info.visibleEdgeSet == AllBorderEdges) {
+        if (firstEdge.borderStyle() == SOLID) {
+            if (info.isUniformWidth && !outer.isRounded()) {
+                // 4-side, solid, uniform-width, rectangular border => one drawRect()
+                drawSolidBorderRect(context, outer.rect(), firstEdge.width, firstEdge.color);
+            } else {
+                // 4-side, solid border => one drawDRRect()
+                drawBleedAdjustedDRRect(context, info.bleedAvoidance, outer, inner, firstEdge.color);
+            }
+        } else {
+            // 4-side, double border => 2x drawDRRect()
+            ASSERT(firstEdge.borderStyle() == DOUBLE);
+            drawDoubleBorder(context, info, borderRect, outer, inner);
+        }
 
-    FloatRect innerThirdRect = outerBorder;
-    FloatRect outerThirdRect = outerBorder;
-    innerThirdRect.expand(innerThirdOutsets);
-    outerThirdRect.expand(outerThirdOutsets);
+        return true;
+    }
 
-    // TODO(fmalita): use 2 x fillDRRect() instead of fillPath()?
-    Path path;
-    path.addRect(outerBorder);
-    path.addRect(outerThirdRect);
-    path.addRect(innerThirdRect);
-    path.addRect(innerBorder);
+    // This is faster than the normal complex border path only if it avoids creating transparency
+    // layers (when the border is translucent).
+    if (firstEdge.borderStyle() == SOLID && !outer.isRounded() && info.hasAlpha) {
+        ASSERT(info.visibleEdgeSet != AllBorderEdges);
+        // solid, rectangular border => one drawPath()
+        Path path;
 
-    context->setFillRule(RULE_EVENODD);
-    context->setFillColor(borderInfo.edges[borderInfo.firstVisibleEdge].color);
-    context->fillPath(path);
+        for (int i = BSTop; i <= BSLeft; ++i) {
+            const BorderEdge& currEdge = info.edges[i];
+            if (currEdge.shouldRender())
+                path.addRect(calculateSideRect(outer, currEdge, i));
+        }
+
+        context->setFillRule(RULE_NONZERO);
+        context->setFillColor(firstEdge.color);
+        context->fillPath(path);
+
+        return true;
+    }
+
+    return false;
 }
 
 } // anonymous namespace
@@ -1508,89 +1666,45 @@ void BoxPainter::paintBorder(LayoutBoxModelObject& obj, const PaintInfo& info, c
     if (paintNinePieceImage(obj, graphicsContext, rect, style, style.borderImage()))
         return;
 
-    const BoxBorderInfo borderInfo(style, includeLogicalLeftEdge, includeLogicalRightEdge);
+    const BoxBorderInfo borderInfo(style, bleedAvoidance, includeLogicalLeftEdge, includeLogicalRightEdge);
     FloatRoundedRect outerBorder = style.getRoundedBorderFor(rect, includeLogicalLeftEdge, includeLogicalRightEdge);
-    FloatRoundedRect innerBorder = style.getRoundedInnerBorderFor(borderInnerRectAdjustedForBleedAvoidance(graphicsContext, rect, bleedAvoidance), includeLogicalLeftEdge, includeLogicalRightEdge);
+    FloatRoundedRect innerBorder = style.getRoundedInnerBorderFor(rect, includeLogicalLeftEdge, includeLogicalRightEdge);
 
     if (outerBorder.rect().isEmpty() || !borderInfo.visibleEdgeCount)
         return;
 
     const BorderEdge& firstEdge = borderInfo.edges[borderInfo.firstVisibleEdge];
     bool haveAllSolidEdges = borderInfo.isUniformStyle && firstEdge.borderStyle() == SOLID;
-    bool haveAllDoubleEdges = borderInfo.isUniformStyle && firstEdge.borderStyle() == DOUBLE;
 
     // If no corner intersects the clip region, we can pretend outerBorder is
     // rectangular to improve performance.
     if (haveAllSolidEdges && outerBorder.isRounded() && allCornersClippedOut(outerBorder, info.rect))
         outerBorder.setRadii(FloatRoundedRect::Radii());
 
-    // Fast path for drawing 4-side all-solid uniform-color borders.
-    if (haveAllSolidEdges && borderInfo.visibleEdgeSet == AllBorderEdges && borderInfo.isUniformColor && innerBorder.isRenderable()) {
-        if (borderInfo.isUniformWidth && !outerBorder.isRounded() && !innerBorder.isRounded()) {
-            // Non-rounded, solid, uniform color and width => one drawRect()
-            // TODO(fmalita): we should be able to handle uniform-width rrects similarly.
-            drawSolidBorderRect(graphicsContext, outerBorder.rect(), firstEdge.width, firstEdge.color);
-        } else {
-            // Non-rounded/rounded, solid, uniform color, non-uniform/uniform width => one drawDRRect()
-            graphicsContext->fillDRRect(outerBorder, innerBorder, firstEdge.color);
-        }
-
+    if (paintBorderFastPath(graphicsContext, borderInfo, rect, outerBorder, innerBorder))
         return;
-    }
-
-    // isRenderable() check avoids issue described in https://bugs.webkit.org/show_bug.cgi?id=38787
-    if ((haveAllSolidEdges || haveAllDoubleEdges) && borderInfo.isUniformColor && innerBorder.isRenderable()) {
-        // Fast path for drawing all unrounded double edges.
-        // TODO(fmalita): why is this predicated on hasAlpha?
-        if (borderInfo.visibleEdgeSet == AllBorderEdges && borderInfo.hasAlpha && !outerBorder.isRounded() && !innerBorder.isRounded()) {
-            // Solid edges are handled by prevous fast paths.
-            ASSERT(!haveAllSolidEdges);
-
-            drawDoubleBorderRect(graphicsContext, borderInfo, outerBorder.rect(), innerBorder.rect());
-            return;
-        }
-
-        // Avoid creating transparent layers
-        if (haveAllSolidEdges && borderInfo.visibleEdgeSet != AllBorderEdges && !outerBorder.isRounded() && borderInfo.hasAlpha) {
-            Path path;
-
-            for (int i = BSTop; i <= BSLeft; ++i) {
-                const BorderEdge& currEdge = borderInfo.edges[i];
-                if (currEdge.shouldRender()) {
-                    FloatRect sideRect = calculateSideRect(outerBorder, currEdge, i);
-                    path.addRect(sideRect);
-                }
-            }
-
-            graphicsContext->setFillRule(RULE_NONZERO);
-            graphicsContext->setFillColor(firstEdge.color);
-            graphicsContext->fillPath(path);
-            return;
-        }
-    }
 
     bool clipToOuterBorder = outerBorder.isRounded();
     GraphicsContextStateSaver stateSaver(*graphicsContext, clipToOuterBorder);
     if (clipToOuterBorder) {
-        // Clip to the inner and outer radii rects.
-        if (bleedAvoidance != BackgroundBleedClipBackground)
+        // For BackgroundBleedClip{Only,Layer}, the outer rrect clip is already applied.
+        if (!bleedAvoidanceIsClipping(bleedAvoidance))
             graphicsContext->clipRoundedRect(outerBorder);
-        // isRenderable() check avoids issue described in https://bugs.webkit.org/show_bug.cgi?id=38787
-        // The inside will be clipped out later (in clipBorderSideForComplexInnerPath)
-        if (innerBorder.isRenderable() && !innerBorder.isEmpty())
+
+        // For BackgroundBleedBackgroundOverBorder, we're going to draw an opaque background over
+        // the inner rrect - so clipping is not needed (nor desirable due to backdrop bleeding).
+        if (bleedAvoidance != BackgroundBleedBackgroundOverBorder && innerBorder.isRenderable() && !innerBorder.isEmpty())
             graphicsContext->clipOutRoundedRect(innerBorder);
     }
 
     // If only one edge visible antialiasing doesn't create seams
     bool antialias = shouldAntialiasLines(graphicsContext) || borderInfo.visibleEdgeCount == 1;
-    FloatRoundedRect unadjustedInnerBorder = (bleedAvoidance == BackgroundBleedBackgroundOverBorder) ? style.getRoundedInnerBorderFor(rect, includeLogicalLeftEdge, includeLogicalRightEdge) : innerBorder;
-    IntPoint innerBorderAdjustment(innerBorder.rect().x() - unadjustedInnerBorder.rect().x(), innerBorder.rect().y() - unadjustedInnerBorder.rect().y());
     if (borderInfo.hasAlpha) {
-        paintTranslucentBorderSides(graphicsContext, style, outerBorder, unadjustedInnerBorder, innerBorderAdjustment,
-            borderInfo.edges, borderInfo.visibleEdgeSet, bleedAvoidance, includeLogicalLeftEdge, includeLogicalRightEdge, antialias);
+        paintTranslucentBorderSides(graphicsContext, style, outerBorder, innerBorder, borderInfo.edges,
+        borderInfo.visibleEdgeSet, bleedAvoidance, includeLogicalLeftEdge, includeLogicalRightEdge, antialias);
     } else {
-        paintBorderSides(graphicsContext, style, outerBorder, unadjustedInnerBorder, innerBorderAdjustment,
-            borderInfo.edges, borderInfo.visibleEdgeSet, bleedAvoidance, includeLogicalLeftEdge, includeLogicalRightEdge, antialias);
+        paintBorderSides(graphicsContext, style, outerBorder, innerBorder, borderInfo.edges,
+        borderInfo.visibleEdgeSet, bleedAvoidance, includeLogicalLeftEdge, includeLogicalRightEdge, antialias);
     }
 }
 
@@ -1602,8 +1716,10 @@ static inline bool includesAdjacentEdges(BorderEdgeFlags flags)
         || (flags & (LeftBorderEdge | TopBorderEdge)) == (LeftBorderEdge | TopBorderEdge);
 }
 
-void BoxPainter::paintTranslucentBorderSides(GraphicsContext* graphicsContext, const ComputedStyle& style, const FloatRoundedRect& outerBorder, const FloatRoundedRect& innerBorder, const IntPoint& innerBorderAdjustment,
-    const BorderEdge edges[], BorderEdgeFlags edgesToDraw, BackgroundBleedAvoidance bleedAvoidance, bool includeLogicalLeftEdge, bool includeLogicalRightEdge, bool antialias)
+void BoxPainter::paintTranslucentBorderSides(GraphicsContext* graphicsContext, const ComputedStyle& style,
+    const FloatRoundedRect& outerBorder, const FloatRoundedRect& innerBorder, const BorderEdge edges[],
+    BorderEdgeFlags edgesToDraw, BackgroundBleedAvoidance bleedAvoidance, bool includeLogicalLeftEdge,
+    bool includeLogicalRightEdge, bool antialias)
 {
     // willBeOverdrawn assumes that we draw in order: top, bottom, left, right.
     // This is different from BoxSide enum order.
@@ -1637,19 +1753,14 @@ void BoxPainter::paintTranslucentBorderSides(GraphicsContext* graphicsContext, c
             commonColor = Color(commonColor.red(), commonColor.green(), commonColor.blue());
         }
 
-        paintBorderSides(graphicsContext, style, outerBorder, innerBorder, innerBorderAdjustment, edges, commonColorEdgeSet, bleedAvoidance, includeLogicalLeftEdge, includeLogicalRightEdge, antialias, &commonColor);
+        paintBorderSides(graphicsContext, style, outerBorder, innerBorder, edges, commonColorEdgeSet,
+            bleedAvoidance, includeLogicalLeftEdge, includeLogicalRightEdge, antialias, &commonColor);
 
         if (useTransparencyLayer)
             graphicsContext->endLayer();
 
         edgesToDraw &= ~commonColorEdgeSet;
     }
-}
-
-LayoutRect BoxPainter::borderInnerRectAdjustedForBleedAvoidance(GraphicsContext* context, const LayoutRect& rect, BackgroundBleedAvoidance bleedAvoidance)
-{
-    // We shrink the rectangle by one pixel on each side to make it fully overlap the anti-aliased background border
-    return (bleedAvoidance == BackgroundBleedBackgroundOverBorder) ? shrinkRectByOnePixel(context, rect) : rect;
 }
 
 void BoxPainter::paintOneBorderSide(GraphicsContext* graphicsContext, const ComputedStyle& style, const FloatRoundedRect& outerBorder, const FloatRoundedRect& innerBorder,
@@ -1700,7 +1811,7 @@ void BoxPainter::paintOneBorderSide(GraphicsContext* graphicsContext, const Comp
 }
 
 void BoxPainter::paintBorderSides(GraphicsContext* graphicsContext, const ComputedStyle& style, const FloatRoundedRect& outerBorder, const FloatRoundedRect& innerBorder,
-    const IntPoint& innerBorderAdjustment, const BorderEdge edges[], BorderEdgeFlags edgeSet, BackgroundBleedAvoidance bleedAvoidance,
+    const BorderEdge edges[], BorderEdgeFlags edgeSet, BackgroundBleedAvoidance bleedAvoidance,
     bool includeLogicalLeftEdge, bool includeLogicalRightEdge, bool antialias, const Color* overrideColor)
 {
     bool renderRadii = outerBorder.isRounded();
@@ -1716,7 +1827,7 @@ void BoxPainter::paintBorderSides(GraphicsContext* graphicsContext, const Comput
 
     if (edges[BSTop].shouldRender() && includesEdge(edgeSet, BSTop)) {
         FloatRect sideRect = outerBorder.rect();
-        sideRect.setHeight(edges[BSTop].width + innerBorderAdjustment.y());
+        sideRect.setHeight(edges[BSTop].width);
 
         bool usePath = renderRadii && (borderStyleHasInnerDetail(edges[BSTop].borderStyle()) || borderWillArcInnerEdge(innerBorder.radii().topLeft(), innerBorder.radii().topRight()));
         paintOneBorderSide(graphicsContext, style, outerBorder, innerBorder, sideRect, BSTop, BSLeft, BSRight, edges, usePath ? &roundedPath : 0, bleedAvoidance, includeLogicalLeftEdge, includeLogicalRightEdge, antialias, overrideColor);
@@ -1724,7 +1835,7 @@ void BoxPainter::paintBorderSides(GraphicsContext* graphicsContext, const Comput
 
     if (edges[BSBottom].shouldRender() && includesEdge(edgeSet, BSBottom)) {
         FloatRect sideRect = outerBorder.rect();
-        sideRect.shiftYEdgeTo(sideRect.maxY() - edges[BSBottom].width - innerBorderAdjustment.y());
+        sideRect.shiftYEdgeTo(sideRect.maxY() - edges[BSBottom].width);
 
         bool usePath = renderRadii && (borderStyleHasInnerDetail(edges[BSBottom].borderStyle()) || borderWillArcInnerEdge(innerBorder.radii().bottomLeft(), innerBorder.radii().bottomRight()));
         paintOneBorderSide(graphicsContext, style, outerBorder, innerBorder, sideRect, BSBottom, BSLeft, BSRight, edges, usePath ? &roundedPath : 0, bleedAvoidance, includeLogicalLeftEdge, includeLogicalRightEdge, antialias, overrideColor);
@@ -1732,7 +1843,7 @@ void BoxPainter::paintBorderSides(GraphicsContext* graphicsContext, const Comput
 
     if (edges[BSLeft].shouldRender() && includesEdge(edgeSet, BSLeft)) {
         FloatRect sideRect = outerBorder.rect();
-        sideRect.setWidth(edges[BSLeft].width + innerBorderAdjustment.x());
+        sideRect.setWidth(edges[BSLeft].width);
 
         bool usePath = renderRadii && (borderStyleHasInnerDetail(edges[BSLeft].borderStyle()) || borderWillArcInnerEdge(innerBorder.radii().bottomLeft(), innerBorder.radii().topLeft()));
         paintOneBorderSide(graphicsContext, style, outerBorder, innerBorder, sideRect, BSLeft, BSTop, BSBottom, edges, usePath ? &roundedPath : 0, bleedAvoidance, includeLogicalLeftEdge, includeLogicalRightEdge, antialias, overrideColor);
@@ -1740,7 +1851,7 @@ void BoxPainter::paintBorderSides(GraphicsContext* graphicsContext, const Comput
 
     if (edges[BSRight].shouldRender() && includesEdge(edgeSet, BSRight)) {
         FloatRect sideRect = outerBorder.rect();
-        sideRect.shiftXEdgeTo(sideRect.maxX() - edges[BSRight].width - innerBorderAdjustment.x());
+        sideRect.shiftXEdgeTo(sideRect.maxX() - edges[BSRight].width);
 
         bool usePath = renderRadii && (borderStyleHasInnerDetail(edges[BSRight].borderStyle()) || borderWillArcInnerEdge(innerBorder.radii().bottomRight(), innerBorder.radii().topRight()));
         paintOneBorderSide(graphicsContext, style, outerBorder, innerBorder, sideRect, BSRight, BSTop, BSBottom, edges, usePath ? &roundedPath : 0, bleedAvoidance, includeLogicalLeftEdge, includeLogicalRightEdge, antialias, overrideColor);
@@ -1803,29 +1914,12 @@ void BoxPainter::drawBoxSideFromPath(GraphicsContext* graphicsContext, const Lay
         return;
     }
     case DOUBLE: {
-        // Get the inner border rects for both the outer border line and the inner border line
-        int outerBorderTopWidth;
-        int innerBorderTopWidth;
-        edges[BSTop].getDoubleBorderStripeWidths(outerBorderTopWidth, innerBorderTopWidth);
-
-        int outerBorderRightWidth;
-        int innerBorderRightWidth;
-        edges[BSRight].getDoubleBorderStripeWidths(outerBorderRightWidth, innerBorderRightWidth);
-
-        int outerBorderBottomWidth;
-        int innerBorderBottomWidth;
-        edges[BSBottom].getDoubleBorderStripeWidths(outerBorderBottomWidth, innerBorderBottomWidth);
-
-        int outerBorderLeftWidth;
-        int innerBorderLeftWidth;
-        edges[BSLeft].getDoubleBorderStripeWidths(outerBorderLeftWidth, innerBorderLeftWidth);
-
         // Draw inner border line
         {
             GraphicsContextStateSaver stateSaver(*graphicsContext);
+            const LayoutRectOutsets innerInsets = doubleStripeInsets(edges, BorderEdge::DoubleBorderStripeInner);
             FloatRoundedRect innerClip = style.getRoundedInnerBorderFor(borderRect,
-                innerBorderTopWidth, innerBorderBottomWidth, innerBorderLeftWidth, innerBorderRightWidth,
-                includeLogicalLeftEdge, includeLogicalRightEdge);
+                innerInsets, includeLogicalLeftEdge, includeLogicalRightEdge);
 
             graphicsContext->clipRoundedRect(innerClip);
             drawBoxSideFromPath(graphicsContext, borderRect, borderPath, edges, thickness, drawThickness, side, style, color, SOLID, bleedAvoidance, includeLogicalLeftEdge, includeLogicalRightEdge);
@@ -1835,16 +1929,17 @@ void BoxPainter::drawBoxSideFromPath(GraphicsContext* graphicsContext, const Lay
         {
             GraphicsContextStateSaver stateSaver(*graphicsContext);
             LayoutRect outerRect = borderRect;
-            if (bleedAvoidance == BackgroundBleedClipBackground) {
+            LayoutRectOutsets outerInsets = doubleStripeInsets(edges, BorderEdge::DoubleBorderStripeOuter);
+
+            if (bleedAvoidanceIsClipping(bleedAvoidance)) {
                 outerRect.inflate(1);
-                ++outerBorderTopWidth;
-                ++outerBorderBottomWidth;
-                ++outerBorderLeftWidth;
-                ++outerBorderRightWidth;
+                outerInsets.setTop(outerInsets.top() - 1);
+                outerInsets.setRight(outerInsets.right() - 1);
+                outerInsets.setBottom(outerInsets.bottom() - 1);
+                outerInsets.setLeft(outerInsets.left() - 1);
             }
 
-            FloatRoundedRect outerClip = style.getRoundedInnerBorderFor(outerRect,
-                outerBorderTopWidth, outerBorderBottomWidth, outerBorderLeftWidth, outerBorderRightWidth,
+            FloatRoundedRect outerClip = style.getRoundedInnerBorderFor(outerRect, outerInsets,
                 includeLogicalLeftEdge, includeLogicalRightEdge);
             graphicsContext->clipOutRoundedRect(outerClip);
             drawBoxSideFromPath(graphicsContext, borderRect, borderPath, edges, thickness, drawThickness, side, style, color, SOLID, bleedAvoidance, includeLogicalLeftEdge, includeLogicalRightEdge);
@@ -1875,7 +1970,7 @@ void BoxPainter::drawBoxSideFromPath(GraphicsContext* graphicsContext, const Lay
         LayoutUnit rightWidth = edges[BSRight].usedWidth() / 2;
 
         FloatRoundedRect clipRect = style.getRoundedInnerBorderFor(borderRect,
-            topWidth, bottomWidth, leftWidth, rightWidth,
+            LayoutRectOutsets(-topWidth, -rightWidth, -bottomWidth, -leftWidth),
             includeLogicalLeftEdge, includeLogicalRightEdge);
 
         graphicsContext->clipRoundedRect(clipRect);
@@ -1927,7 +2022,7 @@ void BoxPainter::paintBoxShadow(const PaintInfo& info, const LayoutRect& paintRe
         if (shadowOffset.isZero() && !shadowBlur && !shadowSpread)
             continue;
 
-        const Color& shadowColor = shadow.color();
+        const Color& shadowColor = shadow.color().resolve(style.visitedDependentColor(CSSPropertyColor));
 
         if (shadow.style() == Normal) {
             FloatRect fillRect = border.rect();
@@ -1948,13 +2043,12 @@ void BoxPainter::paintBoxShadow(const PaintInfo& info, const LayoutRect& paintRe
 
                     // If the box is opaque, it is unnecessary to clip it out. However, doing so saves time
                     // when painting the shadow. On the other hand, it introduces subpixel gaps along the
-                    // corners. Those are avoided by insetting the clipping path by one pixel.
+                    // corners. Those are avoided by insetting the clipping path by one CSS pixel.
                     if (hasOpaqueBackground)
                         rectToClipOut.inflateWithRadii(-1);
 
-                    if (!rectToClipOut.isEmpty()) {
+                    if (!rectToClipOut.isEmpty())
                         context->clipOutRoundedRect(rectToClipOut);
-                    }
                 } else {
                     // This IntRect is correct even with fractional shadows, because it is used for the rectangle
                     // of the box itself, which is always pixel-aligned.
@@ -1963,21 +2057,12 @@ void BoxPainter::paintBoxShadow(const PaintInfo& info, const LayoutRect& paintRe
                     // If the box is opaque, it is unnecessary to clip it out. However, doing so saves time
                     // when painting the shadow. On the other hand, it introduces subpixel gaps along the
                     // edges if they are not pixel-aligned. Those are avoided by insetting the clipping path
-                    // by one pixel.
-                    // When Slimming Paint is enabled, turn off this heuristic. See crbug.com/382491 for details.
-                    if (hasOpaqueBackground && !RuntimeEnabledFeatures::slimmingPaintEnabled()) {
-                        // FIXME: The function to decide on the policy based on the transform should be a named function.
-                        // FIXME: It's not clear if this check is right. What about integral scale factors?
-                        // FIXME: See crbug.com/382491. The use of getCTM may also be wrong because it does not include
-                        // device zoom applied at raster time.
-                        AffineTransform transform = context->getCTM();
-                        if (transform.a() != 1 || (transform.d() != 1 && transform.d() != -1) || transform.b() || transform.c())
-                            rectToClipOut.inflate(-1);
-                    }
+                    // by one CSS pixel.
+                    if (hasOpaqueBackground)
+                        rectToClipOut.inflate(-1);
 
-                    if (!rectToClipOut.isEmpty()) {
+                    if (!rectToClipOut.isEmpty())
                         context->clipOut(rectToClipOut);
-                    }
                 }
             }
 

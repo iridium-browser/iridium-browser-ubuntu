@@ -104,7 +104,7 @@ input[type='checkbox']:checked {
   pointer-events: none;
   position: absolute;
   /* Duration and timing function are set in Javascript. */
-  transition-property: -webkit-transform, opacity;
+  transition-property: transform, opacity;
 }
 
 .gallery .image-container > .image[fade] {
@@ -113,7 +113,8 @@ input[type='checkbox']:checked {
 
 /* Full resolution image is invisible unless printing. */
 .gallery .image-container > canvas.fullres {
-  display: none;
+  opacity: 0;
+  position: absolute;
 }
 
 @media print {
@@ -137,9 +138,14 @@ input[type='checkbox']:checked {
 
   /* Print the full resolution image instead. */
   .gallery .image-container > canvas.fullres {
-    display: block !important;
+    height: auto !important;
     max-height: 100%;
     max-width: 100%;
+    opacity: 1 !important;
+    position: static !important;
+    transform: none !important;
+    visibility: visible !important;
+    width: auto !important;
   }
 }
 
@@ -303,28 +309,26 @@ input[type='checkbox']:checked {
 }
 
 .gallery .filename-spacer .namebox {
-  height: 22px;
-  top: 15px;
-}
-
-.gallery[editing] .filename-spacer .namebox {
-  height: 21px;
-  top: 5px;
-}
-
-.gallery .filename-spacer .namebox {
   background-color: transparent;
   border: none;
   box-sizing: border-box;
   cursor: pointer;
   display: block;
   font-size: 120%;
+  height: 22px;
   outline: none;
   overflow: hidden;
   padding: 0 3px;
   position: absolute;
   text-overflow: ellipsis;
+  top: 15px;
   white-space: nowrap;
+  width: 100%;
+}
+
+.gallery[editing] .filename-spacer .namebox {
+  height: 21px;
+  top: 5px;
 }
 
 .gallery .filename-spacer .namebox[disabled] {
@@ -394,7 +398,7 @@ input[type='checkbox']:checked {
 }
 
 .gallery .filename-spacer .saved[highlighted] {
-  -webkit-transform: scaleX(1.1) scaleY(1.1) rotate(0);
+  transform: scaleX(1.1) scaleY(1.1) rotate(0);
   opacity: 1;
 }
 
@@ -441,6 +445,7 @@ input[type='checkbox']:checked {
   height: 100%;
   overflow: hidden;
   transition: opacity 180ms linear, visibility 0ms linear;
+  white-space: nowrap;
   z-index: 0;
 }
 
@@ -455,7 +460,7 @@ input[type='checkbox']:checked {
   cursor: pointer;
   display: inline-block;
   height: 47px;
-  margin: 2px;
+  margin: 2px 2px 2px 0;
   overflow: hidden;
   transition: all 180ms linear;
   width: 47px;
@@ -1106,15 +1111,15 @@ input[type='checkbox']:checked {
 
 .gallery .spinner {
   background-image:
-      url(../../file_manager/foreground/images/common/spinner.svg);
+      url(chrome://resources/images/throbber.svg);
   background-size: 100%;
-  height: 16px;
+  height: 32px;
   left: 50%;
-  margin-left: -8px;
-  margin-top: -8px;
+  margin-left: -16px;
+  margin-top: -16px;
   position: absolute;
   top: 50%;
-  width: 16px;
+  width: 32px;
 }
 
 .gallery:not([spinner]) .spinner {
@@ -1153,7 +1158,7 @@ input[type='checkbox']:checked {
   top: 0;
 
   /* transition-duration is set in Javascript. */
-  transition-property: -webkit-transform;
+  transition-property: transform;
   transition-timing-function: linear;
 }
 
@@ -1173,7 +1178,7 @@ input[type='checkbox']:checked {
   position: absolute;
   /* Tile's zoom factor is animated on hover. We apply the transform to
   the entire tile so that the image outline is included into the animation. */
-  transition: -webkit-transform 150ms linear;
+  transition: transform 150ms linear;
   z-index: 50;
 }
 

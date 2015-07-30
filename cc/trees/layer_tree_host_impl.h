@@ -31,10 +31,11 @@
 #include "cc/output/renderer.h"
 #include "cc/quads/render_pass.h"
 #include "cc/resources/resource_provider.h"
-#include "cc/resources/tile_manager.h"
 #include "cc/resources/ui_resource_client.h"
 #include "cc/scheduler/commit_earlyout_reason.h"
 #include "cc/scheduler/draw_result.h"
+#include "cc/scheduler/video_frame_controller.h"
+#include "cc/tiles/tile_manager.h"
 #include "cc/trees/layer_tree_settings.h"
 #include "cc/trees/proxy.h"
 #include "skia/ext/refptr.h"
@@ -79,6 +80,7 @@ enum class GpuRasterizationStatus {
   ON_FORCED,
   OFF_DEVICE,
   OFF_VIEWPORT,
+  MSAA_CONTENT,
   OFF_CONTENT
 };
 
@@ -104,6 +106,7 @@ class LayerTreeHostImplClient {
   virtual void SetNeedsAnimateOnImplThread() = 0;
   virtual void SetNeedsCommitOnImplThread() = 0;
   virtual void SetNeedsPrepareTilesOnImplThread() = 0;
+  virtual void SetVideoNeedsBeginFrames(bool needs_begin_frames) = 0;
   virtual void PostAnimationEventsToMainThreadOnImplThread(
       scoped_ptr<AnimationEventsVector> events) = 0;
   // Returns true if resources were deleted by this call.
@@ -136,6 +139,7 @@ class CC_EXPORT LayerTreeHostImpl
       public OutputSurfaceClient,
       public TopControlsManagerClient,
       public ScrollbarAnimationControllerClient,
+      public VideoFrameControllerClient,
       public base::SupportsWeakPtr<LayerTreeHostImpl> {
  public:
   static scoped_ptr<LayerTreeHostImpl> Create(
@@ -229,7 +233,7 @@ class CC_EXPORT LayerTreeHostImpl
   // DidDrawAllLayers must also be called, regardless of whether DrawLayers is
   // called between the two.
   virtual DrawResult PrepareToDraw(FrameData* frame);
-  virtual void DrawLayers(FrameData* frame, base::TimeTicks frame_begin_time);
+  virtual void DrawLayers(FrameData* frame);
   // Must be called if and only if PrepareToDraw was called.
   void DidDrawAllLayers(const FrameData& frame);
 
@@ -278,9 +282,11 @@ class CC_EXPORT LayerTreeHostImpl
                                          base::TimeDelta delay) override;
   void SetNeedsRedrawForScrollbarAnimation() override;
 
+  // VideoBeginFrameSource implementation.
+  void AddVideoFrameController(VideoFrameController* controller) override;
+  void RemoveVideoFrameController(VideoFrameController* controller) override;
+
   // OutputSurfaceClient implementation.
-  void DeferredInitialize() override;
-  void ReleaseGL() override;
   void CommitVSyncParameters(base::TimeTicks timebase,
                              base::TimeDelta interval) override;
   void SetNeedsRedrawRect(const gfx::Rect& rect) override;
@@ -314,10 +320,19 @@ class CC_EXPORT LayerTreeHostImpl
 
   virtual bool InitializeRenderer(scoped_ptr<OutputSurface> output_surface);
   TileManager* tile_manager() { return tile_manager_.get(); }
+
+  void SetHasGpuRasterizationTrigger(bool flag) {
+    has_gpu_rasterization_trigger_ = flag;
+    UpdateGpuRasterizationStatus();
+  }
+  void SetContentIsSuitableForGpuRasterization(bool flag) {
+    content_is_suitable_for_gpu_rasterization_ = flag;
+    UpdateGpuRasterizationStatus();
+  }
   bool CanUseGpuRasterization();
-  void SetGpuRasterizationStatus(
-      GpuRasterizationStatus gpu_rasterization_status);
+  void UpdateTreeResourcesForGpuRasterizationIfNeeded();
   bool use_gpu_rasterization() const { return use_gpu_rasterization_; }
+  bool use_msaa() const { return use_msaa_; }
 
   GpuRasterizationStatus gpu_rasterization_status() const {
     return gpu_rasterization_status_;
@@ -332,6 +347,7 @@ class CC_EXPORT LayerTreeHostImpl
 
   virtual bool SwapBuffers(const FrameData& frame);
   virtual void WillBeginImplFrame(const BeginFrameArgs& args);
+  virtual void DidFinishImplFrame();
   void DidModifyTilePriorities();
 
   LayerTreeImpl* active_tree() { return active_tree_.get(); }
@@ -426,23 +442,6 @@ class CC_EXPORT LayerTreeHostImpl
   void SetDebugState(const LayerTreeDebugState& new_debug_state);
   const LayerTreeDebugState& debug_state() const { return debug_state_; }
 
-  class CC_EXPORT CullRenderPassesWithNoQuads {
-   public:
-    bool ShouldRemoveRenderPass(const RenderPassDrawQuad& quad,
-                                const FrameData& frame) const;
-
-    // Iterates in draw order, so that when a surface is removed, and its
-    // target becomes empty, then its target can be removed also.
-    size_t RenderPassListBegin(const RenderPassList& list) const { return 0; }
-    size_t RenderPassListEnd(const RenderPassList& list) const {
-      return list.size();
-    }
-    size_t RenderPassListNext(size_t it) const { return it + 1; }
-  };
-
-  template <typename RenderPassCuller>
-      static void RemoveRenderPasses(RenderPassCuller culler, FrameData* frame);
-
   gfx::Vector2dF accumulated_root_overscroll() const {
     return accumulated_root_overscroll_;
   }
@@ -452,8 +451,6 @@ class CC_EXPORT LayerTreeHostImpl
   void SetTreePriority(TreePriority priority);
   TreePriority GetTreePriority() const;
 
-  void UpdateCurrentBeginFrameArgs(const BeginFrameArgs& args);
-  void ResetCurrentBeginFrameArgsForNextFrame();
   virtual BeginFrameArgs CurrentBeginFrameArgs() const;
 
   // Expected time between two begin impl frame calls.
@@ -502,9 +499,6 @@ class CC_EXPORT LayerTreeHostImpl
   // to unregister itself.
   void InsertSwapPromiseMonitor(SwapPromiseMonitor* monitor);
   void RemoveSwapPromiseMonitor(SwapPromiseMonitor* monitor);
-
-  void GetPictureLayerImplPairs(std::vector<PictureLayerImpl::Pair>* layers,
-                                bool need_valid_tile_priorities) const;
 
   // TODO(weiliangc): Replace RequiresHighResToDraw with scheduler waits for
   // ReadyToDraw. crbug.com/469175
@@ -562,6 +556,9 @@ class CC_EXPORT LayerTreeHostImpl
     return is_likely_to_require_a_draw_;
   }
 
+  // Removes empty or orphan RenderPasses from the frame.
+  static void RemoveRenderPasses(FrameData* frame);
+
   LayerTreeHostImplClient* client_;
   Proxy* proxy_;
 
@@ -576,7 +573,8 @@ class CC_EXPORT LayerTreeHostImpl
   void DestroyTileManager();
   void ReleaseTreeResources();
   void RecreateTreeResources();
-  void EnforceZeroBudget(bool zero_budget);
+
+  void UpdateGpuRasterizationStatus();
 
   bool IsSynchronousSingleThreaded() const;
 
@@ -588,6 +586,7 @@ class CC_EXPORT LayerTreeHostImpl
   // Scroll by preferring to move the inner viewport first, only moving the
   // outer if the inner is at its scroll extents.
   void ScrollViewportInnerFirst(gfx::Vector2dF scroll_delta);
+
   void AnimatePageScale(base::TimeTicks monotonic_time);
   void AnimateScrollbars(base::TimeTicks monotonic_time);
   void AnimateTopControls(base::TimeTicks monotonic_time);
@@ -617,8 +616,7 @@ class CC_EXPORT LayerTreeHostImpl
   float DeviceSpaceDistanceToLayer(const gfx::PointF& device_viewport_point,
                                    LayerImpl* layer_impl);
   void StartScrollbarFadeRecursive(LayerImpl* layer);
-  void SetManagedMemoryPolicy(const ManagedMemoryPolicy& policy,
-                              bool zero_budget);
+  void SetManagedMemoryPolicy(const ManagedMemoryPolicy& policy);
   void EnforceManagedMemoryPolicy(const ManagedMemoryPolicy& policy);
 
   void MarkUIResourceNotEvicted(UIResourceId uid);
@@ -648,8 +646,12 @@ class CC_EXPORT LayerTreeHostImpl
   // |tile_manager_| can also be NULL when raster_enabled is false.
   scoped_ptr<ResourceProvider> resource_provider_;
   scoped_ptr<TileManager> tile_manager_;
+  bool content_is_suitable_for_gpu_rasterization_;
+  bool has_gpu_rasterization_trigger_;
   bool use_gpu_rasterization_;
+  bool use_msaa_;
   GpuRasterizationStatus gpu_rasterization_status_;
+  bool tree_resources_for_gpu_rasterization_dirty_;
   scoped_ptr<TileTaskWorkerPool> tile_task_worker_pool_;
   scoped_ptr<ResourcePool> resource_pool_;
   scoped_ptr<ResourcePool> staging_resource_pool_;
@@ -684,7 +686,7 @@ class CC_EXPORT LayerTreeHostImpl
 
   // The optional delegate for the root layer scroll offset.
   LayerScrollOffsetDelegate* root_layer_scroll_offset_delegate_;
-  LayerTreeSettings settings_;
+  const LayerTreeSettings settings_;
   LayerTreeDebugState debug_state_;
   bool visible_;
   ManagedMemoryPolicy cached_managed_memory_policy_;
@@ -709,8 +711,6 @@ class CC_EXPORT LayerTreeHostImpl
   // The maximum memory that would be used by the prioritized resource
   // manager, if there were no limit on memory usage.
   size_t max_memory_needed_bytes_;
-
-  bool zero_budget_;
 
   // Viewport size passed in from the main thread, in physical pixels.  This
   // value is the default size for all concepts of physical viewport (draw
@@ -744,6 +744,7 @@ class CC_EXPORT LayerTreeHostImpl
 
   scoped_ptr<AnimationRegistrar> animation_registrar_;
   std::set<ScrollbarAnimationController*> scrollbar_animation_controllers_;
+  std::set<VideoFrameController*> video_frame_controllers_;
 
   RenderingStatsInstrumentation* rendering_stats_instrumentation_;
   MicroBenchmarkControllerImpl micro_benchmark_controller_;
@@ -758,7 +759,6 @@ class CC_EXPORT LayerTreeHostImpl
   int id_;
 
   std::set<SwapPromiseMonitor*> swap_promise_monitor_;
-  std::vector<PictureLayerImpl::Pair> picture_layer_pairs_;
 
   bool requires_high_res_to_draw_;
   bool is_likely_to_require_a_draw_;

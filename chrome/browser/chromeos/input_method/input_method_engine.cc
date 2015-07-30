@@ -17,6 +17,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/ime/candidate_window.h"
@@ -31,8 +32,8 @@
 #include "ui/events/event.h"
 #include "ui/events/event_processor.h"
 #include "ui/events/event_utils.h"
-#include "ui/events/keycodes/dom3/dom_code.h"
-#include "ui/events/keycodes/dom4/keycode_converter.h"
+#include "ui/events/keycodes/dom/dom_code.h"
+#include "ui/events/keycodes/dom/keycode_converter.h"
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/keyboard/keyboard_util.h"
 
@@ -162,7 +163,8 @@ InputMethodEngine::InputMethodEngine()
       composition_cursor_(0),
       candidate_window_(new ui::CandidateWindow()),
       window_visible_(false),
-      sent_key_event_(NULL) {
+      sent_key_event_(NULL),
+      profile_(NULL) {
 }
 
 InputMethodEngine::~InputMethodEngine() {
@@ -170,12 +172,14 @@ InputMethodEngine::~InputMethodEngine() {
 
 void InputMethodEngine::Initialize(
     scoped_ptr<InputMethodEngineInterface::Observer> observer,
-    const char* extension_id) {
+    const char* extension_id,
+    Profile* profile) {
   DCHECK(observer) << "Observer must not be null.";
 
   // TODO(komatsu): It is probably better to set observer out of Initialize.
   observer_ = observer.Pass();
   extension_id_ = extension_id;
+  profile_ = profile;
 }
 
 const std::string& InputMethodEngine::GetActiveComponentId() const {
@@ -501,6 +505,8 @@ void InputMethodEngine::HideInputView() {
 
 void InputMethodEngine::SetCompositionBounds(
     const std::vector<gfx::Rect>& bounds) {
+  if (!CheckProfile())
+    return;
   observer_->OnCompositionBoundsChanged(bounds);
 }
 
@@ -517,6 +523,8 @@ void InputMethodEngine::EnableInputView() {
 
 void InputMethodEngine::FocusIn(
     const IMEEngineHandlerInterface::InputContext& input_context) {
+  if (!CheckProfile())
+    return;
   current_input_type_ = input_context.type;
 
   if (!IsActive() || current_input_type_ == ui::TEXT_INPUT_TYPE_NONE)
@@ -562,6 +570,8 @@ void InputMethodEngine::FocusIn(
 }
 
 void InputMethodEngine::FocusOut() {
+  if (!CheckProfile())
+    return;
   if (!IsActive() || current_input_type_ == ui::TEXT_INPUT_TYPE_NONE)
     return;
 
@@ -573,32 +583,46 @@ void InputMethodEngine::FocusOut() {
 }
 
 void InputMethodEngine::Enable(const std::string& component_id) {
+  if (!CheckProfile())
+    return;
   DCHECK(!component_id.empty());
   active_component_id_ = component_id;
   observer_->OnActivate(component_id);
-  current_input_type_ = IMEBridge::Get()->GetCurrentTextInputType();
-  FocusIn(IMEEngineHandlerInterface::InputContext(current_input_type_,
-                                                  ui::TEXT_INPUT_MODE_DEFAULT,
-                                                  ui::TEXT_INPUT_FLAG_NONE));
+  const IMEEngineHandlerInterface::InputContext& input_context =
+      IMEBridge::Get()->GetCurrentInputContext();
+  current_input_type_ = input_context.type;
+  FocusIn(input_context);
   EnableInputView();
 }
 
 void InputMethodEngine::Disable() {
+  if (!CheckProfile())
+    return;
   active_component_id_.clear();
   observer_->OnDeactivated(active_component_id_);
 }
 
 void InputMethodEngine::PropertyActivate(const std::string& property_name) {
+  if (!CheckProfile())
+    return;
   observer_->OnMenuItemActivated(active_component_id_, property_name);
 }
 
 void InputMethodEngine::Reset() {
+  if (!CheckProfile())
+    return;
   observer_->OnReset(active_component_id_);
+}
+
+bool InputMethodEngine::IsInterestedInKeyEvent() const {
+  return observer_->IsInterestedInKeyEvent();
 }
 
 void InputMethodEngine::ProcessKeyEvent(
     const ui::KeyEvent& key_event,
     const KeyEventDoneCallback& callback) {
+  if (!CheckProfile())
+    return;
 
   KeyEventDoneCallback* handler = new KeyEventDoneCallback();
   *handler = callback;
@@ -620,6 +644,8 @@ void InputMethodEngine::ProcessKeyEvent(
 }
 
 void InputMethodEngine::CandidateClicked(uint32 index) {
+  if (!CheckProfile())
+    return;
   if (index > candidate_ids_.size()) {
     return;
   }
@@ -632,10 +658,17 @@ void InputMethodEngine::CandidateClicked(uint32 index) {
 void InputMethodEngine::SetSurroundingText(const std::string& text,
                                            uint32 cursor_pos,
                                            uint32 anchor_pos) {
+  if (!CheckProfile())
+    return;
   observer_->OnSurroundingTextChanged(active_component_id_,
                                       text,
                                       static_cast<int>(cursor_pos),
                                       static_cast<int>(anchor_pos));
+}
+
+bool InputMethodEngine::CheckProfile() const {
+  Profile* active_profile = ProfileManager::GetActiveUserProfile();
+  return active_profile == profile_ || profile_->IsSameProfile(active_profile);
 }
 
 // TODO(uekawa): rename this method to a more reasonable name.

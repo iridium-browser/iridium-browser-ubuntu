@@ -8,15 +8,9 @@ import android.content.ComponentName;
 import android.content.Intent;
 import android.net.Uri;
 import android.test.ActivityInstrumentationTestCase2;
-import android.text.TextUtils;
 
 import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
 
-import org.chromium.base.PathUtils;
-
-import org.chromium.net.urlconnection.CronetHttpURLConnectionTest;
-
-import java.io.File;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -79,7 +73,7 @@ public class CronetTestBase extends
         // Make sure the activity was created as expected.
         assertNotNull(getActivity());
         try {
-            waitForActiveShellToBeDoneLoading();
+            waitForActivityToBeDoneLoading();
         } catch (Throwable e) {
             fail("Test activity has failed to load.");
         }
@@ -87,7 +81,7 @@ public class CronetTestBase extends
     }
 
     // Helper method to tell the activity to skip factory init in onCreate().
-    protected CronetTestActivity skipFactoryInitInOnCreate() {
+    protected CronetTestActivity launchCronetTestAppAndSkipFactoryInit() {
         String[] commandLineArgs = {
                 CronetTestActivity.LIBRARY_INIT_KEY, CronetTestActivity.LIBRARY_INIT_SKIP};
         CronetTestActivity activity =
@@ -96,41 +90,26 @@ public class CronetTestBase extends
     }
 
     /**
-     * Waits for the Active shell to finish loading. This times out after
-     * WAIT_FOR_ACTIVE_SHELL_LOADING_TIMEOUT milliseconds and it shouldn't be
-     * used for long loading pages. Instead it should be used more for test
-     * initialization. The proper way to wait is to use a
-     * TestCallbackHelperContainer after the initial load is completed.
+     * Waits for the Activity to finish loading. This times out after
+     * WAIT_FOR_ACTIVE_SHELL_LOADING_TIMEOUT milliseconds.
      *
      * @return Whether or not the Shell was actually finished loading.
      * @throws InterruptedException
      */
-    private boolean waitForActiveShellToBeDoneLoading()
+    private boolean waitForActivityToBeDoneLoading()
             throws InterruptedException {
         final CronetTestActivity activity = getActivity();
 
-        // Wait for the Content Shell to be initialized.
+        // Wait for the Activity to load.
         return CriteriaHelper.pollForCriteria(new Criteria() {
-                @Override
+            @Override
             public boolean isSatisfied() {
                 try {
                     final AtomicBoolean isLoaded = new AtomicBoolean(false);
                     runTestOnUiThread(new Runnable() {
-                            @Override
+                        @Override
                         public void run() {
-                            if (activity != null) {
-                                // There are two cases here that need to be
-                                // accounted for.
-                                // The first is that we've just created a Shell
-                                // and it isn't
-                                // loading because it has no URL set yet. The
-                                // second is that
-                                // we've set a URL and it actually is loading.
-                                isLoaded.set(!activity.isLoading() && !TextUtils
-                                        .isEmpty(activity.getUrl()));
-                            } else {
-                                isLoaded.set(false);
-                            }
+                            isLoaded.set(activity != null && !activity.isLoading());
                         }
                     });
 
@@ -145,8 +124,8 @@ public class CronetTestBase extends
 
     @Override
     protected void runTest() throws Throwable {
-        if (!getClass().getName().equals(
-                CronetHttpURLConnectionTest.class.getName())) {
+        if (!getClass().getPackage().getName().equals(
+                "org.chromium.net.urlconnection")) {
             super.runTest();
             return;
         }
@@ -172,31 +151,6 @@ public class CronetTestBase extends
         } catch (Throwable e) {
             throw new Throwable("CronetTestBase#runTest failed.", e);
         }
-    }
-
-    /**
-     * Returns the path for the test storage (http cache, QUIC server info).
-     */
-    public String prepareTestStorage() {
-        String storagePath = PathUtils.getDataDirectory(
-                getInstrumentation().getTargetContext()) + "/test_storage";
-        File storage = new File(storagePath);
-        if (storage.exists()) {
-            assertTrue(recursiveDelete(storage));
-        }
-        assertTrue(storage.mkdir());
-        return storagePath;
-    }
-
-    boolean recursiveDelete(File path) {
-        if (path.isDirectory()) {
-            for (File c : path.listFiles()) {
-                if (!recursiveDelete(c)) {
-                    return false;
-                }
-            }
-        }
-        return path.delete();
     }
 
     @Target(ElementType.METHOD)

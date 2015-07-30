@@ -267,7 +267,7 @@ private:
     AtomicString m_mimeTypeOverride;
     unsigned long m_timeoutMilliseconds;
     PersistentWillBeMember<Blob> m_responseBlob;
-    RefPtrWillBeMember<Stream> m_responseLegacyStream;
+    PersistentWillBeMember<Stream> m_responseLegacyStream;
     PersistentWillBeMember<ReadableStreamImpl<ReadableStreamChunkTypeTraits<DOMArrayBufferView>>> m_responseStream;
     PersistentWillBeMember<ReadableStreamSource> m_responseStreamSource;
 
@@ -305,7 +305,7 @@ private:
 
     // This blob loader will be used if |m_downloadingToFile| is true and
     // |m_responseTypeCode| is NOT ResponseTypeBlob.
-    OwnPtrWillBeMember<BlobLoader> m_blobLoader;
+    PersistentWillBeMember<BlobLoader> m_blobLoader;
 
     // Positive if we are dispatching events.
     // This is an integer specifying the recursion level rather than a boolean

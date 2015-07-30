@@ -17,6 +17,7 @@ from chromite.lib import commandline
 from chromite.lib import cros_build_lib
 from chromite.lib import osutils
 from chromite.lib import portage_util
+from chromite.lib import sysroot_lib
 
 _CREATE_BATCH_CMD = ('rsync',)
 _CREATE_BATCH_EXCLUDE = ('--exclude=/tmp/', '--exclude=/var/cache/',
@@ -88,23 +89,26 @@ def FinishParsing(options):
         'Non-existent directory %r specified for --out-dir' % options.out_dir)
 
 
-def GenerateSysroot(sysroot, board, build_tests, unpack_only=False):
+def GenerateSysroot(sysroot_path, board, build_tests, unpack_only=False):
   """Create a sysroot using only binary packages from local binhost.
 
   Args:
-    sysroot: Where we want to place the sysroot.
+    sysroot_path: Where we want to place the sysroot.
     board: Board we want to build for.
     build_tests: If we should include autotest packages.
     unpack_only: If we only want to unpack the binary packages, and not build
                  them.
   """
-  osutils.SafeMakedirs(sysroot)
+  osutils.SafeMakedirs(sysroot_path)
   if not unpack_only:
+    # Generate the sysroot configuration.
+    sysroot = sysroot_lib.Sysroot(sysroot_path)
+    sysroot.WriteConfig(sysroot.GenerateBoardConfiguration(board))
     cros_build_lib.RunCommand(
         [os.path.join(constants.CROSUTILS_DIR, 'install_toolchain'),
-         '--noconfigure', '--board_root', sysroot, '--board', board])
+         '--noconfigure', '--sysroot', sysroot_path])
   cmd = list(_BUILD_PKGS_CMD)
-  cmd.extend(['--board_root', sysroot, '--board', board])
+  cmd.extend(['--board_root', sysroot_path, '--board', board])
   if unpack_only:
     cmd.append('--unpackonly')
   if not build_tests:

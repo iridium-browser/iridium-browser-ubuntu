@@ -67,7 +67,13 @@ void crazy_context_t::ResetSearchPaths() {
 
 extern "C" {
 
-crazy_context_t* crazy_context_create(void) { return new crazy_context_t(); }
+void crazy_set_sdk_build_version(int sdk_build_version) {
+  *Globals::GetSDKBuildVersion() = sdk_build_version;
+}
+
+crazy_context_t* crazy_context_create() {
+  return new crazy_context_t();
+}
 
 const char* crazy_context_get_error(crazy_context_t* context) {
   const char* error = context->error.c_str();
@@ -214,6 +220,7 @@ crazy_status_t crazy_library_open(crazy_library_t** library,
                                                   context->file_offset,
                                                   &context->search_paths,
                                                   false,
+                                                  false,
                                                   &context->error);
 
   if (!wrap)
@@ -247,6 +254,7 @@ crazy_status_t crazy_library_open_in_zip_file(crazy_library_t** library,
           context->load_address,
           &context->search_paths,
           context->no_map_exec_support_fallback_enabled,
+          false,
           &context->error);
 
   if (!wrap)

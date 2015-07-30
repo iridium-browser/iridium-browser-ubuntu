@@ -12,7 +12,6 @@
 #include "base/time/time.h"
 #include "chrome/browser/chromeos/login/signin/oauth2_login_verifier.h"
 #include "chrome/browser/chromeos/login/signin/oauth2_token_fetcher.h"
-#include "chrome/browser/chromeos/login/signin/token_handle_util.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "google_apis/gaia/gaia_oauth_client.h"
 #include "google_apis/gaia/oauth2_token_service.h"
@@ -58,8 +57,6 @@ class OAuth2LoginManager : public KeyedService,
     RESTORE_FROM_SAVED_OAUTH2_REFRESH_TOKEN,
     // Restore session from OAuth2 refresh token passed via command line.
     RESTORE_FROM_PASSED_OAUTH2_REFRESH_TOKEN,
-    // Restore session from authentication code passed via command line.
-    RESTORE_FROM_AUTH_CODE,
   };
 
   class Observer {
@@ -84,22 +81,20 @@ class OAuth2LoginManager : public KeyedService,
   void AddObserver(OAuth2LoginManager::Observer* observer);
   void RemoveObserver(OAuth2LoginManager::Observer* observer);
 
-  // Restores and verifies OAuth tokens either following specified
-  // |restore_strategy|. For |restore_strategy| with values
-  // RESTORE_FROM_PASSED_OAUTH2_REFRESH_TOKEN or
-  // RESTORE_FROM_AUTH_CODE, respectively
-  // parameters |oauth2_refresh_token| or |auth_code| need to have non-empty
-  // value.
-  void RestoreSession(
-      net::URLRequestContextGetter* auth_request_context,
-      SessionRestoreStrategy restore_strategy,
-      const std::string& oauth2_refresh_token,
-      const std::string& auth_code);
+  // Restores and verifies OAuth tokens following specified |restore_strategy|.
+  // For |restore_strategy| RESTORE_FROM_PASSED_OAUTH2_REFRESH_TOKEN, parameter
+  // |oauth2_refresh_token| needs to have a non-empty value.
+  // For |restore_strategy| RESTORE_FROM_COOKIE_JAR |auth_request_context| must
+  // be initialized.
+  void RestoreSession(net::URLRequestContextGetter* auth_request_context,
+                      SessionRestoreStrategy restore_strategy,
+                      const std::string& oauth2_refresh_token,
+                      const std::string& oauth2_access_token);
 
   // Continues session restore after transient network errors.
   void ContinueSessionRestore();
 
-  // Start resporting session from saved OAuth2 refresh token.
+  // Start restoring session from saved OAuth2 refresh token.
   void RestoreSessionFromSavedTokens();
 
   // Stops all background authentication requests.
@@ -110,9 +105,11 @@ class OAuth2LoginManager : public KeyedService,
 
   const base::Time& session_restore_start() { return session_restore_start_; }
 
+  bool SessionRestoreIsRunning() const;
+
   // Returns true if the tab loading should block until session restore
   // finishes.
-  bool ShouldBlockTabLoading();
+  bool ShouldBlockTabLoading() const;
 
  private:
   friend class MergeSessionLoadPageTest;
@@ -150,7 +147,7 @@ class OAuth2LoginManager : public KeyedService,
 
   // gaia::GaiaOAuthClient::Delegate overrides.
   void OnRefreshTokenResponse(const std::string& access_token,
-                                      int expires_in_seconds) override;
+                              int expires_in_seconds) override;
   void OnGetUserInfoResponse(
       scoped_ptr<base::DictionaryValue> user_info) override;
   void OnOAuthError() override;
@@ -159,7 +156,8 @@ class OAuth2LoginManager : public KeyedService,
   // OAuth2LoginVerifier::Delegate overrides.
   void OnSessionMergeSuccess() override;
   void OnSessionMergeFailure(bool connection_error) override;
-  void OnListAccountsSuccess(const std::string& data) override;
+  void OnListAccountsSuccess(
+      const std::vector<std::pair<std::string, bool>>& accounts) override;
   void OnListAccountsFailure(bool connection_error) override;
 
   // OAuth2TokenFetcher::Delegate overrides.
@@ -220,10 +218,6 @@ class OAuth2LoginManager : public KeyedService,
   void RecordSessionRestoreOutcome(SessionRestoreOutcome outcome,
                                    SessionRestoreState state);
 
-  // Callback from TokenHandleUtil, used to release util.
-  void OnTokenHandleComplete(const user_manager::UserID& user_id,
-                             TokenHandleUtil::TokenHandleStatus status);
-
   // Records |outcome| of merge verification check. |is_pre_merge| specifies
   // if this is pre or post merge session verification.
   static void RecordCookiesCheckOutcome(
@@ -240,16 +234,12 @@ class OAuth2LoginManager : public KeyedService,
   scoped_ptr<OAuth2TokenFetcher> oauth2_token_fetcher_;
   scoped_ptr<OAuth2LoginVerifier> login_verifier_;
   scoped_ptr<gaia::GaiaOAuthClient> account_info_fetcher_;
-  scoped_ptr<TokenHandleUtil> token_handle_util_;
 
   // OAuth2 refresh token.
   std::string refresh_token_;
 
   // OAuthLogin scoped access token.
   std::string oauthlogin_access_token_;
-
-  // Authorization code for fetching OAuth2 tokens.
-  std::string auth_code_;
 
   // Session restore start time.
   base::Time session_restore_start_;
@@ -259,8 +249,6 @@ class OAuth2LoginManager : public KeyedService,
   // TODO(zelidrag|gspencer): Figure out how to get rid of ProfileHelper so we
   // can change the line below to ObserverList<Observer, true>.
   ObserverList<Observer, false> observer_list_;
-
-  base::WeakPtrFactory<OAuth2LoginManager> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(OAuth2LoginManager);
 };

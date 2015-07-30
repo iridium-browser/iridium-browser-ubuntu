@@ -18,8 +18,6 @@ namespace android {
 // This enumeration maps to the values returned by BuildInfo::sdk_int(),
 // indicating the Android release associated with a given SDK version.
 enum SdkVersion {
-  SDK_VERSION_ICE_CREAM_SANDWICH = 14,
-  SDK_VERSION_ICE_CREAM_SANDWICH_MR1 = 15,
   SDK_VERSION_JELLY_BEAN = 16,
   SDK_VERSION_JELLY_BEAN_MR1 = 17,
   SDK_VERSION_JELLY_BEAN_MR2 = 18,
@@ -101,7 +99,9 @@ class BASE_EXPORT BuildInfo {
     return java_exception_info_;
   }
 
-  void set_java_exception_info(const std::string& info);
+  void SetJavaExceptionInfo(const std::string& info);
+
+  void ClearJavaExceptionInfo();
 
   static bool RegisterBindings(JNIEnv* env);
 

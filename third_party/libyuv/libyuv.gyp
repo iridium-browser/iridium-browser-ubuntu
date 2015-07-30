@@ -57,7 +57,7 @@
             # arm64 does not need -mfpu=neon option as neon is not optional
             ['target_arch != "arm64"', {
               'cflags': [
-                '-Wa,-mfpu=neon',
+                '-mfpu=neon',
               ],
             }],
           ],
@@ -121,6 +121,9 @@
         ['build_neon != 0', {
           'dependencies': [
             'libyuv_neon',
+          ],
+          'defines': [
+            'LIBYUV_NEON',
           ],
         }],
         # MemorySanitizer does not support assembly code yet.

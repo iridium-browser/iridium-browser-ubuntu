@@ -69,8 +69,10 @@
         <structure name="IDR_OOBE_ENROLLMENT_WEBVIEW_CSS" file="resources\chromeos\login\oobe_screen_oauth_enrollment_webview.css" flattenhtml="true" type="chrome_html" />
         <structure name="IDR_OOBE_ENROLLMENT_WEBVIEW_JS" file="resources\chromeos\login\oobe_screen_oauth_enrollment_webview.js" flattenhtml="true" type="chrome_html" />
         <structure name="IDR_KEYBOARD_UTILS_JS" file="resources\chromeos\keyboard\keyboard_utils.js" flattenhtml="true" type="chrome_html" />
-        <structure name="IDR_CUSTOM_ELEMENTS_HTML" file="resources\chromeos\login\custom_elements.html" flattenhtml="true" type="chrome_html" />
-        <structure name="IDR_CUSTOM_ELEMENTS_JS" file="resources\chromeos\login\custom_elements.js" flattenhtml="true" type="chrome_html" />
+        <structure name="IDR_CUSTOM_ELEMENTS_OOBE_HTML" file="resources\chromeos\login\custom_elements_oobe.html" flattenhtml="true" type="chrome_html" />
+        <structure name="IDR_CUSTOM_ELEMENTS_OOBE_JS" file="resources\chromeos\login\custom_elements_oobe.js" flattenhtml="true" type="chrome_html" />
+        <structure name="IDR_CUSTOM_ELEMENTS_LOGIN_HTML" file="resources\chromeos\login\custom_elements_login.html" flattenhtml="true" type="chrome_html" />
+        <structure name="IDR_CUSTOM_ELEMENTS_LOGIN_JS" file="resources\chromeos\login\custom_elements_login.js" flattenhtml="true" type="chrome_html" />
       </if>
       <structure name="IDR_READER_OUT_OF_DATE_HTML" file="resources\reader_out_of_date.html" flattenhtml="true" type="chrome_html" />
       <structure name="IDR_SECURITY_INTERSTITIAL_UI_HTML" file="resources\security_warnings\interstitial_ui.html" flattenhtml="true" type="chrome_html" />
@@ -249,7 +251,6 @@
       </if>
       <include name="IDR_POLICY_HTML" file="resources\policy.html" flattenhtml="true" allowexternalscript="true" type="BINDATA"/>
       <include name="IDR_POLICY_JS" file="resources\policy.js" type="BINDATA"/>
-      <include name="IDR_PRERENDER_URL_WHITELIST" file="resources\prerender_url_whitelist.dat" type="BINDATA"/>
       <if expr="enable_print_preview">
         <include name="IDR_PRINT_PREVIEW_HTML" file="resources\print_preview\print_preview.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
         <include name="IDR_PRINT_PREVIEW_JS" file="resources\print_preview\print_preview.js" flattenhtml="true" type="BINDATA" />
@@ -277,13 +278,6 @@
       </if>
       <if expr="enable_google_now">
         <include name="IDR_GOOGLE_NOW_MANIFEST" file="resources\google_now\manifest.json" type="BINDATA" />
-      </if>
-      <if expr="not is_android">
-        <include name="IDR_SUGGESTIONS_INTERNALS_HTML" file="resources\suggestions_internals\suggestions_internals.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
-        <include name="IDR_SUGGESTIONS_INTERNALS_CSS" file="resources\suggestions_internals\suggestions_internals.css" type="BINDATA" />
-        <include name="IDR_SUGGESTIONS_INTERNALS_JS" file="resources\suggestions_internals\suggestions_internals.js" type="BINDATA" />
-        <include name="IDR_SUGGESTIONS_PAGE_CSS" file="resources\ntp4\suggestions_page.css" type="BINDATA" />
-        <include name="IDR_SUGGESTIONS_PAGE_JS" file="resources\ntp4\suggestions_page.js" type="BINDATA" />
       </if>
       <include name="IDR_UBER_HTML" file="resources\uber\uber.html" flattenhtml="true" type="BINDATA" />
       <include name="IDR_UBER_JS" file="resources\uber\uber.js" type="BINDATA" />
@@ -441,33 +435,15 @@
           <include name="IDR_ZHUYIN_MANIFEST" file="resources\chromeos\input_method\zhuyin_manifest.json" type="BINDATA" />
           <include name="IDR_CANGJIE_MANIFEST" file="resources\chromeos\input_method\cangjie_manifest.json" type="BINDATA" />
           <include name="IDR_MOZC_MANIFEST" file="resources\chromeos\input_method\mozc_manifest.json" type="BINDATA" />
+          <include name="IDR_HANGUL_MANIFEST" file="resources\chromeos\input_method\hangul_manifest.json" type="BINDATA" />
         </if>
-        <include name="IDR_HANGUL_MANIFEST" file="resources\chromeos\input_method\hangul_manifest.json" type="BINDATA" />
         <include name="IDR_BRAILLE_MANIFEST" file="resources\chromeos\braille_ime\manifest.json" type="BINDATA" />
       </if>
       <include name="IDR_WHISPERNET_PROXY_MANIFEST" file="resources\whispernet_proxy\manifest.json" type="BINDATA" />
       <include name="IDR_MD_SETTINGS_UI_HTML" file="resources\md_settings\md_settings.html" type="BINDATA" />
       <include name="IDR_MD_SETTINGS_UI_CSS" file="resources\md_settings\md_settings.css" type="BINDATA" />
       <if expr="enable_media_router">
-        <include name="IDR_MEDIA_ROUTER_DATA_JS" file="resources\media_router\media_router_data.js" type="BINDATA" />
-        <include name="IDR_CAST_MODE_PICKER_HTML" file="resources\media_router\elements\cast_mode_picker\cast_mode_picker.html" type="BINDATA" />
-        <include name="IDR_CAST_MODE_PICKER_CSS" file="resources\media_router\elements\cast_mode_picker\cast_mode_picker.css" type="BINDATA" />
-        <include name="IDR_CAST_MODE_PICKER_JS" file="resources\media_router\elements\cast_mode_picker\cast_mode_picker.js" type="BINDATA" />
-        <include name="IDR_MEDIA_ROUTER_CHROMECAST_ICON" file="resources\media_router\elements\icon\chromecast-icon.png" type="BINDATA" />
-        <include name="IDR_MEDIA_ROUTER_CHROMECAST_2X_ICON" file="resources\media_router\elements\icon\chromecast-icon2x.png" type="BINDATA" />
-        <include name="IDR_CLOSE_GRAY_ICON" file="resources\media_router\elements\icon\close-gray.png" type="BINDATA" />
-        <include name="IDR_CLOSE_GRAY_2X_ICON" file="resources\media_router\elements\icon\close-gray2x.png" type="BINDATA" />
-        <include name="IDR_DOWN_ARROW_ICON" file="resources\media_router\elements\icon\down-arrow.png" type="BINDATA" />
-        <include name="IDR_DOWN_ARROW_2X_ICON" file="resources\media_router\elements\icon\down-arrow2x.png" type="BINDATA" />
-        <include name="IDR_DOWN_ARROW_HOVER_ICON" file="resources\media_router\elements\icon\down-arrow-hover.png" type="BINDATA" />
-        <include name="IDR_DOWN_ARROW_HOVER_2X_ICON" file="resources\media_router\elements\icon\down-arrow-hover2x.png" type="BINDATA" />
-        <include name="IDR_DOWN_ARROW_SHOWING_ICON" file="resources\media_router\elements\icon\down-arrow-showing.png" type="BINDATA" />
-        <include name="IDR_MEDIA_ROUTER_GENERIC_DEVICE_ICON" file="resources\media_router\elements\icon\generic-device.png" type="BINDATA" />
-        <include name="IDR_MEDIA_ROUTER_GENERIC_DEVICE_2X_ICON" file="resources\media_router\elements\icon\generic-device2x.png" type="BINDATA" />
-        <include name="IDR_MEDIA_ROUTER_HANGOUTS_ICON" file="resources\media_router\elements\icon\hangouts-icon.png" type="BINDATA" />
-        <include name="IDR_MEDIA_ROUTER_HANGOUTS_2X_ICON" file="resources\media_router\elements\icon\hangouts-icon2x.png" type="BINDATA" />
-        <include name="IDR_SAD_FACE_ICON" file="resources\media_router\elements\icon\sad-face.png" type="BINDATA" />
-        <include name="IDR_SAD_FACE_2X_ICON" file="resources\media_router\elements\icon\sad-face2x.png" type="BINDATA" />
+        <part file="media_router_resources.grdp" />
       </if>
     </includes>
   </release>

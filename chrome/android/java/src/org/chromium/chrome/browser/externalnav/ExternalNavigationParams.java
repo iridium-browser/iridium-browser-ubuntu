@@ -44,10 +44,20 @@ public class ExternalNavigationParams {
     /** Whether this navigation happens in background tab. */
     private final boolean mIsBackgroundTabNavigation;
 
+    /** Whether this navigation happens in main frame. */
+    private final boolean mIsMainFrame;
+
+    /**
+     * Whether the current tab should be closed when an URL load was overridden and an
+     * intent launched.
+     */
+    private final boolean mShouldCloseContentsOnOverrideUrlLoadingAndLaunchIntent;
+
     private ExternalNavigationParams(String url, boolean isIncognito, String referrerUrl,
             int pageTransition, boolean isRedirect, boolean appMustBeInForeground,
             TabRedirectHandler redirectHandler, TransitionPageHelper transitionPageHelper, Tab tab,
-            boolean openInNewTab, boolean isBackgroundTabNavigation) {
+            boolean openInNewTab, boolean isBackgroundTabNavigation, boolean isMainFrame,
+            boolean shouldCloseContentsOnOverrideUrlLoadingAndLaunchIntent) {
         mUrl = url;
         mIsIncognito = isIncognito;
         mPageTransition = pageTransition;
@@ -59,6 +69,9 @@ public class ExternalNavigationParams {
         mTab = tab;
         mOpenInNewTab = openInNewTab;
         mIsBackgroundTabNavigation = isBackgroundTabNavigation;
+        mIsMainFrame = isMainFrame;
+        mShouldCloseContentsOnOverrideUrlLoadingAndLaunchIntent =
+                shouldCloseContentsOnOverrideUrlLoadingAndLaunchIntent;
     }
 
     /** @return The URL to potentially open externally. */
@@ -119,6 +132,19 @@ public class ExternalNavigationParams {
         return mIsBackgroundTabNavigation;
     }
 
+    /** @return Whether this navigation happens in main frame. */
+    public boolean isMainFrame() {
+        return mIsMainFrame;
+    }
+
+    /**
+     * @return Whether the current tab should be closed when an URL load was overridden and an
+     *         intent launched.
+     */
+    public boolean shouldCloseContentsOnOverrideUrlLoadingAndLaunchIntent() {
+        return mShouldCloseContentsOnOverrideUrlLoadingAndLaunchIntent;
+    }
+
     /** The builder for {@link ExternalNavigationParams} objects. */
     public static class Builder {
         /** The URL which we are navigating to. */
@@ -152,6 +178,15 @@ public class ExternalNavigationParams {
 
         /** Whether this navigation happens in background tab. */
         private boolean mIsBackgroundTabNavigation;
+
+        /** Whether this navigation happens in main frame. */
+        private boolean mIsMainFrame;
+
+        /**
+         * Whether the current tab should be closed when an URL load was overridden and an
+         * intent launched.
+         */
+        private boolean mShouldCloseContentsOnOverrideUrlLoadingAndLaunchIntent;
 
         public Builder(String url, boolean isIncognito) {
             mUrl = url;
@@ -203,11 +238,26 @@ public class ExternalNavigationParams {
             return this;
         }
 
+        /** Sets whether this navigation happens in main frame. */
+        public Builder setIsMainFrame(boolean v) {
+            mIsMainFrame = v;
+            return this;
+        }
+
+        /** Sets whether the current tab should be closed when an URL load was overridden and an
+         * intent launched.
+         */
+        public Builder setShouldCloseContentsOnOverrideUrlLoadingAndLaunchIntent(boolean v) {
+            mShouldCloseContentsOnOverrideUrlLoadingAndLaunchIntent = v;
+            return this;
+        }
+
         /** @return A fully constructed {@link ExternalNavigationParams} object. */
         public ExternalNavigationParams build() {
             return new ExternalNavigationParams(mUrl, mIsIncognito, mReferrerUrl, mPageTransition,
                     mIsRedirect, mApplicationMustBeInForeground, mRedirectHandler,
-                    mTransitionPageHelper, mTab, mOpenInNewTab, mIsBackgroundTabNavigation);
+                    mTransitionPageHelper, mTab, mOpenInNewTab, mIsBackgroundTabNavigation,
+                    mIsMainFrame, mShouldCloseContentsOnOverrideUrlLoadingAndLaunchIntent);
         }
     }
 }

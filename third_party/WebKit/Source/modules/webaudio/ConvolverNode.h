@@ -25,6 +25,7 @@
 #ifndef ConvolverNode_h
 #define ConvolverNode_h
 
+#include "modules/ModulesExport.h"
 #include "modules/webaudio/AudioNode.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/RefPtr.h"
@@ -36,16 +37,13 @@ class AudioBuffer;
 class ExceptionState;
 class Reverb;
 
-class ConvolverHandler final : public AudioHandler {
+class MODULES_EXPORT ConvolverHandler final : public AudioHandler {
 public:
-    ConvolverHandler(AudioNode&, float sampleRate);
+    static PassRefPtr<ConvolverHandler> create(AudioNode&, float sampleRate);
     virtual ~ConvolverHandler();
 
     // AudioHandler
-    virtual void dispose() override;
     virtual void process(size_t framesToProcess) override;
-    virtual void initialize() override;
-    virtual void uninitialize() override;
 
     // Impulse responses
     void setBuffer(AudioBuffer*, ExceptionState&);
@@ -54,26 +52,30 @@ public:
     bool normalize() const { return m_normalize; }
     void setNormalize(bool normalize) { m_normalize = normalize; }
 
-    DECLARE_VIRTUAL_TRACE();
-
 private:
+    ConvolverHandler(AudioNode&, float sampleRate);
     virtual double tailTime() const override;
     virtual double latencyTime() const override;
 
     OwnPtr<Reverb> m_reverb;
-    Member<AudioBuffer> m_buffer;
+    // This Persistent doesn't make a reference cycle including the owner
+    // ConvolverNode.
+    Persistent<AudioBuffer> m_buffer;
 
     // This synchronizes dynamic changes to the convolution impulse response with process().
     mutable Mutex m_processLock;
 
     // Normalize the impulse response or not. Must default to true.
     bool m_normalize;
+
+    // TODO(tkent): Use FRIEND_TEST macro provided by gtest_prod.h
+    friend class ConvolverNodeTest_ReverbLifetime_Test;
 };
 
-class ConvolverNode final : public AudioNode {
+class MODULES_EXPORT ConvolverNode final : public AudioNode {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static ConvolverNode* create(AudioContext*, float sampleRate);
+    static ConvolverNode* create(AudioContext&, float sampleRate);
 
     AudioBuffer* buffer() const;
     void setBuffer(AudioBuffer*, ExceptionState&);
@@ -83,6 +85,9 @@ public:
 private:
     ConvolverNode(AudioContext&, float sampleRate);
     ConvolverHandler& convolverHandler() const;
+
+    // TODO(tkent): Use FRIEND_TEST macro provided by gtest_prod.h
+    friend class ConvolverNodeTest_ReverbLifetime_Test;
 };
 
 } // namespace blink

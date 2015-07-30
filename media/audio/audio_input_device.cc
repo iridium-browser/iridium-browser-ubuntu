@@ -4,7 +4,6 @@
 
 #include "media/audio/audio_input_device.h"
 
-#include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/memory/scoped_vector.h"
 #include "base/threading/thread_restrictions.h"
@@ -290,7 +289,7 @@ void AudioInputDevice::AudioThreadCallback::MapSharedMemory() {
         reinterpret_cast<media::AudioInputBuffer*>(ptr);
     scoped_ptr<media::AudioBus> audio_bus =
         media::AudioBus::WrapMemory(audio_parameters_, buffer->audio);
-    audio_buses_.push_back(audio_bus.release());
+    audio_buses_.push_back(audio_bus.Pass());
     ptr += segment_length_;
   }
 }

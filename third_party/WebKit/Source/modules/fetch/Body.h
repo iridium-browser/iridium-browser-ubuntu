@@ -12,6 +12,7 @@
 #include "core/dom/DOMArrayBuffer.h"
 #include "core/fileapi/FileReaderLoader.h"
 #include "core/fileapi/FileReaderLoaderClient.h"
+#include "modules/ModulesExport.h"
 #include "platform/blob/BlobData.h"
 #include "platform/heap/Handle.h"
 #include "wtf/RefPtr.h"
@@ -19,10 +20,12 @@
 namespace blink {
 
 class BodyStreamBuffer;
+class BodyStreamSource;
+class DOMException;
 class ReadableByteStream;
 class ScriptState;
 
-class Body
+class MODULES_EXPORT Body
     : public GarbageCollectedFinalized<Body>
     , public ScriptWrappable
     , public ActiveDOMObject
@@ -30,6 +33,7 @@ class Body
     DEFINE_WRAPPERTYPEINFO();
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(Body);
 public:
+    class ReadableStreamSource;
     enum ResponseType {
         ResponseUnknown,
         ResponseAsArrayBuffer,
@@ -58,7 +62,17 @@ public:
 
     // Returns true if the body stream is (possibly partially) consumed.
     bool isBodyConsumed() const;
-    void refreshBody();
+    // Sets |m_stream| to a newly created stream from |source|.
+    void setBody(ReadableStreamSource* /* source */);
+
+    void setBody(PassRefPtr<BlobDataHandle> handle)
+    {
+        setBody(createBodySource(handle));
+    }
+    void setBody(BodyStreamBuffer* buffer)
+    {
+        setBody(createBodySource(buffer));
+    }
 
     // Creates a new BodyStreamBuffer to drain the data from the ReadableStream.
     BodyStreamBuffer* createDrainingStream();
@@ -67,12 +81,14 @@ public:
     virtual void stop() override;
     virtual bool hasPendingActivity() const override;
 
+    ReadableStreamSource* createBodySource(PassRefPtr<BlobDataHandle>);
+    ReadableStreamSource* createBodySource(BodyStreamBuffer*);
+
     DECLARE_VIRTUAL_TRACE();
 
     BodyStreamBuffer* bufferForTest() const { return buffer(); }
 
 private:
-    class ReadableStreamSource;
     class BlobHandleReceiver;
 
     void pullSource();
@@ -87,7 +103,7 @@ private:
     virtual void didFinishLoading() override;
     virtual void didFail(FileError::ErrorCode) override;
 
-    void didBlobHandleReceiveError(PassRefPtrWillBeRawPtr<DOMException>);
+    void didBlobHandleReceiveError(DOMException*);
 
     // We use BlobDataHandle or BodyStreamBuffer as data container of the Body.
     // BodyStreamBuffer is used only when the Response object is created by

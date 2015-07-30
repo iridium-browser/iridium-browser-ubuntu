@@ -24,6 +24,8 @@ PasswordStoreDefault::PasswordStoreDefault(
 }
 
 PasswordStoreDefault::~PasswordStoreDefault() {
+  if (!GetBackgroundTaskRunner()->BelongsToCurrentThread())
+    GetBackgroundTaskRunner()->DeleteSoon(FROM_HERE, login_db_.release());
 }
 
 bool PasswordStoreDefault::Init(
@@ -146,6 +148,25 @@ bool PasswordStoreDefault::FillBlacklistLogins(
     ScopedVector<PasswordForm>* forms) {
   DCHECK(GetBackgroundTaskRunner()->BelongsToCurrentThread());
   return login_db_ && login_db_->GetBlacklistLogins(forms);
+}
+
+void PasswordStoreDefault::AddSiteStatsImpl(const InteractionsStats& stats) {
+  DCHECK(GetBackgroundTaskRunner()->BelongsToCurrentThread());
+  if (login_db_)
+    login_db_->stats_table().AddRow(stats);
+}
+
+void PasswordStoreDefault::RemoveSiteStatsImpl(const GURL& origin_domain) {
+  DCHECK(GetBackgroundTaskRunner()->BelongsToCurrentThread());
+  if (login_db_)
+    login_db_->stats_table().RemoveRow(origin_domain);
+}
+
+scoped_ptr<InteractionsStats> PasswordStoreDefault::GetSiteStatsImpl(
+    const GURL& origin_domain) {
+  DCHECK(GetBackgroundTaskRunner()->BelongsToCurrentThread());
+  return login_db_ ? login_db_->stats_table().GetRow(origin_domain)
+                   : scoped_ptr<InteractionsStats>();
 }
 
 }  // namespace password_manager

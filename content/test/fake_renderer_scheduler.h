@@ -5,11 +5,11 @@
 #ifndef CONTENT_TEST_FAKE_RENDERER_SCHEDULER_H_
 #define CONTENT_TEST_FAKE_RENDERER_SCHEDULER_H_
 
-#include "content/renderer/scheduler/renderer_scheduler.h"
+#include "components/scheduler/renderer/renderer_scheduler.h"
 
 namespace content {
 
-class FakeRendererScheduler : public RendererScheduler {
+class FakeRendererScheduler : public scheduler::RendererScheduler {
  public:
   FakeRendererScheduler();
   ~FakeRendererScheduler() override;
@@ -18,13 +18,20 @@ class FakeRendererScheduler : public RendererScheduler {
   scoped_refptr<base::SingleThreadTaskRunner> DefaultTaskRunner() override;
   scoped_refptr<base::SingleThreadTaskRunner> CompositorTaskRunner() override;
   scoped_refptr<base::SingleThreadTaskRunner> LoadingTaskRunner() override;
-  scoped_refptr<SingleThreadIdleTaskRunner> IdleTaskRunner() override;
+  scoped_refptr<scheduler::SingleThreadIdleTaskRunner> IdleTaskRunner()
+      override;
+  scoped_refptr<base::SingleThreadTaskRunner> TimerTaskRunner() override;
   void WillBeginFrame(const cc::BeginFrameArgs& args) override;
   void BeginFrameNotExpectedSoon() override;
   void DidCommitFrameToCompositor() override;
-  void DidReceiveInputEventOnCompositorThread(
+  void DidHandleInputEventOnCompositorThread(
+      const blink::WebInputEvent& web_input_event,
+      InputEventState event_state) override;
+  void DidHandleInputEventOnMainThread(
       const blink::WebInputEvent& web_input_event) override;
   void DidAnimateForInputOnCompositorThread() override;
+  void OnRendererHidden() override;
+  void OnRendererVisible() override;
   bool IsHighPriorityWorkAnticipated() override;
   bool CanExceedIdleDeadlineIfRequired() const override;
   bool ShouldYieldForHighPriorityWork() override;
@@ -32,6 +39,8 @@ class FakeRendererScheduler : public RendererScheduler {
   void RemoveTaskObserver(
       base::MessageLoop::TaskObserver* task_observer) override;
   void Shutdown() override;
+  void SuspendTimerQueue() override;
+  void ResumeTimerQueue() override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(FakeRendererScheduler);

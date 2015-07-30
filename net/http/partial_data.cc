@@ -8,7 +8,6 @@
 #include "base/bind_helpers.h"
 #include "base/format_macros.h"
 #include "base/logging.h"
-#include "base/profiler/scoped_tracker.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -81,7 +80,7 @@ int PartialData::Core::GetAvailableRange(disk_cache::Entry* entry, int64 offset,
   int rv = entry->GetAvailableRange(
       offset, len, &start_, base::Bind(&PartialData::Core::OnIOComplete,
                                        base::Unretained(this)));
-  if (rv != net::ERR_IO_PENDING) {
+  if (rv != ERR_IO_PENDING) {
     // The callback will not be invoked. Lets cleanup.
     *start = start_;
     delete this;
@@ -90,11 +89,6 @@ int PartialData::Core::GetAvailableRange(disk_cache::Entry* entry, int64 offset,
 }
 
 void PartialData::Core::OnIOComplete(int result) {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "422516 PartialData::Core::OnIOComplete"));
-
   if (owner_)
     owner_->GetAvailableRangeCompleted(result, start_);
   delete this;
@@ -435,9 +429,10 @@ void PartialData::FixContentLength(HttpResponseHeaders* headers) {
                                         resource_size_));
 }
 
-int PartialData::CacheRead(
-    disk_cache::Entry* entry, IOBuffer* data, int data_len,
-    const net::CompletionCallback& callback) {
+int PartialData::CacheRead(disk_cache::Entry* entry,
+                           IOBuffer* data,
+                           int data_len,
+                           const CompletionCallback& callback) {
   int read_len = std::min(data_len, cached_min_len_);
   if (!read_len)
     return 0;
@@ -456,9 +451,10 @@ int PartialData::CacheRead(
   return rv;
 }
 
-int PartialData::CacheWrite(
-    disk_cache::Entry* entry, IOBuffer* data, int data_len,
-    const net::CompletionCallback& callback) {
+int PartialData::CacheWrite(disk_cache::Entry* entry,
+                            IOBuffer* data,
+                            int data_len,
+                            const CompletionCallback& callback) {
   DVLOG(3) << "To write: " << data_len;
   if (sparse_entry_) {
     return entry->WriteSparseData(

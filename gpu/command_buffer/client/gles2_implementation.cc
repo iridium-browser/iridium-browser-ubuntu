@@ -614,7 +614,22 @@ bool GLES2Implementation::GetHelper(GLenum pname, GLint* params) {
   // are invalid. It is not a problem for now, but once we allow resource
   // sharing in WebGL, we need to implement a mechanism to allow correct
   // client side binding points tracking.  crbug.com/465562.
+
+  // ES2 parameters.
   switch (pname) {
+    case GL_ACTIVE_TEXTURE:
+      *params = active_texture_unit_ + GL_TEXTURE0;
+      return true;
+    case GL_ARRAY_BUFFER_BINDING:
+      *params = bound_array_buffer_id_;
+      return true;
+    case GL_ELEMENT_ARRAY_BUFFER_BINDING:
+      *params =
+          vertex_array_object_manager_->bound_element_array_buffer();
+      return true;
+    case GL_FRAMEBUFFER_BINDING:
+      *params = bound_framebuffer_;
+      return true;
     case GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS:
       *params = capabilities_.max_combined_texture_image_units;
       return true;
@@ -651,21 +666,8 @@ bool GLES2Implementation::GetHelper(GLenum pname, GLint* params) {
     case GL_NUM_SHADER_BINARY_FORMATS:
       *params = capabilities_.num_shader_binary_formats;
       return true;
-    case GL_ARRAY_BUFFER_BINDING:
-      *params = bound_array_buffer_id_;
-      return true;
-    case GL_ELEMENT_ARRAY_BUFFER_BINDING:
-      *params =
-          vertex_array_object_manager_->bound_element_array_buffer();
-      return true;
-    case GL_PIXEL_PACK_TRANSFER_BUFFER_BINDING_CHROMIUM:
-      *params = bound_pixel_pack_transfer_buffer_id_;
-      return true;
-    case GL_PIXEL_UNPACK_TRANSFER_BUFFER_BINDING_CHROMIUM:
-      *params = bound_pixel_unpack_transfer_buffer_id_;
-      return true;
-    case GL_ACTIVE_TEXTURE:
-      *params = active_texture_unit_ + GL_TEXTURE0;
+    case GL_RENDERBUFFER_BINDING:
+      *params = bound_renderbuffer_;
       return true;
     case GL_TEXTURE_BINDING_2D:
       *params = texture_units_[active_texture_unit_].bound_texture_2d;
@@ -673,32 +675,249 @@ bool GLES2Implementation::GetHelper(GLenum pname, GLint* params) {
     case GL_TEXTURE_BINDING_CUBE_MAP:
       *params = texture_units_[active_texture_unit_].bound_texture_cube_map;
       return true;
+
+    // Non-standard parameters.
     case GL_TEXTURE_BINDING_EXTERNAL_OES:
       *params =
           texture_units_[active_texture_unit_].bound_texture_external_oes;
       return true;
-    case GL_FRAMEBUFFER_BINDING:
-      *params = bound_framebuffer_;
+    case GL_PIXEL_PACK_TRANSFER_BUFFER_BINDING_CHROMIUM:
+      *params = bound_pixel_pack_transfer_buffer_id_;
+      return true;
+    case GL_PIXEL_UNPACK_TRANSFER_BUFFER_BINDING_CHROMIUM:
+      *params = bound_pixel_unpack_transfer_buffer_id_;
       return true;
     case GL_READ_FRAMEBUFFER_BINDING:
       if (IsChromiumFramebufferMultisampleAvailable()) {
         *params = bound_read_framebuffer_;
         return true;
       }
+      break;
+
+    // Non-cached parameters.
+    case GL_ALIASED_LINE_WIDTH_RANGE:
+    case GL_ALIASED_POINT_SIZE_RANGE:
+    case GL_ALPHA_BITS:
+    case GL_BLEND:
+    case GL_BLEND_COLOR:
+    case GL_BLEND_DST_ALPHA:
+    case GL_BLEND_DST_RGB:
+    case GL_BLEND_EQUATION_ALPHA:
+    case GL_BLEND_EQUATION_RGB:
+    case GL_BLEND_SRC_ALPHA:
+    case GL_BLEND_SRC_RGB:
+    case GL_BLUE_BITS:
+    case GL_COLOR_CLEAR_VALUE:
+    case GL_COLOR_WRITEMASK:
+    case GL_COMPRESSED_TEXTURE_FORMATS:
+    case GL_CULL_FACE:
+    case GL_CULL_FACE_MODE:
+    case GL_CURRENT_PROGRAM:
+    case GL_DEPTH_BITS:
+    case GL_DEPTH_CLEAR_VALUE:
+    case GL_DEPTH_FUNC:
+    case GL_DEPTH_RANGE:
+    case GL_DEPTH_TEST:
+    case GL_DEPTH_WRITEMASK:
+    case GL_DITHER:
+    case GL_FRONT_FACE:
+    case GL_GENERATE_MIPMAP_HINT:
+    case GL_GREEN_BITS:
+    case GL_IMPLEMENTATION_COLOR_READ_FORMAT:
+    case GL_IMPLEMENTATION_COLOR_READ_TYPE:
+    case GL_LINE_WIDTH:
+    case GL_MAX_VIEWPORT_DIMS:
+    case GL_PACK_ALIGNMENT:
+    case GL_POLYGON_OFFSET_FACTOR:
+    case GL_POLYGON_OFFSET_FILL:
+    case GL_POLYGON_OFFSET_UNITS:
+    case GL_RED_BITS:
+    case GL_SAMPLE_ALPHA_TO_COVERAGE:
+    case GL_SAMPLE_BUFFERS:
+    case GL_SAMPLE_COVERAGE:
+    case GL_SAMPLE_COVERAGE_INVERT:
+    case GL_SAMPLE_COVERAGE_VALUE:
+    case GL_SAMPLES:
+    case GL_SCISSOR_BOX:
+    case GL_SCISSOR_TEST:
+    case GL_SHADER_BINARY_FORMATS:
+    case GL_SHADER_COMPILER:
+    case GL_STENCIL_BACK_FAIL:
+    case GL_STENCIL_BACK_FUNC:
+    case GL_STENCIL_BACK_PASS_DEPTH_FAIL:
+    case GL_STENCIL_BACK_PASS_DEPTH_PASS:
+    case GL_STENCIL_BACK_REF:
+    case GL_STENCIL_BACK_VALUE_MASK:
+    case GL_STENCIL_BACK_WRITEMASK:
+    case GL_STENCIL_BITS:
+    case GL_STENCIL_CLEAR_VALUE:
+    case GL_STENCIL_FAIL:
+    case GL_STENCIL_FUNC:
+    case GL_STENCIL_PASS_DEPTH_FAIL:
+    case GL_STENCIL_PASS_DEPTH_PASS:
+    case GL_STENCIL_REF:
+    case GL_STENCIL_TEST:
+    case GL_STENCIL_VALUE_MASK:
+    case GL_STENCIL_WRITEMASK:
+    case GL_SUBPIXEL_BITS:
+    case GL_UNPACK_ALIGNMENT:
+    case GL_VIEWPORT:
       return false;
-    case GL_RENDERBUFFER_BINDING:
-      *params = bound_renderbuffer_;
+    default:
+      break;
+  }
+
+  if (capabilities_.major_version < 3) {
+    return false;
+  }
+
+  // ES3 parameters.
+  switch (pname) {
+    case GL_MAJOR_VERSION:
+      *params = capabilities_.major_version;
       return true;
-    case GL_MAX_UNIFORM_BUFFER_BINDINGS:
-      *params = capabilities_.max_uniform_buffer_bindings;
+    case GL_MAX_3D_TEXTURE_SIZE:
+      *params = capabilities_.max_3d_texture_size;
+      return true;
+    case GL_MAX_ARRAY_TEXTURE_LAYERS:
+      *params = capabilities_.max_array_texture_layers;
+      return true;
+    case GL_MAX_COLOR_ATTACHMENTS:
+      *params = capabilities_.max_color_attachments;
+      return true;
+    case GL_MAX_COMBINED_FRAGMENT_UNIFORM_COMPONENTS:
+      *params = capabilities_.max_combined_fragment_uniform_components;
+      return true;
+    case GL_MAX_COMBINED_UNIFORM_BLOCKS:
+      *params = capabilities_.max_combined_uniform_blocks;
+      return true;
+    case GL_MAX_COMBINED_VERTEX_UNIFORM_COMPONENTS:
+      *params = capabilities_.max_combined_vertex_uniform_components;
+      return true;
+    case GL_MAX_DRAW_BUFFERS:
+      *params = capabilities_.max_draw_buffers;
+      return true;
+    case GL_MAX_ELEMENT_INDEX:
+      *params = capabilities_.max_element_index;
+      return true;
+    case GL_MAX_ELEMENTS_INDICES:
+      *params = capabilities_.max_elements_indices;
+      return true;
+    case GL_MAX_ELEMENTS_VERTICES:
+      *params = capabilities_.max_elements_vertices;
+      return true;
+    case GL_MAX_FRAGMENT_INPUT_COMPONENTS:
+      *params = capabilities_.max_fragment_input_components;
+      return true;
+    case GL_MAX_FRAGMENT_UNIFORM_BLOCKS:
+      *params = capabilities_.max_fragment_uniform_blocks;
+      return true;
+    case GL_MAX_FRAGMENT_UNIFORM_COMPONENTS:
+      *params = capabilities_.max_fragment_uniform_components;
+      return true;
+    case GL_MAX_PROGRAM_TEXEL_OFFSET:
+      *params = capabilities_.max_program_texel_offset;
+      return true;
+    case GL_MAX_SAMPLES:
+      *params = capabilities_.max_samples;
+      return true;
+    case GL_MAX_SERVER_WAIT_TIMEOUT:
+      *params = capabilities_.max_server_wait_timeout;
+      return true;
+    case GL_MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS:
+      *params = capabilities_.max_transform_feedback_interleaved_components;
       return true;
     case GL_MAX_TRANSFORM_FEEDBACK_SEPARATE_ATTRIBS:
       *params = capabilities_.max_transform_feedback_separate_attribs;
       return true;
+    case GL_MAX_TRANSFORM_FEEDBACK_SEPARATE_COMPONENTS:
+      *params = capabilities_.max_transform_feedback_separate_components;
+      return true;
+    case GL_MAX_UNIFORM_BLOCK_SIZE:
+      *params = capabilities_.max_uniform_block_size;
+      return true;
+    case GL_MAX_UNIFORM_BUFFER_BINDINGS:
+      *params = capabilities_.max_uniform_buffer_bindings;
+      return true;
+    case GL_MAX_VARYING_COMPONENTS:
+      *params = capabilities_.max_varying_components;
+      return true;
+    case GL_MAX_VERTEX_OUTPUT_COMPONENTS:
+      *params = capabilities_.max_vertex_output_components;
+      return true;
+    case GL_MAX_VERTEX_UNIFORM_BLOCKS:
+      *params = capabilities_.max_vertex_uniform_blocks;
+      return true;
+    case GL_MAX_VERTEX_UNIFORM_COMPONENTS:
+      *params = capabilities_.max_vertex_uniform_components;
+      return true;
+    case GL_MIN_PROGRAM_TEXEL_OFFSET:
+      *params = capabilities_.min_program_texel_offset;
+      return true;
+    case GL_MINOR_VERSION:
+      *params = capabilities_.minor_version;
+      return true;
+    case GL_NUM_EXTENSIONS:
+      *params = capabilities_.num_extensions;
+      return true;
+    case GL_NUM_PROGRAM_BINARY_FORMATS:
+      *params = capabilities_.num_program_binary_formats;
+      return true;
     case GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT:
       *params = capabilities_.uniform_buffer_offset_alignment;
       return true;
-    // TODO(zmo): Support ES3 pnames.
+
+    // Non-cached ES3 parameters.
+    case GL_COPY_READ_BUFFER_BINDING:
+    case GL_COPY_WRITE_BUFFER_BINDING:
+    case GL_DRAW_BUFFER0:
+    case GL_DRAW_BUFFER1:
+    case GL_DRAW_BUFFER2:
+    case GL_DRAW_BUFFER3:
+    case GL_DRAW_BUFFER4:
+    case GL_DRAW_BUFFER5:
+    case GL_DRAW_BUFFER6:
+    case GL_DRAW_BUFFER7:
+    case GL_DRAW_BUFFER8:
+    case GL_DRAW_BUFFER9:
+    case GL_DRAW_BUFFER10:
+    case GL_DRAW_BUFFER11:
+    case GL_DRAW_BUFFER12:
+    case GL_DRAW_BUFFER13:
+    case GL_DRAW_BUFFER14:
+    case GL_DRAW_BUFFER15:
+    case GL_DRAW_FRAMEBUFFER_BINDING:
+    case GL_FRAGMENT_SHADER_DERIVATIVE_HINT:
+    case GL_MAX_TEXTURE_LOD_BIAS:
+    case GL_PACK_ROW_LENGTH:
+    case GL_PACK_SKIP_PIXELS:
+    case GL_PACK_SKIP_ROWS:
+    case GL_PIXEL_PACK_BUFFER_BINDING:
+    case GL_PIXEL_UNPACK_BUFFER_BINDING:
+    case GL_PRIMITIVE_RESTART_FIXED_INDEX:
+    case GL_PROGRAM_BINARY_FORMATS:
+    case GL_RASTERIZER_DISCARD:
+    case GL_READ_BUFFER:
+    case GL_READ_FRAMEBUFFER_BINDING:
+    case GL_SAMPLER_BINDING:
+    case GL_TEXTURE_BINDING_2D_ARRAY:
+    case GL_TEXTURE_BINDING_3D:
+    case GL_TRANSFORM_FEEDBACK_BINDING:
+    case GL_TRANSFORM_FEEDBACK_ACTIVE:
+    case GL_TRANSFORM_FEEDBACK_BUFFER_BINDING:
+    case GL_TRANSFORM_FEEDBACK_PAUSED:
+    case GL_TRANSFORM_FEEDBACK_BUFFER_SIZE:
+    case GL_TRANSFORM_FEEDBACK_BUFFER_START:
+    case GL_UNIFORM_BUFFER_BINDING:
+    case GL_UNIFORM_BUFFER_SIZE:
+    case GL_UNIFORM_BUFFER_START:
+    case GL_UNPACK_IMAGE_HEIGHT:
+    case GL_UNPACK_ROW_LENGTH:
+    case GL_UNPACK_SKIP_IMAGES:
+    case GL_UNPACK_SKIP_PIXELS:
+    case GL_UNPACK_SKIP_ROWS:
+    case GL_VERTEX_ARRAY_BINDING:
+      return false;
     default:
       return false;
   }
@@ -724,8 +943,30 @@ bool GLES2Implementation::GetFloatvHelper(GLenum pname, GLfloat* params) {
   return true;
 }
 
+bool GLES2Implementation::GetInteger64vHelper(GLenum pname, GLint64* params) {
+  // TODO(zmo): we limit values to 32-bit, which is OK for now.
+  GLint value;
+  if (!GetHelper(pname, &value)) {
+    return false;
+  }
+  *params = value;
+  return true;
+}
+
 bool GLES2Implementation::GetIntegervHelper(GLenum pname, GLint* params) {
   return GetHelper(pname, params);
+}
+
+bool GLES2Implementation::GetIntegeri_vHelper(
+    GLenum pname, GLuint index, GLint* data) {
+  // TODO(zmo): Implement client side caching.
+  return false;
+}
+
+bool GLES2Implementation::GetInteger64i_vHelper(
+    GLenum pname, GLuint index, GLint64* data) {
+  // TODO(zmo): Implement client side caching.
+  return false;
 }
 
 bool GLES2Implementation::GetInternalformativHelper(
@@ -1310,13 +1551,33 @@ void GLES2Implementation::PixelStorei(GLenum pname, GLint param) {
 void GLES2Implementation::VertexAttribIPointer(
     GLuint index, GLint size, GLenum type, GLsizei stride, const void* ptr) {
   GPU_CLIENT_SINGLE_THREAD_CHECK();
-  GPU_CLIENT_LOG("[" << GetLogPrefix() << "] glVertexAttribPointer("
+  GPU_CLIENT_LOG("[" << GetLogPrefix() << "] glVertexAttribIPointer("
       << index << ", "
       << size << ", "
-      << GLES2Util::GetStringVertexAttribType(type) << ", "
+      << GLES2Util::GetStringVertexAttribIType(type) << ", "
       << stride << ", "
       << ptr << ")");
-  helper_->VertexAttribIPointer(index, size, type, stride, ToGLuint(ptr));
+  // Record the info on the client side.
+  if (!vertex_array_object_manager_->SetAttribPointer(bound_array_buffer_id_,
+                                                      index,
+                                                      size,
+                                                      type,
+                                                      GL_FALSE,
+                                                      stride,
+                                                      ptr,
+                                                      GL_TRUE)) {
+    SetGLError(GL_INVALID_OPERATION, "glVertexAttribIPointer",
+               "client side arrays are not allowed in vertex array objects.");
+    return;
+  }
+  if (!support_client_side_arrays_ || bound_array_buffer_id_ != 0) {
+    // Only report NON client side buffers to the service.
+    if (!ValidateOffset("glVertexAttribIPointer",
+                        reinterpret_cast<GLintptr>(ptr))) {
+      return;
+    }
+    helper_->VertexAttribIPointer(index, size, type, stride, ToGLuint(ptr));
+  }
   CheckGLError();
 }
 
@@ -1332,8 +1593,14 @@ void GLES2Implementation::VertexAttribPointer(
       << stride << ", "
       << ptr << ")");
   // Record the info on the client side.
-  if (!vertex_array_object_manager_->SetAttribPointer(
-      bound_array_buffer_id_, index, size, type, normalized, stride, ptr)) {
+  if (!vertex_array_object_manager_->SetAttribPointer(bound_array_buffer_id_,
+                                                      index,
+                                                      size,
+                                                      type,
+                                                      normalized,
+                                                      stride,
+                                                      ptr,
+                                                      GL_FALSE)) {
     SetGLError(GL_INVALID_OPERATION, "glVertexAttribPointer",
                "client side arrays are not allowed in vertex array objects.");
     return;
@@ -1660,6 +1927,97 @@ void GLES2Implementation::CompressedTexSubImage2D(
   SetBucketContents(kResultBucketId, data, image_size);
   helper_->CompressedTexSubImage2DBucket(
       target, level, xoffset, yoffset, width, height, format, kResultBucketId);
+  // Free the bucket. This is not required but it does free up the memory.
+  // and we don't have to wait for the result so from the client's perspective
+  // it's cheap.
+  helper_->SetBucketSize(kResultBucketId, 0);
+  CheckGLError();
+}
+
+void GLES2Implementation::CompressedTexImage3D(
+    GLenum target, GLint level, GLenum internalformat, GLsizei width,
+    GLsizei height, GLsizei depth, GLint border, GLsizei image_size,
+    const void* data) {
+  GPU_CLIENT_SINGLE_THREAD_CHECK();
+  GPU_CLIENT_LOG("[" << GetLogPrefix() << "] glCompressedTexImage3D("
+      << GLES2Util::GetStringTexture3DTarget(target) << ", " << level << ", "
+      << GLES2Util::GetStringCompressedTextureFormat(internalformat) << ", "
+      << width << ", " << height << ", " << depth << ", " << border << ", "
+      << image_size << ", " << static_cast<const void*>(data) << ")");
+  if (width < 0 || height < 0 || depth < 0 || level < 0) {
+    SetGLError(GL_INVALID_VALUE, "glCompressedTexImage3D", "dimension < 0");
+    return;
+  }
+  if (border != 0) {
+    SetGLError(GL_INVALID_VALUE, "glCompressedTexImage3D", "border != 0");
+    return;
+  }
+  if (height == 0 || width == 0 || depth == 0) {
+    return;
+  }
+  // If there's a pixel unpack buffer bound use it when issuing
+  // CompressedTexImage3D.
+  if (bound_pixel_unpack_transfer_buffer_id_) {
+    GLuint offset = ToGLuint(data);
+    BufferTracker::Buffer* buffer = GetBoundPixelUnpackTransferBufferIfValid(
+        bound_pixel_unpack_transfer_buffer_id_,
+        "glCompressedTexImage3D", offset, image_size);
+    if (buffer && buffer->shm_id() != -1) {
+      helper_->CompressedTexImage3D(
+          target, level, internalformat, width, height, depth, image_size,
+          buffer->shm_id(), buffer->shm_offset() + offset);
+      buffer->set_last_usage_token(helper_->InsertToken());
+    }
+    return;
+  }
+  SetBucketContents(kResultBucketId, data, image_size);
+  helper_->CompressedTexImage3DBucket(
+      target, level, internalformat, width, height, depth, kResultBucketId);
+  // Free the bucket. This is not required but it does free up the memory.
+  // and we don't have to wait for the result so from the client's perspective
+  // it's cheap.
+  helper_->SetBucketSize(kResultBucketId, 0);
+  CheckGLError();
+}
+
+void GLES2Implementation::CompressedTexSubImage3D(
+    GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset,
+    GLsizei width, GLsizei height, GLsizei depth, GLenum format,
+    GLsizei image_size, const void* data) {
+  GPU_CLIENT_SINGLE_THREAD_CHECK();
+  GPU_CLIENT_LOG("[" << GetLogPrefix() << "] glCompressedTexSubImage3D("
+      << GLES2Util::GetStringTextureTarget(target) << ", "
+      << level << ", "
+      << xoffset << ", " << yoffset << ", " << zoffset << ", "
+      << width << ", " << height << ", " << depth << ", "
+      << GLES2Util::GetStringCompressedTextureFormat(format) << ", "
+      << image_size << ", "
+      << static_cast<const void*>(data) << ")");
+  if (width < 0 || height < 0 || depth < 0 || level < 0) {
+    SetGLError(GL_INVALID_VALUE, "glCompressedTexSubImage3D", "dimension < 0");
+    return;
+  }
+  // If there's a pixel unpack buffer bound use it when issuing
+  // CompressedTexSubImage3D.
+  if (bound_pixel_unpack_transfer_buffer_id_) {
+    GLuint offset = ToGLuint(data);
+    BufferTracker::Buffer* buffer = GetBoundPixelUnpackTransferBufferIfValid(
+        bound_pixel_unpack_transfer_buffer_id_,
+        "glCompressedTexSubImage3D", offset, image_size);
+    if (buffer && buffer->shm_id() != -1) {
+      helper_->CompressedTexSubImage3D(
+          target, level, xoffset, yoffset, zoffset,
+          width, height, depth, format, image_size,
+          buffer->shm_id(), buffer->shm_offset() + offset);
+      buffer->set_last_usage_token(helper_->InsertToken());
+      CheckGLError();
+    }
+    return;
+  }
+  SetBucketContents(kResultBucketId, data, image_size);
+  helper_->CompressedTexSubImage3DBucket(
+      target, level, xoffset, yoffset, zoffset, width, height, depth, format,
+      kResultBucketId);
   // Free the bucket. This is not required but it does free up the memory.
   // and we don't have to wait for the result so from the client's perspective
   // it's cheap.
@@ -2421,7 +2779,7 @@ bool GLES2Implementation::GetActiveUniformBlockNameHelper(
     } else if (length || name) {
       std::vector<int8> str;
       GetBucketContents(kResultBucketId, &str);
-      DCHECK(str.size() > 0);
+      DCHECK_GT(str.size(), 0u);
       GLsizei max_size =
           std::min(bufsize, static_cast<GLsizei>(str.size())) - 1;
       if (length) {
@@ -2829,7 +3187,32 @@ void GLES2Implementation::GetUniformiv(
   helper_->GetUniformiv(
       program, location, GetResultShmId(), GetResultShmOffset());
   WaitForCmd();
-  GetResultAs<cmds::GetUniformfv::Result*>()->CopyResult(params);
+  GetResultAs<cmds::GetUniformiv::Result*>()->CopyResult(params);
+  GPU_CLIENT_LOG_CODE_BLOCK({
+    for (int32 i = 0; i < result->GetNumResults(); ++i) {
+      GPU_CLIENT_LOG("  " << i << ": " << result->GetData()[i]);
+    }
+  });
+  CheckGLError();
+}
+
+void GLES2Implementation::GetUniformuiv(
+    GLuint program, GLint location, GLuint* params) {
+  GPU_CLIENT_SINGLE_THREAD_CHECK();
+  GPU_CLIENT_LOG("[" << GetLogPrefix() << "] glGetUniformuiv("
+      << program << ", " << location << ", "
+      << static_cast<const void*>(params) << ")");
+  TRACE_EVENT0("gpu", "GLES2::GetUniformuiv");
+  typedef cmds::GetUniformuiv::Result Result;
+  Result* result = GetResultAs<Result*>();
+  if (!result) {
+    return;
+  }
+  result->SetNumResults(0);
+  helper_->GetUniformuiv(
+      program, location, GetResultShmId(), GetResultShmOffset());
+  WaitForCmd();
+  GetResultAs<cmds::GetUniformuiv::Result*>()->CopyResult(params);
   GPU_CLIENT_LOG_CODE_BLOCK({
     for (int32 i = 0; i < result->GetNumResults(); ++i) {
       GPU_CLIENT_LOG("  " << i << ": " << result->GetData()[i]);
@@ -3050,7 +3433,7 @@ void GLES2Implementation::BindBufferHelper(
 void GLES2Implementation::BindBufferStub(GLenum target, GLuint buffer) {
   helper_->BindBuffer(target, buffer);
   if (share_group_->bind_generates_resource())
-    helper_->CommandBufferHelper::Flush();
+    helper_->CommandBufferHelper::OrderingBarrier();
 }
 
 void GLES2Implementation::BindBufferBaseHelper(
@@ -3134,7 +3517,7 @@ void GLES2Implementation::BindFramebufferStub(GLenum target,
                                               GLuint framebuffer) {
   helper_->BindFramebuffer(target, framebuffer);
   if (share_group_->bind_generates_resource())
-    helper_->CommandBufferHelper::Flush();
+    helper_->CommandBufferHelper::OrderingBarrier();
 }
 
 void GLES2Implementation::BindRenderbufferHelper(
@@ -3164,7 +3547,7 @@ void GLES2Implementation::BindRenderbufferStub(GLenum target,
                                                GLuint renderbuffer) {
   helper_->BindRenderbuffer(target, renderbuffer);
   if (share_group_->bind_generates_resource())
-    helper_->CommandBufferHelper::Flush();
+    helper_->CommandBufferHelper::OrderingBarrier();
 }
 
 void GLES2Implementation::BindSamplerHelper(GLuint unit,
@@ -3211,7 +3594,7 @@ void GLES2Implementation::BindTextureHelper(GLenum target, GLuint texture) {
 void GLES2Implementation::BindTextureStub(GLenum target, GLuint texture) {
   helper_->BindTexture(target, texture);
   if (share_group_->bind_generates_resource())
-    helper_->CommandBufferHelper::Flush();
+    helper_->CommandBufferHelper::OrderingBarrier();
 }
 
 void GLES2Implementation::BindTransformFeedbackHelper(
@@ -3262,7 +3645,7 @@ void GLES2Implementation::BindValuebufferCHROMIUMStub(GLenum target,
                                                       GLuint valuebuffer) {
   helper_->BindValuebufferCHROMIUM(target, valuebuffer);
   if (share_group_->bind_generates_resource())
-    helper_->CommandBufferHelper::Flush();
+    helper_->CommandBufferHelper::OrderingBarrier();
 }
 
 void GLES2Implementation::UseProgramHelper(GLuint program) {
@@ -3504,7 +3887,7 @@ void GLES2Implementation::GetVertexAttribfv(
       << static_cast<const void*>(params) << ")");
   uint32 value = 0;
   if (vertex_array_object_manager_->GetVertexAttrib(index, pname, &value)) {
-    *params = static_cast<float>(value);
+    *params = static_cast<GLfloat>(value);
     return;
   }
   TRACE_EVENT0("gpu", "GLES2::GetVertexAttribfv");
@@ -3535,7 +3918,7 @@ void GLES2Implementation::GetVertexAttribiv(
       << static_cast<const void*>(params) << ")");
   uint32 value = 0;
   if (vertex_array_object_manager_->GetVertexAttrib(index, pname, &value)) {
-    *params = value;
+    *params = static_cast<GLint>(value);
     return;
   }
   TRACE_EVENT0("gpu", "GLES2::GetVertexAttribiv");
@@ -3546,6 +3929,68 @@ void GLES2Implementation::GetVertexAttribiv(
   }
   result->SetNumResults(0);
   helper_->GetVertexAttribiv(
+      index, pname, GetResultShmId(), GetResultShmOffset());
+  WaitForCmd();
+  result->CopyResult(params);
+  GPU_CLIENT_LOG_CODE_BLOCK({
+    for (int32 i = 0; i < result->GetNumResults(); ++i) {
+      GPU_CLIENT_LOG("  " << i << ": " << result->GetData()[i]);
+    }
+  });
+  CheckGLError();
+}
+
+void GLES2Implementation::GetVertexAttribIiv(
+    GLuint index, GLenum pname, GLint* params) {
+  GPU_CLIENT_SINGLE_THREAD_CHECK();
+  GPU_CLIENT_LOG("[" << GetLogPrefix() << "] glGetVertexAttribIiv("
+      << index << ", "
+      << GLES2Util::GetStringVertexAttribute(pname) << ", "
+      << static_cast<const void*>(params) << ")");
+  uint32 value = 0;
+  if (vertex_array_object_manager_->GetVertexAttrib(index, pname, &value)) {
+    *params = static_cast<GLint>(value);
+    return;
+  }
+  TRACE_EVENT0("gpu", "GLES2::GetVertexAttribIiv");
+  typedef cmds::GetVertexAttribiv::Result Result;
+  Result* result = GetResultAs<Result*>();
+  if (!result) {
+    return;
+  }
+  result->SetNumResults(0);
+  helper_->GetVertexAttribIiv(
+      index, pname, GetResultShmId(), GetResultShmOffset());
+  WaitForCmd();
+  result->CopyResult(params);
+  GPU_CLIENT_LOG_CODE_BLOCK({
+    for (int32 i = 0; i < result->GetNumResults(); ++i) {
+      GPU_CLIENT_LOG("  " << i << ": " << result->GetData()[i]);
+    }
+  });
+  CheckGLError();
+}
+
+void GLES2Implementation::GetVertexAttribIuiv(
+    GLuint index, GLenum pname, GLuint* params) {
+  GPU_CLIENT_SINGLE_THREAD_CHECK();
+  GPU_CLIENT_LOG("[" << GetLogPrefix() << "] glGetVertexAttribIuiv("
+      << index << ", "
+      << GLES2Util::GetStringVertexAttribute(pname) << ", "
+      << static_cast<const void*>(params) << ")");
+  uint32 value = 0;
+  if (vertex_array_object_manager_->GetVertexAttrib(index, pname, &value)) {
+    *params = static_cast<GLuint>(value);
+    return;
+  }
+  TRACE_EVENT0("gpu", "GLES2::GetVertexAttribIuiv");
+  typedef cmds::GetVertexAttribiv::Result Result;
+  Result* result = GetResultAs<Result*>();
+  if (!result) {
+    return;
+  }
+  result->SetNumResults(0);
+  helper_->GetVertexAttribIuiv(
       index, pname, GetResultShmId(), GetResultShmOffset());
   WaitForCmd();
   result->CopyResult(params);
@@ -4829,8 +5274,10 @@ namespace {
 
 bool ValidImageFormat(GLenum internalformat) {
   switch (internalformat) {
+    case GL_R8:
     case GL_RGB:
     case GL_RGBA:
+    case GL_BGRA_EXT:
       return true;
     default:
       return false;

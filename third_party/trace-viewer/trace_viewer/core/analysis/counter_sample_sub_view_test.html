@@ -100,15 +100,15 @@ tv.b.unittest.testSuite(function() {
     var results = new StubAnalysisResults();
     view.analyzeCounterSamples_(results, selection);
 
-    assertEquals(1, results.tables.length);
-    assertEquals('Selected counter:', results.headers[0].label);
+    assert.equal(results.tables.length, 1);
+    assert.equal(results.headers[0].label, 'Selected counter:');
     var table = results.tables[0];
-    assertEquals(3, table.rows.length);
+    assert.equal(table.rows.length, 3);
 
-    assertEquals('Title', table.rows[0].label);
-    assertEquals('Timestamp', table.rows[1].label);
-    assertEquals('value', table.rows[2].label);
-    assertEquals(10, table.rows[2].text);
+    assert.equal(table.rows[0].label, 'Title');
+    assert.equal(table.rows[1].label, 'Timestamp');
+    assert.equal(table.rows[2].label, 'value');
+    assert.equal(table.rows[2].text, 10);
   });
 
   function createSelectionWithTwoCountersDiffSeriesDiffEvents() {
@@ -120,9 +120,9 @@ tv.b.unittest.testSuite(function() {
     ctr1AllocatedSeries.addCounterSample(10, 25);
     ctr1AllocatedSeries.addCounterSample(20, 15);
 
-    assertEquals('a', ctr1.name);
-    assertEquals(3, ctr1.numSamples);
-    assertEquals(1, ctr1.numSeries);
+    assert.equal(ctr1.name, 'a');
+    assert.equal(ctr1.numSamples, 3);
+    assert.equal(ctr1.numSeries, 1);
 
     var ctr2 = new Counter(null, 0, '', 'b');
     var ctr2AllocatedSeries = new CounterSeries('bytesallocated', 0);
@@ -141,9 +141,9 @@ tv.b.unittest.testSuite(function() {
     ctr2FreeSeries.addCounterSample(20, 25);
     ctr2FreeSeries.addCounterSample(30, 0);
 
-    assertEquals('b', ctr2.name);
-    assertEquals(4, ctr2.numSamples);
-    assertEquals(2, ctr2.numSeries);
+    assert.equal(ctr2.name, 'b');
+    assert.equal(ctr2.numSamples, 4);
+    assert.equal(ctr2.numSeries, 2);
 
     var selection = new Selection();
     var t1track = {};
@@ -163,7 +163,7 @@ tv.b.unittest.testSuite(function() {
     var results = new StubAnalysisResults();
     view.analyzeCounterSamples_(results, selection);
 
-    assertEquals(2, results.tables.length);
+    assert.equal(results.tables.length, 2);
   });
 });
 </script>

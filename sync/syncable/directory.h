@@ -55,16 +55,6 @@ enum InvariantCheckLevel {
 // Although Directory's kernel_ is exposed via public accessor it should be
 // treated as pseudo-private.
 class SYNC_EXPORT Directory {
-  friend class SyncableDirectoryTest;
-  friend class syncer::TestUserShare;
-  FRIEND_TEST_ALL_PREFIXES(SyncableDirectoryTest, ManageDeleteJournals);
-  FRIEND_TEST_ALL_PREFIXES(SyncableDirectoryTest,
-                           TakeSnapshotGetsAllDirtyHandlesTest);
-  FRIEND_TEST_ALL_PREFIXES(SyncableDirectoryTest,
-                           TakeSnapshotGetsOnlyDirtyHandlesTest);
-  FRIEND_TEST_ALL_PREFIXES(SyncableDirectoryTest,
-                           TakeSnapshotGetsMetahandlesToPurge);
-
  public:
   typedef std::vector<int64> Metahandles;
 
@@ -120,8 +110,6 @@ class SYNC_EXPORT Directory {
     // The store birthday we were given by the server. Contents are opaque to
     // the client.
     std::string store_birthday;
-    // The next local ID that has not been used with this cache-GUID.
-    int64 next_id;
     // The serialized bag of chips we were given by the server. Contents are
     // opaque to the client. This is the serialization of a message of type
     // ChipBag defined in sync.proto. It can contains NULL characters.
@@ -146,6 +134,9 @@ class SYNC_EXPORT Directory {
   struct SYNC_EXPORT_PRIVATE SaveChangesSnapshot {
     SaveChangesSnapshot();
     ~SaveChangesSnapshot();
+
+    // Returns true if this snapshot has any unsaved metahandle changes.
+    bool HasUnsavedMetahandleChanges() const;
 
     KernelShareInfoStatus kernel_info_status;
     PersistedKernelInfo kernel_info;
@@ -276,7 +267,7 @@ class SYNC_EXPORT Directory {
                          transaction_observer);
 
   int64 NextMetahandle();
-  // Returns a negative integer unique to this client.
+  // Generates next client ID based on a randomly generated GUID.
   syncable::Id NextId();
 
   bool good() const { return NULL != kernel_; }
@@ -312,9 +303,6 @@ class SYNC_EXPORT Directory {
 
   ModelTypeSet InitialSyncEndedTypes();
   bool InitialSyncEndedForType(ModelType type);
-  bool InitialSyncEndedForType(BaseTransaction* trans, ModelType type);
-
-  const std::string& name() const { return kernel_->name; }
 
   // (Account) Store birthday is opaque to the client, so we keep it in the
   // format it is in the proto buffer in case we switch to a binary birthday
@@ -336,12 +324,6 @@ class SYNC_EXPORT Directory {
   // Returns a pointer to our cryptographer. Does not transfer ownership.
   // Not thread safe, so should only be accessed while holding a transaction.
   Cryptographer* GetCryptographer(const BaseTransaction* trans);
-
-  // Returns true if the directory had encountered an unrecoverable error.
-  // Note: Any function in |Directory| that can be called without holding a
-  // transaction need to check if the Directory already has an unrecoverable
-  // error on it.
-  bool unrecoverable_error_set(const BaseTransaction* trans) const;
 
   // Called to immediately report an unrecoverable error (but don't
   // propagate it up).
@@ -540,6 +522,17 @@ class SYNC_EXPORT Directory {
   const Kernel* kernel() const;
 
  private:
+  friend class SyncableDirectoryTest;
+  friend class syncer::TestUserShare;
+  FRIEND_TEST_ALL_PREFIXES(SyncableDirectoryTest, ManageDeleteJournals);
+  FRIEND_TEST_ALL_PREFIXES(SyncableDirectoryTest,
+                           TakeSnapshotGetsAllDirtyHandlesTest);
+  FRIEND_TEST_ALL_PREFIXES(SyncableDirectoryTest,
+                           TakeSnapshotGetsOnlyDirtyHandlesTest);
+  FRIEND_TEST_ALL_PREFIXES(SyncableDirectoryTest,
+                           TakeSnapshotGetsMetahandlesToPurge);
+  FRIEND_TEST_ALL_PREFIXES(SyncableDirectoryTest, CatastrophicError);
+
   // You'll notice that some of the methods below are private overloads of the
   // public ones declared above. The general pattern is that the public overload
   // constructs a ScopedKernelLock before calling the corresponding private
@@ -628,9 +621,22 @@ class SYNC_EXPORT Directory {
                             ModelType type,
                             std::vector<int64>* result);
 
+  // Invoked by DirectoryBackingStore when a catastrophic database error is
+  // detected.
+  void OnCatastrophicError();
+
+  // Returns true if the initial sync for |type| has completed.
+  bool InitialSyncEndedForType(BaseTransaction* trans, ModelType type);
+
   // Stops sending events to the delegate and the transaction
   // observer.
   void Close();
+
+  // Returns true if the directory had encountered an unrecoverable error.
+  // Note: Any function in |Directory| that can be called without holding a
+  // transaction need to check if the Directory already has an unrecoverable
+  // error on it.
+  bool unrecoverable_error_set(const BaseTransaction* trans) const;
 
   Kernel* kernel_;
 
@@ -649,6 +655,8 @@ class SYNC_EXPORT Directory {
   // Maintain deleted entries not in |kernel_| until it's verified that they
   // are deleted in native models as well.
   scoped_ptr<DeleteJournal> delete_journal_;
+
+  base::WeakPtrFactory<Directory> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(Directory);
 };

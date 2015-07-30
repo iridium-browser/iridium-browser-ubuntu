@@ -62,7 +62,7 @@
                     '<(success_stamp)',
                   ],
                   'action': [
-                    'python', '../third_party/closure_compiler/checker.py',
+                    'python', '../third_party/closure_compiler/compile.py',
                     '--strict',
                     '--no-single-file',
                     '--success-stamp', '<(success_stamp)',
@@ -95,10 +95,6 @@
           'link_flags': [
             '-lppapi_stub',
             '-lppapi_cpp',
-          ],
-          'dependencies': [
-            # TODO(mseaborn): Remove need for this (https://crbug.com/456902).
-            '<(DEPTH)/native_client/tools.gyp:prep_toolchain',
           ],
         },  # end of target 'remoting_key_tester_pexe'
       ],

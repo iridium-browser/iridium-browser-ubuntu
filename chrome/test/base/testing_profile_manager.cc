@@ -130,7 +130,7 @@ TestingProfile* TestingProfileManager::CreateGuestProfile() {
   TestingProfile::Builder().BuildIncognito(profile);
 
   profile_manager_->AddProfile(profile);  // Takes ownership.
-  profile_manager_->SetGuestProfilePrefs(profile);
+  profile_manager_->SetNonPersonalProfilePrefs(profile);
 
   testing_profiles_.insert(std::make_pair(kGuestProfileName, profile));
 
@@ -240,5 +240,7 @@ void TestingProfileManager::SetUpInternal() {
   profile_manager_ = new testing::ProfileManager(profiles_dir_.path());
   browser_process_->SetProfileManager(profile_manager_);  // Takes ownership.
 
+  profile_manager_->GetProfileInfoCache().
+      set_disable_avatar_download_for_testing(true);
   called_set_up_ = true;
 }

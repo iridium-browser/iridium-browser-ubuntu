@@ -10,15 +10,14 @@
 #define LIBANGLE_RENDERER_RENDERBUFFERIMPL_H_
 
 #include "angle_gl.h"
-
-#include "libANGLE/Error.h"
-
 #include "common/angleutils.h"
+#include "libANGLE/Error.h"
+#include "libANGLE/FramebufferAttachment.h"
 
 namespace rx
 {
 
-class RenderbufferImpl : angle::NonCopyable
+class RenderbufferImpl : public FramebufferAttachmentObjectImpl
 {
   public:
     RenderbufferImpl();

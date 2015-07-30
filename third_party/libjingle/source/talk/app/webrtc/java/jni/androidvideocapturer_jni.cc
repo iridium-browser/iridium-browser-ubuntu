@@ -27,7 +27,6 @@
  */
 
 #include "talk/app/webrtc/java/jni/androidvideocapturer_jni.h"
-
 #include "talk/app/webrtc/java/jni/classreferenceholder.h"
 #include "webrtc/base/bind.h"
 
@@ -51,6 +50,7 @@ rtc::scoped_refptr<AndroidVideoCapturerJni>
 AndroidVideoCapturerJni::Create(JNIEnv* jni,
                                 jobject j_video_capture,
                                 jstring device_name) {
+  LOG(LS_INFO) << "AndroidVideoCapturerJni::Create";
   rtc::scoped_refptr<AndroidVideoCapturerJni> capturer(
       new rtc::RefCountedObject<AndroidVideoCapturerJni>(jni, j_video_capture));
 
@@ -68,7 +68,10 @@ AndroidVideoCapturerJni::AndroidVideoCapturerJni(JNIEnv* jni,
           jni,
           FindClass(jni,
                     "org/webrtc/VideoCapturerAndroid$NativeObserver")),
-      capturer_(nullptr) {
+      capturer_(nullptr),
+      thread_(nullptr),
+      valid_global_refs_(true) {
+  LOG(LS_INFO) << "AndroidVideoCapturerJni ctor";
   thread_checker_.DetachFromThread();
 }
 
@@ -83,12 +86,19 @@ bool AndroidVideoCapturerJni::Init(jstring device_name) {
 }
 
 AndroidVideoCapturerJni::~AndroidVideoCapturerJni() {
+  valid_global_refs_ = false;
+  if (thread_ != nullptr) {
+    LOG(LS_INFO) << "AndroidVideoCapturerJni dtor - flush invoker";
+    invoker_.Flush(thread_);
+  }
+  LOG(LS_INFO) << "AndroidVideoCapturerJni dtor done";
 }
 
 void AndroidVideoCapturerJni::Start(int width, int height, int framerate,
                                     webrtc::AndroidVideoCapturer* capturer) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(capturer_ == nullptr);
+  LOG(LS_INFO) << "AndroidVideoCapturerJni start";
+  CHECK(thread_checker_.CalledOnValidThread());
+  CHECK(capturer_ == nullptr);
   thread_ = rtc::Thread::Current();
   capturer_ = capturer;
 
@@ -115,13 +125,15 @@ void AndroidVideoCapturerJni::Start(int width, int height, int framerate,
 }
 
 void AndroidVideoCapturerJni::Stop() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  LOG(LS_INFO) << "AndroidVideoCapturerJni stop";
+  CHECK(thread_checker_.CalledOnValidThread());
   capturer_ = nullptr;
   jmethodID m = GetMethodID(jni(), *j_video_capturer_class_,
                             "stopCapture", "()V");
   jni()->CallVoidMethod(*j_capturer_global_, m);
   CHECK_EXCEPTION(jni()) << "error during VideoCapturerAndroid.stopCapture";
   DeleteGlobalRef(jni(), j_frame_observer_);
+  LOG(LS_INFO) << "AndroidVideoCapturerJni stop done";
 }
 
 void AndroidVideoCapturerJni::ReturnBuffer(int64 time_stamp) {
@@ -131,6 +143,10 @@ void AndroidVideoCapturerJni::ReturnBuffer(int64 time_stamp) {
 }
 
 void AndroidVideoCapturerJni::ReturnBuffer_w(int64 time_stamp) {
+  if (!valid_global_refs_) {
+    LOG(LS_ERROR) << "ReturnBuffer_w is called for invalid global refs.";
+    return;
+  }
   jmethodID m = GetMethodID(jni(), *j_video_capturer_class_,
                             "returnBuffer", "(J)V");
   jni()->CallVoidMethod(*j_capturer_global_, m, time_stamp);
@@ -148,6 +164,7 @@ std::string AndroidVideoCapturerJni::GetSupportedFormats() {
 }
 
 void AndroidVideoCapturerJni::OnCapturerStarted(bool success) {
+  LOG(LS_INFO) <<  "AndroidVideoCapturerJni capture started: " << success;
   invoker_.AsyncInvoke<void>(
       thread_,
       rtc::Bind(&AndroidVideoCapturerJni::OnCapturerStarted_w, this, success));
@@ -164,18 +181,27 @@ void AndroidVideoCapturerJni::OnIncomingFrame(void* video_frame,
 }
 
 void AndroidVideoCapturerJni::OnCapturerStarted_w(bool success) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  if (capturer_)
+  CHECK(thread_checker_.CalledOnValidThread());
+  if (capturer_) {
     capturer_->OnCapturerStarted(success);
+  } else {
+    LOG(LS_WARNING) << "OnCapturerStarted_w is called for closed capturer.";
+  }
 }
 
 void AndroidVideoCapturerJni::OnIncomingFrame_w(void* video_frame,
                                                 int length,
                                                 int rotation,
                                                 int64 time_stamp) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  if (capturer_)
+  CHECK(thread_checker_.CalledOnValidThread());
+  if (capturer_) {
     capturer_->OnIncomingFrame(video_frame, length, rotation, time_stamp);
+  } else {
+    LOG(LS_INFO) <<
+        "Frame arrived after camera has been stopped: " << time_stamp <<
+        ". Valid global refs: " << valid_global_refs_;
+    ReturnBuffer_w(time_stamp);
+  }
 }
 
 JNIEnv* AndroidVideoCapturerJni::jni() { return AttachCurrentThreadIfNeeded(); }
@@ -192,13 +218,15 @@ JOW(void, VideoCapturerAndroid_00024NativeObserver_nativeOnFrameCaptured)
     // If this is a copy of the original frame, it means that the memory
     // is not direct memory and thus VideoCapturerAndroid does not guarantee
     // that the memory is valid when we have released |j_frame|.
-    DCHECK(false) << "j_frame is a copy.";
+    LOG(LS_ERROR) << "NativeObserver_nativeOnFrameCaptured: frame is a copy";
+    CHECK(false) << "j_frame is a copy.";
   }
   jni->ReleaseByteArrayElements(j_frame, bytes, JNI_ABORT);
 }
 
 JOW(void, VideoCapturerAndroid_00024NativeObserver_nativeCapturerStarted)
     (JNIEnv* jni, jclass, jlong j_capturer, jboolean j_success) {
+  LOG(LS_INFO) << "NativeObserver_nativeCapturerStarted";
   reinterpret_cast<AndroidVideoCapturerJni*>(j_capturer)->OnCapturerStarted(
       j_success);
 }

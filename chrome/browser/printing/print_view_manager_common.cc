@@ -5,7 +5,7 @@
 #include "chrome/browser/printing/print_view_manager_common.h"
 
 #if defined(ENABLE_EXTENSIONS)
-#include "extensions/browser/guest_view/guest_view_manager.h"
+#include "components/guest_view/browser/guest_view_manager.h"
 #include "extensions/browser/guest_view/mime_handler_view/mime_handler_view_guest.h"
 #endif  // defined(ENABLE_EXTENSIONS)
 
@@ -36,9 +36,14 @@ bool StoreFullPagePlugin(content::WebContents** result,
 // guest's WebContents instead.
 content::WebContents* GetWebContentsToUse(content::WebContents* contents) {
 #if defined(ENABLE_EXTENSIONS)
-  extensions::GuestViewManager::FromBrowserContext(
-      contents->GetBrowserContext())
-      ->ForEachGuest(contents, base::Bind(&StoreFullPagePlugin, &contents));
+  guest_view::GuestViewManager* guest_view_manager =
+      guest_view::GuestViewManager::FromBrowserContext(
+          contents->GetBrowserContext());
+  if (guest_view_manager) {
+    guest_view_manager->ForEachGuest(
+        contents,
+        base::Bind(&StoreFullPagePlugin, &contents));
+  }
 #endif  // defined(ENABLE_EXTENSIONS)
   return contents;
 }

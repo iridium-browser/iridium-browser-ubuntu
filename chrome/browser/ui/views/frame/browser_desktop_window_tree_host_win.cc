@@ -7,6 +7,7 @@
 #include <dwmapi.h>
 
 #include "base/process/process_handle.h"
+#include "base/win/windows_version.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
@@ -41,27 +42,27 @@ class DesktopThemeProvider : public ui::ThemeProvider {
       : delegate_(delegate) {
   }
 
-  virtual bool UsingSystemTheme() const override {
+  bool UsingSystemTheme() const override {
     return delegate_->UsingSystemTheme();
   }
-  virtual gfx::ImageSkia* GetImageSkiaNamed(int id) const override {
+  gfx::ImageSkia* GetImageSkiaNamed(int id) const override {
     return delegate_->GetImageSkiaNamed(
         chrome::MapThemeImage(chrome::HOST_DESKTOP_TYPE_NATIVE, id));
   }
-  virtual SkColor GetColor(int id) const override {
+  SkColor GetColor(int id) const override {
     return delegate_->GetColor(id);
   }
-  virtual int GetDisplayProperty(int id) const override {
+  int GetDisplayProperty(int id) const override {
     return delegate_->GetDisplayProperty(id);
   }
-  virtual bool ShouldUseNativeFrame() const override {
+  bool ShouldUseNativeFrame() const override {
     return delegate_->ShouldUseNativeFrame();
   }
-  virtual bool HasCustomImage(int id) const override {
+  bool HasCustomImage(int id) const override {
     return delegate_->HasCustomImage(
         chrome::MapThemeImage(chrome::HOST_DESKTOP_TYPE_NATIVE, id));
   }
-  virtual base::RefCountedMemory* GetRawData(
+  base::RefCountedMemory* GetRawData(
       int id,
       ui::ScaleFactor scale_factor) const override {
     return delegate_->GetRawData(id, scale_factor);
@@ -330,10 +331,19 @@ MARGINS BrowserDesktopWindowTreeHostWin::GetDWMFrameMargins() const {
     // because the GDI-drawn text in the web content composited over it will
     // become semi-transparent over any glass area.
     if (!IsMaximized() && !GetWidget()->IsFullscreen()) {
-      margins.cxLeftWidth = kClientEdgeThickness + 1;
-      margins.cxRightWidth = kClientEdgeThickness + 1;
-      margins.cyBottomHeight = kClientEdgeThickness + 1;
       margins.cyTopHeight = kClientEdgeThickness + 1;
+      // On Windows 10, we don't draw our own window border, so don't extend the
+      // nonclient area in for it. The top is extended so that the MARGINS isn't
+      // treated as an empty (ignored) extension.
+      if (base::win::GetVersion() >= base::win::VERSION_WIN10) {
+        margins.cxLeftWidth = 0;
+        margins.cxRightWidth = 0;
+        margins.cyBottomHeight = 0;
+      } else {
+        margins.cxLeftWidth = kClientEdgeThickness + 1;
+        margins.cxRightWidth = kClientEdgeThickness + 1;
+        margins.cyBottomHeight = kClientEdgeThickness + 1;
+      }
     }
     // In maximized mode, we only have a titlebar strip of glass, no side/bottom
     // borders.

@@ -14,9 +14,11 @@ var remoting = remoting || {};
 
 /**
  * @param {HTMLElement} toolbar The HTML element representing the tool-bar.
+ * @param {function()} disconnectCallback Callback for disconnecting the
+ *    session.
  * @constructor
  */
-remoting.Toolbar = function(toolbar) {
+remoting.Toolbar = function(toolbar, disconnectCallback) {
   /** @private {HTMLElement} */
   this.toolbar_ = toolbar;
   /** @private {HTMLElement} */
@@ -42,8 +44,7 @@ remoting.Toolbar = function(toolbar) {
   window.addEventListener('mousemove', remoting.Toolbar.onMouseMove, false);
   window.addEventListener('resize', this.center.bind(this), false);
 
-  registerEventListener('toolbar-disconnect', 'click',
-                        remoting.app.disconnect.bind(remoting.app));
+  registerEventListener('toolbar-disconnect', 'click', disconnectCallback);
   registerEventListener('toolbar-stub',
                         'click', function() { remoting.toolbar.toggle(); });
 
@@ -71,6 +72,7 @@ remoting.Toolbar.prototype.createOptionsMenu = function() {
       document.getElementById('screen-shrink-to-fit'),
       document.getElementById('new-connection'),
       document.getElementById('toggle-full-screen'),
+      null,
       null);
 };
 

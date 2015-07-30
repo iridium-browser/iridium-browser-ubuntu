@@ -8,7 +8,6 @@ from __future__ import print_function
 
 import ConfigParser
 import glob
-import logging
 import os
 import pprint
 
@@ -16,6 +15,7 @@ from chromite.cbuildbot import cbuildbot_config
 from chromite.cbuildbot import failures_lib
 from chromite.cbuildbot import constants
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import gerrit
 from chromite.lib import git
 from chromite.lib import osutils
@@ -65,7 +65,6 @@ def _GetCommonAffectedSubdir(change, git_repo):
 
   Returns:
     An absolute path in |git_repo|.
-
   """
   affected_paths = [os.path.join(git_repo, path)
                     for path in change.GetDiffStatus(git_repo)]
@@ -234,7 +233,7 @@ def GetStagesToIgnoreForChange(build_root, change):
     result = GetOptionForChange(build_root, change, 'GENERAL',
                                 'ignored-stages')
   except ConfigParser.Error:
-    cros_build_lib.Error('%s has malformed config file', change, exc_info=True)
+    logging.error('%s has malformed config file', change, exc_info=True)
   return result.split() if result else []
 
 
@@ -455,24 +454,30 @@ class CalculateSuspects(object):
     return [x for x, y in zip(changes, reloaded_changes) if y.WasVetoed()]
 
   @classmethod
-  def _FindPackageBuildFailureSuspects(cls, changes, messages):
+  def _FindPackageBuildFailureSuspects(cls, changes, messages, sanity):
     """Figure out what CLs are at fault for a set of build failures.
 
     Args:
         changes: A list of cros_patch.GerritPatch instances to consider.
-        messages: A list of build failure messages, of type
-                  BuildFailureMessage.
+        messages: A list of failure messages. We will only look at the ones of
+                  type BuildFailureMessage.
+        sanity: The sanity checker builder passed and the tree was open when
+                the build started.
     """
     suspects = set()
     for message in messages:
-      suspects.update(message.FindPackageBuildFailureSuspects(changes))
+      if message:
+        suspects.update(
+            message.FindPackageBuildFailureSuspects(changes, sanity))
+      elif sanity:
+        suspects.update(changes)
     return suspects
 
   @classmethod
   def FilterChangesForInfraFail(cls, changes):
     """Returns a list of changes responsible for infra failures."""
     # Chromite changes could cause infra failures.
-    return [x for x in changes if x.project == constants.CHROMITE_PROJECT]
+    return [x for x in changes if x.project in constants.INFRA_PROJECTS]
 
   @classmethod
   def _MatchesFailureType(cls, messages, fail_type, strict=True):
@@ -528,12 +533,13 @@ class CalculateSuspects(object):
                 messages, failures_lib.InfrastructureFailure, strict=False))
 
   @classmethod
-  def FindSuspects(cls, changes, messages, infra_fail=False, lab_fail=False):
+  def FindSuspects(cls, changes, messages, infra_fail=False, lab_fail=False,
+                   sanity=True):
     """Find out what changes probably caused our failure.
 
     In cases where there were no internal failures, we can assume that the
     external failures are at fault. Otherwise, this function just defers to
-    _FindPackageBuildFailureSuspects and FindPreviouslyFailedChanges as needed.
+    _FindPackageBuildFailureSuspects and GetBlamedChanges as needed.
     If the failures don't match either case, just fail everything.
 
     Args:
@@ -543,6 +549,8 @@ class CalculateSuspects(object):
       infra_fail: The build failed purely due to infrastructure failures.
       lab_fail: The build failed purely due to test lab infrastructure
         failures.
+      sanity: The sanity checker builder passed and the tree was open when
+              the build started.
 
     Returns:
        A set of changes as suspects.
@@ -560,7 +568,7 @@ class CalculateSuspects(object):
       logging.warning('Detected that the build failed purely due to HW '
                       'Test Lab failure(s). Will not reject any changes')
       return set()
-    elif not lab_fail and infra_fail:
+    elif infra_fail:
       # The non-lab infrastructure errors might have been caused
       # by chromite changes.
       logging.warning(
@@ -568,14 +576,7 @@ class CalculateSuspects(object):
           'issue(s). Will only reject chromite changes')
       return set(cls.FilterChangesForInfraFail(changes))
 
-    if all(message and message.IsPackageBuildFailure()
-           for message in messages):
-      # If we are here, there are no None messages.
-      suspects = cls._FindPackageBuildFailureSuspects(changes, messages)
-    else:
-      suspects = set(changes)
-
-    return suspects
+    return cls._FindPackageBuildFailureSuspects(changes, messages, sanity)
 
   @classmethod
   def GetResponsibleOverlays(cls, build_root, messages):
@@ -598,7 +599,7 @@ class CalculateSuspects(object):
       if message is None:
         return None
       bot_id = message.builder
-      config = cbuildbot_config.config.get(bot_id)
+      config = cbuildbot_config.GetConfig().get(bot_id)
       if not config:
         return None
       responsible_overlays.update(
@@ -741,12 +742,18 @@ class CalculateSuspects(object):
 
       failed_configs = [x for x in relevant_configs if x in failing]
       if not failed_configs:
+        logging.info('All the %s relevant config(s) for change %s passed, so '
+                     'it will be submitted.', len(relevant_configs),
+                     cros_patch.GetChangesAsString([change]))
         fully_verified.add(change)
       else:
         # Examine the failures and see if we can safely ignore them
         # for the change.
         failed_messages = [x for x in messages if x.builder in failed_configs]
         if cls._CanIgnoreFailures(failed_messages, change, build_root):
+          logging.info('All failures of relevant configs for change %s are '
+                       'ignorable by this change, so it will be submitted.',
+                       cros_patch.GetChangesAsString([change]))
           fully_verified.add(change)
 
     return fully_verified

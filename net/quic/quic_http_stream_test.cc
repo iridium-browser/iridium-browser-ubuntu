@@ -50,8 +50,8 @@ namespace test {
 namespace {
 
 const char kUploadData[] = "Really nifty data!";
-const char kServerHostname[] = "www.google.com";
-const uint16 kServerPort = 80;
+const char kDefaultServerHostName[] = "www.google.com";
+const uint16 kDefaultServerPort = 80;
 
 class TestQuicConnection : public QuicConnection {
  public:
@@ -135,7 +135,7 @@ class QuicHttpStreamTest : public ::testing::TestWithParam<QuicVersion> {
         read_buffer_(new IOBufferWithSize(4096)),
         connection_id_(2),
         stream_id_(kClientDataStreamId1),
-        maker_(GetParam(), connection_id_, &clock_),
+        maker_(GetParam(), connection_id_, &clock_, kDefaultServerHostName),
         random_generator_(0) {
     IPAddressNumber ip;
     CHECK(ParseIPLiteralToNumber("192.0.2.33", &ip));
@@ -208,13 +208,13 @@ class QuicHttpStreamTest : public ::testing::TestWithParam<QuicVersion> {
     session_.reset(new QuicClientSession(
         connection_, scoped_ptr<DatagramClientSocket>(socket), nullptr,
         &transport_security_state_, make_scoped_ptr((QuicServerInfo*)nullptr),
-        DefaultQuicConfig(), "CONNECTION_UNKNOWN", base::TimeTicks::Now(),
+        /*cert_verify_flags=*/0, DefaultQuicConfig(), "CONNECTION_UNKNOWN",
+        base::TimeTicks::Now(),
         base::MessageLoop::current()->message_loop_proxy().get(), nullptr));
-    session_->InitializeSession(QuicServerId(kServerHostname, kServerPort,
-                                             /*is_secure=*/false,
-                                             PRIVACY_MODE_DISABLED),
-                                &crypto_config_,
-                                &crypto_client_stream_factory_);
+    session_->InitializeSession(
+        QuicServerId(kDefaultServerHostName, kDefaultServerPort,
+                     /*is_secure=*/false, PRIVACY_MODE_DISABLED),
+        &crypto_config_, &crypto_client_stream_factory_);
     session_->GetCryptoStream()->CryptoConnect();
     EXPECT_TRUE(session_->IsCryptoHandshakeConfirmed());
     stream_.reset(use_closing_stream_ ?
@@ -400,7 +400,8 @@ TEST_P(QuicHttpStreamTest, GetRequestLargeResponse) {
   headers["content-type"] = "text/plain";
   headers["big6"] = std::string(10000, 'x');  // Lots of x's.
 
-  std::string response = SpdyUtils::SerializeUncompressedHeaders(headers);
+  std::string response =
+      SpdyUtils::SerializeUncompressedHeaders(headers, GetParam());
   EXPECT_LT(4096u, response.length());
   stream_->OnDataReceived(response.data(), response.length());
   stream_->OnClose(QUIC_NO_ERROR);

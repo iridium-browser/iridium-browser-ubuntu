@@ -15,7 +15,7 @@
 
 // A pre-multiplied color storing each component in the same order as SkPMColor,
 // but as a float in the range [0, 255].
-class SK_STRUCT_ALIGN(16) SkPMFloat {
+class SkPMFloat : public Sk4f {
 public:
     static SkPMFloat FromPMColor(SkPMColor c) { return SkPMFloat(c); }
     static SkPMFloat FromARGB(float a, float r, float g, float b) { return SkPMFloat(a,r,g,b); }
@@ -28,35 +28,32 @@ public:
     explicit SkPMFloat(SkPMColor);
     SkPMFloat(float a, float r, float g, float b)
     #ifdef SK_PMCOLOR_IS_RGBA
-        : fColors(r,g,b,a) {}
+        : INHERITED(r,g,b,a) {}
     #else
-        : fColors(b,g,r,a) {}
+        : INHERITED(b,g,r,a) {}
     #endif
 
+    SkPMFloat(const Sk4f& fs) : INHERITED(fs) {}
 
-    // Freely autoconvert between SkPMFloat and Sk4f.
-    /*implicit*/ SkPMFloat(const Sk4f& fs) { fColors = fs; }
-    /*implicit*/ operator Sk4f() const { return fColors; }
-
-    float a() const { return fColors[SK_A32_SHIFT / 8]; }
-    float r() const { return fColors[SK_R32_SHIFT / 8]; }
-    float g() const { return fColors[SK_G32_SHIFT / 8]; }
-    float b() const { return fColors[SK_B32_SHIFT / 8]; }
+    float a() const { return this->kth<SK_A32_SHIFT / 8>(); }
+    float r() const { return this->kth<SK_R32_SHIFT / 8>(); }
+    float g() const { return this->kth<SK_G32_SHIFT / 8>(); }
+    float b() const { return this->kth<SK_B32_SHIFT / 8>(); }
 
     // N.B. All methods returning an SkPMColor call SkPMColorAssert on that result before returning.
 
-    // get() and clamped() round component values to the nearest integer.
-    SkPMColor     get() const;  // Assumes all values in [0, 255].  Some implementations may clamp.
-    SkPMColor clamped() const;  // Will clamp all values to [0, 255].
+    // round() and roundClamp() round component values to the nearest integer.
+    SkPMColor round() const;  // Assumes all values in [0, 255].  Some implementations may clamp.
+    SkPMColor roundClamp() const;  // Will clamp all values to [0, 255].
 
-    // Like get(), but truncates instead of rounding.
+    // Like round(), but truncates instead of rounding.
     // The domain of this function is (-1.0f, 256.0f).  Values in (-1.0f, 0.0f] trunc to a zero.
     SkPMColor trunc() const;
 
-    // 4-at-a-time versions of get() and clamped().  Like From4PMColors(), no alignment assumed.
-    static void To4PMColors(
+    // 4-at-a-time versions of round() and roundClamp(). Like From4PMColors(), no alignment assumed.
+    static void RoundTo4PMColors(
             const SkPMFloat&, const SkPMFloat&, const SkPMFloat&, const SkPMFloat&, SkPMColor[4]);
-    static void ClampTo4PMColors(
+    static void RoundClampTo4PMColors(
             const SkPMFloat&, const SkPMFloat&, const SkPMFloat&, const SkPMFloat&, SkPMColor[4]);
 
     bool isValid() const {
@@ -67,7 +64,7 @@ public:
     }
 
 private:
-    Sk4f fColors;
+    typedef Sk4f INHERITED;
 };
 
 #ifdef SKNX_NO_SIMD

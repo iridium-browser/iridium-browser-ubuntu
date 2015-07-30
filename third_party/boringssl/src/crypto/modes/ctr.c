@@ -88,7 +88,8 @@ void CRYPTO_ctr128_encrypt(const uint8_t *in, uint8_t *out, size_t len,
                            block128_f block) {
   unsigned int n;
 
-  assert(in && out && key && ecount_buf && num);
+  assert(key && ecount_buf && num);
+  assert(len == 0 || (in && out));
   assert(*num < 16);
   assert((16 % sizeof(size_t)) == 0);
 
@@ -163,7 +164,8 @@ void CRYPTO_ctr128_encrypt_ctr32(const uint8_t *in, uint8_t *out,
                                  unsigned int *num, ctr128_f func) {
   unsigned int n, ctr32;
 
-  assert(in && out && key && ecount_buf && num);
+  assert(key && ecount_buf && num);
+  assert(len == 0 || (in && out));
   assert(*num < 16);
 
   n = *num;

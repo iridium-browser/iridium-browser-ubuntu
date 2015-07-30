@@ -31,6 +31,7 @@
 #include "core/dom/DOMException.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
+#include "core/html/HTMLMediaElement.h"
 #include "modules/encryptedmedia/EncryptedMediaUtils.h"
 #include "modules/encryptedmedia/MediaKeySession.h"
 #include "modules/encryptedmedia/SimpleContentDecryptionModuleResultPromise.h"
@@ -81,18 +82,21 @@ private:
     const RefPtr<DOMArrayBuffer> m_data;
 };
 
-MediaKeys::MediaKeys(ExecutionContext* context, const String& keySystem, const blink::WebVector<WebEncryptedMediaSessionType>& supportedSessionTypes, PassOwnPtr<WebContentDecryptionModule> cdm)
-    : ContextLifecycleObserver(context)
-    , m_keySystem(keySystem)
+MediaKeys* MediaKeys::create(ExecutionContext* context, const WebVector<WebEncryptedMediaSessionType>& supportedSessionTypes, PassOwnPtr<WebContentDecryptionModule> cdm)
+{
+    MediaKeys* mediaKeys = new MediaKeys(context, supportedSessionTypes, cdm);
+    mediaKeys->suspendIfNeeded();
+    return mediaKeys;
+}
+
+MediaKeys::MediaKeys(ExecutionContext* context, const WebVector<WebEncryptedMediaSessionType>& supportedSessionTypes, PassOwnPtr<WebContentDecryptionModule> cdm)
+    : ActiveDOMObject(context)
     , m_supportedSessionTypes(supportedSessionTypes)
     , m_cdm(cdm)
+    , m_mediaElement(nullptr)
     , m_timer(this, &MediaKeys::timerFired)
 {
     WTF_LOG(Media, "MediaKeys(%p)::MediaKeys", this);
-
-    // Step 4.4 of MediaKeys::create():
-    // 4.4.1 Set the keySystem attribute to keySystem.
-    ASSERT(!m_keySystem.isEmpty());
 }
 
 MediaKeys::~MediaKeys()
@@ -161,6 +165,22 @@ ScriptPromise MediaKeys::setServerCertificate(ScriptState* scriptState, const DO
     return promise;
 }
 
+bool MediaKeys::setMediaElement(HTMLMediaElement* mediaElement)
+{
+    // If some other HtmlMediaElement already has a reference to us, fail.
+    if (m_mediaElement)
+        return false;
+
+    m_mediaElement = mediaElement;
+    return true;
+}
+
+void MediaKeys::clearMediaElement()
+{
+    ASSERT(m_mediaElement);
+    m_mediaElement.clear();
+}
+
 bool MediaKeys::sessionTypeSupported(WebEncryptedMediaSessionType sessionType)
 {
     for (size_t i = 0; i < m_supportedSessionTypes.size(); i++) {
@@ -204,15 +224,36 @@ WebContentDecryptionModule* MediaKeys::contentDecryptionModule()
 DEFINE_TRACE(MediaKeys)
 {
     visitor->trace(m_pendingActions);
-    ContextLifecycleObserver::trace(visitor);
+    visitor->trace(m_mediaElement);
+    ActiveDOMObject::trace(visitor);
 }
 
 void MediaKeys::contextDestroyed()
 {
-    ContextLifecycleObserver::contextDestroyed();
+    ActiveDOMObject::contextDestroyed();
 
-    // We don't need the CDM anymore.
+    // We don't need the CDM anymore. Only destroyed after all related
+    // ActiveDOMObjects have been stopped.
     m_cdm.clear();
+}
+
+bool MediaKeys::hasPendingActivity() const
+{
+    // Remain around if there are pending events.
+    WTF_LOG(Media, "MediaKeys(%p)::hasPendingActivity %s%s", this,
+        ActiveDOMObject::hasPendingActivity() ? " ActiveDOMObject::hasPendingActivity()" : "",
+        !m_pendingActions.isEmpty() ? " !m_pendingActions.isEmpty()" : "");
+
+    return ActiveDOMObject::hasPendingActivity() || !m_pendingActions.isEmpty();
+}
+
+void MediaKeys::stop()
+{
+    ActiveDOMObject::stop();
+
+    if (m_timer.isActive())
+        m_timer.stop();
+    m_pendingActions.clear();
 }
 
 } // namespace blink

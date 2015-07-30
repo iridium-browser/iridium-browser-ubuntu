@@ -134,7 +134,7 @@ void FrameLoaderClientImpl::dispatchDidClearWindowObjectInMainWorld()
             if (RuntimeEnabledFeatures::serviceWorkerEnabled())
                 NavigatorServiceWorker::from(*document);
             DOMWindowStorageController::from(*document);
-            if (RuntimeEnabledFeatures::vRDeviceEnabled())
+            if (RuntimeEnabledFeatures::webVREnabled())
                 NavigatorVRDevice::from(*document);
         }
     }
@@ -150,13 +150,13 @@ void FrameLoaderClientImpl::documentElementAvailable()
         m_webFrame->client()->didCreateDocumentElement(m_webFrame);
 }
 
-void FrameLoaderClientImpl::didCreateScriptContext(v8::Handle<v8::Context> context, int extensionGroup, int worldId)
+void FrameLoaderClientImpl::didCreateScriptContext(v8::Local<v8::Context> context, int extensionGroup, int worldId)
 {
     if (m_webFrame->client())
         m_webFrame->client()->didCreateScriptContext(m_webFrame, context, extensionGroup, worldId);
 }
 
-void FrameLoaderClientImpl::willReleaseScriptContext(v8::Handle<v8::Context> context, int worldId)
+void FrameLoaderClientImpl::willReleaseScriptContext(v8::Local<v8::Context> context, int worldId)
 {
     if (m_webFrame->client())
         m_webFrame->client()->willReleaseScriptContext(m_webFrame, context, worldId);
@@ -432,10 +432,9 @@ void FrameLoaderClientImpl::dispatchDidCommitLoad(HistoryItem* item, HistoryComm
     m_webFrame->viewImpl()->didCommitLoad(commitType == StandardCommit, false);
     if (m_webFrame->client())
         m_webFrame->client()->didCommitProvisionalLoad(m_webFrame, WebHistoryItem(item), static_cast<WebHistoryCommitType>(commitType));
-    // FIXME(dgozman): update this for out-of-process.
-    WebDevToolsAgent* devToolsAgent = m_webFrame->top()->isWebLocalFrame() ? toWebLocalFrameImpl(m_webFrame->top())->viewImpl()->devToolsAgent() : nullptr;
+    WebDevToolsAgentImpl* devToolsAgent = WebLocalFrameImpl::fromFrame(m_webFrame->frame()->localFrameRoot())->devToolsAgentImpl();
     if (devToolsAgent)
-        static_cast<WebDevToolsAgentImpl*>(devToolsAgent)->didCommitLoadForLocalFrame(m_webFrame->frame());
+        devToolsAgent->didCommitLoadForLocalFrame(m_webFrame->frame());
 }
 
 void FrameLoaderClientImpl::dispatchDidFailProvisionalLoad(

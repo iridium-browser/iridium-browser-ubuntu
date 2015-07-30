@@ -27,6 +27,7 @@
 #define V8ScriptRunner_h
 
 #include "bindings/core/v8/V8CacheOptions.h"
+#include "core/CoreExport.h"
 #include "core/fetch/AccessControlStatus.h"
 #include "wtf/PassOwnPtr.h"
 #include "wtf/text/TextPosition.h"
@@ -42,7 +43,7 @@ class ScriptSourceCode;
 class ExecutionContext;
 class ScriptStreamer;
 
-class V8ScriptRunner {
+class CORE_EXPORT V8ScriptRunner final {
 public:
     // For the following methods, the caller sites have to hold
     // a HandleScope and a ContextScope.
@@ -57,11 +58,10 @@ public:
     static v8::MaybeLocal<v8::Value> compileAndRunInternalScript(v8::Local<v8::String>, v8::Isolate*, const String& = String(), const TextPosition& = TextPosition());
     static v8::MaybeLocal<v8::Value> runCompiledInternalScript(v8::Isolate*, v8::Local<v8::Script>);
     static v8::MaybeLocal<v8::Value> callInternalFunction(v8::Local<v8::Function>, v8::Local<v8::Value> receiver, int argc, v8::Local<v8::Value> info[], v8::Isolate*);
-    // TODO(bashi): Use v8::MaybeLocal<T> instead of v8::Local<T>.
-    static v8::Local<v8::Value> callFunction(v8::Local<v8::Function>, ExecutionContext*, v8::Local<v8::Value> receiver, int argc, v8::Local<v8::Value> info[], v8::Isolate*);
-    static v8::Local<v8::Object> instantiateObject(v8::Isolate*, v8::Local<v8::ObjectTemplate>);
-    static v8::Local<v8::Object> instantiateObject(v8::Isolate*, v8::Local<v8::Function>, int argc = 0, v8::Local<v8::Value> argv[] = 0);
-    static v8::Local<v8::Object> instantiateObjectInDocument(v8::Isolate*, v8::Local<v8::Function>, ExecutionContext*, int argc = 0, v8::Local<v8::Value> argv[] = 0);
+    static v8::MaybeLocal<v8::Value> callFunction(v8::Local<v8::Function>, ExecutionContext*, v8::Local<v8::Value> receiver, int argc, v8::Local<v8::Value> info[], v8::Isolate*);
+    static v8::MaybeLocal<v8::Object> instantiateObject(v8::Isolate*, v8::Local<v8::ObjectTemplate>);
+    static v8::MaybeLocal<v8::Object> instantiateObject(v8::Isolate*, v8::Local<v8::Function>, int argc = 0, v8::Local<v8::Value> argv[] = 0);
+    static v8::MaybeLocal<v8::Object> instantiateObjectInDocument(v8::Isolate*, v8::Local<v8::Function>, ExecutionContext*, int argc = 0, v8::Local<v8::Value> argv[] = 0);
 
     static unsigned tagForParserCache(CachedMetadataHandler*);
     static unsigned tagForCodeCache(CachedMetadataHandler*);

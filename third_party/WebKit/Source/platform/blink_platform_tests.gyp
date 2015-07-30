@@ -82,6 +82,7 @@
         '../wtf/wtf_tests.gyp:wtf_unittest_helpers',
         '<(DEPTH)/base/base.gyp:test_support_base',
         '<(DEPTH)/skia/skia.gyp:skia',
+        '<(DEPTH)/third_party/harfbuzz-ng/harfbuzz.gyp:harfbuzz-ng',
         '<(DEPTH)/url/url.gyp:url_lib',
         'blink_platform.gyp:blink_common',
         'blink_platform.gyp:blink_platform',
@@ -114,7 +115,7 @@
     },
   ],
   'conditions': [
-    ['OS=="android" and android_webview_build==0 and gtest_target_type == "shared_library"', {
+    ['OS=="android" and gtest_target_type == "shared_library"', {
       'targets': [{
         'target_name': 'blink_heap_unittests_apk',
         'type': 'none',

@@ -26,16 +26,18 @@
 #if ENABLE(WEB_AUDIO)
 #include "modules/webaudio/BiquadFilterNode.h"
 
+#include "modules/webaudio/AudioBasicProcessorHandler.h"
+
 namespace blink {
 
-BiquadFilterNode::BiquadFilterNode(AudioContext* context, float sampleRate)
-    : AudioNode(*context)
+BiquadFilterNode::BiquadFilterNode(AudioContext& context, float sampleRate)
+    : AudioNode(context)
     , m_frequency(AudioParam::create(context, 350.0))
     , m_q(AudioParam::create(context, 1))
     , m_gain(AudioParam::create(context, 0.0))
     , m_detune(AudioParam::create(context, 0.0))
 {
-    setHandler(new AudioBasicProcessorHandler(AudioHandler::NodeTypeBiquadFilter, *this, sampleRate, adoptPtr(new BiquadProcessor(sampleRate, 1, m_frequency->handler(), m_q->handler(), m_gain->handler(), m_detune->handler(), false))));
+    setHandler(AudioBasicProcessorHandler::create(AudioHandler::NodeTypeBiquadFilter, *this, sampleRate, adoptPtr(new BiquadProcessor(sampleRate, 1, m_frequency->handler(), m_q->handler(), m_gain->handler(), m_detune->handler()))));
 }
 
 DEFINE_TRACE(BiquadFilterNode)

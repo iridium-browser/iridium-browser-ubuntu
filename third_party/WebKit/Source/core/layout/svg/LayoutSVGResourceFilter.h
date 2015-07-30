@@ -39,13 +39,14 @@ public:
     /*
      * The state transitions should follow the following:
      * Initial -> RecordingContent -> ReadyToPaint -> PaintingFilter -> ReadyToPaint
-     *                                                   |     ^
-     *                                                   v     |
-     *                                              PaintingFilterCycle
+     *               |     ^                              |     ^
+     *               v     |                              v     |
+     *     RecordingContentCycleDetected            PaintingFilterCycle
      */
     enum FilterDataState {
         Initial,
         RecordingContent,
+        RecordingContentCycleDetected,
         ReadyToPaint,
         PaintingFilter,
         PaintingFilterCycleDetected
@@ -64,7 +65,6 @@ public:
     RefPtrWillBeMember<SVGFilterBuilder> builder;
     OwnPtr<DisplayItemList> m_displayItemList;
     OwnPtr<GraphicsContext> m_context;
-    FloatRect boundaries;
     FilterDataState m_state;
 
 private:

@@ -106,6 +106,7 @@
           'type': '<(gtest_target_type)',
           'dependencies': [
             'voice_engine',
+            '<(DEPTH)/testing/gmock.gyp:gmock',
             '<(DEPTH)/testing/gtest.gyp:gtest',
             # The rest are to satisfy the unittests' include chain.
             # This would be unnecessary if we used qualified includes.
@@ -128,6 +129,9 @@
             'voe_audio_processing_unittest.cc',
             'voe_base_unittest.cc',
             'voe_codec_unittest.cc',
+            'voe_network_unittest.cc',
+            'voice_engine_fixture.cc',
+            'voice_engine_fixture.h',
           ],
           'conditions': [
             ['OS=="android"', {

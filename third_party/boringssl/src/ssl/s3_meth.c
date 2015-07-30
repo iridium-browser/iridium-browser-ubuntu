@@ -54,7 +54,7 @@
  * copied and put under another distribution licence
  * [including the GNU Public Licence.] */
 
-#include "ssl_locl.h"
+#include "internal.h"
 
 
 static const SSL_PROTOCOL_METHOD TLS_protocol_method = {
@@ -78,8 +78,6 @@ static const SSL_PROTOCOL_METHOD TLS_protocol_method = {
     ssl3_pending,
     ssl3_num_ciphers,
     ssl3_get_cipher,
-    ssl3_callback_ctrl,
-    ssl3_ctx_callback_ctrl,
     SSL3_HM_HEADER_LENGTH,
     ssl3_set_handshake_header,
     ssl3_handshake_write,

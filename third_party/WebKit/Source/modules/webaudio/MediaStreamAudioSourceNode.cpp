@@ -33,7 +33,7 @@
 
 namespace blink {
 
-MediaStreamAudioSourceHandler::MediaStreamAudioSourceHandler(AudioNode& node, MediaStream* mediaStream, MediaStreamTrack* audioTrack, PassOwnPtr<AudioSourceProvider> audioSourceProvider)
+MediaStreamAudioSourceHandler::MediaStreamAudioSourceHandler(AudioNode& node, MediaStream& mediaStream, MediaStreamTrack* audioTrack, PassOwnPtr<AudioSourceProvider> audioSourceProvider)
     : AudioHandler(NodeTypeMediaStreamAudioSource, node, node.context()->sampleRate())
     , m_mediaStream(mediaStream)
     , m_audioTrack(audioTrack)
@@ -47,15 +47,14 @@ MediaStreamAudioSourceHandler::MediaStreamAudioSourceHandler(AudioNode& node, Me
     initialize();
 }
 
-MediaStreamAudioSourceHandler::~MediaStreamAudioSourceHandler()
+PassRefPtr<MediaStreamAudioSourceHandler> MediaStreamAudioSourceHandler::create(AudioNode& node, MediaStream& mediaStream, MediaStreamTrack* audioTrack, PassOwnPtr<AudioSourceProvider> audioSourceProvider)
 {
-    ASSERT(!isInitialized());
+    return adoptRef(new MediaStreamAudioSourceHandler(node, mediaStream, audioTrack, audioSourceProvider));
 }
 
-void MediaStreamAudioSourceHandler::dispose()
+MediaStreamAudioSourceHandler::~MediaStreamAudioSourceHandler()
 {
     uninitialize();
-    AudioHandler::dispose();
 }
 
 void MediaStreamAudioSourceHandler::setFormat(size_t numberOfChannels, float sourceSampleRate)
@@ -79,14 +78,14 @@ void MediaStreamAudioSourceHandler::setFormat(size_t numberOfChannels, float sou
             AudioContext::AutoLocker contextLocker(context());
 
             // Do any necesssary re-configuration to the output's number of channels.
-            output(0)->setNumberOfChannels(numberOfChannels);
+            output(0).setNumberOfChannels(numberOfChannels);
         }
     }
 }
 
 void MediaStreamAudioSourceHandler::process(size_t numberOfFrames)
 {
-    AudioBus* outputBus = output(0)->bus();
+    AudioBus* outputBus = output(0).bus();
 
     if (!audioSourceProvider()) {
         outputBus->zero();
@@ -110,25 +109,23 @@ void MediaStreamAudioSourceHandler::process(size_t numberOfFrames)
     }
 }
 
-DEFINE_TRACE(MediaStreamAudioSourceHandler)
-{
-    visitor->trace(m_mediaStream);
-    visitor->trace(m_audioTrack);
-    AudioHandler::trace(visitor);
-    AudioSourceProviderClient::trace(visitor);
-}
-
 // ----------------------------------------------------------------
 
-MediaStreamAudioSourceNode::MediaStreamAudioSourceNode(AudioContext& context, MediaStream* mediaStream, MediaStreamTrack* audioTrack, PassOwnPtr<AudioSourceProvider> audioSourceProvider)
+MediaStreamAudioSourceNode::MediaStreamAudioSourceNode(AudioContext& context, MediaStream& mediaStream, MediaStreamTrack* audioTrack, PassOwnPtr<AudioSourceProvider> audioSourceProvider)
     : AudioSourceNode(context)
 {
-    setHandler(new MediaStreamAudioSourceHandler(*this, mediaStream, audioTrack, audioSourceProvider));
+    setHandler(MediaStreamAudioSourceHandler::create(*this, mediaStream, audioTrack, audioSourceProvider));
 }
 
-MediaStreamAudioSourceNode* MediaStreamAudioSourceNode::create(AudioContext* context, MediaStream* mediaStream, MediaStreamTrack* audioTrack, PassOwnPtr<AudioSourceProvider> audioSourceProvider)
+MediaStreamAudioSourceNode* MediaStreamAudioSourceNode::create(AudioContext& context, MediaStream& mediaStream, MediaStreamTrack* audioTrack, PassOwnPtr<AudioSourceProvider> audioSourceProvider)
 {
-    return new MediaStreamAudioSourceNode(*context, mediaStream, audioTrack, audioSourceProvider);
+    return new MediaStreamAudioSourceNode(context, mediaStream, audioTrack, audioSourceProvider);
+}
+
+DEFINE_TRACE(MediaStreamAudioSourceNode)
+{
+    AudioSourceProviderClient::trace(visitor);
+    AudioSourceNode::trace(visitor);
 }
 
 MediaStreamAudioSourceHandler& MediaStreamAudioSourceNode::mediaStreamAudioSourceHandler() const
@@ -139,6 +136,11 @@ MediaStreamAudioSourceHandler& MediaStreamAudioSourceNode::mediaStreamAudioSourc
 MediaStream* MediaStreamAudioSourceNode::mediaStream() const
 {
     return mediaStreamAudioSourceHandler().mediaStream();
+}
+
+void MediaStreamAudioSourceNode::setFormat(size_t numberOfChannels, float sourceSampleRate)
+{
+    mediaStreamAudioSourceHandler().setFormat(numberOfChannels, sourceSampleRate);
 }
 
 } // namespace blink

@@ -36,6 +36,7 @@
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "core/dom/ContextLifecycleObserver.h"
 #include "core/events/EventTarget.h"
+#include "modules/ModulesExport.h"
 #include "modules/serviceworkers/RegistrationOptions.h"
 #include "modules/serviceworkers/ServiceWorker.h"
 #include "modules/serviceworkers/ServiceWorkerRegistration.h"
@@ -52,7 +53,7 @@ class WebServiceWorker;
 class WebServiceWorkerProvider;
 class WebServiceWorkerRegistration;
 
-class ServiceWorkerContainer final
+class MODULES_EXPORT ServiceWorkerContainer final
     : public RefCountedGarbageCollectedEventTargetWithInlineData<ServiceWorkerContainer>
     , public ContextLifecycleObserver
     , public WebServiceWorkerProviderClient {
@@ -77,7 +78,6 @@ public:
     // WebServiceWorkerProviderClient overrides.
     virtual void setController(WebServiceWorker*, bool shouldNotifyControllerChange) override;
     virtual void dispatchMessageEvent(const WebString& message, const WebMessagePortChannelArray&) override;
-    virtual bool getClientInfo(WebServiceWorkerClientInfo*);
 
     // EventTarget overrides.
     virtual ExecutionContext* executionContext() const override { return ContextLifecycleObserver::executionContext(); }

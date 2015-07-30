@@ -11,6 +11,8 @@
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_sender.h"
 
+struct FrameMsg_PostMessage_Params;
+
 namespace content {
 
 class CrossProcessFrameConnector;
@@ -115,7 +117,9 @@ class RenderFrameProxyHost
 
  private:
   // IPC Message handlers.
+  void OnDetach();
   void OnOpenURL(const FrameHostMsg_OpenURL_Params& params);
+  void OnRouteMessageEvent(const FrameMsg_PostMessage_Params& params);
 
   // This RenderFrameProxyHost's routing id.
   int routing_id_;

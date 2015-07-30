@@ -5,7 +5,6 @@
 package org.chromium.chrome.browser.toolbar;
 
 import org.chromium.base.CalledByNative;
-import org.chromium.chrome.browser.ui.toolbar.ToolbarModelSecurityLevel;
 import org.chromium.content_public.browser.WebContents;
 
 /**
@@ -25,19 +24,6 @@ public class ToolbarModel {
     }
 
     private long mNativeToolbarModelAndroid;
-
-    /**
-     * Fetch the security level for a given web contents.
-     *
-     * @param webContents The web contents to get the security level for.
-     * @return The ToolbarModelSecurityLevel for the specified web contents.
-     *
-     * @see ToolbarModelSecurityLevel
-     */
-    public static int getSecurityLevelForWebContents(WebContents webContents) {
-        if (webContents == null) return ToolbarModelSecurityLevel.NONE;
-        return nativeGetSecurityLevelForWebContents(webContents);
-    }
 
     /**
      * @param webContents The web contents to query for deprecated SHA-1 presence.
@@ -71,24 +57,23 @@ public class ToolbarModel {
         return nativeGetText(mNativeToolbarModelAndroid);
     }
 
-    /** @return The parameter in the url that triggers query extraction. */
-    public String getQueryExtractionParam() {
-        if (mNativeToolbarModelAndroid == 0) return null;
-        return nativeGetQueryExtractionParam(mNativeToolbarModelAndroid);
-    }
-
     /** @return The chip text from the search URL. */
     public String getCorpusChipText() {
         if (mNativeToolbarModelAndroid == 0) return null;
         return nativeGetCorpusChipText(mNativeToolbarModelAndroid);
     }
 
-    private static native int nativeGetSecurityLevelForWebContents(WebContents webContents);
+    /** @return Whether the URL is replaced by a search query. */
+    public boolean wouldReplaceURL() {
+        if (mNativeToolbarModelAndroid == 0) return false;
+        return nativeWouldReplaceURL(mNativeToolbarModelAndroid);
+    }
+
     private static native boolean nativeIsDeprecatedSHA1Present(WebContents webContents);
 
     private native long nativeInit(ToolbarModelDelegate delegate);
     private native void nativeDestroy(long nativeToolbarModelAndroid);
     private native String nativeGetText(long nativeToolbarModelAndroid);
-    private native String nativeGetQueryExtractionParam(long nativeToolbarModelAndroid);
     private native String nativeGetCorpusChipText(long nativeToolbarModelAndroid);
+    private native boolean nativeWouldReplaceURL(long nativeToolbarModelAndroid);
 }

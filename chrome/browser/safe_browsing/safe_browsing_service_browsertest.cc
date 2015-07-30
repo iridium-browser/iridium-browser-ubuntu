@@ -28,6 +28,7 @@
 #include "chrome/browser/profiles/startup_task_runner_service_factory.h"
 #include "chrome/browser/safe_browsing/client_side_detection_service.h"
 #include "chrome/browser/safe_browsing/database_manager.h"
+#include "chrome/browser/safe_browsing/local_database_manager.h"
 #include "chrome/browser/safe_browsing/metadata.pb.h"
 #include "chrome/browser/safe_browsing/protocol_manager.h"
 #include "chrome/browser/safe_browsing/safe_browsing_database.h"
@@ -50,6 +51,10 @@
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chromeos/chromeos_switches.h"
+#endif
+
+#if !defined(SAFE_BROWSING_DB_LOCAL)
+#error This test requires SAFE_BROWSING_DB_LOCAL.
 #endif
 
 using content::BrowserThread;
@@ -168,9 +173,6 @@ class TestSafeBrowsingDatabase :  public SafeBrowsingDatabase {
                                  std::vector<SBPrefix>* prefix_hits) override {
     return false;
   }
-  bool ContainsSideEffectFreeWhitelistUrl(const GURL& url) override {
-    return true;
-  }
   bool ContainsMalwareIP(const std::string& ip_address) override {
     return true;
   }
@@ -277,7 +279,6 @@ class TestSafeBrowsingDatabaseFactory : public SafeBrowsingDatabaseFactory {
       bool enable_client_side_whitelist,
       bool enable_download_whitelist,
       bool enable_extension_blacklist,
-      bool enable_side_effect_free_whitelist,
       bool enable_ip_blacklist,
       bool enabled_unwanted_software_list) override {
     db_ = new TestSafeBrowsingDatabase();
@@ -403,7 +404,7 @@ class SafeBrowsingServiceTest : public InProcessBrowserTest {
     full_hash->list_id = list_id;
   }
 
-  virtual void SetUp() {
+  void SetUp() override {
     // InProcessBrowserTest::SetUp() instantiates SafebrowsingService and
     // RegisterFactory has to be called before SafeBrowsingService is created.
     sb_factory_.reset(new TestSafeBrowsingServiceFactory(
@@ -414,7 +415,7 @@ class SafeBrowsingServiceTest : public InProcessBrowserTest {
     InProcessBrowserTest::SetUp();
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     InProcessBrowserTest::TearDown();
 
     // Unregister test factories after InProcessBrowserTest::TearDown
@@ -424,7 +425,7 @@ class SafeBrowsingServiceTest : public InProcessBrowserTest {
     SafeBrowsingService::RegisterFactory(NULL);
   }
 
-  virtual void SetUpCommandLine(base::CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     // Makes sure the auto update is not triggered during the test.
     // This test will fill up the database using testing prefixes
     // and urls.
@@ -447,7 +448,7 @@ class SafeBrowsingServiceTest : public InProcessBrowserTest {
     InProcessBrowserTest::TearDownOnMainThread();
   }
 
-  virtual void SetUpInProcessBrowserTestFixture() {
+  void SetUpInProcessBrowserTestFixture() override {
     ASSERT_TRUE(test_server()->Start());
   }
 
@@ -478,22 +479,37 @@ class SafeBrowsingServiceTest : public InProcessBrowserTest {
     pm_factory_.GetProtocolManager()->IntroduceDelay(delay);
   }
 
-  base::TimeDelta GetCheckTimeout(SafeBrowsingService* sb_service) {
-    return sb_service->database_manager()->check_timeout_;
+  // TODO(nparker): Remove the need for this by wiring in our own
+  // SafeBrowsingDatabaseManager factory and keep a ptr to the subclass.
+  // Or add a Get/SetTimeout to sbdbmgr.
+  static LocalSafeBrowsingDatabaseManager* LocalDatabaseManagerForService(
+      SafeBrowsingService* sb_service) {
+    return static_cast<LocalSafeBrowsingDatabaseManager*>(
+        sb_service->database_manager().get());
   }
 
-  void SetCheckTimeout(SafeBrowsingService* sb_service,
-                       const base::TimeDelta& delay) {
-    sb_service->database_manager()->check_timeout_ = delay;
+  static base::TimeDelta GetCheckTimeout(SafeBrowsingService* sb_service) {
+    return LocalDatabaseManagerForService(sb_service)->check_timeout_;
+  }
+
+  static void SetCheckTimeout(SafeBrowsingService* sb_service,
+                              const base::TimeDelta& delay) {
+    LocalDatabaseManagerForService(sb_service)->check_timeout_ = delay;
   }
 
   void CreateCSDService() {
+#if defined(SAFE_BROWSING_CSD)
     safe_browsing::ClientSideDetectionService* csd_service =
         safe_browsing::ClientSideDetectionService::Create(NULL);
     SafeBrowsingService* sb_service =
         g_browser_process->safe_browsing_service();
+
+    // A CSD service should already exist.
+    EXPECT_TRUE(sb_service->csd_service_);
+
     sb_service->csd_service_.reset(csd_service);
     sb_service->RefreshState();
+#endif
   }
 
   void ProceedAndWhitelist(
@@ -1258,8 +1274,8 @@ class SafeBrowsingDatabaseManagerCookieTest : public InProcessBrowserTest {
   DISALLOW_COPY_AND_ASSIGN(SafeBrowsingDatabaseManagerCookieTest);
 };
 
-// Test that a Safe Browsing database update request both sends cookies and can
-// save cookies.
+// Test that a Local Safe Browsing database update request both sends cookies
+// and can save cookies.
 IN_PROC_BROWSER_TEST_F(SafeBrowsingDatabaseManagerCookieTest,
                        TestSBUpdateCookies) {
   content::WindowedNotificationObserver observer(

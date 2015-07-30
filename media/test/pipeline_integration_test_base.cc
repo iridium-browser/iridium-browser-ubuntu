@@ -25,7 +25,9 @@
 
 using ::testing::_;
 using ::testing::AnyNumber;
+using ::testing::AtLeast;
 using ::testing::AtMost;
+using ::testing::Invoke;
 using ::testing::InvokeWithoutArgs;
 using ::testing::SaveArg;
 
@@ -111,7 +113,9 @@ PipelineStatus PipelineIntegrationTestBase::Start(const std::string& filename,
       .Times(AtMost(1))
       .WillRepeatedly(SaveArg<0>(&metadata_));
   EXPECT_CALL(*this, OnBufferingStateChanged(BUFFERING_HAVE_ENOUGH))
-      .Times(AtMost(1));
+      .Times(AnyNumber());
+  EXPECT_CALL(*this, OnBufferingStateChanged(BUFFERING_HAVE_NOTHING))
+      .Times(AnyNumber());
   CreateDemuxer(filename);
 
   if (cdm_context) {
@@ -134,8 +138,6 @@ PipelineStatus PipelineIntegrationTestBase::Start(const std::string& filename,
       base::Bind(&PipelineIntegrationTestBase::OnMetadata,
                  base::Unretained(this)),
       base::Bind(&PipelineIntegrationTestBase::OnBufferingStateChanged,
-                 base::Unretained(this)),
-      base::Bind(&PipelineIntegrationTestBase::OnVideoFramePaint,
                  base::Unretained(this)),
       base::Closure(), base::Bind(&PipelineIntegrationTestBase::OnAddTextTrack,
                                   base::Unretained(this)),
@@ -238,10 +240,17 @@ scoped_ptr<Renderer> PipelineIntegrationTestBase::CreateRenderer() {
       new FFmpegVideoDecoder(message_loop_.message_loop_proxy()));
 #endif
 
+  // Simulate a 60Hz rendering sink.
+  video_sink_.reset(new NullVideoSink(
+      clockless_playback_, base::TimeDelta::FromSecondsD(1.0 / 60),
+      base::Bind(&PipelineIntegrationTestBase::OnVideoFramePaint,
+                 base::Unretained(this)),
+      message_loop_.task_runner()));
+
   // Disable frame dropping if hashing is enabled.
-  scoped_ptr<VideoRenderer> video_renderer(
-      new VideoRendererImpl(message_loop_.message_loop_proxy(),
-                            video_decoders.Pass(), false, new MediaLog()));
+  scoped_ptr<VideoRenderer> video_renderer(new VideoRendererImpl(
+      message_loop_.message_loop_proxy(), video_sink_.get(),
+      video_decoders.Pass(), false, nullptr, new MediaLog()));
 
   if (!clockless_playback_) {
     audio_sink_ = new NullAudioSink(message_loop_.message_loop_proxy());

@@ -185,8 +185,11 @@ class WebMediaPlayerAndroid : public blink::WebMediaPlayer,
   // compositor thread.
   void SetVideoFrameProviderClient(
       cc::VideoFrameProvider::Client* client) override;
+  bool UpdateCurrentFrame(base::TimeTicks deadline_min,
+                          base::TimeTicks deadline_max) override;
+  bool HasCurrentFrame() override;
   scoped_refptr<media::VideoFrame> GetCurrentFrame() override;
-  void PutCurrentFrame(const scoped_refptr<media::VideoFrame>& frame) override;
+  void PutCurrentFrame() override;
 
   // Media player callback handlers.
   void OnMediaMetadataChanged(const base::TimeDelta& duration, int width,
@@ -317,6 +320,9 @@ class WebMediaPlayerAndroid : public blink::WebMediaPlayer,
                                    const std::string& session_id);
   MediaKeyException CancelKeyRequestInternal(const std::string& key_system,
                                              const std::string& session_id);
+
+  // Called when |cdm_context| is ready.
+  void OnCdmContextReady(media::CdmContext* cdm_context);
 
   // Sets the CDM. Should only be called when |is_player_initialized_| is true
   // and a new non-null |cdm_context_| is available. Fires |cdm_attached_cb_|

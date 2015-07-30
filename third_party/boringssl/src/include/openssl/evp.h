@@ -58,7 +58,6 @@
 #define OPENSSL_HEADER_EVP_H
 
 #include <openssl/base.h>
-#include <openssl/stack.h>
 
 /* OpenSSL included digest and cipher functions in this header so we include
  * them for users that still expect that.
@@ -67,9 +66,7 @@
 #include <openssl/aead.h>
 #include <openssl/cipher.h>
 #include <openssl/digest.h>
-#include <openssl/mem.h>
 #include <openssl/obj.h>
-#include <openssl/thread.h>
 
 #if defined(__cplusplus)
 extern "C" {
@@ -89,6 +86,9 @@ OPENSSL_EXPORT EVP_PKEY *EVP_PKEY_new(void);
  * itself. */
 OPENSSL_EXPORT void EVP_PKEY_free(EVP_PKEY *pkey);
 
+/* EVP_PKEY_up_ref increments the reference count of |pkey| and returns it. */
+OPENSSL_EXPORT EVP_PKEY *EVP_PKEY_up_ref(EVP_PKEY *pkey);
+
 /* EVP_PKEY_is_opaque returns one if |pkey| is opaque. Opaque keys are backed by
  * custom implementations which do not expose key material and parameters. It is
  * an error to attempt to duplicate, export, or compare an opaque key. */
@@ -106,10 +106,6 @@ OPENSSL_EXPORT int EVP_PKEY_supports_digest(const EVP_PKEY *pkey,
  * WARNING: this differs from the traditional return value of a "cmp"
  * function. */
 OPENSSL_EXPORT int EVP_PKEY_cmp(const EVP_PKEY *a, const EVP_PKEY *b);
-
-/* EVP_PKEY_dup adds one to the reference count of |pkey| and returns
- * |pkey|. */
-OPENSSL_EXPORT EVP_PKEY *EVP_PKEY_dup(EVP_PKEY *pkey);
 
 /* EVP_PKEY_copy_parameters sets the parameters of |to| to equal the parameters
  * of |from|. It returns one on success and zero on error. */
@@ -652,6 +648,17 @@ OPENSSL_EXPORT int EVP_PKEY_CTX_get0_rsa_oaep_label(EVP_PKEY_CTX *ctx,
                                                     const uint8_t **out_label);
 
 
+/* Deprecated functions. */
+
+/* EVP_PKEY_dup adds one to the reference count of |pkey| and returns
+ * |pkey|.
+ *
+ * WARNING: this is a |_dup| function that doesn't actually duplicate! Use
+ * |EVP_PKEY_up_ref| if you want to increment the reference count without
+ * confusion. */
+OPENSSL_EXPORT EVP_PKEY *EVP_PKEY_dup(EVP_PKEY *pkey);
+
+
 /* Private functions */
 
 /* OpenSSL_add_all_algorithms does nothing. */
@@ -695,35 +702,20 @@ struct evp_pkey_st {
 }  /* extern C */
 #endif
 
-#define EVP_F_EVP_DigestSignAlgorithm 100
-#define EVP_F_EVP_DigestVerifyInitFromAlgorithm 101
-#define EVP_F_EVP_PKEY_CTX_ctrl 102
-#define EVP_F_EVP_PKEY_CTX_dup 103
-#define EVP_F_EVP_PKEY_copy_parameters 104
-#define EVP_F_EVP_PKEY_decrypt 105
-#define EVP_F_EVP_PKEY_decrypt_init 106
-#define EVP_F_EVP_PKEY_derive 107
 #define EVP_F_EVP_PKEY_derive_init 108
-#define EVP_F_EVP_PKEY_derive_set_peer 109
 #define EVP_F_EVP_PKEY_encrypt 110
 #define EVP_F_EVP_PKEY_encrypt_init 111
 #define EVP_F_EVP_PKEY_get1_DH 112
-#define EVP_F_EVP_PKEY_get1_DSA 113
 #define EVP_F_EVP_PKEY_get1_EC_KEY 114
 #define EVP_F_EVP_PKEY_get1_RSA 115
 #define EVP_F_EVP_PKEY_keygen 116
-#define EVP_F_EVP_PKEY_keygen_init 117
-#define EVP_F_EVP_PKEY_new 118
-#define EVP_F_EVP_PKEY_set_type 119
 #define EVP_F_EVP_PKEY_sign 120
 #define EVP_F_EVP_PKEY_sign_init 121
 #define EVP_F_EVP_PKEY_verify 122
 #define EVP_F_EVP_PKEY_verify_init 123
-#define EVP_F_check_padding_md 124
 #define EVP_F_d2i_AutoPrivateKey 125
 #define EVP_F_d2i_PrivateKey 126
 #define EVP_F_do_EC_KEY_print 127
-#define EVP_F_do_rsa_print 128
 #define EVP_F_do_sigver_init 129
 #define EVP_F_eckey_param2type 130
 #define EVP_F_eckey_param_decode 131
@@ -755,15 +747,34 @@ struct evp_pkey_st {
 #define EVP_F_rsa_pub_decode 157
 #define EVP_F_pkey_hmac_ctrl 158
 #define EVP_F_EVP_PKEY_CTX_get0_rsa_oaep_label 159
+#define EVP_F_EVP_DigestSignAlgorithm 160
+#define EVP_F_EVP_DigestVerifyInitFromAlgorithm 161
+#define EVP_F_EVP_PKEY_CTX_ctrl 162
+#define EVP_F_EVP_PKEY_CTX_dup 163
+#define EVP_F_EVP_PKEY_copy_parameters 164
+#define EVP_F_EVP_PKEY_decrypt 165
+#define EVP_F_EVP_PKEY_decrypt_init 166
+#define EVP_F_EVP_PKEY_derive 167
+#define EVP_F_EVP_PKEY_derive_set_peer 168
+#define EVP_F_EVP_PKEY_get1_DSA 169
+#define EVP_F_EVP_PKEY_keygen_init 170
+#define EVP_F_EVP_PKEY_new 171
+#define EVP_F_EVP_PKEY_set_type 172
+#define EVP_F_check_padding_md 173
+#define EVP_F_do_dsa_print 174
+#define EVP_F_do_rsa_print 175
+#define EVP_F_dsa_param_decode 176
+#define EVP_F_dsa_priv_decode 177
+#define EVP_F_dsa_priv_encode 178
+#define EVP_F_dsa_pub_decode 179
+#define EVP_F_dsa_pub_encode 180
+#define EVP_F_dsa_sig_print 181
+#define EVP_F_old_dsa_priv_decode 182
 #define EVP_R_BUFFER_TOO_SMALL 100
 #define EVP_R_COMMAND_NOT_SUPPORTED 101
-#define EVP_R_CONTEXT_NOT_INITIALISED 102
-#define EVP_R_DECODE_ERROR 103
 #define EVP_R_DIFFERENT_KEY_TYPES 104
 #define EVP_R_DIFFERENT_PARAMETERS 105
-#define EVP_R_DIGEST_AND_KEY_TYPE_NOT_SUPPORTED 106
 #define EVP_R_EXPECTING_AN_EC_KEY_KEY 107
-#define EVP_R_EXPECTING_AN_RSA_KEY 108
 #define EVP_R_EXPECTING_A_DH_KEY 109
 #define EVP_R_EXPECTING_A_DSA_KEY 110
 #define EVP_R_ILLEGAL_OR_UNSUPPORTED_PADDING_MODE 111
@@ -772,10 +783,8 @@ struct evp_pkey_st {
 #define EVP_R_INVALID_DIGEST_TYPE 114
 #define EVP_R_INVALID_KEYBITS 115
 #define EVP_R_INVALID_MGF1_MD 116
-#define EVP_R_INVALID_OPERATION 117
 #define EVP_R_INVALID_PADDING_MODE 118
 #define EVP_R_INVALID_PSS_PARAMETERS 119
-#define EVP_R_INVALID_PSS_SALTLEN 120
 #define EVP_R_INVALID_SALT_LENGTH 121
 #define EVP_R_INVALID_TRAILER 122
 #define EVP_R_KEYS_NOT_SET 123
@@ -790,14 +799,22 @@ struct evp_pkey_st {
 #define EVP_R_OPERATON_NOT_INITIALIZED 132
 #define EVP_R_UNKNOWN_DIGEST 133
 #define EVP_R_UNKNOWN_MASK_DIGEST 134
-#define EVP_R_UNKNOWN_MESSAGE_DIGEST_ALGORITHM 135
-#define EVP_R_UNKNOWN_PUBLIC_KEY_TYPE 136
-#define EVP_R_UNKNOWN_SIGNATURE_ALGORITHM 137
 #define EVP_R_UNSUPPORTED_ALGORITHM 138
 #define EVP_R_UNSUPPORTED_MASK_ALGORITHM 139
 #define EVP_R_UNSUPPORTED_MASK_PARAMETER 140
-#define EVP_R_UNSUPPORTED_PUBLIC_KEY_TYPE 141
-#define EVP_R_UNSUPPORTED_SIGNATURE_TYPE 142
-#define EVP_R_WRONG_PUBLIC_KEY_TYPE 143
+#define EVP_R_EXPECTING_AN_RSA_KEY 141
+#define EVP_R_INVALID_OPERATION 142
+#define EVP_R_DECODE_ERROR 143
+#define EVP_R_INVALID_PSS_SALTLEN 144
+#define EVP_R_UNKNOWN_PUBLIC_KEY_TYPE 145
+#define EVP_R_CONTEXT_NOT_INITIALISED 146
+#define EVP_R_DIGEST_AND_KEY_TYPE_NOT_SUPPORTED 147
+#define EVP_R_WRONG_PUBLIC_KEY_TYPE 148
+#define EVP_R_UNKNOWN_SIGNATURE_ALGORITHM 149
+#define EVP_R_UNKNOWN_MESSAGE_DIGEST_ALGORITHM 150
+#define EVP_R_BN_DECODE_ERROR 151
+#define EVP_R_PARAMETER_ENCODING_ERROR 152
+#define EVP_R_UNSUPPORTED_PUBLIC_KEY_TYPE 153
+#define EVP_R_UNSUPPORTED_SIGNATURE_TYPE 154
 
 #endif  /* OPENSSL_HEADER_EVP_H */

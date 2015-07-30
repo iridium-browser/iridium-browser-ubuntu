@@ -332,10 +332,32 @@ class USER_MANAGER_EXPORT UserManager {
                                       const std::string& path,
                                       std::string* out_value) = 0;
 
-  // Updates user identified by |user_id| GAIA ID preference.
+  // Updates user's identified by |user_id| string preference |path|.
   virtual void SetKnownUserStringPref(const UserID& user_id,
                                       const std::string& path,
                                       const std::string& in_value) = 0;
+
+  // Returns true if |user_id| preference by |path| does exist,
+  // fills in |out_value|. Otherwise returns false.
+  virtual bool GetKnownUserBooleanPref(const UserID& user_id,
+                                       const std::string& path,
+                                       bool* out_value) = 0;
+
+  // Updates user's identified by |user_id| boolean preference |path|.
+  virtual void SetKnownUserBooleanPref(const UserID& user_id,
+                                       const std::string& path,
+                                       const bool in_value) = 0;
+
+  // Returns true if |user_id| preference by |path| does exist,
+  // fills in |out_value|. Otherwise returns false.
+  virtual bool GetKnownUserIntegerPref(const UserID& user_id,
+                                       const std::string& path,
+                                       int* out_value) = 0;
+
+  // Updates user's identified by |user_id| integer preference |path|.
+  virtual void SetKnownUserIntegerPref(const UserID& user_id,
+                                       const std::string& path,
+                                       const int in_value) = 0;
 
   // Updates |gaia_id| for user with |user_id|.
   // TODO(antrim): Update this once UserID contains GAIA ID.
@@ -346,6 +368,29 @@ class USER_MANAGER_EXPORT UserManager {
   // if GAIA ID was found or false otherwise.
   // TODO(antrim): Update this once UserID contains GAIA ID.
   virtual bool FindGaiaID(const UserID& user_id, std::string* out_value) = 0;
+
+  // Saves whether the user authenticates using SAML.
+  virtual void UpdateUsingSAML(const UserID& user_id,
+                               const bool using_saml) = 0;
+
+  // Returns if SAML needs to be used for authentication of the user with
+  // |user_id|, if it is known (was set by a |UpdateUsingSaml| call). Otherwise
+  // returns false.
+  virtual bool FindUsingSAML(const UserID& user_id) = 0;
+
+  // Setter and getter for DeviceId known user string preference.
+  virtual void SetKnownUserDeviceId(const UserID& user_id,
+                                    const std::string& device_id) = 0;
+  virtual std::string GetKnownUserDeviceId(const UserID& user_id) = 0;
+
+  // Saves why the user has to go through re-auth flow.
+  virtual void UpdateReauthReason(const UserID& user_id,
+                                  const int reauth_reason) = 0;
+
+  // Returns the reason why the user with |user_id| has to go through the
+  // re-auth flow. Returns true if such a reason was recorded or false
+  // otherwise.
+  virtual bool FindReauthReason(const UserID& user_id, int* out_value) = 0;
 
  protected:
   // Sets UserManager instance.

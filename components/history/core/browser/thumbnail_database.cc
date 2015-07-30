@@ -660,7 +660,7 @@ void ThumbnailDatabase::ComputeDatabaseMetrics() {
             SQL_FROM_HERE,
             "SELECT COUNT(*) FROM favicons WHERE icon_type IN (?, ?)"));
     touch_icon_count.BindInt64(0, favicon_base::TOUCH_ICON);
-    touch_icon_count.BindInt64(0, favicon_base::TOUCH_PRECOMPOSED_ICON);
+    touch_icon_count.BindInt64(1, favicon_base::TOUCH_PRECOMPOSED_ICON);
     UMA_HISTOGRAM_COUNTS_10000(
         "History.NumTouchIconsInDB",
         touch_icon_count.Step() ? touch_icon_count.ColumnInt(0) : 0);
@@ -1035,16 +1035,6 @@ IconMappingID ThumbnailDatabase::AddIconMapping(
   return db_.GetLastInsertRowId();
 }
 
-bool ThumbnailDatabase::UpdateIconMapping(IconMappingID mapping_id,
-                                          favicon_base::FaviconID icon_id) {
-  sql::Statement statement(db_.GetCachedStatement(SQL_FROM_HERE,
-      "UPDATE icon_mapping SET icon_id=? WHERE id=?"));
-  statement.BindInt64(0, icon_id);
-  statement.BindInt64(1, mapping_id);
-
-  return statement.Run();
-}
-
 bool ThumbnailDatabase::DeleteIconMappings(const GURL& page_url) {
   sql::Statement statement(db_.GetCachedStatement(SQL_FROM_HERE,
       "DELETE FROM icon_mapping WHERE page_url = ?"));
@@ -1068,29 +1058,6 @@ bool ThumbnailDatabase::HasMappingFor(favicon_base::FaviconID id) {
   statement.BindInt64(0, id);
 
   return statement.Step();
-}
-
-bool ThumbnailDatabase::CloneIconMappings(const GURL& old_page_url,
-                                          const GURL& new_page_url) {
-  sql::Statement statement(db_.GetCachedStatement(SQL_FROM_HERE,
-      "SELECT icon_id FROM icon_mapping "
-      "WHERE page_url=?"));
-  if (!statement.is_valid())
-    return false;
-
-  // Do nothing if there are existing bindings
-  statement.BindString(0, URLDatabase::GURLToDatabaseURL(new_page_url));
-  if (statement.Step())
-    return true;
-
-  statement.Assign(db_.GetCachedStatement(SQL_FROM_HERE,
-      "INSERT INTO icon_mapping (page_url, icon_id) "
-        "SELECT ?, icon_id FROM icon_mapping "
-        "WHERE page_url = ?"));
-
-  statement.BindString(0, URLDatabase::GURLToDatabaseURL(new_page_url));
-  statement.BindString(1, URLDatabase::GURLToDatabaseURL(old_page_url));
-  return statement.Run();
 }
 
 bool ThumbnailDatabase::InitIconMappingEnumerator(
@@ -1176,13 +1143,19 @@ bool ThumbnailDatabase::RetainDataForPageUrls(
       "ON (old.id = mapping.old_icon_id)";
   const char kDropOldFaviconsTable[] = "DROP TABLE old_favicons";
 
+  // Set the retained favicon bitmaps to be expired (last_updated == 0).
+  // The user may be deleting their favicon bitmaps because the favicon bitmaps
+  // are incorrect. Expiring a favicon bitmap causes it to be redownloaded when
+  // the user visits a page associated with the favicon bitmap. See
+  // crbug.com/474421 for an example of a bug which caused favicon bitmaps to
+  // become incorrect.
   const char kRenameFaviconBitmapsTable[] =
       "ALTER TABLE favicon_bitmaps RENAME TO old_favicon_bitmaps";
   const char kCopyFaviconBitmaps[] =
       "INSERT INTO favicon_bitmaps "
       "  (icon_id, last_updated, image_data, width, height, last_requested) "
-      "SELECT mapping.new_icon_id, old.last_updated, "
-      "    old.image_data, old.width, old.height, old.last_requested "
+      "SELECT mapping.new_icon_id, 0, old.image_data, old.width, old.height,"
+      "    old.last_requested "
       "FROM old_favicon_bitmaps AS old "
       "JOIN temp.icon_id_mapping AS mapping "
       "ON (old.icon_id = mapping.old_icon_id)";

@@ -116,6 +116,14 @@ class DataReductionProxyParams : public DataReductionProxyConfigValues {
   // Returns true if the Data Reduction Proxy config client should be used.
   static bool IsConfigClientEnabled();
 
+  // Returns true if the Data Reduction Proxy is forced to be enabled from the
+  // command line.
+  static bool ShouldForceEnableDataReductionProxy();
+
+  // Returns true if the secure Data Reduction Proxy should be used until the
+  // secure proxy check fails.
+  static bool ShouldUseSecureProxyByDefault();
+
   // Constructs configuration parameters. If |kAllowed|, then the standard
   // data reduction proxy configuration is allowed to be used. If
   // |kfallbackAllowed| a fallback proxy can be used if the primary proxy is

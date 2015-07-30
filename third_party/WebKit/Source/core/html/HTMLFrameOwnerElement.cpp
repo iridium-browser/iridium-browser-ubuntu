@@ -26,6 +26,7 @@
 #include "core/dom/AXObjectCache.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/events/Event.h"
+#include "core/frame/FrameHost.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
 #include "core/layout/LayoutPart.h"
@@ -112,7 +113,7 @@ HTMLFrameOwnerElement::HTMLFrameOwnerElement(const QualifiedName& tagName, Docum
 
 LayoutPart* HTMLFrameOwnerElement::layoutPart() const
 {
-    // HTMLObjectElement and HTMLEmbedElement may return arbitrary renderers
+    // HTMLObjectElement and HTMLEmbedElement may return arbitrary layoutObjects
     // when using fallback content.
     if (!layoutObject() || !layoutObject()->isLayoutPart())
         return nullptr;
@@ -255,6 +256,9 @@ bool HTMLFrameOwnerElement::loadOrRedirectSubframe(const KURL& url, const Atomic
     }
 
     if (!SubframeLoadingDisabler::canLoadFrame(*this))
+        return false;
+
+    if (document().frame()->host()->subframeCount() >= FrameHost::maxNumberOfFrames)
         return false;
 
     return parentFrame->loader().client()->createFrame(FrameLoadRequest(&document(), url, "_self", CheckContentSecurityPolicy), frameName, this);

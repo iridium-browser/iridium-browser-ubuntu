@@ -20,18 +20,26 @@ void V8TestPermissiveDictionary::toImpl(v8::Isolate* isolate, v8::Local<v8::Valu
         return;
     }
 
-    v8::Local<v8::Object> v8Object = v8Value->ToObject(isolate);
     v8::TryCatch block;
-    v8::Local<v8::Value> booleanMemberValue = v8Object->Get(v8String(isolate, "booleanMember"));
-    if (block.HasCaught()) {
+    v8::Local<v8::Object> v8Object;
+    if (!v8Call(v8Value->ToObject(isolate->GetCurrentContext()), v8Object, block)) {
         exceptionState.rethrowV8Exception(block.Exception());
         return;
     }
-    if (booleanMemberValue.IsEmpty() || booleanMemberValue->IsUndefined()) {
-        // Do nothing.
-    } else {
-        bool booleanMember = booleanMemberValue->BooleanValue();
-        impl.setBooleanMember(booleanMember);
+    {
+        v8::Local<v8::Value> booleanMemberValue;
+        if (!v8Object->Get(isolate->GetCurrentContext(), v8String(isolate, "booleanMember")).ToLocal(&booleanMemberValue)) {
+            exceptionState.rethrowV8Exception(block.Exception());
+            return;
+        }
+        if (booleanMemberValue.IsEmpty() || booleanMemberValue->IsUndefined()) {
+            // Do nothing.
+        } else {
+            bool booleanMember = toBoolean(isolate, booleanMemberValue, exceptionState);
+            if (exceptionState.hadException())
+                return;
+            impl.setBooleanMember(booleanMember);
+        }
     }
 
 }
@@ -39,16 +47,20 @@ void V8TestPermissiveDictionary::toImpl(v8::Isolate* isolate, v8::Local<v8::Valu
 v8::Local<v8::Value> toV8(const TestPermissiveDictionary& impl, v8::Local<v8::Object> creationContext, v8::Isolate* isolate)
 {
     v8::Local<v8::Object> v8Object = v8::Object::New(isolate);
-    toV8TestPermissiveDictionary(impl, v8Object, creationContext, isolate);
+    if (!toV8TestPermissiveDictionary(impl, v8Object, creationContext, isolate))
+        return v8::Local<v8::Value>();
     return v8Object;
 }
 
-void toV8TestPermissiveDictionary(const TestPermissiveDictionary& impl, v8::Local<v8::Object> dictionary, v8::Local<v8::Object> creationContext, v8::Isolate* isolate)
+bool toV8TestPermissiveDictionary(const TestPermissiveDictionary& impl, v8::Local<v8::Object> dictionary, v8::Local<v8::Object> creationContext, v8::Isolate* isolate)
 {
+    // TODO(bashi): Use ForceSet() instead of Set(). http://crbug.com/476720
     if (impl.hasBooleanMember()) {
-        dictionary->Set(v8String(isolate, "booleanMember"), v8Boolean(impl.booleanMember(), isolate));
+        if (!v8CallBoolean(dictionary->Set(isolate->GetCurrentContext(), v8String(isolate, "booleanMember"), v8Boolean(impl.booleanMember(), isolate))))
+            return false;
     }
 
+    return true;
 }
 
 TestPermissiveDictionary NativeValueTraits<TestPermissiveDictionary>::nativeValue(v8::Isolate* isolate, v8::Local<v8::Value> value, ExceptionState& exceptionState)

@@ -38,12 +38,23 @@ DirectoryItemTreeBaseMethods.searchAndSelectByEntry = function(entry) {
 
 Object.freeze(DirectoryItemTreeBaseMethods);
 
-var TREE_ITEM_INNTER_HTML =
+var TREE_ITEM_INNER_HTML =
     '<div class="tree-row">' +
     ' <paper-ripple fit class="recenteringTouch"></paper-ripple>' +
     ' <span class="expand-icon"></span>' +
     ' <span class="icon"></span>' +
     ' <span class="label entry-name"></span>' +
+    '</div>' +
+    '<div class="tree-children"></div>';
+
+var MENU_TREE_ITEM_INNER_HTML =
+    '<div class="tree-row">' +
+    ' <paper-ripple fit class="recenteringTouch"></paper-ripple>' +
+    ' <span class="expand-icon"></span>' +
+    ' <div class="button">' +
+    '  <span class="icon item-icon"></span>' +
+    '  <span class="label entry-name"></span>' +
+    ' </div>' +
     '</div>' +
     '<div class="tree-children"></div>';
 
@@ -67,7 +78,7 @@ function DirectoryItem(label, tree) {
   item.directoryModel_ = tree.directoryModel;
   item.fileFilter_ = tree.directoryModel.getFileFilter();
 
-  item.innerHTML = TREE_ITEM_INNTER_HTML;
+  item.innerHTML = TREE_ITEM_INNER_HTML;
   item.addEventListener('expand', item.onExpand_.bind(item), false);
 
   // Sets hasChildren=false tentatively. This will be overridden after
@@ -358,11 +369,11 @@ function SubDirectoryItem(label, dirEntry, parentDirItem, tree) {
 
   // Sets up context menu of the item.
   if (tree.contextMenuForSubitems)
-    item.setContextMenu(tree.contextMenuForSubitems);
+    item.setContextMenu_(tree.contextMenuForSubitems);
   // Adds handler for future change.
   tree.addEventListener(
       'contextMenuForSubitemsChange',
-      function(e) { item.setContextMenu(e.newValue); });
+      function(e) { item.setContextMenu_(e.newValue); });
 
   // Populates children now if needed.
   if (parentDirItem.expanded)
@@ -382,8 +393,9 @@ SubDirectoryItem.prototype = {
 /**
  * Sets the context menu for directory tree.
  * @param {!cr.ui.Menu} menu Menu to be set.
+ * @private
  */
-SubDirectoryItem.prototype.setContextMenu = function(menu) {
+SubDirectoryItem.prototype.setContextMenu_ = function(menu) {
   var tree = this.parentTree_ || this;  // If no parent, 'this' itself is tree.
   var locationInfo = tree.volumeManager_.getLocationInfo(this.entry);
   if (locationInfo && locationInfo.isEligibleForFolderShortcut)
@@ -422,14 +434,19 @@ function VolumeItem(modelItem, tree) {
 
   item.modelItem_ = modelItem;
   item.volumeInfo_ = modelItem.volumeInfo;
-
-  // Sets up icons of the item.
   item.setupIcon_(item.querySelector('.icon'), item.volumeInfo_);
-  item.setupEjectButton_(item.rowElement);
+
+  // Attach the "eject" icon if the volume is ejectable.
+  if ((modelItem.volumeInfo_.source === VolumeManagerCommon.Source.DEVICE &&
+       modelItem.volumeInfo_.volumeType !==
+           VolumeManagerCommon.VolumeType.MTP) ||
+      modelItem.volumeInfo_.source === VolumeManagerCommon.Source.FILE) {
+    item.setupEjectButton_(item.rowElement);
+  }
 
   // Sets up context menu of the item.
   if (tree.contextMenuForRootItems)
-    item.setContextMenu(tree.contextMenuForRootItems);
+    item.setContextMenu_(tree.contextMenuForRootItems);
 
   // Populate children of this volume using resolved display root.
   item.volumeInfo_.resolveDisplayRoot(function(displayRoot) {
@@ -449,6 +466,15 @@ VolumeItem.prototype = {
   get entry() {
     return this.volumeInfo_.displayRoot;
   },
+  /**
+   * @type {!VolumeInfo}
+   */
+  get volumeInfo() {
+    return this.volumeInfo_;
+  },
+  /**
+   * @type {!NavigationModelVolumeItem}
+   */
   get modelItem() {
     return this.modelItem_;
   }
@@ -457,10 +483,10 @@ VolumeItem.prototype = {
 /**
  * Sets the context menu for volume items.
  * @param {!cr.ui.Menu} menu Menu to be set.
+ * @private
  */
-VolumeItem.prototype.setContextMenu = function(menu) {
-  if (this.isRemovable_())
-    cr.ui.contextMenuHandler.setContextMenu(this, menu);
+VolumeItem.prototype.setContextMenu_ = function(menu) {
+  cr.ui.contextMenuHandler.setContextMenu(this, menu);
 };
 
 /**
@@ -486,17 +512,6 @@ VolumeItem.prototype.activate = function() {
         // Error, the display root is not available. It may happen on Drive.
         this.parentTree_.dataModel.onItemNotFoundError(this.modelItem);
       }.bind(this));
-};
-
-/**
- * @return {boolean} True if this volume can be removed by user operation.
- * @private
- */
-VolumeItem.prototype.isRemovable_ = function() {
-  var volumeType = this.volumeInfo_.volumeType;
-  return volumeType === VolumeManagerCommon.VolumeType.ARCHIVE ||
-         volumeType === VolumeManagerCommon.VolumeType.REMOVABLE ||
-         volumeType === VolumeManagerCommon.VolumeType.PROVIDED;
 };
 
 /**
@@ -528,31 +543,29 @@ VolumeItem.prototype.setupIcon_ = function(icon, volumeInfo) {
  * @private
  */
 VolumeItem.prototype.setupEjectButton_ = function(rowElement) {
-  if (this.isRemovable_()) {
-    var ejectButton = cr.doc.createElement('div');
-    // Block other mouse handlers.
-    ejectButton.addEventListener(
-        'mouseup', function(event) { event.stopPropagation() });
-    ejectButton.addEventListener(
-        'mousedown', function(event) { event.stopPropagation() });
-    ejectButton.className = 'root-eject';
-    ejectButton.setAttribute('aria-label', str('UNMOUNT_DEVICE_BUTTON_LABEL'));
-    ejectButton.addEventListener('click', function(event) {
-      event.stopPropagation();
-      var unmountCommand = cr.doc.querySelector('command#unmount');
-      // Let's make sure 'canExecute' state of the command is properly set for
-      // the root before executing it.
-      unmountCommand.canExecuteChange(this);
-      unmountCommand.execute(this);
-    }.bind(this));
-    rowElement.appendChild(ejectButton);
+  var ejectButton = cr.doc.createElement('div');
+  // Block other mouse handlers.
+  ejectButton.addEventListener(
+      'mouseup', function(event) { event.stopPropagation() });
+  ejectButton.addEventListener(
+      'mousedown', function(event) { event.stopPropagation() });
+  ejectButton.className = 'root-eject';
+  ejectButton.setAttribute('aria-label', str('UNMOUNT_DEVICE_BUTTON_LABEL'));
+  ejectButton.addEventListener('click', function(event) {
+    event.stopPropagation();
+    var unmountCommand = cr.doc.querySelector('command#unmount');
+    // Let's make sure 'canExecute' state of the command is properly set for
+    // the root before executing it.
+    unmountCommand.canExecuteChange(this);
+    unmountCommand.execute(this);
+  }.bind(this));
+  rowElement.appendChild(ejectButton);
 
-    // Add paper-ripple effect on the eject button.
-    var ripple = cr.doc.createElement('paper-ripple');
-    ripple.setAttribute('fit', '');
-    ripple.className = 'circle recenteringTouch';
-    ejectButton.appendChild(ripple);
-  }
+  // Add paper-ripple effect on the eject button.
+  var ripple = cr.doc.createElement('paper-ripple');
+  ripple.setAttribute('fit', '');
+  ripple.className = 'circle recenteringTouch';
+  ejectButton.appendChild(ripple);
 };
 
 
@@ -689,14 +702,14 @@ function ShortcutItem(modelItem, tree) {
   item.dirEntry_ = modelItem.entry;
   item.modelItem_ = modelItem;
 
-  item.innerHTML = TREE_ITEM_INNTER_HTML;
+  item.innerHTML = TREE_ITEM_INNER_HTML;
 
   var icon = item.querySelector('.icon');
   icon.classList.add('item-icon');
   icon.setAttribute('volume-type-icon', VolumeManagerCommon.VolumeType.DRIVE);
 
   if (tree.contextMenuForRootItems)
-    item.setContextMenu(tree.contextMenuForRootItems);
+    item.setContextMenu_(tree.contextMenuForRootItems);
 
   item.label = modelItem.entry.name;
   return item;
@@ -753,8 +766,9 @@ ShortcutItem.prototype.selectByEntry = function(entry) {
 /**
  * Sets the context menu for shortcut items.
  * @param {!cr.ui.Menu} menu Menu to be set.
+ * @private
  */
-ShortcutItem.prototype.setContextMenu = function(menu) {
+ShortcutItem.prototype.setContextMenu_ = function(menu) {
   cr.ui.contextMenuHandler.setContextMenu(this, menu);
 };
 
@@ -785,35 +799,38 @@ ShortcutItem.prototype.activate = function() {
 };
 
 ////////////////////////////////////////////////////////////////////////////////
-// CommandItem
+// MenuItem
 
 /**
  * A TreeItem which represents a command button.
  * Command items are displayed as top-level children of DirectoryTree.
  *
- * @param {NavigationModelCommandItem} modelItem
- * @param {DirectoryTree} tree Current tree, which contains this item.
+ * @param {!NavigationModelMenuItem} modelItem
+ * @param {!DirectoryTree} tree Current tree, which contains this item.
  * @extends {cr.ui.TreeItem}
  * @constructor
  */
-function CommandItem(modelItem, tree) {
+function MenuItem(modelItem, tree) {
   var item = new cr.ui.TreeItem();
-  item.__proto__ = CommandItem.prototype;
+  item.__proto__ = MenuItem.prototype;
 
   item.parentTree_ = tree;
   item.modelItem_ = modelItem;
-
-  item.innerHTML = TREE_ITEM_INNTER_HTML;
-
-  var icon = item.querySelector('.icon');
-  icon.classList.add('item-icon');
-  icon.setAttribute('command-icon', modelItem.command.id);
-
+  item.innerHTML = MENU_TREE_ITEM_INNER_HTML;
   item.label = modelItem.label;
+
+  item.menuButton_ = /** @type {!cr.ui.MenuButton} */(queryRequiredElement(
+        assert(item.firstElementChild), '.button'));
+  item.menuButton_.setAttribute('menu', item.modelItem_.menu);
+  cr.ui.MenuButton.decorate(item.menuButton_);
+
+  var icon = queryRequiredElement(item, '.icon');
+  icon.setAttribute('menu-button-icon', item.modelItem_.icon);
+
   return item;
 }
 
-CommandItem.prototype = {
+MenuItem.prototype = {
   __proto__: cr.ui.TreeItem.prototype,
   get entry() {
     return null;
@@ -830,30 +847,34 @@ CommandItem.prototype = {
  * @param {!DirectoryEntry|!FakeEntry} entry
  * @return {boolean} True if the parent item is found.
  */
-CommandItem.prototype.searchAndSelectByEntry = function(entry) {
+MenuItem.prototype.searchAndSelectByEntry = function(entry) {
   return false;
 };
 
 /**
  * @override
  */
-CommandItem.prototype.handleClick = function(e) {
+MenuItem.prototype.handleClick = function(e) {
   this.activate();
 };
 
 /**
  * @param {!DirectoryEntry} entry
  */
-CommandItem.prototype.selectByEntry = function(entry) {
+MenuItem.prototype.selectByEntry = function(entry) {
 };
 
 /**
  * Executes the command.
  */
-CommandItem.prototype.activate = function() {
-  this.modelItem_.command.execute();
-};
+MenuItem.prototype.activate = function() {
+  // Dispatch an event to update the menu (if updatable).
+  var updateEvent = new Event('update');
+  updateEvent.menuButton = this.menuButton_;
+  this.menuButton_.menu.dispatchEvent(updateEvent);
 
+  this.menuButton_.showMenu();
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 // DirectoryTree
@@ -999,8 +1020,8 @@ DirectoryTree.prototype.updateSubElementsFromList = function(recursive) {
         case NavigationModelItemType.SHORTCUT:
           this.addAt(new ShortcutItem(modelItem, this), itemIndex);
           break;
-        case NavigationModelItemType.COMMAND:
-          this.addAt(new CommandItem(modelItem, this), itemIndex);
+        case NavigationModelItemType.MENU:
+          this.addAt(new MenuItem(modelItem, this), itemIndex);
           break;
       }
     }

@@ -100,8 +100,6 @@ class MEDIA_EXPORT Pipeline : public DemuxerHost {
   //                 video in supported formats are known.
   //   |buffering_state_cb| will be executed whenever there are changes in the
   //                        overall buffering state of the pipeline.
-  //   |paint_cb| will be executed whenever there is a VideoFrame to be painted.
-  //              It's safe to call this callback from any thread.
   //   |duration_change_cb| optional callback that will be executed whenever the
   //                        presentation duration changes.
   //   |add_text_track_cb| will be executed whenever a text track is added.
@@ -115,7 +113,6 @@ class MEDIA_EXPORT Pipeline : public DemuxerHost {
              const PipelineStatusCB& seek_cb,
              const PipelineMetadataCB& metadata_cb,
              const BufferingStateCB& buffering_state_cb,
-             const PaintCB& paint_cb,
              const base::Closure& duration_change_cb,
              const AddTextTrackCB& add_text_track_cb,
              const base::Closure& waiting_for_decryption_key_cb);
@@ -144,17 +141,17 @@ class MEDIA_EXPORT Pipeline : public DemuxerHost {
   bool IsRunning() const;
 
   // Gets the current playback rate of the pipeline.  When the pipeline is
-  // started, the playback rate will be 0.0f.  A rate of 1.0f indicates
+  // started, the playback rate will be 0.0.  A rate of 1.0 indicates
   // that the pipeline is rendering the media at the standard rate.  Valid
-  // values for playback rate are >= 0.0f.
-  float GetPlaybackRate() const;
+  // values for playback rate are >= 0.0.
+  double GetPlaybackRate() const;
 
-  // Attempt to adjust the playback rate. Setting a playback rate of 0.0f pauses
-  // all rendering of the media.  A rate of 1.0f indicates a normal playback
-  // rate.  Values for the playback rate must be greater than or equal to 0.0f.
+  // Attempt to adjust the playback rate. Setting a playback rate of 0.0 pauses
+  // all rendering of the media.  A rate of 1.0 indicates a normal playback
+  // rate.  Values for the playback rate must be greater than or equal to 0.0.
   //
   // TODO(scherkus): What about maximum rate?  Does HTML5 specify a max?
-  void SetPlaybackRate(float playback_rate);
+  void SetPlaybackRate(double playback_rate);
 
   // Gets the current volume setting being used by the audio renderer.  When
   // the pipeline is started, this value will be 1.0f.  Valid values range
@@ -245,7 +242,7 @@ class MEDIA_EXPORT Pipeline : public DemuxerHost {
   void ErrorChangedTask(PipelineStatus error);
 
   // Carries out notifying filters that the playback rate has changed.
-  void PlaybackRateChangedTask(float playback_rate);
+  void PlaybackRateChangedTask(double playback_rate);
 
   // Carries out notifying filters that the volume has changed.
   void VolumeChangedTask(float volume);
@@ -322,10 +319,10 @@ class MEDIA_EXPORT Pipeline : public DemuxerHost {
   // filters.
   float volume_;
 
-  // Current playback rate (>= 0.0f).  This value is set immediately via
+  // Current playback rate (>= 0.0).  This value is set immediately via
   // SetPlaybackRate() and a task is dispatched on the task runner to notify
   // the filters.
-  float playback_rate_;
+  double playback_rate_;
 
   // Current duration as reported by |demuxer_|.
   base::TimeDelta duration_;
@@ -360,7 +357,6 @@ class MEDIA_EXPORT Pipeline : public DemuxerHost {
   PipelineStatusCB error_cb_;
   PipelineMetadataCB metadata_cb_;
   BufferingStateCB buffering_state_cb_;
-  PaintCB paint_cb_;
   base::Closure duration_change_cb_;
   AddTextTrackCB add_text_track_cb_;
   base::Closure waiting_for_decryption_key_cb_;

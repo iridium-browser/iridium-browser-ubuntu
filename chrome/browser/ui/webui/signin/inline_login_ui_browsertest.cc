@@ -25,6 +25,7 @@
 #include "chrome/test/base/test_chrome_web_ui_controller_factory.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/guest_view/browser/guest_view_manager.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/signin/core/common/signin_pref_names.h"
@@ -37,7 +38,6 @@
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
-#include "extensions/browser/guest_view/guest_view_manager.h"
 #include "google_apis/gaia/fake_gaia.h"
 #include "google_apis/gaia/gaia_switches.h"
 #include "net/base/url_util.h"
@@ -54,6 +54,7 @@ using ::testing::Invoke;
 using ::testing::InvokeWithoutArgs;
 using ::testing::Return;
 
+using guest_view::GuestViewManager;
 using login_ui_test_utils::ExecuteJsToSigninInSigninFrame;
 using login_ui_test_utils::WaitUntilUIReady;
 
@@ -137,7 +138,7 @@ void InlineLoginUIBrowserTest::SetUpSigninManager(const std::string& username) {
 
   SigninManagerBase* signin_manager =
       SigninManagerFactory::GetForProfile(browser()->profile());
-  signin_manager->SetAuthenticatedUsername(username);
+  signin_manager->SetAuthenticatedAccountInfo(username, username);
 }
 
 void InlineLoginUIBrowserTest::EnableSigninAllowed(bool enable) {
@@ -188,9 +189,8 @@ IN_PROC_BROWSER_TEST_F(InlineLoginUIBrowserTest, MAYBE_DifferentStorageId) {
     // Make sure storage partition of embedded webview is different from
     // parent.
     std::set<content::WebContents*> set;
-    extensions::GuestViewManager* manager =
-        extensions::GuestViewManager::FromBrowserContext(
-            info.contents->GetBrowserContext());
+    GuestViewManager* manager = GuestViewManager::FromBrowserContext(
+        info.contents->GetBrowserContext());
     manager->ForEachGuest(info.contents, base::Bind(&AddToSet, &set));
     ASSERT_EQ(1u, set.size());
     content::WebContents* webview_contents = *set.begin();
@@ -253,7 +253,7 @@ IN_PROC_BROWSER_TEST_F(InlineLoginUIBrowserTest, CanOfferNoProfile) {
   std::string error_message;
   EXPECT_FALSE(InlineLoginHandlerImpl::CanOffer(
       NULL, InlineLoginHandlerImpl::CAN_OFFER_FOR_ALL,
-      "user@gmail.com", &error_message));
+      "12345", "user@gmail.com", &error_message));
   EXPECT_EQ("", error_message);
 }
 
@@ -261,7 +261,7 @@ IN_PROC_BROWSER_TEST_F(InlineLoginUIBrowserTest, CanOffer) {
   EnableOneClick(true);
   EXPECT_TRUE(InlineLoginHandlerImpl::CanOffer(
       browser()->profile(), InlineLoginHandlerImpl::CAN_OFFER_FOR_ALL,
-      "user@gmail.com", NULL));
+      "12345", "user@gmail.com", NULL));
 
   EnableOneClick(false);
 
@@ -269,7 +269,7 @@ IN_PROC_BROWSER_TEST_F(InlineLoginUIBrowserTest, CanOffer) {
 
   EXPECT_TRUE(InlineLoginHandlerImpl::CanOffer(
       browser()->profile(), InlineLoginHandlerImpl::CAN_OFFER_FOR_ALL,
-      "user@gmail.com", &error_message));
+      "12345", "user@gmail.com", &error_message));
 }
 
 IN_PROC_BROWSER_TEST_F(InlineLoginUIBrowserTest, CanOfferProfileConnected) {
@@ -280,13 +280,13 @@ IN_PROC_BROWSER_TEST_F(InlineLoginUIBrowserTest, CanOfferProfileConnected) {
 
   EXPECT_TRUE(InlineLoginHandlerImpl::CanOffer(
       browser()->profile(), InlineLoginHandlerImpl::CAN_OFFER_FOR_ALL,
-      "foo@gmail.com", &error_message));
+      "12345", "foo@gmail.com", &error_message));
   EXPECT_TRUE(InlineLoginHandlerImpl::CanOffer(
       browser()->profile(), InlineLoginHandlerImpl::CAN_OFFER_FOR_ALL,
-      "foo", &error_message));
+      "12345", "foo", &error_message));
   EXPECT_FALSE(InlineLoginHandlerImpl::CanOffer(
       browser()->profile(), InlineLoginHandlerImpl::CAN_OFFER_FOR_ALL,
-      "user@gmail.com", &error_message));
+      "12345", "user@gmail.com", &error_message));
   EXPECT_EQ(l10n_util::GetStringFUTF8(IDS_SYNC_WRONG_EMAIL,
                                       base::UTF8ToUTF16("foo@gmail.com")),
             error_message);
@@ -298,7 +298,7 @@ IN_PROC_BROWSER_TEST_F(InlineLoginUIBrowserTest, CanOfferUsernameNotAllowed) {
   std::string error_message;
   EXPECT_FALSE(InlineLoginHandlerImpl::CanOffer(
       browser()->profile(), InlineLoginHandlerImpl::CAN_OFFER_FOR_ALL,
-      "foo@gmail.com", &error_message));
+      "12345", "foo@gmail.com", &error_message));
   EXPECT_EQ(l10n_util::GetStringUTF8(IDS_SYNC_LOGIN_NAME_PROHIBITED),
             error_message);
 }
@@ -312,10 +312,10 @@ IN_PROC_BROWSER_TEST_F(InlineLoginUIBrowserTest, CanOfferWithRejectedEmail) {
   std::string error_message;
   EXPECT_TRUE(InlineLoginHandlerImpl::CanOffer(
       browser()->profile(), InlineLoginHandlerImpl::CAN_OFFER_FOR_ALL,
-      "foo@gmail.com", &error_message));
+      "12345", "foo@gmail.com", &error_message));
   EXPECT_TRUE(InlineLoginHandlerImpl::CanOffer(
       browser()->profile(), InlineLoginHandlerImpl::CAN_OFFER_FOR_ALL,
-      "user@gmail.com", &error_message));
+      "12345", "user@gmail.com", &error_message));
 }
 
 IN_PROC_BROWSER_TEST_F(InlineLoginUIBrowserTest, CanOfferNoSigninCookies) {
@@ -325,7 +325,7 @@ IN_PROC_BROWSER_TEST_F(InlineLoginUIBrowserTest, CanOfferNoSigninCookies) {
   std::string error_message;
   EXPECT_FALSE(InlineLoginHandlerImpl::CanOffer(
       browser()->profile(), InlineLoginHandlerImpl::CAN_OFFER_FOR_ALL,
-      "user@gmail.com", &error_message));
+      "12345", "user@gmail.com", &error_message));
   EXPECT_EQ("", error_message);
 }
 

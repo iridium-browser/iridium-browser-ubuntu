@@ -7,7 +7,7 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
-#include "base/metrics/field_trial.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
@@ -21,6 +21,7 @@
 #include "extensions/common/extension_resource.h"
 #include "extensions/common/extension_urls.h"
 #include "extensions/common/manifest_handlers/icons_handler.h"
+#include "extensions/common/manifest_url_handlers.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
@@ -47,8 +48,6 @@ ExtensionUninstallDialog::ExtensionUninstallDialog(
     ExtensionUninstallDialog::Delegate* delegate)
     : profile_(profile),
       delegate_(delegate),
-      extension_(NULL),
-      triggering_extension_(NULL),
       ui_loop_(base::MessageLoop::current()) {
 }
 
@@ -70,7 +69,7 @@ void ExtensionUninstallDialog::ConfirmUninstall(const Extension* extension) {
                             ? extension_misc::EXTENSION_ICON_SMALL * 2
                             : extension_misc::EXTENSION_ICON_LARGE;
   ExtensionResource image = IconsInfo::GetIconResource(
-      extension_, icon_size, ExtensionIconSet::MATCH_BIGGER);
+      extension_.get(), icon_size, ExtensionIconSet::MATCH_BIGGER);
 
   // Load the image asynchronously. The response will be sent to OnImageLoaded.
   ImageLoader* loader = ImageLoader::Get(profile_);
@@ -82,7 +81,7 @@ void ExtensionUninstallDialog::ConfirmUninstall(const Extension* extension) {
       ImageLoader::ImageRepresentation::NEVER_RESIZE,
       gfx::Size(),
       ui::SCALE_FACTOR_100P));
-  loader->LoadImagesAsync(extension_,
+  loader->LoadImagesAsync(extension_.get(),
                           images_list,
                           base::Bind(&ExtensionUninstallDialog::OnImageLoaded,
                                      AsWeakPtr(),
@@ -129,8 +128,17 @@ std::string ExtensionUninstallDialog::GetHeadingText() {
 }
 
 bool ExtensionUninstallDialog::ShouldShowReportAbuseCheckbox() const {
-  return base::FieldTrialList::FindFullName("ExtensionUninstall.ReportAbuse") ==
-      "ShowCheckbox";
+  return ManifestURL::UpdatesFromGallery(extension_.get());
+}
+
+void ExtensionUninstallDialog::OnDialogClosed(CloseAction action) {
+  // We don't want to artificially weight any of the options, so only record if
+  // reporting abuse was available.
+  if (ShouldShowReportAbuseCheckbox()) {
+    UMA_HISTOGRAM_ENUMERATION("Extensions.UninstallDialogAction",
+                              action,
+                              CLOSE_ACTION_LAST);
+  }
 }
 
 void ExtensionUninstallDialog::HandleReportAbuse() {

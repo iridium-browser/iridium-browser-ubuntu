@@ -39,6 +39,12 @@ class PasswordAutofillAgent : public content::RenderFrameObserver {
   bool TextFieldHandlingKeyDown(const blink::WebInputElement& element,
                                 const blink::WebKeyboardEvent& event);
 
+  // Function that should be called whenever the value of |element| changes due
+  // to user input. This is separate from TextDidChangeInTextField() as that
+  // function may trigger UI and should only be called when other UI won't be
+  // shown.
+  void UpdateStateForTextChange(const blink::WebInputElement& element);
+
   // Fills the username and password fields of this form with the given values.
   // Returns true if the fields were filled, false otherwise.
   bool FillSuggestion(const blink::WebNode& node,
@@ -59,8 +65,13 @@ class PasswordAutofillAgent : public content::RenderFrameObserver {
   // Shows an Autofill popup with username suggestions for |element|. If
   // |show_all| is |true|, will show all possible suggestions for that element,
   // otherwise shows suggestions based on current value of |element|.
+  // If |generation_popup_showing| is true, this function will return false
+  // as both UIs should not be shown at the same time. This function should
+  // still be called in this situation so that UMA stats can be logged.
   // Returns true if any suggestions were shown, false otherwise.
-  bool ShowSuggestions(const blink::WebInputElement& element, bool show_all);
+  bool ShowSuggestions(const blink::WebInputElement& element,
+                       bool show_all,
+                       bool generation_popup_showing);
 
   // Called when new form controls are inserted.
   void OnDynamicFormsSeen();
@@ -101,6 +112,8 @@ class PasswordAutofillAgent : public content::RenderFrameObserver {
     // The user manually edited the password more recently than the username was
     // changed.
     bool password_was_edited_last;
+    // The user edited the username field after page loading.
+    bool username_was_edited;
     PasswordInfo();
   };
   typedef std::map<blink::WebInputElement, PasswordInfo> LoginToPasswordInfoMap;

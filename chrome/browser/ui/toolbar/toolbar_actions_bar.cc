@@ -7,14 +7,15 @@
 #include "base/auto_reset.h"
 #include "base/profiler/scoped_tracker.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
+#include "chrome/browser/extensions/extension_message_bubble_controller.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/extensions/extension_action_view_controller.h"
+#include "chrome/browser/ui/extensions/extension_message_bubble_factory.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/ui/toolbar/component_toolbar_actions_factory.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_controller.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar_delegate.h"
@@ -99,304 +100,7 @@ void SortContainer(std::vector<Type1>* to_sort,
 bool ToolbarActionsBar::disable_animations_for_testing_ = false;
 
 // static
-bool ToolbarActionsBar::pop_out_actions_to_run_ = false;
-
-// static
 bool ToolbarActionsBar::send_overflowed_action_changes_ = true;
-
-// A class to implement an optional tab ordering that "pops out" actions that
-// want to run on a particular page, as part of our experimentation with how to
-// best signal that actions like extension page actions want to run.
-// TODO(devlin): Once we finally settle on the right behavior, determine if
-// we need this.
-class ToolbarActionsBar::TabOrderHelper
-    : public TabStripModelObserver {
- public:
-  TabOrderHelper(ToolbarActionsBar* toolbar,
-                 Browser* browser,
-                 extensions::ExtensionToolbarModel* model);
-  ~TabOrderHelper() override;
-
-  // Returns the number of extra icons that should appear on the given |tab_id|
-  // because of actions that are going to pop out.
-  size_t GetExtraIconCount(int tab_id);
-
-  // Returns the item order of actions for the tab with the given
-  // |web_contents|.
-  WeakToolbarActions GetActionOrder(content::WebContents* web_contents);
-
-  // Notifies the TabOrderHelper that a given |action| does/doesn't want to run
-  // on the tab indicated by |tab_id|.
-  void SetActionWantsToRun(ToolbarActionViewController* action,
-                           int tab_id,
-                           bool wants_to_run);
-
-  // Notifies the TabOrderHelper that a given |action| has been removed.
-  void ActionRemoved(ToolbarActionViewController* action);
-
-  // Handles a resize, including updating any actions that want to act and
-  // updating the model.
-  void HandleResize(size_t resized_count, int tab_id);
-
-  // Handles a drag and drop, including updating any actions that want to act
-  // and updating the model.
-  void HandleDragDrop(int dragged,
-                      int dropped,
-                      ToolbarActionsBar::DragType drag_type,
-                      int tab_id);
-
-  void notify_overflow_bar(ToolbarActionsBar* overflow_bar,
-                           bool should_notify) {
-    // There's a possibility that a new overflow bar can be constructed before
-    // the first is fully destroyed. Only un-register the |overflow_bar_| if
-    // it's the one making the request.
-    if (should_notify)
-      overflow_bar_ = overflow_bar;
-    else if (overflow_bar_ == overflow_bar)
-      overflow_bar_ = nullptr;
-  }
-
- private:
-  // TabStripModelObserver:
-  void TabInsertedAt(content::WebContents* web_contents,
-                     int index,
-                     bool foreground) override;
-  void TabDetachedAt(content::WebContents* web_contents, int index) override;
-  void ActiveTabChanged(content::WebContents* old_contents,
-                        content::WebContents* new_contents,
-                        int index,
-                        int reason) override;
-  void TabStripModelDeleted() override;
-
-  // Notifies the main |toolbar_| and, if present, the |overflow_bar_| that
-  // actions need to be reordered.
-  void NotifyReorderActions();
-
-  // The set of tabs for the given action (the key) is currently "popped out".
-  // "Popped out" actions are those that were in the overflow menu normally, but
-  // want to run and are moved to the main bar so the user can see them.
-  std::map<ToolbarActionViewController*, std::set<int>> popped_out_in_tabs_;
-
-  // The set of tab ids that have been checked for whether actions need to be
-  // popped out or not.
-  std::set<int> tabs_checked_for_pop_out_;
-
-  // The owning ToolbarActionsBar.
-  ToolbarActionsBar* toolbar_;
-
-  // The overflow bar, if one is present.
-  ToolbarActionsBar* overflow_bar_;
-
-  // The associated toolbar model.
-  extensions::ExtensionToolbarModel* model_;
-
-  // A scoped tab strip observer so we can clean up |tabs_checked_for_popout_|.
-  ScopedObserver<TabStripModel, TabStripModelObserver> tab_strip_observer_;
-
-  DISALLOW_COPY_AND_ASSIGN(TabOrderHelper);
-};
-
-ToolbarActionsBar::TabOrderHelper::TabOrderHelper(
-    ToolbarActionsBar* toolbar,
-    Browser* browser,
-    extensions::ExtensionToolbarModel* model)
-    : toolbar_(toolbar),
-      overflow_bar_(nullptr),
-      model_(model),
-      tab_strip_observer_(this) {
-  tab_strip_observer_.Add(browser->tab_strip_model());
-}
-
-ToolbarActionsBar::TabOrderHelper::~TabOrderHelper() {
-}
-
-size_t ToolbarActionsBar::TabOrderHelper::GetExtraIconCount(int tab_id) {
-  size_t extra_icons = 0;
-  const WeakToolbarActions& toolbar_actions = toolbar_->toolbar_actions();
-  for (ToolbarActionViewController* action : toolbar_actions) {
-    auto actions_tabs = popped_out_in_tabs_.find(action);
-    if (actions_tabs != popped_out_in_tabs_.end() &&
-        actions_tabs->second.count(tab_id))
-      ++extra_icons;
-  }
-  return extra_icons;
-}
-
-void ToolbarActionsBar::TabOrderHelper::HandleResize(size_t resized_count,
-                                                     int tab_id) {
-  int extra = GetExtraIconCount(tab_id);
-  size_t tab_icon_count = model_->visible_icon_count() + extra;
-  bool reorder_necessary = false;
-  const WeakToolbarActions& toolbar_actions = toolbar_->toolbar_actions();
-  if (resized_count < tab_icon_count) {
-    for (int i = resized_count; i < extra; ++i) {
-      // If an extension that was popped out to act is overflowed, then it
-      // should no longer be popped out, and it also doesn't count for adjusting
-      // the visible count (since it wasn't really out to begin with).
-      if (popped_out_in_tabs_[toolbar_actions[i]].count(tab_id)) {
-        reorder_necessary = true;
-        popped_out_in_tabs_[toolbar_actions[i]].erase(tab_id);
-        ++(resized_count);
-      }
-    }
-  } else {
-    // If the user increases the toolbar size while actions that popped out are
-    // visible, we need to re-arrange the icons in other windows to be
-    // consistent with what the user sees.
-    // That is, if the normal order is A, B, [C, D] (with C and D hidden), C
-    // pops out to act, and then the user increases the size of the toolbar,
-    // the user sees uncovering D (since C is already out). This is what should
-    // happen in all windows.
-    for (size_t i = tab_icon_count; i < resized_count; ++i) {
-      if (toolbar_actions[i]->GetId() !=
-              model_->toolbar_items()[i - extra]->id())
-        model_->MoveExtensionIcon(toolbar_actions[i]->GetId(), i - extra);
-    }
-  }
-
-  resized_count -= extra;
-  model_->SetVisibleIconCount(resized_count);
-  if (reorder_necessary)
-    NotifyReorderActions();
-}
-
-void ToolbarActionsBar::TabOrderHelper::HandleDragDrop(
-    int dragged_index,
-    int dropped_index,
-    ToolbarActionsBar::DragType drag_type,
-    int tab_id) {
-  const WeakToolbarActions& toolbar_actions = toolbar_->toolbar_actions();
-  ToolbarActionViewController* action = toolbar_actions[dragged_index];
-  int delta = 0;
-  switch (drag_type) {
-    case ToolbarActionsBar::DRAG_TO_OVERFLOW:
-      // If the user moves an action back into overflow, then we don't adjust
-      // the base visible count, but do stop popping that action out.
-      if (popped_out_in_tabs_[action].count(tab_id))
-        popped_out_in_tabs_[action].erase(tab_id);
-      else
-        delta = -1;
-      break;
-    case ToolbarActionsBar::DRAG_TO_MAIN:
-      delta = 1;
-      break;
-    case ToolbarActionsBar::DRAG_TO_SAME:
-      // If the user moves an action that had popped out to be on the toolbar,
-      // then we treat it as "pinning" the action, and adjust the base visible
-      // count to accommodate.
-      if (popped_out_in_tabs_[action].count(tab_id)) {
-        delta = 1;
-        popped_out_in_tabs_[action].erase(tab_id);
-      }
-      break;
-  }
-
-  // If there are any actions that are in front of the dropped index only
-  // because they were popped out, decrement the dropped index.
-  for (int i = 0; i < dropped_index; ++i) {
-    if (i != dragged_index &&
-        model_->GetIndexForId(toolbar_actions[i]->GetId()) >= dropped_index)
-      --dropped_index;
-  }
-
-  model_->MoveExtensionIcon(action->GetId(), dropped_index);
-
-  if (delta)
-    model_->SetVisibleIconCount(model_->visible_icon_count() + delta);
-}
-
-void ToolbarActionsBar::TabOrderHelper::SetActionWantsToRun(
-    ToolbarActionViewController* action,
-    int tab_id,
-    bool wants_to_run) {
-  bool is_overflowed = model_->GetIndexForId(action->GetId()) >=
-      static_cast<int>(model_->visible_icon_count());
-  bool reorder_necessary = false;
-  if (wants_to_run && is_overflowed) {
-    popped_out_in_tabs_[action].insert(tab_id);
-    reorder_necessary = true;
-  } else if (!wants_to_run && popped_out_in_tabs_[action].count(tab_id)) {
-    popped_out_in_tabs_[action].erase(tab_id);
-    reorder_necessary = true;
-  }
-  if (reorder_necessary)
-    NotifyReorderActions();
-}
-
-void ToolbarActionsBar::TabOrderHelper::ActionRemoved(
-    ToolbarActionViewController* action) {
-  popped_out_in_tabs_.erase(action);
-}
-
-WeakToolbarActions ToolbarActionsBar::TabOrderHelper::GetActionOrder(
-    content::WebContents* web_contents) {
-  WeakToolbarActions toolbar_actions = toolbar_->toolbar_actions();
-  // First, make sure that we've checked any actions that want to run.
-  int tab_id = SessionTabHelper::IdForTab(web_contents);
-  if (!tabs_checked_for_pop_out_.count(tab_id)) {
-    tabs_checked_for_pop_out_.insert(tab_id);
-    for (ToolbarActionViewController* toolbar_action : toolbar_actions) {
-      if (toolbar_action->WantsToRun(web_contents))
-        popped_out_in_tabs_[toolbar_action].insert(tab_id);
-    }
-  }
-
-  // Then, shift any actions that want to run to the front.
-  size_t insert_at = 0;
-  // Rotate any actions that want to run to the boundary between visible and
-  // overflowed actions.
-  for (WeakToolbarActions::iterator iter =
-           toolbar_actions.begin() + model_->visible_icon_count();
-       iter != toolbar_actions.end(); ++iter) {
-    if (popped_out_in_tabs_[(*iter)].count(tab_id)) {
-      std::rotate(toolbar_actions.begin() + insert_at, iter, iter + 1);
-      ++insert_at;
-    }
-  }
-
-  return toolbar_actions;
-}
-
-void ToolbarActionsBar::TabOrderHelper::TabInsertedAt(
-    content::WebContents* web_contents,
-    int index,
-    bool foreground) {
-  if (foreground)
-    NotifyReorderActions();
-}
-
-void ToolbarActionsBar::TabOrderHelper::TabDetachedAt(
-    content::WebContents* web_contents,
-    int index) {
-  int tab_id = SessionTabHelper::IdForTab(web_contents);
-  for (auto& tabs : popped_out_in_tabs_)
-    tabs.second.erase(tab_id);
-  tabs_checked_for_pop_out_.erase(tab_id);
-}
-
-void ToolbarActionsBar::TabOrderHelper::ActiveTabChanged(
-    content::WebContents* old_contents,
-    content::WebContents* new_contents,
-    int index,
-    int reason) {
-  // When we do a bulk-refresh by switching tabs, we don't animate the
-  // difference. We only animate when it's a change driven by the action or the
-  // user.
-  base::AutoReset<bool> animation_reset(&toolbar_->suppress_animation_, true);
-  NotifyReorderActions();
-}
-
-void ToolbarActionsBar::TabOrderHelper::TabStripModelDeleted() {
-  tab_strip_observer_.RemoveAll();
-}
-
-void ToolbarActionsBar::TabOrderHelper::NotifyReorderActions() {
-  // Reorder the reference toolbar first (since we use its actions in
-  // GetActionOrder()).
-  toolbar_->ReorderActions();
-  if (overflow_bar_)
-    overflow_bar_->ReorderActions();
-}
 
 ToolbarActionsBar::PlatformSettings::PlatformSettings(bool in_overflow_mode)
     : left_padding(in_overflow_mode ? kOverflowLeftPadding : kLeftPadding),
@@ -415,19 +119,16 @@ ToolbarActionsBar::ToolbarActionsBar(ToolbarActionsBarDelegate* delegate,
       model_(extensions::ExtensionToolbarModel::Get(browser_->profile())),
       main_bar_(main_bar),
       platform_settings_(main_bar != nullptr),
+      popup_owner_(nullptr),
       model_observer_(this),
       suppress_layout_(false),
       suppress_animation_(true),
-      overflowed_action_wants_to_run_(false) {
+      overflowed_action_wants_to_run_(false),
+      checked_extension_bubble_(false),
+      popped_out_action_(nullptr),
+      weak_ptr_factory_(this) {
   if (model_)  // |model_| can be null in unittests.
     model_observer_.Add(model_);
-
-  if (pop_out_actions_to_run_) {
-    if (in_overflow_mode())
-      main_bar_->tab_order_helper_->notify_overflow_bar(this, true);
-    else
-      tab_order_helper_.reset(new TabOrderHelper(this, browser_, model_));
-  }
 }
 
 ToolbarActionsBar::~ToolbarActionsBar() {
@@ -435,8 +136,6 @@ ToolbarActionsBar::~ToolbarActionsBar() {
   // the order of deletion between the views and the ToolbarActionsBar.
   DCHECK(toolbar_actions_.empty()) <<
       "Must call DeleteActions() before destruction.";
-  if (in_overflow_mode() && pop_out_actions_to_run_)
-    main_bar_->tab_order_helper_->notify_overflow_bar(this, false);
 }
 
 // static
@@ -456,10 +155,8 @@ void ToolbarActionsBar::RegisterProfilePrefs(
       prefs::kToolbarIconSurfacingBubbleAcknowledged,
       false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-  registry->RegisterInt64Pref(
-      prefs::kToolbarIconSurfacingBubbleLastShowTime,
-      0,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterInt64Pref(prefs::kToolbarIconSurfacingBubbleLastShowTime,
+                              0);
 }
 
 gfx::Size ToolbarActionsBar::GetPreferredSize() const {
@@ -532,16 +229,26 @@ size_t ToolbarActionsBar::GetIconCount() const {
   if (!model_)
     return 0u;
 
-  size_t extra_icons = 0;
-  if (tab_order_helper_) {
-    extra_icons = tab_order_helper_->GetExtraIconCount(
-        SessionTabHelper::IdForTab(
-            browser_->tab_strip_model()->GetActiveWebContents()));
+  int pop_out_modifier = 0;
+  // If there is a popped out action, it could affect the number of visible
+  // icons - but only if it wouldn't otherwise be visible.
+  if (popped_out_action_) {
+    size_t popped_out_index =
+        std::find(toolbar_actions_.begin(),
+                  toolbar_actions_.end(),
+                  popped_out_action_) - toolbar_actions_.begin();
+    pop_out_modifier = popped_out_index >= model_->visible_icon_count() ? 1 : 0;
   }
 
+  // We purposefully do not account for any "popped out" actions in overflow
+  // mode. This is because the popup cannot be showing while the overflow menu
+  // is open, so there's no concern there. Also, if the user has a popped out
+  // action, and immediately opens the overflow menu, we *want* the action there
+  // (since it will close the popup, but do so asynchronously, and we don't
+  // want to "slide" the action back in.
   size_t visible_icons = in_overflow_mode() ?
-      toolbar_actions_.size() - main_bar_->GetIconCount() :
-      model_->visible_icon_count() + extra_icons;
+      toolbar_actions_.size() - model_->visible_icon_count() :
+      model_->visible_icon_count() + pop_out_modifier;
 
 #if DCHECK_IS_ON()
   // Good time for some sanity checks: We should never try to display more
@@ -553,17 +260,44 @@ size_t ToolbarActionsBar::GetIconCount() const {
     for (ToolbarActionViewController* action : toolbar_actions_) {
       // No component action should ever have a valid extension id, so we can
       // use this to check the extension amount.
-      // TODO(devlin): Fix this to just check model size when the model also
-      // includes component actions.
       if (crx_file::id_util::IdIsValid(action->GetId()))
         ++num_extension_actions;
     }
-    DCHECK_LE(visible_icons, num_extension_actions);
+
+    int num_component_actions =
+        ComponentToolbarActionsFactory::GetInstance()->
+            GetNumComponentActions();
+    size_t num_total_actions = num_extension_actions + num_component_actions;
+
+    DCHECK_LE(visible_icons, num_total_actions);
     DCHECK_EQ(model_->toolbar_items().size(), num_extension_actions);
   }
 #endif
 
   return visible_icons;
+}
+
+std::vector<ToolbarActionViewController*>
+ToolbarActionsBar::GetActions() const {
+  std::vector<ToolbarActionViewController*> actions = toolbar_actions_.get();
+
+  // If there is an action that should be popped out, and it's not visible by
+  // default, make it the final action in the list.
+  if (popped_out_action_) {
+    size_t index =
+        std::find(actions.begin(), actions.end(), popped_out_action_) -
+        actions.begin();
+    DCHECK_NE(actions.size(), index);
+    size_t visible = GetIconCount();
+    if (index >= visible) {
+      size_t rindex = actions.size() - index - 1;
+      std::rotate(actions.rbegin() + rindex,
+                  actions.rbegin() + rindex + 1,
+                  actions.rend() - visible + 1);
+    }
+  }
+
+  return actions;
 }
 
 void ToolbarActionsBar::CreateActions() {
@@ -590,7 +324,8 @@ void ToolbarActionsBar::CreateActions() {
       toolbar_actions_.push_back(new ExtensionActionViewController(
           extension.get(),
           browser_,
-          action_manager->GetExtensionAction(*extension)));
+          action_manager->GetExtensionAction(*extension),
+          this));
     }
 
     // Component actions come second, and are suppressed if the extension
@@ -631,9 +366,27 @@ void ToolbarActionsBar::CreateActions() {
 
   // Once the actions are created, we should animate the changes.
   suppress_animation_ = false;
+
+  // CreateActions() can be called multiple times, so we need to make sure we
+  // haven't already shown the bubble.
+  if (!checked_extension_bubble_) {
+    checked_extension_bubble_ = true;
+    // CreateActions() can be called as part of the browser window set up, which
+    // we need to let finish before showing the actions.
+    scoped_ptr<extensions::ExtensionMessageBubbleController> controller =
+        ExtensionMessageBubbleFactory(browser_->profile()).GetController();
+    if (controller) {
+      base::MessageLoop::current()->PostTask(
+          FROM_HERE,
+          base::Bind(&ToolbarActionsBar::MaybeShowExtensionBubble,
+                     weak_ptr_factory_.GetWeakPtr(),
+                     base::Passed(controller.Pass())));
+    }
+  }
 }
 
 void ToolbarActionsBar::DeleteActions() {
+  HideActivePopup();
   delegate_->RemoveAllViews();
   toolbar_actions_.clear();
 }
@@ -664,13 +417,7 @@ void ToolbarActionsBar::OnResizeComplete(int width) {
   // Save off the desired number of visible icons. We do this now instead of
   // at the end of the animation so that even if the browser is shut down
   // while animating, the right value will be restored on next run.
-  if (tab_order_helper_) {
-    tab_order_helper_->HandleResize(
-        resized_count,
-        SessionTabHelper::IdForTab(GetCurrentWebContents()));
-  } else {
-    model_->SetVisibleIconCount(resized_count);
-  }
+  model_->SetVisibleIconCount(resized_count);
 }
 
 void ToolbarActionsBar::OnDragDrop(int dragged_index,
@@ -682,51 +429,106 @@ void ToolbarActionsBar::OnDragDrop(int dragged_index,
     return;
   }
 
-  if (tab_order_helper_) {
-    tab_order_helper_->HandleDragDrop(
-        dragged_index,
-        dropped_index,
-        drag_type,
-        SessionTabHelper::IdForTab(GetCurrentWebContents()));
-  } else {
-    int delta = 0;
-    if (drag_type == DRAG_TO_OVERFLOW)
-      delta = -1;
-    else if (drag_type == DRAG_TO_MAIN)
-      delta = 1;
-    model_->MoveExtensionIcon(toolbar_actions_[dragged_index]->GetId(),
-                              dropped_index);
-    if (delta)
-      model_->SetVisibleIconCount(model_->visible_icon_count() + delta);
+  int delta = 0;
+  if (drag_type == DRAG_TO_OVERFLOW)
+    delta = -1;
+  else if (drag_type == DRAG_TO_MAIN)
+    delta = 1;
+  model_->MoveExtensionIcon(toolbar_actions_[dragged_index]->GetId(),
+                            dropped_index);
+  if (delta)
+    model_->SetVisibleIconCount(model_->visible_icon_count() + delta);
+}
+
+void ToolbarActionsBar::OnAnimationEnded() {
+  // Check if we were waiting for animation to complete to either show a
+  // message bubble, or to show a popup.
+  if (pending_extension_bubble_controller_) {
+    MaybeShowExtensionBubble(pending_extension_bubble_controller_.Pass());
+  } else if (!popped_out_closure_.is_null()) {
+    popped_out_closure_.Run();
+    popped_out_closure_.Reset();
   }
 }
 
-bool ToolbarActionsBar::ShouldShowInfoBubble() {
-  // If the redesign isn't running, or the user has already acknowledged it,
-  // we don't show the bubble.
-  PrefService* prefs = browser_->profile()->GetPrefs();
-  if (!extensions::FeatureSwitch::extension_action_redesign()->IsEnabled() ||
-      (prefs->HasPrefPath(prefs::kToolbarIconSurfacingBubbleAcknowledged) &&
-       prefs->GetBoolean(prefs::kToolbarIconSurfacingBubbleAcknowledged)))
-    return false;
+bool ToolbarActionsBar::IsActionVisible(
+    const ToolbarActionViewController* action) const {
+  size_t index = std::find(toolbar_actions_.begin(),
+                           toolbar_actions_.end(),
+                           action) - toolbar_actions_.begin();
+  return index < GetIconCount() || action == popped_out_action_;
+}
 
-  // We don't show more than once per day.
-  if (prefs->HasPrefPath(prefs::kToolbarIconSurfacingBubbleLastShowTime)) {
-    base::Time last_shown_time = base::Time::FromInternalValue(
-        prefs->GetInt64(prefs::kToolbarIconSurfacingBubbleLastShowTime));
-    if (base::Time::Now() - last_shown_time < base::TimeDelta::FromDays(1))
-      return false;
+void ToolbarActionsBar::PopOutAction(ToolbarActionViewController* controller,
+                                     const base::Closure& closure) {
+  DCHECK(!popped_out_action_) << "Only one action can be popped out at a time!";
+  bool needs_redraw = !IsActionVisible(controller);
+  popped_out_action_ = controller;
+  if (needs_redraw) {
+    // We suppress animation for this draw, because we need the action to get
+    // into position immediately, since it's about to show its popup.
+    base::AutoReset<bool> layout_resetter(&suppress_animation_, false);
+    delegate_->Redraw(true);
   }
 
-  if (!model_->RedesignIsShowingNewIcons()) {
-    // We only show the bubble if there are any new icons present - otherwise,
-    // the user won't see anything different, so we treat it as acknowledged.
-    OnToolbarActionsBarBubbleClosed(
-        ToolbarActionsBarBubbleDelegate::ACKNOWLEDGED);
-    return false;
+  ResizeDelegate(gfx::Tween::LINEAR, false);
+  if (!delegate_->IsAnimating()) {
+    // Don't call the closure re-entrantly.
+    base::MessageLoop::current()->PostTask(FROM_HERE, closure);
+  } else {
+    popped_out_closure_ = closure;
   }
+}
 
-  return true;
+void ToolbarActionsBar::UndoPopOut() {
+  DCHECK(popped_out_action_);
+  ToolbarActionViewController* controller = popped_out_action_;
+  popped_out_action_ = nullptr;
+  popped_out_closure_.Reset();
+  if (!IsActionVisible(controller))
+    delegate_->Redraw(true);
+  ResizeDelegate(gfx::Tween::LINEAR, false);
+}
+
+void ToolbarActionsBar::SetPopupOwner(
+    ToolbarActionViewController* popup_owner) {
+  // We should never be setting a popup owner when one already exists, and
+  // never unsetting one when one wasn't set.
+  DCHECK((!popup_owner_ && popup_owner) ||
+         (popup_owner_ && !popup_owner));
+  popup_owner_ = popup_owner;
+}
+
+void ToolbarActionsBar::HideActivePopup() {
+  if (popup_owner_)
+    popup_owner_->HidePopup();
+  DCHECK(!popup_owner_);
+}
+
+ToolbarActionViewController* ToolbarActionsBar::GetMainControllerForAction(
+    ToolbarActionViewController* action) {
+  return in_overflow_mode() ?
+      main_bar_->GetActionForId(action->GetId()) : action;
+}
+
+void ToolbarActionsBar::MaybeShowExtensionBubble(
+    scoped_ptr<extensions::ExtensionMessageBubbleController> controller) {
+  controller->HighlightExtensionsIfNecessary();  // Safe to call multiple times.
+  if (delegate_->IsAnimating()) {
+    // If the toolbar is animating, we can't effectively anchor the bubble,
+    // so wait until animation stops.
+    pending_extension_bubble_controller_ = controller.Pass();
+  } else {
+    const extensions::ExtensionIdList& affected_extensions =
+        controller->GetExtensionIdList();
+    ToolbarActionViewController* anchor_action = nullptr;
+    for (const std::string& id : affected_extensions) {
+      anchor_action = GetActionForId(id);
+      if (anchor_action)
+        break;
+    }
+    delegate_->ShowExtensionMessageBubble(controller.Pass(), anchor_action);
+  }
 }
 
 void ToolbarActionsBar::OnToolbarExtensionAdded(
@@ -741,7 +543,8 @@ void ToolbarActionsBar::OnToolbarExtensionAdded(
           extension,
           browser_,
           extensions::ExtensionActionManager::Get(browser_->profile())->
-              GetExtensionAction(*extension)));
+              GetExtensionAction(*extension),
+          this));
 
   delegate_->AddViewForAction(toolbar_actions_[index], index);
 
@@ -775,8 +578,6 @@ void ToolbarActionsBar::OnToolbarExtensionRemoved(
   scoped_ptr<ToolbarActionViewController> removed_action(*iter);
   toolbar_actions_.weak_erase(iter);
   delegate_->RemoveViewForAction(removed_action.get());
-  if (tab_order_helper_)
-    tab_order_helper_->ActionRemoved(removed_action.get());
   removed_action.reset();
 
   // If the extension is being upgraded we don't want the bar to shrink
@@ -819,25 +620,16 @@ void ToolbarActionsBar::OnToolbarExtensionUpdated(
   // There might not be a view in cases where we are highlighting or if we
   // haven't fully initialized the actions.
   if (action) {
-    content::WebContents* web_contents = GetCurrentWebContents();
     action->UpdateState();
-
-    if (tab_order_helper_) {
-      tab_order_helper_->SetActionWantsToRun(
-          action,
-          SessionTabHelper::IdForTab(web_contents),
-          action->WantsToRun(web_contents));
-    }
+    SetOverflowedActionWantsToRun();
   }
-
-  SetOverflowedActionWantsToRun();
 }
 
 bool ToolbarActionsBar::ShowExtensionActionPopup(
     const extensions::Extension* extension,
     bool grant_active_tab) {
   // Don't override another popup, and only show in the active window.
-  if (delegate_->IsPopupRunning() || !browser_->window()->IsActive())
+  if (popup_owner() || !browser_->window()->IsActive())
     return false;
 
   ToolbarActionViewController* action = GetActionForId(extension->id());
@@ -898,24 +690,6 @@ Browser* ToolbarActionsBar::GetBrowser() {
   return browser_;
 }
 
-void ToolbarActionsBar::OnToolbarActionsBarBubbleShown() {
-  // Record the last time the bubble was shown.
-  browser_->profile()->GetPrefs()->SetInt64(
-      prefs::kToolbarIconSurfacingBubbleLastShowTime,
-      base::Time::Now().ToInternalValue());
-}
-
-void ToolbarActionsBar::OnToolbarActionsBarBubbleClosed(CloseAction action) {
-  if (action == ToolbarActionsBarBubbleDelegate::ACKNOWLEDGED) {
-    PrefService* prefs = browser_->profile()->GetPrefs();
-    prefs->SetBoolean(prefs::kToolbarIconSurfacingBubbleAcknowledged, true);
-    // Once the bubble is acknowledged, we no longer need to store the last
-    // show time.
-    if (prefs->HasPrefPath(prefs::kToolbarIconSurfacingBubbleLastShowTime))
-      prefs->ClearPref(prefs::kToolbarIconSurfacingBubbleLastShowTime);
-  }
-}
-
 void ToolbarActionsBar::ReorderActions() {
   if (toolbar_actions_.empty())
     return;
@@ -926,21 +700,6 @@ void ToolbarActionsBar::ReorderActions() {
     return action->GetId() == ext->id();
   };
   SortContainer(&toolbar_actions_.get(), model_->toolbar_items(), compare);
-
-  // Only adjust the order if the model isn't highlighting a particular
-  // subset (and the specialized tab order is enabled).
-  TabOrderHelper* tab_order_helper = in_overflow_mode() ?
-      main_bar_->tab_order_helper_.get() : tab_order_helper_.get();
-  if (!model_->is_highlighting() && tab_order_helper) {
-    WeakToolbarActions new_order =
-        tab_order_helper->GetActionOrder(GetCurrentWebContents());
-    auto compare = [](ToolbarActionViewController* const& first,
-                      ToolbarActionViewController* const& second) {
-      return first->GetId() == second->GetId();
-    };
-    SortContainer(
-        &toolbar_actions_.get(), new_order, compare);
-  }
 
   // Our visible browser actions may have changed - re-Layout() and check the
   // size (if we aren't suppressing the layout).

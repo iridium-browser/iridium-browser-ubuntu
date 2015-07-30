@@ -9,8 +9,10 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/logging.h"
+#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "media/base/cdm_callback_promise.h"
+#include "media/base/cdm_config.h"
 #include "media/base/cdm_factory.h"
 #include "media/base/cdm_key_information.h"
 #include "media/base/key_systems.h"
@@ -25,11 +27,24 @@ namespace media {
 // EME API.
 const int kSessionClosedSystemCode = 29127;
 
+ProxyDecryptor::PendingGenerateKeyRequestData::PendingGenerateKeyRequestData(
+    EmeInitDataType init_data_type,
+    const std::vector<uint8>& init_data)
+    : init_data_type(init_data_type), init_data(init_data) {
+}
+
+ProxyDecryptor::PendingGenerateKeyRequestData::
+    ~PendingGenerateKeyRequestData() {
+}
+
 ProxyDecryptor::ProxyDecryptor(MediaPermission* media_permission,
+                               bool use_hw_secure_codecs,
                                const KeyAddedCB& key_added_cb,
                                const KeyErrorCB& key_error_cb,
                                const KeyMessageCB& key_message_cb)
-    : media_permission_(media_permission),
+    : is_creating_cdm_(false),
+      media_permission_(media_permission),
+      use_hw_secure_codecs_(use_hw_secure_codecs),
       key_added_cb_(key_added_cb),
       key_error_cb_(key_error_cb),
       key_message_cb_(key_message_cb),
@@ -46,33 +61,79 @@ ProxyDecryptor::~ProxyDecryptor() {
   media_keys_.reset();
 }
 
-CdmContext* ProxyDecryptor::GetCdmContext() {
-  return media_keys_ ? media_keys_->GetCdmContext() : nullptr;
+void ProxyDecryptor::CreateCdm(CdmFactory* cdm_factory,
+                               const std::string& key_system,
+                               const GURL& security_origin,
+                               const CdmContextReadyCB& cdm_context_ready_cb) {
+  DVLOG(1) << __FUNCTION__ << ": key_system = " << key_system;
+  DCHECK(!is_creating_cdm_);
+  DCHECK(!media_keys_);
+
+  // TODO(sandersd): Trigger permissions check here and use it to determine
+  // distinctive identifier support, instead of always requiring the
+  // permission. http://crbug.com/455271
+  CdmConfig cdm_config;
+  cdm_config.allow_distinctive_identifier = true;
+  cdm_config.allow_persistent_state = true;
+  cdm_config.use_hw_secure_codecs = use_hw_secure_codecs_;
+
+  is_creating_cdm_ = true;
+
+  base::WeakPtr<ProxyDecryptor> weak_this = weak_ptr_factory_.GetWeakPtr();
+  cdm_factory->Create(
+      key_system, security_origin, cdm_config,
+      base::Bind(&ProxyDecryptor::OnSessionMessage, weak_this),
+      base::Bind(&ProxyDecryptor::OnSessionClosed, weak_this),
+      base::Bind(&ProxyDecryptor::OnLegacySessionError, weak_this),
+      base::Bind(&ProxyDecryptor::OnSessionKeysChange, weak_this),
+      base::Bind(&ProxyDecryptor::OnSessionExpirationUpdate, weak_this),
+      base::Bind(&ProxyDecryptor::OnCdmCreated, weak_this, key_system,
+                 security_origin, cdm_context_ready_cb));
 }
 
-bool ProxyDecryptor::InitializeCDM(CdmFactory* cdm_factory,
-                                   const std::string& key_system,
-                                   const GURL& security_origin) {
-  DVLOG(1) << "InitializeCDM: key_system = " << key_system;
+void ProxyDecryptor::OnCdmCreated(const std::string& key_system,
+                                  const GURL& security_origin,
+                                  const CdmContextReadyCB& cdm_context_ready_cb,
+                                  scoped_ptr<MediaKeys> cdm,
+                                  const std::string& /* error_message */) {
+  is_creating_cdm_ = false;
 
-  DCHECK(!media_keys_);
-  media_keys_ = CreateMediaKeys(cdm_factory, key_system, security_origin);
-  if (!media_keys_)
-    return false;
+  if (!cdm) {
+    cdm_context_ready_cb.Run(nullptr);
+  } else {
+    key_system_ = key_system;
+    security_origin_ = security_origin;
+    is_clear_key_ = IsClearKey(key_system) || IsExternalClearKey(key_system);
+    media_keys_ = cdm.Pass();
 
-  key_system_ = key_system;
-  security_origin_ = security_origin;
+    cdm_context_ready_cb.Run(media_keys_->GetCdmContext());
+  }
 
-  is_clear_key_ =
-      IsClearKey(key_system) || IsExternalClearKey(key_system);
-  return true;
+  for (const auto& request : pending_requests_)
+    GenerateKeyRequestInternal(request->init_data_type, request->init_data);
+
+  pending_requests_.clear();
+}
+
+void ProxyDecryptor::GenerateKeyRequest(EmeInitDataType init_data_type,
+                                        const uint8* init_data,
+                                        int init_data_length) {
+  std::vector<uint8> init_data_vector(init_data, init_data + init_data_length);
+
+  if (is_creating_cdm_) {
+    pending_requests_.push_back(
+        new PendingGenerateKeyRequestData(init_data_type, init_data_vector));
+    return;
+  }
+
+  GenerateKeyRequestInternal(init_data_type, init_data_vector);
 }
 
 // Returns true if |data| is prefixed with |header| and has data after the
 // |header|.
-bool HasHeader(const uint8* data, int data_length, const std::string& header) {
-  return static_cast<size_t>(data_length) > header.size() &&
-         std::equal(data, data + header.size(), header.begin());
+bool HasHeader(const std::vector<uint8>& data, const std::string& header) {
+  return data.size() > header.size() &&
+         std::equal(header.begin(), header.end(), data.begin());
 }
 
 // Removes the first |length| items from |data|.
@@ -80,23 +141,30 @@ void StripHeader(std::vector<uint8>& data, size_t length) {
   data.erase(data.begin(), data.begin() + length);
 }
 
-bool ProxyDecryptor::GenerateKeyRequest(EmeInitDataType init_data_type,
-                                        const uint8* init_data,
-                                        int init_data_length) {
-  DVLOG(1) << "GenerateKeyRequest()";
+void ProxyDecryptor::GenerateKeyRequestInternal(
+    EmeInitDataType init_data_type,
+    const std::vector<uint8>& init_data) {
+  DVLOG(1) << __FUNCTION__;
+  DCHECK(!is_creating_cdm_);
+
+  if (!media_keys_) {
+    OnLegacySessionError(std::string(), MediaKeys::NOT_SUPPORTED_ERROR, 0,
+                         "CDM creation failed.");
+    return;
+  }
+
   const char kPrefixedApiPersistentSessionHeader[] = "PERSISTENT|";
   const char kPrefixedApiLoadSessionHeader[] = "LOAD_SESSION|";
 
   SessionCreationType session_creation_type = TemporarySession;
-  std::vector<uint8> init_data_vector(init_data, init_data + init_data_length);
-  if (HasHeader(init_data, init_data_length, kPrefixedApiLoadSessionHeader)) {
+  std::vector<uint8> stripped_init_data = init_data;
+  if (HasHeader(init_data, kPrefixedApiLoadSessionHeader)) {
     session_creation_type = LoadSession;
-    StripHeader(init_data_vector, strlen(kPrefixedApiLoadSessionHeader));
-  } else if (HasHeader(init_data,
-                       init_data_length,
-                       kPrefixedApiPersistentSessionHeader)) {
+    StripHeader(stripped_init_data, strlen(kPrefixedApiLoadSessionHeader));
+  } else if (HasHeader(init_data, kPrefixedApiPersistentSessionHeader)) {
     session_creation_type = PersistentSession;
-    StripHeader(init_data_vector, strlen(kPrefixedApiPersistentSessionHeader));
+    StripHeader(stripped_init_data,
+                strlen(kPrefixedApiPersistentSessionHeader));
   }
 
   scoped_ptr<NewSessionCdmPromise> promise(new CdmCallbackPromise<std::string>(
@@ -110,10 +178,10 @@ bool ProxyDecryptor::GenerateKeyRequest(EmeInitDataType init_data_type,
     media_keys_->LoadSession(
         MediaKeys::PERSISTENT_LICENSE_SESSION,
         std::string(
-            reinterpret_cast<const char*>(vector_as_array(&init_data_vector)),
-            init_data_vector.size()),
+            reinterpret_cast<const char*>(vector_as_array(&stripped_init_data)),
+            stripped_init_data.size()),
         promise.Pass());
-    return true;
+    return;
   }
 
   MediaKeys::SessionType session_type =
@@ -125,9 +193,9 @@ bool ProxyDecryptor::GenerateKeyRequest(EmeInitDataType init_data_type,
   // external clear key.
   DCHECK(!key_system_.empty());
   if (CanUseAesDecryptor(key_system_) || IsExternalClearKey(key_system_)) {
-    OnPermissionStatus(session_type, init_data_type, init_data_vector,
+    OnPermissionStatus(session_type, init_data_type, stripped_init_data,
                        promise.Pass(), true /* granted */);
-    return true;
+    return;
   }
 
 #if defined(OS_CHROMEOS) || defined(OS_ANDROID)
@@ -135,13 +203,11 @@ bool ProxyDecryptor::GenerateKeyRequest(EmeInitDataType init_data_type,
       MediaPermission::PROTECTED_MEDIA_IDENTIFIER, security_origin_,
       base::Bind(&ProxyDecryptor::OnPermissionStatus,
                  weak_ptr_factory_.GetWeakPtr(), session_type, init_data_type,
-                 init_data_vector, base::Passed(&promise)));
+                 stripped_init_data, base::Passed(&promise)));
 #else
-  OnPermissionStatus(session_type, init_data_type, init_data_vector,
+  OnPermissionStatus(session_type, init_data_type, stripped_init_data,
                      promise.Pass(), true /* granted */);
 #endif
-
-  return true;
 }
 
 void ProxyDecryptor::OnPermissionStatus(
@@ -156,9 +222,8 @@ void ProxyDecryptor::OnPermissionStatus(
   // on Android) and the permission status will be evaluated then.
   DVLOG_IF(1, !granted) << "Permission request rejected.";
 
-  media_keys_->CreateSessionAndGenerateRequest(
-      session_type, init_data_type, vector_as_array(&init_data),
-      init_data.size(), promise.Pass());
+  media_keys_->CreateSessionAndGenerateRequest(session_type, init_data_type,
+                                               init_data, promise.Pass());
 }
 
 void ProxyDecryptor::AddKey(const uint8* key,
@@ -167,6 +232,12 @@ void ProxyDecryptor::AddKey(const uint8* key,
                             int init_data_length,
                             const std::string& session_id) {
   DVLOG(1) << "AddKey()";
+
+  if (!media_keys_) {
+    OnLegacySessionError(std::string(), MediaKeys::INVALID_STATE_ERROR, 0,
+                         "CDM is not available.");
+    return;
+  }
 
   // In the prefixed API, the session parameter provided to addKey() is
   // optional, so use the single existing session if it exists.
@@ -205,16 +276,24 @@ void ProxyDecryptor::AddKey(const uint8* key,
         GenerateJWKSet(key, key_length, init_data, init_data_length);
     DCHECK(!jwk.empty());
     media_keys_->UpdateSession(new_session_id,
-                               reinterpret_cast<const uint8*>(jwk.data()),
-                               jwk.size(), promise.Pass());
+                               std::vector<uint8_t>(jwk.begin(), jwk.end()),
+                               promise.Pass());
     return;
   }
 
-  media_keys_->UpdateSession(new_session_id, key, key_length, promise.Pass());
+  media_keys_->UpdateSession(new_session_id,
+                             std::vector<uint8_t>(key, key + key_length),
+                             promise.Pass());
 }
 
 void ProxyDecryptor::CancelKeyRequest(const std::string& session_id) {
   DVLOG(1) << "CancelKeyRequest()";
+
+  if (!media_keys_) {
+    OnLegacySessionError(std::string(), MediaKeys::INVALID_STATE_ERROR, 0,
+                         "CDM is not available.");
+    return;
+  }
 
   scoped_ptr<SimpleCdmPromise> promise(new CdmCallbackPromise<>(
       base::Bind(&ProxyDecryptor::OnSessionClosed,
@@ -222,25 +301,6 @@ void ProxyDecryptor::CancelKeyRequest(const std::string& session_id) {
       base::Bind(&ProxyDecryptor::OnLegacySessionError,
                  weak_ptr_factory_.GetWeakPtr(), session_id)));
   media_keys_->RemoveSession(session_id, promise.Pass());
-}
-
-scoped_ptr<MediaKeys> ProxyDecryptor::CreateMediaKeys(
-    CdmFactory* cdm_factory,
-    const std::string& key_system,
-    const GURL& security_origin) {
-  // TODO(sandersd): Trigger permissions check here and use it to determine
-  // distinctive identifier support, instead of always requiring the
-  // permission. http://crbug.com/455271
-  bool allow_distinctive_identifier = true;
-  bool allow_persistent_state = true;
-  base::WeakPtr<ProxyDecryptor> weak_this = weak_ptr_factory_.GetWeakPtr();
-  return cdm_factory->Create(
-      key_system, allow_distinctive_identifier, allow_persistent_state,
-      security_origin, base::Bind(&ProxyDecryptor::OnSessionMessage, weak_this),
-      base::Bind(&ProxyDecryptor::OnSessionClosed, weak_this),
-      base::Bind(&ProxyDecryptor::OnLegacySessionError, weak_this),
-      base::Bind(&ProxyDecryptor::OnSessionKeysChange, weak_this),
-      base::Bind(&ProxyDecryptor::OnSessionExpirationUpdate, weak_this));
 }
 
 void ProxyDecryptor::OnSessionMessage(const std::string& session_id,

@@ -61,6 +61,11 @@ sinon.Mock = function() {};
  */
 sinon.Mock.prototype.expects = function(method) {};
 
+/**
+ * @return {void}
+ */
+sinon.Mock.prototype.restore = function() {};
+
 /** @type {function(...):Function} */
 sinon.spy = function() {};
 
@@ -73,7 +78,7 @@ sinon.spy = function() {};
  * the following can be used to add the sinon.spy functions:
  *   {(sinon.Spy|function():void)}
  *
- * @constructor
+ * @interface
  */
 sinon.Spy = function() {};
 
@@ -81,13 +86,13 @@ sinon.Spy = function() {};
 sinon.Spy.prototype.callCount;
 
 /** @type {boolean} */
-sinon.Spy.prototype.called = false;
+sinon.Spy.prototype.called;
 
 /** @type {boolean} */
-sinon.Spy.prototype.calledOnce = false;
+sinon.Spy.prototype.calledOnce;
 
 /** @type {boolean} */
-sinon.Spy.prototype.calledTwice = false;
+sinon.Spy.prototype.calledTwice;
 
 /** @type {function(...):boolean} */
 sinon.Spy.prototype.calledWith = function() {};
@@ -99,15 +104,22 @@ sinon.Spy.prototype.reset = function() {};
 
 sinon.Spy.prototype.restore = function() {};
 
+/** @type {Array<Array<*>>} */
+sinon.Spy.prototype.args;
+
 /**
- * @param {Object} obj
- * @param {string} method
+ * @param {Object=} opt_obj
+ * @param {string=} opt_method
  * @param {Function=} opt_stubFunction
  * @return {sinon.TestStub}
  */
-sinon.stub = function(obj, method, opt_stubFunction) {};
+sinon.stub = function(opt_obj, opt_method, opt_stubFunction) {};
 
-/** @constructor */
+/**
+ * TODO(jrw): rename to |sinon.Stub| for consistency
+ * @interface
+ * @extends {sinon.Spy}
+ */
 sinon.TestStub = function() {};
 
 /** @type {function(number):{args:Array}} */
@@ -123,6 +135,9 @@ sinon.TestStub.prototype.withArgs = function() {};
 
 /** @type {function(...):sinon.Expectation} */
 sinon.TestStub.prototype.onFirstCall = function() {};
+
+/** @type {function(...):sinon.Expectation} */
+sinon.TestStub.prototype.callsArgWith = function() {};
 
 /** @returns {Object}  */
 sinon.createStubInstance = function (/** * */ constructor) {};

@@ -55,7 +55,7 @@ enum WorldIdConstants {
 };
 
 // This class represent a collection of DOM wrappers for a specific world.
-class DOMWrapperWorld : public RefCounted<DOMWrapperWorld> {
+class CORE_EXPORT DOMWrapperWorld : public RefCounted<DOMWrapperWorld> {
 public:
     static PassRefPtr<DOMWrapperWorld> create(v8::Isolate*, int worldId = -1, int extensionGroup = -1);
 
@@ -68,7 +68,7 @@ public:
     static bool isolatedWorldsExist() { return isolatedWorldCount; }
     static void allWorldsInMainThread(Vector<RefPtr<DOMWrapperWorld>>& worlds);
 
-    static DOMWrapperWorld& world(v8::Handle<v8::Context> context)
+    static DOMWrapperWorld& world(v8::Local<v8::Context> context)
     {
         return ScriptState::from(context)->world();
     }
@@ -126,7 +126,7 @@ public:
 private:
     class DOMObjectHolderBase {
     public:
-        DOMObjectHolderBase(v8::Isolate* isolate, v8::Handle<v8::Value> wrapper)
+        DOMObjectHolderBase(v8::Isolate* isolate, v8::Local<v8::Value> wrapper)
             : m_wrapper(isolate, wrapper)
             , m_world(0)
         {
@@ -135,7 +135,7 @@ private:
 
         DOMWrapperWorld* world() const { return m_world; }
         void setWorld(DOMWrapperWorld* world) { m_world = world; }
-        void setWeak(void (*callback)(const v8::WeakCallbackData<v8::Value, DOMObjectHolderBase>&))
+        void setWeak(void (*callback)(const v8::WeakCallbackInfo<DOMObjectHolderBase>&))
         {
             m_wrapper.setWeak(this, callback);
         }
@@ -148,13 +148,13 @@ private:
     template<typename T>
     class DOMObjectHolder : public DOMObjectHolderBase {
     public:
-        static PassOwnPtr<DOMObjectHolder<T>> create(v8::Isolate* isolate, T* object, v8::Handle<v8::Value> wrapper)
+        static PassOwnPtr<DOMObjectHolder<T>> create(v8::Isolate* isolate, T* object, v8::Local<v8::Value> wrapper)
         {
             return adoptPtr(new DOMObjectHolder(isolate, object, wrapper));
         }
 
     private:
-        DOMObjectHolder(v8::Isolate* isolate, T* object, v8::Handle<v8::Value> wrapper)
+        DOMObjectHolder(v8::Isolate* isolate, T* object, v8::Local<v8::Value> wrapper)
             : DOMObjectHolderBase(isolate, wrapper)
             , m_object(object)
         {
@@ -165,7 +165,7 @@ private:
 
 public:
     template<typename T>
-    void registerDOMObjectHolder(v8::Isolate* isolate, T* object, v8::Handle<v8::Value> wrapper)
+    void registerDOMObjectHolder(v8::Isolate* isolate, T* object, v8::Local<v8::Value> wrapper)
     {
         registerDOMObjectHolderInternal(DOMObjectHolder<T>::create(isolate, object, wrapper));
     }
@@ -173,12 +173,12 @@ public:
 private:
     DOMWrapperWorld(v8::Isolate*, int worldId, int extensionGroup);
 
-    static void weakCallbackForDOMObjectHolder(const v8::WeakCallbackData<v8::Value, DOMObjectHolderBase>&);
+    static void weakCallbackForDOMObjectHolder(const v8::WeakCallbackInfo<DOMObjectHolderBase>&);
     void registerDOMObjectHolderInternal(PassOwnPtr<DOMObjectHolderBase>);
     void unregisterDOMObjectHolder(DOMObjectHolderBase*);
 
-    CORE_EXPORT static unsigned isolatedWorldCount;
-    CORE_EXPORT static DOMWrapperWorld* worldOfInitializingWindow;
+    static unsigned isolatedWorldCount;
+    static DOMWrapperWorld* worldOfInitializingWindow;
 
     const int m_worldId;
     const int m_extensionGroup;

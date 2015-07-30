@@ -68,8 +68,8 @@ TranslateUIDelegate::TranslateUIDelegate(
     // Insert the language in languages_ in alphabetical order.
     std::vector<LanguageNamePair>::iterator iter2;
     for (iter2 = languages_.begin(); iter2 != languages_.end(); ++iter2) {
-      if (base::i18n::CompareString16WithCollator(
-              collator.get(), language_name, iter2->second) == UCOL_LESS) {
+      if (base::i18n::CompareString16WithCollator(*collator, language_name,
+                                                  iter2->second) == UCOL_LESS) {
         break;
       }
     }
@@ -180,9 +180,10 @@ void TranslateUIDelegate::RevertTranslation() {
 
 void TranslateUIDelegate::TranslationDeclined(bool explicitly_closed) {
   if (!translate_driver_->IsOffTheRecord()) {
-    prefs_->ResetTranslationAcceptedCount(GetOriginalLanguageCode());
-    prefs_->IncrementTranslationDeniedCount(GetOriginalLanguageCode());
-    prefs_->UpdateLastDeniedTime();
+    const std::string& language = GetOriginalLanguageCode();
+    prefs_->ResetTranslationAcceptedCount(language);
+    prefs_->IncrementTranslationDeniedCount(language);
+    prefs_->UpdateLastDeniedTime(language);
   }
 
   // Remember that the user declined the translation so as to prevent showing a

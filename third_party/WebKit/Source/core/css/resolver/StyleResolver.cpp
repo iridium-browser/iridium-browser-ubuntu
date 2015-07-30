@@ -33,9 +33,9 @@
 #include "core/HTMLNames.h"
 #include "core/MediaTypeNames.h"
 #include "core/StylePropertyShorthand.h"
-#include "core/animation/Animation.h"
 #include "core/animation/AnimationTimeline.h"
 #include "core/animation/ElementAnimations.h"
+#include "core/animation/KeyframeEffect.h"
 #include "core/animation/StyleInterpolation.h"
 #include "core/animation/animatable/AnimatableValue.h"
 #include "core/animation/css/CSSAnimatableValueFactory.h"
@@ -80,6 +80,7 @@
 #include "core/frame/Settings.h"
 #include "core/html/HTMLIFrameElement.h"
 #include "core/inspector/InspectorInstrumentation.h"
+#include "core/layout/GeneratedChildren.h"
 #include "core/layout/LayoutView.h"
 #include "core/style/KeyframeList.h"
 #include "core/svg/SVGDocumentExtensions.h"
@@ -94,7 +95,7 @@ using namespace blink;
 void setAnimationUpdateIfNeeded(StyleResolverState& state, Element& element)
 {
     // If any changes to CSS Animations were detected, stash the update away for application after the
-    // render object is updated if we're in the appropriate scope.
+    // layout object is updated if we're in the appropriate scope.
     if (state.animationUpdate())
         element.ensureElementAnimations().cssAnimations().setPendingUpdate(state.takeAnimationUpdate());
 }
@@ -240,11 +241,12 @@ void StyleResolver::addTreeBoundaryCrossingScope(ContainerNode& scope)
 void StyleResolver::resetAuthorStyle(TreeScope& treeScope)
 {
     m_treeBoundaryCrossingRules.removeScope(treeScope.rootNode());
-    resetRuleFeatures();
 
     ScopedStyleResolver* resolver = treeScope.scopedStyleResolver();
     if (!resolver)
         return;
+
+    resetRuleFeatures();
 
     if (treeScope.rootNode().isDocumentNode()) {
         resolver->resetAuthorStyle();
@@ -539,7 +541,7 @@ PassRefPtr<ComputedStyle> StyleResolver::styleForElement(Element* element, const
     ASSERT(!hasPendingAuthorStyleSheets());
     ASSERT(!m_needCollectFeatures);
 
-    // Once an element has a renderer, we don't try to destroy it, since otherwise the renderer
+    // Once an element has a layoutObject, we don't try to destroy it, since otherwise the layoutObject
     // will vanish if a style recalc happens during loading.
     if (sharingBehavior == AllowStyleSharing && !document().isRenderingReady() && !element->layoutObject()) {
         if (!s_styleNotYetAvailable) {
@@ -719,27 +721,27 @@ PassRefPtrWillBeRawPtr<PseudoElement> StyleResolver::createPseudoElement(Element
 
 PassRefPtrWillBeRawPtr<PseudoElement> StyleResolver::createPseudoElementIfNeeded(Element& parent, PseudoId pseudoId)
 {
-    LayoutObject* parentRenderer = parent.layoutObject();
-    if (!parentRenderer)
+    LayoutObject* parentLayoutObject = parent.layoutObject();
+    if (!parentLayoutObject)
         return nullptr;
 
     // The first letter pseudo element has to look up the tree and see if any
     // of the ancestors are first letter.
-    if (pseudoId < FIRST_INTERNAL_PSEUDOID && pseudoId != FIRST_LETTER && !parentRenderer->style()->hasPseudoStyle(pseudoId))
+    if (pseudoId < FIRST_INTERNAL_PSEUDOID && pseudoId != FIRST_LETTER && !parentLayoutObject->style()->hasPseudoStyle(pseudoId))
         return nullptr;
 
     if (pseudoId == BACKDROP && !parent.isInTopLayer())
         return nullptr;
 
-    if (pseudoId == FIRST_LETTER && (parent.isSVGElement() || !FirstLetterPseudoElement::firstLetterTextRenderer(parent)))
+    if (pseudoId == FIRST_LETTER && (parent.isSVGElement() || !FirstLetterPseudoElement::firstLetterTextLayoutObject(parent)))
         return nullptr;
 
-    if (!parentRenderer->canHaveGeneratedChildren())
+    if (!canHaveGeneratedChildren(*parentLayoutObject))
         return nullptr;
 
-    ComputedStyle* parentStyle = parentRenderer->style();
+    ComputedStyle* parentStyle = parentLayoutObject->mutableStyle();
     if (ComputedStyle* cachedStyle = parentStyle->getCachedPseudoStyle(pseudoId)) {
-        if (!pseudoElementRendererIsNeeded(cachedStyle))
+        if (!pseudoElementLayoutObjectIsNeeded(cachedStyle))
             return nullptr;
         return createPseudoElement(&parent, pseudoId);
     }
@@ -751,7 +753,7 @@ PassRefPtrWillBeRawPtr<PseudoElement> StyleResolver::createPseudoElementIfNeeded
     ASSERT(style);
     parentStyle->addCachedPseudoStyle(style);
 
-    if (!pseudoElementRendererIsNeeded(style.get()))
+    if (!pseudoElementLayoutObjectIsNeeded(style.get()))
         return nullptr;
 
     RefPtrWillBeRawPtr<PseudoElement> pseudo = createPseudoElement(&parent, pseudoId);
@@ -900,7 +902,7 @@ PassRefPtr<ComputedStyle> StyleResolver::styleForText(Text* textNode)
 {
     ASSERT(textNode);
 
-    Node* parentNode = NodeRenderingTraversal::parent(*textNode);
+    Node* parentNode = LayoutTreeBuilderTraversal::parent(*textNode);
     if (!parentNode || !parentNode->computedStyle())
         return initialStyleForElement();
     return parentNode->mutableComputedStyle();
@@ -952,7 +954,7 @@ void StyleResolver::collectPseudoRulesForElement(Element* element, ElementRuleCo
 }
 
 // -------------------------------------------------------------------------------------
-// this is mostly boring stuff on how to apply a certain rule to the renderstyle...
+// this is mostly boring stuff on how to apply a certain rule to the Computedstyle...
 
 bool StyleResolver::applyAnimatedProperties(StyleResolverState& state, const Element* animatingElement)
 {
@@ -972,8 +974,8 @@ bool StyleResolver::applyAnimatedProperties(StyleResolverState& state, const Ele
     if (!state.animationUpdate())
         return false;
 
-    const WillBeHeapHashMap<CSSPropertyID, RefPtrWillBeMember<Interpolation>>& activeInterpolationsForAnimations = state.animationUpdate()->activeInterpolationsForAnimations();
-    const WillBeHeapHashMap<CSSPropertyID, RefPtrWillBeMember<Interpolation>>& activeInterpolationsForTransitions = state.animationUpdate()->activeInterpolationsForTransitions();
+    const ActiveInterpolationMap& activeInterpolationsForAnimations = state.animationUpdate()->activeInterpolationsForAnimations();
+    const ActiveInterpolationMap& activeInterpolationsForTransitions = state.animationUpdate()->activeInterpolationsForTransitions();
     applyAnimatedProperties<HighPropertyPriority>(state, activeInterpolationsForAnimations);
     applyAnimatedProperties<HighPropertyPriority>(state, activeInterpolationsForTransitions);
 
@@ -1005,10 +1007,12 @@ StyleRuleKeyframes* StyleResolver::findKeyframesRule(const Element* element, con
 }
 
 template <CSSPropertyPriority priority>
-void StyleResolver::applyAnimatedProperties(StyleResolverState& state, const WillBeHeapHashMap<CSSPropertyID, RefPtrWillBeMember<Interpolation>>& activeInterpolations)
+void StyleResolver::applyAnimatedProperties(StyleResolverState& state, const WillBeHeapHashMap<PropertyHandle, RefPtrWillBeMember<Interpolation>>& activeInterpolations)
 {
     for (const auto& interpolationEntry : activeInterpolations) {
-        CSSPropertyID property = interpolationEntry.key;
+        if (!interpolationEntry.key.isCSSProperty())
+            continue;
+        CSSPropertyID property = interpolationEntry.key.cssProperty();
         if (!CSSPropertyPriorityData<priority>::propertyHasPriority(property))
             continue;
         const StyleInterpolation* interpolation = toStyleInterpolation(interpolationEntry.value.get());
@@ -1130,7 +1134,6 @@ static inline bool isValidFirstLetterStyleProperty(CSSPropertyID id)
     case CSSPropertyWebkitBackgroundClip:
     case CSSPropertyWebkitBackgroundComposite:
     case CSSPropertyWebkitBackgroundOrigin:
-    case CSSPropertyWebkitBackgroundSize:
     case CSSPropertyWebkitBorderAfter:
     case CSSPropertyWebkitBorderAfterColor:
     case CSSPropertyWebkitBorderAfterStyle:
@@ -1145,7 +1148,6 @@ static inline bool isValidFirstLetterStyleProperty(CSSPropertyID id)
     case CSSPropertyWebkitBorderEndWidth:
     case CSSPropertyWebkitBorderHorizontalSpacing:
     case CSSPropertyWebkitBorderImage:
-    case CSSPropertyWebkitBorderRadius:
     case CSSPropertyWebkitBorderStart:
     case CSSPropertyWebkitBorderStartColor:
     case CSSPropertyWebkitBorderStartStyle:
@@ -1178,7 +1180,6 @@ static inline bool isValidFirstLetterStyleProperty(CSSPropertyID id)
     // box-shadox added in CSS3 backgrounds spec:
     // http://www.w3.org/TR/css3-background/#placement
     case CSSPropertyBoxShadow:
-    case CSSPropertyWebkitBoxShadow:
     // Properties that we currently support outside of spec.
     case CSSPropertyWebkitLineBoxContain:
     case CSSPropertyVisibility:
@@ -1211,7 +1212,6 @@ static bool shouldIgnoreTextTrackAuthorStyle(Document& document)
 template <CSSPropertyPriority priority>
 void StyleResolver::applyAllProperty(StyleResolverState& state, CSSValue* allValue, bool inheritedOnly)
 {
-    bool isUnsetValue = !allValue->isInitialValue() && !allValue->isInheritedValue();
     unsigned startCSSProperty = CSSPropertyPriorityData<priority>::first();
     unsigned endCSSProperty = CSSPropertyPriorityData<priority>::last();
 
@@ -1236,16 +1236,7 @@ void StyleResolver::applyAllProperty(StyleResolverState& state, CSSValue* allVal
         if (inheritedOnly && !CSSPropertyMetadata::isInheritedProperty(propertyId))
             continue;
 
-        CSSValue* value;
-        if (!isUnsetValue) {
-            value = allValue;
-        } else {
-            if (CSSPropertyMetadata::isInheritedProperty(propertyId))
-                value = cssValuePool().createInheritedValue().get();
-            else
-                value = cssValuePool().createExplicitInitialValue().get();
-        }
-        StyleBuilder::applyProperty(propertyId, state, value);
+        StyleBuilder::applyProperty(propertyId, state, allValue);
     }
 }
 
@@ -1296,8 +1287,8 @@ void StyleResolver::applyMatchedProperties(StyleResolverState& state, const Matc
             const MatchedProperties& matchedProperties = matchResult.matchedProperties[i];
             unsigned linkMatchType = matchedProperties.m_types.linkMatchType;
             // FIXME: It would be nicer to pass these as arguments but that requires changes in many places.
-            state.setApplyPropertyToRegularStyle(linkMatchType & SelectorChecker::MatchLink);
-            state.setApplyPropertyToVisitedLinkStyle(linkMatchType & SelectorChecker::MatchVisited);
+            state.setApplyPropertyToRegularStyle(linkMatchType & CSSSelector::MatchLink);
+            state.setApplyPropertyToVisitedLinkStyle(linkMatchType & CSSSelector::MatchVisited);
 
             applyProperties<priority>(state, matchedProperties.properties.get(), isImportant, inheritedOnly, static_cast<PropertyWhitelistType>(matchedProperties.m_types.whitelistType));
         }
@@ -1435,10 +1426,6 @@ void StyleResolver::applyCallbackSelectors(StyleResolverState& state)
         state.style()->addCallbackSelector(rules->m_list[i]->selectorList().selectorsText());
 }
 
-CSSPropertyValue::CSSPropertyValue(CSSPropertyID id, const StylePropertySet& propertySet)
-    : property(id), value(propertySet.getPropertyCSSValue(id).get())
-{ }
-
 void StyleResolver::enableStats(StatsReportType reportType)
 {
     if (m_styleResolverStats)
@@ -1468,26 +1455,26 @@ void StyleResolver::printStats()
     fprintf(stderr, "%s\n", m_styleResolverStatsTotals->report().utf8().data());
 }
 
-void StyleResolver::applyPropertiesToStyle(const CSSPropertyValue* properties, size_t count, ComputedStyle* style)
+void StyleResolver::computeFont(ComputedStyle* style, const StylePropertySet& propertySet)
 {
+    CSSPropertyID properties[] = {
+        CSSPropertyFontSize,
+        CSSPropertyFontFamily,
+        CSSPropertyFontStretch,
+        CSSPropertyFontStyle,
+        CSSPropertyFontVariant,
+        CSSPropertyFontWeight,
+        CSSPropertyLineHeight,
+    };
+
+    // TODO(timloh): This is weird, the style is being used as its own parent
     StyleResolverState state(document(), document().documentElement(), style);
     state.setStyle(style);
 
-    for (size_t i = 0; i < count; ++i) {
-        if (properties[i].value) {
-            // As described in BUG66291, setting font-size and line-height on a font may entail a CSSPrimitiveValue::computeLengthDouble call,
-            // which assumes the fontMetrics are available for the affected font, otherwise a crash occurs (see http://trac.webkit.org/changeset/96122).
-            // The updateFont() call below updates the fontMetrics and ensure the proper setting of font-size and line-height.
-            switch (properties[i].property) {
-            case CSSPropertyFontSize:
-            case CSSPropertyLineHeight:
-                updateFont(state);
-                break;
-            default:
-                break;
-            }
-            StyleBuilder::applyProperty(properties[i].property, state, properties[i].value);
-        }
+    for (CSSPropertyID property : properties) {
+        if (property == CSSPropertyLineHeight)
+            updateFont(state);
+        StyleBuilder::applyProperty(property, state, propertySet.getPropertyCSSValue(property).get());
     }
 }
 

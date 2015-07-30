@@ -6,8 +6,8 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
-#include "ui/events/keycodes/dom3/dom_code.h"
-#include "ui/events/keycodes/dom4/keycode_converter.h"
+#include "ui/events/keycodes/dom/dom_code.h"
+#include "ui/events/keycodes/dom/keycode_converter.h"
 #include "ui/events/test/events_test_utils.h"
 
 #if defined(USE_X11)
@@ -79,6 +79,15 @@ TEST(EventTest, RepeatedClick) {
   base::TimeDelta soon = start + base::TimeDelta::FromMilliseconds(1);
   base::TimeDelta later = start + base::TimeDelta::FromMilliseconds(1000);
 
+  // Same event.
+  test_ev1.set_location(gfx::Point(0, 0));
+  test_ev2.set_location(gfx::Point(1, 0));
+  test_ev1.set_time_stamp(start);
+  test_ev2.set_time_stamp(start);
+  EXPECT_FALSE(MouseEvent::IsRepeatedClickEvent(mouse_ev1, mouse_ev2));
+  MouseEvent mouse_ev3(mouse_ev1);
+  EXPECT_FALSE(MouseEvent::IsRepeatedClickEvent(mouse_ev1, mouse_ev3));
+
   // Close point.
   test_ev1.set_location(gfx::Point(0, 0));
   test_ev2.set_location(gfx::Point(1, 0));
@@ -110,6 +119,7 @@ TEST(EventTest, DoubleClickRequiresRelease) {
   const gfx::Point origin2(100, 0);
   scoped_ptr<MouseEvent> ev;
   base::TimeDelta start = base::TimeDelta::FromMilliseconds(0);
+  base::TimeDelta soon = start + base::TimeDelta::FromMilliseconds(1);
 
   ev.reset(new MouseEvent(ET_MOUSE_PRESSED, origin1, origin1, EventTimeForNow(),
                           0, 0));
@@ -130,11 +140,11 @@ TEST(EventTest, DoubleClickRequiresRelease) {
   EXPECT_EQ(1, MouseEvent::GetRepeatCount(*ev));
   ev.reset(new MouseEvent(ET_MOUSE_PRESSED, origin2, origin2, EventTimeForNow(),
                           0, 0));
-  ev->set_time_stamp(start);
+  ev->set_time_stamp(soon);
   EXPECT_EQ(2, MouseEvent::GetRepeatCount(*ev));
   ev.reset(new MouseEvent(ET_MOUSE_RELEASED, origin2, origin2,
                           EventTimeForNow(), 0, 0));
-  ev->set_time_stamp(start);
+  ev->set_time_stamp(soon);
   EXPECT_EQ(2, MouseEvent::GetRepeatCount(*ev));
   MouseEvent::ResetLastClickForTest();
 }
@@ -145,6 +155,7 @@ TEST(EventTest, SingleClickRightLeft) {
   const gfx::Point origin(0, 0);
   scoped_ptr<MouseEvent> ev;
   base::TimeDelta start = base::TimeDelta::FromMilliseconds(0);
+  base::TimeDelta soon = start + base::TimeDelta::FromMilliseconds(1);
 
   ev.reset(new MouseEvent(ET_MOUSE_PRESSED, origin, origin, EventTimeForNow(),
                           ui::EF_RIGHT_MOUSE_BUTTON,
@@ -161,7 +172,7 @@ TEST(EventTest, SingleClickRightLeft) {
   EXPECT_EQ(1, MouseEvent::GetRepeatCount(*ev));
   ev.reset(new MouseEvent(ET_MOUSE_PRESSED, origin, origin, EventTimeForNow(),
                           ui::EF_LEFT_MOUSE_BUTTON, ui::EF_LEFT_MOUSE_BUTTON));
-  ev->set_time_stamp(start);
+  ev->set_time_stamp(soon);
   EXPECT_EQ(2, MouseEvent::GetRepeatCount(*ev));
   MouseEvent::ResetLastClickForTest();
 }
@@ -340,7 +351,7 @@ TEST(EventTest, KeyEventCode) {
   ASSERT_EQ(kDomCodeForSpace,
             ui::KeycodeConverter::CodeStringToDomCode(kCodeForSpace));
   const uint16 kNativeCodeSpace =
-      ui::KeycodeConverter::CodeToNativeKeycode(kCodeForSpace);
+      ui::KeycodeConverter::DomCodeToNativeKeycode(kDomCodeForSpace);
   ASSERT_NE(ui::KeycodeConverter::InvalidNativeKeycode(), kNativeCodeSpace);
   ASSERT_EQ(kNativeCodeSpace,
             ui::KeycodeConverter::DomCodeToNativeKeycode(kDomCodeForSpace));
@@ -356,11 +367,10 @@ TEST(EventTest, KeyEventCode) {
     EXPECT_EQ(kCodeForSpace, key.GetCodeString());
   }
   {
-    // If the synthetic event is initialized without code, it returns
-    // an empty string.
-    // TODO(komatsu): Fill a fallback value assuming the US keyboard layout.
+    // If the synthetic event is initialized without code, the code is
+    // determined from the KeyboardCode assuming a US keyboard layout.
     KeyEvent key(ET_KEY_PRESSED, VKEY_SPACE, EF_NONE);
-    EXPECT_TRUE(key.GetCodeString().empty());
+    EXPECT_EQ(kCodeForSpace, key.GetCodeString());
   }
 #if defined(USE_X11)
   {
@@ -423,8 +433,10 @@ void AdvanceKeyEventTimestamp(MSG& msg) {
 
 #if defined(USE_X11) || defined(OS_WIN)
 TEST(EventTest, AutoRepeat) {
-  const uint16 kNativeCodeA = ui::KeycodeConverter::CodeToNativeKeycode("KeyA");
-  const uint16 kNativeCodeB = ui::KeycodeConverter::CodeToNativeKeycode("KeyB");
+  const uint16 kNativeCodeA =
+      ui::KeycodeConverter::DomCodeToNativeKeycode(DomCode::KEY_A);
+  const uint16 kNativeCodeB =
+      ui::KeycodeConverter::DomCodeToNativeKeycode(DomCode::KEY_B);
 #if defined(USE_X11)
   ScopedXI2Event native_event_a_pressed;
   native_event_a_pressed.InitKeyEvent(ET_KEY_PRESSED, VKEY_A, kNativeCodeA);

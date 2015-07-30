@@ -28,7 +28,9 @@
 #ifndef StyleEngine_h
 #define StyleEngine_h
 
+#include "core/CoreExport.h"
 #include "core/css/CSSFontSelectorClient.h"
+#include "core/css/invalidation/StyleInvalidator.h"
 #include "core/css/resolver/StyleResolver.h"
 #include "core/dom/Document.h"
 #include "core/dom/DocumentOrderedList.h"
@@ -52,7 +54,7 @@ class StyleRuleFontFace;
 class StyleSheet;
 class StyleSheetContents;
 
-class StyleEngine final : public CSSFontSelectorClient  {
+class CORE_EXPORT StyleEngine final : public CSSFontSelectorClient  {
     WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(StyleEngine);
 public:
 
@@ -78,7 +80,6 @@ public:
     const WillBeHeapVector<RefPtrWillBeMember<CSSStyleSheet>>& activeAuthorStyleSheets() const;
 
     const WillBeHeapVector<RefPtrWillBeMember<CSSStyleSheet>>& documentAuthorStyleSheets() const { return m_authorStyleSheets; }
-    const WillBeHeapVector<RefPtrWillBeMember<CSSStyleSheet>>& injectedAuthorStyleSheets() const;
 
     const WillBeHeapVector<RefPtrWillBeMember<CSSStyleSheet>> activeStyleSheetsForInspector() const;
 
@@ -88,11 +89,6 @@ public:
     void removeStyleSheetCandidateNode(Node*, TreeScope&);
     void modifiedStyleSheetCandidateNode(Node*);
     void setExitTransitionStylesheetsEnabled(bool);
-
-    void invalidateInjectedStyleSheetCache();
-    void updateInjectedStyleSheetCache() const;
-
-    void compatibilityModeChanged();
 
     void addAuthorSheet(PassRefPtrWillBeRawPtr<StyleSheetContents> authorSheet);
 
@@ -154,6 +150,8 @@ public:
     void clearResolver();
     void clearMasterResolver();
 
+    StyleInvalidator& styleInvalidator() { return m_styleInvalidator; }
+
     CSSFontSelector* fontSelector() { return m_fontSelector.get(); }
     void setFontSelector(PassRefPtrWillBeRawPtr<CSSFontSelector>);
 
@@ -176,6 +174,12 @@ public:
 
     void platformColorsChanged();
 
+    void classChangedForElement(const SpaceSplitString& changedClasses, Element&);
+    void classChangedForElement(const SpaceSplitString& oldClasses, const SpaceSplitString& newClasses, Element&);
+    void attributeChangedForElement(const QualifiedName& attributeName, Element&);
+    void idChangedForElement(const AtomicString& oldId, const AtomicString& newId, Element&);
+    void pseudoStateChangedForElement(CSSSelector::PseudoType, Element&);
+
     DECLARE_VIRTUAL_TRACE();
 
 private:
@@ -195,6 +199,8 @@ private:
     bool isMaster() const { return m_isMaster; }
     Document* master();
     Document& document() const { return *m_document; }
+
+    void scheduleInvalidationSetsForElement(const InvalidationSetVector&, Element&);
 
     typedef WillBeHeapHashSet<RawPtrWillBeMember<TreeScope>> UnorderedTreeScopeSet;
 
@@ -261,14 +267,11 @@ private:
     RawPtrWillBeMember<Document> m_document;
     bool m_isMaster;
 
-    // Track the number of currently loading top-level stylesheets needed for rendering.
+    // Track the number of currently loading top-level stylesheets needed for layout.
     // Sheets loaded using the @import directive are not included in this count.
     // We use this count of pending sheets to detect when we can begin attaching
     // elements and when it is safe to execute scripts.
     int m_pendingStylesheets;
-
-    mutable WillBeHeapVector<RefPtrWillBeMember<CSSStyleSheet>> m_injectedAuthorStyleSheets;
-    mutable bool m_injectedStyleSheetCacheValid;
 
     WillBeHeapVector<RefPtrWillBeMember<CSSStyleSheet>> m_authorStyleSheets;
 
@@ -294,6 +297,7 @@ private:
     bool m_ignorePendingStylesheets;
     bool m_didCalculateResolver;
     OwnPtrWillBeMember<StyleResolver> m_resolver;
+    StyleInvalidator m_styleInvalidator;
 
     RefPtrWillBeMember<CSSFontSelector> m_fontSelector;
 

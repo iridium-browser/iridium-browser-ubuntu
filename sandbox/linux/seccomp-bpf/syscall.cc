@@ -4,10 +4,9 @@
 
 #include "sandbox/linux/seccomp-bpf/syscall.h"
 
-#include <asm/unistd.h>
 #include <errno.h>
+#include <stdint.h>
 
-#include "base/basictypes.h"
 #include "base/logging.h"
 #include "sandbox/linux/bpf_dsl/seccomp_macros.h"
 
@@ -134,16 +133,21 @@ asm(// We need to be able to tell the kernel exactly where we made a
 #else
     ".arm\n"
 #endif
-    "SyscallAsm:.fnstart\n"
+    "SyscallAsm:\n"
+#if !defined(__native_client_nonsfi__)
+    // .fnstart and .fnend pseudo operations creates unwind table.
+    // It also creates a reference to the symbol __aeabi_unwind_cpp_pr0, which
+    // is not provided by PNaCl toolchain. Disable it.
+    ".fnstart\n"
+#endif
     "@ args = 0, pretend = 0, frame = 8\n"
     "@ frame_needed = 1, uses_anonymous_args = 0\n"
 #if defined(__thumb__)
     ".cfi_startproc\n"
     "push {r7, lr}\n"
+    ".save {r7, lr}\n"
     ".cfi_offset 14, -4\n"
     ".cfi_offset  7, -8\n"
-    "mov r7, sp\n"
-    ".cfi_def_cfa_register 7\n"
     ".cfi_def_cfa_offset 8\n"
 #else
     "stmfd sp!, {fp, lr}\n"
@@ -178,7 +182,11 @@ asm(// We need to be able to tell the kernel exactly where we made a
 #else
     "2:ldmfd sp!, {fp, pc}\n"
 #endif
+#if !defined(__native_client_nonsfi__)
+    // Do not use .fnstart and .fnend for PNaCl toolchain. See above comment,
+    // for more details.
     ".fnend\n"
+#endif
     "9:.size SyscallAsm, 9b-SyscallAsm\n"
 #elif defined(__mips__)
     ".text\n"

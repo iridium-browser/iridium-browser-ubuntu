@@ -202,6 +202,11 @@ void LocationBarViewMac::UpdateBookmarkStarVisibility() {
   star_decoration_->SetVisible(IsStarEnabled());
 }
 
+void LocationBarViewMac::UpdateLocationBarVisibility(bool visible,
+                                                     bool animate) {
+  // Not implemented on Mac.
+}
+
 bool LocationBarViewMac::ShowPageActionPopup(
     const extensions::Extension* extension, bool grant_active_tab) {
   for (ScopedVector<PageActionDecoration>::iterator iter =
@@ -430,7 +435,7 @@ void LocationBarViewMac::Layout() {
     selected_keyword_decoration_->SetKeyword(short_name, is_extension_keyword);
     selected_keyword_decoration_->SetImage(GetKeywordImage(keyword));
   } else if ((GetToolbarModel()->GetSecurityLevel(false) ==
-              ToolbarModel::EV_SECURE)) {
+              ConnectionSecurityHelper::EV_SECURE)) {
     // Switch from location icon to show the EV bubble instead.
     location_icon_decoration_->SetVisible(false);
     ev_bubble_decoration_->SetVisible(true);

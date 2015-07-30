@@ -141,6 +141,17 @@ void glCompressedTexSubImage2DFn(GLenum target,
                                  GLenum format,
                                  GLsizei imageSize,
                                  const void* data) override;
+void glCompressedTexSubImage3DFn(GLenum target,
+                                 GLint level,
+                                 GLint xoffset,
+                                 GLint yoffset,
+                                 GLint zoffset,
+                                 GLsizei width,
+                                 GLsizei height,
+                                 GLsizei depth,
+                                 GLenum format,
+                                 GLsizei imageSize,
+                                 const void* data) override;
 void glCopyBufferSubDataFn(GLenum readTarget,
                            GLenum writeTarget,
                            GLintptr readOffset,
@@ -410,6 +421,7 @@ void glGetUniformIndicesFn(GLuint program,
                            GLuint* uniformIndices) override;
 void glGetUniformivFn(GLuint program, GLint location, GLint* params) override;
 GLint glGetUniformLocationFn(GLuint program, const char* name) override;
+void glGetUniformuivFn(GLuint program, GLint location, GLuint* params) override;
 void glGetVertexAttribfvFn(GLuint index,
                            GLenum pname,
                            GLfloat* params) override;
@@ -579,6 +591,17 @@ void glTexSubImage2DFn(GLenum target,
                        GLint yoffset,
                        GLsizei width,
                        GLsizei height,
+                       GLenum format,
+                       GLenum type,
+                       const void* pixels) override;
+void glTexSubImage3DFn(GLenum target,
+                       GLint level,
+                       GLint xoffset,
+                       GLint yoffset,
+                       GLint zoffset,
+                       GLsizei width,
+                       GLsizei height,
+                       GLsizei depth,
                        GLenum format,
                        GLenum type,
                        const void* pixels) override;

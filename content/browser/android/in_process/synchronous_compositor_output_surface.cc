@@ -16,6 +16,7 @@
 #include "content/browser/gpu/compositor_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/renderer/gpu/frame_swap_message_queue.h"
+#include "gpu/command_buffer/client/context_support.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "gpu/command_buffer/common/gpu_memory_allocation.h"
 #include "third_party/skia/include/core/SkCanvas.h"
@@ -51,9 +52,6 @@ class SynchronousCompositorOutputSurface::SoftwareDevice
     return surface_->current_sw_canvas_;
   }
   void EndPaint(cc::SoftwareFrameData* frame_data) override {}
-  void CopyToPixels(const gfx::Rect& rect, void* pixels) override {
-    NOTIMPLEMENTED();
-  }
 
  private:
   SynchronousCompositorOutputSurface* surface_;
@@ -63,16 +61,19 @@ class SynchronousCompositorOutputSurface::SoftwareDevice
 };
 
 SynchronousCompositorOutputSurface::SynchronousCompositorOutputSurface(
+    const scoped_refptr<cc::ContextProvider>& context_provider,
+    const scoped_refptr<cc::ContextProvider>& worker_context_provider,
     int routing_id,
     scoped_refptr<FrameSwapMessageQueue> frame_swap_message_queue)
     : cc::OutputSurface(
+          context_provider,
+          worker_context_provider,
           scoped_ptr<cc::SoftwareOutputDevice>(new SoftwareDevice(this))),
       routing_id_(routing_id),
       registered_(false),
       current_sw_canvas_(nullptr),
       memory_policy_(0),
       frame_swap_message_queue_(frame_swap_message_queue) {
-  capabilities_.deferred_gl_initialization = true;
   capabilities_.draw_and_swap_full_viewport_every_frame = true;
   capabilities_.adjust_deadline_for_parent = false;
   capabilities_.delegated_rendering = true;
@@ -136,22 +137,6 @@ void AdjustTransform(gfx::Transform* transform, gfx::Rect viewport) {
   transform->matrix().postTranslate(-viewport.x(), -viewport.y(), 0);
 }
 } // namespace
-
-bool SynchronousCompositorOutputSurface::InitializeHwDraw(
-    scoped_refptr<cc::ContextProvider> onscreen_context_provider,
-    scoped_refptr<cc::ContextProvider> worker_context_provider) {
-  DCHECK(CalledOnValidThread());
-  DCHECK(HasClient());
-  DCHECK(!context_provider_.get());
-
-  return InitializeAndSetContext3d(onscreen_context_provider,
-                                   worker_context_provider);
-}
-
-void SynchronousCompositorOutputSurface::ReleaseHwDraw() {
-  DCHECK(CalledOnValidThread());
-  cc::OutputSurface::ReleaseGL();
-}
 
 scoped_ptr<cc::CompositorFrame>
 SynchronousCompositorOutputSurface::DemandDrawHw(
@@ -259,11 +244,36 @@ void SynchronousCompositorOutputSurface::ReturnResources(
 
 void SynchronousCompositorOutputSurface::SetMemoryPolicy(size_t bytes_limit) {
   DCHECK(CalledOnValidThread());
+  bool became_zero = memory_policy_.bytes_limit_when_visible && !bytes_limit;
+  bool became_non_zero =
+      !memory_policy_.bytes_limit_when_visible && bytes_limit;
   memory_policy_.bytes_limit_when_visible = bytes_limit;
   memory_policy_.num_resources_limit = kNumResourcesLimit;
 
   if (client_)
     client_->SetMemoryPolicy(memory_policy_);
+
+  if (became_zero) {
+    // This is small hack to drop context resources without destroying it
+    // when this compositor is put into the background.
+    context_provider()->DeleteCachedResources();
+    context_provider()->ContextSupport()->SetSurfaceVisible(false);
+
+    cc::ContextProvider* context = worker_context_provider();
+    base::AutoLock context_lock(*context->GetLock());
+    context->DetachFromThread();
+    context->DeleteCachedResources();
+    context->ContextSupport()->SetSurfaceVisible(false);
+    context->DetachFromThread();
+  } else if (became_non_zero) {
+    context_provider()->ContextSupport()->SetSurfaceVisible(true);
+
+    cc::ContextProvider* context = worker_context_provider();
+    base::AutoLock context_lock(*context->GetLock());
+    context->DetachFromThread();
+    context->ContextSupport()->SetSurfaceVisible(true);
+    context->DetachFromThread();
+  }
 }
 
 void SynchronousCompositorOutputSurface::SetTreeActivationCallback(

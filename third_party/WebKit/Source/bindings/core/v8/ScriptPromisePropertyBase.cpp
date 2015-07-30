@@ -26,7 +26,7 @@ ScriptPromisePropertyBase::~ScriptPromisePropertyBase()
     clearWrappers();
 }
 
-static void clearHandle(const v8::WeakCallbackData<v8::Object, ScopedPersistent<v8::Object>>& data)
+static void clearHandle(const v8::WeakCallbackInfo<ScopedPersistent<v8::Object>>& data)
 {
     data.GetParameter()->clear();
 }
@@ -107,7 +107,7 @@ void ScriptPromisePropertyBase::resetBase()
     m_state = Pending;
 }
 
-void ScriptPromisePropertyBase::resolveOrRejectInternal(v8::Handle<v8::Promise::Resolver> resolver)
+void ScriptPromisePropertyBase::resolveOrRejectInternal(v8::Local<v8::Promise::Resolver> resolver)
 {
     v8::Local<v8::Context> context = resolver->CreationContext();
     switch (m_state) {
@@ -142,7 +142,7 @@ v8::Local<v8::Object> ScriptPromisePropertyBase::ensureHolderWrapper(ScriptState
             return wrapper;
         ++i;
     }
-    v8::Local<v8::Object> wrapper = holder(context->Global(), m_isolate);
+    v8::Local<v8::Object> wrapper = holder(m_isolate, context->Global());
     OwnPtr<ScopedPersistent<v8::Object>> weakPersistent = adoptPtr(new ScopedPersistent<v8::Object>);
     weakPersistent->set(m_isolate, wrapper);
     weakPersistent->setWeak(weakPersistent.get(), &clearHandle);
@@ -163,7 +163,7 @@ void ScriptPromisePropertyBase::clearWrappers()
     m_wrappers.clear();
 }
 
-v8::Handle<v8::String> ScriptPromisePropertyBase::promiseName()
+v8::Local<v8::String> ScriptPromisePropertyBase::promiseName()
 {
     switch (m_name) {
 #define P(Name)                                           \
@@ -175,10 +175,10 @@ v8::Handle<v8::String> ScriptPromisePropertyBase::promiseName()
 #undef P
     }
     ASSERT_NOT_REACHED();
-    return v8::Handle<v8::String>();
+    return v8::Local<v8::String>();
 }
 
-v8::Handle<v8::String> ScriptPromisePropertyBase::resolverName()
+v8::Local<v8::String> ScriptPromisePropertyBase::resolverName()
 {
     switch (m_name) {
 #define P(Name)                                            \
@@ -190,7 +190,7 @@ v8::Handle<v8::String> ScriptPromisePropertyBase::resolverName()
 #undef P
     }
     ASSERT_NOT_REACHED();
-    return v8::Handle<v8::String>();
+    return v8::Local<v8::String>();
 }
 
 DEFINE_TRACE(ScriptPromisePropertyBase)

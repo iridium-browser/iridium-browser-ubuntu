@@ -29,16 +29,15 @@ const char kAllowNoSandboxJob[]             = "allow-no-sandbox-job";
 // Allows debugging of sandboxed processes (see zygote_main_linux.cc).
 const char kAllowSandboxDebugging[]         = "allow-sandbox-debugging";
 
-// The same as kAuditHandles except all handles are enumerated.
-const char kAuditAllHandles[]               = "enable-handle-auditing-all";
-
-// Enumerates and prints a child process' most dangerous handles when it
-// is terminated.
-const char kAuditHandles[]                  = "enable-handle-auditing";
-
 // Choose which logging channels in blink platform to activate.  See
 // Logging.cpp in blink's Source/platform for a list of available channels.
 const char kBlinkPlatformLogChannels[]      = "blink-platform-log-channels";
+
+// Set blink settings. Format is <name>[=<value],<name>[=<value>],...
+// The names are declared in Settings.in. For boolean type, use "true", "false",
+// or omit '=<value>' part to set to true. For enum type, use the int value of
+// the enum value. Applied after other command line flags and prefs.
+const char kBlinkSettings[]                 = "blink-settings";
 
 // Block cross-site documents (i.e., HTML/XML/JSON) from being loaded in
 // subresources when a document is not supposed to read them.  This will later
@@ -85,16 +84,15 @@ const char kDisableBackingStoreLimit[]      = "disable-backing-store-limit";
 // features.
 const char kDisableBlinkFeatures[]          = "disable-blink-features";
 
-// Disable the Blink Scheduler. Ensures there's no reordering of blink tasks.
-// This switch is intended only for performance tests.
-const char kDisableBlinkScheduler[]         = "disable-blink-scheduler";
-
 // Disable the creation of compositing layers when it would prevent LCD text.
 const char kDisablePreferCompositingToLCDText[] =
     "disable-prefer-compositing-to-lcd-text";
 
 // Disables HTML5 DB support.
 const char kDisableDatabases[]              = "disable-databases";
+
+// Disables Delay Agnostic AEC in WebRTC.
+const char kDisableDelayAgnosticAec[]       = "disable-delay-agnostic-aec";
 
 // Disables delegated renderer.
 const char kDisableDelegatedRenderer[]      = "disable-delegated-renderer";
@@ -228,6 +226,9 @@ const char kDisableRemoteFonts[]            = "disable-remote-fonts";
 // Turns off the accessibility in the renderer.
 const char kDisableRendererAccessibility[]  = "disable-renderer-accessibility";
 
+// Prevent renderer process backgrounding when set.
+const char kDisableRendererBackgrounding[]  = "disable-renderer-backgrounding";
+
 // Disable the seccomp filter sandbox (seccomp-bpf) (Linux only).
 const char kDisableSeccompFilterSandbox[]   = "disable-seccomp-filter-sandbox";
 
@@ -237,15 +238,14 @@ const char kDisableSetuidSandbox[]          = "disable-setuid-sandbox";
 // Disable shared workers.
 const char kDisableSharedWorkers[]          = "disable-shared-workers";
 
-// For tests, disable single thread scheduler and only manually composite.
-const char kDisableSingleThreadProxyScheduler[] =
-    "disable-single-thread-proxy-scheduler";
-
 // Disable smooth scrolling for testing.
 const char kDisableSmoothScrolling[]        = "disable-smooth-scrolling";
 
 // Disables the use of a 3D software rasterizer.
 const char kDisableSoftwareRasterizer[]     = "disable-software-rasterizer";
+
+// Disables the Web Speech API.
+const char kDisableSpeechAPI[]              = "disable-speech-api";
 
 // Disables SVG 1.1 DOM.
 const char kDisableSVG1DOM[]                = "disable-svg1dom";
@@ -384,6 +384,10 @@ const char kEnableOverlayFullscreenVideo[]  = "enable-overlay-fullscreen-video";
 // Enables compositor-accelerated touch-screen pinch gestures.
 const char kEnablePinch[]                   = "enable-pinch";
 
+// Enables testing features of the Plugin Placeholder. For internal use only.
+const char kEnablePluginPlaceholderTesting[] =
+    "enable-plugin-placeholder-testing";
+
 // Make the values returned to window.performance.memory more granular and more
 // up to date in shared worker. Without this flag, the memory information is
 // still available, but it is bucketized and updated less frequently. This flag
@@ -393,12 +397,16 @@ const char kEnablePreciseMemoryInfo[] = "enable-precise-memory-info";
 // Enables payloads for received push messages when using the W3C Push API.
 const char kEnablePushMessagePayload[] = "enable-push-message-payload";
 
-// Enable hasPermission() method of the W3C Push API.
-const char kEnablePushMessagingHasPermission[] =
-        "enable-push-messaging-has-permission";
-
 // Set options to cache V8 data. (off, preparse data, or code)
 const char kV8CacheOptions[] = "v8-cache-options";
+
+// Signals that the V8 natives file has been transfered to the child process
+// by a file descriptor.
+const char kV8NativesPassedByFD[] = "v8-natives-passed-by-fd";
+
+// Signals that the V8 startup snapshot file has been transfered to the child
+// process by a file descriptor.
+const char kV8SnapshotPassedByFD[] = "v8-snapshot-passed-by-fd";
 
 // Enables the CSS multicol implementation that uses the regions implementation.
 const char kEnableRegionBasedColumns[] =
@@ -500,6 +508,10 @@ const char kEnableWebGLImageChromium[] = "enable-webgl-image-chromium";
 
 // Enable rasterizer that writes directly to GPU memory associated with tiles.
 const char kEnableZeroCopy[]                = "enable-zero-copy";
+
+// Explicitly allows additional ports using a comma-separated list of port
+// numbers.
+const char kExplicitlyAllowedPorts[]        = "explicitly-allowed-ports";
 
 // Load NPAPI plugins from the specified directory.
 const char kExtraPluginDir[]                = "extra-plugin-dir";
@@ -618,8 +630,19 @@ const char kNoReferrers[]                   = "no-referrers";
 // Disables the sandbox for all process types that are normally sandboxed.
 const char kNoSandbox[]                     = "no-sandbox";
 
+// Disables appcontainer/lowbox for renderer on Win8+ platforms.
+const char kDisableAppContainer[]           = "disable-appcontainer";
+
 // Number of worker threads used to rasterize content.
 const char kNumRasterThreads[]              = "num-raster-threads";
+
+// Override the behavior of plugin throttling for testing.
+// By default the throttler is only enabled for a hard-coded list of plugins.
+// Set the value to 'never' to disable throttling.
+// Set the value to 'ignore-list' to ignore the hard-coded list.
+// Set the value to 'always' to always throttle every plugin instance.
+const char kOverridePluginPowerSaverForTesting[] =
+    "override-plugin-power-saver-for-testing";
 
 // Controls the behavior of history navigation in response to horizontal
 // overscroll.
@@ -774,6 +797,11 @@ const char kTestingFixedHttpsPort[]         = "testing-fixed-https-port";
 // Type of the current test harness ("browser" or "ui").
 const char kTestType[]                      = "test-type";
 
+// Controls how text selection granularity changes when touch text selection
+// handles are dragged. Should be "character" or "direction". If not specified,
+// the platform default is used.
+const char kTouchTextSelectionStrategy[]    = "touch-selection-strategy";
+
 // Causes TRACE_EVENT flags to be recorded beginning with shutdown. Optionally,
 // can specify the specific trace categories to include (e.g.
 // --trace-shutdown=base,net) otherwise, all events are recorded.
@@ -892,12 +920,6 @@ const char kEnableWebRtcStunOrigin[]        = "enable-webrtc-stun-origin";
 // Override the maximum framerate as can be specified in calls to getUserMedia.
 // This flag expects a value.  Example: --max-gum-fps=17.5
 const char kWebRtcMaxCaptureFramerate[]     = "max-gum-fps";
-
-#if defined(OS_LINUX) || defined(OS_MACOSX)
-// Enables Video Capture Device captured data uploaded to Texture for zero-copy
-// capture pipeline.
-const char kEnableWebRtcCaptureToTexture[] = "enable-webrtc-capture-to-texture";
-#endif
 #endif
 
 #if defined(OS_ANDROID)
@@ -968,18 +990,26 @@ const char kDeviceScaleFactor[]     = "device-scale-factor";
 // Disable the Legacy Window which corresponds to the size of the WebContents.
 const char kDisableLegacyIntermediateWindow[] = "disable-legacy-window";
 
-// Enables or disables the Win32K process mitigation policy for renderer
-// processes which prevents them from invoking user32 and gdi32 system calls
-// which enter the kernel. This is only supported on Windows 8 and beyond.
+// Disables the Win32K process mitigation policy for renderer processes.
 const char kDisableWin32kRendererLockDown[] =
     "disable-win32k-renderer-lockdown";
-const char kEnableWin32kRendererLockDown[] =
-    "enable-win32k-renderer-lockdown";
+
+// Enables experimental hardware acceleration for VP8/VP9 video decoding.
+const char kEnableAcceleratedVpxDecode[] = "enable-accelerated-vpx-decode";
 
 // DirectWrite FontCache is shared by browser to renderers using shared memory.
-// This switch allows specifying suffix to shared memory section name to avoid
-// clashes between different instances of Chrome.
-const char kFontCacheSharedMemSuffix[] = "font-cache-shared-mem-suffix";
+// This switch allows us to pass the shared memory handle to the renderer.
+const char kFontCacheSharedHandle[] = "font-cache-shared-handle";
+
+// Sets the free memory thresholds below which the system is considered to be
+// under moderate and critical memory pressure. Used in the browser process,
+// and ignored if invalid. Specified as a pair of comma separated integers.
+// See base/win/memory_pressure_monitor.cc for defaults.
+const char kMemoryPressureThresholdsMb[] = "memory-pressure-thresholds-mb";
+
+// Enables the exporting of the tracing events to ETW. This is only supported on
+// Windows Vista and later.
+const char kTraceExportEventsToETW[] = "trace-export-events-to-etw";
 #endif
 
 // Enables the use of NPAPI plugins.

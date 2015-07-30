@@ -126,11 +126,11 @@ static bool hasWillChangeThatCreatesStackingContext(const ComputedStyle& style)
         switch (style.willChangeProperties()[i]) {
         case CSSPropertyOpacity:
         case CSSPropertyTransform:
-        case CSSPropertyWebkitTransform:
+        case CSSPropertyAliasWebkitTransform:
         case CSSPropertyTransformStyle:
-        case CSSPropertyWebkitTransformStyle:
+        case CSSPropertyAliasWebkitTransformStyle:
         case CSSPropertyPerspective:
-        case CSSPropertyWebkitPerspective:
+        case CSSPropertyAliasWebkitPerspective:
         case CSSPropertyWebkitMask:
         case CSSPropertyWebkitMaskBoxImage:
         case CSSPropertyWebkitClipPath:
@@ -197,7 +197,9 @@ void StyleAdjuster::adjustComputedStyle(ComputedStyle& style, const ComputedStyl
 
     // will-change:transform should result in the same rendering behavior as having a transform,
     // including the creation of a containing block for fixed position descendants.
-    if (!style.hasTransform() && (style.willChangeProperties().contains(CSSPropertyWebkitTransform) || style.willChangeProperties().contains(CSSPropertyTransform))) {
+    // SVG elements can skip this because they implicitly have transforms.
+    bool isSVGElement = e && e->isSVGElement();
+    if (!isSVGElement && !style.hasTransform() && (style.willChangeProperties().contains(CSSPropertyAliasWebkitTransform) || style.willChangeProperties().contains(CSSPropertyTransform))) {
         bool makeIdentity = true;
         style.setTransform(TransformOperations(makeIdentity));
     }
@@ -228,7 +230,7 @@ void StyleAdjuster::adjustComputedStyle(ComputedStyle& style, const ComputedStyl
         || style.hasFilter()))
         style.setTransformStyle3D(TransformStyle3DFlat);
 
-    if (e && e->isSVGElement()) {
+    if (isSVGElement) {
         // Only the root <svg> element in an SVG document fragment tree honors css position
         if (!(isSVGSVGElement(*e) && e->parentNode() && !e->parentNode()->isSVGElement()))
             style.setPosition(ComputedStyle::initialPosition());
@@ -266,57 +268,51 @@ void StyleAdjuster::adjustStyleForAlignment(ComputedStyle& style, const Computed
     // Otherwise, auto computes to:
     //  - 'stretch' for flex containers and grid containers.
     //  - 'start' for everything else.
-    if (style.justifyItems() == ItemPositionAuto) {
-        if (parentStyle.justifyItemsPositionType() == LegacyPosition) {
+    if (style.justifyItemsPosition() == ItemPositionAuto) {
+        if (parentStyle.justifyItemsPositionType() == LegacyPosition)
             style.setJustifyItems(parentStyle.justifyItems());
-            style.setJustifyItemsPositionType(parentStyle.justifyItemsPositionType());
-        } else if (isFlexOrGrid) {
-            style.setJustifyItems(ItemPositionStretch);
-        }
+        else if (isFlexOrGrid)
+            style.setJustifyItemsPosition(ItemPositionStretch);
     }
 
     // The 'auto' keyword computes to 'stretch' on absolutely-positioned elements,
     // and to the computed value of justify-items on the parent (minus
     // any legacy keywords) on all other boxes.
-    if (style.justifySelf() == ItemPositionAuto) {
-        if (absolutePositioned) {
-            style.setJustifySelf(ItemPositionStretch);
-        } else {
+    if (style.justifySelfPosition() == ItemPositionAuto) {
+        if (absolutePositioned)
+            style.setJustifySelfPosition(ItemPositionStretch);
+        else
             style.setJustifySelf(parentStyle.justifyItems());
-            style.setJustifySelfOverflowAlignment(parentStyle.justifyItemsOverflowAlignment());
-        }
     }
 
     // The 'auto' keyword computes to:
     //  - 'stretch' for flex containers and grid containers,
     //  - 'start' for everything else.
-    if (style.alignItems() == ItemPositionAuto) {
+    if (style.alignItemsPosition() == ItemPositionAuto) {
         if (isFlexOrGrid)
-            style.setAlignItems(ItemPositionStretch);
+            style.setAlignItemsPosition(ItemPositionStretch);
     }
 
     // The 'auto' keyword computes to 'stretch' on absolutely-positioned elements,
     // and to the computed value of align-items on the parent (minus
     // any 'legacy' keywords) on all other boxes.
-    if (style.alignSelf() == ItemPositionAuto) {
-        if (absolutePositioned) {
-            style.setAlignSelf(ItemPositionStretch);
-        } else {
+    if (style.alignSelfPosition() == ItemPositionAuto) {
+        if (absolutePositioned)
+            style.setAlignSelfPosition(ItemPositionStretch);
+        else
             style.setAlignSelf(parentStyle.alignItems());
-            style.setAlignSelfOverflowAlignment(parentStyle.alignItemsOverflowAlignment());
-        }
     }
 
     // Block Containers: For table cells, the behavior of the 'auto' depends on the computed
     // value of 'vertical-align', otherwise behaves as 'start'.
     // Flex Containers: 'auto' computes to 'flex-start'.
     // Grid Containers: 'auto' computes to 'start', and 'stretch' behaves like 'start'.
-    if ((style.justifyContent() == ContentPositionAuto) && (style.justifyContentDistribution() == ContentDistributionDefault)) {
+    if ((style.justifyContentPosition() == ContentPositionAuto) && (style.justifyContentDistribution() == ContentDistributionDefault)) {
         if (style.isDisplayFlexibleOrGridBox()) {
             if (style.isDisplayFlexibleBox())
-                style.setJustifyContent(ContentPositionFlexStart);
+                style.setJustifyContentPosition(ContentPositionFlexStart);
             else
-                style.setJustifyContent(ContentPositionStart);
+                style.setJustifyContentPosition(ContentPositionStart);
         }
     }
 
@@ -324,12 +320,12 @@ void StyleAdjuster::adjustStyleForAlignment(ComputedStyle& style, const Computed
     // value of 'vertical-align', otherwise behaves as 'start'.
     // Flex Containers: 'auto' computes to 'stretch'.
     // Grid Containers: 'auto' computes to 'start', and 'stretch' behaves like 'start'.
-    if (style.alignContent() == ContentPositionAuto && style.alignContentDistribution() == ContentDistributionDefault) {
+    if (style.alignContentPosition() == ContentPositionAuto && style.alignContentDistribution() == ContentDistributionDefault) {
         if (style.isDisplayFlexibleOrGridBox()) {
             if (style.isDisplayFlexibleBox())
                 style.setAlignContentDistribution(ContentDistributionStretch);
             else
-                style.setAlignContent(ContentPositionStart);
+                style.setAlignContentPosition(ContentPositionStart);
         }
     }
 }
@@ -412,7 +408,7 @@ void StyleAdjuster::adjustStyleForHTMLElement(ComputedStyle& style, const Comput
         style.setRequiresAcceleratedCompositingForExternalReasons(toHTMLPlugInElement(element).shouldAccelerate());
 
         // Plugins should get the standard replaced width/height instead of 'auto'.
-        // Replaced renderers get this for free, and fallback content doesn't count.
+        // Replaced layoutObjects get this for free, and fallback content doesn't count.
         if (toHTMLPlugInElement(element).usePlaceholderContent()) {
             if (style.width().isAuto())
                 style.setWidth(Length(LayoutReplaced::defaultWidth, Fixed));

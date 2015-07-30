@@ -76,8 +76,29 @@ class QuicServerSession : public QuicSession {
   // Override base class to process FEC config received from client.
   void OnConfigNegotiated() override;
 
+  bool UsingStatelessRejectsIfPeerSupported() {
+    if (GetCryptoStream() == nullptr) {
+      return false;
+    }
+    return GetCryptoStream()->use_stateless_rejects_if_peer_supported();
+  }
+
+  bool PeerSupportsStatelessRejects() {
+    if (GetCryptoStream() == nullptr) {
+      return false;
+    }
+    return GetCryptoStream()->peer_supports_stateless_rejects();
+  }
+
   void set_serving_region(std::string serving_region) {
     serving_region_ = serving_region;
+  }
+
+  void set_use_stateless_rejects_if_peer_supported(
+      bool use_stateless_rejects_if_peer_supported) {
+    DCHECK(GetCryptoStream() != nullptr);
+    GetCryptoStream()->set_use_stateless_rejects_if_peer_supported(
+        use_stateless_rejects_if_peer_supported);
   }
 
  protected:
@@ -99,6 +120,9 @@ class QuicServerSession : public QuicSession {
 
   scoped_ptr<QuicCryptoServerStream> crypto_stream_;
   QuicServerSessionVisitor* visitor_;
+
+  // Whether bandwidth resumption is enabled for this connection.
+  bool bandwidth_resumption_enabled_;
 
   // The most recent bandwidth estimate sent to the client.
   QuicBandwidth bandwidth_estimate_sent_to_client_;

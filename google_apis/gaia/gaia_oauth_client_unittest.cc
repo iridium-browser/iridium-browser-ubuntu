@@ -88,10 +88,11 @@ class MockOAuthFetcherFactory : public net::URLFetcherFactory,
         complete_immediately_(true) {
   }
   ~MockOAuthFetcherFactory() override {}
-  net::URLFetcher* CreateURLFetcher(int id,
-                                    const GURL& url,
-                                    net::URLFetcher::RequestType request_type,
-                                    net::URLFetcherDelegate* d) override {
+  scoped_ptr<net::URLFetcher> CreateURLFetcher(
+      int id,
+      const GURL& url,
+      net::URLFetcher::RequestType request_type,
+      net::URLFetcherDelegate* d) override {
     url_fetcher_ = new MockOAuthFetcher(
         response_code_,
         max_failure_count_,
@@ -100,7 +101,7 @@ class MockOAuthFetcherFactory : public net::URLFetcherFactory,
         results_,
         request_type,
         d);
-    return url_fetcher_;
+    return scoped_ptr<net::URLFetcher>(url_fetcher_);
   }
   void set_response_code(int response_code) {
     response_code_ = response_code;
@@ -218,14 +219,14 @@ class MockGaiaOAuthClientDelegate : public gaia::GaiaOAuthClient::Delegate {
   // https://groups.google.com/a/chromium.org/d/msg/chromium-dev/01sDxsJ1OYw/I_S0xCBRF2oJ
   MOCK_METHOD1(OnGetUserInfoResponsePtr,
                void(const base::DictionaryValue* user_info));
-  virtual void OnGetUserInfoResponse(
+  void OnGetUserInfoResponse(
       scoped_ptr<base::DictionaryValue> user_info) override {
     user_info_.reset(user_info.release());
     OnGetUserInfoResponsePtr(user_info_.get());
   }
   MOCK_METHOD1(OnGetTokenInfoResponsePtr,
                void(const base::DictionaryValue* token_info));
-  virtual void OnGetTokenInfoResponse(
+  void OnGetTokenInfoResponse(
       scoped_ptr<base::DictionaryValue> token_info) override {
     token_info_.reset(token_info.release());
     OnGetTokenInfoResponsePtr(token_info_.get());

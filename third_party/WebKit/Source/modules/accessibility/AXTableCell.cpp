@@ -68,16 +68,16 @@ bool AXTableCell::isColumnHeaderCell() const
     return equalIgnoringCase(scope, "col") || equalIgnoringCase(scope, "colgroup");
 }
 
-bool AXTableCell::computeAccessibilityIsIgnored() const
+bool AXTableCell::computeAccessibilityIsIgnored(IgnoredReasons* ignoredReasons) const
 {
-    AXObjectInclusion decision = defaultObjectInclusion();
+    AXObjectInclusion decision = defaultObjectInclusion(ignoredReasons);
     if (decision == IncludeObject)
         return false;
     if (decision == IgnoreObject)
         return true;
 
     if (!isTableCell())
-        return AXLayoutObject::computeAccessibilityIsIgnored();
+        return AXLayoutObject::computeAccessibilityIsIgnored(ignoredReasons);
 
     return false;
 }
@@ -218,7 +218,7 @@ SortDirection AXTableCell::sortDirection() const
     return SortDirectionUndefined;
 }
 
-AXObject* AXTableCell::titleUIElement() const
+AXObject* AXTableCell::deprecatedTitleUIElement() const
 {
     // Try to find if the first cell in this row is a <th>. If it is,
     // then it can act as the title ui element. (This is only in the

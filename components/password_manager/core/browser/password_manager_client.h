@@ -24,9 +24,10 @@ class PasswordManager;
 class PasswordManagerDriver;
 class PasswordStore;
 
-enum CustomPassphraseState {
-  WITHOUT_CUSTOM_PASSPHRASE,
-  ONLY_CUSTOM_PASSPHRASE
+enum PasswordSyncState {
+  NOT_SYNCING_PASSWORDS,
+  SYNCING_NORMAL_ENCRYPTION,
+  SYNCING_WITH_CUSTOM_PASSPHRASE
 };
 
 enum class CredentialSourceType {
@@ -50,7 +51,13 @@ class PasswordManagerClient {
 
   // If the password manager should work for the current page. Default
   // always returns true.
-  virtual bool IsPasswordManagerEnabledForCurrentPage() const;
+  virtual bool IsPasswordManagementEnabledForCurrentPage() const;
+
+  // Is saving new data for password autofill enabled for the current profile
+  // and page? For example, saving new data is disabled in Incognito mode,
+  // whereas filling data is not. Also, saving data is disabled in the presence
+  // of SSL errors on a page.
+  virtual bool IsSavingEnabledForCurrentPage() const;
 
   // Return true if |form| should not be available for autofill.
   virtual bool ShouldFilterAutofillResult(
@@ -119,10 +126,9 @@ class PasswordManagerClient {
   // Returns the PasswordStore associated with this instance.
   virtual PasswordStore* GetPasswordStore() const = 0;
 
-  // Returns true if password sync is enabled in the embedder. Return value for
-  // custom passphrase users depends on |state|. The default implementation
-  // always returns false.
-  virtual bool IsPasswordSyncEnabled(CustomPassphraseState state) const;
+  // Reports whether and how passwords are synced in the embedder. The default
+  // implementation always returns NOT_SYNCING_PASSWORDS.
+  virtual PasswordSyncState GetPasswordSyncState() const;
 
   // Only for clients which registered with a LogRouter: If called with
   // |router_can_be_used| set to false, the client may no longer use the

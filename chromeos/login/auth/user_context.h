@@ -48,12 +48,14 @@ class CHROMEOS_EXPORT UserContext {
   Key* GetKey();
   const std::string& GetAuthCode() const;
   const std::string& GetRefreshToken() const;
+  const std::string& GetAccessToken() const;
   const std::string& GetUserIDHash() const;
   bool IsUsingOAuth() const;
   AuthFlow GetAuthFlow() const;
   user_manager::UserType GetUserType() const;
   const std::string& GetPublicSessionLocale() const;
   const std::string& GetPublicSessionInputMethod() const;
+  const std::string& GetDeviceId() const;
 
   bool HasCredentials() const;
 
@@ -62,12 +64,14 @@ class CHROMEOS_EXPORT UserContext {
   void SetKey(const Key& key);
   void SetAuthCode(const std::string& auth_code);
   void SetRefreshToken(const std::string& refresh_token);
+  void SetAccessToken(const std::string& access_token);
   void SetUserIDHash(const std::string& user_id_hash);
   void SetIsUsingOAuth(bool is_using_oauth);
   void SetAuthFlow(AuthFlow auth_flow);
   void SetUserType(user_manager::UserType user_type);
   void SetPublicSessionLocale(const std::string& locale);
   void SetPublicSessionInputMethod(const std::string& input_method);
+  void SetDeviceId(const std::string& device_id);
 
   void ClearSecrets();
 
@@ -77,12 +81,14 @@ class CHROMEOS_EXPORT UserContext {
   Key key_;
   std::string auth_code_;
   std::string refresh_token_;
+  std::string access_token_;  // OAuthLogin scoped access token.
   std::string user_id_hash_;
   bool is_using_oauth_;
   AuthFlow auth_flow_;
   user_manager::UserType user_type_;
   std::string public_session_locale_;
   std::string public_session_input_method_;
+  std::string device_id_;
 };
 
 }  // namespace chromeos

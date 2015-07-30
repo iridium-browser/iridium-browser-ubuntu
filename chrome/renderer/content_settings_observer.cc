@@ -6,12 +6,12 @@
 
 #include "base/command_line.h"
 #include "base/metrics/histogram.h"
-#include "chrome/common/render_messages.h"
+#include "components/content_settings/content/common/content_settings_messages.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/renderer/document_state.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
-#include "third_party/WebKit/public/platform/WebPermissionCallbacks.h"
+#include "third_party/WebKit/public/platform/WebContentSettingCallbacks.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/web/WebDataSource.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
@@ -30,10 +30,10 @@
 #include "extensions/renderer/dispatcher.h"
 #endif
 
+using blink::WebContentSettingCallbacks;
 using blink::WebDataSource;
 using blink::WebDocument;
 using blink::WebFrame;
-using blink::WebPermissionCallbacks;
 using blink::WebSecurityOrigin;
 using blink::WebString;
 using blink::WebURL;
@@ -285,11 +285,11 @@ bool ContentSettingsObserver::allowDatabase(const WebString& name,
 }
 
 void ContentSettingsObserver::requestFileSystemAccessAsync(
-    const WebPermissionCallbacks& callbacks) {
+    const WebContentSettingCallbacks& callbacks) {
   WebFrame* frame = render_frame()->GetWebFrame();
   if (frame->securityOrigin().isUnique() ||
       frame->top()->securityOrigin().isUnique()) {
-    WebPermissionCallbacks permissionCallbacks(callbacks);
+    WebContentSettingCallbacks permissionCallbacks(callbacks);
     permissionCallbacks.doDeny();
     return;
   }
@@ -628,7 +628,7 @@ void ContentSettingsObserver::OnRequestFileSystemAccessAsyncResponse(
   if (it == permission_requests_.end())
     return;
 
-  WebPermissionCallbacks callbacks = it->second;
+  WebContentSettingCallbacks callbacks = it->second;
   permission_requests_.erase(it);
 
   if (allowed) {

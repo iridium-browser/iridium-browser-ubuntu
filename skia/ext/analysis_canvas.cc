@@ -36,7 +36,8 @@ bool IsSolidColorPaint(const SkPaint& paint) {
 
   // getXfermode can return a NULL, but that is handled
   // gracefully by AsMode (NULL turns into kSrcOver mode).
-  SkXfermode::AsMode(paint.getXfermode(), &xfermode);
+  if (!SkXfermode::AsMode(paint.getXfermode(), &xfermode))
+    return false;
 
   // Paint is solid color if the following holds:
   // - Alpha is 1.0, style is fill, and there are no special effects
@@ -60,7 +61,9 @@ bool IsFullQuad(SkCanvas* canvas, const SkRect& drawn_rect) {
     return false;
 
   SkIRect clip_irect;
-  canvas->getClipDeviceBounds(&clip_irect);
+  if (!canvas->getClipDeviceBounds(&clip_irect))
+    return false;
+  
   // if the clip is smaller than the canvas, we're partly clipped, so abort.
   if (!clip_irect.contains(SkIRect::MakeSize(canvas->getDeviceSize())))
     return false;
@@ -96,8 +99,8 @@ void AnalysisCanvas::SetForceNotTransparent(bool flag) {
 
 void AnalysisCanvas::onDrawPaint(const SkPaint& paint) {
   SkRect rect;
-  getClipBounds(&rect);
-  drawRect(rect, paint);
+  if (getClipBounds(&rect))
+    drawRect(rect, paint);
 }
 
 void AnalysisCanvas::onDrawPoints(SkCanvas::PointMode mode,
@@ -208,6 +211,29 @@ void AnalysisCanvas::onDrawBitmapNine(const SkBitmap& bitmap,
                                       const SkPaint* paint) {
   is_solid_color_ = false;
   is_transparent_ = false;
+  ++draw_op_count_;
+}
+
+void AnalysisCanvas::onDrawImage(const SkImage*,
+                                 SkScalar left,
+                                 SkScalar top,
+                                 const SkPaint*) {
+  is_solid_color_ = false;
+  is_transparent_ = false;
+  ++draw_op_count_;
+}
+
+void AnalysisCanvas::onDrawImageRect(const SkImage*,
+                                     const SkRect* src,
+                                     const SkRect& dst,
+                                     const SkPaint* paint) {
+  // Call drawRect to determine transparency,
+  // but reset solid color to false.
+  SkPaint tmpPaint;
+  if (!paint)
+    paint = &tmpPaint;
+  drawRect(dst, *paint);
+  is_solid_color_ = false;
   ++draw_op_count_;
 }
 

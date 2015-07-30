@@ -6,54 +6,67 @@
 #define UI_COMPOSITOR_PAINT_CONTEXT_H_
 
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
+#include "ui/compositor/compositor_export.h"
 #include "ui/gfx/geometry/rect.h"
+
+namespace cc {
+class DisplayItemList;
+}
 
 namespace gfx {
 class Canvas;
 }
 
-namespace ui {
+class SkPictureRecorder;
 
-class PaintContext {
+namespace ui {
+class ClipTransformRecorder;
+class CompositingRecorder;
+class PaintRecorder;
+
+class COMPOSITOR_EXPORT PaintContext {
  public:
-  // Construct a PaintContext that can only re-paint the area in the
+  // Construct a PaintContext that may only re-paint the area in the
   // |invalidation|.
-  PaintContext(gfx::Canvas* canvas, const gfx::Rect& invalidation)
-      : canvas_(canvas), invalidation_(invalidation) {
-#if DCHECK_IS_ON()
-    root_visited_ = nullptr;
-#endif
-  }
+  PaintContext(gfx::Canvas* canvas, const gfx::Rect& invalidation);
+
+  // Construct a PaintContext that may only re-paint the area in the
+  // |invalidation|.
+  PaintContext(cc::DisplayItemList* list,
+               float device_scale_factor,
+               const gfx::Rect& bounds,
+               const gfx::Rect& invalidation);
 
   // Construct a PaintContext that will re-paint everything (no consideration
   // for invalidation).
-  explicit PaintContext(gfx::Canvas* canvas)
-      : PaintContext(canvas, gfx::Rect()) {}
-
-  ~PaintContext() {}
+  explicit PaintContext(gfx::Canvas* canvas);
 
   // Clone a PaintContext with an additional |offset|.
-  PaintContext CloneWithPaintOffset(const gfx::Vector2d& offset) const {
-    return PaintContext(*this, offset);
-  }
+  PaintContext(const PaintContext& other, const gfx::Vector2d& offset);
 
   // Clone a PaintContext that has no consideration for invalidation.
-  PaintContext CloneWithoutInvalidation() const {
-    return PaintContext(canvas_);
-  }
+  enum CloneWithoutInvalidation {
+    CLONE_WITHOUT_INVALIDATION,
+  };
+  PaintContext(const PaintContext& other, CloneWithoutInvalidation c);
 
-  // TODO(danakj): Remove this once everything is painting to display lists.
-  gfx::Canvas* canvas() const { return canvas_; }
+  ~PaintContext();
 
-  // When true, IsRectInvalidated() can be called, otherwise its result would be
+  // When true, IsRectInvalid() can be called, otherwise its result would be
   // invalid.
-  bool CanCheckInvalidated() const { return !invalidation_.IsEmpty(); }
+  bool CanCheckInvalid() const { return !invalidation_.IsEmpty(); }
+
+  // When true, if a thing is not invalidated it does not need to paint itself.
+  // When false, everything should provide an output when painting regardless of
+  // being invalidated in order to remain visible.
+  bool ShouldEarlyOutOfPaintingWhenValid() const { return !!canvas_; }
 
   // When true, the |bounds| touches an invalidated area, so should be
   // re-painted. When false, re-painting can be skipped. Bounds should be in
   // the local space with offsets up to the painting root in the PaintContext.
-  bool IsRectInvalidated(const gfx::Rect& bounds) const {
-    DCHECK(CanCheckInvalidated());
+  bool IsRectInvalid(const gfx::Rect& bounds) const {
+    DCHECK(CanCheckInvalid());
     return invalidation_.Intersects(bounds + offset_);
   }
 
@@ -66,18 +79,32 @@ class PaintContext {
   const gfx::Vector2d& PaintOffset() const { return offset_; }
 #endif
 
+  const gfx::Rect& InvalidationForTesting() const { return invalidation_; }
+
  private:
-  // Clone a PaintContext with an additional |offset|.
-  PaintContext(const PaintContext& other, const gfx::Vector2d& offset)
-      : canvas_(other.canvas_),
-        invalidation_(other.invalidation_),
-        offset_(other.offset_ + offset) {
-#if DCHECK_IS_ON()
-    root_visited_ = other.root_visited_;
-#endif
-  }
+  // The Recorder classes need access to the internal canvas and friends, but we
+  // don't want to expose them on this class so that people must go through the
+  // recorders to access them.
+  friend class ClipTransformRecorder;
+  friend class CompositingRecorder;
+  friend class PaintRecorder;
+  // The Cache class also needs to access the DisplayItemList to append its
+  // cache contents.
+  friend class PaintCache;
 
   gfx::Canvas* canvas_;
+  cc::DisplayItemList* list_;
+  scoped_ptr<SkPictureRecorder> owned_recorder_;
+  // A pointer to the |owned_recorder_| in this PaintContext, or in another one
+  // which this was copied from. We expect a copied-from PaintContext to outlive
+  // copies made from it.
+  SkPictureRecorder* recorder_;
+  // The device scale of the frame being painted. Used to determine which bitmap
+  // resources to use in the frame.
+  float device_scale_factor_;
+  // The bounds of the area being painted. Not all of it may be invalidated from
+  // the previous frame.
+  gfx::Rect bounds_;
   // Invalidation in the space of the paint root (ie the space of the layer
   // backing the paint taking place).
   gfx::Rect invalidation_;
@@ -89,7 +116,12 @@ class PaintContext {
   // Used to verify that the |invalidation_| is only used to compare against
   // rects in the same space.
   mutable void* root_visited_;
+  // Used to verify that paint recorders are not nested. True while a paint
+  // recorder is active.
+  mutable bool inside_paint_recorder_;
 #endif
+
+  DISALLOW_COPY_AND_ASSIGN(PaintContext);
 };
 
 }  // namespace ui

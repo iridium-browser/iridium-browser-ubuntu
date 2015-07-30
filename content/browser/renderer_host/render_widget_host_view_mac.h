@@ -293,7 +293,6 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   void InitAsFullscreen(RenderWidgetHostView* reference_host_view) override;
   void MovePluginWindows(const std::vector<WebPluginGeometry>& moves) override;
   void Focus() override;
-  void Blur() override;
   void UpdateCursor(const WebCursor& cursor) override;
   void SetIsLoading(bool is_loading) override;
   void TextInputTypeChanged(ui::TextInputType type,
@@ -317,7 +316,7 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   void CopyFromCompositingSurface(const gfx::Rect& src_subrect,
                                   const gfx::Size& dst_size,
                                   ReadbackRequestCallback& callback,
-                                  SkColorType color_type) override;
+                                  SkColorType preferred_color_type) override;
   void CopyFromCompositingSurfaceToVideoFrame(
       const gfx::Rect& src_subrect,
       const scoped_refptr<media::VideoFrame>& target,
@@ -346,10 +345,10 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   void WheelEventAck(const blink::WebMouseWheelEvent& event,
                      InputEventAckState ack_result) override;
 
+  uint32_t GetSurfaceIdNamespace() override;
+
   // IPC::Sender implementation.
   bool Send(IPC::Message* message) override;
-
-  SkColorType PreferredReadbackFormat() override;
 
   // gfx::DisplayObserver implementation.
   void OnDisplayAdded(const gfx::Display& new_display) override;
@@ -441,7 +440,7 @@ class CONTENT_EXPORT RenderWidgetHostViewMac
   };
   BrowserCompositorViewState browser_compositor_state_;
 
-  // Delegated frame management and compositior.
+  // Delegated frame management and compositor.
   scoped_ptr<DelegatedFrameHost> delegated_frame_host_;
   scoped_ptr<ui::Layer> root_layer_;
 

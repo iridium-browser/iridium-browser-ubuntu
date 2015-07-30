@@ -69,12 +69,6 @@ enum NotificationType {
   // details about why the install failed.
   NOTIFICATION_EXTENSION_INSTALL_ERROR,
 
-  // Sent when an extension has been uninstalled. The details are an Extension,
-  // and the source is a BrowserContext*.
-  //
-  // DEPRECATED: Use ExtensionRegistry::AddObserver instead.
-  NOTIFICATION_EXTENSION_UNINSTALLED_DEPRECATED,
-
   // Sent when an extension uninstall is not allowed because the extension is
   // not user manageable.  The details are an Extension, and the source is a
   // BrowserContext*.
@@ -127,11 +121,6 @@ enum NotificationType {
   // may not apply to the current page. The source is a LocationBar*. There
   // are no details.
   NOTIFICATION_EXTENSION_PAGE_ACTION_COUNT_CHANGED,
-
-  // Sent when a browser action's visibility has changed. The source is the
-  // ExtensionPrefs* that changed, and the details are a std::string with the
-  // extension's ID.
-  NOTIFICATION_EXTENSION_BROWSER_ACTION_VISIBILITY_CHANGED,
 
   // Sent when an extension command has been removed. The source is the
   // BrowserContext* and the details is an ExtensionCommandRemovedDetails

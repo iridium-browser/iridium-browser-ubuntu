@@ -109,8 +109,7 @@ std::string ReplaceHtmlTemplateValues(
     const std::string& loading_indicator_class,
     const std::string& original_url,
     const DistilledPagePrefs::Theme theme,
-    const DistilledPagePrefs::FontFamily font_family,
-    const std::string& htmlContent) {
+    const DistilledPagePrefs::FontFamily font_family) {
   base::StringPiece html_template =
       ResourceBundle::GetSharedInstance().GetRawDataResource(
           IDR_DOM_DISTILLER_VIEWER_HTML);
@@ -140,7 +139,6 @@ std::string ReplaceHtmlTemplateValues(
   substitutions.push_back(
       l10n_util::GetStringUTF8(IDS_DOM_DISTILLER_VIEWER_VIEW_ORIGINAL));  // $7
   substitutions.push_back(textDirection);                                 // $8
-  substitutions.push_back(htmlContent);                                   // $9
 
   return ReplaceStringPlaceholders(html_template, substitutions, NULL);
 }
@@ -171,10 +169,10 @@ const std::string GetShowFeedbackFormJs() {
 const std::string GetUnsafeIncrementalDistilledPageJs(
     const DistilledPageProto* page_proto,
     const bool is_last_page) {
-  std::string output;
-  base::StringValue value(page_proto->html());
-  base::JSONWriter::Write(&value, &output);
+  std::string output(page_proto->html());
   EnsureNonEmptyContent(&output);
+  base::StringValue value(output);
+  base::JSONWriter::Write(&value, &output);
   std::string page_update("addToPage(");
   page_update += output + ");";
   return page_update + GetToggleLoadingIndicatorJs(
@@ -213,25 +211,23 @@ const std::string GetUnsafeArticleTemplateHtml(
   std::string original_url = page_proto->url();
 
   return ReplaceHtmlTemplateValues(title, text_direction, "hidden",
-                                   original_url, theme, font_family, "");
+                                   original_url, theme, font_family);
 }
 
 const std::string GetUnsafeArticleContentJs(
     const DistilledArticleProto* article_proto) {
   DCHECK(article_proto);
-  if (article_proto->pages_size() == 0 || !article_proto->pages(0).has_html()) {
-    return "";
-  }
-
   std::ostringstream unsafe_output_stream;
-  for (int page_num = 0; page_num < article_proto->pages_size(); ++page_num) {
-    unsafe_output_stream << article_proto->pages(page_num).html();
+  if (article_proto->pages_size() > 0 && article_proto->pages(0).has_html()) {
+    for (int page_num = 0; page_num < article_proto->pages_size(); ++page_num) {
+      unsafe_output_stream << article_proto->pages(page_num).html();
+    }
   }
 
-  std::string output;
-  base::StringValue value(unsafe_output_stream.str());
-  base::JSONWriter::Write(&value, &output);
+  std::string output(unsafe_output_stream.str());
   EnsureNonEmptyContent(&output);
+  base::StringValue value(output);
+  base::JSONWriter::Write(&value, &output);
   std::string page_update("addToPage(");
   page_update += output + ");";
   return page_update + GetToggleLoadingIndicatorJs(true);
@@ -243,39 +239,7 @@ const std::string GetErrorPageHtml(
   std::string title = l10n_util::GetStringUTF8(
       IDS_DOM_DISTILLER_VIEWER_FAILED_TO_FIND_ARTICLE_TITLE);
   return ReplaceHtmlTemplateValues(title, "auto", "hidden", "", theme,
-                                   font_family, "");
-}
-
-const std::string GetUnsafeArticleHtml(
-    const DistilledArticleProto* article_proto,
-    const DistilledPagePrefs::Theme theme,
-    const DistilledPagePrefs::FontFamily font_family) {
-  DCHECK(article_proto);
-  std::string title;
-  std::string unsafe_article_html;
-  std::string text_direction = "";
-  if (article_proto->has_title() && article_proto->pages_size() > 0 &&
-      article_proto->pages(0).has_html()) {
-    title = net::EscapeForHTML(article_proto->title());
-    std::ostringstream unsafe_output_stream;
-    for (int page_num = 0; page_num < article_proto->pages_size(); ++page_num) {
-      unsafe_output_stream << article_proto->pages(page_num).html();
-    }
-    unsafe_article_html = unsafe_output_stream.str();
-    text_direction = article_proto->pages(0).text_direction();
-  }
-
-  EnsureNonEmptyTitle(&title);
-  EnsureNonEmptyContent(&unsafe_article_html);
-
-  std::string original_url;
-  if (article_proto->pages_size() > 0 && article_proto->pages(0).has_url()) {
-    original_url = article_proto->pages(0).url();
-  }
-
-  return ReplaceHtmlTemplateValues(
-      title, text_direction, "hidden", original_url, theme, font_family,
-      unsafe_article_html);
+                                   font_family);
 }
 
 const std::string GetCss() {

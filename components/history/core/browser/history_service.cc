@@ -25,9 +25,11 @@
 #include "base/location.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/threading/thread.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "components/history/core/browser/download_row.h"
 #include "components/history/core/browser/history_backend.h"
 #include "components/history/core/browser/history_client.h"
@@ -114,12 +116,6 @@ class HistoryService::BackendDelegate : public HistoryBackend::Delegate {
     service_task_runner_->PostTask(
         FROM_HERE, base::Bind(&HistoryService::SetInMemoryBackend,
                               history_service_, base::Passed(&backend)));
-  }
-
-  void NotifyAddVisit(const BriefVisitInfo& info) override {
-    service_task_runner_->PostTask(
-        FROM_HERE,
-        base::Bind(&HistoryService::NotifyAddVisit, history_service_, info));
   }
 
   void NotifyFaviconChanged(const std::set<GURL>& urls) override {
@@ -622,15 +618,6 @@ void HistoryService::SetFaviconsOutOfDateForPage(const GURL& page_url) {
                           history_backend_.get(), page_url));
 }
 
-void HistoryService::CloneFavicons(const GURL& old_page_url,
-                                   const GURL& new_page_url) {
-  DCHECK(thread_) << "History service being called after cleanup";
-  DCHECK(thread_checker_.CalledOnValidThread());
-  ScheduleTask(PRIORITY_NORMAL,
-               base::Bind(&HistoryBackend::CloneFavicons,
-                          history_backend_.get(), old_page_url, new_page_url));
-}
-
 void HistoryService::SetImportedFavicons(
     const favicon_base::FaviconUsageDataList& favicon_usage) {
   DCHECK(thread_) << "History service being called after cleanup";
@@ -860,8 +847,11 @@ bool HistoryService::Init(
     bool no_db,
     const std::string& languages,
     const HistoryDatabaseParams& history_database_params) {
+  TRACE_EVENT0("browser,startup", "HistoryService::Init")
+  SCOPED_UMA_HISTOGRAM_TIMER("History.HistoryServiceInitTime");
   DCHECK(thread_) << "History service being called after cleanup";
   DCHECK(thread_checker_.CalledOnValidThread());
+
   base::Thread::Options options;
   options.timer_slack = base::TIMER_SLACK_MAXIMUM;
   if (!thread_->StartWithOptions(options)) {
@@ -1044,11 +1034,6 @@ bool HistoryService::GetRowForURL(const GURL& url, URLRow* url_row) {
   DCHECK(thread_checker_.CalledOnValidThread());
   URLDatabase* db = InMemoryDatabase();
   return db && (db->GetRowForURL(url, url_row) != 0);
-}
-
-void HistoryService::NotifyAddVisit(const BriefVisitInfo& info) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  FOR_EACH_OBSERVER(HistoryServiceObserver, observers_, OnAddVisit(this, info));
 }
 
 void HistoryService::NotifyURLVisited(ui::PageTransition transition,

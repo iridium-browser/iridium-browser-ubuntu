@@ -52,6 +52,7 @@ SchedulerStateMachine::SchedulerStateMachine(const SchedulerSettings& settings)
       continuous_painting_(false),
       children_need_begin_frames_(false),
       defer_commits_(false),
+      video_needs_begin_frames_(false),
       last_commit_had_no_updates_(false),
       wait_for_active_tree_ready_to_draw_(false),
       did_request_swap_in_last_frame_(false),
@@ -243,6 +244,7 @@ void SchedulerStateMachine::AsValueInto(
                     skip_next_begin_main_frame_to_reduce_latency_);
   state->SetBoolean("continuous_painting", continuous_painting_);
   state->SetBoolean("children_need_begin_frames", children_need_begin_frames_);
+  state->SetBoolean("video_needs_begin_frames", video_needs_begin_frames_);
   state->SetBoolean("defer_commits", defer_commits_);
   state->SetBoolean("last_commit_had_no_updates", last_commit_had_no_updates_);
   state->SetBoolean("did_request_swap_in_last_frame",
@@ -303,7 +305,7 @@ bool SchedulerStateMachine::ShouldBeginOutputSurfaceCreation() const {
   if (begin_impl_frame_state_ != BEGIN_IMPL_FRAME_STATE_IDLE)
     return false;
 
-  // We want to clear the pipline of any pending draws and activations
+  // We want to clear the pipeline of any pending draws and activations
   // before starting output surface initialization. This allows us to avoid
   // weird corner cases where we abort draws or force activation while we
   // are initializing the output surface.
@@ -318,7 +320,7 @@ bool SchedulerStateMachine::ShouldBeginOutputSurfaceCreation() const {
 bool SchedulerStateMachine::ShouldDraw() const {
   // If we need to abort draws, we should do so ASAP since the draw could
   // be blocking other important actions (like output surface initialization),
-  // from occuring. If we are waiting for the first draw, then perfom the
+  // from occurring. If we are waiting for the first draw, then perform the
   // aborted draw to keep things moving. If we are not waiting for the first
   // draw however, we don't want to abort for no reason.
   if (PendingDrawsShouldBeAborted())
@@ -386,10 +388,6 @@ bool SchedulerStateMachine::ShouldAnimate() const {
 }
 
 bool SchedulerStateMachine::CouldSendBeginMainFrame() const {
-  // Do not send begin main frame too many times in a single frame.
-  if (send_begin_main_frame_funnel_)
-    return false;
-
   if (!needs_commit_)
     return false;
 
@@ -406,6 +404,10 @@ bool SchedulerStateMachine::CouldSendBeginMainFrame() const {
 
 bool SchedulerStateMachine::ShouldSendBeginMainFrame() const {
   if (!CouldSendBeginMainFrame())
+    return false;
+
+  // Do not send begin main frame too many times in a single frame.
+  if (send_begin_main_frame_funnel_)
     return false;
 
   // Only send BeginMainFrame when there isn't another commit pending already.
@@ -725,8 +727,11 @@ void SchedulerStateMachine::SetSkipNextBeginMainFrameToReduceLatency() {
   skip_next_begin_main_frame_to_reduce_latency_ = true;
 }
 
-bool SchedulerStateMachine::BeginFrameNeededForChildren() const {
+bool SchedulerStateMachine::BeginFrameRequiredForChildren() const {
   return children_need_begin_frames_;
+}
+bool SchedulerStateMachine::BeginFrameNeededForVideo() const {
+  return video_needs_begin_frames_;
 }
 
 bool SchedulerStateMachine::BeginFrameNeeded() const {
@@ -734,8 +739,13 @@ bool SchedulerStateMachine::BeginFrameNeeded() const {
   // TODO(brianderson): Support output surface creation inside a BeginFrame.
   if (!HasInitializedOutputSurface())
     return false;
-  return (BeginFrameNeededToAnimateOrDraw() || BeginFrameNeededForChildren() ||
-          ProactiveBeginFrameWanted());
+
+  // If we are not visible, we don't need BeginFrame messages.
+  if (!visible_)
+    return false;
+
+  return (BeginFrameRequiredForAction() || BeginFrameRequiredForChildren() ||
+          BeginFrameNeededForVideo() || ProactiveBeginFrameWanted());
 }
 
 void SchedulerStateMachine::SetChildrenNeedBeginFrames(
@@ -743,33 +753,32 @@ void SchedulerStateMachine::SetChildrenNeedBeginFrames(
   children_need_begin_frames_ = children_need_begin_frames;
 }
 
+void SchedulerStateMachine::SetVideoNeedsBeginFrames(
+    bool video_needs_begin_frames) {
+  video_needs_begin_frames_ = video_needs_begin_frames;
+}
+
 void SchedulerStateMachine::SetDeferCommits(bool defer_commits) {
   defer_commits_ = defer_commits;
 }
 
-// These are the cases where we definitely (or almost definitely) have a
-// new frame to animate and/or draw and can draw.
-bool SchedulerStateMachine::BeginFrameNeededToAnimateOrDraw() const {
+// These are the cases where we require a BeginFrame message to make progress
+// on requested actions.
+bool SchedulerStateMachine::BeginFrameRequiredForAction() const {
   // The forced draw respects our normal draw scheduling, so we need to
   // request a BeginImplFrame for it.
   if (forced_redraw_state_ == FORCED_REDRAW_STATE_WAITING_FOR_DRAW)
     return true;
 
-  // TODO(mithro): Remove background animation ticking. crbug.com/371747
-  if (needs_animate_)
-    return true;
-
-  // Only background tick for animations - not draws, which will never happen.
-  if (!visible_)
-    return false;
-
-  return needs_redraw_;
+  return needs_animate_ || needs_redraw_ || (needs_commit_ && !defer_commits_);
 }
 
-// These are cases where we are very likely to draw soon, but might not
-// actually have a new frame to draw when we receive the next BeginImplFrame.
-// Proactively requesting the BeginImplFrame helps hide the round trip latency
-// of the SetNeedsBeginFrame request that has to go to the Browser.
+// These are cases where we are very likely want a BeginFrame message in the
+// near future. Proactively requesting the BeginImplFrame helps hide the round
+// trip latency of the SetNeedsBeginFrame request that has to go to the
+// Browser.
+// This includes things like drawing soon, but might not actually have a new
+// frame to draw when we receive the next BeginImplFrame.
 bool SchedulerStateMachine::ProactiveBeginFrameWanted() const {
   // Do not be proactive when invisible.
   if (!visible_)
@@ -780,7 +789,7 @@ bool SchedulerStateMachine::ProactiveBeginFrameWanted() const {
   // request frames when commits are disabled, because the frame requests will
   // not provide the needed commit (and will wake up the process when it could
   // stay idle).
-  if ((needs_commit_ || commit_state_ != COMMIT_STATE_IDLE) && !defer_commits_)
+  if ((commit_state_ != COMMIT_STATE_IDLE) && !defer_commits_)
     return true;
 
   // If the pending tree activates quickly, we'll want a BeginImplFrame soon
@@ -842,13 +851,11 @@ void SchedulerStateMachine::OnBeginImplFrameDeadline() {
   // Clear funnels for any actions we perform during the deadline.
   request_swap_funnel_ = false;
 
-#if defined(OS_ANDROID)
   // Allow one PrepareTiles per draw for synchronous compositor.
   if (settings_.using_synchronous_renderer_compositor) {
     if (prepare_tiles_funnel_ > 0)
       prepare_tiles_funnel_--;
   }
-#endif
 }
 
 void SchedulerStateMachine::OnBeginImplFrameIdle() {
@@ -885,9 +892,8 @@ bool SchedulerStateMachine::ShouldTriggerBeginImplFrameDeadlineImmediately()
   if (begin_impl_frame_state_ != BEGIN_IMPL_FRAME_STATE_INSIDE_BEGIN_FRAME)
     return false;
 
-  // If we've lost the output surface, end the current BeginImplFrame ASAP
-  // so we can start creating the next output surface.
-  if (output_surface_state_ == OUTPUT_SURFACE_LOST)
+  // If we just forced activation, we should end the deadline right now.
+  if (PendingActivationsShouldBeForced() && !has_pending_tree_)
     return true;
 
   // SwapAck throttle the deadline since we wont draw and swap anyway.

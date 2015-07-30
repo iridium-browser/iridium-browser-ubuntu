@@ -16,7 +16,7 @@
       {
         "swarming": {
           "can_use_on_swarming_builders": true,
-          "shards": 5
+          "shards": 10
         },
         "test": "browser_tests"
       },
@@ -69,6 +69,9 @@
         "test": "gfx_unittests"
       },
       {
+        "test": "gl_unittests"
+      },
+      {
         "test": "google_apis_unittests"
       },
       {
@@ -76,7 +79,8 @@
       },
       {
         "swarming": {
-          "can_use_on_swarming_builders": true
+          "can_use_on_swarming_builders": true,
+          "shards": 3
         },
         "test": "interactive_ui_tests"
       },
@@ -88,6 +92,9 @@
       },
       {
         "test": "media_unittests"
+      },
+      {
+        "test": "midi_unittests"
       },
       {
         "swarming": {
@@ -240,6 +247,9 @@
         "test": "gfx_unittests"
       },
       {
+        "test": "gl_unittests"
+      },
+      {
         "test": "google_apis_unittests"
       },
       {
@@ -263,6 +273,9 @@
       },
       {
         "test": "message_center_unittests"
+      },
+      {
+        "test": "midi_unittests"
       },
       {
         "test": "nacl_loader_unittests"
@@ -391,6 +404,9 @@
         "test": "media_unittests"
       },
       {
+        "test": "midi_unittests"
+      },
+      {
         "swarming": {
           "can_use_on_swarming_builders": true
         },
@@ -493,6 +509,9 @@
       },
       {
         "test": "media_unittests"
+      },
+      {
+        "test": "midi_unittests"
       },
       {
         "swarming": {

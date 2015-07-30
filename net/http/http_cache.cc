@@ -23,7 +23,6 @@
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/pickle.h"
-#include "base/profiler/scoped_tracker.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -77,7 +76,7 @@ HttpCache::DefaultBackend::~DefaultBackend() {}
 
 // static
 HttpCache::BackendFactory* HttpCache::DefaultBackend::InMemory(int max_bytes) {
-  return new DefaultBackend(MEMORY_CACHE, net::CACHE_BACKEND_DEFAULT,
+  return new DefaultBackend(MEMORY_CACHE, CACHE_BACKEND_DEFAULT,
                             base::FilePath(), max_bytes, NULL);
 }
 
@@ -146,8 +145,10 @@ class HttpCache::WorkItem {
         trans_(trans),
         entry_(entry),
         backend_(NULL) {}
-  WorkItem(WorkItemOperation operation, Transaction* trans,
-           const net::CompletionCallback& cb, disk_cache::Backend** backend)
+  WorkItem(WorkItemOperation operation,
+           Transaction* trans,
+           const CompletionCallback& cb,
+           disk_cache::Backend** backend)
       : operation_(operation),
         trans_(trans),
         entry_(NULL),
@@ -187,7 +188,7 @@ class HttpCache::WorkItem {
   WorkItemOperation operation_;
   Transaction* trans_;
   ActiveEntry** entry_;
-  net::CompletionCallback callback_;  // User callback.
+  CompletionCallback callback_;  // User callback.
   disk_cache::Backend** backend_;
 };
 
@@ -447,7 +448,7 @@ void HttpCache::AsyncValidation::Terminate(int result) {
 }
 
 //-----------------------------------------------------------------------------
-HttpCache::HttpCache(const net::HttpNetworkSession::Params& params,
+HttpCache::HttpCache(const HttpNetworkSession::Params& params,
                      BackendFactory* backend_factory)
     : net_log_(params.net_log),
       backend_factory_(backend_factory),
@@ -583,7 +584,7 @@ void HttpCache::WriteMetadata(const GURL& url,
   // Do lazy initialization of disk cache if needed.
   if (!disk_cache_.get()) {
     // We don't care about the result.
-    CreateBackend(NULL, net::CompletionCallback());
+    CreateBackend(NULL, CompletionCallback());
   }
 
   HttpCache::Transaction* trans =
@@ -623,7 +624,7 @@ int HttpCache::CreateTransaction(RequestPriority priority,
   // Do lazy initialization of disk cache if needed.
   if (!disk_cache_.get()) {
     // We don't care about the result.
-    CreateBackend(NULL, net::CompletionCallback());
+    CreateBackend(NULL, CompletionCallback());
   }
 
    HttpCache::Transaction* transaction =
@@ -656,7 +657,7 @@ HttpCache::SetHttpNetworkTransactionFactoryForTesting(
 //-----------------------------------------------------------------------------
 
 int HttpCache::CreateBackend(disk_cache::Backend** backend,
-                             const net::CompletionCallback& callback) {
+                             const CompletionCallback& callback) {
   if (!backend_factory_.get())
     return ERR_FAILED;
 
@@ -697,8 +698,8 @@ int HttpCache::GetBackendForTransaction(Transaction* trans) {
   if (!building_backend_)
     return ERR_FAILED;
 
-  WorkItem* item = new WorkItem(
-      WI_CREATE_BACKEND, trans, net::CompletionCallback(), NULL);
+  WorkItem* item =
+      new WorkItem(WI_CREATE_BACKEND, trans, CompletionCallback(), NULL);
   PendingOp* pending_op = GetPendingOp(std::string());
   DCHECK(pending_op->writer);
   pending_op->pending_queue.push_back(item);
@@ -1333,11 +1334,6 @@ void HttpCache::OnIOComplete(int result, PendingOp* pending_op) {
 void HttpCache::OnPendingOpComplete(const base::WeakPtr<HttpCache>& cache,
                                     PendingOp* pending_op,
                                     int rv) {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "422516 HttpCache::OnPendingOpComplete"));
-
   if (cache.get()) {
     cache->OnIOComplete(rv, pending_op);
   } else {

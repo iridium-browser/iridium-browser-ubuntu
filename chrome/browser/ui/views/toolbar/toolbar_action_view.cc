@@ -19,13 +19,15 @@
 #include "grit/theme_resources.h"
 #include "ui/accessibility/ax_view_state.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/compositor/paint_context.h"
+#include "ui/compositor/paint_recorder.h"
 #include "ui/events/event.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/image/image_skia_source.h"
 #include "ui/resources/grit/ui_resources.h"
 #include "ui/views/controls/button/label_button_border.h"
+#include "ui/views/controls/menu/menu_controller.h"
+#include "ui/views/controls/menu/menu_runner.h"
 
 using views::LabelButtonBorder;
 
@@ -34,6 +36,11 @@ namespace {
 // We have smaller insets than normal STYLE_TEXTBUTTON buttons so that we can
 // fit user supplied icons in without clipping them.
 const int kBorderInset = 4;
+
+// The ToolbarActionView which is currently showing its context menu, if any.
+// Since only one context menu can be shown (even across browser windows), it's
+// safe to have this be a global singleton.
+ToolbarActionView* context_menu_owner = nullptr;
 
 }  // namespace
 
@@ -44,17 +51,20 @@ ToolbarActionView::ToolbarActionView(
     ToolbarActionViewController* view_controller,
     Profile* profile,
     ToolbarActionView::Delegate* delegate)
-    : MenuButton(this, base::string16(), NULL, false),
+    : MenuButton(this, base::string16(), nullptr, false),
       view_controller_(view_controller),
       profile_(profile),
       delegate_(delegate),
       called_register_command_(false),
-      wants_to_run_(false) {
+      wants_to_run_(false),
+      weak_factory_(this) {
   set_id(VIEW_ID_BROWSER_ACTION);
   view_controller_->SetDelegate(this);
   SetHorizontalAlignment(gfx::ALIGN_CENTER);
   if (view_controller_->CanDrag())
     set_drag_controller(delegate_);
+
+  set_context_menu_controller(this);
 
   // We also listen for browser theme changes on linux because a switch from or
   // to GTK requires that we regrab our browser action images.
@@ -71,6 +81,8 @@ ToolbarActionView::ToolbarActionView(
 }
 
 ToolbarActionView::~ToolbarActionView() {
+  if (context_menu_owner == this)
+    context_menu_owner = nullptr;
   view_controller_->SetDelegate(nullptr);
 }
 
@@ -110,7 +122,8 @@ void ToolbarActionView::ViewHierarchyChanged(
 
 void ToolbarActionView::PaintChildren(const ui::PaintContext& context) {
   View::PaintChildren(context);
-  view_controller_->PaintExtra(context.canvas(), GetLocalBounds(),
+  ui::PaintRecorder recorder(context);
+  view_controller_->PaintExtra(recorder.canvas(), GetLocalBounds(),
                                GetCurrentWebContents());
 }
 
@@ -192,8 +205,7 @@ bool ToolbarActionView::OnMousePressed(const ui::MouseEvent& event) {
 }
 
 void ToolbarActionView::OnMouseReleased(const ui::MouseEvent& event) {
-  if (view_controller_->HasPopup(GetCurrentWebContents()) ||
-      view_controller_->IsMenuRunning()) {
+  if (view_controller_->HasPopup(GetCurrentWebContents()) || IsMenuRunning()) {
     // TODO(erikkay) this never actually gets called (probably because of the
     // loss of focus).
     MenuButton::OnMouseReleased(event);
@@ -203,8 +215,7 @@ void ToolbarActionView::OnMouseReleased(const ui::MouseEvent& event) {
 }
 
 void ToolbarActionView::OnMouseExited(const ui::MouseEvent& event) {
-  if (view_controller_->HasPopup(GetCurrentWebContents()) ||
-      view_controller_->IsMenuRunning())
+  if (view_controller_->HasPopup(GetCurrentWebContents()) || IsMenuRunning())
     MenuButton::OnMouseExited(event);
   else
     LabelButton::OnMouseExited(event);
@@ -243,27 +254,8 @@ views::View* ToolbarActionView::GetAsView() {
   return this;
 }
 
-bool ToolbarActionView::IsShownInMenu() {
-  return delegate_->ShownInsideMenu();
-}
-
 views::FocusManager* ToolbarActionView::GetFocusManagerForAccelerator() {
   return GetFocusManager();
-}
-
-views::Widget* ToolbarActionView::GetParentForContextMenu() {
-  // RunMenuAt expects a nested menu to be parented by the same widget as the
-  // already visible menu, in this case the Chrome menu.
-  return delegate_->ShownInsideMenu() ?
-      delegate_->GetOverflowReferenceView()->GetWidget() :
-      GetWidget();
-}
-
-ToolbarActionViewController*
-ToolbarActionView::GetPreferredPopupViewController() {
-  return delegate_->ShownInsideMenu() ?
-      delegate_->GetMainViewForAction(this)->view_controller() :
-      view_controller();
 }
 
 views::View* ToolbarActionView::GetReferenceViewForPopup() {
@@ -273,9 +265,8 @@ views::View* ToolbarActionView::GetReferenceViewForPopup() {
   return visible() ? this : delegate_->GetOverflowReferenceView();
 }
 
-views::MenuButton* ToolbarActionView::GetContextMenuButton() {
-  DCHECK(visible());  // We should never show a context menu for a hidden item.
-  return this;
+bool ToolbarActionView::IsMenuRunning() const {
+  return menu_runner_.get() != nullptr;
 }
 
 content::WebContents* ToolbarActionView::GetCurrentWebContents() const {
@@ -283,7 +274,6 @@ content::WebContents* ToolbarActionView::GetCurrentWebContents() const {
 }
 
 void ToolbarActionView::OnPopupShown(bool by_user) {
-  delegate_->SetPopupOwner(this);
   // If this was through direct user action, we press the menu button.
   if (by_user) {
     // We set the state of the menu button we're using as a reference view,
@@ -297,6 +287,99 @@ void ToolbarActionView::OnPopupShown(bool by_user) {
 }
 
 void ToolbarActionView::OnPopupClosed() {
-  delegate_->SetPopupOwner(nullptr);
   pressed_lock_.reset();  // Unpress the menu button if it was pressed.
+}
+
+void ToolbarActionView::ShowContextMenuForView(
+    views::View* source,
+    const gfx::Point& point,
+    ui::MenuSourceType source_type) {
+  // If there's another active menu that won't be dismissed by opening this one,
+  // then we can't show this one right away, since we can only show one nested
+  // menu at a time.
+  // If the other menu is an extension action's context menu, then we'll run
+  // this one after that one closes. If it's a different type of menu, then we
+  // close it and give up, for want of a better solution. (Luckily, this is
+  // rare).
+  // TODO(devlin): Update this when views code no longer runs menus in a nested
+  // loop.
+  if (context_menu_owner) {
+    context_menu_owner->followup_context_menu_task_ =
+        base::Bind(&ToolbarActionView::DoShowContextMenu,
+                   weak_factory_.GetWeakPtr(),
+                   source_type);
+  }
+  if (CloseActiveMenuIfNeeded())
+    return;
+
+  // Otherwise, no other menu is showing, and we can proceed normally.
+  DoShowContextMenu(source_type);
+}
+
+void ToolbarActionView::DoShowContextMenu(
+    ui::MenuSourceType source_type) {
+  ui::MenuModel* context_menu_model = view_controller_->GetContextMenu();
+  // It's possible the action doesn't have a context menu.
+  if (!context_menu_model)
+    return;
+
+  DCHECK(visible());  // We should never show a context menu for a hidden item.
+  DCHECK(!context_menu_owner);
+  context_menu_owner = this;
+
+  gfx::Point screen_loc;
+  ConvertPointToScreen(this, &screen_loc);
+
+  int run_types =
+      views::MenuRunner::HAS_MNEMONICS | views::MenuRunner::CONTEXT_MENU;
+  if (delegate_->ShownInsideMenu())
+    run_types |= views::MenuRunner::IS_NESTED;
+
+  // RunMenuAt expects a nested menu to be parented by the same widget as the
+  // already visible menu, in this case the Chrome menu.
+  views::Widget* parent = delegate_->ShownInsideMenu() ?
+      delegate_->GetOverflowReferenceView()->GetWidget() :
+      GetWidget();
+
+  menu_runner_.reset(new views::MenuRunner(context_menu_model, run_types));
+
+  if (menu_runner_->RunMenuAt(parent,
+                              this,
+                              gfx::Rect(screen_loc, size()),
+                              views::MENU_ANCHOR_TOPLEFT,
+                              source_type) == views::MenuRunner::MENU_DELETED) {
+    return;
+  }
+
+  context_menu_owner = nullptr;
+  menu_runner_.reset();
+  view_controller_->OnContextMenuClosed();
+
+  // If another extension action wants to show its context menu, allow it to.
+  if (!followup_context_menu_task_.is_null()) {
+    base::Closure task = followup_context_menu_task_;
+    followup_context_menu_task_ = base::Closure();
+    task.Run();
+  }
+}
+
+bool ToolbarActionView::CloseActiveMenuIfNeeded() {
+  // If this view is shown inside another menu, there's a possibility that there
+  // is another context menu showing that we have to close before we can
+  // activate a different menu.
+  if (delegate_->ShownInsideMenu()) {
+    views::MenuController* menu_controller =
+        views::MenuController::GetActiveInstance();
+    // If this is shown inside a menu, then there should always be an active
+    // menu controller.
+    DCHECK(menu_controller);
+    if (menu_controller->in_nested_run()) {
+      // There is another menu showing. Close the outermost menu (since we are
+      // shown in the same menu, we don't want to close the whole thing).
+      menu_controller->Cancel(views::MenuController::EXIT_OUTERMOST);
+      return true;
+    }
+  }
+
+  return false;
 }

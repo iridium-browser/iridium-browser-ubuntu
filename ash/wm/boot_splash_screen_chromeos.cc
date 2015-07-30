@@ -10,7 +10,7 @@
 #include "ui/base/x/x11_util.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_type.h"
-#include "ui/compositor/paint_context.h"
+#include "ui/compositor/paint_recorder.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/canvas.h"
 
@@ -36,8 +36,9 @@ class BootSplashScreen::CopyHostContentLayerDelegate
     // to create a zero-copy texture (when possible):
     // https://codereview.chromium.org/10543125
 #if defined(USE_X11)
+    ui::PaintRecorder recorder(context);
     ui::CopyAreaToCanvas(host_->GetAcceleratedWidget(), host_->GetBounds(),
-                         gfx::Point(), context.canvas());
+                         gfx::Point(), recorder.canvas());
 #else
     // TODO(spang): Figure out what to do here.
     NOTIMPLEMENTED();

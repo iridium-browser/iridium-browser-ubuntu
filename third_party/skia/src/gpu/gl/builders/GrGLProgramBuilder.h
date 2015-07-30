@@ -155,7 +155,7 @@ public:
                                          const char* output) = 0;
 
     // TODO rename getFragmentBuilder
-    virtual GrGLGPFragmentBuilder* getFragmentShaderBuilder() = 0;
+    virtual GrGLFragmentBuilder* getFragmentShaderBuilder() = 0;
     virtual GrGLVertexBuilder* getVertexShaderBuilder() = 0;
 
     /*
@@ -166,7 +166,7 @@ public:
 /* a specializations for FPs. Lets the user add uniforms and FS code */
 class GrGLFPBuilder : public virtual GrGLUniformBuilder {
 public:
-    virtual GrGLFPFragmentBuilder* getFragmentShaderBuilder() = 0;
+    virtual GrGLFragmentBuilder* getFragmentShaderBuilder() = 0;
 
     /*
      * *NOTE* NO MEMBERS ALLOWED, MULTIPLE INHERITANCE
@@ -176,7 +176,7 @@ public:
 /* a specializations for XPs. Lets the user add uniforms and FS code */
 class GrGLXPBuilder : public virtual GrGLUniformBuilder {
 public:
-    virtual GrGLFPFragmentBuilder* getFragmentShaderBuilder() = 0;
+    virtual GrGLXPFragmentBuilder* getFragmentShaderBuilder() = 0;
 
     /*
      * *NOTE* NO MEMBERS ALLOWED, MULTIPLE INHERITANCE
@@ -248,7 +248,7 @@ public:
 
     GrGLGpu* gpu() const override { return fGpu; }
 
-    GrGLFPFragmentBuilder* getFragmentShaderBuilder() override { return &fFS; }
+    GrGLXPFragmentBuilder* getFragmentShaderBuilder() override { return &fFS; }
     GrGLVertexBuilder* getVertexShaderBuilder() override { return &fVS; }
 
     void addVarying(
@@ -290,8 +290,7 @@ protected:
     // Generates a possibly mangled name for a stage variable and writes it to the fragment shader.
     // If GrGLSLExpr4 has a valid name then it will use that instead
     void nameExpression(GrGLSLExpr4*, const char* baseName);
-    void emitAndInstallProcs(GrGLSLExpr4* inputColor,
-                             GrGLSLExpr4* inputCoverage);
+    bool emitAndInstallProcs(GrGLSLExpr4* inputColor, GrGLSLExpr4* inputCoverage);
     void emitAndInstallFragProcs(int procOffset, int numProcs, GrGLSLExpr4* inOut);
     void emitAndInstallProc(const GrPendingFragmentStage&,
                             int index,

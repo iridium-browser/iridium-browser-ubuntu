@@ -4,11 +4,14 @@
 
 #include "chrome/browser/local_discovery/service_discovery_host_client.h"
 
+#include "base/thread_task_runner_handle.h"
 #include "chrome/common/local_discovery/local_discovery_messages.h"
+#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/utility_process_host.h"
 #include "net/dns/mdns_client.h"
 #include "net/socket/socket_descriptor.h"
+#include "ui/base/l10n/l10n_util.h"
 
 #if defined(OS_POSIX)
 #include <netinet/in.h>
@@ -184,7 +187,7 @@ ServiceDiscoveryHostClient::~ServiceDiscoveryHostClient() {
 scoped_ptr<ServiceWatcher> ServiceDiscoveryHostClient::CreateServiceWatcher(
     const std::string& service_type,
     const ServiceWatcher::UpdatedCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   return scoped_ptr<ServiceWatcher>(
       new ServiceWatcherProxy(this, service_type, callback));
 }
@@ -192,7 +195,7 @@ scoped_ptr<ServiceWatcher> ServiceDiscoveryHostClient::CreateServiceWatcher(
 scoped_ptr<ServiceResolver> ServiceDiscoveryHostClient::CreateServiceResolver(
     const std::string& service_name,
     const ServiceResolver::ResolveCompleteCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   return scoped_ptr<ServiceResolver>(
       new ServiceResolverProxy(this, service_name, callback));
 }
@@ -202,14 +205,14 @@ ServiceDiscoveryHostClient::CreateLocalDomainResolver(
     const std::string& domain,
     net::AddressFamily address_family,
     const LocalDomainResolver::IPAddressCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   return scoped_ptr<LocalDomainResolver>(new LocalDomainResolverProxy(
       this, domain, address_family, callback));
 }
 
 uint64 ServiceDiscoveryHostClient::RegisterWatcherCallback(
     const ServiceWatcher::UpdatedCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!ContainsKey(service_watcher_callbacks_, current_id_ + 1));
   service_watcher_callbacks_[++current_id_] = callback;
   return current_id_;
@@ -217,7 +220,7 @@ uint64 ServiceDiscoveryHostClient::RegisterWatcherCallback(
 
 uint64 ServiceDiscoveryHostClient::RegisterResolverCallback(
     const ServiceResolver::ResolveCompleteCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!ContainsKey(service_resolver_callbacks_, current_id_ + 1));
   service_resolver_callbacks_[++current_id_] = callback;
   return current_id_;
@@ -225,31 +228,31 @@ uint64 ServiceDiscoveryHostClient::RegisterResolverCallback(
 
 uint64 ServiceDiscoveryHostClient::RegisterLocalDomainResolverCallback(
     const LocalDomainResolver::IPAddressCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!ContainsKey(domain_resolver_callbacks_, current_id_ + 1));
   domain_resolver_callbacks_[++current_id_] = callback;
   return current_id_;
 }
 
 void ServiceDiscoveryHostClient::UnregisterWatcherCallback(uint64 id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   service_watcher_callbacks_.erase(id);
 }
 
 void ServiceDiscoveryHostClient::UnregisterResolverCallback(uint64 id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   service_resolver_callbacks_.erase(id);
 }
 
 void ServiceDiscoveryHostClient::UnregisterLocalDomainResolverCallback(
     uint64 id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   domain_resolver_callbacks_.erase(id);
 }
 
 void ServiceDiscoveryHostClient::Start(
     const base::Closure& error_callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!utility_host_);
   DCHECK(error_callback_.is_null());
   error_callback_ = error_callback;
@@ -259,7 +262,7 @@ void ServiceDiscoveryHostClient::Start(
 }
 
 void ServiceDiscoveryHostClient::Shutdown() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   io_runner_->PostTask(
       FROM_HERE,
       base::Bind(&ServiceDiscoveryHostClient::ShutdownOnIOThread, this));
@@ -268,7 +271,7 @@ void ServiceDiscoveryHostClient::Shutdown() {
 #if defined(OS_POSIX)
 
 void ServiceDiscoveryHostClient::StartOnIOThread() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(!utility_host_);
   BrowserThread::PostTaskAndReplyWithResult(
       BrowserThread::FILE,
@@ -278,12 +281,13 @@ void ServiceDiscoveryHostClient::StartOnIOThread() {
 }
 
 void ServiceDiscoveryHostClient::OnSocketsReady(const SocketInfoList& sockets) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(!utility_host_);
-  utility_host_ = UtilityProcessHost::Create(
-      this, base::MessageLoopProxy::current().get())->AsWeakPtr();
-  if (!utility_host_)
-    return;
+  utility_host_ =
+      UtilityProcessHost::Create(
+          this, base::ThreadTaskRunnerHandle::Get().get())->AsWeakPtr();
+  utility_host_->SetName(l10n_util::GetStringUTF16(
+      IDS_UTILITY_PROCESS_SERVICE_DISCOVERY_HANDLER_NAME));
   utility_host_->EnableMDns();
   utility_host_->StartBatchMode();
   if (sockets.empty()) {
@@ -300,12 +304,13 @@ void ServiceDiscoveryHostClient::OnSocketsReady(const SocketInfoList& sockets) {
 #else  // OS_POSIX
 
 void ServiceDiscoveryHostClient::StartOnIOThread() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(!utility_host_);
-  utility_host_ = UtilityProcessHost::Create(
-      this, base::MessageLoopProxy::current().get())->AsWeakPtr();
-  if (!utility_host_)
-    return;
+  utility_host_ =
+      UtilityProcessHost::Create(
+          this, base::ThreadTaskRunnerHandle::Get().get())->AsWeakPtr();
+  utility_host_->SetName(l10n_util::GetStringUTF16(
+      IDS_UTILITY_PROCESS_SERVICE_DISCOVERY_HANDLER_NAME));
   utility_host_->EnableMDns();
   utility_host_->StartBatchMode();
   // Windows does not enumerate networks here.
@@ -315,7 +320,7 @@ void ServiceDiscoveryHostClient::StartOnIOThread() {
 #endif  // OS_POSIX
 
 void ServiceDiscoveryHostClient::ShutdownOnIOThread() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (utility_host_) {
     utility_host_->Send(new LocalDiscoveryMsg_ShutdownLocalDiscovery);
     utility_host_->EndBatchMode();
@@ -325,14 +330,14 @@ void ServiceDiscoveryHostClient::ShutdownOnIOThread() {
 }
 
 void ServiceDiscoveryHostClient::Send(IPC::Message* msg) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   io_runner_->PostTask(
       FROM_HERE,
       base::Bind(&ServiceDiscoveryHostClient::SendOnIOThread, this, msg));
 }
 
 void ServiceDiscoveryHostClient::SendOnIOThread(IPC::Message* msg) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (utility_host_) {
     utility_host_->Send(msg);
   } else {
@@ -341,7 +346,7 @@ void ServiceDiscoveryHostClient::SendOnIOThread(IPC::Message* msg) {
 }
 
 void ServiceDiscoveryHostClient::OnProcessCrashed(int exit_code) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(!utility_host_);
   OnError();
 }
@@ -377,7 +382,7 @@ void ServiceDiscoveryHostClient::InvalidateWatchers() {
 }
 
 void ServiceDiscoveryHostClient::OnError() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (!error_callback_.is_null())
     callback_runner_->PostTask(FROM_HERE, error_callback_);
 }
@@ -386,7 +391,7 @@ void ServiceDiscoveryHostClient::OnWatcherCallback(
     uint64 id,
     ServiceWatcher::UpdateType update,
     const std::string& service_name) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   callback_runner_->PostTask(
       FROM_HERE,
       base::Bind(&ServiceDiscoveryHostClient::RunWatcherCallback, this, id,
@@ -397,7 +402,7 @@ void ServiceDiscoveryHostClient::OnResolverCallback(
     uint64 id,
     ServiceResolver::RequestStatus status,
     const ServiceDescription& description) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   callback_runner_->PostTask(
       FROM_HERE,
       base::Bind(&ServiceDiscoveryHostClient::RunResolverCallback, this, id,
@@ -409,7 +414,7 @@ void ServiceDiscoveryHostClient::OnLocalDomainResolverCallback(
     bool success,
     const net::IPAddressNumber& ip_address_ipv4,
     const net::IPAddressNumber& ip_address_ipv6) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   callback_runner_->PostTask(
       FROM_HERE,
       base::Bind(&ServiceDiscoveryHostClient::RunLocalDomainResolverCallback,
@@ -420,7 +425,7 @@ void ServiceDiscoveryHostClient::RunWatcherCallback(
     uint64 id,
     ServiceWatcher::UpdateType update,
     const std::string& service_name) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   WatcherCallbacks::iterator it = service_watcher_callbacks_.find(id);
   if (it != service_watcher_callbacks_.end() && !it->second.is_null())
     it->second.Run(update, service_name);
@@ -430,7 +435,7 @@ void ServiceDiscoveryHostClient::RunResolverCallback(
     uint64 id,
     ServiceResolver::RequestStatus status,
     const ServiceDescription& description) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   ResolverCallbacks::iterator it = service_resolver_callbacks_.find(id);
   if (it != service_resolver_callbacks_.end() && !it->second.is_null())
     it->second.Run(status, description);
@@ -441,7 +446,7 @@ void ServiceDiscoveryHostClient::RunLocalDomainResolverCallback(
     bool success,
     const net::IPAddressNumber& ip_address_ipv4,
     const net::IPAddressNumber& ip_address_ipv6) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DomainResolverCallbacks::iterator it = domain_resolver_callbacks_.find(id);
   if (it != domain_resolver_callbacks_.end() && !it->second.is_null())
     it->second.Run(success, ip_address_ipv4, ip_address_ipv6);

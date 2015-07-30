@@ -12,6 +12,8 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "components/favicon/content/content_favicon_driver.h"
+#include "components/variations/variations_associated_data.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
@@ -83,14 +85,25 @@ TabLoader::~TabLoader() {
 
 void TabLoader::StartLoading(const std::vector<RestoredTab>& tabs) {
   // Add the tabs to the list of tabs loading/to load and register them for
-  // notifications.
+  // notifications. Also, restore the favicons of the background tabs (the title
+  // has already been set by now).This avoids having blank icons in case the
+  // restore is halted due to memory pressure. Also, when multiple tabs are
+  // restored to a single window, the title may not appear, and the user will
+  // have no way of finding out which tabs corresponds to which page if the icon
+  // is a generic grey one.
   for (auto& restored_tab : tabs) {
-    if (!restored_tab.is_active)
-      tabs_to_load_.push_back(&restored_tab.contents->GetController());
-    else
-      tabs_loading_.insert(&restored_tab.contents->GetController());
-    RegisterForNotifications(&restored_tab.contents->GetController());
+    if (!restored_tab.is_active()) {
+      tabs_to_load_.push_back(&restored_tab.contents()->GetController());
+      favicon::ContentFaviconDriver* favicon_driver =
+          favicon::ContentFaviconDriver::FromWebContents(
+              restored_tab.contents());
+      favicon_driver->FetchFavicon(favicon_driver->GetActiveURL());
+    } else {
+      tabs_loading_.insert(&restored_tab.contents()->GetController());
+    }
+    RegisterForNotifications(&restored_tab.contents()->GetController());
   }
+
   // When multiple profiles are using the same TabLoader, another profile might
   // already have started loading. In that case, the tabs scheduled for loading
   // by this profile are already in the loading queue, and they will get loaded
@@ -104,7 +117,7 @@ void TabLoader::StartLoading(const std::vector<RestoredTab>& tabs) {
     delegate_ = TabLoaderDelegate::Create(this);
     // There is already at least one tab loading (the active tab). As such we
     // only have to start the timeout timer here.
-    StartTimer();
+    StartFirstTimer();
   }
 }
 
@@ -137,6 +150,13 @@ void TabLoader::LoadNextTab() {
 
   if (!tabs_to_load_.empty())
     StartTimer();
+}
+
+void TabLoader::StartFirstTimer() {
+  force_load_timer_.Stop();
+  force_load_timer_.Start(FROM_HERE,
+                          delegate_->GetFirstTabLoadingTimeout(),
+                          this, &TabLoader::ForceLoadTimerFired);
 }
 
 void TabLoader::StartTimer() {
@@ -183,6 +203,16 @@ void TabLoader::HandleTabClosedOrLoaded(NavigationController* controller) {
 
 void TabLoader::OnMemoryPressure(
     base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level) {
+  // On Windows and Mac this mechanism is only experimentally enabled.
+#if defined(OS_WIN) || (defined(OS_MACOSX) && !defined(OS_IOS))
+  // If memory pressure integration isn't explicitly enabled then ignore these
+  // calls.
+  std::string react_to_memory_pressure = variations::GetVariationParamValue(
+      "IntelligentSessionRestore", "ReactToMemoryPressure");
+  if (react_to_memory_pressure != "true")
+    return;
+#endif
+
   // When receiving a resource pressure level warning, we stop pre-loading more
   // tabs since we are running in danger of loading more tabs by throwing out
   // old ones.

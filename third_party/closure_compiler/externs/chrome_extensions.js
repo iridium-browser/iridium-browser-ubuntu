@@ -189,6 +189,57 @@
  */
 
 
+/*
+ * Ensure projects don't execute this file.
+ * The throw is to catch executions of this file, however, without the guard,
+ * the compiler's flow analysis stops at the throw, even for an externs file.
+ * Therefore, the Math.random() guard fools the compiler during externs
+ * processing.
+ */
+if (Math.random() < 1) {  // always true but the compiler doesn't know that
+  throw 'Externs file "chrome_extensions.js" should not be executed';
+}
+
+
+/**
+ * @see https://developer.chrome.com/extensions/accessibilityFeatures
+ * @const
+ */
+chrome.accessibilityFeatures = {};
+
+
+/** @type {!ChromeSetting} */
+chrome.accessibilityFeatures.spokenFeedback;
+
+
+/** @type {!ChromeSetting} */
+chrome.accessibilityFeatures.largeCursor;
+
+
+/** @type {!ChromeSetting} */
+chrome.accessibilityFeatures.stickyKeys;
+
+
+/** @type {!ChromeSetting} */
+chrome.accessibilityFeatures.highContrast;
+
+
+/** @type {!ChromeSetting} */
+chrome.accessibilityFeatures.screenMagnifier;
+
+
+/** @type {!ChromeSetting} */
+chrome.accessibilityFeatures.autoclick;
+
+
+/** @type {!ChromeSetting} */
+chrome.accessibilityFeatures.virtualKeyboard;
+
+
+/** @type {!ChromeSetting} */
+chrome.accessibilityFeatures.animationPolicy;
+
+
 /**
  * TODO(tbreisacher): Move all chrome.app.* externs into their own file.
  * @const
@@ -1830,6 +1881,78 @@ chrome.copresence.onStatusUpdated;
 
 
 /**
+ * @see https://developer.chrome.com/extensions/enterprise_platformKeys
+ * @const
+ */
+chrome.enterprise = {};
+
+
+/**
+ * @constructor
+ * platformKeys allows for generating hardware-backed keys and the installation
+ * of certificates for these keys.
+ * @see https://developer.chrome.com/extensions/enterprise_platformKeys.
+ */
+chrome.enterprise.platformKeys = function() {};
+
+
+/**
+ * @constructor
+ * @see https://developer.chrome.com/extensions/enterprise_platformKeys#type-Token
+ */
+chrome.enterprise.Token = function() {};
+
+
+/**
+ * @type {string} Unique id for the Token, either "user" or "system."
+ */
+chrome.enterprise.Token.prototype.id;
+
+
+/**
+ * @type {!webCrypto.SubtleCrypto} Implements the WebCrypto's
+ *     SubtleCrypto interface. The cryptographic operations, including key
+ *     generation, are hardware-backed.
+ */
+chrome.enterprise.Token.prototype.subtleCrypto;
+
+
+/**
+ * @param {function(!Array.<!chrome.enterprise.Token>): void} callback Called
+ * with an array of Tokens.
+ */
+chrome.enterprise.platformKeys.getTokens = function(callback) {};
+
+
+/**
+ * @param {string} tokenId Id of cetificate token either "user" or "system".
+ * @param {(function(!Array.<!ArrayBuffer>): void)} callback Array of DER
+ *     encoded x.509 certificates.
+ */
+chrome.enterprise.platformKeys.getCertificates = function(tokenId, callback) {};
+
+
+/**
+ * @param {string} tokenId The id of a Token returned by getTokens.
+ * @param {!ArrayBuffer} certificate The DER encoding of a X.509 certificate.
+ * @param {function(): void=} opt_callback Called back when this operation is
+ *     finished.
+ */
+chrome.enterprise.platformKeys.importCertificate =
+    function(tokenId, certificate, opt_callback) {};
+
+
+/**
+ * @param {string} tokenId The id of a Token returned by getTokens.
+ * @param {!ArrayBuffer} certificate The DER encoding of a X.509 certificate.
+ * @param {(function(): void)=} opt_callback Called back when this operation is
+ *     finished.
+ */
+chrome.enterprise.platformKeys.removeCertificate =
+    function(tokenId, certificate, opt_callback) {};
+
+
+/**
  * @see https://developer.chrome.com/extensions/extension.html
  * @const
  */
@@ -1972,6 +2095,11 @@ chrome.runtime.id;
  */
 chrome.runtime.getBackgroundPage = function(callback) {};
 
+
+/**
+ * @param {function(): void=} opt_callback Callback function.
+ */
+chrome.runtime.openOptionsPage = function(opt_callback) {};
 
 
 /**
@@ -4015,8 +4143,6 @@ chrome.history.onVisited;
 /**
  * @const
  * @see http://developer.chrome.com/apps/identity.html
- * TODO: replace TokenDetails, InvalidTokenDetails and
- *     WebAuthFlowDetails with Object.
  */
 chrome.identity = {};
 
@@ -4057,7 +4183,7 @@ chrome.identity.launchWebAuthFlow = function(details, callback) {};
 chrome.identity.WebAuthFlowDetails;
 
 
-/** @param {!function(!Object=):void} callback */
+/** @param {function(!Object):void} callback */
 chrome.identity.getProfileUserInfo = function(callback) {};
 
 
@@ -6809,6 +6935,10 @@ ChromeSetting.prototype.get = function(details, callback) {};
 ChromeSetting.prototype.set = function(details, opt_callback) {};
 
 
+/** @type {!ChromeObjectEvent} */
+ChromeSetting.prototype.onChange;
+
+
 
 /**
  * @see https://developer.chrome.com/extensions/webRequest.html#type-RequestFilter
@@ -7047,15 +7177,18 @@ chrome.fileSystem.retainEntry = function(entry) {};
 /**
  * @param {!chrome.fileSystem.RequestFileSystemOptions} options Options for the
  *     request.
- * @param {function(FileSystem)} callback A completion callback.
+ * @param {function(!FileSystem=)} callback A completion callback with the file
+ *     system in case of a success. Otherwise the error is passed as
+ *     chrome.runtime.lastError.
  * @see http://developer.chrome.com/apps/fileSystem.html#method-requestFileSystem
  */
 chrome.fileSystem.requestFileSystem = function(options, callback) {};
 
 
 /**
- * @param {function(Array<!chrome.fileSystem.Volume>)} callback A completion
- *     callback.
+ * @param {function(!Array<!chrome.fileSystem.Volume>=)} callback A completion
+ *     callback with the file system list in case of a success. Otherwise the
+ *     error is passed as chrome.runtime.lastError.
  * @see http://developer.chrome.com/apps/fileSystem.html#method-getVolumeList
  */
 chrome.fileSystem.getVolumeList = function(callback) {};
@@ -7547,29 +7680,33 @@ chrome.notifications.ButtonCallback;
 
 
 /**
- * @param {string} notificationId
- * @param {!chrome.notifications.NotificationOptions} options
- * @param {function(string): void} callback
+ * @param {string|!chrome.notifications.NotificationOptions}
+ *     notificationIdOrOptions
+ * @param {(!chrome.notifications.NotificationOptions|function(string): void)=}
+ *     opt_optionsOrCallback
+ * @param {(function(string): void)=} opt_callback
  * @see http://developer.chrome.com/extensions/notifications.html#method-create
  */
-chrome.notifications.create = function(notificationId, options, callback) {};
+chrome.notifications.create = function(notificationIdOrOptions,
+    opt_optionsOrCallback, opt_callback) {};
 
 
 /**
  * @param {string} notificationId
  * @param {!chrome.notifications.NotificationOptions} options
- * @param {!chrome.notifications.BooleanCallback} callback
+ * @param {chrome.notifications.BooleanCallback=} opt_callback
  * @see http://developer.chrome.com/extensions/notifications.html#method-update
  */
-chrome.notifications.update = function(notificationId, options, callback) {};
+chrome.notifications.update =
+    function(notificationId, options, opt_callback) {};
 
 
 /**
  * @param {string} notificationId
- * @param {!chrome.notifications.BooleanCallback} callback
+ * @param {!chrome.notifications.BooleanCallback=} opt_callback
  * @see http://developer.chrome.com/extensions/notifications.html#method-clear
  */
-chrome.notifications.clear = function(notificationId, callback) {};
+chrome.notifications.clear = function(notificationId, opt_callback) {};
 
 
 /**
@@ -8419,27 +8556,26 @@ chrome.mediaGalleriesPrivate.GalleryChangeEvent.prototype.hasListeners =
 
 
 /**
- * WARNING(2014/08/04): This API is still under active initial development and
- * unstable and has a number of issues:
+ * Externs for networking_private.idl:
+ * https://code.google.com/p/chromium/codesearch#chromium/src/extensions/common/api/networking_private.idl
+ * WARNING(2015/04/09): This API is still under active development and has a few
+ * issues with typing:
  *
- * 1. The types NetworkProperties and ManagedNetworkProperties are not defined
- *    in the docs; that is, there is no list of fields and their types.
- *    Therefore, these types are treated as bags-of-objects, rather than types.
- * 2. According to Steven Bennetts, NetworkProperties *should* be a
- *    bag-of-properties as it's a map containing ONC properties and the ONC
- *    properties do not follow the JS field naming conventions; specifically,
- *    the properties start with an uppercase letter, and at least one property
- *    is in all uppercase.
- * 3. The deviceSsid and deviceBssid fields of VerticationProperties are listed
- *    as being required while their description mentions "Only set if" which
- *    sound optional. The dev team was unclear whether they are required or
- *    optional.
- * 4. Some parameters to some functions are marked as being in the Beta channel
- *    only (for example, the networkGuid parameter to getCaptivePortalStatus).
+ * 1. This API uses the ONC specification:
+ *    http://www.chromium.org/chromium-os/chromiumos-design-docs/open-network-configuration
+ * 2. The types for getProperties and getManagedProperties are not currently
+ *    defined. They correspond to ONC Property dictionaries. They are treated as
+ *    Objects rather than types.
+ * 3. NetworkStateProperties defines a subset of NetworkProperties used by
+ *    getState and getNetworks. Since these match ONC property names they
+ *    use ONC PascalCase naming conventions instead of traditional JS
+ *    camelCase naming.
+ * 4. The types for setProperties and createNetwork are not currently defined.
+ *    These use a subset of ONC properties and the complete set (and their
+ *    relationship to the type for getProperties) is still being determined.
  *
  * Because of the above issues, this API should not be used as an example for
- * other APIs added to this file. Please contact mednik@ for questions on and
- * maintenance for this API.
+ * other APIs. Please contact stevenjb@ for questions on and maintenance.
  * @const
  * @see https://developer.chrome.com/extensions/networkingPrivate
  */
@@ -8447,8 +8583,189 @@ chrome.networkingPrivate = {};
 
 
 /**
+ * @constructor
+ * @struct
+ * @see https://developer.chrome.com/extensions/networkingPrivate#type-CellularStateProperties
+ */
+chrome.networkingPrivate.CellularStateProperties = function() {};
+
+
+/**
+ * @type {string|undefined}
+ */
+chrome.networkingPrivate.CellularStateProperties.prototype.ActivationState;
+
+
+/**
+ * @type {string|undefined}
+ */
+chrome.networkingPrivate.CellularStateProperties.prototype.NetworkTechnology;
+
+
+/**
+ * @type {string|undefined}
+ */
+chrome.networkingPrivate.CellularStateProperties.prototype.RoamingState;
+
+
+/**
+ * @type {number|undefined}
+ */
+chrome.networkingPrivate.CellularStateProperties.prototype.SignalStrength;
+
+
+/**
+ * @constructor
+ * @struct
+ * @see https://developer.chrome.com/extensions/networkingPrivate#type-DeviceStateProperties
+ */
+chrome.networkingPrivate.DeviceStateProperties = function() {};
+
+
+/**
+ * @type {boolean|undefined}
+ */
+chrome.networkingPrivate.DeviceStateProperties.prototype.Scanning;
+
+
+/**
+ * @type {string}
+ */
+chrome.networkingPrivate.DeviceStateProperties.prototype.State;
+
+
+/**
+ * @type {string}
+ */
+chrome.networkingPrivate.DeviceStateProperties.prototype.Type;
+
+
+/**
+ * @constructor
+ * @struct
+ * @see https://developer.chrome.com/extensions/networkingPrivate#type-EthernetStateProperties
+ */
+chrome.networkingPrivate.EthernetStateProperties = function() {};
+
+
+/**
+ * @type {string}
+ */
+chrome.networkingPrivate.EthernetStateProperties.prototype.Authentication;
+
+
+/**
+ * @constructor
+ * @struct
+ * @see https://developer.chrome.com/extensions/networkingPrivate#type-IPSecProperties
+ */
+chrome.networkingPrivate.IPSecProperties = function() {};
+
+
+/**
+ * @type {string}
+ */
+chrome.networkingPrivate.IPSecProperties.prototype.AuthenticationType;
+
+
+/**
+ * @constructor
+ * @struct
+ * @see https://developer.chrome.com/extensions/networkingPrivate#type-ThirdPartyVPNProperties
+ */
+chrome.networkingPrivate.ThirdPartyVPNProperties = function() {};
+
+
+/**
+ * @type {string}
+ */
+chrome.networkingPrivate.ThirdPartyVPNProperties.prototype.ExtensionID;
+
+
+/**
+ * @constructor
+ * @struct
+ * @see https://developer.chrome.com/extensions/networkingPrivate#type-VPNStateProperties
+ */
+chrome.networkingPrivate.VPNStateProperties = function() {};
+
+
+/**
+ * @type {!chrome.networkingPrivate.IPSecProperties|undefined}
+ */
+chrome.networkingPrivate.VPNStateProperties.prototype.IPSec;
+
+
+/**
+ * @type {!chrome.networkingPrivate.ThirdPartyVPNProperties|undefined}
+ */
+chrome.networkingPrivate.VPNStateProperties.prototype.ThirdPartyVPN;
+
+
+/**
+ * @type {string}
+ */
+chrome.networkingPrivate.VPNStateProperties.prototype.Type;
+
+
+/**
+ * @constructor
+ * @struct
+ * @see https://developer.chrome.com/extensions/networkingPrivate#type-WiFiStateProperties
+ */
+chrome.networkingPrivate.WiFiStateProperties = function() {};
+
+
+/**
+ * @type {string}
+ */
+chrome.networkingPrivate.WiFiStateProperties.prototype.Security;
+
+
+/**
+ * @type {number|undefined}
+ */
+chrome.networkingPrivate.WiFiStateProperties.prototype.SignalStrength;
+
+
+/**
+ * @constructor
+ * @struct
+ * @see https://developer.chrome.com/extensions/networkingPrivate#type-WiFiStateProperties
+ */
+chrome.networkingPrivate.WiMAXStateProperties = function() {};
+
+
+/**
+ * @type {number|undefined}
+ */
+chrome.networkingPrivate.WiMAXStateProperties.prototype.SignalStrength;
+
+
+/**
+ * @typedef {?{
+ *   Cellular: (!chrome.networkingPrivate.CellularStateProperties|undefined),
+ *   Connectable: (boolean|undefined),
+ *   ConnectionState: (string|undefined),
+ *   ErrorState: (string|undefined),
+ *   Ethernet: (!chrome.networkingPrivate.EthernetStateProperties|undefined),
+ *   GUID: string,
+ *   Name: (string|undefined),
+ *   Priority: (number|undefined),
+ *   Source: (string|undefined),
+ *   Type: string,
+ *   VPN: (!chrome.networkingPrivate.VPNStateProperties|undefined),
+ *   WiFi: (!chrome.networkingPrivate.WiFiStateProperties|undefined),
+ *   WiMAX: (!chrome.networkingPrivate.WiMAXStateProperties|undefined)
+ * }}
+ */
+chrome.networkingPrivate.NetworkStateProperties;
+
+
+/**
  * @typedef {?{
  *   certificate: string,
+ *   intermediateCertificates: (!Array<string>|undefined),
  *   publicKey: string,
  *   nonce: string,
  *   signedData: string,
@@ -8487,53 +8804,70 @@ chrome.networkingPrivate.getManagedProperties = function(guid, callback) {};
 
 /**
  * @param {string} guid
- * @param {function(!Object)} callback
+ * @param {function(!chrome.networkingPrivate.NetworkStateProperties)} callback
  */
 chrome.networkingPrivate.getState = function(guid, callback) {};
 
 
 /**
+ * TODO: Use NetworkConfigProperties for |properties| once fully
+ * defined.
  * @param {string} guid
  * @param {!Object} properties
- * @param {function()=} callback
+ * @param {function()=} opt_callback
  */
-chrome.networkingPrivate.setProperties = function(guid, properties, callback) {
-};
+chrome.networkingPrivate.setProperties =
+    function(guid, properties, opt_callback) {};
 
 
 /**
+ * TODO: Use NetworkConfigProperties for |properties| once fully
+ * defined.
  * @param {boolean} shared
  * @param {!Object} properties
- * @param {function(string)} callback Returns guid of the configured
+ * @param {function(string)=} opt_callback Returns guid of the configured
  *     configuration.
  */
 chrome.networkingPrivate.createNetwork =
-    function(shared, properties, callback) {};
+    function(shared, properties, opt_callback) {};
 
 
 /**
  * @param {string} guid
- * @param {function()=} opt_callback
+ * @param {function()=} opt_callback Called when the operation has completed.
  */
 chrome.networkingPrivate.forgetNetwork = function(guid, opt_callback) {};
 
 
 /**
  * @param {!chrome.networkingPrivate.NetworkFilter} filter
- * @param {function(!Array.<!Object>)=} opt_callback
+ * @param {function(!Array.<!chrome.networkingPrivate.NetworkStateProperties>)}
+ *     callback
  */
-chrome.networkingPrivate.getNetworks = function(filter, opt_callback) {};
+chrome.networkingPrivate.getNetworks = function(filter, callback) {};
 
 
 /**
  * @param {string} type
- * @param {function(!Array.<!Object>)=} opt_callback
+ * @param {function(!Array.<!chrome.networkingPrivate.NetworkStateProperties>)}
+ *      callback
+ * @deprecated Use chrome.networkingPrivate.getNetworks with filter.visible=true
  */
-chrome.networkingPrivate.getVisibleNetworks = function(type, opt_callback) {};
+chrome.networkingPrivate.getVisibleNetworks = function(type, callback) {};
 
 
-/** @param {function(!Array.<string>)=} opt_callback */
-chrome.networkingPrivate.getEnabledNetworkTypes = function(opt_callback) {};
+/**
+ * @param {function(!Array.<string>)} callback
+ * @deprecated Use chrome.networkingPrivate.getDeviceStates.
+ */
+chrome.networkingPrivate.getEnabledNetworkTypes = function(callback) {};
+
+
+/**
+ * @param {function(!Array.<!chrome.networkingPrivate.DeviceStateProperties>)}
+ *     callback
+ */
+chrome.networkingPrivate.getDeviceStates = function(callback) {};
 
 
 /** @param {string} networkType */
@@ -8571,7 +8905,7 @@ chrome.networkingPrivate.startDisconnect = function(guid, opt_callback) {};
  * @param {function()=} opt_callback
  */
 chrome.networkingPrivate.startActivate =
-  function(guid, opt_carrierOrCallback, opt_callback) {};
+    function(guid, opt_carrierOrCallback, opt_callback) {};
 
 
 /**
@@ -8603,10 +8937,10 @@ chrome.networkingPrivate.verifyAndEncryptData =
 /**
  * @param {string} ipOrMacAddress
  * @param {boolean} enabled
- * @param {function(string)} callback
+ * @param {function(string)=} opt_callback
  */
 chrome.networkingPrivate.setWifiTDLSEnabledState =
-    function(ipOrMacAddress, enabled, callback) {};
+    function(ipOrMacAddress, enabled, opt_callback) {};
 
 
 /**
@@ -8630,6 +8964,10 @@ chrome.networkingPrivate.onNetworksChanged;
 
 /** @type {!ChromeStringArrayEvent} */
 chrome.networkingPrivate.onNetworkListChanged;
+
+
+/** @type {!ChromeEvent} */
+chrome.networkingPrivate.onDeviceStateListChanged;
 
 
 /** @type {!ChromeStringStringEvent} */
@@ -8759,17 +9097,15 @@ chrome.gcdPrivate.prefetchWifiPassword = function(ssid, callback) {};
 
 
 /**
- * Establish the session.
- * TODO(user): Deprecated. Remove after app updated to use createSession.
- * @param {string} ipAddress
- * @param {number} port
- * @param {function(number, string, !Array.<string>): void}
- *     callback Called when the session is established or on error. 1st param,
- *     |sessionId|, is the session ID (identifies the session for future calls).
- *     2nd param, |status|, is the status (success or type of error). 3rd param,
- *     |pairingTypes|, is a list of pairing types supported by this device.
+ * Returns local device information.
+ * @param {string} serviceName The mDNS service name of the device.
+ * @param {function(string, !Object): void}
+ *     callback Called when when the device info is available or on error.
+ *     |status|: The status of the operation (success or type of error).
+ *     |deviceInfo|: Content of /privet/info response.
+ *     https://developers.google.com/cloud-devices/v1/reference/local-api/info
  */
-chrome.gcdPrivate.establishSession = function(ipAddress, port, callback) {};
+chrome.gcdPrivate.getDeviceInfo = function(serviceName, callback) {};
 
 
 /**

@@ -30,7 +30,8 @@
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-static const char kTestAccountId[] = "testuser@test.com";
+static const char kTestAccountId[] = "id-testuser@test.com";
+static const char kTestGaiaId[] = "gaiaid-testuser@test.com";
 static const char kTestUsername[] = "testuser@test.com";
 
 class SigninGlobalErrorTest : public testing::Test {
@@ -54,12 +55,12 @@ class SigninGlobalErrorTest : public testing::Test {
         base::UTF8ToUTF16("Person 1"), 0, std::string(), testing_factories);
 
     SigninManagerFactory::GetForProfile(profile())
-        ->SetAuthenticatedUsername(kTestAccountId);
+        ->SetAuthenticatedAccountInfo(kTestAccountId, kTestUsername);
     ProfileInfoCache& cache =
         profile_manager_.profile_manager()->GetProfileInfoCache();
-    cache.SetUserNameOfProfileAtIndex(
+    cache.SetAuthInfoOfProfileAtIndex(
         cache.GetIndexOfProfileWithPath(profile()->GetPath()),
-            base::UTF8ToUTF16(kTestAccountId));
+            kTestGaiaId, base::UTF8ToUTF16(kTestUsername));
 
     global_error_ = SigninGlobalErrorFactory::GetForProfile(profile());
     error_controller_ = SigninErrorControllerFactory::GetForProfile(profile());
@@ -104,7 +105,6 @@ TEST_F(SigninGlobalErrorTest, ErrorAuthStatusProvider) {
   error_provider.reset(new FakeAuthStatusProvider(error_controller()));
   error_provider->SetAuthError(
       kTestAccountId,
-      kTestUsername,
       GoogleServiceAuthError(
           GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS));
   ASSERT_TRUE(global_error()->HasMenuItem());
@@ -150,7 +150,6 @@ TEST_F(SigninGlobalErrorTest, AuthStatusEnumerateAllErrors) {
     base::HistogramTester histogram_tester;
     FakeAuthStatusProvider provider(error_controller());
     provider.SetAuthError(kTestAccountId,
-                          kTestUsername,
                           GoogleServiceAuthError(table[i].error_state));
 
     EXPECT_EQ(global_error()->HasMenuItem(), table[i].is_error);

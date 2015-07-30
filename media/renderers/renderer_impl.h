@@ -5,6 +5,8 @@
 #ifndef MEDIA_RENDERERS_RENDERER_IMPL_H_
 #define MEDIA_RENDERERS_RENDERER_IMPL_H_
 
+#include <vector>
+
 #include "base/cancelable_callback.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -48,7 +50,6 @@ class MEDIA_EXPORT RendererImpl : public Renderer {
                   const PipelineStatusCB& init_cb,
                   const StatisticsCB& statistics_cb,
                   const BufferingStateCB& buffering_state_cb,
-                  const PaintCB& paint_cb,
                   const base::Closure& ended_cb,
                   const PipelineStatusCB& error_cb,
                   const base::Closure& waiting_for_decryption_key_cb) final;
@@ -56,7 +57,7 @@ class MEDIA_EXPORT RendererImpl : public Renderer {
               const CdmAttachedCB& cdm_attached_cb) final;
   void Flush(const base::Closure& flush_cb) final;
   void StartPlayingFrom(base::TimeDelta time) final;
-  void SetPlaybackRate(float playback_rate) final;
+  void SetPlaybackRate(double playback_rate) final;
   void SetVolume(float volume) final;
   base::TimeDelta GetMediaTime() final;
   bool HasAudio() final;
@@ -81,7 +82,8 @@ class MEDIA_EXPORT RendererImpl : public Renderer {
     STATE_ERROR
   };
 
-  base::TimeTicks GetWallClockTime(base::TimeDelta time);
+  bool GetWallClockTimes(const std::vector<base::TimeDelta>& media_timestamps,
+                         std::vector<base::TimeTicks>* wall_clock_times);
 
   // Requests that this object notifies when a decryptor is ready through the
   // |decryptor_ready_cb| provided.
@@ -140,7 +142,6 @@ class MEDIA_EXPORT RendererImpl : public Renderer {
   base::Closure ended_cb_;
   PipelineStatusCB error_cb_;
   BufferingStateCB buffering_state_cb_;
-  PaintCB paint_cb_;
   base::Closure waiting_for_decryption_key_cb_;
 
   // Temporary callback used for Initialize() and Flush().
@@ -154,6 +155,7 @@ class MEDIA_EXPORT RendererImpl : public Renderer {
   TimeSource* time_source_;
   scoped_ptr<WallClockTimeSource> wall_clock_time_source_;
   bool time_ticking_;
+  double playback_rate_;
 
   // The time to start playback from after starting/seeking has completed.
   base::TimeDelta start_time_;

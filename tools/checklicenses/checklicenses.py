@@ -134,8 +134,10 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     ],
     'native_client/toolchain': [
         'BSD GPL (v2 or later)',
+        'BSD MIT/X11 (BSD like)',
         'BSD (2 clause) GPL (v2 or later)',
         'BSD (3 clause) GPL (v2 or later)',
+        'BSD (4 clause) ISC',
         'BSL (v1.0) GPL',
         'BSL (v1.0) GPL (v3.1)',
         'GPL',
@@ -144,6 +146,7 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
         'GPL (v2 or later)',
         'GPL (v3.1)',
         'GPL (v3 or later)',
+        'MPL (v1.1) LGPL (unversioned/unknown version)',
     ],
     'third_party/WebKit': [
         'UNKNOWN',
@@ -201,13 +204,21 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     'third_party/freetype2': [ # http://crbug.com/177319
         'UNKNOWN',
     ],
-    'third_party/hunspell': [  # http://crbug.com/98134
+    'third_party/hunspell_new': [  # http://crbug.com/98134
         'UNKNOWN',
     ],
     'third_party/iccjpeg': [  # http://crbug.com/98137
         'UNKNOWN',
     ],
     'third_party/icu': [  # http://crbug.com/98301
+        'UNKNOWN',
+    ],
+    'third_party/jsoncpp/source': [
+        # https://github.com/open-source-parsers/jsoncpp/issues/234
+        'UNKNOWN',
+    ],
+    'third_party/junit/src': [
+        # https://github.com/junit-team/junit/issues/1132
         'UNKNOWN',
     ],
     'third_party/lcov': [  # http://crbug.com/98304
@@ -350,9 +361,6 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
         'UNKNOWN',
     ],
 
-    'third_party/swig/Lib/linkruntime.c': [  # http://crbug.com/98585
-        'UNKNOWN',
-    ],
     'third_party/talloc': [
         'GPL (v3 or later)',
         'UNKNOWN',  # http://crbug.com/98588

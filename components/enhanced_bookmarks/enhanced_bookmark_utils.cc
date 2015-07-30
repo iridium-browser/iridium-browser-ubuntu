@@ -4,43 +4,15 @@
 
 #include "components/enhanced_bookmarks/enhanced_bookmark_utils.h"
 
-#include "base/i18n/string_compare.h"
 #include "components/bookmarks/browser/bookmark_model.h"
+#include "components/variations/variations_associated_data.h"
 
 using bookmarks::BookmarkModel;
 using bookmarks::BookmarkNode;
 
 namespace enhanced_bookmarks {
 
-// Comparator used to sort bookmarks. No folders are allowed.
-class BookmarkNameComparator : public std::binary_function<const BookmarkNode*,
-                                                           const BookmarkNode*,
-                                                           bool> {
- public:
-  explicit BookmarkNameComparator(icu::Collator* collator)
-      : collator_(collator) {}
-
-  // Returns true if |n1| preceeds |n2|.
-  bool operator()(const BookmarkNode* n1, const BookmarkNode* n2) {
-    DCHECK(!n1->is_folder());
-    DCHECK(!n2->is_folder());
-    if (!collator_)
-      return n1->GetTitle() < n2->GetTitle();
-    return base::i18n::CompareString16WithCollator(
-               collator_, n1->GetTitle(), n2->GetTitle()) == UCOL_LESS;
-  }
-
- private:
-  icu::Collator* collator_;
-};
-
-void SortBookmarksByName(std::vector<const BookmarkNode*>& nodes) {
-  UErrorCode error = U_ZERO_ERROR;
-  scoped_ptr<icu::Collator> collator(icu::Collator::createInstance(error));
-  if (U_FAILURE(error))
-    collator.reset(NULL);
-  std::sort(nodes.begin(), nodes.end(), BookmarkNameComparator(collator.get()));
-}
+const char kFieldTrialName[] = "EnhancedBookmarks";
 
 std::vector<const BookmarkNode*> PrimaryPermanentNodes(BookmarkModel* model) {
   DCHECK(model->loaded());
@@ -92,6 +64,21 @@ const BookmarkNode* RootLevelFolderForNode(const BookmarkNode* node,
     top = top->parent();
   }
   return top;
+}
+
+ViewMode GetDefaultViewMode() {
+  std::string default_view_mode = variations::GetVariationParamValue(
+      enhanced_bookmarks::kFieldTrialName, "DefaultViewMode");
+
+  if (default_view_mode == "List") {
+    return ViewMode::LIST;
+  } else if (default_view_mode == "Grid") {
+    return ViewMode::GRID;
+  }
+
+  // If finch data is not available or has an invalid value, we fall back to
+  // ViewMode::GRID.
+  return ViewMode::GRID;
 }
 
 }  // namespace enhanced_bookmarks

@@ -770,7 +770,6 @@ std::pair<URLID, VisitID> HistoryBackend::AddPageVisit(
   // Add the visit with the time to the database.
   VisitRow visit_info(url_id, time, referring_visit, transition, 0);
   VisitID visit_id = db_->AddVisit(&visit_info, visit_source);
-  NotifyVisitObservers(visit_info);
 
   if (visit_info.visit_time < first_recorded_time_)
     first_recorded_time_ = visit_info.visit_time;
@@ -830,7 +829,6 @@ void HistoryBackend::AddPagesWithDetails(const URLRows& urls,
         NOTREACHED() << "Adding visit failed.";
         return;
       }
-      NotifyVisitObservers(visit_info);
 
       if (visit_info.visit_time < first_recorded_time_)
         first_recorded_time_ = visit_info.visit_time;
@@ -1605,12 +1603,20 @@ void HistoryBackend::MergeFavicon(
   for (size_t i = 0; i < bitmap_id_sizes.size(); ++i) {
     if (bitmap_id_sizes[i].pixel_size == pixel_size) {
       if (IsFaviconBitmapDataEqual(bitmap_id_sizes[i].bitmap_id, bitmap_data)) {
-        thumbnail_db_->SetFaviconBitmapLastUpdateTime(
-            bitmap_id_sizes[i].bitmap_id, base::Time::Now());
+        // Sync calls MergeFavicon() for all of the favicons that it manages at
+        // startup. Do not update the "last updated" time if the favicon bitmap
+        // data matches that in the database.
+        // TODO: Pass in boolean to MergeFavicon() if any users of
+        // MergeFavicon() want the last_updated time to be updated when the new
+        // bitmap data is identical to the old.
         bitmap_identical = true;
       } else {
+        // Expire the favicon bitmap because sync can provide incorrect
+        // |bitmap_data|. See crbug.com/474421 for more details. Expiring the
+        // favicon bitmap causes it to be redownloaded the next time that the
+        // user visits any page which uses |icon_url|.
         thumbnail_db_->SetFaviconBitmap(bitmap_id_sizes[i].bitmap_id,
-                                        bitmap_data, base::Time::Now());
+                                        bitmap_data, base::Time());
         replaced_bitmap = true;
       }
       break;
@@ -1766,19 +1772,6 @@ void HistoryBackend::SetFaviconsOutOfDateForPage(const GURL& page_url) {
        m != icon_mappings.end(); ++m) {
     thumbnail_db_->SetFaviconOutOfDate(m->icon_id);
   }
-  ScheduleCommit();
-}
-
-void HistoryBackend::CloneFavicons(const GURL& old_page_url,
-                                   const GURL& new_page_url) {
-  if (!thumbnail_db_)
-    return;
-
-  // Prevent cross-domain cloning.
-  if (old_page_url.GetOrigin() != new_page_url.GetOrigin())
-    return;
-
-  thumbnail_db_->CloneIconMappings(old_page_url, new_page_url);
   ScheduleCommit();
 }
 
@@ -2386,13 +2379,13 @@ void HistoryBackend::URLsNoLongerBookmarked(const std::set<GURL>& urls) {
     return;
 
   for (std::set<GURL>::const_iterator i = urls.begin(); i != urls.end(); ++i) {
-    URLRow url_row;
-    if (!db_->GetRowForURL(*i, &url_row))
-      continue;  // The URL isn't in the db; nothing to do.
-
     VisitVector visits;
-    db_->GetVisitsForURL(url_row.id(), &visits);
-
+    URLRow url_row;
+    if (db_->GetRowForURL(*i, &url_row))
+      db_->GetVisitsForURL(url_row.id(), &visits);
+    // We need to call DeleteURL() even if the DB didn't contain this URL, so
+    // that we can delete all associated icons in the case of deleting an
+    // unvisited bookmarked URL.
     if (visits.empty())
       expirer_.DeleteURL(*i);  // There are no more visits; nuke the URL.
   }
@@ -2654,17 +2647,6 @@ HistoryClient* HistoryBackend::GetHistoryClient() {
   if (history_client_)
     history_client_->BlockUntilBookmarksLoaded();
   return history_client_;
-}
-
-void HistoryBackend::NotifyVisitObservers(const VisitRow& visit) {
-  BriefVisitInfo info;
-  info.url_id = visit.url_id;
-  info.time = visit.visit_time;
-  info.transition = visit.transition;
-  // If we don't have a delegate yet during setup or shutdown, we will drop
-  // these notifications.
-  if (delegate_)
-    delegate_->NotifyAddVisit(info);
 }
 
 }  // namespace history

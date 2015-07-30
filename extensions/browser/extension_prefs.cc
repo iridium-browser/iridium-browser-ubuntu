@@ -7,10 +7,12 @@
 #include <iterator>
 
 #include "base/command_line.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/prefs/pref_notifier.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
+#include "base/trace_event/trace_event.h"
 #include "base/value_conversions.h"
 #include "components/crx_file/id_util.h"
 #include "components/pref_registry/pref_registry_syncable.h"
@@ -541,6 +543,14 @@ bool ExtensionPrefs::ReadPrefAsURLPatternSet(const std::string& extension_id,
   const base::ListValue* value = NULL;
   if (!ReadPrefAsList(extension_id, pref_key, &value))
     return false;
+  const base::DictionaryValue* extension = GetExtensionPref(extension_id);
+  if (!extension)
+    return false;
+  int location;
+  if (extension->GetInteger(kPrefLocation, &location) &&
+      static_cast<Manifest::Location>(location) == Manifest::COMPONENT) {
+    valid_schemes |= URLPattern::SCHEME_CHROMEUI;
+  }
 
   bool allow_file_access = AllowFileAccess(extension_id);
   return result->Populate(*value, valid_schemes, allow_file_access, NULL);
@@ -747,11 +757,6 @@ bool ExtensionPrefs::HasDisableReason(
 void ExtensionPrefs::AddDisableReason(const std::string& extension_id,
                                       Extension::DisableReason disable_reason) {
   ModifyDisableReasons(extension_id, disable_reason, DISABLE_REASON_ADD);
-}
-
-void ExtensionPrefs::AddDisableReasons(const std::string& extension_id,
-                                       int disable_reasons) {
-  ModifyDisableReasons(extension_id, disable_reasons, DISABLE_REASON_ADD);
 }
 
 void ExtensionPrefs::RemoveDisableReason(
@@ -1744,6 +1749,9 @@ void ExtensionPrefs::FixMissingPrefs(const ExtensionIdList& extension_ids) {
 }
 
 void ExtensionPrefs::InitPrefStore() {
+  TRACE_EVENT0("browser,startup", "ExtensionPrefs::InitPrefStore")
+  SCOPED_UMA_HISTOGRAM_TIMER("Extensions.InitPrefStoreTime");
+
   if (extensions_disabled_) {
     extension_pref_value_map_->NotifyInitializationCompleted();
     return;
@@ -1752,7 +1760,10 @@ void ExtensionPrefs::InitPrefStore() {
   // When this is called, the PrefService is initialized and provides access
   // to the user preferences stored in a JSON file.
   ExtensionIdList extension_ids;
-  GetExtensions(&extension_ids);
+  {
+    SCOPED_UMA_HISTOGRAM_TIMER("Extensions.InitPrefGetExtensionsTime");
+    GetExtensions(&extension_ids);
+  }
   // Create empty preferences dictionary for each extension (these dictionaries
   // are pruned when persisting the preferences to disk).
   for (ExtensionIdList::iterator ext_id = extension_ids.begin();
@@ -1855,7 +1866,11 @@ ExtensionPrefs::ExtensionPrefs(
       app_sorting_(app_sorting.Pass()),
       time_provider_(time_provider.Pass()),
       extensions_disabled_(extensions_disabled) {
+  // TODO(mgiuca): Added these checks to try and diagnose
+  // http://crbug.com/476648. Remove them after the investigation is concluded.
+  CHECK(this);
   app_sorting_->SetExtensionScopedPrefs(this);
+  app_sorting_->CheckExtensionScopedPrefs();
   MakePathsRelative();
 
   // Ensure that any early observers are watching before prefs are initialized.
@@ -1880,66 +1895,30 @@ bool ExtensionPrefs::NeedsStorageGarbageCollection() {
 // static
 void ExtensionPrefs::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterDictionaryPref(
-      pref_names::kExtensions,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterDictionaryPref(pref_names::kExtensions);
   registry->RegisterListPref(pref_names::kToolbar,
                              user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-  registry->RegisterIntegerPref(
-      pref_names::kToolbarSize,
-      -1,  // default value
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterDictionaryPref(
-      kExtensionsBlacklistUpdate,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterListPref(pref_names::kInstallAllowList,
-                             user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterListPref(pref_names::kInstallDenyList,
-                             user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterDictionaryPref(
-      pref_names::kInstallForceList,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterListPref(pref_names::kAllowedTypes,
-                             user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      pref_names::kStorageGarbageCollect,
-      false,  // default value
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterInt64Pref(
-      pref_names::kLastUpdateCheck,
-      0,  // default value
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterInt64Pref(
-      pref_names::kNextUpdateCheck,
-      0,  // default value
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterListPref(pref_names::kAllowedInstallSites,
-                             user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterStringPref(
-      pref_names::kLastChromeVersion,
-      std::string(),  // default value
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterDictionaryPref(
-      kInstallSignature,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterIntegerPref(pref_names::kToolbarSize, -1);
+  registry->RegisterDictionaryPref(kExtensionsBlacklistUpdate);
+  registry->RegisterListPref(pref_names::kInstallAllowList);
+  registry->RegisterListPref(pref_names::kInstallDenyList);
+  registry->RegisterDictionaryPref(pref_names::kInstallForceList);
+  registry->RegisterListPref(pref_names::kAllowedTypes);
+  registry->RegisterBooleanPref(pref_names::kStorageGarbageCollect, false);
+  registry->RegisterInt64Pref(pref_names::kLastUpdateCheck, 0);
+  registry->RegisterInt64Pref(pref_names::kNextUpdateCheck, 0);
+  registry->RegisterListPref(pref_names::kAllowedInstallSites);
+  registry->RegisterStringPref(pref_names::kLastChromeVersion, std::string());
+  registry->RegisterDictionaryPref(kInstallSignature);
 
-  registry->RegisterListPref(pref_names::kNativeMessagingBlacklist,
-                             user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterListPref(pref_names::kNativeMessagingWhitelist,
-                             user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      pref_names::kNativeMessagingUserLevelHosts,
-      true,  // default value
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterIntegerPref(
-      kCorruptedDisableCount,
-      0,  // default value
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterListPref(pref_names::kNativeMessagingBlacklist);
+  registry->RegisterListPref(pref_names::kNativeMessagingWhitelist);
+  registry->RegisterBooleanPref(pref_names::kNativeMessagingUserLevelHosts,
+                                true);
+  registry->RegisterIntegerPref(kCorruptedDisableCount, 0);
 
 #if !defined(OS_MACOSX)
-  registry->RegisterBooleanPref(
-      pref_names::kAppFullscreenAllowed, true,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(pref_names::kAppFullscreenAllowed, true);
 #endif
 }
 
@@ -2037,6 +2016,10 @@ void ExtensionPrefs::PopulateExtensionInfoPrefs(
 
 void ExtensionPrefs::InitExtensionControlledPrefs(
     ExtensionPrefValueMap* value_map) {
+  TRACE_EVENT0("browser,startup",
+               "ExtensionPrefs::InitExtensionControlledPrefs")
+  SCOPED_UMA_HISTOGRAM_TIMER("Extensions.InitExtensionControlledPrefsTime");
+
   ExtensionIdList extension_ids;
   GetExtensions(&extension_ids);
 

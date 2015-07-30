@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/lazy_instance.h"
+#include "base/thread_task_runner_handle.h"
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_logging.h"
 #include "ipc/ipc_message_attachment_set.h"
@@ -28,20 +29,26 @@ namespace {
 class MojoChannelFactory : public ChannelFactory {
  public:
   MojoChannelFactory(ChannelMojo::Delegate* delegate,
+                     scoped_refptr<base::TaskRunner> io_runner,
                      ChannelHandle channel_handle,
                      Channel::Mode mode)
-      : delegate_(delegate), channel_handle_(channel_handle), mode_(mode) {}
+      : delegate_(delegate),
+        io_runner_(io_runner),
+        channel_handle_(channel_handle),
+        mode_(mode) {}
 
   std::string GetName() const override {
     return channel_handle_.name;
   }
 
   scoped_ptr<Channel> BuildChannel(Listener* listener) override {
-    return ChannelMojo::Create(delegate_, channel_handle_, mode_, listener);
+    return ChannelMojo::Create(delegate_, io_runner_, channel_handle_, mode_,
+                               listener);
   }
 
  private:
   ChannelMojo::Delegate* delegate_;
+  scoped_refptr<base::TaskRunner> io_runner_;
   ChannelHandle channel_handle_;
   Channel::Mode mode_;
 };
@@ -53,6 +60,7 @@ class ClientChannelMojo : public ChannelMojo,
                           public mojo::ErrorHandler {
  public:
   ClientChannelMojo(ChannelMojo::Delegate* delegate,
+                    scoped_refptr<base::TaskRunner> io_runner,
                     const ChannelHandle& handle,
                     Listener* listener);
   ~ClientChannelMojo() override;
@@ -67,16 +75,21 @@ class ClientChannelMojo : public ChannelMojo,
       const mojo::Callback<void(int32_t)>& callback) override;
 
  private:
+  void BindPipe(mojo::ScopedMessagePipeHandle handle);
+
   mojo::Binding<ClientChannel> binding_;
+  base::WeakPtrFactory<ClientChannelMojo> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ClientChannelMojo);
 };
 
 ClientChannelMojo::ClientChannelMojo(ChannelMojo::Delegate* delegate,
+                                     scoped_refptr<base::TaskRunner> io_runner,
                                      const ChannelHandle& handle,
                                      Listener* listener)
-    : ChannelMojo(delegate, handle, Channel::MODE_CLIENT, listener),
-      binding_(this) {
+    : ChannelMojo(delegate, io_runner, handle, Channel::MODE_CLIENT, listener),
+      binding_(this),
+      weak_factory_(this) {
 }
 
 ClientChannelMojo::~ClientChannelMojo() {
@@ -84,7 +97,8 @@ ClientChannelMojo::~ClientChannelMojo() {
 
 void ClientChannelMojo::OnPipeAvailable(
     mojo::embedder::ScopedPlatformHandle handle) {
-  binding_.Bind(CreateMessagingPipe(handle.Pass()));
+  CreateMessagingPipe(handle.Pass(), base::Bind(&ClientChannelMojo::BindPipe,
+                                                weak_factory_.GetWeakPtr()));
 }
 
 void ClientChannelMojo::OnConnectionError() {
@@ -99,11 +113,16 @@ void ClientChannelMojo::Init(
   callback.Run(GetSelfPID());
 }
 
+void ClientChannelMojo::BindPipe(mojo::ScopedMessagePipeHandle handle) {
+  binding_.Bind(handle.Pass());
+}
+
 //------------------------------------------------------------------------------
 
 class ServerChannelMojo : public ChannelMojo, public mojo::ErrorHandler {
  public:
   ServerChannelMojo(ChannelMojo::Delegate* delegate,
+                    scoped_refptr<base::TaskRunner> io_runner,
                     const ChannelHandle& handle,
                     Listener* listener);
   ~ServerChannelMojo() override;
@@ -116,19 +135,25 @@ class ServerChannelMojo : public ChannelMojo, public mojo::ErrorHandler {
   void Close() override;
 
  private:
+  void InitClientChannel(mojo::ScopedMessagePipeHandle peer_handle,
+                         mojo::ScopedMessagePipeHandle handle);
+
   // ClientChannelClient implementation
   void ClientChannelWasInitialized(int32_t peer_pid);
 
   mojo::InterfacePtr<ClientChannel> client_channel_;
   mojo::ScopedMessagePipeHandle message_pipe_;
+  base::WeakPtrFactory<ServerChannelMojo> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ServerChannelMojo);
 };
 
 ServerChannelMojo::ServerChannelMojo(ChannelMojo::Delegate* delegate,
+                                     scoped_refptr<base::TaskRunner> io_runner,
                                      const ChannelHandle& handle,
                                      Listener* listener)
-    : ChannelMojo(delegate, handle, Channel::MODE_SERVER, listener) {
+    : ChannelMojo(delegate, io_runner, handle, Channel::MODE_SERVER, listener),
+      weak_factory_(this) {
 }
 
 ServerChannelMojo::~ServerChannelMojo() {
@@ -145,12 +170,20 @@ void ServerChannelMojo::OnPipeAvailable(
     listener()->OnChannelError();
     return;
   }
+  CreateMessagingPipe(
+      handle.Pass(),
+      base::Bind(&ServerChannelMojo::InitClientChannel,
+                 weak_factory_.GetWeakPtr(), base::Passed(&peer)));
+}
 
-  client_channel_.Bind(CreateMessagingPipe(handle.Pass()));
+void ServerChannelMojo::InitClientChannel(
+    mojo::ScopedMessagePipeHandle peer_handle,
+    mojo::ScopedMessagePipeHandle handle) {
+  client_channel_.Bind(
+      mojo::InterfacePtrInfo<ClientChannel>(handle.Pass(), 0u));
   client_channel_.set_error_handler(this);
   client_channel_->Init(
-      peer.Pass(),
-      static_cast<int32_t>(GetSelfPID()),
+      peer_handle.Pass(), static_cast<int32_t>(GetSelfPID()),
       base::Bind(&ServerChannelMojo::ClientChannelWasInitialized,
                  base::Unretained(this)));
 }
@@ -178,13 +211,26 @@ base::ScopedFD TakeOrDupFile(internal::PlatformFileAttachment* attachment) {
 
 #endif
 
-} // namespace
+}  // namespace
 
 //------------------------------------------------------------------------------
 
+ChannelMojo::ChannelInfoDeleter::ChannelInfoDeleter(
+    scoped_refptr<base::TaskRunner> io_runner)
+    : io_runner(io_runner) {
+}
+
+ChannelMojo::ChannelInfoDeleter::~ChannelInfoDeleter() {
+}
+
 void ChannelMojo::ChannelInfoDeleter::operator()(
     mojo::embedder::ChannelInfo* ptr) const {
-  mojo::embedder::DestroyChannelOnIOThread(ptr);
+  if (base::ThreadTaskRunnerHandle::Get() == io_runner) {
+    mojo::embedder::DestroyChannelOnIOThread(ptr);
+  } else {
+    io_runner->PostTask(
+        FROM_HERE, base::Bind(&mojo::embedder::DestroyChannelOnIOThread, ptr));
+  }
 }
 
 //------------------------------------------------------------------------------
@@ -196,17 +242,19 @@ bool ChannelMojo::ShouldBeUsed() {
 }
 
 // static
-scoped_ptr<ChannelMojo> ChannelMojo::Create(ChannelMojo::Delegate* delegate,
-                                            const ChannelHandle& channel_handle,
-                                            Mode mode,
-                                            Listener* listener) {
+scoped_ptr<ChannelMojo> ChannelMojo::Create(
+    ChannelMojo::Delegate* delegate,
+    scoped_refptr<base::TaskRunner> io_runner,
+    const ChannelHandle& channel_handle,
+    Mode mode,
+    Listener* listener) {
   switch (mode) {
     case Channel::MODE_CLIENT:
       return make_scoped_ptr(
-          new ClientChannelMojo(delegate, channel_handle, listener));
+          new ClientChannelMojo(delegate, io_runner, channel_handle, listener));
     case Channel::MODE_SERVER:
       return make_scoped_ptr(
-          new ServerChannelMojo(delegate, channel_handle, listener));
+          new ServerChannelMojo(delegate, io_runner, channel_handle, listener));
     default:
       NOTREACHED();
       return nullptr;
@@ -216,40 +264,41 @@ scoped_ptr<ChannelMojo> ChannelMojo::Create(ChannelMojo::Delegate* delegate,
 // static
 scoped_ptr<ChannelFactory> ChannelMojo::CreateServerFactory(
     ChannelMojo::Delegate* delegate,
+    scoped_refptr<base::TaskRunner> io_runner,
     const ChannelHandle& channel_handle) {
-  return make_scoped_ptr(
-      new MojoChannelFactory(delegate, channel_handle, Channel::MODE_SERVER));
+  return make_scoped_ptr(new MojoChannelFactory(
+      delegate, io_runner, channel_handle, Channel::MODE_SERVER));
 }
 
 // static
 scoped_ptr<ChannelFactory> ChannelMojo::CreateClientFactory(
     ChannelMojo::Delegate* delegate,
+    scoped_refptr<base::TaskRunner> io_runner,
     const ChannelHandle& channel_handle) {
-  return make_scoped_ptr(
-      new MojoChannelFactory(delegate, channel_handle, Channel::MODE_CLIENT));
+  return make_scoped_ptr(new MojoChannelFactory(
+      delegate, io_runner, channel_handle, Channel::MODE_CLIENT));
 }
 
 ChannelMojo::ChannelMojo(ChannelMojo::Delegate* delegate,
+                         scoped_refptr<base::TaskRunner> io_runner,
                          const ChannelHandle& handle,
                          Mode mode,
                          Listener* listener)
     : mode_(mode),
       listener_(listener),
       peer_pid_(base::kNullProcessId),
+      io_runner_(io_runner),
+      channel_info_(nullptr, ChannelInfoDeleter(nullptr)),
       weak_factory_(this) {
   // Create MojoBootstrap after all members are set as it touches
   // ChannelMojo from a different thread.
   bootstrap_ = MojoBootstrap::Create(handle, mode, this);
-  if (delegate) {
-    if (delegate->GetIOTaskRunner() ==
-        base::MessageLoop::current()->message_loop_proxy()) {
-      InitDelegate(delegate);
-    } else {
-      delegate->GetIOTaskRunner()->PostTask(
-          FROM_HERE,
-          base::Bind(
-              &ChannelMojo::InitDelegate, base::Unretained(this), delegate));
-    }
+  if (io_runner == base::MessageLoop::current()->task_runner()) {
+    InitOnIOThread(delegate);
+  } else {
+    io_runner->PostTask(FROM_HERE,
+                        base::Bind(&ChannelMojo::InitOnIOThread,
+                                   base::Unretained(this), delegate));
   }
 }
 
@@ -257,21 +306,56 @@ ChannelMojo::~ChannelMojo() {
   Close();
 }
 
-void ChannelMojo::InitDelegate(ChannelMojo::Delegate* delegate) {
+void ChannelMojo::InitOnIOThread(ChannelMojo::Delegate* delegate) {
   ipc_support_.reset(
       new ScopedIPCSupport(base::MessageLoop::current()->task_runner()));
+  if (!delegate)
+    return;
   delegate_ = delegate->ToWeakPtr();
   delegate_->OnChannelCreated(weak_factory_.GetWeakPtr());
 }
 
-mojo::ScopedMessagePipeHandle ChannelMojo::CreateMessagingPipe(
-    mojo::embedder::ScopedPlatformHandle handle) {
-  DCHECK(!channel_info_.get());
+void ChannelMojo::CreateMessagingPipe(
+    mojo::embedder::ScopedPlatformHandle handle,
+    const CreateMessagingPipeCallback& callback) {
+  auto return_callback = base::Bind(&ChannelMojo::OnMessagingPipeCreated,
+                                    weak_factory_.GetWeakPtr(), callback);
+  if (base::ThreadTaskRunnerHandle::Get() == io_runner_) {
+    CreateMessagingPipeOnIOThread(
+        handle.Pass(), base::ThreadTaskRunnerHandle::Get(), return_callback);
+  } else {
+    io_runner_->PostTask(
+        FROM_HERE,
+        base::Bind(&ChannelMojo::CreateMessagingPipeOnIOThread,
+                   base::Passed(&handle), base::ThreadTaskRunnerHandle::Get(),
+                   return_callback));
+  }
+}
+
+// static
+void ChannelMojo::CreateMessagingPipeOnIOThread(
+    mojo::embedder::ScopedPlatformHandle handle,
+    scoped_refptr<base::TaskRunner> callback_runner,
+    const CreateMessagingPipeOnIOThreadCallback& callback) {
   mojo::embedder::ChannelInfo* channel_info;
   mojo::ScopedMessagePipeHandle pipe =
       mojo::embedder::CreateChannelOnIOThread(handle.Pass(), &channel_info);
-  channel_info_.reset(channel_info);
-  return pipe.Pass();
+  if (base::ThreadTaskRunnerHandle::Get() == callback_runner) {
+    callback.Run(pipe.Pass(), channel_info);
+  } else {
+    callback_runner->PostTask(
+        FROM_HERE, base::Bind(callback, base::Passed(&pipe), channel_info));
+  }
+}
+
+void ChannelMojo::OnMessagingPipeCreated(
+    const CreateMessagingPipeCallback& callback,
+    mojo::ScopedMessagePipeHandle handle,
+    mojo::embedder::ChannelInfo* channel_info) {
+  DCHECK(!channel_info_.get());
+  channel_info_ = scoped_ptr<mojo::embedder::ChannelInfo, ChannelInfoDeleter>(
+      channel_info, ChannelInfoDeleter(io_runner_));
+  callback.Run(handle.Pass());
 }
 
 bool ChannelMojo::Connect() {
@@ -280,31 +364,63 @@ bool ChannelMojo::Connect() {
 }
 
 void ChannelMojo::Close() {
-  message_reader_.reset();
+  scoped_ptr<internal::MessagePipeReader, ReaderDeleter> to_be_deleted;
+
+  {
+    // |message_reader_| has to be cleared inside the lock,
+    // but the instance has to be deleted outside.
+    base::AutoLock l(lock_);
+    to_be_deleted = message_reader_.Pass();
+  }
+
   channel_info_.reset();
   ipc_support_.reset();
+  to_be_deleted.reset();
 }
 
 void ChannelMojo::OnBootstrapError() {
   listener_->OnChannelError();
 }
 
+namespace {
+
+// ClosingDeleter calls |CloseWithErrorIfPending| before deleting the
+// |MessagePipeReader|.
+struct ClosingDeleter {
+  typedef base::DefaultDeleter<internal::MessagePipeReader> DefaultType;
+
+  void operator()(internal::MessagePipeReader* ptr) const {
+    ptr->CloseWithErrorIfPending();
+    delete ptr;
+  }
+};
+
+} // namespace
+
 void ChannelMojo::InitMessageReader(mojo::ScopedMessagePipeHandle pipe,
                                     int32_t peer_pid) {
-  message_reader_ =
-      make_scoped_ptr(new internal::MessagePipeReader(pipe.Pass(), this));
+  scoped_ptr<internal::MessagePipeReader, ClosingDeleter> reader(
+      new internal::MessagePipeReader(pipe.Pass(), this));
 
-  for (size_t i = 0; i < pending_messages_.size(); ++i) {
-    bool sent = message_reader_->Send(make_scoped_ptr(pending_messages_[i]));
-    pending_messages_[i] = nullptr;
-    if (!sent) {
-      pending_messages_.clear();
-      listener_->OnChannelError();
-      return;
+  {
+    base::AutoLock l(lock_);
+    for (size_t i = 0; i < pending_messages_.size(); ++i) {
+      bool sent = reader->Send(make_scoped_ptr(pending_messages_[i]));
+      pending_messages_[i] = nullptr;
+      if (!sent) {
+        // OnChannelError() is notified through ClosingDeleter.
+        pending_messages_.clear();
+        LOG(ERROR)  << "Failed to flush pending messages";
+        return;
+      }
     }
-  }
 
-  pending_messages_.clear();
+    // We set |message_reader_| here and won't get any |pending_messages_|
+    // hereafter. Although we might have some if there is an error, we don't
+    // care. They cannot be sent anyway.
+    message_reader_.reset(reader.release());
+    pending_messages_.clear();
+  }
 
   set_peer_pid(peer_pid);
   listener_->OnChannelConnected(static_cast<int32_t>(GetPeerPID()));
@@ -321,13 +437,19 @@ void ChannelMojo::OnPipeError(internal::MessagePipeReader* reader) {
 }
 
 
+// Warning: Keep the implementation thread-safe.
 bool ChannelMojo::Send(Message* message) {
+  base::AutoLock l(lock_);
   if (!message_reader_) {
     pending_messages_.push_back(message);
     return true;
   }
 
   return message_reader_->Send(make_scoped_ptr(message));
+}
+
+bool ChannelMojo::IsSendThreadSafe() const {
+  return false;
 }
 
 base::ProcessId ChannelMojo::GetPeerPID() const {

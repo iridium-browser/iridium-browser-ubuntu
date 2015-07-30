@@ -4,46 +4,46 @@
 
 import os
 
-from measurements import smoothness_controller
-from measurements import timeline_controller
-from telemetry import benchmark
 from telemetry.core.platform import tracing_category_filter
 from telemetry.core.platform import tracing_options
 from telemetry.page import action_runner
 from telemetry.page import page_test
-from telemetry.results import results_options
 from telemetry.timeline.model import TimelineModel
-from telemetry.util import statistics
 from telemetry.value import list_of_scalar_values
 from telemetry.value import scalar
-from telemetry.value import trace
 
 
 _CR_RENDERER_MAIN = 'CrRendererMain'
 _RUN_SMOOTH_ACTIONS = 'RunSmoothAllActions'
-_GC_REASONS = ['precise', 'conservative', 'idle', 'forced']
-_GC_STAGES = ['mark', 'lazy_sweep', 'complete_sweep']
 
 
-def _GetGcReason(args):
-  # Old style
-  if 'precise' in args:
-    if args['forced']:
-      return 'forced'
-    return 'precise' if args['precise'] else 'conservative'
+def _AddTracingResults(thread, results):
+  _GC_REASONS = ['precise', 'conservative', 'idle', 'forced']
+  _GC_STAGES = ['mark', 'lazy_sweep', 'complete_sweep']
 
-  if args['gcReason'] == 'ConservativeGC':
-    return 'conservative'
-  if args['gcReason'] == 'PreciseGC':
-    return 'precise'
-  if args['gcReason'] == 'ForcedGCForTesting':
-    return 'forced'
-  if args['gcReason'] == 'IdleGC':
-    return 'idle'
-  return None  # Unknown
+  def GetGcReason(event, async_slices):
+    args = event.args
 
+    # Old format
+    if 'precise' in args:
+      if args['forced']:
+        return 'forced'
+      return 'precise' if args['precise'] else 'conservative'
 
-def _AddTracingResults(events, results):
+    if args['gcReason'] == 'ConservativeGC':
+      return 'conservative'
+    if args['gcReason'] == 'PreciseGC':
+      return 'precise'
+    if args['gcReason'] == 'ForcedGCForTesting':
+      for s in async_slices:
+        if s.start <= event.start and event.end <= s.end:
+          return 'forced'
+      # Ignore this forced GC being out of target ranges
+      return None
+    if args['gcReason'] == 'IdleGC':
+      return 'idle'
+    return None  # Unknown
+
   def DumpMetric(page, name, values, unit, results):
     if values[name]:
       results.AddValue(list_of_scalar_values.ListOfScalarValues(
@@ -53,13 +53,17 @@ def _AddTracingResults(events, results):
       results.AddValue(scalar.ScalarValue(
           page, name + '_total', unit, sum(values[name])))
 
+  events = thread.all_slices
+  async_slices = [s for s in thread.async_slices
+                  if s.name == 'BlinkGCTimeMeasurement']
+
   # Prepare
   values = {'oilpan_coalesce': []}
   for reason in _GC_REASONS:
     for stage in _GC_STAGES:
       values['oilpan_%s_%s' % (reason, stage)] = []
 
-  # Parse in time line
+  # Parse trace events
   reason = None
   mark_time = 0
   lazy_sweep_time = 0
@@ -75,7 +79,7 @@ def _AddTracingResults(events, results):
         values['oilpan_%s_lazy_sweep' % reason].append(lazy_sweep_time)
         values['oilpan_%s_complete_sweep' % reason].append(complete_sweep_time)
 
-      reason = _GetGcReason(event.args)
+      reason = GetGcReason(event, async_slices)
       mark_time = duration
       lazy_sweep_time = 0
       complete_sweep_time = 0
@@ -130,7 +134,6 @@ def _AddTracingResults(events, results):
 class _OilpanGCTimesBase(page_test.PageTest):
   def __init__(self, action_name=''):
     super(_OilpanGCTimesBase, self).__init__(action_name)
-    self._timeline_model = None
 
   def WillNavigateToPage(self, page, tab):
     # FIXME: Remove webkit.console when blink.console lands in chromium and
@@ -144,15 +147,13 @@ class _OilpanGCTimesBase(page_test.PageTest):
     tab.browser.platform.tracing_controller.Start(options, category_filter,
                                                   timeout=1000)
 
-  def DidRunActions(self, page, tab):
-    timeline_data = tab.browser.platform.tracing_controller.Stop()
-    self._timeline_model = TimelineModel(timeline_data)
-
   def ValidateAndMeasurePage(self, page, tab, results):
-    threads = self._timeline_model.GetAllThreads()
+    timeline_data = tab.browser.platform.tracing_controller.Stop()
+    timeline_model = TimelineModel(timeline_data)
+    threads = timeline_model.GetAllThreads()
     for thread in threads:
       if thread.name == _CR_RENDERER_MAIN:
-        _AddTracingResults(thread.all_slices, results)
+        _AddTracingResults(thread, results)
 
   def CleanUpAfterPage(self, page, tab):
     if tab.browser.platform.tracing_controller.is_tracing_running:
@@ -164,13 +165,15 @@ class OilpanGCTimesForSmoothness(_OilpanGCTimesBase):
     super(OilpanGCTimesForSmoothness, self).__init__()
     self._interaction = None
 
-  def WillRunActions(self, page, tab):
+  def DidNavigateToPage(self, page, tab):
     runner = action_runner.ActionRunner(tab)
-    self._interaction = runner.BeginInteraction(_RUN_SMOOTH_ACTIONS)
+    self._interaction = runner.CreateInteraction(_RUN_SMOOTH_ACTIONS)
+    self._interaction.Begin()
 
-  def DidRunActions(self, page, tab):
+  def ValidateAndMeasurePage(self, page, tab, results):
     self._interaction.End()
-    super(OilpanGCTimesForSmoothness, self).DidRunActions(page, tab)
+    super(OilpanGCTimesForSmoothness, self).ValidateAndMeasurePage(
+        page, tab, results)
 
 
 class OilpanGCTimesForBlinkPerf(_OilpanGCTimesBase):
@@ -184,12 +187,13 @@ class OilpanGCTimesForBlinkPerf(_OilpanGCTimesBase):
     page.script_to_evaluate_on_commit = self._blink_perf_js
     super(OilpanGCTimesForBlinkPerf, self).WillNavigateToPage(page, tab)
 
-  def DidRunActions(self, page, tab):
+  def ValidateAndMeasurePage(self, page, tab, results):
     tab.WaitForJavaScriptExpression('testRunner.isDone', 600)
-    super(OilpanGCTimesForBlinkPerf, self).DidRunActions(page, tab)
+    super(OilpanGCTimesForBlinkPerf, self).ValidateAndMeasurePage(
+        page, tab, results)
 
 
-class OilpanGCTimesForInternals(_OilpanGCTimesBase):
+class OilpanGCTimesForInternals(OilpanGCTimesForBlinkPerf):
   def __init__(self):
     super(OilpanGCTimesForInternals, self).__init__()
 

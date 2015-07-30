@@ -26,6 +26,7 @@
 #include "net/spdy/spdy_framer.h"
 #include "net/tools/quic/quic_dispatcher.h"
 #include "net/tools/quic/quic_per_connection_packet_writer.h"
+#include "net/tools/quic/quic_server_session.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 namespace net {
@@ -58,9 +59,24 @@ IPAddressNumber Loopback4();
 // Returns an address for ::1.
 IPAddressNumber Loopback6();
 
+// Returns an address for 0.0.0.0.
+IPAddressNumber Any4();
+
 void GenerateBody(std::string* body, int length);
 
 // Create an encrypted packet for testing.
+// If versions == nullptr, uses &QuicSupportedVersions().
+QuicEncryptedPacket* ConstructEncryptedPacket(
+    QuicConnectionId connection_id,
+    bool version_flag,
+    bool reset_flag,
+    QuicPacketSequenceNumber sequence_number,
+    const std::string& data,
+    QuicConnectionIdLength connection_id_length,
+    QuicSequenceNumberLength sequence_number_length,
+    QuicVersionVector* versions);
+
+// This form assumes |versions| == nullptr.
 QuicEncryptedPacket* ConstructEncryptedPacket(
     QuicConnectionId connection_id,
     bool version_flag,
@@ -70,14 +86,27 @@ QuicEncryptedPacket* ConstructEncryptedPacket(
     QuicConnectionIdLength connection_id_length,
     QuicSequenceNumberLength sequence_number_length);
 
-// This form assumes |connection_id_length| == PACKET_8BYTE_CONNECTION_ID and
-// |sequence_number_length| == PACKET_6BYTE_SEQUENCE_NUMBER.
+// This form assumes |connection_id_length| == PACKET_8BYTE_CONNECTION_ID,
+// |sequence_number_length| == PACKET_6BYTE_SEQUENCE_NUMBER and
+// |versions| == nullptr.
 QuicEncryptedPacket* ConstructEncryptedPacket(
     QuicConnectionId connection_id,
     bool version_flag,
     bool reset_flag,
     QuicPacketSequenceNumber sequence_number,
     const std::string& data);
+
+// Create an encrypted packet for testing whose data portion contains
+// a framing error.
+QuicEncryptedPacket* ConstructMisFramedEncryptedPacket(
+    QuicConnectionId connection_id,
+    bool version_flag,
+    bool reset_flag,
+    QuicPacketSequenceNumber sequence_number,
+    const std::string& data,
+    QuicConnectionIdLength connection_id_length,
+    QuicSequenceNumberLength sequence_number_length,
+    QuicVersionVector* versions);
 
 void CompareCharArraysWithHexError(const std::string& description,
                                    const char* actual,
@@ -100,6 +129,9 @@ size_t GetPacketLengthForOneStream(
 
 // Returns QuicConfig set to default values.
 QuicConfig DefaultQuicConfig();
+
+// Returns a QuicConfig set to default values that supports stateless rejects.
+QuicConfig DefaultQuicConfigStatelessRejects();
 
 // Returns a version vector consisting of |version|.
 QuicVersionVector SupportedVersions(QuicVersion version);
@@ -311,6 +343,12 @@ class MockConnection : public QuicConnection {
   MockConnection(Perspective perspective,
                  const QuicVersionVector& supported_versions);
 
+  MockConnection(QuicConnectionId connection_id,
+                 IPEndPoint address,
+                 Perspective perspective,
+                 bool is_secure,
+                 const QuicVersionVector& supported_versions);
+
   ~MockConnection() override;
 
   // If the constructor that uses a MockHelper has been used then this method
@@ -340,6 +378,11 @@ class MockConnection : public QuicConnection {
   MOCK_METHOD1(OnSendConnectionState, void(const CachedNetworkParameters&));
   MOCK_METHOD2(ResumeConnectionState,
                bool(const CachedNetworkParameters&, bool));
+
+  MOCK_METHOD1(OnError, void(QuicFramer* framer));
+  void QuicConnection_OnError(QuicFramer* framer) {
+    QuicConnection::OnError(framer);
+  }
 
   void ReallyProcessUdpPacket(const IPEndPoint& self_address,
                               const IPEndPoint& peer_address,
@@ -625,7 +668,7 @@ class TestWriterFactory : public tools::QuicDispatcher::PacketWriterFactory {
 class MockQuicConnectionDebugVisitor : public QuicConnectionDebugVisitor {
  public:
   MockQuicConnectionDebugVisitor();
-  ~MockQuicConnectionDebugVisitor();
+  ~MockQuicConnectionDebugVisitor() override;
 
   MOCK_METHOD1(OnFrameAddedToPacket, void(const QuicFrame&));
 
@@ -666,6 +709,65 @@ class MockQuicConnectionDebugVisitor : public QuicConnectionDebugVisitor {
   MOCK_METHOD2(OnRevivedPacket,
                void(const QuicPacketHeader&, StringPiece payload));
 };
+
+class TestServerSession : public tools::QuicServerSession {
+ public:
+  TestServerSession(const QuicConfig& config, QuicConnection* connection);
+  ~TestServerSession() override;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TestServerSession);
+};
+
+// Creates and sets up a QuicCryptoClientStream for testing, and all
+// its associated state.
+//
+// server_id: The server id associated with this stream.
+// supports_stateless_rejects:  Does this client support stateless rejects.
+// connection_start_time: The time to set for the connection clock.
+//   Needed for strike-register nonce verification.  The client
+//   connection_start_time should be synchronized witht the server
+//   start time, otherwise nonce verification will fail.
+// crypto_client_config: Pointer to the crypto client config.
+// client_connection: Pointer reference for newly created
+//   connection.  This object will be owned by the
+//   client_session.
+// client_session: Pointer reference for the newly created client
+//   session.  The new object will be owned by the caller.
+// client_stream: Pointer reference for the newly created crypto
+//   client stream.  The new object will be owned by the caller.
+void SetupCryptoClientStreamForTest(
+    QuicServerId server_id,
+    bool supports_stateless_rejects,
+    QuicTime::Delta connection_start_time,
+    QuicCryptoClientConfig* crypto_client_config,
+    PacketSavingConnection** client_connection,
+    TestClientSession** client_session,
+    QuicCryptoClientStream** client_stream);
+
+// Creates and sets up a QuicCryptoServerStream for testing, and all
+// its associated state.
+//
+// server_id: The server id associated with this stream.
+// connection_start_time: The time to set for the connection clock.
+//   Needed for strike-register nonce verification.  The server
+//   connection_start_time should be synchronized witht the client
+//   start time, otherwise nonce verification will fail.
+// crypto_server_config: Pointer to the crypto server config.
+// server_connection: Pointer reference for newly created
+//   connection.  This object will be owned by the
+//   server_session.
+// server_session: Pointer reference for the newly created server
+//   session.  The new object will be owned by the caller.
+// server_stream: Pointer reference for the newly created crypto
+//   server stream.  The new object will be owned by the caller.
+void SetupCryptoServerStreamForTest(
+    QuicServerId server_id,
+    QuicTime::Delta connection_start_time,
+    QuicCryptoServerConfig* crypto_server_config,
+    PacketSavingConnection** server_connection,
+    TestServerSession** server_session,
+    QuicCryptoServerStream** server_stream);
 
 }  // namespace test
 }  // namespace net

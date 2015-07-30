@@ -7,6 +7,7 @@
 
 #include <set>
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/containers/scoped_ptr_hash_map.h"
@@ -17,6 +18,8 @@
 #include "media/base/decryptor.h"
 #include "media/base/media_export.h"
 #include "media/base/media_keys.h"
+
+class GURL;
 
 namespace crypto {
 class SymmetricKey;
@@ -30,27 +33,25 @@ class MEDIA_EXPORT AesDecryptor : public MediaKeys,
                                   public CdmContext,
                                   public Decryptor {
  public:
-  AesDecryptor(const SessionMessageCB& session_message_cb,
+  AesDecryptor(const GURL& security_origin,
+               const SessionMessageCB& session_message_cb,
                const SessionClosedCB& session_closed_cb,
                const SessionKeysChangeCB& session_keys_change_cb);
   ~AesDecryptor() override;
 
   // MediaKeys implementation.
-  void SetServerCertificate(const uint8* certificate_data,
-                            int certificate_data_length,
+  void SetServerCertificate(const std::vector<uint8_t>& certificate,
                             scoped_ptr<SimpleCdmPromise> promise) override;
   void CreateSessionAndGenerateRequest(
       SessionType session_type,
       EmeInitDataType init_data_type,
-      const uint8* init_data,
-      int init_data_length,
+      const std::vector<uint8_t>& init_data,
       scoped_ptr<NewSessionCdmPromise> promise) override;
   void LoadSession(SessionType session_type,
                    const std::string& session_id,
                    scoped_ptr<NewSessionCdmPromise> promise) override;
   void UpdateSession(const std::string& session_id,
-                     const uint8* response,
-                     int response_length,
+                     const std::vector<uint8_t>& response,
                      scoped_ptr<SimpleCdmPromise> promise) override;
   void CloseSession(const std::string& session_id,
                     scoped_ptr<SimpleCdmPromise> promise) override;
@@ -111,7 +112,8 @@ class MEDIA_EXPORT AesDecryptor : public MediaKeys,
   class SessionIdDecryptionKeyMap;
 
   // Key ID <-> SessionIdDecryptionKeyMap map.
-  typedef base::ScopedPtrHashMap<std::string, SessionIdDecryptionKeyMap>
+  typedef base::ScopedPtrHashMap<std::string,
+                                 scoped_ptr<SessionIdDecryptionKeyMap>>
       KeyIdToSessionKeysMap;
 
   // Creates a DecryptionKey using |key_string| and associates it with |key_id|.
@@ -122,7 +124,7 @@ class MEDIA_EXPORT AesDecryptor : public MediaKeys,
 
   // Gets a DecryptionKey associated with |key_id|. The AesDecryptor still owns
   // the key. Returns NULL if no key is associated with |key_id|.
-  DecryptionKey* GetKey(const std::string& key_id) const;
+  DecryptionKey* GetKey_Locked(const std::string& key_id) const;
 
   // Determines if |key_id| is already specified for |session_id|.
   bool HasKey(const std::string& session_id, const std::string& key_id);
@@ -146,7 +148,7 @@ class MEDIA_EXPORT AesDecryptor : public MediaKeys,
 
   // Make session ID unique per renderer by making it static. Session
   // IDs seen by the app will be "1", "2", etc.
-  static uint32 next_session_id_;
+  static uint32_t next_session_id_;
 
   NewKeyCB new_audio_key_cb_;
   NewKeyCB new_video_key_cb_;

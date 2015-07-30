@@ -50,7 +50,7 @@ static void assertV8RecursionScope()
 
 static bool runningUnitTest()
 {
-    return blink::Platform::current()->unitTestSupport();
+    return Platform::current()->unitTestSupport();
 }
 #endif
 
@@ -62,6 +62,9 @@ static void useCounterCallback(v8::Isolate* isolate, v8::Isolate::UseCounterFeat
         break;
     case v8::Isolate::kBreakIterator:
         UseCounter::count(callingExecutionContext(isolate), UseCounter::BreakIterator);
+        break;
+    case v8::Isolate::kLegacyConst:
+        UseCounter::count(callingExecutionContext(isolate), UseCounter::LegacyConst);
         break;
     default:
         // This can happen if V8 has added counters that this version of Blink
@@ -83,7 +86,7 @@ V8PerIsolateData::V8PerIsolateData()
     , m_internalScriptRecursionLevel(0)
 #endif
     , m_performingMicrotaskCheckpoint(false)
-    , m_debugServer(nullptr)
+    , m_scriptDebugger(nullptr)
 {
     // FIXME: Remove once all v8::Isolate::GetCurrent() calls are gone.
     isolate()->Enter();
@@ -147,7 +150,7 @@ void V8PerIsolateData::destroy(v8::Isolate* isolate)
     V8PerIsolateData* data = from(isolate);
     // FIXME: Remove once all v8::Isolate::GetCurrent() calls are gone.
     isolate->Exit();
-    data->m_debugServer.clear();
+    data->m_scriptDebugger.clear();
     delete data;
 }
 
@@ -158,7 +161,7 @@ V8PerIsolateData::DOMTemplateMap& V8PerIsolateData::currentDOMTemplateMap()
     return m_domTemplateMapForNonMainWorld;
 }
 
-v8::Handle<v8::FunctionTemplate> V8PerIsolateData::domTemplate(const void* domTemplateKey, v8::FunctionCallback callback, v8::Handle<v8::Value> data, v8::Handle<v8::Signature> signature, int length)
+v8::Local<v8::FunctionTemplate> V8PerIsolateData::domTemplate(const void* domTemplateKey, v8::FunctionCallback callback, v8::Local<v8::Value> data, v8::Local<v8::Signature> signature, int length)
 {
     DOMTemplateMap& domTemplateMap = currentDOMTemplateMap();
     DOMTemplateMap::iterator result = domTemplateMap.find(domTemplateKey);
@@ -170,7 +173,7 @@ v8::Handle<v8::FunctionTemplate> V8PerIsolateData::domTemplate(const void* domTe
     return templ;
 }
 
-v8::Handle<v8::FunctionTemplate> V8PerIsolateData::existingDOMTemplate(const void* domTemplateKey)
+v8::Local<v8::FunctionTemplate> V8PerIsolateData::existingDOMTemplate(const void* domTemplateKey)
 {
     DOMTemplateMap& domTemplateMap = currentDOMTemplateMap();
     DOMTemplateMap::iterator result = domTemplateMap.find(domTemplateKey);
@@ -179,7 +182,7 @@ v8::Handle<v8::FunctionTemplate> V8PerIsolateData::existingDOMTemplate(const voi
     return v8::Local<v8::FunctionTemplate>();
 }
 
-void V8PerIsolateData::setDOMTemplate(const void* domTemplateKey, v8::Handle<v8::FunctionTemplate> templ)
+void V8PerIsolateData::setDOMTemplate(const void* domTemplateKey, v8::Local<v8::FunctionTemplate> templ)
 {
     currentDOMTemplateMap().add(domTemplateKey, v8::Eternal<v8::FunctionTemplate>(isolate(), v8::Local<v8::FunctionTemplate>(templ)));
 }
@@ -193,18 +196,18 @@ v8::Local<v8::Context> V8PerIsolateData::ensureScriptRegexpContext()
     return m_scriptRegexpScriptState->context();
 }
 
-bool V8PerIsolateData::hasInstance(const WrapperTypeInfo* untrustedWrapperTypeInfo, v8::Handle<v8::Value> value)
+bool V8PerIsolateData::hasInstance(const WrapperTypeInfo* untrustedWrapperTypeInfo, v8::Local<v8::Value> value)
 {
     return hasInstance(untrustedWrapperTypeInfo, value, m_domTemplateMapForMainWorld)
         || hasInstance(untrustedWrapperTypeInfo, value, m_domTemplateMapForNonMainWorld);
 }
 
-bool V8PerIsolateData::hasInstance(const WrapperTypeInfo* untrustedWrapperTypeInfo, v8::Handle<v8::Value> value, DOMTemplateMap& domTemplateMap)
+bool V8PerIsolateData::hasInstance(const WrapperTypeInfo* untrustedWrapperTypeInfo, v8::Local<v8::Value> value, DOMTemplateMap& domTemplateMap)
 {
     DOMTemplateMap::iterator result = domTemplateMap.find(untrustedWrapperTypeInfo);
     if (result == domTemplateMap.end())
         return false;
-    v8::Handle<v8::FunctionTemplate> templ = result->value.Get(isolate());
+    v8::Local<v8::FunctionTemplate> templ = result->value.Get(isolate());
     return templ->HasInstance(value);
 }
 
@@ -237,17 +240,18 @@ static void constructorOfToString(const v8::FunctionCallbackInfo<v8::Value>& inf
     // changes to a DOM constructor's toString's toString will cause the
     // toString of the DOM constructor itself to change. This is extremely
     // obscure and unlikely to be a problem.
-    v8::Handle<v8::Value> value = info.Callee()->Get(v8AtomicString(info.GetIsolate(), "toString"));
-    if (!value->IsFunction()) {
-        v8SetReturnValue(info, v8::String::Empty(info.GetIsolate()));
+    v8::Isolate* isolate = info.GetIsolate();
+    v8::Local<v8::Value> value;
+    if (!info.Callee()->Get(isolate->GetCurrentContext(), v8AtomicString(isolate, "toString")).ToLocal(&value) || !value->IsFunction()) {
+        v8SetReturnValue(info, v8::String::Empty(isolate));
         return;
     }
     v8::Local<v8::Value> result;
-    if (V8ScriptRunner::callInternalFunction(v8::Handle<v8::Function>::Cast(value), info.This(), 0, 0, info.GetIsolate()).ToLocal(&result))
+    if (V8ScriptRunner::callInternalFunction(v8::Local<v8::Function>::Cast(value), info.This(), 0, 0, isolate).ToLocal(&result))
         v8SetReturnValue(info, result);
 }
 
-v8::Handle<v8::FunctionTemplate> V8PerIsolateData::toStringTemplate()
+v8::Local<v8::FunctionTemplate> V8PerIsolateData::toStringTemplate()
 {
     if (m_toStringTemplate.isEmpty())
         m_toStringTemplate.set(isolate(), v8::FunctionTemplate::New(isolate(), constructorOfToString));
@@ -273,10 +277,10 @@ void V8PerIsolateData::clearEndOfScopeTasks()
     m_endOfScopeTasks.clear();
 }
 
-void V8PerIsolateData::setScriptDebugServer(PassOwnPtrWillBeRawPtr<ScriptDebugServer> server)
+void V8PerIsolateData::setScriptDebugger(PassOwnPtrWillBeRawPtr<ScriptDebuggerBase> debugger)
 {
-    ASSERT(!m_debugServer);
-    m_debugServer = server;
+    ASSERT(!m_scriptDebugger);
+    m_scriptDebugger = debugger;
 }
 
 } // namespace blink

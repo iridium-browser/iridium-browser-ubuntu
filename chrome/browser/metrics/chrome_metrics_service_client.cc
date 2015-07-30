@@ -11,7 +11,6 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
@@ -27,8 +26,8 @@
 #include "chrome/browser/ui/browser_otr_state.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/crash_keys.h"
+#include "chrome/common/metrics/version_utils.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "components/metrics/call_stack_profile_metrics_provider.h"
@@ -39,6 +38,7 @@
 #include "components/metrics/profiler/profiler_metrics_provider.h"
 #include "components/metrics/profiler/tracking_synchronizer.h"
 #include "components/metrics/url_constants.h"
+#include "components/variations/variations_associated_data.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/histogram_fetcher.h"
 #include "content/public/browser/notification_service.h"
@@ -81,24 +81,6 @@ namespace {
 // data.
 const int kMaxHistogramGatheringWaitDuration = 60000;  // 60 seconds.
 
-metrics::SystemProfileProto::Channel AsProtobufChannel(
-    chrome::VersionInfo::Channel channel) {
-  switch (channel) {
-    case chrome::VersionInfo::CHANNEL_UNKNOWN:
-      return metrics::SystemProfileProto::CHANNEL_UNKNOWN;
-    case chrome::VersionInfo::CHANNEL_CANARY:
-      return metrics::SystemProfileProto::CHANNEL_CANARY;
-    case chrome::VersionInfo::CHANNEL_DEV:
-      return metrics::SystemProfileProto::CHANNEL_DEV;
-    case chrome::VersionInfo::CHANNEL_BETA:
-      return metrics::SystemProfileProto::CHANNEL_BETA;
-    case chrome::VersionInfo::CHANNEL_STABLE:
-      return metrics::SystemProfileProto::CHANNEL_STABLE;
-  }
-  NOTREACHED();
-  return metrics::SystemProfileProto::CHANNEL_UNKNOWN;
-}
-
 // Standard interval between log uploads, in seconds.
 #if defined(OS_ANDROID) || defined(OS_IOS)
 const int kStandardUploadIntervalSeconds = 5 * 60;  // Five minutes.
@@ -107,17 +89,35 @@ const int kStandardUploadIntervalCellularSeconds = 15 * 60;  // Fifteen minutes.
 const int kStandardUploadIntervalSeconds = 30 * 60;  // Thirty minutes.
 #endif
 
-#if defined(OS_ANDROID) || defined(OS_IOS)
-// Returns true if the user is assigned to the experiment group for enabled
-// cellular uploads.
-bool IsCellularEnabledByExperiment() {
-  const std::string group_name =
-      base::FieldTrialList::FindFullName("UMA_EnableCellularLogUpload");
-  return group_name == "Enabled";
+// Returns true if current connection type is cellular and user is assigned to
+// experimental group for enabled cellular uploads.
+bool IsCellularLogicEnabled() {
+  if (variations::GetVariationParamValue("UMA_EnableCellularLogUpload",
+                                         "Enabled") != "true") {
+    return false;
+  }
+
+  return net::NetworkChangeNotifier::IsConnectionCellular(
+      net::NetworkChangeNotifier::GetConnectionType());
 }
+
+// Checks whether it is the first time that cellular uploads logic should be
+// enabled based on whether the the preference for that logic is initialized.
+// This should happen only once as the used preference will be initialized
+// afterwards in |UmaSessionStats.java|.
+bool ShouldClearSavedMetrics() {
+#if defined(OS_ANDROID)
+  PrefService* local_state = g_browser_process->local_state();
+  return !local_state->HasPrefPath(prefs::kMetricsReportingEnabled) &&
+         variations::GetVariationParamValue("UMA_EnableCellularLogUpload",
+                                            "Enabled") == "true";
+#else
+  return false;
 #endif
+}
 
 }  // namespace
+
 
 ChromeMetricsServiceClient::ChromeMetricsServiceClient(
     metrics::MetricsStateManager* state_manager)
@@ -133,6 +133,7 @@ ChromeMetricsServiceClient::ChromeMetricsServiceClient(
       google_update_metrics_provider_(nullptr),
 #endif
       drive_metrics_provider_(nullptr),
+      start_time_(base::TimeTicks::Now()),
       weak_ptr_factory_(this) {
   DCHECK(thread_checker_.CalledOnValidThread());
   RecordCommandLineMetrics();
@@ -199,18 +200,11 @@ bool ChromeMetricsServiceClient::GetBrand(std::string* brand_code) {
 }
 
 metrics::SystemProfileProto::Channel ChromeMetricsServiceClient::GetChannel() {
-  return AsProtobufChannel(chrome::VersionInfo::GetChannel());
+  return metrics::AsProtobufChannel(chrome::VersionInfo::GetChannel());
 }
 
 std::string ChromeMetricsServiceClient::GetVersionString() {
-  chrome::VersionInfo version_info;
-  std::string version = version_info.Version();
-#if defined(ARCH_CPU_64_BITS)
-  version += "-64";
-#endif  // defined(ARCH_CPU_64_BITS)
-  if (!version_info.IsOfficialBuild())
-    version.append("-devel");
-  return version;
+  return metrics::GetVersionString();
 }
 
 void ChromeMetricsServiceClient::OnLogUploadComplete() {
@@ -277,10 +271,7 @@ ChromeMetricsServiceClient::CreateUploader(
 
 base::TimeDelta ChromeMetricsServiceClient::GetStandardUploadInterval() {
 #if defined(OS_ANDROID) || defined(OS_IOS)
-  bool is_cellular = false;
-  cellular_callback_.Run(&is_cellular);
-
-  if (is_cellular && IsCellularEnabledByExperiment())
+  if (IsCellularLogicEnabled())
     return base::TimeDelta::FromSeconds(kStandardUploadIntervalCellularSeconds);
 #endif
   return base::TimeDelta::FromSeconds(kStandardUploadIntervalSeconds);
@@ -304,6 +295,15 @@ void ChromeMetricsServiceClient::LogPluginLoadingError(
 }
 
 void ChromeMetricsServiceClient::Initialize() {
+  // Clear metrics reports if it is the first time cellular upload logic should
+  // apply to avoid sudden bulk uploads. It needs to be done before initializing
+  // metrics service so that metrics log manager is initialized correctly.
+  if (ShouldClearSavedMetrics()) {
+    PrefService* local_state = g_browser_process->local_state();
+    local_state->ClearPref(metrics::prefs::kMetricsInitialLogs);
+    local_state->ClearPref(metrics::prefs::kMetricsOngoingLogs);
+  }
+
   metrics_service_.reset(new metrics::MetricsService(
       metrics_state_manager_, this, g_browser_process->local_state()));
 
@@ -313,11 +313,9 @@ void ChromeMetricsServiceClient::Initialize() {
       scoped_ptr<metrics::MetricsProvider>(
           new ExtensionsMetricsProvider(metrics_state_manager_)));
 #endif
-  scoped_ptr<metrics::NetworkMetricsProvider> network_metrics_provider(
-      new metrics::NetworkMetricsProvider(
-          content::BrowserThread::GetBlockingPool()));
-  cellular_callback_ = network_metrics_provider->GetConnectionCallback();
-  metrics_service_->RegisterMetricsProvider(network_metrics_provider.Pass());
+  metrics_service_->RegisterMetricsProvider(
+      scoped_ptr<metrics::MetricsProvider>(new metrics::NetworkMetricsProvider(
+          content::BrowserThread::GetBlockingPool())));
 
   metrics_service_->RegisterMetricsProvider(
       scoped_ptr<metrics::MetricsProvider>(new OmniboxMetricsProvider));
@@ -331,7 +329,7 @@ void ChromeMetricsServiceClient::Initialize() {
       scoped_ptr<metrics::MetricsProvider>(drive_metrics_provider_));
 
   profiler_metrics_provider_ =
-      new metrics::ProfilerMetricsProvider(cellular_callback_);
+      new metrics::ProfilerMetricsProvider(base::Bind(&IsCellularLogicEnabled));
   metrics_service_->RegisterMetricsProvider(
       scoped_ptr<metrics::MetricsProvider>(profiler_metrics_provider_));
 
@@ -390,6 +388,12 @@ void ChromeMetricsServiceClient::Initialize() {
       scoped_ptr<metrics::MetricsProvider>(
           SigninStatusMetricsProvider::CreateInstance()));
 #endif  // !defined(OS_CHROMEOS) && !defined(OS_IOS)
+
+  // Clear stability metrics if it is the first time cellular upload logic
+  // should apply to avoid sudden bulk uploads. It needs to be done after all
+  // providers are registered.
+  if (ShouldClearSavedMetrics())
+    metrics_service_->ClearSavedStabilityMetrics();
 }
 
 void ChromeMetricsServiceClient::OnInitTaskGotHardwareClass() {
@@ -423,19 +427,14 @@ void ChromeMetricsServiceClient::OnInitTaskGotGoogleUpdateData() {
       weak_ptr_factory_.GetWeakPtr());
 }
 
-// TODO(vadimt): Consider wrapping params in a struct after the list of params
-// to ReceivedProfilerData settles. crbug/456354.
 void ChromeMetricsServiceClient::ReceivedProfilerData(
+    const metrics::ProfilerDataAttributes& attributes,
     const tracked_objects::ProcessDataPhaseSnapshot& process_data_phase,
-    base::ProcessId process_id,
-    content::ProcessType process_type,
-    int profiling_phase,
-    base::TimeDelta phase_start,
-    base::TimeDelta phase_finish,
     const metrics::ProfilerEvents& past_events) {
   profiler_metrics_provider_->RecordProfilerData(
-      process_data_phase, process_id, process_type, profiling_phase,
-      phase_start, phase_finish, past_events);
+      process_data_phase, attributes.process_id, attributes.process_type,
+      attributes.profiling_phase, attributes.phase_start - start_time_,
+      attributes.phase_finish - start_time_, past_events);
 }
 
 void ChromeMetricsServiceClient::FinishedReceivingProfilerData() {

@@ -9,7 +9,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/devtools/devtools_frame_trace_recorder.h"
-#include "content/browser/devtools/devtools_manager.h"
 #include "content/browser/devtools/protocol/devtools_protocol_handler.h"
 #include "content/browser/devtools/protocol/dom_handler.h"
 #include "content/browser/devtools/protocol/emulation_handler.h"
@@ -28,8 +27,6 @@
 #include "content/common/view_messages.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/content_browser_client.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_widget_host_iterator.h"
 #include "content/public/browser/web_contents_delegate.h"
 
@@ -78,8 +75,13 @@ bool ShouldCreateDevToolsFor(RenderFrameHost* rfh) {
 scoped_refptr<DevToolsAgentHost>
 DevToolsAgentHost::GetOrCreateFor(WebContents* web_contents) {
   RenderFrameDevToolsAgentHost* result = FindAgentHost(web_contents);
-  if (!result)
+  if (!result) {
+    // TODO(dgozman): this check should not be necessary. See
+    // http://crbug.com/489664.
+    if (!web_contents->GetMainFrame())
+      return nullptr;
     result = new RenderFrameDevToolsAgentHost(web_contents->GetMainFrame());
+  }
   return result;
 }
 
@@ -131,8 +133,7 @@ void RenderFrameDevToolsAgentHost::OnCancelPendingNavigation(
   RenderFrameDevToolsAgentHost* agent_host = FindAgentHost(pending);
   if (!agent_host)
     return;
-  agent_host->DisconnectRenderFrameHost();
-  agent_host->ConnectRenderFrameHost(current);
+  agent_host->ReattachToRenderFrameHost(current);
 }
 
 RenderFrameDevToolsAgentHost::RenderFrameDevToolsAgentHost(RenderFrameHost* rfh)
@@ -141,30 +142,35 @@ RenderFrameDevToolsAgentHost::RenderFrameDevToolsAgentHost(RenderFrameHost* rfh)
       input_handler_(new devtools::input::InputHandler()),
       inspector_handler_(new devtools::inspector::InspectorHandler()),
       network_handler_(new devtools::network::NetworkHandler()),
-      page_handler_(new devtools::page::PageHandler()),
+      page_handler_(nullptr),
       power_handler_(new devtools::power::PowerHandler()),
       service_worker_handler_(
           new devtools::service_worker::ServiceWorkerHandler()),
       tracing_handler_(new devtools::tracing::TracingHandler(
           devtools::tracing::TracingHandler::Renderer)),
-      emulation_handler_(new devtools::emulation::EmulationHandler(
-          page_handler_.get())),
-      frame_trace_recorder_(new DevToolsFrameTraceRecorder()),
+      emulation_handler_(nullptr),
+      frame_trace_recorder_(nullptr),
       reattaching_(false) {
   DevToolsProtocolDispatcher* dispatcher = protocol_handler_->dispatcher();
   dispatcher->SetDOMHandler(dom_handler_.get());
-  dispatcher->SetEmulationHandler(emulation_handler_.get());
   dispatcher->SetInputHandler(input_handler_.get());
   dispatcher->SetInspectorHandler(inspector_handler_.get());
   dispatcher->SetNetworkHandler(network_handler_.get());
-  dispatcher->SetPageHandler(page_handler_.get());
   dispatcher->SetPowerHandler(power_handler_.get());
   dispatcher->SetServiceWorkerHandler(service_worker_handler_.get());
   dispatcher->SetTracingHandler(tracing_handler_.get());
+
+  if (!rfh->GetParent()) {
+    page_handler_.reset(new devtools::page::PageHandler());
+    emulation_handler_.reset(
+        new devtools::emulation::EmulationHandler(page_handler_.get()));
+    dispatcher->SetPageHandler(page_handler_.get());
+    dispatcher->SetEmulationHandler(emulation_handler_.get());
+  }
+
   SetRenderFrameHost(rfh);
   g_instances.Get().push_back(this);
   AddRef();  // Balanced in RenderFrameHostDestroyed.
-  DevToolsManager::GetInstance()->AgentHostChanged(this);
 }
 
 BrowserContext* RenderFrameDevToolsAgentHost::GetBrowserContext() {
@@ -183,7 +189,7 @@ void RenderFrameDevToolsAgentHost::SendMessageToAgent(IPC::Message* msg) {
   render_frame_host_->Send(msg);
 }
 
-void RenderFrameDevToolsAgentHost::OnClientAttached() {
+void RenderFrameDevToolsAgentHost::OnClientAttached(bool reattached) {
   if (!render_frame_host_)
     return;
 
@@ -204,21 +210,21 @@ void RenderFrameDevToolsAgentHost::InnerOnClientAttached() {
       PowerSaveBlocker::Create(
           PowerSaveBlocker::kPowerSaveBlockPreventDisplaySleep,
           PowerSaveBlocker::kReasonOther, "DevTools").release()));
-  RenderViewHostImpl* rvh = static_cast<RenderViewHostImpl*>(
-      render_frame_host_->GetRenderViewHost());
-  if (rvh->GetView()) {
-    power_save_blocker_.get()->
-        InitDisplaySleepBlocker(rvh->GetView()->GetNativeView());
-  }
+  power_save_blocker_->InitDisplaySleepBlocker(
+      WebContents::FromRenderFrameHost(render_frame_host_));
 #endif
+
+  frame_trace_recorder_.reset(new DevToolsFrameTraceRecorder());
 }
 
 void RenderFrameDevToolsAgentHost::OnClientDetached() {
 #if defined(OS_ANDROID)
   power_save_blocker_.reset();
 #endif
-  emulation_handler_->Detached();
-  page_handler_->Detached();
+  if (emulation_handler_)
+    emulation_handler_->Detached();
+  if (page_handler_)
+    page_handler_->Detached();
   power_handler_->Detached();
   service_worker_handler_->Detached();
   tracing_handler_->Detached();
@@ -254,6 +260,7 @@ void RenderFrameDevToolsAgentHost::InnerClientDetachedFromRenderer() {
     ChildProcessSecurityPolicyImpl::GetInstance()->RevokeReadRawCookies(
         render_process_host->GetID());
   }
+  frame_trace_recorder_.reset();
 }
 
 RenderFrameDevToolsAgentHost::~RenderFrameDevToolsAgentHost() {
@@ -315,12 +322,17 @@ void RenderFrameDevToolsAgentHost::FrameDeleted(RenderFrameHost* rfh) {
   // |this| may be deleted at this point.
 }
 
+void RenderFrameDevToolsAgentHost::RenderFrameDeleted(RenderFrameHost* rfh) {
+  FrameDeleted(rfh);
+}
+
 void RenderFrameDevToolsAgentHost::DestroyOnRenderFrameGone() {
   DCHECK(render_frame_host_);
   scoped_refptr<RenderFrameDevToolsAgentHost> protect(this);
+  if (IsAttached())
+    OnClientDetached();
   HostClosed();
   ClearRenderFrameHost();
-  DevToolsManager::GetInstance()->AgentHostChanged(this);
   Release();
 }
 
@@ -365,7 +377,8 @@ bool RenderFrameDevToolsAgentHost::OnMessageReceived(
 }
 
 void RenderFrameDevToolsAgentHost::DidAttachInterstitialPage() {
-  page_handler_->DidAttachInterstitialPage();
+  if (page_handler_)
+    page_handler_->DidAttachInterstitialPage();
 
   if (!render_frame_host_)
     return;
@@ -380,17 +393,8 @@ void RenderFrameDevToolsAgentHost::DidAttachInterstitialPage() {
 }
 
 void RenderFrameDevToolsAgentHost::DidDetachInterstitialPage() {
-  page_handler_->DidDetachInterstitialPage();
-}
-
-void RenderFrameDevToolsAgentHost::TitleWasSet(
-    NavigationEntry* entry, bool explicit_set) {
-  DevToolsManager::GetInstance()->AgentHostChanged(this);
-}
-
-void RenderFrameDevToolsAgentHost::NavigationEntryCommitted(
-    const LoadCommittedDetails& load_details) {
-  DevToolsManager::GetInstance()->AgentHostChanged(this);
+  if (page_handler_)
+    page_handler_->DidDetachInterstitialPage();
 }
 
 void RenderFrameDevToolsAgentHost::DidCommitProvisionalLoadForFrame(
@@ -400,50 +404,35 @@ void RenderFrameDevToolsAgentHost::DidCommitProvisionalLoadForFrame(
   service_worker_handler_->UpdateHosts();
 }
 
-void RenderFrameDevToolsAgentHost::Observe(int type,
-                                          const NotificationSource& source,
-                                          const NotificationDetails& details) {
-  if (type == content::NOTIFICATION_RENDER_WIDGET_VISIBILITY_CHANGED) {
-    bool visible = *Details<bool>(details).ptr();
-    page_handler_->OnVisibilityChanged(visible);
-  }
-}
-
 void RenderFrameDevToolsAgentHost::SetRenderFrameHost(RenderFrameHost* rfh) {
   DCHECK(ShouldCreateDevToolsFor(rfh));
   DCHECK(!render_frame_host_);
   render_frame_host_ = static_cast<RenderFrameHostImpl*>(rfh);
+  DCHECK(render_frame_host_);
 
   WebContentsObserver::Observe(WebContents::FromRenderFrameHost(rfh));
-  RenderViewHostImpl* rvh = static_cast<RenderViewHostImpl*>(
-      rfh->GetRenderViewHost());
   dom_handler_->SetRenderFrameHost(render_frame_host_);
-  emulation_handler_->SetRenderViewHost(rvh);
-  input_handler_->SetRenderViewHost(rvh);
+  input_handler_->SetRenderWidgetHost(
+      render_frame_host_->GetRenderWidgetHost());
   network_handler_->SetRenderFrameHost(render_frame_host_);
-  page_handler_->SetRenderViewHost(rvh);
   service_worker_handler_->SetRenderFrameHost(render_frame_host_);
 
-  registrar_.Add(
-      this,
-      content::NOTIFICATION_RENDER_WIDGET_VISIBILITY_CHANGED,
-      content::Source<RenderWidgetHost>(rvh));
+  if (emulation_handler_)
+    emulation_handler_->SetRenderFrameHost(render_frame_host_);
+  if (page_handler_)
+    page_handler_->SetRenderFrameHost(render_frame_host_);
 }
 
 void RenderFrameDevToolsAgentHost::ClearRenderFrameHost() {
   DCHECK(render_frame_host_);
-  RenderViewHostImpl* rvh = static_cast<RenderViewHostImpl*>(
-      render_frame_host_->GetRenderViewHost());
-  registrar_.Remove(
-      this,
-      content::NOTIFICATION_RENDER_WIDGET_VISIBILITY_CHANGED,
-      content::Source<RenderWidgetHost>(rvh));
   render_frame_host_ = nullptr;
   dom_handler_->SetRenderFrameHost(nullptr);
-  emulation_handler_->SetRenderViewHost(nullptr);
-  input_handler_->SetRenderViewHost(nullptr);
+  if (emulation_handler_)
+    emulation_handler_->SetRenderFrameHost(nullptr);
+  input_handler_->SetRenderWidgetHost(nullptr);
   network_handler_->SetRenderFrameHost(nullptr);
-  page_handler_->SetRenderViewHost(nullptr);
+  if (page_handler_)
+    page_handler_->SetRenderFrameHost(nullptr);
   service_worker_handler_->SetRenderFrameHost(nullptr);
 }
 
@@ -484,8 +473,8 @@ bool RenderFrameDevToolsAgentHost::Activate() {
 }
 
 bool RenderFrameDevToolsAgentHost::Close() {
-  if (render_frame_host_) {
-    render_frame_host_->GetRenderViewHost()->ClosePage();
+  if (web_contents()) {
+    web_contents()->ClosePage();
     return true;
   }
   return false;
@@ -512,18 +501,28 @@ void RenderFrameDevToolsAgentHost::OnSwapCompositorFrame(
   ViewHostMsg_SwapCompositorFrame::Param param;
   if (!ViewHostMsg_SwapCompositorFrame::Read(&message, &param))
     return;
-  page_handler_->OnSwapCompositorFrame(get<1>(param).metadata);
-  frame_trace_recorder_->OnSwapCompositorFrame(
-      render_frame_host_, get<1>(param).metadata);
+  if (page_handler_)
+    page_handler_->OnSwapCompositorFrame(get<1>(param).metadata);
+  if (input_handler_)
+    input_handler_->OnSwapCompositorFrame(get<1>(param).metadata);
+  if (frame_trace_recorder_) {
+    frame_trace_recorder_->OnSwapCompositorFrame(
+        render_frame_host_, get<1>(param).metadata);
+  }
 }
 
 void RenderFrameDevToolsAgentHost::SynchronousSwapCompositorFrame(
     const cc::CompositorFrameMetadata& frame_metadata) {
   if (!render_frame_host_)
     return;
-  page_handler_->OnSwapCompositorFrame(frame_metadata);
-  frame_trace_recorder_->OnSwapCompositorFrame(
-      render_frame_host_, frame_metadata);
+  if (page_handler_)
+    page_handler_->OnSwapCompositorFrame(frame_metadata);
+  if (input_handler_)
+    input_handler_->OnSwapCompositorFrame(frame_metadata);
+  if (frame_trace_recorder_) {
+    frame_trace_recorder_->OnSwapCompositorFrame(
+        render_frame_host_, frame_metadata);
+  }
 }
 
 bool RenderFrameDevToolsAgentHost::HasRenderFrameHost(

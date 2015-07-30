@@ -28,8 +28,10 @@ WHICH GENERATES THE GLSL ES LEXER (glslang_lex.cpp).
 #pragma GCC diagnostic ignored "-Wunused-variable"
 #pragma GCC diagnostic ignored "-Wswitch-enum"
 #elif defined(_MSC_VER)
+#pragma warning(disable: 4005)
 #pragma warning(disable: 4065)
 #pragma warning(disable: 4189)
+#pragma warning(disable: 4244)
 #pragma warning(disable: 4505)
 #pragma warning(disable: 4701)
 #pragma warning(disable: 4702)
@@ -47,6 +49,13 @@ WHICH GENERATES THE GLSL ES LEXER (glslang_lex.cpp).
 /* windows only pragma */
 #ifdef _MSC_VER
 #pragma warning(disable : 4102)
+#endif
+
+// Workaround for flex using the register keyword, deprecated in C++11.
+#ifdef __cplusplus
+#if __cplusplus > 199711L
+#define register
+#endif
 #endif
 
 #define YY_USER_ACTION                                 \

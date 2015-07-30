@@ -1,3 +1,4 @@
+
 /*
  * Copyright (C) 2009 Google Inc. All rights reserved.
  *
@@ -34,6 +35,7 @@
 #include "../platform/WebCanvas.h"
 #include "../platform/WebCommon.h"
 #include "../platform/WebFloatSize.h"
+#include "../platform/WebFrameTimingEvent.h"
 #include "../platform/WebPoint.h"
 #include "../platform/WebRect.h"
 #include "../platform/WebSize.h"
@@ -47,6 +49,7 @@ namespace blink {
 
 class WebCompositeAndReadbackAsyncCallback;
 class WebInputEvent;
+class WebLayoutAndPaintAsyncCallback;
 class WebPagePopup;
 class WebString;
 struct WebPoint;
@@ -111,6 +114,11 @@ public:
 
     virtual void paintCompositedDeprecated(WebCanvas*, const WebRect&) { }
 
+    // Run layout and paint of all pending document changes asynchronously.
+    // The caller is resposible for keeping the WebLayoutAndPaintAsyncCallback
+    // object alive until it is called.
+    virtual void layoutAndPaintAsync(WebLayoutAndPaintAsyncCallback*) { }
+
     // The caller is responsible for keeping the WebCompositeAndReadbackAsyncCallback
     // object alive until it is called. This should only be called when
     // isAcceleratedCompositingActive() is true.
@@ -153,6 +161,14 @@ public:
         const WebFloatSize& elasticOverscrollDelta,
         float scaleFactor,
         float topControlsShownRatioDelta) { }
+
+    // Records composite or render events for the Performance Timeline.
+    // See http://w3c.github.io/frame-timing/ for definition of terms.
+    enum FrameTimingEventType {
+        CompositeEvent,
+        RenderEvent,
+    };
+    virtual void recordFrameTimingEvent(FrameTimingEventType eventType, int64_t RectId, const WebVector<WebFrameTimingEvent>& events) { }
 
     // Called to inform the WebWidget that mouse capture was lost.
     virtual void mouseCaptureLost() { }

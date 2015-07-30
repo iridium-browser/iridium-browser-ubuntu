@@ -23,6 +23,7 @@
 #ifndef HTMLObjectElement_h
 #define HTMLObjectElement_h
 
+#include "core/CoreExport.h"
 #include "core/html/FormAssociatedElement.h"
 #include "core/html/HTMLPlugInElement.h"
 
@@ -30,9 +31,9 @@ namespace blink {
 
 class HTMLFormElement;
 
-class HTMLObjectElement final : public HTMLPlugInElement, public FormAssociatedElement {
+class CORE_EXPORT HTMLObjectElement final : public HTMLPlugInElement, public FormAssociatedElement {
     DEFINE_WRAPPERTYPEINFO();
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN_NESTED(HTMLObjectElement, HTMLFrameOwnerElement);
+    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(HTMLObjectElement);
 public:
     static PassRefPtrWillBeRawPtr<HTMLObjectElement> create(Document&, HTMLFormElement*, bool createdByParser);
     virtual ~HTMLObjectElement();
@@ -53,8 +54,6 @@ public:
     virtual bool isEnumeratable() const override { return true; }
     virtual bool isInteractiveContent() const override;
     virtual bool appendFormData(FormDataList&, bool) override;
-
-    virtual bool isObjectElement() const override { return true; }
 
     // Implementations of constraint validation API.
     // Note that the object elements are always barred from constraint validation.

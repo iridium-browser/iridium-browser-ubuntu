@@ -14,11 +14,11 @@
 #include "base/thread_task_runner_handle.h"
 #include "base/threading/worker_pool.h"
 #include "ui/events/event_constants.h"
-#include "ui/events/keycodes/dom3/dom_code.h"
-#include "ui/events/keycodes/dom3/dom_key.h"
-#include "ui/events/keycodes/dom4/keycode_converter.h"
+#include "ui/events/keycodes/dom/dom_code.h"
+#include "ui/events/keycodes/dom/dom_key.h"
+#include "ui/events/keycodes/dom/keycode_converter.h"
 #include "ui/events/keycodes/keyboard_code_conversion.h"
-#include "ui/events/ozone/layout/layout_util.h"
+#include "ui/events/keycodes/keyboard_code_conversion_xkb.h"
 #include "ui/events/ozone/layout/xkb/xkb_keyboard_code_conversion.h"
 
 namespace ui {
@@ -28,22 +28,6 @@ namespace {
 typedef base::Callback<void(const std::string&,
                             scoped_ptr<char, base::FreeDeleter>)>
     LoadKeymapCallback;
-
-DomKey CharacterToDomKey(base::char16 character) {
-  switch (character) {
-    case 0x08:
-      return DomKey::BACKSPACE;
-    case 0x09:
-      return DomKey::TAB;
-    case 0x0A:
-    case 0x0D:
-      return DomKey::ENTER;
-    case 0x1B:
-      return DomKey::ESCAPE;
-    default:
-      return DomKey::CHARACTER;
-  }
-}
 
 KeyboardCode AlphanumericKeyboardCode(base::char16 character) {
   // Plain ASCII letters and digits map directly to VKEY values.
@@ -644,6 +628,17 @@ void LoadKeymap(const std::string& layout_name,
 }
 #endif
 
+KeyboardCode DomCodeToUsLayoutKeyboardCode(DomCode dom_code) {
+  DomKey dummy_dom_key;
+  base::char16 dummy_character;
+  KeyboardCode key_code;
+  if (DomCodeToUsLayoutMeaning(dom_code, EF_NONE, &dummy_dom_key,
+                               &dummy_character, &key_code)) {
+    return key_code;
+  }
+  return VKEY_UNKNOWN;
+}
+
 }  // anonymous namespace
 
 XkbKeyCodeConverter::XkbKeyCodeConverter() {
@@ -754,7 +749,7 @@ bool XkbKeyboardLayoutEngine::Lookup(DomCode dom_code,
     return false;
   *platform_keycode = xkb_keysym;
   // Classify the keysym and convert to DOM and VKEY representations.
-  *dom_key = NonPrintableXkbKeySymToDomKey(xkb_keysym);
+  *dom_key = NonPrintableXKeySymToDomKey(xkb_keysym);
   if (*dom_key == DomKey::NONE) {
     *dom_key = CharacterToDomKey(*character);
     *key_code = AlphanumericKeyboardCode(*character);
@@ -762,21 +757,19 @@ bool XkbKeyboardLayoutEngine::Lookup(DomCode dom_code,
       *key_code = DifficultKeyboardCode(dom_code, flags, xkb_keycode, xkb_flags,
                                         xkb_keysym, *dom_key, *character);
       if (*key_code == VKEY_UNKNOWN)
-        *key_code = DomCodeToNonLocatedKeyboardCode(dom_code);
+        *key_code = DomCodeToUsLayoutKeyboardCode(dom_code);
     }
-
-    if ((flags & EF_CONTROL_DOWN) == EF_CONTROL_DOWN) {
-      // Use GetCharacterFromKeyCode() to set |character| to 0x0 for key codes
-      // that we do not care about.
-      *character = GetCharacterFromKeyCode(*key_code, flags);
-    }
+    // If the Control key is down, only allow ASCII control characters to be
+    // returned, regardless of the key layout. crbug.com/450849
+    if ((flags & EF_CONTROL_DOWN) && (*character >= 0x20))
+      *character = 0;
   } else if (*dom_key == DomKey::DEAD) {
     *character = DeadXkbKeySymToCombiningCharacter(xkb_keysym);
-    *key_code = DomCodeToNonLocatedKeyboardCode(dom_code);
+    *key_code = DomCodeToUsLayoutKeyboardCode(dom_code);
   } else {
     *key_code = NonPrintableDomKeyToKeyboardCode(*dom_key);
     if (*key_code == VKEY_UNKNOWN)
-      *key_code = DomCodeToNonLocatedKeyboardCode(dom_code);
+      *key_code = DomCodeToUsLayoutKeyboardCode(dom_code);
   }
   return true;
 }
@@ -861,7 +854,7 @@ KeyboardCode XkbKeyboardLayoutEngine::DifficultKeyboardCode(
     return VKEY_UNKNOWN;
 
   // If the plain key is non-printable, that determines the VKEY.
-  DomKey plain_key = NonPrintableXkbKeySymToDomKey(plain_keysym);
+  DomKey plain_key = NonPrintableXKeySymToDomKey(plain_keysym);
   if (plain_key != ui::DomKey::NONE)
     return NonPrintableDomKeyToKeyboardCode(dom_key);
 

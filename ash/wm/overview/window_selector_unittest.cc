@@ -35,6 +35,7 @@
 #include "base/run_loop.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/user_action_tester.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/cursor_client.h"
 #include "ui/aura/client/focus_client.h"
@@ -57,6 +58,9 @@
 
 namespace ash {
 namespace {
+
+const char kActiveWindowChangedFromOverview[] =
+    "WindowSelector_ActiveWindowChanged";
 
 class NonActivatableActivationDelegate
     : public aura::client::ActivationDelegate {
@@ -286,6 +290,7 @@ TEST_F(WindowSelectorTest, Basic) {
   scoped_ptr<aura::Window> window2(CreateWindow(bounds));
   scoped_ptr<aura::Window> panel1(CreatePanelWindow(bounds));
   scoped_ptr<aura::Window> panel2(CreatePanelWindow(bounds));
+
   EXPECT_TRUE(WindowsOverlapping(window1.get(), window2.get()));
   EXPECT_TRUE(WindowsOverlapping(panel1.get(), panel2.get()));
   wm::ActivateWindow(window2.get());
@@ -313,6 +318,50 @@ TEST_F(WindowSelectorTest, Basic) {
   EXPECT_FALSE(aura::client::GetCursorClient(root_window)->IsCursorLocked());
 }
 
+// Tests entering overview mode with docked windows
+TEST_F(WindowSelectorTest, BasicWithDocked) {
+  // aura::Window* root_window = Shell::GetPrimaryRootWindow();
+  gfx::Rect bounds(300, 0, 200, 200);
+  scoped_ptr<aura::Window> window1(CreateWindow(bounds));
+  scoped_ptr<aura::Window> window2(CreateWindow(bounds));
+  scoped_ptr<aura::Window> docked1(CreateWindow(bounds));
+  scoped_ptr<aura::Window> docked2(CreateWindow(bounds));
+
+  wm::WMEvent dock_event(wm::WM_EVENT_DOCK);
+  wm::GetWindowState(docked1.get())->OnWMEvent(&dock_event);
+
+  wm::WindowState* docked_state2 = wm::GetWindowState(docked2.get());
+  docked_state2->OnWMEvent(&dock_event);
+  wm::WMEvent minimize_event(wm::WM_EVENT_MINIMIZE);
+  docked_state2->OnWMEvent(&minimize_event);
+
+  EXPECT_TRUE(WindowsOverlapping(window1.get(), window2.get()));
+  gfx::Rect docked_bounds = docked1->GetBoundsInScreen();
+
+  EXPECT_NE(bounds.ToString(), docked_bounds.ToString());
+  EXPECT_FALSE(WindowsOverlapping(window1.get(), docked1.get()));
+  EXPECT_FALSE(WindowsOverlapping(window1.get(), docked2.get()));
+  EXPECT_FALSE(docked2->IsVisible());
+
+  EXPECT_EQ(wm::WINDOW_STATE_TYPE_DOCKED,
+            wm::GetWindowState(docked1.get())->GetStateType());
+  EXPECT_EQ(wm::WINDOW_STATE_TYPE_DOCKED_MINIMIZED,
+            wm::GetWindowState(docked2.get())->GetStateType());
+
+  ToggleOverview();
+
+  EXPECT_FALSE(WindowsOverlapping(window1.get(), window2.get()));
+  // Docked windows stays the same.
+  EXPECT_EQ(docked_bounds.ToString(), docked1->GetBoundsInScreen().ToString());
+  EXPECT_FALSE(docked2->IsVisible());
+
+  // Docked window can still be activated, which will exit the overview mode.
+  ClickWindow(docked1.get());
+  EXPECT_TRUE(wm::IsActiveWindow(docked1.get()));
+  EXPECT_FALSE(
+      ash::Shell::GetInstance()->window_selector_controller()->IsSelecting());
+}
+
 // Tests selecting a window by tapping on it.
 TEST_F(WindowSelectorTest, BasicGesture) {
   gfx::Rect bounds(0, 0, 400, 400);
@@ -327,6 +376,111 @@ TEST_F(WindowSelectorTest, BasicGesture) {
   generator.GestureTapAt(gfx::ToEnclosingRect(
       GetTransformedTargetBounds(window2.get())).CenterPoint());
   EXPECT_EQ(window2.get(), GetFocusedWindow());
+}
+
+// Tests that the user action WindowSelector_ActiveWindowChanged is
+// recorded when the mouse/touchscreen/keyboard are used to select a window
+// in overview mode which is different from the previously-active window.
+TEST_F(WindowSelectorTest, ActiveWindowChangedUserActionRecorded) {
+  base::UserActionTester user_action_tester;
+  gfx::Rect bounds(0, 0, 400, 400);
+  scoped_ptr<aura::Window> window1(CreateWindow(bounds));
+  scoped_ptr<aura::Window> window2(CreateWindow(bounds));
+
+  // Tap on |window2| to activate it and exit overview.
+  wm::ActivateWindow(window1.get());
+  ToggleOverview();
+  ui::test::EventGenerator generator(Shell::GetPrimaryRootWindow(),
+                                     window2.get());
+  generator.GestureTapAt(
+      gfx::ToEnclosingRect(GetTransformedTargetBounds(window2.get()))
+          .CenterPoint());
+  EXPECT_EQ(
+      1, user_action_tester.GetActionCount(kActiveWindowChangedFromOverview));
+
+  // Click on |window2| to activate it and exit overview.
+  wm::ActivateWindow(window1.get());
+  ToggleOverview();
+  ClickWindow(window2.get());
+  EXPECT_EQ(
+      2, user_action_tester.GetActionCount(kActiveWindowChangedFromOverview));
+
+  // Select |window2| using the arrow keys. Activate it (and exit overview) by
+  // pressing the return key.
+  wm::ActivateWindow(window1.get());
+  ToggleOverview();
+  SendKey(ui::VKEY_RIGHT);
+  SendKey(ui::VKEY_RIGHT);
+  SendKey(ui::VKEY_RETURN);
+  EXPECT_EQ(
+      3, user_action_tester.GetActionCount(kActiveWindowChangedFromOverview));
+}
+
+// Tests that the user action WindowSelector_ActiveWindowChanged is not
+// recorded when the mouse/touchscreen/keyboard are used to select the
+// already-active window from overview mode. Also verifies that entering and
+// exiting overview without selecting a window does not record the action.
+TEST_F(WindowSelectorTest, ActiveWindowChangedUserActionNotRecorded) {
+  base::UserActionTester user_action_tester;
+  gfx::Rect bounds(0, 0, 400, 400);
+  scoped_ptr<aura::Window> window1(CreateWindow(bounds));
+  scoped_ptr<aura::Window> window2(CreateWindow(bounds));
+
+  // Set |window1| to be initially active.
+  wm::ActivateWindow(window1.get());
+  ToggleOverview();
+
+  // Tap on |window1| to exit overview.
+  ui::test::EventGenerator generator(Shell::GetPrimaryRootWindow(),
+                                     window1.get());
+  generator.GestureTapAt(
+      gfx::ToEnclosingRect(GetTransformedTargetBounds(window1.get()))
+          .CenterPoint());
+  EXPECT_EQ(
+      0, user_action_tester.GetActionCount(kActiveWindowChangedFromOverview));
+
+  // |window1| remains active. Click on it to exit overview.
+  ASSERT_EQ(window1.get(), GetFocusedWindow());
+  ToggleOverview();
+  ClickWindow(window1.get());
+  EXPECT_EQ(
+      0, user_action_tester.GetActionCount(kActiveWindowChangedFromOverview));
+
+  // |window1| remains active. Select using the keyboard.
+  ASSERT_EQ(window1.get(), GetFocusedWindow());
+  ToggleOverview();
+  SendKey(ui::VKEY_RIGHT);
+  SendKey(ui::VKEY_RETURN);
+  EXPECT_EQ(
+      0, user_action_tester.GetActionCount(kActiveWindowChangedFromOverview));
+
+  // Entering and exiting overview without user input should not record
+  // the action.
+  ToggleOverview();
+  ToggleOverview();
+  EXPECT_EQ(
+      0, user_action_tester.GetActionCount(kActiveWindowChangedFromOverview));
+}
+
+// Tests that the user action WindowSelector_ActiveWindowChanged is not
+// recorded when overview mode exits as a result of closing its only window.
+TEST_F(WindowSelectorTest, ActiveWindowChangedUserActionWindowClose) {
+  base::UserActionTester user_action_tester;
+  scoped_ptr<views::Widget> widget =
+      CreateWindowWidget(gfx::Rect(0, 0, 400, 400));
+
+  ToggleOverview();
+
+  aura::Window* window = widget->GetNativeWindow();
+  gfx::RectF bounds = GetTransformedBoundsInRootWindow(window);
+  gfx::Point point(bounds.top_right().x() - 1, bounds.top_right().y() - 1);
+  ui::test::EventGenerator event_generator(window->GetRootWindow(), point);
+
+  ASSERT_FALSE(widget->IsClosed());
+  event_generator.ClickLeftButton();
+  ASSERT_TRUE(widget->IsClosed());
+  EXPECT_EQ(
+      0, user_action_tester.GetActionCount(kActiveWindowChangedFromOverview));
 }
 
 // Tests that we do not crash and overview mode remains engaged if the desktop
@@ -708,29 +862,6 @@ TEST_F(WindowSelectorTest, QuickReentryRestoresInitialTransform) {
   EXPECT_FALSE(IsSelecting());
   EXPECT_EQ(initial_bounds, ToEnclosingRect(
       GetTransformedTargetBounds(window.get())));
-}
-
-// Tests that non-activatable windows are hidden when entering overview mode.
-TEST_F(WindowSelectorTest, NonActivatableWindowsHidden) {
-  gfx::Rect bounds(0, 0, 400, 400);
-  scoped_ptr<aura::Window> window1(CreateWindow(bounds));
-  scoped_ptr<aura::Window> window2(CreateWindow(bounds));
-  scoped_ptr<aura::Window> non_activatable_window(
-      CreateNonActivatableWindow(Shell::GetPrimaryRootWindow()->bounds()));
-  EXPECT_TRUE(non_activatable_window->IsVisible());
-  ToggleOverview();
-  EXPECT_FALSE(non_activatable_window->IsVisible());
-  ToggleOverview();
-  EXPECT_TRUE(non_activatable_window->IsVisible());
-
-  // Test that a window behind the fullscreen non-activatable window can be
-  // clicked.
-  non_activatable_window->parent()->StackChildAtTop(
-      non_activatable_window.get());
-  ToggleOverview();
-  ClickWindow(window1.get());
-  EXPECT_FALSE(IsSelecting());
-  EXPECT_TRUE(wm::IsActiveWindow(window1.get()));
 }
 
 // Tests that windows with modal child windows are transformed with the modal

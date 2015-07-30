@@ -9,6 +9,7 @@
 #include "base/android/jni_weak_ref.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/android/banners/app_banner_data_fetcher_android.h"
+#include "chrome/browser/banners/app_banner_debug_log.h"
 #include "chrome/browser/banners/app_banner_manager.h"
 
 namespace banners {
@@ -47,29 +48,20 @@ class AppBannerManagerAndroid : public AppBannerManager {
                              jstring japp_package,
                              jstring jicon_url);
 
-  // WebContentsObserver overrides.
-  bool OnMessageReceived(const IPC::Message& message) override;
-
-  // AppBannerDataFetcher::Delegate overrides.
-  bool OnInvalidManifest(AppBannerDataFetcher* fetcher) override;
-
  protected:
   AppBannerDataFetcher* CreateAppBannerDataFetcher(
       base::WeakPtr<AppBannerDataFetcher::Delegate> weak_delegate,
       const int ideal_icon_size) override;
 
  private:
-  // Whether or not the banners should appear for native apps.
-  static bool IsEnabledForNativeApps();
+  // AppBannerDataFetcher::Delegate overrides.
+  bool HandleNonWebApp(const std::string& platform,
+                       const GURL& url,
+                       const std::string& id) override;
 
-  // Called when the renderer has returned information about the meta tag.
-  // If there is some metadata for the play store tag, this kicks off the
-  // process of showing a banner for the package designated by |tag_content| on
-  // the page at the |expected_url|.
-  void OnDidRetrieveMetaTagContent(bool success,
-                                   const std::string& tag_name,
-                                   const std::string& tag_content,
-                                   const GURL& expected_url);
+  bool CheckPlatformAndId(const std::string& platform, const std::string& id);
+
+  bool CheckFetcherMatchesContents();
 
   // AppBannerManager on the Java side.
   JavaObjectWeakGlobalRef weak_java_banner_view_manager_;

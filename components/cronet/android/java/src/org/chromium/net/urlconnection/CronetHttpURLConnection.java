@@ -4,10 +4,12 @@
 
 package org.chromium.net.urlconnection;
 
+import android.util.Log;
 import android.util.Pair;
 
 import org.chromium.net.ExtendedResponseInfo;
 import org.chromium.net.ResponseInfo;
+import org.chromium.net.UploadDataProvider;
 import org.chromium.net.UrlRequest;
 import org.chromium.net.UrlRequestContext;
 import org.chromium.net.UrlRequestException;
@@ -16,8 +18,10 @@ import org.chromium.net.UrlRequestListener;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
+import java.net.ProtocolException;
 import java.net.URL;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -33,18 +37,21 @@ import java.util.TreeMap;
  * attempted.
  */
 public class CronetHttpURLConnection extends HttpURLConnection {
+    private static final String TAG = "CronetHttpURLConnection";
+    private static final String CONTENT_LENGTH = "Content-Length";
     private final UrlRequestContext mUrlRequestContext;
     private final MessageLoop mMessageLoop;
     private final UrlRequest mRequest;
     private final List<Pair<String, String>> mRequestHeaders;
 
     private CronetInputStream mInputStream;
+    private CronetOutputStream mOutputStream;
     private ResponseInfo mResponseInfo;
     private UrlRequestException mException;
-    private ByteBuffer mResponseByteBuffer;
     private boolean mOnRedirectCalled = false;
+    private boolean mHasResponse = false;
 
-    protected CronetHttpURLConnection(URL url,
+    public CronetHttpURLConnection(URL url,
             UrlRequestContext urlRequestContext) {
         super(url);
         mUrlRequestContext = urlRequestContext;
@@ -58,26 +65,11 @@ public class CronetHttpURLConnection extends HttpURLConnection {
     /**
      * Opens a connection to the resource. If the connect method is called when
      * the connection has already been opened (indicated by the connected field
-     * having the value true), the call is ignored unless an exception is thrown
-     * previously, in which case, the exception will be rethrown.
+     * having the value true), the call is ignored.
      */
     @Override
     public void connect() throws IOException {
-        if (connected) {
-            checkHasResponse();
-            return;
-        }
-        connected = true;
-        for (Pair<String, String> requestHeader : mRequestHeaders) {
-            mRequest.addHeader(requestHeader.first, requestHeader.second);
-        }
-        if (!getUseCaches()) {
-            mRequest.disableCache();
-        }
-        mRequest.start();
-        // Blocks until onResponseStarted or onFailed is called.
-        mMessageLoop.loop();
-        checkHasResponse();
+        startRequest();
     }
 
     /**
@@ -87,7 +79,7 @@ public class CronetHttpURLConnection extends HttpURLConnection {
     @Override
     public void disconnect() {
         // Disconnect before connection is made should have no effect.
-        if (connected) {
+        if (connected && mInputStream != null) {
             try {
                 mInputStream.close();
             } catch (IOException e) {
@@ -103,7 +95,7 @@ public class CronetHttpURLConnection extends HttpURLConnection {
      */
     @Override
     public String getResponseMessage() throws IOException {
-        connect();
+        getResponse();
         return mResponseInfo.getHttpStatusText();
     }
 
@@ -112,7 +104,7 @@ public class CronetHttpURLConnection extends HttpURLConnection {
      */
     @Override
     public int getResponseCode() throws IOException {
-        connect();
+        getResponse();
         return mResponseInfo.getHttpStatusCode();
     }
 
@@ -122,7 +114,7 @@ public class CronetHttpURLConnection extends HttpURLConnection {
     @Override
     public Map<String, List<String>> getHeaderFields() {
         try {
-            connect();
+            getResponse();
         } catch (IOException e) {
             return Collections.emptyMap();
         }
@@ -137,7 +129,7 @@ public class CronetHttpURLConnection extends HttpURLConnection {
     @Override
     public final String getHeaderField(String fieldName) {
         try {
-            connect();
+            getResponse();
         } catch (IOException e) {
             return null;
         }
@@ -186,7 +178,7 @@ public class CronetHttpURLConnection extends HttpURLConnection {
      */
     @Override
     public InputStream getInputStream() throws IOException {
-        connect();
+        getResponse();
         if (!instanceFollowRedirects && mOnRedirectCalled) {
             throw new IOException("Cannot read response body of a redirect.");
         }
@@ -198,6 +190,97 @@ public class CronetHttpURLConnection extends HttpURLConnection {
         return mInputStream;
     }
 
+    @Override
+    public OutputStream getOutputStream() throws IOException {
+        if (mOutputStream == null) {
+            if (connected) {
+                throw new ProtocolException(
+                        "Cannot write to OutputStream after receiving response.");
+            }
+            long fixedStreamingModeContentLength = getStreamingModeContentLength();
+            if (fixedStreamingModeContentLength != -1) {
+                mOutputStream = new CronetFixedModeOutputStream(this,
+                        fixedStreamingModeContentLength, mMessageLoop);
+                // Start the request now since all headers can be sent.
+                startRequest();
+            } else {
+                // For the buffered case, start the request only when
+                // content-length bytes are received, or when a
+                // connect action is initiated by the consumer.
+                Log.d(TAG, "Outputstream is being buffered in memory.");
+                String length = getRequestProperty(CONTENT_LENGTH);
+                if (length == null) {
+                    mOutputStream = new CronetBufferedOutputStream(this);
+                } else {
+                    long lengthParsed = Long.parseLong(length);
+                    mOutputStream = new CronetBufferedOutputStream(this, lengthParsed);
+                }
+            }
+        }
+        return mOutputStream;
+    }
+
+    /**
+     * Helper method to get content length passed in by
+     * {@link #setFixedLengthStreamingMode}
+     */
+    private long getStreamingModeContentLength() {
+        long contentLength = fixedContentLength;
+        // Use reflection to see whether fixedContentLengthLong (only added
+        // in API 19) is inherited.
+        try {
+            Class<?> parent = this.getClass();
+            long superFixedContentLengthLong =
+                    parent.getField("fixedContentLengthLong").getLong(this);
+            if (superFixedContentLengthLong != -1) {
+                contentLength = superFixedContentLengthLong;
+            }
+        } catch (Exception e) {
+            // Ignored.
+        }
+        return contentLength;
+    }
+
+    /**
+     * Starts the request if {@code connected} is false.
+     */
+    private void startRequest() throws IOException {
+        if (connected) {
+            return;
+        }
+        if (doOutput) {
+            if (mOutputStream != null) {
+                mRequest.setUploadDataProvider(
+                        (UploadDataProvider) mOutputStream, mMessageLoop);
+                if (getRequestProperty(CONTENT_LENGTH) == null) {
+                    addRequestProperty(CONTENT_LENGTH,
+                            Long.toString(((UploadDataProvider) mOutputStream).getLength()));
+                }
+                // Tells mOutputStream that startRequest() has been called, so
+                // the underlying implementation can prepare for reading if needed.
+                mOutputStream.setConnected();
+            } else {
+                if (getRequestProperty(CONTENT_LENGTH) == null) {
+                    addRequestProperty(CONTENT_LENGTH, "0");
+                }
+            }
+            // Default Content-Type to application/x-www-form-urlencoded
+            if (getRequestProperty("Content-Type") == null) {
+                addRequestProperty("Content-Type",
+                        "application/x-www-form-urlencoded");
+            }
+        }
+        for (Pair<String, String> requestHeader : mRequestHeaders) {
+            mRequest.addHeader(requestHeader.first, requestHeader.second);
+        }
+        if (!getUseCaches()) {
+            mRequest.disableCache();
+        }
+        connected = true;
+        // Start the request.
+        mRequest.start();
+    }
+
     /**
      * Returns an input stream from the server in the case of an error such as
      * the requested file has not been found on the remote server.
@@ -205,7 +288,7 @@ public class CronetHttpURLConnection extends HttpURLConnection {
     @Override
     public InputStream getErrorStream() {
         try {
-            connect();
+            getResponse();
         } catch (IOException e) {
             return null;
         }
@@ -301,14 +384,24 @@ public class CronetHttpURLConnection extends HttpURLConnection {
     }
 
     /**
+     * Sets chunked streaming mode.
+     */
+    @Override
+    public void setChunkedStreamingMode(int chunklen) {
+        // TODO(xunjieli): implement this.
+        throw new UnsupportedOperationException("Chunked mode not supported yet");
+    }
+
+    /**
      * Used by {@link CronetInputStream} to get more data from the network
      * stack. This should only be called after the request has started. Note
      * that this call might block if there isn't any more data to be read.
+     * Since byteBuffer is passed to the UrlRequest, it must be a direct
+     * ByteBuffer.
      */
-    ByteBuffer getMoreData() throws IOException {
-        mResponseByteBuffer = null;
+    void getMoreData(ByteBuffer byteBuffer) throws IOException {
+        mRequest.read(byteBuffer);
         mMessageLoop.loop();
-        return mResponseByteBuffer;
     }
 
     /**
@@ -333,21 +426,18 @@ public class CronetHttpURLConnection extends HttpURLConnection {
         public void onResponseStarted(UrlRequest request, ResponseInfo info) {
             mResponseInfo = info;
             // Quits the message loop since we have the headers now.
-            mMessageLoop.postQuitTask();
+            mMessageLoop.quit();
         }
 
         @Override
-        public void onDataReceived(UrlRequest request, ResponseInfo info,
+        public void onReadCompleted(UrlRequest request, ResponseInfo info,
                 ByteBuffer byteBuffer) {
             mResponseInfo = info;
-            mResponseByteBuffer = ByteBuffer.allocate(byteBuffer.capacity());
-            mResponseByteBuffer.put(byteBuffer);
-            mResponseByteBuffer.flip();
-            mMessageLoop.postQuitTask();
+            mMessageLoop.quit();
         }
 
         @Override
-        public void onRedirect(UrlRequest request, ResponseInfo info,
+        public void onReceivedRedirect(UrlRequest request, ResponseInfo info,
                 String newLocationUrl) {
             mOnRedirectCalled = true;
             if (instanceFollowRedirects) {
@@ -356,6 +446,7 @@ public class CronetHttpURLConnection extends HttpURLConnection {
                 } catch (MalformedURLException e) {
                     // Ignored.
                 }
+                mRequest.followRedirect();
             } else {
                 mResponseInfo = info;
                 mRequest.cancel();
@@ -389,8 +480,25 @@ public class CronetHttpURLConnection extends HttpURLConnection {
             if (mInputStream != null) {
                 mInputStream.setResponseDataCompleted();
             }
-            mMessageLoop.postQuitTask();
+            mMessageLoop.quit();
         }
+    }
+
+    /**
+     * Blocks until the respone headers are received.
+     */
+    private void getResponse() throws IOException {
+        // Check to see if enough data has been received.
+        if (mOutputStream != null) {
+            mOutputStream.checkReceivedEnoughContent();
+        }
+        if (!mHasResponse) {
+            startRequest();
+            // Blocks until onResponseStarted or onFailed is called.
+            mMessageLoop.loop();
+            mHasResponse = true;
+        }
+        checkHasResponse();
     }
 
     /**
@@ -399,6 +507,7 @@ public class CronetHttpURLConnection extends HttpURLConnection {
      * called after onResponseStarted or onFailed.
      */
     private void checkHasResponse() throws IOException {
+        if (!mHasResponse) throw new IllegalStateException("No response.");
         if (mException != null) {
             throw mException;
         } else if (mResponseInfo == null) {
@@ -412,7 +521,7 @@ public class CronetHttpURLConnection extends HttpURLConnection {
      */
     private Pair<String, String> getHeaderFieldPair(int pos) {
         try {
-            connect();
+            getResponse();
         } catch (IOException e) {
             return null;
         }

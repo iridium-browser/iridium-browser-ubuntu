@@ -107,14 +107,17 @@ public:
     virtual void handleTextFormControlChanged(Node*) = 0;
     virtual void handleValueChanged(Node*) = 0;
     virtual void handleUpdateActiveMenuOption(LayoutMenuList*, int optionIndex) = 0;
+    virtual void didShowMenuListPopup(LayoutMenuList*) = 0;
+    virtual void didHideMenuListPopup(LayoutMenuList*) = 0;
     virtual void handleLoadComplete(Document*) = 0;
     virtual void handleLayoutComplete(Document*) = 0;
+
 
     virtual void setCanvasObjectBounds(Element*, const LayoutRect&) = 0;
 
     virtual void clearWeakMembers(Visitor*) = 0;
 
-    virtual void inlineTextBoxesUpdated(LayoutObject* renderer) = 0;
+    virtual void inlineTextBoxesUpdated(LayoutObject*) = 0;
 
     // Called when the scroll offset changes.
     virtual void handleScrollPositionChanged(FrameView*) = 0;
@@ -138,7 +141,7 @@ private:
     static AXObjectCacheCreateFunction m_createFunction;
 };
 
-class CORE_EXPORT ScopedAXObjectCache {
+class CORE_EXPORT ScopedAXObjectCache : public RefCounted<ScopedAXObjectCache> {
     WTF_MAKE_NONCOPYABLE(ScopedAXObjectCache);
 public:
     explicit ScopedAXObjectCache(Document&);

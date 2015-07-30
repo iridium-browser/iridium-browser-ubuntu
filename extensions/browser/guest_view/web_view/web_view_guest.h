@@ -8,10 +8,10 @@
 #include <vector>
 
 #include "base/observer_list.h"
+#include "components/guest_view/browser/guest_view.h"
 #include "content/public/browser/javascript_dialog_manager.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
-#include "extensions/browser/guest_view/guest_view.h"
 #include "extensions/browser/guest_view/web_view/javascript_dialog_helper.h"
 #include "extensions/browser/guest_view/web_view/web_view_find_helper.h"
 #include "extensions/browser/guest_view/web_view/web_view_guest_delegate.h"
@@ -33,7 +33,7 @@ class WebViewInternalFindFunction;
 // a particular embedder WebContents. This happens on either initial navigation
 // or through the use of the New Window API, when a new window is attached to
 // a particular <webview>.
-class WebViewGuest : public GuestView<WebViewGuest>,
+class WebViewGuest : public guest_view::GuestView<WebViewGuest>,
                      public content::NotificationObserver {
  public:
   static GuestViewBase* Create(content::WebContents* owner_web_contents);
@@ -50,7 +50,7 @@ class WebViewGuest : public GuestView<WebViewGuest>,
                                              std::string* partition_name,
                                              bool* in_memory);
 
-  // Returns guestview::kInstanceIDNone if |contents| does not correspond to a
+  // Returns guest_view::kInstanceIDNone if |contents| does not correspond to a
   // WebViewGuest.
   static int GetViewInstanceId(content::WebContents* contents);
 
@@ -120,6 +120,7 @@ class WebViewGuest : public GuestView<WebViewGuest>,
   void GuestZoomChanged(double old_zoom_level, double new_zoom_level) override;
   bool IsAutoSizeSupported() const override;
   bool IsDragAndDropEnabled() const override;
+  void SignalWhenReady(const base::Closure& callback) override;
   void WillAttachToEmbedder() override;
   void WillDestroy() override;
 
@@ -294,8 +295,6 @@ class WebViewGuest : public GuestView<WebViewGuest>,
       const GURL& validated_url,
       bool is_error_page,
       bool is_iframe_srcdoc) override;
-  void DocumentLoadedInFrame(
-      content::RenderFrameHost* render_frame_host) override;
   void RenderProcessGone(base::TerminationStatus status) override;
   void UserAgentOverrideSet(const std::string& user_agent) override;
   void FrameNameChanged(content::RenderFrameHost* render_frame_host,
@@ -336,6 +335,7 @@ class WebViewGuest : public GuestView<WebViewGuest>,
   // may be invalid.
   void LoadAbort(bool is_top_level,
                  const GURL& url,
+                 int error_code,
                  const std::string& error_type);
 
   // Creates a new guest window owned by this WebViewGuest.
@@ -399,6 +399,10 @@ class WebViewGuest : public GuestView<WebViewGuest>,
   bool is_guest_fullscreen_;
   bool is_embedder_fullscreen_;
   bool last_fullscreen_permission_was_allowed_by_embedder_;
+
+  // Tracks whether the webview has a pending zoom from before the first
+  // navigation. This will be equal to 0 when there is no pending zoom.
+  double pending_zoom_factor_;
 
   // This is used to ensure pending tasks will not fire after this object is
   // destroyed.

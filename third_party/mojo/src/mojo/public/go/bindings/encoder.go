@@ -151,7 +151,7 @@ func (e *Encoder) StartArray(length, elementBitSize uint32) {
 // Note: it doesn't write a pointer to the encoded map.
 // Call |Finish()| after writing keys array and values array.
 func (e *Encoder) StartMap() {
-	e.pushState(mapHeader, pointerBitSize)
+	e.pushState(mapHeader, 0)
 }
 
 // StartStruct starts encoding a struct and writes its data header.
@@ -305,6 +305,8 @@ func (e *Encoder) WriteString(value string) error {
 
 // WritePointer writes a pointer to first unclaimed byte index.
 func (e *Encoder) WritePointer() error {
+	e.state().alignOffsetToBytes()
+	e.state().offset = align(e.state().offset, 8)
 	return e.WriteUint64(uint64(e.end - e.state().offset))
 }
 
@@ -321,4 +323,23 @@ func (e *Encoder) WriteHandle(handle system.Handle) error {
 	UntypedHandle := handle.ToUntypedHandle()
 	e.handles = append(e.handles, UntypedHandle)
 	return e.WriteUint32(uint32(len(e.handles) - 1))
+}
+
+// WriteInvalidInterface writes an invalid interface.
+func (e *Encoder) WriteInvalidInterface() error {
+	if err := e.WriteInvalidHandle(); err != nil {
+		return err
+	}
+	e.state().elementsProcessed--
+	return e.WriteUint32(0)
+}
+
+// WriteInterface writes an interface and invalidates the passed handle object.
+func (e *Encoder) WriteInterface(handle system.Handle) error {
+	if err := e.WriteHandle(handle); err != nil {
+		return err
+	}
+	e.state().elementsProcessed--
+	// Set the version field to 0 for now.
+	return e.WriteUint32(0)
 }

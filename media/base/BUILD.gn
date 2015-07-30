@@ -4,12 +4,14 @@
 
 import("//build/config/android/config.gni")
 import("//build/config/arm.gni")
+import("//build/config/features.gni")
 import("//build/config/ui.gni")
 import("//build/config/linux/pkg_config.gni")
 import("//media/media_options.gni")
 
 source_set("base") {
-  visibility = [ "//media/*" ]
+  # This is part of the media component.
+  visibility = [ "//media" ]
   sources = [
     "audio_block_fifo.cc",
     "audio_block_fifo.h",
@@ -117,6 +119,8 @@ source_set("base") {
     "media_permission.h",
     "media_switches.cc",
     "media_switches.h",
+    "moving_average.cc",
+    "moving_average.h",
     "multi_channel_resampler.cc",
     "multi_channel_resampler.h",
     "pipeline.cc",
@@ -186,14 +190,19 @@ source_set("base") {
     "yuv_convert.cc",
     "yuv_convert.h",
   ]
-  defines = []
-  deps = []
-  libs = []
-  configs += [ "//media:media_config" ]
 
-  if (!is_ensemble) {
-    deps += [ "//skia" ]
-  }
+  allow_circular_includes_from = []
+  defines = []
+  public_deps = []
+  deps = [
+    "//ui/events:events_base",
+    "//skia",
+  ]
+  libs = []
+  configs += [
+    "//media:media_config",
+    "//media:media_implementation",
+  ]
 
   if (media_use_ffmpeg) {
     sources += [
@@ -204,6 +213,7 @@ source_set("base") {
       "media_file_checker.cc",
       "media_file_checker.h",
     ]
+
     deps += [ "//third_party/ffmpeg" ]
   }
 
@@ -217,14 +227,16 @@ source_set("base") {
   }
 
   if (is_android) {
-    sources += [ "media_stub.cc" ]
-  } else if (is_win) {
-    sources += [ "media_win.cc" ]
-  } else if (is_posix) {
-    sources += [ "media_posix.cc" ]
+    public_deps = [
+      "//media/base/android",
+      "//media/base/android:media_java",
+      "//media/base/android:media_jni_headers",
+      "//media/base/android:video_capture_jni_headers",
+    ]
+    allow_circular_includes_from += [ "//media/base/android" ]
   }
 
-  if (is_linux && use_x11 && !is_ensemble) {
+  if (is_linux && use_x11) {
     configs += [
       "//build/config/linux:x11",
       "//build/config/linux:xext",
@@ -241,6 +253,9 @@ source_set("base") {
     ]
   } else if (is_mac) {
     sources += [ "user_input_monitor_mac.cc" ]
+
+    # Required by video_frame.cc.
+    libs = [ "CoreVideo.framework" ]
   } else if (is_win) {
     sources += [ "user_input_monitor_win.cc" ]
   } else {
@@ -270,28 +285,30 @@ config("base_for_cast_ios_dependent_config") {
   defines = [ "MEDIA_FOR_CAST_IOS" ]
 }
 
-source_set("base_for_cast_ios") {
-  sources = [
-    "simd/convert_rgb_to_yuv.h",
-    "simd/convert_rgb_to_yuv_c.cc",
-    "simd/convert_yuv_to_rgb.h",
-    "simd/convert_yuv_to_rgb_c.cc",
-    "simd/filter_yuv.h",
-    "simd/filter_yuv_c.cc",
-    "video_frame.cc",
-    "video_frame.h",
-    "video_frame_metadata.cc",
-    "video_frame_metadata.h",
-    "video_util.cc",
-    "video_util.h",
-    "yuv_convert.cc",
-    "yuv_convert.h",
-  ]
-  configs += [
-    "//build/config/compiler:no_size_t_to_int_warning",
-    "//media:media_config",
-  ]
-  all_dependent_configs = [ ":base_for_cast_ios_dependent_config" ]
+if (is_ios) {
+  source_set("base_for_cast_ios") {
+    sources = [
+      "simd/convert_rgb_to_yuv.h",
+      "simd/convert_rgb_to_yuv_c.cc",
+      "simd/convert_yuv_to_rgb.h",
+      "simd/convert_yuv_to_rgb_c.cc",
+      "simd/filter_yuv.h",
+      "simd/filter_yuv_c.cc",
+      "video_frame.cc",
+      "video_frame.h",
+      "video_frame_metadata.cc",
+      "video_frame_metadata.h",
+      "video_util.cc",
+      "video_util.h",
+      "yuv_convert.cc",
+      "yuv_convert.h",
+    ]
+    configs += [
+      "//build/config/compiler:no_size_t_to_int_warning",
+      "//media:media_config",
+    ]
+    all_dependent_configs = [ ":base_for_cast_ios_dependent_config" ]
+  }
 }
 
 source_set("test_support") {
@@ -301,6 +318,8 @@ source_set("test_support") {
     "fake_audio_render_callback.h",
     "fake_audio_renderer_sink.cc",
     "fake_audio_renderer_sink.h",
+    "fake_demuxer_stream.cc",
+    "fake_demuxer_stream.h",
     "fake_text_track_stream.cc",
     "fake_text_track_stream.h",
     "gmock_callback_support.h",
@@ -310,6 +329,8 @@ source_set("test_support") {
     "mock_demuxer_host.h",
     "mock_filters.cc",
     "mock_filters.h",
+    "null_video_sink.cc",
+    "null_video_sink.h",
     "test_data_util.cc",
     "test_data_util.h",
     "test_helpers.cc",
@@ -350,9 +371,12 @@ source_set("unittests") {
     "decoder_buffer_queue_unittest.cc",
     "decoder_buffer_unittest.cc",
     "djb2_unittest.cc",
+    "fake_demuxer_stream_unittest.cc",
     "gmock_callback_support_unittest.cc",
     "key_systems_unittest.cc",
+    "moving_average_unittest.cc",
     "multi_channel_resampler_unittest.cc",
+    "null_video_sink_unittest.cc",
     "pipeline_unittest.cc",
     "ranges_unittest.cc",
     "run_all_unittests.cc",
@@ -376,8 +400,9 @@ source_set("unittests") {
     "//media:media_config",
   ]
   deps = [
-    ":base",
     ":test_support",
+    "//gpu/command_buffer/common",
+    "//media",
     "//skia",
     "//testing/gmock",
     "//testing/gtest",
@@ -413,8 +438,8 @@ source_set("perftests") {
   ]
   configs += [ "//media:media_config" ]
   deps = [
-    ":base",
     ":test_support",
+    "//media",
     "//testing/gmock",
     "//testing/gtest",
   ]
@@ -435,7 +460,10 @@ if (current_cpu == "x86" || current_cpu == "x64") {
       "simd/convert_rgb_to_yuv_ssse3.cc",
       "simd/filter_yuv_sse2.cc",
     ]
-    configs += [ "//media:media_config" ]
+    configs += [
+      "//media:media_config",
+      "//media:media_implementation",
+    ]
     if (!is_win) {
       cflags = [ "-msse2" ]
     }

@@ -616,6 +616,12 @@ login.createScreen('SupervisedUserCreationScreen',
           'webkitTransitionEnd', function(e) {
             previewElement.classList.remove('animation');
           });
+
+      $('supervised-user-creation-close-button-item').addEventListener(
+          'click', function(e) {
+            this.cancel();
+            e.preventDefault();
+          }.bind(this));
     },
 
     buttonIds: [],
@@ -1123,7 +1129,7 @@ login.createScreen('SupervisedUserCreationScreen',
       var pagesWithCancel = ['intro', 'manager', 'username', 'import-password',
           'error', 'import'];
       $('login-header-bar').allowCancel =
-          pagesWithCancel.indexOf(visiblePage) > 0;
+          pagesWithCancel.indexOf(visiblePage) > -1;
       $('cancel-add-user-button').disabled = false;
 
       this.getScreenElement('import-link').hidden = true;
@@ -1139,6 +1145,7 @@ login.createScreen('SupervisedUserCreationScreen',
             'password-error');
         if (this.managerList_.pods.length > 0)
           this.managerList_.selectPod(this.managerList_.pods[0]);
+        $('login-header-bar').updateUI_();
       }
 
       if (visiblePage == 'username' || visiblePage == 'import-password') {
@@ -1192,6 +1199,9 @@ login.createScreen('SupervisedUserCreationScreen',
             !this.importList_.selectedPod_ ||
             this.importList_.selectedPod_.user.exists;
       }
+      $('supervised-user-creation-close-button-item').hidden =
+          (visiblePage == 'created');
+
       chrome.send('currentSupervisedUserPage', [this.currentPage_]);
     },
 
@@ -1342,6 +1352,8 @@ login.createScreen('SupervisedUserCreationScreen',
       var notSignedInPages = ['intro', 'manager'];
       var postCreationPages = ['created'];
       if (notSignedInPages.indexOf(this.currentPage_) >= 0) {
+        chrome.send('hideLocalSupervisedUserCreation');
+
         // Make sure no manager password is kept:
         this.managerList_.clearPods();
 

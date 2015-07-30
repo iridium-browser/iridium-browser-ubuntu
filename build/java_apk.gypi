@@ -47,6 +47,8 @@
 #    application at runtime to access the package's resources.
 #  R_package - A custom Java package to generate the resource file R.java in.
 #    By default, the package given in AndroidManifest.xml will be used.
+#  include_all_resources - Set to 1 to include all resource IDs in all generated
+#    R.java files.
 #  use_chromium_linker - Enable the content dynamic linker that allows sharing the
 #    RELRO section of the native libraries between the different processes.
 #  load_library_from_zip_file - When using the dynamic linker, load the library
@@ -78,6 +80,7 @@
     'jar_name': 'chromium_apk_<(_target_name).jar',
     'resource_dir%':'<(DEPTH)/build/android/ant/empty/res',
     'R_package%':'',
+    'include_all_resources%': 0,
     'additional_R_text_files': [],
     'dependencies_res_zip_paths': [],
     'additional_res_packages': [],
@@ -125,10 +128,7 @@
     'android_manifest_path%': '<(java_in_dir)/AndroidManifest.xml',
     'push_stamp': '<(intermediate_dir)/push.stamp',
     'link_stamp': '<(intermediate_dir)/link.stamp',
-    'package_resources_stamp': '<(intermediate_dir)/package_resources.stamp',
     'resource_zip_path': '<(intermediate_dir)/<(_target_name).resources.zip',
-    'resource_packaged_apk_name': '<(apk_name)-resources.ap_',
-    'resource_packaged_apk_path': '<(intermediate_dir)/<(resource_packaged_apk_name)',
     'shared_resources%': 0,
     'unsigned_apk_path': '<(intermediate_dir)/<(apk_name)-unsigned.apk',
     'final_apk_path%': '<(PRODUCT_DIR)/apks/<(apk_name).apk',
@@ -138,6 +138,7 @@
     'symlink_script_host_path': '<(intermediate_dir)/create_symlinks.sh',
     'symlink_script_device_path': '<(device_intermediate_dir)/create_symlinks.sh',
     'create_standalone_apk%': 1,
+    'res_v14_skip%': 0,
     'res_v14_verify_only%': 0,
     'variables': {
       'variables': {
@@ -604,12 +605,21 @@
             'dependencies_res_zip_paths=': [],
             'additional_res_packages=': [],
           }],
+          ['res_v14_skip == 1', {
+            'process_resources_options+': ['--v14-skip']
+          }],
           ['res_v14_verify_only == 1', {
             'process_resources_options+': ['--v14-verify-only']
           }],
           ['shared_resources == 1', {
             'process_resources_options+': ['--shared-resources']
           }],
+          ['R_package != ""', {
+            'process_resources_options+': ['--custom-package', '<(R_package)']
+          }],
+          ['include_all_resources == 1', {
+            'process_resources_options+': ['--include-all-resources']
+          }]
         ],
       },
       'inputs': [
@@ -806,7 +816,6 @@
         '--input-jars-paths=>(proguard_input_jar_paths)',
         '--proguard-configs=>(proguard_flags_paths)',
 
-
         '--test-jar-path', '<(test_jar_path)',
         '--obfuscated-jar-path', '<(obfuscated_jar_path)',
 
@@ -855,109 +864,32 @@
       'includes': [ 'android/dex_action.gypi' ],
     },
     {
-      'action_name': 'package_resources',
-      'message': 'packaging resources for <(_target_name)',
       'variables': {
-        'package_resources_options': [],
-        'package_resource_zip_input_paths': [
+        'extra_inputs': ['<(codegen_stamp)'],
+        'resource_zips': [
           '<(resource_zip_path)',
-          '>@(dependencies_res_zip_paths)',
         ],
         'conditions': [
-          ['shared_resources == 1', {
-            'package_resources_options+': ['--shared-resources']
+          ['is_test_apk == 0', {
+            'resource_zips': [
+              '>@(dependencies_res_zip_paths)',
+            ],
           }],
         ],
       },
-      'conditions': [
-        ['is_test_apk == 1', {
-          'variables': {
-            'dependencies_res_zip_paths=': [],
-            'additional_res_packages=': [],
-          }
-        }],
-      ],
-      'inputs': [
-        # TODO: This isn't always rerun correctly, http://crbug.com/351928
-        '<(DEPTH)/build/android/gyp/util/build_utils.py',
-        '<(DEPTH)/build/android/gyp/package_resources.py',
-        '<(android_manifest_path)',
-
-        '>@(package_resource_zip_input_paths)',
-
-        '<(codegen_stamp)',
-      ],
-      'outputs': [
-        '<(resource_packaged_apk_path)',
-      ],
-      'action': [
-        'python', '<(DEPTH)/build/android/gyp/package_resources.py',
-        '--android-sdk', '<(android_sdk)',
-        '--android-sdk-tools', '<(android_sdk_tools)',
-
-        '--configuration-name', '<(CONFIGURATION_NAME)',
-
-        '--android-manifest', '<(android_manifest_path)',
-        '--version-code', '<(app_manifest_version_code)',
-        '--version-name', '<(app_manifest_version_name)',
-
-        '--asset-dir', '<(asset_location)',
-        '--resource-zips', '>(package_resource_zip_input_paths)',
-
-        '--no-compress', '<(extensions_to_not_compress)',
-
-        '--apk-path', '<(resource_packaged_apk_path)',
-
-        '<@(package_resources_options)',
-      ],
+      'includes': [ 'android/package_resources_action.gypi' ],
     },
     {
-      'action_name': 'ant_package_<(_target_name)',
-      'message': 'Packaging <(_target_name)',
       'variables': {
-        # Write the inputs list to a file, so that its mtime is updated when
-        # the list of inputs changes.
-        'inputs_list_file': '>|(apk_package.<(_target_name).gypcmd >@(package_input_paths))'
+        'apk_path': '<(unsigned_apk_path)',
+        'native_libs_dir': '<(apk_package_native_libs_dir)',
+        'conditions': [
+          ['native_lib_target != ""', {
+            'extra_inputs': ['<(native_lib_placeholder_stamp)'],
+          }],
+        ],
       },
-      'inputs': [
-        '<(DEPTH)/build/android/ant/apk-package.xml',
-        '<(DEPTH)/build/android/gyp/util/build_utils.py',
-        '<(DEPTH)/build/android/gyp/ant.py',
-        '<(dex_path)',
-        '<(codegen_stamp)',
-        '<(obfuscate_stamp)',
-        '<(resource_packaged_apk_path)',
-        '>@(package_input_paths)',
-        '>(inputs_list_file)',
-      ],
-      'outputs': [
-        '<(unsigned_apk_path)',
-      ],
-      'conditions': [
-        ['native_lib_target != ""', {
-          'inputs': ['<(native_lib_placeholder_stamp)'],
-        }],
-      ],
-      'action': [
-        'python', '<(DEPTH)/build/android/gyp/ant.py',
-        '--',
-        '-quiet',
-        '-DDEX_FILE_PATH=<(intermediate_dir)/classes.dex',
-        '-DANDROID_SDK_ROOT=<(android_sdk_root)',
-        '-DANDROID_SDK_TOOLS=<(android_sdk_tools)',
-        '-DRESOURCE_PACKAGED_APK_NAME=<(resource_packaged_apk_name)',
-        '-DAPK_NAME=<(apk_name)',
-        '-DCONFIGURATION_NAME=<(CONFIGURATION_NAME)',
-        '-DNATIVE_LIBS_DIR=<(apk_package_native_libs_dir)',
-        '-DOUT_DIR=<(intermediate_dir)',
-        '-DUNSIGNED_APK_PATH=<(unsigned_apk_path)',
-        '-DEMMA_INSTRUMENT=<(emma_instrument)',
-        '-DEMMA_DEVICE_JAR=<(emma_device_jar)',
-
-        '-Dbasedir=.',
-        '-buildfile',
-        '<(DEPTH)/build/android/ant/apk-package.xml',
-      ]
+      'includes': ['android/apkbuilder_action.gypi'],
     },
   ],
 }

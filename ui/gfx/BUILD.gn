@@ -57,8 +57,6 @@ component("gfx") {
     "canvas_notimplemented.cc",
     "canvas_paint_mac.h",
     "canvas_paint_mac.mm",
-    "canvas_paint_win.cc",
-    "canvas_paint_win.h",
     "canvas_skia.cc",
     "canvas_skia_paint.h",
     "codec/jpeg_codec.cc",
@@ -145,6 +143,8 @@ component("gfx") {
     "native_widget_types.h",
     "nine_image_painter.cc",
     "nine_image_painter.h",
+    "paint_throbber.cc",
+    "paint_throbber.h",
     "path.cc",
     "path.h",
     "path_aura.cc",
@@ -222,6 +222,8 @@ component("gfx") {
     "win/scoped_set_map_mode.h",
     "win/singleton_hwnd.cc",
     "win/singleton_hwnd.h",
+    "win/singleton_hwnd_observer.cc",
+    "win/singleton_hwnd_observer.h",
     "win/window_impl.cc",
     "win/window_impl.h",
   ]
@@ -324,6 +326,16 @@ component("gfx") {
   # Linux.
   if (is_linux) {
     configs += [ "//build/config/linux:fontconfig" ]
+  }
+
+  # Chrome OS
+  if (is_chromeos) {
+    # Robust JPEG decoding for the login screen.
+    sources += [
+      "chromeos/codec/jpeg_codec_robust_slow.cc",
+      "chromeos/codec/jpeg_codec_robust_slow.h",
+    ]
+    deps += [ "//third_party/libjpeg" ]
   }
 
   if (!use_aura) {
@@ -499,6 +511,10 @@ test("gfx_unittests") {
     sources -= [ "screen_unittest.cc" ]
   } else {
     sources -= [ "nine_image_painter_unittest.cc" ]
+  }
+
+  if (is_chromeos) {
+    sources += [ "chromeos/codec/jpeg_codec_robust_slow_unittest.cc" ]
   }
 
   if (is_win) {

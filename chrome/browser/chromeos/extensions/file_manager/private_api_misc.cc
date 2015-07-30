@@ -4,6 +4,9 @@
 
 #include "chrome/browser/chromeos/extensions/file_manager/private_api_misc.h"
 
+#include <set>
+#include <vector>
+
 #include "ash/frame/frame_util.h"
 #include "base/files/file_path.h"
 #include "base/prefs/pref_service.h"
@@ -12,9 +15,10 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/extensions/file_manager/private_api_util.h"
-#include "chrome/browser/chromeos/file_manager/app_installer.h"
 #include "chrome/browser/chromeos/file_manager/fileapi_util.h"
+#include "chrome/browser/chromeos/file_manager/volume_manager.h"
 #include "chrome/browser/chromeos/file_manager/zip_file_creator.h"
+#include "chrome/browser/chromeos/file_system_provider/service.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/devtools/devtools_window.h"
@@ -30,6 +34,7 @@
 #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager.h"
 #include "chrome/common/extensions/api/file_manager_private.h"
+#include "chrome/common/extensions/api/manifest_types.h"
 #include "chrome/common/pref_names.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
@@ -47,7 +52,6 @@ namespace extensions {
 
 namespace {
 const char kCWSScope[] = "https://www.googleapis.com/auth/chromewebstore";
-const char kGoogleCastApiExtensionId[] = "mafeflapfdfljijmlienjedomfjfmhpd";
 
 // Obtains the current app window.
 AppWindow* GetCurrentAppWindow(ChromeSyncExtensionFunction* function) {
@@ -94,7 +98,7 @@ GetLoggedInProfileInfoList() {
 
   return result_profiles;
 }
-} // namespace
+}  // namespace
 
 bool FileManagerPrivateLogoutUserForReauthenticationFunction::RunSync() {
   const user_manager::User* user =
@@ -250,54 +254,8 @@ bool FileManagerPrivateInstallWebstoreItemFunction::RunAsync() {
   const scoped_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
-  if (params->item_id.empty())
-    return false;
-
-  const extensions::WebstoreStandaloneInstaller::Callback callback =
-      base::Bind(
-          &FileManagerPrivateInstallWebstoreItemFunction::OnInstallComplete,
-          this);
-
-  // Only GoogleCastAPI extension can use silent installation.
-  if (params->silent_installation &&
-      params->item_id != kGoogleCastApiExtensionId) {
-    SetError("Only whitelisted items can do silent installation.");
-    return false;
-  }
-
-  scoped_refptr<file_manager::AppInstaller> installer(
-      new file_manager::AppInstaller(GetAssociatedWebContents(),
-                                     params->item_id,
-                                     GetProfile(),
-                                     params->silent_installation,
-                                     callback));
-  // installer will be AddRef()'d in BeginInstall().
-  installer->BeginInstall();
-  return true;
-}
-
-void FileManagerPrivateInstallWebstoreItemFunction::OnInstallComplete(
-    bool success,
-    const std::string& error,
-    extensions::webstore_install::Result result) {
-  drive::EventLogger* logger = file_manager::util::GetLogger(GetProfile());
-  if (success) {
-    if (logger) {
-      logger->Log(logging::LOG_INFO,
-                  "App install succeeded. (item id: %s)",
-                  webstore_item_id_.c_str());
-    }
-  } else {
-    if (logger) {
-      logger->Log(logging::LOG_ERROR,
-                  "App install failed. (item id: %s, reason: %s)",
-                  webstore_item_id_.c_str(),
-                  error.c_str());
-    }
-    SetError(error);
-  }
-
-  SendResponse(success);
+  SetError("Deleted, use chrome.webstoreWidgetPrivate API instead.");
+  return false;
 }
 
 FileManagerPrivateRequestWebStoreAccessTokenFunction::
@@ -463,12 +421,129 @@ void FileManagerPrivateGetMimeTypeFunction::OnGetMimeType(
 ExtensionFunction::ResponseAction
 FileManagerPrivateIsPiexLoaderEnabledFunction::Run() {
 #if defined(OFFICIAL_BUILD)
-  return RespondNow(OneArgument(
-      new base::FundamentalValue(true)));
+  return RespondNow(OneArgument(new base::FundamentalValue(true)));
 #else
-  return RespondNow(OneArgument(
-      new base::FundamentalValue(false)));
+  return RespondNow(OneArgument(new base::FundamentalValue(false)));
 #endif
+}
+
+FileManagerPrivateGetProvidingExtensionsFunction::
+    FileManagerPrivateGetProvidingExtensionsFunction()
+    : chrome_details_(this) {
+}
+
+ExtensionFunction::ResponseAction
+FileManagerPrivateGetProvidingExtensionsFunction::Run() {
+  using chromeos::file_system_provider::Service;
+  using chromeos::file_system_provider::ProvidingExtensionInfo;
+  const Service* const service = Service::Get(chrome_details_.GetProfile());
+  const std::vector<ProvidingExtensionInfo> info_list =
+      service->GetProvidingExtensionInfoList();
+
+  using api::file_manager_private::ProvidingExtension;
+  std::vector<linked_ptr<ProvidingExtension>> providing_extensions;
+  for (const auto& info : info_list) {
+    const linked_ptr<ProvidingExtension> providing_extension(
+        new ProvidingExtension);
+    providing_extension->extension_id = info.extension_id;
+    providing_extension->name = info.name;
+    providing_extension->configurable = info.capabilities.configurable();
+    providing_extension->multiple_mounts = info.capabilities.multiple_mounts();
+    switch (info.capabilities.source()) {
+      case SOURCE_FILE:
+        providing_extension->source =
+            api::manifest_types::FILE_SYSTEM_PROVIDER_SOURCE_FILE;
+        break;
+      case SOURCE_DEVICE:
+        providing_extension->source =
+            api::manifest_types::FILE_SYSTEM_PROVIDER_SOURCE_DEVICE;
+        break;
+      case SOURCE_NETWORK:
+        providing_extension->source =
+            api::manifest_types::FILE_SYSTEM_PROVIDER_SOURCE_NETWORK;
+        break;
+    }
+    providing_extensions.push_back(providing_extension);
+  }
+
+  return RespondNow(ArgumentList(
+      api::file_manager_private::GetProvidingExtensions::Results::Create(
+          providing_extensions).Pass()));
+}
+
+FileManagerPrivateAddProvidedFileSystemFunction::
+    FileManagerPrivateAddProvidedFileSystemFunction()
+    : chrome_details_(this) {
+}
+
+ExtensionFunction::ResponseAction
+FileManagerPrivateAddProvidedFileSystemFunction::Run() {
+  using extensions::api::file_manager_private::AddProvidedFileSystem::Params;
+  const scoped_ptr<Params> params(Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params);
+
+  using chromeos::file_system_provider::Service;
+  using chromeos::file_system_provider::ProvidingExtensionInfo;
+  Service* const service = Service::Get(chrome_details_.GetProfile());
+
+  if (!service->RequestMount(params->extension_id))
+    return RespondNow(Error("Failed to request a new mount."));
+
+  return RespondNow(NoArguments());
+}
+
+FileManagerPrivateConfigureVolumeFunction::
+    FileManagerPrivateConfigureVolumeFunction()
+    : chrome_details_(this) {
+}
+
+ExtensionFunction::ResponseAction
+FileManagerPrivateConfigureVolumeFunction::Run() {
+  using extensions::api::file_manager_private::ConfigureVolume::Params;
+  const scoped_ptr<Params> params(Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params);
+
+  using file_manager::VolumeManager;
+  using file_manager::Volume;
+  VolumeManager* const volume_manager =
+      VolumeManager::Get(chrome_details_.GetProfile());
+  base::WeakPtr<Volume> volume =
+      volume_manager->FindVolumeById(params->volume_id);
+  if (!volume.get())
+    return RespondNow(Error("Volume not found."));
+  if (!volume->configurable())
+    return RespondNow(Error("Volume not configurable."));
+
+  switch (volume->type()) {
+    case file_manager::VOLUME_TYPE_PROVIDED: {
+      using chromeos::file_system_provider::Service;
+      Service* const service = Service::Get(chrome_details_.GetProfile());
+      DCHECK(service);
+
+      using chromeos::file_system_provider::ProvidedFileSystemInterface;
+      ProvidedFileSystemInterface* const file_system =
+          service->GetProvidedFileSystem(volume->extension_id(),
+                                         volume->file_system_id());
+      if (file_system)
+        file_system->Configure(base::Bind(
+            &FileManagerPrivateConfigureVolumeFunction::OnCompleted, this));
+      break;
+    }
+    default:
+      NOTIMPLEMENTED();
+  }
+
+  return RespondLater();
+}
+
+void FileManagerPrivateConfigureVolumeFunction::OnCompleted(
+    base::File::Error result) {
+  if (result != base::File::FILE_OK) {
+    Respond(Error("Failed to complete configuration."));
+    return;
+  }
+
+  Respond(NoArguments());
 }
 
 }  // namespace extensions

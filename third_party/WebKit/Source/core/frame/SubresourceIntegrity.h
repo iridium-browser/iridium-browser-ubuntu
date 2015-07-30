@@ -5,6 +5,7 @@
 #ifndef SubresourceIntegrity_h
 #define SubresourceIntegrity_h
 
+#include "core/CoreExport.h"
 #include "platform/Crypto.h"
 
 namespace WTF {
@@ -18,26 +19,37 @@ class Element;
 class KURL;
 class Resource;
 
-class SubresourceIntegrity {
+class CORE_EXPORT SubresourceIntegrity {
 public:
     enum IntegrityParseResult {
-        IntegrityParseErrorNone,
-        IntegrityParseErrorFatal,
-        IntegrityParseErrorNonfatal,
+        IntegrityParseValidResult,
+        IntegrityParseNoValidResult
     };
 
-    static bool CheckSubresourceIntegrity(const Element&, const WTF::String& content, const KURL& resourceUrl, const WTF::String& mimeType, const Resource&);
+    static bool CheckSubresourceIntegrity(const Element&, const WTF::String& content, const KURL& resourceUrl, const Resource&);
 
 private:
     // FIXME: After the merge with the Chromium repo, this should be refactored
     // to use FRIEND_TEST in base/gtest_prod_util.h.
     friend class SubresourceIntegrityTest;
+    friend class SubresourceIntegrityTest_Parsing_Test;
+    friend class SubresourceIntegrityTest_ParseAlgorithm_Test;
 
-    static bool parseAlgorithm(const UChar*& begin, const UChar* end, HashAlgorithm&);
+    enum AlgorithmParseResult {
+        AlgorithmValid,
+        AlgorithmUnparsable,
+        AlgorithmUnknown
+    };
+
+    struct IntegrityMetadata {
+        WTF::String digest;
+        HashAlgorithm algorithm;
+    };
+
+    static AlgorithmParseResult parseAlgorithm(const UChar*& begin, const UChar* end, HashAlgorithm&);
     static bool parseDigest(const UChar*& begin, const UChar* end, String& digest);
-    static bool parseMimeType(const UChar*& begin, const UChar* end, String& type);
 
-    static IntegrityParseResult parseIntegrityAttribute(const WTF::String& attribute, WTF::String& integrity, HashAlgorithm&, WTF::String& type, Document&);
+    static IntegrityParseResult parseIntegrityAttribute(const WTF::String& attribute, WTF::Vector<IntegrityMetadata>& metadataList, Document&);
 };
 
 } // namespace blink

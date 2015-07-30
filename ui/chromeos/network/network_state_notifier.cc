@@ -118,6 +118,15 @@ NetworkStateNotifier::~NetworkStateNotifier() {
   NetworkHandler::Get()->network_connection_handler()->RemoveObserver(this);
 }
 
+void NetworkStateNotifier::ConnectToNetworkRequested(
+    const std::string& service_path) {
+  RemoveConnectNotification();
+}
+
+void NetworkStateNotifier::ConnectSucceeded(const std::string& service_path) {
+  RemoveConnectNotification();
+}
+
 void NetworkStateNotifier::ConnectFailed(const std::string& service_path,
                                          const std::string& error_name) {
   // Only show a notification for certain errors. Other failures are expected
@@ -134,7 +143,8 @@ void NetworkStateNotifier::ConnectFailed(const std::string& service_path,
   ShowNetworkConnectError(error_name, service_path);
 }
 
-void NetworkStateNotifier::DiconnectRequested(const std::string& service_path) {
+void NetworkStateNotifier::DisconnectRequested(
+    const std::string& service_path) {
   const NetworkState* network =
       NetworkHandler::Get()->network_state_handler()->GetNetworkState(
           service_path);

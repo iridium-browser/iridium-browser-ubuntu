@@ -66,8 +66,6 @@ class SynchronousCompositorImpl
   void BeginFrame(const cc::BeginFrameArgs& args);
 
   // SynchronousCompositor
-  bool InitializeHwDraw() override;
-  void ReleaseHwDraw() override;
   scoped_ptr<cc::CompositorFrame> DemandDrawHw(
       gfx::Size surface_size,
       const gfx::Transform& transform,
@@ -102,7 +100,6 @@ class SynchronousCompositorImpl
 
   void SetClient(SynchronousCompositorClient* compositor_client);
   void UpdateFrameMetaData(const cc::CompositorFrameMetadata& frame_info);
-  void NotifyDidDestroyCompositorToClient();
   void DidActivatePendingTree();
   void DeliverMessages();
   bool CalledOnValidThread() const;

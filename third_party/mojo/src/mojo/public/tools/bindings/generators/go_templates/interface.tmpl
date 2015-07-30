@@ -13,11 +13,11 @@
 
 
 {% macro declare_request_params(method) %}
-({{declare_params(method|struct_from_method)}})
+({{declare_params(method.param_struct)}})
 {%- if method.response_parameters|is_none_or_empty -%}
 	{{' (err error)'}}
 {%- else -%}
-	{{' '}}({{declare_params(method|response_struct_from_method)}}, err error)
+	{{' '}}({{declare_params(method.response_param_struct)}}, err error)
 {%- endif -%}
 {% endmacro %}
 
@@ -42,8 +42,36 @@ type {{interface|name}} interface {
 {% endfor %}
 }
 
+var {{interface|name(False)}}_Name = "{{interface.module.namespace|replace(".","::")}}::{{interface.name}}"
+
 type {{interface|name}}Request bindings.InterfaceRequest
+
+func (r *{{interface|name}}Request) Name() string {
+	return {{interface|name(False)}}_Name
+}
+
 type {{interface|name}}Pointer bindings.InterfacePointer
+
+func (p *{{interface|name}}Pointer) Name() string {
+	return {{interface|name(False)}}_Name
+}
+
+type {{interface|name}}ServiceFactory struct{
+	Delegate {{interface|name}}Factory
+}
+
+type {{interface|name}}Factory interface {
+	Create(request {{interface|name}}Request)
+}
+
+func (f *{{interface|name}}ServiceFactory) Name() string {
+	return {{interface|name(False)}}_Name
+}
+
+func (f *{{interface|name}}ServiceFactory) Create(messagePipe system.MessagePipeHandle) {
+	request := {{interface|name}}Request{bindings.NewMessagePipeHandleOwner(messagePipe)}
+	f.Delegate.Create(request)
+}
 
 // CreateMessagePipeFor{{interface|name}} creates a message pipe for use with the
 // {{interface|name}} interface with a {{interface|name}}Request on one end and a {{interface|name}}Pointer on the other.
@@ -53,7 +81,7 @@ func CreateMessagePipeFor{{interface|name}}() ({{interface|name}}Request, {{inte
 }
 
 {% for method in interface.methods %}
-const {{interface|name(False)}}_{{method|name}}_Name = {{method.ordinal}}
+const {{interface|name(False)}}_{{method|name}}_Name uint32 = {{method.ordinal}}
 {% endfor %}
 
 type {{interface|name}}Proxy struct {
@@ -73,13 +101,13 @@ func (p *{{interface|name}}Proxy) Close_proxy() {
 }
 
 {% for method in interface.methods %}
-{{struct_macros.define(method|struct_from_method, False)}}
+{{struct_macros.define(method.param_struct, False)}}
 {%-  if method.response_parameters %}
-{{struct_macros.define(method|response_struct_from_method, False)}}
+{{struct_macros.define(method.response_param_struct, False)}}
 {%-   endif %}
 func (p *{{interface|name}}Proxy) {{method|name}}{{declare_request_params(method)}} {
-	payload := &{{method|struct_from_method|name(False)}}{
-{%   for field in (method|struct_from_method).fields %}
+	payload := &{{method.param_struct|name(False)}}{
+{%   for field in (method.param_struct).fields %}
 		{{field|name(False)}},
 {%   endfor %}
 	}
@@ -102,13 +130,24 @@ func (p *{{interface|name}}Proxy) {{method|name}}{{declare_request_params(method
 		p.Close_proxy()
 		return
 	}
-	var response {{method|response_struct_from_method|name(False)}}
+	if readResult.Message.Header.Flags != bindings.MessageIsResponseFlag {
+		err = &bindings.ValidationError{bindings.MessageHeaderInvalidFlags,
+			fmt.Sprintf("invalid message header flag: %v", readResult.Message.Header.Flags),
+		}
+		return
+	}
+	if got, want := readResult.Message.Header.Type, {{interface|name(False)}}_{{method|name}}_Name; got != want {
+		err = &bindings.ValidationError{bindings.MessageHeaderUnknownMethod,
+			fmt.Sprintf("invalid method in response: expected %v, got %v", want, got),
+		}
+		return
+	}
+	var response {{method.response_param_struct|name(False)}}
 	if err = readResult.Message.DecodePayload(&response); err != nil {
-		err = fmt.Errorf("can't decode response: %v", err.Error())
 		p.Close_proxy()
 		return
 	}
-{%   for field in (method|response_struct_from_method).fields %}
+{%   for field in (method.response_param_struct).fields %}
 	{{field|name(False)}} = response.{{field|name(False)}}
 {%   endfor %}
 {% else %}
@@ -135,21 +174,30 @@ func (s *{{interface|name(False)}}Stub) Accept(message *bindings.Message) (err e
 	switch message.Header.Type {
 {% for method in interface.methods %}
 	case {{interface|name(False)}}_{{method|name}}_Name:
-		var request {{method|struct_from_method|name(False)}}
+{%   if method.response_parameters %}
+		if message.Header.Flags != bindings.MessageExpectsResponseFlag {
+{%   else %}
+		if message.Header.Flags != bindings.MessageNoFlag {
+{%   endif %}
+			return &bindings.ValidationError{bindings.MessageHeaderInvalidFlags,
+				fmt.Sprintf("invalid message header flag: %v", message.Header.Flags),
+			}
+		}
+		var request {{method.param_struct|name(False)}}
 		if err := message.DecodePayload(&request); err != nil {
-			return fmt.Errorf("can't decode request: %v", err.Error())
+			return err
 		}
 {%   if method.response_parameters %}
-		var response {{method|response_struct_from_method|name(False)}}
+		var response {{method.response_param_struct|name(False)}}
 {%   endif %}
 {%   if method.response_parameters|is_none_or_empty %}
 		err = s.impl.{{method|name}}(
 {%-   else -%}
-{%	 for field in (method|response_struct_from_method).fields %}
+{%	 for field in (method.response_param_struct).fields %}
 		response.{{field|name(False)}}{{', '}}
 {%-	endfor -%}err = s.impl.{{method|name}}(
 {%-   endif -%}
-{%-	for field in (method|struct_from_method).fields -%}
+{%-	for field in (method.param_struct).fields -%}
 			request.{{field|name(False)}}{% if not loop.last %}, {% endif %}
 {%-	endfor -%}
 		)
@@ -164,13 +212,16 @@ func (s *{{interface|name(False)}}Stub) Accept(message *bindings.Message) (err e
 		}
 		message, err = bindings.EncodeMessage(header, &response)
 		if err != nil {
-			return fmt.Errorf("can't encode response: %v", err.Error())
+			return err
 		}
 		return s.connector.WriteMessage(message)
 {%   endif %}
 {% endfor %}
 	default:
-		return fmt.Errorf("unsupported request type %v", message.Header.Type);
+		return &bindings.ValidationError{
+			bindings.MessageHeaderUnknownMethod,
+			fmt.Sprintf("unknown method %v", message.Header.Type),
+		}
 	}
 	return
 }

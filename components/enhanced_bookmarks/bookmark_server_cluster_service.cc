@@ -112,9 +112,7 @@ const std::vector<std::string> BookmarkServerClusterService::GetClusters()
 // static
 void BookmarkServerClusterService::RegisterPrefs(
     user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterDictionaryPref(
-      prefs::kBookmarkClusters,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterDictionaryPref(prefs::kBookmarkClusters);
 }
 
 scoped_ptr<net::URLFetcher> BookmarkServerClusterService::CreateFetcher() {
@@ -129,8 +127,8 @@ scoped_ptr<net::URLFetcher> BookmarkServerClusterService::CreateFetcher() {
   url = net::AppendQueryParameter(url, "v", model_->GetVersionString());
 
   // Build the URLFetcher to perform the request.
-  scoped_ptr<net::URLFetcher> url_fetcher(
-      net::URLFetcher::Create(url, net::URLFetcher::POST, this));
+  scoped_ptr<net::URLFetcher> url_fetcher =
+      net::URLFetcher::Create(url, net::URLFetcher::POST, this);
 
   // Binary encode a basic request proto.
   image_collections::ClusterRequest request_proto;

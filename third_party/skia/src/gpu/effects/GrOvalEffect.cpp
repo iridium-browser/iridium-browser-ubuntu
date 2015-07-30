@@ -24,7 +24,7 @@ public:
 
     const char* name() const override { return "Circle"; }
 
-    void getGLProcessorKey(const GrGLCaps&, GrProcessorKeyBuilder*) const override;
+    void getGLProcessorKey(const GrGLSLCaps&, GrProcessorKeyBuilder*) const override;
 
     GrGLFragmentProcessor* createGLInstance() const override;
 
@@ -104,7 +104,7 @@ public:
                           const TransformedCoordsArray&,
                           const TextureSamplerArray&) override;
 
-    static inline void GenKey(const GrProcessor&, const GrGLCaps&, GrProcessorKeyBuilder*);
+    static inline void GenKey(const GrProcessor&, const GrGLSLCaps&, GrProcessorKeyBuilder*);
 
     void setData(const GrGLProgramDataManager&, const GrProcessor&) override;
 
@@ -128,23 +128,27 @@ void GLCircleEffect::emitCode(GrGLFPBuilder* builder,
                               const TextureSamplerArray& samplers) {
     const CircleEffect& ce = fp.cast<CircleEffect>();
     const char *circleName;
-    // The circle uniform is (center.x, center.y, radius + 0.5) for regular fills and
-    // (... ,radius - 0.5) for inverse fills.
+    // The circle uniform is (center.x, center.y, radius + 0.5, 1 / (radius + 0.5)) for regular
+    // fills and (..., radius - 0.5, 1 / (radius - 0.5)) for inverse fills.
     fCircleUniform = builder->addUniform(GrGLProgramBuilder::kFragment_Visibility,
-                                         kVec3f_GrSLType, kDefault_GrSLPrecision,
+                                         kVec4f_GrSLType, kDefault_GrSLPrecision,
                                          "circle",
                                          &circleName);
 
-    GrGLFPFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+    GrGLFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
     const char* fragmentPos = fsBuilder->fragmentPosition();
 
     SkASSERT(kHairlineAA_GrProcessorEdgeType != ce.getEdgeType());
+    // TODO: Right now the distance to circle caclulation is performed in a space normalized to the
+    // radius and then denormalized. This is to prevent overflow on devices that have a "real"
+    // mediump. It'd be nice to only to this on mediump devices but we currently don't have the
+    // caps here.
     if (GrProcessorEdgeTypeIsInverseFill(ce.getEdgeType())) {
-        fsBuilder->codeAppendf("\t\tfloat d = length(%s.xy - %s.xy) - %s.z;\n",
-                                circleName, fragmentPos, circleName);
+        fsBuilder->codeAppendf("\t\tfloat d = (length((%s.xy - %s.xy) * %s.w) - 1.0) * %s.z;\n",
+                                circleName, fragmentPos, circleName, circleName);
     } else {
-        fsBuilder->codeAppendf("\t\tfloat d = %s.z - length(%s.xy - %s.xy);\n",
-                               circleName, fragmentPos, circleName);
+        fsBuilder->codeAppendf("\t\tfloat d = (1.0 - length((%s.xy - %s.xy) *  %s.w)) * %s.z;\n",
+                               circleName, fragmentPos, circleName, circleName);
     }
     if (GrProcessorEdgeTypeIsAA(ce.getEdgeType())) {
         fsBuilder->codeAppend("\t\td = clamp(d, 0.0, 1.0);\n");
@@ -156,7 +160,7 @@ void GLCircleEffect::emitCode(GrGLFPBuilder* builder,
                            (GrGLSLExpr4(inputColor) * GrGLSLExpr1("d")).c_str());
 }
 
-void GLCircleEffect::GenKey(const GrProcessor& processor, const GrGLCaps&,
+void GLCircleEffect::GenKey(const GrProcessor& processor, const GrGLSLCaps&,
                             GrProcessorKeyBuilder* b) {
     const CircleEffect& ce = processor.cast<CircleEffect>();
     b->add32(ce.getEdgeType());
@@ -171,7 +175,8 @@ void GLCircleEffect::setData(const GrGLProgramDataManager& pdman, const GrProces
         } else {
             radius += 0.5f;
         }
-        pdman.set3f(fCircleUniform, ce.getCenter().fX, ce.getCenter().fY, radius);
+        pdman.set4f(fCircleUniform, ce.getCenter().fX, ce.getCenter().fY, radius,
+                    SkScalarInvert(radius));
         fPrevCenter = ce.getCenter();
         fPrevRadius = ce.getRadius();
     }
@@ -179,7 +184,7 @@ void GLCircleEffect::setData(const GrGLProgramDataManager& pdman, const GrProces
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-void CircleEffect::getGLProcessorKey(const GrGLCaps& caps,
+void CircleEffect::getGLProcessorKey(const GrGLSLCaps& caps,
                                      GrProcessorKeyBuilder* b) const {
     GLCircleEffect::GenKey(*this, caps, b);
 }
@@ -199,7 +204,7 @@ public:
 
     const char* name() const override { return "Ellipse"; }
 
-    void getGLProcessorKey(const GrGLCaps&, GrProcessorKeyBuilder*) const override;
+    void getGLProcessorKey(const GrGLSLCaps&, GrProcessorKeyBuilder*) const override;
 
     GrGLFragmentProcessor* createGLInstance() const override;
 
@@ -282,7 +287,7 @@ public:
                           const TransformedCoordsArray&,
                           const TextureSamplerArray&) override;
 
-    static inline void GenKey(const GrProcessor&, const GrGLCaps&, GrProcessorKeyBuilder*);
+    static inline void GenKey(const GrProcessor&, const GrGLSLCaps&, GrProcessorKeyBuilder*);
 
     void setData(const GrGLProgramDataManager&, const GrProcessor&) override;
 
@@ -312,7 +317,7 @@ void GLEllipseEffect::emitCode(GrGLFPBuilder* builder,
                                          "ellipse",
                                          &ellipseName);
 
-    GrGLFPFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+    GrGLFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
     const char* fragmentPos = fsBuilder->fragmentPosition();
 
     // d is the offset to the ellipse center
@@ -347,7 +352,7 @@ void GLEllipseEffect::emitCode(GrGLFPBuilder* builder,
                            (GrGLSLExpr4(inputColor) * GrGLSLExpr1("alpha")).c_str());
 }
 
-void GLEllipseEffect::GenKey(const GrProcessor& effect, const GrGLCaps&,
+void GLEllipseEffect::GenKey(const GrProcessor& effect, const GrGLSLCaps&,
                              GrProcessorKeyBuilder* b) {
     const EllipseEffect& ee = effect.cast<EllipseEffect>();
     b->add32(ee.getEdgeType());
@@ -366,7 +371,7 @@ void GLEllipseEffect::setData(const GrGLProgramDataManager& pdman, const GrProce
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
-void EllipseEffect::getGLProcessorKey(const GrGLCaps& caps,
+void EllipseEffect::getGLProcessorKey(const GrGLSLCaps& caps,
                                      GrProcessorKeyBuilder* b) const {
     GLEllipseEffect::GenKey(*this, caps, b);
 }

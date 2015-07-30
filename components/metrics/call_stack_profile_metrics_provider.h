@@ -7,8 +7,14 @@
 
 #include <vector>
 
+#include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "base/profiler/stack_sampling_profiler.h"
 #include "components/metrics/metrics_provider.h"
+
+namespace base {
+class MessageLoopProxy;
+}  // namespace base
 
 namespace metrics {
 class ChromeUserMetricsExtension;
@@ -16,20 +22,50 @@ class ChromeUserMetricsExtension;
 // Performs metrics logging for the stack sampling profiler.
 class CallStackProfileMetricsProvider : public MetricsProvider {
  public:
+  // The event that triggered the profile collection.
+  enum Trigger {
+    UNKNOWN,
+    PROCESS_STARTUP,
+    JANKY_TASK,
+    THREAD_HUNG
+  };
+
   CallStackProfileMetricsProvider();
   ~CallStackProfileMetricsProvider() override;
 
   // MetricsProvider:
+  void OnRecordingEnabled() override;
+  void OnRecordingDisabled() override;
   void ProvideGeneralMetrics(ChromeUserMetricsExtension* uma_proto) override;
 
-  // Uses |profiles| as the source data for the next invocation of
-  // ProvideGeneralMetrics, rather than sourcing them from the
-  // StackSamplingProfiler.
-  void SetSourceProfilesForTesting(
-      const std::vector<base::StackSamplingProfiler::Profile>& profiles);
+  // Appends |profiles| for use by the next invocation of ProvideGeneralMetrics,
+  // rather than sourcing them from the StackSamplingProfiler.
+  void AppendSourceProfilesForTesting(
+      const std::vector<base::StackSamplingProfiler::CallStackProfile>&
+          profiles);
+
+ protected:
+  // Finch field trial and group for reporting profiles. Provided here for test
+  // use.
+  static const char kFieldTrialName[];
+  static const char kReportProfilesGroupName[];
 
  private:
-  std::vector<base::StackSamplingProfiler::Profile> source_profiles_for_test_;
+  // Returns true if reporting of profiles is enabled according to the
+  // controlling Finch field trial.
+  static bool IsSamplingProfilingReportingEnabled();
+
+  // Invoked by the profiler on another thread.
+  static void ReceiveCompletedProfiles(
+      scoped_refptr<base::MessageLoopProxy> message_loop,
+      base::WeakPtr<CallStackProfileMetricsProvider> provider,
+      const base::StackSamplingProfiler::CallStackProfiles& profiles);
+  void AppendCompletedProfiles(
+      const base::StackSamplingProfiler::CallStackProfiles& profiles);
+
+  base::StackSamplingProfiler::CallStackProfiles pending_profiles_;
+
+  base::WeakPtrFactory<CallStackProfileMetricsProvider> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(CallStackProfileMetricsProvider);
 };

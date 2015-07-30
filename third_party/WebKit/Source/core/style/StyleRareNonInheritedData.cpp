@@ -32,18 +32,50 @@
 
 namespace blink {
 
+class SameSizeStyleRareNonInheritedData : public RefCounted<StyleRareNonInheritedData> {
+public:
+    float floats[3];
+    int integers;
+
+    LengthPoint lengthPoints[2];
+    LineClampValue lineClamps;
+    DraggableRegionMode draggableRegions;
+
+    void* dataRefs[8];
+    void* ownPtrs[4];
+    void* refPtrs[4];
+
+    FillLayer fillLayers;
+    NinePieceImage ninePieces;
+    FloatSize floatSize;
+    Length lengths;
+
+    StyleColor styleColors[8];
+
+    Vector<String> m_callbackSelectors;
+
+    StyleContentAlignmentData contentAlignmentData[2];
+    StyleSelfAlignmentData selfAlignmentData[4];
+
+    unsigned m_bitFields[2];
+};
+
+static_assert(sizeof(StyleRareNonInheritedData) == sizeof(SameSizeStyleRareNonInheritedData), "StyleRareNonInheritedData_should_stay_small");
+
 StyleRareNonInheritedData::StyleRareNonInheritedData()
     : opacity(ComputedStyle::initialOpacity())
     , m_perspective(ComputedStyle::initialPerspective())
+    , m_shapeImageThreshold(ComputedStyle::initialShapeImageThreshold())
+    , m_order(ComputedStyle::initialOrder())
     , m_perspectiveOrigin(ComputedStyle::initialPerspectiveOrigin())
+    , m_objectPosition(ComputedStyle::initialObjectPosition())
     , lineClamp(ComputedStyle::initialLineClamp())
     , m_draggableRegionMode(DraggableRegionNone)
+    , m_shapeOutside(ComputedStyle::initialShapeOutside())
+    , m_clipPath(ComputedStyle::initialClipPath())
     , m_mask(MaskFillLayer, true)
     , m_pageSize()
-    , m_shapeOutside(ComputedStyle::initialShapeOutside())
     , m_shapeMargin(ComputedStyle::initialShapeMargin())
-    , m_shapeImageThreshold(ComputedStyle::initialShapeImageThreshold())
-    , m_clipPath(ComputedStyle::initialClipPath())
     , m_textDecorationColor(StyleColor::currentColor())
     , m_visitedLinkTextDecorationColor(StyleColor::currentColor())
     , m_visitedLinkBackgroundColor(ComputedStyle::initialBackgroundColor())
@@ -52,21 +84,15 @@ StyleRareNonInheritedData::StyleRareNonInheritedData()
     , m_visitedLinkBorderRightColor(StyleColor::currentColor())
     , m_visitedLinkBorderTopColor(StyleColor::currentColor())
     , m_visitedLinkBorderBottomColor(StyleColor::currentColor())
-    , m_order(ComputedStyle::initialOrder())
-    , m_objectPosition(ComputedStyle::initialObjectPosition())
+    , m_alignContent(ComputedStyle::initialContentAlignment())
+    , m_alignItems(ComputedStyle::initialSelfAlignment())
+    , m_alignSelf(ComputedStyle::initialSelfAlignment())
+    , m_justifyContent(ComputedStyle::initialContentAlignment())
+    , m_justifyItems(ComputedStyle::initialSelfAlignment())
+    , m_justifySelf(ComputedStyle::initialSelfAlignment())
     , m_pageSizeType(PAGE_SIZE_AUTO)
     , m_transformStyle3D(ComputedStyle::initialTransformStyle3D())
     , m_backfaceVisibility(ComputedStyle::initialBackfaceVisibility())
-    , m_alignContent(ComputedStyle::initialAlignContent())
-    , m_alignContentDistribution(ComputedStyle::initialAlignContentDistribution())
-    , m_alignContentOverflowAlignment(ComputedStyle::initialAlignContentOverflowAlignment())
-    , m_alignItems(ComputedStyle::initialAlignItems())
-    , m_alignItemsOverflowAlignment(ComputedStyle::initialAlignItemsOverflowAlignment())
-    , m_alignSelf(ComputedStyle::initialAlignSelf())
-    , m_alignSelfOverflowAlignment(ComputedStyle::initialAlignSelfOverflowAlignment())
-    , m_justifyContent(ComputedStyle::initialJustifyContent())
-    , m_justifyContentDistribution(ComputedStyle::initialJustifyContentDistribution())
-    , m_justifyContentOverflowAlignment(ComputedStyle::initialJustifyContentOverflowAlignment())
     , userDrag(ComputedStyle::initialUserDrag())
     , textOverflow(ComputedStyle::initialTextOverflow())
     , marginBeforeCollapse(MCOLLAPSE)
@@ -86,16 +112,12 @@ StyleRareNonInheritedData::StyleRareNonInheritedData()
     , m_touchAction(ComputedStyle::initialTouchAction())
     , m_objectFit(ComputedStyle::initialObjectFit())
     , m_isolation(ComputedStyle::initialIsolation())
-    , m_justifyItems(ComputedStyle::initialJustifyItems())
-    , m_justifyItemsOverflowAlignment(ComputedStyle::initialJustifyItemsOverflowAlignment())
-    , m_justifyItemsPositionType(ComputedStyle::initialJustifyItemsPositionType())
-    , m_justifySelf(ComputedStyle::initialJustifySelf())
-    , m_justifySelfOverflowAlignment(ComputedStyle::initialJustifySelfOverflowAlignment())
     , m_scrollBehavior(ComputedStyle::initialScrollBehavior())
     , m_scrollBlocksOn(ComputedStyle::initialScrollBlocksOn())
     , m_requiresAcceleratedCompositingForExternalReasons(false)
     , m_hasInlineTransform(false)
     , m_resize(ComputedStyle::initialResize())
+    , m_hasCompositorProxy(false)
 {
     m_maskBoxImage.setMaskDefaults();
 }
@@ -104,7 +126,10 @@ StyleRareNonInheritedData::StyleRareNonInheritedData(const StyleRareNonInherited
     : RefCounted<StyleRareNonInheritedData>()
     , opacity(o.opacity)
     , m_perspective(o.m_perspective)
+    , m_shapeImageThreshold(o.m_shapeImageThreshold)
+    , m_order(o.m_order)
     , m_perspectiveOrigin(o.m_perspectiveOrigin)
+    , m_objectPosition(o.m_objectPosition)
     , lineClamp(o.lineClamp)
     , m_draggableRegionMode(o.m_draggableRegionMode)
     , m_deprecatedFlexibleBox(o.m_deprecatedFlexibleBox)
@@ -117,17 +142,16 @@ StyleRareNonInheritedData::StyleRareNonInheritedData(const StyleRareNonInherited
     , m_gridItem(o.m_gridItem)
     , m_content(o.m_content ? o.m_content->clone() : nullptr)
     , m_counterDirectives(o.m_counterDirectives ? clone(*o.m_counterDirectives) : nullptr)
-    , m_boxShadow(o.m_boxShadow)
-    , m_boxReflect(o.m_boxReflect)
     , m_animations(o.m_animations ? CSSAnimationData::create(*o.m_animations) : nullptr)
     , m_transitions(o.m_transitions ? CSSTransitionData::create(*o.m_transitions) : nullptr)
+    , m_boxShadow(o.m_boxShadow)
+    , m_boxReflect(o.m_boxReflect)
+    , m_shapeOutside(o.m_shapeOutside)
+    , m_clipPath(o.m_clipPath)
     , m_mask(o.m_mask)
     , m_maskBoxImage(o.m_maskBoxImage)
     , m_pageSize(o.m_pageSize)
-    , m_shapeOutside(o.m_shapeOutside)
     , m_shapeMargin(o.m_shapeMargin)
-    , m_shapeImageThreshold(o.m_shapeImageThreshold)
-    , m_clipPath(o.m_clipPath)
     , m_textDecorationColor(o.m_textDecorationColor)
     , m_visitedLinkTextDecorationColor(o.m_visitedLinkTextDecorationColor)
     , m_visitedLinkBackgroundColor(o.m_visitedLinkBackgroundColor)
@@ -136,21 +160,15 @@ StyleRareNonInheritedData::StyleRareNonInheritedData(const StyleRareNonInherited
     , m_visitedLinkBorderRightColor(o.m_visitedLinkBorderRightColor)
     , m_visitedLinkBorderTopColor(o.m_visitedLinkBorderTopColor)
     , m_visitedLinkBorderBottomColor(o.m_visitedLinkBorderBottomColor)
-    , m_order(o.m_order)
-    , m_objectPosition(o.m_objectPosition)
+    , m_alignContent(o.m_alignContent)
+    , m_alignItems(o.m_alignItems)
+    , m_alignSelf(o.m_alignSelf)
+    , m_justifyContent(o.m_justifyContent)
+    , m_justifyItems(o.m_justifyItems)
+    , m_justifySelf(o.m_justifySelf)
     , m_pageSizeType(o.m_pageSizeType)
     , m_transformStyle3D(o.m_transformStyle3D)
     , m_backfaceVisibility(o.m_backfaceVisibility)
-    , m_alignContent(o.m_alignContent)
-    , m_alignContentDistribution(o.m_alignContentDistribution)
-    , m_alignContentOverflowAlignment(o.m_alignContentOverflowAlignment)
-    , m_alignItems(o.m_alignItems)
-    , m_alignItemsOverflowAlignment(o.m_alignItemsOverflowAlignment)
-    , m_alignSelf(o.m_alignSelf)
-    , m_alignSelfOverflowAlignment(o.m_alignSelfOverflowAlignment)
-    , m_justifyContent(o.m_justifyContent)
-    , m_justifyContentDistribution(o.m_justifyContentDistribution)
-    , m_justifyContentOverflowAlignment(o.m_justifyContentOverflowAlignment)
     , userDrag(o.userDrag)
     , textOverflow(o.textOverflow)
     , marginBeforeCollapse(o.marginBeforeCollapse)
@@ -170,16 +188,12 @@ StyleRareNonInheritedData::StyleRareNonInheritedData(const StyleRareNonInherited
     , m_touchAction(o.m_touchAction)
     , m_objectFit(o.m_objectFit)
     , m_isolation(o.m_isolation)
-    , m_justifyItems(o.m_justifyItems)
-    , m_justifyItemsOverflowAlignment(o.m_justifyItemsOverflowAlignment)
-    , m_justifyItemsPositionType(o.m_justifyItemsPositionType)
-    , m_justifySelf(o.m_justifySelf)
-    , m_justifySelfOverflowAlignment(o.m_justifySelfOverflowAlignment)
     , m_scrollBehavior(o.m_scrollBehavior)
     , m_scrollBlocksOn(o.m_scrollBlocksOn)
     , m_requiresAcceleratedCompositingForExternalReasons(o.m_requiresAcceleratedCompositingForExternalReasons)
     , m_hasInlineTransform(o.m_hasInlineTransform)
     , m_resize(o.m_resize)
+    , m_hasCompositorProxy(o.m_hasCompositorProxy)
 {
 }
 
@@ -194,7 +208,10 @@ bool StyleRareNonInheritedData::operator==(const StyleRareNonInheritedData& o) c
 {
     return opacity == o.opacity
         && m_perspective == o.m_perspective
+        && m_shapeImageThreshold == o.m_shapeImageThreshold
+        && m_order == o.m_order
         && m_perspectiveOrigin == o.m_perspectiveOrigin
+        && m_objectPosition == o.m_objectPosition
         && lineClamp == o.lineClamp
         && m_draggableRegionMode == o.m_draggableRegionMode
         && m_deprecatedFlexibleBox == o.m_deprecatedFlexibleBox
@@ -211,12 +228,11 @@ bool StyleRareNonInheritedData::operator==(const StyleRareNonInheritedData& o) c
         && reflectionDataEquivalent(o)
         && animationDataEquivalent(o)
         && transitionDataEquivalent(o)
+        && shapeOutsideDataEquivalent(o)
         && m_mask == o.m_mask
         && m_maskBoxImage == o.m_maskBoxImage
         && m_pageSize == o.m_pageSize
-        && shapeOutsideDataEquivalent(o)
         && m_shapeMargin == o.m_shapeMargin
-        && m_shapeImageThreshold == o.m_shapeImageThreshold
         && clipPathDataEquivalent(o)
         && m_textDecorationColor == o.m_textDecorationColor
         && m_visitedLinkTextDecorationColor == o.m_visitedLinkTextDecorationColor
@@ -226,22 +242,16 @@ bool StyleRareNonInheritedData::operator==(const StyleRareNonInheritedData& o) c
         && m_visitedLinkBorderRightColor == o.m_visitedLinkBorderRightColor
         && m_visitedLinkBorderTopColor == o.m_visitedLinkBorderTopColor
         && m_visitedLinkBorderBottomColor == o.m_visitedLinkBorderBottomColor
-        && m_order == o.m_order
-        && m_objectPosition == o.m_objectPosition
         && m_callbackSelectors == o.m_callbackSelectors
+        && m_alignContent == o.m_alignContent
+        && m_alignItems == o.m_alignItems
+        && m_alignSelf == o.m_alignSelf
+        && m_justifyContent == o.m_justifyContent
+        && m_justifyItems == o.m_justifyItems
+        && m_justifySelf == o.m_justifySelf
         && m_pageSizeType == o.m_pageSizeType
         && m_transformStyle3D == o.m_transformStyle3D
         && m_backfaceVisibility == o.m_backfaceVisibility
-        && m_alignContent == o.m_alignContent
-        && m_alignContentDistribution == o.m_alignContentDistribution
-        && m_alignContentOverflowAlignment == o.m_alignContentOverflowAlignment
-        && m_alignItems == o.m_alignItems
-        && m_alignItemsOverflowAlignment == o.m_alignItemsOverflowAlignment
-        && m_alignSelf == o.m_alignSelf
-        && m_alignSelfOverflowAlignment == o.m_alignSelfOverflowAlignment
-        && m_justifyContent == o.m_justifyContent
-        && m_justifyContentDistribution == o.m_justifyContentDistribution
-        && m_justifyContentOverflowAlignment == o.m_justifyContentOverflowAlignment
         && userDrag == o.userDrag
         && textOverflow == o.textOverflow
         && marginBeforeCollapse == o.marginBeforeCollapse
@@ -258,16 +268,12 @@ bool StyleRareNonInheritedData::operator==(const StyleRareNonInheritedData& o) c
         && m_touchAction == o.m_touchAction
         && m_objectFit == o.m_objectFit
         && m_isolation == o.m_isolation
-        && m_justifyItems == o.m_justifyItems
-        && m_justifyItemsOverflowAlignment == o.m_justifyItemsOverflowAlignment
-        && m_justifyItemsPositionType == o.m_justifyItemsPositionType
-        && m_justifySelf == o.m_justifySelf
-        && m_justifySelfOverflowAlignment == o.m_justifySelfOverflowAlignment
         && m_scrollBehavior == o.m_scrollBehavior
         && m_scrollBlocksOn == o.m_scrollBlocksOn
         && m_requiresAcceleratedCompositingForExternalReasons == o.m_requiresAcceleratedCompositingForExternalReasons
         && m_hasInlineTransform == o.m_hasInlineTransform
-        && m_resize == o.m_resize;
+        && m_resize == o.m_resize
+        && m_hasCompositorProxy == o.m_hasCompositorProxy;
 }
 
 bool StyleRareNonInheritedData::contentDataEquivalent(const StyleRareNonInheritedData& o) const

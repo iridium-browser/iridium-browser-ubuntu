@@ -42,9 +42,9 @@ class HTMLElement;
 
 class ElementRareData : public NodeRareData {
 public:
-    static ElementRareData* create(LayoutObject* renderer)
+    static ElementRareData* create(LayoutObject* layoutObject)
     {
-        return new ElementRareData(renderer);
+        return new ElementRareData(layoutObject);
     }
 
     ~ElementRareData();
@@ -123,18 +123,27 @@ public:
     bool hasPseudoElements() const;
     void clearPseudoElements();
 
+    uint32_t incrementProxyCount() { return ++m_proxyCount; }
+    uint32_t decrementProxyCount()
+    {
+        ASSERT(m_proxyCount);
+        return --m_proxyCount;
+    }
+    uint32_t proxyCount() const { return m_proxyCount; }
+
     void setCustomElementDefinition(PassRefPtrWillBeRawPtr<CustomElementDefinition> definition) { m_customElementDefinition = definition; }
     CustomElementDefinition* customElementDefinition() const { return m_customElementDefinition.get(); }
 
-    WillBeHeapVector<RefPtrWillBeMember<Attr>>& ensureAttrNodeList();
-    WillBeHeapVector<RefPtrWillBeMember<Attr>>* attrNodeList() { return m_attrNodeList.get(); }
+    AttrNodeList& ensureAttrNodeList();
+    AttrNodeList* attrNodeList() { return m_attrNodeList.get(); }
     void removeAttrNodeList() { m_attrNodeList.clear(); }
 
     DECLARE_TRACE_AFTER_DISPATCH();
 
 private:
     short m_tabindex;
-    bool m_tabStop;
+    unsigned short m_tabStop : 1;
+    unsigned short m_proxyCount : 10;
 
     LayoutSize m_minimumSizeForResizing;
     IntSize m_savedLayerScrollOffset;
@@ -143,7 +152,7 @@ private:
     OwnPtrWillBeMember<ClassList> m_classList;
     OwnPtrWillBeMember<ElementShadow> m_shadow;
     OwnPtrWillBeMember<NamedNodeMap> m_attributeMap;
-    OwnPtrWillBeMember<WillBeHeapVector<RefPtrWillBeMember<Attr>>> m_attrNodeList;
+    OwnPtrWillBeMember<AttrNodeList> m_attrNodeList;
     OwnPtrWillBeMember<InputMethodContext> m_inputMethodContext;
     OwnPtrWillBeMember<ElementAnimations> m_elementAnimations;
     OwnPtrWillBeMember<InlineCSSStyleDeclaration> m_cssomWrapper;
@@ -164,10 +173,11 @@ inline LayoutSize defaultMinimumSizeForResizing()
     return LayoutSize(LayoutUnit::max(), LayoutUnit::max());
 }
 
-inline ElementRareData::ElementRareData(LayoutObject* renderer)
-    : NodeRareData(renderer)
+inline ElementRareData::ElementRareData(LayoutObject* layoutObject)
+    : NodeRareData(layoutObject)
     , m_tabindex(0)
     , m_tabStop(true)
+    , m_proxyCount(0)
     , m_minimumSizeForResizing(defaultMinimumSizeForResizing())
 {
     m_isElementRareData = true;

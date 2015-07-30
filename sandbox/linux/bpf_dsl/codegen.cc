@@ -4,12 +4,11 @@
 
 #include "sandbox/linux/bpf_dsl/codegen.h"
 
-#include <linux/filter.h>
-
 #include <limits>
 #include <utility>
 
 #include "base/logging.h"
+#include "sandbox/linux/system_headers/linux_filter.h"
 
 // This CodeGen implementation strives for simplicity while still
 // generating acceptable BPF programs under typical usage patterns
@@ -132,7 +131,8 @@ CodeGen::Node CodeGen::Append(uint16_t code, uint32_t k, size_t jt, size_t jf) {
   CHECK_EQ(program_.size(), equivalent_.size());
 
   Node res = program_.size();
-  program_.push_back(sock_filter{code, jt, jf, k});
+  program_.push_back(sock_filter{
+      code, static_cast<uint8_t>(jt), static_cast<uint8_t>(jf), k});
   equivalent_.push_back(res);
   return res;
 }

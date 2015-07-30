@@ -10,6 +10,7 @@
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/string_util.h"
+#include "components/mime_util/mime_util.h"
 #include "content/browser/download/download_resource_handler.h"
 #include "content/browser/download/download_stats.h"
 #include "content/browser/loader/certificate_resource_handler.h"
@@ -110,16 +111,9 @@ bool BufferedResourceHandler::OnResponseStarted(ResourceResponse* response,
                                                 bool* defer) {
   response_ = response;
 
-  // TODO(darin): It is very odd to special-case 304 responses at this level.
-  // We do so only because the code always has, see r24977 and r29355.  The
-  // fact that 204 is no longer special-cased this way suggests that 304 need
-  // not be special-cased either.
-  //
-  // The network stack only forwards 304 responses that were not received in
-  // response to a conditional request (i.e., If-Modified-Since).  Other 304
-  // responses end up being translated to 200 or whatever the cached response
-  // code happens to be.  It should be very rare to see a 304 at this level.
-
+  // A 304 response should not contain a Content-Type header (RFC 7232 section
+  // 4.1). The following code may incorrectly attempt to add a Content-Type to
+  // the response, and so must be skipped for 304 responses.
   if (!(response_->head.headers.get() &&
         response_->head.headers->response_code() == 304)) {
     if (ShouldSniffContent()) {
@@ -303,7 +297,7 @@ bool BufferedResourceHandler::SelectNextHandler(bool* defer) {
   ResourceRequestInfoImpl* info = GetRequestInfo();
   const std::string& mime_type = response_->head.mime_type;
 
-  if (net::IsSupportedCertificateMimeType(mime_type)) {
+  if (mime_util::IsSupportedCertificateMimeType(mime_type)) {
     // Install certificate file.
     info->set_is_download(true);
     scoped_ptr<ResourceHandler> handler(
@@ -318,7 +312,7 @@ bool BufferedResourceHandler::SelectNextHandler(bool* defer) {
     scoped_ptr<ResourceHandler> handler(
         host_->MaybeInterceptAsStream(request(), response_.get(), &payload));
     if (handler) {
-      DCHECK(!net::IsSupportedMimeType(mime_type));
+      DCHECK(!mime_util::IsSupportedMimeType(mime_type));
       return UseAlternateNextHandler(handler.Pass(), payload);
     }
   }
@@ -334,7 +328,7 @@ bool BufferedResourceHandler::SelectNextHandler(bool* defer) {
 
   bool must_download = MustDownload();
   if (!must_download) {
-    if (net::IsSupportedMimeType(mime_type))
+    if (mime_util::IsSupportedMimeType(mime_type))
       return true;
 
     std::string payload;

@@ -50,40 +50,50 @@ tv.b.unittest.testSuite(function() {
   }
 
   test('invalidStableId', function() {
+    var model = new FakeModel;
     var vp = new FakeViewPort;
-    assertThrows(UIState.fromUserFriendlyString(vp, '15@1.3x6'));
-    assertThrows(UIState.fromUserFriendlyString(vp, '15@2.2x6'));
+    assert.throws(function() {
+      UIState.fromUserFriendlyString(model, vp, '15@1.3x6');
+    });
+    assert.throws(function() {
+      UIState.fromUserFriendlyString(model, vp, '15@2.2x6');
+    });
+    assert.throws(function() {
+      UIState.fromUserFriendlyString(model, vp, '505@1.x5');
+    });
   });
 
   test('invalidScaleX', function() {
+    var model = new FakeModel;
     var vp = new FakeViewPort;
-    assertUndefined(UIState.fromUserFriendlyString(vp, '1@1.2x-1'));
-    assertThrows(UIState.fromUserFriendlyString(vp, '1@1.2x0'));
+    assert.isUndefined(UIState.fromUserFriendlyString(model, vp, '1@1.2x-1'));
+    assert.throws(function() {
+      UIState.fromUserFriendlyString(model, vp, '1@1.2x0');
+    });
   });
 
   test('invalidSyntax', function() {
+    var model = new FakeModel;
     var vp = new FakeViewPort;
-    assertUndefined(UIState.fromUserFriendlyString(vp, '5'));
-    assertUndefined(UIState.fromUserFriendlyString(vp, '505@1x5'));
-    assertUndefined(UIState.fromUserFriendlyString(vp, '505@1.x5'));
-    assertUndefined(UIState.fromUserFriendlyString(vp, '5@x5'));
-    assertUndefined(UIState.fromUserFriendlyString(vp, '1@1.2.3x5'));
-    assertUndefined(UIState.fromUserFriendlyString(vp, 'ab@1.2x5'));
+    assert.isUndefined(UIState.fromUserFriendlyString(model, vp, '5'));
+    assert.isUndefined(UIState.fromUserFriendlyString(model, vp, '5@x5'));
+    assert.isUndefined(UIState.fromUserFriendlyString(model, vp, 'ab@1.2x5'));
   });
 
   test('validString', function() {
     var model = new FakeModel;
     var vp = new FakeViewPort;
-    var str = '-50125.512@1.2x1.1';
+    var str = '-50125.51231@1.2x1.12345';
     var uiState = UIState.fromUserFriendlyString(model, vp, str);
 
-    assertNotUndefined(uiState);
-    assertEquals(-50125.512, uiState.location.xWorld);
-    assertEquals('1.2',
-        uiState.location.containingTrack.eventContainer.stableId);
-    assertEquals(1.1, uiState.scaleX);
+    assert.isDefined(uiState);
+    assert.equal(uiState.location.xWorld, -50125.51231);
+    assert.equal(
+        uiState.location.getContainingTrack(vp).eventContainer.stableId,
+        '1.2');
+    assert.equal(uiState.scaleX, 1.12345);
 
-    assertEquals(str, uiState.toUserFriendlyString());
+    assert.equal(uiState.toUserFriendlyString(vp), str);
   });
 });
 </script>

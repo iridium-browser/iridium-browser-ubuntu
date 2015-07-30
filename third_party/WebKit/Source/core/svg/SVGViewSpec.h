@@ -77,10 +77,10 @@ private:
 template <typename T>
 void SVGViewSpec::inheritViewAttributesFromElement(T* inheritFromElement)
 {
-    if (inheritFromElement->hasAttribute(SVGNames::viewBoxAttr))
+    if (!inheritFromElement->hasEmptyViewBox())
         viewBox()->baseValue()->setValue(inheritFromElement->viewBox()->currentValue()->value());
 
-    if (inheritFromElement->hasAttribute(SVGNames::preserveAspectRatioAttr)) {
+    if (inheritFromElement->preserveAspectRatio()->isSpecified()) {
         preserveAspectRatio()->baseValue()->setAlign(inheritFromElement->preserveAspectRatio()->currentValue()->align());
         preserveAspectRatio()->baseValue()->setMeetOrSlice(inheritFromElement->preserveAspectRatio()->currentValue()->meetOrSlice());
     }

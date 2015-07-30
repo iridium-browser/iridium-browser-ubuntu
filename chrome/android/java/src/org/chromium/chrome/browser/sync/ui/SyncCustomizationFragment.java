@@ -5,12 +5,6 @@
 package org.chromium.chrome.browser.sync.ui;
 
 import android.accounts.Account;
-import android.accounts.AccountManager;
-import android.accounts.AccountManagerCallback;
-import android.accounts.AccountManagerFuture;
-import android.accounts.AuthenticatorException;
-import android.accounts.OperationCanceledException;
-import android.app.Activity;
 import android.app.DialogFragment;
 import android.app.FragmentTransaction;
 import android.content.Intent;
@@ -44,7 +38,6 @@ import org.chromium.sync.internal_api.pub.PassphraseType;
 import org.chromium.sync.internal_api.pub.base.ModelType;
 import org.chromium.sync.signin.AccountManagerHelper;
 
-import java.io.IOException;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -79,15 +72,18 @@ public class SyncCustomizationFragment extends PreferenceFragment implements
     public static final String PREFERENCE_SYNC_RECENT_TABS = "sync_recent_tabs";
     @VisibleForTesting
     public static final String PREFERENCE_ENCRYPTION = "encryption";
+    @VisibleForTesting
+    public static final String PREF_SYNC_SWITCH = "sync_switch";
+    @VisibleForTesting
+    public static final String PREFERENCE_SYNC_MANAGE_DATA = "sync_manage_data";
 
     public static final String ARGUMENT_ACCOUNT = "account";
 
     private static final int ERROR_COLOR = Color.RED;
-    private static final String PREF_SYNC_SWITCH = "sync_switch";
-    private static final String PREFERENCE_SYNC_MANAGE_DATA = "sync_manage_data";
 
     private ChromeSwitchPreference mSyncSwitchPreference;
     private AndroidSyncSettings mAndroidSyncSettings;
+    private boolean mIsSyncInitialized;
 
     @VisibleForTesting
     public static final String[] PREFS_TO_SAVE = {
@@ -119,6 +115,7 @@ public class SyncCustomizationFragment extends PreferenceFragment implements
                              Bundle savedInstanceState) {
         mAndroidSyncSettings = AndroidSyncSettings.get(getActivity());
         mProfileSyncService = ProfileSyncService.get(getActivity());
+        mIsSyncInitialized = mProfileSyncService.isSyncInitialized();
 
         getActivity().setTitle(R.string.sign_in_sync);
 
@@ -222,6 +219,7 @@ public class SyncCustomizationFragment extends PreferenceFragment implements
     @Override
     public void onResume() {
         super.onResume();
+        mIsSyncInitialized = mProfileSyncService.isSyncInitialized();
         // This prevents sync from actually syncing until the dialog is closed.
         mProfileSyncService.setSetupInProgress(true);
         mProfileSyncService.addSyncStateChangedListener(this);
@@ -370,46 +368,14 @@ public class SyncCustomizationFragment extends PreferenceFragment implements
         }
     }
 
-    private void handleEncryptWithGaia(final String passphrase) {
-        AccountManager accountManager = (AccountManager) getActivity().getSystemService(
-                Activity.ACCOUNT_SERVICE);
-        String username = getArguments().getString(ARGUMENT_ACCOUNT);
-        AccountManagerCallback<Bundle> callback = new AccountManagerCallback<Bundle>() {
-            @Override
-            public void run(AccountManagerFuture<Bundle> future) {
-                boolean validPassword = false;
-                try {
-                    Bundle result = future.getResult();
-                    validPassword = result.getBoolean(AccountManager.KEY_BOOLEAN_RESULT);
-                } catch (OperationCanceledException e) {
-                    // TODO(jgreenwald): notify user that we're unable to
-                    // validate passphrase?
-                    Log.e(TAG, "unable to verify password", e);
-                } catch (AuthenticatorException e) {
-                    Log.e(TAG, "unable to verify password", e);
-                } catch (IOException e) {
-                    Log.e(TAG, "unable to verify password", e);
-                }
-
-                Log.d(TAG, "GAIA password valid: " + validPassword);
-                if (validPassword) {
-                    configureEncryption(passphrase, true);
-                } else {
-                    notifyInvalidPassphrase();
-                }
-            }
-        };
-        Account account = AccountManagerHelper.createAccountFromName(username);
-        Bundle options = new Bundle();
-        options.putString(AccountManager.KEY_PASSWORD, passphrase);
-        accountManager.confirmCredentials(account, options, null, callback, null);
-    }
-
     private void handleEncryptWithCustomPassphrase(String passphrase) {
         configureEncryption(passphrase, false);
     }
 
-    private void handleDecryption(String passphrase) {
+    /**
+     * @return whether the passphrase successfully decrypted the pending keys.
+     */
+    private boolean handleDecryption(String passphrase) {
         if (!passphrase.isEmpty() && mProfileSyncService.setDecryptionPassphrase(passphrase)) {
             // PassphraseDialogFragment doesn't handle closing itself, so do it here. This is
             // not done in updateSyncState() because that happens onResume and possibly in other
@@ -417,9 +383,11 @@ public class SyncCustomizationFragment extends PreferenceFragment implements
             closeDialogIfOpen(FRAGMENT_ENTER_PASSWORD);
             // Update our configuration UI.
             updateSyncState();
+            return true;
         } else {
             // Let the user know that the passphrase was not valid.
             notifyInvalidPassphrase();
+            return false;
         }
     }
 
@@ -427,11 +395,14 @@ public class SyncCustomizationFragment extends PreferenceFragment implements
      * Callback for PassphraseDialogFragment.Listener
      */
     @Override
-    public void onPassphraseEntered(String passphrase, boolean isGaia, boolean isUpdate) {
+    public boolean onPassphraseEntered(String passphrase, boolean isGaia, boolean isUpdate) {
         if (isUpdate) {
             handleEncryptWithCustomPassphrase(passphrase);
+            // Setting a new passphrase should always succeed (validation that
+            // it's not an empty passphrase should already have happened).
+            return true;
         } else {
-            handleDecryption(passphrase);
+            return handleDecryption(passphrase);
         }
     }
 
@@ -561,8 +532,12 @@ public class SyncCustomizationFragment extends PreferenceFragment implements
      */
     @Override
     public void syncStateChanged() {
-        // Update all because Password syncability is also affected by the backend.
-        updateSyncStateFromSwitch();
+        boolean wasSyncInitialized = mIsSyncInitialized;
+        mIsSyncInitialized = mProfileSyncService.isSyncInitialized();
+        if (mIsSyncInitialized != wasSyncInitialized) {
+            // Update all because Password syncability is also affected by the backend.
+            updateSyncStateFromSwitch();
+        }
     }
 
     /**

@@ -5,8 +5,12 @@
 login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
   /** @const */ var STEP_SIGNIN = 'signin';
   /** @const */ var STEP_WORKING = 'working';
+  /** @const */ var STEP_ATTRIBUTE_PROMPT = 'attribute-prompt';
   /** @const */ var STEP_ERROR = 'error';
   /** @const */ var STEP_SUCCESS = 'success';
+
+  /* TODO(dzhioev): define this step on C++ side.
+  /** @const */ var STEP_ATTRIBUTE_PROMPT_ERROR = 'attribute-prompt-error';
 
   /** @const */ var HELP_TOPIC_ENROLLMENT = 4631259;
 
@@ -15,6 +19,7 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
       'showStep',
       'showError',
       'doReload',
+      'showAttributePromptStep',
     ],
 
     /**
@@ -79,6 +84,8 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
                                           this.authenticator_.authDomain);
             }
             this.classList.toggle('saml', isSAML);
+            if (Oobe.getInstance().currentScreen == this)
+              Oobe.getInstance().updateScreenSize(this);
           }).bind(this));
 
       this.authenticator_.addEventListener('backButton',
@@ -100,10 +107,21 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
                 false);
           }).bind(this);
 
-      $('oauth-enroll-error-retry').addEventListener('click',
-                                                     this.doRetry_.bind(this));
+      $('oauth-enroll-error-card').addEventListener('buttonclick',
+                                                    this.doRetry_.bind(this));
+      function doneCallback() {
+        chrome.send('oauthEnrollClose', ['done']);
+      };
+
+      $('oauth-enroll-attribute-prompt-error-card').addEventListener(
+          'buttonclick', doneCallback);
+      $('oauth-enroll-success-card').addEventListener(
+          'buttonclick', doneCallback);
+
       $('oauth-enroll-cancel-button').addEventListener('click',
                                                        this.cancel.bind(this));
+      $('oauth-enroll-refresh-button').addEventListener('click',
+                                                        this.cancel.bind(this));
 
       $('oauth-enroll-back-button').addEventListener('click',
           (function(e) {
@@ -111,6 +129,17 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
             $('oauth-enroll-auth-view').back();
             e.preventDefault();
           }).bind(this));
+
+      $('oauth-enroll-attribute-prompt-card').addEventListener('submit',
+          this.onAttributesSubmitted.bind(this));
+
+      $('oauth-enroll-learn-more-link').addEventListener('click',
+          function(event) {
+            chrome.send('oauthEnrollOnLearnMore');
+          });
+
+      $('oauth-enroll-skip-button').addEventListener('click',
+          this.onSkipButtonClicked.bind(this));
     },
 
     /**
@@ -139,14 +168,6 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
         buttons.push(button);
       }
 
-      makeButton(
-          'oauth-enroll-done-button',
-          ['oauth-enroll-focus-on-success'],
-          loadTimeData.getString('oauthEnrollDone'),
-          function() {
-            chrome.send('oauthEnrollClose', ['done']);
-          });
-
       return buttons;
     },
 
@@ -156,6 +177,7 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
      * URL.
      */
     onBeforeShow: function(data) {
+      $('login-header-bar').signinUIState = SIGNIN_UI_STATE.ENROLLMENT;
       var gaiaParams = {};
       gaiaParams.gaiaUrl = data.gaiaUrl;
       gaiaParams.gaiaPath = 'embedded/setup/chromeos';
@@ -178,6 +200,22 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
       this.showStep(STEP_SIGNIN);
     },
 
+    onBeforeHide: function() {
+      $('login-header-bar').signinUIState = SIGNIN_UI_STATE.HIDDEN;
+    },
+
+    /**
+     * Shows attribute-prompt step with pre-filled asset ID and
+     * location.
+     */
+    showAttributePromptStep: function(annotated_asset_id, annotated_location) {
+      $('oauth-enroll-asset-id').value = annotated_asset_id;
+      $('oauth-enroll-location').value = annotated_location;
+      $('oauth-enroll-back-button').hidden = true;
+
+      this.showStep(STEP_ATTRIBUTE_PROMPT);
+    },
+
     /**
      * Cancels enrollment and drops the user back to the login screen.
      */
@@ -191,11 +229,12 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
     /**
      * Switches between the different steps in the enrollment flow.
      * @param {string} step the steps to show, one of "signin", "working",
-     * "error", "success".
+     * "attribute-prompt", "error", "success".
      */
     showStep: function(step) {
       this.classList.toggle('oauth-enroll-state-' + this.currentStep_, false);
       this.classList.toggle('oauth-enroll-state-' + step, true);
+
       var focusElements =
           this.querySelectorAll('.oauth-enroll-focus-on-' + step);
       for (var i = 0; i < focusElements.length; ++i) {
@@ -213,8 +252,15 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
      * @param {boolean} retry whether the retry link should be shown.
      */
     showError: function(message, retry) {
-      $('oauth-enroll-error-message').textContent = message;
-      $('oauth-enroll-error-retry').hidden = !retry;
+      if (this.currentStep_ == STEP_ATTRIBUTE_PROMPT) {
+        $('oauth-enroll-attribute-prompt-error-card').textContent =
+          message;
+        this.showStep(STEP_ATTRIBUTE_PROMPT_ERROR);
+        return;
+      }
+      $('oauth-enroll-error-card').textContent = message;
+      $('oauth-enroll-error-card').buttonLabel =
+          retry ? loadTimeData.getString('oauthEnrollRetry') : '';
       this.showStep(STEP_ERROR);
     },
 
@@ -229,7 +275,24 @@ login.createScreen('OAuthEnrollmentScreen', 'oauth-enrollment', function() {
      */
     doRetry_: function() {
       chrome.send('oauthEnrollRetry');
+    },
+
+    /**
+     * Skips the device attribute update,
+     * shows the successful enrollment step.
+     */
+    onSkipButtonClicked: function() {
+      this.showStep(STEP_SUCCESS);
+    },
+
+    /**
+     * Uploads the device attributes to server. This goes to C++ side through
+     * |chrome| and launches the device attribute update negotiation.
+     */
+    onAttributesSubmitted: function() {
+      chrome.send('oauthEnrollAttributes',
+                  [$('oauth-enroll-asset-id').value,
+                   $('oauth-enroll-location').value]);
     }
   };
 });
-

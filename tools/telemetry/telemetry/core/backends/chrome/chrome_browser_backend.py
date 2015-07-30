@@ -2,22 +2,16 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import contextlib
-import httplib
-import json
 import logging
 import pprint
 import re
-import socket
 import sys
-import urllib2
 
 from telemetry.core.backends import browser_backend
 from telemetry.core.backends.chrome import extension_backend
 from telemetry.core.backends.chrome import system_info_backend
 from telemetry.core.backends.chrome import tab_list_backend
 from telemetry.core.backends.chrome_inspector import devtools_client_backend
-from telemetry.core.backends.chrome_inspector import devtools_http
 from telemetry.core import exceptions
 from telemetry.core import forwarders
 from telemetry.core import user_agent
@@ -188,7 +182,8 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
   def _WaitForBrowserToComeUp(self):
     """ Wait for browser to come up. """
     try:
-      util.WaitFor(self.HasBrowserFinishedLaunching, timeout=30)
+      timeout = self.browser_options.browser_startup_timeout
+      util.WaitFor(self.HasBrowserFinishedLaunching, timeout=timeout)
     except (exceptions.TimeoutException, exceptions.ProcessGoneException) as e:
       if not self.IsBrowserRunning():
         raise exceptions.BrowserGoneException(self.browser, e)

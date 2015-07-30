@@ -60,7 +60,7 @@ LayoutTable::LayoutTable(Element* element)
     , m_hasColElements(false)
     , m_needsSectionRecalc(false)
     , m_columnLogicalWidthChanged(false)
-    , m_columnRenderersValid(false)
+    , m_columnLayoutObjectsValid(false)
     , m_hasCellColspanThatDeterminesTableWidth(false)
     , m_hSpacing(0)
     , m_vSpacing(0)
@@ -203,7 +203,7 @@ void LayoutTable::addChild(LayoutObject* child, LayoutObject* beforeChild)
     if (beforeChild && !beforeChild->isTableSection() && needsTableSection(beforeChild))
         beforeChild = 0;
 
-    LayoutTableSection* section = LayoutTableSection::createAnonymousWithParentRenderer(this);
+    LayoutTableSection* section = LayoutTableSection::createAnonymousWithParent(this);
     addChild(section, beforeChild);
     section->addChild(child);
 }
@@ -211,8 +211,8 @@ void LayoutTable::addChild(LayoutObject* child, LayoutObject* beforeChild)
 void LayoutTable::addChildIgnoringContinuation(LayoutObject* newChild, LayoutObject* beforeChild)
 {
     // We need to bypass the LayoutBlock implementation and instead do a normal addChild() (or we
-    // won't get there at all), so that any missing anonymous table part renderers are
-    // inserted. Otherwise we might end up with an insane render tree with inlines or blocks as
+    // won't get there at all), so that any missing anonymous table part layoutObjects are
+    // inserted. Otherwise we might end up with an insane layout tree with inlines or blocks as
     // direct children of a table, which will break assumptions made all over the code, which may
     // lead to crashers and security issues.
     addChild(newChild, beforeChild);
@@ -236,8 +236,8 @@ void LayoutTable::removeCaption(const LayoutTableCaption* oldCaption)
 
 void LayoutTable::invalidateCachedColumns()
 {
-    m_columnRenderersValid = false;
-    m_columnRenderers.resize(0);
+    m_columnLayoutObjectsValid = false;
+    m_columnLayoutObjects.resize(0);
 }
 
 void LayoutTable::addColumn(const LayoutTableCol*)
@@ -269,7 +269,7 @@ void LayoutTable::updateLogicalWidth()
 
     LayoutBlock* cb = containingBlock();
 
-    LayoutUnit availableLogicalWidth = containingBlockLogicalWidthForContent() + (isOutOfFlowPositioned() ? cb->paddingLogicalWidth() : LayoutUnit(0));
+    LayoutUnit availableLogicalWidth = containingBlockLogicalWidthForContent() + (isOutOfFlowPositioned() ? cb->paddingLogicalWidth() : LayoutUnit());
     bool hasPerpendicularContainingBlock = cb->style()->isHorizontalWritingMode() != style()->isHorizontalWritingMode();
     LayoutUnit containerWidthInInlineDirection = hasPerpendicularContainingBlock ? perpendicularContainingBlockLogicalHeight() : availableLogicalWidth;
 
@@ -351,7 +351,7 @@ LayoutUnit LayoutTable::convertStyleLogicalHeightToComputedHeight(const Length& 
             borders = borderAndPadding;
         }
         computedLogicalHeight = styleLogicalHeight.value() - borders;
-    } else if (styleLogicalHeight.isPercent()) {
+    } else if (styleLogicalHeight.hasPercent()) {
         computedLogicalHeight = computePercentageLogicalHeight(styleLogicalHeight);
     } else if (styleLogicalHeight.isIntrinsic()) {
         computedLogicalHeight = computeIntrinsicLogicalContentHeightUsing(styleLogicalHeight, logicalHeight() - borderAndPadding, borderAndPadding);
@@ -409,9 +409,8 @@ void LayoutTable::simplifiedNormalFlowLayout()
         section->layoutIfNeeded();
         section->layoutRows();
         section->computeOverflowFromCells();
+        section->updateLayerTransformAfterLayout();
     }
-
-    recalcCollapsedBordersIfNeeded();
 }
 
 void LayoutTable::layout()
@@ -553,6 +552,8 @@ void LayoutTable::layout()
 
             setLogicalHeight(logicalHeight() + section->logicalHeight());
 
+            section->updateLayerTransformAfterLayout();
+
             section = sectionBelow(section);
         }
 
@@ -585,21 +586,24 @@ void LayoutTable::layout()
     if (view()->layoutState()->pageLogicalHeight())
         setPageLogicalOffset(view()->layoutState()->pageLogicalOffset(*this, logicalTop()));
 
-    recalcCollapsedBordersIfNeeded();
-
     m_columnLogicalWidthChanged = false;
     clearNeedsLayout();
 }
 
 void LayoutTable::invalidateCollapsedBorders()
 {
-    m_collapsedBordersValid = false;
     m_collapsedBorders.clear();
+    if (!collapseBorders())
+        return;
 
-    setNeedsSimplifiedNormalFlowLayout();
+    m_collapsedBordersValid = false;
+    setMayNeedPaintInvalidation();
 }
 
 // Collect all the unique border values that we want to paint in a sorted list.
+// During the collection, each cell saves its recalculated borders into the cache
+// of its containing section, and invalidates itself if any border changes.
+// This method doesn't affect layout.
 void LayoutTable::recalcCollapsedBordersIfNeeded()
 {
     if (m_collapsedBordersValid || !collapseBorders())
@@ -794,28 +798,28 @@ LayoutTableCol* LayoutTable::firstColumn() const
 void LayoutTable::updateColumnCache() const
 {
     ASSERT(m_hasColElements);
-    ASSERT(m_columnRenderers.isEmpty());
-    ASSERT(!m_columnRenderersValid);
+    ASSERT(m_columnLayoutObjects.isEmpty());
+    ASSERT(!m_columnLayoutObjectsValid);
 
-    for (LayoutTableCol* columnRenderer = firstColumn(); columnRenderer; columnRenderer = columnRenderer->nextColumn()) {
-        if (columnRenderer->isTableColumnGroupWithColumnChildren())
+    for (LayoutTableCol* columnLayoutObject = firstColumn(); columnLayoutObject; columnLayoutObject = columnLayoutObject->nextColumn()) {
+        if (columnLayoutObject->isTableColumnGroupWithColumnChildren())
             continue;
-        m_columnRenderers.append(columnRenderer);
+        m_columnLayoutObjects.append(columnLayoutObject);
     }
-    m_columnRenderersValid = true;
+    m_columnLayoutObjectsValid = true;
 }
 
 LayoutTableCol* LayoutTable::slowColElement(unsigned col, bool* startEdge, bool* endEdge) const
 {
     ASSERT(m_hasColElements);
 
-    if (!m_columnRenderersValid)
+    if (!m_columnLayoutObjectsValid)
         updateColumnCache();
 
     unsigned columnCount = 0;
-    for (unsigned i = 0; i < m_columnRenderers.size(); i++) {
-        LayoutTableCol* columnRenderer = m_columnRenderers[i];
-        unsigned span = columnRenderer->span();
+    for (unsigned i = 0; i < m_columnLayoutObjects.size(); i++) {
+        LayoutTableCol* columnLayoutObject = m_columnLayoutObjects[i];
+        unsigned span = columnLayoutObject->span();
         unsigned startCol = columnCount;
         ASSERT(span >= 1);
         unsigned endCol = columnCount + span - 1;
@@ -825,7 +829,7 @@ LayoutTableCol* LayoutTable::slowColElement(unsigned col, bool* startEdge, bool*
                 *startEdge = startCol == col;
             if (endEdge)
                 *endEdge = endCol == col;
-            return columnRenderer;
+            return columnLayoutObject;
         }
     }
     return 0;
@@ -1293,10 +1297,14 @@ int LayoutTable::firstLineBoxBaseline() const
         return -1;
 
     int baseline = topNonEmptySection->firstLineBoxBaseline();
-    if (baseline > 0)
+    if (baseline >= 0)
         return topNonEmptySection->logicalTop() + baseline;
 
-    // FIXME: A table row always has a baseline per CSS 2.1. Will this return the right value?
+    // FF, Presto and IE use the top of the section as the baseline if its first row is empty of cells or content.
+    // The baseline of an empty row isn't specified by CSS 2.1.
+    if (topNonEmptySection->firstRow() && !topNonEmptySection->firstRow()->firstCell())
+        return topNonEmptySection->logicalTop();
+
     return -1;
 }
 
@@ -1351,7 +1359,7 @@ bool LayoutTable::nodeAtPoint(HitTestResult& result, const HitTestLocation& loca
     return false;
 }
 
-LayoutTable* LayoutTable::createAnonymousWithParentRenderer(const LayoutObject* parent)
+LayoutTable* LayoutTable::createAnonymousWithParent(const LayoutObject* parent)
 {
     RefPtr<ComputedStyle> newStyle = ComputedStyle::createAnonymousStyleWithDisplay(parent->styleRef(), TABLE);
     LayoutTable* newTable = new LayoutTable(0);
@@ -1376,6 +1384,40 @@ const BorderValue& LayoutTable::tableEndBorderAdjoiningCell(const LayoutTableCel
         return style()->borderEnd();
 
     return style()->borderStart();
+}
+
+PaintInvalidationReason LayoutTable::invalidatePaintIfNeeded(PaintInvalidationState& paintInvalidationState, const LayoutBoxModelObject& paintInvalidationContainer)
+{
+    // Information of collapsed borders doesn't affect layout and are for painting only.
+    // Do it now instead of during painting to invalidate table cells if needed.
+    recalcCollapsedBordersIfNeeded();
+    return LayoutBlock::invalidatePaintIfNeeded(paintInvalidationState, paintInvalidationContainer);
+}
+
+void LayoutTable::invalidatePaintOfSubtreesIfNeeded(PaintInvalidationState& childPaintInvalidationState)
+{
+    if (RuntimeEnabledFeatures::slimmingPaintEnabled()) {
+        // Table cells paint background from the containing column group, column, section and row.
+        // If background of any of them changed, we need to invalidate all affected cells.
+        // Here use shouldDoFullPaintInvalidation() as a broader condition of background change.
+        for (LayoutObject* section = firstChild(); section; section = section->nextSibling()) {
+            if (!section->isTableSection())
+                continue;
+            for (LayoutTableRow* row = toLayoutTableSection(section)->firstRow(); row; row = row->nextRow()) {
+                for (LayoutTableCell* cell = row->firstCell(); cell; cell = cell->nextCell()) {
+                    LayoutTableCol* column = colElement(cell->col());
+                    LayoutTableCol* columnGroup = column ? column->enclosingColumnGroup() : 0;
+                    if ((columnGroup && columnGroup->shouldDoFullPaintInvalidation())
+                        || (column && column->shouldDoFullPaintInvalidation())
+                        || section->shouldDoFullPaintInvalidation()
+                        || row->shouldDoFullPaintInvalidation())
+                        cell->invalidateDisplayItemClient(*cell);
+                }
+            }
+        }
+    }
+
+    LayoutBlock::invalidatePaintOfSubtreesIfNeeded(childPaintInvalidationState);
 }
 
 }

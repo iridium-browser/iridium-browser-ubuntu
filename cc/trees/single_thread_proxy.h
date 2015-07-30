@@ -66,6 +66,7 @@ class CC_EXPORT SingleThreadProxy : public Proxy,
 
   // SchedulerClient implementation
   void WillBeginImplFrame(const BeginFrameArgs& args) override;
+  void DidFinishImplFrame() override;
   void ScheduledActionSendBeginMainFrame() override;
   DrawResult ScheduledActionDrawAndSwapIfPossible() override;
   DrawResult ScheduledActionDrawAndSwapForced() override;
@@ -79,7 +80,6 @@ class CC_EXPORT SingleThreadProxy : public Proxy,
   base::TimeDelta DrawDurationEstimate() override;
   base::TimeDelta BeginMainFrameToCommitDurationEstimate() override;
   base::TimeDelta CommitToActivateDurationEstimate() override;
-  void DidBeginImplFrameDeadline() override;
   void SendBeginFramesToChildren(const BeginFrameArgs& args) override;
   void SendBeginMainFrameNotExpectedSoon() override;
 
@@ -100,6 +100,7 @@ class CC_EXPORT SingleThreadProxy : public Proxy,
   void SetNeedsAnimateOnImplThread() override;
   void SetNeedsPrepareTilesOnImplThread() override;
   void SetNeedsCommitOnImplThread() override;
+  void SetVideoNeedsBeginFrames(bool needs_begin_frames) override;
   void PostAnimationEventsToMainThreadOnImplThread(
       scoped_ptr<AnimationEventsVector> events) override;
   bool ReduceContentsTextureMemoryOnImplThread(size_t limit_bytes,
@@ -128,13 +129,12 @@ class CC_EXPORT SingleThreadProxy : public Proxy,
       scoped_ptr<BeginFrameSource> external_begin_frame_source);
 
  private:
-  void BeginMainFrame();
+  void BeginMainFrame(const BeginFrameArgs& begin_frame_args);
   void BeginMainFrameAbortedOnImplThread(CommitEarlyOutReason reason);
   void DoAnimate();
   void DoBeginMainFrame(const BeginFrameArgs& begin_frame_args);
   void DoCommit();
-  DrawResult DoComposite(base::TimeTicks frame_begin_time,
-                         LayerTreeHostImpl::FrameData* frame);
+  DrawResult DoComposite(LayerTreeHostImpl::FrameData* frame);
   void DoSwap();
   void DidCommitAndDrawFrame();
   void CommitComplete();
@@ -159,8 +159,12 @@ class CC_EXPORT SingleThreadProxy : public Proxy,
   scoped_ptr<ResourceUpdateQueue> queue_for_commit_;
   bool next_frame_is_newly_committed_frame_;
 
+#if DCHECK_IS_ON()
+  bool inside_impl_frame_;
+#endif
   bool inside_draw_;
   bool defer_commits_;
+  bool animate_requested_;
   bool commit_requested_;
   bool inside_synchronous_composite_;
 
@@ -170,8 +174,6 @@ class CC_EXPORT SingleThreadProxy : public Proxy,
 
   // This is the callback for the scheduled RequestNewOutputSurface.
   base::CancelableClosure output_surface_creation_callback_;
-
-  scoped_ptr<BeginFrameSource> external_begin_frame_source_;
 
   base::WeakPtrFactory<SingleThreadProxy> weak_factory_;
 

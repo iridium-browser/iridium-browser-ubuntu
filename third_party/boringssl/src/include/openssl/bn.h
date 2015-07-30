@@ -124,7 +124,9 @@
 #define OPENSSL_HEADER_BN_H
 
 #include <openssl/base.h>
+#include <openssl/thread.h>
 
+#include <inttypes.h>  /* for PRIu64 and friends */
 #include <stdio.h>  /* for FILE* */
 
 #if defined(__cplusplus)
@@ -137,13 +139,24 @@ extern "C" {
  * will allow you to work with numbers until you run out of memory. */
 
 
-/* BN_ULONG is the native word size when working with big integers. */
+/* BN_ULONG is the native word size when working with big integers.
+ *
+ * Note: on some platforms, inttypes.h does not define print format macros in
+ * C++ unless |__STDC_FORMAT_MACROS| defined. As this is a public header, bn.h
+ * does not define |__STDC_FORMAT_MACROS| itself. C++ source files which use the
+ * FMT macros must define it externally. */
 #if defined(OPENSSL_64_BIT)
 #define BN_ULONG uint64_t
 #define BN_BITS2 64
+#define BN_DEC_FMT1	"%" PRIu64
+#define BN_DEC_FMT2	"%019" PRIu64
+#define BN_HEX_FMT1	"%" PRIx64
 #elif defined(OPENSSL_32_BIT)
 #define BN_ULONG uint32_t
 #define BN_BITS2 32
+#define BN_DEC_FMT1	"%" PRIu32
+#define BN_DEC_FMT2	"%09" PRIu32
+#define BN_HEX_FMT1	"%" PRIx32
 #else
 #error "Must define either OPENSSL_32_BIT or OPENSSL_64_BIT"
 #endif
@@ -711,15 +724,13 @@ OPENSSL_EXPORT BN_MONT_CTX *BN_MONT_CTX_copy(BN_MONT_CTX *to,
 OPENSSL_EXPORT int BN_MONT_CTX_set(BN_MONT_CTX *mont, const BIGNUM *mod,
                                    BN_CTX *ctx);
 
-/* BN_MONT_CTX_set_locked takes the lock indicated by |lock| and checks whether
- * |*pmont| is NULL. If so, it creates a new |BN_MONT_CTX| and sets the modulus
- * for it to |mod|. It then stores it as |*pmont| and returns it, or NULL on
- * error.
+/* BN_MONT_CTX_set_locked takes |lock| and checks whether |*pmont| is NULL. If
+ * so, it creates a new |BN_MONT_CTX| and sets the modulus for it to |mod|. It
+ * then stores it as |*pmont| and returns it, or NULL on error.
  *
  * If |*pmont| is already non-NULL then the existing value is returned. */
-OPENSSL_EXPORT BN_MONT_CTX *BN_MONT_CTX_set_locked(BN_MONT_CTX **pmont,
-                                                   int lock, const BIGNUM *mod,
-                                                   BN_CTX *ctx);
+BN_MONT_CTX *BN_MONT_CTX_set_locked(BN_MONT_CTX **pmont, CRYPTO_MUTEX *lock,
+                                    const BIGNUM *mod, BN_CTX *bn_ctx);
 
 /* BN_to_montgomery sets |ret| equal to |a| in the Montgomery domain. It
  * returns one on success and zero on error. */

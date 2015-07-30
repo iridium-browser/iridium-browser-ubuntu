@@ -70,7 +70,6 @@ WebDevToolsFrontendImpl::WebDevToolsFrontendImpl(
 
 WebDevToolsFrontendImpl::~WebDevToolsFrontendImpl()
 {
-    ASSERT(!m_devtoolsHost);
 }
 
 void WebDevToolsFrontendImpl::didClearWindowObject(WebLocalFrameImpl* frame)
@@ -83,8 +82,9 @@ void WebDevToolsFrontendImpl::didClearWindowObject(WebLocalFrameImpl* frame)
         if (m_devtoolsHost)
             m_devtoolsHost->disconnectClient();
         m_devtoolsHost = DevToolsHost::create(this, m_webFrame->frame());
-        v8::Handle<v8::Object> global = scriptState->context()->Global();
-        v8::Handle<v8::Value> devtoolsHostObj = toV8(m_devtoolsHost.get(), global, scriptState->isolate());
+        v8::Local<v8::Object> global = scriptState->context()->Global();
+        v8::Local<v8::Value> devtoolsHostObj = toV8(m_devtoolsHost.get(), global, scriptState->isolate());
+        ASSERT(!devtoolsHostObj.IsEmpty());
         global->Set(v8AtomicString(isolate, "DevToolsHost"), devtoolsHostObj);
     }
 

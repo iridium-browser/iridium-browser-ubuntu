@@ -9,13 +9,12 @@
 #include <vector>
 
 #include "base/gtest_prod_util.h"
-#include "base/memory/ref_counted.h"
 #include "base/strings/string16.h"
+#include "base/threading/thread_checker.h"
 #include "base/time/time.h"
 
 namespace base {
 class DictionaryValue;
-class SingleThreadTaskRunner;
 }
 
 namespace net {
@@ -30,6 +29,7 @@ namespace data_reduction_proxy {
 
 extern const char kSessionHeaderOption[];
 extern const char kCredentialsHeaderOption[];
+extern const char kSecureSessionHeaderOption[];
 extern const char kBuildNumberHeaderOption[];
 extern const char kPatchNumberHeaderOption[];
 extern const char kClientHeaderOption[];
@@ -40,19 +40,20 @@ extern const char kExperimentsOption[];
 extern const char kAndroidWebViewProtocolVersion[];
 #endif
 
-#define CLIENT_ENUMS_LIST \
-    CLIENT_ENUM(UNKNOWN, "") \
-    CLIENT_ENUM(WEBVIEW_ANDROID, "webview") \
-    CLIENT_ENUM(CHROME_ANDROID, "android") \
-    CLIENT_ENUM(CHROME_IOS, "ios") \
-    CLIENT_ENUM(CHROME_MAC, "mac") \
-    CLIENT_ENUM(CHROME_CHROMEOS, "chromeos") \
-    CLIENT_ENUM(CHROME_LINUX, "linux") \
-    CLIENT_ENUM(CHROME_WINDOWS, "win") \
-    CLIENT_ENUM(CHROME_FREEBSD, "freebsd") \
-    CLIENT_ENUM(CHROME_OPENBSD, "openbsd") \
-    CLIENT_ENUM(CHROME_SOLARIS, "solaris") \
-    CLIENT_ENUM(CHROME_QNX, "qnx")
+#define CLIENT_ENUMS_LIST                  \
+  CLIENT_ENUM(UNKNOWN, "")                 \
+  CLIENT_ENUM(CRONET_ANDROID, "cronet")    \
+  CLIENT_ENUM(WEBVIEW_ANDROID, "webview")  \
+  CLIENT_ENUM(CHROME_ANDROID, "android")   \
+  CLIENT_ENUM(CHROME_IOS, "ios")           \
+  CLIENT_ENUM(CHROME_MAC, "mac")           \
+  CLIENT_ENUM(CHROME_CHROMEOS, "chromeos") \
+  CLIENT_ENUM(CHROME_LINUX, "linux")       \
+  CLIENT_ENUM(CHROME_WINDOWS, "win")       \
+  CLIENT_ENUM(CHROME_FREEBSD, "freebsd")   \
+  CLIENT_ENUM(CHROME_OPENBSD, "openbsd")   \
+  CLIENT_ENUM(CHROME_SOLARIS, "solaris")   \
+  CLIENT_ENUM(CHROME_QNX, "qnx")
 
 #define CLIENT_ENUM(name, str_value) name,
 typedef enum {
@@ -83,11 +84,9 @@ class DataReductionProxyRequestOptions {
                                    std::string* credentials);
 
   // Constructs a DataReductionProxyRequestOptions object with the given
-  // client type, config, and network task runner.
-  DataReductionProxyRequestOptions(
-      Client client,
-      DataReductionProxyConfig* config,
-      scoped_refptr<base::SingleThreadTaskRunner> network_task_runner);
+  // client type, and config.
+  DataReductionProxyRequestOptions(Client client,
+                                   DataReductionProxyConfig* config);
 
   virtual ~DataReductionProxyRequestOptions();
 
@@ -129,6 +128,9 @@ class DataReductionProxyRequestOptions {
   void SetCredentials(const std::string& session,
                       const std::string& credentials);
 
+  // Sets the credentials for sending to the Data Reduction Proxy.
+  void SetSecureSession(const std::string& secure_session);
+
  protected:
   void SetHeader(net::HttpRequestHeaders* headers);
 
@@ -145,11 +147,12 @@ class DataReductionProxyRequestOptions {
   virtual std::string GetDefaultKey() const;
 
   // Visible for testing.
-  DataReductionProxyRequestOptions(
-      Client client,
-      const std::string& version,
-      DataReductionProxyConfig* config,
-      scoped_refptr<base::SingleThreadTaskRunner> network_task_runner);
+  DataReductionProxyRequestOptions(Client client,
+                                   const std::string& version,
+                                   DataReductionProxyConfig* config);
+
+  // Visible for testing.
+  virtual const std::string& GetSecureSession() const;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(DataReductionProxyRequestOptionsTest,
@@ -206,6 +209,7 @@ class DataReductionProxyRequestOptions {
   std::string version_;
   std::string session_;
   std::string credentials_;
+  std::string secure_session_;
   std::string build_;
   std::string patch_;
   std::string lofi_;
@@ -219,9 +223,11 @@ class DataReductionProxyRequestOptions {
   // |SetCredentials|.
   bool use_assigned_credentials_;
 
+  // Must outlive |this|.
   DataReductionProxyConfig* data_reduction_proxy_config_;
 
-  scoped_refptr<base::SingleThreadTaskRunner> network_task_runner_;
+  // Enforce usage on the IO thread.
+  base::ThreadChecker thread_checker_;
 
   DISALLOW_COPY_AND_ASSIGN(DataReductionProxyRequestOptions);
 };

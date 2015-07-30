@@ -322,9 +322,8 @@ GoogleStreamingRemoteEngine::ConnectBothStreams(const FSMEventArgs&) {
                       std::string(kDownstreamUrl) +
                       JoinString(downstream_args, '&'));
 
-  downstream_fetcher_.reset(URLFetcher::Create(
-      kDownstreamUrlFetcherIdForTesting, downstream_url, URLFetcher::GET,
-      this));
+  downstream_fetcher_ = URLFetcher::Create(
+      kDownstreamUrlFetcherIdForTesting, downstream_url, URLFetcher::GET, this);
   downstream_fetcher_->SetRequestContext(url_context_.get());
   downstream_fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES |
                                     net::LOAD_DO_NOT_SEND_COOKIES |
@@ -375,8 +374,8 @@ GoogleStreamingRemoteEngine::ConnectBothStreams(const FSMEventArgs&) {
                     std::string(kUpstreamUrl) +
                     JoinString(upstream_args, '&'));
 
-  upstream_fetcher_.reset(URLFetcher::Create(
-      kUpstreamUrlFetcherIdForTesting, upstream_url, URLFetcher::POST, this));
+  upstream_fetcher_ = URLFetcher::Create(kUpstreamUrlFetcherIdForTesting,
+                                         upstream_url, URLFetcher::POST, this);
   if (use_framed_post_data_)
     upstream_fetcher_->SetChunkedUpload("application/octet-stream");
   else
@@ -445,20 +444,17 @@ GoogleStreamingRemoteEngine::ProcessDownstreamResponse(
       case proto::SpeechRecognitionEvent::STATUS_ABORTED:
         return Abort(SPEECH_RECOGNITION_ERROR_ABORTED);
       case proto::SpeechRecognitionEvent::STATUS_AUDIO_CAPTURE:
-        return Abort(SPEECH_RECOGNITION_ERROR_AUDIO);
+        return Abort(SPEECH_RECOGNITION_ERROR_AUDIO_CAPTURE);
       case proto::SpeechRecognitionEvent::STATUS_NETWORK:
         return Abort(SPEECH_RECOGNITION_ERROR_NETWORK);
       case proto::SpeechRecognitionEvent::STATUS_NOT_ALLOWED:
-        // TODO(hans): We need a better error code for this.
-        return Abort(SPEECH_RECOGNITION_ERROR_ABORTED);
+        return Abort(SPEECH_RECOGNITION_ERROR_NOT_ALLOWED);
       case proto::SpeechRecognitionEvent::STATUS_SERVICE_NOT_ALLOWED:
-        // TODO(hans): We need a better error code for this.
-        return Abort(SPEECH_RECOGNITION_ERROR_ABORTED);
+        return Abort(SPEECH_RECOGNITION_ERROR_SERVICE_NOT_ALLOWED);
       case proto::SpeechRecognitionEvent::STATUS_BAD_GRAMMAR:
         return Abort(SPEECH_RECOGNITION_ERROR_BAD_GRAMMAR);
       case proto::SpeechRecognitionEvent::STATUS_LANGUAGE_NOT_SUPPORTED:
-        // TODO(hans): We need a better error code for this.
-        return Abort(SPEECH_RECOGNITION_ERROR_ABORTED);
+        return Abort(SPEECH_RECOGNITION_ERROR_LANGUAGE_NOT_SUPPORTED);
     }
   }
 

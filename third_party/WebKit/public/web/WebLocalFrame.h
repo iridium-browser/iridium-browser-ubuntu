@@ -16,6 +16,7 @@ class WebContentSettingsClient;
 class WebDevToolsAgent;
 class WebDevToolsAgentClient;
 class WebFrameClient;
+class WebNode;
 class WebScriptExecutionCallback;
 class WebSuspendableTask;
 struct WebPrintPresetOptions;
@@ -120,7 +121,7 @@ public:
     // Moves the selection extent point. This function does not allow the
     // selection to collapse. If the new extent is set to the same position as
     // the current base, this function will do nothing.
-    virtual void moveRangeSelectionExtent(const WebPoint&, TextGranularity = CharacterGranularity) = 0;
+    virtual void moveRangeSelectionExtent(const WebPoint&) = 0;
 
     // Content Settings -------------------------------------------------------
 
@@ -128,10 +129,19 @@ public:
 
     // App banner -------------------------------------------------------------
 
-    // Request to show an application install banner for the given |platform|.
+    // Request to show an application install banner for the given |platforms|.
     // The implementation can request the embedder to cancel the call by setting
     // |cancel| to true.
-    virtual void willShowInstallBannerPrompt(const WebString& platform, WebAppBannerPromptReply*) = 0;
+    virtual void willShowInstallBannerPrompt(int requestId, const WebVector<WebString>& platforms, WebAppBannerPromptReply*) = 0;
+
+    // Old version of the above function missing |requestId|.
+    // TODO(benwells): remove this once the above is rolled into chrome.
+    virtual void willShowInstallBannerPrompt(const WebVector<WebString>& platforms, WebAppBannerPromptReply*) = 0;
+
+    // Image reload -----------------------------------------------------------
+
+    // If the provided node is an image, reload the image bypassing the cache.
+    virtual void reloadImage(const WebNode&) = 0;
 };
 
 } // namespace blink

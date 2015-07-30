@@ -84,6 +84,18 @@
     "dependencies": ["permission:audioModem"],
     "contexts": ["blessed_extension"]
   },
+  "autofillPrivate": [{
+    "dependencies": ["permission:autofillPrivate"],
+    "contexts": ["blessed_extension"]
+  }, {
+    "channel": "trunk",
+    "contexts": ["webui"],
+    "matches": [
+      "chrome://md-settings/*",
+      "chrome://settings/*",
+      "chrome://settings-frame/*"
+    ]
+  }],
   "automationInternal": {
     "internal": true,
     "dependencies": ["manifest:automation"],
@@ -495,6 +507,10 @@
     "dependencies": ["permission:inputMethodPrivate"],
     "contexts": ["blessed_extension"]
   },
+  "instanceID": {
+    "dependencies": ["permission:gcm"],
+    "contexts": ["blessed_extension"]
+  },
   "launcherPage": {
     "dependencies": ["manifest:launcher_page"],
     "contexts": ["blessed_extension"]
@@ -568,6 +584,18 @@
     "dependencies": ["permission:pageCapture"],
     "contexts": ["blessed_extension"]
   },
+  "passwordsPrivate": [{
+    "dependencies": ["permission:passwordsPrivate"],
+    "contexts": ["blessed_extension"]
+  }, {
+    "channel": "trunk",
+    "contexts": ["webui"],
+    "matches": [
+      "chrome://md-settings/*",
+      "chrome://settings/*",
+      "chrome://settings-frame/*"
+    ]
+  }],
   "permissions": {
     "channel": "stable",
     "extension_types": ["extension", "legacy_packaged_app", "platform_app"],
@@ -619,6 +647,18 @@
     "dependencies": ["permission:rtcPrivate"],
     "contexts": ["blessed_extension"]
   },
+  "searchEnginesPrivate": [{
+    "dependencies": ["permission:searchEnginesPrivate"],
+    "contexts": ["blessed_extension"]
+  }, {
+    "channel": "trunk",
+    "contexts": ["webui"],
+    "matches": [
+      "chrome://md-settings/*",
+      "chrome://settings/*",
+      "chrome://settings-frame/*"
+    ]
+  }],
   "sessions": {
     "dependencies": ["permission:sessions"],
     "contexts": ["blessed_extension"]
@@ -700,6 +740,10 @@
     "dependencies": ["permission:webrtcAudioPrivate"],
     "contexts": ["blessed_extension"]
   },
+  "webrtcDesktopCapturePrivate": {
+    "dependencies": ["permission:webrtcDesktopCapturePrivate"],
+    "contexts": ["blessed_extension"]
+  },
   "webrtcLoggingPrivate": {
     "dependencies": ["permission:webrtcLoggingPrivate"],
     "contexts": ["blessed_extension"]
@@ -721,6 +765,10 @@
     // NOTE: even though this is only used by the webstore hosted app, which
     // normally would mean blessed_web_page, component hosted apps are actually
     // given the blessed_extension denomination. Confusing.
+    "contexts": ["blessed_extension"]
+  },
+  "webstoreWidgetPrivate": {
+    "dependencies": ["permission:webstoreWidgetPrivate"],
     "contexts": ["blessed_extension"]
   },
   "webviewTag": {

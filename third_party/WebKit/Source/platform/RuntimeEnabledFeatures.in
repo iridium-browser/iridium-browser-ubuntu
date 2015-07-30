@@ -16,12 +16,12 @@
 // condition=ENABLE_NAME is used for wrapping features in compile-time
 // #if ENABLE(FEATURE) guards.  These are deprecated and should all be removed.
 
-AnyPointerMediaQueries status=stable
-AppBanner status=experimental
+AppBanner status=stable
 ApplicationCache status=stable
 AudioVideoTracks depends_on=Media, status=experimental
 AuthorShadowDOMForAnyElement
 BackgroundSync status=experimental
+BackgroundSyncV2 status=experimental
 // Enable bleeding-edge code to make Blink draw content faster.
 // The changes enabled behind this flag are very likely to break lots of content.
 // ** DO NOT use this flag unless you know what you are doing. **
@@ -37,7 +37,6 @@ ContextMenu status=experimental
 CredentialManager status=test
 CSS3Text status=experimental
 CSS3TextDecorations status=experimental
-CSSAnimationUnprefixed status=stable
 CSSAttributeCaseSensitivity status=experimental
 CSSCompositing status=stable
 CSSFontSizeAdjust status=experimental
@@ -46,6 +45,7 @@ CSSMaskSourceType status=experimental
 CSSMotionPath status=experimental
 CSSOMSmoothScroll status=experimental
 CSSScrollBlocksOn status=experimental
+CSSTouchActionPanDirections status=experimental
 CSSViewport status=experimental
 // getPropertyCSSValue, CSSValue, etc. will be removed once layout tests no longer depend on them. crbug.com/331608
 CustomSchemeHandler depends_on=NavigatorContentUtils, status=experimental
@@ -60,25 +60,27 @@ ComputedAccessibilityInfo status=experimental
 ExperimentalCanvasFeatures status=test
 ExperimentalContentSecurityPolicyFeatures status=experimental
 FastMobileScrolling
+FirstPartyIncludesAncestors status=experimental
 FileAPIBlobClose status=experimental
 FileSystem status=stable
 FormDataNewMethods status=experimental
 FullscreenUnprefixed status=test
+FrameTimingSupport status=experimental
 Geofencing status=experimental
 GeometryInterfaces status=test
 HTMLPopupMenu status=stable
 GlobalCacheStorage status=stable
 ImageColorProfiles
-ImageDataConstructor status=stable
 ImageRenderingPixelated status=stable
 IMEAPI status=experimental
 IndexedDBExperimental status=experimental
 InputModeAttribute status=experimental
 KeyboardEventCode status=experimental
+KeyboardEventKey status=test
 LangAttributeAwareFormControlUI
 LinkPreconnect status=experimental
+LinkPreload status=experimental
 LinkHeader status=experimental
-LocalStorage status=stable
 FractionalScrollOffsets status=experimental
 GlobalFetch status=stable
 Media status=stable
@@ -94,7 +96,7 @@ NavigatorConnect status=experimental
 NavigatorContentUtils
 NetworkInformation status=stable
 // CSS parser based on the css-syntax spec. crbug.com/330389
-NewCSSParser status=experimental
+NewCSSParser status=stable
 NotificationConstructor status=stable
 NotificationExperimental status=test
 Notifications status=stable
@@ -106,9 +108,8 @@ OverlayFullscreenVideo
 OverlayScrollbars
 PagePopup status=stable
 PathOpsSVGClipping
-PeerConnection status=stable
 Permissions status=stable
-Picture status=stable
+PointerEvent
 PreciseMemoryInfo
 // This feature is deprecated and replaced by EncryptedMedia.
 // See http://crbug.com/451117 for current status.
@@ -117,13 +118,9 @@ PrefixedEncryptedMedia status=stable
 // See https://crbug.com/346236 for current status.
 PrefixedVideoFullscreen status=stable
 Presentation status=test
-PseudoClassesInMatchingCriteriaInAuthorShadowTrees status=test
 PushMessaging status=stable
 // Push messaging payloads are blocked on the Push API supporting encryption.
 PushMessagingData status=test
-// PushManager.hasPermission() is currently disabled, expecting Permissions API
-// to fulfill the same role.
-PushMessagingHasPermission status=test
 QuotaPromise status=experimental
 ReducedReferrerGranularity
 RegionBasedColumns status=experimental
@@ -138,11 +135,11 @@ ServiceWorkerCache status=stable
 ServiceWorkerClientAttributes status=stable
 ServiceWorkerNotifications status=stable
 ServiceWorkerOnFetch status=stable
-SessionStorage status=stable
 SharedWorker status=stable
 SlimmingPaint
-SlimmingPaintCompositorLayerization
+SlimmingPaintCompositorLayerization depends_on=SlimmingPaint
 SlimmingPaintUnderInvalidationChecking depends_on=SlimmingPaint
+SlimmingPaintStrictCullRectClipping depends_on=SlimmingPaint
 StaleWhileRevalidateCacheControl
 // Do not turn this flag into stable, because many interfaces that should not
 // be shipped would be enabled. Instead, remove the flag from the shipping
@@ -159,15 +156,18 @@ ThreadedParserDataReceiver
 Touch status=stable
 TouchIconLoading
 UnsafeES3APIs
+UnsandboxedAuxiliary status=experimental
 UserSelectAll status=experimental
-VRDevice depends_on=GeometryInterfaces
 WebAnimationsAPI status=experimental
+WebAnimationsSVG status=experimental
 WebAudio condition=WEB_AUDIO, status=stable
 WebGLDraftExtensions status=experimental
 WebGLImageChromium
 WebMIDI status=stable
+WebVR depends_on=GeometryInterfaces
 WebVTTRegions depends_on=Media, status=experimental
 V8IdleTasks
 XSLT status=stable
 SVG1DOM status=stable
 ScrollCustomization
+ScrollRestoration status=experimental

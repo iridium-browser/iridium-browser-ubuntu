@@ -43,14 +43,14 @@ QuicAckFrame MakeAckFrameWithNackRanges(size_t num_nack_ranges,
 class TestSession : public QuicSession {
  public:
   TestSession(QuicConnection* connection, const QuicConfig& config);
-  virtual ~TestSession();
+  ~TestSession() override;
 
   MOCK_METHOD1(CreateIncomingDataStream, QuicDataStream*(QuicStreamId id));
   MOCK_METHOD0(CreateOutgoingDataStream, QuicDataStream*());
 
   void SetCryptoStream(QuicCryptoStream* stream);
 
-  virtual QuicCryptoStream* GetCryptoStream() override;
+  QuicCryptoStream* GetCryptoStream() override;
 
  private:
   QuicCryptoStream* crypto_stream_;
@@ -154,20 +154,21 @@ class MockTimeWaitListManager : public QuicTimeWaitListManager {
   MockTimeWaitListManager(QuicPacketWriter* writer,
                           QuicServerSessionVisitor* visitor,
                           QuicConnectionHelperInterface* helper);
-
   ~MockTimeWaitListManager() override;
 
-  MOCK_METHOD3(AddConnectionIdToTimeWait,
+  MOCK_METHOD4(AddConnectionIdToTimeWait,
                void(QuicConnectionId connection_id,
                     QuicVersion version,
+                    bool connection_rejected_statelessly,
                     QuicEncryptedPacket* close_packet));
 
   void QuicTimeWaitListManager_AddConnectionIdToTimeWait(
       QuicConnectionId connection_id,
       QuicVersion version,
+      bool connection_rejected_statelessly,
       QuicEncryptedPacket* close_packet) {
-    QuicTimeWaitListManager::AddConnectionIdToTimeWait(connection_id, version,
-                                                       close_packet);
+    QuicTimeWaitListManager::AddConnectionIdToTimeWait(
+        connection_id, version, connection_rejected_statelessly, close_packet);
   }
 
   MOCK_METHOD5(ProcessPacket,

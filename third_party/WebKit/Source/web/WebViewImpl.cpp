@@ -38,7 +38,7 @@
 #include "core/dom/Document.h"
 #include "core/dom/DocumentMarkerController.h"
 #include "core/dom/Fullscreen.h"
-#include "core/dom/NodeRenderingTraversal.h"
+#include "core/dom/LayoutTreeBuilderTraversal.h"
 #include "core/dom/Text.h"
 #include "core/editing/Editor.h"
 #include "core/editing/FrameSelection.h"
@@ -81,12 +81,14 @@
 #include "core/page/EventHandler.h"
 #include "core/page/FocusController.h"
 #include "core/page/FrameTree.h"
-#include "core/page/InjectedStyleSheets.h"
 #include "core/page/Page.h"
 #include "core/page/PagePopupClient.h"
 #include "core/page/PointerLockController.h"
 #include "core/page/ScopedPageLoadDeferrer.h"
 #include "core/page/TouchDisambiguation.h"
+#include "core/paint/DeprecatedPaintLayer.h"
+#include "core/timing/DOMWindowPerformance.h"
+#include "core/timing/Performance.h"
 #include "modules/accessibility/AXObject.h"
 #include "modules/accessibility/AXObjectCacheImpl.h"
 #include "modules/credentialmanager/CredentialManagerClient.h"
@@ -126,6 +128,8 @@
 #include "public/web/WebActiveWheelFlingParameters.h"
 #include "public/web/WebAutofillClient.h"
 #include "public/web/WebBeginFrameArgs.h"
+#include "public/web/WebElement.h"
+#include "public/web/WebFrame.h"
 #include "public/web/WebFrameClient.h"
 #include "public/web/WebHitTestResult.h"
 #include "public/web/WebInputElement.h"
@@ -134,6 +138,7 @@
 #include "public/web/WebPlugin.h"
 #include "public/web/WebPluginAction.h"
 #include "public/web/WebRange.h"
+#include "public/web/WebSelection.h"
 #include "public/web/WebTextInputInfo.h"
 #include "public/web/WebViewClient.h"
 #include "public/web/WebWindowFeatures.h"
@@ -340,22 +345,20 @@ void WebView::didExitModalLoop()
 
 void WebViewImpl::setMainFrame(WebFrame* frame)
 {
-    if (frame->isWebLocalFrame())
-        toWebLocalFrameImpl(frame)->initializeCoreFrame(&page()->frameHost(), 0, nullAtom, nullAtom);
-    else
+    if (frame->isWebLocalFrame()) {
+        WebLocalFrameImpl* localFrame = toWebLocalFrameImpl(frame);
+        localFrame->initializeCoreFrame(&page()->frameHost(), 0, nullAtom, nullAtom);
+        // Composited WebViews want repaints outside the frame visible rect.
+        localFrame->frame()->view()->setClipsRepaints(!m_layerTreeView);
+    } else {
         toWebRemoteFrameImpl(frame)->initializeCoreFrame(&page()->frameHost(), 0, nullAtom);
+    }
 }
 
 void WebViewImpl::setCredentialManagerClient(WebCredentialManagerClient* webCredentialManagerClient)
 {
     ASSERT(m_page);
     provideCredentialManagerClientTo(*m_page, new CredentialManagerClient(webCredentialManagerClient));
-}
-
-void WebViewImpl::setDevToolsAgentClient(WebDevToolsAgentClient* devToolsClient)
-{
-    ASSERT(mainFrameImpl());
-    mainFrameImpl()->setDevToolsAgentClient(devToolsClient);
 }
 
 void WebViewImpl::setPrerendererClient(WebPrerendererClient* prerendererClient)
@@ -412,19 +415,13 @@ WebViewImpl::WebViewImpl(WebViewClient* client)
     , m_rootGraphicsLayer(0)
     , m_rootTransformLayer(0)
     , m_graphicsLayerFactory(adoptPtr(new GraphicsLayerFactoryChromium(this)))
-    , m_isAcceleratedCompositingActive(false)
-    , m_layerTreeViewCommitsDeferred(false)
-    , m_layerTreeViewClosed(false)
     , m_matchesHeuristicsForGpuRasterization(false)
     , m_recreatingGraphicsContext(false)
     , m_flingModifier(0)
     , m_flingSourceDevice(false)
     , m_fullscreenController(FullscreenController::create(this))
     , m_showFPSCounter(false)
-    , m_showPaintRects(false)
-    , m_showDebugBorders(false)
     , m_continuousPaintingEnabled(false)
-    , m_showScrollBottleneckRects(false)
     , m_baseBackgroundColor(Color::white)
     , m_backgroundColorOverride(Color::transparent)
     , m_zoomFactorOverride(0)
@@ -469,7 +466,7 @@ WebViewImpl::~WebViewImpl()
     ASSERT(!m_page);
 }
 
-WebDevToolsAgentImpl* WebViewImpl::devToolsAgentImpl()
+WebDevToolsAgentImpl* WebViewImpl::mainFrameDevToolsAgentImpl()
 {
     WebLocalFrameImpl* mainFrame = mainFrameImpl();
     return mainFrame ? mainFrame->devToolsAgentImpl() : nullptr;
@@ -529,8 +526,8 @@ void WebViewImpl::handleMouseDown(LocalFrame& mainFrame, const WebMouseEvent& ev
     if (event.button == WebMouseEvent::ButtonLeft && m_page->mainFrame()->isLocalFrame()) {
         point = m_page->deprecatedLocalMainFrame()->view()->rootFrameToContents(point);
         HitTestResult result(m_page->deprecatedLocalMainFrame()->eventHandler().hitTestResultAtPoint(point));
-        result.setToShadowHostIfInClosedShadowRoot();
-        Node* hitNode = result.innerNonSharedNode();
+        result.setToShadowHostIfInUserAgentShadowRoot();
+        Node* hitNode = result.innerNodeOrImageMapImage();
 
         if (!result.scrollbar() && hitNode && hitNode->layoutObject() && hitNode->layoutObject()->isEmbeddedObject()) {
             m_mouseCaptureNode = hitNode;
@@ -592,8 +589,8 @@ void WebViewImpl::mouseContextMenu(const WebMouseEvent& event)
     // Find the right target frame. See issue 1186900.
     HitTestResult result = hitTestResultForRootFramePos(pme.position());
     Frame* targetFrame;
-    if (result.innerNonSharedNode())
-        targetFrame = result.innerNonSharedNode()->document().frame();
+    if (result.innerNodeOrImageMapImage())
+        targetFrame = result.innerNodeOrImageMapImage()->document().frame();
     else
         targetFrame = m_page->focusController().focusedOrMainFrame();
 
@@ -607,7 +604,7 @@ void WebViewImpl::mouseContextMenu(const WebMouseEvent& event)
 #endif
 
     m_contextMenuAllowed = true;
-    targetLocalFrame->eventHandler().sendContextMenuEvent(pme);
+    targetLocalFrame->eventHandler().sendContextMenuEvent(pme, nullptr);
     m_contextMenuAllowed = false;
     // Actually showing the context menu is handled by the ContextMenuClient
     // implementation...
@@ -686,6 +683,7 @@ bool WebViewImpl::handleGestureEvent(const WebGestureEvent& event)
     case WebInputEvent::GestureFlingStart: {
         if (mainFrameImpl()->frame()->eventHandler().isScrollbarHandlingGestures())
             break;
+        endActiveFlingAnimation();
         m_client->cancelScheduledContentIntents();
         m_positionOnFlingStart = WebPoint(event.x, event.y);
         m_globalPositionOnFlingStart = WebPoint(event.globalX, event.globalY);
@@ -783,7 +781,7 @@ bool WebViewImpl::handleGestureEvent(const WebGestureEvent& event)
         // Instead, assume that the page has been designed with big enough buttons and links.
         // Don't trigger a disambiguation popup when screencasting, since it's implemented outside of
         // compositor pipeline and is not being screencasted itself. This leads to bad user experience.
-        WebDevToolsAgentImpl* devTools = devToolsAgentImpl();
+        WebDevToolsAgentImpl* devTools = mainFrameDevToolsAgentImpl();
         bool screencastEnabled = devTools && devTools->screencastEnabled();
         if (event.data.tap.width > 0 && !shouldDisableDesktopWorkarounds() && !screencastEnabled) {
             IntRect boundingBox(page()->frameHost().pinchViewport().viewportToRootFrame(IntRect(
@@ -795,20 +793,22 @@ bool WebViewImpl::handleGestureEvent(const WebGestureEvent& event)
             // FIXME: We shouldn't pass details of the PinchViewport offset to render_view_impl.
             WebSize pinchViewportOffset = flooredIntSize(page()->frameHost().pinchViewport().location());
 
-            Vector<IntRect> goodTargets;
-            WillBeHeapVector<RawPtrWillBeMember<Node>> highlightNodes;
-            findGoodTouchTargets(boundingBox, mainFrameImpl()->frame(), goodTargets, highlightNodes);
-            // FIXME: replace touch adjustment code when numberOfGoodTargets == 1?
-            // Single candidate case is currently handled by: https://bugs.webkit.org/show_bug.cgi?id=85101
-            if (goodTargets.size() >= 2 && m_client
-                && m_client->didTapMultipleTargets(pinchViewportOffset, boundingBox, goodTargets)) {
+            if (m_webSettings->multiTargetTapNotificationEnabled()) {
+                Vector<IntRect> goodTargets;
+                WillBeHeapVector<RawPtrWillBeMember<Node>> highlightNodes;
+                findGoodTouchTargets(boundingBox, mainFrameImpl()->frame(), goodTargets, highlightNodes);
+                // FIXME: replace touch adjustment code when numberOfGoodTargets == 1?
+                // Single candidate case is currently handled by: https://bugs.webkit.org/show_bug.cgi?id=85101
+                if (goodTargets.size() >= 2 && m_client
+                    && m_client->didTapMultipleTargets(pinchViewportOffset, boundingBox, goodTargets)) {
 
-                enableTapHighlights(highlightNodes);
-                for (size_t i = 0; i < m_linkHighlights.size(); ++i)
-                    m_linkHighlights[i]->startHighlightAnimationIfNeeded();
-                eventSwallowed = true;
-                eventCancelled = true;
-                break;
+                    enableTapHighlights(highlightNodes);
+                    for (size_t i = 0; i < m_linkHighlights.size(); ++i)
+                        m_linkHighlights[i]->startHighlightAnimationIfNeeded();
+                    eventSwallowed = true;
+                    eventCancelled = true;
+                    break;
+                }
             }
         }
 
@@ -927,7 +927,11 @@ bool WebViewImpl::startPageScaleAnimation(const IntPoint& targetPosition, bool u
         clampedPoint = pinchViewport.clampDocumentOffsetAtScale(targetPosition, newScale);
         if (!durationInSeconds) {
             setPageScaleFactor(newScale);
-            pinchViewport.setLocationInDocument(DoublePoint(clampedPoint.x, clampedPoint.y));
+
+            FrameView* view = mainFrameImpl()->frameView();
+            if (view && view->scrollableArea())
+                view->scrollableArea()->setScrollPosition(DoublePoint(clampedPoint.x, clampedPoint.y));
+
             return false;
         }
     }
@@ -967,7 +971,6 @@ void WebViewImpl::setShowPaintRects(bool show)
         TRACE_EVENT0("blink", "WebViewImpl::setShowPaintRects");
         m_layerTreeView->setShowPaintRects(show);
     }
-    m_showPaintRects = show;
     setFirstPaintInvalidationTrackingEnabledForShowPaintRects(show);
 }
 
@@ -975,7 +978,6 @@ void WebViewImpl::setShowDebugBorders(bool show)
 {
     if (m_layerTreeView)
         m_layerTreeView->setShowDebugBorders(show);
-    m_showDebugBorders = show;
 }
 
 void WebViewImpl::setContinuousPaintingEnabled(bool enabled)
@@ -1003,7 +1005,6 @@ void WebViewImpl::setShowScrollBottleneckRects(bool show)
 {
     if (m_layerTreeView)
         m_layerTreeView->setShowScrollBottleneckRects(show);
-    m_showScrollBottleneckRects = show;
 }
 
 void WebViewImpl::acceptLanguagesChanged()
@@ -1063,8 +1064,19 @@ bool WebViewImpl::handleKeyEvent(const WebKeyboardEvent& event)
             // Suppress the next keypress event unless the focused node is a plugin node.
             // (Flash needs these keypress events to handle non-US keyboards.)
             Element* element = focusedElement();
-            if (!element || !element->layoutObject() || !element->layoutObject()->isEmbeddedObject())
+            if (element && element->layoutObject() && element->layoutObject()->isEmbeddedObject()) {
+                if (event.windowsKeyCode == VKEY_TAB) {
+                    // If the plugin supports keyboard focus then we should not send a tab keypress event.
+                    Widget* widget = toLayoutPart(element->layoutObject())->widget();
+                    if (widget && widget->isPluginContainer()) {
+                        WebPluginContainerImpl* plugin = toWebPluginContainerImpl(widget);
+                        if (plugin && plugin->supportsKeyboardFocus())
+                            m_suppressNextKeypressEvent = true;
+                    }
+                }
+            } else {
                 m_suppressNextKeypressEvent = true;
+            }
         }
         return true;
     }
@@ -1143,16 +1155,16 @@ WebRect WebViewImpl::computeBlockBound(const WebPoint& pointInRootFrame, bool ig
     IntPoint point = mainFrameImpl()->frameView()->rootFrameToContents(IntPoint(pointInRootFrame.x, pointInRootFrame.y));
     HitTestRequest::HitTestRequestType hitType = HitTestRequest::ReadOnly | HitTestRequest::Active | (ignoreClipping ? HitTestRequest::IgnoreClipping : 0);
     HitTestResult result = mainFrameImpl()->frame()->eventHandler().hitTestResultAtPoint(point, hitType);
-    result.setToShadowHostIfInClosedShadowRoot();
+    result.setToShadowHostIfInUserAgentShadowRoot();
 
-    Node* node = result.innerNonSharedNode();
+    Node* node = result.innerNodeOrImageMapImage();
     if (!node)
         return WebRect();
 
     // Find the block type node based on the hit node.
-    // FIXME: This wants to walk composed tree with NodeRenderingTraversal::parent().
+    // FIXME: This wants to walk composed tree with LayoutTreeBuilderTraversal::parent().
     while (node && (!node->layoutObject() || node->layoutObject()->isInline()))
-        node = NodeRenderingTraversal::parent(*node);
+        node = LayoutTreeBuilderTraversal::parent(*node);
 
     // Return the bounding box in the root frame's coordinate space.
     if (node) {
@@ -1275,7 +1287,7 @@ static Node* findCursorDefiningAncestor(Node* node, LocalFrame* frame)
             if (cursor != CURSOR_AUTO || frame->eventHandler().useHandCursor(node, node->isLink()))
                 break;
         }
-        node = NodeRenderingTraversal::parent(*node);
+        node = LayoutTreeBuilderTraversal::parent(*node);
     }
 
     return node;
@@ -1302,10 +1314,10 @@ Node* WebViewImpl::bestTapNode(const GestureEventWithHitTestResults& targetedTap
     if (!bestTouchNode)
         return nullptr;
 
-    // We might hit something like an image map that has no renderer on it
-    // Walk up the tree until we have a node with an attached renderer
+    // We might hit something like an image map that has no layoutObject on it
+    // Walk up the tree until we have a node with an attached layoutObject
     while (!bestTouchNode->layoutObject()) {
-        bestTouchNode = NodeRenderingTraversal::parent(*bestTouchNode);
+        bestTouchNode = LayoutTreeBuilderTraversal::parent(*bestTouchNode);
         if (!bestTouchNode)
             return nullptr;
     }
@@ -1327,7 +1339,7 @@ Node* WebViewImpl::bestTapNode(const GestureEventWithHitTestResults& targetedTap
     // has hand cursor set.
     do {
         bestTouchNode = cursorDefiningAncestor;
-        cursorDefiningAncestor = findCursorDefiningAncestor(NodeRenderingTraversal::parent(*bestTouchNode),
+        cursorDefiningAncestor = findCursorDefiningAncestor(LayoutTreeBuilderTraversal::parent(*bestTouchNode),
             m_page->deprecatedLocalMainFrame());
     } while (cursorDefiningAncestor && showsHandCursor(cursorDefiningAncestor, m_page->deprecatedLocalMainFrame()));
 
@@ -1472,7 +1484,7 @@ bool WebViewImpl::sendContextMenuEvent(const WebKeyboardEvent& event)
     Frame* focusedFrame = page()->focusController().focusedOrMainFrame();
     if (!focusedFrame->isLocalFrame())
         return false;
-    bool handled = toLocalFrame(focusedFrame)->eventHandler().sendContextMenuEventForKey();
+    bool handled = toLocalFrame(focusedFrame)->eventHandler().sendContextMenuEventForKey(nullptr);
     m_contextMenuAllowed = false;
     return handled;
 }
@@ -1485,6 +1497,18 @@ void WebViewImpl::showContextMenuAtPoint(float x, float y, PassRefPtrWillBeRawPt
     m_contextMenuAllowed = true;
     page()->contextMenuController().clearContextMenu();
     page()->contextMenuController().showContextMenuAtPoint(page()->deprecatedLocalMainFrame(), x, y, menuProvider);
+    m_contextMenuAllowed = false;
+}
+
+void WebViewImpl::showContextMenuForElement(WebElement element)
+{
+    if (!page())
+        return;
+
+    page()->contextMenuController().clearContextMenu();
+    m_contextMenuAllowed = true;
+    if (LocalFrame* focusedFrame = toLocalFrame(page()->focusController().focusedOrMainFrame()))
+        focusedFrame->eventHandler().sendContextMenuEventForKey(element.unwrap<Element>());
     m_contextMenuAllowed = false;
 }
 
@@ -1975,6 +1999,11 @@ void WebViewImpl::paintCompositedDeprecated(WebCanvas* canvas, const WebRect& re
 }
 #endif
 
+void WebViewImpl::layoutAndPaintAsync(WebLayoutAndPaintAsyncCallback* callback)
+{
+    m_layerTreeView->layoutAndPaintAsync(callback);
+}
+
 void WebViewImpl::compositeAndReadbackAsync(WebCompositeAndReadbackAsyncCallback* callback)
 {
     m_layerTreeView->compositeAndReadbackAsync(callback);
@@ -2012,16 +2041,19 @@ void WebViewImpl::exitFullScreenForElement(Element* element)
     m_fullscreenController->exitFullScreenForElement(element);
 }
 
-void WebViewImpl::clearCompositedSelectionBounds()
+void WebViewImpl::clearCompositedSelection()
 {
     if (m_layerTreeView)
         m_layerTreeView->clearSelection();
 }
 
-void WebViewImpl::updateCompositedSelectionBounds(const WebSelectionBound& anchor, const WebSelectionBound& focus)
+void WebViewImpl::updateCompositedSelection(const WebSelection& selection)
 {
-    if (m_layerTreeView)
-        m_layerTreeView->registerSelection(anchor, focus);
+    if (m_layerTreeView) {
+        m_layerTreeView->registerSelection(selection);
+        // TODO(jdduke): Remove this overload when downstream consumers have been updated, crbug.com/466672.
+        m_layerTreeView->registerSelection(selection.start(), selection.end());
+    }
 }
 
 bool WebViewImpl::hasHorizontalScrollbar()
@@ -2088,7 +2120,13 @@ static String inputTypeToName(WebInputEvent::Type type)
 
 bool WebViewImpl::handleInputEvent(const WebInputEvent& inputEvent)
 {
-    WebAutofillClient* autofillClient = mainFrameImpl() ? mainFrameImpl()->autofillClient() : 0;
+    // TODO(dcheng): The fact that this is getting called when there is no local
+    // main frame is problematic and probably indicates a bug in the input event
+    // routing code.
+    if (!mainFrameImpl())
+        return false;
+
+    WebAutofillClient* autofillClient = mainFrameImpl()->autofillClient();
     UserGestureNotifier notifier(autofillClient, &m_userGestureObserved);
     // On the first input event since page load, |notifier| instructs the
     // autofill client to unblock values of password input fields of any forms
@@ -2111,7 +2149,7 @@ bool WebViewImpl::handleInputEvent(const WebInputEvent& inputEvent)
     if (m_devToolsEmulator->handleInputEvent(inputEvent))
         return true;
 
-    WebDevToolsAgentImpl* devTools = devToolsAgentImpl();
+    WebDevToolsAgentImpl* devTools = mainFrameDevToolsAgentImpl();
     if (devTools && devTools->handleInputEvent(inputEvent))
         return true;
 
@@ -2297,6 +2335,8 @@ bool WebViewImpl::setComposition(
     // clear the composition.
     if (m_suppressNextKeypressEvent && !inputMethodController.hasComposition())
         return text.isEmpty();
+
+    UserGestureIndicator gestureIndicator(DefinitelyProcessingNewUserGesture);
 
     // When the range of composition underlines overlap with the range between
     // selectionStart and selectionEnd, WebKit somehow won't paint the selection
@@ -2738,14 +2778,13 @@ void WebViewImpl::setTextDirection(WebTextDirection direction)
 
 bool WebViewImpl::isAcceleratedCompositingActive() const
 {
-    return m_isAcceleratedCompositingActive;
+    return m_rootLayer;
 }
 
 void WebViewImpl::willCloseLayerTreeView()
 {
-    setIsAcceleratedCompositingActive(false);
+    setRootGraphicsLayer(nullptr);
     m_layerTreeView = 0;
-    m_layerTreeViewClosed = true;
 }
 
 void WebViewImpl::didAcquirePointerLock()
@@ -2904,18 +2943,16 @@ bool WebViewImpl::scrollFocusedNodeIntoRect(const WebRect& rectInViewport)
         return false;
 
     if (!m_webSettings->autoZoomFocusedNodeToLegibleScale()) {
+        frame->document()->updateLayoutIgnorePendingStylesheets();
+
         PinchViewport& pinchViewport = page()->frameHost().pinchViewport();
-
-        // FIXME: The pixel snapping shouldn't be done ad-hoc. crbug.com/458579.
-        IntRect viewportRectInRootFrame(
-            ceiledIntPoint(pinchViewport.location()),
-            expandedIntSize(pinchViewport.visibleSize()));
-
         FloatRect targetRectInRootFrame = pinchViewport.viewportToRootFrame(rectInViewport);
-        DoubleSize remainder = frame->view()->scrollElementToRect(element, IntRect(targetRectInRootFrame));
 
-        // Scroll the remainder in the pinch viewport.
-        page()->frameHost().pinchViewport().move(FloatPoint(remainder.width(), remainder.height()));
+        FrameView* elementView = element->document().view();
+        IntRect boundsInRootFrame = elementView->contentsToRootFrame(pixelSnappedIntRect(element->boundingBox()));
+        LayoutRect boundsInRootContent = LayoutRect(frame->view()->frameToContents(boundsInRootFrame));
+
+        frame->view()->scrollableArea()->scrollIntoRect(boundsInRootContent, targetRectInRootFrame);
         return false;
     }
 
@@ -3150,7 +3187,7 @@ void WebViewImpl::setPageScaleFactor(float scaleFactor)
 
 void WebViewImpl::setMainFrameScrollOffset(const WebPoint& origin)
 {
-    updateMainFrameScrollPosition(DoublePoint(origin.x, origin.y), false);
+    updateLayoutViewportScrollPosition(DoublePoint(origin.x, origin.y), false);
 }
 
 float WebViewImpl::deviceScaleFactor() const
@@ -3298,14 +3335,19 @@ void WebViewImpl::refreshPageScaleFactorAfterLayout()
 
 void WebViewImpl::updatePageDefinedViewportConstraints(const ViewportDescription& description)
 {
+    // If we're not reading the viewport meta tag, allow GPU rasterization.
+    if (!settingsImpl()->viewportMetaEnabled()) {
+        m_matchesHeuristicsForGpuRasterization = true;
+        if (m_layerTreeView)
+            m_layerTreeView->heuristicsForGpuRasterizationUpdated(m_matchesHeuristicsForGpuRasterization);
+    }
+
     if (!settings()->viewportEnabled() || !page() || (!m_size.width && !m_size.height) || !page()->mainFrame()->isLocalFrame())
         return;
 
     Document* document = page()->deprecatedLocalMainFrame()->document();
 
-    m_matchesHeuristicsForGpuRasterization = description.maxWidth == Length(DeviceWidth)
-        && description.minZoom == 1.0
-        && description.minZoomIsExplicit;
+    m_matchesHeuristicsForGpuRasterization = description.matchesHeuristicsForGpuRasterization();
     if (m_layerTreeView)
         m_layerTreeView->heuristicsForGpuRasterizationUpdated(m_matchesHeuristicsForGpuRasterization);
 
@@ -3375,7 +3417,7 @@ IntSize WebViewImpl::contentsSize() const
 {
     if (!page()->mainFrame()->isLocalFrame())
         return IntSize();
-    LayoutView* root = page()->deprecatedLocalMainFrame()->contentRenderer();
+    LayoutView* root = page()->deprecatedLocalMainFrame()->contentLayoutObject();
     if (!root)
         return IntSize();
     return root->documentRect().size();
@@ -3427,7 +3469,7 @@ float WebViewImpl::maximumPageScaleFactor() const
 
 void WebViewImpl::resetScrollAndScaleState()
 {
-    updateMainFrameScrollPosition(IntPoint(), true);
+    updateLayoutViewportScrollPosition(IntPoint(), true);
     page()->frameHost().pinchViewport().reset();
 
     if (!page()->mainFrame()->isLocalFrame())
@@ -3447,7 +3489,7 @@ void WebViewImpl::performMediaPlayerAction(const WebMediaPlayerAction& action,
                                            const WebPoint& location)
 {
     HitTestResult result = hitTestResultForViewportPos(location);
-    RefPtrWillBeRawPtr<Node> node = result.innerNonSharedNode();
+    RefPtrWillBeRawPtr<Node> node = result.innerNode();
     if (!isHTMLVideoElement(*node) && !isHTMLAudioElement(*node))
         return;
 
@@ -3478,7 +3520,7 @@ void WebViewImpl::performPluginAction(const WebPluginAction& action,
 {
     // FIXME: Location is probably in viewport coordinates
     HitTestResult result = hitTestResultForRootFramePos(location);
-    RefPtrWillBeRawPtr<Node> node = result.innerNonSharedNode();
+    RefPtrWillBeRawPtr<Node> node = result.innerNode();
     if (!isHTMLObjectElement(*node) && !isHTMLEmbedElement(*node))
         return;
 
@@ -3519,7 +3561,7 @@ void WebViewImpl::copyImageAt(const WebPoint& point)
         return;
 
     HitTestResult result = hitTestResultForViewportPos(point);
-    if (!isHTMLCanvasElement(result.innerNonSharedNode()) && result.absoluteImageURL().isEmpty()) {
+    if (!isHTMLCanvasElement(result.innerNodeOrImageMapImage()) && result.absoluteImageURL().isEmpty()) {
         // There isn't actually an image at these coordinates.  Might be because
         // the window scrolled while the context menu was open or because the page
         // changed itself between when we thought there was an image here and when
@@ -3538,7 +3580,7 @@ void WebViewImpl::saveImageAt(const WebPoint& point)
     if (!m_client)
         return;
 
-    Node* node = hitTestResultForViewportPos(point).innerNonSharedNode();
+    Node* node = hitTestResultForViewportPos(point).innerNodeOrImageMapImage();
     if (!node || !(isHTMLCanvasElement(*node) || isHTMLImageElement(*node)))
         return;
 
@@ -3712,7 +3754,7 @@ void WebViewImpl::sendResizeEventAndRepaint()
     }
 
     if (m_client) {
-        if (isAcceleratedCompositingActive()) {
+        if (m_layerTreeView) {
             updateLayerTreeViewport();
         } else {
             WebRect damagedRect(0, 0, m_size.width, m_size.height);
@@ -3770,12 +3812,6 @@ void WebViewImpl::disableDeviceEmulation()
     m_devToolsEmulator->disableDeviceEmulation();
 }
 
-WebDevToolsAgent* WebViewImpl::devToolsAgent()
-{
-    WebLocalFrameImpl* mainFrame = mainFrameImpl();
-    return mainFrame ? mainFrame->devToolsAgent() : nullptr;
-}
-
 WebAXObject WebViewImpl::accessibilityObject()
 {
     if (!mainFrameImpl())
@@ -3806,7 +3842,7 @@ void WebViewImpl::showContextMenu()
     page()->contextMenuController().clearContextMenu();
     m_contextMenuAllowed = true;
     if (LocalFrame* focusedFrame = toLocalFrame(page()->focusController().focusedOrMainFrame()))
-        focusedFrame->eventHandler().sendContextMenuEventForKey();
+        focusedFrame->eventHandler().sendContextMenuEventForKey(nullptr);
     m_contextMenuAllowed = false;
 }
 
@@ -3859,6 +3895,9 @@ void WebViewImpl::setIsTransparent(bool isTransparent)
 
     // Future frames check this to know whether to be transparent.
     m_isTransparent = isTransparent;
+
+    if (m_layerTreeView)
+        m_layerTreeView->setHasTransparentBackground(this->isTransparent());
 }
 
 bool WebViewImpl::isTransparent() const
@@ -3917,20 +3956,6 @@ void WebViewImpl::setSelectionColors(unsigned activeBackgroundColor,
 #endif
 }
 
-void WebView::injectStyleSheet(const WebString& sourceCode, const WebVector<WebString>& patternsIn, WebView::StyleInjectionTarget injectIn)
-{
-    Vector<String> patterns;
-    for (size_t i = 0; i < patternsIn.size(); ++i)
-        patterns.append(patternsIn[i]);
-
-    InjectedStyleSheets::instance().add(sourceCode, patterns, static_cast<blink::StyleInjectionTarget>(injectIn));
-}
-
-void WebView::removeInjectedStyleSheets()
-{
-    InjectedStyleSheets::instance().removeAll();
-}
-
 void WebViewImpl::didCommitLoad(bool isNewNavigation, bool isNavigationWithinPage)
 {
     if (isNewNavigation && !isNavigationWithinPage)
@@ -3973,11 +3998,8 @@ void WebViewImpl::didRemoveAllPendingStylesheet(WebLocalFrameImpl* webframe)
 
 void WebViewImpl::resumeTreeViewCommits()
 {
-    if (m_layerTreeViewCommitsDeferred) {
-        if (m_layerTreeView)
-            m_layerTreeView->setDeferCommits(false);
-        m_layerTreeViewCommitsDeferred = false;
-    }
+    if (m_layerTreeView)
+        m_layerTreeView->setDeferCommits(false);
 }
 
 void WebViewImpl::postLayoutResize(WebLocalFrameImpl* webframe)
@@ -4130,7 +4152,7 @@ HitTestResult WebViewImpl::hitTestResultForRootFramePos(const IntPoint& posInRoo
         return HitTestResult();
     IntPoint docPoint(m_page->deprecatedLocalMainFrame()->view()->rootFrameToContents(posInRootFrame));
     HitTestResult result = m_page->deprecatedLocalMainFrame()->eventHandler().hitTestResultAtPoint(docPoint, HitTestRequest::ReadOnly | HitTestRequest::Active);
-    result.setToShadowHostIfInClosedShadowRoot();
+    result.setToShadowHostIfInUserAgentShadowRoot();
     return result;
 }
 
@@ -4151,7 +4173,7 @@ WebHitTestResult WebViewImpl::hitTestResultForTap(const WebPoint& tapPointWindow
 
     HitTestResult result = m_page->deprecatedLocalMainFrame()->eventHandler().hitTestResultForGestureEvent(platformEvent, HitTestRequest::ReadOnly | HitTestRequest::Active).hitTestResult();
 
-    result.setToShadowHostIfInClosedShadowRoot();
+    result.setToShadowHostIfInUserAgentShadowRoot();
     return result;
 }
 
@@ -4173,6 +4195,9 @@ void WebViewImpl::suppressInvalidations(bool enable)
 
 void WebViewImpl::setRootGraphicsLayer(GraphicsLayer* layer)
 {
+    if (!m_layerTreeView)
+        return;
+
     suppressInvalidations(true);
 
     PinchViewport& pinchViewport = page()->frameHost().pinchViewport();
@@ -4181,26 +4206,30 @@ void WebViewImpl::setRootGraphicsLayer(GraphicsLayer* layer)
         m_rootGraphicsLayer = pinchViewport.rootGraphicsLayer();
         m_rootLayer = pinchViewport.rootGraphicsLayer()->platformLayer();
         m_rootTransformLayer = pinchViewport.rootGraphicsLayer();
+        updateRootLayerTransform();
+        m_layerTreeView->setRootLayer(*m_rootLayer);
+        // We register viewport layers here since there may not be a layer
+        // tree view prior to this point.
+        page()->frameHost().pinchViewport().registerLayersWithTreeView(m_layerTreeView);
+        if (m_pageOverlays)
+            m_pageOverlays->update();
+
+        // TODO(enne): Work around page visibility changes not being
+        // propogated to the WebView in some circumstances.  This needs to
+        // be refreshed here when setting a new root layer to avoid being
+        // stuck in a presumed incorrectly invisible state.
+        bool visible = page()->visibilityState() == PageVisibilityStateVisible;
+        m_layerTreeView->setVisible(visible);
     } else {
         m_rootGraphicsLayer = nullptr;
         m_rootLayer = nullptr;
         m_rootTransformLayer = nullptr;
-    }
-
-    setIsAcceleratedCompositingActive(layer != 0);
-
-    updateRootLayerTransform();
-
-    if (m_layerTreeView) {
-        if (m_rootLayer) {
-            m_layerTreeView->setRootLayer(*m_rootLayer);
-            // We register viewport layers here since there may not be a layer
-            // tree view prior to this point.
-            page()->frameHost().pinchViewport().registerLayersWithTreeView(m_layerTreeView);
-        } else {
-            m_layerTreeView->clearRootLayer();
-            page()->frameHost().pinchViewport().clearLayersForTreeView(m_layerTreeView);
-        }
+        // This means that we're transitioning to a new page. Suppress
+        // commits until Blink generates invalidations so we don't
+        // attempt to paint too early in the next page load.
+        m_layerTreeView->setDeferCommits(true);
+        m_layerTreeView->clearRootLayer();
+        page()->frameHost().pinchViewport().clearLayersForTreeView(m_layerTreeView);
     }
 
     suppressInvalidations(false);
@@ -4213,10 +4242,9 @@ void WebViewImpl::scheduleCompositingLayerSync()
 
 void WebViewImpl::invalidateRect(const IntRect& rect)
 {
-    if (m_isAcceleratedCompositingActive) {
-        ASSERT(m_layerTreeView);
+    if (m_layerTreeView)
         updateLayerTreeViewport();
-    } else if (m_client)
+    else if (m_client)
         m_client->didInvalidateRect(rect);
 }
 
@@ -4276,6 +4304,9 @@ void WebViewImpl::initializeLayerTreeView()
         m_layerTreeView = m_client->layerTreeView();
     }
 
+    if (WebDevToolsAgentImpl* devTools = mainFrameDevToolsAgentImpl())
+        devTools->layerTreeViewChanged(m_layerTreeView);
+
     m_page->settings().setAcceleratedCompositingEnabled(m_layerTreeView != 0);
 
     // FIXME: only unittests, click to play, Android priting, and printing (for headers and footers)
@@ -4283,59 +4314,7 @@ void WebViewImpl::initializeLayerTreeView()
     ASSERT(m_layerTreeView || !m_client || m_client->allowsBrokenNullLayerTreeView());
 }
 
-void WebViewImpl::setIsAcceleratedCompositingActive(bool active)
-{
-    // In the middle of shutting down; don't try to spin back up a compositor.
-    // FIXME: compositing startup/shutdown should be refactored so that it
-    // turns on explicitly rather than lazily, which causes this awkwardness.
-    if (m_layerTreeViewClosed)
-        return;
-
-    ASSERT(!active || m_layerTreeView);
-    Platform::current()->histogramEnumeration("GPU.setIsAcceleratedCompositingActive", active * 2 + m_isAcceleratedCompositingActive, 4);
-
-    if (m_isAcceleratedCompositingActive == active)
-        return;
-
-    if (!m_client)
-        return;
-
-    if (!active) {
-        m_isAcceleratedCompositingActive = false;
-        if (!m_layerTreeViewCommitsDeferred) {
-            ASSERT(m_layerTreeView);
-            // This means that we're transitioning to a new page. Suppress commits until WebKit generates invalidations so
-            // we don't attempt to paint too early in the next page load.
-            m_layerTreeView->setDeferCommits(true);
-            m_layerTreeViewCommitsDeferred = true;
-        }
-    } else {
-        TRACE_EVENT0("blink", "WebViewImpl::setIsAcceleratedCompositingActive(true)");
-        m_layerTreeView->setRootLayer(*m_rootLayer);
-
-        bool visible = page()->visibilityState() == PageVisibilityStateVisible;
-        m_layerTreeView->setVisible(visible);
-        updateLayerTreeDeviceScaleFactor();
-        m_layerTreeView->setPageScaleFactorAndLimits(pageScaleFactor(), minimumPageScaleFactor(), maximumPageScaleFactor());
-        updateLayerTreeBackgroundColor();
-        m_layerTreeView->setHasTransparentBackground(isTransparent());
-        updateLayerTreeViewport();
-        m_isAcceleratedCompositingActive = true;
-        if (m_pageOverlays)
-            m_pageOverlays->update();
-        // FIXME: allow emulation, fps counter and continuous painting at the same time: crbug.com/299837.
-        m_layerTreeView->setShowFPSCounter(m_showFPSCounter && !m_devToolsEmulator->deviceEmulationEnabled());
-        m_layerTreeView->setShowPaintRects(m_showPaintRects);
-        m_layerTreeView->setShowDebugBorders(m_showDebugBorders);
-        m_layerTreeView->setContinuousPaintingEnabled(m_continuousPaintingEnabled && !m_devToolsEmulator->deviceEmulationEnabled());
-        m_layerTreeView->setShowScrollBottleneckRects(m_showScrollBottleneckRects);
-        m_layerTreeView->heuristicsForGpuRasterizationUpdated(m_matchesHeuristicsForGpuRasterization);
-    }
-    if (page() && page()->mainFrame()->isLocalFrame())
-        page()->deprecatedLocalMainFrame()->view()->setClipsRepaints(!m_isAcceleratedCompositingActive);
-}
-
-void WebViewImpl::updateMainFrameScrollPosition(const DoublePoint& scrollPosition, bool programmaticScroll)
+void WebViewImpl::updateLayoutViewportScrollPosition(const DoublePoint& scrollPosition, bool programmaticScroll)
 {
     if (!page()->mainFrame()->isLocalFrame())
         return;
@@ -4345,14 +4324,13 @@ void WebViewImpl::updateMainFrameScrollPosition(const DoublePoint& scrollPositio
     if (!frameView)
         return;
 
-    ScrollableArea* scrollableArea = frameView->scrollableArea();
+    ScrollableArea* scrollableArea = frameView->layoutViewportScrollableArea();
     if (scrollableArea->scrollPositionDouble() == scrollPosition)
         return;
 
-    bool oldProgrammaticScroll = frameView->inProgrammaticScroll();
-    frameView->setInProgrammaticScroll(programmaticScroll);
     scrollableArea->notifyScrollPositionChanged(scrollPosition);
-    frameView->setInProgrammaticScroll(oldProgrammaticScroll);
+    if (!programmaticScroll)
+        frameView->setWasScrolledByUser(true);
 }
 
 void WebViewImpl::applyViewportDeltas(
@@ -4379,8 +4357,29 @@ void WebViewImpl::applyViewportDeltas(
 
     frameView->setElasticOverscroll(elasticOverscrollDelta + frameView->elasticOverscroll());
 
-    updateMainFrameScrollPosition(frameView->scrollableArea()->scrollPositionDouble() +
+    updateLayoutViewportScrollPosition(frameView->layoutViewportScrollableArea()->scrollPositionDouble() +
         DoubleSize(outerViewportDelta.width, outerViewportDelta.height), /* programmaticScroll */ false);
+}
+
+void WebViewImpl::recordFrameTimingEvent(FrameTimingEventType eventType, int64_t FrameId, const WebVector<WebFrameTimingEvent>& events)
+{
+    Frame* frame = m_page ? m_page->mainFrame() : 0;
+
+    while (frame && frame->frameID() != FrameId) {
+        frame = frame->tree().traverseNext();
+    }
+
+    if (!frame || !frame->domWindow() || !frame->domWindow()->document())
+        return; // Can't find frame, it may have been cleaned up from the DOM.
+
+    blink::DOMWindow* domWindow = frame->domWindow();
+    blink::Performance* performance = DOMWindowPerformance::performance(*domWindow);
+    for (size_t i = 0; i < events.size(); ++i) {
+        if (eventType == CompositeEvent)
+            performance->addCompositeTiming(domWindow->document(), events[i].sourceFrame, events[i].startTime);
+        else if (eventType == RenderEvent)
+            performance->addRenderTiming(domWindow->document(), events[i].sourceFrame, events[i].startTime, events[i].finishTime);
+    }
 }
 
 void WebViewImpl::updateLayerTreeViewport()
@@ -4428,9 +4427,9 @@ bool WebViewImpl::detectContentOnTouch(const GestureEventWithHitTestResults& tar
     if (!m_page->mainFrame()->isLocalFrame())
         return false;
 
-    // Need a local copy of the hit test as setToShadowHostIfInClosedShadowRoot() will modify it.
+    // Need a local copy of the hit test as setToShadowHostIfInUserAgentShadowRoot() will modify it.
     HitTestResult touchHit = targetedEvent.hitTestResult();
-    touchHit.setToShadowHostIfInClosedShadowRoot();
+    touchHit.setToShadowHostIfInUserAgentShadowRoot();
 
     if (touchHit.isContentEditable())
         return false;
@@ -4441,7 +4440,7 @@ bool WebViewImpl::detectContentOnTouch(const GestureEventWithHitTestResults& tar
 
     // Ignore when tapping on links or nodes listening to click events, unless the click event is on the
     // body element, in which case it's unlikely that the original node itself was intended to be clickable.
-    for (; node && !isHTMLBodyElement(*node); node = NodeRenderingTraversal::parent(*node)) {
+    for (; node && !isHTMLBodyElement(*node); node = LayoutTreeBuilderTraversal::parent(*node)) {
         if (node->isLink() || node->willRespondToTouchEvents() || node->willRespondToMouseClickEvents())
             return false;
     }
@@ -4456,11 +4455,10 @@ bool WebViewImpl::detectContentOnTouch(const GestureEventWithHitTestResults& tar
 
 void WebViewImpl::setVisibilityState(WebPageVisibilityState visibilityState,
                                      bool isInitialState) {
-    if (!page())
-        return;
-
     ASSERT(visibilityState == WebPageVisibilityStateVisible || visibilityState == WebPageVisibilityStateHidden || visibilityState == WebPageVisibilityStatePrerender);
-    m_page->setVisibilityState(static_cast<PageVisibilityState>(static_cast<int>(visibilityState)), isInitialState);
+
+    if (page())
+        m_page->setVisibilityState(static_cast<PageVisibilityState>(static_cast<int>(visibilityState)), isInitialState);
 
     if (m_layerTreeView) {
         bool visible = visibilityState == WebPageVisibilityStateVisible;

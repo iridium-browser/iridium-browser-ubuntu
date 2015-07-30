@@ -30,6 +30,7 @@
             'tests/test_case.html',
             'tests/test_case.html.mock-http-headers',
             'tests/test_page.css',
+            'tests/test_page.css.mock-http-headers',
             'tests/ppapi_nacl_tests_newlib.nmf',
           ],
         },
@@ -80,6 +81,26 @@
 #      ],
     },
     {
+      # GN version: //ppapi:power_saver_test_plugin
+      'target_name': 'power_saver_test_plugin',
+      'type': 'loadable_module',
+      'sources': [
+        'tests/power_saver_test_plugin.cc',
+        'tests/test_utils.cc',
+      ],
+      'dependencies': [
+        'ppapi.gyp:ppapi_cpp',
+        'ppapi_internal.gyp:ppapi_shared',
+      ],
+      'conditions': [
+        ['OS=="mac"', {
+          'mac_bundle': 1,
+          'product_name': 'power_saver_test_plugin',
+          'product_extension': 'plugin',
+        }],
+      ],
+    },
+    {
       # GN version: //ppapi/proxy:test_support
       #             //ppapi/shared_impl:test_support
       'target_name': 'ppapi_unittest_shared',
@@ -101,8 +122,8 @@
         'proxy/resource_message_test_sink.h',
         'shared_impl/test_globals.cc',
         'shared_impl/test_globals.h',
-        'shared_impl/unittest_utils.cc',
-        'shared_impl/unittest_utils.h',
+        'shared_impl/test_utils.cc',
+        'shared_impl/test_utils.h',
       ],
     },
 
@@ -177,7 +198,6 @@
         'proxy/printing_resource_unittest.cc',
         'proxy/raw_var_data_unittest.cc',
         'proxy/serialized_var_unittest.cc',
-        'proxy/talk_resource_unittest.cc',
         'proxy/tracked_callback_unittest.cc',
         'proxy/video_decoder_resource_unittest.cc',
         'proxy/video_encoder_resource_unittest.cc',

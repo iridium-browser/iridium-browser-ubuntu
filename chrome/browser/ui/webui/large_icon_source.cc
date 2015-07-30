@@ -11,38 +11,22 @@
 #include "chrome/common/favicon/large_icon_url_parser.h"
 #include "chrome/common/url_constants.h"
 #include "components/favicon/core/fallback_icon_service.h"
-#include "components/favicon/core/favicon_service.h"
+#include "components/favicon/core/large_icon_service.h"
 #include "components/favicon_base/fallback_icon_style.h"
+#include "components/favicon_base/favicon_types.h"
 #include "net/url_request/url_request.h"
-#include "third_party/skia/include/core/SkColor.h"
 
 namespace {
 
-int kDefaultLargeIconSize = 96;
-int kMaxLargeIconSize = 192;  // Arbitrary bound to safeguard endpoint.
+const int kMaxLargeIconSize = 192;  // Arbitrary bound to safeguard endpoint.
 
 }  // namespace
 
-LargeIconSource::IconRequest::IconRequest() : size(kDefaultLargeIconSize) {
-}
-
-LargeIconSource::IconRequest::IconRequest(
-    const content::URLDataSource::GotDataCallback& callback_in,
-    const GURL& url_in,
-    int size_in)
-    : callback(callback_in),
-      url(url_in),
-      size(size_in) {
-}
-
-LargeIconSource::IconRequest::~IconRequest() {
-}
-
 LargeIconSource::LargeIconSource(
-    favicon::FaviconService* favicon_service,
-    favicon::FallbackIconService* fallback_icon_service)
-    : favicon_service_(favicon_service),
-      fallback_icon_service_(fallback_icon_service) {
+    favicon::FallbackIconService* fallback_icon_service,
+    favicon::LargeIconService* large_icon_service)
+    : fallback_icon_service_(fallback_icon_service),
+      large_icon_service_(large_icon_service) {
 }
 
 LargeIconSource::~LargeIconSource() {
@@ -57,7 +41,7 @@ void LargeIconSource::StartDataRequest(
     int render_process_id,
     int render_frame_id,
     const content::URLDataSource::GotDataCallback& callback) {
-  if (!favicon_service_) {
+  if (!large_icon_service_) {
     SendNotFoundResponse(callback);
     return;
   }
@@ -77,14 +61,14 @@ void LargeIconSource::StartDataRequest(
     return;
   }
 
-  favicon_service_->GetRawFaviconForPageURL(
+  // TODO(beaudoin): Potentially allow icon to be scaled up.
+  large_icon_service_->GetLargeIconOrFallbackStyle(
       url,
-      favicon_base::TOUCH_ICON | favicon_base::TOUCH_PRECOMPOSED_ICON,
+      parser.size_in_pixels(),  // Reducing this will enable scale up.
       parser.size_in_pixels(),
-      base::Bind(
-          &LargeIconSource::OnIconDataAvailable,
-          base::Unretained(this),
-          IconRequest(callback, url, parser.size_in_pixels())),
+      base::Bind(&LargeIconSource::OnLargeIconDataAvailable,
+                 base::Unretained(this), callback, url,
+                 parser.size_in_pixels()),
       &cancelable_task_tracker_);
 }
 
@@ -107,29 +91,25 @@ bool LargeIconSource::ShouldServiceRequest(
   return URLDataSource::ShouldServiceRequest(request);
 }
 
-void LargeIconSource::OnIconDataAvailable(
-    const IconRequest& request,
-    const favicon_base::FaviconRawBitmapResult& bitmap_result) {
-  if (!bitmap_result.is_valid())
-    SendFallbackIcon(request);
-  else
-    request.callback.Run(bitmap_result.bitmap_data.get());
-}
-
-void LargeIconSource::SendFallbackIcon(const IconRequest& request) {
-  if (!fallback_icon_service_) {
-    SendNotFoundResponse(request.callback);
+void LargeIconSource::OnLargeIconDataAvailable(
+    const content::URLDataSource::GotDataCallback& callback,
+    const GURL& url,
+    int size,
+    const favicon_base::LargeIconResult& result) {
+  if (result.bitmap.is_valid()) {
+    callback.Run(result.bitmap.bitmap_data.get());
     return;
   }
-  favicon_base::FallbackIconStyle style;
-  style.background_color = SkColorSetRGB(0x78, 0x78, 0x78);
-  style.text_color = SK_ColorWHITE;
-  style.font_size_ratio = 0.44;
-  style.roundness = 0;  // Square. Round corners can be applied by JavaScript.
+
+  // Bitmap is invalid, use the fallback if service is available.
+  if (!fallback_icon_service_ || !result.fallback_icon_style) {
+    SendNotFoundResponse(callback);
+    return;
+  }
   std::vector<unsigned char> bitmap_data =
       fallback_icon_service_->RenderFallbackIconBitmap(
-          request.url, request.size, style);
-  request.callback.Run(base::RefCountedBytes::TakeVector(&bitmap_data));
+          url, size, *result.fallback_icon_style);
+  callback.Run(base::RefCountedBytes::TakeVector(&bitmap_data));
 }
 
 void LargeIconSource::SendNotFoundResponse(

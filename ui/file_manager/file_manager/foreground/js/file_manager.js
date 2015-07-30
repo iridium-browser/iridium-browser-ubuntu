@@ -93,6 +93,13 @@ function FileManager() {
   this.folderShortcutsModel_ = null;
 
   /**
+   * Model for providers (providing extensions).
+   * @type {ProvidersModel}
+   * @private
+   */
+  this.providersModel_ = null;
+
+  /**
    * Handler for command events.
    * @type {CommandHandler}
    */
@@ -172,6 +179,13 @@ function FileManager() {
   this.spinnerController_ = null;
 
   /**
+   * Sort menu controller.
+   * @type {SortMenuController}
+   * @private
+   */
+  this.sortMenuController_ = null;
+
+  /**
    * Gear menu controller.
    * @type {GearMenuController}
    * @private
@@ -247,7 +261,7 @@ function FileManager() {
 
   /**
    * The document object of this app.
-   * @type {HTMLDocument}
+   * @type {Document}
    * @private
    */
   this.document_ = null;
@@ -261,13 +275,6 @@ function FileManager() {
    * @private
    */
   this.initializeQueue_ = new AsyncUtil.Group();
-
-  /**
-   * Indicates whether cloud import is enabled.  This is initialized in
-   * #initSettings.
-   * @private {boolean}
-   */
-  this.importEnabled_ = true;
 }
 
 FileManager.prototype = /** @struct */ {
@@ -291,13 +298,19 @@ FileManager.prototype = /** @struct */ {
     return this.folderShortcutsModel_;
   },
   /**
+   * @return {ProvidersModel}
+   */
+  get providersModel() {
+    return this.providersModel_;
+  },
+  /**
    * @return {DirectoryTree}
    */
   get directoryTree() {
     return this.ui_.directoryTree;
   },
   /**
-   * @return {HTMLDocument}
+   * @return {Document}
    */
   get document() {
     return this.document_;
@@ -374,17 +387,7 @@ FileManager.prototype = /** @struct */ {
 (function() {
   FileManager.prototype.initSettings_ = function(callback) {
     this.appStateController_ = new AppStateController(this.dialogType);
-    var whenViewOptionsLoaded =
-        this.appStateController_.loadInitialViewOptions();
-    var whenImportFlagLoaded = importer.importEnabled().then(
-        function(enabled) {
-          this.importEnabled_ = enabled;
-        }.bind(this));
-
-    Promise.all([
-      whenViewOptionsLoaded,
-      whenImportFlagLoaded
-    ]).then(callback);
+    this.appStateController_.loadInitialViewOptions().then(callback);
   };
 
   /**
@@ -429,6 +432,9 @@ FileManager.prototype = /** @struct */ {
         this.spinnerController_,
         this.commandHandler,
         this.selectionHandler_);
+    this.sortMenuController_ = new SortMenuController(
+        this.ui_.sortButton,
+        assert(this.directoryModel_.getFileList()));
     this.gearMenuController_ = new GearMenuController(
         this.ui_.gearButton,
         this.ui_.gearMenu,
@@ -444,19 +450,21 @@ FileManager.prototype = /** @struct */ {
         this.ui_.emptyFolder,
         this.directoryModel_);
 
-    importer.importEnabled().then(
-        function(enabled) {
-          if (enabled) {
-            this.importController_ = new importer.ImportController(
-                new importer.RuntimeControllerEnvironment(
-                    this,
-                    this.selectionHandler_),
-                this.mediaScanner_,
-                this.mediaImportHandler_,
-                new importer.RuntimeCommandWidget(),
-                assert(this.tracker_));
-          }
-        }.bind(this));
+    if (this.dialogType === DialogType.FULL_PAGE) {
+      importer.importEnabled().then(
+          function(enabled) {
+            if (enabled) {
+              this.importController_ = new importer.ImportController(
+                  new importer.RuntimeControllerEnvironment(
+                      this,
+                      assert(this.selectionHandler_)),
+                  assert(this.mediaScanner_),
+                  assert(this.mediaImportHandler_),
+                  new importer.RuntimeCommandWidget(),
+                  assert(this.tracker_));
+            }
+          }.bind(this));
+    }
 
     assert(this.fileFilter_);
     assert(this.namingController_);
@@ -598,6 +606,9 @@ FileManager.prototype = /** @struct */ {
     this.initializeQueue_.add(
         this.initFileSystemUI_.bind(this),
         ['initAdditionalUI', 'initSettings'], 'initFileSystemUI');
+    this.initializeQueue_.add(
+        this.initUIFocus_.bind(this),
+        ['initAdditionalUI', 'initFileSystemUI'], 'initUIFocus');
 
     // Run again just in case if all pending closures have completed and the
     // queue has stopped and monitor the completion.
@@ -722,10 +733,14 @@ FileManager.prototype = /** @struct */ {
     this.metadataModel_ = MetadataModel.create(this.volumeManager_);
     this.thumbnailModel_ = new ThumbnailModel(this.metadataModel_);
 
+    // Create the providers model.
+    this.providersModel_ = new ProvidersModel(this.volumeManager_);
+
     // Create the root view of FileManager.
     assert(this.dialogDom_);
     assert(this.launchParams_);
-    this.ui_ = new FileManagerUI(this.dialogDom_, this.launchParams_);
+    this.ui_ = new FileManagerUI(
+        this.providersModel_, this.dialogDom_, this.launchParams_);
 
     // Show the window as soon as the UI pre-initialization is done.
     if (this.dialogType == DialogType.FULL_PAGE && !util.runningInBrowser()) {
@@ -800,6 +815,17 @@ FileManager.prototype = /** @struct */ {
     this.ui_.listContainer.table.normalizeColumns();
     this.ui_.listContainer.table.redraw();
 
+    callback();
+  };
+
+  /**
+   * One-time initialization of focus. This should run at the last of UI
+   *  initialization.
+   *
+   * @private
+   */
+  FileManager.prototype.initUIFocus_ = function(callback) {
+    this.ui_.initUIFocus();
     callback();
   };
 
@@ -968,10 +994,13 @@ FileManager.prototype = /** @struct */ {
                            assert(this.metadataModel_),
                            fakeEntriesVisible);
     directoryTree.dataModel = new NavigationListModel(
-        this.volumeManager_,
-        this.folderShortcutsModel_,
-        new NavigationModelCommandItem(
-          util.queryDecoratedElement('#add-new-services', cr.ui.Command)));
+        assert(this.volumeManager_),
+        assert(this.folderShortcutsModel_),
+        this.dialogType === DialogType.FULL_PAGE ?
+            new NavigationModelMenuItem(
+                str('ADD_NEW_SERVICES_BUTTON_LABEL'),
+                '#add-new-services-menu',
+                'add-new-services') : null);
 
     this.ui_.initDirectoryTree(directoryTree);
   };
@@ -1223,6 +1252,13 @@ FileManager.prototype = /** @struct */ {
    */
   FileManager.prototype.isOnDrive = function() {
     return this.directoryModel_.isOnDrive();
+  };
+
+  /**
+   * @return {boolean} True if the current directory content is from MTP volume.
+   */
+  FileManager.prototype.isOnMTP = function() {
+    return this.directoryModel_.isOnMTP();
   };
 
   /**

@@ -82,6 +82,9 @@ void NormalizeInitState(gpu::gles2::GLES2DecoderTestBase::InitState* init) {
   init->extensions += "GL_EXT_framebuffer_object ";
 }
 
+const uint32 kMaxColorAttachments = 16;
+const uint32 kMaxDrawBuffers = 16;
+
 }  // namespace Anonymous
 
 namespace gpu {
@@ -200,11 +203,11 @@ void GLES2DecoderTestBase::InitDecoderWithCommandLine(
   // Context needs to be created before initializing ContextGroup, which will
   // in turn initialize FeatureInfo, which needs a context to determine
   // extension support.
-  context_ = new gfx::GLContextStubWithExtensions;
+  context_ = new StrictMock<GLContextMock>();
   context_->AddExtensionsString(normalized_init.extensions.c_str());
   context_->SetGLVersionString(normalized_init.gl_version.c_str());
 
-  context_->MakeCurrent(surface_.get());
+  context_->GLContextStubWithExtensions::MakeCurrent(surface_.get());
   gfx::GLSurface::InitializeDynamicMockBindingsForTests(context_.get());
 
   TestHelper::SetupContextGroupInitExpectations(
@@ -227,9 +230,18 @@ void GLES2DecoderTestBase::InitDecoderWithCommandLine(
   EXPECT_TRUE(
       group_->Initialize(mock_decoder_.get(), DisallowedFeatures()));
 
+  if (group_->feature_info()->IsES3Capable()) {
+    EXPECT_CALL(*gl_, GetIntegerv(GL_MAX_COLOR_ATTACHMENTS, _))
+        .WillOnce(SetArgumentPointee<1>(kMaxColorAttachments))
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl_, GetIntegerv(GL_MAX_DRAW_BUFFERS, _))
+        .WillOnce(SetArgumentPointee<1>(kMaxDrawBuffers))
+        .RetiresOnSaturation();
+  }
+
   if (group_->feature_info()->feature_flags().native_vertex_array_object) {
     EXPECT_CALL(*gl_, GenVertexArraysOES(1, _))
-      .WillOnce(SetArgumentPointee<1>(kServiceVertexArrayId))
+        .WillOnce(SetArgumentPointee<1>(kServiceVertexArrayId))
         .RetiresOnSaturation();
     EXPECT_CALL(*gl_, BindVertexArrayOES(_)).Times(1).RetiresOnSaturation();
   }
@@ -364,10 +376,18 @@ void GLES2DecoderTestBase::InitDecoderWithCommandLine(
   // TODO(boliu): Remove OS_ANDROID once crbug.com/259023 is fixed and the
   // workaround has been reverted.
 #if !defined(OS_ANDROID)
+  if (normalized_init.has_alpha && !normalized_init.request_alpha) {
+    EXPECT_CALL(*gl_, ClearColor(0, 0, 0, 1)).Times(1).RetiresOnSaturation();
+  }
+
   EXPECT_CALL(*gl_, Clear(
       GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT))
       .Times(1)
       .RetiresOnSaturation();
+
+  if (normalized_init.has_alpha && !normalized_init.request_alpha) {
+    EXPECT_CALL(*gl_, ClearColor(0, 0, 0, 0)).Times(1).RetiresOnSaturation();
+  }
 #endif
 
   engine_.reset(new StrictMock<MockCommandBufferEngine>());
@@ -380,6 +400,9 @@ void GLES2DecoderTestBase::InitDecoderWithCommandLine(
   shared_memory_base_ = buffer->memory();
 
   static const int32 kLoseContextWhenOutOfMemory = 0x10002;
+  static const int32 kES3ContextRequired = 0x10003;
+
+  bool es3_context_required = group_->feature_info()->IsES3Capable();
 
   int32 attributes[] = {
       EGL_ALPHA_SIZE,
@@ -389,7 +412,10 @@ void GLES2DecoderTestBase::InitDecoderWithCommandLine(
       EGL_STENCIL_SIZE,
       normalized_init.request_stencil ? 8 : 0,
       kLoseContextWhenOutOfMemory,
-      normalized_init.lose_context_when_out_of_memory ? 1 : 0, };
+      normalized_init.lose_context_when_out_of_memory ? 1 : 0,
+      kES3ContextRequired,
+      es3_context_required ? 1 : 0
+  };
   std::vector<int32> attribs(attributes, attributes + arraysize(attributes));
 
   decoder_.reset(GLES2Decoder::Create(group_.get()));
@@ -401,6 +427,11 @@ void GLES2DecoderTestBase::InitDecoderWithCommandLine(
                        surface_->GetSize(),
                        DisallowedFeatures(),
                        attribs);
+  EXPECT_CALL(*context_, MakeCurrent(surface_.get())).WillOnce(Return(true));
+  if (context_->WasAllocatedUsingRobustnessExtension()) {
+    EXPECT_CALL(*gl_, GetGraphicsResetStatusARB())
+        .WillOnce(Return(GL_NO_ERROR));
+  }
   decoder_->MakeCurrent();
   decoder_->set_engine(engine_.get());
   decoder_->BeginDecoding();

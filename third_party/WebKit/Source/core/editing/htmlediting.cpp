@@ -26,8 +26,6 @@
 #include "config.h"
 #include "core/editing/htmlediting.h"
 
-#include "bindings/core/v8/ExceptionState.h"
-#include "bindings/core/v8/ExceptionStatePlaceholder.h"
 #include "core/HTMLElementFactory.h"
 #include "core/HTMLNames.h"
 #include "core/dom/Document.h"
@@ -36,6 +34,7 @@
 #include "core/dom/Range.h"
 #include "core/dom/Text.h"
 #include "core/dom/shadow/ShadowRoot.h"
+#include "core/editing/EditingStrategy.h"
 #include "core/editing/Editor.h"
 #include "core/editing/HTMLInterchange.h"
 #include "core/editing/PlainTextRange.h"
@@ -99,7 +98,7 @@ int comparePositions(const Position& a, const Position& b)
             bias = 1;
     }
 
-    int result = Range::compareBoundaryPoints(nodeA, offsetA, nodeB, offsetB, IGNORE_EXCEPTION);
+    int result = EditingStrategy::comparePositions(nodeA, offsetA, nodeB, offsetB);
     return result ? result : bias;
 }
 
@@ -213,7 +212,7 @@ Element* unsplittableElementForPosition(const Position& p)
 
 Position nextCandidate(const Position& position)
 {
-    PositionIterator p = position;
+    PositionIterator p(position);
     while (!p.atEnd()) {
         p.increment();
         if (p.isCandidate())
@@ -236,7 +235,7 @@ Position nextVisuallyDistinctCandidate(const Position& position)
 
 Position previousCandidate(const Position& position)
 {
-    PositionIterator p = position;
+    PositionIterator p(position);
     while (!p.atStart()) {
         p.decrement();
         if (p.isCandidate())
@@ -355,8 +354,8 @@ TextDirection directionOfEnclosingBlock(const Position& position)
     Element* enclosingBlockElement = enclosingBlock(position.containerNode());
     if (!enclosingBlockElement)
         return LTR;
-    LayoutObject* renderer = enclosingBlockElement->layoutObject();
-    return renderer ? renderer->style()->direction() : LTR;
+    LayoutObject* layoutObject = enclosingBlockElement->layoutObject();
+    return layoutObject ? layoutObject->style()->direction() : LTR;
 }
 
 // This method is used to create positions in the DOM. It returns the maximum valid offset
@@ -365,20 +364,7 @@ TextDirection directionOfEnclosingBlock(const Position& position)
 // on a Position before using it to create a DOM Range, or an exception will be thrown.
 int lastOffsetForEditing(const Node* node)
 {
-    ASSERT(node);
-    if (!node)
-        return 0;
-    if (node->offsetInCharacters())
-        return node->maxCharacterOffset();
-
-    if (node->hasChildren())
-        return node->countChildren();
-
-    // NOTE: This should preempt the childNodeCount for, e.g., select nodes
-    if (editingIgnoresContent(node))
-        return 1;
-
-    return 0;
+    return EditingStrategy::lastOffsetForEditing(node);
 }
 
 String stringWithRebalancedWhitespace(const String& string, bool startIsStartOfParagraph, bool endIsEndOfParagraph)
@@ -398,7 +384,7 @@ String stringWithRebalancedWhitespace(const String& string, bool startIsStartOfP
         }
 
         if (previousCharacterWasSpace || (!i && startIsStartOfParagraph) || (i + 1 == length && endIsEndOfParagraph)) {
-            rebalancedString.append(noBreakSpace);
+            rebalancedString.append(noBreakSpaceCharacter);
             previousCharacterWasSpace = false;
         } else {
             rebalancedString.append(' ');
@@ -413,13 +399,13 @@ String stringWithRebalancedWhitespace(const String& string, bool startIsStartOfP
 
 bool isTableStructureNode(const Node *node)
 {
-    LayoutObject* renderer = node->layoutObject();
-    return (renderer && (renderer->isTableCell() || renderer->isTableRow() || renderer->isTableSection() || renderer->isLayoutTableCol()));
+    LayoutObject* layoutObject = node->layoutObject();
+    return (layoutObject && (layoutObject->isTableCell() || layoutObject->isTableRow() || layoutObject->isTableSection() || layoutObject->isLayoutTableCol()));
 }
 
 const String& nonBreakingSpaceString()
 {
-    DEFINE_STATIC_LOCAL(String, nonBreakingSpaceString, (&noBreakSpace, 1));
+    DEFINE_STATIC_LOCAL(String, nonBreakingSpaceString, (&noBreakSpaceCharacter, 1));
     return nonBreakingSpaceString;
 }
 
@@ -432,14 +418,14 @@ static bool isSpecialHTMLElement(const Node& n)
     if (n.isLink())
         return true;
 
-    LayoutObject* renderer = n.layoutObject();
-    if (!renderer)
+    LayoutObject* layoutObject = n.layoutObject();
+    if (!layoutObject)
         return false;
 
-    if (renderer->style()->display() == TABLE || renderer->style()->display() == INLINE_TABLE)
+    if (layoutObject->style()->display() == TABLE || layoutObject->style()->display() == INLINE_TABLE)
         return true;
 
-    if (renderer->style()->isFloating())
+    if (layoutObject->style()->isFloating())
         return true;
 
     return false;
@@ -629,8 +615,8 @@ Node* highestNodeToRemoveInPruning(Node* node, Node* excludeNode)
     Node* previousNode = nullptr;
     Element* rootEditableElement = node ? node->rootEditableElement() : nullptr;
     for (; node; node = node->parentNode()) {
-        if (LayoutObject* renderer = node->layoutObject()) {
-            if (!renderer->canHaveChildren() || hasARenderedDescendant(node, previousNode) || rootEditableElement == node || excludeNode == node)
+        if (LayoutObject* layoutObject = node->layoutObject()) {
+            if (!layoutObject->canHaveChildren() || hasARenderedDescendant(node, previousNode) || rootEditableElement == node || excludeNode == node)
                 return previousNode;
         }
         previousNode = node;
@@ -752,8 +738,8 @@ bool isRenderedTableElement(const Node* node)
     if (!node || !node->isElementNode())
         return false;
 
-    LayoutObject* renderer = node->layoutObject();
-    return (renderer && renderer->isTable());
+    LayoutObject* layoutObject = node->layoutObject();
+    return (layoutObject && layoutObject->isTable());
 }
 
 bool isTableCell(const Node* node)
@@ -767,7 +753,7 @@ bool isEmptyTableCell(const Node* node)
 {
     // Returns true IFF the passed in node is one of:
     //   .) a table cell with no children,
-    //   .) a table cell with a single BR child, and which has no other child renderers, including :before and :after renderers
+    //   .) a table cell with a single BR child, and which has no other child layoutObject, including :before and :after layoutObject
     //   .) the BR child of such a table cell
 
     // Find rendered node
@@ -778,22 +764,22 @@ bool isEmptyTableCell(const Node* node)
 
     // Make sure the rendered node is a table cell or <br>.
     // If it's a <br>, then the parent node has to be a table cell.
-    LayoutObject* renderer = node->layoutObject();
-    if (renderer->isBR()) {
-        renderer = renderer->parent();
-        if (!renderer)
+    LayoutObject* layoutObject = node->layoutObject();
+    if (layoutObject->isBR()) {
+        layoutObject = layoutObject->parent();
+        if (!layoutObject)
             return false;
     }
-    if (!renderer->isTableCell())
+    if (!layoutObject->isTableCell())
         return false;
 
-    // Check that the table cell contains no child renderers except for perhaps a single <br>.
-    LayoutObject* childRenderer = toLayoutTableCell(renderer)->firstChild();
-    if (!childRenderer)
+    // Check that the table cell contains no child layoutObjects except for perhaps a single <br>.
+    LayoutObject* childLayoutObject = toLayoutTableCell(layoutObject)->firstChild();
+    if (!childLayoutObject)
         return true;
-    if (!childRenderer->isBR())
+    if (!childLayoutObject->isBR())
         return false;
-    return !childRenderer->nextSibling();
+    return !childLayoutObject->nextSibling();
 }
 
 PassRefPtrWillBeRawPtr<HTMLElement> createDefaultParagraphElement(Document& document)
@@ -882,11 +868,11 @@ PassRefPtrWillBeRawPtr<HTMLBRElement> createBlockPlaceholderElement(Document& do
 
 bool isNodeRendered(const Node& node)
 {
-    LayoutObject* renderer = node.layoutObject();
-    if (!renderer)
+    LayoutObject* layoutObject = node.layoutObject();
+    if (!layoutObject)
         return false;
 
-    return renderer->style()->visibility() == VISIBLE;
+    return layoutObject->style()->visibility() == VISIBLE;
 }
 
 // return first preceding DOM position rendered at a different location, or "this"
@@ -932,7 +918,7 @@ Position leadingWhitespacePosition(const Position& position, EAffinity affinity,
     if (prev != position && inSameContainingBlockFlowElement(prev.anchorNode(), position.anchorNode()) && prev.anchorNode()->isTextNode()) {
         String string = toText(prev.anchorNode())->data();
         UChar previousCharacter = string[prev.deprecatedEditingOffset()];
-        bool isSpace = option == ConsiderNonCollapsibleWhitespace ? (isSpaceOrNewline(previousCharacter) || previousCharacter == noBreakSpace) : isCollapsibleWhitespace(previousCharacter);
+        bool isSpace = option == ConsiderNonCollapsibleWhitespace ? (isSpaceOrNewline(previousCharacter) || previousCharacter == noBreakSpaceCharacter) : isCollapsibleWhitespace(previousCharacter);
         if (isSpace && isEditablePosition(prev))
             return prev;
     }
@@ -949,7 +935,7 @@ Position trailingWhitespacePosition(const Position& position, EAffinity, Whitesp
 
     VisiblePosition visiblePosition(position);
     UChar characterAfterVisiblePosition = visiblePosition.characterAfter();
-    bool isSpace = option == ConsiderNonCollapsibleWhitespace ? (isSpaceOrNewline(characterAfterVisiblePosition) || characterAfterVisiblePosition == noBreakSpace) : isCollapsibleWhitespace(characterAfterVisiblePosition);
+    bool isSpace = option == ConsiderNonCollapsibleWhitespace ? (isSpaceOrNewline(characterAfterVisiblePosition) || characterAfterVisiblePosition == noBreakSpaceCharacter) : isCollapsibleWhitespace(characterAfterVisiblePosition);
     // The space must not be in another paragraph and it must be editable.
     if (isSpace && !isEndOfParagraph(visiblePosition) && visiblePosition.next(CannotCrossEditingBoundary).isNotNull())
         return position;
@@ -972,11 +958,11 @@ void updatePositionForNodeRemoval(Position& position, Node& node)
         return;
     switch (position.anchorType()) {
     case Position::PositionIsBeforeChildren:
-        if (position.containerNode() == node)
+        if (node.containsIncludingShadowDOM(position.containerNode()))
             position = positionInParentBeforeNode(node);
         break;
     case Position::PositionIsAfterChildren:
-        if (position.containerNode() == node)
+        if (node.containsIncludingShadowDOM(position.containerNode()))
             position = positionInParentAfterNode(node);
         break;
     case Position::PositionIsOffsetInAnchor:
@@ -1135,8 +1121,8 @@ bool isRenderedAsNonInlineTableImageOrHR(const Node* node)
 {
     if (!node)
         return false;
-    LayoutObject* renderer = node->layoutObject();
-    return renderer && ((renderer->isTable() && !renderer->isInline()) || (renderer->isImage() && !renderer->isInline()) || renderer->isHR());
+    LayoutObject* layoutObject = node->layoutObject();
+    return layoutObject && ((layoutObject->isTable() && !layoutObject->isInline()) || (layoutObject->isImage() && !layoutObject->isInline()) || layoutObject->isHR());
 }
 
 bool areIdenticalElements(const Node* first, const Node* second)
@@ -1173,8 +1159,8 @@ bool isNonTableCellHTMLBlockElement(const Node* node)
 
 bool isBlockFlowElement(const Node& node)
 {
-    LayoutObject* renderer = node.layoutObject();
-    return node.isElementNode() && renderer && renderer->isLayoutBlockFlow();
+    LayoutObject* layoutObject = node.layoutObject();
+    return node.isElementNode() && layoutObject && layoutObject->isLayoutBlockFlow();
 }
 
 Position adjustedSelectionStartForStyleComputation(const VisibleSelection& selection)

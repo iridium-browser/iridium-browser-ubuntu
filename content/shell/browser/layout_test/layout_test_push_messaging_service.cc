@@ -6,23 +6,36 @@
 
 #include "base/callback.h"
 #include "base/logging.h"
+#include "content/public/browser/permission_type.h"
+#include "content/shell/browser/layout_test/layout_test_browser_context.h"
+#include "content/shell/browser/layout_test/layout_test_content_browser_client.h"
+#include "content/shell/browser/layout_test/layout_test_permission_manager.h"
 
 namespace content {
+
+namespace {
+
+blink::WebPushPermissionStatus ToWebPushPermissionStatus(
+    PermissionStatus status) {
+  switch (status) {
+    case PERMISSION_STATUS_GRANTED:
+      return blink::WebPushPermissionStatusGranted;
+    case PERMISSION_STATUS_DENIED:
+      return blink::WebPushPermissionStatusDenied;
+    case PERMISSION_STATUS_ASK:
+      return blink::WebPushPermissionStatusPrompt;
+  }
+
+  NOTREACHED();
+  return blink::WebPushPermissionStatusLast;
+}
+
+}  // anonymous namespace
 
 LayoutTestPushMessagingService::LayoutTestPushMessagingService() {
 }
 
 LayoutTestPushMessagingService::~LayoutTestPushMessagingService() {
-}
-
-void LayoutTestPushMessagingService::SetPermission(const GURL& origin,
-                                                   bool allowed) {
-  permission_map_[origin] = allowed ? blink::WebPushPermissionStatusGranted
-                                    : blink::WebPushPermissionStatusDenied;
-}
-
-void LayoutTestPushMessagingService::ClearPermissions() {
-  permission_map_.clear();
 }
 
 GURL LayoutTestPushMessagingService::GetPushEndpoint() {
@@ -61,10 +74,16 @@ LayoutTestPushMessagingService::GetPermissionStatus(
     const GURL& requesting_origin,
     const GURL& embedding_origin,
     bool user_visible) {
-  const auto& it = permission_map_.find(requesting_origin);
-  if (it == permission_map_.end())
-    return blink::WebPushPermissionStatusDefault;
-  return it->second;
+  return ToWebPushPermissionStatus(LayoutTestContentBrowserClient::Get()
+      ->GetLayoutTestBrowserContext()
+      ->GetLayoutTestPermissionManager()
+      ->GetPermissionStatus(PermissionType::PUSH_MESSAGING,
+                            requesting_origin,
+                            embedding_origin));
+}
+
+bool LayoutTestPushMessagingService::SupportNonVisibleMessages() {
+  return false;
 }
 
 void LayoutTestPushMessagingService::Unregister(

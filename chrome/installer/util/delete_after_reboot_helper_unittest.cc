@@ -22,7 +22,7 @@ namespace {
 // your PendingFileRenameOperations value.
 class DeleteAfterRebootHelperTest : public testing::Test {
  protected:
-  virtual void SetUp() {
+  void SetUp() override {
     // Create a temporary directory for testing and fill it with some files.
     base::CreateNewTempDirectory(base::FilePath::StringType(), &temp_dir_);
     base::CreateTemporaryFileInDir(temp_dir_, &temp_file_);
@@ -36,7 +36,7 @@ class DeleteAfterRebootHelperTest : public testing::Test {
       GetPendingMovesValue(&original_pending_moves_);
     }
   }
-  virtual void TearDown() {
+  void TearDown() override {
     // Delete the temporary directory if it's still there.
     base::DeleteFile(temp_dir_, true);
 
@@ -53,7 +53,8 @@ class DeleteAfterRebootHelperTest : public testing::Test {
       std::vector<char> buffer;
       StringArrayToMultiSZBytes(original_pending_moves_, &buffer);
       session_manager_key.WriteValue(kPendingFileRenameOps, &buffer[0],
-                                     buffer.size(), REG_MULTI_SZ);
+                                     static_cast<int>(buffer.size()),
+                                     REG_MULTI_SZ);
     }
   }
 

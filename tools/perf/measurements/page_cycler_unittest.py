@@ -6,9 +6,9 @@ import sys
 import unittest
 
 from telemetry.core import browser_options
+from telemetry.internal import story_runner
 from telemetry.results import page_test_results
 from telemetry.unittest_util import simple_mock
-from telemetry.user_story import user_story_runner
 
 from measurements import page_cycler
 from metrics import keychain_metric
@@ -114,11 +114,11 @@ class PageCyclerUnitTest(unittest.TestCase):
     options = browser_options.BrowserFinderOptions()
     options.browser_options.platform = FakePlatform()
     parser = options.CreateParser()
-    user_story_runner.AddCommandLineArgs(parser)
+    story_runner.AddCommandLineArgs(parser)
     args = ['--page-repeat=%i' % page_repeat,
             '--pageset-repeat=%i' % pageset_repeat]
     parser.parse_args(args)
-    user_story_runner.ProcessCommandLineArgs(parser, options)
+    story_runner.ProcessCommandLineArgs(parser, options)
     cycler.CustomizeBrowserOptions(options.browser_options)
 
     if setup_memory_module:
@@ -227,7 +227,7 @@ class PageCyclerUnitTest(unittest.TestCase):
 
         # On Mac, there is an additional measurement: the number of keychain
         # accesses.
-        value_count = 4
+        value_count = 3
         if sys.platform == 'darwin':
           value_count += 1
         self.assertEqual(value_count, len(values))
@@ -237,7 +237,7 @@ class PageCyclerUnitTest(unittest.TestCase):
         self.assertEqual(values[0].name, '%s.page_load_time' % chart_name)
         self.assertEqual(values[0].units, 'ms')
 
-        expected_values = ['gpu', 'renderer', 'browser']
+        expected_values = ['gpu', 'browser']
         for value, expected in zip(values[1:len(expected_values) + 1],
             expected_values):
           self.assertEqual(value.page, page)

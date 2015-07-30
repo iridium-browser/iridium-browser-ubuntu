@@ -89,7 +89,7 @@ void TypedUrlChangeProcessor::OnURLsModified(
   DVLOG(1) << "Observed typed_url change.";
   syncer::WriteTransaction trans(FROM_HERE, share_handle());
   for (const auto& row : changed_urls) {
-    if (row.typed_count() > 0) {
+    if (row.typed_count() >= 0) {
       // If there were any errors updating the sync node, just ignore them and
       // continue on to process the next URL.
       CreateOrUpdateSyncNode(row, &trans);
@@ -149,13 +149,21 @@ void TypedUrlChangeProcessor::OnURLsDeleted(
 
 bool TypedUrlChangeProcessor::CreateOrUpdateSyncNode(
     history::URLRow url, syncer::WriteTransaction* trans) {
-  DCHECK_GT(url.typed_count(), 0);
+  DCHECK_GE(url.typed_count(), 0);
   // Get the visits for this node.
   history::VisitVector visit_vector;
   if (!model_associator_->FixupURLAndGetVisits(&url, &visit_vector)) {
     DLOG(ERROR) << "Could not load visits for url: " << url.url();
     return false;
   }
+
+  if (std::find_if(visit_vector.begin(), visit_vector.end(),
+                   [](const history::VisitRow& visit) {
+                     return ui::PageTransitionCoreTypeIs(
+                         visit.transition, ui::PAGE_TRANSITION_TYPED);
+                   }) == visit_vector.end())
+    // This URL has no TYPED visits, don't sync it.
+    return false;
 
   syncer::ReadNode typed_url_root(trans);
   if (typed_url_root.InitTypeRoot(syncer::TYPED_URLS) !=
@@ -216,7 +224,7 @@ bool TypedUrlChangeProcessor::ShouldSyncVisit(int typed_count,
   // tend to be more broadly distributed such that there's no need to sync up
   // every visit to preserve their relative ordering.
   return (ui::PageTransitionCoreTypeIs(transition, ui::PAGE_TRANSITION_TYPED) &&
-          typed_count > 0 &&
+          typed_count >= 0 &&
           (typed_count < kTypedUrlVisitThrottleThreshold ||
            (typed_count % kTypedUrlVisitThrottleMultiple) == 0));
 }
@@ -323,7 +331,7 @@ void TypedUrlChangeProcessor::Disconnect() {
 }
 
 void TypedUrlChangeProcessor::StartImpl() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(history_backend_);
   DCHECK(backend_loop_);
   backend_loop_->PostTask(FROM_HERE,

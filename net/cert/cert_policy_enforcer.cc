@@ -185,11 +185,12 @@ struct ComplianceDetails {
   base::Version whitelist_version;
 };
 
-base::Value* NetLogComplianceCheckResultCallback(X509Certificate* cert,
-                                                 ComplianceDetails* details,
-                                                 NetLog::LogLevel log_level) {
+base::Value* NetLogComplianceCheckResultCallback(
+    X509Certificate* cert,
+    ComplianceDetails* details,
+    NetLogCaptureMode capture_mode) {
   base::DictionaryValue* dict = new base::DictionaryValue();
-  dict->Set("certificate", NetLogX509CertificateCallback(cert, log_level));
+  dict->Set("certificate", NetLogX509CertificateCallback(cert, capture_mode));
   dict->SetBoolean("policy_enforcement_required",
                    details->ct_presence_required);
   if (details->ct_presence_required) {
@@ -250,13 +251,6 @@ void CheckCTEVPolicyCompliance(X509Certificate* cert,
 
 }  // namespace
 
-CertPolicyEnforcer::CertPolicyEnforcer(bool require_ct_for_ev)
-    : require_ct_for_ev_(require_ct_for_ev) {
-}
-
-CertPolicyEnforcer::~CertPolicyEnforcer() {
-}
-
 bool CertPolicyEnforcer::DoesConformToCTEVPolicy(
     X509Certificate* cert,
     const ct::EVCertsWhitelist* ev_whitelist,
@@ -264,8 +258,7 @@ bool CertPolicyEnforcer::DoesConformToCTEVPolicy(
     const BoundNetLog& net_log) {
   ComplianceDetails details;
 
-  if (require_ct_for_ev_)
-    CheckCTEVPolicyCompliance(cert, ev_whitelist, ct_result, &details);
+  CheckCTEVPolicyCompliance(cert, ev_whitelist, ct_result, &details);
 
   NetLog::ParametersCallback net_log_callback =
       base::Bind(&NetLogComplianceCheckResultCallback, base::Unretained(cert),

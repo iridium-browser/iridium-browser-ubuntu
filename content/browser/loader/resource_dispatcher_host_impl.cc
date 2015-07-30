@@ -19,11 +19,12 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/shared_memory.h"
 #include "base/message_loop/message_loop.h"
-#include "base/metrics/histogram.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/stl_util.h"
 #include "base/third_party/dynamic_annotations/dynamic_annotations.h"
+#include "base/time/time.h"
 #include "content/browser/appcache/appcache_interceptor.h"
 #include "content/browser/appcache/chrome_appcache_service.h"
 #include "content/browser/cert_store_impl.h"
@@ -613,7 +614,7 @@ DownloadInterruptReason ResourceDispatcherHostImpl::BeginDownload(
 
   SetReferrerForRequest(request.get(), referrer);
 
-  int extra_load_flags = net::LOAD_IS_DOWNLOAD;
+  int extra_load_flags = net::LOAD_NORMAL;
   if (prefer_cache) {
     // If there is upload data attached, only retrieve from cache because there
     // is no current mechanism to prompt the user for their consent for a
@@ -793,7 +794,8 @@ bool ResourceDispatcherHostImpl::HandleExternalProtocol(ResourceLoader* loader,
     return false;
 
   return delegate_->HandleExternalProtocol(
-      url, info->GetChildID(), info->GetRouteID());
+      url, info->GetChildID(), info->GetRouteID(), info->IsMainFrame(),
+      info->GetPageTransition(), info->HasUserGesture());
 }
 
 void ResourceDispatcherHostImpl::DidStartRequest(ResourceLoader* loader) {
@@ -861,7 +863,46 @@ void ResourceDispatcherHostImpl::DidFinishLoading(ResourceLoader* loader) {
         "Net.ErrorCodesForMainFrame3",
         -loader->request()->status().error());
 
-    if (loader->request()->url().SchemeIsSecure()) {
+    // Record time to success and error for the most common errors, and for
+    // the aggregate remainder errors.
+    base::TimeDelta request_loading_time(
+        base::Time::Now() - loader->request()->request_time());
+    switch (loader->request()->status().error()) {
+      case net::OK:
+        UMA_HISTOGRAM_LONG_TIMES(
+            "Net.RequestTime.Success", request_loading_time);
+        break;
+      case net::ERR_ABORTED:
+        UMA_HISTOGRAM_LONG_TIMES(
+            "Net.RequestTime.ErrAborted", request_loading_time);
+        break;
+      case net::ERR_CONNECTION_RESET:
+        UMA_HISTOGRAM_LONG_TIMES(
+            "Net.RequestTime.ErrConnectionReset", request_loading_time);
+        break;
+      case net::ERR_CONNECTION_TIMED_OUT:
+        UMA_HISTOGRAM_LONG_TIMES(
+            "Net.RequestTime.ErrConnectionTimedOut", request_loading_time);
+        break;
+      case net::ERR_INTERNET_DISCONNECTED:
+        UMA_HISTOGRAM_LONG_TIMES(
+            "Net.RequestTime.ErrInternetDisconnected", request_loading_time);
+        break;
+      case net::ERR_NAME_NOT_RESOLVED:
+        UMA_HISTOGRAM_LONG_TIMES(
+            "Net.RequestTime.ErrNameNotResolved", request_loading_time);
+        break;
+      case net::ERR_TIMED_OUT:
+        UMA_HISTOGRAM_LONG_TIMES(
+            "Net.RequestTime.ErrTimedOut", request_loading_time);
+        break;
+      default:
+        UMA_HISTOGRAM_LONG_TIMES(
+            "Net.RequestTime.MiscError", request_loading_time);
+        break;
+    }
+
+    if (loader->request()->url().SchemeIsCryptographic()) {
       if (loader->request()->url().host() == "www.google.com") {
         UMA_HISTOGRAM_SPARSE_SLOWLY("Net.ErrorCodesForHTTPSGoogleMainFrame2",
                                     -loader->request()->status().error());
@@ -886,7 +927,7 @@ void ResourceDispatcherHostImpl::DidFinishLoading(ResourceLoader* loader) {
         -loader->request()->status().error());
   }
 
-  if (loader->request()->url().SchemeIsSecure()) {
+  if (loader->request()->url().SchemeIsCryptographic()) {
     RecordCertificateHistograms(loader->request()->ssl_info(),
                                 info->GetResourceType());
   }
@@ -977,6 +1018,10 @@ void ResourceDispatcherHostImpl::OnRequestResource(
     int routing_id,
     int request_id,
     const ResourceHostMsg_Request& request_data) {
+  // TODO(pkasting): Remove ScopedTracker below once crbug.com/477117 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "477117 ResourceDispatcherHostImpl::OnRequestResource"));
   // When logging time-to-network only care about main frame and non-transfer
   // navigations.
   if (request_data.resource_type == RESOURCE_TYPE_MAIN_FRAME &&
@@ -1846,7 +1891,7 @@ void ResourceDispatcherHostImpl::FinishedWithResourcesForRequest(
 
 void ResourceDispatcherHostImpl::BeginNavigationRequest(
     ResourceContext* resource_context,
-    int64 frame_tree_node_id,
+    int frame_tree_node_id,
     const NavigationRequestInfo& info,
     NavigationURLLoaderImplCore* loader) {
   // PlzNavigate: BeginNavigationRequest currently should only be used for the
@@ -1866,7 +1911,7 @@ void ResourceDispatcherHostImpl::BeginNavigationRequest(
           info.common_params.url,
           resource_type,
           resource_context))) {
-    loader->NotifyRequestFailed(net::ERR_ABORTED);
+    loader->NotifyRequestFailed(false, net::ERR_ABORTED);
     return;
   }
 
@@ -2173,20 +2218,10 @@ ResourceDispatcherHostImpl::GetLoadInfoForAllRoutes() {
 }
 
 void ResourceDispatcherHostImpl::UpdateLoadInfo() {
-  // TODO(pkasting): Remove ScopedTracker below once crbug.com/455952 is
-  // fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "455952 ResourceDispatcherHostImpl::UpdateLoadInfo"));
-
   scoped_ptr<LoadInfoMap> info_map(GetLoadInfoForAllRoutes());
 
   if (info_map->empty())
     return;
-
-  tracked_objects::ScopedTracker tracking_profile2(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "455952 ResourceDispatcherHostImpl::UpdateLoadInfo2"));
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,

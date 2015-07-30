@@ -5,8 +5,10 @@
 #ifndef FetchResponseData_h
 #define FetchResponseData_h
 
+#include "modules/ModulesExport.h"
 #include "platform/heap/Handle.h"
 #include "platform/weborigin/KURL.h"
+#include "public/platform/WebServiceWorkerRequest.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/text/AtomicString.h"
 
@@ -17,7 +19,7 @@ class BodyStreamBuffer;
 class FetchHeaderList;
 class WebServiceWorkerResponse;
 
-class FetchResponseData final : public GarbageCollectedFinalized<FetchResponseData> {
+class MODULES_EXPORT FetchResponseData final : public GarbageCollectedFinalized<FetchResponseData> {
     WTF_MAKE_NONCOPYABLE(FetchResponseData);
 public:
     // "A response has an associated type which is one of basic, CORS, default,
@@ -61,7 +63,7 @@ public:
     // |m_internalResponse|. If the type is Error or Opaque, does nothing.
     void replaceBodyStreamBuffer(BodyStreamBuffer*);
 
-    void populateWebServiceWorkerResponse(blink::WebServiceWorkerResponse&);
+    void populateWebServiceWorkerResponse(WebServiceWorkerResponse&);
 
     DECLARE_TRACE();
 

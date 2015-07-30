@@ -7,12 +7,12 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/compiler_specific.h"
-#include "base/message_loop/message_loop.h"
-#include "base/profiler/scoped_tracker.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/thread_task_runner_handle.h"
 #include "content/browser/appcache/appcache_group.h"
 #include "content/browser/appcache/appcache_histograms.h"
+#include "content/public/browser/browser_thread.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
@@ -153,11 +153,6 @@ void AppCacheUpdateJob::URLFetcher::OnReceivedRedirect(
 
 void AppCacheUpdateJob::URLFetcher::OnResponseStarted(
     net::URLRequest *request) {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "422516 AppCacheUpdateJob::URLFetcher::OnResponseStarted"));
-
   DCHECK(request == request_);
   int response_code = -1;
   if (request->status().is_success()) {
@@ -174,7 +169,7 @@ void AppCacheUpdateJob::URLFetcher::OnResponseStarted(
     return;
   }
 
-  if (url_.SchemeIsSecure()) {
+  if (url_.SchemeIsCryptographic()) {
     // Do not cache content with cert errors.
     // Also, we willfully violate the HTML5 spec at this point in order
     // to support the appcaching of cross-origin HTTPS resources.
@@ -217,11 +212,6 @@ void AppCacheUpdateJob::URLFetcher::OnResponseStarted(
 
 void AppCacheUpdateJob::URLFetcher::OnReadCompleted(
     net::URLRequest* request, int bytes_read) {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422516 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "422516 AppCacheUpdateJob::URLFetcher::OnReadCompleted"));
-
   DCHECK(request_ == request);
   bool data_consumed = true;
   if (request->status().is_success() && bytes_read > 0) {
@@ -371,7 +361,8 @@ AppCacheUpdateJob::AppCacheUpdateJob(AppCacheServiceImpl* service,
       manifest_fetcher_(NULL),
       manifest_has_valid_mime_type_(false),
       stored_state_(UNSTORED),
-      storage_(service->storage()) {
+      storage_(service->storage()),
+      weak_factory_(this) {
     service_->AddObserver(this);
 }
 
@@ -451,7 +442,10 @@ void AppCacheUpdateJob::StartUpdate(AppCacheHost* host,
                               is_new_pending_master_entry);
   }
 
-  FetchManifest(true);
+  BrowserThread::PostAfterStartupTask(
+      FROM_HERE, base::ThreadTaskRunnerHandle::Get(),
+      base::Bind(&AppCacheUpdateJob::FetchManifest, weak_factory_.GetWeakPtr(),
+                 true));
 }
 
 AppCacheResponseWriter* AppCacheUpdateJob::CreateResponseWriter() {

@@ -371,13 +371,45 @@ TEST_F(ValidationTest, Conformance) {
   RunValidationTests("conformance_", validators.GetHead());
 }
 
+// This test is similar to Conformance test but its goal is specifically
+// do bounds-check testing of message validation. For example we test the
+// detection of off-by-one errors in method ordinals.
+TEST_F(ValidationTest, BoundsCheck) {
+  DummyMessageReceiver dummy_receiver;
+  mojo::internal::FilterChain validators(&dummy_receiver);
+  validators.Append<mojo::internal::MessageHeaderValidator>();
+  validators.Append<BoundsCheckTestInterface::RequestValidator_>();
+
+  RunValidationTests("boundscheck_", validators.GetHead());
+}
+
+// This test is similar to the Conformance test but for responses.
+TEST_F(ValidationTest, ResponseConformance) {
+  DummyMessageReceiver dummy_receiver;
+  mojo::internal::FilterChain validators(&dummy_receiver);
+  validators.Append<mojo::internal::MessageHeaderValidator>();
+  validators.Append<ConformanceTestInterface::ResponseValidator_>();
+
+  RunValidationTests("resp_conformance_", validators.GetHead());
+}
+
+// This test is similar to the BoundsCheck test but for responses.
+TEST_F(ValidationTest, ResponseBoundsCheck) {
+  DummyMessageReceiver dummy_receiver;
+  mojo::internal::FilterChain validators(&dummy_receiver);
+  validators.Append<mojo::internal::MessageHeaderValidator>();
+  validators.Append<BoundsCheckTestInterface::ResponseValidator_>();
+
+  RunValidationTests("resp_boundscheck_", validators.GetHead());
+}
+
 // Test that InterfacePtr<X> applies the correct validators and they don't
 // conflict with each other:
 //   - MessageHeaderValidator
 //   - X::ResponseValidator_
 TEST_F(ValidationIntegrationTest, InterfacePtr) {
-  IntegrationTestInterfacePtr interface_ptr =
-      MakeProxy<IntegrationTestInterface>(testee_endpoint().Pass());
+  IntegrationTestInterfacePtr interface_ptr = MakeProxy(
+      InterfacePtrInfo<IntegrationTestInterface>(testee_endpoint().Pass(), 0u));
   interface_ptr.internal_state()->router_for_testing()->EnableTestingMode();
 
   RunValidationTests("integration_intf_resp", test_message_receiver());

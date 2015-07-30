@@ -19,7 +19,6 @@
 #include "media/base/decoder_buffer.h"
 #include "media/base/media_switches.h"
 #include "media/base/pipeline.h"
-#include "media/base/pipeline_status.h"
 #include "media/base/video_decoder_config.h"
 #include "media/renderers/gpu_video_accelerator_factories.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -98,35 +97,12 @@ void GpuVideoDecoder::Reset(const base::Closure& closure)  {
 }
 
 static bool IsCodedSizeSupported(const gfx::Size& coded_size,
-                                 VideoCodecProfile profile) {
-#if defined(OS_WIN)
-  // Windows Media Foundation H.264 decoding does not support decoding videos
-  // with any dimension smaller than 48 pixels:
-  // http://msdn.microsoft.com/en-us/library/windows/desktop/dd797815
-  if (coded_size.width() < 48 || coded_size.height() < 48)
-    return false;
-#endif
-
-  // Only non-Windows, Ivy Bridge+ platforms can support more than 1920x1080.
-  // We test against 1088 to account for 16x16 macroblocks.
-  if (coded_size.width() <= 1920 && coded_size.height() <= 1088)
-    return true;
-
-  // NOTE: additional autodetection logic may require updating input buffer size
-  // selection in platform-specific implementations, such as
-  // V4L2VideoDecodeAccelerator.
-  base::CPU cpu;
-  bool hw_large_video_support =
-      base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kIgnoreResolutionLimitsForAcceleratedVideoDecode) ||
-      ((cpu.vendor_name() == "GenuineIntel") && cpu.model() >= 55 &&
-       // TODO(posciak, henryhsu): Remove this once we can query in runtime.
-       profile >= H264PROFILE_MIN && profile <= H264PROFILE_MAX);
-  bool os_large_video_support = true;
-#if defined(OS_WIN)
-  os_large_video_support = false;
-#endif
-  return os_large_video_support && hw_large_video_support;
+                                 const gfx::Size& min_resolution,
+                                 const gfx::Size& max_resolution) {
+  return (coded_size.width() <= max_resolution.width() &&
+      coded_size.height() <= max_resolution.height() &&
+      coded_size.width() >= min_resolution.width() &&
+      coded_size.height() >= min_resolution.height());
 }
 
 // Report |status| to UMA and run |cb| with it.  This is super-specific to the
@@ -169,7 +145,7 @@ void GpuVideoDecoder::Initialize(const VideoDecoderConfig& config,
     return;
   }
 
-  if (!IsCodedSizeSupported(config.coded_size(), config.profile())) {
+  if (!IsProfileSupported(config.profile(), config.coded_size())) {
     status_cb.Run(DECODER_ERROR_NOT_SUPPORTED);
     return;
   }
@@ -423,13 +399,13 @@ void GpuVideoDecoder::PictureReady(const media::Picture& picture) {
   DCHECK(decoder_texture_target_);
 
   scoped_refptr<VideoFrame> frame(VideoFrame::WrapNativeTexture(
-      make_scoped_ptr(new gpu::MailboxHolder(
-          pb.texture_mailbox(), decoder_texture_target_, 0 /* sync_point */)),
+      gpu::MailboxHolder(pb.texture_mailbox(), decoder_texture_target_,
+                         0 /* sync_point */),
       BindToCurrentLoop(base::Bind(
           &GpuVideoDecoder::ReleaseMailbox, weak_factory_.GetWeakPtr(),
           factories_, picture.picture_buffer_id(), pb.texture_id())),
-      pb.size(), visible_rect, natural_size, timestamp,
-      picture.allow_overlay()));
+      pb.size(), visible_rect, natural_size, timestamp, picture.allow_overlay(),
+      true /* has_alpha */));
   CHECK_GT(available_pictures_, 0);
   --available_pictures_;
   bool inserted =
@@ -591,6 +567,21 @@ void GpuVideoDecoder::NotifyError(media::VideoDecodeAccelerator::Error error) {
 
   DLOG(ERROR) << "VDA Error: " << error;
   DestroyVDA();
+}
+
+bool GpuVideoDecoder::IsProfileSupported(VideoCodecProfile profile,
+                                         const gfx::Size& coded_size) {
+  DCheckGpuVideoAcceleratorFactoriesTaskRunnerIsCurrent();
+  VideoDecodeAccelerator::SupportedProfiles supported_profiles =
+      factories_->GetVideoDecodeAcceleratorSupportedProfiles();
+  for (const auto& supported_profile : supported_profiles) {
+    if (profile == supported_profile.profile) {
+      return IsCodedSizeSupported(coded_size,
+                                  supported_profile.min_resolution,
+                                  supported_profile.max_resolution);
+    }
+  }
+  return false;
 }
 
 void GpuVideoDecoder::DCheckGpuVideoAcceleratorFactoriesTaskRunnerIsCurrent()

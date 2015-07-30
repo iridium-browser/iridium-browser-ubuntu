@@ -203,6 +203,19 @@ AXObject* AXObjectCacheImpl::get(LayoutObject* layoutObject)
     return m_objects.get(axID);
 }
 
+// Returns true if |node| is an <option> element and its parent <select>
+// is a menu list (not a list box).
+static bool isMenuListOption(Node* node)
+{
+    if (!isHTMLOptionElement(node))
+        return false;
+    HTMLSelectElement* select = toHTMLOptionElement(node)->ownerSelectElement();
+    if (!select)
+        return false;
+    LayoutObject* layoutObject = select->layoutObject();
+    return layoutObject && layoutObject->isMenuList();
+}
+
 AXObject* AXObjectCacheImpl::get(Node* node)
 {
     if (!node)
@@ -214,7 +227,7 @@ AXObject* AXObjectCacheImpl::get(Node* node)
     AXID nodeID = m_nodeObjectMapping.get(node);
     ASSERT(!HashTraits<AXID>::isDeletedValue(nodeID));
 
-    if (node->layoutObject() && nodeID && !layoutID) {
+    if (node->layoutObject() && nodeID && !layoutID && !isMenuListOption(node)) {
         // This can happen if an AXNodeObject is created for a node that's not
         // laid out, but later something changes and it gets a layoutObject (like if it's
         // reparented).
@@ -312,6 +325,9 @@ PassRefPtr<AXObject> AXObjectCacheImpl::createFromRenderer(LayoutObject* layoutO
 
 PassRefPtr<AXObject> AXObjectCacheImpl::createFromNode(Node* node)
 {
+    if (isMenuListOption(node))
+        return AXMenuListOption::create(toHTMLOptionElement(node), this);
+
     return AXNodeObject::create(node, this);
 }
 
@@ -364,11 +380,7 @@ AXObject* AXObjectCacheImpl::getOrCreate(Node* node)
     if (!node->parentElement())
         return 0;
 
-    // It's only allowed to create an AXObject from a Node if it's in a canvas subtree.
-    // Or if it's a hidden element, but we still want to expose it because of other ARIA attributes.
-    bool inCanvasSubtree = node->parentElement()->isInCanvasSubtree();
-    bool isHidden = !node->layoutObject() && isNodeAriaVisible(node);
-    if (!inCanvasSubtree && !isHidden)
+    if (isHTMLHeadElement(node))
         return 0;
 
     RefPtr<AXObject> newObj = createFromNode(node);
@@ -460,9 +472,6 @@ AXObject* AXObjectCacheImpl::getOrCreate(AccessibilityRole role)
         break;
     case MenuListPopupRole:
         obj = AXMenuListPopup::create(this);
-        break;
-    case MenuListOptionRole:
-        obj = AXMenuListOption::create(this);
         break;
     case SpinButtonRole:
         obj = AXSpinButton::create(this);
@@ -557,7 +566,7 @@ void AXObjectCacheImpl::clearWeakMembers(Visitor* visitor)
 {
     Vector<Node*> deadNodes;
     for (HashMap<Node*, AXID>::iterator it = m_nodeObjectMapping.begin(); it != m_nodeObjectMapping.end(); ++it) {
-        if (!visitor->isAlive(it->key))
+        if (!visitor->isHeapObjectAlive(it->key))
             deadNodes.append(it->key);
     }
     for (unsigned i = 0; i < deadNodes.size(); ++i)
@@ -566,7 +575,7 @@ void AXObjectCacheImpl::clearWeakMembers(Visitor* visitor)
     Vector<Widget*> deadWidgets;
     for (HashMap<Widget*, AXID>::iterator it = m_widgetObjectMapping.begin();
         it != m_widgetObjectMapping.end(); ++it) {
-        if (!visitor->isAlive(it->key))
+        if (!visitor->isHeapObjectAlive(it->key))
             deadWidgets.append(it->key);
     }
     for (unsigned i = 0; i < deadWidgets.size(); ++i)
@@ -809,7 +818,7 @@ void AXObjectCacheImpl::handleAriaSelectedChanged(Node* node)
     postNotification(obj, AXCheckedStateChanged);
 
     AXObject* listbox = obj->parentObjectUnignored();
-    if (listbox->roleValue() == ListBoxRole)
+    if (listbox && listbox->roleValue() == ListBoxRole)
         postNotification(listbox, AXSelectedChildrenChanged);
 }
 
@@ -1038,6 +1047,24 @@ void AXObjectCacheImpl::handleUpdateActiveMenuOption(LayoutMenuList* menuList, i
     toAXMenuList(obj)->didUpdateActiveOption(optionIndex);
 }
 
+void AXObjectCacheImpl::didShowMenuListPopup(LayoutMenuList* menuList)
+{
+    AXObject* obj = get(menuList);
+    if (!obj || !obj->isMenuList())
+        return;
+
+    toAXMenuList(obj)->didShowPopup();
+}
+
+void AXObjectCacheImpl::didHideMenuListPopup(LayoutMenuList* menuList)
+{
+    AXObject* obj = get(menuList);
+    if (!obj || !obj->isMenuList())
+        return;
+
+    toAXMenuList(obj)->didHidePopup();
+}
+
 void AXObjectCacheImpl::handleLoadComplete(Document* document)
 {
     postNotification(getOrCreate(document), AXObjectCache::AXLoadComplete);
@@ -1083,19 +1110,19 @@ String AXObjectCacheImpl::computedNameForNode(Node* node)
     if (!obj)
         return "";
 
-    String title = obj->title();
+    String title = obj->deprecatedTitle();
 
     String titleUIText;
     if (title.isEmpty()) {
-        AXObject* titleUIElement = obj->titleUIElement();
+        AXObject* titleUIElement = obj->deprecatedTitleUIElement();
         if (titleUIElement) {
-            titleUIText = titleUIElement->textUnderElement();
+            titleUIText = titleUIElement->deprecatedTextUnderElement();
             if (!titleUIText.isEmpty())
                 return titleUIText;
         }
     }
 
-    String description = obj->accessibilityDescription();
+    String description = obj->deprecatedAccessibilityDescription();
     if (!description.isEmpty())
         return description;
 

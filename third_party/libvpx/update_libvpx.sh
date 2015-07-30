@@ -22,7 +22,7 @@
 export LC_ALL=C
 
 # Location for the remote git repository.
-GIT_REPO="http://git.chromium.org/webm/libvpx.git"
+GIT_REPO="https://chromium.googlesource.com/webm/libvpx"
 
 GIT_BRANCH="origin/master"
 LIBVPX_SRC_DIR="source/libvpx"

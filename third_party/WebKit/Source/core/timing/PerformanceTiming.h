@@ -32,10 +32,9 @@
 #define PerformanceTiming_h
 
 #include "bindings/core/v8/ScriptWrappable.h"
+#include "core/CoreExport.h"
 #include "core/frame/DOMWindowProperty.h"
 #include "platform/heap/Handle.h"
-#include "wtf/PassRefPtr.h"
-#include "wtf/RefCounted.h"
 
 namespace blink {
 
@@ -44,14 +43,16 @@ class DocumentLoader;
 class DocumentTiming;
 class LocalFrame;
 class ResourceLoadTiming;
+class ScriptState;
+class ScriptValue;
 
-class PerformanceTiming final : public RefCountedWillBeGarbageCollected<PerformanceTiming>, public ScriptWrappable, public DOMWindowProperty {
+class CORE_EXPORT PerformanceTiming final : public GarbageCollectedFinalized<PerformanceTiming>, public ScriptWrappable, public DOMWindowProperty {
     DEFINE_WRAPPERTYPEINFO();
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(PerformanceTiming);
 public:
-    static PassRefPtrWillBeRawPtr<PerformanceTiming> create(LocalFrame* frame)
+    static PerformanceTiming* create(LocalFrame* frame)
     {
-        return adoptRefWillBeNoop(new PerformanceTiming(frame));
+        return new PerformanceTiming(frame);
     }
 
     unsigned long long navigationStart() const;
@@ -75,6 +76,8 @@ public:
     unsigned long long domComplete() const;
     unsigned long long loadEventStart() const;
     unsigned long long loadEventEnd() const;
+
+    ScriptValue toJSONForBinding(ScriptState*);
 
     DECLARE_VIRTUAL_TRACE();
 

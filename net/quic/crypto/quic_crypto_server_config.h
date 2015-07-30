@@ -15,6 +15,7 @@
 #include "base/synchronization/lock.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_export.h"
+#include "net/base/net_util.h"
 #include "net/quic/crypto/crypto_handshake.h"
 #include "net/quic/crypto/crypto_handshake_message.h"
 #include "net/quic/crypto/crypto_protocol.h"
@@ -59,7 +60,7 @@ struct ClientHelloInfo {
 
   // Errors from EvaluateClientHello.
   std::vector<uint32> reject_reasons;
-  COMPILE_ASSERT(sizeof(QuicTag) == sizeof(uint32), header_out_of_sync);
+  static_assert(sizeof(QuicTag) == sizeof(uint32), "header out of sync");
 };
 
 namespace test {
@@ -245,6 +246,8 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
       const IPEndPoint& client_address,
       QuicVersion version,
       const QuicVersionVector& supported_versions,
+      bool use_stateless_rejects,
+      QuicConnectionId server_designated_connection_id,
       const QuicClock* clock,
       QuicRandom* rand,
       QuicCryptoNegotiatedParameters* params,
@@ -429,11 +432,13 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
       ValidateClientHelloResultCallback* done_cb) const;
 
   // BuildRejection sets |out| to be a REJ message in reply to |client_hello|.
-  void BuildRejection(const IPAddressNumber& server_address,
+  void BuildRejection(const IPAddressNumber& server_ip,
                       const Config& config,
                       const CryptoHandshakeMessage& client_hello,
                       const ClientHelloInfo& info,
                       const CachedNetworkParameters& cached_network_params,
+                      bool use_stateless_rejects,
+                      QuicConnectionId server_designated_connection_id,
                       QuicRandom* rand,
                       QuicCryptoNegotiatedParameters* params,
                       CryptoHandshakeMessage* out) const;
@@ -461,20 +466,6 @@ class NET_EXPORT_PRIVATE QuicCryptoServerConfig {
       const Config& config,
       base::StringPiece token,
       SourceAddressTokens* tokens) const;
-
-  // ValidateSourceAddressToken returns HANDSHAKE_OK if the source address
-  // tokens in |tokens| contain a valid and timely token for the IP address
-  // |ip| given that the current time is |now|. Otherwise it returns the
-  // reason for failure. |cached_network_params| is populated if the valid
-  // token contains a CachedNetworkParameters proto.
-  // TODO(rch): remove this method when we remove:
-  // FLAGS_quic_use_multiple_address_in_source_tokens.
-  HandshakeFailureReason ValidateSourceAddressToken(
-      const Config& config,
-      base::StringPiece token,
-      const IPAddressNumber& ip,
-      QuicWallTime now,
-      CachedNetworkParameters* cached_network_params) const;
 
   // ValidateSourceAddressTokens returns HANDSHAKE_OK if the source address
   // tokens in |tokens| contain a valid and timely token for the IP address

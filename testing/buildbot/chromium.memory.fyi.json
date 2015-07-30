@@ -75,7 +75,7 @@
         "test": "gcm_unit_tests"
       },
       {
-        "test": "gfx_unittests"
+        "test": "gl_unittests"
       },
       {
         "test": "google_apis_unittests"
@@ -101,6 +101,9 @@
       },
       {
         "test": "media_unittests"
+      },
+      {
+        "test": "midi_unittests"
       },
       {
         "test": "mojo_common_unittests"
@@ -243,6 +246,9 @@
         "test": "gfx_unittests"
       },
       {
+        "test": "gl_unittests"
+      },
+      {
         "test": "google_apis_unittests"
       },
       {
@@ -265,6 +271,9 @@
       },
       {
         "test": "media_unittests"
+      },
+      {
+        "test": "midi_unittests"
       },
       {
         "test": "mojo_common_unittests"
@@ -409,6 +418,9 @@
         "test": "gfx_unittests"
       },
       {
+        "test": "gl_unittests"
+      },
+      {
         "test": "google_apis_unittests"
       },
       {
@@ -425,6 +437,9 @@
       },
       {
         "test": "media_unittests"
+      },
+      {
+        "test": "midi_unittests"
       },
       {
         "test": "mojo_common_unittests"

@@ -38,7 +38,7 @@ class AudioContext;
 
 class OfflineAudioDestinationHandler final : public AudioDestinationHandler {
 public:
-    OfflineAudioDestinationHandler(AudioNode&, AudioBuffer* renderTarget);
+    static PassRefPtr<OfflineAudioDestinationHandler> create(AudioNode&, AudioBuffer* renderTarget);
     virtual ~OfflineAudioDestinationHandler();
 
     // AudioHandler
@@ -52,17 +52,18 @@ public:
 
     virtual float sampleRate()  const override { return m_renderTarget->sampleRate(); }
 
-    DECLARE_VIRTUAL_TRACE();
-
 private:
+    OfflineAudioDestinationHandler(AudioNode&, AudioBuffer* renderTarget);
     void offlineRender();
     void offlineRenderInternal();
 
     // For completion callback on main thread.
     void notifyComplete();
 
-    // This AudioNode renders into this AudioBuffer.
-    Member<AudioBuffer> m_renderTarget;
+    // This AudioHandler renders into this AudioBuffer.
+    // This Persistent doesn't make a reference cycle including the owner
+    // OfflineAudioDestinationNode.
+    Persistent<AudioBuffer> m_renderTarget;
     // Temporary AudioBus for each render quantum.
     RefPtr<AudioBus> m_renderBus;
 

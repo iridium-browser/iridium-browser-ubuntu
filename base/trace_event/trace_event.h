@@ -144,11 +144,11 @@
 //   class MyData : public base::trace_event::ConvertableToTraceFormat {
 //    public:
 //     MyData() {}
-//     virtual void AppendAsTraceFormat(std::string* out) const override {
+//     void AppendAsTraceFormat(std::string* out) const override {
 //       out->append("{\"foo\":1}");
 //     }
 //    private:
-//     virtual ~MyData() {}
+//     ~MyData() override {}
 //     DISALLOW_COPY_AND_ASSIGN(MyData);
 //   };
 //
@@ -400,6 +400,13 @@
     INTERNAL_TRACE_EVENT_ADD_WITH_ID_TID_AND_TIMESTAMP( \
         TRACE_EVENT_PHASE_ASYNC_BEGIN, category_group, name, id, thread_id, \
         timestamp, TRACE_EVENT_FLAG_COPY, arg1_name, arg1_val)
+#define TRACE_EVENT_COPY_BEGIN_WITH_ID_TID_AND_TIMESTAMP2( \
+        category_group, name, id, thread_id, timestamp, arg1_name, arg1_val, \
+        arg2_name, arg2_val) \
+    INTERNAL_TRACE_EVENT_ADD_WITH_ID_TID_AND_TIMESTAMP( \
+        TRACE_EVENT_PHASE_ASYNC_BEGIN, category_group, name, id, thread_id, \
+        timestamp, TRACE_EVENT_FLAG_COPY, arg1_name, arg1_val, arg2_name, \
+        arg2_val)
 
 // Records a single END event for "name" immediately. If the category
 // is not enabled, then this does nothing.
@@ -449,6 +456,13 @@
     INTERNAL_TRACE_EVENT_ADD_WITH_ID_TID_AND_TIMESTAMP( \
         TRACE_EVENT_PHASE_ASYNC_END, category_group, name, id, thread_id, \
         timestamp, TRACE_EVENT_FLAG_COPY, arg1_name, arg1_val)
+#define TRACE_EVENT_COPY_END_WITH_ID_TID_AND_TIMESTAMP2( \
+        category_group, name, id, thread_id, timestamp, arg1_name, arg1_val, \
+        arg2_name, arg2_val) \
+    INTERNAL_TRACE_EVENT_ADD_WITH_ID_TID_AND_TIMESTAMP( \
+        TRACE_EVENT_PHASE_ASYNC_END, category_group, name, id, thread_id, \
+        timestamp, TRACE_EVENT_FLAG_COPY, arg1_name, arg1_val, arg2_name, \
+        arg2_val)
 
 // Records the value of a counter called "name" immediately. Value
 // must be representable as a 32 bit integer.
@@ -601,6 +615,12 @@
         TRACE_EVENT_PHASE_ASYNC_BEGIN, category_group, name, id, \
         static_cast<int>(base::PlatformThread::CurrentId()), \
         timestamp, TRACE_EVENT_FLAG_NONE)
+#define TRACE_EVENT_COPY_ASYNC_BEGIN_WITH_TIMESTAMP0(category_group, \
+        name, id, timestamp) \
+    INTERNAL_TRACE_EVENT_ADD_WITH_ID_TID_AND_TIMESTAMP( \
+        TRACE_EVENT_PHASE_ASYNC_BEGIN, category_group, name, id, \
+        static_cast<int>(base::PlatformThread::CurrentId()), \
+        timestamp, TRACE_EVENT_FLAG_COPY)
 
 // Records a single ASYNC_STEP_INTO event for |step| immediately. If the
 // category is not enabled, then this does nothing. The |name| and |id| must
@@ -696,20 +716,50 @@
 // NESTABLE_ASYNC event of that id. Corresponding warning messages for
 // unmatched events will be shown in the analysis view.
 
-// Records a single NESTABLE_ASYNC_BEGIN event called "name" immediately, with 2
-// associated arguments. If the category is not enabled, then this does nothing.
+// Records a single NESTABLE_ASYNC_BEGIN event called "name" immediately, with
+// 0, 1 or 2 associated arguments. If the category is not enabled, then this
+// does nothing.
+#define TRACE_EVENT_NESTABLE_ASYNC_BEGIN0(category_group, name, id) \
+    INTERNAL_TRACE_EVENT_ADD_WITH_ID(TRACE_EVENT_PHASE_NESTABLE_ASYNC_BEGIN, \
+        category_group, name, id, TRACE_EVENT_FLAG_NONE)
+#define TRACE_EVENT_NESTABLE_ASYNC_BEGIN1(category_group, name, id, arg1_name, \
+        arg1_val) \
+    INTERNAL_TRACE_EVENT_ADD_WITH_ID(TRACE_EVENT_PHASE_NESTABLE_ASYNC_BEGIN, \
+        category_group, name, id, TRACE_EVENT_FLAG_NONE, arg1_name, arg1_val)
 #define TRACE_EVENT_NESTABLE_ASYNC_BEGIN2(category_group, name, id, arg1_name, \
         arg1_val, arg2_name, arg2_val) \
     INTERNAL_TRACE_EVENT_ADD_WITH_ID(TRACE_EVENT_PHASE_NESTABLE_ASYNC_BEGIN, \
         category_group, name, id, TRACE_EVENT_FLAG_NONE, arg1_name, arg1_val, \
         arg2_name, arg2_val)
-// Records a single NESTABLE_ASYNC_END event called "name" immediately, with 2
-// associated arguments. If the category is not enabled, then this does nothing.
+// Records a single NESTABLE_ASYNC_END event called "name" immediately, with 0,
+// 1, or 2 associated arguments. If the category is not enabled, then this does
+// nothing.
+#define TRACE_EVENT_NESTABLE_ASYNC_END0(category_group, name, id) \
+    INTERNAL_TRACE_EVENT_ADD_WITH_ID(TRACE_EVENT_PHASE_NESTABLE_ASYNC_END, \
+        category_group, name, id, TRACE_EVENT_FLAG_NONE)
+#define TRACE_EVENT_NESTABLE_ASYNC_END1(category_group, name, id, arg1_name, \
+        arg1_val) \
+    INTERNAL_TRACE_EVENT_ADD_WITH_ID(TRACE_EVENT_PHASE_NESTABLE_ASYNC_END, \
+        category_group, name, id, TRACE_EVENT_FLAG_NONE, arg1_name, arg1_val)
 #define TRACE_EVENT_NESTABLE_ASYNC_END2(category_group, name, id, arg1_name, \
         arg1_val, arg2_name, arg2_val) \
     INTERNAL_TRACE_EVENT_ADD_WITH_ID(TRACE_EVENT_PHASE_NESTABLE_ASYNC_END, \
         category_group, name, id, TRACE_EVENT_FLAG_NONE, arg1_name, arg1_val, \
         arg2_name, arg2_val)
+
+#define TRACE_EVENT_COPY_NESTABLE_ASYNC_BEGIN_WITH_TTS2(category_group, name, \
+        id, arg1_name, arg1_val, arg2_name, arg2_val) \
+    INTERNAL_TRACE_EVENT_ADD_WITH_ID(TRACE_EVENT_PHASE_NESTABLE_ASYNC_BEGIN, \
+        category_group, name, id, \
+        TRACE_EVENT_FLAG_ASYNC_TTS | TRACE_EVENT_FLAG_COPY, \
+        arg1_name, arg1_val, arg2_name, arg2_val)
+#define TRACE_EVENT_COPY_NESTABLE_ASYNC_END_WITH_TTS2(category_group, name, \
+        id, arg1_name, arg1_val, arg2_name, arg2_val) \
+    INTERNAL_TRACE_EVENT_ADD_WITH_ID(TRACE_EVENT_PHASE_NESTABLE_ASYNC_END, \
+        category_group, name, id, \
+        TRACE_EVENT_FLAG_ASYNC_TTS | TRACE_EVENT_FLAG_COPY, \
+        arg1_name, arg1_val, arg2_name, arg2_val)
+
 // Records a single NESTABLE_ASYNC_INSTANT event called "name" immediately,
 // with 2 associated arguments. If the category is not enabled, then this
 // does nothing.
@@ -828,9 +878,10 @@
         category_group, name, TRACE_ID_DONT_MANGLE(id), TRACE_EVENT_FLAG_NONE)
 
 #define INTERNAL_TRACE_EVENT_CATEGORY_GROUP_ENABLED_FOR_RECORDING_MODE() \
-    UNLIKELY(*INTERNAL_TRACE_EVENT_UID(category_group_enabled) & \
-        (base::trace_event::TraceLog::ENABLED_FOR_RECORDING | \
-         base::trace_event::TraceLog::ENABLED_FOR_EVENT_CALLBACK))
+  UNLIKELY(*INTERNAL_TRACE_EVENT_UID(category_group_enabled) &           \
+           (base::trace_event::TraceLog::ENABLED_FOR_RECORDING |         \
+            base::trace_event::TraceLog::ENABLED_FOR_EVENT_CALLBACK |    \
+            base::trace_event::TraceLog::ENABLED_FOR_ETW_EXPORT))
 
 // Macro to efficiently determine if a given category group is enabled.
 #define TRACE_EVENT_CATEGORY_GROUP_ENABLED(category_group, ret) \
@@ -1074,6 +1125,7 @@ TRACE_EVENT_API_CLASS_EXPORT extern \
 #define TRACE_EVENT_FLAG_SCOPE_OFFSET (static_cast<unsigned char>(1 << 3))
 #define TRACE_EVENT_FLAG_SCOPE_EXTRA  (static_cast<unsigned char>(1 << 4))
 #define TRACE_EVENT_FLAG_EXPLICIT_TIMESTAMP (static_cast<unsigned char>(1 << 5))
+#define TRACE_EVENT_FLAG_ASYNC_TTS    (static_cast<unsigned char>(1 << 6))
 
 #define TRACE_EVENT_FLAG_SCOPE_MASK   (static_cast<unsigned char>( \
     TRACE_EVENT_FLAG_SCOPE_OFFSET | TRACE_EVENT_FLAG_SCOPE_EXTRA))
@@ -1423,8 +1475,8 @@ static inline base::trace_event::TraceEventHandle AddTraceEvent(
     const char* name,
     unsigned long long id,
     unsigned char flags) {
-  int thread_id = static_cast<int>(base::PlatformThread::CurrentId());
-  base::TimeTicks now = base::TimeTicks::NowFromSystemTraceTime();
+  const int thread_id = static_cast<int>(base::PlatformThread::CurrentId());
+  const base::TimeTicks now = base::TimeTicks::NowFromSystemTraceTime();
   return AddTraceEventWithThreadIdAndTimestamp(phase, category_group_enabled,
                                                name, id, thread_id, now, flags);
 }

@@ -16,7 +16,6 @@ import sys
 import threading
 import unittest
 
-from pylib import android_commands
 from pylib import constants
 from pylib import forwarder
 from pylib import ports
@@ -25,6 +24,8 @@ from pylib.base import environment_factory
 from pylib.base import test_dispatcher
 from pylib.base import test_instance_factory
 from pylib.base import test_run_factory
+from pylib.device import device_errors
+from pylib.device import device_utils
 from pylib.gtest import gtest_config
 from pylib.gtest import setup as gtest_setup
 from pylib.gtest import test_options as gtest_test_options
@@ -110,7 +111,7 @@ def ProcessCommonOptions(args):
   if args.build_directory:
     constants.SetBuildDirectory(args.build_directory)
   if args.output_directory:
-    constants.SetOutputDirectort(args.output_directory)
+    constants.SetOutputDirectory(args.output_directory)
   if args.adb_path:
     constants.SetAdbPath(args.adb_path)
   # Some things such as Forwarder require ADB to be in the environment path.
@@ -152,6 +153,9 @@ def AddRemoteDeviceOptions(parser):
                            'Overrides all other flags.'))
   group.add_argument('--remote-device-timeout', type=int,
                      help='Times to retry finding remote device')
+  group.add_argument('--network-config', type=int,
+                     help='Integer that specifies the network environment '
+                          'that the tests will be run in.')
 
   device_os_group = group.add_mutually_exclusive_group()
   device_os_group.add_argument('--remote-device-minimum-os',
@@ -175,9 +179,6 @@ def AddRemoteDeviceOptions(parser):
 def AddDeviceOptions(parser):
   """Adds device options to |parser|."""
   group = parser.add_argument_group(title='Device Options')
-  group.add_argument('-c', dest='cleanup_test_files',
-                     help='Cleanup test files on the device after run',
-                     action='store_true')
   group.add_argument('--tool',
                      dest='tool',
                      help=('Run the test under a tool '
@@ -372,7 +373,6 @@ def ProcessInstrumentationOptions(args):
   # TODO(jbudorick): Get rid of InstrumentationOptions.
   return instrumentation_test_options.InstrumentationOptions(
       args.tool,
-      args.cleanup_test_files,
       args.annotations,
       args.exclude_annotations,
       args.test_filter,
@@ -437,7 +437,6 @@ def ProcessUIAutomatorOptions(args):
 
   return uiautomator_test_options.UIAutomatorOptions(
       args.tool,
-      args.cleanup_test_files,
       args.annotations,
       args.exclude_annotations,
       args.test_filter,
@@ -636,7 +635,6 @@ def _RunGTests(args, devices):
     # into the gtest code.
     gtest_options = gtest_test_options.GTestOptions(
         args.tool,
-        args.cleanup_test_files,
         args.test_filter,
         args.run_disabled,
         args.test_arguments,
@@ -660,9 +658,6 @@ def _RunGTests(args, devices):
 
     if args.json_results_file:
       json_results.GenerateJsonResultsFile(results, args.json_results_file)
-
-  if os.path.isdir(constants.ISOLATE_DEPS_DIR):
-    shutil.rmtree(constants.ISOLATE_DEPS_DIR)
 
   return exit_code
 
@@ -775,6 +770,9 @@ def _RunJUnitTests(args):
       test_type='JUnit',
       test_package=args.test_suite)
 
+  if args.json_results_file:
+    json_results.GenerateJsonResultsFile(results, args.json_results_file)
+
   return exit_code
 
 
@@ -867,18 +865,19 @@ def _GetAttachedDevices(test_device=None):
   Returns:
     A list of attached devices.
   """
-  attached_devices = []
-
-  attached_devices = android_commands.GetAttachedDevices()
+  attached_devices = device_utils.DeviceUtils.HealthyDevices()
   if test_device:
-    assert test_device in attached_devices, (
-        'Did not find device %s among attached device. Attached devices: %s'
-        % (test_device, ', '.join(attached_devices)))
-    attached_devices = [test_device]
+    test_device = [d for d in attached_devices if d == test_device]
+    if not test_device:
+      raise device_errors.DeviceUnreachableError(
+          'Did not find device %s among attached device. Attached devices: %s'
+          % (test_device, ', '.join(attached_devices)))
+    return test_device
 
-  assert attached_devices, 'No devices attached.'
-
-  return sorted(attached_devices)
+  else:
+    if not attached_devices:
+      raise device_errors.NoDevicesError()
+    return sorted(attached_devices)
 
 
 def RunTestsCommand(args, parser):

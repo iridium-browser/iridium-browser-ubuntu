@@ -11,6 +11,7 @@
 #include "base/timer/timer.h"
 #include "content/common/content_export.h"
 #include "content/public/renderer/plugin_instance_throttler.h"
+#include "content/renderer/pepper/pepper_webplugin_impl.h"
 #include "ppapi/shared_impl/ppb_view_shared.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/geometry/size.h"
@@ -22,6 +23,7 @@ struct WebRect;
 
 namespace content {
 
+class PepperWebPluginImpl;
 class RenderFrameImpl;
 
 class CONTENT_EXPORT PluginInstanceThrottlerImpl
@@ -38,11 +40,11 @@ class CONTENT_EXPORT PluginInstanceThrottlerImpl
   bool IsHiddenForPlaceholder() const override;
   void MarkPluginEssential(PowerSaverUnthrottleMethod method) override;
   void SetHiddenForPlaceholder(bool hidden) override;
-  blink::WebPlugin* GetWebPlugin() const override;
+  PepperWebPluginImpl* GetWebPlugin() const override;
   const gfx::Size& GetSize() const override;
   void NotifyAudioThrottled() override;
 
-  void SetWebPlugin(blink::WebPlugin* web_plugin);
+  void SetWebPlugin(PepperWebPluginImpl* web_plugin);
 
   bool needs_representative_keyframe() const {
     return state_ == THROTTLER_STATE_AWAITING_KEYFRAME;
@@ -88,14 +90,11 @@ class CONTENT_EXPORT PluginInstanceThrottlerImpl
 
   bool is_hidden_for_placeholder_;
 
-  blink::WebPlugin* web_plugin_;
+  PepperWebPluginImpl* web_plugin_;
 
   // Holds a reference to the last received frame. This doesn't actually copy
   // the pixel data, but rather increments the reference count to the pixels.
   SkBitmap last_received_frame_;
-
-  // Number of consecutive interesting frames we've encountered.
-  int consecutive_interesting_frames_;
 
   // Number of frames we've examined to find a keyframe.
   int frames_examined_;

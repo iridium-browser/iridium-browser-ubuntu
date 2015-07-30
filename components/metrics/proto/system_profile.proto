@@ -8,6 +8,8 @@
 syntax = "proto2";
 
 option optimize_for = LITE_RUNTIME;
+option java_outer_classname = "SystemProfileProtos";
+option java_package = "org.chromium.components.metrics";
 
 package metrics;
 
@@ -75,7 +77,12 @@ message SystemProfileProto {
 
   // Information on the user's operating system.
   message OS {
-    // The user's operating system.
+    // The user's operating system. This should be one of:
+    // - Android
+    // - Windows NT
+    // - Linux (includes ChromeOS)
+    // - iPhone OS
+    // - Mac OS X
     optional string name = 1;
 
     // The version of the OS.  The meaning of this field is OS-dependent.
@@ -446,9 +453,8 @@ message SystemProfileProto {
     optional int32 renderer_crash_count = 3;
     optional int32 renderer_hang_count = 4;
 
-    // Number of renderer crashes that were for extensions.
-    // TODO(isherman): Figure out whether this is also counted in
-    // |renderer_crash_count|.
+    // Number of renderer crashes that were for extensions. These crashes are
+    // not counted in renderer_crash_count.
     optional int32 extension_renderer_crash_count = 5;
 
     // Number of non-renderer child process crashes.

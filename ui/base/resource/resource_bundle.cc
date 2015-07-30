@@ -41,7 +41,6 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "ui/base/font_helper_chromeos.h"
 #include "ui/gfx/platform_font_linux.h"
 #endif
 
@@ -663,6 +662,9 @@ void ResourceBundle::AddDataPackFromPathInternal(const base::FilePath& path,
 }
 
 void ResourceBundle::AddDataPack(DataPack* data_pack) {
+#if DCHECK_IS_ON()
+  data_pack->CheckForDuplicateResources(data_packs_);
+#endif
   data_packs_.push_back(data_pack);
 
   if (GetScaleForScaleFactor(data_pack->GetScaleFactor()) >
@@ -674,7 +676,6 @@ void ResourceBundle::InitDefaultFontList() {
 #if defined(OS_CHROMEOS)
   std::string font_family = base::UTF16ToUTF8(
       GetLocalizedString(IDS_UI_FONT_FAMILY_CROS));
-  ui::ReplaceNotoSansWithRobotoIfEnabled(&font_family);
   gfx::FontList::SetDefaultFontDescription(font_family);
 
   // TODO(yukishiino): Remove SetDefaultFontDescription() once the migration to

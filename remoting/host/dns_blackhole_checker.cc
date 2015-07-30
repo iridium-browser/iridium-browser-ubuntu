@@ -4,6 +4,7 @@
 
 #include "remoting/host/dns_blackhole_checker.h"
 
+#include "base/callback_helpers.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "remoting/base/logging.h"
@@ -40,8 +41,7 @@ void DnsBlackholeChecker::OnURLFetchComplete(const net::URLFetcher* source) {
     HOST_LOG << "Unable to connect to host talkgadget (" << response << ")";
   }
   url_fetcher_.reset(nullptr);
-  callback_.Run(allow);
-  callback_.Reset();
+  base::ResetAndReturn(&callback_).Run(allow);
 }
 
 void DnsBlackholeChecker::CheckForDnsBlackhole(
@@ -58,8 +58,8 @@ void DnsBlackholeChecker::CheckForDnsBlackhole(
     }
     talkgadget_url += kTalkGadgetUrl;
     HOST_LOG << "Verifying connection to " << talkgadget_url;
-    url_fetcher_.reset(net::URLFetcher::Create(GURL(talkgadget_url),
-                                               net::URLFetcher::GET, this));
+    url_fetcher_ = net::URLFetcher::Create(GURL(talkgadget_url),
+                                           net::URLFetcher::GET, this);
     url_fetcher_->SetRequestContext(url_request_context_getter_.get());
     url_fetcher_->Start();
   } else {

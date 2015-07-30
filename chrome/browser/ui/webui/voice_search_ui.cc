@@ -30,7 +30,6 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
-#include "chrome/grit/google_chrome_strings.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/url_data_source.h"
@@ -270,9 +269,11 @@ class VoiceSearchDomHandler : public WebUIMessageHandler {
 
     AddPair(list, "NaCl Enabled", nacl_enabled);
 
-    AddPair(list,
-            "Microphone",
-            HotwordServiceFactory::IsMicrophoneAvailable() ? "Yes" : "No");
+    HotwordService* hotword_service =
+        HotwordServiceFactory::GetForProfile(profile_);
+    AddPair(list, "Microphone Present",
+            hotword_service && hotword_service->microphone_available() ? "Yes"
+                                                                       : "No");
 
     std::string audio_capture = "No";
     if (profile_->GetPrefs()->GetBoolean(prefs::kAudioCaptureAllowed))
@@ -302,6 +303,13 @@ class VoiceSearchDomHandler : public WebUIMessageHandler {
 
   // Adds information specific to the hotword configuration to the list.
   void AddHotwordInfo(base::ListValue* list)  {
+    HotwordService* hotword_service =
+        HotwordServiceFactory::GetForProfile(profile_);
+    std::string hotword_allowed = "No";
+    if (hotword_service && hotword_service->IsHotwordAllowed())
+      hotword_allowed = "Yes";
+    AddPair(list, "Hotword Module Installable", hotword_allowed);
+
     std::string search_enabled = "No";
     if (profile_->GetPrefs()->GetBoolean(prefs::kHotwordSearchEnabled))
       search_enabled = "Yes";
@@ -313,8 +321,6 @@ class VoiceSearchDomHandler : public WebUIMessageHandler {
     AddPair(list, "Always-on Hotword Search Enabled", always_on_search_enabled);
 
     std::string audio_logging_enabled = "No";
-    HotwordService* hotword_service =
-        HotwordServiceFactory::GetForProfile(profile_);
     if (hotword_service && hotword_service->IsOptedIntoAudioLogging())
       audio_logging_enabled = "Yes";
     AddPair(list, "Hotword Audio Logging Enabled", audio_logging_enabled);

@@ -23,7 +23,7 @@
 #include "net/cert/x509_certificate.h"
 #include "url/url_canon.h"
 
-#if defined(USE_NSS) || defined(OS_IOS)
+#if defined(USE_NSS_CERTS) || defined(OS_IOS)
 #include "net/cert/cert_verify_proc_nss.h"
 #elif defined(USE_OPENSSL_CERTS) && !defined(OS_ANDROID)
 #include "net/cert/cert_verify_proc_openssl.h"
@@ -169,7 +169,7 @@ bool ExaminePublicKeys(const scoped_refptr<X509Certificate>& cert,
 
 // static
 CertVerifyProc* CertVerifyProc::CreateDefault() {
-#if defined(USE_NSS) || defined(OS_IOS)
+#if defined(USE_NSS_CERTS) || defined(OS_IOS)
   return new CertVerifyProcNSS();
 #elif defined(USE_OPENSSL_CERTS) && !defined(OS_ANDROID)
   return new CertVerifyProcOpenSSL();
@@ -190,6 +190,7 @@ CertVerifyProc::~CertVerifyProc() {}
 
 int CertVerifyProc::Verify(X509Certificate* cert,
                            const std::string& hostname,
+                           const std::string& ocsp_response,
                            int flags,
                            CRLSet* crl_set,
                            const CertificateList& additional_trust_anchors,
@@ -209,7 +210,7 @@ int CertVerifyProc::Verify(X509Certificate* cert,
   if (flags & CertVerifier::VERIFY_EV_CERT)
     flags |= CertVerifier::VERIFY_REV_CHECKING_ENABLED_EV_ONLY;
 
-  int rv = VerifyInternal(cert, hostname, flags, crl_set,
+  int rv = VerifyInternal(cert, hostname, ocsp_response, flags, crl_set,
                           additional_trust_anchors, verify_result);
 
   UMA_HISTOGRAM_BOOLEAN("Net.CertCommonNameFallback",

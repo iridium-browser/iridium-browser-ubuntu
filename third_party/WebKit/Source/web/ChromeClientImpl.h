@@ -121,7 +121,6 @@ public:
     virtual void dispatchViewportPropertiesDidChange(const ViewportDescription&) const override;
     virtual void print(LocalFrame*) override;
     virtual void annotatedRegionsChanged() override;
-    virtual bool paintCustomOverhangArea(GraphicsContext*, const IntRect&, const IntRect&, const IntRect&) override;
     virtual PassOwnPtrWillBeRawPtr<ColorChooser> createColorChooser(LocalFrame*, ColorChooserClient*, const Color&) override;
     virtual PassRefPtr<DateTimeChooser> openDateTimeChooser(DateTimeChooserClient*, const DateTimeChooserParameters&) override;
     virtual void runOpenPanel(LocalFrame*, PassRefPtr<FileChooser>) override;
@@ -141,8 +140,8 @@ public:
     virtual void enterFullScreenForElement(Element*) override;
     virtual void exitFullScreenForElement(Element*) override;
 
-    virtual void clearCompositedSelectionBounds() override;
-    virtual void updateCompositedSelectionBounds(const blink::CompositedSelectionBound& anchor, const blink::CompositedSelectionBound& focus) override;
+    virtual void clearCompositedSelection() override;
+    virtual void updateCompositedSelection(const CompositedSelection&) override;
 
     // ChromeClient methods:
     virtual void postAccessibilityNotification(AXObject*, AXObjectCache::AXNotification) override;

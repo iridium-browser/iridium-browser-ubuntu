@@ -4,6 +4,8 @@
 
 package org.chromium.chrome.browser.preferences.website;
 
+import org.chromium.chrome.browser.ContentSettingsType;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -61,6 +63,8 @@ public class WebsitePermissionsFetcher {
         queue.add(new CookieInfoFetcher());
         // Fullscreen are stored per-origin.
         queue.add(new FullscreenInfoFetcher());
+        // Images exceptions are host-based patterns.
+        queue.add(new ImagesExceptionInfoFetcher());
         // Local storage info is per-origin.
         queue.add(new LocalStorageInfoFetcher());
         // Website storage is per-host.
@@ -74,8 +78,10 @@ public class WebsitePermissionsFetcher {
         queue.add(new ProtectedMediaIdentifierInfoFetcher());
         // Push notification permission is per-origin and per-embedder.
         queue.add(new PushNotificationInfoFetcher());
-        // Voice and Video capture permission is per-origin and per-embedder.
-        queue.add(new VoiceAndVideoCaptureInfoFetcher());
+        // Camera capture permission is per-origin and per-embedder.
+        queue.add(new CameraCaptureInfoFetcher());
+        // Micropohone capture permission is per-origin and per-embedder.
+        queue.add(new MicrophoneCaptureInfoFetcher());
         queue.add(new PermissionsAvailableCallbackRunner());
         queue.next();
     }
@@ -108,9 +114,12 @@ public class WebsitePermissionsFetcher {
         } else if (filterHelper.showFullscreenSites(filter)) {
             // Local storage info is per-origin.
             queue.add(new FullscreenInfoFetcher());
-        } else if (filterHelper.showCameraMicSites(filter)) {
-            // Voice and Video capture permission is per-origin and per-embedder.
-            queue.add(new VoiceAndVideoCaptureInfoFetcher());
+        } else if (filterHelper.showCameraSites(filter)) {
+            // Camera capture permission is per-origin and per-embedder.
+            queue.add(new CameraCaptureInfoFetcher());
+        } else if (filterHelper.showMicrophoneSites(filter)) {
+            // Micropohone capture permission is per-origin and per-embedder.
+            queue.add(new MicrophoneCaptureInfoFetcher());
         } else if (filterHelper.showPopupSites(filter)) {
             // Popup exceptions are host-based patterns (unless we start
             // synchronizing popup exceptions with desktop Chrome.)
@@ -121,6 +130,12 @@ public class WebsitePermissionsFetcher {
         } else if (filterHelper.showPushNotificationsSites(filter)) {
             // Push notification permission is per-origin and per-embedder.
             queue.add(new PushNotificationInfoFetcher());
+        } else if (filterHelper.showProtectedMediaSites(filter)) {
+            // Protected media identifier permission is per-origin and per-embedder.
+            queue.add(new ProtectedMediaIdentifierInfoFetcher());
+        } else if (filterHelper.showImagesSites(filter)) {
+            // Images exceptions are host-based patterns.
+            queue.add(new ImagesExceptionInfoFetcher());
         }
         queue.add(new PermissionsAvailableCallbackRunner());
         queue.next();
@@ -200,15 +215,17 @@ public class WebsitePermissionsFetcher {
     private class PopupExceptionInfoFetcher implements Task {
         @Override
         public void run(TaskQueue queue) {
-            for (PopupExceptionInfo info : WebsitePreferenceBridge.getPopupExceptionInfo()) {
+            for (ContentSettingException exception :
+                    WebsitePreferenceBridge.getContentSettingsExceptions(
+                            ContentSettingsType.CONTENT_SETTINGS_TYPE_POPUPS)) {
                 // The pattern "*" represents the default setting, not a
                 // specific website.
-                if (info.getPattern().equals("*")) continue;
-                WebsiteAddress address = WebsiteAddress.create(info.getPattern());
+                if (exception.getPattern().equals("*")) continue;
+                WebsiteAddress address = WebsiteAddress.create(exception.getPattern());
                 if (address == null) continue;
                 Set<Website> sites = findOrCreateSitesByHost(address);
                 for (Website site : sites) {
-                    site.setPopupExceptionInfo(info);
+                    site.setPopupException(exception);
                 }
             }
             queue.next();
@@ -218,15 +235,16 @@ public class WebsitePermissionsFetcher {
     private class JavaScriptExceptionInfoFetcher implements Task {
         @Override
         public void run(TaskQueue queue) {
-            for (JavaScriptExceptionInfo info
-                    : WebsitePreferenceBridge.getJavaScriptExceptionInfo()) {
+            for (ContentSettingException exception
+                    : WebsitePreferenceBridge.getContentSettingsExceptions(
+                            ContentSettingsType.CONTENT_SETTINGS_TYPE_JAVASCRIPT)) {
                 // The pattern "*" represents the default setting, not a specific website.
-                if (info.getPattern().equals("*")) continue;
-                WebsiteAddress address = WebsiteAddress.create(info.getPattern());
+                if (exception.getPattern().equals("*")) continue;
+                WebsiteAddress address = WebsiteAddress.create(exception.getPattern());
                 if (address == null) continue;
                 Set<Website> sites = findOrCreateSitesByHost(address);
                 for (Website site : sites) {
-                    site.setJavaScriptExceptionInfo(info);
+                    site.setJavaScriptException(exception);
                 }
             }
             queue.next();
@@ -255,6 +273,28 @@ public class WebsitePermissionsFetcher {
                 WebsiteAddress address = WebsiteAddress.create(info.getOrigin());
                 if (address == null) continue;
                 createSiteByOriginAndHost(address).setFullscreenInfo(info);
+            }
+            queue.next();
+        }
+    }
+
+    /**
+     * Class for fetching the images information.
+     */
+    private class ImagesExceptionInfoFetcher implements Task {
+        @Override
+        public void run(TaskQueue queue) {
+            for (ContentSettingException exception
+                    : WebsitePreferenceBridge.getContentSettingsExceptions(
+                            ContentSettingsType.CONTENT_SETTINGS_TYPE_IMAGES)) {
+                // The pattern "*" represents the default setting, not a specific website.
+                if (exception.getPattern().equals("*")) continue;
+                WebsiteAddress address = WebsiteAddress.create(exception.getPattern());
+                if (address == null) continue;
+                Set<Website> sites = findOrCreateSitesByHost(address);
+                for (Website site : sites) {
+                    site.setImagesException(exception);
+                }
             }
             queue.next();
         }
@@ -332,14 +372,25 @@ public class WebsitePermissionsFetcher {
         }
     }
 
-    private class VoiceAndVideoCaptureInfoFetcher implements Task {
+    private class CameraCaptureInfoFetcher implements Task {
         @Override
         public void run(TaskQueue queue) {
-            for (VoiceAndVideoCaptureInfo info :
-                    WebsitePreferenceBridge.getVoiceAndVideoCaptureInfo()) {
+            for (CameraInfo info : WebsitePreferenceBridge.getCameraInfo()) {
                 WebsiteAddress address = WebsiteAddress.create(info.getOrigin());
                 if (address == null) continue;
-                createSiteByOriginAndHost(address).setVoiceAndVideoCaptureInfo(info);
+                createSiteByOriginAndHost(address).setCameraInfo(info);
+            }
+            queue.next();
+        }
+    }
+
+    private class MicrophoneCaptureInfoFetcher implements Task {
+        @Override
+        public void run(TaskQueue queue) {
+            for (MicrophoneInfo info : WebsitePreferenceBridge.getMicrophoneInfo()) {
+                WebsiteAddress address = WebsiteAddress.create(info.getOrigin());
+                if (address == null) continue;
+                createSiteByOriginAndHost(address).setMicrophoneInfo(info);
             }
             queue.next();
         }

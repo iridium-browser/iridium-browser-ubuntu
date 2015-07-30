@@ -14,7 +14,7 @@
 #include "GrGLPathRendering.h"
 #include "GrGLProgram.h"
 #include "GrGLRenderTarget.h"
-#include "GrGLStencilBuffer.h"
+#include "GrGLStencilAttachment.h"
 #include "GrGLTexture.h"
 #include "GrGLVertexArray.h"
 #include "GrGLVertexBuffer.h"
@@ -24,6 +24,7 @@
 #include "SkTypes.h"
 
 class GrPipeline;
+class GrNonInstancedVertices;
 
 #ifdef SK_DEVELOPER
 #define PROGRAM_CACHE_STATS
@@ -46,7 +47,7 @@ public:
     const GrGLCaps& glCaps() const { return *fGLContext.caps(); }
 
     GrGLPathRendering* glPathRendering() {
-        SkASSERT(glCaps().pathRenderingSupport());
+        SkASSERT(glCaps().shaderCaps()->pathRenderingSupport());
         return static_cast<GrGLPathRendering*>(pathRendering());
     }
 
@@ -105,6 +106,8 @@ public:
                         const SkIRect& srcRect,
                         const SkIPoint& dstPoint) override;
 
+    void xferBarrier(GrRenderTarget*, GrXferBarrierType) override;
+
     void buildProgramDesc(GrProgramDesc*,
                           const GrPrimitiveProcessor&,
                           const GrPipeline&,
@@ -114,16 +117,18 @@ private:
     // GrGpu overrides
     void onResetContext(uint32_t resetBits) override;
 
-    GrTexture* onCreateTexture(const GrSurfaceDesc& desc, bool budgeted, const void* srcData,
-                               size_t rowBytes) override;
-    GrTexture* onCreateCompressedTexture(const GrSurfaceDesc& desc, bool budgeted,
+    GrTexture* onCreateTexture(const GrSurfaceDesc& desc, GrGpuResource::LifeCycle lifeCycle,
+                               const void* srcData, size_t rowBytes) override;
+    GrTexture* onCreateCompressedTexture(const GrSurfaceDesc& desc,
+                                         GrGpuResource::LifeCycle lifeCycle,
                                          const void* srcData) override;
     GrVertexBuffer* onCreateVertexBuffer(size_t size, bool dynamic) override;
     GrIndexBuffer* onCreateIndexBuffer(size_t size, bool dynamic) override;
     GrTexture* onWrapBackendTexture(const GrBackendTextureDesc&) override;
     GrRenderTarget* onWrapBackendRenderTarget(const GrBackendRenderTargetDesc&) override;
-    bool createStencilBufferForRenderTarget(GrRenderTarget* rt, int width, int height) override;
-    bool attachStencilBufferToRenderTarget(GrStencilBuffer* sb, GrRenderTarget* rt) override;
+    bool createStencilAttachmentForRenderTarget(GrRenderTarget* rt, int width, int height) override;
+    bool attachStencilAttachmentToRenderTarget(GrStencilAttachment* sb,
+                                               GrRenderTarget* rt) override;
 
     void onClear(GrRenderTarget*, const SkIRect* rect, GrColor color,
                  bool canIgnoreRect) override;
@@ -144,7 +149,7 @@ private:
 
     void onResolveRenderTarget(GrRenderTarget* target) override;
 
-    void onDraw(const DrawArgs&, const GrDrawTarget::DrawInfo&) override;
+    void onDraw(const DrawArgs&, const GrNonInstancedVertices&) override;
     void onStencilPath(const GrPath*, const StencilPathState&) override;
     void onDrawPath(const DrawArgs&, const GrPath*, const GrStencilSettings&) override;
     void onDrawPaths(const DrawArgs&,
@@ -169,10 +174,10 @@ private:
     bool flushGLState(const DrawArgs&);
 
     // Sets up vertex attribute pointers and strides. On return indexOffsetInBytes gives the offset
-    // an into the index buffer. It does not account for drawInfo.startIndex() but rather the start
+    // an into the index buffer. It does not account for vertices.startIndex() but rather the start
     // index is relative to the returned offset.
     void setupGeometry(const GrPrimitiveProcessor&,
-                       const GrDrawTarget::DrawInfo& info,
+                       const GrNonInstancedVertices& vertices,
                        size_t* indexOffsetInBytes);
 
     // Subclasses should call this to flush the blend state.
@@ -276,8 +281,8 @@ private:
                                  int left = 0, int top = 0,
                                  int width = -1, int height = -1);
 
-    bool createRenderTargetObjects(const GrSurfaceDesc&, bool budgeted, GrGLuint texID, 
-                                   GrGLRenderTarget::IDDesc*);
+    bool createRenderTargetObjects(const GrSurfaceDesc&, GrGpuResource::LifeCycle lifeCycle,
+                                   GrGLuint texID, GrGLRenderTarget::IDDesc*);
 
     enum TempFBOTarget {
         kSrc_TempFBOTarget,
@@ -331,7 +336,7 @@ private:
     public:
         HWGeometryState() { fVBOVertexArray = NULL; this->invalidate(); }
 
-        ~HWGeometryState() { SkSafeUnref(fVBOVertexArray); }
+        ~HWGeometryState() { SkDELETE(fVBOVertexArray); }
 
         void invalidate() {
             fBoundVertexArrayIDIsValid = false;
@@ -433,6 +438,7 @@ private:
     } fHWGeometryState;
 
     struct {
+        GrBlendEquation fEquation;
         GrBlendCoeff    fSrcCoeff;
         GrBlendCoeff    fDstCoeff;
         GrColor         fConstColor;
@@ -440,8 +446,9 @@ private:
         TriState        fEnabled;
 
         void invalidate() {
-            fSrcCoeff = kInvalid_GrBlendCoeff;
-            fDstCoeff = kInvalid_GrBlendCoeff;
+            fEquation = static_cast<GrBlendEquation>(-1);
+            fSrcCoeff = static_cast<GrBlendCoeff>(-1);
+            fDstCoeff = static_cast<GrBlendCoeff>(-1);
             fConstColorValid = false;
             fEnabled = kUnknown_TriState;
         }

@@ -1035,44 +1035,6 @@ void BrowserView::FullscreenStateChanged() {
                     EXCLUSIVE_ACCESS_BUBBLE_TYPE_NONE);
 }
 
-void BrowserView::ToolbarSizeChanged(bool is_animating) {
-  // The call to SetMaxTopArrowHeight() below can result in reentrancy;
-  // |call_state| tracks whether we're reentrant.  We can't just early-return in
-  // this case because we need to layout again so the infobar container's bounds
-  // are set correctly.
-  static CallState call_state = NORMAL;
-
-  // A reentrant call can (and should) use the fast resize path unless both it
-  // and the normal call are both non-animating.
-  bool use_fast_resize =
-      is_animating || (call_state == REENTRANT_FORCE_FAST_RESIZE);
-  if (use_fast_resize)
-    contents_web_view_->SetFastResize(true);
-  UpdateUIForContents(GetActiveWebContents());
-  if (use_fast_resize)
-    contents_web_view_->SetFastResize(false);
-
-  // Inform the InfoBarContainer that the distance to the location icon may have
-  // changed.  We have to do this after the block above so that the toolbars are
-  // laid out correctly for calculating the maximum arrow height below.
-  {
-    base::AutoReset<CallState> resetter(&call_state,
-        is_animating ? REENTRANT_FORCE_FAST_RESIZE : REENTRANT);
-    SetMaxTopArrowHeight(GetMaxTopInfoBarArrowHeight(), infobar_container_);
-  }
-
-  // When transitioning from animating to not animating we need to make sure the
-  // contents_container_ gets layed out. If we don't do this and the bounds
-  // haven't changed contents_container_ won't get a Layout out and we'll end up
-  // with a gray rect because the clip wasn't updated.  Note that a reentrant
-  // call never needs to do this, because after it returns, the normal call
-  // wrapping it will do it.
-  if ((call_state == NORMAL) && !is_animating) {
-    contents_web_view_->InvalidateLayout();
-    contents_container_->Layout();
-  }
-}
-
 LocationBar* BrowserView::GetLocationBar() const {
   return GetLocationBarView();
 }
@@ -1084,8 +1046,10 @@ void BrowserView::SetFocusToLocationBar(bool select_all) {
   // view believe it has a focus even if the widget doens't have a
   // focus. Either cases, we need to ignore this when the browser
   // window isn't active.
+#if defined(OS_WIN) || defined(OS_CHROMEOS)
   if (!force_location_bar_focus_ && !IsActive())
     return;
+#endif
 
   // Temporarily reveal the top-of-window views (if not already revealed) so
   // that the location bar view is visible and is considered focusable. If the
@@ -1139,6 +1103,44 @@ void BrowserView::FocusToolbar() {
   toolbar_->SetPaneFocus(nullptr);
 }
 
+void BrowserView::ToolbarSizeChanged(bool is_animating) {
+  // The call to SetMaxTopArrowHeight() below can result in reentrancy;
+  // |call_state| tracks whether we're reentrant.  We can't just early-return in
+  // this case because we need to layout again so the infobar container's bounds
+  // are set correctly.
+  static CallState call_state = NORMAL;
+
+  // A reentrant call can (and should) use the fast resize path unless both it
+  // and the normal call are both non-animating.
+  bool use_fast_resize =
+      is_animating || (call_state == REENTRANT_FORCE_FAST_RESIZE);
+  if (use_fast_resize)
+    contents_web_view_->SetFastResize(true);
+  UpdateUIForContents(GetActiveWebContents());
+  if (use_fast_resize)
+    contents_web_view_->SetFastResize(false);
+
+  // Inform the InfoBarContainer that the distance to the location icon may have
+  // changed.  We have to do this after the block above so that the toolbars are
+  // laid out correctly for calculating the maximum arrow height below.
+  {
+    base::AutoReset<CallState> resetter(&call_state,
+        is_animating ? REENTRANT_FORCE_FAST_RESIZE : REENTRANT);
+    SetMaxTopArrowHeight(GetMaxTopInfoBarArrowHeight(), infobar_container_);
+  }
+
+  // When transitioning from animating to not animating we need to make sure the
+  // contents_container_ gets layed out. If we don't do this and the bounds
+  // haven't changed contents_container_ won't get a Layout out and we'll end up
+  // with a gray rect because the clip wasn't updated.  Note that a reentrant
+  // call never needs to do this, because after it returns, the normal call
+  // wrapping it will do it.
+  if ((call_state == NORMAL) && !is_animating) {
+    contents_web_view_->InvalidateLayout();
+    contents_container_->Layout();
+  }
+}
+
 void BrowserView::FocusBookmarksToolbar() {
   DCHECK(!immersive_mode_controller_->IsEnabled());
   if (bookmark_bar_view_.get() &&
@@ -1170,7 +1172,7 @@ void BrowserView::FocusAppMenu() {
 }
 
 void BrowserView::RotatePaneFocus(bool forwards) {
-  GetWidget()->GetFocusManager()->RotatePaneFocus(
+  GetFocusManager()->RotatePaneFocus(
       forwards ?
           views::FocusManager::kForward : views::FocusManager::kBackward,
       views::FocusManager::kWrap);
@@ -1354,13 +1356,6 @@ void BrowserView::UserChangedTheme() {
   frame_->FrameTypeChanged();
 }
 
-void BrowserView::WebContentsFocused(WebContents* contents) {
-  if (contents_web_view_->GetWebContents() == contents)
-    contents_web_view_->OnWebContentsFocused(contents);
-  else
-    devtools_web_view_->OnWebContentsFocused(contents);
-}
-
 void BrowserView::ShowWebsiteSettings(Profile* profile,
                                       content::WebContents* web_contents,
                                       const GURL& url,
@@ -1468,20 +1463,44 @@ void BrowserView::HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {
 // to windows. The real fix to this bug is to disable the commands when they
 // won't do anything. We'll need something like an overall clipboard command
 // manager to do that.
-void BrowserView::Cut() {
-  // If a WebContent is focused, call WebContents::Cut. Otherwise, e.g. if
-  // Omnibox is focused, send a Ctrl+x key event to Chrome. Using RWH interface
-  // rather than the fake key event for a WebContent is important since the fake
-  // event might be consumed by the web content (crbug.com/137908).
-  DoCutCopyPaste(&content::WebContents::Cut, IDS_APP_CUT);
-}
+void BrowserView::CutCopyPaste(int command_id) {
+  // If a WebContents is focused, call its member method.
+  //
+  // We could make WebContents register accelerators and then just use the
+  // plumbing for accelerators below to dispatch these, but it's not clear
+  // whether that would still allow keypresses of ctrl-X/C/V to be sent as
+  // key events (and not accelerators) to the WebContents so it can give the web
+  // page a chance to override them.
+  WebContents* contents = browser_->tab_strip_model()->GetActiveWebContents();
+  if (contents) {
+    void (WebContents::*method)();
+    if (command_id == IDC_CUT)
+      method = &content::WebContents::Cut;
+    else if (command_id == IDC_COPY)
+      method = &content::WebContents::Copy;
+    else
+      method = &content::WebContents::Paste;
+    if (DoCutCopyPasteForWebContents(contents, method))
+      return;
 
-void BrowserView::Copy() {
-  DoCutCopyPaste(&content::WebContents::Copy, IDS_APP_COPY);
-}
+    WebContents* devtools =
+        DevToolsWindow::GetInTabWebContents(contents, nullptr);
+    if (devtools && DoCutCopyPasteForWebContents(devtools, method))
+      return;
+  }
 
-void BrowserView::Paste() {
-  DoCutCopyPaste(&content::WebContents::Paste, IDS_APP_PASTE);
+  // Any Views which want to handle the clipboard commands in the Chrome menu
+  // should:
+  //   (a) Register ctrl-X/C/V as accelerators
+  //   (b) Implement CanHandleAccelerators() to not return true unless they're
+  //       focused, as the FocusManager will try all registered accelerator
+  //       handlers, not just the focused one.
+  // Currently, Textfield (which covers the omnibox and find bar, and likely any
+  // other native UI in the future that wants to deal with clipboard commands)
+  // does the above.
+  ui::Accelerator accelerator;
+  GetAccelerator(command_id, &accelerator);
+  GetFocusManager()->ProcessAccelerator(accelerator);
 }
 
 WindowOpenDisposition BrowserView::GetDispositionForPopupBounds(
@@ -2521,38 +2540,18 @@ ExclusiveAccessContext* BrowserView::GetExclusiveAccessContext() {
   return this;
 }
 
-void BrowserView::DoCutCopyPaste(void (WebContents::*method)(),
-                                 int command_id) {
-  WebContents* contents = browser_->tab_strip_model()->GetActiveWebContents();
-  if (!contents)
-    return;
-  if (DoCutCopyPasteForWebContents(contents, method))
-    return;
-
-  WebContents* devtools = DevToolsWindow::GetInTabWebContents(contents,
-                                                              nullptr);
-  if (devtools && DoCutCopyPasteForWebContents(devtools, method))
-    return;
-
-  views::FocusManager* focus_manager = GetFocusManager();
-  views::View* focused = focus_manager->GetFocusedView();
-  if (focused &&
-      (!strcmp(focused->GetClassName(), views::Textfield::kViewClassName) ||
-       !strcmp(focused->GetClassName(), OmniboxViewViews::kViewClassName))) {
-    views::Textfield* textfield = static_cast<views::Textfield*>(focused);
-    textfield->ExecuteCommand(command_id);
-  }
-}
-
 bool BrowserView::DoCutCopyPasteForWebContents(
     WebContents* contents,
     void (WebContents::*method)()) {
-  if (contents->GetRenderWidgetHostView()->HasFocus()) {
-    (contents->*method)();
-    return true;
-  }
-
-  return false;
+  // It's possible for a non-null WebContents to have a null RWHV if it's
+  // crashed or otherwise been killed.
+  content::RenderWidgetHostView* rwhv = contents->GetRenderWidgetHostView();
+  if (!rwhv || !rwhv->HasFocus())
+    return false;
+  // Calling |method| rather than using a fake key event is important since a
+  // fake event might be consumed by the web content.
+  (contents->*method)();
+  return true;
 }
 
 void BrowserView::ActivateAppModalDialog() const {

@@ -24,7 +24,9 @@
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/safe_browsing/database_manager.h"
 #include "chrome/browser/safe_browsing/download_feedback_service.h"
+#include "chrome/browser/safe_browsing/local_database_manager.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
+#include "chrome/browser/safe_browsing/test_database_manager.h"
 #include "chrome/common/safe_browsing/binary_feature_extractor.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/test/base/testing_profile.h"
@@ -41,11 +43,6 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/zlib/google/zip.h"
 #include "url/gurl.h"
-
-#if defined(OS_MACOSX)
-#include "base/metrics/field_trial.h"
-#include "components/variations/entropy_provider.h"
-#endif
 
 using ::testing::Assign;
 using ::testing::ContainerEq;
@@ -65,10 +62,9 @@ namespace safe_browsing {
 namespace {
 // A SafeBrowsingDatabaseManager implementation that returns a fixed result for
 // a given URL.
-class MockSafeBrowsingDatabaseManager : public SafeBrowsingDatabaseManager {
+class MockSafeBrowsingDatabaseManager : public TestSafeBrowsingDatabaseManager {
  public:
-  explicit MockSafeBrowsingDatabaseManager(SafeBrowsingService* service)
-      : SafeBrowsingDatabaseManager(service) { }
+  MockSafeBrowsingDatabaseManager() {}
 
   MOCK_METHOD1(MatchDownloadWhitelistUrl, bool(const GURL&));
   MOCK_METHOD1(MatchDownloadWhitelistString, bool(const std::string&));
@@ -95,8 +91,13 @@ class FakeSafeBrowsingService : public SafeBrowsingService {
   ~FakeSafeBrowsingService() override {}
 
   SafeBrowsingDatabaseManager* CreateDatabaseManager() override {
-    mock_database_manager_ = new MockSafeBrowsingDatabaseManager(this);
+    mock_database_manager_ = new MockSafeBrowsingDatabaseManager();
     return mock_database_manager_;
+  }
+
+  SafeBrowsingProtocolManagerDelegate* GetProtocolManagerDelegate() override {
+    // Our SafeBrowsingDatabaseManager doesn't implement this delegate.
+    return NULL;
   }
 
   void RegisterAllDelayedAnalysis() override {}
@@ -181,13 +182,15 @@ ACTION_P(TrustSignature, certificate_file) {
 // easily.  Note: check will be deleted automatically when the callback is
 // deleted.
 void OnSafeBrowsingResult(
-    SafeBrowsingDatabaseManager::SafeBrowsingCheck* check) {
-  check->client->OnSafeBrowsingResult(*check);
+    LocalSafeBrowsingDatabaseManager::SafeBrowsingCheck* check) {
+  check->OnSafeBrowsingResult();
 }
 
 ACTION_P(CheckDownloadUrlDone, threat_type) {
-  SafeBrowsingDatabaseManager::SafeBrowsingCheck* check =
-      new SafeBrowsingDatabaseManager::SafeBrowsingCheck(
+  // TODO(nparker): Remove use of SafeBrowsingCheck and instead call
+  // client->OnCheckDownloadUrlResult(..) directly.
+  LocalSafeBrowsingDatabaseManager::SafeBrowsingCheck* check =
+      new LocalSafeBrowsingDatabaseManager::SafeBrowsingCheck(
           arg0,
           std::vector<SBFullHash>(),
           arg1,
@@ -208,13 +211,6 @@ class DownloadProtectionServiceTest : public testing::Test {
             content::TestBrowserThreadBundle::IO_MAINLOOP) {
   }
   void SetUp() override {
-#if defined(OS_MACOSX)
-    field_trial_list_.reset(new base::FieldTrialList(
-          new metrics::SHA1EntropyProvider("42")));
-    ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
-          "SafeBrowsingOSXClientDownloadPings",
-          "Enabled"));
-#endif
     // Start real threads for the IO and File threads so that the DCHECKs
     // to test that we're on the correct thread work.
     sb_service_ = new StrictMock<FakeSafeBrowsingService>();
@@ -411,9 +407,6 @@ class DownloadProtectionServiceTest : public testing::Test {
   content::TestBrowserThreadBundle test_browser_thread_bundle_;
   content::InProcessUtilityThreadHelper in_process_utility_thread_helper_;
   base::FilePath testdata_path_;
-#if defined(OS_MACOSX)
-  scoped_ptr<base::FieldTrialList> field_trial_list_;
-#endif
   DownloadProtectionService::ClientDownloadRequestSubscription
       client_download_request_subscription_;
   scoped_ptr<ClientDownloadRequest> last_client_download_request_;
@@ -535,17 +528,13 @@ TEST_F(DownloadProtectionServiceTest, CheckClientDownloadWhitelistedUrl) {
       base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
                  base::Unretained(this)));
   MessageLoop::current()->Run();
-#if defined(OS_WIN)
-  EXPECT_TRUE(IsResult(DownloadProtectionService::DANGEROUS));
-#else
-  EXPECT_TRUE(IsResult(DownloadProtectionService::UNKNOWN));
-#endif
 
 #if defined(OS_WIN) || defined(OS_MACOSX)
-  // OSX sends pings for evaluation purposes.
+  EXPECT_TRUE(IsResult(DownloadProtectionService::DANGEROUS));
   EXPECT_TRUE(HasClientDownloadRequest());
   ClearClientDownloadRequest();
 #else
+  EXPECT_TRUE(IsResult(DownloadProtectionService::UNKNOWN));
   EXPECT_FALSE(HasClientDownloadRequest());
 #endif
 
@@ -556,17 +545,13 @@ TEST_F(DownloadProtectionServiceTest, CheckClientDownloadWhitelistedUrl) {
       base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
                  base::Unretained(this)));
   MessageLoop::current()->Run();
-#if defined(OS_WIN)
-  EXPECT_TRUE(IsResult(DownloadProtectionService::DANGEROUS));
-#else
-  EXPECT_TRUE(IsResult(DownloadProtectionService::UNKNOWN));
-#endif
 
 #if defined(OS_WIN) || defined(OS_MACOSX)
-  // OSX sends pings for evaluation purposes.
+  EXPECT_TRUE(IsResult(DownloadProtectionService::DANGEROUS));
   EXPECT_TRUE(HasClientDownloadRequest());
   ClearClientDownloadRequest();
 #else
+  EXPECT_TRUE(IsResult(DownloadProtectionService::UNKNOWN));
   EXPECT_FALSE(HasClientDownloadRequest());
 #endif
 
@@ -577,17 +562,13 @@ TEST_F(DownloadProtectionServiceTest, CheckClientDownloadWhitelistedUrl) {
       base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
                  base::Unretained(this)));
   MessageLoop::current()->Run();
-#if defined(OS_WIN)
-  EXPECT_TRUE(IsResult(DownloadProtectionService::DANGEROUS));
-#else
-  EXPECT_TRUE(IsResult(DownloadProtectionService::UNKNOWN));
-#endif
 
 #if defined(OS_WIN) || defined(OS_MACOSX)
-  // OSX sends pings for evaluation purposes.
+  EXPECT_TRUE(IsResult(DownloadProtectionService::DANGEROUS));
   EXPECT_TRUE(HasClientDownloadRequest());
   ClearClientDownloadRequest();
 #else
+  EXPECT_TRUE(IsResult(DownloadProtectionService::UNKNOWN));
   EXPECT_FALSE(HasClientDownloadRequest());
 #endif
 
@@ -598,11 +579,7 @@ TEST_F(DownloadProtectionServiceTest, CheckClientDownloadWhitelistedUrl) {
       base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
                  base::Unretained(this)));
   MessageLoop::current()->Run();
-#if defined(OS_MACOSX)
-  EXPECT_TRUE(IsResult(DownloadProtectionService::UNKNOWN));
-#else
   EXPECT_TRUE(IsResult(DownloadProtectionService::SAFE));
-#endif
   // TODO(grt): Make the service produce the request even when the URL is
   // whitelisted.
   EXPECT_FALSE(HasClientDownloadRequest());
@@ -697,19 +674,15 @@ TEST_F(DownloadProtectionServiceTest, CheckClientDownloadSuccess) {
       base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
                  base::Unretained(this)));
   MessageLoop::current()->Run();
-#if defined(OS_WIN)
-  EXPECT_TRUE(IsResult(DownloadProtectionService::SAFE));
-#else
-  // On !OS_WIN, no file types are currently supported. Hence all requests to
-  // CheckClientDownload() result in a verdict of UNKNOWN.
-  EXPECT_TRUE(IsResult(DownloadProtectionService::UNKNOWN));
-#endif
 
 #if defined(OS_WIN) || defined(OS_MACOSX)
-  // OSX sends pings for evaluation purposes.
+  EXPECT_TRUE(IsResult(DownloadProtectionService::SAFE));
   EXPECT_TRUE(HasClientDownloadRequest());
   ClearClientDownloadRequest();
 #else
+  // On !(OS_WIN || OS_MACOSX), no file types are currently supported. Hence all
+  // requests to CheckClientDownload() result in a verdict of UNKNOWN.
+  EXPECT_TRUE(IsResult(DownloadProtectionService::UNKNOWN));
   EXPECT_FALSE(HasClientDownloadRequest());
 #endif
 
@@ -751,17 +724,13 @@ TEST_F(DownloadProtectionServiceTest, CheckClientDownloadSuccess) {
   MessageLoop::current()->Run();
   EXPECT_FALSE(DownloadFeedbackService::GetPingsForDownloadForTesting(
       item, &feedback_ping, &feedback_response));
-#if defined(OS_WIN)
-  EXPECT_TRUE(IsResult(DownloadProtectionService::DANGEROUS));
-#else
-  EXPECT_TRUE(IsResult(DownloadProtectionService::UNKNOWN));
-#endif
 
 #if defined(OS_WIN) || defined(OS_MACOSX)
-  // OSX sends pings for evaluation purposes.
+  EXPECT_TRUE(IsResult(DownloadProtectionService::DANGEROUS));
   EXPECT_TRUE(HasClientDownloadRequest());
   ClearClientDownloadRequest();
 #else
+  EXPECT_TRUE(IsResult(DownloadProtectionService::UNKNOWN));
   EXPECT_FALSE(HasClientDownloadRequest());
 #endif
 
@@ -777,7 +746,7 @@ TEST_F(DownloadProtectionServiceTest, CheckClientDownloadSuccess) {
       base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
                  base::Unretained(this)));
   MessageLoop::current()->Run();
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_MACOSX)
   EXPECT_TRUE(IsResult(DownloadProtectionService::UNCOMMON));
   EXPECT_TRUE(DownloadFeedbackService::GetPingsForDownloadForTesting(
       item, &feedback_ping, &feedback_response));
@@ -804,7 +773,7 @@ TEST_F(DownloadProtectionServiceTest, CheckClientDownloadSuccess) {
       base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
                  base::Unretained(this)));
   MessageLoop::current()->Run();
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_MACOSX)
   EXPECT_TRUE(IsResult(DownloadProtectionService::DANGEROUS_HOST));
   EXPECT_TRUE(DownloadFeedbackService::GetPingsForDownloadForTesting(
       item, &feedback_ping, &feedback_response));
@@ -828,17 +797,13 @@ TEST_F(DownloadProtectionServiceTest, CheckClientDownloadSuccess) {
       base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
                  base::Unretained(this)));
   MessageLoop::current()->Run();
-#if defined(OS_WIN)
-  EXPECT_TRUE(IsResult(DownloadProtectionService::POTENTIALLY_UNWANTED));
-#else
-  EXPECT_TRUE(IsResult(DownloadProtectionService::UNKNOWN));
-#endif
 
 #if defined(OS_WIN) || defined(OS_MACOSX)
-  // OSX sends pings for evaluation purposes.
+  EXPECT_TRUE(IsResult(DownloadProtectionService::POTENTIALLY_UNWANTED));
   EXPECT_TRUE(HasClientDownloadRequest());
   ClearClientDownloadRequest();
 #else
+  EXPECT_TRUE(IsResult(DownloadProtectionService::UNKNOWN));
   EXPECT_FALSE(HasClientDownloadRequest());
 #endif
 }
@@ -887,17 +852,13 @@ TEST_F(DownloadProtectionServiceTest, CheckClientDownloadHTTPS) {
       base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
                  base::Unretained(this)));
   MessageLoop::current()->Run();
-#if defined(OS_WIN)
-  EXPECT_TRUE(IsResult(DownloadProtectionService::DANGEROUS));
-#else
-  EXPECT_TRUE(IsResult(DownloadProtectionService::UNKNOWN));
-#endif
 
 #if defined(OS_WIN) || defined(OS_MACOSX)
-  // OSX sends pings for evaluation purposes.
+  EXPECT_TRUE(IsResult(DownloadProtectionService::DANGEROUS));
   EXPECT_TRUE(HasClientDownloadRequest());
   ClearClientDownloadRequest();
 #else
+  EXPECT_TRUE(IsResult(DownloadProtectionService::UNKNOWN));
   EXPECT_FALSE(HasClientDownloadRequest());
 #endif
 }
@@ -945,17 +906,13 @@ TEST_F(DownloadProtectionServiceTest, CheckClientDownloadBlob) {
       base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
                  base::Unretained(this)));
   MessageLoop::current()->Run();
-#if defined(OS_WIN)
-  EXPECT_TRUE(IsResult(DownloadProtectionService::DANGEROUS));
-#else
-  EXPECT_TRUE(IsResult(DownloadProtectionService::UNKNOWN));
-#endif
 
 #if defined(OS_WIN) || defined(OS_MACOSX)
-  // OSX sends pings for evaluation purposes.
+  EXPECT_TRUE(IsResult(DownloadProtectionService::DANGEROUS));
   EXPECT_TRUE(HasClientDownloadRequest());
   ClearClientDownloadRequest();
 #else
+  EXPECT_TRUE(IsResult(DownloadProtectionService::UNKNOWN));
   EXPECT_FALSE(HasClientDownloadRequest());
 #endif
 }
@@ -1007,14 +964,9 @@ TEST_F(DownloadProtectionServiceTest, CheckClientDownloadData) {
       base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
                  base::Unretained(this)));
   MessageLoop::current()->Run();
-#if defined(OS_WIN)
-  EXPECT_TRUE(IsResult(DownloadProtectionService::DANGEROUS));
-#else
-  EXPECT_TRUE(IsResult(DownloadProtectionService::UNKNOWN));
-#endif
 
 #if defined(OS_WIN) || defined(OS_MACOSX)
-  // OSX sends pings for evaluation purposes.
+  EXPECT_TRUE(IsResult(DownloadProtectionService::DANGEROUS));
   ASSERT_TRUE(HasClientDownloadRequest());
   const ClientDownloadRequest& request = *GetClientDownloadRequest();
   const char kExpectedUrl[] =
@@ -1041,6 +993,7 @@ TEST_F(DownloadProtectionServiceTest, CheckClientDownloadData) {
                                       kExpectedUrl, kExpectedReferrer));
   ClearClientDownloadRequest();
 #else
+  EXPECT_TRUE(IsResult(DownloadProtectionService::UNKNOWN));
   EXPECT_FALSE(HasClientDownloadRequest());
 #endif
 }
@@ -1113,16 +1066,9 @@ TEST_F(DownloadProtectionServiceTest, CheckClientDownloadZip) {
       base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
                  base::Unretained(this)));
   MessageLoop::current()->Run();
-#if defined(OS_WIN)
-  EXPECT_TRUE(IsResult(DownloadProtectionService::SAFE));
-#else
-  // For !OS_WIN, no file types are currently supported. Hence the resulting
-  // verdict is UNKNOWN.
-  EXPECT_TRUE(IsResult(DownloadProtectionService::UNKNOWN));
-#endif
 
 #if defined(OS_WIN) || defined(OS_MACOSX)
-  // OSX sends pings for evaluation purposes.
+  EXPECT_TRUE(IsResult(DownloadProtectionService::SAFE));
   EXPECT_TRUE(HasClientDownloadRequest());
   const ClientDownloadRequest& request = *GetClientDownloadRequest();
   EXPECT_EQ(1, request.archived_binary_size());
@@ -1135,6 +1081,9 @@ TEST_F(DownloadProtectionServiceTest, CheckClientDownloadZip) {
             archived_binary->length());
   ClearClientDownloadRequest();
 #else
+  // For !(OS_WIN || OS_MACOSX), no file types are currently supported. Hence
+  // the resulting verdict is UNKNOWN.
+  EXPECT_TRUE(IsResult(DownloadProtectionService::UNKNOWN));
   EXPECT_FALSE(HasClientDownloadRequest());
 #endif
   Mock::VerifyAndClearExpectations(binary_feature_extractor_.get());
@@ -1152,17 +1101,13 @@ TEST_F(DownloadProtectionServiceTest, CheckClientDownloadZip) {
       base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
                  base::Unretained(this)));
   MessageLoop::current()->Run();
-#if defined(OS_WIN)
-  EXPECT_TRUE(IsResult(DownloadProtectionService::DANGEROUS));
-#else
-  EXPECT_TRUE(IsResult(DownloadProtectionService::UNKNOWN));
-#endif
 
 #if defined(OS_WIN) || defined(OS_MACOSX)
-  // OSX sends pings for evaluation purposes.
+  EXPECT_TRUE(IsResult(DownloadProtectionService::DANGEROUS));
   EXPECT_TRUE(HasClientDownloadRequest());
   ClearClientDownloadRequest();
 #else
+  EXPECT_TRUE(IsResult(DownloadProtectionService::UNKNOWN));
   EXPECT_FALSE(HasClientDownloadRequest());
 #endif
   Mock::VerifyAndClearExpectations(binary_feature_extractor_.get());
@@ -1258,60 +1203,6 @@ TEST_F(DownloadProtectionServiceTest, CheckClientCrxDownloadSuccess) {
   MessageLoop::current()->Run();
   EXPECT_TRUE(IsResult(DownloadProtectionService::UNKNOWN));
 }
-
-#if defined(OS_MACOSX)
-// TODO(mattm): remove this (see crbug.com/414834).
-TEST_F(DownloadProtectionServiceTest,
-       CheckClientDownloadPingOnOSXRequiresFieldTrial) {
-  // Clear the field trial that was set in SetUp().
-  field_trial_list_.reset();
-
-  net::TestURLFetcherFactory factory;
-
-  base::FilePath tmp_path(FILE_PATH_LITERAL("bla.tmp"));
-  base::FilePath final_path(FILE_PATH_LITERAL("bla.exe"));
-  std::vector<GURL> url_chain;
-  url_chain.push_back(GURL("http://www.google.com/"));
-  url_chain.push_back(GURL("http://www.google.com/bla.exe"));
-  GURL referrer("http://www.google.com/");
-  std::string hash = "hash";
-  std::string remote_address = "10.11.12.13";
-
-  content::MockDownloadItem item;
-  EXPECT_CALL(item, GetFullPath()).WillRepeatedly(ReturnRef(tmp_path));
-  EXPECT_CALL(item, GetTargetFilePath()).WillRepeatedly(ReturnRef(final_path));
-  EXPECT_CALL(item, GetUrlChain()).WillRepeatedly(ReturnRef(url_chain));
-  EXPECT_CALL(item, GetReferrerUrl()).WillRepeatedly(ReturnRef(referrer));
-  EXPECT_CALL(item, GetTabUrl()).WillRepeatedly(ReturnRef(GURL::EmptyGURL()));
-  EXPECT_CALL(item, GetTabReferrerUrl())
-      .WillRepeatedly(ReturnRef(GURL::EmptyGURL()));
-  EXPECT_CALL(item, GetHash()).WillRepeatedly(ReturnRef(hash));
-  EXPECT_CALL(item, GetReceivedBytes()).WillRepeatedly(Return(100));
-  EXPECT_CALL(item, HasUserGesture()).WillRepeatedly(Return(true));
-  EXPECT_CALL(item, GetRemoteAddress()).WillRepeatedly(Return(remote_address));
-
-  EXPECT_CALL(*sb_service_->mock_database_manager(),
-              MatchDownloadWhitelistUrl(_))
-      .WillRepeatedly(Return(false));
-  EXPECT_CALL(*binary_feature_extractor_.get(), CheckSignature(tmp_path, _))
-      .WillOnce(SetCertificateContents("dummy cert data"));
-  EXPECT_CALL(
-      *binary_feature_extractor_.get(),
-      ExtractImageFeatures(tmp_path, BinaryFeatureExtractor::kDefaultOptions,
-                           _, _))
-      .WillOnce(SetDosHeaderContents("dummy dos header"));
-  download_service_->CheckClientDownload(
-      &item,
-      base::Bind(&DownloadProtectionServiceTest::CheckDoneCallback,
-                 base::Unretained(this)));
-
-  // SendRequest is not called.  Wait for FinishRequest to call our callback.
-  MessageLoop::current()->Run();
-  net::TestURLFetcher* fetcher = factory.GetFetcherByID(0);
-  EXPECT_EQ(NULL, fetcher);
-  EXPECT_FALSE(HasClientDownloadRequest());
-}
-#endif
 
 TEST_F(DownloadProtectionServiceTest, CheckClientDownloadValidateRequest) {
   net::TestURLFetcherFactory factory;

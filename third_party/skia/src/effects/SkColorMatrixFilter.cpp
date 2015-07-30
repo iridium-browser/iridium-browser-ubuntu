@@ -269,7 +269,7 @@ static Sk4f premul(const Sk4f& x) {
 
 static Sk4f unpremul(const SkPMFloat& pm) {
     float scale = 255 / pm.a(); // candidate for fast/approx invert?
-    return Sk4f(pm) * Sk4f(scale, scale, scale, 1);
+    return pm * Sk4f(scale, scale, scale, 1);
 }
 
 static Sk4f clamp_0_255(const Sk4f& value) {
@@ -299,7 +299,7 @@ void SkColorMatrixFilter::filterSpan(const SkPMColor src[], int count, SkPMColor
         const Sk4f c4 = Sk4f::Load(fTranspose + 16);  // translates
 
         // todo: we could cache this in the constructor...
-        SkPMColor matrix_translate_pmcolor = SkPMFloat(premul(clamp_0_255(c4))).clamped();
+        SkPMColor matrix_translate_pmcolor = SkPMFloat(premul(clamp_0_255(c4))).roundClamp();
 
         for (int i = 0; i < count; i++) {
             const SkPMColor src_c = src[i];
@@ -323,7 +323,7 @@ void SkColorMatrixFilter::filterSpan(const SkPMColor src[], int count, SkPMColor
             Sk4f dst4 = c0 * r4 + c1 * g4 + c2 * b4 + c3 * a4 + c4;
 
             // clamp, re-premul, and write
-            dst[i] = SkPMFloat(premul(clamp_0_255(dst4))).get();
+            dst[i] = SkPMFloat(premul(clamp_0_255(dst4))).round();
         }
     } else {
         const State& state = fState;
@@ -408,7 +408,7 @@ public:
 
     const char* name() const override { return "Color Matrix"; }
 
-    virtual void getGLProcessorKey(const GrGLCaps& caps,
+    virtual void getGLProcessorKey(const GrGLSLCaps& caps,
                                    GrProcessorKeyBuilder* b) const override {
         GLProcessor::GenKey(*this, caps, b);
     }
@@ -423,7 +423,7 @@ public:
     class GLProcessor : public GrGLFragmentProcessor {
     public:
         // this class always generates the same code.
-        static void GenKey(const GrProcessor&, const GrGLCaps&, GrProcessorKeyBuilder* b) {}
+        static void GenKey(const GrProcessor&, const GrGLSLCaps&, GrProcessorKeyBuilder* b) {}
 
         GLProcessor(const GrProcessor&) {}
 
@@ -444,7 +444,7 @@ public:
                 // could optimize this case, but we aren't for now.
                 inputColor = "vec4(1)";
             }
-            GrGLFPFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+            GrGLFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
             // The max() is to guard against 0 / 0 during unpremul when the incoming color is
             // transparent black.
             fsBuilder->codeAppendf("\tfloat nonZeroAlpha = max(%s.a, 0.00001);\n", inputColor);

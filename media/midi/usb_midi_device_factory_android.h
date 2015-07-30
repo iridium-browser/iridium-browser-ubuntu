@@ -13,13 +13,15 @@
 #include "base/callback.h"
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
-#include "media/base/media_export.h"
 #include "media/midi/usb_midi_device.h"
+#include "media/midi/usb_midi_export.h"
 
 namespace media {
+namespace midi {
 
 // This class enumerates UsbMidiDevices.
-class MEDIA_EXPORT UsbMidiDeviceFactoryAndroid : public UsbMidiDevice::Factory {
+class USB_MIDI_EXPORT UsbMidiDeviceFactoryAndroid
+      : public UsbMidiDevice::Factory {
  public:
   UsbMidiDeviceFactoryAndroid();
   ~UsbMidiDeviceFactoryAndroid() override;
@@ -45,6 +47,7 @@ class MEDIA_EXPORT UsbMidiDeviceFactoryAndroid : public UsbMidiDevice::Factory {
   DISALLOW_COPY_AND_ASSIGN(UsbMidiDeviceFactoryAndroid);
 };
 
+}  // namespace midi
 }  // namespace media
 
 #endif  // MEDIA_MIDI_USB_MIDI_DEVICE_FACTORY_ANDROID_H_

@@ -47,22 +47,11 @@ void EmitHistogram(AccessAddressBookEventType type) {
 
 namespace autofill {
 
-namespace {
-
-bool ShouldAutofill(const FormFieldData& form_field) {
-  return form_field.should_autocomplete ||
-         !base::CommandLine::ForCurrentProcess()->HasSwitch(
-             switches::kRespectAutocompleteOffForAutofill);
-}
-
-}  // namespace
-
 AutofillExternalDelegate::AutofillExternalDelegate(AutofillManager* manager,
                                                    AutofillDriver* driver)
     : manager_(manager),
       driver_(driver),
       query_id_(0),
-      display_warning_if_disabled_(false),
       has_suggestion_(false),
       has_shown_popup_for_current_edit_(false),
       should_show_scan_credit_card_(false),
@@ -76,14 +65,12 @@ AutofillExternalDelegate::~AutofillExternalDelegate() {}
 void AutofillExternalDelegate::OnQuery(int query_id,
                                        const FormData& form,
                                        const FormFieldData& field,
-                                       const gfx::RectF& element_bounds,
-                                       bool display_warning_if_disabled) {
+                                       const gfx::RectF& element_bounds) {
   if (!query_form_.SameFormAs(form))
     has_shown_address_book_prompt = false;
 
   query_form_ = form;
   query_field_ = field;
-  display_warning_if_disabled_ = display_warning_if_disabled;
   query_id_ = query_id;
   element_bounds_ = element_bounds;
   should_show_scan_credit_card_ =
@@ -101,9 +88,11 @@ void AutofillExternalDelegate::OnSuggestionsReturned(
   // Add or hide warnings as appropriate.
   ApplyAutofillWarnings(&suggestions);
 
+#if !defined(OS_ANDROID)
   // Add a separator to go between the values and menu items.
   suggestions.push_back(Suggestion());
   suggestions.back().frontend_id = POPUP_ITEM_ID_SEPARATOR;
+#endif
 
   if (should_show_scan_credit_card_) {
     Suggestion scan_credit_card(
@@ -131,10 +120,12 @@ void AutofillExternalDelegate::OnSuggestionsReturned(
   if (has_suggestion_)
     ApplyAutofillOptions(&suggestions);
 
+#if !defined(OS_ANDROID)
   // Remove the separator if it is the last element.
   DCHECK_GT(suggestions.size(), 0U);
   if (suggestions.back().frontend_id == POPUP_ITEM_ID_SEPARATOR)
     suggestions.pop_back();
+#endif
 
   // If anything else is added to modify the values after inserting the data
   // list, AutofillPopupControllerImpl::UpdateDataListValues will need to be
@@ -276,12 +267,17 @@ void AutofillExternalDelegate::DidAcceptSuggestion(const base::string16& value,
   manager_->client()->HideAutofillPopup();
 }
 
-void AutofillExternalDelegate::RemoveSuggestion(const base::string16& value,
+bool AutofillExternalDelegate::RemoveSuggestion(const base::string16& value,
                                                 int identifier) {
   if (identifier > 0)
-    manager_->RemoveAutofillProfileOrCreditCard(identifier);
-  else
+    return manager_->RemoveAutofillProfileOrCreditCard(identifier);
+
+  if (identifier == POPUP_ITEM_ID_AUTOCOMPLETE_ENTRY) {
     manager_->RemoveAutocompleteEntry(query_field_.name, value);
+    return true;
+  }
+
+  return false;
 }
 
 void AutofillExternalDelegate::DidEndTextFieldEditing() {
@@ -300,11 +296,8 @@ void AutofillExternalDelegate::Reset() {
 
 void AutofillExternalDelegate::OnPingAck() {
   // Reissue the most recent query, which will reopen the Autofill popup.
-  manager_->OnQueryFormFieldAutofill(query_id_,
-                                     query_form_,
-                                     query_field_,
-                                     element_bounds_,
-                                     display_warning_if_disabled_);
+  manager_->OnQueryFormFieldAutofill(query_id_, query_form_, query_field_,
+                                     element_bounds_);
 }
 
 base::WeakPtr<AutofillExternalDelegate> AutofillExternalDelegate::GetWeakPtr() {
@@ -341,30 +334,11 @@ void AutofillExternalDelegate::FillAutofillFormData(int unique_id,
 
 void AutofillExternalDelegate::ApplyAutofillWarnings(
     std::vector<Suggestion>* suggestions) {
-  if (!ShouldAutofill(query_field_)) {
-    // Autofill is disabled.  If there were some profile or credit card
-    // suggestions to show, show a warning instead.  Otherwise, clear out the
-    // list of suggestions.
-    if (!suggestions->empty() && (*suggestions)[0].frontend_id > 0) {
-      // If Autofill is disabled and we had suggestions, show a warning instead.
-      suggestions->assign(1, Suggestion(
-          l10n_util::GetStringUTF16(IDS_AUTOFILL_WARNING_FORM_DISABLED)));
-      (*suggestions)[0].frontend_id = POPUP_ITEM_ID_WARNING_MESSAGE;
-    } else {
-      suggestions->clear();
-    }
-  } else if (suggestions->size() > 1 &&
-             (*suggestions)[0].frontend_id == POPUP_ITEM_ID_WARNING_MESSAGE) {
+  if (suggestions->size() > 1 &&
+      (*suggestions)[0].frontend_id == POPUP_ITEM_ID_WARNING_MESSAGE) {
     // If we received a warning instead of suggestions from Autofill but regular
     // suggestions from autocomplete, don't show the Autofill warning.
     suggestions->erase(suggestions->begin());
-  }
-
-  // If we were about to show a warning and we shouldn't, don't.
-  if (!suggestions->empty() &&
-      (*suggestions)[0].frontend_id == POPUP_ITEM_ID_WARNING_MESSAGE &&
-      !display_warning_if_disabled_) {
-    suggestions->clear();
   }
 }
 
@@ -389,12 +363,14 @@ void AutofillExternalDelegate::InsertDataListValues(
   if (data_list_values_.empty())
     return;
 
+#if !defined(OS_ANDROID)
   // Insert the separator between the datalist and Autofill values (if there
   // are any).
   if (!suggestions->empty()) {
     suggestions->insert(suggestions->begin(), Suggestion());
     (*suggestions)[0].frontend_id = POPUP_ITEM_ID_SEPARATOR;
   }
+#endif
 
   // Insert the datalist elements at the beginning.
   suggestions->insert(suggestions->begin(), data_list_values_.size(),

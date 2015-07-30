@@ -34,6 +34,7 @@
 #include "core/dom/Node.h"
 #include "core/dom/PseudoElement.h"
 #include "core/dom/Text.h"
+#include "core/dom/shadow/InsertionPoint.h"
 #include "core/layout/LayoutFullScreen.h"
 #include "core/layout/LayoutObject.h"
 #include "core/layout/LayoutText.h"
@@ -47,10 +48,11 @@ LayoutTreeBuilderForElement::LayoutTreeBuilderForElement(Element& element, Compu
     : LayoutTreeBuilder(element, nullptr)
     , m_style(style)
 {
+    ASSERT(!isActiveInsertionPoint(element));
     if (element.isFirstLetterPseudoElement()) {
-        if (LayoutObject* nextLayoutObject = FirstLetterPseudoElement::firstLetterTextRenderer(element))
+        if (LayoutObject* nextLayoutObject = FirstLetterPseudoElement::firstLetterTextLayoutObject(element))
             m_layoutObjectParent = nextLayoutObject->parent();
-    } else if (ContainerNode* containerNode = NodeRenderingTraversal::parent(element)) {
+    } else if (ContainerNode* containerNode = LayoutTreeBuilderTraversal::parent(element)) {
         m_layoutObjectParent = containerNode->layoutObject();
     }
 }
@@ -60,10 +62,10 @@ LayoutObject* LayoutTreeBuilderForElement::nextLayoutObject() const
     ASSERT(m_layoutObjectParent);
 
     if (m_node->isInTopLayer())
-        return NodeRenderingTraversal::nextInTopLayer(*m_node);
+        return LayoutTreeBuilderTraversal::nextInTopLayer(*m_node);
 
     if (m_node->isFirstLetterPseudoElement())
-        return FirstLetterPseudoElement::firstLetterTextRenderer(*m_node);
+        return FirstLetterPseudoElement::firstLetterTextLayoutObject(*m_node);
 
     return LayoutTreeBuilder::nextLayoutObject();
 }
@@ -130,14 +132,14 @@ void LayoutTreeBuilderForElement::createLayoutObject()
 
     // Make sure the LayoutObject already knows it is going to be added to a LayoutFlowThread before we set the style
     // for the first time. Otherwise code using inLayoutFlowThread() in the styleWillChange and styleDidChange will fail.
-    newLayoutObject->setFlowThreadState(parentLayoutObject->flowThreadState());
+    newLayoutObject->setIsInsideFlowThread(parentLayoutObject->isInsideFlowThread());
 
     LayoutObject* nextLayoutObject = this->nextLayoutObject();
     m_node->setLayoutObject(newLayoutObject);
     newLayoutObject->setStyle(&style); // setStyle() can depend on layoutObject() already being set.
 
     if (Fullscreen::isActiveFullScreenElement(*m_node)) {
-        newLayoutObject = LayoutFullScreen::wrapRenderer(newLayoutObject, parentLayoutObject, &m_node->document());
+        newLayoutObject = LayoutFullScreen::wrapLayoutObject(newLayoutObject, parentLayoutObject, &m_node->document());
         if (!newLayoutObject)
             return;
     }
@@ -151,9 +153,9 @@ void LayoutTreeBuilderForText::createLayoutObject()
     LayoutObject* parentLayoutObject = this->parentLayoutObject();
     ComputedStyle& style = parentLayoutObject->mutableStyleRef();
 
-    ASSERT(m_node->textRendererIsNeeded(style, *parentLayoutObject));
+    ASSERT(m_node->textLayoutObjectIsNeeded(style, *parentLayoutObject));
 
-    LayoutText* newLayoutObject = m_node->createTextRenderer(style);
+    LayoutText* newLayoutObject = m_node->createTextLayoutObject(style);
     if (!parentLayoutObject->isChildAllowed(newLayoutObject, style)) {
         newLayoutObject->destroy();
         return;
@@ -161,7 +163,7 @@ void LayoutTreeBuilderForText::createLayoutObject()
 
     // Make sure the LayoutObject already knows it is going to be added to a LayoutFlowThread before we set the style
     // for the first time. Otherwise code using inLayoutFlowThread() in the styleWillChange and styleDidChange will fail.
-    newLayoutObject->setFlowThreadState(parentLayoutObject->flowThreadState());
+    newLayoutObject->setIsInsideFlowThread(parentLayoutObject->isInsideFlowThread());
 
     LayoutObject* nextLayoutObject = this->nextLayoutObject();
     m_node->setLayoutObject(newLayoutObject);

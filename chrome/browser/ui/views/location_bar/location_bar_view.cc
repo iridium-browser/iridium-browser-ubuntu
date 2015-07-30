@@ -20,7 +20,6 @@
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/location_bar_controller.h"
 #include "chrome/browser/extensions/tab_helper.h"
-#include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/instant_service.h"
 #include "chrome/browser/search/instant_service_factory.h"
@@ -58,6 +57,7 @@
 #include "chrome/browser/ui/views/translate/translate_bubble_view.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/favicon/content/content_favicon_driver.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/translate/core/browser/language_state.h"
@@ -74,7 +74,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
-#include "ui/compositor/paint_context.h"
+#include "ui/compositor/paint_recorder.h"
 #include "ui/events/event.h"
 #include "ui/gfx/animation/slide_animation.h"
 #include "ui/gfx/canvas.h"
@@ -142,6 +142,7 @@ LocationBarView::LocationBarView(Browser* browser,
       manage_passwords_icon_view_(NULL),
       translate_icon_view_(NULL),
       star_view_(NULL),
+      size_animation_(this),
       is_popup_mode_(is_popup_mode),
       show_focus_rect_(false),
       template_url_service_(NULL),
@@ -210,9 +211,10 @@ void LocationBarView::Init() {
       location_height - bubble_vertical_padding));
 
   const SkColor background_color =
-      GetColor(ToolbarModel::NONE, LocationBarView::BACKGROUND);
+      GetColor(ConnectionSecurityHelper::NONE, LocationBarView::BACKGROUND);
   ev_bubble_view_ = new EVBubbleView(
-      bubble_font_list, GetColor(ToolbarModel::EV_SECURE, SECURITY_TEXT),
+      bubble_font_list,
+      GetColor(ConnectionSecurityHelper::EV_SECURE, SECURITY_TEXT),
       background_color, this);
   ev_bubble_view_->set_drag_controller(this);
   AddChildView(ev_bubble_view_);
@@ -238,7 +240,7 @@ void LocationBarView::Init() {
   ime_inline_autocomplete_view_->SetVisible(false);
   AddChildView(ime_inline_autocomplete_view_);
 
-  const SkColor text_color = GetColor(ToolbarModel::NONE, TEXT);
+  const SkColor text_color = GetColor(ConnectionSecurityHelper::NONE, TEXT);
   selected_keyword_view_ = new SelectedKeywordView(
       bubble_font_list, text_color, background_color, profile());
   AddChildView(selected_keyword_view_);
@@ -247,13 +249,13 @@ void LocationBarView::Init() {
   suggested_text_view_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   suggested_text_view_->SetAutoColorReadabilityEnabled(false);
   suggested_text_view_->SetEnabledColor(GetColor(
-      ToolbarModel::NONE, LocationBarView::DEEMPHASIZED_TEXT));
+      ConnectionSecurityHelper::NONE, LocationBarView::DEEMPHASIZED_TEXT));
   suggested_text_view_->SetVisible(false);
   AddChildView(suggested_text_view_);
 
   keyword_hint_view_ = new KeywordHintView(
-      profile(), font_list,
-      GetColor(ToolbarModel::NONE, LocationBarView::DEEMPHASIZED_TEXT),
+      profile(), font_list, GetColor(ConnectionSecurityHelper::NONE,
+                                     LocationBarView::DEEMPHASIZED_TEXT),
       background_color);
   AddChildView(keyword_hint_view_);
 
@@ -304,14 +306,17 @@ void LocationBarView::Init() {
   // Initialize the location entry. We do this to avoid a black flash which is
   // visible when the location entry has just been initialized.
   Update(NULL);
+
+  size_animation_.Reset(1);
 }
 
 bool LocationBarView::IsInitialized() const {
   return omnibox_view_ != NULL;
 }
 
-SkColor LocationBarView::GetColor(ToolbarModel::SecurityLevel security_level,
-                                  ColorKind kind) const {
+SkColor LocationBarView::GetColor(
+    ConnectionSecurityHelper::SecurityLevel security_level,
+    ColorKind kind) const {
   const ui::NativeTheme* native_theme = GetNativeTheme();
   switch (kind) {
     case BACKGROUND:
@@ -335,17 +340,17 @@ SkColor LocationBarView::GetColor(ToolbarModel::SecurityLevel security_level,
     case SECURITY_TEXT: {
       SkColor color;
       switch (security_level) {
-        case ToolbarModel::EV_SECURE:
-        case ToolbarModel::SECURE:
+        case ConnectionSecurityHelper::EV_SECURE:
+        case ConnectionSecurityHelper::SECURE:
           color = SkColorSetRGB(7, 149, 0);
           break;
 
-        case ToolbarModel::SECURITY_WARNING:
-        case ToolbarModel::SECURITY_POLICY_WARNING:
+        case ConnectionSecurityHelper::SECURITY_WARNING:
+        case ConnectionSecurityHelper::SECURITY_POLICY_WARNING:
           return GetColor(security_level, DEEMPHASIZED_TEXT);
           break;
 
-        case ToolbarModel::SECURITY_ERROR:
+        case ConnectionSecurityHelper::SECURITY_ERROR:
           color = SkColorSetRGB(162, 0, 0);
           break;
 
@@ -526,6 +531,8 @@ gfx::Size LocationBarView::GetPreferredSize() const {
   gfx::Size min_size(border_painter_->GetMinimumSize());
   if (!IsInitialized())
     return min_size;
+
+  min_size.set_height(min_size.height() * size_animation_.GetCurrentValue());
 
   // Compute width of omnibox-leading content.
   const int horizontal_edge_thickness = GetHorizontalEdgeThickness();
@@ -993,8 +1000,8 @@ bool LocationBarView::ShouldShowKeywordBubble() const {
 }
 
 bool LocationBarView::ShouldShowEVBubble() const {
-  return
-      (GetToolbarModel()->GetSecurityLevel(false) == ToolbarModel::EV_SECURE);
+  return (GetToolbarModel()->GetSecurityLevel(false) ==
+          ConnectionSecurityHelper::EV_SECURE);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1063,6 +1070,18 @@ void LocationBarView::UpdateBookmarkStarVisibility() {
         edit_bookmarks_enabled_.GetValue() &&
         !IsBookmarkStarHiddenByExtension());
   }
+}
+
+void LocationBarView::UpdateLocationBarVisibility(bool visible, bool animate) {
+  if (!animate) {
+    size_animation_.Reset(visible ? 1 : 0);
+    return;
+  }
+
+  if (visible)
+    size_animation_.Show();
+  else
+    size_animation_.Hide();
 }
 
 bool LocationBarView::ShowPageActionPopup(
@@ -1203,7 +1222,7 @@ void LocationBarView::OnPaint(gfx::Canvas* canvas) {
   // the omnibox background, so we can't just blindly fill our entire bounds.
   gfx::Rect bounds(GetContentsBounds());
   bounds.Inset(GetHorizontalEdgeThickness(), vertical_edge_thickness());
-  SkColor color(GetColor(ToolbarModel::NONE, BACKGROUND));
+  SkColor color(GetColor(ConnectionSecurityHelper::NONE, BACKGROUND));
   if (is_popup_mode_) {
     canvas->FillRect(bounds, color);
   } else {
@@ -1221,21 +1240,22 @@ void LocationBarView::OnPaint(gfx::Canvas* canvas) {
 void LocationBarView::PaintChildren(const ui::PaintContext& context) {
   View::PaintChildren(context);
 
-  gfx::Canvas* canvas = context.canvas();
+  ui::PaintRecorder recorder(context);
 
   // For non-InstantExtendedAPI cases, if necessary, show focus rect. As we need
   // the focus rect to appear on top of children we paint here rather than
   // OnPaint().
   // Note: |Canvas::DrawFocusRect| paints a dashed rect with gray color.
   if (show_focus_rect_ && HasFocus())
-    canvas->DrawFocusRect(omnibox_view_->bounds());
+    recorder.canvas()->DrawFocusRect(omnibox_view_->bounds());
 
   // Maximized popup windows don't draw the horizontal edges.  We implement this
   // by simply expanding the paint area outside the view by the edge thickness.
   gfx::Rect border_rect(GetContentsBounds());
   if (is_popup_mode_ && (GetHorizontalEdgeThickness() == 0))
     border_rect.Inset(-kPopupEdgeThickness, 0);
-  views::Painter::PaintPainterAt(canvas, border_painter_.get(), border_rect);
+  views::Painter::PaintPainterAt(recorder.canvas(), border_painter_.get(),
+                                 border_rect);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1257,9 +1277,9 @@ void LocationBarView::WriteDragDataForView(views::View* sender,
             ui::DragDropTypes::DRAG_NONE);
 
   WebContents* web_contents = GetWebContents();
-  FaviconTabHelper* favicon_tab_helper =
-      FaviconTabHelper::FromWebContents(web_contents);
-  gfx::ImageSkia favicon = favicon_tab_helper->GetFavicon().AsImageSkia();
+  favicon::FaviconDriver* favicon_driver =
+      favicon::ContentFaviconDriver::FromWebContents(web_contents);
+  gfx::ImageSkia favicon = favicon_driver->GetFavicon().AsImageSkia();
   button_drag_utils::SetURLAndDragImage(web_contents->GetURL(),
                                         web_contents->GetTitle(),
                                         favicon,
@@ -1282,6 +1302,16 @@ bool LocationBarView::CanStartDragForView(View* sender,
                                           const gfx::Point& press_pt,
                                           const gfx::Point& p) {
   return true;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// LocationBarView, private gfx::AnimationDelegate implementation:
+void LocationBarView::AnimationProgressed(const gfx::Animation* animation) {
+  browser_->window()->ToolbarSizeChanged(true);
+}
+
+void LocationBarView::AnimationEnded(const gfx::Animation* animation) {
+  browser_->window()->ToolbarSizeChanged(false);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

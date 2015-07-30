@@ -56,10 +56,10 @@ namespace {
 // diagnostic page.
 #if defined(GOOGLE_CHROME_BUILD)
 const char kSbDiagnosticUrl[] =
-    "http://safebrowsing.clients.google.com/safebrowsing/diagnostic?site=%s&client=googlechrome";
+    "https://www.google.com/safebrowsing/diagnostic?site=%s&client=googlechrome";
 #else
 const char kSbDiagnosticUrl[] =
-    "http://safebrowsing.clients.google.com/safebrowsing/diagnostic?site=%s&client=chromium";
+    "https://www.google.com/safebrowsing/diagnostic?site=%s&client=chromium";
 #endif
 
 // URL for malware and phishing, V2.
@@ -159,7 +159,7 @@ SafeBrowsingBlockingPage::SafeBrowsingBlockingPage(
   // This must be done after calculating |interstitial_reason_| above.
   // Use same prefix for UMA as for Rappor.
   set_metrics_helper(new SecurityInterstitialMetricsHelper(
-      web_contents, request_url(), GetMetricPrefix(), GetMetricPrefix(),
+      web_contents, request_url(), GetMetricPrefix(), GetRapporPrefix(),
       SecurityInterstitialMetricsHelper::REPORT_RAPPOR,
       GetSamplingEventName()));
   metrics_helper()->RecordUserDecision(SecurityInterstitialMetricsHelper::SHOW);
@@ -192,7 +192,8 @@ SafeBrowsingBlockingPage::SafeBrowsingBlockingPage(
 
 bool SafeBrowsingBlockingPage::CanShowMalwareDetailsOption() {
   return (!web_contents()->GetBrowserContext()->IsOffTheRecord() &&
-          web_contents()->GetURL().SchemeIs(url::kHttpScheme));
+          web_contents()->GetURL().SchemeIs(url::kHttpScheme) &&
+          IsPrefEnabled(prefs::kSafeBrowsingExtendedReportingOptInAllowed));
 }
 
 SafeBrowsingBlockingPage::~SafeBrowsingBlockingPage() {
@@ -280,9 +281,7 @@ void SafeBrowsingBlockingPage::CommandReceived(const std::string& page_cmd) {
     }
     case CMD_OPEN_DIAGNOSTIC: {
       // User wants to see why this page is blocked.
-      // TODO(felt): element_index will always be 0. See crbug.com/464732
-      size_t element_index = 0;
-      const UnsafeResource& unsafe_resource = unsafe_resources_[element_index];
+      const UnsafeResource& unsafe_resource = unsafe_resources_[0];
       std::string bad_url_spec = unsafe_resource.url.spec();
       metrics_helper()->RecordUserInteraction(
           SecurityInterstitialMetricsHelper::SHOW_DIAGNOSTIC);
@@ -402,7 +401,8 @@ void SafeBrowsingBlockingPage::FinishMalwareDetails(int64 delay_ms) {
   DCHECK_EQ(interstitial_reason_, SB_REASON_MALWARE);
 
   const bool enabled =
-      IsPrefEnabled(prefs::kSafeBrowsingExtendedReportingEnabled);
+      IsPrefEnabled(prefs::kSafeBrowsingExtendedReportingEnabled) &&
+      IsPrefEnabled(prefs::kSafeBrowsingExtendedReportingOptInAllowed);
   if (!enabled)
     return;
 
@@ -493,6 +493,20 @@ bool SafeBrowsingBlockingPage::IsMainPageLoadBlocked(
 }
 
 std::string SafeBrowsingBlockingPage::GetMetricPrefix() const {
+  bool primary_subresource = unsafe_resources_[0].is_subresource;
+  switch (interstitial_reason_) {
+    case SB_REASON_MALWARE:
+      return primary_subresource ? "malware_subresource" : "malware";
+    case SB_REASON_HARMFUL:
+      return primary_subresource ? "harmful_subresource" : "harmful";
+    case SB_REASON_PHISHING:
+      return primary_subresource ? "phishing_subresource" : "phishing";
+  }
+  NOTREACHED();
+  return std::string();
+}
+
+std::string SafeBrowsingBlockingPage::GetRapporPrefix() const {
   switch (interstitial_reason_) {
     case SB_REASON_MALWARE:
       return "malware";

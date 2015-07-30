@@ -363,7 +363,7 @@ Runtime._assert = function(value, message)
 {
     if (value)
         return;
-    Runtime._originalAssert.call(Runtime._console, value, message);
+    Runtime._originalAssert.call(Runtime._console, value, message + " " + new Error().stack);
 }
 
 Runtime.prototype = {
@@ -654,6 +654,19 @@ Runtime.Module.prototype = {
     },
 
     /**
+     * @param {string} name
+     * @return {string}
+     */
+    resource: function(name)
+    {
+        var fullName = this._name + "/" + name;
+        var content = Runtime.cachedResources[fullName];
+        if (!content)
+            throw new Error(fullName + " not preloaded. Check module.json");
+        return content;
+    },
+
+    /**
      * @return {!Promise.<undefined>}
      */
     _loadPromise: function()
@@ -673,7 +686,7 @@ Runtime.Module.prototype = {
             dependencyPromises.push(this._manager._modulesMap[dependencies[i]]._loadPromise());
 
         this._pendingLoadPromise = Promise.all(dependencyPromises)
-            .then(this._loadStylesheets.bind(this))
+            .then(this._loadResources.bind(this))
             .then(this._loadScripts.bind(this))
             .then(markAsLoaded.bind(this));
 
@@ -693,15 +706,15 @@ Runtime.Module.prototype = {
      * @return {!Promise.<undefined>}
      * @this {Runtime.Module}
      */
-    _loadStylesheets: function()
+    _loadResources: function()
     {
-        var stylesheets = this._descriptor["stylesheets"];
-        if (!stylesheets)
+        var resources = this._descriptor["resources"];
+        if (!resources)
             return Promise.resolve();
         var promises = [];
-        for (var i = 0; i < stylesheets.length; ++i) {
-            var url = this._modularizeURL(stylesheets[i]);
-            promises.push(loadResourcePromise(url).then(cacheStylesheet.bind(this, url), cacheStylesheet.bind(this, url, undefined)));
+        for (var i = 0; i < resources.length; ++i) {
+            var url = this._modularizeURL(resources[i]);
+            promises.push(loadResourcePromise(url).then(cacheResource.bind(this, url), cacheResource.bind(this, url, undefined)));
         }
         return Promise.all(promises).then(undefined);
 
@@ -709,10 +722,10 @@ Runtime.Module.prototype = {
          * @param {string} path
          * @param {string=} content
          */
-        function cacheStylesheet(path, content)
+        function cacheResource(path, content)
         {
             if (!content) {
-                console.error("Failed to load stylesheet: " + path);
+                console.error("Failed to load resource: " + path);
                 return;
             }
             var sourceURL = window.location.href;
@@ -732,7 +745,8 @@ Runtime.Module.prototype = {
             return Promise.resolve();
 
         if (Runtime.isReleaseMode()) {
-            var base = this._descriptor.remote && Runtime._remoteBase || undefined;
+            var useRemote = this._descriptor.remote && Runtime.experiments.isEnabled("remoteModules");
+            var base = useRemote && Runtime._remoteBase || undefined;
             return loadScriptsPromise([this._name + "_module.js"], base);
         }
 
@@ -861,6 +875,15 @@ Runtime.Extension.prototype = {
                 return Promise.reject("Could not instantiate: " + className);
             return result;
         }
+    },
+
+    /**
+     * @param {string} platform
+     * @return {string}
+     */
+    title: function(platform)
+    {
+        return this._descriptor["title-" + platform] || this._descriptor["title"];
     }
 }
 
@@ -1033,23 +1056,12 @@ Runtime.Experiment.prototype = {
         var name = pair.shift();
         Runtime._queryParamsObject[name] = pair.join("=");
     }
-
-    // Patch settings from the URL param (for tests).
-    var settingsParam = Runtime.queryParam("settings");
-    if (settingsParam) {
-        try {
-            var settings = JSON.parse(window.decodeURI(settingsParam));
-            for (var key in settings)
-                window.localStorage[key] = settings[key];
-        } catch(e) {
-            // Ignore malformed settings.
-        }
-    }
 })();}
 
 
 // This must be constructed after the query parameters have been parsed.
 Runtime.experiments = new Runtime.ExperimentsSupport();
+Runtime.experiments.register("remoteModules", "Remote Modules", true);
 
 /**
  * @type {?string}

@@ -9,7 +9,6 @@ from __future__ import print_function
 import cPickle
 import fnmatch
 import glob
-import logging
 import os
 import re
 import shutil
@@ -20,6 +19,7 @@ from chromite.cbuildbot import constants
 from chromite.cbuildbot import repository
 from chromite.lib import cidb
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import git
 from chromite.lib import gs
 from chromite.lib import osutils
@@ -102,11 +102,12 @@ def _PushGitChanges(git_repo, message, dry_run=True, push_to=None):
     push_to: A git.RemoteRef object specifying the remote branch to push to.
       Defaults to the tracking branch of the current branch.
   """
-  push_branch = None
   if push_to is None:
-    remote, push_branch = git.GetTrackingBranch(
+    # TODO(akeshet): Clean up git.GetTrackingBranch to always or never return a
+    # tuple.
+    # pylint: disable=unpacking-non-sequence
+    push_to = git.GetTrackingBranch(
         git_repo, for_checkout=False, for_push=True)
-    push_to = git.RemoteRef(remote, push_branch)
 
   git.RunGit(git_repo, ['add', '-A'])
 
@@ -577,7 +578,7 @@ class BuildSpecsManager(object):
       version = version_info.IncrementVersion()
       version_info.UpdateVersionFile(message, dry_run=self.dry_run)
       assert version != self.latest
-      cros_build_lib.Info('Incremented version number to  %s', version)
+      logging.info('Incremented version number to  %s', version)
 
     return version
 
@@ -668,12 +669,11 @@ class BuildSpecsManager(object):
 
     Args:
       master_build_id: Master build id to check.
-      builders_array: A list of the names of the builders to check.
+      builders_array: A list of the names of build configs to check.
       timeout: Number of seconds to wait for the results.
 
     Returns:
-      A build-names->status dictionary of build statuses.
-
+      A build_config name-> status dictionary of build statuses.
     """
     builders_completed = set()
 
@@ -681,13 +681,13 @@ class BuildSpecsManager(object):
       """Helper function that iterates through current statuses."""
       status_dict = self.GetSlaveStatusesFromCIDB(master_build_id)
       for builder in set(builders_array) - set(status_dict.keys()):
-        logging.warn('No status found for builder %s.', builder)
+        logging.warn('No status found for build config %s.', builder)
 
       latest_completed = set(
           [b for b, s in status_dict.iteritems() if s in
            constants.BUILDER_COMPLETED_STATUSES and b in builders_array])
       for builder in sorted(latest_completed - builders_completed):
-        logging.info('Builder %s completed with status "%s".',
+        logging.info('Build config %s completed with status "%s".',
                      builder, status_dict[builder])
       builders_completed.update(latest_completed)
 

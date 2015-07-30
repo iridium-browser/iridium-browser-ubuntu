@@ -5,11 +5,13 @@
 #include "content/browser/notifications/notification_event_dispatcher_impl.h"
 
 #include "base/callback.h"
+#include "content/browser/notifications/platform_notification_context_impl.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "content/browser/service_worker/service_worker_registration.h"
 #include "content/browser/service_worker/service_worker_storage.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_database_data.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/platform_notification_data.h"
 
@@ -49,6 +51,8 @@ void NotificationClickEventFinished(
     case SERVICE_WORKER_ERROR_STATE:
     case SERVICE_WORKER_ERROR_TIMEOUT:
     case SERVICE_WORKER_ERROR_SCRIPT_EVALUATE_FAILED:
+    case SERVICE_WORKER_ERROR_DISK_CACHE:
+    case SERVICE_WORKER_ERROR_REDUNDANT:
     case SERVICE_WORKER_ERROR_MAX_VALUE:
       status = PERSISTENT_NOTIFICATION_STATUS_SERVICE_WORKER_ERROR;
       break;
@@ -62,8 +66,7 @@ void NotificationClickEventFinished(
 // Dispatches the notificationclick on |service_worker_registration| if the
 // registration was available. Must be called on the IO thread.
 void DispatchNotificationClickEventOnRegistration(
-    const std::string& notification_id,
-    const PlatformNotificationData& notification_data,
+    const NotificationDatabaseData& notification_database_data,
     const NotificationClickDispatchCompleteCallback& dispatch_complete_callback,
     ServiceWorkerStatusCode service_worker_status,
     const scoped_refptr<ServiceWorkerRegistration>&
@@ -74,10 +77,12 @@ void DispatchNotificationClickEventOnRegistration(
         base::Bind(&NotificationClickEventFinished,
                    dispatch_complete_callback,
                    service_worker_registration);
-    service_worker_registration->active_version()
-        ->DispatchNotificationClickEvent(dispatch_event_callback,
-                                         notification_id,
-                                         notification_data);
+
+    service_worker_registration->active_version()->
+        DispatchNotificationClickEvent(
+            dispatch_event_callback,
+            notification_database_data.notification_id,
+            notification_database_data.notification_data);
     return;
   }
 
@@ -100,6 +105,8 @@ void DispatchNotificationClickEventOnRegistration(
     case SERVICE_WORKER_ERROR_STATE:
     case SERVICE_WORKER_ERROR_TIMEOUT:
     case SERVICE_WORKER_ERROR_SCRIPT_EVALUATE_FAILED:
+    case SERVICE_WORKER_ERROR_DISK_CACHE:
+    case SERVICE_WORKER_ERROR_REDUNDANT:
     case SERVICE_WORKER_ERROR_MAX_VALUE:
       status = PERSISTENT_NOTIFICATION_STATUS_SERVICE_WORKER_ERROR;
       break;
@@ -117,19 +124,42 @@ void DispatchNotificationClickEventOnRegistration(
 // |service_worker_registration_id|. Must be called on the IO thread.
 void FindServiceWorkerRegistration(
     const GURL& origin,
-    int64 service_worker_registration_id,
-    const std::string& notification_id,
-    const PlatformNotificationData& notification_data,
     const NotificationClickDispatchCompleteCallback& dispatch_complete_callback,
-    scoped_refptr<ServiceWorkerContextWrapper> service_worker_context) {
+    scoped_refptr<ServiceWorkerContextWrapper> service_worker_context,
+    bool success,
+    const NotificationDatabaseData& notification_database_data) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  service_worker_context->context()->storage()->FindRegistrationForId(
-      service_worker_registration_id,
+  if (!success) {
+    BrowserThread::PostTask(
+        BrowserThread::UI,
+        FROM_HERE,
+        base::Bind(dispatch_complete_callback,
+                   PERSISTENT_NOTIFICATION_STATUS_DATABASE_ERROR));
+    return;
+  }
+
+  service_worker_context->FindRegistrationForId(
+      notification_database_data.service_worker_registration_id,
       origin,
       base::Bind(&DispatchNotificationClickEventOnRegistration,
-                 notification_id,
-                 notification_data,
+                 notification_database_data,
                  dispatch_complete_callback));
+}
+
+// Reads the data associated with the |persistent_notification_id| belonging to
+// |origin| from the notification context.
+void ReadNotificationDatabaseData(
+    int64_t persistent_notification_id,
+    const GURL& origin,
+    const NotificationClickDispatchCompleteCallback& dispatch_complete_callback,
+    scoped_refptr<ServiceWorkerContextWrapper> service_worker_context,
+    scoped_refptr<PlatformNotificationContextImpl> notification_context) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  notification_context->ReadNotificationData(
+      persistent_notification_id,
+      origin,
+      base::Bind(&FindServiceWorkerRegistration,
+                 origin, dispatch_complete_callback, service_worker_context));
 }
 
 }  // namespace
@@ -151,29 +181,33 @@ NotificationEventDispatcherImpl::~NotificationEventDispatcherImpl() {}
 
 void NotificationEventDispatcherImpl::DispatchNotificationClickEvent(
     BrowserContext* browser_context,
+    int64_t persistent_notification_id,
     const GURL& origin,
-    int64 service_worker_registration_id,
-    const std::string& notification_id,
-    const PlatformNotificationData& notification_data,
     const NotificationClickDispatchCompleteCallback&
         dispatch_complete_callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK_GT(persistent_notification_id, 0);
+  DCHECK(origin.is_valid());
 
   StoragePartition* partition =
       BrowserContext::GetStoragePartitionForSite(browser_context, origin);
+
   scoped_refptr<ServiceWorkerContextWrapper> service_worker_context =
       static_cast<ServiceWorkerContextWrapper*>(
           partition->GetServiceWorkerContext());
+  scoped_refptr<PlatformNotificationContextImpl> notification_context =
+      static_cast<PlatformNotificationContextImpl*>(
+          partition->GetPlatformNotificationContext());
+
   BrowserThread::PostTask(
       BrowserThread::IO,
       FROM_HERE,
-      base::Bind(&FindServiceWorkerRegistration,
+      base::Bind(&ReadNotificationDatabaseData,
+                 persistent_notification_id,
                  origin,
-                 service_worker_registration_id,
-                 notification_id,
-                 notification_data,
                  dispatch_complete_callback,
-                 service_worker_context));
+                 service_worker_context,
+                 notification_context));
 }
 
 }  // namespace content

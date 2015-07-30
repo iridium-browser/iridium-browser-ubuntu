@@ -359,6 +359,11 @@ bool PeerConnection::Initialize(
     portallocator_flags &= ~(cricket::PORTALLOCATOR_ENABLE_IPV6);
   }
 
+  if (configuration.tcp_candidate_policy == kTcpCandidatePolicyDisabled) {
+    portallocator_flags |= cricket::PORTALLOCATOR_DISABLE_TCP;
+    LOG(LS_INFO) << "TCP candidates are disabled.";
+  }
+
   port_allocator_->set_flags(portallocator_flags);
   // No step delay is used while allocating ports.
   port_allocator_->set_step_delay(cricket::kMinimumStepDelay);
@@ -377,9 +382,7 @@ bool PeerConnection::Initialize(
 
   // Initialize the WebRtcSession. It creates transport channels etc.
   if (!session_->Initialize(factory_->options(), constraints,
-                            dtls_identity_service,
-                            configuration.type,
-                            configuration.bundle_policy))
+                            dtls_identity_service, configuration))
     return false;
 
   // Register PeerConnection as receiver of local ice candidates.

@@ -27,9 +27,9 @@
 #include "content/browser/renderer_host/event_with_latency_info.h"
 #include "content/browser/renderer_host/input/input_ack_handler.h"
 #include "content/browser/renderer_host/input/input_router_client.h"
+#include "content/browser/renderer_host/input/render_widget_host_latency_tracker.h"
 #include "content/browser/renderer_host/input/synthetic_gesture.h"
 #include "content/browser/renderer_host/input/touch_emulator_client.h"
-#include "content/browser/renderer_host/render_widget_host_latency_tracker.h"
 #include "content/common/input/input_event_ack_state.h"
 #include "content/common/input/synthetic_gesture_packet.h"
 #include "content/common/view_message_enums.h"
@@ -37,6 +37,7 @@
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/common/page_zoom.h"
 #include "ipc/ipc_listener.h"
+#include "third_party/WebKit/public/platform/WebDisplayMode.h"
 #include "ui/base/ime/text_input_mode.h"
 #include "ui/base/ime/text_input_type.h"
 #include "ui/events/gesture_detection/gesture_provider_config_helper.h"
@@ -137,7 +138,7 @@ class CONTENT_EXPORT RenderWidgetHostImpl
   void CopyFromBackingStore(const gfx::Rect& src_rect,
                             const gfx::Size& accelerated_dst_size,
                             ReadbackRequestCallback& callback,
-                            const SkColorType color_type) override;
+                            const SkColorType preferred_color_type) override;
   bool CanCopyFromBackingStore() override;
 #if defined(OS_ANDROID)
   void LockBackingStore() override;
@@ -162,8 +163,6 @@ class CONTENT_EXPORT RenderWidgetHostImpl
   void RemoveMouseEventCallback(const MouseEventCallback& callback) override;
   void GetWebScreenInfo(blink::WebScreenInfo* result) override;
 
-  SkColorType PreferredReadbackFormat() override;
-
   // Forces redraw in the renderer and when the update reaches the browser
   // grabs snapshot from the compositor. Returns PNG-encoded snapshot.
   void GetSnapshotFromBrowser(
@@ -173,11 +172,6 @@ class CONTENT_EXPORT RenderWidgetHostImpl
 
   // Notification that the screen info has changed.
   void NotifyScreenInfoChanged();
-
-  // Invalidates the cached screen info so that next resize request
-  // will carry the up to date screen info. Unlike
-  // |NotifyScreenInfoChanged|, this doesn't send a message to the renderer.
-  void InvalidateScreenInfo();
 
   // Sets the View of this RenderWidgetHost.
   void SetView(RenderWidgetHostViewBase* view);
@@ -199,9 +193,6 @@ class CONTENT_EXPORT RenderWidgetHostImpl
   void set_owned_by_render_frame_host(bool owned_by_rfh) {
     owned_by_render_frame_host_ = owned_by_rfh;
   }
-
-  // Called by RenderFrameHost before destroying this object.
-  void Cleanup();
 
   // Tells the renderer to die and then calls Destroy().
   virtual void Shutdown();
@@ -539,8 +530,11 @@ class CONTENT_EXPORT RenderWidgetHostImpl
 
   bool IsMouseLocked() const;
 
-  // RenderViewHost overrides this method to report when in fullscreen mode.
-  virtual bool IsFullscreen() const;
+  // RenderViewHost overrides this method to report whether tab-initiated
+  // fullscreen was granted.
+  virtual bool IsFullscreenGranted() const;
+
+  virtual blink::WebDisplayMode GetDisplayMode() const;
 
   // Indicates if the render widget host should track the render widget's size
   // as opposed to visa versa.
@@ -564,6 +558,12 @@ class CONTENT_EXPORT RenderWidgetHostImpl
     return --in_flight_event_count_;
   }
 
+  void set_renderer_initialized(bool renderer_initialized) {
+    renderer_initialized_ = renderer_initialized;
+  }
+
+  bool renderer_initialized() const { return renderer_initialized_; }
+
   // The View associated with the RenderViewHost. The lifetime of this object
   // is associated with the lifetime of the Render process. If the Renderer
   // crashes, its View is destroyed and this pointer becomes NULL, even though
@@ -576,11 +576,6 @@ class CONTENT_EXPORT RenderWidgetHostImpl
   // TODO(ccameron): Fix this.
   // http://crbug.com/404828
   base::WeakPtr<RenderWidgetHostViewBase> view_weak_;
-
-  // true if a renderer has once been valid. We use this flag to display a sad
-  // tab only when we lose our renderer and not if a paint occurs during
-  // initialization.
-  bool renderer_initialized_;
 
   // This value indicates how long to wait before we consider a renderer hung.
   base::TimeDelta hung_renderer_delay_;
@@ -690,6 +685,11 @@ class CONTENT_EXPORT RenderWidgetHostImpl
       int snapshot_id,
       scoped_refptr<base::RefCountedBytes> png_data);
 
+  // true if a renderer has once been valid. We use this flag to display a sad
+  // tab only when we lose our renderer and not if a paint occurs during
+  // initialization.
+  bool renderer_initialized_;
+
   // Our delegate, which wants to know mainly about keyboard events.
   // It will remain non-NULL until DetachDelegate() is called.
   RenderWidgetHostDelegate* delegate_;
@@ -717,14 +717,6 @@ class CONTENT_EXPORT RenderWidgetHostImpl
 
   // True when waiting for RESIZE_ACK.
   bool resize_ack_pending_;
-
-  // Cached copy of the screen info so that it doesn't need to be updated every
-  // time the window is resized.
-  scoped_ptr<blink::WebScreenInfo> screen_info_;
-
-  // Set if screen_info_ may have changed and should be recomputed and force a
-  // resize message.
-  bool screen_info_out_of_date_;
 
   // The current size of the RenderWidget.
   gfx::Size current_size_;

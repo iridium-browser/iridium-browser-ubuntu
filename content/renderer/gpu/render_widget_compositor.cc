@@ -30,17 +30,18 @@
 #include "cc/scheduler/begin_frame_source.h"
 #include "cc/trees/latency_info_swap_promise_monitor.h"
 #include "cc/trees/layer_tree_host.h"
+#include "components/scheduler/renderer/renderer_scheduler.h"
 #include "content/common/content_switches_internal.h"
 #include "content/common/gpu/client/context_provider_command_buffer.h"
 #include "content/public/common/content_switches.h"
 #include "content/renderer/input/input_handler_manager.h"
-#include "content/renderer/scheduler/renderer_scheduler.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "third_party/WebKit/public/platform/WebCompositeAndReadbackAsyncCallback.h"
-#include "third_party/WebKit/public/platform/WebSelectionBound.h"
+#include "third_party/WebKit/public/platform/WebLayoutAndPaintAsyncCallback.h"
 #include "third_party/WebKit/public/platform/WebSize.h"
 #include "third_party/WebKit/public/web/WebKit.h"
 #include "third_party/WebKit/public/web/WebRuntimeFeatures.h"
+#include "third_party/WebKit/public/web/WebSelection.h"
 #include "third_party/WebKit/public/web/WebWidget.h"
 #include "ui/gfx/frame_time.h"
 #include "ui/gl/gl_switches.h"
@@ -62,7 +63,7 @@ class Layer;
 using blink::WebBeginFrameArgs;
 using blink::WebFloatPoint;
 using blink::WebRect;
-using blink::WebSelectionBound;
+using blink::WebSelection;
 using blink::WebSize;
 using blink::WebTopControlsState;
 
@@ -88,25 +89,39 @@ bool GetSwitchValueAsInt(const base::CommandLine& command_line,
 }
 
 cc::LayerSelectionBound ConvertWebSelectionBound(
-    const WebSelectionBound& web_bound) {
-  DCHECK(web_bound.layerId);
-
+    const WebSelection& web_selection,
+    bool is_start) {
   cc::LayerSelectionBound cc_bound;
-  switch (web_bound.type) {
-    case blink::WebSelectionBound::Caret:
-      cc_bound.type = cc::SELECTION_BOUND_CENTER;
-      break;
-    case blink::WebSelectionBound::SelectionLeft:
-      cc_bound.type = cc::SELECTION_BOUND_LEFT;
-      break;
-    case blink::WebSelectionBound::SelectionRight:
-      cc_bound.type = cc::SELECTION_BOUND_RIGHT;
-      break;
+  if (web_selection.isNone())
+    return cc_bound;
+
+  const blink::WebSelectionBound& web_bound =
+      is_start ? web_selection.start() : web_selection.end();
+  DCHECK(web_bound.layerId);
+  cc_bound.type = cc::SELECTION_BOUND_CENTER;
+  if (web_selection.isRange()) {
+    if (is_start) {
+      cc_bound.type = web_bound.isTextDirectionRTL ? cc::SELECTION_BOUND_RIGHT
+                                                   : cc::SELECTION_BOUND_LEFT;
+    } else {
+      cc_bound.type = web_bound.isTextDirectionRTL ? cc::SELECTION_BOUND_LEFT
+                                                   : cc::SELECTION_BOUND_RIGHT;
+    }
   }
   cc_bound.layer_id = web_bound.layerId;
   cc_bound.edge_top = gfx::Point(web_bound.edgeTopInLayer);
   cc_bound.edge_bottom = gfx::Point(web_bound.edgeBottomInLayer);
   return cc_bound;
+}
+
+cc::LayerSelection ConvertWebSelection(const WebSelection& web_selection) {
+  cc::LayerSelection cc_selection;
+  cc_selection.start = ConvertWebSelectionBound(web_selection, true);
+  cc_selection.end = ConvertWebSelectionBound(web_selection, false);
+  cc_selection.is_editable = web_selection.isEditable();
+  cc_selection.is_empty_text_form_control =
+      web_selection.isEmptyTextFormControl();
+  return cc_selection;
 }
 
 gfx::Size CalculateDefaultTileSize(RenderWidget* widget) {
@@ -193,6 +208,7 @@ RenderWidgetCompositor::RenderWidgetCompositor(
     : num_failed_recreate_attempts_(0),
       widget_(widget),
       compositor_deps_(compositor_deps),
+      layout_and_paint_async_callback_(nullptr),
       weak_factory_(this) {
 }
 
@@ -207,8 +223,6 @@ void RenderWidgetCompositor::Initialize() {
 
   settings.throttle_frame_production =
       !cmd->HasSwitch(switches::kDisableGpuVsync);
-  settings.use_external_begin_frame_source =
-      cmd->HasSwitch(switches::kEnableBeginFrameScheduling);
   settings.main_frame_before_activation_enabled =
       cmd->HasSwitch(cc::switches::kEnableMainFrameBeforeActivation) &&
       !cmd->HasSwitch(cc::switches::kDisableMainFrameBeforeActivation);
@@ -297,7 +311,8 @@ void RenderWidgetCompositor::Initialize() {
   settings.use_pinch_virtual_viewport =
       cmd->HasSwitch(cc::switches::kEnablePinchVirtualViewport);
   settings.verify_property_trees =
-      cmd->HasSwitch(cc::switches::kEnablePropertyTreeVerification);
+      cmd->HasSwitch(cc::switches::kEnablePropertyTreeVerification) &&
+      settings.impl_side_painting;
   settings.renderer_settings.allow_antialiasing &=
       !cmd->HasSwitch(cc::switches::kDisableCompositedAntialiasing);
   settings.single_thread_proxy_scheduler =
@@ -413,14 +428,13 @@ void RenderWidgetCompositor::Initialize() {
   // TODO(danakj): Only do this on low end devices.
   settings.create_low_res_tiling = true;
 
+  settings.use_external_begin_frame_source = true;
+
 #elif !defined(OS_MACOSX)
   if (ui::IsOverlayScrollbarEnabled()) {
     settings.scrollbar_animator = cc::LayerTreeSettings::THINNING;
     settings.solid_color_scrollbar_color = SkColorSetARGB(128, 128, 128, 128);
-  } else if (cmd->HasSwitch(cc::switches::kEnablePinchVirtualViewport)) {
-    // use_pinch_zoom_scrollbars is only true on desktop when non-overlay
-    // scrollbars are in use.
-    settings.use_pinch_zoom_scrollbars = true;
+  } else if (settings.use_pinch_virtual_viewport) {
     settings.scrollbar_animator = cc::LayerTreeSettings::LINEAR_FADE;
     settings.solid_color_scrollbar_color = SkColorSetARGB(128, 128, 128, 128);
   }
@@ -438,6 +452,14 @@ void RenderWidgetCompositor::Initialize() {
     settings.create_low_res_tiling = true;
   if (cmd->HasSwitch(switches::kDisableLowResTiling))
     settings.create_low_res_tiling = false;
+  if (cmd->HasSwitch(switches::kEnableBeginFrameScheduling))
+    settings.use_external_begin_frame_source = true;
+
+  if (widget_->for_oopif()) {
+    // TODO(simonhong): Apply BeginFrame scheduling for OOPIF.
+    // See crbug.com/471411.
+    settings.use_external_begin_frame_source = false;
+  }
 
   scoped_refptr<base::SingleThreadTaskRunner> compositor_thread_task_runner =
       compositor_deps_->GetCompositorImplThreadTaskRunner();
@@ -457,16 +479,19 @@ void RenderWidgetCompositor::Initialize() {
         compositor_deps_->CreateExternalBeginFrameSource(widget_->routing_id());
   }
 
+  cc::LayerTreeHost::InitParams params;
+  params.client = this;
+  params.shared_bitmap_manager = shared_bitmap_manager;
+  params.gpu_memory_buffer_manager = gpu_memory_buffer_manager;
+  params.settings = &settings;
+  params.task_graph_runner = task_graph_runner;
+  params.main_task_runner = main_thread_compositor_task_runner;
+  params.external_begin_frame_source = external_begin_frame_source.Pass();
   if (compositor_thread_task_runner.get()) {
     layer_tree_host_ = cc::LayerTreeHost::CreateThreaded(
-        this, shared_bitmap_manager, gpu_memory_buffer_manager,
-        task_graph_runner, settings, main_thread_compositor_task_runner,
-        compositor_thread_task_runner, external_begin_frame_source.Pass());
+        compositor_thread_task_runner, &params);
   } else {
-    layer_tree_host_ = cc::LayerTreeHost::CreateSingleThreaded(
-        this, this, shared_bitmap_manager, gpu_memory_buffer_manager,
-        task_graph_runner, settings, main_thread_compositor_task_runner,
-        external_begin_frame_source.Pass());
+    layer_tree_host_ = cc::LayerTreeHost::CreateSingleThreaded(this, &params);
   }
   DCHECK(layer_tree_host_);
 }
@@ -512,10 +537,6 @@ RenderWidgetCompositor::CreateLatencyInfoSwapPromiseMonitor(
 void RenderWidgetCompositor::QueueSwapPromise(
     scoped_ptr<cc::SwapPromise> swap_promise) {
   layer_tree_host_->QueueSwapPromise(swap_promise.Pass());
-}
-
-int RenderWidgetCompositor::GetLayerTreeId() const {
-  return layer_tree_host_->id();
 }
 
 int RenderWidgetCompositor::GetSourceFrameNumber() const {
@@ -681,15 +702,13 @@ void RenderWidgetCompositor::clearViewportLayers() {
 }
 
 void RenderWidgetCompositor::registerSelection(
-    const blink::WebSelectionBound& start,
-    const blink::WebSelectionBound& end) {
-  layer_tree_host_->RegisterSelection(ConvertWebSelectionBound(start),
-                                      ConvertWebSelectionBound(end));
+    const blink::WebSelection& selection) {
+  layer_tree_host_->RegisterSelection(ConvertWebSelection(selection));
 }
 
 void RenderWidgetCompositor::clearSelection() {
-  cc::LayerSelectionBound empty_selection;
-  layer_tree_host_->RegisterSelection(empty_selection, empty_selection);
+  cc::LayerSelection empty_selection;
+  layer_tree_host_->RegisterSelection(empty_selection);
 }
 
 void CompositeAndReadbackAsyncCallback(
@@ -703,22 +722,43 @@ void CompositeAndReadbackAsyncCallback(
   }
 }
 
+void RenderWidgetCompositor::layoutAndPaintAsync(
+    blink::WebLayoutAndPaintAsyncCallback* callback) {
+  DCHECK(!temporary_copy_output_request_ && !layout_and_paint_async_callback_);
+  layout_and_paint_async_callback_ = callback;
+  ScheduleCommit();
+}
+
 void RenderWidgetCompositor::compositeAndReadbackAsync(
     blink::WebCompositeAndReadbackAsyncCallback* callback) {
-  DCHECK(!temporary_copy_output_request_);
+  DCHECK(!temporary_copy_output_request_ && !layout_and_paint_async_callback_);
   temporary_copy_output_request_ =
       cc::CopyOutputRequest::CreateBitmapRequest(
           base::Bind(&CompositeAndReadbackAsyncCallback, callback));
   // Force a commit to happen. The temporary copy output request will
   // be installed after layout which will happen as a part of the commit, for
   // widgets that delay the creation of their output surface.
-  bool threaded = !!compositor_deps_->GetCompositorImplThreadTaskRunner().get();
-  if (!threaded &&
-      !layer_tree_host_->settings().single_thread_proxy_scheduler) {
-    layer_tree_host_->Composite(gfx::FrameTime::Now());
+  ScheduleCommit();
+}
+
+bool RenderWidgetCompositor::CommitIsSynchronous() const {
+  return !compositor_deps_->GetCompositorImplThreadTaskRunner().get() &&
+         !layer_tree_host_->settings().single_thread_proxy_scheduler;
+}
+
+void RenderWidgetCompositor::ScheduleCommit() {
+  if (CommitIsSynchronous()) {
+    base::MessageLoop::current()->PostTask(
+        FROM_HERE, base::Bind(&RenderWidgetCompositor::SynchronousCommit,
+                              weak_factory_.GetWeakPtr()));
   } else {
     layer_tree_host_->SetNeedsCommit();
   }
+}
+
+void RenderWidgetCompositor::SynchronousCommit() {
+  DCHECK(CommitIsSynchronous());
+  layer_tree_host_->Composite(gfx::FrameTime::Now());
 }
 
 void RenderWidgetCompositor::finishAllRendering() {
@@ -727,6 +767,10 @@ void RenderWidgetCompositor::finishAllRendering() {
 
 void RenderWidgetCompositor::setDeferCommits(bool defer_commits) {
   layer_tree_host_->SetDeferCommits(defer_commits);
+}
+
+int RenderWidgetCompositor::layerTreeId() const {
+  return layer_tree_host_->id();
 }
 
 void RenderWidgetCompositor::setShowFPSCounter(bool show) {
@@ -880,6 +924,10 @@ void RenderWidgetCompositor::DidFailToInitializeOutputSurface() {
 }
 
 void RenderWidgetCompositor::WillCommit() {
+  if (!layout_and_paint_async_callback_)
+    return;
+  layout_and_paint_async_callback_->didLayoutAndPaint();
+  layout_and_paint_async_callback_ = nullptr;
 }
 
 void RenderWidgetCompositor::DidCommit() {
@@ -924,6 +972,11 @@ void RenderWidgetCompositor::RateLimitSharedMainThreadContext() {
   if (!provider)
     return;
   provider->ContextGL()->RateLimitOffscreenContextCHROMIUM();
+}
+
+void RenderWidgetCompositor::SetSurfaceIdNamespace(
+    uint32_t surface_id_namespace) {
+  layer_tree_host_->set_surface_id_namespace(surface_id_namespace);
 }
 
 }  // namespace content

@@ -60,11 +60,6 @@ class VoiceProcessor;
 class ChannelManager : public rtc::MessageHandler,
                        public sigslot::has_slots<> {
  public:
-#if !defined(DISABLE_MEDIA_ENGINE_FACTORY)
-  // Creates the channel manager, and specifies the worker thread to use.
-  explicit ChannelManager(rtc::Thread* worker);
-#endif
-
   // For testing purposes. Allows the media engine and data media
   // engine and dev manager to be mocks.  The ChannelManager takes
   // ownership of these objects.
@@ -112,7 +107,8 @@ class ChannelManager : public rtc::MessageHandler,
   VoiceChannel* CreateVoiceChannel(
       BaseSession* session, const std::string& content_name, bool rtcp);
   // Destroys a voice channel created with the Create API.
-  void DestroyVoiceChannel(VoiceChannel* voice_channel);
+  void DestroyVoiceChannel(VoiceChannel* voice_channel,
+                           VideoChannel* video_channel);
   // TODO(pbos): Remove as soon as all call sites specify VideoOptions.
   VideoChannel* CreateVideoChannel(BaseSession* session,
                                    const std::string& content_name,
@@ -240,9 +236,6 @@ class ChannelManager : public rtc::MessageHandler,
   // This API is mainly a hook used by unittests.
   const std::string& video_device_name() const { return video_device_name_; }
 
-  // TODO(hellner): Remove this function once the engine capturer has been
-  // removed.
-  VideoFormat GetStartCaptureFormat();
 
  protected:
   // Adds non-transient parameters which can only be changed through the
@@ -272,7 +265,8 @@ class ChannelManager : public rtc::MessageHandler,
   void Terminate_w();
   VoiceChannel* CreateVoiceChannel_w(
       BaseSession* session, const std::string& content_name, bool rtcp);
-  void DestroyVoiceChannel_w(VoiceChannel* voice_channel);
+  void DestroyVoiceChannel_w(VoiceChannel* voice_channel,
+                             VideoChannel* video_channel);
   VideoChannel* CreateVideoChannel_w(BaseSession* session,
                                      const std::string& content_name,
                                      bool rtcp,

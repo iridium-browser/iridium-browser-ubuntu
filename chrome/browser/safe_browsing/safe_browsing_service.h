@@ -33,6 +33,7 @@ struct SafeBrowsingProtocolConfig;
 class SafeBrowsingDatabaseManager;
 class SafeBrowsingPingManager;
 class SafeBrowsingProtocolManager;
+class SafeBrowsingProtocolManagerDelegate;
 class SafeBrowsingServiceFactory;
 class SafeBrowsingUIManager;
 class SafeBrowsingURLRequestContextGetter;
@@ -59,7 +60,7 @@ class DownloadProtectionService;
 #if defined(FULL_SAFE_BROWSING)
 class IncidentReportingService;
 class OffDomainInclusionDetector;
-class ScriptRequestDetector;
+class ResourceRequestDetector;
 #endif
 }
 
@@ -104,7 +105,7 @@ class SafeBrowsingService
 
   safe_browsing::ClientSideDetectionService*
       safe_browsing_detection_service() const {
-    DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+    DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
     return csd_service_.get();
   }
 
@@ -112,7 +113,7 @@ class SafeBrowsingService
   // is destroyed.
   safe_browsing::DownloadProtectionService*
       download_protection_service() const {
-    DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+    DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
     return download_service_.get();
   }
 
@@ -160,6 +161,9 @@ class SafeBrowsingService
   // Registers all the delayed analysis with the incident reporting service.
   // This is where you register your process-wide, profile-independent analysis.
   virtual void RegisterAllDelayedAnalysis();
+
+  // Return a ptr to DatabaseManager's delegate, or NULL if it doesn't have one.
+  virtual SafeBrowsingProtocolManagerDelegate* GetProtocolManagerDelegate();
 
  private:
   friend class SafeBrowsingServiceFactoryImpl;
@@ -269,7 +273,7 @@ class SafeBrowsingService
   scoped_ptr<safe_browsing::OffDomainInclusionDetector>
       off_domain_inclusion_detector_;
 
-  scoped_ptr<safe_browsing::ScriptRequestDetector> script_request_detector_;
+  scoped_ptr<safe_browsing::ResourceRequestDetector> resource_request_detector_;
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(SafeBrowsingService);

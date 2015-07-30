@@ -23,6 +23,7 @@
 #include "components/bookmarks/common/android/bookmark_id.h"
 #include "components/bookmarks/common/android/bookmark_type.h"
 #include "components/enhanced_bookmarks/enhanced_bookmark_model.h"
+#include "components/enhanced_bookmarks/enhanced_bookmark_utils.h"
 #include "components/enhanced_bookmarks/image_record.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "content/public/browser/browser_thread.h"
@@ -213,7 +214,7 @@ void EnhancedBookmarksBridge::MoveBookmark(JNIEnv* env,
                                            jobject obj,
                                            jobject j_bookmark_id_obj,
                                            jobject j_parent_id_obj) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(enhanced_bookmark_model_->loaded());
 
   long bookmark_id = JavaBookmarkIdGetId(env, j_bookmark_id_obj);
@@ -311,6 +312,10 @@ bool EnhancedBookmarksBridge::IsEditable(const BookmarkNode* node) const {
   }
   return profile_->GetPrefs()->GetBoolean(
         bookmarks::prefs::kEditBookmarksEnabled);
+}
+
+static jint GetDefaultViewMode(JNIEnv* env, jclass jcaller) {
+  return enhanced_bookmarks::GetDefaultViewMode();
 }
 
 static jlong Init(JNIEnv* env, jobject obj, jobject j_profile) {

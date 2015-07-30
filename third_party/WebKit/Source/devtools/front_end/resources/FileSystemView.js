@@ -30,12 +30,12 @@
 
 /**
  * @constructor
- * @extends {WebInspector.SplitView}
+ * @extends {WebInspector.SplitWidget}
  * @param {!WebInspector.FileSystemModel.FileSystem} fileSystem
  */
 WebInspector.FileSystemView = function(fileSystem)
 {
-    WebInspector.SplitView.call(this, true, false, "fileSystemViewSplitViewState");
+    WebInspector.SplitWidget.call(this, true, false, "fileSystemViewSplitViewState");
     this.element.classList.add("file-system-view", "storage-view");
 
     var vbox = new WebInspector.VBox();
@@ -43,33 +43,33 @@ WebInspector.FileSystemView = function(fileSystem)
     this._directoryTree = new TreeOutline();
     this._directoryTree.element.classList.add("outline-disclosure", "filesystem-directory-tree");
     vbox.element.appendChild(this._directoryTree.element);
-    this.setSidebarView(vbox);
+    this.setSidebarWidget(vbox);
 
     var rootItem = new WebInspector.FileSystemView.EntryTreeElement(this, fileSystem.root);
     rootItem.expanded = true;
     this._directoryTree.appendChild(rootItem);
     this._visibleView = null;
 
-    this._refreshButton = new WebInspector.StatusBarButton(WebInspector.UIString("Refresh"), "refresh-status-bar-item");
+    this._refreshButton = new WebInspector.ToolbarButton(WebInspector.UIString("Refresh"), "refresh-toolbar-item");
     this._refreshButton.setVisible(true);
     this._refreshButton.addEventListener("click", this._refresh, this);
 
-    this._deleteButton = new WebInspector.StatusBarButton(WebInspector.UIString("Delete"), "delete-status-bar-item");
+    this._deleteButton = new WebInspector.ToolbarButton(WebInspector.UIString("Delete"), "delete-toolbar-item");
     this._deleteButton.setVisible(true);
     this._deleteButton.addEventListener("click", this._confirmDelete, this);
 }
 
 WebInspector.FileSystemView.prototype = {
     /**
-     * @return {!Array.<!WebInspector.StatusBarItem>}
+     * @return {!Array.<!WebInspector.ToolbarItem>}
      */
-    statusBarItems: function()
+    toolbarItems: function()
     {
         return [this._refreshButton, this._deleteButton];
     },
 
     /**
-     * @type {!WebInspector.View}
+     * @type {!WebInspector.Widget}
      */
     get visibleView()
     {
@@ -77,7 +77,7 @@ WebInspector.FileSystemView.prototype = {
     },
 
     /**
-     * @param {!WebInspector.View} view
+     * @param {!WebInspector.Widget} view
      */
     showView: function(view)
     {
@@ -86,7 +86,7 @@ WebInspector.FileSystemView.prototype = {
         if (this._visibleView)
             this._visibleView.detach();
         this._visibleView = view;
-        this.setMainView(view);
+        this.setMainWidget(view);
     },
 
     _refresh: function()
@@ -105,7 +105,7 @@ WebInspector.FileSystemView.prototype = {
         this._directoryTree.selectedTreeElement.deleteEntry();
     },
 
-    __proto__: WebInspector.SplitView.prototype
+    __proto__: WebInspector.SplitWidget.prototype
 }
 
 /**
@@ -165,6 +165,7 @@ WebInspector.FileSystemView.EntryTreeElement.prototype = {
      */
     _directoryContentReceived: function(errorCode, entries)
     {
+        WebInspector.userMetrics.FileSystemDirectoryContentReceived.record();
         if (errorCode === FileError.NOT_FOUND_ERR) {
             if (this.parent)
                 this.parent.refresh();

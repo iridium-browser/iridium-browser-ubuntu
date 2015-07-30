@@ -2,7 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import sys
 import time
 
 from telemetry.core import exceptions
@@ -52,7 +51,7 @@ class RasterizeAndRecordMicro(page_test.PageTest):
     """ % (self._record_repeat, self._rasterize_repeat))
 
     benchmark_id = tab.EvaluateJavaScript('window.benchmark_results.id')
-    if (not benchmark_id):
+    if not benchmark_id:
       raise page_test.MeasurementFailure(
           'Failed to schedule rasterize_and_record_micro')
 
@@ -67,7 +66,7 @@ class RasterizeAndRecordMicro(page_test.PageTest):
     rasterize_time = data['rasterize_time_ms']
     # TODO(schenney): Remove this workaround when reference builds get past
     # the change that adds this comment.
-    if ('picture_memory_usage' in data):
+    if 'picture_memory_usage' in data:
       picture_memory_usage = data['picture_memory_usage']
     else:
       picture_memory_usage = 0
@@ -88,10 +87,12 @@ class RasterizeAndRecordMicro(page_test.PageTest):
     record_time_painting_disabled = data['record_time_painting_disabled_ms']
     # TODO(schenney): Remove this workaround when reference builds get past
     # the change that adds this comment.
-    if ('record_time_caching_disabled_ms' in data):
-      record_time_caching_disabled = data['record_time_caching_disabled_ms']
-    else:
-      record_time_caching_disabled = 0
+    record_time_caching_disabled = \
+        data.get('record_time_caching_disabled_ms', 0)
+    # TODO(schenney): Remove this workaround when reference builds get past
+    # the change that adds this comment.
+    record_time_construction_disabled = \
+        data.get('record_time_construction_disabled_ms', 0)
     results.AddValue(scalar.ScalarValue(
         results.current_page, 'record_time_sk_null_canvas', 'ms',
         record_time_sk_null_canvas))
@@ -101,6 +102,9 @@ class RasterizeAndRecordMicro(page_test.PageTest):
     results.AddValue(scalar.ScalarValue(
         results.current_page, 'record_time_caching_disabled', 'ms',
         record_time_caching_disabled))
+    results.AddValue(scalar.ScalarValue(
+        results.current_page, 'record_time_construction_disabled', 'ms',
+        record_time_construction_disabled))
 
     if self._report_detailed_results:
       pixels_rasterized_with_non_solid_color = \
@@ -115,7 +119,7 @@ class RasterizeAndRecordMicro(page_test.PageTest):
           data['total_picture_layers_off_screen']
       # TODO(schenney): Remove this workaround when reference builds get past
       # the change that adds this comment.
-      if ('total_pictures_in_pile_size' in data):
+      if 'total_pictures_in_pile_size' in data:
         total_pictures_in_pile_size = data['total_pictures_in_pile_size']
       else:
         total_pictures_in_pile_size = 0

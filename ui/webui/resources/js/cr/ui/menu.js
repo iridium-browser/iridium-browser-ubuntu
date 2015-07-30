@@ -27,11 +27,6 @@ cr.define('cr.ui', function() {
     contextElement: null,
 
     /**
-     * Selector for children which are menu items.
-     */
-    menuItemSelector: '*',
-
-    /**
      * Initializes the menu element.
      */
     decorate: function() {
@@ -93,7 +88,7 @@ cr.define('cr.ui', function() {
      * @private
      */
     findMenuItem_: function(node) {
-      while (node && node.parentNode != this) {
+      while (node && node.parentNode != this && !(node instanceof MenuItem)) {
         node = node.parentNode;
       }
       return node ? assertInstanceof(node, MenuItem) : null;
@@ -119,7 +114,7 @@ cr.define('cr.ui', function() {
     },
 
     get menuItems() {
-      return this.querySelectorAll(this.menuItemSelector);
+      return this.querySelectorAll(this.menuItemSelector || '*');
     },
 
     /**
@@ -226,12 +221,15 @@ cr.define('cr.ui', function() {
         case 'Enter':
         case 'U+0020': // Space
           if (item) {
+            // Store |contextElement| since it'll be removed when handling the
+            // 'activate' event.
+            var contextElement = this.contextElement;
             var activationEvent = cr.doc.createEvent('Event');
             activationEvent.initEvent('activate', true, true);
             activationEvent.originalEvent = e;
             if (item.dispatchEvent(activationEvent)) {
               if (item.command)
-                item.command.execute();
+                item.command.execute(contextElement);
             }
           }
           return true;
@@ -271,6 +269,11 @@ cr.define('cr.ui', function() {
    */
   cr.defineProperty(Menu, 'selectedIndex', cr.PropertyKind.JS,
       selectedIndexChanged);
+
+  /**
+   * Selector for children which are menu items.
+   */
+  cr.defineProperty(Menu, 'menuItemSelector', cr.PropertyKind.ATTR);
 
   // Export
   return {

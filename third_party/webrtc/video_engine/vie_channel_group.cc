@@ -223,7 +223,7 @@ bool ChannelGroup::CreateSendChannel(int channel_id,
   int stream_idx = 0;
   channel->GetLocalSSRC(stream_idx, &ssrc);
   encoder_state_feedback_->AddEncoder(ssrc, encoder);
-  std::list<unsigned int> ssrcs;
+  std::vector<uint32_t> ssrcs;
   ssrcs.push_back(ssrc);
   encoder->SetSsrcs(ssrcs);
   return true;
@@ -288,7 +288,7 @@ void ChannelGroup::DeleteChannel(int channel_id) {
   DCHECK(vie_encoder != NULL);
 
   call_stats_->DeregisterStatsObserver(vie_channel->GetStatsObserver());
-  SetChannelRembStatus(channel_id, false, false, vie_channel);
+  SetChannelRembStatus(false, false, vie_channel);
 
   // If we're owning the encoder, remove the feedback and stop all encoding
   // threads and processing. This must be done before deleting the channel.
@@ -453,8 +453,7 @@ int64_t ChannelGroup::GetPacerQueuingDelayMs() const {
   return pacer_->QueueInMs();
 }
 
-void ChannelGroup::SetChannelRembStatus(int channel_id,
-                                        bool sender,
+void ChannelGroup::SetChannelRembStatus(bool sender,
                                         bool receiver,
                                         ViEChannel* channel) {
   // Update the channel state.

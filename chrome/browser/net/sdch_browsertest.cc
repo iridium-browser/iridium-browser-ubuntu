@@ -261,9 +261,41 @@ class SdchResponseHandler {
   base::WeakPtrFactory<SdchResponseHandler> weak_ptr_factory_;
 };
 
+class TestSdchObserver : public net::SdchObserver {
+ public:
+  TestSdchObserver() : manager_(nullptr), fetch_count_(0) {}
+  ~TestSdchObserver() override {
+    if (manager_) {
+      manager_->RemoveObserver(this);
+    }
+  }
+
+  void Observe(net::SdchManager* manager) {
+    DCHECK(!manager_);
+    manager_ = manager;
+    manager_->AddObserver(this);
+  }
+
+  // SdchObserver
+  void OnDictionaryAdded(const GURL& /* dictionary_url */,
+                         const std::string& /* server_hash */) override {}
+  void OnDictionaryRemoved(const std::string& /* server_hash */) override {}
+  void OnGetDictionary(const GURL& /* request_url */,
+                       const GURL& /* dictionary_url */) override {
+    fetch_count_++;
+  }
+  void OnDictionaryUsed(const std::string& /* server_hash */) override {}
+  void OnClearDictionaries() override {}
+
+  int fetch_count() const { return fetch_count_; }
+
+ private:
+  net::SdchManager* manager_;
+  int fetch_count_;
+};
+
 class SdchBrowserTest : public InProcessBrowserTest,
-                        public net::URLFetcherDelegate,
-                        public net::SdchObserver {
+                        public net::URLFetcherDelegate {
  public:
   static const char kTestHost[];
 
@@ -277,7 +309,7 @@ class SdchBrowserTest : public InProcessBrowserTest,
 
   void FetchUrlDetailed(GURL url, net::URLRequestContextGetter* getter) {
     url_fetch_complete_ = false;
-    fetcher_.reset(net::URLFetcher::Create(url, net::URLFetcher::GET, this));
+    fetcher_ = net::URLFetcher::Create(url, net::URLFetcher::GET, this);
     fetcher_->SetRequestContext(getter);
     fetcher_->Start();
     if (!url_fetch_complete_) {
@@ -534,7 +566,7 @@ class SdchBrowserTest : public InProcessBrowserTest,
  private:
   static void NukeSdchDictionariesOnIOThread(
       net::URLRequestContextGetter* context_getter) {
-    DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+    DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
     net::SdchManager* sdch_manager =
         context_getter->GetURLRequestContext()->sdch_manager();
     DCHECK(sdch_manager);
@@ -544,13 +576,13 @@ class SdchBrowserTest : public InProcessBrowserTest,
   void GetNumberOfDictionaryFetchesOnIOThread(
       net::URLRequestContextGetter* context_getter,
       int* result) {
-    DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+    DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 
     net::SdchManager* manager(
         context_getter->GetURLRequestContext()->sdch_manager());
-    DCHECK(fetch_counts_.end() != fetch_counts_.find(manager));
+    DCHECK(observers_.end() != observers_.find(manager));
 
-    *result = fetch_counts_[manager];
+    *result = observers_[manager].fetch_count();
   }
 
   // InProcessBrowserTest
@@ -591,39 +623,19 @@ class SdchBrowserTest : public InProcessBrowserTest,
 
   void SubscribeToSdchNotifications(
       net::URLRequestContextGetter* context_getter) {
-    DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+    DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 
     net::SdchManager* manager =
         context_getter->GetURLRequestContext()->sdch_manager();
-    DCHECK(fetch_counts_.end() == fetch_counts_.find(manager));
+    DCHECK(observers_.end() == observers_.find(manager));
 
-    fetch_counts_[manager] = 0;
-    manager->AddObserver(this);
+    observers_[manager].Observe(manager);
   }
 
   void UnsubscribeFromAllSdchNotifications() {
-    DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
-
-    for (auto it = fetch_counts_.begin(); it != fetch_counts_.end(); ++it)
-      it->first->RemoveObserver(this);
-
-    fetch_counts_.clear();
+    DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
+    observers_.clear();
   }
-
-  // SdchObserver
-  void OnDictionaryUsed(net::SdchManager* manager,
-                        const std::string& server_hash) override {}
-
-  void OnGetDictionary(net::SdchManager* manager,
-                       const GURL& request_url,
-                       const GURL& dictionary_url) override {
-    DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
-    DLOG(ERROR) << "Retrieving count of notifications from manager " << manager;
-    DCHECK(fetch_counts_.end() != fetch_counts_.find(manager));
-    ++fetch_counts_[manager];
-  }
-
-  void OnClearDictionaries(net::SdchManager* manager) override {}
 
   // URLFetcherDelegate
   void OnURLFetchComplete(const net::URLFetcher* source) override {
@@ -644,7 +656,7 @@ class SdchBrowserTest : public InProcessBrowserTest,
   Browser* incognito_browser_;
 
   // IO Thread access only.
-  std::map<net::SdchManager*, int> fetch_counts_;
+  std::map<net::SdchManager*, TestSdchObserver> observers_;
 };
 
 const char SdchBrowserTest::kTestHost[] = "our.test.host.com";

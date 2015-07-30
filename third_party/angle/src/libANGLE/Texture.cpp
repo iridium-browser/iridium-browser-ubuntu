@@ -7,14 +7,13 @@
 // Texture.cpp: Implements the gl::Texture class. [OpenGL ES 2.0.24] section 3.7 page 63.
 
 #include "libANGLE/Texture.h"
-#include "libANGLE/Data.h"
-#include "libANGLE/formatutils.h"
-
-#include "libANGLE/Config.h"
-#include "libANGLE/Surface.h"
 
 #include "common/mathutil.h"
 #include "common/utilities.h"
+#include "libANGLE/Config.h"
+#include "libANGLE/Data.h"
+#include "libANGLE/Surface.h"
+#include "libANGLE/formatutils.h"
 
 namespace gl
 {
@@ -46,12 +45,9 @@ static size_t GetImageDescIndex(GLenum target, size_t level)
     return IsCubeMapTextureTarget(target) ? ((level * 6) + CubeMapTextureTargetToLayerIndex(target)) : level;
 }
 
-unsigned int Texture::mCurrentTextureSerial = 1;
-
 Texture::Texture(rx::TextureImpl *impl, GLuint id, GLenum target)
-    : RefCountObject(id),
+    : FramebufferAttachmentObject(id),
       mTexture(impl),
-      mTextureSerial(issueTextureSerial()),
       mUsage(GL_NONE),
       mImmutableLevelCount(0),
       mTarget(target),
@@ -154,16 +150,6 @@ bool Texture::isCubeComplete() const
     }
 
     return true;
-}
-
-unsigned int Texture::getTextureSerial() const
-{
-    return mTextureSerial;
-}
-
-unsigned int Texture::issueTextureSerial()
-{
-    return mCurrentTextureSerial++;
 }
 
 bool Texture::isImmutable() const
@@ -284,7 +270,7 @@ Error Texture::generateMipmaps()
     // Release from previous calls to eglBindTexImage, to avoid calling the Impl after
     releaseTexImageInternal();
 
-    Error error = mTexture->generateMipmaps();
+    Error error = mTexture->generateMipmaps(getSamplerState());
     if (error.isError())
     {
         return error;
@@ -587,6 +573,27 @@ Texture::SamplerCompletenessCache::SamplerCompletenessCache()
       supportsNPOT(false),
       samplerComplete(false)
 {
+}
+
+GLsizei Texture::getAttachmentWidth(const gl::FramebufferAttachment::Target &target) const
+{
+    return getWidth(target.textureIndex().type, target.textureIndex().mipIndex);
+}
+
+GLsizei Texture::getAttachmentHeight(const gl::FramebufferAttachment::Target &target) const
+{
+    return getHeight(target.textureIndex().type, target.textureIndex().mipIndex);
+}
+
+GLenum Texture::getAttachmentInternalFormat(const gl::FramebufferAttachment::Target &target) const
+{
+    return getInternalFormat(target.textureIndex().type, target.textureIndex().mipIndex);
+}
+
+GLsizei Texture::getAttachmentSamples(const gl::FramebufferAttachment::Target &/*target*/) const
+{
+    // Multisample textures not currently supported
+    return 0;
 }
 
 }

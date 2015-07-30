@@ -5,6 +5,7 @@
 # Common gypi for unit tests.
 {
   'include_dirs': [
+    '../src/codec',
     '../src/core',
     '../src/effects',
     '../src/image',
@@ -90,6 +91,7 @@
     '../tests/DiscardableMemoryTest.cpp',
     '../tests/DocumentTest.cpp',
     '../tests/DrawBitmapRectTest.cpp',
+    '../tests/DrawFilterTest.cpp',
     '../tests/DrawPathTest.cpp',
     '../tests/DrawTextTest.cpp',
     '../tests/DynamicHashTest.cpp',
@@ -167,7 +169,6 @@
     '../tests/PathCoverageTest.cpp',
     '../tests/PathMeasureTest.cpp',
     '../tests/PathTest.cpp',
-    '../tests/PathUtilsTest.cpp',
     '../tests/PictureBBHTest.cpp',
     '../tests/PictureShaderTest.cpp',
     '../tests/PictureTest.cpp',
@@ -214,8 +215,10 @@
     '../tests/StrokerTest.cpp',
     '../tests/SurfaceTest.cpp',
     '../tests/SVGDeviceTest.cpp',
+    '../tests/SwizzlerTest.cpp',
     '../tests/TessellatingPathRendererTests.cpp',
     '../tests/TArrayTest.cpp',
+    '../tests/TemplatesTest.cpp',
     '../tests/TDPQueueTest.cpp',
     '../tests/Time.cpp',
     '../tests/TLSTest.cpp',

@@ -76,8 +76,8 @@ class TestBrowserWindow : public BrowserWindow {
   void UpdateFullscreenWithToolbar(bool with_toolbar) override;
   bool IsFullscreenWithToolbar() const override;
 #if defined(OS_WIN)
-  virtual void SetMetroSnapMode(bool enable) override {}
-  virtual bool IsInMetroSnapMode() const override;
+  void SetMetroSnapMode(bool enable) override {}
+  bool IsInMetroSnapMode() const override;
 #endif
   LocationBar* GetLocationBar() const override;
   void SetFocusToLocationBar(bool select_all) override {}
@@ -85,6 +85,7 @@ class TestBrowserWindow : public BrowserWindow {
   void UpdateToolbar(content::WebContents* contents) override {}
   void ResetToolbarTabState(content::WebContents* contents) override {}
   void FocusToolbar() override {}
+  void ToolbarSizeChanged(bool is_animating) override {}
   void FocusAppMenu() override {}
   void FocusBookmarksToolbar() override {}
   void FocusInfobars() override {}
@@ -130,14 +131,11 @@ class TestBrowserWindow : public BrowserWindow {
       bool app_modal,
       const base::Callback<void(bool)>& callback) override {}
   void UserChangedTheme() override {}
-  void WebContentsFocused(content::WebContents* contents) override {}
   void ShowWebsiteSettings(Profile* profile,
                            content::WebContents* web_contents,
                            const GURL& url,
                            const content::SSLStatus& ssl) override {}
-  void Cut() override {}
-  void Copy() override {}
-  void Paste() override {}
+  void CutCopyPaste(int command_id) override {}
   WindowOpenDisposition GetDispositionForPopupBounds(
       const gfx::Rect& bounds) override;
   FindBar* CreateFindBar() override;
@@ -172,6 +170,7 @@ class TestBrowserWindow : public BrowserWindow {
     void UpdateManagePasswordsIconAndBubble() override {}
     void UpdatePageActions() override {}
     void UpdateBookmarkStarVisibility() override {}
+    void UpdateLocationBarVisibility(bool visible, bool animate) override {}
     bool ShowPageActionPopup(const extensions::Extension* extension,
                              bool grant_active_tab) override;
     void UpdateOpenPDFInReaderPrompt() override {}

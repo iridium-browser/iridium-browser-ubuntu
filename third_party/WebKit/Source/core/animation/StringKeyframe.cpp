@@ -5,35 +5,51 @@
 #include "config.h"
 #include "core/animation/StringKeyframe.h"
 
+#include "core/animation/AngleSVGInterpolation.h"
 #include "core/animation/ColorStyleInterpolation.h"
 #include "core/animation/CompositorAnimations.h"
 #include "core/animation/ConstantStyleInterpolation.h"
+#include "core/animation/DefaultSVGInterpolation.h"
 #include "core/animation/DeferredLegacyStyleInterpolation.h"
 #include "core/animation/DoubleStyleInterpolation.h"
+#include "core/animation/FilterStyleInterpolation.h"
 #include "core/animation/ImageSliceStyleInterpolation.h"
 #include "core/animation/ImageStyleInterpolation.h"
+#include "core/animation/IntegerOptionalIntegerSVGInterpolation.h"
+#include "core/animation/IntegerSVGInterpolation.h"
 #include "core/animation/LegacyStyleInterpolation.h"
 #include "core/animation/LengthBoxStyleInterpolation.h"
 #include "core/animation/LengthPairStyleInterpolation.h"
+#include "core/animation/LengthSVGInterpolation.h"
 #include "core/animation/LengthStyleInterpolation.h"
+#include "core/animation/ListSVGInterpolation.h"
 #include "core/animation/ListStyleInterpolation.h"
+#include "core/animation/NumberOptionalNumberSVGInterpolation.h"
+#include "core/animation/NumberSVGInterpolation.h"
+#include "core/animation/PathSVGInterpolation.h"
+#include "core/animation/PointSVGInterpolation.h"
+#include "core/animation/RectSVGInterpolation.h"
 #include "core/animation/SVGStrokeDasharrayStyleInterpolation.h"
 #include "core/animation/ShadowStyleInterpolation.h"
+#include "core/animation/TransformSVGInterpolation.h"
 #include "core/animation/VisibilityStyleInterpolation.h"
 #include "core/animation/css/CSSAnimations.h"
 #include "core/css/CSSPropertyMetadata.h"
 #include "core/css/resolver/StyleResolver.h"
 #include "core/style/ComputedStyle.h"
+#include "core/svg/SVGElement.h"
+#include "platform/RuntimeEnabledFeatures.h"
 
 namespace blink {
 
 StringKeyframe::StringKeyframe(const StringKeyframe& copyFrom)
     : Keyframe(copyFrom.m_offset, copyFrom.m_composite, copyFrom.m_easing)
     , m_propertySet(copyFrom.m_propertySet->mutableCopy())
+    , m_svgPropertyMap(copyFrom.m_svgPropertyMap)
 {
 }
 
-void StringKeyframe::setPropertyValue(CSSPropertyID property, const String& value, StyleSheetContents* styleSheetContents)
+void StringKeyframe::setPropertyValue(CSSPropertyID property, const String& value, Element* element, StyleSheetContents* styleSheetContents)
 {
     ASSERT(property != CSSPropertyInvalid);
     if (CSSAnimations::isAllowedAnimation(property))
@@ -47,13 +63,23 @@ void StringKeyframe::setPropertyValue(CSSPropertyID property, PassRefPtrWillBeRa
     m_propertySet->setProperty(property, value, false);
 }
 
-PropertySet StringKeyframe::properties() const
+void StringKeyframe::setPropertyValue(const QualifiedName& attributeName, const String& value, Element* element)
+{
+    ASSERT(element->isSVGElement());
+    m_svgPropertyMap.set(&attributeName, value);
+}
+
+PropertyHandleSet StringKeyframe::properties() const
 {
     // This is not used in time-critical code, so we probably don't need to
     // worry about caching this result.
-    PropertySet properties;
+    PropertyHandleSet properties;
     for (unsigned i = 0; i < m_propertySet->propertyCount(); ++i)
-        properties.add(m_propertySet->propertyAt(i).id());
+        properties.add(PropertyHandle(m_propertySet->propertyAt(i).id()));
+
+    for (const auto& key: m_svgPropertyMap.keys())
+        properties.add(PropertyHandle(*key));
+
     return properties;
 }
 
@@ -61,9 +87,14 @@ PassRefPtrWillBeRawPtr<Keyframe> StringKeyframe::clone() const
 {
     return adoptRefWillBeNoop(new StringKeyframe(*this));
 }
-PassOwnPtrWillBeRawPtr<Keyframe::PropertySpecificKeyframe> StringKeyframe::createPropertySpecificKeyframe(CSSPropertyID property) const
+
+PassOwnPtrWillBeRawPtr<Keyframe::PropertySpecificKeyframe> StringKeyframe::createPropertySpecificKeyframe(PropertyHandle property) const
 {
-    return adoptPtrWillBeNoop(new PropertySpecificKeyframe(offset(), &easing(), propertyValue(property), composite()));
+    if (property.isCSSProperty())
+        return adoptPtrWillBeNoop(new CSSPropertySpecificKeyframe(offset(), &easing(), cssPropertyValue(property.cssProperty()), composite()));
+
+    ASSERT(property.isSVGAttribute());
+    return adoptPtrWillBeNoop(new SVGPropertySpecificKeyframe(offset(), &easing(), svgPropertyValue(*property.svgAttribute()), composite()));
 }
 
 DEFINE_TRACE(StringKeyframe)
@@ -72,19 +103,19 @@ DEFINE_TRACE(StringKeyframe)
     Keyframe::trace(visitor);
 }
 
-StringKeyframe::PropertySpecificKeyframe::PropertySpecificKeyframe(double offset, PassRefPtr<TimingFunction> easing, CSSValue* value, AnimationEffect::CompositeOperation op)
+StringKeyframe::CSSPropertySpecificKeyframe::CSSPropertySpecificKeyframe(double offset, PassRefPtr<TimingFunction> easing, CSSValue* value, EffectModel::CompositeOperation op)
     : Keyframe::PropertySpecificKeyframe(offset, easing, op)
     , m_value(value)
 { }
 
-StringKeyframe::PropertySpecificKeyframe::PropertySpecificKeyframe(double offset, PassRefPtr<TimingFunction> easing, CSSValue* value)
-    : Keyframe::PropertySpecificKeyframe(offset, easing, AnimationEffect::CompositeReplace)
+StringKeyframe::CSSPropertySpecificKeyframe::CSSPropertySpecificKeyframe(double offset, PassRefPtr<TimingFunction> easing, CSSValue* value)
+    : Keyframe::PropertySpecificKeyframe(offset, easing, EffectModel::CompositeReplace)
     , m_value(value)
 {
     ASSERT(!isNull(m_offset));
 }
 
-void StringKeyframe::PropertySpecificKeyframe::populateAnimatableValue(CSSPropertyID property, Element& element, const ComputedStyle* baseStyle) const
+void StringKeyframe::CSSPropertySpecificKeyframe::populateAnimatableValue(CSSPropertyID property, Element& element, const ComputedStyle* baseStyle) const
 {
     if (!m_animatableValueCache && (baseStyle || !m_value->isInheritedValue()))
         m_animatableValueCache = StyleResolver::createAnimatableValueSnapshot(element, baseStyle, property, m_value.get());
@@ -121,11 +152,13 @@ InterpolationRange setRange(CSSPropertyID id)
 
 } // namespace
 
-// FIXME: Refactor this into a generic piece that lives in InterpolationEffect, and a template parameter specific converter.
-PassRefPtrWillBeRawPtr<Interpolation> StringKeyframe::PropertySpecificKeyframe::maybeCreateInterpolation(CSSPropertyID property, Keyframe::PropertySpecificKeyframe& end, Element* element, const ComputedStyle* baseStyle) const
+PassRefPtrWillBeRawPtr<Interpolation> StringKeyframe::CSSPropertySpecificKeyframe::maybeCreateInterpolation(PropertyHandle propertyHandle, Keyframe::PropertySpecificKeyframe& end, Element* element, const ComputedStyle* baseStyle) const
 {
+    CSSPropertyID property = propertyHandle.cssProperty();
+
+    // FIXME: Refactor this into a generic piece that lives in InterpolationEffect, and a template parameter specific converter.
     CSSValue* fromCSSValue = m_value.get();
-    CSSValue* toCSSValue = toStringPropertySpecificKeyframe(end).value();
+    CSSValue* toCSSValue = toCSSPropertySpecificKeyframe(end).value();
     InterpolationRange range = RangeAll;
     bool fallBackToLegacy = false;
 
@@ -311,8 +344,7 @@ PassRefPtrWillBeRawPtr<Interpolation> StringKeyframe::PropertySpecificKeyframe::
     }
 
     case CSSPropertyBoxShadow:
-    case CSSPropertyTextShadow:
-    case CSSPropertyWebkitBoxShadow: {
+    case CSSPropertyTextShadow: {
         RefPtrWillBeRawPtr<Interpolation> interpolation = ListStyleInterpolation<ShadowStyleInterpolation>::maybeCreateFromList(*fromCSSValue, *toCSSValue, property);
         if (interpolation)
             return interpolation.release();
@@ -360,6 +392,16 @@ PassRefPtrWillBeRawPtr<Interpolation> StringKeyframe::PropertySpecificKeyframe::
         break;
     }
 
+    case CSSPropertyWebkitFilter: {
+        RefPtrWillBeRawPtr<Interpolation> interpolation = FilterStyleInterpolation::maybeCreateList(*fromCSSValue, *toCSSValue, property);
+        if (interpolation)
+            return interpolation.release();
+
+        // FIXME: Support drop shadow interpolation.
+        fallBackToLegacy = true;
+        break;
+    }
+
     default:
         // Fall back to LegacyStyleInterpolation.
         fallBackToLegacy = true;
@@ -372,8 +414,7 @@ PassRefPtrWillBeRawPtr<Interpolation> StringKeyframe::PropertySpecificKeyframe::
     if (forceDefaultInterpolation)
         return nullptr;
 
-    if (fromCSSValue->isUnsetValue() || fromCSSValue->isInheritedValue() || fromCSSValue->isInitialValue()
-        || toCSSValue->isUnsetValue() || toCSSValue->isInheritedValue() || toCSSValue->isInitialValue())
+    if (fromCSSValue->isCSSWideKeyword() || toCSSValue->isCSSWideKeyword())
         fallBackToLegacy = true;
 
     if (fallBackToLegacy) {
@@ -397,23 +438,121 @@ PassRefPtrWillBeRawPtr<Interpolation> StringKeyframe::PropertySpecificKeyframe::
 
 }
 
-PassOwnPtrWillBeRawPtr<Keyframe::PropertySpecificKeyframe> StringKeyframe::PropertySpecificKeyframe::neutralKeyframe(double offset, PassRefPtr<TimingFunction> easing) const
+PassOwnPtrWillBeRawPtr<Keyframe::PropertySpecificKeyframe> StringKeyframe::CSSPropertySpecificKeyframe::neutralKeyframe(double offset, PassRefPtr<TimingFunction> easing) const
 {
-    return adoptPtrWillBeNoop(new PropertySpecificKeyframe(offset, easing, 0, AnimationEffect::CompositeAdd));
+    return adoptPtrWillBeNoop(new CSSPropertySpecificKeyframe(offset, easing, static_cast<CSSValue*>(0), EffectModel::CompositeAdd));
 }
 
-PassOwnPtrWillBeRawPtr<Keyframe::PropertySpecificKeyframe> StringKeyframe::PropertySpecificKeyframe::cloneWithOffset(double offset) const
+PassOwnPtrWillBeRawPtr<Keyframe::PropertySpecificKeyframe> StringKeyframe::CSSPropertySpecificKeyframe::cloneWithOffset(double offset) const
 {
-    Keyframe::PropertySpecificKeyframe* theClone = new PropertySpecificKeyframe(offset, m_easing, m_value.get());
-    toStringPropertySpecificKeyframe(theClone)->m_animatableValueCache = m_animatableValueCache;
+    Keyframe::PropertySpecificKeyframe* theClone = new CSSPropertySpecificKeyframe(offset, m_easing, m_value.get());
+    toCSSPropertySpecificKeyframe(theClone)->m_animatableValueCache = m_animatableValueCache;
     return adoptPtrWillBeNoop(theClone);
 }
 
-DEFINE_TRACE(StringKeyframe::PropertySpecificKeyframe)
+DEFINE_TRACE(StringKeyframe::CSSPropertySpecificKeyframe)
 {
     visitor->trace(m_value);
     visitor->trace(m_animatableValueCache);
     Keyframe::PropertySpecificKeyframe::trace(visitor);
 }
 
+SVGPropertySpecificKeyframe::SVGPropertySpecificKeyframe(double offset, PassRefPtr<TimingFunction> easing, const String& value, EffectModel::CompositeOperation op)
+    : Keyframe::PropertySpecificKeyframe(offset, easing, op)
+    , m_value(value)
+{
 }
+
+SVGPropertySpecificKeyframe::SVGPropertySpecificKeyframe(double offset, PassRefPtr<TimingFunction> easing, const String& value)
+    : Keyframe::PropertySpecificKeyframe(offset, easing, EffectModel::CompositeReplace)
+    , m_value(value)
+{
+    ASSERT(!isNull(m_offset));
+}
+
+DEFINE_TRACE(StringKeyframe::SVGPropertySpecificKeyframe)
+{
+    Keyframe::PropertySpecificKeyframe::trace(visitor);
+}
+
+PassOwnPtrWillBeRawPtr<Keyframe::PropertySpecificKeyframe> SVGPropertySpecificKeyframe::cloneWithOffset(double offset) const
+{
+    return adoptPtrWillBeNoop(new SVGPropertySpecificKeyframe(offset, m_easing, m_value));
+}
+
+PassOwnPtrWillBeRawPtr<Keyframe::PropertySpecificKeyframe> SVGPropertySpecificKeyframe::neutralKeyframe(double offset, PassRefPtr<TimingFunction> easing) const
+{
+    return adoptPtrWillBeNoop(new SVGPropertySpecificKeyframe(offset, easing, "", EffectModel::CompositeAdd));
+}
+
+namespace {
+
+PassRefPtrWillBeRawPtr<Interpolation> createSVGInterpolation(SVGPropertyBase* fromValue, SVGPropertyBase* toValue, SVGAnimatedPropertyBase* attribute)
+{
+    RefPtrWillBeRawPtr<Interpolation> interpolation = nullptr;
+    ASSERT(fromValue->type() == toValue->type());
+    switch (fromValue->type()) {
+    case AnimatedAngle:
+        if (AngleSVGInterpolation::canCreateFrom(fromValue) && AngleSVGInterpolation::canCreateFrom(toValue))
+            return AngleSVGInterpolation::create(fromValue, toValue, attribute);
+        break;
+    case AnimatedInteger:
+        return IntegerSVGInterpolation::create(fromValue, toValue, attribute);
+    case AnimatedIntegerOptionalInteger: {
+        int min = &attribute->attributeName() == &SVGNames::orderAttr ? 1 : 0;
+        return IntegerOptionalIntegerSVGInterpolation::create(fromValue, toValue, attribute, min);
+    }
+    case AnimatedLength:
+        return LengthSVGInterpolation::create(fromValue, toValue, attribute);
+    case AnimatedLengthList:
+        interpolation = ListSVGInterpolation<LengthSVGInterpolation>::maybeCreate(fromValue, toValue, attribute);
+        break;
+    case AnimatedNumber: {
+        SVGNumberNegativeValuesMode negativeValuesMode = &attribute->attributeName() == &SVGNames::pathLengthAttr ? ForbidNegativeNumbers : AllowNegativeNumbers;
+        return NumberSVGInterpolation::create(fromValue, toValue, attribute, negativeValuesMode);
+    }
+    case AnimatedNumberOptionalNumber:
+        return NumberOptionalNumberSVGInterpolation::create(fromValue, toValue, attribute);
+    case AnimatedNumberList:
+        interpolation = ListSVGInterpolation<NumberSVGInterpolation>::maybeCreate(fromValue, toValue, attribute);
+        break;
+    case AnimatedPath:
+        interpolation = PathSVGInterpolation::maybeCreate(fromValue, toValue, attribute);
+        break;
+    case AnimatedPoints:
+        interpolation = ListSVGInterpolation<PointSVGInterpolation>::maybeCreate(fromValue, toValue, attribute);
+        break;
+    case AnimatedRect:
+        return RectSVGInterpolation::create(fromValue, toValue, attribute);
+    case AnimatedTransformList:
+        interpolation = ListSVGInterpolation<TransformSVGInterpolation>::maybeCreate(fromValue, toValue, attribute);
+        break;
+
+    // TODO(ericwilligers): Support more animation types.
+    default:
+        break;
+    }
+    if (interpolation)
+        return interpolation.release();
+
+    return DefaultSVGInterpolation::create(fromValue, toValue, attribute);
+}
+
+} // namespace
+
+PassRefPtrWillBeRawPtr<Interpolation> SVGPropertySpecificKeyframe::maybeCreateInterpolation(PropertyHandle propertyHandle, Keyframe::PropertySpecificKeyframe& end, Element* element, const ComputedStyle* baseStyle) const
+{
+    ASSERT(element);
+    RefPtrWillBeRawPtr<SVGAnimatedPropertyBase> attribute = toSVGElement(element)->propertyFromAttribute(*propertyHandle.svgAttribute());
+    ASSERT(attribute);
+
+    RefPtrWillBeRawPtr<SVGPropertyBase> fromValue = attribute->currentValueBase()->cloneForAnimation(m_value);
+    RefPtrWillBeRawPtr<SVGPropertyBase> toValue = attribute->currentValueBase()->cloneForAnimation(toSVGPropertySpecificKeyframe(end).value());
+
+    if (!fromValue || !toValue)
+        return nullptr;
+
+    return createSVGInterpolation(fromValue.get(), toValue.get(), attribute.get());
+}
+
+} // namespace blink

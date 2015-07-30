@@ -4,6 +4,8 @@
 
 #include "extensions/browser/process_manager.h"
 
+#include <vector>
+
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
@@ -23,6 +25,7 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/extensions_browser_client.h"
+#include "extensions/browser/lazy_background_task_queue.h"
 #include "extensions/browser/notification_types.h"
 #include "extensions/browser/process_manager_delegate.h"
 #include "extensions/browser/process_manager_factory.h"
@@ -105,6 +108,11 @@ static void CreateBackgroundHostForExtensionLoad(
   if (BackgroundInfo::HasPersistentBackgroundPage(extension))
     manager->CreateBackgroundHost(extension,
                                   BackgroundInfo::GetBackgroundURL(extension));
+}
+
+void PropagateExtensionWakeResult(const base::Callback<void(bool)>& callback,
+                                  extensions::ExtensionHost* host) {
+  callback.Run(host != nullptr);
 }
 
 }  // namespace
@@ -406,6 +414,34 @@ ExtensionHost* ProcessManager::GetBackgroundHostForExtension(
   return nullptr;
 }
 
+ExtensionHost* ProcessManager::GetExtensionHostForRenderFrameHost(
+    content::RenderFrameHost* render_frame_host) {
+  content::WebContents* web_contents =
+      content::WebContents::FromRenderFrameHost(render_frame_host);
+  for (ExtensionHost* extension_host : background_hosts_) {
+    if (extension_host->host_contents() == web_contents)
+      return extension_host;
+  }
+  return nullptr;
+}
+
+bool ProcessManager::IsEventPageSuspended(const std::string& extension_id) {
+  return GetBackgroundHostForExtension(extension_id) == nullptr;
+}
+
+bool ProcessManager::WakeEventPage(const std::string& extension_id,
+                                   const base::Callback<void(bool)>& callback) {
+  if (GetBackgroundHostForExtension(extension_id)) {
+    // Run the callback immediately if the extension is already awake.
+    return false;
+  }
+  LazyBackgroundTaskQueue* queue =
+      ExtensionSystem::Get(browser_context_)->lazy_background_task_queue();
+  queue->AddPendingTask(browser_context_, extension_id,
+                        base::Bind(&PropagateExtensionWakeResult, callback));
+  return true;
+}
+
 bool ProcessManager::IsBackgroundHostClosing(const std::string& extension_id) {
   ExtensionHost* host = GetBackgroundHostForExtension(extension_id);
   return (host && background_page_data_[extension_id].is_closing);
@@ -418,7 +454,7 @@ const Extension* ProcessManager::GetExtensionForRenderFrameHost(
 }
 
 const Extension* ProcessManager::GetExtensionForWebContents(
-    content::WebContents* web_contents) {
+    const content::WebContents* web_contents) {
   if (!web_contents->GetSiteInstance())
     return nullptr;
   return extension_registry_->enabled_extensions().GetByID(
@@ -805,8 +841,8 @@ void ProcessManager::CloseLazyBackgroundPageNow(const std::string& extension_id,
       }
     }
     for (content::RenderFrameHost* frame : frames_to_close) {
-      frame->GetRenderViewHost()->ClosePage();
-      // RenderViewHost::ClosePage() may result in calling
+      content::WebContents::FromRenderFrameHost(frame)->ClosePage();
+      // WebContents::ClosePage() may result in calling
       // UnregisterRenderViewHost() asynchronously and may cause race conditions
       // when the background page is reloaded.
       // To avoid this, unregister the view now.

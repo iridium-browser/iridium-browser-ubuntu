@@ -26,6 +26,7 @@
 #ifndef DragData_h
 #define DragData_h
 
+#include "core/CoreExport.h"
 #include "core/page/DragActions.h"
 #include "platform/geometry/IntPoint.h"
 #include "platform/heap/Handle.h"
@@ -48,7 +49,8 @@ enum DragApplicationFlags {
     DragApplicationIsCopyKeyDown = 8
 };
 
-class DragData {
+class CORE_EXPORT DragData {
+    STACK_ALLOCATED();
 public:
     enum FilenameConversionPolicy { DoNotConvertFilenames, ConvertFilenames };
 
@@ -75,7 +77,7 @@ public:
 private:
     IntPoint m_clientPosition;
     IntPoint m_globalPosition;
-    DataObject* m_platformDragData;
+    Member<DataObject> m_platformDragData;
     DragOperation m_draggingSourceOperationMask;
     DragApplicationFlags m_applicationFlags;
 };

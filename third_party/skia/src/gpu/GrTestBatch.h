@@ -9,6 +9,7 @@
 #define GrTestBatch_DEFINED
 
 #include "GrBatch.h"
+#include "GrVertexBuffer.h"
 
 /*
  * A simple batch only for testing purposes which actually doesn't batch at all, but can fit into
@@ -24,11 +25,7 @@ public:
 
     void getInvariantOutputColor(GrInitInvariantOutput* out) const override {
         // When this is called on a batch, there is only one geometry bundle
-        if (fGeometryProcessor->hasVertexColor()) {
-            out->setUnknownFourComponents();
-        } else {
-            out->setKnownFourComponents(fGeometryProcessor->color());
-        }
+        out->setKnownFourComponents(this->geoData(0)->fColor);
     }
 
     void getInvariantOutputCoverage(GrInitInvariantOutput* out) const override {
@@ -67,14 +64,17 @@ public:
     }
 
 protected:
-    GrTestBatch(const GrGeometryProcessor* gp) {
+    GrTestBatch(const GrGeometryProcessor* gp, const SkRect& bounds) {
         fGeometryProcessor.reset(SkRef(gp));
+
+        this->setBounds(bounds);
     }
 
     const GrGeometryProcessor* geometryProcessor() const { return fGeometryProcessor; }
 
 private:
     virtual Geometry* geoData(int index) = 0;
+    virtual const Geometry* geoData(int index) const = 0;
 
     bool onCombineIfPossible(GrBatch* t) override {
         return false;

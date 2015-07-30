@@ -11,18 +11,26 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/debug/alias.h"
+#include "base/macros.h"
 #include "base/sha1.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "components/crx_file/id_util.h"
 #include "extensions/common/extension_api.h"
 #include "extensions/common/features/feature_provider.h"
 #include "extensions/common/switches.h"
 
+using crx_file::id_util::HashedIdInHex;
+
 namespace extensions {
 
 namespace {
+
+// A singleton copy of the --whitelisted-extension-id so that we don't need to
+// copy it from the CommandLine each time.
+std::string* g_whitelisted_extension_id = NULL;
 
 Feature::Availability IsAvailableToManifestForBind(
     const std::string& extension_id,
@@ -207,12 +215,6 @@ std::string ListDisplayNames(const std::vector<EnumType>& enum_types) {
   return display_name_list;
 }
 
-std::string HashExtensionId(const std::string& extension_id) {
-  const std::string id_hash = base::SHA1HashString(extension_id);
-  DCHECK_EQ(base::kSHA1Length, id_hash.length());
-  return base::HexEncode(id_hash.c_str(), id_hash.length());
-}
-
 bool IsCommandLineSwitchEnabled(const std::string& switch_name) {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switch_name + "=1"))
@@ -222,7 +224,32 @@ bool IsCommandLineSwitchEnabled(const std::string& switch_name) {
   return false;
 }
 
+bool IsWhitelistedForTest(const std::string& extension_id) {
+  // TODO(jackhou): Delete the commandline whitelisting mechanism.
+  // Since it is only used it tests, ideally it should not be set via the
+  // commandline. At the moment the commandline is used as a mechanism to pass
+  // the id to the renderer process.
+  if (!g_whitelisted_extension_id) {
+    g_whitelisted_extension_id = new std::string(
+        base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+            switches::kWhitelistedExtensionID));
+  }
+  return !g_whitelisted_extension_id->empty() &&
+         *g_whitelisted_extension_id == extension_id;
+}
+
 }  // namespace
+
+SimpleFeature::ScopedWhitelistForTest::ScopedWhitelistForTest(
+    const std::string& id)
+    : previous_id_(g_whitelisted_extension_id) {
+  g_whitelisted_extension_id = new std::string(id);
+}
+
+SimpleFeature::ScopedWhitelistForTest::~ScopedWhitelistForTest() {
+  delete g_whitelisted_extension_id;
+  g_whitelisted_extension_id = previous_id_;
+}
 
 struct SimpleFeature::Mappings {
   Mappings() {
@@ -363,20 +390,9 @@ Feature::Availability SimpleFeature::IsAvailableToManifest(
   if (component_extensions_auto_granted_ && location == Manifest::COMPONENT)
     return CreateAvailability(IS_AVAILABLE, type);
 
-  if (!whitelist_.empty()) {
-    if (!IsIdInWhitelist(extension_id)) {
-      // TODO(aa): This is gross. There should be a better way to test the
-      // whitelist.
-      base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-      if (!command_line->HasSwitch(switches::kWhitelistedExtensionID))
-        return CreateAvailability(NOT_FOUND_IN_WHITELIST, type);
-
-      std::string whitelist_switch_value =
-          base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-              switches::kWhitelistedExtensionID);
-      if (extension_id != whitelist_switch_value)
-        return CreateAvailability(NOT_FOUND_IN_WHITELIST, type);
-    }
+  if (!whitelist_.empty() && !IsIdInWhitelist(extension_id) &&
+      !IsWhitelistedForTest(extension_id)) {
+    return CreateAvailability(NOT_FOUND_IN_WHITELIST, type);
   }
 
   if (!MatchesManifestLocation(location))
@@ -568,7 +584,7 @@ bool SimpleFeature::IsIdInArray(const std::string& extension_id,
   const char* const* end = array + array_length;
 
   return ((std::find(start, end, extension_id) != end) ||
-          (std::find(start, end, HashExtensionId(extension_id)) != end));
+          (std::find(start, end, HashedIdInHex(extension_id)) != end));
 }
 
 // static
@@ -578,7 +594,7 @@ bool SimpleFeature::IsIdInList(const std::string& extension_id,
     return false;
 
   return (ContainsValue(list, extension_id) ||
-          ContainsValue(list, HashExtensionId(extension_id)));
+          ContainsValue(list, HashedIdInHex(extension_id)));
 }
 
 bool SimpleFeature::MatchesManifestLocation(

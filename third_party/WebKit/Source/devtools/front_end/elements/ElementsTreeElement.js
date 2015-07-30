@@ -78,7 +78,7 @@ WebInspector.ElementsTreeElement.animateOnDOMUpdate = function(treeElement)
 WebInspector.ElementsTreeElement.visibleShadowRoots = function(node)
 {
     var roots = node.shadowRoots();
-    if (roots.length && !WebInspector.settings.showUAShadowDOM.get())
+    if (roots.length && !WebInspector.moduleSetting("showUAShadowDOM").get())
         roots = roots.filter(filter);
 
     /**
@@ -431,7 +431,7 @@ WebInspector.ElementsTreeElement.prototype = {
      */
     hasEditableNode: function()
     {
-        return !this._node.isShadowRoot() && !this._node.ancestorClosedShadowRoot();
+        return !this._node.isShadowRoot() && !this._node.ancestorUserAgentShadowRoot();
     },
 
     _insertInLastAttributePosition: function(tag, node)
@@ -533,7 +533,7 @@ WebInspector.ElementsTreeElement.prototype = {
          */
         function setPseudoStateCallback(pseudoState, enabled)
         {
-            node.target().cssModel.forcePseudoState(node, pseudoState, enabled);
+            WebInspector.CSSStyleModel.fromNode(node).forcePseudoState(node, pseudoState, enabled);
         }
     },
 
@@ -849,7 +849,7 @@ WebInspector.ElementsTreeElement.prototype = {
         }
 
         var config = new WebInspector.InplaceEditor.Config(commit.bind(this), dispose.bind(this));
-        config.setMultilineOptions(initialValue, { name: "xml", htmlMode: true }, "web-inspector-html", WebInspector.settings.domWordWrap.get(), true);
+        config.setMultilineOptions(initialValue, { name: "xml", htmlMode: true }, "web-inspector-html", WebInspector.moduleSetting("domWordWrap").get(), true);
         WebInspector.InplaceEditor.startMultilineEditing(this._htmlEditElement, config).then(markAsBeingEdited.bind(this));
 
         /**
@@ -1055,13 +1055,15 @@ WebInspector.ElementsTreeElement.prototype = {
             var nodeInfo = this._nodeTitleInfo(updateRecord || null);
             if (this._node.nodeType() === Node.DOCUMENT_FRAGMENT_NODE && this._node.isInShadowTree() && this._node.shadowRootType()) {
                 this.childrenListElement.classList.add("shadow-root");
-                var depth = 5;
-                for (var node = this._node; depth > 0 && node; node = node.parentNode) {
+                var depth = 4;
+                for (var node = this._node; depth && node; node = node.parentNode) {
                     if (node.nodeType() === Node.DOCUMENT_FRAGMENT_NODE)
                         depth--;
                 }
-                if (depth > 0)
+                if (!depth)
                     this.childrenListElement.classList.add("shadow-root-deep");
+                else
+                    this.childrenListElement.classList.add("shadow-root-depth-" + depth);
             }
             var highlightElement = createElement("span");
             highlightElement.className = "highlight";

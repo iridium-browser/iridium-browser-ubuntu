@@ -83,6 +83,7 @@ public:
 
     virtual void setAnimationPolicy(ImageAnimationPolicy policy) override { m_animationPolicy = policy; }
     virtual ImageAnimationPolicy animationPolicy() override { return m_animationPolicy; }
+    virtual void advanceTime(double deltaTimeInSeconds) override;
 
     virtual bool bitmapForCurrentFrame(SkBitmap*) override;
     virtual PassRefPtr<Image> imageForDefaultFrame() override;
@@ -125,6 +126,12 @@ private:
 
     // Called before accessing m_frames[index]. Returns false on index out of bounds.
     bool ensureFrameIsCached(size_t index);
+
+    // Returns the total number of bytes allocated for all framebuffers, i.e.
+    // the sum of m_source.frameBytesAtIndex(...) for all frames.  This is
+    // returned as an int for caller convenience, to allow safely subtracting
+    // the values from successive calls as signed expressions.
+    int totalFrameBytes();
 
     // Called to invalidate cached data. When |destroyAll| is true, we wipe out
     // the entire frame buffer cache and tell the image source to destroy

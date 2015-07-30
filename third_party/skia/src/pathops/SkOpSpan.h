@@ -50,7 +50,7 @@ public:
     SkOpContour* contour() const;
 
     int debugID() const {
-        return PATH_OPS_DEBUG_RELEASE(fID, -1);
+        return SkDEBUGRELEASE(fID, -1);
     }
 
     const SkOpAngle* debugAngle(int id) const;
@@ -119,12 +119,11 @@ protected:
     SkOpPtT* fNext;  // intersection on opposite curve or alias on this curve
     bool fDeleted;  // set if removed from span list 
     bool fDuplicatePt;  // set if identical pt is somewhere in the next loop
-    PATH_OPS_DEBUG_CODE(int fID);
+    SkDEBUGCODE(int fID);
 };
 
 class SkOpSpanBase {
 public:
-    void addSimpleAngle(bool checkFrom , SkChunkAlloc* );
     void align();
 
     bool aligned() const {
@@ -132,6 +131,10 @@ public:
     }
 
     void alignEnd(double t, const SkPoint& pt);
+
+    void bumpSpanAdds() {
+        ++fSpanAdds;
+    }
 
     bool chased() const {
         return fChased;
@@ -164,11 +167,11 @@ public:
     SkOpContour* contour() const;
 
     int debugBumpCount() {
-        return PATH_OPS_DEBUG_RELEASE(++fCount, -1);
+        return SkDEBUGRELEASE(++fCount, -1);
     }
 
     int debugID() const {
-        return PATH_OPS_DEBUG_RELEASE(fID, -1);
+        return SkDEBUGRELEASE(fID, -1);
     }
 
     const SkOpAngle* debugAngle(int id) const;
@@ -253,6 +256,10 @@ public:
         return fPtT.next()->next() == &fPtT; 
     }
 
+    int spanAddsCount() const {
+        return fSpanAdds;
+    }
+
     const SkOpSpan* starter(const SkOpSpanBase* end) const {
         const SkOpSpanBase* result = t() < end->t() ? this : end;
         return result->upCast();
@@ -316,16 +323,15 @@ protected:  // no direct access to internals to avoid treating a span base as a 
     SkOpSpanBase* fCoinEnd;  // linked list of coincident spans that end here (may point to itself)
     SkOpAngle* fFromAngle;  // points to next angle from span start to end
     SkOpSpan* fPrev;  // previous intersection point
+    int fSpanAdds;  // number of times intersections have been added to span
     bool fAligned;
     bool fChased;  // set after span has been added to chase array
-    PATH_OPS_DEBUG_CODE(int fCount);  // number of pt/t pairs added
-    PATH_OPS_DEBUG_CODE(int fID);
+    SkDEBUGCODE(int fCount);  // number of pt/t pairs added
+    SkDEBUGCODE(int fID);
 };
 
 class SkOpSpan : public SkOpSpanBase {
 public:
-    void applyCoincidence(SkOpSpan* opp);
-
     bool clearCoincident() {
         SkASSERT(!final());
         if (fCoincident == this) {
@@ -335,6 +341,7 @@ public:
         return true;
     }
 
+    int computeWindSum();
     bool containsCoincidence(const SkOpSegment* ) const;
 
     bool containsCoincidence(const SkOpSpan* coin) const {
@@ -423,12 +430,7 @@ public:
         fToAngle = angle;
     }
 
-    void setWindSum(int windSum) {
-        SkASSERT(!final());
-        SkASSERT(fWindSum == SK_MinS32 || fWindSum == windSum);
-        SkASSERT(!DEBUG_LIMIT_WIND_SUM || abs(windSum) <= DEBUG_LIMIT_WIND_SUM);
-        fWindSum = windSum;
-    }
+    void setWindSum(int windSum);
 
     void setWindValue(int windValue) {
         SkASSERT(!final());
@@ -436,6 +438,8 @@ public:
         SkASSERT(fWindSum == SK_MinS32);
         fWindValue = windValue;
     }
+
+    bool sortableTop(SkOpContour* );
 
     SkOpAngle* toAngle() const {
         SkASSERT(!final());
@@ -460,6 +464,7 @@ private:  // no direct access to internals to avoid treating a span base as a sp
     int fOppSum;  // for binary operators: the opposite winding sum
     int fWindValue;  // 0 == canceled; 1 == normal; >1 == coincident
     int fOppValue;  // normally 0 -- when binary coincident edges combine, opp value goes here
+    int fTopTTry; // specifies direction and t value to try next
     bool fDone;  // if set, this span to next higher T has been processed
 };
 

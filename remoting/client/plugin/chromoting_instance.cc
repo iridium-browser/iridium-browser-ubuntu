@@ -14,6 +14,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/lazy_instance.h"
@@ -712,10 +713,10 @@ void ChromotingInstance::HandleConnect(const base::DictionaryValue& data) {
   // Create TransportFactory.
   scoped_ptr<protocol::TransportFactory> transport_factory(
       new protocol::LibjingleTransportFactory(
-          signal_strategy_.get(),
-          PepperPortAllocator::Create(this).Pass(),
+          signal_strategy_.get(), PepperPortAllocator::Create(this).Pass(),
           protocol::NetworkSettings(
-              protocol::NetworkSettings::NAT_TRAVERSAL_FULL)));
+              protocol::NetworkSettings::NAT_TRAVERSAL_FULL),
+          protocol::TransportRole::CLIENT));
 
   // Create Authenticator.
   scoped_ptr<protocol::ThirdPartyClientAuthenticator::TokenFetcher>
@@ -905,8 +906,7 @@ void ChromotingInstance::HandleOnPinFetched(const base::DictionaryValue& data) {
     return;
   }
   if (!secret_fetched_callback_.is_null()) {
-    secret_fetched_callback_.Run(pin);
-    secret_fetched_callback_.Reset();
+    base::ResetAndReturn(&secret_fetched_callback_).Run(pin);
   } else {
     LOG(WARNING) << "Ignored OnPinFetched received without a pending fetch.";
   }

@@ -28,6 +28,9 @@ const char kDisablePasswordGeneration[]     = "disable-password-generation";
 // The "disable" flag for kEnableSingleClickAutofill.
 const char kDisableSingleClickAutofill[]    = "disable-single-click-autofill";
 
+const char kEnableAccessorySuggestionView[] =
+    "enable-autofill-keyboard-accessory-view";
+
 // Enables using device's camera to scan a new credit card when filling out a
 // credit card form.
 const char kEnableCreditCardScan[]          = "enable-credit-card-scan";
@@ -66,10 +69,6 @@ const char kIgnoreAutocompleteOffForAutofill[] =
 // and that the user doesn't have the given form blacklisted. Used in testing.
 const char kLocalHeuristicsOnlyForPasswordGeneration[] =
     "local-heuristics-only-for-password-generation";
-
-// The "disable" flag for kIgnoreAutocompleteOffForAutofill.
-const char kRespectAutocompleteOffForAutofill[] =
-    "respect-autocomplete-off-autofill";
 
 // Annotates forms with Autofill field type predictions.
 const char kShowAutofillTypePredictions[]   = "show-autofill-type-predictions";

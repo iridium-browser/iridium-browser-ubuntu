@@ -116,6 +116,9 @@ static vpx_codec_err_t decoder_destroy(vpx_codec_alg_priv_t *ctx) {
           (FrameWorkerData *)worker->data1;
       vp9_get_worker_interface()->end(worker);
       vp9_remove_common(&frame_worker_data->pbi->common);
+#if CONFIG_VP9_POSTPROC
+      vp9_free_postproc_buffers(&frame_worker_data->pbi->common);
+#endif
       vp9_decoder_remove(frame_worker_data->pbi);
       vpx_free(frame_worker_data->scratch_buffer);
 #if CONFIG_MULTITHREAD
@@ -129,8 +132,10 @@ static vpx_codec_err_t decoder_destroy(vpx_codec_alg_priv_t *ctx) {
 #endif
   }
 
-  if (ctx->buffer_pool)
+  if (ctx->buffer_pool) {
+    vp9_free_ref_frame_buffers(ctx->buffer_pool);
     vp9_free_internal_frame_buffers(&ctx->buffer_pool->int_frame_buffers);
+  }
 
   vpx_free(ctx->frame_workers);
   vpx_free(ctx->buffer_pool);
@@ -457,7 +462,6 @@ static INLINE void check_resync(vpx_codec_alg_priv_t *const ctx,
 static vpx_codec_err_t decode_one(vpx_codec_alg_priv_t *ctx,
                                   const uint8_t **data, unsigned int data_sz,
                                   void *user_priv, int64_t deadline) {
-  vp9_ppflags_t flags = {0, 0, 0};
   const VP9WorkerInterface *const winterface = vp9_get_worker_interface();
   (void)deadline;
 
@@ -523,7 +527,7 @@ static vpx_codec_err_t decode_one(vpx_codec_alg_priv_t *ctx,
       frame_worker_data->scratch_buffer_size = data_sz;
     }
     frame_worker_data->data_size = data_sz;
-    vpx_memcpy(frame_worker_data->scratch_buffer, *data, data_sz);
+    memcpy(frame_worker_data->scratch_buffer, *data, data_sz);
 
     frame_worker_data->frame_decoded = 0;
     frame_worker_data->frame_context_ready = 0;
@@ -541,9 +545,6 @@ static vpx_codec_err_t decode_one(vpx_codec_alg_priv_t *ctx,
     worker->had_error = 0;
     winterface->launch(worker);
   }
-
-  if (ctx->base.init_flags & VPX_CODEC_USE_POSTPROC)
-    set_ppflags(ctx, &flags);
 
   return VPX_CODEC_OK;
 }
@@ -750,6 +751,8 @@ static vpx_image_t *decoder_get_frame(vpx_codec_alg_priv_t *ctx,
           (FrameWorkerData *)worker->data1;
       ctx->next_output_worker_id =
           (ctx->next_output_worker_id + 1) % ctx->num_frame_workers;
+      if (ctx->base.init_flags & VPX_CODEC_USE_POSTPROC)
+        set_ppflags(ctx, &flags);
       // Wait for the frame from worker thread.
       if (winterface->sync(worker)) {
         // Check if worker has received any frames.

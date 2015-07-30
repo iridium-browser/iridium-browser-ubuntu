@@ -89,6 +89,8 @@
 
 #if defined(OS_WIN)
 #include "base/win/win_util.h"
+#include "ui/gfx/platform_font_win.h"
+#include "ui/gfx/win/dpi.h"
 #endif
 
 using base::TimeDelta;
@@ -123,6 +125,40 @@ void DismissVirtualKeyboardTask() {
       virtual_keyboard_display_retries = 0;
     }
   }
+}
+
+void GetWindowsSpecificPrefs(RendererPreferences* prefs) {
+  NONCLIENTMETRICS_XP metrics = {0};
+  base::win::GetNonClientMetrics(&metrics);
+
+  prefs->caption_font_family_name = metrics.lfCaptionFont.lfFaceName;
+  prefs->caption_font_height = gfx::PlatformFontWin::GetFontSize(
+      metrics.lfCaptionFont);
+
+  prefs->small_caption_font_family_name = metrics.lfSmCaptionFont.lfFaceName;
+  prefs->small_caption_font_height = gfx::PlatformFontWin::GetFontSize(
+      metrics.lfSmCaptionFont);
+
+  prefs->menu_font_family_name = metrics.lfMenuFont.lfFaceName;
+  prefs->menu_font_height = gfx::PlatformFontWin::GetFontSize(
+      metrics.lfMenuFont);
+
+  prefs->status_font_family_name = metrics.lfStatusFont.lfFaceName;
+  prefs->status_font_height = gfx::PlatformFontWin::GetFontSize(
+      metrics.lfStatusFont);
+
+  prefs->message_font_family_name = metrics.lfMessageFont.lfFaceName;
+  prefs->message_font_height = gfx::PlatformFontWin::GetFontSize(
+      metrics.lfMessageFont);
+
+  prefs->vertical_scroll_bar_width_in_dips =
+      gfx::win::GetSystemMetricsInDIP(SM_CXVSCROLL);
+  prefs->horizontal_scroll_bar_height_in_dips =
+      gfx::win::GetSystemMetricsInDIP(SM_CYHSCROLL);
+  prefs->arrow_bitmap_height_vertical_scroll_bar_in_dips =
+      gfx::win::GetSystemMetricsInDIP(SM_CYVSCROLL);
+  prefs->arrow_bitmap_width_horizontal_scroll_bar_in_dips =
+      gfx::win::GetSystemMetricsInDIP(SM_CXHSCROLL);
 }
 #endif
 
@@ -254,7 +290,7 @@ bool RenderViewHostImpl::CreateRenderView(
   DCHECK(GetProcess()->HasConnection());
   DCHECK(GetProcess()->GetBrowserContext());
 
-  renderer_initialized_ = true;
+  set_renderer_initialized(true);
 
   GpuSurfaceTracker::Get()->SetSurfaceHandle(
       surface_id(), GetCompositingSurface());
@@ -268,6 +304,9 @@ bool RenderViewHostImpl::CreateRenderView(
   ViewMsg_New_Params params;
   params.renderer_preferences =
       delegate_->GetRendererPrefs(GetProcess()->GetBrowserContext());
+#if defined(OS_WIN)
+  GetWindowsSpecificPrefs(&params.renderer_preferences);
+#endif
   params.web_preferences = GetWebkitPreferences();
   params.view_id = GetRoutingID();
   params.main_frame_routing_id = main_frame_routing_id_;
@@ -297,6 +336,13 @@ bool RenderViewHostImpl::CreateRenderView(
     return false;
   SetInitialRenderSizeParams(params.initial_size);
 
+  // If the RWHV has not yet been set, the surface ID namespace will get
+  // passed down by the call to SetView().
+  if (view_) {
+    Send(new ViewMsg_SetSurfaceIdNamespace(GetRoutingID(),
+                                           view_->GetSurfaceIdNamespace()));
+  }
+
   // If it's enabled, tell the renderer to set up the Javascript bindings for
   // sending messages back to the browser.
   if (GetProcess()->IsIsolatedGuest())
@@ -314,13 +360,16 @@ bool RenderViewHostImpl::CreateRenderView(
 }
 
 bool RenderViewHostImpl::IsRenderViewLive() const {
-  return GetProcess()->HasConnection() && renderer_initialized_;
+  return GetProcess()->HasConnection() && renderer_initialized();
 }
 
 void RenderViewHostImpl::SyncRendererPrefs() {
-  Send(new ViewMsg_SetRendererPrefs(GetRoutingID(),
-                                    delegate_->GetRendererPrefs(
-                                        GetProcess()->GetBrowserContext())));
+  RendererPreferences renderer_preferences =
+      delegate_->GetRendererPrefs(GetProcess()->GetBrowserContext());
+#if defined(OS_WIN)
+  GetWindowsSpecificPrefs(&renderer_preferences);
+#endif
+  Send(new ViewMsg_SetRendererPrefs(GetRoutingID(), renderer_preferences));
 }
 
 WebPreferences RenderViewHostImpl::ComputeWebkitPrefs() {
@@ -700,7 +749,7 @@ void RenderViewHostImpl::AllowBindings(int bindings_flags) {
   }
 
   enabled_bindings_ |= bindings_flags;
-  if (renderer_initialized_)
+  if (renderer_initialized())
     Send(new ViewMsg_AllowBindings(GetRoutingID(), enabled_bindings_));
 }
 
@@ -858,7 +907,6 @@ bool RenderViewHostImpl::OnMessageReceived(const IPC::Message& msg) {
                         OnDidContentsPreferredSizeChange)
     IPC_MESSAGE_HANDLER(ViewHostMsg_RouteCloseEvent,
                         OnRouteCloseEvent)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_RouteMessageEvent, OnRouteMessageEvent)
     IPC_MESSAGE_HANDLER(DragHostMsg_StartDragging, OnStartDragging)
     IPC_MESSAGE_HANDLER(DragHostMsg_UpdateDragCursor, OnUpdateDragCursor)
     IPC_MESSAGE_HANDLER(DragHostMsg_TargetDrop_ACK, OnTargetDropACK)
@@ -1052,12 +1100,6 @@ void RenderViewHostImpl::OnRouteCloseEvent() {
   delegate_->RouteCloseEvent(this);
 }
 
-void RenderViewHostImpl::OnRouteMessageEvent(
-    const ViewMsg_PostMessage_Params& params) {
-  // Give to the delegate to route to the active RenderViewHost.
-  delegate_->RouteMessageEvent(this, params);
-}
-
 void RenderViewHostImpl::OnStartDragging(
     const DropData& drop_data,
     WebDragOperationsMask drag_operations_mask,
@@ -1183,8 +1225,12 @@ void RenderViewHostImpl::RequestToLockMouse(bool user_gesture,
   delegate_->RequestToLockMouse(user_gesture, last_unlocked_by_target);
 }
 
-bool RenderViewHostImpl::IsFullscreen() const {
+bool RenderViewHostImpl::IsFullscreenGranted() const {
   return delegate_->IsFullscreenForCurrentTab();
+}
+
+blink::WebDisplayMode RenderViewHostImpl::GetDisplayMode() const {
+  return delegate_->GetDisplayMode();
 }
 
 void RenderViewHostImpl::OnFocus() {
@@ -1378,12 +1424,6 @@ void RenderViewHostImpl::GrantFileAccessFromPageState(const PageState& state) {
     if (!policy->CanReadFile(GetProcess()->GetID(), file))
       policy->GrantReadFile(GetProcess()->GetID(), file);
   }
-}
-
-void RenderViewHostImpl::AttachToFrameTree() {
-  FrameTree* frame_tree = delegate_->GetFrameTree();
-
-  frame_tree->ResetForMainFrameSwap();
 }
 
 void RenderViewHostImpl::SelectWordAroundCaret() {

@@ -16,17 +16,40 @@
 #include "chrome/browser/ui/webui/net_internals/net_internals_ui.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/public/common/content_switches.h"
-#include "net/log/net_log_logger.h"
 #include "net/log/trace_net_log_observer.h"
+#include "net/log/write_to_file_net_log_observer.h"
+
+namespace {
+
+net::NetLogCaptureMode GetCaptureModeFromCommandLine(
+    const base::CommandLine& command_line) {
+  if (command_line.HasSwitch(switches::kNetLogCaptureMode)) {
+    std::string capture_mode_string =
+        command_line.GetSwitchValueASCII(switches::kNetLogCaptureMode);
+
+    if (capture_mode_string == "Default")
+      return net::NetLogCaptureMode::Default();
+    if (capture_mode_string == "IncludeCookiesAndCredentials")
+      return net::NetLogCaptureMode::IncludeCookiesAndCredentials();
+    if (capture_mode_string == "IncludeSocketBytes")
+      return net::NetLogCaptureMode::IncludeSocketBytes();
+
+    LOG(ERROR) << "Unrecognized value for --" << switches::kNetLogCaptureMode;
+  }
+
+  return net::NetLogCaptureMode::Default();
+}
+
+}  // namespace
 
 ChromeNetLog::ChromeNetLog()
     : net_log_temp_file_(new NetLogTempFile(this)) {
-  const base::CommandLine* command_line =
-      base::CommandLine::ForCurrentProcess();
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
 
-  if (command_line->HasSwitch(switches::kLogNetLog)) {
+  if (command_line.HasSwitch(switches::kLogNetLog)) {
     base::FilePath log_path =
-        command_line->GetSwitchValuePath(switches::kLogNetLog);
+        command_line.GetSwitchValuePath(switches::kLogNetLog);
     // Much like logging.h, bypass threading restrictions by using fopen
     // directly.  Have to write on a thread that's shutdown to handle events on
     // shutdown properly, and posting events to another thread as they occur
@@ -45,20 +68,14 @@ ChromeNetLog::ChromeNetLog()
                  << " for net logging";
     } else {
       scoped_ptr<base::Value> constants(NetInternalsUI::GetConstants());
-      net_log_logger_.reset(new net::NetLogLogger());
-      if (command_line->HasSwitch(switches::kNetLogLevel)) {
-        std::string log_level_string =
-            command_line->GetSwitchValueASCII(switches::kNetLogLevel);
-        int command_line_log_level;
-        if (base::StringToInt(log_level_string, &command_line_log_level) &&
-            command_line_log_level >= LOG_ALL &&
-            command_line_log_level <= LOG_NONE) {
-          net_log_logger_->set_log_level(
-              static_cast<LogLevel>(command_line_log_level));
-        }
-      }
-      net_log_logger_->StartObserving(this, file.Pass(), constants.get(),
-                                      nullptr);
+      write_to_file_observer_.reset(new net::WriteToFileNetLogObserver());
+
+      net::NetLogCaptureMode capture_mode =
+          GetCaptureModeFromCommandLine(command_line);
+      write_to_file_observer_->set_capture_mode(capture_mode);
+
+      write_to_file_observer_->StartObserving(this, file.Pass(),
+                                      constants.get(), nullptr);
     }
   }
 
@@ -69,8 +86,8 @@ ChromeNetLog::ChromeNetLog()
 ChromeNetLog::~ChromeNetLog() {
   net_log_temp_file_.reset();
   // Remove the observers we own before we're destroyed.
-  if (net_log_logger_)
-    net_log_logger_->StopObserving(nullptr);
+  if (write_to_file_observer_)
+    write_to_file_observer_->StopObserving(nullptr);
   if (trace_net_log_observer_)
     trace_net_log_observer_->StopWatchForTraceStart();
 }

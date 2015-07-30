@@ -10,6 +10,7 @@
 WebInspector.XHRBreakpointsSidebarPane = function()
 {
     WebInspector.BreakpointsSidebarPaneBase.call(this, WebInspector.UIString("XHR Breakpoints"));
+    this._xhrBreakpointsSetting = WebInspector.settings.createLocalSetting("xhrBreakpoints", []);
 
     /** @type {!Map.<string, !Element>} */
     this._breakpointElements = new Map();
@@ -96,18 +97,15 @@ WebInspector.XHRBreakpointsSidebarPane.prototype = {
         element._url = url;
         element.addEventListener("contextmenu", this._contextMenu.bind(this, url), true);
 
-        var label = createCheckboxLabel(undefined, enabled);
+        var title = url ? WebInspector.UIString("URL contains \"%s\"", url) : WebInspector.UIString("Any XHR");
+        var label = createCheckboxLabel(title, enabled);
         label.classList.add("checkbox-elem");
         element.appendChild(label);
         label.checkboxElement.addEventListener("click", this._checkboxClicked.bind(this, url), false);
         element._checkboxElement = label.checkboxElement;
 
-        var labelElement = label.createChild("span", "cursor-auto");
-        if (!url)
-            labelElement.textContent = WebInspector.UIString("Any XHR");
-        else
-            labelElement.textContent = WebInspector.UIString("URL contains \"%s\"", url);
-        labelElement.addEventListener("dblclick", this._labelClicked.bind(this, url), false);
+        label.textElement.classList.add("cursor-auto");
+        label.textElement.addEventListener("dblclick", this._labelClicked.bind(this, url), false);
 
         var currentElement = /** @type {?Element} */ (this.listElement.firstChild);
         while (currentElement) {
@@ -238,7 +236,7 @@ WebInspector.XHRBreakpointsSidebarPane.prototype = {
         var breakpoints = [];
         for (var url of this._breakpointElements.keys())
             breakpoints.push({ url: url, enabled: this._breakpointElements.get(url)._checkboxElement.checked });
-        WebInspector.settings.xhrBreakpoints.set(breakpoints);
+        this._xhrBreakpointsSetting.set(breakpoints);
     },
 
     /**
@@ -246,7 +244,7 @@ WebInspector.XHRBreakpointsSidebarPane.prototype = {
      */
     _restoreBreakpoints: function(target)
     {
-        var breakpoints = WebInspector.settings.xhrBreakpoints.get();
+        var breakpoints = this._xhrBreakpointsSetting.get();
         for (var i = 0; i < breakpoints.length; ++i) {
             var breakpoint = breakpoints[i];
             if (breakpoint && typeof breakpoint.url === "string")

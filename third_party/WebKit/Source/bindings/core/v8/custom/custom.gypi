@@ -5,9 +5,6 @@
 {
     'variables': {
         'bindings_core_v8_custom_files': [
-            'V8BlobCustom.cpp',
-            'V8BlobCustomHelpers.cpp',
-            'V8BlobCustomHelpers.h',
             'V8CSSStyleDeclarationCustom.cpp',
             'V8CustomEventCustom.cpp',
             'V8CustomXPathNSResolver.cpp',
@@ -16,7 +13,6 @@
             'V8DevToolsHostCustom.cpp',
             'V8ErrorEventCustom.cpp',
             'V8EventTargetCustom.cpp',
-            'V8FileCustom.cpp',
             'V8HTMLAllCollectionCustom.cpp',
             'V8HTMLDocumentCustom.cpp',
             'V8HTMLOptionsCollectionCustom.cpp',
@@ -32,7 +28,6 @@
             'V8PopStateEventCustom.cpp',
             'V8WindowCustom.cpp',
             'V8WorkerCustom.cpp',
-            'V8WorkerGlobalScopeCustom.cpp',
             'V8XMLHttpRequestCustom.cpp',
         ],
     },

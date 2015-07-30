@@ -8,8 +8,8 @@
 #include "base/path_service.h"
 #include "base/strings/stringprintf.h"
 #include "content/public/browser/web_contents.h"
+#include "content/shell/browser/blink_test_controller.h"
 #include "content/shell/browser/shell.h"
-#include "content/shell/browser/webkit_test_controller.h"
 #include "net/base/filename_util.h"
 
 namespace content {
@@ -62,6 +62,7 @@ GURL LayoutTestDevToolsFrontend::GetDevToolsPathAsURL(
 void LayoutTestDevToolsFrontend::ReuseFrontend(const std::string& settings,
                                                const std::string frontend_url) {
   DisconnectFromTarget();
+  preferences()->Clear();
   frontend_shell()->LoadURL(GetDevToolsPathAsURL(settings, frontend_url));
 }
 
@@ -81,7 +82,7 @@ void LayoutTestDevToolsFrontend::AgentHostClosed(
 
 void LayoutTestDevToolsFrontend::RenderProcessGone(
     base::TerminationStatus status) {
-  WebKitTestController::Get()->DevToolsProcessCrashed();
+  BlinkTestController::Get()->DevToolsProcessCrashed();
 }
 
 }  // namespace content

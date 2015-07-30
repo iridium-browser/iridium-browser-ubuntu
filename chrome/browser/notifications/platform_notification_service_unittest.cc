@@ -12,10 +12,17 @@
 #include "content/public/browser/desktop_notification_delegate.h"
 #include "content/public/common/platform_notification_data.h"
 #include "content/public/test/test_browser_thread_bundle.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
 namespace {
+
+const int kNotificationVibrationPattern[] = { 100, 200, 300 };
+
+#if !defined(OS_ANDROID)
+const int64_t kPersistentNotificationId = 42;
+#endif
 
 class MockDesktopNotificationDelegate
     : public content::DesktopNotificationDelegate {
@@ -126,13 +133,16 @@ TEST_F(PlatformNotificationServiceTest, DisplayPageCloseClosure) {
   // delegate given that it'd result in a use-after-free.
 }
 
+// TODO(peter): Re-enable this test when //content is responsible for creating
+// the notification delegate ids.
+#if !defined(OS_ANDROID)
 TEST_F(PlatformNotificationServiceTest, PersistentNotificationDisplay) {
   content::PlatformNotificationData notification_data;
   notification_data.title = base::ASCIIToUTF16("My notification's title");
   notification_data.body = base::ASCIIToUTF16("Hello, world!");
 
   service()->DisplayPersistentNotification(
-      profile(), 42 /* sw_registration_id */, GURL("https://chrome.com/"),
+      profile(), kPersistentNotificationId, GURL("https://chrome.com/"),
       SkBitmap(), notification_data);
 
   ASSERT_EQ(1u, ui_manager()->GetNotificationCount());
@@ -144,15 +154,20 @@ TEST_F(PlatformNotificationServiceTest, PersistentNotificationDisplay) {
   EXPECT_EQ("Hello, world!",
       base::UTF16ToUTF8(notification.message()));
 
-  service()->ClosePersistentNotification(profile(),
-                                         notification.delegate_id());
+  service()->ClosePersistentNotification(profile(), kPersistentNotificationId);
   EXPECT_EQ(0u, ui_manager()->GetNotificationCount());
 }
+#endif  // !defined(OS_ANDROID)
 
 TEST_F(PlatformNotificationServiceTest, DisplayPageNotificationMatches) {
+  std::vector<int> vibration_pattern(
+      kNotificationVibrationPattern,
+      kNotificationVibrationPattern + arraysize(kNotificationVibrationPattern));
+
   content::PlatformNotificationData notification_data;
   notification_data.title = base::ASCIIToUTF16("My notification's title");
   notification_data.body = base::ASCIIToUTF16("Hello, world!");
+  notification_data.vibration_pattern = vibration_pattern;
   notification_data.silent = true;
 
   MockDesktopNotificationDelegate* delegate
@@ -172,6 +187,10 @@ TEST_F(PlatformNotificationServiceTest, DisplayPageNotificationMatches) {
       base::UTF16ToUTF8(notification.title()));
   EXPECT_EQ("Hello, world!",
       base::UTF16ToUTF8(notification.message()));
+
+  EXPECT_THAT(notification.vibration_pattern(),
+      testing::ElementsAreArray(kNotificationVibrationPattern));
+
   EXPECT_TRUE(notification.silent());
 }
 

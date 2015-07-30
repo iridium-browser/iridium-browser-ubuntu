@@ -11,6 +11,7 @@
 
 #include <windows.h>
 #include <shlobj.h>
+#include <shobjidl.h>
 
 #include <limits>
 #include <string>
@@ -45,13 +46,12 @@
 #include "chrome/installer/util/beacons.h"
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/install_util.h"
+#include "chrome/installer/util/installer_util_strings.h"
 #include "chrome/installer/util/l10n_string_util.h"
 #include "chrome/installer/util/master_preferences.h"
 #include "chrome/installer/util/master_preferences_constants.h"
 #include "chrome/installer/util/util_constants.h"
 #include "chrome/installer/util/work_item.h"
-
-#include "installer_util_strings.h"  // NOLINT
 
 using base::win::RegKey;
 
@@ -878,6 +878,25 @@ bool ElevateAndRegisterChrome(BrowserDistribution* dist,
   return false;
 }
 
+// Launches the Windows 'settings' modern app with the 'default apps' view
+// focused. This only works for Windows 8 and Windows 10. The appModelId
+// looks arbitrary but it is the same in Win8 and Win10 previews. There
+// is no easy way to retrieve the appModelId from the registry.
+bool LaunchDefaultAppsSettingsModernDialog() {
+  base::win::ScopedComPtr<IApplicationActivationManager> activator;
+  HRESULT hr = activator.CreateInstance(CLSID_ApplicationActivationManager);
+  if (SUCCEEDED(hr)) {
+    DWORD pid = 0;
+    CoAllowSetForegroundWindow(activator.get(), nullptr);
+    hr = activator->ActivateApplication(
+        L"windows.immersivecontrolpanel_cw5n1h2txyewy"
+        L"!microsoft.windows.immersivecontrolpanel",
+        L"page=SettingsPageAppsDefaults", AO_NONE, &pid);
+    return SUCCEEDED(hr);
+  }
+  return false;
+}
+
 // Launches the Windows 7 and Windows 8 dialog for picking the application to
 // handle the given protocol. Most importantly, this is used to set the default
 // handler for http (and, implicitly with it, https). In that case it is also
@@ -1569,6 +1588,17 @@ const wchar_t* ShellUtil::kRegCommand = L"command";
 const wchar_t* ShellUtil::kRegDelegateExecute = L"DelegateExecute";
 const wchar_t* ShellUtil::kRegOpenWithProgids = L"OpenWithProgids";
 
+ShellUtil::ShortcutProperties::ShortcutProperties(ShellChange level_in)
+    : level(level_in),
+      icon_index(0),
+      dual_mode(false),
+      pin_to_taskbar(false),
+      options(0U) {
+}
+
+ShellUtil::ShortcutProperties::~ShortcutProperties() {
+}
+
 bool ShellUtil::QuickIsChromeRegisteredInHKLM(BrowserDistribution* dist,
                                               const base::FilePath& chrome_exe,
                                               const base::string16& suffix) {
@@ -2051,13 +2081,22 @@ bool ShellUtil::ShowMakeChromeDefaultSystemUI(
   bool succeeded = true;
   bool is_default = (GetChromeDefaultState() == IS_DEFAULT);
   if (!is_default) {
-    // On Windows 8, you can't set yourself as the default handler
-    // programatically. In other words IApplicationAssociationRegistration
-    // has been rendered useless. What you can do is to launch
-    // "Set Program Associations" section of the "Default Programs"
-    // control panel, which is a mess, or pop the concise "How you want to open
-    // webpages?" dialog.  We choose the latter.
-    succeeded = LaunchSelectDefaultProtocolHandlerDialog(L"http");
+    if (base::win::GetVersion() < base::win::VERSION_WIN10) {
+      // On Windows 8, you can't set yourself as the default handler
+      // programatically. In other words IApplicationAssociationRegistration
+      // has been rendered useless. What you can do is to launch
+      // "Set Program Associations" section of the "Default Programs"
+      // control panel, which is a mess, or pop the concise "How you want to
+      // open webpages?" dialog.  We choose the latter.
+      succeeded = LaunchSelectDefaultProtocolHandlerDialog(L"http");
+    } else {
+      // On Windows 10, you can't even launch the associations dialog.
+      // So we launch the settings dialog. Quoting from MSDN: "The Open With
+      // dialog box can no longer be used to change the default program used to
+      // open a file extension. You can only use SHOpenWithDialog to open
+      // a single file."
+      succeeded = LaunchDefaultAppsSettingsModernDialog();
+    }
     is_default = (succeeded && GetChromeDefaultState() == IS_DEFAULT);
   }
   if (succeeded && is_default)

@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import base64
+import codecs
 import httplib
 import optparse
 import json
@@ -54,82 +55,35 @@ css_warning_message = """
  */
 """
 
-def CanMinify():
-  return _HasLocalClosureCompiler()
-
-_HasLocalClosureCompilerResult = None
-def _HasLocalClosureCompiler():
-  global _HasLocalClosureCompilerResult
-  if _HasLocalClosureCompilerResult != None:
-    return _HasLocalClosureCompilerResult
-  try:
-    _MinifyJSLocally('console.log("test");')
-    _HasLocalClosureCompilerResult = True
-  except:
-    _HasLocalClosureCompilerResult = False
-  return _HasLocalClosureCompilerResult
+def _AssertIsUTF8(f):
+  if isinstance(f, StringIO.StringIO):
+    return
+  assert f.encoding == 'utf-8'
 
 
 def _MinifyJS(input_js):
-  if _HasLocalClosureCompiler():
-    return _MinifyJSLocally(input_js)
-  return _MinifyJSUsingClosureService(input_js)
+  tvcm_path = os.path.abspath(os.path.join(
+      os.path.dirname(__file__), '..'))
+  rjsmin_path = os.path.abspath(
+      os.path.join(tvcm_path, 'third_party', 'rjsmin', 'rjsmin.py'))
 
+  with tempfile.NamedTemporaryFile() as f:
+    args = [
+      'python',
+      rjsmin_path
+    ]
+    p = subprocess.Popen(args,
+                         stdin=subprocess.PIPE,
+                         stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE)
+    res = p.communicate(input=input_js)
+    errorcode = p.wait()
+    if errorcode != 0:
+      sys.stderr.write('rJSmin exited with error code %d' % errorcode)
+      sys.stderr.write(res[1])
+      raise Exception('Failed to minify, omgah')
+    return res[0]
 
-def _MinifyJSLocally(input_js):
-  with open(os.devnull, 'w') as devnull:
-    with tempfile.NamedTemporaryFile() as f:
-      args = [
-        'closure-compiler',
-        '--compilation_level', 'SIMPLE_OPTIMIZATIONS',
-        '--language_in', 'ECMASCRIPT5',
-        '--warning_level', 'QUIET'
-      ]
-      p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=devnull)
-      res = p.communicate(input=input_js)
-      if p.wait() != 0:
-        raise Exception('Failed to minify, omgah')
-      return res[0]
-
-def _MinifyJSUsingClosureService(input_js):
-  # Define the parameters for the POST request and encode them in
-  # a URL-safe format.
-  params = urllib.urlencode([
-    ('js_code', input_js),
-    ('language', 'ECMASCRIPT5'),
-    ('compilation_level', 'SIMPLE_OPTIMIZATIONS'),
-    ('output_format', 'json'),
-    ('output_info', 'errors'),
-    ('output_info', 'compiled_code'),
-  ])
-
-  # Always use the following value for the Content-type header.
-  headers = { "Content-type": "application/x-www-form-urlencoded" }
-  conn = httplib.HTTPConnection('closure-compiler.appspot.com')
-  conn.request('POST', '/compile', params, headers)
-  response = conn.getresponse()
-  data = response.read()
-  conn.close
-
-  if response.status != 200:
-    raise Exception("error returned from JS compile service: %d" % response.status)
-
-  result = json.loads(data)
-  if 'errors' in result:
-    errors = []
-    for e in result['errors']:
-      filenum = int(e['file'][6:])
-      filename = 'flat_script.js'
-      lineno = e['lineno']
-      charno = e['charno']
-      err = e['error']
-      errors.append('%s:%d:%d: %s' % (filename, lineno, charno, err))
-    raise Exception('Failed to generate %s. Reason: %s' % (output_js_file,
-                                                           '\n'.join(errors)))
-
-  if 'compiledCode' not in result:
-    raise Exception('Got %s' % repr(result))
-  return result['compiledCode']
 
 def GenerateJS(load_sequence,
                use_include_tags_for_scripts=False,
@@ -143,7 +97,28 @@ def GenerateJS(load_sequence,
                    dir_for_include_tag_root,
                    minify=minify,
                    report_sizes=report_sizes)
+
   return f.getvalue()
+
+def pt_parts(self):
+  sl = ['unicode and 8-bit string parts of above page template']
+  for x in self.buflist:
+      if type(x) == type(''):
+          maxcode = 0
+          for c in x:
+              maxcode = max(ord(c), maxcode)
+      # show only unicode objects and non-ascii strings
+      if type(x) == type('') and maxcode > 127:
+          t = '****NonAsciiStr: '
+      elif type(x) == type(u''):
+          t = '*****UnicodeStr: '
+      else:
+          t = None
+      if t:
+          sl.append(t + repr(x))
+  s = '\n'.join(sl)
+  return s
+
 
 def GenerateJSToFile(f,
                      load_sequence,
@@ -151,6 +126,7 @@ def GenerateJSToFile(f,
                      dir_for_include_tag_root=None,
                      minify=False,
                      report_sizes=False):
+  _AssertIsUTF8(f)
   if use_include_tags_for_scripts and dir_for_include_tag_root == None:
     raise Exception('Must provide dir_for_include_tag_root')
 
@@ -159,7 +135,7 @@ def GenerateJSToFile(f,
 
   loader = load_sequence[0].loader
 
-  polymer_script = loader.LoadRawScript('components/polymer/polymer.js')
+  polymer_script = loader.LoadRawScript('components/polymer/polymer.min.js')
   f.write(polymer_script.contents)
 
   f.write('\n')
@@ -187,12 +163,9 @@ def GenerateJSToFile(f,
                                     use_include_tags_for_scripts,
                                     dir_for_include_tag_root)
 
-      # Sizing. Can only show minified sizes if closure-compiler is local.
+      # Add minified size info.
       js = s.getvalue()
-      if _HasLocalClosureCompiler():
-        min_js_size = str(len(_MinifyJS(js)))
-      else:
-        min_js_size = '-'
+      min_js_size = str(len(_MinifyJS(js)))
 
       # Print names for this module. Some domain-specific simplifciations
       # are included to make pivoting more obvious.
@@ -218,6 +191,7 @@ class ExtraScript(object):
     self.content_type = content_type
 
   def WriteToFile(self, output_file):
+    _AssertIsUTF8(output_file)
     attrs = []
     if self.script_id:
       attrs.append('id="%s"' % self.script_id)
@@ -233,25 +207,25 @@ class ExtraScript(object):
     output_file.write('</script>\n')
 
 
-_have_printed_yui_missing_warning = False
-
 def _MinifyCSS(css_text):
+  tvcm_path = os.path.abspath(os.path.join(
+      os.path.dirname(__file__), '..'))
+  rcssmin_path = os.path.abspath(
+      os.path.join(tvcm_path, 'third_party', 'rcssmin', 'rcssmin.py'))
+
   with tempfile.NamedTemporaryFile() as f:
-    yuic_args = ['yui-compressor', '--type', 'css', '-o', f.name]
-    try:
-      p = subprocess.Popen(yuic_args, stdin=subprocess.PIPE)
-    except OSError:
-      global _have_printed_yui_missing_warning
-      if not _have_printed_yui_missing_warning:
-        _have_printed_yui_missing_warning = True
-        sys.stderr.write(
-            'yui-compressor missing. CSS minification will be skipped.\n')
-      return css_text
-    p.communicate(input=css_text)
-    if p.wait() != 0:
-      raise Exception('Failed to generate %s.' % output_css_file)
-    with open(f.name, 'r') as f2:
-      return f2.read()
+    rcssmin_args = ['python', rcssmin_path]
+    p = subprocess.Popen(rcssmin_args,
+                         stdin=subprocess.PIPE,
+                         stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE)
+    res = p.communicate(input=css_text)
+    errorcode = p.wait()
+    if errorcode != 0:
+      sys.stderr.write('rCSSmin exited with error code %d' % errorcode)
+      sys.stderr.write(res[1])
+      raise Exception('Failed to generate css for %s.' % css_text)
+    return res[0]
 
 
 def GenerateStandaloneHTMLAsString(*args, **kwargs):
@@ -268,6 +242,7 @@ def GenerateStandaloneHTMLToFile(output_file,
                                  minify=False,
                                  report_sizes=False,
                                  output_html_head_and_body=True):
+  _AssertIsUTF8(output_file)
   extra_scripts = extra_scripts or []
 
   if output_html_head_and_body:
@@ -311,8 +286,8 @@ def GenerateStandaloneHTMLToFile(output_file,
     output_file.write('<script src="%s"></script>\n' % flattened_js_url)
   else:
     output_file.write('<script>\n')
-    output_file.write(
-        GenerateJS(load_sequence, minify=minify, report_sizes=report_sizes))
+    x = GenerateJS(load_sequence, minify=minify, report_sizes=report_sizes)
+    output_file.write(x)
     output_file.write('</script>\n')
 
   for extra_script in extra_scripts:

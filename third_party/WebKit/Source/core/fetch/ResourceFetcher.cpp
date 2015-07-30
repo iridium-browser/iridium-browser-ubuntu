@@ -144,9 +144,9 @@ static Resource* resourceFromDataURIRequest(const ResourceRequest& request, cons
     const KURL& url = request.url();
     ASSERT(url.protocolIsData());
 
-    blink::WebString mimetype;
-    blink::WebString charset;
-    RefPtr<SharedBuffer> data = PassRefPtr<SharedBuffer>(blink::Platform::current()->parseDataURL(url, mimetype, charset));
+    WebString mimetype;
+    WebString charset;
+    RefPtr<SharedBuffer> data = PassRefPtr<SharedBuffer>(Platform::current()->parseDataURL(url, mimetype, charset));
     if (!data)
         return nullptr;
     ResourceResponse response(url, mimetype, data->size(), charset, String());
@@ -330,6 +330,14 @@ ResourcePtr<Resource> ResourceFetcher::fetchLinkResource(Resource::Type type, Fe
     ASSERT(type == Resource::LinkPrefetch || type == Resource::LinkSubresource);
     ASSERT(request.resourceRequest().frameType() == WebURLRequest::FrameTypeNone);
     request.mutableResourceRequest().setRequestContext(type == Resource::LinkPrefetch ? WebURLRequest::RequestContextPrefetch : WebURLRequest::RequestContextSubresource);
+    return requestResource(type, request);
+}
+
+ResourcePtr<Resource> ResourceFetcher::fetchLinkPreloadResource(Resource::Type type, FetchRequest& request)
+{
+    // TODO(yoav): Enforce a LinkPreload context here, once we know we're adding one - https://github.com/whatwg/fetch/issues/36
+    ASSERT(request.resourceRequest().frameType() == WebURLRequest::FrameTypeNone);
+    determineRequestContext(request.mutableResourceRequest(), type);
     return requestResource(type, request);
 }
 
@@ -729,6 +737,9 @@ ResourceFetcher::RevalidationPolicy ResourceFetcher::determineRevalidationPolicy
     if (m_allowStaleResources)
         return Use;
 
+    if (request.cachePolicy() == ResourceRequestCachePolicy::ReloadBypassingCache)
+        return Reload;
+
     if (!fetchRequest.options().canReuseRequest(existingResource->options()))
         return Reload;
 
@@ -1053,9 +1064,10 @@ void ResourceFetcher::didReceiveResponse(const Resource* resource, const Resourc
 {
     // If the response is fetched via ServiceWorker, the original URL of the response could be different from the URL of the request.
     // We check the URL not to load the resources which are forbidden by the page CSP. This behavior is not specified in the CSP specification yet.
+    // FIXME(mkwst): Fix this behavior when the CSP docs are updated.
     if (response.wasFetchedViaServiceWorker()) {
         const KURL& originalURL = response.originalURLViaServiceWorker();
-        if (!context().canRequest(resource->type(), resource->resourceRequest(), originalURL, resource->options(), false, FetchRequest::UseDefaultOriginRestrictionForType)) {
+        if (!originalURL.isEmpty() && !context().canRequest(resource->type(), resource->resourceRequest(), originalURL, resource->options(), false, FetchRequest::UseDefaultOriginRestrictionForType)) {
             resource->loader()->cancel();
             bool isInternalRequest = resource->options().initiatorInfo.name == FetchInitiatorTypeNames::internal;
             context().dispatchDidFail(resource->identifier(), ResourceError(errorDomainBlinkInternal, 0, originalURL.string(), "Unsafe attempt to load URL " + originalURL.elidedString() + " fetched by a ServiceWorker."), isInternalRequest);
@@ -1257,11 +1269,11 @@ ResourceFetcher::DeadResourceStatsRecorder::DeadResourceStatsRecorder()
 
 ResourceFetcher::DeadResourceStatsRecorder::~DeadResourceStatsRecorder()
 {
-    blink::Platform::current()->histogramCustomCounts(
+    Platform::current()->histogramCustomCounts(
         "WebCore.ResourceFetcher.HitCount", m_useCount, 0, 1000, 50);
-    blink::Platform::current()->histogramCustomCounts(
+    Platform::current()->histogramCustomCounts(
         "WebCore.ResourceFetcher.RevalidateCount", m_revalidateCount, 0, 1000, 50);
-    blink::Platform::current()->histogramCustomCounts(
+    Platform::current()->histogramCustomCounts(
         "WebCore.ResourceFetcher.LoadCount", m_loadCount, 0, 1000, 50);
 }
 

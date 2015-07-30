@@ -8,6 +8,8 @@ import("//testing/test.gni")
 component("crypto") {
   output_name = "crcrypto"  # Avoid colliding with OpenSSL's libcrypto.
   sources = [
+    "aead_openssl.cc",
+    "aead_openssl.h",
     "apple_keychain.h",
     "apple_keychain_ios.mm",
     "apple_keychain_mac.mm",
@@ -48,6 +50,8 @@ component("crypto") {
     "mock_apple_keychain.h",
     "mock_apple_keychain_ios.cc",
     "mock_apple_keychain_mac.cc",
+    "nss_key_util.cc",
+    "nss_key_util.h",
     "nss_util.cc",
     "nss_util.h",
     "nss_util_internal.h",
@@ -136,9 +140,6 @@ component("crypto") {
       "ec_signature_creator_nss.cc",
       "encryptor_nss.cc",
       "hmac_nss.cc",
-      "nss_util.cc",
-      "nss_util.h",
-      "nss_util_internal.h",
       "rsa_private_key_nss.cc",
       "secure_hash_default.cc",
       "signature_creator_nss.cc",
@@ -154,6 +155,8 @@ component("crypto") {
   } else {
     # Remove OpenSSL when using NSS.
     sources -= [
+      "aead_openssl.cc",
+      "aead_openssl.h",
       "ec_private_key_openssl.cc",
       "ec_signature_creator_openssl.cc",
       "encryptor_openssl.cc",
@@ -167,6 +170,18 @@ component("crypto") {
       "signature_creator_openssl.cc",
       "signature_verifier_openssl.cc",
       "symmetric_key_openssl.cc",
+    ]
+  }
+
+  # Some files are built when NSS is used at all, either for the internal crypto
+  # library or the platform certificate library.
+  if (use_openssl && !use_nss_certs) {
+    sources -= [
+      "nss_key_util.cc",
+      "nss_key_util.h",
+      "nss_util.cc",
+      "nss_util.h",
+      "nss_util_internal.h",
     ]
   }
 
@@ -205,53 +220,55 @@ if (false && is_win) {
   }
 }
 
-# TODO(GYP): Make this link on win as well.
-if (!is_win) {
-  test("crypto_unittests") {
-    sources = [
-      # Tests.
-      "curve25519_unittest.cc",
-      "ec_private_key_unittest.cc",
-      "ec_signature_creator_unittest.cc",
-      "encryptor_unittest.cc",
-      "ghash_unittest.cc",
-      "hkdf_unittest.cc",
-      "hmac_unittest.cc",
+test("crypto_unittests") {
+  sources = [
+    # Tests.
+    "curve25519_unittest.cc",
+    "ec_private_key_unittest.cc",
+    "ec_signature_creator_unittest.cc",
+    "encryptor_unittest.cc",
+    "ghash_unittest.cc",
+    "hkdf_unittest.cc",
+    "hmac_unittest.cc",
+    "nss_key_util_unittest.cc",
+    "nss_util_unittest.cc",
+    "openssl_bio_string_unittest.cc",
+    "p224_spake_unittest.cc",
+    "p224_unittest.cc",
+    "random_unittest.cc",
+    "rsa_private_key_unittest.cc",
+    "secure_hash_unittest.cc",
+    "sha2_unittest.cc",
+    "signature_creator_unittest.cc",
+    "signature_verifier_unittest.cc",
+    "symmetric_key_unittest.cc",
+  ]
+
+  # Some files are built when NSS is used at all, either for the internal crypto
+  # library or the platform certificate library.
+  if (use_openssl && !use_nss_certs) {
+    sources -= [
+      "nss_key_util_unittest.cc",
       "nss_util_unittest.cc",
-      "openssl_bio_string_unittest.cc",
-      "p224_spake_unittest.cc",
-      "p224_unittest.cc",
-      "random_unittest.cc",
-      "rsa_private_key_nss_unittest.cc",
-      "rsa_private_key_unittest.cc",
-      "secure_hash_unittest.cc",
-      "sha2_unittest.cc",
-      "signature_creator_unittest.cc",
-      "signature_verifier_unittest.cc",
-      "symmetric_key_unittest.cc",
-    ]
-
-    if (use_openssl || !is_linux) {
-      sources -= [ "rsa_private_key_nss_unittest.cc" ]
-    }
-
-    if (use_openssl) {
-      sources -= [ "nss_util_unittest.cc" ]
-    } else {
-      sources -= [ "openssl_bio_string_unittest.cc" ]
-    }
-
-    deps = [
-      ":crypto",
-      ":platform",
-      ":test_support",
-      "//base",
-      "//base/test:run_all_unittests",
-      "//base/test:test_support",
-      "//testing/gmock",
-      "//testing/gtest",
     ]
   }
+
+  if (!use_openssl) {
+    sources -= [ "openssl_bio_string_unittest.cc" ]
+  }
+
+  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
+
+  deps = [
+    ":crypto",
+    ":platform",
+    ":test_support",
+    "//base",
+    "//base/test:run_all_unittests",
+    "//base/test:test_support",
+    "//testing/gmock",
+    "//testing/gtest",
+  ]
 }
 
 source_set("test_support") {
@@ -287,7 +304,7 @@ source_set("test_support") {
 }
 
 config("platform_config") {
-  if (!use_openssl && is_clang) {
+  if ((!use_openssl || use_nss_certs) && is_clang) {
     # There is a broken header guard in /usr/include/nss/secmod.h:
     # https://bugzilla.mozilla.org/show_bug.cgi?id=884072
     cflags = [ "-Wno-header-guard" ]
@@ -306,21 +323,26 @@ group("platform") {
     deps = [
       "//net/third_party/nss/ssl:libssl",
     ]
+  }
+
+  # Link in NSS if it is used for either the internal crypto library
+  # (!use_openssl) or platform certificate library (use_nss_certs).
+  if (!use_openssl || use_nss_certs) {
     if (is_linux) {
       # On Linux, we use the system NSS (excepting SSL where we always use our
       # own).
-      #
-      # We always need our SSL header search path to come before the system one
-      # so our versions are used. The libssl target will add the search path we
-      # want, but according to GN's ordering rules, public_configs' search path
-      # will get applied before ones inherited from our dependencies.
-      # Therefore, we need to explicitly list our custom libssl's config here
-      # before the system one.
-      public_configs = [
-        ":platform_config",
-        "//net/third_party/nss/ssl:ssl_config",
-        "//third_party/nss:system_nss_no_ssl_config",
-      ]
+      public_configs = [ ":platform_config" ]
+      if (!use_openssl) {
+        # If using a bundled copy of NSS's SSL library, ensure the bundled SSL
+        # header search path comes before the system one so our versions are
+        # used. The libssl target will add the search path we want, but
+        # according to GN's ordering rules, public_configs' search path will get
+        # applied before ones inherited from our dependencies.  Therefore, we
+        # need to explicitly list our custom libssl's config here before the
+        # system one.
+        public_configs += [ "//net/third_party/nss/ssl:ssl_config" ]
+      }
+      public_configs += [ "//third_party/nss:system_nss_no_ssl_config" ]
     } else {
       # Non-Linux platforms use the hermetic NSS from the tree.
       deps += [

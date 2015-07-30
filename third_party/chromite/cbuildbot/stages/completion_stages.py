@@ -6,8 +6,6 @@
 
 from __future__ import print_function
 
-import logging
-
 from chromite.cbuildbot import chroot_lib
 from chromite.cbuildbot import commands
 from chromite.cbuildbot import cbuildbot_config
@@ -21,6 +19,7 @@ from chromite.cbuildbot.stages import generic_stages
 from chromite.cbuildbot.stages import sync_stages
 from chromite.lib import clactions
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import git
 from chromite.lib import portage_util
 
@@ -153,51 +152,44 @@ class MasterSlaveSyncCompletionStage(ManifestVersionedSyncCompletionStage):
     If this build is not a master then return just the status of this build.
 
     Returns:
-      A dict with "bot id" keys and BuilderStatus objects for values.  All keys
-      will have valid BuilderStatus values, but builders that never started
-      will have a BuilderStatus with status MISSING.
+      A dict of build_config name -> BuilderStatus objects, for all important
+      slave build configs. Build configs that never started will have a
+      BuilderStatus of MISSING.
     """
+    # Wait for slaves if we're a master, in production or mock-production.
+    # Otherwise just look at our own status.
+    slave_statuses = self._GetLocalBuildStatus()
     if not self._run.config.master:
       # The slave build returns its own status.
       logging.warning('The build is not a master.')
-      return self._GetLocalBuildStatus()
-    else:
+    elif self._run.options.mock_slave_status or not self._run.options.debug:
       # The master build.
       builders = self._GetSlaveConfigs()
-      builder_names = [b['name'] for b in builders]
-      if not builder_names:
-        # Master has no slaves.
-        return {}
-      elif (len(builder_names) == 1 and self._run.config.name in builder_names
-            or not self._run.options.mock_slave_status and
-            self._run.options.debug):
-        # Master with only itself as the slave should not wait.
-        return self._GetLocalBuildStatus()
-      else:
-        # Wait for the slaves to finish.
-        timeout = None
-        build_id, db = self._run.GetCIDBHandle()
-        if db:
-          timeout = db.GetTimeToDeadline(build_id)
-        if timeout is None:
-          # Catch-all: This could happen if cidb is not setup, or the deadline
-          # query fails.
-          timeout = constants.MASTER_BUILD_TIMEOUT_DEFAULT_SECONDS
+      builder_names = [b.name for b in builders]
+      timeout = None
+      build_id, db = self._run.GetCIDBHandle()
+      if db:
+        timeout = db.GetTimeToDeadline(build_id)
+      if timeout is None:
+        # Catch-all: This could happen if cidb is not setup, or the deadline
+        # query fails.
+        timeout = constants.MASTER_BUILD_TIMEOUT_DEFAULT_SECONDS
 
-        if self._run.options.debug:
-          # For debug runs, wait for three minutes to ensure most code
-          # paths are executed.
-          logging.info('Waiting for 3 minutes only for debug run. '
-                       'Would have waited for %s seconds.', timeout)
-          timeout = 3 * 60
+      if self._run.options.debug:
+        # For debug runs, wait for three minutes to ensure most code
+        # paths are executed.
+        logging.info('Waiting for 3 minutes only for debug run. '
+                     'Would have waited for %s seconds.', timeout)
+        timeout = 3 * 60
 
-        manager = self._run.attrs.manifest_manager
-        if sync_stages.MasterSlaveLKGMSyncStage.sub_manager:
-          manager = sync_stages.MasterSlaveLKGMSyncStage.sub_manager
-        return manager.GetBuildersStatus(
-            self._run.attrs.metadata.GetValue('build_id'),
-            builder_names,
-            timeout=timeout)
+      manager = self._run.attrs.manifest_manager
+      if sync_stages.MasterSlaveLKGMSyncStage.sub_manager:
+        manager = sync_stages.MasterSlaveLKGMSyncStage.sub_manager
+      slave_statuses.update(manager.GetBuildersStatus(
+          self._run.attrs.metadata.GetValue('build_id'),
+          builder_names,
+          timeout=timeout))
+    return slave_statuses
 
   def _HandleStageException(self, exc_info):
     """Decide whether an exception should be treated as fatal."""
@@ -251,19 +243,19 @@ class MasterSlaveSyncCompletionStage(ManifestVersionedSyncCompletionStage):
       cros_build_lib.PrintBuildbotStepWarnings()
 
     if failing:
-      cros_build_lib.Warning('\n'.join([
+      logging.warning('\n'.join([
           'The following builders failed with this manifest:',
           ', '.join(sorted(failing)),
           'Please check the logs of the failing builders for details.']))
 
     if inflight:
-      cros_build_lib.Warning('\n'.join([
+      logging.warning('\n'.join([
           'The following builders took too long to finish:',
           ', '.join(sorted(inflight)),
           'Please check the logs of these builders for details.']))
 
     if no_stat:
-      cros_build_lib.Warning('\n'.join([
+      logging.warning('\n'.join([
           'The following builders did not start or failed prematurely:',
           ', '.join(sorted(no_stat)),
           'Please check the logs of these builders for details.']))
@@ -485,9 +477,15 @@ class CanaryCompletionStage(MasterSlaveSyncCompletionStage):
 class CommitQueueCompletionStage(MasterSlaveSyncCompletionStage):
   """Commits or reports errors to CL's that failed to be validated."""
 
+  # These stages are required to have run at least once and to never have
+  # failed, on each important slave. Otherwise, we may have incomplete
+  # information on which CLs affect which builders, and thus skip all
+  # board-aware submission.
+  _CRITICAL_STAGES = ('CommitQueueSync',)
+
   def HandleSuccess(self):
     if self._run.config.master:
-      self.sync_stage.pool.SubmitPool()
+      self.sync_stage.pool.SubmitPool(reason=constants.STRATEGY_CQ_SUCCESS)
       # After submitting the pool, update the commit hashes for uprevved
       # ebuilds.
       manifest = git.ManifestCheckout.Cached(self._build_root)
@@ -534,16 +532,20 @@ class CommitQueueCompletionStage(MasterSlaveSyncCompletionStage):
     Returns:
       A tuple of (config_map, action_history), where the config_map
       is a dictionary mapping build_id to config name for all slaves
-      in this run, and action_history is a list of all CL actions
-      associated with |changes|.
+      in this run plus the master, and action_history is a list of all
+      CL actions associated with |changes|.
     """
     # build_id is the master build id for the run.
     build_id, db = self._run.GetCIDBHandle()
     assert db, 'No database connection to use.'
     slave_list = db.GetSlaveStatuses(build_id)
+    # TODO(akeshet): We are getting the full action history for all changes that
+    # were in this CQ run. It would make more sense to only get the actions from
+    # build_ids of this master and its slaves.
     action_history = db.GetActionsForChanges(changes)
 
     config_map = dict()
+
     # Build the build_id to config_name mapping. Note that if add the
     # "relaunch" feature in cbuildbot, there may be multiple build ids
     # for the same slave config. We will have to make sure
@@ -551,6 +553,13 @@ class CommitQueueCompletionStage(MasterSlaveSyncCompletionStage):
     # latest start time).
     for d in slave_list:
       config_map[d['id']] = d['build_config']
+
+    # TODO(akeshet): We are giving special treatment to the CQ master, which
+    # makes this logic CQ specific. We only use this logic in the CQ anyway at
+    # the moment, but may need to reconsider if we need to generalize to other
+    # master-slave builds.
+    assert self._run.config.name == constants.CQ_MASTER
+    config_map[build_id] = constants.CQ_MASTER
 
     return config_map, action_history
 
@@ -583,6 +592,47 @@ class CommitQueueCompletionStage(MasterSlaveSyncCompletionStage):
 
     return changes_by_config
 
+  def _ShouldSubmitPartialPool(self):
+    """Determine whether we should attempt or skip SubmitPartialPool.
+
+    Returns:
+      True if all important, non-sanity-check slaves ran and completed all
+      critical stages, and hence it is safe to attempt SubmitPartialPool. False
+      otherwise.
+    """
+    # sanity_check_slaves should not block board-aware submission, since they do
+    # not actually apply test patches.
+    sanity_check_slaves = set(self._run.config.sanity_check_slaves)
+    all_slaves = set([x.name for x in self._GetSlaveConfigs()])
+    all_slaves -= sanity_check_slaves
+    assert self._run.config.name not in all_slaves
+
+    # Get slave stages.
+    build_id, db = self._run.GetCIDBHandle()
+    assert db, 'No database connection to use.'
+    slave_stages = db.GetSlaveStages(build_id)
+
+    should_submit = True
+    ACCEPTED_STATUSES = (constants.BUILDER_STATUS_PASSED,
+                         constants.BUILDER_STATUS_SKIPPED,)
+
+    # Configs that have passed critical stages.
+    configs_per_stage = {stage: set() for stage in self._CRITICAL_STAGES}
+
+    for stage in slave_stages:
+      if (stage['name'] in self._CRITICAL_STAGES and
+          stage['status'] in ACCEPTED_STATUSES):
+        configs_per_stage[stage['name']].add(stage['build_config'])
+
+    for stage in self._CRITICAL_STAGES:
+      missing_configs = all_slaves - configs_per_stage[stage]
+      if missing_configs:
+        logging.warn('Config(s) %s did not complete critical stage %s.',
+                     ' '.join(missing_configs), stage)
+        should_submit = False
+
+    return should_submit
+
   def CQMasterHandleFailure(self, failing, inflight, no_stat):
     """Handle changes in the validation pool upon build failure or timeout.
 
@@ -598,17 +648,28 @@ class CommitQueueCompletionStage(MasterSlaveSyncCompletionStage):
     messages = self._GetFailedMessages(failing)
     self.SendInfraAlertIfNeeded(failing, inflight, no_stat)
 
-    # Start with all the changes in the validation pool.
     changes = self.sync_stage.pool.changes
-    changes_by_config = self.GetRelevantChangesForSlaves(changes, no_stat)
 
-    # Even if there was a failure, we can submit the changes that indicate
-    # that they don't care about this failure.
-    changes = self.sync_stage.pool.SubmitPartialPool(
-        changes, messages, changes_by_config, failing, inflight, no_stat)
+    do_partial_submission = self._ShouldSubmitPartialPool()
 
-    tot_sanity = self._ToTSanity(
-        self._run.config.sanity_check_slaves, self._slave_statuses)
+    if do_partial_submission:
+      changes_by_config = self.GetRelevantChangesForSlaves(changes, no_stat)
+
+      # Even if there was a failure, we can submit the changes that indicate
+      # that they don't care about this failure.
+      changes = self.sync_stage.pool.SubmitPartialPool(
+          changes, messages, changes_by_config, failing, inflight, no_stat,
+          reason=constants.STRATEGY_CQ_PARTIAL)
+    else:
+      logging.warn('Not doing any partial submission, due to critical stage '
+                   'failure(s).')
+      title = 'CQ encountered a critical failure.'
+      msg = ('CQ encountered a critical failure, and hence skipped '
+             'board-aware submission. See %s' % self.ConstructDashboardURL())
+      tree_status.SendHealthAlert(self._run, title, msg)
+
+    sanity_check_slaves = set(self._run.config.sanity_check_slaves)
+    tot_sanity = self._ToTSanity(sanity_check_slaves, self._slave_statuses)
 
     if not tot_sanity:
       # Sanity check slave failure may have been caused by bug(s)

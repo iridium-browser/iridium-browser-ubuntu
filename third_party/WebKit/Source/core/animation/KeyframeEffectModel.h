@@ -31,9 +31,11 @@
 #ifndef KeyframeEffectModel_h
 #define KeyframeEffectModel_h
 
+#include "core/CoreExport.h"
 #include "core/animation/AnimationEffect.h"
-#include "core/animation/AnimationNode.h"
+#include "core/animation/EffectModel.h"
 #include "core/animation/InterpolationEffect.h"
+#include "core/animation/PropertyHandle.h"
 #include "core/animation/StringKeyframe.h"
 #include "core/animation/animatable/AnimatableValueKeyframe.h"
 #include "platform/animation/TimingFunction.h"
@@ -50,7 +52,7 @@ namespace blink {
 class Element;
 class KeyframeEffectModelTest;
 
-class KeyframeEffectModelBase : public AnimationEffect {
+class CORE_EXPORT KeyframeEffectModelBase : public EffectModel {
 public:
     // FIXME: Implement accumulation.
 
@@ -73,19 +75,19 @@ public:
 
     bool isReplaceOnly();
 
-    PropertySet properties() const;
+    PropertyHandleSet properties() const;
 
     using KeyframeVector = WillBeHeapVector<RefPtrWillBeMember<Keyframe>>;
     const KeyframeVector& getFrames() const { return m_keyframes; }
     void setFrames(KeyframeVector& keyframes);
 
-    const PropertySpecificKeyframeVector& getPropertySpecificKeyframes(CSSPropertyID id) const
+    const PropertySpecificKeyframeVector& getPropertySpecificKeyframes(PropertyHandle property) const
     {
         ensureKeyframeGroups();
-        return m_keyframeGroups->get(id)->keyframes();
+        return m_keyframeGroups->get(property)->keyframes();
     }
 
-    // AnimationEffect implementation.
+    // EffectModel implementation.
     virtual void sample(int iteration, double fraction, double iterationDuration, OwnPtrWillBeRawPtr<WillBeHeapVector<RefPtrWillBeMember<Interpolation>>>&) const override;
 
     virtual bool isKeyframeEffectModel() const override { return true; }
@@ -111,7 +113,7 @@ public:
 
     static KeyframeVector normalizedKeyframesForInspector(const KeyframeVector& keyframes) { return normalizedKeyframes(keyframes); }
 
-    bool affects(CSSPropertyID property) const override
+    bool affects(PropertyHandle property) const override
     {
         ensureKeyframeGroups();
         return m_keyframeGroups->contains(property);
@@ -134,7 +136,7 @@ protected:
     // The spec describes filtering the normalized keyframes at sampling time
     // to get the 'property-specific keyframes'. For efficiency, we cache the
     // property-specific lists.
-    using KeyframeGroupMap = WillBeHeapHashMap<CSSPropertyID, OwnPtrWillBeMember<PropertySpecificKeyframeGroup>>;
+    using KeyframeGroupMap = WillBeHeapHashMap<PropertyHandle, OwnPtrWillBeMember<PropertySpecificKeyframeGroup>>;
     mutable OwnPtrWillBeMember<KeyframeGroupMap> m_keyframeGroups;
     mutable RefPtrWillBeMember<InterpolationEffect> m_interpolationEffect;
     RefPtr<TimingFunction> m_neutralKeyframeEasing;
@@ -175,26 +177,26 @@ using StringKeyframeEffectModel = KeyframeEffectModel<StringKeyframe>;
 using StringKeyframeVector = StringKeyframeEffectModel::KeyframeVector;
 using StringPropertySpecificKeyframeVector = StringKeyframeEffectModel::PropertySpecificKeyframeVector;
 
-DEFINE_TYPE_CASTS(KeyframeEffectModelBase, AnimationEffect, value, value->isKeyframeEffectModel(), value.isKeyframeEffectModel());
+DEFINE_TYPE_CASTS(KeyframeEffectModelBase, EffectModel, value, value->isKeyframeEffectModel(), value.isKeyframeEffectModel());
 DEFINE_TYPE_CASTS(AnimatableValueKeyframeEffectModel, KeyframeEffectModelBase, value, value->isAnimatableValueKeyframeEffectModel(), value.isAnimatableValueKeyframeEffectModel());
 DEFINE_TYPE_CASTS(StringKeyframeEffectModel, KeyframeEffectModelBase, value, value->isStringKeyframeEffectModel(), value.isStringKeyframeEffectModel());
 
-inline const AnimatableValueKeyframeEffectModel* toAnimatableValueKeyframeEffectModel(const AnimationEffect* base)
+inline const AnimatableValueKeyframeEffectModel* toAnimatableValueKeyframeEffectModel(const EffectModel* base)
 {
     return toAnimatableValueKeyframeEffectModel(toKeyframeEffectModelBase(base));
 }
 
-inline AnimatableValueKeyframeEffectModel* toAnimatableValueKeyframeEffectModel(AnimationEffect* base)
+inline AnimatableValueKeyframeEffectModel* toAnimatableValueKeyframeEffectModel(EffectModel* base)
 {
     return toAnimatableValueKeyframeEffectModel(toKeyframeEffectModelBase(base));
 }
 
-inline const StringKeyframeEffectModel* toStringKeyframeEffectModel(const AnimationEffect* base)
+inline const StringKeyframeEffectModel* toStringKeyframeEffectModel(const EffectModel* base)
 {
     return toStringKeyframeEffectModel(toKeyframeEffectModelBase(base));
 }
 
-inline StringKeyframeEffectModel* toStringKeyframeEffectModel(AnimationEffect* base)
+inline StringKeyframeEffectModel* toStringKeyframeEffectModel(EffectModel* base)
 {
     return toStringKeyframeEffectModel(toKeyframeEffectModelBase(base));
 }

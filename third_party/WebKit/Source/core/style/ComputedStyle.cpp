@@ -197,16 +197,16 @@ StyleRecalcChange ComputedStyle::stylePropagationDiff(const ComputedStyle* oldSt
 ItemPosition ComputedStyle::resolveAlignment(const ComputedStyle& parentStyle, const ComputedStyle& childStyle, ItemPosition resolvedAutoPositionForLayoutObject)
 {
     // The auto keyword computes to the parent's align-items computed value, or to "stretch", if not set or "auto".
-    if (childStyle.alignSelf() == ItemPositionAuto)
-        return (parentStyle.alignItems() == ItemPositionAuto) ? resolvedAutoPositionForLayoutObject : parentStyle.alignItems();
-    return childStyle.alignSelf();
+    if (childStyle.alignSelfPosition() == ItemPositionAuto)
+        return (parentStyle.alignItemsPosition() == ItemPositionAuto) ? resolvedAutoPositionForLayoutObject : parentStyle.alignItemsPosition();
+    return childStyle.alignSelfPosition();
 }
 
 ItemPosition ComputedStyle::resolveJustification(const ComputedStyle& parentStyle, const ComputedStyle& childStyle, ItemPosition resolvedAutoPositionForLayoutObject)
 {
-    if (childStyle.justifySelf() == ItemPositionAuto)
-        return (parentStyle.justifyItems() == ItemPositionAuto) ? resolvedAutoPositionForLayoutObject : parentStyle.justifyItems();
-    return childStyle.justifySelf();
+    if (childStyle.justifySelfPosition() == ItemPositionAuto)
+        return (parentStyle.justifyItemsPosition() == ItemPositionAuto) ? resolvedAutoPositionForLayoutObject : parentStyle.justifyItemsPosition();
+    return childStyle.justifySelfPosition();
 }
 
 void ComputedStyle::inheritFrom(const ComputedStyle& inheritParent, IsAtShadowBoundary isAtShadowBoundary)
@@ -468,7 +468,6 @@ bool ComputedStyle::diffNeedsFullLayoutAndPaintInvalidation(const ComputedStyle&
             || rareNonInheritedData->m_wrapThrough != other.rareNonInheritedData->m_wrapThrough
             || rareNonInheritedData->m_shapeMargin != other.rareNonInheritedData->m_shapeMargin
             || rareNonInheritedData->m_order != other.rareNonInheritedData->m_order
-            || rareNonInheritedData->m_justifyContent != other.rareNonInheritedData->m_justifyContent
             || rareNonInheritedData->m_grid.get() != other.rareNonInheritedData->m_grid.get()
             || rareNonInheritedData->m_gridItem.get() != other.rareNonInheritedData->m_gridItem.get()
             || rareNonInheritedData->m_textCombine != other.rareNonInheritedData->m_textCombine
@@ -647,9 +646,11 @@ bool ComputedStyle::diffNeedsFullLayout(const ComputedStyle& other) const
 
     if (rareNonInheritedData.get() != other.rareNonInheritedData.get()) {
         if (rareNonInheritedData->m_alignContent != other.rareNonInheritedData->m_alignContent
-            || rareNonInheritedData->m_alignContentDistribution != other.rareNonInheritedData->m_alignContentDistribution
             || rareNonInheritedData->m_alignItems != other.rareNonInheritedData->m_alignItems
-            || rareNonInheritedData->m_alignSelf != other.rareNonInheritedData->m_alignSelf)
+            || rareNonInheritedData->m_alignSelf != other.rareNonInheritedData->m_alignSelf
+            || rareNonInheritedData->m_justifyContent != other.rareNonInheritedData->m_justifyContent
+            || rareNonInheritedData->m_justifyItems != other.rareNonInheritedData->m_justifyItems
+            || rareNonInheritedData->m_justifySelf != other.rareNonInheritedData->m_justifySelf)
             return true;
     }
 
@@ -868,7 +869,7 @@ bool ComputedStyle::hasWillChangeCompositingHint() const
         switch (rareNonInheritedData->m_willChange->m_properties[i]) {
         case CSSPropertyOpacity:
         case CSSPropertyTransform:
-        case CSSPropertyWebkitTransform:
+        case CSSPropertyAliasWebkitTransform:
         case CSSPropertyTop:
         case CSSPropertyLeft:
         case CSSPropertyBottom:
@@ -1008,7 +1009,8 @@ short ComputedStyle::verticalBorderSpacing() const { return inherited->vertical_
 void ComputedStyle::setHorizontalBorderSpacing(short v) { SET_VAR(inherited, horizontal_border_spacing, v); }
 void ComputedStyle::setVerticalBorderSpacing(short v) { SET_VAR(inherited, vertical_border_spacing, v); }
 
-FloatRoundedRect ComputedStyle::getRoundedBorderFor(const LayoutRect& borderRect, bool includeLogicalLeftEdge, bool includeLogicalRightEdge) const
+FloatRoundedRect ComputedStyle::getRoundedBorderFor(const LayoutRect& borderRect,
+    bool includeLogicalLeftEdge, bool includeLogicalRightEdge) const
 {
     FloatRoundedRect roundedRect(pixelSnappedIntRect(borderRect));
     if (hasBorderRadius()) {
@@ -1028,22 +1030,27 @@ FloatRoundedRect ComputedStyle::getRoundedInnerBorderFor(const LayoutRect& borde
     int topWidth = (horizontal || includeLogicalLeftEdge) ? borderTopWidth() : 0;
     int bottomWidth = (horizontal || includeLogicalRightEdge) ? borderBottomWidth() : 0;
 
-    return getRoundedInnerBorderFor(borderRect, topWidth, bottomWidth, leftWidth, rightWidth, includeLogicalLeftEdge, includeLogicalRightEdge);
+    return getRoundedInnerBorderFor(borderRect,
+        LayoutRectOutsets(-topWidth, -rightWidth, -bottomWidth, -leftWidth),
+        includeLogicalLeftEdge, includeLogicalRightEdge);
 }
 
 FloatRoundedRect ComputedStyle::getRoundedInnerBorderFor(const LayoutRect& borderRect,
-    int topWidth, int bottomWidth, int leftWidth, int rightWidth, bool includeLogicalLeftEdge, bool includeLogicalRightEdge) const
+    const LayoutRectOutsets insets, bool includeLogicalLeftEdge, bool includeLogicalRightEdge) const
 {
-    LayoutRect innerRect(borderRect.x() + leftWidth,
-        borderRect.y() + topWidth,
-        borderRect.width() - leftWidth - rightWidth,
-        borderRect.height() - topWidth - bottomWidth);
+    LayoutRect innerRect(borderRect);
+    innerRect.expand(insets);
 
     FloatRoundedRect roundedRect(pixelSnappedIntRect(innerRect));
 
     if (hasBorderRadius()) {
         FloatRoundedRect::Radii radii = getRoundedBorderFor(borderRect).radii();
-        radii.shrink(topWidth, bottomWidth, leftWidth, rightWidth);
+        // Insets use negative values.
+        radii.shrink(
+            -insets.top().toFloat(),
+            -insets.bottom().toFloat(),
+            -insets.left().toFloat(),
+            -insets.right().toFloat());
         roundedRect.includeLogicalEdges(radii, isHorizontalWritingMode(), includeLogicalLeftEdge, includeLogicalRightEdge);
     }
     return roundedRect;
@@ -1119,9 +1126,9 @@ const AtomicString& ComputedStyle::hyphenString() const
         return hyphenationString;
 
     // FIXME: This should depend on locale.
-    DEFINE_STATIC_LOCAL(AtomicString, hyphenMinusString, (&hyphenMinus, 1));
-    DEFINE_STATIC_LOCAL(AtomicString, hyphenString, (&hyphen, 1));
-    return font().primaryFontHasGlyphForCharacter(hyphen) ? hyphenString : hyphenMinusString;
+    DEFINE_STATIC_LOCAL(AtomicString, hyphenMinusString, (&hyphenMinusCharacter, 1));
+    DEFINE_STATIC_LOCAL(AtomicString, hyphenString, (&hyphenCharacter, 1));
+    return font().primaryFontHasGlyphForCharacter(hyphenCharacter) ? hyphenString : hyphenMinusString;
 }
 
 const AtomicString& ComputedStyle::textEmphasisMarkString() const
@@ -1132,28 +1139,28 @@ const AtomicString& ComputedStyle::textEmphasisMarkString() const
     case TextEmphasisMarkCustom:
         return textEmphasisCustomMark();
     case TextEmphasisMarkDot: {
-        DEFINE_STATIC_LOCAL(AtomicString, filledDotString, (&bullet, 1));
-        DEFINE_STATIC_LOCAL(AtomicString, openDotString, (&whiteBullet, 1));
+        DEFINE_STATIC_LOCAL(AtomicString, filledDotString, (&bulletCharacter, 1));
+        DEFINE_STATIC_LOCAL(AtomicString, openDotString, (&whiteBulletCharacter, 1));
         return textEmphasisFill() == TextEmphasisFillFilled ? filledDotString : openDotString;
     }
     case TextEmphasisMarkCircle: {
-        DEFINE_STATIC_LOCAL(AtomicString, filledCircleString, (&blackCircle, 1));
-        DEFINE_STATIC_LOCAL(AtomicString, openCircleString, (&whiteCircle, 1));
+        DEFINE_STATIC_LOCAL(AtomicString, filledCircleString, (&blackCircleCharacter, 1));
+        DEFINE_STATIC_LOCAL(AtomicString, openCircleString, (&whiteCircleCharacter, 1));
         return textEmphasisFill() == TextEmphasisFillFilled ? filledCircleString : openCircleString;
     }
     case TextEmphasisMarkDoubleCircle: {
-        DEFINE_STATIC_LOCAL(AtomicString, filledDoubleCircleString, (&fisheye, 1));
-        DEFINE_STATIC_LOCAL(AtomicString, openDoubleCircleString, (&bullseye, 1));
+        DEFINE_STATIC_LOCAL(AtomicString, filledDoubleCircleString, (&fisheyeCharacter, 1));
+        DEFINE_STATIC_LOCAL(AtomicString, openDoubleCircleString, (&bullseyeCharacter, 1));
         return textEmphasisFill() == TextEmphasisFillFilled ? filledDoubleCircleString : openDoubleCircleString;
     }
     case TextEmphasisMarkTriangle: {
-        DEFINE_STATIC_LOCAL(AtomicString, filledTriangleString, (&blackUpPointingTriangle, 1));
-        DEFINE_STATIC_LOCAL(AtomicString, openTriangleString, (&whiteUpPointingTriangle, 1));
+        DEFINE_STATIC_LOCAL(AtomicString, filledTriangleString, (&blackUpPointingTriangleCharacter, 1));
+        DEFINE_STATIC_LOCAL(AtomicString, openTriangleString, (&whiteUpPointingTriangleCharacter, 1));
         return textEmphasisFill() == TextEmphasisFillFilled ? filledTriangleString : openTriangleString;
     }
     case TextEmphasisMarkSesame: {
-        DEFINE_STATIC_LOCAL(AtomicString, filledSesameString, (&sesameDot, 1));
-        DEFINE_STATIC_LOCAL(AtomicString, openSesameString, (&whiteSesameDot, 1));
+        DEFINE_STATIC_LOCAL(AtomicString, filledSesameString, (&sesameDotCharacter, 1));
+        DEFINE_STATIC_LOCAL(AtomicString, openSesameString, (&whiteSesameDotCharacter, 1));
         return textEmphasisFill() == TextEmphasisFillFilled ? filledSesameString : openSesameString;
     }
     case TextEmphasisMarkAuto:
@@ -1253,10 +1260,10 @@ int ComputedStyle::computedLineHeight() const
     if (lh.isNegative())
         return fontMetrics().lineSpacing();
 
-    if (lh.isPercent())
+    if (lh.hasPercent())
         return minimumValueForLength(lh, fontSize());
 
-    return lh.value();
+    return std::min(lh.value(), LayoutUnit::max().toFloat());
 }
 
 void ComputedStyle::setWordSpacing(float wordSpacing)

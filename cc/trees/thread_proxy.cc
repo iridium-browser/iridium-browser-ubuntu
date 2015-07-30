@@ -401,6 +401,15 @@ void ThreadProxy::SetNeedsCommitOnImplThread() {
   impl().scheduler->SetNeedsCommit();
 }
 
+void ThreadProxy::SetVideoNeedsBeginFrames(bool needs_begin_frames) {
+  TRACE_EVENT1("cc", "ThreadProxy::SetVideoNeedsBeginFrames",
+               "needs_begin_frames", needs_begin_frames);
+  DCHECK(IsImplThread());
+  // In tests the layer tree is destroyed after the scheduler is.
+  if (impl().scheduler)
+    impl().scheduler->SetVideoNeedsBeginFrames(needs_begin_frames);
+}
+
 void ThreadProxy::PostAnimationEventsToMainThreadOnImplThread(
     scoped_ptr<AnimationEventsVector> events) {
   TRACE_EVENT0("cc",
@@ -1078,8 +1087,7 @@ DrawResult ThreadProxy::DrawSwapInternal(bool forced_draw) {
   }
 
   if (draw_frame) {
-    impl().layer_tree_host_impl->DrawLayers(
-        &frame, impl().scheduler->LastBeginImplFrameTime());
+    impl().layer_tree_host_impl->DrawLayers(&frame);
     result = DRAW_SUCCESS;
   } else {
     DCHECK_NE(DRAW_SUCCESS, result);
@@ -1154,8 +1162,8 @@ base::TimeDelta ThreadProxy::CommitToActivateDurationEstimate() {
   return impl().timing_history.CommitToActivateDurationEstimate();
 }
 
-void ThreadProxy::DidBeginImplFrameDeadline() {
-  impl().layer_tree_host_impl->ResetCurrentBeginFrameArgsForNextFrame();
+void ThreadProxy::DidFinishImplFrame() {
+  impl().layer_tree_host_impl->DidFinishImplFrame();
 }
 
 void ThreadProxy::SendBeginFramesToChildren(const BeginFrameArgs& args) {

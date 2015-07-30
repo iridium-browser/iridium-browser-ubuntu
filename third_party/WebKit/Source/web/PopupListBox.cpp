@@ -40,7 +40,6 @@
 #include "platform/PlatformGestureEvent.h"
 #include "platform/PlatformKeyboardEvent.h"
 #include "platform/PlatformMouseEvent.h"
-#include "platform/PlatformScreen.h"
 #include "platform/PlatformTouchEvent.h"
 #include "platform/PlatformWheelEvent.h"
 #include "platform/RuntimeEnabledFeatures.h"
@@ -177,7 +176,7 @@ bool PopupListBox::handleWheelEvent(const PlatformWheelEvent& event)
         return true;
     }
 
-    ScrollableArea::handleWheelEvent(event);
+    ScrollableArea::handleWheel(event);
     return true;
 }
 
@@ -286,7 +285,7 @@ static String stripLeadingWhiteSpace(const String& string)
     int length = string.length();
     int i;
     for (i = 0; i < length; ++i)
-        if (string[i] != noBreakSpace
+        if (string[i] != noBreakSpaceCharacter
             && !isSpaceOrNewline(string[i]))
             break;
 
@@ -351,7 +350,7 @@ void PopupListBox::paint(GraphicsContext* gc, const IntRect& rect)
     paintRect.moveBy(-location());
 
     if (numItems()) {
-        IntSize scrollOffset = flooredIntSize(m_scrollOffset);
+        IntSize scrollOffset = toIntSize(m_scrollOffset);
         // FIXME: Calling this part of the scroll might cause issues later on
         // depending on how the compositor winds up using this information.
         // We may need to use an additional TransformRecorder instead, if that

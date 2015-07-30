@@ -262,19 +262,19 @@
       <!-- Color Enhancer extension -->
 
       <message desc="The title of the application, displayed in the web store." name="IDS_COLOR_ENHANCER_APPNAME">
-        Color Vision Enhancer
+        Color Enhancer
       </message>
       <message desc="The description of the application, displayed in the web store." name="IDS_COLOR_ENHANCER_APPDESC">
         A customizable color filter applied to webpages to improve color perception.
       </message>
       <message desc="Title for a slider that determines how much to rotate the color space." name="IDS_COLOR_ENHANCER_ADJUSTMENT_FACTOR">
-        Adjustment Factor
+        Color adjustment
       </message>
       <message desc="Title for a slider that determines by how much the color should be filtered." name="IDS_COLOR_ENHANCER_DEGREE">
         Degree
       </message>
       <message desc="Title for a dropdown selecting between colors to enhance." name="IDS_COLOR_ENHANCER_TYPE_CHOICE">
-        Improve perception for:
+        Step 1: Select the row with the faintest stars:
       </message>
       <message desc="Choice to enhancing the red color." name="IDS_COLOR_ENHANCER_TYPE_RED">
         Red
@@ -285,8 +285,48 @@
       <message desc="Choice to enhancing the blue color." name="IDS_COLOR_ENHANCER_TYPE_BLUE">
         Blue
       </message>
-      <message desc="Title for button that will apply these settings to all currently open websites." name="IDS_COLOR_ENHANCER_RESET">
-        Reset all sites
+      <message desc="Title for checkbox that enables the extension." name="IDS_COLOR_ENHANCER_ENABLE">
+        Enable?
+      </message>
+      <message desc="Title for slider changes color vision deficiency severity." name="IDS_COLOR_ENHANCER_SEVERITY">
+        Step 2: Adjust the slider until all of the stars are visible in the
+        selected row
+      </message>
+      <message desc="Title for the heading before the section containing setup." name="IDS_COLOR_ENHANCER_SETUP_HEADING">
+        Setup:
+      </message>
+      <message desc="Button that resets the color enhancer extension to its default state." name="IDS_COLOR_ENHANCER_RESET">
+        Reset
+      </message>
+      <message desc="OK button for the color enhancer setup." name="IDS_COLOR_ENHANCER_OK">
+        OK
+      </message>
+      <message desc="Cancel button for the color enhancer setup." name="IDS_COLOR_ENHANCER_CANCEL">
+        Cancel
+      </message>
+      <message desc="Button for the color enhancer popup that opens the Setup part of the popup." name="IDS_COLOR_ENHANCER_SETUP_BUTTON">
+        Setup
+      </message>
+
+      <!-- Animation extension -->
+
+      <message desc="The title of the extension that controls whether images can animate or not, displayed in the web store." name="IDS_ANIMATION_APPNAME">
+        Animation Policy
+      </message>
+      <message desc="The description of the extension that allows users to disable animations or run them only once." name="IDS_ANIMATION_APPDESC">
+        Run animations only once, or disable animation completely.
+      </message>
+      <message desc="The title of a group of radio buttons controlling the animation policy - whether animation is allowed, allowed once only, or disabled." name="IDS_ANIMATION_POLICY">
+        Animation Policy:
+      </message>
+      <message desc="Indicates that showing animated images is allowed" name="IDS_ANIMATION_ALLOWED">
+        Allow all animated images.
+      </message>
+      <message desc="Indicates that showing animated images should only happen one time" name="IDS_ANIMATION_ONCE">
+        Allow animated images, but only once.
+      </message>
+      <message desc="Indicates that there will be no image animation" name="IDS_ANIMATION_NONE">
+        Disable all image animation.
       </message>
 
     </messages>

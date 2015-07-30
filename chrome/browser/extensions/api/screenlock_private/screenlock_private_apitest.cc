@@ -10,6 +10,7 @@
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/easy_unlock_service.h"
+#include "chrome/browser/signin/proximity_auth_facade.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/profile_management_switches.h"
@@ -22,6 +23,7 @@ namespace extensions {
 
 namespace {
 
+const char kTestGaiaId[] = "gaia-id-testuser@gmail.com";
 const char kAttemptClickAuthMessage[] = "attemptClickAuth";
 const char kTestExtensionId[] = "lkegkdgachcnekllcdfkijonogckdnjo";
 const char kTestUser[] = "testuser@gmail.com";
@@ -49,12 +51,13 @@ class ScreenlockPrivateApiTest : public ExtensionApiTest,
 
   void SetUpOnMainThread() override {
     SigninManagerFactory::GetForProfile(profile())
-        ->SetAuthenticatedUsername(kTestUser);
+        ->SetAuthenticatedAccountInfo(kTestGaiaId, kTestUser);
     ProfileInfoCache& info_cache =
         g_browser_process->profile_manager()->GetProfileInfoCache();
     size_t index = info_cache.GetIndexOfProfileWithPath(profile()->GetPath());
     ASSERT_NE(std::string::npos, index);
-    info_cache.SetUserNameOfProfileAtIndex(index, base::UTF8ToUTF16(kTestUser));
+    info_cache.SetAuthInfoOfProfileAtIndex(index, kTestGaiaId,
+                                           base::UTF8ToUTF16(kTestUser));
     ExtensionApiTest::SetUpOnMainThread();
   }
 
@@ -74,9 +77,8 @@ class ScreenlockPrivateApiTest : public ExtensionApiTest,
                const content::NotificationDetails& details) override {
     const std::string& content = *content::Details<std::string>(details).ptr();
     if (content == kAttemptClickAuthMessage) {
-      ScreenlockBridge::Get()->lock_handler()->SetAuthType(
-          kTestUser,
-          ScreenlockBridge::LockHandler::USER_CLICK,
+      GetScreenlockBridgeInstance()->lock_handler()->SetAuthType(
+          kTestUser, proximity_auth::ScreenlockBridge::LockHandler::USER_CLICK,
           base::string16());
       EasyUnlockService::Get(profile())->AttemptAuth(kTestUser);
     }
@@ -93,11 +95,21 @@ class ScreenlockPrivateApiTest : public ExtensionApiTest,
   DISALLOW_COPY_AND_ASSIGN(ScreenlockPrivateApiTest);
 };
 
-IN_PROC_BROWSER_TEST_F(ScreenlockPrivateApiTest, LockUnlock) {
+// Time out under MSan. http://crbug.com/478091
+// Flaky under LSan on ChromeOS. http://crbug.com/482002
+#if defined(MEMORY_SANITIZER) || defined(LEAK_SANITIZER) && defined(OS_CHROMEOS)
+#define MAYBE_LockUnlock DISABLED_LockUnlock
+#define MAYBE_AuthType DISABLED_AuthType
+#else
+#define MAYBE_LockUnlock LockUnlock
+#define MAYBE_AuthType AuthType
+#endif
+
+IN_PROC_BROWSER_TEST_F(ScreenlockPrivateApiTest, MAYBE_LockUnlock) {
   RunTest("screenlock_private/lock_unlock");
 }
 
-IN_PROC_BROWSER_TEST_F(ScreenlockPrivateApiTest, AuthType) {
+IN_PROC_BROWSER_TEST_F(ScreenlockPrivateApiTest, MAYBE_AuthType) {
   RunTest("screenlock_private/auth_type");
 }
 

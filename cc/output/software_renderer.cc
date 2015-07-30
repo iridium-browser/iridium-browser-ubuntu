@@ -236,8 +236,6 @@ bool SoftwareRenderer::IsSoftwareResource(
       return false;
     case ResourceProvider::RESOURCE_TYPE_BITMAP:
       return true;
-    case ResourceProvider::RESOURCE_TYPE_INVALID:
-      break;
   }
 
   LOG(FATAL) << "Invalid resource type.";
@@ -440,7 +438,7 @@ void SoftwareRenderer::DrawTextureQuad(const DrawingFrame* frame,
       QuadVertexRect(), quad->rect, quad->visible_rect);
   SkRect quad_rect = gfx::RectFToSkRect(visible_quad_vertex_rect);
 
-  if (quad->flipped)
+  if (quad->y_flipped)
     current_canvas_->scale(1, -1);
 
   bool blend_background = quad->background_color != SK_ColorTRANSPARENT &&
@@ -510,10 +508,10 @@ void SoftwareRenderer::DrawRenderPassQuad(const DrawingFrame* frame,
                                           const RenderPassDrawQuad* quad) {
   ScopedResource* content_texture =
       render_pass_textures_.get(quad->render_pass_id);
-  if (!content_texture || !content_texture->id())
-    return;
-
+  DCHECK(content_texture);
+  DCHECK(content_texture->id());
   DCHECK(IsSoftwareResource(content_texture->id()));
+
   ResourceProvider::ScopedReadLockSoftware lock(resource_provider_,
                                                 content_texture->id());
   if (!lock.valid())

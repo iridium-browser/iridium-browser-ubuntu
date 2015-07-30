@@ -194,27 +194,20 @@ void AudioParamHandler::disconnect(AudioNodeOutput& output)
 
 // ----------------------------------------------------------------
 
-AudioParam::AudioParam(AudioContext* context, double defaultValue)
+AudioParam::AudioParam(AudioContext& context, double defaultValue)
     : m_handler(AudioParamHandler::create(context, defaultValue))
     , m_context(context)
 {
 }
 
-AudioParam* AudioParam::create(AudioContext* context, double defaultValue)
+AudioParam* AudioParam::create(AudioContext& context, double defaultValue)
 {
-    ASSERT(context);
     return new AudioParam(context, defaultValue);
 }
 
 DEFINE_TRACE(AudioParam)
 {
     visitor->trace(m_context);
-    // TODO(tkent): Oilpan: m_renderingOutputs should not be strong references.
-    // This is a short-term workaround to avoid crashes, and causes AudioNode
-    // leaks.
-    AudioContext::AutoLocker locker(context());
-    for (unsigned i = 0; i < handler().numberOfRenderingConnections(); ++i)
-        visitor->trace(handler().renderingOutput(i)->node());
 }
 
 float AudioParam::value() const

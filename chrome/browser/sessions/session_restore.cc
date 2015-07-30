@@ -16,6 +16,7 @@
 #include "base/debug/alias.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
+#include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
@@ -178,7 +179,7 @@ class SessionRestoreImpl : public content::NotificationObserver {
     }
 
     // Always create in a new window.
-    FinishedTabCreation(true, true, created_contents);
+    FinishedTabCreation(true, true, &created_contents);
 
     on_session_restored_callbacks_->Notify(
         static_cast<int>(created_contents.size()));
@@ -279,10 +280,9 @@ class SessionRestoreImpl : public content::NotificationObserver {
   // have been loaded.
   //
   // Returns the Browser that was created, if any.
-  Browser* FinishedTabCreation(
-      bool succeeded,
-      bool created_tabbed_browser,
-      const std::vector<RestoredTab>& contents_created) {
+  Browser* FinishedTabCreation(bool succeeded,
+                               bool created_tabbed_browser,
+                               std::vector<RestoredTab>* contents_created) {
     Browser* browser = nullptr;
     if (!created_tabbed_browser && always_create_tabbed_browser_) {
       browser =
@@ -297,8 +297,12 @@ class SessionRestoreImpl : public content::NotificationObserver {
     }
 
     if (succeeded) {
+      if (SessionRestore::GetSmartRestoreMode() !=
+          SessionRestore::SMART_RESTORE_MODE_OFF) {
+        std::stable_sort(contents_created->begin(), contents_created->end());
+      }
       // Start Loading tabs.
-      SessionRestoreDelegate::RestoreTabs(contents_created, restore_started_);
+      SessionRestoreDelegate::RestoreTabs(*contents_created, restore_started_);
     }
 
     if (!synchronous_) {
@@ -361,7 +365,7 @@ class SessionRestoreImpl : public content::NotificationObserver {
       content::BrowserContext::GetDefaultStoragePartition(profile_)
           ->GetDOMStorageContext()
           ->StartScavengingUnusedSessionStorage();
-      return FinishedTabCreation(false, false, *created_contents);
+      return FinishedTabCreation(false, false, created_contents);
     }
 
 #if defined(OS_CHROMEOS)
@@ -461,7 +465,7 @@ class SessionRestoreImpl : public content::NotificationObserver {
     // FinishedTabCreation will create a new TabbedBrowser and add the urls to
     // it.
     Browser* finished_browser =
-        FinishedTabCreation(true, has_tabbed_browser, *created_contents);
+        FinishedTabCreation(true, has_tabbed_browser, created_contents);
     if (finished_browser)
       last_browser = finished_browser;
 
@@ -504,7 +508,26 @@ class SessionRestoreImpl : public content::NotificationObserver {
                             std::vector<RestoredTab>* created_contents) {
     DVLOG(1) << "RestoreTabsToBrowser " << window.tabs.size();
     DCHECK(!window.tabs.empty());
+    base::TimeTicks now = base::TimeTicks::Now();
+    base::TimeTicks highest_time = base::TimeTicks::UnixEpoch();
     if (initial_tab_count == 0) {
+      if (SessionRestore::GetSmartRestoreMode() ==
+          SessionRestore::SMART_RESTORE_MODE_MRU) {
+        // The last active time of a WebContents is initially set to the
+        // creation time of the tab, which is not necessarly the same as the
+        // loading time, so we have to restore the values. Also, since TimeTicks
+        // only make sense in their current session, these values have to be
+        // sanitized first. To do so, we need to first figure out the largest
+        // time. This will then be used to set the last active time of
+        // each tab where the most recent tab will have its time set to |now|
+        // and the rest of the tabs will have theirs set earlier by the same
+        // delta as they originally had.
+        for (int i = 0; i < static_cast<int>(window.tabs.size()); ++i) {
+          const sessions::SessionTab& tab = *(window.tabs[i]);
+          if (tab.last_active_time > highest_time)
+            highest_time = tab.last_active_time;
+        }
+      }
       for (int i = 0; i < static_cast<int>(window.tabs.size()); ++i) {
         const sessions::SessionTab& tab = *(window.tabs[i]);
 
@@ -517,9 +540,15 @@ class SessionRestoreImpl : public content::NotificationObserver {
         if (!contents)
           continue;
 
-        RestoredTab restored_tab;
-        restored_tab.contents = contents;
-        restored_tab.is_active = is_selected_tab;
+        // Sanitize the last active time.
+        if (SessionRestore::GetSmartRestoreMode() ==
+            SessionRestore::SMART_RESTORE_MODE_MRU) {
+          base::TimeDelta delta = highest_time - tab.last_active_time;
+          contents->SetLastActiveTime(now - delta);
+        }
+
+        RestoredTab restored_tab(contents, is_selected_tab,
+                                 tab.extension_app_id.empty(), tab.pinned);
         created_contents->push_back(restored_tab);
 
         // If this isn't the selected tab, there's nothing else to do.
@@ -542,9 +571,14 @@ class SessionRestoreImpl : public content::NotificationObserver {
         WebContents* contents =
             RestoreTab(tab, tab_index_offset + i, browser, false);
         if (contents) {
-          RestoredTab restored_tab;
-          restored_tab.contents = contents;
-          restored_tab.is_active = false;
+          // Sanitize the last active time.
+          if (SessionRestore::GetSmartRestoreMode() ==
+              SessionRestore::SMART_RESTORE_MODE_MRU) {
+            base::TimeDelta delta = highest_time - tab.last_active_time;
+            contents->SetLastActiveTime(now - delta);
+          }
+          RestoredTab restored_tab(contents, false,
+                                   tab.extension_app_id.empty(), tab.pinned);
           created_contents->push_back(restored_tab);
         }
       }
@@ -815,6 +849,17 @@ SessionRestore::CallbackSubscription
     SessionRestore::RegisterOnSessionRestoredCallback(
         const base::Callback<void(int)>& callback) {
   return on_session_restored_callbacks()->Add(callback);
+}
+
+// static
+SessionRestore::SmartRestoreMode SessionRestore::GetSmartRestoreMode() {
+  std::string prioritize_tabs = variations::GetVariationParamValue(
+      "IntelligentSessionRestore", "PrioritizeTabs");
+  if (prioritize_tabs == "mru")
+    return SMART_RESTORE_MODE_MRU;
+  if (prioritize_tabs == "simple")
+    return SMART_RESTORE_MODE_SIMPLE;
+  return SMART_RESTORE_MODE_OFF;
 }
 
 // static

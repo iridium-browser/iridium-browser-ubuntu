@@ -307,14 +307,15 @@ String StylePropertySerializer::asText() const
         case CSSPropertyTransitionDelay:
             shorthandPropertyID = CSSPropertyTransition;
             break;
-        case CSSPropertyWebkitAnimationName:
-        case CSSPropertyWebkitAnimationDuration:
-        case CSSPropertyWebkitAnimationTimingFunction:
-        case CSSPropertyWebkitAnimationDelay:
-        case CSSPropertyWebkitAnimationIterationCount:
-        case CSSPropertyWebkitAnimationDirection:
-        case CSSPropertyWebkitAnimationFillMode:
-            shorthandPropertyID = CSSPropertyWebkitAnimation;
+        case CSSPropertyAnimationName:
+        case CSSPropertyAnimationDuration:
+        case CSSPropertyAnimationTimingFunction:
+        case CSSPropertyAnimationDelay:
+        case CSSPropertyAnimationIterationCount:
+        case CSSPropertyAnimationDirection:
+        case CSSPropertyAnimationFillMode:
+        case CSSPropertyAnimationPlayState:
+            shorthandPropertyID = CSSPropertyAnimation;
             break;
         case CSSPropertyFlexDirection:
         case CSSPropertyFlexWrap:
@@ -335,12 +336,6 @@ String StylePropertySerializer::asText() const
         case CSSPropertyWebkitMaskClip:
         case CSSPropertyWebkitMaskOrigin:
             shorthandPropertyID = CSSPropertyWebkitMask;
-            break;
-        case CSSPropertyWebkitTransitionProperty:
-        case CSSPropertyWebkitTransitionDuration:
-        case CSSPropertyWebkitTransitionTimingFunction:
-        case CSSPropertyWebkitTransitionDelay:
-            shorthandPropertyID = CSSPropertyWebkitTransition;
             break;
         case CSSPropertyAll:
             result.append(getPropertyText(propertyID, property.value()->cssText(), property.isImportant(), numDecls++));
@@ -422,11 +417,11 @@ String StylePropertySerializer::getPropertyValue(CSSPropertyID propertyID) const
     case CSSPropertyFlexFlow:
         return getShorthandValue(flexFlowShorthand());
     case CSSPropertyGridColumn:
-        return getShorthandValue(gridColumnShorthand());
+        return getShorthandValue(gridColumnShorthand(), " / ");
     case CSSPropertyGridRow:
-        return getShorthandValue(gridRowShorthand());
+        return getShorthandValue(gridRowShorthand(), " / ");
     case CSSPropertyGridArea:
-        return getShorthandValue(gridAreaShorthand());
+        return getShorthandValue(gridAreaShorthand(), " / ");
     case CSSPropertyFont:
         return fontValue();
     case CSSPropertyMargin:
@@ -453,10 +448,6 @@ String StylePropertySerializer::getPropertyValue(CSSPropertyID propertyID) const
         return getShorthandValue(webkitTextEmphasisShorthand());
     case CSSPropertyWebkitTextStroke:
         return getShorthandValue(webkitTextStrokeShorthand());
-    case CSSPropertyWebkitTransition:
-        return getLayeredShorthandValue(webkitTransitionShorthand(), true);
-    case CSSPropertyWebkitAnimation:
-        return getLayeredShorthandValue(webkitAnimationShorthand(), true);
     case CSSPropertyMarker: {
         if (const CSSValue* value = m_propertySet.getPropertyCSSValue(CSSPropertyMarkerStart))
             return value->cssText();
@@ -760,7 +751,7 @@ String StylePropertySerializer::getLayeredShorthandValue(const StylePropertyShor
     return result.toString();
 }
 
-String StylePropertySerializer::getShorthandValue(const StylePropertyShorthand& shorthand) const
+String StylePropertySerializer::getShorthandValue(const StylePropertyShorthand& shorthand, String separator) const
 {
     String commonValue;
     StringBuilder result;
@@ -777,7 +768,7 @@ String StylePropertySerializer::getShorthandValue(const StylePropertyShorthand& 
             if (value->isInitialValue())
                 continue;
             if (!result.isEmpty())
-                result.append(' ');
+                result.append(separator);
             result.append(valueText);
         } else
             commonValue = String();

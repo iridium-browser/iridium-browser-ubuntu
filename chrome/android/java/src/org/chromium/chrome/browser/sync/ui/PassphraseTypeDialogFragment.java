@@ -4,11 +4,11 @@
 
 package org.chromium.chrome.browser.sync.ui;
 
-import android.app.AlertDialog;
 import android.app.Dialog;
 import android.app.DialogFragment;
 import android.content.DialogInterface;
 import android.os.Bundle;
+import android.support.v7.app.AlertDialog;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.AdapterView;
@@ -16,7 +16,6 @@ import android.widget.AdapterView.OnItemClickListener;
 import android.widget.ArrayAdapter;
 import android.widget.CheckedTextView;
 import android.widget.ListView;
-
 
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
@@ -32,6 +31,7 @@ import java.util.Set;
  */
 public class PassphraseTypeDialogFragment extends DialogFragment implements
         DialogInterface.OnClickListener, OnItemClickListener {
+    private static final String TAG = "PassphraseTypeDialogFragment";
 
     interface Listener {
         void onPassphraseTypeSelected(PassphraseType type);
@@ -97,7 +97,11 @@ public class PassphraseTypeDialogFragment extends DialogFragment implements
         return new Adapter(container, container.getDisplayNames());
     }
 
-    private class Adapter extends ArrayAdapter<String> {
+    /**
+     * The adapter for our ListView; only visible for testing purposes.
+     */
+    @VisibleForTesting
+    public class Adapter extends ArrayAdapter<String> {
 
         private final PassphraseTypeUiElementContainer mElementsContainer;
 
@@ -177,12 +181,14 @@ public class PassphraseTypeDialogFragment extends DialogFragment implements
         ListView list = new ListView(getActivity());
         Adapter adapter = createAdapter(getCurrentTypeFromArguments());
         list.setAdapter(adapter);
+        list.setId(R.id.passphrase_type_list);
         list.setOnItemClickListener(this);
+        list.setDividerHeight(0);
         PassphraseType currentType = getCurrentTypeFromArguments();
         list.setSelection(adapter.getPositionForType(currentType));
 
         // Create and return the dialog
-        return new AlertDialog.Builder(getActivity())
+        return new AlertDialog.Builder(getActivity(), R.style.AlertDialogTheme)
                 .setNegativeButton(R.string.cancel, this)
                 .setTitle(R.string.sync_passphrase_type_title)
                 .setView(list)

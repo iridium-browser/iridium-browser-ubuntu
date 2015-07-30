@@ -332,6 +332,75 @@ void CompressedTexSubImage2D(GLenum target,
   }
 }
 
+void CompressedTexImage3DBucket(GLenum target,
+                                GLint level,
+                                GLenum internalformat,
+                                GLsizei width,
+                                GLsizei height,
+                                GLsizei depth,
+                                GLuint bucket_id) {
+  gles2::cmds::CompressedTexImage3DBucket* c =
+      GetCmdSpace<gles2::cmds::CompressedTexImage3DBucket>();
+  if (c) {
+    c->Init(target, level, internalformat, width, height, depth, bucket_id);
+  }
+}
+
+void CompressedTexImage3D(GLenum target,
+                          GLint level,
+                          GLenum internalformat,
+                          GLsizei width,
+                          GLsizei height,
+                          GLsizei depth,
+                          GLsizei imageSize,
+                          uint32_t data_shm_id,
+                          uint32_t data_shm_offset) {
+  gles2::cmds::CompressedTexImage3D* c =
+      GetCmdSpace<gles2::cmds::CompressedTexImage3D>();
+  if (c) {
+    c->Init(target, level, internalformat, width, height, depth, imageSize,
+            data_shm_id, data_shm_offset);
+  }
+}
+
+void CompressedTexSubImage3DBucket(GLenum target,
+                                   GLint level,
+                                   GLint xoffset,
+                                   GLint yoffset,
+                                   GLint zoffset,
+                                   GLsizei width,
+                                   GLsizei height,
+                                   GLsizei depth,
+                                   GLenum format,
+                                   GLuint bucket_id) {
+  gles2::cmds::CompressedTexSubImage3DBucket* c =
+      GetCmdSpace<gles2::cmds::CompressedTexSubImage3DBucket>();
+  if (c) {
+    c->Init(target, level, xoffset, yoffset, zoffset, width, height, depth,
+            format, bucket_id);
+  }
+}
+
+void CompressedTexSubImage3D(GLenum target,
+                             GLint level,
+                             GLint xoffset,
+                             GLint yoffset,
+                             GLint zoffset,
+                             GLsizei width,
+                             GLsizei height,
+                             GLsizei depth,
+                             GLenum format,
+                             GLsizei imageSize,
+                             uint32_t data_shm_id,
+                             uint32_t data_shm_offset) {
+  gles2::cmds::CompressedTexSubImage3D* c =
+      GetCmdSpace<gles2::cmds::CompressedTexSubImage3D>();
+  if (c) {
+    c->Init(target, level, xoffset, yoffset, zoffset, width, height, depth,
+            format, imageSize, data_shm_id, data_shm_offset);
+  }
+}
+
 void CopyBufferSubData(GLenum readtarget,
                        GLenum writetarget,
                        GLintptr readoffset,
@@ -833,6 +902,35 @@ void GetFramebufferAttachmentParameteriv(GLenum target,
   }
 }
 
+void GetInteger64v(GLenum pname,
+                   uint32_t params_shm_id,
+                   uint32_t params_shm_offset) {
+  gles2::cmds::GetInteger64v* c = GetCmdSpace<gles2::cmds::GetInteger64v>();
+  if (c) {
+    c->Init(pname, params_shm_id, params_shm_offset);
+  }
+}
+
+void GetIntegeri_v(GLenum pname,
+                   GLuint index,
+                   uint32_t data_shm_id,
+                   uint32_t data_shm_offset) {
+  gles2::cmds::GetIntegeri_v* c = GetCmdSpace<gles2::cmds::GetIntegeri_v>();
+  if (c) {
+    c->Init(pname, index, data_shm_id, data_shm_offset);
+  }
+}
+
+void GetInteger64i_v(GLenum pname,
+                     GLuint index,
+                     uint32_t data_shm_id,
+                     uint32_t data_shm_offset) {
+  gles2::cmds::GetInteger64i_v* c = GetCmdSpace<gles2::cmds::GetInteger64i_v>();
+  if (c) {
+    c->Init(pname, index, data_shm_id, data_shm_offset);
+  }
+}
+
 void GetIntegerv(GLenum pname,
                  uint32_t params_shm_id,
                  uint32_t params_shm_offset) {
@@ -1024,6 +1122,16 @@ void GetUniformiv(GLuint program,
   }
 }
 
+void GetUniformuiv(GLuint program,
+                   GLint location,
+                   uint32_t params_shm_id,
+                   uint32_t params_shm_offset) {
+  gles2::cmds::GetUniformuiv* c = GetCmdSpace<gles2::cmds::GetUniformuiv>();
+  if (c) {
+    c->Init(program, location, params_shm_id, params_shm_offset);
+  }
+}
+
 void GetUniformIndices(GLuint program,
                        uint32_t names_bucket_id,
                        uint32_t indices_shm_id,
@@ -1063,6 +1171,28 @@ void GetVertexAttribiv(GLuint index,
                        uint32_t params_shm_offset) {
   gles2::cmds::GetVertexAttribiv* c =
       GetCmdSpace<gles2::cmds::GetVertexAttribiv>();
+  if (c) {
+    c->Init(index, pname, params_shm_id, params_shm_offset);
+  }
+}
+
+void GetVertexAttribIiv(GLuint index,
+                        GLenum pname,
+                        uint32_t params_shm_id,
+                        uint32_t params_shm_offset) {
+  gles2::cmds::GetVertexAttribIiv* c =
+      GetCmdSpace<gles2::cmds::GetVertexAttribIiv>();
+  if (c) {
+    c->Init(index, pname, params_shm_id, params_shm_offset);
+  }
+}
+
+void GetVertexAttribIuiv(GLuint index,
+                         GLenum pname,
+                         uint32_t params_shm_id,
+                         uint32_t params_shm_offset) {
+  gles2::cmds::GetVertexAttribIuiv* c =
+      GetCmdSpace<gles2::cmds::GetVertexAttribIuiv>();
   if (c) {
     c->Init(index, pname, params_shm_id, params_shm_offset);
   }

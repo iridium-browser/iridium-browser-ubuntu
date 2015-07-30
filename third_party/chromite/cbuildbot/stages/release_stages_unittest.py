@@ -8,7 +8,7 @@ from __future__ import print_function
 
 import mock
 
-from chromite.cbuildbot.cbuildbot_unittest import BuilderRunMock
+from chromite.cbuildbot import cbuildbot_unittest
 from chromite.cbuildbot.stages import artifact_stages
 from chromite.cbuildbot.stages import generic_stages_unittest
 from chromite.cbuildbot.stages import release_stages
@@ -25,7 +25,8 @@ from chromite.lib.paygen import paygen_build_lib
 # pylint: disable=protected-access
 
 
-class PaygenStageTest(generic_stages_unittest.AbstractStageTest):
+class PaygenStageTest(generic_stages_unittest.AbstractStageTestCase,
+                      cbuildbot_unittest.SimpleBuilderTestCase):
   """Test the PaygenStageStage."""
 
   BOT_ID = 'x86-mario-release'
@@ -42,7 +43,6 @@ class PaygenStageTest(generic_stages_unittest.AbstractStageTest):
   }
 
   def setUp(self):
-    self.StartPatcher(BuilderRunMock())
     self._Prepare()
 
   def ConstructStage(self):
@@ -117,23 +117,6 @@ class PaygenStageTest(generic_stages_unittest.AbstractStageTest):
           {'chan1': ['chan1_uri1']}, notifier)
 
       # Ensure we didn't notify anyone of success.
-      self.assertEqual(notifier.mock_calls, [])
-      self.assertEqual(mock_gs_ctx.Cat.mock_calls,
-                       [mock.call('chan1_uri1.json')])
-
-  def testWaitForSigningResultsMalformedJson(self):
-    """Test _WaitForSigningResults when invalid Json is received.."""
-    with patch(release_stages.gs, 'GSContext') as mock_gs_ctx_init:
-      mock_gs_ctx = mock_gs_ctx_init.return_value
-      mock_gs_ctx.Cat.return_value = "{"
-      notifier = mock.Mock()
-
-      stage = self.ConstructStage()
-
-      self.assertRaises(release_stages.MalformedResultsException,
-                        stage._WaitForSigningResults,
-                        self.INSNS_URLS_PER_CHANNEL, notifier)
-
       self.assertEqual(notifier.mock_calls, [])
       self.assertEqual(mock_gs_ctx.Cat.mock_calls,
                        [mock.call('chan1_uri1.json')])
@@ -218,7 +201,24 @@ class PaygenStageTest(generic_stages_unittest.AbstractStageTest):
     """Verify _CheckForResults handles unexpected Json values."""
     with patch(release_stages.gs, 'GSContext') as mock_gs_ctx_init:
       mock_gs_ctx = mock_gs_ctx_init.return_value
-      mock_gs_ctx.Cat.return_value = "{}"
+      mock_gs_ctx.Cat.return_value = '{}'
+      notifier = mock.Mock()
+
+      stage = self.ConstructStage()
+      self.assertFalse(
+          stage._CheckForResults(mock_gs_ctx,
+                                 self.INSNS_URLS_PER_CHANNEL,
+                                 notifier))
+      self.assertEqual(stage.signing_results, {
+          'chan1': {}, 'chan2': {}
+      })
+      self.assertEqual(notifier.mock_calls, [])
+
+  def testCheckForResultsMalformedJson(self):
+    """Verify _CheckForResults handles unexpected Json values."""
+    with patch(release_stages.gs, 'GSContext') as mock_gs_ctx_init:
+      mock_gs_ctx = mock_gs_ctx_init.return_value
+      mock_gs_ctx.Cat.return_value = '{'
       notifier = mock.Mock()
 
       stage = self.ConstructStage()

@@ -5,6 +5,16 @@
 import("//third_party/mojo/src/mojo/public/mojo_application.gni")
 import("//third_party/mojo/src/mojo/public/tools/bindings/mojom.gni")
 
+group("test_service") {
+  # Meta-target, don't link into production code.
+  testonly = true
+  deps = [
+    ":bindings",
+    ":test_app",
+    ":test_request_tracker_app",
+  ]
+}
+
 mojom("bindings") {
   sources = [
     "test_request_tracker.mojom",
@@ -28,8 +38,8 @@ mojo_native_application("test_app") {
     ":bindings",
     "//base",
     "//base:i18n",
-    "//third_party/mojo/src/mojo/public/cpp/application",
-    "//third_party/mojo/src/mojo/public/cpp/application:standalone",
+    "//mojo/application/public/cpp",
+    "//mojo/application/public/cpp:standalone",
     "//third_party/mojo/src/mojo/public/cpp/bindings",
     "//third_party/mojo/src/mojo/public/cpp/system",
     "//third_party/mojo/src/mojo/public/cpp/utility",
@@ -52,8 +62,8 @@ mojo_native_application("test_request_tracker_app") {
     ":bindings",
     "//base",
     "//base:i18n",
-    "//third_party/mojo/src/mojo/public/cpp/application",
-    "//third_party/mojo/src/mojo/public/cpp/application:standalone",
+    "//mojo/application/public/cpp",
+    "//mojo/application/public/cpp:standalone",
     "//third_party/mojo/src/mojo/public/cpp/bindings",
     "//third_party/mojo/src/mojo/public/cpp/system",
     "//third_party/mojo/src/mojo/public/cpp/utility",

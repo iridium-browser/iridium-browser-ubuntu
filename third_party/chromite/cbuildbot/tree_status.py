@@ -8,7 +8,6 @@ from __future__ import print_function
 
 import httplib
 import json
-import logging
 import os
 import re
 import socket
@@ -17,7 +16,7 @@ import urllib2
 
 from chromite.cbuildbot import constants
 from chromite.lib import alerts
-from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import osutils
 from chromite.lib import timeout_util
 
@@ -378,14 +377,14 @@ def SendHealthAlert(builder_run, subject, body, extra_fields=None):
                   to be added to the message. Custom field names should begin
                   with the prefix 'X-'.
   """
-  # TODO(davidjames): Implement the ability to send emails in GCE.
-  # https://cloud.google.com/compute/docs/sending-mail
-  in_golo = cros_build_lib.HostIsCIBuilder(golo_only=True)
-  if in_golo and builder_run.InProduction():
+  if builder_run.InProduction():
+    server = alerts.GmailServer(
+        token_cache_file=constants.GMAIL_TOKEN_CACHE_FILE,
+        token_json_file=constants.GMAIL_TOKEN_JSON_FILE)
     alerts.SendEmail(subject,
                      GetHealthAlertRecipients(builder_run),
+                     server=server,
                      message=body,
-                     smtp_server=constants.GOLO_SMTP_SERVER,
                      extra_fields=extra_fields)
 
 

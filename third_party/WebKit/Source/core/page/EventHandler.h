@@ -26,6 +26,7 @@
 #ifndef EventHandler_h
 #define EventHandler_h
 
+#include "core/CoreExport.h"
 #include "core/editing/TextGranularity.h"
 #include "core/events/TextEventInputType.h"
 #include "core/layout/HitTestRequest.h"
@@ -83,7 +84,7 @@ class Widget;
 enum AppendTrailingWhitespace { ShouldAppendTrailingWhitespace, DontAppendTrailingWhitespace };
 enum class DragInitiator;
 
-class EventHandler : public NoBaseWillBeGarbageCollectedFinalized<EventHandler> {
+class CORE_EXPORT EventHandler : public NoBaseWillBeGarbageCollectedFinalized<EventHandler> {
     WTF_MAKE_NONCOPYABLE(EventHandler);
 public:
     explicit EventHandler(LocalFrame*);
@@ -120,12 +121,14 @@ public:
     void scheduleHoverStateUpdate();
     void scheduleCursorUpdate();
 
+    // Return whether a mouse cursor update is currently pending.  Used for testing.
+    bool cursorUpdatePending();
+
     void setResizingFrameSet(HTMLFrameSetElement*);
 
     void resizeScrollableAreaDestroyed();
 
     IntPoint lastKnownMousePosition() const;
-    Cursor currentMouseCursor() const { return m_currentMouseCursor; }
 
     // Attempts to scroll the DOM tree. If that fails, scrolls the view.
     // If the view can't be scrolled either, recursively bubble to the parent frame.
@@ -142,6 +145,9 @@ public:
     // Called on the local root frame exactly once per gesture event.
     bool handleGestureEvent(const PlatformGestureEvent&);
     bool handleGestureEvent(const GestureEventWithHitTestResults&);
+
+    // Clear the old hover/active state within frames before moving the hover state to the another frame
+    void updateGestureHoverActiveState(const HitTestRequest&, Element*);
 
     // Hit-test the provided (non-scroll) gesture event, applying touch-adjustment and updating
     // hover/active state across all frames if necessary. This should be called at most once
@@ -163,8 +169,8 @@ public:
     // FIXME: This doesn't appear to be used outside tests anymore, what path are we using now and is it tested?
     bool bestZoomableAreaForTouchPoint(const IntPoint& touchCenter, const IntSize& touchRadius, IntRect& targetArea, Node*& targetNode);
 
-    bool sendContextMenuEvent(const PlatformMouseEvent&);
-    bool sendContextMenuEventForKey();
+    bool sendContextMenuEvent(const PlatformMouseEvent&, Node* overrideTargetNode = nullptr);
+    bool sendContextMenuEventForKey(Element* overrideTargetElement = nullptr);
     bool sendContextMenuEventForGesture(const GestureEventWithHitTestResults&);
 
     void setMouseDownMayStartAutoscroll() { m_mouseDownMayStartAutoscroll = true; }
@@ -197,7 +203,7 @@ public:
 private:
     static DragState& dragState();
 
-    PassRefPtrWillBeRawPtr<DataTransfer> createDraggingDataTransfer() const;
+    DataTransfer* createDraggingDataTransfer() const;
 
     bool updateSelectionForMouseDownDispatchingSelectStart(Node*, const VisibleSelection&, TextGranularity);
     void selectClosestWordFromHitTestResult(const HitTestResult&, AppendTrailingWhitespace);
@@ -341,6 +347,9 @@ private:
     LayoutPoint m_dragStartPos;
 
     Timer<EventHandler> m_hoverTimer;
+
+    // TODO(rbyers): Mouse cursor update is page-wide, not per-frame.  Page-wide state
+    // should move out of EventHandler to a new PageEventHandler class. crbug.com/449649
     Timer<EventHandler> m_cursorUpdateTimer;
 
     bool m_mouseDownMayStartAutoscroll;
@@ -358,7 +367,6 @@ private:
     RefPtrWillBeMember<Node> m_lastNodeUnderMouse;
     RefPtrWillBeMember<LocalFrame> m_lastMouseMoveEventSubframe;
     RefPtrWillBeMember<Scrollbar> m_lastScrollbarUnderMouse;
-    Cursor m_currentMouseCursor;
 
     int m_clickCount;
     RefPtrWillBeMember<Node> m_clickNode;
@@ -371,6 +379,7 @@ private:
     LayoutSize m_offsetFromResizeCorner; // In the coords of m_resizeScrollableArea.
 
     bool m_mousePositionIsUnknown;
+    // The last mouse movement position this frame has seen in root frame coordinates.
     IntPoint m_lastKnownMousePosition;
     IntPoint m_lastKnownMouseGlobalPosition;
     IntPoint m_mouseDownPos; // In our view's coords.

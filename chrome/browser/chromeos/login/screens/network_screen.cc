@@ -19,6 +19,7 @@
 #include "chrome/browser/chromeos/login/screens/network_view.h"
 #include "chrome/browser/chromeos/login/ui/input_events_blocker.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/webui/chromeos/login/l10n_util.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/chromium_strings.h"
@@ -118,8 +119,10 @@ void NetworkScreen::Initialize(::login::ScreenContext* context) {
 }
 
 void NetworkScreen::OnViewDestroyed(NetworkView* view) {
-  if (view_ == view)
+  if (view_ == view) {
     view_ = nullptr;
+    timezone_subscription_.reset();
+  }
 }
 
 void NetworkScreen::OnUserAction(const std::string& action_id) {
@@ -173,6 +176,7 @@ void NetworkScreen::DefaultNetworkChanged(const NetworkState* network) {
 
 void NetworkScreen::InputMethodChanged(
     input_method::InputMethodManager* manager,
+    Profile* /* proflie */,
     bool /* show_message */) {
   GetContextEditor().SetString(
       kContextKeyInputMethod,
@@ -193,7 +197,8 @@ void NetworkScreen::SetApplicationLocale(const std::string& locale) {
       &NetworkScreen::OnLanguageChangedCallback, weak_factory_.GetWeakPtr(),
       base::Owned(new chromeos::InputEventsBlocker)));
   locale_util::SwitchLanguage(locale, true /* enableLocaleKeyboardLayouts */,
-                              true /* login_layouts_only */, callback);
+                              true /* login_layouts_only */, callback,
+                              ProfileManager::GetActiveUserProfile());
 }
 
 std::string NetworkScreen::GetApplicationLocale() {
@@ -222,6 +227,10 @@ void NetworkScreen::SetTimezone(const std::string& timezone_id) {
 
 std::string NetworkScreen::GetTimezone() const {
   return timezone_;
+}
+
+void NetworkScreen::CreateNetworkFromOnc(const std::string& onc_spec) {
+  network_state_helper_->CreateNetworkFromOnc(onc_spec);
 }
 
 void NetworkScreen::AddObserver(Observer* observer) {
@@ -370,7 +379,7 @@ void NetworkScreen::OnLanguageListResolved(
     scoped_ptr<base::ListValue> new_language_list,
     std::string new_language_list_locale,
     std::string new_selected_language) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   language_list_.reset(new_language_list.release());
   language_list_locale_ = new_language_list_locale;

@@ -12,9 +12,9 @@
 #include "cc/base/scoped_ptr_deque.h"
 #include "cc/output/overlay_processor.h"
 #include "cc/output/renderer.h"
+#include "cc/raster/task_graph_runner.h"
 #include "cc/resources/resource_provider.h"
 #include "cc/resources/scoped_resource.h"
-#include "cc/resources/task_graph_runner.h"
 #include "ui/gfx/geometry/quad_f.h"
 
 namespace cc {
@@ -139,7 +139,8 @@ class CC_EXPORT DirectRenderer : public Renderer {
       DrawingFrame* frame,
       scoped_ptr<CopyOutputRequest> request) = 0;
 
-  base::ScopedPtrHashMap<RenderPassId, ScopedResource> render_pass_textures_;
+  base::ScopedPtrHashMap<RenderPassId, scoped_ptr<ScopedResource>>
+      render_pass_textures_;
   OutputSurface* output_surface_;
   ResourceProvider* resource_provider_;
   scoped_ptr<OverlayProcessor> overlay_processor_;

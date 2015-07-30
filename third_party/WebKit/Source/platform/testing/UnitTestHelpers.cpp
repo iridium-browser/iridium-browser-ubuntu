@@ -29,22 +29,23 @@
 #include "public/platform/Platform.h"
 #include "public/platform/WebThread.h"
 #include "public/platform/WebTraceLocation.h"
+#include "public/platform/WebUnitTestSupport.h"
 
 namespace blink {
 namespace testing {
 
-class QuitTask : public blink::WebThread::Task {
+class QuitTask : public WebThread::Task {
 public:
     virtual void run()
     {
-        blink::Platform::current()->currentThread()->exitRunLoop();
+        Platform::current()->unitTestSupport()->exitRunLoop();
     }
 };
 
 void runPendingTasks()
 {
-    blink::Platform::current()->currentThread()->postTask(FROM_HERE, new QuitTask);
-    blink::Platform::current()->currentThread()->enterRunLoop();
+    Platform::current()->currentThread()->postTask(FROM_HERE, new QuitTask);
+    Platform::current()->unitTestSupport()->enterRunLoop();
 }
 
 }

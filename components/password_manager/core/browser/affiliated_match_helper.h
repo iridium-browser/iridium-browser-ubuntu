@@ -13,6 +13,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
+#include "base/timer/timer.h"
 #include "components/password_manager/core/browser/affiliation_utils.h"
 #include "components/password_manager/core/browser/password_store.h"
 #include "components/password_manager/core/browser/password_store_consumer.h"
@@ -68,6 +69,27 @@ class AffiliatedMatchHelper : public PasswordStore::Observer,
       const autofill::PasswordForm& observed_form,
       const AffiliatedRealmsCallback& result_callback);
 
+  // Retrieves realms of web sites affiliated with the Android application that
+  // |android_form| belongs to and invokes |result_callback| on the same thread;
+  // or yields the empty list if  |android_form| is not an Android credential.
+  // NOTE: This will issue an on-demand network request against the Affiliation
+  // API if affiliations of the Android application are not cached. However, as
+  // long as the |android_form| is from the PasswordStore, this should rarely
+  // happen as affiliation information for those applications are prefetched.
+  virtual void GetAffiliatedWebRealms(
+      const autofill::PasswordForm& android_form,
+      const AffiliatedRealmsCallback& result_callback);
+
+  // Removes cached affiliation data that is no longer needed.
+  void TrimAffiliationCache();
+
+  // Returns whether or not |form| represents an Android credential.
+  static bool IsValidAndroidCredential(const autofill::PasswordForm& form);
+
+  // Returns whether or not |form| represents a valid Web credential for the
+  // purposes of affiliation-based matching.
+  static bool IsValidWebCredential(const autofill::PasswordForm& form);
+
   // Consumes a list of |android_credentials| corresponding to applications that
   // are affiliated with the realm of |observed_form|, and transforms them so
   // as to make them fillable into |observed_form|. This can be called from any
@@ -90,15 +112,50 @@ class AffiliatedMatchHelper : public PasswordStore::Observer,
   static const int64 kInitializationDelayOnStartupInSeconds = 8;
 
  private:
+  // Indicates the time at which verifying that affiliation information has been
+  // correctly prefetched for dummy Android applications takes place.
+  enum class VerificationTiming { ON_STARTUP, PERIODIC };
+
   // Reads all autofillable credentials from the password store and starts
   // observing the store for future changes.
   void DoDeferredInitialization();
 
-  // AffiliationService callback:
-  void OnGetAffiliationsResults(const FacetURI& original_facet_uri,
-                                const AffiliatedRealmsCallback& result_callback,
-                                const AffiliatedFacets& results,
-                                bool success);
+  // Called back by AffiliationService to supply the list of facets affiliated
+  // with |original_facet_uri| so that a GetAffiliatedAndroidRealms() call can
+  // be completed.
+  void CompleteGetAffiliatedAndroidRealms(
+      const FacetURI& original_facet_uri,
+      const AffiliatedRealmsCallback& result_callback,
+      const AffiliatedFacets& results,
+      bool success);
+
+  // Called back by AffiliationService to supply the list of facets affiliated
+  // with the Android application that GetAffiliatedWebRealms() was called with,
+  // so that the call can be completed.
+  void CompleteGetAffiliatedWebRealms(
+      const AffiliatedRealmsCallback& result_callback,
+      const AffiliatedFacets& results,
+      bool success);
+
+  // Called either shortly after startup or periodically in the steady state (as
+  // indicated by |timing|) to verify that affiliation information has been
+  // correctly prefetched for the dummy Android applications. Will record UMA
+  // histograms using a appropriate suffix based on |timing|.
+  void VerifyAffiliationsForDummyFacets(VerificationTiming timing);
+
+  // Sets up the given |timer| to call VerifyAffiliationsForDummyFacets() with
+  // the specified |delay|, with the given |timing| designation.
+  void ScheduleVerifyAffiliationsForDummyFacets(base::Timer* timer,
+                                                base::TimeDelta delay,
+                                                VerificationTiming timing);
+
+  // Called back by the AffiliationService in response to requesting affiliation
+  // information for the dummy Web facets. The |timing| indicates if the check
+  // was performed shortly after startup or periodically in the steady state.
+  static void OnRetrievedAffiliationResultsForDummyWebFacets(
+      VerificationTiming timing,
+      const AffiliatedFacets& results,
+      bool success);
 
   // PasswordStore::Observer:
   void OnLoginsChanged(const PasswordStoreChangeList& changes) override;
@@ -112,6 +169,10 @@ class AffiliatedMatchHelper : public PasswordStore::Observer,
 
   // Being the sole consumer of AffiliationService, |this| owns the service.
   scoped_ptr<AffiliationService> affiliation_service_;
+
+  // Timers used to schedule VerifyAffiliationsPrefetchedForDummyFacets().
+  base::OneShotTimer<AffiliatedMatchHelper> on_startup_verification_timer_;
+  base::RepeatingTimer<AffiliatedMatchHelper> repeated_verification_timer_;
 
   base::WeakPtrFactory<AffiliatedMatchHelper> weak_ptr_factory_;
 

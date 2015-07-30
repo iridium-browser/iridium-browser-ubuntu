@@ -33,7 +33,7 @@ using content::BrowserThread;
 ThreadWatcher::ThreadWatcher(const WatchingParams& params)
     : thread_id_(params.thread_id),
       thread_name_(params.thread_name),
-      watched_loop_(
+      watched_runner_(
           BrowserThread::GetMessageLoopProxyForThread(params.thread_id)),
       sleep_time_(params.sleep_time),
       unresponsive_time_(params.unresponsive_time),
@@ -141,7 +141,7 @@ void ThreadWatcher::PostPingMessage() {
   base::Closure callback(
       base::Bind(&ThreadWatcher::OnPongMessage, weak_ptr_factory_.GetWeakPtr(),
                  ping_sequence_number_));
-  if (watched_loop_->PostTask(
+  if (watched_runner_->PostTask(
           FROM_HERE,
           base::Bind(&ThreadWatcher::OnPingMessage, thread_id_,
                      callback))) {
@@ -346,7 +346,7 @@ ThreadWatcherList::CrashDataThresholds::CrashDataThresholds()
 // static
 void ThreadWatcherList::StartWatchingAll(
     const base::CommandLine& command_line) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   uint32 unresponsive_threshold;
   CrashOnHangThreadMap crash_on_hang_threads;
   ParseCommandLine(command_line,
@@ -539,10 +539,12 @@ void ThreadWatcherList::InitializeAndStartWatching(
   ThreadWatcherList* thread_watcher_list = new ThreadWatcherList();
   CHECK(thread_watcher_list);
 
-  // Disable ThreadWatcher in Canary and Stable channels.
+  // TODO(rtenneti): Because we don't generate crash dumps for ThreadWatcher in
+  // stable channel, disable ThreadWatcher in stable and unknown channels. We
+  // will also not collect histogram data in these channels until
+  // http://crbug.com/426203 is fixed.
   chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
-  if (channel == chrome::VersionInfo::CHANNEL_CANARY ||
-      channel == chrome::VersionInfo::CHANNEL_STABLE ||
+  if (channel == chrome::VersionInfo::CHANNEL_STABLE ||
       channel == chrome::VersionInfo::CHANNEL_UNKNOWN) {
     return;
   }

@@ -17,6 +17,22 @@
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/permission_broker_client.h"
 #endif  // defined(OS_CHROMEOS)
+
+// The definition of struct termios2 is copied from asm-generic/termbits.h
+// because including that header directly conflicts with termios.h.
+extern "C" {
+struct termios2 {
+  tcflag_t c_iflag;  // input mode flags
+  tcflag_t c_oflag;  // output mode flags
+  tcflag_t c_cflag;  // control mode flags
+  tcflag_t c_lflag;  // local mode flags
+  cc_t c_line;       // line discipline
+  cc_t c_cc[19];     // control characters
+  speed_t c_ispeed;  // input speed
+  speed_t c_ospeed;  // output speed
+};
+}
+
 #endif  // defined(OS_LINUX)
 
 namespace {
@@ -45,7 +61,7 @@ bool BitrateToSpeedConstant(int bitrate, speed_t* speed) {
     BITRATE_TO_SPEED_CASE(9600)
     BITRATE_TO_SPEED_CASE(19200)
     BITRATE_TO_SPEED_CASE(38400)
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if !defined(OS_MACOSX)
     BITRATE_TO_SPEED_CASE(57600)
     BITRATE_TO_SPEED_CASE(115200)
     BITRATE_TO_SPEED_CASE(230400)
@@ -83,7 +99,7 @@ bool SpeedConstantToBitrate(speed_t speed, int* bitrate) {
     SPEED_TO_BITRATE_CASE(9600)
     SPEED_TO_BITRATE_CASE(19200)
     SPEED_TO_BITRATE_CASE(38400)
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if !defined(OS_MACOSX)
     SPEED_TO_BITRATE_CASE(57600)
     SPEED_TO_BITRATE_CASE(115200)
     SPEED_TO_BITRATE_CASE(230400)
@@ -101,18 +117,20 @@ bool SetCustomBitrate(base::PlatformFile file,
                       struct termios* config,
                       int bitrate) {
 #if defined(OS_LINUX)
-  struct serial_struct serial;
-  if (ioctl(file, TIOCGSERIAL, &serial) < 0) {
+  struct termios2 tio;
+  if (ioctl(file, TCGETS2, &tio) < 0) {
+    VPLOG(1) << "Failed to get parameters to set custom bitrate";
     return false;
   }
-  serial.flags = (serial.flags & ~ASYNC_SPD_MASK) | ASYNC_SPD_CUST;
-  serial.custom_divisor = serial.baud_base / bitrate;
-  if (serial.custom_divisor < 1) {
-    serial.custom_divisor = 1;
+  tio.c_cflag &= ~CBAUD;
+  tio.c_cflag |= CBAUDEX;
+  tio.c_ispeed = bitrate;
+  tio.c_ospeed = bitrate;
+  if (ioctl(file, TCSETS2, &tio) < 0) {
+    VPLOG(1) << "Failed to set custom bitrate";
+    return false;
   }
-  cfsetispeed(config, B38400);
-  cfsetospeed(config, B38400);
-  return ioctl(file, TIOCSSERIAL, &serial) >= 0;
+  return true;
 #elif defined(OS_MACOSX)
   speed_t speed = static_cast<speed_t>(bitrate);
   cfsetispeed(config, speed);
@@ -129,16 +147,16 @@ namespace device {
 
 // static
 scoped_refptr<SerialIoHandler> SerialIoHandler::Create(
-    scoped_refptr<base::MessageLoopProxy> file_thread_message_loop,
-    scoped_refptr<base::MessageLoopProxy> ui_thread_message_loop) {
-  return new SerialIoHandlerPosix(file_thread_message_loop,
-                                  ui_thread_message_loop);
+    scoped_refptr<base::SingleThreadTaskRunner> file_thread_task_runner,
+    scoped_refptr<base::SingleThreadTaskRunner> ui_thread_task_runner) {
+  return new SerialIoHandlerPosix(file_thread_task_runner,
+                                  ui_thread_task_runner);
 }
 
 void SerialIoHandlerPosix::RequestAccess(
     const std::string& port,
-    scoped_refptr<base::MessageLoopProxy> file_message_loop,
-    scoped_refptr<base::MessageLoopProxy> ui_message_loop) {
+    scoped_refptr<base::SingleThreadTaskRunner> file_task_runner,
+    scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner) {
 #if defined(OS_LINUX) && defined(OS_CHROMEOS)
   if (base::SysInfo::IsRunningOnChromeOS()) {
     chromeos::PermissionBrokerClient* client =
@@ -149,13 +167,11 @@ void SerialIoHandlerPosix::RequestAccess(
       return;
     }
     // PermissionBrokerClient should be called on the UI thread.
-    ui_message_loop->PostTask(
+    ui_task_runner->PostTask(
         FROM_HERE,
         base::Bind(
             &chromeos::PermissionBrokerClient::RequestPathAccess,
-            base::Unretained(client),
-            port,
-            -1,
+            base::Unretained(client), port, -1,
             base::Bind(&SerialIoHandler::OnRequestAccessComplete, this, port)));
   } else {
     OnRequestAccessComplete(port, true /* success */);
@@ -279,9 +295,9 @@ bool SerialIoHandlerPosix::ConfigurePortImpl() {
 }
 
 SerialIoHandlerPosix::SerialIoHandlerPosix(
-    scoped_refptr<base::MessageLoopProxy> file_thread_message_loop,
-    scoped_refptr<base::MessageLoopProxy> ui_thread_message_loop)
-    : SerialIoHandler(file_thread_message_loop, ui_thread_message_loop),
+    scoped_refptr<base::SingleThreadTaskRunner> file_thread_task_runner,
+    scoped_refptr<base::SingleThreadTaskRunner> ui_thread_task_runner)
+    : SerialIoHandler(file_thread_task_runner, ui_thread_task_runner),
       is_watching_reads_(false),
       is_watching_writes_(false) {
 }

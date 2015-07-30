@@ -92,6 +92,8 @@ class KEYBOARD_EXPORT KeyboardController : public ui::InputMethodObserver,
 
   void set_lock_keyboard(bool lock) { lock_keyboard_ = lock; }
 
+  KeyboardMode keyboard_mode() const { return keyboard_mode_; }
+
   void SetKeyboardMode(KeyboardMode mode);
 
   // Force the keyboard to show up if not showing and lock the keyboard if
@@ -111,8 +113,8 @@ class KEYBOARD_EXPORT KeyboardController : public ui::InputMethodObserver,
 
   bool show_on_resize() { return show_on_resize_; }
 
-  // Returns the current keyboard bounds. When the keyboard is not shown,
-  // an empty rectangle will get returned.
+  // Returns the current keyboard bounds. An empty rectangle will get returned
+  // when the keyboard is not shown or in FLOATING mode.
   const gfx::Rect& current_keyboard_bounds() {
     return current_keyboard_bounds_;
   }
@@ -129,6 +131,12 @@ class KEYBOARD_EXPORT KeyboardController : public ui::InputMethodObserver,
 
   // aura::WindowObserver overrides
   void OnWindowHierarchyChanged(const HierarchyChangeParams& params) override;
+  void OnWindowAddedToRootWindow(aura::Window* window) override;
+  void OnWindowRemovingFromRootWindow(aura::Window* window,
+                                      aura::Window* new_root) override;
+  void OnWindowBoundsChanged(aura::Window* window,
+                             const gfx::Rect& old_bounds,
+                             const gfx::Rect& new_bounds) override;
 
   // InputMethodObserver overrides
   void OnTextInputTypeChanged(const ui::TextInputClient* client) override {}

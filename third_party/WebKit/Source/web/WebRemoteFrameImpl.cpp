@@ -193,6 +193,8 @@ void WebRemoteFrameImpl::removeChild(WebFrame* frame)
 
 WebDocument WebRemoteFrameImpl::document() const
 {
+    // TODO(dcheng): this should also ASSERT_NOT_REACHED, but a lot of
+    // code tries to access the document of a remote frame at the moment.
     return WebDocument();
 }
 
@@ -281,14 +283,14 @@ void WebRemoteFrameImpl::executeScriptInIsolatedWorld(
     ASSERT_NOT_REACHED();
 }
 
-v8::Handle<v8::Value> WebRemoteFrameImpl::callFunctionEvenIfScriptDisabled(
-    v8::Handle<v8::Function>,
-    v8::Handle<v8::Value>,
+v8::Local<v8::Value> WebRemoteFrameImpl::callFunctionEvenIfScriptDisabled(
+    v8::Local<v8::Function>,
+    v8::Local<v8::Value>,
     int argc,
-    v8::Handle<v8::Value> argv[])
+    v8::Local<v8::Value> argv[])
 {
     ASSERT_NOT_REACHED();
-    return v8::Handle<v8::Value>();
+    return v8::Local<v8::Value>();
 }
 
 v8::Local<v8::Context> WebRemoteFrameImpl::mainWorldScriptContext() const
@@ -714,12 +716,18 @@ WebString WebRemoteFrameImpl::layerTreeAsText(bool showDebugInfo) const
     return WebString();
 }
 
+// TODO(alexmos): Remove once Chromium side is updated to take previous sibling.
 WebLocalFrame* WebRemoteFrameImpl::createLocalChild(const WebString& name, WebSandboxFlags sandboxFlags, WebFrameClient* client)
+{
+    return createLocalChild(name, sandboxFlags, client, lastChild());
+}
+
+WebLocalFrame* WebRemoteFrameImpl::createLocalChild(const WebString& name, WebSandboxFlags sandboxFlags, WebFrameClient* client, WebFrame* previousSibling)
 {
     WebLocalFrameImpl* child = toWebLocalFrameImpl(WebLocalFrame::create(client));
     WillBeHeapHashMap<WebFrame*, OwnPtrWillBeMember<FrameOwner>>::AddResult result =
         m_ownersForChildren.add(child, RemoteBridgeFrameOwner::create(child, static_cast<SandboxFlags>(sandboxFlags)));
-    appendChild(child);
+    insertAfter(child, previousSibling);
     // FIXME: currently this calls LocalFrame::init() on the created LocalFrame, which may
     // result in the browser observing two navigations to about:blank (one from the initial
     // frame creation, and one from swapping it into the remote process). FrameLoader might

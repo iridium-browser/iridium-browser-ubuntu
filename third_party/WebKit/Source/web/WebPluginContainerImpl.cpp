@@ -52,7 +52,6 @@
 #include "core/layout/HitTestResult.h"
 #include "core/layout/LayoutBox.h"
 #include "core/layout/LayoutPart.h"
-#include "core/loader/FormState.h"
 #include "core/loader/FrameLoadRequest.h"
 #include "core/page/Chrome.h"
 #include "core/page/EventHandler.h"
@@ -95,6 +94,8 @@
 #include "web/WebViewImpl.h"
 #include "wtf/Assertions.h"
 
+#include <base/debug/stack_trace.h>
+
 namespace blink {
 
 // Public methods --------------------------------------------------------------
@@ -105,10 +106,10 @@ void WebPluginContainerImpl::setFrameRect(const IntRect& frameRect)
     reportGeometry();
 }
 
-void WebPluginContainerImpl::layoutWidgetIfPossible()
+void WebPluginContainerImpl::layoutIfNeeded()
 {
     RELEASE_ASSERT(m_webPlugin);
-    m_webPlugin->layoutPluginIfNeeded();
+    m_webPlugin->layoutIfNeeded();
 }
 
 void WebPluginContainerImpl::paint(GraphicsContext* context, const IntRect& rect)
@@ -147,20 +148,18 @@ void WebPluginContainerImpl::invalidateRect(const IntRect& rect)
     if (!parent())
         return;
 
-    LayoutBox* renderer = toLayoutBox(m_element->layoutObject());
-    if (!renderer)
+    LayoutBox* layoutObject = toLayoutBox(m_element->layoutObject());
+    if (!layoutObject)
         return;
 
     IntRect dirtyRect = rect;
-    dirtyRect.move(renderer->borderLeft() + renderer->paddingLeft(),
-                   renderer->borderTop() + renderer->paddingTop());
+    dirtyRect.move(
+        layoutObject->borderLeft() + layoutObject->paddingLeft(),
+        layoutObject->borderTop() + layoutObject->paddingTop());
 
-    // For querying DeprecatedPaintLayer::compositingState().
-    // This code should be correct.
-    DisableCompositingQueryAsserts disabler;
-    // FIXME: We should not allow paint invalidation out of paint invalidation state. crbug.com/457415
-    DisablePaintInvalidationStateAsserts paintInvalidationAssertDisabler;
-    renderer->invalidatePaintRectangle(LayoutRect(dirtyRect));
+    m_pendingInvalidationRect.unite(dirtyRect);
+
+    layoutObject->setMayNeedPaintInvalidation();
 }
 
 void WebPluginContainerImpl::setFocus(bool focused, WebFocusType focusType)
@@ -322,9 +321,9 @@ void WebPluginContainerImpl::setWebLayer(WebLayer* layer)
     m_element->setNeedsCompositingUpdate();
     // Being composited or not affects the self painting layer bit
     // on the DeprecatedPaintLayer.
-    if (LayoutPart* renderer = m_element->layoutPart()) {
-        ASSERT(renderer->hasLayer());
-        renderer->layer()->updateSelfPaintingLayer();
+    if (LayoutPart* layoutObject = m_element->layoutPart()) {
+        ASSERT(layoutObject->hasLayer());
+        layoutObject->layer()->updateSelfPaintingLayer();
     }
 }
 
@@ -407,10 +406,16 @@ void WebPluginContainerImpl::scrollRect(const WebRect& rect)
     invalidateRect(rect);
 }
 
+void WebPluginContainerImpl::setNeedsLayout()
+{
+    if (m_element->layoutObject())
+        m_element->layoutObject()->setNeedsLayoutAndFullPaintInvalidation("Plugin needs layout");
+}
+
 void WebPluginContainerImpl::reportGeometry()
 {
-    // We cannot compute geometry without a parent or renderer.
-    if (!parent() || !m_element->layoutObject())
+    // We cannot compute geometry without a parent or layoutObject.
+    if (!parent() || !m_element || !m_element->layoutObject())
         return;
 
     IntRect windowRect, clipRect, unobscuredRect;
@@ -455,10 +460,12 @@ v8::Local<v8::Object> WebPluginContainerImpl::v8ObjectForElement()
     if (!scriptState->contextIsValid())
         return v8::Local<v8::Object>();
 
-    v8::Handle<v8::Value> v8value = toV8(m_element.get(), scriptState->context()->Global(), scriptState->isolate());
+    v8::Local<v8::Value> v8value = toV8(m_element.get(), scriptState->context()->Global(), scriptState->isolate());
+    if (v8value.IsEmpty())
+        return v8::Local<v8::Object>();
     ASSERT(v8value->IsObject());
 
-    return v8::Handle<v8::Object>::Cast(v8value);
+    return v8::Local<v8::Object>::Cast(v8value);
 }
 
 WebString WebPluginContainerImpl::executeScriptURL(const WebURL& url, bool popupsAllowed)
@@ -480,7 +487,7 @@ WebString WebPluginContainerImpl::executeScriptURL(const WebURL& url, bool popup
     // Failure is reported as a null string.
     if (result.IsEmpty() || !result->IsString())
         return WebString();
-    return toCoreString(v8::Handle<v8::String>::Cast(result));
+    return toCoreString(v8::Local<v8::String>::Cast(result));
 }
 
 void WebPluginContainerImpl::loadFrameRequest(const WebURLRequest& request, const WebString& target, bool notifyNeeded, void* notifyData)
@@ -511,6 +518,9 @@ void WebPluginContainerImpl::zoomLevelChanged(double zoomLevel)
 
 bool WebPluginContainerImpl::isRectTopmost(const WebRect& rect)
 {
+    if (!m_element)
+        return false;
+
     LocalFrame* frame = m_element->document().frame();
     if (!frame)
         return false;
@@ -690,14 +700,6 @@ void WebPluginContainerImpl::willEndLiveResize()
 {
     if (m_scrollbarGroup)
         m_scrollbarGroup->willEndLiveResize();
-}
-
-bool WebPluginContainerImpl::paintCustomOverhangArea(GraphicsContext* context, const IntRect& horizontalOverhangArea, const IntRect& verticalOverhangArea, const IntRect& dirtyRect)
-{
-    Color fillColor(0xCC, 0xCC, 0xCC);
-    context->fillRect(intersection(horizontalOverhangArea, dirtyRect), fillColor);
-    context->fillRect(intersection(verticalOverhangArea, dirtyRect), fillColor);
-    return true;
 }
 
 // Private methods -------------------------------------------------------------
@@ -899,7 +901,7 @@ void WebPluginContainerImpl::handleTouchEvent(TouchEvent* event)
     case TouchEventRequestTypeNone:
         return;
     case TouchEventRequestTypeRaw: {
-        WebTouchEventBuilder webEvent(this, m_element->layoutObject(), *event);
+        WebTouchEventBuilder webEvent(m_element->layoutObject(), *event);
         if (webEvent.type == WebInputEvent::Undefined)
             return;
 
@@ -928,7 +930,7 @@ static inline bool gestureScrollHelper(ScrollbarGroup* scrollbarGroup, ScrollDir
 
 void WebPluginContainerImpl::handleGestureEvent(GestureEvent* event)
 {
-    WebGestureEventBuilder webEvent(this, m_element->layoutObject(), *event);
+    WebGestureEventBuilder webEvent(m_element->layoutObject(), *event);
     if (webEvent.type == WebInputEvent::Undefined)
         return;
     if (event->type() == EventTypeNames::gesturetapdown)
@@ -968,6 +970,19 @@ void WebPluginContainerImpl::focusPlugin()
         currentPage->focusController().setFocusedElement(m_element, &containingFrame);
     else
         containingFrame.document()->setFocusedElement(m_element);
+}
+
+void WebPluginContainerImpl::issuePaintInvalidations()
+{
+    if (m_pendingInvalidationRect.isEmpty())
+        return;
+
+    LayoutBox* layoutObject = toLayoutBox(m_element->layoutObject());
+    if (!layoutObject)
+        return;
+
+    layoutObject->invalidatePaintRectangle(LayoutRect(m_pendingInvalidationRect));
+    m_pendingInvalidationRect = IntRect();
 }
 
 void WebPluginContainerImpl::calculateGeometry(IntRect& windowRect, IntRect& clipRect, IntRect& unobscuredRect, Vector<IntRect>& cutOutRects)

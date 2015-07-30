@@ -14,6 +14,7 @@
 #include "net/http/http_response_info.h"
 #include "net/socket/client_socket_pool.h"
 #include "net/socket/client_socket_pool_base.h"
+#include "net/socket/connection_attempts.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/ssl/ssl_config_service.h"
 
@@ -49,7 +50,6 @@ class NET_EXPORT_PRIVATE SSLSocketParams
       const SSLConfig& ssl_config,
       PrivacyMode privacy_mode,
       int load_flags,
-      bool force_spdy_over_ssl,
       bool want_spdy_over_npn);
 
   // Returns the type of the underlying connection.
@@ -71,7 +71,6 @@ class NET_EXPORT_PRIVATE SSLSocketParams
   const SSLConfig& ssl_config() const { return ssl_config_; }
   PrivacyMode privacy_mode() const { return privacy_mode_; }
   int load_flags() const { return load_flags_; }
-  bool force_spdy_over_ssl() const { return force_spdy_over_ssl_; }
   bool want_spdy_over_npn() const { return want_spdy_over_npn_; }
   bool ignore_limits() const { return ignore_limits_; }
 
@@ -86,7 +85,6 @@ class NET_EXPORT_PRIVATE SSLSocketParams
   const SSLConfig ssl_config_;
   const PrivacyMode privacy_mode_;
   const int load_flags_;
-  const bool force_spdy_over_ssl_;
   const bool want_spdy_over_npn_;
   bool ignore_limits_;
 
@@ -167,6 +165,12 @@ class SSLConnectJob : public ConnectJob {
   scoped_ptr<SSLClientSocket> ssl_socket_;
 
   HttpResponseInfo error_response_info_;
+
+  ConnectionAttempts connection_attempts_;
+  // The address of the server the connect job is connected to. Populated if
+  // and only if the connect job is connected *directly* to the server (not
+  // through an HTTPS CONNECT request or a SOCKS proxy).
+  IPEndPoint server_address_;
 
   DISALLOW_COPY_AND_ASSIGN(SSLConnectJob);
 };

@@ -65,6 +65,7 @@ var tests = []test{
 	{"crypto/cipher/aead_test", "aes-128-ctr-hmac-sha256", "crypto/cipher/test/aes_128_ctr_hmac_sha256.txt"},
 	{"crypto/cipher/aead_test", "aes-256-ctr-hmac-sha256", "crypto/cipher/test/aes_256_ctr_hmac_sha256.txt"},
 	{"crypto/cipher/cipher_test", "crypto/cipher/test/cipher_test.txt"},
+	{"crypto/cmac/cmac_test"},
 	{"crypto/constant_time_test"},
 	{"crypto/dh/dh_test"},
 	{"crypto/digest/digest_test"},
@@ -73,10 +74,12 @@ var tests = []test{
 	{"crypto/ec/example_mul"},
 	{"crypto/ecdsa/ecdsa_test"},
 	{"crypto/err/err_test"},
-	{"crypto/evp/evp_test"},
+	{"crypto/evp/evp_extra_test"},
+	{"crypto/evp/evp_test", "crypto/evp/evp_tests.txt"},
+	{"crypto/evp/evp_test", "crypto/hmac/hmac_tests.txt"},
 	{"crypto/evp/pbkdf_test"},
 	{"crypto/hkdf/hkdf_test"},
-	{"crypto/hmac/hmac_test"},
+	{"crypto/hmac/hmac_test", "crypto/hmac/hmac_tests.txt"},
 	{"crypto/lhash/lhash_test"},
 	{"crypto/modes/gcm_test"},
 	{"crypto/pkcs8/pkcs12_test"},
@@ -101,8 +104,9 @@ type testOutput struct {
 }
 
 type testResult struct {
-	Actual   string `json:"actual"`
-	Expected string `json:"expected"`
+	Actual       string `json:"actual"`
+	Expected     string `json:"expected"`
+	IsUnexpected bool   `json:"is_unexpected"`
 }
 
 func newTestOutput() *testOutput {
@@ -119,7 +123,11 @@ func (t *testOutput) addResult(name, result string) {
 	if _, found := t.Tests[name]; found {
 		panic(name)
 	}
-	t.Tests[name] = testResult{Actual: result, Expected: "PASS"}
+	t.Tests[name] = testResult{
+		Actual:       result,
+		Expected:     "PASS",
+		IsUnexpected: result != "PASS",
+	}
 	t.NumFailuresByType[result]++
 }
 
@@ -178,13 +186,13 @@ func runTest(test test) (passed bool, err error) {
 	return false, nil
 }
 
-// shortTestName returns the short name of a test. It assumes that any argument
-// which ends in .txt is a path to a data file and not relevant to the test's
-// uniqueness.
+// shortTestName returns the short name of a test. Except for evp_test, it
+// assumes that any argument which ends in .txt is a path to a data file and not
+// relevant to the test's uniqueness.
 func shortTestName(test test) string {
 	var args []string
 	for _, arg := range test {
-		if !strings.HasSuffix(arg, ".txt") {
+		if test[0] == "crypto/evp/evp_test" || !strings.HasSuffix(arg, ".txt") {
 			args = append(args, arg)
 		}
 	}
@@ -214,18 +222,19 @@ func main() {
 		}
 	}
 
-	if len(failed) == 0 {
-		fmt.Printf("\nAll tests passed!\n")
-	} else {
-		fmt.Printf("\n%d of %d tests failed:\n", len(failed), len(tests))
-		for _, test := range failed {
-			fmt.Printf("\t%s\n", strings.Join([]string(test), " "))
-		}
-	}
-
 	if *jsonOutput != "" {
 		if err := testOutput.writeTo(*jsonOutput); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 		}
 	}
+
+	if len(failed) > 0 {
+		fmt.Printf("\n%d of %d tests failed:\n", len(failed), len(tests))
+		for _, test := range failed {
+			fmt.Printf("\t%s\n", strings.Join([]string(test), " "))
+		}
+		os.Exit(1)
+	}
+
+	fmt.Printf("\nAll tests passed!\n")
 }

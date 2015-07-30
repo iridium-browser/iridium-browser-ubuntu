@@ -144,6 +144,10 @@ base::DictionaryValue* GpuInfoAsDictionaryValue() {
   }
 #endif
 
+  std::string disabled_extensions;
+  GpuDataManagerImpl::GetInstance()->GetDisabledExtensions(
+      &disabled_extensions);
+
   basic_info->Append(
       NewDescriptionValuePair("Driver vendor", gpu_info.driver_vendor));
   basic_info->Append(NewDescriptionValuePair("Driver version",
@@ -154,6 +158,8 @@ base::DictionaryValue* GpuInfoAsDictionaryValue() {
                                              gpu_info.pixel_shader_version));
   basic_info->Append(NewDescriptionValuePair("Vertex shader version",
                                              gpu_info.vertex_shader_version));
+  basic_info->Append(NewDescriptionValuePair("Max. MSAA samples",
+                                             gpu_info.max_msaa_samples));
   basic_info->Append(NewDescriptionValuePair("Machine model name",
                                              gpu_info.machine_model_name));
   basic_info->Append(NewDescriptionValuePair("Machine model version",
@@ -166,6 +172,8 @@ base::DictionaryValue* GpuInfoAsDictionaryValue() {
                                              gpu_info.gl_version));
   basic_info->Append(NewDescriptionValuePair("GL_EXTENSIONS",
                                              gpu_info.gl_extensions));
+  basic_info->Append(NewDescriptionValuePair("Disabled Extensions",
+                                             disabled_extensions));
   basic_info->Append(NewDescriptionValuePair("Window system binding vendor",
                                              gpu_info.gl_ws_vendor));
   basic_info->Append(NewDescriptionValuePair("Window system binding version",
@@ -213,10 +221,10 @@ base::DictionaryValue* GpuInfoAsDictionaryValue() {
   info->Set("basic_info", basic_info);
 
 #if defined(OS_WIN)
-  base::Value* dx_info = gpu_info.dx_diagnostics.children.size() ?
-    DxDiagNodeToList(gpu_info.dx_diagnostics) :
-    base::Value::CreateNullValue();
-  info->Set("diagnostics", dx_info);
+  scoped_ptr<base::Value> dx_info = base::Value::CreateNullValue();
+  if (gpu_info.dx_diagnostics.children.size())
+    dx_info.reset(DxDiagNodeToList(gpu_info.dx_diagnostics));
+  info->Set("diagnostics", dx_info.Pass());
 #endif
 
   return info;

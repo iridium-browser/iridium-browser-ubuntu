@@ -69,7 +69,7 @@ StyleFetchedImage* CSSImageValue::cachedImage(Document* document, const Resource
             request.setCrossOriginAccessControl(document->securityOrigin(), options.allowCredentials, options.credentialsRequested);
 
         if (ResourcePtr<ImageResource> cachedImage = document->fetcher()->fetchImage(request))
-            m_image = StyleFetchedImage::create(cachedImage.get());
+            m_image = StyleFetchedImage::create(cachedImage.get(), document);
     }
 
     return (m_image && m_image->isImageResource()) ? toStyleFetchedImage(m_image) : 0;
@@ -111,9 +111,9 @@ String CSSImageValue::customCSSText() const
     return "url(" + quoteCSSURLIfNeeded(m_absoluteURL) + ")";
 }
 
-bool CSSImageValue::knownToBeOpaque(const LayoutObject* renderer) const
+bool CSSImageValue::knownToBeOpaque(const LayoutObject* layoutObject) const
 {
-    return m_image ? m_image->knownToBeOpaque(renderer) : false;
+    return m_image ? m_image->knownToBeOpaque(layoutObject) : false;
 }
 
 DEFINE_TRACE_AFTER_DISPATCH(CSSImageValue)

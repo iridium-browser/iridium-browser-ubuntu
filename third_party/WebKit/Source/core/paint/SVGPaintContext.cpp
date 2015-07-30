@@ -26,13 +26,11 @@
 #include "core/paint/SVGPaintContext.h"
 
 #include "core/frame/FrameHost.h"
-#include "core/layout/PaintInfo.h"
 #include "core/layout/svg/LayoutSVGResourceFilter.h"
 #include "core/layout/svg/LayoutSVGResourceMasker.h"
 #include "core/layout/svg/SVGLayoutSupport.h"
 #include "core/layout/svg/SVGResources.h"
 #include "core/layout/svg/SVGResourcesCache.h"
-#include "core/paint/LayoutObjectDrawingRecorder.h"
 #include "core/paint/SVGFilterPainter.h"
 #include "core/paint/SVGMaskPainter.h"
 #include "platform/FloatConversion.h"
@@ -44,10 +42,7 @@ SVGPaintContext::~SVGPaintContext()
     if (m_filter) {
         ASSERT(SVGResourcesCache::cachedResourcesForLayoutObject(m_object));
         ASSERT(SVGResourcesCache::cachedResourcesForLayoutObject(m_object)->filter() == m_filter);
-
-        LayoutObjectDrawingRecorder recorder(*m_originalPaintInfo->context, *m_object, DisplayItem::SVGFilter, LayoutRect::infiniteIntRect());
-        if (!recorder.canUseCachedDrawing())
-            SVGFilterPainter(*m_filter).finishEffect(*m_object, m_originalPaintInfo->context);
+        SVGFilterPainter(*m_filter).finishEffect(*m_object, m_originalPaintInfo->context);
 
         // Reset the paint info after the filter effect has been completed.
         // This isn't strictly required (e.g., m_paintInfo.rect is not used
@@ -195,6 +190,43 @@ void SVGPaintContext::paintSubtree(GraphicsContext* context, LayoutObject* item)
 
     PaintInfo info(context, LayoutRect::infiniteIntRect(), PaintPhaseForeground, PaintBehaviorNormal);
     item->paint(info, IntPoint());
+}
+
+bool SVGPaintContext::paintForLayoutObject(const PaintInfo& paintInfo, const ComputedStyle& style, LayoutObject& layoutObject, LayoutSVGResourceMode resourceMode, SkPaint& paint, const AffineTransform* additionalPaintServerTransform)
+{
+    if (paintInfo.isRenderingClipPathAsMaskImage()) {
+        if (resourceMode == ApplyToStrokeMode)
+            return false;
+        paint.setColor(SVGComputedStyle::initialFillPaintColor().rgb());
+        paint.setShader(nullptr);
+        return true;
+    }
+
+    SVGPaintServer paintServer = SVGPaintServer::requestForLayoutObject(layoutObject, style, resourceMode);
+    if (!paintServer.isValid())
+        return false;
+
+    if (additionalPaintServerTransform && paintServer.isTransformDependent())
+        paintServer.prependTransform(*additionalPaintServerTransform);
+
+    const SVGComputedStyle& svgStyle = style.svgStyle();
+    float paintAlpha = resourceMode == ApplyToFillMode ? svgStyle.fillOpacity() : svgStyle.strokeOpacity();
+    paintServer.applyToSkPaint(paint, paintAlpha);
+
+    paint.setFilterQuality(WebCoreInterpolationQualityToSkFilterQuality(InterpolationDefault));
+
+    // TODO(fs): The color filter can set when generating a picture for a mask -
+    // due to color-interpolation. We could also just apply the
+    // color-interpolation property from the the shape itself (which could mean
+    // the paintserver if it has it specified), since that would be more in line
+    // with the spec for color-interpolation. For now, just steal it from the GC
+    // though.
+    // Additionally, it's not really safe/guaranteed to be correct, as
+    // something down the paint pipe may want to farther tweak the color
+    // filter, which could yield incorrect results. (Consider just using
+    // saveLayer() w/ this color filter explicitly instead.)
+    paint.setColorFilter(paintInfo.context->colorFilter());
+    return true;
 }
 
 } // namespace blink

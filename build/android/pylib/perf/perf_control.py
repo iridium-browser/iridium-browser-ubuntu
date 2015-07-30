@@ -6,7 +6,9 @@ import atexit
 import logging
 
 from pylib import android_commands
+from pylib.device import device_errors
 from pylib.device import device_utils
+
 
 class PerfControl(object):
   """Provides methods for setting the performance mode of a device."""
@@ -28,7 +30,9 @@ class PerfControl(object):
 
   def SetHighPerfMode(self):
     """Sets the highest stable performance mode for the device."""
-    if not self._device.old_interface.IsRootEnabled():
+    try:
+      self._device.EnableRoot()
+    except device_errors.CommandFailedError:
       message = 'Need root for performance mode. Results may be NOISY!!'
       logging.warning(message)
       # Add an additional warning at exit, such that it's clear that any results
@@ -58,13 +62,13 @@ class PerfControl(object):
     self._ForceAllCpusOnline(True)
     self._SetScalingGovernorInternal('performance')
     if not self._AllCpusAreOnline():
-      if not self._device.old_interface.IsRootEnabled():
+      if not self._device.HasRoot():
         raise RuntimeError('Need root to force CPUs online.')
       raise RuntimeError('Failed to force CPUs online.')
 
   def SetDefaultPerfMode(self):
     """Sets the performance mode for the device to its default mode."""
-    if not self._device.old_interface.IsRootEnabled():
+    if not self._device.HasRoot():
       return
     product_model = self._device.product_model
     if 'Nexus 5' == product_model:

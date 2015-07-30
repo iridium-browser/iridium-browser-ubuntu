@@ -61,27 +61,32 @@ cr.define('cr.login', function() {
    * @const
    */
   var SUPPORTED_PARAMS = [
-    'gaiaId',           // Obfuscated GAIA ID to skip the email prompt page
-                        // during the re-auth flow.
-    'gaiaUrl',          // Gaia url to use.
-    'gaiaPath',         // Gaia path to use without a leading slash.
-    'hl',               // Language code for the user interface.
-    'email',            // Pre-fill the email field in Gaia UI.
-    'service',          // Name of Gaia service.
-    'continueUrl',      // Continue url to use.
-    'frameUrl',         // Initial frame URL to use. If empty defaults to
-                        // gaiaUrl.
-    'constrained',      // Whether the extension is loaded in a constrained
-                        // window.
-    'clientId',         // Chrome client id.
-    'needPassword',     // Whether the host is interested in getting a password.
-                        // If this set to |false|, |confirmPasswordCallback| is
-                        // not called before dispatching |authCopleted|.
-                        // Default is |true|.
-    'flow',             // One of 'default', 'enterprise', or 'theftprotection'.
-    'enterpriseDomain', // Domain in which hosting device is (or should be)
-                        // enrolled.
-    'emailDomain'       // Value used to prefill domain for email.
+    'gaiaId',        // Obfuscated GAIA ID to skip the email prompt page
+                     // during the re-auth flow.
+    'gaiaUrl',       // Gaia url to use.
+    'gaiaPath',      // Gaia path to use without a leading slash.
+    'hl',            // Language code for the user interface.
+    'email',         // Pre-fill the email field in Gaia UI.
+    'service',       // Name of Gaia service.
+    'continueUrl',   // Continue url to use.
+    'frameUrl',      // Initial frame URL to use. If empty defaults to
+                     // gaiaUrl.
+    'constrained',   // Whether the extension is loaded in a constrained
+                     // window.
+    'clientId',      // Chrome client id.
+    'useEafe',       // Whether to use EAFE.
+    'needPassword',  // Whether the host is interested in getting a password.
+                     // If this set to |false|, |confirmPasswordCallback| is
+                     // not called before dispatching |authCopleted|.
+                     // Default is |true|.
+    'flow',          // One of 'default', 'enterprise', or 'theftprotection'.
+    'enterpriseDomain',    // Domain in which hosting device is (or should be)
+                           // enrolled.
+    'emailDomain',         // Value used to prefill domain for email.
+    'clientVersion',       // Version of the Chrome build.
+    'platformVersion',     // Version of the OS build.
+    'releaseChannel',      // Installation channel.
+    'endpointGen',         // Current endpoint generation.
   ];
 
   /**
@@ -101,6 +106,7 @@ cr.define('cr.login', function() {
     this.chooseWhatToSync_ = false;
     this.skipForNow_ = false;
     this.authFlow = AuthFlow.DEFAULT;
+    this.authDomain = '';
     this.loaded_ = false;
     this.idpOrigin_ = null;
     this.continueUrl_ = null;
@@ -109,6 +115,9 @@ cr.define('cr.login', function() {
     this.reloadUrl_ = null;
     this.trusted_ = true;
     this.oauth_code_ = null;
+
+    this.useEafe_ = false;
+    this.clientId_ = null;
 
     this.samlHandler_ = new cr.login.SamlHandler(this.webview_);
     this.confirmPasswordCallback = null;
@@ -123,12 +132,6 @@ cr.define('cr.login', function() {
     this.samlHandler_.addEventListener(
         'authPageLoaded',
         this.onAuthPageLoaded_.bind(this));
-    Object.defineProperty(this, 'authDomain', {
-      get: (function() {
-        return this.samlHandler_.authDomain;
-      }).bind(this),
-      enumerable: true
-    });
 
     this.webview_.addEventListener('droplink', this.onDropLink_.bind(this));
     this.webview_.addEventListener(
@@ -174,7 +177,6 @@ cr.define('cr.login', function() {
     this.trusted_ = true;
     this.authFlow = AuthFlow.DEFAULT;
     this.samlHandler_.reset();
-    this.loaded_ = false;
   };
 
   /**
@@ -183,7 +185,9 @@ cr.define('cr.login', function() {
    * @param {Object} data Parameters for the authorization flow.
    */
   Authenticator.prototype.load = function(authMode, data) {
+    this.authMode = authMode;
     this.clearCredentials_();
+    this.loaded_ = false;
     this.idpOrigin_ = data.gaiaUrl || IDP_ORIGIN;
     this.continueUrl_ = data.continueUrl || CONTINUE_URL;
     this.continueUrlWithoutParams_ =
@@ -191,6 +195,8 @@ cr.define('cr.login', function() {
         this.continueUrl_;
     this.isConstrainedWindow_ = data.constrained == '1';
     this.isNewGaiaFlowChromeOS = data.isNewGaiaFlowChromeOS;
+    this.useEafe_ = data.useEafe || false;
+    this.clientId_ = data.clientId;
 
     this.initialFrameUrl_ = this.constructInitialFrameUrl_(data);
     this.reloadUrl_ = data.frameUrl || this.initialFrameUrl_;
@@ -214,6 +220,7 @@ cr.define('cr.login', function() {
    */
   Authenticator.prototype.reload = function() {
     this.clearCredentials_();
+    this.loaded_ = false;
     this.webview_.src = this.reloadUrl_;
   };
 
@@ -232,6 +239,14 @@ cr.define('cr.login', function() {
         url = appendParam(url, 'client_id', data.clientId);
       if (data.enterpriseDomain)
         url = appendParam(url, 'manageddomain', data.enterpriseDomain);
+      if (data.clientVersion)
+        url = appendParam(url, 'client_version', data.clientVersion);
+      if (data.platformVersion)
+        url = appendParam(url, 'platform_version', data.platformVersion);
+      if (data.releaseChannel)
+        url = appendParam(url, 'release_channel', data.releaseChannel);
+      if (data.endpointGen)
+        url = appendParam(url, 'endpoint_gen', data.endpointGen);
     } else {
       url = appendParam(url, 'continue', this.continueUrl_);
       url = appendParam(url, 'service', data.service || SERVICE_ID);
@@ -308,7 +323,8 @@ cr.define('cr.login', function() {
    * @private
    */
   Authenticator.prototype.onFocus_ = function(e) {
-    this.webview_.focus();
+    if (this.authMode == AuthMode.DESKTOP)
+      this.webview_.focus();
   };
 
   /**
@@ -366,35 +382,69 @@ cr.define('cr.login', function() {
   };
 
   /**
-   * Invoked when an HTML5 message is received from the webview element.
+   * Returns true if given HTML5 message is received from the webview element.
    * @param {object} e Payload of the received HTML5 message.
-   * @private
    */
-  Authenticator.prototype.onMessageFromWebview_ = function(e) {
+  Authenticator.prototype.isGaiaMessage = function(e) {
     if (!this.isWebviewEvent_(e))
-      return;
+      return false;
 
     // The event origin does not have a trailing slash.
     if (e.origin != this.idpOrigin_.substring(0, this.idpOrigin_.length - 1)) {
+      return false;
+    }
+
+    // EAFE passes back auth code via message.
+    if (this.useEafe_ &&
+        typeof e.data == 'object' &&
+        e.data.hasOwnProperty('authorizationCode')) {
+      assert(!this.oauth_code_);
+      this.oauth_code_ = e.data.authorizationCode;
+      this.dispatchEvent(
+          new CustomEvent('authCompleted',
+                          {
+                            detail: {
+                              authCodeOnly: true,
+                              authCode: this.oauth_code_
+                            }
+                          }));
       return;
     }
 
     // Gaia messages must be an object with 'method' property.
     if (typeof e.data != 'object' || !e.data.hasOwnProperty('method')) {
-      return;
+      return false;
     }
+    return true;
+  };
+
+  /**
+   * Invoked when an HTML5 message is received from the webview element.
+   * @param {object} e Payload of the received HTML5 message.
+   * @private
+   */
+  Authenticator.prototype.onMessageFromWebview_ = function(e) {
+    if (!this.isGaiaMessage(e))
+      return;
 
     var msg = e.data;
     if (msg.method == 'attemptLogin') {
       this.email_ = msg.email;
       this.password_ = msg.password;
       this.chooseWhatToSync_ = msg.chooseWhatToSync;
+      // We need to dispatch only first event, before user enters password.
+      if (!msg.password) {
+        this.dispatchEvent(
+            new CustomEvent('attemptLogin', {detail: msg.email}));
+      }
     } else if (msg.method == 'dialogShown') {
       this.dispatchEvent(new Event('dialogShown'));
     } else if (msg.method == 'dialogHidden') {
       this.dispatchEvent(new Event('dialogHidden'));
     } else if (msg.method == 'backButton') {
       this.dispatchEvent(new CustomEvent('backButton', {detail: msg.show}));
+    } else if (msg.method == 'showView') {
+      this.dispatchEvent(new Event('showView'));
     } else {
       console.warn('Unrecognized message from GAIA: ' + msg.method);
     }
@@ -411,7 +461,8 @@ cr.define('cr.login', function() {
       // TODO(xiyuan): Change to synchronous call when iframe based code
       // is removed.
       var invokeConfirmPassword = (function() {
-        this.confirmPasswordCallback(this.samlHandler_.scrapedPasswordCount);
+        this.confirmPasswordCallback(this.email_,
+                                     this.samlHandler_.scrapedPasswordCount);
       }).bind(this);
       window.setTimeout(invokeConfirmPassword, 0);
       return;
@@ -460,7 +511,8 @@ cr.define('cr.login', function() {
       if (this.confirmPasswordCallback) {
         // Confirm scraped password. The flow follows in
         // verifyConfirmedPassword.
-        this.confirmPasswordCallback(this.samlHandler_.scrapedPasswordCount);
+        this.confirmPasswordCallback(this.email_,
+                                     this.samlHandler_.scrapedPasswordCount);
         return;
       }
     }
@@ -477,16 +529,21 @@ cr.define('cr.login', function() {
            (this.email_ && this.gaiaId_ && this.sessionIndex_));
     this.dispatchEvent(
         new CustomEvent('authCompleted',
-          // TODO(rsorokin): get rid of the stub values.
-                        {detail: {email: this.email_ || '',
-                                  gaiaId: this.gaiaId_ || '',
-                                  password: this.password_ || '',
-                                  authCode: this.oauth_code_,
-                                  usingSAML: this.authFlow == AuthFlow.SAML,
-                                  chooseWhatToSync: this.chooseWhatToSync_,
-                                  skipForNow: this.skipForNow_,
-                                  sessionIndex: this.sessionIndex_ || '',
-                                  trusted: this.trusted_}}));
+                        // TODO(rsorokin): get rid of the stub values.
+                        {
+                          detail: {
+                            email: this.email_ || '',
+                            gaiaId: this.gaiaId_ || '',
+                            password: this.password_ || '',
+                            authCode: this.oauth_code_,
+                            usingSAML: this.authFlow == AuthFlow.SAML,
+                            chooseWhatToSync: this.chooseWhatToSync_,
+                            skipForNow: this.skipForNow_,
+                            sessionIndex: this.sessionIndex_ || '',
+                            trusted: this.trusted_
+                          }
+                        }));
+    this.clearCredentials_();
   };
 
   /**
@@ -509,12 +566,8 @@ cr.define('cr.login', function() {
     if (!e.detail.isSAMLPage)
       return;
 
-    if (this.authFlow != AuthFlow.SAML) {
-      this.authFlow = AuthFlow.SAML;
-    } else {
-      // Force an authFlowChanged event to update UI with updated auth doamin.
-      cr.dispatchPropertyChange(this, 'authFlow');
-    }
+    this.authDomain = this.samlHandler_.authDomain;
+    this.authFlow = AuthFlow.SAML;
   };
 
   /**
@@ -550,8 +603,9 @@ cr.define('cr.login', function() {
     var currentUrl = this.webview_.src;
     if (currentUrl.lastIndexOf(this.idpOrigin_) == 0) {
       var msg = {
-        'method': 'handshake'
+        'method': 'handshake',
       };
+
       this.webview_.contentWindow.postMessage(msg, currentUrl);
     }
   };
@@ -576,6 +630,21 @@ cr.define('cr.login', function() {
       this.dispatchEvent(new Event('ready'));
       // Focus webview after dispatching event when webview is already visible.
       this.webview_.focus();
+    }
+
+    // Sends client id to EAFE on every loadstop after a small timeout. This is
+    // needed because EAFE sits behind SSO and initialize asynchrounouly
+    // and we don't know for sure when it is loaded and ready to listen
+    // for message. The postMessage is guarded by EAFE's origin.
+    if (this.useEafe_) {
+      // An arbitrary small timeout for delivering the initial message.
+      var EAFE_INITIAL_MESSAGE_DELAY_IN_MS = 500;
+      window.setTimeout((function() {
+        var msg = {
+          'clientId': this.clientId_
+        };
+        this.webview_.contentWindow.postMessage(msg, this.idpOrigin_);
+      }).bind(this), EAFE_INITIAL_MESSAGE_DELAY_IN_MS);
     }
   };
 
@@ -607,6 +676,12 @@ cr.define('cr.login', function() {
    * @type {AuthFlow}
    */
   cr.defineProperty(Authenticator, 'authFlow');
+
+  /**
+   * The domain name of the current auth page.
+   * @type {string}
+   */
+  cr.defineProperty(Authenticator, 'authDomain');
 
   Authenticator.AuthFlow = AuthFlow;
   Authenticator.AuthMode = AuthMode;

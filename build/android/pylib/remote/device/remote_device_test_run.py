@@ -14,6 +14,7 @@ import zipfile
 
 from pylib import constants
 from pylib.base import test_run
+from pylib.remote.device import appurify_constants
 from pylib.remote.device import appurify_sanitized
 from pylib.remote.device import remote_device_helper
 from pylib.utils import zip_utils
@@ -172,7 +173,7 @@ class RemoteDeviceTestRun(test_run.TestRun):
     """Download the test results from remote device service.
 
     Args:
-      results_path: path to download results to.
+      results_path: Path to download appurify results zipfile.
     """
     if results_path:
       logging.info('Downloading results to %s.' % results_path)
@@ -200,7 +201,7 @@ class RemoteDeviceTestRun(test_run.TestRun):
     return self._results['status']
 
   def _AmInstrumentTestSetup(self, app_path, test_path, runner_package,
-                             environment_variables):
+                             environment_variables, extra_apks=None):
     config = {'runner': runner_package}
     if environment_variables:
       config['environment_vars'] = ','.join(
@@ -212,6 +213,7 @@ class RemoteDeviceTestRun(test_run.TestRun):
     if data_deps:
       with tempfile.NamedTemporaryFile(suffix='.zip') as test_with_deps:
         sdcard_files = []
+        additional_apks = []
         host_test = os.path.basename(test_path)
         with zipfile.ZipFile(test_with_deps.name, 'w') as zip_file:
           zip_file.write(test_path, host_test, zipfile.ZIP_DEFLATED)
@@ -222,19 +224,29 @@ class RemoteDeviceTestRun(test_run.TestRun):
             else:
               zip_utils.WriteToZipFile(zip_file, h, os.path.basename(h))
               sdcard_files.append(os.path.basename(h))
+          for a in extra_apks or ():
+            zip_utils.WriteToZipFile(zip_file, a, os.path.basename(a));
+            additional_apks.append(os.path.basename(a))
+
         config['sdcard_files'] = ','.join(sdcard_files)
         config['host_test'] = host_test
+        if additional_apks:
+          config['additional_apks'] = ','.join(additional_apks)
         self._test_id = self._UploadTestToDevice(
             'robotium', test_with_deps.name, app_id=self._app_id)
     else:
       self._test_id = self._UploadTestToDevice('robotium', test_path)
 
     logging.info('Setting config: %s' % config)
-    self._SetTestConfig('robotium', config)
+    appurify_configs = {}
+    if self._env.network_config:
+      appurify_configs['network'] = self._env.network_config
+    self._SetTestConfig('robotium', config, **appurify_configs)
 
   def _UploadAppToDevice(self, app_path):
     """Upload app to device."""
-    logging.info('Uploading %s to remote service.', app_path)
+    logging.info('Uploading %s to remote service as %s.', app_path,
+                 self._test_instance.suite)
     with open(app_path, 'rb') as apk_src:
       with appurify_sanitized.SanitizeLogging(self._env.verbose_count,
                                               logging.WARNING):
@@ -259,21 +271,32 @@ class RemoteDeviceTestRun(test_run.TestRun):
           'Unable to upload %s.' % test_path)
       return upload_results.json()['response']['test_id']
 
-  def _SetTestConfig(self, runner_type, body):
+  def _SetTestConfig(self, runner_type, runner_configs,
+                     network=appurify_constants.NETWORK.WIFI_1_BAR,
+                     pcap=0, profiler=0, videocapture=0):
     """Generates and uploads config file for test.
     Args:
-      extras: Extra arguments to set in the config file.
+      runner_configs: Configs specific to the runner you are using.
+      network: Config to specify the network environment the devices running
+          the tests will be in.
+      pcap: Option to set the recording the of network traffic from the device.
+      profiler: Option to set the recording of CPU, memory, and network
+          transfer usage in the tests.
+      videocapture: Option to set video capture during the tests.
+
     """
     logging.info('Generating config file for test.')
     with tempfile.TemporaryFile() as config:
       config_data = [
-        '[appurify]',
-        'pcap=0',
-        'profiler=0',
-        'videocapture=0',
-        '[%s]' % runner_type
+          '[appurify]',
+          'network=%s' % network,
+          'pcap=%s' % pcap,
+          'profiler=%s' % profiler,
+          'videocapture=%s' % videocapture,
+          '[%s]' % runner_type
       ]
-      config_data.extend('%s=%s' % (k, v) for k, v in body.iteritems())
+      config_data.extend(
+          '%s=%s' % (k, v) for k, v in runner_configs.iteritems())
       config.write(''.join('%s\n' % l for l in config_data))
       config.flush()
       config.seek(0)

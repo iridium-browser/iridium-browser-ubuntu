@@ -10,7 +10,6 @@
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/task_runner.h"
-#include "content/common/media/cdm_messages.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
@@ -36,12 +35,10 @@ using media::MediaKeys;
 
 namespace {
 
-// Maximum lengths for various EME API parameters. These are checks to
-// prevent unnecessarily large parameters from being passed around, and the
-// lengths are somewhat arbitrary as the EME spec doesn't specify any limits.
-const size_t kMaxInitDataLength = 64 * 1024;  // 64 KB
-const size_t kMaxSessionResponseLength = 64 * 1024;  // 64 KB
-const size_t kMaxKeySystemLength = 256;
+#if defined(OS_ANDROID)
+// Android only supports 128-bit key IDs.
+const size_t kAndroidKeyIdBytes = 128 / 8;
+#endif
 
 // The ID used in this class is a concatenation of |render_frame_id| and
 // |cdm_id|, i.e. (render_frame_id << 32) + cdm_id.
@@ -112,7 +109,7 @@ typedef CdmPromiseInternal<std::string> NewSessionPromise;
 
 // Render process ID to BrowserCdmManager map.
 typedef std::map<int, BrowserCdmManager*> BrowserCdmManagerMap;
-base::LazyInstance<BrowserCdmManagerMap> g_browser_cdm_manager_map =
+base::LazyInstance<BrowserCdmManagerMap>::Leaky g_browser_cdm_manager_map =
     LAZY_INSTANCE_INITIALIZER;
 
 BrowserCdmManager* BrowserCdmManager::FromProcess(int render_process_id) {
@@ -296,18 +293,20 @@ void BrowserCdmManager::OnSessionExpirationUpdate(
                                           new_expiry_time));
 }
 
-void BrowserCdmManager::OnInitializeCdm(int render_frame_id,
-                                        int cdm_id,
-                                        const std::string& key_system,
-                                        const GURL& security_origin) {
-  if (key_system.size() > kMaxKeySystemLength) {
-    // This failure will be discovered and reported by OnCreateSession()
-    // as GetCdm() will return null.
-    NOTREACHED() << "Invalid key system: " << key_system;
+void BrowserCdmManager::OnInitializeCdm(
+    int render_frame_id,
+    int cdm_id,
+    uint32_t promise_id,
+    const CdmHostMsg_InitializeCdm_Params& params) {
+  if (params.key_system.size() > media::limits::kMaxKeySystemLength) {
+    NOTREACHED() << "Invalid key system: " << params.key_system;
+    RejectPromise(render_frame_id, cdm_id, promise_id,
+                  MediaKeys::INVALID_ACCESS_ERROR, 0, "Invalid key system.");
     return;
   }
 
-  AddCdm(render_frame_id, cdm_id, key_system, security_origin);
+  AddCdm(render_frame_id, cdm_id, promise_id, params.key_system,
+         params.security_origin, params.use_hw_secure_codecs);
 }
 
 void BrowserCdmManager::OnSetServerCertificate(
@@ -331,8 +330,7 @@ void BrowserCdmManager::OnSetServerCertificate(
     return;
   }
 
-  cdm->SetServerCertificate(&certificate[0], certificate.size(),
-                            promise.Pass());
+  cdm->SetServerCertificate(certificate, promise.Pass());
 }
 
 void BrowserCdmManager::OnCreateSessionAndGenerateRequest(
@@ -346,12 +344,21 @@ void BrowserCdmManager::OnCreateSessionAndGenerateRequest(
   scoped_ptr<NewSessionPromise> promise(
       new NewSessionPromise(this, render_frame_id, cdm_id, promise_id));
 
-  if (init_data.size() > kMaxInitDataLength) {
+  if (init_data.size() > media::limits::kMaxInitDataLength) {
     LOG(WARNING) << "InitData for ID: " << cdm_id
                  << " too long: " << init_data.size();
     promise->reject(MediaKeys::INVALID_ACCESS_ERROR, 0, "Init data too long.");
     return;
   }
+#if defined(OS_ANDROID)
+  // 'webm' initData is a single key ID. On Android the length is restricted.
+  if (init_data_type == INIT_DATA_TYPE_WEBM &&
+      init_data.size() != kAndroidKeyIdBytes) {
+    promise->reject(MediaKeys::INVALID_ACCESS_ERROR, 0,
+                    "'webm' initData is not the correct length.");
+    return;
+  }
+#endif
 
   media::EmeInitDataType eme_init_data_type;
   switch (init_data_type) {
@@ -400,7 +407,7 @@ void BrowserCdmManager::OnUpdateSession(int render_frame_id,
     return;
   }
 
-  if (response.size() > kMaxSessionResponseLength) {
+  if (response.size() > media::limits::kMaxSessionResponseLength) {
     LOG(WARNING) << "Response for ID " << cdm_id
                  << " is too long: " << response.size();
     promise->reject(MediaKeys::INVALID_ACCESS_ERROR, 0, "Response too long.");
@@ -412,7 +419,7 @@ void BrowserCdmManager::OnUpdateSession(int render_frame_id,
     return;
   }
 
-  cdm->UpdateSession(session_id, &response[0], response.size(), promise.Pass());
+  cdm->UpdateSession(session_id, response, promise.Pass());
 }
 
 void BrowserCdmManager::OnCloseSession(int render_frame_id,
@@ -445,43 +452,34 @@ void BrowserCdmManager::OnDestroyCdm(int render_frame_id, int cdm_id) {
 
 void BrowserCdmManager::AddCdm(int render_frame_id,
                                int cdm_id,
+                               uint32_t promise_id,
                                const std::string& key_system,
-                               const GURL& security_origin) {
+                               const GURL& security_origin,
+                               bool use_hw_secure_codecs) {
   DCHECK(task_runner_->RunsTasksOnCurrentThread());
   DCHECK(!GetCdm(render_frame_id, cdm_id));
 
-  bool use_secure_surface = false;
-
-#if defined(OS_ANDROID)
-  // TODO(sandersd): Pass the security level from key system instead.
-  // http://crbug.com/467779
-  RenderFrameHost* rfh =
-      RenderFrameHost::FromID(render_process_id_, render_frame_id);
-  WebContents* web_contents = WebContents::FromRenderFrameHost(rfh);
-  if (web_contents) {
-    content::RendererPreferences* prefs =
-        web_contents->GetMutableRendererPrefs();
-    use_secure_surface = prefs->use_video_overlay_for_embedded_encrypted_video;
-  }
-#endif
+  scoped_ptr<SimplePromise> promise(
+      new SimplePromise(this, render_frame_id, cdm_id, promise_id));
 
   scoped_ptr<BrowserCdm> cdm(media::CreateBrowserCdm(
-      key_system, use_secure_surface, BROWSER_CDM_MANAGER_CB(OnSessionMessage),
+      key_system, use_hw_secure_codecs,
+      BROWSER_CDM_MANAGER_CB(OnSessionMessage),
       BROWSER_CDM_MANAGER_CB(OnSessionClosed),
       BROWSER_CDM_MANAGER_CB(OnLegacySessionError),
       BROWSER_CDM_MANAGER_CB(OnSessionKeysChange),
       BROWSER_CDM_MANAGER_CB(OnSessionExpirationUpdate)));
 
   if (!cdm) {
-    // This failure will be discovered and reported by
-    // OnCreateSessionAndGenerateRequest() as GetCdm() will return null.
     DVLOG(1) << "failed to create CDM.";
+    promise->reject(MediaKeys::INVALID_STATE_ERROR, 0, "Failed to create CDM.");
     return;
   }
 
   uint64 id = GetId(render_frame_id, cdm_id);
   cdm_map_.add(id, cdm.Pass());
   cdm_security_origin_map_[id] = security_origin;
+  promise->resolve();
 }
 
 void BrowserCdmManager::RemoveAllCdmForFrame(int render_frame_id) {
@@ -584,8 +582,8 @@ void BrowserCdmManager::CreateSessionAndGenerateRequestIfPermitted(
   // Only the temporary session type is supported in browser CDM path.
   // TODO(xhwang): Add SessionType support if needed.
   cdm->CreateSessionAndGenerateRequest(media::MediaKeys::TEMPORARY_SESSION,
-                                       init_data_type, &init_data[0],
-                                       init_data.size(), promise.Pass());
+                                       init_data_type, init_data,
+                                       promise.Pass());
 }
 
 }  // namespace content

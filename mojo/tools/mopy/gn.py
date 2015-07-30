@@ -107,7 +107,7 @@ def ConfigForGNArgs(args):
   if config_args["use_goma"]:
     config_args["goma_dir"] = args.get("goma_dir")
   config_args["use_nacl"] = args.get("mojo_use_nacl", False)
-  config_args["target_os"] = args.get("os")
+  config_args["target_os"] = args.get("target_os")
   config_args["target_cpu"] = args.get("target_cpu")
   config_args["dcheck_always_on"] = args.get("dcheck_always_on")
   return Config(**config_args)
@@ -132,4 +132,10 @@ def ParseGNConfig(build_dir):
         key = result.group(1)
         value = result.group(2)
         values[key] = ast.literal_eval(TRANSLATIONS.get(value, value))
+
+  # TODO(msw): The build dir is derived from GN args 'is_debug' and 'target_os'.
+  #            The script should probably use its 'build_dir' argument instead.
+  if not "is_debug" in values:
+    values["is_debug"] = "Debug" in build_dir
+
   return values

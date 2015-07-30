@@ -5,81 +5,12 @@
 import logging
 import time
 
-from integration_tests import network_metrics
+from common import chrome_proxy_metrics
+from common import network_metrics
+from common.chrome_proxy_metrics import ChromeProxyMetricException
 from telemetry.page import page_test
 from telemetry.value import scalar
 
-
-class ChromeProxyMetricException(page_test.MeasurementFailure):
-  pass
-
-
-CHROME_PROXY_VIA_HEADER = 'Chrome-Compression-Proxy'
-
-
-class ChromeProxyResponse(network_metrics.HTTPResponse):
-  """ Represents an HTTP response from a timeleine event."""
-  def __init__(self, event):
-    super(ChromeProxyResponse, self).__init__(event)
-
-  def ShouldHaveChromeProxyViaHeader(self):
-    resp = self.response
-    # Ignore https and data url
-    if resp.url.startswith('https') or resp.url.startswith('data:'):
-      return False
-    # Ignore 304 Not Modified and cache hit.
-    if resp.status == 304 or resp.served_from_cache:
-      return False
-    # Ignore invalid responses that don't have any header. Log a warning.
-    if not resp.headers:
-      logging.warning('response for %s does not any have header '
-                      '(refer=%s, status=%s)',
-                      resp.url, resp.GetHeader('Referer'), resp.status)
-      return False
-    return True
-
-  def HasChromeProxyViaHeader(self):
-    via_header = self.response.GetHeader('Via')
-    if not via_header:
-      return False
-    vias = [v.strip(' ') for v in via_header.split(',')]
-    # The Via header is valid if it has a 4-character version prefix followed by
-    # the proxy name, for example, "1.1 Chrome-Compression-Proxy".
-    return any(v[4:] == CHROME_PROXY_VIA_HEADER for v in vias)
-
-  def IsValidByViaHeader(self):
-    return (not self.ShouldHaveChromeProxyViaHeader() or
-            self.HasChromeProxyViaHeader())
-
-  def GetChromeProxyClientType(self):
-    """Get the client type directive from the Chrome-Proxy request header.
-
-    Returns:
-        The client type directive from the Chrome-Proxy request header for the
-        request that lead to this response. For example, if the request header
-        "Chrome-Proxy: c=android" is present, then this method would return
-        "android". Returns None if no client type directive is present.
-    """
-    if 'Chrome-Proxy' not in self.response.request_headers:
-      return None
-
-    chrome_proxy_request_header = self.response.request_headers['Chrome-Proxy']
-    values = [v.strip() for v in chrome_proxy_request_header.split(',')]
-    for value in values:
-      kvp = value.split('=', 1)
-      if len(kvp) == 2 and kvp[0].strip() == 'c':
-        return kvp[1].strip()
-    return None
-
-  def HasChromeProxyLoFi(self):
-    if 'Chrome-Proxy' not in self.response.request_headers:
-      return False
-    chrome_proxy_request_header = self.response.request_headers['Chrome-Proxy']
-    values = [v.strip() for v in chrome_proxy_request_header.split(',')]
-    for value in values:
-      if len(value) == 5 and value == 'q=low':
-        return True
-    return False
 
 class ChromeProxyMetric(network_metrics.NetworkMetric):
   """A Chrome proxy timeline metric."""
@@ -93,7 +24,7 @@ class ChromeProxyMetric(network_metrics.NetworkMetric):
     self._events = events
 
   def ResponseFromEvent(self, event):
-    return ChromeProxyResponse(event)
+    return chrome_proxy_metrics.ChromeProxyResponse(event)
 
   def AddResults(self, tab, results):
     raise NotImplementedError
@@ -213,6 +144,21 @@ class ChromeProxyMetric(network_metrics.NetworkMetric):
         results.current_page, 'response_duration', 'ms', response_duration,
         important=False))
 
+  def AddResultsForExtraViaHeader(self, tab, results, extra_via_header):
+    extra_via_count = 0
+
+    for resp in self.IterResponses(tab):
+      if resp.HasChromeProxyViaHeader():
+        if resp.HasExtraViaHeader(extra_via_header):
+          extra_via_count += 1
+        else:
+          raise ChromeProxyMetricException, (
+              '%s: Should have via header %s.' % (resp.response.url,
+                                                  extra_via_header))
+
+    results.AddValue(scalar.ScalarValue(
+        results.current_page, 'extra_via_header', 'count', extra_via_count))
+
   def AddResultsForClientVersion(self, tab, results):
     via_count = 0
     for resp in self.IterResponses(tab):
@@ -259,8 +205,7 @@ class ChromeProxyMetric(network_metrics.NetworkMetric):
         if client_type.lower() == bypass_for_client_type.lower():
           raise ChromeProxyMetricException, (
               '%s: Response for client of type "%s" has via header, but should '
-              'be bypassed.' % (
-                  resp.response.url, bypass_for_client_type, client_type))
+              'be bypassed.' % (resp.response.url, bypass_for_client_type))
       elif resp.ShouldHaveChromeProxyViaHeader():
         bypass_count += 1
         if client_type.lower() != bypass_for_client_type.lower():
@@ -280,27 +225,40 @@ class ChromeProxyMetric(network_metrics.NetworkMetric):
         results.current_page, 'bypass', 'count', bypass_count))
 
   def AddResultsForLoFi(self, tab, results):
-    lo_fi_count = 0
+    lo_fi_request_count = 0
+    lo_fi_response_count = 0
 
     for resp in self.IterResponses(tab):
-      if resp.HasChromeProxyLoFi():
-        lo_fi_count += 1
+      if resp.HasChromeProxyLoFiRequest():
+        lo_fi_request_count += 1
       else:
         raise ChromeProxyMetricException, (
             '%s: LoFi not in request header.' % (resp.response.url))
+
+      if resp.HasChromeProxyLoFiResponse():
+        lo_fi_response_count += 1
+      else:
+        raise ChromeProxyMetricException, (
+            '%s: LoFi not in response header.' % (resp.response.url))
 
       if resp.content_length > 100:
         raise ChromeProxyMetricException, (
             'Image %s is %d bytes. Expecting less than 100 bytes.' %
             (resp.response.url, resp.content_length))
 
-    if lo_fi_count == 0:
+    if lo_fi_request_count == 0:
+      raise ChromeProxyMetricException, (
+          'Expected at least one LoFi request, but zero such requests were '
+          'sent.')
+    if lo_fi_response_count == 0:
       raise ChromeProxyMetricException, (
           'Expected at least one LoFi response, but zero such responses were '
           'received.')
 
     results.AddValue(scalar.ScalarValue(
-        results.current_page, 'lo_fi', 'count', lo_fi_count))
+        results.current_page, 'lo_fi_request', 'count', lo_fi_request_count))
+    results.AddValue(scalar.ScalarValue(
+        results.current_page, 'lo_fi_response', 'count', lo_fi_response_count))
     super(ChromeProxyMetric, self).AddResults(tab, results)
 
   def AddResultsForBypass(self, tab, results):

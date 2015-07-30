@@ -34,6 +34,8 @@
 #include "core/layout/LayoutAnalyzer.h"
 #include "core/layout/LayoutTheme.h"
 #include "core/paint/DeprecatedPaintLayer.h"
+#include "core/paint/PaintInfo.h"
+#include "core/paint/ThemePainter.h"
 #include "platform/PlatformKeyboardEvent.h"
 #include "platform/fonts/SimpleFontData.h"
 
@@ -54,17 +56,17 @@ LayoutTextControlSingleLine::~LayoutTextControlSingleLine()
 
 inline Element* LayoutTextControlSingleLine::containerElement() const
 {
-    return inputElement()->closedShadowRoot()->getElementById(ShadowElementNames::textFieldContainer());
+    return inputElement()->userAgentShadowRoot()->getElementById(ShadowElementNames::textFieldContainer());
 }
 
 inline Element* LayoutTextControlSingleLine::editingViewPortElement() const
 {
-    return inputElement()->closedShadowRoot()->getElementById(ShadowElementNames::editingViewPort());
+    return inputElement()->userAgentShadowRoot()->getElementById(ShadowElementNames::editingViewPort());
 }
 
 inline HTMLElement* LayoutTextControlSingleLine::innerSpinButtonElement() const
 {
-    return toHTMLElement(inputElement()->closedShadowRoot()->getElementById(ShadowElementNames::spinButton()));
+    return toHTMLElement(inputElement()->userAgentShadowRoot()->getElementById(ShadowElementNames::spinButton()));
 }
 
 void LayoutTextControlSingleLine::paint(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
@@ -82,7 +84,7 @@ void LayoutTextControlSingleLine::paint(const PaintInfo& paintInfo, const Layout
 
         // Convert the rect into the coords used for painting the content
         contentsRect.moveBy(paintOffset + location());
-        LayoutTheme::theme().paintCapsLockIndicator(this, paintInfo, pixelSnappedIntRect(contentsRect));
+        LayoutTheme::theme().painter().paintCapsLockIndicator(this, paintInfo, pixelSnappedIntRect(contentsRect));
     }
 }
 
@@ -108,93 +110,93 @@ void LayoutTextControlSingleLine::layout()
     // and type=search if the text height is taller than the contentHeight()
     // because of compability.
 
-    LayoutBox* innerEditorRenderer = innerEditorElement()->layoutBox();
-    bool innerEditorRendererHadLayout = innerEditorRenderer && innerEditorRenderer->needsLayout();
-    LayoutBox* viewPortRenderer = editingViewPortElement() ? editingViewPortElement()->layoutBox() : 0;
+    LayoutBox* innerEditorLayoutObject = innerEditorElement()->layoutBox();
+    bool innerEditorLayoutObjectHadLayout = innerEditorLayoutObject && innerEditorLayoutObject->needsLayout();
+    LayoutBox* viewPortLayoutObject = editingViewPortElement() ? editingViewPortElement()->layoutBox() : 0;
 
     // To ensure consistency between layouts, we need to reset any conditionally overriden height.
-    if (innerEditorRenderer && !innerEditorRenderer->styleRef().logicalHeight().isAuto()) {
-        innerEditorRenderer->mutableStyleRef().setLogicalHeight(Length(Auto));
-        layoutScope.setNeedsLayout(innerEditorRenderer, LayoutInvalidationReason::TextControlChanged);
+    if (innerEditorLayoutObject && !innerEditorLayoutObject->styleRef().logicalHeight().isAuto()) {
+        innerEditorLayoutObject->mutableStyleRef().setLogicalHeight(Length(Auto));
+        layoutScope.setNeedsLayout(innerEditorLayoutObject, LayoutInvalidationReason::TextControlChanged);
         HTMLElement* placeholderElement = inputElement()->placeholderElement();
         if (LayoutBox* placeholderBox = placeholderElement ? placeholderElement->layoutBox() : 0)
             layoutScope.setNeedsLayout(placeholderBox, LayoutInvalidationReason::TextControlChanged);
     }
-    if (viewPortRenderer && !viewPortRenderer->styleRef().logicalHeight().isAuto()) {
-        viewPortRenderer->mutableStyleRef().setLogicalHeight(Length(Auto));
-        layoutScope.setNeedsLayout(viewPortRenderer, LayoutInvalidationReason::TextControlChanged);
+    if (viewPortLayoutObject && !viewPortLayoutObject->styleRef().logicalHeight().isAuto()) {
+        viewPortLayoutObject->mutableStyleRef().setLogicalHeight(Length(Auto));
+        layoutScope.setNeedsLayout(viewPortLayoutObject, LayoutInvalidationReason::TextControlChanged);
     }
 
     LayoutBlockFlow::layoutBlock(false);
 
     Element* container = containerElement();
-    LayoutBox* containerRenderer = container ? container->layoutBox() : 0;
+    LayoutBox* containerLayoutObject = container ? container->layoutBox() : 0;
 
     // Set the text block height
     LayoutUnit desiredLogicalHeight = textBlockLogicalHeight();
     LayoutUnit logicalHeightLimit = computeLogicalHeightLimit();
-    if (innerEditorRenderer && innerEditorRenderer->logicalHeight() > logicalHeightLimit) {
-        if (desiredLogicalHeight != innerEditorRenderer->logicalHeight())
+    if (innerEditorLayoutObject && innerEditorLayoutObject->logicalHeight() > logicalHeightLimit) {
+        if (desiredLogicalHeight != innerEditorLayoutObject->logicalHeight())
             layoutScope.setNeedsLayout(this, LayoutInvalidationReason::TextControlChanged);
 
         m_desiredInnerEditorLogicalHeight = desiredLogicalHeight;
 
-        innerEditorRenderer->mutableStyleRef().setLogicalHeight(Length(desiredLogicalHeight, Fixed));
-        layoutScope.setNeedsLayout(innerEditorRenderer, LayoutInvalidationReason::TextControlChanged);
-        if (viewPortRenderer) {
-            viewPortRenderer->mutableStyleRef().setLogicalHeight(Length(desiredLogicalHeight, Fixed));
-            layoutScope.setNeedsLayout(viewPortRenderer, LayoutInvalidationReason::TextControlChanged);
+        innerEditorLayoutObject->mutableStyleRef().setLogicalHeight(Length(desiredLogicalHeight, Fixed));
+        layoutScope.setNeedsLayout(innerEditorLayoutObject, LayoutInvalidationReason::TextControlChanged);
+        if (viewPortLayoutObject) {
+            viewPortLayoutObject->mutableStyleRef().setLogicalHeight(Length(desiredLogicalHeight, Fixed));
+            layoutScope.setNeedsLayout(viewPortLayoutObject, LayoutInvalidationReason::TextControlChanged);
         }
     }
     // The container might be taller because of decoration elements.
-    if (containerRenderer) {
-        containerRenderer->layoutIfNeeded();
-        LayoutUnit containerLogicalHeight = containerRenderer->logicalHeight();
+    if (containerLayoutObject) {
+        containerLayoutObject->layoutIfNeeded();
+        LayoutUnit containerLogicalHeight = containerLayoutObject->logicalHeight();
         if (containerLogicalHeight > logicalHeightLimit) {
-            containerRenderer->mutableStyleRef().setLogicalHeight(Length(logicalHeightLimit, Fixed));
+            containerLayoutObject->mutableStyleRef().setLogicalHeight(Length(logicalHeightLimit, Fixed));
             layoutScope.setNeedsLayout(this, LayoutInvalidationReason::TextControlChanged);
-        } else if (containerRenderer->logicalHeight() < contentLogicalHeight()) {
-            containerRenderer->mutableStyleRef().setLogicalHeight(Length(contentLogicalHeight(), Fixed));
+        } else if (containerLayoutObject->logicalHeight() < contentLogicalHeight()) {
+            containerLayoutObject->mutableStyleRef().setLogicalHeight(Length(contentLogicalHeight(), Fixed));
             layoutScope.setNeedsLayout(this, LayoutInvalidationReason::TextControlChanged);
         } else {
-            containerRenderer->mutableStyleRef().setLogicalHeight(Length(containerLogicalHeight, Fixed));
+            containerLayoutObject->mutableStyleRef().setLogicalHeight(Length(containerLogicalHeight, Fixed));
         }
     }
 
-    // We ensure that the inner editor renderer is laid out at least once. This is
+    // We ensure that the inner editor layoutObject is laid out at least once. This is
     // required as the logic below assumes that we don't carry over previous layout values.
-    if (innerEditorRenderer && !innerEditorRendererHadLayout)
-        layoutScope.setNeedsLayout(innerEditorRenderer, LayoutInvalidationReason::TextControlChanged);
+    if (innerEditorLayoutObject && !innerEditorLayoutObjectHadLayout)
+        layoutScope.setNeedsLayout(innerEditorLayoutObject, LayoutInvalidationReason::TextControlChanged);
 
     // If we need another layout pass, we have changed one of children's height so we need to relayout them.
     if (needsLayout())
         LayoutBlockFlow::layoutBlock(true);
 
     // Center the child block in the block progression direction (vertical centering for horizontal text fields).
-    if (!container && innerEditorRenderer && innerEditorRenderer->size().height() != contentLogicalHeight()) {
-        LayoutUnit logicalHeightDiff = innerEditorRenderer->logicalHeight() - contentLogicalHeight();
-        innerEditorRenderer->setLogicalTop(innerEditorRenderer->logicalTop() - (logicalHeightDiff / 2 + layoutMod(logicalHeightDiff, 2)));
+    if (!container && innerEditorLayoutObject && innerEditorLayoutObject->size().height() != contentLogicalHeight()) {
+        LayoutUnit logicalHeightDiff = innerEditorLayoutObject->logicalHeight() - contentLogicalHeight();
+        innerEditorLayoutObject->setLogicalTop(innerEditorLayoutObject->logicalTop() - (logicalHeightDiff / 2 + layoutMod(logicalHeightDiff, 2)));
     } else {
-        centerContainerIfNeeded(containerRenderer);
+        centerContainerIfNeeded(containerLayoutObject);
     }
 
     HTMLElement* placeholderElement = inputElement()->placeholderElement();
     if (LayoutBox* placeholderBox = placeholderElement ? placeholderElement->layoutBox() : 0) {
         LayoutSize innerEditorSize;
 
-        if (innerEditorRenderer)
-            innerEditorSize = innerEditorRenderer->size();
+        if (innerEditorLayoutObject)
+            innerEditorSize = innerEditorLayoutObject->size();
         placeholderBox->mutableStyleRef().setWidth(Length(innerEditorSize.width() - placeholderBox->borderAndPaddingWidth(), Fixed));
         placeholderBox->mutableStyleRef().setHeight(Length(innerEditorSize.height() - placeholderBox->borderAndPaddingHeight(), Fixed));
         bool neededLayout = placeholderBox->needsLayout();
         placeholderBox->layoutIfNeeded();
         LayoutPoint textOffset;
-        if (innerEditorRenderer)
-            textOffset = innerEditorRenderer->location();
+        if (innerEditorLayoutObject)
+            textOffset = innerEditorLayoutObject->location();
         if (editingViewPortElement() && editingViewPortElement()->layoutBox())
             textOffset += toLayoutSize(editingViewPortElement()->layoutBox()->location());
-        if (containerRenderer)
-            textOffset += toLayoutSize(containerRenderer->location());
+        if (containerLayoutObject)
+            textOffset += toLayoutSize(containerLayoutObject->location());
         placeholderBox->setLocation(textOffset);
 
         // The placeholder gets layout last, after the parent text control and its other children,
@@ -235,18 +237,18 @@ void LayoutTextControlSingleLine::styleDidChange(StyleDifference diff, const Com
     // We may have set the width and the height in the old style in layout().
     // Reset them now to avoid getting a spurious layout hint.
     Element* viewPort = editingViewPortElement();
-    if (LayoutObject* viewPortRenderer = viewPort ? viewPort->layoutObject() : 0) {
-        viewPortRenderer->mutableStyleRef().setHeight(Length());
-        viewPortRenderer->mutableStyleRef().setWidth(Length());
+    if (LayoutObject* viewPortLayoutObject = viewPort ? viewPort->layoutObject() : 0) {
+        viewPortLayoutObject->mutableStyleRef().setHeight(Length());
+        viewPortLayoutObject->mutableStyleRef().setWidth(Length());
     }
     Element* container = containerElement();
-    if (LayoutObject* containerRenderer = container ? container->layoutObject() : 0) {
-        containerRenderer->mutableStyleRef().setHeight(Length());
-        containerRenderer->mutableStyleRef().setWidth(Length());
+    if (LayoutObject* containerLayoutObject = container ? container->layoutObject() : 0) {
+        containerLayoutObject->mutableStyleRef().setHeight(Length());
+        containerLayoutObject->mutableStyleRef().setWidth(Length());
     }
-    LayoutObject* innerEditorRenderer = innerEditorElement()->layoutObject();
-    if (innerEditorRenderer && diff.needsFullLayout())
-        innerEditorRenderer->setNeedsLayoutAndFullPaintInvalidation(LayoutInvalidationReason::StyleChange);
+    LayoutObject* innerEditorLayoutObject = innerEditorElement()->layoutObject();
+    if (innerEditorLayoutObject && diff.needsFullLayout())
+        innerEditorLayoutObject->setNeedsLayoutAndFullPaintInvalidation(LayoutInvalidationReason::StyleChange);
     if (HTMLElement* placeholder = inputElement()->placeholderElement())
         placeholder->setInlineStyleProperty(CSSPropertyTextOverflow, textShouldBeTruncated() ? CSSValueEllipsis : CSSValueClip);
     setHasOverflowClip(false);
@@ -327,9 +329,9 @@ LayoutUnit LayoutTextControlSingleLine::preferredContentLogicalWidth(float charW
 
     if (includesDecoration) {
         HTMLElement* spinButton = innerSpinButtonElement();
-        if (LayoutBox* spinRenderer = spinButton ? spinButton->layoutBox() : 0) {
-            result += spinRenderer->borderAndPaddingLogicalWidth();
-            // Since the width of spinRenderer is not calculated yet, spinRenderer->logicalWidth() returns 0.
+        if (LayoutBox* spinLayoutObject = spinButton ? spinButton->layoutBox() : 0) {
+            result += spinLayoutObject->borderAndPaddingLogicalWidth();
+            // Since the width of spinLayoutObject is not calculated yet, spinLayoutObject->logicalWidth() returns 0.
             // So ensureComputedStyle()->logicalWidth() is used instead.
             result += spinButton->ensureComputedStyle()->logicalWidth().value();
         }
@@ -377,11 +379,11 @@ bool LayoutTextControlSingleLine::textShouldBeTruncated() const
 
 void LayoutTextControlSingleLine::autoscroll(const IntPoint& position)
 {
-    LayoutBox* renderer = innerEditorElement()->layoutBox();
-    if (!renderer)
+    LayoutBox* layoutObject = innerEditorElement()->layoutBox();
+    if (!layoutObject)
         return;
 
-    renderer->autoscroll(position);
+    layoutObject->autoscroll(position);
 }
 
 LayoutUnit LayoutTextControlSingleLine::scrollWidth() const

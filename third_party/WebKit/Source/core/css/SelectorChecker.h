@@ -43,10 +43,10 @@ class ComputedStyle;
 class SelectorChecker {
     WTF_MAKE_NONCOPYABLE(SelectorChecker);
 public:
-    enum Match { SelectorMatches, SelectorFailsLocally, SelectorFailsAllSiblings, SelectorFailsCompletely };
     enum VisitedMatchType { VisitedMatchDisabled, VisitedMatchEnabled };
     enum Mode { ResolvingStyle = 0, CollectingStyleRules, CollectingCSSRules, QueryingRules, SharingRules };
-    SelectorChecker(Document&, Mode);
+
+    explicit SelectorChecker(Mode);
 
     struct SelectorCheckingContext {
         STACK_ALLOCATED();
@@ -80,12 +80,12 @@ public:
         ComputedStyle* elementStyle;
         RawPtrWillBeMember<LayoutScrollbar> scrollbar;
         ScrollbarPart scrollbarPart;
-        unsigned isSubSelector : 1;
-        unsigned hasScrollbarPseudo : 1;
-        unsigned hasSelectionPseudo : 1;
-        unsigned isUARule : 1;
-        unsigned scopeContainsLastMatchedElement : 1;
-        unsigned treatShadowHostAsNormalScope : 1;
+        bool isSubSelector;
+        bool hasScrollbarPseudo;
+        bool hasSelectionPseudo;
+        bool isUARule;
+        bool scopeContainsLastMatchedElement;
+        bool treatShadowHostAsNormalScope;
     };
 
     struct MatchResult {
@@ -97,86 +97,26 @@ public:
         unsigned specificity;
     };
 
-    template<typename SiblingTraversalStrategy>
-    Match match(const SelectorCheckingContext&, const SiblingTraversalStrategy&, MatchResult* = 0) const;
+    bool match(const SelectorCheckingContext&, MatchResult* = 0) const;
 
-    template<typename SiblingTraversalStrategy>
-    bool checkOne(const SelectorCheckingContext&, const SiblingTraversalStrategy&, unsigned* specificity = 0) const;
-
-    bool strictParsing() const { return m_strictParsing; }
-
-    Mode mode() const { return m_mode; }
-
-    static bool tagMatches(const Element&, const QualifiedName&);
-    static bool isCommonPseudoClassSelector(const CSSSelector&);
     static bool matchesFocusPseudoClass(const Element&);
-    static bool matchesSpatialNavigationFocusPseudoClass(const Element&);
-    static bool matchesListBoxPseudoClass(const Element&);
-
-    enum LinkMatchMask { MatchLink = 1, MatchVisited = 2, MatchAll = MatchLink | MatchVisited };
-    static unsigned determineLinkMatchType(const CSSSelector&);
-
-    static bool isHostInItsShadowTree(const Element&, const ContainerNode* scope);
 
 private:
-    template<typename SiblingTraversalStrategy>
-    Match matchForSubSelector(const SelectorCheckingContext&, const SiblingTraversalStrategy&, MatchResult*) const;
-    template<typename SiblingTraversalStrategy>
-    Match matchForRelation(const SelectorCheckingContext&, const SiblingTraversalStrategy&, MatchResult*) const;
-    template<typename SiblingTraversalStrategy>
-    Match matchForShadowDistributed(const Element*, const SiblingTraversalStrategy&, SelectorCheckingContext& nextContext, MatchResult* = 0) const;
-    template<typename SiblingTraversalStrategy>
-    Match matchForPseudoShadow(const ContainerNode*, const SelectorCheckingContext&, const SiblingTraversalStrategy&, MatchResult*) const;
-    template<typename SiblingTraversalStrategy>
-    bool checkPseudoClass(const SelectorCheckingContext&, const SiblingTraversalStrategy&, unsigned* specificity) const;
-    template<typename SiblingTraversalStrategy>
-    bool checkPseudoElement(const SelectorCheckingContext&, const SiblingTraversalStrategy&) const;
+    bool checkOne(const SelectorCheckingContext&, unsigned* specificity = 0) const;
 
-    bool checkScrollbarPseudoClass(const SelectorCheckingContext&, Document*, const CSSSelector&) const;
-    template<typename SiblingTraversalStrategy>
-    bool checkPseudoHost(const SelectorCheckingContext&, const SiblingTraversalStrategy&, unsigned*) const;
+    enum Match { SelectorMatches, SelectorFailsLocally, SelectorFailsAllSiblings, SelectorFailsCompletely };
+    Match matchSelector(const SelectorCheckingContext&, MatchResult* = 0) const;
+    Match matchForSubSelector(const SelectorCheckingContext&, MatchResult*) const;
+    Match matchForRelation(const SelectorCheckingContext&, MatchResult*) const;
+    Match matchForShadowDistributed(const SelectorCheckingContext&, const Element&, MatchResult*) const;
+    Match matchForPseudoShadow(const SelectorCheckingContext&, const ContainerNode*, MatchResult*) const;
+    bool checkPseudoClass(const SelectorCheckingContext&, unsigned* specificity) const;
+    bool checkPseudoElement(const SelectorCheckingContext&) const;
+    bool checkScrollbarPseudoClass(const SelectorCheckingContext&) const;
+    bool checkPseudoHost(const SelectorCheckingContext&, unsigned*) const;
 
-    static bool isFrameFocused(const Element&);
-    bool shouldMatchHoverOrActive(const SelectorCheckingContext&) const;
-
-    bool m_strictParsing;
     Mode m_mode;
 };
-
-inline bool SelectorChecker::isCommonPseudoClassSelector(const CSSSelector& selector)
-{
-    if (selector.match() != CSSSelector::PseudoClass)
-        return false;
-    CSSSelector::PseudoType pseudoType = selector.pseudoType();
-    return pseudoType == CSSSelector::PseudoLink
-        || pseudoType == CSSSelector::PseudoAnyLink
-        || pseudoType == CSSSelector::PseudoVisited
-        || pseudoType == CSSSelector::PseudoFocus;
-}
-
-inline bool SelectorChecker::tagMatches(const Element& element, const QualifiedName& tagQName)
-{
-    if (tagQName == anyQName())
-        return true;
-    const AtomicString& localName = tagQName.localName();
-    if (localName != starAtom && localName != element.localName())
-        return false;
-    const AtomicString& namespaceURI = tagQName.namespaceURI();
-    return namespaceURI == starAtom || namespaceURI == element.namespaceURI();
-}
-
-inline bool SelectorChecker::isHostInItsShadowTree(const Element& element, const ContainerNode* scope)
-{
-    return scope && scope->isInShadowTree() && scope->shadowHost() == element;
-}
-
-inline bool SelectorChecker::shouldMatchHoverOrActive(const SelectorCheckingContext& context) const
-{
-    // If we're in quirks mode, then :hover and :active should never match anchors with no
-    // href and *:hover and *:active should not match anything. This is specified in
-    // https://quirks.spec.whatwg.org/#the-:active-and-:hover-quirk
-    return m_strictParsing || context.isSubSelector || (context.selector->relation() == CSSSelector::SubSelector && context.selector->tagHistory()) || context.element->isLink();
-}
 
 }
 

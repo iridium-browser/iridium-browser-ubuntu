@@ -33,8 +33,13 @@ namespace {
 class MockProxyResolverFactory : public ProxyResolverFactory {
  public:
   MockProxyResolverFactory() : ProxyResolverFactory(false) {}
-  scoped_ptr<ProxyResolver> CreateProxyResolver() override {
-    return make_scoped_ptr(new MockAsyncProxyResolver());
+  int CreateProxyResolver(
+      const scoped_refptr<ProxyResolverScriptData>& pac_script,
+      scoped_ptr<ProxyResolver>* resolver,
+      const CompletionCallback& callback,
+      scoped_ptr<Request>* request) override {
+    resolver->reset(new MockAsyncProxyResolver());
+    return OK;
   }
 };
 
@@ -282,7 +287,7 @@ TEST_F(URLRequestFtpJobTest, FtpProxyRequest) {
 
   EXPECT_TRUE(url_request->status().is_success());
   EXPECT_TRUE(url_request->proxy_server().Equals(
-      net::HostPortPair::FromString("localhost:80")));
+      HostPortPair::FromString("localhost:80")));
   EXPECT_EQ(1, network_delegate()->completed_requests());
   EXPECT_EQ(0, network_delegate()->error_count());
   EXPECT_FALSE(request_delegate.auth_required_called());
@@ -332,7 +337,7 @@ TEST_F(URLRequestFtpJobTest, FtpProxyRequestNeedProxyAuthNoCredentials) {
 
   EXPECT_TRUE(url_request->status().is_success());
   EXPECT_TRUE(url_request->proxy_server().Equals(
-      net::HostPortPair::FromString("localhost:80")));
+      HostPortPair::FromString("localhost:80")));
   EXPECT_EQ(1, network_delegate()->completed_requests());
   EXPECT_EQ(0, network_delegate()->error_count());
   EXPECT_TRUE(request_delegate.auth_required_called());
@@ -622,7 +627,7 @@ TEST_F(URLRequestFtpJobTest, FtpProxyRequestReuseSocket) {
 
   EXPECT_TRUE(url_request1->status().is_success());
   EXPECT_TRUE(url_request1->proxy_server().Equals(
-      net::HostPortPair::FromString("localhost:80")));
+      HostPortPair::FromString("localhost:80")));
   EXPECT_EQ(1, network_delegate()->completed_requests());
   EXPECT_EQ(0, network_delegate()->error_count());
   EXPECT_FALSE(request_delegate1.auth_required_called());

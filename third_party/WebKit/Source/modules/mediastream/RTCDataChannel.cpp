@@ -326,7 +326,7 @@ void RTCDataChannel::scheduledEventTimerFired(Timer<RTCDataChannel>*)
 
 void RTCDataChannel::clearWeakMembers(Visitor* visitor)
 {
-    if (visitor->isAlive(m_connection))
+    if (visitor->isHeapObjectAlive(m_connection))
         return;
     stop();
     m_connection = nullptr;
@@ -334,6 +334,7 @@ void RTCDataChannel::clearWeakMembers(Visitor* visitor)
 
 DEFINE_TRACE(RTCDataChannel)
 {
+    visitor->trace(m_executionContext);
     visitor->trace(m_scheduledEvents);
     visitor->template registerWeakMembers<RTCDataChannel, &RTCDataChannel::clearWeakMembers>(this);
     RefCountedGarbageCollectedEventTargetWithInlineData<RTCDataChannel>::trace(visitor);

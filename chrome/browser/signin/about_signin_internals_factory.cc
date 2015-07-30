@@ -8,6 +8,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/account_tracker_service_factory.h"
 #include "chrome/browser/signin/chrome_signin_client_factory.h"
+#include "chrome/browser/signin/gaia_cookie_manager_service_factory.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_error_controller_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
@@ -27,6 +28,7 @@ AboutSigninInternalsFactory::AboutSigninInternalsFactory()
         BrowserContextDependencyManager::GetInstance()) {
   DependsOn(AccountTrackerServiceFactory::GetInstance());
   DependsOn(ChromeSigninClientFactory::GetInstance());
+  DependsOn(GaiaCookieManagerServiceFactory::GetInstance());
   DependsOn(ProfileOAuth2TokenServiceFactory::GetInstance());
   DependsOn(SigninErrorControllerFactory::GetInstance());
   DependsOn(SigninManagerFactory::GetInstance());
@@ -56,10 +58,7 @@ void AboutSigninInternalsFactory::RegisterProfilePrefs(
   for (int i = UNTIMED_FIELDS_BEGIN; i < UNTIMED_FIELDS_END; ++i) {
     const std::string pref_path = SigninStatusFieldToString(
         static_cast<UntimedSigninStatusField>(i));
-    user_prefs->RegisterStringPref(
-        pref_path.c_str(),
-        std::string(),
-        user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+    user_prefs->RegisterStringPref(pref_path.c_str(), std::string());
   }
 
   for (int i = TIMED_FIELDS_BEGIN; i < TIMED_FIELDS_END; ++i) {
@@ -67,14 +66,8 @@ void AboutSigninInternalsFactory::RegisterProfilePrefs(
         static_cast<TimedSigninStatusField>(i)) + ".value";
     const std::string time = SigninStatusFieldToString(
         static_cast<TimedSigninStatusField>(i)) + ".time";
-    user_prefs->RegisterStringPref(
-        value.c_str(),
-        std::string(),
-        user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-    user_prefs->RegisterStringPref(
-        time.c_str(),
-        std::string(),
-        user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+    user_prefs->RegisterStringPref(value.c_str(), std::string());
+    user_prefs->RegisterStringPref(time.c_str(), std::string());
   }
 }
 
@@ -85,7 +78,8 @@ KeyedService* AboutSigninInternalsFactory::BuildServiceInstanceFor(
       ProfileOAuth2TokenServiceFactory::GetForProfile(profile),
       AccountTrackerServiceFactory::GetForProfile(profile),
       SigninManagerFactory::GetForProfile(profile),
-      SigninErrorControllerFactory::GetForProfile(profile));
+      SigninErrorControllerFactory::GetForProfile(profile),
+      GaiaCookieManagerServiceFactory::GetForProfile(profile));
   service->Initialize(ChromeSigninClientFactory::GetForProfile(profile));
   return service;
 }

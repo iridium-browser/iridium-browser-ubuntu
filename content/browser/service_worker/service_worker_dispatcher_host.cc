@@ -5,6 +5,7 @@
 #include "content/browser/service_worker/service_worker_dispatcher_host.h"
 
 #include "base/logging.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/trace_event/trace_event.h"
 #include "content/browser/message_port_message_filter.h"
@@ -21,6 +22,7 @@
 #include "content/common/service_worker/service_worker_types.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/origin_util.h"
 #include "ipc/ipc_message_macros.h"
 #include "net/base/net_util.h"
 #include "third_party/WebKit/public/platform/WebServiceWorkerError.h"
@@ -49,12 +51,8 @@ bool AllOriginsMatch(const GURL& url_a, const GURL& url_b, const GURL& url_c) {
          url_a.GetOrigin() == url_c.GetOrigin();
 }
 
-// TODO(dominicc): When crbug.com/362214 is fixed use that to be
-// consistent with Blink's
-// SecurityOrigin::canAccessFeatureRequiringSecureOrigin.
 bool OriginCanAccessServiceWorkers(const GURL& url) {
-  return url.SchemeIsHTTPOrHTTPS() &&
-      (url.SchemeIsSecure() || net::IsLocalhost(url.host()));
+  return url.SchemeIsHTTPOrHTTPS() && IsOriginSecure(url);
 }
 
 bool CanRegisterServiceWorker(const GURL& document_url,
@@ -334,7 +332,8 @@ void ServiceWorkerDispatcherHost::OnRegisterServiceWorker(
   }
 
   if (!GetContentClient()->browser()->AllowServiceWorker(
-          pattern, provider_host->topmost_frame_url(), resource_context_)) {
+          pattern, provider_host->topmost_frame_url(), resource_context_,
+          render_process_id_, provider_host->frame_id())) {
     Send(new ServiceWorkerMsg_ServiceWorkerRegistrationError(
         thread_id, request_id, WebServiceWorkerError::ErrorTypeUnknown,
         base::ASCIIToUTF16(kServiceWorkerRegisterErrorPrefix) +
@@ -409,7 +408,8 @@ void ServiceWorkerDispatcherHost::OnUnregisterServiceWorker(
   }
 
   if (!GetContentClient()->browser()->AllowServiceWorker(
-          pattern, provider_host->topmost_frame_url(), resource_context_)) {
+          pattern, provider_host->topmost_frame_url(), resource_context_,
+          render_process_id_, provider_host->frame_id())) {
     Send(new ServiceWorkerMsg_ServiceWorkerUnregistrationError(
         thread_id,
         request_id,
@@ -479,9 +479,8 @@ void ServiceWorkerDispatcherHost::OnGetRegistration(
   }
 
   if (!GetContentClient()->browser()->AllowServiceWorker(
-          provider_host->document_url(),
-          provider_host->topmost_frame_url(),
-          resource_context_)) {
+          provider_host->document_url(), provider_host->topmost_frame_url(),
+          resource_context_, render_process_id_, provider_host->frame_id())) {
     Send(new ServiceWorkerMsg_ServiceWorkerGetRegistrationError(
         thread_id, request_id, WebServiceWorkerError::ErrorTypeUnknown,
         base::ASCIIToUTF16(kServiceWorkerGetRegistrationErrorPrefix) +
@@ -563,6 +562,10 @@ void ServiceWorkerDispatcherHost::OnProviderCreated(
     int provider_id,
     int render_frame_id,
     ServiceWorkerProviderType provider_type) {
+  // TODO(pkasting): Remove ScopedTracker below once crbug.com/477117 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "477117 ServiceWorkerDispatcherHost::OnProviderCreated"));
   TRACE_EVENT0("ServiceWorker",
                "ServiceWorkerDispatcherHost::OnProviderCreated");
   if (!GetContext())

@@ -128,10 +128,13 @@ void AXNodeObject::alterSliderValue(bool increase)
     if (roleValue() != SliderRole)
         return;
 
-    if (!getAttribute(stepAttr).isEmpty())
-        changeValueByStep(increase);
-    else
-        changeValueByPercent(increase ? 5 : -5);
+    float value = valueForRange();
+    float step = stepValueForRange();
+
+    value += increase ? step : -step;
+
+    setValue(String::number(value));
+    axObjectCache()->postNotification(node(), AXObjectCacheImpl::AXValueChanged);
 }
 
 String AXNodeObject::ariaAccessibilityDescription() const
@@ -155,19 +158,7 @@ void AXNodeObject::ariaLabeledByElements(WillBeHeapVector<RawPtrWillBeMember<Ele
         elementsFromAttribute(elements, aria_labelledbyAttr);
 }
 
-void AXNodeObject::changeValueByStep(bool increase)
-{
-    float step = stepValueForRange();
-    float value = valueForRange();
-
-    value += increase ? step : -step;
-
-    setValue(String::number(value));
-
-    axObjectCache()->postNotification(node(), AXObjectCacheImpl::AXValueChanged);
-}
-
-bool AXNodeObject::computeAccessibilityIsIgnored() const
+bool AXNodeObject::computeAccessibilityIsIgnored(IgnoredReasons* ignoredReasons) const
 {
 #if ENABLE(ASSERT)
     // Double-check that an AXObject is never accessed before
@@ -176,15 +167,42 @@ bool AXNodeObject::computeAccessibilityIsIgnored() const
 #endif
 
     // If this element is within a parent that cannot have children, it should not be exposed.
-    if (isDescendantOfBarrenParent())
+    if (isDescendantOfLeafNode()) {
+        if (ignoredReasons)
+            ignoredReasons->append(IgnoredReason(AXAncestorIsLeafNode, leafNodeAncestor()));
         return true;
+    }
 
     // Ignore labels that are already referenced by a control's title UI element.
     AXObject* controlObject = correspondingControlForLabelElement();
-    if (controlObject && !controlObject->exposesTitleUIElement() && controlObject->isCheckboxOrRadio())
-        return true;
+    if (controlObject && !controlObject->deprecatedExposesTitleUIElement() && controlObject->isCheckboxOrRadio()) {
+        if (ignoredReasons) {
+            HTMLLabelElement* label = labelElementContainer();
+            if (label && !label->isSameNode(node())) {
+                AXObject* labelAXObject = axObjectCache()->getOrCreate(label);
+                ignoredReasons->append(IgnoredReason(AXLabelContainer, labelAXObject));
+            }
 
-    return m_role == UnknownRole;
+            ignoredReasons->append(IgnoredReason(AXLabelFor, controlObject));
+        }
+        return true;
+    }
+
+    Element* element = node()->isElementNode() ? toElement(node()) : node()->parentElement();
+    if (!layoutObject()
+        && (!element || !element->isInCanvasSubtree())
+        && !equalIgnoringCase(getAttribute(aria_hiddenAttr), "false")) {
+        if (ignoredReasons)
+            ignoredReasons->append(IgnoredReason(AXNotRendered));
+        return true;
+    }
+
+    if (m_role == UnknownRole) {
+        if (ignoredReasons)
+            ignoredReasons->append(IgnoredReason(AXUninteresting));
+        return true;
+    }
+    return false;
 }
 
 static bool isListElement(Node* node)
@@ -192,10 +210,13 @@ static bool isListElement(Node* node)
     return isHTMLUListElement(*node) || isHTMLOListElement(*node) || isHTMLDListElement(*node);
 }
 
-static bool isPresentationRoleInTable(AXObject* parent, Node* child)
+static bool isPresentationalInTable(AXObject* parent, HTMLElement* currentElement)
 {
+    if (!currentElement)
+        return false;
+
     Node* parentNode = parent->node();
-    if (!parentNode || !parentNode->isElementNode())
+    if (!parentNode || !parentNode->isHTMLElement())
         return false;
 
     // AXTable determines the role as checking isTableXXX.
@@ -205,35 +226,37 @@ static bool isPresentationRoleInTable(AXObject* parent, Node* child)
     // cell(its role)-> tr(tr role)-> tfoot, tbody, thead(ignored role) -> table(table role).
     // If table has presentation role, it will be like
     // cell(group)-> tr(unknown) -> tfoot, tbody, thead(ignored) -> table(presentation).
-    if (isHTMLTableCellElement(child) && isHTMLTableRowElement(*parentNode))
+    if (isHTMLTableCellElement(*currentElement) && isHTMLTableRowElement(*parentNode))
         return parent->hasInheritedPresentationalRole();
 
-    if (isHTMLTableRowElement(child) && isHTMLTableSectionElement(*parentNode)) {
+    if (isHTMLTableRowElement(*currentElement) && isHTMLTableSectionElement(toHTMLElement(*parentNode))) {
         // Because TableSections have ignored role, presentation should be checked with its parent node
         AXObject* tableObject = parent->parentObject();
-        Node* tableNode = tableObject->node();
+        Node* tableNode = tableObject ? tableObject->node() : 0;
         return isHTMLTableElement(tableNode) && tableObject->hasInheritedPresentationalRole();
     }
     return false;
 }
 
-static bool isRequiredOwnedElement(AXObject* parent, AccessibilityRole childRole, Node* childNode)
+static bool isRequiredOwnedElement(AXObject* parent, AccessibilityRole currentRole, HTMLElement* currentElement)
 {
     Node* parentNode = parent->node();
-    if (!parentNode || !parentNode->isElementNode())
+    if (!parentNode || !parentNode->isHTMLElement())
         return false;
 
-    if (childRole == ListItemRole)
+    if (currentRole == ListItemRole)
         return isListElement(parentNode);
-    if (childRole == ListMarkerRole)
+    if (currentRole == ListMarkerRole)
         return isHTMLLIElement(*parentNode);
-    if (childRole == MenuItemCheckBoxRole || childRole ==  MenuItemRole || childRole ==  MenuItemRadioRole)
+    if (currentRole == MenuItemCheckBoxRole || currentRole ==  MenuItemRole || currentRole ==  MenuItemRadioRole)
         return isHTMLMenuElement(*parentNode);
 
-    if (isHTMLTableCellElement(childNode))
+    if (!currentElement)
+        return false;
+    if (isHTMLTableCellElement(*currentElement))
         return isHTMLTableRowElement(*parentNode);
-    if (isHTMLTableRowElement(childNode))
-        return isHTMLTableSectionElement(*parentNode);
+    if (isHTMLTableRowElement(*currentElement))
+        return isHTMLTableSectionElement(toHTMLElement(*parentNode));
 
     // In case of ListboxRole and it's child, ListBoxOptionRole,
     // Inheritance of presentation role is handled in AXListBoxOption
@@ -242,45 +265,74 @@ static bool isRequiredOwnedElement(AXObject* parent, AccessibilityRole childRole
     return false;
 }
 
-bool AXNodeObject::computeHasInheritedPresentationalRole() const
+
+const AXObject* AXNodeObject::inheritsPresentationalRoleFrom() const
 {
     // ARIA states if an item can get focus, it should not be presentational.
     if (canSetFocusAttribute())
-        return false;
+        return 0;
 
     if (isPresentational())
-        return true;
+        return this;
 
     // http://www.w3.org/TR/wai-aria/complete#presentation
     // ARIA spec says that the user agent MUST apply an inherited role of presentation
     // to any owned elements that do not have an explicit role defined.
     if (ariaRoleAttribute() != UnknownRole)
-        return false;
+        return 0;
 
     AXObject* parent = parentObject();
     if (!parent)
-        return false;
+        return 0;
 
-    Node* curNode = node();
-    if (!parent->hasInheritedPresentationalRole()
-        && !isPresentationRoleInTable(parent, curNode))
-        return false;
+    HTMLElement* element = nullptr;
+    if (node() && node()->isHTMLElement())
+        element = toHTMLElement(node());
+    if (!parent->hasInheritedPresentationalRole()) {
+        if (!layoutObject() || !layoutObject()->isBoxModelObject())
+            return 0;
 
+        LayoutBoxModelObject* cssBox = toLayoutBoxModelObject(layoutObject());
+        if (!cssBox->isTableCell() && !cssBox->isTableRow())
+            return 0;
+
+        if (!isPresentationalInTable(parent, element))
+            return 0;
+    }
     // ARIA spec says that when a parent object is presentational and this object
     // is a required owned element of that parent, then this object is also presentational.
-    return isRequiredOwnedElement(parent, roleValue(), curNode);
+    if (isRequiredOwnedElement(parent, roleValue(), element))
+        return parent;
+    return 0;
+}
+
+bool AXNodeObject::isDescendantOfElementType(const HTMLQualifiedName& tagName) const
+{
+    if (!node())
+        return false;
+
+    for (Element* parent = node()->parentElement(); parent; parent = parent->parentElement()) {
+        if (parent->hasTagName(tagName))
+            return true;
+    }
+    return false;
 }
 
 AccessibilityRole AXNodeObject::determineAccessibilityRoleUtil()
 {
     if (!node())
         return UnknownRole;
-    if (node()->isLink())
+    // HTMLAnchorElement sets isLink only when it has hrefAttr.
+    // We assume that it is also LinkRole if it has event listners even though it doesn't have hrefAttr.
+    if (node()->isLink() || (isHTMLAnchorElement(*node()) && isClickable()))
         return LinkRole;
+
     if (isHTMLButtonElement(*node()))
         return buttonRoleType();
+
     if (isHTMLDetailsElement(*node()))
         return DetailsRole;
+
     if (isHTMLSummaryElement(*node())) {
         if (node()->parentNode() && isHTMLDetailsElement(node()->parentNode()))
             return DisclosureTriangleRole;
@@ -328,42 +380,115 @@ AccessibilityRole AXNodeObject::determineAccessibilityRoleUtil()
             return TimeRole;
         return TextFieldRole;
     }
+
     if (isHTMLSelectElement(*node())) {
         HTMLSelectElement& selectElement = toHTMLSelectElement(*node());
         return selectElement.multiple() ? ListBoxRole : PopUpButtonRole;
     }
+
     if (isHTMLTextAreaElement(*node()))
-        return TextAreaRole;
+        return TextFieldRole;
+
     if (headingLevel())
         return HeadingRole;
+
     if (isHTMLDivElement(*node()))
         return DivRole;
+
     if (isHTMLMeterElement(*node()))
         return MeterRole;
+
     if (isHTMLOutputElement(*node()))
         return StatusRole;
+
     if (isHTMLParagraphElement(*node()))
         return ParagraphRole;
+
     if (isHTMLLabelElement(*node()))
         return LabelRole;
+
+    if (isHTMLLegendElement(*node()))
+        return LegendRole;
+
     if (isHTMLRubyElement(*node()))
         return RubyRole;
+
     if (isHTMLDListElement(*node()))
         return DescriptionListRole;
-    if (node()->isElementNode() && node()->hasTagName(blockquoteTag))
-        return BlockquoteRole;
-    if (node()->isElementNode() && node()->hasTagName(captionTag))
-        return CaptionRole;
-    if (node()->isElementNode() && node()->hasTagName(figcaptionTag))
-        return FigcaptionRole;
-    if (node()->isElementNode() && node()->hasTagName(figureTag))
-        return FigureRole;
-    if (isHTMLAnchorElement(*node()) && isClickable())
-        return LinkRole;
-    if (isHTMLIFrameElement(*node()))
+
+    if (node()->hasTagName(ddTag))
+        return DescriptionListDetailRole;
+
+    if (node()->hasTagName(dtTag))
+        return DescriptionListTermRole;
+
+    if (node()->nodeName() == "math")
+        return MathRole;
+
+    if (node()->hasTagName(rpTag) || node()->hasTagName(rtTag))
+        return AnnotationRole;
+
+    if (isHTMLFormElement(*node()))
+        return FormRole;
+
+    if (node()->hasTagName(articleTag))
+        return ArticleRole;
+
+    if (node()->hasTagName(mainTag))
+        return MainRole;
+
+    if (node()->hasTagName(navTag))
+        return NavigationRole;
+
+    if (node()->hasTagName(asideTag))
+        return ComplementaryRole;
+
+    if (node()->hasTagName(preTag))
+        return PreRole;
+
+    if (node()->hasTagName(sectionTag))
+        return RegionRole;
+
+    if (node()->hasTagName(addressTag))
+        return ContentInfoRole;
+
+    if (isHTMLDialogElement(*node()))
+        return DialogRole;
+
+    // The HTML element should not be exposed as an element. That's what the LayoutView element does.
+    if (isHTMLHtmlElement(*node()))
+        return IgnoredRole;
+
+    if (isHTMLIFrameElement(*node())) {
+        const AtomicString& ariaRole = getAttribute(roleAttr);
+        if (ariaRole == "none" || ariaRole == "presentation")
+            return IframePresentationalRole;
         return IframeRole;
+    }
+
+    // There should only be one banner/contentInfo per page. If header/footer are being used within an article or section
+    // then it should not be exposed as whole page's banner/contentInfo
+    if (node()->hasTagName(headerTag) && !isDescendantOfElementType(articleTag) && !isDescendantOfElementType(sectionTag))
+        return BannerRole;
+
+    if (node()->hasTagName(footerTag) && !isDescendantOfElementType(articleTag) && !isDescendantOfElementType(sectionTag))
+        return FooterRole;
+
+    if (node()->hasTagName(blockquoteTag))
+        return BlockquoteRole;
+
+    if (node()->hasTagName(captionTag))
+        return CaptionRole;
+
+    if (node()->hasTagName(figcaptionTag))
+        return FigcaptionRole;
+
+    if (node()->hasTagName(figureTag))
+        return FigureRole;
+
     if (isEmbeddedObject())
         return EmbeddedObjectRole;
+
     return UnknownRole;
 }
 
@@ -380,8 +505,11 @@ AccessibilityRole AXNodeObject::determineAccessibilityRole()
     AccessibilityRole role = determineAccessibilityRoleUtil();
     if (role != UnknownRole)
         return role;
-    if (node()->isElementNode() && toElement(node())->isFocusable())
-        return GroupRole;
+    if (node()->isElementNode()) {
+        Element* element = toElement(node());
+        if (element->isInCanvasSubtree() && element->isFocusable())
+            return GroupRole;
+    }
     return UnknownRole;
 }
 
@@ -399,9 +527,6 @@ AccessibilityRole AXNodeObject::determineAriaRoleAttribute() const
 
     if (role == ButtonRole)
         role = buttonRoleType();
-
-    if (role == TextAreaRole && !ariaIsMultiline())
-        role = TextFieldRole;
 
     role = remapAriaRoleDueToParent(role);
 
@@ -433,8 +558,9 @@ void AXNodeObject::elementsFromAttribute(WillBeHeapVector<RawPtrWillBeMember<Ele
     }
 }
 
-// If you call node->hasEditableStyle() since that will return true if an ancestor is editable.
-// This only returns true if this is the element that actually has the contentEditable attribute set.
+// This only returns true if this is the element that actually has the
+// contentEditable attribute set, unlike node->hasEditableStyle() which will
+// also return true if an ancestor is editable.
 bool AXNodeObject::hasContentEditableAttributeSet() const
 {
     if (!hasAttribute(contenteditableAttr))
@@ -442,6 +568,21 @@ bool AXNodeObject::hasContentEditableAttributeSet() const
     const AtomicString& contentEditableValue = getAttribute(contenteditableAttr);
     // Both "true" (case-insensitive) and the empty string count as true.
     return contentEditableValue.isEmpty() || equalIgnoringCase(contentEditableValue, "true");
+}
+
+bool AXNodeObject::isTextControl() const
+{
+    if (hasContentEditableAttributeSet())
+        return true;
+
+    switch (roleValue()) {
+    case TextFieldRole:
+    case ComboBoxRole:
+    case SearchBoxRole:
+        return true;
+    default:
+        return false;
+    }
 }
 
 bool AXNodeObject::isGenericFocusableElement() const
@@ -757,7 +898,7 @@ bool AXNodeObject::isPasswordField() const
         return false;
 
     AccessibilityRole ariaRole = ariaRoleAttribute();
-    if (ariaRole != TextFieldRole && ariaRole != TextAreaRole && ariaRole != UnknownRole)
+    if (ariaRole != TextFieldRole && ariaRole != UnknownRole)
         return false;
 
     return toHTMLInputElement(node)->type() == InputTypeNames::password;
@@ -771,6 +912,18 @@ bool AXNodeObject::isProgressIndicator() const
 bool AXNodeObject::isSlider() const
 {
     return roleValue() == SliderRole;
+}
+
+bool AXNodeObject::isNativeSlider() const
+{
+    Node* node = this->node();
+    if (!node)
+        return false;
+
+    if (!isHTMLInputElement(node))
+        return false;
+
+    return toHTMLInputElement(node)->type() == InputTypeNames::range;
 }
 
 bool AXNodeObject::isChecked() const
@@ -952,7 +1105,7 @@ bool AXNodeObject::canvasHasFallbackContent() const
     return ElementTraversal::firstChild(*node);
 }
 
-bool AXNodeObject::exposesTitleUIElement() const
+bool AXNodeObject::deprecatedExposesTitleUIElement() const
 {
     if (!isControl())
         return false;
@@ -1047,7 +1200,7 @@ unsigned AXNodeObject::hierarchicalLevel() const
 
 String AXNodeObject::ariaAutoComplete() const
 {
-    if (roleValue() != ComboBoxRole && roleValue() != TextAreaRole)
+    if (roleValue() != ComboBoxRole)
         return String();
 
     const AtomicString& ariaAutoComplete = getAttribute(aria_autocompleteAttr).lower();
@@ -1059,7 +1212,7 @@ String AXNodeObject::ariaAutoComplete() const
     return String();
 }
 
-String AXNodeObject::placeholder() const
+String AXNodeObject::deprecatedPlaceholder() const
 {
     String placeholder;
     if (node()) {
@@ -1096,7 +1249,7 @@ String AXNodeObject::text() const
     return toElement(node)->innerText();
 }
 
-AXObject* AXNodeObject::titleUIElement() const
+AXObject* AXNodeObject::deprecatedTitleUIElement() const
 {
     if (!node() || !node()->isElementNode())
         return 0;
@@ -1119,30 +1272,21 @@ AccessibilityButtonState AXNodeObject::checkboxOrRadioValue() const
     return AXObject::checkboxOrRadioValue();
 }
 
-void AXNodeObject::colorValue(int& r, int& g, int& b) const
+RGBA32 AXNodeObject::colorValue() const
 {
-    r = 0;
-    g = 0;
-    b = 0;
-
-    if (!isColorWell())
-        return;
-
-    if (!isHTMLInputElement(node()))
-        return;
+    if (!isHTMLInputElement(node()) || !isColorWell())
+        return AXObject::colorValue();
 
     HTMLInputElement* input = toHTMLInputElement(node());
     const AtomicString& type = input->getAttribute(typeAttr);
     if (!equalIgnoringCase(type, "color"))
-        return;
+        return AXObject::colorValue();
 
     // HTMLInputElement::value always returns a string parseable by Color.
     Color color;
     bool success = color.setFromString(input->value());
     ASSERT_UNUSED(success, success);
-    r = color.red();
-    g = color.green();
-    b = color.blue();
+    return color.rgb();
 }
 
 InvalidState AXNodeObject::invalidState() const
@@ -1175,6 +1319,32 @@ InvalidState AXNodeObject::invalidState() const
     return InvalidStateUndefined;
 }
 
+int AXNodeObject::posInSet() const
+{
+    if (supportsSetSizeAndPosInSet()) {
+        if (hasAttribute(aria_posinsetAttr))
+            return getAttribute(aria_posinsetAttr).toInt();
+        return AXObject::indexInParent() + 1;
+    }
+
+    return 0;
+}
+
+int AXNodeObject::setSize() const
+{
+    if (supportsSetSizeAndPosInSet()) {
+        if (hasAttribute(aria_setsizeAttr))
+            return getAttribute(aria_setsizeAttr).toInt();
+
+        if (parentObject()) {
+            const auto& siblings = parentObject()->children();
+            return siblings.size();
+        }
+    }
+
+    return 0;
+}
+
 String AXNodeObject::ariaInvalidValue() const
 {
     if (invalidState() == InvalidStateOther)
@@ -1196,11 +1366,8 @@ float AXNodeObject::valueForRange() const
     if (hasAttribute(aria_valuenowAttr))
         return getAttribute(aria_valuenowAttr).toFloat();
 
-    if (isHTMLInputElement(node())) {
-        HTMLInputElement& input = toHTMLInputElement(*node());
-        if (input.type() == InputTypeNames::range)
-            return input.valueAsNumber();
-    }
+    if (isNativeSlider())
+        return toHTMLInputElement(*node()).valueAsNumber();
 
     if (isHTMLMeterElement(node()))
         return toHTMLMeterElement(*node()).value();
@@ -1213,11 +1380,8 @@ float AXNodeObject::maxValueForRange() const
     if (hasAttribute(aria_valuemaxAttr))
         return getAttribute(aria_valuemaxAttr).toFloat();
 
-    if (isHTMLInputElement(node())) {
-        HTMLInputElement& input = toHTMLInputElement(*node());
-        if (input.type() == InputTypeNames::range)
-            return input.maximum();
-    }
+    if (isNativeSlider())
+        return toHTMLInputElement(*node()).maximum();
 
     if (isHTMLMeterElement(node()))
         return toHTMLMeterElement(*node()).max();
@@ -1230,11 +1394,8 @@ float AXNodeObject::minValueForRange() const
     if (hasAttribute(aria_valueminAttr))
         return getAttribute(aria_valueminAttr).toFloat();
 
-    if (isHTMLInputElement(node())) {
-        HTMLInputElement& input = toHTMLInputElement(*node());
-        if (input.type() == InputTypeNames::range)
-            return input.minimum();
-    }
+    if (isNativeSlider())
+        return toHTMLInputElement(*node()).minimum();
 
     if (isHTMLMeterElement(node()))
         return toHTMLMeterElement(*node()).min();
@@ -1244,7 +1405,11 @@ float AXNodeObject::minValueForRange() const
 
 float AXNodeObject::stepValueForRange() const
 {
-    return getAttribute(stepAttr).toFloat();
+    if (!isNativeSlider())
+        return 0.0;
+
+    Decimal step = toHTMLInputElement(*node()).createStepRange(RejectAny).step();
+    return step.toString().toFloat();
 }
 
 String AXNodeObject::stringValue() const
@@ -1256,12 +1421,12 @@ String AXNodeObject::stringValue() const
     if (ariaRoleAttribute() == StaticTextRole) {
         String staticText = text();
         if (!staticText.length())
-            staticText = textUnderElement(TextUnderElementAll);
+            staticText = deprecatedTextUnderElement(TextUnderElementAll);
         return staticText;
     }
 
     if (node->isTextNode())
-        return textUnderElement(TextUnderElementAll);
+        return deprecatedTextUnderElement(TextUnderElementAll);
 
     if (isHTMLSelectElement(*node)) {
         HTMLSelectElement& selectElement = toHTMLSelectElement(*node);
@@ -1364,7 +1529,7 @@ static bool shouldUseAccessibilityObjectInnerText(AXObject* obj)
 
     // If something doesn't expose any children, then we can always take the inner text content.
     // This is what we want when someone puts an <a> inside a <button> for example.
-    if (obj->isDescendantOfBarrenParent())
+    if (obj->isDescendantOfLeafNode())
         return true;
 
     // Skip focusable children, so we don't include the text of links and controls.
@@ -1389,7 +1554,7 @@ static bool isSameLayoutBox(LayoutObject* r1, LayoutObject* r2)
     return b1 && b2 && b1 == b2;
 }
 
-String AXNodeObject::textUnderElement(TextUnderElementMode mode) const
+String AXNodeObject::deprecatedTextUnderElement(TextUnderElementMode mode) const
 {
     Node* node = this->node();
     if (node && node->isTextNode())
@@ -1422,7 +1587,7 @@ String AXNodeObject::textUnderElement(TextUnderElementMode mode) const
                 builder.append(' ');
         }
 
-        builder.append(child->textUnderElement(mode));
+        builder.append(child->deprecatedTextUnderElement(mode));
         previous = child;
 
         if (mode == TextUnderElementAny && !builder.isEmpty())
@@ -1442,7 +1607,7 @@ AXObject* AXNodeObject::findChildWithTagName(const HTMLQualifiedName& tagName) c
     return 0;
 }
 
-String AXNodeObject::accessibilityDescription() const
+String AXNodeObject::deprecatedAccessibilityDescription() const
 {
     // Static text should not have a description, it should only have a stringValue.
     if (roleValue() == StaticTextRole)
@@ -1460,23 +1625,23 @@ String AXNodeObject::accessibilityDescription() const
             return alt;
     }
 
-    // An element's descriptive text is comprised of title() (what's visible on the screen) and accessibilityDescription() (other descriptive text).
+    // An element's descriptive text is comprised of deprecatedTitle() (what's visible on the screen) and deprecatedAccessibilityDescription() (other descriptive text).
     // Both are used to generate what a screen reader speaks.
-    // If this point is reached (i.e. there's no accessibilityDescription) and there's no title(), we should fallback to using the title attribute.
+    // If this point is reached (i.e. there's no accessibilityDescription) and there's no deprecatedTitle(), we should fallback to using the title attribute.
     // The title attribute is normally used as help text (because it is a tooltip), but if there is nothing else available, this should be used (according to ARIA).
-    if (title(TextUnderElementAny).isEmpty())
+    if (deprecatedTitle(TextUnderElementAny).isEmpty())
         return getAttribute(titleAttr);
 
     if (roleValue() == FigureRole) {
         AXObject* figcaption = findChildWithTagName(figcaptionTag);
         if (figcaption)
-            return figcaption->accessibilityDescription();
+            return figcaption->deprecatedAccessibilityDescription();
     }
 
     return String();
 }
 
-String AXNodeObject::title(TextUnderElementMode mode) const
+String AXNodeObject::deprecatedTitle(TextUnderElementMode mode) const
 {
     Node* node = this->node();
     if (!node)
@@ -1491,7 +1656,7 @@ String AXNodeObject::title(TextUnderElementMode mode) const
 
     if (isInputElement || AXObject::isARIAInput(ariaRoleAttribute()) || isControl()) {
         HTMLLabelElement* label = labelForElement(toElement(node));
-        if (label && !exposesTitleUIElement())
+        if (label && !deprecatedExposesTitleUIElement())
             return label->innerText();
     }
 
@@ -1517,31 +1682,31 @@ String AXNodeObject::title(TextUnderElementMode mode) const
     case RadioButtonRole:
     case SwitchRole:
     case TabRole:
-        return textUnderElement(mode);
+        return deprecatedTextUnderElement(mode);
     // SVGRoots should not use the text under itself as a title. That could include the text of objects like <text>.
     case SVGRootRole:
         return String();
     case FigureRole: {
         AXObject* figcaption = findChildWithTagName(figcaptionTag);
         if (figcaption)
-            return figcaption->textUnderElement();
+            return figcaption->deprecatedTextUnderElement();
     }
     default:
         break;
     }
 
     if (isHeading() || isLink())
-        return textUnderElement(mode);
+        return deprecatedTextUnderElement(mode);
 
     // If it's focusable but it's not content editable or a known control type, then it will appear to
     // the user as a single atomic object, so we should use its text as the default title.
     if (isGenericFocusableElement())
-        return textUnderElement(mode);
+        return deprecatedTextUnderElement(mode);
 
     return String();
 }
 
-String AXNodeObject::helpText() const
+String AXNodeObject::deprecatedHelpText() const
 {
     Node* node = this->node();
     if (!node)
@@ -1555,7 +1720,7 @@ String AXNodeObject::helpText() const
     if (!describedBy.isEmpty())
         return describedBy;
 
-    String description = accessibilityDescription();
+    String description = deprecatedAccessibilityDescription();
     for (Node* curr = node; curr; curr = curr->parentNode()) {
         if (curr->isHTMLElement()) {
             const AtomicString& summary = toElement(curr)->getAttribute(summaryAttr);
@@ -1583,19 +1748,19 @@ String AXNodeObject::helpText() const
 
 String AXNodeObject::computedName() const
 {
-    String title = this->title(TextUnderElementAll);
+    String title = this->deprecatedTitle(TextUnderElementAll);
 
     String titleUIText;
     if (title.isEmpty()) {
-        AXObject* titleUIElement = this->titleUIElement();
+        AXObject* titleUIElement = this->deprecatedTitleUIElement();
         if (titleUIElement) {
-            titleUIText = titleUIElement->textUnderElement();
+            titleUIText = titleUIElement->deprecatedTextUnderElement();
             if (!titleUIText.isEmpty())
                 return titleUIText;
         }
     }
 
-    String description = accessibilityDescription();
+    String description = deprecatedAccessibilityDescription();
     if (!description.isEmpty())
         return description;
 
@@ -1613,7 +1778,82 @@ String AXNodeObject::computedName() const
     return String();
 }
 
+//
+// New AX name calculation.
+//
 
+String AXNodeObject::textAlternative(bool recursive, bool inAriaLabelledByTraversal, HashSet<AXObject*>& visited, AXNameFrom* nameFrom, Vector<AXObject*>* nameObjects)
+{
+    bool alreadyVisited = visited.contains(this);
+    visited.add(this);
+
+    if (!node() && !layoutObject())
+        return String();
+
+    // Step 2A from: http://www.w3.org/TR/accname-aam-1.1
+    if (!recursive && layoutObject()
+        && layoutObject()->style()->visibility() != VISIBLE
+        && !equalIgnoringCase(getAttribute(aria_hiddenAttr), "false")) {
+        return String();
+    }
+
+    // Step 2B from: http://www.w3.org/TR/accname-aam-1.1
+    if (!inAriaLabelledByTraversal && hasAttribute(aria_labelledbyAttr) && !alreadyVisited) {
+        if (nameFrom)
+            *nameFrom = AXNameFromRelatedElement;
+        WillBeHeapVector<RawPtrWillBeMember<Element>> elements;
+        ariaLabeledByElements(elements);
+        StringBuilder accumulatedText;
+        for (const auto& element : elements) {
+            RefPtr<AXObject> axElement = axObjectCache()->getOrCreate(element);
+            if (axElement) {
+                if (nameObjects)
+                    nameObjects->append(axElement.get());
+                String result = axElement->textAlternative(true, true, visited, nullptr, nullptr);
+                if (!result.isEmpty()) {
+                    if (!accumulatedText.isEmpty())
+                        accumulatedText.append(" ");
+                    accumulatedText.append(result);
+                }
+            }
+        }
+        return accumulatedText.toString();
+    }
+
+    // Step 2F / 2G from: http://www.w3.org/TR/accname-aam-1.1
+    if (recursive || nameFromContents()) {
+        if (nameFrom)
+            *nameFrom = AXNameFromContents;
+
+        Node* node = this->node();
+        if (node && node->isTextNode())
+            return toText(node)->wholeText();
+
+        StringBuilder accumulatedText;
+        AXObject* previous = nullptr;
+        for (AXObject* child = firstChild(); child; child = child->nextSibling()) {
+            // If we're going between two layoutObjects that are in separate LayoutBoxes, add
+            // whitespace if it wasn't there already. Intuitively if you have
+            // <span>Hello</span><span>World</span>, those are part of the same LayoutBox
+            // so we should return "HelloWorld", but given <div>Hello</div><div>World</div> the
+            // strings are in separate boxes so we should return "Hello World".
+            if (previous && accumulatedText.length() && !isHTMLSpace(accumulatedText[accumulatedText.length() - 1])) {
+                if (!isSameLayoutBox(child->layoutObject(), previous->layoutObject()))
+                    accumulatedText.append(' ');
+            }
+
+            String result = child->textAlternative(true, false, visited, nullptr, nullptr);
+            accumulatedText.append(result);
+            previous = child;
+        }
+
+        return accumulatedText.toString();
+    }
+
+    if (nameFrom)
+        *nameFrom = AXNameFromAttribute;
+    return String();
+}
 
 LayoutRect AXNodeObject::elementRect() const
 {
@@ -1659,28 +1899,37 @@ LayoutRect AXNodeObject::elementRect() const
     return boundingBox;
 }
 
+static Node* getParentNodeForComputeParent(Node* node)
+{
+    if (!node)
+        return nullptr;
+
+    Node* parentNode = nullptr;
+
+    // Skip over <optgroup> and consider the <select> the immediate parent of an <option>.
+    if (isHTMLOptionElement(node))
+        parentNode = toHTMLOptionElement(node)->ownerSelectElement();
+
+    if (!parentNode)
+        parentNode = node->parentNode();
+
+    return parentNode;
+}
+
 AXObject* AXNodeObject::computeParent() const
 {
-    if (!node())
-        return 0;
+    if (Node* parentNode = getParentNodeForComputeParent(node()))
+        return axObjectCache()->getOrCreate(parentNode);
 
-    Node* parentObj = node()->parentNode();
-    if (parentObj)
-        return axObjectCache()->getOrCreate(parentObj);
-
-    return 0;
+    return nullptr;
 }
 
 AXObject* AXNodeObject::computeParentIfExists() const
 {
-    if (!node())
-        return 0;
+    if (Node* parentNode = getParentNodeForComputeParent(node()))
+        return axObjectCache()->get(parentNode);
 
-    Node* parentObj = node()->parentNode();
-    if (parentObj)
-        return axObjectCache()->get(parentObj);
-
-    return 0;
+    return nullptr;
 }
 
 AXObject* AXNodeObject::firstChild() const
@@ -1936,6 +2185,14 @@ void AXNodeObject::childrenChanged()
     if (!node() && !layoutObject())
         return;
 
+    // If this is not part of the accessibility tree because an ancestor
+    // has only presentational children, invalidate this object's children but
+    // skip sending a notification and skip walking up the ancestors.
+    if (ancestorForWhichThisIsAPresentationalChild()) {
+        setNeedsToUpdateChildren();
+        return;
+    }
+
     axObjectCache()->postNotification(this, AXObjectCacheImpl::AXChildrenChanged);
 
     // Go up the accessibility parent chain, but only if the element already exists. This method is
@@ -2078,17 +2335,6 @@ void AXNodeObject::ariaLabeledByText(Vector<AccessibilityText>& textOrder) const
             textOrder.append(AccessibilityText(ariaLabeledBy, AlternativeText, axElement));
         }
     }
-}
-
-void AXNodeObject::changeValueByPercent(float percentChange)
-{
-    float range = maxValueForRange() - minValueForRange();
-    float value = valueForRange();
-
-    value += range * (percentChange / 100);
-    setValue(String::number(value));
-
-    axObjectCache()->postNotification(node(), AXObjectCacheImpl::AXValueChanged);
 }
 
 } // namespace blink

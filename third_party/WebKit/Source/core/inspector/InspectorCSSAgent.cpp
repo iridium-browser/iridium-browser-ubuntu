@@ -528,6 +528,7 @@ void InspectorCSSAgent::didCommitLoadForLocalFrame(LocalFrame* frame)
     if (frame == m_pageAgent->inspectedFrame()) {
         reset();
         m_editedStyleSheets.clear();
+        m_editedStyleElements.clear();
     }
 }
 
@@ -656,6 +657,19 @@ bool InspectorCSSAgent::getEditedStyleSheet(const String& url, String* content)
     return true;
 }
 
+void InspectorCSSAgent::addEditedStyleElement(int backendNodeId, const String& content)
+{
+    m_editedStyleElements.set(backendNodeId, content);
+}
+
+bool InspectorCSSAgent::getEditedStyleElement(int backendNodeId, String* content)
+{
+    if (!m_editedStyleElements.contains(backendNodeId))
+        return false;
+    *content = m_editedStyleElements.get(backendNodeId);
+    return true;
+}
+
 bool InspectorCSSAgent::forcePseudoState(Element* element, CSSSelector::PseudoType pseudoType)
 {
     if (m_nodeIdToForcedPseudoState.isEmpty())
@@ -729,6 +743,7 @@ void InspectorCSSAgent::getMatchedStylesForNode(ErrorString* errorString, int no
     // Matched rules.
     StyleResolver& styleResolver = ownerDocument->ensureStyleResolver();
 
+    element->updateDistribution();
     RefPtrWillBeRawPtr<CSSRuleList> matchedRules = styleResolver.pseudoCSSRulesForElement(element, elementPseudoId, StyleResolver::AllCSSRules);
     matchedCSSRules = buildArrayForMatchedRuleList(matchedRules.get(), originalElement, NOPSEUDO);
 
@@ -797,10 +812,10 @@ void InspectorCSSAgent::getComputedStyleForNode(ErrorString* errorString, int no
     style = inspectorStyle->buildArrayForComputedStyle();
 }
 
-void InspectorCSSAgent::collectPlatformFontsForRenderer(LayoutText* renderer, HashCountedSet<String>* fontStats)
+void InspectorCSSAgent::collectPlatformFontsForLayoutObject(LayoutText* layoutObject, HashCountedSet<String>* fontStats)
 {
-    for (InlineTextBox* box = renderer->firstTextBox(); box; box = box->nextTextBox()) {
-        const ComputedStyle& style = renderer->styleRef(box->isFirstLineStyle());
+    for (InlineTextBox* box = layoutObject->firstTextBox(); box; box = box->nextTextBox()) {
+        const ComputedStyle& style = layoutObject->styleRef(box->isFirstLineStyle());
         const Font& font = style.font();
         TextRun run = box->constructTextRunForInspector(style, font);
         SimpleShaper shaper(&font, run);
@@ -838,15 +853,15 @@ void InspectorCSSAgent::getPlatformFontsForNode(ErrorString* errorString, int no
 
     HashCountedSet<String> fontStats;
     for (size_t i = 0; i < textNodes.size(); ++i) {
-        LayoutText* renderer = textNodes[i]->layoutObject();
-        collectPlatformFontsForRenderer(renderer, &fontStats);
+        LayoutText* layoutObject = textNodes[i]->layoutObject();
+        collectPlatformFontsForLayoutObject(layoutObject, &fontStats);
 
-        if (!renderer->isTextFragment())
+        if (!layoutObject->isTextFragment())
             continue;
 
         // If we're the remaining text from a first-letter then our previous
-        // sibling has to be the first-letter renderer.
-        LayoutObject* previous = renderer->previousSibling();
+        // sibling has to be the first-letter layoutObject.
+        LayoutObject* previous = layoutObject->previousSibling();
         if (!previous)
             continue;
 
@@ -854,8 +869,8 @@ void InspectorCSSAgent::getPlatformFontsForNode(ErrorString* errorString, int no
             continue;
 
         // The first-letter pseudoElement only has one child, which is the
-        // first-letter renderer.
-        collectPlatformFontsForRenderer(toLayoutText(previous->slowFirstChild()), &fontStats);
+        // first-letter layoutObject.
+        collectPlatformFontsForLayoutObject(toLayoutText(previous->slowFirstChild()), &fontStats);
     }
 
     platformFonts = TypeBuilder::Array<TypeBuilder::CSS::PlatformFontUsage>::create();
@@ -1094,11 +1109,16 @@ PassRefPtr<TypeBuilder::CSS::CSSMedia> InspectorCSSAgent::buildMediaObject(const
 
     const MediaQuerySet* queries = media->queries();
     const WillBeHeapVector<OwnPtrWillBeMember<MediaQuery> >& queryVector = queries->queryVector();
-    OwnPtr<MediaQueryEvaluator> mediaEvaluator = adoptPtr(new MediaQueryEvaluator(parentStyleSheet->ownerDocument()->frame()));
+    LocalFrame* frame = nullptr;
+    if (parentStyleSheet) {
+        if (Document* document = parentStyleSheet->ownerDocument())
+            frame = document->frame();
+    }
+    OwnPtr<MediaQueryEvaluator> mediaEvaluator = adoptPtr(new MediaQueryEvaluator(frame));
 
     InspectorStyleSheet* inspectorStyleSheet = parentStyleSheet ? m_cssStyleSheetToInspectorStyleSheet.get(parentStyleSheet) : nullptr;
     RefPtr<TypeBuilder::Array<TypeBuilder::CSS::MediaQuery> > mediaListArray = TypeBuilder::Array<TypeBuilder::CSS::MediaQuery>::create();
-    RefPtr<MediaValues> mediaValues = MediaValues::createDynamicIfFrameExists(parentStyleSheet->ownerDocument()->frame());
+    RefPtr<MediaValues> mediaValues = MediaValues::createDynamicIfFrameExists(frame);
     bool hasMediaQueryItems = false;
     for (size_t i = 0; i < queryVector.size(); ++i) {
         MediaQuery* query = queryVector.at(i).get();
@@ -1301,7 +1321,7 @@ InspectorStyleSheet* InspectorCSSAgent::bindStyleSheet(CSSStyleSheet* styleSheet
     if (!inspectorStyleSheet) {
         String id = String::number(m_lastStyleSheetId++);
         Document* document = styleSheet->ownerDocument();
-        inspectorStyleSheet = InspectorStyleSheet::create(m_pageAgent, m_resourceAgent, id, styleSheet, detectOrigin(styleSheet, document), InspectorDOMAgent::documentURLString(document), this);
+        inspectorStyleSheet = InspectorStyleSheet::create(m_resourceAgent, id, styleSheet, detectOrigin(styleSheet, document), InspectorDOMAgent::documentURLString(document), this);
         m_idToInspectorStyleSheet.set(id, inspectorStyleSheet);
         m_cssStyleSheetToInspectorStyleSheet.set(styleSheet, inspectorStyleSheet);
         if (m_creatingViaInspectorStyleSheet)

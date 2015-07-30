@@ -31,6 +31,7 @@
 #include "core/layout/HitTestResult.h"
 #include "core/layout/LayoutAnalyzer.h"
 #include "core/layout/PointerEventsHitRules.h"
+#include "core/layout/svg/LayoutSVGResourcePaintServer.h"
 #include "core/layout/svg/SVGLayoutSupport.h"
 #include "core/layout/svg/SVGPathData.h"
 #include "core/layout/svg/SVGResources.h"
@@ -73,6 +74,21 @@ void LayoutSVGShape::updateShapeFromElement()
     m_strokeBoundingBox = calculateStrokeBoundingBox();
 }
 
+FloatRect LayoutSVGShape::hitTestStrokeBoundingBox() const
+{
+    if (style()->svgStyle().hasStroke())
+        return m_strokeBoundingBox;
+
+    // Implementation of http://dev.w3.org/fxtf/css-masking-1/#compute-stroke-bounding-box
+    // for the <rect> / <ellipse> / <circle> case except that we ignore whether
+    // the stroke is none.
+
+    FloatRect box = m_fillBoundingBox;
+    const float strokeWidth = this->strokeWidth();
+    box.inflate(strokeWidth / 2);
+    return box;
+}
+
 bool LayoutSVGShape::shapeDependentStrokeContains(const FloatPoint& point)
 {
     ASSERT(m_path);
@@ -107,11 +123,16 @@ bool LayoutSVGShape::fillContains(const FloatPoint& point, bool requiresFill, co
 
 bool LayoutSVGShape::strokeContains(const FloatPoint& point, bool requiresStroke)
 {
-    if (!strokeBoundingBox().contains(point))
-        return false;
+    if (requiresStroke) {
+        if (!strokeBoundingBox().contains(point))
+            return false;
 
-    if (requiresStroke && !SVGPaintServer::existsForLayoutObject(*this, styleRef(), ApplyToStrokeMode))
-        return false;
+        if (!SVGPaintServer::existsForLayoutObject(*this, styleRef(), ApplyToStrokeMode))
+            return false;
+    } else {
+        if (!hitTestStrokeBoundingBox().contains(point))
+            return false;
+    }
 
     return shapeDependentStrokeContains(point);
 }

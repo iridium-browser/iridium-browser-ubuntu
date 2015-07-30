@@ -26,9 +26,6 @@ VolumeManagerCommon.RootType = {
   // Root for a drive volume.
   DRIVE: 'drive',
 
-  // Root for a privet storage volume.
-  CLOUD_DEVICE: 'cloud_device',
-
   // Root for a MTP volume.
   MTP: 'mtp',
 
@@ -123,9 +120,20 @@ VolumeManagerCommon.VolumeType = {
   DOWNLOADS: 'downloads',
   REMOVABLE: 'removable',
   ARCHIVE: 'archive',
-  CLOUD_DEVICE: 'cloud_device',
   MTP: 'mtp',
   PROVIDED: 'provided'
+};
+
+/**
+ * Source of each volume's data.
+ * @enum {string}
+ * @const
+ */
+VolumeManagerCommon.Source = {
+  FILE: 'file',
+  DEVICE: 'device',
+  NETWORK: 'network',
+  SYSTEM: 'system'
 };
 
 /**
@@ -161,8 +169,6 @@ VolumeManagerCommon.getVolumeTypeFromRootType = function(rootType) {
     case VolumeManagerCommon.RootType.DRIVE_SHARED_WITH_ME:
     case VolumeManagerCommon.RootType.DRIVE_RECENT:
       return VolumeManagerCommon.VolumeType.DRIVE;
-    case VolumeManagerCommon.RootType.CLOUD_DEVICE:
-      return VolumeManagerCommon.VolumeType.CLOUD_DEVICE;
     case VolumeManagerCommon.RootType.MTP:
       return VolumeManagerCommon.VolumeType.MTP;
     case VolumeManagerCommon.RootType.PROVIDED:

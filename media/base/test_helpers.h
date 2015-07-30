@@ -17,6 +17,7 @@
 
 namespace base {
 class MessageLoop;
+class RunLoop;
 class TimeDelta;
 }
 
@@ -53,6 +54,8 @@ class WaitableMessageLoopEvent {
   // Fails the test if the timeout is reached.
   void RunAndWaitForStatus(PipelineStatus expected);
 
+  bool is_signaled() const { return signaled_; }
+
  private:
   void OnCallback(PipelineStatus status);
   void OnTimeout();
@@ -60,6 +63,7 @@ class WaitableMessageLoopEvent {
   base::MessageLoop* message_loop_;
   bool signaled_;
   PipelineStatus status_;
+  scoped_ptr<base::RunLoop> run_loop_;
 
   DISALLOW_COPY_AND_ASSIGN(WaitableMessageLoopEvent);
 };

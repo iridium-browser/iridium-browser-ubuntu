@@ -27,6 +27,7 @@
 #include "core/frame/OriginsUsingFeatures.h"
 #include "core/frame/SettingsDelegate.h"
 #include "core/frame/UseCounter.h"
+#include "core/page/Page.h"
 #include "core/page/PageAnimator.h"
 #include "core/page/PageLifecycleNotifier.h"
 #include "core/page/PageLifecycleObserver.h"
@@ -76,7 +77,7 @@ public:
     static void platformColorsChanged();
 
     // It is up to the platform to ensure that non-null clients are provided where required.
-    struct PageClients {
+    struct CORE_EXPORT PageClients {
         WTF_MAKE_NONCOPYABLE(PageClients); WTF_MAKE_FAST_ALLOCATED(PageClients);
     public:
         PageClients();
@@ -142,7 +143,7 @@ public:
     ScrollingCoordinator* scrollingCoordinator();
 
     String mainThreadScrollingReasonsAsText();
-    PassRefPtrWillBeRawPtr<ClientRectList> nonFastScrollableRects(const LocalFrame*);
+    ClientRectList* nonFastScrollableRects(const LocalFrame*);
 
     Settings& settings() const { return *m_settings; }
 
@@ -184,7 +185,7 @@ public:
 
     double timerAlignmentInterval() const;
 
-    class MultisamplingChangedObserver : public WillBeGarbageCollectedMixin {
+    class CORE_EXPORT MultisamplingChangedObserver : public WillBeGarbageCollectedMixin {
     public:
         virtual void multisamplingChanged(bool) = 0;
     };
@@ -268,6 +269,8 @@ private:
     // FIXME: Most of the members of Page should move onto FrameHost.
     OwnPtrWillBeMember<FrameHost> m_frameHost;
 };
+
+extern template class CORE_TEMPLATE_EXPORT WillBeHeapSupplement<Page>;
 
 } // namespace blink
 

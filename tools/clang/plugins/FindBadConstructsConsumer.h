@@ -17,6 +17,9 @@
 // - Enum types with a xxxx_LAST or xxxxLast const actually have that constant
 //   have the maximal value for that type.
 
+#ifndef TOOLS_CLANG_PLUGINS_FINDBADCONSTRUCTSCONSUMER_H_
+#define TOOLS_CLANG_PLUGINS_FINDBADCONSTRUCTSCONSUMER_H_
+
 #include "clang/AST/AST.h"
 #include "clang/AST/ASTConsumer.h"
 #include "clang/AST/Attr.h"
@@ -24,9 +27,11 @@
 #include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/AST/TypeLoc.h"
 #include "clang/Basic/SourceManager.h"
+#include "clang/Basic/SourceLocation.h"
 
 #include "ChromeClassTester.h"
 #include "Options.h"
+#include "SuppressibleDiagnosticBuilder.h"
 
 namespace chrome_checker {
 
@@ -57,6 +62,15 @@ class FindBadConstructsConsumer
   bool InTestingNamespace(const clang::Decl* record);
   bool IsMethodInBannedOrTestingNamespace(const clang::CXXMethodDecl* method);
 
+  // Returns a diagnostic builder that only emits the diagnostic if the spelling
+  // location (the actual characters that make up the token) is not in an
+  // ignored file. This is useful for situations where the token might originate
+  // from a macro in a system header: warning isn't useful, since system headers
+  // generally can't be easily updated.
+  SuppressibleDiagnosticBuilder ReportIfSpellingLocNotIgnored(
+      clang::SourceLocation loc,
+      unsigned diagnostic_id);
+
   void CheckVirtualMethods(clang::SourceLocation record_location,
                            clang::CXXRecordDecl* record,
                            bool warn_on_inline_bodies);
@@ -71,7 +85,6 @@ class FindBadConstructsConsumer
   static RefcountIssue CheckRecordForRefcountIssue(
       const clang::CXXRecordDecl* record,
       clang::SourceLocation& loc);
-  clang::DiagnosticsEngine::Level getErrorLevel();
   static bool IsRefCountedCallback(const clang::CXXBaseSpecifier* base,
                                    clang::CXXBasePath& path,
                                    void* user_data);
@@ -85,8 +98,6 @@ class FindBadConstructsConsumer
 
   void CheckWeakPtrFactoryMembers(clang::SourceLocation record_location,
                                   clang::CXXRecordDecl* record);
-
-  const Options options_;
 
   unsigned diag_method_requires_override_;
   unsigned diag_redundant_virtual_specifier_;
@@ -103,3 +114,5 @@ class FindBadConstructsConsumer
 };
 
 }  // namespace chrome_checker
+
+#endif  // TOOLS_CLANG_PLUGINS_FINDBADCONSTRUCTSCONSUMER_H_

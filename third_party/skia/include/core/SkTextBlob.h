@@ -68,6 +68,7 @@ private:
         const SkPoint& offset() const;
         void applyFontToPaint(SkPaint*) const;
         GlyphPositioning positioning() const;
+        bool isLCD() const;
 
     private:
         const RunRecord* fCurrentRun;
@@ -92,6 +93,7 @@ private:
     static unsigned ScalarsPerGlyph(GlyphPositioning pos);
 
     friend class GrAtlasTextContext;
+    friend class GrTextBlobCache;
     friend class GrTextContext;
     friend class SkBaseDevice;
     friend class SkTextBlobBuilder;

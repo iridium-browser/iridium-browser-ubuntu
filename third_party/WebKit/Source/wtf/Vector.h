@@ -30,6 +30,8 @@
 #include "wtf/NotFound.h"
 #include "wtf/StdLibExtras.h"
 #include "wtf/VectorTraits.h"
+#include <algorithm>
+#include <iterator>
 #include <string.h>
 #include <utility>
 
@@ -79,16 +81,28 @@ static const size_t kInitialVectorSize = WTF_VECTOR_INITIAL_SIZE;
     template<typename T>
     struct VectorUnusedSlotClearer<false, T> {
         static void clear(T*, T*) { }
+#if ENABLE(ASSERT)
+        static void checkCleared(const T*, const T*) { }
+#endif
     };
 
     template<typename T>
     struct VectorUnusedSlotClearer<true, T> {
         static void clear(T* begin, T* end)
         {
-            // We clear out unused slots so that the visitor and the finalizer
-            // do not visit them (or at least it does not matter if they do).
-            memset(begin, 0, sizeof(T) * (end - begin));
+            memset(reinterpret_cast<void*>(begin), 0, sizeof(T) * (end - begin));
         }
+
+#if ENABLE(ASSERT)
+        static void checkCleared(const T* begin, const T* end)
+        {
+            const unsigned char* unusedArea = reinterpret_cast<const unsigned char*>(begin);
+            const unsigned char* endAddress = reinterpret_cast<const unsigned char*>(end);
+            ASSERT(endAddress >= unusedArea);
+            for (int i = 0; i < endAddress - unusedArea; ++i)
+                ASSERT(!unusedArea[i]);
+        }
+#endif
     };
 
     template <bool canInitializeWithMemset, typename T>
@@ -328,7 +342,18 @@ static const size_t kInitialVectorSize = WTF_VECTOR_INITIAL_SIZE;
 
         void clearUnusedSlots(T* from, T* to)
         {
+            // If the vector backing is garbage-collected and needs tracing
+            // or finalizing, we clear out the unused slots so that the visitor
+            // or the finalizer does not cause a problem when visiting the
+            // unused slots.
             VectorUnusedSlotClearer<Allocator::isGarbageCollected && (VectorTraits<T>::needsDestruction || ShouldBeTraced<VectorTraits<T>>::value), T>::clear(from, to);
+        }
+
+        void checkUnusedSlots(const T* from, const T* to)
+        {
+#if ENABLE(ASSERT) && !defined(ANNOTATE_CONTIGUOUS_CONTAINER)
+            VectorUnusedSlotClearer<Allocator::isGarbageCollected && (VectorTraits<T>::needsDestruction || ShouldBeTraced<VectorTraits<T>>::value), T>::checkCleared(from, to);
+#endif
         }
 
     protected:
@@ -419,6 +444,7 @@ static const size_t kInitialVectorSize = WTF_VECTOR_INITIAL_SIZE;
         using Base::capacity;
 
         using Base::clearUnusedSlots;
+        using Base::checkUnusedSlots;
 
         bool hasOutOfLineBuffer() const
         {
@@ -539,11 +565,13 @@ static const size_t kInitialVectorSize = WTF_VECTOR_INITIAL_SIZE;
                     ANNOTATE_CHANGE_SIZE(other.inlineBuffer(), inlineCapacity, other.m_size, m_size);
                     TypeOperations::swap(inlineBuffer(), inlineBuffer() + other.m_size, other.inlineBuffer());
                     TypeOperations::move(inlineBuffer() + other.m_size, inlineBuffer() + m_size, other.inlineBuffer() + other.m_size);
+                    Base::clearUnusedSlots(inlineBuffer() + other.m_size, inlineBuffer() + m_size);
                     ANNOTATE_CHANGE_SIZE(inlineBuffer(), inlineCapacity, m_size, other.m_size);
                 } else {
                     ANNOTATE_CHANGE_SIZE(inlineBuffer(), inlineCapacity, m_size, other.m_size);
                     TypeOperations::swap(inlineBuffer(), inlineBuffer() + m_size, other.inlineBuffer());
                     TypeOperations::move(other.inlineBuffer() + m_size, other.inlineBuffer() + other.m_size, inlineBuffer() + m_size);
+                    Base::clearUnusedSlots(other.inlineBuffer() + m_size, other.inlineBuffer() + other.m_size);
                     ANNOTATE_CHANGE_SIZE(other.inlineBuffer(), inlineCapacity, other.m_size, m_size);
                 }
             } else if (buffer() == inlineBuffer()) {
@@ -552,6 +580,7 @@ static const size_t kInitialVectorSize = WTF_VECTOR_INITIAL_SIZE;
                 other.m_buffer = other.inlineBuffer();
                 ANNOTATE_NEW_BUFFER(other.m_buffer, inlineCapacity, m_size);
                 TypeOperations::move(inlineBuffer(), inlineBuffer() + m_size, other.inlineBuffer());
+                Base::clearUnusedSlots(inlineBuffer(), inlineBuffer() + m_size);
                 std::swap(m_capacity, other.m_capacity);
             } else if (other.buffer() == other.inlineBuffer()) {
                 ANNOTATE_DELETE_BUFFER(other.m_buffer, inlineCapacity, other.m_size);
@@ -559,6 +588,7 @@ static const size_t kInitialVectorSize = WTF_VECTOR_INITIAL_SIZE;
                 m_buffer = inlineBuffer();
                 ANNOTATE_NEW_BUFFER(m_buffer, inlineCapacity, other.m_size);
                 TypeOperations::move(other.inlineBuffer(), other.inlineBuffer() + other.m_size, inlineBuffer());
+                Base::clearUnusedSlots(other.inlineBuffer(), other.inlineBuffer() + other.m_size);
                 std::swap(m_capacity, other.m_capacity);
             } else {
                 std::swap(m_buffer, other.m_buffer);
@@ -607,12 +637,7 @@ static const size_t kInitialVectorSize = WTF_VECTOR_INITIAL_SIZE;
 
         Vector()
         {
-            // Unused slots are initialized to zero so that the visitor and the
-            // finalizer can visit them safely. canInitializeWithMemset tells us
-            // that the class does not expect matching constructor and
-            // destructor calls as long as the memory is zeroed.
-            static_assert(!Allocator::isGarbageCollected || !VectorTraits<T>::needsDestruction || VectorTraits<T>::canInitializeWithMemset, "class has problems with finalizers called on cleared memory");
-            static_assert(!WTF::IsPolymorphic<T>::value || !VectorTraits<T>::canInitializeWithMemset, "cannot initialize with memset if there is a vtable");
+            static_assert(!WTF::IsPolymorphic<T>::value || !VectorTraits<T>::canInitializeWithMemset, "Cannot initialize with memset if there is a vtable");
             ANNOTATE_NEW_BUFFER(begin(), capacity(), 0);
             m_size = 0;
         }
@@ -620,11 +645,7 @@ static const size_t kInitialVectorSize = WTF_VECTOR_INITIAL_SIZE;
         explicit Vector(size_t size)
             : Base(size)
         {
-            // Unused slots are initialized to zero so that the visitor and the
-            // finalizer can visit them safely. canInitializeWithMemset tells us
-            // that the class does not expect matching constructor and
-            // destructor calls as long as the memory is zeroed.
-            static_assert(!Allocator::isGarbageCollected || !VectorTraits<T>::needsDestruction || VectorTraits<T>::canInitializeWithMemset, "class has problems with finalizers called on cleared memory");
+            static_assert(!WTF::IsPolymorphic<T>::value || !VectorTraits<T>::canInitializeWithMemset, "Cannot initialize with memset if there is a vtable");
             ANNOTATE_NEW_BUFFER(begin(), capacity(), size);
             m_size = size;
             TypeOperations::initialize(begin(), end());
@@ -779,6 +800,7 @@ static const size_t kInitialVectorSize = WTF_VECTOR_INITIAL_SIZE;
         using Base::allocateBuffer;
         using Base::allocationSize;
         using Base::clearUnusedSlots;
+        using Base::checkUnusedSlots;
     };
 
     template<typename T, size_t inlineCapacity, typename Allocator>
@@ -970,6 +992,7 @@ static const size_t kInitialVectorSize = WTF_VECTOR_INITIAL_SIZE;
     {
         if (size <= m_size) {
             TypeOperations::destruct(begin() + size, end());
+            clearUnusedSlots(begin() + size, end());
             ANNOTATE_CHANGE_SIZE(begin(), capacity(), m_size, size);
         } else {
             if (size > capacity())
@@ -1026,6 +1049,7 @@ static const size_t kInitialVectorSize = WTF_VECTOR_INITIAL_SIZE;
         Base::allocateExpandedBuffer(newCapacity);
         ANNOTATE_NEW_BUFFER(begin(), capacity(), m_size);
         TypeOperations::move(oldBuffer, oldEnd, begin());
+        clearUnusedSlots(oldBuffer, oldEnd);
         ANNOTATE_DELETE_BUFFER(oldBuffer, oldCapacity, m_size);
         Base::deallocateBuffer(oldBuffer);
     }
@@ -1066,6 +1090,7 @@ static const size_t kInitialVectorSize = WTF_VECTOR_INITIAL_SIZE;
             if (begin() != oldBuffer) {
                 ANNOTATE_NEW_BUFFER(begin(), capacity(), m_size);
                 TypeOperations::move(oldBuffer, oldEnd, begin());
+                clearUnusedSlots(oldBuffer, oldEnd);
                 ANNOTATE_DELETE_BUFFER(oldBuffer, oldCapacity, m_size);
             }
         } else {
@@ -1287,6 +1312,7 @@ static const size_t kInitialVectorSize = WTF_VECTOR_INITIAL_SIZE;
         if (ShouldBeTraced<VectorTraits<T>>::value) {
             for (const T* bufferEntry = bufferBegin; bufferEntry != bufferEnd; bufferEntry++)
                 Allocator::template trace<VisitorDispatcher, T, VectorTraits<T>>(visitor, *const_cast<T*>(bufferEntry));
+            checkUnusedSlots(buffer() + size(), buffer() + capacity());
         }
         if (this->hasOutOfLineBuffer())
             Allocator::markNoTracing(visitor, buffer());

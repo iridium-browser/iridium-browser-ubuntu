@@ -8,7 +8,6 @@ from __future__ import print_function
 
 import functools
 import glob
-import logging
 import os
 import re
 import shlex
@@ -16,6 +15,7 @@ import shutil
 
 from chromite.cbuildbot import failures_lib
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import osutils
 
 
@@ -293,8 +293,6 @@ class Path(object):
 
 
 _DISABLE_NACL = 'disable_nacl'
-_USE_DRM = 'use_drm'
-
 
 _CHROME_INTERNAL_FLAG = 'chrome_internal'
 _HIGHDPI_FLAG = 'highdpi'
@@ -309,7 +307,7 @@ C = Conditions
 # Files shared between all deployment types.
 _COPY_PATHS_COMMON = (
     Path('chrome_sandbox', mode=0o4755, dest=_CHROME_SANDBOX_DEST),
-    Path('icudtl.dat', cond=C.GypSet('icu_use_data_file_flag')),
+    Path('icudtl.dat'),
     # Set as optional for backwards compatibility.
     Path('lib/libpeerconnection.so',
          exe=True,
@@ -334,6 +332,10 @@ _COPY_PATHS_COMMON = (
          exe=True,
          optional=True,
          cond=C.GypNotSet(_DISABLE_NACL)),
+    Path('nacl_helper_nonsfi',
+         exe=True,
+         optional=True,
+         cond=C.GypNotSet(_DISABLE_NACL)),
     Path('natives_blob.bin', optional=True),
     Path('pnacl/', cond=C.GypNotSet(_DISABLE_NACL)),
     Path('snapshot_blob.bin', optional=True),
@@ -345,8 +347,6 @@ _COPY_PATHS_APP_SHELL = (
 ) + _COPY_PATHS_COMMON
 
 _COPY_PATHS_CHROME = (
-    Path('ash_shell', exe=True, cond=C.GypSet(_USE_DRM)),
-    Path('aura_demo', exe=True, cond=C.GypSet(_USE_DRM)),
     Path('chrome', exe=True),
     Path('chrome-wrapper'),
     Path('chrome_100_percent.pak'),

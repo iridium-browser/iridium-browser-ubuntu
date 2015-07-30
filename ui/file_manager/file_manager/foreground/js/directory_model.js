@@ -179,13 +179,29 @@ DirectoryModel.prototype.isSearching = function() {
 };
 
 /**
- * @return {boolean}
+ * @return {boolean} True if it's on Drive.
  */
 DirectoryModel.prototype.isOnDrive = function() {
+  return this.isCurrentRootVolumeType_(VolumeManagerCommon.VolumeType.DRIVE);
+};
+
+/**
+ * @return {boolean} True if it's on MTP volume.
+ */
+DirectoryModel.prototype.isOnMTP = function() {
+  return this.isCurrentRootVolumeType_(VolumeManagerCommon.VolumeType.MTP);
+};
+
+/**
+ * @param {VolumeManagerCommon.VolumeType} volumeType Volume Type
+ * @return {boolean} True if current root volume type is equal to specified
+ *     volume type.
+ * @private
+ */
+DirectoryModel.prototype.isCurrentRootVolumeType_ = function(volumeType) {
   var rootType = this.getCurrentRootType();
   return rootType != null &&
-      VolumeManagerCommon.getVolumeTypeFromRootType(rootType) ==
-      VolumeManagerCommon.VolumeType.DRIVE;
+      VolumeManagerCommon.getVolumeTypeFromRootType(rootType) === volumeType;
 };
 
 /**
@@ -924,6 +940,10 @@ DirectoryModel.prototype.changeDirectoryEntry = function(
   this.changeDirectorySequence_++;
   this.clearSearch_();
 
+  // If there is on-going scan, cancel it.
+  if (this.currentDirContents_.isScanning())
+    this.currentDirContents_.cancelScan();
+
   this.directoryChangeQueue_.run(function(sequence, queueTaskCallback) {
     this.fileWatcher_.changeWatchedDirectory(
         dirEntry,
@@ -969,7 +989,7 @@ DirectoryModel.prototype.changeDirectoryEntry = function(
           this.dispatchEvent(event);
 
           if (event.volumeChanged) {
-            this.onVolumeChanged_(currentVolumeInfo);
+            this.onVolumeChanged_(assert(currentVolumeInfo));
           }
         }.bind(this));
   }.bind(this, this.changeDirectorySequence_));

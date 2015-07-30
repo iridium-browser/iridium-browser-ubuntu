@@ -123,7 +123,7 @@
 #   persistent IDs for all fields (but not for groups!) are needed. These are
 #   specified by the 'id' keys of each policy. NEVER CHANGE EXISTING IDs,
 #   because doing so would break the deployed wire format!
-#   For your editing convenience: highest ID currently used: 301
+#   For your editing convenience: highest ID currently used: 303
 #
 # Placeholders:
 #   The following placeholder strings are automatically substituted:
@@ -893,7 +893,7 @@
       'example_value': False,
       'id': 162,
       'caption': '''Force SafeSearch''',
-      'desc': '''This policy is deprecated, please use ForceGoogleSafeSearch and ForceYouTubeSafetyMode instead.
+      'desc': '''This policy is deprecated, please use ForceGoogleSafeSearch and ForceYouTubeSafetyMode instead. This policy will be ignored if either the ForceGoogleSafeSearch or ForceYouTubeSafetyMode policies are set.
 
       Forces queries in Google Web Search to be done with SafeSearch set to active and prevents users from changing this setting. This setting also forces Safety Mode on YouTube.
 
@@ -4976,6 +4976,20 @@
       If this setting is disabled or not configured then users can choose to proceed to the flagged site after being shown the warning.''',
     },
     {
+      'name': 'SafeBrowsingExtendedReportingOptInAllowed',
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['chrome.*:44-', 'chrome_os:44-'],
+      'features': {
+        'dynamic_refresh': True,
+        'per_profile': True,
+      },
+      'example_value': True,
+      'id': 299,
+      'caption': '''Allow users to opt in to Safe Browsing extended reporting''',
+      'desc': '''Setting this policy to false stops users from choosing to send information about security errors they encounter to Google servers. If this setting is true or not configured, then users will be allowed to send information when they encounter an SSL error or Safe Browsing warning.''',
+    },
+    {
       'name': 'SpellCheckServiceEnabled',
       'type': 'main',
       'schema': { 'type': 'boolean' },
@@ -7160,10 +7174,10 @@
         },
       ],
       'supported_on': [
-        'chrome.*:39-',
-        'chrome_os:39-',
-        'android:39-',
-        'ios:39-',
+        'chrome.*:39-43',
+        'chrome_os:39-43',
+        'android:39-43',
+        'ios:39-43',
       ],
       'features': {
         'dynamic_refresh': True,
@@ -7215,10 +7229,10 @@
         },
       ],
       'supported_on': [
-        'chrome.*:39-',
-        'chrome_os:39-',
-        'android:39-',
-        'ios:39-',
+        'chrome.*:39-43',
+        'chrome_os:39-43',
+        'android:39-43',
+        'ios:39-43',
       ],
       'features': {
         'dynamic_refresh': True,
@@ -7307,6 +7321,36 @@
       If this policy is set to a string representing a domain name, <ph name="PRODUCT_OS_NAME">$2<ex>Google Chrome OS</ex></ph> will show an autocomplete option during user sign-in allowing the user to type in only his user name without the domain name extension.  The user will be able to overwrite this domain name extension.''',
     },
     {
+      'name': 'ForceMaximizeOnFirstRun',
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['chrome_os:43-'],
+      'features': {
+        'dynamic_refresh': False,
+        'per_profile': True,
+      },
+      'example_value': True,
+      'id': 298,
+      'caption': '''Maximize the first browser window on first run''',
+      'desc': '''If this policy is set to true, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will unconditionally maximize the the first window shown on first run.
+      If this policy is set to false or not configured, a heuristic will decide whether to maximize the first window shown, based on the screen size.''',
+    },
+    {
+      'name': 'SSLErrorOverrideAllowed',
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'supported_on': ['chrome.*:44-', 'chrome_os:44-', 'android:44-'],
+      'features': {
+        'dynamic_refresh': True,
+        'per_profile': True,
+      },
+      'example_value': True,
+      'id': 300,
+      'caption': '''Allow proceeding from the SSL warning page''',
+      'desc': '''Chrome shows a warning page when users navigate to sites that have SSL errors. By default or when this policy is set to true, users are allowed to click through these warning pages.
+      Setting this policy to false disallows users to click through any warning page.''',
+    },
+    {
       'name': 'QuicAllowed',
       'type': 'main',
       'schema': { 'type': 'boolean' },
@@ -7321,7 +7365,24 @@
       'desc': '''If this policy is set to true or not set usage of QUIC protocol in <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> is allowed.
       If this policy is set to false usage of QUIC protocol is disallowed.''',
     },
+    {
+      'name': 'WelcomePageOnOSUpgradeEnabled',
+      'supported_on': ['chrome.win:44-'],
+      'type': 'main',
+      'schema': { 'type': 'boolean' },
+      'id': 303,
+      'caption': 'Enable showing the welcome page on the first browser launch following OS upgrade.',
+      'desc': '''Enable showing the welcome page on the first browser launch following OS upgrade.
 
+      If this policy is set to true or not configured, the browser will re-show the welcome page on the first launch following an OS upgrade.
+
+      If this policy is set to false, the browser will not re-show the welcome page on the first launch following an OS upgrade.''',
+      'features': {
+        'dynamic_refresh': False,
+        'per_profile': False
+      },
+      'example_value': False
+    }
   ],
   'messages': {
     # Messages that are not associated to any policies.

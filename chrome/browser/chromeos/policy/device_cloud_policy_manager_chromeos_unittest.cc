@@ -11,10 +11,10 @@
 #include "base/bind_helpers.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/testing_pref_service.h"
 #include "base/run_loop.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos.h"
 #include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos_factory.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_initializer.h"
@@ -92,7 +92,7 @@ class DeviceCloudPolicyManagerChromeOSTest
   DeviceCloudPolicyManagerChromeOSTest()
       : fake_cryptohome_client_(new chromeos::FakeCryptohomeClient()),
         state_keys_broker_(&fake_session_manager_client_,
-                           base::MessageLoopProxy::current()),
+                           base::ThreadTaskRunnerHandle::Get()),
         store_(NULL) {
     fake_statistics_provider_.SetMachineStatistic("serial_numer", "test_sn");
     std::vector<std::string> state_keys;
@@ -114,13 +114,11 @@ class DeviceCloudPolicyManagerChromeOSTest
 
     install_attributes_.reset(
         new EnterpriseInstallAttributes(fake_cryptohome_client_));
-    store_ =
-        new DeviceCloudPolicyStoreChromeOS(&device_settings_service_,
-                                           install_attributes_.get(),
-                                           base::MessageLoopProxy::current());
+    store_ = new DeviceCloudPolicyStoreChromeOS(
+        &device_settings_service_, install_attributes_.get(),
+        base::ThreadTaskRunnerHandle::Get());
     manager_.reset(new TestingDeviceCloudPolicyManagerChromeOS(
-        make_scoped_ptr(store_),
-        base::MessageLoopProxy::current(),
+        make_scoped_ptr(store_), base::ThreadTaskRunnerHandle::Get(),
         &state_keys_broker_));
 
     chrome::RegisterLocalState(local_state_.registry());
@@ -130,7 +128,7 @@ class DeviceCloudPolicyManagerChromeOSTest
     // OAuth tokens, then writes the token to local state, encrypting it
     // first with methods in CryptohomeTokenEncryptor.
     request_context_getter_ = new net::TestURLRequestContextGetter(
-        base::MessageLoopProxy::current());
+        base::ThreadTaskRunnerHandle::Get());
     TestingBrowserProcess::GetGlobal()->SetSystemRequestContext(
         request_context_getter_.get());
     TestingBrowserProcess::GetGlobal()->SetLocalState(&local_state_);
@@ -141,6 +139,8 @@ class DeviceCloudPolicyManagerChromeOSTest
     url_fetcher_response_string_ = "{\"access_token\":\"accessToken4Test\","
                                    "\"expires_in\":1234,"
                                    "\"refresh_token\":\"refreshToken4Test\"}";
+
+    AllowUninterestingRemoteCommandFetches();
   }
 
   void TearDown() override {
@@ -171,14 +171,10 @@ class DeviceCloudPolicyManagerChromeOSTest
     manager_->Initialize(&local_state_);
     manager_->AddDeviceCloudPolicyManagerObserver(this);
     initializer_.reset(new DeviceCloudPolicyInitializer(
-        &local_state_,
-        &device_management_service_,
+        &local_state_, &device_management_service_,
         &consumer_device_management_service_,
-        base::MessageLoopProxy::current(),
-        install_attributes_.get(),
-        &state_keys_broker_,
-        store_,
-        manager_.get()));
+        base::ThreadTaskRunnerHandle::Get(), install_attributes_.get(),
+        &state_keys_broker_, store_, manager_.get()));
     initializer_->Init();
   }
 
@@ -191,6 +187,19 @@ class DeviceCloudPolicyManagerChromeOSTest
              new base::FundamentalValue(false),
              NULL);
     EXPECT_TRUE(manager_->policies().Equals(bundle));
+  }
+
+  void AllowUninterestingRemoteCommandFetches() {
+    // We are not interested in remote command fetches that the client initiates
+    // automatically. Make them fail and ignore them otherwise.
+    EXPECT_CALL(device_management_service_,
+                CreateJob(DeviceManagementRequestJob::TYPE_REMOTE_COMMANDS, _))
+        .Times(AnyNumber())
+        .WillRepeatedly(device_management_service_.FailJob(
+            DM_STATUS_TEMPORARY_UNAVAILABLE));
+    EXPECT_CALL(device_management_service_,
+                StartJob(dm_protocol::kValueRequestRemoteCommands, _, _, _, _,
+                         _, _)).Times(AnyNumber());
   }
 
   MOCK_METHOD0(OnDeviceCloudPolicyManagerConnected, void());
@@ -245,14 +254,15 @@ TEST_F(DeviceCloudPolicyManagerChromeOSTest, EnrolledDevice) {
               CreateJob(DeviceManagementRequestJob::TYPE_POLICY_FETCH, _))
       .Times(AtMost(1))
       .WillOnce(device_management_service_.CreateAsyncJob(&policy_fetch_job));
-  EXPECT_CALL(device_management_service_, StartJob(_, _, _, _, _, _, _))
+  EXPECT_CALL(device_management_service_,
+              StartJob(dm_protocol::kValueRequestPolicy, _, _, _, _, _, _))
       .Times(AtMost(1));
   ConnectManager();
   base::RunLoop().RunUntilIdle();
   Mock::VerifyAndClearExpectations(&device_management_service_);
   ASSERT_TRUE(policy_fetch_job);
   // Should create a status uploader for reporting on enrolled devices.
-  EXPECT_TRUE(manager_->HasStatusUploaderForTest());
+  EXPECT_TRUE(manager_->GetStatusUploader());
   VerifyPolicyPopulated();
 
   manager_->Shutdown();
@@ -282,7 +292,8 @@ TEST_F(DeviceCloudPolicyManagerChromeOSTest, UnmanagedDevice) {
               CreateJob(DeviceManagementRequestJob::TYPE_POLICY_FETCH, _))
       .Times(AtMost(1))
       .WillOnce(device_management_service_.CreateAsyncJob(&policy_fetch_job));
-  EXPECT_CALL(device_management_service_, StartJob(_, _, _, _, _, _, _))
+  EXPECT_CALL(device_management_service_,
+              StartJob(dm_protocol::kValueRequestPolicy, _, _, _, _, _, _))
       .Times(AtMost(1));
   ConnectManager();
   base::RunLoop().RunUntilIdle();
@@ -290,7 +301,7 @@ TEST_F(DeviceCloudPolicyManagerChromeOSTest, UnmanagedDevice) {
   ASSERT_TRUE(policy_fetch_job);
   // Should create a status provider for reporting on enrolled devices, even
   // those that aren't managed.
-  EXPECT_TRUE(manager_->HasStatusUploaderForTest());
+  EXPECT_TRUE(manager_->GetStatusUploader());
 
   // Switch back to ACTIVE, service the policy fetch and let it propagate.
   device_policy_.policy_data().set_state(em::PolicyData::ACTIVE);
@@ -318,7 +329,7 @@ TEST_F(DeviceCloudPolicyManagerChromeOSTest, ConsumerDevice) {
   ConnectManager();
   EXPECT_TRUE(manager_->policies().Equals(bundle));
   // Should not create a status provider for reporting on consumer devices.
-  EXPECT_FALSE(manager_->HasStatusUploaderForTest());
+  EXPECT_FALSE(manager_->GetStatusUploader());
 
   manager_->Shutdown();
   EXPECT_TRUE(manager_->policies().Equals(bundle));
@@ -334,7 +345,8 @@ TEST_F(DeviceCloudPolicyManagerChromeOSTest, ConnectAndDisconnect) {
   EXPECT_CALL(device_management_service_,
               CreateJob(DeviceManagementRequestJob::TYPE_POLICY_FETCH, _))
       .WillOnce(device_management_service_.CreateAsyncJob(&policy_fetch_job));
-  EXPECT_CALL(device_management_service_, StartJob(_, _, _, _, _, _, _));
+  EXPECT_CALL(device_management_service_,
+              StartJob(dm_protocol::kValueRequestPolicy, _, _, _, _, _, _));
   EXPECT_CALL(*this, OnDeviceCloudPolicyManagerConnected());
   ConnectManager();
   base::RunLoop().RunUntilIdle();
@@ -424,10 +436,11 @@ class DeviceCloudPolicyManagerChromeOSEnrollmentTest
                 CreateJob(DeviceManagementRequestJob::TYPE_REGISTRATION, _))
         .Times(AtMost(1))
         .WillOnce(device_management_service_.CreateAsyncJob(&register_job));
-    EXPECT_CALL(device_management_service_, StartJob(_, _, _, _, _, _, _))
+    EXPECT_CALL(device_management_service_,
+                StartJob(dm_protocol::kValueRequestRegister, _, _, _, _, _, _))
         .Times(AtMost(1))
-        .WillOnce(DoAll(SaveArg<5>(&client_id_),
-                        SaveArg<6>(&register_request_)));
+        .WillOnce(
+            DoAll(SaveArg<5>(&client_id_), SaveArg<6>(&register_request_)));
     DeviceCloudPolicyInitializer::AllowedDeviceModes modes;
     modes[DEVICE_MODE_ENTERPRISE] = true;
 
@@ -445,6 +458,7 @@ class DeviceCloudPolicyManagerChromeOSEnrollmentTest
                    base::Unretained(this)));
     base::RunLoop().RunUntilIdle();
     Mock::VerifyAndClearExpectations(&device_management_service_);
+    AllowUninterestingRemoteCommandFetches();
 
     if (done_)
       return;
@@ -456,10 +470,12 @@ class DeviceCloudPolicyManagerChromeOSEnrollmentTest
                 CreateJob(DeviceManagementRequestJob::TYPE_POLICY_FETCH, _))
         .Times(AtMost(1))
         .WillOnce(device_management_service_.CreateAsyncJob(&policy_fetch_job));
-    EXPECT_CALL(device_management_service_, StartJob(_, _, _, _, _, _, _))
+    EXPECT_CALL(device_management_service_,
+                StartJob(dm_protocol::kValueRequestPolicy, _, _, _, _, _, _))
         .Times(AtMost(1));
     register_job->SendResponse(register_status_, register_response_);
     Mock::VerifyAndClearExpectations(&device_management_service_);
+    AllowUninterestingRemoteCommandFetches();
 
     if (done_)
       return;
@@ -479,10 +495,12 @@ class DeviceCloudPolicyManagerChromeOSEnrollmentTest
         .Times(AtMost(1))
         .WillOnce(device_management_service_.CreateAsyncJob(
             &robot_auth_fetch_job));
-    EXPECT_CALL(device_management_service_, StartJob(_, _, _, _, _, _, _))
-        .Times(AtMost(1));
+    EXPECT_CALL(device_management_service_,
+                StartJob(dm_protocol::kValueRequestApiAuthorization, _, _, _, _,
+                         _, _)).Times(AtMost(1));
     base::RunLoop().RunUntilIdle();
     Mock::VerifyAndClearExpectations(&device_management_service_);
+    AllowUninterestingRemoteCommandFetches();
 
     if (done_)
       return;
@@ -492,6 +510,7 @@ class DeviceCloudPolicyManagerChromeOSEnrollmentTest
     robot_auth_fetch_job->SendResponse(robot_auth_fetch_status_,
                                        robot_auth_fetch_response_);
     Mock::VerifyAndClearExpectations(&device_management_service_);
+    AllowUninterestingRemoteCommandFetches();
 
     if (done_)
       return;

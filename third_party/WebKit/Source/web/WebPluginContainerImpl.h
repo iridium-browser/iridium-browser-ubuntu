@@ -78,10 +78,11 @@ public:
     virtual bool supportsInputMethod() const override;
     virtual bool canProcessDrag() const override;
     virtual bool wantsWheelEvents() override;
+    virtual void layoutIfNeeded() override;
+    virtual void invalidatePaintIfNeeded() override { issuePaintInvalidations(); }
 
     // Widget methods
     virtual void setFrameRect(const IntRect&) override;
-    virtual void layoutWidgetIfPossible() override;
     virtual void paint(GraphicsContext*, const IntRect&) override;
     virtual void invalidateRect(const IntRect&) override;
     virtual void setFocus(bool, WebFocusType) override;
@@ -101,6 +102,7 @@ public:
     virtual void invalidate() override;
     virtual void invalidateRect(const WebRect&) override;
     virtual void scrollRect(const WebRect&) override;
+    virtual void setNeedsLayout() override;
     virtual void reportGeometry() override;
     virtual void allowScriptObjects() override;
     virtual void clearScriptObjects() override;
@@ -162,8 +164,6 @@ public:
     void willStartLiveResize();
     void willEndLiveResize();
 
-    bool paintCustomOverhangArea(GraphicsContext*, const IntRect&, const IntRect&, const IntRect&);
-
     DECLARE_VIRTUAL_TRACE();
     virtual void dispose() override;
 
@@ -187,6 +187,8 @@ private:
 
     void focusPlugin();
 
+    void issuePaintInvalidations();
+
     void calculateGeometry(
         IntRect& windowRect,
         IntRect& clipRect,
@@ -201,6 +203,8 @@ private:
     Vector<WebPluginLoadObserver*> m_pluginLoadObservers;
 
     WebLayer* m_webLayer;
+
+    IntRect m_pendingInvalidationRect;
 
     // The associated scrollbar group object, created lazily. Used for Pepper
     // scrollbars.

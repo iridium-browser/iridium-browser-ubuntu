@@ -5,6 +5,7 @@
 #include "extensions/browser/guest_view/app_view/app_view_guest.h"
 
 #include "base/command_line.h"
+#include "components/guest_view/browser/guest_view_manager.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/common/renderer_preferences.h"
 #include "extensions/browser/api/app_runtime/app_runtime_api.h"
@@ -15,7 +16,6 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/guest_view/app_view/app_view_constants.h"
-#include "extensions/browser/guest_view/guest_view_manager.h"
 #include "extensions/browser/lazy_background_task_queue.h"
 #include "extensions/browser/process_manager.h"
 #include "extensions/browser/view_type_utils.h"
@@ -29,6 +29,7 @@ namespace app_runtime = extensions::core_api::app_runtime;
 using content::RenderFrameHost;
 using content::WebContents;
 using extensions::ExtensionHost;
+using guest_view::GuestViewBase;
 
 namespace extensions {
 
@@ -175,7 +176,11 @@ void AppViewGuest::CreateWebContents(
     callback.Run(nullptr);
     return;
   }
-
+  // Verifying that the appId is not the same as the host application.
+  if (owner_host() == app_id) {
+    callback.Run(nullptr);
+    return;
+  }
   const base::DictionaryValue* data = nullptr;
   if (!create_params.GetDictionary(appview::kData, &data)) {
     callback.Run(nullptr);
@@ -279,7 +284,7 @@ void AppViewGuest::LaunchAppAndFireEvent(
 
   scoped_ptr<base::DictionaryValue> embed_request(new base::DictionaryValue());
   embed_request->SetInteger(appview::kGuestInstanceID, guest_instance_id());
-  embed_request->SetString(appview::kEmbedderID, owner_extension_id());
+  embed_request->SetString(appview::kEmbedderID, owner_host());
   embed_request->Set(appview::kData, data.release());
   AppRuntimeEventRouter::DispatchOnEmbedRequestedEvent(
       browser_context(), embed_request.Pass(), extension_host->extension());

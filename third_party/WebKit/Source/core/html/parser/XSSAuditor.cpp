@@ -35,6 +35,7 @@
 #include "core/frame/Settings.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/html/HTMLParamElement.h"
+#include "core/html/LinkRelAttribute.h"
 #include "core/html/parser/HTMLDocumentParser.h"
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/html/parser/TextResourceDecoder.h"
@@ -615,7 +616,8 @@ bool XSSAuditor::filterLinkToken(const FilterTokenRequest& request)
         return false;
 
     const HTMLToken::Attribute& attribute = request.token.attributes().at(indexOfAttribute);
-    if (!equalIgnoringCase(String(attribute.value), "import"))
+    LinkRelAttribute parsedAttribute(String(attribute.value));
+    if (!parsedAttribute.isImport())
         return false;
 
     return eraseAttributeIfInjected(request, hrefAttr, kURLWithUniqueOrigin, SrcLikeAttributeTruncation, AllowSameOriginHref);
@@ -708,7 +710,14 @@ String XSSAuditor::canonicalize(String snippet, TruncationKind treatment)
     String decodedSnippet = fullyDecodeString(snippet, m_encoding);
 
     if (treatment != NoTruncation) {
-        decodedSnippet.truncate(kMaximumFragmentLengthTarget);
+        if (decodedSnippet.length() > kMaximumFragmentLengthTarget) {
+            // Let the page influence the stopping point to avoid disclosing leading fragments.
+            // Stop when we hit whitespace, since that is unlikely to be part a leading fragment.
+            size_t position = kMaximumFragmentLengthTarget;
+            while (position < decodedSnippet.length() && !isHTMLSpace(decodedSnippet[position]))
+                ++position;
+            decodedSnippet.truncate(position);
+        }
         if (treatment == SrcLikeAttributeTruncation)
             truncateForSrcLikeAttribute(decodedSnippet);
         else if (treatment == ScriptLikeAttributeTruncation)

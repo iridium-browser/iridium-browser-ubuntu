@@ -19,6 +19,9 @@ namespace gl
 {
 class FramebufferAttachment;
 struct PixelPackState;
+
+typedef std::vector<const FramebufferAttachment *> AttachmentList;
+
 }
 
 namespace rx
@@ -55,10 +58,10 @@ class FramebufferD3D : public FramebufferImpl
     FramebufferD3D(const gl::Framebuffer::Data &data, RendererD3D *renderer);
     virtual ~FramebufferD3D();
 
-    void setColorAttachment(size_t index, const gl::FramebufferAttachment *attachment) override;
-    void setDepthAttachment(const gl::FramebufferAttachment *attachment) override;
-    void setStencilAttachment(const gl::FramebufferAttachment *attachment) override;
-    void setDepthStencilAttachment(const gl::FramebufferAttachment *attachment) override;
+    void onUpdateColorAttachment(size_t index) override;
+    void onUpdateDepthAttachment() override;
+    void onUpdateStencilAttachment() override;
+    void onUpdateDepthStencilAttachment() override;
 
     void setDrawBuffers(size_t count, const GLenum *buffers) override;
     void setReadBuffer(GLenum buffer) override;
@@ -103,7 +106,6 @@ class FramebufferD3D : public FramebufferImpl
     virtual GLenum getRenderTargetImplementationFormat(RenderTargetD3D *renderTarget) const = 0;
 };
 
-gl::Error GetAttachmentRenderTarget(const gl::FramebufferAttachment *attachment, RenderTargetD3D **outRT);
 unsigned int GetAttachmentSerial(const gl::FramebufferAttachment *attachment);
 
 }

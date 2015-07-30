@@ -15,6 +15,7 @@ import time
 from chromite.cbuildbot import repository
 from chromite.cbuildbot import manifest_version
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import cache
 from chromite.lib import git
 
@@ -84,7 +85,7 @@ class RemoteTryJob(object):
     self.repo_cache = cache.DiskCache(self.options.cache_dir)
     cwd = os.path.dirname(os.path.realpath(__file__))
     self.user_email = git.GetProjectUserEmail(cwd)
-    cros_build_lib.Info('Using email:%s', self.user_email)
+    logging.info('Using email:%s', self.user_email)
     # Name of the job that appears on the waterfall.
     patch_list = options.gerrit_patches + options.local_patches
     self.name = options.remote_description
@@ -137,8 +138,7 @@ class RemoteTryJob(object):
     # character limit. Validate that our description is well under the limit.
     if (len(self.user) + len(self.name) + self.PADDING >
         self.MAX_DESCRIPTION_LENGTH):
-      cros_build_lib.Warning(
-          'remote tryjob description is too long, truncating it')
+      logging.warning('remote tryjob description is too long, truncating it')
       self.name = self.name[:self.MAX_DESCRIPTION_LENGTH - self.PADDING] + '...'
 
     # Buildbot will set extra_args as a buildset 'property'.  It will store
@@ -189,7 +189,9 @@ class RemoteTryJob(object):
         raise ChromiteUpgradeNeeded(val)
     push_branch = manifest_version.PUSH_BRANCH
 
-    remote_branch = ('origin', 'refs/remotes/origin/test') if testjob else None
+    remote_branch = None
+    if testjob:
+      remote_branch = git.RemoteRef('origin', 'refs/remotes/origin/test')
     git.CreatePushBranch(push_branch, workdir, sync=False,
                          remote_push_branch=remote_branch)
 
@@ -217,7 +219,7 @@ class RemoteTryJob(object):
     try:
       git.PushWithRetry(push_branch, workdir, retries=3, dryrun=dryrun)
     except cros_build_lib.RunCommandError:
-      cros_build_lib.Error(
+      logging.error(
           'Failed to submit tryjob.  This could be due to too many '
           'submission requests by users.  Please try again.')
       raise

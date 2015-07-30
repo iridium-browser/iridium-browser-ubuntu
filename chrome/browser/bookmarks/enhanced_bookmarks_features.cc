@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/common/chrome_switches.h"
+#include "components/enhanced_bookmarks/enhanced_bookmark_utils.h"
 #include "components/variations/variations_associated_data.h"
 
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
@@ -14,16 +15,11 @@
 #include "extensions/common/features/feature_provider.h"
 #endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
 
-#if defined(OS_ANDROID)
-#include "base/android/build_info.h"
-#endif  // defined(OS_ANDROID)
-
 namespace {
 
-const char kFieldTrialName[] = "EnhancedBookmarks";
-
 bool GetBookmarksExperimentExtensionID(std::string* extension_id) {
-  *extension_id = variations::GetVariationParamValue(kFieldTrialName, "id");
+  *extension_id = variations::GetVariationParamValue(
+      enhanced_bookmarks::kFieldTrialName, "id");
   if (extension_id->empty())
     return false;
 
@@ -50,7 +46,7 @@ bool IsEnhancedBookmarkImageFetchingEnabled(const PrefService* user_prefs) {
   // experience is not a big list of flat colors. However as a precautionary
   // measure it is possible to disable this collection of images from finch.
   std::string disable_fetching = variations::GetVariationParamValue(
-      kFieldTrialName, "DisableImagesFetching");
+      enhanced_bookmarks::kFieldTrialName, "DisableImagesFetching");
   return disable_fetching.empty();
 }
 #endif  // defined(OS_ANDROID)
@@ -75,10 +71,6 @@ bool IsEnhancedBookmarksEnabled(std::string* extension_id) {
 
   bool opt_out = base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
                      switches::kEnhancedBookmarksExperiment) == "0";
-#if defined(OS_ANDROID)
-  opt_out |= base::android::BuildInfo::GetInstance()->sdk_int() <
-                 base::android::SdkVersion::SDK_VERSION_ICE_CREAM_SANDWICH_MR1;
-#endif  // defined(OS_ANDROID)
 
   if (opt_out)
     return false;
@@ -91,8 +83,8 @@ bool IsEnableDomDistillerSet() {
           switches::kEnableDomDistiller)) {
     return true;
   }
-  if (variations::GetVariationParamValue(
-          kFieldTrialName, "enable-dom-distiller") == "1")
+  if (variations::GetVariationParamValue(enhanced_bookmarks::kFieldTrialName,
+                                         "enable-dom-distiller") == "1")
     return true;
 
   return false;
@@ -103,8 +95,8 @@ bool IsEnableSyncArticlesSet() {
           switches::kEnableSyncArticles)) {
     return true;
   }
-  if (variations::GetVariationParamValue(
-          kFieldTrialName, "enable-sync-articles") == "1")
+  if (variations::GetVariationParamValue(enhanced_bookmarks::kFieldTrialName,
+                                         "enable-sync-articles") == "1")
     return true;
 
   return false;

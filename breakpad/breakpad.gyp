@@ -131,6 +131,8 @@
             'src/processor/minidump.cc',
             'src/processor/minidump_processor.cc',
             'src/processor/minidump_stackwalk.cc',
+            'src/processor/symbolic_constants_win.cc',
+            'src/processor/symbolic_constants_win.h',
           ],
           'conditions': [
             ['OS=="ios"', {
@@ -445,11 +447,7 @@
           # GN version: //breakpad:dump_syms
           'target_name': 'dump_syms',
           'type': 'executable',
-          'conditions': [
-            ['OS=="android"', {
-              'toolsets': [ 'host' ],
-            }],
-          ],
+          'toolsets': ['host'],
 
           # dwarf2reader.cc uses dynamic_cast. Because we don't typically
           # don't support RTTI, we enable it for this single target. Since
@@ -848,6 +846,11 @@
             'src/client/mac/Framework',
             'src/common/mac',
           ],
+          'direct_dependent_settings': {
+            'include_dirs': [
+              'src',
+            ],
+          },
         }
       ]
     }],

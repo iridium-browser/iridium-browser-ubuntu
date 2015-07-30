@@ -6,14 +6,23 @@
 
 from __future__ import print_function
 
-import logging
+import re
 
+from chromite.compute import compute_configs
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import timeout_util
 
 
 class GCContextException(Exception):
   """Base exception for this module."""
+
+
+# Wrap RunCommandError exceptions to distinguish the exceptions raised
+# by commands we invoke from those that could be thrown by others who
+# use RunCommand.
+class GCCommandError(GCContextException, cros_build_lib.RunCommandError):
+  """Thrown when an error happened we couldn't decode."""
 
 
 class ZoneNotSpecifiedError(GCContextException):
@@ -61,7 +70,11 @@ class GCContext(object):
     if zone:
       cmd += ['--zone', zone]
 
-    return cros_build_lib.RunCommand(cmd, **kwargs)
+    try:
+      return cros_build_lib.RunCommand(cmd, **kwargs)
+    except cros_build_lib.RunCommandError as e:
+      raise GCCommandError(e.msg, e.result, e.exception)
+
 
   def DoZoneSpecificCommand(self, cmd, **kwargs):
     """Runs the zone-specific |cmd|.
@@ -99,27 +112,42 @@ class GCContext(object):
     """
     return self._CopyFiles('%s:%s' % (instance, src), dest, **kwargs)
 
-  def _CopyFiles(self, src, dest, **kwargs):
+  def _CopyFiles(self, src, dest, ssh_key_file=None, user=None, **kwargs):
     """Copies files from |src| to |dest|.
 
     Args:
       instance: Name of the instance.
-      src: The source path (a local path or instance@path).
-      dest: The destination path (a local path or instance@path).
+      src: The source path (a local path or user:instance@path).
+      dest: The destination path (a local path or user:instance@path).
       kwargs: See DoCommand.
     """
-    return self.DoZoneSpecificCommand(['copy-files', src, dest], **kwargs)
+    command = ['copy-files']
 
-  def SSH(self, instance, cmd=None, **kwargs):
+    if ssh_key_file:
+      command += ['--ssh-key-file', ssh_key_file]
+    if user:
+      dest = '%s@%s' % (user, dest)
+
+    command += [src, dest]
+
+    return self.DoZoneSpecificCommand(command, **kwargs)
+
+  def SSH(self, instance, user=None, cmd=None, ssh_key_file=None, **kwargs):
     """SSH into |instance|. Run |cmd| if it is provided.
 
     Args:
       instance: Name of the instance.
       cmd: Command to run on |instance|.
     """
-    ssh_cmd = ['ssh', instance]
+    ssh_cmd = ['ssh']
+    if user:
+      ssh_cmd += ['%s@%s' % (user, instance)]
+    else:
+      ssh_cmd += [instance]
     if cmd:
       ssh_cmd += ['--command', cmd]
+    if ssh_key_file:
+      ssh_cmd += ['--ssh-key-file', ssh_key_file]
     return self.DoZoneSpecificCommand(ssh_cmd, **kwargs)
 
   def ListInstances(self, **kwargs):
@@ -160,36 +188,64 @@ class GCContext(object):
 
     return self.DoCommand(cmd, **kwargs)
 
+  def GetInstanceIP(self, instance, **kwargs):
+    """Returns an instance's ephemeral external IP address.
+
+    May not work with all network configurations.
+    """
+    # It sure would be nice if there were an easier way to fetch
+    # the instance's ephemeral IP address...
+    description = self.DoZoneSpecificCommand(
+        ['instances', 'describe', instance, '--format', 'text'],
+        redirect_stdout=True, **kwargs).output
+    match = re.search('natIP: ([.0-9]+)', description)
+    if match:
+      return match.group(1)
+    else:
+      raise GCContextException('Unable to parse instance IP.  '
+                               '"gcloud compute instances describe %s": %s'
+                               % (instance, description))
+
   def CreateInstance(self, instance, image=None, machine_type=None,
                      address=None, wait_until_sshable=True,
-                     scopes=None, **kwargs):
+                     scopes=None, tags=None, **kwargs):
     """Creates an |instance|.
 
+    Additionally, if an image is provided, adds a custom metadata pair to
+    identify the the image used to create the instance.
+
     Args:
-       instance: The name of the instance to create.
-       image: The source image to create |instance| from.
-       machine_type: The machine type to use.
-       address: The external IP address to assign to |instance|.
-       wait_until_sshable: After creating |instance|, wait until
-         we can ssh into |instance|.
-       scopes: The list (or tuple) of service account scopes.
-       kwargs: See DoZoneSpecificCommand.
+      instance: The name of the instance to create.
+      image: The source image to create |instance| from.
+      machine_type: The machine type to use.
+      address: The external IP address to assign to |instance|.
+      wait_until_sshable: After creating |instance|, wait until
+        we can ssh into |instance|.
+      scopes: The list (or tuple) of service account scopes.
+      tags: List of tags to be assigned to the instance.
+      kwargs: See DoZoneSpecificCommand.
     """
     cmd = ['instances', 'create', instance]
     if image:
       cmd += ['--image', image]
+      cmd += ['--metadata',
+              '%s="%s"' % (compute_configs.METADATA_IMAGE_NAME, image)]
     if address:
       cmd += ['--address', address]
     if machine_type:
       cmd += ['--machine-type', machine_type]
     if scopes:
       cmd += ['--scopes'] + list(scopes)
+    if tags:
+      cmd += ['--tags'] + list(tags)
 
     ret = self.DoZoneSpecificCommand(cmd, **kwargs)
     if wait_until_sshable:
       def _IsUp():
         try:
-          self.SSH(instance, cmd='ls', capture_output=True)
+          instance_ip = self.GetInstanceIP(instance, **kwargs)
+          command = ['nc', '-zv', instance_ip, '22']
+          cros_build_lib.RunCommand(command, capture_output=True)
         except cros_build_lib.RunCommandError:
           return False
         else:
@@ -200,20 +256,24 @@ class GCContext(object):
         timeout = 60 * 5
         timeout_util.WaitForReturnTrue(_IsUp, timeout, period=5)
       except timeout_util.TimeoutError:
+        self.DeleteInstance(instance)
         raise GCContextException('Timed out wating to ssh into the instance')
 
     return ret
 
-  def DeleteInstance(self, instance, keep_disks=None, **kwargs):
-    """Deletes |instance|. User will be prompted to confirm.
+  def DeleteInstance(self, instance, quiet=False, keep_disks=None, **kwargs):
+    """Deletes |instance|.
 
     Args:
       instance: Name of the instance.
+      quiet: Silent delete instance without prompting the user.
       keep_disks: Keep the type of the disk; valid types are
         'boot', 'data', and 'all'.
       kwargs: See DoCommand.
     """
     cmd = ['instances', 'delete', instance]
+    if quiet:
+      cmd += ['-q']
     if keep_disks:
       cmd += ['--keep-disks', keep_disks]
 
@@ -237,4 +297,3 @@ class GCContext(object):
     """
     cmd = ['disks', 'delete', disk]
     return self.DoZoneSpecificCommand(cmd, **kwargs)
-

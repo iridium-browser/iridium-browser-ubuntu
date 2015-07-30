@@ -9,13 +9,13 @@ namespace blink {
 
 struct WebPushSubscriptionOptions {
     WebPushSubscriptionOptions()
-        : userVisible(false)
+        : userVisibleOnly(false)
     {
     }
 
     // Indicates that the subscription will only be used for push messages
     // that result in UI visible to the user.
-    bool userVisible;
+    bool userVisibleOnly;
 };
 
 } // namespace blink

@@ -7,14 +7,13 @@
 #include <algorithm>
 
 #include "base/stl_util.h"
-#include "sql/statement.h"
 #include "sql/transaction.h"
 
 // Current version number.  Note: when changing the current version number,
 // corresponding changes must happen in the unit tests, and new migration test
 // added.  See |WebDatabaseMigrationTest::kCurrentTestedVersionNumber|.
 // static
-const int WebDatabase::kCurrentVersionNumber = 64;
+const int WebDatabase::kCurrentVersionNumber = 65;
 
 const int WebDatabase::kDeprecatedVersionNumber = 51;
 

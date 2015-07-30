@@ -99,6 +99,8 @@ source_set("audio_processing") {
     "rms_level.h",
     "splitting_filter.cc",
     "splitting_filter.h",
+    "three_band_filter_bank.cc",
+    "three_band_filter_bank.h",
     "transient/common.h",
     "transient/daubechies_8_wavelet_coeffs.h",
     "transient/dyadic_decimator.h",
@@ -223,7 +225,9 @@ if (current_cpu == "x86" || current_cpu == "x64") {
       "aec/aec_rdft_sse2.c",
     ]
 
-    cflags = [ "-msse2" ]
+    if (is_posix) {
+      cflags = [ "-msse2" ]
+    }
 
     configs += [ "../..:common_config" ]
     public_configs = [ "../..:common_inherited_config" ]

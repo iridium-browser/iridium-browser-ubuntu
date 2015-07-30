@@ -401,9 +401,12 @@ void WizardController::ShowUpdateScreen() {
 void WizardController::ShowUserImageScreen() {
   const user_manager::UserManager* user_manager =
       user_manager::UserManager::Get();
-  // Skip user image selection for public sessions and ephemeral logins.
+  // Skip user image selection for public sessions and ephemeral non-regual user
+  // logins.
   if (user_manager->IsLoggedInAsPublicAccount() ||
-      user_manager->IsCurrentUserNonCryptohomeDataEphemeral()) {
+      (user_manager->IsCurrentUserNonCryptohomeDataEphemeral() &&
+       user_manager->GetLoggedInUser()->GetType() !=
+           user_manager::USER_TYPE_REGULAR)) {
     OnUserImageSkipped();
     return;
   }
@@ -1053,11 +1056,12 @@ void WizardController::SetHostConfiguration() {
   }
 }
 
-void WizardController::ConfigureHost(bool accepted_eula,
-                                     const std::string& lang,
-                                     const std::string& timezone,
-                                     bool send_reports,
-                                     const std::string& keyboard_layout) {
+void WizardController::ConfigureHostRequested(
+    bool accepted_eula,
+    const std::string& lang,
+    const std::string& timezone,
+    bool send_reports,
+    const std::string& keyboard_layout) {
   VLOG(1) << "ConfigureHost locale=" << lang << ", timezone=" << timezone
           << ", keyboard_layout=" << keyboard_layout;
   if (accepted_eula)  // Always true.
@@ -1068,6 +1072,11 @@ void WizardController::ConfigureHost(bool accepted_eula,
   network_screen->SetApplicationLocale(lang);
   network_screen->SetTimezone(timezone);
   network_screen->SetInputMethod(keyboard_layout);
+}
+
+void WizardController::AddNetworkRequested(const std::string& onc_spec) {
+  NetworkScreen* network_screen = NetworkScreen::Get(this);
+  network_screen->CreateNetworkFromOnc(onc_spec);
 }
 
 void WizardController::OnEnableDebuggingScreenRequested() {

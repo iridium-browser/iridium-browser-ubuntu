@@ -8,13 +8,14 @@
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/trace_event/trace_event.h"
 #include "cc/input/input_handler.h"
+#include "components/scheduler/renderer/renderer_scheduler.h"
 #include "content/renderer/input/input_event_filter.h"
 #include "content/renderer/input/input_handler_manager_client.h"
 #include "content/renderer/input/input_handler_wrapper.h"
 #include "content/renderer/input/input_scroll_elasticity_controller.h"
-#include "content/renderer/scheduler/renderer_scheduler.h"
 
 using blink::WebInputEvent;
+using scheduler::RendererScheduler;
 
 namespace content {
 
@@ -39,7 +40,7 @@ InputEventAckState InputEventDispositionToAck(
 InputHandlerManager::InputHandlerManager(
     const scoped_refptr<base::MessageLoopProxy>& message_loop_proxy,
     InputHandlerManagerClient* client,
-    RendererScheduler* renderer_scheduler)
+    scheduler::RendererScheduler* renderer_scheduler)
     : message_loop_proxy_(message_loop_proxy),
       client_(client),
       renderer_scheduler_(renderer_scheduler) {
@@ -147,8 +148,23 @@ InputEventAckState InputHandlerManager::HandleInputEvent(
   }
 
   InputHandlerProxy* proxy = it->second->input_handler_proxy();
-  return InputEventDispositionToAck(
+  InputEventAckState input_event_ack_state = InputEventDispositionToAck(
       proxy->HandleInputEventWithLatencyInfo(*input_event, latency_info));
+  switch (input_event_ack_state) {
+    case INPUT_EVENT_ACK_STATE_CONSUMED:
+      renderer_scheduler_->DidHandleInputEventOnCompositorThread(
+          *input_event,
+          RendererScheduler::InputEventState::EVENT_CONSUMED_BY_COMPOSITOR);
+      break;
+    case INPUT_EVENT_ACK_STATE_NOT_CONSUMED:
+      renderer_scheduler_->DidHandleInputEventOnCompositorThread(
+          *input_event,
+          RendererScheduler::InputEventState::EVENT_FORWARDED_TO_MAIN_THREAD);
+      break;
+    default:
+      break;
+  }
+  return input_event_ack_state;
 }
 
 void InputHandlerManager::DidOverscroll(int routing_id,
@@ -158,11 +174,6 @@ void InputHandlerManager::DidOverscroll(int routing_id,
 
 void InputHandlerManager::DidStopFlinging(int routing_id) {
   client_->DidStopFlinging(routing_id);
-}
-
-void InputHandlerManager::DidReceiveInputEvent(
-    const blink::WebInputEvent& web_input_event) {
-  renderer_scheduler_->DidReceiveInputEventOnCompositorThread(web_input_event);
 }
 
 void InputHandlerManager::DidAnimateForInput() {

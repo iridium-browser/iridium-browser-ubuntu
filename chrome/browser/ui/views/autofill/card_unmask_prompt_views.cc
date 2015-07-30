@@ -19,13 +19,15 @@
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/compositor/paint_context.h"
+#include "ui/compositor/compositing_recorder.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/geometry/safe_integer_conversions.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/button/checkbox.h"
 #include "ui/views/controls/combobox/combobox.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
+#include "ui/views/controls/link.h"
 #include "ui/views/controls/throbber.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/widget/widget.h"
@@ -56,6 +58,7 @@ CardUnmaskPromptViews::CardUnmaskPromptViews(
       cvc_input_(nullptr),
       month_input_(nullptr),
       year_input_(nullptr),
+      new_card_link_(nullptr),
       error_icon_(nullptr),
       error_label_(nullptr),
       storage_row_(nullptr),
@@ -84,7 +87,7 @@ void CardUnmaskPromptViews::ControllerGone() {
 
 void CardUnmaskPromptViews::DisableAndWaitForVerification() {
   SetInputsEnabled(false);
-  progress_overlay_->SetOpacity(0.0);
+  progress_overlay_->SetAlpha(0);
   progress_overlay_->SetVisible(true);
   progress_throbber_->Start();
   overlay_animation_.Show();
@@ -109,16 +112,21 @@ void CardUnmaskPromptViews::GotVerificationResult(
     // quickly.
     overlay_animation_.Reset();
     if (storage_row_)
-      storage_row_->SetOpacity(1.0);
+      storage_row_->SetAlpha(255);
     progress_overlay_->SetVisible(false);
 
     if (allow_retry) {
       SetInputsEnabled(true);
 
-      // If there is more than one input showing, don't mark anything as
-      // invalid since we don't know the location of the problem.
-      if (!controller_->ShouldRequestExpirationDate())
+      if (!controller_->ShouldRequestExpirationDate()) {
+        // If there is more than one input showing, don't mark anything as
+        // invalid since we don't know the location of the problem.
         cvc_input_->SetInvalid(true);
+
+        // Show a "New card?" link, which when clicked will cause us to ask
+        // for expiration date.
+        ShowNewCardLink();
+      }
 
       // TODO(estade): When do we hide |error_label_|?
       SetRetriableErrorMessage(error_message);
@@ -131,6 +139,21 @@ void CardUnmaskPromptViews::GotVerificationResult(
   }
 
   Layout();
+}
+
+void CardUnmaskPromptViews::LinkClicked(views::Link* source, int event_flags) {
+  DCHECK_EQ(source, new_card_link_);
+  controller_->NewCardLinkClicked();
+  for (int i = 0; i < input_row_->child_count(); ++i)
+    input_row_->child_at(i)->SetVisible(true);
+
+  new_card_link_->SetVisible(false);
+  input_row_->InvalidateLayout();
+  cvc_input_->SetInvalid(false);
+  cvc_input_->SetText(base::string16());
+  GetDialogClientView()->UpdateDialogButtons();
+  GetWidget()->UpdateWindowTitle();
+  SetRetriableErrorMessage(base::string16());
 }
 
 void CardUnmaskPromptViews::SetRetriableErrorMessage(
@@ -161,10 +184,20 @@ void CardUnmaskPromptViews::SetInputsEnabled(bool enabled) {
   cvc_input_->SetEnabled(enabled);
   if (storage_checkbox_)
     storage_checkbox_->SetEnabled(enabled);
-  if (month_input_)
-    month_input_->SetEnabled(enabled);
-  if (year_input_)
-    year_input_->SetEnabled(enabled);
+  month_input_->SetEnabled(enabled);
+  year_input_->SetEnabled(enabled);
+}
+
+void CardUnmaskPromptViews::ShowNewCardLink() {
+  if (new_card_link_)
+    return;
+
+  new_card_link_ = new views::Link(
+      l10n_util::GetStringUTF16(IDS_AUTOFILL_CARD_UNMASK_NEW_CARD_LINK));
+  new_card_link_->SetBorder(views::Border::CreateEmptyBorder(0, 7, 0, 0));
+  new_card_link_->SetUnderline(false);
+  new_card_link_->set_listener(this);
+  input_row_->AddChildView(new_card_link_);
 }
 
 views::View* CardUnmaskPromptViews::GetContentsView() {
@@ -231,6 +264,8 @@ void CardUnmaskPromptViews::OnNativeThemeChanged(const ui::NativeTheme* theme) {
   progress_overlay_->set_background(
       views::Background::CreateSolidBackground(bg_color));
   progress_label_->SetBackgroundColor(bg_color);
+  progress_label_->SetEnabledColor(theme->GetSystemColor(
+      ui::NativeTheme::kColorId_ThrobberSpinningColor));
 }
 
 ui::ModalType CardUnmaskPromptViews::GetModalType() const {
@@ -287,10 +322,12 @@ bool CardUnmaskPromptViews::Accept() {
 
   controller_->OnUnmaskResponse(
       cvc_input_->text(),
-      month_input_ ? month_input_->GetTextForRow(month_input_->selected_index())
-                   : base::string16(),
-      year_input_ ? year_input_->GetTextForRow(year_input_->selected_index())
-                  : base::string16(),
+      month_input_->visible()
+          ? month_input_->GetTextForRow(month_input_->selected_index())
+          : base::string16(),
+      year_input_->visible()
+          ? year_input_->GetTextForRow(year_input_->selected_index())
+          : base::string16(),
       storage_checkbox_ ? storage_checkbox_->checked() : false);
   return false;
 }
@@ -326,9 +363,10 @@ void CardUnmaskPromptViews::OnPerformAction(views::Combobox* combobox) {
 
 void CardUnmaskPromptViews::AnimationProgressed(
     const gfx::Animation* animation) {
-  progress_overlay_->SetOpacity(animation->GetCurrentValue());
+  uint8_t alpha = static_cast<uint8_t>(animation->CurrentValueBetween(0, 255));
+  progress_overlay_->SetAlpha(alpha);
   if (storage_row_)
-    storage_row_->SetOpacity(1.0 - animation->GetCurrentValue());
+    storage_row_->SetAlpha(255 - alpha);
 }
 
 void CardUnmaskPromptViews::InitIfNecessary() {
@@ -373,18 +411,21 @@ void CardUnmaskPromptViews::InitIfNecessary() {
       new views::BoxLayout(views::BoxLayout::kHorizontal, 0, 0, 5));
   controls_container->AddChildView(input_row_);
 
-  if (controller_->ShouldRequestExpirationDate()) {
-    month_input_ = new views::Combobox(&month_combobox_model_);
-    month_input_->set_listener(this);
-    input_row_->AddChildView(month_input_);
-    views::Label* separator = new views::Label(l10n_util::GetStringUTF16(
-        IDS_AUTOFILL_CARD_UNMASK_EXPIRATION_DATE_SEPARATOR));
-    separator->SetEnabledColor(kGreyTextColor);
-    input_row_->AddChildView(separator);
-    year_input_ = new views::Combobox(&year_combobox_model_);
-    year_input_->set_listener(this);
-    input_row_->AddChildView(year_input_);
-    input_row_->AddChildView(new views::Label(base::ASCIIToUTF16("  ")));
+  month_input_ = new views::Combobox(&month_combobox_model_);
+  month_input_->set_listener(this);
+  input_row_->AddChildView(month_input_);
+  views::Label* separator = new views::Label(l10n_util::GetStringUTF16(
+      IDS_AUTOFILL_CARD_UNMASK_EXPIRATION_DATE_SEPARATOR));
+  separator->SetEnabledColor(kGreyTextColor);
+  input_row_->AddChildView(separator);
+  year_input_ = new views::Combobox(&year_combobox_model_);
+  year_input_->set_listener(this);
+  input_row_->AddChildView(year_input_);
+  input_row_->AddChildView(new views::Label(base::ASCIIToUTF16("  ")));
+  // Hide all of the above as appropriate.
+  if (!controller_->ShouldRequestExpirationDate()) {
+    for (int i = 0; i < input_row_->child_count(); ++i)
+      input_row_->child_at(i)->SetVisible(false);
   }
 
   cvc_input_ = new DecoratedTextfield(
@@ -433,13 +474,11 @@ void CardUnmaskPromptViews::InitIfNecessary() {
   progress_overlay_->SetVisible(false);
   AddChildView(progress_overlay_);
 
-  progress_throbber_ = new views::CheckmarkThrobber();
+  progress_throbber_ = new views::Throbber();
   progress_overlay_->AddChildView(progress_throbber_);
 
   progress_label_ = new views::Label(l10n_util::GetStringUTF16(
       IDS_AUTOFILL_CARD_UNMASK_VERIFICATION_IN_PROGRESS));
-  // Material blue. TODO(estade): find an appropriate place for this color.
-  progress_label_->SetEnabledColor(SkColorSetRGB(0x42, 0x85, 0xF4));
   progress_overlay_->AddChildView(progress_label_);
 }
 
@@ -457,33 +496,28 @@ void CardUnmaskPromptViews::ClosePrompt() {
 }
 
 CardUnmaskPromptViews::FadeOutView::FadeOutView()
-    : fade_everything_(false), opacity_(1.0) {
+    : fade_everything_(false), alpha_(255) {
 }
 CardUnmaskPromptViews::FadeOutView::~FadeOutView() {
 }
 
 void CardUnmaskPromptViews::FadeOutView::PaintChildren(
     const ui::PaintContext& context) {
-  if (opacity_ > 0.99)
-    return views::View::PaintChildren(context);
-
-  gfx::Canvas* canvas = context.canvas();
-  canvas->SaveLayerAlpha(0xff * opacity_);
+  ui::CompositingRecorder recorder(context, alpha_);
   views::View::PaintChildren(context);
-  canvas->Restore();
 }
 
 void CardUnmaskPromptViews::FadeOutView::OnPaint(gfx::Canvas* canvas) {
-  if (!fade_everything_ || opacity_ > 0.99)
+  if (!fade_everything_ || alpha_ == 255)
     return views::View::OnPaint(canvas);
 
-  canvas->SaveLayerAlpha(0xff * opacity_);
+  canvas->SaveLayerAlpha(alpha_);
   views::View::OnPaint(canvas);
   canvas->Restore();
 }
 
-void CardUnmaskPromptViews::FadeOutView::SetOpacity(double opacity) {
-  opacity_ = opacity;
+void CardUnmaskPromptViews::FadeOutView::SetAlpha(uint8_t alpha) {
+  alpha_ = alpha;
   SchedulePaint();
 }
 

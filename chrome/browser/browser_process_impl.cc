@@ -27,6 +27,7 @@
 #include "base/time/default_tick_clock.h"
 #include "base/trace_event/trace_event.h"
 #include "chrome/browser/chrome_browser_main.h"
+#include "chrome/browser/chrome_child_process_watcher.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/component_updater/chrome_component_updater_configurator.h"
@@ -135,7 +136,7 @@
 #endif
 
 #if !defined(DISABLE_NACL)
-#include "chrome/browser/component_updater/pnacl/pnacl_component_installer.h"
+#include "chrome/browser/component_updater/pnacl_component_installer.h"
 #endif
 
 #if defined(ENABLE_PLUGIN_INSTALLATION)
@@ -152,7 +153,7 @@
 static const int kUpdateCheckIntervalHours = 6;
 #endif
 
-#if defined(USE_X11) || defined(OS_WIN)
+#if defined(USE_X11) || defined(OS_WIN) || defined(USE_OZONE)
 // How long to wait for the File thread to complete during EndSession, on Linux
 // and Windows. We have a timeout here because we're unable to run the UI
 // messageloop and there's some deadlock risk. Our only option is to exit
@@ -178,7 +179,8 @@ BrowserProcessImpl::BrowserProcessImpl(
       module_ref_count_(0),
       did_start_(false),
       download_status_updater_(new DownloadStatusUpdater),
-      local_state_task_runner_(local_state_task_runner) {
+      local_state_task_runner_(local_state_task_runner),
+      cached_default_web_client_state_(ShellIntegration::UNKNOWN_DEFAULT) {
   g_browser_process = this;
   platform_part_.reset(new BrowserProcessPlatformPart());
 
@@ -241,7 +243,7 @@ void BrowserProcessImpl::StartTearDown() {
   // URLFetcher operation before going away.)
   metrics_services_manager_.reset();
   intranet_redirect_detector_.reset();
-#if defined(FULL_SAFE_BROWSING) || defined(MOBILE_SAFE_BROWSING)
+#if defined(SAFE_BROWSING_SERVICE)
   if (safe_browsing_service_.get())
     safe_browsing_service()->ShutDown();
 #endif
@@ -272,6 +274,8 @@ void BrowserProcessImpl::StartTearDown() {
   // PromoResourceService must be destroyed after the keyed services and before
   // the IO thread.
   promo_resource_service_.reset();
+
+  child_process_watcher_.reset();
 
 #if !defined(OS_ANDROID)
   // Debugger must be cleaned up before IO thread and NotificationService.
@@ -498,7 +502,7 @@ void BrowserProcessImpl::EndSession() {
   //
   // If you change the condition here, be sure to also change
   // ProfileBrowserTests to match.
-#if defined(USE_X11) || defined(OS_WIN)
+#if defined(USE_X11) || defined(OS_WIN) || defined(USE_OZONE)
   // Do a best-effort wait on the successful countdown of rundown tasks. Note
   // that if we don't complete "quickly enough", Windows will terminate our
   // process.
@@ -764,6 +768,11 @@ gcm::GCMDriver* BrowserProcessImpl::gcm_driver() {
   return gcm_driver_.get();
 }
 
+ShellIntegration::DefaultWebClientState
+BrowserProcessImpl::CachedDefaultWebClientState() {
+  return cached_default_web_client_state_;
+}
+
 // static
 void BrowserProcessImpl::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(prefs::kDefaultBrowserSettingEnabled,
@@ -876,14 +885,14 @@ BrowserProcessImpl::component_updater() {
   if (!component_updater_.get()) {
     if (!BrowserThread::CurrentlyOn(BrowserThread::UI))
       return NULL;
-    update_client::Configurator* configurator =
+    scoped_refptr<update_client::Configurator> configurator =
         component_updater::MakeChromeComponentUpdaterConfigurator(
             base::CommandLine::ForCurrentProcess(),
             io_thread()->system_url_request_context_getter());
     // Creating the component updater does not do anything, components
     // need to be registered and Start() needs to be called.
-    component_updater_.reset(
-        component_updater::ComponentUpdateServiceFactory(configurator));
+    component_updater_.reset(component_updater::ComponentUpdateServiceFactory(
+                                 configurator).release());
   }
   return component_updater_.get();
 }
@@ -1061,6 +1070,10 @@ void BrowserProcessImpl::PreMainMessageLoopRun() {
   storage_monitor::StorageMonitor::Create();
 #endif
 
+  child_process_watcher_.reset(new ChromeChildProcessWatcher());
+
+  CacheDefaultWebClientState();
+
   platform_part_->PreMainMessageLoopRun();
 }
 
@@ -1123,7 +1136,7 @@ void BrowserProcessImpl::CreateSafeBrowsingService() {
   // Set this flag to true so that we don't retry indefinitely to
   // create the service class if there was an error.
   created_safe_browsing_service_ = true;
-#if defined(FULL_SAFE_BROWSING) || defined(MOBILE_SAFE_BROWSING)
+#if defined(SAFE_BROWSING_SERVICE)
   safe_browsing_service_ = SafeBrowsingService::CreateSafeBrowsingService();
   safe_browsing_service_->Initialize();
 #endif
@@ -1169,6 +1182,14 @@ void BrowserProcessImpl::ApplyMetricsReportingPolicy() {
       base::Bind(
           base::IgnoreResult(&GoogleUpdateSettings::SetCollectStatsConsent),
           local_state()->GetBoolean(prefs::kMetricsReportingEnabled))));
+#endif
+}
+
+void BrowserProcessImpl::CacheDefaultWebClientState() {
+#if defined(OS_CHROMEOS)
+  cached_default_web_client_state_ = ShellIntegration::IS_DEFAULT;
+#elif !defined(OS_ANDROID) && !defined(OS_IOS)
+  cached_default_web_client_state_ = ShellIntegration::GetDefaultBrowser();
 #endif
 }
 

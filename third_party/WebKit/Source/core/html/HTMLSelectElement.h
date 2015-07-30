@@ -121,7 +121,7 @@ public:
     void optionRemoved(const HTMLOptionElement&);
     bool anonymousIndexedSetter(unsigned, PassRefPtrWillBeRawPtr<HTMLOptionElement>, ExceptionState&);
 
-    void updateListOnRenderer();
+    void updateListOnLayoutObject();
 
     HTMLOptionElement* spatialNavigationFocusedOption();
     void handleMouseRelease();
@@ -156,7 +156,7 @@ private:
 
     virtual LayoutObject* createLayoutObject(const ComputedStyle&) override;
     virtual bool appendFormData(FormDataList&, bool) override;
-    virtual void didAddClosedShadowRoot(ShadowRoot&) override;
+    virtual void didAddUserAgentShadowRoot(ShadowRoot&) override;
 
     virtual void defaultEventHandler(Event*) override;
 
@@ -190,7 +190,7 @@ private:
     bool shouldOpenPopupForKeyDownEvent(KeyboardEvent*);
     bool shouldOpenPopupForKeyPressEvent(KeyboardEvent*);
     void listBoxDefaultEventHandler(Event*);
-    void setOptionsChangedOnRenderer();
+    void setOptionsChangedOnLayoutObject();
     size_t searchOptionsForValue(const String&, size_t listIndexStart, size_t listIndexEnd) const;
     void updateListBoxSelection(bool deselectOtherOptions, bool scroll = true);
 

@@ -10,7 +10,10 @@
 #include "base/prefs/testing_pref_service.h"
 #include "base/sha1.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
+#include "base/test/histogram_tester.h"
+#include "base/version.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_pref_service_syncable.h"
@@ -18,6 +21,7 @@
 #include "components/variations/proto/variations_seed.pb.h"
 #include "components/web_resource/resource_request_allowed_notifier_test_util.h"
 #include "content/public/test/test_browser_thread.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "net/base/url_util.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
@@ -221,6 +225,7 @@ class VariationsServiceTest : public ::testing::Test {
   VariationsServiceTest() {}
 
  private:
+  content::TestBrowserThreadBundle thread_bundle_;
 #if defined(OS_CHROMEOS)
   // Not used directly. Initializes CrosSettings for testing.
   chromeos::ScopedTestDeviceSettingsService test_device_settings_service_;
@@ -266,9 +271,6 @@ TEST_F(VariationsServiceTest, VariationsURLHasOSNameParam) {
 }
 
 TEST_F(VariationsServiceTest, RequestsInitiallyNotAllowed) {
-  base::MessageLoopForUI message_loop;
-  content::TestBrowserThread ui_thread(content::BrowserThread::UI,
-                                       &message_loop);
   TestingPrefServiceSimple prefs;
   VariationsService::RegisterPrefs(prefs.registry());
 
@@ -288,9 +290,6 @@ TEST_F(VariationsServiceTest, RequestsInitiallyNotAllowed) {
 }
 
 TEST_F(VariationsServiceTest, RequestsInitiallyAllowed) {
-  base::MessageLoopForUI message_loop;
-  content::TestBrowserThread ui_thread(content::BrowserThread::UI,
-                                       &message_loop);
   TestingPrefServiceSimple prefs;
   VariationsService::RegisterPrefs(prefs.registry());
 
@@ -306,9 +305,6 @@ TEST_F(VariationsServiceTest, RequestsInitiallyAllowed) {
 }
 
 TEST_F(VariationsServiceTest, SeedStoredWhenOKStatus) {
-  base::MessageLoop message_loop;
-  content::TestBrowserThread io_thread(content::BrowserThread::IO,
-                                       &message_loop);
   TestingPrefServiceSimple prefs;
   VariationsService::RegisterPrefs(prefs.registry());
 
@@ -339,9 +335,6 @@ TEST_F(VariationsServiceTest, SeedNotStoredWhenNonOKStatus) {
     net::HTTP_SERVICE_UNAVAILABLE,
   };
 
-  base::MessageLoop message_loop;
-  content::TestBrowserThread io_thread(content::BrowserThread::IO,
-                                       &message_loop);
   TestingPrefServiceSimple prefs;
   VariationsService::RegisterPrefs(prefs.registry());
 
@@ -363,9 +356,6 @@ TEST_F(VariationsServiceTest, SeedNotStoredWhenNonOKStatus) {
 }
 
 TEST_F(VariationsServiceTest, SeedDateUpdatedOn304Status) {
-  base::MessageLoop message_loop;
-  content::TestBrowserThread io_thread(content::BrowserThread::IO,
-                                       &message_loop);
   TestingPrefServiceSimple prefs;
   VariationsService::RegisterPrefs(prefs.registry());
 
@@ -427,6 +417,96 @@ TEST_F(VariationsServiceTest, Observer) {
               observer.crticial_changes_notified()) << i;
 
     service.RemoveObserver(&observer);
+  }
+}
+
+TEST_F(VariationsServiceTest, LoadPermanentConsistencyCountry) {
+  struct {
+    // Comma separated list, NULL if the pref isn't set initially.
+    const char* pref_value_before;
+    const char* version;
+    // NULL indicates that no country code is present in the seed.
+    const char* seed_country_code;
+    // Comma separated list.
+    const char* expected_pref_value_after;
+    std::string expected_country;
+    VariationsService::LoadPermanentConsistencyCountryResult expected_result;
+  } test_cases[] = {
+      // Existing pref value present for this version.
+      {"20.0.0.0,us", "20.0.0.0", "ca", "20.0.0.0,us", "us",
+       VariationsService::LOAD_COUNTRY_HAS_BOTH_VERSION_EQ_COUNTRY_NEQ},
+      {"20.0.0.0,us", "20.0.0.0", "us", "20.0.0.0,us", "us",
+       VariationsService::LOAD_COUNTRY_HAS_BOTH_VERSION_EQ_COUNTRY_EQ},
+      {"20.0.0.0,us", "20.0.0.0", nullptr, "20.0.0.0,us", "us",
+       VariationsService::LOAD_COUNTRY_HAS_PREF_NO_SEED_VERSION_EQ},
+
+      // Existing pref value present for a different version.
+      {"19.0.0.0,ca", "20.0.0.0", "us", "20.0.0.0,us", "us",
+       VariationsService::LOAD_COUNTRY_HAS_BOTH_VERSION_NEQ_COUNTRY_NEQ},
+      {"19.0.0.0,us", "20.0.0.0", "us", "20.0.0.0,us", "us",
+       VariationsService::LOAD_COUNTRY_HAS_BOTH_VERSION_NEQ_COUNTRY_EQ},
+      {"19.0.0.0,ca", "20.0.0.0", nullptr, "", "",
+       VariationsService::LOAD_COUNTRY_HAS_PREF_NO_SEED_VERSION_NEQ},
+
+      // No existing pref value present.
+      {nullptr, "20.0.0.0", "us", "20.0.0.0,us", "us",
+       VariationsService::LOAD_COUNTRY_NO_PREF_HAS_SEED},
+      {nullptr, "20.0.0.0", nullptr, "", "",
+       VariationsService::LOAD_COUNTRY_NO_PREF_NO_SEED},
+      {"", "20.0.0.0", "us", "20.0.0.0,us", "us",
+       VariationsService::LOAD_COUNTRY_NO_PREF_HAS_SEED},
+      {"", "20.0.0.0", nullptr, "", "",
+       VariationsService::LOAD_COUNTRY_NO_PREF_NO_SEED},
+
+      // Invalid existing pref value.
+      {"20.0.0.0", "20.0.0.0", "us", "20.0.0.0,us", "us",
+       VariationsService::LOAD_COUNTRY_INVALID_PREF_HAS_SEED},
+      {"20.0.0.0", "20.0.0.0", nullptr, "", "",
+       VariationsService::LOAD_COUNTRY_INVALID_PREF_NO_SEED},
+      {"20.0.0.0,us,element3", "20.0.0.0", "us", "20.0.0.0,us", "us",
+       VariationsService::LOAD_COUNTRY_INVALID_PREF_HAS_SEED},
+      {"20.0.0.0,us,element3", "20.0.0.0", nullptr, "", "",
+       VariationsService::LOAD_COUNTRY_INVALID_PREF_NO_SEED},
+      {"badversion,ca", "20.0.0.0", "us", "20.0.0.0,us", "us",
+       VariationsService::LOAD_COUNTRY_INVALID_PREF_HAS_SEED},
+      {"badversion,ca", "20.0.0.0", nullptr, "", "",
+       VariationsService::LOAD_COUNTRY_INVALID_PREF_NO_SEED},
+  };
+
+  for (const auto& test : test_cases) {
+    TestingPrefServiceSimple prefs;
+    VariationsService::RegisterPrefs(prefs.registry());
+    VariationsService service(
+        new web_resource::TestRequestAllowedNotifier(&prefs), &prefs, NULL);
+
+    if (test.pref_value_before) {
+      base::ListValue list_value;
+      std::vector<std::string> list_components;
+      base::SplitString(test.pref_value_before, ',', &list_components);
+      for (const std::string& component : list_components)
+        list_value.AppendString(component);
+      prefs.Set(prefs::kVariationsPermanentConsistencyCountry, list_value);
+    }
+
+    variations::VariationsSeed seed(CreateTestSeed());
+    if (test.seed_country_code)
+      seed.set_country_code(test.seed_country_code);
+
+    base::HistogramTester histogram_tester;
+    EXPECT_EQ(test.expected_country, service.LoadPermanentConsistencyCountry(
+                                         base::Version(test.version), seed));
+
+    base::ListValue expected_list_value;
+    std::vector<std::string> list_components;
+    base::SplitString(test.expected_pref_value_after, ',', &list_components);
+    for (const std::string& component : list_components)
+      expected_list_value.AppendString(component);
+    EXPECT_TRUE(expected_list_value.Equals(
+        prefs.GetList(prefs::kVariationsPermanentConsistencyCountry)));
+
+    histogram_tester.ExpectUniqueSample(
+        "Variations.LoadPermanentConsistencyCountryResult",
+        test.expected_result, 1);
   }
 }
 

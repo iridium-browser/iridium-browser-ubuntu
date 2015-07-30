@@ -16,7 +16,6 @@ from __future__ import print_function
 import ConfigParser
 import itertools
 import json
-import logging
 import os
 import shutil
 import socket
@@ -29,6 +28,7 @@ from chromite.cbuildbot import constants
 from chromite.cbuildbot import cbuildbot_config
 from chromite.cbuildbot import failures_lib
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import parallel
 from chromite.lib import retry_util
 from chromite.lib.paygen import download_cache
@@ -38,7 +38,7 @@ from chromite.lib.paygen import gslock
 from chromite.lib.paygen import gspaths
 from chromite.lib.paygen import paygen_payload_lib
 from chromite.lib.paygen import urilib
-from chromite.lib.paygen import utils
+
 
 # For crostools access.
 sys.path.insert(0, constants.SOURCE_ROOT)
@@ -533,8 +533,9 @@ class _PaygenBuild(object):
     """
     # TODO(dgarrett): Switch to JSON mechanism in _DiscoverAllFsiBuilds
     #   after it's in production, and after we clear the change with the TPMs.
-    #
     #   At that time, check and ignore FSIs without the is_delta_supported flag.
+    # TODO(pprabhu): Can't switch to _DiscoverAllFsiBuilds till the HACK there
+    #   is removed.
 
     # FSI versions are only defined for the stable-channel.
     if self._build.channel != 'stable-channel':
@@ -568,6 +569,13 @@ class _PaygenBuild(object):
       may be empty.
     """
     results = []
+    # XXX:HACK -- FSI builds for this board is known to brick the DUTs in the
+    # lab. As a workaround, we're dropping test coverage for this board
+    # temporarily (crbug.com/460174).
+    # TODO(pprabhu) Remove hack once we have a real solution (crbug.com/462320).
+    if self._build.board == 'peach-pit':
+      return results
+
     contents = json.loads(gslib.Cat(FSI_URI))
 
     for fsi in contents.get('fsis', []):
@@ -1006,6 +1014,7 @@ class _PaygenBuild(object):
                                 retry=True,
                                 wait_for_results=True,
                                 timeout_mins=timeout_mins,
+                                suite_min_duts=2,
                                 debug=bool(self._drm))
       except failures_lib.TestWarning as e:
         logging.warning('Warning running test suite; error output:\n%s', e)
@@ -1020,15 +1029,17 @@ class _PaygenBuild(object):
           '--retry', 'True',
           '--timeout_mins', str(timeout_mins),
           '--no_wait', 'False',
+          '--suite_min_duts', '2',
       ]
       logging.info('Running autotest suite: %s', ' '.join(cmd))
-      cmd_result = utils.RunCommand(cmd, error_ok=True, redirect_stdout=True,
-                                    redirect_stderr=True, return_result=True)
-      if cmd_result.returncode:
-        logging.error('Error (%d) running test suite; error output:\n%s',
-                      cmd_result.returncode, cmd_result.error)
-        raise PayloadTestError('failed to run test (return code %d)' %
-                               cmd_result.returncode)
+      try:
+        commands.HWTestCreateAndWait(cmd)
+      except cros_build_lib.RunCommandError as e:
+        if e.result.returncode:
+          logging.error('Error (%d) running test suite; error output:\n%s',
+                        e.result.returncode, e.result.error)
+          raise PayloadTestError('failed to run test (return code %d)' %
+                                 e.result.returncode)
 
   def _AutotestPayloads(self, payload_tests):
     """Create necessary test artifacts and initiate Autotest runs.

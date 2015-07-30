@@ -6,15 +6,15 @@
 
 from __future__ import print_function
 
-import logging
 import os
 import unittest
 
 from chromite.cbuildbot import constants
-from chromite.cros.tests import image_test
 from chromite.lib import commandline
-from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
+from chromite.lib import image_test
 from chromite.lib import osutils
+from chromite.lib import path_util
 
 
 def ParseArgs(args):
@@ -66,7 +66,7 @@ def main(args):
   # We use a different prefix here so that unittest DO NOT pick up the
   # image tests automatically because they depend on a proper environment.
   loader.testMethodPrefix = 'Test'
-  all_tests = loader.loadTestsFromName('chromite.cros.tests.image_test')
+  all_tests = loader.loadTestsFromName('chromite.lib.image_test')
   forgiving = image_test.ImageTestSuite()
   non_forgiving = image_test.ImageTestSuite()
   for suite in all_tests:
@@ -81,7 +81,7 @@ def main(args):
   runner.SetBoard(opts.board)
   runner.SetResultDir(opts.test_results_root)
   image_file = FindImage(opts.image_dir)
-  tmp_in_chroot = cros_build_lib.FromChrootPath('/tmp')
+  tmp_in_chroot = path_util.FromChrootPath('/tmp')
   with osutils.TempDir(base_dir=tmp_in_chroot) as temp_dir:
     with osutils.MountImageContext(image_file, temp_dir):
       with osutils.ChdirContext(temp_dir):

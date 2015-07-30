@@ -88,7 +88,7 @@ class GLHelperTest : public testing::Test {
       std::string* output,
       const scoped_refptr<base::RefCountedString>& json_events_str,
       bool has_more_events) {
-    if (output->size() > 1) {
+    if (output->size() > 1 && !json_events_str->data().empty()) {
       output->append(",");
     }
     output->append(json_events_str->data());
@@ -110,7 +110,13 @@ class GLHelperTest : public testing::Test {
     run_loop.Run();
     json_data.append("]");
 
-    scoped_ptr<base::Value> trace_data(base::JSONReader::Read(json_data));
+    std::string error_msg;
+    scoped_ptr<base::Value> trace_data(
+        base::JSONReader::ReadAndReturnError(json_data, 0, NULL, &error_msg));
+    CHECK(trace_data)
+        << "JSON parsing failed (" << error_msg << ") JSON data:" << std::endl
+        << json_data;
+
     base::ListValue* list;
     CHECK(trace_data->GetAsList(&list));
     for (size_t i = 0; i < list->GetSize(); i++) {

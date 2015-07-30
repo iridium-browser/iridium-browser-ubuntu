@@ -76,17 +76,17 @@ MediaControlElementType AccessibilityMediaControl::controlType() const
     return mediaControlElementType(layoutObject()->node());
 }
 
-String AccessibilityMediaControl::title(TextUnderElementMode mode) const
+String AccessibilityMediaControl::deprecatedTitle(TextUnderElementMode mode) const
 {
     // FIXME: the ControlsPanel container should never be visible in the
     // accessibility hierarchy.
     if (controlType() == MediaControlsPanel)
         return queryString(WebLocalizedString::AXMediaDefault);
 
-    return AXLayoutObject::title(mode);
+    return AXLayoutObject::deprecatedTitle(mode);
 }
 
-String AccessibilityMediaControl::accessibilityDescription() const
+String AccessibilityMediaControl::deprecatedAccessibilityDescription() const
 {
     switch (controlType()) {
     case MediaEnterFullscreenButton:
@@ -118,7 +118,7 @@ String AccessibilityMediaControl::accessibilityDescription() const
     }
 }
 
-String AccessibilityMediaControl::helpText() const
+String AccessibilityMediaControl::deprecatedHelpText() const
 {
     switch (controlType()) {
     case MediaEnterFullscreenButton:
@@ -150,12 +150,12 @@ String AccessibilityMediaControl::helpText() const
     }
 }
 
-bool AccessibilityMediaControl::computeAccessibilityIsIgnored() const
+bool AccessibilityMediaControl::computeAccessibilityIsIgnored(IgnoredReasons* ignoredReasons) const
 {
     if (!m_layoutObject || !m_layoutObject->style() || m_layoutObject->style()->visibility() != VISIBLE || controlType() == MediaTimelineContainer)
         return true;
 
-    return accessibilityIsIgnoredByDefault();
+    return accessibilityIsIgnoredByDefault(ignoredReasons);
 }
 
 AccessibilityRole AccessibilityMediaControl::roleValue() const
@@ -196,19 +196,19 @@ PassRefPtr<AXObject> AXMediaControlsContainer::create(LayoutObject* layoutObject
     return adoptRef(new AXMediaControlsContainer(layoutObject, axObjectCache));
 }
 
-String AXMediaControlsContainer::accessibilityDescription() const
+String AXMediaControlsContainer::deprecatedAccessibilityDescription() const
 {
     return queryString(isControllingVideoElement() ? WebLocalizedString::AXMediaVideoElement : WebLocalizedString::AXMediaAudioElement);
 }
 
-String AXMediaControlsContainer::helpText() const
+String AXMediaControlsContainer::deprecatedHelpText() const
 {
     return queryString(isControllingVideoElement() ? WebLocalizedString::AXMediaVideoElementHelp : WebLocalizedString::AXMediaAudioElementHelp);
 }
 
-bool AXMediaControlsContainer::computeAccessibilityIsIgnored() const
+bool AXMediaControlsContainer::computeAccessibilityIsIgnored(IgnoredReasons* ignoredReasons) const
 {
-    return accessibilityIsIgnoredByDefault();
+    return accessibilityIsIgnoredByDefault(ignoredReasons);
 }
 
 //
@@ -240,7 +240,7 @@ String AccessibilityMediaTimeline::valueDescription() const
     return localizedMediaTimeDescription(toHTMLInputElement(node)->value().toFloat());
 }
 
-String AccessibilityMediaTimeline::helpText() const
+String AccessibilityMediaTimeline::deprecatedHelpText() const
 {
     return queryString(isControllingVideoElement() ? WebLocalizedString::AXMediaVideoSliderHelp : WebLocalizedString::AXMediaAudioSliderHelp);
 }
@@ -259,7 +259,7 @@ PassRefPtr<AXObject> AccessibilityMediaTimeDisplay::create(LayoutObject* layoutO
     return adoptRef(new AccessibilityMediaTimeDisplay(layoutObject, axObjectCache));
 }
 
-bool AccessibilityMediaTimeDisplay::computeAccessibilityIsIgnored() const
+bool AccessibilityMediaTimeDisplay::computeAccessibilityIsIgnored(IgnoredReasons* ignoredReasons) const
 {
     if (!m_layoutObject || !m_layoutObject->style() || m_layoutObject->style()->visibility() != VISIBLE)
         return true;
@@ -267,10 +267,10 @@ bool AccessibilityMediaTimeDisplay::computeAccessibilityIsIgnored() const
     if (!m_layoutObject->style()->width().value())
         return true;
 
-    return accessibilityIsIgnoredByDefault();
+    return accessibilityIsIgnoredByDefault(ignoredReasons);
 }
 
-String AccessibilityMediaTimeDisplay::accessibilityDescription() const
+String AccessibilityMediaTimeDisplay::deprecatedAccessibilityDescription() const
 {
     if (controlType() == MediaCurrentTimeDisplay)
         return queryString(WebLocalizedString::AXMediaCurrentTimeDisplay);

@@ -6,11 +6,11 @@
 #include "core/paint/SVGClipPainter.h"
 
 #include "core/dom/ElementTraversal.h"
-#include "core/layout/PaintInfo.h"
 #include "core/layout/svg/LayoutSVGResourceClipper.h"
 #include "core/layout/svg/SVGResources.h"
 #include "core/layout/svg/SVGResourcesCache.h"
 #include "core/paint/CompositingRecorder.h"
+#include "core/paint/PaintInfo.h"
 #include "core/paint/TransformRecorder.h"
 #include "platform/graphics/paint/ClipPathDisplayItem.h"
 #include "platform/graphics/paint/CompositingDisplayItem.h"
@@ -100,6 +100,8 @@ void SVGClipPainter::postApplyStatefulResource(const LayoutObject& target, Graph
     case ClipperAppliedPath:
         // Path-only clipping, no layers to restore but we need to emit an end to the clip path display item.
         if (RuntimeEnabledFeatures::slimmingPaintEnabled()) {
+            if (context->displayItemList()->displayItemConstructionIsDisabled())
+                return;
             context->displayItemList()->add(EndClipPathDisplayItem::create(target));
         } else {
             EndClipPathDisplayItem endClipPathDisplayItem(target);
@@ -128,6 +130,8 @@ void SVGClipPainter::drawClipMaskContent(GraphicsContext* context, const LayoutO
     TransformRecorder recorder(*context, layoutObject, contentTransformation);
     if (RuntimeEnabledFeatures::slimmingPaintEnabled()) {
         ASSERT(context->displayItemList());
+        if (context->displayItemList()->displayItemConstructionIsDisabled())
+            return;
         context->displayItemList()->add(DrawingDisplayItem::create(layoutObject, DisplayItem::SVGClip, clipContentPicture));
     } else {
         DrawingDisplayItem clipPicture(layoutObject, DisplayItem::SVGClip, clipContentPicture);

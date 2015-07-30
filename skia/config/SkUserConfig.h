@@ -245,6 +245,10 @@ SK_API void SkDebugf_FileLine(const char* file, int line, bool fatal,
 #   define SK_SUPPORT_LEGACY_GETTOPDEVICE
 #endif
 
+#ifndef    SK_SUPPORT_LEGACY_IMAGEFILTER_CTM
+#   define SK_SUPPORT_LEGACY_IMAGEFILTER_CTM
+#endif
+
 #ifndef    SK_LEGACY_DRAWPICTURECALLBACK
 #   define SK_LEGACY_DRAWPICTURECALLBACK
 #endif
@@ -253,24 +257,16 @@ SK_API void SkDebugf_FileLine(const char* file, int line, bool fatal,
 #   define SK_SUPPORT_LEGACY_GETDEVICE
 #endif
 
-#ifndef    SK_SUPPORT_LEGACY_SCALAR_XFERMODES
-#   define SK_SUPPORT_LEGACY_SCALAR_XFERMODES
-#endif
-
 #ifndef    SK_SUPPORT_LEGACY_PUBLIC_IMAGEINFO_FIELDS
 #   define SK_SUPPORT_LEGACY_PUBLIC_IMAGEINFO_FIELDS
-#endif
-
-#ifndef    SK_SUPPORT_LEGACY_SCALAR_MAPPOINTS
-#   define SK_SUPPORT_LEGACY_SCALAR_MAPPOINTS
 #endif
 
 #ifndef    SK_IGNORE_ETC1_SUPPORT
 #   define SK_IGNORE_ETC1_SUPPORT
 #endif
 
-#ifndef    SK_SUPPORT_LEGACY_BOOL_ONGETINFO
-#   define SK_SUPPORT_LEGACY_BOOL_ONGETINFO
+#ifndef    SK_SUPPORT_LEGACY_IMAGEFILTER_TRANSFORM_SCRATCH_LAYTER
+#   define SK_SUPPORT_LEGACY_IMAGEFILTER_TRANSFORM_SCRATCH_LAYTER
 #endif
 
 #ifndef    SK_IGNORE_GPU_DITHER
@@ -281,12 +277,12 @@ SK_API void SkDebugf_FileLine(const char* file, int line, bool fatal,
 #   define SK_SUPPORT_LEGACY_INT_COLORMATRIX
 #endif
 
-#ifndef    SK_SUPPORT_LEGACY_PATHOP_ENUMS
-#   define SK_SUPPORT_LEGACY_PATHOP_ENUMS
-#endif
-
 #ifndef    SK_LEGACY_STROKE_CURVES
 #   define SK_LEGACY_STROKE_CURVES
+#endif
+
+#ifndef    SK_PREFER_LEGACY_FLOAT_XFERMODES
+#   define SK_PREFER_LEGACY_FLOAT_XFERMODES
 #endif
 
 ///////////////////////// Imported from BUILD.gn and skia_common.gypi

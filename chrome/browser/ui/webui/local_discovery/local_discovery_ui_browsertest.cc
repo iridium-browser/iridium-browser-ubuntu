@@ -20,7 +20,6 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/base/web_ui_browser_test.h"
-#include "chromeos/chromeos_switches.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/browser/signin_manager_base.h"
@@ -33,6 +32,7 @@
 #if defined(OS_CHROMEOS)
 #include "base/prefs/pref_service.h"
 #include "chrome/common/pref_names.h"
+#include "chromeos/chromeos_switches.h"
 #endif
 
 using testing::InvokeWithoutArgs;
@@ -275,6 +275,7 @@ const char kURLRegisterComplete[] =
 const char kURLGaiaToken[] =
     "https://accounts.google.com/o/oauth2/token";
 
+const char kSampleGaiaId[] = "12345";
 const char kSampleUser[] = "user@host.com";
 
 class TestMessageLoopCondition {
@@ -344,10 +345,10 @@ class LocalDiscoveryUITest : public WebUIBrowserTest {
       &fetcher_impl_factory_,
       fake_url_fetcher_creator_.callback()) {
   }
-  virtual ~LocalDiscoveryUITest() {
+  ~LocalDiscoveryUITest() override {
   }
 
-  virtual void SetUpOnMainThread() override {
+  void SetUpOnMainThread() override {
     WebUIBrowserTest::SetUpOnMainThread();
 
     test_service_discovery_client_ = new TestServiceDiscoveryClient();
@@ -364,7 +365,7 @@ class LocalDiscoveryUITest : public WebUIBrowserTest {
         SigninManagerFactory::GetForProfile(browser()->profile());
 
     DCHECK(signin_manager);
-    signin_manager->SetAuthenticatedUsername(kSampleUser);
+    signin_manager->SetAuthenticatedAccountInfo(kSampleGaiaId, kSampleUser);
 
     fake_fetcher_factory().SetFakeResponse(
         GURL(kURLInfo),
@@ -424,7 +425,7 @@ class LocalDiscoveryUITest : public WebUIBrowserTest {
     AddLibrary(base::FilePath(FILE_PATH_LITERAL("local_discovery_ui_test.js")));
   }
 
-  virtual void SetUpCommandLine(base::CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
 #if defined(OS_CHROMEOS)
     // On chromeos, don't sign in with the stub-user automatically.  Use the
     // kLoginUser instead.

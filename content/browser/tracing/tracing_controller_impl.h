@@ -61,6 +61,7 @@ class TracingControllerImpl
   void RequestGlobalMemoryDump(
       const base::trace_event::MemoryDumpRequestArgs& args,
       const base::trace_event::MemoryDumpCallback& callback) override;
+  bool IsCoordinatorProcess() const override;
 
  private:
   typedef std::set<scoped_refptr<TraceMessageFilter> > TraceMessageFilterSet;
@@ -130,6 +131,12 @@ class TracingControllerImpl
   void OnProcessMemoryDumpResponse(TraceMessageFilter* trace_message_filter,
                                    uint64 dump_guid,
                                    bool success);
+
+  // Callback of MemoryDumpManager::CreateProcessDump().
+  void OnBrowserProcessMemoryDumpDone(uint64 dump_guid, bool success);
+
+  void FinalizeGlobalMemoryDumpIfAllProcessesReplied();
+
   void OnWatchEventMatched();
 
   void SetEnabledOnFileThread(
@@ -156,14 +163,23 @@ class TracingControllerImpl
   // Pending acks for DisableRecording.
   int pending_disable_recording_ack_count_;
   TraceMessageFilterSet pending_disable_recording_filters_;
+
   // Pending acks for CaptureMonitoringSnapshot.
   int pending_capture_monitoring_snapshot_ack_count_;
   TraceMessageFilterSet pending_capture_monitoring_filters_;
+
   // Pending acks for GetTraceLogStatus.
   int pending_trace_log_status_ack_count_;
   TraceMessageFilterSet pending_trace_log_status_filters_;
   float maximum_trace_buffer_usage_;
   size_t approximate_event_count_;
+
+  // Pending acks for memory RequestGlobalDumpPoint.
+  int pending_memory_dump_ack_count_;
+  int failed_memory_dump_count_;
+  TraceMessageFilterSet pending_memory_dump_filters_;
+  uint64 pending_memory_dump_guid_;
+  base::trace_event::MemoryDumpCallback pending_memory_dump_callback_;
 
 #if defined(OS_CHROMEOS) || defined(OS_WIN)
   bool is_system_tracing_;
@@ -183,6 +199,7 @@ class TracingControllerImpl
   std::set<TracingUI*> tracing_uis_;
   scoped_refptr<TraceDataSink> trace_data_sink_;
   scoped_refptr<TraceDataSink> monitoring_data_sink_;
+
   DISALLOW_COPY_AND_ASSIGN(TracingControllerImpl);
 };
 

@@ -18,7 +18,7 @@ class PushError {
 public:
     // For CallbackPromiseAdapter.
     typedef WebPushError WebType;
-    static PassRefPtrWillBeRawPtr<DOMException> take(ScriptPromiseResolver*, WebType* webErrorRaw);
+    static DOMException* take(ScriptPromiseResolver*, WebType* webErrorRaw);
     static void dispose(WebType* webErrorRaw);
 
 private:

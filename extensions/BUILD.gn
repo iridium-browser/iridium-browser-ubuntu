@@ -78,6 +78,7 @@ source_set("test_support") {
     ":extensions_resources",
     "//base",
     "//base:prefs_test_support",
+    "//components/guest_view:test_support",
     "//content/public/common",
     "//content/test:test_support",
     "//extensions/browser",
@@ -160,6 +161,7 @@ test("extensions_unittests") {
     "//extensions/renderer",
     "//extensions/strings",
     "//extensions/utility",
+    "//mojo/application/public/interfaces",
     "//mojo/environment:chromium",
     "//testing/gmock",
     "//testing/gtest",
@@ -167,7 +169,6 @@ test("extensions_unittests") {
     "//third_party/mojo/src/mojo/edk/js",
     "//third_party/mojo/src/mojo/edk/system",
     "//third_party/mojo/src/mojo/public/cpp/bindings",
-    "//third_party/mojo/src/mojo/public/interfaces/application",
   ]
 
   if (is_win) {
@@ -204,6 +205,7 @@ test("extensions_browsertests") {
     "//components/storage_monitor:test_support",
     "//content/test:test_support",
     "//device/bluetooth:mocks",
+    "//device/usb:mocks",
     "//mojo/environment:chromium",
     "//testing/gmock",
     "//testing/gtest",

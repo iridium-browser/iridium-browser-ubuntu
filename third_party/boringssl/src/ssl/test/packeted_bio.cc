@@ -15,7 +15,6 @@
 #include "packeted_bio.h"
 
 #include <assert.h>
-#include <errno.h>
 #include <limits.h>
 #include <stdio.h>
 #include <string.h>
@@ -111,8 +110,7 @@ static int PacketedRead(BIO *bio, char *out, int outl) {
         (static_cast<uint64_t>(buf[6]) << 8) |
         static_cast<uint64_t>(buf[7]);
     timeout /= 1000;  // Convert nanoseconds to microseconds.
-    OPENSSL_timeval *out_timeout =
-        reinterpret_cast<OPENSSL_timeval *>(bio->ptr);
+    timeval *out_timeout = reinterpret_cast<timeval *>(bio->ptr);
     assert(out_timeout->tv_usec == 0);
     assert(out_timeout->tv_sec == 0);
     out_timeout->tv_usec = timeout % 1000000;
@@ -210,7 +208,7 @@ const BIO_METHOD g_packeted_bio_method = {
 
 }  // namespace
 
-ScopedBIO PacketedBioCreate(OPENSSL_timeval *out_timeout) {
+ScopedBIO PacketedBioCreate(timeval *out_timeout) {
   ScopedBIO bio(BIO_new(&g_packeted_bio_method));
   if (!bio) {
     return nullptr;

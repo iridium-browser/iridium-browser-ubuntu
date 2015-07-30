@@ -8,20 +8,20 @@
   },
   'targets': [
     {
-      # GN version: //ui/events:dom4_keycode_converter
-      'target_name': 'dom4_keycode_converter',
+      # GN version: //ui/events:dom_keycode_converter
+      'target_name': 'dom_keycode_converter',
       'type': 'static_library',
       'dependencies': [
         '<(DEPTH)/base/base.gyp:base',
       ],
       'sources': [
         # Note: sources list duplicated in GN build.
-        'keycodes/dom3/dom_code.h',
-        'keycodes/dom3/dom_key.h',
-        'keycodes/dom3/dom_key_data.h',
-        'keycodes/dom4/keycode_converter.cc',
-        'keycodes/dom4/keycode_converter.h',
-        'keycodes/dom4/keycode_converter_data.h',
+        'keycodes/dom/dom_code.h',
+        'keycodes/dom/dom_key.h',
+        'keycodes/dom/dom_key_data.inc',
+        'keycodes/dom/keycode_converter.cc',
+        'keycodes/dom/keycode_converter.h',
+        'keycodes/dom/keycode_converter_data.inc',
       ],
     },
     {
@@ -34,7 +34,7 @@
         '<(DEPTH)/skia/skia.gyp:skia',
         '../gfx/gfx.gyp:gfx',
         '../gfx/gfx.gyp:gfx_geometry',
-        'dom4_keycode_converter',
+        'dom_keycode_converter',
       ],
       'defines': [
         'EVENTS_BASE_IMPLEMENTATION',
@@ -43,6 +43,8 @@
         # Note: sources list duplicated in GN build.
         'android/scroller.cc',
         'android/scroller.h',
+        'base_event_utils.cc',
+        'base_event_utils.h',
         'event_constants.h',
         'event_switches.cc',
         'event_switches.h',
@@ -52,6 +54,7 @@
         'gesture_event_details.h',
         'gestures/fling_curve.cc',
         'gestures/fling_curve.h',
+        'keycodes/dom_us_layout_data.h',
         'keycodes/keyboard_code_conversion.cc',
         'keycodes/keyboard_code_conversion.h',
         'keycodes/keyboard_code_conversion_android.cc',
@@ -78,6 +81,13 @@
             '../gfx/x/gfx_x11.gyp:gfx_x11',
           ],
         }],
+        ['use_x11==1 or use_xkbcommon==1', {
+          'sources': [
+            'keycodes/keyboard_code_conversion_xkb.cc',
+            'keycodes/keyboard_code_conversion_xkb.h',
+            'keycodes/xkb_keysym.h',
+          ],
+        }],
       ],
     },
     {
@@ -90,7 +100,7 @@
         '<(DEPTH)/skia/skia.gyp:skia',
         '../gfx/gfx.gyp:gfx',
         '../gfx/gfx.gyp:gfx_geometry',
-        'dom4_keycode_converter',
+        'dom_keycode_converter',
         'events_base',
         'gesture_detection',
       ],
@@ -342,7 +352,7 @@
         '../gfx/gfx.gyp:gfx_geometry',
         '../gfx/gfx.gyp:gfx_test_support',
         'devices/events_devices.gyp:events_devices',
-        'dom4_keycode_converter',
+        'dom_keycode_converter',
         'events',
         'events_base',
         'events_test_support',
@@ -372,7 +382,8 @@
         'gestures/fling_curve_unittest.cc',
         'gestures/gesture_provider_aura_unittest.cc',
         'gestures/motion_event_aura_unittest.cc',
-        'keycodes/dom4/keycode_converter_unittest.cc',
+        'keycodes/dom/keycode_converter_unittest.cc',
+        'keycodes/keyboard_code_conversion_unittest.cc',
         'latency_info_unittest.cc',
         'platform/platform_event_source_unittest.cc',
         'x/events_x_unittest.cc',

@@ -44,7 +44,7 @@ namespace blink {
 //     // This returns a V8 function which the DerivedFunction is bound to.
 //     // The DerivedFunction is destructed when the V8 function is
 //     // garbage-collected.
-//     static v8::Handle<v8::Function> createFunction(ScriptState* scriptState)
+//     static v8::Local<v8::Function> createFunction(ScriptState* scriptState)
 //     {
 //         DerivedFunction* self = new DerivedFunction(scriptState);
 //         return self->bindToV8Function();
@@ -62,7 +62,7 @@ protected:
     {
     }
 
-    v8::Handle<v8::Function> bindToV8Function();
+    v8::Local<v8::Function> bindToV8Function();
 
 private:
     virtual ScriptValue call(ScriptValue) = 0;

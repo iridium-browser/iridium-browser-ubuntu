@@ -63,11 +63,12 @@ class Context final : angle::NonCopyable
     virtual ~Context();
 
     void makeCurrent(egl::Surface *surface);
+    void releaseSurface();
 
     virtual void markContextLost();
     bool isContextLost();
 
-    // These create  and destroy methods are merely pass-throughs to 
+    // These create  and destroy methods are merely pass-throughs to
     // ResourceManager, which owns these object types
     GLuint createBuffer();
     GLuint createShader(GLenum type);
@@ -94,7 +95,7 @@ class Context final : angle::NonCopyable
     // NV Fences are owned by the Context.
     GLuint createFenceNV();
     void deleteFenceNV(GLuint fence);
-    
+
     // Queries are owned by the Context;
     GLuint createQuery();
     void deleteQuery(GLuint query);
@@ -124,8 +125,6 @@ class Context final : angle::NonCopyable
 
     Error beginQuery(GLenum target, GLuint query);
     Error endQuery(GLenum target);
-
-    void setFramebufferZero(Framebuffer *framebuffer);
 
     void setVertexAttribDivisor(GLuint index, GLuint divisor);
 
@@ -168,7 +167,7 @@ class Context final : angle::NonCopyable
     Error drawArrays(GLenum mode, GLint first, GLsizei count, GLsizei instances);
     Error drawElements(GLenum mode, GLsizei count, GLenum type,
                        const GLvoid *indices, GLsizei instances,
-                       const rx::RangeUI &indexRange);
+                       const RangeUI &indexRange);
     Error flush();
     Error finish();
 
@@ -199,7 +198,7 @@ class Context final : angle::NonCopyable
     State &getState() { return mState; }
     const State &getState() const { return mState; }
 
-    Data getData() const;
+    const Data &getData() const { return mData; }
 
   private:
     void detachBuffer(GLuint buffer);
@@ -230,7 +229,6 @@ class Context final : angle::NonCopyable
 
     EGLint mConfigID;
     EGLenum mClientType;
-    EGLenum mRenderBuffer;
 
     TextureMap mZeroTextures;
 
@@ -271,7 +269,11 @@ class Context final : angle::NonCopyable
     bool mRobustAccess;
 
     ResourceManager *mResourceManager;
+
+    // Cache the Data object to avoid re-calling the constructor
+    Data mData;
 };
+
 }
 
 #endif   // LIBANGLE_CONTEXT_H_

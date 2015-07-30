@@ -34,10 +34,8 @@ namespace launch_util {
 
 // static
 void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterIntegerPref(
-      pref_names::kBookmarkAppCreationLaunchType,
-      LAUNCH_TYPE_REGULAR,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterIntegerPref(pref_names::kBookmarkAppCreationLaunchType,
+                                LAUNCH_TYPE_REGULAR);
 }
 
 }  // namespace launch_util
@@ -56,6 +54,13 @@ LaunchType GetLaunchType(const ExtensionPrefs* prefs,
       !extension->is_platform_app() && result == LAUNCH_TYPE_WINDOW)
     result = LAUNCH_TYPE_REGULAR;
 #endif
+
+  if (extensions::util::IsNewBookmarkAppsEnabled()) {
+    if (result == LAUNCH_TYPE_PINNED)
+      result = LAUNCH_TYPE_REGULAR;
+    if (result == LAUNCH_TYPE_FULLSCREEN)
+      result = LAUNCH_TYPE_WINDOW;
+  }
 
   return result;
 }
@@ -144,6 +149,12 @@ bool HasPreferredLaunchContainer(const ExtensionPrefs* prefs,
       AppLaunchInfo::GetLaunchContainer(extension);
   return manifest_launch_container == LAUNCH_CONTAINER_TAB &&
       prefs->ReadPrefAsInteger(extension->id(), kPrefLaunchType, &value);
+}
+
+bool LaunchesInWindow(content::BrowserContext* context,
+                      const Extension* extension) {
+  return GetLaunchType(ExtensionPrefs::Get(context), extension) ==
+         LAUNCH_TYPE_WINDOW;
 }
 
 }  // namespace extensions

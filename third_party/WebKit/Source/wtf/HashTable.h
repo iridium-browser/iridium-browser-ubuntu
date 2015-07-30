@@ -262,19 +262,14 @@ namespace WTF {
     template<typename T, typename Allocator> struct Mover<T, Allocator, true> {
         static void move(T& from, T& to)
         {
-            // A swap operation should not normally allocate, but it may do so
-            // if it is falling back on some sort of triple assignment in the
-            // style of t = a; a = b; b = t because there is no overloaded swap
-            // operation. We can't allow allocation both because it is slower
-            // than a true swap operation, but also because allocation implies
-            // allowing GC: We cannot allow a GC after swapping only the key.
-            // The value is only traced if the key is present and therefore the
-            // GC will not see the value in the old backing if the key has been
-            // moved to the new backing. Therefore, we cannot allow GC until
-            // after both key and value have been moved.
-            Allocator::enterNoAllocationScope();
+            // The key and value cannot be swapped atomically, and it would be
+            // wrong to have a GC when only one was swapped and the other still
+            // contained garbage (eg. from a previous use of the same slot).
+            // Therefore we forbid a GC until both the key and the value are
+            // swapped.
+            Allocator::enterGCForbiddenScope();
             hashTableSwap(from, to);
-            Allocator::leaveNoAllocationScope();
+            Allocator::leaveGCForbiddenScope();
         }
     };
     template<typename T, typename Allocator> struct Mover<T, Allocator, false> {
@@ -774,14 +769,14 @@ namespace WTF {
     template<typename Key, typename Value, typename Extractor, typename HashFunctions, typename Traits, typename KeyTraits, typename Allocator>
     inline void HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::initializeBucket(ValueType& bucket)
     {
-        // For hash maps the key and value cannot be initialied simultaneously,
-        // and it would be wrong to have a GC when only one was initialized and
-        // the other still contained garbage (eg. from a previous use of the
-        // same slot). Therefore we forbid allocation (and thus GC) while the
-        // slot is initalized to an empty value.
-        Allocator::enterNoAllocationScope();
+        // The key and value cannot be initialied atomically, and it would be
+        // wrong to have a GC when only one was initialized and the other still
+        // contained garbage (eg. from a previous use of the same slot).
+        // Therefore we forbid a GC while both the key and the value are
+        // initialized.
+        Allocator::enterGCForbiddenScope();
         HashTableBucketInitializer<Traits::emptyValueIsZero>::template initialize<Traits>(bucket);
-        Allocator::leaveNoAllocationScope();
+        Allocator::leaveGCForbiddenScope();
     }
 
     template<typename Key, typename Value, typename Extractor, typename HashFunctions, typename Traits, typename KeyTraits, typename Allocator>
@@ -1235,7 +1230,7 @@ template<typename Key, typename Value, typename Extractor, typename HashFunction
                 // This is run as part of weak processing after full
                 // marking. The backing store is therefore marked if
                 // we get here.
-                ASSERT(visitor->isAlive(table->m_table));
+                ASSERT(visitor->isHeapObjectAlive(table->m_table));
                 // Now perform weak processing (this is a no-op if the backing
                 // was accessible through an iterator and was already marked
                 // strongly).
@@ -1300,7 +1295,7 @@ template<typename Key, typename Value, typename Extractor, typename HashFunction
         // and/or weak callback then we are done. This optimization does not
         // happen for ListHashSet since its iterator does not point at the
         // backing.
-        if (!m_table || visitor->isAlive(m_table))
+        if (!m_table || visitor->isHeapObjectAlive(m_table))
             return;
         // Normally, we mark the backing store without performing trace. This
         // means it is marked live, but the pointers inside it are not marked.

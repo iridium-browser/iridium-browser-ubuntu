@@ -27,15 +27,19 @@ group("all_components") {
     "//components/cdm/common",
     "//components/cdm/renderer",
     "//components/cloud_devices/common",
+    "//components/chrome_apps",
     "//components/component_updater",
     "//components/content_settings/core/browser",
     "//components/content_settings/core/common",
+    "//components/copresence",
     "//components/crash/app",
     "//components/crash/browser",
     "//components/crx_file",
     "//components/data_reduction_proxy/core/browser",
     "//components/data_reduction_proxy/core/common",
     "//components/device_event_log",
+    "//components/devtools_discovery",
+    "//components/devtools_http_handler",
     "//components/dom_distiller/core",
     "//components/domain_reliability",
     "//components/enhanced_bookmarks",
@@ -43,7 +47,9 @@ group("all_components") {
     "//components/favicon_base",
     "//components/feedback",
     "//components/gcm_driver",
+    "//components/gcm_driver/instance_id",
     "//components/google/core/browser",
+    "//components/guest_view:guest_view",
     "//components/history/content/browser",
     "//components/history/core/browser",
     "//components/history/core/common",
@@ -56,6 +62,7 @@ group("all_components") {
     "//components/leveldb_proto",
     "//components/login",
     "//components/metrics",
+    "//components/mime_util",
     "//components/navigation_interception",
     "//components/navigation_metrics",
     "//components/network_time",
@@ -70,14 +77,13 @@ group("all_components") {
     "//components/pdf/browser",
     "//components/pdf/common",
     "//components/pdf/renderer",
+    "//components/plugins/common",
     "//components/plugins/renderer",
     "//components/policy",
     "//components/power",
     "//components/precache/core",
     "//components/precache/content",
     "//components/pref_registry",
-    "//components/proximity_auth",
-    "//components/proximity_auth/cryptauth",
     "//components/query_parser",
     "//components/rappor",
     "//components/renderer_context_menu",
@@ -85,7 +91,7 @@ group("all_components") {
     "//components/search",
     "//components/search_engines",
     "//components/search_provider_logos",
-    "//components/sessions:sessions_content",
+    "//components/sessions",
     "//components/signin/core/browser",
     "//components/startup_metric_utils",
     "//components/strings",
@@ -97,6 +103,7 @@ group("all_components") {
     "//components/translate/core/browser",
     "//components/translate/core/common",
     "//components/ui/zoom:ui_zoom",
+    "//components/undo",
     "//components/update_client",
     "//components/url_fixer",
     "//components/url_matcher",
@@ -112,11 +119,19 @@ group("all_components") {
     "//components/web_cache/renderer",
     "//components/web_modal",
     "//components/web_resource",
+    "//components/webcrypto",
     "//components/webdata/common",
     "//components/webui_generator",
     "//components/wifi",
     "//components/wifi_sync",
   ]
+
+  if (!is_android && !is_ios) {
+    deps += [
+      "//components/proximity_auth",
+      "//components/proximity_auth/cryptauth",
+    ]
+  }
 
   if (!enable_configuration_policy) {
     deps -= [ "//components/policy" ]
@@ -131,6 +146,11 @@ group("all_components") {
       "//components/wifi_sync",
     ]
   }
+
+  if (!is_chromeos || !enable_extensions) {
+    deps -= [ "//components/chrome_apps" ]
+  }
+
   if (is_ios) {
     deps -= [
       "//components/history/content/browser",
@@ -167,6 +187,7 @@ group("all_components") {
       "//components/favicon_base",  # Should work, needs checking.
       "//components/feedback",  # Blocked on content.
       "//components/gcm_driver",  # Should work, needs checking.
+      "//components/gcm_driver/instance_id",  # Should work, needs checking.
       "//components/google/core/browser",  # Should work, needs checking.
       "//components/history/core/browser",  # Should work, needs checking.
       "//components/history/core/common",  # Should work, needs checking.
@@ -189,7 +210,7 @@ group("all_components") {
       "//components/renderer_context_menu",  # Blocked on content.
       "//components/search_engines",  # Should work, needs checking.
       "//components/search_provider_logos",  # Should work, needs checking.
-      "//components/sessions:sessions_content",  # Blocked on content.
+      "//components/sessions",  # Blocked on content.
       "//components/signin/core/browser",  # Should work, needs checking.
       "//components/translate/content/browser",  # Blocked on content.
       "//components/translate/content/common",  # Blocked on content.
@@ -215,6 +236,7 @@ group("all_components") {
     deps += [
       "//components/app_modal",
       "//components/browsing_data",
+      "//components/scheduler",
     ]
   }
 
@@ -251,6 +273,7 @@ test("components_unittests") {
     "//components/data_reduction_proxy/core/browser:unit_tests",
     "//components/data_reduction_proxy/core/common:unit_tests",
     "//components/device_event_log:unit_tests",
+    "//components/devtools_http_handler:unit_tests",
     "//components/dom_distiller/core:unit_tests",
     "//components/domain_reliability:unit_tests",
     "//components/favicon_base:unit_tests",
@@ -258,22 +281,30 @@ test("components_unittests") {
     "//components/invalidation:unittests",
     "//components/login:unit_tests",
     "//components/metrics:unit_tests",
+    "//components/mime_util:unit_tests",
     "//components/omnibox:unit_tests",
     "//components/ownership:unit_tests",
     "//components/packed_ct_ev_whitelist:unit_tests",
-    "//components/proximity_auth:unit_tests",
+    "//components/undo:unit_tests",
     "//components/update_client:unit_tests",
     "//components/variations:unit_tests",
     "//components/web_resource:unit_tests",
+    "//components/webcrypto:unit_tests",
     "//components/webdata/common:unit_tests",
 
     # These are the deps required by the code in this target.
     "//base",
     "//base/test:test_support",
     "//content/test:test_support",
+    "//net",
     "//ui/base",
+    "//ui/resources:ui_test_pak",
   ]
   data_deps = [ ":components_tests_pak" ]
+
+  if (!is_android && !is_ios) {
+    deps += [ "//components/proximity_auth:unit_tests" ]
+  }
 
   # TODO(GYP) need this target.
   #'breakpad/app/crash_keys_win_unittest.cc',
@@ -288,16 +319,19 @@ test("components_unittests") {
   if (is_win) {
     deps += [ "//components/browser_watcher:unit_tests" ]
   }
+  if (is_ios) {
+    deps -= [ "//components/devtools_http_handler:unit_tests" ]
+  }
+
+  if (!is_ios) {
+    deps += [ "//components/scheduler:unit_tests" ]
+  }
 }
 
 repack("components_tests_pak") {
   sources = [
     "$root_gen_dir/components/components_resources.pak",
     "$root_gen_dir/components/strings/components_strings_en-US.pak",
-    "$root_gen_dir/ui/resources/ui_resources_100_percent.pak",
-    "$root_gen_dir/ui/resources/webui_resources.pak",
-    "$root_gen_dir/ui/strings/app_locale_settings_en-US.pak",
-    "$root_gen_dir/ui/strings/ui_strings_en-US.pak",
   ]
 
   output = "$root_out_dir/components_tests_resources.pak"
@@ -305,9 +339,18 @@ repack("components_tests_pak") {
   deps = [
     "//components/resources",
     "//components/strings",
-    "//ui/resources",
-    "//ui/strings",
   ]
+}
+
+if (is_android) {
+  import("//build/config/android/rules.gni")
+
+  generate_jni("components_browsertests_jni_headers") {
+    jni_package = "components_browsertests/shell"
+    sources = [
+      "test/android/browsertests_apk/src/org/chromium/components_browsertests_apk/ComponentsBrowserTestsActivity.java",
+    ]
+  }
 }
 
 test("components_browsertests") {
@@ -336,7 +379,7 @@ test("components_browsertests") {
     "//base/test:test_support",
     "//content/test:browsertest_support",
     "//content/test:test_support",
-
+    "//device/bluetooth",
     "//testing/gmock",
     "//testing/gtest",
     "//ui/base",
@@ -345,7 +388,18 @@ test("components_browsertests") {
   data_deps = [ ":components_tests_pak" ]
 
   if (is_android) {
+    sources += [
+      "test/android/browsertests_apk/components_browser_tests_android.cc",
+      "test/android/browsertests_apk/components_browser_tests_android.h",
+      "test/android/browsertests_apk/components_browser_tests_jni_onload.cc",
+    ]
     sources -= [ "autofill/content/browser/risk/fingerprint_browsertest.cc" ]
+    deps += [
+      ":components_browsertests_jni_headers",
+      "//testing/android/native_test:native_test_util",
+    ]
+
+    use_launcher = false
   }
 
   if (is_linux) {
@@ -361,6 +415,7 @@ test("components_browsertests") {
 
 test("components_perftests") {
   sources = [
+    "scheduler/child/task_queue_manager_perftest.cc",
     "visitedlink/test/visitedlink_perftest.cc",
   ]
 
@@ -371,6 +426,7 @@ test("components_perftests") {
     "//base",
     "//base/test:test_support_perf",
     "//testing/gtest",
+    "//testing/perf",
     "//content/test:test_support",
     "//components/visitedlink/browser",
   ]

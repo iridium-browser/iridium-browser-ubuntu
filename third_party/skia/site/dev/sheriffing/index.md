@@ -16,6 +16,7 @@ Tree Sheriffs Documentation
     +   [Compile bot failures automatically close the tree](#tree_closers)
     +   [How to revert a CL](#how_to_revert)
     +   [What to do if DEPS roll fails to land](#deps_roll_failures)
+    +   [How to rebaseline](#how_to_rebaseline)
 
 
 <a name="what_is_a_sheriff"></a>
@@ -32,7 +33,7 @@ Below is a brief summary of what the sheriff does for each task:
 * Start watching the [status page](https://status.skia.org) for bot breakages.
 * Track down people responsible for breakages and revert broken changes if there is no easy fix.
 * Close and open the [tree](http://skia-tree-status.appspot.com).
-* Keep the builder comments on the [status page](https://status.skia.org) upto date.
+* Keep the builder comments on the [status page](https://status.skia.org) up to date.
 * File or follow up with [BreakingTheBuildbots bugs](https://code.google.com/p/skia/issues/list?q=label:BreakingTheBuildbots). See the tip on [when to file bugs](#when_to_file_bugs).
 
 <a name="deps_rolls"></a>
@@ -112,3 +113,49 @@ See the revert documentation [here](https://skia.org/dev/contrib/revert).
 ### What to do if DEPS roll fails to land
 
 A common cause of DEPS roll failures are layout tests. Find the offending Skia CL by examining the commit hash range in the DEPS roll and revert (or talk to the commit author if they are available). If you do revert then keep an eye on the next DEPS roll to make sure it succeeds.
+
+If a Skia CL changes layout tests, but the new images look good, the tests need to be rebaselined. See [Rebaseline Layout Tests](#how_to_rebaseline).
+
+<a name="how_to_rebaseline"></a>
+### Rebaseline Layout Tests (i.e., add suppressions)
+
+* First create a Chromium bug:
+  * goto [crbug.com](https://crbug.com)
+  * Make sure you’re logged in with your Chromium credentials
+  * Click “New Issue”
+  * Summary: “Skia image rebaseline”
+  * Description:
+      * DEPS roll #,
+      * Helpful message about what went wrong (e.g., “Changes to how lighting is scaled in Skia r#### changed the following images:”)
+      * Layout tests effected
+      * You should copy the list of affected from stdio of the failing bot
+  * Status: Assigned
+  * Owner: yourself
+  * cc: reed@, bsalomon@, robertphillips@ & developer responsible for changes
+  * Labels: OS-All & Cr-Blink-LayoutTests
+  * If it is filter related, cc senorblanco@
+
+* (Dispreferred but faster) Edit [skia/skia_test_expectations.txt](https://chromium.googlesource.com/chromium/src/+/master/skia/skia_test_expectations.txt)
+  * Add # comment about what has changed (I usually paraphrase the crbug text)
+  * Add line(s) like the following after the comment:
+      * crbug.com/<bug#youjustcreated> foo/bar/test-name.html [ ImageOnlyFailure ]
+  * Note: this change is usually done in the DEPS roll patch itself
+
+* (Preferred but slower) Make a separate Blink patch by editing LayoutTests/TestExpectations
+  * Add # comment about what has changed (I usually paraphrase the crbug text)
+  * Add line(s) like the following after the comment:
+      * crbug.com/<bug#youjustcreated> foo/bar/test-name.html [ NeedsManualRebaseline ]
+  * Commit the patch you created and wait until it lands and rolls into Chrome
+
+* Retry the DEPS roll (for the 1st/dispreferred option this usually means just retrying the layout bots)
+* Make a Blink patch by editing LayoutTests/TestExpectations
+  * Add # comment about what has changed 
+  * Add line(s) like the following after the comment:
+      * crbug.com/<bug#youjustcreated> foo/bar/test-name.html [ NeedsRebaseline ]
+        * (if you took the second option above you can just edit the existing line(s))
+
+* If you took the first/dispreferred option above:
+  * Wait for the Blink patch to roll into Chrome
+  * Create a Chrome patch that removes your suppressions from skia/skia_test_expectations.txt
+
+

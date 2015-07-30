@@ -31,7 +31,6 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/wrench_menu_model.h"
 #include "chrome/browser/ui/view_ids.h"
-#include "chrome/browser/ui/views/extensions/extension_message_bubble_view.h"
 #include "chrome/browser/ui/views/extensions/extension_popup.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/location_bar/page_action_image_view.h"
@@ -130,10 +129,7 @@ ToolbarView::ToolbarView(Browser* browser)
       browser_actions_(NULL),
       app_menu_(NULL),
       browser_(browser),
-      badge_controller_(browser->profile(), this),
-      extension_message_bubble_factory_(
-          new extensions::ExtensionMessageBubbleFactory(browser->profile(),
-                                                        this)) {
+      badge_controller_(browser->profile(), this) {
   set_id(VIEW_ID_TOOLBAR);
 
   SetEventTargeter(
@@ -271,14 +267,6 @@ void ToolbarView::Init() {
   }
 }
 
-void ToolbarView::OnWidgetVisibilityChanged(views::Widget* widget,
-                                            bool visible) {
-  if (visible) {
-    // Safe to call multiple times; the bubble will only appear once.
-    extension_message_bubble_factory_->MaybeShow(app_menu_);
-  }
-}
-
 void ToolbarView::OnWidgetActivationChanged(views::Widget* widget,
                                             bool active) {
   extensions::ExtensionCommandsGlobalRegistry* registry =
@@ -359,6 +347,11 @@ void ToolbarView::ShowAppMenu(bool for_drop) {
   FOR_EACH_OBSERVER(views::MenuListener, menu_listeners_, OnMenuOpened());
 
   wrench_menu_->RunMenu(app_menu_);
+}
+
+void ToolbarView::CloseAppMenu() {
+  if (wrench_menu_)
+    wrench_menu_->CloseMenu();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -738,6 +731,13 @@ gfx::Size ToolbarView::SizeForContentSize(gfx::Size size) const {
         GetThemeProvider()->GetImageSkiaNamed(IDR_CONTENT_TOP_CENTER);
     size.SetToMax(
         gfx::Size(0, normal_background->height() - content_shadow_height()));
+  } else if (size.height() == 0) {
+    // Location mode with a 0 height location bar. If on ash, expand by one
+    // pixel to show a border in the title bar, otherwise leave the size as zero
+    // height.
+    const int kAshBorderSpacing = 1;
+    if (browser_->host_desktop_type() == chrome::HOST_DESKTOP_TYPE_ASH)
+      size.Enlarge(0, kAshBorderSpacing);
   } else {
     const int kPopupBottomSpacingGlass = 1;
     const int kPopupBottomSpacingNonGlass = 2;

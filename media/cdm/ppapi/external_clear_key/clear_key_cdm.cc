@@ -7,8 +7,6 @@
 #include <algorithm>
 #include <cstring>
 #include <sstream>
-#include <string>
-#include <vector>
 
 #include "base/bind.h"
 #include "base/logging.h"
@@ -23,6 +21,7 @@
 #include "media/cdm/json_web_key.h"
 #include "media/cdm/ppapi/cdm_file_io_test.h"
 #include "media/cdm/ppapi/external_clear_key/cdm_video_decoder.h"
+#include "url/gurl.h"
 
 #if defined(CLEAR_KEY_CDM_USE_FAKE_AUDIO_DECODER)
 #include "base/basictypes.h"
@@ -45,25 +44,17 @@ MSVC_PUSH_DISABLE_WARNING(4244);
 MSVC_POP_WARNING();
 }  // extern "C"
 
-// TODO(tomfinegan): When COMPONENT_BUILD is not defined an AtExitManager must
-// exist before the call to InitializeFFmpegLibraries(). This should no longer
-// be required after http://crbug.com/91970 because we'll be able to get rid of
-// InitializeFFmpegLibraries().
 #if !defined COMPONENT_BUILD
 static base::AtExitManager g_at_exit_manager;
 #endif
 
-// TODO(tomfinegan): InitializeFFmpegLibraries() and |g_cdm_module_initialized|
-// are required for running in the sandbox, and should no longer be required
-// after http://crbug.com/91970 is fixed.
+// Prepare media library.
 static bool InitializeFFmpegLibraries() {
-  base::FilePath file_path;
-  CHECK(PathService::Get(base::DIR_MODULE, &file_path));
-  CHECK(media::InitializeMediaLibrary(file_path));
+  media::InitializeMediaLibrary();
   return true;
 }
-
 static bool g_ffmpeg_lib_initialized = InitializeFFmpegLibraries();
+
 #endif  // CLEAR_KEY_CDM_USE_FFMPEG_DECODER
 
 const char kClearKeyCdmVersion[] = "0.1.0.1";
@@ -231,7 +222,6 @@ class ScopedResetter {
 
 void INITIALIZE_CDM_MODULE() {
 #if defined(CLEAR_KEY_CDM_USE_FFMPEG_DECODER)
-  DVLOG(2) << "FFmpeg libraries initialized: " << g_ffmpeg_lib_initialized;
   av_register_all();
 #endif  // CLEAR_KEY_CDM_USE_FFMPEG_DECODER
 }
@@ -262,7 +252,8 @@ void* CreateCdmInstance(int cdm_interface_version,
   if (!host)
     return NULL;
 
-  return new media::ClearKeyCdm(host, key_system_string);
+  // TODO(jrummell): Obtain the proper origin for this instance.
+  return new media::ClearKeyCdm(host, key_system_string, GURL::EmptyGURL());
 }
 
 const char* GetCdmVersion() {
@@ -271,8 +262,11 @@ const char* GetCdmVersion() {
 
 namespace media {
 
-ClearKeyCdm::ClearKeyCdm(ClearKeyCdmHost* host, const std::string& key_system)
+ClearKeyCdm::ClearKeyCdm(ClearKeyCdmHost* host,
+                         const std::string& key_system,
+                         const GURL& origin)
     : decryptor_(
+          origin,
           base::Bind(&ClearKeyCdm::OnSessionMessage, base::Unretained(this)),
           base::Bind(&ClearKeyCdm::OnSessionClosed, base::Unretained(this)),
           base::Bind(&ClearKeyCdm::OnSessionKeysChange,
@@ -317,7 +311,8 @@ void ClearKeyCdm::CreateSessionAndGenerateRequest(
                      promise_id)));
   decryptor_.CreateSessionAndGenerateRequest(
       ConvertSessionType(session_type), ConvertInitDataType(init_data_type),
-      init_data, init_data_size, promise.Pass());
+      std::vector<uint8_t>(init_data, init_data + init_data_size),
+      promise.Pass());
 
   if (key_system_ == kExternalClearKeyFileIOTestKeySystem)
     StartFileIOTest();
@@ -356,9 +351,9 @@ void ClearKeyCdm::LoadSession(uint32 promise_id,
           base::Bind(&ClearKeyCdm::OnPromiseFailed,
                      base::Unretained(this),
                      promise_id)));
-  decryptor_.CreateSessionAndGenerateRequest(MediaKeys::TEMPORARY_SESSION,
-                                             EmeInitDataType::WEBM, NULL, 0,
-                                             promise.Pass());
+  decryptor_.CreateSessionAndGenerateRequest(
+      MediaKeys::TEMPORARY_SESSION, EmeInitDataType::WEBM,
+      std::vector<uint8_t>(), promise.Pass());
 }
 
 void ClearKeyCdm::UpdateSession(uint32 promise_id,
@@ -379,7 +374,8 @@ void ClearKeyCdm::UpdateSession(uint32 promise_id,
       base::Bind(&ClearKeyCdm::OnPromiseFailed, base::Unretained(this),
                  promise_id)));
   decryptor_.UpdateSession(
-      web_session_str, response, response_size, promise.Pass());
+      web_session_str, std::vector<uint8_t>(response, response + response_size),
+      promise.Pass());
 
   if (!renewal_timer_set_) {
     ScheduleNextRenewal();
@@ -716,8 +712,7 @@ void ClearKeyCdm::LoadLoadableSession() {
       base::Bind(&ClearKeyCdm::OnPromiseFailed, base::Unretained(this),
                  promise_id_for_emulated_loadsession_)));
   decryptor_.UpdateSession(session_id_for_emulated_loadsession_,
-                           reinterpret_cast<const uint8*>(jwk_set.data()),
-                           jwk_set.size(),
+                           std::vector<uint8_t>(jwk_set.begin(), jwk_set.end()),
                            promise.Pass());
 }
 

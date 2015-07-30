@@ -73,12 +73,12 @@ public:
     virtual const WrapperTypeInfo* wrapperTypeInfo() const = 0;
 
     // Creates and returns a new wrapper object.
-    virtual v8::Handle<v8::Object> wrap(v8::Handle<v8::Object> creationContext, v8::Isolate*);
+    virtual v8::Local<v8::Object> wrap(v8::Isolate*, v8::Local<v8::Object> creationContext);
 
     // Associates the instance with the existing wrapper. Returns |wrapper|.
-    virtual v8::Handle<v8::Object> associateWithWrapper(v8::Isolate*, const WrapperTypeInfo*, v8::Handle<v8::Object> wrapper);
+    virtual v8::Local<v8::Object> associateWithWrapper(v8::Isolate*, const WrapperTypeInfo*, v8::Local<v8::Object> wrapper);
 
-    void setWrapper(v8::Handle<v8::Object> wrapper, v8::Isolate* isolate, const WrapperTypeInfo* wrapperTypeInfo)
+    void setWrapper(v8::Local<v8::Object> wrapper, v8::Isolate* isolate, const WrapperTypeInfo* wrapperTypeInfo)
     {
         RELEASE_ASSERT(!containsWrapper());
         if (!*wrapper)
@@ -86,7 +86,7 @@ public:
         RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(toScriptWrappable(wrapper) == this);
         m_wrapper.Reset(isolate, wrapper);
         wrapperTypeInfo->configureWrapper(&m_wrapper);
-        m_wrapper.SetWeak(this, &setWeakCallback);
+        m_wrapper.SetWeak(this, &firstWeakCallback, v8::WeakCallbackType::kInternalFields);
         ASSERT(containsWrapper());
     }
 
@@ -160,22 +160,28 @@ protected:
     // already broken), we must not hit the RELEASE_ASSERT.
 
 private:
-    void disposeWrapper(v8::Local<v8::Object> wrapper)
+    void disposeWrapper(const v8::WeakCallbackInfo<ScriptWrappable>& data)
     {
-        RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(toScriptWrappable(wrapper) == this);
+        auto scriptWrappable = reinterpret_cast<ScriptWrappable*>(data.GetInternalField(v8DOMWrapperObjectIndex));
+        RELEASE_ASSERT_WITH_SECURITY_IMPLICATION(scriptWrappable == this);
         RELEASE_ASSERT(containsWrapper());
-        RELEASE_ASSERT(wrapper == m_wrapper);
         m_wrapper.Reset();
     }
 
-    static void setWeakCallback(const v8::WeakCallbackData<v8::Object, ScriptWrappable>& data)
+    static void firstWeakCallback(const v8::WeakCallbackInfo<ScriptWrappable>& data)
     {
-        data.GetParameter()->disposeWrapper(data.GetValue());
+        data.GetParameter()->disposeWrapper(data);
+        data.SetSecondPassCallback(secondWeakCallback);
+    }
 
+    static void secondWeakCallback(const v8::WeakCallbackInfo<ScriptWrappable>& data)
+    {
         // FIXME: I noticed that 50%~ of minor GC cycle times can be consumed
         // inside data.GetParameter()->deref(), which causes Node destructions. We should
         // make Node destructions incremental.
-        releaseObject(data.GetValue());
+        auto scriptWrappable = reinterpret_cast<ScriptWrappable*>(data.GetInternalField(v8DOMWrapperObjectIndex));
+        auto typeInfo = reinterpret_cast<WrapperTypeInfo*>(data.GetInternalField(v8DOMWrapperTypeIndex));
+        typeInfo->derefObject(scriptWrappable);
     }
 
     v8::Persistent<v8::Object> m_wrapper;

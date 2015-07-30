@@ -35,6 +35,7 @@
 #include "core/dom/NodeWithIndex.h"
 #include "core/dom/ProcessingInstruction.h"
 #include "core/dom/Text.h"
+#include "core/editing/EditingStrategy.h"
 #include "core/editing/VisiblePosition.h"
 #include "core/editing/VisibleUnits.h"
 #include "core/editing/iterators/TextIterator.h"
@@ -150,15 +151,11 @@ Node* Range::commonAncestorContainer() const
     return commonAncestorContainer(m_start.container(), m_end.container());
 }
 
-Node* Range::commonAncestorContainer(Node* containerA, Node* containerB)
+Node* Range::commonAncestorContainer(const Node* containerA, const Node* containerB)
 {
-    for (Node* parentA = containerA; parentA; parentA = parentA->parentNode()) {
-        for (Node* parentB = containerB; parentB; parentB = parentB->parentNode()) {
-            if (parentA == parentB)
-                return parentA;
-        }
-    }
-    return 0;
+    if (!containerA || !containerB)
+        return nullptr;
+    return containerA->commonAncestor(*containerB, NodeTraversal::parent);
 }
 
 static inline bool checkForDifferentRootContainer(const RangeBoundaryPoint& start, const RangeBoundaryPoint& end)
@@ -381,95 +378,13 @@ short Range::compareBoundaryPoints(unsigned how, const Range* sourceRange, Excep
 
 short Range::compareBoundaryPoints(Node* containerA, int offsetA, Node* containerB, int offsetB, ExceptionState& exceptionState)
 {
-    ASSERT(containerA);
-    ASSERT(containerB);
-
-    if (!containerA)
-        return -1;
-    if (!containerB)
-        return 1;
-
-    // see DOM2 traversal & range section 2.5
-
-    // case 1: both points have the same container
-    if (containerA == containerB) {
-        if (offsetA == offsetB)
-            return 0;           // A is equal to B
-        if (offsetA < offsetB)
-            return -1;          // A is before B
-        else
-            return 1;           // A is after B
-    }
-
-    // case 2: node C (container B or an ancestor) is a child node of A
-    Node* c = containerB;
-    while (c && c->parentNode() != containerA)
-        c = c->parentNode();
-    if (c) {
-        int offsetC = 0;
-        Node* n = containerA->firstChild();
-        while (n != c && offsetC < offsetA) {
-            offsetC++;
-            n = n->nextSibling();
-        }
-
-        if (offsetA <= offsetC)
-            return -1;              // A is before B
-        else
-            return 1;               // A is after B
-    }
-
-    // case 3: node C (container A or an ancestor) is a child node of B
-    c = containerA;
-    while (c && c->parentNode() != containerB)
-        c = c->parentNode();
-    if (c) {
-        int offsetC = 0;
-        Node* n = containerB->firstChild();
-        while (n != c && offsetC < offsetB) {
-            offsetC++;
-            n = n->nextSibling();
-        }
-
-        if (offsetC < offsetB)
-            return -1;              // A is before B
-        else
-            return 1;               // A is after B
-    }
-
-    // case 4: containers A & B are siblings, or children of siblings
-    // ### we need to do a traversal here instead
-    Node* commonAncestor = commonAncestorContainer(containerA, containerB);
-    if (!commonAncestor) {
+    bool disconnected = false;
+    short result = EditingStrategy::comparePositions(containerA, offsetA, containerB, offsetB, &disconnected);
+    if (disconnected) {
         exceptionState.throwDOMException(WrongDocumentError, "The two ranges are in separate documents.");
         return 0;
     }
-    Node* childA = containerA;
-    while (childA && childA->parentNode() != commonAncestor)
-        childA = childA->parentNode();
-    if (!childA)
-        childA = commonAncestor;
-    Node* childB = containerB;
-    while (childB && childB->parentNode() != commonAncestor)
-        childB = childB->parentNode();
-    if (!childB)
-        childB = commonAncestor;
-
-    if (childA == childB)
-        return 0; // A is equal to B
-
-    Node* n = commonAncestor->firstChild();
-    while (n) {
-        if (n == childA)
-            return -1; // A is before B
-        if (n == childB)
-            return 1; // A is after B
-        n = n->nextSibling();
-    }
-
-    // Should never reach this point.
-    ASSERT_NOT_REACHED();
-    return 0;
+    return result;
 }
 
 short Range::compareBoundaryPoints(const RangeBoundaryPoint& boundaryA, const RangeBoundaryPoint& boundaryB, ExceptionState& exceptionState)
@@ -1414,7 +1329,13 @@ void Range::checkExtractPrecondition(ExceptionState& exceptionState)
 
 Node* Range::firstNode() const
 {
-    return startPosition().toOffsetInAnchor().nodeAsRangeFirstNode();
+    if (m_start.container()->offsetInCharacters())
+        return m_start.container();
+    if (Node* child = NodeTraversal::childAt(*m_start.container(), m_start.offset()))
+        return child;
+    if (!m_start.offset())
+        return m_start.container();
+    return NodeTraversal::nextSkippingChildren(*m_start.container());
 }
 
 ShadowRoot* Range::shadowRoot() const
@@ -1424,7 +1345,11 @@ ShadowRoot* Range::shadowRoot() const
 
 Node* Range::pastLastNode() const
 {
-    return endPosition().toOffsetInAnchor().nodeAsRangePastLastNode();
+    if (m_end.container()->offsetInCharacters())
+        return NodeTraversal::nextSkippingChildren(*m_end.container());
+    if (Node* child = NodeTraversal::childAt(*m_end.container(), m_end.offset()))
+        return child;
+    return NodeTraversal::nextSkippingChildren(*m_end.container());
 }
 
 IntRect Range::boundingBox() const
@@ -1452,11 +1377,11 @@ void Range::textRects(Vector<IntRect>& rects, bool useSelectionHeight, RangeInFi
         LayoutObject* r = node->layoutObject();
         if (!r || !r->isText())
             continue;
-        LayoutText* renderText = toLayoutText(r);
+        LayoutText* layoutText = toLayoutText(r);
         int startOffset = node == startContainer ? m_start.offset() : 0;
         int endOffset = node == endContainer ? m_end.offset() : std::numeric_limits<int>::max();
         bool isFixed = false;
-        renderText->absoluteRectsForRange(rects, startOffset, endOffset, useSelectionHeight, &isFixed);
+        layoutText->absoluteRectsForRange(rects, startOffset, endOffset, useSelectionHeight, &isFixed);
         allFixed &= isFixed;
         someFixed |= isFixed;
     }
@@ -1480,11 +1405,11 @@ void Range::textQuads(Vector<FloatQuad>& quads, bool useSelectionHeight, RangeIn
         LayoutObject* r = node->layoutObject();
         if (!r || !r->isText())
             continue;
-        LayoutText* renderText = toLayoutText(r);
+        LayoutText* layoutText = toLayoutText(r);
         int startOffset = node == startContainer ? m_start.offset() : 0;
         int endOffset = node == endContainer ? m_end.offset() : std::numeric_limits<int>::max();
         bool isFixed = false;
-        renderText->absoluteQuadsForRange(quads, startOffset, endOffset, useSelectionHeight, &isFixed);
+        layoutText->absoluteQuadsForRange(quads, startOffset, endOffset, useSelectionHeight, &isFixed);
         allFixed &= isFixed;
         someFixed |= isFixed;
     }
@@ -1715,7 +1640,7 @@ void Range::expand(const String& unit, ExceptionState& exceptionState)
     setEnd(end.deepEquivalent().containerNode(), end.deepEquivalent().computeOffsetInContainerNode(), exceptionState);
 }
 
-PassRefPtrWillBeRawPtr<ClientRectList> Range::getClientRects() const
+ClientRectList* Range::getClientRects() const
 {
     m_ownerDocument->updateLayoutIgnorePendingStylesheets();
 
@@ -1725,7 +1650,7 @@ PassRefPtrWillBeRawPtr<ClientRectList> Range::getClientRects() const
     return ClientRectList::create(quads);
 }
 
-PassRefPtrWillBeRawPtr<ClientRect> Range::getBoundingClientRect() const
+ClientRect* Range::getBoundingClientRect() const
 {
     return ClientRect::create(boundingRect());
 }
@@ -1754,13 +1679,13 @@ void Range::getBorderAndTextQuads(Vector<FloatQuad>& quads) const
                 }
             }
         } else if (node->isTextNode()) {
-            if (LayoutText* renderText = toText(node)->layoutObject()) {
+            if (LayoutText* layoutText = toText(node)->layoutObject()) {
                 int startOffset = (node == startContainer) ? m_start.offset() : 0;
                 int endOffset = (node == endContainer) ? m_end.offset() : INT_MAX;
 
                 Vector<FloatQuad> textQuads;
-                renderText->absoluteQuadsForRange(textQuads, startOffset, endOffset);
-                m_ownerDocument->adjustFloatQuadsForScrollAndAbsoluteZoom(textQuads, *renderText);
+                layoutText->absoluteQuadsForRange(textQuads, startOffset, endOffset);
+                m_ownerDocument->adjustFloatQuadsForScrollAndAbsoluteZoom(textQuads, *layoutText);
 
                 quads.appendVector(textQuads);
             }
@@ -1798,6 +1723,8 @@ void showTree(const blink::Range* range)
     if (range && range->boundaryPointsValid()) {
         range->startContainer()->showTreeAndMark(range->startContainer(), "S", range->endContainer(), "E");
         fprintf(stderr, "start offset: %d, end offset: %d\n", range->startOffset(), range->endOffset());
+    } else {
+        fprintf(stderr, "Cannot show tree if range is null, or if boundary points are invalid.\n");
     }
 }
 

@@ -21,6 +21,7 @@
 #include <GLSLANG/ShaderLang.h>
 
 #include <vector>
+#include <sstream>
 #include <string>
 #include <set>
 
@@ -66,14 +67,68 @@ class InfoLog : angle::NonCopyable
     InfoLog();
     ~InfoLog();
 
-    int getLength() const;
+    size_t getLength() const;
     void getLog(GLsizei bufSize, GLsizei *length, char *infoLog);
 
     void appendSanitized(const char *message);
-    void append(const char *info, ...);
     void reset();
+
+    // This helper class ensures we append a newline after writing a line.
+    class StreamHelper : angle::NonCopyable
+    {
+      public:
+        StreamHelper(StreamHelper &&rhs)
+            : mStream(rhs.mStream)
+        {
+            rhs.mStream = nullptr;
+        }
+
+        StreamHelper &operator=(StreamHelper &&rhs)
+        {
+            std::swap(mStream, rhs.mStream);
+            return *this;
+        }
+
+        ~StreamHelper()
+        {
+            // Write newline when destroyed on the stack
+            if (mStream)
+            {
+                (*mStream) << std::endl;
+            }
+        }
+
+        template <typename T>
+        StreamHelper &operator<<(const T &value)
+        {
+            (*mStream) << value;
+            return *this;
+        }
+
+      private:
+        friend class InfoLog;
+
+        StreamHelper(std::stringstream *stream)
+            : mStream(stream)
+        {
+            ASSERT(stream);
+        }
+
+        std::stringstream *mStream;
+    };
+
+    template <typename T>
+    StreamHelper operator<<(const T &value)
+    {
+        StreamHelper helper(&mStream);
+        helper << value;
+        return helper;
+    }
+
+    std::string str() const { return mStream.str(); }
+
   private:
-    char *mInfoLog;
+    std::stringstream mStream;
 };
 
 // Struct used for correlating uniforms/elements of uniform arrays to handles
@@ -135,6 +190,7 @@ class Program : angle::NonCopyable
 
     GLuint getAttributeLocation(const std::string &name);
     int getSemanticIndex(int attributeIndex);
+    const int *getSemanticIndexes() const;
 
     void getActiveAttribute(GLuint index, GLsizei bufsize, GLsizei *length, GLint *size, GLenum *type, GLchar *name);
     GLint getActiveAttributeCount();
@@ -223,7 +279,10 @@ class Program : angle::NonCopyable
     void unlink(bool destroy = false);
     void resetUniformBlockBindings();
 
-    bool linkAttributes(InfoLog &infoLog, const AttributeBindings &attributeBindings, const Shader *vertexShader);
+    bool linkAttributes(const Data &data,
+                        InfoLog &infoLog,
+                        const AttributeBindings &attributeBindings,
+                        const Shader *vertexShader);
     bool linkUniformBlocks(InfoLog &infoLog, const Shader &vertexShader, const Shader &fragmentShader, const Caps &caps);
     bool areMatchingInterfaceBlocks(gl::InfoLog &infoLog, const sh::InterfaceBlock &vertexInterfaceBlock,
                                     const sh::InterfaceBlock &fragmentInterfaceBlock);

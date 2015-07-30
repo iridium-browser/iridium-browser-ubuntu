@@ -77,11 +77,11 @@ void CSSStyleSheetResource::didAddClient(ResourceClient* c)
         static_cast<StyleSheetResourceClient*>(c)->setCSSStyleSheet(m_resourceRequest.url(), m_response.url(), encoding(), this);
 }
 
-const String CSSStyleSheetResource::sheetText(bool enforceMIMEType, bool* hasValidMIMEType) const
+const String CSSStyleSheetResource::sheetText(MIMETypeCheck mimeTypeCheck) const
 {
     ASSERT(!isPurgeable());
 
-    if (!m_data || m_data->isEmpty() || !canUseSheet(enforceMIMEType, hasValidMIMEType))
+    if (!m_data || m_data->isEmpty() || !canUseSheet(mimeTypeCheck))
         return String();
 
     if (!m_decodedSheetText.isNull())
@@ -125,13 +125,10 @@ void CSSStyleSheetResource::destroyDecodedDataIfPossible()
     setDecodedSize(0);
 }
 
-bool CSSStyleSheetResource::canUseSheet(bool enforceMIMEType, bool* hasValidMIMEType) const
+bool CSSStyleSheetResource::canUseSheet(MIMETypeCheck mimeTypeCheck) const
 {
     if (errorOccurred())
         return false;
-
-    if (!enforceMIMEType && !hasValidMIMEType)
-        return true;
 
     // This check exactly matches Firefox. Note that we grab the Content-Type
     // header directly because we want to see what the value is BEFORE content
@@ -140,12 +137,9 @@ bool CSSStyleSheetResource::canUseSheet(bool enforceMIMEType, bool* hasValidMIME
     //
     // This code defaults to allowing the stylesheet for non-HTTP protocols so
     // folks can use standards mode for local HTML documents.
-    bool typeOK = mimeType().isEmpty() || equalIgnoringCase(mimeType(), "text/css") || equalIgnoringCase(mimeType(), "application/x-unknown-content-type");
-    if (hasValidMIMEType)
-        *hasValidMIMEType = typeOK;
-    if (!enforceMIMEType)
+    if (mimeTypeCheck == MIMETypeCheck::Lax)
         return true;
-    return typeOK;
+    return mimeType().isEmpty() || equalIgnoringCase(mimeType(), "text/css") || equalIgnoringCase(mimeType(), "application/x-unknown-content-type");
 }
 
 PassRefPtrWillBeRawPtr<StyleSheetContents> CSSStyleSheetResource::restoreParsedStyleSheet(const CSSParserContext& context)

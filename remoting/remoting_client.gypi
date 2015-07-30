@@ -17,7 +17,7 @@
         '../ppapi/ppapi.gyp:ppapi_cpp_objects',
         '../ppapi/ppapi.gyp:ppapi_internal_module',
         '../third_party/webrtc/modules/modules.gyp:desktop_capture',
-        '../ui/events/events.gyp:dom4_keycode_converter',
+        '../ui/events/events.gyp:dom_keycode_converter',
         'remoting_base',
         'remoting_client',
         'remoting_protocol',
@@ -49,11 +49,12 @@
     },  # end of target 'remoting_client'
 
     {
+      # GN version: //remoting/webapp:html
       'target_name': 'remoting_webapp_html',
       'type': 'none',
       'actions': [
         {
-          # GN version: //remoting/webapp:html
+          # GN version: //remoting/webapp:main_html
           'action_name': 'Build Remoting Webapp main.html',
           'inputs': [
             'webapp/build-html.py',
@@ -61,11 +62,11 @@
             '<@(remoting_webapp_template_files)',
           ],
           'outputs': [
-            '<(SHARED_INTERMEDIATE_DIR)/main.html',
+            '<(SHARED_INTERMEDIATE_DIR)/remoting/main.html',
           ],
           'action': [
             'python', 'webapp/build-html.py',
-            '<(SHARED_INTERMEDIATE_DIR)/main.html',
+            '<(SHARED_INTERMEDIATE_DIR)/remoting/main.html',
             '<(remoting_webapp_template_main)',
             '--template-dir', '<(DEPTH)/remoting',
             '--templates', '<@(remoting_webapp_template_files)',
@@ -74,33 +75,35 @@
           ],
         },
         {
+          # GN version: //remoting/webapp:wcs_sandbox_html
           'action_name': 'Build Remoting Webapp wcs_sandbox.html',
           'inputs': [
             'webapp/build-html.py',
             '<(remoting_webapp_template_wcs_sandbox)',
           ],
           'outputs': [
-            '<(SHARED_INTERMEDIATE_DIR)/wcs_sandbox.html',
+            '<(SHARED_INTERMEDIATE_DIR)/remoting/wcs_sandbox.html',
           ],
           'action': [
             'python', 'webapp/build-html.py',
-            '<(SHARED_INTERMEDIATE_DIR)/wcs_sandbox.html',
+            '<(SHARED_INTERMEDIATE_DIR)/remoting/wcs_sandbox.html',
             '<(remoting_webapp_template_wcs_sandbox)',
             '--js', '<@(remoting_webapp_wcs_sandbox_html_all_js_files)',
           ],
         },
         {
+          # GN version: //remoting/webapp:background_html
           'action_name': 'Build Remoting Webapp background.html',
           'inputs': [
             'webapp/build-html.py',
             '<(remoting_webapp_template_background)',
           ],
           'outputs': [
-            '<(SHARED_INTERMEDIATE_DIR)/background.html',
+            '<(SHARED_INTERMEDIATE_DIR)/remoting/background.html',
           ],
           'action': [
             'python', 'webapp/build-html.py',
-            '<(SHARED_INTERMEDIATE_DIR)/background.html',
+            '<(SHARED_INTERMEDIATE_DIR)/remoting/background.html',
             '<(remoting_webapp_template_background)',
             '--js', '<@(remoting_webapp_background_html_all_js_files)',
           ],
@@ -112,11 +115,11 @@
             '<(remoting_webapp_template_message_window)',
           ],
           'outputs': [
-            '<(SHARED_INTERMEDIATE_DIR)/message_window.html',
+            '<(SHARED_INTERMEDIATE_DIR)/remoting/message_window.html',
           ],
           'action': [
             'python', 'webapp/build-html.py',
-            '<(SHARED_INTERMEDIATE_DIR)/message_window.html',
+            '<(SHARED_INTERMEDIATE_DIR)/remoting/message_window.html',
             '<(remoting_webapp_template_message_window)',
             '--js', '<@(remoting_webapp_message_window_html_all_js_files)',
           ],

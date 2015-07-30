@@ -71,6 +71,13 @@ WebInspector.TracingModel._legacyAsyncEventsString =
     WebInspector.TracingModel.Phase.AsyncStepInto +
     WebInspector.TracingModel.Phase.AsyncStepPast;
 
+WebInspector.TracingModel._flowEventsString =
+    WebInspector.TracingModel.Phase.FlowBegin +
+    WebInspector.TracingModel.Phase.FlowStep +
+    WebInspector.TracingModel.Phase.FlowEnd;
+
+WebInspector.TracingModel._rendererMainThreadName = "CrRendererMain";
+
 WebInspector.TracingModel._asyncEventsString = WebInspector.TracingModel._nestableAsyncEventsString + WebInspector.TracingModel._legacyAsyncEventsString;
 
 /**
@@ -98,6 +105,15 @@ WebInspector.TracingModel.isAsyncBeginPhase = function(phase)
 WebInspector.TracingModel.isAsyncPhase = function(phase)
 {
     return WebInspector.TracingModel._asyncEventsString.indexOf(phase) >= 0;
+}
+
+/**
+ * @param {string} phase
+ * @return {boolean}
+ */
+WebInspector.TracingModel.isFlowPhase = function(phase)
+{
+    return WebInspector.TracingModel._flowEventsString.indexOf(phase) >= 0;
 }
 
 /**
@@ -174,6 +190,10 @@ WebInspector.TracingModel.prototype = {
         this._processMetadataEvents();
         this._processPendingAsyncEvents();
         this._backingStorage.finishWriting();
+        for (var process of Object.values(this._processById)) {
+            for (var thread of Object.values(process._threads))
+                thread.tracingComplete();
+        }
     },
 
     reset: function()
@@ -188,6 +208,7 @@ WebInspector.TracingModel.prototype = {
         this._devtoolsWorkerMetadataEvents = [];
         this._backingStorage.reset();
         this._appendDelimiter = false;
+        this._loadedFromFile = false;
         /** @type {!Array<!WebInspector.TracingModel.Event>} */
         this._asyncEvents = [];
         /** @type {!Map<string, !WebInspector.TracingModel.AsyncEvent>} */
@@ -229,8 +250,6 @@ WebInspector.TracingModel.prototype = {
             var endTimeStamp = (payload.ts + (payload.dur || 0)) / 1000;
             this._maximumRecordTime = Math.max(this._maximumRecordTime, endTimeStamp);
             var event = process._addEvent(payload);
-            if (!event)
-                return;
             // Build async event when we've got events from all threads & processes, so we can sort them and process in the
             // chronological order. However, also add individual async events to the thread flow (above), so we can easily
             // display them on the same chart as other events, should we choose so.
@@ -269,8 +288,13 @@ WebInspector.TracingModel.prototype = {
     {
         this._devtoolsPageMetadataEvents.sort(WebInspector.TracingModel.Event.compareStartTime);
         if (!this._devtoolsPageMetadataEvents.length) {
-            WebInspector.console.error(WebInspector.TracingModel.DevToolsMetadataEvent.TracingStartedInPage + " event not found.");
-            return;
+            // The trace is probably coming not from DevTools. Make a mock Metadata event.
+            var pageMetaEvent = this._loadedFromFile ? this._makeMockPageMetadataEvent() : null;
+            if (!pageMetaEvent) {
+                WebInspector.console.error(WebInspector.TracingModel.DevToolsMetadataEvent.TracingStartedInPage + " event not found.");
+                return;
+            }
+            this._devtoolsPageMetadataEvents.push(pageMetaEvent);
         }
         var sessionId = this._devtoolsPageMetadataEvents[0].args["sessionId"] || this._devtoolsPageMetadataEvents[0].args["data"]["sessionId"];
         this._sessionId = sessionId;
@@ -294,6 +318,26 @@ WebInspector.TracingModel.prototype = {
         var idList = Object.keys(mismatchingIds);
         if (idList.length)
             WebInspector.console.error("Timeline recording was started in more than one page simultaneously. Session id mismatch: " + this._sessionId + " and " + idList + ".");
+    },
+
+    /**
+     * @return {?WebInspector.TracingModel.Event}
+     */
+    _makeMockPageMetadataEvent: function()
+    {
+        var rendererMainThreadName = WebInspector.TracingModel._rendererMainThreadName;
+        // FIXME: pick up the first renderer process for now.
+        var process = Object.values(this._processById).filter(function(p) { return p.threadByName(rendererMainThreadName); })[0];
+        var thread = process && process.threadByName(rendererMainThreadName);
+        if (!thread)
+            return null;
+        var pageMetaEvent = new WebInspector.TracingModel.Event(
+            WebInspector.TracingModel.DevToolsMetadataEventCategory,
+            WebInspector.TracingModel.DevToolsMetadataEvent.TracingStartedInPage,
+            WebInspector.TracingModel.Phase.Metadata,
+            this._minimumRecordTime, thread);
+        pageMetaEvent.addArgs({"data": {"sessionId": "mockSessionId"}});
+        return pageMetaEvent;
     },
 
     /**
@@ -463,6 +507,7 @@ WebInspector.TracingModel.Loader.prototype = {
 
     finish: function()
     {
+        this._tracingModel._loadedFromFile = true;
         this._tracingModel.tracingComplete();
     }
 }
@@ -555,15 +600,15 @@ WebInspector.TracingModel.Event.prototype = {
     },
 
     /**
-     * @param {!WebInspector.TracingManager.EventPayload} payload
+     * @param {!WebInspector.TracingModel.Event} endEvent
      */
-    _complete: function(payload)
+    _complete: function(endEvent)
     {
-        if (payload.args)
-            this.addArgs(payload.args);
+        if (endEvent.args)
+            this.addArgs(endEvent.args);
         else
-            console.error("Missing mandatory event argument 'args' at " + payload.ts / 1000);
-        this.setEndTime(payload.ts / 1000);
+            console.error("Missing mandatory event argument 'args' at " + endEvent.startTime);
+        this.setEndTime(endEvent.startTime);
     },
 
     /**
@@ -594,7 +639,7 @@ WebInspector.TracingModel.Event.orderedCompareStartTime = function (a, b)
     // Array.mergeOrdered coalesces objects if comparator returns 0.
     // To change this behavior this comparator return -1 in the case events
     // startTime's are equal, so both events got placed into the result array.
-    return a.startTime - b.startTime || -1;
+    return a.startTime - b.startTime || a.ordinal - b.ordinal || -1;
 }
 
 /**
@@ -768,7 +813,6 @@ WebInspector.TracingModel.Process = function(id)
     /** @type {!Object.<number, !WebInspector.TracingModel.Thread>} */
     this._threads = {};
     this._threadByName = new Map();
-    this._objects = {};
 }
 
 WebInspector.TracingModel.Process.prototype = {
@@ -814,40 +858,11 @@ WebInspector.TracingModel.Process.prototype = {
 
     /**
      * @param {!WebInspector.TracingManager.EventPayload} payload
-     * @return {?WebInspector.TracingModel.Event} event
+     * @return {!WebInspector.TracingModel.Event} event
      */
     _addEvent: function(payload)
     {
-        var phase = WebInspector.TracingModel.Phase;
-
-        var event = this.threadById(payload.tid)._addEvent(payload);
-        if (!event)
-            return null;
-        if (payload.ph === phase.SnapshotObject)
-            this.objectsByName(event.name).push(event);
-        return event;
-    },
-
-    /**
-     * @param {string} name
-     * @return {!Array.<!WebInspector.TracingModel.Event>}
-     */
-    objectsByName: function(name)
-    {
-        var objects = this._objects[name];
-        if (!objects) {
-            objects = [];
-            this._objects[name] = objects;
-        }
-        return objects;
-    },
-
-    /**
-     * @return {!Array.<string>}
-     */
-    sortedObjectNames: function()
-    {
-        return Object.keys(this._objects).sort();
+        return this.threadById(payload.tid)._addEvent(payload);
     },
 
     /**
@@ -875,8 +890,6 @@ WebInspector.TracingModel.Thread = function(process, id)
     this._events = [];
     this._asyncEvents = [];
     this._id = id;
-
-    this._stack = [];
 }
 
 WebInspector.TracingModel.Thread.prototype = {
@@ -886,38 +899,50 @@ WebInspector.TracingModel.Thread.prototype = {
     target: function()
     {
         //FIXME: correctly specify target
-        if (this.name() === "CrRendererMain")
+        if (this.name() === WebInspector.TracingModel._rendererMainThreadName)
             return WebInspector.targetManager.targets()[0] || null;
         else
             return null;
     },
 
+    tracingComplete: function()
+    {
+        this._asyncEvents.stableSort(WebInspector.TracingModel.Event.compareStartTime);
+        this._events.stableSort(WebInspector.TracingModel.Event.compareStartTime);
+        var phases = WebInspector.TracingModel.Phase;
+        var stack = [];
+        for (var i = 0; i < this._events.length; ++i) {
+            var e = this._events[i];
+            e.ordinal = i;
+            switch (e.phase) {
+            case phases.End:
+                this._events[i] = null;  // Mark for removal.
+                // Quietly ignore unbalanced close events, they're legit (we could have missed start one).
+                if (!stack.length)
+                    continue;
+                var top = stack.pop();
+                if (top.name !== e.name || top.category !== e.category)
+                    console.error("B/E events mismatch at " + top.startTime + " (" + top.name + ") vs. " + e.startTime + " (" + e.name + ")");
+                else
+                    top._complete(e);
+                break;
+            case phases.Begin:
+                stack.push(e);
+                break;
+            }
+        }
+        this._events.remove(null, false);
+    },
+
     /**
      * @param {!WebInspector.TracingManager.EventPayload} payload
-     * @return {?WebInspector.TracingModel.Event} event
+     * @return {!WebInspector.TracingModel.Event} event
      */
     _addEvent: function(payload)
     {
-        var timestamp = payload.ts / 1000;
-        if (payload.ph === WebInspector.TracingModel.Phase.End) {
-            // Quietly ignore unbalanced close events, they're legit (we could have missed start one).
-            if (!this._stack.length)
-                return null;
-            var top = this._stack.pop();
-            if (top.name !== payload.name || top.category !== payload.cat)
-                console.error("B/E events mismatch at " + top.startTime + " (" + top.name + ") vs. " + timestamp + " (" + payload.name + ")");
-            else
-                top._complete(payload);
-            return null;
-        }
         var event = payload.ph === WebInspector.TracingModel.Phase.SnapshotObject
             ? WebInspector.TracingModel.ObjectSnapshot.fromPayload(payload, this)
             : WebInspector.TracingModel.Event.fromPayload(payload, this);
-        if (payload.ph === WebInspector.TracingModel.Phase.Begin)
-            this._stack.push(event);
-        // TODO(alph): According to the spec events are not required to come in a sorted order.
-        if (this._events.length && this._events.peekLast().startTime > event.startTime)
-            console.assert(false, "Event is out of order: " + event.name);
         this._events.push(event);
         return event;
     },

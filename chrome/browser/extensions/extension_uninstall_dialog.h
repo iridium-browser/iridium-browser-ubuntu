@@ -27,6 +27,15 @@ class Extension;
 class ExtensionUninstallDialog
     : public base::SupportsWeakPtr<ExtensionUninstallDialog> {
  public:
+  // The type of action the dialog took at close.
+  // Do not reorder this enum, as it is used in UMA histograms.
+  enum CloseAction {
+    CLOSE_ACTION_UNINSTALL = 0,
+    CLOSE_ACTION_UNINSTALL_AND_REPORT_ABUSE = 1,
+    CLOSE_ACTION_CANCELED = 2,
+    CLOSE_ACTION_LAST = 3,
+  };
+
   class Delegate {
    public:
     // We call this method to signal that the uninstallation should continue.
@@ -64,6 +73,9 @@ class ExtensionUninstallDialog
   // Returns true if a checkbox for reporting abuse should be shown.
   bool ShouldShowReportAbuseCheckbox() const;
 
+  // Called when the dialog is closing to do any book-keeping.
+  void OnDialogClosed(CloseAction action);
+
  protected:
   // Constructor used by the derived classes.
   ExtensionUninstallDialog(Profile* profile, Delegate* delegate);
@@ -79,11 +91,11 @@ class ExtensionUninstallDialog
   Delegate* delegate_;
 
   // The extension we are showing the dialog for.
-  const Extension* extension_;
+  scoped_refptr<const Extension> extension_;
 
   // The extension triggering the dialog if the dialog was shown by
   // chrome.management.uninstall.
-  const Extension* triggering_extension_;
+  scoped_refptr<const Extension> triggering_extension_;
 
   // The extensions icon.
   gfx::ImageSkia icon_;

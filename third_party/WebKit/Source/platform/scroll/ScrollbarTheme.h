@@ -28,7 +28,7 @@
 
 #include "platform/PlatformExport.h"
 #include "platform/geometry/IntRect.h"
-#include "platform/graphics/paint/DisplayItemClient.h"
+#include "platform/graphics/paint/DisplayItem.h"
 #include "platform/scroll/ScrollTypes.h"
 
 namespace blink {
@@ -82,8 +82,6 @@ public:
 
     virtual void paintScrollCorner(GraphicsContext*, const DisplayItemClientWrapper&, const IntRect& cornerRect);
     virtual void paintTickmarks(GraphicsContext*, ScrollbarThemeClient*, const IntRect&) { }
-    virtual void paintOverhangBackground(GraphicsContext*, const IntRect&, const IntRect&, const IntRect&);
-    virtual void paintOverhangShadows(GraphicsContext*, const IntSize&, const IntRect&, const IntRect&, const IntRect&) { }
 
     virtual bool shouldCenterOnThumb(ScrollbarThemeClient*, const PlatformMouseEvent&);
     virtual bool shouldSnapBackToDragOrigin(ScrollbarThemeClient*, const PlatformMouseEvent&);
@@ -135,7 +133,8 @@ public:
     static bool mockScrollbarsEnabled();
 
 protected:
-    bool paintInternal(ScrollbarThemeClient*, GraphicsContext*, const IntRect& damageRect);
+    static DisplayItem::Type buttonPartToDisplayItemType(ScrollbarPart);
+    static DisplayItem::Type trackPiecePartToDisplayItemType(ScrollbarPart);
 
 private:
     static ScrollbarTheme* nativeTheme(); // Must be implemented to return the correct theme subclass.

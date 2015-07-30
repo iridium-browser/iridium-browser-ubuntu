@@ -32,7 +32,8 @@ class ChromeNativeAppWindowViews
       views::Widget* widget);
   // Called before views::Widget::Init() in InitializeDefaultWindow() to allow
   // subclasses to customize the InitParams that would be passed.
-  virtual void OnBeforePanelWidgetInit(views::Widget::InitParams* init_params,
+  virtual void OnBeforePanelWidgetInit(bool use_default_bounds,
+                                       views::Widget::InitParams* init_params,
                                        views::Widget* widget);
 
   virtual void InitializeDefaultWindow(
@@ -40,7 +41,7 @@ class ChromeNativeAppWindowViews
   virtual void InitializePanelWindow(
       const extensions::AppWindow::CreateParams& create_params);
   virtual views::NonClientFrameView* CreateStandardDesktopAppFrame();
-  virtual apps::AppWindowFrameView* CreateNonStandardAppFrame();
+  virtual views::NonClientFrameView* CreateNonStandardAppFrame() = 0;
 
   // ui::BaseWindow implementation.
   gfx::Rect GetRestoredBounds() const override;
@@ -62,7 +63,6 @@ class ChromeNativeAppWindowViews
   // NativeAppWindow implementation.
   void SetFullscreen(int fullscreen_types) override;
   bool IsFullscreenOrPending() const override;
-  void UpdateBadgeIcon() override;
   void UpdateShape(scoped_ptr<SkRegion> region) override;
   bool HasFrameColor() const override;
   SkColor ActiveFrameColor() const override;

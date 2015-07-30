@@ -27,6 +27,7 @@
 #include "chrome/browser/ui/toolbar/wrench_menu_model.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/favicon_base/favicon_types.h"
+#include "content/public/browser/user_metrics.h"
 #include "grit/browser_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/accelerators/accelerator.h"
@@ -278,6 +279,8 @@ void RecentTabsSubMenuModel::ExecuteCommand(int command_id, int event_flags) {
 
     if (item.session_tag.empty()) {  // Restore tab of local session.
       if (service && delegate) {
+        content::RecordAction(
+            base::UserMetricsAction("WrenchMenu_OpenRecentTabFromLocal"));
         UMA_HISTOGRAM_ENUMERATION("WrenchMenu.RecentTabsSubMenu",
                                   LOCAL_SESSION_TAB, LIMIT_RECENT_TAB_ACTION);
         service->RestoreEntryById(delegate, item.tab_id,
@@ -292,6 +295,8 @@ void RecentTabsSubMenuModel::ExecuteCommand(int command_id, int event_flags) {
         return;
       if (tab->navigations.empty())
         return;
+      content::RecordAction(
+          base::UserMetricsAction("WrenchMenu_OpenRecentTabFromDevice"));
       UMA_HISTOGRAM_ENUMERATION("WrenchMenu.RecentTabsSubMenu",
                                 OTHER_DEVICE_TAB, LIMIT_RECENT_TAB_ACTION);
       SessionRestore::RestoreForeignSessionTab(
@@ -304,6 +309,8 @@ void RecentTabsSubMenuModel::ExecuteCommand(int command_id, int event_flags) {
       int window_items_idx = CommandIdToWindowVectorIndex(command_id);
       DCHECK(window_items_idx >= 0 &&
              window_items_idx < static_cast<int>(local_window_items_.size()));
+      content::RecordAction(
+          base::UserMetricsAction("WrenchMenu_OpenRecentWindow"));
       UMA_HISTOGRAM_ENUMERATION("WrenchMenu.RecentTabsSubMenu", RESTORE_WINDOW,
                                 LIMIT_RECENT_TAB_ACTION);
       service->RestoreEntryById(delegate, local_window_items_[window_items_idx],
@@ -388,11 +395,11 @@ void RecentTabsSubMenuModel::BuildLocalEntries() {
     // teach users about this command.
     InsertItemWithStringIdAt(++last_local_model_index_,
                              kDisabledRecentlyClosedHeaderCommandId,
-                             IDS_NEW_TAB_RECENTLY_CLOSED);
+                             IDS_RECENTLY_CLOSED);
   } else {
     InsertItemWithStringIdAt(++last_local_model_index_,
                              kRecentlyClosedHeaderCommandId,
-                             IDS_NEW_TAB_RECENTLY_CLOSED);
+                             IDS_RECENTLY_CLOSED);
     ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     SetIcon(last_local_model_index_,
             rb.GetNativeImageNamed(IDR_RECENTLY_CLOSED_WINDOW));
@@ -527,14 +534,8 @@ void RecentTabsSubMenuModel::BuildLocalWindowItem(
     int curr_model_index) {
   int command_id = WindowVectorIndexToCommandId(local_window_items_.size());
   // See comments in BuildLocalEntries() about usage of InsertItem*At().
-  if (num_tabs == 1) {
-    InsertItemWithStringIdAt(curr_model_index, command_id,
-                             IDS_NEW_TAB_RECENTLY_CLOSED_WINDOW_SINGLE);
-  } else {
-    InsertItemAt(curr_model_index, command_id, l10n_util::GetStringFUTF16(
-        IDS_NEW_TAB_RECENTLY_CLOSED_WINDOW_MULTIPLE,
-        base::IntToString16(num_tabs)));
-  }
+  InsertItemAt(curr_model_index, command_id, l10n_util::GetPluralStringFUTF16(
+      IDS_RECENTLY_CLOSED_WINDOW, num_tabs));
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   SetIcon(curr_model_index, rb.GetNativeImageNamed(IDR_RECENTLY_CLOSED_WINDOW));
   local_window_items_.push_back(window_id);

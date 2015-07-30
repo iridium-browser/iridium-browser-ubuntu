@@ -64,11 +64,13 @@
 #include "core/html/imports/HTMLImportLoader.h"
 #include "core/inspector/DOMEditor.h"
 #include "core/inspector/DOMPatchSupport.h"
+#include "core/inspector/EventListenerInfo.h"
 #include "core/inspector/IdentifiersFactory.h"
 #include "core/inspector/InjectedScriptHost.h"
 #include "core/inspector/InjectedScriptManager.h"
 #include "core/inspector/InspectorHighlight.h"
 #include "core/inspector/InspectorHistory.h"
+#include "core/inspector/InspectorIdentifiers.h"
 #include "core/inspector/InspectorOverlay.h"
 #include "core/inspector/InspectorPageAgent.h"
 #include "core/inspector/InspectorState.h"
@@ -159,7 +161,7 @@ static Node* hoveredNodeForPoint(LocalFrame* frame, const IntPoint& pointInRootF
         hitType |= HitTestRequest::IgnorePointerEventsNone;
     HitTestRequest request(hitType);
     HitTestResult result(request, frame->view()->rootFrameToContents(pointInRootFrame));
-    frame->contentRenderer()->hitTest(result);
+    frame->contentLayoutObject()->hitTest(result);
     Node* node = result.innerPossiblyPseudoNode();
     while (node && node->nodeType() == Node::TEXT_NODE)
         node = node->parentNode();
@@ -460,7 +462,7 @@ Element* InspectorDOMAgent::assertElement(ErrorString* errorString, int nodeId)
     return toElement(node);
 }
 
-static ShadowRoot* closedShadowRoot(Node* node)
+static ShadowRoot* userAgentShadowRoot(Node* node)
 {
     if (!node || !node->isInShadowTree())
         return nullptr;
@@ -471,7 +473,7 @@ static ShadowRoot* closedShadowRoot(Node* node)
     ASSERT(candidate);
     ShadowRoot* shadowRoot = toShadowRoot(candidate);
 
-    return shadowRoot->type() == ShadowRoot::ClosedShadowRoot ? shadowRoot : nullptr;
+    return shadowRoot->type() == ShadowRoot::UserAgentShadowRoot ? shadowRoot : nullptr;
 }
 
 Node* InspectorDOMAgent::assertEditableNode(ErrorString* errorString, int nodeId)
@@ -485,7 +487,7 @@ Node* InspectorDOMAgent::assertEditableNode(ErrorString* errorString, int nodeId
             *errorString = "Cannot edit shadow roots";
             return nullptr;
         }
-        if (closedShadowRoot(node)) {
+        if (userAgentShadowRoot(node)) {
             *errorString = "Cannot edit nodes from user-agent shadow trees";
             return nullptr;
         }
@@ -517,7 +519,7 @@ Element* InspectorDOMAgent::assertEditableElement(ErrorString* errorString, int 
     if (!element)
         return nullptr;
 
-    if (element->isInShadowTree() && closedShadowRoot(element)) {
+    if (element->isInShadowTree() && userAgentShadowRoot(element)) {
         *errorString = "Cannot edit elements from user-agent shadow trees";
         return nullptr;
     }
@@ -938,65 +940,15 @@ void InspectorDOMAgent::getEventListenersForNode(ErrorString* errorString, int n
     if (!node)
         return;
     Vector<EventListenerInfo> eventInformation;
-    getEventListeners(node, eventInformation, true);
-
-    // Get Capturing Listeners (in this order)
-    size_t eventInformationLength = eventInformation.size();
-    for (size_t i = 0; i < eventInformationLength; ++i) {
-        const EventListenerInfo& info = eventInformation[i];
-        const EventListenerVector& vector = info.eventListenerVector;
-        for (size_t j = 0; j < vector.size(); ++j) {
-            const RegisteredEventListener& listener = vector[j];
-            if (listener.useCapture) {
-                RefPtr<TypeBuilder::DOM::EventListener> listenerObject = buildObjectForEventListener(listener, info.eventType, info.eventTarget->toNode(), objectGroup);
-                if (listenerObject)
-                    listenersArray->addItem(listenerObject);
-            }
-        }
-    }
-
-    // Get Bubbling Listeners (reverse order)
-    for (size_t i = eventInformationLength; i; --i) {
-        const EventListenerInfo& info = eventInformation[i - 1];
-        const EventListenerVector& vector = info.eventListenerVector;
-        for (size_t j = 0; j < vector.size(); ++j) {
-            const RegisteredEventListener& listener = vector[j];
-            if (!listener.useCapture) {
-                RefPtr<TypeBuilder::DOM::EventListener> listenerObject = buildObjectForEventListener(listener, info.eventType, info.eventTarget->toNode(), objectGroup);
-                if (listenerObject)
-                    listenersArray->addItem(listenerObject);
-            }
-        }
-    }
-}
-
-void InspectorDOMAgent::getEventListeners(EventTarget* target, Vector<EventListenerInfo>& eventInformation, bool includeAncestors)
-{
-    // The Node's Ancestors including self.
-    Vector<EventTarget*> ancestors;
-    ancestors.append(target);
-    if (includeAncestors) {
-        Node* node = target->toNode();
-        for (ContainerNode* ancestor = node ? node->parentOrShadowHostNode() : nullptr; ancestor; ancestor = ancestor->parentOrShadowHostNode())
-            ancestors.append(ancestor);
-    }
-
-    // Nodes and their Listeners for the concerned event types (order is top to bottom)
-    for (size_t i = ancestors.size(); i; --i) {
-        EventTarget* ancestor = ancestors[i - 1];
-        Vector<AtomicString> eventTypes = ancestor->eventTypes();
-        for (size_t j = 0; j < eventTypes.size(); ++j) {
-            AtomicString& type = eventTypes[j];
-            const EventListenerVector& listeners = ancestor->getEventListeners(type);
-            EventListenerVector filteredListeners;
-            filteredListeners.reserveCapacity(listeners.size());
-            for (size_t k = 0; k < listeners.size(); ++k) {
-                if (listeners[k].listener->type() == EventListener::JSEventListenerType)
-                    filteredListeners.append(listeners[k]);
-            }
-            if (!filteredListeners.isEmpty())
-                eventInformation.append(EventListenerInfo(ancestor, type, filteredListeners));
-        }
+    EventListenerInfo::getEventListeners(node, eventInformation, true);
+    if (!eventInformation.size())
+        return;
+    RegisteredEventListenerIterator iterator(eventInformation);
+    while (const RegisteredEventListener* listener = iterator.nextRegisteredEventListener()) {
+        const EventListenerInfo& info = iterator.currentEventListenerInfo();
+        RefPtr<TypeBuilder::DOM::EventListener> listenerObject = buildObjectForEventListener(*listener, info.eventType, info.eventTarget->toNode(), objectGroup);
+        if (listenerObject)
+            listenersArray->addItem(listenerObject);
     }
 }
 
@@ -1121,7 +1073,7 @@ void InspectorDOMAgent::performSearch(ErrorString*, const String& whitespaceTrim
         for (Document* document : docs) {
             ASSERT(document);
             TrackExceptionState exceptionState;
-            RefPtrWillBeRawPtr<XPathResult> result = DocumentXPathEvaluator::evaluate(*document, whitespaceTrimmedQuery, document, nullptr, XPathResult::ORDERED_NODE_SNAPSHOT_TYPE, ScriptValue(), exceptionState);
+            XPathResult* result = DocumentXPathEvaluator::evaluate(*document, whitespaceTrimmedQuery, document, nullptr, XPathResult::ORDERED_NODE_SNAPSHOT_TYPE, ScriptValue(), exceptionState);
             if (exceptionState.hadException() || !result)
                 continue;
 
@@ -1247,13 +1199,13 @@ bool InspectorDOMAgent::handleMouseMove(LocalFrame* frame, const PlatformMouseEv
     if (m_searchingForNode == NotSearching)
         return false;
 
-    if (!frame->view() || !frame->contentRenderer())
+    if (!frame->view() || !frame->contentLayoutObject())
         return true;
     Node* node = hoveredNodeForEvent(frame, event, event.shiftKey());
 
     // Do not highlight within closed shadow root unless requested.
     if (m_searchingForNode != SearchingForUAShadow) {
-        ShadowRoot* shadowRoot = closedShadowRoot(node);
+        ShadowRoot* shadowRoot = userAgentShadowRoot(node);
         if (shadowRoot)
             node = shadowRoot->host();
     }
@@ -1534,7 +1486,7 @@ void InspectorDOMAgent::getNodeForLocation(ErrorString* errorString, int x, int 
         return;
     HitTestRequest request(HitTestRequest::Move | HitTestRequest::ReadOnly | HitTestRequest::AllowChildFrameContent);
     HitTestResult result(request, IntPoint(x, y));
-    m_document->frame()->contentRenderer()->hitTest(result);
+    m_document->frame()->contentLayoutObject()->hitTest(result);
     Node* node = result.innerPossiblyPseudoNode();
     while (node && node->nodeType() == Node::TEXT_NODE)
         node = node->parentNode();
@@ -1596,7 +1548,7 @@ static String documentBaseURLString(Document* document)
 static TypeBuilder::DOM::ShadowRootType::Enum shadowRootType(ShadowRoot* shadowRoot)
 {
     switch (shadowRoot->type()) {
-    case ShadowRoot::ClosedShadowRoot:
+    case ShadowRoot::UserAgentShadowRoot:
         return TypeBuilder::DOM::ShadowRootType::User_agent;
     case ShadowRoot::OpenShadowRoot:
         return TypeBuilder::DOM::ShadowRootType::Author;
@@ -1642,9 +1594,8 @@ PassRefPtr<TypeBuilder::DOM::Node> InspectorDOMAgent::buildObjectForNode(Node* n
 
         if (node->isFrameOwnerElement()) {
             HTMLFrameOwnerElement* frameOwner = toHTMLFrameOwnerElement(node);
-            LocalFrame* frame = (frameOwner->contentFrame() && frameOwner->contentFrame()->isLocalFrame()) ? toLocalFrame(frameOwner->contentFrame()) : nullptr;
-            if (frame)
-                value->setFrameId(m_pageAgent->frameId(frame));
+            if (LocalFrame* frame = frameOwner->contentFrame() && frameOwner->contentFrame()->isLocalFrame() ? toLocalFrame(frameOwner->contentFrame()) : nullptr)
+                value->setFrameId(InspectorIdentifiers<LocalFrame>::identifier(frame));
             if (Document* doc = frameOwner->contentDocument())
                 value->setContentDocument(buildObjectForNode(doc, 0, nodesMap));
         }
@@ -1776,22 +1727,8 @@ PassRefPtr<TypeBuilder::DOM::EventListener> InspectorDOMAgent::buildObjectForEve
         .setIsAttribute(eventListener->isAttribute())
         .setNodeId(pushNodePathToFrontend(node))
         .setLocation(location);
-    if (objectGroupId) {
-        ScriptValue functionValue = eventListenerHandler(&document, eventListener.get());
-        if (!functionValue.isEmpty()) {
-            LocalFrame* frame = document.frame();
-            if (frame) {
-                ScriptState* scriptState = eventListenerHandlerScriptState(frame, eventListener.get());
-                if (scriptState) {
-                    InjectedScript injectedScript = m_injectedScriptManager->injectedScriptFor(scriptState);
-                    if (!injectedScript.isEmpty()) {
-                        RefPtr<TypeBuilder::Runtime::RemoteObject> valueJson = injectedScript.wrapObject(functionValue, *objectGroupId);
-                        value->setHandler(valueJson);
-                    }
-                }
-            }
-        }
-    }
+    if (objectGroupId)
+        value->setHandler(eventHandlerObject(&document, eventListener.get(), m_injectedScriptManager, objectGroupId));
     return value.release();
 }
 
@@ -2146,7 +2083,7 @@ static ShadowRoot* shadowRootForNode(Node* node, const String& type)
     if (type == "a")
         return toElement(node)->shadowRoot();
     if (type == "u")
-        return toElement(node)->closedShadowRoot();
+        return toElement(node)->userAgentShadowRoot();
     return nullptr;
 }
 
@@ -2208,7 +2145,7 @@ void InspectorDOMAgent::pushNodesByBackendIdsToFrontend(ErrorString* errorString
         }
 
         Node* node = DOMNodeIds::nodeForId(backendNodeId);
-        if (node && node->document().frame()->instrumentingAgents() == m_pageAgent->inspectedFrame()->instrumentingAgents())
+        if (node && node->document().frame() && node->document().frame()->instrumentingAgents() == m_pageAgent->inspectedFrame()->instrumentingAgents())
             result->addItem(pushNodePathToFrontend(node));
         else
             result->addItem(0);
@@ -2239,14 +2176,14 @@ void InspectorDOMAgent::getRelayoutBoundary(ErrorString* errorString, int nodeId
     Node* node = assertNode(errorString, nodeId);
     if (!node)
         return;
-    LayoutObject* renderer = node->layoutObject();
-    if (!renderer) {
-        *errorString = "No renderer for node, perhaps orphan or hidden node";
+    LayoutObject* layoutObject = node->layoutObject();
+    if (!layoutObject) {
+        *errorString = "No layout object for node, perhaps orphan or hidden node";
         return;
     }
-    while (renderer && !renderer->isDocumentElement() && !renderer->isRelayoutBoundaryForInspector())
-        renderer = renderer->container();
-    Node* resultNode = renderer ? renderer->generatingNode() : node->ownerDocument();
+    while (layoutObject && !layoutObject->isDocumentElement() && !layoutObject->isRelayoutBoundaryForInspector())
+        layoutObject = layoutObject->container();
+    Node* resultNode = layoutObject ? layoutObject->generatingNode() : node->ownerDocument();
     *relayoutBoundaryNodeId = pushNodePathToFrontend(resultNode);
 }
 

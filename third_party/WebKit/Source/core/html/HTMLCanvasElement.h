@@ -30,6 +30,7 @@
 
 #include "bindings/core/v8/ScriptValue.h"
 #include "bindings/core/v8/UnionTypesCore.h"
+#include "core/CoreExport.h"
 #include "core/dom/Document.h"
 #include "core/html/HTMLElement.h"
 #include "core/html/canvas/CanvasImageSource.h"
@@ -51,12 +52,11 @@ class GraphicsContext;
 class GraphicsContextStateSaver;
 class HTMLCanvasElement;
 class Image;
-class ImageData;
 class ImageBuffer;
 class ImageBufferSurface;
 class IntSize;
 
-class CanvasObserver : public WillBeGarbageCollectedMixin {
+class CORE_EXPORT CanvasObserver : public WillBeGarbageCollectedMixin {
     DECLARE_EMPTY_VIRTUAL_DESTRUCTOR_WILL_BE_REMOVED(CanvasObserver);
 public:
     virtual void canvasChanged(HTMLCanvasElement*, const FloatRect& changedRect) = 0;
@@ -68,7 +68,7 @@ public:
     DEFINE_INLINE_VIRTUAL_TRACE() { }
 };
 
-class HTMLCanvasElement final : public HTMLElement, public DocumentVisibilityObserver, public CanvasImageSource, public ImageBufferClient {
+class CORE_EXPORT HTMLCanvasElement final : public HTMLElement, public DocumentVisibilityObserver, public CanvasImageSource, public ImageBufferClient {
     DEFINE_WRAPPERTYPEINFO();
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(HTMLCanvasElement);
 public:
@@ -152,7 +152,7 @@ public:
     // CanvasImageSource implementation
     virtual PassRefPtr<Image> getSourceImageForCanvas(SourceImageMode, SourceImageStatus*) const override;
     virtual bool wouldTaintOrigin(SecurityOrigin*) const override;
-    virtual FloatSize sourceSize() const override;
+    virtual FloatSize elementSize() const override;
     virtual bool isCanvasElement() const override { return true; }
     virtual bool isOpaque() const override;
 
@@ -166,8 +166,7 @@ public:
 
     DECLARE_VIRTUAL_TRACE();
 
-    // Methods used for testing
-    void createImageBufferUsingSurface(PassOwnPtr<ImageBufferSurface>);
+    void createImageBufferUsingSurfaceForTesting(PassOwnPtr<ImageBufferSurface>);
 
 protected:
     virtual void didMoveToNewDocument(Document& oldDocument) override;

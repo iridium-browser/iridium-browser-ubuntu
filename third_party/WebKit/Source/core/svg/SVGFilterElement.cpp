@@ -86,31 +86,8 @@ void SVGFilterElement::setFilterRes(unsigned x, unsigned y)
     svgAttributeChanged(SVGNames::filterResAttr);
 }
 
-bool SVGFilterElement::isSupportedAttribute(const QualifiedName& attrName)
-{
-    DEFINE_STATIC_LOCAL(HashSet<QualifiedName>, supportedAttributes, ());
-    if (supportedAttributes.isEmpty()) {
-        SVGURIReference::addSupportedAttributes(supportedAttributes);
-        supportedAttributes.add(SVGNames::filterUnitsAttr);
-        supportedAttributes.add(SVGNames::primitiveUnitsAttr);
-        supportedAttributes.add(SVGNames::xAttr);
-        supportedAttributes.add(SVGNames::yAttr);
-        supportedAttributes.add(SVGNames::widthAttr);
-        supportedAttributes.add(SVGNames::heightAttr);
-        supportedAttributes.add(SVGNames::filterResAttr);
-    }
-    return supportedAttributes.contains<SVGAttributeHashTranslator>(attrName);
-}
-
 void SVGFilterElement::svgAttributeChanged(const QualifiedName& attrName)
 {
-    if (!isSupportedAttribute(attrName)) {
-        SVGElement::svgAttributeChanged(attrName);
-        return;
-    }
-
-    SVGElement::InvalidationGuard invalidationGuard(this);
-
     bool isXYWH = attrName == SVGNames::xAttr
         || attrName == SVGNames::yAttr
         || attrName == SVGNames::widthAttr
@@ -120,9 +97,19 @@ void SVGFilterElement::svgAttributeChanged(const QualifiedName& attrName)
     else if (attrName == SVGNames::filterResAttr)
         UseCounter::count(document(), UseCounter::SVGFilterRes);
 
-    LayoutSVGResourceContainer* renderer = toLayoutSVGResourceContainer(this->layoutObject());
-    if (renderer)
-        renderer->invalidateCacheAndMarkForLayout();
+    if (isXYWH
+        || attrName == SVGNames::filterResAttr
+        || attrName == SVGNames::filterUnitsAttr
+        || attrName == SVGNames::primitiveUnitsAttr) {
+        SVGElement::InvalidationGuard invalidationGuard(this);
+        LayoutSVGResourceContainer* layoutObject = toLayoutSVGResourceContainer(this->layoutObject());
+        if (layoutObject)
+            layoutObject->invalidateCacheAndMarkForLayout();
+
+        return;
+    }
+
+    SVGElement::svgAttributeChanged(attrName);
 }
 
 void SVGFilterElement::childrenChanged(const ChildrenChange& change)
@@ -138,13 +125,13 @@ void SVGFilterElement::childrenChanged(const ChildrenChange& change)
 
 LayoutObject* SVGFilterElement::createLayoutObject(const ComputedStyle&)
 {
-    LayoutSVGResourceFilter* renderer = new LayoutSVGResourceFilter(this);
+    LayoutSVGResourceFilter* layoutObject = new LayoutSVGResourceFilter(this);
 
     for (const RefPtrWillBeMember<Node>& node : m_clientsToAdd)
-        renderer->addClientLayer(node.get());
+        layoutObject->addClientLayer(node.get());
     m_clientsToAdd.clear();
 
-    return renderer;
+    return layoutObject;
 }
 
 bool SVGFilterElement::selfHasRelativeLengths() const

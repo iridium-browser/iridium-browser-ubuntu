@@ -35,7 +35,6 @@ class __declspec(uuid("88cdbbdc-a73b-4afa-acbf-15d5e2ce12c3"))
     SinkFilter : public FilterBase {
  public:
   explicit SinkFilter(SinkFilterObserver* observer);
-  virtual ~SinkFilter();
 
   void SetRequestedMediaFormat(VideoPixelFormat pixel_format,
                                float frame_rate,
@@ -45,12 +44,14 @@ class __declspec(uuid("88cdbbdc-a73b-4afa-acbf-15d5e2ce12c3"))
   const VideoCaptureFormat& ResultingFormat();
 
   // Implement FilterBase.
-  virtual size_t NoOfPins();
-  virtual IPin* GetPin(int index);
+  size_t NoOfPins() override;
+  IPin* GetPin(int index) override;
 
-  STDMETHOD(GetClassID)(CLSID* clsid);
+  STDMETHOD(GetClassID)(CLSID* clsid) override;
 
  private:
+  ~SinkFilter() override;
+
   scoped_refptr<SinkInputPin> input_pin_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(SinkFilter);

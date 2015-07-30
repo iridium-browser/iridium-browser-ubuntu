@@ -32,7 +32,8 @@ class InlineScript(object):
 
   @property
   def contents(self):
-    return str(self._soup.string)
+    #TODO(nednguyen): change other places to use unicode() instead of str().
+    return unicode(self._soup.string)
 
   @property
   def stripped_contents(self):
@@ -161,8 +162,8 @@ class HTMLModuleParserResults(object):
       for comment in comments:
         comment.extract()
 
-    # We is done.
-    return str(soup)
+    # We are done.
+    return str(soup).strip()
 
   @property
   def html_contents_without_links_and_script(self):

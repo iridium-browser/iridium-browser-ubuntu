@@ -380,25 +380,6 @@ void Transport::DestroyAllChannels_w() {
     DestroyTransportChannel(impls[i]);
 }
 
-void Transport::ResetChannels() {
-  ASSERT(signaling_thread()->IsCurrent());
-  worker_thread_->Invoke<void>(Bind(&Transport::ResetChannels_w, this));
-}
-
-void Transport::ResetChannels_w() {
-  ASSERT(worker_thread()->IsCurrent());
-
-  // We are no longer attempting to connect
-  connect_requested_ = false;
-
-  // Clear out the old messages, they aren't relevant
-  rtc::CritScope cs(&crit_);
-  ready_candidates_.clear();
-
-  // Reset all of the channels
-  CallChannels_w(&TransportChannelImpl::Reset);
-}
-
 void Transport::OnSignalingReady() {
   ASSERT(signaling_thread()->IsCurrent());
   if (destroyed_) return;
@@ -578,6 +559,12 @@ void Transport::OnChannelRequestSignaling_s() {
 
 void Transport::OnChannelCandidateReady(TransportChannelImpl* channel,
                                         const Candidate& candidate) {
+  // We should never signal peer-reflexive candidates.
+  if (candidate.type() == PRFLX_PORT_TYPE) {
+    ASSERT(false);
+    return;
+  }
+
   ASSERT(worker_thread()->IsCurrent());
   rtc::CritScope cs(&crit_);
   ready_candidates_.push_back(candidate);

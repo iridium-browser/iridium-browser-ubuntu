@@ -1,3 +1,7 @@
+attribs/00_test_list.txt
 context/00_test_list.txt
 core/00_test_list.txt
 glsl3/00_test_list.txt
+state/00_test_list.txt
+buffers/00_test_list.txt
+textures/00_test_list.txt

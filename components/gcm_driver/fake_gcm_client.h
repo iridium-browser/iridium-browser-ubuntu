@@ -56,6 +56,12 @@ class FakeGCMClient : public GCMClient {
   void RemoveAccountMapping(const std::string& account_id) override;
   void SetLastTokenFetchTime(const base::Time& time) override;
   void UpdateHeartbeatTimer(scoped_ptr<base::Timer> timer) override;
+  void AddInstanceIDData(const std::string& app_id,
+                         const std::string& instance_id_data) override;
+  void RemoveInstanceIDData(const std::string& app_id) override;
+  std::string GetInstanceIDData(const std::string& app_id) override;
+  void AddHeartbeatInterval(const std::string& scope, int interval_ms) override;
+  void RemoveHeartbeatInterval(const std::string& scope) override;
 
   // Initiate the start that has been delayed.
   // Called on UI thread.

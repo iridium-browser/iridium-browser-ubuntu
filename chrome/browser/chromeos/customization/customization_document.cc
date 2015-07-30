@@ -440,9 +440,7 @@ void ServicesCustomizationDocument::RegisterPrefs(
 // static
 void ServicesCustomizationDocument::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterDictionaryPref(
-      kServicesCustomizationKey,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterDictionaryPref(kServicesCustomizationKey);
 }
 
 // static
@@ -569,8 +567,7 @@ void ServicesCustomizationDocument::StartFileFetch() {
 }
 
 void ServicesCustomizationDocument::DoStartFileFetch() {
-  url_fetcher_.reset(net::URLFetcher::Create(
-      url_, net::URLFetcher::GET, this));
+  url_fetcher_ = net::URLFetcher::Create(url_, net::URLFetcher::GET, this);
   url_fetcher_->SetRequestContext(g_browser_process->system_request_context());
   url_fetcher_->AddExtraRequestHeader("Accept: application/json");
   url_fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |

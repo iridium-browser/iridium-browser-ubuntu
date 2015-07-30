@@ -32,6 +32,9 @@ class MockRenderProcessHost : public RenderProcessHost {
   // Provides test access to how many times a bad message has been received.
   int bad_msg_count() const { return bad_msg_count_; }
 
+  // Provides tests a way to simulate this render process crashing.
+  void SimulateCrash();
+
   // RenderProcessHost implementation (public portion).
   void EnableSendQueue() override;
   bool Init() override;
@@ -50,7 +53,6 @@ class MockRenderProcessHost : public RenderProcessHost {
   bool Shutdown(int exit_code, bool wait) override;
   bool FastShutdownIfPossible() override;
   bool FastShutdownStarted() const override;
-  void DumpHandles() override;
   base::ProcessHandle GetHandle() const override;
   int GetID() const override;
   bool HasConnection() const override;
@@ -80,7 +82,7 @@ class MockRenderProcessHost : public RenderProcessHost {
       const WebRtcRtpPacketCallback& packet_callback) override;
 #endif
   void ResumeDeferredNavigation(const GlobalRequestID& request_id) override;
-  void NotifyTimezoneChange() override;
+  void NotifyTimezoneChange(const std::string& zone_id) override;
   ServiceRegistry* GetServiceRegistry() override;
   const base::TimeTicks& GetInitTimeForNavigationMetrics() const override;
   bool SubscribeUniformEnabled() const override;

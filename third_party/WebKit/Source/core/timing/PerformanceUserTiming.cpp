@@ -76,9 +76,8 @@ UserTiming::UserTiming(Performance* performance)
 {
 }
 
-static void insertPerformanceEntry(PerformanceEntryMap& performanceEntryMap, PassRefPtrWillBeRawPtr<PerformanceEntry> performanceEntry)
+static void insertPerformanceEntry(PerformanceEntryMap& performanceEntryMap, PerformanceEntry* entry)
 {
-    RefPtrWillBeRawPtr<PerformanceEntry> entry = performanceEntry;
     PerformanceEntryMap::iterator it = performanceEntryMap.find(entry->name());
     if (it != performanceEntryMap.end())
         it->value.append(entry);
@@ -110,7 +109,7 @@ void UserTiming::mark(const String& markName, ExceptionState& exceptionState)
     TRACE_EVENT_COPY_MARK("blink.user_timing", markName.utf8().data());
     double startTime = m_performance->now();
     insertPerformanceEntry(m_marksMap, PerformanceMark::create(markName, startTime));
-    blink::Platform::current()->histogramCustomCounts("PLT.UserTiming_Mark", static_cast<int>(startTime), 0, 600000, 100);
+    Platform::current()->histogramCustomCounts("PLT.UserTiming_Mark", static_cast<int>(startTime), 0, 600000, 100);
 }
 
 void UserTiming::clearMarks(const String& markName)
@@ -168,7 +167,7 @@ void UserTiming::measure(const String& measureName, const String& startMark, con
 
     insertPerformanceEntry(m_measuresMap, PerformanceMeasure::create(measureName, startTime, endTime));
     if (endTime >= startTime)
-        blink::Platform::current()->histogramCustomCounts("PLT.UserTiming_MeasureDuration", static_cast<int>(endTime - startTime), 0, 600000, 100);
+        Platform::current()->histogramCustomCounts("PLT.UserTiming_MeasureDuration", static_cast<int>(endTime - startTime), 0, 600000, 100);
 }
 
 void UserTiming::clearMeasures(const String& measureName)
@@ -219,11 +218,9 @@ PerformanceEntryVector UserTiming::getMeasures(const String& name) const
 
 DEFINE_TRACE(UserTiming)
 {
-#if ENABLE(OILPAN)
     visitor->trace(m_performance);
     visitor->trace(m_marksMap);
     visitor->trace(m_measuresMap);
-#endif
 }
 
 } // namespace blink

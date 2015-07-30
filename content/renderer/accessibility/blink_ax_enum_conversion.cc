@@ -43,6 +43,9 @@ uint32 AXStateFromBlink(const blink::WebAXObject& o) {
   if (o.isLinked())
     state |= (1 << ui::AX_STATE_LINKED);
 
+  if (o.isMultiline())
+    state |= (1 << ui::AX_STATE_MULTILINE);
+
   if (o.isMultiSelectable())
     state |= (1 << ui::AX_STATE_MULTISELECTABLE);
 
@@ -294,8 +297,6 @@ ui::AXRole AXRoleFromBlink(blink::WebAXRole role) {
       return ui::AX_ROLE_TABLE;
     case blink::WebAXRoleTableHeaderContainer:
       return ui::AX_ROLE_TABLE_HEADER_CONTAINER;
-    case blink::WebAXRoleTextArea:
-      return ui::AX_ROLE_TEXT_AREA;
     case blink::WebAXRoleTextField:
       return ui::AX_ROLE_TEXT_FIELD;
     case blink::WebAXRoleTime:
@@ -359,8 +360,10 @@ ui::AXEvent AXEventFromBlink(blink::WebAXEvent event) {
       return ui::AX_EVENT_LOCATION_CHANGED;
     case blink::WebAXEventMenuListItemSelected:
       return ui::AX_EVENT_MENU_LIST_ITEM_SELECTED;
+    case blink::WebAXEventMenuListItemUnselected:
+      return ui::AX_EVENT_MENU_LIST_ITEM_SELECTED;
     case blink::WebAXEventMenuListValueChanged:
-        return ui::AX_EVENT_MENU_LIST_VALUE_CHANGED;
+      return ui::AX_EVENT_MENU_LIST_VALUE_CHANGED;
     case blink::WebAXEventRowCollapsed:
       return ui::AX_EVENT_ROW_COLLAPSED;
     case blink::WebAXEventRowCountChanged:
@@ -390,18 +393,31 @@ ui::AXTextDirection AXTextDirectionFromBlink(
     blink::WebAXTextDirection text_direction) {
   switch (text_direction) {
     case blink::WebAXTextDirectionLR:
-      return ui::AX_TEXT_DIRECTION_LR;
+      return ui::AX_TEXT_DIRECTION_LTR;
     case blink::WebAXTextDirectionRL:
-      return ui::AX_TEXT_DIRECTION_RL;
+      return ui::AX_TEXT_DIRECTION_RTL;
     case blink::WebAXTextDirectionTB:
-      return ui::AX_TEXT_DIRECTION_TB;
+      return ui::AX_TEXT_DIRECTION_TTB;
     case blink::WebAXTextDirectionBT:
-      return ui::AX_TEXT_DIRECTION_BT;
+      return ui::AX_TEXT_DIRECTION_BTT;
     default:
       NOTREACHED();
   }
 
   return ui::AX_TEXT_DIRECTION_NONE;
+}
+
+ui::AXTextStyle AXTextStyleFromBlink(blink::WebAXTextStyle text_style) {
+  unsigned int browser_text_style = ui::AX_TEXT_STYLE_NONE;
+  if (text_style & blink::WebAXTextStyleBold)
+    browser_text_style |= ui::AX_TEXT_STYLE_BOLD;
+  if (text_style & blink::WebAXTextStyleItalic)
+    browser_text_style |= ui::AX_TEXT_STYLE_ITALIC;
+  if (text_style & blink::WebAXTextStyleUnderline)
+    browser_text_style |= ui::AX_TEXT_STYLE_UNDERLINE;
+  if (text_style & blink::WebAXTextStyleLineThrough)
+    browser_text_style |= ui::AX_TEXT_STYLE_LINE_THROUGH;
+  return static_cast<ui::AXTextStyle>(browser_text_style);
 }
 
 ui::AXInvalidState AXInvalidStateFromBlink(

@@ -13,7 +13,7 @@ import ctypes
 import ctypes.util
 import datetime
 import errno
-import logging
+import glob
 import operator
 import os
 import pwd
@@ -22,6 +22,7 @@ import shutil
 import tempfile
 
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import retry_util
 
 
@@ -56,7 +57,8 @@ def ExpandPath(path):
   return os.path.realpath(os.path.expanduser(path))
 
 
-def WriteFile(path, content, mode='w', atomic=False, makedirs=False):
+def WriteFile(path, content, mode='w', atomic=False, makedirs=False,
+              sudo=False):
   """Write the given content to disk.
 
   Args:
@@ -67,25 +69,52 @@ def WriteFile(path, content, mode='w', atomic=False, makedirs=False):
     atomic: If the updating of the file should be done atomically.  Note this
             option is incompatible w/ append mode.
     makedirs: If True, create missing leading directories in the path.
+    sudo: If True, write the file as root.
   """
-  write_path = path
-  if atomic:
-    write_path = path + '.tmp'
+  if sudo:
+    if 'a' in mode or '+' in mode:
+      raise ValueError('append mode does not work in sudo mode')
+
+    if atomic:
+      raise ValueError('atomic is not supported in sudo mode')
+
 
   if makedirs:
-    SafeMakedirs(os.path.dirname(path))
+    SafeMakedirs(os.path.dirname(path), sudo=sudo)
 
-  with open(write_path, mode) as f:
-    f.writelines(cros_build_lib.iflatten_instance(content))
+  # If the file needs to be written as root and we are not root, write to a temp
+  # file, move it and change the permission.
+  if sudo and os.getuid() != 0:
+    with tempfile.NamedTemporaryFile(mode=mode, delete=False) as temp:
+      write_path = temp.name
+      temp.writelines(cros_build_lib.iflatten_instance(content))
+    os.chmod(write_path, 0o644)
 
-  if not atomic:
-    return
+    try:
+      cros_build_lib.SudoRunCommand(['mv', write_path, path],
+                                    print_cmd=False, redirect_stderr=True)
+      cros_build_lib.SudoRunCommand(['chown', 'root:root', path],
+                                    print_cmd=False, redirect_stderr=True)
+    except cros_build_lib.RunCommandError:
+      SafeUnlink(write_path)
+      raise
 
-  try:
-    os.rename(write_path, path)
-  except EnvironmentError:
-    SafeUnlink(write_path)
-    raise
+  else:
+    # We have the right permissions, simply write the file in python.
+    write_path = path
+    if atomic:
+      write_path = path + '.tmp'
+    with open(write_path, mode) as f:
+      f.writelines(cros_build_lib.iflatten_instance(content))
+
+    if not atomic:
+      return
+
+    try:
+      os.rename(write_path, path)
+    except EnvironmentError:
+      SafeUnlink(write_path)
+      raise
 
 
 def Touch(path, makedirs=False, mode=None):
@@ -112,6 +141,25 @@ def ReadFile(path, mode='r'):
   """Read a given file on disk.  Primarily useful for one off small files."""
   with open(path, mode) as f:
     return f.read()
+
+
+def SafeSymlink(source, dest, sudo=False):
+  """Create a symlink at |dest| pointing to |source|.
+
+  This will override the |dest| if the symlink exists. This operation is not
+  atomic.
+
+  Args:
+    source: source path.
+    dest: destination path.
+    sudo: If True, create the link as root.
+  """
+  if sudo and os.getuid() != 0:
+    cros_build_lib.SudoRunCommand(['ln', '-sfT', source, dest],
+                                  print_cmd=False, redirect_stderr=True)
+  else:
+    SafeUnlink(dest)
+    os.symlink(source, dest)
 
 
 def SafeUnlink(path, sudo=False):
@@ -153,10 +201,10 @@ def SafeMakedirs(path, mode=0o775, sudo=False, user='root'):
     True if the directory had to be created, False if otherwise.
 
   Raises:
-    EnvironmentError: if the makedir failed and it was non sudo.
-    RunCommandError: If sudo mode, and the command failed for any reason.
+    EnvironmentError: If the makedir failed.
+    RunCommandError: If using RunCommand and the command failed for any reason.
   """
-  if sudo:
+  if sudo and not (os.getuid() == 0 and user == 'root'):
     if os.path.isdir(path):
       return False
     cros_build_lib.SudoRunCommand(
@@ -272,6 +320,20 @@ def DirectoryIterator(base_path):
       yield os.path.join(root, e)
 
 
+def IteratePaths(end_path):
+  """Generator that iterates down to |end_path| from root /.
+
+  Args:
+    end_path: The destination. If this is a relative path, it will be resolved
+        to absolute path. In all cases, it will be normalized.
+
+  Yields:
+    All the paths gradually constructed from / to |end_path|. For example:
+    IteratePaths("/this/path") yields "/", "/this", and "/this/path".
+  """
+  return reversed(list(IteratePathParents(end_path)))
+
+
 def IteratePathParents(start_path):
   """Generator that iterates through a directory's parents.
 
@@ -280,9 +342,12 @@ def IteratePathParents(start_path):
 
   Yields:
     The passed-in path, along with its parents.  i.e.,
-    IteratePathParents('/usr/local') would yield '/usr/local', '/usr/', and '/'.
+    IteratePathParents('/usr/local') would yield '/usr/local', '/usr', and '/'.
   """
   path = os.path.abspath(start_path)
+  # There's a bug that abspath('//') returns '//'. We need to renormalize it.
+  if path == '//':
+    path = '/'
   yield path
   while path.strip('/'):
     path = os.path.dirname(path)
@@ -331,7 +396,6 @@ def FindInPathParents(path_to_find, start_path, test_func=None, end_path=None):
   return None
 
 
-# pylint: disable=W0212,R0904,W0702
 def SetGlobalTempDir(tempdir_value, tempdir_env=None):
   """Set the global temp directory to the specified |tempdir_value|
 
@@ -349,8 +413,9 @@ def SetGlobalTempDir(tempdir_value, tempdir_env=None):
       environment and were set prior to this function. If the environment
       variable was not set, it is recorded as None.
   """
+  # pylint: disable=protected-access
   with tempfile._once_lock:
-    old_tempdir_value = tempfile._get_default_tempdir()
+    old_tempdir_value = GetGlobalTempDir()
     old_tempdir_env = tuple((x, os.environ.get(x)) for x in _TEMPDIR_ENV_VARS)
 
     # Now update TMPDIR/TEMP/TMP, and poke the python
@@ -374,6 +439,15 @@ def SetGlobalTempDir(tempdir_value, tempdir_env=None):
   return (old_tempdir_value, old_tempdir_env)
 
 
+def GetGlobalTempDir():
+  """Get the path to the current global tempdir.
+
+  The global tempdir path can be modified through calls to SetGlobalTempDir.
+  """
+  # pylint: disable=protected-access
+  return tempfile._get_default_tempdir()
+
+
 def _TempDirSetup(self, prefix='tmp', set_global=False, base_dir=None):
   """Generate a tempdir, modifying the object, and env to use it.
 
@@ -392,12 +466,12 @@ def _TempDirSetup(self, prefix='tmp', set_global=False, base_dir=None):
         SetGlobalTempDir(self.tempdir)
 
 
-def _TempDirTearDown(self, force_sudo):
+def _TempDirTearDown(self, force_sudo, delete=True):
   # Note that _TempDirSetup may have failed, resulting in these attributes
   # not being set; this is why we use getattr here (and must).
   tempdir = getattr(self, 'tempdir', None)
   try:
-    if tempdir is not None:
+    if tempdir is not None and delete:
       RmDir(tempdir, ignore_missing=True, sudo=force_sudo)
   except EnvironmentError as e:
     # Suppress ENOENT since we may be invoked
@@ -409,6 +483,7 @@ def _TempDirTearDown(self, force_sudo):
   # Restore environment modification if necessary.
   orig_tempdir_value = getattr(self, '_orig_tempdir_value', None)
   if orig_tempdir_value is not None:
+    # pylint: disable=protected-access
     SetGlobalTempDir(orig_tempdir_value, self._orig_tempdir_env)
 
 
@@ -428,9 +503,13 @@ class TempDir(object):
       base_dir: The directory to place the temporary directory.
       set_global: Set this directory as the global temporary directory.
       storage: The object that will have its 'tempdir' attribute set.
+      delete: Whether the temporary dir should be deleted as part of cleanup.
+          (default: True)
       sudo_rm: Whether the temporary dir will need root privileges to remove.
+          (default: False)
     """
     self.kwargs = kwargs.copy()
+    self.delete = kwargs.pop('delete', True)
     self.sudo_rm = kwargs.pop('sudo_rm', False)
     self.tempdir = None
     _TempDirSetup(self, **kwargs)
@@ -439,7 +518,7 @@ class TempDir(object):
     """Clean up the temporary directory."""
     if self.tempdir is not None:
       try:
-        _TempDirTearDown(self, self.sudo_rm)
+        _TempDirTearDown(self, self.sudo_rm, delete=self.delete)
       finally:
         self.tempdir = None
 
@@ -454,24 +533,24 @@ class TempDir(object):
       if exc_type:
         # If an exception from inside the context was already in progress,
         # log our cleanup exception, then allow the original to resume.
-        cros_build_lib.Error('While exiting %s:', self, exc_info=True)
+        logging.error('While exiting %s:', self, exc_info=True)
 
         if self.tempdir:
           # Log all files in tempdir at the time of the failure.
           try:
-            cros_build_lib.Error('Directory contents were:')
+            logging.error('Directory contents were:')
             for name in os.listdir(self.tempdir):
-              cros_build_lib.Error('  %s', name)
+              logging.error('  %s', name)
           except OSError:
-            cros_build_lib.Error('  Directory did not exist.')
+            logging.error('  Directory did not exist.')
 
           # Log all mounts at the time of the failure, since that's the most
           # common cause.
           mount_results = cros_build_lib.RunCommand(
               ['mount'], redirect_stdout=True, combine_stdout_stderr=True,
               error_code_ok=True)
-          cros_build_lib.Error('Mounts were:')
-          cros_build_lib.Error('  %s', mount_results.output)
+          logging.error('Mounts were:')
+          logging.error('  %s', mount_results.output)
 
       else:
         # If there was not an exception from the context, raise ours.
@@ -481,7 +560,6 @@ class TempDir(object):
     self.Cleanup()
 
 
-# pylint: disable=W0212,R0904,W0702
 def TempDirDecorator(func):
   """Populates self.tempdir with path to a temporary writeable directory."""
   def f(self, *args, **kwargs):
@@ -657,8 +735,11 @@ def SourceEnvironment(script, whitelist, ifs=',', env=None, multiline=False):
   dump_script = ['source "%s" >/dev/null' % script,
                  'IFS="%s"' % ifs]
   for var in whitelist:
+    # Note: If we want to get more exact results out of bash, we should switch
+    # to using `declare -p "${var}"`.  It would require writing a custom parser
+    # here, but it would be more robust.
     dump_script.append(
-        '[[ "${%(var)s+set}" == "set" ]] && echo %(var)s="${%(var)s[*]}"'
+        '[[ "${%(var)s+set}" == "set" ]] && echo "%(var)s=\\"${%(var)s[*]}\\""'
         % {'var': var})
   dump_script.append('exit 0')
 
@@ -1042,3 +1123,17 @@ def ResolveSymlink(file_name, root='/'):
     else:
       file_name = os.path.join(os.path.dirname(file_name), link)
   return file_name
+
+
+def IsInsideVm():
+  """Return True if we are running inside a virtual machine.
+
+  This function only supports VirtualBox at the moment. The detection is based
+  on the model of the hard drive.
+  """
+  for blk_model in glob.glob('/sys/block/*/device/model'):
+    if os.path.isfile(blk_model):
+      if ReadFile(blk_model).startswith('VBOX'):
+        return True
+
+  return False

@@ -13,6 +13,7 @@
 #include "base/memory/weak_ptr.h"
 #include "content/renderer/media/crypto/pepper_cdm_wrapper.h"
 #include "media/base/cdm_context.h"
+#include "media/base/cdm_factory.h"
 #include "media/base/decryptor.h"
 #include "media/base/media_keys.h"
 #include "media/base/video_decoder_config.h"
@@ -34,37 +35,35 @@ class PpapiDecryptor : public media::MediaKeys,
                        public media::CdmContext,
                        public media::Decryptor {
  public:
-  static scoped_ptr<PpapiDecryptor> Create(
+  static void Create(
       const std::string& key_system,
+      const GURL& security_origin,
       bool allow_distinctive_identifier,
       bool allow_persistent_state,
-      const GURL& security_origin,
       const CreatePepperCdmCB& create_pepper_cdm_cb,
       const media::SessionMessageCB& session_message_cb,
       const media::SessionClosedCB& session_closed_cb,
       const media::LegacySessionErrorCB& legacy_session_error_cb,
       const media::SessionKeysChangeCB& session_keys_change_cb,
-      const media::SessionExpirationUpdateCB& session_expiration_update_cb);
+      const media::SessionExpirationUpdateCB& session_expiration_update_cb,
+      const media::CdmCreatedCB& cdm_created_cb);
 
   ~PpapiDecryptor() override;
 
   // media::MediaKeys implementation.
   void SetServerCertificate(
-      const uint8* certificate_data,
-      int certificate_data_length,
+      const std::vector<uint8_t>& certificate,
       scoped_ptr<media::SimpleCdmPromise> promise) override;
   void CreateSessionAndGenerateRequest(
       SessionType session_type,
       media::EmeInitDataType init_data_type,
-      const uint8* init_data,
-      int init_data_length,
+      const std::vector<uint8_t>& init_data,
       scoped_ptr<media::NewSessionCdmPromise> promise) override;
   void LoadSession(SessionType session_type,
                    const std::string& session_id,
                    scoped_ptr<media::NewSessionCdmPromise> promise) override;
   void UpdateSession(const std::string& session_id,
-                     const uint8* response,
-                     int response_length,
+                     const std::vector<uint8_t>& response,
                      scoped_ptr<media::SimpleCdmPromise> promise) override;
   void CloseSession(const std::string& session_id,
                     scoped_ptr<media::SimpleCdmPromise> promise) override;
@@ -98,9 +97,6 @@ class PpapiDecryptor : public media::MediaKeys,
 
  private:
   PpapiDecryptor(
-      const std::string& key_system,
-      bool allow_distinctive_identifier,
-      bool allow_persistent_state,
       scoped_ptr<PepperCdmWrapper> pepper_cdm_wrapper,
       const media::SessionMessageCB& session_message_cb,
       const media::SessionClosedCB& session_closed_cb,
@@ -108,12 +104,17 @@ class PpapiDecryptor : public media::MediaKeys,
       const media::SessionKeysChangeCB& session_keys_change_cb,
       const media::SessionExpirationUpdateCB& session_expiration_update_cb);
 
+  void InitializeCdm(const std::string& key_system,
+                     bool allow_distinctive_identifier,
+                     bool allow_persistent_state,
+                     scoped_ptr<media::SimpleCdmPromise> promise);
+
   void OnDecoderInitialized(StreamType stream_type, bool success);
 
   // Callbacks for |plugin_cdm_delegate_| to fire session events.
   void OnSessionMessage(const std::string& session_id,
                         MediaKeys::MessageType message_type,
-                        const std::vector<uint8>& message,
+                        const std::vector<uint8_t>& message,
                         const GURL& legacy_destination_url);
   void OnSessionKeysChange(const std::string& session_id,
                            bool has_additional_usable_key,
@@ -123,7 +124,7 @@ class PpapiDecryptor : public media::MediaKeys,
   void OnSessionClosed(const std::string& session_id);
   void OnLegacySessionError(const std::string& session_id,
                             MediaKeys::Exception exception_code,
-                            uint32 system_code,
+                            uint32_t system_code,
                             const std::string& error_description);
 
   void AttemptToResumePlayback();

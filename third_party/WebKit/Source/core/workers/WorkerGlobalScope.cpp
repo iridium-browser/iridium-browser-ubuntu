@@ -68,23 +68,6 @@
 
 namespace blink {
 
-class CloseWorkerGlobalScopeTask : public ExecutionContextTask {
-public:
-    static PassOwnPtr<CloseWorkerGlobalScopeTask> create()
-    {
-        return adoptPtr(new CloseWorkerGlobalScopeTask);
-    }
-
-    virtual void performTask(ExecutionContext *context)
-    {
-        WorkerGlobalScope* workerGlobalScope = toWorkerGlobalScope(context);
-        // Notify parent that this context is closed. Parent is responsible for calling WorkerThread::stop().
-        workerGlobalScope->thread()->workerReportingProxy().workerGlobalScopeClosed();
-    }
-
-    virtual bool isCleanupTask() const { return true; }
-};
-
 WorkerGlobalScope::WorkerGlobalScope(const KURL& url, const String& userAgent, WorkerThread* thread, double timeOrigin, const SecurityOrigin* starterOrigin, PassOwnPtrWillBeRawPtr<WorkerClients> workerClients)
     : m_url(url)
     , m_userAgent(userAgent)
@@ -110,6 +93,7 @@ WorkerGlobalScope::WorkerGlobalScope(const KURL& url, const String& userAgent, W
 WorkerGlobalScope::~WorkerGlobalScope()
 {
     ASSERT(!m_script);
+    ASSERT(!m_workerInspectorController);
 }
 
 void WorkerGlobalScope::applyContentSecurityPolicyFromString(const String& policy, ContentSecurityPolicyHeaderType contentSecurityPolicyType)
@@ -175,14 +159,8 @@ WorkerLocation* WorkerGlobalScope::location() const
 
 void WorkerGlobalScope::close()
 {
-    if (m_closing)
-        return;
-
-    // Let current script run to completion but prevent future script evaluations.
-    // After m_closing is set, all the tasks in the queue continue to be fetched but only
-    // tasks with isCleanupTask()==true will be executed.
+    // Let current script run to completion, but tell the worker micro task runner to tear down the thread after this task.
     m_closing = true;
-    postTask(FROM_HERE, CloseWorkerGlobalScopeTask::create());
 }
 
 WorkerConsole* WorkerGlobalScope::console()
@@ -204,11 +182,9 @@ void WorkerGlobalScope::postTask(const WebTraceLocation& location, PassOwnPtr<Ex
     thread()->postTask(location, task);
 }
 
-// FIXME: Called twice, from WorkerThreadShutdownFinishTask and WorkerGlobalScope::dispose.
 void WorkerGlobalScope::clearInspector()
 {
-    if (!m_workerInspectorController)
-        return;
+    ASSERT(m_workerInspectorController);
     thread()->setWorkerInspectorController(nullptr);
     m_workerInspectorController->dispose();
     m_workerInspectorController.clear();
@@ -217,18 +193,22 @@ void WorkerGlobalScope::clearInspector()
 void WorkerGlobalScope::dispose()
 {
     ASSERT(thread()->isCurrentThread());
+    stopActiveDOMObjects();
 
-    m_eventQueue->close();
+    // Event listeners would keep DOMWrapperWorld objects alive for too long. Also, they have references to JS objects,
+    // which become dangling once Heap is destroyed.
+    removeAllEventListeners();
+
     clearScript();
     clearInspector();
+    m_eventQueue->close();
+
     // We do not clear the thread field of the
     // WorkerGlobalScope. Other objects keep the worker global scope
     // alive because they need its thread field to check that work is
     // being carried out on the right thread. We therefore cannot clear
     // the thread field before all references to the worker global
     // scope are gone.
-
-    ExecutionContext::notifyContextDestroyed();
 }
 
 void WorkerGlobalScope::didEvaluateWorkerScript()
@@ -258,7 +238,7 @@ void WorkerGlobalScope::importScripts(const Vector<String>& urls, ExceptionState
 
     for (const KURL& completeURL : completedURLs) {
         RefPtr<WorkerScriptLoader> scriptLoader(WorkerScriptLoader::create());
-        scriptLoader->setRequestContext(blink::WebURLRequest::RequestContextScript);
+        scriptLoader->setRequestContext(WebURLRequest::RequestContextScript);
         scriptLoader->loadSynchronously(executionContext, completeURL, AllowCrossOriginRequests);
 
         // If the fetching attempt failed, throw a NetworkError exception and abort all these steps.
@@ -345,7 +325,8 @@ void WorkerGlobalScope::countDeprecation(UseCounter::Feature feature) const
     ASSERT(isSharedWorkerGlobalScope() || isServiceWorkerGlobalScope());
     // For each deprecated feature, send console message at most once
     // per worker lifecycle.
-    if (m_deprecationWarningBits.recordMeasurement(feature)) {
+    if (!m_deprecationWarningBits.hasRecordedMeasurement(feature)) {
+        m_deprecationWarningBits.recordMeasurement(feature);
         ASSERT(!UseCounter::deprecationMessage(feature).isEmpty());
         ASSERT(executionContext());
         executionContext()->addConsoleMessage(ConsoleMessage::create(DeprecationMessageSource, WarningMessageLevel, UseCounter::deprecationMessage(feature)));
@@ -364,14 +345,39 @@ void WorkerGlobalScope::exceptionHandled(int exceptionId, bool isHandled)
         addConsoleMessage(consoleMessage.release());
 }
 
+bool WorkerGlobalScope::isPrivilegedContext(String& errorMessage, const PrivilegeContextCheck privilegeContextCheck) const
+{
+    // Until there are APIs that are available in workers and that
+    // require a privileged context test that checks ancestors, just do
+    // a simple check here. Once we have a need for a real
+    // |isPrivilegedContext| check here, we can check the responsible
+    // document for a privileged context at worker creation time, pass
+    // it in via WorkerThreadStartupData, and check it here.
+    return securityOrigin()->isPotentiallyTrustworthy(errorMessage);
+}
+
 void WorkerGlobalScope::removeURLFromMemoryCache(const KURL& url)
 {
     m_thread->workerLoaderProxy()->postTaskToLoader(createCrossThreadTask(&WorkerGlobalScope::removeURLFromMemoryCacheInternal, url));
 }
 
-void WorkerGlobalScope::removeURLFromMemoryCacheInternal(ExecutionContext*, const KURL& url)
+void WorkerGlobalScope::removeURLFromMemoryCacheInternal(const KURL& url)
 {
     memoryCache()->removeURLFromCache(url);
+}
+
+v8::Local<v8::Object> WorkerGlobalScope::wrap(v8::Isolate*, v8::Local<v8::Object> creationContext)
+{
+    // WorkerGlobalScope must never be wrapped with wrap method.  The global
+    // object of ECMAScript environment is used as the wrapper.
+    RELEASE_ASSERT_NOT_REACHED();
+    return v8::Local<v8::Object>();
+}
+
+v8::Local<v8::Object> WorkerGlobalScope::associateWithWrapper(v8::Isolate*, const WrapperTypeInfo*, v8::Local<v8::Object> wrapper)
+{
+    RELEASE_ASSERT_NOT_REACHED(); // same as wrap method
+    return v8::Local<v8::Object>();
 }
 
 DEFINE_TRACE(WorkerGlobalScope)

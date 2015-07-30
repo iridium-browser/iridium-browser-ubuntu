@@ -106,6 +106,9 @@
       <message name="IDS_DELETE" desc="Label for a delete button. Used in multiple contexts. [CHAR-LIMIT=20]">
         Delete
       </message>
+      <message name="IDS_TITLE" desc="Text indicating the title of a button or a textfield. Ued in multiple contexts. [CHAR-LIMIT=32]">
+        Title
+      </message>
       <message name="IDS_TEXT_ON" desc="Text indicating that an option is turned on. [CHAR-LIMIT=20]">
         On
       </message>
@@ -131,9 +134,6 @@
       </message>
       <message name="IDS_MENU_HELP" desc="Menu item for opening the help page. [CHAR-LIMIT=27]">
         Help &amp; feedback
-      </message>
-      <message name="IDS_HELP" desc="Title for the help view.">
-        Help
       </message>
       <message name="IDS_MANAGED_BY_YOUR_ADMINISTRATOR" desc="Popup message when the user clicks a UI element that has been disabled by enterprise policy.">
         Managed by your administrator
@@ -216,7 +216,7 @@
 
       <!-- Autofill/Wallet integration preferences -->
       <message name="IDS_AUTOFILL_WALLET_TITLE" desc="Text for checkbox that enables or disables import of Wallet data for Autofill.">
-        Show addresses and credit cards from Google Wallet
+        Show addresses and credit cards from Google Payments
       </message>
       <message name="IDS_AUTOFILL_WALLET_MANAGEMENT_LINK_TEXT" desc="Text for link that allows users to see and edit their Wallet information.">
         Edit
@@ -228,14 +228,17 @@
         https://wallet.google.com/manage/addressBook
       </message>
       <message name="IDS_AUTOFILL_FROM_GOOGLE_ACCOUNT_LONG" desc="Text that indicates an address or credit card came from Google servers.">
-        From Google Wallet
+        From Google Payments
       </message>
 
       <!-- Save passwords preferences -->
       <message name="IDS_PREFS_SAVED_PASSWORDS" desc="Title for the Saved Passwords preferences. [CHAR-LIMIT=32]">
         Save passwords
       </message>
-     <message name="IDS_PASSWORDS_AUTO_SIGNIN_TITLE" desc="Title for checkbox to enable automatically signing the user in to websites">
+      <message name="IDS_PREFS_SMART_LOCK_FOR_PASSWORDS" desc="The brand name of the password manager to be displayed in preferences instead of the title 'Save Passwords' when a user is signed in. [CHAR-LIMIT=32]">
+        Smart Lock for Passwords
+      </message>
+      <message name="IDS_PASSWORDS_AUTO_SIGNIN_TITLE" desc="Title for checkbox to enable automatically signing the user in to websites">
         Auto Sign-in
       </message>
       <message name="IDS_PASSWORDS_AUTO_SIGNIN_DESCRIPTION" desc="Text under 'Auto sign-in' checkbox">
@@ -248,7 +251,7 @@
         Never saved
       </message>
       <message name="IDS_MANAGE_PASSWORDS_TEXT" desc="Text for link to manage passwords on Account Central.">
-        Manage saved passwords in your <ph name="BEGIN_LINK">&lt;link&gt;</ph>Google Account<ph name="END_LINK">&lt;/link&gt;</ph>
+        View and manage saved passwords at <ph name="BEGIN_LINK">&lt;link&gt;</ph>passwords.google.com<ph name="END_LINK">&lt;/link&gt;</ph>
       </message>
       <message name="IDS_SAVED_PASSWORDS_NONE_TEXT" desc="Text when there are no saved passwords/exceptions.">
         Saved passwords will appear here.
@@ -384,6 +387,17 @@ For example, some websites may respond to this request by showing you ads that a
       <message name="IDS_CAN_NOT_CLEAR_BROWSING_HISTORY_TOAST" desc="Message on the toast explaining that child account users can not clear their browsing history.">
         Browsing history can't be cleared with accounts for kids
       </message>
+      <message name="IDS_USAGE_AND_CRASH_REPORTS_TITLE" desc="Title for 'Usage and crash reports' preference">
+        Usage and crash reports
+      </message>
+      <message name="IDS_USAGE_AND_CRASH_REPORTS_DESCRIPTION" desc="Description for 'Usage and crash reports' preference">
+        Help us prioritize the features and improvements we should work on by sending Google information about the files, applications, and services running whenever you experience a crash.
+
+        Usage statistics include information such as preferences, button clicks, and memory usage. They do not include webpage URLs or any personal information. Crash reports contain system information at the time of the crash, and may contain web page URLs or personal information, depending on what was happening at the time of the crash.
+      </message>
+      <message name="IDS_USAGE_AND_CRASH_REPORTS_LEARN_MORE_URL" desc="URL for learning more about 'Usage and crash reports' preference" translateable="false">
+        https://support.google.com/chrome/answer/96817
+      </message>
 
       <!-- Accessibility preferences -->
       <message name="IDS_PREFS_ACCESSIBILITY" desc="Title of Accessibility settings, which allows the user to change webpage font sizes. [CHAR-LIMIT=32]">
@@ -418,6 +432,9 @@ For example, some websites may respond to this request by showing you ads that a
       <message name="IDS_ALLOW_THIRD_PARTY_COOKIES_SUMMARY" desc="Summary text for Allow Third Party Cookies preference">
         Third-party websites can save and read cookie data
       </message>
+      <message name="IDS_IMAGES_PERMISSION_TITLE" desc="Title of the permission to show images [CHAR-LIMIT=32]">
+        Images
+      </message>
       <message name="IDS_JAVASCRIPT_PERMISSION_TITLE" desc="Title of the permission to run javascript [CHAR-LIMIT=32]">
         JavaScript
       </message>
@@ -442,8 +459,11 @@ For example, some websites may respond to this request by showing you ads that a
       <message name="IDS_WEBSITE_SETTINGS_ADD_SITE_TOAST" desc="The toast shown when a new site has been added to the whitelist.">
         Site <ph name="SITE_NAME">%1$s<ex>google.com</ex></ph> added
       </message>
-      <message name="IDS_WEBSITE_SETTINGS_ADD_SITE_DESCRIPTION" desc="The description for the add website dialog.">
+      <message name="IDS_WEBSITE_SETTINGS_ADD_SITE_DESCRIPTION_JAVASCRIPT" desc="The description for the allow Javascript for website dialog.">
         Allow JavaScript on websites you specify while blocking it for the rest of the web
+      </message>
+      <message name="IDS_WEBSITE_SETTINGS_ADD_SITE_DESCRIPTION_IMAGES" desc="The description for the allow Images on website dialog.">
+        Allow images on websites you specify while blocking them for the rest of the web
       </message>
       <message name="IDS_WEBSITE_SETTINGS_ADD_SITE_SITE_URL" desc="The label for the input field where the user can type a website URL.">
         Site URL
@@ -487,20 +507,21 @@ For example, some websites may respond to this request by showing you ads that a
       <message name="IDS_ACCESSIBILITY_COLLAPSED_GROUP" desc="The accessibility text to read when the selected widget is collapsed.">
         Collapsed - click to expand.
       </message>
-      <message name="IDS_WEBSITE_SETTINGS_CATEGORY_BLOCK_ALL" desc="Summary text explaining that a permission is blocked for all sites.">
-        Block all sites
+      <message name="IDS_WEBSITE_SETTINGS_CATEGORY_BLOCKED_RECOMMENDED" desc="Summary text explaining that a permission is blocked, which is the recommended setting.">
+        Blocked (recommended)
       </message>
-      <message name="IDS_WEBSITE_SETTINGS_CATEGORY_BLOCK_RECOMMENDED" desc="Summary text explaining that a permission is blocked, which is the recommended setting.">
-        Block (recommended)
+      <message name="IDS_WEBSITE_SETTINGS_CATEGORY_ALLOWED_RECOMMENDED" desc="Summary text explaining that a permission is allowed, which is the recommended setting.">
+        Allowed (recommended)
+      </message>
+      <message name="IDS_WEBSITE_SETTINGS_CATEGORY_ASK_FIRST_RECOMMENDED" desc="Summary text explaining that the user will be asked before a site is granted a
+particular permission.">
+        Ask first (recommended)
       </message>
       <message name="IDS_WEBSITE_SETTINGS_CATEGORY_ASK_BEFORE_SENDING" desc="Summary text explaining that permission will be requested before sending things, e.g. notifications.">
         Ask before sending (recommended)
       </message>
       <message name="IDS_WEBSITE_SETTINGS_CATEGORY_ASK_BEFORE_ACCESSING" desc="Summary text explaining that permission will be requested before accessing something, like location.">
         Ask before accessing (recommended)
-      </message>
-      <message name="IDS_WEBSITE_SETTINGS_CATEGORY_ASK_BEFORE_ACCESSING_CAMERA_MIC" desc="Summary text explaining that permission will be requested before accessing the camera and microphone.">
-        Ask before accessing camera and microphone (recommended)
       </message>
       <message name="IDS_WEBSITE_SETTINGS_CATEGORY_COOKIE_ALLOWED" desc="Summary text explaining that sites are allowed to use cookies and that it is the recommended setting.">
         Allow sites to save and read cookie data (recommended)
@@ -513,9 +534,6 @@ For example, some websites may respond to this request by showing you ads that a
       </message>
       <message name="IDS_WEBSITE_SETTINGS_SEARCH" desc="The label for the search button on the Website Settings page.">
         Search
-      </message>
-      <message name="IDS_WEBSITE_SETTINGS_CHANGE" desc="The label for the text allowing users to change the Location/Protected content default setting.">
-        Change
       </message>
       <message name="IDS_WEBSITE_RESET" desc="The label for the button allowing users to clear all data and reset the permissions for a website.">
         Clear &amp; reset
@@ -553,27 +571,22 @@ For example, some websites may respond to this request by showing you ads that a
       </message>
 
       <!-- Camera and microphone preferences -->
-      <message name="IDS_WEBSITE_SETTINGS_USE_CAMERA_OR_MIC" desc="The category filter 'Camera/Mic' for content settings.">
-        Camera or microphone
+      <message name="IDS_WEBSITE_SETTINGS_USE_CAMERA" desc="The category filter 'Camera' for content settings.">
+        Camera
       </message>
-      <message name="IDS_VIDEO_PERMISSION_TITLE" desc="Title text to be shown when the user has allowed/denied video access for the website [CHAR-LIMIT=32]">
+      <message name="IDS_WEBSITE_SETTINGS_USE_MIC" desc="The category filter 'Mic' for content settings.">
+        Microphone
+      </message>
+      <message name="IDS_CAMERA_PERMISSION_TITLE" desc="Title text to be shown when the user has allowed/denied video access for the website [CHAR-LIMIT=32]">
         Access your camera
       </message>
-      <message name="IDS_VOICE_PERMISSION_TITLE" desc="Title text to be shown when the user has allowed/denied voice access for the website [CHAR-LIMIT=32]">
+      <message name="IDS_MIC_PERMISSION_TITLE" desc="Title text to be shown when the user has allowed/denied voice access for the website [CHAR-LIMIT=32]">
         Access your microphone
-      </message>
-      <message name="IDS_VOICE_AND_VIDEO_PERMISSION_TITLE" desc="Title text to be shown when the user has allowed/denied voice and video access for the website [CHAR-LIMIT=32]">
-        Access your mic and camera
       </message>
 
       <!-- Protected content preferences -->
       <message name="IDS_PROTECTED_CONTENT" desc="Title for link to protected content settings [CHAR-LIMIT=32]">
         Protected content
-      </message>
-      <message name="IDS_PROTECTED_CONTENT_PREFS_DESCRIPTION" desc="Description of Protected Content preference">
-        When protected content is ON, websites will be able to authenticate your device to ensure it is authorized to play premium, protected videos.
-
-If OFF, you may not be able to play premium videos on this device.
       </message>
       <message name="IDS_PROTECTED_CONTENT_RESET_FAILED" desc="Protected content preference device credential reset failure toast">
         Reset failed. Ensure your device is online and try again.
@@ -589,6 +602,7 @@ If OFF, you may not be able to play premium videos on this device.
 
 To obtain new licenses, connect to the internet and play your downloaded content.
       </message>
+      <!-- Keep in sync with chrome/common/url_constants.cc -->
       <message name="IDS_PROTECTED_CONTENT_LEARN_MORE_URL" desc="URL for learning more about device credential reset menu preference" translateable="false">
         https://support.google.com/chrome/?p=mobile_protected_content
       </message>
@@ -769,9 +783,6 @@ To obtain new licenses, connect to the internet and play your downloaded content
       <message name="IDS_SYNC_NEED_PASSPHRASE" desc="Error message when a passphrase is needed for decrypting sync data.">
         Passphrase required
       </message>
-      <message name="IDS_SYNC_NEED_PASSWORD" desc="Error message when a password is needed for decrypting sync data.">
-        Password required
-      </message>
       <message name="IDS_SYNC_SETUP_PROGRESS" desc="Message indicating that sync setup is in progress">
         Setup in progress…
       </message>
@@ -904,9 +915,6 @@ To obtain new licenses, connect to the internet and play your downloaded content
       <message name="IDS_SYNC_PASSPHRASE_TYPE_TITLE" desc="Title of sync passphrase type dialog. [CHAR-LIMIT=24]">
         Encryption
       </message>
-      <message name="IDS_SYNC_PASSPHRASE_TYPE_NONE" desc="Option to encrypt sync data with no passphrase.">
-        Don’t encrypt
-      </message>
       <message name="IDS_SYNC_PASSPHRASE_TYPE_KEYSTORE" desc="Option to encrypt only passwords, using your Google credentials.">
         Encrypt passwords with Google credentials
       </message>
@@ -930,12 +938,6 @@ To obtain new licenses, connect to the internet and play your downloaded content
       </message>
       <message name="IDS_SYNC_ENTER_CUSTOM_PASSPHRASE_HINT_CONFIRM" desc="Hint for the passphrase confirmation field when user is to type in a passphrase. [CHAR-LIMIT=30]">
         Confirm passphrase
-      </message>
-      <message name="IDS_SYNC_ENTER_GOOGLE_PASSPHRASE" desc="Prompt user to enter their custom sync password.">
-        Sign in with your Google Account:
-      </message>
-      <message name="IDS_SYNC_ENTER_GOOGLE_PASSPHRASE_HINT" desc="Hint for the password field when user is to type in a Google Account password. [CHAR-LIMIT=30]">
-        Password
       </message>
       <message name="IDS_SYNC_PASSPHRASE_CANNOT_BE_BLANK" desc="Inform user that they cannot use a blank password [CHAR-LIMIT=40]">
         This field cannot be blank
@@ -1086,9 +1088,6 @@ You are signing in with a managed account and giving its administrator control o
       <message name="IDS_TRANSLATE_NEVER_TRANSLATE_LANGUAGE" meaning="Android" desc="Text to display on the never translate language button. [CHAR-LIMIT=64]">
         Never translate <ph name="LANGUAGE">%1$s<ex>French</ex></ph>
       </message>
-      <message name="IDS_MENU_DISMISS_BTN" desc="Content description for the settings menu button when the menu is open.">
-        Dismiss the menu
-      </message>
       <message name="IDS_MENU_PRINT" desc="Menu item for printing the current page. [CHAR-LIMIT=27]">
         Print…
       </message>
@@ -1112,6 +1111,9 @@ You are signing in with a managed account and giving its administrator control o
       </message>
       <message name="IDS_ACCESSIBILITY_MENU_BACK" desc="Content description for the backard navigation button.">
         Go back
+      </message>
+      <message name="IDS_ACCESSIBILITY_MENU_INFO" desc="Content description for the button which opens the page info popup, which displays security information and permissions for the current page">
+        View site information
       </message>
       <message name="IDS_ACCESSIBILITY_CONTENT_VIEW" desc="Content description for the content view that holds the web contents [CHAR-LIMIT=30]">
         Web View
@@ -1159,14 +1161,11 @@ You are signing in with a managed account and giving its administrator control o
       </message>
       <message name="IDS_CONTEXTMENU_SAVE_VIDEO" desc="Context sensitive menu item for saving the selected video. [CHAR-LIMIT=30]">
         Save video
-     </message>
-
-     <!-- Http authentication -->
-      <message name="IDS_ACCESSIBILITY_HTTP_AUTH_USERNAME_INPUT" desc="Content description for the http authentication pop-up username input field.">
-        Username
       </message>
-      <message name="IDS_ACCESSIBILITY_HTTP_AUTH_PASSWORD_INPUT" desc="Content description for the http authentication pop-up password input field.">
-        Password
+
+      <!-- Swipe refresh -->
+      <message name="IDS_ACCESSIBILITY_SWIPE_REFRESH" desc="Content description for the swipe refresh action.">
+        Refreshing page
       </message>
 
       <!-- Smartcard certificate support -->
@@ -1198,15 +1197,6 @@ You are signing in with a managed account and giving its administrator control o
       </message>
 
       <!-- DOM Distiller strings -->
-      <message name="IDS_DISTILLATION_QUALITY_QUESTION" desc="Question to ask the user about whether the text from a web page was extracted correctly.">
-        Was the text extracted correctly?
-      </message>
-      <message name="IDS_DISTILLATION_QUALITY_ANSWER_YES" desc="Text for the answering whether the text from a web page was extracted correctly and the answer is yes.">
-        Yes
-      </message>
-      <message name="IDS_DISTILLATION_QUALITY_ANSWER_NO" desc="Text for the answering whether the text from a web page was extracted correctly and the answer is no.">
-        No
-      </message>
       <message name="IDS_DARK_MODE" desc="Title of button that will change theme of distilled pages to dark mode.">
         Dark
       </message>
@@ -1274,6 +1264,9 @@ You are signing in with a managed account and giving its administrator control o
       </message>
       <message name="IDS_PAGE_INFO_PERMISSION_BLOCK" desc="The label used in the permissions dropdowns in the Page Info dialog on mobile for the option that denies a permission.">
         Block
+      </message>
+      <message name="IDS_PAGE_INFO_DETAILS_LINK" desc="The label of the link to open the detailed connection information popup from the page info bubble.">
+        Details
       </message>
       <message name="IDS_PAGE_INFO_CONNECTION_HTTPS" desc="Message to display in the page info bubble when the connection is private (HTTPS).">
         Your connection to this site is private.
@@ -1423,9 +1416,6 @@ Hit the back button to exit.
       </message>
       <message name="IDS_CHOOSE_ACCOUNT_SIGN_IN" desc="Sign in button for choose google account dialog [CHAR-LIMIT=20]">
         Sign in
-      </message>
-      <message name="IDS_FRE_NEXT" desc="Button that advances the First Run Experience forward">
-        Next
       </message>
       <message name="IDS_FRE_DONE" desc="Button to dismiss the sign-in screen once the user is done">
         Done

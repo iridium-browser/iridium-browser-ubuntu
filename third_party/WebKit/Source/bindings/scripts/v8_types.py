@@ -80,6 +80,7 @@ IdlType.is_typed_array = property(
 
 IdlType.is_wrapper_type = property(
     lambda self: (self.is_interface_type and
+                  not self.is_callback_interface and
                   self.base_type not in NON_WRAPPER_TYPES))
 
 
@@ -112,7 +113,7 @@ CPP_SPECIAL_CONVERSION_RULES = {
     'Promise': 'ScriptPromise',
     'ScriptValue': 'ScriptValue',
     # FIXME: Eliminate custom bindings for XPathNSResolver  http://crbug.com/345529
-    'XPathNSResolver': 'RefPtrWillBeRawPtr<XPathNSResolver>',
+    'XPathNSResolver': 'RawPtr<XPathNSResolver>',
     'boolean': 'bool',
     'unrestricted double': 'double',
     'unrestricted float': 'float',
@@ -310,7 +311,7 @@ IdlType.set_will_be_garbage_collected_types = classmethod(
 
 
 def gc_type(idl_type):
-    if idl_type.is_garbage_collected:
+    if idl_type.is_garbage_collected or idl_type.is_dictionary or idl_type.is_union_type:
         return 'GarbageCollectedObject'
     if idl_type.is_will_be_garbage_collected:
         return 'WillBeGarbageCollectedObject'
@@ -322,7 +323,8 @@ IdlTypeBase.gc_type = property(gc_type)
 def is_traceable(idl_type):
     return (idl_type.is_garbage_collected
             or idl_type.is_will_be_garbage_collected
-            or idl_type.is_dictionary)
+            or idl_type.is_dictionary
+            or idl_type.is_union_type)
 
 IdlTypeBase.is_traceable = property(is_traceable)
 IdlUnionType.is_traceable = property(
@@ -366,8 +368,9 @@ INCLUDES_FOR_TYPE = {
 }
 
 
-def includes_for_type(idl_type):
+def includes_for_type(idl_type, extended_attributes=None):
     idl_type = idl_type.preprocessed_type
+    extended_attributes = extended_attributes or {}
 
     # Simple types
     base_idl_type = idl_type.base_type
@@ -390,22 +393,30 @@ def includes_for_type(idl_type):
     return set(['bindings/%s/v8/V8%s.h' % (component_dir[base_idl_type],
                                            base_idl_type)])
 
-IdlType.includes_for_type = property(includes_for_type)
-IdlUnionType.includes_for_type = property(
-    lambda self: set.union(*[member_type.includes_for_type
-                             for member_type in self.member_types]))
-IdlArrayOrSequenceType.includes_for_type = property(
-    lambda self: self.element_type.includes_for_type)
+IdlType.includes_for_type = includes_for_type
 
 
-def add_includes_for_type(idl_type):
-    includes.update(idl_type.includes_for_type)
+def includes_for_union_type(idl_type, extended_attributes=None):
+    return set.union(*[member_type.includes_for_type(extended_attributes)
+                       for member_type in idl_type.member_types])
+
+IdlUnionType.includes_for_type = includes_for_union_type
+
+
+def includes_for_array_or_sequence_type(idl_type, extended_attributes=None):
+    return idl_type.element_type.includes_for_type(extended_attributes)
+
+IdlArrayOrSequenceType.includes_for_type = includes_for_array_or_sequence_type
+
+
+def add_includes_for_type(idl_type, extended_attributes=None):
+    includes.update(idl_type.includes_for_type(extended_attributes))
 
 IdlTypeBase.add_includes_for_type = add_includes_for_type
 
 
 def includes_for_interface(interface_name):
-    return IdlType(interface_name).includes_for_type
+    return IdlType(interface_name).includes_for_type()
 
 
 def add_includes_for_interface(interface_name):
@@ -472,7 +483,7 @@ V8_VALUE_TO_CPP_VALUE = {
     'DOMString': '{v8_value}',
     'ByteString': 'toByteString({isolate}, {arguments})',
     'USVString': 'toUSVString({isolate}, {arguments})',
-    'boolean': '{v8_value}->BooleanValue()',
+    'boolean': 'toBoolean({isolate}, {arguments})',
     'float': 'toRestrictedFloat({isolate}, {arguments})',
     'unrestricted float': 'toFloat({isolate}, {arguments})',
     'double': 'toRestrictedDouble({isolate}, {arguments})',
@@ -490,10 +501,10 @@ V8_VALUE_TO_CPP_VALUE = {
     'EventTarget': 'toEventTarget({isolate}, {v8_value})',
     'NodeFilter': 'toNodeFilter({v8_value}, info.Holder(), ScriptState::current({isolate}))',
     'Promise': 'ScriptPromise::cast(ScriptState::current({isolate}), {v8_value})',
-    'SerializedScriptValue': 'SerializedScriptValueFactory::instance().create({v8_value}, 0, 0, exceptionState, {isolate})',
+    'SerializedScriptValue': 'SerializedScriptValueFactory::instance().create({isolate}, {v8_value}, 0, 0, exceptionState)',
     'ScriptValue': 'ScriptValue(ScriptState::current({isolate}), {v8_value})',
     'Window': 'toDOMWindow({isolate}, {v8_value})',
-    'XPathNSResolver': 'toXPathNSResolver({isolate}, {v8_value})',
+    'XPathNSResolver': 'toXPathNSResolver(ScriptState::current({isolate}), {v8_value})',
 }
 
 
@@ -501,7 +512,7 @@ def v8_conversion_needs_exception_state(idl_type):
     return (idl_type.is_numeric_type or
             idl_type.is_enum or
             idl_type.is_dictionary or
-            idl_type.name in ('ByteString', 'Dictionary', 'USVString', 'SerializedScriptValue'))
+            idl_type.name in ('Boolean', 'ByteString', 'Dictionary', 'USVString', 'SerializedScriptValue'))
 
 IdlType.v8_conversion_needs_exception_state = property(v8_conversion_needs_exception_state)
 IdlArrayOrSequenceType.v8_conversion_needs_exception_state = True
@@ -539,7 +550,6 @@ def v8_value_to_cpp_value(idl_type, extended_attributes, v8_value, variable_name
 
     # Simple types
     idl_type = idl_type.preprocessed_type
-    add_includes_for_type(idl_type)
     base_idl_type = idl_type.as_union_type.name if idl_type.is_union_type else idl_type.base_type
 
     if idl_type.is_integer_type:
@@ -582,11 +592,14 @@ def v8_value_to_cpp_value_array_or_sequence(native_array_element_type, v8_value,
         this_cpp_type = None
         ref_ptr_type = cpp_ptr_type('RefPtr', 'Member', native_array_element_type.gc_type)
         expression_format = '(to{ref_ptr_type}NativeArray<{native_array_element_type}, V8{native_array_element_type}>({v8_value}, {index}, {isolate}, exceptionState))'
-        add_includes_for_type(native_array_element_type)
     else:
         ref_ptr_type = None
         this_cpp_type = native_array_element_type.cpp_type
-        expression_format = 'toImplArray<{cpp_type}>({v8_value}, {index}, {isolate}, exceptionState)'
+        if native_array_element_type.is_dictionary or native_array_element_type.is_union_type:
+            vector_type = 'HeapVector'
+        else:
+            vector_type = 'Vector'
+        expression_format = 'toImplArray<%s<{cpp_type}>>({v8_value}, {index}, {isolate}, exceptionState)' % vector_type
     expression = expression_format.format(native_array_element_type=native_array_element_type.name, cpp_type=this_cpp_type, index=index, ref_ptr_type=ref_ptr_type, v8_value=v8_value, isolate=isolate)
     return expression
 
@@ -597,11 +610,6 @@ def v8_value_to_local_cpp_value(idl_type, extended_attributes, v8_value, variabl
 
     this_cpp_type = idl_type.cpp_type_args(extended_attributes=extended_attributes, raw_type=True)
     idl_type = idl_type.preprocessed_type
-
-    if idl_type.base_type in ('void', 'object', 'EventHandler', 'EventListener'):
-        return {
-            'error_message': 'no V8 -> C++ conversion for IDL type: %s' % idl_type.name
-        }
 
     cpp_value = v8_value_to_cpp_value(idl_type, extended_attributes, v8_value, variable_name, index, isolate, restricted_float=restricted_float)
 
@@ -637,7 +645,9 @@ def v8_value_to_local_cpp_value(idl_type, extended_attributes, v8_value, variabl
                 else:
                     check_expression = '!%s.prepare()' % variable_name
     elif not idl_type.v8_conversion_is_trivial:
-        raise Exception('unclassified V8 -> C++ conversion for IDL type: %s' % idl_type.name)
+        return {
+            'error_message': 'no V8 -> C++ conversion for IDL type: %s' % idl_type.name
+        }
     else:
         assign_expression = cpp_value
 
@@ -729,8 +739,6 @@ def v8_conversion_type(idl_type, extended_attributes):
     # Array or sequence types
     native_array_element_type = idl_type.native_array_element_type
     if native_array_element_type:
-        if native_array_element_type.is_interface_type:
-            add_includes_for_type(native_array_element_type)
         return 'array'
 
     # Simple types
@@ -758,7 +766,6 @@ def v8_conversion_type(idl_type, extended_attributes):
         return 'Dictionary'
 
     # Data type with potential additional includes
-    add_includes_for_type(idl_type)
     if base_idl_type in V8_SET_RETURN_VALUE:  # Special v8SetReturnValue treatment
         return base_idl_type
 

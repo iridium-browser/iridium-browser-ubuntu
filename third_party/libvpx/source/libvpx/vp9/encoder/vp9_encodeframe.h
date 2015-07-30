@@ -12,6 +12,8 @@
 #ifndef VP9_ENCODER_VP9_ENCODEFRAME_H_
 #define VP9_ENCODER_VP9_ENCODEFRAME_H_
 
+#include "vpx/vpx_integer.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif

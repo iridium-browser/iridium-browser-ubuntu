@@ -29,7 +29,7 @@
 
 .elements-disclosure li.parent::before {
     -webkit-user-select: none;
-    -webkit-mask-image: url(Images/statusbarButtonGlyphs.png);
+    -webkit-mask-image: url(Images/toolbarButtonGlyphs.png);
     -webkit-mask-size: 320px 144px;
     content: "a";
     color: transparent;
@@ -39,7 +39,7 @@
 
 @media (-webkit-min-device-pixel-ratio: 1.5) {
 .elements-disclosure li.parent::before {
-    -webkit-mask-image: url(Images/statusbarButtonGlyphs_2x.png);
+    -webkit-mask-image: url(Images/toolbarButtonGlyphs_2x.png);
 }
 } /* media */
 
@@ -122,7 +122,22 @@
     margin-left: 5px;
     padding-left: 5px;
     border-left: 1px solid rgb(190, 190, 190);
+}
+
+.elements-tree-outline ol.shadow-root-depth-4 {
     background-color: rgba(0, 0, 0, 0.04);
+}
+
+.elements-tree-outline ol.shadow-root-depth-3 {
+    background-color: rgba(0, 0, 0, 0.03);
+}
+
+.elements-tree-outline ol.shadow-root-depth-2 {
+    background-color: rgba(0, 0, 0, 0.02);
+}
+
+.elements-tree-outline ol.shadow-root-depth-1 {
+    background-color: rgba(0, 0, 0, 0.01);
 }
 
 .elements-tree-outline ol.shadow-root-deep {

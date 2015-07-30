@@ -22,15 +22,15 @@
 #ifndef RuleFeature_h
 #define RuleFeature_h
 
+#include "core/CoreExport.h"
 #include "core/css/CSSSelector.h"
-#include "core/css/invalidation/StyleInvalidator.h"
+#include "core/css/invalidation/DescendantInvalidationSet.h"
 #include "wtf/Forward.h"
 #include "wtf/HashSet.h"
 #include "wtf/text/AtomicStringHash.h"
 
 namespace blink {
 
-class DescendantInvalidationSet;
 class QualifiedName;
 class RuleData;
 class SpaceSplitString;
@@ -48,7 +48,9 @@ public:
     bool hasDocumentSecurityOrigin;
 };
 
-class RuleFeatureSet {
+using InvalidationSetVector = WillBeHeapVector<RefPtrWillBeMember<DescendantInvalidationSet>, 8>;
+
+class CORE_EXPORT RuleFeatureSet {
     DISALLOW_ALLOCATION();
 public:
     RuleFeatureSet();
@@ -79,20 +81,16 @@ public:
     }
 
     bool hasSelectorForId(const AtomicString& idValue) const { return m_idInvalidationSets.contains(idValue); }
-    bool hasSelectorForPseudoType(CSSSelector::PseudoType pseudo) const { return m_pseudoInvalidationSets.contains(pseudo); }
 
-    void scheduleStyleInvalidationForClassChange(const SpaceSplitString& changedClasses, Element&);
-    void scheduleStyleInvalidationForClassChange(const SpaceSplitString& oldClasses, const SpaceSplitString& newClasses, Element&);
-    void scheduleStyleInvalidationForAttributeChange(const QualifiedName& attributeName, Element&);
-    void scheduleStyleInvalidationForIdChange(const AtomicString& oldId, const AtomicString& newId, Element&);
-    void scheduleStyleInvalidationForPseudoChange(CSSSelector::PseudoType, Element&);
+    void collectInvalidationSetsForClass(InvalidationSetVector&, Element&, const AtomicString& className) const;
+    void collectInvalidationSetsForId(InvalidationSetVector&, Element&, const AtomicString& id) const;
+    void collectInvalidationSetsForAttribute(InvalidationSetVector&, Element&, const QualifiedName& attributeName) const;
+    void collectInvalidationSetsForPseudoClass(InvalidationSetVector&, Element&, CSSSelector::PseudoType) const;
 
     bool hasIdsInSelectors() const
     {
         return m_idInvalidationSets.size() > 0;
     }
-
-    StyleInvalidator& styleInvalidator();
 
     DECLARE_TRACE();
 
@@ -103,8 +101,8 @@ protected:
     DescendantInvalidationSet* invalidationSetForSelector(const CSSSelector&);
 
 private:
-    typedef WillBeHeapHashMap<AtomicString, RefPtrWillBeMember<DescendantInvalidationSet>> InvalidationSetMap;
-    typedef WillBeHeapHashMap<CSSSelector::PseudoType, RefPtrWillBeMember<DescendantInvalidationSet>, WTF::IntHash<unsigned>, WTF::UnsignedWithZeroKeyHashTraits<unsigned>> PseudoTypeInvalidationSetMap;
+    using InvalidationSetMap = WillBeHeapHashMap<AtomicString, RefPtrWillBeMember<DescendantInvalidationSet>>;
+    using PseudoTypeInvalidationSetMap = WillBeHeapHashMap<CSSSelector::PseudoType, RefPtrWillBeMember<DescendantInvalidationSet>, WTF::IntHash<unsigned>, WTF::UnsignedWithZeroKeyHashTraits<unsigned>>;
 
     struct FeatureMetadata {
         FeatureMetadata()
@@ -172,10 +170,10 @@ private:
     InvalidationSetMap m_attributeInvalidationSets;
     InvalidationSetMap m_idInvalidationSets;
     PseudoTypeInvalidationSetMap m_pseudoInvalidationSets;
-    StyleInvalidator m_styleInvalidator;
 };
 
-
 } // namespace blink
+
+WTF_ALLOW_MOVE_AND_INIT_WITH_MEM_FUNCTIONS(blink::RuleFeature);
 
 #endif // RuleFeature_h

@@ -69,7 +69,7 @@
 #include "sync/test/fake_encryptor.h"
 #include "sync/util/cryptographer.h"
 #include "sync/util/extensions_activity.h"
-#include "sync/util/test_unrecoverable_error_handler.h"
+#include "sync/util/mock_unrecoverable_error_handler.h"
 #include "sync/util/time.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -572,6 +572,35 @@ TEST_F(SyncApiTest, WriteEncryptedTitle) {
   }
 }
 
+// Non-unique name should not be empty. For bookmarks non-unique name is copied
+// from bookmark title. This test verifies that setting bookmark title to ""
+// results in single space title and non-unique name in internal representation.
+// GetTitle should still return empty string.
+TEST_F(SyncApiTest, WriteEmptyBookmarkTitle) {
+  int bookmark_id;
+  {
+    WriteTransaction trans(FROM_HERE, user_share());
+    ReadNode root_node(&trans);
+    root_node.InitByRootLookup();
+
+    WriteNode bookmark_node(&trans);
+    ASSERT_TRUE(bookmark_node.InitBookmarkByCreation(root_node, NULL));
+    bookmark_id = bookmark_node.GetId();
+    bookmark_node.SetTitle("");
+  }
+  {
+    ReadTransaction trans(FROM_HERE, user_share());
+    ReadNode root_node(&trans);
+    root_node.InitByRootLookup();
+
+    ReadNode bookmark_node(&trans);
+    ASSERT_EQ(BaseNode::INIT_OK, bookmark_node.InitByIdLookup(bookmark_id));
+    EXPECT_EQ("", bookmark_node.GetTitle());
+    EXPECT_EQ(" ", bookmark_node.GetEntry()->GetSpecifics().bookmark().title());
+    EXPECT_EQ(" ", bookmark_node.GetEntry()->GetNonUniqueName());
+  }
+}
+
 TEST_F(SyncApiTest, BaseNodeSetSpecifics) {
   int64 child_id = MakeNodeWithRoot(user_share(), BOOKMARKS, "testtag");
   WriteTransaction trans(FROM_HERE, user_share());
@@ -807,7 +836,8 @@ class SyncManagerTest : public testing::Test,
   };
 
   SyncManagerTest()
-      : sync_manager_("Test sync manager") {
+      : sync_manager_("Test sync manager"),
+        mock_unrecoverable_error_handler_(NULL) {
     switches_.encryption_method =
         InternalComponentsFactory::ENCRYPTION_KEYSTORE;
   }
@@ -857,7 +887,8 @@ class SyncManagerTest : public testing::Test,
     args.invalidator_client_id = "fake_invalidator_client_id";
     args.internal_components_factory.reset(GetFactory());
     args.encryptor = &encryptor_;
-    args.unrecoverable_error_handler.reset(new TestUnrecoverableErrorHandler);
+    mock_unrecoverable_error_handler_ = new MockUnrecoverableErrorHandler();
+    args.unrecoverable_error_handler.reset(mock_unrecoverable_error_handler_);
     args.cancelation_signal = &cancelation_signal_;
     sync_manager_.Init(&args);
 
@@ -903,13 +934,13 @@ class SyncManagerTest : public testing::Test,
     return GetRoutingInfoTypes(routing_info);
   }
 
-  virtual void OnChangesApplied(
+  void OnChangesApplied(
       ModelType model_type,
       int64 model_version,
       const BaseTransaction* trans,
       const ImmutableChangeRecordList& changes) override {}
 
-  virtual void OnChangesComplete(ModelType model_type) override {}
+  void OnChangesComplete(ModelType model_type) override {}
 
   // Helper methods.
   bool SetUpEncryption(NigoriStatus nigori_status,
@@ -1051,6 +1082,12 @@ class SyncManagerTest : public testing::Test,
               sync_manager_.GetEncryptionHandler()->GetPassphraseType());
   }
 
+  bool HasUnrecoverableError() {
+    if (mock_unrecoverable_error_handler_)
+      return mock_unrecoverable_error_handler_->invocation_count() > 0;
+    return false;
+  }
+
  private:
   // Needed by |sync_manager_|.
   base::MessageLoop message_loop_;
@@ -1070,12 +1107,15 @@ class SyncManagerTest : public testing::Test,
   StrictMock<SyncEncryptionHandlerObserverMock> encryption_observer_;
   InternalComponentsFactory::Switches switches_;
   InternalComponentsFactory::StorageOption storage_used_;
+
+  // Not owned (ownership is passed to the SyncManager).
+  MockUnrecoverableErrorHandler* mock_unrecoverable_error_handler_;
 };
 
 TEST_F(SyncManagerTest, GetAllNodesForTypeTest) {
   ModelSafeRoutingInfo routing_info;
   GetModelSafeRoutingInfo(&routing_info);
-  sync_manager_.StartSyncingNormally(routing_info);
+  sync_manager_.StartSyncingNormally(routing_info, base::Time());
 
   scoped_ptr<base::ListValue> node_list(
       sync_manager_.GetAllNodesForType(syncer::PREFERENCES));
@@ -2029,6 +2069,93 @@ TEST_F(SyncManagerTest, UpdatePasswordReencryptEverything) {
   EXPECT_FALSE(ResetUnsyncedEntry(PASSWORDS, client_tag));
 }
 
+// Test that attempting to start up with corrupted password data triggers
+// an unrecoverable error (rather than crashing).
+TEST_F(SyncManagerTest, ReencryptEverythingWithUnrecoverableErrorPasswords) {
+  const char kClientTag[] = "client_tag";
+
+  EXPECT_TRUE(SetUpEncryption(WRITE_TO_NIGORI, DEFAULT_ENCRYPTION));
+  sync_pb::EntitySpecifics entity_specifics;
+  {
+    // Create a synced bookmark with undecryptable data.
+    ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
+
+    Cryptographer other_cryptographer(&encryptor_);
+    KeyParams fake_params = {"localhost", "dummy", "fake_key"};
+    other_cryptographer.AddKey(fake_params);
+    sync_pb::PasswordSpecificsData data;
+    data.set_password_value("secret");
+    other_cryptographer.Encrypt(
+        data,
+        entity_specifics.mutable_password()->mutable_encrypted());
+
+    // Set up the real cryptographer with a different key.
+    KeyParams real_params = {"localhost", "username", "real_key"};
+    trans.GetCryptographer()->AddKey(real_params);
+  }
+  MakeServerNode(sync_manager_.GetUserShare(), PASSWORDS, kClientTag,
+                 syncable::GenerateSyncableHash(PASSWORDS,
+                                                kClientTag),
+                 entity_specifics);
+  EXPECT_FALSE(ResetUnsyncedEntry(PASSWORDS, kClientTag));
+
+  // Force a re-encrypt everything. Should trigger an unrecoverable error due
+  // to being unable to decrypt the data that was previously applied.
+  testing::Mock::VerifyAndClearExpectations(&encryption_observer_);
+  EXPECT_CALL(encryption_observer_, OnEncryptionComplete());
+  EXPECT_CALL(encryption_observer_, OnCryptographerStateChanged(_));
+  EXPECT_CALL(encryption_observer_, OnEncryptedTypesChanged(_, false));
+  EXPECT_FALSE(HasUnrecoverableError());
+  sync_manager_.GetEncryptionHandler()->Init();
+  PumpLoop();
+  EXPECT_TRUE(HasUnrecoverableError());
+}
+
+// Test that attempting to start up with corrupted bookmark data triggers
+// an unrecoverable error (rather than crashing).
+TEST_F(SyncManagerTest, ReencryptEverythingWithUnrecoverableErrorBookmarks) {
+  const char kClientTag[] = "client_tag";
+  EXPECT_CALL(encryption_observer_,
+              OnEncryptedTypesChanged(
+                  HasModelTypes(EncryptableUserTypes()), true));
+  EXPECT_TRUE(SetUpEncryption(WRITE_TO_NIGORI, FULL_ENCRYPTION));
+  sync_pb::EntitySpecifics entity_specifics;
+  {
+    // Create a synced bookmark with undecryptable data.
+    ReadTransaction trans(FROM_HERE, sync_manager_.GetUserShare());
+
+    Cryptographer other_cryptographer(&encryptor_);
+    KeyParams fake_params = {"localhost", "dummy", "fake_key"};
+    other_cryptographer.AddKey(fake_params);
+    sync_pb::EntitySpecifics bm_specifics;
+    bm_specifics.mutable_bookmark()->set_title("title");
+    bm_specifics.mutable_bookmark()->set_url("url");
+    sync_pb::EncryptedData encrypted;
+    other_cryptographer.Encrypt(bm_specifics, &encrypted);
+    entity_specifics.mutable_encrypted()->CopyFrom(encrypted);
+
+    // Set up the real cryptographer with a different key.
+    KeyParams real_params = {"localhost", "username", "real_key"};
+    trans.GetCryptographer()->AddKey(real_params);
+  }
+  MakeServerNode(sync_manager_.GetUserShare(), BOOKMARKS, kClientTag,
+                 syncable::GenerateSyncableHash(BOOKMARKS,
+                                                kClientTag),
+                 entity_specifics);
+  EXPECT_FALSE(ResetUnsyncedEntry(BOOKMARKS, kClientTag));
+
+  // Force a re-encrypt everything. Should trigger an unrecoverable error due
+  // to being unable to decrypt the data that was previously applied.
+  testing::Mock::VerifyAndClearExpectations(&encryption_observer_);
+  EXPECT_CALL(encryption_observer_, OnEncryptionComplete());
+  EXPECT_CALL(encryption_observer_, OnCryptographerStateChanged(_));
+  EXPECT_CALL(encryption_observer_, OnEncryptedTypesChanged(_, true));
+  EXPECT_FALSE(HasUnrecoverableError());
+  sync_manager_.GetEncryptionHandler()->Init();
+  PumpLoop();
+  EXPECT_TRUE(HasUnrecoverableError());
+}
+
 // Verify SetTitle(..) doesn't unnecessarily set IS_UNSYNCED for bookmarks
 // when we write the same data, but does set it when we write new data.
 TEST_F(SyncManagerTest, SetBookmarkTitle) {
@@ -2377,7 +2504,7 @@ class MockSyncScheduler : public FakeSyncScheduler {
   MockSyncScheduler() : FakeSyncScheduler() {}
   virtual ~MockSyncScheduler() {}
 
-  MOCK_METHOD1(Start, void(SyncScheduler::Mode));
+  MOCK_METHOD2(Start, void(SyncScheduler::Mode, base::Time));
   MOCK_METHOD1(ScheduleConfiguration, void(const ConfigurationParams&));
 };
 
@@ -2437,7 +2564,7 @@ TEST_F(SyncManagerTestWithMockScheduler, BasicConfiguration) {
   ModelTypeSet disabled_types = Difference(ModelTypeSet::All(), enabled_types);
 
   ConfigurationParams params;
-  EXPECT_CALL(*scheduler(), Start(SyncScheduler::CONFIGURATION_MODE));
+  EXPECT_CALL(*scheduler(), Start(SyncScheduler::CONFIGURATION_MODE, _));
   EXPECT_CALL(*scheduler(), ScheduleConfiguration(_)).
       WillOnce(SaveArg<0>(&params));
 
@@ -2489,7 +2616,7 @@ TEST_F(SyncManagerTestWithMockScheduler, ReConfiguration) {
   ModelTypeSet enabled_types = GetRoutingInfoTypes(new_routing_info);
 
   ConfigurationParams params;
-  EXPECT_CALL(*scheduler(), Start(SyncScheduler::CONFIGURATION_MODE));
+  EXPECT_CALL(*scheduler(), Start(SyncScheduler::CONFIGURATION_MODE, _));
   EXPECT_CALL(*scheduler(), ScheduleConfiguration(_)).
       WillOnce(SaveArg<0>(&params));
 

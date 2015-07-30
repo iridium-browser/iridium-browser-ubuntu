@@ -21,6 +21,7 @@
 #ifndef CSSValue_h
 #define CSSValue_h
 
+#include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
 #include "platform/weborigin/KURL.h"
 #include "wtf/HashMap.h"
@@ -30,13 +31,24 @@
 
 namespace blink {
 
-class CSSValue : public RefCountedWillBeGarbageCollectedFinalized<CSSValue> {
+class CORE_EXPORT CSSValue : public RefCountedWillBeGarbageCollectedFinalized<CSSValue> {
 public:
+#if ENABLE(OILPAN)
+    // Override operator new to allocate CSSValue subtype objects onto
+    // a dedicated heap.
+    GC_PLUGIN_IGNORE("crbug.com/443854")
+    void* operator new(size_t size)
+    {
+        return allocateObject(size);
+    }
+    static void* allocateObject(size_t size)
+    {
+        ThreadState* state = ThreadStateFor<ThreadingTrait<CSSValue>::Affinity>::state();
+        return Heap::allocateOnHeapIndex(state, size, CSSValueHeapIndex, GCInfoTrait<CSSValue>::index());
+    }
+#else
     // Override RefCounted's deref() to ensure operator delete is called on
     // the appropriate subclass type.
-    // When oilpan is enabled the finalize method is called by the garbage
-    // collector and not immediately when deref reached zero.
-#if !ENABLE(OILPAN)
     void deref()
     {
         if (derefBase())
@@ -65,8 +77,9 @@ public:
     bool isImageValue() const { return m_classType == ImageClass; }
     bool isImplicitInitialValue() const;
     bool isInheritedValue() const { return m_classType == InheritedClass; }
-    bool isUnsetValue() const { return m_classType == UnsetClass; }
     bool isInitialValue() const { return m_classType == InitialClass; }
+    bool isUnsetValue() const { return m_classType == UnsetClass; }
+    bool isCSSWideKeyword() const { return m_classType >= InheritedClass && m_classType <= UnsetClass; }
     bool isLinearGradientValue() const { return m_classType == LinearGradientClass; }
     bool isPathValue() const { return m_classType == PathClass; }
     bool isRadialGradientValue() const { return m_classType == RadialGradientClass; }
@@ -89,6 +102,12 @@ public:
     void finalizeGarbageCollectedObject();
     DEFINE_INLINE_TRACE_AFTER_DISPATCH() { }
     DECLARE_TRACE();
+
+    // ~CSSValue should be public, because non-public ~CSSValue causes C2248
+    // error: 'blink::CSSValue::~CSSValue' : cannot access protected member
+    // declared in class 'blink::CSSValue' when compiling
+    // 'source\wtf\refcounted.h' by using msvc.
+    ~CSSValue() { }
 
 protected:
 
@@ -162,8 +181,6 @@ protected:
     // NOTE: This class is non-virtual for memory and performance reasons.
     // Don't go making it virtual again unless you know exactly what you're doing!
 
-    ~CSSValue() { }
-
 private:
     void destroy();
 
@@ -219,8 +236,6 @@ inline bool compareCSSValuePtr(const Member<CSSValueType>& first, const Member<C
 
 #define DEFINE_CSS_VALUE_TYPE_CASTS(thisType, predicate) \
     DEFINE_TYPE_CASTS(thisType, CSSValue, value, value->predicate, value.predicate)
-
-WILL_HAVE_ALL_INSTANCES_ON_SAME_GC_HEAP(CSSValue);
 
 } // namespace blink
 

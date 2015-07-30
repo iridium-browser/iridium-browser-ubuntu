@@ -6,9 +6,10 @@
 #include "base/bind_helpers.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/test/test_timeouts.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/thread.h"
 #include "media/base/video_capture_types.h"
 #include "media/video/capture/video_capture_device.h"
@@ -44,8 +45,6 @@
 // On Android, native camera (JAVA) delivers frames on UI thread which is the
 // main thread for tests. This results in no frame received by
 // VideoCaptureAndroid.
-#define CaptureVGA DISABLED_CaptureVGA
-#define Capture720p DISABLED_Capture720p
 #define MAYBE_AllocateBadSize DISABLED_AllocateBadSize
 #define ReAllocateCamera DISABLED_ReAllocateCamera
 #define DeAllocateCameraWhileRunning DISABLED_DeAllocateCameraWhileRunning
@@ -62,29 +61,31 @@ using ::testing::SaveArg;
 namespace media {
 namespace {
 
+static const gfx::Size kCaptureSizes[] = {
+    gfx::Size(640, 480),
+    gfx::Size(1280, 720)
+};
+
 class MockClient : public VideoCaptureDevice::Client {
  public:
-  MOCK_METHOD2(ReserveOutputBuffer,
-               scoped_refptr<Buffer>(VideoFrame::Format format,
-                                     const gfx::Size& dimensions));
   MOCK_METHOD9(OnIncomingCapturedYuvData,
-               void (const uint8* y_data,
-                     const uint8* u_data,
-                     const uint8* v_data,
-                     size_t y_stride,
-                     size_t u_stride,
-                     size_t v_stride,
-                     const VideoCaptureFormat& frame_format,
-                     int clockwise_rotation,
-                     const base::TimeTicks& timestamp));
-  MOCK_METHOD3(OnIncomingCapturedVideoFrame,
-               void(const scoped_refptr<Buffer>& buffer,
-                    const scoped_refptr<VideoFrame>& frame,
+               void(const uint8* y_data,
+                    const uint8* u_data,
+                    const uint8* v_data,
+                    size_t y_stride,
+                    size_t u_stride,
+                    size_t v_stride,
+                    const VideoCaptureFormat& frame_format,
+                    int clockwise_rotation,
                     const base::TimeTicks& timestamp));
+  MOCK_METHOD0(DoReserveOutputBuffer, void(void));
+  MOCK_METHOD0(DoOnIncomingCapturedBuffer, void(void));
+  MOCK_METHOD0(DoOnIncomingCapturedVideoFrame, void(void));
   MOCK_METHOD1(OnError, void(const std::string& reason));
 
   explicit MockClient(base::Callback<void(const VideoCaptureFormat&)> frame_cb)
-      : main_thread_(base::MessageLoopProxy::current()), frame_cb_(frame_cb) {}
+      : main_thread_(base::ThreadTaskRunnerHandle::Get()),
+      frame_cb_(frame_cb) {}
 
   void OnIncomingCapturedData(const uint8* data,
                               int length,
@@ -94,6 +95,23 @@ class MockClient : public VideoCaptureDevice::Client {
     ASSERT_GT(length, 0);
     ASSERT_TRUE(data != NULL);
     main_thread_->PostTask(FROM_HERE, base::Bind(frame_cb_, format));
+  }
+
+  // Trampoline methods to workaround GMOCK problems with scoped_ptr<>.
+  scoped_ptr<Buffer> ReserveOutputBuffer(VideoPixelFormat format,
+                                         const gfx::Size& dimensions) override {
+    DoReserveOutputBuffer();
+    return scoped_ptr<Buffer>();
+  }
+  void OnIncomingCapturedBuffer(scoped_ptr<Buffer> buffer,
+                                const VideoCaptureFormat& frame_format,
+                                const base::TimeTicks& timestamp) override {
+    DoOnIncomingCapturedBuffer();
+  }
+  void OnIncomingCapturedVideoFrame(scoped_ptr<Buffer> buffer,
+                                    const scoped_refptr<VideoFrame>& frame,
+                                    const base::TimeTicks& timestamp) override {
+    DoOnIncomingCapturedVideoFrame();
   }
 
  private:
@@ -118,7 +136,8 @@ class DeviceEnumerationListener :
 
 }  // namespace
 
-class VideoCaptureDeviceTest : public testing::Test {
+class VideoCaptureDeviceTest :
+    public testing::TestWithParam<gfx::Size> {
  protected:
   typedef VideoCaptureDevice::Client Client;
 
@@ -128,7 +147,7 @@ class VideoCaptureDeviceTest : public testing::Test {
             new MockClient(base::Bind(&VideoCaptureDeviceTest::OnFrameCaptured,
                                       base::Unretained(this)))),
         video_capture_device_factory_(VideoCaptureDeviceFactory::CreateFactory(
-            base::MessageLoopProxy::current())) {
+            base::ThreadTaskRunnerHandle::Get())) {
     device_enumeration_listener_ = new DeviceEnumerationListener();
   }
 
@@ -142,8 +161,9 @@ class VideoCaptureDeviceTest : public testing::Test {
 #endif
     EXPECT_CALL(*client_, OnIncomingCapturedYuvData(_,_,_,_,_,_,_,_,_))
                .Times(0);
-    EXPECT_CALL(*client_, ReserveOutputBuffer(_,_)).Times(0);
-    EXPECT_CALL(*client_, OnIncomingCapturedVideoFrame(_,_,_)).Times(0);
+    EXPECT_CALL(*client_, DoReserveOutputBuffer()).Times(0);
+    EXPECT_CALL(*client_, DoOnIncomingCapturedBuffer()).Times(0);
+    EXPECT_CALL(*client_, DoOnIncomingCapturedVideoFrame()).Times(0);
   }
 
   void ResetWithNewClient() {
@@ -197,6 +217,23 @@ class VideoCaptureDeviceTest : public testing::Test {
     DVLOG_IF(1, pixel_format != PIXEL_FORMAT_MAX) << "No camera can capture the"
         << " format: " << VideoCaptureFormat::PixelFormatToString(pixel_format);
     return scoped_ptr<VideoCaptureDevice::Name>();
+  }
+
+  bool IsCaptureSizeSupported(const VideoCaptureDevice::Name& device,
+                              const gfx::Size& size) {
+    VideoCaptureFormats supported_formats;
+    video_capture_device_factory_->GetDeviceSupportedFormats(
+        device, &supported_formats);
+    const auto it =
+        std::find_if(supported_formats.begin(), supported_formats.end(),
+                     [&size](VideoCaptureFormat const& f) {
+                       return f.frame_size == size;
+                     });
+    if (it == supported_formats.end()) {
+      DVLOG(1) << "Size " << size.ToString() << " is not supported.";
+      return false;
+    }
+    return true;
   }
 
 #if defined(OS_WIN)
@@ -255,12 +292,18 @@ TEST_F(VideoCaptureDeviceTest, MAYBE_OpenInvalidDevice) {
 #endif
 }
 
-TEST_F(VideoCaptureDeviceTest, CaptureVGA) {
+TEST_P(VideoCaptureDeviceTest, CaptureWithSize) {
   names_ = EnumerateDevices();
   if (names_->empty()) {
     DVLOG(1) << "No camera available. Exiting test.";
     return;
   }
+
+  const gfx::Size& size = GetParam();
+  if (!IsCaptureSizeSupported(names_->front(), size))
+    return;
+  const int width = size.width();
+  const int height = size.height();
 
   scoped_ptr<VideoCaptureDevice> device(
       video_capture_device_factory_->Create(names_->front()));
@@ -270,45 +313,25 @@ TEST_F(VideoCaptureDeviceTest, CaptureVGA) {
   EXPECT_CALL(*client_, OnError(_)).Times(0);
 
   VideoCaptureParams capture_params;
-  capture_params.requested_format.frame_size.SetSize(640, 480);
-  capture_params.requested_format.frame_rate = 30;
+  capture_params.requested_format.frame_size.SetSize(width, height);
+  capture_params.requested_format.frame_rate = 30.0f;
   capture_params.requested_format.pixel_format = PIXEL_FORMAT_I420;
   device->AllocateAndStart(capture_params, client_.Pass());
   // Get captured video frames.
   WaitForCapturedFrame();
-  EXPECT_EQ(last_format().frame_size.width(), 640);
-  EXPECT_EQ(last_format().frame_size.height(), 480);
-  EXPECT_EQ(static_cast<size_t>(640 * 480 * 3 / 2),
-            last_format().ImageAllocationSize());
+  EXPECT_EQ(last_format().frame_size.width(), width);
+  EXPECT_EQ(last_format().frame_size.height(), height);
+  if (last_format().pixel_format != PIXEL_FORMAT_MJPEG)
+    EXPECT_LE(static_cast<size_t>(width * height * 3 / 2),
+              last_format().ImageAllocationSize());
   device->StopAndDeAllocate();
 }
 
-TEST_F(VideoCaptureDeviceTest, Capture720p) {
-  names_ = EnumerateDevices();
-  if (names_->empty()) {
-    DVLOG(1) << "No camera available. Exiting test.";
-    return;
-  }
-
-  scoped_ptr<VideoCaptureDevice> device(
-      video_capture_device_factory_->Create(names_->front()));
-  ASSERT_TRUE(device);
-
-  EXPECT_CALL(*client_, OnError(_)).Times(0);
-
-  VideoCaptureParams capture_params;
-  capture_params.requested_format.frame_size.SetSize(1280, 720);
-  capture_params.requested_format.frame_rate = 30;
-  capture_params.requested_format.pixel_format = PIXEL_FORMAT_I420;
-  device->AllocateAndStart(capture_params, client_.Pass());
-  // Get captured video frames.
-  WaitForCapturedFrame();
-  EXPECT_EQ(last_format().frame_size.width(), 1280);
-  EXPECT_EQ(last_format().frame_size.height(), 720);
-  EXPECT_EQ(static_cast<size_t>(1280 * 720 * 3 / 2),
-            last_format().ImageAllocationSize());
-  device->StopAndDeAllocate();
-}
+#if !defined(OS_ANDROID)
+INSTANTIATE_TEST_CASE_P(MAYBE_VideoCaptureDeviceTests,
+                        VideoCaptureDeviceTest,
+                        testing::ValuesIn(kCaptureSizes));
+#endif
 
 TEST_F(VideoCaptureDeviceTest, MAYBE_AllocateBadSize) {
   names_ = EnumerateDevices();

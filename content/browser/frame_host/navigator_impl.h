@@ -34,6 +34,7 @@ class CONTENT_EXPORT NavigatorImpl : public Navigator {
                 NavigatorDelegate* delegate);
 
   // Navigator implementation.
+  NavigatorDelegate* GetDelegate() override;
   NavigationController* GetController() override;
   void DidStartProvisionalLoad(RenderFrameHostImpl* render_frame_host,
                                const GURL& url,
@@ -77,6 +78,9 @@ class CONTENT_EXPORT NavigatorImpl : public Navigator {
   void CommitNavigation(FrameTreeNode* frame_tree_node,
                         ResourceResponse* response,
                         scoped_ptr<StreamHandle> body) override;
+  void FailedNavigation(FrameTreeNode* frame_tree_node,
+                        bool has_stale_copy_in_cache,
+                        int error_code) override;
   void LogResourceRequestTime(base::TimeTicks timestamp,
                               const GURL& url) override;
   void LogBeforeUnloadTime(
@@ -84,11 +88,6 @@ class CONTENT_EXPORT NavigatorImpl : public Navigator {
       const base::TimeTicks& renderer_before_unload_end_time) override;
   void CancelNavigation(FrameTreeNode* frame_tree_node) override;
   bool IsWaitingForBeforeUnloadACK(FrameTreeNode* frame_tree_node) override;
-
-  // PlzNavigate
-  // Returns the navigation request for a given node. Used in tests.
-  NavigationRequest* GetNavigationRequestForNodeForTesting(
-      FrameTreeNode* frame_tree_node);
 
  private:
   // Holds data used to track browser side navigation metrics.
@@ -138,11 +137,6 @@ class CONTENT_EXPORT NavigatorImpl : public Navigator {
   NavigatorDelegate* delegate_;
 
   scoped_ptr<NavigatorImpl::NavigationMetricsData> navigation_data_;
-
-  // PlzNavigate: used to track the various ongoing NavigationRequests in the
-  // different FrameTreeNodes, based on the frame_tree_node_id.
-  typedef base::ScopedPtrHashMap<int64, NavigationRequest> NavigationRequestMap;
-  NavigationRequestMap navigation_request_map_;
 
   DISALLOW_COPY_AND_ASSIGN(NavigatorImpl);
 };

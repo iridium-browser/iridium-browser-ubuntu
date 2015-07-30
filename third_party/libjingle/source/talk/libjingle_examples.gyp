@@ -97,11 +97,15 @@
             'examples/peerconnection/client/peer_connection_client.h',
           ],
           'dependencies': [
-            '<(DEPTH)/third_party/jsoncpp/jsoncpp.gyp:jsoncpp',
             'libjingle.gyp:libjingle_peerconnection',
             '<@(libjingle_tests_additional_deps)',
           ],
           'conditions': [
+            ['build_json==1', {
+              'dependencies': [
+                '<(DEPTH)/third_party/jsoncpp/jsoncpp.gyp:jsoncpp',
+              ],
+            }],
             # TODO(ronghuawu): Move these files to a win/ directory then they
             # can be excluded automatically.
             ['OS=="win"', {
@@ -222,6 +226,8 @@
                 'examples/objc/AppRTCDemo/ios/resources/ic_call_end_black_24dp@2x.png',
                 'examples/objc/AppRTCDemo/ios/resources/ic_clear_black_24dp.png',
                 'examples/objc/AppRTCDemo/ios/resources/ic_clear_black_24dp@2x.png',
+                'examples/objc/AppRTCDemo/ios/resources/ic_switch_video_black_24dp.png',
+                'examples/objc/AppRTCDemo/ios/resources/ic_switch_video_black_24dp@2x.png',
                 'examples/objc/Icon.png',
               ],
               'sources': [

@@ -162,13 +162,13 @@ std::map<uint16, LoggingEventCounts> GetEventCountForPacketEvents(
 // PacketReceiverCallback.
 class LoopBackPacketPipe : public test::PacketPipe {
  public:
-  LoopBackPacketPipe(const PacketReceiverCallback& packet_receiver)
+  explicit LoopBackPacketPipe(const PacketReceiverCallback& packet_receiver)
       : packet_receiver_(packet_receiver) {}
 
-  ~LoopBackPacketPipe() override {}
+  ~LoopBackPacketPipe() final {}
 
   // PacketPipe implementations.
-  void Send(scoped_ptr<Packet> packet) override {
+  void Send(scoped_ptr<Packet> packet) final {
     packet_receiver_.Run(packet.Pass());
   }
 
@@ -200,7 +200,7 @@ class LoopBackTransport : public PacketSender {
     packet_pipe_->InitOnIOThread(task_runner, clock);
   }
 
-  bool SendPacket(PacketRef packet, const base::Closure& cb) override {
+  bool SendPacket(PacketRef packet, const base::Closure& cb) final {
     DCHECK(cast_environment_->CurrentlyOn(CastEnvironment::MAIN));
     if (!send_packets_)
       return true;
@@ -217,7 +217,7 @@ class LoopBackTransport : public PacketSender {
     return true;
   }
 
-  int64 GetBytesSent() override { return bytes_sent_; }
+  int64 GetBytesSent() final { return bytes_sent_; }
 
   void SetSendPackets(bool send_packets) { send_packets_ = send_packets; }
 
@@ -276,7 +276,7 @@ class TestReceiverAudioCallback
                        bool is_continuous) {
     ++num_called_;
 
-    ASSERT_TRUE(!!audio_bus);
+    ASSERT_TRUE(audio_bus);
     ASSERT_FALSE(expected_frames_.empty());
     const scoped_ptr<ExpectedAudioFrame> expected_audio_frame(
         expected_frames_.front());
@@ -306,7 +306,7 @@ class TestReceiverAudioCallback
   }
 
   void CheckCodedAudioFrame(scoped_ptr<EncodedFrame> audio_frame) {
-    ASSERT_TRUE(!!audio_frame);
+    ASSERT_TRUE(audio_frame);
     ASSERT_FALSE(expected_frames_.empty());
     const ExpectedAudioFrame& expected_audio_frame =
         *(expected_frames_.front());
@@ -375,7 +375,7 @@ class TestReceiverVideoCallback
                        bool is_continuous) {
     ++num_called_;
 
-    ASSERT_TRUE(!!video_frame.get());
+    ASSERT_TRUE(video_frame.get());
     ASSERT_FALSE(expected_frame_.empty());
     ExpectedVideoFrame expected_video_frame = expected_frame_.front();
     expected_frame_.pop_front();
@@ -643,7 +643,7 @@ class End2EndTest : public ::testing::Test {
         &event_subscriber_sender_);
   }
 
-  void TearDown() override {
+  void TearDown() final {
     cast_sender_.reset();
     cast_receiver_.reset();
     task_runner_->RunTasks();

@@ -11,7 +11,7 @@ gypi_values = exec_script("//build/gypi_to_gn.py",
                           "scope",
                           [ "../../chrome_browser_ui.gypi" ])
 
-static_library("ui") {
+source_set("ui") {
   output_name = "browser_ui"
 
   sources = []
@@ -42,7 +42,8 @@ static_library("ui") {
     "//chrome:strings",
     "//chrome/app/resources:platform_locale_settings",
     "//chrome/app/theme:theme_resources",
-    "//chrome/browser/net:cert_logger_proto",
+    "//chrome/browser/net:encrypted_cert_logger_proto",
+    "//chrome/browser/ssl:cert_logger_proto",
     "//chrome/common",
     "//chrome/common/net",
     "//components/app_modal",
@@ -79,12 +80,6 @@ static_library("ui") {
     sources += rebase_path(gypi_values.chrome_browser_ui_non_ios_sources,
                            ".",
                            "//chrome")
-    sources += rebase_path(gypi_values.chrome_browser_ui_global_error_sources,
-                           ".",
-                           "//chrome")
-    sources += rebase_path(gypi_values.chrome_browser_ui_omnibox_sources,
-                           ".",
-                           "//chrome")
     sources += rebase_path(gypi_values.chrome_browser_ui_toolbar_model_sources,
                            ".",
                            "//chrome")
@@ -104,7 +99,6 @@ static_library("ui") {
       "//third_party/WebKit/public:resources",
       "//third_party/adobe/flash:flapper_version_h",
       "//third_party/expat",
-      "//third_party/hunspell",
       "//third_party/leveldatabase",
       "//third_party/mojo/src/mojo/edk/system",
       "//third_party/npapi",
@@ -134,6 +128,7 @@ static_library("ui") {
     deps += [
       "//components/copresence",
       "//components/feedback/proto",
+      "//components/proximity_auth/webui",
       "//device/bluetooth",
       "//third_party/libusb",
     ]
@@ -143,12 +138,6 @@ static_library("ui") {
     deps += [ "//printing" ]
   }
 
-  if (enable_one_click_signin) {
-    sources +=
-        rebase_path(gypi_values.chrome_browser_ui_one_click_signin_sources,
-                    ".",
-                    "//chrome")
-  }
   if (enable_nacl) {
     sources +=
         rebase_path(gypi_values.chrome_browser_ui_nacl_sources, ".", "//chrome")
@@ -167,7 +156,6 @@ static_library("ui") {
     deps += [ "//ppapi/proxy:ipc" ]
   }
   if (safe_browsing_mode == 1) {
-    defines += [ "FULL_SAFE_BROWSING" ]
     deps += [
       "//chrome/browser/safe_browsing:chunk_proto",
       "//chrome/common/safe_browsing:proto",
@@ -217,50 +205,22 @@ static_library("ui") {
                       ".",
                       "//chrome")
     }
-    if (is_mac) {
-      if (mac_views_browser) {
-        sources += rebase_path(
-                gypi_values.chrome_browser_ui_views_mac_experimental_sources,
-                ".",
-                "//chrome")
-        sources +=
-            rebase_path(gypi_values.chrome_browser_ui_views_non_mac_sources,
-                        ".",
-                        "//chrome")
-        sources -= [
-          "cocoa/apps/chrome_app_window_client_cocoa.mm",
-          "cocoa/autofill/card_unmask_prompt_view_bridge.mm",
-          "cocoa/autofill/generated_credit_card_bubble_cocoa.mm",
-          "cocoa/autofill/new_credit_card_bubble_cocoa.mm",
-          "cocoa/bookmarks/bookmark_drag_drop_cocoa.mm",
-          "cocoa/browser_window_factory_cocoa.mm",
-          "cocoa/constrained_web_dialog_delegate_mac.mm",
-          "cocoa/extensions/browser_action_test_util_mac.mm",
-          "cocoa/extensions/extension_action_platform_delegate_cocoa.mm",
-          "cocoa/extensions/extension_install_dialog_controller.mm",
-          "cocoa/extensions/extension_installed_bubble_bridge.mm",
-          "cocoa/extensions/extension_uninstall_dialog_cocoa.mm",
-          "cocoa/extensions/media_galleries_dialog_cocoa.mm",
-          "cocoa/infobars/alternate_nav_infobar_controller.mm",
-          "cocoa/infobars/confirm_infobar_controller.mm",
-          "cocoa/login_prompt_cocoa.mm",
-          "cocoa/panels/panel_stack_window_cocoa.mm",
-          "cocoa/simple_message_box_mac.mm",
-          "cocoa/single_web_contents_dialog_manager_cocoa.cc",
-          "cocoa/ssl_client_certificate_selector_cocoa.mm",
-          "cocoa/tab_dialogs_cocoa.mm",
-          "cocoa/tab_modal_confirm_dialog_mac.mm",
-          "cocoa/task_manager_mac.mm",
-          "cocoa/web_dialog_window_controller.mm",
-        ]
-        deps += [ "//extensions/components/native_app_window" ]
-      }
-    } else {
+    if (!is_mac) {
       sources +=
           rebase_path(gypi_values.chrome_browser_ui_views_non_mac_sources,
                       ".",
                       "//chrome")
       deps += [ "//extensions/components/native_app_window" ]
+      if (is_chromeos) {
+        # TODO(GYP): crbug.com/481629. These files should probably not be
+        # a part of ui_views_non_mac_sources at all.
+        sources -= [
+          "views/frame/opaque_browser_frame_view.cc",
+          "views/frame/opaque_browser_frame_view.h",
+          "views/frame/opaque_browser_frame_view_linux.cc",
+          "views/frame/opaque_browser_frame_view_linux.h",
+        ]
+      }
     }
     if (use_ash) {
       sources += rebase_path(gypi_values.chrome_browser_ui_ash_views_sources,
@@ -314,11 +274,6 @@ static_library("ui") {
                            ".",
                            "//chrome")
   }
-  if (is_linux || is_android) {
-    sources += rebase_path(gypi_values.chrome_browser_ui_android_linux_sources,
-                           ".",
-                           "//chrome")
-  }
 
   if (is_android) {
     deps += [
@@ -347,6 +302,21 @@ static_library("ui") {
       "//third_party/molokocacao",
       "//third_party/mozilla",
     ]
+    if (mac_views_browser) {
+      sources += rebase_path(
+              gypi_values.chrome_browser_ui_views_mac_experimental_sources,
+              ".",
+              "//chrome")
+      sources +=
+          rebase_path(gypi_values.chrome_browser_ui_views_non_mac_sources,
+                      ".",
+                      "//chrome")
+      deps += [ "//extensions/components/native_app_window" ]
+    } else {
+      sources += rebase_path(gypi_values.chrome_browser_ui_cocoa_sources,
+                             ".",
+                             "//chrome")
+    }
     include_dirs = [ "$target_gen_dir" ]
     libs += [ "Quartz.framework" ]
     configs +=
@@ -453,6 +423,12 @@ static_library("ui") {
             ".",
             "//chrome")
   }
+  if (enable_media_router) {
+    sources += rebase_path(gypi_values.chrome_browser_ui_media_router_sources,
+                           ".",
+                           "//chrome")
+    deps += [ "//chrome/browser/media/router" ]
+  }
   if (enable_webrtc) {
     sources += rebase_path(gypi_values.chrome_browser_ui_webrtc_sources,
                            ".",
@@ -463,9 +439,6 @@ static_library("ui") {
         rebase_path(gypi_values.chrome_browser_ui_service_discovery_sources,
                     ".",
                     "//chrome")
-  }
-  if (enable_spellcheck) {
-    deps += [ "//third_party/hunspell" ]
   }
 }
 
@@ -509,8 +482,6 @@ source_set("test_support") {
     "login/login_prompt_test_utils.h",
     "passwords/manage_passwords_ui_controller_mock.cc",
     "passwords/manage_passwords_ui_controller_mock.h",
-    "pdf/pdf_browsertest_base.cc",
-    "pdf/pdf_browsertest_base.h",
     "test/test_confirm_bubble_model.cc",
     "test/test_confirm_bubble_model.h",
     "toolbar/test_toolbar_action_view_controller.cc",

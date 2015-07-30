@@ -53,8 +53,8 @@ tv.b.unittest.testSuite(function() {
 
     var viewRect =
         view.getBoundingClientRect();
-    assertEquals(400, viewRect.height);
-    assertEquals(800, viewRect.width);
+    assert.equal(viewRect.height, 400);
+    assert.equal(viewRect.width, 800);
   });
 });
 </script>

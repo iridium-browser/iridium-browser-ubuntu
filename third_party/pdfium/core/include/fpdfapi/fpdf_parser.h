@@ -211,7 +211,7 @@ protected:
 #define PDFWORD_TEXT		2
 #define PDFWORD_DELIMITER	3
 #define PDFWORD_NAME		4
-class CPDF_SimpleParser : public CFX_Object
+class CPDF_SimpleParser 
 {
 public:
 
@@ -250,7 +250,7 @@ private:
 
     FX_DWORD			m_dwCurPos;
 };
-class CPDF_SyntaxParser : public CFX_Object
+class CPDF_SyntaxParser 
 {
 public:
 
@@ -372,7 +372,7 @@ struct PARSE_CONTEXT {
 
     FX_FILESIZE	m_DataEnd;
 };
-class IPDF_DocParser : public CFX_Object
+class IPDF_DocParser 
 {
 public:
     virtual ~IPDF_DocParser() { }
@@ -613,7 +613,7 @@ protected:
 #define FXCIPHER_RC4	1
 #define FXCIPHER_AES	2
 #define FXCIPHER_AES2   3
-class CPDF_SecurityHandler : public CFX_Object
+class CPDF_SecurityHandler 
 {
 public:
 
@@ -715,7 +715,7 @@ private:
 
     int					m_KeyLen;
 };
-class CPDF_CryptoHandler : public CFX_Object
+class CPDF_CryptoHandler 
 {
 public:
 
@@ -772,7 +772,7 @@ protected:
 
     FX_LPBYTE			m_pAESContext;
 };
-class CPDF_Point : public CFX_Object
+class CPDF_Point 
 {
 public:
 
@@ -793,9 +793,14 @@ CFX_ByteString PDF_NameDecode(FX_BSTR orig);
 CFX_ByteString PDF_NameDecode(const CFX_ByteString& orig);
 CFX_ByteString PDF_NameEncode(const CFX_ByteString& orig);
 CFX_ByteString PDF_EncodeString(const CFX_ByteString& src, FX_BOOL bHex = FALSE);
-CFX_WideString PDF_DecodeText(const CFX_ByteString& str, CFX_CharMap* pCharMap = NULL);
 CFX_WideString PDF_DecodeText(FX_LPCBYTE pData, FX_DWORD size, CFX_CharMap* pCharMap = NULL);
+inline CFX_WideString PDF_DecodeText(const CFX_ByteString& bstr, CFX_CharMap* pCharMap = NULL) {
+    return PDF_DecodeText((FX_LPCBYTE)bstr.c_str(), bstr.GetLength(), pCharMap);
+}
 CFX_ByteString PDF_EncodeText(FX_LPCWSTR pString, int len = -1, CFX_CharMap* pCharMap = NULL);
+inline CFX_ByteString PDF_EncodeText(const CFX_WideString& str, CFX_CharMap* pCharMap = NULL) {
+    return PDF_EncodeText(str.c_str(), str.GetLength(), pCharMap);
+}
 FX_FLOAT PDF_ClipFloat(FX_FLOAT f);
 class CFDF_Document : public CPDF_IndirectObjects
 {
@@ -829,7 +834,7 @@ void			FPDF_FileSpec_SetWin32Path(CPDF_Object* pFileSpec, const CFX_WideString& 
 void FlateEncode(const FX_BYTE* src_buf, FX_DWORD src_size, FX_LPBYTE& dest_buf, FX_DWORD& dest_size);
 FX_DWORD FlateDecode(const FX_BYTE* src_buf, FX_DWORD src_size, FX_LPBYTE& dest_buf, FX_DWORD& dest_size);
 FX_DWORD RunLengthDecode(const FX_BYTE* src_buf, FX_DWORD src_size, FX_LPBYTE& dest_buf, FX_DWORD& dest_size);
-class CPDF_NumberTree : public CFX_Object
+class CPDF_NumberTree 
 {
 public:
 
@@ -885,7 +890,7 @@ protected:
     IFX_FileAvail* m_pFileAvail;
     IFX_FileRead* m_pFileRead;
 };
-class CPDF_SortObjNumArray : public CFX_Object
+class CPDF_SortObjNumArray 
 {
 public:
 
@@ -910,7 +915,7 @@ enum PDF_PAGENODE_TYPE {
     PDF_PAGENODE_PAGES,
     PDF_PAGENODE_ARRAY,
 };
-class CPDF_PageNode : public CFX_Object
+class CPDF_PageNode 
 {
 public:
     CPDF_PageNode() : m_type(PDF_PAGENODE_UNKOWN) {}

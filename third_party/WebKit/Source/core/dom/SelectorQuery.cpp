@@ -29,7 +29,6 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/css/SelectorChecker.h"
-#include "core/css/SiblingTraversalStrategies.h"
 #include "core/css/parser/CSSParser.h"
 #include "core/dom/Document.h"
 #include "core/dom/ElementTraversal.h"
@@ -118,12 +117,12 @@ void SelectorDataList::initialize(const CSSSelectorList& selectorList)
 
 inline bool SelectorDataList::selectorMatches(const CSSSelector& selector, Element& element, const ContainerNode& rootNode) const
 {
-    SelectorChecker selectorChecker(element.document(), SelectorChecker::QueryingRules);
+    SelectorChecker selectorChecker(SelectorChecker::QueryingRules);
     SelectorChecker::SelectorCheckingContext selectorCheckingContext(selector, &element, SelectorChecker::VisitedMatchDisabled);
     selectorCheckingContext.scope = !rootNode.isDocumentNode() ? &rootNode : 0;
     if (selectorCheckingContext.scope)
         selectorCheckingContext.scopeContainsLastMatchedElement = true;
-    return selectorChecker.match(selectorCheckingContext, DOMSiblingTraversalStrategy()) == SelectorChecker::SelectorMatches;
+    return selectorChecker.match(selectorCheckingContext);
 }
 
 bool SelectorDataList::matches(Element& targetElement) const
@@ -175,11 +174,29 @@ void SelectorDataList::collectElementsByClassName(ContainerNode& rootNode, const
     }
 }
 
+inline bool matchesTagName(const QualifiedName& tagName, const Element& element)
+{
+    if (tagName == anyQName())
+        return true;
+    if (element.hasLocalName(tagName.localName()))
+        return true;
+    // Non-html elements in html documents are normalized to their camel-cased
+    // version during parsing if applicable. Yet, type selectors are lower-cased
+    // for selectors in html documents. Compare the upper case converted names
+    // instead to allow matching SVG elements like foreignObject.
+    if (!element.isHTMLElement() && element.document().isHTMLDocument())
+        return element.tagQName().localNameUpper() == tagName.localNameUpper();
+    return false;
+}
+
 template <typename SelectorQueryTrait>
 void SelectorDataList::collectElementsByTagName(ContainerNode& rootNode, const QualifiedName& tagName,  typename SelectorQueryTrait::OutputType& output) const
 {
     for (Element& element : ElementTraversal::descendantsOf(rootNode)) {
-        if (SelectorChecker::tagMatches(element, tagName)) {
+        // querySelector*() doesn't allow namespaces and throws before it gets
+        // here so we can ignore them.
+        ASSERT(tagName.namespaceURI() == starAtom);
+        if (matchesTagName(tagName, element)) {
             SelectorQueryTrait::appendElement(output, element);
             if (SelectorQueryTrait::shouldOnlyMatchFirstElement)
                 return;

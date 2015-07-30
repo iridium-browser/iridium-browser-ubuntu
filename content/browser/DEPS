@@ -1,4 +1,10 @@
 include_rules = [
+  # Allow inclusion of specific components that we depend on. We may only
+  # depend on components which we share with the mojo html_viewer.
+  "+components/mime_util",
+  "+components/scheduler/common",
+  "+components/tracing",
+
   "+content/app/strings/grit",  # For generated headers
   "+content/public/browser",
   "+device/battery",  # For battery status service.
@@ -14,11 +20,6 @@ include_rules = [
   "+ui/aura_extra",
   "+ui/webui",
   "+win8/util",
-
-  # TODO(joi): This was misplaced; need to move it somewhere else,
-  # since //content shouldn't depend on //components, which is a layer
-  # above.
-  "+components/tracing",
 
   # In general, //content shouldn't depend on //device.
   # This is the an exception.
@@ -36,31 +37,30 @@ include_rules = [
   "+chromeos",
   "+third_party/cros_system_api",
 
-  "-webkit/renderer",
-
   # No inclusion of WebKit from the browser, other than strictly enum/POD,
   # header-only types, and some selected common code.
   "-third_party/WebKit",
   "+third_party/WebKit/public/platform/WebCircularGeofencingRegion.h",
   "+third_party/WebKit/public/platform/WebCursorInfo.h",
+  "+third_party/WebKit/public/platform/WebDisplayMode.h",
   "+third_party/WebKit/public/platform/WebFocusType.h",
   "+third_party/WebKit/public/platform/WebGamepad.h",
   "+third_party/WebKit/public/platform/WebGamepads.h",
   "+third_party/WebKit/public/platform/WebGeofencingEventType.h",
   "+third_party/WebKit/public/platform/WebGraphicsContext3D.h",
-  "+third_party/WebKit/public/platform/WebIDBDatabaseException.h",
-  "+third_party/WebKit/public/platform/WebIDBTypes.h",
-  "+third_party/WebKit/public/platform/WebReferrerPolicy.h",
   "+third_party/WebKit/public/platform/WebLockOrientationError.h",
+  "+third_party/WebKit/public/platform/WebReferrerPolicy.h",
+  "+third_party/WebKit/public/platform/WebScreenInfo.h",
   "+third_party/WebKit/public/platform/WebScreenOrientationLockType.h",
   "+third_party/WebKit/public/platform/WebScreenOrientationType.h",
-  "+third_party/WebKit/public/platform/WebScreenInfo.h",
   "+third_party/WebKit/public/platform/WebServiceWorkerCacheError.h",
   "+third_party/WebKit/public/platform/WebServiceWorkerError.h",
   "+third_party/WebKit/public/platform/WebServiceWorkerEventResult.h",
   "+third_party/WebKit/public/platform/WebServiceWorkerResponseType.h",
   "+third_party/WebKit/public/platform/WebServiceWorkerState.h",
   "+third_party/WebKit/public/platform/WebString.h",
+  "+third_party/WebKit/public/platform/modules/indexeddb/WebIDBDatabaseException.h",
+  "+third_party/WebKit/public/platform/modules/indexeddb/WebIDBTypes.h",
   "+third_party/WebKit/public/platform/modules/notifications/WebNotificationPermission.h",
   "+third_party/WebKit/public/platform/modules/push_messaging/WebPushPermissionStatus.h",
   "+third_party/WebKit/public/web/mac/WebScrollbarTheme.h",

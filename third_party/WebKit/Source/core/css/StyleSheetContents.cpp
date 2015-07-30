@@ -283,11 +283,9 @@ void StyleSheetContents::parseAuthorStyleSheet(const CSSStyleSheetResource* cach
     TRACE_EVENT0("blink", "StyleSheetContents::parseAuthorStyleSheet");
     TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "ParseAuthorStyleSheet", "data", InspectorParseAuthorStyleSheetEvent::data(cachedStyleSheet));
 
-    bool quirksMode = isQuirksModeBehavior(m_parserContext.mode());
-
-    bool enforceMIMEType = !quirksMode;
-    bool hasValidMIMEType = false;
-    String sheetText = cachedStyleSheet->sheetText(enforceMIMEType, &hasValidMIMEType);
+    bool isSameOriginRequest = securityOrigin && securityOrigin->canRequest(baseURL());
+    CSSStyleSheetResource::MIMETypeCheck mimeTypeCheck = isQuirksModeBehavior(m_parserContext.mode()) && isSameOriginRequest ? CSSStyleSheetResource::MIMETypeCheck::Lax : CSSStyleSheetResource::MIMETypeCheck::Strict;
+    String sheetText = cachedStyleSheet->sheetText(mimeTypeCheck);
 
     const ResourceResponse& response = cachedStyleSheet->response();
     m_sourceMapURL = response.httpHeaderField("SourceMap");
@@ -298,17 +296,6 @@ void StyleSheetContents::parseAuthorStyleSheet(const CSSStyleSheetResource* cach
 
     CSSParserContext context(parserContext(), UseCounter::getFrom(this));
     CSSParser::parseSheet(context, this, sheetText, TextPosition::minimumPosition(), 0, true);
-
-    // If we're loading a stylesheet cross-origin, and the MIME type is not standard, require the CSS
-    // to at least start with a syntactically valid CSS rule.
-    // This prevents an attacker playing games by injecting CSS strings into HTML, XML, JSON, etc. etc.
-    if (!hasValidMIMEType && !hasSyntacticallyValidCSSHeader()) {
-        bool isCrossOriginCSS = !securityOrigin || !securityOrigin->canRequest(baseURL());
-        if (isCrossOriginCSS) {
-            clearRules();
-            return;
-        }
-    }
 }
 
 void StyleSheetContents::parseString(const String& sheetText)

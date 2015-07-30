@@ -14,7 +14,6 @@
 
 #include "client/crash_report_database.h"
 
-#include <rpc.h>
 #include <string.h>
 #include <time.h>
 #include <windows.h>
@@ -24,6 +23,7 @@
 #include "base/strings/string16.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "client/settings.h"
 #include "util/misc/initialization_state_dcheck.h"
 
 namespace crashpad {
@@ -32,6 +32,8 @@ namespace {
 
 const wchar_t kReportsDirectory[] = L"reports";
 const wchar_t kMetadataFileName[] = L"metadata";
+
+const wchar_t kSettings[] = L"settings.dat";
 
 const wchar_t kCrashReportFileExtension[] = L"dmp";
 
@@ -444,7 +446,7 @@ void Metadata::Write() {
     const base::FilePath& path = report.file_path;
     if (path.DirName() != report_dir_) {
       LOG(ERROR) << path.value().c_str() << " expected to start with "
-                 << report_dir_.value().c_str();
+                 << base::UTF16ToUTF8(report_dir_.value());
       return;
     }
     records.push_back(MetadataFileReportRecord(report, &string_table));
@@ -534,13 +536,17 @@ class CrashReportDatabaseWin : public CrashReportDatabase {
   scoped_ptr<Metadata> AcquireMetadata();
 
   base::FilePath base_dir_;
+  Settings settings_;
   InitializationStateDcheck initialized_;
 
   DISALLOW_COPY_AND_ASSIGN(CrashReportDatabaseWin);
 };
 
 CrashReportDatabaseWin::CrashReportDatabaseWin(const base::FilePath& path)
-    : CrashReportDatabase(), base_dir_(path), initialized_() {
+    : CrashReportDatabase(),
+      base_dir_(path),
+      settings_(base_dir_.Append(kSettings)),
+      initialized_() {
 }
 
 CrashReportDatabaseWin::~CrashReportDatabaseWin() {
@@ -557,28 +563,25 @@ bool CrashReportDatabaseWin::Initialize() {
   // TODO(scottmg): When are completed reports pruned from disk? Delete here or
   // maybe on AcquireMetadata().
 
+  if (!settings_.Initialize())
+    return false;
+
   INITIALIZATION_STATE_SET_VALID(initialized_);
   return true;
 }
 
 Settings* CrashReportDatabaseWin::GetSettings() {
   INITIALIZATION_STATE_DCHECK_VALID(initialized_);
-
-  // Port to Win https://code.google.com/p/crashpad/issues/detail?id=13.
-  NOTREACHED();
-  return nullptr;
+  return &settings_;
 }
 
 OperationStatus CrashReportDatabaseWin::PrepareNewCrashReport(
     NewReport** report) {
   INITIALIZATION_STATE_DCHECK_VALID(initialized_);
 
-  ::UUID system_uuid;
-  if (UuidCreate(&system_uuid) != RPC_S_OK)
-    return kFileSystemError;
-
   scoped_ptr<NewReport> new_report(new NewReport());
-  new_report->uuid.InitializeFromSystemUUID(&system_uuid);
+  if (!new_report->uuid.InitializeWithNew())
+    return kFileSystemError;
   new_report->path = base_dir_.Append(kReportsDirectory)
                          .Append(new_report->uuid.ToString16() + L"." +
                                  kCrashReportFileExtension);
@@ -626,7 +629,8 @@ OperationStatus CrashReportDatabaseWin::ErrorWritingCrashReport(
   // We failed to write, so remove the dump file. There's no entry in the
   // metadata table yet.
   if (!DeleteFile(scoped_report->path.value().c_str())) {
-    PLOG(ERROR) << "DeleteFile " << scoped_report->path.value().c_str();
+    PLOG(ERROR) << "DeleteFile "
+                << base::UTF16ToUTF8(scoped_report->path.value());
     return CrashReportDatabase::kFileSystemError;
   }
 

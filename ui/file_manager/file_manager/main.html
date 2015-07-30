@@ -36,6 +36,8 @@
     <link rel="import" href="chrome://resources/polymer/paper-progress/paper-progress.html">
     <link rel="import" href="chrome://resources/polymer/paper-ripple/paper-ripple.html">
 
+    <link rel="stylesheet" href="chrome-extension://fbjakikfhfdajcamjleinfciajelkpek/cws_widget/cws_widget_container.css">
+
     <!-- Don't load main_scripts.js when flattening is disabled. -->
     <if expr="False"><!-- </if>
       <script src="foreground/js/main_scripts.js"></script>
@@ -56,6 +58,12 @@
       <!-- Loads the client of the image loader extension -->
       <script src="common/js/lru_cache.js"></script>
       <script src="chrome-extension://pmfjbimdmchhbnneeidfognadeopoehp/image_loader_client.js"></script>
+
+      <!-- Scripts for Chrome Webstore widget -->
+      <script src="chrome-extension://fbjakikfhfdajcamjleinfciajelkpek/cws_widget/app_installer.js"></script>
+      <script src="chrome-extension://fbjakikfhfdajcamjleinfciajelkpek/cws_widget/cws_webview_client.js"></script>
+      <script src="chrome-extension://fbjakikfhfdajcamjleinfciajelkpek/cws_widget/cws_widget_container.js"></script>
+      <script src="chrome-extension://fbjakikfhfdajcamjleinfciajelkpek/cws_widget/cws_widget_container_error_dialog.js"></script>
 
       <script src="chrome://resources/js/load_time_data.js"></script>
       <script src="chrome://resources/js/cr.js"></script>
@@ -113,10 +121,8 @@
       <script src="foreground/js/metadata/new_metadata_provider.js"></script>
       <script src="foreground/js/metadata/thumbnail_model.js"></script>
 
-      <script src="foreground/js/app_installer.js"></script>
       <script src="foreground/js/app_state_controller.js"></script>
       <script src="foreground/js/column_visibility_controller.js"></script>
-      <script src="foreground/js/cws_container_client.js"></script>
       <script src="foreground/js/dialog_action_controller.js"></script>
       <script src="foreground/js/dialog_type.js"></script>
       <script src="foreground/js/directory_contents.js"></script>
@@ -129,6 +135,7 @@
       <script src="foreground/js/file_transfer_controller.js"></script>
       <script src="foreground/js/file_watcher.js"></script>
       <script src="foreground/js/folder_shortcuts_data_model.js"></script>
+      <script src="foreground/js/sort_menu_controller.js"></script>
       <script src="foreground/js/gear_menu_controller.js"></script>
       <script src="foreground/js/import_controller.js"></script>
       <script src="foreground/js/launch_param.js"></script>
@@ -151,6 +158,7 @@
       <script src="foreground/js/toolbar_controller.js"></script>
       <script src="foreground/js/thumbnail_loader.js"></script>
       <script src="foreground/js/list_thumbnail_loader.js"></script>
+      <script src="foreground/js/providers_model.js"></script>
       <script src="foreground/js/ui/banners.js"></script>
       <script src="foreground/js/ui/conflict_dialog.js"></script>
       <script src="foreground/js/ui/default_action_dialog.js"></script>
@@ -169,6 +177,7 @@
       <script src="foreground/js/ui/location_line.js"></script>
       <script src="foreground/js/ui/multi_profile_share_dialog.js"></script>
       <script src="foreground/js/ui/progress_center_panel.js"></script>
+      <script src="foreground/js/ui/providers_menu.js"></script>
       <script src="foreground/js/ui/scrollbar.js"></script>
       <script src="foreground/js/ui/search_box.js"></script>
       <script src="foreground/js/ui/share_dialog.js"></script>
@@ -226,6 +235,7 @@
       <command id="unmount" i18n-values="label:UNMOUNT_DEVICE_BUTTON_LABEL"
                shortcut="U+0045-Shift-Ctrl"><!-- Shortcut: 'Shift-Ctrl-E' -->
       <command id="format" i18n-values="label:FORMAT_DEVICE_BUTTON_LABEL">
+      <command id="configure" i18n-values="label:CONFIGURE_VOLUME_BUTTON_LABEL">
 
       <command id="volume-help" i18n-values="label:DRIVE_MENU_HELP">
       <command id="drive-buy-more-space"
@@ -249,14 +259,19 @@
       <command id="zoom-out" shortcut="U+00BD-Ctrl">
       <command id="zoom-reset" shortcut="U+0030-Ctrl">
 
+      <command id="sort-by-name" i18n-values="label:NAME_COLUMN_LABEL">
+      <command id="sort-by-size" i18n-values="label:SIZE_COLUMN_LABEL">
+      <command id="sort-by-type" i18n-values="label:TYPE_COLUMN_LABEL">
+      <command id="sort-by-date" i18n-values="label:DATE_COLUMN_LABEL">
+
       <!-- Shortcuts to open inspector. (Ctrl+Shift+I/J/C/B) -->
       <command id="inspect-normal" shortcut="U+0049-Shift-Ctrl">
       <command id="inspect-console" shortcut="U+004A-Shift-Ctrl">
       <command id="inspect-element" shortcut="U+0043-Shift-Ctrl">
       <command id="inspect-background" shortcut="U+0042-Shift-Ctrl">
 
-      <command id="add-new-services"
-               i18n-values="label:ADD_NEW_SERVICES_BUTTON_LABEL">
+      <command id="install-new-extension"
+               i18n-values="label:INSTALL_NEW_EXTENSION_LABEL">
     </commands>
 
     <cr-menu id="file-context-menu" class="chrome-menu" showShortcuts>
@@ -283,6 +298,7 @@
     </cr-menu>
 
     <cr-menu id="roots-context-menu" class="chrome-menu" >
+      <cr-menu-item command="#configure"></cr-menu-item>
       <cr-menu-item command="#unmount"></cr-menu-item>
       <cr-menu-item command="#format"></cr-menu-item>
       <cr-menu-item command="#remove-folder-shortcut"></cr-menu-item>
@@ -292,10 +308,23 @@
       <cr-menu-item command="#create-folder-shortcut"></cr-menu-item>
     </cr-menu>
 
-    <cr-menu id="gear-menu" class="chrome-menu" showShortcuts>
+    <cr-menu id="sort-menu" class="chrome-menu" menu-item-selector="cr-menu-item">
+      <cr-menu-item id="sort-menu-sort-by-name"
+                    command="#sort-by-name"></cr-menu-item>
+      <cr-menu-item id="sort-menu-sort-by-size"
+                    command="#sort-by-size"></cr-menu-item>
+      <cr-menu-item id="sort-menu-sort-by-type"
+                    command="#sort-by-type"></cr-menu-item>
+      <cr-menu-item id="sort-menu-sort-by-date"
+                    command="#sort-by-date"></cr-menu-item>
+    </cr-menu>
+
+    <cr-menu id="gear-menu" class="chrome-menu" showShortcuts
+             menu-item-selector="cr-menu-item, hr">
       <cr-menu-item id="gear-menu-newwindow" command="#new-window"></cr-menu-item>
       <cr-menu-item id="gear-menu-newfolder" command="#new-folder"></cr-menu-item>
       <hr>
+      <cr-menu-item command="#configure"></cr-menu-item>
       <cr-menu-item id="gear-menu-toggle-hidden-files"
                     command="#toggle-hidden-files"></cr-menu-item>
       <cr-menu-item id="gear-menu-drive-sync-settings"
@@ -313,7 +342,7 @@
       <div id="volume-space-info">
         <div id="volume-space-info-contents">
           <span id="volume-space-info-label"></span>
-          <div class="progress-bar">
+          <div class="progress-bar" aria-hidden="true">
             <div class="progress-track" id="volume-space-info-bar"></div>
           </div>
         </div>
@@ -322,6 +351,8 @@
 
     <cr-menu id="tasks-menu" class="chrome-menu">
     </cr-menu>
+
+    <cr-menu id="add-new-services-menu" class="chrome-menu"></cr-menu>
 
     <cr-menu id="text-context-menu" class="chrome-menu" showShortcuts>
       <cr-menu-item command="#cut"></cr-menu-item>
@@ -342,7 +373,7 @@
       <div id="files-selected-label"></div>
       <div class="spacer"></div>
       <button id="tasks" class="combobutton" menu="#tasks-menu"
-              tabindex="9"
+              tabindex="9" hidden
               i18n-values="aria-label:TASKS_BUTTON_LABEL">
         <paper-ripple fit></paper-ripple>
       </button>
@@ -350,16 +381,16 @@
               tabindex="10"
               i18n-values="aria-label:SHARE_BUTTON_LABEL"
               visibleif="full-page">
-        <paper-ripple fit class="recenteringTouch circle"></paper-ripple>
+        <paper-ripple fit class="recenteringTouch"></paper-ripple>
       </button>
       <button id="delete-button" class="icon-button" tabindex="11"
               i18n-values="aria-label:DELETE_BUTTON_LABEL"
               visibleif="full-page">
-        <paper-ripple fit class="recenteringTouch circle"></paper-ripple>
+        <paper-ripple fit class="recenteringTouch"></paper-ripple>
       </button>
       <button id="search-button" class="icon-button" tabindex="12"
               i18n-values="aria-label:SEARCH_TEXT_LABEL">
-        <paper-ripple fit class="recenteringTouch circle"></paper-ripple>
+        <paper-ripple fit class="recenteringTouch"></paper-ripple>
       </button>
       <div id="search-box">
         <paper-input-decorator i18n-values="label:SEARCH_TEXT_LABEL">
@@ -374,7 +405,7 @@
               i18n-values="aria-label:CLOUD_IMPORT_COMMAND"
               hidden>
         <core-icon icon="cloud-queue"></core-icon>
-        <paper-ripple fit class="recenteringTouch circle"></paper-ripple>
+        <paper-ripple fit class="recenteringTouch"></paper-ripple>
       </button>
       <button id="cloud-import-details-button"
               class="icon-button manual-display"
@@ -382,17 +413,23 @@
               i18n-values="aria-label:CLOUD_IMPORT_SHOW_DETAILS"
               hidden>
         <core-icon icon="arrow-drop-down"></core-icon>
-        <paper-ripple fit class="recenteringTouch circle"></paper-ripple>
+        <paper-ripple fit class="recenteringTouch"></paper-ripple>
       </button>
       <button id="view-button" class="icon-button" tabindex="15"
               i18n-values="aria-label:CHANGE_TO_THUMBNAILVIEW_BUTTON_LABEL">
-        <paper-ripple fit class="recenteringTouch circle"></paper-ripple>
+        <paper-ripple fit class="recenteringTouch"></paper-ripple>
       </button>
-      <button id="gear-button" class="icon-button" tabindex="16"
+      <button id="sort-button" class="icon-button" tabindex="16"
+              menu="#sort-menu"
+              i18n-values="aria-label:SORT_BUTTON_TOOLTIP"
+              aria-activedescendant="sort-menu">
+        <paper-ripple fit class="recenteringTouch"></paper-ripple>
+      </button>
+      <button id="gear-button" class="icon-button" tabindex="17"
               menu="#gear-menu"
               i18n-values="aria-label:GEAR_BUTTON_TOOLTIP"
               aria-activedescendant="gear-menu">
-        <paper-ripple fit class="recenteringTouch circle"></paper-ripple>
+        <paper-ripple fit class="recenteringTouch"></paper-ripple>
       </button>
     </div>
 
@@ -420,7 +457,7 @@
     <div class="dialog-container">
       <div class="dialog-navigation-list">
         <div class="dialog-navigation-list-contents">
-          <tree id="directory-tree" tabindex="17"></tree>
+          <tree id="directory-tree" tabindex="18"></tree>
         </div>
         <div class="dialog-navigation-list-footer">
           <div id="progress-center" hidden>
@@ -492,20 +529,18 @@
         </button>
         <div id="filename-input-box" visibleif="saveas-file">
           <paper-input-decorator i18n-values="label:FILENAME_LABEL">
-            <input is="core-input" class="entry-name" type="text"
-                   spellcheck="false" tabindex="4">
+            <input id="filename-input-textbox" is="core-input" tabindex="4"
+                   class="entry-name" type="text" spellcheck="false">
           </paper-input-decorator>
         </div>
         <div class="preparing-label" i18n-content="PREPARING_LABEL"></div>
-        <div class="progress-bar" visibleif="saveas-file">
-          <div class="progress-track"></div>
-        </div>
+        <div class="progress-bar"><div class="progress-track"></div></div>
       </div>
       <div class="right buttonbar">
         <select class="file-type" hidden tabindex="-1"></select>
-        <button class="ok primary" disabled tabindex="5"></button>
-        <button class="cancel secondary" i18n-content="CANCEL_LABEL"
-                tabindex="6"></button>
+        <button id="ok-button" class="ok primary" disabled tabindex="5"></button>
+        <button id="cancel-button" class="cancel secondary"
+                i18n-content="CANCEL_LABEL" tabindex="6"></button>
       </div>
     </div>
     <div id="drag-container"></div>

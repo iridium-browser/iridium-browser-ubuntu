@@ -91,6 +91,7 @@ IPC_STRUCT_TRAITS_BEGIN(autofill::PasswordFormFillData)
   IPC_STRUCT_TRAITS_MEMBER(additional_logins)
   IPC_STRUCT_TRAITS_MEMBER(other_possible_usernames)
   IPC_STRUCT_TRAITS_MEMBER(wait_for_username)
+  IPC_STRUCT_TRAITS_MEMBER(is_possible_change_password_form)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(autofill::PasswordAndRealm)
@@ -275,12 +276,11 @@ IPC_MESSAGE_ROUTED3(AutofillHostMsg_TextFieldDidChange,
                     base::TimeTicks /* timestamp */)
 
 // Queries the browser for Autofill suggestions for a form input field.
-IPC_MESSAGE_ROUTED5(AutofillHostMsg_QueryFormFieldAutofill,
+IPC_MESSAGE_ROUTED4(AutofillHostMsg_QueryFormFieldAutofill,
                     int /* id of this message */,
                     autofill::FormData /* the form */,
                     autofill::FormFieldData /* the form field */,
-                    gfx::RectF /* input field bounds, window-relative */,
-                    bool /* display warning if autofill disabled */)
+                    gfx::RectF /* input field bounds, window-relative */)
 
 // Sent when a form is previewed with Autofill suggestions.
 IPC_MESSAGE_ROUTED0(AutofillHostMsg_DidPreviewAutofillFormData)
@@ -319,6 +319,10 @@ IPC_MESSAGE_ROUTED2(AutofillHostMsg_ShowPasswordEditingPopup,
 
 // Instructs the browser to hide any password generation popups.
 IPC_MESSAGE_ROUTED0(AutofillHostMsg_HidePasswordGenerationPopup)
+
+// Instructs the browsr that form no longer contains a generated password.
+IPC_MESSAGE_ROUTED1(AutofillHostMsg_PasswordNoLongerGenerated,
+                    autofill::PasswordForm)
 
 // Instruct the browser to show a popup with suggestions filled from data
 // associated with |key|. The popup will use |text_direction| for displaying

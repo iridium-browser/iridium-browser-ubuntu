@@ -115,7 +115,7 @@ Response* Response::create(ExecutionContext* context, const BodyInit& body, cons
         return create(context, blob, ResponseInit(responseInit, exceptionState), exceptionState);
     }
     if (body.isFormData()) {
-        RefPtrWillBeRawPtr<DOMFormData> domFormData = body.getAsFormData();
+        DOMFormData* domFormData = body.getAsFormData();
         OwnPtr<BlobData> blobData = BlobData::create();
         // FIXME: the same code exist in RequestInit::RequestInit().
         RefPtr<FormData> httpBody = domFormData->createMultiPartFormData();
@@ -206,6 +206,7 @@ Response* Response::create(ExecutionContext* context, Blob* body, const Response
         // "If object's type attribute is not the empty byte sequence, set
         // Content-Type to its value."
         r->m_response->setBlobDataHandle(body->blobDataHandle());
+        r->setBody(body->blobDataHandle());
         if (!body->type().isEmpty() && !r->m_response->headerList()->has("Content-Type"))
             r->m_response->headerList()->append("Content-Type", body->type());
     }
@@ -239,6 +240,28 @@ Response* Response::error(ExecutionContext* context)
     Response* r = new Response(context, responseData);
     r->m_headers->setGuard(Headers::ImmutableGuard);
     r->suspendIfNeeded();
+    return r;
+}
+
+Response* Response::redirect(ExecutionContext* context, const String& url, unsigned short status, ExceptionState& exceptionState)
+{
+    KURL parsedURL = context->completeURL(url);
+    if (!parsedURL.isValid()) {
+        exceptionState.throwTypeError("Failed to parse URL from " + url);
+        return nullptr;
+    }
+
+    if (status != 301 && status != 302 && status != 303 && status != 307 && status != 308) {
+        exceptionState.throwRangeError("Invalid status code");
+        return nullptr;
+    }
+
+    Response* r = new Response(context);
+    r->suspendIfNeeded();
+    r->m_headers->setGuard(Headers::ImmutableGuard);
+    r->m_response->setStatus(status);
+    r->m_response->headerList()->set("Location", parsedURL);
+
     return r;
 }
 
@@ -308,15 +331,17 @@ Response* Response::clone(ExceptionState& exceptionState)
         BodyStreamBuffer* drainingStream = createDrainingStream();
         m_response->replaceBodyStreamBuffer(drainingStream);
     }
-    // Lock the old body and set |body| property to the new one.
-    lockBody();
-    refreshBody();
 
     FetchResponseData* response = m_response->clone();
     Headers* headers = Headers::create(response->headerList());
     headers->setGuard(m_headers->guard());
     Response* r = new Response(executionContext(), response, headers);
     r->suspendIfNeeded();
+
+    // Lock the old body and set |body| property to the new one.
+    lockBody();
+    refreshBody();
+
     return r;
 }
 
@@ -339,10 +364,15 @@ Response::Response(ExecutionContext* context, FetchResponseData* response)
     , m_headers(Headers::create(m_response->headerList()))
 {
     m_headers->setGuard(Headers::ResponseGuard);
+
+    refreshBody();
 }
 
 Response::Response(ExecutionContext* context, FetchResponseData* response, Headers* headers)
-    : Body(context) , m_response(response) , m_headers(headers) { }
+    : Body(context) , m_response(response) , m_headers(headers)
+{
+    refreshBody();
+}
 
 bool Response::hasBody() const
 {
@@ -377,6 +407,14 @@ BodyStreamBuffer* Response::internalBuffer() const
 String Response::internalMIMEType() const
 {
     return m_response->internalMIMEType();
+}
+
+void Response::refreshBody()
+{
+    if (m_response->buffer())
+        setBody(m_response->buffer());
+    else
+        setBody(m_response->blobDataHandle());
 }
 
 DEFINE_TRACE(Response)

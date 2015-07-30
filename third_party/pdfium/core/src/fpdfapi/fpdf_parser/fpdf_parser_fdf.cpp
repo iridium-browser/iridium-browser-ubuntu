@@ -19,10 +19,10 @@ CFDF_Document::~CFDF_Document()
 }
 CFDF_Document* CFDF_Document::CreateNewDoc()
 {
-    CFDF_Document* pDoc = FX_NEW CFDF_Document;
-    pDoc->m_pRootDict = FX_NEW CPDF_Dictionary;
+    CFDF_Document* pDoc = new CFDF_Document;
+    pDoc->m_pRootDict = new CPDF_Dictionary;
     pDoc->AddIndirectObject(pDoc->m_pRootDict);
-    CPDF_Dictionary* pFDFDict = FX_NEW CPDF_Dictionary;
+    CPDF_Dictionary* pFDFDict = new CPDF_Dictionary;
     pDoc->m_pRootDict->SetAt(FX_BSTRC("FDF"), pFDFDict);
     return pDoc;
 }
@@ -31,7 +31,7 @@ CFDF_Document* CFDF_Document::ParseFile(IFX_FileRead *pFile, FX_BOOL bOwnFile)
   if (!pFile) {
     return NULL;
   }
-  CFDF_Document* pDoc = FX_NEW CFDF_Document;
+  CFDF_Document* pDoc = new CFDF_Document;
   pDoc->ParseStream(pFile, bOwnFile);
   if (pDoc->m_pRootDict == NULL) {
     delete pDoc;
@@ -141,7 +141,7 @@ void FPDF_FileSpec_SetWin32Path(CPDF_Object* pFileSpec, const CFX_WideString& fi
     } else if (filepath.GetLength() > 1 && filepath[0] == '\\' && filepath[1] == '\\') {
         result = ChangeSlash(filepath.c_str() + 1);
     } else {
-        result = ChangeSlash(filepath);
+        result = ChangeSlash(filepath.c_str());
     }
     if (pFileSpec->GetType() == PDFOBJ_STRING) {
         pFileSpec->SetString(CFX_ByteString::FromUnicode(result));
@@ -173,7 +173,7 @@ CFX_WideString	FPDF_FileSpec_GetWin32Path(const CPDF_Object* pFileSpec)
         wsFileName = CFX_WideString::FromLocal(pFileSpec->GetString());
     }
     if (wsFileName[0] != '/') {
-        return ChangeSlash(wsFileName);
+        return ChangeSlash(wsFileName.c_str());
     }
     if (wsFileName[2] == '/') {
         CFX_WideString result;
@@ -184,7 +184,7 @@ CFX_WideString	FPDF_FileSpec_GetWin32Path(const CPDF_Object* pFileSpec)
     } else {
         CFX_WideString result;
         result += '\\';
-        result += ChangeSlash(wsFileName);
+        result += ChangeSlash(wsFileName.c_str());
         return result;
     }
 }

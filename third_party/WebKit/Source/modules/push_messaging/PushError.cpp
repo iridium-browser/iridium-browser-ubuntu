@@ -5,12 +5,13 @@
 #include "config.h"
 #include "modules/push_messaging/PushError.h"
 
+#include "core/dom/DOMException.h"
 #include "core/dom/ExceptionCode.h"
 #include "wtf/OwnPtr.h"
 
 namespace blink {
 
-PassRefPtrWillBeRawPtr<DOMException> PushError::take(ScriptPromiseResolver*, WebType* webErrorRaw)
+DOMException* PushError::take(ScriptPromiseResolver*, WebType* webErrorRaw)
 {
     OwnPtr<WebType> webError = adoptPtr(webErrorRaw);
     switch (webError->errorType) {
@@ -20,6 +21,8 @@ PassRefPtrWillBeRawPtr<DOMException> PushError::take(ScriptPromiseResolver*, Web
         return DOMException::create(NetworkError, webError->message);
     case WebPushError::ErrorTypeNotFound:
         return DOMException::create(NotFoundError, webError->message);
+    case WebPushError::ErrorTypeNotSupported:
+        return DOMException::create(NotSupportedError, webError->message);
     case WebPushError::ErrorTypeUnknown:
         return DOMException::create(UnknownError, webError->message);
     }

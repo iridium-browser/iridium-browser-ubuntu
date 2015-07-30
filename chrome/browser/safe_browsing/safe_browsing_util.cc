@@ -5,7 +5,6 @@
 #include "chrome/browser/safe_browsing/safe_browsing_util.h"
 
 #include "base/logging.h"
-#include "base/metrics/field_trial.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/browser_process.h"
@@ -169,13 +168,6 @@ bool IsKnownList(const std::string& name) {
   }
   return false;
 }
-
-// String constants for the M40 UwS Finch trial.
-const char kUnwantedTrialName[] = "UwSInterstitialStatus";
-const char kOff[] = "Off";
-const char kOnButInvisible[] = "OnButInvisible";
-const char kOn[] = "On";
-
 }  // namespace
 
 namespace safe_browsing_util {
@@ -195,19 +187,17 @@ const char kBinUrlList[] = "goog-badbinurl-shavar";
 const char kCsdWhiteList[] = "goog-csdwhite-sha256";
 const char kDownloadWhiteList[] = "goog-downloadwhite-digest256";
 const char kExtensionBlacklist[] = "goog-badcrxids-digestvar";
-const char kSideEffectFreeWhitelist[] = "goog-sideeffectfree-shavar";
 const char kIPBlacklist[] = "goog-badip-digest256";
 const char kUnwantedUrlList[] = "goog-unwanted-shavar";
 const char kInclusionWhitelist[] = "goog-csdinclusionwhite-sha256";
 
-const char* kAllLists[10] = {
+const char* kAllLists[9] = {
     kMalwareList,
     kPhishingList,
     kBinUrlList,
     kCsdWhiteList,
     kDownloadWhiteList,
     kExtensionBlacklist,
-    kSideEffectFreeWhitelist,
     kIPBlacklist,
     kUnwantedUrlList,
     kInclusionWhitelist,
@@ -227,8 +217,6 @@ ListType GetListId(const base::StringPiece& name) {
     id = DOWNLOADWHITELIST;
   } else if (name == safe_browsing_util::kExtensionBlacklist) {
     id = EXTENSIONBLACKLIST;
-  } else if (name == safe_browsing_util::kSideEffectFreeWhitelist) {
-    id = SIDEEFFECTFREEWHITELIST;
   } else if (name == safe_browsing_util::kIPBlacklist) {
     id = IPBLACKLIST;
   } else if (name == safe_browsing_util::kUnwantedUrlList) {
@@ -260,9 +248,6 @@ bool GetListName(ListType list_id, std::string* list) {
       break;
     case EXTENSIONBLACKLIST:
       *list = safe_browsing_util::kExtensionBlacklist;
-      break;
-    case SIDEEFFECTFREEWHITELIST:
-      *list = safe_browsing_util::kSideEffectFreeWhitelist;
       break;
     case IPBLACKLIST:
       *list = safe_browsing_util::kIPBlacklist;
@@ -537,17 +522,6 @@ SBFullHash StringToSBFullHash(const std::string& hash_in) {
 std::string SBFullHashToString(const SBFullHash& hash) {
   DCHECK_EQ(crypto::kSHA256Length, sizeof(hash.full_hash));
   return std::string(hash.full_hash, sizeof(hash.full_hash));
-}
-
-UnwantedStatus GetUnwantedTrialGroup() {
-  std::string status(base::FieldTrialList::FindFullName(kUnwantedTrialName));
-  if (status == kOff)
-    return UWS_OFF;
-  if (status == kOnButInvisible)
-    return UWS_ON_INVISIBLE;
-  if (status == kOn)
-    return UWS_ON;
-  return UWS_ON;
 }
 
 }  // namespace safe_browsing_util

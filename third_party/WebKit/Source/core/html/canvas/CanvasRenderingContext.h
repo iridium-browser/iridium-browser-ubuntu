@@ -26,6 +26,7 @@
 #ifndef CanvasRenderingContext_h
 #define CanvasRenderingContext_h
 
+#include "core/CoreExport.h"
 #include "core/dom/ActiveDOMObject.h"
 #include "core/html/HTMLCanvasElement.h"
 #include "platform/heap/Handle.h"
@@ -40,7 +41,7 @@ namespace blink {
 class CanvasImageSource;
 class HTMLCanvasElement;
 
-class CanvasRenderingContext : public NoBaseWillBeGarbageCollectedFinalized<CanvasRenderingContext>, public ActiveDOMObject {
+class CORE_EXPORT CanvasRenderingContext : public NoBaseWillBeGarbageCollectedFinalized<CanvasRenderingContext>, public ActiveDOMObject {
     WTF_MAKE_NONCOPYABLE(CanvasRenderingContext);
     WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(CanvasRenderingContext);
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(CanvasRenderingContext);
@@ -63,7 +64,7 @@ public:
     // Return true if the content is updated.
     virtual bool paintRenderingResultsToCanvas(SourceDrawingBuffer) { return false; }
 
-    virtual blink::WebLayer* platformLayer() const { return nullptr; }
+    virtual WebLayer* platformLayer() const { return nullptr; }
 
     bool wouldTaintOrigin(CanvasImageSource*);
     void didMoveToNewDocument(Document*);

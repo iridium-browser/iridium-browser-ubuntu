@@ -24,7 +24,6 @@ set(ly_source_files
   ${ly_src_dir}/convert_to_argb.cc
   ${ly_src_dir}/convert_to_i420.cc
   ${ly_src_dir}/cpu_id.cc
-  ${ly_src_dir}/format_conversion.cc
   ${ly_src_dir}/mjpeg_decoder.cc
   ${ly_src_dir}/mjpeg_validate.cc
   ${ly_src_dir}/planar_functions.cc
@@ -39,6 +38,7 @@ set(ly_source_files
   ${ly_src_dir}/row_posix.cc
   ${ly_src_dir}/row_win.cc
   ${ly_src_dir}/scale.cc
+  ${ly_src_dir}/scale_any.cc
   ${ly_src_dir}/scale_argb.cc
   ${ly_src_dir}/scale_common.cc
   ${ly_src_dir}/scale_mips.cc
@@ -50,6 +50,7 @@ set(ly_source_files
 
 set(ly_unittest_sources
   ${ly_base_dir}/unit_test/basictypes_test.cc
+  ${ly_base_dir}/unit_test/color_test.cc
   ${ly_base_dir}/unit_test/compare_test.cc
   ${ly_base_dir}/unit_test/convert_test.cc
   ${ly_base_dir}/unit_test/cpu_test.cc
@@ -72,7 +73,6 @@ set(ly_header_files
   ${ly_inc_dir}/libyuv/convert_from.h
   ${ly_inc_dir}/libyuv/convert_from_argb.h
   ${ly_inc_dir}/libyuv/cpu_id.h
-  ${ly_inc_dir}/libyuv/format_conversion.h
   ${ly_inc_dir}/libyuv/planar_functions.h
   ${ly_inc_dir}/libyuv/rotate.h
   ${ly_inc_dir}/libyuv/rotate_argb.h

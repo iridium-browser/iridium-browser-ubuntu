@@ -4,6 +4,7 @@
 
 #include "components/autofill/content/renderer/autofill_agent.h"
 
+#include "base/auto_reset.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/message_loop/message_loop.h"
@@ -43,6 +44,7 @@
 #include "third_party/WebKit/public/web/WebNode.h"
 #include "third_party/WebKit/public/web/WebOptionElement.h"
 #include "third_party/WebKit/public/web/WebTextAreaElement.h"
+#include "third_party/WebKit/public/web/WebUserGestureIndicator.h"
 #include "third_party/WebKit/public/web/WebView.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/events/keycodes/keyboard_codes.h"
@@ -62,6 +64,7 @@ using blink::WebNode;
 using blink::WebOptionElement;
 using blink::WebString;
 using blink::WebTextAreaElement;
+using blink::WebUserGestureIndicator;
 using blink::WebVector;
 
 namespace autofill {
@@ -123,7 +126,7 @@ void TrimStringVectorForIPC(std::vector<base::string16>* strings) {
 // successful.
 bool ExtractFormDataOnSave(const WebFormElement& form_element, FormData* data) {
   return WebFormElementToFormData(
-      form_element, WebFormControlElement(), REQUIRE_NONE,
+      form_element, WebFormControlElement(),
       static_cast<ExtractMask>(EXTRACT_VALUE | EXTRACT_OPTION_TEXT), data,
       NULL);
 }
@@ -133,7 +136,6 @@ bool ExtractFormDataOnSave(const WebFormElement& form_element, FormData* data) {
 AutofillAgent::ShowSuggestionsOptions::ShowSuggestionsOptions()
     : autofill_on_empty_values(false),
       requires_caret_at_end(false),
-      display_warning_if_disabled(false),
       datalist_only(false),
       show_full_suggestion_list(false),
       show_password_suggestions_only(false) {
@@ -148,17 +150,18 @@ AutofillAgent::AutofillAgent(content::RenderFrame* render_frame,
       password_generation_agent_(password_generation_agent),
       legacy_(render_frame->GetRenderView(), this),
       autofill_query_id_(0),
-      display_warning_if_disabled_(false),
       was_query_node_autofilled_(false),
       has_shown_autofill_popup_for_current_edit_(false),
-      did_set_node_text_(false),
       ignore_text_changes_(false),
       is_popup_possibly_visible_(false),
+      is_generation_popup_possibly_visible_(false),
       weak_ptr_factory_(this) {
   render_frame->GetWebFrame()->setAutofillClient(this);
 
   // This owns itself, and will delete itself when |render_frame| is destructed
-  // (same as AutofillAgent).
+  // (same as AutofillAgent). This object must be constructed after
+  // AutofillAgent so that password generation UI is shown before password
+  // manager UI (see https://crbug.com/498545).
   new PageClickTracker(render_frame, this);
 }
 
@@ -247,6 +250,10 @@ void AutofillAgent::WillSubmitForm(const WebFormElement& form) {
 }
 
 void AutofillAgent::DidChangeScrollOffset() {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableAccessorySuggestionView)) {
+    return;
+  }
   HidePopup();
 }
 
@@ -274,6 +281,7 @@ void AutofillAgent::FocusChangeComplete() {
 
   if (!focused_element.isNull() && password_generation_agent_ &&
       password_generation_agent_->FocusedNodeHasChanged(focused_element)) {
+    is_generation_popup_possibly_visible_ = true;
     is_popup_possibly_visible_ = true;
   }
 }
@@ -303,7 +311,6 @@ void AutofillAgent::didRequestAutocomplete(
         "must use a secure connection or --reduce-security-for-testing.";
   } else if (!WebFormElementToFormData(form,
                                        WebFormControlElement(),
-                                       REQUIRE_AUTOCOMPLETE,
                                        static_cast<ExtractMask>(
                                            EXTRACT_VALUE |
                                            EXTRACT_OPTION_TEXT |
@@ -349,7 +356,6 @@ void AutofillAgent::FormControlElementClicked(
 
   ShowSuggestionsOptions options;
   options.autofill_on_empty_values = true;
-  options.display_warning_if_disabled = true;
   options.show_full_suggestion_list = element.isAutofilled();
 
   // On Android, default to showing the dropdown on field focus.
@@ -382,15 +388,12 @@ void AutofillAgent::textFieldDidEndEditing(const WebInputElement& element) {
 }
 
 void AutofillAgent::textFieldDidChange(const WebFormControlElement& element) {
+  DCHECK(toWebInputElement(&element) || IsTextAreaElement(element));
   if (ignore_text_changes_)
     return;
 
-  DCHECK(toWebInputElement(&element) || IsTextAreaElement(element));
-
-  if (did_set_node_text_) {
-    did_set_node_text_ = false;
+  if (!WebUserGestureIndicator::isProcessingUserGesture())
     return;
-  }
 
   // We post a task for doing the Autofill as the caret position is not set
   // properly at this point (http://bugs.webkit.org/show_bug.cgi?id=16976) and
@@ -412,6 +415,10 @@ void AutofillAgent::TextFieldDidChangeImpl(
 
   const WebInputElement* input_element = toWebInputElement(&element);
   if (input_element) {
+    // |password_autofill_agent_| keeps track of all text changes even if
+    // it isn't displaying UI.
+    password_autofill_agent_->UpdateStateForTextChange(*input_element);
+
     if (password_generation_agent_ &&
         password_generation_agent_->TextDidChangeInTextField(*input_element)) {
       is_popup_possibly_visible_ = true;
@@ -431,10 +438,7 @@ void AutofillAgent::TextFieldDidChangeImpl(
 
   FormData form;
   FormFieldData field;
-  if (FindFormAndFieldForFormControlElement(element,
-                                            &form,
-                                            &field,
-                                            REQUIRE_NONE)) {
+  if (FindFormAndFieldForFormControlElement(element, &form, &field)) {
     Send(new AutofillHostMsg_TextFieldDidChange(routing_id(), form, field,
                                                 base::TimeTicks::Now()));
   }
@@ -452,7 +456,6 @@ void AutofillAgent::textFieldDidReceiveKeyDown(const WebInputElement& element,
     ShowSuggestionsOptions options;
     options.autofill_on_empty_values = true;
     options.requires_caret_at_end = true;
-    options.display_warning_if_disabled = true;
     ShowSuggestions(element, options);
   }
 }
@@ -658,37 +661,29 @@ void AutofillAgent::ShowSuggestions(const WebFormControlElement& element,
 
   element_ = element;
   if (IsAutofillableInputElement(input_element) &&
-      (password_autofill_agent_->ShowSuggestions(
-           *input_element, options.show_full_suggestion_list) ||
-       options.show_password_suggestions_only)) {
+      password_autofill_agent_->ShowSuggestions(
+          *input_element, options.show_full_suggestion_list,
+          is_generation_popup_possibly_visible_)) {
     is_popup_possibly_visible_ = true;
     return;
   }
+
+  if (is_generation_popup_possibly_visible_)
+    return;
+
+  if (options.show_password_suggestions_only)
+    return;
 
   // Password field elements should only have suggestions shown by the password
   // autofill agent.
   if (input_element && input_element->isPasswordField())
     return;
 
-  // If autocomplete is disabled at the field level, ensure that the native
-  // UI won't try to show a warning, since that may conflict with a custom
-  // popup. Note that we cannot use the WebKit method element.autoComplete()
-  // as it does not allow us to distinguish the case where autocomplete is
-  // disabled for *both* the element and for the form.
-  bool display_warning = options.display_warning_if_disabled;
-  if (display_warning) {
-    const base::string16 autocomplete_attribute =
-        element.getAttribute("autocomplete");
-    if (LowerCaseEqualsASCII(autocomplete_attribute, "off"))
-      display_warning = false;
-  }
-
-  QueryAutofillSuggestions(element, display_warning, options.datalist_only);
+  QueryAutofillSuggestions(element, options.datalist_only);
 }
 
 void AutofillAgent::QueryAutofillSuggestions(
     const WebFormControlElement& element,
-    bool display_warning_if_disabled,
     bool datalist_only) {
   if (!element.document().frame())
     return;
@@ -697,26 +692,10 @@ void AutofillAgent::QueryAutofillSuggestions(
 
   static int query_counter = 0;
   autofill_query_id_ = query_counter++;
-  display_warning_if_disabled_ = display_warning_if_disabled;
-
-  // If autocomplete is disabled at the form level, we want to see if there
-  // would have been any suggestions were it enabled, so that we can show a
-  // warning.  Otherwise, we want to ignore fields that disable autocomplete, so
-  // that the suggestions list does not include suggestions for these form
-  // fields -- see comment 1 on http://crbug.com/69914
-  RequirementsMask requirements =
-      element.autoComplete() ? REQUIRE_AUTOCOMPLETE : REQUIRE_NONE;
-
-  // If we're ignoring autocomplete="off", always extract everything.
-  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kRespectAutocompleteOffForAutofill)) {
-    requirements = REQUIRE_NONE;
-  }
 
   FormData form;
   FormFieldData field;
-  if (!FindFormAndFieldForFormControlElement(element, &form, &field,
-                                             requirements)) {
+  if (!FindFormAndFieldForFormControlElement(element, &form, &field)) {
     // If we didn't find the cached form, at least let autocomplete have a shot
     // at providing suggestions.
     WebFormControlElementToFormField(element, EXTRACT_VALUE, &field);
@@ -746,17 +725,13 @@ void AutofillAgent::QueryAutofillSuggestions(
                                        data_list_values,
                                        data_list_labels));
 
-  Send(new AutofillHostMsg_QueryFormFieldAutofill(routing_id(),
-                                                  autofill_query_id_,
-                                                  form,
-                                                  field,
-                                                  bounding_box_scaled,
-                                                  display_warning_if_disabled));
+  Send(new AutofillHostMsg_QueryFormFieldAutofill(
+      routing_id(), autofill_query_id_, form, field, bounding_box_scaled));
 }
 
 void AutofillAgent::FillFieldWithValue(const base::string16& value,
                                        WebInputElement* node) {
-  did_set_node_text_ = true;
+  base::AutoReset<bool> auto_reset(&ignore_text_changes_, true);
   node->setEditingValue(value.substr(0, node->maxLength()));
 }
 
@@ -788,6 +763,7 @@ void AutofillAgent::HidePopup() {
   if (!is_popup_possibly_visible_)
     return;
   is_popup_possibly_visible_ = false;
+  is_generation_popup_possibly_visible_ = false;
   Send(new AutofillHostMsg_HidePopup(routing_id()));
 }
 

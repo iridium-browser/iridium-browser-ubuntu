@@ -7,6 +7,7 @@
 #define GPU_COMMAND_BUFFER_SERVICE_GPU_TRACER_H_
 
 #include <deque>
+#include <stack>
 #include <string>
 #include <vector>
 
@@ -107,15 +108,18 @@ class GPU_EXPORT GPUTracer
 
 class Outputter : public base::RefCounted<Outputter> {
  public:
-  virtual void TraceDevice(const std::string& category,
+  virtual void TraceDevice(GpuTracerSource source,
+                           const std::string& category,
                            const std::string& name,
                            int64 start_time,
                            int64 end_time) = 0;
 
-  virtual void TraceServiceBegin(const std::string& category,
+  virtual void TraceServiceBegin(GpuTracerSource source,
+                                 const std::string& category,
                                  const std::string& name) = 0;
 
-  virtual void TraceServiceEnd(const std::string& category,
+  virtual void TraceServiceEnd(GpuTracerSource source,
+                               const std::string& category,
                                const std::string& name) = 0;
 
  protected:
@@ -126,15 +130,18 @@ class Outputter : public base::RefCounted<Outputter> {
 class TraceOutputter : public Outputter {
  public:
   static scoped_refptr<TraceOutputter> Create(const std::string& name);
-  void TraceDevice(const std::string& category,
+  void TraceDevice(GpuTracerSource source,
+                   const std::string& category,
                    const std::string& name,
                    int64 start_time,
                    int64 end_time) override;
 
-  void TraceServiceBegin(const std::string& category,
+  void TraceServiceBegin(GpuTracerSource source,
+                         const std::string& category,
                          const std::string& name) override;
 
-  void TraceServiceEnd(const std::string& category,
+  void TraceServiceEnd(GpuTracerSource source,
+                       const std::string& category,
                        const std::string& name) override;
 
  protected:
@@ -143,7 +150,10 @@ class TraceOutputter : public Outputter {
   ~TraceOutputter() override;
 
   base::Thread named_thread_;
-  uint64 local_trace_id_;
+  uint64 local_trace_device_id_ = 0;
+  uint64 local_trace_service_id_ = 0;
+
+  std::stack<uint64> trace_service_id_stack_[NUM_TRACER_SOURCES];
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TraceOutputter);
@@ -154,16 +164,19 @@ class GPU_EXPORT GPUTrace
  public:
   GPUTrace(scoped_refptr<Outputter> outputter,
            gfx::GPUTimingClient* gpu_timing_client,
+           const GpuTracerSource source,
            const std::string& category,
            const std::string& name,
-           const bool enabled);
+           const bool tracing_service,
+           const bool tracing_device);
 
   void Destroy(bool have_context);
 
-  void Start(bool trace_service);
-  void End(bool tracing_service);
+  void Start();
+  void End();
   bool IsAvailable();
-  bool IsEnabled() { return enabled_; }
+  bool IsServiceTraceEnabled() const { return service_enabled_; }
+  bool IsDeviceTraceEnabled() const { return device_enabled_; }
   void Process();
 
  private:
@@ -173,11 +186,13 @@ class GPU_EXPORT GPUTrace
 
   friend class base::RefCounted<GPUTrace>;
 
-  std::string category_;
-  std::string name_;
+  const GpuTracerSource source_ = kTraceGroupInvalid;
+  const std::string category_;
+  const std::string name_;
   scoped_refptr<Outputter> outputter_;
   scoped_ptr<gfx::GPUTimer> gpu_timer_;
-  const bool enabled_ = false;
+  const bool service_enabled_ = false;
+  const bool device_enabled_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(GPUTrace);
 };

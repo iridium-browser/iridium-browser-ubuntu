@@ -100,7 +100,8 @@ class Me2MeNativeMessagingHost
       scoped_ptr<base::DictionaryValue> response);
   void ProcessGetCredentialsFromAuthCode(
       scoped_ptr<base::DictionaryValue> message,
-      scoped_ptr<base::DictionaryValue> response);
+      scoped_ptr<base::DictionaryValue> response,
+      bool need_user_email);
 
   // These Send... methods get called on the DaemonController's internal thread,
   // or on the calling thread if called by the PairingRegistry.
@@ -135,8 +136,8 @@ class Me2MeNativeMessagingHost
    public:
     ElevatedChannelEventHandler(Me2MeNativeMessagingHost* host);
 
-    virtual void OnMessage(scoped_ptr<base::Value> message) override;
-    virtual void OnDisconnect() override;
+    void OnMessage(scoped_ptr<base::Value> message) override;
+    void OnDisconnect() override;
    private:
     Me2MeNativeMessagingHost* parent_;
   };

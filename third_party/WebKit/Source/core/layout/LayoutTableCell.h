@@ -68,9 +68,11 @@ public:
         m_column = column;
     }
 
+    bool hasCol() const { return m_column != unsetColumnIndex; }
+
     unsigned col() const
     {
-        ASSERT(m_column != unsetColumnIndex);
+        ASSERT(hasCol());
         return m_column;
     }
 
@@ -98,15 +100,21 @@ public:
         return styleWidth;
     }
 
-    int logicalHeightForRowSizing() const
+    int logicalHeightFromStyle() const
     {
-        // FIXME: This function does too much work, and is very hot during table layout!
-        int adjustedLogicalHeight = pixelSnappedLogicalHeight() - (intrinsicPaddingBefore() + intrinsicPaddingAfter());
         int styleLogicalHeight = valueForLength(style()->logicalHeight(), 0);
         // In strict mode, box-sizing: content-box do the right thing and actually add in the border and padding.
         // Call computedCSSPadding* directly to avoid including implicitPadding.
         if (!document().inQuirksMode() && style()->boxSizing() != BORDER_BOX)
             styleLogicalHeight += (computedCSSPaddingBefore() + computedCSSPaddingAfter()).floor() + borderBefore() + borderAfter();
+        return styleLogicalHeight;
+    }
+
+    int logicalHeightForRowSizing() const
+    {
+        // FIXME: This function does too much work, and is very hot during table layout!
+        int adjustedLogicalHeight = pixelSnappedLogicalHeight() - (intrinsicPaddingBefore() + intrinsicPaddingAfter());
+        int styleLogicalHeight = logicalHeightFromStyle();
         return max(styleLogicalHeight, adjustedLogicalHeight);
     }
 
@@ -161,10 +169,10 @@ public:
     void setCellWidthChanged(bool b = true) { m_cellWidthChanged = b; }
 
     static LayoutTableCell* createAnonymous(Document*);
-    static LayoutTableCell* createAnonymousWithParentRenderer(const LayoutObject*);
+    static LayoutTableCell* createAnonymousWithParent(const LayoutObject*);
     virtual LayoutBox* createAnonymousBoxWithSameTypeAs(const LayoutObject* parent) const override
     {
-        return createAnonymousWithParentRenderer(parent);
+        return createAnonymousWithParent(parent);
     }
 
     // This function is used to unify which table part's style we use for computing direction and
@@ -216,7 +224,7 @@ public:
     }
 #endif
 
-    virtual const char* name() const override { return isAnonymous() ? "LayoutTableCell (anonymous)" : "LayoutTableCell"; }
+    virtual const char* name() const override { return "LayoutTableCell"; }
 
 protected:
     virtual void styleDidChange(StyleDifference, const ComputedStyle* oldStyle) override;

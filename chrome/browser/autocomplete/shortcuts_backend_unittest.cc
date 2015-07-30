@@ -15,7 +15,6 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/search_engines/template_url_service.h"
 #include "content/public/test/test_browser_thread.h"
-#include "sql/statement.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -55,14 +54,16 @@ class ShortcutsBackendTest : public testing::Test,
   bool DeleteShortcutsWithIDs(
       const ShortcutsDatabase::ShortcutIDs& deleted_ids);
 
+ private:
+  base::MessageLoopForUI ui_message_loop_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread db_thread_;
+
  protected:
   TestingProfile profile_;
 
  private:
   scoped_refptr<ShortcutsBackend> backend_;
-  base::MessageLoopForUI ui_message_loop_;
-  content::TestBrowserThread ui_thread_;
-  content::TestBrowserThread db_thread_;
 
   bool load_notified_;
   bool changed_notified_;
@@ -99,6 +100,7 @@ void ShortcutsBackendTest::SetSearchProvider() {
       TemplateURLServiceFactory::GetForProfile(&profile_);
   TemplateURLData data;
   data.SetURL("http://foo.com/search?bar={searchTerms}");
+  data.SetShortName(base::UTF8ToUTF16("foo"));
   data.SetKeyword(base::UTF8ToUTF16("foo"));
 
   TemplateURL* template_url = new TemplateURL(data);

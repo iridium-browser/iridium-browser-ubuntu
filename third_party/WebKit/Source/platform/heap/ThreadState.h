@@ -33,6 +33,7 @@
 
 #include "platform/PlatformExport.h"
 #include "platform/heap/AddressSanitizer.h"
+#include "platform/heap/ThreadingTraits.h"
 #include "public/platform/WebThread.h"
 #include "wtf/Forward.h"
 #include "wtf/HashMap.h"
@@ -52,6 +53,7 @@ namespace blink {
 class BasePage;
 class CallbackStack;
 struct GCInfo;
+class GarbageCollectedMixinConstructorMarker;
 class HeapObjectHeader;
 class PageMemoryRegion;
 class PageMemory;
@@ -69,49 +71,6 @@ using VisitorCallback = void (*)(Visitor*, void* self);
 using TraceCallback = VisitorCallback;
 using WeakPointerCallback = VisitorCallback;
 using EphemeronCallback = VisitorCallback;
-
-// ThreadAffinity indicates which threads objects can be used on. We
-// distinguish between objects that can be used on the main thread
-// only and objects that can be used on any thread.
-//
-// For objects that can only be used on the main thread we avoid going
-// through thread-local storage to get to the thread state.
-//
-// FIXME: We should evaluate the performance gain. Having
-// ThreadAffinity is complicating the implementation and we should get
-// rid of it if it is fast enough to go through thread-local storage
-// always.
-enum ThreadAffinity {
-    AnyThread,
-    MainThreadOnly,
-};
-
-// FIXME: These forward declarations violate dependency rules. Remove them.
-// Ideally we want to provide a USED_IN_MAIN_THREAD_ONLY(T) macro, which
-// indicates that classes in T's hierarchy are used only by the main thread.
-class Node;
-class NodeList;
-
-template<typename T,
-    bool mainThreadOnly = WTF::IsSubclass<typename WTF::RemoveConst<T>::Type, Node>::value
-        || WTF::IsSubclass<typename WTF::RemoveConst<T>::Type, NodeList>::value> struct DefaultThreadingTrait;
-
-template<typename T>
-struct DefaultThreadingTrait<T, false> {
-    static const ThreadAffinity Affinity = AnyThread;
-};
-
-template<typename T>
-struct DefaultThreadingTrait<T, true> {
-    static const ThreadAffinity Affinity = MainThreadOnly;
-};
-
-template<typename T>
-struct ThreadingTrait {
-    static const ThreadAffinity Affinity = DefaultThreadingTrait<T>::Affinity;
-};
-
-template<typename U> class ThreadingTrait<const U> : public ThreadingTrait<U> { };
 
 // Declare that a class has a pre-finalizer function.  The function is called in
 // the object's owner thread, and can access Member<>s to other
@@ -153,7 +112,7 @@ template<typename U> class ThreadingTrait<const U> : public ThreadingTrait<U> { 
         static bool invokePreFinalizer(void* object, Visitor& visitor)   \
         { \
             Class* self = reinterpret_cast<Class*>(object); \
-            if (visitor.isAlive(self)) \
+            if (visitor.isHeapObjectAlive(self)) \
                 return false; \
             self->method(); \
             return true; \
@@ -227,7 +186,7 @@ public:
         NoGCScheduled,
         IdleGCScheduled,
         PreciseGCScheduled,
-        GCScheduledForTesting,
+        FullGCScheduled,
         StoppingOtherThreads,
         GCRunning,
         EagerSweepScheduled,
@@ -362,6 +321,7 @@ public:
     // 6) Each thread calls preSweep().
     // 7) Each thread runs lazy sweeping (concurrently with sweepings
     //    in other threads) and eventually calls completeSweep().
+    // 8) Each thread calls postSweep().
     //
     // Notes:
     // - We stop the world between 1) and 5).
@@ -372,21 +332,22 @@ public:
     //   In this case, the next GC just cancels the remaining lazy sweeping.
     //   Specifically, preGC() of the next GC calls makeConsistentForSweeping()
     //   and it marks all not-yet-swept objets as dead.
+    void makeConsistentForSweeping();
     void preGC();
     void postGC(GCType);
+    void preSweep();
+    void completeSweep();
+    void postSweep();
 
     // Support for disallowing allocation. Mainly used for sanity
     // checks asserts.
     bool isAllocationAllowed() const { return !isAtSafePoint() && !m_noAllocationCount; }
     void enterNoAllocationScope() { m_noAllocationCount++; }
     void leaveNoAllocationScope() { m_noAllocationCount--; }
-
-    // Before performing GC the thread-specific heap state should be
-    // made consistent for sweeping.
-    void makeConsistentForSweeping();
-
+    bool isGCForbidden() const { return m_gcForbiddenCount; }
+    void enterGCForbiddenScope() { m_gcForbiddenCount++; }
+    void leaveGCForbiddenScope() { m_gcForbiddenCount--; }
     bool sweepForbidden() const { return m_sweepForbidden; }
-    void completeSweep();
 
     void prepareRegionTree();
     void flushHeapDoesNotContainCacheIfNeeded();
@@ -461,10 +422,8 @@ public:
     }
 
     // Get one of the heap structures for this thread.
-    //
-    // The heap is split into multiple heap parts based on object
-    // types. To get the index for a given type, use
-    // HeapIndexTrait<Type>::index.
+    // The thread heap is split into multiple heap parts based on object types
+    // and object sizes.
     BaseHeap* heap(int heapIndex) const
     {
         ASSERT(0 <= heapIndex);
@@ -542,9 +501,6 @@ public:
     bool popAndInvokeWeakPointerCallback(Visitor*);
 
     size_t objectPayloadSizeForTesting();
-
-    void preSweep();
-    void postSweep();
     void prepareHeapForTermination();
 
     // Request to call a pref-finalizer of the target object before the object
@@ -582,22 +538,27 @@ public:
         m_traceDOMWrappers = traceDOMWrappers;
     }
 
-    double collectionRate() const { return m_collectionRate; }
-
     // By entering a gc-forbidden scope, conservative GCs will not
     // be allowed while handling an out-of-line allocation request.
     // Intended used when constructing subclasses of GC mixins, where
     // the object being constructed cannot be safely traced & marked
     // fully should a GC be allowed while its subclasses are being
     // constructed.
-    void enterGCForbiddenScope(unsigned delta)
+    void enterGCForbiddenScopeIfNeeded(GarbageCollectedMixinConstructorMarker* gcMixinMarker)
     {
-        m_gcForbiddenCount += delta;
+        if (!m_gcMixinMarker) {
+            enterGCForbiddenScope();
+            m_gcMixinMarker = gcMixinMarker;
+        }
     }
-
-#if ENABLE(ASSERT)
-    bool isGCForbidden() const { return m_gcForbiddenCount; }
-#endif
+    void leaveGCForbiddenScopeIfNeeded(GarbageCollectedMixinConstructorMarker* gcMixinMarker)
+    {
+        ASSERT(m_gcForbiddenCount > 0);
+        if (m_gcMixinMarker == gcMixinMarker) {
+            leaveGCForbiddenScope();
+            m_gcMixinMarker = nullptr;
+        }
+    }
 
     // vectorBackingHeap() returns a heap that the vector allocation should use.
     // We have four vector heaps and want to choose the best heap here.
@@ -691,13 +652,6 @@ private:
     void clearHeapAges();
     int heapIndexOfVectorHeapLeastRecentlyExpanded(int beginHeapIndex, int endHeapIndex);
 
-    template<typename U> friend class GarbageCollectedMixinConstructorMarker;
-    void leaveGCForbiddenScope()
-    {
-        ASSERT(m_gcForbiddenCount > 0);
-        m_gcForbiddenCount--;
-    }
-
     friend class SafePointAwareMutexLocker;
     friend class SafePointBarrier;
     friend class SafePointScope;
@@ -725,11 +679,9 @@ private:
     Vector<Address> m_safePointStackCopy;
     bool m_atSafePoint;
     Vector<Interruptor*> m_interruptors;
-    bool m_didV8GCAfterLastGC;
     bool m_sweepForbidden;
     size_t m_noAllocationCount;
     size_t m_gcForbiddenCount;
-    size_t m_allocatedObjectSizeBeforeGC;
     BaseHeap* m_heaps[NumberOfHeaps];
 
     int m_vectorBackingHeapIndex;
@@ -737,9 +689,9 @@ private:
     size_t m_currentHeapAges;
 
     bool m_isTerminating;
+    GarbageCollectedMixinConstructorMarker* m_gcMixinMarker;
 
     bool m_shouldFlushHeapDoesNotContainCache;
-    double m_collectionRate;
     GCState m_gcState;
 
     CallbackStack* m_weakCallbackStack;

@@ -71,12 +71,6 @@ copresence::CopresenceManager* CopresenceService::manager() {
   return manager_.get();
 }
 
-audio_modem::WhispernetClient* CopresenceService::whispernet_client() {
-  if (!whispernet_client_ && !is_shutting_down_)
-    whispernet_client_.reset(new ChromeWhispernetClient(browser_context_));
-  return whispernet_client_.get();
-}
-
 const std::string CopresenceService::auth_token(const std::string& app_id)
     const {
   // This won't be const if we use map[]
@@ -110,14 +104,10 @@ void CopresenceService::ResetState() {
 
 // static
 void CopresenceService::RegisterProfilePrefs(PrefRegistrySyncable* registry) {
-  registry->RegisterStringPref(
-      prefs::kCopresenceAuthenticatedDeviceId,
-      std::string(),
-      PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterStringPref(
-      prefs::kCopresenceAnonymousDeviceId,
-      std::string(),
-      PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterStringPref(prefs::kCopresenceAuthenticatedDeviceId,
+                               std::string());
+  registry->RegisterStringPref(prefs::kCopresenceAnonymousDeviceId,
+                               std::string());
 }
 
 // static
@@ -209,7 +199,9 @@ CopresenceService::GetAPIKey(const std::string& app_id) const {
 }
 
 audio_modem::WhispernetClient* CopresenceService::GetWhispernetClient() {
-  return whispernet_client();
+  if (!whispernet_client_ && !is_shutting_down_)
+    whispernet_client_.reset(new ChromeWhispernetClient(browser_context_));
+  return whispernet_client_.get();
 }
 
 gcm::GCMDriver* CopresenceService::GetGCMDriver() {

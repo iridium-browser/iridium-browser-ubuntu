@@ -5,7 +5,8 @@
 #include "ipc/mojo/ipc_channel_mojo_host.h"
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
 #include "ipc/mojo/ipc_channel_mojo.h"
 
 namespace IPC {
@@ -30,7 +31,6 @@ class ChannelMojoHost::ChannelDelegate
   // ChannelMojo::Delegate
   base::WeakPtr<Delegate> ToWeakPtr() override;
   void OnChannelCreated(base::WeakPtr<ChannelMojo> channel) override;
-  scoped_refptr<base::TaskRunner> GetIOTaskRunner() override;
 
   // Returns an weak ptr of ChannelDelegate instead of Delegate
   base::WeakPtr<ChannelDelegate> GetWeakPtr();
@@ -73,11 +73,6 @@ void ChannelMojoHost::ChannelDelegate::OnChannelCreated(
   channel_ = channel;
 }
 
-scoped_refptr<base::TaskRunner>
-ChannelMojoHost::ChannelDelegate::GetIOTaskRunner() {
-  return io_task_runner_;
-}
-
 void ChannelMojoHost::ChannelDelegate::OnClientLaunched(
     base::ProcessHandle process) {
   if (channel_)
@@ -103,7 +98,7 @@ ChannelMojoHost::~ChannelMojoHost() {
 }
 
 void ChannelMojoHost::OnClientLaunched(base::ProcessHandle process) {
-  if (io_task_runner_ == base::MessageLoop::current()->message_loop_proxy()) {
+  if (io_task_runner_ == base::MessageLoop::current()->task_runner()) {
     channel_delegate_->OnClientLaunched(process);
   } else {
     io_task_runner_->PostTask(FROM_HERE,

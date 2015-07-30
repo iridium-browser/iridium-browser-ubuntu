@@ -49,7 +49,6 @@
 #include "core/layout/LayoutText.h"
 #include "core/layout/LayoutTheme.h"
 #include "core/layout/LayoutView.h"
-#include "core/layout/PaintInfo.h"
 #include "core/layout/TextRunConstructor.h"
 #include "core/page/EventHandler.h"
 #include "core/page/FocusController.h"
@@ -113,12 +112,10 @@ LayoutUnit LayoutListBox::itemHeight() const
         baseItem = &toHTMLOptGroupElement(baseItem)->optGroupLabelElement();
     else if (!isHTMLOptionElement(baseItem))
         return defaultItemHeight();
-    LayoutObject* baseItemRenderer = baseItem->layoutObject();
-    if (!baseItemRenderer)
+    LayoutObject* baseItemLayoutObject = baseItem->layoutObject();
+    if (!baseItemLayoutObject || !baseItemLayoutObject->isBox())
         return defaultItemHeight();
-    if (!baseItemRenderer || !baseItemRenderer->isBox())
-        return defaultItemHeight();
-    return toLayoutBox(baseItemRenderer)->size().height();
+    return toLayoutBox(baseItemLayoutObject)->size().height();
 }
 
 void LayoutListBox::computeLogicalHeight(LayoutUnit, LayoutUnit logicalTop, LogicalExtentComputedValues& computedValues) const
@@ -143,7 +140,7 @@ void LayoutListBox::stopAutoscroll()
 void LayoutListBox::computeIntrinsicLogicalWidths(LayoutUnit& minLogicalWidth, LayoutUnit& maxLogicalWidth) const
 {
     LayoutBlockFlow::computeIntrinsicLogicalWidths(minLogicalWidth, maxLogicalWidth);
-    if (style()->width().isPercent())
+    if (style()->width().hasPercent())
         minLogicalWidth = 0;
 }
 
@@ -152,7 +149,7 @@ void LayoutListBox::scrollToRect(const LayoutRect& rect)
     if (hasOverflowClip()) {
         ASSERT(layer());
         ASSERT(layer()->scrollableArea());
-        layer()->scrollableArea()->exposeRect(rect, ScrollAlignment::alignToEdgeIfNeeded, ScrollAlignment::alignToEdgeIfNeeded);
+        layer()->scrollableArea()->scrollIntoView(rect, ScrollAlignment::alignToEdgeIfNeeded, ScrollAlignment::alignToEdgeIfNeeded);
     }
 }
 

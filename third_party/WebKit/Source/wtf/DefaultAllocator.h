@@ -179,6 +179,8 @@ public:
 
     static void enterNoAllocationScope() { }
     static void leaveNoAllocationScope() { }
+    static void enterGCForbiddenScope() { }
+    static void leaveGCForbiddenScope() { }
 
 private:
     WTF_EXPORT static void* allocateBacking(size_t);
@@ -188,7 +190,7 @@ private:
 // need, so unless we have this class we get compile errors.
 class DefaultAllocatorDummyVisitor {
 public:
-    template<typename T> inline bool isAlive(T obj)
+    template<typename T> inline bool isHeapObjectAlive(T obj)
     {
         ASSERT_NOT_REACHED();
         return false;

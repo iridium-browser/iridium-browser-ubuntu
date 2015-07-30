@@ -58,6 +58,12 @@ void JsonWriter::DumpJson() {
             result["options"]["ext"]     = gBitmapResults[i].ext.c_str();
             result["md5"]                = gBitmapResults[i].md5.c_str();
 
+            // Source options only need to be part of the key if they exist.
+            // Source type by source type, we either always set options or never set options.
+            if (!gBitmapResults[i].sourceOptions.isEmpty()) {
+                result["key"]["source_options"] = gBitmapResults[i].sourceOptions.c_str();
+            }
+
             root["results"].append(result);
         }
     }
@@ -109,6 +115,10 @@ bool JsonWriter::ReadJson(const char* path, void(*callback)(BitmapResult)) {
         br.sourceType = r["key"]["source_type"].asCString();
         br.ext        = r["options"]["ext"].asCString();
         br.md5        = r["md5"].asCString();
+
+        if (!r["key"]["source_options"].isNull()) {
+            br.sourceOptions = r["key"]["source_options"].asCString();
+        }
         callback(br);
     }
     return true;

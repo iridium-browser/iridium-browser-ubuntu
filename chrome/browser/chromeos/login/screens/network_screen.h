@@ -77,6 +77,7 @@ class NetworkScreen : public NetworkModel,
 
   // InputMethodManager::Observer implementation:
   void InputMethodChanged(input_method::InputMethodManager* manager,
+                          Profile* profile,
                           bool show_message) override;
 
   void SetApplicationLocale(const std::string& locale);
@@ -87,6 +88,8 @@ class NetworkScreen : public NetworkModel,
 
   void SetTimezone(const std::string& timezone_id);
   std::string GetTimezone() const;
+
+  void CreateNetworkFromOnc(const std::string& onc_spec);
 
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);

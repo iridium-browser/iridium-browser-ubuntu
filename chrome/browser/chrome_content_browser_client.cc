@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/files/scoped_file.h"
 #include "base/i18n/icu_util.h"
@@ -19,6 +20,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/sequenced_worker_pool.h"
+#include "chrome/browser/after_startup_task_utils.h"
 #include "chrome/browser/browser_about_handler.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
@@ -31,6 +33,7 @@
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/defaults.h"
+#include "chrome/browser/devtools/chrome_devtools_manager_delegate.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/font_family_cache.h"
 #include "chrome/browser/geolocation/chrome_access_token_store.h"
@@ -53,6 +56,7 @@
 #include "chrome/browser/renderer_host/chrome_render_message_filter.h"
 #include "chrome/browser/renderer_host/pepper/chrome_browser_pepper_host_factory.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
+#include "chrome/browser/safe_browsing/ui_manager.h"
 #include "chrome/browser/search/instant_service.h"
 #include "chrome/browser/search/instant_service_factory.h"
 #include "chrome/browser/search/search.h"
@@ -62,6 +66,7 @@
 #include "chrome/browser/speech/tts_message_filter.h"
 #include "chrome/browser/ssl/ssl_add_certificate.h"
 #include "chrome/browser/ssl/ssl_blocking_page.h"
+#include "chrome/browser/ssl/ssl_cert_reporter.h"
 #include "chrome/browser/ssl/ssl_client_certificate_selector.h"
 #include "chrome/browser/ssl/ssl_error_handler.h"
 #include "chrome/browser/sync_file_system/local/sync_file_system_backend.h"
@@ -115,9 +120,10 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/child_process_host.h"
 #include "content/public/common/content_descriptors.h"
+#include "content/public/common/service_registry.h"
 #include "content/public/common/url_utils.h"
 #include "content/public/common/web_preferences.h"
-#include "gin/public/isolate_holder.h"
+#include "gin/v8_initializer.h"
 #include "net/base/mime_util.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_options.h"
@@ -136,6 +142,7 @@
 #include "chrome/browser/chrome_browser_main_mac.h"
 #include "chrome/browser/spellchecker/spellcheck_message_filter_mac.h"
 #elif defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/attestation/platform_verification_impl.h"
 #include "chrome/browser/chromeos/chrome_browser_main_chromeos.h"
 #include "chrome/browser/chromeos/drive/fileapi/file_system_backend_delegate.h"
 #include "chrome/browser/chromeos/file_manager/app_id.h"
@@ -151,11 +158,11 @@
 #include "chrome/browser/chrome_browser_main_linux.h"
 #elif defined(OS_ANDROID)
 #include "chrome/browser/android/new_tab_page_url_handler.h"
-#include "chrome/browser/android/service_tab_launcher.h"
 #include "chrome/browser/android/webapps/single_tab_mode_tab_helper.h"
 #include "chrome/browser/chrome_browser_main_android.h"
 #include "chrome/common/descriptors_android.h"
 #include "components/crash/browser/crash_dump_manager_android.h"
+#include "components/service_tab_launcher/browser/android/service_tab_launcher.h"
 #elif defined(OS_POSIX)
 #include "chrome/browser/chrome_browser_main_posix.h"
 #endif
@@ -169,12 +176,6 @@
 #if defined(OS_ANDROID)
 #include "ui/base/ui_base_paths.h"
 #include "ui/gfx/android/device_display_info.h"
-#endif
-
-#if defined(OS_ANDROID)
-#include "chrome/browser/android/dev_tools_manager_delegate_android.h"
-#else
-#include "chrome/browser/devtools/chrome_devtools_manager_delegate.h"
 #endif
 
 #if defined(TOOLKIT_VIEWS)
@@ -211,9 +212,9 @@
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/media/cast_transport_host_filter.h"
 #include "chrome/browser/speech/extension_api/tts_engine_extension_api.h"
+#include "components/guest_view/browser/guest_view_base.h"
+#include "components/guest_view/browser/guest_view_manager.h"
 #include "extensions/browser/extension_registry.h"
-#include "extensions/browser/guest_view/guest_view_base.h"
-#include "extensions/browser/guest_view/guest_view_manager.h"
 #include "extensions/browser/guest_view/web_view/web_view_guest.h"
 #include "extensions/browser/guest_view/web_view/web_view_permission_helper.h"
 #include "extensions/browser/guest_view/web_view/web_view_renderer_state.h"
@@ -518,6 +519,29 @@ void HandleBlockedPopupOnUIThread(const BlockedWindowParams& params) {
   popup_helper->AddBlockedPopup(params);
 }
 
+// An implementation of the SSLCertReporter interface used by
+// SSLErrorHandler. Uses the SafeBrowsing UI manager to send invalid
+// certificate reports.
+class SafeBrowsingSSLCertReporter : public SSLCertReporter {
+ public:
+  explicit SafeBrowsingSSLCertReporter(
+      const scoped_refptr<SafeBrowsingUIManager>& safe_browsing_ui_manager)
+      : safe_browsing_ui_manager_(safe_browsing_ui_manager) {}
+  ~SafeBrowsingSSLCertReporter() override {}
+
+  // SSLCertReporter implementation
+  void ReportInvalidCertificateChain(
+      const std::string& serialized_report) override {
+    if (safe_browsing_ui_manager_) {
+      safe_browsing_ui_manager_->ReportInvalidCertificateChain(
+          serialized_report, base::Bind(&base::DoNothing));
+    }
+  }
+
+ private:
+  const scoped_refptr<SafeBrowsingUIManager> safe_browsing_ui_manager_;
+};
+
 #if defined(OS_ANDROID)
 
 void HandleSingleTabModeBlockOnUIThread(const BlockedWindowParams& params) {
@@ -571,7 +595,7 @@ void GetGuestViewDefaultContentSettingRules(
                                   std::string(),
                                   incognito));
 }
-#endif  // defined(ENALBE_EXTENSIONS)
+#endif  // defined(ENABLE_EXTENSIONS)
 
 }  // namespace
 
@@ -614,17 +638,9 @@ ChromeContentBrowserClient::~ChromeContentBrowserClient() {
 // static
 void ChromeContentBrowserClient::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterBooleanPref(
-      prefs::kDisable3DAPIs,
-      false,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kEnableHyperlinkAuditing,
-      true,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterListPref(
-      prefs::kEnableDeprecatedWebPlatformFeatures,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kDisable3DAPIs, false);
+  registry->RegisterBooleanPref(prefs::kEnableHyperlinkAuditing, true);
+  registry->RegisterListPref(prefs::kEnableDeprecatedWebPlatformFeatures);
 }
 
 // static
@@ -692,6 +708,13 @@ content::BrowserMainParts* ChromeContentBrowserClient::CreateBrowserMainParts(
   chrome::AddMetricsExtraParts(main_parts);
 
   return main_parts;
+}
+
+void ChromeContentBrowserClient::PostAfterStartupTask(
+    const tracked_objects::Location& from_here,
+    const scoped_refptr<base::TaskRunner>& task_runner,
+    const base::Closure& task) {
+  AfterStartupTaskUtils::PostTask(from_here, task_runner, task);
 }
 
 std::string ChromeContentBrowserClient::GetStoragePartitionIdForSite(
@@ -1203,6 +1226,15 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
                                   homedir.value().c_str());
 #endif
 
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(V8_USE_EXTERNAL_STARTUP_DATA)
+  if (process_type != switches::kZygoteProcess) {
+    command_line->AppendSwitch(::switches::kV8NativesPassedByFD);
+    command_line->AppendSwitch(::switches::kV8SnapshotPassedByFD);
+  }
+#endif  // V8_USE_EXTERNAL_STARTUP_DATA
+#endif  // OS_POSIX && !OS_MACOSX
+
   if (process_type == switches::kRendererProcess) {
     content::RenderProcessHost* process =
         content::RenderProcessHost::FromID(child_process_id);
@@ -1310,6 +1342,7 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
     static const char* const kSwitchNames[] = {
       autofill::switches::kDisableFillOnAccountSelect,
       autofill::switches::kDisablePasswordGeneration,
+      autofill::switches::kEnableAccessorySuggestionView,
       autofill::switches::kEnableFillOnAccountSelect,
       autofill::switches::kEnableFillOnAccountSelectNoHighlighting,
       autofill::switches::kEnablePasswordGeneration,
@@ -1317,7 +1350,6 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
       autofill::switches::kEnableSingleClickAutofill,
       autofill::switches::kIgnoreAutocompleteOffForAutofill,
       autofill::switches::kLocalHeuristicsOnlyForPasswordGeneration,
-      autofill::switches::kRespectAutocompleteOffForAutofill,
 #if defined(ENABLE_EXTENSIONS)
       extensions::switches::kAllowHTTPBackgroundPage,
       extensions::switches::kAllowLegacyExtensionManifests,
@@ -1337,7 +1369,6 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
       switches::kDisableCastStreamingHWEncoding,
       switches::kDisableJavaScriptHarmonyShipping,
       switches::kDisableNewBookmarkApps,
-      switches::kDisableOutOfProcessPdf,
       switches::kEnableBenchmarking,
       switches::kEnableNaCl,
 #if !defined(DISABLE_NACL)
@@ -1347,7 +1378,6 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
 #endif
       switches::kEnableNetBenchmarking,
       switches::kEnableNewBookmarkApps,
-      switches::kEnableOutOfProcessPdf,
       switches::kEnablePluginPlaceholderShadowDom,
       switches::kJavaScriptHarmony,
       switches::kMessageLoopHistogrammer,
@@ -1357,6 +1387,7 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
       switches::kProfilingAtStart,
       switches::kProfilingFile,
       switches::kProfilingFlush,
+      switches::kUnsafelyTreatInsecureOriginAsSecure,
       translate::switches::kTranslateSecurityOrigin,
     };
 
@@ -1445,11 +1476,23 @@ bool ChromeContentBrowserClient::AllowAppCache(
 bool ChromeContentBrowserClient::AllowServiceWorker(
     const GURL& scope,
     const GURL& first_party_url,
-    content::ResourceContext* context) {
+    content::ResourceContext* context,
+    int render_process_id,
+    int render_frame_id) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK(scope.is_valid());
+  DCHECK(first_party_url.is_valid());
+
   ProfileIOData* io_data = ProfileIOData::FromResourceContext(context);
-  return io_data->GetCookieSettings()->
-      IsSettingCookieAllowed(scope, first_party_url);
+  bool allow = io_data->GetCookieSettings()->IsSettingCookieAllowed(
+      scope, first_party_url);
+
+  // Record access to database for potential display in UI.
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(&TabSpecificContentSettings::ServiceWorkerAccessed,
+                 render_process_id, render_frame_id, scope, !allow));
+  return allow;
 }
 
 bool ChromeContentBrowserClient::AllowGetCookie(
@@ -1712,11 +1755,12 @@ void ChromeContentBrowserClient::AllowCertificateError(
 
   SafeBrowsingService* safe_browsing_service =
       g_browser_process->safe_browsing_service();
-  SSLErrorHandler::HandleSSLError(
-      tab, cert_error, ssl_info, request_url, options_mask,
-      safe_browsing_service ? safe_browsing_service->ui_manager().get()
-                            : nullptr,
-      callback);
+  scoped_ptr<SafeBrowsingSSLCertReporter> cert_reporter(
+      new SafeBrowsingSSLCertReporter(safe_browsing_service
+                                          ? safe_browsing_service->ui_manager()
+                                          : nullptr));
+  SSLErrorHandler::HandleSSLError(tab, cert_error, ssl_info, request_url,
+                                  options_mask, cert_reporter.Pass(), callback);
 }
 
 void ChromeContentBrowserClient::SelectClientCertificate(
@@ -1956,8 +2000,6 @@ void ChromeContentBrowserClient::OverrideWebkitPrefs(
       prefs->GetBoolean(prefs::kWebKitJavascriptCanOpenWindowsAutomatically);
   web_prefs->dom_paste_enabled =
       prefs->GetBoolean(prefs::kWebKitDomPasteEnabled);
-  web_prefs->shrinks_standalone_images_to_fit =
-      prefs->GetBoolean(prefs::kWebKitShrinksStandaloneImagesToFit);
   web_prefs->tabs_to_links = prefs->GetBoolean(prefs::kWebkitTabsToLinks);
 
   if (!prefs->GetBoolean(prefs::kWebKitJavascriptEnabled))
@@ -2183,23 +2225,16 @@ void ChromeContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
     int child_process_id,
     FileDescriptorInfo* mappings) {
 #if defined(V8_USE_EXTERNAL_STARTUP_DATA)
-  if (v8_snapshot_fd_.get() == -1 && v8_natives_fd_.get() == -1) {
-    base::FilePath v8_data_path;
-    PathService::Get(gin::IsolateHolder::kV8SnapshotBasePathKey, &v8_data_path);
-    DCHECK(!v8_data_path.empty());
-
-    int file_flags = base::File::FLAG_OPEN | base::File::FLAG_READ;
-    base::FilePath v8_natives_data_path =
-        v8_data_path.AppendASCII(gin::IsolateHolder::kNativesFileName);
-    base::FilePath v8_snapshot_data_path =
-        v8_data_path.AppendASCII(gin::IsolateHolder::kSnapshotFileName);
-    base::File v8_natives_data_file(v8_natives_data_path, file_flags);
-    base::File v8_snapshot_data_file(v8_snapshot_data_path, file_flags);
-    DCHECK(v8_natives_data_file.IsValid());
-    DCHECK(v8_snapshot_data_file.IsValid());
-    v8_natives_fd_.reset(v8_natives_data_file.TakePlatformFile());
-    v8_snapshot_fd_.reset(v8_snapshot_data_file.TakePlatformFile());
+  if (v8_natives_fd_.get() == -1 || v8_snapshot_fd_.get() == -1) {
+    int v8_natives_fd = -1;
+    int v8_snapshot_fd = -1;
+    if (gin::V8Initializer::OpenV8FilesForChildProcesses(&v8_natives_fd,
+                                                         &v8_snapshot_fd)) {
+      v8_natives_fd_.reset(v8_natives_fd);
+      v8_snapshot_fd_.reset(v8_snapshot_fd);
+    }
   }
+  DCHECK(v8_natives_fd_.get() != -1 && v8_snapshot_fd_.get() != -1);
   mappings->Share(kV8NativesDataDescriptor, v8_natives_fd_.get());
   mappings->Share(kV8SnapshotDataDescriptor, v8_snapshot_fd_.get());
 #endif  // V8_USE_EXTERNAL_STARTUP_DATA
@@ -2297,13 +2332,14 @@ void ChromeContentBrowserClient::PreSpawnRenderer(
 }
 #endif
 
-bool ChromeContentBrowserClient::CheckMediaAccessPermission(
-    content::BrowserContext* browser_context,
-    const GURL& security_origin,
-    content::MediaStreamType type) {
-  return MediaCaptureDevicesDispatcher::GetInstance()
-      ->CheckMediaAccessPermission(
-          browser_context, security_origin, type);
+void ChromeContentBrowserClient::OverrideRenderFrameMojoServices(
+    content::ServiceRegistry* registry,
+    content::RenderFrameHost* render_frame_host) {
+#if defined(OS_CHROMEOS)
+  registry->AddService(
+      base::Bind(&chromeos::attestation::PlatformVerificationImpl::Create,
+                 render_frame_host));
+#endif
 }
 
 void ChromeContentBrowserClient::OpenURL(
@@ -2322,7 +2358,7 @@ void ChromeContentBrowserClient::OpenURL(
   Navigate(&nav_params);
   callback.Run(nav_params.target_contents);
 #elif defined(OS_ANDROID)
-  chrome::android::ServiceTabLauncher::GetInstance()->LaunchTab(
+  service_tab_launcher::ServiceTabLauncher::GetInstance()->LaunchTab(
       browser_context, params, callback);
 #else
   NOTIMPLEMENTED();
@@ -2339,11 +2375,7 @@ void ChromeContentBrowserClient::RecordURLMetric(const std::string& metric,
 
 content::DevToolsManagerDelegate*
 ChromeContentBrowserClient::GetDevToolsManagerDelegate() {
-#if defined(OS_ANDROID)
-  return new DevToolsManagerDelegateAndroid();
-#else
   return new ChromeDevToolsManagerDelegate();
-#endif
 }
 
 content::TracingDelegate* ChromeContentBrowserClient::GetTracingDelegate() {

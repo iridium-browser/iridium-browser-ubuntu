@@ -15,10 +15,12 @@
 #include "ash/test/ash_test_base.h"
 #include "ash/test/display_manager_test_api.h"
 #include "ash/test/mirror_window_test_api.h"
+#include "ash/wm/window_state.h"
 #include "base/command_line.h"
 #include "base/format_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
+#include "ui/aura/client/aura_constants.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window_observer.h"
 #include "ui/aura/window_tree_host.h"
@@ -487,7 +489,7 @@ TEST_F(DisplayManagerTest, TestNativeDisplaysChanged) {
       CreateDisplayInfo(internal_display_id, gfx::Rect(0, 0, 500, 500));
   const DisplayInfo external_display_info =
       CreateDisplayInfo(external_id, gfx::Rect(1, 1, 100, 100));
-  const DisplayInfo mirrored_display_info =
+  const DisplayInfo mirroring_display_info =
       CreateDisplayInfo(mirror_id, gfx::Rect(0, 0, 500, 500));
 
   EXPECT_EQ(1U, display_manager()->GetNumDisplays());
@@ -502,7 +504,7 @@ TEST_F(DisplayManagerTest, TestNativeDisplaysChanged) {
   EXPECT_EQ(default_bounds,
             display_manager()->GetDisplayAt(0).bounds().ToString());
   EXPECT_EQ(1U, display_manager()->num_connected_displays());
-  EXPECT_FALSE(display_manager()->IsMirrored());
+  EXPECT_FALSE(display_manager()->IsInMirrorMode());
 
   if (!SupportsMultipleDisplays())
     return;
@@ -516,7 +518,7 @@ TEST_F(DisplayManagerTest, TestNativeDisplaysChanged) {
   EXPECT_EQ("1,1 100x100",
             GetDisplayInfoForId(external_id).bounds_in_native().ToString());
   EXPECT_EQ(1U, display_manager()->num_connected_displays());
-  EXPECT_FALSE(display_manager()->IsMirrored());
+  EXPECT_FALSE(display_manager()->IsInMirrorMode());
   EXPECT_EQ(external_id, Shell::GetScreen()->GetPrimaryDisplay().id());
 
   EXPECT_EQ(internal_display_id, gfx::Display::InternalDisplayId());
@@ -535,7 +537,7 @@ TEST_F(DisplayManagerTest, TestNativeDisplaysChanged) {
   EXPECT_EQ("1,1 100x100",
             GetDisplayInfoForId(10).bounds_in_native().ToString());
   EXPECT_EQ(2U, display_manager()->num_connected_displays());
-  EXPECT_FALSE(display_manager()->IsMirrored());
+  EXPECT_FALSE(display_manager()->IsInMirrorMode());
   EXPECT_EQ(ToDisplayName(internal_display_id),
             display_manager()->GetDisplayNameForId(internal_display_id));
 
@@ -548,7 +550,7 @@ TEST_F(DisplayManagerTest, TestNativeDisplaysChanged) {
   EXPECT_EQ("1,1 100x100",
             GetDisplayInfoForId(10).bounds_in_native().ToString());
   EXPECT_EQ(2U, display_manager()->num_connected_displays());
-  EXPECT_FALSE(display_manager()->IsMirrored());
+  EXPECT_FALSE(display_manager()->IsInMirrorMode());
   EXPECT_EQ(ToDisplayName(internal_display_id),
             display_manager()->GetDisplayNameForId(internal_display_id));
 
@@ -559,21 +561,21 @@ TEST_F(DisplayManagerTest, TestNativeDisplaysChanged) {
   EXPECT_EQ("0,0 500x500",
             GetDisplayForId(internal_display_id).bounds().ToString());
   EXPECT_EQ(1U, display_manager()->num_connected_displays());
-  EXPECT_FALSE(display_manager()->IsMirrored());
+  EXPECT_FALSE(display_manager()->IsInMirrorMode());
 
   // External display was changed during suspend.
   display_info_list.push_back(external_display_info);
   display_manager()->OnNativeDisplaysChanged(display_info_list);
   EXPECT_EQ(2U, display_manager()->GetNumDisplays());
   EXPECT_EQ(2U, display_manager()->num_connected_displays());
-  EXPECT_FALSE(display_manager()->IsMirrored());
+  EXPECT_FALSE(display_manager()->IsInMirrorMode());
 
   // suspend...
   display_info_list.clear();
   display_manager()->OnNativeDisplaysChanged(display_info_list);
   EXPECT_EQ(2U, display_manager()->GetNumDisplays());
   EXPECT_EQ(2U, display_manager()->num_connected_displays());
-  EXPECT_FALSE(display_manager()->IsMirrored());
+  EXPECT_FALSE(display_manager()->IsInMirrorMode());
 
   // and resume with different external display.
   display_info_list.push_back(internal_display_info);
@@ -581,20 +583,20 @@ TEST_F(DisplayManagerTest, TestNativeDisplaysChanged) {
   display_manager()->OnNativeDisplaysChanged(display_info_list);
   EXPECT_EQ(2U, display_manager()->GetNumDisplays());
   EXPECT_EQ(2U, display_manager()->num_connected_displays());
-  EXPECT_FALSE(display_manager()->IsMirrored());
-  EXPECT_FALSE(display_manager()->IsMirrored());
+  EXPECT_FALSE(display_manager()->IsInMirrorMode());
+  EXPECT_FALSE(display_manager()->IsInMirrorMode());
 
   // mirrored...
   display_info_list.clear();
   display_info_list.push_back(internal_display_info);
-  display_info_list.push_back(mirrored_display_info);
+  display_info_list.push_back(mirroring_display_info);
   display_manager()->OnNativeDisplaysChanged(display_info_list);
   EXPECT_EQ(1U, display_manager()->GetNumDisplays());
   EXPECT_EQ("0,0 500x500",
             GetDisplayForId(internal_display_id).bounds().ToString());
   EXPECT_EQ(2U, display_manager()->num_connected_displays());
-  EXPECT_EQ(11U, display_manager()->mirrored_display_id());
-  EXPECT_TRUE(display_manager()->IsMirrored());
+  EXPECT_EQ(11U, display_manager()->mirroring_display_id());
+  EXPECT_TRUE(display_manager()->IsInMirrorMode());
 
   // Test display name.
   EXPECT_EQ(ToDisplayName(internal_display_id),
@@ -612,7 +614,7 @@ TEST_F(DisplayManagerTest, TestNativeDisplaysChanged) {
   display_manager()->OnNativeDisplaysChanged(display_info_list);
   EXPECT_EQ(2U, display_manager()->GetNumDisplays());
   EXPECT_EQ(2U, display_manager()->num_connected_displays());
-  EXPECT_FALSE(display_manager()->IsMirrored());
+  EXPECT_FALSE(display_manager()->IsInMirrorMode());
   EXPECT_EQ("0,0 500x500",
             GetDisplayForId(internal_display_id).bounds().ToString());
   EXPECT_EQ("500,0 100x100",
@@ -627,7 +629,7 @@ TEST_F(DisplayManagerTest, TestNativeDisplaysChanged) {
   EXPECT_EQ("1,1 100x100",
             GetDisplayInfoForId(external_id).bounds_in_native().ToString());
   EXPECT_EQ(1U, display_manager()->num_connected_displays());
-  EXPECT_FALSE(display_manager()->IsMirrored());
+  EXPECT_FALSE(display_manager()->IsInMirrorMode());
 
   // Switched to another display
   display_info_list.clear();
@@ -638,7 +640,7 @@ TEST_F(DisplayManagerTest, TestNativeDisplaysChanged) {
       "0,0 500x500",
       GetDisplayInfoForId(internal_display_id).bounds_in_native().ToString());
   EXPECT_EQ(1U, display_manager()->num_connected_displays());
-  EXPECT_FALSE(display_manager()->IsMirrored());
+  EXPECT_FALSE(display_manager()->IsInMirrorMode());
 }
 
 // Make sure crash does not happen if add and remove happens at the same time.
@@ -1207,7 +1209,7 @@ TEST_F(DisplayManagerTest, SoftwareMirroring) {
   Shell::GetScreen()->AddObserver(&display_observer);
 
   DisplayManager* display_manager = Shell::GetInstance()->display_manager();
-  display_manager->SetSecondDisplayMode(DisplayManager::MIRRORING);
+  display_manager->SetMultiDisplayMode(DisplayManager::MIRRORING);
   display_manager->UpdateDisplays();
   RunAllPendingInMessageLoop();
   EXPECT_TRUE(display_observer.changed_and_reset());
@@ -1217,13 +1219,13 @@ TEST_F(DisplayManagerTest, SoftwareMirroring) {
   EXPECT_EQ("400x500", test_api.GetHost()->GetBounds().size().ToString());
   EXPECT_EQ("300x400",
             test_api.GetHost()->window()->bounds().size().ToString());
-  EXPECT_TRUE(display_manager->IsMirrored());
+  EXPECT_TRUE(display_manager->IsInMirrorMode());
 
   display_manager->SetMirrorMode(false);
   EXPECT_TRUE(display_observer.changed_and_reset());
   EXPECT_EQ(NULL, test_api.GetHost());
   EXPECT_EQ(2U, display_manager->GetNumDisplays());
-  EXPECT_FALSE(display_manager->IsMirrored());
+  EXPECT_FALSE(display_manager->IsInMirrorMode());
 
   // Make sure the mirror window has the pixel size of the
   // source display.
@@ -1265,17 +1267,17 @@ TEST_F(DisplayManagerTest, SingleDisplayToSoftwareMirroring) {
   UpdateDisplay("600x400");
 
   DisplayManager* display_manager = Shell::GetInstance()->display_manager();
-  display_manager->SetSecondDisplayMode(DisplayManager::MIRRORING);
+  display_manager->SetMultiDisplayMode(DisplayManager::MIRRORING);
   UpdateDisplay("600x400,600x400");
 
-  EXPECT_TRUE(display_manager->IsMirrored());
+  EXPECT_TRUE(display_manager->IsInMirrorMode());
   EXPECT_EQ(1U, display_manager->GetNumDisplays());
   DisplayController* display_controller =
       ash::Shell::GetInstance()->display_controller();
   EXPECT_TRUE(display_controller->mirror_window_controller()->GetWindow());
 
   UpdateDisplay("600x400");
-  EXPECT_FALSE(display_manager->IsMirrored());
+  EXPECT_FALSE(display_manager->IsInMirrorMode());
   EXPECT_EQ(1U, display_manager->GetNumDisplays());
   EXPECT_FALSE(display_controller->mirror_window_controller()->GetWindow());
 }
@@ -1458,6 +1460,106 @@ TEST_F(DisplayManagerTest, MAYBE_UpdateDisplayWithHostOrigin) {
   EXPECT_EQ("200x300", host1->GetBounds().size().ToString());
 }
 
+TEST_F(DisplayManagerTest, UnifiedDesktopBasic) {
+  if (!SupportsMultipleDisplays())
+    return;
+  test::DisplayManagerTestApi::EnableUnifiedDesktopForTest();
+
+  // Don't check root window destruction in unified mode.
+  Shell::GetPrimaryRootWindow()->RemoveObserver(this);
+
+  UpdateDisplay("300x200,400x500");
+
+  // Defaults to the unified desktop.
+  gfx::Screen* screen =
+      gfx::Screen::GetScreenByType(gfx::SCREEN_TYPE_ALTERNATE);
+  EXPECT_EQ("700x500", screen->GetPrimaryDisplay().size().ToString());
+
+  display_manager()->SetMirrorMode(true);
+  EXPECT_EQ("300x200", screen->GetPrimaryDisplay().size().ToString());
+
+  display_manager()->SetMirrorMode(false);
+  EXPECT_EQ("700x500", screen->GetPrimaryDisplay().size().ToString());
+
+  // Switch to single desktop.
+  UpdateDisplay("500x300");
+  EXPECT_EQ("500x300", screen->GetPrimaryDisplay().size().ToString());
+
+  // Switch to unified desktop.
+  UpdateDisplay("500x300,400x500");
+  EXPECT_EQ("900x500", screen->GetPrimaryDisplay().size().ToString());
+
+  // Switch back to extended desktop.
+  display_manager()->SetDefaultMultiDisplayMode(DisplayManager::EXTENDED);
+  display_manager()->ReconfigureDisplays();
+  EXPECT_EQ("500x300", screen->GetPrimaryDisplay().size().ToString());
+  EXPECT_EQ("400x500", ScreenUtil::GetSecondaryDisplay().size().ToString());
+}
+
+// Updating displays again in unified desktop mode should not crash.
+// crbug.com/491094.
+TEST_F(DisplayManagerTest, ConfigureUnifiedTwice) {
+  if (!SupportsMultipleDisplays())
+    return;
+  // Don't check root window destruction in unified mode.
+  Shell::GetPrimaryRootWindow()->RemoveObserver(this);
+
+  UpdateDisplay("300x200,400x500");
+  // Mirror windows are created in a posted task.
+  RunAllPendingInMessageLoop();
+
+  UpdateDisplay("300x250,400x550");
+  RunAllPendingInMessageLoop();
+}
+
+TEST_F(DisplayManagerTest, RotateUnifiedDesktop) {
+  if (!SupportsMultipleDisplays())
+    return;
+  test::DisplayManagerTestApi::EnableUnifiedDesktopForTest();
+
+  // Don't check root window destruction in unified mode.
+  Shell::GetPrimaryRootWindow()->RemoveObserver(this);
+
+  UpdateDisplay("300x200,400x500");
+
+  gfx::Screen* screen =
+      gfx::Screen::GetScreenByType(gfx::SCREEN_TYPE_ALTERNATE);
+  const gfx::Display& display = screen->GetPrimaryDisplay();
+  EXPECT_EQ("700x500", display.size().ToString());
+  display_manager()->SetDisplayRotation(display.id(), gfx::Display::ROTATE_90,
+                                        gfx::Display::ROTATION_SOURCE_ACTIVE);
+  EXPECT_EQ("500x700", screen->GetPrimaryDisplay().size().ToString());
+  display_manager()->SetDisplayRotation(display.id(), gfx::Display::ROTATE_0,
+                                        gfx::Display::ROTATION_SOURCE_ACTIVE);
+  EXPECT_EQ("700x500", screen->GetPrimaryDisplay().size().ToString());
+
+  UpdateDisplay("300x200");
+  EXPECT_EQ("300x200", screen->GetPrimaryDisplay().size().ToString());
+}
+
+// Makes sure the transition from unified to single won't crash
+// with docked wnidows.
+TEST_F(DisplayManagerTest, UnifiedWithDockWindows) {
+  if (!SupportsMultipleDisplays())
+    return;
+  test::DisplayManagerTestApi::EnableUnifiedDesktopForTest();
+
+  // Don't check root window destruction in unified mode.
+  Shell::GetPrimaryRootWindow()->RemoveObserver(this);
+
+  UpdateDisplay("300x200,400x500");
+
+  scoped_ptr<aura::Window> docked(
+      CreateTestWindowInShellWithBounds(gfx::Rect(10, 10, 50, 50)));
+  docked->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_DOCKED);
+  ASSERT_TRUE(wm::GetWindowState(docked.get())->IsDocked());
+  EXPECT_EQ("0,0 250x453", docked->bounds().ToString());
+  UpdateDisplay("300x200");
+  // Make sure the window is still docked.
+  EXPECT_TRUE(wm::GetWindowState(docked.get())->IsDocked());
+  EXPECT_EQ("0,0 250x250", docked->bounds().ToString());
+}
+
 class ScreenShutdownTest : public test::AshTestBase {
  public:
   ScreenShutdownTest() {
@@ -1526,13 +1628,13 @@ class FontTestHelper : public test::AshTestBase {
 
 bool IsTextSubpixelPositioningEnabled() {
   gfx::FontRenderParams params =
-      gfx::GetFontRenderParams(gfx::FontRenderParamsQuery(false), NULL);
+      gfx::GetFontRenderParams(gfx::FontRenderParamsQuery(), NULL);
   return params.subpixel_positioning;
 }
 
 gfx::FontRenderParams::Hinting GetFontHintingParams() {
   gfx::FontRenderParams params =
-      gfx::GetFontRenderParams(gfx::FontRenderParamsQuery(false), NULL);
+      gfx::GetFontRenderParams(gfx::FontRenderParamsQuery(), NULL);
   return params.hinting;
 }
 

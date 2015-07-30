@@ -69,7 +69,7 @@ void ExhaustMemoryWithRealloc() {
 // We also use it so that the compiler doesn't discard certain return values
 // as something we don't need (see the comment with calloc below).
 template <typename Type>
-Type HideValueFromCompiler(volatile Type value) {
+NOINLINE Type HideValueFromCompiler(volatile Type value) {
 #if defined(__GNUC__)
   // In a GCC compatible compiler (GCC or Clang), make this compiler barrier
   // more robust than merely using "volatile".
@@ -293,8 +293,8 @@ bool CallocReturnsNull(size_t nmemb, size_t size) {
   scoped_ptr<char, base::FreeDeleter> array_pointer(
       static_cast<char*>(calloc(nmemb, size)));
   // We need the call to HideValueFromCompiler(): we have seen LLVM
-  // optimize away the call to calloc() entirely and assume
-  // the pointer to not be NULL.
+  // optimize away the call to calloc() entirely and assume the pointer to not
+  // be NULL.
   return HideValueFromCompiler(array_pointer.get()) == NULL;
 }
 

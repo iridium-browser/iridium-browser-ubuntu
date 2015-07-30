@@ -22,6 +22,8 @@ class MenuModel;
 namespace app_list {
 
 class SearchResultObserver;
+class TokenizedString;
+class TokenizedStringMatch;
 
 // SearchResult consists of an icon, title text and details text. Title and
 // details text can have tagged ranges that are displayed differently from
@@ -111,6 +113,11 @@ class APP_LIST_EXPORT SearchResult {
     display_type_ = display_type;
   }
 
+  int distance_from_origin() { return distance_from_origin_; }
+  void set_distance_from_origin(int distance) {
+    distance_from_origin_ = distance;
+  }
+
   const Actions& actions() const {
     return actions_;
   }
@@ -135,12 +142,14 @@ class APP_LIST_EXPORT SearchResult {
   void AddObserver(SearchResultObserver* observer);
   void RemoveObserver(SearchResultObserver* observer);
 
+  // Updates the result's relevance score, and sets its title and title tags,
+  // based on a string match result.
+  void UpdateFromMatch(const TokenizedString& title,
+                       const TokenizedStringMatch& match);
+
   // TODO(mukai): Remove this method and really simplify the ownership of
   // SearchResult. Ideally, SearchResult will be copyable.
   virtual scoped_ptr<SearchResult> Duplicate() const = 0;
-
-  // Opens the result.
-  virtual void Open(int event_flags);
 
   // Invokes a custom action on the result. It does nothing by default.
   virtual void InvokeAction(int action_index, int event_flags);
@@ -150,11 +159,20 @@ class APP_LIST_EXPORT SearchResult {
   // Note the returned menu model is owned by this item.
   virtual ui::MenuModel* GetContextMenuModel();
 
+  // Returns a string showing |text| marked up with brackets indicating the
+  // tag positions in |tags|. Useful for debugging and testing.
+  static std::string TagsDebugString(const std::string& text, const Tags& tags);
+
  protected:
   void set_id(const std::string& id) { id_ = id; }
   void set_voice_result(bool voice_result) { voice_result_ = voice_result; }
 
  private:
+  friend class SearchController;
+
+  // Opens the result. Clients should use AppListViewDelegate::OpenSearchResult.
+  virtual void Open(int event_flags);
+
   gfx::ImageSkia icon_;
 
   base::string16 title_;
@@ -166,6 +184,10 @@ class APP_LIST_EXPORT SearchResult {
   std::string id_;
   double relevance_;
   DisplayType display_type_;
+
+  // The Manhattan distance from the origin of all search results to this
+  // result. This is logged for UMA.
+  int distance_from_origin_;
 
   Actions actions_;
   bool voice_result_;

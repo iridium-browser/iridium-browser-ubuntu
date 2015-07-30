@@ -12,7 +12,6 @@ var EventTypeNames = null;
 var EventPhase = null;
 var EventSourceType = null;
 var EventSourceTypeNames = null;
-var LogLevelType = null;
 var ClientInfo = null;
 var NetError = null;
 var QuicError = null;
@@ -197,7 +196,6 @@ var MainView = (function() {
       addTab(SdchView);
       addTab(HttpCacheView);
       addTab(ModulesView);
-      addTab(TestView);
       addTab(HSTSView);
       addTab(BandwidthView);
       addTab(PrerenderView);
@@ -301,7 +299,6 @@ ConstantsObserver.prototype.onReceivedConstants = function(receivedConstants) {
   EventPhase = Constants.logEventPhase;
   EventSourceType = Constants.logSourceType;
   EventSourceTypeNames = makeInverseMap(EventSourceType);
-  LogLevelType = Constants.logLevelType;
   ClientInfo = Constants.clientInfo;
   LoadFlag = Constants.loadFlag;
   NetError = Constants.netError;
@@ -312,6 +309,8 @@ ConstantsObserver.prototype.onReceivedConstants = function(receivedConstants) {
   SdchProblemCode = Constants.sdchProblemCode;
   DataReductionProxyBypassEventType =
       Constants.dataReductionProxyBypassEventType;
+  DataReductionProxyBypassActionType =
+      Constants.dataReductionProxyBypassActionType;
   // certStatusFlag may not be present when loading old log Files
   if (typeof(Constants.certStatusFlag) == 'object')
     CertStatusFlag = Constants.certStatusFlag;
@@ -332,7 +331,6 @@ function areValidConstants(receivedConstants) {
          typeof(receivedConstants.clientInfo) == 'object' &&
          typeof(receivedConstants.logEventPhase) == 'object' &&
          typeof(receivedConstants.logSourceType) == 'object' &&
-         typeof(receivedConstants.logLevelType) == 'object' &&
          typeof(receivedConstants.loadFlag) == 'object' &&
          typeof(receivedConstants.netError) == 'object' &&
          typeof(receivedConstants.addressFamily) == 'object' &&

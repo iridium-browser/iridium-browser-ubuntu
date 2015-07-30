@@ -46,7 +46,7 @@ unsigned AudioHandler::s_instanceCount = 0;
 AudioHandler::AudioHandler(NodeType nodeType, AudioNode& node, float sampleRate)
     : m_isInitialized(false)
     , m_nodeType(NodeTypeUnknown)
-    , m_node(node)
+    , m_node(&node)
     , m_context(node.context())
     , m_sampleRate(sampleRate)
     , m_lastProcessingTime(-1)
@@ -71,6 +71,9 @@ AudioHandler::AudioHandler(NodeType nodeType, AudioNode& node, float sampleRate)
 
 AudioHandler::~AudioHandler()
 {
+    ASSERT(isMainThread());
+    // dispose() should be called.
+    ASSERT(!node());
     --s_instanceCount;
 #if DEBUG_AUDIONODE_REFERENCES
     --s_nodeCount[nodeType()];
@@ -98,9 +101,22 @@ void AudioHandler::dispose()
     ASSERT(isMainThread());
     ASSERT(context()->isGraphOwner());
 
-    context()->handler().removeChangedChannelCountMode(this);
-    context()->handler().removeAutomaticPullNode(this);
-    context()->handler().disposeOutputs(*this);
+    context()->deferredTaskHandler().removeChangedChannelCountMode(this);
+    context()->deferredTaskHandler().removeAutomaticPullNode(this);
+    for (auto& output : m_outputs)
+        output->dispose();
+    m_node = nullptr;
+}
+
+AudioNode* AudioHandler::node() const
+{
+    ASSERT(isMainThread());
+    return m_node;
+}
+
+AudioContext* AudioHandler::context() const
+{
+    return m_context;
 }
 
 String AudioHandler::nodeTypeName() const
@@ -173,359 +189,19 @@ void AudioHandler::addInput()
 
 void AudioHandler::addOutput(unsigned numberOfChannels)
 {
+    ASSERT(isMainThread());
     m_outputs.append(AudioNodeOutput::create(this, numberOfChannels));
-    m_connectedNodes.append(nullptr);
-    ASSERT(numberOfOutputs() == m_connectedNodes.size());
-    m_connectedParams.append(nullptr);
-    ASSERT(numberOfOutputs() == m_connectedParams.size());
+    node()->didAddOutput(numberOfOutputs());
 }
 
-AudioNodeInput* AudioHandler::input(unsigned i)
+AudioNodeInput& AudioHandler::input(unsigned i)
 {
-    if (i < m_inputs.size())
-        return m_inputs[i].get();
-    return nullptr;
+    return *m_inputs[i];
 }
 
-AudioNodeOutput* AudioHandler::output(unsigned i)
+AudioNodeOutput& AudioHandler::output(unsigned i)
 {
-    if (i < m_outputs.size())
-        return m_outputs[i].get();
-    return nullptr;
-}
-
-void AudioHandler::connect(AudioHandler* destination, unsigned outputIndex, unsigned inputIndex, ExceptionState& exceptionState)
-{
-    ASSERT(isMainThread());
-    AudioContext::AutoLocker locker(context());
-
-    if (context()->isContextClosed()) {
-        exceptionState.throwDOMException(
-            InvalidStateError,
-            "Cannot connect after the context has been closed.");
-        return;
-    }
-
-    if (!destination) {
-        exceptionState.throwDOMException(
-            SyntaxError,
-            "invalid destination node.");
-        return;
-    }
-
-    // Sanity check input and output indices.
-    if (outputIndex >= numberOfOutputs()) {
-        exceptionState.throwDOMException(
-            IndexSizeError,
-            "output index (" + String::number(outputIndex) + ") exceeds number of outputs (" + String::number(numberOfOutputs()) + ").");
-        return;
-    }
-
-    if (destination && inputIndex >= destination->numberOfInputs()) {
-        exceptionState.throwDOMException(
-            IndexSizeError,
-            "input index (" + String::number(inputIndex) + ") exceeds number of inputs (" + String::number(destination->numberOfInputs()) + ").");
-        return;
-    }
-
-    if (context() != destination->context()) {
-        exceptionState.throwDOMException(
-            SyntaxError,
-            "cannot connect to a destination belonging to a different audio context.");
-        return;
-    }
-
-    destination->input(inputIndex)->connect(*output(outputIndex));
-    if (!m_connectedNodes[outputIndex])
-        m_connectedNodes[outputIndex] = new HeapHashSet<Member<AudioHandler>>();
-    m_connectedNodes[outputIndex]->add(destination);
-
-    // Let context know that a connection has been made.
-    context()->incrementConnectionCount();
-}
-
-void AudioHandler::connect(AudioParam* param, unsigned outputIndex, ExceptionState& exceptionState)
-{
-    ASSERT(isMainThread());
-    AudioContext::AutoLocker locker(context());
-
-    if (context()->isContextClosed()) {
-        exceptionState.throwDOMException(
-            InvalidStateError,
-            "Cannot connect after the context has been closed.");
-        return;
-    }
-
-    if (!param) {
-        exceptionState.throwDOMException(
-            SyntaxError,
-            "invalid AudioParam.");
-        return;
-    }
-
-    if (outputIndex >= numberOfOutputs()) {
-        exceptionState.throwDOMException(
-            IndexSizeError,
-            "output index (" + String::number(outputIndex) + ") exceeds number of outputs (" + String::number(numberOfOutputs()) + ").");
-        return;
-    }
-
-    if (context() != param->context()) {
-        exceptionState.throwDOMException(
-            SyntaxError,
-            "cannot connect to an AudioParam belonging to a different audio context.");
-        return;
-    }
-
-    param->handler().connect(*output(outputIndex));
-    if (!m_connectedParams[outputIndex])
-        m_connectedParams[outputIndex] = new HeapHashSet<Member<AudioParam>>();
-    m_connectedParams[outputIndex]->add(param);
-}
-
-void AudioHandler::disconnect()
-{
-    ASSERT(isMainThread());
-    AudioContext::AutoLocker locker(context());
-
-    // Disconnect all outgoing connections.
-    for (unsigned i = 0; i < numberOfOutputs(); ++i) {
-        this->output(i)->disconnectAll();
-        m_connectedNodes[i] = nullptr;
-        m_connectedParams[i] = nullptr;
-    }
-}
-
-void AudioHandler::disconnect(unsigned outputIndex, ExceptionState& exceptionState)
-{
-    ASSERT(isMainThread());
-    AudioContext::AutoLocker locker(context());
-
-    // Sanity check on the output index.
-    if (outputIndex >= numberOfOutputs()) {
-        exceptionState.throwDOMException(
-            IndexSizeError,
-            ExceptionMessages::indexOutsideRange(
-                "output index",
-                outputIndex,
-                0u,
-                ExceptionMessages::InclusiveBound,
-                numberOfOutputs(),
-                ExceptionMessages::InclusiveBound));
-        return;
-    }
-
-    // Disconnect all outgoing connections from the given output.
-    output(outputIndex)->disconnectAll();
-    m_connectedNodes[outputIndex] = nullptr;
-    m_connectedParams[outputIndex] = nullptr;
-}
-
-void AudioHandler::disconnect(AudioHandler* destination, ExceptionState& exceptionState)
-{
-    ASSERT(isMainThread());
-    AudioContext::AutoLocker locker(context());
-
-    unsigned numberOfDisconnections = 0;
-
-    // FIXME: Can this be optimized? ChannelSplitter and ChannelMerger can have
-    // 32 ports and that requires 1024 iterations to validate entire connections.
-    for (unsigned i = 0; i < numberOfOutputs(); ++i) {
-        AudioNodeOutput* output = this->output(i);
-        for (unsigned j = 0; j < destination->numberOfInputs(); ++j) {
-            AudioNodeInput* input = destination->input(j);
-            if (output->isConnectedToInput(*input)) {
-                output->disconnectInput(*input);
-                m_connectedNodes[i]->remove(destination);
-                numberOfDisconnections++;
-            }
-        }
-    }
-
-    // If there is no connection to the destination, throw an exception.
-    if (numberOfDisconnections == 0) {
-        exceptionState.throwDOMException(
-            InvalidAccessError,
-            "the given destination is not connected.");
-        return;
-    }
-}
-
-void AudioHandler::disconnect(AudioHandler* destination, unsigned outputIndex, ExceptionState& exceptionState)
-{
-    ASSERT(isMainThread());
-    AudioContext::AutoLocker locker(context());
-
-    bool isOutputIndexInRange = outputIndex < numberOfOutputs();
-
-    // If the output index is valid, proceed to disconnect.
-    if (isOutputIndexInRange) {
-        unsigned numberOfDisconnections = 0;
-        AudioNodeOutput* output = this->output(outputIndex);
-
-        // Sanity check on destination inputs and disconnect when possible.
-        for (unsigned i = 0; i < destination->numberOfInputs(); ++i) {
-            AudioNodeInput* input = destination->input(i);
-            if (output->isConnectedToInput(*input)) {
-                output->disconnectInput(*input);
-                m_connectedNodes[outputIndex]->remove(destination);
-                numberOfDisconnections++;
-            }
-        }
-
-        // If there is no connection to the destination, throw an exception.
-        if (numberOfDisconnections == 0) {
-            exceptionState.throwDOMException(
-                InvalidAccessError,
-                "output (" + String::number(outputIndex) + ") is not connected to the given destination.");
-            return;
-        }
-
-    } else {
-
-        // The output index is out of range. Throw an exception.
-        exceptionState.throwDOMException(
-            IndexSizeError,
-            ExceptionMessages::indexOutsideRange(
-                "output index",
-                outputIndex,
-                0u,
-                ExceptionMessages::InclusiveBound,
-                numberOfOutputs(),
-                ExceptionMessages::InclusiveBound));
-        return;
-    }
-}
-
-void AudioHandler::disconnect(AudioHandler* destination, unsigned outputIndex, unsigned inputIndex, ExceptionState& exceptionState)
-{
-    ASSERT(isMainThread());
-    AudioContext::AutoLocker locker(context());
-
-    bool isOutputIndexInRange = outputIndex < numberOfOutputs();
-    bool isInputIndexInRange = inputIndex < destination->numberOfInputs();
-
-    // If both indices are valid, proceed to disconnect.
-    if (isOutputIndexInRange && isInputIndexInRange) {
-        AudioNodeOutput* output = this->output(outputIndex);
-        AudioNodeInput* input = destination->input(inputIndex);
-
-        // Sanity check on the connection between the output and the destination input.
-        if (!output->isConnectedToInput(*input)) {
-            exceptionState.throwDOMException(
-                InvalidAccessError,
-                "output (" + String::number(outputIndex) + ") is not connected to the input (" + String::number(inputIndex) + ") of the destination.");
-            return;
-        }
-
-        output->disconnectInput(*input);
-        m_connectedNodes[outputIndex]->remove(destination);
-    }
-
-    // Sanity check input and output indices.
-    if (!isOutputIndexInRange) {
-        exceptionState.throwDOMException(
-            IndexSizeError,
-            ExceptionMessages::indexOutsideRange(
-                "output index",
-                outputIndex,
-                0u,
-                ExceptionMessages::InclusiveBound,
-                numberOfOutputs(),
-                ExceptionMessages::InclusiveBound));
-        return;
-    }
-
-    if (!isInputIndexInRange) {
-        exceptionState.throwDOMException(
-            IndexSizeError,
-            ExceptionMessages::indexOutsideRange(
-                "input index",
-                inputIndex,
-                0u,
-                ExceptionMessages::InclusiveBound,
-                destination->numberOfInputs(),
-                ExceptionMessages::InclusiveBound));
-        return;
-    }
-}
-
-void AudioHandler::disconnect(AudioParam* destinationParam, ExceptionState& exceptionState)
-{
-    ASSERT(isMainThread());
-    AudioContext::AutoLocker locker(context());
-
-    // The number of disconnection made.
-    unsigned numberOfDisconnections = 0;
-
-    // Check if the node output is connected the destination AudioParam.
-    // Disconnect if connected and increase |numberOfDisconnectios| by 1.
-    for (unsigned i = 0; i < numberOfOutputs(); ++i) {
-        AudioNodeOutput* output = this->output(i);
-        if (output->isConnectedToAudioParam(destinationParam->handler())) {
-            output->disconnectAudioParam(destinationParam->handler());
-            m_connectedParams[i]->remove(destinationParam);
-            numberOfDisconnections++;
-        }
-    }
-
-    // Throw an exception when there is no valid connection to the destination.
-    if (numberOfDisconnections == 0) {
-        exceptionState.throwDOMException(
-            InvalidAccessError,
-            "the given AudioParam is not connected.");
-        return;
-    }
-}
-
-void AudioHandler::disconnect(AudioParam* destinationParam, unsigned outputIndex, ExceptionState& exceptionState)
-{
-    ASSERT(isMainThread());
-    AudioContext::AutoLocker locker(context());
-
-    bool isOutputIndexInRange = outputIndex < numberOfOutputs();
-
-    // If the output index is valid, proceed to disconnect.
-    if (isOutputIndexInRange) {
-        AudioNodeOutput* output = this->output(outputIndex);
-
-        // Sanity check on the connection between the output and the destination.
-        if (!output->isConnectedToAudioParam(destinationParam->handler())) {
-            exceptionState.throwDOMException(
-                InvalidAccessError,
-                "specified destination AudioParam and node output (" + String::number(outputIndex) + ") are not connected.");
-            return;
-        }
-
-        output->disconnectAudioParam(destinationParam->handler());
-        m_connectedParams[outputIndex]->remove(destinationParam);
-    } else {
-
-        // The output index is out of range. Throw an exception.
-        exceptionState.throwDOMException(
-            IndexSizeError,
-            ExceptionMessages::indexOutsideRange(
-                "output index",
-                outputIndex,
-                0u,
-                ExceptionMessages::InclusiveBound,
-                numberOfOutputs(),
-                ExceptionMessages::InclusiveBound));
-        return;
-    }
-}
-
-void AudioHandler::disconnectWithoutException(unsigned outputIndex)
-{
-    ASSERT(isMainThread());
-    AudioContext::AutoLocker locker(context());
-
-    // Sanity check input and output indices.
-    if (outputIndex >= numberOfOutputs())
-        return;
-    output(outputIndex)->disconnectAll();
-    m_connectedNodes[outputIndex] = nullptr;
-    m_connectedParams[outputIndex] = nullptr;
+    return *m_outputs[i];
 }
 
 unsigned long AudioHandler::channelCount()
@@ -547,7 +223,13 @@ void AudioHandler::setChannelCount(unsigned long channelCount, ExceptionState& e
     } else {
         exceptionState.throwDOMException(
             NotSupportedError,
-            "channel count (" + String::number(channelCount) + ") must be between 1 and " + String::number(AudioContext::maxNumberOfChannels()) + ".");
+            ExceptionMessages::indexOutsideRange<unsigned long>(
+                "channel count",
+                channelCount,
+                1,
+                ExceptionMessages::InclusiveBound,
+                AudioContext::maxNumberOfChannels(),
+                ExceptionMessages::InclusiveBound));
     }
 }
 
@@ -583,7 +265,7 @@ void AudioHandler::setChannelCountMode(const String& mode, ExceptionState& excep
     }
 
     if (m_newChannelCountMode != oldMode)
-        context()->handler().addChangedChannelCountMode(this);
+        context()->deferredTaskHandler().addChangedChannelCountMode(this);
 }
 
 String AudioHandler::channelInterpretation()
@@ -614,8 +296,8 @@ void AudioHandler::setChannelInterpretation(const String& interpretation, Except
 
 void AudioHandler::updateChannelsForInputs()
 {
-    for (unsigned i = 0; i < m_inputs.size(); ++i)
-        input(i)->changedOutputs();
+    for (auto& input : m_inputs)
+        input->changedOutputs();
 }
 
 void AudioHandler::processIfNecessary(size_t framesToProcess)
@@ -680,14 +362,14 @@ void AudioHandler::pullInputs(size_t framesToProcess)
     ASSERT(context()->isAudioThread());
 
     // Process all of the AudioNodes connected to our inputs.
-    for (unsigned i = 0; i < m_inputs.size(); ++i)
-        input(i)->pull(0, framesToProcess);
+    for (auto& input : m_inputs)
+        input->pull(0, framesToProcess);
 }
 
 bool AudioHandler::inputsAreSilent()
 {
-    for (unsigned i = 0; i < m_inputs.size(); ++i) {
-        if (!input(i)->bus()->isSilent())
+    for (auto& input : m_inputs) {
+        if (!input->bus()->isSilent())
             return false;
     }
     return true;
@@ -695,14 +377,14 @@ bool AudioHandler::inputsAreSilent()
 
 void AudioHandler::silenceOutputs()
 {
-    for (unsigned i = 0; i < m_outputs.size(); ++i)
-        output(i)->bus()->zero();
+    for (auto& output : m_outputs)
+        output->bus()->zero();
 }
 
 void AudioHandler::unsilenceOutputs()
 {
-    for (unsigned i = 0; i < m_outputs.size(); ++i)
-        output(i)->bus()->clearSilentFlag();
+    for (auto& output : m_outputs)
+        output->bus()->clearSilentFlag();
 }
 
 void AudioHandler::enableOutputsIfNecessary()
@@ -712,8 +394,8 @@ void AudioHandler::enableOutputsIfNecessary()
         AudioContext::AutoLocker locker(context());
 
         m_isDisabled = false;
-        for (unsigned i = 0; i < m_outputs.size(); ++i)
-            output(i)->enable();
+        for (auto& output : m_outputs)
+            output->enable();
     }
 }
 
@@ -738,8 +420,8 @@ void AudioHandler::disableOutputsIfNecessary()
         if (nodeType() != NodeTypeConvolver && nodeType() != NodeTypeDelay) {
             m_isDisabled = true;
             clearInternalStateWhenDisabled();
-            for (unsigned i = 0; i < m_outputs.size(); ++i)
-                output(i)->disable();
+            for (auto& output : m_outputs)
+                output->disable();
         }
     }
 }
@@ -779,7 +461,7 @@ void AudioHandler::breakConnection()
         // We were unable to get the lock, so put this in a list to finish up
         // later.
         ASSERT(context()->isAudioThread());
-        context()->handler().addDeferredBreakConnection(*this);
+        context()->deferredTaskHandler().addDeferredBreakConnection(*this);
     }
 }
 
@@ -816,49 +498,39 @@ void AudioHandler::printNodeCounts()
 
 #endif // DEBUG_AUDIONODE_REFERENCES
 
-DEFINE_TRACE(AudioHandler)
-{
-    visitor->trace(m_node);
-    visitor->trace(m_context);
-    // TODO(tkent): Oilpan: renderingOutputs should not be strong references.
-    // This is a short-term workaround to avoid crashes, and causes AudioNode
-    // leaks.
-    {
-        AudioContext::AutoLocker locker(context()->handler());
-        for (const OwnPtr<AudioNodeInput>& input : m_inputs) {
-            for (unsigned i = 0; i < input->numberOfRenderingConnections(); ++i)
-                visitor->trace(input->renderingOutput(i)->node());
-        }
-    }
-    visitor->trace(m_connectedNodes);
-    visitor->trace(m_connectedParams);
-}
-
 void AudioHandler::updateChannelCountMode()
 {
     m_channelCountMode = m_newChannelCountMode;
     updateChannelsForInputs();
 }
 
+unsigned AudioHandler::numberOfOutputChannels() const
+{
+    // This should only be called for ScriptProcessorNodes which are the only nodes where you can
+    // have an output with 0 channels.  All other nodes have have at least one output channel, so
+    // there's no reason other nodes should ever call this function.
+    ASSERT_WITH_MESSAGE(1, "numberOfOutputChannels() not valid for node type %d", nodeType());
+    return 1;
+}
 // ----------------------------------------------------------------
 
 AudioNode::AudioNode(AudioContext& context)
     : m_context(context)
     , m_handler(nullptr)
 {
-    m_context->registerLiveNode(*this);
     ThreadState::current()->registerPreFinalizer(*this);
 }
 
 void AudioNode::dispose()
 {
     ASSERT(isMainThread());
-    context()->unregisterLiveNode(*this);
     AudioContext::AutoLocker locker(context());
     handler().dispose();
+    if (context()->contextState() == AudioContext::Running)
+        context()->deferredTaskHandler().addRenderingOrphanHandler(m_handler.release());
 }
 
-void AudioNode::setHandler(AudioHandler* handler)
+void AudioNode::setHandler(PassRefPtr<AudioHandler> handler)
 {
     ASSERT(handler);
     m_handler = handler;
@@ -872,58 +544,336 @@ AudioHandler& AudioNode::handler() const
 DEFINE_TRACE(AudioNode)
 {
     visitor->trace(m_context);
-    visitor->trace(m_handler);
+    visitor->trace(m_connectedNodes);
+    visitor->trace(m_connectedParams);
     RefCountedGarbageCollectedEventTargetWithInlineData<AudioNode>::trace(visitor);
-}
-
-void AudioNode::connect(AudioNode* node, unsigned outputIndex, unsigned inputIndex, ExceptionState& exceptionState)
-{
-    handler().connect(&node->handler(), outputIndex, inputIndex, exceptionState);
-}
-
-void AudioNode::connect(AudioParam* param, unsigned outputIndex, ExceptionState& exceptionState)
-{
-    handler().connect(param, outputIndex, exceptionState);
-}
-
-void AudioNode::disconnect()
-{
-    handler().disconnect();
-}
-
-void AudioNode::disconnect(unsigned outputIndex, ExceptionState& exceptionState)
-{
-    handler().disconnect(outputIndex, exceptionState);
-}
-
-void AudioNode::disconnect(AudioNode* node, ExceptionState& exceptionState)
-{
-    handler().disconnect(&node->handler(), exceptionState);
-}
-
-void AudioNode::disconnect(AudioNode* node, unsigned outputIndex, ExceptionState& exceptionState)
-{
-    handler().disconnect(&node->handler(), outputIndex, exceptionState);
-}
-
-void AudioNode::disconnect(AudioNode* node, unsigned outputIndex, unsigned inputIndex, ExceptionState& exceptionState)
-{
-    handler().disconnect(&node->handler(), outputIndex, inputIndex, exceptionState);
-}
-
-void AudioNode::disconnect(AudioParam* param, ExceptionState& exceptionState)
-{
-    handler().disconnect(param, exceptionState);
-}
-
-void AudioNode::disconnect(AudioParam* param, unsigned outputIndex, ExceptionState& exceptionState)
-{
-    handler().disconnect(param, outputIndex, exceptionState);
 }
 
 AudioContext* AudioNode::context() const
 {
     return m_context;
+}
+
+void AudioNode::connect(AudioNode* destination, unsigned outputIndex, unsigned inputIndex, ExceptionState& exceptionState)
+{
+    ASSERT(isMainThread());
+    AudioContext::AutoLocker locker(context());
+
+    if (context()->isContextClosed()) {
+        exceptionState.throwDOMException(
+            InvalidStateError,
+            "Cannot connect after the context has been closed.");
+        return;
+    }
+
+    if (!destination) {
+        exceptionState.throwDOMException(
+            SyntaxError,
+            "invalid destination node.");
+        return;
+    }
+
+    // Sanity check input and output indices.
+    if (outputIndex >= numberOfOutputs()) {
+        exceptionState.throwDOMException(
+            IndexSizeError,
+            "output index (" + String::number(outputIndex) + ") exceeds number of outputs (" + String::number(numberOfOutputs()) + ").");
+        return;
+    }
+
+    if (destination && inputIndex >= destination->numberOfInputs()) {
+        exceptionState.throwDOMException(
+            IndexSizeError,
+            "input index (" + String::number(inputIndex) + ") exceeds number of inputs (" + String::number(destination->numberOfInputs()) + ").");
+        return;
+    }
+
+    if (context() != destination->context()) {
+        exceptionState.throwDOMException(
+            SyntaxError,
+            "cannot connect to a destination belonging to a different audio context.");
+        return;
+    }
+
+    // ScriptProcessorNodes with 0 output channels can't be connected to any destination.  If there
+    // are no output channels, what would the destination receive?  Just disallow this.
+    if (handler().nodeType() == AudioHandler::NodeTypeJavaScript
+        && handler().numberOfOutputChannels() == 0) {
+        exceptionState.throwDOMException(
+            InvalidAccessError,
+            "cannot connect a ScriptProcessorNode with 0 output channels to any destination node.");
+        return;
+    }
+
+    destination->handler().input(inputIndex).connect(handler().output(outputIndex));
+    if (!m_connectedNodes[outputIndex])
+        m_connectedNodes[outputIndex] = new HeapHashSet<Member<AudioNode>>();
+    m_connectedNodes[outputIndex]->add(destination);
+
+    // Let context know that a connection has been made.
+    context()->incrementConnectionCount();
+}
+
+void AudioNode::connect(AudioParam* param, unsigned outputIndex, ExceptionState& exceptionState)
+{
+    ASSERT(isMainThread());
+    AudioContext::AutoLocker locker(context());
+
+    if (context()->isContextClosed()) {
+        exceptionState.throwDOMException(
+            InvalidStateError,
+            "Cannot connect after the context has been closed.");
+        return;
+    }
+
+    if (!param) {
+        exceptionState.throwDOMException(
+            SyntaxError,
+            "invalid AudioParam.");
+        return;
+    }
+
+    if (outputIndex >= numberOfOutputs()) {
+        exceptionState.throwDOMException(
+            IndexSizeError,
+            "output index (" + String::number(outputIndex) + ") exceeds number of outputs (" + String::number(numberOfOutputs()) + ").");
+        return;
+    }
+
+    if (context() != param->context()) {
+        exceptionState.throwDOMException(
+            SyntaxError,
+            "cannot connect to an AudioParam belonging to a different audio context.");
+        return;
+    }
+
+    param->handler().connect(handler().output(outputIndex));
+    if (!m_connectedParams[outputIndex])
+        m_connectedParams[outputIndex] = new HeapHashSet<Member<AudioParam>>();
+    m_connectedParams[outputIndex]->add(param);
+}
+
+void AudioNode::disconnectAllFromOutput(unsigned outputIndex)
+{
+    handler().output(outputIndex).disconnectAll();
+    m_connectedNodes[outputIndex] = nullptr;
+    m_connectedParams[outputIndex] = nullptr;
+}
+
+bool AudioNode::disconnectFromOutputIfConnected(unsigned outputIndex, AudioNode& destination, unsigned inputIndexOfDestination)
+{
+    AudioNodeOutput& output = handler().output(outputIndex);
+    AudioNodeInput& input = destination.handler().input(inputIndexOfDestination);
+    if (!output.isConnectedToInput(input))
+        return false;
+    output.disconnectInput(input);
+    m_connectedNodes[outputIndex]->remove(&destination);
+    return true;
+}
+
+bool AudioNode::disconnectFromOutputIfConnected(unsigned outputIndex, AudioParam& param)
+{
+    AudioNodeOutput& output = handler().output(outputIndex);
+    if (!output.isConnectedToAudioParam(param.handler()))
+        return false;
+    output.disconnectAudioParam(param.handler());
+    m_connectedParams[outputIndex]->remove(&param);
+    return true;
+}
+
+void AudioNode::disconnect()
+{
+    ASSERT(isMainThread());
+    AudioContext::AutoLocker locker(context());
+
+    // Disconnect all outgoing connections.
+    for (unsigned i = 0; i < numberOfOutputs(); ++i)
+        disconnectAllFromOutput(i);
+}
+
+void AudioNode::disconnect(unsigned outputIndex, ExceptionState& exceptionState)
+{
+    ASSERT(isMainThread());
+    AudioContext::AutoLocker locker(context());
+
+    // Sanity check on the output index.
+    if (outputIndex >= numberOfOutputs()) {
+        exceptionState.throwDOMException(
+            IndexSizeError,
+            ExceptionMessages::indexOutsideRange(
+                "output index",
+                outputIndex,
+                0u,
+                ExceptionMessages::InclusiveBound,
+                numberOfOutputs() - 1,
+                ExceptionMessages::InclusiveBound));
+        return;
+    }
+    // Disconnect all outgoing connections from the given output.
+    disconnectAllFromOutput(outputIndex);
+}
+
+void AudioNode::disconnect(AudioNode* destination, ExceptionState& exceptionState)
+{
+    ASSERT(isMainThread());
+    AudioContext::AutoLocker locker(context());
+
+    unsigned numberOfDisconnections = 0;
+
+    // FIXME: Can this be optimized? ChannelSplitter and ChannelMerger can have
+    // 32 ports and that requires 1024 iterations to validate entire connections.
+    for (unsigned outputIndex = 0; outputIndex < numberOfOutputs(); ++outputIndex) {
+        for (unsigned inputIndex = 0; inputIndex < destination->handler().numberOfInputs(); ++inputIndex) {
+            if (disconnectFromOutputIfConnected(outputIndex, *destination, inputIndex))
+                numberOfDisconnections++;
+        }
+    }
+
+    // If there is no connection to the destination, throw an exception.
+    if (numberOfDisconnections == 0) {
+        exceptionState.throwDOMException(
+            InvalidAccessError,
+            "the given destination is not connected.");
+        return;
+    }
+}
+
+void AudioNode::disconnect(AudioNode* destination, unsigned outputIndex, ExceptionState& exceptionState)
+{
+    ASSERT(isMainThread());
+    AudioContext::AutoLocker locker(context());
+
+    if (outputIndex >= numberOfOutputs()) {
+        // The output index is out of range. Throw an exception.
+        exceptionState.throwDOMException(
+            IndexSizeError,
+            ExceptionMessages::indexOutsideRange(
+                "output index",
+                outputIndex,
+                0u,
+                ExceptionMessages::InclusiveBound,
+                numberOfOutputs() - 1,
+                ExceptionMessages::InclusiveBound));
+        return;
+    }
+
+    // If the output index is valid, proceed to disconnect.
+    unsigned numberOfDisconnections = 0;
+    // Sanity check on destination inputs and disconnect when possible.
+    for (unsigned inputIndex = 0; inputIndex < destination->numberOfInputs(); ++inputIndex) {
+        if (disconnectFromOutputIfConnected(outputIndex, *destination, inputIndex))
+            numberOfDisconnections++;
+    }
+
+    // If there is no connection to the destination, throw an exception.
+    if (numberOfDisconnections == 0) {
+        exceptionState.throwDOMException(
+            InvalidAccessError,
+            "output (" + String::number(outputIndex) + ") is not connected to the given destination.");
+    }
+}
+
+void AudioNode::disconnect(AudioNode* destination, unsigned outputIndex, unsigned inputIndex, ExceptionState& exceptionState)
+{
+    ASSERT(isMainThread());
+    AudioContext::AutoLocker locker(context());
+
+    if (outputIndex >= numberOfOutputs()) {
+        exceptionState.throwDOMException(
+            IndexSizeError,
+            ExceptionMessages::indexOutsideRange(
+                "output index",
+                outputIndex,
+                0u,
+                ExceptionMessages::InclusiveBound,
+                numberOfOutputs() - 1,
+                ExceptionMessages::InclusiveBound));
+        return;
+    }
+
+    if (inputIndex >= destination->handler().numberOfInputs()) {
+        exceptionState.throwDOMException(
+            IndexSizeError,
+            ExceptionMessages::indexOutsideRange(
+                "input index",
+                inputIndex,
+                0u,
+                ExceptionMessages::InclusiveBound,
+                destination->numberOfInputs() - 1,
+                ExceptionMessages::InclusiveBound));
+        return;
+    }
+
+    // If both indices are valid, proceed to disconnect.
+    if (!disconnectFromOutputIfConnected(outputIndex, *destination, inputIndex)) {
+        exceptionState.throwDOMException(
+            InvalidAccessError,
+            "output (" + String::number(outputIndex) + ") is not connected to the input (" + String::number(inputIndex) + ") of the destination.");
+        return;
+    }
+}
+
+void AudioNode::disconnect(AudioParam* destinationParam, ExceptionState& exceptionState)
+{
+    ASSERT(isMainThread());
+    AudioContext::AutoLocker locker(context());
+
+    // The number of disconnection made.
+    unsigned numberOfDisconnections = 0;
+
+    // Check if the node output is connected the destination AudioParam.
+    // Disconnect if connected and increase |numberOfDisconnectios| by 1.
+    for (unsigned outputIndex = 0; outputIndex < handler().numberOfOutputs(); ++outputIndex) {
+        if (disconnectFromOutputIfConnected(outputIndex, *destinationParam))
+            numberOfDisconnections++;
+    }
+
+    // Throw an exception when there is no valid connection to the destination.
+    if (numberOfDisconnections == 0) {
+        exceptionState.throwDOMException(
+            InvalidAccessError,
+            "the given AudioParam is not connected.");
+        return;
+    }
+}
+
+void AudioNode::disconnect(AudioParam* destinationParam, unsigned outputIndex, ExceptionState& exceptionState)
+{
+    ASSERT(isMainThread());
+    AudioContext::AutoLocker locker(context());
+
+    if (outputIndex >= handler().numberOfOutputs()) {
+        // The output index is out of range. Throw an exception.
+        exceptionState.throwDOMException(
+            IndexSizeError,
+            ExceptionMessages::indexOutsideRange(
+                "output index",
+                outputIndex,
+                0u,
+                ExceptionMessages::InclusiveBound,
+                numberOfOutputs() - 1,
+                ExceptionMessages::InclusiveBound));
+        return;
+    }
+
+    // If the output index is valid, proceed to disconnect.
+    if (!disconnectFromOutputIfConnected(outputIndex, *destinationParam)) {
+        exceptionState.throwDOMException(
+            InvalidAccessError,
+            "specified destination AudioParam and node output (" + String::number(outputIndex) + ") are not connected.");
+        return;
+    }
+}
+
+void AudioNode::disconnectWithoutException(unsigned outputIndex)
+{
+    ASSERT(isMainThread());
+    AudioContext::AutoLocker locker(context());
+
+    // Sanity check input and output indices.
+    if (outputIndex >= handler().numberOfOutputs())
+        return;
+    disconnectAllFromOutput(outputIndex);
 }
 
 unsigned AudioNode::numberOfInputs() const
@@ -974,6 +924,14 @@ const AtomicString& AudioNode::interfaceName() const
 ExecutionContext* AudioNode::executionContext() const
 {
     return context()->executionContext();
+}
+
+void AudioNode::didAddOutput(unsigned numberOfOutputs)
+{
+    m_connectedNodes.append(nullptr);
+    ASSERT_UNUSED(numberOfOutputs, numberOfOutputs == m_connectedNodes.size());
+    m_connectedParams.append(nullptr);
+    ASSERT_UNUSED(numberOfOutputs, numberOfOutputs == m_connectedParams.size());
 }
 
 } // namespace blink

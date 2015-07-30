@@ -15,7 +15,7 @@ import android.os.AsyncTask;
 import android.util.Log;
 
 import org.chromium.base.CommandLine;
-import org.chromium.chrome.ChromeSwitches;
+import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.sync.signin.AccountManagerHelper;
 
 import java.io.IOException;
@@ -143,6 +143,7 @@ public class ChildAccountService {
                         for (HasChildAccountCallback callback : mCallbacks) {
                             callback.onChildAccountChecked(hasChildAccount);
                         }
+                        mCallbacks.clear();
                     }
                 }, null /* handler */);
 
@@ -223,6 +224,9 @@ public class ChildAccountService {
     }
 
     private boolean isChildAccountDetectionEnabled() {
+        if (!AccountManagerHelper.get(mContext).hasGetAccountsPermission()) {
+            return false;
+        }
         return nativeIsChildAccountDetectionEnabled();
     }
 

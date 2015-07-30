@@ -14,12 +14,30 @@
 }
 
 .new-gaia-flow #gaia-signin {
+  height: 528px;
   padding: 0 0 0;
-  width: 522px;
+  width: 448px;
+}
+
+.new-gaia-flow .throbber {
+  display: none;
+}
+
+throbber-notice {
+  display: none;
+}
+
+.new-gaia-flow throbber-notice {
+  display: block;
 }
 
 #gaia-signin.full-width {
   padding: 75px 0 0;
+}
+
+.new-gaia-flow #gaia-signin.full-width {
+  padding-top: 47px;
+  width: 562px;
 }
 
 #signin-right {
@@ -47,53 +65,49 @@
   display: none;
 }
 
-#close-button-item {
-  background: transparent none;
-  background-image: url(chrome://theme/IDR_LOGIN_CLOSE_BUTTTON);
-  background-position: center;
-  background-repeat: no-repeat;
-  height: 14px;
+#close-button-item,
+#back-button-item {
+  color: white;
   position: absolute;
-  right: 15px;
-  top: 15px;
-  width: 14px;
+  top: 10px;
   z-index: 1;
 }
 
-html[dir=rtl] #close-button-item {
-  left: 15px;
-  right: auto;
+#close-button-item:disabled,
+#back-button-item:disabled {
+  color: rgb(127, 127, 127);
 }
 
-.loading #close-button-item {
-  background-image: url(chrome://theme/IDR_LOGIN_CLOSE_BUTTTON_ON_WHITE);
-}
-
-#close-button-item:disabled {
-  background-image: url(chrome://theme/IDR_LOGIN_CLOSE_BUTTTON_MASKED);
+#close-button-item {
+  right: 10px;
 }
 
 #back-button-item {
-  background: transparent none;
-  background-image: url(chrome://theme/IDR_LOGIN_BACK_BUTTTON);
-  background-position: center;
-  background-repeat: no-repeat;
-  height: 18px;
-  left: 14px;
-  position: absolute;
-  top: 14px;
-  width: 18px;
-  z-index: 1;
+  left: 10px;
+}
+
+html[dir=rtl] #close-button-item {
+  left: 10px;
+  right: auto;
 }
 
 html[dir=rtl] #back-button-item {
   -webkit-transform: scaleX(-1);
   left: auto;
-  right: 14px;
+  right: 10px;
 }
 
-#back-button-item:disabled {
-  background-image: url(chrome://theme/IDR_LOGIN_BACK_BUTTTON_MASKED);
+.loading #close-button-item,
+.new-gaia-flow .full-width #close-button-item {
+  color: rgba(0, 0, 0, .54);
+}
+
+.new-gaia-flow .full-width #back-button-item {
+  display: none;
+}
+
+.loading.auth-completed #close-button-item {
+  display: none;
 }
 
 .signin-text {
@@ -116,6 +130,10 @@ html[dir=rtl] #back-button-item {
 #gaia-signin-form-container,
 #signin-frame {
   height: 100%;
+}
+
+.new-gaia-flow #gaia-signin-form-container {
+  width: 100%;
 }
 
 .full-width #signin-frame,
@@ -147,12 +165,18 @@ html[dir=rtl] #back-button-item {
 }
 
 webview#signin-frame {
+  -webkit-transition: opacity 500ms ease-in;
   display: block;
-  height: 609px;
   margin-left: 0;
+  opacity: 0;
   overflow: hidden;
   padding: 0;
-  width: 522px;
+  width: 448px;
+}
+
+webview#signin-frame.show {
+  -webkit-transition: opacity 500ms ease-out;
+  opacity: 1;
 }
 
 /* Simpler alignment if no right panel. */
@@ -192,7 +216,7 @@ webview#signin-frame {
 }
 
 #createSupervisedUserSeparator {
-  background-color: rgba(128,128,128,0.3);
+  background-color: rgba(128, 128, 128, 0.3);
   height: 1px;
   width: 200px;
 }
@@ -223,6 +247,53 @@ webview#signin-frame {
   top: 50px;
 }
 
+.new-gaia-flow  #saml-notice-container {
+  -webkit-margin-start: 19px;
+  text-align: start;
+  top: 15px;
+}
+
 #saml-notice-message {
   margin: 0 auto;
+}
+
+.new-gaia-flow #saml-notice-message {
+  color: rgb(106, 106, 106);
+  font-size: 13px;
+}
+
+#gaia-whitelist-error {
+  bottom: 0;
+  display: none;
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 0;
+}
+
+.new-gaia-flow #gaia-whitelist-error {
+  display: block;
+  visibility: hidden;
+}
+
+.new-gaia-flow .whitelist-error #gaia-whitelist-error {
+  visibility: visible;
+}
+
+.new-gaia-flow #gaia-signin.whitelist-error .step-contents {
+  visibility: hidden;
+}
+
+.new-gaia-flow #gaia-signin.whitelist-error .step-loading {
+  visibility: hidden;
+}
+
+html /deep/ #forgotPasswordDlg {
+  position: fixed;
+  top: 200px;
+  width: 350px;
+}
+
+html /deep/ #forgotPasswordDlg gaia-paper-button[autofocus] {
+  color: rgb(66, 133, 244);
 }

@@ -279,8 +279,6 @@ void ShellDesktopControllerAura::InitWindowManager() {
   aura::client::SetCursorClient(host_->window(), cursor_manager_.get());
 
   user_activity_detector_.reset(new ui::UserActivityDetector);
-  host_->event_processor()->GetRootTarget()->AddPreTargetHandler(
-      user_activity_detector_.get());
 #if defined(OS_CHROMEOS)
   user_activity_notifier_.reset(
       new ui::UserActivityPowerManagerNotifier(user_activity_detector_.get()));
@@ -308,7 +306,6 @@ void ShellDesktopControllerAura::CreateRootWindow() {
   // TODO(mukai): Set up input method.
 
   host_.reset(screen_->CreateHostForPrimaryDisplay());
-  host_->InitHost();
   aura::client::SetWindowTreeClient(host_->window(), this);
   root_window_event_filter_.reset(new wm::CompoundEventFilter);
   host_->window()->AddPreTargetHandler(root_window_event_filter_.get());
@@ -324,10 +321,6 @@ void ShellDesktopControllerAura::DestroyRootWindow() {
   host_->RemoveObserver(this);
   if (input_method_filter_)
     root_window_event_filter_->RemoveHandler(input_method_filter_.get());
-  if (user_activity_detector_) {
-    host_->event_processor()->GetRootTarget()->RemovePreTargetHandler(
-        user_activity_detector_.get());
-  }
   wm::FocusController* focus_controller =
       static_cast<wm::FocusController*>(focus_client_.get());
   if (focus_controller) {

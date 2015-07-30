@@ -229,8 +229,8 @@ void WebPluginScrollbarImpl::scroll(ScrollDirection direction, ScrollGranularity
 
 void WebPluginScrollbarImpl::paint(WebCanvas* canvas, const WebRect& rect)
 {
-    GraphicsContext context(canvas, nullptr);
-    m_scrollbar->paint(&context, rect);
+    OwnPtr<GraphicsContext> context = GraphicsContext::deprecatedCreateWithCanvas(canvas);
+    m_scrollbar->paint(context.get(), rect);
 }
 
 bool WebPluginScrollbarImpl::handleInputEvent(const WebInputEvent& event)
@@ -323,7 +323,7 @@ bool WebPluginScrollbarImpl::onMouseWheel(const WebInputEvent& event)
 {
     WebMouseWheelEvent mousewheel = static_cast<const WebMouseWheelEvent&>(event);
     PlatformWheelEventBuilder platformEvent(m_scrollbar.get(), mousewheel);
-    return m_group->handleWheelEvent(platformEvent).didScroll;
+    return m_group->handleWheel(platformEvent).didScroll;
 }
 
 bool WebPluginScrollbarImpl::onKeyDown(const WebInputEvent& event)

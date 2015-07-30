@@ -31,6 +31,7 @@
 #include "core/editing/FindOptions.h"
 #include "core/editing/iterators/FullyClippedStateStack.h"
 #include "core/editing/iterators/TextIteratorFlags.h"
+#include "core/editing/iterators/TextIteratorTextState.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Vector.h"
 
@@ -40,46 +41,28 @@ class InlineTextBox;
 class LayoutText;
 class LayoutTextFragment;
 
-String plainText(const Range*, TextIteratorBehaviorFlags = TextIteratorDefaultBehavior);
+CORE_EXPORT String plainText(const Range*, TextIteratorBehaviorFlags = TextIteratorDefaultBehavior);
 String plainText(const Position& start, const Position& end, TextIteratorBehaviorFlags = TextIteratorDefaultBehavior);
-PassRefPtrWillBeRawPtr<Range> findPlainText(const Range*, const String&, FindOptions);
-void findPlainText(const Position& inputStart, const Position& inputEnd, const String&, FindOptions, Position& resultStart, Position& resultEnd);
+CORE_EXPORT PassRefPtrWillBeRawPtr<Range> findPlainText(const Range*, const String&, FindOptions);
+CORE_EXPORT void findPlainText(const Position& inputStart, const Position& inputEnd, const String&, FindOptions, Position& resultStart, Position& resultEnd);
+
+String plainText(const PositionInComposedTree& start, const PositionInComposedTree& end, TextIteratorBehaviorFlags = TextIteratorDefaultBehavior);
 
 // Iterates through the DOM range, returning all the text, and 0-length boundaries
 // at points where replaced elements break up the text flow.  The text comes back in
 // chunks so as to optimize for performance of the iteration.
 
-class CORE_EXPORT TextIterator {
+template<typename Strategy>
+class TextIteratorAlgorithm {
     STACK_ALLOCATED();
 public:
     // [start, end] indicates the document range that the iteration should take place within (both ends inclusive).
-    TextIterator(const Position& start, const Position& end, TextIteratorBehaviorFlags = TextIteratorDefaultBehavior);
-    ~TextIterator();
+    TextIteratorAlgorithm(const typename Strategy::PositionType& start, const typename Strategy::PositionType& end, TextIteratorBehaviorFlags = TextIteratorDefaultBehavior);
+    ~TextIteratorAlgorithm();
 
-    bool atEnd() const { return !m_positionNode || m_shouldStop; }
+    bool atEnd() const { return !m_textState.positionNode() || m_shouldStop; }
     void advance();
     bool isInsideReplacedElement() const;
-
-    int length() const { return m_textLength; }
-    UChar characterAt(unsigned index) const;
-    String substring(unsigned position, unsigned length) const;
-    void appendTextToStringBuilder(StringBuilder&, unsigned position = 0, unsigned maxLength = UINT_MAX) const;
-
-    template<typename BufferType>
-    void appendTextTo(BufferType& output, unsigned position = 0)
-    {
-        ASSERT_WITH_SECURITY_IMPLICATION(position <= static_cast<unsigned>(length()));
-        unsigned lengthToAppend = length() - position;
-        if (!lengthToAppend)
-            return;
-        if (m_singleCharacterBuffer) {
-            ASSERT(!position);
-            ASSERT(length() == 1);
-            output.append(&m_singleCharacterBuffer, 1);
-        } else {
-            string().appendTo(output, startOffsetInCurrentContainer() + position, lengthToAppend);
-        }
-    }
 
     PassRefPtrWillBeRawPtr<Range> createRange() const;
     Node* node() const;
@@ -88,8 +71,11 @@ public:
     Node* currentContainer() const;
     int startOffsetInCurrentContainer() const;
     int endOffsetInCurrentContainer() const;
-    Position startPositionInCurrentContainer() const;
-    Position endPositionInCurrentContainer() const;
+    typename Strategy::PositionType startPositionInCurrentContainer() const;
+    typename Strategy::PositionType endPositionInCurrentContainer() const;
+
+    const TextIteratorTextState& text() const { return m_textState; };
+    int length() const { return m_textState.length(); }
 
     bool breaksAtReplacedElement() { return !(m_behavior & TextIteratorDoesNotBreakAtReplacedElement); }
 
@@ -98,7 +84,7 @@ public:
     // replaced elements. When |forSelectionPreservation| is set to true, it
     // also emits spaces for other non-text nodes using the
     // |TextIteratorEmitsCharactersBetweenAllVisiblePosition| mode.
-    static int rangeLength(const Position& start, const Position& end, bool forSelectionPreservation = false);
+    static int rangeLength(const typename Strategy::PositionType& start, const typename Strategy::PositionType& end, bool forSelectionPreservation = false);
     static PassRefPtrWillBeRawPtr<Range> subrange(Range* entireRange, int characterOffset, int characterCount);
     static void subrange(Position& start, Position& end, int characterOffset, int characterCount);
 
@@ -113,16 +99,13 @@ private:
     enum IterationProgress {
         HandledNone,
         HandledOpenShadowRoots,
-        HandledClosedShadowRoot,
+        HandledUserAgentShadowRoot,
         HandledNode,
         HandledChildren
     };
 
-    void initialize(const Position& start, const Position& end);
+    void initialize(Node* startContainer, int startOffset, Node* endContainer, int endOffset);
 
-    void flushPositionOffsets() const;
-    int positionStartOffset() const { return m_positionStartOffset; }
-    const String& string() const { return m_text; }
     void exitNode();
     bool shouldRepresentNodeOffsetZero();
     bool shouldEmitSpaceBeforeAndAfterNode(Node*);
@@ -133,7 +116,7 @@ private:
     void handleTextBox();
     void handleTextNodeFirstLetter(LayoutTextFragment*);
     void emitCharacter(UChar, Node* textNode, Node* offsetBaseNode, int textStartOffset, int textEndOffset);
-    void emitText(Node* textNode, LayoutText* renderer, int textStartOffset, int textEndOffset);
+    void emitText(Node* textNode, LayoutText* layoutObject, int textStartOffset, int textEndOffset);
 
     // Used by selection preservation code.  There should be one character emitted between every VisiblePosition
     // in the Range used to create the TextIterator.
@@ -163,7 +146,7 @@ private:
     RawPtrWillBeMember<Node> m_node;
     int m_offset;
     IterationProgress m_iterationProgress;
-    FullyClippedStateStack m_fullyClippedStack;
+    FullyClippedStateStackAlgorithm<Strategy> m_fullyClippedStack;
     int m_shadowDepth;
 
     // The range.
@@ -172,14 +155,6 @@ private:
     RawPtrWillBeMember<Node> m_endContainer;
     int m_endOffset;
     RawPtrWillBeMember<Node> m_pastEndNode;
-
-    // The current text and its position, in the form to be returned from the iterator.
-    RawPtrWillBeMember<Node> m_positionNode;
-    mutable RawPtrWillBeMember<Node> m_positionOffsetBaseNode;
-    mutable int m_positionStartOffset;
-    mutable int m_positionEndOffset;
-    int m_textLength;
-    String m_text;
 
     // Used when there is still some pending text from the current node; when these
     // are false and 0, we go back to normal iterating.
@@ -194,18 +169,10 @@ private:
     // Used to do the whitespace collapsing logic.
     RawPtrWillBeMember<Text> m_lastTextNode;
     bool m_lastTextNodeEndedWithCollapsedSpace;
-    UChar m_lastCharacter;
-
-    // Used for whitespace characters that aren't in the DOM, so we can point at them.
-    // If non-zero, overrides m_text.
-    UChar m_singleCharacterBuffer;
 
     // Used when text boxes are out of order (Hebrew/Arabic w/ embeded LTR text)
     Vector<InlineTextBox*> m_sortedTextBoxes;
     size_t m_sortedTextBoxesPosition;
-
-    // Used when deciding whether to emit a "positioning" (e.g. newline) before any other content
-    bool m_hasEmitted;
 
     const TextIteratorBehaviorFlags m_behavior;
 
@@ -213,7 +180,16 @@ private:
     bool m_handledFirstLetter;
     // Used when stopsOnFormControls() is true to determine if the iterator should keep advancing.
     bool m_shouldStop;
+
+    // Contains state of emitted text.
+    TextIteratorTextState m_textState;
 };
+
+extern template class CORE_TEMPLATE_EXPORT TextIteratorAlgorithm<EditingStrategy>;
+extern template class CORE_TEMPLATE_EXPORT TextIteratorAlgorithm<EditingInComposedTreeStrategy>;
+
+using TextIterator = TextIteratorAlgorithm<EditingStrategy>;
+using TextIteratorInComposedTree = TextIteratorAlgorithm<EditingInComposedTreeStrategy>;
 
 } // namespace blink
 

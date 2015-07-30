@@ -37,7 +37,6 @@
 #include "bindings/core/v8/V8IteratorResultValue.h"
 #include "bindings/core/v8/V8ThrowException.h"
 #include "core/HTMLNames.h"
-#include "core/InternalRuntimeFlags.h"
 #include "core/SVGNames.h"
 #include "core/animation/AnimationTimeline.h"
 #include "core/css/StyleSheetContents.h"
@@ -83,6 +82,7 @@
 #include "core/frame/Settings.h"
 #include "core/html/HTMLContentElement.h"
 #include "core/html/HTMLIFrameElement.h"
+#include "core/html/HTMLImageElement.h"
 #include "core/html/HTMLInputElement.h"
 #include "core/html/HTMLMediaElement.h"
 #include "core/html/HTMLPlugInElement.h"
@@ -120,6 +120,7 @@
 #include "core/plugins/testing/DocumentFragmentPluginPlaceholder.h"
 #include "core/testing/DictionaryTest.h"
 #include "core/testing/GCObservation.h"
+#include "core/testing/InternalRuntimeFlags.h"
 #include "core/testing/InternalSettings.h"
 #include "core/testing/LayerRect.h"
 #include "core/testing/LayerRectList.h"
@@ -208,7 +209,7 @@ void Internals::resetToConsistentState(Page* page)
     page->setDeviceScaleFactor(1);
     page->setIsCursorVisible(true);
     page->setPageScaleFactor(1, IntPoint(0, 0));
-    blink::overrideUserPreferredLanguages(Vector<AtomicString>());
+    overrideUserPreferredLanguages(Vector<AtomicString>());
     if (!page->deprecatedLocalMainFrame()->spellChecker().isContinuousSpellCheckingEnabled())
         page->deprecatedLocalMainFrame()->spellChecker().toggleContinuousSpellChecking();
     if (page->deprecatedLocalMainFrame()->editor().isOverwriteModeEnabled())
@@ -269,7 +270,7 @@ String Internals::address(Node* node)
 
 GCObservation* Internals::observeGC(ScriptValue scriptValue)
 {
-    v8::Handle<v8::Value> observedValue = scriptValue.v8Value();
+    v8::Local<v8::Value> observedValue = scriptValue.v8Value();
     ASSERT(!observedValue.IsEmpty());
     if (observedValue->IsNull() || observedValue->IsUndefined()) {
         V8ThrowException::throwTypeError(v8::Isolate::GetCurrent(), "value to observe is null or undefined");
@@ -288,7 +289,7 @@ unsigned Internals::updateStyleAndReturnAffectedElementCount(ExceptionState& exc
     }
 
     unsigned beforeCount = document->styleEngine().resolverAccessCount();
-    document->updateRenderTreeIfNeeded();
+    document->updateLayoutTreeIfNeeded();
     return document->styleEngine().resolverAccessCount() - beforeCount;
 }
 
@@ -396,16 +397,6 @@ bool Internals::hasSelectorForAttributeInShadow(Element* host, const AtomicStrin
     return host->shadow()->ensureSelectFeatureSet().hasSelectorForAttribute(attributeName);
 }
 
-bool Internals::hasSelectorForPseudoClassInShadow(Element* host, const String& pseudoClass, ExceptionState& exceptionState)
-{
-    ASSERT(host);
-    if (!host->shadow()) {
-        exceptionState.throwDOMException(InvalidAccessError, "The host element does not have a shadow.");
-        return 0;
-    }
-    return host->shadow()->ensureSelectFeatureSet().hasSelectorForPseudoType(CSSSelector::parsePseudoType(AtomicString(pseudoClass), false));
-}
-
 unsigned short Internals::compareTreeScopePosition(const Node* node1, const Node* node2, ExceptionState& exceptionState) const
 {
     ASSERT(node1 && node2);
@@ -429,6 +420,34 @@ void Internals::pauseAnimations(double pauseTime, ExceptionState& exceptionState
 
     frame()->view()->updateLayoutAndStyleForPainting();
     frame()->document()->timeline().pauseAnimationsForTesting(pauseTime);
+}
+
+void Internals::advanceTimeForImage(Element* image, double deltaTimeInSeconds, ExceptionState& exceptionState)
+{
+    ASSERT(image);
+    if (deltaTimeInSeconds < 0) {
+        exceptionState.throwDOMException(InvalidAccessError, ExceptionMessages::indexExceedsMinimumBound("deltaTimeInSeconds", deltaTimeInSeconds, 0.0));
+        return;
+    }
+
+    if (!isHTMLImageElement(*image)) {
+        exceptionState.throwDOMException(InvalidAccessError, "The element provided is not a image element.");
+        return;
+    }
+
+    ImageResource* resource = toHTMLImageElement(*image).cachedImage();
+    if (!resource || !resource->hasImage()) {
+        exceptionState.throwDOMException(InvalidAccessError, "The image resource is not available.");
+        return;
+    }
+
+    Image* imageData = resource->image();
+    if (!imageData->isBitmapImage()) {
+        exceptionState.throwDOMException(InvalidAccessError, "The image resource is not a BitmapImage type.");
+        return;
+    }
+
+    imageData->advanceTime(deltaTimeInSeconds);
 }
 
 bool Internals::hasShadowInsertionPoint(const Node* root, ExceptionState& exceptionState) const
@@ -530,10 +549,10 @@ PassRefPtrWillBeRawPtr<CSSStyleDeclaration> Internals::computedStyleIncludingVis
     return CSSComputedStyleDeclaration::create(node, allowVisitedStyle);
 }
 
-PassRefPtrWillBeRawPtr<ShadowRoot> Internals::createClosedShadowRoot(Element* host)
+PassRefPtrWillBeRawPtr<ShadowRoot> Internals::createUserAgentShadowRoot(Element* host)
 {
     ASSERT(host);
-    return PassRefPtrWillBeRawPtr<ShadowRoot>(host->ensureClosedShadowRoot());
+    return PassRefPtrWillBeRawPtr<ShadowRoot>(host->ensureUserAgentShadowRoot());
 }
 
 ShadowRoot* Internals::shadowRoot(Element* host)
@@ -579,8 +598,8 @@ String Internals::shadowRootType(const Node* root, ExceptionState& exceptionStat
     }
 
     switch (toShadowRoot(root)->type()) {
-    case ShadowRoot::ClosedShadowRoot:
-        return String("ClosedShadowRoot");
+    case ShadowRoot::UserAgentShadowRoot:
+        return String("UserAgentShadowRoot");
     case ShadowRoot::OpenShadowRoot:
         return String("OpenShadowRoot");
     default:
@@ -667,7 +686,7 @@ DOMWindow* Internals::pagePopupWindow() const
     return nullptr;
 }
 
-PassRefPtrWillBeRawPtr<ClientRect> Internals::absoluteCaretBounds(ExceptionState& exceptionState)
+ClientRect* Internals::absoluteCaretBounds(ExceptionState& exceptionState)
 {
     Document* document = contextDocument();
     if (!document || !document->frame()) {
@@ -678,15 +697,15 @@ PassRefPtrWillBeRawPtr<ClientRect> Internals::absoluteCaretBounds(ExceptionState
     return ClientRect::create(document->frame()->selection().absoluteCaretBounds());
 }
 
-PassRefPtrWillBeRawPtr<ClientRect> Internals::boundingBox(Element* element)
+ClientRect* Internals::boundingBox(Element* element)
 {
     ASSERT(element);
 
     element->document().updateLayoutIgnorePendingStylesheets();
-    LayoutObject* renderer = element->layoutObject();
-    if (!renderer)
+    LayoutObject* layoutObject = element->layoutObject();
+    if (!layoutObject)
         return ClientRect::create();
-    return ClientRect::create(renderer->absoluteBoundingBoxRectIgnoringTransforms());
+    return ClientRect::create(layoutObject->absoluteBoundingBoxRectIgnoringTransforms());
 }
 
 unsigned Internals::markerCountForNode(Node* node, const String& markerType, ExceptionState& exceptionState)
@@ -922,8 +941,14 @@ void Internals::scrollElementToRect(Element* element, long x, long y, long w, lo
         exceptionState.throwDOMException(InvalidNodeTypeError, element ? "No view can be obtained from the provided element's document." : ExceptionMessages::argumentNullOrIncorrectType(1, "Element"));
         return;
     }
+
     FrameView* mainFrame = toLocalFrame(element->document().page()->mainFrame())->view();
-    mainFrame->scrollElementToRect(element, IntRect(x, y, w, h));
+    mainFrame->frame().document()->updateLayoutIgnorePendingStylesheets();
+
+    FrameView* elementView = element->document().view();
+    IntRect boundsInRootFrame = elementView->contentsToRootFrame(pixelSnappedIntRect(element->boundingBox()));
+    IntRect boundsInRootContent = mainFrame->frameToContents(boundsInRootFrame);
+    mainFrame->scrollableArea()->scrollIntoRect(LayoutRect(boundsInRootContent), FloatRect(x, y, w, h));
 }
 
 PassRefPtrWillBeRawPtr<Range> Internals::rangeFromLocationAndLength(Element* scope, int rangeLocation, int rangeLength)
@@ -1063,7 +1088,7 @@ Node* Internals::touchNodeAdjustedToBestContextMenuNode(long x, long y, long wid
     return targetNode;
 }
 
-PassRefPtrWillBeRawPtr<ClientRect> Internals::bestZoomableAreaForTouchPoint(long x, long y, long width, long height, Document* document, ExceptionState& exceptionState)
+ClientRect* Internals::bestZoomableAreaForTouchPoint(long x, long y, long width, long height, Document* document, ExceptionState& exceptionState)
 {
     ASSERT(document);
     if (!document->frame()) {
@@ -1122,7 +1147,7 @@ void Internals::setUserPreferredLanguages(const Vector<String>& languages)
     Vector<AtomicString> atomicLanguages;
     for (size_t i = 0; i < languages.size(); ++i)
         atomicLanguages.append(AtomicString(languages[i]));
-    blink::overrideUserPreferredLanguages(atomicLanguages);
+    overrideUserPreferredLanguages(atomicLanguages);
 }
 
 unsigned Internals::activeDOMObjectCount(Document* document)
@@ -1224,7 +1249,7 @@ static DeprecatedPaintLayer* findLayerForGraphicsLayer(DeprecatedPaintLayer* sea
 // of rects returned by an SkRegion (which have been split apart for sorting
 // purposes). No attempt is made to do this efficiently (eg. by relying on the
 // sort criteria of SkRegion).
-static void mergeRects(blink::WebVector<blink::WebRect>& rects)
+static void mergeRects(WebVector<blink::WebRect>& rects)
 {
     for (size_t i = 0; i < rects.size(); ++i) {
         if (rects[i].isEmpty())
@@ -1266,13 +1291,13 @@ static void mergeRects(blink::WebVector<blink::WebRect>& rects)
 
 static void accumulateLayerRectList(DeprecatedPaintLayerCompositor* compositor, GraphicsLayer* graphicsLayer, LayerRectList* rects)
 {
-    blink::WebVector<blink::WebRect> layerRects = graphicsLayer->platformLayer()->touchEventHandlerRegion();
+    WebVector<blink::WebRect> layerRects = graphicsLayer->platformLayer()->touchEventHandlerRegion();
     if (!layerRects.isEmpty()) {
         mergeRects(layerRects);
         String layerType;
         IntSize layerOffset;
-        DeprecatedPaintLayer* renderLayer = findLayerForGraphicsLayer(compositor->rootLayer(), graphicsLayer, &layerOffset, &layerType);
-        Node* node = renderLayer ? renderLayer->layoutObject()->node() : 0;
+        DeprecatedPaintLayer* paintLayer = findLayerForGraphicsLayer(compositor->rootLayer(), graphicsLayer, &layerOffset, &layerType);
+        Node* node = paintLayer ? paintLayer->layoutObject()->node() : 0;
         for (size_t i = 0; i < layerRects.size(); ++i) {
             if (!layerRects[i].isEmpty()) {
                 rects->append(node, layerType, layerOffset.width(), layerOffset.height(), ClientRect::create(layerRects[i]));
@@ -1310,6 +1335,18 @@ LayerRectList* Internals::touchEventTargetLayerRects(Document* document, Excepti
     }
 
     return nullptr;
+}
+
+bool Internals::executeCommand(Document* document, const String& name, const String& value, ExceptionState& exceptionState)
+{
+    ASSERT(document);
+    if (!document->frame()) {
+        exceptionState.throwDOMException(InvalidAccessError, "The document provided is invalid.");
+        return false;
+    }
+
+    LocalFrame* frame = document->frame();
+    return frame->editor().executeCommand(name, value);
 }
 
 AtomicString Internals::htmlNamespace()
@@ -1506,19 +1543,19 @@ bool Internals::scrollsWithRespectTo(Element* element1, Element* element2, Excep
     ASSERT(element1 && element2);
     element1->document().view()->updateLayoutAndStyleForPainting();
 
-    LayoutObject* renderer1 = element1->layoutObject();
-    LayoutObject* renderer2 = element2->layoutObject();
-    if (!renderer1 || !renderer1->isBox()) {
-        exceptionState.throwDOMException(InvalidAccessError, renderer1 ? "The first provided element's renderer is not a box." : "The first provided element has no renderer.");
+    LayoutObject* layoutObject1 = element1->layoutObject();
+    LayoutObject* layoutObject2 = element2->layoutObject();
+    if (!layoutObject1 || !layoutObject1->isBox()) {
+        exceptionState.throwDOMException(InvalidAccessError, layoutObject1 ? "The first provided element's layoutObject is not a box." : "The first provided element has no layoutObject.");
         return false;
     }
-    if (!renderer2 || !renderer2->isBox()) {
-        exceptionState.throwDOMException(InvalidAccessError, renderer2 ? "The second provided element's renderer is not a box." : "The second provided element has no renderer.");
+    if (!layoutObject2 || !layoutObject2->isBox()) {
+        exceptionState.throwDOMException(InvalidAccessError, layoutObject2 ? "The second provided element's layoutObject is not a box." : "The second provided element has no layoutObject.");
         return false;
     }
 
-    DeprecatedPaintLayer* layer1 = toLayoutBox(renderer1)->layer();
-    DeprecatedPaintLayer* layer2 = toLayoutBox(renderer2)->layer();
+    DeprecatedPaintLayer* layer1 = toLayoutBox(layoutObject1)->layer();
+    DeprecatedPaintLayer* layer2 = toLayoutBox(layoutObject2)->layer();
     if (!layer1 || !layer2) {
         exceptionState.throwDOMException(InvalidAccessError, String::format("No DeprecatedPaintLayer can be obtained from the %s provided element.", layer1 ? "second" : "first"));
         return false;
@@ -1545,13 +1582,13 @@ String Internals::elementLayerTreeAsText(Element* element, unsigned flags, Excep
     ASSERT(element);
     element->document().updateLayout();
 
-    LayoutObject* renderer = element->layoutObject();
-    if (!renderer || !renderer->isBox()) {
-        exceptionState.throwDOMException(InvalidAccessError, renderer ? "The provided element's renderer is not a box." : "The provided element has no renderer.");
+    LayoutObject* layoutObject = element->layoutObject();
+    if (!layoutObject || !layoutObject->isBox()) {
+        exceptionState.throwDOMException(InvalidAccessError, layoutObject ? "The provided element's layoutObject is not a box." : "The provided element has no layoutObject.");
         return String();
     }
 
-    DeprecatedPaintLayer* layer = toLayoutBox(renderer)->layer();
+    DeprecatedPaintLayer* layer = toLayoutBox(layoutObject)->layer();
     if (!layer
         || !layer->hasCompositedDeprecatedPaintLayerMapping()
         || !layer->compositedDeprecatedPaintLayerMapping()->mainGraphicsLayer()) {
@@ -1584,7 +1621,7 @@ String Internals::mainThreadScrollingReasons(Document* document, ExceptionState&
     return page->mainThreadScrollingReasonsAsText();
 }
 
-PassRefPtrWillBeRawPtr<ClientRectList> Internals::nonFastScrollableRects(Document* document, ExceptionState& exceptionState) const
+ClientRectList* Internals::nonFastScrollableRects(Document* document, ExceptionState& exceptionState) const
 {
     ASSERT(document);
     if (!document->frame()) {
@@ -1828,17 +1865,17 @@ void Internals::forceFullRepaint(Document* document, ExceptionState& exceptionSt
         layoutView->invalidatePaintForViewAndCompositedLayers();
 }
 
-PassRefPtrWillBeRawPtr<ClientRectList> Internals::draggableRegions(Document* document, ExceptionState& exceptionState)
+ClientRectList* Internals::draggableRegions(Document* document, ExceptionState& exceptionState)
 {
     return annotatedRegions(document, true, exceptionState);
 }
 
-PassRefPtrWillBeRawPtr<ClientRectList> Internals::nonDraggableRegions(Document* document, ExceptionState& exceptionState)
+ClientRectList* Internals::nonDraggableRegions(Document* document, ExceptionState& exceptionState)
 {
     return annotatedRegions(document, false, exceptionState);
 }
 
-PassRefPtrWillBeRawPtr<ClientRectList> Internals::annotatedRegions(Document* document, bool draggable, ExceptionState& exceptionState)
+ClientRectList* Internals::annotatedRegions(Document* document, bool draggable, ExceptionState& exceptionState)
 {
     ASSERT(document);
     if (!document->view()) {
@@ -1911,15 +1948,9 @@ static const char* cursorTypeToString(Cursor::Type cursorType)
     return "UNKNOWN";
 }
 
-String Internals::getCurrentCursorInfo(Document* document, ExceptionState& exceptionState)
+String Internals::getCurrentCursorInfo()
 {
-    ASSERT(document);
-    if (!document->frame()) {
-        exceptionState.throwDOMException(InvalidAccessError, "The document provided is invalid.");
-        return String();
-    }
-
-    Cursor cursor = document->frame()->eventHandler().currentMouseCursor();
+    Cursor cursor = frame()->page()->chrome().getLastSetCursorForTesting();
 
     StringBuilder result;
     result.appendLiteral("type=");
@@ -1944,6 +1975,11 @@ String Internals::getCurrentCursorInfo(Document* document, ExceptionState& excep
     return result.toString();
 }
 
+bool Internals::cursorUpdatePending() const
+{
+    return frame()->eventHandler().cursorUpdatePending();
+}
+
 PassRefPtr<DOMArrayBuffer> Internals::serializeObject(PassRefPtr<SerializedScriptValue> value) const
 {
     String stringValue = value->toWireString();
@@ -1963,7 +1999,7 @@ void Internals::forceReload(bool endToEnd)
     frame()->reload(endToEnd ? EndToEndReload : NormalReload, NotClientRedirect);
 }
 
-PassRefPtrWillBeRawPtr<ClientRect> Internals::selectionBounds(ExceptionState& exceptionState)
+ClientRect* Internals::selectionBounds(ExceptionState& exceptionState)
 {
     Document* document = contextDocument();
     if (!document || !document->frame()) {
@@ -1989,11 +2025,11 @@ String Internals::getImageSourceURL(Element* element)
 String Internals::selectMenuListText(HTMLSelectElement* select)
 {
     ASSERT(select);
-    LayoutObject* renderer = select->layoutObject();
-    if (!renderer || !renderer->isMenuList())
+    LayoutObject* layoutObject = select->layoutObject();
+    if (!layoutObject || !layoutObject->isMenuList())
         return String();
 
-    LayoutMenuList* menuList = toLayoutMenuList(renderer);
+    LayoutMenuList* menuList = toLayoutMenuList(layoutObject);
     return menuList->text();
 }
 
@@ -2005,11 +2041,11 @@ bool Internals::isSelectPopupVisible(Node* node)
 
     HTMLSelectElement& select = toHTMLSelectElement(*node);
 
-    LayoutObject* renderer = select.layoutObject();
-    if (!renderer || !renderer->isMenuList())
+    LayoutObject* layoutObject = select.layoutObject();
+    if (!layoutObject || !layoutObject->isMenuList())
         return false;
 
-    LayoutMenuList* menuList = toLayoutMenuList(renderer);
+    LayoutMenuList* menuList = toLayoutMenuList(layoutObject);
     return menuList->popupIsVisible();
 }
 
@@ -2020,11 +2056,11 @@ bool Internals::selectPopupItemStyleIsRtl(Node* node, int itemIndex)
 
     HTMLSelectElement& select = toHTMLSelectElement(*node);
 
-    LayoutObject* renderer = select.layoutObject();
-    if (!renderer || !renderer->isMenuList())
+    LayoutObject* layoutObject = select.layoutObject();
+    if (!layoutObject || !layoutObject->isMenuList())
         return false;
 
-    LayoutMenuList& menuList = toLayoutMenuList(*renderer);
+    LayoutMenuList& menuList = toLayoutMenuList(*layoutObject);
     PopupMenuStyle itemStyle = menuList.itemStyle(itemIndex);
     return itemStyle.textDirection() == RTL;
 }
@@ -2036,21 +2072,21 @@ int Internals::selectPopupItemStyleFontHeight(Node* node, int itemIndex)
 
     HTMLSelectElement& select = toHTMLSelectElement(*node);
 
-    LayoutObject* renderer = select.layoutObject();
-    if (!renderer || !renderer->isMenuList())
+    LayoutObject* layoutObject = select.layoutObject();
+    if (!layoutObject || !layoutObject->isMenuList())
         return false;
 
-    LayoutMenuList& menuList = toLayoutMenuList(*renderer);
+    LayoutMenuList& menuList = toLayoutMenuList(*layoutObject);
     PopupMenuStyle itemStyle = menuList.itemStyle(itemIndex);
     return itemStyle.font().fontMetrics().height();
 }
 
 bool Internals::loseSharedGraphicsContext3D()
 {
-    OwnPtr<blink::WebGraphicsContext3DProvider> sharedProvider = adoptPtr(blink::Platform::current()->createSharedOffscreenGraphicsContext3DProvider());
+    OwnPtr<WebGraphicsContext3DProvider> sharedProvider = adoptPtr(Platform::current()->createSharedOffscreenGraphicsContext3DProvider());
     if (!sharedProvider)
         return false;
-    blink::WebGraphicsContext3D* sharedContext = sharedProvider->context3d();
+    WebGraphicsContext3D* sharedContext = sharedProvider->context3d();
     sharedContext->loseContextCHROMIUM(GL_GUILTY_CONTEXT_RESET_EXT, GL_INNOCENT_CONTEXT_RESET_EXT);
     // To prevent tests that call loseSharedGraphicsContext3D from being
     // flaky, we call finish so that the context is guaranteed to be lost
@@ -2090,7 +2126,7 @@ namespace {
 
 class AddOneFunction : public ScriptFunction {
 public:
-    static v8::Handle<v8::Function> createFunction(ScriptState* scriptState)
+    static v8::Local<v8::Function> createFunction(ScriptState* scriptState)
     {
         AddOneFunction* self = new AddOneFunction(scriptState);
         return self->bindToV8Function();
@@ -2211,21 +2247,21 @@ void Internals::setNetworkStateNotifierTestOnly(bool testOnly)
 
 void Internals::setNetworkConnectionInfo(const String& type, ExceptionState& exceptionState)
 {
-    blink::WebConnectionType webtype;
+    WebConnectionType webtype;
     if (type == "cellular") {
-        webtype = blink::ConnectionTypeCellular;
+        webtype = ConnectionTypeCellular;
     } else if (type == "bluetooth") {
-        webtype = blink::ConnectionTypeBluetooth;
+        webtype = ConnectionTypeBluetooth;
     } else if (type == "ethernet") {
-        webtype = blink::ConnectionTypeEthernet;
+        webtype = ConnectionTypeEthernet;
     } else if (type == "wifi") {
-        webtype = blink::ConnectionTypeWifi;
+        webtype = ConnectionTypeWifi;
     } else if (type == "other") {
-        webtype = blink::ConnectionTypeOther;
+        webtype = ConnectionTypeOther;
     } else if (type == "none") {
-        webtype = blink::ConnectionTypeNone;
+        webtype = ConnectionTypeNone;
     } else if (type == "unknown") {
-        webtype = blink::ConnectionTypeUnknown;
+        webtype = ConnectionTypeUnknown;
     } else {
         exceptionState.throwDOMException(NotFoundError, ExceptionMessages::failedToEnumerate("connection type", type));
         return;
@@ -2238,7 +2274,7 @@ unsigned Internals::countHitRegions(CanvasRenderingContext2D* context)
     return context->hitRegionsCount();
 }
 
-PassRefPtrWillBeRawPtr<ClientRect> Internals::boundsInViewportSpace(Element* element)
+ClientRect* Internals::boundsInViewportSpace(Element* element)
 {
     ASSERT(element);
     return ClientRect::create(element->boundsInViewportSpace());
@@ -2270,7 +2306,7 @@ Vector<String> Internals::getTransitionElementIds()
     return ids;
 }
 
-PassRefPtrWillBeRawPtr<ClientRectList> Internals::getTransitionElementRects()
+ClientRectList* Internals::getTransitionElementRects()
 {
     Vector<Document::TransitionElementData> elementData;
     frame()->document()->getTransitionElementData(elementData);
@@ -2280,11 +2316,7 @@ PassRefPtrWillBeRawPtr<ClientRectList> Internals::getTransitionElementRects()
         for (size_t j = 0; j < elementData[i].elements.size(); ++j)
             rects.append(elementData[i].elements[j].rect);
     }
-
-    Vector<FloatQuad> quads(rects.size());
-    for (size_t i = 0; i < rects.size(); ++i)
-        quads[i] = FloatRect(rects[i]);
-    return ClientRectList::create(quads);
+    return ClientRectList::create(rects);
 }
 
 void Internals::hideAllTransitionElements()
@@ -2330,7 +2362,7 @@ void Internals::forcePluginPlaceholder(HTMLElement* element, const PluginPlaceho
 
 void Internals::forceBlinkGCWithoutV8GC()
 {
-    ThreadState::current()->setGCState(ThreadState::GCScheduledForTesting);
+    ThreadState::current()->setGCState(ThreadState::FullGCScheduled);
 }
 
 String Internals::selectedHTMLForClipboard()
@@ -2351,6 +2383,31 @@ void Internals::setVisualViewportOffset(int x, int y)
 ValueIterable<int>::IterationSource* Internals::startIteration(ScriptState*, ExceptionState&)
 {
     return new InternalsIterationSource();
+}
+
+bool Internals::isUseCounted(Document* document, int useCounterId)
+{
+    if (useCounterId < 0 || useCounterId >= UseCounter::NumberOfFeatures)
+        return false;
+    return UseCounter::isCounted(*document, static_cast<UseCounter::Feature>(useCounterId));
+}
+
+String Internals::unscopeableAttribute()
+{
+    return "unscopeableAttribute";
+}
+
+String Internals::unscopeableMethod()
+{
+    return "unscopeableMethod";
+}
+
+ClientRectList* Internals::focusRingRects(Element* element)
+{
+    Vector<LayoutRect> rects;
+    if (element && element->layoutObject())
+        element->layoutObject()->addFocusRingRects(rects, LayoutPoint());
+    return ClientRectList::create(rects);
 }
 
 } // namespace blink

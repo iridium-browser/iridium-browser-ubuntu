@@ -20,10 +20,6 @@
 #include "ui/gfx/skia_util.h"
 #include "ui/gfx/transform.h"
 
-#if defined(OS_WIN)
-#include "ui/gfx/canvas_skia_paint.h"
-#endif
-
 namespace gfx {
 
 Canvas::Canvas(const Size& size, float image_scale, bool is_opaque)
@@ -63,13 +59,12 @@ Canvas::Canvas()
       canvas_(owned_canvas_.get()) {
 }
 
-Canvas::~Canvas() {
+Canvas::Canvas(SkCanvas* canvas, float image_scale)
+    : image_scale_(image_scale), owned_canvas_(), canvas_(canvas) {
+  DCHECK(canvas);
 }
 
-// static
-Canvas* Canvas::CreateCanvasWithoutScaling(SkCanvas* canvas,
-                                           float image_scale) {
-  return new Canvas(canvas, image_scale);
+Canvas::~Canvas() {
 }
 
 void Canvas::RecreateBackingCanvas(const Size& size,
@@ -546,13 +541,6 @@ void Canvas::EndPlatformPaint() {
 
 void Canvas::Transform(const gfx::Transform& transform) {
   canvas_->concat(transform.matrix());
-}
-
-Canvas::Canvas(SkCanvas* canvas, float image_scale)
-    : image_scale_(image_scale),
-      owned_canvas_(),
-      canvas_(canvas) {
-  DCHECK(canvas);
 }
 
 bool Canvas::IntersectsClipRectInt(int x, int y, int w, int h) {

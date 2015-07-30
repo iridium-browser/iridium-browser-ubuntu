@@ -40,7 +40,7 @@ func NewDecoder(bytes []byte, handles []system.UntypedHandle) *Decoder {
 // claimData claims a block of |size| bytes for a one-level value.
 func (d *Decoder) claimData(size int) error {
 	if d.end+size > len(d.buf) {
-		return fmt.Errorf("data buffer is too small")
+		return &ValidationError{IllegalMemoryRange, "data buffer is too small"}
 	}
 	d.end += size
 	return nil
@@ -48,10 +48,10 @@ func (d *Decoder) claimData(size int) error {
 
 func (d *Decoder) claimHandle(index int) (system.UntypedHandle, error) {
 	if index >= len(d.handles) {
-		return nil, fmt.Errorf("trying to access non present handle")
+		return nil, &ValidationError{IllegalHandle, "trying to access non present handle"}
 	}
 	if index < d.nextHandle {
-		return nil, fmt.Errorf("trying to access handle out of order")
+		return nil, &ValidationError{IllegalHandle, "trying to access handle out of order"}
 	}
 	d.nextHandle = index + 1
 	return d.handles[index], nil
@@ -100,7 +100,9 @@ func (d *Decoder) StartArray(elementBitSize uint32) (uint32, error) {
 	}
 	minSize := bytesForBits(uint64(header.ElementsOrVersion) * uint64(elementBitSize))
 	if got, want := int(header.Size), dataHeaderSize+minSize; got < want {
-		return 0, fmt.Errorf("data header size is too small: is %d, but should be at least %d", got, want)
+		return 0, &ValidationError{UnexpectedArrayHeader,
+			fmt.Sprintf("data header size(%d) should be at least %d", got, want),
+		}
 	}
 	if err := d.pushState(header, elementBitSize); err != nil {
 		return 0, err
@@ -117,9 +119,11 @@ func (d *Decoder) StartMap() error {
 		return err
 	}
 	if header != mapHeader {
-		return fmt.Errorf("invalid map header: %v", header)
+		return &ValidationError{UnexpectedStructHeader,
+			fmt.Sprintf("invalid map header: %v", header),
+		}
 	}
-	if err := d.pushState(header, pointerBitSize); err != nil {
+	if err := d.pushState(header, 0); err != nil {
 		return err
 	}
 	return nil
@@ -135,7 +139,9 @@ func (d *Decoder) StartStruct() (DataHeader, error) {
 		return DataHeader{}, err
 	}
 	if header.Size < dataHeaderSize {
-		return DataHeader{}, fmt.Errorf("data header size(%d) should be at least %d", header.Size, dataHeaderSize)
+		return DataHeader{}, &ValidationError{UnexpectedStructHeader,
+			fmt.Sprintf("data header size(%d) should be at least %d", header.Size, dataHeaderSize),
+		}
 	}
 	if err := d.pushState(header, 0); err != nil {
 		return DataHeader{}, err
@@ -290,7 +296,6 @@ func (d *Decoder) ReadString() (string, error) {
 // ReadPointer reads a pointer and reassigns first unclaimed byte index if the
 // pointer is not null.
 func (d *Decoder) ReadPointer() (uint64, error) {
-	oldEnd := d.state().offset
 	pointer, err := d.ReadUint64()
 	if err != nil {
 		return pointer, err
@@ -299,15 +304,17 @@ func (d *Decoder) ReadPointer() (uint64, error) {
 		return pointer, nil
 	}
 
-	newEnd := uint64(oldEnd) + pointer
-	if newEnd >= uint64(len(d.buf)) {
-		return 0, fmt.Errorf("trying to access out of range memory")
+	newEnd := uint64(d.state().offset-8) + pointer
+	if pointer >= uint64(len(d.buf)) || newEnd >= uint64(len(d.buf)) {
+		return 0, &ValidationError{IllegalPointer, "trying to access out of range memory"}
 	}
 	if newEnd < uint64(d.end) {
-		return 0, fmt.Errorf("trying to access memory out of order")
+		return 0, &ValidationError{IllegalMemoryRange, "trying to access memory out of order"}
 	}
 	if newEnd%8 != 0 {
-		return 0, fmt.Errorf("incorrect pointer data alignment: %d", newEnd)
+		return 0, &ValidationError{MisalignedObject,
+			fmt.Sprintf("incorrect pointer data alignment: %d", newEnd),
+		}
 	}
 	d.claimData(int(newEnd) - d.end)
 	return pointer, nil
@@ -364,4 +371,18 @@ func (d *Decoder) ReadSharedBufferHandle() (system.SharedBufferHandle, error) {
 	} else {
 		return handle.ToSharedBufferHandle(), nil
 	}
+}
+
+// ReadInterface reads an encoded interface and returns the message pipe handle.
+// The version field is ignored for now.
+func (d *Decoder) ReadInterface() (system.MessagePipeHandle, error) {
+	handle, err := d.ReadMessagePipeHandle()
+	if err != nil {
+		return nil, err
+	}
+	d.state().elementsProcessed--
+	if _, err := d.ReadUint32(); err != nil {
+		return nil, err
+	}
+	return handle, nil
 }

@@ -114,7 +114,7 @@ found in the LICENSE file.
   </style>
 
   <div class="record-selection-dialog">
-    <x-info-bar-group></x-info-bar-group>
+    <tv-b-ui-info-bar-group></tv-b-ui-info-bar-group>
     <div class="category-presets">
     </div>
     <div class="category-description"></div>
@@ -162,7 +162,8 @@ tv.exportTo('tv.e.about_tracing', function() {
       categoryFilter: ['blink', 'cc', 'netlog', 'renderer.scheduler',
         'toplevel', 'v8']},
     {title: 'Input latency',
-      categoryFilter: ['benchmark', 'input', 'renderer.scheduler', 'toplevel']},
+      categoryFilter: ['benchmark', 'input', 'evdev', 'renderer.scheduler',
+        'toplevel']},
     {title: 'Rendering',
       categoryFilter: ['blink', 'cc', 'gpu', 'toplevel']},
     {title: 'Javascript and rendering',
@@ -176,6 +177,14 @@ tv.exportTo('tv.e.about_tracing', function() {
     {title: 'Manually select settings',
       categoryFilter: []}
   ];
+  var RECORDING_MODES = [
+      {'label': 'Record until full',
+        'value': 'record-until-full'},
+      {'label': 'Record continuously',
+        'value': 'record-continuously'},
+      {'label': 'Record as much as possible',
+        'value': 'record-as-much-as-possible'}];
+  var DEFAULT_RECORD_MODE = 'record-until-full';
   var DEFAULT_CONTINUOUS_TRACING = true;
   var DEFAULT_SYSTEM_TRACING = false;
   var DEFAULT_SAMPLING_TRACING = false;
@@ -211,11 +220,11 @@ tv.exportTo('tv.e.about_tracing', function() {
             return { label: p.title, value: p.categoryFilter };
           })));
 
+      this.tracingRecordModeSltr_ = tv.b.ui.createSelector(
+          this, 'tracingRecordMode',
+          'recordSelectionDialog.tracingRecordMode',
+          DEFAULT_RECORD_MODE, RECORDING_MODES);
 
-      this.continuousTracingBn_ = tv.b.ui.createCheckBox(
-          undefined, undefined,
-          'recordSelectionDialog.useContinuousTracing', true,
-          'Continuous tracing');
       this.systemTracingBn_ = tv.b.ui.createCheckBox(
           undefined, undefined,
           'recordSelectionDialog.useSystemTracing', true,
@@ -225,7 +234,7 @@ tv.exportTo('tv.e.about_tracing', function() {
           'recordSelectionDialog.useSampling', false,
           'State sampling');
       this.tracingModesContainerEl_ = this.querySelector('.tracing-modes');
-      this.tracingModesContainerEl_.appendChild(this.continuousTracingBn_);
+      this.tracingModesContainerEl_.appendChild(this.tracingRecordModeSltr_);
       this.tracingModesContainerEl_.appendChild(this.systemTracingBn_);
       this.tracingModesContainerEl_.appendChild(this.samplingTracingBn_);
 
@@ -247,8 +256,7 @@ tv.exportTo('tv.e.about_tracing', function() {
       // TODO(chrishenry): When used with tv.b.ui.Overlay (such as in
       // chrome://tracing, this does not yet look quite right due to
       // the 10px overlay content padding (but it's good enough).
-      this.infoBarGroup_ = this.querySelector('x-info-bar-group');
-      tv.b.ui.decorate(this.infoBarGroup_, tv.b.ui.InfoBarGroup);
+      this.infoBarGroup_ = this.querySelector('tv-b-ui-info-bar-group');
 
       this.addEventListener('visibleChange', this.onVisibleChange_.bind(this));
     },
@@ -262,13 +270,13 @@ tv.exportTo('tv.e.about_tracing', function() {
       }
     },
 
-    get useContinuousTracing() {
+    get tracingRecordMode() {
       if (this.usingPreset_())
-        return DEFAULT_CONTINUOUS_TRACING;
-      return this.continuousTracingBn_.checked;
+        return DEFAULT_RECORD_MODE;
+      return this.tracingRecordModeSltr_.selectedValue;
     },
-    set useContinuousTracing(value) {
-      this.continuousTracingBn_.checked = !!value;
+    set tracingRecordMode(value) {
+      this.tracingRecordMode_ = value;
     },
 
     get useSystemTracing() {
@@ -279,6 +287,7 @@ tv.exportTo('tv.e.about_tracing', function() {
     set useSystemTracing(value) {
       this.systemTracingBn_.checked = !!value;
     },
+
     get useSampling() {
       if (this.usingPreset_())
         return DEFAULT_SAMPLING_TRACING;

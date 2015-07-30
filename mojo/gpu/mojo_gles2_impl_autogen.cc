@@ -193,6 +193,30 @@ void MojoGLES2Impl::CompressedTexSubImage2D(GLenum target,
   glCompressedTexSubImage2D(target, level, xoffset, yoffset, width, height,
                             format, imageSize, data);
 }
+void MojoGLES2Impl::CompressedTexImage3D(GLenum target,
+                                         GLint level,
+                                         GLenum internalformat,
+                                         GLsizei width,
+                                         GLsizei height,
+                                         GLsizei depth,
+                                         GLint border,
+                                         GLsizei imageSize,
+                                         const void* data) {
+  NOTREACHED() << "Unimplemented CompressedTexImage3D.";
+}
+void MojoGLES2Impl::CompressedTexSubImage3D(GLenum target,
+                                            GLint level,
+                                            GLint xoffset,
+                                            GLint yoffset,
+                                            GLint zoffset,
+                                            GLsizei width,
+                                            GLsizei height,
+                                            GLsizei depth,
+                                            GLenum format,
+                                            GLsizei imageSize,
+                                            const void* data) {
+  NOTREACHED() << "Unimplemented CompressedTexSubImage3D.";
+}
 void MojoGLES2Impl::CopyBufferSubData(GLenum readtarget,
                                       GLenum writetarget,
                                       GLintptr readoffset,
@@ -475,6 +499,15 @@ void MojoGLES2Impl::GetFramebufferAttachmentParameteriv(GLenum target,
   MojoGLES2MakeCurrent(context_);
   glGetFramebufferAttachmentParameteriv(target, attachment, pname, params);
 }
+void MojoGLES2Impl::GetInteger64v(GLenum pname, GLint64* params) {
+  NOTREACHED() << "Unimplemented GetInteger64v.";
+}
+void MojoGLES2Impl::GetIntegeri_v(GLenum pname, GLuint index, GLint* data) {
+  NOTREACHED() << "Unimplemented GetIntegeri_v.";
+}
+void MojoGLES2Impl::GetInteger64i_v(GLenum pname, GLuint index, GLint64* data) {
+  NOTREACHED() << "Unimplemented GetInteger64i_v.";
+}
 void MojoGLES2Impl::GetIntegerv(GLenum pname, GLint* params) {
   MojoGLES2MakeCurrent(context_);
   glGetIntegerv(pname, params);
@@ -586,6 +619,11 @@ void MojoGLES2Impl::GetUniformiv(GLuint program,
   MojoGLES2MakeCurrent(context_);
   glGetUniformiv(program, location, params);
 }
+void MojoGLES2Impl::GetUniformuiv(GLuint program,
+                                  GLint location,
+                                  GLuint* params) {
+  NOTREACHED() << "Unimplemented GetUniformuiv.";
+}
 void MojoGLES2Impl::GetUniformIndices(GLuint program,
                                       GLsizei count,
                                       const char* const* names,
@@ -607,6 +645,16 @@ void MojoGLES2Impl::GetVertexAttribiv(GLuint index,
                                       GLint* params) {
   MojoGLES2MakeCurrent(context_);
   glGetVertexAttribiv(index, pname, params);
+}
+void MojoGLES2Impl::GetVertexAttribIiv(GLuint index,
+                                       GLenum pname,
+                                       GLint* params) {
+  NOTREACHED() << "Unimplemented GetVertexAttribIiv.";
+}
+void MojoGLES2Impl::GetVertexAttribIuiv(GLuint index,
+                                        GLenum pname,
+                                        GLuint* params) {
+  NOTREACHED() << "Unimplemented GetVertexAttribIuiv.";
 }
 void MojoGLES2Impl::GetVertexAttribPointerv(GLuint index,
                                             GLenum pname,

@@ -34,8 +34,8 @@
 
 #include "core/CSSPropertyNames.h"
 #include "core/CSSValueKeywords.h"
+#include "core/dom/Position.h"
 #include "core/editing/WritingDirection.h"
-#include "platform/fonts/FixedPitchFontType.h"
 #include "platform/heap/Handle.h"
 #include "wtf/Forward.h"
 #include "wtf/RefCounted.h"
@@ -54,7 +54,6 @@ class Element;
 class HTMLElement;
 class MutableStylePropertySet;
 class Node;
-class Position;
 class QualifiedName;
 class ComputedStyle;
 class StylePropertySet;
@@ -161,7 +160,7 @@ private:
     void mergeStyle(const StylePropertySet*, CSSPropertyOverrideMode);
 
     RefPtrWillBeMember<MutableStylePropertySet> m_mutableStyle;
-    FixedPitchFontType m_fixedPitchFontType;
+    bool m_isMonospaceFont;
     float m_fontSizeDelta;
 
     friend class HTMLElementEquivalent;
@@ -214,7 +213,7 @@ public:
         return !(*this == other);
     }
 private:
-    void extractTextStyles(Document*, MutableStylePropertySet*, FixedPitchFontType);
+    void extractTextStyles(Document*, MutableStylePropertySet*, bool isMonospaceFont);
 
     String m_cssStyle;
     bool m_applyBold;

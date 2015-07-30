@@ -74,6 +74,10 @@ class GaiaScreenHandler : public BaseScreenHandler {
   ~GaiaScreenHandler() override;
 
   void LoadGaia(const GaiaContext& context);
+
+  // Callback that loads GAIA after version information has been retrieved.
+  void LoadGaiaWithVersion(const GaiaContext& context,
+                           const std::string& platform_version);
   void UpdateGaia(const GaiaContext& context);
 
   // Sends request to reload Gaia. If |force_reload| is true, request
@@ -84,6 +88,9 @@ class GaiaScreenHandler : public BaseScreenHandler {
   // Decides whether an auth extension should be pre-loaded. If it should,
   // pre-loads it.
   void MaybePreloadAuthExtension();
+
+  // Show error UI at the end of GAIA flow when user is not whitelisted.
+  void ShowWhitelistCheckFailedError();
 
   FrameState frame_state() const { return frame_state_; }
   net::Error frame_error() const { return frame_error_; }
@@ -191,6 +198,9 @@ class GaiaScreenHandler : public BaseScreenHandler {
   void SetSigninScreenHandler(SigninScreenHandler* handler);
 
   SigninScreenHandlerDelegate* Delegate();
+
+  // Returns temporary unused device Id.
+  std::string GetTemporaryDeviceId();
 
   // Current state of Gaia frame.
   FrameState frame_state_;

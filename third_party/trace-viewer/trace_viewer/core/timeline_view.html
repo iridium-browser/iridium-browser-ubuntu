@@ -14,20 +14,26 @@ found in the LICENSE file.
 <link rel="import" href="/base/ui/overlay.html">
 <link rel="import" href="/base/ui/drag_handle.html">
 <link rel="import" href="/core/analysis/analysis_view.html">
+<link rel="import" href="/core/favicons.html">
 <link rel="import" href="/core/find_control.html">
 <link rel="import" href="/core/find_controller.html">
 <link rel="import" href="/core/timeline_track_view.html">
+<link rel="import" href="/core/scripting_control.html">
+<link rel="import" href="/core/scripting_controller.html">
 <link rel="import" href="/core/side_panel/side_panel_container.html">
 
 <template id="timeline-view-template">
   <div class="control">
-    <div id="left-controls" class="controls"></div>
-    <div class="title">^_^</div>
-    <div id="right-controls" class="controls"></div>
+    <div class="bar">
+      <div id="left-controls" class="controls"></div>
+      <div class="title">^_^</div>
+      <div id="right-controls" class="controls"></div>
+    </div>
+    <div id="collapsing-controls" class="controls"></div>
   </div>
   <middle-container>
     <track-view-container></track-view-container>
-    <x-side-panel-container></x-side-panel-container>
+    <tv-c-side-panel-container></tv-c-side-panel-container>
   </middle-container>
   <x-drag-handle></x-drag-handle>
   <tracing-analysis-view id="analysis"></tracing-analysis-view>
@@ -178,6 +184,11 @@ found in the LICENSE file.
       </div>
 
       <div class='pair'>
+        <div class='command'>`</div>
+        <div class='action'>Show or hide the scripting console</div>
+      </div>
+
+      <div class='pair'>
         <div class='command'>?</div>
         <div class='action'>Show help</div>
       </div>
@@ -188,6 +199,10 @@ found in the LICENSE file.
 <template id="metadata-btn-template">
   <div class="button view-metadata-button view-info-button">Metadata</div>
   <div class="info-button-text metadata-dialog-text"></div>
+</template>
+
+<template id="console-btn-template">
+  <div class="button view-console-button">&#187;</div>
 </template>
 
 <script>
@@ -217,15 +232,16 @@ tv.exportTo('tv.c', function() {
       this.titleEl_ = this.querySelector('.title');
       this.leftControlsEl_ = this.querySelector('#left-controls');
       this.rightControlsEl_ = this.querySelector('#right-controls');
+      this.collapsingControlsEl_ = this.querySelector('#collapsing-controls');
       this.sidePanelContainer_ = this.querySelector(
-          'x-side-panel-container');
+          'tv-c-side-panel-container');
       this.trackViewContainer_ = this.querySelector('track-view-container');
 
-      tv.b.ui.decorate(this.sidePanelContainer_,
-                       tv.c.SidePanelContainer);
 
       this.findCtl_ = new TracingFindControl();
       this.findCtl_.controller = new tv.c.FindController();
+      this.scriptingCtl_ = new TracingScriptingControl();
+      this.scriptingCtl_.controller = new tv.c.ScriptingController();
 
       this.showFlowEvents_ = false;
       this.rightControls.appendChild(tv.b.ui.createCheckBox(
@@ -241,7 +257,9 @@ tv.exportTo('tv.c', function() {
 
       this.rightControls.appendChild(this.createMetadataButton_());
       this.rightControls.appendChild(this.findCtl_);
+      this.rightControls.appendChild(this.createConsoleButton_());
       this.rightControls.appendChild(this.createHelpButton_());
+      this.collapsingControls.appendChild(this.scriptingCtl_);
 
       this.dragEl_ = this.querySelector('x-drag-handle');
       tv.b.ui.decorate(this.dragEl_, tv.b.ui.DragHandle);
@@ -262,6 +280,27 @@ tv.exportTo('tv.c', function() {
       // State management on selection change.
       this.selections_ = {};
       window.addEventListener('popstate', this.onPopState_.bind(this));
+    },
+
+    updateDocumentFavicon: function() {
+      var hue;
+      if (!this.model)
+        hue = 'blue';
+      else
+        hue = this.model.faviconHue;
+
+      var faviconData = tv.c.FaviconsByHue[hue];
+      if (faviconData === undefined)
+        faviconData = tv.c.FaviconsByHue['blue'];
+
+      // Find link if its there
+      var link = document.head.querySelector('link[rel="shortcut icon"]');
+      if (!link) {
+        link = document.createElement('link');
+        link.rel = 'shortcut icon';
+        document.head.appendChild(link);
+      }
+      link.href = faviconData;
     },
 
     get showFlowEvents() {
@@ -314,6 +353,20 @@ tv.exportTo('tv.c', function() {
       return showEl;
     },
 
+    createConsoleButton_: function() {
+      var node = tv.b.instantiateTemplate('#console-btn-template', THIS_DOC);
+      var toggleEl = node.querySelector('.view-console-button');
+
+      function onClick(e) {
+        this.scriptingCtl_.toggleVisibility();
+        e.stopPropagation();
+        return false;
+      }
+      toggleEl.addEventListener('click', onClick.bind(this));
+
+      return toggleEl;
+    },
+
     createMetadataButton_: function() {
       var node = tv.b.instantiateTemplate('#metadata-btn-template', THIS_DOC);
       var showEl = node.querySelector('.view-metadata-button');
@@ -363,6 +416,10 @@ tv.exportTo('tv.c', function() {
       return this.rightControlsEl_;
     },
 
+    get collapsingControls() {
+      return this.collapsingControlsEl_;
+    },
+
     get viewTitle() {
       return this.titleEl_.textContent.substring(
           this.titleEl_.textContent.length - 2);
@@ -398,18 +455,20 @@ tv.exportTo('tv.c', function() {
               'selectionChange', this.onSelectionChanged_);
           this.trackView_.detach();
           this.trackView_ = undefined;
-          this.findCtl_.controller.trackView = undefined;
+          this.findCtl_.controller.timeline = undefined;
+          this.scriptingCtl_.controller.timeline = undefined;
         }
         this.sidePanelContainer_.model = undefined;
       }
 
       // Create new trackView if needed.
       if (modelValid && !this.trackView_) {
-        this.trackView_ = new tv.c.TimelineTrackView();
+        this.trackView_ = new tv.c.TimelineTrackView(this);
         this.trackView_.focusElement =
             this.focusElement_ ? this.focusElement_ : this.parentElement;
         this.trackViewContainer_.appendChild(this.trackView_);
         this.findCtl_.controller.timeline = this.trackView_;
+        this.scriptingCtl_.controller.timeline = this.trackView_;
         this.trackView_.addEventListener(
             'selectionChange', this.onSelectionChanged_);
         this.trackView_.viewport.addEventListener(
@@ -467,6 +526,11 @@ tv.exportTo('tv.c', function() {
     get listenToKeys_() {
       if (!tv.b.ui.isElementAttachedToDocument(this))
         return;
+      if (document.activeElement.type === 'textarea')
+        return false;
+      if (this.sidePanelContainer_.activePanel &&
+          this.sidePanelContainer_.activePanel.listeningToKeys)
+        return false;
       if (!this.focusElement_)
         return true;
       if (this.focusElement.tabIndex >= 0)
@@ -488,27 +552,42 @@ tv.exportTo('tv.c', function() {
       if (!this.listenToKeys_)
         return;
 
+      // Shortcuts that *can* steal focus from the console and the filter text
+      // box.
+      switch (e.keyCode) {
+        case '`'.charCodeAt(0):
+          this.scriptingCtl_.toggleVisibility();
+          if (!this.scriptingCtl_.hasFocus)
+            this.focus();
+          e.preventDefault();
+          break;
+      }
+
+      if (this.scriptingCtl_.hasFocus)
+        return;
+
       // Shortcuts that *can* steal focus from the filter text box.
       switch (e.keyCode) {
-        case 47:  // /
-          if (this.findCtl_.hasFocus())
+        case '/'.charCodeAt(0):
+          if (this.findCtl_.hasFocus)
             this.focus();
           else
             this.findCtl_.focus();
           e.preventDefault();
           break;
-        case 63:  // ?
+        case '?'.charCodeAt(0):
           this.querySelector('.view-help-button').click();
           e.preventDefault();
           break;
       }
 
-      if (this.findCtl_.hasFocus())
+      if (this.findCtl_.hasFocus)
         return;
 
-      // Shortcuts that *can't* steal focus from the filter text box.
+      // Shortcuts that *can't* steal focus from the filter text box or the
+      // console.
       switch (e.keyCode) {
-        case 118:  // v
+        case 'v'.charCodeAt(0):
           this.toggleHighlightVSync_();
           e.preventDefault();
           break;
@@ -533,7 +612,7 @@ tv.exportTo('tv.c', function() {
       var state = {
         selection_guid: e.selection.guid
       };
-      window.history.pushState(state, '');
+      window.history.pushState(state, document.title);
 
       this.trackView_.selection = e.selection;
       e.stopPropagation();
@@ -568,6 +647,10 @@ tv.exportTo('tv.c', function() {
     toggleHighlightVSync_: function() {
       this.highlightVSyncCheckbox_.checked =
           !this.highlightVSyncCheckbox_.checked;
+    },
+
+    setFindCtlText: function(string) {
+      this.findCtl_.setText(string);
     }
   };
 

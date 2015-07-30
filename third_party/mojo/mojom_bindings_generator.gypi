@@ -57,10 +57,14 @@
         '<@(mojom_import_args)',
         '-o', '<(SHARED_INTERMEDIATE_DIR)',
         '--java_output_directory=<(java_out_dir)',
+        '--dart_mojo_root=//third_party/mojo/src',
       ],
       'message': 'Generating Mojo bindings from <(RULE_INPUT_DIRNAME)/<(RULE_INPUT_ROOT).mojom',
       'process_outputs_as_sources': 1,
     }
+  ],
+  'dependencies': [
+    '<(DEPTH)/third_party/mojo/mojo_public.gyp:mojo_interface_bindings_generation',
   ],
   'include_dirs': [
     '<(DEPTH)',

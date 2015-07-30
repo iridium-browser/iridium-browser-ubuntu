@@ -140,6 +140,7 @@ WebInspector.PropertiesSidebarPane.prototype = {
                 var title = prototype.description;
                 title = title.replace(/Prototype$/, "");
                 var section = new WebInspector.ObjectPropertiesSection(prototype, title);
+                section.element.classList.add("properties-widget-section");
                 this.sections.push(section);
                 body.appendChild(section.element);
                 if (expanded[this.sections.length - 1])

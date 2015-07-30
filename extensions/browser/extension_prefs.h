@@ -262,7 +262,6 @@ class ExtensionPrefs : public ExtensionScopedPrefs, public KeyedService {
                         Extension::DisableReason disable_reason) const;
   void AddDisableReason(const std::string& extension_id,
                         Extension::DisableReason disable_reason);
-  void AddDisableReasons(const std::string& extension_id, int disable_reasons);
   void RemoveDisableReason(const std::string& extension_id,
                            Extension::DisableReason disable_reason);
   void ClearDisableReasons(const std::string& extension_id);
@@ -537,6 +536,7 @@ class ExtensionPrefs : public ExtensionScopedPrefs, public KeyedService {
 
  private:
   friend class ExtensionPrefsBlacklistedExtensions;  // Unit test.
+  friend class ExtensionPrefsComponentExtension;     // Unit test.
   friend class ExtensionPrefsUninstallExtension;     // Unit test.
 
   enum DisableReasonChange {

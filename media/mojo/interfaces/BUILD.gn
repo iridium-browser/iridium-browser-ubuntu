@@ -13,7 +13,11 @@ mojom("interfaces") {
     "media_types.mojom",
   ]
 
+  if (is_chromeos) {
+    sources += [ "platform_verification.mojom" ]
+  }
+
   deps = [
-    "//third_party/mojo_services/src/geometry/public/interfaces",
+    "//ui/mojo/geometry:interfaces",
   ]
 }

@@ -10,6 +10,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -30,6 +31,7 @@ namespace {
 
 // Allow parsed command line option 'tdls_busy' to set the fake busy count.
 int s_tdls_busy_count = 0;
+int s_extra_wifi_networks = 0;
 
 // Used to compare values for finding entries to erase in a ListValue.
 // (ListValue only implements a const_iterator version of Find).
@@ -735,6 +737,15 @@ void FakeShillManagerClient::SetupDefaultEnvironment() {
                                    base::FundamentalValue(true));
       profiles->AddService(shared_profile, kPortaledWifiPath);
     }
+
+    for (int i = 0; i < s_extra_wifi_networks; ++i) {
+      int id = 4 + i;
+      std::string path = base::StringPrintf("/service/wifi%d", id);
+      std::string guid = base::StringPrintf("wifi%d_guid", id);
+      std::string name = base::StringPrintf("wifi%d", id);
+      services->AddService(path, guid, name, shill::kTypeWifi,
+                           shill::kStateIdle, add_to_visible);
+    }
   }
 
   // Wimax
@@ -775,6 +786,9 @@ void FakeShillManagerClient::SetupDefaultEnvironment() {
     devices->SetDeviceProperty("/device/cellular1",
                                shill::kSupportedCarriersProperty,
                                carrier_list);
+    devices->SetDeviceProperty("/device/cellular1",
+                               shill::kSupportNetworkScanProperty,
+                               base::FundamentalValue(true));
     if (roaming_state_ == kRoamingRequired) {
       devices->SetDeviceProperty("/device/cellular1",
                                  shill::kProviderRequiresRoamingProperty,
@@ -1049,8 +1063,7 @@ bool FakeShillManagerClient::ParseOption(const std::string& arg0,
     base::DictionaryValue* simlock_dict = new base::DictionaryValue;
     simlock_dict->Set(shill::kSIMLockEnabledProperty,
                       new base::FundamentalValue(locked));
-    // TODO(stevenjb): Investigate why non-empty value breaks UI.
-    std::string lock_type = "";  // shill::kSIMLockPin
+    std::string lock_type = shill::kSIMLockPin;
     simlock_dict->SetString(shill::kSIMLockTypeProperty, lock_type);
     simlock_dict->SetInteger(shill::kSIMLockRetriesLeftProperty, 5);
 
@@ -1076,6 +1089,9 @@ bool FakeShillManagerClient::ParseOption(const std::string& arg0,
 
 bool FakeShillManagerClient::SetInitialNetworkState(std::string type_arg,
                                                     std::string state_arg) {
+  int state_arg_as_int = -1;
+  base::StringToInt(state_arg, &state_arg_as_int);
+
   std::string state;
   if (state_arg.empty() || state_arg == "1" || state_arg == "on" ||
       state_arg == "enabled" || state_arg == "connected" ||
@@ -1086,6 +1102,10 @@ bool FakeShillManagerClient::SetInitialNetworkState(std::string type_arg,
              state_arg == "inactive" || state_arg == shill::kStateIdle) {
     // Technology enabled, services are created but are not connected.
     state = shill::kStateIdle;
+  } else if (type_arg == shill::kTypeWifi && state_arg_as_int > 1) {
+    // Enabled and connected, add extra wifi networks.
+    state = shill::kStateOnline;
+    s_extra_wifi_networks = state_arg_as_int - 1;
   } else if (state_arg == "disabled" || state_arg == "disconnect") {
     // Technology disabled but available, services created but not connected.
     state = kNetworkDisabled;

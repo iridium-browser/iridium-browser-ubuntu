@@ -4,16 +4,19 @@
  */
 
 #oauth-enrollment {
-  height: 609px;
+  height: 528px;
   padding: 0;
-  width: 522px;
+  width: 448px;
+}
+
+#oauth-enrollment.saml {
+  height: 528px;
+  width: 562px;
 }
 
 #oauth-enroll-step-contents {
   color: #666;
   height: 100%;
-  margin-bottom: 10px;
-  position: relative;
   width: 100%;
 }
 
@@ -21,7 +24,6 @@
   display: none;
 }
 
-.oauth-enroll-state-working #oauth-enroll-step-working,
 .oauth-enroll-state-error #oauth-enroll-step-error,
 .oauth-enroll-state-success #oauth-enroll-step-success {
   display: table;
@@ -29,7 +31,12 @@
   margin: 0 auto;
 }
 
-.oauth-enroll-state-signin #oauth-enroll-step-signin {
+.oauth-enroll-state-working #oauth-enroll-step-signin,
+.oauth-enroll-state-attribute-prompt-error
+    #oauth-enroll-step-attribute-prompt-error,
+.oauth-enroll-state-signin #oauth-enroll-step-signin,
+.oauth-enroll-state-attribute-prompt
+    #oauth-enroll-step-attribute-prompt {
   display: block;
   height: 100%;
   width: 100%;
@@ -55,22 +62,6 @@
   vertical-align: middle;
 }
 
-.oauth-enroll-step-icon {
-  display: inline-block;
-  position: relative;
-  top: 0.5em;
-  vertical-align: top;
-}
-
-.oauth-enroll-step-icon > * {
-  -webkit-margin-end: .4em;
-  display: inline-block;
-  height: 22px;
-  position: relative;
-  top: -11px;
-  width: 22px;
-}
-
 .oauth-enroll-step-message {
   display: inline-block;
   max-width: 400px;
@@ -79,7 +70,7 @@
 }
 
 .oauth-enroll-link {
-  color: rgb(37, 79, 155);
+  color: rgb(17, 85, 204);
   cursor: pointer;
   text-decoration: none;
 }
@@ -88,12 +79,23 @@
   display: none;
 }
 
+#oauth-enroll-back-button,
+#oauth-enrollment.saml #oauth-enroll-back-button {
+  display: none;
+}
+
+.oauth-enroll-state-signin #oauth-enroll-back-button {
+  display: inline;
+}
+
 .oauth-enroll-state-signin.mode-manual #oauth-enroll-cancel-button,
-.oauth-enroll-state-signin #oauth-enroll-back-button,
+.oauth-enroll-state-signin.mode-forced #oauth-enroll-refresh-button,
+.oauth-enroll-state-signin.mode-recovery #oauth-enroll-refresh-button,
 .oauth-enroll-state-working.mode-manual #oauth-enroll-cancel-button,
-.oauth-enroll-state-working #oauth-enroll-back-button,
+.oauth-enroll-state-working.mode-forced #oauth-enroll-refresh-button,
+.oauth-enroll-stain-working.mode-recovery #oauth-enroll-refresh-button,
 .oauth-enroll-state-error.mode-manual #oauth-enroll-cancel-button,
-.oauth-enroll-state-error #oauth-enroll-back-button,
+.oauth-enroll-state-error.mode-manual #oauth-enroll-done-button,
 .oauth-enroll-state-success #oauth-enroll-done-button {
   display: inline;
 }
@@ -103,19 +105,16 @@
 }
 
 #oauth-saml-notice-container {
+  -webkit-margin-start: 19px;
   left: 0;
   position: absolute;
   right: 0;
-  text-align: center;
-  top: 62px;
+  text-align: start;
+  top: 15px;
 }
 
 #oauth-enrollment.saml {
-  padding: 97px 0 21px;
-}
-
-#oauth-enrollment.saml #oauth-enroll-auth-view {
-  height: 444px;
+  padding-top: 47px;
 }
 
 #oauth-enrollment.saml #oauth-enrollment-controls,
@@ -128,42 +127,62 @@
 }
 
 #oauth-saml-notice-message {
+  color: rgb(106, 106, 106);
+  font-size: 13px;
   margin: 0 auto;
 }
 
-#oauth-enroll-cancel-button {
-  background: transparent none;
-  background-image: url(chrome://theme/IDR_LOGIN_CLOSE_BUTTTON);
-  background-position: center;
-  background-repeat: no-repeat;
-  height: 14px;
+#oauth-enroll-cancel-button,
+#oauth-enroll-back-button,
+#oauth-enroll-refresh-button {
   position: absolute;
-  right: 15px;
-  top: 15px;
-  width: 14px;
+  top: 10px;
   z-index: 1;
 }
 
-html[dir=rtl] #oauth-enroll-cancel-button {
-  left: 15px;
+#oauth-enroll-cancel-button,
+#oauth-enroll-refresh-button {
+  color: rgba(0, 0, 0, .54);
+  right: 10px;
+}
+
+html[dir=rtl] #oauth-enroll-cancel-button,
+html[dir=rtl] #oauth-enroll-refresh-button {
+  left: 10px;
   right: auto;
 }
 
+#oauth-enrollment.saml #oauth-enroll-cancel-button,
+#oauth-enrollment.saml #oauth-enroll-refresh-button {
+  color: rgba(0, 0, 0, .54);
+}
+
+.oauth-enroll-state-signin #oauth-enroll-cancel-button,
+.oauth-enroll-state-working #oauth-enroll-cancel-button,
+.oauth-enroll-state-signin #oauth-enroll-refresh-button,
+.oauth-enroll-state-working #oauth-enroll-refresh-button {
+  color: white;
+}
+
 #oauth-enroll-back-button {
-  background: transparent none;
-  background-image: url(chrome://theme/IDR_LOGIN_BACK_BUTTTON);
-  background-position: center;
-  background-repeat: no-repeat;
-  height: 18px;
-  left: 14px;
-  position: absolute;
-  top: 14px;
-  width: 18px;
-  z-index: 1;
+  color: white;
+  left: 10px;
 }
 
 html[dir=rtl] #oauth-enroll-back-button {
   -webkit-transform: scaleX(-1);
   left: auto;
-  right: 14px;
+  right: 10px;
+}
+
+#oauth-enrollment.saml #oauth-enroll-back-button {
+  display: none;
+}
+
+#oauth-enroll-attribute-prompt-message {
+  color: black;
+}
+
+#oauth-enroll-skip-button {
+  min-width: 0;
 }

@@ -10,6 +10,7 @@
 
 #include "base/command_line.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/profiler/scoped_profile.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -81,6 +82,7 @@
 #include "extensions/common/manifest_handlers/background_info.h"
 #include "extensions/common/manifest_url_handlers.h"
 #include "extensions/common/one_shot_event.h"
+#include "extensions/common/permissions/api_permission.h"
 #include "extensions/common/permissions/permission_message_provider.h"
 #include "extensions/common/permissions/permissions_data.h"
 
@@ -98,6 +100,7 @@
 using content::BrowserContext;
 using content::BrowserThread;
 using content::DevToolsAgentHost;
+using extensions::APIPermission;
 using extensions::CrxInstaller;
 using extensions::Extension;
 using extensions::ExtensionIdSet;
@@ -108,6 +111,8 @@ using extensions::FeatureSwitch;
 using extensions::InstallVerifier;
 using extensions::ManagementPolicy;
 using extensions::Manifest;
+using extensions::PermissionID;
+using extensions::PermissionIDSet;
 using extensions::PermissionMessage;
 using extensions::PermissionMessageIDs;
 using extensions::PermissionSet;
@@ -397,6 +402,7 @@ const Extension* ExtensionService::GetExtensionById(
 void ExtensionService::Init() {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   TRACE_EVENT0("browser,startup", "ExtensionService::Init");
+  TRACK_SCOPED_REGION("Startup", "ExtensionService::Init");
   SCOPED_UMA_HISTOGRAM_TIMER("Extensions.ExtensionServiceInitTime");
 
   DCHECK(!is_ready());  // Can't redo init.
@@ -740,8 +746,7 @@ bool ExtensionService::UninstallExtension(
 
   UMA_HISTOGRAM_ENUMERATION("Extensions.UninstallType",
                             extension->GetType(), 100);
-  RecordPermissionMessagesHistogram(extension.get(),
-                                    "Extensions.Permissions_Uninstall2");
+  RecordPermissionMessagesHistogram(extension.get(), "Uninstall");
 
   // Unload before doing more cleanup to ensure that nothing is hanging on to
   // any of these resources.
@@ -765,10 +770,6 @@ bool ExtensionService::UninstallExtension(
   UntrackTerminatedExtension(extension->id());
 
   // Notify interested parties that we've uninstalled this extension.
-  content::NotificationService::current()->Notify(
-      extensions::NOTIFICATION_EXTENSION_UNINSTALLED_DEPRECATED,
-      content::Source<Profile>(profile_),
-      content::Details<const Extension>(extension.get()));
   ExtensionRegistry::Get(profile_)
       ->TriggerOnUninstalled(extension.get(), reason);
 
@@ -994,8 +995,7 @@ void ExtensionService::UnblockAllExtensions() {
 void ExtensionService::GrantPermissionsAndEnableExtension(
     const Extension* extension) {
   GrantPermissions(extension);
-  RecordPermissionMessagesHistogram(extension,
-                                    "Extensions.Permissions_ReEnable2");
+  RecordPermissionMessagesHistogram(extension, "ReEnable");
   extension_prefs_->SetDidExtensionEscalatePermissions(extension, false);
   EnableExtension(extension->id());
 }
@@ -1010,21 +1010,41 @@ void ExtensionService::RecordPermissionMessagesHistogram(
     const Extension* extension, const char* histogram) {
   // Since this is called from multiple sources, and since the histogram macros
   // use statics, we need to manually lookup the histogram ourselves.
-  base::HistogramBase* counter = base::LinearHistogram::FactoryGet(
-      histogram,
+  base::HistogramBase* legacy_counter = base::LinearHistogram::FactoryGet(
+      base::StringPrintf("Extensions.Permissions_%s2", histogram),
       1,
       PermissionMessage::kEnumBoundary,
       PermissionMessage::kEnumBoundary + 1,
       base::HistogramBase::kUmaTargetedHistogramFlag);
 
-  PermissionMessageIDs permissions =
+  // TODO(treib): Remove the legacy "2" histograms. See crbug.com/484102.
+  PermissionMessageIDs legacy_permissions =
       extension->permissions_data()->GetLegacyPermissionMessageIDs();
-  if (permissions.empty()) {
-    counter->Add(PermissionMessage::kNone);
+  if (legacy_permissions.empty()) {
+    legacy_counter->Add(PermissionMessage::kNone);
   } else {
-    for (PermissionMessage::ID id : permissions)
-      counter->Add(id);
+    for (PermissionMessage::ID id : legacy_permissions)
+      legacy_counter->Add(id);
   }
+
+  base::HistogramBase* counter = base::LinearHistogram::FactoryGet(
+      base::StringPrintf("Extensions.Permissions_%s3", histogram),
+      1,
+      APIPermission::kEnumBoundary,
+      APIPermission::kEnumBoundary + 1,
+      base::HistogramBase::kUmaTargetedHistogramFlag);
+
+  base::HistogramBase* counter_has_any = base::BooleanHistogram::FactoryGet(
+      base::StringPrintf("Extensions.HasPermissions_%s3", histogram),
+      base::HistogramBase::kUmaTargetedHistogramFlag);
+
+  PermissionIDSet permissions =
+      extensions::PermissionMessageProvider::Get()->GetAllPermissionIDs(
+          extension->permissions_data()->active_permissions().get(),
+          extension->GetType());
+  counter_has_any->AddBoolean(!permissions.empty());
+  for (const PermissionID& id : permissions)
+    counter->Add(id.id());
 }
 
 void ExtensionService::NotifyExtensionLoaded(const Extension* extension) {
@@ -1407,10 +1427,6 @@ void ExtensionService::RemoveComponentExtension(
       GetExtensionById(extension_id, false));
   UnloadExtension(extension_id, UnloadedExtensionInfo::REASON_UNINSTALL);
   if (extension.get()) {
-    content::NotificationService::current()->Notify(
-        extensions::NOTIFICATION_EXTENSION_UNINSTALLED_DEPRECATED,
-        content::Source<Profile>(profile_),
-        content::Details<const Extension>(extension.get()));
     ExtensionRegistry::Get(profile_)->TriggerOnUninstalled(
         extension.get(), extensions::UNINSTALL_REASON_COMPONENT_REMOVED);
   }
@@ -1433,6 +1449,8 @@ void ExtensionService::ReloadExtensionsForTest() {
 void ExtensionService::SetReadyAndNotifyListeners() {
   TRACE_EVENT0("browser,startup",
                "ExtensionService::SetReadyAndNotifyListeners");
+  TRACK_SCOPED_REGION(
+      "Startup", "ExtensionService::SetReadyAndNotifyListeners");
   SCOPED_UMA_HISTOGRAM_TIMER(
       "Extensions.ExtensionServiceNotifyReadyListenersTime");
 
@@ -1665,8 +1683,7 @@ void ExtensionService::CheckPermissionsIncrease(const Extension* extension,
   } else if (is_privilege_increase) {
     disable_reasons |= Extension::DISABLE_PERMISSIONS_INCREASE;
     if (!extension_prefs_->DidExtensionEscalatePermissions(extension->id())) {
-      RecordPermissionMessagesHistogram(extension,
-                                        "Extensions.Permissions_AutoDisable2");
+      RecordPermissionMessagesHistogram(extension, "AutoDisable");
     }
     extension_prefs_->SetExtensionState(extension->id(), Extension::DISABLED);
     extension_prefs_->SetDidExtensionEscalatePermissions(extension, true);
@@ -1789,8 +1806,7 @@ void ExtensionService::OnExtensionInstalled(
                               extension->GetType(), 100);
     UMA_HISTOGRAM_ENUMERATION("Extensions.InstallSource",
                               extension->location(), Manifest::NUM_LOCATIONS);
-    RecordPermissionMessagesHistogram(extension,
-                                      "Extensions.Permissions_Install2");
+    RecordPermissionMessagesHistogram(extension, "Install");
   } else {
     UMA_HISTOGRAM_ENUMERATION("Extensions.UpdateType",
                               extension->GetType(), 100);
@@ -1805,7 +1821,8 @@ void ExtensionService::OnExtensionInstalled(
   }
 
   if (disable_reasons)
-    extension_prefs_->AddDisableReasons(id, disable_reasons);
+    extension_prefs_->AddDisableReason(id,
+        static_cast<Extension::DisableReason>(disable_reasons));
 
   const Extension::State initial_state =
       disable_reasons == Extension::DISABLE_NONE ? Extension::ENABLED
@@ -2095,16 +2112,22 @@ void ExtensionService::RegisterContentSettings(
               profile_->GetOriginalProfile() != profile_)));
 }
 
-void ExtensionService::TrackTerminatedExtension(const Extension* extension) {
+void ExtensionService::TrackTerminatedExtension(
+    const std::string& extension_id) {
+  extensions_being_terminated_.erase(extension_id);
+
+  const Extension* extension = GetInstalledExtension(extension_id);
+  if (!extension) {
+    return;
+  }
+
   // No need to check for duplicates; inserting a duplicate is a no-op.
   registry_->AddTerminated(make_scoped_refptr(extension));
-  extensions_being_terminated_.erase(extension->id());
   UnloadExtension(extension->id(), UnloadedExtensionInfo::REASON_TERMINATE);
 }
 
 void ExtensionService::TerminateExtension(const std::string& extension_id) {
-  const Extension* extension = GetInstalledExtension(extension_id);
-  TrackTerminatedExtension(extension);
+  TrackTerminatedExtension(extension_id);
 }
 
 void ExtensionService::UntrackTerminatedExtension(const std::string& id) {
@@ -2245,7 +2268,7 @@ void ExtensionService::Observe(int type,
           base::Bind(
               &ExtensionService::TrackTerminatedExtension,
               AsWeakPtr(),
-              host->extension()));
+              host->extension()->id()));
       break;
     }
     case content::NOTIFICATION_RENDERER_PROCESS_TERMINATED: {

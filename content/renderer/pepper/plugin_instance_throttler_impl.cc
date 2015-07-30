@@ -8,7 +8,9 @@
 #include "base/time/time.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/renderer/render_thread.h"
+#include "content/renderer/pepper/pepper_plugin_instance_impl.h"
 #include "content/renderer/render_frame_impl.h"
+#include "ppapi/shared_impl/ppapi_constants.h"
 #include "third_party/WebKit/public/platform/WebRect.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "third_party/WebKit/public/web/WebPluginParams.h"
@@ -23,8 +25,6 @@ namespace {
 // representative keyframe. Units are the ratio of all pixels that are within
 // the most common luma bin. The same threshold is used for history thumbnails.
 const double kAcceptableFrameMaximumBoringness = 0.94;
-
-const int kMinimumConsecutiveInterestingFrames = 4;
 
 // When plugin audio is throttled, the plugin will sometimes stop generating
 // video frames. We use this timeout to prevent waiting forever for a good
@@ -53,7 +53,6 @@ PluginInstanceThrottlerImpl::PluginInstanceThrottlerImpl()
     : state_(THROTTLER_STATE_AWAITING_KEYFRAME),
       is_hidden_for_placeholder_(false),
       web_plugin_(nullptr),
-      consecutive_interesting_frames_(0),
       frames_examined_(0),
       audio_throttled_(false),
       audio_throttled_frame_timeout_(
@@ -96,6 +95,8 @@ void PluginInstanceThrottlerImpl::MarkPluginEssential(
   state_ = THROTTLER_STATE_MARKED_ESSENTIAL;
   RecordUnthrottleMethodMetric(method);
 
+  FOR_EACH_OBSERVER(Observer, observer_list_, OnPeripheralStateChange());
+
   if (was_throttled)
     FOR_EACH_OBSERVER(Observer, observer_list_, OnThrottleStateChange());
 }
@@ -105,7 +106,7 @@ void PluginInstanceThrottlerImpl::SetHiddenForPlaceholder(bool hidden) {
   FOR_EACH_OBSERVER(Observer, observer_list_, OnHiddenForPlaceholder(hidden));
 }
 
-blink::WebPlugin* PluginInstanceThrottlerImpl::GetWebPlugin() const {
+PepperWebPluginImpl* PluginInstanceThrottlerImpl::GetWebPlugin() const {
   DCHECK(web_plugin_);
   return web_plugin_;
 }
@@ -119,7 +120,8 @@ void PluginInstanceThrottlerImpl::NotifyAudioThrottled() {
   audio_throttled_frame_timeout_.Reset();
 }
 
-void PluginInstanceThrottlerImpl::SetWebPlugin(blink::WebPlugin* web_plugin) {
+void PluginInstanceThrottlerImpl::SetWebPlugin(
+    PepperWebPluginImpl* web_plugin) {
   DCHECK(!web_plugin_);
   web_plugin_ = web_plugin;
 }
@@ -129,6 +131,7 @@ void PluginInstanceThrottlerImpl::Initialize(
     const GURL& content_origin,
     const std::string& plugin_module_name,
     const gfx::Size& unobscured_size) {
+  DCHECK(unobscured_size_.IsEmpty());
   unobscured_size_ = unobscured_size;
 
   // |frame| may be nullptr in tests.
@@ -139,7 +142,9 @@ void PluginInstanceThrottlerImpl::Initialize(
                                        unobscured_size.width(),
                                        unobscured_size.height(),
                                        &cross_origin_main_content)) {
+      DCHECK_NE(THROTTLER_STATE_MARKED_ESSENTIAL, state_);
       state_ = THROTTLER_STATE_MARKED_ESSENTIAL;
+      FOR_EACH_OBSERVER(Observer, observer_list_, OnPeripheralStateChange());
 
       if (cross_origin_main_content)
         helper->WhitelistContentOrigin(content_origin);
@@ -163,20 +168,15 @@ void PluginInstanceThrottlerImpl::OnImageFlush(const SkBitmap* bitmap) {
 
   ++frames_examined_;
 
-  double boring_score = color_utils::CalculateBoringScore(*bitmap);
-  if (boring_score <= kAcceptableFrameMaximumBoringness)
-    ++consecutive_interesting_frames_;
-  else
-    consecutive_interesting_frames_ = 0;
-
   // Does not make a copy, just takes a reference to the underlying pixel data.
   last_received_frame_ = *bitmap;
 
   if (audio_throttled_)
     audio_throttled_frame_timeout_.Reset();
 
-  if (frames_examined_ >= kMaximumFramesToExamine ||
-      consecutive_interesting_frames_ >= kMinimumConsecutiveInterestingFrames) {
+  double boring_score = color_utils::CalculateBoringScore(*bitmap);
+  if (boring_score <= kAcceptableFrameMaximumBoringness ||
+      frames_examined_ >= kMaximumFramesToExamine) {
     EngageThrottle();
   }
 }

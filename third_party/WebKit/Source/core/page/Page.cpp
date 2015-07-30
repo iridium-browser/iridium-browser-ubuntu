@@ -169,7 +169,7 @@ String Page::mainThreadScrollingReasonsAsText()
     return String();
 }
 
-PassRefPtrWillBeRawPtr<ClientRectList> Page::nonFastScrollableRects(const LocalFrame* frame)
+ClientRectList* Page::nonFastScrollableRects(const LocalFrame* frame)
 {
     if (ScrollingCoordinator* scrollingCoordinator = this->scrollingCoordinator()) {
         // Hits in compositing/iframes/iframe-composited-scrolling.html
@@ -178,11 +178,7 @@ PassRefPtrWillBeRawPtr<ClientRectList> Page::nonFastScrollableRects(const LocalF
     }
 
     // Now retain non-fast scrollable regions
-    WebVector<WebRect> rects = frame->view()->layerForScrolling()->platformLayer()->nonFastScrollableRegion();
-    Vector<FloatQuad> quads(rects.size());
-    for (size_t i = 0; i < rects.size(); ++i)
-        quads[i] = FloatRect(rects[i]);
-    return ClientRectList::create(quads);
+    return ClientRectList::create(frame->view()->layerForScrolling()->platformLayer()->nonFastScrollableRegion());
 }
 
 void Page::setMainFrame(Frame* mainFrame)
@@ -401,7 +397,7 @@ void Page::setVisibilityState(PageVisibilityState visibilityState, bool isInitia
         return;
     m_visibilityState = visibilityState;
 
-    if (visibilityState == blink::PageVisibilityStateVisible)
+    if (visibilityState == PageVisibilityStateVisible)
         setTimerAlignmentInterval(DOMTimer::visiblePageAlignmentInterval());
     else
         setTimerAlignmentInterval(DOMTimer::hiddenPageAlignmentInterval());
@@ -602,5 +598,7 @@ Page::PageClients::PageClients()
 Page::PageClients::~PageClients()
 {
 }
+
+template class WillBeHeapSupplement<Page>;
 
 } // namespace blink

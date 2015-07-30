@@ -17,9 +17,12 @@
 #if defined(OPENSSL_ARM) || defined(OPENSSL_AARCH64)
 
 #include <inttypes.h>
+#include <string.h>
+
+#if !defined(OPENSSL_TRUSTY)
 #include <setjmp.h>
 #include <signal.h>
-#include <string.h>
+#endif
 
 #include "arm_arch.h"
 
@@ -29,9 +32,6 @@
  * that we need and have a weak pointer to getauxval. */
 
 unsigned long getauxval(unsigned long type) __attribute__((weak));
-
-static const unsigned long AT_HWCAP = 16;
-static const unsigned long AT_HWCAP2 = 26;
 
 char CRYPTO_is_NEON_capable(void) {
   return (OPENSSL_armcap_P & ARMV7_NEON) != 0;
@@ -62,7 +62,7 @@ void CRYPTO_set_NEON_functional(char neon_functional) {
   }
 }
 
-#if !defined(OPENSSL_NO_ASM) && defined(OPENSSL_ARM)
+#if !defined(OPENSSL_NO_ASM) && defined(OPENSSL_ARM) && !defined(OPENSSL_TRUSTY)
 
 static sigjmp_buf sigill_jmp;
 
@@ -116,11 +116,11 @@ static int probe_for_NEON() {
 
 #else
 
-static int probe_for_NEON() {
+static int probe_for_NEON(void) {
   return 0;
 }
 
-#endif  /* !OPENSSL_NO_ASM && OPENSSL_ARM */
+#endif  /* !OPENSSL_NO_ASM && OPENSSL_ARM && !OPENSSL_TRUSTY */
 
 void OPENSSL_cpuid_setup(void) {
   if (getauxval == NULL) {
@@ -136,6 +136,7 @@ void OPENSSL_cpuid_setup(void) {
     return;
   }
 
+  static const unsigned long AT_HWCAP = 16;
   unsigned long hwcap = getauxval(AT_HWCAP);
 
 #if defined(OPENSSL_ARM)
@@ -146,6 +147,7 @@ void OPENSSL_cpuid_setup(void) {
 
   /* In 32-bit mode, the ARMv8 feature bits are in a different aux vector
    * value. */
+  static const unsigned long AT_HWCAP2 = 26;
   hwcap = getauxval(AT_HWCAP2);
 
   /* See /usr/include/asm/hwcap.h on an ARM installation for the source of

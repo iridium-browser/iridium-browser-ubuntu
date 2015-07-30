@@ -55,6 +55,7 @@
 #import "chrome/browser/ui/cocoa/framed_browser_window.h"
 #import "chrome/browser/ui/cocoa/fullscreen_window.h"
 #import "chrome/browser/ui/cocoa/infobars/infobar_container_controller.h"
+#include "chrome/browser/ui/cocoa/last_active_browser_cocoa.h"
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_editor.h"
 #import "chrome/browser/ui/cocoa/presentation_mode_controller.h"
 #import "chrome/browser/ui/cocoa/profiles/avatar_base_controller.h"
@@ -394,9 +395,6 @@ using content::WebContents;
     // Create the bridge for the status bubble.
     statusBubble_ = new StatusBubbleMac([self window], self);
 
-    // Create the permissions bubble.
-    permissionBubbleCocoa_.reset(new PermissionBubbleCocoa([self window]));
-
     // Register for application hide/unhide notifications.
     [[NSNotificationCenter defaultCenter]
          addObserver:self
@@ -590,8 +588,10 @@ using content::WebContents;
 
 // Called right after our window became the main window.
 - (void)windowDidBecomeMain:(NSNotification*)notification {
-  BrowserList::SetLastActive(browser_.get());
-  [self saveWindowPositionIfNeeded];
+  if (chrome::GetLastActiveBrowser() != browser_) {
+    BrowserList::SetLastActive(browser_.get());
+    [self saveWindowPositionIfNeeded];
+  }
 
   [[[self window] contentView] cr_recursivelyInvokeBlock:^(id view) {
       if ([view conformsToProtocol:@protocol(ThemedWindowDrawing)])
@@ -727,6 +727,8 @@ using content::WebContents;
 // browsers' behaviour, and is desirable in multi-tab situations. Note, however,
 // that the "toggle" behaviour means that the window can still be "unzoomed" to
 // the user size.
+// Note: this method is also called from -isZoomed. If the returned zoomed rect
+// equals the current window's frame, -isZoomed returns YES.
 - (NSRect)windowWillUseStandardFrame:(NSWindow*)window
                         defaultFrame:(NSRect)frame {
   // Forget that we grew the window up (if we in fact did).
@@ -835,6 +837,19 @@ using content::WebContents;
   NSWindow* window = [self window];
   NSRect windowFrame = [window frame];
   NSRect workarea = [[window screen] visibleFrame];
+
+  // Prevent the window from growing smaller than its minimum height:
+  // http://crbug.com/230400 .
+  if (deltaH < 0) {
+    CGFloat minWindowHeight = [window minSize].height;
+    if (windowFrame.size.height + deltaH < minWindowHeight) {
+      // |deltaH| + |windowFrame.size.height| = |minWindowHeight|.
+      deltaH = minWindowHeight - windowFrame.size.height;
+    }
+    if (deltaH == 0) {
+      return NO;
+    }
+  }
 
   // If the window is not already fully in the workarea, do not adjust its frame
   // at all.
@@ -1251,6 +1266,26 @@ using content::WebContents;
   [toolbarController_ setTranslateIconLit:on];
 }
 
+- (void)onActiveTabChanged:(content::WebContents*)oldContents
+                        to:(content::WebContents*)newContents {
+  // No need to remove previous bubble. It will close itself.
+  PermissionBubbleManager* manager(nullptr);
+  if (oldContents) {
+    manager = PermissionBubbleManager::FromWebContents(oldContents);
+    if (manager)
+      manager->SetView(nullptr);
+  }
+
+  if (newContents) {
+    if (!permissionBubbleCocoa_.get()) {
+      permissionBubbleCocoa_.reset(new PermissionBubbleCocoa([self window]));
+    }
+    manager = PermissionBubbleManager::FromWebContents(newContents);
+    if (manager)
+      manager->SetView(permissionBubbleCocoa_.get());
+  }
+}
+
 - (void)zoomChangedForActiveTab:(BOOL)canShowBubble {
   [toolbarController_ zoomChangedForActiveTab:canShowBubble];
 }
@@ -1632,14 +1667,6 @@ using content::WebContents;
       BookmarkBar::DONT_ANIMATE_STATE_CHANGE);
 
   [infoBarContainerController_ changeWebContents:contents];
-
-  // No need to remove previous bubble. It will close itself.
-  // TODO(leng):  The PermissionBubbleManager for the previous contents should
-  // have SetView(NULL) called.  Fix this when the previous contents are
-  // available here or move to BrowserWindowCocoa::OnActiveTabChanged().
-  // crbug.com/340720
-  PermissionBubbleManager::FromWebContents(contents)->SetView(
-      permissionBubbleCocoa_.get());
 
   // Must do this after bookmark and infobar updates to avoid
   // unnecesary resize in contents.

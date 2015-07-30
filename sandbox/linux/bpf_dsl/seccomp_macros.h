@@ -5,16 +5,15 @@
 #ifndef SANDBOX_LINUX_BPF_DSL_SECCOMP_MACROS_H_
 #define SANDBOX_LINUX_BPF_DSL_SECCOMP_MACROS_H_
 
-#include <asm/unistd.h>
-#include <linux/filter.h>
-
 #include <sys/cdefs.h>
 // Old Bionic versions do not have sys/user.h.  The if can be removed once we no
 // longer need to support these old Bionic versions.
 // All x86_64 builds use a new enough bionic to have sys/user.h.
 #if !defined(__BIONIC__) || defined(__x86_64__)
 #include <sys/types.h>  // Fix for gcc 4.7, make sure __uint16_t is defined.
+#if !defined(__native_client_nonsfi__)
 #include <sys/user.h>
+#endif
 #if defined(__mips__)
 // sys/user.h in eglibc misses size_t definition
 #include <stddef.h>
@@ -53,10 +52,10 @@
                                  8*(nr) + 0)
 
 
-#if defined(__BIONIC__)
-// Old Bionic versions don't have sys/user.h, so we just define regs_struct
-// directly.  This can be removed once we no longer need to support these old
-// Bionic versions.
+#if defined(__BIONIC__) || defined(__native_client_nonsfi__)
+// Old Bionic versions and PNaCl toolchain don't have sys/user.h, so we just
+// define regs_struct directly.  This can be removed once we no longer need to
+// support these old Bionic versions and PNaCl toolchain.
 struct regs_struct {
   long int ebx;
   long int ecx;
@@ -152,10 +151,10 @@ typedef user_regs_struct regs_struct;
 #define SECCOMP_ARG_LSB_IDX(nr) (offsetof(struct arch_seccomp_data, args) +   \
                                  8*(nr) + 0)
 
-#if defined(__BIONIC__)
-// Old Bionic versions don't have sys/user.h, so we just define regs_struct
-// directly.  This can be removed once we no longer need to support these old
-// Bionic versions.
+#if defined(__BIONIC__) || defined(__native_client_nonsfi__)
+// Old Bionic versions and PNaCl toolchain don't have sys/user.h, so we just
+// define regs_struct directly.  This can be removed once we no longer need to
+// support these old Bionic versions and PNaCl toolchain.
 struct regs_struct {
   unsigned long uregs[18];
 };

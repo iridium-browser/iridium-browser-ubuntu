@@ -11,18 +11,18 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "components/devtools_http_handler/devtools_http_handler.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/devtools_http_handler.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_client.h"
+#include "content/shell/browser/blink_test_controller.h"
 #include "content/shell/browser/shell.h"
 #include "content/shell/browser/shell_browser_context.h"
 #include "content/shell/browser/shell_browser_main_parts.h"
 #include "content/shell/browser/shell_content_browser_client.h"
 #include "content/shell/browser/shell_devtools_manager_delegate.h"
-#include "content/shell/browser/webkit_test_controller.h"
 #include "content/shell/common/shell_switches.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
@@ -107,9 +107,10 @@ ShellDevToolsFrontend* ShellDevToolsFrontend::Show(
       shell,
       inspected_contents);
 
-  DevToolsHttpHandler* http_handler = ShellContentBrowserClient::Get()
-                                          ->shell_browser_main_parts()
-                                          ->devtools_http_handler();
+  devtools_http_handler::DevToolsHttpHandler* http_handler =
+      ShellContentBrowserClient::Get()
+          ->shell_browser_main_parts()
+          ->devtools_http_handler();
   shell->LoadURL(http_handler->GetFrontendURL("/devtools/devtools.html"));
 
   return devtools_frontend;
@@ -215,7 +216,7 @@ void ShellDevToolsFrontend::HandleMessageFromDevToolsFrontend(
     }
 
     net::URLFetcher* fetcher =
-        net::URLFetcher::Create(gurl, net::URLFetcher::GET, this);
+        net::URLFetcher::Create(gurl, net::URLFetcher::GET, this).release();
     pending_requests_[fetcher] = request_id;
     fetcher->SetRequestContext(web_contents()->GetBrowserContext()->
         GetRequestContext());
@@ -224,6 +225,22 @@ void ShellDevToolsFrontend::HandleMessageFromDevToolsFrontend(
         new ResponseWriter(weak_factory_.GetWeakPtr(), stream_id)));
     fetcher->Start();
     return;
+  } else if (method == "getPreferences") {
+    SendMessageAck(request_id, &preferences_);
+    return;
+  } else if (method == "setPreference") {
+    std::string name;
+    std::string value;
+    if (!params->GetString(0, &name) ||
+        !params->GetString(1, &value)) {
+      return;
+    }
+    preferences_.SetStringWithoutPathExpansion(name, value);
+  } else if (method == "removePreference") {
+    std::string name;
+    if (!params->GetString(0, &name))
+      return;
+    preferences_.RemoveWithoutPathExpansion(name, nullptr);
   } else {
     return;
   }

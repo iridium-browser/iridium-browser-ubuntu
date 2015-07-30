@@ -29,27 +29,33 @@
 #include "bindings/core/v8/ExceptionMessages.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/ExceptionCode.h"
+#include "modules/webaudio/AudioBasicProcessorHandler.h"
+#include "modules/webaudio/DelayProcessor.h"
 #include "wtf/MathExtras.h"
 
 namespace blink {
 
 const double maximumAllowedDelayTime = 180;
 
-DelayNode::DelayNode(AudioContext* context, float sampleRate, double maxDelayTime)
-    : AudioNode(*context)
+DelayNode::DelayNode(AudioContext& context, float sampleRate, double maxDelayTime)
+    : AudioNode(context)
     , m_delayTime(AudioParam::create(context, 0.0))
 {
-    setHandler(new AudioBasicProcessorHandler(AudioHandler::NodeTypeDelay, *this, sampleRate, adoptPtr(new DelayProcessor(sampleRate, 1, m_delayTime->handler(), maxDelayTime))));
+    setHandler(AudioBasicProcessorHandler::create(AudioHandler::NodeTypeDelay, *this, sampleRate, adoptPtr(new DelayProcessor(sampleRate, 1, m_delayTime->handler(), maxDelayTime))));
 }
 
-DelayNode* DelayNode::create(AudioContext* context, float sampleRate, double maxDelayTime, ExceptionState& exceptionState)
+DelayNode* DelayNode::create(AudioContext& context, float sampleRate, double maxDelayTime, ExceptionState& exceptionState)
 {
     if (maxDelayTime <= 0 || maxDelayTime >= maximumAllowedDelayTime) {
         exceptionState.throwDOMException(
             NotSupportedError,
-            "max delay time (" + String::number(maxDelayTime)
-            + ") must be between 0 and " + String::number(maximumAllowedDelayTime)
-            + ", exclusive.");
+            ExceptionMessages::indexOutsideRange(
+                "max delay time",
+                maxDelayTime,
+                0.0,
+                ExceptionMessages::ExclusiveBound,
+                maximumAllowedDelayTime,
+                ExceptionMessages::ExclusiveBound));
         return nullptr;
     }
     return new DelayNode(context, sampleRate, maxDelayTime);

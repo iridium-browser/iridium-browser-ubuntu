@@ -7,7 +7,6 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_change_registrar.h"
 #include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
@@ -27,6 +26,7 @@
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
 #include "chrome/browser/drive/drive_service_interface.h"
+#include "chrome/browser/extensions/api/file_system/file_system_api.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
@@ -464,8 +464,8 @@ void EventRouter::AddFileWatch(const base::FilePath& local_path,
 
     if (is_on_drive) {
       // For Drive, file watching is done via OnDirectoryChanged().
-      base::MessageLoopProxy::current()->PostTask(FROM_HERE,
-                                                  base::Bind(callback, true));
+      base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                    base::Bind(callback, true));
     } else {
       // For local files, start watching using FileWatcher.
       watcher->WatchLocalFile(
@@ -479,8 +479,8 @@ void EventRouter::AddFileWatch(const base::FilePath& local_path,
     file_watchers_[watch_path] = watcher.release();
   } else {
     iter->second->AddExtension(extension_id);
-    base::MessageLoopProxy::current()->PostTask(FROM_HERE,
-                                                base::Bind(callback, true));
+    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                  base::Bind(callback, true));
   }
 }
 
@@ -869,6 +869,11 @@ void EventRouter::OnVolumeMounted(chromeos::MountError error_code,
   DispatchMountCompletedEvent(
       file_manager_private::MOUNT_COMPLETED_EVENT_TYPE_MOUNT, error_code,
       volume);
+
+  // TODO(mtomasz): Move VolumeManager and part of the event router outside of
+  // file_manager, so there is no dependency between File System API and the
+  // file_manager code.
+  extensions::file_system_api::DispatchVolumeListChangeEvent(profile_);
 }
 
 void EventRouter::OnVolumeUnmounted(chromeos::MountError error_code,

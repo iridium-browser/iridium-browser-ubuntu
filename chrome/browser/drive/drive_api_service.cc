@@ -11,6 +11,7 @@
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/drive/drive_api_util.h"
 #include "google_apis/drive/auth_service.h"
+#include "google_apis/drive/base_requests.h"
 #include "google_apis/drive/drive_api_parser.h"
 #include "google_apis/drive/drive_api_requests.h"
 #include "google_apis/drive/request_sender.h"
@@ -91,7 +92,7 @@ const int kMaxNumFilesResourcePerRequestForSearch = 100;
 
 // For performance, we declare all fields we use.
 const char kAboutResourceFields[] =
-    "kind,quotaBytesTotal,quotaBytesUsed,largestChangeId,rootFolderId";
+    "kind,quotaBytesTotal,quotaBytesUsedAggregate,largestChangeId,rootFolderId";
 const char kFileResourceFields[] =
     "kind,id,title,createdDate,sharedWithMeDate,mimeType,"
     "md5Checksum,fileSize,labels/trashed,imageMediaMetadata/width,"
@@ -161,8 +162,13 @@ const char kDriveApiRootDirectoryResourceId[] = "root";
 
 BatchRequestConfigurator::BatchRequestConfigurator(
     const base::WeakPtr<google_apis::drive::BatchUploadRequest>& batch_request,
+    base::SequencedTaskRunner* task_runner,
+    const google_apis::DriveApiUrlGenerator& url_generator,
     const google_apis::CancelCallback& cancel_callback)
-    : batch_request_(batch_request), cancel_callback_(cancel_callback) {
+    : batch_request_(batch_request),
+      task_runner_(task_runner),
+      url_generator_(url_generator),
+      cancel_callback_(cancel_callback) {
 }
 
 BatchRequestConfigurator::~BatchRequestConfigurator() {
@@ -183,14 +189,18 @@ google_apis::CancelCallback BatchRequestConfigurator::MultipartUploadNewFile(
   DCHECK(CalledOnValidThread());
   DCHECK(!callback.is_null());
 
-  DCHECK(batch_request_);
-
-  batch_request_->AddRequest(
-      new google_apis::drive::MultipartUploadNewFileRequest(
-          batch_request_->sender(), title, parent_resource_id, content_type,
+  scoped_ptr<google_apis::BatchableDelegate> delegate(
+      new google_apis::drive::MultipartUploadNewFileDelegate(
+          task_runner_.get(), title, parent_resource_id, content_type,
           content_length, options.modified_date, options.last_viewed_by_me_date,
-          local_file_path, options.properties, batch_request_->url_generator(),
-          callback, progress_callback));
+          local_file_path, options.properties, url_generator_, callback,
+          progress_callback));
+  // Batch request can be null when pre-authorization for the requst is failed
+  // in request sender.
+  if (batch_request_)
+    batch_request_->AddRequest(delegate.release());
+  else
+    delegate->NotifyError(DRIVE_OTHER_ERROR);
   return cancel_callback_;
 }
 
@@ -205,15 +215,20 @@ BatchRequestConfigurator::MultipartUploadExistingFile(
     const google_apis::ProgressCallback& progress_callback) {
   DCHECK(CalledOnValidThread());
   DCHECK(!callback.is_null());
-  DCHECK(batch_request_);
 
-  batch_request_->AddRequest(
-      new google_apis::drive::MultipartUploadExistingFileRequest(
-          batch_request_->sender(), options.title, resource_id,
+  scoped_ptr<google_apis::BatchableDelegate> delegate(
+      new google_apis::drive::MultipartUploadExistingFileDelegate(
+          task_runner_.get(), options.title, resource_id,
           options.parent_resource_id, content_type, content_length,
           options.modified_date, options.last_viewed_by_me_date,
-          local_file_path, options.etag, options.properties,
-          batch_request_->url_generator(), callback, progress_callback));
+          local_file_path, options.etag, options.properties, url_generator_,
+          callback, progress_callback));
+  // Batch request can be null when pre-authorization for the requst is failed
+  // in request sender.
+  if (batch_request_)
+    batch_request_->AddRequest(delegate.release());
+  else
+    delegate->NotifyError(DRIVE_OTHER_ERROR);
   return cancel_callback_;
 }
 
@@ -712,11 +727,14 @@ CancelCallback DriveAPIService::MultipartUploadNewFile(
   DCHECK(!callback.is_null());
 
   return sender_->StartRequestWithRetry(
-      new google_apis::drive::MultipartUploadNewFileRequest(
-          sender_.get(), title, parent_resource_id, content_type,
-          content_length, options.modified_date, options.last_viewed_by_me_date,
-          local_file_path, options.properties, url_generator_, callback,
-          progress_callback));
+      new google_apis::drive::SingleBatchableDelegateRequest(
+          sender_.get(),
+          new google_apis::drive::MultipartUploadNewFileDelegate(
+              sender_->blocking_task_runner(), title, parent_resource_id,
+              content_type, content_length, options.modified_date,
+              options.last_viewed_by_me_date, local_file_path,
+              options.properties, url_generator_, callback,
+              progress_callback)));
 }
 
 CancelCallback DriveAPIService::MultipartUploadExistingFile(
@@ -731,11 +749,14 @@ CancelCallback DriveAPIService::MultipartUploadExistingFile(
   DCHECK(!callback.is_null());
 
   return sender_->StartRequestWithRetry(
-      new google_apis::drive::MultipartUploadExistingFileRequest(
-          sender_.get(), options.title, resource_id, options.parent_resource_id,
-          content_type, content_length, options.modified_date,
-          options.last_viewed_by_me_date, local_file_path, options.etag,
-          options.properties, url_generator_, callback, progress_callback));
+      new google_apis::drive::SingleBatchableDelegateRequest(
+          sender_.get(),
+          new google_apis::drive::MultipartUploadExistingFileDelegate(
+              sender_->blocking_task_runner(), options.title, resource_id,
+              options.parent_resource_id, content_type, content_length,
+              options.modified_date, options.last_viewed_by_me_date,
+              local_file_path, options.etag, options.properties, url_generator_,
+              callback, progress_callback)));
 }
 
 CancelCallback DriveAPIService::AuthorizeApp(
@@ -861,7 +882,8 @@ DriveAPIService::StartBatchRequest() {
   const google_apis::CancelCallback callback =
       sender_->StartRequestWithRetry(request.release());
   return make_scoped_ptr<BatchRequestConfiguratorInterface>(
-      new BatchRequestConfigurator(weak_ref, callback));
+      new BatchRequestConfigurator(weak_ref, sender_->blocking_task_runner(),
+                                   url_generator_, callback));
 }
 
 }  // namespace drive

@@ -14,7 +14,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
-#include "chrome/browser/signin/screenlock_bridge.h"
+#include "chrome/browser/signin/proximity_auth_facade.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/api/easy_unlock_private.h"
@@ -22,15 +22,16 @@
 #include "chrome/common/pref_names.h"
 #include "chromeos/login/user_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
-#include "components/proximity_auth/cryptauth/cryptauth_account_token_fetcher.h"
-#include "components/proximity_auth/cryptauth/cryptauth_client.h"
-#include "components/proximity_auth/cryptauth/cryptauth_client_factory.h"
+#include "components/proximity_auth/cryptauth/cryptauth_access_token_fetcher.h"
+#include "components/proximity_auth/cryptauth/cryptauth_client_impl.h"
+#include "components/proximity_auth/screenlock_bridge.h"
 #include "components/proximity_auth/switches.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/common/constants.h"
+#include "google_apis/gaia/gaia_auth_util.h"
 
 #if defined(OS_CHROMEOS)
 #include "apps/app_lifetime_monitor_factory.h"
@@ -93,7 +94,13 @@ EasyUnlockService::Type EasyUnlockServiceRegular::GetType() const {
 }
 
 std::string EasyUnlockServiceRegular::GetUserEmail() const {
-  return ScreenlockBridge::GetAuthenticatedUserEmail(profile());
+  const SigninManagerBase* signin_manager =
+      SigninManagerFactory::GetForProfileIfExists(profile());
+  // |profile| has to be a signed-in profile with SigninManager already
+  // created. Otherwise, just crash to collect stack.
+  DCHECK(signin_manager);
+  const std::string user_email = signin_manager->GetAuthenticatedUsername();
+  return user_email.empty() ? user_email : gaia::CanonicalizeEmail(user_email);
 }
 
 void EasyUnlockServiceRegular::LaunchSetup() {
@@ -223,7 +230,7 @@ void EasyUnlockServiceRegular::RunTurnOffFlow() {
 
   SetTurnOffFlowStatus(PENDING);
 
-  proximity_auth::CryptAuthClientFactory factory(
+  proximity_auth::CryptAuthClientFactoryImpl factory(
       ProfileOAuth2TokenServiceFactory::GetForProfile(profile()),
       SigninManagerFactory::GetForProfile(profile())
           ->GetAuthenticatedAccountId(),
@@ -299,7 +306,7 @@ void EasyUnlockServiceRegular::SetAutoPairingResult(
 }
 
 void EasyUnlockServiceRegular::InitializeInternal() {
-  ScreenlockBridge::Get()->AddObserver(this);
+  GetScreenlockBridgeInstance()->AddObserver(this);
   registrar_.Init(profile()->GetPrefs());
   registrar_.Add(
       prefs::kEasyUnlockAllowed,
@@ -318,7 +325,7 @@ void EasyUnlockServiceRegular::ShutdownInternal() {
 
   turn_off_flow_status_ = EasyUnlockService::IDLE;
   registrar_.RemoveAll();
-  ScreenlockBridge::Get()->RemoveObserver(this);
+  GetScreenlockBridgeInstance()->RemoveObserver(this);
 }
 
 bool EasyUnlockServiceRegular::IsAllowedInternal() const {
@@ -355,16 +362,16 @@ void EasyUnlockServiceRegular::OnSuspendDone() {
 }
 
 void EasyUnlockServiceRegular::OnScreenDidLock(
-    ScreenlockBridge::LockHandler::ScreenType screen_type) {
+    proximity_auth::ScreenlockBridge::LockHandler::ScreenType screen_type) {
   will_unlock_using_easy_unlock_ = false;
   lock_screen_last_shown_timestamp_ = base::TimeTicks::Now();
 }
 
 void EasyUnlockServiceRegular::OnScreenDidUnlock(
-    ScreenlockBridge::LockHandler::ScreenType screen_type) {
+    proximity_auth::ScreenlockBridge::LockHandler::ScreenType screen_type) {
   // Notifications of signin screen unlock events can also reach this code path;
   // disregard them.
-  if (screen_type != ScreenlockBridge::LockHandler::LOCK_SCREEN)
+  if (screen_type != proximity_auth::ScreenlockBridge::LockHandler::LOCK_SCREEN)
     return;
 
   // Only record metrics for users who have enabled the feature.

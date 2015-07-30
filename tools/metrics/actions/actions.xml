@@ -1063,6 +1063,22 @@ should be able to be added at any place in this file.
   <description>Please enter the description of this user action.</description>
 </action>
 
+<action name="BackgroundUploadReportAborted">
+  <owner>olivierrobin@chromium.org</owner>
+  <owner>pkl@chromium.org</owner>
+  <description>
+    An attempt to upload a crash report as a background task failed.
+  </description>
+</action>
+
+<action name="BackgroundUploadReportSucceeded">
+  <owner>olivierrobin@chromium.org</owner>
+  <owner>pkl@chromium.org</owner>
+  <description>
+    An attempt to upload a crash report as a background task succeeeded.
+  </description>
+</action>
+
 <action name="BadMessageTerminate_ACDH">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
@@ -1765,6 +1781,15 @@ should be able to be added at any place in this file.
   <description>Please enter the description of this user action.</description>
 </action>
 
+<action name="BrowserForSystemProfile">
+  <owner>mlerman@chromium.org</owner>
+  <description>
+    A browser opened with the System Profile. Tsk, tsk. Any non-zero amount
+    means something is using the system profile for a browser when it likely
+    shouldn't be.
+  </description>
+</action>
+
 <action name="BrowserPlugin.Guest.AbnormalDeath">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
@@ -2422,6 +2447,20 @@ should be able to be added at any place in this file.
   </obsolete>
 </action>
 
+<action name="DataSaverPrompt_Clicked">
+  <owner>glevin@chromium.org</owner>
+  <description>
+    Records click on prompt (notification) to install Data Saver extension.
+  </description>
+</action>
+
+<action name="DataSaverPrompt_Shown">
+  <owner>glevin@chromium.org</owner>
+  <description>
+    Records display of prompt (notification) to install Data Saver extension.
+  </description>
+</action>
+
 <action name="Debugger">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
@@ -2770,16 +2809,19 @@ should be able to be added at any place in this file.
 <action name="FilterURLTermiate_About">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>Removed in M44.</obsolete>
 </action>
 
 <action name="FilterURLTermiate_Blocked">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>Removed in M44.</obsolete>
 </action>
 
 <action name="FilterURLTermiate_Invalid">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>Removed in M44.</obsolete>
 </action>
 
 <action name="Find">
@@ -7091,6 +7133,23 @@ should be able to be added at any place in this file.
   </description>
 </action>
 
+<action name="Launcher_MinimizeTask">
+  <owner>bruthig@google.com</owner>
+  <owner>tdanderson@google.com</owner>
+  <description>
+    Recorded when the user minimizes an existing task by clicking an icon in the
+    shelf.
+  </description>
+</action>
+
+<action name="Launcher_SwitchTask">
+  <owner>bruthig@google.com</owner>
+  <owner>tdanderson@google.com</owner>
+  <description>
+    Recorded when the user activates an existing task from the shelf.
+  </description>
+</action>
+
 <action name="LoadURL">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
@@ -8481,6 +8540,20 @@ should be able to be added at any place in this file.
   <description>Settings: Accessibility: Enable tap dragging</description>
 </action>
 
+<action name="Options_AddPersonEnabled_Disable">
+  <owner>jwd@chromium.org</owner>
+  <description>
+    Settings: People: Disables allowing anyone to add a person to Chrome.
+  </description>
+</action>
+
+<action name="Options_AddPersonEnabled_Enable">
+  <owner>jwd@chromium.org</owner>
+  <description>
+    Settings: People: Enables anyone to add a person to Chrome.
+  </description>
+</action>
+
 <action name="Options_AllowAllUsers_Disable">
   <owner>stevenjb@chromium.org</owner>
   <description>
@@ -8611,6 +8684,16 @@ should be able to be added at any place in this file.
 <action name="Options_BluetoothShowAddDevice">
   <owner>stevenjb@chromium.org</owner>
   <description>Settings: Bluetooth: Add a device</description>
+</action>
+
+<action name="Options_BrowserGuestEnabled_Disable">
+  <owner>jwd@chromium.org</owner>
+  <description>Settings: People: Disable Guest browsing.</description>
+</action>
+
+<action name="Options_BrowserGuestEnabled_Enable">
+  <owner>jwd@chromium.org</owner>
+  <description>Settings: People: Allows guests to browse.</description>
 </action>
 
 <action name="Options_CaptivePortalBypassProxy_Disable">
@@ -8893,6 +8976,11 @@ should be able to be added at any place in this file.
   <description>Please enter the description of this user action.</description>
 </action>
 
+<action name="Options_GetMoreExtensions">
+  <owner>jwd@chromium.org</owner>
+  <description>Extensions: Click on 'Get More Extensions' link.</description>
+</action>
+
 <action name="Options_GoogleGeolocationAccessCheckbox_Disable">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
@@ -9138,6 +9226,11 @@ should be able to be added at any place in this file.
 <action name="Options_LinkDoctorCheckbox_Enable">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+</action>
+
+<action name="Options_LoadUnpackedExtension">
+  <owner>jwd@chromium.org</owner>
+  <description>Extensions: Loads an unpacked extension.</description>
 </action>
 
 <action name="Options_ManageAccounts">
@@ -9722,6 +9815,20 @@ should be able to be added at any place in this file.
   <description>Settings: Date and time: Timezone</description>
 </action>
 
+<action name="Options_ToggleDeveloperMode_Disabled">
+  <owner>jwd@chromium.org</owner>
+  <description>
+    Extensions: Disables developer mode for Chrome extensions.
+  </description>
+</action>
+
+<action name="Options_ToggleDeveloperMode_Enabled">
+  <owner>jwd@chromium.org</owner>
+  <description>
+    Extensions: Enables developer mode for Chrome extensions.
+  </description>
+</action>
+
 <action name="Options_TouchpadNaturalScroll_Disable">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
@@ -9750,6 +9857,11 @@ should be able to be added at any place in this file.
 <action name="Options_Translate_Enable">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+</action>
+
+<action name="Options_UpdateExtensions">
+  <owner>jwd@chromium.org</owner>
+  <description>Extensions: Click on update extensions in settings.</description>
 </action>
 
 <action name="Options_Use24HourClockCheckbox_Disable">
@@ -11004,6 +11116,29 @@ should be able to be added at any place in this file.
   <description>Please enter the description of this user action.</description>
 </action>
 
+<action name="StackedTab_DragActiveTab">
+  <owner>bruthig@chromium.org</owner>
+  <owner>tdanderson@chromium.org</owner>
+  <description>
+    Recorded when the active tab is dragged while the tabstrip is using a
+    stacked layout. The user performs this action in order to view tabs which
+    are not currently visible within the tabstrip. Note this user action is only
+    recorded for platforms which use the Views toolkit.
+  </description>
+</action>
+
+<action name="StackedTab_EnteredStackedLayout">
+  <owner>bruthig@chromium.org</owner>
+  <owner>tdanderson@chromium.org</owner>
+  <description>
+    Recorded when the tabstrip begins using a stacked layout for its tabs. This
+    occurs when the user is interacting with the tabstrip using touch and there
+    is insufficient space to be able to display all tabs at a minimum
+    touch-friendly width. Note this user action is only recorded for platforms
+    which use the Views toolkit.
+  </description>
+</action>
+
 <action name="Star">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
@@ -11107,6 +11242,15 @@ should be able to be added at any place in this file.
 <action name="StatusArea_CapsLock_Popup">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+</action>
+
+<action name="StatusArea_Cast_Detailed">
+  <owner>jdufault@chromium.org</owner>
+  <description>
+    Counts the number of times the user has clicked on the &quot;Cast desktop
+    to&quot; status tray item and is now in the detail view to select a cast
+    receiver.
+  </description>
 </action>
 
 <action name="StatusArea_Drive_CancelOperation">
@@ -11311,6 +11455,15 @@ should be able to be added at any place in this file.
 <action name="SuspiciousExtensionBubbleDismissed">
   <owner>finnur@chromium.org</owner>
   <description>Please enter the description of this user action.</description>
+</action>
+
+<action name="SwitchTab_Click">
+  <owner>bruthig@chromium.org</owner>
+  <owner>tdanderson@chromium.org</owner>
+  <description>
+    Recorded when the user switches tabs with a mouse click. This user action is
+    only recorded on platforms which use the Views toolkit.
+  </description>
 </action>
 
 <action name="SyncedNotifications.SendingServiceDisabled">
@@ -11640,6 +11793,16 @@ should be able to be added at any place in this file.
 <action name="Tray_LockScreen">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+</action>
+
+<action name="Tray_Overview">
+  <owner>bruthig@chromium.org</owner>
+  <owner>tdanderson@chromium.org</owner>
+  <description>
+    Records when the user presses the overview mode button in the Ash system
+    tray. Overview mode is a feature of Ash that shows thumbnails of all
+    currently-open windows.
+  </description>
 </action>
 
 <action name="Tray_ShutDown">
@@ -12051,6 +12214,15 @@ should be able to be added at any place in this file.
   <description>Please enter the description of this user action.</description>
 </action>
 
+<action name="WindowSelector_ActiveWindowChanged">
+  <owner>tdanderson@chromium.org</owner>
+  <owner>bruthig@chromium.org</owner>
+  <description>
+    Recorded when the user selects a window from Ash overview mode which is
+    different from the window that was active prior to entering overview mode.
+  </description>
+</action>
+
 <action name="WindowSelector_Overview">
   <owner>tdanderson@chromium.org</owner>
   <owner>flackr@chromium.org</owner>
@@ -12077,6 +12249,27 @@ should be able to be added at any place in this file.
 <action name="WorkerProcess_BadProcessToKill">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+</action>
+
+<action name="WrenchMenu_OpenRecentTabFromDevice">
+  <owner>jwd@chromium.org</owner>
+  <description>
+    Hot Dog Menu: Recent Tabs: Open a recent tab from a device.
+  </description>
+</action>
+
+<action name="WrenchMenu_OpenRecentTabFromLocal">
+  <owner>jwd@chromium.org</owner>
+  <description>
+    Hot Dog Menu: Recent Tabs: Open a recent tab link from local.
+  </description>
+</action>
+
+<action name="WrenchMenu_OpenRecentWindow">
+  <owner>jwd@chromium.org</owner>
+  <description>
+    Hot Dog Menu: Recent Tabs: Open a recent tab in a new window.
+  </description>
 </action>
 
 <action name="ZoomMinus">

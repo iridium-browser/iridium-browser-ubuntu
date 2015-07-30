@@ -5,6 +5,8 @@
 {
   'variables': {
     'chrome_renderer_sources': [
+      'renderer/banners/app_banner_client.cc',
+      'renderer/banners/app_banner_client.h',
       'renderer/benchmarking_extension.cc',
       'renderer/benchmarking_extension.h',
       'renderer/chrome_content_renderer_client.cc',
@@ -40,8 +42,6 @@
       'renderer/plugins/plugin_uma.h',
       'renderer/plugins/shadow_dom_plugin_placeholder.cc',
       'renderer/plugins/shadow_dom_plugin_placeholder.h',
-      'renderer/prefetch_helper.cc',
-      'renderer/prefetch_helper.h',
       'renderer/prerender/prerender_dispatcher.cc',
       'renderer/prerender/prerender_dispatcher.h',
       'renderer/prerender/prerender_extra_data.cc',
@@ -133,7 +133,6 @@
       'renderer/media/cast_udp_transport.cc',
       'renderer/media/cast_udp_transport.h',
       'renderer/resources/extensions/app_custom_bindings.js',
-      'renderer/resources/extensions/app_view.js',
       'renderer/resources/extensions/automation_custom_bindings.js',
       'renderer/resources/extensions/browser_action_custom_bindings.js',
       'renderer/resources/extensions/chrome_direct_setting.js',
@@ -141,7 +140,6 @@
       'renderer/resources/extensions/content_setting.js',
       'renderer/resources/extensions/declarative_content_custom_bindings.js',
       'renderer/resources/extensions/enterprise_platform_keys_custom_bindings.js',
-      'renderer/resources/extensions/extension_options.js',
       'renderer/resources/extensions/feedback_private_custom_bindings.js',
       'renderer/resources/extensions/file_browser_handler_custom_bindings.js',
       'renderer/resources/extensions/file_entry_binding_util.js',
@@ -251,6 +249,7 @@
         'chrome_resources.gyp:chrome_strings',
         '../third_party/re2/re2.gyp:re2',
         '../components/components.gyp:autofill_content_renderer',
+        '../components/components.gyp:content_settings_content_common',
         '../components/components.gyp:cdm_renderer',
         '../components/components.gyp:data_reduction_proxy_content_common',
         '../components/components.gyp:network_hints_renderer',
@@ -308,17 +307,9 @@
           'sources': [
             '<@(chrome_renderer_safe_browsing_sources)',
           ],
-          'defines': [
-            'FULL_SAFE_BROWSING',
-          ],
           'dependencies': [
             'safe_browsing_proto',
             '../third_party/smhasher/smhasher.gyp:murmurhash3',
-          ],
-        }],
-        ['safe_browsing==2', {
-          'defines': [
-            'MOBILE_SAFE_BROWSING',
           ],
         }],
         ['enable_extensions==1', {
@@ -352,7 +343,7 @@
             '<@(chrome_renderer_spellchecker_sources)',
           ],
           'dependencies': [
-            '../third_party/hunspell/hunspell.gyp:hunspell',
+            '../third_party/hunspell_new/hunspell.gyp:hunspell',
           ],
         }],
         ['OS=="mac"', {

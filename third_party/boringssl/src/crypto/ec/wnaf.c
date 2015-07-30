@@ -72,6 +72,7 @@
 #include <openssl/bn.h>
 #include <openssl/err.h>
 #include <openssl/mem.h>
+#include <openssl/thread.h>
 
 #include "internal.h"
 
@@ -84,7 +85,6 @@
 
 /* structure for precomputed multiples of the generator */
 typedef struct ec_pre_comp_st {
-  const EC_GROUP *group; /* parent EC_GROUP object */
   size_t blocksize;      /* block size for wNAF splitting */
   size_t numblocks; /* max. number of blocks for which we have precomputation */
   size_t w;         /* window size */
@@ -94,19 +94,14 @@ typedef struct ec_pre_comp_st {
   int references;
 } EC_PRE_COMP;
 
-static EC_PRE_COMP *ec_pre_comp_new(const EC_GROUP *group) {
+static EC_PRE_COMP *ec_pre_comp_new(void) {
   EC_PRE_COMP *ret = NULL;
-
-  if (!group) {
-    return NULL;
-  }
 
   ret = (EC_PRE_COMP *)OPENSSL_malloc(sizeof(EC_PRE_COMP));
   if (!ret) {
     OPENSSL_PUT_ERROR(EC, ec_pre_comp_new, ERR_R_MALLOC_FAILURE);
     return ret;
   }
-  ret->group = group;
   ret->blocksize = 8; /* default */
   ret->numblocks = 0;
   ret->w = 4; /* default */
@@ -126,14 +121,8 @@ void *ec_pre_comp_dup(EC_PRE_COMP *pre_comp) {
 }
 
 void ec_pre_comp_free(EC_PRE_COMP *pre_comp) {
-  int i;
-
-  if (!pre_comp) {
-    return;
-  }
-
-  i = CRYPTO_add(&pre_comp->references, -1, CRYPTO_LOCK_EC_PRE_COMP);
-  if (i > 0) {
+  if (pre_comp == NULL ||
+      CRYPTO_add(&pre_comp->references, -1, CRYPTO_LOCK_EC_PRE_COMP) > 0) {
     return;
   }
 
@@ -642,18 +631,10 @@ int ec_wNAF_mul(const EC_GROUP *group, EC_POINT *r, const BIGNUM *scalar,
   ret = 1;
 
 err:
-  if (new_ctx != NULL) {
-    BN_CTX_free(new_ctx);
-  }
-  if (tmp != NULL) {
-    EC_POINT_free(tmp);
-  }
-  if (wsize != NULL) {
-    OPENSSL_free(wsize);
-  }
-  if (wNAF_len != NULL) {
-    OPENSSL_free(wNAF_len);
-  }
+  BN_CTX_free(new_ctx);
+  EC_POINT_free(tmp);
+  OPENSSL_free(wsize);
+  OPENSSL_free(wNAF_len);
   if (wNAF != NULL) {
     signed char **w;
 
@@ -670,9 +651,7 @@ err:
 
     OPENSSL_free(val);
   }
-  if (val_sub != NULL) {
-    OPENSSL_free(val_sub);
-  }
+  OPENSSL_free(val_sub);
   return ret;
 }
 
@@ -710,20 +689,18 @@ int ec_wNAF_precompute_mult(EC_GROUP *group, BN_CTX *ctx) {
   int ret = 0;
 
   /* if there is an old EC_PRE_COMP object, throw it away */
-  if (group->pre_comp) {
-    ec_pre_comp_free(group->pre_comp);
-    group->pre_comp = NULL;
-  }
-
-  pre_comp = ec_pre_comp_new(group);
-  if (pre_comp == NULL) {
-    return 0;
-  }
+  ec_pre_comp_free(group->pre_comp);
+  group->pre_comp = NULL;
 
   generator = EC_GROUP_get0_generator(group);
   if (generator == NULL) {
     OPENSSL_PUT_ERROR(EC, ec_wNAF_precompute_mult, EC_R_UNDEFINED_GENERATOR);
-    goto err;
+    return 0;
+  }
+
+  pre_comp = ec_pre_comp_new();
+  if (pre_comp == NULL) {
+    return 0;
   }
 
   if (ctx == NULL) {
@@ -836,7 +813,6 @@ int ec_wNAF_precompute_mult(EC_GROUP *group, BN_CTX *ctx) {
     goto err;
   }
 
-  pre_comp->group = group;
   pre_comp->blocksize = blocksize;
   pre_comp->numblocks = numblocks;
   pre_comp->w = w;
@@ -853,12 +829,8 @@ err:
   if (ctx != NULL) {
     BN_CTX_end(ctx);
   }
-  if (new_ctx != NULL) {
-    BN_CTX_free(new_ctx);
-  }
-  if (pre_comp) {
-    ec_pre_comp_free(pre_comp);
-  }
+  BN_CTX_free(new_ctx);
+  ec_pre_comp_free(pre_comp);
   if (points) {
     EC_POINT **p;
 
@@ -867,12 +839,8 @@ err:
     }
     OPENSSL_free(points);
   }
-  if (tmp_point) {
-    EC_POINT_free(tmp_point);
-  }
-  if (base) {
-    EC_POINT_free(base);
-  }
+  EC_POINT_free(tmp_point);
+  EC_POINT_free(base);
   return ret;
 }
 

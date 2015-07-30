@@ -16,6 +16,7 @@ from chromite.cbuildbot import constants
 from chromite.lib import cgroups
 from chromite.lib import commandline
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import locking
 from chromite.lib import namespaces
 from chromite.lib import osutils
@@ -83,6 +84,7 @@ def FetchRemoteTarballs(storage_dir, urls):
   # fail if asked to resume a complete file.
   # pylint: disable=C0301,W0631
   # https://sourceforge.net/tracker/?func=detail&atid=100976&aid=3482927&group_id=976
+  logging.notice('Downloading chroot files.')
   for url in urls:
     # http://www.logilab.org/ticket/8766
     # pylint: disable=E1101
@@ -93,7 +95,7 @@ def FetchRemoteTarballs(storage_dir, urls):
         return parsed.path
       continue
     content_length = 0
-    print('Attempting download: %s' % url)
+    logging.debug('Attempting download from %s', url)
     result = retry_util.RunCurl(
         ['-I', url], redirect_stdout=True, redirect_stderr=True,
         print_cmd=False)
@@ -133,13 +135,14 @@ def FetchRemoteTarballs(storage_dir, urls):
     if filename == tarball_name or filename.startswith(ignored_prefix):
       continue
 
-    print('Cleaning up old tarball: %s' % (filename,))
+    logging.info('Cleaning up old tarball: %s' % (filename,))
     osutils.SafeUnlink(os.path.join(storage_dir, filename))
 
   return tarball_dest
 
 
-def CreateChroot(chroot_path, sdk_tarball, cache_dir, nousepkg=False):
+def CreateChroot(chroot_path, sdk_tarball, cache_dir, nousepkg=False,
+                 workspace=None):
   """Creates a new chroot from a given SDK"""
 
   cmd = MAKE_CHROOT + ['--stage3_path', sdk_tarball,
@@ -148,6 +151,10 @@ def CreateChroot(chroot_path, sdk_tarball, cache_dir, nousepkg=False):
   if nousepkg:
     cmd.append('--nousepkg')
 
+  if workspace:
+    cmd.extend(['--workspace_root', workspace])
+
+  logging.notice('Creating chroot. This may take a few minutes...')
   try:
     cros_build_lib.RunCommand(cmd, print_cmd=False)
   except cros_build_lib.RunCommandError:
@@ -159,13 +166,14 @@ def DeleteChroot(chroot_path):
   cmd = MAKE_CHROOT + ['--chroot', chroot_path,
                        '--delete']
   try:
+    logging.notice('Deleting chroot.')
     cros_build_lib.RunCommand(cmd, print_cmd=False)
   except cros_build_lib.RunCommandError:
     raise SystemExit('Running %r failed!' % cmd)
 
 
 def EnterChroot(chroot_path, cache_dir, chrome_root, chrome_root_mount,
-                additional_args):
+                workspace, additional_args):
   """Enters an existing SDK chroot"""
   st = os.statvfs(os.path.join(chroot_path, 'usr', 'bin', 'sudo'))
   # The os.ST_NOSUID constant wasn't added until python-3.2.
@@ -177,19 +185,22 @@ def EnterChroot(chroot_path, cache_dir, chrome_root, chrome_root_mount,
     cmd.extend(['--chrome_root', chrome_root])
   if chrome_root_mount:
     cmd.extend(['--chrome_root_mount', chrome_root_mount])
+  if workspace:
+    cmd.extend(['--workspace_root', workspace])
+
   if len(additional_args) > 0:
     cmd.append('--')
     cmd.extend(additional_args)
 
-  ret = cros_build_lib.RunCommand(cmd, print_cmd=False, error_code_ok=True)
+  ret = cros_build_lib.RunCommand(cmd, print_cmd=False, error_code_ok=True,
+                                  mute_output=False)
   # If we were in interactive mode, ignore the exit code; it'll be whatever
   # they last ran w/in the chroot and won't matter to us one way or another.
   # Note this does allow chroot entrance to fail and be ignored during
   # interactive; this is however a rare case and the user will immediately
   # see it (nor will they be checking the exit code manually).
   if ret.returncode != 0 and additional_args:
-    raise SystemExit('Running {%s} failed with exit code %i'
-                     % (ret.cmdstr, ret.returncode))
+    raise SystemExit(ret.returncode)
 
 
 def _SudoCommand():
@@ -393,7 +404,7 @@ def _ProxySimSetup(options):
     try:
       cros_build_lib.RunCommand(cmd_cleanup, print_cmd=False)
     except cros_build_lib.RunCommandError:
-      cros_build_lib.Error('running %r failed', cmd_cleanup)
+      logging.error('running %r failed', cmd_cleanup)
     raise SystemExit('Running %r failed!' % (cmd,))
   os.write(parent_writefd, SUCCESS_FLAG)
   os.close(parent_writefd)
@@ -450,6 +461,8 @@ If given args those are passed to the chroot environment, and executed."""
                     help=('Use this sdk version.  For prebuilt, current is %r'
                           ', for bootstrapping it is %r.'
                           % (sdk_latest_version, bootstrap_latest_version)))
+  parser.add_option('--workspace', default=None,
+                    help='Workspace directory to mount into the chroot.')
 
   # Commands.
   group = parser.add_option_group('Commands')
@@ -573,8 +586,8 @@ def main(argv):
     urls = GetArchStageTarballs(sdk_version)
 
   lock_path = os.path.dirname(options.chroot)
-  lock_path = os.path.join(lock_path,
-                           '.%s_lock' % os.path.basename(options.chroot))
+  lock_path = os.path.join(
+      lock_path, '.%s_lock' % os.path.basename(options.chroot).lstrip('.'))
   with cgroups.SimpleContainChildren('cros_sdk', pid=first_pid):
     with locking.FileLock(lock_path, 'chroot lock') as lock:
 
@@ -621,9 +634,11 @@ def main(argv):
       if options.create:
         lock.write_lock()
         CreateChroot(options.chroot, sdk_tarball, options.cache_dir,
-                     nousepkg=(options.bootstrap or options.nousepkg))
+                     nousepkg=(options.bootstrap or options.nousepkg),
+                     workspace=options.workspace)
 
       if options.enter:
         lock.read_lock()
         EnterChroot(options.chroot, options.cache_dir, options.chrome_root,
-                    options.chrome_root_mount, chroot_command)
+                    options.chrome_root_mount, options.workspace,
+                    chroot_command)

@@ -32,7 +32,6 @@
 #include "core/layout/LayoutGeometryMap.h"
 #include "core/layout/LayoutInline.h"
 #include "core/layout/LayoutObject.h"
-#include "core/layout/LayoutRegion.h"
 #include "core/layout/LayoutTextFragment.h"
 #include "core/layout/LayoutView.h"
 #include "core/layout/compositing/CompositedDeprecatedPaintLayerMapping.h"
@@ -50,6 +49,29 @@
 
 namespace blink {
 
+class FloatStateForStyleChange {
+public:
+    static void setWasFloating(LayoutBoxModelObject* boxModelObject, bool wasFloating)
+    {
+        s_wasFloating = wasFloating;
+        s_boxModelObject = boxModelObject;
+    }
+
+    static bool wasFloating(LayoutBoxModelObject* boxModelObject)
+    {
+        ASSERT(boxModelObject == s_boxModelObject);
+        return s_wasFloating;
+    }
+
+private:
+    // Used to store state between styleWillChange and styleDidChange
+    static bool s_wasFloating;
+    static LayoutBoxModelObject* s_boxModelObject;
+};
+
+bool FloatStateForStyleChange::s_wasFloating = false;
+LayoutBoxModelObject* FloatStateForStyleChange::s_boxModelObject = nullptr;
+
 // The HashMap for storing continuation pointers.
 // An inline can be split with blocks occuring in between the inline content.
 // When this occurs we need a pointer to the next object. We can basically be
@@ -59,8 +81,6 @@ namespace blink {
 // its continuation but the <b> will just have an inline as its continuation.
 typedef HashMap<const LayoutBoxModelObject*, LayoutBoxModelObject*> ContinuationMap;
 static ContinuationMap* continuationMap = nullptr;
-
-bool LayoutBoxModelObject::s_wasFloating = false;
 
 void LayoutBoxModelObject::setSelectionState(SelectionState state)
 {
@@ -144,7 +164,7 @@ void LayoutBoxModelObject::styleWillChange(StyleDifference diff, const ComputedS
         invalidatePaintIncludingNonCompositingDescendants();
     }
 
-    s_wasFloating = isFloating();
+    FloatStateForStyleChange::setWasFloating(this, isFloating());
 
     if (const ComputedStyle* oldStyle = style()) {
         if (parent() && diff.needsPaintInvalidationLayer()) {
@@ -162,6 +182,7 @@ void LayoutBoxModelObject::styleDidChange(StyleDifference diff, const ComputedSt
     bool hadTransform = hasTransformRelatedProperty();
     bool hadLayer = hasLayer();
     bool layerWasSelfPainting = hadLayer && layer()->isSelfPaintingLayer();
+    bool wasFloatingBeforeStyleChanged = FloatStateForStyleChange::wasFloating(this);
 
     LayoutObject::styleDidChange(diff, oldStyle);
     updateFromStyle();
@@ -169,7 +190,7 @@ void LayoutBoxModelObject::styleDidChange(StyleDifference diff, const ComputedSt
     DeprecatedPaintLayerType type = layerTypeRequired();
     if (type != NoDeprecatedPaintLayer) {
         if (!layer() && layerCreationAllowedForSubtree()) {
-            if (s_wasFloating && isFloating())
+            if (wasFloatingBeforeStyleChanged && isFloating())
                 setChildNeedsLayout();
             createLayer(type);
             if (parent() && !needsLayout()) {
@@ -182,7 +203,7 @@ void LayoutBoxModelObject::styleDidChange(StyleDifference diff, const ComputedSt
         setHasTransformRelatedProperty(false); // Either a transform wasn't specified or the object doesn't support transforms, so just null out the bit.
         setHasReflection(false);
         layer()->removeOnlyThisLayer(); // calls destroyLayer() which clears m_layer
-        if (s_wasFloating && isFloating())
+        if (wasFloatingBeforeStyleChanged && isFloating())
             setChildNeedsLayout();
         if (hadTransform)
             setNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation(LayoutInvalidationReason::StyleChange);
@@ -200,6 +221,17 @@ void LayoutBoxModelObject::styleDidChange(StyleDifference diff, const ComputedSt
         layer()->styleChanged(diff, oldStyle);
         if (hadLayer && layer()->isSelfPaintingLayer() != layerWasSelfPainting)
             setChildNeedsLayout();
+    }
+
+    // Fixed-position is painted using transform. In the case that the object
+    // gets the same layout after changing position property, although no
+    // re-raster (rect-based invalidation) is needed, display items should
+    // still update their paint offset.
+    if (RuntimeEnabledFeatures::slimmingPaintEnabled() && oldStyle) {
+        bool newStyleIsFixedPosition = style()->position() == FixedPosition;
+        bool oldStyleIsFixedPosition = oldStyle->position() == FixedPosition;
+        if (newStyleIsFixedPosition != oldStyleIsFixedPosition)
+            invalidateDisplayItemClientForNonCompositingDescendants();
     }
 
     if (FrameView *frameView = view()->frameView()) {
@@ -377,7 +409,7 @@ LayoutBlock* LayoutBoxModelObject::containingBlockForAutoHeightDetection(Length 
     // For percentage heights: The percentage is calculated with respect to the height of the generated box's
     // containing block. If the height of the containing block is not specified explicitly (i.e., it depends
     // on content height), and this element is not absolutely positioned, the value computes to 'auto'.
-    if (!logicalHeight.isPercent() || isOutOfFlowPositioned())
+    if (!logicalHeight.hasPercent() || isOutOfFlowPositioned())
         return 0;
 
     // Anonymous block boxes are ignored when resolving percentage values that would refer to it:
@@ -394,7 +426,7 @@ LayoutBlock* LayoutBoxModelObject::containingBlockForAutoHeightDetection(Length 
         return 0;
 
     // Match LayoutBox::availableLogicalHeightUsing by special casing
-    // the render view. The available height is taken from the frame.
+    // the layout view. The available height is taken from the frame.
     if (cb->isLayoutView())
         return 0;
 
@@ -446,13 +478,13 @@ LayoutSize LayoutBoxModelObject::relativePositionOffset() const
     // See <https://bugs.webkit.org/show_bug.cgi?id=26396>.
     if (!style()->top().isAuto()
         && (!containingBlock->hasAutoHeightOrContainingBlockWithAutoHeight()
-            || !style()->top().isPercent()
+            || !style()->top().hasPercent()
             || containingBlock->stretchesToViewport()))
         offset.expand(0, valueForLength(style()->top(), containingBlock->availableHeight()));
 
     else if (!style()->bottom().isAuto()
         && (!containingBlock->hasAutoHeightOrContainingBlockWithAutoHeight()
-            || !style()->bottom().isPercent()
+            || !style()->bottom().hasPercent()
             || containingBlock->stretchesToViewport()))
         offset.expand(0, -valueForLength(style()->bottom(), containingBlock->availableHeight()));
 
@@ -533,7 +565,7 @@ int LayoutBoxModelObject::pixelSnappedOffsetHeight() const
 LayoutUnit LayoutBoxModelObject::computedCSSPadding(const Length& padding) const
 {
     LayoutUnit w = 0;
-    if (padding.isPercent())
+    if (padding.hasPercent())
         w = containingBlockLogicalWidthForContent();
     return minimumValueForLength(padding, w);
 }
@@ -593,13 +625,13 @@ IntSize LayoutBoxModelObject::calculateImageIntrinsicDimensions(StyleImage* imag
     if (image->isGeneratedImage() && image->usesImageContainerSize())
         return IntSize(positioningAreaSize.width(), positioningAreaSize.height());
 
-    Length intrinsicWidth;
-    Length intrinsicHeight;
+    Length intrinsicWidth(Fixed);
+    Length intrinsicHeight(Fixed);
     FloatSize intrinsicRatio;
     image->computeIntrinsicDimensions(this, intrinsicWidth, intrinsicHeight, intrinsicRatio);
 
-    ASSERT(!intrinsicWidth.isPercent());
-    ASSERT(!intrinsicHeight.isPercent());
+    ASSERT(intrinsicWidth.isFixed());
+    ASSERT(intrinsicHeight.isFixed());
 
     IntSize resolvedSize(intrinsicWidth.value(), intrinsicHeight.value());
     IntSize minimumSize(resolvedSize.width() > 0 ? 1 : 0, resolvedSize.height() > 0 ? 1 : 0);
@@ -837,8 +869,8 @@ const LayoutObject* LayoutBoxModelObject::pushMappingToContainer(const LayoutBox
 
     LayoutSize adjustmentForSkippedAncestor;
     if (ancestorSkipped) {
-        // There can't be a transform between paintInvalidationContainer and o, because transforms create containers, so it should be safe
-        // to just subtract the delta between the ancestor and o.
+        // There can't be a transform between paintInvalidationContainer and ancestorToStopAt, because transforms create containers, so it should be safe
+        // to just subtract the delta between the ancestor and ancestorToStopAt.
         adjustmentForSkippedAncestor = -ancestorToStopAt->offsetFromAncestorContainer(container);
     }
 
@@ -862,7 +894,7 @@ const LayoutObject* LayoutBoxModelObject::pushMappingToContainer(const LayoutBox
 void LayoutBoxModelObject::moveChildTo(LayoutBoxModelObject* toBoxModelObject, LayoutObject* child, LayoutObject* beforeChild, bool fullRemoveInsert)
 {
     // We assume that callers have cleared their positioned objects list for child moves (!fullRemoveInsert) so the
-    // positioned renderer maps don't become stale. It would be too slow to do the map lookup on each call.
+    // positioned layoutObject maps don't become stale. It would be too slow to do the map lookup on each call.
     ASSERT(!fullRemoveInsert || !isLayoutBlock() || !toLayoutBlock(this)->hasPositionedObjects());
 
     ASSERT(this == child->parent());

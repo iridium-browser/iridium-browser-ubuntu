@@ -12,7 +12,6 @@ import datetime
 import errno
 import getpass
 import hashlib
-import logging
 import os
 import re
 import tempfile
@@ -21,7 +20,9 @@ import urlparse
 from chromite.cbuildbot import constants
 from chromite.lib import cache
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import osutils
+from chromite.lib import path_util
 from chromite.lib import retry_stats
 from chromite.lib import retry_util
 from chromite.lib import timeout_util
@@ -252,7 +253,7 @@ class GSContext(object):
   # (1*sleep) the first time, then (2*sleep), continuing via attempt * sleep.
   DEFAULT_SLEEP_TIME = 60
 
-  GSUTIL_VERSION = '4.8'
+  GSUTIL_VERSION = '4.11'
   GSUTIL_TAR = 'gsutil_%s.tar.gz' % GSUTIL_VERSION
   GSUTIL_URL = (PUBLIC_BASE_HTTPS_URL +
                 'chromeos-mirror/gentoo/distfiles/%s' % GSUTIL_TAR)
@@ -267,9 +268,7 @@ class GSContext(object):
   def GetDefaultGSUtilBin(cls, cache_dir=None):
     if cls.DEFAULT_GSUTIL_BIN is None:
       if cache_dir is None:
-        # Import here to avoid circular imports (commandline imports gs).
-        from chromite.lib import commandline
-        cache_dir = commandline.GetCacheDir()
+        cache_dir = path_util.GetCacheDir()
       if cache_dir is not None:
         common_path = os.path.join(cache_dir, constants.COMMON_CACHE)
         tar_cache = cache.TarballCache(common_path)
@@ -518,7 +517,10 @@ class GSContext(object):
 
     error = e.result.error
     if error:
-      if 'PreconditionException' in error:
+      # gsutil usually prints PreconditionException when a precondition fails.
+      # It may also print "ResumableUploadAbortException: 412 Precondition
+      # Failed", so the logic needs to be a little more general.
+      if 'PreconditionException' in error or '412 Precondition Failed' in error:
         raise GSContextPreconditionFailed(e)
 
       # If the file does not exist, one of the following errors occurs. The

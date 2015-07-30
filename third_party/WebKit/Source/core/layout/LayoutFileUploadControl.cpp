@@ -30,7 +30,6 @@
 #include "core/html/HTMLInputElement.h"
 #include "core/layout/LayoutButton.h"
 #include "core/layout/LayoutTheme.h"
-#include "core/layout/PaintInfo.h"
 #include "core/layout/TextRunConstructor.h"
 #include "core/paint/FileUploadControlPainter.h"
 #include "platform/fonts/Font.h"
@@ -95,18 +94,18 @@ void LayoutFileUploadControl::computeIntrinsicLogicalWidths(LayoutUnit& minLogic
     const String characterAsString = String(&character, 1);
     const Font& font = style()->font();
     // FIXME: Remove the need for this const_cast by making constructTextRun take a const LayoutObject*.
-    LayoutFileUploadControl* renderer = const_cast<LayoutFileUploadControl*>(this);
-    float minDefaultLabelWidth = defaultWidthNumChars * font.width(constructTextRun(renderer, font, characterAsString, styleRef(), TextRun::AllowTrailingExpansion));
+    LayoutFileUploadControl* layoutObject = const_cast<LayoutFileUploadControl*>(this);
+    float minDefaultLabelWidth = defaultWidthNumChars * font.width(constructTextRun(layoutObject, font, characterAsString, styleRef(), TextRun::AllowTrailingExpansion));
 
     const String label = toHTMLInputElement(node())->locale().queryString(WebLocalizedString::FileButtonNoFileSelectedLabel);
-    float defaultLabelWidth = font.width(constructTextRun(renderer, font, label, styleRef(), TextRun::AllowTrailingExpansion));
+    float defaultLabelWidth = font.width(constructTextRun(layoutObject, font, label, styleRef(), TextRun::AllowTrailingExpansion));
     if (HTMLInputElement* button = uploadButton()) {
-        if (LayoutObject* buttonRenderer = button->layoutObject())
-            defaultLabelWidth += buttonRenderer->maxPreferredLogicalWidth() + afterButtonSpacing;
+        if (LayoutObject* buttonLayoutObject = button->layoutObject())
+            defaultLabelWidth += buttonLayoutObject->maxPreferredLogicalWidth() + afterButtonSpacing;
     }
     maxLogicalWidth = static_cast<int>(ceilf(std::max(minDefaultLabelWidth, defaultLabelWidth)));
 
-    if (!style()->width().isPercent())
+    if (!style()->width().hasPercent())
         minLogicalWidth = maxLogicalWidth;
 }
 
@@ -149,7 +148,7 @@ HTMLInputElement* LayoutFileUploadControl::uploadButton() const
 {
     // FIXME: This should be on HTMLInputElement as an API like innerButtonElement().
     HTMLInputElement* input = toHTMLInputElement(node());
-    Node* buttonNode = input->closedShadowRoot()->firstChild();
+    Node* buttonNode = input->userAgentShadowRoot()->firstChild();
     return isHTMLInputElement(buttonNode) ? toHTMLInputElement(buttonNode) : 0;
 }
 

@@ -22,7 +22,7 @@ namespace {
 // fast retransmission.
 const QuicByteCount kDefaultMinimumCongestionWindow = 2 * kDefaultTCPMSS;
 const QuicByteCount kMaxSegmentSize = kDefaultTCPMSS;
-const int kMaxBurstLength = 3;
+const QuicByteCount kMaxBurstBytes = 3 * kMaxSegmentSize;
 const float kRenoBeta = 0.7f;             // Reno backoff factor.
 const uint32 kDefaultNumConnections = 2;  // N-connection emulation.
 }  // namespace
@@ -46,13 +46,11 @@ TcpCubicBytesSender::TcpCubicBytesSender(
       largest_sent_at_last_cutback_(0),
       congestion_window_(initial_tcp_congestion_window * kMaxSegmentSize),
       min_congestion_window_(kDefaultMinimumCongestionWindow),
+      min4_mode_(false),
       max_congestion_window_(max_congestion_window * kMaxSegmentSize),
-      slowstart_threshold_(std::numeric_limits<uint64>::max()),
+      slowstart_threshold_(max_congestion_window * kMaxSegmentSize),
       last_cutback_exited_slowstart_(false),
       clock_(clock) {
-  // Disable the ack train mode in hystart when pacing is enabled, since it
-  // may be falsely triggered.
-  hybrid_slow_start_.set_ack_train_detection(false);
 }
 
 TcpCubicBytesSender::~TcpCubicBytesSender() {
@@ -69,6 +67,12 @@ void TcpCubicBytesSender::SetFromConfig(const QuicConfig& config,
     if (config.HasReceivedConnectionOptions() &&
         ContainsQuicTag(config.ReceivedConnectionOptions(), kMIN1)) {
       // Min CWND experiment.
+      min_congestion_window_ = kMaxSegmentSize;
+    }
+    if (config.HasReceivedConnectionOptions() &&
+        ContainsQuicTag(config.ReceivedConnectionOptions(), kMIN4)) {
+      // Min CWND of 4 experiment.
+      min4_mode_ = true;
       min_congestion_window_ = kMaxSegmentSize;
     }
   }
@@ -237,6 +241,9 @@ QuicTime::Delta TcpCubicBytesSender::TimeUntilSend(
   if (GetCongestionWindow() > bytes_in_flight) {
     return QuicTime::Delta::Zero();
   }
+  if (min4_mode_ && bytes_in_flight < 4 * kMaxSegmentSize) {
+    return QuicTime::Delta::Zero();
+  }
   return QuicTime::Delta::Infinite();
 }
 
@@ -291,11 +298,10 @@ bool TcpCubicBytesSender::IsCwndLimited(QuicByteCount bytes_in_flight) const {
   if (bytes_in_flight >= congestion_window_) {
     return true;
   }
-  const QuicByteCount max_burst = kMaxBurstLength * kMaxSegmentSize;
   const QuicByteCount available_bytes = congestion_window_ - bytes_in_flight;
   const bool slow_start_limited =
       InSlowStart() && bytes_in_flight > congestion_window_ / 2;
-  return slow_start_limited || available_bytes <= max_burst;
+  return slow_start_limited || available_bytes <= kMaxBurstBytes;
 }
 
 bool TcpCubicBytesSender::InRecovery() const {
@@ -341,8 +347,10 @@ void TcpCubicBytesSender::MaybeIncreaseCwnd(
              << " slowstart threshold: " << slowstart_threshold_
              << " congestion window count: " << num_acked_packets_;
   } else {
-    congestion_window_ = cubic_.CongestionWindowAfterAck(
-        acked_bytes, congestion_window_, rtt_stats_->min_rtt());
+    congestion_window_ =
+        min(max_congestion_window_,
+            cubic_.CongestionWindowAfterAck(acked_bytes, congestion_window_,
+                                            rtt_stats_->min_rtt()));
     DVLOG(1) << "Cubic; congestion window: " << congestion_window_
              << " slowstart threshold: " << slowstart_threshold_;
   }

@@ -63,13 +63,17 @@ private:
 
     void clearExistingMediaKeys();
     void setNewMediaKeys();
-    void finish();
 
-    void reportSetFailed(ExceptionCode, const String& errorMessage);
+    void finish();
+    void fail(ExceptionCode, const String& errorMessage);
+
+    void clearFailed(ExceptionCode, const String& errorMessage);
+    void setFailed(ExceptionCode, const String& errorMessage);
 
     // Keep media element alive until promise is fulfilled
     RefPtrWillBeMember<HTMLMediaElement> m_element;
     PersistentWillBeMember<MediaKeys> m_newMediaKeys;
+    bool m_tookOwnership;
     Timer<SetMediaKeysHandler> m_timer;
 };
 
@@ -98,13 +102,13 @@ public:
         (*m_failureCallback)(InvalidStateError, "Unexpected completion.");
     }
 
-    virtual void completeWithSession(blink::WebContentDecryptionModuleResult::SessionStatus status) override
+    virtual void completeWithSession(WebContentDecryptionModuleResult::SessionStatus status) override
     {
         ASSERT_NOT_REACHED();
         (*m_failureCallback)(InvalidStateError, "Unexpected completion.");
     }
 
-    virtual void completeWithError(blink::WebContentDecryptionModuleException code, unsigned long systemCode, const blink::WebString& message) override
+    virtual void completeWithError(WebContentDecryptionModuleException code, unsigned long systemCode, const WebString& message) override
     {
         // Non-zero |systemCode| is appended to the |message|. If the |message|
         // is empty, we'll report "Rejected with system code (systemCode)".
@@ -134,6 +138,7 @@ SetMediaKeysHandler::SetMediaKeysHandler(ScriptState* scriptState, HTMLMediaElem
     : ScriptPromiseResolver(scriptState)
     , m_element(element)
     , m_newMediaKeys(mediaKeys)
+    , m_tookOwnership(false)
     , m_timer(this, &SetMediaKeysHandler::timerFired)
 {
     WTF_LOG(Media, "SetMediaKeysHandler::SetMediaKeysHandler");
@@ -160,8 +165,16 @@ void SetMediaKeysHandler::clearExistingMediaKeys()
     //     element, and the user agent is unable to use it with this element,
     //     reject promise with a new DOMException whose name is
     //     "QuotaExceededError".
-    // FIXME: Need to check whether mediaKeys is already in use by another
-    //        media element.
+    if (m_newMediaKeys) {
+        if (!m_newMediaKeys->setMediaElement(m_element.get())) {
+            fail(QuotaExceededError, "The MediaKeys object is already in use by another media element.");
+            return;
+        }
+        // Note that |m_newMediaKeys| is considered owned by |m_element|, so
+        // it needs to be reset if any of these steps fail.
+        m_tookOwnership = true;
+    }
+
     // 3.2 If the mediaKeys attribute is not null, run the following steps:
     if (thisElement.m_mediaKeys) {
         // 3.2.1 If the user agent or CDM do not support removing the
@@ -171,18 +184,24 @@ void SetMediaKeysHandler::clearExistingMediaKeys()
         // 3.2.2 If the association cannot currently be removed (i.e. during
         //       playback), return a promise rejected with a new DOMException
         //       whose name is "InvalidStateError".
-        if (m_element->webMediaPlayer()) {
-            reject(DOMException::create(InvalidStateError, "The existing MediaKeys object cannot be removed while a media resource is loaded."));
+        WebMediaPlayer* mediaPlayer = m_element->webMediaPlayer();
+        if (mediaPlayer) {
+            if (!mediaPlayer->paused()) {
+                fail(InvalidStateError, "The existing MediaKeys object cannot be removed while a media resource is playing.");
+                return;
+            }
+
+            // 3.2.3 Stop using the CDM instance represented by the mediaKeys
+            //       attribute to decrypt media data and remove the association
+            //       with the media element.
+            OwnPtr<SuccessCallback> successCallback = bind(&SetMediaKeysHandler::setNewMediaKeys, this);
+            OwnPtr<FailureCallback> failureCallback = bind<ExceptionCode, const String&>(&SetMediaKeysHandler::clearFailed, this);
+            ContentDecryptionModuleResult* result = new SetContentDecryptionModuleResult(successCallback.release(), failureCallback.release());
+            mediaPlayer->setContentDecryptionModule(nullptr, result->result());
+
+            // Don't do anything more until |result| is resolved (or rejected).
             return;
         }
-
-        // (next 2 steps not required as there is no player connected).
-        // 3.2.3 Stop using the CDM instance represented by the mediaKeys
-        //       attribute to decrypt media data and remove the association
-        //       with the media element.
-        // 3.2.4 If the preceding step failed, reject promise with a new
-        //       DOMException whose name is the appropriate error name and
-        //       that has an appropriate message.
     }
 
     // MediaKeys not currently set or no player connected, so continue on.
@@ -198,7 +217,7 @@ void SetMediaKeysHandler::setNewMediaKeys()
         // 3.3.1 Associate the CDM instance represented by mediaKeys with the
         //       media element for decrypting media data.
         // 3.3.2 If the preceding step failed, run the following steps:
-        //       (done in reportSetFailed()).
+        //       (done in setFailed()).
         // 3.3.3 Run the Attempt to Resume Playback If Necessary algorithm on
         //       the media element. The user agent may choose to skip this
         //       step if it knows resuming will fail (i.e. mediaKeys has no
@@ -206,7 +225,7 @@ void SetMediaKeysHandler::setNewMediaKeys()
         //       (Handled in Chromium).
         if (m_element->webMediaPlayer()) {
             OwnPtr<SuccessCallback> successCallback = bind(&SetMediaKeysHandler::finish, this);
-            OwnPtr<FailureCallback> failureCallback = bind<ExceptionCode, const String&>(&SetMediaKeysHandler::reportSetFailed, this);
+            OwnPtr<FailureCallback> failureCallback = bind<ExceptionCode, const String&>(&SetMediaKeysHandler::setFailed, this);
             ContentDecryptionModuleResult* result = new SetContentDecryptionModuleResult(successCallback.release(), failureCallback.release());
             m_element->webMediaPlayer()->setContentDecryptionModule(m_newMediaKeys->contentDecryptionModule(), result->result());
 
@@ -225,24 +244,48 @@ void SetMediaKeysHandler::finish()
     HTMLMediaElementEncryptedMedia& thisElement = HTMLMediaElementEncryptedMedia::from(*m_element);
 
     // 3.4 Set the mediaKeys attribute to mediaKeys.
+    if (thisElement.m_mediaKeys)
+        thisElement.m_mediaKeys->clearMediaElement();
     thisElement.m_mediaKeys = m_newMediaKeys;
 
     // 3.5 Resolve promise with undefined.
     resolve();
 }
 
-void SetMediaKeysHandler::reportSetFailed(ExceptionCode code, const String& errorMessage)
+void SetMediaKeysHandler::fail(ExceptionCode code, const String& errorMessage)
 {
-    WTF_LOG(Media, "SetMediaKeysHandler::reportSetFailed");
+    // Reset ownership of |m_newMediaKeys|.
+    if (m_tookOwnership)
+        m_newMediaKeys->clearMediaElement();
+
+    // Reject promise with an appropriate error.
+    reject(DOMException::create(code, errorMessage));
+}
+
+void SetMediaKeysHandler::clearFailed(ExceptionCode code, const String& errorMessage)
+{
+    WTF_LOG(Media, "SetMediaKeysHandler::clearFailed (%d, %s)", code, errorMessage.ascii().data());
+
+    // 3.2.4 If the preceding step failed (in setContentDecryptionModule()
+    //       called from clearExistingMediaKeys()), reject promise with a new
+    //       DOMException whose name is the appropriate error name and that
+    //       has an appropriate message.
+    fail(code, errorMessage);
+}
+
+void SetMediaKeysHandler::setFailed(ExceptionCode code, const String& errorMessage)
+{
+    WTF_LOG(Media, "SetMediaKeysHandler::setFailed (%d, %s)", code, errorMessage.ascii().data());
     HTMLMediaElementEncryptedMedia& thisElement = HTMLMediaElementEncryptedMedia::from(*m_element);
 
-    // 3.3.2 If the preceding step failed, run the following steps:
+    // 3.3.2 If the preceding step failed (in setContentDecryptionModule()
+    //       called from setNewMediaKeys()), run the following steps:
     // 3.3.2.1 Set the mediaKeys attribute to null.
     thisElement.m_mediaKeys.clear();
 
     // 3.3.2.2 Reject promise with a new DOMException whose name is the
     //         appropriate error name and that has an appropriate message.
-    reject(DOMException::create(code, errorMessage));
+    fail(code, errorMessage);
 }
 
 DEFINE_TRACE(SetMediaKeysHandler)
@@ -258,7 +301,14 @@ HTMLMediaElementEncryptedMedia::HTMLMediaElementEncryptedMedia()
 {
 }
 
-DEFINE_EMPTY_DESTRUCTOR_WILL_BE_REMOVED(HTMLMediaElementEncryptedMedia)
+#if !ENABLE(OILPAN)
+HTMLMediaElementEncryptedMedia::~HTMLMediaElementEncryptedMedia()
+{
+    WTF_LOG(Media, "HTMLMediaElementEncryptedMedia::~HTMLMediaElementEncryptedMedia");
+    if (m_mediaKeys)
+        m_mediaKeys->clearMediaElement();
+}
+#endif
 
 const char* HTMLMediaElementEncryptedMedia::supplementName()
 {

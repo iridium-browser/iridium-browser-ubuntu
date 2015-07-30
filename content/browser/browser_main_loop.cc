@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/memory/memory_pressure_monitor.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
@@ -14,12 +15,15 @@
 #include "base/power_monitor/power_monitor.h"
 #include "base/power_monitor/power_monitor_device_source.h"
 #include "base/process/process_metrics.h"
+#include "base/profiler/scoped_profile.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/system_monitor/system_monitor.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/timer/hi_res_timer_manager.h"
+#include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/trace_event.h"
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/device_sensors/device_inertial_sensor_service.h"
@@ -27,6 +31,7 @@
 #include "content/browser/download/save_file_manager.h"
 #include "content/browser/gamepad/gamepad_service.h"
 #include "content/browser/gpu/browser_gpu_channel_host_factory.h"
+#include "content/browser/gpu/browser_gpu_memory_buffer_manager.h"
 #include "content/browser/gpu/compositor_util.h"
 #include "content/browser/gpu/gpu_data_manager_impl.h"
 #include "content/browser/gpu/gpu_process_host.h"
@@ -43,6 +48,7 @@
 #include "content/browser/webui/url_data_manager.h"
 #include "content/common/content_switches_internal.h"
 #include "content/common/host_discardable_shared_memory_manager.h"
+#include "content/common/host_shared_bitmap_manager.h"
 #include "content/public/browser/browser_main_parts.h"
 #include "content/public/browser/browser_shutdown.h"
 #include "content/public/browser/content_browser_client.h"
@@ -90,6 +96,7 @@
 #endif
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
+#include "base/mac/memory_pressure_monitor.h"
 #include "content/browser/bootstrap_sandbox_mac.h"
 #include "content/browser/cocoa/system_hotkey_helper_mac.h"
 #include "content/browser/compositor/browser_compositor_view_mac.h"
@@ -101,6 +108,7 @@
 #include <commctrl.h>
 #include <shellapi.h>
 
+#include "base/win/memory_pressure_monitor.h"
 #include "content/browser/system_message_window_win.h"
 #include "content/common/sandbox_win.h"
 #include "net/base/winsock_init.h"
@@ -108,7 +116,7 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "base/chromeos/memory_pressure_observer_chromeos.h"
+#include "base/chromeos/memory_pressure_monitor.h"
 #include "chromeos/chromeos_switches.h"
 #endif
 
@@ -299,6 +307,34 @@ NOINLINE void ResetThread_IndexedDb(scoped_ptr<base::Thread> thread) {
 MSVC_POP_WARNING()
 MSVC_ENABLE_OPTIMIZE();
 
+#if defined(OS_WIN)
+// Creates a memory pressure monitor using automatic thresholds, or those
+// specified on the command-line. Ownership is passed to the caller.
+base::win::MemoryPressureMonitor* CreateWinMemoryPressureMonitor(
+    const base::CommandLine& parsed_command_line) {
+  std::vector<std::string> thresholds;
+  base::SplitString(
+      parsed_command_line.GetSwitchValueASCII(
+          switches::kMemoryPressureThresholdsMb),
+      ',',
+      &thresholds);
+
+  int moderate_threshold_mb = 0;
+  int critical_threshold_mb = 0;
+  if (thresholds.size() == 2 &&
+      base::StringToInt(thresholds[0], &moderate_threshold_mb) &&
+      base::StringToInt(thresholds[1], &critical_threshold_mb) &&
+      moderate_threshold_mb >= critical_threshold_mb &&
+      critical_threshold_mb >= 0) {
+    return new base::win::MemoryPressureMonitor(moderate_threshold_mb,
+                                                critical_threshold_mb);
+  }
+
+  // In absence of valid switches use the automatic defaults.
+  return new base::win::MemoryPressureMonitor();
+}
+#endif  // defined(OS_WIN)
+
 }  // namespace
 
 // The currently-running BrowserMainLoop.  There can be one or zero.
@@ -385,6 +421,8 @@ BrowserMainLoop::~BrowserMainLoop() {
 
 void BrowserMainLoop::Init() {
   TRACE_EVENT0("startup", "BrowserMainLoop::Init");
+  TRACK_SCOPED_REGION("Startup", "BrowserMainLoop::Init");
+
   parts_.reset(
       GetContentClient()->browser()->CreateBrowserMainParts(parameters_));
 }
@@ -393,6 +431,7 @@ void BrowserMainLoop::Init() {
 
 void BrowserMainLoop::EarlyInitialization() {
   TRACE_EVENT0("startup", "BrowserMainLoop::EarlyInitialization");
+  TRACK_SCOPED_REGION("Startup", "BrowserMainLoop::EarlyInitialization");
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
   // No thread should be created before this call, as SetupSandbox()
@@ -466,8 +505,12 @@ void BrowserMainLoop::EarlyInitialization() {
       gfx::GpuMemoryBuffer::SCANOUT);
 #endif
 
-  base::DiscardableMemoryAllocator::SetInstance(
-      HostDiscardableSharedMemoryManager::current());
+  // TODO(boliu): kSingleProcess check is a temporary workaround for
+  // in-process Android WebView. crbug.com/503724 tracks proper fix.
+  if (!parsed_command_line_.HasSwitch(switches::kSingleProcess)) {
+    base::DiscardableMemoryAllocator::SetInstance(
+        HostDiscardableSharedMemoryManager::current());
+  }
 
   if (parts_)
     parts_->PostEarlyInitialization();
@@ -475,6 +518,8 @@ void BrowserMainLoop::EarlyInitialization() {
 
 void BrowserMainLoop::MainMessageLoopStart() {
   TRACE_EVENT0("startup", "BrowserMainLoop::MainMessageLoopStart");
+  TRACK_SCOPED_REGION("Startup", "BrowserMainLoop::MainMessageLoopStart");
+
   if (parts_) {
     TRACE_EVENT0("startup",
         "BrowserMainLoop::MainMessageLoopStart:PreMainMessageLoopStart");
@@ -518,7 +563,7 @@ void BrowserMainLoop::MainMessageLoopStart() {
 #if !defined(OS_IOS)
   {
     TRACE_EVENT0("startup", "BrowserMainLoop::Subsystem:MediaFeatures");
-    media::InitializeCPUSpecificMediaFeatures();
+    media::InitializeMediaLibrary();
   }
   {
     TRACE_EVENT0("startup",
@@ -585,6 +630,12 @@ void BrowserMainLoop::MainMessageLoopStart() {
     DOMStorageArea::EnableAggressiveCommitDelay();
   }
 
+  base::trace_event::MemoryDumpManager::GetInstance()->Initialize();
+
+  // Enable the dump providers.
+  base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
+      HostSharedBitmapManager::current());
+
 #if defined(TCMALLOC_TRACE_MEMORY_SUPPORTED)
   trace_memory_controller_.reset(new base::trace_event::TraceMemoryController(
       base::MessageLoop::current()->message_loop_proxy(),
@@ -597,14 +648,23 @@ int BrowserMainLoop::PreCreateThreads() {
   if (parts_) {
     TRACE_EVENT0("startup",
         "BrowserMainLoop::CreateThreads:PreCreateThreads");
+    TRACK_SCOPED_REGION("Startup", "BrowserMainLoop::PreCreateThreads");
+
     result_code_ = parts_->PreCreateThreads();
   }
 
+  // TODO(chrisha): Abstract away this construction mess to a helper function,
+  // once MemoryPressureMonitor is made a concrete class.
 #if defined(OS_CHROMEOS)
   if (chromeos::switches::MemoryPressureHandlingEnabled()) {
-    memory_pressure_observer_.reset(new base::MemoryPressureObserverChromeOS(
+    memory_pressure_monitor_.reset(new base::chromeos::MemoryPressureMonitor(
         chromeos::switches::GetMemoryPressureThresholds()));
   }
+#elif defined(OS_MACOSX) && !defined(OS_IOS)
+  memory_pressure_monitor_.reset(new base::mac::MemoryPressureMonitor());
+#elif defined(OS_WIN)
+  memory_pressure_monitor_.reset(CreateWinMemoryPressureMonitor(
+      parsed_command_line_));
 #endif
 
 #if defined(ENABLE_PLUGINS)
@@ -658,6 +718,7 @@ int BrowserMainLoop::PreCreateThreads() {
 
 void BrowserMainLoop::CreateStartupTasks() {
   TRACE_EVENT0("startup", "BrowserMainLoop::CreateStartupTasks");
+  TRACK_SCOPED_REGION("Startup", "BrowserMainLoop::CreateStartupTasks");
 
   // First time through, we really want to create all the tasks
   if (!startup_task_runner_.get()) {
@@ -708,6 +769,7 @@ void BrowserMainLoop::CreateStartupTasks() {
 
 int BrowserMainLoop::CreateThreads() {
   TRACE_EVENT0("startup", "BrowserMainLoop::CreateThreads");
+  TRACK_SCOPED_REGION("Startup", "BrowserMainLoop::CreateThreads");
 
   base::Thread::Options io_message_loop_options;
   io_message_loop_options.message_loop_type = base::MessageLoop::TYPE_IO;
@@ -804,6 +866,9 @@ int BrowserMainLoop::PreMainMessageLoopRun() {
   if (parts_) {
     TRACE_EVENT0("startup",
         "BrowserMainLoop::CreateThreads:PreMainMessageLoopRun");
+    TRACK_SCOPED_REGION(
+        "Startup", "BrowserMainLoop::PreMainMessageLoopRun");
+
     parts_->PreMainMessageLoopRun();
   }
 
@@ -872,9 +937,7 @@ void BrowserMainLoop::ShutdownThreadsAndCleanUp() {
     resource_dispatcher_host_.get()->Shutdown();
   }
 
-#if defined(OS_CHROMEOS)
-  memory_pressure_observer_.reset();
-#endif
+  memory_pressure_monitor_.reset();
 
 #if defined(OS_MACOSX)
   BrowserCompositorMac::DisableRecyclingForShutdown();
@@ -1098,6 +1161,12 @@ int BrowserMainLoop::BrowserThreadsStarted() {
   BrowserGpuChannelHostFactory::Initialize(established_gpu_channel);
 #endif
 
+  // Enable the GpuMemoryBuffer dump provider with IO thread affinity. Note that
+  // unregistration happens on the IO thread (See
+  // BrowserProcessSubThread::IOThreadPreCleanUp).
+  base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
+      BrowserGpuMemoryBufferManager::current(), io_thread_->task_runner());
+
   {
     TRACE_EVENT0("startup", "BrowserThreadsStarted::Subsystem:AudioMan");
     audio_manager_.reset(media::AudioManager::CreateWithHangTimer(
@@ -1106,7 +1175,7 @@ int BrowserMainLoop::BrowserThreadsStarted() {
 
   {
     TRACE_EVENT0("startup", "BrowserThreadsStarted::Subsystem:MidiManager");
-    midi_manager_.reset(media::MidiManager::Create());
+    midi_manager_.reset(media::midi::MidiManager::Create());
   }
 
 #if defined(OS_LINUX) && defined(USE_UDEV)
@@ -1204,6 +1273,8 @@ bool BrowserMainLoop::UsingInProcessGpu() const {
 
 bool BrowserMainLoop::InitializeToolkit() {
   TRACE_EVENT0("startup", "BrowserMainLoop::InitializeToolkit");
+  TRACK_SCOPED_REGION("Startup", "BrowserMainLoop::InitializeToolkit");
+
   // TODO(evan): this function is rather subtle, due to the variety
   // of intersecting ifdefs we have.  To keep it easy to follow, there
   // are no #else branches on any #ifs.

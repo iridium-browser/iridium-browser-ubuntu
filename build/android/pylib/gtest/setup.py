@@ -31,11 +31,13 @@ ISOLATE_FILE_PATHS = {
       'third_party/WebKit/Source/platform/heap/BlinkHeapUnitTests.isolate',
     'breakpad_unittests': 'breakpad/breakpad_unittests.isolate',
     'cc_perftests': 'cc/cc_perftests.isolate',
+    'components_browsertests': 'components/components_browsertests.isolate',
     'components_unittests': 'components/components_unittests.isolate',
     'content_browsertests': 'content/content_browsertests.isolate',
     'content_unittests': 'content/content_unittests.isolate',
     'media_perftests': 'media/media_perftests.isolate',
     'media_unittests': 'media/media_unittests.isolate',
+    'midi_unittests': 'media/midi/midi_unittests.isolate',
     'net_unittests': 'net/net_unittests.isolate',
     'sql_unittests': 'sql/sql_unittests.isolate',
     'sync_unit_tests': 'sync/sync_unit_tests.isolate',
@@ -205,7 +207,7 @@ def Setup(test_options, devices):
     test_package = exe_test_package
   logging.warning('Found target %s', test_package.suite_path)
 
-  base_setup.GenerateDepsDirUsingIsolate(test_options.suite_name,
+  i = base_setup.GenerateDepsDirUsingIsolate(test_options.suite_name,
                                          test_options.isolate_file_path,
                                          ISOLATE_FILE_PATHS,
                                          DEPS_EXCLUSION_LIST)
@@ -215,6 +217,8 @@ def Setup(test_options, devices):
         else device.GetExternalStoragePath())
     base_setup.PushDataDeps(device, device_dir, test_options)
   device_utils.DeviceUtils.parallel(devices).pMap(push_data_deps_to_device_dir)
+  if i:
+    i.Clear()
 
   tests = _GetTests(test_options, test_package, devices)
 
@@ -236,7 +240,8 @@ def Setup(test_options, devices):
     tests = unittest_util.FilterTestNames(tests, test_options.gtest_filter)
 
   # Coalesce unit tests into a single test per device
-  if test_options.suite_name != 'content_browsertests':
+  if (test_options.suite_name != 'content_browsertests' and
+      test_options.suite_name != 'components_browsertests'):
     num_devices = len(devices)
     tests = [':'.join(tests[i::num_devices]) for i in xrange(num_devices)]
     tests = [t for t in tests if t]

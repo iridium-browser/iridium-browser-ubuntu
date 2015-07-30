@@ -13,10 +13,10 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/test/content_browser_sanity_checker.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_browser_context.h"
 #include "content/test/browser_side_navigation_test_utils.h"
+#include "content/test/content_browser_sanity_checker.h"
 #include "content/test/test_render_frame_host.h"
 #include "content/test/test_render_frame_host_factory.h"
 #include "content/test/test_render_view_host.h"
@@ -163,16 +163,19 @@ void RenderViewHostTestHarness::Reload() {
   NavigationEntry* entry = controller().GetLastCommittedEntry();
   DCHECK(entry);
   controller().Reload(false);
-  RenderFrameHostTester::For(main_rfh())->SendNavigateWithTransition(
-      entry->GetPageID(), entry->GetURL(), ui::PAGE_TRANSITION_RELOAD);
+  RenderFrameHostTester::For(main_rfh())
+      ->SendNavigateWithTransition(entry->GetPageID(), entry->GetUniqueID(),
+                                   false, entry->GetURL(),
+                                   ui::PAGE_TRANSITION_RELOAD);
 }
 
 void RenderViewHostTestHarness::FailedReload() {
   NavigationEntry* entry = controller().GetLastCommittedEntry();
   DCHECK(entry);
   controller().Reload(false);
-  RenderFrameHostTester::For(main_rfh())->SendFailedNavigate(entry->GetPageID(),
-                                                             entry->GetURL());
+  RenderFrameHostTester::For(main_rfh())
+      ->SendFailedNavigate(entry->GetPageID(), entry->GetUniqueID(), false,
+                           entry->GetURL());
 }
 
 void RenderViewHostTestHarness::SetUp() {

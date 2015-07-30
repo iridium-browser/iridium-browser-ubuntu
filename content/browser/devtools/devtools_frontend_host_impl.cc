@@ -4,10 +4,13 @@
 
 #include "content/browser/devtools/devtools_frontend_host_impl.h"
 
+#include "content/browser/bad_message.h"
 #include "content/common/devtools_messages.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/content_client.h"
+#include "grit/devtools_resources_map.h"
 
 namespace content {
 
@@ -16,6 +19,18 @@ DevToolsFrontendHost* DevToolsFrontendHost::Create(
     RenderFrameHost* frontend_main_frame,
     DevToolsFrontendHost::Delegate* delegate) {
   return new DevToolsFrontendHostImpl(frontend_main_frame, delegate);
+}
+
+// static
+base::StringPiece DevToolsFrontendHost::GetFrontendResource(
+    const std::string& path) {
+  for (size_t i = 0; i < kDevtoolsResourcesSize; ++i) {
+    if (path == kDevtoolsResources[i].name) {
+      return GetContentClient()->GetDataResource(
+          kDevtoolsResources[i].value, ui::SCALE_FACTOR_NONE);
+    }
+  }
+  return std::string();
 }
 
 DevToolsFrontendHostImpl::DevToolsFrontendHostImpl(
@@ -29,6 +44,11 @@ DevToolsFrontendHostImpl::DevToolsFrontendHostImpl(
 }
 
 DevToolsFrontendHostImpl::~DevToolsFrontendHostImpl() {
+}
+
+void DevToolsFrontendHostImpl::BadMessageRecieved() {
+  bad_message::ReceivedBadMessage(web_contents()->GetRenderProcessHost(),
+                                  bad_message::DFH_BAD_EMBEDDER_MESSAGE);
 }
 
 bool DevToolsFrontendHostImpl::OnMessageReceived(

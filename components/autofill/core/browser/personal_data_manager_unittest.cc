@@ -26,9 +26,12 @@
 #include "components/autofill/core/common/autofill_pref_names.h"
 #include "components/autofill/core/common/autofill_switches.h"
 #include "components/autofill/core/common/form_data.h"
+#include "components/signin/core/browser/account_tracker_service.h"
+#include "components/signin/core/browser/test_signin_client.h"
 #include "components/signin/core/common/signin_pref_names.h"
 #include "components/webdata/common/web_data_service_base.h"
 #include "components/webdata/common/web_database_service.h"
+#include "google_apis/gaia/fake_oauth2_token_service.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -95,6 +98,14 @@ class PersonalDataManagerTest : public testing::Test {
     web_database_ = new WebDatabaseService(path,
                                            base::MessageLoopProxy::current(),
                                            base::MessageLoopProxy::current());
+
+    // Setup account tracker.
+    signin_client_.reset(new TestSigninClient(prefs_.get()));
+    fake_oauth2_token_service_.reset(new FakeOAuth2TokenService());
+    account_tracker_.reset(new AccountTrackerService());
+    account_tracker_->Initialize(fake_oauth2_token_service_.get(),
+                                 signin_client_.get());
+
     // Hacky: hold onto a pointer but pass ownership.
     autofill_table_ = new AutofillTable("en-US");
     web_database_->AddTable(scoped_ptr<WebDatabaseTable>(autofill_table_));
@@ -110,12 +121,22 @@ class PersonalDataManagerTest : public testing::Test {
     ResetPersonalDataManager(USER_MODE_NORMAL);
   }
 
+  void TearDown() override {
+    // Order of destruction is important as AutofillManager relies on
+    // PersonalDataManager to be around when it gets destroyed.
+    account_tracker_->Shutdown();
+    fake_oauth2_token_service_.reset();
+    account_tracker_.reset();
+    signin_client_.reset();
+  }
+
   void ResetPersonalDataManager(UserMode user_mode) {
     bool is_incognito = (user_mode == USER_MODE_INCOGNITO);
     personal_data_.reset(new PersonalDataManager("en"));
     personal_data_->Init(
         scoped_refptr<AutofillWebDataService>(autofill_database_service_),
         prefs_.get(),
+        account_tracker_.get(),
         is_incognito);
     personal_data_->AddObserver(&personal_data_observer_);
 
@@ -127,7 +148,11 @@ class PersonalDataManagerTest : public testing::Test {
 
   void EnableWalletCardImport() {
     prefs_->SetBoolean(prefs::kAutofillWalletSyncExperimentEnabled, true);
-    prefs_->SetString(::prefs::kGoogleServicesUsername, "syncuser@example.com");
+    std::string account_id =
+        account_tracker_->SeedAccountInfo("12345", "syncuser@example.com");
+    prefs_->SetString(::prefs::kGoogleServicesAccountId, account_id);
+    base::CommandLine::ForCurrentProcess()->AppendSwitch(
+        switches::kEnableOfferStoreUnmaskedWalletCards);
   }
 
   // The temporary directory should be deleted at the end to ensure that
@@ -135,6 +160,9 @@ class PersonalDataManagerTest : public testing::Test {
   base::ScopedTempDir temp_dir_;
   base::MessageLoopForUI message_loop_;
   scoped_ptr<PrefService> prefs_;
+  scoped_ptr<FakeOAuth2TokenService> fake_oauth2_token_service_;
+  scoped_ptr<AccountTrackerService> account_tracker_;
+  scoped_ptr<TestSigninClient> signin_client_;
   scoped_refptr<AutofillWebDataService> autofill_database_service_;
   scoped_refptr<WebDatabaseService> web_database_;
   AutofillTable* autofill_table_;  // weak ref
@@ -440,6 +468,46 @@ TEST_F(PersonalDataManagerTest, ReturnsServerCreditCards) {
   base::MessageLoop::current()->Run();
 
   EXPECT_EQ(0U, personal_data_->GetCreditCards().size());
+}
+
+// Makes sure that full cards are re-masked when full PAN storage is off.
+TEST_F(PersonalDataManagerTest, RefuseToStoreFullCard) {
+  prefs_->SetBoolean(prefs::kAutofillWalletSyncExperimentEnabled, true);
+
+  // On Linux this should be disabled automatically. Elsewhere, only if the
+  // flag is passed.
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+  EXPECT_FALSE(base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDisableOfferStoreUnmaskedWalletCards));
+#else
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kDisableOfferStoreUnmaskedWalletCards);
+#endif
+
+  std::vector<CreditCard> server_cards;
+  server_cards.push_back(CreditCard(CreditCard::FULL_SERVER_CARD, "c789"));
+  test::SetCreditCardInfo(&server_cards.back(), "Clyde Barrow",
+                          "347666888555" /* American Express */, "04", "2015");
+  test::SetServerCreditCards(autofill_table_, server_cards);
+  personal_data_->Refresh();
+
+  EXPECT_CALL(personal_data_observer_, OnPersonalDataChanged())
+      .WillOnce(QuitMainMessageLoop());
+  base::MessageLoop::current()->Run();
+
+  ASSERT_EQ(1U, personal_data_->GetCreditCards().size());
+  EXPECT_EQ(CreditCard::MASKED_SERVER_CARD,
+            personal_data_->GetCreditCards()[0]->record_type());
+}
+
+TEST_F(PersonalDataManagerTest, OfferStoreUnmaskedCards) {
+#if defined(OS_CHROMEOS) || defined(OS_WIN) || defined(OS_MACOSX) || \
+    defined(OS_IOS) || defined(OS_ANDROID)
+  bool should_offer = true;
+#elif defined(OS_LINUX)
+  bool should_offer = false;
+#endif
+  EXPECT_EQ(should_offer, OfferStoreUnmaskedCards());
 }
 
 // Tests that UpdateServerCreditCard can be used to mask or unmask server cards.
@@ -2925,7 +2993,8 @@ TEST_F(PersonalDataManagerTest, GetCreditCardSuggestions) {
   // hidden.
   std::vector<CreditCard> server_cards;
   // This server card matches a local card, except the local card is missing the
-  // number. This should count as a dupe.
+  // number. This should count as a dupe. The locally saved card takes
+  // precedence.
   server_cards.push_back(CreditCard(CreditCard::MASKED_SERVER_CARD, "a123"));
   test::SetCreditCardInfo(&server_cards.back(), "John Dillinger",
                           "9012" /* Visa */, "01", "2010");
@@ -2950,14 +3019,14 @@ TEST_F(PersonalDataManagerTest, GetCreditCardSuggestions) {
   base::MessageLoop::current()->Run();
 
   suggestions = personal_data_->GetCreditCardSuggestions(
-          AutofillType(CREDIT_CARD_NAME), base::string16());
+      AutofillType(CREDIT_CARD_NAME), base::string16());
   ASSERT_EQ(4U, suggestions.size());
-  EXPECT_EQ(ASCIIToUTF16("Clyde Barrow"), suggestions[0].value);
-  EXPECT_NE(suggestions[0].backend_id.guid, credit_card0.guid());
-  EXPECT_EQ(ASCIIToUTF16("Bonnie Parker"), suggestions[1].value);
-  EXPECT_EQ(suggestions[1].backend_id.guid, credit_card2.guid());
-  EXPECT_EQ(ASCIIToUTF16("John Dillinger"), suggestions[2].value);
-  EXPECT_NE(suggestions[2].backend_id.guid, credit_card1.guid());
+  EXPECT_EQ(ASCIIToUTF16("John Dillinger"), suggestions[0].value);
+  EXPECT_EQ(suggestions[0].backend_id.guid, credit_card1.guid());
+  EXPECT_EQ(ASCIIToUTF16("Clyde Barrow"), suggestions[1].value);
+  EXPECT_NE(suggestions[1].backend_id.guid, credit_card0.guid());
+  EXPECT_EQ(ASCIIToUTF16("Bonnie Parker"), suggestions[2].value);
+  EXPECT_EQ(suggestions[2].backend_id.guid, credit_card2.guid());
   EXPECT_EQ(ASCIIToUTF16("Bonnie Parker"), suggestions[3].value);
   EXPECT_NE(suggestions[3].backend_id.guid, credit_card2.guid());
 
@@ -2981,10 +3050,10 @@ TEST_F(PersonalDataManagerTest, GetCreditCardSuggestions) {
                 "2109"),
             suggestions[3].value);
 
-  // Make sure a server card can be a dupe of more than one local card.
+  // Make sure a full server card can be a dupe of more than one local card.
   CreditCard credit_card3("4141084B-72D7-4B73-90CF-3D6AC154673B",
                           "https://www.example.com");
-  test::SetCreditCardInfo(&credit_card3, "John Dillinger", "", "01", "");
+  test::SetCreditCardInfo(&credit_card3, "Clyde Barrow", "", "04", "");
   personal_data_->AddCreditCard(credit_card3);
 
   EXPECT_CALL(personal_data_observer_, OnPersonalDataChanged())
@@ -2994,9 +3063,9 @@ TEST_F(PersonalDataManagerTest, GetCreditCardSuggestions) {
   suggestions = personal_data_->GetCreditCardSuggestions(
           AutofillType(CREDIT_CARD_NAME), base::string16());
   ASSERT_EQ(4U, suggestions.size());
-  EXPECT_EQ(ASCIIToUTF16("Clyde Barrow"), suggestions[0].value);
-  EXPECT_EQ(ASCIIToUTF16("Bonnie Parker"), suggestions[1].value);
-  EXPECT_EQ(ASCIIToUTF16("John Dillinger"), suggestions[2].value);
+  EXPECT_EQ(ASCIIToUTF16("John Dillinger"), suggestions[0].value);
+  EXPECT_EQ(ASCIIToUTF16("Clyde Barrow"), suggestions[1].value);
+  EXPECT_EQ(ASCIIToUTF16("Bonnie Parker"), suggestions[2].value);
   EXPECT_EQ(ASCIIToUTF16("Bonnie Parker"), suggestions[3].value);
 }
 
@@ -3113,7 +3182,7 @@ TEST_F(PersonalDataManagerTest, UpdateServerCreditCardUsageStats) {
 
   server_cards.push_back(CreditCard(CreditCard::MASKED_SERVER_CARD, "b456"));
   test::SetCreditCardInfo(&server_cards.back(), "Bonnie Parker",
-                          "2109" /* Mastercard */, "12", "2012");
+                          "4444" /* Mastercard */, "12", "2012");
   server_cards.back().SetTypeForMaskedCard(kMasterCard);
 
   server_cards.push_back(CreditCard(CreditCard::FULL_SERVER_CARD, "c789"));
@@ -3152,6 +3221,7 @@ TEST_F(PersonalDataManagerTest, UpdateServerCreditCardUsageStats) {
   EXPECT_CALL(personal_data_observer_, OnPersonalDataChanged())
       .WillOnce(QuitMainMessageLoop());
   base::MessageLoop::current()->Run();
+  ASSERT_EQ(3U, personal_data_->GetCreditCards().size());
 
   for (size_t i = 0; i < 3; ++i)
     EXPECT_EQ(0, server_cards[i].Compare(*personal_data_->GetCreditCards()[i]));
@@ -3173,6 +3243,7 @@ TEST_F(PersonalDataManagerTest, UpdateServerCreditCardUsageStats) {
   EXPECT_CALL(personal_data_observer_, OnPersonalDataChanged())
       .WillOnce(QuitMainMessageLoop());
   base::MessageLoop::current()->Run();
+  ASSERT_EQ(3U, personal_data_->GetCreditCards().size());
 
   EXPECT_EQ(1U, personal_data_->GetCreditCards()[0]->use_count());
   EXPECT_NE(base::Time(), personal_data_->GetCreditCards()[0]->use_date());
@@ -3184,6 +3255,31 @@ TEST_F(PersonalDataManagerTest, UpdateServerCreditCardUsageStats) {
   EXPECT_NE(base::Time(), personal_data_->GetCreditCards()[2]->use_date());
   // Time may or may not have elapsed between unmasking and RecordUseOf.
   EXPECT_LE(initial_use_date, personal_data_->GetCreditCards()[2]->use_date());
+
+  // Can record usage stats on masked cards.
+  server_cards[1].set_guid(personal_data_->GetCreditCards()[1]->guid());
+  personal_data_->RecordUseOf(server_cards[1]);
+  EXPECT_CALL(personal_data_observer_, OnPersonalDataChanged())
+      .WillOnce(QuitMainMessageLoop());
+  base::MessageLoop::current()->Run();
+  ASSERT_EQ(3U, personal_data_->GetCreditCards().size());
+  EXPECT_EQ(1U, personal_data_->GetCreditCards()[1]->use_count());
+  EXPECT_NE(base::Time(), personal_data_->GetCreditCards()[1]->use_date());
+
+  // Upgrading to unmasked retains the usage stats (and increments them).
+  CreditCard* unmasked_card2 = &server_cards[1];
+  unmasked_card2->set_record_type(CreditCard::FULL_SERVER_CARD);
+  unmasked_card2->SetNumber(ASCIIToUTF16("5555555555554444"));
+  personal_data_->UpdateServerCreditCard(*unmasked_card2);
+
+  server_cards[1].set_guid(personal_data_->GetCreditCards()[1]->guid());
+  personal_data_->RecordUseOf(server_cards[1]);
+  EXPECT_CALL(personal_data_observer_, OnPersonalDataChanged())
+      .WillOnce(QuitMainMessageLoop());
+  base::MessageLoop::current()->Run();
+  ASSERT_EQ(3U, personal_data_->GetCreditCards().size());
+  EXPECT_EQ(2U, personal_data_->GetCreditCards()[1]->use_count());
+  EXPECT_NE(base::Time(), personal_data_->GetCreditCards()[1]->use_date());
 }
 
 TEST_F(PersonalDataManagerTest, ClearAllServerData) {

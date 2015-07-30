@@ -15,6 +15,7 @@ class SoftwareOutputDevice;
 }
 
 namespace content {
+class BrowserCompositorOverlayCandidateValidator;
 class ContextProviderCommandBuffer;
 class ReflectorImpl;
 class WebGraphicsContext3DCommandBufferImpl;
@@ -27,6 +28,7 @@ class CONTENT_EXPORT BrowserCompositorOutputSurface
 
   // cc::OutputSurface implementation.
   bool BindToClient(cc::OutputSurfaceClient* client) override;
+  cc::OverlayCandidateValidator* GetOverlayCandidateValidator() const override;
 
   // ui::CompositorOutputSurface::Observer implementation.
   void OnUpdateVSyncParameters(base::TimeTicks timebase,
@@ -37,17 +39,26 @@ class CONTENT_EXPORT BrowserCompositorOutputSurface
 
   void SetReflector(ReflectorImpl* reflector);
 
+  // Called when |reflector_| was updated.
+  virtual void OnReflectorChanged();
+
+  // Returns a callback that will be called when all mirroring
+  // compositors have started composition.
+  virtual base::Closure CreateCompositionStartedCallback();
+
 #if defined(OS_MACOSX)
   virtual void OnSurfaceDisplayed() = 0;
-  virtual void OnSurfaceRecycled() = 0;
-  virtual bool ShouldNotShowFramesAfterRecycle() const = 0;
+  virtual void SetSurfaceSuspendedForRecycle(bool suspended) = 0;
+  virtual bool SurfaceShouldNotShowFramesAfterSuspendForRecycle() const = 0;
 #endif
 
  protected:
   // Constructor used by the accelerated implementation.
   BrowserCompositorOutputSurface(
       const scoped_refptr<cc::ContextProvider>& context,
-      const scoped_refptr<ui::CompositorVSyncManager>& vsync_manager);
+      const scoped_refptr<ui::CompositorVSyncManager>& vsync_manager,
+      scoped_ptr<BrowserCompositorOverlayCandidateValidator>
+          overlay_candidate_validator);
 
   // Constructor used by the software implementation.
   BrowserCompositorOutputSurface(
@@ -59,6 +70,9 @@ class CONTENT_EXPORT BrowserCompositorOutputSurface
 
  private:
   void Initialize();
+
+  scoped_ptr<BrowserCompositorOverlayCandidateValidator>
+      overlay_candidate_validator_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserCompositorOutputSurface);
 };

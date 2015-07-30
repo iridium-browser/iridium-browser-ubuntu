@@ -113,9 +113,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
                   bool is_initial_navigation,
                   bool is_server_redirect,
                   bool* send_referrer) override;
-#if defined(ENABLE_EXTENSIONS)
   bool ShouldForwardToGuestContainer(const IPC::Message& msg) override;
-#endif
   bool WillSendRequest(blink::WebFrame* frame,
                        ui::PageTransition transition_type,
                        const GURL& url,
@@ -147,6 +145,11 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
       content::RenderFrame* render_frame,
       const std::string& mime_type,
       const GURL& original_url) override;
+  void RecordRappor(const std::string& metric,
+                    const std::string& sample) override;
+  void RecordRapporURL(const std::string& metric, const GURL& url) override;
+  scoped_ptr<blink::WebAppBannerClient> CreateAppBannerClient(
+      content::RenderFrame* render_frame) override;
 
 #if defined(ENABLE_EXTENSIONS)
   // Takes ownership.

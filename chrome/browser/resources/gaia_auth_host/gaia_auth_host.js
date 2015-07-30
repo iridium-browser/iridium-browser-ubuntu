@@ -125,12 +125,6 @@ cr.define('cr.login', function() {
     reloadUrl_: null,
 
     /**
-     * The domain name of the current auth page.
-     * @type {string}
-     */
-    authDomain: '',
-
-    /**
      * Invoked when authentication is completed successfully with credential
      * data. A credential data object looks like this:
      * <pre>
@@ -286,12 +280,6 @@ cr.define('cr.login', function() {
      * Reloads the auth extension.
      */
     reload: function() {
-      var sendParamsOnLoad = function() {
-        this.frame_.removeEventListener('load', sendParamsOnLoad);
-        this.frame_.contentWindow.postMessage(this.authParams_, AUTH_URL_BASE);
-      }.bind(this);
-
-      this.frame_.addEventListener('load', sendParamsOnLoad);
       this.frame_.src = this.reloadUrl_;
       this.authFlow = AuthFlow.GAIA;
     },
@@ -342,6 +330,11 @@ cr.define('cr.login', function() {
       if (!this.isAuthExtMessage_(e))
         return;
 
+      if (msg.method == 'loginUIDOMContentLoaded') {
+        this.frame_.contentWindow.postMessage(this.authParams_, AUTH_URL_BASE);
+        return;
+      }
+
       if (msg.method == 'loginUILoaded') {
         cr.dispatchSimpleEvent(this, 'ready');
         return;
@@ -378,7 +371,7 @@ cr.define('cr.login', function() {
 
       if (msg.method == 'confirmPassword') {
         if (this.confirmPasswordCallback_)
-          this.confirmPasswordCallback_(msg.passwordCount);
+          this.confirmPasswordCallback_(msg.email, msg.passwordCount);
         else
           console.error('GaiaAuthHost: Invalid confirmPasswordCallback_.');
         return;
@@ -439,6 +432,12 @@ cr.define('cr.login', function() {
       console.error('Unknown message method=' + msg.method);
     }
   };
+
+  /**
+   * The domain name of the current auth page.
+   * @type {string}
+   */
+  cr.defineProperty(GaiaAuthHost, 'authDomain');
 
   /**
    * The current auth flow of the hosted gaia_auth extension.

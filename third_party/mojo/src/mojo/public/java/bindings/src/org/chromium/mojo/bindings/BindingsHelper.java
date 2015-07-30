@@ -24,6 +24,12 @@ public class BindingsHelper {
     public static final int SERIALIZED_HANDLE_SIZE = 4;
 
     /**
+     * The size, in bytes, of a serialized interface, which consists of a serialized handle (4
+     * bytes) and a version number (4 bytes).
+     */
+    public static final int SERIALIZED_INTERFACE_SIZE = 8;
+
+    /**
      * The size, in bytes, of a serialized pointer. A pointer is serializaed as an unsigned long
      * representing the offset from its position to the pointed elemnt.
      */
@@ -32,7 +38,7 @@ public class BindingsHelper {
     /**
      * The header for a serialized map element.
      */
-    public static final DataHeader MAP_STRUCT_HEADER = new DataHeader(24, 2);
+    public static final DataHeader MAP_STRUCT_HEADER = new DataHeader(24, 0);
 
     /**
      * The value used for the expected length of a non-fixed size array.

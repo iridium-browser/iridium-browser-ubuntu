@@ -178,7 +178,7 @@ public:
 
     void setData(const GrGLProgramDataManager&, const GrProcessor&) override;
 
-    static inline void GenKey(const GrProcessor&, const GrGLCaps&, GrProcessorKeyBuilder*);
+    static inline void GenKey(const GrProcessor&, const GrGLSLCaps&, GrProcessorKeyBuilder*);
 
 private:
     GrTextureDomain::GLDomain         fGLDomain;
@@ -197,7 +197,7 @@ void GrGLTextureDomainEffect::emitCode(GrGLFPBuilder* builder,
     const GrTextureDomainEffect& textureDomainEffect = fp.cast<GrTextureDomainEffect>();
     const GrTextureDomain& domain = textureDomainEffect.textureDomain();
 
-    GrGLFPFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+    GrGLFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
     SkString coords2D = fsBuilder->ensureFSCoords2D(coords, 0);
     fGLDomain.sampleTexture(fsBuilder, domain, outputColor, coords2D, samplers[0], inputColor);
 }
@@ -209,7 +209,7 @@ void GrGLTextureDomainEffect::setData(const GrGLProgramDataManager& pdman,
     fGLDomain.setData(pdman, domain, processor.texture(0)->origin());
 }
 
-void GrGLTextureDomainEffect::GenKey(const GrProcessor& processor, const GrGLCaps&,
+void GrGLTextureDomainEffect::GenKey(const GrProcessor& processor, const GrGLSLCaps&,
                                      GrProcessorKeyBuilder* b) {
     const GrTextureDomain& domain = processor.cast<GrTextureDomainEffect>().textureDomain();
     b->add32(GrTextureDomain::GLDomain::DomainKey(domain));
@@ -256,7 +256,7 @@ GrTextureDomainEffect::~GrTextureDomainEffect() {
 
 }
 
-void GrTextureDomainEffect::getGLProcessorKey(const GrGLCaps& caps,
+void GrTextureDomainEffect::getGLProcessorKey(const GrGLSLCaps& caps,
                                               GrProcessorKeyBuilder* b) const {
     GrGLTextureDomainEffect::GenKey(*this, caps, b);
 }
@@ -299,7 +299,7 @@ GrFragmentProcessor* GrTextureDomainEffect::TestCreate(SkRandom* random,
     domain.fBottom = random->nextRangeScalar(domain.fTop, SK_Scalar1);
     GrTextureDomain::Mode mode =
         (GrTextureDomain::Mode) random->nextULessThan(GrTextureDomain::kModeCount);
-    const SkMatrix& matrix = GrProcessorUnitTest::TestMatrix(random);
+    const SkMatrix& matrix = GrTest::TestMatrix(random);
     bool bilerp = mode != GrTextureDomain::kRepeat_Mode ? random->nextBool() : false;
     GrCoordSet coords = random->nextBool() ? kLocal_GrCoordSet : kDevice_GrCoordSet;
     return GrTextureDomainEffect::Create(textures[texIdx],

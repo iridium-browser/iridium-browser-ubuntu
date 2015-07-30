@@ -210,8 +210,8 @@ bool BrowserPluginGuest::OnMessageReceivedFromEmbedder(
     const IPC::Message& message) {
   RenderWidgetHostViewGuest* rwhv = static_cast<RenderWidgetHostViewGuest*>(
       web_contents()->GetRenderWidgetHostView());
-  if (rwhv &&
-      rwhv->OnMessageReceivedFromEmbedder(
+  // Until the guest is attached, it should not be handling input events.
+  if (attached() && rwhv && rwhv->OnMessageReceivedFromEmbedder(
           message,
           static_cast<RenderViewHostImpl*>(
               embedder_web_contents()->GetRenderViewHost()))) {
@@ -560,26 +560,8 @@ void BrowserPluginGuest::RenderProcessGone(base::TerminationStatus status) {
 // static
 bool BrowserPluginGuest::ShouldForwardToBrowserPluginGuest(
     const IPC::Message& message) {
-  switch (message.type()) {
-    case BrowserPluginHostMsg_CompositorFrameSwappedACK::ID:
-    case BrowserPluginHostMsg_Detach::ID:
-    case BrowserPluginHostMsg_DragStatusUpdate::ID:
-    case BrowserPluginHostMsg_ExecuteEditCommand::ID:
-    case BrowserPluginHostMsg_ExtendSelectionAndDelete::ID:
-    case BrowserPluginHostMsg_HandleInputEvent::ID:
-    case BrowserPluginHostMsg_ImeConfirmComposition::ID:
-    case BrowserPluginHostMsg_ImeSetComposition::ID:
-    case BrowserPluginHostMsg_LockMouse_ACK::ID:
-    case BrowserPluginHostMsg_ReclaimCompositorResources::ID:
-    case BrowserPluginHostMsg_SetEditCommandsForNextKeyEvent::ID:
-    case BrowserPluginHostMsg_SetFocus::ID:
-    case BrowserPluginHostMsg_SetVisibility::ID:
-    case BrowserPluginHostMsg_UnlockMouse_ACK::ID:
-    case BrowserPluginHostMsg_UpdateGeometry::ID:
-      return true;
-    default:
-      return false;
-  }
+  return (message.type() != BrowserPluginHostMsg_Attach::ID) &&
+      (IPC_MESSAGE_CLASS(message) == BrowserPluginMsgStart);
 }
 
 bool BrowserPluginGuest::OnMessageReceived(const IPC::Message& message) {
@@ -649,9 +631,21 @@ void BrowserPluginGuest::Attach(
         ack);
     last_pending_frame_.reset();
   }
-  delegate_->WillAttach(embedder_web_contents, browser_plugin_instance_id,
-                        params.is_full_page_plugin);
 
+  // The guest is owned by the embedder. Attach is queued up so we cannot
+  // change embedders before attach completes. If the embedder goes away,
+  // so does the guest and so we will never call WillAttachComplete because
+  // we have a weak ptr.
+  delegate_->WillAttach(embedder_web_contents, browser_plugin_instance_id,
+                        params.is_full_page_plugin,
+                        base::Bind(&BrowserPluginGuest::OnWillAttachComplete,
+                                   weak_ptr_factory_.GetWeakPtr(),
+                                   embedder_web_contents, params));
+}
+
+void BrowserPluginGuest::OnWillAttachComplete(
+    WebContentsImpl* embedder_web_contents,
+    const BrowserPluginHostMsg_Attach_Params& params) {
   // If a RenderView has already been created for this new window, then we need
   // to initialize the browser-side state now so that the RenderFrameHostManager
   // does not create a new RenderView on navigation.

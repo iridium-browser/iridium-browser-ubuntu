@@ -4,11 +4,16 @@
 
 #include "content/renderer/pepper/plugin_power_saver_helper.h"
 
+#include <string>
+
+#include "base/command_line.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/string_number_conversions.h"
 #include "content/common/frame_messages.h"
 #include "content/public/common/content_constants.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/renderer/render_frame.h"
+#include "ppapi/shared_impl/ppapi_constants.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebPluginParams.h"
@@ -33,9 +38,9 @@ const char kPeripheralHeuristicHistogram[] =
     "Plugin.PowerSaver.PeripheralHeuristic";
 
 // Maximum dimensions plugin content may have while still being considered
-// peripheral content. These match the sizes used by Safari.
-const int kPeripheralContentMaxWidth = 400;
-const int kPeripheralContentMaxHeight = 300;
+// peripheral content. These are similar to the numbers used by WebKit.
+const int kPeripheralContentMaxWidth = 398;
+const int kPeripheralContentMaxHeight = 298;
 
 // Plugin content below this size in height and width is considered "tiny".
 // Tiny content is never peripheral, as tiny plugins often serve a critical
@@ -59,7 +64,17 @@ PluginPowerSaverHelper::PeripheralPlugin::~PeripheralPlugin() {
 }
 
 PluginPowerSaverHelper::PluginPowerSaverHelper(RenderFrame* render_frame)
-    : RenderFrameObserver(render_frame) {
+    : RenderFrameObserver(render_frame)
+    , override_for_testing_(Normal) {
+  base::CommandLine& command_line = *base::CommandLine::ForCurrentProcess();
+  std::string override_for_testing = command_line.GetSwitchValueASCII(
+      switches::kOverridePluginPowerSaverForTesting);
+  if (override_for_testing == "never")
+    override_for_testing_ = Never;
+  else if (override_for_testing == "ignore-list")
+    override_for_testing_ = IgnoreList;
+  else if (override_for_testing == "always")
+    override_for_testing_ = Always;
 }
 
 PluginPowerSaverHelper::~PluginPowerSaverHelper() {
@@ -121,8 +136,15 @@ bool PluginPowerSaverHelper::ShouldThrottleContent(
     *cross_origin_main_content = false;
 
   // This feature has only been tested throughly with Flash thus far.
-  if (plugin_module_name != content::kFlashPluginName)
+  // It is also enabled for the Power Saver test plugin for browser tests.
+  if (override_for_testing_ == Always) {
+    return true;
+  } else if (override_for_testing_ == Never) {
     return false;
+  } else if (override_for_testing_ == Normal &&
+             plugin_module_name != content::kFlashPluginName) {
+    return false;
+  }
 
   if (width <= 0 || height <= 0)
     return false;

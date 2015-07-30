@@ -12,30 +12,36 @@ div {
 }
 
 div.error-icon,
+div.revokedError-icon,
 div.warning-icon,
 div.info-icon,
 div.device-icon,
 div.red-ball,
 div.green-ball,
 div.orange-ball {
-    background-image: url(Images/statusbarButtonGlyphs.png);
+    background-image: url(Images/toolbarButtonGlyphs.png);
     background-size: 320px 144px;
 }
 
 @media (-webkit-min-device-pixel-ratio: 1.5) {
 div.error-icon,
+div.revokedError-icon,
 div.warning-icon,
 div.info-icon,
 div.device-icon,
 div.red-ball,
 div.green-ball,
 div.orange-ball {
-    background-image: url(Images/statusbarButtonGlyphs_2x.png);
+    background-image: url(Images/toolbarButtonGlyphs_2x.png);
 }
 } /* media */
 
 div.error-icon {
     background-position: -213px -96px;
+}
+
+div.revokedError-icon {
+    background-position: -245px -107px;
 }
 
 div.warning-icon {

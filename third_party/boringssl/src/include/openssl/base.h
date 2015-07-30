@@ -56,8 +56,8 @@
 
 /* This file should be the first included by all BoringSSL headers. */
 
+#include <stddef.h>
 #include <stdint.h>
-#include <stdlib.h>
 #include <sys/types.h>
 
 #include <openssl/opensslfeatures.h>
@@ -103,6 +103,11 @@ extern "C" {
 #define OPENSSL_WINDOWS
 #endif
 
+#if defined(TRUSTY)
+#define OPENSSL_TRUSTY
+#define OPENSSL_NO_THREADS
+#endif
+
 #define OPENSSL_IS_BORINGSSL
 #define OPENSSL_VERSION_NUMBER 0x10002000
 
@@ -131,6 +136,9 @@ extern "C" {
 #define OPENSSL_EXPORT
 
 #endif  /* defined(BORINGSSL_SHARED_LIBRARY) */
+
+/* CRYPTO_THREADID is a dummy value. */
+typedef int CRYPTO_THREADID;
 
 typedef int ASN1_BOOLEAN;
 typedef int ASN1_NULL;
@@ -174,7 +182,9 @@ typedef struct bn_mont_ctx_st BN_MONT_CTX;
 typedef struct buf_mem_st BUF_MEM;
 typedef struct cbb_st CBB;
 typedef struct cbs_st CBS;
+typedef struct cmac_ctx_st CMAC_CTX;
 typedef struct conf_st CONF;
+typedef struct conf_value_st CONF_VALUE;
 typedef struct dh_method DH_METHOD;
 typedef struct dh_st DH;
 typedef struct dsa_method DSA_METHOD;

@@ -1,5 +1,5 @@
 /*
- * This file is part of the render object implementation for KHTML.
+ * This file is part of the layout object implementation for KHTML.
  *
  * Copyright (C) 1999 Lars Knoll (knoll@kde.org)
  *           (C) 1999 Antti Koivisto (koivisto@kde.org)
@@ -163,14 +163,14 @@ static bool childDoesNotAffectWidthOrFlexing(LayoutObject* child)
 
 static LayoutUnit contentWidthForChild(LayoutBox* child)
 {
-    if (child->hasOverrideWidth())
+    if (child->hasOverrideLogicalContentWidth())
         return child->overrideLogicalContentWidth();
     return child->logicalWidth() - child->borderAndPaddingLogicalWidth();
 }
 
 static LayoutUnit contentHeightForChild(LayoutBox* child)
 {
-    if (child->hasOverrideHeight())
+    if (child->hasOverrideLogicalContentHeight())
         return child->overrideLogicalContentHeight();
     return child->logicalHeight() - child->borderAndPaddingLogicalHeight();
 }
@@ -331,7 +331,7 @@ void LayoutDeprecatedFlexibleBox::layoutHorizontalBox(bool relayoutChildren)
                 continue;
 
             SubtreeLayoutScope layoutScope(*child);
-            if (relayoutChildren || (child->isReplaced() && (child->style()->width().isPercent() || child->style()->height().isPercent())))
+            if (relayoutChildren || (child->isReplaced() && (child->style()->width().hasPercent() || child->style()->height().hasPercent())))
                 layoutScope.setChildNeedsLayout(child);
 
             // Compute the child's vertical margins.
@@ -630,7 +630,7 @@ void LayoutDeprecatedFlexibleBox::layoutVerticalBox(bool relayoutChildren)
             }
 
             SubtreeLayoutScope layoutScope(*child);
-            if (!haveLineClamp && (relayoutChildren || (child->isReplaced() && (child->style()->width().isPercent() || child->style()->height().isPercent()))))
+            if (!haveLineClamp && (relayoutChildren || (child->isReplaced() && (child->style()->width().hasPercent() || child->style()->height().hasPercent()))))
                 layoutScope.setChildNeedsLayout(child);
 
             if (child->style()->visibility() == COLLAPSE) {
@@ -844,7 +844,7 @@ void LayoutDeprecatedFlexibleBox::applyLineClamp(FlexBoxIterator& iterator, bool
             continue;
 
         child->clearOverrideSize();
-        if (relayoutChildren || (child->isReplaced() && (child->style()->width().isPercent() || child->style()->height().isPercent()))
+        if (relayoutChildren || (child->isReplaced() && (child->style()->width().hasPercent() || child->style()->height().hasPercent()))
             || (child->style()->height().isAuto() && child->isLayoutBlock())) {
             child->setChildNeedsLayout(MarkOnlyThis);
 
@@ -895,20 +895,9 @@ void LayoutDeprecatedFlexibleBox::applyLineClamp(FlexBoxIterator& iterator, bool
         if (!lastVisibleLine)
             continue;
 
-        const UChar ellipsisAndSpace[2] = { horizontalEllipsis, ' ' };
-        DEFINE_STATIC_LOCAL(AtomicString, ellipsisAndSpaceStr, (ellipsisAndSpace, 2));
-        DEFINE_STATIC_LOCAL(AtomicString, ellipsisStr, (&horizontalEllipsis, 1));
+        DEFINE_STATIC_LOCAL(AtomicString, ellipsisStr, (&horizontalEllipsisCharacter, 1));
         const Font& font = style(numVisibleLines == 1)->font();
-
-        // Get ellipsis width, and if the last child is an anchor, it will go after the ellipsis, so add in a space and the anchor width too
-        float totalWidth;
-        InlineBox* anchorBox = lastLine->lastChild();
-        if (anchorBox && anchorBox->layoutObject().style()->isLink()) {
-            totalWidth = anchorBox->logicalWidth() + font.width(constructTextRun(this, font, ellipsisAndSpace, 2, styleRef(), style()->direction()));
-        } else {
-            anchorBox = 0;
-            totalWidth = font.width(constructTextRun(this, font, &horizontalEllipsis, 1, styleRef(), style()->direction()));
-        }
+        float totalWidth = font.width(constructTextRun(this, font, &horizontalEllipsisCharacter, 1, styleRef(), style()->direction()));
 
         // See if this width can be accommodated on the last visible line
         LayoutBlockFlow& destBlock = lastVisibleLine->block();
@@ -929,7 +918,7 @@ void LayoutDeprecatedFlexibleBox::applyLineClamp(FlexBoxIterator& iterator, bool
         // Let the truncation code kick in.
         // FIXME: the text alignment should be recomputed after the width changes due to truncation.
         LayoutUnit blockLeftEdge = destBlock.logicalLeftOffsetForLine(lastVisibleLine->y(), false);
-        lastVisibleLine->placeEllipsis(anchorBox ? ellipsisAndSpaceStr : ellipsisStr, leftToRight, blockLeftEdge.toFloat(), blockRightEdge.toFloat(), totalWidth, anchorBox);
+        lastVisibleLine->placeEllipsis(ellipsisStr, leftToRight, blockLeftEdge.toFloat(), blockRightEdge.toFloat(), totalWidth);
         destBlock.setHasMarkupTruncation(true);
     }
 }
@@ -942,7 +931,7 @@ void LayoutDeprecatedFlexibleBox::clearLineClamp()
             continue;
 
         child->clearOverrideSize();
-        if ((child->isReplaced() && (child->style()->width().isPercent() || child->style()->height().isPercent()))
+        if ((child->isReplaced() && (child->style()->width().hasPercent() || child->style()->height().hasPercent()))
             || (child->style()->height().isAuto() && child->isLayoutBlock())) {
             child->setChildNeedsLayout();
 
@@ -1017,17 +1006,6 @@ LayoutUnit LayoutDeprecatedFlexibleBox::allowedChildFlex(LayoutBox* child, bool 
         return allowedShrinkage;
     }
     return 0;
-}
-
-const char* LayoutDeprecatedFlexibleBox::name() const
-{
-    if (isFloating())
-        return "LayoutDeprecatedFlexibleBox (floating)";
-    if (isAnonymous())
-        return "LayoutDeprecatedFlexibleBox (anonymous)";
-    if (isRelPositioned())
-        return "LayoutDeprecatedFlexibleBox (relative positioned)";
-    return "LayoutDeprecatedFlexibleBox";
 }
 
 } // namespace blink

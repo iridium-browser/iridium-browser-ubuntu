@@ -7,7 +7,6 @@
 //   Performance tests for ANGLE draw call overhead.
 //
 
-#include <cassert>
 #include <sstream>
 
 #include "ANGLEPerfTest.h"
@@ -24,10 +23,17 @@ struct DrawCallPerfParams final : public RenderTestParams
 
         strstr << RenderTestParams::suffix();
 
+        if (numTris == 0)
+        {
+            strstr << "_validation_only";
+        }
+
         return strstr.str();
     }
 
     unsigned int iterations;
+    double runTimeSeconds;
+    int numTris;
 };
 
 class DrawCallPerfBenchmark : public ANGLERenderTest,
@@ -36,7 +42,7 @@ class DrawCallPerfBenchmark : public ANGLERenderTest,
   public:
     DrawCallPerfBenchmark();
 
-    bool initializeBenchmark() override;
+    void initializeBenchmark() override;
     void destroyBenchmark() override;
     void beginDrawBenchmark() override;
     void drawBenchmark() override;
@@ -51,15 +57,16 @@ DrawCallPerfBenchmark::DrawCallPerfBenchmark()
     : ANGLERenderTest("DrawCallPerf", GetParam()),
       mProgram(0),
       mBuffer(0),
-      mNumTris(0)
+      mNumTris(GetParam().numTris)
 {
+    mRunTimeSeconds = GetParam().runTimeSeconds;
 }
 
-bool DrawCallPerfBenchmark::initializeBenchmark()
+void DrawCallPerfBenchmark::initializeBenchmark()
 {
     const auto &params = GetParam();
 
-    assert(params.iterations > 0);
+    ASSERT_TRUE(params.iterations > 0);
     mDrawIterations = params.iterations;
 
     const std::string vs = SHADER_SOURCE
@@ -83,28 +90,35 @@ bool DrawCallPerfBenchmark::initializeBenchmark()
     );
 
     mProgram = CompileProgram(vs, fs);
-    if (!mProgram)
-    {
-        return false;
-    }
+    ASSERT_TRUE(mProgram != 0);
 
     // Use the program object
     glUseProgram(mProgram);
 
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 
+    std::vector<GLfloat> floatData;
 
-    std::vector<float> floatData(6);
-    floatData[0] = 1;
-    floatData[1] = 2;
-    floatData[2] = 0;
-    floatData[3] = 0;
-    floatData[4] = 2;
-    floatData[5] = 0;
+    for (int quadIndex = 0; quadIndex < mNumTris; ++quadIndex)
+    {
+        floatData.push_back(1);
+        floatData.push_back(2);
+        floatData.push_back(0);
+        floatData.push_back(0);
+        floatData.push_back(2);
+        floatData.push_back(0);
+    }
 
     glGenBuffers(1, &mBuffer);
     glBindBuffer(GL_ARRAY_BUFFER, mBuffer);
-    glBufferData(GL_ARRAY_BUFFER, floatData.size() * sizeof(float), &floatData[0], GL_STATIC_DRAW);
+
+    // To avoid generating GL errors when testing validation-only
+    if (floatData.empty())
+    {
+        floatData.push_back(0.0f);
+    }
+
+    glBufferData(GL_ARRAY_BUFFER, floatData.size() * sizeof(GLfloat), &floatData[0], GL_STATIC_DRAW);
 
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
     glEnableVertexAttribArray(0);
@@ -118,22 +132,11 @@ bool DrawCallPerfBenchmark::initializeBenchmark()
     glUniform1f(glGetUniformLocation(mProgram, "uScale"), scale);
     glUniform1f(glGetUniformLocation(mProgram, "uOffset"), offset);
 
-    GLenum glErr = glGetError();
-    if (glErr != GL_NO_ERROR)
-    {
-        return false;
-    }
-
-    return true;
+    ASSERT_GL_NO_ERROR();
 }
 
 void DrawCallPerfBenchmark::destroyBenchmark()
 {
-    const auto &params = GetParam();
-
-    // print static parameters
-    printResult("iterations", static_cast<size_t>(params.iterations), "updates", false);
-
     glDeleteProgram(mProgram);
     glDeleteBuffers(1, &mBuffer);
 }
@@ -150,19 +153,37 @@ void DrawCallPerfBenchmark::drawBenchmark()
 
     for (unsigned int it = 0; it < params.iterations; it++)
     {
-        glDrawArrays(GL_TRIANGLES, 0, 3 * mNumTris);
+        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(3 * mNumTris));
     }
+
+    ASSERT_GL_NO_ERROR();
 }
 
 DrawCallPerfParams DrawCallPerfD3D11Params()
 {
     DrawCallPerfParams params;
     params.glesMajorVersion = 2;
-    params.widowWidth = 1280;
-    params.windowHeight = 720;
+    params.widowWidth = 256;
+    params.windowHeight = 256;
     params.requestedRenderer = EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE;
     params.deviceType = EGL_PLATFORM_ANGLE_DEVICE_TYPE_NULL_ANGLE;
     params.iterations = 50;
+    params.numTris = 1;
+    params.runTimeSeconds = 10.0;
+    return params;
+}
+
+DrawCallPerfParams DrawCallPerfValidationOnly()
+{
+    DrawCallPerfParams params;
+    params.glesMajorVersion = 2;
+    params.widowWidth = 256;
+    params.windowHeight = 256;
+    params.requestedRenderer = EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE;
+    params.deviceType = EGL_PLATFORM_ANGLE_DEVICE_TYPE_NULL_ANGLE;
+    params.iterations = 100;
+    params.numTris = 0;
+    params.runTimeSeconds = 5.0;
     return params;
 }
 
@@ -170,11 +191,13 @@ DrawCallPerfParams DrawCallPerfD3D9Params()
 {
     DrawCallPerfParams params;
     params.glesMajorVersion = 2;
-    params.widowWidth = 1280;
-    params.windowHeight = 720;
+    params.widowWidth = 256;
+    params.windowHeight = 256;
     params.requestedRenderer = EGL_PLATFORM_ANGLE_TYPE_D3D9_ANGLE;
     params.deviceType = EGL_PLATFORM_ANGLE_DEVICE_TYPE_NULL_ANGLE;
     params.iterations = 50;
+    params.numTris = 1;
+    params.runTimeSeconds = 10.0;
     return params;
 }
 
@@ -185,6 +208,8 @@ TEST_P(DrawCallPerfBenchmark, Run)
 
 INSTANTIATE_TEST_CASE_P(DrawCallPerf,
                         DrawCallPerfBenchmark,
-                        ::testing::Values(DrawCallPerfD3D11Params(), DrawCallPerfD3D9Params()));
+                        ::testing::Values(DrawCallPerfD3D11Params(),
+                                          DrawCallPerfD3D9Params(),
+                                          DrawCallPerfValidationOnly()));
 
 } // namespace

@@ -18,6 +18,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/signin/account_tracker_service_factory.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_controller_impl.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_i18n_input.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_view.h"
@@ -48,6 +49,7 @@
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/autofill/core/common/autofill_switches.h"
 #include "components/autofill/core/common/form_data.h"
+#include "components/signin/core/browser/account_tracker_service.h"
 #include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/mock_render_process_host.h"
@@ -144,73 +146,69 @@ class TestAutofillDialogView : public AutofillDialogView {
  public:
   TestAutofillDialogView()
       : updates_started_(0), save_details_locally_checked_(true) {}
-  virtual ~TestAutofillDialogView() {}
+  ~TestAutofillDialogView() override {}
 
-  virtual void Show() override {}
-  virtual void Hide() override {}
+  void Show() override {}
+  void Hide() override {}
 
-  virtual void UpdatesStarted() override {
+  void UpdatesStarted() override {
     updates_started_++;
   }
 
-  virtual void UpdatesFinished() override {
+  void UpdatesFinished() override {
     updates_started_--;
     EXPECT_GE(updates_started_, 0);
   }
 
-  virtual void UpdateNotificationArea() override {
+  void UpdateNotificationArea() override {
     EXPECT_GE(updates_started_, 1);
   }
 
-  virtual void UpdateAccountChooser() override {
+  void UpdateAccountChooser() override {
     EXPECT_GE(updates_started_, 1);
   }
 
-  virtual void UpdateButtonStrip() override {
+  void UpdateButtonStrip() override {
     EXPECT_GE(updates_started_, 1);
   }
 
-  virtual void UpdateOverlay() override {
+  void UpdateOverlay() override {
     EXPECT_GE(updates_started_, 1);
   }
 
-  virtual void UpdateDetailArea() override {
+  void UpdateDetailArea() override {
     EXPECT_GE(updates_started_, 1);
   }
 
-  virtual void UpdateSection(DialogSection section) override {
+  void UpdateSection(DialogSection section) override {
     section_updates_[section]++;
     EXPECT_GE(updates_started_, 1);
   }
 
-  virtual void UpdateErrorBubble() override {
+  void UpdateErrorBubble() override {
     EXPECT_GE(updates_started_, 1);
   }
 
-  virtual void FillSection(DialogSection section,
-                           ServerFieldType originating_type) override {}
-  virtual void GetUserInput(DialogSection section, FieldValueMap* output)
-      override {
+  void FillSection(DialogSection section,
+                   ServerFieldType originating_type) override {}
+  void GetUserInput(DialogSection section, FieldValueMap* output) override {
     *output = outputs_[section];
   }
 
-  virtual base::string16 GetCvc() override { return base::string16(); }
+  base::string16 GetCvc() override { return base::string16(); }
 
-  virtual bool SaveDetailsLocally() override {
-    return save_details_locally_checked_;
-  }
+  bool SaveDetailsLocally() override { return save_details_locally_checked_; }
 
-  virtual const content::NavigationController* ShowSignIn(const GURL& url)
-      override {
+  const content::NavigationController* ShowSignIn(const GURL& url) override {
     return NULL;
   }
-  virtual void HideSignIn() override {}
+  void HideSignIn() override {}
 
   MOCK_METHOD0(ModelChanged, void());
   MOCK_METHOD0(UpdateForErrors, void());
 
-  virtual void OnSignInResize(const gfx::Size& pref_size) override {}
-  virtual void ValidateSection(DialogSection) override {}
+  void OnSignInResize(const gfx::Size& pref_size) override {}
+  void ValidateSection(DialogSection) override {}
 
   void SetUserInput(DialogSection section, const FieldValueMap& map) {
     outputs_[section] = map;
@@ -260,17 +258,19 @@ class TestAutofillDialogController
         mock_new_card_bubble_controller_(mock_new_card_bubble_controller),
         submit_button_delay_count_(0) {}
 
-  virtual ~TestAutofillDialogController() {}
+  ~TestAutofillDialogController() override {}
 
-  virtual AutofillDialogView* CreateView() override {
+  AutofillDialogView* CreateView() override {
     return new testing::NiceMock<TestAutofillDialogView>();
   }
 
   void Init(content::BrowserContext* browser_context) {
+    Profile* profile = Profile::FromBrowserContext(browser_context);
     test_manager_.Init(WebDataServiceFactory::GetAutofillWebDataForProfile(
-                           Profile::FromBrowserContext(browser_context),
+                           profile,
                            ServiceAccessType::EXPLICIT_ACCESS),
                        user_prefs::UserPrefs::Get(browser_context),
+                       AccountTrackerServiceFactory::GetForProfile(profile),
                        browser_context->IsOffTheRecord());
   }
 
@@ -329,24 +329,24 @@ class TestAutofillDialogController
   using AutofillDialogControllerImpl::SignedInState;
 
  protected:
-  virtual PersonalDataManager* GetManager() const override {
+  PersonalDataManager* GetManager() const override {
     return const_cast<TestAutofillDialogController*>(this)->
         GetTestingManager();
   }
 
-  virtual AddressValidator* GetValidator() override {
+  AddressValidator* GetValidator() override {
     return &mock_validator_;
   }
 
-  virtual wallet::WalletClient* GetWalletClient() override {
+  wallet::WalletClient* GetWalletClient() override {
     return &mock_wallet_client_;
   }
 
-  virtual void OpenTabWithUrl(const GURL& url) override {
+  void OpenTabWithUrl(const GURL& url) override {
     open_tab_url_ = url;
   }
 
-  virtual void ShowNewCreditCardBubble(
+  void ShowNewCreditCardBubble(
       scoped_ptr<CreditCard> new_card,
       scoped_ptr<AutofillProfile> billing_profile) override {
     mock_new_card_bubble_controller_->Show(new_card.Pass(),
@@ -355,7 +355,7 @@ class TestAutofillDialogController
 
   // AutofillDialogControllerImpl calls this method before showing the dialog
   // window.
-  virtual void SubmitButtonDelayBegin() override {
+  void SubmitButtonDelayBegin() override {
     // Do not delay enabling the submit button in testing.
     submit_button_delay_count_++;
   }
@@ -1129,7 +1129,7 @@ TEST_F(AutofillDialogControllerTest, AutofillProfileVariants) {
   EXPECT_CALL(*controller()->GetView(), ModelChanged());
   ui::MenuModel* shipping_model =
       controller()->MenuModelForSection(SECTION_SHIPPING);
-  ASSERT_TRUE(!!shipping_model);
+  ASSERT_TRUE(shipping_model);
   EXPECT_EQ(3, shipping_model->GetItemCount());
 
   // Set up some variant data.

@@ -116,7 +116,8 @@ void HttpStreamFactoryImpl::Request::OnWebSocketHandshakeStreamReady(
 void HttpStreamFactoryImpl::Request::OnStreamFailed(
     Job* job,
     int status,
-    const SSLConfig& used_ssl_config) {
+    const SSLConfig& used_ssl_config,
+    SSLFailureState ssl_failure_state) {
   DCHECK_NE(OK, status);
   DCHECK(job);
   if (!bound_job_.get()) {
@@ -139,7 +140,7 @@ void HttpStreamFactoryImpl::Request::OnStreamFailed(
   } else {
     DCHECK(jobs_.empty());
   }
-  delegate_->OnStreamFailed(status, used_ssl_config);
+  delegate_->OnStreamFailed(status, used_ssl_config, ssl_failure_state);
 }
 
 void HttpStreamFactoryImpl::Request::OnCertificateError(
@@ -234,6 +235,11 @@ bool HttpStreamFactoryImpl::Request::using_spdy() const {
   return using_spdy_;
 }
 
+const ConnectionAttempts& HttpStreamFactoryImpl::Request::connection_attempts()
+    const {
+  return connection_attempts_;
+}
+
 void
 HttpStreamFactoryImpl::Request::RemoveRequestFromSpdySessionRequestMap() {
   if (spdy_session_key_.get()) {
@@ -313,6 +319,12 @@ void HttpStreamFactoryImpl::Request::OnNewSpdySessionReady(
                                    using_spdy,
                                    net_log);
   }
+}
+
+void HttpStreamFactoryImpl::Request::AddConnectionAttempts(
+    const ConnectionAttempts& attempts) {
+  for (const auto& attempt : attempts)
+    connection_attempts_.push_back(attempt);
 }
 
 void HttpStreamFactoryImpl::Request::OrphanJobsExcept(Job* job) {

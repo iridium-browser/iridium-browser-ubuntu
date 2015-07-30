@@ -26,10 +26,15 @@ RE_RUNNER_FAIL = re.compile('\\[ RUNNER_FAILED \\] ?(.*)\r\n')
 # to output the CRASHED marker when a crash happens.
 RE_CRASH = re.compile('\\[ CRASHED      \\](.*)\r\n')
 
+# Bots that don't output anything for 20 minutes get timed out, so that's our
+# hard cap.
+_INFRA_STDOUT_TIMEOUT = 20 * 60
+
 
 def _TestSuiteRequiresMockTestServer(suite_name):
   """Returns True if the test suite requires mock test server."""
   tests_require_net_test_server = ['unit_tests', 'net_unittests',
+                                   'components_browsertests',
                                    'content_unittests',
                                    'content_browsertests']
   return (suite_name in
@@ -49,8 +54,7 @@ class TestRunner(base_test_runner.BaseTestRunner):
       test_package: An instance of TestPackage class.
     """
 
-    super(TestRunner, self).__init__(device, test_options.tool,
-                                     test_options.cleanup_test_files)
+    super(TestRunner, self).__init__(device, test_options.tool)
 
     self.test_package = test_package
     self.test_package.tool = self.tool
@@ -63,7 +67,8 @@ class TestRunner(base_test_runner.BaseTestRunner):
     if os.environ.get('BUILDBOT_SLAVENAME'):
       timeout = timeout * 2
 
-    self._timeout = timeout * self.tool.GetTimeoutScale()
+    self._timeout = min(timeout * self.tool.GetTimeoutScale(),
+                        _INFRA_STDOUT_TIMEOUT)
     if _TestSuiteRequiresHighPerfMode(self.test_package.suite_name):
       self._perf_controller = perf_control.PerfControl(self.device)
 

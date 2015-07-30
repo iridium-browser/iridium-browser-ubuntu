@@ -33,8 +33,15 @@ abstract class Stub extends core.MojoEventStreamListener {
     assert(result.status.isOk || result.status.isResourceExhausted);
 
     // Prepare the response.
-    var message = new ServiceMessage.fromMessage(new Message(bytes, handles));
-    var responseFuture = _isClosing ? null : handleMessage(message);
+    var message;
+    var responseFuture;
+    try {
+      message = new ServiceMessage.fromMessage(new Message(bytes, handles));
+      responseFuture = _isClosing ? null : handleMessage(message);
+    } catch (e, s) {
+      handles.forEach((h) => h.close());
+      rethrow;
+    }
 
     // If there's a response, send it.
     if (responseFuture != null) {
@@ -52,9 +59,11 @@ abstract class Stub extends core.MojoEventStreamListener {
             // This was the final response future for which we needed to send
             // a response. It is safe to close.
             super.close().then((_) {
-              _isClosing = false;
-              _closeCompleter.complete(null);
-              _closeCompleter = null;
+              if (_isClosing) {
+                _isClosing = false;
+                _closeCompleter.complete(null);
+                _closeCompleter = null;
+              }
             });
           }
         }
@@ -63,9 +72,11 @@ abstract class Stub extends core.MojoEventStreamListener {
       // We are closing, there is no response to send for this message, and
       // there are no outstanding response futures. Do the close now.
       super.close().then((_) {
-        _isClosing = false;
-        _closeCompleter.complete(null);
-        _closeCompleter = null;
+        if (_isClosing) {
+          _isClosing = false;
+          _closeCompleter.complete(null);
+          _closeCompleter = null;
+        }
       });
     }
   }
@@ -74,13 +85,13 @@ abstract class Stub extends core.MojoEventStreamListener {
     throw 'Unexpected write signal in client.';
   }
 
-  // NB: |nodefer| should only be true when calling close() while handling an
+  // NB: |immediate| should only be true when calling close() while handling an
   // exception thrown from handleRead(), e.g. when we receive a malformed
   // message, or when we have received the PEER_CLOSED event.
   @override
-  Future close({bool nodefer: false}) {
+  Future close({bool immediate: false}) {
     if (isOpen &&
-        !nodefer &&
+        !immediate &&
         (isInHandler || (_outstandingResponseFutures > 0))) {
       // Either close() is being called from within handleRead() or
       // handleWrite(), or close() is being called while there are outstanding
@@ -90,7 +101,7 @@ abstract class Stub extends core.MojoEventStreamListener {
       _closeCompleter = new Completer();
       return _closeCompleter.future;
     } else {
-      return super.close(nodefer: nodefer).then((_) {
+      return super.close(immediate: immediate).then((_) {
         if (_isClosing) {
           _isClosing = false;
           _closeCompleter.complete(null);

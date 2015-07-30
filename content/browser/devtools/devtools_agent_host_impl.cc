@@ -35,6 +35,16 @@ base::LazyInstance<AgentStateCallbacks>::Leaky g_callbacks =
 }  // namespace
 
 // static
+std::string DevToolsAgentHost::GetProtocolVersion() {
+  return std::string(devtools::kProtocolVersion);
+}
+
+// static
+bool DevToolsAgentHost::IsSupportedProtocolVersion(const std::string& version) {
+  return devtools::IsSupportedProtocolVersion(version);
+}
+
+// static
 DevToolsAgentHost::List DevToolsAgentHost::GetOrCreateAll() {
   List result;
   SharedWorkerDevToolsAgentHost::List shared_list;
@@ -71,7 +81,8 @@ DevToolsAgentHostImpl::DevToolsAgentHostImpl()
           base::Bind(&DevToolsAgentHostImpl::SendMessageToClient,
                      base::Unretained(this)))),
       id_(base::GenerateGUID()),
-      client_(NULL) {
+      client_(NULL),
+      handle_all_commands_(false) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   g_instances.Get()[id_] = this;
 }
@@ -106,7 +117,6 @@ void DevToolsAgentHostImpl::AttachClient(DevToolsAgentHostClient* client) {
   }
   client_ = client;
   Attach();
-  DevToolsManager::GetInstance()->AgentHostChanged(this);
 }
 
 void DevToolsAgentHostImpl::DetachClient() {
@@ -116,7 +126,6 @@ void DevToolsAgentHostImpl::DetachClient() {
   scoped_refptr<DevToolsAgentHostImpl> protect(this);
   client_ = NULL;
   Detach();
-  DevToolsManager::GetInstance()->AgentHostChanged(this);
 }
 
 bool DevToolsAgentHostImpl::IsAttached() {
@@ -144,10 +153,6 @@ void DevToolsAgentHostImpl::DisconnectWebContents() {
 void DevToolsAgentHostImpl::ConnectWebContents(WebContents* wc) {
 }
 
-bool DevToolsAgentHostImpl::IsWorker() const {
-  return false;
-}
-
 void DevToolsAgentHostImpl::HostClosed() {
   if (!client_)
     return;
@@ -157,7 +162,6 @@ void DevToolsAgentHostImpl::HostClosed() {
   DevToolsAgentHostClient* client = client_;
   client_ = NULL;
   client->AgentHostClosed(this, false);
-  DevToolsManager::GetInstance()->AgentHostChanged(this);
 }
 
 void DevToolsAgentHostImpl::SendMessageToClient(const std::string& message) {
@@ -183,7 +187,6 @@ void DevToolsAgentHost::DetachAllClients() {
       agent_host->client_ = NULL;
       client->AgentHostClosed(agent_host, true);
       agent_host->Detach();
-      DevToolsManager::GetInstance()->AgentHostChanged(protect);
     }
   }
 }
@@ -212,6 +215,7 @@ void DevToolsAgentHostImpl::NotifyCallbacks(
     DevToolsAgentHostImpl* agent_host, bool attached) {
   AgentStateCallbacks copy(g_callbacks.Get());
   DevToolsManager* manager = DevToolsManager::GetInstance();
+  manager->AgentHostStateChanged(agent_host, attached);
   if (manager->delegate())
     manager->delegate()->DevToolsAgentStateChanged(agent_host, attached);
   for (AgentStateCallbacks::iterator it = copy.begin(); it != copy.end(); ++it)
@@ -244,7 +248,10 @@ bool DevToolsAgentHostImpl::DispatchProtocolMessage(
     }
   }
 
-  return protocol_handler_->HandleOptionalCommand(command.Pass());
+  if (!handle_all_commands_)
+    return protocol_handler_->HandleOptionalCommand(command.Pass());
+  protocol_handler_->HandleCommand(command.Pass());
+  return true;
 }
 
 }  // namespace content

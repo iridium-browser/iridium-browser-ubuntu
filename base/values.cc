@@ -7,9 +7,9 @@
 #include <string.h>
 
 #include <algorithm>
+#include <cmath>
 #include <ostream>
 
-#include "base/float_util.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/move.h"
@@ -85,8 +85,8 @@ Value::~Value() {
 }
 
 // static
-Value* Value::CreateNullValue() {
-  return new Value(TYPE_NULL);
+scoped_ptr<Value> Value::CreateNullValue() {
+  return make_scoped_ptr(new Value(TYPE_NULL));
 }
 
 bool Value::GetAsBinary(const BinaryValue** out_value) const {
@@ -137,7 +137,11 @@ Value* Value::DeepCopy() const {
   // This method should only be getting called for null Values--all subclasses
   // need to provide their own implementation;.
   DCHECK(IsType(TYPE_NULL));
-  return CreateNullValue();
+  return CreateNullValue().release();
+}
+
+scoped_ptr<Value> Value::CreateDeepCopy() const {
+  return make_scoped_ptr(DeepCopy());
 }
 
 bool Value::Equals(const Value* other) const {
@@ -175,7 +179,7 @@ FundamentalValue::FundamentalValue(int in_value)
 
 FundamentalValue::FundamentalValue(double in_value)
     : Value(TYPE_DOUBLE), double_value_(in_value) {
-  if (!IsFinite(double_value_)) {
+  if (!std::isfinite(double_value_)) {
     NOTREACHED() << "Non-finite (i.e. NaN or positive/negative infinity) "
                  << "values cannot be represented in JSON";
     double_value_ = 0.0;
@@ -829,6 +833,10 @@ DictionaryValue* DictionaryValue::DeepCopy() const {
   return result;
 }
 
+scoped_ptr<DictionaryValue> DictionaryValue::CreateDeepCopy() const {
+  return make_scoped_ptr(DeepCopy());
+}
+
 bool DictionaryValue::Equals(const Value* other) const {
   if (other->GetType() != GetType())
     return false;
@@ -881,6 +889,10 @@ bool ListValue::Set(size_t index, Value* in_value) {
     list_[index] = in_value;
   }
   return true;
+}
+
+bool ListValue::Set(size_t index, scoped_ptr<Value> in_value) {
+  return Set(index, in_value.release());
 }
 
 bool ListValue::Get(size_t index, const Value** out_value) const {
@@ -1032,6 +1044,10 @@ ListValue::iterator ListValue::Erase(iterator iter,
   return list_.erase(iter);
 }
 
+void ListValue::Append(scoped_ptr<Value> in_value) {
+  Append(in_value.release());
+}
+
 void ListValue::Append(Value* in_value) {
   DCHECK(in_value);
   list_.push_back(in_value);
@@ -1119,6 +1135,10 @@ ListValue* ListValue::DeepCopy() const {
     result->Append((*i)->DeepCopy());
 
   return result;
+}
+
+scoped_ptr<ListValue> ListValue::CreateDeepCopy() const {
+  return make_scoped_ptr(DeepCopy());
 }
 
 bool ListValue::Equals(const Value* other) const {

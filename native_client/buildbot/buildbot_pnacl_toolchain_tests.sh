@@ -66,7 +66,7 @@ readonly SCONS_COMMON_SLOW="./scons --verbose bitcode=1 -j2"
 build-run-prerequisites() {
   local platform=$1
   ${SCONS_COMMON} platform=${platform} \
-    sel_ldr sel_universal irt_core
+    sel_ldr sel_universal irt_core elf_loader
 }
 
 
@@ -180,14 +180,31 @@ tc-test-bot() {
     build-run-prerequisites ${arch}
   done
 
-  # Run the torture tests.
+
+  # Run the torture tests and compiler_rt tests.
   for arch in ${archset}; do
+    echo "@@@BUILD_STEP pnacl bitcode compiler_rt tests@@@"
+    export PNACL_RUN_ARCH=${arch}
+    make -C toolchain_build/src/compiler-rt \
+      -f lib/builtins/Makefile-pnacl-bitcode \
+      TCROOT=${INSTALL_ABSPATH} nacltest-pnacl || handle-error
+
+    # The CC arg is just a dummy to keep the make scripts from complaining
+    # if clang is not found in PATH
+    echo "@@@BUILD_STEP clang compiler_rt tests $arch @@@"
+    make -C toolchain_build/src/compiler-rt TCROOT=${INSTALL_ABSPATH} \
+      CC=gcc nacltest-${arch} || handle-error
+
+    echo "@@@BUILD_STEP torture_tests_clang $arch @@@"
+    ${TORTURE_TEST} clang ${arch} --verbose \
+      --concurrency=${PNACL_CONCURRENCY} || handle-error
+
     if [[ "${arch}" == "x86-32" ]]; then
       # Torture tests on x86-32 are covered by tc-tests-all in
       # buildbot_pnacl.sh.
       continue
     fi
-    echo "@@@BUILD_STEP torture_tests $arch @@@"
+    echo "@@@BUILD_STEP torture_tests_pnacl $arch @@@"
     ${TORTURE_TEST} pnacl ${arch} --verbose \
       --concurrency=${PNACL_CONCURRENCY} || handle-error
   done

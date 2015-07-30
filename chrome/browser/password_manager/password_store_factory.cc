@@ -8,7 +8,7 @@
 #include "base/environment.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/prefs/pref_service.h"
-#include "chrome/browser/password_manager/password_manager_util.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/password_manager/sync_metrics.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
@@ -24,6 +24,7 @@
 #include "components/password_manager/core/browser/affiliation_service.h"
 #include "components/password_manager/core/browser/affiliation_utils.h"
 #include "components/password_manager/core/browser/login_database.h"
+#include "components/password_manager/core/browser/password_manager_util.h"
 #include "components/password_manager/core/browser/password_store.h"
 #include "components/password_manager/core/browser/password_store_default.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
@@ -103,6 +104,12 @@ bool ShouldAffiliationBasedMatchingBeActive(Profile* profile) {
          !profile_sync_service->IsUsingSecondaryPassphrase();
 }
 
+bool ShouldPropagatingPasswordChangesToWebCredentialsBeEnabled() {
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  return password_manager::IsPropagatingPasswordChangesToWebCredentialsEnabled(
+      *command_line);
+}
+
 void ActivateAffiliationBasedMatching(PasswordStore* password_store,
                                       Profile* profile) {
   DCHECK(password_store);
@@ -124,6 +131,8 @@ void ActivateAffiliationBasedMatching(PasswordStore* password_store,
                                                   affiliation_service.Pass()));
   affiliated_match_helper->Initialize();
   password_store->SetAffiliatedMatchHelper(affiliated_match_helper.Pass());
+  password_store->enable_propagating_password_changes_to_web_credentials(
+      ShouldPropagatingPasswordChangesToWebCredentialsBeEnabled());
 }
 
 }  // namespace
@@ -184,6 +193,21 @@ void PasswordStoreFactory::OnPasswordsSyncedStatePotentiallyChanged(
   }
 }
 
+// static
+void PasswordStoreFactory::TrimOrDeleteAffiliationCache(Profile* profile) {
+  scoped_refptr<PasswordStore> password_store =
+      GetForProfile(profile, ServiceAccessType::EXPLICIT_ACCESS);
+  if (password_store && password_store->HasAffiliatedMatchHelper()) {
+    password_store->TrimAffiliationCache();
+  } else {
+    scoped_refptr<base::SingleThreadTaskRunner> db_thread_runner(
+        content::BrowserThread::GetMessageLoopProxyForThread(
+            content::BrowserThread::DB));
+    password_manager::AffiliationService::DeleteCache(
+        GetAffiliationDatabasePath(profile), db_thread_runner.get());
+  }
+}
+
 PasswordStoreFactory::PasswordStoreFactory()
     : BrowserContextKeyedServiceFactory(
         "PasswordStore",
@@ -229,7 +253,7 @@ KeyedService* PasswordStoreFactory::BuildServiceInstanceFor(
       new password_manager::LoginDatabase(login_db_file_path));
 
   scoped_refptr<base::SingleThreadTaskRunner> main_thread_runner(
-      base::MessageLoopProxy::current());
+      base::ThreadTaskRunnerHandle::Get());
   scoped_refptr<base::SingleThreadTaskRunner> db_thread_runner(
       content::BrowserThread::GetMessageLoopProxyForThread(
           content::BrowserThread::DB));
@@ -348,10 +372,8 @@ void PasswordStoreFactory::RegisterProfilePrefs(
 #if !defined(OS_CHROMEOS) && defined(USE_X11)
   // Notice that the preprocessor conditions above are exactly those that will
   // result in using PasswordStoreX in BuildServiceInstanceFor().
-  registry->RegisterIntegerPref(
-      password_manager::prefs::kLocalProfileId,
-      kInvalidLocalProfileId,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterIntegerPref(password_manager::prefs::kLocalProfileId,
+                                kInvalidLocalProfileId);
 #endif
 }
 

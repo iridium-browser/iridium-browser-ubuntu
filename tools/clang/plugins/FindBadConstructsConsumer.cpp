@@ -70,20 +70,22 @@ bool IsGtestTestFixture(const CXXRecordDecl* decl) {
   return decl->getQualifiedNameAsString() == "testing::Test";
 }
 
+// Generates a fixit hint to remove the 'virtual' keyword.
+// Unfortunately, there doesn't seem to be a good way to determine the source
+// location of the 'virtual' keyword. It's available in Declarator, but that
+// isn't accessible from the AST. So instead, make an educated guess that the
+// first token is probably the virtual keyword. Strictly speaking, this doesn't
+// have to be true, but it probably will be.
+// TODO(dcheng): Add a warning to force virtual to always appear first ;-)
 FixItHint FixItRemovalForVirtual(const SourceManager& manager,
+                                 const LangOptions& lang_opts,
                                  const CXXMethodDecl* method) {
-  // Unfortunately, there doesn't seem to be a good way to determine the
-  // location of the 'virtual' keyword. It's available in Declarator, but that
-  // isn't accessible from the AST. So instead, make an educated guess that the
-  // first token is probably the virtual keyword. Strictly speaking, this
-  // doesn't have to be true, but it probably will be.
-  // TODO(dcheng): Add a warning to force virtual to always appear first ;-)
   SourceRange range(method->getLocStart());
   // Get the spelling loc just in case it was expanded from a macro.
   SourceRange spelling_range(manager.getSpellingLoc(range.getBegin()));
   // Sanity check that the text looks like virtual.
   StringRef text = clang::Lexer::getSourceText(
-      CharSourceRange::getTokenRange(spelling_range), manager, LangOptions());
+      CharSourceRange::getTokenRange(spelling_range), manager, lang_opts);
   if (text.trim() != "virtual")
     return FixItHint();
   return FixItHint::CreateRemoval(range);
@@ -100,7 +102,7 @@ bool IsPodOrTemplateType(const CXXRecordDecl& record) {
 
 FindBadConstructsConsumer::FindBadConstructsConsumer(CompilerInstance& instance,
                                                      const Options& options)
-    : ChromeClassTester(instance), options_(options) {
+    : ChromeClassTester(instance, options) {
   // Messages for virtual method specifiers.
   diag_method_requires_override_ =
       diagnostic().getCustomDiagID(getErrorLevel(), kMethodRequiresOverride);
@@ -289,12 +291,30 @@ void FindBadConstructsConsumer::CheckCtorDtorWeight(
         if (it->hasInlineBody()) {
           if (it->isCopyConstructor() &&
               !record->hasUserDeclaredCopyConstructor()) {
-            emitWarning(record_location,
-                        "Complex class/struct needs an explicit out-of-line "
-                        "copy constructor.");
+            // In general, implicit constructors are generated on demand.  But
+            // in the Windows component build, dllexport causes instantiation of
+            // the copy constructor which means that this fires on many more
+            // classes. For now, suppress this on dllexported classes.
+            // (This does mean that windows component builds will not emit this
+            // warning in some cases where it is emitted in other configs, but
+            // that's the better tradeoff at this point).
+            // TODO(dcheng): With the RecursiveASTVisitor, these warnings might
+            // be emitted on other platforms too, reevaluate if we want to keep
+            // surpressing this then http://crbug.com/467288
+            if (!record->hasAttr<DLLExportAttr>())
+              emitWarning(record_location,
+                          "Complex class/struct needs an explicit out-of-line "
+                          "copy constructor.");
           } else {
-            emitWarning(it->getInnerLocStart(),
-                        "Complex constructor has an inlined body.");
+            // See the comment in the previous branch about copy constructors.
+            // This does the same for implicit move constructors.
+            bool is_likely_compiler_generated_dllexport_move_ctor =
+                it->isMoveConstructor() &&
+                !record->hasUserDeclaredMoveConstructor() &&
+                record->hasAttr<DLLExportAttr>();
+            if (!is_likely_compiler_generated_dllexport_move_ctor)
+              emitWarning(it->getInnerLocStart(),
+                          "Complex constructor has an inlined body.");
           }
         } else if (it->isInlined() && !it->isInlineSpecified() &&
                    !it->isDeleted() && (!it->isCopyOrMoveConstructor() ||
@@ -351,6 +371,15 @@ bool FindBadConstructsConsumer::IsMethodInBannedOrTestingNamespace(
   }
 
   return false;
+}
+
+SuppressibleDiagnosticBuilder
+FindBadConstructsConsumer::ReportIfSpellingLocNotIgnored(
+    SourceLocation loc,
+    unsigned diagnostic_id) {
+  return SuppressibleDiagnosticBuilder(
+      &diagnostic(), loc, diagnostic_id,
+      InBannedDirectory(instance().getSourceManager().getSpellingLoc(loc)));
 }
 
 // Checks that virtual methods are correctly annotated, and have no body in a
@@ -410,49 +439,84 @@ void FindBadConstructsConsumer::CheckVirtualSpecifiers(
     return;
 
   SourceManager& manager = instance().getSourceManager();
+  const LangOptions& lang_opts = instance().getLangOpts();
 
   // Complain if a method is annotated virtual && (override || final).
   if (has_virtual && (override_attr || final_attr)) {
-    diagnostic().Report(method->getLocStart(),
-                        diag_redundant_virtual_specifier_)
+    // ... but only if virtual does not originate in a macro from a banned file.
+    // Note this is just an educated guess: the assumption here is that any
+    // macro for declaring methods will probably be at the start of the method's
+    // source range.
+    ReportIfSpellingLocNotIgnored(method->getLocStart(),
+                                  diag_redundant_virtual_specifier_)
         << "'virtual'"
         << (override_attr ? static_cast<Attr*>(override_attr) : final_attr)
-        << FixItRemovalForVirtual(manager, method);
+        << FixItRemovalForVirtual(manager, lang_opts, method);
   }
 
   // Complain if a method is an override and is not annotated with override or
   // final.
   if (is_override && !override_attr && !final_attr) {
-    SourceRange type_info_range =
-        method->getTypeSourceInfo()->getTypeLoc().getSourceRange();
-    FullSourceLoc loc(type_info_range.getBegin(), manager);
-
-    // Build the FixIt insertion point after the end of the method definition,
-    // including any const-qualifiers and attributes, and before the opening
-    // of the l-curly-brace (if inline) or the semi-color (if a declaration).
-    SourceLocation spelling_end =
-        manager.getSpellingLoc(type_info_range.getEnd());
-    if (spelling_end.isValid()) {
-      SourceLocation token_end =
-          Lexer::getLocForEndOfToken(spelling_end, 0, manager, LangOptions());
-      diagnostic().Report(token_end, diag_method_requires_override_)
-          << FixItHint::CreateInsertion(token_end, " override");
+    SourceRange range = method->getSourceRange();
+    SourceLocation loc;
+    if (method->hasInlineBody()) {
+      loc = method->getBody()->getSourceRange().getBegin();
     } else {
-      diagnostic().Report(loc, diag_method_requires_override_);
+      loc = Lexer::getLocForEndOfToken(manager.getSpellingLoc(range.getEnd()),
+                                       0, manager, lang_opts);
+      // The original code used the ending source loc of TypeSourceInfo's
+      // TypeLoc. Unfortunately, this breaks down in the presence of attributes.
+      // Attributes often appear at the end of a TypeLoc, e.g.
+      //   virtual ULONG __stdcall AddRef()
+      // has a TypeSourceInfo that looks something like:
+      //   ULONG AddRef() __attribute(stdcall)
+      // so a fix-it insertion would be generated to insert 'override' after
+      // __stdcall in the code as written.
+      // While using the spelling loc of the CXXMethodDecl fixes attribute
+      // handling, it breaks handling of "= 0" and similar constructs.. To work
+      // around this, scan backwards in the source text for a '=' or ')' token
+      // and adjust the location as needed...
+      for (SourceLocation l = loc.getLocWithOffset(-1);
+           l != manager.getLocForStartOfFile(manager.getFileID(loc));
+           l = l.getLocWithOffset(-1)) {
+        l = Lexer::GetBeginningOfToken(l, manager, lang_opts);
+        Token token;
+        // getRawToken() returns *true* on failure. In that case, just give up
+        // and don't bother generating a possibly incorrect fix-it.
+        if (Lexer::getRawToken(l, token, manager, lang_opts, true)) {
+          loc = SourceLocation();
+          break;
+        }
+        if (token.is(tok::r_paren)) {
+          break;
+        } else if (token.is(tok::equal)) {
+          loc = l;
+          break;
+        }
+      }
+    }
+    // Again, only emit the warning if it doesn't originate from a macro in
+    // a system header.
+    if (loc.isValid()) {
+      ReportIfSpellingLocNotIgnored(loc, diag_method_requires_override_)
+          << FixItHint::CreateInsertion(loc, " override");
+    } else {
+      ReportIfSpellingLocNotIgnored(range.getBegin(),
+                                    diag_method_requires_override_);
     }
   }
 
   if (final_attr && override_attr) {
-    diagnostic().Report(override_attr->getLocation(),
-                        diag_redundant_virtual_specifier_)
+    ReportIfSpellingLocNotIgnored(override_attr->getLocation(),
+                                  diag_redundant_virtual_specifier_)
         << override_attr << final_attr
         << FixItHint::CreateRemoval(override_attr->getRange());
   }
 
   if (final_attr && !is_override) {
-    diagnostic().Report(method->getLocStart(),
-                        diag_base_method_virtual_and_final_)
-        << FixItRemovalForVirtual(manager, method)
+    ReportIfSpellingLocNotIgnored(method->getLocStart(),
+                                  diag_base_method_virtual_and_final_)
+        << FixItRemovalForVirtual(manager, lang_opts, method)
         << FixItHint::CreateRemoval(final_attr->getRange());
   }
 }
@@ -464,9 +528,27 @@ void FindBadConstructsConsumer::CheckVirtualBodies(
   if (method->hasBody() && method->hasInlineBody()) {
     if (CompoundStmt* cs = dyn_cast<CompoundStmt>(method->getBody())) {
       if (cs->size()) {
-        emitWarning(cs->getLBracLoc(),
-                    "virtual methods with non-empty bodies shouldn't be "
-                    "declared inline.");
+        SourceLocation loc = cs->getLBracLoc();
+        // CR_BEGIN_MSG_MAP_EX and BEGIN_SAFE_MSG_MAP_EX try to be compatible
+        // to BEGIN_MSG_MAP(_EX).  So even though they are in chrome code,
+        // we can't easily fix them, so explicitly whitelist them here.
+        bool emit = true;
+        if (loc.isMacroID()) {
+          SourceManager& manager = instance().getSourceManager();
+          if (InBannedDirectory(manager.getSpellingLoc(loc)))
+            emit = false;
+          else {
+            StringRef name = Lexer::getImmediateMacroName(
+                loc, manager, instance().getLangOpts());
+            if (name == "CR_BEGIN_MSG_MAP_EX" ||
+                name == "BEGIN_SAFE_MSG_MAP_EX")
+              emit = false;
+          }
+        }
+        if (emit)
+          emitWarning(loc,
+                      "virtual methods with non-empty bodies shouldn't be "
+                      "declared inline.");
       }
     }
   }
@@ -492,7 +574,7 @@ void FindBadConstructsConsumer::CountType(const Type* type,
       bool whitelisted_template = false;
 
       // HACK: I'm at a loss about how to get the syntax checker to get
-      // whether a template is exterened or not. For the first pass here,
+      // whether a template is externed or not. For the first pass here,
       // just do retarded string comparisons.
       if (TemplateDecl* decl = name.getAsTemplateDecl()) {
         std::string base_name = decl->getNameAsString();
@@ -554,13 +636,6 @@ FindBadConstructsConsumer::CheckRecordForRefcountIssue(
   }
 
   return None;
-}
-
-// Adds either a warning or error, based on the current handling of
-// -Werror.
-DiagnosticsEngine::Level FindBadConstructsConsumer::getErrorLevel() {
-  return diagnostic().getWarningsAsErrors() ? DiagnosticsEngine::Error
-                                            : DiagnosticsEngine::Warning;
 }
 
 // Returns true if |base| specifies one of the Chromium reference counted

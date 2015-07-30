@@ -6,10 +6,10 @@
             "order": 1
         },
         {
-            "type": "@WebInspector.StatusBarItem.Provider",
-            "className": "WebInspector.ScreencastApp.StatusBarButtonProvider",
+            "type": "@WebInspector.ToolbarItem.Provider",
+            "className": "WebInspector.ScreencastApp.ToolbarButtonProvider",
             "order": 1,
-            "location": "toolbar-left"
+            "location": "main-toolbar-left"
         }
     ],
     "dependencies": [
@@ -19,7 +19,7 @@
         "ScreencastApp.js",
         "ScreencastView.js"
     ],
-    "stylesheets": [
+    "resources": [
         "screencastView.css"
     ]
 }

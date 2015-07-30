@@ -162,6 +162,18 @@ void GCMDriverAndroid::SetLastTokenFetchTime(const base::Time& time) {
 void GCMDriverAndroid::WakeFromSuspendForHeartbeat(bool wake) {
 }
 
+InstanceIDStore* GCMDriverAndroid::GetInstanceIDStore() {
+  // Not supported for Android.
+  return NULL;
+}
+
+void GCMDriverAndroid::AddHeartbeatInterval(const std::string& scope,
+                                            int interval_ms) {
+}
+
+void GCMDriverAndroid::RemoveHeartbeatInterval(const std::string& scope) {
+}
+
 GCMClient::Result GCMDriverAndroid::EnsureStarted(
     GCMClient::StartMode start_mode) {
   // TODO(johnme): Maybe we should check if GMS is available?

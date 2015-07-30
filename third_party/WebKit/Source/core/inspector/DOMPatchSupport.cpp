@@ -194,13 +194,13 @@ bool DOMPatchSupport::innerPatchNode(Digest* oldDigest, Digest* newDigest, Excep
         // FIXME: Create a function in Element for removing all properties. Take in account whether did/willModifyAttribute are important.
         while (oldElement->attributesWithoutUpdate().size()) {
             const Attribute& attribute = oldElement->attributesWithoutUpdate().at(0);
-            if (!m_domEditor->removeAttribute(oldElement, attribute.localName(), exceptionState))
+            if (!m_domEditor->removeAttribute(oldElement, attribute.name().toString(), exceptionState))
                 return false;
         }
 
         // FIXME: Create a function in Element for copying properties. cloneDataFromElement() is close but not enough for this case.
         for (auto& attribute : newElement->attributesWithoutUpdate()) {
-            if (!m_domEditor->setAttribute(oldElement, attribute.name().localName(), attribute.value(), exceptionState))
+            if (!m_domEditor->setAttribute(oldElement, attribute.name().toString(), attribute.value(), exceptionState))
                 return false;
         }
     }
@@ -400,7 +400,7 @@ bool DOMPatchSupport::innerPatchChildren(ContainerNode* parentNode, const Vector
     return true;
 }
 
-static void addStringToDigestor(blink::WebCryptoDigestor* digestor, const String& string)
+static void addStringToDigestor(WebCryptoDigestor* digestor, const String& string)
 {
     digestor->consume(reinterpret_cast<const unsigned char*>(string.utf8().data()), string.length());
 }
@@ -409,7 +409,7 @@ PassOwnPtr<DOMPatchSupport::Digest> DOMPatchSupport::createDigest(Node* node, Un
 {
     Digest* digest = new Digest(node);
 
-    OwnPtr<blink::WebCryptoDigestor> digestor = createDigestor(HashAlgorithmSha1);
+    OwnPtr<WebCryptoDigestor> digestor = createDigestor(HashAlgorithmSha1);
     DigestValue digestResult;
 
     Node::NodeType nodeType = node->nodeType();
@@ -429,7 +429,7 @@ PassOwnPtr<DOMPatchSupport::Digest> DOMPatchSupport::createDigest(Node* node, Un
 
         AttributeCollection attributes = element.attributesWithoutUpdate();
         if (!attributes.isEmpty()) {
-            OwnPtr<blink::WebCryptoDigestor> attrsDigestor = createDigestor(HashAlgorithmSha1);
+            OwnPtr<WebCryptoDigestor> attrsDigestor = createDigestor(HashAlgorithmSha1);
             for (auto& attribute : attributes) {
                 addStringToDigestor(attrsDigestor.get(), attribute.name().toString());
                 addStringToDigestor(attrsDigestor.get(), attribute.value().string());

@@ -496,15 +496,13 @@ ScriptValueSerializer::StateBase* ScriptValueSerializer::AbstractObjectState::se
 {
     while (m_index < m_propertyNames->Length()) {
         if (!m_nameDone) {
-            v8::Local<v8::Value> propertyName = m_propertyNames->Get(m_index);
-            if (StateBase* newState = serializer.checkException(this))
-                return newState;
-            if (propertyName.IsEmpty())
-                return serializer.handleError(InputError, "Empty property names cannot be cloned.", this);
+            v8::Local<v8::Value> propertyName;
+            if (!m_propertyNames->Get(serializer.context(), m_index).ToLocal(&propertyName))
+                return serializer.handleError(JSException, "Failed to get a property while cloning an object.", this);
             bool hasStringProperty = propertyName->IsString() && v8CallBoolean(composite()->HasRealNamedProperty(serializer.context(), propertyName.As<v8::String>()));
             if (StateBase* newState = serializer.checkException(this))
                 return newState;
-            bool hasIndexedProperty = !hasStringProperty && propertyName->IsUint32() && v8CallBoolean(composite()->HasRealIndexedProperty(serializer.context(), propertyName->Uint32Value()));
+            bool hasIndexedProperty = !hasStringProperty && propertyName->IsUint32() && v8CallBoolean(composite()->HasRealIndexedProperty(serializer.context(), propertyName.As<v8::Uint32>()->Value()));
             if (StateBase* newState = serializer.checkException(this))
                 return newState;
             if (hasStringProperty || (hasIndexedProperty && !ignoreIndexed)) {
@@ -520,9 +518,9 @@ ScriptValueSerializer::StateBase* ScriptValueSerializer::AbstractObjectState::se
             if (StateBase* newState = serializer.doSerialize(m_propertyName, this))
                 return newState;
         }
-        v8::Local<v8::Value> value = composite()->Get(m_propertyName);
-        if (StateBase* newState = serializer.checkException(this))
-            return newState;
+        v8::Local<v8::Value> value;
+        if (!composite()->Get(serializer.context(), m_propertyName).ToLocal(&value))
+            return serializer.handleError(JSException, "Failed to get a property while cloning an object.", this);
         m_nameDone = false;
         m_propertyName.Clear();
         ++m_index;
@@ -553,7 +551,9 @@ ScriptValueSerializer::StateBase* ScriptValueSerializer::ObjectState::objectDone
 ScriptValueSerializer::StateBase* ScriptValueSerializer::DenseArrayState::advance(ScriptValueSerializer& serializer)
 {
     while (m_arrayIndex < m_arrayLength) {
-        v8::Local<v8::Value> value = composite().As<v8::Array>()->Get(m_arrayIndex);
+        v8::Local<v8::Value> value;
+        if (!composite().As<v8::Array>()->Get(serializer.context(), m_arrayIndex).ToLocal(&value))
+            return serializer.handleError(JSException, "Failed to get an element while cloning an array.", this);
         m_arrayIndex++;
         if (StateBase* newState = serializer.checkException(this))
             return newState;
@@ -583,6 +583,8 @@ static v8::Local<v8::Object> toV8Object(MessagePort* impl, v8::Local<v8::Object>
     if (!impl)
         return v8::Local<v8::Object>();
     v8::Local<v8::Value> wrapper = toV8(impl, creationContext, isolate);
+    if (wrapper.IsEmpty())
+        return v8::Local<v8::Object>();
     ASSERT(wrapper->IsObject());
     return wrapper.As<v8::Object>();
 }
@@ -592,6 +594,8 @@ static v8::Local<v8::ArrayBuffer> toV8Object(DOMArrayBuffer* impl, v8::Local<v8:
     if (!impl)
         return v8::Local<v8::ArrayBuffer>();
     v8::Local<v8::Value> wrapper = toV8(impl, creationContext, isolate);
+    if (wrapper.IsEmpty())
+        return v8::Local<v8::ArrayBuffer>();
     ASSERT(wrapper->IsArrayBuffer());
     return wrapper.As<v8::ArrayBuffer>();
 }
@@ -604,7 +608,7 @@ static bool isHostObject(v8::Local<v8::Object> object)
     // them; conveniently, this is also a quick way to detect DOM wrapper objects, because
     // the mechanism for these relies on data stored in these fields. We should
     // catch external array data as a special case.
-    return object->InternalFieldCount() || object->HasIndexedPropertiesInExternalArrayData();
+    return object->InternalFieldCount();
 }
 
 ScriptValueSerializer::ScriptValueSerializer(SerializedScriptValueWriter& writer, MessagePortArray* messagePorts, ArrayBufferArray* arrayBuffers, WebBlobInfoArray* blobInfo, BlobDataHandleMap& blobDataHandles, v8::TryCatch& tryCatch, ScriptState* scriptState)
@@ -673,9 +677,9 @@ ScriptValueSerializer::StateBase* ScriptValueSerializer::doSerializeValue(v8::Lo
     } else if (value->IsFalse()) {
         m_writer.writeFalse();
     } else if (value->IsInt32()) {
-        m_writer.writeInt32(value->Int32Value());
+        m_writer.writeInt32(value.As<v8::Int32>()->Value());
     } else if (value->IsUint32()) {
-        m_writer.writeUint32(value->Uint32Value());
+        m_writer.writeUint32(value.As<v8::Uint32>()->Value());
     } else if (value->IsNumber()) {
         m_writer.writeNumber(value.As<v8::Number>()->Value());
     } else if (V8ArrayBufferView::hasInstance(value, isolate())) {
@@ -697,7 +701,7 @@ ScriptValueSerializer::StateBase* ScriptValueSerializer::doSerializeValue(v8::Lo
             return handleError(DataCloneError, "An object could not be cloned.", next);
         greyObject(jsObject);
         if (value->IsDate()) {
-            m_writer.writeDate(value->NumberValue());
+            m_writer.writeDate(value.As<v8::Date>()->ValueOf());
         } else if (value->IsStringObject()) {
             writeStringObject(value);
         } else if (value->IsNumberObject()) {
@@ -836,6 +840,8 @@ ScriptValueSerializer::StateBase* ScriptValueSerializer::writeCompositorProxy(v8
     CompositorProxy* compositorProxy = V8CompositorProxy::toImpl(value.As<v8::Object>());
     if (!compositorProxy)
         return nullptr;
+    if (!compositorProxy->connected())
+        return handleError(DataCloneError, "A CompositorProxy object has been disconnected, and could therefore not be cloned.", next);
     m_writer.writeCompositorProxy(*compositorProxy);
     return nullptr;
 }
@@ -1398,14 +1404,14 @@ bool SerializedScriptValueReader::readImageData(v8::Local<v8::Value>* value)
         return false;
     if (m_position + pixelDataLength > m_length)
         return false;
-    RefPtrWillBeRawPtr<ImageData> imageData = ImageData::create(IntSize(width, height));
+    ImageData* imageData = ImageData::create(IntSize(width, height));
     DOMUint8ClampedArray* pixelArray = imageData->data();
     ASSERT(pixelArray);
     ASSERT(pixelArray->length() >= pixelDataLength);
     memcpy(pixelArray->data(), m_buffer + m_position, pixelDataLength);
     m_position += pixelDataLength;
-    *value = toV8(imageData.release(), m_scriptState->context()->Global(), isolate());
-    return true;
+    *value = toV8(imageData, m_scriptState->context()->Global(), isolate());
+    return !value->IsEmpty();
 }
 
 bool SerializedScriptValueReader::readCompositorProxy(v8::Local<v8::Value>* value)
@@ -1419,7 +1425,7 @@ bool SerializedScriptValueReader::readCompositorProxy(v8::Local<v8::Value>* valu
 
     CompositorProxy* compositorProxy = CompositorProxy::create(element, attributes);
     *value = toV8(compositorProxy, m_scriptState->context()->Global(), isolate());
-    return true;
+    return !value->IsEmpty();
 }
 
 PassRefPtr<DOMArrayBuffer> SerializedScriptValueReader::doReadArrayBuffer()
@@ -1440,7 +1446,7 @@ bool SerializedScriptValueReader::readArrayBuffer(v8::Local<v8::Value>* value)
     if (!arrayBuffer)
         return false;
     *value = toV8(arrayBuffer.release(), m_scriptState->context()->Global(), isolate());
-    return true;
+    return !value->IsEmpty();
 }
 
 bool SerializedScriptValueReader::readArrayBufferView(v8::Local<v8::Value>* value, ScriptValueCompositeCreator& creator)
@@ -1585,7 +1591,7 @@ bool SerializedScriptValueReader::readBlob(v8::Local<v8::Value>* value, bool isI
         blob = Blob::create(getOrCreateBlobDataHandle(uuid, type, size));
     }
     *value = toV8(blob, m_scriptState->context()->Global(), isolate());
-    return true;
+    return !value->IsEmpty();
 }
 
 bool SerializedScriptValueReader::readFile(v8::Local<v8::Value>* value, bool isIndexed)
@@ -1601,7 +1607,7 @@ bool SerializedScriptValueReader::readFile(v8::Local<v8::Value>* value, bool isI
     if (!file)
         return false;
     *value = toV8(file, m_scriptState->context()->Global(), isolate());
-    return true;
+    return !value->IsEmpty();
 }
 
 bool SerializedScriptValueReader::readFileList(v8::Local<v8::Value>* value, bool isIndexed)
@@ -1626,7 +1632,7 @@ bool SerializedScriptValueReader::readFileList(v8::Local<v8::Value>* value, bool
         fileList->append(file);
     }
     *value = toV8(fileList, m_scriptState->context()->Global(), isolate());
-    return true;
+    return !value->IsEmpty();
 }
 
 File* SerializedScriptValueReader::readFileHelper()
@@ -1819,10 +1825,15 @@ bool ScriptValueDeserializer::completeDenseArray(uint32_t numProperties, uint32_
         return false;
     if (length > stackDepth())
         return false;
+    v8::Isolate* isolate = m_reader.scriptState()->isolate();
+    v8::Local<v8::Context> context = m_reader.scriptState()->context();
     for (unsigned i = 0, stackPos = stackDepth() - length; i < length; i++, stackPos++) {
         v8::Local<v8::Value> elem = element(stackPos);
-        if (!elem->IsUndefined())
-            array->Set(i, elem);
+        if (!elem->IsUndefined()) {
+            // TODO(jsbell): Use DefineOwnProperty when exposed by v8. http://crbug.com/475206
+            if (!v8CallBoolean(array->ForceSet(context, v8::Integer::New(isolate, i), elem)))
+                return false;
+        }
     }
     pop(length);
     return true;
@@ -1841,7 +1852,7 @@ bool ScriptValueDeserializer::tryGetTransferredMessagePort(uint32_t index, v8::L
         return false;
     v8::Local<v8::Object> creationContext = m_reader.scriptState()->context()->Global();
     *object = toV8(m_transferredMessagePorts->at(index).get(), creationContext, m_reader.scriptState()->isolate());
-    return true;
+    return !object->IsEmpty();
 }
 
 bool ScriptValueDeserializer::tryGetTransferredArrayBuffer(uint32_t index, v8::Local<v8::Value>* object)
@@ -1856,6 +1867,8 @@ bool ScriptValueDeserializer::tryGetTransferredArrayBuffer(uint32_t index, v8::L
         v8::Isolate* isolate = m_reader.scriptState()->isolate();
         v8::Local<v8::Object> creationContext = m_reader.scriptState()->context()->Global();
         result = toV8(buffer.get(), creationContext, isolate);
+        if (result.IsEmpty())
+            return false;
         m_arrayBuffers[index] = result;
     }
     *object = result;
@@ -1880,10 +1893,13 @@ bool ScriptValueDeserializer::initializeObject(v8::Local<v8::Object> object, uin
     unsigned length = 2 * numProperties;
     if (length > stackDepth())
         return false;
+    v8::Local<v8::Context> context = m_reader.scriptState()->context();
     for (unsigned i = stackDepth() - length; i < stackDepth(); i += 2) {
         v8::Local<v8::Value> propertyName = element(i);
         v8::Local<v8::Value> propertyValue = element(i + 1);
-        object->Set(propertyName, propertyValue);
+        // TODO(jsbell): Use DefineOwnProperty when exposed by v8. http://crbug.com/475206
+        if (!v8CallBoolean(object->ForceSet(context, propertyName, propertyValue)))
+            return false;
     }
     pop(length);
     *value = object;

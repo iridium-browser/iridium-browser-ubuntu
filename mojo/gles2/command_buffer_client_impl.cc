@@ -8,8 +8,8 @@
 
 #include "base/logging.h"
 #include "base/process/process_handle.h"
-#include "mojo/services/gles2/command_buffer_type_conversions.h"
-#include "mojo/services/gles2/mojo_buffer_backing.h"
+#include "components/gles2/command_buffer_type_conversions.h"
+#include "components/gles2/mojo_buffer_backing.h"
 
 namespace gles2 {
 
@@ -121,7 +121,9 @@ CommandBufferClientImpl::CommandBufferClientImpl(
       last_put_offset_(-1),
       next_transfer_buffer_id_(0),
       async_waiter_(async_waiter) {
-  command_buffer_.Bind(command_buffer_handle.Pass(), async_waiter);
+  command_buffer_.Bind(mojo::InterfacePtrInfo<mojo::CommandBuffer>(
+                           command_buffer_handle.Pass(), 0u),
+                       async_waiter);
   command_buffer_.set_error_handler(this);
 }
 

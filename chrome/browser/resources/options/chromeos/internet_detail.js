@@ -18,6 +18,8 @@ cr.define('options.internet', function() {
 
   /** @const */ var GoogleNameServers = ['8.8.4.4', '8.8.8.8'];
   /** @const */ var CarrierGenericUMTS = 'Generic UMTS';
+  /** @const */ var CarrierSprint = 'Sprint';
+  /** @const */ var CarrierVerizon = 'Verizon Wireless';
 
   /**
    * Helper function to set hidden attribute for elements matching a selector.
@@ -169,6 +171,35 @@ cr.define('options.internet', function() {
     return prefixLength;
   }
 
+  // Returns true if we should show the 'View Account' button for |onc|.
+  // TODO(stevenjb): We should query the Mobile Config API for whether or not to
+  // show the 'View Account' button once it is integrated with Settings.
+  function shouldShowViewAccountButton(onc) {
+    var activationState = onc.getActiveValue('Cellular.ActivationState');
+    if (activationState != 'Activating' && activationState != 'Activated')
+      return false;
+
+    // If no online payment URL was provided by Shill, only show 'View Account'
+    // for Verizon Wireless.
+    if (!onc.getActiveValue('Cellular.PaymentPortal.Url') &&
+        onc.getActiveValue('Cellular.Carrier') != CarrierVerizon) {
+      return false;
+    }
+
+    // 'View Account' should only be shown for connected networks, or
+    // disconnected LTE networks with a valid MDN.
+    var connectionState = onc.getActiveValue('ConnectionState');
+    if (connectionState != 'Connected') {
+      var technology = onc.getActiveValue('Cellular.NetworkTechnology');
+      if (technology != 'LTE' && technology != 'LTEAdvanced')
+        return false;
+      if (!onc.getActiveValue('Cellular.MDN'))
+        return false;
+    }
+
+    return true;
+  }
+
   /////////////////////////////////////////////////////////////////////////////
   // DetailsInternetPage class:
 
@@ -204,11 +235,15 @@ cr.define('options.internet', function() {
     initializePage: function() {
       Page.prototype.initializePage.call(this);
       this.initializePageContents_();
+
+      chrome.networkingPrivate.onNetworksChanged.addListener(
+          this.onNetworksChanged_.bind(this));
+
       this.showNetworkDetails_();
     },
 
     /**
-     * Auto-activates the network details dialog if network information
+     * Automatically shows the network details dialog if network information
      * is included in the URL.
      */
     showNetworkDetails_: function() {
@@ -218,6 +253,22 @@ cr.define('options.internet', function() {
       chrome.send('loadVPNProviders');
       chrome.networkingPrivate.getManagedProperties(
           guid, DetailsInternetPage.initializeDetailsPage);
+    },
+
+    /**
+     * networkingPrivate callback when networks change.
+     * @param {Array<string>} changes List of GUIDs whose properties have
+     *     changed.
+     * @private
+     */
+    onNetworksChanged_: function(changes) {
+      if (!this.onc_)
+        return;
+      var guid = this.onc_.guid();
+      if (changes.indexOf(guid) != -1) {
+        chrome.networkingPrivate.getManagedProperties(
+          guid, DetailsInternetPage.updateConnectionData);
+      }
     },
 
     /**
@@ -686,27 +737,33 @@ cr.define('options.internet', function() {
         return;
       }
 
+      var connectable = onc.getActiveValue('Connectable');
       var connectState = onc.getActiveValue('ConnectionState');
       if (connectState == 'NotConnected') {
+        $('details-internet-disconnect').hidden = true;
         $('details-internet-login').hidden = false;
         // Connecting to an unconfigured network might trigger certificate
         // installation UI. Until that gets handled here, always enable the
-        // Connect button.
-        $('details-internet-login').disabled = false;
-        $('details-internet-disconnect').hidden = true;
+        // Connect button for built-in networks.
+        var enabled = (this.type_ != 'VPN') ||
+                      (onc.getActiveValue('VPN.Type') != 'ThirdPartyVPN') ||
+                      connectable;
+        $('details-internet-login').disabled = !enabled;
       } else {
         $('details-internet-login').hidden = true;
         $('details-internet-disconnect').hidden = false;
       }
 
-      var connectable = onc.getActiveValue('Connectable');
-      if (connectState != 'Connected' &&
-          (!connectable || onc.getWiFiSecurity() != 'None' ||
-          (this.type_ == 'WiMAX' || this.type_ == 'VPN'))) {
-        $('details-internet-configure').hidden = false;
-      } else {
-        $('details-internet-configure').hidden = true;
+      var showConfigure = false;
+      if (this.type_ == 'VPN') {
+        showConfigure = true;
+      } else if (this.type_ == 'WiMAX' && connectState == 'NotConnected') {
+        showConfigure = true;
+      } else if (this.type_ == 'WiFi') {
+        showConfigure = (connectState == 'NotConnected' &&
+                         (!connectable || onc.getWiFiSecurity() != 'None'));
       }
+      $('details-internet-configure').hidden = !showConfigure;
     },
 
     /**
@@ -736,10 +793,10 @@ cr.define('options.internet', function() {
           $('sim-card-lock-enabled').checked = lockEnabled;
           $('change-pin').hidden = !lockEnabled;
         }
-        showViewAccount = onc.getActiveValue('showViewAccountButton');
+        showViewAccount = shouldShowViewAccountButton(onc);
         var activationState = onc.getActiveValue('Cellular.ActivationState');
-        showActivate = activationState == 'NotActivated' ||
-            activationState == 'PartiallyActivated';
+        showActivate = (activationState == 'NotActivated' ||
+                        activationState == 'PartiallyActivated');
       }
 
       $('view-account-details').hidden = !showViewAccount;
@@ -760,7 +817,6 @@ cr.define('options.internet', function() {
       $('network-details-title').textContent =
           this.networkTitle_ || onc.getTranslatedValue('Name');
 
-      var connectionState = onc.getActiveValue('ConnectionState');
       var connectionStateString = onc.getTranslatedValue('ConnectionState');
       $('network-details-subtitle-status').textContent = connectionStateString;
 
@@ -980,9 +1036,7 @@ cr.define('options.internet', function() {
      * Event Listener for the cellular-apn-cancel button.
      * @private
      */
-    cancelApn_: function() {
-      this.initializeApnList_();
-    },
+    cancelApn_: function() { this.initializeApnList_(); },
 
     /**
      * Event Listener for the select-apn button.
@@ -1044,6 +1098,8 @@ cr.define('options.internet', function() {
    * Shows a spinner while the carrier is changed.
    */
   DetailsInternetPage.showCarrierChangeSpinner = function(visible) {
+    if (!DetailsInternetPage.getInstance().visible)
+      return;
     $('switch-carrier-spinner').hidden = !visible;
     // Disable any buttons that allow us to operate on cellular networks.
     DetailsInternetPage.changeCellularButtonsState(visible);
@@ -1056,7 +1112,37 @@ cr.define('options.internet', function() {
     var carrierSelector = $('select-carrier');
     var carrier = carrierSelector[carrierSelector.selectedIndex].textContent;
     DetailsInternetPage.showCarrierChangeSpinner(true);
-    chrome.send('setCarrier', [carrier]);
+    var guid = DetailsInternetPage.getInstance().onc_.guid();
+    var oncData = new OncData({});
+    oncData.setProperty('Cellular.Carrier', carrier);
+    chrome.networkingPrivate.setProperties(guid, oncData.getData(), function() {
+      // Start activation or show the activation UI after changing carriers.
+      DetailsInternetPage.activateCellular(guid);
+    });
+  };
+
+  /**
+   * If the network is not already activated, starts the activation process or
+   * shows the activation UI. Otherwise does nothing.
+   */
+  DetailsInternetPage.activateCellular = function(guid) {
+    chrome.networkingPrivate.getProperties(guid, function(properties) {
+      var oncData = new OncData(properties);
+      if (oncData.getActiveValue('Cellular.ActivationState') == 'Activated') {
+        DetailsInternetPage.showCarrierChangeSpinner(false);
+        return;
+      }
+      var carrier = oncData.getActiveValue('Cellular.Carrier');
+      if (carrier == CarrierSprint) {
+        // Sprint is directly ativated, call startActivate().
+        chrome.networkingPrivate.startActivate(guid, '', function() {
+          DetailsInternetPage.showCarrierChangeSpinner(false);
+        });
+      } else {
+        DetailsInternetPage.showCarrierChangeSpinner(false);
+        chrome.send('showMorePlanInfo', [guid]);
+      }
+    });
   };
 
   /**
@@ -1125,19 +1211,65 @@ cr.define('options.internet', function() {
       }
   };
 
-  DetailsInternetPage.updateCarrier = function() {
-    DetailsInternetPage.showCarrierChangeSpinner(false);
+  DetailsInternetPage.loginFromDetails = function() {
+    DetailsInternetPage.configureOrConnect();
+    PageManager.closeOverlay();
   };
 
-  DetailsInternetPage.loginFromDetails = function() {
+  /**
+   * This function identifies unconfigured networks and networks that are
+   * likely to fail (e.g. due to a bad passphrase on a previous connect
+   * attempt). For such networks a configure dialog will be opened. Otherwise
+   * a connection will be attempted.
+   */
+  DetailsInternetPage.configureOrConnect = function() {
     var detailsPage = DetailsInternetPage.getInstance();
     if (detailsPage.type_ == 'WiFi')
       sendChromeMetricsAction('Options_NetworkConnectToWifi');
     else if (detailsPage.type_ == 'VPN')
       sendChromeMetricsAction('Options_NetworkConnectToVPN');
-    // TODO(stevenjb): chrome.networkingPrivate.startConnect
-    chrome.send('startConnect', [detailsPage.onc_.guid()]);
-    PageManager.closeOverlay();
+
+    var onc = detailsPage.onc_;
+    var guid = onc.guid();
+    var type = onc.getActiveValue('Type');
+
+    // Built-in VPNs do not correctly set 'Connectable', so we always show the
+    // configuration UI.
+    if (type == 'VPN') {
+      if (onc.getActiveValue('VPN.Type') != 'ThirdPartyVPN') {
+        chrome.send('configureNetwork', [guid]);
+        return;
+      }
+    }
+
+    // If 'Connectable' is false for WiFi or WiMAX, Shill requires
+    // additional configuration to connect, so show the configuration UI.
+    if ((type == 'WiFi' || type == 'WiMAX') &&
+        !onc.getActiveValue('Connectable')) {
+      chrome.send('configureNetwork', [guid]);
+      return;
+    }
+
+    // Secure WiFi networks with ErrorState set most likely require
+    // configuration (e.g. a correct passphrase) before connecting.
+    if (type == 'WiFi' && onc.getWiFiSecurity() != 'None') {
+      var errorState = onc.getActiveValue('ErrorState');
+      if (errorState && errorState != 'Unknown') {
+        chrome.send('configureNetwork', [guid]);
+        return;
+      }
+    }
+
+    // Cellular networks need to be activated before they can be connected to.
+    if (type == 'Cellular') {
+      var activationState = onc.getActiveValue('Cellular.ActivationState');
+      if (activationState != 'Activated' && activationState != 'Unknown') {
+        DetailsInternetPage.activateCellular(guid);
+        return;
+      }
+    }
+
+    chrome.networkingPrivate.startConnect(guid);
   };
 
   DetailsInternetPage.disconnectNetwork = function() {
@@ -1152,15 +1284,17 @@ cr.define('options.internet', function() {
 
   DetailsInternetPage.configureNetwork = function() {
     var detailsPage = DetailsInternetPage.getInstance();
-    chrome.send('configureNetwork', [detailsPage.onc_.guid()]);
+    // This is an explicit request to show the configure dialog; do not show
+    // the enrollment dialog for networks missing a certificate.
+    var forceShow = true;
+    chrome.send('configureNetwork', [detailsPage.onc_.guid(), forceShow]);
     PageManager.closeOverlay();
   };
 
   DetailsInternetPage.activateFromDetails = function() {
     var detailsPage = DetailsInternetPage.getInstance();
-    if (detailsPage.type_ == 'Cellular') {
-      chrome.send('activateNetwork', [detailsPage.onc_.guid()]);
-    }
+    if (detailsPage.type_ == 'Cellular')
+      DetailsInternetPage.activateCellular(detailsPage.onc_.guid());
     PageManager.closeOverlay();
   };
 
@@ -1314,9 +1448,6 @@ cr.define('options.internet', function() {
     detailsPage.populateHeader_();
     detailsPage.updateConnectionButtonVisibilty_();
     detailsPage.updateDetails_();
-
-    // Inform chrome which network to pass events for in InternetOptionsHandler.
-    chrome.send('setNetworkGuid', [detailsPage.onc_.guid()]);
 
     // TODO(stevenjb): Some of the setup below should be moved to
     // updateDetails_() so that updates are reflected in the UI.

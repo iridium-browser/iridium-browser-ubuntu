@@ -12,10 +12,11 @@
 #include "libANGLE/Config.h"
 #include "libANGLE/Display.h"
 #include "libANGLE/Surface.h"
+#include "libANGLE/histogram_macros.h"
 #include "libANGLE/renderer/d3d/RendererD3D.h"
 #include "libANGLE/renderer/d3d/SurfaceD3D.h"
 #include "libANGLE/renderer/d3d/SwapChainD3D.h"
-#include "platform/Platform.h"
+#include "libANGLE/renderer/d3d/DeviceD3D.h"
 
 #include <EGL/eglext.h>
 
@@ -33,7 +34,7 @@
 
 #if !defined(ANGLE_DEFAULT_D3D11)
 // Enables use of the Direct3D 11 API for a default display, when available
-#   define ANGLE_DEFAULT_D3D11 0
+#   define ANGLE_DEFAULT_D3D11 1
 #endif
 
 namespace rx
@@ -108,10 +109,9 @@ egl::Error CreateRendererD3D(egl::Display *display, RendererD3D **outRenderer)
             if (renderer->getRendererClass() == RENDERER_D3D11)
             {
                 ASSERT(result.getID() >= 0 && result.getID() < NUM_D3D11_INIT_ERRORS);
-
-                angle::Platform *platform = ANGLEPlatformCurrent();
-                platform->histogramEnumeration("GPU.ANGLE.D3D11InitializeResult",
-                                               result.getID(), NUM_D3D11_INIT_ERRORS);
+                ANGLE_HISTOGRAM_ENUMERATION("GPU.ANGLE.D3D11InitializeResult",
+                                            result.getID(),
+                                            NUM_D3D11_INIT_ERRORS);
             }
 #       endif
 
@@ -119,10 +119,9 @@ egl::Error CreateRendererD3D(egl::Display *display, RendererD3D **outRenderer)
             if (renderer->getRendererClass() == RENDERER_D3D9)
             {
                 ASSERT(result.getID() >= 0 && result.getID() < NUM_D3D9_INIT_ERRORS);
-
-                angle::Platform *platform = ANGLEPlatformCurrent();
-                platform->histogramEnumeration("GPU.ANGLE.D3D9InitializeResult",
-                                               result.getID(), NUM_D3D9_INIT_ERRORS);
+                ANGLE_HISTOGRAM_ENUMERATION("GPU.ANGLE.D3D9InitializeResult",
+                                            result.getID(),
+                                            NUM_D3D9_INIT_ERRORS);
             }
 #       endif
 
@@ -142,12 +141,15 @@ egl::Error CreateRendererD3D(egl::Display *display, RendererD3D **outRenderer)
 }
 
 DisplayD3D::DisplayD3D()
-    : mRenderer(nullptr)
+    : mRenderer(nullptr),
+      mDevice(nullptr)
 {
 }
 
-egl::Error DisplayD3D::createWindowSurface(const egl::Config *configuration, EGLNativeWindowType window,
-                                           const egl::AttributeMap &attribs, SurfaceImpl **outSurface)
+
+SurfaceImpl *DisplayD3D::createWindowSurface(const egl::Config *configuration,
+                                             EGLNativeWindowType window,
+                                             const egl::AttributeMap &attribs)
 {
     ASSERT(mRenderer != nullptr);
 
@@ -161,68 +163,47 @@ egl::Error DisplayD3D::createWindowSurface(const egl::Config *configuration, EGL
         height = -1;
     }
 
-    SurfaceD3D *surface = SurfaceD3D::createFromWindow(mRenderer, mDisplay, configuration, window, fixedSize,
-                                                       width, height);
-    egl::Error error = surface->initialize();
-    if (error.isError())
-    {
-        SafeDelete(surface);
-        return error;
-    }
-
-    *outSurface = surface;
-    return egl::Error(EGL_SUCCESS);
+    return SurfaceD3D::createFromWindow(
+        mRenderer, mDisplay, configuration, window, fixedSize, width, height);
 }
 
-egl::Error DisplayD3D::createPbufferSurface(const egl::Config *configuration, const egl::AttributeMap &attribs,
-                                            SurfaceImpl **outSurface)
+SurfaceImpl *DisplayD3D::createPbufferSurface(const egl::Config *configuration,
+                                              const egl::AttributeMap &attribs)
 {
     ASSERT(mRenderer != nullptr);
 
     EGLint width = attribs.get(EGL_WIDTH, 0);
     EGLint height = attribs.get(EGL_HEIGHT, 0);
 
-    SurfaceD3D *surface = SurfaceD3D::createOffscreen(mRenderer, mDisplay, configuration, NULL, width, height);
-    egl::Error error = surface->initialize();
-    if (error.isError())
-    {
-        SafeDelete(surface);
-        return error;
-    }
-
-    *outSurface = surface;
-    return egl::Error(EGL_SUCCESS);
+    return SurfaceD3D::createOffscreen(mRenderer, mDisplay, configuration, nullptr, width, height);
 }
 
-egl::Error DisplayD3D::createPbufferFromClientBuffer(const egl::Config *configuration, EGLClientBuffer shareHandle,
-                                                     const egl::AttributeMap &attribs, SurfaceImpl **outSurface)
+SurfaceImpl *DisplayD3D::createPbufferFromClientBuffer(const egl::Config *configuration,
+                                                       EGLClientBuffer shareHandle,
+                                                       const egl::AttributeMap &attribs)
 {
     ASSERT(mRenderer != nullptr);
 
     EGLint width = attribs.get(EGL_WIDTH, 0);
     EGLint height = attribs.get(EGL_HEIGHT, 0);
 
-    SurfaceD3D *surface = SurfaceD3D::createOffscreen(mRenderer, mDisplay, configuration, shareHandle,
-                                                      width, height);
-    egl::Error error = surface->initialize();
-    if (error.isError())
-    {
-        SafeDelete(surface);
-        return error;
-    }
-
-    *outSurface = surface;
-    return egl::Error(EGL_SUCCESS);
+    return SurfaceD3D::createOffscreen(
+        mRenderer, mDisplay, configuration, shareHandle, width, height);
 }
 
-egl::Error DisplayD3D::createPixmapSurface(const egl::Config *configuration, NativePixmapType nativePixmap,
-                                           const egl::AttributeMap &attribs, SurfaceImpl **outSurface)
+SurfaceImpl *DisplayD3D::createPixmapSurface(const egl::Config *configuration,
+                                             NativePixmapType nativePixmap,
+                                             const egl::AttributeMap &attribs)
 {
-    ASSERT(mRenderer != nullptr);
-
     UNIMPLEMENTED();
-    *outSurface = nullptr;
-    return egl::Error(EGL_BAD_DISPLAY);
+    return nullptr;
+}
+
+egl::Error DisplayD3D::getDevice(DeviceImpl **device)
+{
+    *device = reinterpret_cast<DeviceImpl*>(mDevice);
+    ASSERT(*device != nullptr);
+    return egl::Error(EGL_SUCCESS);
 }
 
 egl::Error DisplayD3D::createContext(const egl::Config *config, const gl::Context *shareContext, const egl::AttributeMap &attribs,
@@ -247,11 +228,21 @@ egl::Error DisplayD3D::initialize(egl::Display *display)
 {
     ASSERT(mRenderer == nullptr && display != nullptr);
     mDisplay = display;
-    return CreateRendererD3D(display, &mRenderer);
+    egl::Error error = CreateRendererD3D(display, &mRenderer);
+    if (error.isError())
+    {
+        return error;
+    }
+
+    ASSERT(mDevice == nullptr);
+    mDevice = new DeviceD3D(mRenderer);
+
+    return egl::Error(EGL_SUCCESS);
 }
 
 void DisplayD3D::terminate()
 {
+    SafeDelete(mDevice);
     SafeDelete(mRenderer);
 }
 
@@ -331,6 +322,8 @@ void DisplayD3D::generateExtensions(egl::DisplayExtensions *outExtensions) const
     }
 
     outExtensions->createContext = true;
+
+    outExtensions->deviceQuery = true;
 }
 
 std::string DisplayD3D::getVendorString() const

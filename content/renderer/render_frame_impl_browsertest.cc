@@ -33,6 +33,8 @@ class RenderFrameImplTest : public RenderViewTest {
 
   void SetUp() override {
     RenderViewTest::SetUp();
+    EXPECT_FALSE(static_cast<RenderFrameImpl*>(view_->GetMainRenderFrame())
+                     ->is_subframe_);
 
     FrameMsg_NewFrame_WidgetParams widget_params;
     widget_params.routing_id = kSubframeWidgetRouteId;
@@ -46,17 +48,17 @@ class RenderFrameImplTest : public RenderViewTest {
 
     LoadHTML("Parent frame <iframe name='frame'></iframe>");
 
-    FrameReplicationState replicationState("frame");
-
     RenderFrameImpl::FromWebFrame(
         view_->GetMainRenderFrame()->GetWebFrame()->firstChild())
         ->OnSwapOut(kFrameProxyRouteId, false, FrameReplicationState());
 
     RenderFrameImpl::CreateFrame(kSubframeRouteId, kFrameProxyRouteId,
-                                 MSG_ROUTING_NONE, FrameReplicationState(),
+                                 MSG_ROUTING_NONE, MSG_ROUTING_NONE,
+                                 FrameReplicationState(),
                                  compositor_deps_.get(), widget_params);
 
     frame_ = RenderFrameImpl::FromRoutingID(kSubframeRouteId);
+    EXPECT_TRUE(frame_->is_subframe_);
   }
 
   // Loads the given HTML into the frame as a data: URL and blocks until
@@ -125,7 +127,7 @@ TEST_F(RenderFrameImplTest, MAYBE_FrameResize) {
   resize_params.top_controls_height = 0.f;
   resize_params.top_controls_shrink_blink_size = false;
   resize_params.resizer_rect = gfx::Rect();
-  resize_params.is_fullscreen = false;
+  resize_params.is_fullscreen_granted = false;
 
   scoped_ptr<IPC::Message> resize_message(new ViewMsg_Resize(0, resize_params));
   FrameWidget()->OnMessageReceived(*resize_message);

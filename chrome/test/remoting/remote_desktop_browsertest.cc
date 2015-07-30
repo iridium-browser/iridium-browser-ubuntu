@@ -387,7 +387,7 @@ void RemoteDesktopBrowserTest::DisconnectMe2Me() {
 
   ASSERT_TRUE(RemoteDesktopBrowserTest::IsSessionConnected());
 
-  ExecuteScript("remoting.app.disconnect();");
+  ExecuteScript("remoting.app.getActivity().stop();");
 
   EXPECT_TRUE(HtmlElementVisible("client-dialog"));
   EXPECT_TRUE(HtmlElementVisible("client-reconnect-button"));
@@ -487,6 +487,7 @@ void RemoteDesktopBrowserTest::LoadBrowserTestJavaScript(
   LoadScript(content, FILE_PATH_LITERAL("mock_session_connector.js"));
   LoadScript(content, FILE_PATH_LITERAL("mock_signal_strategy.js"));
   LoadScript(content, FILE_PATH_LITERAL("timeout_waiter.js"));
+  LoadScript(content, FILE_PATH_LITERAL("sinon.js"));
 }
 
 void RemoteDesktopBrowserTest::Cleanup() {
@@ -509,6 +510,7 @@ void RemoteDesktopBrowserTest::Cleanup() {
 }
 
 content::WebContents* RemoteDesktopBrowserTest::SetUpTest() {
+  LOG(INFO) << "Starting Test Setup.";
   VerifyInternetAccess();
   Install();
   content::WebContents* app_web_content = LaunchChromotingApp(false);
@@ -841,9 +843,7 @@ bool RemoteDesktopBrowserTest::IsSessionConnected() {
   DismissHostVersionWarningIfVisible();
 
   return ExecuteScriptAndExtractBool(
-      "remoting.clientSession != null && "
-      "remoting.clientSession.getState() == "
-      "remoting.ClientSession.State.CONNECTED");
+      "remoting.currentMode === remoting.AppMode.IN_SESSION");
 }
 
 bool RemoteDesktopBrowserTest::IsPinFormVisible() {

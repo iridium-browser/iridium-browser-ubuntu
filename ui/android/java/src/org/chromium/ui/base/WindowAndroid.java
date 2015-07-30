@@ -13,11 +13,15 @@ import android.app.PendingIntent;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Process;
 import android.util.Log;
 import android.util.SparseArray;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.accessibility.AccessibilityManager;
 import android.widget.Toast;
 
@@ -28,6 +32,7 @@ import org.chromium.ui.VSyncMonitor;
 import java.lang.ref.WeakReference;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedList;
 
 /**
  * The window base class that has the minimum functionality.
@@ -81,6 +86,10 @@ public class WindowAndroid {
     private HashSet<Animator> mAnimationsOverContent = new HashSet<Animator>();
     private View mAnimationPlaceholderView;
 
+    private ViewGroup mKeyboardAccessoryView;
+
+    private boolean mIsKeyboardShowing = false;
+
     // System accessibility service.
     private final AccessibilityManager mAccessibilityManager;
 
@@ -89,6 +98,15 @@ public class WindowAndroid {
 
     // On KitKat and higher, a class that monitors the touch exploration state.
     private TouchExplorationMonitor mTouchExplorationMonitor;
+
+    /**
+     * An interface to notify listeners of changes in the soft keyboard's visibility.
+     */
+    public interface KeyboardVisibilityListener {
+        public void keyboardVisibilityChanged(boolean isShowing);
+    }
+    private LinkedList<KeyboardVisibilityListener> mKeyboardVisibilityListeners =
+            new LinkedList<KeyboardVisibilityListener>();
 
     private final VSyncMonitor.Listener mVSyncListener = new VSyncMonitor.Listener() {
         @Override
@@ -199,6 +217,66 @@ public class WindowAndroid {
     }
 
     /**
+     * Determine whether access to a particular permission is granted.
+     * @param permission The permission whose access is to be checked.
+     * @return Whether access to the permission is granted.
+     */
+    public boolean hasPermission(String permission) {
+        return mApplicationContext.checkPermission(permission, Process.myPid(), Process.myUid())
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    /**
+     * Determine whether the specified permission can be requested.
+     *
+     * <p>
+     * A permission can be requested in the following states:
+     * 1.) Default un-granted state, permission can be requested
+     * 2.) Permission previously requested but denied by the user, but the user did not select
+     *     "Never ask again".
+     *
+     * @param permission The permission name.
+     * @return Whether the requesting the permission is allowed.
+     */
+    public boolean canRequestPermission(String permission) {
+        Log.w(TAG, "Cannot determine the request permission state as the context "
+                + "is not an Activity");
+        assert false : "Failed to determine the request permission state using a WindowAndroid "
+                + "without an Activity";
+        return false;
+    }
+
+    /**
+     * Requests the specified permissions are granted for further use.
+     * @param permissions The list of permissions to request access to.
+     * @param callback The callback to be notified whether the permissions were granted.
+     */
+    public void requestPermissions(String[] permissions, PermissionCallback callback) {
+        Log.w(TAG, "Cannot request permissions as the context is not an Activity");
+        assert false : "Failed to request permissions using a WindowAndroid without an Activity";
+    }
+
+    /**
+     * Determine whether access to file is granted.
+     */
+    public boolean hasFileAccess() {
+        return true;
+    }
+
+    /**
+     * Requests the access to files.
+     * @param callback The callback to be notified whether access were granted.
+     */
+    public void requestFileAccess(final FileAccessCallback callback) {
+        new Handler().post(new Runnable() {
+            @Override
+            public void run() {
+                callback.onFileAccessResult(false);
+            }
+        });
+    }
+
+    /**
      * Displays an error message with a provided error message string.
      * @param error The error message string to be displayed.
      */
@@ -273,14 +351,21 @@ public class WindowAndroid {
     }
 
     /**
-     * Responds to the intent result if the intent was created by the native window.
-     * @param requestCode Request code of the requested intent.
-     * @param resultCode Result code of the requested intent.
-     * @param data The data returned by the intent.
-     * @return Boolean value of whether the intent was started by the native window.
+     * For window instances associated with an activity, notifies any listeners
+     * that the activity has been paused.
      */
-    public boolean onActivityResult(int requestCode, int resultCode, Intent data) {
-        return false;
+    protected void onActivityPaused() {
+        if (mNativeWindowAndroid == 0) return;
+        nativeOnActivityPaused(mNativeWindowAndroid);
+    }
+
+    /**
+     * For window instances associated with an activity, notifies any listeners
+     * that the activity has been paused.
+     */
+    protected void onActivityResumed() {
+        if (mNativeWindowAndroid == 0) return;
+        nativeOnActivityResumed(mNativeWindowAndroid);
     }
 
     @CalledByNative
@@ -301,6 +386,29 @@ public class WindowAndroid {
          */
         void onIntentCompleted(WindowAndroid window, int resultCode,
                 ContentResolver contentResolver, Intent data);
+    }
+
+    /**
+     * Callback for permission requests.
+     */
+    public interface PermissionCallback {
+        /**
+         * Called upon completing a permission request.
+         * @param permissions The list of permissions in the result.
+         * @param grantResults Whether the permissions were granted.
+         */
+        void onRequestPermissionsResult(String[] permissions, int[] grantResults);
+    }
+
+    /**
+     * Callback for file access requests.
+     */
+    public interface FileAccessCallback {
+        /**
+         * Called upon completing a file access request.
+         * @param granted Whether file access is granted.
+         */
+        void onFileAccessResult(boolean granted);
     }
 
     /**
@@ -357,6 +465,66 @@ public class WindowAndroid {
     }
 
     /**
+     * Sets the keyboard accessory view.
+     * @param view This view sits at the bottom of the content area and pushes the content up rather
+     *             than overlaying it. Currently used as a container for Autofill suggestions.
+     */
+    public void setKeyboardAccessoryView(ViewGroup view) {
+        mKeyboardAccessoryView = view;
+    }
+
+    /**
+     * {@see setKeyboardAccessoryView(ViewGroup)}.
+     */
+    public ViewGroup getKeyboardAccessoryView() {
+        return mKeyboardAccessoryView;
+    }
+
+    protected void registerKeyboardVisibilityCallbacks() {
+    }
+
+    protected void unregisterKeyboardVisibilityCallbacks() {
+    }
+
+    /**
+     * Adds a listener that is updated of keyboard visibility changes. This works as a best guess.
+     * {@see UiUtils.isKeyboardShowing}
+     */
+    public void addKeyboardVisibilityListener(KeyboardVisibilityListener listener) {
+        if (mKeyboardVisibilityListeners.isEmpty()) {
+            registerKeyboardVisibilityCallbacks();
+        }
+        mKeyboardVisibilityListeners.add(listener);
+    }
+
+    /**
+     * {@see addKeyboardVisibilityListener()}.
+     */
+    public void removeKeyboardVisibilityListener(KeyboardVisibilityListener listener) {
+        mKeyboardVisibilityListeners.remove(listener);
+        if (mKeyboardVisibilityListeners.isEmpty()) {
+            unregisterKeyboardVisibilityCallbacks();
+        }
+    }
+
+    /**
+     * To be called when the keyboard visibility state might have changed. Informs listeners of the
+     * state change IFF there actually was a change.
+     * @param isShowing The current (guesstimated) state of the keyboard.
+     */
+    protected void keyboardVisibilityPossiblyChanged(boolean isShowing) {
+        if (mIsKeyboardShowing == isShowing) return;
+        mIsKeyboardShowing = isShowing;
+
+        // Clone the list in case a listener tries to remove itself during the callback.
+        LinkedList<KeyboardVisibilityListener> listeners =
+                new LinkedList<KeyboardVisibilityListener>(mKeyboardVisibilityListeners);
+        for (KeyboardVisibilityListener listener : listeners) {
+            listener.keyboardVisibilityChanged(isShowing);
+        }
+    }
+
+    /**
      * Start a post-layout animation on top of web content.
      *
      * By default, Android optimizes what it shows on top of SurfaceViews (saves power).
@@ -409,6 +577,8 @@ public class WindowAndroid {
     private native void nativeOnVSync(long nativeWindowAndroid,
                                       long vsyncTimeMicros,
                                       long vsyncPeriodMicros);
+    private native void nativeOnActivityPaused(long nativeWindowAndroid);
+    private native void nativeOnActivityResumed(long nativeWindowAndroid);
     private native void nativeDestroy(long nativeWindowAndroid);
 
 }

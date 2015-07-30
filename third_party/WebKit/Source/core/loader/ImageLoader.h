@@ -23,6 +23,7 @@
 #ifndef ImageLoader_h
 #define ImageLoader_h
 
+#include "core/CoreExport.h"
 #include "core/fetch/ImageResource.h"
 #include "core/fetch/ImageResourceClient.h"
 #include "core/fetch/ResourcePtr.h"
@@ -37,7 +38,7 @@ class IncrementLoadEventDelayCount;
 class FetchRequest;
 class Document;
 
-class ImageLoaderClient : public WillBeGarbageCollectedMixin {
+class CORE_EXPORT ImageLoaderClient : public WillBeGarbageCollectedMixin {
 public:
     virtual void notifyImageSourceChanged() = 0;
 
@@ -57,7 +58,7 @@ class LayoutImageResource;
 template<typename T> class EventSender;
 typedef EventSender<ImageLoader> ImageEventSender;
 
-class ImageLoader : public NoBaseWillBeGarbageCollectedFinalized<ImageLoader>, public ImageResourceClient {
+class CORE_EXPORT ImageLoader : public NoBaseWillBeGarbageCollectedFinalized<ImageLoader>, public ImageResourceClient {
 public:
     explicit ImageLoader(Element*);
     virtual ~ImageLoader();
@@ -72,7 +73,9 @@ public:
         // FIXME - Verify that this is the right behavior according to the spec.
         UpdateIgnorePreviousError,
         // This forces the image to update its intrinsic size, even if the image source has not changed.
-        UpdateSizeChanged
+        UpdateSizeChanged,
+        // This force the image to refetch and reload the image source, even if it has not changed.
+        UpdateForcedReload
     };
 
     enum BypassMainWorldBehavior {
@@ -107,6 +110,8 @@ public:
 
     void addClient(ImageLoaderClient*);
     void removeClient(ImageLoaderClient*);
+
+    virtual bool getImageAnimationPolicy(ImageResource*, ImageAnimationPolicy&) override final;
 protected:
     virtual void notifyFinished(Resource*) override;
 
@@ -126,7 +131,7 @@ private:
     void dispatchPendingErrorEvent();
 
     LayoutImageResource* layoutImageResource();
-    void updateRenderer();
+    void updateLayoutObject();
 
     void setImageWithoutConsideringPendingLoadEvent(ImageResource*);
     void sourceImageChanged();

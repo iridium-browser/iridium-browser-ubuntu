@@ -73,6 +73,7 @@ class WebPluginImpl : public WebPlugin,
   virtual NPObject* scriptableObject();
   virtual struct _NPP* pluginNPP();
   virtual bool getFormValue(blink::WebString& value);
+  virtual void layoutIfNeeded() override;
   virtual void paint(
       blink::WebCanvas* canvas, const blink::WebRect& paint_rect);
   virtual void updateGeometry(
@@ -132,7 +133,7 @@ class WebPluginImpl : public WebPlugin,
   bool CheckIfRunInsecureContent(const GURL& url) override;
 #if defined(OS_WIN)
   void SetWindowlessData(HANDLE pump_messages_event,
-                         gfx::NativeViewId dummy_activation_window) { }
+                         gfx::NativeViewId dummy_activation_window) override {}
   void ReparentPluginWindow(HWND window, HWND parent) { }
   void ReportExecutableMemory(size_t size) { }
 #endif

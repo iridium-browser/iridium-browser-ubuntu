@@ -21,6 +21,7 @@ source_set("browser") {
   deps = [
     "//base",
     "//base:base_static",
+    "//components/mime_util",
     "//content:resources",
     "//content/browser/background_sync:background_sync_proto",
     "//content/browser/cache_storage:cache_storage_proto",
@@ -89,8 +90,6 @@ source_set("browser") {
               "$root_gen_dir/blink/grit/devtools_resources.h",
               "$root_gen_dir/blink/grit/devtools_resources_map.cc",
               "$root_gen_dir/blink/grit/devtools_resources_map.h",
-              "$root_gen_dir/content/browser/devtools/protocol/devtools_protocol_dispatcher.cc",
-              "$root_gen_dir/content/browser/devtools/protocol/devtools_protocol_dispatcher.h",
               "$root_gen_dir/content/browser/tracing/grit/tracing_resources.h",
               "$root_gen_dir/ui/resources/grit/webui_resources_map.cc",
             ],
@@ -100,13 +99,15 @@ source_set("browser") {
     deps += [
       "//cc",
       "//cc/surfaces",
+      "//components/scheduler:common",
       "//content/app/resources",
       "//content/app/strings",
+      "//content/browser/devtools:gen_devtools_protocol_handler",
       "//content/browser/devtools:resources",
       "//content/common:mojo_bindings",
       "//content/public/common:mojo_bindings",
       "//device/bluetooth",
-      "//net:http_server",
+      "//mojo/application/public/interfaces",
       "//storage/browser",
       "//storage/common",
       "//third_party/WebKit/public:image_resources",
@@ -116,7 +117,6 @@ source_set("browser") {
       "//third_party/leveldatabase",
       "//third_party/libyuv",
       "//third_party/mojo/src/mojo/public/cpp/bindings",
-      "//third_party/mojo/src/mojo/public/interfaces/application",
       "//third_party/mojo/src/mojo/public/js",
       "//ui/events/blink",
       "//ui/resources",
@@ -196,12 +196,6 @@ source_set("browser") {
       defines += [ "ENABLE_SCREEN_CAPTURE=1" ]
       deps += [ "//third_party/webrtc/modules/desktop_capture" ]
     }
-    if (is_linux || is_mac) {
-      sources += [
-        "renderer_host/media/video_capture_texture_wrapper.cc",
-        "renderer_host/media/video_capture_texture_wrapper.h",
-      ]
-    }
   }
 
   if (is_win) {
@@ -223,6 +217,7 @@ source_set("browser") {
       "dinput8.lib",
       "dwmapi.lib",
       "dxguid.lib",
+      "oleacc.lib",
       "sensorsapi.lib",
       "portabledeviceguids.lib",
     ]
@@ -321,6 +316,7 @@ source_set("browser") {
       "geolocation/network_location_provider.h",
       "geolocation/network_location_request.cc",
       "geolocation/network_location_request.h",
+      "renderer_host/begin_frame_observer_proxy.cc",
       "tracing/tracing_ui.cc",
       "tracing/tracing_ui.h",
 
@@ -361,8 +357,16 @@ source_set("browser") {
       "geolocation/empty_wifi_data_provider.cc",
       "geolocation/empty_wifi_data_provider.h",
     ]
-    deps += [ "//ui/accelerated_widget_mac" ]
-    libs += [ "bsm" ]
+    deps += [
+      "//sandbox/mac:sandbox",
+      "//third_party/mozilla",
+      "//third_party/sudden_motion_sensor",
+      "//ui/accelerated_widget_mac",
+    ]
+    libs += [
+      "bsm",
+      "QTKit.framework",
+    ]
   }
 
   if (is_chromeos) {
@@ -382,6 +386,8 @@ source_set("browser") {
     ]
   } else {  # Not aura.
     sources -= [
+      "renderer_host/compositor_resize_lock_aura.cc",
+      "renderer_host/compositor_resize_lock_aura.h",
       "renderer_host/input/synthetic_gesture_target_aura.cc",
       "renderer_host/input/synthetic_gesture_target_aura.h",
       "renderer_host/native_web_keyboard_event_aura.cc",
@@ -395,10 +401,12 @@ source_set("browser") {
       "web_contents/aura/gesture_nav_simple.h",
       "web_contents/aura/overscroll_navigation_overlay.cc",
       "web_contents/aura/overscroll_navigation_overlay.h",
+      "web_contents/aura/overscroll_window_animation.cc",
+      "web_contents/aura/overscroll_window_animation.h",
+      "web_contents/aura/overscroll_window_delegate.cc",
+      "web_contents/aura/overscroll_window_delegate.h",
       "web_contents/aura/shadow_layer_delegate.cc",
       "web_contents/aura/shadow_layer_delegate.h",
-      "web_contents/aura/window_slider.cc",
-      "web_contents/aura/window_slider.h",
       "web_contents/touch_editable_impl_aura.cc",
       "web_contents/touch_editable_impl_aura.h",
       "web_contents/web_contents_view_aura.cc",
@@ -420,8 +428,8 @@ source_set("browser") {
 
     if (!use_ozone) {
       sources -= [
-        "compositor/overlay_candidate_validator_ozone.cc",
-        "compositor/overlay_candidate_validator_ozone.h",
+        "compositor/browser_compositor_overlay_candidate_validator_ozone.cc",
+        "compositor/browser_compositor_overlay_candidate_validator_ozone.h",
         "compositor/software_output_device_ozone.cc",
         "compositor/software_output_device_ozone.h",
       ]

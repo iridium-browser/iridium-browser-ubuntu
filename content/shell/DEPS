@@ -1,5 +1,6 @@
 include_rules = [
   "+gin/public",
+  "+gin/v8_initializer.h",
   "+v8/include",
 
   # For chromeos build config
@@ -23,6 +24,8 @@ include_rules = [
   "+ui/views",
 
   "+components/crash",
+  "+components/devtools_discovery",
+  "+components/devtools_http_handler",
 
   # For enabling media related features.
   "+media/base/media_switches.h",

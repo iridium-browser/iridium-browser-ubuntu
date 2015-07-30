@@ -29,6 +29,7 @@
 #include "gpu/config/gpu_driver_bug_workaround_type.h"
 #include "gpu/config/gpu_feature_type.h"
 #include "gpu/config/gpu_info_collector.h"
+#include "gpu/config/gpu_switches.h"
 #include "gpu/config/gpu_util.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/gl/gl_implementation.h"
@@ -411,8 +412,10 @@ void GpuDataManagerImplPrivate::RegisterSwiftShaderPath(
 }
 
 bool GpuDataManagerImplPrivate::ShouldUseWarp() const {
-  return use_warp_ ||
-         base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kUseWarp);
+  std::string angle_impl_flag =
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          switches::kUseANGLE);
+  return use_warp_ || angle_impl_flag == gfx::kANGLEImplementationWARPName;
 }
 
 void GpuDataManagerImplPrivate::AddObserver(GpuDataManagerObserver* observer) {
@@ -561,6 +564,9 @@ void GpuDataManagerImplPrivate::UpdateGpuInfoHelper() {
   if (gpu_driver_bug_list_) {
     gpu_driver_bugs_ = gpu_driver_bug_list_->MakeDecision(
         gpu::GpuControlList::kOsAny, std::string(), gpu_info_);
+
+    disabled_extensions_ =
+        JoinString(gpu_driver_bug_list_->GetDisabledExtensions(), ' ');
   }
   gpu::GpuDriverBugList::AppendWorkaroundsFromCommandLine(
       &gpu_driver_bugs_, *base::CommandLine::ForCurrentProcess());
@@ -598,8 +604,7 @@ void GpuDataManagerImplPrivate::AppendRendererCommandLine(
     base::CommandLine* command_line) const {
   DCHECK(command_line);
 
-  if (IsFeatureBlacklisted(gpu::GPU_FEATURE_TYPE_ACCELERATED_VIDEO_DECODE) &&
-      !command_line->HasSwitch(switches::kDisableAcceleratedVideoDecode))
+  if (ShouldDisableAcceleratedVideoDecode(command_line))
     command_line->AppendSwitch(switches::kDisableAcceleratedVideoDecode);
 #if defined(ENABLE_WEBRTC)
   if (IsFeatureBlacklisted(gpu::GPU_FEATURE_TYPE_ACCELERATED_VIDEO_ENCODE) &&
@@ -654,8 +659,7 @@ void GpuDataManagerImplPrivate::AppendGpuCommandLine(
                                     IntSetToString(gpu_driver_bugs_));
   }
 
-  if (IsFeatureBlacklisted(gpu::GPU_FEATURE_TYPE_ACCELERATED_VIDEO_DECODE) &&
-      !command_line->HasSwitch(switches::kDisableAcceleratedVideoDecode)) {
+  if (ShouldDisableAcceleratedVideoDecode(command_line)) {
     command_line->AppendSwitch(switches::kDisableAcceleratedVideoDecode);
   }
 #if defined(ENABLE_WEBRTC)
@@ -678,8 +682,10 @@ void GpuDataManagerImplPrivate::AppendGpuCommandLine(
   command_line->AppendSwitchASCII(switches::kGpuDriverVersion,
       gpu_info_.driver_version);
 
-  if (ShouldUseWarp())
-    command_line->AppendSwitch(switches::kUseWarp);
+  if (ShouldUseWarp() && !command_line->HasSwitch(switches::kUseANGLE)) {
+    command_line->AppendSwitchASCII(switches::kUseANGLE,
+                                    gfx::kANGLEImplementationWARPName);
+  }
 }
 
 void GpuDataManagerImplPrivate::AppendPluginCommandLine(
@@ -735,9 +741,10 @@ void GpuDataManagerImplPrivate::UpdateRendererWebPrefs(
   }
 #endif
 
-  if (!IsFeatureBlacklisted(gpu::GPU_FEATURE_TYPE_ACCELERATED_VIDEO_DECODE) &&
-      !base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableAcceleratedVideoDecode)) {
+  const base::CommandLine* command_line =
+      base::CommandLine::ForCurrentProcess();
+  if (!ShouldDisableAcceleratedVideoDecode(command_line) &&
+      !command_line->HasSwitch(switches::kDisableAcceleratedVideoDecode)) {
     prefs->pepper_accelerated_video_decode_enabled = true;
   }
 }
@@ -875,6 +882,33 @@ bool GpuDataManagerImplPrivate::CanUseGpuBrowserCompositor() const {
   return true;
 }
 
+
+bool GpuDataManagerImplPrivate::ShouldDisableAcceleratedVideoDecode(
+    const base::CommandLine* command_line) const {
+  // Make sure that we initialize the experiment first to make sure that
+  // statistics are bucket correctly in all cases.
+  // This experiment is temporary and will be removed once enough data
+  // to resolve crbug/442039 has been collected.
+  const std::string group_name = base::FieldTrialList::FindFullName(
+      "DisableAcceleratedVideoDecode");
+  if (command_line->HasSwitch(switches::kDisableAcceleratedVideoDecode)) {
+    // It was already disabled on the command line.
+    return false;
+  }
+  if (IsFeatureBlacklisted(gpu::GPU_FEATURE_TYPE_ACCELERATED_VIDEO_DECODE))
+    return true;
+  if (group_name == "Disabled")
+    return true;
+  return false;
+}
+
+void GpuDataManagerImplPrivate::GetDisabledExtensions(
+    std::string* disabled_extensions) const {
+  DCHECK(disabled_extensions);
+
+  *disabled_extensions = disabled_extensions_;
+}
+
 void GpuDataManagerImplPrivate::BlockDomainFrom3DAPIs(
     const GURL& url, GpuDataManagerImpl::DomainGuilt guilt) {
   BlockDomainFrom3DAPIsAtTime(url, guilt, base::Time::Now());
@@ -998,8 +1032,14 @@ void GpuDataManagerImplPrivate::UpdatePreliminaryBlacklistedFeatures() {
 
 void GpuDataManagerImplPrivate::UpdateGpuSwitchingManager(
     const gpu::GPUInfo& gpu_info) {
-  ui::GpuSwitchingManager::GetInstance()->SetGpuCount(
-      gpu_info.secondary_gpus.size() + 1);
+  // The vendor IDs might be 0 on non-PCI devices (like Android), but
+  // the length of the vector is all we care about in most cases.
+  std::vector<uint32> vendor_ids;
+  vendor_ids.push_back(gpu_info.gpu.vendor_id);
+  for (const auto& device : gpu_info.secondary_gpus) {
+    vendor_ids.push_back(device.vendor_id);
+  }
+  ui::GpuSwitchingManager::GetInstance()->SetGpuVendorIds(vendor_ids);
 
   if (ui::GpuSwitchingManager::GetInstance()->SupportsDualGpus()) {
     if (gpu_driver_bugs_.count(gpu::FORCE_DISCRETE_GPU) == 1)

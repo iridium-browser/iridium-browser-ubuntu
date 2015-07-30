@@ -352,6 +352,21 @@ static int {{overloads.name}}MethodLength()
 
 
 {##############################################################################}
+{% macro runtime_determined_maxarg_method(overloads) %}
+static int {{overloads.name}}MethodMaxArg()
+{
+    {% for length, runtime_enabled_functions in overloads.runtime_determined_maxargs %}
+    {% for runtime_enabled_function in runtime_enabled_functions %}
+    {% filter runtime_enabled(runtime_enabled_function) %}
+    return {{length}};
+    {% endfilter %}
+    {% endfor %}
+    {% endfor %}
+}
+{% endmacro %}
+
+
+{##############################################################################}
 {# FIXME: We should return a rejected Promise if an error occurs in this
 function when ALL methods in this overload return Promise. In order to do so,
 we must ensure either ALL or NO methods in this overload return Promise #}
@@ -401,7 +416,7 @@ static void {{overloads.name}}Method{{world_suffix}}(const v8::FunctionCallbackI
         {# Invalid arity, throw error #}
         {# Report full list of valid arities if gaps and above minimum #}
         {% if overloads.valid_arities %}
-        if (info.Length() >= {{overloads.minarg}}) {
+        if (info.Length() >= {{overloads.length}}) {
             setArityTypeError(exceptionState, "{{overloads.valid_arities}}", info.Length());
             {{propagate_error_with_exception_state(overloads) | indent(12)}}
         }
@@ -482,14 +497,14 @@ static void {{method.name}}OriginSafeMethodGetter{{world_suffix}}(const v8::Prop
     if (holder.IsEmpty()) {
         // This is only reachable via |object.__proto__.func|, in which case it
         // has already passed the same origin security check
-        v8SetReturnValue(info, privateTemplate->GetFunction());
+        v8SetReturnValue(info, privateTemplate->GetFunction(info.GetIsolate()->GetCurrentContext()).ToLocalChecked());
         return;
     }
     {{cpp_class}}* impl = {{v8_class}}::toImpl(holder);
     if (!BindingSecurity::shouldAllowAccessToFrame(info.GetIsolate(), impl->frame(), DoNotReportSecurityError)) {
         static int sharedTemplateKey; // This address is used for a key to look up the dom template.
         v8::Local<v8::FunctionTemplate> sharedTemplate = data->domTemplate(&sharedTemplateKey, {{cpp_class}}V8Internal::{{method.name}}MethodCallback{{world_suffix}}, v8Undefined(), {{signature}}, {{method.length}});
-        v8SetReturnValue(info, sharedTemplate->GetFunction());
+        v8SetReturnValue(info, sharedTemplate->GetFunction(info.GetIsolate()->GetCurrentContext()).ToLocalChecked());
         return;
     }
 
@@ -500,7 +515,7 @@ static void {{method.name}}OriginSafeMethodGetter{{world_suffix}}(const v8::Prop
         return;
     }
 
-    v8SetReturnValue(info, privateTemplate->GetFunction());
+    v8SetReturnValue(info, privateTemplate->GetFunction(info.GetIsolate()->GetCurrentContext()).ToLocalChecked());
 }
 
 static void {{method.name}}OriginSafeMethodGetterCallback{{world_suffix}}(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>& info)
@@ -530,6 +545,8 @@ bool {{v8_class}}::PrivateScript::{{method.name}}Method({{method.argument_declar
 
     ScriptState::Scope scope(scriptState);
     v8::Local<v8::Value> holder = toV8(holderImpl, scriptState->context()->Global(), scriptState->isolate());
+    if (holder.IsEmpty())
+        return false;
 
     {% for argument in method.arguments %}
     v8::Local<v8::Value> {{argument.handle}} = {{argument.private_script_cpp_value_to_v8_value}};
@@ -630,32 +647,23 @@ V8DOMConfiguration::installMethod(isolate, {{method.function_template}}, {{metho
 
 {######################################}
 {% macro install_conditionally_enabled_methods() %}
-void {{v8_class_or_partial}}::installConditionallyEnabledMethods(v8::Local<v8::Object> prototypeObject, v8::Isolate* isolate)
-{
-    {% if is_partial %}
-    {{v8_class}}::installConditionallyEnabledMethods(prototypeObject, isolate);
-    {% endif %}
-    {% if conditionally_enabled_methods %}
-    {# Define per-context enabled operations #}
-    v8::Local<v8::Signature> defaultSignature = v8::Signature::New(isolate, domTemplate(isolate));
-    ExecutionContext* context = toExecutionContext(prototypeObject->CreationContext());
-    ASSERT(context);
-
-    {% for method in conditionally_enabled_methods %}
-    {% filter per_context_enabled(method.overloads.per_context_enabled_function_all
-                                  if method.overloads else
-                                  method.per_context_enabled_function) %}
-    {% filter exposed(method.overloads.exposed_test_all
-                      if method.overloads else
-                      method.exposed_test) %}
-    {% filter runtime_enabled(method.overloads.runtime_enabled_function_all
-                              if method.overloads else
-                              method.runtime_enabled_function) %}
-    prototypeObject->Set(v8AtomicString(isolate, "{{method.name}}"), v8::FunctionTemplate::New(isolate, {{cpp_class_or_partial}}V8Internal::{{method.name}}MethodCallback, v8Undefined(), defaultSignature, {{method.number_of_required_arguments}})->GetFunction());
-    {% endfilter %}{# runtime_enabled() #}
-    {% endfilter %}{# exposed() #}
-    {% endfilter %}{# per_context_enabled() #}
-    {% endfor %}
-    {% endif %}
-}
+{% if conditionally_enabled_methods %}
+{# Define operations with limited exposure #}
+v8::Local<v8::Signature> defaultSignature = v8::Signature::New(isolate, domTemplate(isolate));
+ExecutionContext* context = toExecutionContext(prototypeObject->CreationContext());
+ASSERT(context);
+{% for method in conditionally_enabled_methods %}
+{% filter exposed(method.overloads.exposed_test_all
+                  if method.overloads else
+                  method.exposed_test) %}
+{% filter runtime_enabled(method.overloads.runtime_enabled_function_all
+                          if method.overloads else
+                          method.runtime_enabled_function) %}
+v8::Local<v8::FunctionTemplate> functionTemplate = v8::FunctionTemplate::New(isolate, {{cpp_class_or_partial}}V8Internal::{{method.name}}MethodCallback, v8Undefined(), defaultSignature, {{method.number_of_required_arguments}});
+v8::Local<v8::Function> function = ->GetFunction(isolate->GetCurrentContext())).ToLocalChecked();
+v8CallOrCrash(prototypeObject->Set(isolate->GetCurrentContext(), v8AtomicString(isolate, "{{method.name}}"), function));
+{% endfilter %}{# runtime_enabled() #}
+{% endfilter %}{# exposed() #}
+{% endfor %}
+{% endif %}
 {%- endmacro %}

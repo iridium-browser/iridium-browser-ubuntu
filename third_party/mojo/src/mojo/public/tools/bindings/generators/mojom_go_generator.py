@@ -60,9 +60,9 @@ _kind_infos = {
 _imports = {}
 
 def GetBitSize(kind):
-  if isinstance(kind, (mojom.Array, mojom.Map, mojom.Struct)):
+  if isinstance(kind, (mojom.Array, mojom.Map, mojom.Struct, mojom.Interface)):
     return 64
-  if isinstance(kind, (mojom.InterfaceRequest, mojom.Interface)):
+  if isinstance(kind, (mojom.InterfaceRequest)):
     kind = mojom.MSGPIPE
   if isinstance(kind, mojom.Enum):
     kind = mojom.INT32
@@ -166,14 +166,18 @@ def ExpressionToText(token):
 def DecodeSuffix(kind):
   if mojom.IsEnumKind(kind):
     return DecodeSuffix(mojom.INT32)
-  if mojom.IsInterfaceKind(kind) or mojom.IsInterfaceRequestKind(kind):
+  if mojom.IsInterfaceKind(kind):
+    return 'Interface'
+  if mojom.IsInterfaceRequestKind(kind):
     return DecodeSuffix(mojom.MSGPIPE)
   return _kind_infos[kind].decode_suffix
 
 def EncodeSuffix(kind):
   if mojom.IsEnumKind(kind):
     return EncodeSuffix(mojom.INT32)
-  if mojom.IsInterfaceKind(kind) or mojom.IsInterfaceRequestKind(kind):
+  if mojom.IsInterfaceKind(kind):
+    return 'Interface'
+  if mojom.IsInterfaceRequestKind(kind):
     return EncodeSuffix(mojom.MSGPIPE)
   return _kind_infos[kind].encode_suffix
 
@@ -183,30 +187,6 @@ def GetPackageName(module):
 def GetPackagePath(module):
   name = module.name.split('.')[0]
   return '/'.join(module.path.split('/')[:-1] + [name])
-
-def GetStructFromMethod(method):
-  params_class = "%s_%s_Params" % (GetNameForElement(method.interface),
-      GetNameForElement(method))
-  struct = mojom.Struct(params_class, module=method.interface.module)
-  for param in method.parameters:
-    struct.AddField("in%s" % GetNameForElement(param),
-        param.kind, param.ordinal)
-  struct.packed = pack.PackedStruct(struct)
-  struct.bytes = pack.GetByteLayout(struct.packed)
-  struct.versions = pack.GetVersionInfo(struct.packed)
-  return struct
-
-def GetResponseStructFromMethod(method):
-  params_class = "%s_%s_ResponseParams" % (GetNameForElement(method.interface),
-      GetNameForElement(method))
-  struct = mojom.Struct(params_class, module=method.interface.module)
-  for param in method.response_parameters:
-    struct.AddField("out%s" % GetNameForElement(param),
-        param.kind, param.ordinal)
-  struct.packed = pack.PackedStruct(struct)
-  struct.bytes = pack.GetByteLayout(struct.packed)
-  struct.versions = pack.GetVersionInfo(struct.packed)
-  return struct
 
 def GetAllConstants(module):
   data = [module] + module.structs + module.interfaces
@@ -231,7 +211,7 @@ def AddImport(module, element):
     AddImport(module, element.key_kind)
     AddImport(module, element.value_kind)
     return
-  if mojom.IsNonInterfaceHandleKind(element):
+  if mojom.IsAnyHandleKind(element):
     _imports['mojo/public/go/system'] = 'system'
     return
 
@@ -248,48 +228,6 @@ def AddImport(module, element):
     name += '_'
   _imports[path] = name
 
-# Scans |module| for elements that require imports and adds all found imports
-# to '_imports' dict. Returns a list of imports that should include the
-# generated go file.
-def GetImports(module):
-  # Imports can only be used in structs, constants, enums, interfaces.
-  all_structs = list(module.structs)
-  for i in module.interfaces:
-    for method in i.methods:
-      all_structs.append(GetStructFromMethod(method))
-      if method.response_parameters:
-        all_structs.append(GetResponseStructFromMethod(method))
-
-  if len(all_structs) > 0 or len(module.interfaces) > 0:
-    _imports['fmt'] = 'fmt'
-    _imports['mojo/public/go/bindings'] = 'bindings'
-  if len(all_structs) > 0:
-    _imports['sort'] = 'sort'
-
-  for struct in all_structs:
-    for field in struct.fields:
-      AddImport(module, field.kind)
-# TODO(rogulenko): add these after generating constants and struct defaults.
-#      if field.default:
-#        AddImport(module, field.default)
-
-  for enum in GetAllEnums(module):
-    for field in enum.fields:
-      if field.value:
-        AddImport(module, field.value)
-
-# TODO(rogulenko): add these after generating constants and struct defaults.
-#  for constant in GetAllConstants(module):
-#    AddImport(module, constant.value)
-
-  imports_list = []
-  for i in _imports:
-    if i.split('/')[-1] == _imports[i]:
-      imports_list.append('"%s"' % i)
-    else:
-      imports_list.append('%s "%s"' % (_imports[i], i))
-  return sorted(imports_list)
-
 class Generator(generator.Generator):
   go_filters = {
     'array': lambda kind: mojom.Array(kind),
@@ -301,24 +239,22 @@ class Generator(generator.Generator):
     'is_array': mojom.IsArrayKind,
     'is_enum': mojom.IsEnumKind,
     'is_handle': mojom.IsAnyHandleKind,
-    'is_handle_owner': lambda kind:
-        mojom.IsInterfaceKind(kind) or mojom.IsInterfaceRequestKind(kind),
+    'is_interface': mojom.IsInterfaceKind,
+    'is_interface_request': mojom.IsInterfaceRequestKind,
     'is_map': mojom.IsMapKind,
     'is_none_or_empty': lambda array: array == None or len(array) == 0,
     'is_nullable': mojom.IsNullableKind,
     'is_pointer': mojom.IsObjectKind,
     'is_struct': mojom.IsStructKind,
     'name': GetNameForElement,
-    'response_struct_from_method': GetResponseStructFromMethod,
-    'struct_from_method': GetStructFromMethod,
     'tab_indent': lambda s, size = 1: ('\n' + '\t' * size).join(s.splitlines())
   }
 
   def GetParameters(self):
     return {
       'enums': GetAllEnums(self.module),
-      'imports': GetImports(self.module),
-      'interfaces': self.module.interfaces,
+      'imports': self.GetImports(),
+      'interfaces': self.GetInterfaces(),
       'package': GetPackageName(self.module),
       'structs': self.GetStructs(),
     }
@@ -342,3 +278,69 @@ class Generator(generator.Generator):
       'namespace': self.module.namespace,
       'module': self.module,
     }
+
+  # Scans |self.module| for elements that require imports and adds all found
+  # imports to '_imports' dict. Returns a list of imports that should include
+  # the generated go file.
+  def GetImports(self):
+    # Imports can only be used in structs, constants, enums, interfaces.
+    all_structs = list(self.module.structs)
+    for i in self.module.interfaces:
+      for method in i.methods:
+        all_structs.append(self._GetStructFromMethod(method))
+        if method.response_parameters:
+          all_structs.append(self._GetResponseStructFromMethod(method))
+
+    if len(all_structs) > 0 or len(self.module.interfaces) > 0:
+      _imports['fmt'] = 'fmt'
+      _imports['mojo/public/go/bindings'] = 'bindings'
+    if len(self.module.interfaces) > 0:
+      _imports['mojo/public/go/system'] = 'system'
+    if len(all_structs) > 0:
+      _imports['sort'] = 'sort'
+
+    for struct in all_structs:
+      for field in struct.fields:
+        AddImport(self.module, field.kind)
+# TODO(rogulenko): add these after generating constants and struct defaults.
+#        if field.default:
+#          AddImport(self.module, field.default)
+
+    for enum in GetAllEnums(self.module):
+      for field in enum.fields:
+        if field.value:
+          AddImport(self.module, field.value)
+
+# TODO(rogulenko): add these after generating constants and struct defaults.
+#    for constant in GetAllConstants(self.module):
+#      AddImport(self.module, constant.value)
+
+    imports_list = []
+    for i in _imports:
+      if i.split('/')[-1] == _imports[i]:
+        imports_list.append('"%s"' % i)
+      else:
+        imports_list.append('%s "%s"' % (_imports[i], i))
+    return sorted(imports_list)
+
+  # Overrides the implementation from the base class in order to customize the
+  # struct and field names.
+  def _GetStructFromMethod(self, method):
+    params_class = "%s_%s_Params" % (GetNameForElement(method.interface),
+        GetNameForElement(method))
+    struct = mojom.Struct(params_class, module=method.interface.module)
+    for param in method.parameters:
+      struct.AddField("in%s" % GetNameForElement(param),
+          param.kind, param.ordinal, attributes=param.attributes)
+    return self._AddStructComputedData(False, struct)
+
+  # Overrides the implementation from the base class in order to customize the
+  # struct and field names.
+  def _GetResponseStructFromMethod(self, method):
+    params_class = "%s_%s_ResponseParams" % (
+        GetNameForElement(method.interface), GetNameForElement(method))
+    struct = mojom.Struct(params_class, module=method.interface.module)
+    for param in method.response_parameters:
+      struct.AddField("out%s" % GetNameForElement(param),
+          param.kind, param.ordinal, attributes=param.attributes)
+    return self._AddStructComputedData(False, struct)

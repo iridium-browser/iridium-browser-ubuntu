@@ -13,6 +13,8 @@
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/sync/profile_sync_service_factory.h"
 #if defined(OS_WIN) && defined(USE_ASH)
 #include "chrome/browser/ui/ash/ash_util.h"
 #endif
@@ -21,6 +23,7 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/autofill/core/common/password_form.h"
+#include "components/password_manager/core/browser/password_bubble_experiment.h"
 #include "components/password_manager/core/common/experiments.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -74,25 +77,34 @@ void PasswordManagerHandler::GetLocalizedValues(
   };
 
   RegisterStrings(localized_strings, resources, arraysize(resources));
-  RegisterTitle(localized_strings, "passwordsPage",
-                IDS_PASSWORDS_EXCEPTIONS_WINDOW_TITLE);
+
+  const ProfileSyncService* sync_service =
+      ProfileSyncServiceFactory::GetForProfile(GetProfile());
+  int title_id =
+      password_bubble_experiment::IsSmartLockBrandingEnabled(sync_service) ?
+      IDS_PASSWORDS_EXCEPTIONS_SMART_LOCK_WINDOW_TITLE :
+      IDS_PASSWORDS_EXCEPTIONS_WINDOW_TITLE;
+  RegisterTitle(localized_strings, "passwordsPage", title_id);
 
   localized_strings->SetString("passwordManagerLearnMoreURL",
                                chrome::kPasswordManagerLearnMoreURL);
   localized_strings->SetString("passwordsManagePasswordsLink",
                                chrome::kPasswordManagerAccountDashboardURL);
 
-  std::vector<base::string16> pieces;
-  base::SplitStringDontTrim(
-      l10n_util::GetStringUTF16(IDS_MANAGE_PASSWORDS_REMOTE_TEXT),
-      '|',  // separator
-      &pieces);
-  DCHECK_EQ(3U, pieces.size());
+  std::string management_hostname =
+      GURL(chrome::kPasswordManagerAccountDashboardURL).host();
+  base::string16 link_text = base::UTF8ToUTF16(management_hostname);
+  size_t offset;
+  base::string16 full_text = l10n_util::GetStringFUTF16(
+      IDS_MANAGE_PASSWORDS_REMOTE_TEXT, link_text, &offset);
+
   localized_strings->SetString("passwordsManagePasswordsBeforeLinkText",
-                               pieces[0]);
-  localized_strings->SetString("passwordsManagePasswordsLinkText", pieces[1]);
+                               full_text.substr(0, offset));
+  localized_strings->SetString("passwordsManagePasswordsLinkText",
+                               full_text.substr(offset,
+                                                offset + link_text.size()));
   localized_strings->SetString("passwordsManagePasswordsAfterLinkText",
-                               pieces[2]);
+                               full_text.substr(offset + link_text.size()));
 
   bool disable_show_passwords = false;
 

@@ -8,6 +8,8 @@
 
 #include "base/basictypes.h"
 #import "chrome/browser/ui/cocoa/view_id_util.h"
+#include "grit/theme_resources.h"
+#include "ui/base/cocoa/appkit_utils.h"
 
 NSString* const kBrowserActionGrippyDragStartedNotification =
     @"BrowserActionGrippyDragStartedNotification";
@@ -19,6 +21,8 @@ NSString* const kBrowserActionsContainerWillAnimate =
     @"BrowserActionsContainerWillAnimate";
 NSString* const kBrowserActionsContainerMouseEntered =
     @"BrowserActionsContainerMouseEntered";
+NSString* const kBrowserActionsContainerAnimationEnded =
+    @"BrowserActionsContainerAnimationEnded";
 NSString* const kTranslationWithDelta =
     @"TranslationWithDelta";
 
@@ -59,6 +63,7 @@ const CGFloat kMinimumContainerWidth = 3.0;
     resizeAnimation_.reset([[NSViewAnimation alloc] init]);
     [resizeAnimation_ setDuration:kAnimationDuration];
     [resizeAnimation_ setAnimationBlockingMode:NSAnimationNonblocking];
+    [resizeAnimation_ setDelegate:self];
 
     [self setHidden:YES];
   }
@@ -69,6 +74,15 @@ const CGFloat kMinimumContainerWidth = 3.0;
   if (trackingArea_.get())
     [self removeTrackingArea:trackingArea_.get()];
   [super dealloc];
+}
+
+- (void)drawRect:(NSRect)rect {
+  [super drawRect:rect];
+  if (isHighlighting_) {
+    ui::NinePartImageIds imageIds = IMAGE_GRID(IDR_DEVELOPER_MODE_HIGHLIGHT);
+    ui::DrawNinePartImage(
+        [self bounds], imageIds, NSCompositeSourceOver, 1.0, true);
+  }
 }
 
 - (void)setTrackingEnabled:(BOOL)enabled {
@@ -85,6 +99,13 @@ const CGFloat kMinimumContainerWidth = 3.0;
     [self removeTrackingArea:trackingArea_.get()];
     [trackingArea_.get() clearOwner];
     trackingArea_.reset(nil);
+  }
+}
+
+- (void)setIsHighlighting:(BOOL)isHighlighting {
+  if (isHighlighting != isHighlighting_) {
+    isHighlighting_ = isHighlighting;
+    [self setNeedsDisplay:YES];
   }
 }
 
@@ -120,7 +141,6 @@ const CGFloat kMinimumContainerWidth = 3.0;
       !NSMouseInRect(initialDragPoint_, grippyRect_, [self isFlipped]))
     return;
 
-  lastXPos_ = [self frame].origin.x;
   userIsResizing_ = YES;
 
   [[self appropriateCursorForGrippy] push];
@@ -180,8 +200,28 @@ const CGFloat kMinimumContainerWidth = 3.0;
   [[NSNotificationCenter defaultCenter]
       postNotificationName:kBrowserActionGrippyDraggingNotification
                     object:self];
+}
 
-  lastXPos_ += dX;
+- (void)animationDidEnd:(NSAnimation*)animation {
+  // We notify asynchronously so that the animation fully finishes before any
+  // listeners do work.
+  [self performSelector:@selector(notifyAnimationEnded)
+              withObject:self
+              afterDelay:0];
+}
+
+- (void)animationDidStop:(NSAnimation*)animation {
+  // We notify asynchronously so that the animation fully finishes before any
+  // listeners do work.
+  [self performSelector:@selector(notifyAnimationEnded)
+              withObject:self
+              afterDelay:0];
+}
+
+- (void)notifyAnimationEnded {
+  [[NSNotificationCenter defaultCenter]
+      postNotificationName:kBrowserActionsContainerAnimationEnded
+                    object:self];
 }
 
 - (ViewID)viewID {
@@ -198,7 +238,6 @@ const CGFloat kMinimumContainerWidth = 3.0;
   CGFloat maxAllowedWidth = [self maxAllowedWidth];
   width = std::min(maxAllowedWidth, width);
 
-  lastXPos_ = frame.origin.x;
   CGFloat dX = frame.size.width - width;
   frame.size.width = width;
   NSRect newFrame = NSOffsetRect(frame, dX, 0);
@@ -223,10 +262,6 @@ const CGFloat kMinimumContainerWidth = 3.0;
     [self setFrame:newFrame];
     [self setNeedsDisplay:YES];
   }
-}
-
-- (CGFloat)resizeDeltaX {
-  return [self frame].origin.x - lastXPos_;
 }
 
 - (NSRect)animationEndFrame {

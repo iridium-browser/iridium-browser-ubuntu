@@ -70,12 +70,9 @@ shouldClearDocumentBackground initial=true
 textAreasAreResizable initial=false, invalidate=Style
 acceleratedCompositingEnabled initial=true, invalidate=AcceleratedCompositing
 
-shrinksStandaloneImagesToFit initial=true
-
 offlineWebApplicationCacheEnabled initial=true
 usesEncodingDetector initial=false
 allowScriptsToCloseWindows initial=false
-regionBasedColumnsEnabled initial=false
 
 # FIXME: This should really be disabled by default as it makes platforms that
 # don't support the feature download files they can't use by.
@@ -147,6 +144,10 @@ maxTouchPoints type=int, initial=0
 # crbug.com/304895 tracks removal once we're satisfied with the algorithm.
 touchAdjustmentEnabled initial=true
 
+# Determines whether WebViewClient::didTapMultipleTargets will be used for
+# touch disambiguation.
+multiTargetTapNotificationEnabled initial=true
+
 syncXHRInDocumentsEnabled initial=true
 cookieEnabled initial=true
 navigateOnDragDrop initial=true
@@ -173,6 +174,8 @@ smartInsertDeleteEnabled initial=defaultSmartInsertDeleteEnabled
 selectTrailingWhitespaceEnabled initial=defaultSelectTrailingWhitespaceEnabled
 
 selectionIncludesAltImageText initial=false
+
+selectionStrategy type=SelectionStrategy, initial=SelectionStrategy::Character
 
 ######## Settings used by Android WebView below ########
 
@@ -316,6 +319,7 @@ disableReadingFromCanvas initial=false
 strictMixedContentChecking initial=false
 strictPowerfulFeatureRestrictions initial=false
 logDnsPrefetchAndPreconnect initial=false
+logPreload initial=false
 
 # If true, the UA styles will include viewportAndroid.css. It is used for
 # Android, and dynamically set by the inspector for mobile emulation.

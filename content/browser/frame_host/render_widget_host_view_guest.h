@@ -129,17 +129,15 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
 #endif  // defined(OS_ANDROID)
 
 #if defined(OS_WIN)
-  virtual void SetParentNativeViewAccessible(
+  void SetParentNativeViewAccessible(
       gfx::NativeViewAccessible accessible_parent) override;
-  virtual gfx::NativeViewId GetParentForWindowlessPlugin() const override;
+  gfx::NativeViewId GetParentForWindowlessPlugin() const override;
 #endif
 
   // Overridden from ui::GestureEventHelper.
   bool CanDispatchToConsumer(ui::GestureConsumer* consumer) override;
   void DispatchGestureEvent(ui::GestureEvent* event) override;
   void DispatchCancelTouchEvent(ui::TouchEvent* event) override;
-
-  SkColorType PreferredReadbackFormat() override;
 
  protected:
   friend class RenderWidgetHostView;

@@ -13,9 +13,11 @@
 #include "base/metrics/field_trial.h"
 #include "base/rand_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "sql/connection.h"
+#include "sql/error_delegate_util.h"
 #include "sql/statement.h"
 #include "sql/transaction.h"
 #include "sync/internal_api/public/base/node_ordinal.h"
@@ -28,22 +30,8 @@
 
 using std::string;
 
-namespace {
-
-bool IsSyncBackingDatabase32KEnabled() {
-  const std::string group_name =
-      base::FieldTrialList::FindFullName("SyncBackingDatabase32K");
-  return group_name == "Enabled";
-}
-
-}  // namespace
-
 namespace syncer {
 namespace syncable {
-
-// This just has to be big enough to hold an UPDATE or INSERT statement that
-// modifies all the columns in the entry table.
-static const string::size_type kUpdateStatementBufferSize = 2048;
 
 // Increment this version whenever updating DB tables.
 const int32 kCurrentDBVersion = 89;
@@ -149,6 +137,29 @@ scoped_ptr<EntryKernel> UnpackEntry(sql::Statement* statement) {
 
 namespace {
 
+// This just has to be big enough to hold an UPDATE or INSERT statement that
+// modifies all the columns in the entry table.
+static const string::size_type kUpdateStatementBufferSize = 2048;
+
+bool IsSyncBackingDatabase32KEnabled() {
+  const std::string group_name =
+      base::FieldTrialList::FindFullName("SyncBackingDatabase32K");
+  return group_name == "Enabled";
+}
+
+void OnSqliteError(const base::Closure& catastrophic_error_handler,
+                   int err,
+                   sql::Statement* statement) {
+  // An error has been detected. Ignore unless it is catastrophic.
+  if (sql::IsErrorCatastrophic(err)) {
+    // At this point sql::* and DirectoryBackingStore may be on the callstack so
+    // don't invoke the error handler directly. Instead, PostTask to this thread
+    // to avoid potential reentrancy issues.
+    base::MessageLoop::current()->PostTask(FROM_HERE,
+                                           catastrophic_error_handler);
+  }
+}
+
 string ComposeCreateTableColumnSpecs() {
   const ColumnSpec* begin = g_metas_columns;
   const ColumnSpec* end = g_metas_columns + arraysize(g_metas_columns);
@@ -176,6 +187,12 @@ void AppendColumnList(std::string* output) {
   }
 }
 
+bool SaveEntryToDB(sql::Statement* save_statement, const EntryKernel& entry) {
+  save_statement->Reset(true);
+  BindFields(entry, save_statement);
+  return save_statement->Run();
+}
+
 }  // namespace
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -185,15 +202,17 @@ DirectoryBackingStore::DirectoryBackingStore(const string& dir_name)
     : dir_name_(dir_name),
       database_page_size_(IsSyncBackingDatabase32KEnabled() ? 32768 : 4096),
       needs_column_refresh_(false) {
+  DCHECK(base::ThreadTaskRunnerHandle::IsSet());
   ResetAndCreateConnection();
 }
 
 DirectoryBackingStore::DirectoryBackingStore(const string& dir_name,
                                              sql::Connection* db)
-    : db_(db),
-      dir_name_(dir_name),
+    : dir_name_(dir_name),
       database_page_size_(IsSyncBackingDatabase32KEnabled() ? 32768 : 4096),
+      db_(db),
       needs_column_refresh_(false) {
+  DCHECK(base::ThreadTaskRunnerHandle::IsSet());
 }
 
 DirectoryBackingStore::~DirectoryBackingStore() {
@@ -235,10 +254,8 @@ bool DirectoryBackingStore::SaveChanges(
 
   // Back out early if there is nothing to write.
   bool save_info =
-    (Directory::KERNEL_SHARE_INFO_DIRTY == snapshot.kernel_info_status);
-  if (snapshot.dirty_metas.empty() && snapshot.metahandles_to_purge.empty() &&
-      snapshot.delete_journals.empty() &&
-      snapshot.delete_journals_to_purge.empty() && !save_info) {
+      (Directory::KERNEL_SHARE_INFO_DIRTY == snapshot.kernel_info_status);
+  if (!snapshot.HasUnsavedMetahandleChanges() && !save_info) {
     return true;
   }
 
@@ -274,11 +291,9 @@ bool DirectoryBackingStore::SaveChanges(
             SQL_FROM_HERE,
             "UPDATE share_info "
             "SET store_birthday = ?, "
-            "next_id = ?, "
             "bag_of_chips = ?"));
     s1.BindString(0, info.store_birthday);
-    s1.BindInt64(1, info.next_id);
-    s1.BindBlob(2, info.bag_of_chips.data(), info.bag_of_chips.size());
+    s1.BindBlob(1, info.bag_of_chips.data(), info.bag_of_chips.size());
 
     if (!s1.Run())
       return false;
@@ -315,6 +330,24 @@ bool DirectoryBackingStore::SaveChanges(
   }
 
   return transaction.Commit();
+}
+
+sql::Connection* DirectoryBackingStore::db() {
+  return db_.get();
+}
+
+bool DirectoryBackingStore::IsOpen() const {
+  return db_->is_open();
+}
+
+bool DirectoryBackingStore::Open(const base::FilePath& path) {
+  DCHECK(!db_->is_open());
+  return db_->Open(path);
+}
+
+bool DirectoryBackingStore::OpenInMemory() {
+  DCHECK(!db_->is_open());
+  return db_->OpenInMemory();
 }
 
 bool DirectoryBackingStore::InitializeTables() {
@@ -611,17 +644,15 @@ bool DirectoryBackingStore::LoadDeleteJournals(
 
 bool DirectoryBackingStore::LoadInfo(Directory::KernelLoadInfo* info) {
   {
-    sql::Statement s(
-        db_->GetUniqueStatement(
-            "SELECT store_birthday, next_id, cache_guid, bag_of_chips "
-            "FROM share_info"));
+    sql::Statement s(db_->GetUniqueStatement(
+        "SELECT store_birthday, cache_guid, bag_of_chips "
+        "FROM share_info"));
     if (!s.Step())
       return false;
 
     info->kernel_info.store_birthday = s.ColumnString(0);
-    info->kernel_info.next_id = s.ColumnInt64(1);
-    info->cache_guid = s.ColumnString(2);
-    s.ColumnBlobAsString(3, &(info->kernel_info.bag_of_chips));
+    info->cache_guid = s.ColumnString(1);
+    s.ColumnBlobAsString(2, &(info->kernel_info.bag_of_chips));
 
     // Verify there was only one row returned.
     DCHECK(!s.Step());
@@ -662,14 +693,6 @@ bool DirectoryBackingStore::LoadInfo(Directory::KernelLoadInfo* info) {
     DCHECK(s.Succeeded());
   }
   return true;
-}
-
-/* static */
-bool DirectoryBackingStore::SaveEntryToDB(sql::Statement* save_statement,
-                                          const EntryKernel& entry) {
-  save_statement->Reset(true);
-  BindFields(entry, save_statement);
-  return save_statement->Run();
 }
 
 bool DirectoryBackingStore::SafeDropTable(const char* table_name) {
@@ -1641,6 +1664,18 @@ void DirectoryBackingStore::ResetAndCreateConnection() {
   db_->set_exclusive_locking();
   db_->set_cache_size(32);
   db_->set_page_size(database_page_size_);
+  if (!catastrophic_error_handler_.is_null())
+    SetCatastrophicErrorHandler(catastrophic_error_handler_);
+}
+
+void DirectoryBackingStore::SetCatastrophicErrorHandler(
+    const base::Closure& catastrophic_error_handler) {
+  DCHECK(CalledOnValidThread());
+  DCHECK(!catastrophic_error_handler.is_null());
+  catastrophic_error_handler_ = catastrophic_error_handler;
+  sql::Connection::ErrorCallback error_callback =
+      base::Bind(&OnSqliteError, catastrophic_error_handler_);
+  db_->set_error_callback(error_callback);
 }
 
 }  // namespace syncable

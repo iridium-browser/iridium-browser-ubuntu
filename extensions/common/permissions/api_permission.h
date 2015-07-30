@@ -34,16 +34,20 @@ class APIPermission {
   // The IDs of all permissions available to apps. Add as many permissions here
   // as needed to generate meaningful permission messages. Add the rules for the
   // messages to ChromePermissionMessageProvider.
-  // Remove permissions from this list if they have no longer have a
-  // corresponding API permission and no permission message.
+  // Do not reorder this enumeration or remove any entries. If you need to add a
+  // new entry, add it just prior to kEnumBoundary, and ensure to update the
+  // "ExtensionPermission3" enum in tools/metrics/histograms/histograms.xml
+  // (by running update_extension_permission.py).
   // TODO(sashab): Move this to a more central location, and rename it to
   // PermissionID.
   enum ID {
     // Error codes.
-    kInvalid = -2,
-    kUnknown = -1,
+    kInvalid,
+    kUnknown,
 
-    // Real permissions.
+    // Actual permission IDs. Not all of these are valid permissions on their
+    // own; some are just needed by various manifest permissions to represent
+    // their permission message rule combinations.
     kAccessibilityFeaturesModify,
     kAccessibilityFeaturesRead,
     kAccessibilityPrivate,
@@ -56,6 +60,7 @@ class APIPermission {
     kAudio,
     kAudioCapture,
     kAudioModem,
+    kAutofillPrivate,
     kAutomation,
     kAutoTestPrivate,
     kBackground,
@@ -167,6 +172,7 @@ class APIPermission {
     kReadingListPrivate,
     kRtcPrivate,
     kSearchProvider,
+    kSearchEnginesPrivate,
     kSerial,
     kSessions,
     kSettingsPrivate,
@@ -201,8 +207,10 @@ class APIPermission {
     kWebRequest,
     kWebRequestBlocking,
     kWebrtcAudioPrivate,
+    kWebrtcDesktopCapturePrivate,
     kWebrtcLoggingPrivate,
     kWebstorePrivate,
+    kWebstoreWidgetPrivate,
     kWebView,
     kWindowShape,
     kScreenlockPrivate,
@@ -211,11 +219,6 @@ class APIPermission {
     kSystemNetwork,
     kSystemInfoCpu,
     kSystemInfoMemory,
-
-    // Permission message IDs that are not currently valid permissions on their
-    // own, but are needed by various manifest permissions to represent their
-    // permission message rule combinations.
-    // TODO(sashab): Move these in-line with the other permission IDs.
     kBluetooth,
     kBluetoothDevices,
     kFavicon,
@@ -236,7 +239,11 @@ class APIPermission {
     kUsbDeviceList,
     kUsbDeviceUnknownProduct,
     kUsbDeviceUnknownVendor,
-
+    kUsersPrivate,
+    kPasswordsPrivate,
+    // Last entry: Add new entries above and ensure to update the
+    // "ExtensionPermission3" enum in tools/metrics/histograms/histograms.xml
+    // (by running update_extension_permission.py).
     kEnumBoundary
   };
 

@@ -44,7 +44,7 @@ class DevicePermissionsTableModel
 
  private:
   scoped_refptr<DevicePermissionsPrompt::Prompt> prompt_;
-  ui::TableModelObserver* observer_;
+  ui::TableModelObserver* observer_ = nullptr;
 };
 
 int DevicePermissionsTableModel::RowCount() {
@@ -75,9 +75,8 @@ void DevicePermissionsTableModel::OnDevicesChanged() {
 }
 
 DevicePermissionsDialogView::DevicePermissionsDialogView(
-    DevicePermissionsPrompt::Delegate* delegate,
     scoped_refptr<DevicePermissionsPrompt::Prompt> prompt)
-    : delegate_(delegate), prompt_(prompt) {
+    : prompt_(prompt) {
   views::BoxLayout* layout =
       new views::BoxLayout(views::BoxLayout::kVertical,
                            views::kButtonHEdgeMarginNew,
@@ -121,19 +120,17 @@ DevicePermissionsDialogView::~DevicePermissionsDialogView() {
   RemoveAllChildViews(true);
 }
 
-bool DevicePermissionsDialogView::Cancel() {
-  std::vector<scoped_refptr<UsbDevice>> empty;
-  delegate_->OnUsbDevicesChosen(empty);
-  return true;
+void DevicePermissionsDialogView::DeleteDelegate() {
+  // Calling prompt_->Dismissed() here ensures it will be called regardless of
+  // how the view is closed, including shutdown of the entire view hierarchy.
+  prompt_->Dismissed();
+  delete this;
 }
 
 bool DevicePermissionsDialogView::Accept() {
-  std::vector<scoped_refptr<UsbDevice>> devices;
   for (int index : table_view_->selection_model().selected_indices()) {
     prompt_->GrantDevicePermission(index);
-    devices.push_back(prompt_->GetDevice(index));
   }
-  delegate_->OnUsbDevicesChosen(devices);
   return true;
 }
 
@@ -160,5 +157,5 @@ gfx::Size DevicePermissionsDialogView::GetPreferredSize() const {
 void ChromeDevicePermissionsPrompt::ShowDialog() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   constrained_window::ShowWebModalDialogViews(
-      new DevicePermissionsDialogView(delegate(), prompt()), web_contents());
+      new DevicePermissionsDialogView(prompt()), web_contents());
 }

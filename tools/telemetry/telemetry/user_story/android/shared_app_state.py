@@ -1,17 +1,14 @@
 # Copyright 2014 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-import os
-
 from telemetry.core import platform
 from telemetry.core.platform import android_device
 from telemetry.core.platform import android_platform
-from telemetry.core import wpr_modes
-from telemetry.user_story import shared_user_story_state
+from telemetry.story import shared_state
 from telemetry.web_perf import timeline_based_measurement
 
 
-class SharedAppState(shared_user_story_state.SharedUserStoryState):
+class SharedAppState(shared_state.SharedState):
   """Manage test state/transitions across multiple android.UserStory's.
 
   WARNING: the class is not ready for public consumption.
@@ -29,9 +26,9 @@ class SharedAppState(shared_user_story_state.SharedUserStoryState):
     super(SharedAppState, self).__init__(test, finder_options, user_story_set)
     if not isinstance(
         test, timeline_based_measurement.TimelineBasedMeasurement):
-        raise ValueError(
-            'SharedAppState only accepts TimelineBasedMeasurement tests'
-            ' (not %s).' % test.__class__)
+      raise ValueError(
+          'SharedAppState only accepts TimelineBasedMeasurement tests'
+          ' (not %s).' % test.__class__)
     self._test = test
     self._finder_options = finder_options
     self._android_app = None
@@ -71,7 +68,7 @@ class SharedAppState(shared_user_story_state.SharedUserStoryState):
     """This does not apply to android app user stories."""
     return 'pass', None
 
-  def TearDownState(self, results):
+  def TearDownState(self):
     """Tear down anything created in the __init__ method that is not needed.
 
     Currently, there is no clean-up needed from SharedAppState.__init__.

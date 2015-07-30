@@ -238,7 +238,7 @@ WebInspector.ServiceWorkerOriginElement.prototype = {
             swRegistrationElement._updateRegistration(registration);
             return;
         }
-        swRegistrationElement = new WebInspector.SWRegistrationElement(this._manager, registration);
+        swRegistrationElement = new WebInspector.SWRegistrationElement(this._manager, this, registration);
         this._registrationElements.set(registration.id, swRegistrationElement);
         this._childrenListNode.appendChild(swRegistrationElement._element);
     },
@@ -253,17 +253,27 @@ WebInspector.ServiceWorkerOriginElement.prototype = {
             return;
         this._registrationElements.delete(registrationId);
         this._childrenListNode.removeChild(swRegistrationElement._element);
-    }
+    },
+
+    /**
+     * @return {boolean}
+     */
+    _visible: function()
+    {
+        return !!this._element.parentElement;
+    },
 }
 
 /**
  * @constructor
  * @param {!WebInspector.ServiceWorkerManager} manager
+ * @param {!WebInspector.ServiceWorkerOriginElement} originElement
  * @param {!WebInspector.ServiceWorkerRegistration} registration
  */
-WebInspector.SWRegistrationElement = function(manager, registration)
+WebInspector.SWRegistrationElement = function(manager, originElement, registration)
 {
     this._manager = manager;
+    this._originElement = originElement;
     this._registration = registration;
     this._element = createElementWithClass("div", "service-workers-registration");
     var headerNode = this._element.createChild("li").createChild("div", "service-workers-registration-header");
@@ -271,7 +281,24 @@ WebInspector.SWRegistrationElement = function(manager, registration)
     this._deleteButton = headerNode.createChild("button", "service-workers-button service-workers-delete-button");
     this._deleteButton.addEventListener("click", this._deleteButtonClicked.bind(this), false);
     this._deleteButton.title = WebInspector.UIString("Delete");
+    this._updateButton = headerNode.createChild("button", "service-workers-button service-workers-update-button");
+    this._updateButton.addEventListener("click", this._updateButtonClicked.bind(this), false);
+    this._updateButton.title = WebInspector.UIString("Update");
+    this._updateButton.disabled = true
+    this._pushButton = headerNode.createChild("button", "service-workers-button service-workers-push-button");
+    this._pushButton.addEventListener("click", this._pushButtonClicked.bind(this), false);
+    this._pushButton.title = WebInspector.UIString("Emulate push event");
+    this._pushButton.disabled = true
     this._childrenListNode = this._element.createChild("ol");
+
+    this._skipWaitingCheckboxLabel = createCheckboxLabel(WebInspector.UIString("Skip waiting"));
+    this._skipWaitingCheckboxLabel.title = WebInspector.UIString("Simulate skipWaiting()");
+    this._skipWaitingCheckboxLabel.classList.add("service-workers-skip-waiting-checkbox-label");
+    this._skipWaitingCheckbox = this._skipWaitingCheckboxLabel.checkboxElement;
+    this._skipWaitingCheckbox.checked = true;
+    this._skipWaitingCheckbox.classList.add("service-workers-skip-waiting-checkbox");
+    this._skipWaitingCheckbox.addEventListener("change", this._skipWaitingCheckboxChanged.bind(this), false);
+
     this._updateRegistration(registration);
 }
 
@@ -283,8 +310,24 @@ WebInspector.SWRegistrationElement.prototype = {
     {
         this._registration = registration;
         this._titleNode.textContent = WebInspector.UIString(registration.isDeleted ? "Scope: %s - deleted" : "Scope: %s", registration.scopeURL.asParsedURL().path);
-        this._deleteButton.classList.toggle("hidden", registration.isDeleted);
+        this._updateButton.disabled = !!registration.isDeleted;
+        this._deleteButton.disabled = !!registration.isDeleted;
+        this._skipWaitingCheckboxLabel.remove();
         this._updateVersionList();
+
+        if (this._visible() && this._skipWaitingCheckbox.checked) {
+            this._registration.versions.valuesArray().map(callSkipWaitingForInstalledVersions.bind(this));
+        }
+
+        /**
+         * @this {WebInspector.SWRegistrationElement}
+         * @param {!WebInspector.ServiceWorkerVersion} version
+         */
+        function callSkipWaitingForInstalledVersions(version)
+        {
+            if (version.isInstalled())
+                this._manager.skipWaiting(version.id);
+        }
     },
 
     _updateVersionList: function()
@@ -295,6 +338,9 @@ WebInspector.SWRegistrationElement.prototype = {
         versions = versions.filter(function(version) {
             return !version.isStoppedAndRedundant() || version.errorMessages.length;
         });
+        var activeVersions = versions.filter(function(version) { return version.isActivating() || version.isActivated(); });
+        this._pushButton.disabled = !activeVersions.length || !!this._registration.isDeleted;
+
         tableElement.appendChild(this._createVersionModeRow(
             versions.filter(function(version) { return version.isNew() || version.isInstalling(); }),
             "installing",
@@ -304,7 +350,7 @@ WebInspector.SWRegistrationElement.prototype = {
             "waiting",
             WebInspector.UIString("waiting")));
         tableElement.appendChild(this._createVersionModeRow(
-            versions.filter(function(version) { return version.isActivating() || version.isActivated(); }),
+            activeVersions,
             "active",
             WebInspector.UIString("active")));
         tableElement.appendChild(this._createVersionModeRow(
@@ -324,7 +370,11 @@ WebInspector.SWRegistrationElement.prototype = {
     _createVersionModeRow: function(versions, modeClass, modeTitle)
     {
         var modeRowElement = createElementWithClass("div", "service-workers-version-mode-row  service-workers-version-mode-row-" + modeClass);
-        modeRowElement.createChild("div", "service-workers-version-mode").createChild("div", "service-workers-version-mode-text").createTextChild(modeTitle);
+        var modeTitleDiv = modeRowElement.createChild("div", "service-workers-version-mode");
+        modeTitleDiv.createChild("div", "service-workers-version-mode-text").createTextChild(modeTitle);
+        if (modeClass == "waiting") {
+          modeTitleDiv.appendChild(this._skipWaitingCheckboxLabel);
+        }
         var versionsElement = modeRowElement.createChild("div", "service-workers-versions");
         for (var version of versions) {
             var stateRowElement = versionsElement.createChild("div", "service-workers-version-row");
@@ -398,6 +448,23 @@ WebInspector.SWRegistrationElement.prototype = {
     /**
      * @param {!Event} event
      */
+    _updateButtonClicked: function(event)
+    {
+        this._manager.updateRegistration(this._registration.id);
+    },
+
+    /**
+     * @param {!Event} event
+     */
+    _pushButtonClicked: function(event)
+    {
+        var data = "Test push message from DevTools."
+        this._manager.deliverPushMessage(this._registration.id, data);
+    },
+
+    /**
+     * @param {!Event} event
+     */
     _startButtonClicked: function(event)
     {
         this._manager.startWorker(this._registration.scopeURL);
@@ -419,5 +486,30 @@ WebInspector.SWRegistrationElement.prototype = {
     _inspectButtonClicked: function(versionId, event)
     {
         this._manager.inspectWorker(versionId);
-    }
+    },
+
+    _skipWaitingCheckboxChanged: function()
+    {
+        if (!this._skipWaitingCheckbox.checked)
+            return;
+        this._registration.versions.valuesArray().map(callSkipWaitingForInstalledVersions.bind(this));
+
+        /**
+         * @this {WebInspector.SWRegistrationElement}
+         * @param {!WebInspector.ServiceWorkerVersion} version
+         */
+        function callSkipWaitingForInstalledVersions(version)
+        {
+            if (version.isInstalled())
+                this._manager.skipWaiting(version.id);
+        }
+    },
+
+    /**
+     * @return {boolean}
+     */
+    _visible: function()
+    {
+        return this._originElement._visible();
+    },
 }

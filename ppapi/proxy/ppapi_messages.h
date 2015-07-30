@@ -50,7 +50,6 @@
 #include "ppapi/c/private/ppb_isolated_file_system_private.h"
 #include "ppapi/c/private/ppb_net_address_private.h"
 #include "ppapi/c/private/ppb_pdf.h"
-#include "ppapi/c/private/ppb_talk_private.h"
 #include "ppapi/c/private/ppp_flash_browser_operations.h"
 #include "ppapi/c/private/ppp_pdf.h"
 #include "ppapi/proxy/host_resolver_private_resource.h"
@@ -119,9 +118,6 @@ IPC_ENUM_TRAITS(PP_PrivateFontCharset)
 IPC_ENUM_TRAITS(PP_ResourceImage)
 IPC_ENUM_TRAITS(PP_ResourceString)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_SessionType, PP_SESSIONTYPE_PERSISTENT_RELEASE)
-IPC_ENUM_TRAITS_MAX_VALUE(PP_TalkEvent, PP_TALKEVENT_NUM_EVENTS - 1)
-IPC_ENUM_TRAITS_MAX_VALUE(PP_TalkPermission,
-                          PP_TALKPERMISSION_NUM_PERMISSIONS - 1)
 IPC_ENUM_TRAITS_MAX_VALUE(PP_TCPSocket_Option,
                           PP_TCPSOCKET_OPTION_RECV_BUFFER_SIZE)
 IPC_ENUM_TRAITS(PP_TextInput_Type)
@@ -454,7 +450,7 @@ IPC_STRUCT_TRAITS_MEMBER(profile)
 IPC_STRUCT_TRAITS_MEMBER(max_resolution)
 IPC_STRUCT_TRAITS_MEMBER(max_framerate_numerator)
 IPC_STRUCT_TRAITS_MEMBER(max_framerate_denominator)
-IPC_STRUCT_TRAITS_MEMBER(acceleration)
+IPC_STRUCT_TRAITS_MEMBER(hardware_accelerated)
 IPC_STRUCT_TRAITS_END()
 
 #if !defined(OS_NACL) && !defined(NACL_WIN64)
@@ -787,8 +783,9 @@ IPC_MESSAGE_ROUTED3(
     int32_t /* result */)
 
 // PPP_ContentDecryptor_Dev
-IPC_MESSAGE_ROUTED4(PpapiMsg_PPPContentDecryptor_Initialize,
+IPC_MESSAGE_ROUTED5(PpapiMsg_PPPContentDecryptor_Initialize,
                     PP_Instance /* instance */,
+                    uint32_t /* promise_id */,
                     ppapi::proxy::SerializedVar /* key_system, String */,
                     PP_Bool /* allow_distinctive_identifier */,
                     PP_Bool /* allow_persistent_state */)
@@ -1208,6 +1205,11 @@ IPC_SYNC_MESSAGE_ROUTED3_1(
 IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBTesting_GetLiveObjectsForInstance,
                            PP_Instance /* instance */,
                            uint32 /* result */)
+IPC_SYNC_MESSAGE_ROUTED1_0(PpapiHostMsg_PPBTesting_PostPowerSaverStatus,
+                           PP_Instance /* instance */)
+IPC_SYNC_MESSAGE_ROUTED1_0(
+    PpapiHostMsg_PPBTesting_SubscribeToPowerSaverNotifications,
+    PP_Instance /* instance */)
 IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBTesting_SimulateInputEvent,
                     PP_Instance /* instance */,
                     ppapi::InputEventData /* input_event */)
@@ -2353,17 +2355,5 @@ IPC_MESSAGE_CONTROL1(PpapiPluginMsg_VideoCapture_OnError,
                      uint32_t /* error */)
 IPC_MESSAGE_CONTROL1(PpapiPluginMsg_VideoCapture_OnBufferReady,
                      uint32_t /* buffer */)
-
-// Talk ------------------------------------------------------------------------
-
-IPC_MESSAGE_CONTROL0(PpapiHostMsg_Talk_Create)
-IPC_MESSAGE_CONTROL1(PpapiHostMsg_Talk_RequestPermission,
-                     PP_TalkPermission /* permission */)
-IPC_MESSAGE_CONTROL0(PpapiPluginMsg_Talk_RequestPermissionReply)
-IPC_MESSAGE_CONTROL0(PpapiHostMsg_Talk_StartRemoting)
-IPC_MESSAGE_CONTROL0(PpapiPluginMsg_Talk_StartRemotingReply)
-IPC_MESSAGE_CONTROL0(PpapiHostMsg_Talk_StopRemoting)
-IPC_MESSAGE_CONTROL0(PpapiPluginMsg_Talk_StopRemotingReply)
-IPC_MESSAGE_CONTROL1(PpapiPluginMsg_Talk_NotifyEvent, PP_TalkEvent /* event */)
 
 #endif  // !defined(OS_NACL) && !defined(NACL_WIN64)

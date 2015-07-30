@@ -12,6 +12,8 @@
 #include "SkTSort.h"
 
 class SkChunkAlloc;
+enum class SkOpRayDir;
+struct SkOpRayHit;
 class SkPathWriter;
 
 class SkOpContour {
@@ -32,11 +34,15 @@ public:
                 : fBounds.fTop < rh.fBounds.fTop;
     }
 
+    void addConic(SkPoint pts[3], SkScalar weight, SkChunkAlloc* allocator) {
+        appendSegment(allocator).addConic(pts, weight, this);
+    }
+
     void addCubic(SkPoint pts[4], SkChunkAlloc* allocator) {
         appendSegment(allocator).addCubic(pts, this);
     }
 
-    void addCurve(SkPath::Verb verb, const SkPoint pts[4], SkChunkAlloc* allocator);
+    SkOpSegment* addCurve(SkPath::Verb verb, const SkPoint pts[4], SkChunkAlloc* allocator);
 
     void addLine(SkPoint pts[2], SkChunkAlloc* allocator) {
         appendSegment(allocator).addLine(pts, this);
@@ -98,11 +104,11 @@ public:
     }
 
     int debugID() const {
-        return PATH_OPS_DEBUG_RELEASE(fID, -1);
+        return SkDEBUGRELEASE(fID, -1);
     }
 
     int debugIndent() const {
-        return PATH_OPS_DEBUG_RELEASE(fIndent, 0);
+        return SkDEBUGRELEASE(fDebugIndent, 0);
     }
 
 #if DEBUG_ACTIVE_SPANS
@@ -115,23 +121,23 @@ public:
 #endif
 
     const SkOpAngle* debugAngle(int id) const {
-        return PATH_OPS_DEBUG_RELEASE(globalState()->debugAngle(id), NULL);
+        return SkDEBUGRELEASE(this->globalState()->debugAngle(id), NULL);
     }
 
     SkOpContour* debugContour(int id) {
-        return PATH_OPS_DEBUG_RELEASE(globalState()->debugContour(id), NULL);
+        return SkDEBUGRELEASE(this->globalState()->debugContour(id), NULL);
     }
 
     const SkOpPtT* debugPtT(int id) const {
-        return PATH_OPS_DEBUG_RELEASE(globalState()->debugPtT(id), NULL);
+        return SkDEBUGRELEASE(this->globalState()->debugPtT(id), NULL);
     }
 
     const SkOpSegment* debugSegment(int id) const {
-        return PATH_OPS_DEBUG_RELEASE(globalState()->debugSegment(id), NULL);
+        return SkDEBUGRELEASE(this->globalState()->debugSegment(id), NULL);
     }
 
     const SkOpSpanBase* debugSpan(int id) const {
-        return PATH_OPS_DEBUG_RELEASE(globalState()->debugSpan(id), NULL);
+        return SkDEBUGRELEASE(this->globalState()->debugSpan(id), NULL);
     }
 
     SkOpGlobalState* globalState() const {
@@ -155,9 +161,17 @@ public:
         return fDone;
     }
 
-    void dump();
-    void dumpAll();
+    void dump() const;
+    void dumpAll() const;
     void dumpAngles() const;
+    void dumpContours() const;
+    void dumpContoursAll() const;
+    void dumpContoursAngles() const;
+    void dumpContoursPts() const;
+    void dumpContoursPt(int segmentID) const;
+    void dumpContoursSegment(int segmentID) const;
+    void dumpContoursSpan(int segmentID) const;
+    void dumpContoursSpans() const;
     void dumpPt(int ) const;
     void dumpPts() const;
     void dumpPtsX() const;
@@ -170,6 +184,8 @@ public:
         return fTail->pts()[SkPathOpsVerbToPoints(fTail->verb())];
     }
 
+    SkOpSpan* findSortableTop(SkOpContour* );
+
     SkOpSegment* first() {
         SkASSERT(fCount > 0);
         return &fHead;
@@ -180,14 +196,15 @@ public:
         return &fHead;
     }
 
-    void indentDump() {
-        PATH_OPS_DEBUG_CODE(fIndent += 2);
+    void indentDump() const {
+        SkDEBUGCODE(fDebugIndent += 2);
     }
 
     void init(SkOpGlobalState* globalState, bool operand, bool isXor) {
         fState = globalState;
         fOperand = operand;
         fXor = isXor;
+        SkDEBUGCODE(fID = globalState->nextContourID());
     }
 
     bool isXor() const {
@@ -206,15 +223,21 @@ public:
         } while ((segment = segment->next()));
     }
 
-    bool moveNearby() {
+    bool moveMultiples() {
         SkASSERT(fCount > 0);
         SkOpSegment* segment = &fHead;
         do {
-            if (!segment->moveNearby()) {
-                return false;
-            }
+            segment->moveMultiples();
         } while ((segment = segment->next()));
         return true;
+    }
+
+    void moveNearby() {
+        SkASSERT(fCount > 0);
+        SkOpSegment* segment = &fHead;
+        do {
+            segment->moveNearby();
+        } while ((segment = segment->next()));
     }
 
     SkOpContour* next() {
@@ -225,8 +248,6 @@ public:
         return fNext;
     }
 
-    SkOpSegment* nonVerticalSegment(SkOpSpanBase** start, SkOpSpanBase** end);
-
     bool operand() const {
         return fOperand;
     }
@@ -235,9 +256,11 @@ public:
         return fOppXor;
     }
 
-    void outdentDump() {
-        PATH_OPS_DEBUG_CODE(fIndent -= 2);
+    void outdentDump() const {
+        SkDEBUGCODE(fDebugIndent -= 2);
     }
+
+    void rayCheck(const SkOpRayHit& base, SkOpRayDir dir, SkOpRayHit** hits, SkChunkAlloc* );
 
     void remove(SkOpContour* contour) {
         if (contour == this) {
@@ -260,9 +283,10 @@ public:
         fNext = NULL;
         fCount = 0;
         fDone = false;
+        fTopsFound = false;
         SkDEBUGCODE(fBounds.set(SK_ScalarMax, SK_ScalarMax, SK_ScalarMin, SK_ScalarMin));
         SkDEBUGCODE(fFirstSorted = -1);
-        PATH_OPS_DEBUG_CODE(fIndent = 0);
+        SkDEBUGCODE(fDebugIndent = 0);
     }
 
     void setBounds() {
@@ -305,15 +329,6 @@ public:
         } while ((segment = segment->next()));
     }
 
-    void sortSegments() {
-        SkOpSegment* segment = &fHead;
-        do {
-            *fSortedSegments.append() = segment;
-        } while ((segment = segment->next()));
-        SkTQSort<SkOpSegment>(fSortedSegments.begin(), fSortedSegments.end() - 1);
-        fFirstSorted = 0;
-    }
-
     const SkPoint& start() const {
         return fHead.pts()[0];
     }
@@ -333,7 +348,6 @@ public:
     }
 
     void toPath(SkPathWriter* path) const;
-    void topSortableSegment(const SkPoint& topLeft, SkPoint* bestXY, SkOpSegment** topStart);
     SkOpSegment* undoneSegment(SkOpSpanBase** startPtr, SkOpSpanBase** endPtr);
 
 private:
@@ -341,16 +355,19 @@ private:
     SkOpSegment fHead;
     SkOpSegment* fTail;
     SkOpContour* fNext;
-    SkTDArray<SkOpSegment*> fSortedSegments;  // set by find top segment
     SkPathOpsBounds fBounds;
     int fCount;
     int fFirstSorted;
     bool fDone;  // set by find top segment
+    bool fTopsFound;
     bool fOperand;  // true for the second argument to a binary operator
     bool fXor;  // set if original path had even-odd fill
     bool fOppXor;  // set if opposite path had even-odd fill
-    PATH_OPS_DEBUG_CODE(int fID);
-    PATH_OPS_DEBUG_CODE(int fIndent);
+    SkDEBUGCODE(int fID);
+    SkDEBUGCODE(mutable int fDebugIndent);
+};
+
+class SkOpContourHead : public SkOpContour {
 };
 
 #endif

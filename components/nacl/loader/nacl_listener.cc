@@ -28,13 +28,9 @@
 #include "ipc/ipc_switches.h"
 #include "ipc/ipc_sync_channel.h"
 #include "ipc/ipc_sync_message_filter.h"
-#include "mojo/nacl/mojo_syscall.h"
 #include "native_client/src/public/chrome_main.h"
 #include "native_client/src/public/nacl_app.h"
 #include "native_client/src/public/nacl_desc.h"
-#include "third_party/mojo/src/mojo/edk/embedder/embedder.h"
-#include "third_party/mojo/src/mojo/edk/embedder/platform_support.h"
-#include "third_party/mojo/src/mojo/edk/embedder/simple_platform_support.h"
 
 #if defined(OS_POSIX)
 #include "base/file_descriptor_posix.h"
@@ -67,6 +63,12 @@ void FatalLogHandler(const char* data, size_t bytes) {
   memcpy((char*)g_listener->crash_info_shmem_memory() + sizeof(uint32_t),
          data,
          copy_bytes);
+}
+
+void LoadStatusCallback(int load_status) {
+  g_listener->trusted_listener()->Send(
+      new NaClRendererMsg_ReportLoadStatus(
+          static_cast<NaClErrorCode>(load_status)));
 }
 
 #if defined(OS_MACOSX)
@@ -139,13 +141,18 @@ void DebugStubPortSelectedHandler(uint16_t port) {
 // the given message_loop_proxy runs.
 // Also, creates and sets the corresponding NaClDesc to the given nap with
 // the FD #.
-scoped_refptr<NaClIPCAdapter> SetUpIPCAdapter(
+void SetUpIPCAdapter(
     IPC::ChannelHandle* handle,
     scoped_refptr<base::MessageLoopProxy> message_loop_proxy,
     struct NaClApp* nap,
-    int nacl_fd) {
+    int nacl_fd,
+    NaClIPCAdapter::ResolveFileTokenCallback resolve_file_token_cb,
+    NaClIPCAdapter::OpenResourceCallback open_resource_cb) {
   scoped_refptr<NaClIPCAdapter> ipc_adapter(
-      new NaClIPCAdapter(*handle, message_loop_proxy.get()));
+      new NaClIPCAdapter(*handle,
+                         message_loop_proxy.get(),
+                         resolve_file_token_cb,
+                         open_resource_cb));
   ipc_adapter->ConnectChannel();
 #if defined(OS_POSIX)
   handle->socket =
@@ -155,7 +162,6 @@ scoped_refptr<NaClIPCAdapter> SetUpIPCAdapter(
   // Pass a NaClDesc to the untrusted side. This will hold a ref to the
   // NaClIPCAdapter.
   NaClAppSetDesc(nap, nacl_fd, ipc_adapter->MakeNaClDesc());
-  return ipc_adapter;
 }
 
 }  // namespace
@@ -200,7 +206,8 @@ NaClListener::NaClListener() : shutdown_event_(true, false),
 #if defined(OS_POSIX)
                                number_of_cores_(-1),  // unknown/error
 #endif
-                               main_loop_(NULL) {
+                               main_loop_(NULL),
+                               is_started_(false) {
   io_thread_.StartWithOptions(
       base::Thread::Options(base::MessageLoop::TYPE_IO, 0));
   DCHECK(g_listener == NULL);
@@ -269,13 +276,58 @@ void NaClListener::Listen() {
 bool NaClListener::OnMessageReceived(const IPC::Message& msg) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(NaClListener, msg)
+      IPC_MESSAGE_HANDLER(NaClProcessMsg_AddPrefetchedResource,
+                          OnAddPrefetchedResource)
       IPC_MESSAGE_HANDLER(NaClProcessMsg_Start, OnStart)
       IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
 }
 
+bool NaClListener::OnOpenResource(
+    const IPC::Message& msg,
+    const std::string& key,
+    NaClIPCAdapter::OpenResourceReplyCallback cb) {
+  // This callback is executed only on |io_thread_| with NaClIPCAdapter's
+  // |lock_| not being held.
+  DCHECK(!cb.is_null());
+  PrefetchedResourceFilesMap::iterator it =
+      prefetched_resource_files_.find(key);
+
+  if (it != prefetched_resource_files_.end()) {
+    // Fast path for prefetched FDs.
+    IPC::PlatformFileForTransit file = it->second.first;
+    base::FilePath path = it->second.second;
+    prefetched_resource_files_.erase(it);
+    // A pre-opened resource descriptor is available. Run the reply callback
+    // and return true.
+    cb.Run(msg, file, path);
+    return true;
+  }
+
+  // Return false to fall back to the slow path. Let NaClIPCAdapter issue an
+  // IPC to the renderer.
+  return false;
+}
+
+void NaClListener::OnAddPrefetchedResource(
+    const nacl::NaClResourcePrefetchResult& prefetched_resource_file) {
+  DCHECK(!is_started_);
+  if (is_started_)
+    return;
+  bool result = prefetched_resource_files_.insert(std::make_pair(
+      prefetched_resource_file.file_key,
+      std::make_pair(
+          prefetched_resource_file.file,
+          prefetched_resource_file.file_path_metadata))).second;
+  if (!result) {
+    LOG(FATAL) << "Duplicated open_resource key: "
+               << prefetched_resource_file.file_key;
+  }
+}
+
 void NaClListener::OnStart(const nacl::NaClStartParams& params) {
+  is_started_ = true;
 #if defined(OS_LINUX) || defined(OS_MACOSX)
   int urandom_fd = dup(base::GetUrandomFD());
   if (urandom_fd < 0) {
@@ -287,8 +339,9 @@ void NaClListener::OnStart(const nacl::NaClStartParams& params) {
   struct NaClApp* nap = NULL;
   NaClChromeMainInit();
 
-  crash_info_shmem_.reset(new base::SharedMemory(params.crash_info_shmem_handle,
-                                                 false));
+  CHECK(base::SharedMemory::IsHandleValid(params.crash_info_shmem_handle));
+  crash_info_shmem_.reset(new base::SharedMemory(
+      params.crash_info_shmem_handle, false /* not readonly */));
   CHECK(crash_info_shmem_->Map(nacl::kNaClCrashInfoShmemSize));
   NaClSetFatalErrorCallback(&FatalLogHandler);
 
@@ -311,17 +364,21 @@ void NaClListener::OnStart(const nacl::NaClStartParams& params) {
     // (browser/renderer) processes. The IRT uses these channels to
     // communicate with the host and to initialize the IPC dispatchers.
     SetUpIPCAdapter(&browser_handle, io_thread_.message_loop_proxy(),
-                    nap, NACL_CHROME_DESC_BASE);
+                    nap, NACL_CHROME_DESC_BASE,
+                    NaClIPCAdapter::ResolveFileTokenCallback(),
+                    NaClIPCAdapter::OpenResourceCallback());
     SetUpIPCAdapter(&ppapi_renderer_handle, io_thread_.message_loop_proxy(),
-                    nap, NACL_CHROME_DESC_BASE + 1);
-
-    scoped_refptr<NaClIPCAdapter> manifest_ipc_adapter =
-        SetUpIPCAdapter(&manifest_service_handle,
-                        io_thread_.message_loop_proxy(),
-                        nap,
-                        NACL_CHROME_DESC_BASE + 2);
-    manifest_ipc_adapter->set_resolve_file_token_callback(
-        base::Bind(&NaClListener::ResolveFileToken, base::Unretained(this)));
+                    nap, NACL_CHROME_DESC_BASE + 1,
+                    NaClIPCAdapter::ResolveFileTokenCallback(),
+                    NaClIPCAdapter::OpenResourceCallback());
+    SetUpIPCAdapter(&manifest_service_handle,
+                    io_thread_.message_loop_proxy(),
+                    nap,
+                    NACL_CHROME_DESC_BASE + 2,
+                    base::Bind(&NaClListener::ResolveFileToken,
+                               base::Unretained(this)),
+                    base::Bind(&NaClListener::OnOpenResource,
+                               base::Unretained(this)));
   }
 
   trusted_listener_ = new NaClTrustedListener(
@@ -335,7 +392,6 @@ void NaClListener::OnStart(const nacl::NaClStartParams& params) {
           manifest_service_handle)))
     LOG(ERROR) << "Failed to send IPC channel handle to NaClProcessHost.";
 
-  std::vector<nacl::FileDescriptor> handles = params.handles;
   struct NaClChromeMainArgs* args = NaClChromeMainArgsCreate();
   if (args == NULL) {
     LOG(ERROR) << "NaClChromeMainArgsCreate() failed";
@@ -346,16 +402,15 @@ void NaClListener::OnStart(const nacl::NaClStartParams& params) {
   args->number_of_cores = number_of_cores_;
   args->create_memory_object_func = CreateMemoryObject;
 # if defined(OS_MACOSX)
-  CHECK(handles.size() >= 1);
-  g_shm_fd = nacl::ToNativeHandle(handles[handles.size() - 1]);
-  handles.pop_back();
+  CHECK(params.mac_shm_fd != IPC::InvalidPlatformFileForTransit());
+  g_shm_fd = IPC::PlatformFileForTransitToPlatformFile(params.mac_shm_fd);
 # endif
 #endif
 
   DCHECK(params.process_type != nacl::kUnknownNaClProcessType);
-  CHECK(handles.size() >= 1);
-  NaClHandle irt_handle = nacl::ToNativeHandle(handles[handles.size() - 1]);
-  handles.pop_back();
+  CHECK(params.irt_handle != IPC::InvalidPlatformFileForTransit());
+  NaClHandle irt_handle =
+      IPC::PlatformFileForTransitToPlatformFile(params.irt_handle);
 
 #if defined(OS_WIN)
   args->irt_fd = _open_osfhandle(reinterpret_cast<intptr_t>(irt_handle),
@@ -377,8 +432,9 @@ void NaClListener::OnStart(const nacl::NaClStartParams& params) {
         params.version);
   }
 
-  CHECK(handles.size() == 1);
-  args->imc_bootstrap_handle = nacl::ToNativeHandle(handles[0]);
+  CHECK(params.imc_bootstrap_handle != IPC::InvalidPlatformFileForTransit());
+  args->imc_bootstrap_handle =
+      IPC::PlatformFileForTransitToPlatformFile(params.imc_bootstrap_handle);
   args->enable_debug_stub = params.enable_debug_stub;
 
   // Now configure parts that depend on process type.
@@ -408,9 +464,10 @@ void NaClListener::OnStart(const nacl::NaClStartParams& params) {
     args->pnacl_mode = 0;
   }
 
-#if defined(OS_LINUX) || defined(OS_MACOSX)
-  args->debug_stub_server_bound_socket_fd = nacl::ToNativeHandle(
-      params.debug_stub_server_bound_socket);
+#if defined(OS_POSIX)
+  args->debug_stub_server_bound_socket_fd =
+      IPC::PlatformFileForTransitToPlatformFile(
+          params.debug_stub_server_bound_socket);
 #endif
 #if defined(OS_WIN)
   args->broker_duplicate_handle_func = BrokerDuplicateHandle;
@@ -418,6 +475,7 @@ void NaClListener::OnStart(const nacl::NaClStartParams& params) {
   args->debug_stub_server_port_selected_handler_func =
       DebugStubPortSelectedHandler;
 #endif
+  args->load_status_handler_func = LoadStatusCallback;
 #if defined(OS_LINUX)
   args->prereserved_sandbox_size = prereserved_sandbox_size_;
 #endif
@@ -427,29 +485,6 @@ void NaClListener::OnStart(const nacl::NaClStartParams& params) {
   std::string file_path_str = params.nexe_file_path_metadata.AsUTF8Unsafe();
   args->nexe_desc = NaClDescCreateWithFilePathMetadata(nexe_file,
                                                        file_path_str.c_str());
-
-#if defined(OS_POSIX)
-  if (params.enable_mojo) {
-#if !defined(OS_MACOSX)
-    // Don't call mojo::embedder::Init on Mac; it's already been called from
-    // ChromeMain() (see chrome/app/chrome_exe_main_mac.cc).
-    mojo::embedder::Init(make_scoped_ptr(
-        new mojo::embedder::SimplePlatformSupport()));
-#endif
-    // InjectMojo adds a file descriptor to the process that allows Mojo calls
-    // to use an implementation defined outside the NaCl sandbox. See
-    // //mojo/nacl for implementation details.
-    InjectMojo(nap);
-  } else {
-    // When Mojo isn't enabled, we inject a file descriptor that intentionally
-    // fails on any imc_sendmsg() call to make debugging easier.
-    InjectDisabledMojo(nap);
-  }
-#else
-  InjectDisabledMojo(nap);
-#endif
-  // TODO(yusukes): Support pre-opening resource files.
-  CHECK(params.prefetched_resource_files.empty());
 
   int exit_status;
   if (!NaClChromeMainStart(nap, args, &exit_status))

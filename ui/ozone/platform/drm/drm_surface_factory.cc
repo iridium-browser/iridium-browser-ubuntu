@@ -7,8 +7,8 @@
 #include <errno.h>
 
 #include "ui/gfx/native_widget_types.h"
+#include "ui/ozone/platform/drm/common/drm_util.h"
 #include "ui/ozone/platform/drm/gpu/drm_surface.h"
-#include "ui/ozone/platform/drm/gpu/drm_util.h"
 #include "ui/ozone/platform/drm/gpu/drm_window.h"
 #include "ui/ozone/platform/drm/gpu/hardware_display_controller.h"
 #include "ui/ozone/platform/drm/gpu/screen_manager.h"
@@ -25,12 +25,14 @@ DrmSurfaceFactory::~DrmSurfaceFactory() {
 
 scoped_ptr<ui::SurfaceOzoneCanvas> DrmSurfaceFactory::CreateCanvasForWidget(
     gfx::AcceleratedWidget widget) {
+  DCHECK(thread_checker_.CalledOnValidThread());
   return make_scoped_ptr(new DrmSurface(screen_manager_->GetWindow(widget)));
 }
 
 bool DrmSurfaceFactory::LoadEGLGLES2Bindings(
     AddGLLibraryCallback add_gl_library,
     SetGLGetProcAddressProcCallback set_gl_get_proc_address) {
+  DCHECK(thread_checker_.CalledOnValidThread());
   return false;
 }
 

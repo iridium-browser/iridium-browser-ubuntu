@@ -9,7 +9,6 @@ import re
 import shutil
 import tempfile
 
-from telemetry import page as page_module
 from telemetry.util import cloud_storage
 
 
@@ -102,7 +101,7 @@ class WprArchiveInfo(object):
     if self.temp_target_wpr_file_path:
       return self.temp_target_wpr_file_path
     wpr_file = self._user_story_name_to_wpr_file.get(story.display_name, None)
-    if wpr_file is None and isinstance(story, page_module.Page):
+    if wpr_file is None and hasattr(story, 'url'):
       # Some old pages always use the URL to identify a page rather than the
       # display_name, so try to look for that.
       wpr_file = self._user_story_name_to_wpr_file.get(story.url, None)
@@ -127,8 +126,9 @@ class WprArchiveInfo(object):
     shutil.move(self.temp_target_wpr_file_path, target_wpr_file_path)
 
     # Update the hash file.
+    target_wpr_file_hash = cloud_storage.CalculateHash(target_wpr_file_path)
     with open(target_wpr_file_path + '.sha1', 'wb') as f:
-      f.write(cloud_storage.CalculateHash(target_wpr_file_path))
+      f.write(target_wpr_file_hash)
       f.flush()
 
     self._WriteToFile()
@@ -141,7 +141,7 @@ class WprArchiveInfo(object):
                         'user stories to cloud storage.')
         return
       try:
-        cloud_storage.Insert(self._bucket, target_wpr_file,
+        cloud_storage.Insert(self._bucket, target_wpr_file_hash,
                              target_wpr_file_path)
       except cloud_storage.CloudStorageError, e:
         logging.warning('Failed to upload wpr file %s to cloud storage. '

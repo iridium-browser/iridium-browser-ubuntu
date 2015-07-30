@@ -9,9 +9,10 @@
 #include <utility>
 #include <vector>
 
+#include "base/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "cc/debug/micro_benchmark_impl.h"
-#include "cc/resources/task_graph_runner.h"
+#include "cc/raster/task_graph_runner.h"
 
 namespace cc {
 
@@ -21,7 +22,7 @@ class LayerImpl;
 class RasterizeAndRecordBenchmarkImpl : public MicroBenchmarkImpl {
  public:
   explicit RasterizeAndRecordBenchmarkImpl(
-      scoped_refptr<base::MessageLoopProxy> origin_loop,
+      scoped_refptr<base::SingleThreadTaskRunner> origin_task_runner,
       base::Value* value,
       const MicroBenchmarkImpl::DoneCallback& callback);
   ~RasterizeAndRecordBenchmarkImpl() override;

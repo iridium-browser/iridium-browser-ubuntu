@@ -19,6 +19,7 @@ found in the LICENSE file.
 <link rel="import" href="/extras/importer/linux_perf/mali_parser.html">
 <link rel="import" href="/extras/importer/linux_perf/memreclaim_parser.html">
 <link rel="import" href="/extras/importer/linux_perf/power_parser.html">
+<link rel="import" href="/extras/importer/linux_perf/regulator_parser.html">
 <link rel="import" href="/extras/importer/linux_perf/sched_parser.html">
 <link rel="import" href="/extras/importer/linux_perf/sync_parser.html">
 <link rel="import" href="/extras/importer/linux_perf/workqueue_parser.html">
@@ -190,12 +191,16 @@ tv.exportTo('tv.e.importer.linux_perf', function() {
     if (LinuxPerfImporter._extractEventsFromSystraceHTML(events, false).ok)
       return true;
 
+    if (LinuxPerfImporter._extractEventsFromSystraceMultiHTML(events, false).ok)
+      return true;
+
     if (/^# tracer:/.test(events))
       return true;
 
-    var m = /^(.+)\n/.exec(events);
-    if (m)
-      events = m[1];
+    var lineBreakIndex = events.indexOf('\n');
+    if (lineBreakIndex > -1)
+      events = events.substring(0, lineBreakIndex);
+
     if (autoDetectLineParser(events))
       return true;
 
@@ -261,6 +266,45 @@ tv.exportTo('tv.e.importer.linux_perf', function() {
     if (newLastEvent == oldLastEvent)
       return failure;
     events[events.length - 1] = newLastEvent;
+
+    return {ok: true,
+      lines: produce_result ? events : undefined,
+      events_begin_at_line: events_begin_at_line};
+  };
+
+  LinuxPerfImporter._extractEventsFromSystraceMultiHTML = function(
+      incoming_events, produce_result) {
+    var failure = {ok: false};
+    if (produce_result === undefined)
+      produce_result = true;
+
+    if (/^<!DOCTYPE HTML>/.test(incoming_events) == false)
+      return failure;
+    var r = new tv.c.importer.SimpleLineReader(incoming_events);
+
+    // Try to find the Linux perf trace in any of the trace-data tags
+    var events = [];
+    while (!/^# tracer:/.test(events)) {
+      if (!r.advanceToLineMatching(
+          /^  <script class="trace-data" type="application\/text">$/))
+        return failure;
+
+      var events_begin_at_line = r.curLineNumber + 1;
+
+      r.beginSavingLines();
+      if (!r.advanceToLineMatching(/^  <\/script>$/))
+        return failure;
+
+      events = r.endSavingLinesAndGetResult();
+
+      // Drop off first and last event as it contains the tag.
+      events = events.slice(1, events.length - 1);
+    }
+
+    if (!r.advanceToLineMatching(/^<\/body>$/))
+      return failure;
+    if (!r.advanceToLineMatching(/^<\/html>$/))
+      return failure;
 
     return {ok: true,
       lines: produce_result ? events : undefined,
@@ -338,7 +382,7 @@ tv.exportTo('tv.e.importer.linux_perf', function() {
       this.registerDefaultHandlers_();
       this.parseLines();
       this.importClockSyncRecords();
-      var timeShift = this.computeTimeTransform(isSecondaryImport);
+      var timeShift = this.computeTimeTransform();
       if (timeShift === undefined) {
         this.model_.importWarning({
           type: 'clock_sync',
@@ -360,6 +404,8 @@ tv.exportTo('tv.e.importer.linux_perf', function() {
      * on a thread means that it is not of interest to the user.
      */
     buildPerThreadCpuSlicesFromCpuState: function() {
+      var SCHEDULING_STATE = tv.c.trace_model.SCHEDULING_STATE;
+
       // Push the cpu slices to the threads that they run on.
       for (var cpuNumber in this.model_.kernel.cpus) {
         var cpu = this.model_.kernel.cpus[cpuNumber];
@@ -389,13 +435,6 @@ tv.exportTo('tv.e.importer.linux_perf', function() {
       }
 
       // Create slices for when the thread is not running.
-      var getColorIdForReservedName = tv.b.ui.getColorIdForReservedName;
-      var runningId = getColorIdForReservedName('thread_state_running');
-      var runnableId = getColorIdForReservedName('thread_state_runnable');
-      var sleepingId = getColorIdForReservedName('thread_state_sleeping');
-      var ioWaitId = getColorIdForReservedName('thread_state_iowait');
-      var unknownStateId = getColorIdForReservedName('thread_state_unknown');
-
       this.model_.getAllThreads().forEach(function(thread) {
         if (thread.tempCpuSlices === undefined)
           return;
@@ -424,12 +463,12 @@ tv.exportTo('tv.e.importer.linux_perf', function() {
             var wakeupDuration = slice.start - wakeup.ts;
             var args = {'wakeup from tid': wakeup.fromTid};
             slices.push(new tv.c.trace_model.ThreadTimeSlice(
-                thread, '', 'Runnable', runnableId,
+                thread, SCHEDULING_STATE.RUNNABLE, '',
                 wakeup.ts, args, wakeupDuration));
           }
 
           var runningSlice = new tv.c.trace_model.ThreadTimeSlice(
-              thread, '', 'Running', runningId,
+              thread, SCHEDULING_STATE.RUNNING, '',
               slice.start, {}, slice.duration);
           runningSlice.cpuOnWhichThreadWasRunning = slice.cpu;
           slices.push(runningSlice);
@@ -449,67 +488,67 @@ tv.exportTo('tv.e.importer.linux_perf', function() {
 
           // Push a sleep slice onto the slices list, interrupting it with a
           // wakeup if appropriate.
-          var pushSleep = function(title, id) {
+          var pushSleep = function(state) {
             if (wakeup !== undefined) {
               midDuration = wakeup.ts - prevSlice.end;
             }
             slices.push(new tv.c.trace_model.ThreadTimeSlice(
                 thread,
-                '', title, id, prevSlice.end, {}, midDuration));
+                state, '', prevSlice.end, {}, midDuration));
             if (wakeup !== undefined) {
               var wakeupDuration = nextSlice.start - wakeup.ts;
               var args = {'wakeup from tid': wakeup.fromTid};
               slices.push(new tv.c.trace_model.ThreadTimeSlice(
-                  thread,
-                  '', 'Runnable', runnableId, wakeup.ts, args, wakeupDuration));
+                  thread, SCHEDULING_STATE.RUNNABLE, '',
+                  wakeup.ts, args, wakeupDuration));
               wakeup = undefined;
             }
           };
 
           if (prevSlice.args.stateWhenDescheduled == 'S') {
-            pushSleep('Sleeping', sleepingId);
+            pushSleep(SCHEDULING_STATE.SLEEPING);
           } else if (prevSlice.args.stateWhenDescheduled == 'R' ||
                      prevSlice.args.stateWhenDescheduled == 'R+') {
             slices.push(new tv.c.trace_model.ThreadTimeSlice(
-                thread,
-                '', 'Runnable', runnableId, prevSlice.end, {}, midDuration));
+                thread, SCHEDULING_STATE.RUNNABLE, '',
+                prevSlice.end, {}, midDuration));
           } else if (prevSlice.args.stateWhenDescheduled == 'D') {
-            pushSleep('Uninterruptible Sleep', ioWaitId);
+            pushSleep(SCHEDULING_STATE.UNINTR_SLEEP);
           } else if (prevSlice.args.stateWhenDescheduled == 'T') {
             slices.push(new tv.c.trace_model.ThreadTimeSlice(
-                thread, '', '__TASK_STOPPED', ioWaitId,
+                thread, SCHEDULING_STATE.STOPPED, '',
                 prevSlice.end, {}, midDuration));
           } else if (prevSlice.args.stateWhenDescheduled == 't') {
             slices.push(new tv.c.trace_model.ThreadTimeSlice(
-                thread, '', 'debug', ioWaitId,
+                thread, SCHEDULING_STATE.DEBUG, '',
                 prevSlice.end, {}, midDuration));
           } else if (prevSlice.args.stateWhenDescheduled == 'Z') {
             slices.push(new tv.c.trace_model.ThreadTimeSlice(
-                thread, '', 'Zombie', ioWaitId,
+                thread, SCHEDULING_STATE.ZOMBIE, '', ioWaitId,
                 prevSlice.end, {}, midDuration));
           } else if (prevSlice.args.stateWhenDescheduled == 'X') {
             slices.push(new tv.c.trace_model.ThreadTimeSlice(
-                thread, '', 'Exit Dead', ioWaitId,
+                thread, SCHEDULING_STATE.EXIT_DEAD, '',
                 prevSlice.end, {}, midDuration));
           } else if (prevSlice.args.stateWhenDescheduled == 'x') {
             slices.push(new tv.c.trace_model.ThreadTimeSlice(
-                thread, '', 'Task Dead', ioWaitId,
+                thread, SCHEDULING_STATE.TASK_DEAD, '',
                 prevSlice.end, {}, midDuration));
           } else if (prevSlice.args.stateWhenDescheduled == 'K') {
             slices.push(new tv.c.trace_model.ThreadTimeSlice(
-                thread, '', 'Wakekill', ioWaitId,
+                thread, SCHEDULING_STATE.WAKE_KILL, '',
                 prevSlice.end, {}, midDuration));
           } else if (prevSlice.args.stateWhenDescheduled == 'W') {
             slices.push(new tv.c.trace_model.ThreadTimeSlice(
-                thread, '', 'Waking', ioWaitId,
+                thread, SCHEDULING_STATE.WAKING, '',
                 prevSlice.end, {}, midDuration));
           } else if (prevSlice.args.stateWhenDescheduled == 'D|K') {
-            pushSleep('Uninterruptible Sleep | WakeKill', ioWaitId);
+            pushSleep(SCHEDULING_STATE.UNINTR_SLEEP_WAKE_KILL);
           } else if (prevSlice.args.stateWhenDescheduled == 'D|W') {
-            pushSleep('Uninterruptible Sleep | Waking', ioWaitId);
+            pushSleep(SCHEDULING_STATE.UNINTR_SLEEP_WAKING);
           } else {
             slices.push(new tv.c.trace_model.ThreadTimeSlice(
-                thread, '', 'UNKNOWN', unknownStateId,
+                thread, SCHEDULING_STATE.UNKNOWN, '',
                 prevSlice.end, {}, midDuration));
             this.model_.importWarning({
               type: 'parse_error',
@@ -519,7 +558,7 @@ tv.exportTo('tv.e.importer.linux_perf', function() {
           }
 
           var runningSlice = new tv.c.trace_model.ThreadTimeSlice(
-              thread, '', 'Running', runningId,
+              thread, SCHEDULING_STATE.RUNNING, '',
               nextSlice.start, {}, nextSlice.duration);
           runningSlice.cpuOnWhichThreadWasRunning = prevSlice.cpu;
           slices.push(runningSlice);
@@ -539,7 +578,10 @@ tv.exportTo('tv.e.importer.linux_perf', function() {
      * @return {number} offset from perf time to parent time or undefined if
      * the necessary sync records were not found.
      */
-    computeTimeTransform: function(isSecondaryImport) {
+    computeTimeTransform: function() {
+      var isSecondaryImport = this.model.getClockSyncRecordsNamed(
+          'linux_perf_importer').length !== 0;
+
       var mSyncs = this.model_.getClockSyncRecordsNamed('monotonic');
       // If this is a secondary import, and no clock syncing records were
       // found, then abort the import. Otherwise, just skip clock alignment.
@@ -732,10 +774,14 @@ tv.exportTo('tv.e.importer.linux_perf', function() {
      * Walks the this.events_ structure and populates this.lines_.
      */
     parseLines: function() {
+      var lines = [];
       var extractResult = LinuxPerfImporter._extractEventsFromSystraceHTML(
           this.events_, true);
+      if (!extractResult.ok)
+        extractResult = LinuxPerfImporter._extractEventsFromSystraceMultiHTML(
+            this.events_, true);
       var lines = extractResult.ok ?
-          extractResult.lines : this.events_.split('\n');
+        extractResult.lines : this.events_.split('\n');
 
       var lineParser = null;
       for (var lineNumber = 0; lineNumber < lines.length; ++lineNumber) {

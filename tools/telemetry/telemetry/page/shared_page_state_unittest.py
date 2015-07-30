@@ -5,23 +5,21 @@
 import tempfile
 import unittest
 
-from telemetry.core import browser_finder
 from telemetry.core import wpr_modes
+from telemetry.internal import story_runner
 from telemetry.page import page
 from telemetry.page import page_set
 from telemetry.page import page_test
 from telemetry.page import shared_page_state
 from telemetry.unittest_util import options_for_unittests
-from telemetry import user_story
-from telemetry.user_story import user_story_runner
 from telemetry.user_story import user_story_set
 
 
 def SetUpPageRunnerArguments(options):
   parser = options.CreateParser()
-  user_story_runner.AddCommandLineArgs(parser)
+  story_runner.AddCommandLineArgs(parser)
   options.MergeDefaultValues(parser.get_default_values())
-  user_story_runner.ProcessCommandLineArgs(parser, options)
+  story_runner.ProcessCommandLineArgs(parser, options)
 
 
 class DummyTest(page_test.PageTest):
@@ -78,7 +76,7 @@ class SharedPageStateTests(unittest.TestCase):
     test = DummyTest()
     uss = user_story_set.UserStorySet()
     uss.AddUserStory(us)
-    us.shared_user_story_state_class(test, self.options, uss)
+    us.shared_state_class(test, self.options, uss)
     browser_options = self.options.browser_options
     actual_user_agent = browser_options.browser_user_agent_type
     self.assertEqual(expected_user_agent, actual_user_agent)

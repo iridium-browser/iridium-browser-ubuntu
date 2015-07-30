@@ -41,8 +41,10 @@ namespace blink {
 class WebCompositeAndReadbackAsyncCallback;
 class WebCompositorAnimationTimeline;
 class WebLayer;
+class WebLayoutAndPaintAsyncCallback;
 struct WebPoint;
 struct WebSelectionBound;
+class WebSelection;
 class WebWidget;
 
 class WebLayerTreeView {
@@ -109,6 +111,11 @@ public:
     // Relays the end of a fling animation.
     virtual void didStopFlinging() { }
 
+    // Run layout and paint of all pending document changes asynchronously.
+    // The caller is resposible for keeping the WebLayoutAndPaintAsyncCallback object
+    // alive until it is called.
+    virtual void layoutAndPaintAsync(WebLayoutAndPaintAsyncCallback*) { }
+
     // The caller is responsible for keeping the WebCompositeAndReadbackAsyncCallback
     // object alive until it is called.
     virtual void compositeAndReadbackAsync(WebCompositeAndReadbackAsyncCallback*) { }
@@ -133,13 +140,14 @@ public:
     virtual void clearViewportLayers() { }
 
     // Used to update the active selection bounds.
-    // If the (empty) selection is an insertion point, |start| and |end| will be identical with type |Caret|.
-    // If the (non-empty) selection has mixed RTL/LTR text, |start| and |end| may share the same type,
-    // |SelectionLeft| or |SelectionRight|.
+    // FIXME: Remove this overload when downstream consumers have been updated to use WebSelection, crbug.com/466672.
     virtual void registerSelection(const WebSelectionBound& start, const WebSelectionBound& end) { }
+    virtual void registerSelection(const WebSelection&) { }
     virtual void clearSelection() { }
 
     // Debugging / dangerous ---------------------------------------------
+
+    virtual int layerTreeId() const { return 0; }
 
     // Toggles the FPS counter in the HUD layer
     virtual void setShowFPSCounter(bool) { }

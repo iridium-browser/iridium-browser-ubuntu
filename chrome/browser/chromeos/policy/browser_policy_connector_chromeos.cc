@@ -11,11 +11,11 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/chromeos/policy/affiliated_cloud_policy_invalidator.h"
 #include "chrome/browser/chromeos/policy/affiliated_invalidation_service_provider.h"
@@ -28,6 +28,7 @@
 #include "chrome/browser/chromeos/policy/device_network_configuration_updater.h"
 #include "chrome/browser/chromeos/policy/enrollment_config.h"
 #include "chrome/browser/chromeos/policy/enterprise_install_attributes.h"
+#include "chrome/browser/chromeos/policy/remote_commands/affiliated_remote_commands_invalidator.h"
 #include "chrome/browser/chromeos/policy/server_backed_state_keys_broker.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
@@ -106,7 +107,7 @@ BrowserPolicyConnectorChromeOS::BrowserPolicyConnectorChromeOS()
       chromeos::DBusThreadManager::IsInitialized()) {
     state_keys_broker_.reset(new ServerBackedStateKeysBroker(
         chromeos::DBusThreadManager::Get()->GetSessionManagerClient(),
-        base::MessageLoopProxy::current()));
+        base::ThreadTaskRunnerHandle::Get()));
 
     chromeos::CryptohomeClient* cryptohome_client =
         chromeos::DBusThreadManager::Get()->GetCryptohomeClient();
@@ -134,10 +135,9 @@ BrowserPolicyConnectorChromeOS::BrowserPolicyConnectorChromeOS()
             chromeos::DeviceSettingsService::Get(),
             install_attributes_.get(),
             GetBackgroundTaskRunner()));
-    device_cloud_policy_manager_ =
-        new DeviceCloudPolicyManagerChromeOS(device_cloud_policy_store.Pass(),
-                                             base::MessageLoopProxy::current(),
-                                             state_keys_broker_.get());
+    device_cloud_policy_manager_ = new DeviceCloudPolicyManagerChromeOS(
+        device_cloud_policy_store.Pass(), base::ThreadTaskRunnerHandle::Get(),
+        state_keys_broker_.get());
     AddPolicyProvider(
         scoped_ptr<ConfigurationPolicyProvider>(device_cloud_policy_manager_));
   }
@@ -199,6 +199,10 @@ void BrowserPolicyConnectorChromeOS::Init(
         enterprise_management::DeviceRegisterRequest::DEVICE,
         device_cloud_policy_manager_->core(),
         affiliated_invalidation_service_provider_.get()));
+    device_remote_commands_invalidator_.reset(
+        new AffiliatedRemoteCommandsInvalidator(
+            device_cloud_policy_manager_->core(),
+            affiliated_invalidation_service_provider_.get()));
   }
 
   SetTimezoneIfPolicyAvailable();
@@ -242,6 +246,16 @@ bool BrowserPolicyConnectorChromeOS::IsEnterpriseManaged() {
 
 std::string BrowserPolicyConnectorChromeOS::GetEnterpriseDomain() {
   return install_attributes_ ? install_attributes_->GetDomain() : std::string();
+}
+
+std::string BrowserPolicyConnectorChromeOS::GetDeviceAssetID() {
+  if (device_cloud_policy_manager_) {
+    const enterprise_management::PolicyData* policy =
+        device_cloud_policy_manager_->device_store()->policy();
+    if (policy && policy->has_annotated_asset_id())
+      return policy->annotated_asset_id();
+  }
+  return std::string();
 }
 
 DeviceMode BrowserPolicyConnectorChromeOS::GetDeviceMode() {

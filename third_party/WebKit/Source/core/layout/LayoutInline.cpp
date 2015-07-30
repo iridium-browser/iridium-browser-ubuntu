@@ -61,9 +61,9 @@ LayoutInline::LayoutInline(Element* element)
 
 LayoutInline* LayoutInline::createAnonymous(Document* document)
 {
-    LayoutInline* renderer = new LayoutInline(0);
-    renderer->setDocumentForAnonymous(document);
-    return renderer;
+    LayoutInline* layoutObject = new LayoutInline(0);
+    layoutObject->setDocumentForAnonymous(document);
+    return layoutObject;
 }
 
 void LayoutInline::willBeDestroyed()
@@ -196,7 +196,7 @@ void LayoutInline::styleDidChange(StyleDifference diff, const ComputedStyle* old
     for (LayoutInline* currCont = continuation; currCont; currCont = currCont->inlineElementContinuation()) {
         LayoutBoxModelObject* nextCont = currCont->continuation();
         currCont->setContinuation(0);
-        currCont->setStyle(style());
+        currCont->setStyle(mutableStyle());
         currCont->setContinuation(nextCont);
     }
 
@@ -288,11 +288,11 @@ void LayoutInline::addChild(LayoutObject* newChild, LayoutObject* beforeChild)
     return addChildIgnoringContinuation(newChild, beforeChild);
 }
 
-static LayoutBoxModelObject* nextContinuation(LayoutObject* renderer)
+static LayoutBoxModelObject* nextContinuation(LayoutObject* layoutObject)
 {
-    if (renderer->isInline() && !renderer->isReplaced())
-        return toLayoutInline(renderer)->continuation();
-    return toLayoutBlock(renderer)->inlineElementContinuation();
+    if (layoutObject->isInline() && !layoutObject->isReplaced())
+        return toLayoutInline(layoutObject)->continuation();
+    return toLayoutBlock(layoutObject)->inlineElementContinuation();
 }
 
 LayoutBoxModelObject* LayoutInline::continuationBefore(LayoutObject* beforeChild)
@@ -359,8 +359,8 @@ void LayoutInline::addChildIgnoringContinuation(LayoutObject* newChild, LayoutOb
 LayoutInline* LayoutInline::clone() const
 {
     LayoutInline* cloneInline = new LayoutInline(node());
-    cloneInline->setStyle(style());
-    cloneInline->setFlowThreadState(flowThreadState());
+    cloneInline->setStyle(mutableStyle());
+    cloneInline->setIsInsideFlowThread(isInsideFlowThread());
     return cloneInline;
 }
 
@@ -380,14 +380,14 @@ void LayoutInline::splitInlines(LayoutBlock* fromBlock, LayoutBlock* toBlock,
     ASSERT(isDescendantOf(fromBlock));
 
     // If we're splitting the inline containing the fullscreened element,
-    // |beforeChild| may be the renderer for the fullscreened element. However,
-    // that renderer is wrapped in a LayoutFullScreen, so |this| is not its
+    // |beforeChild| may be the layoutObject for the fullscreened element. However,
+    // that layoutObject is wrapped in a LayoutFullScreen, so |this| is not its
     // parent. Since the splitting logic expects |this| to be the parent, set
     // |beforeChild| to be the LayoutFullScreen.
     if (Fullscreen* fullscreen = Fullscreen::fromIfExists(document())) {
         const Element* fullScreenElement = fullscreen->webkitCurrentFullScreenElement();
         if (fullScreenElement && beforeChild && beforeChild->node() == fullScreenElement)
-            beforeChild = fullscreen->fullScreenRenderer();
+            beforeChild = fullscreen->fullScreenLayoutObject();
     }
 
     // FIXME: Because splitting is O(n^2) as tags nest pathologically, we cap the depth at which we're willing to clone.
@@ -658,12 +658,12 @@ void LayoutInline::absoluteRects(Vector<IntRect>& rects, const LayoutPoint& accu
     AbsoluteRectsGeneratorContext context(rects, accumulatedOffset);
     generateLineBoxRects(context);
 
-    if (continuation()) {
-        if (continuation()->isBox()) {
-            LayoutBox* box = toLayoutBox(continuation());
-            continuation()->absoluteRects(rects, toLayoutPoint(accumulatedOffset - containingBlock()->location() + box->locationOffset()));
+    if (const LayoutBoxModelObject* continuation = this->continuation()) {
+        if (continuation->isBox()) {
+            const LayoutBox* box = toLayoutBox(continuation);
+            continuation->absoluteRects(rects, toLayoutPoint(accumulatedOffset - containingBlock()->location() + box->locationOffset()));
         } else {
-            continuation()->absoluteRects(rects, toLayoutPoint(accumulatedOffset - containingBlock()->location()));
+            continuation->absoluteRects(rects, toLayoutPoint(accumulatedOffset - containingBlock()->location()));
         }
     }
 }
@@ -673,11 +673,11 @@ namespace {
 
 class AbsoluteQuadsGeneratorContext {
 public:
-    AbsoluteQuadsGeneratorContext(const LayoutInline* renderer, Vector<FloatQuad>& quads)
+    AbsoluteQuadsGeneratorContext(const LayoutInline* layoutObject, Vector<FloatQuad>& quads)
         : m_quads(quads)
         , m_geometryMap()
     {
-        m_geometryMap.pushMappingsToAncestor(renderer, 0);
+        m_geometryMap.pushMappingsToAncestor(layoutObject, 0);
     }
 
     void operator()(const FloatRect& rect)
@@ -696,8 +696,8 @@ void LayoutInline::absoluteQuads(Vector<FloatQuad>& quads, bool* wasFixed) const
     AbsoluteQuadsGeneratorContext context(this, quads);
     generateLineBoxRects(context);
 
-    if (continuation())
-        continuation()->absoluteQuads(quads, wasFixed);
+    if (const LayoutBoxModelObject* continuation = this->continuation())
+        continuation->absoluteQuads(quads, wasFixed);
 }
 
 LayoutUnit LayoutInline::offsetLeft() const
@@ -722,12 +722,12 @@ LayoutUnit LayoutInline::offsetTop() const
     return adjustedPositionRelativeToOffsetParent(topLeft).y();
 }
 
-static LayoutUnit computeMargin(const LayoutInline* renderer, const Length& margin)
+static LayoutUnit computeMargin(const LayoutInline* layoutObject, const Length& margin)
 {
     if (margin.isFixed())
         return margin.value();
-    if (margin.isPercent())
-        return minimumValueForLength(margin, std::max(LayoutUnit(), renderer->containingBlock()->availableLogicalWidth()));
+    if (margin.hasPercent())
+        return minimumValueForLength(margin, std::max(LayoutUnit(), layoutObject->containingBlock()->availableLogicalWidth()));
     return LayoutUnit();
 }
 
@@ -776,15 +776,6 @@ LayoutUnit LayoutInline::marginAfter(const ComputedStyle* otherStyle) const
     return computeMargin(this, style()->marginAfterUsing(otherStyle ? otherStyle : style()));
 }
 
-const char* LayoutInline::name() const
-{
-    if (isRelPositioned())
-        return "LayoutInline (relative positioned)";
-    if (isAnonymous())
-        return "LayoutInline (anonymous)";
-    return "LayoutInline";
-}
-
 bool LayoutInline::nodeAtPoint(HitTestResult& result,
     const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction hitTestAction)
 {
@@ -812,7 +803,7 @@ private:
 
 bool LayoutInline::hitTestCulledInline(HitTestResult& result, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset)
 {
-    ASSERT(result.isRectBasedTest() && !alwaysCreateLineBoxes());
+    ASSERT(!alwaysCreateLineBoxes());
     if (!visibleToHitTestRequest(result.hitTestRequest()))
         return false;
 
@@ -1036,8 +1027,8 @@ LayoutRect LayoutInline::absoluteClippedOverflowRect() const
     LinesBoundingBoxGeneratorContext context(floatResult);
 
     LayoutInline* endContinuation = inlineElementContinuation();
-    while (endContinuation->inlineElementContinuation())
-        endContinuation = endContinuation->inlineElementContinuation();
+    while (LayoutInline* nextContinuation = endContinuation->inlineElementContinuation())
+        endContinuation = nextContinuation;
 
     for (LayoutBlock* currBlock = containingBlock(); currBlock && currBlock->isAnonymousBlock(); currBlock = toLayoutBlock(currBlock->nextSibling())) {
         for (LayoutObject* curr = currBlock->firstChild(); curr; curr = curr->nextSibling()) {
@@ -1060,7 +1051,8 @@ LayoutRect LayoutInline::clippedOverflowRectForPaintInvalidation(const LayoutBox
 
 LayoutRect LayoutInline::clippedOverflowRect(const LayoutBoxModelObject* paintInvalidationContainer, const PaintInvalidationState* paintInvalidationState) const
 {
-    if ((!firstLineBoxIncludingCulling() && !continuation()) || style()->visibility() != VISIBLE)
+    const LayoutBoxModelObject* continuation = this->continuation();
+    if ((!firstLineBoxIncludingCulling() && !continuation) || style()->visibility() != VISIBLE)
         return LayoutRect();
 
     LayoutRect overflowRect(linesVisualOverflowBoundingBox());
@@ -1076,8 +1068,8 @@ LayoutRect LayoutInline::clippedOverflowRect(const LayoutBoxModelObject* paintIn
                 overflowRect.unite(curr->rectWithOutlineForPaintInvalidation(paintInvalidationContainer, outlineSize));
         }
 
-        if (continuation() && !continuation()->isInline() && continuation()->parent())
-            overflowRect.unite(continuation()->rectWithOutlineForPaintInvalidation(paintInvalidationContainer, outlineSize));
+        if (continuation && !continuation->isInline() && continuation->parent())
+            overflowRect.unite(continuation->rectWithOutlineForPaintInvalidation(paintInvalidationContainer, outlineSize));
     }
 
     return overflowRect;
@@ -1126,7 +1118,7 @@ void LayoutInline::mapRectToPaintInvalidationBacking(const LayoutBoxModelObject*
 
     if (style()->hasInFlowPosition() && layer()) {
         // Apply the in-flow position offset when invalidating a rectangle. The layer
-        // is translated, but the render box isn't, so we need to do this to get the
+        // is translated, but the layout box isn't, so we need to do this to get the
         // right dirty rect. Since this is called from LayoutObject::setStyle, the relative position
         // flag on the LayoutObject has been cleared, so use the one on the style().
         topLeft += layer()->offsetForInFlowPosition();
@@ -1225,8 +1217,8 @@ void LayoutInline::mapLocalToContainer(const LayoutBoxModelObject* paintInvalida
 void LayoutInline::updateDragState(bool dragOn)
 {
     LayoutBoxModelObject::updateDragState(dragOn);
-    if (continuation())
-        continuation()->updateDragState(dragOn);
+    if (LayoutBoxModelObject* continuation = this->continuation())
+        continuation->updateDragState(dragOn);
 }
 
 void LayoutInline::childBecameNonInline(LayoutObject* child)
@@ -1250,7 +1242,7 @@ void LayoutInline::updateHitTestResult(HitTestResult& result, const LayoutPoint&
     if (n) {
         if (isInlineElementContinuation()) {
             // We're in the continuation of a split inline.  Adjust our local point to be in the coordinate space
-            // of the principal renderer's containing block.  This will end up being the innerNonSharedNode.
+            // of the principal layoutObject's containing block.  This will end up being the innerNode.
             LayoutBlock* firstBlock = n->layoutObject()->containingBlock();
 
             // Get our containing block.
@@ -1258,10 +1250,7 @@ void LayoutInline::updateHitTestResult(HitTestResult& result, const LayoutPoint&
             localPoint.moveBy(block->location() - firstBlock->locationOffset());
         }
 
-        result.setInnerNode(n);
-        if (!result.innerNonSharedNode())
-            result.setInnerNonSharedNode(n);
-        result.setLocalPoint(localPoint);
+        result.setNodeAndPosition(n, localPoint);
     }
 }
 
@@ -1411,16 +1400,21 @@ public:
 
 void LayoutInline::addFocusRingRects(Vector<LayoutRect>& rects, const LayoutPoint& additionalOffset) const
 {
-    AbsoluteLayoutRectsIgnoringEmptyRectsGeneratorContext context(rects, additionalOffset);
-    generateLineBoxRects(context);
+    // Add line boxes only if this object is the first object of addFocusRingRects().
+    // Otherwise the parent (LayoutBlockFlow or LayoutInline) should have added line box rects
+    // covering those of this object.
+    if (rects.isEmpty()) {
+        AbsoluteLayoutRectsIgnoringEmptyRectsGeneratorContext context(rects, additionalOffset);
+        generateLineBoxRects(context);
+    }
 
     addChildFocusRingRects(rects, additionalOffset);
 
-    if (continuation()) {
-        if (continuation()->isInline())
-            continuation()->addFocusRingRects(rects, additionalOffset + (continuation()->containingBlock()->location() - containingBlock()->location()));
+    if (LayoutBoxModelObject* continuation = this->continuation()) {
+        if (continuation->isInline())
+            continuation->addFocusRingRects(rects, additionalOffset + (continuation->containingBlock()->location() - containingBlock()->location()));
         else
-            continuation()->addFocusRingRects(rects, additionalOffset + (toLayoutBox(continuation())->location() - containingBlock()->location()));
+            continuation->addFocusRingRects(rects, additionalOffset + (toLayoutBox(continuation)->location() - containingBlock()->location()));
     }
 }
 

@@ -10,6 +10,7 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/containers/hash_tables.h"
 #include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop_proxy.h"
@@ -47,15 +48,19 @@ class LevelDBPrefStore : public PersistentPrefStore {
   // PersistentPrefStore overrides:
   bool GetMutableValue(const std::string& key, base::Value** result) override;
   // Takes ownership of value.
-  void SetValue(const std::string& key, base::Value* value) override;
-  void SetValueSilently(const std::string& key, base::Value* value) override;
-  void RemoveValue(const std::string& key) override;
+  void SetValue(const std::string& key,
+                base::Value* value,
+                uint32 flags) override;
+  void SetValueSilently(const std::string& key,
+                        base::Value* value,
+                        uint32 flags) override;
+  void RemoveValue(const std::string& key, uint32 flags) override;
   bool ReadOnly() const override;
   PrefReadError GetReadError() const override;
   PrefReadError ReadPrefs() override;
   void ReadPrefsAsync(ReadErrorDelegate* error_delegate) override;
   void CommitPendingWrite() override;
-  void ReportValueChanged(const std::string& key) override;
+  void ReportValueChanged(const std::string& key, uint32 flags) override;
 
  private:
   struct ReadingResults;
@@ -102,8 +107,8 @@ class LevelDBPrefStore : public PersistentPrefStore {
 
   // Changes are accumulated in |keys_to_delete_| and |keys_to_set_| and are
   // stored in the database according to |timer_|.
-  std::set<std::string> keys_to_delete_;
-  std::map<std::string, std::string> keys_to_set_;
+  base::hash_set<std::string> keys_to_delete_;
+  base::hash_map<std::string, std::string> keys_to_set_;
   base::OneShotTimer<LevelDBPrefStore> timer_;
 
   base::WeakPtrFactory<LevelDBPrefStore> weak_ptr_factory_;

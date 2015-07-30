@@ -23,7 +23,7 @@ class OmniboxView;
 // Implements OmniboxPopupView using a raw NSWindow containing an
 // NSTableView.
 class OmniboxPopupViewMac : public OmniboxPopupView,
-                            public OmniboxPopupMatrixDelegate {
+                            public OmniboxPopupMatrixObserver {
  public:
   OmniboxPopupViewMac(OmniboxView* omnibox_view,
                       OmniboxEditModel* edit_model,
@@ -49,7 +49,7 @@ class OmniboxPopupViewMac : public OmniboxPopupView,
   OmniboxPopupMatrix* matrix() { return matrix_; }
 
  protected:
-  // Gets the autocomplete results. This is virtual so that it can be overriden
+  // Gets the autocomplete results. This is virtual so that it can be overridden
   // by tests.
   virtual const AutocompleteResult& GetResult() const;
 

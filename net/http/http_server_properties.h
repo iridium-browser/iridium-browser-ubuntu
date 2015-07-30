@@ -118,6 +118,10 @@ struct NET_EXPORT AlternativeService {
            port == other.port;
   }
 
+  bool operator!=(const AlternativeService& other) const {
+    return !this->operator==(other);
+  }
+
   bool operator<(const AlternativeService& other) const {
     if (protocol != other.protocol)
       return protocol < other.protocol;
@@ -183,6 +187,14 @@ struct NET_EXPORT SupportsQuic {
 struct NET_EXPORT ServerNetworkStats {
   ServerNetworkStats() : bandwidth_estimate(QuicBandwidth::Zero()) {}
 
+  bool operator==(const ServerNetworkStats& other) const {
+    return srtt == other.srtt && bandwidth_estimate == other.bandwidth_estimate;
+  }
+
+  bool operator!=(const ServerNetworkStats& other) const {
+    return !this->operator==(other);
+  }
+
   base::TimeDelta srtt;
   QuicBandwidth bandwidth_estimate;
 };
@@ -213,6 +225,9 @@ class NET_EXPORT HttpServerProperties {
   // Returns true if |server| supports a network protocol which honors
   // request prioritization.
   virtual bool SupportsRequestPriority(const HostPortPair& server) = 0;
+
+  // Returns the value set by SetSupportsSpdy(). If not set, returns false.
+  virtual bool GetSupportsSpdy(const HostPortPair& server) = 0;
 
   // Add |server| into the persistent store. Should only be called from IO
   // thread.
@@ -279,8 +294,7 @@ class NET_EXPORT HttpServerProperties {
   // to |threshold| will be honored. |threshold| must be between 0.0 and 1.0
   // inclusive. Hence, a threshold of 0.0 implies that all advertisements will
   // be honored.
-  virtual void SetAlternateProtocolProbabilityThreshold(
-      double threshold) = 0;
+  virtual void SetAlternativeServiceProbabilityThreshold(double threshold) = 0;
 
   // Gets a reference to the SettingsMap stored for a host.
   // If no settings are stored, returns an empty SettingsMap.
@@ -308,6 +322,7 @@ class NET_EXPORT HttpServerProperties {
   virtual void SetSupportsQuic(bool used_quic,
                                const IPAddressNumber& last_address) = 0;
 
+  // Sets |stats| for |host_port_pair|.
   virtual void SetServerNetworkStats(const HostPortPair& host_port_pair,
                                      ServerNetworkStats stats) = 0;
 

@@ -10,7 +10,6 @@
 #include "base/memory/shared_memory.h"
 #include "base/strings/stringprintf.h"
 #include "cc/resources/shared_bitmap_manager.h"
-#include "content/public/renderer/render_thread.h"
 #include "content/shell/renderer/test_runner/web_test_delegate.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
@@ -152,6 +151,7 @@ TestPlugin::TestPlugin(blink::WebFrame* frame,
       print_event_details_(false),
       print_user_gesture_status_(false),
       can_process_drag_(false),
+      supports_keyboard_focus_(false),
       is_persistent_(params.mimeType == PluginPersistsMimeType()),
       can_create_without_renderer_(params.mimeType ==
                                    CanCreateWithoutRendererMimeType()) {
@@ -171,6 +171,9 @@ TestPlugin::TestPlugin(blink::WebFrame* frame,
       blink::WebString, kAttributePrintEventDetails, ("print-event-details"));
   const CR_DEFINE_STATIC_LOCAL(
       blink::WebString, kAttributeCanProcessDrag, ("can-process-drag"));
+  const CR_DEFINE_STATIC_LOCAL(blink::WebString,
+                               kAttributeSupportsKeyboardFocus,
+                               ("supports-keyboard-focus"));
   const CR_DEFINE_STATIC_LOCAL(blink::WebString,
                                kAttributePrintUserGestureStatus,
                                ("print-user-gesture-status"));
@@ -197,6 +200,8 @@ TestPlugin::TestPlugin(blink::WebFrame* frame,
       print_event_details_ = ParseBoolean(attribute_value);
     else if (attribute_name == kAttributeCanProcessDrag)
       can_process_drag_ = ParseBoolean(attribute_value);
+    else if (attribute_name == kAttributeSupportsKeyboardFocus)
+      supports_keyboard_focus_ = ParseBoolean(attribute_value);
     else if (attribute_name == kAttributePrintUserGestureStatus)
       print_user_gesture_status_ = ParseBoolean(attribute_value);
   }
@@ -217,7 +222,7 @@ bool TestPlugin::initialize(blink::WebPluginContainer* container) {
     return false;
 
   layer_ = cc::TextureLayer::CreateForMailbox(this);
-  web_layer_ = make_scoped_ptr(InstantiateWebLayer(layer_));
+  web_layer_ = make_scoped_ptr(delegate_->InstantiateWebLayer(layer_));
   container_ = container;
   container_->setWebLayer(web_layer_.get());
   if (re_request_touch_events_) {
@@ -257,6 +262,10 @@ NPObject* TestPlugin::scriptableObject() {
 
 bool TestPlugin::canProcessDrag() const {
   return can_process_drag_;
+}
+
+bool TestPlugin::supportsKeyboardFocus() const {
+  return supports_keyboard_focus_;
 }
 
 void TestPlugin::updateGeometry(
@@ -302,7 +311,7 @@ void TestPlugin::updateGeometry(
     texture_mailbox_ = cc::TextureMailbox(mailbox, GL_TEXTURE_2D, sync_point);
   } else {
     scoped_ptr<cc::SharedBitmap> bitmap =
-        RenderThread::Get()->GetSharedBitmapManager()->AllocateSharedBitmap(
+        delegate_->GetSharedBitmapManager()->AllocateSharedBitmap(
             gfx::Rect(rect_).size());
     if (!bitmap) {
       texture_mailbox_ = cc::TextureMailbox();

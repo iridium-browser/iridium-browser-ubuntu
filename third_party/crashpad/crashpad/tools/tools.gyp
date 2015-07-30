@@ -16,6 +16,69 @@
   'includes': [
     '../build/crashpad.gypi',
   ],
+  'targets': [
+    {
+      'target_name': 'crashpad_tool_support',
+      'type': 'static_library',
+      'dependencies': [
+        '../third_party/mini_chromium/mini_chromium.gyp:base',
+      ],
+      'include_dirs': [
+        '..',
+      ],
+      'sources': [
+        'tool_support.cc',
+        'tool_support.h',
+      ],
+    },
+    {
+      'target_name': 'crashpad_database_util',
+      'type': 'executable',
+      'dependencies': [
+        'crashpad_tool_support',
+        '../client/client.gyp:crashpad_client',
+        '../compat/compat.gyp:crashpad_compat',
+        '../third_party/mini_chromium/mini_chromium.gyp:base',
+        '../util/util.gyp:crashpad_util',
+      ],
+      'include_dirs': [
+        '..',
+      ],
+      'sources': [
+        'crashpad_database_util.cc',
+      ],
+    },
+    {
+      'target_name': 'generate_dump',
+      'type': 'executable',
+      'dependencies': [
+        'crashpad_tool_support',
+        '../compat/compat.gyp:crashpad_compat',
+        '../minidump/minidump.gyp:crashpad_minidump',
+        '../snapshot/snapshot.gyp:crashpad_snapshot',
+        '../third_party/mini_chromium/mini_chromium.gyp:base',
+        '../util/util.gyp:crashpad_util',
+      ],
+      'include_dirs': [
+        '..',
+      ],
+      'sources': [
+        'generate_dump.cc',
+      ],
+      'conditions': [
+        ['OS=="mac"', {
+          'xcode_settings': {
+            'OTHER_LDFLAGS': [
+              '-sectcreate',
+              '__TEXT',
+              '__info_plist',
+              '<(sectaskaccess_info_plist)'
+            ],
+          },
+        }],
+      ],
+    }
+  ],
   'conditions': [
     ['OS=="mac"', {
       'variables': {
@@ -46,37 +109,6 @@
 
       'targets': [
         {
-          'target_name': 'crashpad_tool_support',
-          'type': 'static_library',
-          'dependencies': [
-            '../third_party/mini_chromium/mini_chromium.gyp:base',
-          ],
-          'include_dirs': [
-            '..',
-          ],
-          'sources': [
-            'tool_support.cc',
-            'tool_support.h',
-          ],
-        },
-        {
-          'target_name': 'crashpad_database_util',
-          'type': 'executable',
-          'dependencies': [
-            'crashpad_tool_support',
-            '../client/client.gyp:crashpad_client',
-            '../compat/compat.gyp:crashpad_compat',
-            '../third_party/mini_chromium/mini_chromium.gyp:base',
-            '../util/util.gyp:crashpad_util',
-          ],
-          'include_dirs': [
-            '..',
-          ],
-          'sources': [
-            'crashpad_database_util.cc',
-          ],
-        },
-        {
           'target_name': 'catch_exception_tool',
           'type': 'executable',
           'dependencies': [
@@ -106,32 +138,6 @@
           ],
           'sources': [
             'mac/exception_port_tool.cc',
-          ],
-          'xcode_settings': {
-            'OTHER_LDFLAGS': [
-              '-sectcreate',
-              '__TEXT',
-              '__info_plist',
-              '<(sectaskaccess_info_plist)'
-            ],
-          },
-        },
-        {
-          'target_name': 'generate_dump',
-          'type': 'executable',
-          'dependencies': [
-            'crashpad_tool_support',
-            '../compat/compat.gyp:crashpad_compat',
-            '../minidump/minidump.gyp:crashpad_minidump',
-            '../snapshot/snapshot.gyp:crashpad_snapshot',
-            '../third_party/mini_chromium/mini_chromium.gyp:base',
-            '../util/util.gyp:crashpad_util',
-          ],
-          'include_dirs': [
-            '..',
-          ],
-          'sources': [
-            'generate_dump.cc',
           ],
           'xcode_settings': {
             'OTHER_LDFLAGS': [
@@ -182,8 +188,6 @@
           ],
         },
       ],
-    }, {
-      'targets': [],
     }],
   ],
 }

@@ -381,6 +381,14 @@ DisplaySnapshotX11* NativeDisplayDelegateX11::InitDisplaySnapshot(
   return display_snapshot;
 }
 
+void NativeDisplayDelegateX11::GetHDCPState(
+    const DisplaySnapshot& output,
+    const GetHDCPStateCallback& callback) {
+  HDCPState state = HDCP_STATE_UNDESIRED;
+  bool success = GetHDCPState(output, &state);
+  callback.Run(success, state);
+}
+
 bool NativeDisplayDelegateX11::GetHDCPState(const DisplaySnapshot& output,
                                             HDCPState* state) {
   unsigned char* values = NULL;
@@ -438,6 +446,13 @@ bool NativeDisplayDelegateX11::GetHDCPState(const DisplaySnapshot& output,
 
   VLOG(3) << "HDCP state: success," << *state;
   return true;
+}
+
+void NativeDisplayDelegateX11::SetHDCPState(
+    const DisplaySnapshot& output,
+    HDCPState state,
+    const SetHDCPStateCallback& callback) {
+  callback.Run(SetHDCPState(output, state));
 }
 
 bool NativeDisplayDelegateX11::SetHDCPState(const DisplaySnapshot& output,
@@ -606,6 +621,13 @@ XRRCrtcGamma* NativeDisplayDelegateX11::CreateGammaRampForProfile(
   // TODO(mukai|marcheu): Creates the appropriate gamma ramp data from the
   // profile enum. It would be served by the vendor.
   return NULL;
+}
+
+bool NativeDisplayDelegateX11::SetGammaRamp(
+    const ui::DisplaySnapshot& output,
+    const std::vector<GammaRampRGBEntry>& lut) {
+  NOTIMPLEMENTED();
+  return false;
 }
 
 void NativeDisplayDelegateX11::DrawBackground() {

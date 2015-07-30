@@ -8,6 +8,9 @@
 #include "base/basictypes.h"
 
 namespace net {
+namespace interfaces {
+class ProxyResolverFactory;
+}
 
 class DhcpProxyScriptFetcher;
 class HostResolver;

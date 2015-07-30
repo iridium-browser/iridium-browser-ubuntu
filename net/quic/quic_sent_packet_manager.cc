@@ -46,9 +46,6 @@ static const int64 kMinHandshakeTimeoutMs = 10;
 static const size_t kDefaultMaxTailLossProbes = 2;
 static const int64 kMinTailLossProbeTimeoutMs = 10;
 
-// Number of samples before we force a new recent min rtt to be captured.
-static const size_t kNumMinRttSamplesAfterQuiescence = 2;
-
 // Number of unpaced packets to send after quiescence.
 static const size_t kInitialUnpacedBurst = 10;
 
@@ -169,10 +166,8 @@ void QuicSentPacketManager::SetFromConfig(const QuicConfig& config) {
     receive_buffer_bytes_ =
         max(kMinSocketReceiveBuffer,
             static_cast<QuicByteCount>(config.ReceivedSocketReceiveBuffer()));
-    if (FLAGS_quic_limit_max_cwnd_to_receive_buffer) {
-      send_algorithm_->SetMaxCongestionWindow(receive_buffer_bytes_ *
-                                              kUsableRecieveBufferFraction);
-    }
+    send_algorithm_->SetMaxCongestionWindow(receive_buffer_bytes_ *
+                                            kUsableRecieveBufferFraction);
   }
   send_algorithm_->SetFromConfig(config, perspective_);
 
@@ -568,14 +563,6 @@ bool QuicSentPacketManager::OnPacketSent(
     --pending_timer_transmission_count_;
   }
 
-  if (unacked_packets_.bytes_in_flight() == 0) {
-    // TODO(ianswett): Consider being less aggressive to force a new
-    // recent_min_rtt, likely by not discarding a relatively new sample.
-    DVLOG(1) << "Sampling a new recent min rtt within 2 samples. currently:"
-             << rtt_stats_.recent_min_rtt().ToMilliseconds() << "ms";
-    rtt_stats_.SampleNewRecentMinRtt(kNumMinRttSamplesAfterQuiescence);
-  }
-
   // Only track packets as in flight that the send algorithm wants us to track.
   // Since FEC packets should also be counted towards the congestion window,
   // consider them as retransmittable for the purposes of congestion control.
@@ -793,11 +780,6 @@ QuicTime::Delta QuicSentPacketManager::TimeUntilSend(
   // send algorithm does not need to be consulted.
   if (pending_timer_transmission_count_ > 0) {
     return QuicTime::Delta::Zero();
-  }
-  if (!FLAGS_quic_limit_max_cwnd_to_receive_buffer &&
-      unacked_packets_.bytes_in_flight() >=
-          kUsableRecieveBufferFraction * receive_buffer_bytes_) {
-    return QuicTime::Delta::Infinite();
   }
   return send_algorithm_->TimeUntilSend(
       now, unacked_packets_.bytes_in_flight(), retransmittable);

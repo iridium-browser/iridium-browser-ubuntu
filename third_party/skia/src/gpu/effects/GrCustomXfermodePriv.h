@@ -29,7 +29,7 @@ class GrCustomXferFP : public GrFragmentProcessor {
 public:
     GrCustomXferFP(SkXfermode::Mode mode, GrTexture* background);
 
-    void getGLProcessorKey(const GrGLCaps& caps, GrProcessorKeyBuilder* b) const override; 
+    void getGLProcessorKey(const GrGLSLCaps& caps, GrProcessorKeyBuilder* b) const override; 
 
     GrGLFragmentProcessor* createGLInstance() const override;
 
@@ -64,10 +64,6 @@ public:
         return true;
     }
 
-    bool canTweakAlphaForCoverage() const override {
-        return false;
-    }
-
     void getInvariantOutput(const GrProcOptInfo& colorPOI, const GrProcOptInfo& coveragePOI,
                             GrXPFactory::InvariantOutput*) const override;
 
@@ -79,9 +75,7 @@ private:
 
     bool willReadDstColor(const GrDrawTargetCaps& caps,
                           const GrProcOptInfo& colorPOI,
-                          const GrProcOptInfo& coveragePOI) const override {
-        return true;
-    }
+                          const GrProcOptInfo& coveragePOI) const override;
 
     bool onIsEqual(const GrXPFactory& xpfBase) const override {
         const GrCustomXPFactory& xpf = xpfBase.cast<GrCustomXPFactory>();

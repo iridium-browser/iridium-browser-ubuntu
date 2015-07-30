@@ -9,9 +9,12 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "gpu/command_buffer/client/gles2_interface.h"
 #include "gpu/command_buffer/common/mailbox.h"
 #include "media/base/media_export.h"
+#include "media/video/video_decode_accelerator.h"
 #include "media/video/video_encode_accelerator.h"
+#include "ui/gfx/gpu_memory_buffer.h"
 
 namespace base {
 class SingleThreadTaskRunner;
@@ -58,14 +61,27 @@ class MEDIA_EXPORT GpuVideoAcceleratorFactories
 
   virtual void WaitSyncPoint(uint32 sync_point) = 0;
 
+  virtual scoped_ptr<gfx::GpuMemoryBuffer> AllocateGpuMemoryBuffer(
+      const gfx::Size& size,
+      gfx::GpuMemoryBuffer::Format format,
+      gfx::GpuMemoryBuffer::Usage usage) = 0;
+
+  virtual bool IsTextureRGSupported() = 0;
+
+  virtual gpu::gles2::GLES2Interface* GetGLES2Interface() = 0;
+
   // Allocate & return a shared memory segment.
   virtual scoped_ptr<base::SharedMemory> CreateSharedMemory(size_t size) = 0;
 
   // Returns the task runner the video accelerator runs on.
   virtual scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner() = 0;
 
+  // Returns the supported codec profiles of video decode accelerator.
+  virtual VideoDecodeAccelerator::SupportedProfiles
+      GetVideoDecodeAcceleratorSupportedProfiles() = 0;
+
   // Returns the supported codec profiles of video encode accelerator.
-  virtual std::vector<VideoEncodeAccelerator::SupportedProfile>
+  virtual VideoEncodeAccelerator::SupportedProfiles
       GetVideoEncodeAcceleratorSupportedProfiles() = 0;
 
  protected:

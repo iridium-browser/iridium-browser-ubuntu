@@ -46,8 +46,7 @@ public:
     virtual void didUpdate() override;
 
     // Can be called from any thread.
-    // TODO(tkent): Rename to m_handler.
-    AudioHandler& node() const { return m_handler; }
+    AudioHandler& handler() const { return m_handler; }
 
     // Must be called with the context's graph lock.
     void connect(AudioNodeOutput&);
@@ -80,8 +79,8 @@ public:
 private:
     explicit AudioNodeInput(AudioHandler&);
 
-    // This reference to an Oilpan object is safe because the AudioNode owns
-    // this AudioNodeInput object.
+    // This reference is safe because the AudioHandler owns this AudioNodeInput
+    // object.
     AudioHandler& m_handler;
 
     // m_disabledOutputs contains the AudioNodeOutputs which are disabled (will

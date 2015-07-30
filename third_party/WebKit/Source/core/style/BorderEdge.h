@@ -17,15 +17,20 @@ struct BorderEdge {
     bool hasVisibleColorAndStyle() const;
     bool shouldRender() const;
     bool presentButInvisible() const;
-    bool obscuresBackgroundEdge(float scale) const;
+    bool obscuresBackgroundEdge() const;
     bool obscuresBackground() const;
     int usedWidth() const;
-
-    void getDoubleBorderStripeWidths(int& outerWidth, int& innerWidth) const;
 
     bool sharesColorWith(const BorderEdge& other) const;
 
     EBorderStyle borderStyle() const  { return static_cast<EBorderStyle>(style); }
+
+    enum DoubleBorderStripe {
+        DoubleBorderStripeOuter,
+        DoubleBorderStripeInner
+    };
+
+    int getDoubleBorderStripeWidth(DoubleBorderStripe) const;
 
     int width;
     Color color;

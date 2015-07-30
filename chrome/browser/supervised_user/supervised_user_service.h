@@ -80,16 +80,6 @@ class SupervisedUserService : public KeyedService,
     // Returns true to indicate that the delegate handled the (de)activation, or
     // false to indicate that the SupervisedUserService itself should handle it.
     virtual bool SetActive(bool active) = 0;
-    // Returns the path to a blacklist file to load, or an empty path to
-    // indicate "none".
-    virtual base::FilePath GetBlacklistPath() const;
-    // Returns the URL from which to download a blacklist if no local one exists
-    // yet. The blacklist file will be stored at |GetBlacklistPath()|.
-    virtual GURL GetBlacklistURL() const;
-    // Returns the identifier ("cx") of the Custom Search Engine to use for the
-    // experimental "SafeSites" feature, or the empty string to disable the
-    // feature.
-    virtual std::string GetSafeSitesCx() const;
   };
 
   ~SupervisedUserService() override;
@@ -214,8 +204,7 @@ class SupervisedUserService : public KeyedService,
     void SetManualURLs(scoped_ptr<std::map<GURL, bool>> url_map);
 
     void InitAsyncURLChecker(
-        const scoped_refptr<net::URLRequestContextGetter>& context,
-        const std::string& cx);
+        const scoped_refptr<net::URLRequestContextGetter>& context);
 
     void Clear();
 
@@ -292,13 +281,17 @@ class SupervisedUserService : public KeyedService,
   void OnSiteListsChanged(
       const std::vector<scoped_refptr<SupervisedUserSiteList>>& site_lists);
 
-  // Asynchronously downloads a static blacklist file from |url|, stores it at
-  // |path|, loads it, and applies it to the URL filters. If |url| is not valid
-  // (e.g. empty), directly tries to load from |path|.
+  // Asynchronously loads a blacklist from a binary file at |path| and applies
+  // it to the URL filters. If no file exists at |path| yet, downloads a file
+  // from |url| and stores it at |path| first.
   void LoadBlacklist(const base::FilePath& path, const GURL& url);
 
-  // Asynchronously loads a static blacklist from a binary file at |path| and
-  // applies it to the URL filters.
+  void OnBlacklistFileChecked(const base::FilePath& path,
+                              const GURL& url,
+                              bool file_exists);
+
+  // Asynchronously loads a blacklist from a binary file at |path| and applies
+  // it to the URL filters.
   void LoadBlacklistFromFile(const base::FilePath& path);
 
   void OnBlacklistDownloadDone(const base::FilePath& path, bool success);

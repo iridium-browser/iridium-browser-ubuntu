@@ -91,6 +91,9 @@ class CONTENT_EXPORT RenderFrameHostImpl
     : public RenderFrameHost,
       public BrowserAccessibilityDelegate {
  public:
+  typedef base::Callback<void(const ui::AXTreeUpdate&)>
+      AXTreeSnapshotCallback;
+
   // Keeps track of the state of the RenderFrameHostImpl, particularly with
   // respect to swap out.
   enum RenderFrameHostImplState {
@@ -132,7 +135,8 @@ class CONTENT_EXPORT RenderFrameHostImpl
   void ExecuteJavaScript(const base::string16& javascript) override;
   void ExecuteJavaScript(const base::string16& javascript,
                          const JavaScriptResultCallback& callback) override;
-  void ExecuteJavaScriptForTests(const base::string16& javascript) override;
+  void ExecuteJavaScriptWithUserGestureForTests(
+      const base::string16& javascript) override;
   void ExecuteJavaScriptInIsolatedWorld(
       const base::string16& javascript,
       const JavaScriptResultCallback& callback,
@@ -180,7 +184,9 @@ class CONTENT_EXPORT RenderFrameHostImpl
 
   // Creates a RenderFrame in the renderer process.  Only called for
   // cross-process subframe navigations in --site-per-process.
-  bool CreateRenderFrame(int parent_routing_id, int proxy_routing_id);
+  bool CreateRenderFrame(int parent_routing_id,
+                         int previous_sibling_routing_id,
+                         int proxy_routing_id);
 
   // Returns whether the RenderFrame in the renderer process has been created
   // and still has a connection.  This is valid for all frames.
@@ -203,11 +209,6 @@ class CONTENT_EXPORT RenderFrameHostImpl
   RenderViewHostImpl* render_view_host() { return render_view_host_; }
   RenderFrameHostDelegate* delegate() { return delegate_; }
   FrameTreeNode* frame_tree_node() { return frame_tree_node_; }
-
-  // Sets this RenderFrameHost's loading state.
-  void set_is_loading(bool is_loading) {
-    is_loading_ = is_loading;
-  }
 
   // Returns this RenderFrameHost's loading state. This method is only used by
   // FrameTreeNode. The proper way to check whether a frame is loading is to
@@ -370,6 +371,10 @@ class CONTENT_EXPORT RenderFrameHostImpl
   // Send a message to the renderer process to change the accessibility mode.
   void SetAccessibilityMode(AccessibilityMode AccessibilityMode);
 
+  // Request a one-time snapshot of the accessibility tree without changing
+  // the accessibility mode.
+  void RequestAXTreeSnapshot(AXTreeSnapshotCallback callback);
+
   // Turn on accessibility testing. The given callback will be run
   // every time an accessibility notification is received from the
   // renderer process, and the accessibility tree it sent can be
@@ -418,6 +423,14 @@ class CONTENT_EXPORT RenderFrameHostImpl
                         scoped_ptr<StreamHandle> body,
                         const CommonNavigationParams& common_params,
                         const RequestNavigationParams& request_params);
+
+  // PlzNavigate
+  // Indicates that a navigation failed and that this RenderFrame should display
+  // an error page.
+  void FailedNavigation(const CommonNavigationParams& common_params,
+                        const RequestNavigationParams& request_params,
+                        bool has_stale_copy_in_cache,
+                        int error_code);
 
   // Sets up the Mojo connection between this instance and its associated render
   // frame if it has not yet been set up.
@@ -515,7 +528,12 @@ class CONTENT_EXPORT RenderFrameHostImpl
       const std::vector<AccessibilityHostMsg_LocationChangeParams>& params);
   void OnAccessibilityFindInPageResult(
       const AccessibilityHostMsg_FindInPageResultParams& params);
+  void OnAccessibilitySnapshotResponse(int callback_id,
+                                       const ui::AXTreeUpdate& snapshot);
   void OnToggleFullscreen(bool enter_fullscreen);
+  void OnDidStartLoading(bool to_different_document);
+  void OnDidStopLoading();
+  void OnDidChangeLoadProgress(double load_progress);
 
 #if defined(OS_MACOSX) || defined(OS_ANDROID)
   void OnShowPopup(const FrameHostMsg_ShowPopup_Params& params);
@@ -553,6 +571,10 @@ class CONTENT_EXPORT RenderFrameHostImpl
 
   // Informs the content client that geolocation permissions were used.
   void DidUseGeolocationPermission();
+
+  void UpdatePermissionsForNavigation(
+      const CommonNavigationParams& common_params,
+      const RequestNavigationParams& request_params);
 
   // For now, RenderFrameHosts indirectly keep RenderViewHosts alive via a
   // refcount that calls Shutdown when it reaches zero.  This allows each
@@ -612,7 +634,7 @@ class CONTENT_EXPORT RenderFrameHostImpl
   // frames.
   // TODO(kenrb): Later this will also be used on the top-level frame, when
   // RenderFrameHost owns its RenderViewHost.
-  scoped_ptr<RenderWidgetHostImpl> render_widget_host_;
+  RenderWidgetHostImpl* render_widget_host_;
 
   int routing_id_;
 
@@ -662,6 +684,11 @@ class CONTENT_EXPORT RenderFrameHostImpl
   // document or not.
   bool is_loading_;
 
+  // PlzNavigate
+  // Used to track whether a commit is expected in this frame. Only used in
+  // tests.
+  bool pending_commit_;
+
   // Used to swap out or shut down this RFH when the unload event is taking too
   // long to execute, depending on the number of active frames in the
   // SiteInstance.
@@ -684,6 +711,10 @@ class CONTENT_EXPORT RenderFrameHostImpl
   // A count of the number of times we needed to reset accessibility, so
   // we don't keep trying to reset forever.
   int accessibility_reset_count_;
+
+  // The mapping from callback id to corresponding callback for pending
+  // accessibility tree snapshot calls created by RequestAXTreeSnapshot.
+  std::map<int, AXTreeSnapshotCallback> ax_tree_snapshot_callbacks_;
 
   // Callback when an event is received, for testing.
   base::Callback<void(ui::AXEvent, int)> accessibility_testing_callback_;

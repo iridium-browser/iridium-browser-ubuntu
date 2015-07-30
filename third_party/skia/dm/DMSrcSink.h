@@ -13,6 +13,7 @@
 #include "SkBBoxHierarchy.h"
 #include "SkBitmap.h"
 #include "SkCanvas.h"
+#include "SkCodec.h"
 #include "SkData.h"
 #include "SkGPipe.h"
 #include "SkPicture.h"
@@ -94,14 +95,20 @@ public:
         kNormal_Mode,
         kScanline_Mode,
     };
-    CodecSrc(Path, Mode);
+    enum DstColorType {
+        kGetFromCanvas_DstColorType,
+        kIndex8_Always_DstColorType,
+        kGrayscale_Always_DstColorType,
+    };
+    CodecSrc(Path, Mode, DstColorType);
 
     Error draw(SkCanvas*) const override;
     SkISize size() const override;
     Name name() const override;
 private:
-    Path fPath;
-    Mode fMode;
+    Path                   fPath;
+    Mode                   fMode;
+    DstColorType           fDstColorType;
 };
 
 
@@ -207,63 +214,74 @@ public:
 
 /*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
 
-class ViaMatrix : public Sink {
+class Via : public Sink {
+public:
+    explicit Via(Sink* sink) : fSink(sink) {}
+    const char* fileExtension() const override { return fSink->fileExtension(); }
+    int               enclave() const override { return fSink->enclave(); }
+protected:
+    SkAutoTDelete<Sink> fSink;
+};
+
+class ViaMatrix : public Via {
 public:
     ViaMatrix(SkMatrix, Sink*);
-
     Error draw(const Src&, SkBitmap*, SkWStream*, SkString*) const override;
-    int enclave() const override { return fSink->enclave(); }
-    const char* fileExtension() const override { return fSink->fileExtension(); }
 private:
-    SkMatrix            fMatrix;
-    SkAutoTDelete<Sink> fSink;
+    const SkMatrix fMatrix;
 };
 
-class ViaUpright : public Sink {
+class ViaUpright : public Via {
 public:
     ViaUpright(SkMatrix, Sink*);
-
     Error draw(const Src&, SkBitmap*, SkWStream*, SkString*) const override;
-    int enclave() const override { return fSink->enclave(); }
-    const char* fileExtension() const override { return fSink->fileExtension(); }
 private:
-    SkMatrix            fMatrix;
-    SkAutoTDelete<Sink> fSink;
+    const SkMatrix fMatrix;
 };
 
-class ViaPipe : public Sink {
+class ViaPipe : public Via {
 public:
-    explicit ViaPipe(Sink*);
-
+    explicit ViaPipe(Sink* sink) : Via(sink) {}
     Error draw(const Src&, SkBitmap*, SkWStream*, SkString*) const override;
-    int enclave() const override { return fSink->enclave(); }
-    const char* fileExtension() const override { return fSink->fileExtension(); }
-private:
-    SkAutoTDelete<Sink>  fSink;
 };
 
-class ViaSerialization : public Sink {
+class ViaDeferred : public Via {
 public:
-    explicit ViaSerialization(Sink*);
-
+    explicit ViaDeferred(Sink* sink) : Via(sink) {}
     Error draw(const Src&, SkBitmap*, SkWStream*, SkString*) const override;
-    int enclave() const override { return fSink->enclave(); }
-    const char* fileExtension() const override { return fSink->fileExtension(); }
-private:
-    SkAutoTDelete<Sink> fSink;
 };
 
-class ViaTiles : public Sink {
+class ViaSerialization : public Via {
+public:
+    explicit ViaSerialization(Sink* sink) : Via(sink) {}
+    Error draw(const Src&, SkBitmap*, SkWStream*, SkString*) const override;
+};
+
+class ViaTiles : public Via {
 public:
     ViaTiles(int w, int h, SkBBHFactory*, Sink*);
-
     Error draw(const Src&, SkBitmap*, SkWStream*, SkString*) const override;
-    int enclave() const override { return fSink->enclave(); }
-    const char* fileExtension() const override { return fSink->fileExtension(); }
 private:
     const int                   fW, fH;
     SkAutoTDelete<SkBBHFactory> fFactory;
-    SkAutoTDelete<Sink>         fSink;
+};
+
+class ViaSecondPicture : public Via {
+public:
+    explicit ViaSecondPicture(Sink* sink) : Via(sink) {}
+    Error draw(const Src&, SkBitmap*, SkWStream*, SkString*) const override;
+};
+
+class ViaSingletonPictures : public Via {
+public:
+    explicit ViaSingletonPictures(Sink* sink) : Via(sink) {}
+    Error draw(const Src&, SkBitmap*, SkWStream*, SkString*) const override;
+};
+
+class ViaTwice : public Via {
+public:
+    explicit ViaTwice(Sink* sink) : Via(sink) {}
+    Error draw(const Src&, SkBitmap*, SkWStream*, SkString*) const override;
 };
 
 }  // namespace DM

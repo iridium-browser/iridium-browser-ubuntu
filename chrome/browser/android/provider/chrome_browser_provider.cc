@@ -40,7 +40,6 @@
 #include "components/search_engines/template_url_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "jni/ChromeBrowserProvider_jni.h"
-#include "sql/statement.h"
 #include "ui/base/layout.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/favicon_size.h"
@@ -261,10 +260,8 @@ class RemoveBookmarkTask : public BookmarkModelObserverTask {
   static void RunOnUIThread(BookmarkModel* model, const int64 id) {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
     const BookmarkNode* node = bookmarks::GetBookmarkNodeByID(model, id);
-    if (node && node->parent()) {
-      const BookmarkNode* parent_node = node->parent();
-      model->Remove(parent_node, parent_node->GetIndexOf(node));
-    }
+    if (node && node->parent())
+      model->Remove(node);
   }
 
   // Verify that the bookmark was actually removed. Called synchronously.

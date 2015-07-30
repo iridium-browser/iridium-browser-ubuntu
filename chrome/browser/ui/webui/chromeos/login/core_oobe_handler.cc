@@ -95,6 +95,9 @@ void CoreOobeHandler::DeclareLocalizedValues(
                IDS_ENTERPRISE_DEVICE_REQUISITION_REMORA_PROMPT_TEXT);
   builder->Add("deviceRequisitionSharkPromptText",
                IDS_ENTERPRISE_DEVICE_REQUISITION_SHARK_PROMPT_TEXT);
+
+  // Strings for Asset Identifier shown in version string.
+  builder->Add("assetIdLabel", IDS_OOBE_ASSET_ID_LABEL);
 }
 
 void CoreOobeHandler::Initialize() {
@@ -203,8 +206,9 @@ void CoreOobeHandler::RefocusCurrentPod() {
   CallJS("refocusCurrentPod");
 }
 
-void CoreOobeHandler::ShowPasswordChangedScreen(bool show_password_error) {
-  CallJS("showPasswordChangedScreen", show_password_error);
+void CoreOobeHandler::ShowPasswordChangedScreen(bool show_password_error,
+                                                const std::string& email) {
+  CallJS("showPasswordChangedScreen", show_password_error, email);
 }
 
 void CoreOobeHandler::SetUsageStats(bool checked) {
@@ -366,8 +370,8 @@ void CoreOobeHandler::OnOSVersionLabelTextUpdated(
 }
 
 void CoreOobeHandler::OnEnterpriseInfoUpdated(
-    const std::string& message_text) {
-  CallJS("setEnterpriseInfo", message_text);
+    const std::string& message_text, const std::string& asset_id) {
+  CallJS("setEnterpriseInfo", message_text, asset_id);
 }
 
 void CoreOobeHandler::UpdateLabel(const std::string& id,
@@ -383,13 +387,11 @@ void CoreOobeHandler::UpdateDeviceRequisition() {
 }
 
 void CoreOobeHandler::UpdateKeyboardState() {
-  if (!login::LoginScrollIntoViewEnabled())
-    return;
-
   keyboard::KeyboardController* keyboard_controller =
       keyboard::KeyboardController::GetInstance();
   if (keyboard_controller) {
     gfx::Rect bounds = keyboard_controller->current_keyboard_bounds();
+    ShowControlBar(bounds.IsEmpty());
     SetKeyboardState(!bounds.IsEmpty(), bounds);
   }
 }

@@ -4,6 +4,7 @@
 
 #include "base/command_line.h"
 #include "base/metrics/field_trial.h"
+#include "base/test/mock_entropy_provider.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/common/chrome_switches.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
@@ -16,16 +17,6 @@
 namespace test {
 
 using ::testing::ElementsAre;
-
-class BadEntropyProvider : public base::FieldTrial::EntropyProvider {
- public:
-  ~BadEntropyProvider() override {}
-
-  double GetEntropyForTrial(const std::string& trial_name,
-                            uint32 randomization_seed) const override {
-    return 0.5;
-  }
-};
 
 class IOThreadPeer {
  public:
@@ -89,7 +80,6 @@ class IOThreadTest : public testing::Test {
 };
 
 TEST_F(IOThreadTest, InitializeNetworkSessionParamsFromGlobals) {
-  globals_.quic_connection_options.push_back(net::kPACE);
   globals_.quic_connection_options.push_back(net::kTBBR);
   globals_.quic_connection_options.push_back(net::kTIME);
 
@@ -152,49 +142,12 @@ TEST_F(IOThreadTest, SpdyFieldTrialParametrized) {
   EXPECT_TRUE(use_alternate_protocols);
 }
 
-TEST_F(IOThreadTest, SpdyCommandLineEnable) {
-  command_line_.AppendSwitch("enable-spdy4");
-  // Command line should overwrite field trial group.
-  field_trial_group_ = "SpdyDisabled";
-  ConfigureSpdyGlobals();
-  EXPECT_THAT(globals_.next_protos,
-              ElementsAre(net::kProtoHTTP11, net::kProtoSPDY31,
-                          net::kProtoSPDY4_14, net::kProtoSPDY4));
-  bool use_alternate_protocols = false;
-  globals_.use_alternate_protocols.CopyToIfSet(&use_alternate_protocols);
-  EXPECT_TRUE(use_alternate_protocols);
-}
-
-TEST_F(IOThreadTest, SpdyCommandLineDisable) {
-  command_line_.AppendSwitch("enable-npn-http");
-  // Command line should overwrite field trial group.
-  field_trial_group_ = "Spdy4Enabled";
-  ConfigureSpdyGlobals();
-  EXPECT_THAT(globals_.next_protos, ElementsAre(net::kProtoHTTP11));
-  bool use_alternate_protocols = true;
-  globals_.use_alternate_protocols.CopyToIfSet(&use_alternate_protocols);
-  EXPECT_FALSE(use_alternate_protocols);
-}
-
 TEST_F(IOThreadTest, SpdyCommandLineUseSpdyOff) {
   command_line_.AppendSwitchASCII("use-spdy", "off");
   // Command line should overwrite field trial group.
   field_trial_group_ = "Spdy4Enabled";
   ConfigureSpdyGlobals();
   EXPECT_EQ(0u, globals_.next_protos.size());
-}
-
-TEST_F(IOThreadTest, SpdyCommandLineUseSpdySSL) {
-  command_line_.AppendSwitchASCII("use-spdy", "ssl");
-  // Command line should overwrite field trial group.
-  field_trial_group_ = "SpdyDisabled";
-  ConfigureSpdyGlobals();
-  bool force_spdy_over_ssl = false;
-  globals_.force_spdy_over_ssl.CopyToIfSet(&force_spdy_over_ssl);
-  EXPECT_TRUE(force_spdy_over_ssl);
-  bool force_spdy_always = false;
-  globals_.force_spdy_always.CopyToIfSet(&force_spdy_always);
-  EXPECT_TRUE(force_spdy_always);
 }
 
 TEST_F(IOThreadTest, SpdyCommandLineUseSpdyDisableAltProtocols) {
@@ -222,9 +175,10 @@ TEST_F(IOThreadTest, EnableQuicFromFieldTrialGroup) {
   net::HttpNetworkSession::Params params;
   InitializeNetworkSessionParams(&params);
   EXPECT_TRUE(params.enable_quic);
+  EXPECT_FALSE(params.disable_insecure_quic);
   EXPECT_TRUE(params.enable_quic_for_proxies);
   EXPECT_EQ(1350u, params.quic_max_packet_length);
-  EXPECT_EQ(1.0, params.alternate_protocol_probability_threshold);
+  EXPECT_EQ(1.0, params.alternative_service_probability_threshold);
   EXPECT_EQ(default_params.quic_supported_versions,
             params.quic_supported_versions);
   EXPECT_EQ(net::QuicTagVector(), params.quic_connection_options);
@@ -240,7 +194,7 @@ TEST_F(IOThreadTest, EnableQuicFromFieldTrialGroup) {
 }
 
 TEST_F(IOThreadTest, EnableQuicFromQuicProxyFieldTrialGroup) {
-  base::FieldTrialList field_trial_list(new BadEntropyProvider());
+  base::FieldTrialList field_trial_list(new base::MockEntropyProvider());
   base::FieldTrialList::CreateFieldTrial(
       data_reduction_proxy::DataReductionProxyParams::GetQuicFieldTrialName(),
       "Enabled");
@@ -251,7 +205,7 @@ TEST_F(IOThreadTest, EnableQuicFromQuicProxyFieldTrialGroup) {
   EXPECT_FALSE(params.enable_quic);
   EXPECT_TRUE(params.enable_quic_for_proxies);
   EXPECT_TRUE(IOThread::ShouldEnableQuicForDataReductionProxy());
-  EXPECT_EQ(256 * 1024, params.quic_socket_receive_buffer_size);
+  EXPECT_EQ(1024 * 1024, params.quic_socket_receive_buffer_size);
 }
 
 TEST_F(IOThreadTest, EnableQuicFromCommandLine) {
@@ -265,28 +219,14 @@ TEST_F(IOThreadTest, EnableQuicFromCommandLine) {
   EXPECT_FALSE(IOThread::ShouldEnableQuicForDataReductionProxy());
 }
 
-TEST_F(IOThreadTest, EnablePacingFromCommandLine) {
-  command_line_.AppendSwitch("enable-quic");
-  command_line_.AppendSwitch("enable-quic-pacing");
-
-  ConfigureQuicGlobals();
-  net::HttpNetworkSession::Params params;
-  InitializeNetworkSessionParams(&params);
-  net::QuicTagVector options;
-  options.push_back(net::kPACE);
-  EXPECT_EQ(options, params.quic_connection_options);
-}
-
-TEST_F(IOThreadTest, EnablePacingFromFieldTrialParams) {
+TEST_F(IOThreadTest, DisableInsecureQuicFromFieldTrialParams) {
   field_trial_group_ = "Enabled";
-  field_trial_params_["enable_pacing"] = "true";
+  field_trial_params_["disable_insecure_quic"] = "true";
 
   ConfigureQuicGlobals();
   net::HttpNetworkSession::Params params;
   InitializeNetworkSessionParams(&params);
-  net::QuicTagVector options;
-  options.push_back(net::kPACE);
-  EXPECT_EQ(options, params.quic_connection_options);
+  EXPECT_TRUE(params.disable_insecure_quic);
 }
 
 TEST_F(IOThreadTest, PacketLengthFromCommandLine) {
@@ -339,14 +279,13 @@ TEST_F(IOThreadTest, QuicVersionFromFieldTrialParams) {
 TEST_F(IOThreadTest, QuicConnectionOptionsFromCommandLine) {
   command_line_.AppendSwitch("enable-quic");
   command_line_.AppendSwitchASCII("quic-connection-options",
-                                  "PACE,TIME,TBBR,REJ");
+                                  "TIME,TBBR,REJ");
 
   ConfigureQuicGlobals();
   net::HttpNetworkSession::Params params;
   InitializeNetworkSessionParams(&params);
 
   net::QuicTagVector options;
-  options.push_back(net::kPACE);
   options.push_back(net::kTIME);
   options.push_back(net::kTBBR);
   options.push_back(net::kREJ);
@@ -355,14 +294,13 @@ TEST_F(IOThreadTest, QuicConnectionOptionsFromCommandLine) {
 
 TEST_F(IOThreadTest, QuicConnectionOptionsFromFieldTrialParams) {
   field_trial_group_ = "Enabled";
-  field_trial_params_["connection_options"] = "PACE,TIME,TBBR,REJ";
+  field_trial_params_["connection_options"] = "TIME,TBBR,REJ";
 
   ConfigureQuicGlobals();
   net::HttpNetworkSession::Params params;
   InitializeNetworkSessionParams(&params);
 
   net::QuicTagVector options;
-  options.push_back(net::kPACE);
   options.push_back(net::kTIME);
   options.push_back(net::kTBBR);
   options.push_back(net::kREJ);
@@ -445,43 +383,52 @@ TEST_F(IOThreadTest, QuicPacketLossThresholdFieldTrialParams) {
 
 TEST_F(IOThreadTest, QuicReceiveBufferSize) {
   field_trial_group_ = "Enabled";
-  field_trial_params_["receive_buffer_size"] = "1048576";
+  field_trial_params_["receive_buffer_size"] = "2097152";
   ConfigureQuicGlobals();
   net::HttpNetworkSession::Params params;
   InitializeNetworkSessionParams(&params);
-  EXPECT_EQ(1048576, params.quic_socket_receive_buffer_size);
+  EXPECT_EQ(2097152, params.quic_socket_receive_buffer_size);
 }
 
-TEST_F(IOThreadTest,
-       AlternateProtocolProbabilityThresholdFromFlag) {
-  command_line_.AppendSwitchASCII("alternate-protocol-probability-threshold",
-                                  ".5");
+TEST_F(IOThreadTest, AlternativeServiceProbabilityThresholdFromFlag) {
+  command_line_.AppendSwitchASCII("alternative-service-probability-threshold",
+                                  "0.5");
 
   ConfigureQuicGlobals();
   net::HttpNetworkSession::Params params;
   InitializeNetworkSessionParams(&params);
-  EXPECT_EQ(.5, params.alternate_protocol_probability_threshold);
+  EXPECT_EQ(.5, params.alternative_service_probability_threshold);
 }
 
-TEST_F(IOThreadTest,
-       AlternateProtocolProbabilityThresholdFromEnableQuicFlag) {
+TEST_F(IOThreadTest, AlternativeServiceProbabilityThresholdFromEnableQuicFlag) {
   command_line_.AppendSwitch("enable-quic");
 
   ConfigureQuicGlobals();
   net::HttpNetworkSession::Params params;
   InitializeNetworkSessionParams(&params);
-  EXPECT_EQ(0, params.alternate_protocol_probability_threshold);
+  EXPECT_EQ(0, params.alternative_service_probability_threshold);
 }
 
-TEST_F(IOThreadTest,
-       AlternateProtocolProbabilityThresholdFromParams) {
+// TODO(bnc): Remove when new parameter name rolls out and server configuration
+// is changed.
+TEST_F(IOThreadTest, AlternativeServiceProbabilityThresholdFromOldParams) {
   field_trial_group_ = "Enabled";
   field_trial_params_["alternate_protocol_probability_threshold"] = ".5";
 
   ConfigureQuicGlobals();
   net::HttpNetworkSession::Params params;
   InitializeNetworkSessionParams(&params);
-  EXPECT_EQ(.5, params.alternate_protocol_probability_threshold);
+  EXPECT_EQ(.5, params.alternative_service_probability_threshold);
+}
+
+TEST_F(IOThreadTest, AlternativeServiceProbabilityThresholdFromParams) {
+  field_trial_group_ = "Enabled";
+  field_trial_params_["alternative_service_probability_threshold"] = ".5";
+
+  ConfigureQuicGlobals();
+  net::HttpNetworkSession::Params params;
+  InitializeNetworkSessionParams(&params);
+  EXPECT_EQ(.5, params.alternative_service_probability_threshold);
 }
 
 TEST_F(IOThreadTest, QuicDisallowedByPolicy) {

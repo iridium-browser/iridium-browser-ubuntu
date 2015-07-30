@@ -11,9 +11,8 @@
 #ifndef WEBRTC_MODULES_VIDEO_RENDER_MAIN_INTERFACE_VIDEO_RENDER_DEFINES_H_
 #define WEBRTC_MODULES_VIDEO_RENDER_MAIN_INTERFACE_VIDEO_RENDER_DEFINES_H_
 
-// Includes
 #include "webrtc/common_types.h"
-#include "webrtc/common_video/interface/i420_video_frame.h"
+#include "webrtc/common_video/interface/incoming_video_stream.h"
 #include "webrtc/modules/interface/module_common_types.h"
 
 namespace webrtc
@@ -41,20 +40,6 @@ enum VideoRenderError
 {
     kRenderShutDown = 0,
     kRenderPerformanceAlarm = 1
-};
-
-// The object a module user uses to send new frames to the renderer
-// One object is used for each incoming stream
-class VideoRenderCallback
-{
-public:
-    virtual int32_t RenderFrame(const uint32_t streamId,
-                                const I420VideoFrame& videoFrame) = 0;
-
-protected:
-    virtual ~VideoRenderCallback()
-    {
-    }
 };
 
 // Feedback class to be implemented by module user

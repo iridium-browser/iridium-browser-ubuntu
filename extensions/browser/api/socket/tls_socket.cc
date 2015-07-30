@@ -23,9 +23,7 @@ namespace {
 // Returns 0 if the string is invalid.
 uint16 SSLProtocolVersionFromString(const std::string& version_str) {
   uint16 version = 0;  // Invalid.
-  if (version_str == "ssl3") {
-    version = net::SSL_PROTOCOL_VERSION_SSL3;
-  } else if (version_str == "tls1") {
+  if (version_str == "tls1") {
     version = net::SSL_PROTOCOL_VERSION_TLS1;
   } else if (version_str == "tls1.1") {
     version = net::SSL_PROTOCOL_VERSION_TLS1_1;
@@ -184,7 +182,7 @@ void TLSSocket::UpgradeSocketToTLS(
     const std::string& extension_id,
     core_api::socket::SecureOptions* options,
     const TLSSocket::SecureCallback& callback) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   TCPSocket* tcp_socket = static_cast<TCPSocket*>(socket);
   scoped_ptr<net::SSLClientSocket> null_sock;
 

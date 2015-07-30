@@ -124,6 +124,17 @@ class MTPDeviceDelegateImplLinux : public MTPDeviceAsyncDelegate {
   void DeleteDirectory(const base::FilePath& file_path,
                        const DeleteDirectorySuccessCallback& success_callback,
                        const ErrorCallback& error_callback) override;
+  void AddWatcher(const GURL& origin,
+                  const base::FilePath& file_path,
+                  const bool recursive,
+                  const storage::WatcherManager::StatusCallback& callback,
+                  const storage::WatcherManager::NotificationCallback&
+                      notification_callback) override;
+  void RemoveWatcher(
+      const GURL& origin,
+      const base::FilePath& file_path,
+      const bool recursive,
+      const storage::WatcherManager::StatusCallback& callback) override;
   void CancelPendingTasksAndDeleteDelegate() override;
 
   // The internal methods correspond to the similarly named methods above.
@@ -194,6 +205,7 @@ class MTPDeviceDelegateImplLinux : public MTPDeviceAsyncDelegate {
 
   // Called when ReadDirectory succeeds.
   virtual void OnDidReadDirectoryToDeleteDirectory(
+      const base::FilePath& directory_path,
       const uint32 directory_id,
       const DeleteDirectorySuccessCallback& success_callback,
       const ErrorCallback& error_callback,
@@ -202,9 +214,14 @@ class MTPDeviceDelegateImplLinux : public MTPDeviceAsyncDelegate {
 
   // Calls DeleteObjectOnUIThread on UI thread.
   virtual void RunDeleteObjectOnUIThread(
+      const base::FilePath& object_path,
       const uint32 object_id,
       const DeleteObjectSuccessCallback& success_callback,
       const ErrorCallback& error_callback);
+
+  // Notifies |chage_type| of |file_path| to watchers.
+  void NotifyFileChange(const base::FilePath& file_path,
+                        const storage::WatcherManager::ChangeType change_type);
 
   // Ensures the device is initialized for communication.
   // If the device is already initialized, call RunTask().
@@ -303,6 +320,7 @@ class MTPDeviceDelegateImplLinux : public MTPDeviceAsyncDelegate {
 
   // Called when CreateSignleDirectory() succeeds.
   void OnDidCreateSingleDirectory(
+      const base::FilePath& directory_path,
       const CreateDirectorySuccessCallback& success_callback);
 
   // Called when parent directory |created_directory| is created as part of
@@ -392,11 +410,13 @@ class MTPDeviceDelegateImplLinux : public MTPDeviceAsyncDelegate {
   // Called when MoveFileLocal() succeeds with rename operation.
   void OnDidMoveFileLocalWithRename(
       const MoveFileLocalSuccessCallback& success_callback,
+      const base::FilePath& source_file_path,
       const uint32 file_id);
 
   // Called when CopyFileFromLocal() succeeds.
   void OnDidCopyFileFromLocal(
       const CopyFileFromLocalSuccessCallback& success_callback,
+      const base::FilePath& file_path,
       const int source_file_descriptor);
 
   // Called when CopyFileLocal() fails.
@@ -410,7 +430,8 @@ class MTPDeviceDelegateImplLinux : public MTPDeviceAsyncDelegate {
                                     base::File::Error error);
 
   // Called when DeleteObject() succeeds.
-  void OnDidDeleteObject(const uint32 object_id,
+  void OnDidDeleteObject(const base::FilePath& object_path,
+                         const uint32 object_id,
                          const DeleteObjectSuccessCallback success_callback);
 
   // Called when DeleteFileOrDirectory() fails.
@@ -457,6 +478,12 @@ class MTPDeviceDelegateImplLinux : public MTPDeviceAsyncDelegate {
 
   // Mode for opening storage.
   const bool read_only_;
+
+  // Maps for holding notification callbacks.
+  typedef std::map<GURL, storage::WatcherManager::NotificationCallback>
+      OriginNotificationCallbackMap;
+  typedef std::map<base::FilePath, OriginNotificationCallbackMap> Subscribers;
+  Subscribers subscribers_;
 
   // A list of pending tasks that needs to be run when the device is
   // initialized or when the current task in progress is complete.

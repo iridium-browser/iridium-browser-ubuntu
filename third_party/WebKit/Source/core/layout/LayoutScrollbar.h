@@ -44,7 +44,7 @@ public:
     static PassRefPtrWillBeRawPtr<Scrollbar> createCustomScrollbar(ScrollableArea*, ScrollbarOrientation, Node*, LocalFrame* owningFrame = 0);
     virtual ~LayoutScrollbar();
 
-    LayoutBox* owningRenderer() const;
+    LayoutBox* owningLayoutObject() const;
 
     IntRect buttonRect(ScrollbarPart);
     IntRect trackRect(int startLength, int endLength);
@@ -55,6 +55,8 @@ public:
     virtual bool isOverlayScrollbar() const override { return false; }
 
     LayoutScrollbarPart* getPart(ScrollbarPart partType) { return m_parts.get(partType); }
+
+    virtual void invalidateRect(const IntRect&) override;
 
     DECLARE_VIRTUAL_TRACE();
 

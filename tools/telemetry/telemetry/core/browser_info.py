@@ -5,9 +5,10 @@
 _check_webgl_supported_script = """
 (function () {
   var c = document.createElement('canvas');
-  var gl = c.getContext('webgl');
+  var gl = c.getContext('webgl', { failIfMajorPerformanceCaveat: true });
   if (gl == null) {
-    gl = c.getContext("experimental-webgl");
+    gl = c.getContext('experimental-webgl',
+        { failIfMajorPerformanceCaveat: true });
     if (gl == null) {
       return false;
     }
@@ -45,3 +46,14 @@ class BrowserInfo(object):
     branch_num = (
         self._browser._browser_backend.devtools_client.GetChromeBranchNumber())
     return branch_num >= 2339
+
+  def HasDiagonalScrollingSupport(self):
+    # Diagonal scrolling was not supported in the ScrollAction until
+    # Chromium branch number 2332
+    branch_num = (
+        self._browser._browser_backend.devtools_client.GetChromeBranchNumber())
+    return branch_num >= 2332
+
+  @property
+  def browser_type(self):
+    return self._browser.browser_type

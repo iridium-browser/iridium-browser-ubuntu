@@ -4,9 +4,14 @@
 
 #include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_io_data.h"
 
+#include "base/prefs/pref_service.h"
 #include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings.h"
+#include "chrome/common/chrome_content_client.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config_retrieval_params.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_experiments_stats.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_io_data.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
 
 #if defined(OS_ANDROID)
 #include "base/android/build_info.h"
@@ -48,19 +53,26 @@ CreateDataReductionProxyChromeIOData(
   }
 #endif
 
+  bool enabled = prefs->GetBoolean(
+                     data_reduction_proxy::prefs::kDataReductionProxyEnabled) ||
+                 data_reduction_proxy::DataReductionProxyParams::
+                     ShouldForceEnableDataReductionProxy();
   scoped_ptr<data_reduction_proxy::DataReductionProxyIOData>
       data_reduction_proxy_io_data(
           new data_reduction_proxy::DataReductionProxyIOData(
               DataReductionProxyChromeSettings::GetClient(), flags, net_log,
-              io_task_runner, ui_task_runner, enable_quic));
-  data_reduction_proxy_io_data->InitOnUIThread(prefs);
+              io_task_runner, ui_task_runner, enabled, enable_quic,
+              GetUserAgent()));
+  data_reduction_proxy_io_data->experiments_stats()->InitializeOnUIThread(
+      data_reduction_proxy::DataReductionProxyConfigRetrievalParams::Create(
+          prefs));
 
 #if defined(ENABLE_DATA_REDUCTION_PROXY_DEBUGGING)
   scoped_ptr<data_reduction_proxy::ContentDataReductionProxyDebugUIService>
       data_reduction_proxy_ui_service(
           new data_reduction_proxy::ContentDataReductionProxyDebugUIService(
               base::Bind(&data_reduction_proxy::DataReductionProxyConfigurator::
-                             GetProxyConfigOnIOThread,
+                             GetProxyConfig,
                          base::Unretained(
                              data_reduction_proxy_io_data->configurator())),
               ui_task_runner, io_task_runner,

@@ -14,6 +14,7 @@
 #include "content/browser/dom_storage/session_storage_namespace_impl.h"
 #include "content/common/content_export.h"
 #include "net/base/load_states.h"
+#include "third_party/WebKit/public/platform/WebDisplayMode.h"
 #include "third_party/WebKit/public/web/WebPopupType.h"
 #include "ui/base/window_open_disposition.h"
 
@@ -21,7 +22,6 @@ class GURL;
 class SkBitmap;
 struct ViewHostMsg_CreateWindow_Params;
 struct FrameHostMsg_DidCommitProvisionalLoad_Params;
-struct ViewMsg_PostMessage_Params;
 
 namespace base {
 class ListValue;
@@ -129,11 +129,6 @@ class CONTENT_EXPORT RenderViewHostDelegate {
   // The page wants to close the active view in this tab.
   virtual void RouteCloseEvent(RenderViewHost* rvh) {}
 
-  // The page wants to post a message to the active view in this tab.
-  virtual void RouteMessageEvent(
-      RenderViewHost* rvh,
-      const ViewMsg_PostMessage_Params& params) {}
-
   // Return a dummy RendererPreferences object that will be used by the renderer
   // associated with the owning RenderViewHost.
   virtual RendererPreferences GetRendererPrefs(
@@ -180,6 +175,9 @@ class CONTENT_EXPORT RenderViewHostDelegate {
 
   // Returns whether the associated tab is in fullscreen mode.
   virtual bool IsFullscreenForCurrentTab() const;
+
+  // Returns the display mode for the view.
+  virtual blink::WebDisplayMode GetDisplayMode() const;
 
   // The contents' preferred size changed.
   virtual void UpdatePreferredSize(const gfx::Size& pref_size) {}

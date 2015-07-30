@@ -4,6 +4,8 @@
 
 #include "content/browser/frame_host/navigation_entry_impl.h"
 
+#include <queue>
+
 #include "base/metrics/histogram.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -62,7 +64,7 @@ NavigationEntryImpl::NavigationEntryImpl(SiteInstanceImpl* instance,
                                          ui::PageTransition transition_type,
                                          bool is_renderer_initiated)
     : frame_tree_(
-          new TreeNode(new FrameNavigationEntry(instance, url, referrer))),
+          new TreeNode(new FrameNavigationEntry(-1, instance, url, referrer))),
       unique_id_(GetUniqueIDInConstructor()),
       bindings_(kInvalidBindings),
       page_type_(PAGE_TYPE_NORMAL),
@@ -313,14 +315,6 @@ bool NavigationEntryImpl::GetCanLoadLocalResources() const {
   return can_load_local_resources_;
 }
 
-void NavigationEntryImpl::SetFrameToNavigate(const std::string& frame_name) {
-  frame_to_navigate_ = frame_name;
-}
-
-const std::string& NavigationEntryImpl::GetFrameToNavigate() const {
-  return frame_to_navigate_;
-}
-
 void NavigationEntryImpl::SetExtraData(const std::string& key,
                                        const base::string16& data) {
   extra_data_[key] = data;
@@ -378,7 +372,6 @@ NavigationEntryImpl* NavigationEntryImpl::Clone() const {
   // ResetForCommit: should_replace_entry_
   copy->redirect_chain_ = redirect_chain_;
   // ResetForCommit: should_clear_history_list_
-  copy->frame_to_navigate_ = frame_to_navigate_;
   // ResetForCommit: frame_tree_node_id_
   // ResetForCommit: intent_received_timestamp_
   copy->extra_data_ = extra_data_;
@@ -421,6 +414,7 @@ StartNavigationParams NavigationEntryImpl::ConstructStartNavigationParams()
 
 RequestNavigationParams NavigationEntryImpl::ConstructRequestNavigationParams(
     base::TimeTicks navigation_start,
+    bool intended_as_new_entry,
     int pending_history_list_offset,
     int current_history_list_offset,
     int current_history_list_length) const {
@@ -444,8 +438,8 @@ RequestNavigationParams NavigationEntryImpl::ConstructRequestNavigationParams(
   }
   return RequestNavigationParams(
       GetIsOverridingUserAgent(), navigation_start, redirects,
-      GetCanLoadLocalResources(), GetFrameToNavigate(), base::Time::Now(),
-      GetPageState(), GetPageID(), pending_offset_to_send,
+      GetCanLoadLocalResources(), base::Time::Now(), GetPageState(),
+      GetPageID(), GetUniqueID(), intended_as_new_entry, pending_offset_to_send,
       current_offset_to_send, current_length_to_send,
       should_clear_history_list());
 }
@@ -471,15 +465,56 @@ void NavigationEntryImpl::ResetForCommit() {
 #endif
 }
 
-void NavigationEntryImpl::AddOrUpdateFrameEntry(int64 frame_tree_node_id,
+void NavigationEntryImpl::AddOrUpdateFrameEntry(FrameTreeNode* frame_tree_node,
                                                 SiteInstanceImpl* site_instance,
                                                 const GURL& url,
                                                 const Referrer& referrer) {
-  // TODO(creis): Walk tree to find the node to update.
-  // TODO(creis): Only create a new entry if one doesn't exist yet.
-  FrameNavigationEntry* frame_entry =
-      new FrameNavigationEntry(site_instance, url, referrer);
-  root_node()->children.push_back(
+  // We should already have a TreeNode for the parent node by the time this node
+  // commits.  Find it first.
+  DCHECK(frame_tree_node->parent());
+  int parent_ftn_id = frame_tree_node->parent()->frame_tree_node_id();
+  bool found = false;
+  NavigationEntryImpl::TreeNode* parent_node = nullptr;
+  std::queue<NavigationEntryImpl::TreeNode*> work_queue;
+  work_queue.push(root_node());
+  while (!found && !work_queue.empty()) {
+    parent_node = work_queue.front();
+    work_queue.pop();
+    // The root FNE will have an ID of -1, so check for that as well.
+    if (parent_node->frame_entry->frame_tree_node_id() == parent_ftn_id ||
+        (parent_node->frame_entry->frame_tree_node_id() == -1 &&
+         parent_node == root_node() &&
+         frame_tree_node->parent()->IsMainFrame())) {
+      found = true;
+      break;
+    }
+    // Enqueue any children and keep looking.
+    for (auto& child : parent_node->children)
+      work_queue.push(child);
+  }
+  if (!found) {
+    // The renderer should not send a commit for a subframe before its parent.
+    // TODO(creis): This can currently happen because we don't yet clone the
+    // FrameNavigationEntry tree on manual subframe navigations.  Once that's
+    // added, we should kill the renderer if we get here.
+    return;
+  }
+
+  // Now check whether we have a TreeNode for the node itself.
+  int frame_tree_node_id = frame_tree_node->frame_tree_node_id();
+  for (TreeNode* child : parent_node->children) {
+    if (child->frame_entry->frame_tree_node_id() == frame_tree_node_id) {
+      // Update the existing FrameNavigationEntry.
+      child->frame_entry->UpdateEntry(site_instance, url, referrer);
+      return;
+    }
+  }
+
+  // No entry exists yet, so create a new one.  Unordered list, since we expect
+  // to look up entries by frame sequence number or unique name.
+  FrameNavigationEntry* frame_entry = new FrameNavigationEntry(
+      frame_tree_node_id, site_instance, url, referrer);
+  parent_node->children.push_back(
       new NavigationEntryImpl::TreeNode(frame_entry));
 }
 

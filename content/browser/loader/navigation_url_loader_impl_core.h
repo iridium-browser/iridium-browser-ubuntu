@@ -40,7 +40,7 @@ class NavigationURLLoaderImplCore {
 
   // Starts the request.
   void Start(ResourceContext* resource_context,
-             int64 frame_tree_node_id,
+             int frame_tree_node_id,
              scoped_ptr<NavigationRequestInfo> request_info);
 
   // Follows the current pending redirect.
@@ -59,7 +59,7 @@ class NavigationURLLoaderImplCore {
                              scoped_ptr<StreamHandle> body);
 
   // Notifies |loader_| on the UI thread that the request failed.
-  void NotifyRequestFailed(int net_error);
+  void NotifyRequestFailed(bool in_cache, int net_error);
 
  private:
   base::WeakPtr<NavigationURLLoaderImpl> loader_;

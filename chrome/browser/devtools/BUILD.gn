@@ -30,6 +30,8 @@ action("devtools_protocol_constants") {
 static_library("devtools") {
   # Note: new sources and deps should be generally added in (!is_android) below.
   sources = [
+    "chrome_devtools_manager_delegate.cc",
+    "chrome_devtools_manager_delegate.h",
     "devtools_network_conditions.cc",
     "devtools_network_conditions.h",
     "devtools_network_controller.cc",
@@ -64,10 +66,10 @@ static_library("devtools") {
     deps += [
       "//chrome/app/theme:theme_resources",
       "//chrome/common/extensions/api",
-      "//chrome/common/extensions/api:api_registration",
       "//chrome:extra_resources",
       "//chrome:resources",
       "//chrome:strings",
+      "//components/devtools_http_handler",
       "//net:http_server",
       "//skia",
       "//third_party/icu",
@@ -76,10 +78,8 @@ static_library("devtools") {
       ":webrtc_device_provider_resources",
     ]
     sources += [
-      "browser_list_tabcontents_provider.cc",
-      "browser_list_tabcontents_provider.h",
-      "chrome_devtools_manager_delegate.cc",
-      "chrome_devtools_manager_delegate.h",
+      "chrome_devtools_discovery_provider.cc",
+      "chrome_devtools_discovery_provider.h",
       "device/adb/adb_client_socket.cc",
       "device/adb/adb_client_socket.h",
       "device/adb/adb_device_provider.cc",

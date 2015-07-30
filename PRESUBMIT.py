@@ -175,7 +175,7 @@ _BANNED_CPP_FUNCTIONS = (
         r"^net[\\\/]disk_cache[\\\/]cache_util\.cc$",
         r"^net[\\\/]url_request[\\\/]test_url_fetcher_factory\.cc$",
         r"^ui[\\\/]ozone[\\\/]platform[\\\/]drm[\\\/]host[\\\/]"
-            "drm_native_display_delegate\.cc$",
+            "drm_display_host_manager\.cc$",
       ),
     ),
     (
@@ -248,6 +248,18 @@ _BANNED_CPP_FUNCTIONS = (
       True,
       (
         r'extensions[\\\/]renderer[\\\/]safe_builtins\.*',
+      ),
+    ),
+    (
+      '\<MessageLoopProxy\>',
+      (
+        'MessageLoopProxy is deprecated. ',
+        'Please use SingleThreadTaskRunner or ThreadTaskRunnerHandle instead.'
+      ),
+      True,
+      (
+        # Internal message_loop related code may still use it.
+        r'^base[\\\/]message_loop[\\\/].*',
       ),
     ),
 )
@@ -1288,6 +1300,35 @@ def _CheckJavaStyle(input_api, output_api):
       black_list=_EXCLUDED_PATHS + input_api.DEFAULT_BLACK_LIST)
 
 
+def _CheckNoNewUtilLogUsage(input_api, output_api):
+  """Checks that new logs are using org.chromium.base.Log."""
+
+  chromium_log_import_pattern = input_api.re.compile(
+      r'^import org\.chromium\.base\.Log;$', input_api.re.MULTILINE);
+  log_pattern = input_api.re.compile(r'^\s*(android\.util\.)?Log\.\w')
+  sources = lambda x: input_api.FilterSourceFile(x, white_list=(r'.*\.java$',))
+
+  errors = []
+
+  for f in input_api.AffectedSourceFiles(sources):
+    if chromium_log_import_pattern.search(input_api.ReadFile(f)) is not None:
+      # Uses org.chromium.base.Log already
+      continue
+
+    for line_num, line in f.ChangedContents():
+      if log_pattern.search(line):
+        errors.append("%s:%d" % (f.LocalPath(), line_num))
+
+  results = []
+  if len(errors):
+    results.append(output_api.PresubmitPromptWarning(
+        'Please use org.chromium.base.Log for new logs.\n' +
+        'See base/android/java/src/org/chromium/base/README_logging.md ' +
+        'or contact dgn@chromium.org for more info.',
+        errors))
+  return results
+
+
 def _CheckForCopyrightedCode(input_api, output_api):
   """Verifies that newly added code doesn't contain copyrighted material
   and is properly licensed under the standard Chromium license.
@@ -1456,6 +1497,7 @@ def _CommonChecks(input_api, output_api):
   results.extend(_CheckForCopyrightedCode(input_api, output_api))
   results.extend(_CheckForWindowsLineEndings(input_api, output_api))
   results.extend(_CheckSingletonInHeaders(input_api, output_api))
+  results.extend(_CheckNoNewUtilLogUsage(input_api, output_api))
 
   if any('PRESUBMIT.py' == f.LocalPath() for f in input_api.AffectedFiles()):
     results.extend(input_api.canned_checks.RunUnitTestsInDirectory(

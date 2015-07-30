@@ -8,6 +8,7 @@
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -17,6 +18,7 @@
 #include "chrome/browser/devtools/devtools_target_impl.h"
 #include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
 #include "chrome/browser/infobars/infobar_service.h"
+#include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/themes/theme_service.h"
@@ -28,6 +30,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/chrome_manifest_url_handlers.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/infobars/core/confirm_infobar_delegate.h"
@@ -71,9 +74,7 @@ static const char kFrontendHostParams[] = "params";
 static const char kTitleFormat[] = "Developer Tools - %s";
 
 static const char kDevToolsActionTakenHistogram[] = "DevTools.ActionTaken";
-static const int kDevToolsActionTakenBoundary = 100;
 static const char kDevToolsPanelShownHistogram[] = "DevTools.PanelShown";
-static const int kDevToolsPanelShownBoundary = 20;
 
 // This constant should be in sync with
 // the constant at shell_devtools_frontend.cc.
@@ -207,6 +208,8 @@ class DefaultBindingsDelegate : public DevToolsUIBindings::Delegate {
   void SetIsDocked(bool is_docked) override {}
   void OpenInNewTab(const std::string& url) override;
   void SetWhitelistedShortcuts(const std::string& message) override {}
+  using DispatchCallback =
+      DevToolsEmbedderMessageDispatcher::Delegate::DispatchCallback;
 
   void InspectedContentsClosing() override;
   void OnLoadCompleted() override {}
@@ -231,7 +234,7 @@ void DefaultBindingsDelegate::OpenInNewTab(const std::string& url) {
 }
 
 void DefaultBindingsDelegate::InspectedContentsClosing() {
-  web_contents_->GetRenderViewHost()->ClosePage();
+  web_contents_->ClosePage();
 }
 
 InfoBarService* DefaultBindingsDelegate::GetInfoBarService() {
@@ -587,7 +590,7 @@ void DevToolsUIBindings::LoadNetworkResource(const DispatchCallback& callback,
   }
 
   net::URLFetcher* fetcher =
-      net::URLFetcher::Create(gurl, net::URLFetcher::GET, this);
+      net::URLFetcher::Create(gurl, net::URLFetcher::GET, this).release();
   pending_requests_[fetcher] = callback;
   fetcher->SetRequestContext(profile_->GetRequestContext());
   fetcher->SetExtraRequestHeaders(headers);
@@ -737,16 +740,52 @@ void DevToolsUIBindings::SetDevicesUpdatesEnabled(bool enabled) {
   }
 }
 
+void DevToolsUIBindings::GetPreferences(const DispatchCallback& callback) {
+  const DictionaryValue* prefs =
+      profile_->GetPrefs()->GetDictionary(prefs::kDevToolsPreferences);
+  callback.Run(prefs);
+}
+
+void DevToolsUIBindings::SetPreference(const std::string& name,
+                                   const std::string& value) {
+  DictionaryPrefUpdate update(profile_->GetPrefs(),
+                              prefs::kDevToolsPreferences);
+  update.Get()->SetStringWithoutPathExpansion(name, value);
+}
+
+void DevToolsUIBindings::RemovePreference(const std::string& name) {
+  DictionaryPrefUpdate update(profile_->GetPrefs(),
+                              prefs::kDevToolsPreferences);
+  update.Get()->RemoveWithoutPathExpansion(name, nullptr);
+}
+
+void DevToolsUIBindings::ClearPreferences() {
+  DictionaryPrefUpdate update(profile_->GetPrefs(),
+                              prefs::kDevToolsPreferences);
+  update.Get()->Clear();
+}
+
 void DevToolsUIBindings::SendMessageToBrowser(const std::string& message) {
   if (agent_host_.get())
     agent_host_->DispatchProtocolMessage(message);
 }
 
-void DevToolsUIBindings::RecordActionUMA(const std::string& name, int action) {
+void DevToolsUIBindings::RecordEnumeratedHistogram(const std::string& name,
+                                                   int sample,
+                                                   int boundary_value) {
+  if (!(boundary_value >= 0 && boundary_value <= 100 && sample >= 0 &&
+        sample < boundary_value)) {
+    frontend_host_->BadMessageRecieved();
+    return;
+  }
+  // Each histogram name must follow a different code path in
+  // order to UMA_HISTOGRAM_ENUMERATION work correctly.
   if (name == kDevToolsActionTakenHistogram)
-    UMA_HISTOGRAM_ENUMERATION(name, action, kDevToolsActionTakenBoundary);
+    UMA_HISTOGRAM_ENUMERATION(name, sample, boundary_value);
   else if (name == kDevToolsPanelShownHistogram)
-    UMA_HISTOGRAM_ENUMERATION(name, action, kDevToolsPanelShownBoundary);
+    UMA_HISTOGRAM_ENUMERATION(name, sample, boundary_value);
+  else
+    frontend_host_->BadMessageRecieved();
 }
 
 void DevToolsUIBindings::SendJsonRequest(const DispatchCallback& callback,

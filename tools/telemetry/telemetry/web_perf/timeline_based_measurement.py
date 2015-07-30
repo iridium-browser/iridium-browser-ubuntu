@@ -8,10 +8,12 @@ from telemetry.core.platform import tracing_category_filter
 from telemetry.core.platform import tracing_options
 from telemetry.timeline import model as model_module
 from telemetry.value import trace
+from telemetry.web_perf.metrics import gpu_timeline
 from telemetry.web_perf.metrics import layout
 from telemetry.web_perf.metrics import responsiveness_metric
 from telemetry.web_perf.metrics import smoothness
 from telemetry.web_perf import timeline_interaction_record as tir_module
+from telemetry.web_perf import smooth_gesture_util
 
 # TimelineBasedMeasurement considers all instrumentation as producing a single
 # timeline. But, depending on the amount of instrumentation that is enabled,
@@ -34,7 +36,8 @@ def _GetAllTimelineBasedMetrics():
   # This cannot be done until crbug.com/460208 is fixed.
   return (smoothness.SmoothnessMetric(),
           responsiveness_metric.ResponsivenessMetric(),
-          layout.LayoutMetric())
+          layout.LayoutMetric(),
+          gpu_timeline.GPUTimelineMetric())
 
 
 class InvalidInteractions(Exception):
@@ -42,8 +45,8 @@ class InvalidInteractions(Exception):
 
 
 # TODO(nednguyen): Get rid of this results wrapper hack after we add interaction
-# record to telemetry value system.
-class _ResultsWrapper(object):
+# record to telemetry value system (crbug.com/453109)
+class ResultsWrapperInterface(object):
   def __init__(self, results, label):
     self._results = results
     self._result_prefix = label
@@ -52,11 +55,14 @@ class _ResultsWrapper(object):
   def current_page(self):
     return self._results.current_page
 
-  def _GetResultName(self, trace_name):
-    return '%s-%s' % (self._result_prefix, trace_name)
+  def AddValue(self, value):
+    raise NotImplementedError
+
+
+class _TBMResultWrapper(ResultsWrapperInterface):
 
   def AddValue(self, value):
-    value.name = self._GetResultName(value.name)
+    value.name = '%s-%s' % (self._result_prefix, value.name)
     self._results.AddValue(value)
 
 
@@ -68,6 +74,11 @@ def _GetRendererThreadsToInteractionRecordsMap(model):
       # TODO(nduca): Add support for page-load interaction record.
       if tir_module.IsTimelineInteractionRecord(event.name):
         interaction = tir_module.TimelineInteractionRecord.FromAsyncEvent(event)
+        # Adjust the interaction record to match the synthetic gesture
+        # controller if needed.
+        interaction = (
+            smooth_gesture_util.GetAdjustedInteractionIfContainGesture(
+                model, interaction))
         threads_to_records_map[curr_thread].append(interaction)
         if interaction.label in interaction_labels_of_previous_threads:
           raise InvalidInteractions(
@@ -81,10 +92,12 @@ def _GetRendererThreadsToInteractionRecordsMap(model):
 
 
 class _TimelineBasedMetrics(object):
-  def __init__(self, model, renderer_thread, interaction_records):
+  def __init__(self, model, renderer_thread, interaction_records,
+              results_wrapper_class=_TBMResultWrapper):
     self._model = model
     self._renderer_thread = renderer_thread
     self._interaction_records = interaction_records
+    self._results_wrapper_class = results_wrapper_class
 
   def AddResults(self, results):
     interactions_by_label = defaultdict(list)
@@ -96,7 +109,7 @@ class _TimelineBasedMetrics(object):
       if not all(are_repeatable) and len(interactions) > 1:
         raise InvalidInteractions('Duplicate unrepeatable interaction records '
                                   'on the page')
-      wrapped_results = _ResultsWrapper(results, label)
+      wrapped_results = self._results_wrapper_class(results, label)
       self.UpdateResultsByMetric(interactions, wrapped_results)
 
   def UpdateResultsByMetric(self, interactions, wrapped_results):
@@ -167,9 +180,17 @@ class TimelineBasedMeasurement(object):
   For information on how to mark up a page to work with
   TimelineBasedMeasurement, refer to the
   perf.metrics.timeline_interaction_record module.
+
+  Args:
+      options: an instance of timeline_based_measurement.Options.
+      results_wrapper_class: A class that has the __init__ method takes in
+        the page_test_results object and the interaction record label. This
+        class follows the ResultsWrapperInterface. Note: this class is not
+        supported long term and to be removed when crbug.com/453109 is resolved.
   """
-  def __init__(self, options):
+  def __init__(self, options, results_wrapper_class=_TBMResultWrapper):
     self._tbm_options = options
+    self._results_wrapper_class = results_wrapper_class
 
   def WillRunUserStory(self, tracing_controller,
                        synthetic_delay_categories=None):
@@ -219,7 +240,8 @@ class TimelineBasedMeasurement(object):
     for renderer_thread, interaction_records in (
         threads_to_records_map.iteritems()):
       meta_metrics = _TimelineBasedMetrics(
-          model, renderer_thread, interaction_records)
+          model, renderer_thread, interaction_records,
+          self._results_wrapper_class)
       meta_metrics.AddResults(results)
 
   def DidRunUserStory(self, tracing_controller):

@@ -6,10 +6,11 @@
 #define CONTENT_CHILD_BLINK_PLATFORM_IMPL_H_
 
 #include "base/compiler_specific.h"
+#include "base/containers/scoped_ptr_hash_map.h"
 #include "base/threading/thread_local_storage.h"
 #include "base/timer/timer.h"
 #include "base/trace_event/trace_event.h"
-#include "content/child/webcrypto/webcrypto_impl.h"
+#include "components/webcrypto/webcrypto_impl.h"
 #include "content/child/webfallbackthemeengine_impl.h"
 #include "content/common/content_export.h"
 #include "third_party/WebKit/public/platform/Platform.h"
@@ -32,6 +33,7 @@ class MessageLoop;
 }
 
 namespace content {
+class BackgroundSyncProvider;
 class FlingCurveConfiguration;
 class NotificationDispatcher;
 class PermissionDispatcher;
@@ -40,6 +42,7 @@ class ThreadSafeSender;
 class WebBluetoothImpl;
 class WebCryptoImpl;
 class WebGeofencingProviderImpl;
+class WebMemoryDumpProviderAdapter;
 
 class CONTENT_EXPORT BlinkPlatformImpl
     : NON_EXPORTED_BASE(public blink::Platform) {
@@ -61,6 +64,8 @@ class CONTENT_EXPORT BlinkPlatformImpl
   virtual long long databaseGetFileSize(const blink::WebString& vfs_file_name);
   virtual long long databaseGetSpaceAvailableForOrigin(
       const blink::WebString& origin_identifier);
+  virtual bool databaseSetFileSize(
+      const blink::WebString& vfs_file_name, long long size);
   virtual blink::WebString signedPublicKeyAndChallengeString(
       unsigned key_size_index, const blink::WebString& challenge,
       const blink::WebURL& url);
@@ -84,6 +89,7 @@ class CONTENT_EXPORT BlinkPlatformImpl
       blink::WebString& charset);
   virtual blink::WebURLError cancelledError(const blink::WebURL& url) const;
   virtual bool isReservedIPAddress(const blink::WebString& host) const;
+  virtual bool portAllowed(const blink::WebURL& url) const;
   virtual blink::WebThread* createThread(const char* name);
   virtual blink::WebThread* currentThread();
   virtual void yieldCurrentThread();
@@ -99,7 +105,8 @@ class CONTENT_EXPORT BlinkPlatformImpl
   virtual void histogramSparse(const char* name, int sample);
   virtual const unsigned char* getTraceCategoryEnabledFlag(
       const char* category_name);
-  virtual long* getTraceSamplingState(const unsigned thread_bucket);
+  virtual TraceEventAPIAtomicWord* getTraceSamplingState(
+      const unsigned thread_bucket);
   virtual TraceEventHandle addTraceEvent(
       char phase,
       const unsigned char* category_group_enabled,
@@ -121,12 +128,14 @@ class CONTENT_EXPORT BlinkPlatformImpl
       const char** arg_names,
       const unsigned char* arg_types,
       const unsigned long long* arg_values,
-      const blink::WebConvertableToTraceFormat* convertable_values,
+      blink::WebConvertableToTraceFormat* convertable_values,
       unsigned char flags);
   virtual void updateTraceEventDuration(
       const unsigned char* category_group_enabled,
       const char* name,
       TraceEventHandle);
+  virtual void registerMemoryDumpProvider(blink::WebMemoryDumpProvider* wmdp);
+  virtual void unregisterMemoryDumpProvider(blink::WebMemoryDumpProvider* wmdp);
   virtual blink::WebData loadResource(const char* name);
   virtual blink::WebString queryLocalizedString(
       blink::WebLocalizedString::Name name);
@@ -146,7 +155,6 @@ class CONTENT_EXPORT BlinkPlatformImpl
   virtual void setSharedTimerFiredFunction(void (*func)());
   virtual void setSharedTimerFireInterval(double interval_seconds);
   virtual void stopSharedTimer();
-  virtual void callOnMainThread(void (*func)(void*), void* context);
   virtual blink::WebGestureCurve* createFlingAnimationCurve(
       blink::WebGestureDevice device_source,
       const blink::WebFloatPoint& velocity,
@@ -160,6 +168,7 @@ class CONTENT_EXPORT BlinkPlatformImpl
   virtual blink::WebPushProvider* pushProvider();
   virtual blink::WebNavigatorConnectProvider* navigatorConnectProvider();
   virtual blink::WebPermissionClient* permissionClient();
+  virtual blink::WebSyncProvider* backgroundSyncProvider();
 
   void SuspendSharedTimer();
   void ResumeSharedTimer();
@@ -192,14 +201,18 @@ class CONTENT_EXPORT BlinkPlatformImpl
   bool shared_timer_fire_time_was_set_while_suspended_;
   int shared_timer_suspended_;  // counter
   base::ThreadLocalStorage::Slot current_thread_slot_;
-  WebCryptoImpl web_crypto_;
+  webcrypto::WebCryptoImpl web_crypto_;
   scoped_ptr<WebGeofencingProviderImpl> geofencing_provider_;
   scoped_ptr<WebBluetoothImpl> bluetooth_;
+  base::ScopedPtrHashMap<blink::WebMemoryDumpProvider*,
+                         scoped_ptr<WebMemoryDumpProviderAdapter>>
+      memory_dump_providers_;
 
   scoped_refptr<ThreadSafeSender> thread_safe_sender_;
   scoped_refptr<NotificationDispatcher> notification_dispatcher_;
   scoped_refptr<PushDispatcher> push_dispatcher_;
   scoped_ptr<PermissionDispatcher> permission_client_;
+  scoped_ptr<BackgroundSyncProvider> sync_provider_;
 };
 
 }  // namespace content

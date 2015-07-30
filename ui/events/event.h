@@ -658,7 +658,7 @@ class EVENTS_EXPORT KeyEvent : public Event {
   KeyEvent(base::char16 character, KeyboardCode key_code, int flags);
 
   // Used for synthetic events with code of DOM KeyboardEvent (e.g. 'KeyA')
-  // See also: ui/events/keycodes/dom3/dom_values.txt
+  // See also: ui/events/keycodes/dom/dom_values.txt
   KeyEvent(EventType type,
            KeyboardCode key_code,
            DomCode code,
@@ -779,7 +779,7 @@ class EVENTS_EXPORT KeyEvent : public Event {
   // TODO(kpschoedel): refactor so that key_ and character_ are not mutable.
   // This requires defining the KeyEvent completely at construction rather
   // than lazily under GetCharacter(), which likely also means removing
-  // the two 'incomplete' constructors.
+  // the two 'incomplete' constructors. crbug.com/444045
   //
   // DOM KeyboardEvent |key|
   // http://www.w3.org/TR/DOM-Level-3-Events-key/

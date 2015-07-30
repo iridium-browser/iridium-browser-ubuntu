@@ -68,7 +68,7 @@ interface InspectorInstrumentation {
 #include "core/dom/PseudoElement.h"
 
     // We should call PageDebuggerAgent method first otherwise this method resets script cache and removes scripts executed by other agents.
-    [PageDebugger, Page, PageRuntime]
+    [PageDebugger, Page, PageRuntime, Animation]
     void didClearDocumentOfWindowObject([Keep] LocalFrame*);
 
     [DOMDebugger, Inline=FastReturn]
@@ -305,17 +305,14 @@ interface InspectorInstrumentation {
     [Page]
     void frameAttachedToParent([Keep] LocalFrame*);
 
-    [Canvas, Page]
+    [Page]
     void frameDetachedFromParent([Keep] LocalFrame*);
 
-    [Resource, DOM, Canvas, Page]
+    [Resource, DOM, Page]
     void didCommitLoad([Keep] LocalFrame*, DocumentLoader*);
 
     [DOM, Inline=FastReturn]
     void frameDocumentUpdated([Keep] LocalFrame*);
-
-    [Page]
-    void loaderDetachedFromFrame(LocalFrame*, DocumentLoader*);
 
     [Page]
     void frameStartedLoading([Keep] LocalFrame*);
@@ -423,10 +420,10 @@ interface InspectorInstrumentation {
     void traceAsyncCallbackCompleted(const InspectorInstrumentationCookie&);
 
     [Animation, Inline=FastReturn]
-    void didCreateAnimationPlayer(Document*, AnimationPlayer* player);
+    void didCreateAnimation(Document*, Animation* player);
 
     [Animation, Inline=FastReturn]
-    void didCancelAnimationPlayer(Document*, AnimationPlayer* player);
+    void didCancelAnimation(Document*, Animation* player);
 }
 
 interface InspectorConsoleInstrumentation {
@@ -457,16 +454,4 @@ interface InspectorOverrides {
 
     [Resource, Inline=FastReturn]
     bool shouldForceCORSPreflight(Document*);
-}
-
-
-interface InspectorCanvasInstrumentation {
-
-#include "bindings/core/v8/ScriptValue.h"
-
-    [Canvas]
-    ScriptValue wrapCanvas2DRenderingContextForInstrumentation(Document*, const ScriptValue&);
-
-    [Canvas]
-    ScriptValue wrapWebGLRenderingContextForInstrumentation(Document*, const ScriptValue&);
 }

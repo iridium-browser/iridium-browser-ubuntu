@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 #include "content/test/ppapi/ppapi_test.h"
-#include "ppapi/shared_impl/test_harness_utils.h"
+#include "ppapi/shared_impl/test_utils.h"
 
 // This file lists tests for Pepper APIs (without NaCl) against content_shell.
 // TODO(teravest): Move more tests here. http://crbug.com/371873

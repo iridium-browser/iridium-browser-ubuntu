@@ -111,6 +111,15 @@
             '../net/net.gyp:net_small',
           ],
           'includes': [ 'cronet/cronet_static.gypi' ],
+          'conditions': [
+            ['enable_data_reduction_proxy_support==1',
+              {
+                'dependencies': [
+                  '../components/components.gyp:data_reduction_proxy_core_browser_small',
+                ],
+              },
+            ],
+          ],
         },
         {
           # cronet_static target depends on ICU and includes file and ftp support.
@@ -120,6 +129,15 @@
             '../net/net.gyp:net',
           ],
           'includes': [ 'cronet/cronet_static.gypi' ],
+          'conditions': [
+            ['enable_data_reduction_proxy_support==1',
+              {
+                'dependencies': [
+                  '../components/components.gyp:data_reduction_proxy_core_browser',
+                ],
+              },
+            ],
+          ],
         },
         {
           'target_name': 'libcronet',
@@ -194,9 +212,12 @@
               '**/CronetUrlRequestContext.java',
               '**/CronetUrlRequestFactory.java',
               '**/RequestPriority.java',
+              '**/urlconnection/CronetBufferedOutputStream.java',
+              '**/urlconnection/CronetFixedModeOutputStream.java',
               '**/urlconnection/CronetInputStream.java',
               '**/urlconnection/CronetHttpURLConnection.java',
               '**/urlconnection/CronetHttpURLStreamHandler.java',
+              '**/urlconnection/CronetOutputStream.java',
               '**/urlconnection/CronetURLStreamHandlerFactory.java',
               '**/urlconnection/MessageLoop.java',
             ],
@@ -261,6 +282,7 @@
             'cronet/android/test/src/org/chromium/net/MockUrlRequestJobFactory.java',
             'cronet/android/test/src/org/chromium/net/NativeTestServer.java',
             'cronet/android/test/src/org/chromium/net/NetworkChangeNotifierUtil.java',
+            'cronet/android/test/src/org/chromium/net/QuicTestServer.java',
             'cronet/android/test/src/org/chromium/net/TestUploadDataStreamHandler.java',
           ],
           'variables': {
@@ -277,6 +299,8 @@
             'cronet/android/test/mock_url_request_job_factory.h',
             'cronet/android/test/native_test_server.cc',
             'cronet/android/test/native_test_server.h',
+            'cronet/android/test/quic_test_server.cc',
+            'cronet/android/test/quic_test_server.h',
             'cronet/android/test/test_upload_data_stream_handler.cc',
             'cronet/android/test/test_upload_data_stream_handler.h',
             'cronet/android/test/network_change_notifier_util.cc',
@@ -287,6 +311,7 @@
             'cronet_tests_jni_headers',
             '../base/base.gyp:base',
             '../net/net.gyp:net',
+            '../net/net.gyp:net_quic_proto',
             '../net/net.gyp:net_test_support',
             '../net/net.gyp:simple_quic_tools',
             '../url/url.gyp:url_lib',
@@ -294,16 +319,13 @@
             '../third_party/icu/icu.gyp:icui18n',
             '../third_party/icu/icu.gyp:icuuc',
           ],
-          'conditions': [
-            ['use_icu_alternatives_on_android==1',
+          'conditions' : [
+            ['enable_data_reduction_proxy_support==1',
               {
-                'sources': [
-                  '../net/base/directory_lister.cc',
-                  '../net/base/directory_lister.h',
-                  '../net/url_request/url_request_file_job.cc',
-                  '../net/url_request/url_request_file_job.h',
-                ]
-              }
+                'defines' : [
+                  'DATA_REDUCTION_PROXY_SUPPORT'
+                ],
+              },
             ],
           ],
         },
@@ -312,6 +334,7 @@
           'type': 'none',
           'dependencies': [
             'cronet_java',
+            '../net/net.gyp:net_java_test_support',
           ],
           'variables': {
             'apk_name': 'CronetTest',
@@ -357,6 +380,7 @@
             'libcronet',
             'cronet_java',
             'cronet_stub',
+            '../net/net.gyp:net_unittests_apk',
           ],
           'variables': {
             'native_lib': 'libcronet.>(android_product_extension)',
@@ -474,6 +498,9 @@
           ],
         },
       ],
+      'variables': {
+        'enable_data_reduction_proxy_support%': 0,
+      },
     }],  # OS=="android"
   ],
 }

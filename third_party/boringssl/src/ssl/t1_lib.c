@@ -106,18 +106,20 @@
  * (eay@cryptsoft.com).  This product includes software written by Tim
  * Hudson (tjh@cryptsoft.com). */
 
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <assert.h>
+#include <string.h>
 
 #include <openssl/bytestring.h>
+#include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
 #include <openssl/mem.h>
 #include <openssl/obj.h>
 #include <openssl/rand.h>
 
-#include "ssl_locl.h"
+#include "internal.h"
 
 
 static int tls_decrypt_ticket(SSL *s, const uint8_t *tick, int ticklen,
@@ -243,9 +245,7 @@ static int tls1_check_duplicate_extensions(const CBS *cbs) {
   ret = 1;
 
 done:
-  if (extension_types) {
-    OPENSSL_free(extension_types);
-  }
+  OPENSSL_free(extension_types);
   return ret;
 }
 
@@ -356,7 +356,7 @@ static const uint8_t ecformats_default[] = {
 };
 
 static const uint16_t eccurves_default[] = {
-    23, /* X9_64_prime256v1 */
+    23, /* X9_62_prime256v1 */
     24, /* secp384r1 */
 };
 
@@ -388,6 +388,9 @@ static void tls1_get_curvelist(SSL *s, int get_peer_curves,
                                const uint16_t **out_curve_ids,
                                size_t *out_curve_ids_len) {
   if (get_peer_curves) {
+    /* Only clients send a curve list, so this function is only called
+     * on the server. */
+    assert(s->server);
     *out_curve_ids = s->s3->tmp.peer_ellipticcurvelist;
     *out_curve_ids_len = s->s3->tmp.peer_ellipticcurvelist_length;
     return;
@@ -426,22 +429,38 @@ int tls1_check_curve(SSL *s, CBS *cbs, uint16_t *out_curve_id) {
 }
 
 int tls1_get_shared_curve(SSL *s) {
-  const uint16_t *pref, *supp;
-  size_t preflen, supplen, i, j;
+  const uint16_t *curves, *peer_curves, *pref, *supp;
+  size_t curves_len, peer_curves_len, pref_len, supp_len, i, j;
 
   /* Can't do anything on client side */
   if (s->server == 0) {
     return NID_undef;
   }
 
-  /* Return first preference shared curve */
-  tls1_get_curvelist(s, !!(s->options & SSL_OP_CIPHER_SERVER_PREFERENCE), &supp,
-                     &supplen);
-  tls1_get_curvelist(s, !(s->options & SSL_OP_CIPHER_SERVER_PREFERENCE), &pref,
-                     &preflen);
+  tls1_get_curvelist(s, 0 /* local curves */, &curves, &curves_len);
+  tls1_get_curvelist(s, 1 /* peer curves */, &peer_curves, &peer_curves_len);
 
-  for (i = 0; i < preflen; i++) {
-    for (j = 0; j < supplen; j++) {
+  if (peer_curves_len == 0) {
+    /* Clients are not required to send a supported_curves extension. In this
+     * case, the server is free to pick any curve it likes. See RFC 4492,
+     * section 4, paragraph 3. */
+    return (curves_len == 0) ? NID_undef : tls1_ec_curve_id2nid(curves[0]);
+  }
+
+  if (s->options & SSL_OP_CIPHER_SERVER_PREFERENCE) {
+    pref = curves;
+    pref_len = curves_len;
+    supp = peer_curves;
+    supp_len = peer_curves_len;
+  } else {
+    pref = peer_curves;
+    pref_len = peer_curves_len;
+    supp = curves;
+    supp_len = curves_len;
+  }
+
+  for (i = 0; i < pref_len; i++) {
+    for (j = 0; j < supp_len; j++) {
       if (pref[i] == supp[j]) {
         return tls1_ec_curve_id2nid(pref[i]);
       }
@@ -468,9 +487,7 @@ int tls1_set_curves(uint16_t **out_curve_ids, size_t *out_curve_ids_len,
     }
   }
 
-  if (*out_curve_ids) {
-    OPENSSL_free(*out_curve_ids);
-  }
+  OPENSSL_free(*out_curve_ids);
   *out_curve_ids = curve_ids;
   *out_curve_ids_len = ncurves;
 
@@ -545,11 +562,23 @@ static int tls1_check_point_format(SSL *s, uint8_t comp_id) {
  * preferences are checked; the peer (the server) does not send preferences. */
 static int tls1_check_curve_id(SSL *s, uint16_t curve_id) {
   const uint16_t *curves;
-  size_t curves_len, i, j;
+  size_t curves_len, i, get_peer_curves;
 
   /* Check against our list, then the peer's list. */
-  for (j = 0; j <= 1; j++) {
-    tls1_get_curvelist(s, j, &curves, &curves_len);
+  for (get_peer_curves = 0; get_peer_curves <= 1; get_peer_curves++) {
+    if (get_peer_curves && !s->server) {
+      /* Servers do not present a preference list so, if we are a client, only
+       * check our list. */
+      continue;
+    }
+
+    tls1_get_curvelist(s, get_peer_curves, &curves, &curves_len);
+    if (get_peer_curves && curves_len == 0) {
+      /* Clients are not required to send a supported_curves extension. In this
+       * case, the server is free to pick any curve it likes. See RFC 4492,
+       * section 4, paragraph 3. */
+      continue;
+    }
     for (i = 0; i < curves_len; i++) {
       if (curves[i] == curve_id) {
         break;
@@ -558,12 +587,6 @@ static int tls1_check_curve_id(SSL *s, uint16_t curve_id) {
 
     if (i == curves_len) {
       return 0;
-    }
-
-    /* Servers do not present a preference list so, if we are a client, only
-     * check our list. */
-    if (!s->server) {
-      return 1;
     }
   }
 
@@ -599,9 +622,7 @@ int tls1_check_ec_cert(SSL *s, X509 *x) {
   ret = 1;
 
 done:
-  if (pkey) {
-    EVP_PKEY_free(pkey);
-  }
+  EVP_PKEY_free(pkey);
   return ret;
 }
 
@@ -791,7 +812,7 @@ uint8_t *ssl_add_clienthello_tlsext(SSL *s, uint8_t *buf, uint8_t *limit,
 
   if (s->version >= TLS1_VERSION || SSL_IS_DTLS(s)) {
     size_t i;
-    unsigned long alg_k, alg_a;
+    uint32_t alg_k, alg_a;
     STACK_OF(SSL_CIPHER) *cipher_stack = SSL_get_ciphers(s);
 
     for (i = 0; i < sk_SSL_CIPHER_num(cipher_stack); i++) {
@@ -850,7 +871,7 @@ uint8_t *ssl_add_clienthello_tlsext(SSL *s, uint8_t *buf, uint8_t *limit,
   }
 
   /* Add RI if renegotiating */
-  if (s->renegotiate) {
+  if (s->s3->initial_handshake_complete) {
     int el;
 
     if (!ssl_add_clienthello_renegotiate_ext(s, 0, &el, 0)) {
@@ -884,7 +905,12 @@ uint8_t *ssl_add_clienthello_tlsext(SSL *s, uint8_t *buf, uint8_t *limit,
 
   if (!(SSL_get_options(s) & SSL_OP_NO_TICKET)) {
     int ticklen = 0;
-    if (!s->new_session && s->session && s->session->tlsext_tick) {
+    /* Renegotiation does not participate in session resumption. However, still
+     * advertise the extension to avoid potentially breaking servers which carry
+     * over the state from the previous handshake, such as OpenSSL servers
+     * without upstream's 3c3f0259238594d77264a78944d409f2127642c4. */
+    if (!s->s3->initial_handshake_complete && s->session != NULL &&
+        s->session->tlsext_tick != NULL) {
       ticklen = s->session->tlsext_ticklen;
     }
 
@@ -933,7 +959,7 @@ uint8_t *ssl_add_clienthello_tlsext(SSL *s, uint8_t *buf, uint8_t *limit,
     s2n(0, ret);
   }
 
-  if (s->ctx->next_proto_select_cb && !s->s3->tmp.finish_md_len &&
+  if (s->ctx->next_proto_select_cb && !s->s3->initial_handshake_complete &&
       !SSL_IS_DTLS(s)) {
     /* The client advertises an emtpy extension to indicate its support for
      * Next Protocol Negotiation */
@@ -944,7 +970,7 @@ uint8_t *ssl_add_clienthello_tlsext(SSL *s, uint8_t *buf, uint8_t *limit,
     s2n(0, ret);
   }
 
-  if (s->signed_cert_timestamps_enabled && !s->s3->tmp.finish_md_len) {
+  if (s->signed_cert_timestamps_enabled) {
     /* The client advertises an empty extension to indicate its support for
      * certificate timestamps. */
     if (limit - ret - 4 < 0) {
@@ -954,7 +980,7 @@ uint8_t *ssl_add_clienthello_tlsext(SSL *s, uint8_t *buf, uint8_t *limit,
     s2n(0, ret);
   }
 
-  if (s->alpn_client_proto_list && !s->s3->tmp.finish_md_len) {
+  if (s->alpn_client_proto_list && !s->s3->initial_handshake_complete) {
     if ((size_t)(limit - ret) < 6 + s->alpn_client_proto_list_len) {
       return NULL;
     }
@@ -1105,8 +1131,8 @@ uint8_t *ssl_add_serverhello_tlsext(SSL *s, uint8_t *buf, uint8_t *limit) {
   uint8_t *orig = buf;
   uint8_t *ret = buf;
   int next_proto_neg_seen;
-  unsigned long alg_k = s->s3->tmp.new_cipher->algorithm_mkey;
-  unsigned long alg_a = s->s3->tmp.new_cipher->algorithm_auth;
+  uint32_t alg_k = s->s3->tmp.new_cipher->algorithm_mkey;
+  uint32_t alg_a = s->s3->tmp.new_cipher->algorithm_auth;
   int using_ecc = (alg_k & SSL_kECDHE) || (alg_a & SSL_aECDSA);
   using_ecc = using_ecc && (s->s3->tmp.peer_ecpointformatlist != NULL);
 
@@ -1319,9 +1345,7 @@ static int tls1_alpn_handle_client_hello(SSL *s, CBS *cbs, int *out_alert) {
       s, &selected, &selected_len, CBS_data(&protocol_name_list),
       CBS_len(&protocol_name_list), s->ctx->alpn_select_cb_arg);
   if (r == SSL_TLSEXT_ERR_OK) {
-    if (s->s3->alpn_selected) {
-      OPENSSL_free(s->s3->alpn_selected);
-    }
+    OPENSSL_free(s->s3->alpn_selected);
     s->s3->alpn_selected = BUF_memdup(selected, selected_len);
     if (!s->s3->alpn_selected) {
       *out_alert = SSL_AD_INTERNAL_ERROR;
@@ -1347,37 +1371,27 @@ static int ssl_scan_clienthello_tlsext(SSL *s, CBS *cbs, int *out_alert) {
   s->s3->tmp.certificate_status_expected = 0;
   s->s3->tmp.extended_master_secret = 0;
 
-  if (s->s3->alpn_selected) {
-    OPENSSL_free(s->s3->alpn_selected);
-    s->s3->alpn_selected = NULL;
-  }
+  OPENSSL_free(s->s3->alpn_selected);
+  s->s3->alpn_selected = NULL;
 
   /* Clear any signature algorithms extension received */
-  if (s->cert->peer_sigalgs) {
-    OPENSSL_free(s->cert->peer_sigalgs);
-    s->cert->peer_sigalgs = NULL;
-    s->cert->peer_sigalgslen = 0;
-  }
+  OPENSSL_free(s->cert->peer_sigalgs);
+  s->cert->peer_sigalgs = NULL;
+  s->cert->peer_sigalgslen = 0;
 
   /* Clear any shared signature algorithms */
-  if (s->cert->shared_sigalgs) {
-    OPENSSL_free(s->cert->shared_sigalgs);
-    s->cert->shared_sigalgs = NULL;
-    s->cert->shared_sigalgslen = 0;
-  }
+  OPENSSL_free(s->cert->shared_sigalgs);
+  s->cert->shared_sigalgs = NULL;
+  s->cert->shared_sigalgslen = 0;
 
   /* Clear ECC extensions */
-  if (s->s3->tmp.peer_ecpointformatlist != 0) {
-    OPENSSL_free(s->s3->tmp.peer_ecpointformatlist);
-    s->s3->tmp.peer_ecpointformatlist = NULL;
-    s->s3->tmp.peer_ecpointformatlist_length = 0;
-  }
+  OPENSSL_free(s->s3->tmp.peer_ecpointformatlist);
+  s->s3->tmp.peer_ecpointformatlist = NULL;
+  s->s3->tmp.peer_ecpointformatlist_length = 0;
 
-  if (s->s3->tmp.peer_ellipticcurvelist != 0) {
-    OPENSSL_free(s->s3->tmp.peer_ellipticcurvelist);
-    s->s3->tmp.peer_ellipticcurvelist = NULL;
-    s->s3->tmp.peer_ellipticcurvelist_length = 0;
-  }
+  OPENSSL_free(s->s3->tmp.peer_ellipticcurvelist);
+  s->s3->tmp.peer_ellipticcurvelist = NULL;
+  s->s3->tmp.peer_ellipticcurvelist_length = 0;
 
   /* There may be no extensions. */
   if (CBS_len(cbs) == 0) {
@@ -1400,11 +1414,6 @@ static int ssl_scan_clienthello_tlsext(SSL *s, CBS *cbs, int *out_alert) {
         !CBS_get_u16_length_prefixed(&extensions, &extension)) {
       *out_alert = SSL_AD_DECODE_ERROR;
       return 0;
-    }
-
-    if (s->tlsext_debug_cb) {
-      s->tlsext_debug_cb(s, 0, type, (uint8_t *)CBS_data(&extension),
-                         CBS_len(&extension), s->tlsext_debug_arg);
     }
 
     /* The servername extension is treated as follows:
@@ -1519,10 +1528,8 @@ static int ssl_scan_clienthello_tlsext(SSL *s, CBS *cbs, int *out_alert) {
         return 0;
       }
 
-      if (s->s3->tmp.peer_ellipticcurvelist) {
-        OPENSSL_free(s->s3->tmp.peer_ellipticcurvelist);
-        s->s3->tmp.peer_ellipticcurvelist_length = 0;
-      }
+      OPENSSL_free(s->s3->tmp.peer_ellipticcurvelist);
+      s->s3->tmp.peer_ellipticcurvelist_length = 0;
 
       s->s3->tmp.peer_ellipticcurvelist =
           (uint16_t *)OPENSSL_malloc(CBS_len(&elliptic_curve_list));
@@ -1582,29 +1589,16 @@ static int ssl_scan_clienthello_tlsext(SSL *s, CBS *cbs, int *out_alert) {
         return 0;
       }
     } else if (type == TLSEXT_TYPE_next_proto_neg &&
-               s->s3->tmp.finish_md_len == 0 && s->s3->alpn_selected == NULL &&
-               !SSL_IS_DTLS(s)) {
+               !s->s3->initial_handshake_complete &&
+               s->s3->alpn_selected == NULL && !SSL_IS_DTLS(s)) {
       /* The extension must be empty. */
       if (CBS_len(&extension) != 0) {
         *out_alert = SSL_AD_DECODE_ERROR;
         return 0;
       }
-
-      /* We shouldn't accept this extension on a renegotiation.
-       *
-       * s->new_session will be set on renegotiation, but we probably shouldn't
-       * rely that it couldn't be set on the initial renegotation too in
-       * certain cases (when there's some other reason to disallow resuming an
-       * earlier session -- the current code won't be doing anything like that,
-       * but this might change).
-
-       * A valid sign that there's been a previous handshake in this connection
-       * is if s->s3->tmp.finish_md_len > 0.  (We are talking about a check
-       * that will happen in the Hello protocol round, well before a new
-       * Finished message could have been computed.) */
       s->s3->next_proto_neg_seen = 1;
     } else if (type == TLSEXT_TYPE_application_layer_protocol_negotiation &&
-               s->ctx->alpn_select_cb && s->s3->tmp.finish_md_len == 0) {
+               s->ctx->alpn_select_cb && !s->s3->initial_handshake_complete) {
       if (!tls1_alpn_handle_client_hello(s, &extension, out_alert)) {
         return 0;
       }
@@ -1704,17 +1698,13 @@ static int ssl_scan_serverhello_tlsext(SSL *s, CBS *cbs, int *out_alert) {
   s->s3->tmp.extended_master_secret = 0;
   s->srtp_profile = NULL;
 
-  if (s->s3->alpn_selected) {
-    OPENSSL_free(s->s3->alpn_selected);
-    s->s3->alpn_selected = NULL;
-  }
+  OPENSSL_free(s->s3->alpn_selected);
+  s->s3->alpn_selected = NULL;
 
   /* Clear ECC extensions */
-  if (s->s3->tmp.peer_ecpointformatlist != 0) {
-    OPENSSL_free(s->s3->tmp.peer_ecpointformatlist);
-    s->s3->tmp.peer_ecpointformatlist = NULL;
-    s->s3->tmp.peer_ecpointformatlist_length = 0;
-  }
+  OPENSSL_free(s->s3->tmp.peer_ecpointformatlist);
+  s->s3->tmp.peer_ecpointformatlist = NULL;
+  s->s3->tmp.peer_ecpointformatlist_length = 0;
 
   /* There may be no extensions. */
   if (CBS_len(cbs) == 0) {
@@ -1737,11 +1727,6 @@ static int ssl_scan_serverhello_tlsext(SSL *s, CBS *cbs, int *out_alert) {
         !CBS_get_u16_length_prefixed(&extensions, &extension)) {
       *out_alert = SSL_AD_DECODE_ERROR;
       return 0;
-    }
-
-    if (s->tlsext_debug_cb) {
-      s->tlsext_debug_cb(s, 1, type, (uint8_t *)CBS_data(&extension),
-                         CBS_len(&extension), s->tlsext_debug_arg);
     }
 
     if (type == TLSEXT_TYPE_server_name) {
@@ -1795,8 +1780,7 @@ static int ssl_scan_serverhello_tlsext(SSL *s, CBS *cbs, int *out_alert) {
       /* Set a flag to expect a CertificateStatus message */
       s->s3->tmp.certificate_status_expected = 1;
     } else if (type == TLSEXT_TYPE_next_proto_neg &&
-               s->s3->tmp.finish_md_len == 0 &&
-               !SSL_IS_DTLS(s)) {
+               !s->s3->initial_handshake_complete && !SSL_IS_DTLS(s)) {
       uint8_t *selected;
       uint8_t selected_len;
 
@@ -1828,7 +1812,8 @@ static int ssl_scan_serverhello_tlsext(SSL *s, CBS *cbs, int *out_alert) {
 
       s->next_proto_negotiated_len = selected_len;
       s->s3->next_proto_neg_seen = 1;
-    } else if (type == TLSEXT_TYPE_application_layer_protocol_negotiation) {
+    } else if (type == TLSEXT_TYPE_application_layer_protocol_negotiation &&
+               !s->s3->initial_handshake_complete) {
       CBS protocol_name_list, protocol_name;
 
       /* We must have requested it. */
@@ -1977,8 +1962,8 @@ static int ssl_check_serverhello_tlsext(SSL *s) {
   /* If we are client and using an elliptic curve cryptography cipher suite,
    * then if server returns an EC point formats lists extension it must contain
    * uncompressed. */
-  unsigned long alg_k = s->s3->tmp.new_cipher->algorithm_mkey;
-  unsigned long alg_a = s->s3->tmp.new_cipher->algorithm_auth;
+  uint32_t alg_k = s->s3->tmp.new_cipher->algorithm_mkey;
+  uint32_t alg_a = s->s3->tmp.new_cipher->algorithm_auth;
   if (((alg_k & SSL_kECDHE) || (alg_a & SSL_aECDSA)) &&
       !tls1_check_point_format(s, TLSEXT_ECPOINTFORMAT_uncompressed)) {
     OPENSSL_PUT_ERROR(SSL, ssl_check_serverhello_tlsext,
@@ -2123,8 +2108,11 @@ static int tls_decrypt_ticket(SSL *s, const uint8_t *etick, int eticklen,
   EVP_CIPHER_CTX ctx;
   SSL_CTX *tctx = s->initial_ctx;
 
-  /* Need at least keyname + iv + some encrypted data */
-  if (eticklen < 48) {
+  /* Ensure there is room for the key name and the largest IV
+   * |tlsext_ticket_key_cb| may try to consume. The real limit may be lower, but
+   * the maximum IV length should be well under the minimum size for the
+   * session material and HMAC. */
+  if (eticklen < 16 + EVP_MAX_IV_LENGTH) {
     return 2;
   }
 
@@ -2133,7 +2121,8 @@ static int tls_decrypt_ticket(SSL *s, const uint8_t *etick, int eticklen,
   EVP_CIPHER_CTX_init(&ctx);
   if (tctx->tlsext_ticket_key_cb) {
     uint8_t *nctick = (uint8_t *)etick;
-    int rv = tctx->tlsext_ticket_key_cb(s, nctick, nctick + 16, &ctx, &hctx, 0);
+    int rv = tctx->tlsext_ticket_key_cb(s, nctick, nctick + 16, &ctx, &hctx,
+                                        0 /* decrypt */);
     if (rv < 0) {
       return -1;
     }
@@ -2158,13 +2147,13 @@ static int tls_decrypt_ticket(SSL *s, const uint8_t *etick, int eticklen,
     }
   }
 
-  /* Attempt to process session ticket, first conduct sanity and integrity
-   * checks on ticket. */
+  /* First, check the MAC. The MAC is at the end of the ticket. */
   mlen = HMAC_size(&hctx);
-  if (mlen < 0) {
+  if ((size_t) eticklen < 16 + EVP_CIPHER_CTX_iv_length(&ctx) + 1 + mlen) {
+    /* The ticket must be large enough for key name, IV, data, and MAC. */
     HMAC_CTX_cleanup(&hctx);
     EVP_CIPHER_CTX_cleanup(&ctx);
-    return -1;
+    return 2;
   }
   eticklen -= mlen;
   /* Check HMAC of encrypted ticket */
@@ -2397,11 +2386,9 @@ static int tls1_set_shared_sigalgs(SSL *s) {
   TLS_SIGALGS *salgs = NULL;
   CERT *c = s->cert;
 
-  if (c->shared_sigalgs) {
-    OPENSSL_free(c->shared_sigalgs);
-    c->shared_sigalgs = NULL;
-    c->shared_sigalgslen = 0;
-  }
+  OPENSSL_free(c->shared_sigalgs);
+  c->shared_sigalgs = NULL;
+  c->shared_sigalgslen = 0;
 
   /* If client use client signature algorithms if not NULL */
   if (!s->server && c->client_sigalgs) {
@@ -2635,15 +2622,11 @@ int tls1_set_sigalgs(CERT *c, const int *psig_nids, size_t salglen,
   }
 
   if (client) {
-    if (c->client_sigalgs) {
-      OPENSSL_free(c->client_sigalgs);
-    }
+    OPENSSL_free(c->client_sigalgs);
     c->client_sigalgs = sigalgs;
     c->client_sigalgslen = salglen;
   } else {
-    if (c->conf_sigalgs) {
-      OPENSSL_free(c->conf_sigalgs);
-    }
+    OPENSSL_free(c->conf_sigalgs);
     c->conf_sigalgs = sigalgs;
     c->conf_sigalgslen = salglen;
   }

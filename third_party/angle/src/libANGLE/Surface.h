@@ -15,16 +15,12 @@
 
 #include "common/angleutils.h"
 #include "libANGLE/Error.h"
-#include "libANGLE/RefCountObject.h"
+#include "libANGLE/FramebufferAttachment.h"
+#include "libANGLE/renderer/SurfaceImpl.h"
 
 namespace gl
 {
 class Texture;
-}
-
-namespace rx
-{
-class SurfaceImpl;
 }
 
 namespace egl
@@ -33,7 +29,7 @@ class AttributeMap;
 class Display;
 struct Config;
 
-class Surface final : public RefCountObject
+class Surface final : public gl::FramebufferAttachmentObject
 {
   public:
     Surface(rx::SurfaceImpl *impl, EGLint surfaceType, const egl::Config *config, const AttributeMap &attributes);
@@ -68,8 +64,15 @@ class Surface final : public RefCountObject
 
     EGLint isFixedSize() const;
 
+    // FramebufferAttachmentObject implementation
+    GLsizei getAttachmentWidth(const gl::FramebufferAttachment::Target &/*target*/) const override { return getWidth(); }
+    GLsizei getAttachmentHeight(const gl::FramebufferAttachment::Target &/*target*/) const override { return getHeight(); }
+    GLenum getAttachmentInternalFormat(const gl::FramebufferAttachment::Target &target) const override;
+    GLsizei getAttachmentSamples(const gl::FramebufferAttachment::Target &target) const override;
+
   private:
     virtual ~Surface();
+    rx::FramebufferAttachmentObjectImpl *getAttachmentImpl() const override { return mImplementation; }
 
     // ANGLE-only method, used internally
     friend class gl::Texture;

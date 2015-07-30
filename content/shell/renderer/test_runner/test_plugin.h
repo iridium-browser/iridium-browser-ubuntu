@@ -11,7 +11,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "cc/layers/texture_layer.h"
 #include "cc/layers/texture_layer_client.h"
-#include "content/public/test/layouttest_support.h"
 #include "third_party/WebKit/public/platform/WebExternalTextureLayer.h"
 #include "third_party/WebKit/public/platform/WebExternalTextureLayerClient.h"
 #include "third_party/WebKit/public/platform/WebExternalTextureMailbox.h"
@@ -63,6 +62,8 @@ class TestPlugin : public blink::WebPlugin, public cc::TextureLayerClient {
   virtual void destroy();
   virtual NPObject* scriptableObject();
   virtual bool canProcessDrag() const;
+  virtual bool supportsKeyboardFocus() const;
+  virtual void layoutIfNeeded() override { }
   virtual void paint(blink::WebCanvas* canvas, const blink::WebRect& rect) {}
   virtual void updateGeometry(
       const blink::WebRect& window_rect,
@@ -170,6 +171,7 @@ class TestPlugin : public blink::WebPlugin, public cc::TextureLayerClient {
   bool print_event_details_;
   bool print_user_gesture_status_;
   bool can_process_drag_;
+  bool supports_keyboard_focus_;
 
   bool is_persistent_;
   bool can_create_without_renderer_;

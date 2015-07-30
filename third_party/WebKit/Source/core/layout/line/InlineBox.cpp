@@ -23,10 +23,10 @@
 #include "core/layout/HitTestLocation.h"
 #include "core/layout/LayoutBlockFlow.h"
 #include "core/layout/LayoutObject.h"
-#include "core/layout/PaintInfo.h"
 #include "core/layout/line/InlineFlowBox.h"
 #include "core/layout/line/RootInlineBox.h"
 #include "core/paint/BlockPainter.h"
+#include "core/paint/PaintInfo.h"
 #include "platform/fonts/FontMetrics.h"
 #include "wtf/Partitions.h"
 
@@ -391,12 +391,16 @@ void showTree(const blink::InlineBox* b)
 {
     if (b)
         b->showTreeForThis();
+    else
+        fprintf(stderr, "Cannot showTree for (nil) InlineBox.\n");
 }
 
 void showLineTree(const blink::InlineBox* b)
 {
     if (b)
         b->showLineTreeForThis();
+    else
+        fprintf(stderr, "Cannot showLineTree for (nil) InlineBox.\n");
 }
 
 #endif

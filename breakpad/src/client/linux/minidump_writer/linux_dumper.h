@@ -52,13 +52,15 @@
 namespace google_breakpad {
 
 // Typedef for our parsing of the auxv variables in /proc/pid/auxv.
-#if defined(__i386) || defined(__ARM_EABI__) || defined(__mips__)
+#if defined(__i386) || defined(__ARM_EABI__) || \
+ (defined(__mips__) && _MIPS_SIM == _ABIO32)
 typedef Elf32_auxv_t elf_aux_entry;
-#elif defined(__x86_64) || defined(__aarch64__)
+#elif defined(__x86_64) || defined(__aarch64__) || \
+     (defined(__mips__) && _MIPS_SIM != _ABIO32)
 typedef Elf64_auxv_t elf_aux_entry;
 #endif
 
-typedef typeof(((elf_aux_entry*) 0)->a_un.a_val) elf_aux_val_t;
+typedef __typeof__(((elf_aux_entry*) 0)->a_un.a_val) elf_aux_val_t;
 
 // When we find the VDSO mapping in the process's address space, this
 // is the name we use for it when writing it to the minidump.

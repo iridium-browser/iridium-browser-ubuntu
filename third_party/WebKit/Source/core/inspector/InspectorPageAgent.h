@@ -44,7 +44,6 @@ class Resource;
 class Document;
 class DocumentLoader;
 class FrameHost;
-class InjectedScriptManager;
 class InspectorCSSAgent;
 class InspectorDebuggerAgent;
 class InspectorOverlay;
@@ -72,7 +71,7 @@ public:
         OtherResource
     };
 
-    static PassOwnPtrWillBeRawPtr<InspectorPageAgent> create(LocalFrame* inspectedFrame, InjectedScriptManager*, InspectorOverlay*);
+    static PassOwnPtrWillBeRawPtr<InspectorPageAgent> create(LocalFrame* inspectedFrame, InspectorOverlay*);
     void setDeferredAgents(InspectorDebuggerAgent*, InspectorCSSAgent*);
 
     static Vector<Document*> importsForFrame(LocalFrame*);
@@ -92,8 +91,6 @@ public:
     void removeScriptToEvaluateOnLoad(ErrorString*, const String& identifier) override;
     void reload(ErrorString*, const bool* optionalIgnoreCache, const String* optionalScriptToEvaluateOnLoad) override;
     void navigate(ErrorString*, const String& url, String* frameId) override;
-    void getCookies(ErrorString*, RefPtr<TypeBuilder::Array<TypeBuilder::Page::Cookie> >& cookies) override;
-    void deleteCookie(ErrorString*, const String& cookieName, const String& url) override;
     void getResourceTree(ErrorString*, RefPtr<TypeBuilder::Page::FrameResourceTree>&) override;
     void getResourceContent(ErrorString*, const String& frameId, const String& url, PassRefPtrWillBeRawPtr<GetResourceContentCallback>) override;
     void searchInResource(ErrorString*, const String& frameId, const String& url, const String& query, const bool* optionalCaseSensitive, const bool* optionalIsRegex, RefPtr<TypeBuilder::Array<TypeBuilder::Debugger::SearchMatch>>&) override;
@@ -110,7 +107,6 @@ public:
     void didCommitLoad(LocalFrame*, DocumentLoader*);
     void frameAttachedToParent(LocalFrame*);
     void frameDetachedFromParent(LocalFrame*);
-    void loaderDetachedFromFrame(DocumentLoader*);
     void frameStartedLoading(LocalFrame*);
     void frameStoppedLoading(LocalFrame*);
     void frameScheduledNavigation(LocalFrame*, double delay);
@@ -128,17 +124,13 @@ public:
     void discardAgent() override;
 
     // Cross-agents API
+    static DocumentLoader* assertDocumentLoader(ErrorString*, LocalFrame*);
+    LocalFrame* frameForId(const String& frameId);
+    LocalFrame* assertFrame(ErrorString*, const String& frameId);
     FrameHost* frameHost();
     LocalFrame* inspectedFrame() const { return m_inspectedFrame.get(); }
-    String createIdentifier();
-    LocalFrame* frameForId(const String& frameId);
-    String frameId(LocalFrame*);
-    bool hasIdForFrame(LocalFrame*) const;
-    String loaderId(DocumentLoader*);
     LocalFrame* findFrameWithSecurityOrigin(const String& originRawString);
-    LocalFrame* assertFrame(ErrorString*, const String& frameId);
     bool screencastEnabled();
-    static DocumentLoader* assertDocumentLoader(ErrorString*, LocalFrame*);
     InspectorResourceContentLoader* resourceContentLoader() { return m_inspectorResourceContentLoader.get(); }
 
     DECLARE_VIRTUAL_TRACE();
@@ -146,7 +138,7 @@ public:
 private:
     class GetResourceContentLoadListener;
 
-    InspectorPageAgent(LocalFrame* inspectedFrame, InjectedScriptManager*, InspectorOverlay*);
+    InspectorPageAgent(LocalFrame* inspectedFrame, InspectorOverlay*);
 
     void finishReload();
     void getResourceContentAfterResourcesContentLoaded(const String& frameId, const String& url, PassRefPtrWillBeRawPtr<GetResourceContentCallback>);
@@ -156,16 +148,12 @@ private:
     PassRefPtr<TypeBuilder::Page::Frame> buildObjectForFrame(LocalFrame*);
     PassRefPtr<TypeBuilder::Page::FrameResourceTree> buildObjectForFrameTree(LocalFrame*);
     RawPtrWillBeMember<LocalFrame> m_inspectedFrame;
-    RawPtrWillBeMember<InjectedScriptManager> m_injectedScriptManager;
     RawPtrWillBeMember<InspectorDebuggerAgent> m_debuggerAgent;
     RawPtrWillBeMember<InspectorCSSAgent> m_cssAgent;
     RawPtrWillBeMember<InspectorOverlay> m_overlay;
     long m_lastScriptIdentifier;
     String m_pendingScriptToEvaluateOnLoadOnce;
     String m_scriptToEvaluateOnLoadOnce;
-    HashMap<LocalFrame*, String> m_frameToIdentifier;
-    HashMap<String, LocalFrame*> m_identifierToFrame;
-    HashMap<DocumentLoader*, String> m_loaderToIdentifier;
     bool m_enabled;
     bool m_reloading;
 

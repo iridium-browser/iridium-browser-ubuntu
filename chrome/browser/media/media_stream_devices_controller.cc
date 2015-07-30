@@ -17,7 +17,6 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/content_settings/core/browser/content_settings_provider.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
@@ -216,16 +215,10 @@ MediaStreamDevicesController::~MediaStreamDevicesController() {
 // static
 void MediaStreamDevicesController::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* prefs) {
-  prefs->RegisterBooleanPref(prefs::kVideoCaptureAllowed,
-                             true,
-                             user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kAudioCaptureAllowed,
-                             true,
-                             user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  prefs->RegisterListPref(prefs::kVideoCaptureAllowedUrls,
-                          user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  prefs->RegisterListPref(prefs::kAudioCaptureAllowedUrls,
-                          user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  prefs->RegisterBooleanPref(prefs::kVideoCaptureAllowed, true);
+  prefs->RegisterBooleanPref(prefs::kAudioCaptureAllowed, true);
+  prefs->RegisterListPref(prefs::kVideoCaptureAllowedUrls);
+  prefs->RegisterListPref(prefs::kAudioCaptureAllowedUrls);
 }
 
 // TODO(gbillock): rename? doesn't actually dismiss. More of a 'check profile
@@ -543,9 +536,11 @@ bool MediaStreamDevicesController::IsRequestAllowedByDefault() const {
         return false;
       }
       if (profile_->GetHostContentSettingsMap()->GetContentSetting(
-              request_.security_origin, request_.security_origin,
-              device_checks[i].settings_type, NO_RESOURCE_IDENTIFIER) !=
-              CONTENT_SETTING_ALLOW) {
+              request_.security_origin,
+              request_.security_origin,
+              device_checks[i].settings_type,
+              content_settings::ResourceIdentifier()) !=
+          CONTENT_SETTING_ALLOW) {
         return false;
       }
     }
@@ -561,10 +556,11 @@ int MediaStreamDevicesController::FilterBlockedByDefaultDevices() {
 
   if (IsDeviceAudioCaptureRequestedAndAllowed()) {
     if (profile_->GetHostContentSettingsMap()->GetContentSetting(
-        request_.security_origin,
-        request_.security_origin,
-        CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC,
-        NO_RESOURCE_IDENTIFIER) == CONTENT_SETTING_BLOCK) {
+            request_.security_origin,
+            request_.security_origin,
+            CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC,
+            content_settings::ResourceIdentifier()) ==
+        CONTENT_SETTING_BLOCK) {
       request_permissions_[content::MEDIA_DEVICE_AUDIO_CAPTURE].permission =
           MEDIA_BLOCKED_BY_USER_SETTING;
     } else {
@@ -574,10 +570,11 @@ int MediaStreamDevicesController::FilterBlockedByDefaultDevices() {
 
   if (IsDeviceVideoCaptureRequestedAndAllowed()) {
     if (profile_->GetHostContentSettingsMap()->GetContentSetting(
-        request_.security_origin,
-        request_.security_origin,
-        CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
-        NO_RESOURCE_IDENTIFIER) == CONTENT_SETTING_BLOCK) {
+            request_.security_origin,
+            request_.security_origin,
+            CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
+            content_settings::ResourceIdentifier()) ==
+        CONTENT_SETTING_BLOCK) {
       request_permissions_[content::MEDIA_DEVICE_VIDEO_CAPTURE].permission =
           MEDIA_BLOCKED_BY_USER_SETTING;
     } else {
@@ -589,7 +586,7 @@ int MediaStreamDevicesController::FilterBlockedByDefaultDevices() {
 }
 
 bool MediaStreamDevicesController::IsDefaultMediaAccessBlocked() const {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   return (profile_->GetHostContentSettingsMap()->GetDefaultContentSetting(
               CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, NULL)
           == CONTENT_SETTING_BLOCK &&
@@ -604,7 +601,7 @@ bool MediaStreamDevicesController::IsSchemeSecure() const {
 }
 
 void MediaStreamDevicesController::StorePermission(bool allowed) const {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   ContentSettingsPattern primary_pattern =
       ContentSettingsPattern::FromURLNoWildcard(request_.security_origin);
   // Check the pattern is valid or not. When the request is from a file access,

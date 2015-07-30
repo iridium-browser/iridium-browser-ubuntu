@@ -61,6 +61,7 @@
 
 #include <openssl/engine.h>
 #include <openssl/ex_data.h>
+#include <openssl/thread.h>
 
 #if defined(__cplusplus)
 extern "C" {
@@ -190,7 +191,7 @@ OPENSSL_EXPORT int RSA_sign(int hash_nid, const uint8_t *in,
                             unsigned int *out_len, RSA *rsa);
 
 /* RSA_sign_raw signs |in_len| bytes from |in| with the public key from |rsa|
- * and writes, at most, |max_out| bytes of encrypted data to |out|. The
+ * and writes, at most, |max_out| bytes of signature data to |out|. The
  * |max_out| argument must be, at least, |RSA_size| in order to ensure success.
  *
  * It returns 1 on success or zero on error.
@@ -254,7 +255,7 @@ OPENSSL_EXPORT int RSA_public_decrypt(int flen, const uint8_t *from,
 /* Utility functions. */
 
 /* RSA_size returns the number of bytes in the modulus, which is also the size
- * of a signature of encrypted value using |rsa|. */
+ * of a signature or encrypted value using |rsa|. */
 OPENSSL_EXPORT unsigned RSA_size(const RSA *rsa);
 
 /* RSA_is_opaque returns one if |rsa| is opaque and doesn't expose its key
@@ -315,7 +316,6 @@ OPENSSL_EXPORT int RSA_padding_add_PKCS1_PSS_mgf1(RSA *rsa, uint8_t *EM,
                                                   int sLen);
 
 
-
 /* ASN.1 functions. */
 
 /* d2i_RSAPublicKey parses an ASN.1, DER-encoded, RSA public key from |len|
@@ -349,7 +349,7 @@ OPENSSL_EXPORT int i2d_RSAPrivateKey(const RSA *in, uint8_t **outp);
 
 /* ex_data functions.
  *
- * These functions are wrappers. See |ex_data.h| for details. */
+ * See |ex_data.h| for details. */
 
 OPENSSL_EXPORT int RSA_get_ex_new_index(long argl, void *argp,
                                         CRYPTO_EX_new *new_func,
@@ -388,6 +388,12 @@ OPENSSL_EXPORT void *RSA_get_ex_data(const RSA *r, int idx);
 
 #define RSA_3 0x3
 #define RSA_F4 0x10001
+
+
+/* Deprecated functions. */
+
+/* RSA_blinding_on returns one. */
+OPENSSL_EXPORT int RSA_blinding_on(RSA *rsa, BN_CTX *ctx);
 
 
 struct rsa_meth_st {
@@ -472,18 +478,21 @@ struct rsa_st {
   int references;
   int flags;
 
-  /* Used to cache montgomery values */
+  CRYPTO_MUTEX lock;
+
+  /* Used to cache montgomery values. The creation of these values is protected
+   * by |lock|. */
   BN_MONT_CTX *_method_mod_n;
   BN_MONT_CTX *_method_mod_p;
   BN_MONT_CTX *_method_mod_q;
 
   /* num_blindings contains the size of the |blindings| and |blindings_inuse|
    * arrays. This member and the |blindings_inuse| array are protected by
-   * CRYPTO_LOCK_RSA_BLINDING. */
+   * |lock|. */
   unsigned num_blindings;
   /* blindings is an array of BN_BLINDING structures that can be reserved by a
-   * thread by locking CRYPTO_LOCK_RSA_BLINDING and changing the corresponding
-   * element in |blindings_inuse| from 0 to 1. */
+   * thread by locking |lock| and changing the corresponding element in
+   * |blindings_inuse| from 0 to 1. */
   BN_BLINDING **blindings;
   unsigned char *blindings_inuse;
 };

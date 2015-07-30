@@ -24,7 +24,7 @@
 #include "net/base/net_errors.h"
 #include "net/base/request_priority.h"
 #include "net/http/http_response_headers.h"
-#include "net/log/capturing_net_log.h"
+#include "net/log/test_net_log.h"
 #include "net/proxy/proxy_server.h"
 #include "net/socket/socket_test_util.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -131,6 +131,7 @@ class DataReductionProxyInterceptorTest : public testing::Test {
     default_context_->Init();
   }
 
+  base::MessageLoopForIO message_loop_;
   scoped_ptr<DataReductionProxyTestContext> test_context_;
   net::TestNetworkDelegate default_network_delegate_;
   scoped_ptr<net::URLRequestJobFactory> job_factory_;
@@ -199,10 +200,6 @@ class DataReductionProxyInterceptorWithServerTest : public testing::Test {
     test_context_ =
         DataReductionProxyTestContext::Builder()
             .WithParamsFlags(DataReductionProxyParams::kAllowed)
-            .WithParamsDefinitions(
-                TestDataReductionProxyParams::HAS_EVERYTHING &
-                    ~TestDataReductionProxyParams::HAS_DEV_ORIGIN &
-                    ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN)
             .WithURLRequestContext(&context_)
             .Build();
     std::string spec;
@@ -235,7 +232,8 @@ class DataReductionProxyInterceptorWithServerTest : public testing::Test {
   }
 
  private:
-  net::CapturingNetLog net_log_;
+  base::MessageLoopForIO message_loop_;
+  net::TestNetLog net_log_;
   net::TestNetworkDelegate network_delegate_;
   net::TestURLRequestContext context_;
   net::test_server::EmbeddedTestServer proxy_;
@@ -286,12 +284,6 @@ class DataReductionProxyInterceptorEndToEndTest : public testing::Test {
   void SetUp() override {
     drp_test_context_ =
         DataReductionProxyTestContext::Builder()
-            .WithParamsFlags(DataReductionProxyParams::kAllowed |
-                             DataReductionProxyParams::kFallbackAllowed)
-            .WithParamsDefinitions(
-                 TestDataReductionProxyParams::HAS_EVERYTHING &
-                 ~TestDataReductionProxyParams::HAS_DEV_ORIGIN &
-                 ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN)
             .WithURLRequestContext(&context_)
             .WithMockClientSocketFactory(&mock_socket_factory_)
             .Build();
@@ -302,7 +294,7 @@ class DataReductionProxyInterceptorEndToEndTest : public testing::Test {
 
     // Three proxies should be available for use: primary, fallback, and direct.
     const net::ProxyConfig& proxy_config =
-        drp_test_context_->configurator()->GetProxyConfigOnIOThread();
+        drp_test_context_->configurator()->GetProxyConfig();
     EXPECT_EQ(3U, proxy_config.proxy_rules().proxies_for_http.size());
   }
 
@@ -329,6 +321,7 @@ class DataReductionProxyInterceptorEndToEndTest : public testing::Test {
   }
 
  private:
+  base::MessageLoopForIO message_loop_;
   net::TestDelegate delegate_;
   net::MockClientSocketFactory mock_socket_factory_;
   net::TestURLRequestContext context_;
@@ -474,6 +467,48 @@ TEST_F(DataReductionProxyInterceptorEndToEndTest, RedirectWithBypassAndRetry) {
   // Each of the redirects should have been intercepted before being followed.
   EXPECT_EQ(0, delegate().received_redirect_count());
   EXPECT_EQ(std::vector<GURL>(1, GURL("http://foo.com")), request->url_chain());
+}
+
+TEST_F(DataReductionProxyInterceptorEndToEndTest, RedirectChainToHttps) {
+  // First, a redirect is successfully received through the Data Reduction
+  // Proxy. HSTS is forced for play.google.com and prebaked into Chrome, so
+  // http://play.google.com will automatically be redirected to
+  // https://play.google.com. See net/http/transport_security_state_static.json.
+  MockRead first_redirect_reads[] = {
+      MockRead(
+          "HTTP/1.1 302 Found\r\n"
+          "Location: http://play.google.com\r\n"
+          "Via: 1.1 Chrome-Compression-Proxy\r\n\r\n"),
+      MockRead(""),
+      MockRead(net::SYNCHRONOUS, net::OK),
+  };
+  net::StaticSocketDataProvider first_redirect_socket(
+      first_redirect_reads, arraysize(first_redirect_reads), nullptr, 0);
+  mock_socket_factory()->AddSocketDataProvider(&first_redirect_socket);
+
+  // Receive the response for https://play.google.com.
+  MockRead https_response_reads[] = {
+      MockRead("HTTP/1.1 200 OK\r\n\r\n"),
+      MockRead(kBody.c_str()),
+      MockRead(net::SYNCHRONOUS, net::OK),
+  };
+  net::StaticSocketDataProvider https_response_socket(
+      https_response_reads, arraysize(https_response_reads), nullptr, 0);
+  mock_socket_factory()->AddSocketDataProvider(&https_response_socket);
+  net::SSLSocketDataProvider https_response_ssl_socket(net::SYNCHRONOUS,
+                                                       net::OK);
+  mock_socket_factory()->AddSSLSocketDataProvider(&https_response_ssl_socket);
+
+  scoped_ptr<net::URLRequest> request =
+      CreateAndExecuteRequest(GURL("http://music.google.com"));
+  EXPECT_FALSE(delegate().request_failed());
+  EXPECT_EQ(kBody, delegate().data_received());
+
+  std::vector<GURL> expected_url_chain;
+  expected_url_chain.push_back(GURL("http://music.google.com"));
+  expected_url_chain.push_back(GURL("http://play.google.com"));
+  expected_url_chain.push_back(GURL("https://play.google.com"));
+  EXPECT_EQ(expected_url_chain, request->url_chain());
 }
 
 }  // namespace

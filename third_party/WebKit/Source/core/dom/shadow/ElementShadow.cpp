@@ -147,7 +147,7 @@ ShadowRoot& ElementShadow::addShadowRoot(Element& shadowHost, ShadowRoot::Shadow
     EventDispatchForbiddenScope assertNoEventDispatch;
     ScriptForbiddenScope forbidScript;
 
-    if (type == ShadowRoot::OpenShadowRoot && (!youngestShadowRoot() || youngestShadowRoot()->type() == ShadowRoot::ClosedShadowRoot))
+    if (type == ShadowRoot::OpenShadowRoot && (!youngestShadowRoot() || youngestShadowRoot()->type() == ShadowRoot::UserAgentShadowRoot))
         shadowHost.willAddFirstOpenShadowRoot();
 
     for (ShadowRoot* root = youngestShadowRoot(); root; root = root->olderShadowRoot())
@@ -240,7 +240,7 @@ bool ElementShadow::hasSameStyles(const ElementShadow* other) const
 
 const InsertionPoint* ElementShadow::finalDestinationInsertionPointFor(const Node* key) const
 {
-    ASSERT(key && !key->document().childNeedsDistributionRecalc());
+    ASSERT(key && !key->needsDistributionRecalc());
     NodeToDestinationInsertionPoints::const_iterator it = m_nodeToInsertionPoints.find(key);
 #if ENABLE(OILPAN)
     return it == m_nodeToInsertionPoints.end() ? nullptr : it->value->last().get();
@@ -251,7 +251,7 @@ const InsertionPoint* ElementShadow::finalDestinationInsertionPointFor(const Nod
 
 const DestinationInsertionPoints* ElementShadow::destinationInsertionPointsFor(const Node* key) const
 {
-    ASSERT(key && !key->document().childNeedsDistributionRecalc());
+    ASSERT(key && !key->needsDistributionRecalc());
     NodeToDestinationInsertionPoints::const_iterator it = m_nodeToInsertionPoints.find(key);
 #if ENABLE(OILPAN)
     return it == m_nodeToInsertionPoints.end() ? nullptr : it->value.get();
@@ -345,12 +345,6 @@ void ElementShadow::collectSelectFeatureSetFrom(ShadowRoot& root)
                 m_selectFeatures.collectFeaturesFromSelector(*component);
         }
     }
-}
-
-void ElementShadow::distributedNodePseudoStateChanged(CSSSelector::PseudoType pseudo)
-{
-    if (ensureSelectFeatureSet().hasSelectorForPseudoType(pseudo))
-        setNeedsDistributionRecalc();
 }
 
 void ElementShadow::willAffectSelector()

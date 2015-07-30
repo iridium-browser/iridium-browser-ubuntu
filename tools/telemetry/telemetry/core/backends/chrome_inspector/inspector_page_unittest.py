@@ -35,6 +35,7 @@ class InspectorPageTest(tab_test_case.TabTestCase):
     self._tab.WaitForDocumentReadyStateToBeComplete()
     self.assertEquals(self._tab.EvaluateJavaScript('foo'), 'bar')
 
+  @decorators.Disabled('chromeos')  # crbug.com/483212
   def testCaptureScreenshot(self):
     if not self._tab.screenshot_supported:
       return

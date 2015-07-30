@@ -7,7 +7,6 @@
 from __future__ import print_function
 
 import collections
-import logging
 import os
 
 from chromite.cbuildbot import commands
@@ -19,6 +18,7 @@ from chromite.cbuildbot import validation_pool
 from chromite.cbuildbot.stages import generic_stages
 from chromite.lib import cgroups
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import osutils
 from chromite.lib import perf_uploader
 from chromite.lib import timeout_util
@@ -139,7 +139,7 @@ class VMTestStage(generic_stages.BoardSpecificBuilderStage,
     self._Upload([os.path.basename(image) for image in vm_files])
 
   def _Upload(self, filenames):
-    cros_build_lib.Info('Uploading artifacts to Google Storage...')
+    logging.info('Uploading artifacts to Google Storage...')
     with self.ArtifactUploader(archive=False, strict=False) as queue:
       for filename in filenames:
         queue.put([filename])
@@ -181,14 +181,13 @@ class VMTestStage(generic_stages.BoardSpecificBuilderStage,
     test_basename = constants.VM_TEST_RESULTS % dict(attempt=self._attempt)
     try:
       for test_type in self._run.config.vm_tests:
-        cros_build_lib.Info('Running VM test %s.', test_type)
+        logging.info('Running VM test %s.', test_type)
         with cgroups.SimpleContainChildren('VMTest'):
           with timeout_util.Timeout(self.VM_TEST_TIMEOUT):
             self._RunTest(test_type, test_results_dir)
 
     except Exception:
-      cros_build_lib.Error(_VM_TEST_ERROR_MSG %
-                           dict(vm_test_results=test_basename))
+      logging.error(_VM_TEST_ERROR_MSG % dict(vm_test_results=test_basename))
       self._ArchiveVMFiles(test_results_dir)
       raise
     finally:
@@ -254,8 +253,8 @@ class HWTestStage(generic_stages.BoardSpecificBuilderStage,
     # Wait for UploadHWTestArtifacts to generate the payloads.
     if not self.GetParallel('payloads_generated', pretty_name='payloads'):
       cros_build_lib.PrintBuildbotStepWarnings('missing payloads')
-      cros_build_lib.Warning('Cannot run HWTest because UploadTestArtifacts '
-                             'failed. See UploadTestArtifacts for details.')
+      logging.warning('Cannot run HWTest because UploadTestArtifacts failed. '
+                      'See UploadTestArtifacts for details.')
       return
 
     build = '/'.join([self._bot_id, self.version])
@@ -290,8 +289,8 @@ class AUTestStage(HWTestStage):
     if not self.GetParallel('delta_payloads_generated',
                             pretty_name='delta payloads'):
       cros_build_lib.PrintBuildbotStepWarnings('missing delta payloads')
-      cros_build_lib.Warning('Cannot run HWTest because UploadTestArtifacts '
-                             'failed. See UploadTestArtifacts for details.')
+      logging.warning('Cannot run HWTest because UploadTestArtifacts failed. '
+                      'See UploadTestArtifacts for details.')
       return
 
     with osutils.TempDir() as tempdir:
@@ -354,7 +353,7 @@ class ImageTestStage(generic_stages.BoardSpecificBuilderStage,
     """
     # Import image_test here so that extra imports from image_test does not
     # affect cbuildbot in bootstrap.
-    from chromite.cros.tests import image_test
+    from chromite.lib import image_test
     # A dict of list of perf values, keyed by test name.
     perf_entries = collections.defaultdict(list)
     for root, _, filenames in os.walk(test_results_dir):
@@ -367,9 +366,19 @@ class ImageTestStage(generic_stages.BoardSpecificBuilderStage,
         perf_entries[test_name].extend(entries)
 
     platform_name = self._run.bot_id
-    cros_ver = self._run.GetVersionInfo(self._run.buildroot).VersionString()
+    cros_ver = self._run.GetVersionInfo().VersionString()
     chrome_ver = self._run.DetermineChromeVersion()
     for test_name, perf_values in perf_entries.iteritems():
       perf_uploader.UploadPerfValues(perf_values, platform_name, test_name,
                                      cros_version=cros_ver,
                                      chrome_version=chrome_ver)
+
+
+class BinhostTestStage(generic_stages.BuilderStage):
+  """Stage that verifies Chrome prebuilts."""
+
+  config_name = 'binhost_test'
+
+  def PerformStage(self):
+    # Verify our binhosts.
+    commands.RunBinhostTest(self._build_root)

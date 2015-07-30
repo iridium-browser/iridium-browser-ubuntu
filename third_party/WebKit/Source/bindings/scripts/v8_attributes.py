@@ -49,7 +49,7 @@ def attribute_context(interface, attribute):
     base_idl_type = idl_type.base_type
     extended_attributes = attribute.extended_attributes
 
-    idl_type.add_includes_for_type()
+    idl_type.add_includes_for_type(extended_attributes)
     if idl_type.enum_values:
         includes.add('core/inspector/ConsoleMessage.h')
 
@@ -127,6 +127,7 @@ def attribute_context(interface, attribute):
         'is_initialized_by_event_constructor':
             'InitializedByEventConstructor' in extended_attributes,
         'is_keep_alive_for_gc': keep_alive_for_gc,
+        'is_lenient_this': 'LenientThis' in extended_attributes,
         'is_nullable': idl_type.is_nullable,
         'is_explicit_nullable': idl_type.is_explicit_nullable,
         'is_partial_interface_member':
@@ -143,7 +144,6 @@ def attribute_context(interface, attribute):
         'measure_as': v8_utilities.measure_as(attribute, interface),  # [MeasureAs]
         'name': attribute.name,
         'only_exposed_to_private_script': is_only_exposed_to_private_script,
-        'per_context_enabled_function': v8_utilities.per_context_enabled_function_name(attribute),  # [PerContextEnabled]
         'private_script_v8_value_to_local_cpp_value': idl_type.v8_value_to_local_cpp_value(
             extended_attributes, 'v8Value', 'cppValue', bailout_return_value='false', isolate='scriptState->isolate()'),
         'property_attributes': property_attributes(interface, attribute),
@@ -218,7 +218,7 @@ def getter_context(interface, attribute, context):
     context.update({
         'cpp_value': cpp_value,
         'cpp_value_to_v8_value': idl_type.cpp_value_to_v8_value(
-            cpp_value=cpp_value, creation_context='info.Holder()',
+            cpp_value=cpp_value, creation_context='holder',
             extended_attributes=extended_attributes),
         'v8_set_return_value_for_main_world': v8_set_return_value_statement(for_main_world=True),
         'v8_set_return_value': v8_set_return_value_statement(),
@@ -426,13 +426,7 @@ def setter_base_name(interface, attribute, arguments):
 def scoped_content_attribute_name(interface, attribute):
     content_attribute_name = attribute.extended_attributes['Reflect'] or attribute.name.lower()
     if interface.name.startswith('SVG'):
-        # SVG's xmlbase/xmlspace/xmllang need special behavior, i.e.
-        # it is in XMLNames namespace and the generated attribute has no xml prefix.
-        if attribute.name.startswith('xml'):
-            namespace = 'XMLNames'
-            content_attribute_name = content_attribute_name[3:]
-        else:
-            namespace = 'SVGNames'
+        namespace = 'SVGNames'
     else:
         namespace = 'HTMLNames'
     includes.add('core/%s.h' % namespace)
@@ -518,23 +512,17 @@ def is_expose_js_accessors(interface, attribute):
         return False
 
     # These attributes must not be accessors on prototype chains.
-    if (attribute.is_static or
+    if (is_constructor_attribute(attribute) or
+            attribute.is_static or
             is_unforgeable(interface, attribute) or
             'OverrideBuiltins' in interface.extended_attributes):
         return False
 
     # FIXME: We should move all of the following DOM attributes to prototype
     # chains.
-    if (is_constructor_attribute(attribute) or
-            has_custom_getter(attribute) or
+    if (has_custom_getter(attribute) or
             has_custom_setter(attribute) or
-            interface.name == 'Window' or
-            v8_utilities.indexed_property_getter(interface) or
-            v8_utilities.indexed_property_setter(interface) or
-            v8_utilities.indexed_property_deleter(interface) or
-            v8_utilities.named_property_getter(interface) or
-            v8_utilities.named_property_setter(interface) or
-            v8_utilities.named_property_deleter(interface)):
+            interface.name == 'Window'):
         return False
 
     return is_accessor

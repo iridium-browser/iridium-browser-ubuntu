@@ -12,7 +12,7 @@
 
 namespace blink {
 
-PassRefPtr<ScriptState> ScriptState::create(v8::Handle<v8::Context> context, PassRefPtr<DOMWrapperWorld> world)
+PassRefPtr<ScriptState> ScriptState::create(v8::Local<v8::Context> context, PassRefPtr<DOMWrapperWorld> world)
 {
     RefPtr<ScriptState> scriptState = adoptRef(new ScriptState(context, world));
     // This ref() is for keeping this ScriptState alive as long as the v8::Context is alive.
@@ -21,19 +21,25 @@ PassRefPtr<ScriptState> ScriptState::create(v8::Handle<v8::Context> context, Pas
     return scriptState;
 }
 
-static void weakCallback(const v8::WeakCallbackData<v8::Context, ScriptState>& data)
+static void derefCallback(const v8::WeakCallbackInfo<ScriptState>& data)
 {
-    data.GetValue()->SetAlignedPointerInEmbedderData(v8ContextPerContextDataIndex, 0);
-    data.GetParameter()->clearContext();
     data.GetParameter()->deref();
 }
 
-ScriptState::ScriptState(v8::Handle<v8::Context> context, PassRefPtr<DOMWrapperWorld> world)
+static void weakCallback(const v8::WeakCallbackInfo<ScriptState>& data)
+{
+    data.GetParameter()->clearContext();
+    data.SetSecondPassCallback(derefCallback);
+}
+
+ScriptState::ScriptState(v8::Local<v8::Context> context, PassRefPtr<DOMWrapperWorld> world)
     : m_isolate(context->GetIsolate())
     , m_context(m_isolate, context)
     , m_world(world)
     , m_perContextData(V8PerContextData::create(context))
+#if ENABLE(ASSERT)
     , m_globalObjectDetached(false)
+#endif
 {
     ASSERT(m_world);
     m_context.setWeak(this, &weakCallback);
@@ -50,7 +56,9 @@ void ScriptState::detachGlobalObject()
 {
     ASSERT(!m_context.isEmpty());
     context()->DetachGlobal();
+#if ENABLE(ASSERT)
     m_globalObjectDetached = true;
+#endif
 }
 
 void ScriptState::disposePerContextData()
@@ -88,7 +96,9 @@ void ScriptState::setEvalEnabled(bool enabled)
 ScriptValue ScriptState::getFromGlobalObject(const char* name)
 {
     v8::HandleScope handleScope(m_isolate);
-    v8::Local<v8::Value> v8Value = context()->Global()->Get(v8AtomicString(isolate(), name));
+    v8::Local<v8::Value> v8Value;
+    if (!context()->Global()->Get(context(), v8AtomicString(isolate(), name)).ToLocal(&v8Value))
+        return ScriptValue();
     return ScriptValue(this, v8Value);
 }
 

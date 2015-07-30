@@ -23,10 +23,6 @@
 #include "ui/gfx/geometry/size.h"
 #include "ui/gl/gl_context_cgl.h"
 
-namespace base {
-class SingleThreadTaskRunner;
-}  // namespace base
-
 namespace content {
 
 // Preload VideoToolbox libraries, needed for sandbox warmup.
@@ -57,6 +53,9 @@ class VTVideoDecodeAccelerator : public media::VideoDecodeAccelerator {
       void* source_frame_refcon,
       OSStatus status,
       CVImageBufferRef image_buffer);
+
+  static media::VideoDecodeAccelerator::SupportedProfiles
+      GetSupportedProfiles();
 
  private:
   // Logged to UMA, so never reuse values. Make sure to update

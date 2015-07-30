@@ -36,11 +36,14 @@ const wchar_t* g_troublesome_dlls[kTroublesomeDllsMaxCount] = {
                                         // See crbug.com/379218.
   L"activedetect64.dll",                // Lenovo One Key Theater.
   L"bitguard.dll",                      // Unknown (suspected malware).
+  L"bsvc.dll",                          // Unknown (suspected adware).
   L"chrmxtn.dll",                       // Unknown (keystroke logger).
   L"cplushook.dll",                     // Unknown (suspected malware).
   L"crdli.dll",                         // Linkury Inc.
   L"crdli64.dll",                       // Linkury Inc.
   L"datamngr.dll",                      // Unknown (suspected adware).
+  L"dpinterface32.dll",                 // Unknown (suspected adware).
+  L"explorerex.dll",                    // Unknown (suspected adware).
   L"hk.dll",                            // Unknown (keystroke logger).
   L"libapi2hook.dll",                   // V-Bates.
   L"libinject.dll",                     // V-Bates.
@@ -51,8 +54,10 @@ const wchar_t* g_troublesome_dlls[kTroublesomeDllsMaxCount] = {
   L"lmrn.dll",                          // Unknown.
   L"minisp.dll",                        // Unknown (suspected malware).
   L"minisp32.dll",                      // Unknown (suspected malware).
+  L"offerswizarddll.dll",               // Unknown (suspected adware).
   L"safetynut.dll",                     // Unknown (suspected adware).
   L"smdmf.dll",                         // Unknown (suspected adware).
+  L"spappsv32.dll",                     // Unknown (suspected adware).
   L"systemk.dll",                       // Unknown (suspected adware).
   L"vntsrv.dll",                        // Virtual New Tab by APN LLC.
   L"wajam_goblin_64.dll",               // Wajam Internet Technologies.

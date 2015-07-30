@@ -284,6 +284,27 @@ OPENSSL_EXPORT int EC_POINTs_mul(const EC_GROUP *group, EC_POINT *r,
                                  BN_CTX *ctx);
 
 
+/* Deprecated functions. */
+
+/* EC_GROUP_set_asn1_flag does nothing. */
+OPENSSL_EXPORT void EC_GROUP_set_asn1_flag(EC_GROUP *group, int flag);
+
+#define OPENSSL_EC_NAMED_CURVE 0
+
+typedef struct ec_method_st EC_METHOD;
+
+/* EC_GROUP_method_of returns NULL. */
+OPENSSL_EXPORT const EC_METHOD *EC_GROUP_method_of(const EC_GROUP *group);
+
+/* EC_METHOD_get_field_type returns NID_X9_62_prime_field. */
+OPENSSL_EXPORT int EC_METHOD_get_field_type(const EC_METHOD *meth);
+
+/* EC_GROUP_set_point_conversion_form aborts the process if |form| is not
+ * |POINT_CONVERSION_UNCOMPRESSED| and otherwise does nothing. */
+OPENSSL_EXPORT void EC_GROUP_set_point_conversion_form(
+    EC_GROUP *group, point_conversion_form_t form);
+
+
 /* Old code expects to get EC_KEY from ec.h. */
 #if !defined(OPENSSL_HEADER_EC_KEY_H)
 #include <openssl/ec_key.h>
@@ -353,6 +374,13 @@ OPENSSL_EXPORT int EC_POINTs_mul(const EC_GROUP *group, EC_POINT *r,
 #define EC_F_i2d_ECPrivateKey 156
 #define EC_F_i2o_ECPublicKey 157
 #define EC_F_o2i_ECPublicKey 158
+#define EC_F_BN_to_felem 159
+#define EC_F_ec_GFp_nistp256_group_set_curve 160
+#define EC_F_ec_GFp_nistp256_point_get_affine_coordinates 161
+#define EC_F_ec_GFp_nistp256_points_mul 162
+#define EC_F_ec_group_copy 163
+#define EC_F_nistp256_pre_comp_new 164
+#define EC_F_EC_KEY_new_by_curve_name 165
 #define EC_R_BUFFER_TOO_SMALL 100
 #define EC_R_COORDINATES_OUT_OF_RANGE 101
 #define EC_R_D2I_ECPKPARAMETERS_FAILURE 102
@@ -379,5 +407,7 @@ OPENSSL_EXPORT int EC_POINTs_mul(const EC_GROUP *group, EC_POINT *r,
 #define EC_R_UNKNOWN_GROUP 123
 #define EC_R_UNKNOWN_ORDER 124
 #define EC_R_WRONG_ORDER 125
+#define EC_R_BIGNUM_OUT_OF_RANGE 126
+#define EC_R_WRONG_CURVE_PARAMETERS 127
 
 #endif  /* OPENSSL_HEADER_EC_H */

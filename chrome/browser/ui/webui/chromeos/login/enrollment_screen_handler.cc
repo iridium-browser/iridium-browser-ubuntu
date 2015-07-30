@@ -148,6 +148,10 @@ void EnrollmentScreenHandler::RegisterMessages() {
               &EnrollmentScreenHandler::HandleRetry);
   AddCallback("frameLoadingCompleted",
               &EnrollmentScreenHandler::HandleFrameLoadingCompleted);
+  AddCallback("oauthEnrollAttributes",
+              &EnrollmentScreenHandler::HandleDeviceAttributesProvided);
+  AddCallback("oauthEnrollOnLearnMore",
+              &EnrollmentScreenHandler::HandleOnLearnMore);
 }
 
 // EnrollmentScreenHandler
@@ -182,6 +186,12 @@ void EnrollmentScreenHandler::Hide() {
 void EnrollmentScreenHandler::ShowSigninScreen() {
   observe_network_failure_ = true;
   ShowStep(kEnrollmentStepSignin);
+}
+
+void EnrollmentScreenHandler::ShowAttributePromptScreen(
+    const std::string& asset_id,
+    const std::string& location) {
+  CallJS("showAttributePromptStep", asset_id, location);
 }
 
 void EnrollmentScreenHandler::ShowEnrollmentSpinnerScreen() {
@@ -310,6 +320,9 @@ void EnrollmentScreenHandler::ShowEnrollmentStatus(
         case policy::EnterpriseInstallAttributes::LOCK_WRONG_DOMAIN:
           ShowError(IDS_ENTERPRISE_ENROLLMENT_STATUS_LOCK_WRONG_USER, true);
           return;
+        case policy::EnterpriseInstallAttributes::LOCK_WRONG_MODE:
+          ShowError(IDS_ENTERPRISE_ENROLLMENT_STATUS_LOCK_WRONG_MODE, true);
+          return;
       }
       NOTREACHED();
       return;
@@ -326,6 +339,9 @@ void EnrollmentScreenHandler::ShowEnrollmentStatus(
       ShowError(IDS_ENTERPRISE_ENROLLMENT_STATUS_STORE_TOKEN_AND_ID_FAILED,
                 true);
       NOTREACHED();
+      return;
+    case policy::EnrollmentStatus::STATUS_ATTRIBUTE_UPDATE_FAILED:
+      ShowError(IDS_ENTERPRISE_ENROLLMENT_ATTRIBUTE_ERROR, false);
       return;
   }
   NOTREACHED();
@@ -351,10 +367,24 @@ void EnrollmentScreenHandler::DeclareLocalizedValues(
   builder->Add("oauthEnrollCancel", IDS_ENTERPRISE_ENROLLMENT_CANCEL);
   builder->Add("oauthEnrollBack", IDS_ENTERPRISE_ENROLLMENT_BACK);
   builder->Add("oauthEnrollDone", IDS_ENTERPRISE_ENROLLMENT_DONE);
+  builder->Add("oauthEnrollContinue", IDS_ENTERPRISE_ENROLLMENT_CONTINUE);
+  builder->Add("oauthEnrollNextBtn", IDS_NEWGAIA_OFFLINE_NEXT_BUTTON_TEXT);
+  builder->Add("oauthEnrollSkip", IDS_ENTERPRISE_ENROLLMENT_SKIP);
   builder->Add("oauthEnrollSuccess", IDS_ENTERPRISE_ENROLLMENT_SUCCESS);
+  builder->Add("oauthEnrollDeviceInformation",
+               IDS_ENTERPRISE_ENROLLMENT_DEVICE_INFORMATION);
+  builder->Add("oauthEnrollAttributes", IDS_ENTERPRISE_ENROLLMENT_ATTRIBUTES);
   builder->Add("oauthEnrollExplainLink",
                IDS_ENTERPRISE_ENROLLMENT_EXPLAIN_LINK);
+  builder->Add("oauthEnrollExplaneAttributeLink",
+               IDS_ENTERPRISE_ENROLLMENT_EXPLAIN_ATTRIBUTE_LINK);
+  builder->Add("oauthEnrollAttributeExplanation",
+               IDS_ENTERPRISE_ENROLLMENT_ATTRIBUTE_EXPLANATION);
   builder->Add("oauthEnrollWorking", IDS_ENTERPRISE_ENROLLMENT_WORKING);
+  builder->Add("oauthEnrollAssetIdLabel",
+               IDS_ENTERPRISE_ENROLLMENT_ASSET_ID_LABEL);
+  builder->Add("oauthEnrollLocationLabel",
+               IDS_ENTERPRISE_ENROLLMENT_LOCATION_LABEL);
 }
 
 OobeUI::Screen EnrollmentScreenHandler::GetCurrentScreen() const {
@@ -514,6 +544,18 @@ void EnrollmentScreenHandler::HandleFrameLoadingCompleted(int status) {
     UpdateState(NetworkError::ERROR_REASON_FRAME_ERROR);
   else
     UpdateState(NetworkError::ERROR_REASON_UPDATE);
+}
+
+void EnrollmentScreenHandler::HandleDeviceAttributesProvided(
+    const std::string& asset_id,
+    const std::string& location) {
+  controller_->OnDeviceAttributeProvided(asset_id, location);
+}
+
+void EnrollmentScreenHandler::HandleOnLearnMore() {
+  if (!help_app_.get())
+    help_app_ = new HelpAppLauncher(GetNativeWindow());
+  help_app_->ShowHelpTopic(HelpAppLauncher::HELP_DEVICE_ATTRIBUTES);
 }
 
 void EnrollmentScreenHandler::ShowStep(const char* step) {

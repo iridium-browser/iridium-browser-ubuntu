@@ -45,23 +45,22 @@ class AudioContext;
 
 class ScriptProcessorHandler final : public AudioHandler {
 public:
-    ScriptProcessorHandler(AudioNode&, float sampleRate, size_t bufferSize, unsigned numberOfInputChannels, unsigned numberOfOutputChannels);
+    static PassRefPtr<ScriptProcessorHandler> create(AudioNode&, float sampleRate, size_t bufferSize, unsigned numberOfInputChannels, unsigned numberOfOutputChannels);
     virtual ~ScriptProcessorHandler();
 
     // AudioHandler
-    virtual void dispose() override;
     virtual void process(size_t framesToProcess) override;
     virtual void initialize() override;
-    virtual void uninitialize() override;
 
     size_t bufferSize() const { return m_bufferSize; }
 
     virtual void setChannelCount(unsigned long, ExceptionState&) override;
     virtual void setChannelCountMode(const String&, ExceptionState&) override;
 
-    DECLARE_TRACE();
+    virtual unsigned numberOfOutputChannels() const { return m_numberOfOutputChannels; }
 
 private:
+    ScriptProcessorHandler(AudioNode&, float sampleRate, size_t bufferSize, unsigned numberOfInputChannels, unsigned numberOfOutputChannels);
     virtual double tailTime() const override;
     virtual double latencyTime() const override;
 
@@ -72,8 +71,10 @@ private:
     void swapBuffers() { m_doubleBufferIndex = 1 - m_doubleBufferIndex; }
     unsigned m_doubleBufferIndex;
     unsigned m_doubleBufferIndexForEvent;
-    HeapVector<Member<AudioBuffer>> m_inputBuffers;
-    HeapVector<Member<AudioBuffer>> m_outputBuffers;
+    // These Persistent don't make reference cycles including the owner
+    // ScriptProcessorNode.
+    PersistentHeapVector<Member<AudioBuffer>> m_inputBuffers;
+    PersistentHeapVector<Member<AudioBuffer>> m_outputBuffers;
 
     size_t m_bufferSize;
     unsigned m_bufferReadWriteIndex;
@@ -84,6 +85,9 @@ private:
     RefPtr<AudioBus> m_internalInputBus;
     // Synchronize process() with fireProcessEvent().
     mutable Mutex m_processEventLock;
+
+    // TODO(tkent): Use FRIEND_TEST macro provided by gtest_prod.h
+    friend class ScriptProcessorNodeTest_BufferLifetime_Test;
 };
 
 class ScriptProcessorNode final : public AudioNode {
@@ -97,7 +101,7 @@ public:
     // latency. Higher numbers will be necessary to avoid audio breakup and
     // glitches.
     // The value chosen must carefully balance between latency and audio quality.
-    static ScriptProcessorNode* create(AudioContext*, float sampleRate, size_t bufferSize, unsigned numberOfInputChannels, unsigned numberOfOutputChannels);
+    static ScriptProcessorNode* create(AudioContext&, float sampleRate, size_t bufferSize, unsigned numberOfInputChannels, unsigned numberOfOutputChannels);
 
     DEFINE_ATTRIBUTE_EVENT_LISTENER(audioprocess);
     size_t bufferSize() const;

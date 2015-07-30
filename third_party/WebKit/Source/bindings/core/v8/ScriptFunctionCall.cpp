@@ -71,18 +71,22 @@ void ScriptCallArgumentHandler::appendArgument(bool argument)
     m_arguments.append(ScriptValue(m_scriptState.get(), v8Boolean(argument, isolate)));
 }
 
-void ScriptCallArgumentHandler::appendArgument(const Vector<ScriptValue>& argument)
+bool ScriptCallArgumentHandler::appendArgument(const Vector<ScriptValue>& argument)
 {
     v8::Isolate* isolate = m_scriptState->isolate();
     ScriptState::Scope scope(m_scriptState.get());
     v8::Local<v8::Array> result = v8::Array::New(isolate, argument.size());
     for (size_t i = 0; i < argument.size(); ++i) {
-        if (argument[i].scriptState() != m_scriptState)
-            result->Set(v8::Integer::New(isolate, i), v8::Undefined(isolate));
+        v8::Local<v8::Value> value;
+        if (argument[i].scriptState() == m_scriptState)
+            value = argument[i].v8Value();
         else
-            result->Set(v8::Integer::New(isolate, i), argument[i].v8Value());
+            value = v8::Undefined(isolate);
+        if (!v8CallBoolean(result->Set(m_scriptState->context(), v8::Integer::New(isolate, i), value)))
+            return false;
     }
     m_arguments.append(ScriptValue(m_scriptState.get(), result));
+    return true;
 }
 
 void ScriptCallArgumentHandler::appendUndefinedArgument()
@@ -104,12 +108,24 @@ ScriptValue ScriptFunctionCall::call(bool& hadException, bool reportExceptions)
     v8::TryCatch tryCatch;
     tryCatch.SetVerbose(reportExceptions);
 
+    ScriptValue result = callWithoutExceptionHandling();
+    hadException = tryCatch.HasCaught();
+    return result;
+}
+
+ScriptValue ScriptFunctionCall::call()
+{
+    bool hadException = false;
+    return call(hadException);
+}
+
+ScriptValue ScriptFunctionCall::callWithoutExceptionHandling()
+{
+    ScriptState::Scope scope(m_scriptState.get());
     v8::Local<v8::Object> thisObject = v8::Local<v8::Object>::Cast(m_thisObject.v8Value());
-    v8::Local<v8::Value> value = thisObject->Get(v8String(m_scriptState->isolate(), m_name));
-    if (tryCatch.HasCaught()) {
-        hadException = true;
+    v8::Local<v8::Value> value;
+    if (!thisObject->Get(m_scriptState->context(), v8String(m_scriptState->isolate(), m_name)).ToLocal(&value))
         return ScriptValue();
-    }
 
     ASSERT(value->IsFunction());
 
@@ -120,19 +136,23 @@ ScriptValue ScriptFunctionCall::call(bool& hadException, bool reportExceptions)
         ASSERT(!info[i].IsEmpty());
     }
 
-    v8::Local<v8::Value> result = V8ScriptRunner::callFunction(function, m_scriptState->executionContext(), thisObject, m_arguments.size(), info.get(), m_scriptState->isolate());
-    if (tryCatch.HasCaught()) {
-        hadException = true;
+    v8::Local<v8::Value> result;
+    if (!V8ScriptRunner::callFunction(function, m_scriptState->executionContext(), thisObject, m_arguments.size(), info.get(), m_scriptState->isolate()).ToLocal(&result))
         return ScriptValue();
-    }
-
     return ScriptValue(m_scriptState.get(), result);
 }
 
-ScriptValue ScriptFunctionCall::call()
+v8::Local<v8::Function> ScriptFunctionCall::function()
 {
-    bool hadException = false;
-    return call(hadException);
+    v8::TryCatch tryCatch;
+    v8::Local<v8::Object> thisObject = v8::Local<v8::Object>::Cast(m_thisObject.v8Value());
+    v8::Local<v8::Value> value;
+    if (!thisObject->Get(m_scriptState->context(), v8String(m_scriptState->isolate(), m_name)).ToLocal(&value))
+        return v8::Local<v8::Function>();
+
+    ASSERT(value->IsFunction());
+    return v8::Local<v8::Function>::Cast(value);
 }
+
 
 } // namespace blink

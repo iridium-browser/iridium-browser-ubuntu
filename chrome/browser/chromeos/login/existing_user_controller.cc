@@ -28,7 +28,9 @@
 #include "chrome/browser/chromeos/login/easy_unlock/bootstrap_user_context_initializer.h"
 #include "chrome/browser/chromeos/login/easy_unlock/bootstrap_user_flow.h"
 #include "chrome/browser/chromeos/login/helper.h"
+#include "chrome/browser/chromeos/login/reauth_stats.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
+#include "chrome/browser/chromeos/login/signin/oauth2_token_initializer.h"
 #include "chrome/browser/chromeos/login/signin_specifics.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
@@ -42,6 +44,7 @@
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/system/device_disabling_manager.h"
+#include "chrome/browser/signin/chrome_signin_client.h"
 #include "chrome/browser/signin/easy_unlock_service.h"
 #include "chrome/browser/ui/aura/accessibility/automation_manager_aura.h"
 #include "chrome/browser/ui/webui/chromeos/login/l10n_util.h"
@@ -571,6 +574,14 @@ void ExistingUserController::OnAuthFailure(const AuthFailure& failure) {
 
   // Clear the recorded displayed email so it won't affect any future attempts.
   display_email_.clear();
+
+  // TODO(ginkage): Fix this case once crbug.com/469990 is ready.
+  /*
+    if (failure.reason() == AuthFailure::COULD_NOT_MOUNT_CRYPTOHOME) {
+      RecordReauthReason(last_login_attempt_username_,
+                         ReauthReason::MISSING_CRYPTOHOME);
+    }
+  */
 }
 
 void ExistingUserController::OnAuthSuccess(const UserContext& user_context) {
@@ -596,7 +607,7 @@ void ExistingUserController::OnAuthSuccess(const UserContext& user_context) {
   //  Bootstrap experiment       F            N/A
   const bool has_auth_cookies =
       login_performer_->auth_mode() == LoginPerformer::AUTH_MODE_EXTENSION &&
-      (user_context.GetAuthCode().empty() ||
+      (user_context.GetAccessToken().empty() ||
        user_context.GetAuthFlow() == UserContext::AUTH_FLOW_GAIA_WITH_SAML) &&
       user_context.GetAuthFlow() != UserContext::AUTH_FLOW_EASY_BOOTSTRAP;
 
@@ -679,7 +690,8 @@ void ExistingUserController::OnPasswordChangeDetected() {
   // us to recover from a lost owner password/homedir.
   // TODO(gspencer): We shouldn't have to erase stateful data when
   // doing this.  See http://crosbug.com/9115 http://crosbug.com/7792
-  login_display_->ShowPasswordChangedDialog(show_invalid_old_password_error);
+  login_display_->ShowPasswordChangedDialog(show_invalid_old_password_error,
+                                            display_email_);
 
   if (auth_status_consumer_)
     auth_status_consumer_->OnPasswordChangeDetected();
@@ -691,18 +703,18 @@ void ExistingUserController::WhiteListCheckFailed(const std::string& email) {
   PerformLoginFinishedActions(true /* start public session timer */);
   offline_failed_ = false;
 
-  if (g_browser_process->platform_part()
-          ->browser_policy_connector_chromeos()
-          ->IsEnterpriseManaged()) {
-    ShowError(IDS_ENTERPRISE_LOGIN_ERROR_WHITELIST, email);
+  if (StartupUtils::IsWebviewSigninEnabled()) {
+    login_display_->ShowWhitelistCheckFailedError();
   } else {
-    ShowError(IDS_LOGIN_ERROR_WHITELIST, email);
-  }
-
-  if (StartupUtils::IsWebviewSigninEnabled())
-    login_display_->ShowSigninUI("");
-  else
+    if (g_browser_process->platform_part()
+            ->browser_policy_connector_chromeos()
+            ->IsEnterpriseManaged()) {
+      ShowError(IDS_ENTERPRISE_LOGIN_ERROR_WHITELIST, email);
+    } else {
+      ShowError(IDS_LOGIN_ERROR_WHITELIST, email);
+    }
     login_display_->ShowSigninUI(email);
+  }
 
   if (auth_status_consumer_) {
     auth_status_consumer_->OnAuthFailure(
@@ -941,28 +953,24 @@ gfx::NativeWindow ExistingUserController::GetNativeWindow() const {
 
 void ExistingUserController::ShowError(int error_id,
                                        const std::string& details) {
-  // TODO(dpolukhin): show detailed error info. |details| string contains
-  // low level error info that is not localized and even is not user friendly.
-  // For now just ignore it because error_text contains all required information
-  // for end users, developers can see details string in Chrome logs.
   VLOG(1) << details;
   HelpAppLauncher::HelpTopic help_topic_id;
-  bool is_offline = !network_state_helper_->IsConnected();
-  switch (login_performer_->error().state()) {
-    case GoogleServiceAuthError::CONNECTION_FAILED:
-      help_topic_id = HelpAppLauncher::HELP_CANT_ACCESS_ACCOUNT_OFFLINE;
-      break;
-    case GoogleServiceAuthError::ACCOUNT_DISABLED:
-      help_topic_id = HelpAppLauncher::HELP_ACCOUNT_DISABLED;
-      break;
-    case GoogleServiceAuthError::HOSTED_NOT_ALLOWED:
-      help_topic_id = HelpAppLauncher::HELP_HOSTED_ACCOUNT;
-      break;
-    default:
-      help_topic_id = is_offline ?
-          HelpAppLauncher::HELP_CANT_ACCESS_ACCOUNT_OFFLINE :
-          HelpAppLauncher::HELP_CANT_ACCESS_ACCOUNT;
-      break;
+  if (login_performer_) {
+    switch (login_performer_->error().state()) {
+      case GoogleServiceAuthError::ACCOUNT_DISABLED:
+        help_topic_id = HelpAppLauncher::HELP_ACCOUNT_DISABLED;
+        break;
+      case GoogleServiceAuthError::HOSTED_NOT_ALLOWED:
+        help_topic_id = HelpAppLauncher::HELP_HOSTED_ACCOUNT;
+        break;
+      default:
+        help_topic_id = HelpAppLauncher::HELP_CANT_ACCESS_ACCOUNT;
+        break;
+    }
+  } else {
+    // login_performer_ will be null if an error occurred during OAuth2 token
+    // fetch. In this case, show a generic error.
+    help_topic_id = HelpAppLauncher::HELP_CANT_ACCESS_ACCOUNT;
   }
 
   if (error_id == IDS_LOGIN_ERROR_AUTHENTICATING) {
@@ -984,6 +992,7 @@ void ExistingUserController::ShowGaiaPasswordChanged(
   // changed.
   user_manager::UserManager::Get()->SaveUserOAuthStatus(
       username, user_manager::User::OAUTH2_TOKEN_STATUS_INVALID);
+  RecordReauthReason(username, ReauthReason::OTHER);
 
   login_display_->SetUIEnabled(true);
   login_display_->ShowGaiaPasswordChanged(username);
@@ -1111,7 +1120,20 @@ void ExistingUserController::ContinueLoginIfDeviceNotDisabled(
   continuation.Run();
 }
 
-void ExistingUserController::DoCompleteLogin(const UserContext& user_context) {
+void ExistingUserController::DoCompleteLogin(
+    const UserContext& user_context_wo_device_id) {
+  UserContext user_context = user_context_wo_device_id;
+  std::string device_id =
+      user_manager::UserManager::Get()->GetKnownUserDeviceId(
+          user_context.GetUserID());
+  if (device_id.empty()) {
+    bool is_ephemeral =
+        ChromeUserManager::Get()->AreEphemeralUsersEnabled() &&
+        user_context.GetUserID() != ChromeUserManager::Get()->GetOwnerEmail();
+    device_id = ChromeSigninClient::GenerateSigninScopedDeviceID(is_ephemeral);
+  }
+  user_context.SetDeviceId(device_id);
+
   PerformPreLoginActions(user_context);
 
   if (!time_init_.is_null()) {
@@ -1129,6 +1151,17 @@ void ExistingUserController::DoCompleteLogin(const UserContext& user_context) {
         user_context.GetAuthCode(),
         base::Bind(&ExistingUserController::OnBootstrapUserContextInitialized,
                    weak_factory_.GetWeakPtr()));
+    return;
+  }
+
+  // Fetch OAuth2 tokens if we have an auth code and are not using SAML.
+  // SAML uses cookies to get tokens.
+  if (user_context.GetAuthFlow() == UserContext::AUTH_FLOW_GAIA_WITHOUT_SAML &&
+      !user_context.GetAuthCode().empty()) {
+    oauth2_token_initializer_.reset(new OAuth2TokenInitializer);
+    oauth2_token_initializer_->Start(
+        user_context, base::Bind(&ExistingUserController::OnOAuth2TokensFetched,
+                                 weak_factory_.GetWeakPtr()));
     return;
   }
 
@@ -1206,6 +1239,18 @@ void ExistingUserController::OnBootstrapUserContextInitialized(
           user_context,
           bootstrap_user_context_initializer_->random_key_used()));
 
+  PerformLogin(user_context, LoginPerformer::AUTH_MODE_EXTENSION);
+}
+
+void ExistingUserController::OnOAuth2TokensFetched(
+    bool success,
+    const UserContext& user_context) {
+  if (!success) {
+    LOG(ERROR) << "OAuth2 token fetch failed.";
+    OnAuthFailure(AuthFailure(AuthFailure::FAILED_TO_INITIALIZE_TOKEN));
+    return;
+  }
+  UserSessionManager::GetInstance()->OnOAuth2TokensFetched(user_context);
   PerformLogin(user_context, LoginPerformer::AUTH_MODE_EXTENSION);
 }
 

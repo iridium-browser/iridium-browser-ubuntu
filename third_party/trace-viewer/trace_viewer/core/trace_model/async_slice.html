@@ -7,7 +7,7 @@ found in the LICENSE file.
 
 <link rel="import" href="/base/extension_registry.html">
 <link rel="import" href="/core/analysis/util.html">
-<link rel="import" href="/core/trace_model/slice.html">
+<link rel="import" href="/core/trace_model/timed_event.html">
 
 <script>
 'use strict';
@@ -25,37 +25,34 @@ tv.exportTo('tv.c.trace_model', function() {
    */
   function AsyncSlice(category, title, colorId, start, args, duration,
                       opt_isTopLevel) {
-    tv.c.trace_model.Slice.call(this, category, title, colorId, start, args,
-                                duration);
+    tv.c.trace_model.TimedEvent.call(this, start);
+
+    this.category = category || '';
+    this.title = title;
+    this.colorId = colorId;
+    this.args = args;
+    this.startStackFrame = undefined;
+    this.endStackFrame = undefined;
+    this.didNotFinish = false;
+    this.important = false;
+    this.subSlices = [];
+
+    this.id = undefined;
+    this.startThread = undefined;
+    this.endThread = undefined;
+
+    this.duration = duration;
+
+    // TODO(nduca): Forgive me for what I must do.
     this.isTopLevel = (opt_isTopLevel === true);
   };
 
   AsyncSlice.prototype = {
-    __proto__: tv.c.trace_model.Slice.prototype,
+    __proto__: tv.c.trace_model.TimedEvent.prototype,
 
-    toJSON: function() {
-      var obj = new Object();
-      var keys = Object.keys(this);
-      for (var i = 0; i < keys.length; i++) {
-        var key = keys[i];
-        if (typeof this[key] == 'function')
-          continue;
-        if (key == 'startThread' || key == 'endThread') {
-          obj[key] = this[key].guid;
-          continue;
-        }
-        obj[key] = this[key];
-      }
-      return obj;
+    get analysisTypeName() {
+      return this.title;
     },
-
-    id: undefined,
-
-    startThread: undefined,
-
-    endThread: undefined,
-
-    subSlices: undefined,
 
     get viewSubGroupTitle() {
       return this.title;
@@ -64,6 +61,26 @@ tv.exportTo('tv.c.trace_model', function() {
     get userFriendlyName() {
       return 'Async slice ' + this.title + ' at ' +
           tv.c.analysis.tsString(this.start);
+    },
+
+    findDescendentSlice: function(targetTitle) {
+      if (!this.subSlices)
+        return undefined;
+
+      for (var i = 0; i < this.subSlices.length; i++) {
+        if (this.subSlices[i].title == targetTitle)
+          return this.subSlices[i];
+        var slice = this.subSlices[i].findDescendentSlice(targetTitle);
+        if (slice) return slice;
+      }
+      return undefined;
+    },
+
+    iterateAllDescendents: function(callback, opt_this) {
+      this.subSlices.forEach(callback, opt_this);
+      this.subSlices.forEach(function(subSlice) {
+        subSlice.iterateAllDescendents(callback, opt_this);
+      }, opt_this);
     }
   };
 
@@ -72,8 +89,8 @@ tv.exportTo('tv.c.trace_model', function() {
       {
         name: 'asyncSlice',
         pluralName: 'asyncSlices',
-        singleViewElementName: 'tv-c-single-slice-sub-view',
-        multiViewElementName: 'tv-c-multi-slice-sub-view'
+        singleViewElementName: 'tv-c-a-single-async-slice-sub-view',
+        multiViewElementName: 'tv-c-a-multi-async-slice-sub-view'
       });
 
 

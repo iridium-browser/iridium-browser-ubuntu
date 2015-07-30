@@ -12,7 +12,7 @@
 #include "base/prefs/testing_pref_service.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
 #include "net/base/net_util.h"
-#include "net/log/capturing_net_log.h"
+#include "net/log/test_net_log.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -23,7 +23,6 @@ class TestingPrefServiceSimple;
 
 namespace data_reduction_proxy {
 
-class DataReductionProxyConfigurator;
 class DataReductionProxyTestContext;
 class MockDataReductionProxyConfig;
 
@@ -84,6 +83,7 @@ class DataReductionProxySettingsTestBase : public testing::Test {
     return true;
   }
 
+  base::MessageLoopForIO message_loop_;
   scoped_ptr<DataReductionProxyTestContext> test_context_;
   scoped_ptr<DataReductionProxySettings> settings_;
   base::Time last_update_time_;
@@ -98,11 +98,11 @@ class ConcreteDataReductionProxySettingsTest
     : public DataReductionProxySettingsTestBase {
  public:
   typedef MockDataReductionProxySettings<C> MockSettings;
-  virtual void ResetSettings(bool allowed,
-                             bool fallback_allowed,
-                             bool alt_allowed,
-                             bool promo_allowed,
-                             bool holdback) override {
+  void ResetSettings(bool allowed,
+                     bool fallback_allowed,
+                     bool alt_allowed,
+                     bool promo_allowed,
+                     bool holdback) override {
     return DataReductionProxySettingsTestBase::ResetSettings<C>(
         allowed, fallback_allowed, alt_allowed, promo_allowed, holdback);
   }

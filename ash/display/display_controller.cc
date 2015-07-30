@@ -17,11 +17,14 @@
 #include "ash/host/ash_window_tree_host.h"
 #include "ash/host/ash_window_tree_host_init_params.h"
 #include "ash/host/root_window_transformer.h"
+#include "ash/magnifier/magnification_controller.h"
+#include "ash/magnifier/partial_magnification_controller.h"
 #include "ash/root_window_controller.h"
 #include "ash/root_window_settings.h"
 #include "ash/screen_util.h"
 #include "ash/shell.h"
 #include "ash/shell_delegate.h"
+#include "ash/system/tray/system_tray.h"
 #include "ash/wm/coordinate_conversion.h"
 #include "base/command_line.h"
 #include "base/stl_util.h"
@@ -160,8 +163,7 @@ void SetDisplayPropertiesOnHost(AshWindowTreeHost* ash_host,
   host->compositor()->ScheduleFullRedraw();
 }
 
-void ClearDisplayPropertiesOnHost(AshWindowTreeHost* ash_host,
-                                  const gfx::Display& display) {
+void ClearDisplayPropertiesOnHost(AshWindowTreeHost* ash_host) {
 #if defined(OS_CHROMEOS) && defined(USE_OZONE)
   aura::WindowTreeHost* host = ash_host->AsWindowTreeHost();
   ui::CursorController::GetInstance()->ClearCursorConfigForWindow(
@@ -181,12 +183,11 @@ aura::Window* GetWindow(AshWindowTreeHost* ash_host) {
 class FocusActivationStore {
  public:
   FocusActivationStore()
-      : activation_client_(NULL),
-        capture_client_(NULL),
-        focus_client_(NULL),
-        focused_(NULL),
-        active_(NULL) {
-  }
+      : activation_client_(nullptr),
+        capture_client_(nullptr),
+        focus_client_(nullptr),
+        focused_(nullptr),
+        active_(nullptr) {}
 
   void Store(bool clear_focus) {
     if (!activation_client_) {
@@ -207,13 +208,13 @@ class FocusActivationStore {
       activation_client_->DeactivateWindow(active_);
 
     // Release capture if any.
-    capture_client_->SetCapture(NULL);
+    capture_client_->SetCapture(nullptr);
     // Clear the focused window if any. This is necessary because a
     // window may be deleted when losing focus (fullscreen flash for
     // example).  If the focused window is still alive after move, it'll
     // be re-focused below.
     if (clear_focus)
-      focus_client_->FocusWindow(NULL);
+      focus_client_->FocusWindow(nullptr);
   }
 
   void Restore() {
@@ -227,8 +228,8 @@ class FocusActivationStore {
       tracker_.Remove(focused_);
     if (active_)
       tracker_.Remove(active_);
-    focused_ = NULL;
-    active_ = NULL;
+    focused_ = nullptr;
+    active_ = nullptr;
   }
 
  private:
@@ -263,7 +264,7 @@ bool DisplayController::DisplayChangeLimiter::IsThrottled() const {
 // DisplayController
 
 DisplayController::DisplayController()
-    : primary_tree_host_for_replace_(NULL),
+    : primary_tree_host_for_replace_(nullptr),
       focus_activation_store_(new FocusActivationStore()),
       cursor_window_controller_(new CursorWindowController()),
       mirror_window_controller_(new MirrorWindowController()),
@@ -289,7 +290,7 @@ void DisplayController::Start() {
 void DisplayController::Shutdown() {
   // Unset the display manager's delegate here because
   // DisplayManager outlives DisplayController.
-  Shell::GetInstance()->display_manager()->set_delegate(NULL);
+  Shell::GetInstance()->display_manager()->set_delegate(nullptr);
 
   cursor_window_controller_.reset();
   mirror_window_controller_.reset();
@@ -302,7 +303,7 @@ void DisplayController::Shutdown() {
   // delete the primary root window controller.
   aura::Window::Windows root_windows = DisplayController::GetAllRootWindows();
   std::vector<RootWindowController*> to_delete;
-  RootWindowController* primary_rwc = NULL;
+  RootWindowController* primary_rwc = nullptr;
   for (aura::Window::Windows::iterator iter = root_windows.begin();
        iter != root_windows.end();
        ++iter) {
@@ -330,7 +331,6 @@ void DisplayController::CreatePrimaryHost(
 void DisplayController::InitDisplays() {
   RootWindowController::CreateForPrimaryDisplay(
       window_tree_hosts_[primary_display_id]);
-
   DisplayManager* display_manager = GetDisplayManager();
   for (size_t i = 0; i < display_manager->GetNumDisplays(); ++i) {
     const gfx::Display& display = display_manager->GetDisplayAt(i);
@@ -340,7 +340,6 @@ void DisplayController::InitDisplays() {
       RootWindowController::CreateForSecondaryDisplay(ash_host);
     }
   }
-  UpdateHostWindowNames();
 
   FOR_EACH_OBSERVER(Observer, observers_, OnDisplaysInitialized());
 }
@@ -364,10 +363,16 @@ aura::Window* DisplayController::GetPrimaryRootWindow() {
 }
 
 aura::Window* DisplayController::GetRootWindowForDisplayId(int64 id) {
-  CHECK_EQ(1u, window_tree_hosts_.count(id));
-  AshWindowTreeHost* host = window_tree_hosts_[id];
+  AshWindowTreeHost* host = GetAshWindowTreeHostForDisplayId(id);
   CHECK(host);
   return GetWindow(host);
+}
+
+AshWindowTreeHost* DisplayController::GetAshWindowTreeHostForDisplayId(
+    int64 display_id) {
+  CHECK_EQ(1u, window_tree_hosts_.count(display_id))
+      << "display id = " << display_id;
+  return window_tree_hosts_[display_id];
 }
 
 void DisplayController::CloseChildWindows() {
@@ -436,10 +441,9 @@ void DisplayController::ToggleMirrorMode() {
   Shell* shell = Shell::GetInstance();
   DisplayConfiguratorAnimation* animation =
       shell->display_configurator_animation();
-  animation->StartFadeOutAnimation(
-      base::Bind(&DisplayController::SetMirrorModeAfterAnimation,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 !display_manager->IsMirrored()));
+  animation->StartFadeOutAnimation(base::Bind(
+      &DisplayController::SetMirrorModeAfterAnimation,
+      weak_ptr_factory_.GetWeakPtr(), !display_manager->IsInMirrorMode()));
 #endif
 }
 
@@ -481,10 +485,10 @@ void DisplayController::SetPrimaryDisplay(
     const gfx::Display& new_primary_display) {
   DisplayManager* display_manager = GetDisplayManager();
   DCHECK(new_primary_display.is_valid());
-  DCHECK(display_manager->IsActiveDisplay(new_primary_display));
+  DCHECK(display_manager->GetDisplayForId(new_primary_display.id()).is_valid());
 
   if (!new_primary_display.is_valid() ||
-      !display_manager->IsActiveDisplay(new_primary_display)) {
+      !display_manager->GetDisplayForId(new_primary_display.id()).is_valid()) {
     LOG(ERROR) << "Invalid or non-existent display is requested:"
                << new_primary_display.ToString();
     return;
@@ -548,7 +552,7 @@ void DisplayController::UpdateMouseLocationAfterDisplayChange() {
   int64 closest_distance_squared = -1;
   DisplayManager* display_manager = GetDisplayManager();
 
-  aura::Window* dst_root_window = NULL;
+  aura::Window* dst_root_window = nullptr;
   for (size_t i = 0; i < display_manager->GetNumDisplays(); ++i) {
     const gfx::Display& display = display_manager->GetDisplayAt(i);
     const DisplayInfo display_info =
@@ -588,6 +592,10 @@ void DisplayController::UpdateMouseLocationAfterDisplayChange() {
   ::wm::ConvertPointToScreen(dst_root_window, &target_location_in_screen);
   const gfx::Display& target_display =
       display_manager->FindDisplayContainingPoint(target_location_in_screen);
+  // If the original location isn't on any of new display, let ozone move
+  // the cursor.
+  if (!target_display.is_valid())
+    return;
   int64 target_display_id = target_display.id();
 
   // Do not move the cursor if the cursor's location did not change. This avoids
@@ -631,13 +639,65 @@ bool DisplayController::UpdateWorkAreaOfDisplayNearestWindow(
 }
 
 void DisplayController::OnDisplayAdded(const gfx::Display& display) {
-  if (primary_tree_host_for_replace_) {
+#if defined(OS_CHROMEOS)
+  // If we're switching from/to offscreen WTH, we need to
+  // create new WTH for primary display instead of reusing.
+  if (primary_tree_host_for_replace_ &&
+      (GetRootWindowSettings(GetWindow(primary_tree_host_for_replace_))
+               ->display_id == DisplayManager::kUnifiedDisplayId ||
+       display.id() == DisplayManager::kUnifiedDisplayId)) {
+    DCHECK_EQ(gfx::Display::kInvalidDisplayID, primary_display_id);
+    primary_display_id = display.id();
+
+    AshWindowTreeHost* ash_host =
+        AddWindowTreeHostForDisplay(display, AshWindowTreeHostInitParams());
+    RootWindowController::CreateForSecondaryDisplay(ash_host);
+
+    // Magnifier controllers keep pointers to the current root window.
+    // Update them here to avoid accessing them later.
+    Shell::GetInstance()->magnification_controller()->SwitchTargetRootWindow(
+        ash_host->AsWindowTreeHost()->window(), false);
+    Shell::GetInstance()
+        ->partial_magnification_controller()
+        ->SwitchTargetRootWindow(ash_host->AsWindowTreeHost()->window());
+
+    AshWindowTreeHost* to_delete = primary_tree_host_for_replace_;
+    primary_tree_host_for_replace_ = nullptr;
+
+    // Show the shelf if the original WTH had a visible system
+    // tray. It may or may not be visible depending on OOBE state.
+    ash::SystemTray* old_tray =
+        GetRootWindowController(to_delete->AsWindowTreeHost()->window())
+            ->GetSystemTray();
+    ash::SystemTray* new_tray =
+        ash::Shell::GetInstance()->GetPrimarySystemTray();
+    if (old_tray->GetWidget()->IsVisible()) {
+      new_tray->SetVisible(true);
+      new_tray->GetWidget()->Show();
+    }
+
+    DeleteHost(to_delete);
+#ifndef NDEBUG
+    auto iter = std::find_if(
+        window_tree_hosts_.begin(), window_tree_hosts_.end(),
+        [to_delete](const std::pair<int64, AshWindowTreeHost*>& pair) {
+          return pair.second == to_delete;
+        });
+    DCHECK(iter == window_tree_hosts_.end());
+#endif
+    // the host has already been removed from the window_tree_host_.
+  } else
+#endif
+      // TODO(oshima): It should be possible to consolidate logic for
+      // unified and non unified, but I'm keeping them separated to minimize
+      // the risk in M44. I'll consolidate this in M45.
+      if (primary_tree_host_for_replace_) {
     DCHECK(window_tree_hosts_.empty());
     primary_display_id = display.id();
     window_tree_hosts_[display.id()] = primary_tree_host_for_replace_;
     GetRootWindowSettings(GetWindow(primary_tree_host_for_replace_))
         ->display_id = display.id();
-    primary_tree_host_for_replace_ = NULL;
+    primary_tree_host_for_replace_ = nullptr;
     const DisplayInfo& display_info =
         GetDisplayManager()->GetDisplayInfo(display.id());
     AshWindowTreeHost* ash_host = window_tree_hosts_[display.id()];
@@ -647,10 +707,22 @@ void DisplayController::OnDisplayAdded(const gfx::Display& display) {
     if (primary_display_id == gfx::Display::kInvalidDisplayID)
       primary_display_id = display.id();
     DCHECK(!window_tree_hosts_.empty());
-    AshWindowTreeHost* ash_host = AddWindowTreeHostForDisplay(
-        display, AshWindowTreeHostInitParams());
+    AshWindowTreeHost* ash_host =
+        AddWindowTreeHostForDisplay(display, AshWindowTreeHostInitParams());
     RootWindowController::CreateForSecondaryDisplay(ash_host);
   }
+}
+
+void DisplayController::DeleteHost(AshWindowTreeHost* host_to_delete) {
+  ClearDisplayPropertiesOnHost(host_to_delete);
+  RootWindowController* controller =
+      GetRootWindowController(GetWindow(host_to_delete));
+  DCHECK(controller);
+  controller->MoveWindowsTo(GetPrimaryRootWindow());
+  // Delete most of root window related objects, but don't delete
+  // root window itself yet because the stack may be using it.
+  controller->Shutdown();
+  base::MessageLoop::current()->DeleteSoon(FROM_HERE, controller);
 }
 
 void DisplayController::OnDisplayRemoved(const gfx::Display& display) {
@@ -692,15 +764,8 @@ void DisplayController::OnDisplayRemoved(const gfx::Display& display) {
         GetDisplayManager()->GetDisplayForId(primary_display_id),
         DISPLAY_METRIC_BOUNDS);
   }
-  ClearDisplayPropertiesOnHost(host_to_delete, display);
-  RootWindowController* controller =
-      GetRootWindowController(GetWindow(host_to_delete));
-  DCHECK(controller);
-  controller->MoveWindowsTo(GetPrimaryRootWindow());
-  // Delete most of root window related objects, but don't delete
-  // root window itself yet because the stack may be using it.
-  controller->Shutdown();
-  base::MessageLoop::current()->DeleteSoon(FROM_HERE, controller);
+
+  DeleteHost(host_to_delete);
 
   // The window tree host should be erased at last because some handlers can
   // access to the host through GetRootWindowForDisplayId() during
@@ -733,19 +798,18 @@ void DisplayController::OnHostResized(const aura::WindowTreeHost* host) {
 }
 
 void DisplayController::CreateOrUpdateMirroringDisplay(
-    const DisplayInfo& info) {
-  switch (GetDisplayManager()->second_display_mode()) {
-    case DisplayManager::MIRRORING:
-      mirror_window_controller_->UpdateWindow(info);
-      cursor_window_controller_->UpdateContainer();
-      break;
-    case DisplayManager::EXTENDED:
-      NOTREACHED();
+    const DisplayInfoList& info_list) {
+  if (GetDisplayManager()->IsInMirrorMode() ||
+      GetDisplayManager()->IsInUnifiedMode()) {
+    mirror_window_controller_->UpdateWindow(info_list);
+    cursor_window_controller_->UpdateContainer();
+  } else {
+    NOTREACHED();
   }
 }
 
-void DisplayController::CloseMirroringDisplay() {
-  mirror_window_controller_->Close();
+void DisplayController::CloseMirroringDisplayIfNotNecessary() {
+  mirror_window_controller_->CloseIfNotNecessary();
   // If cursor_compositing is enabled for large cursor, the cursor window is
   // always on the desktop display (the visible cursor on the non-desktop
   // display is drawn through compositor mirroring). Therefore, it's unnecessary
@@ -781,10 +845,13 @@ void DisplayController::PostDisplayConfigurationChange() {
   DisplayLayoutStore* layout_store = display_manager->layout_store();
   if (display_manager->num_connected_displays() > 1) {
     DisplayIdPair pair = display_manager->GetCurrentDisplayIdPair();
-    layout_store->UpdateMirrorStatus(pair, display_manager->IsMirrored());
-    DisplayLayout layout = layout_store->GetRegisteredDisplayLayout(pair);
+    layout_store->UpdateMultiDisplayState(
+        pair, display_manager->IsInMirrorMode(),
+        display_manager->default_multi_display_mode() ==
+            DisplayManager::UNIFIED);
 
     if (Shell::GetScreen()->GetNumDisplays() > 1 ) {
+      DisplayLayout layout = layout_store->GetRegisteredDisplayLayout(pair);
       int64 primary_id = layout.primary_id;
       SetPrimaryDisplayId(
           primary_id == gfx::Display::kInvalidDisplayID ?
@@ -798,7 +865,6 @@ void DisplayController::PostDisplayConfigurationChange() {
     }
   }
   FOR_EACH_OBSERVER(Observer, observers_, OnDisplayConfigurationChanged());
-  UpdateHostWindowNames();
   UpdateMouseLocationAfterDisplayChange();
 }
 
@@ -810,10 +876,14 @@ AshWindowTreeHost* DisplayController::AddWindowTreeHostForDisplay(
       GetDisplayManager()->GetDisplayInfo(display.id());
   AshWindowTreeHostInitParams params_with_bounds(init_params);
   params_with_bounds.initial_bounds = display_info.bounds_in_native();
+  params_with_bounds.offscreen =
+      display.id() == DisplayManager::kUnifiedDisplayId;
   AshWindowTreeHost* ash_host = AshWindowTreeHost::Create(params_with_bounds);
   aura::WindowTreeHost* host = ash_host->AsWindowTreeHost();
 
-  host->window()->SetName(base::StringPrintf("RootWindow-%d", host_count++));
+  host->window()->SetName(base::StringPrintf(
+      "%sRootWindow-%d", params_with_bounds.offscreen ? "Offscreen" : "",
+      host_count++));
   host->window()->SetTitle(base::UTF8ToUTF16(display_info.name()));
   host->compositor()->SetBackgroundColor(SK_ColorBLACK);
   // No need to remove our observer observer because the DisplayController
@@ -826,10 +896,7 @@ AshWindowTreeHost* DisplayController::AddWindowTreeHostForDisplay(
   SetDisplayPropertiesOnHost(ash_host, display);
 
 #if defined(OS_CHROMEOS)
-  static bool force_constrain_pointer_to_root =
-      base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kAshConstrainPointerToRoot);
-  if (base::SysInfo::IsRunningOnChromeOS() || force_constrain_pointer_to_root)
+  if (switches::ConstrainPointerToRoot())
     ash_host->ConfineCursorToRootWindow();
 #endif
   return ash_host;
@@ -845,23 +912,6 @@ void DisplayController::OnFadeOutForSwapDisplayFinished() {
 
 void DisplayController::SetMirrorModeAfterAnimation(bool mirror) {
   GetDisplayManager()->SetMirrorMode(mirror);
-}
-
-void DisplayController::UpdateHostWindowNames() {
-#if defined(USE_X11)
-  // crbug.com/120229 - set the window title for the primary dislpay
-  // to "aura_root_0" so gtalk can find the primary root window to broadcast.
-  // TODO(jhorwich) Remove this once Chrome supports window-based broadcasting.
-  aura::Window* primary = Shell::GetPrimaryRootWindow();
-  aura::Window::Windows root_windows = Shell::GetAllRootWindows();
-  for (size_t i = 0; i < root_windows.size(); ++i) {
-    std::string name =
-        root_windows[i] == primary ? "aura_root_0" : "aura_root_x";
-    gfx::AcceleratedWidget xwindow =
-        root_windows[i]->GetHost()->GetAcceleratedWidget();
-    XStoreName(gfx::GetXDisplay(), xwindow, name.c_str());
-  }
-#endif
 }
 
 }  // namespace ash

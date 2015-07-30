@@ -70,16 +70,17 @@ class FormatEtcEnumerator final : public IEnumFORMATETC {
   ~FormatEtcEnumerator();
 
   // IEnumFORMATETC implementation:
-  HRESULT __stdcall Next(
-      ULONG count, FORMATETC* elements_array, ULONG* elements_fetched);
-  HRESULT __stdcall Skip(ULONG skip_count);
-  HRESULT __stdcall Reset();
-  HRESULT __stdcall Clone(IEnumFORMATETC** clone);
+  HRESULT __stdcall Next(ULONG count,
+                         FORMATETC* elements_array,
+                         ULONG* elements_fetched) override;
+  HRESULT __stdcall Skip(ULONG skip_count) override;
+  HRESULT __stdcall Reset() override;
+  HRESULT __stdcall Clone(IEnumFORMATETC** clone) override;
 
   // IUnknown implementation:
-  HRESULT __stdcall QueryInterface(const IID& iid, void** object);
-  ULONG __stdcall AddRef();
-  ULONG __stdcall Release();
+  HRESULT __stdcall QueryInterface(const IID& iid, void** object) override;
+  ULONG __stdcall AddRef() override;
+  ULONG __stdcall Release() override;
 
  private:
   // This can only be called from |CloneFromOther|, since it initializes the
@@ -623,6 +624,20 @@ static void DuplicateMedium(CLIPFORMAT source_clipformat,
   destination->pUnkForRelease = source->pUnkForRelease;
   if (destination->pUnkForRelease)
     destination->pUnkForRelease->AddRef();
+}
+
+DataObjectImpl::StoredDataInfo::StoredDataInfo(const FORMATETC& format_etc,
+                                               STGMEDIUM* medium)
+    : format_etc(format_etc), medium(medium), owns_medium(true) {
+}
+
+DataObjectImpl::StoredDataInfo::~StoredDataInfo() {
+  if (owns_medium) {
+    ReleaseStgMedium(medium);
+    delete medium;
+  }
+  if (downloader.get())
+    downloader->Stop();
 }
 
 DataObjectImpl::DataObjectImpl()

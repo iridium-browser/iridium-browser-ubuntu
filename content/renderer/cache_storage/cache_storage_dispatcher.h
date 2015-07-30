@@ -84,8 +84,7 @@ class CacheStorageDispatcher : public WorkerTaskRunner::Observer {
       int request_id,
       const std::vector<ServiceWorkerFetchRequest>& response);
   void OnCacheBatchSuccess(int thread_id,
-                           int request_id,
-                           const std::vector<ServiceWorkerResponse>& response);
+                           int request_id);
 
   void OnCacheMatchError(int thread_id,
                          int request_id,
@@ -144,7 +143,7 @@ class CacheStorageDispatcher : public WorkerTaskRunner::Observer {
       const blink::WebServiceWorkerCache::QueryParams& query_params);
   void dispatchBatchForCache(
       int cache_id,
-      blink::WebServiceWorkerCache::CacheWithResponsesCallbacks* callbacks,
+      blink::WebServiceWorkerCache::CacheBatchCallbacks* callbacks,
       const blink::WebVector<blink::WebServiceWorkerCache::BatchOperation>&
           batch_operations);
 
@@ -171,6 +170,8 @@ class CacheStorageDispatcher : public WorkerTaskRunner::Observer {
                 IDMapOwnPointer> WithResponsesCallbacksMap;
   typedef IDMap<blink::WebServiceWorkerCache::CacheWithRequestsCallbacks,
                 IDMapOwnPointer> WithRequestsCallbacksMap;
+  using BatchCallbacksMap =
+      IDMap<blink::WebServiceWorkerCache::CacheBatchCallbacks, IDMapOwnPointer>;
 
   static int32 CurrentWorkerId() {
     return WorkerTaskRunner::Instance()->CurrentWorkerId();
@@ -205,7 +206,7 @@ class CacheStorageDispatcher : public WorkerTaskRunner::Observer {
   MatchCallbacksMap cache_match_callbacks_;
   WithResponsesCallbacksMap cache_match_all_callbacks_;
   WithRequestsCallbacksMap cache_keys_callbacks_;
-  WithResponsesCallbacksMap cache_batch_callbacks_;
+  BatchCallbacksMap cache_batch_callbacks_;
 
   TimeMap cache_match_times_;
   TimeMap cache_match_all_times_;

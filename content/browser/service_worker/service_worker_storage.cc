@@ -10,6 +10,7 @@
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
 #include "base/task_runner_util.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "content/browser/service_worker/service_worker_context_core.h"
 #include "content/browser/service_worker/service_worker_disk_cache.h"
@@ -32,7 +33,7 @@ namespace {
 
 void RunSoon(const tracked_objects::Location& from_here,
              const base::Closure& closure) {
-  base::MessageLoop::current()->PostTask(from_here, closure);
+  base::ThreadTaskRunnerHandle::Get()->PostTask(from_here, closure);
 }
 
 void CompleteFindNow(
@@ -309,7 +310,7 @@ void ServiceWorkerStorage::FindRegistrationForDocument(
       base::Bind(
           &FindForDocumentInDB,
           database_.get(),
-          base::MessageLoopProxy::current(),
+          base::ThreadTaskRunnerHandle::Get(),
           document_url,
           base::Bind(&ServiceWorkerStorage::DidFindRegistrationForDocument,
                      weak_factory_.GetWeakPtr(),
@@ -351,10 +352,12 @@ void ServiceWorkerStorage::FindRegistrationForPattern(
       base::Bind(
           &FindForPatternInDB,
           database_.get(),
-          base::MessageLoopProxy::current(),
+          base::ThreadTaskRunnerHandle::Get(),
           scope,
           base::Bind(&ServiceWorkerStorage::DidFindRegistrationForPattern,
-                     weak_factory_.GetWeakPtr(), scope, callback)));
+                     weak_factory_.GetWeakPtr(),
+                     scope,
+                     callback)));
 }
 
 ServiceWorkerRegistration* ServiceWorkerStorage::GetUninstallingRegistration(
@@ -412,10 +415,12 @@ void ServiceWorkerStorage::FindRegistrationForId(
       FROM_HERE,
       base::Bind(&FindForIdInDB,
                  database_.get(),
-                 base::MessageLoopProxy::current(),
-                 registration_id, origin,
+                 base::ThreadTaskRunnerHandle::Get(),
+                 registration_id,
+                 origin,
                  base::Bind(&ServiceWorkerStorage::DidFindRegistrationForId,
-                            weak_factory_.GetWeakPtr(), callback)));
+                            weak_factory_.GetWeakPtr(),
+                            callback)));
 }
 
 void ServiceWorkerStorage::FindRegistrationForIdOnly(
@@ -445,10 +450,13 @@ void ServiceWorkerStorage::FindRegistrationForIdOnly(
 
   database_task_manager_->GetTaskRunner()->PostTask(
       FROM_HERE,
-      base::Bind(&FindForIdOnlyInDB, database_.get(),
-                 base::MessageLoopProxy::current(), registration_id,
+      base::Bind(&FindForIdOnlyInDB,
+                 database_.get(),
+                 base::ThreadTaskRunnerHandle::Get(),
+                 registration_id,
                  base::Bind(&ServiceWorkerStorage::DidFindRegistrationForId,
-                            weak_factory_.GetWeakPtr(), callback)));
+                            weak_factory_.GetWeakPtr(),
+                            callback)));
 }
 
 void ServiceWorkerStorage::GetRegistrationsForOrigin(
@@ -531,6 +539,11 @@ void ServiceWorkerStorage::StoreRegistration(
   ResourceList resources;
   version->script_cache_map()->GetResources(&resources);
 
+  if (resources.empty()) {
+    RunSoon(FROM_HERE, base::Bind(callback, SERVICE_WORKER_ERROR_FAILED));
+    return;
+  }
+
   uint64 resources_total_size_bytes = 0;
   for (const auto& resource : resources) {
     resources_total_size_bytes += resource.size_bytes;
@@ -544,7 +557,7 @@ void ServiceWorkerStorage::StoreRegistration(
       FROM_HERE,
       base::Bind(&WriteRegistrationInDB,
                  database_.get(),
-                 base::MessageLoopProxy::current(),
+                 base::ThreadTaskRunnerHandle::Get(),
                  data,
                  resources,
                  base::Bind(&ServiceWorkerStorage::DidStoreRegistration,
@@ -618,10 +631,12 @@ void ServiceWorkerStorage::DeleteRegistration(
       FROM_HERE,
       base::Bind(&DeleteRegistrationFromDB,
                  database_.get(),
-                 base::MessageLoopProxy::current(),
-                 registration_id, origin,
+                 base::ThreadTaskRunnerHandle::Get(),
+                 registration_id,
+                 origin,
                  base::Bind(&ServiceWorkerStorage::DidDeleteRegistration,
-                            weak_factory_.GetWeakPtr(), params)));
+                            weak_factory_.GetWeakPtr(),
+                            params)));
 
   // The registration should no longer be findable.
   pending_deletions_.insert(registration_id);
@@ -736,11 +751,12 @@ void ServiceWorkerStorage::GetUserData(
       FROM_HERE,
       base::Bind(&ServiceWorkerStorage::GetUserDataInDB,
                  database_.get(),
-                 base::MessageLoopProxy::current(),
+                 base::ThreadTaskRunnerHandle::Get(),
                  registration_id,
                  key,
                  base::Bind(&ServiceWorkerStorage::DidGetUserData,
-                            weak_factory_.GetWeakPtr(), callback)));
+                            weak_factory_.GetWeakPtr(),
+                            callback)));
 }
 
 void ServiceWorkerStorage::ClearUserData(
@@ -796,9 +812,12 @@ void ServiceWorkerStorage::GetUserDataForAllRegistrations(
       FROM_HERE,
       base::Bind(
           &ServiceWorkerStorage::GetUserDataForAllRegistrationsInDB,
-          database_.get(), base::MessageLoopProxy::current(), key,
+          database_.get(),
+          base::ThreadTaskRunnerHandle::Get(),
+          key,
           base::Bind(&ServiceWorkerStorage::DidGetUserDataForAllRegistrations,
-                     weak_factory_.GetWeakPtr(), callback)));
+                     weak_factory_.GetWeakPtr(),
+                     callback)));
 }
 
 void ServiceWorkerStorage::DeleteAndStartOver(const StatusCallback& callback) {
@@ -806,13 +825,11 @@ void ServiceWorkerStorage::DeleteAndStartOver(const StatusCallback& callback) {
 
   // Delete the database on the database thread.
   PostTaskAndReplyWithResult(
-      database_task_manager_->GetTaskRunner(),
-      FROM_HERE,
+      database_task_manager_->GetTaskRunner(), FROM_HERE,
       base::Bind(&ServiceWorkerDatabase::DestroyDatabase,
                  base::Unretained(database_.get())),
       base::Bind(&ServiceWorkerStorage::DidDeleteDatabase,
-                 weak_factory_.GetWeakPtr(),
-                 callback));
+                 weak_factory_.GetWeakPtr(), callback));
 }
 
 int64 ServiceWorkerStorage::NewRegistrationId() {
@@ -952,7 +969,7 @@ bool ServiceWorkerStorage::LazyInitialize(const base::Closure& callback) {
       FROM_HERE,
       base::Bind(&ReadInitialDataFromDB,
                  database_.get(),
-                 base::MessageLoopProxy::current(),
+                 base::ThreadTaskRunnerHandle::Get(),
                  base::Bind(&ServiceWorkerStorage::DidReadInitialData,
                             weak_factory_.GetWeakPtr())));
   return false;
@@ -1080,6 +1097,7 @@ void ServiceWorkerStorage::ReturnFoundRegistration(
     const FindRegistrationCallback& callback,
     const ServiceWorkerDatabase::RegistrationData& data,
     const ResourceList& resources) {
+  DCHECK(!resources.empty());
   scoped_refptr<ServiceWorkerRegistration> registration =
       GetOrCreateRegistration(data, resources);
   CompleteFindNow(registration, SERVICE_WORKER_OK, callback);
@@ -1297,9 +1315,9 @@ ServiceWorkerStorage::GetOrCreateRegistration(
   }
 
   if (version->status() == ServiceWorkerVersion::ACTIVATED)
-    registration->SetActiveVersion(version.get());
+    registration->SetActiveVersion(version);
   else if (version->status() == ServiceWorkerVersion::INSTALLED)
-    registration->SetWaitingVersion(version.get());
+    registration->SetWaitingVersion(version);
   else
     NOTREACHED();
 
@@ -1443,7 +1461,7 @@ void ServiceWorkerStorage::DeleteStaleResources() {
       FROM_HERE,
       base::Bind(&ServiceWorkerStorage::CollectStaleResourcesFromDB,
                  database_.get(),
-                 base::MessageLoopProxy::current(),
+                 base::ThreadTaskRunnerHandle::Get(),
                  base::Bind(&ServiceWorkerStorage::DidCollectStaleResources,
                             weak_factory_.GetWeakPtr())));
 }
@@ -1451,9 +1469,11 @@ void ServiceWorkerStorage::DeleteStaleResources() {
 void ServiceWorkerStorage::DidCollectStaleResources(
     const std::vector<int64>& stale_resource_ids,
     ServiceWorkerDatabase::Status status) {
-  DCHECK_EQ(ServiceWorkerDatabase::STATUS_OK, status);
-  if (status != ServiceWorkerDatabase::STATUS_OK)
+  if (status != ServiceWorkerDatabase::STATUS_OK) {
+    DCHECK_NE(ServiceWorkerDatabase::STATUS_ERROR_NOT_FOUND, status);
+    ScheduleDeleteAndStartOver();
     return;
+  }
   StartPurgingResources(stale_resource_ids);
 }
 
@@ -1772,12 +1792,10 @@ void ServiceWorkerStorage::DidDeleteDatabase(
   // Deleting the directory could take a long time and restart could be delayed.
   // We should probably rename the directory and delete it later.
   PostTaskAndReplyWithResult(
-      database_task_manager_->GetTaskRunner(),
-      FROM_HERE,
+      disk_cache_thread_.get(), FROM_HERE,
       base::Bind(&base::DeleteFile, GetDiskCachePath(), true),
       base::Bind(&ServiceWorkerStorage::DidDeleteDiskCache,
-                 weak_factory_.GetWeakPtr(),
-                 callback));
+                 weak_factory_.GetWeakPtr(), callback));
 }
 
 void ServiceWorkerStorage::DidDeleteDiskCache(

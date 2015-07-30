@@ -35,8 +35,6 @@
 #include "chrome/browser/background/background_contents_service_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
-#include "chrome/browser/browsing_data/browsing_data_helper.h"
-#include "chrome/browser/browsing_data/browsing_data_remover.h"
 #include "chrome/browser/character_encoding.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
@@ -58,7 +56,6 @@
 #include "chrome/browser/extensions/extension_ui_util.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/tab_helper.h"
-#include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/file_select_helper.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/history/top_sites_factory.h"
@@ -70,8 +67,10 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_destroyer.h"
 #include "chrome/browser/profiles/profile_metrics.h"
+#include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/repost_form_warning_controller.h"
 #include "chrome/browser/search/search.h"
+#include "chrome/browser/sessions/session_restore.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
@@ -108,6 +107,7 @@
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
 #include "chrome/browser/ui/exclusive_access/mouse_lock_controller.h"
+#include "chrome/browser/ui/extensions/bookmark_app_browser_controller.h"
 #include "chrome/browser/ui/fast_unload_controller.h"
 #include "chrome/browser/ui/find_bar/find_bar.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
@@ -140,7 +140,6 @@
 #include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "chrome/browser/ui/window_sizer/window_sizer.h"
 #include "chrome/browser/upgrade_detector.h"
-#include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/custom_handlers/protocol_handler.h"
@@ -155,6 +154,7 @@
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/favicon/content/content_favicon_driver.h"
 #include "components/history/core/browser/top_sites.h"
 #include "components/infobars/core/simple_alert_infobar_delegate.h"
 #include "components/search/search.h"
@@ -250,11 +250,6 @@ BrowserWindow* CreateBrowserWindow(Browser* browser) {
 bool IsFastTabUnloadEnabled() {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kEnableFastUnload);
-}
-
-bool IsWebAppFrameEnabled() {
-  return base::CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableWebAppFrame);
 }
 
 }  // namespace
@@ -371,6 +366,12 @@ Browser::Browser(const CreateParams& params)
   CHECK(IncognitoModePrefs::CanOpenBrowser(profile_));
   CHECK(!profile_->IsGuestSession() || profile_->IsOffTheRecord())
       << "Only off the record browser may be opened in guest mode";
+  DCHECK(!profile_->IsSystemProfile())
+      << "The system profile should never have a real browser.";
+  // TODO(mlerman): After this hits stable channel, see if there are counts
+  // for this metric. If not, change the DCHECK above to a CHECK.
+  if (profile_->IsSystemProfile())
+    content::RecordAction(base::UserMetricsAction("BrowserForSystemProfile"));
 
   // TODO(jeremy): Move to initializer list once flag is removed.
   if (IsFastTabUnloadEnabled())
@@ -417,11 +418,19 @@ Browser::Browser(const CreateParams& params)
   if (chrome::IsInstantExtendedAPIEnabled() && is_type_tabbed())
     instant_controller_.reset(new BrowserInstantController(this));
 
+  if (extensions::BookmarkAppBrowserController::IsForBookmarkApp(this)) {
+    bookmark_app_controller_.reset(
+        new extensions::BookmarkAppBrowserController(this));
+  }
+
   UpdateBookmarkBarState(BOOKMARK_BAR_STATE_CHANGE_INIT);
 
   ProfileMetrics::LogProfileLaunch(profile_);
 
   window_ = params.window ? params.window : CreateBrowserWindow(this);
+
+  if (bookmark_app_controller_)
+    bookmark_app_controller_->UpdateLocationBarVisibility(false);
 
   // Create the extension window controller before sending notifications.
   extension_window_controller_.reset(
@@ -521,11 +530,7 @@ Browser::~Browser() {
       // profile has BrowserContextKeyedServices that the Incognito profile
       // doesn't, so the ProfileDestroyer can't delete it properly.
       // TODO(mlerman): Delete the guest using an improved ProfileDestroyer.
-      BrowsingDataRemover* data_remover =
-          BrowsingDataRemover::CreateForUnboundedRange(profile_);
-      data_remover->Remove(BrowsingDataRemover::REMOVE_ALL,
-                           BrowsingDataHelper::ALL);
-      // BrowsingDataRemover deletes itself.
+      profiles::RemoveBrowsingDataForProfile(profile_->GetPath());
 #endif
     } else {
       // An incognito profile is no longer needed, this indirectly frees
@@ -581,9 +586,11 @@ gfx::Image Browser::GetCurrentPageIcon() const {
   WebContents* web_contents = tab_strip_model_->GetActiveWebContents();
   // |web_contents| can be NULL since GetCurrentPageIcon() is called by the
   // window during the window's creation (before tabs have been added).
-  FaviconTabHelper* favicon_tab_helper =
-      web_contents ? FaviconTabHelper::FromWebContents(web_contents) : NULL;
-  return favicon_tab_helper ? favicon_tab_helper->GetFavicon() : gfx::Image();
+  favicon::FaviconDriver* favicon_driver =
+      web_contents
+          ? favicon::ContentFaviconDriver::FromWebContents(web_contents)
+          : nullptr;
+  return favicon_driver ? favicon_driver->GetFavicon() : gfx::Image();
 }
 
 base::string16 Browser::GetWindowTitleForCurrentTab() const {
@@ -1071,13 +1078,22 @@ void Browser::ActiveTabChanged(WebContents* old_contents,
     find_bar_controller_->find_bar()->MoveWindowIfNecessary(gfx::Rect());
   }
 
-  // Update sessions. Don't force creation of sessions. If sessions doesn't
-  // exist, the change will be picked up by sessions when created.
+  // Update sessions (selected tab index and last active time). Don't force
+  // creation of sessions. If sessions doesn't exist, the change will be picked
+  // up by sessions when created.
   SessionService* session_service =
       SessionServiceFactory::GetForProfileIfExisting(profile_);
   if (session_service && !tab_strip_model_->closing_all()) {
     session_service->SetSelectedTabInWindow(session_id(),
                                             tab_strip_model_->active_index());
+    if (SessionRestore::GetSmartRestoreMode() ==
+        SessionRestore::SMART_RESTORE_MODE_MRU) {
+      SessionTabHelper* session_tab_helper =
+          SessionTabHelper::FromWebContents(new_contents);
+      session_service->SetLastActiveTime(session_id(),
+                                         session_tab_helper->session_id(),
+                                         base::TimeTicks::Now());
+    }
   }
 
   // This needs to be called after notifying SearchDelegate.
@@ -1196,6 +1212,17 @@ bool Browser::ShouldPreserveAbortedURLs(WebContents* source) {
     return false;
   GURL committed_url(source->GetController().GetLastCommittedEntry()->GetURL());
   return chrome::IsNTPURL(committed_url, profile);
+}
+
+void Browser::SetFocusToLocationBar(bool select_all) {
+  // Two differences between this and FocusLocationBar():
+  // (1) This doesn't get recorded in user metrics, since it's called
+  //     internally.
+  // (2) This checks whether the location bar can be focused, and if not, clears
+  //     the focus.  FocusLocationBar() is only reached when the location bar is
+  //     focusable, but this may be reached at other times, e.g. while in
+  //     fullscreen mode, where we need to leave focus in a consistent state.
+  window_->SetFocusToLocationBar(select_all);
 }
 
 bool Browser::PreHandleKeyboardEvent(content::WebContents* source,
@@ -1411,6 +1438,9 @@ void Browser::NavigationStateChanged(WebContents* source,
   if (changed_flags & (content::INVALIDATE_TYPE_URL |
                        content::INVALIDATE_TYPE_LOAD))
     command_controller_->TabStateChanged();
+
+  if (bookmark_app_controller_)
+    bookmark_app_controller_->UpdateLocationBarVisibility(true);
 }
 
 void Browser::VisibleSSLStateChanged(const WebContents* source) {
@@ -1506,10 +1536,6 @@ void Browser::ContentsZoomChange(bool zoom_in) {
   chrome::ExecuteCommand(this, zoom_in ? IDC_ZOOM_PLUS : IDC_ZOOM_MINUS);
 }
 
-void Browser::WebContentsFocused(WebContents* contents) {
-  window_->WebContentsFocused(contents);
-}
-
 bool Browser::TakeFocus(content::WebContents* source,
                         bool reverse) {
   content::NotificationService::current()->Notify(
@@ -1554,17 +1580,6 @@ bool Browser::ShouldFocusLocationBarByDefault(WebContents* source) {
   }
 
   return chrome::NavEntryIsInstantNTP(source, entry);
-}
-
-void Browser::SetFocusToLocationBar(bool select_all) {
-  // Two differences between this and FocusLocationBar():
-  // (1) This doesn't get recorded in user metrics, since it's called
-  //     internally.
-  // (2) This checks whether the location bar can be focused, and if not, clears
-  //     the focus.  FocusLocationBar() is only reached when the location bar is
-  //     focusable, but this may be reached at other times, e.g. while in
-  //     fullscreen mode, where we need to leave focus in a consistent state.
-  window_->SetFocusToLocationBar(select_all);
 }
 
 void Browser::ViewSourceForTab(WebContents* source, const GURL& page_url) {
@@ -2405,7 +2420,7 @@ void Browser::TabDetachedAtImpl(content::WebContents* contents,
   }
 }
 
-bool Browser::ShouldShowLocationBar() const {
+bool Browser::SupportsLocationBar() const {
   // Tabbed browser always show a location bar.
   if (is_type_tabbed())
     return true;
@@ -2415,34 +2430,22 @@ bool Browser::ShouldShowLocationBar() const {
   if (!is_app())
     return !is_trusted_source();
 
-  if (ShouldUseWebAppFrame())
-    return false;
+  if (bookmark_app_controller_)
+    return bookmark_app_controller_->SupportsLocationBar();
 
-  // Bookmark apps should show the location bar.
-  const std::string extension_id =
-      web_app::GetExtensionIdFromApplicationName(app_name());
-  const extensions::Extension* extension =
-      extensions::ExtensionRegistry::Get(profile_)->GetExtensionById(
-          extension_id, extensions::ExtensionRegistry::EVERYTHING);
-  return extensions::ui_util::ShouldShowLocationBar(
-      extension, tab_strip_model_->GetActiveWebContents());
+  return false;
 }
 
 bool Browser::ShouldUseWebAppFrame() const {
   // Only use the web app frame for apps in ash, and only if the web app frame
   // is enabled.
-  if (!is_app() || host_desktop_type() != chrome::HOST_DESKTOP_TYPE_ASH ||
-      !IsWebAppFrameEnabled()) {
+  if (!is_app())
     return false;
-  }
 
-  // Use the web app frame for hosted apps.
-  const std::string extension_id =
-      web_app::GetExtensionIdFromApplicationName(app_name());
-  const extensions::Extension* extension =
-      extensions::ExtensionRegistry::Get(profile_)->GetExtensionById(
-          extension_id, extensions::ExtensionRegistry::EVERYTHING);
-  return extension && extension->from_bookmark();
+  if (bookmark_app_controller_)
+    return bookmark_app_controller_->should_use_web_app_frame();
+
+  return false;
 }
 
 bool Browser::SupportsWindowFeatureImpl(WindowFeature feature,
@@ -2464,7 +2467,7 @@ bool Browser::SupportsWindowFeatureImpl(WindowFeature feature,
     if (is_type_tabbed())
       features |= FEATURE_TOOLBAR;
 
-    if (ShouldShowLocationBar())
+    if (SupportsLocationBar())
       features |= FEATURE_LOCATIONBAR;
 
     if (ShouldUseWebAppFrame())

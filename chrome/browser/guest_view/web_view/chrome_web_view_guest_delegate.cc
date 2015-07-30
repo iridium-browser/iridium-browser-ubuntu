@@ -6,15 +6,15 @@
 #include "chrome/browser/guest_view/web_view/chrome_web_view_guest_delegate.h"
 
 #include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
-#include "chrome/browser/favicon/favicon_tab_helper.h"
+#include "chrome/browser/favicon/favicon_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_context_menu/render_view_context_menu.h"
 #include "chrome/browser/ui/pdf/chrome_pdf_web_contents_helper_client.h"
 #include "chrome/common/chrome_version_info.h"
 #include "components/browsing_data/storage_partition_http_cache_data_remover.h"
+#include "components/guest_view/browser/guest_view_event.h"
 #include "components/pdf/browser/pdf_web_contents_helper.h"
 #include "components/renderer_context_menu/context_menu_delegate.h"
-#include "components/web_cache/browser/web_cache_manager.h"
 #include "content/public/browser/render_process_host.h"
 #include "extensions/browser/api/web_request/web_request_api.h"
 #include "extensions/browser/guest_view/web_view/web_view_constants.h"
@@ -27,6 +27,8 @@
 #include "chrome/browser/printing/print_view_manager_basic.h"
 #endif  // defined(ENABLE_PRINT_PREVIEW)
 #endif  // defined(ENABLE_PRINTING)
+
+using guest_view::GuestViewEvent;
 
 namespace extensions {
 
@@ -41,28 +43,6 @@ ChromeWebViewGuestDelegate::ChromeWebViewGuestDelegate(
 ChromeWebViewGuestDelegate::~ChromeWebViewGuestDelegate() {
 }
 
-void ChromeWebViewGuestDelegate::ClearCache(
-    base::Time remove_since,
-    const base::Closure& done_callback) {
-  int render_process_id = guest_web_contents()->GetRenderProcessHost()->GetID();
-  // We need to clear renderer cache separately for our process because
-  // StoragePartitionHttpCacheDataRemover::ClearData() does not clear that.
-  web_cache::WebCacheManager::GetInstance()->Remove(render_process_id);
-  web_cache::WebCacheManager::GetInstance()->ClearCacheForProcess(
-      render_process_id);
-
-  content::StoragePartition* partition =
-      content::BrowserContext::GetStoragePartition(
-          guest_web_contents()->GetBrowserContext(),
-          guest_web_contents()->GetSiteInstance());
-
-  // StoragePartitionHttpCacheDataRemover removes itself when it is done.
-  // TODO(lazyboy): Once StoragePartitionHttpCacheDataRemover moves to
-  // components/, move |ClearCache| to WebViewGuest: http//crbug.com/471287.
-  browsing_data::StoragePartitionHttpCacheDataRemover::CreateForRange(
-      partition, remove_since, base::Time::Now())->Remove(done_callback);
-}
-
 bool ChromeWebViewGuestDelegate::HandleContextMenu(
     const content::ContextMenuParams& params) {
   ContextMenuDelegate* menu_delegate =
@@ -70,6 +50,11 @@ bool ChromeWebViewGuestDelegate::HandleContextMenu(
   DCHECK(menu_delegate);
 
   pending_menu_ = menu_delegate->BuildMenu(guest_web_contents(), params);
+  // It's possible for the returned menu to be null, so early out to avoid
+  // a crash. TODO(wjmaclean): find out why it's possible for this to happen
+  // in the first place, and if it's an error.
+  if (!pending_menu_)
+    return false;
 
   // Pass it to embedder.
   int request_id = ++pending_context_menu_request_id_;
@@ -79,7 +64,7 @@ bool ChromeWebViewGuestDelegate::HandleContextMenu(
   args->Set(webview::kContextMenuItems, items.release());
   args->SetInteger(webview::kRequestId, request_id);
   web_view_guest()->DispatchEventToView(
-      new GuestViewBase::Event(webview::kEventContextMenuShow, args.Pass()));
+      new GuestViewEvent(webview::kEventContextMenuShow, args.Pass()));
   return true;
 }
 
@@ -87,7 +72,7 @@ bool ChromeWebViewGuestDelegate::HandleContextMenu(
 // extension module in the future.
 void ChromeWebViewGuestDelegate::OnAttachWebViewHelpers(
     content::WebContents* contents) {
-  FaviconTabHelper::CreateForWebContents(contents);
+  favicon::CreateContentFaviconDriverForWebContents(contents);
   ChromeExtensionWebContentsObserver::CreateForWebContents(contents);
 #if defined(ENABLE_PRINTING)
 #if defined(ENABLE_PRINT_PREVIEW)
@@ -103,12 +88,6 @@ void ChromeWebViewGuestDelegate::OnAttachWebViewHelpers(
           new ChromePDFWebContentsHelperClient()));
 }
 
-void ChromeWebViewGuestDelegate::OnDidCommitProvisionalLoadForFrame(
-    bool is_main_frame) {
-  if (is_main_frame)
-    chromevox_injected_ = false;
-}
-
 void ChromeWebViewGuestDelegate::OnDidInitialize() {
 #if defined(OS_CHROMEOS)
   chromeos::AccessibilityManager* accessibility_manager =
@@ -120,18 +99,12 @@ void ChromeWebViewGuestDelegate::OnDidInitialize() {
 #endif
 }
 
-void ChromeWebViewGuestDelegate::OnDocumentLoadedInFrame(
-    content::RenderFrameHost* render_frame_host) {
-  if (!render_frame_host->GetParent())
-    InjectChromeVoxIfNeeded(render_frame_host->GetRenderViewHost());
-}
-
 void ChromeWebViewGuestDelegate::OnGuestDestroyed() {
   // Clean up custom context menu items for this guest.
   MenuManager* menu_manager = MenuManager::Get(
       Profile::FromBrowserContext(web_view_guest()->browser_context()));
   menu_manager->RemoveAllContextItems(MenuItem::ExtensionKey(
-      web_view_guest()->owner_extension_id(),
+      web_view_guest()->owner_host(),
       web_view_guest()->view_instance_id()));
 }
 

@@ -6,6 +6,7 @@
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/message_loop/message_loop.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/local_discovery/privet_http_impl.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_errors.h"
@@ -244,8 +245,8 @@ class PrivetHTTPTest : public ::testing::Test {
   PrivetHTTPTest() {
     PrivetURLFetcher::ResetTokenMapForTests();
 
-    request_context_= new net::TestURLRequestContextGetter(
-        base::MessageLoopProxy::current());
+    request_context_ = new net::TestURLRequestContextGetter(
+        base::ThreadTaskRunnerHandle::Get());
     privet_client_ =
         PrivetV1HTTPClient::CreateDefault(make_scoped_ptr<PrivetHTTPClient>(
             new PrivetHTTPClientImpl("sampleDevice._privet._tcp.local",
@@ -379,7 +380,7 @@ class MockRegisterDelegate : public PrivetRegisterOperation::Delegate {
   ~MockRegisterDelegate() {
   }
 
-  virtual void OnPrivetRegisterClaimToken(
+  void OnPrivetRegisterClaimToken(
       PrivetRegisterOperation* operation,
       const std::string& token,
       const GURL& url) override {
@@ -390,7 +391,7 @@ class MockRegisterDelegate : public PrivetRegisterOperation::Delegate {
       const std::string& token,
       const GURL& url));
 
-  virtual void OnPrivetRegisterError(
+  void OnPrivetRegisterError(
       PrivetRegisterOperation* operation,
       const std::string& action,
       PrivetRegisterOperation::FailureReason reason,
@@ -405,7 +406,7 @@ class MockRegisterDelegate : public PrivetRegisterOperation::Delegate {
                     PrivetRegisterOperation::FailureReason reason,
                     int printer_http_code));
 
-  virtual void OnPrivetRegisterDone(
+  void OnPrivetRegisterDone(
       PrivetRegisterOperation* operation,
       const std::string& device_id) override {
     OnPrivetRegisterDoneInternal(device_id);
@@ -439,9 +440,9 @@ class PrivetInfoTest : public PrivetHTTPTest {
  public:
   PrivetInfoTest() {}
 
-  virtual ~PrivetInfoTest() {}
+  ~PrivetInfoTest() override {}
 
-  virtual void SetUp() override {
+  void SetUp() override {
     info_operation_ = privet_client_->CreateInfoOperation(
         info_callback_.callback());
   }
@@ -485,10 +486,10 @@ class PrivetRegisterTest : public PrivetHTTPTest {
  public:
   PrivetRegisterTest() {
   }
-  virtual ~PrivetRegisterTest() {
+  ~PrivetRegisterTest() override {
   }
 
-  virtual void SetUp() override {
+  void SetUp() override {
     info_operation_ = privet_client_->CreateInfoOperation(
         info_callback_.callback());
     register_operation_ =
@@ -675,9 +676,9 @@ class PrivetCapabilitiesTest : public PrivetHTTPTest {
  public:
   PrivetCapabilitiesTest() {}
 
-  virtual ~PrivetCapabilitiesTest() {}
+  ~PrivetCapabilitiesTest() override {}
 
-  virtual void SetUp() override {
+  void SetUp() override {
     capabilities_operation_ = privet_client_->CreateCapabilitiesOperation(
         capabilities_callback_.callback());
   }
@@ -785,9 +786,9 @@ class PrivetLocalPrintTest : public PrivetHTTPTest {
  public:
   PrivetLocalPrintTest() {}
 
-  virtual ~PrivetLocalPrintTest() {}
+  ~PrivetLocalPrintTest() override {}
 
-  virtual void SetUp() override {
+  void SetUp() override {
     PrivetURLFetcher::ResetTokenMapForTests();
 
     local_print_operation_ = privet_client_->CreateLocalPrintOperation(

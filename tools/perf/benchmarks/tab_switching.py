@@ -66,7 +66,8 @@ class TabSwitchingFiveBlankTabs(benchmark.Benchmark):
 
 
 @benchmark.Enabled('has tabs')
-@benchmark.Disabled('android')  # http://crbug.com/460084
+# http://crbug.com/460084, http://crbug.com/488067
+@benchmark.Disabled('android', 'linux')
 class TabSwitchingToughEnergyCases(benchmark.Benchmark):
   """This test records the MPArch.RWH_TabSwitchPaintDuration histogram.
 
@@ -102,12 +103,26 @@ class TabSwitchingToughImageCases(benchmark.Benchmark):
     return 'tab_switching.tough_image_cases'
 
 
-@benchmark.Disabled  # Just for local testing, not on waterfall.
+@benchmark.Enabled('linux', 'mac', 'win', 'chromeos')
 class TabSwitchingFlashEnergyCases(benchmark.Benchmark):
   test = tab_switching.TabSwitching
   page_set = page_sets.FlashEnergyCasesPageSet
   options = {'pageset_repeat': 10}
+
   @classmethod
   def Name(cls):
     return 'tab_switching.flash_energy_cases'
 
+
+@benchmark.Enabled('linux', 'mac', 'win', 'chromeos')
+class TabSwitchingPluginPowerSaver(benchmark.Benchmark):
+  test = tab_switching.TabSwitching
+  page_set = page_sets.FlashEnergyCasesPageSet
+  options = {'pageset_repeat': 10}
+
+  def CustomizeBrowserOptions(self, options):
+    options.AppendExtraBrowserArgs(['--enable-plugin-power-saver'])
+
+  @classmethod
+  def Name(cls):
+    return 'tab_switching.plugin_power_saver'

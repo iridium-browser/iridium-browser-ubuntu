@@ -10,7 +10,6 @@
 #include "base/containers/hash_tables.h"
 #include "base/files/file_path.h"
 #include "base/json/json_file_value_serializer.h"
-#include "base/metrics/histogram.h"
 #include "base/sha1.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -166,7 +165,10 @@ SupervisedUserURLFilter::SupervisedUserURLFilter()
     : default_behavior_(ALLOW),
       contents_(new Contents()),
       blacklist_(nullptr),
-      blocking_task_runner_(BrowserThread::GetBlockingPool()) {
+      blocking_task_runner_(
+          BrowserThread::GetBlockingPool()
+              ->GetTaskRunnerWithShutdownBehavior(
+                  base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN).get()) {
   // Detach from the current thread so we can be constructed on a different
   // thread than the one where we're used.
   DetachFromThread();
@@ -417,22 +419,17 @@ void SupervisedUserURLFilter::SetManualHosts(
     const std::map<std::string, bool>* host_map) {
   DCHECK(CalledOnValidThread());
   host_map_ = *host_map;
-  UMA_HISTOGRAM_CUSTOM_COUNTS("ManagedMode.ManualHostsEntries",
-                              host_map->size(), 1, 1000, 50);
 }
 
 void SupervisedUserURLFilter::SetManualURLs(
     const std::map<GURL, bool>* url_map) {
   DCHECK(CalledOnValidThread());
   url_map_ = *url_map;
-  UMA_HISTOGRAM_CUSTOM_COUNTS("ManagedMode.ManualURLsEntries",
-                              url_map->size(), 1, 1000, 50);
 }
 
 void SupervisedUserURLFilter::InitAsyncURLChecker(
-    net::URLRequestContextGetter* context,
-    const std::string& cx) {
-  async_url_checker_.reset(new SupervisedUserAsyncURLChecker(context, cx));
+    net::URLRequestContextGetter* context) {
+  async_url_checker_.reset(new SupervisedUserAsyncURLChecker(context));
 }
 
 bool SupervisedUserURLFilter::HasAsyncURLChecker() const {

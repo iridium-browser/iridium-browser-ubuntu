@@ -79,6 +79,9 @@ const char kLaunchLocalPath[] = "app.launch.local_path";
 const char kLaunchWebURL[] = "app.launch.web_url";
 const char kLaunchWidth[] = "app.launch.width";
 const char kLayouts[] = "layouts";
+const char kLinkedAppIcons[] = "app.linked_icons";
+const char kLinkedAppIconURL[] = "url";
+const char kLinkedAppIconSize[] = "size";
 const char kManifestVersion[] = "manifest_version";
 const char kMatchAboutBlank[] = "match_about_blank";
 const char kMatches[] = "matches";
@@ -171,6 +174,7 @@ const char kUIOverride[] = "chrome_ui_overrides";
 const char kUpdateURL[] = "update_url";
 const char kUrlHandlers[] = "url_handlers";
 const char kUrlHandlerTitle[] = "title";
+const char kUsbPrinters[] = "usb_printers";
 const char kVersion[] = "version";
 const char kVersionName[] = "version_name";
 const char kWebAccessibleResources[] = "web_accessible_resources";
@@ -180,6 +184,10 @@ const char kWebviewAccessibleResources[] = "accessible_resources";
 const char kWebviewName[] = "name";
 const char kWebviewPartitions[] = "partitions";
 const char kWhitelist[] = "whitelist";
+#if defined(OS_CHROMEOS)
+const char kFileSystemProviderCapabilities[] =
+    "file_system_provider_capabilities";
+#endif
 
 }  // namespace manifest_keys
 
@@ -464,6 +472,14 @@ const char kInvalidLaunchValue[] =
     "Invalid value for '*'.";
 const char kInvalidLaunchValueContainer[] =
     "Invalid container type for '*'.";
+const char kInvalidLinkedAppIcon[] =
+    "Invalid linked app icon. Must be a dictionary";
+const char kInvalidLinkedAppIconSize[] =
+    "Invalid 'size' for linked app icon. Must be an integer";
+const char kInvalidLinkedAppIconURL[] =
+    "Invalid 'url' for linked app icon. Must be a string that is a valid URL";
+const char kInvalidLinkedAppIcons[] =
+    "Invalid 'app.linked_icons'. Must be an array";
 const char kInvalidManifest[] =
     "Manifest file is invalid.";
 const char kInvalidManifestVersion[] =
@@ -697,7 +713,14 @@ const char kWebRequestConflictsWithLazyBackground[] =
     "The 'webRequest' API cannot be used with event pages.";
 #if defined(OS_CHROMEOS)
 const char kIllegalPlugins[] =
-    "Extensions cannot install plugins on Chrome OS";
+    "Extensions cannot install plugins on Chrome OS.";
+const char kInvalidFileSystemProviderMissingCapabilities[] =
+    "The 'fileSystemProvider' permission requires the "
+    "'file_system_provider_capabilities' section to be specified in the "
+    "manifest.";
+const char kInvalidFileSystemProviderMissingPermission[] =
+    "The 'file_system_provider_capabilities' section requires the "
+    "'fileSystemProvider' permission to be specified in the manifest.";
 #endif
 
 }  // namespace manifest_errors

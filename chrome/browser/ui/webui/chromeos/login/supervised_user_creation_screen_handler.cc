@@ -165,6 +165,9 @@ void SupervisedUserCreationScreenHandler::RegisterMessages() {
   AddCallback("abortLocalSupervisedUserCreation",
               &SupervisedUserCreationScreenHandler::
                   HandleAbortLocalSupervisedUserCreation);
+  AddCallback("hideLocalSupervisedUserCreation",
+              &SupervisedUserCreationScreenHandler::
+                  HandleHideLocalSupervisedUserCreation);
   AddCallback("checkSupervisedUserName",
               &SupervisedUserCreationScreenHandler::
                   HandleCheckSupervisedUserName);
@@ -222,10 +225,8 @@ void SupervisedUserCreationScreenHandler::Show() {
     bool is_owner = ((*it)->email() == owner);
     base::DictionaryValue* user_dict = new base::DictionaryValue();
     UserSelectionScreen::FillUserDictionary(
-        *it,
-        is_owner,
-        false, /* is_signin_to_add */
-        ScreenlockBridge::LockHandler::OFFLINE_PASSWORD,
+        *it, is_owner, false, /* is_signin_to_add */
+        proximity_auth::ScreenlockBridge::LockHandler::OFFLINE_PASSWORD,
         NULL, /* public_session_recommended_locales */
         user_dict);
     users_list->Append(user_dict);
@@ -284,6 +285,11 @@ void SupervisedUserCreationScreenHandler::
 void SupervisedUserCreationScreenHandler::
     HandleAbortLocalSupervisedUserCreation() {
   delegate_->AbortFlow();
+}
+
+void SupervisedUserCreationScreenHandler::
+    HandleHideLocalSupervisedUserCreation() {
+  delegate_->HideFlow();
 }
 
 void SupervisedUserCreationScreenHandler::HandleManagerSelected(

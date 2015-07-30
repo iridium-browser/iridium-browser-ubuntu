@@ -14,15 +14,17 @@ import cookielib
 import datetime
 import httplib
 import json
-import logging
 import netrc
 import os
 import socket
+import sys
 import urllib
 import urlparse
 from cStringIO import StringIO
 
 from chromite.cbuildbot import constants
+from chromite.lib import cros_logging as logging
+from chromite.lib import git
 from chromite.lib import retry_util
 
 
@@ -30,7 +32,6 @@ try:
   NETRC = netrc.netrc()
 except (IOError, netrc.NetrcParseError):
   NETRC = netrc.netrc(os.devnull)
-LOGGER = logging.getLogger()
 TRY_LIMIT = 10
 SLEEP = 0.5
 
@@ -101,23 +102,30 @@ def CreateHttpConn(host, path, reqtype='GET', headers=None, body=None):
     headers.setdefault('Authorization', 'Basic %s' % (
         base64.b64encode('%s:%s' % (auth[0], auth[2]))))
   else:
-    LOGGER.debug('No netrc file found')
+    logging.debug('No netrc file found')
 
   if 'Cookie' not in headers:
     cookies = GetCookies(host, '/a/%s' % path)
     headers['Cookie'] = '; '.join('%s=%s' % (n, v) for n, v in cookies.items())
 
+  if 'User-Agent' not in headers:
+    headers['User-Agent'] = ' '.join((
+        'chromite.lib.gob_util',
+        os.path.basename(sys.argv[0]),
+        git.GetGitRepoRevision(os.path.dirname(os.path.realpath(__file__))),
+    ))
+
   if body:
     body = json.JSONEncoder().encode(body)
     headers.setdefault('Content-Type', 'application/json')
-  if LOGGER.isEnabledFor(logging.DEBUG):
-    LOGGER.debug('%s https://%s/a/%s', reqtype, host, path)
+  if logging.getLogger().isEnabledFor(logging.DEBUG):
+    logging.debug('%s https://%s/a/%s', reqtype, host, path)
     for key, val in headers.iteritems():
       if key.lower() in ('authorization', 'cookie'):
         val = 'HIDDEN'
-      LOGGER.debug('%s: %s', key, val)
+      logging.debug('%s: %s', key, val)
     if body:
-      LOGGER.debug(body)
+      logging.debug(body)
   conn = httplib.HTTPSConnection(host)
   conn.req_host = host
   conn.req_params = {
@@ -155,7 +163,7 @@ def FetchUrl(host, path, reqtype='GET', headers=None, body=None,
                             body=body)
       response = conn.getresponse()
     except socket.error as ex:
-      LOGGER.warn('%s%s', err_prefix, str(ex))
+      logging.warn('%s%s', err_prefix, str(ex))
       raise
 
     # Normal/good responses.
@@ -166,7 +174,7 @@ def FetchUrl(host, path, reqtype='GET', headers=None, body=None,
       return StringIO(response_body)
 
     # Bad responses.
-    LOGGER.debug('response msg:\n%s', response.msg)
+    logging.debug('response msg:\n%s', response.msg)
     http_version = 'HTTP/%s' % ('1.1' if response.version == 11 else '1.0')
     msg = ('%s %s %s\n%s %d %s\nResponse body: %r' %
            (reqtype, conn.req_params['url'], http_version,
@@ -176,7 +184,7 @@ def FetchUrl(host, path, reqtype='GET', headers=None, body=None,
     # Ones we can retry.
     if response.status >= 500:
       # A status >=500 is assumed to be a possible transient error; retry.
-      LOGGER.warn('%s%s', err_prefix, msg)
+      logging.warn('%s%s', err_prefix, msg)
       raise InternalGOBError(response.status, response.reason)
 
     # Ones we cannot retry.
@@ -195,15 +203,15 @@ def FetchUrl(host, path, reqtype='GET', headers=None, body=None,
 
     if response.status >= 400:
       # The 'X-ErrorId' header is set only on >= 400 response code.
-      LOGGER.warn('%s\n%s\nX-ErrorId: %s', err_prefix, msg,
-                  response.getheader('X-ErrorId'))
+      logging.warn('%s\n%s\nX-ErrorId: %s', err_prefix, msg,
+                   response.getheader('X-ErrorId'))
     else:
-      LOGGER.warn('%s\n%s', err_prefix, msg)
+      logging.warn('%s\n%s', err_prefix, msg)
 
     try:
-      LOGGER.warn('conn.sock.getpeername(): %s', conn.sock.getpeername())
+      logging.warn('conn.sock.getpeername(): %s', conn.sock.getpeername())
     except AttributeError:
-      LOGGER.warn('peer name unavailable')
+      logging.warn('peer name unavailable')
     raise GOBError(response.status, response.reason)
 
   return retry_util.RetryException((socket.error, InternalGOBError), TRY_LIMIT,
@@ -511,8 +519,8 @@ def GetCommitDate(git_url, commit):
   information - you should assume UTC.
 
   Args:
-     git_url: URL for the repository to get the commit date from.
-     commit: A git commit identifier (e.g. a sha1).
+    git_url: URL for the repository to get the commit date from.
+    commit: A git commit identifier (e.g. a sha1).
 
   Returns:
      A datetime object.

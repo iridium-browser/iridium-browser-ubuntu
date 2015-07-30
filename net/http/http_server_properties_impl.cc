@@ -27,7 +27,7 @@ HttpServerPropertiesImpl::HttpServerPropertiesImpl()
       alternative_service_map_(AlternativeServiceMap::NO_AUTO_EVICT),
       spdy_settings_map_(SpdySettingsMap::NO_AUTO_EVICT),
       server_network_stats_map_(ServerNetworkStatsMap::NO_AUTO_EVICT),
-      alternate_protocol_probability_threshold_(1),
+      alternative_service_probability_threshold_(1.0),
       weak_ptr_factory_(this) {
   canonical_suffixes_.push_back(".c.youtube.com");
   canonical_suffixes_.push_back(".googlevideo.com");
@@ -157,14 +157,23 @@ bool HttpServerPropertiesImpl::SupportsRequestPriority(
   if (host_port_pair.host().empty())
     return false;
 
-  SpdyServerHostPortMap::iterator spdy_host_port =
-      spdy_servers_map_.Get(host_port_pair.ToString());
-  if (spdy_host_port != spdy_servers_map_.end() && spdy_host_port->second)
+  if (GetSupportsSpdy(host_port_pair))
     return true;
 
   const AlternativeService alternative_service =
       GetAlternativeService(host_port_pair);
   return alternative_service.protocol == QUIC;
+}
+
+bool HttpServerPropertiesImpl::GetSupportsSpdy(
+    const HostPortPair& host_port_pair) {
+  DCHECK(CalledOnValidThread());
+  if (host_port_pair.host().empty())
+    return false;
+
+  SpdyServerHostPortMap::iterator spdy_host_port =
+      spdy_servers_map_.Get(host_port_pair.ToString());
+  return spdy_host_port != spdy_servers_map_.end() && spdy_host_port->second;
 }
 
 void HttpServerPropertiesImpl::SetSupportsSpdy(
@@ -185,7 +194,7 @@ void HttpServerPropertiesImpl::SetSupportsSpdy(
 }
 
 bool HttpServerPropertiesImpl::RequiresHTTP11(
-    const net::HostPortPair& host_port_pair) {
+    const HostPortPair& host_port_pair) {
   DCHECK(CalledOnValidThread());
   if (host_port_pair.host().empty())
     return false;
@@ -194,7 +203,7 @@ bool HttpServerPropertiesImpl::RequiresHTTP11(
 }
 
 void HttpServerPropertiesImpl::SetHTTP11Required(
-    const net::HostPortPair& host_port_pair) {
+    const HostPortPair& host_port_pair) {
   DCHECK(CalledOnValidThread());
   if (host_port_pair.host().empty())
     return;
@@ -227,7 +236,7 @@ AlternativeService HttpServerPropertiesImpl::GetAlternativeService(
   AlternativeServiceMap::const_iterator it =
       alternative_service_map_.Get(origin);
   if (it != alternative_service_map_.end()) {
-    if (it->second.probability < alternate_protocol_probability_threshold_) {
+    if (it->second.probability < alternative_service_probability_threshold_) {
       return AlternativeService();
     }
     AlternativeService alternative_service(it->second.alternative_service);
@@ -245,7 +254,7 @@ AlternativeService HttpServerPropertiesImpl::GetAlternativeService(
   if (it == alternative_service_map_.end()) {
     return AlternativeService();
   }
-  if (it->second.probability < alternate_protocol_probability_threshold_) {
+  if (it->second.probability < alternative_service_probability_threshold_) {
     return AlternativeService();
   }
   AlternativeService alternative_service(it->second.alternative_service);
@@ -290,7 +299,7 @@ void HttpServerPropertiesImpl::SetAlternativeService(
                    << alternative_service_info.ToString() << ".";
     }
   } else {
-    if (alternative_probability >= alternate_protocol_probability_threshold_) {
+    if (alternative_probability >= alternative_service_probability_threshold_) {
       // TODO(rch): Consider the case where multiple requests are started
       // before the first completes. In this case, only one of the jobs
       // would reach this code, whereas all of them should should have.
@@ -506,9 +515,9 @@ HttpServerPropertiesImpl::server_network_stats_map() const {
   return server_network_stats_map_;
 }
 
-void HttpServerPropertiesImpl::SetAlternateProtocolProbabilityThreshold(
+void HttpServerPropertiesImpl::SetAlternativeServiceProbabilityThreshold(
     double threshold) {
-  alternate_protocol_probability_threshold_ = threshold;
+  alternative_service_probability_threshold_ = threshold;
 }
 
 AlternativeServiceMap::const_iterator

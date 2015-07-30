@@ -97,7 +97,7 @@ const FX_DWORD g_dwMacPalette[256] = {
     0xffEEEEEE, 0xffDDDDDD, 0xffBBBBBB, 0xffAAAAAA, 0xff888888, 0xff777777,
     0xff555555, 0xff444444, 0xff222222, 0xff111111, 0xff000000
 };
-class CFX_Palette : public CFX_Object
+class CFX_Palette 
 {
 public:
     CFX_Palette();
@@ -942,10 +942,7 @@ CFX_DIBitmap* CFX_DIBSource::CloneConvert(FXDIB_Format dest_format, const FX_REC
         }
         return pClone;
     }
-    CFX_DIBitmap* pClone = FX_NEW CFX_DIBitmap;
-    if (!pClone) {
-        return NULL;
-    }
+    CFX_DIBitmap* pClone = new CFX_DIBitmap;
     if(!pClone->Create(m_Width, m_Height, dest_format)) {
         delete pClone;
         return NULL;
@@ -1015,7 +1012,7 @@ FX_BOOL CFX_DIBitmap::ConvertFormat(FXDIB_Format dest_format, void* pIccTransfor
     }
     int dest_bpp = dest_format & 0xff;
     int dest_pitch = (dest_bpp * m_Width + 31) / 32 * 4;
-    FX_LPBYTE dest_buf = FX_AllocNL(FX_BYTE, dest_pitch * m_Height + 4);
+    FX_LPBYTE dest_buf = FX_TryAlloc(FX_BYTE, dest_pitch * m_Height + 4);
     if (dest_buf == NULL) {
         return FALSE;
     }

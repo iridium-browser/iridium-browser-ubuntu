@@ -86,6 +86,7 @@ void IOSurfaceLayerImpl::AppendQuads(
                io_surface_size_,
                io_surface_resource_id_,
                IOSurfaceDrawQuad::FLIPPED);
+  ValidateQuadResources(quad);
 }
 
 void IOSurfaceLayerImpl::ReleaseResources() {

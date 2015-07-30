@@ -6,9 +6,9 @@
 
 from __future__ import print_function
 
+import collections
 import datetime
 import glob
-import logging
 import os
 import re
 try:
@@ -22,9 +22,12 @@ except ImportError:
       '`sudo apt-get install python-sqlalchemy` or similar.')
 
 from chromite.cbuildbot import constants
-from chromite.lib import retry_stats
 from chromite.lib import clactions
+from chromite.lib import cros_logging as logging
 from chromite.lib import factory
+from chromite.lib import osutils
+from chromite.lib import retry_stats
+
 
 CIDB_MIGRATIONS_DIR = os.path.join(constants.CHROMITE_DIR, 'cidb',
                                    'migrations')
@@ -95,13 +98,51 @@ class StrictModeListener(sqlalchemy.interfaces.PoolListener):
     cur.close()
 
 
+# Tuple to keep arguments that modify SQL query retry behaviour of
+# SchemaVersionedMySQLConnection.
+SqlConnectionRetryArgs = collections.namedtuple(
+    'SqlConnectionRetryArgs',
+    ('max_retry', 'sleep', 'backoff_factor'))
+
+
 class SchemaVersionedMySQLConnection(object):
   """Connection to a database that is aware of its schema version."""
 
   SCHEMA_VERSION_TABLE_NAME = 'schemaVersionTable'
   SCHEMA_VERSION_COL = 'schemaVersion'
 
-  def __init__(self, db_name, db_migrations_dir, db_credentials_dir):
+  def _UpdateConnectUrlArgs(self, key, db_credentials_dir, filename):
+    """Read an argument for the sql connection from the given file.
+
+    side effect: store argument in self._connect_url_args
+
+    Args:
+      key: Name of the argument to read.
+      db_credentials_dir: The directory containing the credentials.
+      filename: Name of the file to read.
+    """
+    file_path = os.path.join(db_credentials_dir, filename)
+    if os.path.exists(file_path):
+      self._connect_url_args[key] = osutils.ReadFile(file_path).strip()
+
+  def _UpdateSslArgs(self, key, db_credentials_dir, filename):
+    """Read an ssl argument for the sql connection from the given file.
+
+    side effect: store argument in self._ssl_args
+
+    Args:
+      key: Name of the ssl argument to read.
+      db_credentials_dir: The directory containing the credentials.
+      filename: Name of the file to read.
+    """
+    file_path = os.path.join(db_credentials_dir, filename)
+    if os.path.exists(file_path):
+      if 'ssl' not in self._ssl_args:
+        self._ssl_args['ssl'] = {}
+      self._ssl_args['ssl'][key] = file_path
+
+  def __init__(self, db_name, db_migrations_dir, db_credentials_dir,
+               query_retry_args=SqlConnectionRetryArgs(8, 4, 2)):
     """SchemaVersionedMySQLConnection constructor.
 
     Args:
@@ -110,9 +151,13 @@ class SchemaVersionedMySQLConnection(object):
                          for this database.
       db_credentials_dir: Absolute path to directory containing connection
                           information to the database. Specifically, this
-                          directory should contain files names user.txt,
-                          password.txt, host.txt, client-cert.pem,
-                          client-key.pem, and server-ca.pem
+                          directory may contain files names user.txt,
+                          password.txt, host.txt, port.txt, client-cert.pem,
+                          client-key.pem, and server-ca.pem This object will
+                          silently drop the relevant mysql commandline flags for
+                          missing files in the directory.
+      query_retry_args: An optional SqlConnectionRetryArgs tuple to tweak the
+                        retry behaviour of SQL queries.
     """
     # None, or a sqlalchemy.MetaData instance
     self._meta = None
@@ -125,22 +170,22 @@ class SchemaVersionedMySQLConnection(object):
     self.db_migrations_dir = db_migrations_dir
     self.db_credentials_dir = db_credentials_dir
     self.db_name = db_name
+    self.query_retry_args = query_retry_args
 
-    with open(os.path.join(db_credentials_dir, 'password.txt')) as f:
-      password = f.read().strip()
-    with open(os.path.join(db_credentials_dir, 'host.txt')) as f:
-      host = f.read().strip()
-    with open(os.path.join(db_credentials_dir, 'user.txt')) as f:
-      user = f.read().strip()
+    # mysql args that are optionally provided by files in db_credentials_dir
+    self._connect_url_args = {}
+    self._ssl_args = {}
 
-    cert = os.path.join(db_credentials_dir, 'client-cert.pem')
-    key = os.path.join(db_credentials_dir, 'client-key.pem')
-    ca = os.path.join(db_credentials_dir, 'server-ca.pem')
-    self._ssl_args = {'ssl': {'cert': cert, 'key': key, 'ca': ca}}
+    self._UpdateConnectUrlArgs('host', db_credentials_dir, 'host.txt')
+    self._UpdateConnectUrlArgs('port', db_credentials_dir, 'port.txt')
+    self._UpdateConnectUrlArgs('username', db_credentials_dir, 'user.txt')
+    self._UpdateConnectUrlArgs('password', db_credentials_dir, 'password.txt')
 
-    connect_url = sqlalchemy.engine.url.URL('mysql', username=user,
-                                            password=password,
-                                            host=host)
+    self._UpdateSslArgs('cert', db_credentials_dir, 'client-cert.pem')
+    self._UpdateSslArgs('key', db_credentials_dir, 'client-key.pem')
+    self._UpdateSslArgs('ca', db_credentials_dir, 'server-ca.pem')
+
+    connect_url = sqlalchemy.engine.url.URL('mysql', **self._connect_url_args)
 
     # Create a temporary engine to connect to the mysql instance, and check if
     # a database named |db_name| exists. If not, create one. We use a temporary
@@ -160,9 +205,9 @@ class SchemaVersionedMySQLConnection(object):
     # Now create the persistent connection to the database named |db_name|.
     # If there is a schema version table, read the current schema version
     # from it. Otherwise, assume schema_version 0.
-    self._connect_url = sqlalchemy.engine.url.URL('mysql', username=user,
-                                                  password=password,
-                                                  host=host, database=db_name)
+    self._connect_url_args['database'] = db_name
+    self._connect_url = sqlalchemy.engine.url.URL('mysql',
+                                                  **self._connect_url_args)
 
     self.schema_version = self.QuerySchemaVersion()
 
@@ -310,7 +355,7 @@ class SchemaVersionedMySQLConnection(object):
 
     Raises:
       DBException if the table does not have a single column primary key.
-   """
+    """
     self._ReflectToMetadata()
     t = self._meta.tables[table]
 
@@ -453,9 +498,9 @@ class SchemaVersionedMySQLConnection(object):
     return retry_stats.RetryWithStats(
         retry_stats.CIDB,
         handler=_IsRetryableException,
-        max_retry=8,
-        sleep=4,
-        backoff_factor=2,
+        max_retry=self.query_retry_args.max_retry,
+        sleep=self.query_retry_args.sleep,
+        backoff_factor=self.query_retry_args.backoff_factor,
         functor=f)
 
   def _GetEngine(self):
@@ -502,9 +547,9 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
 
   NUM_RESULTS_NO_LIMIT = -1
 
-  def __init__(self, db_credentials_dir):
+  def __init__(self, db_credentials_dir, *args, **kwargs):
     super(CIDBConnection, self).__init__('cidb', CIDB_MIGRATIONS_DIR,
-                                         db_credentials_dir)
+                                         db_credentials_dir, *args, **kwargs)
 
   def GetTime(self):
     """Gets the current time, according to database.
@@ -690,11 +735,12 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
         (2) The new deadline requested is earlier than the original deadline.
     """
     return self._Execute(
-        'UPDATE buildTable SET deadline = NOW() + INTERVAL %s SECOND WHERE '
-        'id = %s AND '
+        'UPDATE buildTable SET deadline = NOW() + INTERVAL %d SECOND WHERE '
+        'id = %d AND '
         '(deadline = 0 OR deadline > NOW()) AND '
-        'NOW() + INTERVAL %s SECOND > deadline',
-        timeout_seconds, build_id, timeout_seconds).rowcount
+        'NOW() + INTERVAL %d SECOND > deadline'
+        % (timeout_seconds, build_id, timeout_seconds)
+        ).rowcount
 
   @minimum_schema(6)
   def UpdateBoardPerBuildMetadata(self, build_id, board, board_metadata):
@@ -711,7 +757,7 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
     }
     return self._UpdateWhere(
         'boardPerBuildTable',
-        'build_id = %s and board = "%s"' % (build_id, board),
+        'build_id = %d and board = "%s"' % (build_id, board),
         update_dict)
 
   @minimum_schema(28)
@@ -789,7 +835,7 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
     self._Execute(
         'UPDATE childConfigPerBuildTable '
         'SET status="%s", final=1 '
-        'WHERE (build_id, child_config) = (%s, "%s")' %
+        'WHERE (build_id, child_config) = (%d, "%s")' %
         (status, build_id, child_config))
 
 
@@ -816,14 +862,16 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
 
     Returns:
       A list of dictionary with keys (id, build_config, start_time,
-      finish_time, status, waterfall, build_number, builder_name, full_version),
-      or None if no build with this id was found.
+      finish_time, status, waterfall, build_number, builder_name,
+      platform_version, full_version), or None if no build with this
+      id was found.
     """
     return self._SelectWhere(
         'buildTable',
-        'id IN (%s)' % ','.join(str(x) for x in build_ids),
+        'id IN (%s)' % ','.join(str(int(x)) for x in build_ids),
         ['id', 'build_config', 'start_time', 'finish_time', 'status',
-         'waterfall', 'build_number', 'builder_name', 'full_version'])
+         'waterfall', 'build_number', 'builder_name', 'platform_version',
+         'full_version'])
 
   @minimum_schema(2)
   def GetSlaveStatuses(self, master_build_id):
@@ -838,9 +886,32 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
       with keys (id, build_config, start_time, finish_time, status).
     """
     return self._SelectWhere('buildTable',
-                             'master_build_id = %s' % master_build_id,
+                             'master_build_id = %d' % master_build_id,
                              ['id', 'build_config', 'start_time',
                               'finish_time', 'status'])
+
+  @minimum_schema(30)
+  def GetSlaveStages(self, master_build_id):
+    """Gets all the stages of slave builds to given build.
+
+    Args:
+      master_build_id: build id of the master build to fetch the slave
+                       stages for.
+
+    Returns:
+      A list containing, for each stage of each slave build found,
+      a dictionary with keys (id, build_id, name, board, status, last_updated,
+      start_time, finish_time, final, build_config).
+    """
+    bs_table_columns = ['id', 'build_id', 'name', 'board', 'status',
+                        'last_updated', 'start_time', 'finish_time', 'final']
+    bs_prepended_columns = ['bs.' + x for x in bs_table_columns]
+    results = self._Execute(
+        'SELECT %s, b.build_config FROM buildStageTable bs JOIN buildTable b '
+        'ON build_id = b.id where b.master_build_id = %d' %
+        (', '.join(bs_prepended_columns), master_build_id)).fetchall()
+    columns = bs_table_columns + ['build_config']
+    return [dict(zip(columns, values)) for values in results]
 
   @minimum_schema(32)
   def GetTimeToDeadline(self, build_id):
@@ -863,7 +934,7 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
     # separately.
     r = self._Execute(
         'SELECT deadline >= NOW(), TIMEDIFF(deadline, NOW()) '
-        'from buildTable where id = %s' % build_id).fetchall()
+        'from buildTable where id = %d' % build_id).fetchall()
     if not r:
       return None
 
@@ -899,14 +970,14 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
           master for which data should be retrieved.
 
     Returns:
-      A sorted list of dicts containining up to |number| dictionaries for
+      A sorted list of dicts containing up to |number| dictionaries for
       build statuses in descending order. Valid keys in the dictionary are
       [id, build_config, buildbot_generation, waterfall, build_number,
-      start_time, finish_time, full_version, status].
+      start_time, finish_time, platform_version, full_version, status].
     """
     columns = ['id', 'build_config', 'buildbot_generation', 'waterfall',
-               'build_number', 'start_time', 'finish_time', 'full_version',
-               'status']
+               'build_number', 'start_time', 'finish_time', 'platform_version',
+               'full_version', 'status']
 
     where_clauses = ['build_config = "%s"' % build_config]
     if start_date is not None:
@@ -918,7 +989,7 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
     if starting_build_number is not None:
       where_clauses.append('build_number >= %d' % starting_build_number)
     if ignore_build_id is not None:
-      where_clauses.append('id != %s' % ignore_build_id)
+      where_clauses.append('id != %d' % ignore_build_id)
     query = (
         'SELECT %s'
         ' FROM buildTable'
@@ -947,7 +1018,7 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
                          'blame_url', 'notes']
     where_or_clauses = []
     for build_id in build_ids:
-      where_or_clauses.append('build_id = %s' % build_id)
+      where_or_clauses.append('build_id = %d' % build_id)
     annotations = self._SelectWhere('annotationsTable',
                                     ' OR '.join(where_or_clauses),
                                     ['build_id'] + columns_to_report)
@@ -983,7 +1054,7 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
     for change in changes:
       change_number = int(change.gerrit_number)
       change_source = 'internal' if change.internal else 'external'
-      clauses.append('(change_number, change_source) = (%s, "%s")' %
+      clauses.append('(change_number, change_source) = (%d, "%s")' %
                      (change_number, change_source))
     clause = ' OR '.join(clauses)
     results = self._Execute(
@@ -1017,7 +1088,8 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
                'FROM clActionTable WHERE %s' % conds)
     query = '%s NATURAL JOIN (%s) as w' % (self._SQL_FETCH_ACTIONS, changes)
     results = self._Execute(query, values).fetchall()
-    return [clactions.CLAction(*values) for values in results]
+    return clactions.CLActionHistory(clactions.CLAction(*values)
+                                     for values in results)
 
   @minimum_schema(29)
   def HasBuildStageFailed(self, build_stage_id):
@@ -1030,7 +1102,7 @@ class CIDBConnection(SchemaVersionedMySQLConnection):
       True if there is a failure reported for this build stage to cidb.
     """
     failures = self._SelectWhere('failureTable',
-                                 'build_stage_id = %s' % build_stage_id,
+                                 'build_stage_id = %d' % build_stage_id,
                                  ['id'])
     return bool(failures)
 

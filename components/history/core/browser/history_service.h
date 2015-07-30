@@ -63,7 +63,7 @@ class HistoryDatabase;
 struct HistoryDatabaseParams;
 class HistoryQueryTest;
 class HistoryServiceObserver;
-class HistoryTest;
+class HistoryServiceTest;
 class InMemoryHistoryBackend;
 struct KeywordSearchTermVisit;
 class PageUsageData;
@@ -520,7 +520,7 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
   friend class HistoryQueryTest;
   friend class HistoryOperation;
   friend class ::HistoryQuickProviderTest;
-  friend class HistoryTest;
+  friend class HistoryServiceTest;
   friend class ::HistoryURLProvider;
   friend class ::HistoryURLProviderTest;
   friend class ::InMemoryURLIndexTest;
@@ -564,9 +564,6 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
   bool GetRowForURL(const GURL& url, URLRow* url_row);
 
   // Observers ----------------------------------------------------------------
-
-  // Notify all Observers registered that the VisitDatabase was changed.
-  void NotifyAddVisit(const BriefVisitInfo& info);
 
   // Notify all HistoryServiceObservers registered that user is visiting a URL.
   // The |row| ID will be set to the value that is currently in effect in the
@@ -747,10 +744,6 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
   // Used by the FaviconService to mark the favicon for the page as being out
   // of date.
   void SetFaviconsOutOfDateForPage(const GURL& page_url);
-
-  // Used by the FaviconService to clone favicons from one page to another,
-  // provided that other page does not already have favicons.
-  void CloneFavicons(const GURL& old_page_url, const GURL& new_page_url);
 
   // Used by the FaviconService for importing many favicons for many pages at
   // once. The pages must exist, any favicon sets for unknown pages will be

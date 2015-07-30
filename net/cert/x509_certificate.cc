@@ -46,7 +46,7 @@ const char kCertificateHeader[] = "CERTIFICATE";
 // The PEM block header used for PKCS#7 data
 const char kPKCS7Header[] = "PKCS7";
 
-#if !defined(USE_NSS)
+#if !defined(USE_NSS_CERTS)
 // A thread-safe cache for OS certificate handles.
 //
 // Within each of the supported underlying crypto libraries, a certificate
@@ -187,19 +187,19 @@ void X509CertificateCache::Remove(X509Certificate::OSCertHandle cert_handle) {
     cache_.erase(pos);
   }
 }
-#endif  // !defined(USE_NSS)
+#endif  // !defined(USE_NSS_CERTS)
 
 // See X509CertificateCache::InsertOrUpdate. NSS has a built-in cache, so there
 // is no point in wrapping another cache around it.
 void InsertOrUpdateCache(X509Certificate::OSCertHandle* cert_handle) {
-#if !defined(USE_NSS)
+#if !defined(USE_NSS_CERTS)
   g_x509_certificate_cache.Pointer()->InsertOrUpdate(cert_handle);
 #endif
 }
 
 // See X509CertificateCache::Remove.
 void RemoveFromCache(X509Certificate::OSCertHandle cert_handle) {
-#if !defined(USE_NSS)
+#if !defined(USE_NSS_CERTS)
   g_x509_certificate_cache.Pointer()->Remove(cert_handle);
 #endif
 }
@@ -263,7 +263,7 @@ X509Certificate* X509Certificate::CreateFromHandle(
 // static
 X509Certificate* X509Certificate::CreateFromDERCertChain(
     const std::vector<base::StringPiece>& der_certs) {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is fixed.
+  // TODO(cbentzel): Remove ScopedTracker below once crbug.com/424386 is fixed.
   tracked_objects::ScopedTracker tracking_profile(
       FROM_HERE_WITH_EXPLICIT_FUNCTION(
           "424386 X509Certificate::CreateFromDERCertChain"));

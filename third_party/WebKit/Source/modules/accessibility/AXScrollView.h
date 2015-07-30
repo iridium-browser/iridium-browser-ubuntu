@@ -46,12 +46,11 @@ public:
 
 protected:
     virtual ScrollableArea* getScrollableAreaIfScrollable() const override;
-    virtual void scrollTo(const IntPoint&) const override;
 
 private:
     AXScrollView(FrameView*, AXObjectCacheImpl*);
 
-    virtual bool computeAccessibilityIsIgnored() const override;
+    virtual bool computeAccessibilityIsIgnored(IgnoredReasons* = nullptr) const override;
     virtual bool isAXScrollView() const override { return true; }
     virtual bool isEnabled() const override { return true; }
 

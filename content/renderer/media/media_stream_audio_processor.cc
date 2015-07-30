@@ -80,15 +80,24 @@ bool IsDelayAgnosticAecEnabled() {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kEnableDelayAgnosticAec))
     return true;
+  if (command_line->HasSwitch(switches::kDisableDelayAgnosticAec))
+    return false;
 
   return (group_name == "Enabled" || group_name == "DefaultEnabled");
 }
 
 bool IsBeamformingEnabled(const MediaAudioConstraints& audio_constraints) {
-  return audio_constraints.GetProperty(
-             MediaAudioConstraints::kGoogBeamforming) ||
-         base::FieldTrialList::FindFullName("ChromebookBeamforming") ==
-             "Enabled";
+  return base::FieldTrialList::FindFullName("ChromebookBeamforming") ==
+             "Enabled" ||
+         audio_constraints.GetProperty(MediaAudioConstraints::kGoogBeamforming);
+}
+
+bool IsAudioProcessing48kHzSupportEnabled(
+    const MediaAudioConstraints& audio_constraints) {
+  return base::FieldTrialList::FindFullName("AudioProcessing48kHzSupport") ==
+             "Enabled" ||
+         audio_constraints.GetProperty(
+             MediaAudioConstraints::kGoogAudioProcessing48kHzSupport);
 }
 
 }  // namespace
@@ -465,8 +474,8 @@ void MediaStreamAudioProcessor::InitializeAudioProcessingModule(
   const bool goog_beamforming = IsBeamformingEnabled(audio_constraints);
   const bool goog_high_pass_filter = audio_constraints.GetProperty(
       MediaAudioConstraints::kGoogHighpassFilter);
-  audio_proc_48kHz_support_ = audio_constraints.GetProperty(
-      MediaAudioConstraints::kGoogAudioProcessing48kHzSupport);
+  audio_proc_48kHz_support_ =
+      IsAudioProcessing48kHzSupportEnabled(audio_constraints);
   // Return immediately if no goog constraint is enabled.
   if (!echo_cancellation && !goog_experimental_aec && !goog_ns &&
       !goog_high_pass_filter && !goog_typing_detection &&
@@ -486,10 +495,8 @@ void MediaStreamAudioProcessor::InitializeAudioProcessingModule(
   if (goog_beamforming) {
     ConfigureBeamforming(&config);
   }
-  if (audio_proc_48kHz_support_) {
-    config.Set<webrtc::AudioProcessing48kHzSupport>(
-        new webrtc::AudioProcessing48kHzSupport(true));
-  }
+  config.Set<webrtc::AudioProcessing48kHzSupport>(
+      new webrtc::AudioProcessing48kHzSupport(audio_proc_48kHz_support_));
 
   // Create and configure the webrtc::AudioProcessing.
   audio_processing_.reset(webrtc::AudioProcessing::Create(config));

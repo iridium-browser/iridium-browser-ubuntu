@@ -27,9 +27,9 @@
 #define IDBAny_h
 
 #include "bindings/core/v8/ScriptWrappable.h"
+#include "modules/ModulesExport.h"
 #include "modules/indexeddb/IDBKey.h"
-#include "modules/indexeddb/IDBKeyPath.h"
-#include "platform/SharedBuffer.h"
+#include "modules/indexeddb/IDBValue.h"
 #include "wtf/Forward.h"
 #include "wtf/text/WTFString.h"
 
@@ -50,12 +50,8 @@ class WebBlobInfo;
 //
 // This allows for lazy conversion to script values (via IDBBindingUtilities),
 // and avoids the need for many dedicated union types.
-//
-// Values may be represented as just serialized data plus blob references
-// (BufferType), or serialized data, blob references, and a key to be injected
-// at a given path (BufferKeyAndKeyPathType).
 
-class IDBAny : public GarbageCollectedFinalized<IDBAny> {
+class MODULES_EXPORT IDBAny : public GarbageCollectedFinalized<IDBAny> {
 public:
     static IDBAny* createUndefined();
     static IDBAny* createNull();
@@ -72,13 +68,13 @@ public:
     {
         return new IDBAny(value);
     }
-    static IDBAny* create(PassRefPtr<SharedBuffer> value, const Vector<WebBlobInfo>* blobInfo)
+    static IDBAny* create(PassRefPtr<IDBValue> value)
     {
-        return new IDBAny(value, blobInfo);
+        return new IDBAny(value);
     }
-    static IDBAny* create(PassRefPtr<SharedBuffer> value, const Vector<WebBlobInfo>* blobInfo, IDBKey* key, const IDBKeyPath& keyPath)
+    static IDBAny* create(const Vector<RefPtr<IDBValue>>& values)
     {
-        return new IDBAny(value, blobInfo, key, keyPath);
+        return new IDBAny(values);
     }
     ~IDBAny();
     DECLARE_TRACE();
@@ -95,8 +91,8 @@ public:
         IDBObjectStoreType,
         IntegerType,
         KeyType,
-        BufferType,
-        BufferKeyAndKeyPathType,
+        IDBValueType,
+        IDBValueArrayType
     };
 
     Type type() const { return m_type; }
@@ -107,11 +103,10 @@ public:
     IDBDatabase* idbDatabase() const;
     IDBIndex* idbIndex() const;
     IDBObjectStore* idbObjectStore() const;
-    SharedBuffer* buffer() const;
-    const Vector<WebBlobInfo>* blobInfo() const;
+    IDBValue* value() const;
+    const Vector<RefPtr<IDBValue>>* values() const;
     int64_t integer() const;
     const IDBKey* key() const;
-    const IDBKeyPath& keyPath() const;
 
 private:
     explicit IDBAny(Type);
@@ -121,23 +116,22 @@ private:
     explicit IDBAny(IDBIndex*);
     explicit IDBAny(IDBObjectStore*);
     explicit IDBAny(IDBKey*);
-    IDBAny(PassRefPtr<SharedBuffer>, const Vector<WebBlobInfo>*);
-    IDBAny(PassRefPtr<SharedBuffer>, const Vector<WebBlobInfo>*, IDBKey*, const IDBKeyPath&);
+    explicit IDBAny(const Vector<RefPtr<IDBValue>>&);
+    explicit IDBAny(PassRefPtr<IDBValue>);
     explicit IDBAny(int64_t);
 
     const Type m_type;
 
-    // Only one of the following should ever be in use at any given time, except that BufferType uses two and BufferKeyAndKeyPathType uses four.
+    // Only one of the following should ever be in use at any given time.
     const RefPtrWillBeMember<DOMStringList> m_domStringList;
     const Member<IDBCursor> m_idbCursor;
     const Member<IDBDatabase> m_idbDatabase;
     const Member<IDBIndex> m_idbIndex;
     const Member<IDBObjectStore> m_idbObjectStore;
     const Member<IDBKey> m_idbKey;
-    const IDBKeyPath m_idbKeyPath;
-    const RefPtr<SharedBuffer> m_buffer;
-    const Vector<WebBlobInfo>* m_blobInfo;
-    const int64_t m_integer;
+    const RefPtr<IDBValue> m_idbValue;
+    const Vector<RefPtr<IDBValue>> m_idbValues;
+    const int64_t m_integer = 0;
 };
 
 } // namespace blink

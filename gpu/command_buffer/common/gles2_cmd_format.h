@@ -43,6 +43,7 @@ typedef void GLvoid;
 typedef khronos_intptr_t GLintptr;
 typedef khronos_ssize_t  GLsizeiptr;
 typedef struct __GLsync *GLsync;
+typedef int64_t GLint64;
 typedef uint64_t GLuint64;
 
 namespace gpu {
@@ -93,12 +94,6 @@ struct SizedResult {
   // results including the size field.
   static size_t ComputeSize(size_t num_results) {
     return sizeof(T) * num_results + sizeof(uint32_t);  // NOLINT
-  }
-
-  // Returns the total size in bytes of the SizedResult for a given size of
-  // results.
-  static size_t ComputeSizeFromBytes(size_t size_of_result_in_bytes) {
-    return size_of_result_in_bytes + sizeof(uint32_t);  // NOLINT
   }
 
   // Returns the maximum number of results for a given buffer size.

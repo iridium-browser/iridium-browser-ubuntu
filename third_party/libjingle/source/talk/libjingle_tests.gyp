@@ -31,17 +31,21 @@
       'target_name': 'libjingle_unittest_main',
       'type': 'static_library',
       'dependencies': [
-        '<(DEPTH)/third_party/libyuv/libyuv.gyp:libyuv',
         '<(webrtc_root)/base/base_tests.gyp:rtc_base_tests_utils',
         '<@(libjingle_tests_additional_deps)',
       ],
       'direct_dependent_settings': {
         'include_dirs': [
-          '<(DEPTH)/third_party/libyuv/include',
+          '<(libyuv_dir)/include',
           '<(DEPTH)/testing/gtest/include',
           '<(DEPTH)/testing/gtest',
         ],
       },
+      'conditions': [
+        ['build_libyuv==1', {
+          'dependencies': ['<(DEPTH)/third_party/libyuv/libyuv.gyp:libyuv',],
+        }],
+      ],
       'include_dirs': [
          '<(DEPTH)/testing/gtest/include',
          '<(DEPTH)/testing/gtest',
@@ -59,6 +63,8 @@
         'media/base/testutils.h',
         'media/devices/fakedevicemanager.h',
         'media/webrtc/dummyinstantiation.cc',
+        'media/webrtc/fakewebrtccall.cc',
+        'media/webrtc/fakewebrtccall.h',
         'media/webrtc/fakewebrtccommon.h',
         'media/webrtc/fakewebrtcdeviceinfo.h',
         'media/webrtc/fakewebrtcvcmfactory.h',
@@ -101,9 +107,7 @@
         # Disabled because some tests fail.
         # TODO(ronghuawu): Reenable these tests.
         # 'media/devices/devicemanager_unittest.cc',
-        'media/webrtc/webrtcvideoengine_unittest.cc',
         'media/webrtc/webrtcvideoengine2_unittest.cc',
-        'media/webrtc/webrtcvideoengine2_unittest.h',
         'media/webrtc/webrtcvoiceengine_unittest.cc',
       ],
       'conditions': [
@@ -139,7 +143,6 @@
       'target_name': 'libjingle_p2p_unittest',
       'type': 'executable',
       'dependencies': [
-        '<(DEPTH)/third_party/libsrtp/libsrtp.gyp:libsrtp',
         '<(webrtc_root)/base/base_tests.gyp:rtc_base_tests_utils',
         'libjingle.gyp:libjingle',
         'libjingle.gyp:libjingle_p2p',
@@ -159,6 +162,11 @@
         'session/media/srtpfilter_unittest.cc',
       ],
       'conditions': [
+        ['build_libsrtp==1', {
+          'dependencies': [
+            '<(DEPTH)/third_party/libsrtp/libsrtp.gyp:libsrtp',
+          ],
+        }],
         ['OS=="win"', {
           'msvs_settings': {
             'VCLinkerTool': {
@@ -241,10 +249,16 @@
   ],
   'conditions': [
     ['OS=="linux"', {
+      'variables': {
+        'junit_jar': '<(DEPTH)/third_party/junit-jar/junit-4.11.jar',
+      },
       'targets': [
         {
           'target_name': 'libjingle_peerconnection_test_jar',
           'type': 'none',
+          'dependencies': [
+            'libjingle.gyp:libjingle_peerconnection_jar',
+          ],
           'actions': [
             {
               'variables': {
@@ -260,7 +274,7 @@
                 '<@(java_files)',
                 '<(PRODUCT_DIR)/libjingle_peerconnection.jar',
                 '<(PRODUCT_DIR)/lib/libjingle_peerconnection_so.so',
-                '<(DEPTH)/third_party/junit/junit-4.11.jar',
+                '<(junit_jar)',
               ],
               'outputs': [
                 '<(PRODUCT_DIR)/libjingle_peerconnection_test.jar',
@@ -268,7 +282,7 @@
               'action': [
                 'build/build_jar.sh', '<(java_home)', '<@(_outputs)',
                 '<(INTERMEDIATE_DIR)',
-                '<(java_src_dir):<(PRODUCT_DIR)/libjingle_peerconnection.jar:<(DEPTH)/third_party/junit/junit-4.11.jar',
+                '<(java_src_dir):<(PRODUCT_DIR)/libjingle_peerconnection.jar:<(junit_jar)',
                 '<@(java_files)'
               ],
             },
@@ -283,7 +297,7 @@
               'inputs': [
                 'app/webrtc/javatests/libjingle_peerconnection_java_unittest.sh',
                 '<(PRODUCT_DIR)/libjingle_peerconnection_test_jar',
-                '<(DEPTH)/third_party/junit/junit-4.11.jar',
+                '<(junit_jar)',
               ],
               'outputs': [
                 '<(PRODUCT_DIR)/libjingle_peerconnection_java_unittest',
@@ -294,7 +308,7 @@
                 'sed -e "s@GYP_JAVA_HOME@<(java_home)@" '
                 '< app/webrtc/javatests/libjingle_peerconnection_java_unittest.sh '
                 '> <(PRODUCT_DIR)/libjingle_peerconnection_java_unittest && '
-                'cp <(DEPTH)/third_party/junit/junit-4.11.jar <(PRODUCT_DIR) && '
+                'cp <(junit_jar) <(PRODUCT_DIR) && '
                 'chmod u+x <(PRODUCT_DIR)/libjingle_peerconnection_java_unittest'
               ],
             },

@@ -80,7 +80,7 @@ import v8_interface
 import v8_types
 import v8_union
 from v8_utilities import capitalize, cpp_name, conditional_string, v8_class_name
-from utilities import KNOWN_COMPONENTS, idl_filename_to_component, is_valid_component_dependency
+from utilities import KNOWN_COMPONENTS, idl_filename_to_component, is_valid_component_dependency, is_testing_target
 
 
 def render_template(include_paths, header_template, cpp_template,
@@ -126,7 +126,9 @@ class TypedefResolver(Visitor):
 
     def resolve(self, definitions, definition_name):
         """Traverse definitions and resolves typedefs with the actual types."""
-        self.typedefs = self.info_provider.typedefs
+        self.typedefs = {}
+        for name, typedef in self.info_provider.typedefs.iteritems():
+            self.typedefs[name] = typedef.idl_type
         self.additional_includes = set()
         definitions.accept(self)
         self._update_dependencies_include_paths(definition_name)
@@ -211,8 +213,8 @@ class CodeGeneratorV8(CodeGeneratorBase):
         interfaces.update(definitions.interfaces)
 
         interface_info = self.info_provider.interfaces_info[interface_name]
-        component = idl_filename_to_component(
-            interface_info.get('full_path'))
+        full_path = interface_info.get('full_path')
+        component = idl_filename_to_component(full_path)
         include_paths = interface_info.get('dependencies_include_paths')
 
         # Select appropriate Jinja template and contents function
@@ -236,7 +238,7 @@ class CodeGeneratorV8(CodeGeneratorBase):
         cpp_template = self.jinja_env.get_template(cpp_template_filename)
 
         template_context = interface_context(interface)
-        if not interface.is_partial:
+        if not interface.is_partial and not is_testing_target(full_path):
             template_context['header_includes'].add(self.info_provider.include_path_for_export)
             template_context['exported'] = self.info_provider.specifier_for_export
         # Add the include for interface itself
@@ -265,8 +267,9 @@ class CodeGeneratorV8(CodeGeneratorBase):
         # Add the include for interface itself
         if interface_info['include_path']:
             template_context['header_includes'].add(interface_info['include_path'])
-        template_context['header_includes'].add(self.info_provider.include_path_for_export)
-        template_context['exported'] = self.info_provider.specifier_for_export
+        if not is_testing_target(interface_info.get('full_path')):
+            template_context['header_includes'].add(self.info_provider.include_path_for_export)
+            template_context['exported'] = self.info_provider.specifier_for_export
         header_text, cpp_text = render_template(
             include_paths, header_template, cpp_template, template_context)
         header_path, cpp_path = self.output_paths(dictionary_name)
@@ -297,7 +300,6 @@ class CodeGeneratorDictionaryImpl(CodeGeneratorBase):
         cpp_template = self.jinja_env.get_template('dictionary_impl.cpp')
         template_context = v8_dictionary.dictionary_impl_context(
             dictionary, interfaces_info)
-        template_context['exported'] = self.info_provider.specifier_for_export
         include_paths = interface_info.get('dependencies_include_paths')
         # Add union containers header file to header_includes rather than
         # cpp file so that union containers can be used in dictionary headers.
@@ -306,7 +308,9 @@ class CodeGeneratorDictionaryImpl(CodeGeneratorBase):
         include_paths = [header for header in include_paths
                          if header not in union_container_headers]
         template_context['header_includes'].update(union_container_headers)
-        template_context['header_includes'].add(self.info_provider.include_path_for_export)
+        if not is_testing_target(interface_info.get('full_path')):
+            template_context['exported'] = self.info_provider.specifier_for_export
+            template_context['header_includes'].add(self.info_provider.include_path_for_export)
         header_text, cpp_text = render_template(
             include_paths, header_template, cpp_template, template_context)
         header_path, cpp_path = self.output_paths(
@@ -383,7 +387,6 @@ def initialize_jinja_env(cache_dir):
         'blink_capitalize': capitalize,
         'conditional': conditional_if_endif,
         'exposed': exposed_if,
-        'per_context_enabled': per_context_enabled_if,
         'runtime_enabled': runtime_enabled_if,
         })
     return jinja_env
@@ -412,13 +415,6 @@ def exposed_if(code, exposed_test):
     if not exposed_test:
         return code
     return generate_indented_conditional(code, 'context && (%s)' % exposed_test)
-
-
-# [PerContextEnabled]
-def per_context_enabled_if(code, per_context_enabled_function):
-    if not per_context_enabled_function:
-        return code
-    return generate_indented_conditional(code, 'context && context->isDocument() && %s(toDocument(context))' % per_context_enabled_function)
 
 
 # [RuntimeEnabled]

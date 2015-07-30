@@ -110,6 +110,11 @@ class WebContents : public PageNavigator,
     int routing_id;
     int main_frame_routing_id;
 
+    // The name of the top-level frame of the new window. It is non-empty
+    // when creating a named window (e.g. <a target="foo"> or
+    // window.open('', 'bar')).
+    std::string main_frame_name;
+
     // Initial size of the new WebContent's view. Can be (0, 0) if not needed.
     gfx::Size initial_size;
 
@@ -219,6 +224,10 @@ class WebContents : public PageNavigator,
   // Returns the currently active RenderWidgetHostView. This may change over
   // time and can be nullptr (during setup and teardown).
   virtual RenderWidgetHostView* GetRenderWidgetHostView() const = 0;
+
+  // Causes the current page to be closed, including running its onunload event
+  // handler.
+  virtual void ClosePage() = 0;
 
   // Returns the currently active fullscreen widget. If there is none, returns
   // nullptr.
@@ -342,9 +351,10 @@ class WebContents : public PageNavigator,
   // change.
   virtual void NotifyNavigationStateChanged(InvalidateTypes changed_flags) = 0;
 
-  // Get the last time that the WebContents was made active (either when it was
-  // created or shown with WasShown()).
+  // Get/Set the last time that the WebContents was made active (either when it
+  // was created or shown with WasShown()).
   virtual base::TimeTicks GetLastActiveTime() const = 0;
+  virtual void SetLastActiveTime(base::TimeTicks last_active_time) = 0;
 
   // Invoked when the WebContents becomes shown/hidden.
   virtual void WasShown() = 0;
@@ -627,6 +637,13 @@ class WebContents : public PageNavigator,
 
   // Requests the renderer to exit fullscreen.
   virtual void ExitFullscreen() = 0;
+
+  // Unblocks requests from renderer for a newly created window. This is
+  // used in showCreatedWindow() or sometimes later in cases where
+  // delegate->ShouldResumeRequestsForCreatedWindow() indicated the requests
+  // should not yet be resumed. Then the client is responsible for calling this
+  // as soon as they are ready.
+  virtual void ResumeLoadingCreatedWebContents() = 0;
 
 #if defined(OS_ANDROID)
   CONTENT_EXPORT static WebContents* FromJavaWebContents(

@@ -22,6 +22,7 @@
 #include "media/base/pipeline_status.h"
 #include "media/base/time_delta_interpolator.h"
 #include "media/base/video_frame.h"
+#include "media/base/video_renderer_sink.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace chromecast {
@@ -36,12 +37,14 @@ const base::TimeDelta kMaxDeltaFetcher(
 
 }  // namespace
 
-CmaRenderer::CmaRenderer(scoped_ptr<MediaPipeline> media_pipeline)
+CmaRenderer::CmaRenderer(scoped_ptr<MediaPipeline> media_pipeline,
+                         ::media::VideoRendererSink* video_renderer_sink)
     : media_task_runner_factory_(
           new BalancedMediaTaskRunnerFactory(kMaxDeltaFetcher)),
       media_pipeline_(media_pipeline.Pass()),
       audio_pipeline_(media_pipeline_->GetAudioPipeline()),
       video_pipeline_(media_pipeline_->GetVideoPipeline()),
+      video_renderer_sink_(video_renderer_sink),
       state_(kUninitialized),
       is_pending_transition_(false),
       has_audio_(false),
@@ -52,7 +55,7 @@ CmaRenderer::CmaRenderer(scoped_ptr<MediaPipeline> media_pipeline)
       initial_video_hole_created_(false),
       time_interpolator_(
           new ::media::TimeDeltaInterpolator(&default_tick_clock_)),
-      playback_rate_(1.0f),
+      playback_rate_(1.0),
       weak_factory_(this) {
   weak_this_ = weak_factory_.GetWeakPtr();
   thread_checker_.DetachFromThread();
@@ -76,7 +79,6 @@ void CmaRenderer::Initialize(
     const ::media::PipelineStatusCB& init_cb,
     const ::media::StatisticsCB& statistics_cb,
     const ::media::BufferingStateCB& buffering_state_cb,
-    const PaintCB& paint_cb,
     const base::Closure& ended_cb,
     const ::media::PipelineStatusCB& error_cb,
     const base::Closure& waiting_for_decryption_key_cb) {
@@ -97,7 +99,6 @@ void CmaRenderer::Initialize(
   demuxer_stream_provider_ = demuxer_stream_provider;
   statistics_cb_ = statistics_cb;
   buffering_state_cb_ = buffering_state_cb;
-  paint_cb_ = paint_cb;
   ended_cb_ = ended_cb;
   error_cb_ = error_cb;
   // TODO(erickung): wire up waiting_for_decryption_key_cb.
@@ -160,7 +161,8 @@ void CmaRenderer::StartPlayingFrom(base::TimeDelta time) {
   // Pipeline::StateTransitionTask).
   if (!initial_video_hole_created_) {
     initial_video_hole_created_ = true;
-    paint_cb_.Run(::media::VideoFrame::CreateHoleFrame(initial_natural_size_));
+    video_renderer_sink_->PaintFrameUsingOldRenderingPath(
+        ::media::VideoFrame::CreateHoleFrame(initial_natural_size_));
   }
 #endif
 
@@ -183,7 +185,7 @@ void CmaRenderer::StartPlayingFrom(base::TimeDelta time) {
   CompleteStateTransition(kPlaying);
 }
 
-void CmaRenderer::SetPlaybackRate(float playback_rate) {
+void CmaRenderer::SetPlaybackRate(double playback_rate) {
   CMALOG(kLogControl) << __FUNCTION__ << ": " << playback_rate;
   DCHECK(thread_checker_.CalledOnValidThread());
   media_pipeline_->SetPlaybackRate(playback_rate);
@@ -261,7 +263,6 @@ void CmaRenderer::InitializeAudioPipeline() {
   if (config.codec() == ::media::kCodecAAC)
     stream->EnableBitstreamConverter();
 
-  has_audio_ = true;
   media_pipeline_->InitializeAudio(
       config, frame_provider.Pass(), audio_initialization_done_cb);
 }
@@ -277,10 +278,10 @@ void CmaRenderer::OnAudioPipelineInitializeDone(
   DCHECK_EQ(state_, kUninitialized) << state_;
   DCHECK(!init_cb_.is_null());
   if (status != ::media::PIPELINE_OK) {
-    has_audio_ = false;
     base::ResetAndReturn(&init_cb_).Run(status);
     return;
   }
+  has_audio_ = true;
 
   InitializeVideoPipeline();
 }
@@ -325,7 +326,6 @@ void CmaRenderer::InitializeVideoPipeline() {
 
   initial_natural_size_ = config.natural_size();
 
-  has_video_ = true;
   media_pipeline_->InitializeVideo(
       config,
       frame_provider.Pass(),
@@ -343,10 +343,10 @@ void CmaRenderer::OnVideoPipelineInitializeDone(
   DCHECK_EQ(state_, kUninitialized) << state_;
   DCHECK(!init_cb_.is_null());
   if (status != ::media::PIPELINE_OK) {
-    has_video_ = false;
     base::ResetAndReturn(&init_cb_).Run(status);
     return;
   }
+  has_video_ = true;
 
   CompleteStateTransition(kFlushed);
   base::ResetAndReturn(&init_cb_).Run(::media::PIPELINE_OK);
@@ -383,7 +383,8 @@ void CmaRenderer::OnStatisticsUpdated(
 void CmaRenderer::OnNaturalSizeChanged(const gfx::Size& size) {
   DCHECK(thread_checker_.CalledOnValidThread());
 #if defined(VIDEO_HOLE)
-  paint_cb_.Run(::media::VideoFrame::CreateHoleFrame(size));
+  video_renderer_sink_->PaintFrameUsingOldRenderingPath(
+      ::media::VideoFrame::CreateHoleFrame(size));
 #endif
 }
 

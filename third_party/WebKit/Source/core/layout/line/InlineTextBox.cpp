@@ -28,7 +28,6 @@
 #include "core/layout/LayoutBlock.h"
 #include "core/layout/LayoutRubyRun.h"
 #include "core/layout/LayoutRubyText.h"
-#include "core/layout/PaintInfo.h"
 #include "core/layout/line/AbstractInlineTextBox.h"
 #include "core/layout/line/EllipsisBox.h"
 #include "core/paint/InlineTextBoxPainter.h"
@@ -278,7 +277,7 @@ FloatWillBeLayoutUnit InlineTextBox::placeEllipsisBox(bool flowIsLTR, FloatWillB
 
         int offset = offsetForPosition(ellipsisX, false);
         if (offset == 0) {
-            // No characters should be rendered.  Set ourselves to full truncation and place the ellipsis at the min of our start
+            // No characters should be laid out.  Set ourselves to full truncation and place the ellipsis at the min of our start
             // and the ellipsis edge.
             m_truncation = cFullTruncation;
             truncatedWidth += ellipsisWidth;
@@ -398,7 +397,7 @@ int InlineTextBox::caretMaxOffset() const
 FloatWillBeLayoutUnit InlineTextBox::textPos() const
 {
     // When computing the width of a text run, LayoutBlock::computeInlineDirectionPositionsForLine() doesn't include the actual offset
-    // from the containing block edge in its measurement. textPos() should be consistent so the text are rendered in the same width.
+    // from the containing block edge in its measurement. textPos() should be consistent so the text are laid out in the same width.
     if (logicalLeft() == 0)
         return 0;
     return logicalLeft() - root().logicalLeft();

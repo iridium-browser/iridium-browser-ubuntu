@@ -28,6 +28,7 @@ ServiceWorkerVersionBrowserTest.TimeoutStartingWorker
 
 # http://crbug.com/456131
 BrowserSideNavigationBrowserTest.BrowserInitiatedNavigations
+BrowserSideNavigationBrowserTest.FailedNavigation
 
 # http://crbug.com/464029
 WebRtcBrowserTest.CallAndModifyStream
@@ -38,3 +39,9 @@ RenderFrameHostImplBrowserTest.IsFocused_Widget
 
 # http://crbug.com/470507
 SRC_ClearKey/EncryptedMediaTest.Playback_VideoClearAudio_WebM/0
+
+# http://crbug.com/484351
+PluginTest.VerifyPluginWindowRect
+
+# http://crbug.com/484852
+PluginTest.NPObjectIdentity

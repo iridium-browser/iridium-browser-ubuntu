@@ -205,7 +205,7 @@ void ProfileDownloader::Start() {
 
 void ProfileDownloader::StartForAccount(const std::string& account_id) {
   VLOG(1) << "Starting profile downloader...";
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   ProfileOAuth2TokenService* service =
       ProfileOAuth2TokenServiceFactory::GetForProfile(
@@ -322,8 +322,8 @@ void ProfileDownloader::OnGetUserInfoResponse(
   }
   VLOG(1) << "Fetching profile image from " << image_url;
   picture_url_ = image_url;
-  profile_image_fetcher_.reset(net::URLFetcher::Create(
-      GURL(image_url), net::URLFetcher::GET, this));
+  profile_image_fetcher_ =
+      net::URLFetcher::Create(GURL(image_url), net::URLFetcher::GET, this);
   profile_image_fetcher_->SetRequestContext(
       delegate_->GetBrowserProfile()->GetRequestContext());
   profile_image_fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |
@@ -349,7 +349,7 @@ void ProfileDownloader::OnNetworkError(int response_code) {
 }
 
 void ProfileDownloader::OnURLFetchComplete(const net::URLFetcher* source) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   std::string data;
   source->GetResponseAsString(&data);
   bool network_error =
@@ -371,7 +371,7 @@ void ProfileDownloader::OnURLFetchComplete(const net::URLFetcher* source) {
 }
 
 void ProfileDownloader::OnImageDecoded(const SkBitmap& decoded_image) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   int image_size = delegate_->GetDesiredImageSideLength();
   profile_picture_ = skia::ImageOperations::Resize(
       decoded_image,
@@ -383,7 +383,7 @@ void ProfileDownloader::OnImageDecoded(const SkBitmap& decoded_image) {
 }
 
 void ProfileDownloader::OnDecodeImageFailed() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   delegate_->OnProfileDownloadFailure(
       this, ProfileDownloaderDelegate::IMAGE_DECODE_FAILED);
 }

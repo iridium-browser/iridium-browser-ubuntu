@@ -40,7 +40,7 @@ public:
 
     const char* name() const override { return "Arithmetic"; }
 
-    void getGLProcessorKey(const GrGLCaps& caps, GrProcessorKeyBuilder* b) const override;
+    void getGLProcessorKey(const GrGLSLCaps& caps, GrProcessorKeyBuilder* b) const override;
 
     GrGLFragmentProcessor* createGLInstance() const override;
 
@@ -79,10 +79,6 @@ public:
 
     bool supportsRGBCoverage(GrColor knownColor, uint32_t knownColorFlags) const override {
         return true;
-    }
-
-    bool canTweakAlphaForCoverage() const override {
-        return false;
     }
 
     void getInvariantOutput(const GrProcOptInfo& colorPOI, const GrProcOptInfo& coveragePOI,

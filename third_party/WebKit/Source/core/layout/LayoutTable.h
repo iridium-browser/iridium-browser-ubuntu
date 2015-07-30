@@ -253,10 +253,10 @@ public:
             recalcSections();
     }
 
-    static LayoutTable* createAnonymousWithParentRenderer(const LayoutObject*);
+    static LayoutTable* createAnonymousWithParent(const LayoutObject*);
     virtual LayoutBox* createAnonymousBoxWithSameTypeAs(const LayoutObject* parent) const override
     {
-        return createAnonymousWithParentRenderer(parent);
+        return createAnonymousWithParent(parent);
     }
 
     const BorderValue& tableStartBorderAdjoiningCell(const LayoutTableCell*) const;
@@ -284,6 +284,8 @@ public:
 protected:
     virtual void styleDidChange(StyleDifference, const ComputedStyle* oldStyle) override;
     virtual void simplifiedNormalFlowLayout() override;
+    virtual PaintInvalidationReason invalidatePaintIfNeeded(PaintInvalidationState&, const LayoutBoxModelObject& paintInvalidationContainer) override;
+    virtual void invalidatePaintOfSubtreesIfNeeded(PaintInvalidationState&) override;
 
 private:
     virtual bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectTable || LayoutBlock::isOfType(type); }
@@ -322,7 +324,7 @@ private:
     mutable Vector<int> m_columnPos;
     mutable Vector<ColumnStruct> m_columns;
     mutable Vector<LayoutTableCaption*> m_captions;
-    mutable Vector<LayoutTableCol*> m_columnRenderers;
+    mutable Vector<LayoutTableCol*> m_columnLayoutObjects;
 
     mutable LayoutTableSection* m_head;
     mutable LayoutTableSection* m_foot;
@@ -330,6 +332,7 @@ private:
 
     OwnPtr<TableLayoutAlgorithm> m_tableLayout;
 
+    // A sorted list of all unique border values that we want to paint.
     CollapsedBorderValues m_collapsedBorders;
     const CollapsedBorderValue* m_currentBorder;
     bool m_collapsedBordersValid : 1;
@@ -338,7 +341,7 @@ private:
     mutable bool m_needsSectionRecalc : 1;
 
     bool m_columnLogicalWidthChanged : 1;
-    mutable bool m_columnRenderersValid: 1;
+    mutable bool m_columnLayoutObjectsValid: 1;
     mutable bool m_hasCellColspanThatDeterminesTableWidth : 1;
     bool hasCellColspanThatDeterminesTableWidth() const
     {

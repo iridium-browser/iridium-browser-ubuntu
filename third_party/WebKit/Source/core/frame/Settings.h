@@ -28,9 +28,11 @@
 #define Settings_h
 
 #include "bindings/core/v8/V8CacheOptions.h"
+#include "core/CoreExport.h"
 #include "core/SettingsMacros.h"
 #include "core/css/PointerProperties.h"
 #include "core/editing/EditingBehaviorTypes.h"
+#include "core/editing/SelectionStrategy.h"
 #include "core/frame/SettingsDelegate.h"
 #include "platform/Timer.h"
 #include "platform/fonts/GenericFontFamilySettings.h"
@@ -43,7 +45,7 @@
 
 namespace blink {
 
-class Settings {
+class CORE_EXPORT Settings {
     WTF_MAKE_NONCOPYABLE(Settings); WTF_MAKE_FAST_ALLOCATED(Settings);
 public:
     static PassOwnPtr<Settings> create();

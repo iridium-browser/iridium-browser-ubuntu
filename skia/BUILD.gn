@@ -377,7 +377,6 @@ component("skia") {
     "//third_party/skia/src/utils/SkNinePatch.cpp",
     "//third_party/skia/src/utils/SkOSFile.cpp",
     "//third_party/skia/src/utils/SkParsePath.cpp",
-    "//third_party/skia/src/utils/SkPathUtils.cpp",
     "//third_party/skia/src/utils/SkSHA1.cpp",
     "//third_party/skia/src/utils/SkSHA1.h",
     "//third_party/skia/src/utils/SkTFitsIn.h",
@@ -666,6 +665,7 @@ if (is_linux && !is_chromeos) {
   }
 
   executable("filter_fuzz_stub") {
+    testonly = true
     sources = [
       "tools/filter_fuzz_stub/filter_fuzz_stub.cc",
     ]
@@ -673,6 +673,7 @@ if (is_linux && !is_chromeos) {
     deps = [
       ":skia",
       "//base",
+      "//base/test:test_support",
     ]
   }
 }

@@ -154,7 +154,7 @@ enum ExternalMode {
 };
 
 template <typename StringType>
-CORE_EXPORT StringType v8StringToWebCoreString(v8::Handle<v8::String>, ExternalMode);
+CORE_EXPORT StringType v8StringToWebCoreString(v8::Local<v8::String>, ExternalMode);
 CORE_EXPORT String int32ToWebCoreString(int value);
 
 // V8StringResource is an adapter class that converts V8 values to Strings
@@ -174,7 +174,7 @@ public:
     {
     }
 
-    V8StringResource(v8::Handle<v8::Value> object)
+    V8StringResource(v8::Local<v8::Value> object)
         : m_v8Object(object)
         , m_mode(Externalize)
     {
@@ -186,7 +186,7 @@ public:
     {
     }
 
-    void operator=(v8::Handle<v8::Value> object)
+    void operator=(v8::Local<v8::Value> object)
     {
         m_v8Object = object;
     }
@@ -206,11 +206,9 @@ public:
         if (prepareFast())
             return true;
 
-        m_v8Object = m_v8Object->ToString(v8::Isolate::GetCurrent());
-        // Handle the case where an exception is thrown as part of invoking toString on the object.
-        if (m_v8Object.IsEmpty())
-            return false;
-        return true;
+        // TODO(bashi): Pass an isolate to this function and remove
+        // v8::Isolate::GetCurrent().
+        return m_v8Object->ToString(v8::Isolate::GetCurrent()->GetCurrentContext()).ToLocal(&m_v8Object);
     }
 
     bool prepare(ExceptionState& exceptionState)
@@ -218,11 +216,12 @@ public:
         if (prepareFast())
             return true;
 
+        // TODO(bashi): Pass an isolate to this function and remove
+        // v8::Isolate::GetCurrent().
         v8::Isolate* isolate = v8::Isolate::GetCurrent();
         v8::TryCatch block(isolate);
-        m_v8Object = m_v8Object->ToString(isolate);
         // Handle the case where an exception is thrown as part of invoking toString on the object.
-        if (block.HasCaught()) {
+        if (!m_v8Object->ToString(isolate->GetCurrentContext()).ToLocal(&m_v8Object)) {
             exceptionState.rethrowV8Exception(block.Exception());
             return false;
         }
@@ -247,7 +246,7 @@ private:
             return true;
 
         if (LIKELY(m_v8Object->IsInt32())) {
-            setString(int32ToWebCoreString(m_v8Object->Int32Value()));
+            setString(int32ToWebCoreString(m_v8Object.As<v8::Int32>()->Value()));
             return true;
         }
 
@@ -268,12 +267,12 @@ private:
     StringType toString() const
     {
         if (LIKELY(!m_v8Object.IsEmpty()))
-            return v8StringToWebCoreString<StringType>(const_cast<v8::Handle<v8::Value>*>(&m_v8Object)->As<v8::String>(), m_mode);
+            return v8StringToWebCoreString<StringType>(const_cast<v8::Local<v8::Value>*>(&m_v8Object)->As<v8::String>(), m_mode);
 
         return StringType(m_string);
     }
 
-    v8::Handle<v8::Value> m_v8Object;
+    v8::Local<v8::Value> m_v8Object;
     ExternalMode m_mode;
     String m_string;
 };

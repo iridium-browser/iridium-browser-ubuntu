@@ -4,6 +4,7 @@
  
 // Original code copyright 2014 Foxit Software Inc. http://www.foxitsoftware.com
 
+#include "../../third_party/base/nonstd_unique_ptr.h"
 #include "../include/fsdk_define.h"
 #include "../include/fsdk_mgr.h"
 #include "../include/fsdk_baseannot.h"
@@ -1564,13 +1565,13 @@ void CPDFSDK_Widget::AddImageToAppearance(const CFX_ByteString& sAPType, CPDF_St
 	CPDF_Dictionary* pStreamResList = pStreamDict->GetDict("Resources");
 	if (!pStreamResList)
 	{
-		pStreamResList = FX_NEW CPDF_Dictionary();
+		pStreamResList = new CPDF_Dictionary();
 		pStreamDict->SetAt("Resources", pStreamResList);
 	}
 
-	if (pStreamResList) 
+	if (pStreamResList)
 	{
-		CPDF_Dictionary* pXObject = FX_NEW CPDF_Dictionary;			
+		CPDF_Dictionary* pXObject = new CPDF_Dictionary;
 		pXObject->SetAtReference(sImageAlias, pDoc, pImage);
 		pStreamResList->SetAt("XObject", pXObject);
 	}
@@ -1727,22 +1728,13 @@ FX_BOOL CPDFSDK_InterForm::HighlightWidgets()
 
 CPDFSDK_Widget* CPDFSDK_InterForm::GetSibling(CPDFSDK_Widget* pWidget, FX_BOOL bNext) const
 {
-	ASSERT(pWidget != NULL);
+    nonstd::unique_ptr<CBA_AnnotIterator> pIterator(
+        new CBA_AnnotIterator(pWidget->GetPageView(), "Widget", ""));
 
-	CBA_AnnotIterator* pIterator = new CBA_AnnotIterator(pWidget->GetPageView(), "Widget", "");
-	ASSERT(pIterator != NULL);
-
-	CPDFSDK_Widget* pRet = NULL;
-
-	if (bNext)
-		pRet = (CPDFSDK_Widget*)pIterator->GetNextAnnot(pWidget);
-	else
-		pRet = (CPDFSDK_Widget*)pIterator->GetPrevAnnot(pWidget);
-
-	pIterator->Release();
-	
-	return pRet;
-
+    if (bNext) {
+        return (CPDFSDK_Widget*)pIterator->GetNextAnnot(pWidget);
+    }
+    return (CPDFSDK_Widget*)pIterator->GetPrevAnnot(pWidget);
 }
 
 CPDFSDK_Widget*	CPDFSDK_InterForm::GetWidget(CPDF_FormControl* pControl) const
@@ -1870,7 +1862,7 @@ CPDF_Stream* CPDFSDK_InterForm::LoadImageFromFile(const CFX_WideString& sFile)
 
 	CPDF_Stream* pRetStream = NULL;
 
-	if (CFX_DIBitmap* pBmp = CFX_WindowsDIB::LoadFromFile(sFile))
+	if (CFX_DIBitmap* pBmp = CFX_WindowsDIB::LoadFromFile(sFile.c_str()))
 	{
 		int nWidth = pBmp->GetWidth();
 		int nHeight = pBmp->GetHeight();
@@ -2537,7 +2529,7 @@ int	CPDFSDK_InterForm::AfterValueChange(const CPDF_FormField* pField)
 		FX_BOOL bFormated = FALSE;
 		CFX_WideString sValue = this->OnFormat(pFormField, 0, bFormated);
 		if (bFormated)
-			this->ResetFieldAppearance(pFormField, sValue, TRUE);
+			this->ResetFieldAppearance(pFormField, sValue.c_str(), TRUE);
 		else
 			this->ResetFieldAppearance(pFormField, NULL, TRUE);
 		this->UpdateField(pFormField);

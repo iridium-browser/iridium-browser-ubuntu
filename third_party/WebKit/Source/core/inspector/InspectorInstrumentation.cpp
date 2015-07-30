@@ -134,12 +134,6 @@ void appendAsyncCallStack(ExecutionContext* executionContext, ScriptCallStack* c
         callStack->setAsyncCallStack(debuggerAgent->currentAsyncStackTraceForConsole());
 }
 
-bool canvasAgentEnabled(ExecutionContext* executionContext)
-{
-    InstrumentingAgents* instrumentingAgents = instrumentingAgentsFor(executionContext);
-    return instrumentingAgents && instrumentingAgents->inspectorCanvasAgent();
-}
-
 bool consoleAgentEnabled(ExecutionContext* executionContext)
 {
     InstrumentingAgents* instrumentingAgents = instrumentingAgentsFor(executionContext);
@@ -179,9 +173,9 @@ InstrumentingAgents* instrumentingAgentsFor(EventTarget* eventTarget)
     return instrumentingAgentsFor(eventTarget->executionContext());
 }
 
-InstrumentingAgents* instrumentingAgentsFor(LayoutObject* renderer)
+InstrumentingAgents* instrumentingAgentsFor(LayoutObject* layoutObject)
 {
-    return instrumentingAgentsFor(renderer->frame());
+    return instrumentingAgentsFor(layoutObject->frame());
 }
 
 InstrumentingAgents* instrumentingAgentsFor(WorkerGlobalScope* workerGlobalScope)

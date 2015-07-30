@@ -63,6 +63,10 @@ bool WebContentsDelegate::ShouldFocusPageAfterCrash() {
   return true;
 }
 
+bool WebContentsDelegate::ShouldResumeRequestsForCreatedWindow() {
+  return true;
+}
+
 bool WebContentsDelegate::TakeFocus(WebContents* source, bool reverse) {
   return false;
 }
@@ -149,6 +153,11 @@ bool WebContentsDelegate::EmbedsFullscreenWidget() const {
 bool WebContentsDelegate::IsFullscreenForTabOrPending(
     const WebContents* web_contents) const {
   return false;
+}
+
+blink::WebDisplayMode WebContentsDelegate::GetDisplayMode(
+    const WebContents* web_contents) const {
+  return blink::WebDisplayModeBrowser;
 }
 
 content::ColorChooser* WebContentsDelegate::OpenColorChooser(

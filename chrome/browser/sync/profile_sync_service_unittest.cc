@@ -12,6 +12,7 @@
 #include "base/values.h"
 #include "chrome/browser/invalidation/fake_invalidation_service.h"
 #include "chrome/browser/invalidation/profile_invalidation_provider_factory.h"
+#include "chrome/browser/signin/account_tracker_service_factory.h"
 #include "chrome/browser/signin/fake_profile_oauth2_token_service.h"
 #include "chrome/browser/signin/fake_profile_oauth2_token_service_builder.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
@@ -28,6 +29,8 @@
 #include "chrome/test/base/testing_profile_manager.h"
 #include "components/invalidation/invalidation_service.h"
 #include "components/invalidation/profile_invalidation_provider.h"
+#include "components/signin/core/browser/account_tracker_service.h"
+#include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/sync_driver/data_type_manager.h"
 #include "components/sync_driver/pref_names.h"
@@ -45,6 +48,9 @@ class BrowserContext;
 namespace browser_sync {
 
 namespace {
+
+const char kGaiaId[] = "12345";
+const char kEmail[] = "test_user@gmail.com";
 
 class FakeDataTypeManager : public sync_driver::DataTypeManager {
  public:
@@ -205,14 +211,17 @@ class ProfileSyncServiceTest : public ::testing::Test {
   }
 
   void IssueTestTokens() {
+    std::string account_id =
+        AccountTrackerServiceFactory::GetForProfile(profile_)
+            ->SeedAccountInfo(kGaiaId, kEmail);
     ProfileOAuth2TokenServiceFactory::GetForProfile(profile_)
-        ->UpdateCredentials("test", "oauth2_login_token");
+        ->UpdateCredentials(account_id, "oauth2_login_token");
   }
 
   void CreateService(ProfileSyncServiceStartBehavior behavior) {
     SigninManagerBase* signin =
         SigninManagerFactory::GetForProfile(profile_);
-    signin->SetAuthenticatedUsername("test");
+    signin->SetAuthenticatedAccountInfo(kGaiaId, kEmail);
     ProfileOAuth2TokenService* oauth2_token_service =
         ProfileOAuth2TokenServiceFactory::GetForProfile(profile_);
     components_factory_ = new ProfileSyncComponentsFactoryMock();
@@ -526,7 +535,7 @@ TEST_F(ProfileSyncServiceTest, BackupBeforeFirstSync) {
   InitializeForFirstSync();
 
   SigninManagerFactory::GetForProfile(profile())
-      ->SetAuthenticatedUsername("test");
+      ->SetAuthenticatedAccountInfo(kGaiaId, kEmail);
   IssueTestTokens();
   PumpLoop();
 
@@ -648,6 +657,51 @@ TEST_F(ProfileSyncServiceTest, DisableSyncFlag) {
 // Verify that no disable sync flag enables sync.
 TEST_F(ProfileSyncServiceTest, NoDisableSyncFlag) {
   EXPECT_TRUE(ProfileSyncService::IsSyncEnabled());
+}
+
+// Test Sync will stop after receive memory pressure
+TEST_F(ProfileSyncServiceTest, MemoryPressureRecording) {
+  CreateService(browser_sync::AUTO_START);
+  IssueTestTokens();
+  ExpectDataTypeManagerCreation(1);
+  ExpectSyncBackendHostCreation(1);
+  InitializeForNthSync();
+
+  EXPECT_TRUE(service()->SyncActive());
+  EXPECT_FALSE(profile()->GetPrefs()->GetBoolean(
+      sync_driver::prefs::kSyncSuppressStart));
+
+  testing::Mock::VerifyAndClearExpectations(components_factory());
+
+  sync_driver::SyncPrefs sync_prefs(service()->profile()->GetPrefs());
+
+  EXPECT_EQ(profile()->GetPrefs()->GetInteger(
+                sync_driver::prefs::kSyncMemoryPressureWarningCount),
+            0);
+  EXPECT_FALSE(sync_prefs.DidSyncShutdownCleanly());
+
+  // Simulate memory pressure notification.
+  base::MemoryPressureListener::NotifyMemoryPressure(
+      base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_CRITICAL);
+  base::RunLoop().RunUntilIdle();
+
+  // Verify memory pressure recorded.
+  EXPECT_EQ(profile()->GetPrefs()->GetInteger(
+                sync_driver::prefs::kSyncMemoryPressureWarningCount),
+            1);
+  EXPECT_FALSE(sync_prefs.DidSyncShutdownCleanly());
+
+  // Simulate memory pressure notification.
+  base::MemoryPressureListener::NotifyMemoryPressure(
+      base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_CRITICAL);
+  base::RunLoop().RunUntilIdle();
+  ShutdownAndDeleteService();
+
+  // Verify memory pressure and shutdown recorded.
+  EXPECT_EQ(profile()->GetPrefs()->GetInteger(
+                sync_driver::prefs::kSyncMemoryPressureWarningCount),
+            2);
+  EXPECT_TRUE(sync_prefs.DidSyncShutdownCleanly());
 }
 
 }  // namespace

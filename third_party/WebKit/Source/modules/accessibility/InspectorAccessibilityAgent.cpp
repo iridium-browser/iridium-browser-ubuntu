@@ -15,6 +15,7 @@
 #include "core/page/Page.h"
 #include "modules/accessibility/AXObject.h"
 #include "modules/accessibility/AXObjectCacheImpl.h"
+#include "modules/accessibility/InspectorTypeBuilderHelper.h"
 #include "platform/JSONValues.h"
 
 namespace blink {
@@ -33,111 +34,10 @@ using TypeBuilder::Accessibility::AXWidgetStates;
 
 namespace {
 
-PassRefPtr<AXProperty> createProperty(String name, PassRefPtr<AXValue> value)
-{
-    RefPtr<AXProperty> property = AXProperty::create().setName(name).setValue(value);
-    return property;
-}
-
-PassRefPtr<AXProperty> createProperty(AXGlobalStates::Enum name, PassRefPtr<AXValue> value)
-{
-    return createProperty(TypeBuilder::getEnumConstantValue(name), value);
-}
-
-PassRefPtr<AXProperty> createProperty(AXLiveRegionAttributes::Enum name, PassRefPtr<AXValue> value)
-{
-    return createProperty(TypeBuilder::getEnumConstantValue(name), value);
-}
-
-
-PassRefPtr<AXProperty> createProperty(AXRelationshipAttributes::Enum name, PassRefPtr<AXValue> value)
-{
-    return createProperty(TypeBuilder::getEnumConstantValue(name), value);
-}
-
-PassRefPtr<AXProperty> createProperty(AXWidgetAttributes::Enum name, PassRefPtr<AXValue> value)
-{
-    return createProperty(TypeBuilder::getEnumConstantValue(name), value);
-}
-
-PassRefPtr<AXProperty> createProperty(AXWidgetStates::Enum name, PassRefPtr<AXValue> value)
-{
-    return createProperty(TypeBuilder::getEnumConstantValue(name), value);
-}
-
-
-PassRefPtr<AXValue> createValue(String value, AXValueType::Enum type = AXValueType::String)
-{
-    RefPtr<AXValue> axValue = AXValue::create().setType(type);
-    axValue->setValue(JSONString::create(value));
-    return axValue;
-}
-
-PassRefPtr<AXValue> createValue(int value, AXValueType::Enum type = AXValueType::Integer)
-{
-    RefPtr<AXValue> axValue = AXValue::create().setType(type);
-    axValue->setValue(JSONBasicValue::create(value));
-    return axValue;
-}
-
-PassRefPtr<AXValue> createValue(float value, AXValueType::Enum type = AXValueType::Number)
-{
-    RefPtr<AXValue> axValue = AXValue::create().setType(type);
-    axValue->setValue(JSONBasicValue::create(value));
-    return axValue;
-}
-
-PassRefPtr<AXValue> createBooleanValue(bool value, AXValueType::Enum type = AXValueType::Boolean)
-{
-    RefPtr<AXValue> axValue = AXValue::create().setType(type);
-    axValue->setValue(JSONBasicValue::create(value));
-    return axValue;
-}
-
-PassRefPtr<AXRelatedNode> relatedNodeForAXObject(const AXObject* axObject)
-{
-    Node* node = axObject->node();
-    if (!node)
-        return PassRefPtr<AXRelatedNode>();
-    int backendNodeId = DOMNodeIds::idForNode(node);
-    if (!backendNodeId)
-        return PassRefPtr<AXRelatedNode>();
-    RefPtr<AXRelatedNode> relatedNode = AXRelatedNode::create().setBackendNodeId(backendNodeId);
-    if (!node->isElementNode())
-        return relatedNode;
-
-    Element* element = toElement(node);
-    const AtomicString& idref = element->getIdAttribute();
-    if (!idref.isEmpty())
-        relatedNode->setIdref(idref);
-    return relatedNode;
-}
-
-
-PassRefPtr<AXValue> createRelatedNodeValue(const AXObject* axObject)
-{
-    RefPtr<AXValue> axValue = AXValue::create().setType(AXValueType::Idref);
-    RefPtr<AXRelatedNode> relatedNode = relatedNodeForAXObject(axObject);
-    axValue->setRelatedNodeValue(relatedNode);
-    return axValue;
-}
-
-PassRefPtr<AXValue> createRelatedNodeListValue(AXObject::AccessibilityChildrenVector axObjects)
-{
-    RefPtr<TypeBuilder::Array<AXRelatedNode>> relatedNodes = TypeBuilder::Array<AXRelatedNode>::create();
-    for (unsigned i = 0; i < axObjects.size(); i++) {
-        if (RefPtr<AXRelatedNode> relatedNode = relatedNodeForAXObject(axObjects[i].get()))
-            relatedNodes->addItem(relatedNode);
-    }
-    RefPtr<AXValue> axValue = AXValue::create().setType(AXValueType::IdrefList);
-    axValue->setRelatedNodeArrayValue(relatedNodes);
-    return axValue;
-}
-
 void fillCoreProperties(AXObject* axObject, PassRefPtr<AXNode> nodeObject)
 {
     // core properties
-    String description = axObject->accessibilityDescription();
+    String description = axObject->deprecatedAccessibilityDescription();
     if (!description.isEmpty())
         nodeObject->setDescription(createValue(description));
 
@@ -149,7 +49,7 @@ void fillCoreProperties(AXObject* axObject, PassRefPtr<AXNode> nodeObject)
             nodeObject->setValue(createValue(stringValue));
     }
 
-    String help = axObject->helpText();
+    String help = axObject->deprecatedHelpText();
     if (!help.isEmpty())
         nodeObject->setHelp(createValue(help));
 }
@@ -213,12 +113,12 @@ bool roleAllowsOrientation(AccessibilityRole role)
 
 bool roleAllowsReadonly(AccessibilityRole role)
 {
-    return role == GridRole || role == CellRole || role == TextAreaRole || role == TextFieldRole || role == ColumnHeaderRole || role == RowHeaderRole || role == TreeGridRole;
+    return role == GridRole || role == CellRole || role == TextFieldRole || role == ColumnHeaderRole || role == RowHeaderRole || role == TreeGridRole;
 }
 
 bool roleAllowsRequired(AccessibilityRole role)
 {
-    return role == ComboBoxRole || role == CellRole || role == ListBoxRole || role == RadioGroupRole || role == SpinButtonRole || role == TextAreaRole || role == TextFieldRole || role == TreeRole || role == ColumnHeaderRole || role == RowHeaderRole || role == TreeGridRole;
+    return role == ComboBoxRole || role == CellRole || role == ListBoxRole || role == RadioGroupRole || role == SpinButtonRole || role == TextFieldRole || role == TreeRole || role == ColumnHeaderRole || role == RowHeaderRole || role == TreeGridRole;
 }
 
 bool roleAllowsSort(AccessibilityRole role)
@@ -280,9 +180,7 @@ void fillWidgetProperties(AXObject* axObject, PassRefPtr<TypeBuilder::Array<AXPr
     }
 
     if (role == TextFieldRole)
-        properties->addItem(createProperty(AXWidgetAttributes::Multiline, createBooleanValue(false)));
-    else if (role == TextAreaRole)
-        properties->addItem(createProperty(AXWidgetAttributes::Multiline, createBooleanValue(true)));
+        properties->addItem(createProperty(AXWidgetAttributes::Multiline, createBooleanValue(axObject->isMultiline())));
 
     if (roleAllowsReadonly(role)) {
         properties->addItem(createProperty(AXWidgetAttributes::Readonly, createBooleanValue(axObject->isReadOnly())));
@@ -367,12 +265,12 @@ void fillRelationships(AXObject* axObject, PassRefPtr<TypeBuilder::Array<AXPrope
         properties->addItem(createProperty(AXRelationshipAttributes::Controls, createRelatedNodeListValue(results)));
     results.clear();
 
-    axObject->ariaDescribedbyElements(results);
+    axObject->deprecatedAriaDescribedbyElements(results);
     if (!results.isEmpty())
         properties->addItem(createProperty(AXRelationshipAttributes::Describedby, createRelatedNodeListValue(results)));
     results.clear();
 
-    axObject->ariaLabelledbyElements(results);
+    axObject->deprecatedAriaLabelledbyElements(results);
     if (!results.isEmpty())
         properties->addItem(createProperty(AXRelationshipAttributes::Labelledby, createRelatedNodeListValue(results)));
     results.clear();
@@ -383,10 +281,47 @@ void fillRelationships(AXObject* axObject, PassRefPtr<TypeBuilder::Array<AXPrope
     results.clear();
 }
 
+PassRefPtr<AXValue> createRoleNameValue(AccessibilityRole role)
+{
+    AtomicString roleName = AXObject::roleName(role);
+    RefPtr<AXValue> roleNameValue;
+    if (!roleName.isNull()) {
+        roleNameValue = createValue(roleName, AXValueType::Role);
+    } else {
+        roleNameValue = createValue(AXObject::internalRoleName(role), AXValueType::InternalRole);
+    }
+    return roleNameValue;
+}
+
+PassRefPtr<AXNode> buildObjectForIgnoredNode(Node* node, AXObject* axObject, AXObjectCacheImpl* cacheImpl)
+{
+    AXObject::IgnoredReasons ignoredReasons;
+
+    AXID axID = 0;
+    RefPtr<AXNode> ignoredNodeObject = AXNode::create().setNodeId(String::number(axID)).setIgnored(true);
+    if (axObject) {
+        axObject->computeAccessibilityIsIgnored(&ignoredReasons);
+        axID = axObject->axObjectID();
+        AccessibilityRole role = axObject->roleValue();
+        ignoredNodeObject->setRole(createRoleNameValue(role));
+    } else if (!node->layoutObject()) {
+        ignoredReasons.append(IgnoredReason(AXNotRendered));
+    }
+
+    RefPtr<TypeBuilder::Array<AXProperty>> ignoredReasonProperties = TypeBuilder::Array<AXProperty>::create();
+    for (size_t i = 0; i < ignoredReasons.size(); i++)
+        ignoredReasonProperties->addItem(createProperty(ignoredReasons[i]));
+    ignoredNodeObject->setIgnoredReasons(ignoredReasonProperties);
+
+    return ignoredNodeObject;
+}
+
 PassRefPtr<AXNode> buildObjectForNode(Node* node, AXObject* axObject, AXObjectCacheImpl* cacheImpl, PassRefPtr<TypeBuilder::Array<AXProperty>> properties)
 {
     AccessibilityRole role = axObject->roleValue();
-    RefPtr<AXNode> nodeObject = AXNode::create().setNodeId(String::number(axObject->axObjectID())).setRole(createValue(AXObject::roleName(role), AXValueType::Role)).setProperties(properties);
+    RefPtr<AXNode> nodeObject = AXNode::create().setNodeId(String::number(axObject->axObjectID())).setIgnored(false);
+    nodeObject->setRole(createRoleNameValue(role));
+    nodeObject->setProperties(properties);
     String computedName = cacheImpl->computedNameForNode(node);
     if (!computedName.isEmpty())
         nodeObject->setName(createValue(computedName));
@@ -419,12 +354,15 @@ void InspectorAccessibilityAgent::getAXNode(ErrorString* errorString, int nodeId
     Node* node = domAgent->assertNode(errorString, nodeId);
     if (!node)
         return;
+
     Document& document = node->document();
-    ScopedAXObjectCache cache(document);
-    AXObjectCacheImpl* cacheImpl = toAXObjectCacheImpl(cache.get());
+    RefPtr<ScopedAXObjectCache> cache(adoptRef(new ScopedAXObjectCache(document)));
+    AXObjectCacheImpl* cacheImpl = toAXObjectCacheImpl(cache->get());
     AXObject* axObject = cacheImpl->getOrCreate(node);
-    if (!axObject)
+    if (!axObject || axObject->accessibilityIsIgnored()) {
+        accessibilityNode = buildObjectForIgnoredNode(node, axObject, cacheImpl);
         return;
+    }
 
     RefPtr<TypeBuilder::Array<AXProperty>> properties = TypeBuilder::Array<AXProperty>::create();
     fillLiveRegionProperties(axObject, properties);

@@ -256,8 +256,6 @@ component("proxy") {
       "ppp_instance_private_proxy.h",
       "ppp_video_decoder_proxy.cc",
       "ppp_video_decoder_proxy.h",
-      "talk_resource.cc",
-      "talk_resource.h",
       "video_capture_resource.cc",
       "video_capture_resource.h",
     ]
@@ -272,16 +270,13 @@ component("proxy") {
     "//ipc",
     "//media:shared_memory_support",
     "//ppapi/c",
-    "//ppapi/proxy:ipc",
+    "//ppapi/proxy:ipc_sources",
     "//ppapi/shared_impl",
     "//third_party/icu",
   ]
 
   if (is_nacl) {
-    deps += [
-      "//ui/events:latency_info",
-      "//mojo/nacl:mojo",
-    ]
+    deps += [ "//ui/events:latency_info" ]
   } else {
     deps += [
       "//base/third_party/dynamic_annotations",
@@ -293,7 +288,19 @@ component("proxy") {
   }
 }
 
-source_set("ipc") {
+group("ipc") {
+  if (is_component_build) {
+    public_deps = [
+      "//ppapi/proxy",
+    ]
+  } else {
+    public_deps = [
+      ":ipc_sources",
+    ]
+  }
+}
+
+source_set("ipc_sources") {
   sources = [
     "nacl_message_scanner.cc",
     "nacl_message_scanner.h",

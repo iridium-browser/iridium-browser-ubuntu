@@ -125,11 +125,6 @@ class Predictor::LookupRequest {
 
  private:
   void OnLookupFinished(int result) {
-    // TODO(vadimt): Remove ScopedTracker below once crbug.com/436634 is fixed.
-    tracked_objects::ScopedTracker tracking_profile(
-        FROM_HERE_WITH_EXPLICIT_FUNCTION(
-            "436634 Predictor::LookupRequest::OnLookupFinished"));
-
     predictor_->OnLookupFinished(this, url_, result == net::OK);
   }
 
@@ -161,12 +156,11 @@ Predictor::Predictor(bool preconnect_enabled, bool predictor_enabled)
       next_trim_time_(base::TimeTicks::Now() +
                       TimeDelta::FromHours(kDurationBetweenTrimmingsHours)),
       observer_(NULL) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 }
 
 Predictor::~Predictor() {
-  // TODO(rlp): Add DCHECK for CurrentlyOn(BrowserThread::IO) when the
-  // ProfileManagerTest has been updated with a mock profile.
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(shutdown_);
 }
 
@@ -181,10 +175,8 @@ Predictor* Predictor::CreatePredictor(bool preconnect_enabled,
 
 void Predictor::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterListPref(prefs::kDnsPrefetchingStartupList,
-                             user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterListPref(prefs::kDnsPrefetchingHostReferralList,
-                             user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterListPref(prefs::kDnsPrefetchingStartupList);
+  registry->RegisterListPref(prefs::kDnsPrefetchingHostReferralList);
 }
 
 // --------------------- Start UI methods. ------------------------------------
@@ -194,7 +186,7 @@ void Predictor::InitNetworkPredictor(PrefService* user_prefs,
                                      IOThread* io_thread,
                                      net::URLRequestContextGetter* getter,
                                      ProfileIOData* profile_io_data) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   user_prefs_ = user_prefs;
   url_request_context_getter_ = getter;
@@ -224,7 +216,7 @@ void Predictor::InitNetworkPredictor(PrefService* user_prefs,
 }
 
 void Predictor::AnticipateOmniboxUrl(const GURL& url, bool preconnectable) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (!predictor_enabled_)
     return;
   if (!url.is_valid() || !url.has_host())
@@ -318,7 +310,7 @@ void Predictor::PreconnectUrlAndSubresources(const GURL& url,
 UrlList Predictor::GetPredictedUrlListAtStartup(
     PrefService* user_prefs,
     PrefService* local_state) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   UrlList urls;
   // Recall list of URLs we learned about during last session.
   // This may catch secondary hostnames, pulled in by the homepages.  It will
@@ -372,17 +364,17 @@ UrlList Predictor::GetPredictedUrlListAtStartup(
 }
 
 void Predictor::set_max_queueing_delay(int max_queueing_delay_ms) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   g_max_queueing_delay_ms = max_queueing_delay_ms;
 }
 
 void Predictor::set_max_parallel_resolves(size_t max_parallel_resolves) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   g_max_parallel_resolves = max_parallel_resolves;
 }
 
 void Predictor::ShutdownOnUIThread() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   BrowserThread::PostTask(
       BrowserThread::IO,
       FROM_HERE,
@@ -394,7 +386,7 @@ void Predictor::ShutdownOnUIThread() {
 // --------------------- Start IO methods. ------------------------------------
 
 void Predictor::Shutdown() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(!shutdown_);
   shutdown_ = true;
 
@@ -402,7 +394,7 @@ void Predictor::Shutdown() {
 }
 
 void Predictor::DiscardAllResults() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   // Delete anything listed so far in this session that shows in about:dns.
   referrers_.clear();
 
@@ -443,11 +435,7 @@ void Predictor::DiscardAllResults() {
 // Overloaded Resolve() to take a vector of names.
 void Predictor::ResolveList(const UrlList& urls,
                             UrlInfo::ResolutionMotivation motivation) {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION("436671 Predictor::ResolveList"));
-
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   for (UrlList::const_iterator it = urls.begin(); it < urls.end(); ++it) {
     AppendToResolutionQueue(*it, motivation);
@@ -458,7 +446,7 @@ void Predictor::ResolveList(const UrlList& urls,
 // to the queue.
 void Predictor::Resolve(const GURL& url,
                         UrlInfo::ResolutionMotivation motivation) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (!url.has_host())
     return;
   AppendToResolutionQueue(url, motivation);
@@ -466,7 +454,7 @@ void Predictor::Resolve(const GURL& url,
 
 void Predictor::LearnFromNavigation(const GURL& referring_url,
                                     const GURL& target_url) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (!predictor_enabled_ || !CanPreresolveAndPreconnect())
     return;
   DCHECK_EQ(referring_url, Predictor::CanonicalizeUrl(referring_url));
@@ -484,7 +472,7 @@ void Predictor::LearnFromNavigation(const GURL& referring_url,
 
 void Predictor::PredictorGetHtmlInfo(Predictor* predictor,
                                      std::string* output) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   output->append("<html><head><title>About DNS</title>"
                  // We'd like the following no-cache... but it doesn't work.
@@ -523,7 +511,7 @@ struct RightToLeftStringSorter {
 };
 
 void Predictor::GetHtmlReferrerLists(std::string* output) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (referrers_.empty())
     return;
 
@@ -576,7 +564,7 @@ void Predictor::GetHtmlReferrerLists(std::string* output) {
 }
 
 void Predictor::GetHtmlInfo(std::string* output) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (initial_observer_.get())
     initial_observer_->GetFirstResolutionsHtml(output);
   // Show list of subresource predictions and stats.
@@ -618,7 +606,7 @@ void Predictor::GetHtmlInfo(std::string* output) {
 }
 
 void Predictor::TrimReferrersNow() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   // Just finish up work if an incremental trim is in progress.
   if (urls_being_trimmed_.empty())
     LoadUrlsForTrimming();
@@ -626,7 +614,7 @@ void Predictor::TrimReferrersNow() {
 }
 
 void Predictor::SerializeReferrers(base::ListValue* referral_list) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   referral_list->Clear();
   referral_list->Append(new base::FundamentalValue(kPredictorReferrerVersion));
   for (Referrers::const_iterator it = referrers_.begin();
@@ -644,7 +632,7 @@ void Predictor::SerializeReferrers(base::ListValue* referral_list) {
 }
 
 void Predictor::DeserializeReferrers(const base::ListValue& referral_list) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   int format_version = -1;
   if (referral_list.GetSize() > 0 &&
       referral_list.GetInteger(0, &format_version) &&
@@ -679,7 +667,7 @@ void Predictor::DeserializeReferrersThenDelete(
 }
 
 void Predictor::DiscardInitialNavigationHistory() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (initial_observer_.get())
     initial_observer_->DiscardInitialNavigationHistory();
 }
@@ -689,32 +677,17 @@ void Predictor::FinalizeInitializationOnIOThread(
     base::ListValue* referral_list,
     IOThread* io_thread,
     ProfileIOData* profile_io_data) {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
-  tracked_objects::ScopedTracker tracking_profile1(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "436671 Predictor::FinalizeInitializationOnIOThread1"));
-
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   profile_io_data_ = profile_io_data;
   initial_observer_.reset(new InitialObserver());
   host_resolver_ = io_thread->globals()->host_resolver.get();
-
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
-  tracked_objects::ScopedTracker tracking_profile2(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "436671 Predictor::FinalizeInitializationOnIOThread2"));
 
   net::URLRequestContext* context =
       url_request_context_getter_->GetURLRequestContext();
   transport_security_state_ = context->transport_security_state();
   ssl_config_service_ = context->ssl_config_service();
   proxy_service_ = context->proxy_service();
-
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
-  tracked_objects::ScopedTracker tracking_profile3(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "436671 Predictor::FinalizeInitializationOnIOThread3"));
 
   // base::WeakPtrFactory instances need to be created and destroyed
   // on the same thread. The predictor lives on the IO thread and will die
@@ -723,18 +696,8 @@ void Predictor::FinalizeInitializationOnIOThread(
   // TODO(groby): Check if WeakPtrFactory has the same constraint.
   weak_factory_.reset(new base::WeakPtrFactory<Predictor>(this));
 
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
-  tracked_objects::ScopedTracker tracking_profile4(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "436671 Predictor::FinalizeInitializationOnIOThread4"));
-
   // Prefetch these hostnames on startup.
   DnsPrefetchMotivatedList(startup_urls, UrlInfo::STARTUP_LIST_MOTIVATED);
-
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
-  tracked_objects::ScopedTracker tracking_profile5(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "436671 Predictor::FinalizeInitializationOnIOThread5"));
 
   DeserializeReferrersThenDelete(referral_list);
 }
@@ -747,7 +710,7 @@ void Predictor::FinalizeInitializationOnIOThread(
 //-----------------------------------------------------------------------------
 
 void Predictor::LearnAboutInitialNavigation(const GURL& url) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (!predictor_enabled_ || NULL == initial_observer_.get() ||
       !CanPreresolveAndPreconnect()) {
     return;
@@ -769,18 +732,13 @@ void Predictor::DnsPrefetchList(const NameList& hostnames) {
     urls.push_back(GURL("http://" + *it + ":80"));
   }
 
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DnsPrefetchMotivatedList(urls, UrlInfo::PAGE_SCAN_MOTIVATED);
 }
 
 void Predictor::DnsPrefetchMotivatedList(
     const UrlList& urls,
     UrlInfo::ResolutionMotivation motivation) {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "436671 Predictor::DnsPrefetchMotivatedList"));
-
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI) ||
          BrowserThread::CurrentlyOn(BrowserThread::IO));
   if (!predictor_enabled_)
@@ -808,7 +766,7 @@ static void SaveDnsPrefetchStateForNextStartupAndTrimOnIOThread(
     base::ListValue* referral_list,
     base::WaitableEvent* completion,
     Predictor* predictor) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   if (NULL == predictor) {
     completion->Signal();
@@ -862,7 +820,7 @@ void Predictor::SaveDnsPrefetchStateForNextStartupAndTrim(
     base::ListValue* startup_list,
     base::ListValue* referral_list,
     base::WaitableEvent* completion) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (initial_observer_.get())
     initial_observer_->GetInitialDnsResolutionList(startup_list);
 
@@ -941,7 +899,7 @@ bool Predictor::CanPrefetchAndPrerender() const {
   if (BrowserThread::CurrentlyOn(BrowserThread::UI)) {
     return chrome_browser_net::CanPrefetchAndPrerenderUI(user_prefs_);
   } else {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+    DCHECK_CURRENTLY_ON(BrowserThread::IO);
     return chrome_browser_net::CanPrefetchAndPrerenderIO(profile_io_data_);
   }
 }
@@ -950,7 +908,7 @@ bool Predictor::CanPreresolveAndPreconnect() const {
   if (BrowserThread::CurrentlyOn(BrowserThread::UI)) {
     return chrome_browser_net::CanPreresolveAndPreconnectUI(user_prefs_);
   } else {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+    DCHECK_CURRENTLY_ON(BrowserThread::IO);
     return chrome_browser_net::CanPreresolveAndPreconnectIO(profile_io_data_);
   }
 }
@@ -968,7 +926,7 @@ void Predictor::PrepareFrameSubresources(const GURL& original_url,
   // subresources.
   GURL url = GetHSTSRedirectOnIOThread(original_url);
 
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK_EQ(url.GetWithEmptyPath(), url);
   Referrers::iterator it = referrers_.find(url);
   if (referrers_.end() == it) {
@@ -1021,7 +979,7 @@ void Predictor::PrepareFrameSubresources(const GURL& original_url,
 
 void Predictor::OnLookupFinished(LookupRequest* request, const GURL& url,
                                  bool found) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   LookupFinished(request, url, found);
   pending_lookups_.erase(request);
@@ -1032,7 +990,7 @@ void Predictor::OnLookupFinished(LookupRequest* request, const GURL& url,
 
 void Predictor::LookupFinished(LookupRequest* request, const GURL& url,
                                bool found) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   UrlInfo* info = &results_[url];
   DCHECK(info->HasUrl(url));
   if (info->is_marked_to_delete()) {
@@ -1059,12 +1017,7 @@ bool Predictor::WouldLikelyProxyURL(const GURL& url) {
 UrlInfo* Predictor::AppendToResolutionQueue(
     const GURL& url,
     UrlInfo::ResolutionMotivation motivation) {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
-  tracked_objects::ScopedTracker tracking_profile1(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "436671 Predictor::AppendToResolutionQueue1"));
-
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(url.has_host());
 
   if (shutdown_)
@@ -1082,35 +1035,28 @@ UrlInfo* Predictor::AppendToResolutionQueue(
     return NULL;
   }
 
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
-  tracked_objects::ScopedTracker tracking_profile2(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "436671 Predictor::AppendToResolutionQueue2"));
+  bool would_likely_proxy;
+  {
+    // TODO(ttuttle): Remove ScopedTracker below once crbug.com/436671 is fixed.
+    tracked_objects::ScopedTracker tracking_profile(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION("436671 WouldLikelyProxyURL()"));
+    would_likely_proxy = WouldLikelyProxyURL(url);
+  }
 
-  if (WouldLikelyProxyURL(url)) {
+  if (would_likely_proxy) {
     info->DLogResultsStats("DNS PrefetchForProxiedRequest");
     return NULL;
   }
 
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
-  tracked_objects::ScopedTracker tracking_profile3(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "436671 Predictor::AppendToResolutionQueue3"));
-
   info->SetQueuedState(motivation);
   work_queue_.Push(url, motivation);
-
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
-  tracked_objects::ScopedTracker tracking_profile4(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "436671 Predictor::AppendToResolutionQueue4"));
 
   StartSomeQueuedResolutions();
   return info;
 }
 
 bool Predictor::CongestionControlPerformed(UrlInfo* info) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   // Note: queue_duration is ONLY valid after we go to assigned state.
   if (info->queue_duration() < max_dns_queue_delay_)
     return false;
@@ -1128,15 +1074,10 @@ bool Predictor::CongestionControlPerformed(UrlInfo* info) {
 }
 
 void Predictor::StartSomeQueuedResolutions() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   while (!work_queue_.IsEmpty() &&
          pending_lookups_.size() < max_concurrent_dns_lookups_) {
-    // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
-    tracked_objects::ScopedTracker tracking_profile1(
-        FROM_HERE_WITH_EXPLICIT_FUNCTION(
-            "436671 Predictor::StartSomeQueuedResolutions1"));
-
     const GURL url(work_queue_.Pop());
     UrlInfo* info = &results_[url];
     DCHECK(info->HasUrl(url));
@@ -1149,17 +1090,14 @@ void Predictor::StartSomeQueuedResolutions() {
 
     LookupRequest* request = new LookupRequest(this, host_resolver_, url);
 
-    // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
-    tracked_objects::ScopedTracker tracking_profile2(
-        FROM_HERE_WITH_EXPLICIT_FUNCTION(
-            "436671 Predictor::StartSomeQueuedResolutions2"));
-
-    int status = request->Start();
-
-    // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
-    tracked_objects::ScopedTracker tracking_profile3(
-        FROM_HERE_WITH_EXPLICIT_FUNCTION(
-            "436671 Predictor::StartSomeQueuedResolutions3"));
+    int status;
+    {
+      // TODO(ttuttle): Remove ScopedTracker below once crbug.com/436671 is
+      // fixed.
+      tracked_objects::ScopedTracker tracking_profile(
+          FROM_HERE_WITH_EXPLICIT_FUNCTION("436671 LookupRequest::Start()"));
+      status = request->Start();
+    }
 
     if (status == net::ERR_IO_PENDING) {
       // Will complete asynchronously.
@@ -1177,7 +1115,7 @@ void Predictor::StartSomeQueuedResolutions() {
 }
 
 void Predictor::TrimReferrers() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (!urls_being_trimmed_.empty())
     return;   // There is incremental trimming in progress already.
 
@@ -1227,7 +1165,7 @@ void Predictor::IncrementalTrimReferrers(bool trim_all_now) {
 }
 
 GURL Predictor::GetHSTSRedirectOnIOThread(const GURL& url) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   if (!transport_security_state_)
     return url;
@@ -1291,7 +1229,7 @@ Predictor::InitialObserver::~InitialObserver() {
 
 void Predictor::InitialObserver::Append(const GURL& url,
                                         Predictor* predictor) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   // TODO(rlp): Do we really need the predictor check here?
   if (NULL == predictor)
@@ -1307,7 +1245,7 @@ void Predictor::InitialObserver::Append(const GURL& url,
 
 void Predictor::InitialObserver::GetInitialDnsResolutionList(
     base::ListValue* startup_list) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(startup_list);
   startup_list->Clear();
   DCHECK_EQ(0u, startup_list->GetSize());
@@ -1323,7 +1261,7 @@ void Predictor::InitialObserver::GetInitialDnsResolutionList(
 
 void Predictor::InitialObserver::GetFirstResolutionsHtml(
     std::string* output) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   UrlInfo::UrlInfoTable resolution_list;
   {

@@ -8,7 +8,8 @@ from telemetry.page import page as page_module
 from telemetry.unittest_util import options_for_unittests
 from telemetry.unittest_util import page_test_test_case
 
-from measurements import repaint
+from measurements import smoothness
+from page_sets import repaint_helpers
 
 
 class TestRepaintPage(page_module.Page):
@@ -17,7 +18,7 @@ class TestRepaintPage(page_module.Page):
                                           page_set, base_dir)
 
   def RunPageInteractions(self, action_runner):
-    action_runner.RepaintContinuously(seconds=2)
+    repaint_helpers.Repaint(action_runner)
 
 
 class RepaintUnitTest(page_test_test_case.PageTestTestCase):
@@ -32,10 +33,11 @@ class RepaintUnitTest(page_test_test_case.PageTestTestCase):
     self._options = options_for_unittests.GetCopy()
     self._options.browser_options.wpr_mode = wpr_modes.WPR_OFF
 
+  @decorators.Disabled('chromeos')  # crbug.com/483212
   def testRepaint(self):
     ps = self.CreateEmptyPageSet()
     ps.AddUserStory(TestRepaintPage(ps, ps.base_dir))
-    measurement = repaint.Repaint()
+    measurement = smoothness.Repaint()
     results = self.RunMeasurement(measurement, ps, options=self._options)
     self.assertEquals(0, len(results.failures))
 
@@ -59,4 +61,4 @@ class RepaintUnitTest(page_test_test_case.PageTestTestCase):
 
   @decorators.Disabled('android')
   def testCleanUpTrace(self):
-    self.TestTracingCleanedUp(repaint.Repaint, self._options)
+    self.TestTracingCleanedUp(smoothness.Repaint, self._options)

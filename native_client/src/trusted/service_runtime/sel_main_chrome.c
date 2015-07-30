@@ -107,6 +107,7 @@ struct NaClChromeMainArgs *NaClChromeMainArgsCreate(void) {
   args->broker_duplicate_handle_func = NULL;
   args->attach_debug_exception_handler_func = NULL;
 #endif
+  args->load_status_handler_func = NULL;
 #if NACL_LINUX || NACL_OSX
   args->number_of_cores = -1;  /* unknown */
 #endif
@@ -309,18 +310,7 @@ static int LoadApp(struct NaClApp *nap, struct NaClChromeMainArgs *args) {
 
     NaClLog(4, "secure service = %"NACL_PRIxPTR"\n",
             (uintptr_t) nap->secure_service);
-    NACL_FI_FATAL("BeforeWaitForStartModule");
 
-    if (NULL != nap->secure_service) {
-      NaClErrorCode start_result;
-      /*
-       * wait for start_module RPC call on secure channel thread.
-       */
-      start_result = NaClWaitForStartModuleCommand(nap);
-      if (LOAD_OK == errcode) {
-        errcode = start_result;
-      }
-    }
   }
 
   NACL_FI_FATAL("BeforeLoadIrt");
@@ -328,6 +318,9 @@ static int LoadApp(struct NaClApp *nap, struct NaClChromeMainArgs *args) {
   /*
    * error reporting done; can quit now if there was an error earlier.
    */
+  if (LOAD_OK == errcode) {
+    errcode = NaClGetLoadStatus(nap);
+  }
   if (LOAD_OK != errcode) {
     goto done;
   }
@@ -371,11 +364,40 @@ static int LoadApp(struct NaClApp *nap, struct NaClChromeMainArgs *args) {
 #endif
   }
 
+  if (args->load_status_handler_func != NULL) {
+    args->load_status_handler_func(LOAD_OK);
+  }
   return LOAD_OK;
 
 done:
   fflush(stdout);
 
+  /*
+   * If there is a load status callback, call that now and transfer logs
+   * in preparation for process exit.
+   */
+  if (args->load_status_handler_func != NULL) {
+    /* Don't return LOAD_OK if we had some failure loading. */
+    if (LOAD_OK == errcode) {
+      errcode = LOAD_INTERNAL;
+    }
+    args->load_status_handler_func(errcode);
+    NaClLog(LOG_ERROR, "NaCl LoadApp failed. Transferring logs before exit.\n");
+    NaClLogRunAbortBehavior();
+    /*
+     * Fall through and run NaClBlockIfCommandChannelExists.
+     * TODO(jvoung): remove NaClBlockIfCommandChannelExists() and use the
+     * callback to indicate the load_status after Chromium no longer calls
+     * start_module. We also need to change Chromium so that it does not
+     * attempt to set up the command channel if there is a known load error.
+     * Otherwise there is a race between this process's exit / load error
+     * reporting, and the command channel setup on the Chromium side (plus
+     * the associated reporting). Thus this could end up with two different
+     * load errors being reported (1) the real load error from here, and
+     * (2) the command channel setup failure because the process exited in
+     * the middle of setting up the command channel.
+     */
+  }
   /*
    * If there is a secure command channel, we sent an RPC reply with
    * the reason that the nexe was rejected.  If we exit now, that

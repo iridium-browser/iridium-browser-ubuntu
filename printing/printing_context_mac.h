@@ -5,17 +5,14 @@
 #ifndef PRINTING_PRINTING_CONTEXT_MAC_H_
 #define PRINTING_PRINTING_CONTEXT_MAC_H_
 
+#include <ApplicationServices/ApplicationServices.h>
 #include <string>
 
 #include "base/mac/scoped_nsobject.h"
 #include "printing/print_job_constants.h"
 #include "printing/printing_context.h"
 
-#ifdef __OBJC__
 @class NSPrintInfo;
-#else
-class NSPrintInfo;
-#endif  // __OBJC__
 
 namespace printing {
 
@@ -32,7 +29,8 @@ class PRINTING_EXPORT PrintingContextMac : public PrintingContext {
   Result UseDefaultSettings() override;
   gfx::Size GetPdfPaperSizeDeviceUnits() override;
   Result UpdatePrinterSettings(bool external_preview,
-                               bool show_system_dialog) override;
+                               bool show_system_dialog,
+                               int page_count) override;
   Result InitWithSettings(const PrintSettings& settings) override;
   Result NewDocument(const base::string16& document_name) override;
   Result NewPage() override;

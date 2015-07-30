@@ -32,10 +32,10 @@
 #include "core/layout/HitTestResult.h"
 #include "core/layout/LayoutInline.h"
 #include "core/layout/LayoutView.h"
-#include "core/layout/PaintInfo.h"
 #include "core/layout/line/InlineTextBox.h"
 #include "core/layout/line/RootInlineBox.h"
 #include "core/paint/InlinePainter.h"
+#include "core/paint/PaintInfo.h"
 
 namespace blink {
 
@@ -145,19 +145,19 @@ void LineBoxList::dirtyLineBoxes()
         curr->dirtyLineBoxes();
 }
 
-bool LineBoxList::rangeIntersectsRect(LayoutBoxModelObject* renderer, LayoutUnit logicalTop, LayoutUnit logicalBottom, const LayoutRect& rect, const LayoutPoint& offset) const
+bool LineBoxList::rangeIntersectsRect(LayoutBoxModelObject* layoutObject, LayoutUnit logicalTop, LayoutUnit logicalBottom, const LayoutRect& rect, const LayoutPoint& offset) const
 {
     LayoutBox* block;
-    if (renderer->isBox())
-        block = toLayoutBox(renderer);
+    if (layoutObject->isBox())
+        block = toLayoutBox(layoutObject);
     else
-        block = renderer->containingBlock();
+        block = layoutObject->containingBlock();
     LayoutUnit physicalStart = block->flipForWritingMode(logicalTop);
     LayoutUnit physicalEnd = block->flipForWritingMode(logicalBottom);
     LayoutUnit physicalExtent = absoluteValue(physicalEnd - physicalStart);
     physicalStart = std::min(physicalStart, physicalEnd);
 
-    if (renderer->style()->isHorizontalWritingMode()) {
+    if (layoutObject->style()->isHorizontalWritingMode()) {
         physicalStart += offset.y();
         if (physicalStart >= rect.maxY() || physicalStart + physicalExtent <= rect.y())
             return false;
@@ -170,7 +170,7 @@ bool LineBoxList::rangeIntersectsRect(LayoutBoxModelObject* renderer, LayoutUnit
     return true;
 }
 
-bool LineBoxList::anyLineIntersectsRect(LayoutBoxModelObject* renderer, const LayoutRect& rect, const LayoutPoint& offset) const
+bool LineBoxList::anyLineIntersectsRect(LayoutBoxModelObject* layoutObject, const LayoutRect& rect, const LayoutPoint& offset) const
 {
     // We can check the first box and last box and avoid painting/hit testing if we don't
     // intersect.  This is a quick short-circuit that we can take to avoid walking any lines.
@@ -181,24 +181,24 @@ bool LineBoxList::anyLineIntersectsRect(LayoutBoxModelObject* renderer, const La
     LayoutUnit firstLineTop = firstLineBox()->logicalTopVisualOverflow(firstRootBox.lineTop());
     LayoutUnit lastLineBottom = lastLineBox()->logicalBottomVisualOverflow(lastRootBox.lineBottom());
 
-    return rangeIntersectsRect(renderer, firstLineTop, lastLineBottom, rect, offset);
+    return rangeIntersectsRect(layoutObject, firstLineTop, lastLineBottom, rect, offset);
 }
 
-bool LineBoxList::lineIntersectsDirtyRect(LayoutBoxModelObject* renderer, InlineFlowBox* box, const PaintInfo& paintInfo, const LayoutPoint& offset) const
+bool LineBoxList::lineIntersectsDirtyRect(LayoutBoxModelObject* layoutObject, InlineFlowBox* box, const PaintInfo& paintInfo, const LayoutPoint& offset) const
 {
     RootInlineBox& root = box->root();
     LayoutUnit logicalTop = std::min<LayoutUnit>(box->logicalTopVisualOverflow(root.lineTop()), root.selectionTop());
     LayoutUnit logicalBottom = box->logicalBottomVisualOverflow(root.lineBottom());
 
-    return rangeIntersectsRect(renderer, logicalTop, logicalBottom, LayoutRect(paintInfo.rect), offset);
+    return rangeIntersectsRect(layoutObject, logicalTop, logicalBottom, LayoutRect(paintInfo.rect), offset);
 }
 
-bool LineBoxList::hitTest(LayoutBoxModelObject* renderer, HitTestResult& result, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction hitTestAction) const
+bool LineBoxList::hitTest(LayoutBoxModelObject* layoutObject, HitTestResult& result, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction hitTestAction) const
 {
     if (hitTestAction != HitTestForeground)
         return false;
 
-    ASSERT(renderer->isLayoutBlock() || (renderer->isLayoutInline() && renderer->hasLayer())); // The only way an inline could hit test like this is if it has a layer.
+    ASSERT(layoutObject->isLayoutBlock() || (layoutObject->isLayoutInline() && layoutObject->hasLayer())); // The only way an inline could hit test like this is if it has a layer.
 
     // If we have no lines then we have no work to do.
     if (!firstLineBox())
@@ -209,7 +209,7 @@ bool LineBoxList::hitTest(LayoutBoxModelObject* renderer, HitTestResult& result,
         IntRect(point.x(), point.y() - locationInContainer.topPadding(), 1, locationInContainer.topPadding() + locationInContainer.bottomPadding() + 1) :
         IntRect(point.x() - locationInContainer.leftPadding(), point.y(), locationInContainer.rightPadding() + locationInContainer.leftPadding() + 1, 1));
 
-    if (!anyLineIntersectsRect(renderer, rect, accumulatedOffset))
+    if (!anyLineIntersectsRect(layoutObject, rect, accumulatedOffset))
         return false;
 
     // See if our root lines contain the point.  If so, then we hit test
@@ -217,10 +217,10 @@ bool LineBoxList::hitTest(LayoutBoxModelObject* renderer, HitTestResult& result,
     // based off positions of our first line box or our last line box.
     for (InlineFlowBox* curr = lastLineBox(); curr; curr = curr->prevLineBox()) {
         RootInlineBox& root = curr->root();
-        if (rangeIntersectsRect(renderer, curr->logicalTopVisualOverflow(root.lineTop()), curr->logicalBottomVisualOverflow(root.lineBottom()), rect, accumulatedOffset)) {
+        if (rangeIntersectsRect(layoutObject, curr->logicalTopVisualOverflow(root.lineTop()), curr->logicalBottomVisualOverflow(root.lineBottom()), rect, accumulatedOffset)) {
             bool inside = curr->nodeAtPoint(result, locationInContainer, accumulatedOffset, root.lineTop(), root.lineBottom());
             if (inside) {
-                renderer->updateHitTestResult(result, locationInContainer.point() - toLayoutSize(accumulatedOffset));
+                layoutObject->updateHitTestResult(result, locationInContainer.point() - toLayoutSize(accumulatedOffset));
                 return true;
             }
         }
@@ -253,11 +253,7 @@ void LineBoxList::dirtyLinesFromChangedChild(LayoutObject* container, LayoutObje
     // parent's first line box.
     RootInlineBox* box = 0;
     LayoutObject* curr = 0;
-    ListHashSet<LayoutObject*, 16> potentialLineBreakObjects;
-    potentialLineBreakObjects.add(child);
     for (curr = child->previousSibling(); curr; curr = curr->previousSibling()) {
-        potentialLineBreakObjects.add(curr);
-
         if (curr->isFloatingOrOutOfFlowPositioned())
             continue;
 
@@ -296,7 +292,6 @@ void LineBoxList::dirtyLinesFromChangedChild(LayoutObject* container, LayoutObje
 
     // If we found a line box, then dirty it.
     if (box) {
-        RootInlineBox* adjacentBox;
         box->markDirty();
 
         // dirty the adjacent lines that might be affected
@@ -306,14 +301,12 @@ void LineBoxList::dirtyLinesFromChangedChild(LayoutObject* container, LayoutObje
         // calls setLineBreakInfo with the result of findNextLineBreak.  findNextLineBreak,
         // despite the name, actually returns the first LayoutObject after the BR.
         // <rdar://problem/3849947> "Typing after pasting line does not appear until after window resize."
-        adjacentBox = box->prevRootBox();
-        if (adjacentBox)
-            adjacentBox->markDirty();
-        adjacentBox = box->nextRootBox();
+        if (RootInlineBox* prevRootBox = box->prevRootBox())
+            prevRootBox->markDirty();
         // If |child| or any of its immediately previous siblings with culled lineboxes is the object after a line-break in |box| or the linebox after it
         // then that means |child| actually sits on the linebox after |box| (or is its line-break object) and so we need to dirty it as well.
-        if (adjacentBox && (potentialLineBreakObjects.contains(box->lineBreakObj()) || potentialLineBreakObjects.contains(adjacentBox->lineBreakObj()) || child->isBR() || isIsolated(container->style()->unicodeBidi())))
-            adjacentBox->markDirty();
+        if (RootInlineBox* nextRootBox = box->nextRootBox())
+            nextRootBox->markDirty();
     }
 }
 

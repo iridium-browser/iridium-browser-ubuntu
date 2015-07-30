@@ -1119,7 +1119,7 @@ static void test_bytes_used(skiatest::Reporter* reporter) {
 
     // Protect against any unintentional bloat.
     size_t approxUsed = SkPictureUtils::ApproximateBytesUsed(empty.get());
-    REPORTER_ASSERT(reporter, approxUsed <= 136);
+    REPORTER_ASSERT(reporter, approxUsed <= 432);
 
     // Sanity check of nested SkPictures.
     SkPictureRecorder r2;
@@ -1127,7 +1127,7 @@ static void test_bytes_used(skiatest::Reporter* reporter) {
     r2.getRecordingCanvas()->drawPicture(empty.get());
     SkAutoTUnref<SkPicture> nested(r2.endRecording());
 
-    REPORTER_ASSERT(reporter, SkPictureUtils::ApproximateBytesUsed(nested.get()) >
+    REPORTER_ASSERT(reporter, SkPictureUtils::ApproximateBytesUsed(nested.get()) >=
                               SkPictureUtils::ApproximateBytesUsed(empty.get()));
 }
 
@@ -1310,4 +1310,16 @@ DEF_TEST(Picture_BitmapLeak, r) {
     pic.reset(NULL);
     REPORTER_ASSERT(r, mut.pixelRef()->unique());
     REPORTER_ASSERT(r, immut.pixelRef()->unique());
+}
+
+// getRecordingCanvas() should return a SkCanvas when recording, null when not recording.
+DEF_TEST(Picture_getRecordingCanvas, r) {
+    SkPictureRecorder rec;
+    REPORTER_ASSERT(r, !rec.getRecordingCanvas());
+    for (int i = 0; i < 3; i++) {
+        rec.beginRecording(100, 100);
+        REPORTER_ASSERT(r, rec.getRecordingCanvas());
+        rec.endRecording()->unref();
+        REPORTER_ASSERT(r, !rec.getRecordingCanvas());
+    }
 }

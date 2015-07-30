@@ -10,7 +10,6 @@
 #include "components/signin/core/browser/signin_manager.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 
-class AccountReconcilor;
 class ProfileOAuth2TokenService;
 class SigninClient;
 
@@ -65,7 +64,7 @@ class SigninTracker : public SigninManagerBase::Observer,
 
     // The signed in account has been added into the content area cookie jar.
     // This will be called only after a call to SigninSuccess().
-    virtual void MergeSessionComplete(const GoogleServiceAuthError& error) = 0;
+    virtual void AccountAddedToCookie(const GoogleServiceAuthError& error) = 0;
   };
 
   // Creates a SigninTracker that tracks the signin status on the passed
@@ -75,7 +74,6 @@ class SigninTracker : public SigninManagerBase::Observer,
   // non-null.
   SigninTracker(ProfileOAuth2TokenService* token_service,
                 SigninManagerBase* signin_manager,
-                AccountReconcilor* account_reconcilor,
                 GaiaCookieManagerService* cookie_manager_service,
                 SigninClient* client,
                 Observer* observer);
@@ -100,7 +98,6 @@ class SigninTracker : public SigninManagerBase::Observer,
   // The classes whose collective signin status we are tracking.
   ProfileOAuth2TokenService* token_service_;
   SigninManagerBase* signin_manager_;
-  AccountReconcilor* account_reconcilor_;
   GaiaCookieManagerService* cookie_manager_service_;
 
   // The client associated with this instance.

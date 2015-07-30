@@ -276,12 +276,13 @@ void VideoCaptureImpl::OnMailboxBufferReceived(
     first_frame_timestamp_ = timestamp;
 
   scoped_refptr<media::VideoFrame> frame = media::VideoFrame::WrapNativeTexture(
-      make_scoped_ptr(new gpu::MailboxHolder(mailbox_holder)),
+      mailbox_holder,
       media::BindToCurrentLoop(base::Bind(
           &VideoCaptureImpl::OnClientBufferFinished, weak_factory_.GetWeakPtr(),
           buffer_id, scoped_refptr<ClientBuffer>())),
       packed_frame_size, gfx::Rect(packed_frame_size), packed_frame_size,
-      timestamp - first_frame_timestamp_, false);
+      timestamp - first_frame_timestamp_, false /* allow_overlay */,
+      true /* has_alpha */);
   frame->metadata()->MergeInternalValuesFrom(metadata);
 
   for (const auto& client : clients_)

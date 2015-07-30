@@ -29,6 +29,7 @@
 #ifndef AXLayoutObject_h
 #define AXLayoutObject_h
 
+#include "modules/ModulesExport.h"
 #include "modules/accessibility/AXNodeObject.h"
 #include "platform/geometry/LayoutRect.h"
 #include "wtf/Forward.h"
@@ -45,7 +46,7 @@ class Node;
 class VisibleSelection;
 class Widget;
 
-class AXLayoutObject : public AXNodeObject {
+class MODULES_EXPORT AXLayoutObject : public AXNodeObject {
 protected:
     AXLayoutObject(LayoutObject*, AXObjectCacheImpl*);
 
@@ -95,18 +96,26 @@ protected:
     virtual bool isSelected() const override;
 
     // Whether objects are ignored, i.e. not included in the tree.
-    virtual AXObjectInclusion defaultObjectInclusion() const override;
-    virtual bool computeAccessibilityIsIgnored() const override;
+    virtual AXObjectInclusion defaultObjectInclusion(IgnoredReasons* = nullptr) const override;
+    virtual bool computeAccessibilityIsIgnored(IgnoredReasons* = nullptr) const override;
 
     // Properties of static elements.
     virtual const AtomicString& accessKey() const override;
+    virtual RGBA32 backgroundColor() const override final;
+    virtual RGBA32 color() const override final;
+    // Font size is in pixels.
+    virtual float fontSize() const override final;
     virtual AccessibilityOrientation orientation() const override;
     virtual String text() const override;
+    virtual AccessibilityTextDirection textDirection() const override final;
     virtual int textLength() const override;
+    virtual TextStyle textStyle() const override final;
     virtual KURL url() const override;
 
-    // Load inline text boxes if they're not already loaded.
+    // Inline text boxes.
     virtual void loadInlineTextBoxes() override;
+    virtual AXObject* nextOnLine() const override;
+    virtual AXObject* previousOnLine() const override;
 
     // Properties of interactive elements.
     virtual String actionVerb() const override;
@@ -116,13 +125,13 @@ protected:
     virtual AXObject* activeDescendant() const override;
     virtual void ariaFlowToElements(AccessibilityChildrenVector&) const override;
     virtual void ariaControlsElements(AccessibilityChildrenVector&) const override;
-    virtual void ariaDescribedbyElements(AccessibilityChildrenVector&) const override;
-    virtual void ariaLabelledbyElements(AccessibilityChildrenVector&) const override;
+    virtual void deprecatedAriaDescribedbyElements(AccessibilityChildrenVector&) const override;
+    virtual void deprecatedAriaLabelledbyElements(AccessibilityChildrenVector&) const override;
     virtual void ariaOwnsElements(AccessibilityChildrenVector&) const override;
 
     virtual bool ariaHasPopup() const override;
     virtual bool ariaRoleHasPresentationalChildren() const override;
-    virtual bool isPresentationalChildOfAriaRole() const override;
+    virtual AXObject* ancestorForWhichThisIsAPresentationalChild() const override;
     virtual bool shouldFocusActiveDescendant() const override;
     virtual bool supportsARIADragging() const override;
     virtual bool supportsARIADropping() const override;
@@ -136,10 +145,10 @@ protected:
     virtual bool liveRegionBusy() const override;
 
     // Accessibility Text.
-    virtual String textUnderElement(TextUnderElementMode) const override;
+    virtual String deprecatedTextUnderElement(TextUnderElementMode) const override;
 
     // Accessibility Text - (To be deprecated).
-    virtual String helpText() const override;
+    virtual String deprecatedHelpText() const override;
 
     // Location and click point in frame-relative coordinates.
     virtual void markCachedElementRectDirty() const override;
@@ -179,7 +188,6 @@ protected:
     // Modify or take an action on an object.
     virtual void setSelectedTextRange(const PlainTextRange&) override;
     virtual void setValue(const String&) override;
-    virtual void scrollTo(const IntPoint&) const override;
 
     // Notifications that this object may have changed.
     virtual void handleActiveDescendantChanged() override;
@@ -192,14 +200,13 @@ protected:
     virtual void lineBreaks(Vector<int>&) const override;
 
 private:
-    bool isAllowedChildOfTree() const;
+    AXObject* treeAncestorDisallowingChild() const;
     void ariaListboxSelectedChildren(AccessibilityChildrenVector&);
-    PlainTextRange ariaSelectedTextRange() const;
+    PlainTextRange visibleSelectionUnderObject() const;
     bool nodeIsTextControl(const Node*) const;
     bool isTabItemSelected() const;
     AXObject* accessibilityImageMapHitTest(HTMLAreaElement*, const IntPoint&) const;
     LayoutObject* layoutParentObject() const;
-    bool isDescendantOfElementType(const HTMLQualifiedName& tagName) const;
     bool isSVGImage() const;
     void detachRemoteSVGRoot();
     AXSVGRoot* remoteSVGRootElement() const;

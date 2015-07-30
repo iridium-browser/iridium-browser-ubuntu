@@ -4,6 +4,8 @@
 
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_request_options.h"
 
+#include <vector>
+
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/single_thread_task_runner.h"
@@ -26,7 +28,7 @@
 #include "net/proxy/proxy_server.h"
 #include "net/url_request/url_request.h"
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !defined(OS_IOS)
 #include "google_apis/google_api_keys.h"
 #endif
 
@@ -40,6 +42,7 @@ std::string FormatOption(const std::string& name, const std::string& value) {
 
 const char kSessionHeaderOption[] = "ps";
 const char kCredentialsHeaderOption[] = "sid";
+const char kSecureSessionHeaderOption[] = "s";
 const char kBuildNumberHeaderOption[] = "b";
 const char kPatchNumberHeaderOption[] = "p";
 const char kClientHeaderOption[] = "c";
@@ -96,25 +99,25 @@ bool DataReductionProxyRequestOptions::ParseLocalSessionKey(
 
 DataReductionProxyRequestOptions::DataReductionProxyRequestOptions(
     Client client,
-    DataReductionProxyConfig* config,
-    scoped_refptr<base::SingleThreadTaskRunner> network_task_runner)
+    DataReductionProxyConfig* config)
     : client_(GetString(client)),
       use_assigned_credentials_(false),
-      data_reduction_proxy_config_(config),
-      network_task_runner_(network_task_runner) {
+      data_reduction_proxy_config_(config) {
   GetChromiumBuildAndPatch(ChromiumVersion(), &build_, &patch_);
+  // Constructed on the UI thread, but should be checked on the IO thread.
+  thread_checker_.DetachFromThread();
 }
 
 DataReductionProxyRequestOptions::DataReductionProxyRequestOptions(
     Client client,
     const std::string& version,
-    DataReductionProxyConfig* config,
-    scoped_refptr<base::SingleThreadTaskRunner> network_task_runner)
+    DataReductionProxyConfig* config)
     : client_(GetString(client)),
       use_assigned_credentials_(false),
-      data_reduction_proxy_config_(config),
-      network_task_runner_(network_task_runner) {
+      data_reduction_proxy_config_(config) {
   GetChromiumBuildAndPatch(version, &build_, &patch_);
+  // Constructed on the UI thread, but should be checked on the IO thread.
+  thread_checker_.DetachFromThread();
 }
 
 DataReductionProxyRequestOptions::~DataReductionProxyRequestOptions() {
@@ -208,7 +211,7 @@ void DataReductionProxyRequestOptions::MaybeAddRequestHeader(
     net::URLRequest* request,
     const net::ProxyServer& proxy_server,
     net::HttpRequestHeaders* request_headers) {
-  DCHECK(network_task_runner_->BelongsToCurrentThread());
+  DCHECK(thread_checker_.CalledOnValidThread());
   if (!proxy_server.is_valid())
     return;
   if (proxy_server.is_direct())
@@ -221,7 +224,7 @@ void DataReductionProxyRequestOptions::MaybeAddRequestHeader(
 void DataReductionProxyRequestOptions::MaybeAddProxyTunnelRequestHandler(
     const net::HostPortPair& proxy_server,
     net::HttpRequestHeaders* request_headers) {
-  DCHECK(network_task_runner_->BelongsToCurrentThread());
+  DCHECK(thread_checker_.CalledOnValidThread());
   MaybeAddRequestHeaderImpl(proxy_server, true, request_headers);
 }
 
@@ -273,6 +276,7 @@ void DataReductionProxyRequestOptions::UpdateCredentials() {
 }
 
 void DataReductionProxyRequestOptions::SetKeyOnIO(const std::string& key) {
+  DCHECK(thread_checker_.CalledOnValidThread());
   if(!key.empty()) {
     key_ = key;
     UpdateCredentials();
@@ -281,7 +285,7 @@ void DataReductionProxyRequestOptions::SetKeyOnIO(const std::string& key) {
 
 void DataReductionProxyRequestOptions::PopulateConfigResponse(
     base::DictionaryValue* response) const {
-  DCHECK(network_task_runner_->BelongsToCurrentThread());
+  DCHECK(thread_checker_.CalledOnValidThread());
   std::string session;
   std::string credentials;
   base::Time now = Now();
@@ -296,9 +300,22 @@ void DataReductionProxyRequestOptions::PopulateConfigResponse(
 void DataReductionProxyRequestOptions::SetCredentials(
     const std::string& session,
     const std::string& credentials) {
-  DCHECK(network_task_runner_->BelongsToCurrentThread());
+  DCHECK(thread_checker_.CalledOnValidThread());
   session_ = session;
   credentials_ = credentials;
+  secure_session_.clear();
+  // Force skipping of credential regeneration. It should be handled by the
+  // caller.
+  use_assigned_credentials_ = true;
+  RegenerateRequestHeaderValue();
+}
+
+void DataReductionProxyRequestOptions::SetSecureSession(
+    const std::string& secure_session) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  session_.clear();
+  credentials_.clear();
+  secure_session_ = secure_session;
   // Force skipping of credential regeneration. It should be handled by the
   // caller.
   use_assigned_credentials_ = true;
@@ -310,9 +327,9 @@ std::string DataReductionProxyRequestOptions::GetDefaultKey() const {
       *base::CommandLine::ForCurrentProcess();
   std::string key =
     command_line.GetSwitchValueASCII(switches::kDataReductionProxyKey);
-// Android and iOS get the default key from a preprocessor constant. All other
+// iOS gets the default key from a preprocessor constant. All other
 // platforms get the key from google_apis
-#if defined(OS_ANDROID) || defined(OS_IOS)
+#if defined(OS_IOS)
 #if defined(SPDY_PROXY_AUTH_VALUE)
   if (key.empty())
     key = SPDY_PROXY_AUTH_VALUE;
@@ -321,8 +338,12 @@ std::string DataReductionProxyRequestOptions::GetDefaultKey() const {
   if (key.empty()) {
     key = google_apis::GetSpdyProxyAuthValue();
   }
-#endif  // defined(OS_ANDROID) || defined(OS_IOS)
+#endif  // defined(OS_IOS)
   return key;
+}
+
+const std::string& DataReductionProxyRequestOptions::GetSecureSession() const {
+  return secure_session_;
 }
 
 void DataReductionProxyRequestOptions::MaybeAddRequestHeaderImpl(
@@ -340,18 +361,27 @@ void DataReductionProxyRequestOptions::MaybeAddRequestHeaderImpl(
 }
 
 void DataReductionProxyRequestOptions::RegenerateRequestHeaderValue() {
-  header_value_ = FormatOption(kSessionHeaderOption, session_)
-                + ", " + FormatOption(kCredentialsHeaderOption, credentials_)
-                + (client_.empty() ?
-                       "" : ", " + FormatOption(kClientHeaderOption, client_))
-                + (build_.empty() || patch_.empty() ?
-                       "" :
-                       ", " + FormatOption(kBuildNumberHeaderOption, build_)
-                       + ", " + FormatOption(kPatchNumberHeaderOption, patch_))
-                + (lofi_.empty() ?
-                       "" : ", " + FormatOption(kLoFiHeaderOption, lofi_));
+  std::vector<std::string> headers;
+  if (!session_.empty())
+    headers.push_back(FormatOption(kSessionHeaderOption, session_));
+  if (!credentials_.empty())
+    headers.push_back(FormatOption(kCredentialsHeaderOption, credentials_));
+  if (!secure_session_.empty()) {
+    headers.push_back(
+        FormatOption(kSecureSessionHeaderOption, secure_session_));
+  }
+  if (!client_.empty())
+    headers.push_back(FormatOption(kClientHeaderOption, client_));
+  if (!build_.empty() && !patch_.empty()) {
+    headers.push_back(FormatOption(kBuildNumberHeaderOption, build_));
+    headers.push_back(FormatOption(kPatchNumberHeaderOption, patch_));
+  }
+  if (!lofi_.empty())
+    headers.push_back(FormatOption(kLoFiHeaderOption, lofi_));
   for (const auto& experiment : experiments_)
-    header_value_ += ", " + FormatOption(kExperimentsOption, experiment);
+    headers.push_back(FormatOption(kExperimentsOption, experiment));
+
+  header_value_ = JoinString(headers, ", ");
 }
 
 }  // namespace data_reduction_proxy

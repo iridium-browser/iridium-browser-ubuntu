@@ -29,6 +29,7 @@
 #include "base/path_service.h"
 #include "base/trace_event/trace_event.h"
 #include "base/win/windows_version.h"
+#include "content/public/common/content_switches.h"
 #include "media/video/video_decode_accelerator.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_context.h"
@@ -102,6 +103,14 @@ DEFINE_GUID(MF_XVP_PLAYBACK_MODE, 0x3c5d293f, 0xad67, 0x4e29, 0xaf, 0x12,
 }
 
 namespace content {
+
+static const media::VideoCodecProfile kSupportedProfiles[] = {
+  media::H264PROFILE_BASELINE,
+  media::H264PROFILE_MAIN,
+  media::H264PROFILE_HIGH,
+  media::VP8PROFILE_ANY,
+  media::VP9PROFILE_ANY
+};
 
 CreateDXGIDeviceManager DXVAVideoDecodeAccelerator::create_dxgi_device_manager_
     = NULL;
@@ -514,12 +523,12 @@ DXVAVideoDecodeAccelerator::DXVAVideoDecodeAccelerator(
       make_context_current_(make_context_current),
       codec_(media::kUnknownVideoCodec),
       decoder_thread_("DXVAVideoDecoderThread"),
-      weak_this_factory_(this),
-      weak_ptr_(weak_this_factory_.GetWeakPtr()),
       pending_flush_(false),
       use_dx11_(false),
       dx11_video_format_converter_media_type_needs_init_(true),
-      gl_context_(gl_context) {
+      gl_context_(gl_context),
+      weak_this_factory_(this) {
+  weak_ptr_ = weak_this_factory_.GetWeakPtr();
   memset(&input_stream_info_, 0, sizeof(input_stream_info_));
   memset(&output_stream_info_, 0, sizeof(output_stream_info_));
 }
@@ -534,11 +543,14 @@ bool DXVAVideoDecodeAccelerator::Initialize(media::VideoCodecProfile profile,
 
   main_thread_task_runner_ = base::MessageLoop::current()->task_runner();
 
-  if (profile != media::H264PROFILE_BASELINE &&
-      profile != media::H264PROFILE_MAIN &&
-      profile != media::H264PROFILE_HIGH &&
-      profile != media::VP8PROFILE_ANY &&
-      profile != media::VP9PROFILE_ANY) {
+  bool profile_supported = false;
+  for (const auto& supported_profile : kSupportedProfiles) {
+    if (profile == supported_profile) {
+      profile_supported = true;
+      break;
+    }
+  }
+  if (!profile_supported) {
     RETURN_AND_NOTIFY_ON_FAILURE(false,
         "Unsupported h.264, vp8, or vp9 profile", PLATFORM_FAILURE, false);
   }
@@ -911,6 +923,25 @@ GLenum DXVAVideoDecodeAccelerator::GetSurfaceInternalFormat() const {
   return GL_BGRA_EXT;
 }
 
+// static
+media::VideoDecodeAccelerator::SupportedProfiles
+DXVAVideoDecodeAccelerator::GetSupportedProfiles() {
+  // TODO(henryhsu): Need to ensure the profiles are actually supported.
+  SupportedProfiles profiles;
+  for (const auto& supported_profile : kSupportedProfiles) {
+    SupportedProfile profile;
+    profile.profile = supported_profile;
+    // Windows Media Foundation H.264 decoding does not support decoding videos
+    // with any dimension smaller than 48 pixels:
+    // http://msdn.microsoft.com/en-us/library/windows/desktop/dd797815
+    profile.min_resolution.SetSize(48, 48);
+    // Use 1088 to account for 16x16 macroblocks.
+    profile.max_resolution.SetSize(1920, 1088);
+    profiles.push_back(profile);
+  }
+  return profiles;
+}
+
 bool DXVAVideoDecodeAccelerator::InitDecoder(media::VideoCodecProfile profile) {
   HMODULE decoder_dll = NULL;
 
@@ -938,8 +969,10 @@ bool DXVAVideoDecodeAccelerator::InitDecoder(media::VideoCodecProfile profile) {
                       "blacklisted version of msmpeg2vdec.dll 6.7.7140",
                       false);
     codec_ = media::kCodecH264;
-  } else if (profile == media::VP8PROFILE_ANY ||
-             profile == media::VP9PROFILE_ANY) {
+  } else if ((profile == media::VP8PROFILE_ANY ||
+              profile == media::VP9PROFILE_ANY) &&
+             base::CommandLine::ForCurrentProcess()->HasSwitch(
+                 switches::kEnableAcceleratedVpxDecode)) {
     int program_files_key = base::DIR_PROGRAM_FILES;
     if (base::win::OSInfo::GetInstance()->wow64_status() ==
         base::win::OSInfo::WOW64_ENABLED) {

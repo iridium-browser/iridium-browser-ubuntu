@@ -52,7 +52,6 @@
 #include "public/platform/WebGraphicsContext3D.h"
 #include "public/platform/WebGraphicsContext3DProvider.h"
 #include "third_party/skia/include/core/SkPicture.h"
-#include "third_party/skia/include/effects/SkTableColorFilter.h"
 #include "wtf/ArrayBufferContents.h"
 #include "wtf/MathExtras.h"
 #include "wtf/Vector.h"
@@ -81,7 +80,7 @@ ImageBuffer::ImageBuffer(PassOwnPtr<ImageBufferSurface> surface)
     , m_client(0)
 {
     if (m_surface->canvas()) {
-        m_context = adoptPtr(new GraphicsContext(m_surface->canvas(), 0));
+        m_context = GraphicsContext::deprecatedCreateWithCanvas(m_surface->canvas());
         m_context->setAccelerated(m_surface->isAccelerated());
     }
     m_surface->setImageBuffer(this);
@@ -286,16 +285,6 @@ void ImageBuffer::flush()
     if (m_surface->canvas()) {
         m_surface->canvas()->flush();
     }
-}
-
-PassRefPtr<SkColorFilter> ImageBuffer::createColorSpaceFilter(ColorSpace srcColorSpace,
-    ColorSpace dstColorSpace)
-{
-    const uint8_t* lut = ColorSpaceUtilities::getConversionLUT(dstColorSpace, srcColorSpace);
-    if (!lut)
-        return nullptr;
-
-    return adoptRef(SkTableColorFilter::CreateARGB(0, lut, lut, lut));
 }
 
 bool ImageBuffer::getImageData(Multiply multiplied, const IntRect& rect, WTF::ArrayBufferContents& contents) const

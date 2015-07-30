@@ -63,6 +63,7 @@ function ThumbnailLoader(entry, opt_loaderType, opt_metadata, opt_mediaType,
         if (opt_metadata.external && opt_metadata.external.thumbnailUrl &&
             (!opt_metadata.external.present || !FileType.isImage(entry))) {
           this.thumbnailUrl_ = opt_metadata.external.thumbnailUrl;
+          this.croppedThumbnailUrl_ = opt_metadata.external.croppedThumbnailUrl;
           this.loadTarget_ = ThumbnailLoader.LoadTarget.EXTERNAL_METADATA;
         }
         break;
@@ -188,7 +189,7 @@ ThumbnailLoader.prototype.load = function(box, fillMode, opt_optimizationMode,
   this.canvasUpToDate_ = false;
   this.image_ = new Image();
   this.image_.onload = function() {
-    this.attachImage(box, fillMode);
+    this.attachImage(assert(box), fillMode);
     if (opt_onSuccess)
       opt_onSuccess(this.image_, this.transform_);
   }.bind(this);
@@ -248,31 +249,51 @@ ThumbnailLoader.prototype.load = function(box, fillMode, opt_optimizationMode,
  * functionality to fit image to a box. This method is responsible for rotating
  * and flipping a thumbnail.
  *
+ * @param {ThumbnailLoader.FillMode} fillMode Only FIT and OVER_FILL is
+ *     supported. This takes effect only when external thumbnail source is used.
  * @return {!Promise<{data:string, width:number, height:number}>} A promise
  *     which is resolved when data url is fetched.
  */
-ThumbnailLoader.prototype.loadAsDataUrl = function() {
+ThumbnailLoader.prototype.loadAsDataUrl = function(fillMode) {
+  assert(fillMode === ThumbnailLoader.FillMode.FIT ||
+      fillMode === ThumbnailLoader.FillMode.OVER_FILL);
+
   return new Promise(function(resolve, reject) {
     // Load by using ImageLoaderClient.
     var modificationTime = this.metadata_ &&
                            this.metadata_.filesystem &&
                            this.metadata_.filesystem.modificationTime &&
                            this.metadata_.filesystem.modificationTime.getTime();
+    var thumbnailUrl = this.thumbnailUrl_;
+    var options = {
+      maxWidth: ThumbnailLoader.THUMBNAIL_MAX_WIDTH,
+      maxHeight: ThumbnailLoader.THUMBNAIL_MAX_HEIGHT,
+      cache: true,
+      priority: this.priority_,
+      timestamp: modificationTime
+    };
+
+    if (fillMode === ThumbnailLoader.FillMode.OVER_FILL) {
+      // Use cropped thumbnail url if available.
+      thumbnailUrl = this.croppedThumbnailUrl_ ?
+          this.croppedThumbnailUrl_ : this.thumbnailUrl_;
+
+      // Set crop option to image loader. Since image of croppedThumbnailUrl_ is
+      // 360x360 with current implemenation, it's no problem to crop it.
+      options['width'] = 360;
+      options['height'] = 360;
+      options['crop'] = true;
+    }
+
     ImageLoaderClient.getInstance().load(
-        this.thumbnailUrl_,
+        thumbnailUrl,
         function(result) {
           if (result.status === 'success')
             resolve(result);
           else
             reject(result);
         },
-        {
-          maxWidth: ThumbnailLoader.THUMBNAIL_MAX_WIDTH,
-          maxHeight: ThumbnailLoader.THUMBNAIL_MAX_HEIGHT,
-          cache: true,
-          priority: this.priority_,
-          timestamp: modificationTime
-        });
+        options);
   }.bind(this)).then(function(result) {
     if (!this.transform_)
       return result;
@@ -443,7 +464,7 @@ ThumbnailLoader.prototype.renderMedia_ = function() {
 
 /**
  * Attach the image to a given element.
- * @param {Element} container Parent element.
+ * @param {!Element} container Parent element.
  * @param {ThumbnailLoader.FillMode} fillMode Fill mode.
  */
 ThumbnailLoader.prototype.attachImage = function(container, fillMode) {

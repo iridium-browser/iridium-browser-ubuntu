@@ -11,7 +11,6 @@
 #include "base/bind.h"
 #include "base/guid.h"
 #include "base/memory/scoped_vector.h"
-#include "base/profiler/scoped_tracker.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "content/browser/resource_context_impl.h"
@@ -31,6 +30,7 @@
 #include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
 #include "net/http/http_util.h"
+#include "net/log/net_log.h"
 #include "storage/browser/blob/blob_data_builder.h"
 #include "storage/browser/blob/blob_data_handle.h"
 #include "storage/browser/blob/blob_storage_context.h"
@@ -38,6 +38,59 @@
 #include "ui/base/page_transition_types.h"
 
 namespace content {
+
+namespace {
+
+net::NetLog::EventType RequestJobResultToNetEventType(
+    ServiceWorkerMetrics::URLRequestJobResult result) {
+  using n = net::NetLog;
+  using m = ServiceWorkerMetrics;
+  switch (result) {
+    case m::REQUEST_JOB_FALLBACK_RESPONSE:
+      return n::TYPE_SERVICE_WORKER_FALLBACK_RESPONSE;
+    case m::REQUEST_JOB_FALLBACK_FOR_CORS:
+      return n::TYPE_SERVICE_WORKER_FALLBACK_FOR_CORS;
+    case m::REQUEST_JOB_HEADERS_ONLY_RESPONSE:
+      return n::TYPE_SERVICE_WORKER_HEADERS_ONLY_RESPONSE;
+    case m::REQUEST_JOB_STREAM_RESPONSE:
+      return n::TYPE_SERVICE_WORKER_STREAM_RESPONSE;
+    case m::REQUEST_JOB_BLOB_RESPONSE:
+      return n::TYPE_SERVICE_WORKER_BLOB_RESPONSE;
+    case m::REQUEST_JOB_ERROR_RESPONSE_STATUS_ZERO:
+      return n::TYPE_SERVICE_WORKER_ERROR_RESPONSE_STATUS_ZERO;
+    case m::REQUEST_JOB_ERROR_BAD_BLOB:
+      return n::TYPE_SERVICE_WORKER_ERROR_BAD_BLOB;
+    case m::REQUEST_JOB_ERROR_NO_PROVIDER_HOST:
+      return n::TYPE_SERVICE_WORKER_ERROR_NO_PROVIDER_HOST;
+    case m::REQUEST_JOB_ERROR_NO_ACTIVE_VERSION:
+      return n::TYPE_SERVICE_WORKER_ERROR_NO_ACTIVE_VERSION;
+    case m::REQUEST_JOB_ERROR_FETCH_EVENT_DISPATCH:
+      return n::TYPE_SERVICE_WORKER_ERROR_FETCH_EVENT_DISPATCH;
+    case m::REQUEST_JOB_ERROR_BLOB_READ:
+      return n::TYPE_SERVICE_WORKER_ERROR_BLOB_READ;
+    case m::REQUEST_JOB_ERROR_STREAM_ABORTED:
+      return n::TYPE_SERVICE_WORKER_ERROR_STREAM_ABORTED;
+    case m::REQUEST_JOB_ERROR_KILLED:
+      return n::TYPE_SERVICE_WORKER_ERROR_KILLED;
+    case m::REQUEST_JOB_ERROR_KILLED_WITH_BLOB:
+      return n::TYPE_SERVICE_WORKER_ERROR_KILLED_WITH_BLOB;
+    case m::REQUEST_JOB_ERROR_KILLED_WITH_STREAM:
+      return n::TYPE_SERVICE_WORKER_ERROR_KILLED_WITH_STREAM;
+    // We can't log if there's no request; fallthrough.
+    case m::REQUEST_JOB_ERROR_NO_REQUEST:
+    // Obsolete types; fallthrough.
+    case m::REQUEST_JOB_ERROR_DESTROYED:
+    case m::REQUEST_JOB_ERROR_DESTROYED_WITH_BLOB:
+    case m::REQUEST_JOB_ERROR_DESTROYED_WITH_STREAM:
+    // Invalid type.
+    case m::NUM_REQUEST_JOB_RESULT_TYPES:
+      NOTREACHED() << result;
+  }
+  NOTREACHED() << result;
+  return n::TYPE_FAILED;
+}
+
+}  // namespace
 
 ServiceWorkerURLRequestJob::ServiceWorkerURLRequestJob(
     net::URLRequest* request,
@@ -47,6 +100,7 @@ ServiceWorkerURLRequestJob::ServiceWorkerURLRequestJob(
     const ResourceContext* resource_context,
     FetchRequestMode request_mode,
     FetchCredentialsMode credentials_mode,
+    bool is_main_resource_load,
     RequestContextType request_context_type,
     RequestContextFrameType frame_type,
     scoped_refptr<ResourceRequestBody> body)
@@ -60,6 +114,7 @@ ServiceWorkerURLRequestJob::ServiceWorkerURLRequestJob(
       stream_pending_buffer_size_(0),
       request_mode_(request_mode),
       credentials_mode_(credentials_mode),
+      is_main_resource_load_(is_main_resource_load),
       request_context_type_(request_context_type),
       frame_type_(frame_type),
       fall_back_required_(false),
@@ -145,11 +200,6 @@ void ServiceWorkerURLRequestJob::SetExtraRequestHeaders(
 
 bool ServiceWorkerURLRequestJob::ReadRawData(
     net::IOBuffer* buf, int buf_size, int *bytes_read) {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "423948 ServiceWorkerURLRequestJob::ReadRawData"));
-
   DCHECK(buf);
   DCHECK_GE(buf_size, 0);
   DCHECK(bytes_read);
@@ -161,6 +211,7 @@ bool ServiceWorkerURLRequestJob::ReadRawData(
         return true;
       case Stream::STREAM_COMPLETE:
         DCHECK(!*bytes_read);
+        RecordResult(ServiceWorkerMetrics::REQUEST_JOB_STREAM_RESPONSE);
         return true;
       case Stream::STREAM_EMPTY:
         stream_pending_buffer_ = buf;
@@ -169,6 +220,7 @@ bool ServiceWorkerURLRequestJob::ReadRawData(
         return false;
       case Stream::STREAM_ABORTED:
         // Handle this as connection reset.
+        RecordResult(ServiceWorkerMetrics::REQUEST_JOB_ERROR_STREAM_ABORTED);
         NotifyDone(net::URLRequestStatus(net::URLRequestStatus::FAILED,
                                          net::ERR_CONNECTION_RESET));
         return false;
@@ -186,8 +238,13 @@ bool ServiceWorkerURLRequestJob::ReadRawData(
   SetStatus(status);
   if (status.is_io_pending())
     return false;
+  if (status.is_success() && *bytes_read == 0)
+    RecordResult(ServiceWorkerMetrics::REQUEST_JOB_BLOB_RESPONSE);
   return status.is_success();
 }
+
+// TODO(falken): Refactor Blob and Stream specific handling to separate classes.
+// Overrides for Blob reading -------------------------------------------------
 
 void ServiceWorkerURLRequestJob::OnReceivedRedirect(
     net::URLRequest* request,
@@ -221,11 +278,6 @@ void ServiceWorkerURLRequestJob::OnBeforeNetworkStart(net::URLRequest* request,
 }
 
 void ServiceWorkerURLRequestJob::OnResponseStarted(net::URLRequest* request) {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "423948 ServiceWorkerURLRequestJob::OnResponseStarted"));
-
   // TODO(falken): Add Content-Length, Content-Type if they were not provided in
   // the ServiceWorkerResponse.
   response_time_ = base::Time::Now();
@@ -234,20 +286,25 @@ void ServiceWorkerURLRequestJob::OnResponseStarted(net::URLRequest* request) {
 
 void ServiceWorkerURLRequestJob::OnReadCompleted(net::URLRequest* request,
                                                  int bytes_read) {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "423948 ServiceWorkerURLRequestJob::OnReadCompleted"));
-
   SetStatus(request->status());
   if (!request->status().is_success()) {
+    RecordResult(ServiceWorkerMetrics::REQUEST_JOB_ERROR_BLOB_READ);
+    NotifyDone(request->status());
+    return;
+  }
+
+  if (bytes_read == 0) {
+    // Protect because NotifyReadComplete() can destroy |this|.
+    scoped_refptr<ServiceWorkerURLRequestJob> protect(this);
+    RecordResult(ServiceWorkerMetrics::REQUEST_JOB_BLOB_RESPONSE);
+    NotifyReadComplete(bytes_read);
     NotifyDone(request->status());
     return;
   }
   NotifyReadComplete(bytes_read);
-  if (bytes_read == 0)
-    NotifyDone(request->status());
 }
+
+// Overrides for Stream reading -----------------------------------------------
 
 void ServiceWorkerURLRequestJob::OnDataAvailable(Stream* stream) {
   // Clear the IO_PENDING status.
@@ -269,12 +326,14 @@ void ServiceWorkerURLRequestJob::OnDataAvailable(Stream* stream) {
     case Stream::STREAM_COMPLETE:
       // Calling NotifyReadComplete with 0 signals completion.
       DCHECK(!bytes_read);
+      RecordResult(ServiceWorkerMetrics::REQUEST_JOB_STREAM_RESPONSE);
       break;
     case Stream::STREAM_EMPTY:
       NOTREACHED();
       break;
     case Stream::STREAM_ABORTED:
       // Handle this as connection reset.
+      RecordResult(ServiceWorkerMetrics::REQUEST_JOB_ERROR_STREAM_ABORTED);
       NotifyDone(net::URLRequestStatus(net::URLRequestStatus::FAILED,
                                        net::ERR_CONNECTION_RESET));
       break;
@@ -296,6 +355,8 @@ void ServiceWorkerURLRequestJob::OnStreamRegistered(Stream* stream) {
   stream_->SetReadObserver(this);
   CommitResponseHeader();
 }
+
+// Misc -----------------------------------------------------------------------
 
 const net::HttpResponseInfo* ServiceWorkerURLRequestJob::http_info() const {
   if (!http_response_info_)
@@ -333,6 +394,16 @@ void ServiceWorkerURLRequestJob::GetExtraResponseInfo(
 
 ServiceWorkerURLRequestJob::~ServiceWorkerURLRequestJob() {
   ClearStream();
+
+  if (!ShouldRecordResult())
+    return;
+  ServiceWorkerMetrics::URLRequestJobResult result =
+      ServiceWorkerMetrics::REQUEST_JOB_ERROR_KILLED;
+  if (response_body_type_ == STREAM)
+    result = ServiceWorkerMetrics::REQUEST_JOB_ERROR_KILLED_WITH_STREAM;
+  else if (response_body_type_ == BLOB)
+    result = ServiceWorkerMetrics::REQUEST_JOB_ERROR_KILLED_WITH_BLOB;
+  RecordResult(result);
 }
 
 void ServiceWorkerURLRequestJob::MaybeStartRequest() {
@@ -346,6 +417,11 @@ void ServiceWorkerURLRequestJob::MaybeStartRequest() {
 }
 
 void ServiceWorkerURLRequestJob::StartRequest() {
+  if (request()) {
+    request()->net_log().AddEvent(
+        net::NetLog::TYPE_SERVICE_WORKER_START_REQUEST);
+  }
+
   switch (response_type_) {
     case NOT_DETERMINED:
       NOTREACHED();
@@ -359,10 +435,17 @@ void ServiceWorkerURLRequestJob::StartRequest() {
       return;
 
     case FORWARD_TO_SERVICE_WORKER:
-      if (!provider_host_ || !provider_host_->active_version()) {
+      if (!provider_host_) {
+        RecordResult(ServiceWorkerMetrics::REQUEST_JOB_ERROR_NO_PROVIDER_HOST);
         DeliverErrorResponse();
         return;
       }
+      if (!provider_host_->active_version()) {
+        RecordResult(ServiceWorkerMetrics::REQUEST_JOB_ERROR_NO_ACTIVE_VERSION);
+        DeliverErrorResponse();
+        return;
+      }
+
       DCHECK(!fetch_dispatcher_);
       // Send a fetch event to the ServiceWorker associated to the
       // provider_host.
@@ -499,15 +582,25 @@ void ServiceWorkerURLRequestJob::DidDispatchFetchEvent(
     const ServiceWorkerResponse& response,
     scoped_refptr<ServiceWorkerVersion> version) {
   fetch_dispatcher_.reset();
+  ServiceWorkerMetrics::RecordFetchEventStatus(is_main_resource_load_, status);
 
   // Check if we're not orphaned.
-  if (!request())
+  if (!request()) {
+    RecordResult(ServiceWorkerMetrics::REQUEST_JOB_ERROR_NO_REQUEST);
     return;
+  }
 
   if (status != SERVICE_WORKER_OK) {
-    // Dispatching event has been failed, returns an error response.
-    // TODO(kinuko): Would be nice to log the error case.
-    DeliverErrorResponse();
+    RecordResult(ServiceWorkerMetrics::REQUEST_JOB_ERROR_FETCH_EVENT_DISPATCH);
+    if (is_main_resource_load_) {
+      // Using the service worker failed, so fallback to network. Detach the
+      // controller so subresource requests also skip the worker.
+      provider_host_->NotifyControllerLost();
+      response_type_ = FALLBACK_TO_NETWORK;
+      NotifyRestartRequired();
+    } else {
+      DeliverErrorResponse();
+    }
     return;
   }
 
@@ -519,6 +612,7 @@ void ServiceWorkerURLRequestJob::DidDispatchFetchEvent(
     if (request_mode_ == FETCH_REQUEST_MODE_CORS ||
         request_mode_ == FETCH_REQUEST_MODE_CORS_WITH_FORCED_PREFLIGHT) {
       fall_back_required_ = true;
+      RecordResult(ServiceWorkerMetrics::REQUEST_JOB_FALLBACK_FOR_CORS);
       CreateResponseHeader(
           400, "Service Worker Fallback Required", ServiceWorkerHeaderMap());
       CommitResponseHeader();
@@ -526,6 +620,7 @@ void ServiceWorkerURLRequestJob::DidDispatchFetchEvent(
     }
     // Change the response type and restart the request to fallback to
     // the network.
+    RecordResult(ServiceWorkerMetrics::REQUEST_JOB_FALLBACK_RESPONSE);
     response_type_ = FALLBACK_TO_NETWORK;
     NotifyRestartRequired();
     return;
@@ -534,8 +629,11 @@ void ServiceWorkerURLRequestJob::DidDispatchFetchEvent(
   // We should have a response now.
   DCHECK_EQ(SERVICE_WORKER_FETCH_EVENT_RESULT_RESPONSE, fetch_result);
 
-  // Treat a response whose status is 0 as a Network Error.
+  // A response with status code 0 occurs when the respondWith promise was
+  // rejected or preventDefault() was called with no response provided.
+  // In this case, return a network error.
   if (response.status_code == 0) {
+    RecordResult(ServiceWorkerMetrics::REQUEST_JOB_ERROR_RESPONSE_STATUS_ZERO);
     NotifyDone(
         net::URLRequestStatus(net::URLRequestStatus::FAILED, net::ERR_FAILED));
     return;
@@ -564,6 +662,7 @@ void ServiceWorkerURLRequestJob::DidDispatchFetchEvent(
   // Set up a request for reading the stream.
   if (response.stream_url.is_valid()) {
     DCHECK(response.blob_uuid.empty());
+    SetResponseBodyType(STREAM);
     streaming_version_ = version;
     streaming_version_->AddStreamingURLRequestJob(this);
     response_url_ = response.url;
@@ -586,12 +685,15 @@ void ServiceWorkerURLRequestJob::DidDispatchFetchEvent(
     CommitResponseHeader();
     return;
   }
+
   // Set up a request for reading the blob.
   if (!response.blob_uuid.empty() && blob_storage_context_) {
+    SetResponseBodyType(BLOB);
     scoped_ptr<storage::BlobDataHandle> blob_data_handle =
         blob_storage_context_->GetBlobDataFromUUID(response.blob_uuid);
     if (!blob_data_handle) {
       // The renderer gave us a bad blob UUID.
+      RecordResult(ServiceWorkerMetrics::REQUEST_JOB_ERROR_BAD_BLOB);
       DeliverErrorResponse();
       return;
     }
@@ -605,8 +707,10 @@ void ServiceWorkerURLRequestJob::DidDispatchFetchEvent(
   CreateResponseHeader(
       response.status_code, response.status_text, response.headers);
   load_timing_info_.receive_headers_end = base::TimeTicks::Now();
-  if (!blob_request_)
+  if (!blob_request_) {
+    RecordResult(ServiceWorkerMetrics::REQUEST_JOB_HEADERS_ONLY_RESPONSE);
     CommitResponseHeader();
+  }
 }
 
 void ServiceWorkerURLRequestJob::CreateResponseHeader(
@@ -646,6 +750,31 @@ void ServiceWorkerURLRequestJob::DeliverErrorResponse() {
   CreateResponseHeader(
       500, "Service Worker Response Error", ServiceWorkerHeaderMap());
   CommitResponseHeader();
+}
+
+void ServiceWorkerURLRequestJob::SetResponseBodyType(ResponseBodyType type) {
+  DCHECK_EQ(response_body_type_, UNKNOWN);
+  DCHECK_NE(type, UNKNOWN);
+  response_body_type_ = type;
+}
+
+bool ServiceWorkerURLRequestJob::ShouldRecordResult() {
+  return !did_record_result_ && is_started_ &&
+         response_type_ == FORWARD_TO_SERVICE_WORKER;
+}
+
+void ServiceWorkerURLRequestJob::RecordResult(
+    ServiceWorkerMetrics::URLRequestJobResult result) {
+  DCHECK(ShouldRecordResult());
+  // It violates style guidelines to handle a DCHECK fail condition but if there
+  // is a bug don't let it corrupt UMA results by double-counting.
+  if (!ShouldRecordResult())
+    return;
+  did_record_result_ = true;
+  ServiceWorkerMetrics::RecordURLRequestJobResult(is_main_resource_load_,
+                                                  result);
+  if (request())
+    request()->net_log().AddEvent(RequestJobResultToNetEventType(result));
 }
 
 void ServiceWorkerURLRequestJob::ClearStream() {

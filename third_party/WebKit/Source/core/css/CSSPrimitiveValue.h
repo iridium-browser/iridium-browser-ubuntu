@@ -24,12 +24,14 @@
 
 #include "core/CSSPropertyNames.h"
 #include "core/CSSValueKeywords.h"
+#include "core/CoreExport.h"
 #include "core/css/CSSValue.h"
 #include "platform/graphics/Color.h"
 #include "wtf/BitVector.h"
 #include "wtf/Forward.h"
 #include "wtf/MathExtras.h"
 #include "wtf/PassRefPtr.h"
+#include "wtf/text/StringHash.h"
 
 namespace blink {
 
@@ -68,7 +70,7 @@ template<> inline float roundForImpreciseConversion(double value)
 // CSSPrimitiveValues are immutable. This class has manual ref-counting
 // of unioned types and does not have the code necessary
 // to handle any kind of mutations.
-class CSSPrimitiveValue : public CSSValue {
+class CORE_EXPORT CSSPrimitiveValue : public CSSValue {
 public:
     enum UnitType {
         CSS_UNKNOWN = 0,
@@ -96,7 +98,6 @@ public:
         CSS_COUNTER = 23,
         CSS_RECT = 24,
         CSS_RGBCOLOR = 25,
-        // From CSS Values and Units. Viewport-percentage Lengths (vw/vh/vmin/vmax).
         CSS_VW = 26,
         CSS_VH = 27,
         CSS_VMIN = 28,
@@ -105,29 +106,18 @@ public:
         CSS_DPI = 31,
         CSS_DPCM = 32,
         CSS_FR = 33,
-        CSS_PAIR = 100, // We envision this being exposed as a means of getting computed style values for pairs (border-spacing/radius, background-position, etc.)
+        CSS_PAIR = 100,
         CSS_UNICODE_RANGE = 102,
-
-        // These are from CSS3 Values and Units, but that isn't a finished standard yet
         CSS_TURN = 107,
         CSS_REMS = 108,
         CSS_CHS = 109,
-
-        // This is used internally for counter names (as opposed to counter values)
         CSS_COUNTER_NAME = 110,
-
-        // This is used by the CSS Shapes draft
         CSS_SHAPE = 111,
-
-        // Used by border images.
         CSS_QUAD = 112,
-
         CSS_CALC = 113,
         CSS_CALC_PERCENTAGE_WITH_NUMBER = 114,
         CSS_CALC_PERCENTAGE_WITH_LENGTH = 115,
-
         CSS_STRING = 116,
-
         CSS_PROPERTY_ID = 117,
         CSS_VALUE_ID = 118
     };
@@ -154,7 +144,6 @@ public:
     void accumulateLengthArray(CSSLengthArray&, double multiplier = 1) const;
     void accumulateLengthArray(CSSLengthArray&, CSSLengthTypeArray&, double multiplier = 1) const;
 
-    // This enum follows the BisonCSSParser::Units enum augmented with UNIT_FREQUENCY for frequencies.
     enum UnitCategory {
         UNumber,
         UPercent,
@@ -181,7 +170,6 @@ public:
     }
     bool isAttr() const { return m_primitiveUnitType == CSS_ATTR; }
     bool isCounter() const { return m_primitiveUnitType == CSS_COUNTER; }
-    bool isFontIndependentLength() const { return m_primitiveUnitType >= CSS_PX && m_primitiveUnitType <= CSS_PC; }
     bool isFontRelativeLength() const
     {
         return m_primitiveUnitType == CSS_EMS
@@ -224,9 +212,9 @@ public:
     {
         return adoptRefWillBeNoop(new CSSPrimitiveValue(propertyID));
     }
-    static PassRefPtrWillBeRawPtr<CSSPrimitiveValue> createColor(unsigned rgbValue)
+    static PassRefPtrWillBeRawPtr<CSSPrimitiveValue> createColor(RGBA32 rgbValue)
     {
-        return adoptRefWillBeNoop(new CSSPrimitiveValue(rgbValue, CSS_RGBCOLOR));
+        return adoptRefWillBeNoop(new CSSPrimitiveValue(rgbValue));
     }
     static PassRefPtrWillBeRawPtr<CSSPrimitiveValue> create(double value, UnitType type)
     {
@@ -269,21 +257,11 @@ public:
     double computeDegrees() const;
     double computeSeconds();
 
-    /*
-     * Computes a length in pixels out of the given CSSValue
-     *
-     * The metrics have to be a bit different for screen and printer output.
-     * For screen output we assume 1 inch == 72 px, for printer we assume 300 dpi
-     *
-     * this is screen/printer dependent, so we probably need a config option for this,
-     * and some tool to calibrate.
-     */
+    // Computes a length in pixels, resolving relative lengths
     template<typename T> T computeLength(const CSSToLengthConversionData&);
 
     // Converts to a Length (Fixed, Percent or Calculated)
     Length convertToLength(const CSSToLengthConversionData&);
-
-    double deprecatedGetDoubleValue() const;
 
     double getDoubleValue() const;
     float getFloatValue() const { return getValue<float>(); }
@@ -330,9 +308,7 @@ public:
 private:
     CSSPrimitiveValue(CSSValueID);
     CSSPrimitiveValue(CSSPropertyID);
-    // int vs. unsigned is too subtle to distinguish types, so require a UnitType.
-    CSSPrimitiveValue(int parserOperator, UnitType);
-    CSSPrimitiveValue(unsigned color, UnitType); // RGB value
+    CSSPrimitiveValue(RGBA32 color);
     CSSPrimitiveValue(const Length&, float zoom);
     CSSPrimitiveValue(const LengthSize&, const ComputedStyle&);
     CSSPrimitiveValue(const String&, UnitType);
@@ -369,10 +345,9 @@ private:
     union {
         CSSPropertyID propertyID;
         CSSValueID valueID;
-        int parserOperator;
         double num;
         StringImpl* string;
-        unsigned rgbcolor;
+        RGBA32 rgbcolor;
         // FIXME: oilpan: Should be members, but no support for members in unions. Just trace the raw ptr for now.
         CSSBasicShape* shape;
         CSSCalcValue* calc;

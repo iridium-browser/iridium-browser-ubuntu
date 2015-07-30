@@ -29,6 +29,7 @@
 #include "core/dom/ActiveDOMObject.h"
 #include "core/page/PageLifecycleObserver.h"
 #include "modules/EventTargetModules.h"
+#include "modules/ModulesExport.h"
 #include "modules/speech/SpeechGrammarList.h"
 #include "modules/speech/SpeechRecognitionResult.h"
 #include "platform/heap/Handle.h"
@@ -44,7 +45,7 @@ class MediaStreamTrack;
 class SpeechRecognitionController;
 class SpeechRecognitionError;
 
-class SpeechRecognition final : public RefCountedGarbageCollectedEventTargetWithInlineData<SpeechRecognition>, public PageLifecycleObserver, public ActiveDOMObject {
+class MODULES_EXPORT SpeechRecognition final : public RefCountedGarbageCollectedEventTargetWithInlineData<SpeechRecognition>, public PageLifecycleObserver, public ActiveDOMObject {
     DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollected<SpeechRecognition>);
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(SpeechRecognition);
     DEFINE_WRAPPERTYPEINFO();
@@ -58,6 +59,8 @@ public:
     void setGrammars(SpeechGrammarList* grammars) { m_grammars = grammars; }
     String lang() { return m_lang; }
     void setLang(const String& lang) { m_lang = lang; }
+    String serviceURI() { return m_serviceURI; }
+    void setServiceURI(const String& serviceURI) { m_serviceURI = serviceURI; }
     bool continuous() { return m_continuous; }
     void setContinuous(bool continuous) { m_continuous = continuous; }
     bool interimResults() { return m_interimResults; }
@@ -116,6 +119,7 @@ private:
     Member<SpeechGrammarList> m_grammars;
     Member<MediaStreamTrack> m_audioTrack;
     String m_lang;
+    String m_serviceURI;
     bool m_continuous;
     bool m_interimResults;
     unsigned long m_maxAlternatives;

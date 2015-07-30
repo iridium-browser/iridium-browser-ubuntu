@@ -5,12 +5,13 @@
 /**
  * The root of the file manager's view managing the DOM of Files.app.
  *
+ * @param {!ProvidersModel} providersModel Model for providers.
  * @param {!HTMLElement} element Top level element of Files.app.
  * @param {!LaunchParam} launchParam Launch param.
  * @constructor
  * @struct
  */
-function FileManagerUI(element, launchParam) {
+function FileManagerUI(providersModel, element, launchParam) {
   // Pre-populate the static localized strings.
   i18nTemplate.process(element.ownerDocument, loadTimeData);
 
@@ -96,7 +97,7 @@ function FileManagerUI(element, launchParam) {
    * @const
    */
   this.suggestAppsDialog = new SuggestAppsDialog(
-      this.element, launchParam.suggestAppsDialogState);
+      providersModel, this.element, launchParam.suggestAppsDialogState);
 
   /**
    * Conflict dialog.
@@ -166,6 +167,14 @@ function FileManagerUI(element, launchParam) {
    * @const
    */
   this.toggleViewButton = queryRequiredElement(this.element, '#view-button');
+
+  /**
+   * The button to sort the file list.
+   * @type {!cr.ui.MenuButton}
+   * @const
+   */
+  this.sortButton = util.queryDecoratedElement(
+      '#sort-button', cr.ui.MenuButton);
 
   /**
    * The button to open gear menu.
@@ -254,10 +263,30 @@ function FileManagerUI(element, launchParam) {
    * @type {!DialogFooter}
    */
   this.dialogFooter = DialogFooter.findDialogFooter(
-      this.dialogType_, /** @type {!Document} */(this.element.ownerDocument));
+      this.dialogType_, /** @type {!Document} */ (this.element.ownerDocument));
+
+  /**
+   * @public {!ProvidersMenu}
+   * @const
+   */
+  this.providersMenu = new ProvidersMenu(providersModel,
+      util.queryDecoratedElement('#add-new-services-menu', cr.ui.Menu));
 
   // Initialize attributes.
   this.element.setAttribute('type', this.dialogType_);
+
+  // Hack: make menuitems focusable. Since the menuitems in Files.app is not
+  // button so it doesn't have a tabfocus in nature. It prevents Chromevox from
+  // speeaching because the opened menu is closed when the non-focusable object
+  // tries to get the focus.
+  var menuitems = document.querySelectorAll('cr-menu.chrome-menu > :not(hr)');
+  for (var i = 0; i < menuitems.length; i++) {
+    // Make menuitems focusable. The value can be any non-negative value,
+    // because pressing 'Tab' key on menu is handled and we don't need to mind
+    // the taborder and the destination of tabfocus.
+    if (!menuitems[i].hasAttribute('tabindex'))
+      menuitems[i].setAttribute('tabindex', '0');
+  }
 
   // Modify UI default behavior.
   this.element.addEventListener('click', this.onExternalLinkClick_.bind(this));
@@ -301,10 +330,24 @@ FileManagerUI.prototype.initAdditionalUI = function(
 
   // Add handlers.
   document.defaultView.addEventListener('resize', this.relayout.bind(this));
-  document.addEventListener('focusout', this.onFocusOut_.bind(this));
+};
 
-  // Set the initial focus.
-  this.onFocusOut_();
+/**
+ * Initializes the focus.
+ */
+FileManagerUI.prototype.initUIFocus = function() {
+  // Set the initial focus. When there is no focus, the active element is the
+  // <body>.
+  var targetElement = null;
+  if (this.dialogType_ == DialogType.SELECT_SAVEAS_FILE) {
+    targetElement = this.dialogFooter.filenameInput;
+  } else if (this.listContainer.currentListType !=
+             ListContainer.ListType.UNINITIALIZED) {
+    targetElement = this.listContainer.currentList;
+  }
+
+  if (targetElement)
+    targetElement.focus();
 };
 
 /**
@@ -385,36 +428,6 @@ FileManagerUI.prototype.onExternalLinkClick_ = function(event) {
 
   if (this.dialogType_ != DialogType.FULL_PAGE)
     this.dialogFooter.cancelButton.click();
-};
-
-/**
- * Re-focuses an element.
- * @private
- */
-FileManagerUI.prototype.onFocusOut_ = function() {
-  setTimeout(function() {
-    // When there is no focus, the active element is the <body>
-    if (document.activeElement !== document.body)
-      return;
-
-    var targetElement;
-    if (this.dialogType_ == DialogType.SELECT_SAVEAS_FILE) {
-      targetElement = this.dialogFooter.filenameInput;
-    } else if (this.listContainer.currentListType !=
-               ListContainer.ListType.UNINITIALIZED) {
-      targetElement = this.listContainer.currentList;
-    } else {
-      return;
-    }
-
-    // Hack: if the tabIndex is disabled, we can assume a modal dialog is
-    // shown. Focus to a button on the dialog instead.
-    if (!targetElement.hasAttribute('tabIndex') || targetElement.tabIndex == -1)
-      targetElement = document.querySelector('button:not([tabIndex="-1"])');
-
-    if (targetElement)
-      targetElement.focus();
-  }.bind(this), 0);
 };
 
 /**

@@ -8,8 +8,10 @@
 #include "base/base_export.h"
 #include "base/containers/hash_tables.h"
 #include "base/containers/small_map.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_vector.h"
 #include "base/trace_event/memory_allocator_dump.h"
+#include "base/trace_event/memory_dump_session_state.h"
 #include "base/trace_event/process_memory_maps.h"
 #include "base/trace_event/process_memory_totals.h"
 
@@ -18,6 +20,7 @@ namespace trace_event {
 
 class ConvertableToTraceFormat;
 class MemoryDumpManager;
+class MemoryDumpSessionState;
 
 // ProcessMemoryDump is as a strongly typed container which enforces the data
 // model for each memory dump and holds the dumps produced by the
@@ -27,10 +30,12 @@ class MemoryDumpManager;
 // dump point time.
 class BASE_EXPORT ProcessMemoryDump {
  public:
+  // Maps allocator dumps absolute names (allocator_name/heap/subheap) to
+  // MemoryAllocatorDump instances.
   using AllocatorDumpsMap =
       SmallMap<hash_map<std::string, MemoryAllocatorDump*>>;
 
-  ProcessMemoryDump();
+  ProcessMemoryDump(const scoped_refptr<MemoryDumpSessionState>& session_state);
   ~ProcessMemoryDump();
 
   // Called at trace generation time to populate the TracedValue.
@@ -45,19 +50,25 @@ class BASE_EXPORT ProcessMemoryDump {
   void set_has_process_mmaps() { has_process_mmaps_ = true; }
 
   // Creates a new MemoryAllocatorDump with the given name and returns the
-  // empty object back to the caller. The |name| must be unique in the dump.
-  // ProcessMemoryDump handles the memory ownership of the created object.
-  // |parent| can be used to specify a hierarchical relationship of the
-  // allocator dumps.
-  MemoryAllocatorDump* CreateAllocatorDump(const std::string& name);
-  MemoryAllocatorDump* CreateAllocatorDump(const std::string& name,
-                                           MemoryAllocatorDump* parent);
+  // empty object back to the caller.
+  // Arguments:
+  //   absolute_name: a name that uniquely identifies allocator dumps produced
+  //       by this provider. It is possible to specify nesting by using a
+  //       path-like string (e.g., v8/isolate1/heap1, v8/isolate1/heap2).
+  //       Leading or trailing slashes are not allowed.
+  // ProcessMemoryDump handles the memory ownership of its MemoryAllocatorDumps.
+  MemoryAllocatorDump* CreateAllocatorDump(const std::string& absolute_name);
 
-  // Returns a MemoryAllocatorDump given its name or nullptr if not found.
-  MemoryAllocatorDump* GetAllocatorDump(const std::string& name) const;
+  // Looks up a MemoryAllocatorDump given its allocator and heap names, or
+  // nullptr if not found.
+  MemoryAllocatorDump* GetAllocatorDump(const std::string& absolute_name) const;
 
   // Returns the map of the MemoryAllocatorDumps added to this dump.
   const AllocatorDumpsMap& allocator_dumps() const { return allocator_dumps_; }
+
+  const scoped_refptr<MemoryDumpSessionState>& session_state() const {
+    return session_state_;
+  }
 
  private:
   ProcessMemoryTotals process_totals_;
@@ -66,12 +77,13 @@ class BASE_EXPORT ProcessMemoryDump {
   ProcessMemoryMaps process_mmaps_;
   bool has_process_mmaps_;
 
-  // A maps of "allocator_name" -> MemoryAllocatorDump populated by
-  // allocator dump providers.
   AllocatorDumpsMap allocator_dumps_;
 
   // ProcessMemoryDump handles the memory ownership of all its belongings.
   ScopedVector<MemoryAllocatorDump> allocator_dumps_storage_;
+
+  // State shared among all PMDs instances created in a given trace session.
+  scoped_refptr<MemoryDumpSessionState> session_state_;
 
   DISALLOW_COPY_AND_ASSIGN(ProcessMemoryDump);
 };

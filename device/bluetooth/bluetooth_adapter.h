@@ -14,12 +14,15 @@
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "device/bluetooth/bluetooth_advertisement.h"
 #include "device/bluetooth/bluetooth_audio_sink.h"
 #include "device/bluetooth/bluetooth_device.h"
 #include "device/bluetooth/bluetooth_export.h"
 
 namespace device {
 
+class BluetoothAdvertisement;
+class BluetoothDiscoveryFilter;
 class BluetoothDiscoverySession;
 class BluetoothGattCharacteristic;
 class BluetoothGattDescriptor;
@@ -35,8 +38,7 @@ struct BluetoothAdapterDeleter;
 // known to the adapter, discovering new devices, and providing notification of
 // updates to device information.
 class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
-    : public base::RefCountedThreadSafe<BluetoothAdapter,
-                                        BluetoothAdapterDeleter> {
+    : public base::RefCounted<BluetoothAdapter> {
  public:
   // Interface for observing changes from bluetooth adapters.
   class Observer {
@@ -180,6 +182,21 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
   // initialization, if initialization is asynchronous on the platform.
   typedef base::Callback<void()> InitCallback;
 
+  typedef base::Callback<void(scoped_ptr<BluetoothDiscoverySession>)>
+      DiscoverySessionCallback;
+  typedef std::vector<BluetoothDevice*> DeviceList;
+  typedef std::vector<const BluetoothDevice*> ConstDeviceList;
+  typedef base::Callback<void(scoped_refptr<BluetoothSocket>)>
+      CreateServiceCallback;
+  typedef base::Callback<void(const std::string& message)>
+      CreateServiceErrorCallback;
+  typedef base::Callback<void(scoped_refptr<BluetoothAudioSink>)>
+      AcquiredCallback;
+  typedef base::Callback<void(scoped_refptr<BluetoothAdvertisement>)>
+      CreateAdvertisementCallback;
+  typedef base::Callback<void(BluetoothAdvertisement::ErrorCode)>
+      CreateAdvertisementErrorCallback;
+
   // Returns a weak pointer to a new adapter.  For platforms with asynchronous
   // initialization, the returned adapter will run the |init_callback| once
   // asynchronous initialization is complete.
@@ -203,9 +220,8 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
   // Adds and removes observers for events on this bluetooth adapter. If
   // monitoring multiple adapters, check the |adapter| parameter of observer
   // methods to determine which adapter is issuing the event.
-  virtual void AddObserver(BluetoothAdapter::Observer* observer) = 0;
-  virtual void RemoveObserver(
-      BluetoothAdapter::Observer* observer) = 0;
+  virtual void AddObserver(BluetoothAdapter::Observer* observer);
+  virtual void RemoveObserver(BluetoothAdapter::Observer* observer);
 
   // The address of this adapter. The address format is "XX:XX:XX:XX:XX:XX",
   // where each XX is a hexadecimal number.
@@ -269,17 +285,26 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
   // that have been discovered so far. Otherwise, clients can be notified of all
   // new and lost devices by implementing the Observer methods "DeviceAdded" and
   // "DeviceRemoved".
-  typedef base::Callback<void(scoped_ptr<BluetoothDiscoverySession>)>
-      DiscoverySessionCallback;
   virtual void StartDiscoverySession(const DiscoverySessionCallback& callback,
                                      const ErrorCallback& error_callback);
+  virtual void StartDiscoverySessionWithFilter(
+      scoped_ptr<BluetoothDiscoveryFilter> discovery_filter,
+      const DiscoverySessionCallback& callback,
+      const ErrorCallback& error_callback);
+
+  // Return all discovery filters assigned to this adapter merged together.
+  scoped_ptr<BluetoothDiscoveryFilter> GetMergedDiscoveryFilter() const;
+
+  // Works like GetMergedDiscoveryFilter, but doesn't take |masked_filter| into
+  // account. |masked_filter| is compared by pointer, and must be a member of
+  // active session.
+  scoped_ptr<BluetoothDiscoveryFilter> GetMergedDiscoveryFilterMasked(
+      BluetoothDiscoveryFilter* masked_filter) const;
 
   // Requests the list of devices from the adapter. All devices are returned,
   // including those currently connected and those paired. Use the returned
   // device pointers to determine which they are.
-  typedef std::vector<BluetoothDevice*> DeviceList;
   virtual DeviceList GetDevices();
-  typedef std::vector<const BluetoothDevice*> ConstDeviceList;
   virtual ConstDeviceList GetDevices() const;
 
   // Returns a pointer to the device with the given address |address| or NULL if
@@ -321,10 +346,6 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
   // called on success with a BluetoothSocket instance that is to be owned by
   // the received.  |error_callback| will be called on failure with a message
   // indicating the cause.
-  typedef base::Callback<void(scoped_refptr<BluetoothSocket>)>
-      CreateServiceCallback;
-  typedef base::Callback<void(const std::string& message)>
-      CreateServiceErrorCallback;
   virtual void CreateRfcommService(
       const BluetoothUUID& uuid,
       const ServiceOptions& options,
@@ -349,23 +370,28 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
   // will be called on success with a BluetoothAudioSink which is to be owned by
   // the caller of this method. |error_callback| will be called on failure with
   // a message indicating the cause.
-  typedef base::Callback<void(scoped_refptr<BluetoothAudioSink>)>
-      AcquiredCallback;
   virtual void RegisterAudioSink(
       const BluetoothAudioSink::Options& options,
       const AcquiredCallback& callback,
       const BluetoothAudioSink::ErrorCallback& error_callback) = 0;
 
+  // Creates and registers an advertisement for broadcast over the LE channel.
+  // The created advertisement will be returned via the success callback.
+  virtual void RegisterAdvertisement(
+      scoped_ptr<BluetoothAdvertisement::Data> advertisement_data,
+      const CreateAdvertisementCallback& callback,
+      const CreateAdvertisementErrorCallback& error_callback) = 0;
+
  protected:
-  friend class base::RefCountedThreadSafe<BluetoothAdapter,
-                                          BluetoothAdapterDeleter>;
-  friend struct BluetoothAdapterDeleter;
+  friend class base::RefCounted<BluetoothAdapter>;
   friend class BluetoothDiscoverySession;
+
+  typedef std::map<const std::string, BluetoothDevice*> DevicesMap;
+  typedef std::pair<BluetoothDevice::PairingDelegate*, PairingDelegatePriority>
+      PairingDelegatePair;
+
   BluetoothAdapter();
   virtual ~BluetoothAdapter();
-
-  // Called by RefCountedThreadSafeDeleteOnCorrectThread to destroy this.
-  virtual void DeleteOnCorrectThread() const = 0;
 
   // Internal methods for initiating and terminating device discovery sessions.
   // An implementation of BluetoothAdapter keeps an internal reference count to
@@ -395,12 +421,22 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
   //    - If the count is greater than 1, decrement the count and return
   //      success.
   //
+  // |discovery_filter| passed to AddDiscoverySession and RemoveDiscoverySession
+  // is owned by other objects and shall not be freed.
+  //
   // These methods invoke |callback| for success and |error_callback| for
   // failures.
-  virtual void AddDiscoverySession(const base::Closure& callback,
+  virtual void AddDiscoverySession(BluetoothDiscoveryFilter* discovery_filter,
+                                   const base::Closure& callback,
                                    const ErrorCallback& error_callback) = 0;
-  virtual void RemoveDiscoverySession(const base::Closure& callback,
-                                      const ErrorCallback& error_callback) = 0;
+  virtual void RemoveDiscoverySession(
+      BluetoothDiscoveryFilter* discovery_filter,
+      const base::Closure& callback,
+      const ErrorCallback& error_callback) = 0;
+  virtual void SetDiscoveryFilter(
+      scoped_ptr<BluetoothDiscoveryFilter> discovery_filter,
+      const base::Closure& callback,
+      const ErrorCallback& error_callback) = 0;
 
   // Called by RemovePairingDelegate() in order to perform any class-specific
   // internal functionality necessary to remove the pairing delegate, such as
@@ -409,7 +445,9 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
       BluetoothDevice::PairingDelegate* pairing_delegate) = 0;
 
   // Success callback passed to AddDiscoverySession by StartDiscoverySession.
-  void OnStartDiscoverySession(const DiscoverySessionCallback& callback);
+  void OnStartDiscoverySession(
+      scoped_ptr<BluetoothDiscoveryFilter> discovery_filter,
+      const DiscoverySessionCallback& callback);
 
   // Marks all known DiscoverySession instances as inactive. Called by
   // BluetoothAdapter in the event that the adapter unexpectedly stops
@@ -422,19 +460,25 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
   void DiscoverySessionBecameInactive(
       BluetoothDiscoverySession* discovery_session);
 
+  // Observers of BluetoothAdapter, notified from implementation subclasses.
+  ObserverList<device::BluetoothAdapter::Observer> observers_;
+
   // Devices paired with, connected to, discovered by, or visible to the
   // adapter. The key is the Bluetooth address of the device and the value is
   // the BluetoothDevice object whose lifetime is managed by the adapter
   // instance.
-  typedef std::map<const std::string, BluetoothDevice*> DevicesMap;
   DevicesMap devices_;
 
   // Default pairing delegates registered with the adapter.
-  typedef std::pair<BluetoothDevice::PairingDelegate*,
-                    PairingDelegatePriority> PairingDelegatePair;
   std::list<PairingDelegatePair> pairing_delegates_;
 
  private:
+  // Return all discovery filters assigned to this adapter merged together.
+  // If |omit| is true, |discovery_filter| will not be processed.
+  scoped_ptr<BluetoothDiscoveryFilter> GetMergedDiscoveryFilterHelper(
+      const BluetoothDiscoveryFilter* discovery_filter,
+      bool omit) const;
+
   // List of active DiscoverySession objects. This is used to notify sessions to
   // become inactive in case of an unexpected change to the adapter discovery
   // state. We keep raw pointers, with the invariant that a DiscoverySession
@@ -446,13 +490,6 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapter
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.
   base::WeakPtrFactory<BluetoothAdapter> weak_ptr_factory_;
-};
-
-// Trait for RefCountedThreadSafe that deletes BluetoothAdapter.
-struct BluetoothAdapterDeleter {
-  static void Destruct(const BluetoothAdapter* adapter) {
-    adapter->DeleteOnCorrectThread();
-  }
 };
 
 }  // namespace device

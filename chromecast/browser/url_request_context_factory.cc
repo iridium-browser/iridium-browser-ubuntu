@@ -10,19 +10,20 @@
 #include "base/threading/worker_pool.h"
 #include "chromecast/browser/cast_http_user_agent_settings.h"
 #include "chromecast/browser/cast_network_delegate.h"
+#include "chromecast/common/chromecast_switches.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cookie_store_factory.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "net/cert/cert_verifier.h"
+#include "net/cert_net/nss_ocsp.h"
 #include "net/cookies/cookie_store.h"
 #include "net/dns/host_resolver.h"
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_network_layer.h"
 #include "net/http/http_server_properties_impl.h"
 #include "net/http/http_stream_factory.h"
-#include "net/ocsp/nss_ocsp.h"
 #include "net/proxy/proxy_service.h"
 #include "net/socket/next_proto.h"
 #include "net/ssl/channel_id_service.h"
@@ -63,10 +64,10 @@ class URLRequestContextFactory::URLRequestContextGetter
         request_context_.reset(factory_->CreateMediaRequestContext());
       } else {
         request_context_.reset(factory_->CreateSystemRequestContext());
-#if defined(USE_NSS)
+#if defined(USE_NSS_CERTS)
         // Set request context used by NSS for Crl requests.
         net::SetURLRequestContextForNSSHttpIO(request_context_.get());
-#endif  // defined(USE_NSS)
+#endif  // defined(USE_NSS_CERTS)
       }
     }
     return request_context_.get();
@@ -242,15 +243,17 @@ void URLRequestContextFactory::InitializeMainContextDependencies(
       url::kDataScheme,
       new net::DataProtocolHandler);
   DCHECK(set_protocol);
-#if defined(OS_ANDROID)
-  set_protocol = job_factory->SetProtocolHandler(
-      url::kFileScheme,
-      new net::FileProtocolHandler(
-          content::BrowserThread::GetBlockingPool()->
-              GetTaskRunnerWithShutdownBehavior(
-                  base::SequencedWorkerPool::SKIP_ON_SHUTDOWN)));
-  DCHECK(set_protocol);
-#endif  // defined(OS_ANDROID)
+
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableLocalFileAccesses)) {
+    set_protocol = job_factory->SetProtocolHandler(
+        url::kFileScheme,
+        new net::FileProtocolHandler(
+            content::BrowserThread::GetBlockingPool()->
+                GetTaskRunnerWithShutdownBehavior(
+                    base::SequencedWorkerPool::SKIP_ON_SHUTDOWN)));
+    DCHECK(set_protocol);
+  }
 
   // Set up interceptors in the reverse order.
   scoped_ptr<net::URLRequestJobFactory> top_job_factory = job_factory.Pass();

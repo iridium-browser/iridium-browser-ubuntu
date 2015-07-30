@@ -639,19 +639,8 @@ DELEGATE_TO_GL_9(texImage2D, TexImage2D,
 DELEGATE_TO_GL_3(texParameterf, TexParameterf,
                  WGC3Denum, WGC3Denum, WGC3Dfloat);
 
-static const unsigned int kTextureWrapR = 0x8072;
-
-void WebGraphicsContext3DImpl::texParameteri(
-    WGC3Denum target, WGC3Denum pname, WGC3Dint param) {
-  // TODO(kbr): figure out whether the setting of TEXTURE_WRAP_R in
-  // GraphicsContext3D.cpp is strictly necessary to avoid seams at the
-  // edge of cube maps, and, if it is, push it into the GLES2 service
-  // side code.
-  if (pname == kTextureWrapR) {
-    return;
-  }
-  gl_->TexParameteri(target, pname, param);
-}
+DELEGATE_TO_GL_3(texParameteri, TexParameteri,
+                 WGC3Denum, WGC3Denum, WGC3Dint);
 
 DELEGATE_TO_GL_9(texSubImage2D, TexSubImage2D,
                  WGC3Denum, WGC3Dint, WGC3Dint, WGC3Dint, WGC3Dsizei,
@@ -1025,12 +1014,12 @@ WGC3Denum WebGraphicsContext3DImpl::clientWaitSync(WGC3Dsync sync,
                                                    WGC3Duint64 timeout) {
   return gl_->ClientWaitSync(reinterpret_cast<GLsync>(sync), flags, timeout);
 }
-//DELEGATE_TO_GL_9(compressedTexImage3D, CompressedTexImage3D, WGC3Denum,
-//                 WGC3Dint, WGC3Denum, WGC3Dsizei, WGC3Dsizei, WGC3Dsizei,
-//                 WGC3Dint, WGC3Dsizei, const void *)
-//DELEGATE_TO_GL_11(compressedTexSubImage3D, CompressedTexSubImage3D, WGC3Denum,
-//                  WGC3Dint, WGC3Dint, WGC3Dint, WGC3Dint, WGC3Dsizei,
-//                  WGC3Dsizei, WGC3Dsizei, WGC3Denum, WGC3Dsizei, const void *)
+DELEGATE_TO_GL_9(compressedTexImage3D, CompressedTexImage3D, WGC3Denum,
+                 WGC3Dint, WGC3Denum, WGC3Dsizei, WGC3Dsizei, WGC3Dsizei,
+                 WGC3Dint, WGC3Dsizei, const void *)
+DELEGATE_TO_GL_11(compressedTexSubImage3D, CompressedTexSubImage3D, WGC3Denum,
+                  WGC3Dint, WGC3Dint, WGC3Dint, WGC3Dint, WGC3Dsizei,
+                  WGC3Dsizei, WGC3Dsizei, WGC3Denum, WGC3Dsizei, const void *)
 DELEGATE_TO_GL_5(copyBufferSubData, CopyBufferSubData, WGC3Denum, WGC3Denum,
                  WGC3Dintptr, WGC3Dintptr, WGC3Dsizeiptr)
 DELEGATE_TO_GL_9(copyTexSubImage3D, CopyTexSubImage3D, WGC3Denum, WGC3Dint,

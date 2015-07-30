@@ -26,6 +26,7 @@
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/keyboard/keyboard_controller.h"
+#include "ui/keyboard/keyboard_controller_observer.h"
 
 namespace virtual_keyboard_private =
     extensions::core_api::virtual_keyboard_private;
@@ -36,22 +37,23 @@ namespace {
 
 const char* kVirtualKeyboardExtensionID = "mppnpdlheglhdfmldimlhpnegondlapf";
 
-Context::Type TextInputTypeToGeneratedInputTypeEnum(ui::TextInputType type) {
+virtual_keyboard_private::OnTextInputBoxFocusedType
+TextInputTypeToGeneratedInputTypeEnum(ui::TextInputType type) {
   switch (type) {
     case ui::TEXT_INPUT_TYPE_NONE:
-      return Context::TYPE_NONE;
+      return virtual_keyboard_private::ON_TEXT_INPUT_BOX_FOCUSED_TYPE_NONE;
     case ui::TEXT_INPUT_TYPE_PASSWORD:
-      return Context::TYPE_PASSWORD;
+      return virtual_keyboard_private::ON_TEXT_INPUT_BOX_FOCUSED_TYPE_PASSWORD;
     case ui::TEXT_INPUT_TYPE_EMAIL:
-      return Context::TYPE_EMAIL;
+      return virtual_keyboard_private::ON_TEXT_INPUT_BOX_FOCUSED_TYPE_EMAIL;
     case ui::TEXT_INPUT_TYPE_NUMBER:
-      return Context::TYPE_NUMBER;
+      return virtual_keyboard_private::ON_TEXT_INPUT_BOX_FOCUSED_TYPE_NUMBER;
     case ui::TEXT_INPUT_TYPE_TELEPHONE:
-      return Context::TYPE_TEL;
+      return virtual_keyboard_private::ON_TEXT_INPUT_BOX_FOCUSED_TYPE_TEL;
     case ui::TEXT_INPUT_TYPE_URL:
-      return Context::TYPE_URL;
+      return virtual_keyboard_private::ON_TEXT_INPUT_BOX_FOCUSED_TYPE_URL;
     case ui::TEXT_INPUT_TYPE_DATE:
-      return Context::TYPE_DATE;
+      return virtual_keyboard_private::ON_TEXT_INPUT_BOX_FOCUSED_TYPE_DATE;
     case ui::TEXT_INPUT_TYPE_TEXT:
     case ui::TEXT_INPUT_TYPE_SEARCH:
     case ui::TEXT_INPUT_TYPE_DATE_TIME:
@@ -62,11 +64,48 @@ Context::Type TextInputTypeToGeneratedInputTypeEnum(ui::TextInputType type) {
     case ui::TEXT_INPUT_TYPE_TEXT_AREA:
     case ui::TEXT_INPUT_TYPE_CONTENT_EDITABLE:
     case ui::TEXT_INPUT_TYPE_DATE_TIME_FIELD:
-      return Context::TYPE_TEXT;
+      return virtual_keyboard_private::ON_TEXT_INPUT_BOX_FOCUSED_TYPE_TEXT;
   }
   NOTREACHED();
-  return Context::TYPE_NONE;
+  return virtual_keyboard_private::ON_TEXT_INPUT_BOX_FOCUSED_TYPE_NONE;
 }
+
+class AshKeyboardControllerObserver
+    : public keyboard::KeyboardControllerObserver {
+ public:
+  explicit AshKeyboardControllerObserver(content::BrowserContext* context)
+      : context_(context) {}
+  ~AshKeyboardControllerObserver() override {}
+
+  // KeyboardControllerObserver overrides:
+  void OnKeyboardBoundsChanging(const gfx::Rect& bounds) override {
+    extensions::EventRouter* router = extensions::EventRouter::Get(context_);
+
+    if (!router->HasEventListener(
+            virtual_keyboard_private::OnBoundsChanged::kEventName)) {
+      return;
+    }
+
+    scoped_ptr<base::ListValue> event_args(new base::ListValue());
+    scoped_ptr<base::DictionaryValue> new_bounds(new base::DictionaryValue());
+    new_bounds->SetInteger("left", bounds.x());
+    new_bounds->SetInteger("top", bounds.y());
+    new_bounds->SetInteger("width", bounds.width());
+    new_bounds->SetInteger("height", bounds.height());
+    event_args->Append(new_bounds.release());
+
+    scoped_ptr<extensions::Event> event(new extensions::Event(
+        virtual_keyboard_private::OnBoundsChanged::kEventName,
+        event_args.Pass()));
+    event->restrict_to_browser_context = context_;
+    router->BroadcastEvent(event.Pass());
+  }
+
+ private:
+  content::BrowserContext* context_;
+
+  DISALLOW_COPY_AND_ASSIGN(AshKeyboardControllerObserver);
+};
 
 }  // namespace
 
@@ -75,7 +114,9 @@ AshKeyboardControllerProxy::AshKeyboardControllerProxy(
     : keyboard::KeyboardControllerProxy(context) {
 }
 
-AshKeyboardControllerProxy::~AshKeyboardControllerProxy() {}
+AshKeyboardControllerProxy::~AshKeyboardControllerProxy() {
+  DCHECK(!keyboard_controller_);
+}
 
 void AshKeyboardControllerProxy::OnRequest(
     const ExtensionHostMsg_Request_Params& params) {
@@ -120,6 +161,20 @@ extensions::WindowController*
     AshKeyboardControllerProxy::GetExtensionWindowController() const {
   // The keyboard doesn't have a window controller.
   return NULL;
+}
+
+void AshKeyboardControllerProxy::SetController(
+    keyboard::KeyboardController* controller) {
+  // During KeyboardController destruction, controller can be set to null.
+  if (!controller) {
+    DCHECK(keyboard_controller_);
+    keyboard_controller_->RemoveObserver(observer_.get());
+    keyboard_controller_ = nullptr;
+    return;
+  }
+  keyboard_controller_ = controller;
+  observer_.reset(new AshKeyboardControllerObserver(browser_context()));
+  keyboard_controller_->AddObserver(observer_.get());
 }
 
 content::WebContents*
@@ -171,7 +226,8 @@ void AshKeyboardControllerProxy::SetUpdateInputType(ui::TextInputType type) {
   scoped_ptr<base::ListValue> event_args(new base::ListValue());
   scoped_ptr<base::DictionaryValue> input_context(new base::DictionaryValue());
   input_context->SetString("type",
-      Context::ToString(TextInputTypeToGeneratedInputTypeEnum(type)));
+                           virtual_keyboard_private::ToString(
+                               TextInputTypeToGeneratedInputTypeEnum(type)));
   event_args->Append(input_context.release());
 
   scoped_ptr<extensions::Event> event(new extensions::Event(

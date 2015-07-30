@@ -14,6 +14,8 @@ namespace test {
 
 TestNativeDisplayDelegate::TestNativeDisplayDelegate(ActionLogger* log)
     : max_configurable_pixels_(0),
+      get_hdcp_expectation_(true),
+      set_hdcp_expectation_(true),
       hdcp_state_(HDCP_STATE_UNDESIRED),
       run_async_(false),
       log_(log) {
@@ -104,16 +106,18 @@ void TestNativeDisplayDelegate::CreateFrameBuffer(const gfx::Size& size) {
                            outputs_.size() >= 2 ? outputs_[1] : NULL));
 }
 
-bool TestNativeDisplayDelegate::GetHDCPState(const DisplaySnapshot& output,
-                                             HDCPState* state) {
-  *state = hdcp_state_;
-  return true;
+void TestNativeDisplayDelegate::GetHDCPState(
+    const DisplaySnapshot& output,
+    const GetHDCPStateCallback& callback) {
+  callback.Run(get_hdcp_expectation_, hdcp_state_);
 }
 
-bool TestNativeDisplayDelegate::SetHDCPState(const DisplaySnapshot& output,
-                                             HDCPState state) {
+void TestNativeDisplayDelegate::SetHDCPState(
+    const DisplaySnapshot& output,
+    HDCPState state,
+    const SetHDCPStateCallback& callback) {
   log_->AppendAction(GetSetHDCPStateAction(output, state));
-  return true;
+  callback.Run(set_hdcp_expectation_);
 }
 
 std::vector<ui::ColorCalibrationProfile>
@@ -126,6 +130,13 @@ bool TestNativeDisplayDelegate::SetColorCalibrationProfile(
     const DisplaySnapshot& output,
     ui::ColorCalibrationProfile new_profile) {
   return false;
+}
+
+bool TestNativeDisplayDelegate::SetGammaRamp(
+    const ui::DisplaySnapshot& output,
+    const std::vector<GammaRampRGBEntry>& lut) {
+  log_->AppendAction(SetGammaRampAction(output, lut));
+  return true;
 }
 
 void TestNativeDisplayDelegate::AddObserver(NativeDisplayObserver* observer) {

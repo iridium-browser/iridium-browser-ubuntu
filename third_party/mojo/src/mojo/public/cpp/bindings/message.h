@@ -43,7 +43,7 @@ class Message {
   bool has_flag(uint32_t flag) const { return !!(data_->header.flags & flag); }
 
   // Access the request_id field (if present).
-  bool has_request_id() const { return data_->header.version >= 3; }
+  bool has_request_id() const { return data_->header.version >= 1; }
   uint64_t request_id() const {
     MOJO_DCHECK(has_request_id());
     return static_cast<const internal::MessageHeaderWithRequestID*>(
@@ -103,6 +103,39 @@ class MessageReceiverWithResponder : public MessageReceiver {
   // its own destruction.
   //
   virtual bool AcceptWithResponder(Message* message, MessageReceiver* responder)
+      MOJO_WARN_UNUSED_RESULT = 0;
+};
+
+// A MessageReceiver that is also able to provide status about the state
+// of the underlying MessagePipe to which it will be forwarding messages
+// received via the |Accept()| call.
+class MessageReceiverWithStatus : public MessageReceiver {
+ public:
+  ~MessageReceiverWithStatus() override {}
+
+  // Returns |true| if this MessageReceiver is currently bound to a MessagePipe,
+  // the pipe has not been closed, and the pipe has not encountered an error.
+  virtual bool IsValid() = 0;
+};
+
+// An alternative to MessageReceiverWithResponder for cases in which it
+// is necessary for the implementor of this interface to know about the status
+// of the MessagePipe which will carry the responses.
+class MessageReceiverWithResponderStatus : public MessageReceiver {
+ public:
+  ~MessageReceiverWithResponderStatus() override {}
+
+  // A variant on Accept that registers a MessageReceiverWithStatus (known as
+  // the responder) to handle the response message generated from the given
+  // message. Any of the responder's methods (Accept or IsValid) may be called
+  // during  AcceptWithResponder or some time after its return.
+  //
+  // NOTE: Upon returning true, AcceptWithResponder assumes ownership of
+  // |responder| and will delete it after calling |responder->Accept| or upon
+  // its own destruction.
+  //
+  virtual bool AcceptWithResponder(Message* message,
+                                   MessageReceiverWithStatus* responder)
       MOJO_WARN_UNUSED_RESULT = 0;
 };
 

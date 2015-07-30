@@ -69,6 +69,7 @@ std::string DeriveCommandLine(const GURL& start_url,
   DCHECK_NE(&base_command_line, command_line);
 
   static const char* const kForwardSwitches[] = {
+    ::switches::kBlinkSettings,
     ::switches::kDisableAccelerated2dCanvas,
     ::switches::kDisableAcceleratedJpegDecoding,
     ::switches::kDisableAcceleratedVideoDecode,
@@ -127,7 +128,6 @@ std::string DeriveCommandLine(const GURL& start_url,
     ::switches::kGpuSandboxAllowSysVShm,
     ::switches::kGpuSandboxFailuresFatal,
     ::switches::kGpuSandboxStartEarly,
-    ::switches::kIgnoreResolutionLimitsForAcceleratedVideoDecode,
     ::switches::kNoSandbox,
     ::switches::kNumRasterThreads,
     ::switches::kPpapiFlashArgs,

@@ -35,9 +35,7 @@ const char kPrefKeyWatcherPersistentOrigins[] = "persistent-origins";
 const char kPrefKeyOpenedFilesLimit[] = "opened-files-limit";
 
 void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterDictionaryPref(
-      prefs::kFileSystemProviderMounted,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterDictionaryPref(prefs::kFileSystemProviderMounted);
 }
 
 Registry::Registry(Profile* profile) : profile_(profile) {
@@ -166,6 +164,7 @@ scoped_ptr<Registry::RestoredFileSystems> Registry::RestoreFileSystems(
          !file_system->GetBooleanWithoutPathExpansion(kPrefKeySupportsNotifyTag,
                                                       &supports_notify_tag) ||
          file_system_id.empty() || display_name.empty()) ||
+        // Optional fields.
         (file_system->GetIntegerWithoutPathExpansion(kPrefKeyOpenedFilesLimit,
                                                      &opened_files_limit) &&
          opened_files_limit < 0)) {

@@ -4,13 +4,16 @@
 
 from measurements import oilpan_gc_times
 
+from telemetry.core import util
 from telemetry.results import page_test_results
 from telemetry.timeline import model
 from telemetry.timeline import slice as slice_data
-from telemetry.timeline.event import TimelineEvent
 from telemetry.unittest_util import options_for_unittests
 from telemetry.unittest_util import page_test_test_case
 from telemetry.page import page as page_module
+
+util.AddDirToPythonPath(util.GetTelemetryDir(), 'third_party', 'mock')
+import mock  # pylint: disable=import-error
 
 
 class TestOilpanGCTimesPage(page_module.Page):
@@ -19,9 +22,8 @@ class TestOilpanGCTimesPage(page_module.Page):
         'file://blank.html', page_set, page_set.base_dir)
 
   def RunPageInteractions(self, action_runner):
-    interaction = action_runner.BeginGestureInteraction('ScrollAction')
-    action_runner.ScrollPage()
-    interaction.End()
+    with action_runner.CreateGestureInteraction('ScrollAction'):
+      action_runner.ScrollPage()
 
 
 class OilpanGCTimesTestData(object):
@@ -49,9 +51,21 @@ class OilpanGCTimesTestData(object):
     self._renderer_thread.all_slices.append(new_slice)
     return new_slice
 
+  def AddAsyncSlice(self, name, timestamp, duration, args):
+    new_slice = slice_data.Slice(
+        None,
+        'category',
+        name,
+        timestamp,
+        duration,
+        timestamp,
+        duration,
+        args)
+    self._renderer_thread.async_slices.append(new_slice)
+    return new_slice
+
   def ClearResults(self):
     self._results = page_test_results.PageTestResults()
-
 
 class OilpanGCTimesTest(page_test_test_case.PageTestTestCase):
   """Smoke test for Oilpan GC pause time measurements.
@@ -64,10 +78,13 @@ class OilpanGCTimesTest(page_test_test_case.PageTestTestCase):
   _KEY_LAZY_SWEEP = 'ThreadHeap::lazySweepPages'
   _KEY_COMPLETE_SWEEP = 'ThreadState::completeSweep'
   _KEY_COALESCE = 'ThreadHeap::coalesce'
+  _KEY_MEASURE = 'BlinkGCTimeMeasurement'
 
   def setUp(self):
     self._options = options_for_unittests.GetCopy()
 
+  # Disable for accessing private API of _OilpanGCTimesBase.
+  # pylint: disable=protected-access
   def testForParsingOldFormat(self):
     def getMetric(results, name):
       metrics = results.FindAllPageSpecificValuesNamed(name)
@@ -77,9 +94,12 @@ class OilpanGCTimesTest(page_test_test_case.PageTestTestCase):
     data = self._GenerateDataForParsingOldFormat()
 
     measurement = oilpan_gc_times._OilpanGCTimesBase()
-    measurement._renderer_process = data._renderer_process
-    measurement._timeline_model = data._model
-    measurement.ValidateAndMeasurePage(None, None, data.results)
+
+    tab = mock.MagicMock()
+    with mock.patch(
+        'measurements.oilpan_gc_times.TimelineModel') as MockTimelineModel:
+      MockTimelineModel.return_value = data._model
+      measurement.ValidateAndMeasurePage(None, tab, data.results)
 
     results = data.results
     self.assertEquals(7, len(getMetric(results, 'oilpan_coalesce')))
@@ -97,6 +117,8 @@ class OilpanGCTimesTest(page_test_test_case.PageTestTestCase):
     self.assertEquals(2, len(getMetric(results,
                                        'oilpan_forced_complete_sweep')))
 
+  # Disable for accessing private API of _OilpanGCTimesBase.
+  # pylint: disable=protected-access
   def testForParsing(self):
     def getMetric(results, name):
       metrics = results.FindAllPageSpecificValuesNamed(name)
@@ -106,28 +128,31 @@ class OilpanGCTimesTest(page_test_test_case.PageTestTestCase):
     data = self._GenerateDataForParsing()
 
     measurement = oilpan_gc_times._OilpanGCTimesBase()
-    measurement._renderer_process = data._renderer_process
     measurement._timeline_model = data._model
-    measurement.ValidateAndMeasurePage(None, None, data.results)
+    tab = mock.MagicMock()
+    with mock.patch(
+        'measurements.oilpan_gc_times.TimelineModel') as MockTimelineModel:
+      MockTimelineModel.return_value = data._model
+      measurement.ValidateAndMeasurePage(None, tab, data.results)
 
     results = data.results
-    self.assertEquals(7, len(getMetric(results, 'oilpan_coalesce')))
-    self.assertEquals(2, len(getMetric(results, 'oilpan_precise_mark')))
-    self.assertEquals(2, len(getMetric(results, 'oilpan_precise_lazy_sweep')))
-    self.assertEquals(2, len(getMetric(results,
+    self.assertEquals(8, len(getMetric(results, 'oilpan_coalesce')))
+    self.assertEquals(4, len(getMetric(results, 'oilpan_precise_mark')))
+    self.assertEquals(4, len(getMetric(results, 'oilpan_precise_lazy_sweep')))
+    self.assertEquals(4, len(getMetric(results,
                                        'oilpan_precise_complete_sweep')))
-    self.assertEquals(2, len(getMetric(results, 'oilpan_conservative_mark')))
-    self.assertEquals(2, len(getMetric(results,
+    self.assertEquals(4, len(getMetric(results, 'oilpan_conservative_mark')))
+    self.assertEquals(4, len(getMetric(results,
                                        'oilpan_conservative_lazy_sweep')))
-    self.assertEquals(2, len(getMetric(results,
+    self.assertEquals(4, len(getMetric(results,
                                        'oilpan_conservative_complete_sweep')))
     self.assertEquals(1, len(getMetric(results, 'oilpan_forced_mark')))
     self.assertEquals(1, len(getMetric(results, 'oilpan_forced_lazy_sweep')))
     self.assertEquals(1, len(getMetric(results,
                                        'oilpan_forced_complete_sweep')))
-    self.assertEquals(1, len(getMetric(results, 'oilpan_idle_mark')))
-    self.assertEquals(1, len(getMetric(results, 'oilpan_idle_lazy_sweep')))
-    self.assertEquals(1, len(getMetric(results,
+    self.assertEquals(2, len(getMetric(results, 'oilpan_idle_mark')))
+    self.assertEquals(2, len(getMetric(results, 'oilpan_idle_lazy_sweep')))
+    self.assertEquals(2, len(getMetric(results,
                                        'oilpan_idle_complete_sweep')))
 
   def testForSmoothness(self):
@@ -227,4 +252,35 @@ class OilpanGCTimesTest(page_test_test_case.PageTestTestCase):
     data.AddSlice(self._KEY_COALESCE, 277, 24, {})
     data.AddSlice(self._KEY_LAZY_SWEEP, 301, 25, {})
     data.AddSlice(self._KEY_COMPLETE_SWEEP, 326, 26, {})
+
+    # Following events are covered with 'BlinkGCTimeMeasurement' event.
+    first_measure = data.AddSlice(self._KEY_COALESCE, 352, 27, {})
+    data.AddSlice(self._KEY_MARK, 380, 28,
+                  {'lazySweeping': True, 'gcReason': 'ConservativeGC'})
+    data.AddSlice(self._KEY_LAZY_SWEEP, 408, 29, {})
+    data.AddSlice(self._KEY_LAZY_SWEEP, 437, 30, {})
+    data.AddSlice(self._KEY_COMPLETE_SWEEP, 467, 31, {})
+    data.AddSlice(self._KEY_MARK, 498, 32,
+                  {'lazySweeping': True, 'gcReason': 'PreciseGC'})
+    data.AddSlice(self._KEY_LAZY_SWEEP, 530, 33, {})
+    data.AddSlice(self._KEY_COMPLETE_SWEEP, 563, 34, {})
+    data.AddSlice(self._KEY_MARK, 597, 35,
+                  {'lazySweeping': False, 'gcReason': 'ConservativeGC'})
+    data.AddSlice(self._KEY_LAZY_SWEEP, 632, 36, {})
+    data.AddSlice(self._KEY_COMPLETE_SWEEP, 667, 37, {})
+    data.AddSlice(self._KEY_MARK, 704, 38,
+                  {'lazySweeping': False, 'gcReason': 'PreciseGC'})
+    data.AddSlice(self._KEY_LAZY_SWEEP, 742, 39, {})
+    data.AddSlice(self._KEY_COMPLETE_SWEEP, 781, 40, {})
+    data.AddSlice(self._KEY_MARK, 821, 41,
+                  {'lazySweeping': False, 'gcReason': 'ForcedGCForTesting'})
+    data.AddSlice(self._KEY_COMPLETE_SWEEP, 862, 42, {})
+    data.AddSlice(self._KEY_MARK, 904, 43,
+                  {'lazySweeping': False, 'gcReason': 'IdleGC'})
+    last_measure = data.AddSlice(self._KEY_COMPLETE_SWEEP, 947, 44, {})
+
+    # Async event
+    async_dur = last_measure.end - first_measure.start
+    data.AddAsyncSlice(self._KEY_MEASURE, first_measure.start, async_dur, {})
+
     return data

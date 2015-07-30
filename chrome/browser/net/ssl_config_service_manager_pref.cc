@@ -75,9 +75,7 @@ std::vector<uint16> ParseCipherSuites(
 // Returns 0 if the string is invalid.
 uint16 SSLProtocolVersionFromString(const std::string& version_str) {
   uint16 version = 0;  // Invalid.
-  if (version_str == switches::kSSLVersionSSLv3) {
-    version = net::SSL_PROTOCOL_VERSION_SSL3;
-  } else if (version_str == switches::kSSLVersionTLSv1) {
+  if (version_str == switches::kSSLVersionTLSv1) {
     version = net::SSL_PROTOCOL_VERSION_TLS1;
   } else if (version_str == switches::kSSLVersionTLSv11) {
     version = net::SSL_PROTOCOL_VERSION_TLS1_1;
@@ -227,9 +225,9 @@ void SSLConfigServiceManagerPref::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(
       prefs::kCertRevocationCheckingRequiredLocalAnchors,
       default_config.rev_checking_required_local_anchors);
-  registry->RegisterStringPref(prefs::kSSLVersionMin, "");
-  registry->RegisterStringPref(prefs::kSSLVersionMax, "");
-  registry->RegisterStringPref(prefs::kSSLVersionFallbackMin, "");
+  registry->RegisterStringPref(prefs::kSSLVersionMin, std::string());
+  registry->RegisterStringPref(prefs::kSSLVersionMax, std::string());
+  registry->RegisterStringPref(prefs::kSSLVersionFallbackMin, std::string());
   registry->RegisterBooleanPref(prefs::kDisableSSLRecordSplitting,
                                 !default_config.false_start_enabled);
   registry->RegisterListPref(prefs::kCipherSuiteBlacklist);
@@ -242,7 +240,7 @@ net::SSLConfigService* SSLConfigServiceManagerPref::Get() {
 void SSLConfigServiceManagerPref::OnPreferenceChanged(
     PrefService* prefs,
     const std::string& pref_name_in) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(prefs);
   if (pref_name_in == prefs::kCipherSuiteBlacklist)
     OnDisabledCipherSuitesChange(prefs);
@@ -283,11 +281,6 @@ void SSLConfigServiceManagerPref::GetSSLConfigFromPrefs(
       SSLProtocolVersionFromString(version_fallback_min_str);
   if (version_min) {
     config->version_min = version_min;
-  } else {
-    const std::string group = base::FieldTrialList::FindFullName("SSLv3");
-    if (group == "Enabled") {
-      config->version_min = net::SSL_PROTOCOL_VERSION_SSL3;
-    }
   }
   if (version_max) {
     uint16 supported_version_max = config->version_max;

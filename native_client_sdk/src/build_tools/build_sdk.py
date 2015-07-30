@@ -170,14 +170,24 @@ def BuildStepDownloadToolchains(toolchains):
   if 'bionic' in toolchains:
     build_platform = '%s_x86' % getos.GetPlatform()
     args.extend(['--append', os.path.join(build_platform, 'nacl_arm_bionic')])
+  if getos.GetPlatform() == 'linux':
+    # TODO(sbc): remove this once this change makes it into chrome
+    # https://codereview.chromium.org/1080513003/
+    args.extend(['--append', 'arm_trusted'])
   args.extend(['sync', '--extract'])
   buildbot_common.Run(args, cwd=NACL_DIR)
 
 
 def BuildStepCleanPepperDirs(pepperdir, pepperdir_old):
   buildbot_common.BuildStep('Clean Pepper Dirs')
-  buildbot_common.RemoveDir(pepperdir_old)
-  buildbot_common.RemoveDir(pepperdir)
+  dirs_to_remove = (
+      pepperdir,
+      pepperdir_old,
+      os.path.join(OUT_DIR, 'arm_trusted')
+  )
+  for dirname in dirs_to_remove:
+    if os.path.exists(dirname):
+      buildbot_common.RemoveDir(dirname)
   buildbot_common.MakeDir(pepperdir)
 
 
@@ -234,6 +244,12 @@ def BuildStepUntarToolchains(pepperdir, toolchains):
                        tcname % {'platform': platform})
       extract_packages.append(package_tuple)
 
+
+  # On linux we also want to extract the arm_trusted package which contains
+  # the ARM libraries we ship in support of sel_ldr_arm.
+  if platform == 'linux':
+    extract_packages.append((os.path.join(build_platform, 'arm_trusted'),
+                            'arm_trusted'))
   if extract_packages:
     # Extract all of the packages into the temp directory.
     package_names = [package_tuple[0] for package_tuple in extract_packages]
@@ -537,6 +553,7 @@ def GypNinjaBuild(arch, gyp_py_script, gyp_file, targets,
   gyp_env['GYP_GENERATORS'] = 'ninja'
   gyp_defines = gyp_defines or []
   gyp_defines.append('nacl_allow_thin_archives=0')
+  gyp_defines.append('use_sysroot=1')
   if options.mac_sdk:
     gyp_defines.append('mac_sdk=%s' % options.mac_sdk)
 
@@ -581,6 +598,7 @@ def BuildStepBuildToolchains(pepperdir, toolchains, build, clean):
   if clean:
     for dirname in glob.glob(os.path.join(OUT_DIR, GYPBUILD_DIR + '*')):
       buildbot_common.RemoveDir(dirname)
+    build = True
 
   if build:
     GypNinjaBuild_NaCl(GYPBUILD_DIR)
@@ -811,14 +829,21 @@ def GetManifestBundle(pepper_ver, chrome_revision, nacl_revision, tarfile,
   return bundle
 
 
+def Archive(filename, from_directory, step_link=True):
+  if buildbot_common.IsSDKBuilder():
+    bucket_path = 'nativeclient-mirror/nacl/nacl_sdk/'
+  else:
+    bucket_path = 'nativeclient-mirror/nacl/nacl_sdk_test/'
+  bucket_path += build_version.ChromeVersion()
+  buildbot_common.Archive(filename, bucket_path, from_directory, step_link)
+
+
 def BuildStepArchiveBundle(name, pepper_ver, chrome_revision, nacl_revision,
                            tarfile):
   buildbot_common.BuildStep('Archive %s' % name)
-  bucket_path = 'nativeclient-mirror/nacl/nacl_sdk/%s' % (
-      build_version.ChromeVersion(),)
   tarname = os.path.basename(tarfile)
   tarfile_dir = os.path.dirname(tarfile)
-  buildbot_common.Archive(tarname, bucket_path, tarfile_dir)
+  Archive(tarname, tarfile_dir)
 
   # generate "manifest snippet" for this archive.
   archive_url = GSTORE + 'nacl_sdk/%s/%s' % (
@@ -830,24 +855,37 @@ def BuildStepArchiveBundle(name, pepper_ver, chrome_revision, nacl_revision,
   with open(manifest_snippet_file, 'wb') as manifest_snippet_stream:
     manifest_snippet_stream.write(bundle.GetDataAsString())
 
-  buildbot_common.Archive(tarname + '.json', bucket_path, OUT_DIR,
-                          step_link=False)
+  Archive(tarname + '.json', OUT_DIR, step_link=False)
+
+
+def BuildStepBuildPNaClComponent(version, revision):
+  # Sadly revision can go backwords for a given version since when a version
+  # is built from master, revision will be a huge number (in the hundreds of
+  # thousands.  Once the branch happens the revision will reset to zero.
+  # TODO(sbc): figure out how to compensate for this in some way such that
+  # revisions always go forward for a given version.
+  buildbot_common.BuildStep('PNaCl Component')
+  if len(revision) > 4:
+    rev_minor = revision[-4:]
+    rev_major = revision[:-4]
+    version = "0.%s.%s.%s" % (version, rev_major, rev_minor)
+  else:
+    version = "0.%s.0.%s" % (version, revision)
+  buildbot_common.Run(['./make_pnacl_component.sh', version], cwd=SCRIPT_DIR)
+
+
+def BuildStepArchivePNaClComponent():
+  buildbot_common.BuildStep('Archive PNaCl Component')
+  Archive('pnacl_multicrx.zip', OUT_DIR)
 
 
 def BuildStepArchiveSDKTools():
-  # Only push up sdk_tools.tgz and nacl_sdk.zip on the linux buildbot.
-  builder_name = os.getenv('BUILDBOT_BUILDERNAME', '')
-  if builder_name == 'linux-sdk-multi':
-    buildbot_common.BuildStep('Build SDK Tools')
-    build_updater.BuildUpdater(OUT_DIR)
+  buildbot_common.BuildStep('Build SDK Tools')
+  build_updater.BuildUpdater(OUT_DIR)
 
-    buildbot_common.BuildStep('Archive SDK Tools')
-    bucket_path = 'nativeclient-mirror/nacl/nacl_sdk/%s' % (
-        build_version.ChromeVersion(),)
-    buildbot_common.Archive('sdk_tools.tgz', bucket_path, OUT_DIR,
-                            step_link=False)
-    buildbot_common.Archive('nacl_sdk.zip', bucket_path, OUT_DIR,
-                            step_link=False)
+  buildbot_common.BuildStep('Archive SDK Tools')
+  Archive('sdk_tools.tgz', OUT_DIR, step_link=False)
+  Archive('nacl_sdk.zip', OUT_DIR, step_link=False)
 
 
 def BuildStepSyncNaClPorts():
@@ -975,6 +1013,8 @@ def main(args):
   global options
   options = parser.parse_args(args)
 
+  buildbot_common.BuildStep('build_sdk')
+
   if options.nacl_tree_path:
     options.bionic = True
     toolchain_build = os.path.join(options.nacl_tree_path, 'toolchain_build')
@@ -1018,6 +1058,7 @@ def main(args):
     options.build_app_engine = False
 
   print 'Building: ' + ' '.join(toolchains)
+  platform = getos.GetPlatform()
 
   if options.archive and not options.tar:
     parser.error('Incompatible arguments with archive.')
@@ -1032,7 +1073,7 @@ def main(args):
   if options.bionic:
     tarname = 'naclsdk_bionic.tar.bz2'
   else:
-    tarname = 'naclsdk_' + getos.GetPlatform() + '.tar.bz2'
+    tarname = 'naclsdk_%s.tar.bz2' % platform
   tarfile = os.path.join(OUT_DIR, tarname)
 
   if options.release:
@@ -1043,6 +1084,16 @@ def main(args):
     # We don't want the currently configured NACL_SDK_ROOT to have any effect
     # of the build.
     del os.environ['NACL_SDK_ROOT']
+
+  if platform == 'linux':
+    # Linux-only: make sure the debian/stable sysroot image is installed
+    install_script = os.path.join(SRC_DIR, 'chrome', 'installer', 'linux',
+                                  'sysroot_scripts',
+                                  'install-debian.wheezy.sysroot.py')
+
+    buildbot_common.Run([sys.executable, install_script, '--arch=arm'])
+    buildbot_common.Run([sys.executable, install_script, '--arch=i386'])
+    buildbot_common.Run([sys.executable, install_script, '--arch=amd64'])
 
   if not options.skip_toolchain:
     BuildStepCleanPepperDirs(pepperdir, pepperdir_old)
@@ -1058,6 +1109,31 @@ def main(args):
       oshelpers.Copy(['-r', srcdir, bionicdir])
     else:
       BuildStepUntarToolchains(pepperdir, toolchains)
+    if platform == 'linux':
+      buildbot_common.Move(os.path.join(pepperdir, 'toolchain', 'arm_trusted'),
+                           os.path.join(OUT_DIR, 'arm_trusted'))
+
+
+  if platform == 'linux':
+    # Linux-only: Copy arm libraries from the arm_trusted package.  These are
+    # needed to be able to run sel_ldr_arm under qemu.
+    arm_libs = [
+      'lib/arm-linux-gnueabihf/librt.so.1',
+      'lib/arm-linux-gnueabihf/libpthread.so.0',
+      'lib/arm-linux-gnueabihf/libgcc_s.so.1',
+      'lib/arm-linux-gnueabihf/libc.so.6',
+      'lib/arm-linux-gnueabihf/ld-linux-armhf.so.3',
+      'lib/arm-linux-gnueabihf/libm.so.6',
+      'usr/lib/arm-linux-gnueabihf/libstdc++.so.6'
+    ]
+    arm_lib_dir = os.path.join(pepperdir, 'tools', 'lib', 'arm_trusted', 'lib')
+    buildbot_common.MakeDir(arm_lib_dir)
+    for arm_lib in arm_libs:
+      arm_lib = os.path.join(OUT_DIR, 'arm_trusted', arm_lib)
+      buildbot_common.CopyFile(arm_lib, arm_lib_dir)
+    buildbot_common.CopyFile(os.path.join(OUT_DIR, 'arm_trusted', 'qemu-arm'),
+                             os.path.join(pepperdir, 'tools'))
+
 
   BuildStepBuildToolchains(pepperdir, toolchains,
                            not options.skip_toolchain,
@@ -1080,28 +1156,34 @@ def main(args):
   if options.tar:
     BuildStepTarBundle(pepper_ver, tarfile)
 
-  if options.build_ports and getos.GetPlatform() == 'linux':
-    ports_tarfile = os.path.join(OUT_DIR, 'naclports.tar.bz2')
-    BuildStepSyncNaClPorts()
-    BuildStepBuildNaClPorts(pepper_ver, pepperdir)
-    if options.tar:
-      BuildStepTarNaClPorts(pepper_ver, ports_tarfile)
+  if platform == 'linux':
+    BuildStepBuildPNaClComponent(pepper_ver, chrome_revision)
 
-  if options.build_app_engine and getos.GetPlatform() == 'linux':
+    if options.build_ports:
+      ports_tarfile = os.path.join(OUT_DIR, 'naclports.tar.bz2')
+      BuildStepSyncNaClPorts()
+      BuildStepBuildNaClPorts(pepper_ver, pepperdir)
+      if options.tar:
+        BuildStepTarNaClPorts(pepper_ver, ports_tarfile)
+
+  if options.build_app_engine and platform == 'linux':
     BuildStepBuildAppEngine(pepperdir, chrome_revision)
 
   if options.qemu:
     qemudir = os.path.join(NACL_DIR, 'toolchain', 'linux_arm-trusted')
     oshelpers.Copy(['-r', qemudir, pepperdir])
 
-  # Archive on non-trybots.
+  # Archive the results on Google Cloud Storage.
   if options.archive:
     BuildStepArchiveBundle('build', pepper_ver, chrome_revision, nacl_revision,
                            tarfile)
-    if options.build_ports and getos.GetPlatform() == 'linux':
-      BuildStepArchiveBundle('naclports', pepper_ver, chrome_revision,
-                             nacl_revision, ports_tarfile)
-    BuildStepArchiveSDKTools()
+    # Only archive sdk_tools/naclport/pnacl_component on linux.
+    if platform == 'linux':
+      if options.build_ports:
+        BuildStepArchiveBundle('naclports', pepper_ver, chrome_revision,
+                               nacl_revision, ports_tarfile)
+      BuildStepArchiveSDKTools()
+      BuildStepArchivePNaClComponent()
 
   return 0
 

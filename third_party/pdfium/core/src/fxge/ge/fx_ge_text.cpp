@@ -12,6 +12,37 @@
 #undef FX_GAMMA_INVERSE
 #define FX_GAMMA(value)			(value)
 #define FX_GAMMA_INVERSE(value)	(value)
+
+namespace {
+
+void ResetTransform(FT_Face face) {
+    FXFT_Matrix  matrix;
+    matrix.xx = 0x10000L;
+    matrix.xy = 0;
+    matrix.yx = 0;
+    matrix.yy = 0x10000L;
+    FXFT_Set_Transform(face, &matrix, 0);
+}
+
+// Sets the given transform on the font, and resets it to the identity when it
+// goes out of scope.
+class ScopedFontTransform
+{
+public:
+    ScopedFontTransform(FT_Face face, FXFT_Matrix* matrix) : m_Face(face) {
+        FXFT_Set_Transform(m_Face, matrix, 0);
+    }
+
+    ~ScopedFontTransform() {
+        ResetTransform(m_Face);
+    }
+
+private:
+    FT_Face m_Face;
+};
+
+}
+
 FX_RECT FXGE_GetGlyphsBBox(FXTEXT_GLYPHPOS* pGlyphAndPos, int nChars, int anti_alias, FX_FLOAT retinaScaleX, FX_FLOAT retinaScaleY)
 {
     FX_RECT rect(0, 0, 0, 0);
@@ -984,19 +1015,8 @@ CFX_FaceCache* CFX_FontCache::GetCachedFace(CFX_Font* pFont)
         counted_face_cache->m_nCount++;
         return counted_face_cache->m_Obj;
     }
-    CFX_FaceCache* face_cache = NULL;
-    face_cache = FX_NEW CFX_FaceCache(bExternal ? NULL : (FXFT_Face)face);
-    if (face_cache == NULL)	{
-        return NULL;
-    }
-    counted_face_cache = FX_NEW CFX_CountedFaceCache;
-    if (!counted_face_cache) {
-        if (face_cache) {
-            delete face_cache;
-            face_cache = NULL;
-        }
-        return NULL;
-    }
+    CFX_FaceCache* face_cache = new CFX_FaceCache(bExternal ? NULL : (FXFT_Face)face);
+    counted_face_cache = new CFX_CountedFaceCache;
     counted_face_cache->m_nCount = 2;
     counted_face_cache->m_Obj = face_cache;
     map.SetAt((FXFT_Face)face, counted_face_cache);
@@ -1081,10 +1101,7 @@ CFX_GlyphBitmap* CFX_FaceCache::LookUpGlyphBitmap(CFX_Font* pFont, const CFX_Aff
 {
     CFX_SizeGlyphCache* pSizeCache = NULL;
     if (!m_SizeMap.Lookup(FaceGlyphsKey, (void*&)pSizeCache)) {
-        pSizeCache = FX_NEW CFX_SizeGlyphCache;
-        if (pSizeCache == NULL)	{
-            return NULL;
-        }
+        pSizeCache = new CFX_SizeGlyphCache;
         m_SizeMap.SetAt(FaceGlyphsKey, pSizeCache);
     }
     CFX_GlyphBitmap* pGlyphBitmap = NULL;
@@ -1153,10 +1170,7 @@ const CFX_GlyphBitmap* CFX_FaceCache::LoadGlyphBitmap(CFX_Font* pFont, FX_DWORD 
         } else {
             pGlyphBitmap = RenderGlyph_Nativetext(pFont, glyph_index, pMatrix, dest_width, anti_alias);
             if (pGlyphBitmap) {
-                pSizeCache = FX_NEW CFX_SizeGlyphCache;
-                if (pSizeCache == NULL)	{
-                    return NULL;
-                }
+                pSizeCache = new CFX_SizeGlyphCache;
                 m_SizeMap.SetAt(FaceGlyphsKey, pSizeCache);
                 pSizeCache->m_GlyphMap.SetAt((FX_LPVOID)(FX_UINTPTR)glyph_index, pGlyphBitmap);
                 return pGlyphBitmap;
@@ -1332,7 +1346,7 @@ CFX_GlyphBitmap* CFX_FaceCache::RenderGlyph(CFX_Font* pFont, FX_DWORD glyph_inde
             pFont->AdjustMMParams(glyph_index, dest_width, pFont->GetSubstFont()->m_Weight);
         }
     }
-    FXFT_Set_Transform(m_Face, &ft_matrix, 0);
+    ScopedFontTransform scoped_transform(m_Face, &ft_matrix);
     int load_flags = (m_Face->face_flags & FT_FACE_FLAG_SFNT) ? FXFT_LOAD_NO_BITMAP : (FXFT_LOAD_NO_BITMAP | FT_LOAD_NO_HINTING);
     int error = FXFT_Load_Glyph(m_Face, glyph_index, load_flags);
     if (error) {
@@ -1378,10 +1392,7 @@ CFX_GlyphBitmap* CFX_FaceCache::RenderGlyph(CFX_Font* pFont, FX_DWORD glyph_inde
         return NULL;
     }
     int dib_width = bmwidth;
-    CFX_GlyphBitmap* pGlyphBitmap = FX_NEW CFX_GlyphBitmap;
-    if (!pGlyphBitmap) {
-        return NULL;
-    }
+    CFX_GlyphBitmap* pGlyphBitmap = new CFX_GlyphBitmap;
     pGlyphBitmap->m_Bitmap.Create(dib_width, bmheight,
                                   anti_alias == FXFT_RENDER_MODE_MONO ? FXDIB_1bppMask : FXDIB_8bppMask);
     pGlyphBitmap->m_Left = FXFT_Get_Glyph_BitmapLeft(m_Face);
@@ -1479,6 +1490,8 @@ FX_BOOL OutputText(void* dib, int x, int y, CFX_Font* pFont, double font_size,
                      glyph_index, argb);
         x_pos += (FX_FLOAT)w / em;
     }
+    if (pText_matrix)
+        ResetTransform(face);
     return TRUE;
 }
 FX_BOOL OutputGlyph(void* dib, int x, int y, CFX_Font* pFont, double font_size,
@@ -1495,7 +1508,7 @@ FX_BOOL OutputGlyph(void* dib, int x, int y, CFX_Font* pFont, double font_size,
         ft_matrix.xy = ft_matrix.yx = 0;
         ft_matrix.yy = (signed long)(font_size / 64 * 65536);
     }
-    FXFT_Set_Transform(pFont->m_Face, &ft_matrix, 0);
+    ScopedFontTransform scoped_transform(pFont->m_Face, &ft_matrix);
     FX_BOOL ret = _OutputGlyph(dib, x, y, pFont,
                                glyph_index, argb);
     return ret;
@@ -1644,7 +1657,7 @@ CFX_PathData* CFX_Font::LoadGlyphPath(FX_DWORD glyph_index, int dest_width)
             AdjustMMParams(glyph_index, dest_width, m_pSubstFont->m_Weight);
         }
     }
-    FXFT_Set_Transform(m_Face, &ft_matrix, 0);
+    ScopedFontTransform scoped_transform(m_Face, &ft_matrix);
     int load_flags = (m_Face->face_flags & FT_FACE_FLAG_SFNT) ? FXFT_LOAD_NO_BITMAP : FXFT_LOAD_NO_BITMAP | FT_LOAD_NO_HINTING;
     int error = FXFT_Load_Glyph(m_Face, glyph_index, load_flags);
     if (error) {
@@ -1676,10 +1689,7 @@ CFX_PathData* CFX_Font::LoadGlyphPath(FX_DWORD glyph_index, int dest_width)
     if (params.m_PointCount == 0) {
         return NULL;
     }
-    CFX_PathData* pPath = FX_NEW CFX_PathData;
-    if (!pPath) {
-        return NULL;
-    }
+    CFX_PathData* pPath = new CFX_PathData;
     pPath->SetPointCount(params.m_PointCount);
     params.m_bCount = FALSE;
     params.m_PointCount = 0;

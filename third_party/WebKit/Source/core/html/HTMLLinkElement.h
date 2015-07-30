@@ -24,6 +24,7 @@
 #ifndef HTMLLinkElement_h
 #define HTMLLinkElement_h
 
+#include "core/CoreExport.h"
 #include "core/css/CSSStyleSheet.h"
 #include "core/dom/DOMSettableTokenList.h"
 #include "core/dom/IconURL.h"
@@ -121,7 +122,7 @@ private:
 };
 
 
-class HTMLLinkElement final : public HTMLElement, public LinkLoaderClient {
+class CORE_EXPORT HTMLLinkElement final : public HTMLElement, public LinkLoaderClient {
     DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<HTMLLinkElement> create(Document&, bool createdByParser);
@@ -131,6 +132,7 @@ public:
     const AtomicString& rel() const;
     String media() const { return m_media; }
     String typeValue() const { return m_type; }
+    String asValue() const { return m_as; }
     const LinkRelAttribute& relAttribute() const { return m_relAttribute; }
 
     const AtomicString& type() const;
@@ -163,7 +165,7 @@ public:
     virtual bool shouldLoadLink() override;
 
     // For LinkStyle
-    bool loadLink(const String& type, const KURL&);
+    bool loadLink(const String& type, const String& as, const KURL&);
     bool isAlternate() const { return linkStyle()->isUnset() && m_relAttribute.isAlternate(); }
     bool shouldProcessStyle() { return linkResourceToProcess() && linkStyle(); }
     bool isCreatedByParser() const { return m_createdByParser; }
@@ -211,6 +213,7 @@ private:
     LinkLoader m_linkLoader;
 
     String m_type;
+    String m_as;
     String m_media;
     RefPtrWillBeMember<DOMSettableTokenList> m_sizes;
     Vector<IntSize> m_iconSizes;

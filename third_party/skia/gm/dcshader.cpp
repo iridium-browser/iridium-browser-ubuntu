@@ -60,7 +60,7 @@ public:
         this->initClassID<DCFP>();
     }
 
-    void getGLProcessorKey(const GrGLCaps& caps,
+    void getGLProcessorKey(const GrGLSLCaps& caps,
                             GrProcessorKeyBuilder* b) const override {}
 
     GrGLFragmentProcessor* createGLInstance() const override {
@@ -71,7 +71,7 @@ public:
                             const char* inputColor,
                             const TransformedCoordsArray& coords,
                             const TextureSamplerArray& samplers) {
-                GrGLFPFragmentBuilder* fpb = builder->getFragmentShaderBuilder();
+                GrGLFragmentBuilder* fpb = builder->getFragmentShaderBuilder();
                 fpb->codeAppendf("vec2 c = %s;", fpb->ensureFSCoords2D(coords, 0).c_str());
                 fpb->codeAppend("vec2 r = mod(c, vec2(20.0));");
                 fpb->codeAppend("vec4 color = vec4(0.5*sin(c.x / 15.0) + 0.5,"
@@ -219,14 +219,7 @@ protected:
         struct BmpText : public Text {
            void setFont(SkPaint* paint) override {
                if (!fTypeface) {
-                    SkString filename = GetResourcePath("/Funkster.ttf");
-                    SkAutoTDelete<SkFILEStream> stream(new SkFILEStream(filename.c_str()));
-                    if (!stream->isValid()) {
-                        SkDebugf("Could not find Funkster.ttf, please set --resourcePath "
-                                 "correctly.\n");
-                        return;
-                    }
-                    fTypeface.reset(SkTypeface::CreateFromStream(stream.detach()));
+                    fTypeface.reset(GetResourceAsTypeface("/fonts/Funkster.ttf"));
                }
                paint->setTypeface(fTypeface);
             }

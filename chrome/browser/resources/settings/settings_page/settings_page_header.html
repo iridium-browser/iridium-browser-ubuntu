@@ -1,12 +1,23 @@
-<link rel="import" href="chrome://resources/polymer/core-icon/core-icon.html">
+<link rel="import" href="chrome://resources/polymer/v0_8/polymer/polymer.html">
+<link rel="import" href="chrome://resources/polymer/v0_8/iron-icon/iron-icon.html">
+<link rel="import" href="chrome://resources/polymer/v0_8/iron-icons/device-icons.html">
 
-<polymer-element name="cr-settings-page-header" layout horizontal center>
+<dom-module id="cr-settings-page-header">
+  <link rel="import" type="css" href="settings_page_header.css">
   <template>
-    <link rel="stylesheet" href="settings_page_header.css">
-    <div class="icon-container">
-      <core-icon icon="{{page.icon}}"></core-icon>
-    </div>
-    <h1>{{page.pageTitle}}</h1>
+    <paper-material>
+      <div class="breadcrumbs">
+        <div class="icon-container">
+          <iron-icon icon="{{topPageIcon_}}"><iron-icon>
+        </div>
+
+        <template is="x-repeat" items="{{parentPages_}}">
+          <a href="{{urlFor_(item)}}">{{item.pageTitle}}</a>&nbsp;&gt;
+        </template>
+
+        <span>{{currentPageTitle_}}</span>
+      </div>
+    </paper-material>
   </template>
   <script src="settings_page_header.js"></script>
-</polymer-element>
+</dom-module>

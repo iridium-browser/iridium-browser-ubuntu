@@ -14,6 +14,7 @@
 #include "base/synchronization/condition_variable.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/platform_thread.h"
+#include "base/timer/timer.h"
 #include "media/base/decryptor.h"
 #include "media/base/demuxer_stream.h"
 #include "media/base/media_log.h"
@@ -21,7 +22,11 @@
 #include "media/base/video_decoder.h"
 #include "media/base/video_frame.h"
 #include "media/base/video_renderer.h"
+#include "media/base/video_renderer_sink.h"
 #include "media/filters/decoder_stream.h"
+#include "media/filters/video_renderer_algorithm.h"
+#include "media/renderers/gpu_video_accelerator_factories.h"
+#include "media/video/gpu_memory_buffer_video_frame_pool.h"
 
 namespace base {
 class SingleThreadTaskRunner;
@@ -36,6 +41,7 @@ namespace media {
 // ready for rendering.
 class MEDIA_EXPORT VideoRendererImpl
     : public VideoRenderer,
+      public NON_EXPORTED_BASE(VideoRendererSink::RenderCallback),
       public base::PlatformThread::Delegate {
  public:
   // |decoders| contains the VideoDecoders to use when initializing.
@@ -47,8 +53,10 @@ class MEDIA_EXPORT VideoRendererImpl
   // Setting |drop_frames_| to true causes the renderer to drop expired frames.
   VideoRendererImpl(
       const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
+      VideoRendererSink* sink,
       ScopedVector<VideoDecoder> decoders,
       bool drop_frames,
+      const scoped_refptr<GpuVideoAcceleratorFactories>& gpu_factories,
       const scoped_refptr<MediaLog>& media_log);
   ~VideoRendererImpl() override;
 
@@ -58,18 +66,28 @@ class MEDIA_EXPORT VideoRendererImpl
                   const SetDecryptorReadyCB& set_decryptor_ready_cb,
                   const StatisticsCB& statistics_cb,
                   const BufferingStateCB& buffering_state_cb,
-                  const PaintCB& paint_cb,
                   const base::Closure& ended_cb,
                   const PipelineStatusCB& error_cb,
-                  const WallClockTimeCB& wall_clock_time_cb,
+                  const TimeSource::WallClockTimeCB& wall_clock_time_cb,
                   const base::Closure& waiting_for_decryption_key_cb) override;
   void Flush(const base::Closure& callback) override;
   void StartPlayingFrom(base::TimeDelta timestamp) override;
+  void OnTimeStateChanged(bool time_progressing) override;
 
   // PlatformThread::Delegate implementation.
   void ThreadMain() override;
 
   void SetTickClockForTesting(scoped_ptr<base::TickClock> tick_clock);
+
+  // VideoRendererSink::RenderCallback implementation.
+  scoped_refptr<VideoFrame> Render(base::TimeTicks deadline_min,
+                                   base::TimeTicks deadline_max,
+                                   bool background_rendering) override;
+  void OnFrameDropped() override;
+
+  void disable_new_video_renderer_for_testing() {
+    use_new_video_renderering_path_ = false;
+  }
 
  private:
   // Creates a dedicated |thread_| for video rendering.
@@ -109,13 +127,45 @@ class MEDIA_EXPORT VideoRendererImpl
   // Note that having enough data may be due to reaching end of stream.
   bool HaveEnoughData_Locked();
   void TransitionToHaveEnough_Locked();
+  void TransitionToHaveNothing();
 
   // Runs |statistics_cb_| with |frames_decoded_| and |frames_dropped_|, resets
   // them to 0, and then waits on |frame_available_| for up to the
   // |wait_duration|.
   void UpdateStatsAndWait_Locked(base::TimeDelta wait_duration);
 
+  // Called after we've painted the first frame.  If |time_progressing_| is
+  // false it Stop() on |sink_|.
+  void MaybeStopSinkAfterFirstPaint();
+
+  // Returns true if there is no more room for additional buffered frames.
+  bool HaveReachedBufferingCap();
+
+  // Starts or stops |sink_| respectively. Do not call while |lock_| is held.
+  void StartSink();
+  void StopSink();
+
+  // Fires |ended_cb_| if there are no remaining usable frames and
+  // |received_end_of_stream_| is true.  Sets |rendered_end_of_stream_| if it
+  // does so.  Returns algorithm_->EffectiveFramesQueued().
+  size_t MaybeFireEndedCallback();
+
+  // Helper method for converting a single media timestamp to wall clock time.
+  base::TimeTicks ConvertMediaTimestamp(base::TimeDelta media_timestamp);
+
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+
+  // Enables the use of VideoRendererAlgorithm and VideoRendererSink for frame
+  // rendering instead of using a thread in a sleep-loop.  Set via the command
+  // line flag kEnableNewVideoRenderer or via test methods.
+  bool use_new_video_renderering_path_;
+
+  // Sink which calls into VideoRendererImpl via Render() for video frames.  Do
+  // not call any methods on the sink while |lock_| is held or the two threads
+  // might deadlock. Do not call Start() or Stop() on the sink directly, use
+  // StartSink() and StopSink() to ensure background rendering is started.
+  VideoRendererSink* const sink_;
+  bool sink_started_;
 
   // Used for accessing data members.
   base::Lock lock_;
@@ -123,11 +173,14 @@ class MEDIA_EXPORT VideoRendererImpl
   // Provides video frames to VideoRendererImpl.
   scoped_ptr<VideoFrameStream> video_frame_stream_;
 
+  // Pool of GpuMemoryBuffers and resources used to create hardware frames.
+  scoped_ptr<GpuMemoryBufferVideoFramePool> gpu_memory_buffer_pool_;
+
   // Flag indicating low-delay mode.
   bool low_delay_;
 
   // Queue of incoming frames yet to be painted.
-  typedef std::deque<scoped_refptr<VideoFrame> > VideoFrameQueue;
+  typedef std::deque<scoped_refptr<VideoFrame>> VideoFrameQueue;
   VideoFrameQueue ready_frames_;
 
   // Keeps track of whether we received the end of stream buffer and finished
@@ -185,7 +238,7 @@ class MEDIA_EXPORT VideoRendererImpl
   BufferingStateCB buffering_state_cb_;
   base::Closure ended_cb_;
   PipelineStatusCB error_cb_;
-  WallClockTimeCB wall_clock_time_cb_;
+  TimeSource::WallClockTimeCB wall_clock_time_cb_;
 
   base::TimeDelta start_timestamp_;
 
@@ -208,6 +261,24 @@ class MEDIA_EXPORT VideoRendererImpl
   bool is_shutting_down_;
 
   scoped_ptr<base::TickClock> tick_clock_;
+
+  // Algorithm for selecting which frame to render; manages frames and all
+  // timing related information.
+  scoped_ptr<VideoRendererAlgorithm> algorithm_;
+
+  // Indicates that Render() was called with |background_rendering| set to true,
+  // so we've entered a background rendering mode where dropped frames are not
+  // counted.  Must be accessed under |lock_| once |sink_| is started.
+  bool was_background_rendering_;
+
+  // Indicates whether or not media time is currently progressing or not.
+  bool time_progressing_;
+
+  // Indicates that Render() should only render the first frame and then request
+  // that the sink be stopped.  |posted_maybe_stop_after_first_paint_| is used
+  // to avoid repeated task posts.
+  bool render_first_frame_and_stop_;
+  bool posted_maybe_stop_after_first_paint_;
 
   // NOTE: Weak pointers must be invalidated before all other member variables.
   base::WeakPtrFactory<VideoRendererImpl> weak_factory_;

@@ -4,6 +4,9 @@
 //
 // A toy server, which listens on a specified address for QUIC traffic and
 // handles incoming responses.
+//
+// Note that this server is intended to verify correctness of the client and is
+// in no way expected to be performant.
 
 #ifndef NET_TOOLS_QUIC_QUIC_SERVER_H_
 #define NET_TOOLS_QUIC_QUIC_SERVER_H_
@@ -51,20 +54,6 @@ class QuicServer : public EpollCallbackInterface {
   void OnModification(int fd, int event_mask) override {}
   void OnEvent(int fd, EpollEvent* event) override;
   void OnUnregistration(int fd, bool replaced) override {}
-
-  // Reads a number of packets from the given fd, and then passes them off to
-  // the QuicDispatcher.  Returns true if some packets are read, false
-  // otherwise.
-  // If packets_dropped is non-null, the socket is configured to track
-  // dropped packets, and some packets are read, it will be set to the number of
-  // dropped packets.
-  static bool ReadAndDispatchPackets(int fd, int port,
-                                     ProcessPacketInterface* processor,
-                                     QuicPacketCount* packets_dropped);
-  // Same as ReadAndDispatchPackets, only does one packet at a time.
-  static bool ReadAndDispatchSinglePacket(int fd, int port,
-                                          ProcessPacketInterface* processor,
-                                          QuicPacketCount* packets_dropped);
 
   void OnShutdown(EpollServer* eps, int fd) override {}
 

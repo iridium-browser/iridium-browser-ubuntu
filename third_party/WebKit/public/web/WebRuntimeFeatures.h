@@ -79,8 +79,6 @@ public:
 
     BLINK_EXPORT static void enableImageColorProfiles(bool);
 
-    BLINK_EXPORT static void enableLocalStorage(bool);
-
     BLINK_EXPORT static void enableMediaPlayer(bool);
 
     BLINK_EXPORT static void enableSubpixelFontScaling(bool);
@@ -103,13 +101,13 @@ public:
 
     BLINK_EXPORT static void enablePagePopup(bool);
 
-    BLINK_EXPORT static void enablePeerConnection(bool);
-
     BLINK_EXPORT static void enablePermissionsAPI(bool);
 
     BLINK_EXPORT static void enableRequestAutocomplete(bool);
 
     BLINK_EXPORT static void enableScreenOrientation(bool);
+
+    BLINK_EXPORT static void enableScriptedSpeech(bool);
 
     BLINK_EXPORT static void enableServiceWorker(bool);
 
@@ -161,7 +159,7 @@ public:
 
     BLINK_EXPORT static void enableUnsafeES3APIs(bool);
 
-    BLINK_EXPORT static void enableVRDevice(bool);
+    BLINK_EXPORT static void enableWebVR(bool);
 private:
     WebRuntimeFeatures();
 };

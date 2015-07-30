@@ -248,7 +248,7 @@ void Layer::SetBounds(const gfx::Rect& bounds) {
   GetAnimator()->SetBounds(bounds);
 }
 
-void Layer::SetSubpixelPositionOffset(const gfx::Vector2dF offset) {
+void Layer::SetSubpixelPositionOffset(const gfx::Vector2dF& offset) {
   subpixel_position_offset_ = offset;
   RecomputePosition();
 }
@@ -653,7 +653,9 @@ void Layer::UpdateNinePatchLayerBorder(const gfx::Rect& border) {
 void Layer::SetColor(SkColor color) { GetAnimator()->SetColor(color); }
 
 SkColor Layer::GetTargetColor() {
-  return GetAnimator()->GetTargetColor();
+  if (GetAnimator()->IsAnimatingProperty(LayerAnimationElement::COLOR))
+    return GetAnimator()->GetTargetColor();
+  return cc_layer_->background_color();
 }
 
 SkColor Layer::background_color() const {
@@ -665,11 +667,7 @@ bool Layer::SchedulePaint(const gfx::Rect& invalid_rect) {
       type_ == LAYER_NINE_PATCH || (!delegate_ && !mailbox_.IsValid()))
     return false;
 
-  damaged_region_.op(invalid_rect.x(),
-                     invalid_rect.y(),
-                     invalid_rect.right(),
-                     invalid_rect.bottom(),
-                     SkRegion::kUnion_Op);
+  damaged_region_.Union(invalid_rect);
   ScheduleDraw();
   return true;
 }
@@ -681,20 +679,17 @@ void Layer::ScheduleDraw() {
 }
 
 void Layer::SendDamagedRects() {
-  if ((delegate_ || mailbox_.IsValid()) && !damaged_region_.isEmpty()) {
-    for (SkRegion::Iterator iter(damaged_region_); !iter.done(); iter.next()) {
-      const SkIRect& sk_damaged = iter.rect();
-      gfx::Rect damaged(
-          sk_damaged.x(),
-          sk_damaged.y(),
-          sk_damaged.width(),
-          sk_damaged.height());
-      cc_layer_->SetNeedsDisplayRect(damaged);
-    }
-    damaged_region_.setEmpty();
-  }
-  for (size_t i = 0; i < children_.size(); ++i)
-    children_[i]->SendDamagedRects();
+  if (damaged_region_.IsEmpty())
+    return;
+  if (!delegate_ && !mailbox_.IsValid())
+    return;
+
+  for (cc::Region::Iterator iter(damaged_region_); iter.has_rect(); iter.next())
+    cc_layer_->SetNeedsDisplayRect(iter.rect());
+}
+
+void Layer::ClearDamagedRects() {
+  damaged_region_.Clear();
 }
 
 void Layer::CompleteAllAnimations() {
@@ -753,17 +748,27 @@ void Layer::PaintContents(
     const gfx::Rect& clip,
     ContentLayerClient::PaintingControlSetting painting_control) {
   TRACE_EVENT1("ui", "Layer::PaintContents", "name", name_);
-  scoped_ptr<gfx::Canvas> canvas(gfx::Canvas::CreateCanvasWithoutScaling(
-      sk_canvas, device_scale_factor_));
-  if (delegate_)
-    delegate_->OnPaintLayer(PaintContext(canvas.get(), clip));
+  ClearDamagedRects();
+  if (delegate_) {
+    gfx::Canvas canvas(sk_canvas, device_scale_factor_);
+    delegate_->OnPaintLayer(PaintContext(&canvas, clip));
+  }
 }
 
-scoped_refptr<cc::DisplayItemList> Layer::PaintContentsToDisplayList(
+void Layer::PaintContentsToDisplayList(
+    cc::DisplayItemList* display_list,
     const gfx::Rect& clip,
     ContentLayerClient::PaintingControlSetting painting_control) {
-  NOTIMPLEMENTED();
-  return cc::DisplayItemList::Create();
+  TRACE_EVENT1("ui", "Layer::PaintContentsToDisplayList", "name", name_);
+  gfx::Rect local_bounds(bounds().size());
+  gfx::Rect invalidation(
+      gfx::IntersectRects(damaged_region_.bounds(), local_bounds));
+  DCHECK(clip.Contains(invalidation));
+  ClearDamagedRects();
+  if (!delegate_)
+    return;
+  delegate_->OnPaintLayer(
+      PaintContext(display_list, device_scale_factor_, clip, invalidation));
 }
 
 bool Layer::FillsBoundsCompletely() const { return fills_bounds_completely_; }

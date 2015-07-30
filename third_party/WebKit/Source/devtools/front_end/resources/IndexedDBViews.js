@@ -67,9 +67,9 @@ WebInspector.IDBDatabaseView = function(database)
 
 WebInspector.IDBDatabaseView.prototype = {
     /**
-     * @return {!Array.<!WebInspector.StatusBarItem>}
+     * @return {!Array.<!WebInspector.ToolbarItem>}
      */
-    statusBarItems: function()
+    toolbarItems: function()
     {
         return [];
     },
@@ -129,10 +129,10 @@ WebInspector.IDBDataView = function(model, databaseId, objectStore, index)
 
     this._createEditorToolbar();
 
-    this._refreshButton = new WebInspector.StatusBarButton(WebInspector.UIString("Refresh"), "refresh-status-bar-item");
+    this._refreshButton = new WebInspector.ToolbarButton(WebInspector.UIString("Refresh"), "refresh-toolbar-item");
     this._refreshButton.addEventListener("click", this._refreshButtonClicked, this);
 
-    this._clearButton = new WebInspector.StatusBarButton(WebInspector.UIString("Clear object store"), "clear-status-bar-item");
+    this._clearButton = new WebInspector.ToolbarButton(WebInspector.UIString("Clear object store"), "clear-toolbar-item");
     this._clearButton.addEventListener("click", this._clearButtonClicked, this);
 
     this._pageSize = 50;
@@ -206,17 +206,17 @@ WebInspector.IDBDataView.prototype = {
 
     _createEditorToolbar: function()
     {
-        var editorToolbar = new WebInspector.StatusBar(this.element);
+        var editorToolbar = new WebInspector.Toolbar(this.element);
         editorToolbar.element.classList.add("data-view-toolbar");
 
-        this._pageBackButton = new WebInspector.StatusBarButton(WebInspector.UIString("Show previous page."), "play-backwards-status-bar-item");
+        this._pageBackButton = new WebInspector.ToolbarButton(WebInspector.UIString("Show previous page."), "play-backwards-toolbar-item");
         this._pageBackButton.addEventListener("click", this._pageBackButtonClicked, this);
-        editorToolbar.appendStatusBarItem(this._pageBackButton);
+        editorToolbar.appendToolbarItem(this._pageBackButton);
 
-        this._pageForwardButton = new WebInspector.StatusBarButton(WebInspector.UIString("Show next page."), "play-status-bar-item");
+        this._pageForwardButton = new WebInspector.ToolbarButton(WebInspector.UIString("Show next page."), "play-toolbar-item");
         this._pageForwardButton.setEnabled(false);
         this._pageForwardButton.addEventListener("click", this._pageForwardButtonClicked, this);
-        editorToolbar.appendStatusBarItem(this._pageForwardButton);
+        editorToolbar.appendToolbarItem(this._pageForwardButton);
 
         this._keyInputElement = editorToolbar.element.createChild("input", "key-input");
         this._keyInputElement.placeholder = WebInspector.UIString("Start from key");
@@ -348,9 +348,9 @@ WebInspector.IDBDataView.prototype = {
     },
 
     /**
-     * @return {!Array.<!WebInspector.StatusBarItem>}
+     * @return {!Array.<!WebInspector.ToolbarItem>}
      */
-    statusBarItems: function()
+    toolbarItems: function()
     {
         return [this._refreshButton, this._clearButton];
     },
@@ -390,27 +390,13 @@ WebInspector.IDBDataGridNode.prototype = {
         case "key":
         case "primaryKey":
             cell.removeChildren();
-            this._formatValue(cell, value);
+            var objectElement = WebInspector.ObjectPropertiesSection.defaultObjectPresentation(value, true);
+            cell.appendChild(objectElement);
             break;
         default:
         }
 
         return cell;
-    },
-
-    _formatValue: function(cell, value)
-    {
-        var valueElement = WebInspector.ObjectPropertiesSection.createValueElement(value, false, cell);
-        valueElement.classList.add("source-code");
-        if (value.type === "object") {
-            var section = new WebInspector.ObjectPropertiesSection(value, valueElement);
-            section.editable = false;
-            section.skipProto();
-            cell.appendChild(section.element);
-        } else {
-            valueElement.classList.add("primitive-value");
-            cell.appendChild(valueElement);
-        }
     },
 
     __proto__: WebInspector.DataGridNode.prototype

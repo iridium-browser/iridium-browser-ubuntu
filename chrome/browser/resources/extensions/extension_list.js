@@ -57,6 +57,15 @@ ExtensionFocusRow.prototype = {
     return equivalent || this.focusableElements[0];
   },
 
+  /** @override */
+  makeActive: function(active) {
+    cr.ui.FocusRow.prototype.makeActive.call(this, active);
+
+    // Only highlight if the row has focus.
+    this.classList.toggle('extension-highlight',
+                          active && this.contains(document.activeElement));
+  },
+
   /** Updates the list of focusable elements. */
   updateFocusableElements: function() {
     this.focusableElements.length = 0;
@@ -139,36 +148,51 @@ cr.define('extensions', function() {
   'use strict';
 
   /**
+   * Compares two extensions for the order they should appear in the list.
+   * @param {ExtensionInfo} a The first extension.
+   * @param {ExtensionInfo} b The second extension.
+   * returns {number} -1 if A comes before B, 1 if A comes after B, 0 if equal.
+   */
+  function compareExtensions(a, b) {
+    function compare(x, y) {
+      return x < y ? -1 : (x > y ? 1 : 0);
+    }
+    function compareLocation(x, y) {
+      if (x.location == y.location)
+        return 0;
+      if (x.location == chrome.developerPrivate.Location.UNPACKED)
+        return -1;
+      if (y.location == chrome.developerPrivate.Location.UNPACKED)
+        return 1;
+      return 0;
+    }
+    return compareLocation(a, b) ||
+           compare(a.name.toLowerCase(), b.name.toLowerCase()) ||
+           compare(a.id, b.id);
+  }
+
+  /** @interface */
+  function ExtensionListDelegate() {}
+
+  ExtensionListDelegate.prototype = {
+    /**
+     * Called when the number of extensions in the list has changed.
+     */
+    onExtensionCountChanged: assertNotReached,
+  };
+
+  /**
    * Creates a new list of extensions.
+   * @param {extensions.ExtensionListDelegate} delegate
    * @constructor
    * @extends {HTMLDivElement}
    */
-  function ExtensionList() {
+  function ExtensionList(delegate) {
     var div = document.createElement('div');
     div.__proto__ = ExtensionList.prototype;
-    /** @private {!Array<ExtensionInfo>} */
-    div.extensions_ = [];
-
-    /**
-     * |loadFinished| should be used for testing purposes and will be
-     * fulfilled when this list has finished loading the first time.
-     * @type {Promise}
-     * */
-    div.loadFinished = new Promise(function(resolve, reject) {
-      /** @private {function(?)} */
-      div.resolveLoadFinished_ = resolve;
-    });
-
+    div.initialize(delegate);
     return div;
   }
-
-  /**
-   * @type {Object<string, number>} A map from extension id to last reloaded
-   *     timestamp. The timestamp is recorded when the user click the 'Reload'
-   *     link. It is used to refresh the icon of an unpacked extension.
-   *     This persists between calls to decorate.
-   */
-  var extensionReloadedTimestamp = {};
 
   ExtensionList.prototype = {
     __proto__: HTMLDivElement.prototype,
@@ -217,6 +241,63 @@ cr.define('extensions', function() {
     enableAppInfoDialog_: false,
 
     /**
+     * Initializes the list.
+     * @param {!extensions.ExtensionListDelegate} delegate
+     */
+    initialize: function(delegate) {
+      /** @private {!Array<ExtensionInfo>} */
+      this.extensions_ = [];
+
+      /** @private {!extensions.ExtensionListDelegate} */
+      this.delegate_ = delegate;
+
+      /**
+       * |loadFinished| should be used for testing purposes and will be
+       * fulfilled when this list has finished loading the first time.
+       * @type {Promise}
+       * */
+      this.loadFinished = new Promise(function(resolve, reject) {
+        /** @private {function(?)} */
+        this.resolveLoadFinished_ = resolve;
+      }.bind(this));
+
+      chrome.developerPrivate.onItemStateChanged.addListener(
+          function(eventData) {
+        var EventType = chrome.developerPrivate.EventType;
+        switch (eventData.event_type) {
+          case EventType.VIEW_REGISTERED:
+          case EventType.VIEW_UNREGISTERED:
+          case EventType.INSTALLED:
+          case EventType.LOADED:
+          case EventType.UNLOADED:
+          case EventType.ERROR_ADDED:
+          case EventType.ERRORS_REMOVED:
+          case EventType.PREFS_CHANGED:
+            if (eventData.extensionInfo) {
+              this.updateExtension_(eventData.extensionInfo);
+              this.focusGrid_.ensureRowActive();
+            }
+            break;
+          case EventType.UNINSTALLED:
+            var index = this.getIndexOfExtension_(eventData.item_id);
+            this.extensions_.splice(index, 1);
+            this.removeNode_(getRequiredElement(eventData.item_id));
+            break;
+          default:
+            assertNotReached();
+        }
+
+        if (eventData.event_type == EventType.UNLOADED)
+          this.hideEmbeddedExtensionOptions_(eventData.item_id);
+
+        if (eventData.event_type == EventType.INSTALLED ||
+            eventData.event_type == EventType.UNINSTALLED) {
+          this.delegate_.onExtensionCountChanged();
+        }
+      }.bind(this));
+    },
+
+    /**
      * Updates the extensions on the page.
      * @param {boolean} incognitoAvailable Whether or not incognito is allowed.
      * @param {boolean} enableAppInfoDialog Whether or not the app info dialog
@@ -229,24 +310,14 @@ cr.define('extensions', function() {
       // consider passing in the full object from the ExtensionSettings.
       this.incognitoAvailable_ = incognitoAvailable;
       this.enableAppInfoDialog_ = enableAppInfoDialog;
+      /** @private {Promise} */
       this.extensionsUpdated_ = new Promise(function(resolve, reject) {
         chrome.developerPrivate.getExtensionsInfo(
             {includeDisabled: true, includeTerminated: true},
             function(extensions) {
           // Sort in order of unpacked vs. packed, followed by name, followed by
           // id.
-          extensions.sort(function(a, b) {
-            function compare(x, y) {
-              return x < y ? -1 : (x > y ? 1 : 0);
-            }
-            function compareLocation(x, y) {
-              return x.location == chrome.developerPrivate.Location.UNPACKED ?
-                  -1 : (x.location == y.location ? 0 : 1);
-            }
-            return compareLocation(a, b) ||
-                   compare(a.name.toLowerCase(), b.name.toLowerCase()) ||
-                   compare(a.id, b.id);
-          });
+          extensions.sort(compareExtensions);
           this.extensions_ = extensions;
           this.showExtensionNodes_();
           resolve();
@@ -260,7 +331,6 @@ cr.define('extensions', function() {
           }.bind(this));
         }.bind(this));
       }.bind(this));
-
       return this.extensionsUpdated_;
     },
 
@@ -279,8 +349,10 @@ cr.define('extensions', function() {
       this.updateFocusableElements();
 
       var idToHighlight = this.getIdQueryParam_();
-      if (idToHighlight && $(idToHighlight))
+      if (idToHighlight && $(idToHighlight)) {
         this.scrollToNode_(idToHighlight);
+        this.setInitialFocus_(idToHighlight);
+      }
 
       var idToOpenOptions = this.getOptionsQueryParam_();
       if (idToOpenOptions && $(idToOpenOptions))
@@ -290,6 +362,19 @@ cr.define('extensions', function() {
     /** @return {number} The number of extensions being displayed. */
     getNumExtensions: function() {
       return this.extensions_.length;
+    },
+
+    /**
+     * @param {string} id The id of the extension.
+     * @return {number} The index of the extension with the given id.
+     * @private
+     */
+    getIndexOfExtension_: function(id) {
+      for (var i = 0; i < this.extensions_.length; ++i) {
+        if (this.extensions_[i].id == id)
+          return i;
+      }
+      return -1;
     },
 
     getIdQueryParam_: function() {
@@ -305,43 +390,22 @@ cr.define('extensions', function() {
      * @private
      */
     showExtensionNodes_: function() {
-      // Remove the rows from |focusGrid_| without destroying them.
-      this.focusGrid_.rows.length = 0;
-
       // Any node that is not updated will be removed.
       var seenIds = [];
 
       // Iterate over the extension data and add each item to the list.
-      this.extensions_.forEach(function(extension, i) {
-        var nextExt = this.extensions_[i + 1];
-        var node = $(extension.id);
+      this.extensions_.forEach(function(extension) {
         seenIds.push(extension.id);
-
-        if (node)
-          this.updateNode_(extension, node);
-        else
-          this.createNode_(extension, nextExt ? $(nextExt.id) : null);
+        this.updateExtension_(extension);
       }, this);
       this.focusGrid_.ensureRowActive();
 
       // Remove extensions that are no longer installed.
       var nodes = document.querySelectorAll('.extension-list-item-wrapper[id]');
-      for (var i = 0; i < nodes.length; ++i) {
-        var node = nodes[i];
-        if (seenIds.indexOf(node.id) < 0) {
-          if (node.contains(document.activeElement)) {
-            var focusableNode = nodes[i + 1] || nodes[i - 1];
-            if (focusableNode) {
-              focusableNode.getEquivalentElement(
-                  document.activeElement).focus();
-            }
-          }
-
-          node.parentElement.removeChild(node);
-          // Unregister the removed node from events.
-          assertInstanceof(node, ExtensionFocusRow).destroy();
-        }
-      }
+      Array.prototype.forEach.call(nodes, function(node) {
+        if (seenIds.indexOf(node.id) < 0)
+          this.removeNode_(node);
+      }, this);
     },
 
     /** Updates each row's focusable elements without rebuilding the grid. */
@@ -350,6 +414,30 @@ cr.define('extensions', function() {
       for (var i = 0; i < rows.length; ++i) {
         assertInstanceof(rows[i], ExtensionFocusRow).updateFocusableElements();
       }
+    },
+
+    /**
+     * Removes the node from the DOM, and updates the focused element if needed.
+     * @param {!HTMLElement} node
+     * @private
+     */
+    removeNode_: function(node) {
+      if (node.contains(document.activeElement)) {
+        var nodes =
+            document.querySelectorAll('.extension-list-item-wrapper[id]');
+        var index = Array.prototype.indexOf.call(nodes, node);
+        assert(index != -1);
+        var focusableNode = nodes[index + 1] || nodes[index - 1];
+        if (focusableNode)
+          focusableNode.getEquivalentElement(document.activeElement).focus();
+      }
+      node.parentNode.removeChild(node);
+      this.focusGrid_.removeRow(assertInstanceof(node, ExtensionFocusRow));
+
+      // Unregister the removed node from events.
+      assertInstanceof(node, ExtensionFocusRow).destroy();
+
+      this.focusGrid_.ensureRowActive();
     },
 
     /**
@@ -366,6 +454,30 @@ cr.define('extensions', function() {
       var scrollTop = $(extensionId).offsetTop - scrollFudge *
           $(extensionId).clientHeight;
       setScrollTopForDocument(document, scrollTop);
+    },
+
+    /**
+     * @param {string} extensionId The id of the extension that should have
+     *     initial focus
+     * @private
+     */
+    setInitialFocus_: function(extensionId) {
+      var focusRow = assertInstanceof($(extensionId), ExtensionFocusRow);
+      var columnTypePriority = ['enabled', 'enterprise', 'website', 'details'];
+      var elementToFocus = null;
+      var elementPriority = columnTypePriority.length;
+
+      for (var i = 0; i < focusRow.focusableElements.length; ++i) {
+        var element = focusRow.focusableElements[i];
+        var priority =
+            columnTypePriority.indexOf(element.getAttribute('column-type'));
+        if (priority > -1 && priority < elementPriority) {
+          elementToFocus = element;
+          elementPriority = priority;
+        }
+      }
+
+      focusRow.getEquivalentElement(elementToFocus).focus();
     },
 
     /**
@@ -445,12 +557,12 @@ cr.define('extensions', function() {
 
       // The 'Options' button or link, depending on its behaviour.
       // Set an href to get the correct mouse-over appearance (link,
-      // footer) - but the actual link opening is done through chrome.send
-      // with a preventDefault().
+      // footer) - but the actual link opening is done through developerPrivate
+      // API with a preventDefault().
       row.querySelector('.options-link').href =
           extension.optionsPage ? extension.optionsPage.url : '';
       row.setupColumn('.options-link', 'options', 'click', function(e) {
-        chrome.send('extensionSettingsOptions', [extension.id]);
+        chrome.developerPrivate.showOptions(extension.id);
         e.preventDefault();
       });
 
@@ -477,13 +589,24 @@ cr.define('extensions', function() {
       // The 'Reload' link.
       row.setupColumn('.reload-link', 'localReload', 'click', function(e) {
         chrome.developerPrivate.reload(extension.id, {failQuietly: true});
-        extensionReloadedTimestamp[extension.id] = Date.now();
       });
 
       // The 'Launch' link.
       row.setupColumn('.launch-link', 'launch', 'click', function(e) {
-        chrome.send('extensionSettingsLaunch', [extension.id]);
+        chrome.management.launchApp(extension.id);
       });
+
+      row.setupColumn('.errors-link', 'errors', 'click', function(e) {
+        var extensionId = extension.id;
+        assert(this.extensions_.length > 0);
+        var newEx = this.extensions_.filter(function(e) {
+          return e.state == chrome.developerPrivate.ExtensionState.ENABLED &&
+              e.id == extensionId;
+        })[0];
+        var errors = newEx.manifestErrors.concat(newEx.runtimeErrors);
+        extensions.ExtensionErrorOverlay.getInstance().setErrorsAndShowOverlay(
+            errors, extensionId, newEx.name);
+      }.bind(this));
 
       // The 'Reload' terminated link.
       row.setupColumn('.terminated-reload-link', 'terminatedReload', 'click',
@@ -494,7 +617,7 @@ cr.define('extensions', function() {
       // The 'Repair' corrupted link.
       row.setupColumn('.corrupted-repair-button', 'repair', 'click',
                       function(e) {
-        chrome.send('extensionSettingsRepair', [extension.id]);
+        chrome.developerPrivate.repairExtension(extension.id);
       });
 
       // The 'Enabled' checkbox.
@@ -549,7 +672,7 @@ cr.define('extensions', function() {
       // The path, if provided by unpacked extension.
       row.setupColumn('.load-path a:first-of-type', 'dev-loadPath', 'click',
                       function(e) {
-        chrome.send('extensionSettingsShowPath', [String(extension.id)]);
+        chrome.developerPrivate.showPath(extension.id);
         e.preventDefault();
       });
 
@@ -557,6 +680,12 @@ cr.define('extensions', function() {
       // when adding only one new row.
       this.insertBefore(row, nextNode);
       this.updateNode_(extension, row);
+
+      var nextRow = null;
+      if (nextNode)
+        nextRow = assertInstanceof(nextNode, ExtensionFocusRow);
+
+      this.focusGrid_.addRowBefore(row, nextRow);
     },
 
     /**
@@ -589,20 +718,8 @@ cr.define('extensions', function() {
       }
       row.classList.add.apply(row.classList, classes);
 
-      row.classList.toggle('extension-highlight',
-                           row.id == this.getIdQueryParam_());
-
       var item = row.querySelector('.extension-list-item');
-      // Prevent the image cache of extension icon by using the reloaded
-      // timestamp as a query string. The timestamp is recorded when the user
-      // clicks the 'Reload' link. http://crbug.com/159302.
-      if (extensionReloadedTimestamp[extension.id]) {
-        item.style.backgroundImage =
-            'url(' + extension.iconUrl + '?' +
-            extensionReloadedTimestamp[extension.id] + ')';
-      } else {
-        item.style.backgroundImage = 'url(' + extension.iconUrl + ')';
-      }
+      item.style.backgroundImage = 'url(' + extension.iconUrl + ')';
 
       this.setText_(row, '.extension-title', extension.name);
       this.setText_(row, '.extension-version', extension.version);
@@ -684,6 +801,34 @@ cr.define('extensions', function() {
           row, '.launch-link',
           isUnpacked && extension.type ==
                             chrome.developerPrivate.ExtensionType.PLATFORM_APP);
+
+      // The 'Errors' link.
+      var hasErrors = extension.runtimeErrors.length > 0 ||
+          extension.manifestErrors.length > 0;
+      this.updateVisibility_(row, '.errors-link', hasErrors, function(item) {
+        var Level = chrome.developerPrivate.ErrorLevel;
+
+        var map = {};
+        map[Level.LOG] = {weight: 0, name: 'extension-error-info-icon'};
+        map[Level.WARN] = {weight: 1, name: 'extension-error-warning-icon'};
+        map[Level.ERROR] = {weight: 2, name: 'extension-error-fatal-icon'};
+
+        // Find the highest severity of all the errors; manifest errors all have
+        // a 'warning' level severity.
+        var highestSeverity = extension.runtimeErrors.reduce(
+            function(prev, error) {
+          return map[error.severity].weight > map[prev].weight ?
+              error.severity : prev;
+        }, extension.manifestErrors.length ? Level.WARN : Level.LOG);
+
+        // Adjust the class on the icon.
+        var icon = item.querySelector('.extension-error-icon');
+        // TODO(hcarmona): Populate alt text with a proper description since
+        // this icon conveys the severity of the error. (info, warning, fatal).
+        icon.alt = '';
+        icon.className = 'extension-error-icon';  // Remove other classes.
+        icon.classList.add(map[highestSeverity].name);
+      });
 
       // The 'Reload' terminated link.
       var isTerminated =
@@ -870,15 +1015,6 @@ cr.define('extensions', function() {
         });
       });
 
-      // If the ErrorConsole is enabled, we should have manifest and/or runtime
-      // errors. Otherwise, we may have install warnings. We should not have
-      // both ErrorConsole errors and install warnings.
-      // Errors.
-      this.updateErrors_(row.querySelector('.manifest-errors'),
-                         'dev-manifestErrors', extension.manifestErrors);
-      this.updateErrors_(row.querySelector('.runtime-errors'),
-                         'dev-runtimeErrors', extension.runtimeErrors);
-
       // Install warnings.
       this.updateVisibility_(row, '.install-warnings',
                              extension.installWarnings.length > 0,
@@ -905,7 +1041,6 @@ cr.define('extensions', function() {
       }
 
       row.updateFocusableElements();
-      this.focusGrid_.addRow(row);
     },
 
     /**
@@ -935,38 +1070,6 @@ cr.define('extensions', function() {
       item.hidden = !visible;
       if (visible && opt_shownCallback)
         opt_shownCallback(item);
-    },
-
-    /**
-     * Updates an element to show a list of errors.
-     * @param {Element} panel An element to hold the errors.
-     * @param {string} columnType A tag used to identify the column when
-     *     changing focus.
-     * @param {Array<RuntimeError|ManifestError>|undefined} errors The errors
-     *     to be displayed.
-     * @private
-     */
-    updateErrors_: function(panel, columnType, errors) {
-      // TODO(hcarmona): Look into updating the ExtensionErrorList rather than
-      // rebuilding it every time.
-      panel.hidden = !errors || errors.length == 0;
-      panel.textContent = '';
-
-      if (panel.hidden)
-        return;
-
-      var errorList =
-          new extensions.ExtensionErrorList(assertInstanceof(errors, Array));
-
-      panel.appendChild(errorList);
-
-      var list = errorList.getErrorListElement();
-      if (list)
-        list.setAttribute('column-type', columnType + 'list');
-
-      var button = errorList.getToggleElement();
-      if (button)
-        button.setAttribute('column-type', columnType + 'button');
     },
 
     /**
@@ -1005,23 +1108,72 @@ cr.define('extensions', function() {
         if (cr.ui.FocusOutlineManager.forDocument(document).visible)
           overlay.setInitialFocus();
       };
-      overlay.setExtensionAndShowOverlay(extensionId, extension.name,
-                                         extension.iconUrl, shownCallback);
+      overlay.setExtensionAndShow(extensionId, extension.name,
+                                  extension.iconUrl, shownCallback);
       this.optionsShown_ = true;
 
       var self = this;
       $('overlay').addEventListener('cancelOverlay', function f() {
         self.optionsShown_ = false;
         $('overlay').removeEventListener('cancelOverlay', f);
+
+        // Remove the options query string.
+        uber.replaceState({}, '');
       });
 
       // TODO(dbeam): why do we need to focus <extensionoptions> before and
       // after its showing animation? Makes very little sense to me.
       overlay.setInitialFocus();
     },
+
+    /**
+     * Hides the extension options overlay for the extension with id
+     * |extensionId|. If there is an overlay showing for a different extension,
+     * nothing happens.
+     * @param {string} extensionId ID of the extension to hide.
+     * @private
+     */
+    hideEmbeddedExtensionOptions_: function(extensionId) {
+      if (!this.optionsShown_)
+        return;
+
+      var overlay = extensions.ExtensionOptionsOverlay.getInstance();
+      if (overlay.getExtensionId() == extensionId)
+        overlay.close();
+    },
+
+    /**
+     * Updates the node for the extension.
+     * @param {!ExtensionInfo} extension The information about the extension to
+     *     update.
+     * @private
+     */
+    updateExtension_: function(extension) {
+      var currIndex = this.getIndexOfExtension_(extension.id);
+      if (currIndex != -1) {
+        // If there is a current version of the extension, update it with the
+        // new version.
+        this.extensions_[currIndex] = extension;
+      } else {
+        // If the extension isn't found, push it back and sort. Technically, we
+        // could optimize by inserting it at the right location, but since this
+        // only happens on extension install, it's not worth it.
+        this.extensions_.push(extension);
+        this.extensions_.sort(compareExtensions);
+      }
+
+      var node = /** @type {ExtensionFocusRow} */ ($(extension.id));
+      if (node) {
+        this.updateNode_(extension, node);
+      } else {
+        var nextExt = this.extensions_[this.extensions_.indexOf(extension) + 1];
+        this.createNode_(extension, nextExt ? $(nextExt.id) : null);
+      }
+    }
   };
 
   return {
-    ExtensionList: ExtensionList
+    ExtensionList: ExtensionList,
+    ExtensionListDelegate: ExtensionListDelegate
   };
 });

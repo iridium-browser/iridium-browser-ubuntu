@@ -151,11 +151,6 @@ void FileStream::Context::Flush(const CompletionCallback& callback) {
 
 FileStream::Context::OpenResult FileStream::Context::OpenFileImpl(
     const base::FilePath& path, int open_flags) {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "423948 FileStream::Context::OpenFileImpl"));
-
 #if defined(OS_POSIX)
   // Always use blocking IO.
   open_flags &= ~base::File::FLAG_ASYNC;
@@ -202,14 +197,8 @@ FileStream::Context::IOResult FileStream::Context::FlushFileImpl() {
 void FileStream::Context::OnOpenCompleted(const CompletionCallback& callback,
                                           OpenResult open_result) {
   file_ = open_result.file.Pass();
-  if (file_.IsValid() && !orphaned_) {
-    // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
-    tracked_objects::ScopedTracker tracking_profile(
-        FROM_HERE_WITH_EXPLICIT_FUNCTION(
-            "423948 FileStream::Context::OnOpenCompleted"));
-
+  if (file_.IsValid() && !orphaned_)
     OnFileOpened();
-  }
 
   OnAsyncCompleted(IntToInt64(callback), open_result.error_code);
 }
@@ -239,6 +228,10 @@ Int64CompletionCallback FileStream::Context::IntToInt64(
 void FileStream::Context::OnAsyncCompleted(
     const Int64CompletionCallback& callback,
     const IOResult& result) {
+  // TODO(pkasting): Remove ScopedTracker below once crbug.com/477117 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "477117 FileStream::Context::OnAsyncCompleted"));
   // Reset this before Run() as Run() may issue a new async operation. Also it
   // should be reset before Close() because it shouldn't run if any async
   // operation is in progress.

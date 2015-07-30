@@ -530,6 +530,8 @@ QuicErrorCode QuicCryptoServerConfig::ProcessClientHello(
     const IPEndPoint& client_address,
     QuicVersion version,
     const QuicVersionVector& supported_versions,
+    bool use_stateless_rejects,
+    QuicConnectionId server_designated_connection_id,
     const QuicClock* clock,
     QuicRandom* rand,
     QuicCryptoNegotiatedParameters* params,
@@ -604,8 +606,9 @@ QuicErrorCode QuicCryptoServerConfig::ProcessClientHello(
       !info.unique ||
       !requested_config.get()) {
     BuildRejection(server_ip, *primary_config.get(), client_hello, info,
-                   validate_chlo_result.cached_network_params, rand, params,
-                   out);
+                   validate_chlo_result.cached_network_params,
+                   use_stateless_rejects, server_designated_connection_id, rand,
+                   params, out);
     return QUIC_NO_ERROR;
   }
 
@@ -948,19 +951,13 @@ void QuicCryptoServerConfig::EvaluateClientHello(
   HandshakeFailureReason source_address_token_error;
   StringPiece srct;
   if (client_hello.GetStringPiece(kSourceAddressTokenTag, &srct)) {
-    if (!FLAGS_quic_use_multiple_address_in_source_tokens) {
-      source_address_token_error = ValidateSourceAddressToken(
-          *requested_config.get(), srct, info->client_ip, info->now,
-          &client_hello_state->cached_network_params);
-    } else {
-      source_address_token_error = ParseSourceAddressToken(
-          *requested_config.get(), srct, &info->source_address_tokens);
+    source_address_token_error = ParseSourceAddressToken(
+        *requested_config, srct, &info->source_address_tokens);
 
-      if (source_address_token_error == HANDSHAKE_OK) {
-        source_address_token_error = ValidateSourceAddressTokens(
-            info->source_address_tokens, info->client_ip, info->now,
-            &client_hello_state->cached_network_params);
-      }
+    if (source_address_token_error == HANDSHAKE_OK) {
+      source_address_token_error = ValidateSourceAddressTokens(
+          info->source_address_tokens, info->client_ip, info->now,
+          &client_hello_state->cached_network_params);
     }
     info->valid_source_address_token =
         (source_address_token_error == HANDSHAKE_OK);
@@ -1097,10 +1094,20 @@ void QuicCryptoServerConfig::BuildRejection(
     const CryptoHandshakeMessage& client_hello,
     const ClientHelloInfo& info,
     const CachedNetworkParameters& cached_network_params,
+    bool use_stateless_rejects,
+    QuicConnectionId server_designated_connection_id,
     QuicRandom* rand,
     QuicCryptoNegotiatedParameters* params,
     CryptoHandshakeMessage* out) const {
-  out->set_tag(kREJ);
+  if (FLAGS_enable_quic_stateless_reject_support && use_stateless_rejects) {
+    DVLOG(1) << "QUIC Crypto server config returning stateless reject "
+             << "with server-designated connection ID "
+             << server_designated_connection_id;
+    out->set_tag(kSREJ);
+    out->SetValue(kRCID, server_designated_connection_id);
+  } else {
+    out->set_tag(kREJ);
+  }
   out->SetStringPiece(kSCFG, config.serialized);
   out->SetStringPiece(
       kSourceAddressTokenTag,
@@ -1437,11 +1444,6 @@ string QuicCryptoServerConfig::NewSourceAddressToken(
         *cached_network_params;
   }
 
-  if (!FLAGS_quic_use_multiple_address_in_source_tokens) {
-    return config.source_address_token_boxer->Box(
-        rand, source_address_token->SerializeAsString());
-  }
-
   // Append previous tokens.
   for (const SourceAddressToken& token : previous_tokens.tokens()) {
     if (source_address_tokens.tokens_size() > kMaxTokenAddresses) {
@@ -1483,16 +1485,6 @@ HandshakeFailureReason QuicCryptoServerConfig::ParseSourceAddressToken(
     return SOURCE_ADDRESS_TOKEN_DECRYPTION_FAILURE;
   }
 
-  if (!FLAGS_quic_use_multiple_address_in_source_tokens) {
-    SourceAddressToken source_address_token;
-    if (!source_address_token.ParseFromArray(plaintext.data(),
-                                             plaintext.size())) {
-      return SOURCE_ADDRESS_TOKEN_PARSE_FAILURE;
-    }
-    *(tokens->add_tokens()) = source_address_token;
-    return HANDSHAKE_OK;
-  }
-
   if (!tokens->ParseFromArray(plaintext.data(), plaintext.size())) {
     // Some clients might still be using the old source token format so
     // attempt to parse that format.
@@ -1503,51 +1495,6 @@ HandshakeFailureReason QuicCryptoServerConfig::ParseSourceAddressToken(
       return SOURCE_ADDRESS_TOKEN_PARSE_FAILURE;
     }
     *tokens->add_tokens() = source_address_token;
-  }
-
-  return HANDSHAKE_OK;
-}
-
-HandshakeFailureReason QuicCryptoServerConfig::ValidateSourceAddressToken(
-    const Config& config,
-    StringPiece token,
-    const IPAddressNumber& ip,
-    QuicWallTime now,
-    CachedNetworkParameters* cached_network_params) const {
-  string storage;
-  StringPiece plaintext;
-  if (!config.source_address_token_boxer->Unbox(token, &storage, &plaintext)) {
-    return SOURCE_ADDRESS_TOKEN_DECRYPTION_FAILURE;
-  }
-
-  SourceAddressToken source_address_token;
-  if (!source_address_token.ParseFromArray(plaintext.data(),
-                                           plaintext.size())) {
-    return SOURCE_ADDRESS_TOKEN_PARSE_FAILURE;
-  }
-
-  if (source_address_token.ip() !=
-      IPAddressToPackedString(DualstackIPAddress(ip))) {
-    // It's for a different IP address.
-    return SOURCE_ADDRESS_TOKEN_DIFFERENT_IP_ADDRESS_FAILURE;
-  }
-
-  const QuicWallTime timestamp(
-      QuicWallTime::FromUNIXSeconds(source_address_token.timestamp()));
-  const QuicTime::Delta delta(now.AbsoluteDifference(timestamp));
-
-  if (now.IsBefore(timestamp) &&
-      delta.ToSeconds() > source_address_token_future_secs_) {
-    return SOURCE_ADDRESS_TOKEN_CLOCK_SKEW_FAILURE;
-  }
-
-  if (now.IsAfter(timestamp) &&
-      delta.ToSeconds() > source_address_token_lifetime_secs_) {
-    return SOURCE_ADDRESS_TOKEN_EXPIRED_FAILURE;
-  }
-
-  if (source_address_token.has_cached_network_parameters()) {
-    *cached_network_params = source_address_token.cached_network_parameters();
   }
 
   return HANDSHAKE_OK;

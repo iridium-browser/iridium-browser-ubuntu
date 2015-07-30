@@ -44,6 +44,7 @@ enum DistinctState {
 
 namespace {
 
+const char kTestGaiaId[] = "gaia-id-test_user@test.com";
 const char kTestUser[] = "test_user@test.com";
 
 #if !defined(OS_CHROMEOS)
@@ -252,8 +253,7 @@ void GetDistinctCase(ProfileSyncServiceMock& service,
                   .WillRepeatedly(DoAll(SetArgPointee<0>(status),
                                   Return(false)));
       provider->SetAuthError(
-          kTestUser,
-          kTestUser,
+          signin->GetAuthenticatedAccountId(),
           GoogleServiceAuthError(GoogleServiceAuthError::SERVICE_UNAVAILABLE));
       EXPECT_CALL(service, HasUnrecoverableError())
                   .WillRepeatedly(Return(false));
@@ -339,7 +339,7 @@ TEST_F(SyncUIUtilTest, DistinctCasesReportUniqueMessageSets) {
     GoogleServiceAuthError error = GoogleServiceAuthError::AuthErrorNone();
     EXPECT_CALL(service, GetAuthError()).WillRepeatedly(ReturnRef(error));
     FakeSigninManagerForSyncUIUtilTest signin(profile.get());
-    signin.SetAuthenticatedUsername(kTestUser);
+    signin.SetAuthenticatedAccountInfo(kTestGaiaId, kTestUser);
     scoped_ptr<FakeAuthStatusProvider> provider(new FakeAuthStatusProvider(
         SigninErrorControllerFactory::GetForProfile(profile.get())));
     GetDistinctCase(service, &signin, provider.get(), idx);
@@ -378,7 +378,7 @@ TEST_F(SyncUIUtilTest, HtmlNotIncludedInStatusIfNotRequested) {
     GoogleServiceAuthError error = GoogleServiceAuthError::AuthErrorNone();
     EXPECT_CALL(service, GetAuthError()).WillRepeatedly(ReturnRef(error));
     FakeSigninManagerForSyncUIUtilTest signin(profile.get());
-    signin.SetAuthenticatedUsername(kTestUser);
+    signin.SetAuthenticatedAccountInfo(kTestGaiaId, kTestUser);
     scoped_ptr<FakeAuthStatusProvider> provider(new FakeAuthStatusProvider(
         SigninErrorControllerFactory::GetForProfile(profile.get())));
     GetDistinctCase(service, &signin, provider.get(), idx);

@@ -7,24 +7,13 @@
 
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
-#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/weak_ptr.h"
 #include "base/values.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_metrics.h"
 #include "net/base/layered_network_delegate.h"
 #include "net/proxy/proxy_retry_info.h"
 
-template<class T> class PrefMember;
-
-typedef PrefMember<bool> BooleanPrefMember;
-
 class GURL;
-class PrefService;
-
-namespace base {
-class SingleThreadTaskRunner;
-}
 
 namespace net {
 class HttpResponseHeaders;
@@ -39,11 +28,12 @@ class URLRequest;
 
 namespace data_reduction_proxy {
 
+class DataReductionProxyBypassStats;
 class DataReductionProxyConfig;
 class DataReductionProxyConfigurator;
+class DataReductionProxyExperimentsStats;
 class DataReductionProxyIOData;
 class DataReductionProxyRequestOptions;
-class DataReductionProxyBypassStats;
 
 // DataReductionProxyNetworkDelegate is a LayeredNetworkDelegate that wraps a
 // NetworkDelegate and adds Data Reduction Proxy specific logic.
@@ -63,15 +53,14 @@ class DataReductionProxyNetworkDelegate : public net::LayeredNetworkDelegate {
       scoped_ptr<net::NetworkDelegate> network_delegate,
       DataReductionProxyConfig* config,
       DataReductionProxyRequestOptions* handler,
-      const DataReductionProxyConfigurator* configurator);
+      const DataReductionProxyConfigurator* configurator,
+      DataReductionProxyExperimentsStats* experiments_stats);
   ~DataReductionProxyNetworkDelegate() override;
 
   // Initializes member variables to record data reduction proxy prefs and
   // report UMA.
   void InitIODataAndUMA(
-      scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
       DataReductionProxyIOData* io_data,
-      BooleanPrefMember* data_reduction_proxy_enabled,
       DataReductionProxyBypassStats* bypass_stats);
 
   // Creates a |Value| summary of the state of the network session. The caller
@@ -117,24 +106,12 @@ class DataReductionProxyNetworkDelegate : public net::LayeredNetworkDelegate {
                                int64 original_content_length,
                                DataReductionProxyRequestType request_type);
 
-  // Records daily data savings statistics to prefs and reports data savings
-  // UMA.
-  void UpdateContentLengthPrefs(int64 received_content_length,
-                                int64 original_content_length,
-                                bool data_reduction_proxy_enabled,
-                                DataReductionProxyRequestType request_type);
-
-  scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner_;
-
   // Total size of all content (excluding headers) that has been received
   // over the network.
   int64 received_content_length_;
 
   // Total original size of all content before it was transferred.
   int64 original_content_length_;
-
-  // Weak, owned by our owner.
-  BooleanPrefMember* data_reduction_proxy_enabled_;
 
   // All raw Data Reduction Proxy pointers must outlive |this|.
   DataReductionProxyConfig* data_reduction_proxy_config_;
@@ -146,6 +123,8 @@ class DataReductionProxyNetworkDelegate : public net::LayeredNetworkDelegate {
   DataReductionProxyIOData* data_reduction_proxy_io_data_;
 
   const DataReductionProxyConfigurator* configurator_;
+
+  DataReductionProxyExperimentsStats* experiments_stats_;
 
   DISALLOW_COPY_AND_ASSIGN(DataReductionProxyNetworkDelegate);
 };

@@ -22,6 +22,23 @@
 
 namespace {
 
+const std::string kTokenInfoResponseFormat =
+    "{                        \
+      \"id\": \"%s\",         \
+      \"email\": \"%s\",      \
+      \"hd\": \"\",           \
+      \"name\": \"%s\",       \
+      \"given_name\": \"%s\", \
+      \"locale\": \"%s\"      \
+    }";
+
+const std::string kTokenInfoIncompleteResponseFormat =
+    "{                        \
+      \"id\": \"%s\",         \
+      \"email\": \"%s\",      \
+      \"hd\": \"\",           \
+    }";
+
 enum TrackingEventType {
   UPDATED,
   REMOVED,
@@ -33,6 +50,30 @@ std::string AccountIdToEmail(const std::string account_id) {
 
 std::string AccountIdToGaiaId(const std::string account_id) {
   return "gaia-" + account_id;
+}
+
+std::string AccountIdToFullName(const std::string account_id) {
+  return "full-name-" + account_id;
+}
+
+std::string AccountIdToGivenName(const std::string account_id) {
+  return "given-name-" + account_id;
+}
+
+std::string AccountIdToLocale(const std::string account_id) {
+  return "locale-" + account_id;
+}
+
+void CheckAccountDetails(const std::string account_id,
+                         const AccountTrackerService::AccountInfo& info) {
+  EXPECT_EQ(account_id, info.account_id);
+  EXPECT_EQ(AccountIdToGaiaId(account_id), info.gaia);
+  EXPECT_EQ(AccountIdToEmail(account_id), info.email);
+  EXPECT_EQ(AccountTrackerService::kNoHostedDomainFound,
+            info.hosted_domain);
+  EXPECT_EQ(AccountIdToFullName(account_id), info.full_name);
+  EXPECT_EQ(AccountIdToGivenName(account_id), info.given_name);
+  EXPECT_EQ(AccountIdToLocale(account_id), info.locale);
 }
 
 class TrackingEvent {
@@ -203,6 +244,8 @@ class AccountTrackerServiceTest : public testing::Test {
     pref_service_.registry()->RegisterIntegerPref(
         prefs::kAccountIdMigrationState,
         AccountTrackerService::MIGRATION_NOT_STARTED);
+    pref_service_.registry()->RegisterInt64Pref(
+        AccountTrackerService::kAccountTrackerServiceLastUpdate, 0);
     signin_client_.reset(new TestSigninClient(&pref_service_));
     signin_client_.get()->SetURLRequestContext(
         new net::TestURLRequestContextGetter(
@@ -236,11 +279,23 @@ class AccountTrackerServiceTest : public testing::Test {
 
   std::string GenerateValidTokenInfoResponse(const std::string& account_id) {
     return base::StringPrintf(
-        "{\"id\": \"%s\", \"email\": \"%s\", \"hd\": \"\"}",
+        kTokenInfoResponseFormat.c_str(),
+        AccountIdToGaiaId(account_id).c_str(),
+        AccountIdToEmail(account_id).c_str(),
+        AccountIdToFullName(account_id).c_str(),
+        AccountIdToGivenName(account_id).c_str(),
+        AccountIdToLocale(account_id).c_str());
+  }
+
+  std::string GenerateIncompleteTokenInfoResponse(
+      const std::string& account_id) {
+    return base::StringPrintf(
+        kTokenInfoIncompleteResponseFormat.c_str(),
         AccountIdToGaiaId(account_id).c_str(),
         AccountIdToEmail(account_id).c_str());
   }
   void ReturnOAuthUrlFetchSuccess(const std::string& account_id);
+  void ReturnOAuthUrlFetchSuccessIncomplete(const std::string& account_id);
   void ReturnOAuthUrlFetchFailure(const std::string& account_id);
 
   net::TestURLFetcherFactory* test_fetcher_factory() {
@@ -285,6 +340,14 @@ void AccountTrackerServiceTest::ReturnOAuthUrlFetchSuccess(
   ReturnOAuthUrlFetchResults(gaia::GaiaOAuthClient::kUrlFetcherId,
                              net::HTTP_OK,
                              GenerateValidTokenInfoResponse(account_id));
+}
+
+void AccountTrackerServiceTest::ReturnOAuthUrlFetchSuccessIncomplete(
+    const std::string& account_id) {
+  IssueAccessToken(account_id);
+  ReturnOAuthUrlFetchResults(gaia::GaiaOAuthClient::kUrlFetcherId,
+                             net::HTTP_OK,
+                             GenerateIncompleteTokenInfoResponse(account_id));
 }
 
 void AccountTrackerServiceTest::ReturnOAuthUrlFetchFailure(
@@ -390,21 +453,9 @@ TEST_F(AccountTrackerServiceTest, GetAccounts) {
       account_tracker()->GetAccounts();
 
   EXPECT_EQ(3u, infos.size());
-  EXPECT_EQ("alpha", infos[0].account_id);
-  EXPECT_EQ(AccountIdToGaiaId("alpha"), infos[0].gaia);
-  EXPECT_EQ(AccountIdToEmail("alpha"), infos[0].email);
-  EXPECT_EQ(AccountTrackerService::kNoHostedDomainFound,
-            infos[0].hosted_domain);
-  EXPECT_EQ("beta", infos[1].account_id);
-  EXPECT_EQ(AccountIdToGaiaId("beta"), infos[1].gaia);
-  EXPECT_EQ(AccountIdToEmail("beta"), infos[1].email);
-  EXPECT_EQ(AccountTrackerService::kNoHostedDomainFound,
-            infos[1].hosted_domain);
-  EXPECT_EQ("gamma", infos[2].account_id);
-  EXPECT_EQ(AccountIdToGaiaId("gamma"), infos[2].gaia);
-  EXPECT_EQ(AccountIdToEmail("gamma"), infos[2].email);
-  EXPECT_EQ(AccountTrackerService::kNoHostedDomainFound,
-            infos[2].hosted_domain);
+  CheckAccountDetails("alpha", infos[0]);
+  CheckAccountDetails("beta", infos[1]);
+  CheckAccountDetails("gamma", infos[2]);
 }
 
 TEST_F(AccountTrackerServiceTest, GetAccountInfo_Empty) {
@@ -427,10 +478,7 @@ TEST_F(AccountTrackerServiceTest, GetAccountInfo_TokenAvailable_UserInfo) {
   ReturnOAuthUrlFetchSuccess("alpha");
   AccountTrackerService::AccountInfo info =
       account_tracker()->GetAccountInfo("alpha");
-  ASSERT_EQ("alpha", info.account_id);
-  ASSERT_EQ(AccountIdToGaiaId("alpha"), info.gaia);
-  ASSERT_EQ(AccountIdToEmail("alpha"), info.email);
-  ASSERT_EQ(AccountTrackerService::kNoHostedDomainFound, info.hosted_domain);
+  CheckAccountDetails("alpha", info);
 }
 
 TEST_F(AccountTrackerServiceTest, GetAccountInfo_TokenAvailable_EnableNetwork) {
@@ -457,10 +505,7 @@ TEST_F(AccountTrackerServiceTest, GetAccountInfo_TokenAvailable_EnableNetwork) {
 
   AccountTrackerService::AccountInfo info =
       tracker.GetAccountInfo("alpha");
-  ASSERT_EQ("alpha", info.account_id);
-  ASSERT_EQ(AccountIdToGaiaId("alpha"), info.gaia);
-  ASSERT_EQ(AccountIdToEmail("alpha"), info.email);
-  ASSERT_EQ(AccountTrackerService::kNoHostedDomainFound, info.hosted_domain);
+  CheckAccountDetails("alpha", info);
   tracker.Shutdown();
 }
 
@@ -516,7 +561,7 @@ TEST_F(AccountTrackerServiceTest, Persistence) {
     tracker.Shutdown();
   }
 
-  // Create a new tracker and make sure it loads the accounts corectly from
+  // Create a new tracker and make sure it loads the accounts correctly from
   // persistence.
   {
     AccountTrackerService tracker;
@@ -529,11 +574,8 @@ TEST_F(AccountTrackerServiceTest, Persistence) {
     std::vector<AccountTrackerService::AccountInfo> infos =
         tracker.GetAccounts();
     ASSERT_EQ(2u, infos.size());
-    EXPECT_EQ(AccountIdToGaiaId("alpha"), infos[0].gaia);
-    EXPECT_EQ(AccountIdToEmail("alpha"), infos[0].email);
-    EXPECT_EQ("beta", infos[1].account_id);
-    EXPECT_EQ(AccountIdToGaiaId("beta"), infos[1].gaia);
-    EXPECT_EQ(AccountIdToEmail("beta"), infos[1].email);
+    CheckAccountDetails("alpha", infos[0]);
+    CheckAccountDetails("beta", infos[1]);
 
     // Remove account.
     SimulateTokenRevoked("alpha");
@@ -551,9 +593,7 @@ TEST_F(AccountTrackerServiceTest, Persistence) {
     std::vector<AccountTrackerService::AccountInfo> infos =
         tracker.GetAccounts();
     ASSERT_EQ(1u, infos.size());
-    EXPECT_EQ("beta", infos[0].account_id);
-    EXPECT_EQ(AccountIdToGaiaId("beta"), infos[0].gaia);
-    EXPECT_EQ(AccountIdToEmail("beta"), infos[0].email);
+    CheckAccountDetails("beta", infos[0]);
     tracker.Shutdown();
   }
 }
@@ -574,4 +614,162 @@ TEST_F(AccountTrackerServiceTest, SeedAccountInfo) {
   EXPECT_EQ(account_id, infos[0].account_id);
   EXPECT_EQ(gaia_id, infos[0].gaia);
   EXPECT_EQ(email, infos[0].email);
+}
+
+TEST_F(AccountTrackerServiceTest, UpgradeToFullAccountInfo) {
+  // Start by simulating an incomplete account info and let it be saved to
+  // prefs.
+  {
+    AccountTrackerService tracker;
+    tracker.Initialize(token_service(), signin_client());
+    tracker.EnableNetworkFetches();
+    SimulateTokenAvailable("incomplete");
+    ReturnOAuthUrlFetchSuccessIncomplete("incomplete");
+    tracker.Shutdown();
+  }
+
+  {
+    AccountTrackerService tracker;
+    tracker.Initialize(token_service(), signin_client());
+
+    // Validate that the loaded AccountInfo from prefs is considered invalid.
+    std::vector<AccountTrackerService::AccountInfo> infos =
+        tracker.GetAccounts();
+    ASSERT_EQ(1u, infos.size());
+    ASSERT_FALSE(infos[0].IsValid());
+
+    // Enable network fetches and simulate the same account getting a refresh
+    // token containing all the info.
+    tracker.EnableNetworkFetches();
+    SimulateTokenAvailable("incomplete");
+    ReturnOAuthUrlFetchSuccess("incomplete");
+
+    // Validate that the account is now considered valid.
+    infos = tracker.GetAccounts();
+    ASSERT_EQ(1u, infos.size());
+    ASSERT_TRUE(infos[0].IsValid());
+
+    tracker.Shutdown();
+  }
+
+  // Reinstantiate a tracker to validate that the AccountInfo saved to prefs is
+  // now the upgraded one, considered valid.
+  {
+    AccountTrackerService tracker;
+    tracker.AddObserver(observer());
+    tracker.Initialize(token_service(), signin_client());
+    ASSERT_TRUE(observer()->CheckEvents(TrackingEvent(UPDATED, "incomplete")));
+    // Make sure there are no events in the observer
+    observer()->Clear();
+    // Enabling network fetches shouldn't cause any actual fetch since the
+    // AccountInfos loaded from prefs should be valid.
+    tracker.EnableNetworkFetches();
+
+    std::vector<AccountTrackerService::AccountInfo> infos =
+        tracker.GetAccounts();
+    ASSERT_EQ(1u, infos.size());
+    ASSERT_TRUE(infos[0].IsValid());
+    // Check that no network fetches were made.
+    ASSERT_TRUE(observer()->CheckEvents());
+
+    tracker.Shutdown();
+  }
+}
+
+TEST_F(AccountTrackerServiceTest, TimerRefresh) {
+  // Start by creating a tracker and adding a couple accounts to be persisted to
+  // prefs.
+  {
+    AccountTrackerService tracker;
+    tracker.Initialize(token_service(), signin_client());
+    tracker.EnableNetworkFetches();
+    SimulateTokenAvailable("alpha");
+    ReturnOAuthUrlFetchSuccess("alpha");
+    SimulateTokenAvailable("beta");
+    ReturnOAuthUrlFetchSuccess("beta");
+    tracker.Shutdown();
+  }
+
+  // Rewind the time by half a day, which shouldn't be enough to trigger a
+  // network refresh.
+  base::Time fake_update = base::Time::Now() - base::TimeDelta::FromHours(12);
+  signin_client()->GetPrefs()->SetInt64(
+      AccountTrackerService::kAccountTrackerServiceLastUpdate,
+      fake_update.ToInternalValue());
+
+  // Instantiate a new ATS, making sure the persisted accounts are still there
+  // and that no network fetches happen.
+  {
+    AccountTrackerService tracker;
+    tracker.Initialize(token_service(), signin_client());
+
+    ASSERT_TRUE(tracker.IsAllUserInfoFetched());
+    std::vector<AccountTrackerService::AccountInfo> infos =
+        tracker.GetAccounts();
+    ASSERT_EQ(2u, infos.size());
+    ASSERT_TRUE(infos[0].IsValid());
+    ASSERT_TRUE(infos[1].IsValid());
+
+    tracker.EnableNetworkFetches();
+    ASSERT_TRUE(tracker.IsAllUserInfoFetched());
+    tracker.Shutdown();
+  }
+
+  // Rewind the last updated time enough to trigger a network refresh.
+  fake_update = base::Time::Now() - base::TimeDelta::FromHours(25);
+  signin_client()->GetPrefs()->SetInt64(
+      AccountTrackerService::kAccountTrackerServiceLastUpdate,
+      fake_update.ToInternalValue());
+
+  // Instantiate a new tracker and validate that even though the AccountInfos
+  // are still valid, the network fetches are started.
+  {
+    AccountTrackerService tracker;
+    tracker.Initialize(token_service(), signin_client());
+
+    ASSERT_TRUE(tracker.IsAllUserInfoFetched());
+    std::vector<AccountTrackerService::AccountInfo> infos =
+        tracker.GetAccounts();
+    ASSERT_EQ(2u, infos.size());
+    ASSERT_TRUE(infos[0].IsValid());
+    ASSERT_TRUE(infos[1].IsValid());
+
+    tracker.EnableNetworkFetches();
+    ASSERT_FALSE(tracker.IsAllUserInfoFetched());
+    tracker.Shutdown();
+  }
+}
+
+TEST_F(AccountTrackerServiceTest, LegacyDottedAccountIds) {
+  // Start by creating a tracker and adding an account with a dotted account id
+  // because of an old bug in token service.  The token service would also add
+  // a correct non-dotted account id for the same account.
+  {
+    AccountTrackerService tracker;
+    tracker.Initialize(token_service(), signin_client());
+    tracker.EnableNetworkFetches();
+    SimulateTokenAvailable("foo.bar@gmail.com");
+    SimulateTokenAvailable("foobar@gmail.com");
+    ReturnOAuthUrlFetchSuccess("foo.bar@gmail.com");
+    ReturnOAuthUrlFetchSuccess("foobar@gmail.com");
+    tracker.Shutdown();
+  }
+
+  // Remove the bad account now from the token service to simulate that it
+  // has been "fixed".
+  SimulateTokenRevoked("foo.bar@gmail.com");
+
+  // Instantiate a new tracker and validate that it has only one account, and
+  // it is the correct non dotted one.
+  {
+    AccountTrackerService tracker;
+    tracker.Initialize(token_service(), signin_client());
+
+    ASSERT_TRUE(tracker.IsAllUserInfoFetched());
+    std::vector<AccountTrackerService::AccountInfo> infos =
+        tracker.GetAccounts();
+    ASSERT_EQ(1u, infos.size());
+    ASSERT_STREQ("foobar@gmail.com", infos[0].account_id.c_str());
+    tracker.Shutdown();
+  }
 }

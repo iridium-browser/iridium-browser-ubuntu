@@ -31,7 +31,6 @@ namespace net {
 class AddressList;
 class IPEndPoint;
 struct LoadTimingInfo;
-class SSLCertRequestInfo;
 class SSLInfo;
 class SpdySession;
 
@@ -162,7 +161,7 @@ class NET_EXPORT_PRIVATE SpdyStream {
              const GURL& url,
              RequestPriority priority,
              int32 initial_send_window_size,
-             int32 initial_recv_window_size,
+             int32 max_recv_window_size,
              const BoundNetLog& net_log);
 
   ~SpdyStream();
@@ -263,8 +262,8 @@ class NET_EXPORT_PRIVATE SpdyStream {
 
   // Called by OnDataReceived or OnPaddingConsumed (which are in turn called by
   // the session) to decrease this stream's receive window size by
-  // |delta_window_size|, which must be at least 1 and must not cause
-  // this stream's receive window size to go negative.
+  // |delta_window_size|, which must be at least 1.  May close the stream on
+  // flow control error.
   //
   // If stream flow control is turned off or the stream is not active,
   // this must not be called.
@@ -377,10 +376,6 @@ class NET_EXPORT_PRIVATE SpdyStream {
   bool GetSSLInfo(SSLInfo* ssl_info,
                   bool* was_npn_negotiated,
                   NextProto* protocol_negotiated);
-
-  // Fills SSL Certificate Request info |cert_request_info| and returns
-  // true when SSL is in use.
-  bool GetSSLCertRequestInfo(SSLCertRequestInfo* cert_request_info);
 
   // If the stream is stalled on sending data, but the session is not
   // stalled on sending data and |send_window_size_| is positive, then
@@ -501,10 +496,24 @@ class NET_EXPORT_PRIVATE SpdyStream {
   const GURL url_;
   const RequestPriority priority_;
 
-  // Flow control variables.
   bool send_stalled_by_flow_control_;
+
+  // Current send window size.
   int32 send_window_size_;
+
+  // Maximum receive window size.  Each time a WINDOW_UPDATE is sent, it
+  // restores the receive window size to this value.
+  int32 max_recv_window_size_;
+
+  // Sum of |session_unacked_recv_window_bytes_| and current receive window
+  // size.
+  // TODO(bnc): Rename or change semantics so that |window_size_| is actual
+  // window size.
   int32 recv_window_size_;
+
+  // When bytes are consumed, SpdyIOBuffer destructor calls back to SpdySession,
+  // and this member keeps count of them until the corresponding WINDOW_UPDATEs
+  // are sent.
   int32 unacked_recv_window_bytes_;
 
   const base::WeakPtr<SpdySession> session_;

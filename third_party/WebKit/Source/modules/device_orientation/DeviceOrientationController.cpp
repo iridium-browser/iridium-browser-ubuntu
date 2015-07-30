@@ -13,6 +13,7 @@
 #include "modules/device_orientation/DeviceOrientationDispatcher.h"
 #include "modules/device_orientation/DeviceOrientationEvent.h"
 #include "platform/weborigin/SecurityOrigin.h"
+#include "public/platform/Platform.h"
 
 namespace blink {
 
@@ -42,10 +43,10 @@ const char* DeviceOrientationController::supplementName()
 
 DeviceOrientationController& DeviceOrientationController::from(Document& document)
 {
-    DeviceOrientationController* controller = static_cast<DeviceOrientationController*>(DocumentSupplement::from(document, supplementName()));
+    DeviceOrientationController* controller = static_cast<DeviceOrientationController*>(WillBeHeapSupplement<Document>::from(document, supplementName()));
     if (!controller) {
         controller = new DeviceOrientationController(document);
-        DocumentSupplement::provideTo(document, supplementName(), adoptPtrWillBeNoop(controller));
+        WillBeHeapSupplement<Document>::provideTo(document, supplementName(), adoptPtrWillBeNoop(controller));
     }
     return *controller;
 }
@@ -57,7 +58,7 @@ void DeviceOrientationController::didAddEventListener(LocalDOMWindow* window, co
 
     if (document().frame()) {
         String errorMessage;
-        if (document().securityOrigin()->canAccessFeatureRequiringSecureOrigin(errorMessage)) {
+        if (document().isPrivilegedContext(errorMessage)) {
             UseCounter::count(document().frame(), UseCounter::DeviceOrientationSecureOrigin);
         } else {
             UseCounter::count(document().frame(), UseCounter::DeviceOrientationInsecureOrigin);
@@ -65,6 +66,9 @@ void DeviceOrientationController::didAddEventListener(LocalDOMWindow* window, co
                 return;
         }
     }
+
+    if (!m_hasEventListener)
+        Platform::current()->recordRapporURL("DeviceSensors.DeviceOrientation", WebURL(document().url()));
 
     DeviceSingleWindowEventController::didAddEventListener(window, eventType);
 }
@@ -125,7 +129,7 @@ DEFINE_TRACE(DeviceOrientationController)
 {
     visitor->trace(m_overrideOrientationData);
     DeviceSingleWindowEventController::trace(visitor);
-    DocumentSupplement::trace(visitor);
+    WillBeHeapSupplement<Document>::trace(visitor);
 }
 
 } // namespace blink

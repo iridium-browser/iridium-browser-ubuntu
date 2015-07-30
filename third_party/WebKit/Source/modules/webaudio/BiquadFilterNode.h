@@ -26,7 +26,7 @@
 #define BiquadFilterNode_h
 
 #include "core/dom/DOMTypedArray.h"
-#include "modules/webaudio/AudioBasicProcessorNode.h"
+#include "modules/webaudio/AudioNode.h"
 #include "modules/webaudio/BiquadProcessor.h"
 
 namespace blink {
@@ -48,7 +48,7 @@ public:
         ALLPASS = 7
     };
 
-    static BiquadFilterNode* create(AudioContext* context, float sampleRate)
+    static BiquadFilterNode* create(AudioContext& context, float sampleRate)
     {
         return new BiquadFilterNode(context, sampleRate);
     }
@@ -67,7 +67,7 @@ public:
     void getFrequencyResponse(const DOMFloat32Array* frequencyHz, DOMFloat32Array* magResponse, DOMFloat32Array* phaseResponse);
 
 private:
-    BiquadFilterNode(AudioContext*, float sampleRate);
+    BiquadFilterNode(AudioContext&, float sampleRate);
 
     BiquadProcessor* biquadProcessor() const;
     bool setType(unsigned); // Returns true on success.

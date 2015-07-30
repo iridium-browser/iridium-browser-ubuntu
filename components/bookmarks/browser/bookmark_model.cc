@@ -78,7 +78,7 @@ class SortComparator : public std::binary_function<const BookmarkNode*,
       if (!collator_)
         return n1->GetTitle() < n2->GetTitle();
       return base::i18n::CompareString16WithCollator(
-          collator_, n1->GetTitle(), n2->GetTitle()) == UCOL_LESS;
+                 *collator_, n1->GetTitle(), n2->GetTitle()) == UCOL_LESS;
     }
     // Types differ, sort such that folders come first.
     return n1->is_folder();
@@ -188,12 +188,13 @@ void BookmarkModel::EndGroupedChanges() {
                     GroupedBookmarkChangesEnded(this));
 }
 
-void BookmarkModel::Remove(const BookmarkNode* parent, int index) {
-  if (!loaded_ || !IsValidIndex(parent, index, false) || is_root_node(parent)) {
+void BookmarkModel::Remove(const BookmarkNode* node) {
+  DCHECK(node);
+  if (!loaded_ || is_root_node(node)) {
     NOTREACHED();
     return;
   }
-  RemoveAndDeleteNode(AsMutable(parent->GetChild(index)));
+  RemoveAndDeleteNode(AsMutable(node));
 }
 
 void BookmarkModel::RemoveAllUserBookmarks() {
@@ -312,10 +313,8 @@ favicon_base::IconType BookmarkModel::GetFaviconType(const BookmarkNode* node) {
 
 void BookmarkModel::SetTitle(const BookmarkNode* node,
                              const base::string16& title) {
-  if (!node) {
-    NOTREACHED();
-    return;
-  }
+  DCHECK(node);
+
   if (node->GetTitle() == title)
     return;
 
@@ -341,16 +340,7 @@ void BookmarkModel::SetTitle(const BookmarkNode* node,
 }
 
 void BookmarkModel::SetURL(const BookmarkNode* node, const GURL& url) {
-  if (!node) {
-    NOTREACHED();
-    return;
-  }
-
-  // We cannot change the URL of a folder.
-  if (node->is_folder()) {
-    NOTREACHED();
-    return;
-  }
+  DCHECK(node && !node->is_folder());
 
   if (node->url() == url)
     return;
@@ -466,20 +456,11 @@ void BookmarkModel::OnFaviconChanged(const std::set<GURL>& urls) {
   }
 }
 
-void BookmarkModel::SetDateAdded(const BookmarkNode* node,
-                                 Time date_added) {
-  if (!node) {
-    NOTREACHED();
-    return;
-  }
+void BookmarkModel::SetDateAdded(const BookmarkNode* node, Time date_added) {
+  DCHECK(node && !is_permanent_node(node));
 
   if (node->date_added() == date_added)
     return;
-
-  if (is_permanent_node(node)) {
-    NOTREACHED();
-    return;
-  }
 
   AsMutable(node)->set_date_added(date_added);
 
@@ -847,6 +828,7 @@ void BookmarkModel::RemoveAndDeleteNode(BookmarkNode* delete_me) {
   const BookmarkNode* parent = node->parent();
   DCHECK(parent);
   int index = parent->GetIndexOf(node.get());
+  DCHECK_NE(-1, index);
 
   FOR_EACH_OBSERVER(BookmarkModelObserver, observers_,
                     OnWillRemoveBookmarks(this, parent, index, node.get()));
@@ -886,7 +868,7 @@ void BookmarkModel::RemoveNodeAndGetRemovedUrls(BookmarkNode* node,
   // This method does not explicitly acquires a lock.
   url_lock_.AssertAcquired();
   DCHECK(removed_urls);
-  BookmarkNode* parent = AsMutable(node->parent());
+  BookmarkNode* parent = node->parent();
   DCHECK(parent);
   parent->Remove(node);
   RemoveNode(node, removed_urls);

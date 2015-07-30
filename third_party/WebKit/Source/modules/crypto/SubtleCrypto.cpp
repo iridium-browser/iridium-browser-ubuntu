@@ -44,22 +44,6 @@
 
 namespace blink {
 
-template <>
-DOMArrayPiece::DOMArrayPiece(const BufferSource& bufferSource)
-{
-    void* data = nullptr;
-    unsigned len = 0;
-
-    if (bufferSource.isArrayBuffer()) {
-        data = bufferSource.getAsArrayBuffer()->data();
-        len = bufferSource.getAsArrayBuffer()->byteLength();
-    } else if (bufferSource.isArrayBufferView()) {
-        data = bufferSource.getAsArrayBufferView()->baseAddress();
-        len = bufferSource.getAsArrayBufferView()->byteLength();
-    }
-    initWithData(data, len);
-}
-
 static bool parseAlgorithm(const AlgorithmIdentifier& raw, WebCryptoOperation op, WebCryptoAlgorithm& algorithm, CryptoResult* result)
 {
     AlgorithmError error;
@@ -71,9 +55,8 @@ static bool parseAlgorithm(const AlgorithmIdentifier& raw, WebCryptoOperation op
 
 static bool canAccessWebCrypto(ScriptState* scriptState, CryptoResult* result)
 {
-    const SecurityOrigin* origin = scriptState->executionContext()->securityOrigin();
     String errorMessage;
-    if (!origin->canAccessFeatureRequiringSecureOrigin(errorMessage)) {
+    if (!scriptState->executionContext()->isPrivilegedContext(errorMessage, ExecutionContext::WebCryptoPrivilegeCheck)) {
         result->completeWithError(WebCryptoErrorTypeNotSupported, errorMessage);
         return false;
     }

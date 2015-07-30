@@ -5,14 +5,20 @@
 #include "chrome/browser/chromeos/login/login_manager_test.h"
 
 #include "base/command_line.h"
+#include "base/json/json_file_value_serializer.h"
+#include "base/path_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager_test_api.h"
+#include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
 #include "chrome/browser/chromeos/login/ui/webui_login_view.h"
+#include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_paths.h"
+#include "chrome/common/pref_names.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/login/auth/key.h"
 #include "chromeos/login/auth/user_context.h"
@@ -27,7 +33,8 @@
 namespace chromeos {
 
 LoginManagerTest::LoginManagerTest(bool should_launch_browser)
-    : should_launch_browser_(should_launch_browser),
+    : use_webview_(true),
+      should_launch_browser_(should_launch_browser),
       web_contents_(NULL) {
   set_exit_when_last_browser_closes(false);
 }
@@ -59,6 +66,29 @@ void LoginManagerTest::SetUpOnMainThread() {
       UserSessionManager::GetInstance());
   session_manager_test_api.SetShouldLaunchBrowserInTests(
       should_launch_browser_);
+}
+
+bool LoginManagerTest::SetUpUserDataDirectory() {
+  base::FilePath user_data_dir;
+  CHECK(PathService::Get(chrome::DIR_USER_DATA, &user_data_dir));
+  base::FilePath local_state_path =
+      user_data_dir.Append(chrome::kLocalStateFilename);
+
+  if (!use_webview()) {
+    // Set webview disabled flag only when local state file does not exist.
+    // Otherwise, we break PRE tests that leave state in it.
+    if (!base::PathExists(local_state_path)) {
+      base::DictionaryValue local_state_dict;
+
+      // TODO(nkostylev): Fix tests that fail with webview signin.
+      local_state_dict.SetBoolean(prefs::kWebviewSigninDisabled, true);
+
+      CHECK(JSONFileValueSerializer(local_state_path)
+                .Serialize(local_state_dict));
+    }
+  }
+
+  return MixinBasedBrowserTest::SetUpUserDataDirectory();
 }
 
 void LoginManagerTest::RegisterUser(const std::string& user_id) {
@@ -106,6 +136,7 @@ bool LoginManagerTest::AddUserToSession(const UserContext& user_context) {
 
 void LoginManagerTest::LoginUser(const std::string& user_id) {
   UserContext user_context(user_id);
+  user_context.SetGaiaID(GetGaiaIDForUserID(user_id));
   user_context.SetKey(Key("password"));
   SetExpectedCredentials(user_context);
   EXPECT_TRUE(TryToLogin(user_context));
@@ -113,9 +144,15 @@ void LoginManagerTest::LoginUser(const std::string& user_id) {
 
 void LoginManagerTest::AddUser(const std::string& user_id) {
   UserContext user_context(user_id);
+  user_context.SetGaiaID(GetGaiaIDForUserID(user_id));
   user_context.SetKey(Key("password"));
   SetExpectedCredentials(user_context);
   EXPECT_TRUE(AddUserToSession(user_context));
+}
+
+// static
+std::string LoginManagerTest::GetGaiaIDForUserID(const std::string& user_id) {
+  return "gaia-id-" + user_id;
 }
 
 void LoginManagerTest::JSExpect(const std::string& expression) {

@@ -252,6 +252,14 @@ class GLES2DecoderTest2 : public GLES2DecoderTestBase {
 INSTANTIATE_TEST_CASE_P(Service, GLES2DecoderTest2, ::testing::Bool());
 
 template <>
+void GLES2DecoderTestBase::SpecializedSetup<
+    cmds::GetRenderbufferParameteriv, 0>(
+        bool /* valid */) {
+  DoBindRenderbuffer(GL_RENDERBUFFER, client_renderbuffer_id_,
+                    kServiceRenderbufferId);
+};
+
+template <>
 void GLES2DecoderTestBase::SpecializedSetup<cmds::RenderbufferStorage, 0>(
     bool valid) {
   DoBindRenderbuffer(GL_RENDERBUFFER, client_renderbuffer_id_,
@@ -352,41 +360,6 @@ void GLES2DecoderTestBase::SpecializedSetup<cmds::LinkProgram, 0>(
 };
 
 template <>
-void GLES2DecoderTestBase::SpecializedSetup<cmds::UseProgram, 0>(
-    bool /* valid */) {
-  // Needs the same setup as LinkProgram.
-  SpecializedSetup<cmds::LinkProgram, 0>(false);
-
-  EXPECT_CALL(*gl_, LinkProgram(kServiceProgramId))
-      .Times(1)
-      .RetiresOnSaturation();
-
-  cmds::LinkProgram link_cmd;
-  link_cmd.Init(client_program_id_);
-  EXPECT_EQ(error::kNoError, ExecuteCmd(link_cmd));
-};
-
-template <>
-void GLES2DecoderTestBase::SpecializedSetup<cmds::ValidateProgram, 0>(
-    bool /* valid */) {
-  // Needs the same setup as LinkProgram.
-  SpecializedSetup<cmds::LinkProgram, 0>(false);
-
-  EXPECT_CALL(*gl_, LinkProgram(kServiceProgramId))
-      .Times(1)
-      .RetiresOnSaturation();
-
-  cmds::LinkProgram link_cmd;
-  link_cmd.Init(client_program_id_);
-  EXPECT_EQ(error::kNoError, ExecuteCmd(link_cmd));
-
-  EXPECT_CALL(*gl_,
-      GetProgramiv(kServiceProgramId, GL_INFO_LOG_LENGTH, _))
-      .WillOnce(SetArgumentPointee<2>(0))
-      .RetiresOnSaturation();
-};
-
-template <>
 void GLES2DecoderTestBase::SpecializedSetup<cmds::Uniform1f, 0>(
     bool /* valid */) {
   SetupShaderForUniform(GL_FLOAT);
@@ -483,18 +456,6 @@ void GLES2DecoderTestBase::SpecializedSetup<cmds::UniformMatrix2fvImmediate, 0>(
 };
 
 template <>
-void GLES2DecoderTestBase::SpecializedSetup<cmds::UniformMatrix3fvImmediate, 0>(
-    bool /* valid */) {
-  SetupShaderForUniform(GL_FLOAT_MAT3);
-};
-
-template <>
-void GLES2DecoderTestBase::SpecializedSetup<cmds::UniformMatrix4fvImmediate, 0>(
-    bool /* valid */) {
-  SetupShaderForUniform(GL_FLOAT_MAT4);
-};
-
-template <>
 void GLES2DecoderTestBase::SpecializedSetup<cmds::TexParameterf, 0>(
     bool /* valid */) {
   DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
@@ -533,6 +494,32 @@ void GLES2DecoderTestBase::SpecializedSetup<cmds::GetVertexAttribiv, 0>(
 
 template <>
 void GLES2DecoderTestBase::SpecializedSetup<cmds::GetVertexAttribfv, 0>(
+    bool valid) {
+  DoBindBuffer(GL_ARRAY_BUFFER, client_buffer_id_, kServiceBufferId);
+  DoVertexAttribPointer(1, 1, GL_FLOAT, 0, 0);
+  if (valid) {
+    EXPECT_CALL(*gl_, GetError())
+        .WillOnce(Return(GL_NO_ERROR))
+        .WillOnce(Return(GL_NO_ERROR))
+        .RetiresOnSaturation();
+  }
+};
+
+template <>
+void GLES2DecoderTestBase::SpecializedSetup<cmds::GetVertexAttribIiv, 0>(
+    bool valid) {
+  DoBindBuffer(GL_ARRAY_BUFFER, client_buffer_id_, kServiceBufferId);
+  DoVertexAttribPointer(1, 1, GL_FLOAT, 0, 0);
+  if (valid) {
+    EXPECT_CALL(*gl_, GetError())
+        .WillOnce(Return(GL_NO_ERROR))
+        .WillOnce(Return(GL_NO_ERROR))
+        .RetiresOnSaturation();
+  }
+};
+
+template <>
+void GLES2DecoderTestBase::SpecializedSetup<cmds::GetVertexAttribIuiv, 0>(
     bool valid) {
   DoBindBuffer(GL_ARRAY_BUFFER, client_buffer_id_, kServiceBufferId);
   DoVertexAttribPointer(1, 1, GL_FLOAT, 0, 0);

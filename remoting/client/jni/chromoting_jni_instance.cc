@@ -434,7 +434,8 @@ void ChromotingJniInstance::ConnectToHostOnNetworkThread() {
 
   scoped_ptr<protocol::TransportFactory> transport_factory(
       new protocol::LibjingleTransportFactory(
-          signaling_.get(), port_allocator.Pass(), network_settings));
+          signaling_.get(), port_allocator.Pass(), network_settings,
+          protocol::TransportRole::CLIENT));
 
   client_->Start(signaling_.get(), authenticator_.Pass(),
                  transport_factory.Pass(), host_jid_, capabilities_);
@@ -450,10 +451,10 @@ void ChromotingJniInstance::DisconnectFromHostOnNetworkThread() {
   // |client_| must be torn down before |signaling_|.
   client_.reset();
   client_status_logger_.reset();
-  client_context_.reset();
   video_renderer_.reset();
   authenticator_.reset();
   signaling_.reset();
+  client_context_.reset();
 }
 
 void ChromotingJniInstance::FetchSecret(

@@ -24,6 +24,7 @@
 #include "content/common/content_constants_internal.h"
 #include "content/common/gpu/gpu_config.h"
 #include "content/common/gpu/gpu_messages.h"
+#include "content/common/gpu/media/gpu_video_decode_accelerator.h"
 #include "content/common/gpu/media/gpu_video_encode_accelerator.h"
 #include "content/common/sandbox_linux/sandbox_linux.h"
 #include "content/gpu/gpu_child_thread.h"
@@ -34,6 +35,7 @@
 #include "content/public/common/main_function_params.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
 #include "gpu/config/gpu_info_collector.h"
+#include "gpu/config/gpu_switches.h"
 #include "gpu/config/gpu_util.h"
 #include "ui/events/platform/platform_event_source.h"
 #include "ui/gl/gl_implementation.h"
@@ -58,6 +60,10 @@
 #if defined(OS_MACOSX)
 #include "base/message_loop/message_pump_mac.h"
 #include "content/common/sandbox_mac.h"
+#endif
+
+#if defined(OS_CHROMEOS) && defined(ARCH_CPU_X86_FAMILY)
+#include "content/common/gpu/media/vaapi_wrapper.h"
 #endif
 
 #if defined(SANITIZER_COVERAGE)
@@ -154,16 +160,9 @@ int GpuMain(const MainFunctionParams& parameters) {
   bool dead_on_arrival = false;
 
 #if defined(OS_WIN)
-  base::MessageLoop::Type message_loop_type = base::MessageLoop::TYPE_IO;
-  // Unless we're running on desktop GL, we don't need a UI message
-  // loop, so avoid its use to work around apparent problems with some
-  // third-party software.
-  if (command_line.HasSwitch(switches::kUseGL) &&
-      command_line.GetSwitchValueASCII(switches::kUseGL) ==
-          gfx::kGLImplementationDesktopName) {
-    message_loop_type = base::MessageLoop::TYPE_UI;
-  }
-  base::MessageLoop main_message_loop(message_loop_type);
+  // Use a UI message loop because ANGLE and the desktop GL platform can
+  // create child windows to render to.
+  base::MessageLoop main_message_loop(base::MessageLoop::TYPE_UI);
 #elif defined(OS_LINUX) && defined(USE_X11)
   // We need a UI loop so that we can grab the Expose events. See GLSurfaceGLX
   // and https://crbug.com/326995.
@@ -222,6 +221,10 @@ int GpuMain(const MainFunctionParams& parameters) {
   // Get vendor_id, device_id, driver_version from browser process through
   // commandline switches.
   GetGpuInfoFromCommandLine(gpu_info, command_line);
+
+#if defined(OS_CHROMEOS) && defined(ARCH_CPU_X86_FAMILY)
+  VaapiWrapper::PreSandboxInitialization();
+#endif
 
   // Warm up resources that don't need access to GPUInfo.
   if (WarmUpSandbox(command_line)) {
@@ -305,7 +308,8 @@ int GpuMain(const MainFunctionParams& parameters) {
 
     base::TimeDelta initialize_one_off_time =
         base::TimeTicks::Now() - before_initialize_one_off;
-    UMA_HISTOGRAM_TIMES("GPU.InitializeOneOffTime", initialize_one_off_time);
+    UMA_HISTOGRAM_MEDIUM_TIMES("GPU.InitializeOneOffMediumTime",
+                               initialize_one_off_time);
 
     if (enable_watchdog && delayed_watchdog_enable) {
       watchdog_thread = new GpuWatchdogThread(kGpuTimeout);
@@ -336,6 +340,8 @@ int GpuMain(const MainFunctionParams& parameters) {
     gpu_info.sandboxed = Sandbox::SandboxIsCurrentlyActive();
 #endif
 
+    gpu_info.video_decode_accelerator_supported_profiles =
+        content::GpuVideoDecodeAccelerator::GetSupportedProfiles();
     gpu_info.video_encode_accelerator_supported_profiles =
         content::GpuVideoEncodeAccelerator::GetSupportedProfiles();
   } else {

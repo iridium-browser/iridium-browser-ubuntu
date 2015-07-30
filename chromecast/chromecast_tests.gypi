@@ -3,7 +3,22 @@
 # found in the LICENSE file.
 
 {
+  'variables': {
+    'chromium_code': 1
+  },
   'targets': [
+    {
+      'target_name': 'cast_base_unittests',
+      'type': '<(gtest_target_type)',
+      'dependencies': [
+        'chromecast.gyp:cast_base',
+        '../base/base.gyp:run_all_unittests',
+        '../testing/gtest.gyp:gtest',
+      ],
+      'sources': [
+        'base/serializers_unittest.cc',
+      ],
+    },
     {
       'target_name': 'cast_tests',
       'type': 'none',
@@ -23,17 +38,19 @@
       'target_name': 'cast_test_generator',
       'type': 'none',
       'dependencies': [
+        'cast_base_unittests',
         '../base/base.gyp:base_unittests',
-        '../third_party/cacheinvalidation/cacheinvalidation.gyp:cacheinvalidation_unittests',
         '../content/content_shell_and_tests.gyp:content_unittests',
         '../crypto/crypto.gyp:crypto_unittests',
         '../ipc/ipc.gyp:ipc_tests',
         '../jingle/jingle.gyp:jingle_unittests',
         '../media/media.gyp:media_unittests',
+        '../media/midi/midi.gyp:midi_unittests',
         '../net/net.gyp:net_unittests',
         '../sandbox/sandbox.gyp:sandbox_linux_unittests',
         '../sql/sql.gyp:sql_unittests',
         '../sync/sync.gyp:sync_unit_tests',
+        '../third_party/cacheinvalidation/cacheinvalidation.gyp:cacheinvalidation_unittests',
         '../ui/base/ui_base_tests.gyp:ui_base_unittests',
         '../url/url.gyp:url_unittests',
       ],
@@ -48,12 +65,11 @@
               # timeout to 75s from 45s to allow it to pass (b/19821476)
               # ProxyScriptFetcherImplTest.HttpMimeType is flaking (b/19848784)
              'net_unittests --gtest_filter=-KeygenHandlerTest.SmokeTest:KeygenHandlerTest.ConcurrencyTest:ProxyScriptFetcherImplTest.HttpMimeType --test-launcher-timeout=75000',
-              # Disable OutOfMemoryDeathTest.ViaSharedLibraries due to gTrusty eglibc incompatibility (crbug/428211)
               # Disable ProcessMetricsTest.GetNumberOfThreads (b/15610509)
               # Disable ProcessUtilTest.* (need to define OS_ANDROID)
               # Disable StackContainer.BufferAlignment (don't support 16-byte alignment)
               # Disable SystemMetrics2Test.GetSystemMemoryInfo (buffers>0 can't be guaranteed)
-              'base_unittests --gtest_filter=-OutOfMemoryDeathTest.ViaSharedLibraries:ProcessMetricsTest.GetNumberOfThreads:ProcessUtilTest.*:StackContainer.BufferAlignment:SystemMetrics2Test.GetSystemMemoryInfo',
+              'base_unittests --gtest_filter=-ProcessMetricsTest.GetNumberOfThreads:ProcessUtilTest.*:StackContainer.BufferAlignment:SystemMetrics2Test.GetSystemMemoryInfo',
               # DesktopCaptureDeviceTest.*: No capture device on Eureka
               # Disable PepperGamepadHostTest.WaitForReply (pepper not supported on Eureka)
               # Disable GpuDataManagerImplPrivateTest.SetGLStrings and
@@ -83,9 +99,6 @@
         }, { # else "x86" or "android"
           'variables': {
             'filters': [
-              # Disable OutOfMemoryDeathTest.ViaSharedLibraries due to gTrusty eglibc incompatibility
-              # See: crbug/428211
-              'base_unittests --gtest_filter=-OutOfMemoryDeathTest.ViaSharedLibraries',
               # Disable PipelineIntegrationTest.BasicPlayback_MediaSource_VP9_WebM (not supported)
               'media_unittests --gtest_filter=-PipelineIntegrationTest.BasicPlayback_MediaSource_VP9_WebM',
             ],
@@ -99,6 +112,7 @@
         ['OS!="android"', {
           'dependencies': [
             'cast_shell_browser_test',
+            'cast_shell_media_unittests',
             'media/media.gyp:cast_media_unittests',
           ],
           'variables': {
@@ -176,6 +190,7 @@
             '../cc/cc_tests.gyp:cc_unittests_apk',
             '../ipc/ipc.gyp:ipc_tests_apk',
             '../media/media.gyp:media_unittests_apk',
+            '../media/midi/midi.gyp:midi_unittests_apk',
             '../net/net.gyp:net_unittests_apk',
             '../sandbox/sandbox.gyp:sandbox_linux_jni_unittests_apk',
             '../sql/sql.gyp:sql_unittests_apk',
@@ -213,6 +228,26 @@
       ],  # end of targets
     }, {  # OS!="android"
       'targets': [
+        {
+          'target_name': 'cast_shell_media_unittests',
+          'type': '<(gtest_target_type)',
+          'dependencies': [
+            'cast_metrics_test_support',
+            'cast_shell_media',
+            'media/media.gyp:cast_media',
+            '../base/base.gyp:base',
+            '../base/base.gyp:test_support_base',
+            '../ipc/ipc.gyp:test_support_ipc',
+            '../media/media.gyp:media_test_support',
+            '../testing/gmock.gyp:gmock',
+            '../testing/gtest.gyp:gtest',
+            '../testing/gtest.gyp:gtest_main',
+          ],
+          'sources': [
+            'renderer/media/cma_renderer_unittest.cc',
+            'media/cma/test/run_all_unittests.cc',
+          ],
+        },
         {
           'target_name': 'cast_shell_test_support',
           'type': '<(component)',

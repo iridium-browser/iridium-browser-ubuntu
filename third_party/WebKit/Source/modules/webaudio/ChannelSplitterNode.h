@@ -34,16 +34,19 @@ class AudioContext;
 
 class ChannelSplitterHandler final : public AudioHandler {
 public:
-    ChannelSplitterHandler(AudioNode&, float sampleRate, unsigned numberOfOutputs);
+    static PassRefPtr<ChannelSplitterHandler> create(AudioNode&, float sampleRate, unsigned numberOfOutputs);
 
     // AudioHandler
     virtual void process(size_t framesToProcess) override;
+
+private:
+    ChannelSplitterHandler(AudioNode&, float sampleRate, unsigned numberOfOutputs);
 };
 
 class ChannelSplitterNode final : public AudioNode {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static ChannelSplitterNode* create(AudioContext*, float sampleRate, unsigned numberOfOutputs);
+    static ChannelSplitterNode* create(AudioContext&, float sampleRate, unsigned numberOfOutputs);
 
 private:
     ChannelSplitterNode(AudioContext&, float sampleRate, unsigned numberOfOutputs);
