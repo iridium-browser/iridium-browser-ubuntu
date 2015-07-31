@@ -1,3 +1,11 @@
+iridium-browser (44.0.2403.125-0iridium44.0rc1+1) precise; urgency=low
+
+  * Imported Upstream version 44.0.2403.125
+  * Refreshed patches for new upstream version.
+  * Updated iridium-browser patch to 44.0-rc1
+
+ -- Joachim Bauch <bauch@struktur.de>  Fri, 31 Jul 2015 10:10:12 +0200
+
 iridium-browser (43.0.2357.132-0iridium43.8+1) precise; urgency=low
 
   * Update Vcs urls to point to "git.iridiumbrowser.de".
