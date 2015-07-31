@@ -1,7 +1,9 @@
 Source: iridium-browser
 Section: web
 Priority: optional
-Maintainer: Joachim Bauch <bauch@struktur.de>
+Maintainer: Iridium Browser Team <iridium@lists.inai.de>
+Uploaders:
+ Joachim Bauch <bauch@struktur.de>
 XS-Testsuite: autopkgtest
 Homepage: https://www.iridiumbrowser.de
 Vcs-Git: git://git.iridiumbrowser.de/iridium-browser
