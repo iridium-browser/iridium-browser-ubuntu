@@ -1,1 +1,1 @@
-debian/tmp-std/usr/lib/iridium-browser/libffmpegsumo.so usr/lib/iridium-browser
+debian/tmp-std/usr/lib/iridium-browser/libs/libffmpeg.so usr/lib/iridium-browser/libs

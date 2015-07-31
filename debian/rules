@@ -152,6 +152,10 @@ BROWSER_GYP_DEFINES += component=shared_library
 FFMPEG_MT_GYP_DEFINES += component=shared_library
 endif
 
+# Always build ffmpeg as shared library so we can have both regular and -extra.
+BROWSER_GYP_DEFINES += ffmpeg_component=shared_library
+FFMPEG_MT_GYP_DEFINES += ffmpeg_component=shared_library
+
 # Webkit library is enormous. Exclude for now.
 GYP_DEFINES += remove_webcore_debug_symbols=1
 
@@ -201,7 +205,7 @@ BROWSER_GYP_DEFINES += \
 	proprietary_codecs=1 \
 	build_ffmpegsumo=1 \
 	$(NULL)
-FFMPEG_MT_GYP_DEFINES = \
+FFMPEG_MT_GYP_DEFINES += \
 	use_system_vpx=0 \
 	release_extra_cflags=-g \
 	$(NULL)
@@ -301,12 +305,13 @@ override_dh_shlibdeps:
 	dh_shlibdeps -l$(CURDIR)/debian/iridium-browser/usr/lib/iridium-browser/libs/ |grep -v "dpkg-shlibdeps: warning: can't extract name and version from library name" || true
 
 local-install-arch: PKG_DIRS := $(addprefix debian/,$(shell dh_listpackages))
-local-install-arch: TRASH := .deps gen obj.host obj.target \*.lock obj build.\* .landmines mksnapshot.ia32 protoc pyproto re2c resources xdg-mime xdg-settings yasm \*.TOC \*.stamp product_logo_\*png gen\* lib/\* lib libvpx_obj_int_extract libffmpegsumo.so .ninja\* chrome-wrapper \*.breakpad.\* java_mojo dump_syms 
+local-install-arch: TRASH := .deps gen obj.host obj.target \*.lock obj build.\* .landmines mksnapshot.ia32 protoc pyproto re2c resources xdg-mime xdg-settings yasm \*.TOC \*.stamp product_logo_\*png gen\* lib/\* lib libvpx_obj_int_extract .ninja\* chrome-wrapper \*.breakpad.\* java_mojo dump_syms
 local-install-arch:
 	@set -eux
 	# Two stages: Install out of source tree. Copy to packaging.
 	mkdir -p debian/tmp/$(LIB_DIR)
 	(cd $(SRC_DIR)/out/$(BUILD_TYPE); tar cf - . $(foreach excl,$(TRASH),--exclude=$(excl) );) | (cd debian/tmp/$(LIB_DIR); tar xvf -;)
+	rm $(SRC_DIR)/out/$(BUILD_TYPE)/lib/libffmpeg.so
 ifeq (1,$(COMPONENT_SHARED_LIB_BUILD))
 	mkdir -p debian/tmp/$(LIB_DIR)/libs
 	cp $(SRC_DIR)/out/$(BUILD_TYPE)/lib/*.so debian/tmp/$(LIB_DIR)/libs/
@@ -477,8 +482,8 @@ build-stamp-ffmpeg-%:
 
 	### build
 	$(NINJA) $(BUILD_ARGS)
-	mkdir -p debian/tmp-$*/$(LIB_DIR)
-	cp $(SRC_DIR)/out/$(BUILD_TYPE)/libffmpegsumo.so $(CURDIR)/debian/tmp-$*/$(LIB_DIR)
+	mkdir -p debian/tmp-$*/$(LIB_DIR)/libs
+	cp $(SRC_DIR)/out/$(BUILD_TYPE)/lib/libffmpeg.so $(CURDIR)/debian/tmp-$*/$(LIB_DIR)/libs
 	touch $@
 
 
@@ -552,7 +557,7 @@ compare-arch:
 	T=$$(mktemp -d -t iridium-comparisons-XXXXXXX);\
 	test "$${T}"; \
 	test -d $${T};\
-	DUPES=`find $(PKG_DIRS) -type f -print | grep -v /DEBIAN/ | cut -d/ -f3- | LC_ALL=C sort | uniq -c | grep -vE '^ *2 .*/libffmpegsumo.so$$' | grep -vE '^  *1 '` || true; \
+	DUPES=`find $(PKG_DIRS) -type f -print | grep -v /DEBIAN/ | cut -d/ -f3- | LC_ALL=C sort | uniq -c | grep -vE '^ *2 .*/libffmpeg.so$$' | grep -vE '^  *1 '` || true; \
 	if [ "Z$$DUPES" != Z ] ; then \
 	  echo " => Found duplicates:\n $$DUPES" ; \
 	  exit 1 ; \
