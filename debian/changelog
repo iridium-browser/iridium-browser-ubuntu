@@ -1,3 +1,9 @@
+iridium-browser (44.0.2403.125-0iridium44.0rc1+2) precise; urgency=low
+
+  * Need to build ffmpegsumo together with browser to get correct include paths.
+
+ -- Joachim Bauch <bauch@struktur.de>  Fri, 31 Jul 2015 12:25:48 +0200
+
 iridium-browser (44.0.2403.125-0iridium44.0rc1+1) precise; urgency=low
 
   * Imported Upstream version 44.0.2403.125
