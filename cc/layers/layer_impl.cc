@@ -58,6 +58,7 @@ LayerImpl::LayerImpl(LayerTreeImpl* tree_impl,
       stacking_order_changed_(false),
       double_sided_(true),
       should_flatten_transform_(true),
+      should_flatten_transform_from_property_tree_(false),
       layer_property_changed_(false),
       masks_to_bounds_(false),
       contents_opaque_(false),
@@ -72,6 +73,9 @@ LayerImpl::LayerImpl(LayerTreeImpl* tree_impl,
       opacity_(1.0),
       blend_mode_(SkXfermode::kSrcOver_Mode),
       num_descendants_that_draw_content_(0),
+      transform_tree_index_(-1),
+      opacity_tree_index_(-1),
+      clip_tree_index_(-1),
       draw_depth_(0.f),
       needs_push_properties_(false),
       num_dependents_need_push_properties_(0),
@@ -201,6 +205,21 @@ void LayerImpl::SetClipChildren(std::set<LayerImpl*>* children) {
   if (clip_children_.get() == children)
     return;
   clip_children_.reset(children);
+  SetNeedsPushProperties();
+}
+
+void LayerImpl::SetTransformTreeIndex(int index) {
+  transform_tree_index_ = index;
+  SetNeedsPushProperties();
+}
+
+void LayerImpl::SetClipTreeIndex(int index) {
+  clip_tree_index_ = index;
+  SetNeedsPushProperties();
+}
+
+void LayerImpl::SetOpacityTreeIndex(int index) {
+  opacity_tree_index_ = index;
   SetNeedsPushProperties();
 }
 
@@ -531,6 +550,8 @@ void LayerImpl::PushPropertiesTo(LayerImpl* layer) {
       is_container_for_fixed_position_layers_);
   layer->SetPositionConstraint(position_constraint_);
   layer->SetShouldFlattenTransform(should_flatten_transform_);
+  layer->set_should_flatten_transform_from_property_tree(
+      should_flatten_transform_from_property_tree_);
   layer->SetUseParentBackfaceVisibility(use_parent_backface_visibility_);
   layer->SetTransformAndInvertibility(transform_, transform_is_invertible_);
 
@@ -545,6 +566,11 @@ void LayerImpl::PushPropertiesTo(LayerImpl* layer) {
 
   layer->Set3dSortingContextId(sorting_context_id_);
   layer->SetNumDescendantsThatDrawContent(num_descendants_that_draw_content_);
+
+  layer->SetTransformTreeIndex(transform_tree_index_);
+  layer->SetClipTreeIndex(clip_tree_index_);
+  layer->SetOpacityTreeIndex(opacity_tree_index_);
+  layer->set_offset_to_transform_parent(offset_to_transform_parent_);
 
   LayerImpl* scroll_parent = nullptr;
   if (scroll_parent_) {
@@ -733,6 +759,23 @@ void LayerImpl::NoteLayerPropertyChangedForDescendants() {
   for (size_t i = 0; i < children_.size(); ++i)
     children_[i]->NoteLayerPropertyChangedForDescendantsInternal();
   SetNeedsPushProperties();
+}
+
+#if DCHECK_IS_ON()
+// Verify that the resource id is valid.
+static ResourceProvider::ResourceId ValidateResource(
+    const ResourceProvider* provider,
+    ResourceProvider::ResourceId id) {
+  provider->ValidateResource(id);
+  return id;
+}
+#endif
+
+void LayerImpl::ValidateQuadResourcesInternal(DrawQuad* quad) const {
+#if DCHECK_IS_ON()
+  quad->IterateResources(
+      base::Bind(&ValidateResource, layer_tree_impl_->resource_provider()));
+#endif
 }
 
 const char* LayerImpl::LayerTypeAsString() const {
@@ -1193,6 +1236,12 @@ void LayerImpl::DidUpdateScrollOffset(bool is_from_root_delegate) {
     layer_tree_impl()->DidUpdateScrollOffset(id());
   NoteLayerPropertyChangedForSubtree();
   ScrollbarParametersDidChange(false);
+  // Inform the pending twin that a property changed.
+  if (layer_tree_impl()->IsActiveTree()) {
+    LayerImpl* pending_twin = layer_tree_impl()->FindPendingTreeLayerById(id());
+    if (pending_twin)
+      pending_twin->NoteLayerPropertyChangedForSubtree();
+  }
 }
 
 void LayerImpl::SetDoubleSided(bool double_sided) {
@@ -1428,8 +1477,8 @@ void LayerImpl::RemoveDependentNeedsPushProperties() {
       parent_->RemoveDependentNeedsPushProperties();
 }
 
-void LayerImpl::GetAllTilesAndPrioritiesForTracing(
-    std::map<const Tile*, TilePriority>* tile_map) const {
+void LayerImpl::GetAllPrioritizedTilesForTracing(
+    std::vector<PrioritizedTile>* prioritized_tiles) const {
 }
 
 void LayerImpl::AsValueInto(base::trace_event::TracedValue* state) const {
@@ -1538,7 +1587,7 @@ void LayerImpl::AsValueInto(base::trace_event::TracedValue* state) const {
       DCHECK(converted_to_dictionary);
       for (base::DictionaryValue::Iterator it(*dictionary_value); !it.IsAtEnd();
            it.Advance()) {
-        state->SetValue(it.key().data(), it.value().DeepCopy());
+        state->SetValue(it.key().data(), it.value().CreateDeepCopy());
       }
     } else {
       NOTREACHED();

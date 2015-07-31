@@ -15,20 +15,19 @@
 #include "ui/events/ozone/device/device_manager.h"
 #include "ui/events/ozone/evdev/event_factory_evdev.h"
 #include "ui/events/ozone/layout/keyboard_layout_engine_manager.h"
+#include "ui/ozone/platform/drm/common/drm_util.h"
 #include "ui/ozone/platform/drm/gbm_surface_factory.h"
 #include "ui/ozone/platform/drm/gpu/drm_device_generator.h"
 #include "ui/ozone/platform/drm/gpu/drm_device_manager.h"
 #include "ui/ozone/platform/drm/gpu/drm_gpu_display_manager.h"
 #include "ui/ozone/platform/drm/gpu/drm_gpu_platform_support.h"
-#include "ui/ozone/platform/drm/gpu/drm_util.h"
 #include "ui/ozone/platform/drm/gpu/gbm_buffer.h"
 #include "ui/ozone/platform/drm/gpu/gbm_device.h"
 #include "ui/ozone/platform/drm/gpu/gbm_surface.h"
-#include "ui/ozone/platform/drm/gpu/gpu_lock.h"
 #include "ui/ozone/platform/drm/gpu/scanout_buffer.h"
 #include "ui/ozone/platform/drm/gpu/screen_manager.h"
-#include "ui/ozone/platform/drm/host/display_manager.h"
 #include "ui/ozone/platform/drm/host/drm_cursor.h"
+#include "ui/ozone/platform/drm/host/drm_display_host_manager.h"
 #include "ui/ozone/platform/drm/host/drm_gpu_platform_support_host.h"
 #include "ui/ozone/platform/drm/host/drm_native_display_delegate.h"
 #include "ui/ozone/platform/drm/host/drm_window_host.h"
@@ -79,7 +78,7 @@ class GbmBufferGenerator : public ScanoutBufferGenerator {
   scoped_refptr<ScanoutBuffer> Create(const scoped_refptr<DrmDevice>& drm,
                                       const gfx::Size& size) override {
     scoped_refptr<GbmDevice> gbm(static_cast<GbmDevice*>(drm.get()));
-    return GbmBuffer::CreateBuffer(gbm, SurfaceFactoryOzone::RGBA_8888, size,
+    return GbmBuffer::CreateBuffer(gbm, SurfaceFactoryOzone::BGRA_8888, size,
                                    true);
   }
 
@@ -141,13 +140,10 @@ class OzonePlatformGbm : public OzonePlatform {
     return platform_window.Pass();
   }
   scoped_ptr<NativeDisplayDelegate> CreateNativeDisplayDelegate() override {
-    return make_scoped_ptr(new DrmNativeDisplayDelegate(
-        gpu_platform_support_host_.get(), device_manager_.get(),
-        display_manager_.get(), primary_graphics_card_path_));
+    return make_scoped_ptr(
+        new DrmNativeDisplayDelegate(display_manager_.get()));
   }
   void InitializeUI() override {
-    primary_graphics_card_path_ = GetPrimaryDisplayCardPath();
-    display_manager_.reset(new DisplayManager());
     // Needed since the browser process creates the accelerated widgets and that
     // happens through SFO.
     if (!surface_factory_ozone_)
@@ -157,6 +153,8 @@ class OzonePlatformGbm : public OzonePlatform {
     cursor_.reset(new DrmCursor(window_manager_.get()));
     gpu_platform_support_host_.reset(
         new DrmGpuPlatformSupportHost(cursor_.get()));
+    display_manager_.reset(new DrmDisplayHostManager(
+        gpu_platform_support_host_.get(), device_manager_.get()));
     cursor_factory_ozone_.reset(new BitmapCursorFactoryOzone);
 #if defined(USE_XKBCOMMON)
     KeyboardLayoutEngineManager::SetKeyboardLayoutEngine(make_scoped_ptr(
@@ -171,30 +169,18 @@ class OzonePlatformGbm : public OzonePlatform {
   }
 
   void InitializeGPU() override {
-#if defined(OS_CHROMEOS)
-    gpu_lock_.reset(new GpuLock());
-#endif
     gl_api_loader_.reset(new GlApiLoader());
-    // Async page flips are supported only on surfaceless mode.
-    gbm_ = new GbmDevice(GetPrimaryDisplayCardPath());
-    if (!gbm_->Initialize())
-      LOG(FATAL) << "Failed to initialize primary DRM device";
-
-    drm_device_manager_.reset(new DrmDeviceManager(gbm_));
+    drm_device_manager_.reset(new DrmDeviceManager(
+        scoped_ptr<DrmDeviceGenerator>(new GbmDeviceGenerator())));
     buffer_generator_.reset(new GbmBufferGenerator());
     screen_manager_.reset(new ScreenManager(buffer_generator_.get()));
-    // This makes sure that simple targets that do not handle display
-    // configuration can still use the primary display.
-    ForceInitializationOfPrimaryDisplay(gbm_, screen_manager_.get());
-
     if (!surface_factory_ozone_)
       surface_factory_ozone_.reset(new GbmSurfaceFactory(use_surfaceless_));
 
     surface_factory_ozone_->InitializeGpu(drm_device_manager_.get(),
                                           screen_manager_.get());
     scoped_ptr<DrmGpuDisplayManager> ndd(new DrmGpuDisplayManager(
-        screen_manager_.get(), gbm_,
-        scoped_ptr<DrmDeviceGenerator>(new GbmDeviceGenerator())));
+        screen_manager_.get(), drm_device_manager_.get()));
     gpu_platform_support_.reset(new DrmGpuPlatformSupport(
         drm_device_manager_.get(), screen_manager_.get(), ndd.Pass()));
   }
@@ -205,23 +191,20 @@ class OzonePlatformGbm : public OzonePlatform {
   scoped_ptr<GbmSurfaceFactory> surface_factory_ozone_;
 
   // Objects in the GPU process.
-  scoped_ptr<GpuLock> gpu_lock_;
   scoped_ptr<GlApiLoader> gl_api_loader_;
-  scoped_refptr<GbmDevice> gbm_;
   scoped_ptr<DrmDeviceManager> drm_device_manager_;
   scoped_ptr<GbmBufferGenerator> buffer_generator_;
   scoped_ptr<ScreenManager> screen_manager_;
   scoped_ptr<DrmGpuPlatformSupport> gpu_platform_support_;
 
   // Objects in the Browser process.
-  base::FilePath primary_graphics_card_path_;
   scoped_ptr<DeviceManager> device_manager_;
   scoped_ptr<BitmapCursorFactoryOzone> cursor_factory_ozone_;
   scoped_ptr<DrmWindowHostManager> window_manager_;
   scoped_ptr<DrmCursor> cursor_;
   scoped_ptr<EventFactoryEvdev> event_factory_ozone_;
   scoped_ptr<DrmGpuPlatformSupportHost> gpu_platform_support_host_;
-  scoped_ptr<DisplayManager> display_manager_;
+  scoped_ptr<DrmDisplayHostManager> display_manager_;
 
 #if defined(USE_XKBCOMMON)
   XkbEvdevCodes xkb_evdev_code_converter_;

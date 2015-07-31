@@ -31,7 +31,7 @@ namespace blink {
 class ExceptionState;
 class LayoutText;
 
-class Text : public CharacterData {
+class CORE_EXPORT Text : public CharacterData {
     DEFINE_WRAPPERTYPEINFO();
 public:
     static const unsigned defaultLengthLimit = 1 << 16;
@@ -48,13 +48,13 @@ public:
 
     // DOM Level 3: http://www.w3.org/TR/DOM-Level-3-Core/core.html#ID-1312295772
 
-    CORE_EXPORT String wholeText() const;
+    String wholeText() const;
     PassRefPtrWillBeRawPtr<Text> replaceWholeText(const String&);
 
     void recalcTextStyle(StyleRecalcChange, Text* nextTextSibling);
-    bool textRendererIsNeeded(const ComputedStyle&, const LayoutObject& parent);
-    LayoutText* createTextRenderer(const ComputedStyle&);
-    void updateTextRenderer(unsigned offsetOfReplacedData, unsigned lengthOfReplacedData, RecalcStyleBehavior = DoNotRecalcStyle);
+    bool textLayoutObjectIsNeeded(const ComputedStyle&, const LayoutObject& parent);
+    LayoutText* createTextLayoutObject(const ComputedStyle&);
+    void updateTextLayoutObject(unsigned offsetOfReplacedData, unsigned lengthOfReplacedData, RecalcStyleBehavior = DoNotRecalcStyle);
 
     virtual void attach(const AttachContext& = AttachContext()) override final;
     void reattachIfNeeded(const AttachContext& = AttachContext());
@@ -74,7 +74,7 @@ private:
 
     bool isTextNode() const = delete; // This will catch anyone doing an unnecessary check.
 
-    bool needsWhitespaceRenderer();
+    bool needsWhitespaceLayoutObject();
 
     virtual PassRefPtrWillBeRawPtr<Text> cloneWithData(const String&);
 

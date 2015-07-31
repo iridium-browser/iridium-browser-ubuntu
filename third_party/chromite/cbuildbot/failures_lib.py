@@ -8,6 +8,7 @@ from __future__ import print_function
 
 import collections
 import sys
+import traceback
 
 from chromite.cbuildbot import constants
 from chromite.lib import cros_build_lib
@@ -160,12 +161,12 @@ class SetFailureType(object):
       except self.source_exception:
         # Get the information about the original exception.
         exc_type, exc_value, _ = sys.exc_info()
+        exc_traceback = traceback.format_exc()
         if issubclass(exc_type, self.category_exception):
           # Do not re-raise if the exception is a subclass of the set
           # exception type because it offers more information.
           raise
         else:
-          exc_traceback = cros_build_lib.FormatDetailedTraceback()
           exc_infos = CreateExceptInfo(exc_value, exc_traceback)
           raise self.category_exception(exc_infos=exc_infos)
 
@@ -370,7 +371,7 @@ class BuildFailureMessage(object):
     """Check if all of the failures are package build failures."""
     return self.MatchesFailureType(PackageBuildFailure)
 
-  def FindPackageBuildFailureSuspects(self, changes):
+  def FindPackageBuildFailureSuspects(self, changes, sanity):
     """Figure out what changes probably caused our failures.
 
     We use a fairly simplistic algorithm to calculate breakage: If you changed
@@ -394,6 +395,8 @@ class BuildFailureMessage(object):
 
     Args:
       changes: List of changes to examine.
+      sanity: The sanity checker builder passed and the tree was open when
+              the build started.
 
     Returns:
       Set of changes that likely caused the failure.
@@ -403,7 +406,14 @@ class BuildFailureMessage(object):
     blame_everything = False
     suspects = set()
     for tb in self.tracebacks:
-      for package in tb.exception.failed_packages:
+      # Only look at PackageBuildFailure objects.
+      failed_packages = []
+      if isinstance(tb.exception, PackageBuildFailure):
+        failed_packages = tb.exception.failed_packages
+      else:
+        blame_everything = True
+
+      for package in failed_packages:
         failed_projects = portage_util.FindWorkonProjects([package])
         blame_assigned = False
         for change in changes:
@@ -413,12 +423,15 @@ class BuildFailureMessage(object):
         if not blame_assigned:
           blame_everything = True
 
-    if blame_everything or not suspects:
-      suspects = changes[:]
-    else:
-      # Never treat changes to overlays as innocent.
-      suspects.update(change for change in changes
-                      if '/overlays/' in change.project)
+    # Only do broad-brush blaming if the tree is sane.
+    if sanity:
+      if blame_everything or not suspects:
+        suspects = changes[:]
+      else:
+        # Never treat changes to overlays as innocent.
+        suspects.update(change for change in changes
+                        if '/overlays/' in change.project)
+
     return suspects
 
 

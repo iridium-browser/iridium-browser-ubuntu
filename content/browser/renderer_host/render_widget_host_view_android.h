@@ -60,26 +60,6 @@ class RenderWidgetHostImpl;
 struct DidOverscrollParams;
 struct NativeWebKeyboardEvent;
 
-class ReadbackRequest {
- public:
-  explicit ReadbackRequest(float scale,
-                           SkColorType color_type,
-                           gfx::Rect src_subrect,
-                           ReadbackRequestCallback& result_callback);
-  ~ReadbackRequest();
-  float GetScale() { return scale_; }
-  SkColorType GetColorFormat() { return color_type_; }
-  const gfx::Rect GetCaptureRect() { return src_subrect_; }
-  ReadbackRequestCallback& GetResultCallback() { return result_callback_; }
-
- private:
-  ReadbackRequest();
-  float scale_;
-  SkColorType color_type_;
-  gfx::Rect src_subrect_;
-  ReadbackRequestCallback result_callback_;
-};
-
 // -----------------------------------------------------------------------------
 // See comments in render_widget_host_view.h about this class and its members.
 // -----------------------------------------------------------------------------
@@ -97,6 +77,8 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
                               ContentViewCoreImpl* content_view_core);
   ~RenderWidgetHostViewAndroid() override;
 
+  void Blur();
+
   // RenderWidgetHostView implementation.
   bool OnMessageReceived(const IPC::Message& msg) override;
   void InitAsChild(gfx::NativeView parent_view) override;
@@ -112,7 +94,6 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   gfx::NativeViewAccessible GetNativeViewAccessible() override;
   void MovePluginWindows(const std::vector<WebPluginGeometry>& moves) override;
   void Focus() override;
-  void Blur() override;
   bool HasFocus() const override;
   bool IsSurfaceAvailableForCopy() const override;
   void Show() override;
@@ -145,10 +126,11 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   void AcceleratedSurfaceInitialized(int route_id) override;
   bool HasAcceleratedSurface(const gfx::Size& desired_size) override;
   void SetBackgroundColor(SkColor color) override;
-  void CopyFromCompositingSurface(const gfx::Rect& src_subrect,
-                                  const gfx::Size& dst_size,
-                                  ReadbackRequestCallback& callback,
-                                  const SkColorType color_type) override;
+  void CopyFromCompositingSurface(
+      const gfx::Rect& src_subrect,
+      const gfx::Size& dst_size,
+      ReadbackRequestCallback& callback,
+      const SkColorType preferred_color_type) override;
   void CopyFromCompositingSurfaceToVideoFrame(
       const gfx::Rect& src_subrect,
       const scoped_refptr<media::VideoFrame>& target,
@@ -193,16 +175,17 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
 
   // ui::WindowAndroidObserver implementation.
   void OnCompositingDidCommit() override;
+  void OnRootWindowVisibilityChanged(bool visible) override;
   void OnAttachCompositor() override;
   void OnDetachCompositor() override;
   void OnVSync(base::TimeTicks frame_time,
                base::TimeDelta vsync_period) override;
   void OnAnimate(base::TimeTicks begin_frame_time) override;
+  void OnActivityPaused() override;
+  void OnActivityResumed() override;
 
   // DelegatedFrameEvictor implementation
   void EvictDelegatedFrame() override;
-
-  SkColorType PreferredReadbackFormat() override;
 
   // StylusTextSelectorClient implementation.
   void OnStylusSelectBegin(float x0, float y0, float x1, float y1) override;
@@ -217,8 +200,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   void MoveRangeSelectionExtent(const gfx::PointF& extent) override;
   void SelectBetweenCoordinates(const gfx::PointF& base,
                                 const gfx::PointF& extent) override;
-  void OnSelectionEvent(ui::SelectionEventType event,
-                        const gfx::PointF& anchor_position) override;
+  void OnSelectionEvent(ui::SelectionEventType event) override;
   scoped_ptr<ui::TouchHandleDrawable> CreateDrawable() override;
 
   // Non-virtual methods
@@ -248,7 +230,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   void WasResized();
 
   void GetScaledContentBitmap(float scale,
-                              SkColorType color_type,
+                              SkColorType preferred_color_type,
                               gfx::Rect src_subrect,
                               ReadbackRequestCallback& result_callback);
 
@@ -290,6 +272,8 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
       const cc::CompositorFrameMetadata& frame_metadata);
   void ComputeContentsSize(const cc::CompositorFrameMetadata& frame_metadata);
 
+  void ShowInternal();
+  void HideInternal(bool hide_frontbuffer, bool stop_observing_root_window);
   void AttachLayers();
   void RemoveLayers();
 
@@ -297,13 +281,13 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   // of the copy.
   static void PrepareTextureCopyOutputResult(
       const gfx::Size& dst_size_in_pixel,
-      const SkColorType color_type,
+      SkColorType color_type,
       const base::TimeTicks& start_time,
       ReadbackRequestCallback& callback,
       scoped_ptr<cc::CopyOutputResult> result);
   static void PrepareTextureCopyOutputResultForDelegatedReadback(
       const gfx::Size& dst_size_in_pixel,
-      const SkColorType color_type,
+      SkColorType color_type,
       const base::TimeTicks& start_time,
       scoped_refptr<cc::Layer> readback_layer,
       ReadbackRequestCallback& callback,
@@ -339,9 +323,7 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   void StopObservingRootWindow();
   void SendBeginFrame(base::TimeTicks frame_time, base::TimeDelta vsync_period);
   bool Animate(base::TimeTicks frame_time);
-
-  // Handles all unprocessed and pending readback requests.
-  void AbortPendingReadbackRequests();
+  void RequestDisallowInterceptTouchEvent();
 
   // The model object.
   RenderWidgetHostImpl* host_;
@@ -427,9 +409,6 @@ class CONTENT_EXPORT RenderWidgetHostViewAndroid
   scoped_ptr<LastFrameInfo> last_frame_info_;
 
   TextSurroundingSelectionCallback text_surrounding_selection_callback_;
-
-  // List of readbackrequests waiting for arrival of a valid frame.
-  std::queue<ReadbackRequest> readbacks_waiting_for_frame_;
 
   // The last scroll offset of the view.
   gfx::Vector2dF last_scroll_offset_;

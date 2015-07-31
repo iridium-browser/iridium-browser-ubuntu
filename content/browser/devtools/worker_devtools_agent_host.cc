@@ -11,10 +11,6 @@
 
 namespace content {
 
-bool WorkerDevToolsAgentHost::IsWorker() const {
-  return true;
-}
-
 BrowserContext* WorkerDevToolsAgentHost::GetBrowserContext() {
   RenderProcessHost* rph = RenderProcessHost::FromID(worker_id_.first);
   return rph ? rph->GetBrowserContext() : nullptr;
@@ -39,8 +35,9 @@ void WorkerDevToolsAgentHost::Attach() {
   IPCDevToolsAgentHost::Attach();
 }
 
-void WorkerDevToolsAgentHost::OnClientAttached() {
-  DevToolsAgentHostImpl::NotifyCallbacks(this, true);
+void WorkerDevToolsAgentHost::OnClientAttached(bool reattached) {
+  if (!reattached)
+    DevToolsAgentHostImpl::NotifyCallbacks(this, true);
 }
 
 void WorkerDevToolsAgentHost::OnClientDetached() {

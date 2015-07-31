@@ -4,6 +4,7 @@
 
 import unittest
 
+from telemetry import decorators
 from telemetry.core.backends.chrome_inspector import inspector_websocket
 from telemetry.core.backends.chrome_inspector import websocket
 from telemetry.unittest_util import simple_mock
@@ -51,6 +52,7 @@ class InspectorWebsocketUnittest(unittest.TestCase):
   def tearDown(self):
     self._mock_timer.Restore()
 
+  @decorators.Disabled('chromeos')  # crbug.com/483212
   def testDispatchNotification(self):
     inspector = inspector_websocket.InspectorWebsocket()
     fake_socket = FakeSocket(self._mock_timer)
@@ -67,6 +69,7 @@ class InspectorWebsocketUnittest(unittest.TestCase):
     self.assertEqual(1, len(results))
     self.assertEqual('Test.foo', results[0]['method'])
 
+  @decorators.Disabled('chromeos')  # crbug.com/483212
   def testDispatchNotificationTimedOut(self):
     inspector = inspector_websocket.InspectorWebsocket()
     fake_socket = FakeSocket(self._mock_timer)
@@ -84,6 +87,7 @@ class InspectorWebsocketUnittest(unittest.TestCase):
       inspector.DispatchNotifications(timeout=10)
     self.assertEqual(0, len(results))
 
+  @decorators.Disabled('chromeos')  # crbug.com/483212
   def testUnregisterDomain(self):
     inspector = inspector_websocket.InspectorWebsocket()
     fake_socket = FakeSocket(self._mock_timer)
@@ -108,6 +112,7 @@ class InspectorWebsocketUnittest(unittest.TestCase):
     self.assertEqual(1, len(results))
     self.assertEqual('Test2.foo', results[0]['method'])
 
+  @decorators.Disabled('chromeos')  # crbug.com/483212
   def testUnregisterDomainWithUnregisteredDomain(self):
     inspector = inspector_websocket.InspectorWebsocket()
     with self.assertRaises(AssertionError):

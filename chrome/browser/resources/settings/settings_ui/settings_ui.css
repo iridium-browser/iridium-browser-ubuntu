@@ -10,6 +10,6 @@
   height: 100%;
 }
 
-cr-settings-main core-icon-button {
+cr-settings-main paper-icon-button {
   z-index: 10;
 }

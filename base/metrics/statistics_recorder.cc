@@ -31,7 +31,6 @@ void StatisticsRecorder::Initialize() {
   g_statistics_recorder_.Get();
 }
 
-
 // static
 bool StatisticsRecorder::IsActive() {
   if (lock_ == NULL)
@@ -287,8 +286,6 @@ StatisticsRecorder::StatisticsRecorder() {
 
 // static
 void StatisticsRecorder::DumpHistogramsToVlog(void* instance) {
-  DCHECK(VLOG_IS_ON(1));
-
   string output;
   StatisticsRecorder::WriteGraph(std::string(), &output);
   VLOG(1) << output;

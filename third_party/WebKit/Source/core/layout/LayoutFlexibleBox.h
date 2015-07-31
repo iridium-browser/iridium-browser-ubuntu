@@ -77,6 +77,12 @@ private:
         NoFlipForRowReverse,
     };
 
+    enum ChildLayoutType {
+        LayoutIfNeeded,
+        ForceLayout,
+        NeverLayout
+    };
+
     typedef HashMap<const LayoutBox*, LayoutUnit> InflexibleFlexItemSize;
     typedef Vector<LayoutBox*> OrderedFlexItemList;
 
@@ -123,10 +129,11 @@ private:
     void adjustAlignmentForChild(LayoutBox& child, LayoutUnit);
     ItemPosition alignmentForChild(LayoutBox& child) const;
     LayoutUnit mainAxisBorderAndPaddingExtentForChild(LayoutBox& child) const;
-    LayoutUnit preferredMainAxisContentExtentForChild(LayoutBox& child, bool relayoutChildren = false);
-    bool preferredMainAxisExtentDependsOnLayout(const Length& flexBasis) const;
-    bool childPreferredMainAxisContentExtentRequiresLayout(LayoutBox& child) const;
+    LayoutUnit computeInnerFlexBaseSizeForChild(LayoutBox& child, ChildLayoutType = LayoutIfNeeded);
+    bool mainAxisLengthIsIndefinite(const Length& flexBasis) const;
+    bool childFlexBaseSizeRequiresLayout(LayoutBox& child) const;
     bool needToStretchChildLogicalHeight(LayoutBox& child) const;
+    EOverflow mainAxisOverflowForChild(LayoutBox& child) const;
 
     void layoutFlexItems(bool relayoutChildren);
     LayoutUnit autoMarginOffsetInMainAxis(const OrderedFlexItemList&, LayoutUnit& availableFreeSpace);
@@ -143,7 +150,7 @@ private:
 
     LayoutUnit computeChildMarginValue(Length margin);
     void prepareOrderIteratorAndMargins();
-    LayoutUnit adjustChildSizeForMinAndMax(LayoutBox& child, LayoutUnit childSize);
+    LayoutUnit adjustChildSizeForMinAndMax(LayoutBox& child, LayoutUnit childSize, bool childShrunk = false);
     // The hypothetical main size of an item is the flex base size clamped according to its min and max main size properties
     bool computeNextFlexLine(OrderedFlexItemList& orderedChildren, LayoutUnit& sumFlexBaseSize, double& totalFlexGrow, double& totalWeightedFlexShrink, LayoutUnit& sumHypotheticalMainSize, bool relayoutChildren);
 

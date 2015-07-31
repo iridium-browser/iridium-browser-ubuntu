@@ -18,6 +18,11 @@ class _ThreadTimes(benchmark.Benchmark):
   def Name(cls):
     return 'thread_times'
 
+  @classmethod
+  def ValueCanBeAddedPredicate(cls, value, _):
+    # Default to only reporting per-frame metrics.
+    return 'per_second' not in value.name
+
   def CreatePageTest(self, options):
     return thread_times.ThreadTimes(options.report_silk_details)
 
@@ -89,3 +94,17 @@ class ThreadTimesPolymer(_ThreadTimes):
   def Name(cls):
     return 'thread_times.polymer'
 
+@benchmark.Enabled('android')
+class ThreadTimesKeyIdlePowerCases(_ThreadTimes):
+  """Measures timeline metrics for sites that should be idle in foreground
+  and background scenarios. The metrics are per-second rather than per-frame."""
+  page_set = page_sets.KeyIdlePowerCasesPageSet
+
+  @classmethod
+  def Name(cls):
+    return 'thread_times.key_idle_power_cases'
+
+  @classmethod
+  def ValueCanBeAddedPredicate(cls, value, _):
+    # Only report per-second metrics.
+    return 'per_frame' not in value.name and 'mean_frame' not in value.name

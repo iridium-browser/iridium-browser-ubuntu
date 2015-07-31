@@ -27,10 +27,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-label {
-    cursor: pointer;
-}
-
 label:hover input {
     box-shadow: 0 0 3px highlight;
 }
@@ -62,6 +58,25 @@ body .inspector-view-tabbed-pane.tabbed-pane::shadow .tabbed-pane-header {
     flex: 0 0 24px;
 }
 
+.material .inspector-view-tabbed-pane.tabbed-pane::shadow .tabbed-pane-header {
+    flex: 0 0 28px;
+    overflow: visible;
+}
+
+.inspector-view-tabbed-pane.tabbed-pane::shadow .tabbed-pane-header-tab {
+    height: 23px;
+}
+
+.material .inspector-view-tabbed-pane.tabbed-pane::shadow .tabbed-pane-header-tab {
+    height: 27px;
+    border: none;
+    transition: background-color 100ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.material .inspector-view-tabbed-pane.tabbed-pane::shadow .tabbed-pane-header-tab:hover {
+    background-color: rgba(105, 105, 105, 0.1);
+}
+
 .inspector-view-toolbar-left {
     padding-left: 2px;
     margin-right: -5px; /* Should compensate for .tabbed-pane-header-contents margin-left. */
@@ -71,7 +86,19 @@ body .inspector-view-tabbed-pane.tabbed-pane::shadow .tabbed-pane-header {
 .inspector-view-tabbed-pane.tabbed-pane::shadow .tabbed-pane-header-tab.selected {
     border-width: 0 2px 0 2px;
     background: none;
-    padding-right: 3px;
+    margin: 0;
+    padding: 0 3px;
+}
+
+.material .inspector-view-tabbed-pane.tabbed-pane::shadow .tabbed-pane-header-tab,
+.material .inspector-view-tabbed-pane.tabbed-pane::shadow .tabbed-pane-header-tab.selected {
+    padding: 0 6px;
+    transition: background-color 150ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.material .inspector-view-tabbed-pane.tabbed-pane::shadow .tabbed-pane-header-tab.selected {
+    border: none;
+    background-color: rgba(105, 105, 105, 0.1);
 }
 
 .inspector-view-tabbed-pane.tabbed-pane::shadow .tabbed-pane-header-tab.selected {
@@ -80,9 +107,9 @@ body .inspector-view-tabbed-pane.tabbed-pane::shadow .tabbed-pane-header {
 }
 
 .inspector-view-close-button {
-    float: right;
     padding-right: 6px;
     padding-left: 4px;
+    cursor: default;
 }
 
 body.undocked .inspector-view-close-button {
@@ -104,48 +131,6 @@ body.undocked.platform-mac.inactive .inspector-view-tabbed-pane.tabbed-pane::sha
     color: #555 !important;
 }
 
-.close-button,
-.close-button-gray {
-    background-image: url(Images/statusbarButtonGlyphs.png);
-    background-size: 320px 144px;
-    display: inline-block;
-}
-
-.close-button {
-    width: 14px;
-    height: 14px;
-    background-position: -128px -96px;
-}
-
-.close-button-gray {
-    width: 13px;
-    height: 13px;
-    background-position: -175px -96px;
-}
-
-@media (-webkit-min-device-pixel-ratio: 1.5) {
-.close-button,
-.close-button-gray {
-    background-image: url(Images/statusbarButtonGlyphs_2x.png);
-}
-} /* media */
-
-.close-button:hover {
-    background-position: -96px -96px;
-}
-
-.close-button:active {
-    background-position: -111px -96px;
-}
-
-.close-button-gray:hover {
-    background-position: -143px -96px;
-}
-
-.close-button-gray:active {
-    background-position: -160px -96px;
-}
-
 .bubble-repeat-count {
     display: inline-block;
     height: 14px;
@@ -161,27 +146,6 @@ body.undocked.platform-mac.inactive .inspector-view-tabbed-pane.tabbed-pane::sha
     color: white;
     margin-top: -1px;
     border-radius: 7px;
-}
-
-.object-info-state-note {
-    display: inline-block;
-    width: 11px;
-    height: 11px;
-    background-color: rgb(179, 203, 247);
-    color: white;
-    text-align: center;
-    border-radius: 3px;
-    line-height: 13px;
-    margin: 0 6px;
-    font-size: 9px;
-}
-
-.object-info-state-note::before {
-    content: "i";
-}
-
-.section:not(.expanded) .object-info-state-note {
-    display: none;
 }
 
 .error-message {
@@ -208,6 +172,7 @@ body.undocked.platform-mac.inactive .inspector-view-tabbed-pane.tabbed-pane::sha
 }
 
 iframe.extension {
+    flex: auto;
     width: 100%;
     height: 100%;
 }
@@ -293,7 +258,7 @@ ol.outline-disclosure:focus li.selected * {
 .outline-disclosure li::before {
     float: left;
     -webkit-user-select: none;
-    -webkit-mask-image: url(Images/statusbarButtonGlyphs.png);
+    -webkit-mask-image: url(Images/toolbarButtonGlyphs.png);
     -webkit-mask-size: 320px 144px;
     content: "a";
     color: transparent;
@@ -311,7 +276,7 @@ ol.outline-disclosure:focus li.selected * {
 
 @media (-webkit-min-device-pixel-ratio: 1.5) {
 .outline-disclosure li::before {
-    -webkit-mask-image: url(Images/statusbarButtonGlyphs_2x.png);
+    -webkit-mask-image: url(Images/toolbarButtonGlyphs_2x.png);
 }
 } /* media */
 
@@ -447,7 +412,7 @@ ol.outline-disclosure:focus li.selected * {
     width: 10px;
     height: 10px;
     border: 0;
-    -webkit-mask-image: url(Images/statusbarButtonGlyphs.png);
+    -webkit-mask-image: url(Images/toolbarButtonGlyphs.png);
     -webkit-mask-size: 320px 144px;
     -webkit-appearance: none;
     background-color: rgba(0, 0, 0, 0.75);
@@ -457,7 +422,7 @@ ol.outline-disclosure:focus li.selected * {
 
 @media (-webkit-min-device-pixel-ratio: 1.5) {
 .sidebar-tree-item .disclosure-button {
-    -webkit-mask-image: url(Images/statusbarButtonGlyphs_2x.png);
+    -webkit-mask-image: url(Images/toolbarButtonGlyphs_2x.png);
 }
 } /* media */
 
@@ -650,11 +615,6 @@ body.inactive .sidebar-tree-item.selected {
     background-color: rgb(216, 35, 35) !important;
 }
 
-.source-frame-eval-expression {
-    outline: 1px solid rgb(163, 41, 34);
-    background-color: rgb(255, 255, 194);
-}
-
 .soft-context-menu-glass-pane {
     z-index: 20000;
 }
@@ -722,25 +682,4 @@ body.inactive select.chrome-select,
     box-shadow: 0 1px 0 rgba(80, 80, 80, 0.08),
     inset 0 1px 2px rgba(255, 255, 255, 0.75);
     color: #aaa;
-}
-
-.custom-expandable-section::before {
-    -webkit-user-select: none;
-    background-image: url(Images/statusbarButtonGlyphs.png);
-    background-size: 320px 144px;
-    opacity: 0.5;
-    content: "a";
-    width: 8px;
-    margin-right: 4px;
-    padding-right: 2px;
-    color: transparent;
-    text-shadow: none;
-}
-
-.custom-expandable-section::before {
-    background-position: -4px -96px;
-}
-
-.custom-expandable-section.expanded::before {
-    background-position: -20px -96px;
 }

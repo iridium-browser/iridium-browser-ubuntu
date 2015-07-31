@@ -11,6 +11,7 @@
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_audio_sink.h"
 #include "device/bluetooth/bluetooth_device.h"
+#include "device/bluetooth/bluetooth_discovery_session.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 namespace device {
@@ -60,6 +61,14 @@ class MockBluetoothAdapter : public BluetoothAdapter {
   MOCK_METHOD2(StartDiscoverySession,
                void(const DiscoverySessionCallback& callback,
                     const ErrorCallback& error_callback));
+  MOCK_METHOD3(StartDiscoverySessionWithFilterRaw,
+               void(const BluetoothDiscoveryFilter*,
+                    const DiscoverySessionCallback& callback,
+                    const ErrorCallback& error_callback));
+  MOCK_METHOD3(SetDiscoveryFilterRaw,
+               void(const BluetoothDiscoveryFilter*,
+                    const base::Closure& callback,
+                    const ErrorCallback& error_callback));
   MOCK_CONST_METHOD0(GetDevices, BluetoothAdapter::ConstDeviceList());
   MOCK_METHOD1(GetDevice, BluetoothDevice*(const std::string& address));
   MOCK_CONST_METHOD1(GetDevice,
@@ -85,12 +94,25 @@ class MockBluetoothAdapter : public BluetoothAdapter {
                     const AcquiredCallback& callback,
                     const BluetoothAudioSink::ErrorCallback& error_callback));
 
+  void StartDiscoverySessionWithFilter(
+      scoped_ptr<BluetoothDiscoveryFilter> discovery_filter,
+      const DiscoverySessionCallback& callback,
+      const ErrorCallback& error_callback);
+
  protected:
-  void DeleteOnCorrectThread() const override;
-  virtual void AddDiscoverySession(const base::Closure& callback,
-                                   const ErrorCallback& error_callback);
-  virtual void RemoveDiscoverySession(const base::Closure& callback,
-                                      const ErrorCallback& error_callback);
+  void AddDiscoverySession(BluetoothDiscoveryFilter* discovery_filter,
+                           const base::Closure& callback,
+                           const ErrorCallback& error_callback) override;
+  void RemoveDiscoverySession(BluetoothDiscoveryFilter* discovery_filter,
+                              const base::Closure& callback,
+                              const ErrorCallback& error_callback) override;
+  void SetDiscoveryFilter(scoped_ptr<BluetoothDiscoveryFilter> discovery_filter,
+                          const base::Closure& callback,
+                          const ErrorCallback& error_callback) override;
+  void RegisterAdvertisement(
+      scoped_ptr<BluetoothAdvertisement::Data> advertisement_data,
+      const CreateAdvertisementCallback& callback,
+      const CreateAdvertisementErrorCallback& error_callback) override;
   virtual ~MockBluetoothAdapter();
 
   MOCK_METHOD1(RemovePairingDelegateInternal,

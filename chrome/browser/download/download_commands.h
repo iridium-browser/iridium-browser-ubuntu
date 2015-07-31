@@ -5,8 +5,8 @@
 #ifndef CHROME_BROWSER_DOWNLOAD_DOWNLOAD_COMMANDS_H_
 #define CHROME_BROWSER_DOWNLOAD_DOWNLOAD_COMMANDS_H_
 
+#include "base/gtest_prod_util.h"
 #include "base/strings/string16.h"
-
 #include "chrome/browser/ui/browser.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/page_navigator.h"
@@ -24,7 +24,6 @@ class DownloadCommands {
     RESUME,               // Resume a download.
     DISCARD,              // Discard the malicious download.
     KEEP,                 // Keep the malicious download.
-    RETRY,                // Retry the download.
     LEARN_MORE_SCANNING,  // Show information about download scanning.
     LEARN_MORE_INTERRUPTED,  // Show information about interrupted downloads.
   };
@@ -47,11 +46,13 @@ class DownloadCommands {
 #endif
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(
+      DownloadCommandsTest,
+      GetLearnMoreURLForInterruptedDownload_ContainsContext);
+
   Browser* GetBrowser() const;
-
-  int GetCommandIconId(Command command);
-
-  int GetAlwaysOpenStringId() const;
+  int GetCommandIconId(Command command) const;
+  GURL GetLearnMoreURLForInterruptedDownload() const;
 
   content::DownloadItem* const download_item_;
 };

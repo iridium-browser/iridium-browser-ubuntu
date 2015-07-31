@@ -60,7 +60,6 @@ class CONTENT_EXPORT RenderWidgetHostViewChildFrame
                    const gfx::Rect& bounds) override;
   void InitAsFullscreen(RenderWidgetHostView* reference_host_view) override;
   void MovePluginWindows(const std::vector<WebPluginGeometry>& moves) override;
-  void Blur() override;
   void UpdateCursor(const WebCursor& cursor) override;
   void SetIsLoading(bool is_loading) override;
   void TextInputTypeChanged(ui::TextInputType type,
@@ -80,10 +79,11 @@ class CONTENT_EXPORT RenderWidgetHostViewChildFrame
                         const gfx::Range& range) override;
   void SelectionBoundsChanged(
       const ViewHostMsg_SelectionBounds_Params& params) override;
-  void CopyFromCompositingSurface(const gfx::Rect& src_subrect,
-                                  const gfx::Size& dst_size,
-                                  ReadbackRequestCallback& callback,
-                                  const SkColorType color_type) override;
+  void CopyFromCompositingSurface(
+      const gfx::Rect& src_subrect,
+      const gfx::Size& dst_size,
+      ReadbackRequestCallback& callback,
+      const SkColorType preferred_color_type) override;
   void CopyFromCompositingSurfaceToVideoFrame(
       const gfx::Rect& src_subrect,
       const scoped_refptr<media::VideoFrame>& target,
@@ -101,6 +101,7 @@ class CONTENT_EXPORT RenderWidgetHostViewChildFrame
 #endif  // defined(USE_AURA)
   bool LockMouse() override;
   void UnlockMouse() override;
+  uint32_t GetSurfaceIdNamespace() override;
 
 #if defined(OS_MACOSX)
   // RenderWidgetHostView implementation.
@@ -125,14 +126,12 @@ class CONTENT_EXPORT RenderWidgetHostViewChildFrame
 #endif  // defined(OS_ANDROID)
 
 #if defined(OS_WIN)
-  virtual void SetParentNativeViewAccessible(
+  void SetParentNativeViewAccessible(
       gfx::NativeViewAccessible accessible_parent) override;
-  virtual gfx::NativeViewId GetParentForWindowlessPlugin() const override;
+  gfx::NativeViewId GetParentForWindowlessPlugin() const override;
 #endif
   BrowserAccessibilityManager* CreateBrowserAccessibilityManager(
       BrowserAccessibilityDelegate* delegate) override;
-
-  SkColorType PreferredReadbackFormat() override;
 
  protected:
   friend class RenderWidgetHostView;

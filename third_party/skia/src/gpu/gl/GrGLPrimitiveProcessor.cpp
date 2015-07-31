@@ -37,7 +37,7 @@ GrGLPrimitiveProcessor::setupColorPassThrough(GrGLGPBuilder* pb,
                                               const char* outputName,
                                               const GrGeometryProcessor::Attribute* colorAttr,
                                               UniformHandle* colorUniform) {
-    GrGLGPFragmentBuilder* fs = pb->getFragmentShaderBuilder();
+    GrGLFragmentBuilder* fs = pb->getFragmentShaderBuilder();
     if (kUniform_GrGPInput == inputType) {
         SkASSERT(colorUniform);
         const char* stagedLocalVarName;
@@ -57,7 +57,7 @@ GrGLPrimitiveProcessor::setupColorPassThrough(GrGLGPBuilder* pb,
 
 void GrGLPrimitiveProcessor::addUniformViewMatrix(GrGLGPBuilder* pb) {
     fViewMatrixUniform = pb->addUniform(GrGLProgramBuilder::kVertex_Visibility,
-                                        kMat33f_GrSLType, kDefault_GrSLPrecision,
+                                        kMat33f_GrSLType, kHigh_GrSLPrecision,
                                         "uViewM",
                                         &fViewMatrixName);
 }

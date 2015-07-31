@@ -154,6 +154,34 @@ void GLES2CompressedTexSubImage2D(GLenum target,
   gles2::GetGLContext()->CompressedTexSubImage2D(
       target, level, xoffset, yoffset, width, height, format, imageSize, data);
 }
+void GLES2CompressedTexImage3D(GLenum target,
+                               GLint level,
+                               GLenum internalformat,
+                               GLsizei width,
+                               GLsizei height,
+                               GLsizei depth,
+                               GLint border,
+                               GLsizei imageSize,
+                               const void* data) {
+  gles2::GetGLContext()->CompressedTexImage3D(target, level, internalformat,
+                                              width, height, depth, border,
+                                              imageSize, data);
+}
+void GLES2CompressedTexSubImage3D(GLenum target,
+                                  GLint level,
+                                  GLint xoffset,
+                                  GLint yoffset,
+                                  GLint zoffset,
+                                  GLsizei width,
+                                  GLsizei height,
+                                  GLsizei depth,
+                                  GLenum format,
+                                  GLsizei imageSize,
+                                  const void* data) {
+  gles2::GetGLContext()->CompressedTexSubImage3D(
+      target, level, xoffset, yoffset, zoffset, width, height, depth, format,
+      imageSize, data);
+}
 void GLES2CopyBufferSubData(GLenum readtarget,
                             GLenum writetarget,
                             GLintptr readoffset,
@@ -403,6 +431,15 @@ void GLES2GetFramebufferAttachmentParameteriv(GLenum target,
   gles2::GetGLContext()->GetFramebufferAttachmentParameteriv(target, attachment,
                                                              pname, params);
 }
+void GLES2GetInteger64v(GLenum pname, GLint64* params) {
+  gles2::GetGLContext()->GetInteger64v(pname, params);
+}
+void GLES2GetIntegeri_v(GLenum pname, GLuint index, GLint* data) {
+  gles2::GetGLContext()->GetIntegeri_v(pname, index, data);
+}
+void GLES2GetInteger64i_v(GLenum pname, GLuint index, GLint64* data) {
+  gles2::GetGLContext()->GetInteger64i_v(pname, index, data);
+}
 void GLES2GetIntegerv(GLenum pname, GLint* params) {
   gles2::GetGLContext()->GetIntegerv(pname, params);
 }
@@ -491,6 +528,9 @@ void GLES2GetUniformfv(GLuint program, GLint location, GLfloat* params) {
 void GLES2GetUniformiv(GLuint program, GLint location, GLint* params) {
   gles2::GetGLContext()->GetUniformiv(program, location, params);
 }
+void GLES2GetUniformuiv(GLuint program, GLint location, GLuint* params) {
+  gles2::GetGLContext()->GetUniformuiv(program, location, params);
+}
 void GLES2GetUniformIndices(GLuint program,
                             GLsizei count,
                             const char* const* names,
@@ -505,6 +545,12 @@ void GLES2GetVertexAttribfv(GLuint index, GLenum pname, GLfloat* params) {
 }
 void GLES2GetVertexAttribiv(GLuint index, GLenum pname, GLint* params) {
   gles2::GetGLContext()->GetVertexAttribiv(index, pname, params);
+}
+void GLES2GetVertexAttribIiv(GLuint index, GLenum pname, GLint* params) {
+  gles2::GetGLContext()->GetVertexAttribIiv(index, pname, params);
+}
+void GLES2GetVertexAttribIuiv(GLuint index, GLenum pname, GLuint* params) {
+  gles2::GetGLContext()->GetVertexAttribIuiv(index, pname, params);
 }
 void GLES2GetVertexAttribPointerv(GLuint index, GLenum pname, void** pointer) {
   gles2::GetGLContext()->GetVertexAttribPointerv(index, pname, pointer);
@@ -1479,6 +1525,14 @@ extern const NameToFunc g_gles2_function_table[] = {
      reinterpret_cast<GLES2FunctionPointer>(glCompressedTexSubImage2D),
     },
     {
+     "glCompressedTexImage3D",
+     reinterpret_cast<GLES2FunctionPointer>(glCompressedTexImage3D),
+    },
+    {
+     "glCompressedTexSubImage3D",
+     reinterpret_cast<GLES2FunctionPointer>(glCompressedTexSubImage3D),
+    },
+    {
      "glCopyBufferSubData",
      reinterpret_cast<GLES2FunctionPointer>(glCopyBufferSubData),
     },
@@ -1696,6 +1750,18 @@ extern const NameToFunc g_gles2_function_table[] = {
          glGetFramebufferAttachmentParameteriv),
     },
     {
+     "glGetInteger64v",
+     reinterpret_cast<GLES2FunctionPointer>(glGetInteger64v),
+    },
+    {
+     "glGetIntegeri_v",
+     reinterpret_cast<GLES2FunctionPointer>(glGetIntegeri_v),
+    },
+    {
+     "glGetInteger64i_v",
+     reinterpret_cast<GLES2FunctionPointer>(glGetInteger64i_v),
+    },
+    {
      "glGetIntegerv",
      reinterpret_cast<GLES2FunctionPointer>(glGetIntegerv),
     },
@@ -1772,6 +1838,10 @@ extern const NameToFunc g_gles2_function_table[] = {
      reinterpret_cast<GLES2FunctionPointer>(glGetUniformiv),
     },
     {
+     "glGetUniformuiv",
+     reinterpret_cast<GLES2FunctionPointer>(glGetUniformuiv),
+    },
+    {
      "glGetUniformIndices",
      reinterpret_cast<GLES2FunctionPointer>(glGetUniformIndices),
     },
@@ -1786,6 +1856,14 @@ extern const NameToFunc g_gles2_function_table[] = {
     {
      "glGetVertexAttribiv",
      reinterpret_cast<GLES2FunctionPointer>(glGetVertexAttribiv),
+    },
+    {
+     "glGetVertexAttribIiv",
+     reinterpret_cast<GLES2FunctionPointer>(glGetVertexAttribIiv),
+    },
+    {
+     "glGetVertexAttribIuiv",
+     reinterpret_cast<GLES2FunctionPointer>(glGetVertexAttribIuiv),
     },
     {
      "glGetVertexAttribPointerv",

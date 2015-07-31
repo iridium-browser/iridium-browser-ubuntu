@@ -78,6 +78,7 @@ class GPU_EXPORT FeatureInfo : public base::RefCounted<FeatureInfo> {
     bool blend_equation_advanced_coherent;
     bool ext_texture_rg;
     bool enable_subscribe_uniform;
+    bool emulate_primitive_restart_fixed_index;
   };
 
   struct Workarounds {
@@ -158,6 +159,9 @@ class GPU_EXPORT FeatureInfo : public base::RefCounted<FeatureInfo> {
 
   // Flags for Workarounds.
   Workarounds workarounds_;
+
+  // Whether the command line switch kEnableUnsafeES3APIs is passed in.
+  bool unsafe_es3_apis_enabled_;
 
   scoped_ptr<gfx::GLVersionInfo> gl_version_info_;
 

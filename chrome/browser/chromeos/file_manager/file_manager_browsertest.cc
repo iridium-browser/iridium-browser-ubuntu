@@ -58,6 +58,13 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "storage/browser/fileapi/external_mount_points.h"
 
+// Slow tests are disabled on debug build. http://crbug.com/327719
+// Disabled under MSAN, ASAN, and LSAN as well. http://crbug.com/468980.
+#if !defined(NDEBUG) || defined(MEMORY_SANITIZER) || \
+    defined(ADDRESS_SANITIZER) || defined(LEAK_SANITIZER)
+#define DISABLE_SLOW_FILESAPP_TESTS
+#endif
+
 using drive::DriveIntegrationServiceFactory;
 
 namespace file_manager {
@@ -816,10 +823,8 @@ IN_PROC_BROWSER_TEST_P(FileManagerBrowserTest, Test) {
 #define WRAPPED_INSTANTIATE_TEST_CASE_P(prefix, test_case_name, generator) \
   INSTANTIATE_TEST_CASE_P(prefix, test_case_name, generator)
 
-// Slow tests are disabled on debug build. http://crbug.com/327719
 // Fails on official build. http://crbug.com/429294
-// Disabled under MSAN as well. http://crbug.com/468980.
-#if !defined(NDEBUG) || defined(OFFICIAL_BUILD) || defined(MEMORY_SANITIZER)
+#if defined(DISABLE_SLOW_FILESAPP_TESTS) || defined(OFFICIAL_BUILD)
 #define MAYBE_FileDisplay DISABLED_FileDisplay
 #else
 #define MAYBE_FileDisplay FileDisplay
@@ -830,12 +835,13 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
     ::testing::Values(TestParameter(NOT_IN_GUEST_MODE, "fileDisplayDownloads"),
                       TestParameter(IN_GUEST_MODE, "fileDisplayDownloads"),
                       TestParameter(NOT_IN_GUEST_MODE, "fileDisplayDrive"),
-                      TestParameter(NOT_IN_GUEST_MODE, "fileDisplayMtp")));
+                      TestParameter(NOT_IN_GUEST_MODE, "fileDisplayMtp"),
+                      TestParameter(NOT_IN_GUEST_MODE, "searchNormal"),
+                      TestParameter(NOT_IN_GUEST_MODE, "searchCaseInsensitive"),
+                      TestParameter(NOT_IN_GUEST_MODE, "searchNotFound")));
 
-// Slow tests are disabled on debug build. http://crbug.com/327719
 // Fails on official build. http://crbug.com/429294
-// Disabled under MSAN as well. http://crbug.com/468980.
-#if !defined(NDEBUG) || defined(OFFICIAL_BUILD) || defined(MEMORY_SANITIZER)
+#if defined(DISABLE_SLOW_FILESAPP_TESTS) || defined(OFFICIAL_BUILD)
 #define MAYBE_OpenVideoFiles DISABLED_OpenVideoFiles
 #else
 #define MAYBE_OpenVideoFiles OpenVideoFiles
@@ -847,12 +853,8 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
                       TestParameter(NOT_IN_GUEST_MODE, "videoOpenDownloads"),
                       TestParameter(NOT_IN_GUEST_MODE, "videoOpenDrive")));
 
-// Slow tests are disabled on debug build. http://crbug.com/327719
 // Fails on official build. http://crbug.com/429294
-// Disabled under MSAN, ASAN, and LSAN as well. http://crbug.com/468980.
-#if !defined(NDEBUG) || defined(OFFICIAL_BUILD) ||             \
-    defined(MEMORY_SANITIZER) || defined(ADDRESS_SANITIZER) || \
-    defined(LEAK_SANITIZER)
+#if defined(DISABLE_SLOW_FILESAPP_TESTS) || defined(OFFICIAL_BUILD)
 #define MAYBE_OpenAudioFiles DISABLED_OpenAudioFiles
 #else
 #define MAYBE_OpenAudioFiles OpenAudioFiles
@@ -870,12 +872,8 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
         TestParameter(NOT_IN_GUEST_MODE, "audioRepeatMultipleFileDrive"),
         TestParameter(NOT_IN_GUEST_MODE, "audioNoRepeatMultipleFileDrive")));
 
-// Slow tests are disabled on debug build. http://crbug.com/327719
 // Fails on official build. http://crbug.com/429294
-// Disabled under MSAN, ASAN, and LSAN as well. http://crbug.com/468980.
-#if !defined(NDEBUG) || defined(OFFICIAL_BUILD) ||             \
-    defined(MEMORY_SANITIZER) || defined(ADDRESS_SANITIZER) || \
-    defined(LEAK_SANITIZER)
+#if defined(DISABLE_SLOW_FILESAPP_TESTS) || defined(OFFICIAL_BUILD)
 #define MAYBE_OpenImageFiles DISABLED_OpenImageFiles
 #else
 #define MAYBE_OpenImageFiles OpenImageFiles
@@ -887,9 +885,7 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
                       TestParameter(NOT_IN_GUEST_MODE, "imageOpenDownloads"),
                       TestParameter(NOT_IN_GUEST_MODE, "imageOpenDrive")));
 
-// Slow tests are disabled on debug build. http://crbug.com/327719
-// Disabled under MSAN as well. http://crbug.com/468980.
-#if !defined(NDEBUG) || defined(OFFICIAL_BUILD) || defined(MEMORY_SANITIZER)
+#if defined(DISABLE_SLOW_FILESAPP_TESTS) || defined(OFFICIAL_BUILD)
 #define MAYBE_CreateNewFolder DISABLED_CreateNewFolder
 #else
 #define MAYBE_CreateNewFolder CreateNewFolder
@@ -906,10 +902,8 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
                       TestParameter(NOT_IN_GUEST_MODE,
                                     "createNewFolderDrive")));
 
-// Slow tests are disabled on debug build. http://crbug.com/327719
 // Fails on official build. http://crbug.com/429294
-// Disabled under MSAN as well. http://crbug.com/468980.
-#if !defined(NDEBUG) || defined(OFFICIAL_BUILD) || defined(MEMORY_SANITIZER)
+#if defined(DISABLE_SLOW_FILESAPP_TESTS) || defined(OFFICIAL_BUILD)
 #define MAYBE_KeyboardOperations DISABLED_KeyboardOperations
 #else
 #define MAYBE_KeyboardOperations KeyboardOperations
@@ -934,12 +928,8 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
                       TestParameter(NOT_IN_GUEST_MODE,
                                     "renameNewDirectoryDrive")));
 
-// Slow tests are disabled on debug build. http://crbug.com/327719
 // Fails on official build. http://crbug.com/429294
-// Disabled under MSAN, ASAN, and LSAN as well. http://crbug.com/468980.
-#if !defined(NDEBUG) || defined(OFFICIAL_BUILD) ||             \
-    defined(MEMORY_SANITIZER) || defined(ADDRESS_SANITIZER) || \
-    defined(LEAK_SANITIZER)
+#if defined(DISABLE_SLOW_FILESAPP_TESTS) || defined(OFFICIAL_BUILD)
 #define MAYBE_DriveSpecific DISABLED_DriveSpecific
 #else
 #define MAYBE_DriveSpecific DriveSpecific
@@ -956,12 +946,8 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
         TestParameter(NOT_IN_GUEST_MODE, "clickFirstSearchResult"),
         TestParameter(NOT_IN_GUEST_MODE, "pressEnterToSearch")));
 
-// Slow tests are disabled on debug build. http://crbug.com/327719
 // Fails on official build. http://crbug.com/429294
-// Disabled under MSAN, ASAN, and LSAN as well. http://crbug.com/468980.
-#if !defined(NDEBUG) || defined(OFFICIAL_BUILD) ||             \
-    defined(MEMORY_SANITIZER) || defined(ADDRESS_SANITIZER) || \
-    defined(LEAK_SANITIZER)
+#if defined(DISABLE_SLOW_FILESAPP_TESTS) || defined(OFFICIAL_BUILD)
 #define MAYBE_Transfer DISABLED_Transfer
 #else
 #define MAYBE_Transfer Transfer
@@ -979,10 +965,8 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
         TestParameter(NOT_IN_GUEST_MODE, "transferFromOfflineToDownloads"),
         TestParameter(NOT_IN_GUEST_MODE, "transferFromOfflineToDrive")));
 
-// Slow tests are disabled on debug build. http://crbug.com/327719
 // Fails on official build. http://crbug.com/429294
-// Disabled under MSAN as well. http://crbug.com/468980.
-#if !defined(NDEBUG) || defined(OFFICIAL_BUILD) || defined(MEMORY_SANITIZER)
+#if defined(DISABLE_SLOW_FILESAPP_TESTS) || defined(OFFICIAL_BUILD)
 #define MAYBE_RestorePrefs DISABLED_RestorePrefs
 #else
 #define MAYBE_RestorePrefs RestorePrefs
@@ -995,10 +979,7 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
                       TestParameter(IN_GUEST_MODE, "restoreCurrentView"),
                       TestParameter(NOT_IN_GUEST_MODE, "restoreCurrentView")));
 
-// Slow tests are disabled on debug build. http://crbug.com/327719
-// Disabled under MSAN, ASAN, and LSAN as well. http://crbug.com/468980.
-#if !defined(NDEBUG) || defined(MEMORY_SANITIZER) || \
-    defined(ADDRESS_SANITIZER) || defined(LEAK_SANITIZER)
+#if defined(DISABLE_SLOW_FILESAPP_TESTS)
 #define MAYBE_ShareDialog DISABLED_ShareDialog
 #else
 #define MAYBE_ShareDialog ShareDialog
@@ -1009,9 +990,7 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
     ::testing::Values(TestParameter(NOT_IN_GUEST_MODE, "shareFile"),
                       TestParameter(NOT_IN_GUEST_MODE, "shareDirectory")));
 
-// Slow tests are disabled on debug build. http://crbug.com/327719
-// Disabled under MSAN as well. http://crbug.com/468980.
-#if !defined(NDEBUG) || defined(MEMORY_SANITIZER)
+#if defined(DISABLE_SLOW_FILESAPP_TESTS)
 #define MAYBE_RestoreGeometry DISABLED_RestoreGeometry
 #else
 #define MAYBE_RestoreGeometry RestoreGeometry
@@ -1022,9 +1001,7 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
     ::testing::Values(TestParameter(NOT_IN_GUEST_MODE, "restoreGeometry"),
                       TestParameter(IN_GUEST_MODE, "restoreGeometry")));
 
-// Slow tests are disabled on debug build. http://crbug.com/327719
-// Disabled under MSAN as well. http://crbug.com/468980.
-#if !defined(NDEBUG) || defined(MEMORY_SANITIZER)
+#if defined(DISABLE_SLOW_FILESAPP_TESTS)
 #define MAYBE_Traverse DISABLED_Traverse
 #else
 #define MAYBE_Traverse Traverse
@@ -1036,9 +1013,7 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
                       TestParameter(NOT_IN_GUEST_MODE, "traverseDownloads"),
                       TestParameter(NOT_IN_GUEST_MODE, "traverseDrive")));
 
-// Slow tests are disabled on debug build. http://crbug.com/327719
-// Disabled under MSAN as well. http://crbug.com/468980.
-#if !defined(NDEBUG) || defined(MEMORY_SANITIZER)
+#if defined(DISABLE_SLOW_FILESAPP_TESTS)
 #define MAYBE_SuggestAppDialog DISABLED_SuggestAppDialog
 #else
 #define MAYBE_SuggestAppDialog SuggestAppDialog
@@ -1048,9 +1023,7 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
     FileManagerBrowserTest,
     ::testing::Values(TestParameter(NOT_IN_GUEST_MODE, "suggestAppDialog")));
 
-// Slow tests are disabled on debug build. http://crbug.com/327719
-// Disabled under MSAN as well. http://crbug.com/468980.
-#if !defined(NDEBUG) || defined(MEMORY_SANITIZER)
+#if defined(DISABLE_SLOW_FILESAPP_TESTS)
 #define MAYBE_ExecuteDefaultTaskOnDownloads \
   DISABLED_ExecuteDefaultTaskOnDownloads
 #else
@@ -1063,9 +1036,7 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
         TestParameter(NOT_IN_GUEST_MODE, "executeDefaultTaskOnDownloads"),
         TestParameter(IN_GUEST_MODE, "executeDefaultTaskOnDownloads")));
 
-// Slow tests are disabled on debug build. http://crbug.com/327719
-// Disabled under MSAN as well. http://crbug.com/468980.
-#if !defined(NDEBUG) || defined(MEMORY_SANITIZER)
+#if defined(DISABLE_SLOW_FILESAPP_TESTS)
 #define MAYBE_ExecuteDefaultTaskOnDrive DISABLED_ExecuteDefaultTaskOnDrive
 #else
 #define MAYBE_ExecuteDefaultTaskOnDrive ExecuteDefaultTaskOnDrive
@@ -1076,9 +1047,7 @@ INSTANTIATE_TEST_CASE_P(
     ::testing::Values(
         TestParameter(NOT_IN_GUEST_MODE, "executeDefaultTaskOnDrive")));
 
-// Slow tests are disabled on debug build. http://crbug.com/327719
-// Disabled under MSAN as well. http://crbug.com/468980.
-#if !defined(NDEBUG) || defined(MEMORY_SANITIZER)
+#if defined(DISABLE_SLOW_FILESAPP_TESTS)
 #define MAYBE_DefaultActionDialog DISABLED_DefaultActionDialog
 #else
 #define MAYBE_DefaultActionDialog DefaultActionDialog
@@ -1091,9 +1060,7 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
         TestParameter(IN_GUEST_MODE, "defaultActionDialogOnDownloads"),
         TestParameter(NOT_IN_GUEST_MODE, "defaultActionDialogOnDrive")));
 
-// Slow tests are disabled on debug build. http://crbug.com/327719
-// Disabled under MSAN as well. http://crbug.com/468980.
-#if !defined(NDEBUG) || defined(MEMORY_SANITIZER)
+#if defined(DISABLE_SLOW_FILESAPP_TESTS)
 #define MAYBE_GenericTask DISABLED_GenericTask
 #else
 #define MAYBE_GenericTask GenericTask
@@ -1105,9 +1072,7 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
         TestParameter(NOT_IN_GUEST_MODE, "genericTaskIsNotExecuted"),
         TestParameter(NOT_IN_GUEST_MODE, "genericAndNonGenericTasksAreMixed")));
 
-// Slow tests are disabled on debug build. http://crbug.com/327719
-// Disabled under MSAN as well. http://crbug.com/468980.
-#if !defined(NDEBUG) || defined(MEMORY_SANITIZER)
+#if defined(DISABLE_SLOW_FILESAPP_TESTS)
 #define MAYBE_FolderShortcuts DISABLED_FolderShortcuts
 #else
 #define MAYBE_FolderShortcuts FolderShortcuts
@@ -1119,15 +1084,32 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
         TestParameter(NOT_IN_GUEST_MODE, "traverseFolderShortcuts"),
         TestParameter(NOT_IN_GUEST_MODE, "addRemoveFolderShortcuts")));
 
+// Fails on official build. http://crbug.com/429294
+#if defined(DISABLE_SLOW_FILESAPP_TESTS) || defined(OFFICIAL_BUILD)
+#define MAYBE_SortColumns DISABLED_SortColumns
+#else
+#define MAYBE_SortColumns SortColumns
+#endif
+WRAPPED_INSTANTIATE_TEST_CASE_P(
+    MAYBE_SortColumns,
+    FileManagerBrowserTest,
+    ::testing::Values(TestParameter(NOT_IN_GUEST_MODE, "sortColumns"),
+                      TestParameter(IN_GUEST_MODE, "sortColumns")));
+
 INSTANTIATE_TEST_CASE_P(
     TabIndex,
     FileManagerBrowserTest,
     ::testing::Values(TestParameter(NOT_IN_GUEST_MODE, "searchBoxFocus")));
 
-INSTANTIATE_TEST_CASE_P(TabindexFocus,
-                        FileManagerBrowserTest,
-                        ::testing::Values(TestParameter(NOT_IN_GUEST_MODE,
-                                                        "tabindexFocus")));
+#if defined(DISABLE_SLOW_FILESAPP_TESTS)
+#define MAYBE_TabindexFocus DISABLED_TabindexFocus
+#else
+#define MAYBE_TabindexFocus TabindexFocus
+#endif
+WRAPPED_INSTANTIATE_TEST_CASE_P(
+    MAYBE_TabindexFocus,
+    FileManagerBrowserTest,
+    ::testing::Values(TestParameter(NOT_IN_GUEST_MODE, "tabindexFocus")));
 
 INSTANTIATE_TEST_CASE_P(
     TabindexFocusDownloads,
@@ -1136,15 +1118,41 @@ INSTANTIATE_TEST_CASE_P(
                                     "tabindexFocusDownloads"),
                       TestParameter(IN_GUEST_MODE, "tabindexFocusDownloads")));
 
-INSTANTIATE_TEST_CASE_P(
-    TabindexFocusDirectorySelected,
+#if defined(DISABLE_SLOW_FILESAPP_TESTS)
+#define MAYBE_TabindexFocusDirectorySelected \
+  DISABLED_TabindexFocusDirectorySelected
+#else
+#define MAYBE_TabindexFocusDirectorySelected TabindexFocusDirectorySelected
+#endif
+WRAPPED_INSTANTIATE_TEST_CASE_P(
+    MAYBE_TabindexFocusDirectorySelected,
     FileManagerBrowserTest,
     ::testing::Values(TestParameter(NOT_IN_GUEST_MODE,
                                     "tabindexFocusDirectorySelected")));
 
-// Fails on official build. http://crbug.com/429294
-// Disabled under MSAN as well. http://crbug.com/468980.
-#if !defined(NDEBUG) || defined(OFFICIAL_BUILD) || defined(MEMORY_SANITIZER)
+INSTANTIATE_TEST_CASE_P(
+    TabindexOpenDialog,
+    FileManagerBrowserTest,
+    ::testing::Values(
+        TestParameter(NOT_IN_GUEST_MODE, "tabindexOpenDialogDrive"),
+        TestParameter(NOT_IN_GUEST_MODE, "tabindexOpenDialogDownloads"),
+        TestParameter(IN_GUEST_MODE, "tabindexOpenDialogDownloads")));
+
+// Fails on official build. http://crbug.com/482121.
+#if defined(OFFICIAL_BUILD)
+#define MAYBE_TabindexSaveFileDialog DISABLED_TabindexSaveFileDialog
+#else
+#define MAYBE_TabindexSaveFileDialog TabindexSaveFileDialog
+#endif
+WRAPPED_INSTANTIATE_TEST_CASE_P(
+    MAYBE_TabindexSaveFileDialog,
+    FileManagerBrowserTest,
+    ::testing::Values(
+        TestParameter(NOT_IN_GUEST_MODE, "tabindexSaveFileDialogDrive"),
+        TestParameter(NOT_IN_GUEST_MODE, "tabindexSaveFileDialogDownloads"),
+        TestParameter(IN_GUEST_MODE, "tabindexSaveFileDialogDownloads")));
+
+#if defined(DISABLE_SLOW_FILESAPP_TESTS) || defined(OFFICIAL_BUILD)
 #define MAYBE_OpenFileDialog DISABLED_OpenFileDialog
 #else
 #define MAYBE_OpenFileDialog OpenFileDialog
@@ -1165,9 +1173,7 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
                       TestParameter(NOT_IN_GUEST_MODE,
                                     "unloadFileDialog")));
 
-// Slow tests are disabled on debug build. http://crbug.com/327719
-// Disabled under MSAN as well. http://crbug.com/468980.
-#if !defined(NDEBUG) || defined(MEMORY_SANITIZER)
+#if defined(DISABLE_SLOW_FILESAPP_TESTS)
 #define MAYBE_CopyBetweenWindows DISABLED_CopyBetweenWindows
 #else
 #define MAYBE_CopyBetweenWindows CopyBetweenWindows
@@ -1183,9 +1189,7 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
         TestParameter(NOT_IN_GUEST_MODE, "copyBetweenWindowsDriveToUsb"),
         TestParameter(NOT_IN_GUEST_MODE, "copyBetweenWindowsUsbToLocal")));
 
-// Slow tests are disabled on debug build. http://crbug.com/327719
-// Disabled under MSAN as well. http://crbug.com/468980.
-#if !defined(NDEBUG) || defined(MEMORY_SANITIZER)
+#if defined(DISABLE_SLOW_FILESAPP_TESTS)
 #define MAYBE_ShowGridView DISABLED_ShowGridView
 #else
 #define MAYBE_ShowGridView ShowGridView
@@ -1199,6 +1203,7 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
 
 // Structure to describe an account info.
 struct TestAccountInfo {
+  const char* const gaia_id;
   const char* const email;
   const char* const hash;
   const char* const display_name;
@@ -1211,10 +1216,10 @@ enum {
 };
 
 static const TestAccountInfo kTestAccounts[] = {
-  {"__dummy__@invalid.domain", "hashdummy", "Dummy Account"},
-  {"alice@invalid.domain", "hashalice", "Alice"},
-  {"bob@invalid.domain", "hashbob", "Bob"},
-  {"charlie@invalid.domain", "hashcharlie", "Charlie"},
+    {"gaia-id-d", "__dummy__@invalid.domain", "hashdummy", "Dummy Account"},
+    {"gaia-id-a", "alice@invalid.domain", "hashalice", "Alice"},
+    {"gaia-id-b", "bob@invalid.domain", "hashbob", "Bob"},
+    {"gaia-id-c", "charlie@invalid.domain", "hashcharlie", "Charlie"},
 };
 
 // Test fixture class for testing multi-profile features.
@@ -1267,8 +1272,8 @@ class MultiProfileFileManagerBrowserTest : public FileManagerBrowserTestBase {
     user_manager->SaveUserDisplayName(info.email,
                                       base::UTF8ToUTF16(info.display_name));
     SigninManagerFactory::GetForProfile(
-        chromeos::ProfileHelper::GetProfileByUserIdHash(info.hash))->
-            SetAuthenticatedUsername(info.email);
+        chromeos::ProfileHelper::GetProfileByUserIdHash(info.hash))
+        ->SetAuthenticatedAccountInfo(info.gaia_id, info.email);
   }
 
  private:
@@ -1281,10 +1286,8 @@ class MultiProfileFileManagerBrowserTest : public FileManagerBrowserTestBase {
   std::string test_case_name_;
 };
 
-// Slow tests are disabled on debug build. http://crbug.com/327719
 // Fails on official build. http://crbug.com/429294
-// Disabled under MSAN as well. http://crbug.com/468980.
-#if !defined(NDEBUG) || defined(OFFICIAL_BUILD) || defined(MEMORY_SANITIZER)
+#if defined(DISABLE_SLOW_FILESAPP_TESTS) || defined(OFFICIAL_BUILD)
 #define MAYBE_PRE_BasicDownloads DISABLED_PRE_BasicDownloads
 #define MAYBE_BasicDownloads DISABLED_BasicDownloads
 #else
@@ -1305,10 +1308,8 @@ IN_PROC_BROWSER_TEST_F(MultiProfileFileManagerBrowserTest,
   StartTest();
 }
 
-// Slow tests are disabled on debug build. http://crbug.com/327719
 // Fails on official build. http://crbug.com/429294
-// Disabled under MSAN as well. http://crbug.com/468980.
-#if !defined(NDEBUG) || defined(OFFICIAL_BUILD) || defined(MEMORY_SANITIZER)
+#if defined(DISABLE_SLOW_FILESAPP_TESTS) || defined(OFFICIAL_BUILD)
 #define MAYBE_PRE_BasicDrive DISABLED_PRE_BasicDrive
 #define MAYBE_BasicDrive DISABLED_BasicDrive
 #else
@@ -1331,13 +1332,13 @@ IN_PROC_BROWSER_TEST_F(MultiProfileFileManagerBrowserTest, MAYBE_BasicDrive) {
 template<GuestMode M>
 class GalleryBrowserTestBase : public FileManagerBrowserTestBase {
  public:
-  virtual GuestMode GetGuestModeParam() const override { return M; }
-  virtual const char* GetTestCaseNameParam() const override {
+  GuestMode GetGuestModeParam() const override { return M; }
+  const char* GetTestCaseNameParam() const override {
     return test_case_name_.c_str();
   }
 
  protected:
-  virtual const char* GetTestManifestName() const override {
+  const char* GetTestManifestName() const override {
     return "gallery_test_manifest.json";
   }
 
@@ -1364,7 +1365,12 @@ IN_PROC_BROWSER_TEST_F(GalleryBrowserTestInGuestMode,
   StartTest();
 }
 
-IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, OpenSingleImageOnDrive) {
+#if defined(DISABLE_SLOW_FILESAPP_TESTS)
+#define MAYBE_OpenSingleImageOnDrive DISABLED_OpenSingleImageOnDrive
+#else
+#define MAYBE_OpenSingleImageOnDrive OpenSingleImageOnDrive
+#endif
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, MAYBE_OpenSingleImageOnDrive) {
   set_test_case_name("openSingleImageOnDrive");
   StartTest();
 }
@@ -1412,7 +1418,12 @@ IN_PROC_BROWSER_TEST_F(GalleryBrowserTestInGuestMode,
   StartTest();
 }
 
-IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, RenameImageOnDrive) {
+#if defined(DISABLE_SLOW_FILESAPP_TESTS)
+#define MAYBE_RenameImageOnDrive DISABLED_RenameImageOnDrive
+#else
+#define MAYBE_RenameImageOnDrive RenameImageOnDrive
+#endif
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, MAYBE_RenameImageOnDrive) {
   set_test_case_name("renameImageOnDrive");
   StartTest();
 }
@@ -1449,7 +1460,12 @@ IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, RotateImageOnDrive) {
   StartTest();
 }
 
-IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, CropImageOnDownloads) {
+#if defined(DISABLE_SLOW_FILESAPP_TESTS)
+#define MAYBE_CropImageOnDownloads DISABLED_CropImageOnDownloads
+#else
+#define MAYBE_CropImageOnDownloads CropImageOnDownloads
+#endif
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, MAYBE_CropImageOnDownloads) {
   set_test_case_name("cropImageOnDownloads");
   StartTest();
 }
@@ -1465,7 +1481,12 @@ IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, CropImageOnDrive) {
   StartTest();
 }
 
-IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, ExposureImageOnDownloads) {
+#if defined(DISABLE_SLOW_FILESAPP_TESTS)
+#define MAYBE_ExposureImageOnDownloads DISABLED_ExposureImageOnDownloads
+#else
+#define MAYBE_ExposureImageOnDownloads ExposureImageOnDownloads
+#endif
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, MAYBE_ExposureImageOnDownloads) {
   set_test_case_name("exposureImageOnDownloads");
   StartTest();
 }
@@ -1484,19 +1505,19 @@ IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, ExposureImageOnDrive) {
 template<GuestMode M>
 class VideoPlayerBrowserTestBase : public FileManagerBrowserTestBase {
  public:
-  virtual GuestMode GetGuestModeParam() const override { return M; }
-  virtual const char* GetTestCaseNameParam() const override {
+  GuestMode GetGuestModeParam() const override { return M; }
+  const char* GetTestCaseNameParam() const override {
     return test_case_name_.c_str();
   }
 
  protected:
-  virtual void SetUpCommandLine(base::CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(
         chromeos::switches::kEnableVideoPlayerChromecastSupport);
     FileManagerBrowserTestBase::SetUpCommandLine(command_line);
   }
 
-  virtual const char* GetTestManifestName() const override {
+  const char* GetTestManifestName() const override {
     return "video_player_test_manifest.json";
   }
 

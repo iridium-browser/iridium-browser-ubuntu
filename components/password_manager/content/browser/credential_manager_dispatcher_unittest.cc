@@ -37,6 +37,7 @@ const int kRequestId = 4;
 class MockPasswordManagerClient
     : public password_manager::StubPasswordManagerClient {
  public:
+  MOCK_CONST_METHOD0(IsSavingEnabledForCurrentPage, bool());
   MOCK_CONST_METHOD0(IsOffTheRecord, bool());
   MOCK_METHOD1(NotifyUserAutoSigninPtr,
                bool(const std::vector<autofill::PasswordForm*>& local_forms));
@@ -161,6 +162,8 @@ class CredentialManagerDispatcherTest
     client_.reset(new MockPasswordManagerClient(store_.get()));
     dispatcher_.reset(new TestCredentialManagerDispatcher(
         web_contents(), client_.get(), &stub_driver_));
+    ON_CALL(*client_, IsSavingEnabledForCurrentPage())
+        .WillByDefault(testing::Return(true));
     ON_CALL(*client_, IsOffTheRecord()).WillByDefault(testing::Return(false));
 
     NavigateAndCommit(GURL("https://example.com/test.html"));
@@ -173,13 +176,13 @@ class CredentialManagerDispatcherTest
     form_.scheme = autofill::PasswordForm::SCHEME_HTML;
     form_.skip_zero_click = false;
 
-    form2_.username_value = base::ASCIIToUTF16("Username 2");
-    form2_.display_name = base::ASCIIToUTF16("Display Name 2");
-    form2_.password_value = base::ASCIIToUTF16("Password 2");
-    form2_.origin = web_contents()->GetLastCommittedURL().GetOrigin();
-    form2_.signon_realm = form2_.origin.spec();
-    form2_.scheme = autofill::PasswordForm::SCHEME_HTML;
-    form2_.skip_zero_click = false;
+    origin_path_form_.username_value = base::ASCIIToUTF16("Username 2");
+    origin_path_form_.display_name = base::ASCIIToUTF16("Display Name 2");
+    origin_path_form_.password_value = base::ASCIIToUTF16("Password 2");
+    origin_path_form_.origin = GURL("https://example.com/path");
+    origin_path_form_.signon_realm = origin_path_form_.origin.spec();
+    origin_path_form_.scheme = autofill::PasswordForm::SCHEME_HTML;
+    origin_path_form_.skip_zero_click = false;
 
     cross_origin_form_.username_value = base::ASCIIToUTF16("Username");
     cross_origin_form_.display_name = base::ASCIIToUTF16("Display Name");
@@ -202,7 +205,7 @@ class CredentialManagerDispatcherTest
 
  protected:
   autofill::PasswordForm form_;
-  autofill::PasswordForm form2_;
+  autofill::PasswordForm origin_path_form_;
   autofill::PasswordForm cross_origin_form_;
   scoped_refptr<TestPasswordStore> store_;
   scoped_ptr<MockPasswordManagerClient> client_;
@@ -255,9 +258,11 @@ TEST_F(CredentialManagerDispatcherTest, CredentialManagerOnNotifySignedIn) {
   EXPECT_EQ(autofill::PasswordForm::SCHEME_HTML, new_form.scheme);
 }
 
-TEST_F(CredentialManagerDispatcherTest, CredentialManagerIncognitoSignedIn) {
+TEST_F(CredentialManagerDispatcherTest,
+       CredentialManagerSignInWithSavingDisabledForCurrentPage) {
   CredentialInfo info(form_, CredentialType::CREDENTIAL_TYPE_LOCAL);
-  EXPECT_CALL(*client_, IsOffTheRecord()).WillRepeatedly(testing::Return(true));
+  EXPECT_CALL(*client_, IsSavingEnabledForCurrentPage())
+      .WillRepeatedly(testing::Return(false));
   EXPECT_CALL(
       *client_,
       PromptUserToSavePasswordPtr(
@@ -426,7 +431,7 @@ TEST_F(CredentialManagerDispatcherTest,
 TEST_F(CredentialManagerDispatcherTest,
        CredentialManagerOnRequestCredentialWithZeroClickOnlyTwoPasswordStore) {
   store_->AddLogin(form_);
-  store_->AddLogin(form2_);
+  store_->AddLogin(origin_path_form_);
 
   std::vector<GURL> federations;
   EXPECT_CALL(*client_, PromptUserToChooseCredentialsPtr(_, _, _, _))
@@ -452,7 +457,7 @@ TEST_F(CredentialManagerDispatcherTest,
        OnRequestCredentialWithZeroClickOnlyOnePasswordStore) {
   form_.skip_zero_click = true;
   store_->AddLogin(form_);
-  store_->AddLogin(form2_);
+  store_->AddLogin(origin_path_form_);
 
   std::vector<GURL> federations;
   EXPECT_CALL(*client_, PromptUserToChooseCredentialsPtr(_, _, _, _))
@@ -470,11 +475,12 @@ TEST_F(CredentialManagerDispatcherTest,
   CredentialManagerMsg_SendCredential::Param send_param;
   CredentialManagerMsg_SendCredential::Read(message, &send_param);
 
-  // We should get |form2_| back, as |form_| is marked as skipping zero-click.
+  // We should get |origin_path_form_| back, as |form_| is marked as skipping
+  // zero-click.
   EXPECT_EQ(CredentialType::CREDENTIAL_TYPE_LOCAL, get<1>(send_param).type);
-  EXPECT_EQ(form2_.username_value, get<1>(send_param).id);
-  EXPECT_EQ(form2_.display_name, get<1>(send_param).name);
-  EXPECT_EQ(form2_.password_value, get<1>(send_param).password);
+  EXPECT_EQ(origin_path_form_.username_value, get<1>(send_param).id);
+  EXPECT_EQ(origin_path_form_.display_name, get<1>(send_param).name);
+  EXPECT_EQ(origin_path_form_.password_value, get<1>(send_param).password);
 }
 
 TEST_F(CredentialManagerDispatcherTest,

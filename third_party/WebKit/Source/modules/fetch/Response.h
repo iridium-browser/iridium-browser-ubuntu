@@ -8,6 +8,7 @@
 #include "bindings/core/v8/Dictionary.h"
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "bindings/modules/v8/UnionTypesModules.h"
+#include "modules/ModulesExport.h"
 #include "modules/fetch/Body.h"
 #include "modules/fetch/FetchResponseData.h"
 #include "modules/fetch/Headers.h"
@@ -25,7 +26,7 @@ class WebServiceWorkerResponse;
 
 typedef BlobOrArrayBufferOrArrayBufferViewOrFormDataOrUSVString BodyInit;
 
-class Response final : public Body {
+class MODULES_EXPORT Response final : public Body {
     DEFINE_WRAPPERTYPEINFO();
 public:
     ~Response() override { }
@@ -41,6 +42,7 @@ public:
     static Response* createClone(const Response&);
 
     static Response* error(ExecutionContext*);
+    static Response* redirect(ExecutionContext*, const String& url, unsigned short status, ExceptionState&);
 
     const FetchResponseData* response() const { return m_response; }
 
@@ -73,6 +75,8 @@ private:
     explicit Response(ExecutionContext*);
     Response(ExecutionContext*, FetchResponseData*);
     Response(ExecutionContext*, FetchResponseData*, Headers*);
+
+    void refreshBody();
 
     const Member<FetchResponseData> m_response;
     const Member<Headers> m_headers;

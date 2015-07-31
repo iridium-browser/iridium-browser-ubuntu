@@ -9,7 +9,6 @@ from __future__ import print_function
 import collections
 import datetime
 import json
-import logging
 import math
 import multiprocessing
 import os
@@ -21,8 +20,10 @@ from chromite.cbuildbot import results_lib
 from chromite.cbuildbot import constants
 from chromite.lib import clactions
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import gs
 from chromite.lib import parallel
+
 
 # Number of parallel processes used when uploading/downloading GS files.
 MAX_PARALLEL = 40
@@ -389,7 +390,7 @@ class BuildData(object):
   """
 
   __slots__ = (
-      'gathered_dict',  # Dict with gathered data (sheets/carbon version).
+      'gathered_dict',  # Dict with gathered data (sheets version).
       'gathered_url',   # URL to metadata.json.gathered location in GS.
       'metadata_dict',  # Dict representing metadata data from JSON.
       'metadata_url',   # URL to metadata.json location in GS.
@@ -400,7 +401,6 @@ class BuildData(object):
   DATETIME_RE = re.compile(r'^(.+)\s-\d\d\d\d\s\(P\wT\)$')
 
   SHEETS_VER_KEY = 'sheets_version'
-  CARBON_VER_KEY = 'carbon_version'
 
   @staticmethod
   def ReadMetadataURLs(urls, gs_ctx=None, exclude_running=True,
@@ -414,16 +414,16 @@ class BuildData(object):
       exclude_running: If True the metadata for builds that are still running
         will be skipped.
       get_sheets_version: Whether to try to figure out the last sheets version
-        and the last carbon version that was gathered. This requires an extra
-        gsutil request and is only needed if you are writing the metadata to
-        to the Google Sheets spreadsheet.
+        that was gathered. This requires an extra gsutil request and is only
+        needed if you are writing the metadata to the Google Sheets
+        spreadsheet.
 
     Returns:
       List of BuildData objects.
     """
     gs_ctx = gs_ctx or gs.GSContext()
-    cros_build_lib.Info('Reading %d metadata URLs using %d processes now.',
-                        len(urls), MAX_PARALLEL)
+    logging.info('Reading %d metadata URLs using %d processes now.', len(urls),
+                 MAX_PARALLEL)
 
     build_data_per_url = {}
     def _ReadMetadataURL(url):
@@ -440,29 +440,25 @@ class BuildData(object):
                                                 print_cmd=False))
 
         sheets_version = gathered_dict.get(BuildData.SHEETS_VER_KEY)
-        carbon_version = gathered_dict.get(BuildData.CARBON_VER_KEY)
       else:
-        sheets_version, carbon_version = None, None
+        sheets_version = None
 
-      bd = BuildData(url, metadata_dict, sheets_version=sheets_version,
-                     carbon_version=carbon_version)
+      bd = BuildData(url, metadata_dict, sheets_version=sheets_version)
 
       if bd.build_number is None:
-        cros_build_lib.Warning('Metadata at %s was missing build number.',
-                               url)
+        logging.warning('Metadata at %s was missing build number.', url)
         m = re.match(r'.*-b([0-9]*)/.*', url)
         if m:
           inferred_number = int(m.groups()[0])
-          cros_build_lib.Warning('Inferred build number %d from metadata url.',
-                                 inferred_number)
+          logging.warning('Inferred build number %d from metadata url.',
+                          inferred_number)
           bd.metadata_dict['build-number'] = inferred_number
-      if not (sheets_version is None and carbon_version is None):
-        cros_build_lib.Debug('Read %s:\n'
-                             '  build_number=%d, sheets v%d, carbon v%d', url,
-                             bd.build_number, sheets_version, carbon_version)
+      if sheets_version is not None:
+        logging.debug('Read %s:\n  build_number=%d, sheets v%d', url,
+                      bd.build_number, sheets_version)
       else:
-        cros_build_lib.Debug('Read %s:\n  build_number=%d, ungathered',
-                             url, bd.build_number)
+        logging.debug('Read %s:\n  build_number=%d, ungathered', url,
+                      bd.build_number)
 
       build_data_per_url[url] = bd
 
@@ -477,42 +473,36 @@ class BuildData(object):
     return builds
 
   @staticmethod
-  def MarkBuildsGathered(builds, sheets_version, carbon_version, gs_ctx=None):
+  def MarkBuildsGathered(builds, sheets_version, gs_ctx=None):
     """Mark specified |builds| as processed for the given stats versions.
 
     Args:
       builds: List of BuildData objects.
       sheets_version: The Google Sheets version these builds are now processed
         for.
-      carbon_version: The Carbon/Graphite version these builds are now
-        processed for.
       gs_ctx: A GSContext object to use, if set.
     """
     gs_ctx = gs_ctx or gs.GSContext()
 
     # Filter for builds that were not already on these versions.
-    builds = [b for b in builds
-              if b.sheets_version != sheets_version or
-              b.carbon_version != carbon_version]
+    builds = [b for b in builds if b.sheets_version != sheets_version]
     if builds:
-      log_ver_str = 'Sheets v%d, Carbon v%d' % (sheets_version, carbon_version)
-      cros_build_lib.Info('Marking %d builds gathered (for %s) using %d'
-                          ' processes now.', len(builds), log_ver_str,
-                          MAX_PARALLEL)
+      log_ver_str = 'Sheets v%d' % sheets_version
+      logging.info('Marking %d builds gathered (for %s) using %d processes'
+                   ' now.', len(builds), log_ver_str, MAX_PARALLEL)
 
       def _MarkGathered(build):
-        build.MarkGathered(sheets_version, carbon_version)
+        build.MarkGathered(sheets_version)
         json_text = json.dumps(build.gathered_dict.copy())
         gs_ctx.Copy('-', build.gathered_url, input=json_text, print_cmd=False)
-        cros_build_lib.Debug('Marked build_number %d processed for %s.',
-                             build.build_number, log_ver_str)
+        logging.debug('Marked build_number %d processed for %s.',
+                      build.build_number, log_ver_str)
 
       inputs = [[build] for build in builds]
       parallel.RunTasksInProcessPool(_MarkGathered, inputs,
                                      processes=MAX_PARALLEL)
 
-  def __init__(self, metadata_url, metadata_dict, carbon_version=None,
-               sheets_version=None):
+  def __init__(self, metadata_url, metadata_dict, sheets_version=None):
     self.metadata_url = metadata_url
     self.metadata_dict = metadata_dict
 
@@ -520,14 +510,12 @@ class BuildData(object):
     # version (version 0) will be considered "newer".
     self.gathered_url = metadata_url + '.gathered'
     self.gathered_dict = {
-        self.CARBON_VER_KEY: -1 if carbon_version is None else carbon_version,
         self.SHEETS_VER_KEY: -1 if sheets_version is None else sheets_version,
     }
 
-  def MarkGathered(self, sheets_version, carbon_version):
+  def MarkGathered(self, sheets_version):
     """Mark this build as processed for the given stats versions."""
     self.gathered_dict[self.SHEETS_VER_KEY] = sheets_version
-    self.gathered_dict[self.CARBON_VER_KEY] = carbon_version
 
   def __getitem__(self, key):
     """Relay dict-like access to self.metadata_dict."""
@@ -540,10 +528,6 @@ class BuildData(object):
   @property
   def sheets_version(self):
     return self.gathered_dict[self.SHEETS_VER_KEY]
-
-  @property
-  def carbon_version(self):
-    return self.gathered_dict[self.CARBON_VER_KEY]
 
   @property
   def build_number(self):
@@ -736,7 +720,7 @@ def FindLatestFullVersion(builder, version):
     -bNNNN suffix.
   """
   gs_ctx = gs.GSContext()
-  config = cbuildbot_config.config[builder]
+  config = cbuildbot_config.GetConfig()[builder]
   base_url = archive_lib.GetBaseUploadURI(config)
   latest_file_url = os.path.join(base_url, 'LATEST-%s' % version)
   try:
@@ -759,7 +743,7 @@ def GetBuildMetadata(builder, full_version):
     |builder| and |full_version|.
   """
   gs_ctx = gs.GSContext()
-  config = cbuildbot_config.config[builder]
+  config = cbuildbot_config.GetConfig()[builder]
   base_url = archive_lib.GetBaseUploadURI(config)
   try:
     archive_url = os.path.join(base_url, full_version)
@@ -784,14 +768,14 @@ def GetLatestMilestone():
   latest_url = LATEST_URL % {'target': constants.CQ_MASTER}
   gs_ctx = gs.GSContext()
 
-  cros_build_lib.Info('Getting latest milestone from %s', latest_url)
+  logging.info('Getting latest milestone from %s', latest_url)
   try:
     content = gs_ctx.Cat(latest_url).strip()
 
     # Expected syntax is like the following: "R35-1234.5.6-rc7".
     assert content.startswith('R')
     milestone = content.split('-')[0][1:]
-    cros_build_lib.Info('Latest milestone determined to be: %s', milestone)
+    logging.info('Latest milestone determined to be: %s', milestone)
     return int(milestone)
 
   except gs.GSNoSuchKey:
@@ -817,8 +801,8 @@ def GetMetadataURLsSince(target, start_date, end_date):
   gs_ctx = gs.GSContext()
   while True:
     base_url = METADATA_URL_GLOB % {'target': target, 'milestone': milestone}
-    cros_build_lib.Info('Getting %s builds for R%d from "%s"',
-                        target, milestone, base_url)
+    logging.info('Getting %s builds for R%d from "%s"', target, milestone,
+                 base_url)
 
     try:
       # Get GS URLs.  We want the datetimes to quickly know when we are done
@@ -826,8 +810,8 @@ def GetMetadataURLsSince(target, start_date, end_date):
       urls = gs_ctx.List(base_url, details=True)
     except gs.GSNoSuchKey:
       # We ran out of metadata to collect.  Stop searching back in time.
-      cros_build_lib.Info('No %s builds found for $%d.  I will not continue'
-                          ' search to older milestones.', target, milestone)
+      logging.info('No %s builds found for $%d.  I will not continue search'
+                   ' to older milestones.', target, milestone)
       break
 
     # Sort by timestamp.
@@ -844,6 +828,6 @@ def GetMetadataURLsSince(target, start_date, end_date):
       break
     else:
       milestone -= 1
-      cros_build_lib.Info('Continuing on to R%d.', milestone)
+      logging.info('Continuing on to R%d.', milestone)
 
   return ret

@@ -99,6 +99,8 @@
         'signal_processing/splitting_filter.c',
         'signal_processing/sqrt_of_one_minus_x_squared.c',
         'signal_processing/vector_scaling_operations.c',
+        'sparse_fir_filter.cc',
+        'sparse_fir_filter.h',
         'vad/include/vad.h',
         'vad/include/webrtc_vad.h',
         'vad/vad.cc',
@@ -158,7 +160,7 @@
         ['target_arch=="arm64"', {
           'dependencies': ['common_audio_neon',],
         }],
-        ['target_arch=="mipsel" and mips_arch_variant!="r6" and android_webview_build==0', {
+        ['target_arch=="mipsel" and mips_arch_variant!="r6"', {
           'sources': [
             'signal_processing/include/spl_inl_mips.h',
             'signal_processing/complex_bit_reverse_mips.c',
@@ -199,10 +201,14 @@
             'fir_filter_sse.cc',
             'resampler/sinc_resampler_sse.cc',
           ],
-          'cflags': ['-msse2',],
-          'xcode_settings': {
-            'OTHER_CFLAGS': ['-msse2',],
-          },
+          'conditions': [
+            ['os_posix==1', {
+              'cflags': [ '-msse2', ],
+              'xcode_settings': {
+                'OTHER_CFLAGS': [ '-msse2', ],
+              },
+            }],
+          ],
         },
       ],  # targets
     }],
@@ -259,6 +265,7 @@
             'ring_buffer_unittest.cc',
             'signal_processing/real_fft_unittest.cc',
             'signal_processing/signal_processing_unittest.cc',
+            'sparse_fir_filter_unittest.cc',
             'vad/vad_core_unittest.cc',
             'vad/vad_filterbank_unittest.cc',
             'vad/vad_gmm_unittest.cc',

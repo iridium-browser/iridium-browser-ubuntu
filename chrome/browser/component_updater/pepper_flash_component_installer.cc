@@ -73,7 +73,7 @@ base::FilePath GetPepperFlashBaseDirectory() {
 bool GetPepperFlashDirectory(base::FilePath* latest_dir,
                              Version* latest_version,
                              std::vector<base::FilePath>* older_dirs) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  DCHECK_CURRENTLY_ON(BrowserThread::FILE);
   base::FilePath base_dir = GetPepperFlashBaseDirectory();
   bool found = false;
   base::FileEnumerator file_enumerator(
@@ -147,7 +147,7 @@ bool IsPepperFlash(const content::WebPluginInfo& plugin) {
 
 void RegisterPepperFlashWithChrome(const base::FilePath& path,
                                    const Version& version) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   content::PepperPluginInfo plugin_info;
   if (!MakePepperFlashPluginInfo(path, version, true, &plugin_info))
     return;
@@ -180,7 +180,7 @@ void RegisterPepperFlashWithChrome(const base::FilePath& path,
 
 }  // namespace
 
-class PepperFlashComponentInstaller : public update_client::ComponentInstaller {
+class PepperFlashComponentInstaller : public update_client::CrxInstaller {
  public:
   explicit PepperFlashComponentInstaller(const Version& version);
 
@@ -257,19 +257,19 @@ namespace {
 #if defined(GOOGLE_CHROME_BUILD) && !defined(OS_LINUX)
 void FinishPepperFlashUpdateRegistration(ComponentUpdateService* cus,
                                          const Version& version) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   update_client::CrxComponent pepflash;
   pepflash.name = "pepper_flash";
   pepflash.installer = new PepperFlashComponentInstaller(version);
   pepflash.version = version;
   pepflash.pk_hash.assign(kSha2Hash, &kSha2Hash[sizeof(kSha2Hash)]);
-  if (cus->RegisterComponent(pepflash) != ComponentUpdateService::kOk) {
+  if (cus->RegisterComponent(pepflash) != ComponentUpdateService::Status::kOk) {
     NOTREACHED() << "Pepper Flash component registration failed.";
   }
 }
 
 void StartPepperFlashUpdateRegistration(ComponentUpdateService* cus) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  DCHECK_CURRENTLY_ON(BrowserThread::FILE);
   base::FilePath path = GetPepperFlashBaseDirectory();
   if (!base::PathExists(path)) {
     if (!base::CreateDirectory(path)) {

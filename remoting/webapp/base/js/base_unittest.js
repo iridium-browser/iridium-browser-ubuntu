@@ -6,7 +6,16 @@
 
 'use strict';
 
-QUnit.module('base');
+var getRandomValuesStub = null;
+
+QUnit.module('base', {
+  afterEach: function() {
+    if (getRandomValuesStub) {
+      getRandomValuesStub.restore();
+      getRandomValuesStub = null;
+    }
+  }
+});
 
 QUnit.test('mix(dest, src) should copy properties from |src| to |dest|',
   function(assert) {
@@ -52,6 +61,53 @@ QUnit.test('deepCopy(obj) should copy primitive types recursively',
       {'key': {'key_nested': 'value_nested'}}
     );
     assert.deepEqual(base.deepCopy([1, [2, [3]]]), [1, [2, [3]]]);
+});
+
+QUnit.test('copyWithoutNullFields returns a new object',
+  function(assert) {
+    var obj = {
+      a: 'foo',
+      b: 42
+    };
+    var copy = base.copyWithoutNullFields(obj);
+    assert.notEqual(obj, copy);
+    assert.deepEqual(obj, copy);
+});
+
+QUnit.test('copyWithoutNullFields removes null and undefined fields',
+  function(assert) {
+    /** @const */
+    var obj = {
+      a: 'foo',
+      b: 42,
+      zero: 0,
+      emptyString: '',
+      nullField: null,
+      undefinedField: undefined
+    };
+    var copy = base.copyWithoutNullFields(obj);
+    assert.equal(copy['a'], obj['a']);
+    assert.equal(copy['b'], obj['b']);
+    assert.equal(copy['zero'], 0);
+    assert.equal(copy['emptyString'], '');
+    assert.ok(!('nullField' in copy));
+    assert.ok(!('undefinedField' in copy));
+});
+
+QUnit.test('copyWithoutNullFields(null) returns a new empty bject',
+  function(assert) {
+    assert.deepEqual(
+        base.copyWithoutNullFields(null),
+        {});
+    assert.notEqual(
+        base.copyWithoutNullFields(null),
+        base.copyWithoutNullFields(null));
+    assert.deepEqual(
+        base.copyWithoutNullFields(undefined),
+        {});
+    assert.notEqual(
+        base.copyWithoutNullFields(undefined),
+        base.copyWithoutNullFields(undefined));
 });
 
 QUnit.test('modify the original after deepCopy(obj) should not affect the copy',
@@ -151,6 +207,16 @@ QUnit.test('Promise.negate should fulfill iff the promise does not.',
     }).catch(function() {
       assert.ok(true);
     });
+});
+
+QUnit.test('generateUuid generates a UUID', function(assert) {
+  getRandomValuesStub = sinon.stub(
+      window.crypto, 'getRandomValues', function(/** Uint16Array*/ out) {
+        for (var i = 0; i < out.length; i++) {
+          out[i] = i;
+        }
+      });
+  assert.equal(base.generateUuid(), '00000001-0002-0003-0004-000500060007');
 });
 
 QUnit.module('base.Deferred');

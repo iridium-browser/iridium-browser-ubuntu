@@ -211,22 +211,6 @@ PermissionMessageStrings PermissionsData::GetPermissionMessageStrings() const {
       active_permissions().get(), manifest_type_);
 }
 
-std::vector<base::string16> PermissionsData::GetLegacyPermissionMessageStrings()
-    const {
-  if (ShouldSkipPermissionWarnings(extension_id_))
-    return std::vector<base::string16>();
-  return PermissionMessageProvider::Get()->GetLegacyWarningMessages(
-      active_permissions().get(), manifest_type_);
-}
-
-std::vector<base::string16>
-PermissionsData::GetLegacyPermissionMessageDetailsStrings() const {
-  if (ShouldSkipPermissionWarnings(extension_id_))
-    return std::vector<base::string16>();
-  return PermissionMessageProvider::Get()->GetLegacyWarningMessagesDetails(
-      active_permissions().get(), manifest_type_);
-}
-
 CoalescedPermissionMessages PermissionsData::GetCoalescedPermissionMessages()
     const {
   return PermissionMessageProvider::Get()->GetCoalescedPermissionMessages(
@@ -334,6 +318,12 @@ bool PermissionsData::CanCaptureVisiblePage(int tab_id,
   if (error)
     *error = manifest_errors::kAllURLOrActiveTabNeeded;
   return false;
+}
+
+PermissionsData::TabPermissionsMap
+PermissionsData::CopyTabSpecificPermissionsMap() const {
+  base::AutoLock auto_lock(runtime_lock_);
+  return tab_specific_permissions_;
 }
 
 scoped_refptr<const PermissionSet> PermissionsData::GetTabSpecificPermissions(

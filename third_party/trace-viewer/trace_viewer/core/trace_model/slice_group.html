@@ -6,10 +6,10 @@ found in the LICENSE file.
 -->
 
 <link rel="import" href="/core/trace_model/event_container.html">
-<link rel="import" href="/core/trace_model/slice.html">
 <link rel="import" href="/core/filter.html">
 <link rel="import" href="/base/ui/color_scheme.html">
 <link rel="import" href="/base/guid.html">
+<link rel="import" href="/base/sorted_array_utils.html">
 
 <script>
 'use strict';
@@ -19,6 +19,14 @@ found in the LICENSE file.
  */
 tv.exportTo('tv.c.trace_model', function() {
   var Slice = tv.c.trace_model.Slice;
+
+  function getSliceLo(s) {
+    return s.start;
+  }
+
+  function getSliceHi(s) {
+    return s.end;
+  }
 
   /**
    * A group of Slices, plus code to create them from B/E events, as
@@ -45,6 +53,7 @@ tv.exportTo('tv.c.trace_model', function() {
     this.slices = [];
     this.bounds = new tv.b.Range();
     this.topLevelSlices = [];
+    this.haveTopLevelSlicesBeenBuilt = false;
     this.name_ = opt_name;
   }
 
@@ -88,15 +97,17 @@ tv.exportTo('tv.c.trace_model', function() {
      * @param {Slice} slice The slice to be added to the slices array.
      */
     pushSlice: function(slice) {
+      this.haveTopLevelSlicesBeenBuilt = false;
       this.slices.push(slice);
       return slice;
     },
 
     /**
-     * Helper function that pushes the provided slice onto the slices array.
+     * Helper function that pushes the provided slices onto the slices array.
      * @param {Array.<Slice>} slices An array of slices to be added.
      */
     pushSlices: function(slices) {
+      this.haveTopLevelSlicesBeenBuilt = false;
       this.slices.push.apply(this.slices, slices);
     },
 
@@ -268,8 +279,43 @@ tv.exportTo('tv.c.trace_model', function() {
       return slices;
     },
 
-    toJSON: function() {
-      return {};
+    iterSlicesInTimeRange: function(callback, start, end) {
+      var ret = [];
+      tv.b.iterateOverIntersectingIntervals(
+        this.topLevelSlices,
+        function(s) { return s.start; },
+        function(s) { return s.duration; },
+        start,
+        end,
+        function(topLevelSlice) {
+          callback(topLevelSlice);
+          topLevelSlice.iterateAllDescendents(callback);
+        });
+      return ret;
+    },
+
+    findSliceAtTs: function(ts) {
+      if (!this.haveTopLevelSlicesBeenBuilt)
+        throw new Error('Nope');
+      var i = tv.b.findIndexInSortedClosedIntervals(
+          this.topLevelSlices,
+          getSliceLo, getSliceHi,
+          ts);
+      if (i == -1 || i == this.topLevelSlices.length)
+        return undefined;
+
+      var curSlice = this.topLevelSlices[i];
+
+      // Now recurse on slice looking for subSlice of given ts.
+      while (true) {
+        var i = tv.b.findIndexInSortedClosedIntervals(
+            curSlice.subSlices,
+            getSliceLo, getSliceHi,
+            ts);
+        if (i == -1 || i == curSlice.subSlices.length)
+          return curSlice;
+        curSlice = curSlice.subSlices[i];
+      }
     },
 
     /**
@@ -279,6 +325,27 @@ tv.exportTo('tv.c.trace_model', function() {
      * reference.
      */
     createSubSlices: function() {
+      this.haveTopLevelSlicesBeenBuilt = true;
+      this.createSubSlicesImpl_();
+
+      this.slices.forEach(function(slice) {
+        var selfTime = slice.duration;
+        for (var i = 0; i < slice.subSlices.length; i++)
+          selfTime -= slice.subSlices[i].duration;
+        slice.selfTime = selfTime;
+
+        if (slice.cpuDuration === undefined)
+          return;
+
+        var cpuSelfTime = slice.cpuDuration;
+        for (var i = 0; i < slice.subSlices.length; i++) {
+          if (slice.subSlices[i].cpuDuration !== undefined)
+            cpuSelfTime -= slice.subSlices[i].cpuDuration;
+        }
+        slice.cpuSelfTime = cpuSelfTime;
+      });
+    },
+    createSubSlicesImpl_: function() {
       function addSliceIfBounds(root, child) {
         // Because we know that the start time of child is >= the start time
         // of all other slices seen so far, we can just check the last slice
@@ -289,17 +356,10 @@ tv.exportTo('tv.c.trace_model', function() {
                                  child))
               return true;
           }
-          if (!root.selfTime)
-            root.selfTime = root.duration;
-          if (!root.cpuSelfTime && root.cpuDuration)
-            root.cpuSelfTime = root.cpuDuration;
           child.parentSlice = root;
-          if (!root.subSlices)
+          if (root.subSlices === undefined)
             root.subSlices = [];
           root.subSlices.push(child);
-          root.selfTime -= child.duration;
-          if (child.cpuDuration)
-            root.cpuSelfTime -= child.cpuDuration;
           return true;
         }
         return false;
@@ -392,16 +452,21 @@ tv.exportTo('tv.c.trace_model', function() {
     // to the end-time and start-time of the input slice, respectively) we
     // split all of the currently open slices from groupB.
 
-    if (groupA.openPartialSlices_.length > 0) {
+    if (groupA.openPartialSlices_.length > 0)
       throw new Error('groupA has open partial slices');
-    }
-    if (groupB.openPartialSlices_.length > 0) {
+
+    if (groupB.openPartialSlices_.length > 0)
       throw new Error('groupB has open partial slices');
-    }
+
     if (groupA.parentThread != groupB.parentThread)
       throw new Error('Different parent threads. Cannot merge');
 
-    var result = new SliceGroup(groupA.parentThread);
+    if (groupA.sliceConstructor != groupB.sliceConstructor)
+      throw new Error('Different slice constructors. Cannot merge');
+
+    var result = new SliceGroup(groupA.parentThread,
+                                groupA.sliceConstructor,
+                                groupA.name_);
 
     var slicesA = groupA.slices;
     var slicesB = groupB.slices;

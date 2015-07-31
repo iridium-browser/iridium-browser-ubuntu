@@ -29,6 +29,7 @@
 #ifndef AXTable_h
 #define AXTable_h
 
+#include "modules/ModulesExport.h"
 #include "modules/accessibility/AXLayoutObject.h"
 #include "wtf/Forward.h"
 
@@ -37,7 +38,7 @@ namespace blink {
 class AXObjectCacheImpl;
 class AXTableCell;
 
-class AXTable : public AXLayoutObject {
+class MODULES_EXPORT AXTable : public AXLayoutObject {
 
 protected:
     AXTable(LayoutObject*, AXObjectCacheImpl*);
@@ -66,7 +67,7 @@ public:
     unsigned columnCount();
     unsigned rowCount();
 
-    virtual String title(TextUnderElementMode) const override final;
+    virtual String deprecatedTitle(TextUnderElementMode) const override final;
 
     // all the cells in the table
     void cells(AccessibilityChildrenVector&);
@@ -87,7 +88,7 @@ protected:
 
     bool hasARIARole() const;
     virtual bool isTableExposableThroughAccessibility() const;
-    virtual bool computeAccessibilityIsIgnored() const override final;
+    virtual bool computeAccessibilityIsIgnored(IgnoredReasons* = nullptr) const override final;
 };
 
 DEFINE_AX_OBJECT_TYPE_CASTS(AXTable, isAXTable());

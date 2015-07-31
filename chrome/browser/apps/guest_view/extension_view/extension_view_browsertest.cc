@@ -5,78 +5,38 @@
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/apps/app_browsertest_util.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/guest_view/browser/guest_view_manager.h"
+#include "components/guest_view/browser/guest_view_manager_factory.h"
+#include "components/guest_view/browser/test_guest_view_manager.h"
 #include "content/public/test/browser_test_utils.h"
-#include "extensions/browser/guest_view/guest_view_manager.h"
-#include "extensions/browser/guest_view/guest_view_manager_factory.h"
+#include "extensions/browser/guest_view/extensions_guest_view_manager_delegate.h"
 #include "extensions/test/extension_test_message_listener.h"
 
-namespace {
-
-class TestGuestViewManager : public extensions::GuestViewManager {
- public:
-  explicit TestGuestViewManager(content::BrowserContext* context)
-      : extensions::GuestViewManager(context), web_contents_(NULL) {}
-
-  content::WebContents* WaitForGuestCreated() {
-    if (web_contents_)
-      return web_contents_;
-
-    message_loop_runner_ = new content::MessageLoopRunner;
-    message_loop_runner_->Run();
-    return web_contents_;
-  }
-
- private:
-  // GuestViewManager override.
-  void AddGuest(int guest_instance_id,
-                content::WebContents* guest_web_contents) override {
-    extensions::GuestViewManager::AddGuest(guest_instance_id,
-                                           guest_web_contents);
-    web_contents_ = guest_web_contents;
-
-    if (message_loop_runner_.get())
-      message_loop_runner_->Quit();
-  }
-
-  content::WebContents* web_contents_;
-  scoped_refptr<content::MessageLoopRunner> message_loop_runner_;
-};
-
-// Test factory for creating test instances of GuestViewManager.
-class TestGuestViewManagerFactory : public extensions::GuestViewManagerFactory {
- public:
-  TestGuestViewManagerFactory() : test_guest_view_manager_(NULL) {}
-
-  ~TestGuestViewManagerFactory() override {}
-
-  extensions::GuestViewManager* CreateGuestViewManager(
-      content::BrowserContext* context) override {
-    return GetManager(context);
-  }
-
-  TestGuestViewManager* GetManager(content::BrowserContext* context) {
-    if (!test_guest_view_manager_) {
-      test_guest_view_manager_ = new TestGuestViewManager(context);
-    }
-    return test_guest_view_manager_;
-  }
-
- private:
-  TestGuestViewManager* test_guest_view_manager_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestGuestViewManagerFactory);
-};
-
-}  // namespace
+using extensions::ExtensionsGuestViewManagerDelegate;
+using guest_view::GuestViewManager;
+using guest_view::TestGuestViewManager;
+using guest_view::TestGuestViewManagerFactory;
 
 class ExtensionViewTest : public extensions::PlatformAppBrowserTest {
  public:
   ExtensionViewTest() {
-    extensions::GuestViewManager::set_factory_for_testing(&factory_);
+    GuestViewManager::set_factory_for_testing(&factory_);
   }
 
   TestGuestViewManager* GetGuestViewManager() {
-    return factory_.GetManager(browser()->profile());
+    TestGuestViewManager* manager = static_cast<TestGuestViewManager*>(
+        TestGuestViewManager::FromBrowserContext(browser()->profile()));
+    // TestGuestViewManager::WaitForSingleGuestCreated may and will get called
+    // before a guest is created.
+    if (!manager) {
+      manager = static_cast<TestGuestViewManager*>(
+          GuestViewManager::CreateWithDelegate(
+              browser()->profile(),
+              scoped_ptr<guest_view::GuestViewManagerDelegate>(
+                  new ExtensionsGuestViewManagerDelegate(
+                      browser()->profile()))));
+    }
+    return manager;
   }
 
   void TestHelper(const std::string& test_name,

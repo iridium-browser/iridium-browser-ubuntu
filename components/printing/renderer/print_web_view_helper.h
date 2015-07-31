@@ -26,6 +26,17 @@ struct PrintMsg_PrintPage_Params;
 struct PrintMsg_PrintPages_Params;
 struct PrintHostMsg_SetOptionsFromDocument_Params;
 
+// RenderViewTest-based tests crash on Android
+// http://crbug.com/187500
+#if defined(OS_ANDROID)
+#define MAYBE_PrintWebViewHelperTest DISABLED_PrintWebViewHelperTest
+#define MAYBE_PrintWebViewHelperPreviewTest \
+    DISABLED_PrintWebViewHelperPreviewTest
+#else
+#define MAYBE_PrintWebViewHelperTest PrintWebViewHelperTest
+#define MAYBE_PrintWebViewHelperPreviewTest PrintWebViewHelperPreviewTest
+#endif  // defined(OS_ANDROID)
+
 namespace base {
 class DictionaryValue;
 }
@@ -79,9 +90,6 @@ class PrintWebViewHelper
     // a pdf plugin element can't be extracted from the frame.
     virtual blink::WebElement GetPdfElement(blink::WebLocalFrame* frame) = 0;
 
-    // Used to know whether the content to print could be nested in an iframe.
-    virtual bool IsOutOfProcessPdfEnabled() = 0;
-
     virtual bool IsPrintPreviewEnabled() = 0;
 
     // If true, the user can be asked to provide print settings.
@@ -111,16 +119,16 @@ class PrintWebViewHelper
 
  private:
   friend class PrintWebViewHelperTestBase;
-  FRIEND_TEST_ALL_PREFIXES(PrintWebViewHelperPreviewTest,
+  FRIEND_TEST_ALL_PREFIXES(MAYBE_PrintWebViewHelperPreviewTest,
                            BlockScriptInitiatedPrinting);
-  FRIEND_TEST_ALL_PREFIXES(PrintWebViewHelperTest, OnPrintPages);
-  FRIEND_TEST_ALL_PREFIXES(PrintWebViewHelperTest,
+  FRIEND_TEST_ALL_PREFIXES(MAYBE_PrintWebViewHelperTest, OnPrintPages);
+  FRIEND_TEST_ALL_PREFIXES(MAYBE_PrintWebViewHelperTest,
                            BlockScriptInitiatedPrinting);
-  FRIEND_TEST_ALL_PREFIXES(PrintWebViewHelperTest,
+  FRIEND_TEST_ALL_PREFIXES(MAYBE_PrintWebViewHelperTest,
                            BlockScriptInitiatedPrintingFromPopup);
 #if defined(OS_WIN) || defined(OS_MACOSX)
-  FRIEND_TEST_ALL_PREFIXES(PrintWebViewHelperTest, PrintLayoutTest);
-  FRIEND_TEST_ALL_PREFIXES(PrintWebViewHelperTest, PrintWithIframe);
+  FRIEND_TEST_ALL_PREFIXES(MAYBE_PrintWebViewHelperTest, PrintLayoutTest);
+  FRIEND_TEST_ALL_PREFIXES(MAYBE_PrintWebViewHelperTest, PrintWithIframe);
 #endif  // defined(OS_WIN) || defined(OS_MACOSX)
 
   enum PrintingResult {
@@ -493,6 +501,7 @@ class PrintWebViewHelper
   PrintPreviewContext print_preview_context_;
   bool is_loading_;
   bool is_scripted_preview_delayed_;
+  int ipc_nesting_level_;
 
   // Used to fix a race condition where the source is a PDF and print preview
   // hangs because RequestPrintPreview is called before DidStopLoading() is

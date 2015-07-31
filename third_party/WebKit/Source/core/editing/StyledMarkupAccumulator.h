@@ -35,39 +35,70 @@
 
 namespace blink {
 
-class ContainerNode;
-class Node;
+class Document;
 class StylePropertySet;
+class Text;
 
-class StyledMarkupAccumulator final : public MarkupAccumulator {
+class TextOffset {
+    STACK_ALLOCATED();
+public:
+    TextOffset();
+    TextOffset(PassRefPtrWillBeRawPtr<Text>, int);
+    TextOffset(const TextOffset&);
+
+    Text* text() const { return m_text.get(); }
+    int offset() const { return m_offset; }
+
+    bool isNull() const;
+    bool isNotNull() const;
+
+private:
+    RefPtrWillBeMember<Text> m_text;
+    int m_offset;
+};
+
+class StyledMarkupAccumulator final {
+    WTF_MAKE_NONCOPYABLE(StyledMarkupAccumulator);
+    STACK_ALLOCATED();
 public:
     enum RangeFullySelectsNode { DoesFullySelectNode, DoesNotFullySelectNode };
 
-    StyledMarkupAccumulator(EAbsoluteURLs, EAnnotateForInterchange, const Position& start, const Position& end, Node* highestNodeToBeSerialized = nullptr);
-    Node* serializeNodes(Node* startNode, Node* pastEnd);
-    void appendString(const String& s) { return MarkupAccumulator::appendString(s); }
-    void wrapWithNode(ContainerNode&, bool convertBlocksToInlines = false, RangeFullySelectsNode = DoesFullySelectNode);
-    void wrapWithStyleNode(StylePropertySet*, const Document&, bool isBlock = false);
-    String takeResults();
+    StyledMarkupAccumulator(EAbsoluteURLs, const TextOffset& start, const TextOffset& end, const PassRefPtrWillBeRawPtr<Document>, EAnnotateForInterchange, Node*);
+
+    void appendString(const String&);
+    void appendStartTag(Node&, Namespaces* = nullptr);
+    void appendEndTag(const Element&);
+    void appendStartMarkup(StringBuilder&, Node&, Namespaces*);
+    void appendEndMarkup(StringBuilder&, const Element&);
+
+    void appendElement(StringBuilder&, Element&, Namespaces*);
+    void appendElement(StringBuilder&, Element&, bool, RangeFullySelectsNode);
+    void appendStyleNodeOpenTag(StringBuilder&, StylePropertySet*, bool isBlock = false);
+
+    // TODO(hajimehoshi): These functions are called from the serializer, but
+    // should not.
+    Node* highestNodeToBeSerialized() { return m_highestNodeToBeSerialized.get(); }
+    void setHighestNodeToBeSerialized(Node* highestNodeToBeSerialized) { m_highestNodeToBeSerialized = highestNodeToBeSerialized; }
+    void setWrappingStyle(PassRefPtrWillBeRawPtr<EditingStyle> wrappingStyle) { m_wrappingStyle = wrappingStyle; }
+    bool shouldAnnotate() const { return m_shouldAnnotate == AnnotateForInterchange || m_shouldAnnotate == AnnotateForNavigationTransition; }
+    bool shouldAnnotateForNavigationTransition() const { return m_shouldAnnotate == AnnotateForNavigationTransition; }
+    bool shouldAnnotateForInterchange() const { return m_shouldAnnotate == AnnotateForInterchange; }
+
+    size_t length() const { return m_accumulator.length(); }
+    void concatenateMarkup(StringBuilder&) const;
 
 private:
-    void appendStyleNodeOpenTag(StringBuilder&, StylePropertySet*, const Document&, bool isBlock = false);
-    const String& styleNodeCloseTag(bool isBlock = false);
-    virtual void appendText(StringBuilder& out, Text&) override;
-    void appendElement(StringBuilder& out, Element&, bool addDisplayInline, RangeFullySelectsNode);
-    virtual void appendElement(StringBuilder& out, Element& element, Namespaces*) override { appendElement(out, element, false, DoesFullySelectNode); }
+    void appendText(StringBuilder&, Text&);
 
-    enum NodeTraversalMode { EmitString, DoNotEmitString };
-    Node* traverseNodesForSerialization(Node* startNode, Node* pastEnd, NodeTraversalMode);
+    String renderedText(Text&);
+    String stringValueForRange(const Text&);
 
-    bool shouldAnnotate() const { return m_shouldAnnotate == AnnotateForInterchange || m_shouldAnnotate == AnnotateForNavigationTransition; }
-    bool shouldApplyWrappingStyle(const Node& node) const
-    {
-        return m_highestNodeToBeSerialized && m_highestNodeToBeSerialized->parentNode() == node.parentNode()
-            && m_wrappingStyle && m_wrappingStyle->style();
-    }
+    bool shouldApplyWrappingStyle(const Node&) const;
 
-    Vector<String> m_reversedPrecedingMarkup;
+    MarkupAccumulator m_accumulator;
+    const TextOffset m_start;
+    const TextOffset m_end;
+    const RefPtrWillBeMember<Document> m_document;
     const EAnnotateForInterchange m_shouldAnnotate;
     RawPtrWillBeMember<Node> m_highestNodeToBeSerialized;
     RefPtrWillBeMember<EditingStyle> m_wrappingStyle;

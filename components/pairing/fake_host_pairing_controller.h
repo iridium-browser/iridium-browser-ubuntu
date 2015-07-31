@@ -47,15 +47,10 @@ class FakeHostPairingController
   std::string GetEnrollmentDomain() override;
   void OnUpdateStatusChanged(UpdateStatus update_status) override;
   void OnEnrollmentStatusChanged(EnrollmentStatus enrollment_status) override;
+  void SetPermanentId(const std::string& permanent_id) override;
 
   // HostPairingController::Observer:
   void PairingStageChanged(Stage new_stage) override;
-  void ConfigureHost(bool accepted_eula,
-                     const std::string& lang,
-                     const std::string& timezone,
-                     bool send_reports,
-                     const std::string& keyboard_layout) override;
-  void EnrollHost(const std::string& auth_token) override;
 
   ObserverList<Observer> observers_;
   Stage current_stage_;

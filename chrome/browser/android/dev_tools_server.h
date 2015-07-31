@@ -10,7 +10,7 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 
-namespace content {
+namespace devtools_http_handler {
 class DevToolsHttpHandler;
 }
 
@@ -30,7 +30,7 @@ class DevToolsServer {
 
  private:
   std::string socket_name_;
-  scoped_ptr<content::DevToolsHttpHandler> protocol_handler_;
+  scoped_ptr<devtools_http_handler::DevToolsHttpHandler> devtools_http_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(DevToolsServer);
 };

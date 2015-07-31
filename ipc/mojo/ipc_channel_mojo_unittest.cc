@@ -6,11 +6,13 @@
 
 #include "base/base_paths.h"
 #include "base/files/file.h"
-#include "base/message_loop/message_loop.h"
+#include "base/location.h"
 #include "base/path_service.h"
 #include "base/pickle.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/test/test_timeouts.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/thread.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_test_base.h"
@@ -66,12 +68,9 @@ class ListenerThatExpectsOK : public IPC::Listener {
 class ChannelClient {
  public:
   explicit ChannelClient(IPC::Listener* listener, const char* name) {
-    ipc_support_.reset(
-        new IPC::ScopedIPCSupport(main_message_loop_.task_runner()));
-    channel_ = IPC::ChannelMojo::Create(NULL,
+    channel_ = IPC::ChannelMojo::Create(NULL, main_message_loop_.task_runner(),
                                         IPCTestBase::GetChannelName(name),
-                                        IPC::Channel::MODE_CLIENT,
-                                        listener);
+                                        IPC::Channel::MODE_CLIENT, listener);
   }
 
   void Connect() {
@@ -82,7 +81,8 @@ class ChannelClient {
     channel_->Close();
 
     base::RunLoop run_loop;
-    base::MessageLoop::current()->PostTask(FROM_HERE, run_loop.QuitClosure());
+    base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                  run_loop.QuitClosure());
     run_loop.Run();
   }
 
@@ -90,7 +90,6 @@ class ChannelClient {
 
  private:
   base::MessageLoopForIO main_message_loop_;
-  scoped_ptr<IPC::ScopedIPCSupport> ipc_support_;
   scoped_ptr<IPC::ChannelMojo> channel_;
 };
 
@@ -98,22 +97,17 @@ class IPCChannelMojoTestBase : public IPCTestBase {
  public:
   void InitWithMojo(const std::string& test_client_name) {
     Init(test_client_name);
-    ipc_support_.reset(new IPC::ScopedIPCSupport(task_runner()));
   }
 
   void TearDown() override {
     // Make sure Mojo IPC support is properly shutdown on the I/O loop before
     // TearDown continues.
-    ipc_support_.reset();
     base::RunLoop run_loop;
     task_runner()->PostTask(FROM_HERE, run_loop.QuitClosure());
     run_loop.Run();
 
     IPCTestBase::TearDown();
   }
-
- private:
-  scoped_ptr<IPC::ScopedIPCSupport> ipc_support_;
 };
 
 class IPCChannelMojoTest : public IPCChannelMojoTestBase {
@@ -123,7 +117,7 @@ class IPCChannelMojoTest : public IPCChannelMojoTestBase {
       base::SequencedTaskRunner* runner) override {
     host_.reset(new IPC::ChannelMojoHost(task_runner()));
     return IPC::ChannelMojo::CreateServerFactory(host_->channel_delegate(),
-                                                 handle);
+                                                 task_runner(), handle);
   }
 
   bool DidStartClient() override {
@@ -231,7 +225,7 @@ class IPCChannelMojoErrorTest : public IPCChannelMojoTestBase {
       base::SequencedTaskRunner* runner) override {
     host_.reset(new IPC::ChannelMojoHost(task_runner()));
     return IPC::ChannelMojo::CreateServerFactory(host_->channel_delegate(),
-                                                 handle);
+                                                 task_runner(), handle);
   }
 
   bool DidStartClient() override {
@@ -560,15 +554,15 @@ MULTIPROCESS_IPC_TEST_CLIENT_MAIN(ParamTraitInvalidMessagePipeClient) {
 #if defined(OS_WIN)
 class IPCChannelMojoDeadHandleTest : public IPCChannelMojoTestBase {
  protected:
-  virtual scoped_ptr<IPC::ChannelFactory> CreateChannelFactory(
+  scoped_ptr<IPC::ChannelFactory> CreateChannelFactory(
       const IPC::ChannelHandle& handle,
       base::SequencedTaskRunner* runner) override {
     host_.reset(new IPC::ChannelMojoHost(task_runner()));
     return IPC::ChannelMojo::CreateServerFactory(host_->channel_delegate(),
-                                                 handle);
+                                                 task_runner(), handle);
   }
 
-  virtual bool DidStartClient() override {
+  bool DidStartClient() override {
     IPCTestBase::DidStartClient();
     const base::ProcessHandle client = client_process().Handle();
     // Forces GetFileHandleForProcess() fail. It happens occasionally

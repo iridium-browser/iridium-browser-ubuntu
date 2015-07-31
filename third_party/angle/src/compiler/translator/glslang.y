@@ -30,6 +30,7 @@ WHICH GENERATES THE GLSL ES PARSER (glslang_tab.cpp AND glslang_tab.h).
 #elif defined(_MSC_VER)
 #pragma warning(disable: 4065)
 #pragma warning(disable: 4189)
+#pragma warning(disable: 4244)
 #pragma warning(disable: 4505)
 #pragma warning(disable: 4701)
 #pragma warning(disable: 4702)
@@ -217,7 +218,7 @@ variable_identifier
 
         if (variable->getType().getQualifier() == EvqConst)
         {
-            ConstantUnion* constArray = variable->getConstPointer();
+            TConstantUnion* constArray = variable->getConstPointer();
             TType t(variable->getType());
             $$ = context->intermediate.addConstantUnion(constArray, t, @1);
         }
@@ -239,22 +240,22 @@ primary_expression
         $$ = $1;
     }
     | INTCONSTANT {
-        ConstantUnion *unionArray = new ConstantUnion[1];
+        TConstantUnion *unionArray = new TConstantUnion[1];
         unionArray->setIConst($1.i);
         $$ = context->intermediate.addConstantUnion(unionArray, TType(EbtInt, EbpUndefined, EvqConst), @1);
     }
     | UINTCONSTANT {
-        ConstantUnion *unionArray = new ConstantUnion[1];
+        TConstantUnion *unionArray = new TConstantUnion[1];
         unionArray->setUConst($1.u);
         $$ = context->intermediate.addConstantUnion(unionArray, TType(EbtUInt, EbpUndefined, EvqConst), @1);
     }
     | FLOATCONSTANT {
-        ConstantUnion *unionArray = new ConstantUnion[1];
+        TConstantUnion *unionArray = new TConstantUnion[1];
         unionArray->setFConst($1.f);
         $$ = context->intermediate.addConstantUnion(unionArray, TType(EbtFloat, EbpUndefined, EvqConst), @1);
     }
     | BOOLCONSTANT {
-        ConstantUnion *unionArray = new ConstantUnion[1];
+        TConstantUnion *unionArray = new TConstantUnion[1];
         unionArray->setBConst($1.b);
         $$ = context->intermediate.addConstantUnion(unionArray, TType(EbtBool, EbpUndefined, EvqConst), @1);
     }
@@ -295,7 +296,7 @@ integer_expression
 function_call
     : function_call_or_method {
         bool fatalError = false;
-        $$ = context->addFunctionCallOrMethod($1.function, $1.intermNode, @1, &fatalError);
+        $$ = context->addFunctionCallOrMethod($1.function, $1.nodePair.node1, $1.nodePair.node2, @1, &fatalError);
         if (fatalError)
         {
             YYERROR;
@@ -306,11 +307,12 @@ function_call
 function_call_or_method
     : function_call_generic {
         $$ = $1;
+        $$.nodePair.node2 = nullptr;
     }
     | postfix_expression DOT function_call_generic {
-        context->error(@3, "methods are not supported", "");
-        context->recover();
+        ES3_ONLY("", @3, "methods");
         $$ = $3;
+        $$.nodePair.node2 = $1;
     }
     ;
 
@@ -326,11 +328,11 @@ function_call_generic
 function_call_header_no_parameters
     : function_call_header VOID_TYPE {
         $$.function = $1;
-        $$.intermNode = 0;
+        $$.nodePair.node1 = nullptr;
     }
     | function_call_header {
         $$.function = $1;
-        $$.intermNode = 0;
+        $$.nodePair.node1 = nullptr;
     }
     ;
 
@@ -339,13 +341,13 @@ function_call_header_with_parameters
         TParameter param = { 0, new TType($2->getType()) };
         $1->addParameter(param);
         $$.function = $1;
-        $$.intermNode = $2;
+        $$.nodePair.node1 = $2;
     }
     | function_call_header_with_parameters COMMA assignment_expression {
         TParameter param = { 0, new TType($3->getType()) };
         $1.function->addParameter(param);
         $$.function = $1.function;
-        $$.intermNode = context->intermediate.growAggregate($1.intermNode, $3, @2);
+        $$.nodePair.node1 = context->intermediate.growAggregate($1.intermNode, $3, @2);
     }
     ;
 
@@ -358,7 +360,10 @@ function_call_header
 // Grammar Note:  Constructors look like functions, but are recognized as types.
 
 function_identifier
-    : type_specifier_nonarray {
+    : type_specifier_no_prec {
+        if ($1.array) {
+            ES3_ONLY("[]", @1, "array constructor");
+        }
         $$ = context->addConstructorFunc($1);
     }
     | IDENTIFIER {
@@ -517,18 +522,7 @@ logical_or_expression
 conditional_expression
     : logical_or_expression { $$ = $1; }
     | logical_or_expression QUESTION expression COLON assignment_expression {
-       if (context->boolErrorCheck(@2, $1))
-            context->recover();
-
-        $$ = context->intermediate.addSelection($1, $3, $5, @2);
-        if ($3->getType() != $5->getType())
-            $$ = 0;
-
-        if ($$ == 0) {
-            context->binaryOpError(@2, ":", $3->getCompleteString(), $5->getCompleteString());
-            context->recover();
-            $$ = $5;
-        }
+        $$ = context->addTernarySelection($1, $3, $5, @2);
     }
     ;
 
@@ -610,6 +604,7 @@ declaration
         TIntermAggregate *prototype = new TIntermAggregate;
         prototype->setType(function.getReturnType());
         prototype->setName(function.getMangledName());
+        prototype->setFunctionId(function.getUniqueId());
         
         for (size_t i = 0; i < function.getParamCount(); i++)
         {
@@ -768,7 +763,7 @@ function_header
             context->recover();
         }
         // make sure a sampler is not involved as well...
-        if (context->structQualifierErrorCheck(@2, $1))
+        if (context->samplerErrorCheck(@2, $1, "samplers can't be function return values"))
             context->recover();
 
         // Add the function as a prototype after parsing it (we do not support recursion)
@@ -804,7 +799,7 @@ parameter_declarator
         int size;
         if (context->arraySizeErrorCheck(@3, $4, size))
             context->recover();
-        $1.setArray(true, size);
+        $1.setArraySize(size);
 
         TType* type = new TType($1);
         TParameter param = { $2.string, type };
@@ -878,15 +873,21 @@ init_declarator_list
     }
     | init_declarator_list COMMA identifier {
         $$ = $1;
-        $$.intermAggregate = context->parseDeclarator($$.type, $1.intermAggregate, $3.symbol, @3, *$3.string);
-    }
-    | init_declarator_list COMMA identifier LEFT_BRACKET RIGHT_BRACKET {
-        $$ = $1;
-        context->parseArrayDeclarator($$.type, @3, *$3.string, @4, NULL, NULL);
+        $$.intermAggregate = context->parseDeclarator($$.type, $1.intermAggregate, @3, *$3.string);
     }
     | init_declarator_list COMMA identifier LEFT_BRACKET constant_expression RIGHT_BRACKET {
         $$ = $1;
-        $$.intermAggregate = context->parseArrayDeclarator($$.type, @3, *$3.string, @4, $1.intermNode, $5);
+        $$.intermAggregate = context->parseArrayDeclarator($$.type, $1.intermAggregate, @3, *$3.string, @4, $5);
+    }
+    | init_declarator_list COMMA identifier LEFT_BRACKET RIGHT_BRACKET EQUAL initializer {
+        ES3_ONLY("[]", @3, "implicitly sized array");
+        $$ = $1;
+        $$.intermAggregate = context->parseArrayInitDeclarator($$.type, $1.intermAggregate, @3, *$3.string, @4, nullptr, @6, $7);
+    }
+    | init_declarator_list COMMA identifier LEFT_BRACKET constant_expression RIGHT_BRACKET EQUAL initializer {
+        ES3_ONLY("=", @7, "first-class arrays (array initializer)");
+        $$ = $1;
+        $$.intermAggregate = context->parseArrayInitDeclarator($$.type, $1.intermAggregate, @3, *$3.string, @4, $5, @7, $8);
     }
     | init_declarator_list COMMA identifier EQUAL initializer {
         $$ = $1;
@@ -903,16 +904,19 @@ single_declaration
         $$.type = $1;
         $$.intermAggregate = context->parseSingleDeclaration($$.type, @2, *$2.string);
     }
-    | fully_specified_type identifier LEFT_BRACKET RIGHT_BRACKET {
-        context->error(@2, "unsized array declarations not supported", $2.string->c_str());
-        context->recover();
-
-        $$.type = $1;
-        $$.intermAggregate = context->parseSingleDeclaration($$.type, @2, *$2.string);
-    }
     | fully_specified_type identifier LEFT_BRACKET constant_expression RIGHT_BRACKET {
         $$.type = $1;
         $$.intermAggregate = context->parseSingleArrayDeclaration($$.type, @2, *$2.string, @3, $4);
+    }
+    | fully_specified_type identifier LEFT_BRACKET RIGHT_BRACKET EQUAL initializer {
+        ES3_ONLY("[]", @3, "implicitly sized array");
+        $$.type = $1;
+        $$.intermAggregate = context->parseSingleArrayInitDeclaration($$.type, @2, *$2.string, @3, nullptr, @5, $6);
+    }
+    | fully_specified_type identifier LEFT_BRACKET constant_expression RIGHT_BRACKET EQUAL initializer {
+        ES3_ONLY("=", @6, "first-class arrays (array initializer)");
+        $$.type = $1;
+        $$.intermAggregate = context->parseSingleArrayInitDeclaration($$.type, @2, *$2.string, @3, $4, @6, $7);
     }
     | fully_specified_type identifier EQUAL initializer {
         $$.type = $1;
@@ -929,13 +933,14 @@ fully_specified_type
         $$ = $1;
 
         if ($1.array) {
-            context->error(@1, "not supported", "first-class array");
-            context->recover();
-            $1.setArray(false);
+            ES3_ONLY("[]", @1, "first-class-array");
+            if (context->shaderVersion != 300) {
+                $1.clearArrayness();
+            }
         }
     }
     | type_qualifier type_specifier  {
-        $$ = context->addFullySpecifiedType($1.qualifier, $1.layoutQualifier, $2);
+        $$ = context->addFullySpecifiedType($1.qualifier, $1.invariant, $1.layoutQualifier, $2);
     }
     ;
 
@@ -976,9 +981,10 @@ type_qualifier
         if (context->globalErrorCheck(@1, context->symbolTable.atGlobalLevel(), "invariant varying"))
             context->recover();
         if (context->shaderType == GL_VERTEX_SHADER)
-            $$.setBasic(EbtVoid, EvqInvariantVaryingOut, @1);
+            $$.setBasic(EbtVoid, EvqVaryingOut, @1);
         else
-            $$.setBasic(EbtVoid, EvqInvariantVaryingIn, @1);
+            $$.setBasic(EbtVoid, EvqVaryingIn, @1);
+        $$.invariant = true;
     }
     | storage_qualifier {
         if ($1.qualifier != EvqConst && !context->symbolTable.atGlobalLevel()) {
@@ -1005,6 +1011,16 @@ type_qualifier
     | layout_qualifier storage_qualifier {
         $$.setBasic(EbtVoid, $2.qualifier, @2);
         $$.layoutQualifier = $1;
+    }
+    | INVARIANT storage_qualifier {
+        context->es3InvariantErrorCheck($2.qualifier, @1);
+        $$.setBasic(EbtVoid, $2.qualifier, @2);
+        $$.invariant = true;
+    }
+    | INVARIANT interpolation_qualifier storage_qualifier {
+        context->es3InvariantErrorCheck($3.qualifier, @1);
+        $$ = context->joinInterpolationQualifiers(@2, $2.qualifier, @3, $3.qualifier);
+        $$.invariant = true;
     }
     ;
 
@@ -1111,6 +1127,11 @@ type_specifier_no_prec
     : type_specifier_nonarray {
         $$ = $1;
     }
+    | type_specifier_nonarray LEFT_BRACKET RIGHT_BRACKET {
+        ES3_ONLY("[]", @2, "implicitly sized array");
+        $$ = $1;
+        $$.setArraySize(0);
+    }
     | type_specifier_nonarray LEFT_BRACKET constant_expression RIGHT_BRACKET {
         $$ = $1;
 
@@ -1120,7 +1141,7 @@ type_specifier_no_prec
             int size;
             if (context->arraySizeErrorCheck(@2, $3, size))
                 context->recover();
-            $$.setArray(true, size);
+            $$.setArraySize(size);
         }
     }
     ;
@@ -1532,13 +1553,11 @@ condition
             context->recover();
     }
     | fully_specified_type identifier EQUAL initializer {
-        TIntermNode* intermNode;
-        if (context->structQualifierErrorCheck(@2, $1))
-            context->recover();
+        TIntermNode *intermNode;
         if (context->boolErrorCheck(@2, $1))
             context->recover();
 
-        if (!context->executeInitializer(@2, *$2.string, $1, $4, intermNode))
+        if (!context->executeInitializer(@2, *$2.string, $1, $4, &intermNode))
             $$ = $4;
         else {
             context->recover();
@@ -1663,6 +1682,12 @@ function_definition
             context->recover();
         }
         prevDec->setDefined();
+        //
+        // Overload the unique ID of the definition to be the same unique ID as the declaration.
+        // Eventually we will probably want to have only a single definition and just swap the
+        // arguments to be the definition's arguments.
+        //
+        function->setUniqueId(prevDec->getUniqueId());
 
         //
         // Raise error message if main function takes any parameters or return anything other than void
@@ -1735,6 +1760,7 @@ function_definition
         context->intermediate.setAggregateOperator($$, EOpFunction, @1);
         $$->getAsAggregate()->setName($1.function->getMangledName().c_str());
         $$->getAsAggregate()->setType($1.function->getReturnType());
+        $$->getAsAggregate()->setFunctionId($1.function->getUniqueId());
 
         // store the pragma information for debug and optimize and other vendor specific
         // information. This information can be queried from the parse tree

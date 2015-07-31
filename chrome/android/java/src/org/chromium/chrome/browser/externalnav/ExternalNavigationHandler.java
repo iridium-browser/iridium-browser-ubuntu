@@ -4,27 +4,24 @@
 
 package org.chromium.chrome.browser.externalnav;
 
-import android.annotation.TargetApi;
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.net.Uri;
-import android.os.Build;
 import android.provider.Browser;
-import android.util.Log;
 import android.webkit.WebView;
 
 import org.chromium.base.CommandLine;
+import org.chromium.base.Log;
 import org.chromium.base.VisibleForTesting;
-import org.chromium.chrome.ChromeSwitches;
+import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.UrlUtilities;
 import org.chromium.chrome.browser.util.IntentUtils;
 import org.chromium.ui.base.PageTransition;
 
 import java.net.URI;
-import java.net.URISyntaxException;
 import java.util.List;
 
 /**
@@ -50,6 +47,9 @@ public class ExternalNavigationHandler {
         OVERRIDE_WITH_EXTERNAL_INTENT,
         /* We should override the URL loading and clobber the current tab. */
         OVERRIDE_WITH_CLOBBERING_TAB,
+        /* We should override the URL loading.  The desired action will be determined
+         * asynchronously (e.g. by requiring user confirmation). */
+        OVERRIDE_WITH_ASYNC_ACTION,
         /* We shouldn't override the URL loading. */
         NO_OVERRIDE,
     }
@@ -79,8 +79,8 @@ public class ExternalNavigationHandler {
         // Perform generic parsing of the URI to turn it into an Intent.
         try {
             intent = Intent.parseUri(params.getUrl(), Intent.URI_INTENT_SCHEME);
-        } catch (URISyntaxException ex) {
-            Log.w(TAG, "Bad URI " + params.getUrl() + ": " + ex.getMessage());
+        } catch (Exception ex) {
+            Log.w(TAG, "Bad URI " + params.getUrl(), ex);
             return OverrideUrlLoadingResult.NO_OVERRIDE;
         }
 
@@ -106,7 +106,6 @@ public class ExternalNavigationHandler {
         return result;
     }
 
-    @TargetApi(Build.VERSION_CODES.ICE_CREAM_SANDWICH_MR1)
     private OverrideUrlLoadingResult shouldOverrideUrlLoadingInternal(
             ExternalNavigationParams params, Intent intent, boolean hasBrowserFallbackUrl,
             String browserFallbackUrl) {
@@ -148,6 +147,17 @@ public class ExternalNavigationHandler {
         // the intent picker.
         if (isForwardBackNavigation) {
             return OverrideUrlLoadingResult.NO_OVERRIDE;
+        }
+
+        // If accessing a file URL, ensure that the user has granted the necessary file access
+        // to Chrome.  This check should happen for reloads, navigations, etc..., which is why
+        // it occurs before the subsequent blocks.
+        if (params.getUrl().startsWith("file:")
+                && mDelegate.shouldRequestFileAccess(params.getTab())) {
+            mDelegate.startFileIntent(
+                    intent, params.getReferrerUrl(), params.getTab(),
+                    params.shouldCloseContentsOnOverrideUrlLoadingAndLaunchIntent());
+            return OverrideUrlLoadingResult.OVERRIDE_WITH_ASYNC_ACTION;
         }
 
         // http://crbug/331571 : Do not override a navigation started from user typing.
@@ -231,6 +241,7 @@ public class ExternalNavigationHandler {
         // TODO(changwan): check if we need to handle URL even when external intent is off.
         if (CommandLine.getInstance().hasSwitch(
                 ChromeSwitches.DISABLE_EXTERNAL_INTENT_REQUESTS)) {
+            Log.w(TAG, "External intent handling is disabled by a command-line flag.");
             return OverrideUrlLoadingResult.NO_OVERRIDE;
         }
 
@@ -248,6 +259,7 @@ public class ExternalNavigationHandler {
                             + "&referrer=" + mDelegate.getPackageName()));
                     intent.addCategory(Intent.CATEGORY_BROWSABLE);
                     intent.setPackage("com.android.vending");
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                     mDelegate.startActivity(intent);
                     return OverrideUrlLoadingResult.OVERRIDE_WITH_EXTERNAL_INTENT;
                 } catch (ActivityNotFoundException ex) {
@@ -268,13 +280,12 @@ public class ExternalNavigationHandler {
         // security (only access to BROWSABLE activities).
         intent.addCategory(Intent.CATEGORY_BROWSABLE);
         intent.setComponent(null);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.ICE_CREAM_SANDWICH_MR1) {
-            Intent selector = intent.getSelector();
-            if (selector != null) {
-                selector.addCategory(Intent.CATEGORY_BROWSABLE);
-                selector.setComponent(null);
-            }
+        Intent selector = intent.getSelector();
+        if (selector != null) {
+            selector.addCategory(Intent.CATEGORY_BROWSABLE);
+            selector.setComponent(null);
         }
+
         // Set the Browser application ID to us in case the user chooses Chrome
         // as the app.  This will make sure the link is opened in the same tab
         // instead of making a new one.
@@ -297,7 +308,7 @@ public class ExternalNavigationHandler {
                 try {
                     currentUri = new URI(params.getUrl());
                     previousUri = new URI(params.getReferrerUrl());
-                } catch (URISyntaxException e) {
+                } catch (Exception e) {
                     currentUri = null;
                     previousUri = null;
                 }
@@ -309,7 +320,7 @@ public class ExternalNavigationHandler {
                     try {
                         previousIntent = Intent.parseUri(
                                 params.getReferrerUrl(), Intent.URI_INTENT_SCHEME);
-                    } catch (URISyntaxException e) {
+                    } catch (Exception e) {
                         previousIntent = null;
                     }
 
@@ -331,8 +342,10 @@ public class ExternalNavigationHandler {
             if (params.isIncognito() && !mDelegate.willChromeHandleIntent(intent)) {
                 // This intent may leave Chrome.  Warn the user that incognito does not carry over
                 // to apps out side of Chrome.
-                mDelegate.startIncognitoIntent(intent);
-                return OverrideUrlLoadingResult.OVERRIDE_WITH_EXTERNAL_INTENT;
+                mDelegate.startIncognitoIntent(intent, params.getReferrerUrl(),
+                        hasBrowserFallbackUrl ? browserFallbackUrl : null, params.getTab(),
+                        params.shouldCloseContentsOnOverrideUrlLoadingAndLaunchIntent());
+                return OverrideUrlLoadingResult.OVERRIDE_WITH_ASYNC_ACTION;
             } else {
                 if (params.getRedirectHandler() != null && incomingIntentRedirect) {
                     if (!params.getRedirectHandler().hasNewResolver(intent)) {
@@ -374,6 +387,11 @@ public class ExternalNavigationHandler {
      */
     private OverrideUrlLoadingResult clobberCurrentTabWithFallbackUrl(
             String browserFallbackUrl, ExternalNavigationParams params) {
+        if (!params.isMainFrame()) {
+            // For subframes, we don't support fallback url for now.
+            // http://crbug.com/364522.
+            return OverrideUrlLoadingResult.NO_OVERRIDE;
+        }
         // NOTE: any further redirection from fall-back URL should not override URL loading.
         // Otherwise, it can be used in chain for fingerprinting multiple app installation
         // status in one shot. In order to prevent this scenario, we notify redirection
@@ -393,8 +411,9 @@ public class ExternalNavigationHandler {
         try {
             Intent intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
             return intent.getPackage() != null || mDelegate.canResolveActivity(intent);
-        } catch (URISyntaxException ex) {
+        } catch (Exception ex) {
             // Ignore the error.
+            Log.w(TAG, "Bad URI " + url, ex);
         }
         return false;
     }

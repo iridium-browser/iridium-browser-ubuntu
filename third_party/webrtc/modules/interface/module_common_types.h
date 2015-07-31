@@ -61,9 +61,25 @@ struct RTPVideoHeaderVP8 {
                               // in a VP8 partition. Otherwise false
 };
 
+// The packetization types that we support: single, aggregated, and fragmented.
+enum H264PacketizationTypes {
+  kH264SingleNalu,  // This packet contains a single NAL unit.
+  kH264StapA,       // This packet contains STAP-A (single time
+                    // aggregation) packets. If this packet has an
+                    // associated NAL unit type, it'll be for the
+                    // first such aggregated packet.
+  kH264FuA,         // This packet contains a FU-A (fragmentation
+                    // unit) packet, meaning it is a part of a frame
+                    // that was too large to fit into a single packet.
+};
+
 struct RTPVideoHeaderH264 {
-  bool stap_a;
-  bool single_nalu;
+  uint8_t nalu_type;  // The NAL unit type. If this is a header for a
+                      // fragmented packet, it's the NAL unit type of
+                      // the original data. If this is the header for an
+                      // aggregated packet, it's the NAL unit type of
+                      // the first NAL unit in the packet.
+  H264PacketizationTypes packetization_type;
 };
 
 union RTPVideoTypeHeader {
@@ -286,98 +302,6 @@ class CallStatsObserver {
   virtual void OnRttUpdate(int64_t rtt_ms) = 0;
 
   virtual ~CallStatsObserver() {}
-};
-
-// class describing a complete, or parts of an encoded frame.
-class EncodedVideoData {
- public:
-  EncodedVideoData()
-      : payloadType(0),
-        timeStamp(0),
-        renderTimeMs(0),
-        encodedWidth(0),
-        encodedHeight(0),
-        completeFrame(false),
-        missingFrame(false),
-        payloadData(NULL),
-        payloadSize(0),
-        bufferSize(0),
-        fragmentationHeader(),
-        frameType(kVideoFrameDelta),
-        codec(kVideoCodecUnknown) {};
-
-  EncodedVideoData(const EncodedVideoData& data) {
-    payloadType = data.payloadType;
-    timeStamp = data.timeStamp;
-    renderTimeMs = data.renderTimeMs;
-    encodedWidth = data.encodedWidth;
-    encodedHeight = data.encodedHeight;
-    completeFrame = data.completeFrame;
-    missingFrame = data.missingFrame;
-    payloadSize = data.payloadSize;
-    fragmentationHeader.CopyFrom(data.fragmentationHeader);
-    frameType = data.frameType;
-    codec = data.codec;
-    if (data.payloadSize > 0) {
-      payloadData = new uint8_t[data.payloadSize];
-      memcpy(payloadData, data.payloadData, data.payloadSize);
-      bufferSize = data.payloadSize;
-    } else {
-      payloadData = NULL;
-    }
-  }
-
-  ~EncodedVideoData() {
-    delete[] payloadData;
-  };
-
-  EncodedVideoData& operator=(const EncodedVideoData& data) {
-    if (this == &data) {
-      return *this;
-    }
-    payloadType = data.payloadType;
-    timeStamp = data.timeStamp;
-    renderTimeMs = data.renderTimeMs;
-    encodedWidth = data.encodedWidth;
-    encodedHeight = data.encodedHeight;
-    completeFrame = data.completeFrame;
-    missingFrame = data.missingFrame;
-    payloadSize = data.payloadSize;
-    fragmentationHeader.CopyFrom(data.fragmentationHeader);
-    frameType = data.frameType;
-    codec = data.codec;
-    if (data.payloadSize > 0) {
-      delete[] payloadData;
-      payloadData = new uint8_t[data.payloadSize];
-      memcpy(payloadData, data.payloadData, data.payloadSize);
-      bufferSize = data.payloadSize;
-    }
-    return *this;
-  };
-  void VerifyAndAllocate(const size_t size) {
-    if (bufferSize < size) {
-      uint8_t* oldPayload = payloadData;
-      payloadData = new uint8_t[size];
-      memcpy(payloadData, oldPayload, sizeof(uint8_t) * payloadSize);
-
-      bufferSize = size;
-      delete[] oldPayload;
-    }
-  }
-
-  uint8_t payloadType;
-  uint32_t timeStamp;
-  int64_t renderTimeMs;
-  uint32_t encodedWidth;
-  uint32_t encodedHeight;
-  bool completeFrame;
-  bool missingFrame;
-  uint8_t* payloadData;
-  size_t payloadSize;
-  size_t bufferSize;
-  RTPFragmentationHeader fragmentationHeader;
-  FrameType frameType;
-  VideoCodecType codec;
 };
 
 struct VideoContentMetrics {

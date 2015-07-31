@@ -107,18 +107,18 @@ namespace blink {
         data.{{vector}}.append(CSSToStyleMap::mapAnimation{{attribute}}(listValue.get()));
 }
 {% endmacro %}
-{{apply_animation('CSSPropertyWebkitAnimationDelay', 'Delay', 'Animation')}}
-{{apply_animation('CSSPropertyWebkitAnimationDirection', 'Direction', 'Animation')}}
-{{apply_animation('CSSPropertyWebkitAnimationDuration', 'Duration', 'Animation')}}
-{{apply_animation('CSSPropertyWebkitAnimationFillMode', 'FillMode', 'Animation')}}
-{{apply_animation('CSSPropertyWebkitAnimationIterationCount', 'IterationCount', 'Animation')}}
-{{apply_animation('CSSPropertyWebkitAnimationName', 'Name', 'Animation')}}
-{{apply_animation('CSSPropertyWebkitAnimationPlayState', 'PlayState', 'Animation')}}
-{{apply_animation('CSSPropertyWebkitAnimationTimingFunction', 'TimingFunction', 'Animation')}}
-{{apply_animation('CSSPropertyWebkitTransitionDelay', 'Delay', 'Transition')}}
-{{apply_animation('CSSPropertyWebkitTransitionDuration', 'Duration', 'Transition')}}
-{{apply_animation('CSSPropertyWebkitTransitionProperty', 'Property', 'Transition')}}
-{{apply_animation('CSSPropertyWebkitTransitionTimingFunction', 'TimingFunction', 'Transition')}}
+{{apply_animation('CSSPropertyAnimationDelay', 'Delay', 'Animation')}}
+{{apply_animation('CSSPropertyAnimationDirection', 'Direction', 'Animation')}}
+{{apply_animation('CSSPropertyAnimationDuration', 'Duration', 'Animation')}}
+{{apply_animation('CSSPropertyAnimationFillMode', 'FillMode', 'Animation')}}
+{{apply_animation('CSSPropertyAnimationIterationCount', 'IterationCount', 'Animation')}}
+{{apply_animation('CSSPropertyAnimationName', 'Name', 'Animation')}}
+{{apply_animation('CSSPropertyAnimationPlayState', 'PlayState', 'Animation')}}
+{{apply_animation('CSSPropertyAnimationTimingFunction', 'TimingFunction', 'Animation')}}
+{{apply_animation('CSSPropertyTransitionDelay', 'Delay', 'Transition')}}
+{{apply_animation('CSSPropertyTransitionDuration', 'Duration', 'Transition')}}
+{{apply_animation('CSSPropertyTransitionProperty', 'Property', 'Transition')}}
+{{apply_animation('CSSPropertyTransitionTimingFunction', 'TimingFunction', 'Transition')}}
 
 {% macro apply_auto(property_id, auto_getter=none, auto_setter=none, auto_identity='CSSValueAuto') %}
 {% set property = properties[property_id] %}
@@ -296,11 +296,10 @@ static bool lengthTypeAndValueMatch(const BorderImageLengthBox& borderImageLengt
 {
     // Visited link style can never explicitly inherit from parent visited link style so no separate getters are needed.
     StyleColor color = state.parentStyle()->{{property.getter}}();
-    Color resolvedColor = color.resolve(state.parentStyle()->color());
     if (state.applyPropertyToRegularStyle())
-        {{set_value(property)}}(resolvedColor);
+        {{set_value(property)}}(color);
     if (state.applyPropertyToVisitedLinkStyle())
-        state.style()->{{visited_link_setter}}(resolvedColor);
+        state.style()->{{visited_link_setter}}(color);
 }
 
 {{declare_value_function(property_id)}}
@@ -497,70 +496,6 @@ static bool lengthTypeAndValueMatch(const BorderImageLengthBox& borderImageLengt
 {% endmacro %}
 {{apply_grid_template('CSSPropertyGridTemplateColumns', 'Column')}}
 {{apply_grid_template('CSSPropertyGridTemplateRows', 'Row')}}
-
-{% macro apply_alignment(property_id, alignment_type) %}
-{% set property = properties[property_id] %}
-{{declare_initial_function(property_id)}}
-{
-    state.style()->set{{alignment_type}}(ComputedStyle::initial{{alignment_type}}());
-    state.style()->set{{alignment_type}}OverflowAlignment(ComputedStyle::initial{{alignment_type}}OverflowAlignment());
-}
-
-{{declare_inherit_function(property_id)}}
-{
-    state.style()->set{{alignment_type}}(state.parentStyle()->{{property.getter}}());
-    state.style()->set{{alignment_type}}OverflowAlignment(state.parentStyle()->{{property.getter}}OverflowAlignment());
-}
-
-{{declare_value_function(property_id)}}
-{
-    CSSPrimitiveValue* primitiveValue = toCSSPrimitiveValue(value);
-    if (Pair* pairValue = primitiveValue->getPairValue()) {
-        state.style()->set{{alignment_type}}(*pairValue->first());
-        state.style()->set{{alignment_type}}OverflowAlignment(*pairValue->second());
-    } else {
-        state.style()->set{{alignment_type}}(*primitiveValue);
-        state.style()->set{{alignment_type}}OverflowAlignment(ComputedStyle::initial{{alignment_type}}OverflowAlignment());
-    }
-}
-{% endmacro %}
-{{apply_alignment('CSSPropertyJustifySelf', 'JustifySelf')}}
-{{apply_alignment('CSSPropertyAlignItems', 'AlignItems')}}
-{{apply_alignment('CSSPropertyAlignSelf', 'AlignSelf')}}
-
-{% macro apply_content_alignment(property_id, alignment_type) %}
-{% set property = properties[property_id] %}
-{{declare_initial_function(property_id)}}
-{
-    state.style()->set{{alignment_type}}(ComputedStyle::initial{{alignment_type}}());
-    state.style()->set{{alignment_type}}OverflowAlignment(ComputedStyle::initial{{alignment_type}}OverflowAlignment());
-    state.style()->set{{alignment_type}}Distribution(ComputedStyle::initial{{alignment_type}}Distribution());
-}
-
-{{declare_inherit_function(property_id)}}
-{
-    state.style()->set{{alignment_type}}(state.parentStyle()->{{property.getter}}());
-    state.style()->set{{alignment_type}}OverflowAlignment(state.parentStyle()->{{property.getter}}OverflowAlignment());
-    state.style()->set{{alignment_type}}Distribution(state.parentStyle()->{{property.getter}}Distribution());
-}
-
-{{declare_value_function(property_id)}}
-{
-    state.style()->set{{alignment_type}}(ComputedStyle::initial{{alignment_type}}());
-    state.style()->set{{alignment_type}}OverflowAlignment(ComputedStyle::initial{{alignment_type}}OverflowAlignment());
-    state.style()->set{{alignment_type}}Distribution(ComputedStyle::initial{{alignment_type}}Distribution());
-
-    CSSContentDistributionValue* contentValue = toCSSContentDistributionValue(value);
-    if (contentValue->distribution()->getValueID() != CSSValueInvalid)
-        state.style()->set{{alignment_type}}Distribution(*contentValue->distribution());
-    if (contentValue->position()->getValueID() != CSSValueInvalid)
-        state.style()->set{{alignment_type}}(*contentValue->position());
-    if (contentValue->overflow()->getValueID() != CSSValueInvalid)
-        state.style()->set{{alignment_type}}OverflowAlignment(*contentValue->overflow());
-}
-{% endmacro %}
-{{apply_content_alignment('CSSPropertyJustifyContent', 'JustifyContent')}}
-{{apply_content_alignment('CSSPropertyAlignContent', 'AlignContent')}}
 
 {% macro apply_svg_paint(property_id, paint_type) %}
 {% set property = properties[property_id] %}

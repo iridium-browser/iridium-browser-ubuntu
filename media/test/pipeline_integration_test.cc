@@ -5,6 +5,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
 #include "media/base/cdm_callback_promise.h"
@@ -21,12 +22,13 @@
 #include "media/renderers/renderer_impl.h"
 #include "media/test/pipeline_integration_test_base.h"
 #include "testing/gmock/include/gmock/gmock.h"
+#include "url/gurl.h"
 
 #if defined(MOJO_RENDERER)
 #include "media/mojo/services/mojo_renderer_impl.h"
-#include "third_party/mojo/src/mojo/public/cpp/application/application_impl.h"
-#include "third_party/mojo/src/mojo/public/cpp/application/application_test_base.h"
-#include "third_party/mojo/src/mojo/public/cpp/application/connect.h"
+#include "mojo/application/public/cpp/application_impl.h"
+#include "mojo/application/public/cpp/application_test_base.h"
+#include "mojo/application/public/cpp/connect.h"
 
 // TODO(dalecurtis): The mojo renderer is in another process, so we have no way
 // currently to get hashes for video and audio samples.  This also means that
@@ -90,10 +92,13 @@ const int kAppendWholeFile = -1;
 const int kAppendTimeSec = 1;
 const int kAppendTimeMs = kAppendTimeSec * 1000;
 const int k320WebMFileDurationMs = 2736;
+#if !defined(DISABLE_EME_TESTS)
+const int k320EncWebMFileDurationMs = 2737;
+#endif  // !defined(DISABLE_EME_TESTS)
 const int k640WebMFileDurationMs = 2749;
 const int kOpusEndTrimmingWebMFileDurationMs = 2741;
 const int kVP9WebMFileDurationMs = 2736;
-const int kVP8AWebMFileDurationMs = 2733;
+const int kVP8AWebMFileDurationMs = 2734;
 
 #if defined(USE_PROPRIETARY_CODECS)
 #if !defined(DISABLE_EME_TESTS)
@@ -169,7 +174,8 @@ class FakeEncryptedMedia {
   };
 
   FakeEncryptedMedia(AppBase* app)
-      : decryptor_(base::Bind(&FakeEncryptedMedia::OnSessionMessage,
+      : decryptor_(GURL::EmptyGURL(),
+                   base::Bind(&FakeEncryptedMedia::OnSessionMessage,
                               base::Unretained(this)),
                    base::Bind(&FakeEncryptedMedia::OnSessionClosed,
                               base::Unretained(this)),
@@ -312,12 +318,12 @@ class KeyProvidingApp : public FakeEncryptedMedia::AppBase {
         // key ID as the init_data.
         // http://crbug.com/460308
         decryptor->CreateSessionAndGenerateRequest(
-            MediaKeys::TEMPORARY_SESSION, EmeInitDataType::WEBM, kKeyId,
-            arraysize(kKeyId), CreateSessionPromise(RESOLVED));
+            MediaKeys::TEMPORARY_SESSION, EmeInitDataType::WEBM,
+            std::vector<uint8>(kKeyId, kKeyId + arraysize(kKeyId)),
+            CreateSessionPromise(RESOLVED));
       } else {
         decryptor->CreateSessionAndGenerateRequest(
-            MediaKeys::TEMPORARY_SESSION, init_data_type,
-            vector_as_array(&init_data), init_data.size(),
+            MediaKeys::TEMPORARY_SESSION, init_data_type, init_data,
             CreateSessionPromise(RESOLVED));
       }
       EXPECT_FALSE(current_session_id_.empty());
@@ -337,8 +343,7 @@ class KeyProvidingApp : public FakeEncryptedMedia::AppBase {
     std::string jwk = GenerateJWKSet(
         kSecretKey, arraysize(kSecretKey), key_id, key_id_length);
     decryptor->UpdateSession(current_session_id_,
-                             reinterpret_cast<const uint8*>(jwk.data()),
-                             jwk.size(),
+                             std::vector<uint8>(jwk.begin(), jwk.end()),
                              CreatePromise(RESOLVED));
   }
 
@@ -374,13 +379,11 @@ class RotatingKeyProvidingApp : public KeyProvidingApp {
       // key ID as the init_data.
       // http://crbug.com/460308
       decryptor->CreateSessionAndGenerateRequest(
-          MediaKeys::TEMPORARY_SESSION, EmeInitDataType::WEBM,
-          vector_as_array(&key_id), key_id.size(),
+          MediaKeys::TEMPORARY_SESSION, EmeInitDataType::WEBM, key_id,
           CreateSessionPromise(RESOLVED));
     } else {
       decryptor->CreateSessionAndGenerateRequest(
-          MediaKeys::TEMPORARY_SESSION, init_data_type,
-          vector_as_array(&init_data), init_data.size(),
+          MediaKeys::TEMPORARY_SESSION, init_data_type, init_data,
           CreateSessionPromise(RESOLVED));
     }
 
@@ -390,8 +393,7 @@ class RotatingKeyProvidingApp : public KeyProvidingApp {
                                      vector_as_array(&key_id),
                                      key_id.size());
     decryptor->UpdateSession(current_session_id_,
-                             reinterpret_cast<const uint8*>(jwk.data()),
-                             jwk.size(),
+                             std::vector<uint8>(jwk.begin(), jwk.end()),
                              CreatePromise(RESOLVED));
   }
 
@@ -629,12 +631,7 @@ class PipelineIntegrationTestHost : public mojo::test::ApplicationTestBase,
 
   void SetUp() override {
     ApplicationTestBase::SetUp();
-
-    // TODO(dalecurtis): For some reason this isn't done...
-    if (!base::CommandLine::InitializedForCurrentProcess()) {
-      base::CommandLine::Init(0, NULL);
-      InitializeMediaLibraryForTesting();
-    }
+    InitializeMediaLibrary();
   }
 
  protected:
@@ -663,7 +660,9 @@ class PipelineIntegrationTest : public PipelineIntegrationTestHost {
         .Times(AtMost(1))
         .WillRepeatedly(SaveArg<0>(&metadata_));
     EXPECT_CALL(*this, OnBufferingStateChanged(BUFFERING_HAVE_ENOUGH))
-        .Times(AtMost(1));
+        .Times(AnyNumber());
+    EXPECT_CALL(*this, OnBufferingStateChanged(BUFFERING_HAVE_NOTHING))
+        .Times(AnyNumber());
 
     // Encrypted content not used, so this is never called.
     EXPECT_CALL(*this, OnWaitingForDecryptionKey()).Times(0);
@@ -678,8 +677,6 @@ class PipelineIntegrationTest : public PipelineIntegrationTestHost {
         base::Bind(&PipelineIntegrationTest::OnMetadata,
                    base::Unretained(this)),
         base::Bind(&PipelineIntegrationTest::OnBufferingStateChanged,
-                   base::Unretained(this)),
-        base::Bind(&PipelineIntegrationTest::OnVideoFramePaint,
                    base::Unretained(this)),
         base::Closure(), base::Bind(&PipelineIntegrationTest::OnAddTextTrack,
                                     base::Unretained(this)),
@@ -702,7 +699,9 @@ class PipelineIntegrationTest : public PipelineIntegrationTestHost {
         .Times(AtMost(1))
         .WillRepeatedly(SaveArg<0>(&metadata_));
     EXPECT_CALL(*this, OnBufferingStateChanged(BUFFERING_HAVE_ENOUGH))
-        .Times(AtMost(1));
+        .Times(AnyNumber());
+    EXPECT_CALL(*this, OnBufferingStateChanged(BUFFERING_HAVE_NOTHING))
+        .Times(AnyNumber());
     EXPECT_CALL(*this, DecryptorAttached(true));
 
     // Encrypted content used but keys provided in advance, so this is
@@ -724,8 +723,6 @@ class PipelineIntegrationTest : public PipelineIntegrationTestHost {
         base::Bind(&PipelineIntegrationTest::OnMetadata,
                    base::Unretained(this)),
         base::Bind(&PipelineIntegrationTest::OnBufferingStateChanged,
-                   base::Unretained(this)),
-        base::Bind(&PipelineIntegrationTest::OnVideoFramePaint,
                    base::Unretained(this)),
         base::Closure(), base::Bind(&PipelineIntegrationTest::OnAddTextTrack,
                                     base::Unretained(this)),
@@ -1061,7 +1058,7 @@ TEST_F(PipelineIntegrationTest,
   EXPECT_EQ(1u, pipeline_->GetBufferedTimeRanges().size());
   EXPECT_EQ(0, pipeline_->GetBufferedTimeRanges().start(0).InMilliseconds());
   // The second video was not added, so its time has not been added.
-  EXPECT_EQ(k320WebMFileDurationMs,
+  EXPECT_EQ(k320EncWebMFileDurationMs,
             pipeline_->GetBufferedTimeRanges().end(0).InMilliseconds());
 
   Play();

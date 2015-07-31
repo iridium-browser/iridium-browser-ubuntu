@@ -66,6 +66,7 @@ class DownloadRequestLimiterTest : public ChromeRenderViewHostTestHarness {
 
   void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
+    profile_.reset(new TestingProfile());
     InfoBarService::CreateForWebContents(web_contents());
 
     PermissionBubbleManager::CreateForWebContents(web_contents());
@@ -80,7 +81,7 @@ class DownloadRequestLimiterTest : public ChromeRenderViewHostTestHarness {
         &DownloadRequestLimiterTest::FakeCreate, base::Unretained(this));
     DownloadRequestInfoBarDelegate::SetCallbackForTesting(
         &fake_create_callback_);
-    content_settings_ = new HostContentSettingsMap(profile_.GetPrefs(), false);
+    content_settings_ = new HostContentSettingsMap(profile_->GetPrefs(), false);
     DownloadRequestLimiter::SetContentSettingsForTesting(
         content_settings_.get());
   }
@@ -144,16 +145,6 @@ class DownloadRequestLimiterTest : public ChromeRenderViewHostTestHarness {
       state->DidGetUserGesture();
   }
 
-  void DidNavigateMainFrame() {
-    view_->Close();
-    DownloadRequestLimiter::TabDownloadState* state =
-        download_request_limiter_->GetDownloadState(
-            web_contents(), NULL, false);
-    content::LoadCommittedDetails details;
-    content::FrameNavigateParams params;
-    state->DidNavigateMainFrame(details, params);
-  }
-
   void ExpectAndResetCounts(
       int expect_continues,
       int expect_cancels,
@@ -208,7 +199,7 @@ class DownloadRequestLimiterTest : public ChromeRenderViewHostTestHarness {
 
  private:
   DownloadRequestInfoBarDelegate::FakeCreateCallback fake_create_callback_;
-  TestingProfile profile_;
+  scoped_ptr<TestingProfile> profile_;
   scoped_ptr<FakePermissionBubbleView> view_;
 };
 
@@ -416,7 +407,8 @@ TEST_P(DownloadRequestLimiterParamTests,
   ASSERT_EQ(DownloadRequestLimiter::PROMPT_BEFORE_DOWNLOAD,
             download_request_limiter_->GetDownloadStatus(web_contents()));
 
-  DidNavigateMainFrame();
+  Reload();
+  BubbleManagerDocumentLoadCompleted();
   base::RunLoop().RunUntilIdle();
   ExpectAndResetCounts(0, 1, 0, __LINE__);
   ASSERT_EQ(DownloadRequestLimiter::ALLOW_ONE_DOWNLOAD,
@@ -433,7 +425,8 @@ TEST_P(DownloadRequestLimiterParamTests,
             download_request_limiter_->GetDownloadStatus(web_contents()));
   ExpectAndResetCounts(0, 1, 1, __LINE__);
 
-  DidNavigateMainFrame();
+  Reload();
+  BubbleManagerDocumentLoadCompleted();
   base::RunLoop().RunUntilIdle();
   ASSERT_EQ(DownloadRequestLimiter::DOWNLOADS_NOT_ALLOWED,
             download_request_limiter_->GetDownloadStatus(web_contents()));

@@ -5,6 +5,9 @@
 #include "cc/test/layer_tree_test.h"
 
 #include "base/command_line.h"
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "cc/animation/animation.h"
 #include "cc/animation/animation_registrar.h"
 #include "cc/animation/layer_animation_controller.h"
@@ -78,11 +81,6 @@ class ThreadProxyForTest : public ThreadProxy {
  private:
   TestHooks* test_hooks_;
 
-  void WillBeginImplFrame(const BeginFrameArgs& args) override {
-    ThreadProxy::WillBeginImplFrame(args);
-    test_hooks_->WillBeginImplFrame(args);
-  }
-
   void ScheduledActionSendBeginMainFrame() override {
     test_hooks_->ScheduledActionWillSendBeginMainFrame();
     ThreadProxy::ScheduledActionSendBeginMainFrame();
@@ -120,6 +118,11 @@ class ThreadProxyForTest : public ThreadProxy {
     test_hooks_->ScheduledActionInvalidateOutputSurface();
   }
 
+  void SendBeginMainFrameNotExpectedSoon() override {
+    ThreadProxy::SendBeginMainFrameNotExpectedSoon();
+    test_hooks_->SendBeginMainFrameNotExpectedSoon();
+  }
+
   ThreadProxyForTest(
       TestHooks* test_hooks,
       LayerTreeHost* host,
@@ -150,11 +153,6 @@ class SingleThreadProxyForTest : public SingleThreadProxy {
 
  private:
   TestHooks* test_hooks_;
-
-  void WillBeginImplFrame(const BeginFrameArgs& args) override {
-    SingleThreadProxy::WillBeginImplFrame(args);
-    test_hooks_->WillBeginImplFrame(args);
-  }
 
   void ScheduledActionSendBeginMainFrame() override {
     test_hooks_->ScheduledActionWillSendBeginMainFrame();
@@ -187,6 +185,16 @@ class SingleThreadProxyForTest : public SingleThreadProxy {
   void ScheduledActionPrepareTiles() override {
     SingleThreadProxy::ScheduledActionPrepareTiles();
     test_hooks_->ScheduledActionPrepareTiles();
+  }
+
+  void ScheduledActionInvalidateOutputSurface() override {
+    SingleThreadProxy::ScheduledActionInvalidateOutputSurface();
+    test_hooks_->ScheduledActionInvalidateOutputSurface();
+  }
+
+  void SendBeginMainFrameNotExpectedSoon() override {
+    SingleThreadProxy::SendBeginMainFrameNotExpectedSoon();
+    test_hooks_->SendBeginMainFrameNotExpectedSoon();
   }
 
   SingleThreadProxyForTest(
@@ -252,6 +260,11 @@ class LayerTreeHostImplForTesting : public LayerTreeHostImpl {
     test_hooks_->WillBeginImplFrameOnThread(this, args);
   }
 
+  void DidFinishImplFrame() override {
+    LayerTreeHostImpl::DidFinishImplFrame();
+    test_hooks_->DidFinishImplFrameOnThread(this);
+  }
+
   void BeginMainFrameAborted(CommitEarlyOutReason reason) override {
     LayerTreeHostImpl::BeginMainFrameAborted(reason);
     test_hooks_->BeginMainFrameAbortedOnThread(this, reason);
@@ -272,8 +285,8 @@ class LayerTreeHostImplForTesting : public LayerTreeHostImpl {
     return test_hooks_->PrepareToDrawOnThread(this, frame, draw_result);
   }
 
-  void DrawLayers(FrameData* frame, base::TimeTicks frame_begin_time) override {
-    LayerTreeHostImpl::DrawLayers(frame, frame_begin_time);
+  void DrawLayers(FrameData* frame) override {
+    LayerTreeHostImpl::DrawLayers(frame);
     test_hooks_->DrawLayersOnThread(this);
   }
 
@@ -457,10 +470,14 @@ class LayerTreeHostForTesting : public LayerTreeHost {
       scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> impl_task_runner,
       scoped_ptr<BeginFrameSource> external_begin_frame_source) {
+    LayerTreeHost::InitParams params;
+    params.client = client;
+    params.shared_bitmap_manager = shared_bitmap_manager;
+    params.gpu_memory_buffer_manager = gpu_memory_buffer_manager;
+    params.task_graph_runner = task_graph_runner;
+    params.settings = &settings;
     scoped_ptr<LayerTreeHostForTesting> layer_tree_host(
-        new LayerTreeHostForTesting(test_hooks, client, shared_bitmap_manager,
-                                    gpu_memory_buffer_manager,
-                                    task_graph_runner, settings));
+        new LayerTreeHostForTesting(test_hooks, &params));
     if (impl_task_runner.get()) {
       layer_tree_host->InitializeForTesting(
           ThreadProxyForTest::Create(test_hooks,
@@ -484,8 +501,8 @@ class LayerTreeHostForTesting : public LayerTreeHost {
       LayerTreeHostImplClient* host_impl_client) override {
     return LayerTreeHostImplForTesting::Create(
         test_hooks_, settings(), host_impl_client, proxy(),
-        shared_bitmap_manager_, gpu_memory_buffer_manager_, task_graph_runner_,
-        rendering_stats_instrumentation());
+        shared_bitmap_manager(), gpu_memory_buffer_manager(),
+        task_graph_runner(), rendering_stats_instrumentation());
   }
 
   void SetNeedsCommit() override {
@@ -497,23 +514,10 @@ class LayerTreeHostForTesting : public LayerTreeHost {
   void set_test_started(bool started) { test_started_ = started; }
 
  private:
-  LayerTreeHostForTesting(
-      TestHooks* test_hooks,
-      LayerTreeHostClient* client,
-      SharedBitmapManager* shared_bitmap_manager,
-      gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
-      TaskGraphRunner* task_graph_runner,
-      const LayerTreeSettings& settings)
-      : LayerTreeHost(client, NULL, NULL, NULL, settings),
-        shared_bitmap_manager_(shared_bitmap_manager),
-        gpu_memory_buffer_manager_(gpu_memory_buffer_manager),
-        task_graph_runner_(task_graph_runner),
-        test_hooks_(test_hooks),
-        test_started_(false) {}
+  LayerTreeHostForTesting(TestHooks* test_hooks,
+                          LayerTreeHost::InitParams* params)
+      : LayerTreeHost(params), test_hooks_(test_hooks), test_started_(false) {}
 
-  SharedBitmapManager* shared_bitmap_manager_;
-  gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager_;
-  TaskGraphRunner* task_graph_runner_;
   TestHooks* test_hooks_;
   bool test_started_;
 };
@@ -663,12 +667,12 @@ void LayerTreeTest::DoBeginTest() {
     external_begin_frame_source_ = external_begin_frame_source.get();
   }
 
-  DCHECK(!impl_thread_ || impl_thread_->message_loop_proxy().get());
+  DCHECK(!impl_thread_ || impl_thread_->task_runner().get());
   layer_tree_host_ = LayerTreeHostForTesting::Create(
       this, client_.get(), shared_bitmap_manager_.get(),
       gpu_memory_buffer_manager_.get(), task_graph_runner_.get(), settings_,
-      base::MessageLoopProxy::current(),
-      impl_thread_ ? impl_thread_->message_loop_proxy() : NULL,
+      base::ThreadTaskRunnerHandle::Get(),
+      impl_thread_ ? impl_thread_->task_runner() : NULL,
       external_begin_frame_source.Pass());
   ASSERT_TRUE(layer_tree_host_);
 
@@ -709,6 +713,7 @@ void LayerTreeTest::Timeout() {
 }
 
 void LayerTreeTest::RealEndTest() {
+  // TODO(mithro): Make this method only end when not inside an impl frame.
   if (layer_tree_host_ && !timed_out_ &&
       proxy()->MainFrameWillHappenForTesting()) {
     main_task_runner_->PostTask(
@@ -792,7 +797,7 @@ void LayerTreeTest::RunTest(bool threaded,
     ASSERT_TRUE(impl_thread_->Start());
   }
 
-  main_task_runner_ = base::MessageLoopProxy::current();
+  main_task_runner_ = base::ThreadTaskRunnerHandle::Get();
 
   shared_bitmap_manager_.reset(new TestSharedBitmapManager);
   gpu_memory_buffer_manager_.reset(new TestGpuMemoryBufferManager);

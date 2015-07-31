@@ -18,6 +18,7 @@ class GlassAppWindowFrameViewWin;
 class ChromeNativeAppWindowViewsWin : public ChromeNativeAppWindowViewsAura {
  public:
   ChromeNativeAppWindowViewsWin();
+  ~ChromeNativeAppWindowViewsWin() override;
 
   GlassAppWindowFrameViewWin* glass_frame_view() {
     return glass_frame_view_;
@@ -34,23 +35,23 @@ class ChromeNativeAppWindowViewsWin : public ChromeNativeAppWindowViewsAura {
   void EnsureCaptionStyleSet();
 
   // Overridden from ChromeNativeAppWindowViews:
-  virtual void OnBeforeWidgetInit(
+  void OnBeforeWidgetInit(
       const extensions::AppWindow::CreateParams& create_params,
       views::Widget::InitParams* init_params,
       views::Widget* widget) override;
-  virtual void InitializeDefaultWindow(
+  void InitializeDefaultWindow(
       const extensions::AppWindow::CreateParams& create_params) override;
-  virtual views::NonClientFrameView* CreateStandardDesktopAppFrame() override;
+  views::NonClientFrameView* CreateStandardDesktopAppFrame() override;
 
   // Overridden from ui::BaseWindow:
-  virtual void Show() override;
-  virtual void Activate() override;
+  void Show() override;
+  void Activate() override;
 
   // Overridden from views::WidgetDelegate:
   bool CanMinimize() const override;
 
   // Overridden from extensions::NativeAppWindow:
-  virtual void UpdateShelfMenu() override;
+  void UpdateShelfMenu() override;
 
   // Populated if there is a glass frame, which provides special information
   // to the native widget implementation. This will be NULL if there is no

@@ -90,6 +90,7 @@ class FakeEmptyTopSites : public history::TopSites {
   bool AddForcedURL(const GURL& url, const base::Time& time) override {
     return false;
   }
+  void OnNavigationCommitted(const GURL& url) override {}
 
   // RefcountedKeyedService:
   void ShutdownOnUIThread() override {}
@@ -171,7 +172,7 @@ void ZeroSuggestProviderTest::SetUp() {
   turl_model->Load();
 
   TemplateURLData data;
-  data.short_name = base::ASCIIToUTF16("t");
+  data.SetShortName(base::ASCIIToUTF16("t"));
   data.SetURL("https://www.google.com/?q={searchTerms}");
   data.suggestions_url = "https://www.google.com/complete/?q={searchTerms}";
   data.instant_url = "https://does/not/exist?strk=1";
@@ -180,9 +181,8 @@ void ZeroSuggestProviderTest::SetUp() {
   turl_model->Add(default_t_url_);
   turl_model->SetUserSelectedDefaultSearchProvider(default_t_url_);
 
-  profile_.DestroyTopSites();
-  TopSitesFactory::GetInstance()->SetTestingFactory(&profile_,
-                                                    BuildFakeEmptyTopSites);
+  TopSitesFactory* top_sites_factory = TopSitesFactory::GetInstance();
+  top_sites_factory->SetTestingFactory(&profile_, BuildFakeEmptyTopSites);
   provider_ = ZeroSuggestProvider::Create(this, turl_model, &profile_);
 }
 

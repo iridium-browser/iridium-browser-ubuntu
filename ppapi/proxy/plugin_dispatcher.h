@@ -67,6 +67,16 @@ struct InstanceData {
   // The message handler which should handle JavaScript->Plugin messages, if
   // one has been registered, otherwise NULL.
   scoped_ptr<MessageHandler> message_handler;
+
+  // Flush info for PpapiCommandBufferProxy::OrderingBarrier().
+  struct FlushInfo {
+    FlushInfo();
+    ~FlushInfo();
+    bool flush_pending;
+    HostResource resource;
+    int32 put_offset;
+  };
+  FlushInfo flush_info_;
 };
 
 class PPAPI_PROXY_EXPORT PluginDispatcher
@@ -196,7 +206,8 @@ class PPAPI_PROXY_EXPORT PluginDispatcher
   typedef base::hash_map<std::string, const void*> InterfaceMap;
   InterfaceMap plugin_interfaces_;
 
-  typedef base::ScopedPtrHashMap<PP_Instance, InstanceData> InstanceDataMap;
+  typedef base::ScopedPtrHashMap<PP_Instance, scoped_ptr<InstanceData>>
+      InstanceDataMap;
   InstanceDataMap instance_map_;
 
   // The preferences sent from the host. We only want to set this once, which

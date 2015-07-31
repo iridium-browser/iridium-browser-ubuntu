@@ -112,7 +112,7 @@ void ForceGoogleSafeSearchCallbackWrapper(
 void RecordPrecacheStatsOnUIThread(const GURL& url,
                                    const base::Time& fetch_time, int64 size,
                                    bool was_cached, void* profile_id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   Profile* profile = reinterpret_cast<Profile*>(profile_id);
   if (!g_browser_process->profile_manager()->IsValidProfile(profile)) {
@@ -137,14 +137,15 @@ void ReportInvalidReferrerSendOnUI() {
 
 void ReportInvalidReferrerSend(const GURL& target_url,
                                const GURL& referrer_url) {
+  LOG(ERROR) << "Cancelling request to " << target_url
+             << " with invalid referrer " << referrer_url;
   // Record information to help debug http://crbug.com/422871
   if (!target_url.SchemeIsHTTPOrHTTPS())
     return;
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
                           base::Bind(&ReportInvalidReferrerSendOnUI));
   base::debug::DumpWithoutCrashing();
-  NOTREACHED() << "Sending request to " << target_url
-               << " with invalid referrer " << referrer_url;
+  NOTREACHED();
 }
 
 // Record network errors that HTTP requests complete with, including OK and
@@ -285,7 +286,6 @@ ChromeNetworkDelegate::ChromeNetworkDelegate(
     : profile_(NULL),
       enable_referrers_(enable_referrers),
       enable_do_not_track_(NULL),
-      force_safe_search_(NULL),
       force_google_safe_search_(NULL),
       force_youtube_safety_mode_(NULL),
 #if defined(ENABLE_CONFIGURATION_POLICY)
@@ -334,22 +334,16 @@ void ChromeNetworkDelegate::NeverThrottleRequests() {
 void ChromeNetworkDelegate::InitializePrefsOnUIThread(
     BooleanPrefMember* enable_referrers,
     BooleanPrefMember* enable_do_not_track,
-    BooleanPrefMember* force_safe_search,
     BooleanPrefMember* force_google_safe_search,
     BooleanPrefMember* force_youtube_safety_mode,
     PrefService* pref_service) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   enable_referrers->Init(prefs::kEnableReferrers, pref_service);
   enable_referrers->MoveToThread(
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO));
   if (enable_do_not_track) {
     enable_do_not_track->Init(prefs::kEnableDoNotTrack, pref_service);
     enable_do_not_track->MoveToThread(
-        BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO));
-  }
-  if (force_safe_search) {
-    force_safe_search->Init(prefs::kForceSafeSearch, pref_service);
-    force_safe_search->MoveToThread(
         BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO));
   }
   if (force_google_safe_search) {
@@ -374,6 +368,11 @@ int ChromeNetworkDelegate::OnBeforeURLRequest(
     net::URLRequest* request,
     const net::CompletionCallback& callback,
     GURL* new_url) {
+  // TODO(mmenke): Remove ScopedTracker below once crbug.com/456327 is fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "456327 URLRequest::ChromeNetworkDelegate::OnBeforeURLRequest"));
+
 #if defined(ENABLE_CONFIGURATION_POLICY)
   // TODO(joaodasilva): This prevents extensions from seeing URLs that are
   // blocked. However, an extension might redirect the request to another URL,
@@ -390,6 +389,11 @@ int ChromeNetworkDelegate::OnBeforeURLRequest(
   }
 #endif
 
+  // TODO(mmenke): Remove ScopedTracker below once crbug.com/456327 is fixed.
+  tracked_objects::ScopedTracker tracking_profile2(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "456327 URLRequest::ChromeNetworkDelegate::OnBeforeURLRequest 2"));
+
   extensions_delegate_->ForwardStartRequestStatus(request);
 
   if (!enable_referrers_->GetValue())
@@ -397,8 +401,12 @@ int ChromeNetworkDelegate::OnBeforeURLRequest(
   if (enable_do_not_track_ && enable_do_not_track_->GetValue())
     request->SetExtraRequestHeaderByName(kDNTHeader, "1", true /* override */);
 
+  // TODO(mmenke): Remove ScopedTracker below once crbug.com/456327 is fixed.
+  tracked_objects::ScopedTracker tracking_profile3(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "456327 URLRequest::ChromeNetworkDelegate::OnBeforeURLRequest 3"));
+
   bool force_safe_search =
-      (force_safe_search_ && force_safe_search_->GetValue()) ||
       (force_google_safe_search_ && force_google_safe_search_->GetValue());
 
   net::CompletionCallback wrapped_callback = callback;
@@ -412,8 +420,18 @@ int ChromeNetworkDelegate::OnBeforeURLRequest(
   int rv = extensions_delegate_->OnBeforeURLRequest(
       request, wrapped_callback, new_url);
 
+  // TODO(mmenke): Remove ScopedTracker below once crbug.com/456327 is fixed.
+  tracked_objects::ScopedTracker tracking_profile4(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "456327 URLRequest::ChromeNetworkDelegate::OnBeforeURLRequest 4"));
+
   if (force_safe_search && rv == net::OK && new_url->is_empty())
     safe_search_util::ForceGoogleSafeSearch(request, new_url);
+
+  // TODO(mmenke): Remove ScopedTracker below once crbug.com/456327 is fixed.
+  tracked_objects::ScopedTracker tracking_profile5(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "456327 URLRequest::ChromeNetworkDelegate::OnBeforeURLRequest 5"));
 
   if (connect_interceptor_)
     connect_interceptor_->WitnessURLRequest(request);
@@ -425,10 +443,7 @@ int ChromeNetworkDelegate::OnBeforeSendHeaders(
     net::URLRequest* request,
     const net::CompletionCallback& callback,
     net::HttpRequestHeaders* headers) {
-  bool force_safety_mode =
-      (force_safe_search_ && force_safe_search_->GetValue()) ||
-      (force_youtube_safety_mode_ && force_youtube_safety_mode_->GetValue());
-  if (force_safety_mode)
+  if (force_youtube_safety_mode_ && force_youtube_safety_mode_->GetValue())
     safe_search_util::ForceYouTubeSafetyMode(request, headers);
 
   return extensions_delegate_->OnBeforeSendHeaders(request, callback, headers);
@@ -468,31 +483,11 @@ void ChromeNetworkDelegate::OnResponseStarted(net::URLRequest* request) {
 
 void ChromeNetworkDelegate::OnRawBytesRead(const net::URLRequest& request,
                                            int bytes_read) {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "423948 ChromeNetworkDelegate::OnRawBytesRead"));
-
 #if defined(ENABLE_TASK_MANAGER)
   // This is not completely accurate, but as a first approximation ignore
   // requests that are served from the cache. See bug 330931 for more info.
-  if (!request.was_cached()) {
-    // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
-    // I suspect that the jank is in creating a TaskManager instance. After the
-    // bug is fixed, rewrite the operators below as one line.
-    tracked_objects::ScopedTracker tracking_profile1(
-        FROM_HERE_WITH_EXPLICIT_FUNCTION(
-            "423948 ChromeNetworkDelegate::OnRawBytesRead1"));
-
-    TaskManager* task_manager = TaskManager::GetInstance();
-
-    // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
-    tracked_objects::ScopedTracker tracking_profile2(
-        FROM_HERE_WITH_EXPLICIT_FUNCTION(
-            "423948 ChromeNetworkDelegate::OnRawBytesRead2"));
-
-    task_manager->model()->NotifyBytesRead(request, bytes_read);
-  }
+  if (!request.was_cached())
+    TaskManager::GetInstance()->model()->NotifyBytesRead(request, bytes_read);
 #endif  // defined(ENABLE_TASK_MANAGER)
 }
 

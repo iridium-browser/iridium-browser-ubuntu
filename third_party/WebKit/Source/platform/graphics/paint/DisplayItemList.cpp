@@ -13,6 +13,7 @@
 #include "third_party/skia/include/core/SkStream.h"
 
 #ifndef NDEBUG
+#include "platform/graphics/LoggingCanvas.h"
 #include "wtf/text/StringBuilder.h"
 #include <stdio.h>
 #endif
@@ -29,6 +30,7 @@ const DisplayItems& DisplayItemList::displayItems() const
 void DisplayItemList::add(WTF::PassOwnPtr<DisplayItem> displayItem)
 {
     ASSERT(RuntimeEnabledFeatures::slimmingPaintEnabled());
+    ASSERT(!m_constructionDisabled);
 
     if (displayItem->isEnd()) {
         ASSERT(!m_newDisplayItems.isEmpty());
@@ -210,11 +212,13 @@ void DisplayItemList::commitNewDisplayItems()
     // looking for potential matches. Thus we can ensure that the algorithm runs in linear time.
     DisplayItemIndicesByClientMap displayItemIndicesByClient;
 
+#if ENABLE(ASSERT)
     if (RuntimeEnabledFeatures::slimmingPaintUnderInvalidationCheckingEnabled()) {
         // Under-invalidation checking requires a full index of m_currentDisplayItems.
         for (size_t i = 0; i < m_currentDisplayItems.size(); ++i)
             addItemToIndex(*m_currentDisplayItems[i], i, displayItemIndicesByClient);
     }
+#endif // ENABLE(ASSERT)
 
     DisplayItems updatedList;
     size_t currentDisplayItemsIndex = 0;
@@ -222,7 +226,9 @@ void DisplayItemList::commitNewDisplayItems()
         DisplayItem::Type matchingType = newDisplayItem->type();
         if (newDisplayItem->isCached())
             matchingType = DisplayItem::cachedTypeToDrawingType(matchingType);
-        bool isSynchronized = currentDisplayItemsIndex < m_currentDisplayItems.size() && m_currentDisplayItems[currentDisplayItemsIndex]->idsEqual(*newDisplayItem, matchingType);
+        bool isSynchronized = currentDisplayItemsIndex < m_currentDisplayItems.size()
+            && m_currentDisplayItems[currentDisplayItemsIndex]
+            && m_currentDisplayItems[currentDisplayItemsIndex]->idsEqual(*newDisplayItem, matchingType);
 
         if (newDisplayItem->isCached()) {
             ASSERT(!RuntimeEnabledFeatures::slimmingPaintUnderInvalidationCheckingEnabled());
@@ -238,10 +244,12 @@ void DisplayItemList::commitNewDisplayItems()
                 // else: do nothing because previously the client generated a empty picture which is not stored in the cache.
             }
         } else {
+#if ENABLE(ASSERT)
             if (RuntimeEnabledFeatures::slimmingPaintUnderInvalidationCheckingEnabled())
                 checkCachedDisplayItemIsUnchanged(*newDisplayItem, displayItemIndicesByClient);
             else
                 ASSERT(!newDisplayItem->isDrawing() || !clientCacheIsValid(newDisplayItem->client()));
+#endif // ENABLE(ASSERT)
             updatedList.append(newDisplayItem.release());
         }
 
@@ -249,8 +257,10 @@ void DisplayItemList::commitNewDisplayItems()
             ++currentDisplayItemsIndex;
     }
 
+#if ENABLE(ASSERT)
     if (RuntimeEnabledFeatures::slimmingPaintUnderInvalidationCheckingEnabled())
         checkNoRemainingCachedDisplayItems();
+#endif // ENABLE(ASSERT)
 
     m_newDisplayItems.clear();
     m_validlyCachedClientsDirty = true;
@@ -275,14 +285,15 @@ void DisplayItemList::updateValidlyCachedClientsIfNeeded() const
     }
 }
 
+#if ENABLE(ASSERT)
+
 static void showUnderInvalidationError(const char* reason, const DisplayItem& displayItem)
 {
-    WTFLogAlways("ERROR: Under-invalidation (%s): "
-#ifdef NDEBUG
-        "%p (use Debug build to get more information)", reason, displayItem.client());
+#ifndef NDEBUG
+    WTFLogAlways("%s: %s\nSee http://crbug.com/450725.", reason, displayItem.asDebugString().utf8().data());
 #else
-        "%s\n", reason, displayItem.asDebugString().utf8().data());
-#endif
+    WTFLogAlways("%s. Run debug build to get more details\nSee http://crbug.com/450725.", reason);
+#endif // NDEBUG
 }
 
 void DisplayItemList::checkCachedDisplayItemIsUnchanged(const DisplayItem& displayItem, DisplayItemIndicesByClientMap& displayItemIndicesByClient)
@@ -292,12 +303,16 @@ void DisplayItemList::checkCachedDisplayItemIsUnchanged(const DisplayItem& displ
     if (!displayItem.isDrawing() || !clientCacheIsValid(displayItem.client()))
         return;
 
+    if (static_cast<const DrawingDisplayItem&>(displayItem).skipUnderInvalidationChecking())
+        return;
+
     // If checking under-invalidation, we always generate new display item even if the client is not invalidated.
     // Checks if the new picture is the same as the cached old picture. If the new picture is different but
     // the client is not invalidated, issue error about under-invalidation.
     size_t index = findMatchingItemFromIndex(displayItem, displayItem.type(), displayItemIndicesByClient, m_currentDisplayItems);
     if (index == kNotFound) {
-        showUnderInvalidationError("no cached display item", displayItem);
+        showUnderInvalidationError("ERROR: under-invalidation: no cached display item", displayItem);
+        ASSERT_NOT_REACHED();
         return;
     }
 
@@ -306,7 +321,9 @@ void DisplayItemList::checkCachedDisplayItemIsUnchanged(const DisplayItem& displ
     // Remove the display item from cache so that we can check if there are any remaining cached display items after merging.
     m_currentDisplayItems[index] = nullptr;
 
-    if (newPicture->approximateOpCount() == oldPicture->approximateOpCount()) {
+    if (!newPicture && !oldPicture)
+        return;
+    if (newPicture && oldPicture && newPicture->approximateOpCount() == oldPicture->approximateOpCount()) {
         SkDynamicMemoryWStream newPictureSerialized;
         newPicture->serialize(&newPictureSerialized);
         SkDynamicMemoryWStream oldPictureSerialized;
@@ -320,7 +337,15 @@ void DisplayItemList::checkCachedDisplayItemIsUnchanged(const DisplayItem& displ
         }
     }
 
-    showUnderInvalidationError("display item changed", displayItem);
+    showUnderInvalidationError("ERROR: under-invalidation: display item changed", displayItem);
+#ifndef NDEBUG
+    String oldPictureDebugString = oldPicture ? pictureAsDebugString(oldPicture.get()) : "None";
+    String newPictureDebugString = newPicture ? pictureAsDebugString(newPicture.get()) : "None";
+    WTFLogAlways("old picture:\n%s\n", oldPictureDebugString.utf8().data());
+    WTFLogAlways("new picture:\n%s\n", newPictureDebugString.utf8().data());
+#endif // NDEBUG
+
+    ASSERT_NOT_REACHED();
 }
 
 void DisplayItemList::checkNoRemainingCachedDisplayItems()
@@ -330,9 +355,11 @@ void DisplayItemList::checkNoRemainingCachedDisplayItems()
     for (OwnPtr<DisplayItem>& displayItem : m_currentDisplayItems) {
         if (!displayItem || !displayItem->isDrawing() || !clientCacheIsValid(displayItem->client()))
             continue;
-        showUnderInvalidationError("no new display item", *displayItem);
+        showUnderInvalidationError("May be under-invalidation: no new display item", *displayItem);
     }
 }
+
+#endif // ENABLE(ASSERT)
 
 #ifndef NDEBUG
 

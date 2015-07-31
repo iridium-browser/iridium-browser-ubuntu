@@ -123,9 +123,7 @@ interface Document : Node {
     boolean queryCommandSupported(DOMString commandId);
     DOMString queryCommandValue(DOMString commandId);
 
-    // special event handler IDL attributes that only apply to Document objects
-    // FIXME: onreadystatechange should use [LenientThis].
-    attribute EventHandler onreadystatechange;
+    [LenientThis] attribute EventHandler onreadystatechange;
 
     // HTML obsolete features
     // https://html.spec.whatwg.org/#Document-partial
@@ -148,6 +146,7 @@ interface Document : Node {
     // FIXME: The x and y arguments should be of type double.
     Element? elementFromPoint(long x, long y);
     sequence<Element> elementsFromPoint(long x, long y);
+    readonly attribute Element? scrollingElement;
 
     // Selection API
     // http://w3c.github.io/selection-api/#extensions-to-document-interface
@@ -201,7 +200,7 @@ interface Document : Node {
     [MeasureAs=DocumentCharset, TreatReturnedNullStringAs=Undefined, TreatNullAs=NullString] attribute DOMString charset;
     [MeasureAs=DocumentDefaultCharset, TreatReturnedNullStringAs=Undefined] readonly attribute DOMString defaultCharset;
     [MeasureAs=DocumentCaretRangeFromPoint] Range caretRangeFromPoint([Default=Undefined] optional long x, [Default=Undefined] optional long y);
-    [MeasureAs=DocumentGetCSSCanvasContext] RenderingContext getCSSCanvasContext(DOMString contextId, DOMString name, long width, long height);
+    [DeprecateAs=DocumentGetCSSCanvasContext] RenderingContext getCSSCanvasContext(DOMString contextId, DOMString name, long width, long height);
 
     // Deprecated prefixed page visibility API.
     // TODO(davidben): This is a property so attaching a deprecation warning results in false positives when outputting

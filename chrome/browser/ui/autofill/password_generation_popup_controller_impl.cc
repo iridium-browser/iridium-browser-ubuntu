@@ -11,6 +11,9 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversion_utils.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/autofill/password_generation_popup_observer.h"
 #include "chrome/browser/ui/autofill/password_generation_popup_view.h"
 #include "chrome/browser/ui/autofill/popup_constants.h"
@@ -19,9 +22,9 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
-#include "chrome/grit/google_chrome_strings.h"
 #include "components/autofill/content/common/autofill_messages.h"
 #include "components/autofill/core/browser/password_generator.h"
+#include "components/password_manager/core/browser/password_bubble_experiment.h"
 #include "components/password_manager/core/browser/password_manager.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/render_view_host.h"
@@ -88,15 +91,20 @@ PasswordGenerationPopupControllerImpl::PasswordGenerationPopupControllerImpl(
       base::Bind(&PasswordGenerationPopupControllerImpl::HandleKeyPressEvent,
                  base::Unretained(this)));
 
-  std::vector<base::string16> pieces;
-  base::SplitStringDontTrim(
-      l10n_util::GetStringUTF16(IDS_PASSWORD_GENERATION_PROMPT),
-      '|',  // separator
-      &pieces);
-  DCHECK_EQ(3u, pieces.size());
-  link_range_ = gfx::Range(pieces[0].size(),
-                           pieces[0].size() + pieces[1].size());
-  help_text_ = JoinString(pieces, base::string16());
+  int link_id = IDS_MANAGE_PASSWORDS_LINK;
+  int help_text_id = IDS_PASSWORD_GENERATION_PROMPT;
+  const ProfileSyncService* sync_service =
+      ProfileSyncServiceFactory::GetForProfile(
+          Profile::FromBrowserContext(web_contents->GetBrowserContext()));
+  if (password_bubble_experiment::IsSmartLockBrandingEnabled(sync_service)) {
+    help_text_id = IDS_PASSWORD_GENERATION_SMART_LOCK_PROMPT;
+    link_id = IDS_PASSWORD_MANAGER_SMART_LOCK_FOR_PASSWORDS;
+  }
+
+  base::string16 link = l10n_util::GetStringUTF16(link_id);
+  size_t offset;
+  help_text_ = l10n_util::GetStringFUTF16(help_text_id, link, &offset);
+  link_range_ = gfx::Range(offset, offset + link.length());
 }
 
 PasswordGenerationPopupControllerImpl::~PasswordGenerationPopupControllerImpl()
@@ -150,7 +158,7 @@ void PasswordGenerationPopupControllerImpl::PasswordAccepted() {
     return;
 
   driver_->GeneratedPasswordAccepted(current_password_);
-  password_manager_->SetFormHasGeneratedPassword(driver_, form_);
+  password_manager_->SetHasGeneratedPasswordForForm(driver_, form_, true);
   Hide();
 }
 

@@ -8,6 +8,7 @@ from __future__ import print_function
 
 import getpass
 import os
+import shutil
 
 from chromite.compute import compute_configs
 from chromite.compute import bot_constants
@@ -35,11 +36,30 @@ def SetupPrerequisites():
   packages += ['python-sqlalchemy', 'python-mysqldb']
   # Required for payload generation outside of the chroot.
   packages += ['python-protobuf']
+  # Required to install python packages only available via pip.
+  packages += ['python-pip']
 
   # Packages to monitor system performance and usage.
   packages += ['sysstat']
 
   SudoRunCommand(['apt-get', '-y', 'install'] + packages)
+  SetupPipPrerequisites()
+
+
+def SetupPipPrerequisites():
+  """Installs python packages via pip.
+
+  This assumes that pip itself is installed already.
+  """
+  # dict of package to version. Provide version None if you don't care about the
+  # version installed.
+  packages = {'python-statsd': '1.7.0', 'google-api-python-client': '1.4.0'}
+
+  for package, version in packages.iteritems():
+    install_atom = package
+    if version is not None:
+      install_atom += ('==' + version)
+    SudoRunCommand(['pip', 'install', install_atom])
 
 
 def InstallChromeDependencies():
@@ -100,10 +120,9 @@ def _SetupGoB():
   rc_local_path = os.path.join(os.path.sep, 'etc', 'rc.local')
   daemon_path = os.path.join(HOME_DIR, 'gcompute-tools',
                              'git-cookie-authdaemon')
-  daemon_cmd = 'su %s -c %s\n' % (bot_constants.BUILDBOT_USER,
-                                  daemon_path)
+  daemon_cmd = ['su', bot_constants.BUILDBOT_USER, '-c', daemon_path]
   content = osutils.ReadFile(rc_local_path).replace('exit 0', '')
-  content += daemon_cmd
+  content += (' '.join(daemon_cmd) + '\n')
   content += 'exit 0\n'
 
   with osutils.TempDir() as tempdir:
@@ -111,21 +130,31 @@ def _SetupGoB():
     osutils.WriteFile(tmp_file, content)
     os.chmod(tmp_file, 755)
     SudoRunCommand(['mv', tmp_file, rc_local_path])
+  # Also run the daemon now so that subsequent setup steps get credentials.
+  # NB: It's important to redirect all pipes because the daemonize code here is
+  # broken, it leaves open fds behind, causing ssh to hang.
+  SudoRunCommand(daemon_cmd,
+                 mute_output=True, combine_stdout_stderr=True)
 
 
 def _SetupCIDB():
   """Copies cidb credentials."""
-  RunCommand(
-      ['cp', '-r', os.path.join(BOT_CREDS_PATH, bot_constants.CIDB_CREDS_DIR),
-       HOME_DIR])
+  shutil.copytree(os.path.join(BOT_CREDS_PATH, bot_constants.CIDB_CREDS_DIR),
+                  os.path.join(HOME_DIR, bot_constants.CIDB_CREDS_DIR))
 
 
 def _SetupTreeStatus():
   """Copies credentials for updating tree status."""
-  RunCommand(
-      ['cp',
-       os.path.join(BOT_CREDS_PATH, bot_constants.TREE_STATUS_PASSWORD_FILE),
-       HOME_DIR])
+  shutil.copy(
+      os.path.join(BOT_CREDS_PATH, bot_constants.TREE_STATUS_PASSWORD_FILE),
+      HOME_DIR)
+
+
+def _SetupGmail():
+  """Copies credentials for accessing gmail API."""
+  shutil.copy(
+      os.path.join(BOT_CREDS_PATH, bot_constants.GMAIL_CREDENTIALS_FILE),
+      HOME_DIR)
 
 
 def SetupCredentials():
@@ -134,6 +163,7 @@ def SetupCredentials():
   _SetupGoB()
   _SetupCIDB()
   _SetupTreeStatus()
+  _SetupGmail()
 
 
 def SetupBuildbotEnvironment():
@@ -161,7 +191,7 @@ def SetupBuildbotEnvironment():
     # `gclient` relies on depot_tools in $PATH, pass the extra
     # envinornment variable.
     path_env = '%s:%s' % (os.getenv('PATH'), tmp_depot_tools_path)
-    RunCommand(['gclient', 'config', bot_constants.BUILDBOT_SVN_REPO],
+    RunCommand(['gclient', 'config', bot_constants.BUILDBOT_GIT_REPO],
                cwd=bot_constants.BUILDBOT_DIR, extra_env={'PATH': path_env})
     RunCommand(['gclient', 'sync', '--jobs', '5'],
                cwd=bot_constants.BUILDBOT_DIR,
@@ -169,10 +199,9 @@ def SetupBuildbotEnvironment():
 
   # Set up buildbot password.
   config_dir = os.path.join(bot_constants.BUILDBOT_DIR, 'build', 'site_config')
-  RunCommand(['cp', os.path.join(BOT_CREDS_PATH,
-                                 bot_constants.BUILDBOT_PASSWORD_FILE),
-              os.path.join(config_dir,
-                           bot_constants.BUILDBOT_PASSWORD_FILE)])
+  shutil.copy(
+      os.path.join(BOT_CREDS_PATH, bot_constants.BUILDBOT_PASSWORD_FILE),
+      config_dir)
 
   # Update the environment variable.
   depot_tools_path = os.path.join(bot_constants.BUILDBOT_DIR, 'depot_tools')

@@ -1073,44 +1073,6 @@ TEST_F(QuicSentPacketManagerTest,
   VerifyRetransmittablePackets(nullptr, 0);
 }
 
-TEST_F(QuicSentPacketManagerTest, ResetRecentMinRTTWithEmptyWindow) {
-  QuicTime::Delta min_rtt = QuicTime::Delta::FromMilliseconds(50);
-  QuicSentPacketManagerPeer::GetRttStats(&manager_)->UpdateRtt(
-      min_rtt, QuicTime::Delta::Zero(), QuicTime::Zero());
-  EXPECT_EQ(min_rtt,
-            QuicSentPacketManagerPeer::GetRttStats(&manager_)->min_rtt());
-  EXPECT_EQ(min_rtt,
-            QuicSentPacketManagerPeer::GetRttStats(
-                &manager_)->recent_min_rtt());
-
-  // Send two packets with no prior bytes in flight.
-  SendDataPacket(1);
-  SendDataPacket(2);
-
-  clock_.AdvanceTime(QuicTime::Delta::FromMilliseconds(100));
-  // Ack two packets with 100ms RTT observations.
-  QuicAckFrame ack_frame;
-  ack_frame.delta_time_largest_observed = QuicTime::Delta::Zero();
-  ack_frame.largest_observed = 1;
-  ExpectAck(1);
-  manager_.OnIncomingAck(ack_frame, clock_.Now());
-
-  // First ack does not change recent min rtt.
-  EXPECT_EQ(min_rtt,
-            QuicSentPacketManagerPeer::GetRttStats(
-                &manager_)->recent_min_rtt());
-
-  ack_frame.largest_observed = 2;
-  ExpectAck(2);
-  manager_.OnIncomingAck(ack_frame, clock_.Now());
-
-  EXPECT_EQ(min_rtt,
-            QuicSentPacketManagerPeer::GetRttStats(&manager_)->min_rtt());
-  EXPECT_EQ(QuicTime::Delta::FromMilliseconds(100),
-            QuicSentPacketManagerPeer::GetRttStats(
-                &manager_)->recent_min_rtt());
-}
-
 TEST_F(QuicSentPacketManagerTest, RetransmissionTimeout) {
   // Send 100 packets.
   const size_t kNumSentPackets = 100;
@@ -1622,10 +1584,8 @@ TEST_F(QuicSentPacketManagerTest, NegotiateReceiveWindowFromOptions) {
   QuicConfig client_config;
   QuicConfigPeer::SetReceivedSocketReceiveBuffer(&client_config, 1024);
   EXPECT_CALL(*send_algorithm_, SetFromConfig(_, _));
-  if (FLAGS_quic_limit_max_cwnd_to_receive_buffer) {
-    EXPECT_CALL(*send_algorithm_,
-                SetMaxCongestionWindow(kMinSocketReceiveBuffer * 0.95));
-  }
+  EXPECT_CALL(*send_algorithm_,
+              SetMaxCongestionWindow(kMinSocketReceiveBuffer * 0.95));
   EXPECT_CALL(*send_algorithm_, PacingRate())
       .WillRepeatedly(Return(QuicBandwidth::Zero()));
   EXPECT_CALL(*network_change_visitor_, OnCongestionWindowChange());
@@ -1648,10 +1608,8 @@ TEST_F(QuicSentPacketManagerTest, NegotiateReceiveWindowFromOptions) {
     manager_.OnPacketSent(&packet, 0, clock_.Now(), 1024,
                           NOT_RETRANSMISSION, HAS_RETRANSMITTABLE_DATA);
   }
-  if (FLAGS_quic_limit_max_cwnd_to_receive_buffer) {
-    EXPECT_CALL(*send_algorithm_, TimeUntilSend(_, _, _))
-        .WillOnce(Return(QuicTime::Delta::Infinite()));
-  }
+  EXPECT_CALL(*send_algorithm_, TimeUntilSend(_, _, _))
+      .WillOnce(Return(QuicTime::Delta::Infinite()));
   EXPECT_EQ(QuicTime::Delta::Infinite(),
             manager_.TimeUntilSend(clock_.Now(), HAS_RETRANSMITTABLE_DATA));
 }
@@ -1673,10 +1631,8 @@ TEST_F(QuicSentPacketManagerTest, ReceiveWindowLimited) {
     manager_.OnPacketSent(&packet, 0, clock_.Now(), 1024,
                           NOT_RETRANSMISSION, HAS_RETRANSMITTABLE_DATA);
   }
-  if (FLAGS_quic_limit_max_cwnd_to_receive_buffer) {
-    EXPECT_CALL(*send_algorithm_, TimeUntilSend(_, _, _))
-        .WillOnce(Return(QuicTime::Delta::Infinite()));
-  }
+  EXPECT_CALL(*send_algorithm_, TimeUntilSend(_, _, _))
+      .WillOnce(Return(QuicTime::Delta::Infinite()));
   EXPECT_EQ(QuicTime::Delta::Infinite(),
             manager_.TimeUntilSend(clock_.Now(), HAS_RETRANSMITTABLE_DATA));
 }

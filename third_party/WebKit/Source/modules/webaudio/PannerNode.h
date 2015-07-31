@@ -52,11 +52,10 @@ public:
         DopplerRateDirty = 0x4,
     };
 
-    PannerHandler(AudioNode&, float sampleRate);
+    static PassRefPtr<PannerHandler> create(AudioNode&, float sampleRate);
     virtual ~PannerHandler();
 
     // AudioHandler
-    virtual void dispose() override;
     virtual void process(size_t framesToProcess) override;
     virtual void initialize() override;
     virtual void uninitialize() override;
@@ -105,6 +104,7 @@ public:
     virtual void setChannelCountMode(const String&, ExceptionState&) final;
 
 private:
+    PannerHandler(AudioNode&, float sampleRate);
     // AudioContext's listener
     AudioListener* listener();
 
@@ -122,6 +122,9 @@ private:
     bool isDistanceConeGainDirty() const { return m_isDistanceConeGainDirty; }
     bool isDopplerRateDirty() const { return m_isDopplerRateDirty; }
 
+    // This Persistent doesn't make a reference cycle including the owner
+    // PannerNode.
+    Persistent<AudioListener> m_listener;
     OwnPtr<Panner> m_panner;
     unsigned m_panningModel;
     unsigned m_distanceModel;
@@ -153,7 +156,7 @@ private:
 class PannerNode final : public AudioNode {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static PannerNode* create(AudioContext*, float sampleRate);
+    static PannerNode* create(AudioContext&, float sampleRate);
     PannerHandler& pannerHandler() const;
 
     String panningModel() const;

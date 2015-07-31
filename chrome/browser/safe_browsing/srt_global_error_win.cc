@@ -14,13 +14,13 @@
 #include "base/single_thread_task_runner.h"
 #include "base/thread_task_runner_handle.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/safe_browsing/srt_field_trial_win.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
-#include "grit/google_chrome_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using base::SingleThreadTaskRunner;
@@ -140,11 +140,12 @@ base::string16 SRTGlobalError::GetBubbleViewAcceptButtonLabel() {
 }
 
 bool SRTGlobalError::ShouldAddElevationIconToAcceptButton() {
-  return !downloaded_path_.empty();
+  return !downloaded_path_.empty() &&
+         safe_browsing::SRTPromptNeedsElevationIcon();
 }
 
 base::string16 SRTGlobalError::GetBubbleViewCancelButtonLabel() {
-  return l10n_util::GetStringUTF16(IDS_NO_THANKS);
+  return l10n_util::GetStringUTF16(IDS_SRT_BUBBLE_DISMISS);
 }
 
 void SRTGlobalError::OnBubbleViewDidClose(Browser* browser) {

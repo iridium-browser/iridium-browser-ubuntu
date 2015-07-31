@@ -55,14 +55,14 @@ using namespace Unicode;
 
 namespace blink {
 
-struct SameSizeAsRenderText : public LayoutObject {
+struct SameSizeAsLayoutText : public LayoutObject {
     uint32_t bitfields : 16;
     float widths[4];
     String text;
     void* pointers[2];
 };
 
-static_assert(sizeof(LayoutText) == sizeof(SameSizeAsRenderText), "LayoutText should stay small");
+static_assert(sizeof(LayoutText) == sizeof(SameSizeAsLayoutText), "LayoutText should stay small");
 
 class SecureTextTimer;
 typedef HashMap<LayoutText*, SecureTextTimer*> SecureTextTimerMap;
@@ -70,8 +70,8 @@ static SecureTextTimerMap* gSecureTextTimers = 0;
 
 class SecureTextTimer final : public TimerBase {
 public:
-    SecureTextTimer(LayoutText* renderText)
-        : m_renderText(renderText)
+    SecureTextTimer(LayoutText* layoutText)
+        : m_layoutText(layoutText)
         , m_lastTypedCharacterOffset(-1)
     {
     }
@@ -79,7 +79,7 @@ public:
     void restartWithNewText(unsigned lastTypedCharacterOffset)
     {
         m_lastTypedCharacterOffset = lastTypedCharacterOffset;
-        if (Settings* settings = m_renderText->document().settings())
+        if (Settings* settings = m_layoutText->document().settings())
             startOneShot(settings->passwordEchoDurationInSeconds(), FROM_HERE);
     }
     void invalidate() { m_lastTypedCharacterOffset = -1; }
@@ -88,11 +88,11 @@ public:
 private:
     virtual void fired() override
     {
-        ASSERT(gSecureTextTimers->contains(m_renderText));
-        m_renderText->setText(m_renderText->text().impl(), true /* forcing setting text as it may be masked later */);
+        ASSERT(gSecureTextTimers->contains(m_layoutText));
+        m_layoutText->setText(m_layoutText->text().impl(), true /* forcing setting text as it may be masked later */);
     }
 
-    LayoutText* m_renderText;
+    LayoutText* m_layoutText;
     int m_lastTypedCharacterOffset;
 };
 
@@ -108,11 +108,11 @@ static void makeCapitalized(String* string, UChar previous)
         CRASH();
 
     StringBuffer<UChar> stringWithPrevious(length + 1);
-    stringWithPrevious[0] = previous == noBreakSpace ? space : previous;
+    stringWithPrevious[0] = previous == noBreakSpaceCharacter ? spaceCharacter : previous;
     for (unsigned i = 1; i < length + 1; i++) {
         // Replace &nbsp with a real space since ICU no longer treats &nbsp as a word separator.
-        if (input[i - 1] == noBreakSpace)
-            stringWithPrevious[i] = space;
+        if (input[i - 1] == noBreakSpaceCharacter)
+            stringWithPrevious[i] = spaceCharacter;
         else
             stringWithPrevious[i] = input[i - 1];
     }
@@ -128,7 +128,7 @@ static void makeCapitalized(String* string, UChar previous)
     int32_t startOfWord = boundary->first();
     for (endOfWord = boundary->next(); endOfWord != TextBreakDone; startOfWord = endOfWord, endOfWord = boundary->next()) {
         if (startOfWord) // Ignore first char of previous string
-            result.append(input[startOfWord - 1] == noBreakSpace ? noBreakSpace : toTitleCase(stringWithPrevious[startOfWord]));
+            result.append(input[startOfWord - 1] == noBreakSpaceCharacter ? noBreakSpaceCharacter : toTitleCase(stringWithPrevious[startOfWord]));
         for (int i = startOfWord + 1; i < endOfWord; i++)
             result.append(input[i - 1]);
     }
@@ -151,12 +151,11 @@ LayoutText::LayoutText(Node* node, PassRefPtr<StringImpl> str)
     , m_lastTextBox(0)
 {
     ASSERT(m_text);
-    // FIXME: Some clients of LayoutText (and subclasses) pass Document as node to create anonymous renderer.
+    // FIXME: Some clients of LayoutText (and subclasses) pass Document as node to create anonymous layoutObject.
     // They should be switched to passing null and using setDocumentForAnonymous.
     if (node && node->isDocumentNode())
         setDocumentForAnonymous(toDocument(node));
 
-    m_isAllASCII = m_text.containsOnlyASCII();
     m_canUseSimpleFontCodePath = computeCanUseSimpleFontCodePath();
     setIsText();
 
@@ -315,7 +314,7 @@ String LayoutText::plainText() const
         String text = m_text.substring(textBox->start(), textBox->len()).simplifyWhiteSpace(WTF::DoNotStripWhiteSpace);
         plainTextBuilder.append(text);
         if (textBox->nextTextBox() && textBox->nextTextBox()->start() > textBox->end() && text.length() && !text.right(1).containsOnlyWhitespace())
-            plainTextBuilder.append(space);
+            plainTextBuilder.append(spaceCharacter);
     }
     return plainTextBuilder.toString();
 }
@@ -716,48 +715,6 @@ ALWAYS_INLINE float LayoutText::widthFromCache(const Font& f, int start, int len
             return combineText->combinedTextWidth(f);
     }
 
-    if (f.isFixedPitch() && f.fontDescription().variant() == FontVariantNormal && m_isAllASCII && (!glyphOverflow || !glyphOverflow->computeBounds)) {
-        bool missingGlyph = false;
-        float monospaceCharacterWidth = f.spaceWidth();
-        float w = 0;
-        bool isSpace;
-        ASSERT(m_text);
-        StringImpl& text = *m_text.impl();
-        const ComputedStyle& computedStyle = styleRef();
-        for (int i = start; i < start + len; i++) {
-            char c = text[i];
-            // If glyph is not present in primary font then we cannot calculate width based on primary
-            // font property, we need to call "width" method of Font Object.
-            if (!f.primaryFontHasGlyphForCharacter(text[i])) {
-                missingGlyph = true;
-                break;
-            }
-            if (c <= space) {
-                if (c == space || c == newlineCharacter) {
-                    w += monospaceCharacterWidth;
-                    isSpace = true;
-                } else if (c == characterTabulation) {
-                    if (computedStyle.collapseWhiteSpace()) {
-                        w += monospaceCharacterWidth;
-                        isSpace = true;
-                    } else {
-                        w += f.tabWidth(computedStyle.tabSize(), xPos + w);
-                        isSpace = false;
-                    }
-                } else {
-                    isSpace = false;
-                }
-            } else {
-                w += monospaceCharacterWidth;
-                isSpace = false;
-            }
-            if (isSpace && i > start)
-                w += f.fontDescription().wordSpacing();
-        }
-        if (!missingGlyph)
-            return w;
-    }
-
     TextRun run = constructTextRun(const_cast<LayoutText*>(this), f, this, start, len, styleRef(), textDirection);
     run.setCharactersLength(textLength() - start);
     ASSERT(run.charactersLength() >= run.length());
@@ -811,10 +768,10 @@ void LayoutText::trimmedPrefWidths(FloatWillBeLayoutUnit leadWidth,
 
     ASSERT(m_text);
     StringImpl& text = *m_text.impl();
-    if (text[0] == space || (text[0] == newlineCharacter && !style()->preserveNewline()) || text[0] == characterTabulation) {
+    if (text[0] == spaceCharacter || (text[0] == newlineCharacter && !style()->preserveNewline()) || text[0] == tabulationCharacter) {
         const Font& font = style()->font(); // FIXME: This ignores first-line.
         if (stripFrontSpaces) {
-            const UChar spaceChar = space;
+            const UChar spaceChar = spaceCharacter;
             TextRun run = constructTextRun(this, font, &spaceChar, 1, styleRef(), direction);
             run.setCodePath(canUseSimpleFontCodePath() ? TextRun::ForceSimple : TextRun::ForceComplex);
             float spaceWidth = font.width(run);
@@ -893,10 +850,10 @@ void LayoutText::computePreferredLogicalWidths(float leadWidth)
     m_knownToHaveNoOverflowAndNoFallbackFonts = fallbackFonts.isEmpty() && glyphOverflow.isZero();
 }
 
-static inline float hyphenWidth(LayoutText* renderer, const Font& font, TextDirection direction)
+static inline float hyphenWidth(LayoutText* layoutObject, const Font& font, TextDirection direction)
 {
-    const ComputedStyle& style = renderer->styleRef();
-    return font.width(constructTextRun(renderer, font, style.hyphenString().string(), style, direction));
+    const ComputedStyle& style = layoutObject->styleRef();
+    return font.width(constructTextRun(layoutObject, font, style.hyphenString().string(), style, direction));
 }
 
 void LayoutText::computePreferredLogicalWidths(float leadWidth, HashSet<const SimpleFontData*>& fallbackFonts, GlyphOverflow& glyphOverflow)
@@ -937,6 +894,7 @@ void LayoutText::computePreferredLogicalWidths(float leadWidth, HashSet<const Si
     int firstGlyphLeftOverflow = -1;
 
     bool breakAll = (styleToUse.wordBreak() == BreakAllWordBreak || styleToUse.wordBreak() == BreakWordBreak) && styleToUse.autoWrap();
+    bool keepAll = styleToUse.wordBreak() == KeepAllWordBreak && styleToUse.autoWrap();
 
     BidiResolver<TextRunIterator, BidiCharacterRun> bidiResolver;
     BidiCharacterRun* run;
@@ -980,7 +938,7 @@ void LayoutText::computePreferredLogicalWidths(float leadWidth, HashSet<const Si
             } else {
                 isSpace = true;
             }
-        } else if (c == characterTabulation) {
+        } else if (c == tabulationCharacter) {
             if (!styleToUse.collapseWhiteSpace()) {
                 m_hasTab = true;
                 isSpace = false;
@@ -988,7 +946,7 @@ void LayoutText::computePreferredLogicalWidths(float leadWidth, HashSet<const Si
                 isSpace = true;
             }
         } else {
-            isSpace = c == space;
+            isSpace = c == spaceCharacter;
         }
 
         bool isBreakableLocation = isNewline || (isSpace && styleToUse.autoWrap());
@@ -1011,7 +969,7 @@ void LayoutText::computePreferredLogicalWidths(float leadWidth, HashSet<const Si
             lastWordBoundary++;
             continue;
         }
-        if (c == softHyphen) {
+        if (c == softHyphenCharacter) {
             currMaxWidth += widthFromCache(f, lastWordBoundary, i - lastWordBoundary, leadWidth + currMaxWidth, textDirection, &fallbackFonts, &glyphOverflow);
             if (firstGlyphLeftOverflow < 0)
                 firstGlyphLeftOverflow = glyphOverflow.left;
@@ -1019,15 +977,15 @@ void LayoutText::computePreferredLogicalWidths(float leadWidth, HashSet<const Si
             continue;
         }
 
-        bool hasBreak = breakIterator.isBreakable(i, nextBreakable, breakAll ? LineBreakType::BreakAll : LineBreakType::Normal);
+        bool hasBreak = breakIterator.isBreakable(i, nextBreakable, breakAll ? LineBreakType::BreakAll : keepAll ? LineBreakType::KeepAll : LineBreakType::Normal);
         bool betweenWords = true;
         int j = i;
-        while (c != newlineCharacter && c != space && c != characterTabulation && (c != softHyphen)) {
+        while (c != newlineCharacter && c != spaceCharacter && c != tabulationCharacter && (c != softHyphenCharacter)) {
             j++;
             if (j == len)
                 break;
             c = uncheckedCharacterAt(j);
-            if (breakIterator.isBreakable(j, nextBreakable) && characterAt(j - 1) != softHyphen)
+            if (breakIterator.isBreakable(j, nextBreakable) && characterAt(j - 1) != softHyphenCharacter)
                 break;
             if (breakAll) {
                 betweenWords = false;
@@ -1040,7 +998,7 @@ void LayoutText::computePreferredLogicalWidths(float leadWidth, HashSet<const Si
             j = std::min(j, run->stop() + 1);
         int wordLen = j - i;
         if (wordLen) {
-            bool isSpace = (j < len) && c == space;
+            bool isSpace = (j < len) && c == spaceCharacter;
 
             // Non-zero only when kerning is enabled, in which case we measure words with their trailing
             // space, then subtract its width.
@@ -1048,7 +1006,7 @@ void LayoutText::computePreferredLogicalWidths(float leadWidth, HashSet<const Si
             if (isSpace && (f.fontDescription().typesettingFeatures() & Kerning)) {
                 ASSERT(textDirection >=0 && textDirection <= 1);
                 if (!cachedWordTrailingSpaceWidth[textDirection])
-                    cachedWordTrailingSpaceWidth[textDirection] = f.width(constructTextRun(this, f, &space, 1, styleToUse, textDirection)) + wordSpacing;
+                    cachedWordTrailingSpaceWidth[textDirection] = f.width(constructTextRun(this, f, &spaceCharacter, 1, styleToUse, textDirection)) + wordSpacing;
                 wordTrailingSpaceWidth = cachedWordTrailingSpaceWidth[textDirection];
             }
 
@@ -1057,7 +1015,7 @@ void LayoutText::computePreferredLogicalWidths(float leadWidth, HashSet<const Si
                 w = widthFromCache(f, i, wordLen + 1, leadWidth + currMaxWidth, textDirection, &fallbackFonts, &glyphOverflow) - wordTrailingSpaceWidth;
             } else {
                 w = widthFromCache(f, i, wordLen, leadWidth + currMaxWidth, textDirection, &fallbackFonts, &glyphOverflow);
-                if (c == softHyphen)
+                if (c == softHyphenCharacter)
                     currMinWidth += hyphenWidth(this, f, textDirection);
             }
 
@@ -1181,7 +1139,7 @@ bool LayoutText::containsOnlyWhitespace(unsigned from, unsigned len) const
     StringImpl& text = *m_text.impl();
     unsigned currPos;
     for (currPos = from;
-    currPos < from + len && (text[currPos] == newlineCharacter || text[currPos] == space || text[currPos] == characterTabulation);
+    currPos < from + len && (text[currPos] == newlineCharacter || text[currPos] == spaceCharacter || text[currPos] == tabulationCharacter);
     currPos++) { }
     return currPos >= (from + len);
 }
@@ -1332,13 +1290,13 @@ static inline bool isInlineFlowOrEmptyText(const LayoutObject* o)
 
 UChar LayoutText::previousCharacter() const
 {
-    // find previous text renderer if one exists
+    // find previous text layoutObject if one exists
     const LayoutObject* previousText = previousInPreOrder();
     for (; previousText; previousText = previousText->previousInPreOrder()) {
         if (!isInlineFlowOrEmptyText(previousText))
             break;
     }
-    UChar prev = space;
+    UChar prev = spaceCharacter;
     if (previousText && previousText->isText()) {
         if (StringImpl* previousString = toLayoutText(previousText)->text().impl())
             prev = (*previousString)[previousString->length() - 1];
@@ -1385,20 +1343,19 @@ void LayoutText::setTextInternal(PassRefPtr<StringImpl> text)
         case TSNONE:
             break;
         case TSCIRCLE:
-            secureText(whiteBullet);
+            secureText(whiteBulletCharacter);
             break;
         case TSDISC:
-            secureText(bullet);
+            secureText(bulletCharacter);
             break;
         case TSSQUARE:
-            secureText(blackSquare);
+            secureText(blackSquareCharacter);
         }
     }
 
     ASSERT(m_text);
     ASSERT(!isBR() || (textLength() == 1 && m_text[0] == newlineCharacter));
 
-    m_isAllASCII = m_text.containsOnlyASCII();
     m_canUseSimpleFontCodePath = computeCanUseSimpleFontCodePath();
 }
 
@@ -1677,7 +1634,7 @@ int LayoutText::caretMaxOffset() const
     return maxOffset;
 }
 
-unsigned LayoutText::renderedTextLength() const
+unsigned LayoutText::resolvedTextLength() const
 {
     int len = 0;
     for (InlineTextBox* box = firstTextBox(); box; box = box->nextTextBox())
@@ -1687,7 +1644,7 @@ unsigned LayoutText::renderedTextLength() const
 
 int LayoutText::previousOffset(int current) const
 {
-    if (isAllASCII() || m_text.is8Bit())
+    if (m_text.is8Bit())
         return current - 1;
 
     StringImpl* textImpl = m_text.impl();
@@ -1840,7 +1797,7 @@ int LayoutText::previousOffsetForBackwardDeletion(int current) const
 
 int LayoutText::nextOffset(int current) const
 {
-    if (isAllASCII() || m_text.is8Bit())
+    if (m_text.is8Bit())
         return current + 1;
 
     StringImpl* textImpl = m_text.impl();
@@ -1857,7 +1814,7 @@ int LayoutText::nextOffset(int current) const
 
 bool LayoutText::computeCanUseSimpleFontCodePath() const
 {
-    if (isAllASCII() || m_text.is8Bit())
+    if (m_text.is8Bit())
         return true;
     return Character::characterRangeCodePath(characters16(), length()) == SimplePath;
 }

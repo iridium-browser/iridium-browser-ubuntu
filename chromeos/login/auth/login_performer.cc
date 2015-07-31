@@ -29,7 +29,8 @@ using base::UserMetricsAction;
 namespace chromeos {
 
 LoginPerformer::LoginPerformer(scoped_refptr<base::TaskRunner> task_runner,
-                               Delegate* delegate)
+                               Delegate* delegate,
+                               bool disable_client_login)
     : delegate_(delegate),
       task_runner_(task_runner),
       online_attempt_host_(this),
@@ -37,6 +38,7 @@ LoginPerformer::LoginPerformer(scoped_refptr<base::TaskRunner> task_runner,
       password_changed_(false),
       password_changed_callback_count_(0),
       auth_mode_(AUTH_MODE_INTERNAL),
+      disable_client_login_(disable_client_login),
       weak_factory_(this) {
 }
 
@@ -143,6 +145,7 @@ void LoginPerformer::DoPerformLogin(const UserContext& user_context,
                                     AuthorizationMode auth_mode) {
   std::string email = gaia::CanonicalizeEmail(user_context.GetUserID());
   bool wildcard_match = false;
+
   if (!IsUserWhitelisted(email, &wildcard_match)) {
     NotifyWhitelistCheckFailure();
     return;
@@ -154,8 +157,7 @@ void LoginPerformer::DoPerformLogin(const UserContext& user_context,
   switch (auth_mode_) {
     case AUTH_MODE_EXTENSION: {
       RunOnlineWhitelistCheck(
-          email,
-          wildcard_match,
+          email, wildcard_match, user_context.GetRefreshToken(),
           base::Bind(&LoginPerformer::StartLoginCompletion,
                      weak_factory_.GetWeakPtr()),
           base::Bind(&LoginPerformer::NotifyWhitelistCheckFailure,
@@ -173,6 +175,7 @@ void LoginPerformer::LoginAsSupervisedUser(const UserContext& user_context) {
             gaia::ExtractDomainName(user_context.GetUserID()));
 
   user_context_ = user_context;
+  user_context_.SetUserType(user_manager::USER_TYPE_SUPERVISED);
 
   if (RunTrustedCheck(base::Bind(&LoginPerformer::TrustedLoginAsSupervisedUser,
                                  weak_factory_.GetWeakPtr(),
@@ -291,9 +294,11 @@ void LoginPerformer::StartAuthentication() {
                                       authenticator_.get(),
                                       base::Unretained(browser_context),
                                       user_context_));
-    // Make unobtrusive online check. It helps to determine password change
-    // state in the case when offline login fails.
-    online_attempt_host_.Check(GetSigninRequestContext(), user_context_);
+    if (!disable_client_login_) {
+      // Make unobtrusive online check. It helps to determine password change
+      // state in the case when offline login fails.
+      online_attempt_host_.Check(GetSigninRequestContext(), user_context_);
+    }
   } else {
     NOTREACHED();
   }

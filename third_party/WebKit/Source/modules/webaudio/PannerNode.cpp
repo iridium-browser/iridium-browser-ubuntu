@@ -47,6 +47,7 @@ static void fixNANs(double& x)
 
 PannerHandler::PannerHandler(AudioNode& node, float sampleRate)
     : AudioHandler(NodeTypePanner, node, sampleRate)
+    , m_listener(node.context()->listener())
     , m_panningModel(Panner::PanningModelEqualPower)
     , m_distanceModel(DistanceEffect::ModelInverse)
     , m_position(0, 0, 0)
@@ -76,27 +77,26 @@ PannerHandler::PannerHandler(AudioNode& node, float sampleRate)
     initialize();
 }
 
-PannerHandler::~PannerHandler()
+PassRefPtr<PannerHandler> PannerHandler::create(AudioNode& node, float sampleRate)
 {
-    ASSERT(!isInitialized());
+    return adoptRef(new PannerHandler(node, sampleRate));
 }
 
-void PannerHandler::dispose()
+PannerHandler::~PannerHandler()
 {
     uninitialize();
-    AudioHandler::dispose();
 }
 
 void PannerHandler::process(size_t framesToProcess)
 {
-    AudioBus* destination = output(0)->bus();
+    AudioBus* destination = output(0).bus();
 
-    if (!isInitialized() || !input(0)->isConnected() || !m_panner.get()) {
+    if (!isInitialized() || !input(0).isConnected() || !m_panner.get()) {
         destination->zero();
         return;
     }
 
-    AudioBus* source = input(0)->bus();
+    AudioBus* source = input(0).bus();
     if (!source) {
         destination->zero();
         return;
@@ -146,7 +146,7 @@ void PannerHandler::initialize()
         return;
 
     m_panner = Panner::create(m_panningModel, sampleRate(), listener()->hrtfDatabaseLoader());
-    listener()->addPanner(this);
+    listener()->addPanner(*this);
 
     AudioHandler::initialize();
 }
@@ -157,14 +157,14 @@ void PannerHandler::uninitialize()
         return;
 
     m_panner.clear();
-    listener()->removePanner(this);
+    listener()->removePanner(*this);
 
     AudioHandler::uninitialize();
 }
 
 AudioListener* PannerHandler::listener()
 {
-    return context()->listener();
+    return m_listener;
 }
 
 String PannerHandler::panningModel() const
@@ -384,9 +384,8 @@ void PannerHandler::calculateAzimuthElevation(double* outAzimuth, double* outEle
     float upProjection = sourceListener.dot(up);
 
     FloatPoint3D projectedSource = sourceListener - upProjection * up;
-    projectedSource.normalize();
 
-    azimuth = 180.0 * acos(projectedSource.dot(listenerRight)) / piDouble;
+    azimuth = rad2deg(projectedSource.angleBetween(listenerRight));
     fixNANs(azimuth); // avoid illegal values
 
     // Source  in front or behind the listener
@@ -401,7 +400,7 @@ void PannerHandler::calculateAzimuthElevation(double* outAzimuth, double* outEle
         azimuth = 450.0 - azimuth;
 
     // Elevation
-    double elevation = 90.0 - 180.0 * acos(sourceListener.dot(up)) / piDouble;
+    double elevation = 90 - rad2deg(sourceListener.angleBetween(up));
     fixNANs(elevation); // avoid illegal values
 
     if (elevation > 90.0)
@@ -567,10 +566,7 @@ void PannerHandler::setChannelCountMode(const String& mode, ExceptionState& exce
         // This is not supported for a PannerNode, which can only handle 1 or 2 channels.
         exceptionState.throwDOMException(
             NotSupportedError,
-            ExceptionMessages::failedToSet(
-                "channelCountMode",
-                "PannerNode",
-                "'max' is not allowed"));
+                "Panner: 'max' is not allowed");
         m_newChannelCountMode = oldMode;
     } else {
         // Do nothing for other invalid values.
@@ -578,7 +574,7 @@ void PannerHandler::setChannelCountMode(const String& mode, ExceptionState& exce
     }
 
     if (m_newChannelCountMode != oldMode)
-        context()->handler().addChangedChannelCountMode(this);
+        context()->deferredTaskHandler().addChangedChannelCountMode(this);
 }
 
 // ----------------------------------------------------------------
@@ -586,12 +582,12 @@ void PannerHandler::setChannelCountMode(const String& mode, ExceptionState& exce
 PannerNode::PannerNode(AudioContext& context, float sampelRate)
     : AudioNode(context)
 {
-    setHandler(new PannerHandler(*this, sampelRate));
+    setHandler(PannerHandler::create(*this, sampelRate));
 }
 
-PannerNode* PannerNode::create(AudioContext* context, float sampleRate)
+PannerNode* PannerNode::create(AudioContext& context, float sampleRate)
 {
-    return new PannerNode(*context, sampleRate);
+    return new PannerNode(context, sampleRate);
 }
 
 PannerHandler& PannerNode::pannerHandler() const

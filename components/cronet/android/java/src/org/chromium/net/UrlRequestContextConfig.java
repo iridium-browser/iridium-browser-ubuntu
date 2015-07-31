@@ -15,14 +15,14 @@ import java.io.File;
  * UrlRequestContext.
  */
 public class UrlRequestContextConfig {
-
     /**
-     * Default config enables SPDY, QUIC, in memory http cache.
+     * Default config enables SPDY, disables QUIC, SDCH and http cache.
      */
     public UrlRequestContextConfig() {
         enableLegacyMode(false);
         enableQUIC(false);
         enableSPDY(true);
+        enableSDCH(false);
         enableHttpCache(HttpCache.DISABLED, 0);
     }
 
@@ -99,6 +99,48 @@ public class UrlRequestContextConfig {
      */
     public UrlRequestContextConfig enableSPDY(boolean value) {
         return putBoolean(UrlRequestContextConfigList.ENABLE_SPDY, value);
+    }
+
+    /**
+     * Boolean, enable SDCH compression if true.
+     */
+    public UrlRequestContextConfig enableSDCH(boolean value) {
+        return putBoolean(UrlRequestContextConfigList.ENABLE_SDCH, value);
+    }
+
+    /**
+     * String, key to use when authenticating with the proxy.
+     */
+    public UrlRequestContextConfig enableDataReductionProxy(String key) {
+        return (putString(
+                UrlRequestContextConfigList.DATA_REDUCTION_PROXY_KEY, key));
+    }
+
+    /**
+     * Overrides Data Reduction Proxy configuration parameters with a primary
+     * proxy name, fallback proxy name, and a secure proxy check url. Proxies
+     * are specified as [scheme://]host[:port]. Used for testing.
+     * @param primaryProxy The primary data reduction proxy to use.
+     * @param fallbackProxy A fallback data reduction proxy to use.
+     * @param secureProxyCheckUrl A url to fetch to determine if using a secure
+     * proxy is allowed.
+     */
+    public UrlRequestContextConfig setDataReductionProxyOptions(
+            String primaryProxy,
+            String fallbackProxy,
+            String secureProxyCheckUrl) {
+        if (primaryProxy.isEmpty() || fallbackProxy.isEmpty()
+                || secureProxyCheckUrl.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Primary and fallback proxies and check url must be set");
+        }
+        putString(UrlRequestContextConfigList.DATA_REDUCTION_PRIMARY_PROXY,
+                primaryProxy);
+        putString(UrlRequestContextConfigList.DATA_REDUCTION_FALLBACK_PROXY,
+                fallbackProxy);
+        putString(UrlRequestContextConfigList
+                .DATA_REDUCTION_SECURE_PROXY_CHECK_URL, secureProxyCheckUrl);
+        return this;
     }
 
     /**

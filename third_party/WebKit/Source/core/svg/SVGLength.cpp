@@ -61,6 +61,10 @@ inline const char* lengthTypeToString(SVGLengthType type)
         return "pt";
     case LengthTypePC:
         return "pc";
+    case LengthTypeREMS:
+        return "rem";
+    case LengthTypeCHS:
+        return "ch";
     }
 
     ASSERT_NOT_REACHED();
@@ -95,8 +99,17 @@ SVGLengthType stringToLengthType(const CharType*& ptr, const CharType* end)
                 type = LengthTypeEMS;
             if (secondChar == 'x')
                 type = LengthTypeEXS;
-        } else if (firstChar == 'c' && secondChar == 'm') {
-            type = LengthTypeCM;
+        } else if (firstChar == 'r') {
+            if (secondChar == 'e' && ptr < end) {
+                const CharType thirdChar = *ptr++;
+                if (thirdChar == 'm')
+                    type = LengthTypeREMS;
+            }
+        } else if (firstChar == 'c') {
+            if (secondChar == 'h')
+                type = LengthTypeCHS;
+            if (secondChar == 'm')
+                type = LengthTypeCM;
         } else if (firstChar == 'm' && secondChar == 'm') {
             type = LengthTypeMM;
         } else if (firstChar == 'i' && secondChar == 'n') {
@@ -172,7 +185,7 @@ void SVGLength::setValue(float value, const SVGLengthContext& context)
 
 void SVGLength::setUnitType(SVGLengthType type)
 {
-    ASSERT(type != LengthTypeUnknown && type <= LengthTypePC);
+    ASSERT(type != LengthTypeUnknown && type <= LengthTypeCHS);
     m_unitType = type;
 }
 
@@ -260,7 +273,7 @@ void SVGLength::newValueSpecifiedUnits(SVGLengthType type, float value)
 
 void SVGLength::convertToSpecifiedUnits(SVGLengthType type, const SVGLengthContext& context)
 {
-    ASSERT(type != LengthTypeUnknown && type <= LengthTypePC);
+    ASSERT(type != LengthTypeUnknown && type <= LengthTypeCHS);
 
     float valueInUserUnits = value(context);
     m_unitType = type;
@@ -299,6 +312,12 @@ PassRefPtrWillBeRawPtr<SVGLength> SVGLength::fromCSSPrimitiveValue(CSSPrimitiveV
         break;
     case CSSPrimitiveValue::CSS_PT:
         svgType = LengthTypePT;
+        break;
+    case CSSPrimitiveValue::CSS_REMS:
+        svgType = LengthTypeREMS;
+        break;
+    case CSSPrimitiveValue::CSS_CHS:
+        svgType = LengthTypeCHS;
         break;
     default:
         ASSERT(value->primitiveType() == CSSPrimitiveValue::CSS_PC);
@@ -348,6 +367,12 @@ PassRefPtrWillBeRawPtr<CSSPrimitiveValue> SVGLength::toCSSPrimitiveValue(PassRef
         break;
     case LengthTypePC:
         cssType = CSSPrimitiveValue::CSS_PC;
+        break;
+    case LengthTypeREMS:
+        cssType = CSSPrimitiveValue::CSS_REMS;
+        break;
+    case LengthTypeCHS:
+        cssType = CSSPrimitiveValue::CSS_CHS;
         break;
     };
 
@@ -402,7 +427,7 @@ PassRefPtrWillBeRawPtr<SVGLength> SVGLength::blend(PassRefPtrWillBeRawPtr<SVGLen
         || toType == LengthTypeUnknown
         || (!from->isZero() && fromType != LengthTypePercentage && toType == LengthTypePercentage)
         || (!isZero() && fromType == LengthTypePercentage && toType != LengthTypePercentage)
-        || (!from->isZero() && !isZero() && (fromType == LengthTypeEMS || fromType == LengthTypeEXS) && fromType != toType))
+        || (!from->isZero() && !isZero() && (fromType == LengthTypeEMS || fromType == LengthTypeEXS || fromType == LengthTypeREMS || fromType == LengthTypeCHS) && fromType != toType))
         return clone();
 
     RefPtrWillBeRawPtr<SVGLength> length = create();
@@ -414,7 +439,7 @@ PassRefPtrWillBeRawPtr<SVGLength> SVGLength::blend(PassRefPtrWillBeRawPtr<SVGLen
         return length;
     }
 
-    if (fromType == toType || from->isZero() || isZero() || fromType == LengthTypeEMS || fromType == LengthTypeEXS) {
+    if (fromType == toType || from->isZero() || isZero() || fromType == LengthTypeEMS || fromType == LengthTypeEXS || fromType == LengthTypeREMS || fromType == LengthTypeCHS) {
         float fromValue = from->valueInSpecifiedUnits();
         float toValue = valueInSpecifiedUnits();
         if (isZero())

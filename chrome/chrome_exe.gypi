@@ -62,6 +62,7 @@
         # into chrome.exe, not into a dependent.
         '<(DEPTH)/content/app/startup_helper_win.cc',
         '<(DEPTH)/content/public/common/content_switches.cc',
+        'app/chrome_exe_load_config_win.cc',
         'app/chrome_exe_main_aura.cc',
         'app/chrome_exe_main_mac.cc',
         'app/chrome_exe_main_win.cc',
@@ -179,17 +180,8 @@
                   'files': ['tools/build/linux/chrome-wrapper',
                             '../third_party/xdg-utils/scripts/xdg-mime',
                             '../third_party/xdg-utils/scripts/xdg-settings',
+                            'app/theme/<(branding_path_component)/product_logo_48.png',
                             ],
-                  # The wrapper script above may need to generate a .desktop
-                  # file, which requires an icon. So, copy one next to the
-                  # script.
-                  'conditions': [
-                    ['branding=="Chrome"', {
-                      'files': ['app/theme/google_chrome/product_logo_48.png']
-                    }, { # else: 'branding!="Chrome"
-                      'files': ['app/theme/chromium/product_logo_48.png']
-                    }],
-                  ],
                 },
               ],
             }],
@@ -225,22 +217,7 @@
           ],
         }],
         ['OS=="mac"', {
-          # 'branding' is a variable defined in common.gypi
-          # (e.g. "Chromium", "Chrome")
           'conditions': [
-            ['branding=="Chrome"', {
-              'mac_bundle_resources': [
-                'app/theme/google_chrome/mac/app.icns',
-                'app/theme/google_chrome/mac/document.icns',
-                'browser/ui/cocoa/applescript/scripting.sdef',
-              ],
-            }, {  # else: 'branding!="Chrome"
-              'mac_bundle_resources': [
-                'app/theme/chromium/mac/app.icns',
-                'app/theme/chromium/mac/document.icns',
-                'browser/ui/cocoa/applescript/scripting.sdef',
-              ],
-            }],
             ['mac_breakpad==1', {
               'variables': {
                 # A real .dSYM is needed for dump_syms to operate on.
@@ -305,6 +282,9 @@
             'chrome_dll',
           ],
           'mac_bundle_resources': [
+            'app/theme/<(branding_path_component)/mac/app.icns',
+            'app/theme/<(branding_path_component)/mac/document.icns',
+            'browser/ui/cocoa/applescript/scripting.sdef',
             '<(PRODUCT_DIR)/<(mac_bundle_id).manifest',
           ],
           'actions': [
@@ -316,18 +296,8 @@
                 # Unique dir to write to so the [lang].lproj/InfoPlist.strings
                 # for the main app and the helper app don't name collide.
                 'output_path': '<(INTERMEDIATE_DIR)/app_infoplist_strings',
+                'branding_name': '<(branding_path_component)_strings',
               },
-              'conditions': [
-                [ 'branding == "Chrome"', {
-                  'variables': {
-                     'branding_name': 'google_chrome_strings',
-                  },
-                }, { # else branding!="Chrome"
-                  'variables': {
-                     'branding_name': 'chromium_strings',
-                  },
-                }],
-              ],
               'inputs': [
                 '<(tool_path)',
                 '<(version_path)',

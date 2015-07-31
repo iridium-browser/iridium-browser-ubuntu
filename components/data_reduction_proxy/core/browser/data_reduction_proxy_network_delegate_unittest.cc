@@ -4,15 +4,11 @@
 
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_network_delegate.h"
 
-#include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/metrics/field_trial.h"
-#include "base/prefs/pref_registry_simple.h"
-#include "base/prefs/testing_pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/histogram_tester.h"
+#include "base/test/mock_entropy_provider.h"
 #include "base/time/time.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_compression_stats.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config_test_utils.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_metrics.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_request_options.h"
@@ -23,8 +19,8 @@
 #include "net/base/host_port_pair.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_response_headers.h"
-#include "net/log/capturing_net_log.h"
 #include "net/log/net_log.h"
+#include "net/log/test_net_log.h"
 #include "net/proxy/proxy_config.h"
 #include "net/proxy/proxy_server.h"
 #include "net/url_request/url_request.h"
@@ -77,24 +73,17 @@ class DataReductionProxyNetworkDelegateTest : public testing::Test {
                                                      test_job_interceptor_));
     context_.set_job_factory(&test_job_factory_);
 
-    test_context_ =
-        DataReductionProxyTestContext::Builder()
-            .WithParamsFlags(DataReductionProxyParams::kAllowed |
-                                 DataReductionProxyParams::kFallbackAllowed |
-                                 DataReductionProxyParams::kPromoAllowed)
-            .WithParamsDefinitions(
-                TestDataReductionProxyParams::HAS_EVERYTHING &
-                    ~TestDataReductionProxyParams::HAS_DEV_ORIGIN &
-                    ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN)\
-            .WithClient(kClient)
-            .WithURLRequestContext(&context_)
-            .Build();
+    test_context_ = DataReductionProxyTestContext::Builder()
+                        .WithClient(kClient)
+                        .WithURLRequestContext(&context_)
+                        .Build();
 
     data_reduction_proxy_network_delegate_.reset(
         new DataReductionProxyNetworkDelegate(
             scoped_ptr<net::NetworkDelegate>(new TestNetworkDelegate()),
             config(), test_context_->io_data()->request_options(),
-            test_context_->configurator()));
+            test_context_->configurator(),
+            test_context_->io_data()->experiments_stats()));
   }
 
   const net::ProxyConfig& GetProxyConfig() const {
@@ -143,22 +132,15 @@ class DataReductionProxyNetworkDelegateTest : public testing::Test {
     return test_context_->io_data();
   }
 
-  TestingPrefServiceSimple* pref_service() const {
-    return test_context_->pref_service();
-  }
-
   TestDataReductionProxyConfig* config() {
     return test_context_->config();
-  }
-
-  DataReductionProxyCompressionStats* compression_stats() const {
-    return test_context_->data_reduction_proxy_service()->compression_stats();
   }
 
   scoped_ptr<DataReductionProxyNetworkDelegate>
       data_reduction_proxy_network_delegate_;
 
  private:
+  base::MessageLoopForIO message_loop_;
   net::TestURLRequestContext context_;
   net::TestDelegate delegate_;
   // |test_job_interceptor_| is owned by |test_job_factory_|.
@@ -257,16 +239,6 @@ TEST_F(DataReductionProxyNetworkDelegateTest, NetHistograms) {
   histogram_tester.ExpectUniqueSample(kCacheable24HoursHistogramName,
                                       kResponseContentLength, 1);
 }
-
-class BadEntropyProvider : public base::FieldTrial::EntropyProvider {
- public:
-  ~BadEntropyProvider() override {}
-
-  double GetEntropyForTrial(const std::string& trial_name,
-                            uint32 randomization_seed) const override {
-    return 0.5;
-  }
-};
 
 TEST_F(DataReductionProxyNetworkDelegateTest, OnResolveProxyHandler) {
   int load_flags = net::LOAD_NORMAL;
@@ -378,7 +350,7 @@ TEST_F(DataReductionProxyNetworkDelegateTest, OnResolveProxyHandler) {
 
   // With Finch trial set, should only bypass if LOAD flag is set and the
   // effective proxy is the data compression proxy.
-  base::FieldTrialList field_trial_list(new BadEntropyProvider());
+  base::FieldTrialList field_trial_list(new base::MockEntropyProvider());
   base::FieldTrialList::CreateFieldTrial("DataCompressionProxyCriticalBypass",
                                          "Enabled");
   EXPECT_TRUE(
@@ -409,45 +381,6 @@ TEST_F(DataReductionProxyNetworkDelegateTest, OnResolveProxyHandler) {
                         empty_proxy_retry_info, config(),
                         &other_proxy_info);
   EXPECT_FALSE(other_proxy_info.is_direct());
-}
-
-TEST_F(DataReductionProxyNetworkDelegateTest, TotalLengths) {
-  const int64 kOriginalLength = 200;
-  const int64 kReceivedLength = 100;
-
-  data_reduction_proxy_network_delegate_->data_reduction_proxy_io_data_ =
-      io_data();
-
-  data_reduction_proxy_network_delegate_->UpdateContentLengthPrefs(
-      kReceivedLength, kOriginalLength,
-      pref_service()->GetBoolean(
-          data_reduction_proxy::prefs::kDataReductionProxyEnabled),
-      UNKNOWN_TYPE);
-
-  EXPECT_EQ(kReceivedLength,
-            compression_stats()->GetInt64(
-                data_reduction_proxy::prefs::kHttpReceivedContentLength));
-  EXPECT_FALSE(pref_service()->GetBoolean(
-      data_reduction_proxy::prefs::kDataReductionProxyEnabled));
-  EXPECT_EQ(kOriginalLength,
-            compression_stats()->GetInt64(
-                data_reduction_proxy::prefs::kHttpOriginalContentLength));
-
-  // Record the same numbers again, and total lengths should be doubled.
-  data_reduction_proxy_network_delegate_->UpdateContentLengthPrefs(
-      kReceivedLength, kOriginalLength,
-      pref_service()->GetBoolean(
-          data_reduction_proxy::prefs::kDataReductionProxyEnabled),
-      UNKNOWN_TYPE);
-
-  EXPECT_EQ(kReceivedLength * 2,
-            compression_stats()->GetInt64(
-                data_reduction_proxy::prefs::kHttpReceivedContentLength));
-  EXPECT_FALSE(pref_service()->GetBoolean(
-      data_reduction_proxy::prefs::kDataReductionProxyEnabled));
-  EXPECT_EQ(kOriginalLength * 2,
-            compression_stats()->GetInt64(
-                data_reduction_proxy::prefs::kHttpOriginalContentLength));
 }
 
 }  // namespace data_reduction_proxy

@@ -12,7 +12,6 @@
 #include "ash/display/display_info.h"
 #include "ash/display/display_manager.h"
 #include "ash/rotator/screen_rotation_animation.h"
-#include "ash/session/session_state_delegate.h"
 #include "ash/shell.h"
 #include "base/command_line.h"
 #include "base/time/time.h"
@@ -104,6 +103,10 @@ class LayerCleanupObserver : public ui::LayerAnimationObserver {
   void OnDetachedFromSequence(ui::LayerAnimationSequence* sequence) override;
 
  private:
+  // Aborts the active animations of the layer, and recurses upon its child
+  // layers.
+  void AbortAnimations(ui::Layer* layer);
+
   // The owned layer tree.
   scoped_ptr<ui::LayerTreeOwner> layer_tree_owner_;
 
@@ -124,6 +127,7 @@ LayerCleanupObserver::~LayerCleanupObserver() {
   // RequiresNotificationWhenAnimatorDestroyed.
   if (sequence_)
     sequence_->RemoveObserver(this);
+  AbortAnimations(layer_tree_owner_->root());
 }
 
 ui::Layer* LayerCleanupObserver::GetRootLayer() {
@@ -149,6 +153,12 @@ void LayerCleanupObserver::OnDetachedFromSequence(
     ui::LayerAnimationSequence* sequence) {
   DCHECK_EQ(sequence, sequence_);
   sequence_ = nullptr;
+}
+
+void LayerCleanupObserver::AbortAnimations(ui::Layer* layer) {
+  for (ui::Layer* child_layer : layer->children())
+    AbortAnimations(child_layer);
+  layer->GetAnimator()->AbortAllAnimations();
 }
 
 // Set the screen orientation for the given |display| to |new_rotation| and
@@ -270,19 +280,10 @@ ScreenRotationAnimator::~ScreenRotationAnimator() {
 }
 
 bool ScreenRotationAnimator::CanAnimate() const {
-  // Animations are currently broken on the login screen.
-  // (chrome-os-partners:40118). Disabling the animations on this screen for
-  // M-43
   return Shell::GetInstance()
-             ->display_manager()
-             ->GetDisplayForId(display_id_)
-             .is_valid() &&
-         Shell::GetInstance()
-             ->session_state_delegate()
-             ->IsActiveUserSessionStarted() &&
-         !Shell::GetInstance()->session_state_delegate()->IsScreenLocked() &&
-         Shell::GetInstance()->session_state_delegate()->GetSessionState() ==
-             SessionStateDelegate::SESSION_STATE_ACTIVE;
+      ->display_manager()
+      ->GetDisplayForId(display_id_)
+      .is_valid();
 }
 
 void ScreenRotationAnimator::Rotate(gfx::Display::Rotation new_rotation,
@@ -297,7 +298,7 @@ void ScreenRotationAnimator::Rotate(gfx::Display::Rotation new_rotation,
       base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           switches::kAshEnableScreenRotationAnimation);
 
-  if (!CanAnimate() || switch_value == kRotationAnimation_None) {
+  if (switch_value == kRotationAnimation_None) {
     Shell::GetInstance()->display_manager()->SetDisplayRotation(
         display_id_, new_rotation, source);
   } else if (kRotationAnimation_Default == switch_value ||

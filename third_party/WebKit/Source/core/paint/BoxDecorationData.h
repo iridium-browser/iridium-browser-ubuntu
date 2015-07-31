@@ -14,20 +14,19 @@ class GraphicsContext;
 class LayoutBox;
 
 // Information extracted from ComputedStyle for box painting.
-class BoxDecorationData {
+struct BoxDecorationData {
+    STACK_ALLOCATED();
 public:
-    BoxDecorationData(const LayoutBox&, GraphicsContext*);
+    BoxDecorationData(const LayoutBox&);
 
     Color backgroundColor;
+    BackgroundBleedAvoidance bleedAvoidance;
     bool hasBackground;
     bool hasBorder;
     bool hasAppearance;
-    BackgroundBleedAvoidance bleedAvoidance() { return static_cast<BackgroundBleedAvoidance>(m_bleedAvoidance); }
 
 private:
-    BackgroundBleedAvoidance determineBackgroundBleedAvoidance(const LayoutBox&, GraphicsContext*);
-    bool borderObscuresBackgroundEdge(const ComputedStyle&, const FloatSize& contextScale) const;
-    unsigned m_bleedAvoidance : 2; // BackgroundBleedAvoidance
+    BackgroundBleedAvoidance determineBackgroundBleedAvoidance(const LayoutBox&);
 };
 
 } // namespace blink

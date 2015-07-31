@@ -114,6 +114,7 @@ extern const char kFindCanceled[];
 extern const char kFindDone[];
 
 // Initialization parameters.
+extern const char kInitialZoomFactor[];
 extern const char kParameterUserAgentOverride[];
 
 // Miscellaneous.
@@ -135,6 +136,9 @@ extern const uint32 WEB_VIEW_REMOVE_DATA_MASK_FILE_SYSTEMS;
 extern const uint32 WEB_VIEW_REMOVE_DATA_MASK_INDEXEDDB;
 extern const uint32 WEB_VIEW_REMOVE_DATA_MASK_LOCAL_STORAGE;
 extern const uint32 WEB_VIEW_REMOVE_DATA_MASK_WEBSQL;
+
+// Other.
+extern const char kWebViewContentScriptManagerKeyName[];
 
 }  // namespace webview
 

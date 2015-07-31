@@ -62,6 +62,7 @@
 #include "core/page/Page.h"
 #include "platform/SerializedResource.h"
 #include "platform/graphics/Image.h"
+#include "wtf/OwnPtr.h"
 #include "wtf/text/CString.h"
 #include "wtf/text/StringBuilder.h"
 #include "wtf/text/TextEncoding.h"
@@ -104,19 +105,28 @@ public:
 
 protected:
     virtual void appendText(StringBuilder& out, Text&) override;
+    virtual bool shouldIgnoreAttribute(const Attribute&) override;
     virtual void appendElement(StringBuilder& out, Element&, Namespaces*) override;
     virtual void appendCustomAttributes(StringBuilder& out, const Element&, Namespaces*) override;
+    virtual void appendStartTag(Node&, Namespaces* = nullptr) override;
     virtual void appendEndTag(const Element&) override;
 
 private:
     RawPtrWillBeMember<PageSerializer> m_serializer;
     RawPtrWillBeMember<const Document> m_document;
+
+    // FIXME: |PageSerializer| uses |m_nodes| for collecting nodes in document
+    // included into serialized text then extracts image, object, etc. The size
+    // of this vector isn't small for large document. It is better to use
+    // callback like functionality.
+    RawPtrWillBeMember<WillBeHeapVector<RawPtrWillBeMember<Node>>> const m_nodes;
 };
 
 SerializerMarkupAccumulator::SerializerMarkupAccumulator(PageSerializer* serializer, const Document& document, WillBeHeapVector<RawPtrWillBeMember<Node>>* nodes)
-    : MarkupAccumulator(nodes, ResolveAllURLs, Position(), Position())
+    : MarkupAccumulator(ResolveAllURLs)
     , m_serializer(serializer)
     , m_document(&document)
+    , m_nodes(nodes)
 {
 }
 
@@ -129,6 +139,15 @@ void SerializerMarkupAccumulator::appendText(StringBuilder& out, Text& text)
     Element* parent = text.parentElement();
     if (parent && !shouldIgnoreElement(*parent))
         MarkupAccumulator::appendText(out, text);
+}
+
+bool SerializerMarkupAccumulator::shouldIgnoreAttribute(const Attribute& attribute)
+{
+    PageSerializer::Delegate* delegate = m_serializer->delegate();
+    if (delegate)
+        return delegate->shouldIgnoreAttribute(attribute);
+
+    return MarkupAccumulator::shouldIgnoreAttribute(attribute);
 }
 
 void SerializerMarkupAccumulator::appendElement(StringBuilder& out, Element& element, Namespaces* namespaces)
@@ -165,15 +184,23 @@ void SerializerMarkupAccumulator::appendCustomAttributes(StringBuilder& out, con
     appendAttribute(out, element, Attribute(frameOwnerURLAttributeName(frameOwner), AtomicString(url.string())), namespaces);
 }
 
+void SerializerMarkupAccumulator::appendStartTag(Node& node, Namespaces* namespaces)
+{
+    MarkupAccumulator::appendStartTag(node, namespaces);
+    if (m_nodes)
+        m_nodes->append(&node);
+}
+
 void SerializerMarkupAccumulator::appendEndTag(const Element& element)
 {
     if (!shouldIgnoreElement(element))
         MarkupAccumulator::appendEndTag(element);
 }
 
-PageSerializer::PageSerializer(Vector<SerializedResource>* resources)
+PageSerializer::PageSerializer(Vector<SerializedResource>* resources, PassOwnPtr<Delegate> delegate)
     : m_resources(resources)
     , m_blankFrameCounter(0)
+    , m_delegate(delegate)
 {
 }
 
@@ -208,7 +235,7 @@ void PageSerializer::serializeFrame(LocalFrame* frame)
 
     WillBeHeapVector<RawPtrWillBeMember<Node>> serializedNodes;
     SerializerMarkupAccumulator accumulator(this, document, &serializedNodes);
-    String text = accumulator.serializeNodes(document, IncludeNode);
+    String text = serializeNodes<EditingStrategy>(accumulator, document, IncludeNode);
     CString frameHTML = textEncoding.normalizeAndEncode(text, WTF::EntitiesForUnencodables);
     m_resources->append(SerializedResource(url, document.suggestedMIMEType(), SharedBuffer::create(frameHTML.data(), frameHTML.length())));
     m_resourceURLs.add(url);
@@ -311,7 +338,7 @@ void PageSerializer::addToResources(Resource* resource, PassRefPtr<SharedBuffer>
     m_resourceURLs.add(url);
 }
 
-void PageSerializer::addImageToResources(ImageResource* image, LayoutObject* imageRenderer, const KURL& url)
+void PageSerializer::addImageToResources(ImageResource* image, LayoutObject* imageLayoutObject, const KURL& url)
 {
     if (!shouldAddURL(url))
         return;
@@ -319,7 +346,7 @@ void PageSerializer::addImageToResources(ImageResource* image, LayoutObject* ima
     if (!image || image->image() == Image::nullImage() || image->errorOccurred())
         return;
 
-    RefPtr<SharedBuffer> data = imageRenderer ? image->imageForLayoutObject(imageRenderer)->data() : nullptr;
+    RefPtr<SharedBuffer> data = imageLayoutObject ? image->imageForLayoutObject(imageLayoutObject)->data() : nullptr;
     if (!data)
         data = image->image()->data();
 
@@ -385,6 +412,11 @@ KURL PageSerializer::urlForBlankFrame(LocalFrame* frame)
     m_blankFrameURLs.add(frame, fakeURL);
 
     return fakeURL;
+}
+
+PageSerializer::Delegate* PageSerializer::delegate()
+{
+    return m_delegate.get();
 }
 
 } // namespace blink

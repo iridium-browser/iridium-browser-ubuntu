@@ -14,6 +14,7 @@
 #include "extensions/renderer/script_context.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebElement.h"
+#include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebNode.h"
 #include "third_party/WebKit/public/web/WebNodeList.h"
 #include "third_party/WebKit/public/web/WebUserGestureIndicator.h"
@@ -22,7 +23,6 @@
 
 using blink::WebDocument;
 using blink::WebElement;
-using blink::WebFrame;
 using blink::WebNode;
 using blink::WebNodeList;
 using blink::WebUserGestureIndicator;
@@ -79,7 +79,7 @@ void WebstoreBindings::Install(
 
   std::string webstore_item_id;
   std::string error;
-  WebFrame* frame = context()->web_frame();
+  blink::WebLocalFrame* frame = context()->web_frame();
 
   if (!GetWebstoreItemIdFromFrame(
       frame, preferred_store_link_url, &webstore_item_id, &error)) {
@@ -102,7 +102,7 @@ void WebstoreBindings::Install(
 
 // static
 bool WebstoreBindings::GetWebstoreItemIdFromFrame(
-    WebFrame* frame,
+    blink::WebLocalFrame* frame,
     const std::string& preferred_store_link_url,
     std::string* webstore_item_id,
     std::string* error) {
@@ -210,7 +210,7 @@ void WebstoreBindings::OnInlineWebstoreInstallResponse(
   v8::Isolate* isolate = context()->isolate();
   v8::HandleScope handle_scope(isolate);
   v8::Context::Scope context_scope(context()->v8_context());
-  v8::Handle<v8::Value> argv[] = {
+  v8::Local<v8::Value> argv[] = {
     v8::Integer::New(isolate, install_id),
     v8::Boolean::New(isolate, success),
     v8::String::NewFromUtf8(isolate, error.c_str()),
@@ -236,7 +236,7 @@ void WebstoreBindings::OnInlineInstallStageChanged(int stage) {
   v8::Isolate* isolate = context()->isolate();
   v8::HandleScope handle_scope(isolate);
   v8::Context::Scope context_scope(context()->v8_context());
-  v8::Handle<v8::Value> argv[] = {
+  v8::Local<v8::Value> argv[] = {
       v8::String::NewFromUtf8(isolate, stage_string)};
   context()->module_system()->CallModuleMethod(
       "webstore", "onInstallStageChanged", arraysize(argv), argv);
@@ -246,7 +246,7 @@ void WebstoreBindings::OnInlineInstallDownloadProgress(int percent_downloaded) {
   v8::Isolate* isolate = context()->isolate();
   v8::HandleScope handle_scope(isolate);
   v8::Context::Scope context_scope(context()->v8_context());
-  v8::Handle<v8::Value> argv[] = {
+  v8::Local<v8::Value> argv[] = {
       v8::Number::New(isolate, percent_downloaded / 100.0)};
   context()->module_system()->CallModuleMethod(
       "webstore", "onDownloadProgress", arraysize(argv), argv);

@@ -108,8 +108,8 @@ void DeprecatedPaintLayerCompositor::setCompositingModeEnabled(bool enable)
     // LayoutPart::requiresAcceleratedCompositing is used to determine self-paintingness
     // and bases it's return value for frames on the m_compositing bit here.
     if (HTMLFrameOwnerElement* ownerElement = m_layoutView.document().ownerElement()) {
-        if (LayoutPart* renderer = ownerElement->layoutPart())
-            renderer->layer()->updateSelfPaintingLayer();
+        if (LayoutPart* layoutObject = ownerElement->layoutPart())
+            layoutObject->layer()->updateSelfPaintingLayer();
     }
 
     if (m_compositing)
@@ -161,7 +161,7 @@ bool DeprecatedPaintLayerCompositor::preferCompositingToLCDTextEnabled() const
     return m_compositingReasonFinder.hasOverflowScrollTrigger();
 }
 
-static LayoutVideo* findFullscreenVideoRenderer(Document& document)
+static LayoutVideo* findFullscreenVideoLayoutObject(Document& document)
 {
     // Recursively find the document that is in fullscreen.
     Element* fullscreenElement = Fullscreen::fullscreenElementFrom(document);
@@ -176,17 +176,23 @@ static LayoutVideo* findFullscreenVideoRenderer(Document& document)
     fullscreenElement = Fullscreen::currentFullScreenElementFrom(*contentDocument);
     if (!isHTMLVideoElement(fullscreenElement))
         return 0;
-    LayoutObject* renderer = fullscreenElement->layoutObject();
-    if (!renderer)
+    LayoutObject* layoutObject = fullscreenElement->layoutObject();
+    if (!layoutObject)
         return 0;
-    return toLayoutVideo(renderer);
+    return toLayoutVideo(layoutObject);
 }
 
 void DeprecatedPaintLayerCompositor::updateIfNeededRecursive()
 {
     for (Frame* child = m_layoutView.frameView()->frame().tree().firstChild(); child; child = child->tree().nextSibling()) {
-        if (child->isLocalFrame())
-            toLocalFrame(child)->contentRenderer()->compositor()->updateIfNeededRecursive();
+        if (!child->isLocalFrame())
+            continue;
+        LocalFrame* localFrame = toLocalFrame(child);
+        // It's possible for trusted Pepper plugins to force hit testing in situations where
+        // the frame tree is in an inconsistent state, such as in the middle of frame detach.
+        // TODO(bbudge) Remove this check when trusted Pepper plugins are gone.
+        if (localFrame->document()->isActive())
+            localFrame->contentLayoutObject()->compositor()->updateIfNeededRecursive();
     }
 
     TRACE_EVENT0("blink", "DeprecatedPaintLayerCompositor::updateIfNeededRecursive");
@@ -219,7 +225,7 @@ void DeprecatedPaintLayerCompositor::updateIfNeededRecursive()
     assertNoUnresolvedDirtyBits();
     for (Frame* child = m_layoutView.frameView()->frame().tree().firstChild(); child; child = child->tree().nextSibling()) {
         if (child->isLocalFrame())
-            toLocalFrame(child)->contentRenderer()->compositor()->assertNoUnresolvedDirtyBits();
+            toLocalFrame(child)->contentLayoutObject()->compositor()->assertNoUnresolvedDirtyBits();
     }
 #endif
 }
@@ -262,7 +268,7 @@ void DeprecatedPaintLayerCompositor::applyOverlayFullscreenVideoAdjustment()
         return;
 
     bool isLocalRoot = m_layoutView.frame()->isLocalRoot();
-    LayoutVideo* video = findFullscreenVideoRenderer(m_layoutView.document());
+    LayoutVideo* video = findFullscreenVideoLayoutObject(m_layoutView.document());
     if (!video || !video->layer()->hasCompositedDeprecatedPaintLayerMapping()) {
         if (isLocalRoot) {
             GraphicsLayer* backgroundLayer = fixedRootBackgroundLayer();
@@ -301,16 +307,16 @@ void DeprecatedPaintLayerCompositor::updateWithoutAcceleratedCompositing(Composi
 #endif
 }
 
-static void forceRecomputePaintInvalidationRectsIncludingNonCompositingDescendants(LayoutObject* renderer)
+static void forceRecomputePaintInvalidationRectsIncludingNonCompositingDescendants(LayoutObject* layoutObject)
 {
     // We clear the previous paint invalidation rect as it's wrong (paint invaliation container
     // changed, ...). Forcing a full invalidation will make us recompute it. Also we are not
     // changing the previous position from our paint invalidation container, which is fine as
     // we want a full paint invalidation anyway.
-    renderer->setPreviousPaintInvalidationRect(LayoutRect());
-    renderer->setShouldDoFullPaintInvalidation();
+    layoutObject->setPreviousPaintInvalidationRect(LayoutRect());
+    layoutObject->setShouldDoFullPaintInvalidation();
 
-    for (LayoutObject* child = renderer->slowFirstChild(); child; child = child->nextSibling()) {
+    for (LayoutObject* child = layoutObject->slowFirstChild(); child; child = child->nextSibling()) {
         if (!child->isPaintInvalidationContainer())
             forceRecomputePaintInvalidationRectsIncludingNonCompositingDescendants(child);
     }
@@ -352,8 +358,8 @@ void DeprecatedPaintLayerCompositor::updateIfNeeded()
         {
             TRACE_EVENT0("blink", "DeprecatedPaintLayerCompositor::updateAfterCompositingChange");
             if (const FrameView::ScrollableAreaSet* scrollableAreas = m_layoutView.frameView()->scrollableAreas()) {
-                for (FrameView::ScrollableAreaSet::iterator it = scrollableAreas->begin(); it != scrollableAreas->end(); ++it)
-                    layersChanged |= (*it)->updateAfterCompositingChange();
+                for (auto* scrollableArea : *scrollableAreas)
+                    layersChanged |= scrollableArea->updateAfterCompositingChange();
             }
         }
 
@@ -484,7 +490,7 @@ bool DeprecatedPaintLayerCompositor::allocateOrClearCompositedDeprecatedPaintLay
 
 void DeprecatedPaintLayerCompositor::paintInvalidationOnCompositingChange(DeprecatedPaintLayer* layer)
 {
-    // If the renderer is not attached yet, no need to issue paint invalidations.
+    // If the layoutObject is not attached yet, no need to issue paint invalidations.
     if (layer->layoutObject() != &m_layoutView && !layer->layoutObject()->parent())
         return;
 
@@ -609,12 +615,12 @@ String DeprecatedPaintLayerCompositor::layerTreeAsText(LayerTreeFlags flags)
     return layerTreeText;
 }
 
-DeprecatedPaintLayerCompositor* DeprecatedPaintLayerCompositor::frameContentsCompositor(LayoutPart* renderer)
+DeprecatedPaintLayerCompositor* DeprecatedPaintLayerCompositor::frameContentsCompositor(LayoutPart* layoutObject)
 {
-    if (!renderer->node()->isFrameOwnerElement())
+    if (!layoutObject->node()->isFrameOwnerElement())
         return 0;
 
-    HTMLFrameOwnerElement* element = toHTMLFrameOwnerElement(renderer->node());
+    HTMLFrameOwnerElement* element = toHTMLFrameOwnerElement(layoutObject->node());
     if (Document* contentDocument = element->contentDocument()) {
         if (LayoutView* view = contentDocument->layoutView())
             return view->compositor();
@@ -623,13 +629,13 @@ DeprecatedPaintLayerCompositor* DeprecatedPaintLayerCompositor::frameContentsCom
 }
 
 // FIXME: What does this function do? It needs a clearer name.
-bool DeprecatedPaintLayerCompositor::parentFrameContentLayers(LayoutPart* renderer)
+bool DeprecatedPaintLayerCompositor::parentFrameContentLayers(LayoutPart* layoutObject)
 {
-    DeprecatedPaintLayerCompositor* innerCompositor = frameContentsCompositor(renderer);
+    DeprecatedPaintLayerCompositor* innerCompositor = frameContentsCompositor(layoutObject);
     if (!innerCompositor || !innerCompositor->staleInCompositingMode() || innerCompositor->rootLayerAttachment() != RootLayerAttachedViaEnclosingFrame)
         return false;
 
-    DeprecatedPaintLayer* layer = renderer->layer();
+    DeprecatedPaintLayer* layer = layoutObject->layer();
     if (!layer->hasCompositedDeprecatedPaintLayerMapping())
         return false;
 
@@ -752,7 +758,7 @@ void DeprecatedPaintLayerCompositor::updateDirectCompositingReasons(DeprecatedPa
 
 bool DeprecatedPaintLayerCompositor::canBeComposited(const DeprecatedPaintLayer* layer) const
 {
-    return m_hasAcceleratedCompositing && layer->isSelfPaintingLayer() && !layer->subtreeIsInvisible();
+    return m_hasAcceleratedCompositing && layer->isSelfPaintingLayer() && !layer->subtreeIsInvisible() && !layer->layoutObject()->isLayoutFlowThread();
 }
 
 // Return true if the given layer is a stacking context and has compositing child
@@ -763,7 +769,7 @@ bool DeprecatedPaintLayerCompositor::clipsCompositingDescendants(const Deprecate
     return layer->hasCompositingDescendant() && layer->layoutObject()->hasClipOrOverflowClip();
 }
 
-// If an element has composited negative z-index children, those children render in front of the
+// If an element has composited negative z-index children, those children paint in front of the
 // layer background, so we need an extra 'contents' layer for the foreground of the layer
 // object.
 bool DeprecatedPaintLayerCompositor::needsContentsCompositingLayer(const DeprecatedPaintLayer* layer) const
@@ -931,10 +937,11 @@ void DeprecatedPaintLayerCompositor::updateOverflowControlsLayers()
     }
 
     if (requiresScrollCornerLayer()) {
-        if (!m_layerForScrollCorner) {
+        if (!m_layerForScrollCorner)
             m_layerForScrollCorner = GraphicsLayer::create(graphicsLayerFactory(), this);
+
+        if (m_layerForScrollCorner->parent() != controlsParent)
             controlsParent->addChild(m_layerForScrollCorner.get());
-        }
     } else if (m_layerForScrollCorner) {
         m_layerForScrollCorner->removeFromParent();
         m_layerForScrollCorner = nullptr;
@@ -1013,7 +1020,7 @@ void DeprecatedPaintLayerCompositor::destroyRootLayer()
         m_layerForHorizontalScrollbar = nullptr;
         if (ScrollingCoordinator* scrollingCoordinator = this->scrollingCoordinator())
             scrollingCoordinator->scrollableAreaScrollbarLayerDidChange(m_layoutView.frameView(), HorizontalScrollbar);
-        if (Scrollbar* horizontalScrollbar = m_layoutView.frameView()->verticalScrollbar())
+        if (Scrollbar* horizontalScrollbar = m_layoutView.frameView()->horizontalScrollbar())
             m_layoutView.frameView()->invalidateScrollbar(horizontalScrollbar, IntRect(IntPoint(0, 0), horizontalScrollbar->frameRect().size()));
     }
 
@@ -1062,7 +1069,7 @@ void DeprecatedPaintLayerCompositor::attachRootLayer(RootLayerAttachment attachm
         HTMLFrameOwnerElement* ownerElement = m_layoutView.document().ownerElement();
         ASSERT(ownerElement);
         // The layer will get hooked up via CompositedDeprecatedPaintLayerMapping::updateGraphicsLayerConfiguration()
-        // for the frame's renderer in the parent document.
+        // for the frame's layoutObject in the parent document.
         ownerElement->setNeedsCompositingUpdate();
         break;
     }
@@ -1079,7 +1086,7 @@ void DeprecatedPaintLayerCompositor::detachRootLayer()
     switch (m_rootLayerAttachment) {
     case RootLayerAttachedViaEnclosingFrame: {
         // The layer will get unhooked up via CompositedDeprecatedPaintLayerMapping::updateGraphicsLayerConfiguration()
-        // for the frame's renderer in the parent document.
+        // for the frame's layoutObject in the parent document.
         if (m_overflowControlsHostLayer)
             m_overflowControlsHostLayer->removeFromParent();
         else

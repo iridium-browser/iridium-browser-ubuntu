@@ -18,7 +18,7 @@ class SyncError {
 public:
     // For CallbackPromiseAdapter.
     using WebType = WebSyncError;
-    static PassRefPtrWillBeRawPtr<DOMException> take(ScriptPromiseResolver*, WebType*);
+    static DOMException* take(ScriptPromiseResolver*, WebType*);
     static void dispose(WebType*);
 
 private:

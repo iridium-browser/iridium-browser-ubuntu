@@ -126,6 +126,11 @@ BrowserGpuChannelHostFactory::EstablishRequest::EstablishRequest(
 }
 
 void BrowserGpuChannelHostFactory::EstablishRequest::EstablishOnIO() {
+  // TODO(pkasting): Remove ScopedTracker below once crbug.com/477117 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "477117 "
+          "BrowserGpuChannelHostFactory::EstablishRequest::EstablishOnIO"));
   GpuProcessHost* host = GpuProcessHost::FromID(gpu_host_id_);
   if (!host) {
     host = GpuProcessHost::Get(GpuProcessHost::GPU_PROCESS_KIND_SANDBOXED,
@@ -262,7 +267,8 @@ uint32 BrowserGpuChannelHostFactory::GetImageTextureTarget() {
 
   switch (type) {
     case gfx::SURFACE_TEXTURE_BUFFER:
-      // Surface texture backed GPU memory buffers require
+    case gfx::OZONE_NATIVE_BUFFER:
+      // GPU memory buffers that are shared with the GL using EGLImages require
       // TEXTURE_EXTERNAL_OES.
       return GL_TEXTURE_EXTERNAL_OES;
     case gfx::IO_SURFACE_BUFFER:
@@ -289,18 +295,18 @@ BrowserGpuChannelHostFactory::~BrowserGpuChannelHostFactory() {
   for (size_t n = 0; n < established_callbacks_.size(); n++)
     established_callbacks_[n].Run();
   shutdown_event_->Signal();
+  if (gpu_channel_) {
+    gpu_channel_->DestroyChannel();
+    gpu_channel_ = NULL;
+  }
 }
 
 bool BrowserGpuChannelHostFactory::IsMainThread() {
   return BrowserThread::CurrentlyOn(BrowserThread::UI);
 }
 
-base::MessageLoop* BrowserGpuChannelHostFactory::GetMainLoop() {
-  return BrowserThread::UnsafeGetMessageLoopForThread(BrowserThread::UI);
-}
-
-scoped_refptr<base::MessageLoopProxy>
-BrowserGpuChannelHostFactory::GetIOLoopProxy() {
+scoped_refptr<base::SingleThreadTaskRunner>
+BrowserGpuChannelHostFactory::GetIOThreadTaskRunner() {
   return BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO);
 }
 
@@ -347,12 +353,10 @@ CreateCommandBufferResult BrowserGpuChannelHostFactory::CreateViewCommandBuffer(
       const GPUCreateCommandBufferConfig& init_params,
       int32 route_id) {
   CreateRequest request(route_id);
-  GetIOLoopProxy()->PostTask(FROM_HERE, base::Bind(
-        &BrowserGpuChannelHostFactory::CreateViewCommandBufferOnIO,
-        base::Unretained(this),
-        &request,
-        surface_id,
-        init_params));
+  GetIOThreadTaskRunner()->PostTask(
+      FROM_HERE,
+      base::Bind(&BrowserGpuChannelHostFactory::CreateViewCommandBufferOnIO,
+                 base::Unretained(this), &request, surface_id, init_params));
   // TODO(vadimt): Remove ScopedTracker below once crbug.com/125248 is fixed.
   tracked_objects::ScopedTracker tracking_profile(
       FROM_HERE_WITH_EXPLICIT_FUNCTION(
@@ -390,6 +394,7 @@ void BrowserGpuChannelHostFactory::EstablishGpuChannel(
   if (gpu_channel_.get() && gpu_channel_->IsLost()) {
     DCHECK(!pending_request_.get());
     // Recreate the channel if it has been lost.
+    gpu_channel_->DestroyChannel();
     gpu_channel_ = NULL;
   }
 

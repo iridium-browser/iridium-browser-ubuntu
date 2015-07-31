@@ -61,8 +61,10 @@
 #include <openssl/bn.h>
 #include <openssl/err.h>
 #include <openssl/mem.h>
+#include <openssl/thread.h>
 
 #include "internal.h"
+#include "../internal.h"
 
 
 #define OPENSSL_RSA_MAX_MODULUS_BITS 16384
@@ -72,15 +74,9 @@
 
 
 static int finish(RSA *rsa) {
-  if (rsa->_method_mod_n != NULL) {
-    BN_MONT_CTX_free(rsa->_method_mod_n);
-  }
-  if (rsa->_method_mod_p != NULL) {
-    BN_MONT_CTX_free(rsa->_method_mod_p);
-  }
-  if (rsa->_method_mod_q != NULL) {
-    BN_MONT_CTX_free(rsa->_method_mod_q);
-  }
+  BN_MONT_CTX_free(rsa->_method_mod_n);
+  BN_MONT_CTX_free(rsa->_method_mod_p);
+  BN_MONT_CTX_free(rsa->_method_mod_q);
 
   return 1;
 }
@@ -165,13 +161,14 @@ static int encrypt(RSA *rsa, size_t *out_len, uint8_t *out, size_t max_out,
   }
 
   if (rsa->flags & RSA_FLAG_CACHE_PUBLIC) {
-    if (!BN_MONT_CTX_set_locked(&rsa->_method_mod_n, CRYPTO_LOCK_RSA, rsa->n,
-                                ctx)) {
+    if (BN_MONT_CTX_set_locked(&rsa->_method_mod_n, &rsa->lock, rsa->n, ctx) ==
+        NULL) {
       goto err;
     }
   }
 
-  if (!rsa->meth->bn_mod_exp(result, f, rsa->e, rsa->n, ctx, rsa->_method_mod_n)) {
+  if (!rsa->meth->bn_mod_exp(result, f, rsa->e, rsa->n, ctx,
+                             rsa->_method_mod_n)) {
     goto err;
   }
 
@@ -217,37 +214,20 @@ static BN_BLINDING *rsa_blinding_get(RSA *rsa, unsigned *index_used,
   uint8_t *new_blindings_inuse;
   char overflow = 0;
 
-  CRYPTO_w_lock(CRYPTO_LOCK_RSA_BLINDING);
-  if (rsa->num_blindings > 0) {
-    unsigned i, starting_index;
-    CRYPTO_THREADID threadid;
+  CRYPTO_MUTEX_lock_write(&rsa->lock);
 
-    /* We start searching the array at a value based on the
-     * threadid in order to try avoid bouncing the BN_BLINDING
-     * values around different threads. It's harmless if
-     * threadid.val is always set to zero. */
-    CRYPTO_THREADID_current(&threadid);
-    starting_index = threadid.val % rsa->num_blindings;
-
-    for (i = starting_index;;) {
-      if (rsa->blindings_inuse[i] == 0) {
-        rsa->blindings_inuse[i] = 1;
-        ret = rsa->blindings[i];
-        *index_used = i;
-        break;
-      }
-      i++;
-      if (i == rsa->num_blindings) {
-        i = 0;
-      }
-      if (i == starting_index) {
-        break;
-      }
+  unsigned i;
+  for (i = 0; i < rsa->num_blindings; i++) {
+    if (rsa->blindings_inuse[i] == 0) {
+      rsa->blindings_inuse[i] = 1;
+      ret = rsa->blindings[i];
+      *index_used = i;
+      break;
     }
   }
 
   if (ret != NULL) {
-    CRYPTO_w_unlock(CRYPTO_LOCK_RSA_BLINDING);
+    CRYPTO_MUTEX_unlock(&rsa->lock);
     return ret;
   }
 
@@ -256,7 +236,7 @@ static BN_BLINDING *rsa_blinding_get(RSA *rsa, unsigned *index_used,
   /* We didn't find a free BN_BLINDING to use so increase the length of
    * the arrays by one and use the newly created element. */
 
-  CRYPTO_w_unlock(CRYPTO_LOCK_RSA_BLINDING);
+  CRYPTO_MUTEX_unlock(&rsa->lock);
   ret = rsa_setup_blinding(rsa, ctx);
   if (ret == NULL) {
     return NULL;
@@ -269,7 +249,7 @@ static BN_BLINDING *rsa_blinding_get(RSA *rsa, unsigned *index_used,
     return ret;
   }
 
-  CRYPTO_w_lock(CRYPTO_LOCK_RSA_BLINDING);
+  CRYPTO_MUTEX_lock_write(&rsa->lock);
 
   new_blindings =
       OPENSSL_malloc(sizeof(BN_BLINDING *) * (rsa->num_blindings + 1));
@@ -288,24 +268,20 @@ static BN_BLINDING *rsa_blinding_get(RSA *rsa, unsigned *index_used,
   new_blindings_inuse[rsa->num_blindings] = 1;
   *index_used = rsa->num_blindings;
 
-  if (rsa->blindings != NULL) {
-    OPENSSL_free(rsa->blindings);
-  }
+  OPENSSL_free(rsa->blindings);
   rsa->blindings = new_blindings;
-  if (rsa->blindings_inuse != NULL) {
-    OPENSSL_free(rsa->blindings_inuse);
-  }
+  OPENSSL_free(rsa->blindings_inuse);
   rsa->blindings_inuse = new_blindings_inuse;
   rsa->num_blindings++;
 
-  CRYPTO_w_unlock(CRYPTO_LOCK_RSA_BLINDING);
+  CRYPTO_MUTEX_unlock(&rsa->lock);
   return ret;
 
 err2:
   OPENSSL_free(new_blindings);
 
 err1:
-  CRYPTO_w_unlock(CRYPTO_LOCK_RSA_BLINDING);
+  CRYPTO_MUTEX_unlock(&rsa->lock);
   BN_BLINDING_free(ret);
   return NULL;
 }
@@ -320,9 +296,9 @@ static void rsa_blinding_release(RSA *rsa, BN_BLINDING *blinding,
     return;
   }
 
-  CRYPTO_w_lock(CRYPTO_LOCK_RSA_BLINDING);
+  CRYPTO_MUTEX_lock_write(&rsa->lock);
   rsa->blindings_inuse[blinding_index] = 0;
-  CRYPTO_w_unlock(CRYPTO_LOCK_RSA_BLINDING);
+  CRYPTO_MUTEX_unlock(&rsa->lock);
 }
 
 /* signing */
@@ -495,8 +471,8 @@ static int verify_raw(RSA *rsa, size_t *out_len, uint8_t *out, size_t max_out,
   }
 
   if (rsa->flags & RSA_FLAG_CACHE_PUBLIC) {
-    if (!BN_MONT_CTX_set_locked(&rsa->_method_mod_n, CRYPTO_LOCK_RSA, rsa->n,
-                                ctx)) {
+    if (BN_MONT_CTX_set_locked(&rsa->_method_mod_n, &rsa->lock, rsa->n, ctx) ==
+        NULL) {
       goto err;
     }
   }
@@ -599,8 +575,8 @@ static int private_transform(RSA *rsa, uint8_t *out, const uint8_t *in,
     BN_with_flags(d, rsa->d, BN_FLG_CONSTTIME);
 
     if (rsa->flags & RSA_FLAG_CACHE_PUBLIC) {
-      if (!BN_MONT_CTX_set_locked(&rsa->_method_mod_n, CRYPTO_LOCK_RSA, rsa->n,
-                                  ctx)) {
+      if (BN_MONT_CTX_set_locked(&rsa->_method_mod_n, &rsa->lock, rsa->n,
+                                 ctx) == NULL) {
         goto err;
       }
     }
@@ -661,18 +637,20 @@ static int mod_exp(BIGNUM *r0, const BIGNUM *I, RSA *rsa, BN_CTX *ctx) {
     BN_with_flags(q, rsa->q, BN_FLG_CONSTTIME);
 
     if (rsa->flags & RSA_FLAG_CACHE_PRIVATE) {
-      if (!BN_MONT_CTX_set_locked(&rsa->_method_mod_p, CRYPTO_LOCK_RSA, p, ctx)) {
+      if (BN_MONT_CTX_set_locked(&rsa->_method_mod_p, &rsa->lock, p, ctx) ==
+          NULL) {
         goto err;
       }
-      if (!BN_MONT_CTX_set_locked(&rsa->_method_mod_q, CRYPTO_LOCK_RSA, q, ctx)) {
+      if (BN_MONT_CTX_set_locked(&rsa->_method_mod_q, &rsa->lock, q, ctx) ==
+          NULL) {
         goto err;
       }
     }
   }
 
   if (rsa->flags & RSA_FLAG_CACHE_PUBLIC) {
-    if (!BN_MONT_CTX_set_locked(&rsa->_method_mod_n, CRYPTO_LOCK_RSA, rsa->n,
-                                ctx)) {
+    if (BN_MONT_CTX_set_locked(&rsa->_method_mod_n, &rsa->lock, rsa->n, ctx) ==
+        NULL) {
       goto err;
     }
   }

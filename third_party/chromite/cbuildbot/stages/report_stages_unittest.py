@@ -10,6 +10,7 @@ import mock
 import os
 
 from chromite.cbuildbot import cbuildbot_run
+from chromite.cbuildbot import cbuildbot_unittest
 from chromite.cbuildbot import commands
 from chromite.cbuildbot import constants
 from chromite.cbuildbot import failures_lib
@@ -17,7 +18,6 @@ from chromite.cbuildbot import manifest_version
 from chromite.cbuildbot import metadata_lib
 from chromite.cbuildbot import results_lib
 from chromite.cbuildbot import validation_pool
-from chromite.cbuildbot.cbuildbot_unittest import BuilderRunMock
 from chromite.cbuildbot.stages import generic_stages_unittest
 from chromite.cbuildbot.stages import report_stages
 from chromite.cbuildbot.stages import sync_stages
@@ -26,14 +26,17 @@ from chromite.lib import alerts
 from chromite.lib import cidb
 from chromite.lib import cros_build_lib
 from chromite.lib import fake_cidb
-from chromite.lib import gs
+from chromite.lib import gs_unittest
 from chromite.lib import osutils
 from chromite.lib import retry_stats
 from chromite.lib import toolchain
 
-# pylint: disable=protected-access
 
-class BuildReexecutionStageTest(generic_stages_unittest.AbstractStageTest):
+# pylint: disable=protected-access
+# pylint: disable=too-many-ancestors
+
+
+class BuildReexecutionStageTest(generic_stages_unittest.AbstractStageTestCase):
   """Tests that BuildReexecutionFinishedStage behaves as expected."""
   def setUp(self):
     self.fake_db = fake_cidb.FakeCIDBConnection()
@@ -46,7 +49,8 @@ class BuildReexecutionStageTest(generic_stages_unittest.AbstractStageTest):
     release_tag = '4815.0.0-rc1'
     self._run.attrs.release_tag = '4815.0.0-rc1'
     fake_versioninfo = manifest_version.VersionInfo(release_tag, '39')
-    self.PatchObject(gs.GSContext, 'Copy')
+    self.gs_mock = self.StartPatcher(gs_unittest.GSContextMock())
+    self.gs_mock.SetDefaultCmdResult()
     self.PatchObject(cbuildbot_run._BuilderRunBase, 'GetVersionInfo',
                      return_value=fake_versioninfo)
     self.PatchObject(toolchain, 'GetToolchainsForBoard')
@@ -79,7 +83,7 @@ class BuildReexecutionStageTest(generic_stages_unittest.AbstractStageTest):
   def ConstructStage(self):
     return report_stages.BuildReexecutionFinishedStage(self._run)
 
-class BuildStartStageTest(generic_stages_unittest.AbstractStageTest):
+class BuildStartStageTest(generic_stages_unittest.AbstractStageTestCase):
   """Tests that BuildStartStage behaves as expected."""
 
   def setUp(self):
@@ -143,7 +147,9 @@ class BuildStartStageTest(generic_stages_unittest.AbstractStageTest):
     return report_stages.BuildStartStage(self._run)
 
 
-class AbstractReportStageTest(generic_stages_unittest.AbstractStageTest):
+class AbstractReportStageTestCase(
+    generic_stages_unittest.AbstractStageTestCase,
+    cbuildbot_unittest.SimpleBuilderTestCase):
   """Base class for testing the Report stage."""
 
   def setUp(self):
@@ -153,7 +159,6 @@ class AbstractReportStageTest(generic_stages_unittest.AbstractStageTest):
       self.StartPatcher(mock.patch.object(*cmd, autospec=True))
     retry_stats.SetupStats()
 
-    self.StartPatcher(BuilderRunMock())
     self.sync_stage = None
 
     # Set up a general purpose cidb mock. Tests with more specific
@@ -180,7 +185,7 @@ class AbstractReportStageTest(generic_stages_unittest.AbstractStageTest):
     return report_stages.ReportStage(self._run, self.sync_stage, None)
 
 
-class ReportStageTest(AbstractReportStageTest):
+class ReportStageTest(AbstractReportStageTestCase):
   """Test the Report stage."""
 
   RELEASE_TAG = ''
@@ -193,7 +198,7 @@ class ReportStageTest(AbstractReportStageTest):
     self.RunStage()
     filenames = (
         'LATEST-%s' % self.TARGET_MANIFEST_BRANCH,
-        'LATEST-%s' % BuilderRunMock.VERSION,
+        'LATEST-%s' % self.VERSION,
     )
     calls = [mock.call(mock.ANY, mock.ANY, 'metadata.json', False,
                        update_list=True, acl=mock.ANY)]
@@ -274,7 +279,7 @@ class ReportStageTest(AbstractReportStageTest):
     self.assertEqual(expected, child_config_list)
 
 
-class ReportStageNoSyncTest(AbstractReportStageTest):
+class ReportStageNoSyncTest(AbstractReportStageTestCase):
   """Test the Report stage if SyncStage didn't complete.
 
   If SyncStage doesn't complete, we don't know the release tag, and can't

@@ -5,10 +5,14 @@
 #include "content/browser/web_contents/web_contents_android.h"
 
 #include "base/android/jni_android.h"
+#include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
 #include "base/command_line.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
+#include "content/browser/accessibility/browser_accessibility_android.h"
+#include "content/browser/accessibility/browser_accessibility_manager_android.h"
+#include "content/browser/android/content_view_core_impl.h"
 #include "content/browser/android/interstitial_page_delegate_android.h"
 #include "content/browser/frame_host/interstitial_page_impl.h"
 #include "content/browser/media/android/browser_media_player_manager.h"
@@ -25,12 +29,18 @@
 #include "content/public/common/content_switches.h"
 #include "jni/WebContentsImpl_jni.h"
 #include "net/android/network_library.h"
+#include "ui/accessibility/ax_node_data.h"
+#include "ui/gfx/android/device_display_info.h"
 
 using base::android::AttachCurrentThread;
 using base::android::ConvertJavaStringToUTF8;
 using base::android::ConvertJavaStringToUTF16;
 using base::android::ConvertUTF8ToJavaString;
+using base::android::ConvertUTF16ToJavaString;
 using base::android::ScopedJavaGlobalRef;
+using base::android::ToJavaIntArray;
+
+namespace content {
 
 namespace {
 
@@ -40,14 +50,78 @@ void JavaScriptResultCallback(const ScopedJavaGlobalRef<jobject>& callback,
   std::string json;
   base::JSONWriter::Write(result, &json);
   ScopedJavaLocalRef<jstring> j_json = ConvertUTF8ToJavaString(env, json);
-  content::Java_WebContentsImpl_onEvaluateJavaScriptResult(
+  Java_WebContentsImpl_onEvaluateJavaScriptResult(
       env, j_json.obj(), callback.obj());
 }
 
-void ReleaseAllMediaPlayers(content::WebContents* web_contents,
-                            content::RenderFrameHost* render_frame_host) {
-  content::BrowserMediaPlayerManager* manager =
-      static_cast<content::WebContentsImpl*>(web_contents)->
+ScopedJavaLocalRef<jobject> WalkAXTreeDepthFirst(JNIEnv* env,
+      BrowserAccessibilityAndroid* node, float scale_factor,
+      float y_offset, float x_scroll) {
+  ScopedJavaLocalRef<jstring> j_text =
+      ConvertUTF16ToJavaString(env, node->GetText());
+  ScopedJavaLocalRef<jstring> j_class =
+      ConvertUTF8ToJavaString(env, node->GetClassName());
+  const gfx::Rect& location = node->GetLocalBoundsRect();
+  // The style attributes exists and valid if size attribute exists. Otherwise,
+  // they are not. Use a negative size information to indicate the existence
+  // of style information.
+  float size = -1.0;
+  int color = 0;
+  int bgcolor = 0;
+  int text_style = 0;
+  if (node->HasFloatAttribute(ui::AX_ATTR_FONT_SIZE)) {
+    color = node->GetIntAttribute(ui::AX_ATTR_COLOR);
+    bgcolor = node->GetIntAttribute(ui::AX_ATTR_BACKGROUND_COLOR);
+    size =  node->GetFloatAttribute(ui::AX_ATTR_FONT_SIZE);
+    text_style = node->GetIntAttribute(ui::AX_ATTR_TEXT_STYLE);
+  }
+  ScopedJavaLocalRef<jobject> j_node =
+      Java_WebContentsImpl_createAccessibilitySnapshotNode(env,
+          scale_factor * location.x() - x_scroll,
+          scale_factor * location.y() + y_offset,
+          scale_factor * node->GetScrollX(), scale_factor * node->GetScrollY(),
+          scale_factor * location.width(), scale_factor * location.height(),
+          j_text.obj(), color, bgcolor, scale_factor * size, text_style,
+          j_class.obj());
+
+  for(uint32 i = 0; i < node->PlatformChildCount(); i++) {
+    BrowserAccessibilityAndroid* child =
+        static_cast<BrowserAccessibilityAndroid*>(
+            node->PlatformGetChild(i));
+    Java_WebContentsImpl_addAccessibilityNodeAsChild(env,
+        j_node.obj(), WalkAXTreeDepthFirst(env, child, scale_factor, y_offset,
+            x_scroll).obj());
+  }
+  return j_node;
+}
+
+// Walks over the AXTreeUpdate and creates a light weight snapshot.
+void AXTreeSnapshotCallback(const ScopedJavaGlobalRef<jobject>& callback,
+                            float scale_factor,
+                            float y_offset,
+                            float x_scroll,
+                            const ui::AXTreeUpdate& result) {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  if (result.nodes.empty()) {
+    Java_WebContentsImpl_onAccessibilitySnapshot(env, nullptr, callback.obj());
+    return;
+  }
+  scoped_ptr<BrowserAccessibilityManagerAndroid> manager(
+      static_cast<BrowserAccessibilityManagerAndroid*>(
+          BrowserAccessibilityManager::Create(result, nullptr)));
+  manager->set_prune_tree_for_screen_reader(false);
+  BrowserAccessibilityAndroid* root =
+      static_cast<BrowserAccessibilityAndroid*>(manager->GetRoot());
+  ScopedJavaLocalRef<jobject> j_root =
+      WalkAXTreeDepthFirst(env, root, scale_factor, y_offset, x_scroll);
+  Java_WebContentsImpl_onAccessibilitySnapshot(
+      env, j_root.obj(), callback.obj());
+}
+
+void ReleaseAllMediaPlayers(WebContents* web_contents,
+                            RenderFrameHost* render_frame_host) {
+  BrowserMediaPlayerManager* manager =
+      static_cast<WebContentsImpl*>(web_contents)->
           media_web_contents_observer()->GetMediaPlayerManager(
               render_frame_host);
   if (manager)
@@ -55,8 +129,6 @@ void ReleaseAllMediaPlayers(content::WebContents* web_contents,
 }
 
 }  // namespace
-
-namespace content {
 
 // static
 WebContents* WebContents::FromJavaWebContents(
@@ -83,7 +155,7 @@ static void DestroyWebContents(JNIEnv* env,
   if (!web_contents_android)
     return;
 
-  content::WebContents* web_contents = web_contents_android->web_contents();
+  WebContents* web_contents = web_contents_android->web_contents();
   if (!web_contents)
     return;
 
@@ -192,6 +264,11 @@ jboolean WebContentsAndroid::IsIncognito(JNIEnv* env, jobject obj) {
 void WebContentsAndroid::ResumeResponseDeferredAtStart(JNIEnv* env,
                                                        jobject obj) {
   static_cast<WebContentsImpl*>(web_contents_)->ResumeResponseDeferredAtStart();
+}
+
+void WebContentsAndroid::ResumeLoadingCreatedWebContents(JNIEnv* env,
+                                                         jobject obj) {
+  web_contents_->ResumeLoadingCreatedWebContents();
 }
 
 void WebContentsAndroid::SetHasPendingNavigationTransitionForTesting(
@@ -475,7 +552,7 @@ void WebContentsAndroid::EvaluateJavaScript(JNIEnv* env,
   // base::Callback.
   ScopedJavaGlobalRef<jobject> j_callback;
   j_callback.Reset(env, callback);
-  content::RenderFrameHost::JavaScriptResultCallback js_callback =
+  RenderFrameHost::JavaScriptResultCallback js_callback =
       base::Bind(&JavaScriptResultCallback, j_callback);
 
   web_contents_->GetMainFrame()->ExecuteJavaScript(
@@ -498,12 +575,31 @@ void WebContentsAndroid::AddMessageToDevToolsConsole(JNIEnv* env,
 jboolean WebContentsAndroid::HasAccessedInitialDocument(
     JNIEnv* env,
     jobject jobj) {
-  return static_cast<content::WebContentsImpl*>(web_contents_)->
+  return static_cast<WebContentsImpl*>(web_contents_)->
       HasAccessedInitialDocument();
 }
 
 jint WebContentsAndroid::GetThemeColor(JNIEnv* env, jobject obj) {
   return web_contents_->GetThemeColor();
+}
+
+void WebContentsAndroid::RequestAccessibilitySnapshot(JNIEnv* env,
+                                                      jobject obj,
+                                                      jobject callback,
+                                                      jfloat y_offset,
+                                                      jfloat x_scroll) {
+  // Secure the Java callback in a scoped object and give ownership of it to the
+  // base::Callback.
+  ScopedJavaGlobalRef<jobject> j_callback;
+  j_callback.Reset(env, callback);
+  gfx::DeviceDisplayInfo device_info;
+  ContentViewCoreImpl* contentViewCore =
+      ContentViewCoreImpl::FromWebContents(web_contents_);
+  WebContentsImpl::AXTreeSnapshotCallback snapshot_callback =
+      base::Bind(&AXTreeSnapshotCallback, j_callback,
+          contentViewCore->GetScaleFactor(), y_offset, x_scroll);
+  static_cast<WebContentsImpl*>(web_contents_)->RequestAXTreeSnapshot(
+      snapshot_callback);
 }
 
 }  // namespace content

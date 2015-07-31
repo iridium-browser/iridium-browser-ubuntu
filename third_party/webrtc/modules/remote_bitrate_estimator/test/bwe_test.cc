@@ -17,6 +17,7 @@
 #include "webrtc/modules/remote_bitrate_estimator/test/packet_receiver.h"
 #include "webrtc/modules/remote_bitrate_estimator/test/packet_sender.h"
 #include "webrtc/system_wrappers/interface/clock.h"
+#include "webrtc/test/testsupport/perf_test.h"
 
 using std::string;
 using std::vector;
@@ -174,6 +175,154 @@ string BweTest::GetTestName() const {
   const ::testing::TestInfo* const test_info =
       ::testing::UnitTest::GetInstance()->current_test_info();
   return string(test_info->name());
+}
+
+void BweTest::PrintResults(double max_throughput_kbps,
+                           Stats<double> throughput_kbps,
+                           int flow_id,
+                           Stats<double> flow_delay_ms,
+                           Stats<double> flow_throughput_kbps) {
+  std::map<int, Stats<double>> flow_delays_ms;
+  flow_delays_ms[flow_id] = flow_delay_ms;
+  std::map<int, Stats<double>> flow_throughputs_kbps;
+  flow_throughputs_kbps[flow_id] = flow_throughput_kbps;
+  PrintResults(max_throughput_kbps, throughput_kbps, flow_delays_ms,
+               flow_throughputs_kbps);
+}
+
+void BweTest::PrintResults(double max_throughput_kbps,
+                           Stats<double> throughput_kbps,
+                           std::map<int, Stats<double>> flow_delay_ms,
+                           std::map<int, Stats<double>> flow_throughput_kbps) {
+  double utilization = throughput_kbps.GetMean() / max_throughput_kbps;
+  webrtc::test::PrintResult("BwePerformance", GetTestName(), "Utilization",
+                            utilization * 100.0, "%", false);
+  std::stringstream ss;
+  ss << throughput_kbps.GetStdDev() / throughput_kbps.GetMean();
+  webrtc::test::PrintResult("BwePerformance", GetTestName(),
+                            "Utilization var coeff", ss.str(), "", false);
+  for (auto& kv : flow_throughput_kbps) {
+    ss.str("");
+    ss << "Throughput flow " << kv.first;
+    webrtc::test::PrintResultMeanAndError("BwePerformance", GetTestName(),
+                                          ss.str(), kv.second.AsString(),
+                                          "kbps", false);
+  }
+  for (auto& kv : flow_delay_ms) {
+    ss.str("");
+    ss << "Delay flow " << kv.first;
+    webrtc::test::PrintResultMeanAndError("BwePerformance", GetTestName(),
+                                          ss.str(), kv.second.AsString(), "ms",
+                                          false);
+  }
+  double fairness_index = 1.0;
+  if (!flow_throughput_kbps.empty()) {
+    double squared_bitrate_sum = 0.0;
+    fairness_index = 0.0;
+    for (auto kv : flow_throughput_kbps) {
+      squared_bitrate_sum += kv.second.GetMean() * kv.second.GetMean();
+      fairness_index += kv.second.GetMean();
+    }
+    fairness_index *= fairness_index;
+    fairness_index /= flow_throughput_kbps.size() * squared_bitrate_sum;
+  }
+  webrtc::test::PrintResult("BwePerformance", GetTestName(), "Fairness",
+                            fairness_index * 100, "%", false);
+}
+
+void BweTest::RunFairnessTest(BandwidthEstimatorType bwe_type,
+                              size_t num_media_flows,
+                              size_t num_tcp_flows,
+                              int64_t run_time_seconds,
+                              int capacity_kbps,
+                              int max_delay_ms) {
+  std::set<int> all_flow_ids;
+  std::set<int> media_flow_ids;
+  std::set<int> tcp_flow_ids;
+  int next_flow_id = 0;
+  for (size_t i = 0; i < num_media_flows; ++i) {
+    media_flow_ids.insert(next_flow_id);
+    all_flow_ids.insert(next_flow_id);
+    ++next_flow_id;
+  }
+  for (size_t i = 0; i < num_tcp_flows; ++i) {
+    tcp_flow_ids.insert(next_flow_id);
+    all_flow_ids.insert(next_flow_id);
+    ++next_flow_id;
+  }
+
+  std::vector<VideoSource*> sources;
+  std::vector<PacketSender*> senders;
+
+  size_t i = 0;
+  for (int media_flow : media_flow_ids) {
+    // Streams started 20 seconds apart to give them different advantage when
+    // competing for the bandwidth.
+    const int64_t kFlowStartOffsetMs = i++ * (rand() % 10000);
+    sources.push_back(new AdaptiveVideoSource(media_flow, 30, 300, 0,
+                                              kFlowStartOffsetMs));
+    senders.push_back(new PacedVideoSender(&uplink_, sources.back(), bwe_type));
+  }
+
+  const int64_t kTcpStartOffsetMs = 5000;
+  for (int tcp_flow : tcp_flow_ids)
+    senders.push_back(new TcpSender(&uplink_, tcp_flow, kTcpStartOffsetMs));
+
+  ChokeFilter choke(&uplink_, all_flow_ids);
+  choke.SetCapacity(capacity_kbps);
+  choke.SetMaxDelay(max_delay_ms);
+
+  DelayFilter delay_uplink(&uplink_, all_flow_ids);
+  delay_uplink.SetDelayMs(25);
+
+  std::vector<RateCounterFilter*> rate_counters;
+  for (int flow : all_flow_ids) {
+    rate_counters.push_back(
+        new RateCounterFilter(&uplink_, flow, "receiver_input"));
+  }
+
+  RateCounterFilter total_utilization(&uplink_, all_flow_ids,
+                                      "total_utilization");
+
+  std::vector<PacketReceiver*> receivers;
+  i = 0;
+  for (int media_flow : media_flow_ids) {
+    receivers.push_back(
+        new PacketReceiver(&uplink_, media_flow, bwe_type, i++ == 0, false));
+  }
+  for (int tcp_flow : tcp_flow_ids) {
+    receivers.push_back(
+        new PacketReceiver(&uplink_, tcp_flow, kTcpEstimator, false, false));
+  }
+
+  DelayFilter delay_downlink(&downlink_, all_flow_ids);
+  delay_downlink.SetDelayMs(25);
+
+  RunFor(run_time_seconds * 1000);
+
+  std::map<int, Stats<double>> flow_throughput_kbps;
+  for (RateCounterFilter* rate_counter : rate_counters) {
+    int flow_id = *rate_counter->flow_ids().begin();
+    flow_throughput_kbps[flow_id] = rate_counter->GetBitrateStats();
+  }
+
+  std::map<int, Stats<double>> flow_delay_ms;
+  for (PacketReceiver* receiver : receivers) {
+    int flow_id = *receiver->flow_ids().begin();
+    flow_delay_ms[flow_id] = receiver->GetDelayStats();
+  }
+
+  PrintResults(capacity_kbps, total_utilization.GetBitrateStats(),
+               flow_delay_ms, flow_throughput_kbps);
+
+  for (VideoSource* source : sources)
+    delete source;
+  for (PacketSender* sender : senders)
+    delete sender;
+  for (RateCounterFilter* rate_counter : rate_counters)
+    delete rate_counter;
+  for (PacketReceiver* receiver : receivers)
+    delete receiver;
 }
 }  // namespace bwe
 }  // namespace testing

@@ -18,32 +18,27 @@ namespace data_reduction_proxy {
 TestDataReductionProxyConfig::TestDataReductionProxyConfig(
     int params_flags,
     unsigned int params_definitions,
-    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
     net::NetLog* net_log,
     DataReductionProxyConfigurator* configurator,
-    DataReductionProxyEventStore* event_store)
+    DataReductionProxyEventCreator* event_creator)
     : TestDataReductionProxyConfig(
-          make_scoped_ptr(
-              new TestDataReductionProxyParams(params_flags,
-                                               params_definitions)).Pass(),
-          task_runner,
+          make_scoped_ptr(new TestDataReductionProxyParams(params_flags,
+                                                           params_definitions))
+              .Pass(),
           net_log,
           configurator,
-          event_store) {
+          event_creator) {
 }
 
 TestDataReductionProxyConfig::TestDataReductionProxyConfig(
     scoped_ptr<DataReductionProxyConfigValues> config_values,
-    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
     net::NetLog* net_log,
     DataReductionProxyConfigurator* configurator,
-    DataReductionProxyEventStore* event_store)
-    : DataReductionProxyConfig(task_runner,
-                               task_runner,
-                               net_log,
+    DataReductionProxyEventCreator* event_creator)
+    : DataReductionProxyConfig(net_log,
                                config_values.Pass(),
                                configurator,
-                               event_store) {
+                               event_creator) {
   network_interfaces_.reset(new net::NetworkInterfaceList());
 }
 
@@ -82,23 +77,21 @@ DataReductionProxyConfigValues* TestDataReductionProxyConfig::config_values() {
 void TestDataReductionProxyConfig::SetStateForTest(
     bool enabled_by_user,
     bool alternative_enabled_by_user,
-    bool restricted_by_carrier) {
+    bool secure_proxy_allowed) {
   enabled_by_user_ = enabled_by_user;
   alternative_enabled_by_user_ = alternative_enabled_by_user;
-  restricted_by_carrier_ = restricted_by_carrier;
+  secure_proxy_allowed_ = secure_proxy_allowed;
 }
 
 MockDataReductionProxyConfig::MockDataReductionProxyConfig(
     scoped_ptr<DataReductionProxyConfigValues> config_values,
-    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
     net::NetLog* net_log,
     DataReductionProxyConfigurator* configurator,
-    DataReductionProxyEventStore* event_store)
+    DataReductionProxyEventCreator* event_creator)
     : TestDataReductionProxyConfig(config_values.Pass(),
-                                   task_runner,
                                    net_log,
                                    configurator,
-                                   event_store) {
+                                   event_creator) {
 }
 
 MockDataReductionProxyConfig::~MockDataReductionProxyConfig() {
@@ -106,16 +99,12 @@ MockDataReductionProxyConfig::~MockDataReductionProxyConfig() {
 
 void MockDataReductionProxyConfig::UpdateConfigurator(bool enabled,
                                                       bool alternative_enabled,
-                                                      bool restricted,
+                                                      bool secure_proxy_allowed,
                                                       bool at_startup) {
-  EXPECT_CALL(*this, LogProxyState(enabled, restricted, at_startup)).Times(1);
-  DataReductionProxyConfig::UpdateConfigurator(enabled, alternative_enabled,
-                                               restricted, at_startup);
-}
-
-void MockDataReductionProxyConfig::HandleSecureProxyCheckResponse(
-    const std::string& response, const net::URLRequestStatus& status) {
-  DataReductionProxyConfig::HandleSecureProxyCheckResponse(response, status);
+  EXPECT_CALL(*this, LogProxyState(enabled, secure_proxy_allowed, at_startup))
+      .Times(1);
+  DataReductionProxyConfig::UpdateConfigurator(
+      enabled, alternative_enabled, secure_proxy_allowed, at_startup);
 }
 
 }  // namespace data_reduction_proxy

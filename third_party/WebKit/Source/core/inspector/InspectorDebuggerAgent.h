@@ -94,7 +94,7 @@ public:
     void addMessageToConsole(ConsoleMessage*);
 
     // Part of the protocol.
-    void enable(ErrorString*) final;
+    void enable(ErrorString*) override;
     void setBreakpointsActive(ErrorString*, bool active) final;
     void setSkipAllPauses(ErrorString*, bool skipped) final;
 
@@ -136,7 +136,6 @@ public:
     void setAsyncCallStackDepth(ErrorString*, int depth) final;
     void enablePromiseTracker(ErrorString*, const bool* captureStacks) final;
     void disablePromiseTracker(ErrorString*) final;
-    void getPromises(ErrorString*, RefPtr<TypeBuilder::Array<TypeBuilder::Debugger::PromiseDetails> >& promises) final;
     void getPromiseById(ErrorString*, int promiseId, const String* objectGroup, RefPtr<TypeBuilder::Runtime::RemoteObject>& promise) final;
     void flushAsyncOperationEvents(ErrorString*) final;
     void setAsyncOperationBreakpoint(ErrorString*, int operationId) final;
@@ -196,7 +195,7 @@ public:
     void didUpdatePromise(InspectorFrontend::Debugger::EventType::Enum, PassRefPtr<TypeBuilder::Debugger::PromiseDetails>) final;
 
 protected:
-    explicit InspectorDebuggerAgent(InjectedScriptManager*);
+    InspectorDebuggerAgent(InjectedScriptManager*, v8::Isolate*);
 
     virtual void startListeningScriptDebugServer() = 0;
     virtual void stopListeningScriptDebugServer() = 0;
@@ -213,6 +212,8 @@ protected:
     void resetModifiedSources();
 
 private:
+    bool checkEnabled(ErrorString*);
+
     SkipPauseRequest shouldSkipExceptionPause();
     SkipPauseRequest shouldSkipStepPause();
 
@@ -252,6 +253,7 @@ private:
 
     void internalSetAsyncCallStackDepth(int);
     void increaseCachedSkipStackGeneration();
+    PassRefPtr<TypeBuilder::Debugger::ExceptionDetails> createExceptionDetails(v8::Isolate*, v8::Local<v8::Message>);
 
     typedef HashMap<String, Script> ScriptsMap;
     typedef HashMap<String, Vector<String> > BreakpointIdToDebugServerBreakpointIdsMap;
@@ -305,6 +307,7 @@ private:
     bool m_pendingTraceAsyncOperationCompleted;
     bool m_startingStepIntoAsync;
     WillBeHeapVector<RawPtrWillBeMember<AsyncCallTrackingListener>> m_asyncCallTrackingListeners;
+    V8GlobalValueMap<String, v8::Script, v8::kNotWeak> m_compiledScripts;
 };
 
 } // namespace blink

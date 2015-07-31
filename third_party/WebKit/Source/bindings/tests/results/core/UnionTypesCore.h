@@ -48,14 +48,9 @@ public:
     void setDictionary(Dictionary);
     static ArrayBufferOrArrayBufferViewOrDictionary fromDictionary(Dictionary);
 
-#if COMPILER(MSVC) && defined(COMPONENT_BUILD) && LINK_CORE_MODULES_SEPARATELY
-    // Explicit declarations of copy constructor, destructor and operator=,
-    // because msvc automatically generates them if they are not declared in
-    // this header.
     ArrayBufferOrArrayBufferViewOrDictionary(const ArrayBufferOrArrayBufferViewOrDictionary&);
     ~ArrayBufferOrArrayBufferViewOrDictionary();
     ArrayBufferOrArrayBufferViewOrDictionary& operator=(const ArrayBufferOrArrayBufferViewOrDictionary&);
-#endif
 private:
     enum SpecificTypes {
         SpecificTypeNone,
@@ -87,7 +82,7 @@ inline void v8SetReturnValue(const CallbackInfo& callbackInfo, ArrayBufferOrArra
 
 template <>
 struct NativeValueTraits<ArrayBufferOrArrayBufferViewOrDictionary> {
-    static ArrayBufferOrArrayBufferViewOrDictionary nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
+    CORE_EXPORT static ArrayBufferOrArrayBufferViewOrDictionary nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
 };
 
 class CORE_EXPORT BooleanOrStringOrUnrestrictedDouble final {
@@ -111,14 +106,9 @@ public:
     void setUnrestrictedDouble(double);
     static BooleanOrStringOrUnrestrictedDouble fromUnrestrictedDouble(double);
 
-#if COMPILER(MSVC) && defined(COMPONENT_BUILD) && LINK_CORE_MODULES_SEPARATELY
-    // Explicit declarations of copy constructor, destructor and operator=,
-    // because msvc automatically generates them if they are not declared in
-    // this header.
     BooleanOrStringOrUnrestrictedDouble(const BooleanOrStringOrUnrestrictedDouble&);
     ~BooleanOrStringOrUnrestrictedDouble();
     BooleanOrStringOrUnrestrictedDouble& operator=(const BooleanOrStringOrUnrestrictedDouble&);
-#endif
 private:
     enum SpecificTypes {
         SpecificTypeNone,
@@ -150,7 +140,7 @@ inline void v8SetReturnValue(const CallbackInfo& callbackInfo, BooleanOrStringOr
 
 template <>
 struct NativeValueTraits<BooleanOrStringOrUnrestrictedDouble> {
-    static BooleanOrStringOrUnrestrictedDouble nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
+    CORE_EXPORT static BooleanOrStringOrUnrestrictedDouble nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
 };
 
 class CORE_EXPORT DoubleOrString final {
@@ -169,14 +159,9 @@ public:
     void setString(String);
     static DoubleOrString fromString(String);
 
-#if COMPILER(MSVC) && defined(COMPONENT_BUILD) && LINK_CORE_MODULES_SEPARATELY
-    // Explicit declarations of copy constructor, destructor and operator=,
-    // because msvc automatically generates them if they are not declared in
-    // this header.
     DoubleOrString(const DoubleOrString&);
     ~DoubleOrString();
     DoubleOrString& operator=(const DoubleOrString&);
-#endif
 private:
     enum SpecificTypes {
         SpecificTypeNone,
@@ -206,7 +191,60 @@ inline void v8SetReturnValue(const CallbackInfo& callbackInfo, DoubleOrString& i
 
 template <>
 struct NativeValueTraits<DoubleOrString> {
-    static DoubleOrString nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
+    CORE_EXPORT static DoubleOrString nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
+};
+
+class CORE_EXPORT LongOrTestDictionary final {
+    ALLOW_ONLY_INLINE_ALLOCATION();
+public:
+    LongOrTestDictionary();
+    bool isNull() const { return m_type == SpecificTypeNone; }
+
+    bool isLong() const { return m_type == SpecificTypeLong; }
+    int getAsLong() const;
+    void setLong(int);
+    static LongOrTestDictionary fromLong(int);
+
+    bool isTestDictionary() const { return m_type == SpecificTypeTestDictionary; }
+    TestDictionary getAsTestDictionary() const;
+    void setTestDictionary(TestDictionary);
+    static LongOrTestDictionary fromTestDictionary(TestDictionary);
+
+    LongOrTestDictionary(const LongOrTestDictionary&);
+    ~LongOrTestDictionary();
+    LongOrTestDictionary& operator=(const LongOrTestDictionary&);
+    DECLARE_TRACE();
+
+private:
+    enum SpecificTypes {
+        SpecificTypeNone,
+        SpecificTypeLong,
+        SpecificTypeTestDictionary,
+    };
+    SpecificTypes m_type;
+
+    int m_long;
+    TestDictionary m_testDictionary;
+
+    friend CORE_EXPORT v8::Local<v8::Value> toV8(const LongOrTestDictionary&, v8::Local<v8::Object>, v8::Isolate*);
+};
+
+class V8LongOrTestDictionary final {
+public:
+    CORE_EXPORT static void toImpl(v8::Isolate*, v8::Local<v8::Value>, LongOrTestDictionary&, ExceptionState&);
+};
+
+CORE_EXPORT v8::Local<v8::Value> toV8(const LongOrTestDictionary&, v8::Local<v8::Object>, v8::Isolate*);
+
+template <class CallbackInfo>
+inline void v8SetReturnValue(const CallbackInfo& callbackInfo, LongOrTestDictionary& impl)
+{
+    v8SetReturnValue(callbackInfo, toV8(impl, callbackInfo.Holder(), callbackInfo.GetIsolate()));
+}
+
+template <>
+struct NativeValueTraits<LongOrTestDictionary> {
+    CORE_EXPORT static LongOrTestDictionary nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
 };
 
 class CORE_EXPORT NodeOrNodeList final {
@@ -225,14 +263,9 @@ public:
     void setNodeList(PassRefPtrWillBeRawPtr<NodeList>);
     static NodeOrNodeList fromNodeList(PassRefPtrWillBeRawPtr<NodeList>);
 
-#if COMPILER(MSVC) && defined(COMPONENT_BUILD) && LINK_CORE_MODULES_SEPARATELY
-    // Explicit declarations of copy constructor, destructor and operator=,
-    // because msvc automatically generates them if they are not declared in
-    // this header.
     NodeOrNodeList(const NodeOrNodeList&);
     ~NodeOrNodeList();
     NodeOrNodeList& operator=(const NodeOrNodeList&);
-#endif
     DECLARE_TRACE();
 
 private:
@@ -264,7 +297,7 @@ inline void v8SetReturnValue(const CallbackInfo& callbackInfo, NodeOrNodeList& i
 
 template <>
 struct NativeValueTraits<NodeOrNodeList> {
-    static NodeOrNodeList nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
+    CORE_EXPORT static NodeOrNodeList nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
 };
 
 class CORE_EXPORT StringOrArrayBufferOrArrayBufferView final {
@@ -288,14 +321,9 @@ public:
     void setArrayBufferView(PassRefPtr<TestArrayBufferView>);
     static StringOrArrayBufferOrArrayBufferView fromArrayBufferView(PassRefPtr<TestArrayBufferView>);
 
-#if COMPILER(MSVC) && defined(COMPONENT_BUILD) && LINK_CORE_MODULES_SEPARATELY
-    // Explicit declarations of copy constructor, destructor and operator=,
-    // because msvc automatically generates them if they are not declared in
-    // this header.
     StringOrArrayBufferOrArrayBufferView(const StringOrArrayBufferOrArrayBufferView&);
     ~StringOrArrayBufferOrArrayBufferView();
     StringOrArrayBufferOrArrayBufferView& operator=(const StringOrArrayBufferOrArrayBufferView&);
-#endif
 private:
     enum SpecificTypes {
         SpecificTypeNone,
@@ -327,7 +355,7 @@ inline void v8SetReturnValue(const CallbackInfo& callbackInfo, StringOrArrayBuff
 
 template <>
 struct NativeValueTraits<StringOrArrayBufferOrArrayBufferView> {
-    static StringOrArrayBufferOrArrayBufferView nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
+    CORE_EXPORT static StringOrArrayBufferOrArrayBufferView nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
 };
 
 class CORE_EXPORT StringOrDouble final {
@@ -346,14 +374,9 @@ public:
     void setDouble(double);
     static StringOrDouble fromDouble(double);
 
-#if COMPILER(MSVC) && defined(COMPONENT_BUILD) && LINK_CORE_MODULES_SEPARATELY
-    // Explicit declarations of copy constructor, destructor and operator=,
-    // because msvc automatically generates them if they are not declared in
-    // this header.
     StringOrDouble(const StringOrDouble&);
     ~StringOrDouble();
     StringOrDouble& operator=(const StringOrDouble&);
-#endif
 private:
     enum SpecificTypes {
         SpecificTypeNone,
@@ -383,7 +406,7 @@ inline void v8SetReturnValue(const CallbackInfo& callbackInfo, StringOrDouble& i
 
 template <>
 struct NativeValueTraits<StringOrDouble> {
-    static StringOrDouble nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
+    CORE_EXPORT static StringOrDouble nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
 };
 
 class CORE_EXPORT StringOrStringSequence final {
@@ -402,14 +425,9 @@ public:
     void setStringSequence(const Vector<String>&);
     static StringOrStringSequence fromStringSequence(const Vector<String>&);
 
-#if COMPILER(MSVC) && defined(COMPONENT_BUILD) && LINK_CORE_MODULES_SEPARATELY
-    // Explicit declarations of copy constructor, destructor and operator=,
-    // because msvc automatically generates them if they are not declared in
-    // this header.
     StringOrStringSequence(const StringOrStringSequence&);
     ~StringOrStringSequence();
     StringOrStringSequence& operator=(const StringOrStringSequence&);
-#endif
 private:
     enum SpecificTypes {
         SpecificTypeNone,
@@ -439,7 +457,7 @@ inline void v8SetReturnValue(const CallbackInfo& callbackInfo, StringOrStringSeq
 
 template <>
 struct NativeValueTraits<StringOrStringSequence> {
-    static StringOrStringSequence nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
+    CORE_EXPORT static StringOrStringSequence nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
 };
 
 class CORE_EXPORT TestEnumOrDouble final {
@@ -458,14 +476,9 @@ public:
     void setDouble(double);
     static TestEnumOrDouble fromDouble(double);
 
-#if COMPILER(MSVC) && defined(COMPONENT_BUILD) && LINK_CORE_MODULES_SEPARATELY
-    // Explicit declarations of copy constructor, destructor and operator=,
-    // because msvc automatically generates them if they are not declared in
-    // this header.
     TestEnumOrDouble(const TestEnumOrDouble&);
     ~TestEnumOrDouble();
     TestEnumOrDouble& operator=(const TestEnumOrDouble&);
-#endif
 private:
     enum SpecificTypes {
         SpecificTypeNone,
@@ -495,7 +508,7 @@ inline void v8SetReturnValue(const CallbackInfo& callbackInfo, TestEnumOrDouble&
 
 template <>
 struct NativeValueTraits<TestEnumOrDouble> {
-    static TestEnumOrDouble nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
+    CORE_EXPORT static TestEnumOrDouble nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
 };
 
 class CORE_EXPORT TestInterface2OrUint8Array final {
@@ -514,14 +527,9 @@ public:
     void setUint8Array(PassRefPtr<DOMUint8Array>);
     static TestInterface2OrUint8Array fromUint8Array(PassRefPtr<DOMUint8Array>);
 
-#if COMPILER(MSVC) && defined(COMPONENT_BUILD) && LINK_CORE_MODULES_SEPARATELY
-    // Explicit declarations of copy constructor, destructor and operator=,
-    // because msvc automatically generates them if they are not declared in
-    // this header.
     TestInterface2OrUint8Array(const TestInterface2OrUint8Array&);
     ~TestInterface2OrUint8Array();
     TestInterface2OrUint8Array& operator=(const TestInterface2OrUint8Array&);
-#endif
 private:
     enum SpecificTypes {
         SpecificTypeNone,
@@ -551,7 +559,7 @@ inline void v8SetReturnValue(const CallbackInfo& callbackInfo, TestInterface2OrU
 
 template <>
 struct NativeValueTraits<TestInterface2OrUint8Array> {
-    static TestInterface2OrUint8Array nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
+    CORE_EXPORT static TestInterface2OrUint8Array nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
 };
 
 class CORE_EXPORT TestInterfaceGarbageCollectedOrString final {
@@ -570,14 +578,9 @@ public:
     void setString(String);
     static TestInterfaceGarbageCollectedOrString fromString(String);
 
-#if COMPILER(MSVC) && defined(COMPONENT_BUILD) && LINK_CORE_MODULES_SEPARATELY
-    // Explicit declarations of copy constructor, destructor and operator=,
-    // because msvc automatically generates them if they are not declared in
-    // this header.
     TestInterfaceGarbageCollectedOrString(const TestInterfaceGarbageCollectedOrString&);
     ~TestInterfaceGarbageCollectedOrString();
     TestInterfaceGarbageCollectedOrString& operator=(const TestInterfaceGarbageCollectedOrString&);
-#endif
     DECLARE_TRACE();
 
 private:
@@ -609,7 +612,7 @@ inline void v8SetReturnValue(const CallbackInfo& callbackInfo, TestInterfaceGarb
 
 template <>
 struct NativeValueTraits<TestInterfaceGarbageCollectedOrString> {
-    static TestInterfaceGarbageCollectedOrString nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
+    CORE_EXPORT static TestInterfaceGarbageCollectedOrString nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
 };
 
 class CORE_EXPORT TestInterfaceOrLong final {
@@ -628,14 +631,9 @@ public:
     void setLong(int);
     static TestInterfaceOrLong fromLong(int);
 
-#if COMPILER(MSVC) && defined(COMPONENT_BUILD) && LINK_CORE_MODULES_SEPARATELY
-    // Explicit declarations of copy constructor, destructor and operator=,
-    // because msvc automatically generates them if they are not declared in
-    // this header.
     TestInterfaceOrLong(const TestInterfaceOrLong&);
     ~TestInterfaceOrLong();
     TestInterfaceOrLong& operator=(const TestInterfaceOrLong&);
-#endif
 private:
     enum SpecificTypes {
         SpecificTypeNone,
@@ -665,7 +663,7 @@ inline void v8SetReturnValue(const CallbackInfo& callbackInfo, TestInterfaceOrLo
 
 template <>
 struct NativeValueTraits<TestInterfaceOrLong> {
-    static TestInterfaceOrLong nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
+    CORE_EXPORT static TestInterfaceOrLong nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
 };
 
 class CORE_EXPORT TestInterfaceOrTestInterfaceEmpty final {
@@ -684,14 +682,9 @@ public:
     void setTestInterfaceEmpty(PassRefPtr<TestInterfaceEmpty>);
     static TestInterfaceOrTestInterfaceEmpty fromTestInterfaceEmpty(PassRefPtr<TestInterfaceEmpty>);
 
-#if COMPILER(MSVC) && defined(COMPONENT_BUILD) && LINK_CORE_MODULES_SEPARATELY
-    // Explicit declarations of copy constructor, destructor and operator=,
-    // because msvc automatically generates them if they are not declared in
-    // this header.
     TestInterfaceOrTestInterfaceEmpty(const TestInterfaceOrTestInterfaceEmpty&);
     ~TestInterfaceOrTestInterfaceEmpty();
     TestInterfaceOrTestInterfaceEmpty& operator=(const TestInterfaceOrTestInterfaceEmpty&);
-#endif
 private:
     enum SpecificTypes {
         SpecificTypeNone,
@@ -721,7 +714,7 @@ inline void v8SetReturnValue(const CallbackInfo& callbackInfo, TestInterfaceOrTe
 
 template <>
 struct NativeValueTraits<TestInterfaceOrTestInterfaceEmpty> {
-    static TestInterfaceOrTestInterfaceEmpty nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
+    CORE_EXPORT static TestInterfaceOrTestInterfaceEmpty nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
 };
 
 class CORE_EXPORT TestInterfaceWillBeGarbageCollectedOrTestDictionary final {
@@ -740,14 +733,9 @@ public:
     void setTestDictionary(TestDictionary);
     static TestInterfaceWillBeGarbageCollectedOrTestDictionary fromTestDictionary(TestDictionary);
 
-#if COMPILER(MSVC) && defined(COMPONENT_BUILD) && LINK_CORE_MODULES_SEPARATELY
-    // Explicit declarations of copy constructor, destructor and operator=,
-    // because msvc automatically generates them if they are not declared in
-    // this header.
     TestInterfaceWillBeGarbageCollectedOrTestDictionary(const TestInterfaceWillBeGarbageCollectedOrTestDictionary&);
     ~TestInterfaceWillBeGarbageCollectedOrTestDictionary();
     TestInterfaceWillBeGarbageCollectedOrTestDictionary& operator=(const TestInterfaceWillBeGarbageCollectedOrTestDictionary&);
-#endif
     DECLARE_TRACE();
 
 private:
@@ -779,7 +767,7 @@ inline void v8SetReturnValue(const CallbackInfo& callbackInfo, TestInterfaceWill
 
 template <>
 struct NativeValueTraits<TestInterfaceWillBeGarbageCollectedOrTestDictionary> {
-    static TestInterfaceWillBeGarbageCollectedOrTestDictionary nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
+    CORE_EXPORT static TestInterfaceWillBeGarbageCollectedOrTestDictionary nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
 };
 
 class CORE_EXPORT UnrestrictedDoubleOrString final {
@@ -798,14 +786,9 @@ public:
     void setString(String);
     static UnrestrictedDoubleOrString fromString(String);
 
-#if COMPILER(MSVC) && defined(COMPONENT_BUILD) && LINK_CORE_MODULES_SEPARATELY
-    // Explicit declarations of copy constructor, destructor and operator=,
-    // because msvc automatically generates them if they are not declared in
-    // this header.
     UnrestrictedDoubleOrString(const UnrestrictedDoubleOrString&);
     ~UnrestrictedDoubleOrString();
     UnrestrictedDoubleOrString& operator=(const UnrestrictedDoubleOrString&);
-#endif
 private:
     enum SpecificTypes {
         SpecificTypeNone,
@@ -835,7 +818,7 @@ inline void v8SetReturnValue(const CallbackInfo& callbackInfo, UnrestrictedDoubl
 
 template <>
 struct NativeValueTraits<UnrestrictedDoubleOrString> {
-    static UnrestrictedDoubleOrString nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
+    CORE_EXPORT static UnrestrictedDoubleOrString nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
 };
 
 class V8DoubleOrStringOrNull final {
@@ -849,5 +832,25 @@ public:
 };
 
 } // namespace blink
+
+// We need to set canInitializeWithMemset=true because HeapVector supports
+// items that can initialize with memset or have a vtable. It is safe to
+// set canInitializeWithMemset=true for a union type object in practice.
+// See https://codereview.chromium.org/1118993002/#msg5 for more details.
+WTF_ALLOW_MOVE_AND_INIT_WITH_MEM_FUNCTIONS(blink::ArrayBufferOrArrayBufferViewOrDictionary);
+WTF_ALLOW_MOVE_AND_INIT_WITH_MEM_FUNCTIONS(blink::BooleanOrStringOrUnrestrictedDouble);
+WTF_ALLOW_MOVE_AND_INIT_WITH_MEM_FUNCTIONS(blink::DoubleOrString);
+WTF_ALLOW_MOVE_AND_INIT_WITH_MEM_FUNCTIONS(blink::LongOrTestDictionary);
+WTF_ALLOW_MOVE_AND_INIT_WITH_MEM_FUNCTIONS(blink::NodeOrNodeList);
+WTF_ALLOW_MOVE_AND_INIT_WITH_MEM_FUNCTIONS(blink::StringOrArrayBufferOrArrayBufferView);
+WTF_ALLOW_MOVE_AND_INIT_WITH_MEM_FUNCTIONS(blink::StringOrDouble);
+WTF_ALLOW_MOVE_AND_INIT_WITH_MEM_FUNCTIONS(blink::StringOrStringSequence);
+WTF_ALLOW_MOVE_AND_INIT_WITH_MEM_FUNCTIONS(blink::TestEnumOrDouble);
+WTF_ALLOW_MOVE_AND_INIT_WITH_MEM_FUNCTIONS(blink::TestInterface2OrUint8Array);
+WTF_ALLOW_MOVE_AND_INIT_WITH_MEM_FUNCTIONS(blink::TestInterfaceGarbageCollectedOrString);
+WTF_ALLOW_MOVE_AND_INIT_WITH_MEM_FUNCTIONS(blink::TestInterfaceOrLong);
+WTF_ALLOW_MOVE_AND_INIT_WITH_MEM_FUNCTIONS(blink::TestInterfaceOrTestInterfaceEmpty);
+WTF_ALLOW_MOVE_AND_INIT_WITH_MEM_FUNCTIONS(blink::TestInterfaceWillBeGarbageCollectedOrTestDictionary);
+WTF_ALLOW_MOVE_AND_INIT_WITH_MEM_FUNCTIONS(blink::UnrestrictedDoubleOrString);
 
 #endif // UnionTypeCore_h

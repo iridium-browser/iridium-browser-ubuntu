@@ -29,7 +29,7 @@ using autofill::PasswordForm;
 
 namespace password_manager {
 
-const int kCurrentVersionNumber = 12;
+const int kCurrentVersionNumber = 13;
 static const int kCompatibleVersionNumber = 1;
 
 Pickle SerializeVector(const std::vector<base::string16>& vec) {
@@ -233,7 +233,13 @@ bool LoginDatabase::Init() {
 
   // Initialize the tables.
   if (!InitLoginsTable()) {
-    LOG(WARNING) << "Unable to initialize the password store database.";
+    LOG(WARNING) << "Unable to initialize the logins table.";
+    db_.Close();
+    return false;
+  }
+
+  if (!stats_table_.Init(&db_)) {
+    LOG(WARNING) << "Unable to initialize the stats table.";
     db_.Close();
     return false;
   }
@@ -374,6 +380,9 @@ bool LoginDatabase::MigrateOldVersionsAsNeeded() {
               "generation_upload_status INTEGER"))
         return false;
       meta_table_.SetVersionNumber(12);
+    case 12:
+      // The stats table was added. Nothing to do really.
+      meta_table_.SetVersionNumber(13);
     case kCurrentVersionNumber:
       // Already up to date
       return true;
@@ -503,6 +512,19 @@ void LoginDatabase::ReportMetrics(const std::string& sync_username,
     int empty_forms = empty_usernames_statement.ColumnInt(0);
     UMA_HISTOGRAM_COUNTS_100("PasswordManager.EmptyUsernames.CountInDatabase",
                              empty_forms);
+  }
+
+  sql::Statement standalone_empty_usernames_statement(db_.GetCachedStatement(
+      SQL_FROM_HERE, "SELECT COUNT(*) FROM logins a "
+                     "WHERE a.blacklisted_by_user=0 AND a.username_value='' "
+                     "AND NOT EXISTS (SELECT * FROM logins b "
+                     "WHERE b.blacklisted_by_user=0 AND b.username_value!='' "
+                     "AND a.signon_realm = b.signon_realm)"));
+  if (standalone_empty_usernames_statement.Step()) {
+    int num_entries = standalone_empty_usernames_statement.ColumnInt(0);
+    UMA_HISTOGRAM_COUNTS_100(
+        "PasswordManager.EmptyUsernames.WithoutCorrespondingNonempty",
+        num_entries);
   }
 }
 

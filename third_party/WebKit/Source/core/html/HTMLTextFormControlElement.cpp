@@ -119,7 +119,7 @@ String HTMLTextFormControlElement::strippedPlaceholder() const
     // According to the HTML5 specification, we need to remove CR and LF from
     // the attribute value.
     const AtomicString& attributeValue = fastGetAttribute(placeholderAttr);
-    if (!attributeValue.contains(newlineCharacter) && !attributeValue.contains(carriageReturn))
+    if (!attributeValue.contains(newlineCharacter) && !attributeValue.contains(carriageReturnCharacter))
         return attributeValue;
 
     StringBuilder stripped;
@@ -127,14 +127,14 @@ String HTMLTextFormControlElement::strippedPlaceholder() const
     stripped.reserveCapacity(length);
     for (unsigned i = 0; i < length; ++i) {
         UChar character = attributeValue[i];
-        if (character == newlineCharacter || character == carriageReturn)
+        if (character == newlineCharacter || character == carriageReturnCharacter)
             continue;
         stripped.append(character);
     }
     return stripped.toString();
 }
 
-static bool isNotLineBreak(UChar ch) { return ch != newlineCharacter && ch != carriageReturn; }
+static bool isNotLineBreak(UChar ch) { return ch != newlineCharacter && ch != carriageReturnCharacter; }
 
 bool HTMLTextFormControlElement::isPlaceholderEmpty() const
 {
@@ -154,7 +154,7 @@ bool HTMLTextFormControlElement::placeholderShouldBeVisible() const
 
 HTMLElement* HTMLTextFormControlElement::placeholderElement() const
 {
-    return toHTMLElement(closedShadowRoot()->getElementById(ShadowElementNames::placeholder()));
+    return toHTMLElement(userAgentShadowRoot()->getElementById(ShadowElementNames::placeholder()));
 }
 
 void HTMLTextFormControlElement::updatePlaceholderVisibility(bool placeholderValueChanged)
@@ -235,7 +235,7 @@ void HTMLTextFormControlElement::setRangeText(const String& replacement, unsigne
 
     setInnerEditorValue(text);
 
-    // FIXME: What should happen to the value (as in value()) if there's no renderer?
+    // FIXME: What should happen to the value (as in value()) if there's no layoutObject?
     if (!layoutObject())
         return;
 
@@ -603,6 +603,9 @@ void HTMLTextFormControlElement::scheduleSelectEvent()
 
 void HTMLTextFormControlElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
 {
+    if (name == autocapitalizeAttr)
+        UseCounter::count(document(), UseCounter::AutocapitalizeAttribute);
+
     if (name == placeholderAttr) {
         updatePlaceholderVisibility(true);
         UseCounter::count(document(), UseCounter::PlaceholderAttribute);
@@ -638,7 +641,7 @@ void HTMLTextFormControlElement::setInnerEditorValue(const String& value)
 
 static String finishText(StringBuilder& result)
 {
-    // Remove one trailing newline; there's always one that's collapsed out by rendering.
+    // Remove one trailing newline; there's always one that's collapsed out by layoutObject.
     size_t size = result.length();
     if (size && result[size - 1] == '\n')
         result.resize(--size);
@@ -681,19 +684,19 @@ static void getNextSoftBreak(RootInlineBox*& line, Node*& breakNode, unsigned& b
 
 String HTMLTextFormControlElement::valueWithHardLineBreaks() const
 {
-    // FIXME: It's not acceptable to ignore the HardWrap setting when there is no renderer.
+    // FIXME: It's not acceptable to ignore the HardWrap setting when there is no layoutObject.
     // While we have no evidence this has ever been a practical problem, it would be best to fix it some day.
     HTMLElement* innerText = innerEditorElement();
     if (!innerText || !isTextFormControl())
         return value();
 
-    LayoutBlockFlow* renderer = toLayoutBlockFlow(innerText->layoutObject());
-    if (!renderer)
+    LayoutBlockFlow* layoutObject = toLayoutBlockFlow(innerText->layoutObject());
+    if (!layoutObject)
         return value();
 
     Node* breakNode;
     unsigned breakOffset;
-    RootInlineBox* line = renderer->firstRootBox();
+    RootInlineBox* line = layoutObject->firstRootBox();
     if (!line)
         return value();
 
@@ -736,7 +739,7 @@ HTMLTextFormControlElement* enclosingTextFormControl(Node* container)
     if (!container)
         return nullptr;
     Element* ancestor = container->shadowHost();
-    return ancestor && isHTMLTextFormControlElement(*ancestor) && container->containingShadowRoot()->type() == ShadowRoot::ClosedShadowRoot ? toHTMLTextFormControlElement(ancestor) : 0;
+    return ancestor && isHTMLTextFormControlElement(*ancestor) && container->containingShadowRoot()->type() == ShadowRoot::UserAgentShadowRoot ? toHTMLTextFormControlElement(ancestor) : 0;
 }
 
 String HTMLTextFormControlElement::directionForFormData() const
@@ -761,7 +764,7 @@ String HTMLTextFormControlElement::directionForFormData() const
 
 HTMLElement* HTMLTextFormControlElement::innerEditorElement() const
 {
-    return toHTMLElement(closedShadowRoot()->getElementById(ShadowElementNames::innerEditor()));
+    return toHTMLElement(userAgentShadowRoot()->getElementById(ShadowElementNames::innerEditor()));
 }
 
 static Position innerNodePosition(const Position& innerPosition)

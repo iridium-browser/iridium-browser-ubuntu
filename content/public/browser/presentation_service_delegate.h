@@ -5,9 +5,14 @@
 #ifndef CONTENT_PUBLIC_BROWSER_PRESENTATION_SERVICE_DELEGATE_H_
 #define CONTENT_PUBLIC_BROWSER_PRESENTATION_SERVICE_DELEGATE_H_
 
+#include <vector>
+
 #include "base/callback.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_vector.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/presentation_session.h"
+#include "content/public/browser/presentation_session_message.h"
 
 namespace content {
 
@@ -23,6 +28,13 @@ class CONTENT_EXPORT PresentationServiceDelegate {
     // Called when the PresentationServiceDelegate is being destroyed.
     virtual void OnDelegateDestroyed() = 0;
 
+    // Called when the default presentation has been started outside of a
+    // Presentation API context (e.g., browser action). This will not be called
+    // if the session was created as a result of Presentation API's
+    // StartSession()/JoinSession().
+    virtual void OnDefaultPresentationStarted(
+        const PresentationSessionInfo& session) = 0;
+
    protected:
     virtual ~Observer() {}
   };
@@ -31,15 +43,25 @@ class CONTENT_EXPORT PresentationServiceDelegate {
       base::Callback<void(const PresentationSessionInfo&)>;
   using PresentationSessionErrorCallback =
       base::Callback<void(const PresentationError&)>;
+  using PresentationSessionMessageCallback = base::Callback<void(
+      scoped_ptr<ScopedVector<PresentationSessionMessage>>)>;
+  using SendMessageCallback = base::Closure;
 
   virtual ~PresentationServiceDelegate() {}
 
-  // Registers an observer with this class to listen for updates to this class.
+  // Registers an observer associated with frame with |render_process_id|
+  // and |render_frame_id| with this class to listen for updates.
   // This class does not own the observer.
-  // It is an error to add an observer if it has already been added before.
-  virtual void AddObserver(Observer* observer) = 0;
-  // Unregisters an observer with this class.
-  virtual void RemoveObserver(Observer* observer) = 0;
+  // It is an error to add an observer if there is already an observer for that
+  // frame.
+  virtual void AddObserver(int render_process_id,
+                           int render_frame_id,
+                           Observer* observer) = 0;
+
+  // Unregisters the observer associated with the frame with |render_process_id|
+  // and |render_frame_id|.
+  // The observer will no longer receive updates.
+  virtual void RemoveObserver(int render_process_id, int render_frame_id) = 0;
 
   // Registers |listener| to continuously listen for
   // availability updates for a presentation URL, originated from the frame
@@ -115,6 +137,25 @@ class CONTENT_EXPORT PresentationServiceDelegate {
       const std::string& presentation_id,
       const PresentationSessionSuccessCallback& success_cb,
       const PresentationSessionErrorCallback& error_cb) = 0;
+
+  // Gets the next batch of messages from all presentation sessions in the frame
+  // |render_process_id|, |render_frame_id|: ID for originating frame.
+  // |message_cb|: Invoked with a non-empty list of messages.
+  virtual void ListenForSessionMessages(
+      int render_process_id,
+      int render_frame_id,
+      const PresentationSessionMessageCallback& message_cb) = 0;
+
+  // Sends a message (string or binary data) to a presentation session.
+  // |render_process_id|, |render_frame_id|: ID of originating frame.
+  // |message_request|: Contains Presentation URL, ID and message to be sent
+  // and delegate is responsible for deallocating the message_request.
+  // |send_message_cb|: Invoked after handling the send message request.
+  virtual void SendMessage(
+      int render_process_id,
+      int render_frame_id,
+      scoped_ptr<PresentationSessionMessage> message_request,
+      const SendMessageCallback& send_message_cb) = 0;
 };
 
 }  // namespace content

@@ -35,20 +35,18 @@
 
   document.addEventListener(CrSettingsPrefs.INITIALIZED, validateAll_);
 
-  Polymer('cr-settings-pref-tracker', {
-    publish: {
+  Polymer({
+    is: 'cr-settings-pref-tracker',
+
+    properties: {
       /**
        * The Preference object being tracked.
-       *
-       * @attribute pref
-       * @type {Object}
-       * @default null
+       * @type {?chrome.settingsPrivate.PrefObject}
        */
-      pref: null,
-    },
-
-    observe: {
-      pref: 'validate_',
+      pref: {
+        type: Object,
+        observer: 'validate_',
+      },
     },
 
     /** @override */
@@ -74,7 +72,7 @@
           var parentPrefString = this.parentNode && this.parentNode.host &&
               this.parentNode.host.getAttribute('pref');
           if (parentPrefString) {
-            keyHint = parentPrefString.match(/{{([a-z._]+)}}/)[1];
+            keyHint = parentPrefString.match(/{{([a-z0-9._]+)}}/)[1];
           }
 
           throw new Error('Pref not found. Key Hint: ' + keyHint);

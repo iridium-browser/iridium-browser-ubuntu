@@ -40,8 +40,6 @@
 #include "WebCommon.h"
 #include "WebData.h"
 #include "WebDeviceLightListener.h"
-#include "WebDeviceMotionListener.h"
-#include "WebDeviceOrientationListener.h"
 #include "WebGamepadListener.h"
 #include "WebGamepads.h"
 #include "WebGestureDevice.h"
@@ -54,7 +52,6 @@
 #include "WebStorageQuotaType.h"
 #include "WebString.h"
 #include "WebURLError.h"
-#include "WebVR.h"
 #include "WebVector.h"
 
 #include <vector>
@@ -86,6 +83,7 @@ class WebMIDIAccessor;
 class WebMIDIAccessorClient;
 class WebMediaStreamCenter;
 class WebMediaStreamCenterClient;
+class WebMemoryDumpProvider;
 class WebMessagePortChannel;
 class WebMimeRegistry;
 class WebNavigatorConnectProvider;
@@ -98,7 +96,6 @@ class WebPushProvider;
 class WebRTCPeerConnectionHandler;
 class WebRTCPeerConnectionHandlerClient;
 class WebSandboxSupport;
-class WebScheduler;
 class WebSecurityOrigin;
 class WebScrollbarBehavior;
 class WebServiceWorkerCacheStorage;
@@ -232,21 +229,6 @@ public:
 
     virtual void sampleGamepads(WebGamepads& into) { into.length = 0; }
 
-
-    // WebVR -------------------------------------------------------------
-
-    virtual void getVRDevices(WebVector<blink::WebVRDevice>* devices) { };
-
-    virtual void getHMDSensorState(unsigned index, blink::WebHMDSensorState& into) { }
-
-    virtual void resetVRSensor(unsigned index) { }
-
-    virtual void getVRRenderTargetRects(unsigned index,
-        blink::WebVRFieldOfView leftFov,
-        blink::WebVRFieldOfView rightFov,
-        blink::WebVRVector4* leftRect,
-        blink::WebVRVector4* rightRect) { };
-
     // History -------------------------------------------------------------
 
     // Returns the hash for the given canonicalized URL for use in visited
@@ -343,6 +325,8 @@ public:
 
     virtual bool isReservedIPAddress(const WebString& host) const { return false; }
 
+    virtual bool portAllowed(const WebURL&) const { return false; }
+
     // Plugins -------------------------------------------------------------
 
     // If refresh is true, then cached information should not be used to
@@ -375,9 +359,6 @@ public:
 
     // Yield the current thread so another thread can be scheduled.
     virtual void yieldCurrentThread() { }
-
-    // May return null.
-    virtual WebScheduler* scheduler() { return 0; }
 
     // WaitableEvent -------------------------------------------------------
 
@@ -483,7 +464,7 @@ public:
     // addTraceEvent is expected to be called by the trace event macros.
     virtual const unsigned char* getTraceCategoryEnabledFlag(const char* categoryName) { return 0; }
 
-    typedef long int TraceEventAPIAtomicWord;
+    typedef intptr_t TraceEventAPIAtomicWord;
 
     // Get a pointer to a global state of the given thread. An embedder is
     // expected to update the global state as the state of the embedder changes.
@@ -534,6 +515,10 @@ public:
     // - convertableValues is the array of WebConvertableToTraceFormat classes
     //   that may be converted to trace format by calling asTraceFormat method.
     //   ConvertableToTraceFormat interface.
+    //   convertableValues can be moved to another object by
+    //   WebConvertableToTraceFormat::moveFrom() in addTraceEvent(), and thus
+    //   should not be dereferenced (e.g. asTraceFormat() should not be called)
+    //   after return from addTraceEvent().
     // - thresholdBeginId optionally specifies the value returned by a previous
     //   call to addTraceEvent with a BEGIN phase.
     // - threshold is used on an END phase event in conjunction with the
@@ -558,7 +543,7 @@ public:
         const char** argNames,
         const unsigned char* argTypes,
         const unsigned long long* argValues,
-        const WebConvertableToTraceFormat* convertableValues,
+        WebConvertableToTraceFormat* convertableValues,
         unsigned char flags)
     {
         return 0;
@@ -574,8 +559,20 @@ public:
     virtual void histogramEnumeration(const char* name, int sample, int boundaryValue) { }
     // Unlike enumeration histograms, sparse histograms only allocate memory for non-empty buckets.
     virtual void histogramSparse(const char* name, int sample) { }
-    // Record to RAPPOR.
+
+    // Record to a RAPPOR privacy-preserving metric, see: https://www.chromium.org/developers/design-documents/rappor.
+    // recordRappor records a sample string, while recordRapporURL records the domain and registry of a url.
     virtual void recordRappor(const char* metric, const WebString& sample) { }
+    virtual void recordRapporURL(const char* metric, const blink::WebURL& url) { }
+
+    // Registers a memory dump provider. The WebMemoryDumpProvider::onMemoryDump
+    // method will be called on the same thread that called the
+    // registerMemoryDumpProvider() method.
+    // See crbug.com/458295 for design docs.
+    virtual void registerMemoryDumpProvider(blink::WebMemoryDumpProvider*) { }
+
+    // Must be called on the thread that called registerMemoryDumpProvider().
+    virtual void unregisterMemoryDumpProvider(blink::WebMemoryDumpProvider*) { }
 
     // GPU ----------------------------------------------------------------
     //
@@ -649,6 +646,18 @@ public:
     // ui/events/keycodes/dom4/keycode_converter_data.h.
     // Returns 0, if DOM code enum is not found.
     virtual int domEnumFromCodeString(const WebString& codeString) { return 0; }
+
+    // This method converts from the supplied DOM |key| enum to the
+    // corresponding DOM |key| string value for the key pressed. |domKey| values are
+    // based on the value defined in ui/events/keycodes/dom3/dom_key_data.h.
+    // Returns empty string, if DOM key value is not found.
+    virtual WebString domKeyStringFromEnum(int domKey) { return WebString(); }
+
+    // This method converts from the suppled DOM |key| value to the
+    // embedder's DOM |key| enum for the key pressed. |keyString| is defined in
+    // ui/events/keycodes/dom3/dom_key_data.h.
+    // Returns 0 if DOM key enum is not found.
+    virtual int domKeyEnumFromString(const WebString& keyString) { return 0; }
 
     // Quota -----------------------------------------------------------
 

@@ -166,8 +166,7 @@ NTPResourceCache::NTPResourceCache(Profile* profile)
     : profile_(profile), is_swipe_tracking_from_scroll_events_enabled_(false),
       should_show_apps_page_(NewTabUI::ShouldShowApps()),
       should_show_most_visited_page_(true),
-      should_show_other_devices_menu_(true),
-      should_show_recently_closed_menu_(true) {
+      should_show_other_devices_menu_(true) {
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
                  content::Source<ThemeService>(
                      ThemeServiceFactory::GetForProfile(profile)));
@@ -418,26 +417,16 @@ void NTPResourceCache::CreateNewTabHTML() {
   load_time_data.SetBoolean("showMostvisited", should_show_most_visited_page_);
   load_time_data.SetBoolean("showAppLauncherPromo",
       ShouldShowAppLauncherPromo());
-  load_time_data.SetBoolean("showRecentlyClosed",
-      should_show_recently_closed_menu_);
   load_time_data.SetString("title",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_TITLE));
   load_time_data.SetString("mostvisited",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_MOST_VISITED));
-  load_time_data.SetString("suggestions",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_SUGGESTIONS));
   load_time_data.SetString("restoreThumbnailsShort",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_RESTORE_THUMBNAILS_SHORT_LINK));
-  load_time_data.SetString("recentlyclosed",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_RECENTLY_CLOSED));
   load_time_data.SetString("webStoreTitle",
       l10n_util::GetStringUTF16(IDS_EXTENSION_WEB_STORE_TITLE));
   load_time_data.SetString("webStoreTitleShort",
       l10n_util::GetStringUTF16(IDS_EXTENSION_WEB_STORE_TITLE_SHORT));
-  load_time_data.SetString("closedwindowsingle",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_RECENTLY_CLOSED_WINDOW_SINGLE));
-  load_time_data.SetString("closedwindowmultiple",
-      l10n_util::GetStringUTF16(IDS_NEW_TAB_RECENTLY_CLOSED_WINDOW_MULTIPLE));
   load_time_data.SetString("attributionintro",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_ATTRIBUTION_INTRO));
   load_time_data.SetString("thumbnailremovednotification",
@@ -486,8 +475,6 @@ void NTPResourceCache::CreateNewTabHTML() {
           GURL(extension_urls::GetWebstoreLaunchURL()), app_locale).spec());
   load_time_data.SetString("appInstallHintText",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_APP_INSTALL_HINT_LABEL));
-  load_time_data.SetBoolean("isDiscoveryInNTPEnabled",
-      NewTabUI::IsDiscoveryInNTPEnabled());
   load_time_data.SetString("collapseSessionMenuItemText",
       l10n_util::GetStringUTF16(IDS_NEW_TAB_OTHER_SESSIONS_COLLAPSE_SESSION));
   load_time_data.SetString("expandSessionMenuItemText",

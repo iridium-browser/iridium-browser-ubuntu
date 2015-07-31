@@ -6,6 +6,7 @@
 #define MEDIA_CAST_SENDER_H264_VT_ENCODER_H_
 
 #include "base/mac/scoped_cftyperef.h"
+#include "base/power_monitor/power_observer.h"
 #include "base/threading/thread_checker.h"
 #include "media/base/mac/videotoolbox_glue.h"
 #include "media/cast/sender/size_adaptable_video_encoder_base.h"
@@ -16,8 +17,11 @@ namespace cast {
 
 // VideoToolbox implementation of the media::cast::VideoEncoder interface.
 // VideoToolbox makes no guarantees that it is thread safe, so this object is
-// pinned to the thread on which it is constructed.
-class H264VideoToolboxEncoder : public VideoEncoder {
+// pinned to the thread on which it is constructed. Supports changing frame
+// sizes directly. Implements the base::PowerObserver interface to reset the
+// compression session when the host process is suspended.
+class H264VideoToolboxEncoder : public VideoEncoder,
+                                public base::PowerObserver {
   typedef CoreMediaGlue::CMSampleBufferRef CMSampleBufferRef;
   typedef VideoToolboxGlue::VTCompressionSessionRef VTCompressionSessionRef;
   typedef VideoToolboxGlue::VTEncodeInfoFlags VTEncodeInfoFlags;
@@ -30,31 +34,44 @@ class H264VideoToolboxEncoder : public VideoEncoder {
   H264VideoToolboxEncoder(
       const scoped_refptr<CastEnvironment>& cast_environment,
       const VideoSenderConfig& video_config,
-      const gfx::Size& frame_size,
-      uint32 first_frame_id,
       const StatusChangeCallback& status_change_cb);
-  ~H264VideoToolboxEncoder() override;
+  ~H264VideoToolboxEncoder() final;
 
   // media::cast::VideoEncoder implementation
   bool EncodeVideoFrame(
       const scoped_refptr<media::VideoFrame>& video_frame,
       const base::TimeTicks& reference_time,
-      const FrameEncodedCallback& frame_encoded_callback) override;
-  void SetBitRate(int new_bit_rate) override;
-  void GenerateKeyFrame() override;
-  void LatestFrameIdToReference(uint32 frame_id) override;
-  scoped_ptr<VideoFrameFactory> CreateVideoFrameFactory() override;
-  void EmitFrames() override;
+      const FrameEncodedCallback& frame_encoded_callback) final;
+  void SetBitRate(int new_bit_rate) final;
+  void GenerateKeyFrame() final;
+  void LatestFrameIdToReference(uint32 frame_id) final;
+  scoped_ptr<VideoFrameFactory> CreateVideoFrameFactory() final;
+  void EmitFrames() final;
+
+  // base::PowerObserver
+  void OnSuspend() final;
+  void OnResume() final;
 
  private:
-  // Initialize the compression session.
-  bool Initialize(const VideoSenderConfig& video_config);
+  // VideoFrameFactory tied to the VideoToolbox encoder.
+  class VideoFrameFactoryImpl;
 
-  // Configure the compression session.
-  void ConfigureSession(const VideoSenderConfig& video_config);
+  // Reset the encoder's compression session by destroying the existing one
+  // using DestroyCompressionSession() and creating a new one. The new session
+  // is configured using ConfigureCompressionSession().
+  void ResetCompressionSession();
 
-  // Teardown the encoder.
-  void Teardown();
+  // Configure the current compression session using current encoder settings.
+  void ConfigureCompressionSession();
+
+  // Destroy the current compression session if any. Blocks until all pending
+  // frames have been flushed out (similar to EmitFrames without doing any
+  // encoding work).
+  void DestroyCompressionSession();
+
+  // Update the encoder's target frame size by resetting the compression
+  // session. This will also update the video frame factory.
+  void UpdateFrameSize(const gfx::Size& size_needed);
 
   // Set a compression session property.
   bool SetSessionProperty(CFStringRef key, int32_t value);
@@ -74,8 +91,14 @@ class H264VideoToolboxEncoder : public VideoEncoder {
   // VideoToolboxGlue provides access to VideoToolbox at runtime.
   const VideoToolboxGlue* const videotoolbox_glue_;
 
-  // The size of the visible region of the video frames to be encoded.
-  const gfx::Size frame_size_;
+  // VideoSenderConfig copy so we can create compression sessions on demand.
+  // This is needed to recover from backgrounding and other events that can
+  // invalidate compression sessions.
+  const VideoSenderConfig video_config_;
+
+  // Frame size of the current compression session. Can be changed by submitting
+  // a frame of a different size, which will cause a compression session reset.
+  gfx::Size frame_size_;
 
   // Callback used to report initialization status and runtime errors.
   const StatusChangeCallback status_change_cb_;
@@ -86,41 +109,22 @@ class H264VideoToolboxEncoder : public VideoEncoder {
   // The compression session.
   base::ScopedCFTypeRef<VTCompressionSessionRef> compression_session_;
 
-  // Frame identifier counter.
-  uint32 next_frame_id_;
+  // Video frame factory tied to the encoder.
+  scoped_refptr<VideoFrameFactoryImpl> video_frame_factory_;
+
+  // The ID of the last frame that was emitted.
+  uint32 last_frame_id_;
 
   // Force next frame to be a keyframe.
   bool encode_next_frame_as_keyframe_;
 
+  // Power suspension state.
+  bool power_suspended_;
+
+  // NOTE: Weak pointers must be invalidated before all other member variables.
+  base::WeakPtrFactory<H264VideoToolboxEncoder> weak_factory_;
+
   DISALLOW_COPY_AND_ASSIGN(H264VideoToolboxEncoder);
-};
-
-// An implementation of SizeAdaptableVideoEncoderBase to proxy for
-// H264VideoToolboxEncoder instances.
-class SizeAdaptableH264VideoToolboxVideoEncoder
- : public SizeAdaptableVideoEncoderBase {
- public:
-  SizeAdaptableH264VideoToolboxVideoEncoder(
-      const scoped_refptr<CastEnvironment>& cast_environment,
-      const VideoSenderConfig& video_config,
-      const StatusChangeCallback& status_change_cb);
-
-  ~SizeAdaptableH264VideoToolboxVideoEncoder() override;
-
-  scoped_ptr<VideoFrameFactory> CreateVideoFrameFactory() override;
-
- protected:
-  scoped_ptr<VideoEncoder> CreateEncoder() override;
-  void OnEncoderReplaced(VideoEncoder* replacement_encoder) override;
-  void DestroyEncoder() override;
-
- private:
-  struct FactoryHolder;
-  class VideoFrameFactoryProxy;
-
-  const scoped_refptr<FactoryHolder> holder_;
-
-  DISALLOW_COPY_AND_ASSIGN(SizeAdaptableH264VideoToolboxVideoEncoder);
 };
 
 }  // namespace cast

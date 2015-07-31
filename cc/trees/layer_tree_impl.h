@@ -20,6 +20,7 @@
 #include "cc/output/swap_promise.h"
 #include "cc/resources/ui_resource_client.h"
 #include "cc/trees/layer_tree_host_impl.h"
+#include "cc/trees/property_tree.h"
 
 namespace base {
 namespace trace_event {
@@ -47,9 +48,9 @@ class Proxy;
 class ResourceProvider;
 class TileManager;
 class UIResourceRequest;
+class VideoFrameControllerClient;
 struct PendingPageScaleAnimation;
 struct RendererCapabilities;
-struct SelectionHandle;
 
 typedef std::vector<UIResourceRequest> UIResourceRequestQueue;
 typedef SyncedProperty<AdditionGroup<float>> SyncedTopControls;
@@ -110,6 +111,7 @@ class CC_EXPORT LayerTreeImpl {
   BlockingTaskRunner* BlockingMainThreadTaskRunner() const;
   bool RequiresHighResToDraw() const;
   bool SmoothnessTakesPriority() const;
+  VideoFrameControllerClient* GetVideoFrameControllerClient() const;
 
   // Tree specific methods exposed to layer-impl tree.
   // ---------------------------------------------------------------------------
@@ -117,8 +119,8 @@ class CC_EXPORT LayerTreeImpl {
 
   // Tracing methods.
   // ---------------------------------------------------------------------------
-  void GetAllTilesAndPrioritiesForTracing(
-      std::map<const Tile*, TilePriority>* tile_map) const;
+  void GetAllPrioritizedTilesForTracing(
+      std::vector<PrioritizedTile>* prioritized_tiles) const;
   void AsValueInto(base::trace_event::TracedValue* dict) const;
 
   // Other public methods
@@ -126,6 +128,10 @@ class CC_EXPORT LayerTreeImpl {
   LayerImpl* root_layer() const { return root_layer_.get(); }
   void SetRootLayer(scoped_ptr<LayerImpl>);
   scoped_ptr<LayerImpl> DetachLayerTree();
+
+  void SetPropertyTrees(const PropertyTrees& property_trees) {
+    property_trees_ = property_trees;
+  }
 
   void PushPropertiesTo(LayerTreeImpl* tree_impl);
 
@@ -310,13 +316,11 @@ class CC_EXPORT LayerTreeImpl {
   LayerImpl* FindLayerThatIsHitByPointInTouchHandlerRegion(
       const gfx::PointF& screen_space_point);
 
-  void RegisterSelection(const LayerSelectionBound& start,
-                         const LayerSelectionBound& end);
+  void RegisterSelection(const LayerSelection& selection);
 
   // Compute the current selection handle location and visbility with respect to
   // the viewport.
-  void GetViewportSelection(ViewportSelectionBound* start,
-                            ViewportSelectionBound* end);
+  void GetViewportSelection(ViewportSelection* selection);
 
   void set_top_controls_shrink_blink_size(bool shrink);
   bool top_controls_shrink_blink_size() const {
@@ -358,6 +362,7 @@ class CC_EXPORT LayerTreeImpl {
   int source_frame_number_;
   scoped_ptr<LayerImpl> root_layer_;
   HeadsUpDisplayLayerImpl* hud_layer_;
+  PropertyTrees property_trees_;
   LayerImpl* currently_scrolling_layer_;
   LayerScrollOffsetDelegate* root_layer_scroll_offset_delegate_;
   SkColor background_color_;
@@ -368,8 +373,7 @@ class CC_EXPORT LayerTreeImpl {
   LayerImpl* inner_viewport_scroll_layer_;
   LayerImpl* outer_viewport_scroll_layer_;
 
-  LayerSelectionBound selection_start_;
-  LayerSelectionBound selection_end_;
+  LayerSelection selection_;
 
   scoped_refptr<SyncedProperty<ScaleGroup>> page_scale_factor_;
   float min_page_scale_factor_;

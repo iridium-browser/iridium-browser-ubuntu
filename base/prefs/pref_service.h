@@ -128,6 +128,10 @@ class BASE_PREFS_EXPORT PrefService : public base::NonThreadSafe {
     // the Preference.
     bool IsExtensionModifiable() const;
 
+    // Return the registration flags for this pref as a bitmask of
+    // PrefRegistry::PrefRegistrationFlags.
+    uint32 registration_flags() const { return registration_flags_; }
+
    private:
     friend class PrefService;
 
@@ -138,6 +142,8 @@ class BASE_PREFS_EXPORT PrefService : public base::NonThreadSafe {
     const std::string name_;
 
     const base::Value::Type type_;
+
+    uint32 registration_flags_;
 
     // Reference to the PrefService in which this pref was created.
     const PrefService* pref_service_;
@@ -307,6 +313,7 @@ class BASE_PREFS_EXPORT PrefService : public base::NonThreadSafe {
 
   // Give access to ReportUserPrefChanged() and GetMutableUserPref().
   friend class subtle::ScopedUserPrefUpdateBase;
+  friend class PrefServiceTest_WriteablePrefStoreFlags_Test;
 
   // Registration of pref change observers must be done using the
   // PrefChangeRegistrar, which is declared as a friend here to grant it

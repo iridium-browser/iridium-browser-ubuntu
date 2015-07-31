@@ -225,53 +225,8 @@
           'target_name': 'libvpx',
           'type': 'static_library',
 
-          # Copy the script to the output folder so that we can use it with
-          # absolute path.
-          'copies': [{
-            'destination': '<(shared_generated_dir)',
-            'files': [
-              '<(ads2gas_script_path)',
-              '<(ads2gas_script_include)',
-            ],
-          }],
+          'includes': [ 'ads2gas.gypi', ],
 
-          # Rule to convert .asm files to .S files.
-          'rules': [
-            {
-              'rule_name': 'convert_asm',
-              'extension': 'asm',
-              'inputs': [
-                '<(shared_generated_dir)/<(ads2gas_script)',
-                '<(shared_generated_dir)/thumb.pm',
-              ],
-              'outputs': [
-                '<(shared_generated_dir)/<(RULE_INPUT_ROOT).S',
-              ],
-              'action': [
-                'bash',
-                '-c',
-                'cat <(RULE_INPUT_PATH) | perl <(shared_generated_dir)/<(ads2gas_script) -chromium > <(shared_generated_dir)/<(RULE_INPUT_ROOT).S',
-              ],
-              'process_outputs_as_sources': 1,
-              'message': 'Convert libvpx asm file for ARM <(RULE_INPUT_PATH)',
-            },
-          ],
-
-          'variables': {
-            'variables': {
-              'conditions': [
-                ['OS=="ios"', {
-                  'ads2gas_script%': 'ads2gas_apple.pl',
-                }, {
-                  'ads2gas_script%': 'ads2gas.pl',
-                }],
-              ],
-            },
-            'ads2gas_script%': '<(ads2gas_script)',
-            # Location of the assembly conversion script.
-            'ads2gas_script_path': '<(libvpx_source)/build/make/<(ads2gas_script)',
-            'ads2gas_script_include': '<(libvpx_source)/build/make/thumb.pm',
-          },
           'xcode_settings': {
             'OTHER_CFLAGS': [
               '-I<!(pwd)/source/config/<(OS_CATEGORY)/<(target_arch_full)',
@@ -289,21 +244,7 @@
               '<(libvpx_source)',
             ],
           },
-          # We need to explicitly tell the assembler to look for
-          # .include directive files from the place where they're
-          # generated to.
-          'cflags': [
-             '-Wa,-I,<(shared_generated_dir)',
-          ],
           'conditions': [
-            # For Android WebView, the following pathc are not required and not
-            # allowed, because they generate the absolute path.
-            ['android_webview_build!=1', {
-              'cflags': [
-                '-Wa,-I,<!(pwd)/source/config/<(OS_CATEGORY)/<(target_arch_full)',
-                '-Wa,-I,<!(pwd)/source/config',
-              ],
-            }],
             # Libvpx optimizations for ARMv6 or ARMv7 without NEON.
             ['arm_neon==0', {
               'conditions': [
@@ -314,9 +255,6 @@
                   'dependencies': [
                     'libvpx_intrinsics_neon',
 		  ],
-                  'cflags': [
-                    '-Wa,-mfpu=neon',
-                  ],
                 }, {
                   'includes': [
                     'libvpx_srcs_arm.gypi',
@@ -331,8 +269,8 @@
               ],
             }],
             ['OS == "android"', {
-              'includes': [
-                '../../build/android/cpufeatures.gypi',
+              'dependencies': [
+                '../../build/android/ndk.gyp:cpu_features',
               ],
             }],
             ['OS == "ios"', {

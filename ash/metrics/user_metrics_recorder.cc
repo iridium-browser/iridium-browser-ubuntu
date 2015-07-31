@@ -4,11 +4,16 @@
 
 #include "ash/metrics/user_metrics_recorder.h"
 
+#include "ash/session/session_state_delegate.h"
+#include "ash/shelf/shelf_delegate.h"
+#include "ash/shelf/shelf_item_types.h"
 #include "ash/shelf/shelf_layout_manager.h"
+#include "ash/shelf/shelf_model.h"
 #include "ash/shelf/shelf_view.h"
 #include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
+#include "ash/system/tray/system_tray_delegate.h"
 #include "ash/wm/window_state.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/user_metrics.h"
@@ -62,6 +67,31 @@ ActiveWindowStateType GetActiveWindowState() {
     }
   }
   return active_window_state_type;
+}
+
+// Returns true if kiosk mode is active.
+bool IsKioskModeActive() {
+  return Shell::GetInstance()->system_tray_delegate()->GetUserLoginStatus() ==
+         user::LOGGED_IN_KIOSK_APP;
+}
+
+// Returns true if there is an active user and their session isn't currently
+// locked.
+bool IsUserActive() {
+  switch (Shell::GetInstance()->system_tray_delegate()->GetUserLoginStatus()) {
+    case user::LOGGED_IN_NONE:
+    case user::LOGGED_IN_LOCKED:
+      return false;
+    case user::LOGGED_IN_USER:
+    case user::LOGGED_IN_OWNER:
+    case user::LOGGED_IN_GUEST:
+    case user::LOGGED_IN_PUBLIC:
+    case user::LOGGED_IN_SUPERVISED:
+    case user::LOGGED_IN_KIOSK_APP:
+      return true;
+  }
+  NOTREACHED();
+  return false;
 }
 
 // Array of window container ids that contain visible windows to be counted for
@@ -121,13 +151,43 @@ int GetNumVisibleWindowsInPrimaryDisplay() {
   return visible_window_count;
 }
 
+// Records the number of items in the shelf as an UMA statistic.
+void RecordShelfItemCounts() {
+  ShelfDelegate* shelf_delegate = Shell::GetInstance()->GetShelfDelegate();
+  int pinned_item_count = 0;
+  int unpinned_item_count = 0;
+
+  for (const ShelfItem& shelf_item :
+       Shell::GetInstance()->shelf_model()->items()) {
+    if (shelf_item.type != TYPE_APP_LIST) {
+      // Internal ash apps do not have an app id and thus will always be counted
+      // as unpinned.
+      if (shelf_delegate->HasShelfIDToAppIDMapping(shelf_item.id) &&
+          shelf_delegate->IsAppPinned(
+              shelf_delegate->GetAppIDForShelfID(shelf_item.id))) {
+        ++pinned_item_count;
+      } else {
+        ++unpinned_item_count;
+      }
+    }
+  }
+
+  UMA_HISTOGRAM_COUNTS_100("Ash.Shelf.NumberOfItems",
+                           pinned_item_count + unpinned_item_count);
+  UMA_HISTOGRAM_COUNTS_100("Ash.Shelf.NumberOfPinnedItems", pinned_item_count);
+  UMA_HISTOGRAM_COUNTS_100("Ash.Shelf.NumberOfUnpinnedItems",
+                           unpinned_item_count);
+}
+
 }  // namespace
 
 UserMetricsRecorder::UserMetricsRecorder() {
-  timer_.Start(FROM_HERE,
-               base::TimeDelta::FromSeconds(kAshPeriodicMetricsTimeInSeconds),
-               this,
-               &UserMetricsRecorder::RecordPeriodicMetrics);
+  StartTimer();
+}
+
+UserMetricsRecorder::UserMetricsRecorder(bool record_periodic_metrics) {
+  if (record_periodic_metrics)
+    StartTimer();
 }
 
 UserMetricsRecorder::~UserMetricsRecorder() {
@@ -202,6 +262,16 @@ void UserMetricsRecorder::RecordUserMetricsAction(UserMetricsAction action) {
       break;
     case ash::UMA_LAUNCHER_LAUNCH_TASK:
       base::RecordAction(base::UserMetricsAction("Launcher_LaunchTask"));
+      task_switch_metrics_recorder_.OnTaskSwitch(
+          TaskSwitchMetricsRecorder::kShelf);
+      break;
+    case ash::UMA_LAUNCHER_MINIMIZE_TASK:
+      base::RecordAction(base::UserMetricsAction("Launcher_MinimizeTask"));
+      break;
+    case ash::UMA_LAUNCHER_SWITCH_TASK:
+      base::RecordAction(base::UserMetricsAction("Launcher_SwitchTask"));
+      task_switch_metrics_recorder_.OnTaskSwitch(
+          TaskSwitchMetricsRecorder::kShelf);
       break;
     case UMA_MAXIMIZE_MODE_DISABLED:
       base::RecordAction(base::UserMetricsAction("Touchview_Disabled"));
@@ -323,6 +393,9 @@ void UserMetricsRecorder::RecordUserMetricsAction(UserMetricsAction action) {
     case ash::UMA_STATUS_AREA_DETAILED_BRIGHTNESS_VIEW:
       base::RecordAction(
           base::UserMetricsAction("StatusArea_Brightness_Detailed"));
+      break;
+    case ash::UMA_STATUS_AREA_DETAILED_CAST_VIEW:
+      base::RecordAction(base::UserMetricsAction("StatusArea_Cast_Detailed"));
       break;
     case ash::UMA_STATUS_AREA_DETAILED_DRIVE_VIEW:
       base::RecordAction(
@@ -472,6 +545,9 @@ void UserMetricsRecorder::RecordUserMetricsAction(UserMetricsAction action) {
     case ash::UMA_TRAY_LOCK_SCREEN:
       base::RecordAction(base::UserMetricsAction("Tray_LockScreen"));
       break;
+    case ash::UMA_TRAY_OVERVIEW:
+      base::RecordAction(base::UserMetricsAction("Tray_Overview"));
+      break;
     case ash::UMA_TRAY_SHUT_DOWN:
       base::RecordAction(base::UserMetricsAction("Tray_ShutDown"));
       break;
@@ -505,6 +581,10 @@ void UserMetricsRecorder::RecordUserMetricsAction(UserMetricsAction action) {
       base::RecordAction(
           base::UserMetricsAction("WindowSelector_Overview"));
       break;
+    case ash::UMA_WINDOW_OVERVIEW_ACTIVE_WINDOW_CHANGED:
+      base::RecordAction(
+          base::UserMetricsAction("WindowSelector_ActiveWindowChanged"));
+      break;
     case ash::UMA_WINDOW_OVERVIEW_ENTER_KEY:
       base::RecordAction(
           base::UserMetricsAction("WindowSelector_OverviewEnterKey"));
@@ -519,7 +599,10 @@ void UserMetricsRecorder::RecordUserMetricsAction(UserMetricsAction action) {
 void UserMetricsRecorder::RecordPeriodicMetrics() {
   ShelfLayoutManager* manager =
       ShelfLayoutManager::ForShelf(Shell::GetPrimaryRootWindow());
+  // TODO(bruthig): Investigating whether the check for |manager| is necessary
+  // and add tests if it is.
   if (manager) {
+    // TODO(bruthig): Consider tracking the time spent in each alignment.
     UMA_HISTOGRAM_ENUMERATION("Ash.ShelfAlignmentOverTime",
                               manager->SelectValueForShelfAlignment(
                                   SHELF_ALIGNMENT_UMA_ENUM_VALUE_BOTTOM,
@@ -529,12 +612,29 @@ void UserMetricsRecorder::RecordPeriodicMetrics() {
                               SHELF_ALIGNMENT_UMA_ENUM_VALUE_COUNT);
   }
 
-  UMA_HISTOGRAM_COUNTS_100("Ash.NumberOfVisibleWindowsInPrimaryDisplay",
-                           GetNumVisibleWindowsInPrimaryDisplay());
+  if (IsUserInActiveDesktopEnvironment()) {
+    RecordShelfItemCounts();
+    UMA_HISTOGRAM_COUNTS_100("Ash.NumberOfVisibleWindowsInPrimaryDisplay",
+                             GetNumVisibleWindowsInPrimaryDisplay());
+  }
 
+  // TODO(bruthig): Find out if this should only be logged when the user is
+  // active.
+  // TODO(bruthig): Consider tracking how long a particular type of window is
+  // active at a time.
   UMA_HISTOGRAM_ENUMERATION("Ash.ActiveWindowShowTypeOverTime",
                             GetActiveWindowState(),
                             ACTIVE_WINDOW_STATE_TYPE_COUNT);
+}
+
+bool UserMetricsRecorder::IsUserInActiveDesktopEnvironment() const {
+  return IsUserActive() && !IsKioskModeActive();
+}
+
+void UserMetricsRecorder::StartTimer() {
+  timer_.Start(FROM_HERE,
+               base::TimeDelta::FromSeconds(kAshPeriodicMetricsTimeInSeconds),
+               this, &UserMetricsRecorder::RecordPeriodicMetrics);
 }
 
 }  // namespace ash

@@ -5,6 +5,7 @@
 #include "net/base/openssl_private_key_store.h"
 
 #include <openssl/evp.h>
+#include <openssl/mem.h>
 #include <openssl/x509.h>
 
 #include "base/logging.h"
@@ -36,7 +37,7 @@ bool OpenSSLPrivateKeyStore::StoreKeyPair(const GURL& url,
   }
   bool ret = false;
   if (public_len > 0 && private_len > 0) {
-    ret = net::android::StoreKeyPair(
+    ret = android::StoreKeyPair(
         static_cast<const uint8*>(public_key), public_len,
         static_cast<const uint8*>(private_key), private_len);
   }

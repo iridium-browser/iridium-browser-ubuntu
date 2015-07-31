@@ -267,7 +267,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
     ASSERT_TRUE(model->loaded());
 
     TemplateURLData data;
-    data.short_name = ASCIIToUTF16(kSearchShortName);
+    data.SetShortName(ASCIIToUTF16(kSearchShortName));
     data.SetKeyword(ASCIIToUTF16(kSearchKeyword));
     data.SetURL(kSearchURL);
     TemplateURL* template_url = new TemplateURL(data);
@@ -557,14 +557,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_BackspaceInKeywordMode) {
             UTF16ToUTF8(omnibox_view->GetText()));
 }
 
-// http://crbug.com/158913
-#if defined(USE_AURA)
-#define MAYBE_Escape DISABLED_Escape
-#else
-#define MAYBE_Escape Escape
-#endif
-
-IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_Escape) {
+IN_PROC_BROWSER_TEST_F(OmniboxViewTest, Escape) {
   ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUIHistoryURL));
   chrome::FocusLocationBar(browser());
 
@@ -584,7 +577,6 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_Escape) {
   EXPECT_EQ(old_text, omnibox_view->GetText());
   EXPECT_TRUE(omnibox_view->IsSelectAll());
 }
-#undef MAYBE_ESCAPE
 
 #if defined(OS_LINUX)
 #define MAYBE_DesiredTLD DISABLED_DesiredTLD
@@ -638,7 +630,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_DesiredTLDWithTemporaryText) {
   // non-verbatim entry with "ab" as a prefix. This way, by arrowing down, we
   // can set "abc" as temporary text in the omnibox.
   TemplateURLData data;
-  data.short_name = ASCIIToUTF16("abc");
+  data.SetShortName(ASCIIToUTF16("abc"));
   data.SetKeyword(ASCIIToUTF16(kSearchText));
   data.SetURL("http://abc.com/");
   template_url_service->Add(new TemplateURL(data));
@@ -891,7 +883,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, AcceptKeywordBySpace) {
   ASSERT_TRUE(omnibox_view->GetText().empty());
 
   // Revert to keyword hint mode.
-  omnibox_view->model()->ClearKeyword(base::string16());
+  omnibox_view->model()->ClearKeyword();
   ASSERT_TRUE(omnibox_view->model()->is_keyword_hint());
   ASSERT_EQ(search_keyword, omnibox_view->model()->keyword());
   ASSERT_EQ(search_keyword, omnibox_view->GetText());
@@ -906,7 +898,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, AcceptKeywordBySpace) {
   ASSERT_TRUE(omnibox_view->GetText().empty());
 
   // Revert to keyword hint mode.
-  omnibox_view->model()->ClearKeyword(base::string16());
+  omnibox_view->model()->ClearKeyword();
   ASSERT_TRUE(omnibox_view->model()->is_keyword_hint());
   ASSERT_EQ(search_keyword, omnibox_view->model()->keyword());
   ASSERT_EQ(search_keyword, omnibox_view->GetText());
@@ -1085,7 +1077,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, NonSubstitutingKeywordTest) {
 
   // Add a non-default substituting keyword.
   TemplateURLData data;
-  data.short_name = ASCIIToUTF16("Search abc");
+  data.SetShortName(ASCIIToUTF16("Search abc"));
   data.SetKeyword(ASCIIToUTF16(kSearchText));
   data.SetURL("http://abc.com/{searchTerms}");
   TemplateURL* template_url = new TemplateURL(data);
@@ -1110,7 +1102,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, NonSubstitutingKeywordTest) {
 
   // Try a non-substituting keyword.
   template_url_service->Remove(template_url);
-  data.short_name = ASCIIToUTF16("abc");
+  data.SetShortName(ASCIIToUTF16("abc"));
   data.SetURL("http://abc.com/");
   template_url_service->Add(new TemplateURL(data));
 

@@ -43,10 +43,10 @@ WebInspector.TabbedEditorContainerDelegate.prototype = {
  * @constructor
  * @extends {WebInspector.Object}
  * @param {!WebInspector.TabbedEditorContainerDelegate} delegate
- * @param {string} settingName
+ * @param {!WebInspector.Setting} setting
  * @param {string} placeholderText
  */
-WebInspector.TabbedEditorContainer = function(delegate, settingName, placeholderText)
+WebInspector.TabbedEditorContainer = function(delegate, setting, placeholderText)
 {
     WebInspector.Object.call(this);
     this._delegate = delegate;
@@ -64,7 +64,7 @@ WebInspector.TabbedEditorContainer = function(delegate, settingName, placeholder
     this._tabIds = new Map();
     this._files = {};
 
-    this._previouslyViewedFilesSetting = WebInspector.settings.createSetting(settingName, []);
+    this._previouslyViewedFilesSetting = setting;
     this._history = WebInspector.TabbedEditorContainer.History.fromObject(this._previouslyViewedFilesSetting.get());
 }
 
@@ -79,7 +79,7 @@ WebInspector.TabbedEditorContainer.maximalPreviouslyViewedFilesCount = 30;
 
 WebInspector.TabbedEditorContainer.prototype = {
     /**
-     * @return {!WebInspector.View}
+     * @return {!WebInspector.Widget}
      */
     get view()
     {
@@ -267,6 +267,17 @@ WebInspector.TabbedEditorContainer.prototype = {
             if (!this._maybeCloseTab(dirtyTabs[i], nextTabId))
                 break;
         }
+    },
+
+    /**
+     * @param {string} tabId
+     * @param {!WebInspector.ContextMenu} contextMenu
+     */
+    _onContextMenu: function(tabId, contextMenu)
+    {
+        var uiSourceCode = this._files[tabId];
+        if (uiSourceCode)
+            contextMenu.appendApplicableItems(uiSourceCode);
     },
 
     /**
@@ -736,5 +747,15 @@ WebInspector.EditorContainerTabDelegate.prototype = {
     closeTabs: function(tabbedPane, ids)
     {
         this._editorContainer._closeTabs(ids);
+    },
+
+    /**
+     * @override
+     * @param {string} tabId
+     * @param {!WebInspector.ContextMenu} contextMenu
+     */
+    onContextMenu: function(tabId, contextMenu)
+    {
+        this._editorContainer._onContextMenu(tabId, contextMenu);
     }
 }

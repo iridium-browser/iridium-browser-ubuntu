@@ -11,7 +11,6 @@ import errno
 import filecmp
 import fileinput
 import glob
-import logging
 import multiprocessing
 import os
 import re
@@ -20,9 +19,15 @@ import sys
 
 from chromite.cbuildbot import constants
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import gerrit
 from chromite.lib import git
 from chromite.lib import osutils
+
+
+# The parsed output of running `ebuild <ebuild path> info`.
+RepositoryInfoTuple = collections.namedtuple('RepositoryInfoTuple',
+                                             ('srcdir', 'project'))
 
 
 _PRIVATE_PREFIX = '%(buildroot)s/src/private-overlays'
@@ -53,6 +58,18 @@ WORKON_EBUILD_SUFFIX = '-%s.ebuild' % WORKON_EBUILD_VERSION
 
 class MissingOverlayException(Exception):
   """This exception indicates that a needed overlay is missing."""
+
+
+def GetOverlayRoot(path):
+  """Get the overlay root folder for |path|.
+
+  For traditional portage overlays, the root folder is |path|.
+  For bricks, the root folder is in the 'packages' sub-folder.
+  """
+  if os.path.exists(os.path.join(path, 'config.json')):
+    # A brick has its overlay root in the packages subdirectory.
+    return os.path.join(path, 'packages')
+  return path
 
 
 def _ListOverlays(board=None, buildroot=constants.SOURCE_ROOT):
@@ -87,12 +104,13 @@ def _ListOverlays(board=None, buildroot=constants.SOURCE_ROOT):
 
       try:
         masters = cros_build_lib.LoadKeyValueFile(
-            '%s/metadata/layout.conf' % overlay)['masters'].split()
+            os.path.join(GetOverlayRoot(overlay), 'metadata',
+                         'layout.conf'))['masters'].split()
       except (KeyError, IOError):
         masters = []
       overlays[name] = {
           'masters': masters,
-          'path': overlay,
+          'path': GetOverlayRoot(overlay),
       }
 
   # Easy enough -- dump them all.
@@ -134,8 +152,6 @@ def _ListOverlays(board=None, buildroot=constants.SOURCE_ROOT):
   path = os.path.join(buildroot, 'src', 'private-overlays',
                       'chromeos-*-overlay')
   ret += glob.glob(path)
-  _AddRepo('chromiumos')
-  _AddRepo('portage-stable')
 
   # Locate the board repo by name.
   # Load the public & private versions if available.
@@ -200,6 +216,24 @@ def FindOverlayFile(filename, overlay_type='both', board=None,
   return None
 
 
+def FindSysrootOverlays(sysroot):
+  """Ask portage for a list of overlays installed in a given sysroot.
+
+  Returns overlays in lowest to highest priority.  Note that this list
+  is only partially ordered.
+
+  Args:
+    sysroot: The root directory being inspected.
+
+  Returns:
+    list of overlays used in sysroot.
+  """
+  cmd = (cros_build_lib.GetSysrootToolPath(sysroot, 'portageq'),
+         'envvar', 'PORTDIR_OVERLAY')
+  return cros_build_lib.RunCommand(cmd, print_cmd=False,
+                                   capture_output=True).output.strip().split()
+
+
 def ReadOverlayFile(filename, overlay_type='both', board=None,
                     buildroot=constants.SOURCE_ROOT):
   """Attempt to open a file in the overlay directories.
@@ -254,7 +288,8 @@ def GetOverlayName(overlay):
   """Get the self-declared repo name for the |overlay| path."""
   try:
     return cros_build_lib.LoadKeyValueFile(
-        '%s/metadata/layout.conf' % overlay)['repo-name']
+        os.path.join(GetOverlayRoot(overlay), 'metadata',
+                     'layout.conf'))['repo-name']
   except (KeyError, IOError):
     # Not all layout.conf files have a repo-name, so don't make a fuss.
     try:
@@ -293,13 +328,14 @@ class EBuild(object):
 
   # A structure to hold computed values of CROS_WORKON_*.
   CrosWorkonVars = collections.namedtuple(
-      'CrosWorkonVars', ('localname', 'project', 'subdir', 'always_live'))
+      'CrosWorkonVars',
+      ('localname', 'project', 'srcpath', 'subdir', 'always_live'))
 
   @classmethod
   def _Print(cls, message):
     """Verbose print function."""
     if cls.VERBOSE:
-      cros_build_lib.Info(message)
+      logging.info(message)
 
   @classmethod
   def _RunCommand(cls, command, **kwargs):
@@ -323,6 +359,9 @@ class EBuild(object):
 
     This function takes an ebuild_path and updates WORKON information.
 
+    Note: If an exception is thrown, the |ebuild_path| is left in a corrupt
+    state.  You should try to avoid causing exceptions ;).
+
     Args:
       ebuild_path: The path of the ebuild.
       variables: Dictionary of variables to update in ebuild.
@@ -330,29 +369,30 @@ class EBuild(object):
       make_stable: Actually make the ebuild stable.
     """
     written = False
-    for line in fileinput.input(ebuild_path, inplace=1):
-      # Has to be done here to get changes to sys.stdout from fileinput.input.
-      if not redirect_file:
-        redirect_file = sys.stdout
+    try:
+      for line in fileinput.input(ebuild_path, inplace=1):
+        # Has to be done here to get changes to sys.stdout from fileinput.input.
+        if not redirect_file:
+          redirect_file = sys.stdout
 
-      # Always add variables at the top of the ebuild, before the first
-      # nonblank line other than the EAPI line.
-      if not written and not _blank_or_eapi_re.match(line):
-        for key, value in sorted(variables.items()):
-          assert key is not None and value is not None
-          redirect_file.write('%s=%s\n' % (key, value))
-        written = True
+        # Always add variables at the top of the ebuild, before the first
+        # nonblank line other than the EAPI line.
+        if not written and not _blank_or_eapi_re.match(line):
+          for key, value in sorted(variables.items()):
+            assert key is not None and value is not None
+            redirect_file.write('%s=%s\n' % (key, value))
+          written = True
 
-      # Mark KEYWORDS as stable by removing ~'s.
-      if line.startswith('KEYWORDS=') and make_stable:
-        line = line.replace('~', '')
+        # Mark KEYWORDS as stable by removing ~'s.
+        if line.startswith('KEYWORDS=') and make_stable:
+          line = line.replace('~', '')
 
-      varname, eq, _ = line.partition('=')
-      if not (eq == '=' and varname.strip() in variables):
-        # Don't write out the old value of the variable.
-        redirect_file.write(line)
-
-    fileinput.close()
+        varname, eq, _ = line.partition('=')
+        if not (eq == '=' and varname.strip() in variables):
+          # Don't write out the old value of the variable.
+          redirect_file.write(line)
+    finally:
+      fileinput.close()
 
   @classmethod
   def MarkAsStable(cls, unstable_ebuild_path, new_stable_ebuild_path,
@@ -459,6 +499,7 @@ class EBuild(object):
       * CROS_WORKON_LOCALNAME
       * CROS_WORKON_PROJECT
       * CROS_WORKON_SUBDIR
+      * CROS_WORKON_SRCPATH
       * CROS_WORKON_ALWAYS_LIVE
 
     Args:
@@ -471,6 +512,7 @@ class EBuild(object):
     workon_vars = (
         'CROS_WORKON_LOCALNAME',
         'CROS_WORKON_PROJECT',
+        'CROS_WORKON_SRCPATH',
         'CROS_WORKON_SUBDIR',
         'CROS_WORKON_ALWAYS_LIVE',
     )
@@ -481,21 +523,30 @@ class EBuild(object):
     }
     settings = osutils.SourceEnvironment(ebuild_path, workon_vars, env=env)
     # Try to detect problems extracting the variables by checking whether
-    # CROS_WORKON_PROJECT is set. If it isn't, something went wrong, possibly
-    # because we're simplistically sourcing the ebuild without most of portage
-    # being available. That still breaks this script and needs to be flagged
-    # as an error. We won't catch problems setting CROS_WORKON_LOCALNAME or
-    # CROS_WORKON_SUBDIR or if CROS_WORKON_PROJECT is set to the wrong thing,
-    # but at least this covers some types of failures.
-    if 'CROS_WORKON_PROJECT' not in settings:
+    # either CROS_WORKON_PROJECT or CROS_WORK_SRCPATH is set. If it isn't,
+    # something went wrong, possibly because we're simplistically sourcing the
+    # ebuild without most of portage being available. That still breaks this
+    # script and needs to be flagged as an error. We won't catch problems
+    # setting CROS_WORKON_LOCALNAME or CROS_WORKON_SUBDIR, or if
+    # CROS_WORKON_{PROJECT,SRCPATH} is set to the wrong thing, but at least
+    # this covers some types of failures.
+    projects = []
+    srcpaths = []
+    if 'CROS_WORKON_PROJECT' in settings:
+      projects = settings['CROS_WORKON_PROJECT'].split(',')
+    if 'CROS_WORKON_SRCPATH' in settings:
+      srcpaths = settings['CROS_WORKON_SRCPATH'].split(',')
+
+    if not (projects or srcpaths):
       raise EbuildFormatIncorrectException(
-          ebuild_path, 'Unable to determine CROS_WORKON_PROJECT value.')
+          ebuild_path,
+          'Unable to determine CROS_WORKON_{PROJECT,SRCPATH} values.')
+
     localnames = settings['CROS_WORKON_LOCALNAME'].split(',')
-    projects = settings['CROS_WORKON_PROJECT'].split(',')
     subdirs = settings['CROS_WORKON_SUBDIR'].split(',')
     live = settings['CROS_WORKON_ALWAYS_LIVE']
 
-    return EBuild.CrosWorkonVars(localnames, projects, subdirs, live)
+    return EBuild.CrosWorkonVars(localnames, projects, srcpaths, subdirs, live)
 
   def GetSourcePath(self, srcroot, manifest):
     """Get the project and path for this ebuild.
@@ -503,62 +554,93 @@ class EBuild(object):
     The path is guaranteed to exist, be a directory, and be absolute.
     """
 
-    localnames, projects, subdirs, always_live = EBuild.GetCrosWorkonVars(
-        self._unstable_ebuild_path, self.pkgname)
+    localnames, projects, srcpaths, subdirs, always_live = (
+        EBuild.GetCrosWorkonVars(self._unstable_ebuild_path, self.pkgname))
 
     if always_live:
       return [], []
 
     # Sanity checks and completion.
+    num_projects = len(projects)
     # Each project specification has to have the same amount of items.
-    if len(projects) != len(localnames):
+    if num_projects != len(localnames):
       raise EbuildFormatIncorrectException(
           self._unstable_ebuild_path,
           'Number of _PROJECT and _LOCALNAME items don\'t match.')
-    # Subdir must be either 0,1 or len(project)
-    if len(projects) != len(subdirs) and len(subdirs) > 1:
+    # If both SRCPATH and PROJECT are defined, they must have the same number
+    # of items.
+    if len(srcpaths) > num_projects:
+      if num_projects > 0:
+        raise EbuildFormatIncorrectException(
+            self._unstable_ebuild_path,
+            '_PROJECT has fewer items than _SRCPATH.')
+      num_projects = len(srcpaths)
+      projects = [''] * num_projects
+      localnames = [''] * num_projects
+    elif len(srcpaths) < num_projects:
+      if len(srcpaths) > 0:
+        raise EbuildFormatIncorrectException(
+            self._unstable_ebuild_path,
+            '_SRCPATH has fewer items than _PROJECT.')
+      srcpaths = [''] * num_projects
+    # We better have at least one PROJECT or SRCPATH value at this point.
+    if num_projects == 0:
       raise EbuildFormatIncorrectException(
-          self._unstable_ebuild_path, 'Incorrect number of _SUBDIR items.')
-    # If there's one, apply it to all.
-    if len(subdirs) == 1:
-      subdirs = subdirs * len(projects)
-    # If there is none, make an empty list to avoid exceptions later.
-    if len(subdirs) == 0:
-      subdirs = [''] * len(projects)
+          self._unstable_ebuild_path, 'No _PROJECT or _SRCPATH value found.')
+    # Subdir must be either 0,1 or len(project)
+    if num_projects != len(subdirs):
+      if len(subdirs) > 1:
+        raise EbuildFormatIncorrectException(
+            self._unstable_ebuild_path, 'Incorrect number of _SUBDIR items.')
+      # Multiply the single value if present, otherwise fill with empty strings.
+      subdirs = (subdirs or ['']) * num_projects
 
-    # Calculate srcdir.
-    if self.category == 'chromeos-base':
-      dir_ = '' # 'platform2'
+    # Calculate srcdir (used for core packages).
+    if self.category in ('chromeos-base', 'brillo-base'):
+      dir_ = ''
     else:
       dir_ = 'third_party'
 
-    # Once all targets are moved from platform to platform2, uncomment
-    # the following lines as well as dir_ = 'platform2' above,
-    # and delete the loop that builds |subdir_paths| below.
-
-    # subdir_paths = [os.path.realpath(os.path.join(srcroot, dir_, l, s))
-    #                for l, s in zip(localnames, subdirs)]
+    # Obtain brick source directory (used for non-core packages).
+    # TODO(garnold) This manipulates brick internal structure directly instead
+    # of referring to brick_lib; the latter could not be used because of a
+    # cyclic dependency, but should be used once its dependency on portage_util
+    # is eliminated.
+    srcbase = ''
+    if any(srcpaths):
+      brick_dir = os.path.dirname(os.path.dirname(os.path.dirname(
+          os.path.dirname(self._unstable_ebuild_path))))
+      srcbase = os.path.join(brick_dir, 'src')
+      if not os.path.isdir(srcbase):
+        cros_build_lib.Die('_SRCPATH used but brick source path not found.')
 
     subdir_paths = []
-    for local, sub in zip(localnames, subdirs):
-      subdir_path = os.path.realpath(os.path.join(srcroot, dir_, local, sub))
-      if dir_ == '' and not os.path.isdir(subdir_path):
-        subdir_path = os.path.realpath(os.path.join(srcroot, 'platform',
-                                                    local, sub))
-      subdir_paths.append(subdir_path)
+    rows = zip(localnames, subdirs, projects, srcpaths)
+    for local, sub, project, srcpath in rows:
+      if srcpath:
+        subdir_path = os.path.join(srcbase, srcpath)
+        if not os.path.isdir(subdir_path):
+          cros_build_lib.Die('Source for package %s not found in brick.' %
+                             self.pkgname)
+      else:
+        subdir_path = os.path.realpath(os.path.join(srcroot, dir_, local, sub))
+        if dir_ == '' and not os.path.isdir(subdir_path):
+          subdir_path = os.path.realpath(os.path.join(srcroot, 'platform',
+                                                      local, sub))
 
-    for subdir_path, project in zip(subdir_paths, projects):
-      if not os.path.isdir(subdir_path):
-        cros_build_lib.Die('Source repository %s '
-                           'for project %s does not exist.' % (subdir_path,
-                                                               self.pkgname))
-      # Verify that we're grabbing the commit id from the right project name.
-      real_project = manifest.FindCheckoutFromPath(subdir_path)['name']
-      if project != real_project:
-        cros_build_lib.Die('Project name mismatch for %s '
-                           '(found %s, expected %s)' % (subdir_path,
-                                                        real_project,
-                                                        project))
+        if not os.path.isdir(subdir_path):
+          cros_build_lib.Die('Source repository %s '
+                             'for project %s does not exist.' % (subdir_path,
+                                                                 self.pkgname))
+        # Verify that we're grabbing the commit id from the right project name.
+        real_project = manifest.FindCheckoutFromPath(subdir_path)['name']
+        if project != real_project:
+          cros_build_lib.Die('Project name mismatch for %s '
+                             '(found %s, expected %s)' % (subdir_path,
+                                                          real_project,
+                                                          project))
+
+      subdir_paths.append(subdir_path)
 
     return projects, subdir_paths
 
@@ -597,7 +679,7 @@ class EBuild(object):
           self._ebuild_path_no_version,
           'Package has a chromeos-version.sh script but is not workon-able.')
 
-    srcdirs = self.GetSourcePath(srcroot, manifest)[1]
+    _, srcdirs = self.GetSourcePath(srcroot, manifest)
 
     # The chromeos-version script will output a usable raw version number,
     # or nothing in case of error or no available version
@@ -611,6 +693,17 @@ class EBuild(object):
       cros_build_lib.Die('Package %s has a chromeos-version.sh script but '
                          'it returned no valid version for "%s"' %
                          (self.pkgname, ' '.join(srcdirs)))
+
+    # Sanity check: disallow versions that will be larger than the 9999 ebuild
+    # used by cros-workon.
+    main_pv = output.split('.', 1)[0]
+    try:
+      main_pv = int(main_pv)
+    except ValueError:
+      raise ValueError('PV returned is invalid: %s' % output)
+    if main_pv >= int(WORKON_EBUILD_VERSION):
+      raise ValueError('cros-workon packages must have a PV < %s; not %s'
+                       % (WORKON_EBUILD_VERSION, output))
 
     return output
 
@@ -674,7 +767,7 @@ class EBuild(object):
       cros_build_lib.Die('Missing unstable ebuild: %s' %
                          self._unstable_ebuild_path)
 
-    srcdirs = self.GetSourcePath(srcroot, manifest)[1]
+    _, srcdirs = self.GetSourcePath(srcroot, manifest)
     commit_ids = map(self.GetCommitId, srcdirs)
     tree_ids = map(self.GetTreeId, srcdirs)
     variables = dict(CROS_WORKON_COMMIT=self.FormatBashArray(commit_ids),
@@ -747,7 +840,7 @@ class EBuild(object):
     ebuild_projects = {}
     for ebuilds in overlay_dict.itervalues():
       for ebuild in ebuilds:
-        _projects, paths = ebuild.GetSourcePath(directory_src, manifest)
+        _, paths = ebuild.GetSourcePath(directory_src, manifest)
         if changed_paths.intersection(paths):
           ebuild_projects[ebuild] = paths
 
@@ -973,7 +1066,7 @@ class InstalledPackage(object):
 
 def BestEBuild(ebuilds):
   """Returns the newest EBuild from a list of EBuild objects."""
-  from portage.versions import vercmp
+  from portage.versions import vercmp  # pylint: disable=import-error
   winner = ebuilds[0]
   for ebuild in ebuilds[1:]:
     if vercmp(winner.version, ebuild.version) < 0:
@@ -1023,7 +1116,7 @@ def _FindUprevCandidates(files):
     cros_build_lib.Die('Found multiple unstable ebuilds in %s' % path)
 
   if not stable_ebuilds:
-    cros_build_lib.Warning('Missing stable ebuild in %s' % path)
+    logging.warning('Missing stable ebuild in %s' % path)
     return unstable_ebuilds[0]
 
   if len(stable_ebuilds) == 1:
@@ -1040,8 +1133,8 @@ def _FindUprevCandidates(files):
   uprev_ebuild = max(stable_ebuilds, key=lambda eb: eb.current_revision)
   for ebuild in stable_ebuilds:
     if ebuild != uprev_ebuild:
-      cros_build_lib.Warning('Ignoring stable ebuild revision %s in %s' %
-                             (ebuild.version, path))
+      logging.warning('Ignoring stable ebuild revision %s in %s' %
+                      (ebuild.version, path))
   return uprev_ebuild
 
 
@@ -1079,8 +1172,9 @@ def RegenCache(overlay):
   if not repo_name:
     return
 
-  layout = cros_build_lib.LoadKeyValueFile('%s/metadata/layout.conf' % overlay,
-                                           ignore_missing=True)
+  layout = cros_build_lib.LoadKeyValueFile(
+      os.path.join(GetOverlayRoot(overlay), 'metadata', 'layout.conf'),
+      ignore_missing=True)
   if layout.get('cache-format') != 'md5-dict':
     return
 
@@ -1182,15 +1276,15 @@ def BuildFullWorkonPackageDictionary(buildroot, overlay_type, manifest):
 
 
 def GetWorkonProjectMap(overlay, subdirectories):
-  """Get the project -> ebuild mapping for cros_workon ebuilds.
+  """Get a mapping of cros_workon ebuilds to projects and source paths.
 
   Args:
     overlay: Overlay to look at.
     subdirectories: List of subdirectories to look in on the overlay.
 
   Yields:
-    A list of (filename, projects) tuples for cros-workon ebuilds in the
-    given overlay under the given subdirectories.
+    Tuples containing (filename, projects, srcpaths) for cros-workon ebuilds in
+    the given overlay under the given subdirectories.
   """
   # Search ebuilds for project names, ignoring non-existent directories.
   # Also filter out ebuilds which are not cros_workon.
@@ -1198,10 +1292,22 @@ def GetWorkonProjectMap(overlay, subdirectories):
     base_dir = os.path.join(overlay, subdir)
     for ebuild in WorkonEBuildGeneratorForDirectory(base_dir):
       full_path = ebuild.ebuild_path
-      _, projects, _, _ = EBuild.GetCrosWorkonVars(full_path,
-                                                   ebuild.pkgname)
+      _, projects, srcpaths, _, _ = EBuild.GetCrosWorkonVars(full_path,
+                                                             ebuild.pkgname)
       relpath = os.path.relpath(full_path, start=overlay)
-      yield relpath, projects
+      yield relpath, projects, srcpaths
+
+
+def EbuildToCP(path):
+  """Return the category/path string from an ebuild path.
+
+  Args:
+    path: Path to an ebuild.
+
+  Returns:
+    '$CATEGORY/$PN' (e.g. 'sys-apps/dbus')
+  """
+  return os.path.join(*SplitEbuildPath(path)[0:2])
 
 
 def SplitEbuildPath(path):
@@ -1285,7 +1391,7 @@ def FindWorkonProjects(packages):
   all_projects = set()
   buildroot, both = constants.SOURCE_ROOT, constants.BOTH_OVERLAYS
   for overlay in FindOverlays(both, buildroot=buildroot):
-    for _, projects in GetWorkonProjectMap(overlay, packages):
+    for _, projects, _ in GetWorkonProjectMap(overlay, packages):
       all_projects.update(projects)
   return all_projects
 
@@ -1368,6 +1474,33 @@ def FindPackageNameMatches(pkg_str, board=None):
   return matches
 
 
+def FindEbuildForPackage(pkg_str, sysroot, include_masked=False,
+                         extra_env=None):
+  """Returns a path to an ebuild responsible for package matching |pkg_str|.
+
+  Args:
+    pkg_str: The package name with optional category, version, and slot.
+    sysroot: The root directory being inspected.
+    include_masked: True iff we should include masked ebuilds in our query.
+    extra_env: optional dictionary of extra string/string pairs to use as the
+      environment of equery command.
+
+  Returns:
+    Path to ebuild for this package.
+  """
+  cmd = [cros_build_lib.GetSysrootToolPath(sysroot, 'equery'), 'which']
+  if include_masked:
+    cmd += ['--include-masked']
+  cmd += [pkg_str]
+
+  result = cros_build_lib.RunCommand(cmd, extra_env=extra_env, print_cmd=False,
+                                     capture_output=True, error_code_ok=True)
+
+  if result.error:
+    return None
+  return result.output.strip()
+
+
 def GetInstalledPackageUseFlags(pkg_str, board=None):
   """Gets the list of USE flags for installed packages matching |pkg_str|.
 
@@ -1423,6 +1556,44 @@ def GetBinaryPackagePath(c, p, v, sysroot='/', packages_dir=None):
   return path
 
 
-def CleanOutdatedBinaryPackages(board):
-  """Cleans outdated binary packages for |board|."""
-  return cros_build_lib.RunCommand(['eclean-%s' % board, '-d', 'packages'])
+def GetRepositoryForEbuild(ebuild_path, sysroot):
+  """Get parsed output of `ebuild <ebuild_path> info`
+
+  ebuild ... info runs the pkg_info step of an ebuild.
+  cros-workon.eclass defines that step and prints both variables.
+
+  Args:
+    ebuild_path: string full path to ebuild file.
+    sysroot: The root directory being inspected.
+
+  Returns:
+    list of RepositoryInfoTuples.
+  """
+  cmd = (cros_build_lib.GetSysrootToolPath(sysroot, 'ebuild'),
+         ebuild_path, 'info')
+  result = cros_build_lib.RunCommand(
+      cmd, capture_output=True, print_cmd=False, error_code_ok=True)
+
+  # This command should return output that looks a lot like:
+  # CROS_WORKON_SRCDIR=("/mnt/host/source/src/platform2")
+  # CROS_WORKON_PROJECT=("chromiumos/platform2")
+  srcdir_match = re.search(r'^CROS_WORKON_SRCDIR=\((".*")\)$',
+                           result.output, re.MULTILINE)
+  project_match = re.search(r'^CROS_WORKON_PROJECT=\((".*")\)$',
+                            result.output, re.MULTILINE)
+  if not srcdir_match or not project_match:
+    return None
+
+  srcdirs = ParseBashArray(srcdir_match.group(1))
+  projects = ParseBashArray(project_match.group(1))
+  if len(srcdirs) != len(projects):
+    return None
+
+  return [RepositoryInfoTuple(srcdir, project)
+          for srcdir, project in zip(srcdirs, projects)]
+
+
+def CleanOutdatedBinaryPackages(sysroot):
+  """Cleans outdated binary packages from |sysroot|."""
+  return cros_build_lib.RunCommand(
+      [cros_build_lib.GetSysrootToolPath(sysroot, 'eclean'), '-d', 'packages'])

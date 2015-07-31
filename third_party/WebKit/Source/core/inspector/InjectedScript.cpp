@@ -87,7 +87,8 @@ void InjectedScript::evaluateOnCallFrame(ErrorString* errorString, const ScriptV
 {
     ScriptFunctionCall function(injectedScriptObject(), "evaluateOnCallFrame");
     function.appendArgument(callFrames);
-    function.appendArgument(asyncCallStacks);
+    if (!function.appendArgument(asyncCallStacks))
+        return;
     function.appendArgument(callFrameId);
     function.appendArgument(expression);
     function.appendArgument(objectGroup);
@@ -209,7 +210,7 @@ void InjectedScript::getCollectionEntries(ErrorString* errorString, const String
     *result = Array<CollectionEntry>::runtimeCast(resultValue);
 }
 
-void InjectedScript::getProperties(ErrorString* errorString, const String& objectId, bool ownProperties, bool accessorPropertiesOnly, bool generatePreview, RefPtr<Array<PropertyDescriptor>>* properties)
+void InjectedScript::getProperties(ErrorString* errorString, const String& objectId, bool ownProperties, bool accessorPropertiesOnly, bool generatePreview, RefPtr<Array<PropertyDescriptor>>* properties, RefPtr<TypeBuilder::Debugger::ExceptionDetails>* exceptionDetails)
 {
     ScriptFunctionCall function(injectedScriptObject(), "getProperties");
     function.appendArgument(objectId);
@@ -218,7 +219,12 @@ void InjectedScript::getProperties(ErrorString* errorString, const String& objec
     function.appendArgument(generatePreview);
 
     RefPtr<JSONValue> result;
-    makeCall(function, &result);
+    makeCallWithExceptionDetails(function, &result, exceptionDetails);
+    if (*exceptionDetails) {
+        // FIXME: make properties optional
+        *properties = Array<PropertyDescriptor>::create();
+        return;
+    }
     if (!result || result->type() != JSONValue::TypeArray) {
         *errorString = "Internal error";
         return;
@@ -226,13 +232,15 @@ void InjectedScript::getProperties(ErrorString* errorString, const String& objec
     *properties = Array<PropertyDescriptor>::runtimeCast(result);
 }
 
-void InjectedScript::getInternalProperties(ErrorString* errorString, const String& objectId, RefPtr<Array<InternalPropertyDescriptor> >* properties)
+void InjectedScript::getInternalProperties(ErrorString* errorString, const String& objectId, RefPtr<Array<InternalPropertyDescriptor>>* properties, RefPtr<TypeBuilder::Debugger::ExceptionDetails>* exceptionDetails)
 {
     ScriptFunctionCall function(injectedScriptObject(), "getInternalProperties");
     function.appendArgument(objectId);
 
     RefPtr<JSONValue> result;
-    makeCall(function, &result);
+    makeCallWithExceptionDetails(function, &result, exceptionDetails);
+    if (*exceptionDetails)
+        return;
     if (!result || result->type() != JSONValue::TypeArray) {
         *errorString = "Internal error";
         return;
@@ -255,6 +263,13 @@ Node* InjectedScript::nodeForObjectId(const String& objectId)
     ASSERT(!hadException);
 
     return InjectedScriptHost::scriptValueAsNode(scriptState(), resultValue);
+}
+
+EventTarget* InjectedScript::eventTargetForObjectId(const String& objectId)
+{
+    if (isEmpty() || !canAccessInspectedWindow())
+        return nullptr;
+    return InjectedScriptHost::scriptValueAsEventTarget(scriptState(), findObjectById(objectId));
 }
 
 void InjectedScript::releaseObject(const String& objectId)
@@ -335,6 +350,20 @@ ScriptValue InjectedScript::findObjectById(const String& objectId) const
     ScriptValue resultValue = callFunctionWithEvalEnabled(function, hadException);
     ASSERT(!hadException);
     return resultValue;
+}
+
+String InjectedScript::objectIdToObjectGroupName(const String& objectId) const
+{
+    RefPtr<JSONValue> parsedObjectId = parseJSON(objectId);
+    if (!parsedObjectId)
+        return String();
+    RefPtr<JSONObject> object;
+    if (!parsedObjectId->asObject(&object))
+        return String();
+    int boundId = 0;
+    if (!object->getNumber("id", &boundId))
+        return String();
+    return m_native->groupName(boundId);
 }
 
 void InjectedScript::releaseObjectGroup(const String& objectGroup)

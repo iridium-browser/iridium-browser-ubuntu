@@ -19,6 +19,10 @@ namespace policy {
 
 CloudPolicyCore::Observer::~Observer() {}
 
+void CloudPolicyCore::Observer::OnRemoteCommandsServiceStarted(
+    CloudPolicyCore* core) {
+}
+
 CloudPolicyCore::CloudPolicyCore(
     const std::string& policy_type,
     const std::string& settings_entity_id,
@@ -45,6 +49,7 @@ void CloudPolicyCore::Disconnect() {
     FOR_EACH_OBSERVER(Observer, observers_, OnCoreDisconnecting(this));
   refresh_delay_.reset();
   refresh_scheduler_.reset();
+  remote_commands_service_.reset();
   service_.reset();
   client_.reset();
 }
@@ -59,6 +64,8 @@ void CloudPolicyCore::StartRemoteCommandsService(
 
   // Do an initial remote commands fetch immediately.
   remote_commands_service_->FetchRemoteCommands();
+
+  FOR_EACH_OBSERVER(Observer, observers_, OnRemoteCommandsServiceStarted(this));
 }
 
 void CloudPolicyCore::RefreshSoon() {

@@ -8,8 +8,12 @@
 #ifndef CHROME_BROWSER_CHROMEOS_EXTENSIONS_FILE_MANAGER_PRIVATE_API_MISC_H_
 #define CHROME_BROWSER_CHROMEOS_EXTENSIONS_FILE_MANAGER_PRIVATE_API_MISC_H_
 
+#include <string>
+
+#include "base/files/file.h"
 #include "chrome/browser/chromeos/extensions/file_manager/private_api_base.h"
-#include "chrome/common/extensions/webstore_install_result.h"
+#include "chrome/browser/extensions/chrome_extension_function.h"
+#include "chrome/browser/extensions/chrome_extension_function_details.h"
 #include "google_apis/drive/drive_api_error_codes.h"
 
 namespace google_apis {
@@ -109,12 +113,6 @@ class FileManagerPrivateInstallWebstoreItemFunction
 
   // AsyncExtensionFunction overrides.
   bool RunAsync() override;
-  void OnInstallComplete(bool success,
-                         const std::string& error,
-                         extensions::webstore_install::Result result);
-
- private:
-  std::string webstore_item_id_;
 };
 
 class FileManagerPrivateRequestWebStoreAccessTokenFunction
@@ -134,7 +132,6 @@ class FileManagerPrivateRequestWebStoreAccessTokenFunction
 
   void OnAccessTokenFetched(google_apis::DriveApiErrorCode code,
                             const std::string& access_token);
-
 };
 
 class FileManagerPrivateGetProfilesFunction
@@ -194,6 +191,56 @@ class FileManagerPrivateIsPiexLoaderEnabledFunction
  private:
   ResponseAction Run() override;
   DISALLOW_COPY_AND_ASSIGN(FileManagerPrivateIsPiexLoaderEnabledFunction);
+};
+
+// Implements the chrome.fileManagerPrivate.getProvidingExtensions method.
+class FileManagerPrivateGetProvidingExtensionsFunction
+    : public UIThreadExtensionFunction {
+ public:
+  FileManagerPrivateGetProvidingExtensionsFunction();
+  DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.getProvidingExtensions",
+                             FILEMANAGERPRIVATE_GETPROVIDINGEXTENSIONS)
+ protected:
+  ~FileManagerPrivateGetProvidingExtensionsFunction() override {}
+
+ private:
+  ResponseAction Run() override;
+  const ChromeExtensionFunctionDetails chrome_details_;
+  DISALLOW_COPY_AND_ASSIGN(FileManagerPrivateGetProvidingExtensionsFunction);
+};
+
+// Implements the chrome.fileManagerPrivate.addProvidedFileSystem method.
+class FileManagerPrivateAddProvidedFileSystemFunction
+    : public UIThreadExtensionFunction {
+ public:
+  FileManagerPrivateAddProvidedFileSystemFunction();
+  DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.addProvidedFileSystem",
+                             FILEMANAGERPRIVATE_ADDPROVIDEDFILESYSTEM)
+ protected:
+  ~FileManagerPrivateAddProvidedFileSystemFunction() override {}
+
+ private:
+  ResponseAction Run() override;
+  const ChromeExtensionFunctionDetails chrome_details_;
+  DISALLOW_COPY_AND_ASSIGN(FileManagerPrivateAddProvidedFileSystemFunction);
+};
+
+// Implements the chrome.fileManagerPrivate.configureVolume method.
+class FileManagerPrivateConfigureVolumeFunction
+    : public UIThreadExtensionFunction {
+ public:
+  FileManagerPrivateConfigureVolumeFunction();
+  DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.configureVolume",
+                             FILEMANAGERPRIVATE_CONFIGUREVOLUME)
+ protected:
+  ~FileManagerPrivateConfigureVolumeFunction() override {}
+
+ private:
+  ResponseAction Run() override;
+  void OnCompleted(base::File::Error result);
+
+  const ChromeExtensionFunctionDetails chrome_details_;
+  DISALLOW_COPY_AND_ASSIGN(FileManagerPrivateConfigureVolumeFunction);
 };
 
 }  // namespace extensions

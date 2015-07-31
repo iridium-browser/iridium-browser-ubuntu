@@ -63,9 +63,6 @@ class CmaMessageFilterHost
   void CreateMedia(int media_id, LoadType load_type);
   void DestroyMedia(int media_id);
   void SetCdm(int media_id, int render_frame_id, int cdm_id);
-  void SetCdmOnUiThread(MediaPipelineHost* media_pipeline,
-                        int render_frame_id,
-                        int cdm_id);
   void CreateAvPipe(int media_id, TrackId track_id, size_t shared_mem_size);
   void OnAvPipeSet(int media_id,
                    TrackId track_id,
@@ -80,7 +77,7 @@ class CmaMessageFilterHost
   void StartPlayingFrom(int media_id, base::TimeDelta time);
   void Flush(int media_id);
   void Stop(int media_id);
-  void SetPlaybackRate(int media_id, float playback_rate);
+  void SetPlaybackRate(int media_id, double playback_rate);
   void SetVolume(int media_id, TrackId track_id, float volume);
   void NotifyPipeWrite(int media_id, TrackId track_id);
   void NotifyExternalSurface(int surface_id,

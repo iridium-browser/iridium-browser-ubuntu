@@ -36,8 +36,10 @@ FileGrid.prototype = {
     if (this.dataModel)
       this.dataModel.removeEventListener('splice', this.onSplice_.bind(this));
     this.dataModelDescriptor_.set.call(this, model);
-    if (this.dataModel)
+    if (this.dataModel) {
       this.dataModel.addEventListener('splice', this.onSplice_.bind(this));
+      this.classList.toggle('image-dominant', this.dataModel.isImageDominant());
+    }
   }
 };
 
@@ -591,6 +593,8 @@ FileGrid.prototype.decorateThumbnailBox_ = function(li, entry) {
     box.setAttribute('generic-thumbnail', mediaType);
     li.classList.toggle('thumbnail-loaded', false);
   }
+  li.classList.toggle('can-hide-filename',
+                      FileType.isImage(entry) || FileType.isRaw(entry));
 };
 
 /**

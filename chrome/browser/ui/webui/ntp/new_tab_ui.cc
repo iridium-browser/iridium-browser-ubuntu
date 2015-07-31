@@ -26,8 +26,6 @@
 #include "chrome/browser/ui/webui/ntp/ntp_resource_cache.h"
 #include "chrome/browser/ui/webui/ntp/ntp_resource_cache_factory.h"
 #include "chrome/browser/ui/webui/ntp/ntp_user_data_logger.h"
-#include "chrome/browser/ui/webui/ntp/recently_closed_tabs_handler.h"
-#include "chrome/browser/ui/webui/ntp/suggestions_page_handler.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
@@ -97,12 +95,9 @@ NewTabUI::NewTabUI(content::WebUI* web_ui)
     web_ui->AddMessageHandler(new browser_sync::ForeignSessionHandler());
     web_ui->AddMessageHandler(new MetricsHandler());
     web_ui->AddMessageHandler(new MostVisitedHandler());
-    web_ui->AddMessageHandler(new RecentlyClosedTabsHandler());
     web_ui->AddMessageHandler(new FaviconWebUIHandler());
     web_ui->AddMessageHandler(new NewTabPageHandler());
     web_ui->AddMessageHandler(new CoreAppLauncherHandler());
-    if (NewTabUI::IsDiscoveryInNTPEnabled())
-      web_ui->AddMessageHandler(new SuggestionsHandler());
     web_ui->AddMessageHandler(new NewTabPageSyncHandler());
 
     ExtensionService* service =
@@ -126,13 +121,6 @@ NewTabUI::NewTabUI(content::WebUI* web_ui)
   scoped_ptr<NewTabHTMLSource> html_source(
       new NewTabHTMLSource(profile->GetOriginalProfile()));
 
-  // These two resources should be loaded only if suggestions NTP is enabled.
-  html_source->AddResource("suggestions_page.css", "text/css",
-      NewTabUI::IsDiscoveryInNTPEnabled() ? IDR_SUGGESTIONS_PAGE_CSS : 0);
-  if (NewTabUI::IsDiscoveryInNTPEnabled()) {
-    html_source->AddResource("suggestions_page.js", "application/javascript",
-        IDR_SUGGESTIONS_PAGE_JS);
-  }
   // content::URLDataSource assumes the ownership of the html_source.
   content::URLDataSource::Add(profile, html_source.release());
 
@@ -226,8 +214,6 @@ void NewTabUI::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
   CoreAppLauncherHandler::RegisterProfilePrefs(registry);
   NewTabPageHandler::RegisterProfilePrefs(registry);
-  if (NewTabUI::IsDiscoveryInNTPEnabled())
-    SuggestionsHandler::RegisterProfilePrefs(registry);
   MostVisitedHandler::RegisterProfilePrefs(registry);
   browser_sync::ForeignSessionHandler::RegisterProfilePrefs(registry);
 }
@@ -240,13 +226,6 @@ bool NewTabUI::ShouldShowApps() {
 #else
   return true;
 #endif
-}
-
-// static
-bool NewTabUI::IsDiscoveryInNTPEnabled() {
-  // TODO(beaudoin): The flag was removed during a clean-up pass. We leave that
-  // here to easily enable it back when we will explore this option again.
-  return false;
 }
 
 // static

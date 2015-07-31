@@ -47,8 +47,8 @@ class InlineTextBox;
 // get information about InlineTextBoxes without tight coupling.
 class CORE_EXPORT AbstractInlineTextBox : public RefCounted<AbstractInlineTextBox> {
 private:
-    AbstractInlineTextBox(LayoutText* renderText, InlineTextBox* inlineTextBox)
-        : m_renderText(renderText)
+    AbstractInlineTextBox(LayoutText* layoutText, InlineTextBox* inlineTextBox)
+        : m_layoutText(layoutText)
         , m_inlineTextBox(inlineTextBox)
     {
     }
@@ -73,7 +73,7 @@ public:
         BottomToTop
     };
 
-    LayoutText* renderText() const { return m_renderText; }
+    LayoutText* layoutText() const { return m_layoutText; }
 
     PassRefPtr<AbstractInlineTextBox> nextInlineTextBox() const;
     LayoutRect bounds() const;
@@ -82,12 +82,16 @@ public:
     void characterWidths(Vector<FloatWillBeLayoutUnit>&) const;
     void wordBoundaries(Vector<WordBoundaries>&) const;
     String text() const;
+    bool isFirst() const;
+    bool isLast() const;
+    PassRefPtr<AbstractInlineTextBox> nextOnLine() const;
+    PassRefPtr<AbstractInlineTextBox> previousOnLine() const;
 
 private:
     void detach();
 
     // Weak ptrs; these are nulled when InlineTextBox::destroy() calls AbstractInlineTextBox::willDestroy.
-    LayoutText* m_renderText;
+    LayoutText* m_layoutText;
     InlineTextBox* m_inlineTextBox;
 
     typedef HashMap<InlineTextBox*, RefPtr<AbstractInlineTextBox>> InlineToAbstractInlineTextBoxHashMap;

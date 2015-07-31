@@ -105,6 +105,8 @@ struct PasswordForm {
   // (in longest matching prefix fashion) whether or not a given PasswordForm
   // result from the database is a good fit for a particular form on a page.
   // This should not be empty except for Android based credentials.
+  // TODO(melandory): origin should be renamed in order to be consistent with
+  // GURL definition of origin.
   GURL origin;
 
   // The action target of the form; like |origin| URL consists of the scheme,
@@ -263,8 +265,15 @@ struct PasswordForm {
   // If true, this form was parsed using Autofill predictions.
   bool was_parsed_using_autofill_predictions;
 
+  // TODO(vabr): Remove |is_alive| once http://crbug.com/486931 is fixed.
+  bool is_alive;  // Set on construction, reset on destruction.
+
   // Returns true if this match was found using public suffix matching.
   bool IsPublicSuffixMatch() const;
+
+  // Return true if we consider this form to be a change password form.
+  // We use only client heuristics, so it could include signup forms.
+  bool IsPossibleChangePasswordForm() const;
 
   // Equality operators for testing.
   bool operator==(const PasswordForm& form) const;

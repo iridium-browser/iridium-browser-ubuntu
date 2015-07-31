@@ -40,11 +40,67 @@
         'test/bwe_test_logging.cc',
         'test/bwe_test_logging.h',
       ], # source
+      'conditions': [
+        ['enable_bwe_test_logging==1', {
+          'defines': [ 'BWE_TEST_LOGGING_COMPILE_TIME_ENABLE=1' ],
+        }, {
+          'defines': [ 'BWE_TEST_LOGGING_COMPILE_TIME_ENABLE=0' ],
+          'sources!': [
+            'remote_bitrate_estimator/test/bwe_test_logging.cc'
+          ],
+        }],
+      ],
     },
   ], # targets
   'conditions': [
     ['include_tests==1', {
       'targets': [
+        {
+          'target_name': 'bwe_simulator',
+          'type': 'static_library',
+          'dependencies': [
+            '<(DEPTH)/testing/gtest.gyp:gtest',
+          ],
+          'sources': [
+            'test/bwe.cc',
+            'test/bwe.h',
+            'test/bwe_test.cc',
+            'test/bwe_test.h',
+            'test/bwe_test_baselinefile.cc',
+            'test/bwe_test_baselinefile.h',
+            'test/bwe_test_fileutils.cc',
+            'test/bwe_test_fileutils.h',
+            'test/bwe_test_framework.cc',
+            'test/bwe_test_framework.h',
+            'test/bwe_test_framework_unittest.cc',
+            'test/bwe_test_logging.cc',
+            'test/bwe_test_logging.h',
+            'test/packet_receiver.cc',
+            'test/packet_receiver.h',
+            'test/packet_sender.cc',
+            'test/packet_sender.h',
+            'test/packet.h',
+            'test/estimators/nada.cc',
+            'test/estimators/nada.h',
+            'test/estimators/nada_unittest.cc',
+            'test/estimators/remb.cc',
+            'test/estimators/remb.h',
+            'test/estimators/send_side.cc',
+            'test/estimators/send_side.h',
+            'test/estimators/tcp.cc',
+            'test/estimators/tcp.h',
+          ],
+          'conditions': [
+            ['enable_bwe_test_logging==1', {
+              'defines': [ 'BWE_TEST_LOGGING_COMPILE_TIME_ENABLE=1' ],
+            }, {
+              'defines': [ 'BWE_TEST_LOGGING_COMPILE_TIME_ENABLE=0' ],
+              'sources!': [
+                'remote_bitrate_estimator/test/bwe_test_logging.cc'
+              ],
+            }],
+          ],
+        },
         {
           'target_name': 'bwe_tools_util',
           'type': 'static_library',

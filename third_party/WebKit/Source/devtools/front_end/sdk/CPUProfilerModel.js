@@ -40,7 +40,7 @@ WebInspector.CPUProfilerModel = function(target)
     target.profilerAgent().enable();
 
     this._configureCpuProfilerSamplingInterval();
-    WebInspector.settings.highResolutionCpuProfiling.addChangeListener(this._configureCpuProfilerSamplingInterval, this);
+    WebInspector.moduleSetting("highResolutionCpuProfiling").addChangeListener(this._configureCpuProfilerSamplingInterval, this);
 }
 
 WebInspector.CPUProfilerModel.EventTypes = {
@@ -54,7 +54,7 @@ WebInspector.CPUProfilerModel.prototype = {
 
     _configureCpuProfilerSamplingInterval: function()
     {
-        var intervalUs = WebInspector.settings.highResolutionCpuProfiling.get() ? 100 : 1000;
+        var intervalUs = WebInspector.moduleSetting("highResolutionCpuProfiling").get() ? 100 : 1000;
         this.target().profilerAgent().setSamplingInterval(intervalUs);
     },
 
@@ -74,7 +74,8 @@ WebInspector.CPUProfilerModel.prototype = {
          */
         function dispatchEvent()
         {
-            var debuggerLocation = WebInspector.DebuggerModel.Location.fromPayload(this.target(), scriptLocation);
+            var debuggerModel = /** @type {!WebInspector.DebuggerModel} */ (WebInspector.DebuggerModel.fromTarget(this.target()));
+            var debuggerLocation = WebInspector.DebuggerModel.Location.fromPayload(debuggerModel, scriptLocation);
             this.dispatchEventToListeners(WebInspector.CPUProfilerModel.EventTypes.ConsoleProfileFinished, {protocolId: id, scriptLocation: debuggerLocation, cpuProfile: cpuProfile, title: title});
         }
     },
@@ -94,7 +95,8 @@ WebInspector.CPUProfilerModel.prototype = {
          */
         function dispatchEvent()
         {
-            var debuggerLocation = WebInspector.DebuggerModel.Location.fromPayload(this.target(), scriptLocation);
+            var debuggerModel = /** @type {!WebInspector.DebuggerModel} */ (WebInspector.DebuggerModel.fromTarget(this.target()));
+            var debuggerLocation = WebInspector.DebuggerModel.Location.fromPayload(debuggerModel, scriptLocation);
             this.dispatchEventToListeners(WebInspector.CPUProfilerModel.EventTypes.ConsoleProfileStarted, {protocolId: id, scriptLocation: debuggerLocation, title: title});
         }
     },
@@ -135,7 +137,7 @@ WebInspector.CPUProfilerModel.prototype = {
 
     dispose: function()
     {
-        WebInspector.settings.highResolutionCpuProfiling.removeChangeListener(this._configureCpuProfilerSamplingInterval, this);
+        WebInspector.moduleSetting("highResolutionCpuProfiling").removeChangeListener(this._configureCpuProfilerSamplingInterval, this);
     },
 
 

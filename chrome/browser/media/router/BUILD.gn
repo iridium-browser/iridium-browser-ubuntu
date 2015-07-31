@@ -3,50 +3,44 @@
 # found in the LICENSE file.
 #
 import("//testing/test.gni")
+import("//third_party/mojo/src/mojo/public/tools/bindings/mojom.gni")
 
+gypi_values = exec_script("//build/gypi_to_gn.py",
+                          [ rebase_path("media_router.gypi") ],
+                          "scope",
+                          [ "media_router.gypi" ])
+
+# TODO(mfoltz): Fix problem that requires explicitly listing //skia
 source_set("router") {
   deps = [
+    ":mojo_bindings",
     "//base",
+    "//extensions/browser",
+    "//components/keyed_service/core",
+    "//third_party/mojo/src/mojo/public/cpp/bindings",
+    "//skia",
     "//url",
   ]
+  sources = rebase_path(gypi_values.media_router_sources,
+                        ".",
+                        "//chrome/browser/media/router")
+}
+
+mojom("mojo_bindings") {
   sources = [
-    "media_route.cc",
-    "media_route.h",
-    "media_route_id.h",
-    "media_sink.cc",
-    "media_sink.h",
-    "media_source.cc",
-    "media_source.h",
-    "media_source_helper.cc",
-    "media_source_helper.h",
-    "route_id_manager.cc",
-    "route_id_manager.h",
+    "media_router.mojom",
   ]
 }
 
-source_set("unit_tests") {
+source_set("test_support") {
   testonly = true
   deps = [
+    ":mojo_bindings",
     ":router",
-    "//base/test:test_support",
+    "//chrome/test:test_support",
     "//testing/gmock",
-    "//testing/gtest",
   ]
-  sources = [
-    "media_route_unittest.cc",
-    "media_sink_unittest.cc",
-    "media_source_unittest.cc",
-    "route_id_manager_unittest.cc",
-  ]
-}
-
-# Optional standalone test binary, for faster isolated builds.
-test("unit_tests_main") {
-  deps = [
-    ":unit_tests",
-    "//testing/gmock:gmock_main",
-  ]
-  sources = [
-    ":unittest_files",
-  ]
+  sources = rebase_path(gypi_values.media_router_test_support_sources,
+                        ".",
+                        "//chrome/browser/media/router")
 }

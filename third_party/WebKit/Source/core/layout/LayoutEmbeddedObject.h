@@ -29,7 +29,7 @@ namespace blink {
 
 class TextRun;
 
-// Renderer for embeds and objects, often, but not always, rendered via plugins.
+// LayoutObject for embeds and objects, often, but not always, rendered via plugins.
 // For example, <embed src="foo.html"> does not invoke a plugin.
 class LayoutEmbeddedObject : public LayoutPart {
 public:
@@ -53,6 +53,7 @@ private:
     virtual void paint(const PaintInfo&, const LayoutPoint&) override final;
 
     virtual void layout() override final;
+    virtual PaintInvalidationReason invalidatePaintIfNeeded(PaintInvalidationState&, const LayoutBoxModelObject&) override final;
 
     virtual bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectEmbeddedObject || LayoutPart::isOfType(type); }
     virtual LayoutBox* embeddedContentBox() const override final;

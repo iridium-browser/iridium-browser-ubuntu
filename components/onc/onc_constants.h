@@ -132,6 +132,7 @@ ONC_EXPORT extern const char kMEID[];
 ONC_EXPORT extern const char kMIN[];
 ONC_EXPORT extern const char kModelID[];
 ONC_EXPORT extern const char kNetworkTechnology[];
+ONC_EXPORT extern const char kPaymentPortal[];
 ONC_EXPORT extern const char kPRLVersion[];
 ONC_EXPORT extern const char kRoamingHome[];
 ONC_EXPORT extern const char kRoamingRequired[];
@@ -178,6 +179,12 @@ ONC_EXPORT extern const char kLongName[];
 ONC_EXPORT extern const char kTechnology[];
 }  // namespace cellular_found_network
 
+namespace cellular_payment_portal {
+ONC_EXPORT extern const char kMethod[];
+ONC_EXPORT extern const char kPostData[];
+ONC_EXPORT extern const char kUrl[];
+}  // namespace cellular_payment_portal
+
 namespace sim_lock_status {
 ONC_EXPORT extern const char kLockEnabled[];
 ONC_EXPORT extern const char kLockType[];
@@ -219,6 +226,7 @@ ONC_EXPORT extern const char kFrequencyList[];
 ONC_EXPORT extern const char kHexSSID[];
 ONC_EXPORT extern const char kHiddenSSID[];
 ONC_EXPORT extern const char kPassphrase[];
+ONC_EXPORT extern const char kRoamThreshold[];
 ONC_EXPORT extern const char kSSID[];
 ONC_EXPORT extern const char kSecurity[];
 ONC_EXPORT extern const char kSecurityNone[];
@@ -289,6 +297,7 @@ ONC_EXPORT extern const char kEAP_FAST[];
 ONC_EXPORT extern const char kEAP_SIM[];
 ONC_EXPORT extern const char kEAP_TLS[];
 ONC_EXPORT extern const char kEAP_TTLS[];
+ONC_EXPORT extern const char kGTC[];
 ONC_EXPORT extern const char kIdentity[];
 ONC_EXPORT extern const char kInner[];
 ONC_EXPORT extern const char kLEAP[];
@@ -303,6 +312,7 @@ ONC_EXPORT extern const char kServerCAPEMs[];
 ONC_EXPORT extern const char kServerCARef[];
 ONC_EXPORT extern const char kServerCARefs[];
 ONC_EXPORT extern const char kUseSystemCAs[];
+ONC_EXPORT extern const char kUseProactiveKeyCaching[];
 }  // namespace eap
 
 namespace vpn {
@@ -331,6 +341,13 @@ ONC_EXPORT extern const char kServerCARef[];
 ONC_EXPORT extern const char kServerCARefs[];
 ONC_EXPORT extern const char kXAUTH[];
 }  // namespace ipsec
+
+namespace l2tp {
+ONC_EXPORT extern const char kLcpEchoDisabled[];
+ONC_EXPORT extern const char kPassword[];
+ONC_EXPORT extern const char kSaveCredentials[];
+ONC_EXPORT extern const char kUsername[];
+}  // namespace l2tp
 
 namespace openvpn {
 ONC_EXPORT extern const char kAuthNoCache[];
@@ -416,6 +433,13 @@ ONC_EXPORT extern const char kWPAD[];
 namespace global_network_config {
 ONC_EXPORT extern const char kAllowOnlyPolicyNetworksToAutoconnect[];
 }  // global_network_config
+
+namespace device_state {
+ONC_EXPORT extern const char kUninitialized[];
+ONC_EXPORT extern const char kDisabled[];
+ONC_EXPORT extern const char kEnabling[];
+ONC_EXPORT extern const char kEnabled[];
+}  // device_state
 
 }  // namespace onc
 

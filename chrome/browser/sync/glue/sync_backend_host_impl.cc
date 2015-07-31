@@ -187,7 +187,7 @@ void SyncBackendHostImpl::StartSyncingWithServer() {
 
   registrar_->sync_thread()->message_loop()->PostTask(FROM_HERE,
       base::Bind(&SyncBackendHostCore::DoStartSyncing,
-                 core_.get(), routing_info));
+                 core_.get(), routing_info, sync_prefs_->GetLastPollTime()));
 }
 
 void SyncBackendHostImpl::SetEncryptionPassphrase(const std::string& passphrase,
@@ -324,11 +324,11 @@ void SyncBackendHostImpl::UnregisterInvalidationIds() {
   }
 }
 
-void SyncBackendHostImpl::ConfigureDataTypes(
+syncer::ModelTypeSet SyncBackendHostImpl::ConfigureDataTypes(
     syncer::ConfigureReason reason,
     const DataTypeConfigStateMap& config_state_map,
-    const base::Callback<void(syncer::ModelTypeSet,
-                              syncer::ModelTypeSet)>& ready_task,
+    const base::Callback<void(syncer::ModelTypeSet, syncer::ModelTypeSet)>&
+        ready_task,
     const base::Callback<void()>& retry_callback) {
   // Only one configure is allowed at a time.  This is guaranteed by our
   // callers.  The SyncBackendHostImpl requests one configure as the backend is
@@ -445,6 +445,12 @@ void SyncBackendHostImpl::ConfigureDataTypes(
                          routing_info,
                          ready_task,
                          retry_callback);
+
+  DCHECK(syncer::Intersection(active_types, types_to_purge).Empty());
+  DCHECK(syncer::Intersection(active_types, fatal_types).Empty());
+  DCHECK(syncer::Intersection(active_types, unapply_types).Empty());
+  DCHECK(syncer::Intersection(active_types, inactive_types).Empty());
+  return syncer::Difference(active_types, types_to_download);
 }
 
 void SyncBackendHostImpl::EnableEncryptEverything() {
@@ -636,7 +642,7 @@ void SyncBackendHostImpl::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK_EQ(type, chrome::NOTIFICATION_SYNC_REFRESH_LOCAL);
 
   content::Details<const syncer::ModelTypeSet> state_details(details);
@@ -712,6 +718,9 @@ void SyncBackendHostImpl::HandleSyncCycleCompletedOnFrontendLoop(
   last_snapshot_ = snapshot;
 
   SDVLOG(1) << "Got snapshot " << snapshot.ToString();
+
+  if (!snapshot.poll_finish_time().is_null())
+    sync_prefs_->SetLastPollTime(snapshot.poll_finish_time());
 
   // Process any changes to the datatypes we're syncing.
   // TODO(sync): add support for removing types.

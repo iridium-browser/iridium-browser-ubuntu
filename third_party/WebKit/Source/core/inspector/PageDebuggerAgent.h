@@ -31,15 +31,19 @@
 #ifndef PageDebuggerAgent_h
 #define PageDebuggerAgent_h
 
-#include "bindings/core/v8/PageScriptDebugServer.h"
+#include "bindings/core/v8/MainThreadDebugger.h"
 #include "core/inspector/InspectorDebuggerAgent.h"
 #include "core/inspector/InspectorOverlay.h"
+
+using blink::TypeBuilder::Debugger::ExceptionDetails;
+using blink::TypeBuilder::Debugger::ScriptId;
+using blink::TypeBuilder::Runtime::RemoteObject;
 
 namespace blink {
 
 class DocumentLoader;
 class InspectorPageAgent;
-class PageScriptDebugServer;
+class MainThreadDebugger;
 
 class PageDebuggerAgent final
     : public InspectorDebuggerAgent
@@ -48,9 +52,13 @@ class PageDebuggerAgent final
     WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(PageDebuggerAgent);
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(PageDebuggerAgent);
 public:
-    static PassOwnPtrWillBeRawPtr<PageDebuggerAgent> create(PageScriptDebugServer*, InspectorPageAgent*, InjectedScriptManager*, InspectorOverlay*, int debuggerId);
+    static PassOwnPtrWillBeRawPtr<PageDebuggerAgent> create(MainThreadDebugger*, InspectorPageAgent*, InjectedScriptManager*, InspectorOverlay*, int debuggerId);
     ~PageDebuggerAgent() override;
     DECLARE_VIRTUAL_TRACE();
+
+    void enable(ErrorString*) final;
+    void compileScript(ErrorString*, const String& expression, const String& sourceURL, bool persistScript, const int* executionContextId, TypeBuilder::OptOutput<TypeBuilder::Debugger::ScriptId>*, RefPtr<TypeBuilder::Debugger::ExceptionDetails>&) override;
+    void runScript(ErrorString*, const TypeBuilder::Debugger::ScriptId&, const int* executionContextId, const String* objectGroup, const bool* doNotPauseOnExceptionsAndMuteConsole, RefPtr<TypeBuilder::Runtime::RemoteObject>& result, RefPtr<TypeBuilder::Debugger::ExceptionDetails>&) override;
 
     void didStartProvisionalLoad(LocalFrame*);
     void didClearDocumentOfWindowObject(LocalFrame*);
@@ -63,7 +71,7 @@ protected:
 private:
     void startListeningScriptDebugServer() override;
     void stopListeningScriptDebugServer() override;
-    PageScriptDebugServer& scriptDebugServer() override;
+    ScriptDebugServer& scriptDebugServer() override;
     void muteConsole() override;
     void unmuteConsole() override;
 
@@ -72,12 +80,14 @@ private:
     void overlaySteppedOver() override;
 
     InjectedScript injectedScriptForEval(ErrorString*, const int* executionContextId) override;
+    bool canExecuteScripts() const;
 
-    PageDebuggerAgent(PageScriptDebugServer*, InspectorPageAgent*, InjectedScriptManager*, InspectorOverlay*, int debuggerId);
-    RawPtrWillBeMember<PageScriptDebugServer> m_pageScriptDebugServer;
+    PageDebuggerAgent(MainThreadDebugger*, InspectorPageAgent*, InjectedScriptManager*, InspectorOverlay*, int debuggerId);
+    RawPtrWillBeMember<MainThreadDebugger> m_mainThreadDebugger;
     RawPtrWillBeMember<InspectorPageAgent> m_pageAgent;
     RawPtrWillBeMember<InspectorOverlay> m_overlay;
     int m_debuggerId;
+    HashMap<String, String> m_compiledScriptURLs;
 };
 
 } // namespace blink

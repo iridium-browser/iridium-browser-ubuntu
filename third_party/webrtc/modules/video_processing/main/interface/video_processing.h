@@ -18,10 +18,10 @@
 #ifndef WEBRTC_MODULES_INTERFACE_VIDEO_PROCESSING_H
 #define WEBRTC_MODULES_INTERFACE_VIDEO_PROCESSING_H
 
-#include "webrtc/common_video/interface/i420_video_frame.h"
 #include "webrtc/modules/interface/module.h"
 #include "webrtc/modules/interface/module_common_types.h"
 #include "webrtc/modules/video_processing/main/interface/video_processing_defines.h"
+#include "webrtc/video_frame.h"
 
 /**
    The module is largely intended to process video streams, except functionality
@@ -135,15 +135,6 @@ class VideoProcessingModule : public Module {
          Frame statistics.
   */
   static void ClearFrameStats(FrameStats* stats);
-
-  /**
-     Enhances the color of an image through a constant mapping. Only the
-     chrominance is altered. Has a fixed-point implementation.
-
-     \param[in,out] frame
-         Pointer to the video frame.
-  */
-  static int32_t ColorEnhancement(I420VideoFrame* frame);
 
   /**
      Increases/decreases the luminance value.

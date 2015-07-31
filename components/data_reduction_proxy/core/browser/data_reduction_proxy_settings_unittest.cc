@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "base/md5.h"
 #include "base/metrics/field_trial.h"
+#include "base/test/mock_entropy_provider.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_compression_stats.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config_test_utils.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_configurator_test_utils.h"
@@ -23,16 +24,6 @@
 
 namespace data_reduction_proxy {
 
-class BadEntropyProvider : public base::FieldTrial::EntropyProvider {
- public:
-  ~BadEntropyProvider() override {}
-
-  double GetEntropyForTrial(const std::string& trial_name,
-                            uint32 randomization_seed) const override {
-    return 0.5;
-  }
-};
-
 class DataReductionProxySettingsTest
     : public ConcreteDataReductionProxySettingsTest<
           DataReductionProxySettings> {
@@ -45,7 +36,7 @@ class DataReductionProxySettingsTest
     test_context_->pref_service()->SetBoolean(prefs::kDataReductionProxyEnabled,
                                               initially_enabled);
     test_context_->config()->SetStateForTest(initially_enabled, false,
-                                             !request_succeeded);
+                                             request_succeeded);
     ExpectSetProxyPrefs(expected_enabled, false, false);
     settings_->MaybeActivateDataReductionProxy(false);
     test_context_->RunUntilIdle();
@@ -55,7 +46,7 @@ class DataReductionProxySettingsTest
 TEST_F(DataReductionProxySettingsTest, TestIsProxyEnabledOrManaged) {
   settings_->InitPrefMembers();
   // The proxy is disabled initially.
-  test_context_->config()->SetStateForTest(false, false, false);
+  test_context_->config()->SetStateForTest(false, false, true);
 
   EXPECT_FALSE(settings_->IsDataReductionProxyEnabled());
   EXPECT_FALSE(settings_->IsDataReductionProxyManaged());
@@ -74,7 +65,7 @@ TEST_F(DataReductionProxySettingsTest, TestIsProxyEnabledOrManaged) {
 TEST_F(DataReductionProxySettingsTest, TestCanUseDataReductionProxy) {
   settings_->InitPrefMembers();
   // The proxy is disabled initially.
-  test_context_->config()->SetStateForTest(false, false, false);
+  test_context_->config()->SetStateForTest(false, false, true);
 
   GURL http_gurl("http://url.com/");
   EXPECT_FALSE(settings_->CanUseDataReductionProxy(http_gurl));
@@ -152,6 +143,7 @@ TEST_F(DataReductionProxySettingsTest, TestContentLengths) {
 }
 
 TEST(DataReductionProxySettingsStandaloneTest, TestEndToEndSecureProxyCheck) {
+  base::MessageLoopForIO message_loop;
   struct TestCase {
     const char* response_headers;
     const char* response_body;
@@ -182,13 +174,6 @@ TEST(DataReductionProxySettingsStandaloneTest, TestEndToEndSecureProxyCheck) {
 
     scoped_ptr<DataReductionProxyTestContext> drp_test_context =
         DataReductionProxyTestContext::Builder()
-            .WithParamsFlags(DataReductionProxyParams::kAllowed |
-                             DataReductionProxyParams::kFallbackAllowed |
-                             DataReductionProxyParams::kPromoAllowed)
-            .WithParamsDefinitions(
-                TestDataReductionProxyParams::HAS_EVERYTHING &
-                    ~TestDataReductionProxyParams::HAS_DEV_ORIGIN &
-                    ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN)
             .WithURLRequestContext(&context)
             .WithTestConfigurator()
             .SkipSettingsInitialization()
@@ -224,15 +209,9 @@ TEST(DataReductionProxySettingsStandaloneTest, TestEndToEndSecureProxyCheck) {
 }
 
 TEST(DataReductionProxySettingsStandaloneTest, TestOnProxyEnabledPrefChange) {
+  base::MessageLoopForIO message_loop;
   scoped_ptr<DataReductionProxyTestContext> drp_test_context =
       DataReductionProxyTestContext::Builder()
-          .WithParamsFlags(DataReductionProxyParams::kAllowed |
-                           DataReductionProxyParams::kFallbackAllowed |
-                           DataReductionProxyParams::kPromoAllowed)
-          .WithParamsDefinitions(
-              TestDataReductionProxyParams::HAS_EVERYTHING &
-                  ~TestDataReductionProxyParams::HAS_DEV_ORIGIN &
-                  ~TestDataReductionProxyParams::HAS_DEV_FALLBACK_ORIGIN)
           .WithMockConfig()
           .WithTestConfigurator()
           .WithMockDataReductionProxyService()
@@ -240,17 +219,21 @@ TEST(DataReductionProxySettingsStandaloneTest, TestOnProxyEnabledPrefChange) {
           .Build();
 
   // The proxy is enabled initially.
-  drp_test_context->config()->SetStateForTest(true, false, false);
+  drp_test_context->config()->SetStateForTest(true, false, true);
   drp_test_context->InitSettings();
 
+  MockDataReductionProxyService* mock_service =
+      static_cast<MockDataReductionProxyService*>(
+          drp_test_context->data_reduction_proxy_service());
+
   // The pref is disabled, so correspondingly should be the proxy.
-  EXPECT_CALL(*drp_test_context->mock_config(),
+  EXPECT_CALL(*mock_service,
               SetProxyPrefs(false, false, false));
   drp_test_context->pref_service()->SetBoolean(
       prefs::kDataReductionProxyEnabled, false);
 
   // The pref is enabled, so correspondingly should be the proxy.
-  EXPECT_CALL(*drp_test_context->mock_config(),
+  EXPECT_CALL(*mock_service,
               SetProxyPrefs(true, false, false));
   drp_test_context->pref_service()->SetBoolean(
       prefs::kDataReductionProxyEnabled, true);
@@ -357,7 +340,7 @@ TEST_F(DataReductionProxySettingsTest, TestEnableLoFiFromCommandLineProxyOff) {
 }
 
 TEST_F(DataReductionProxySettingsTest, TestGetDailyContentLengths) {
-  DataReductionProxySettings::ContentLengthList result =
+  ContentLengthList result =
       settings_->GetDailyContentLengths(prefs::kDailyHttpOriginalContentLength);
 
   ASSERT_FALSE(result.empty());
@@ -409,7 +392,7 @@ TEST_F(DataReductionProxySettingsTest, CheckQUICFieldTrials) {
          test_context_->pref_service(), test_context_->io_data(),
          test_context_->CreateDataReductionProxyService());
 
-    base::FieldTrialList field_trial_list(new BadEntropyProvider());
+    base::FieldTrialList field_trial_list(new base::MockEntropyProvider());
     if (enable_quic) {
       base::FieldTrialList::CreateFieldTrial(
           DataReductionProxyParams::GetQuicFieldTrialName(),

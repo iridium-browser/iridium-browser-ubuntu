@@ -61,6 +61,10 @@ class BaseTestServer {
       // TestRootStore) is expected to have a self-signed version of the
       // intermediate.
       CERT_CHAIN_WRONG_ROOT,
+
+      // Causes the testserver to use a hostname that is a domain
+      // instead of an IP.
+      CERT_COMMON_NAME_IS_DOMAIN,
     };
 
     // OCSPStatus enumerates the types of OCSP response that the testserver
@@ -263,6 +267,10 @@ class BaseTestServer {
     no_anonymous_ftp_user_ = no_anonymous_ftp_user;
   }
 
+  // Marks the root certificate of an HTTPS test server as trusted for
+  // the duration of tests.
+  bool LoadTestRootCert() const WARN_UNUSED_RESULT;
+
  protected:
   virtual ~BaseTestServer();
   Type type() const { return type_; }
@@ -300,10 +308,6 @@ class BaseTestServer {
 
  private:
   void Init(const std::string& host);
-
-  // Marks the root certificate of an HTTPS test server as trusted for
-  // the duration of tests.
-  bool LoadTestRootCert() const WARN_UNUSED_RESULT;
 
   // Document root of the test server.
   base::FilePath document_root_;

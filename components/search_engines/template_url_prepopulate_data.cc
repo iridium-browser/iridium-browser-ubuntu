@@ -1050,7 +1050,7 @@ scoped_ptr<TemplateURLData> MakePrepopulatedTemplateURLData(
     int id) {
   scoped_ptr<TemplateURLData> data(new TemplateURLData);
 
-  data->short_name = name;
+  data->SetShortName(name);
   data->SetKeyword(keyword);
   data->SetURL(search_url.as_string());
   data->suggestions_url = suggest_url.as_string();
@@ -1184,16 +1184,9 @@ bool SameDomain(const GURL& given_url, const GURL& prepopulated_url) {
 // Global functions -----------------------------------------------------------
 
 void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterIntegerPref(
-      prefs::kCountryIDAtInstall,
-      kCountryIDUnknown,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterListPref(prefs::kSearchProviderOverrides,
-                             user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterIntegerPref(
-      prefs::kSearchProviderOverridesVersion,
-      -1,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterIntegerPref(prefs::kCountryIDAtInstall, kCountryIDUnknown);
+  registry->RegisterListPref(prefs::kSearchProviderOverrides);
+  registry->RegisterIntegerPref(prefs::kSearchProviderOverridesVersion, -1);
 }
 
 int GetDataVersion(PrefService* prefs) {

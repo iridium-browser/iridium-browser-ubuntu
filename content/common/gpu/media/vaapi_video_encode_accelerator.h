@@ -11,8 +11,8 @@
 #include "base/memory/linked_ptr.h"
 #include "base/threading/thread.h"
 #include "content/common/content_export.h"
+#include "content/common/gpu/media/h264_dpb.h"
 #include "content/common/gpu/media/va_surface.h"
-#include "content/common/gpu/media/vaapi_h264_dpb.h"
 #include "content/common/gpu/media/vaapi_wrapper.h"
 #include "media/filters/h264_bitstream_buffer.h"
 #include "media/video/video_encode_accelerator.h"
@@ -29,8 +29,8 @@ class CONTENT_EXPORT VaapiVideoEncodeAccelerator
   ~VaapiVideoEncodeAccelerator() override;
 
   // media::VideoEncodeAccelerator implementation.
-  std::vector<media::VideoEncodeAccelerator::SupportedProfile>
-      GetSupportedProfiles() override;
+  media::VideoEncodeAccelerator::SupportedProfiles GetSupportedProfiles()
+      override;
   bool Initialize(media::VideoFrame::Format format,
                   const gfx::Size& input_visible_size,
                   media::VideoCodecProfile output_profile,
@@ -210,7 +210,7 @@ class CONTENT_EXPORT VaapiVideoEncodeAccelerator
   media::H264BitstreamBuffer packed_pps_;
 
   // Picture currently being prepared for encode.
-  VaapiH264Picture current_pic_;
+  scoped_refptr<H264Picture> current_pic_;
 
   // VA surfaces available for reuse.
   std::vector<VASurfaceID> available_va_surface_ids_;
@@ -235,13 +235,13 @@ class CONTENT_EXPORT VaapiVideoEncodeAccelerator
 
   // Encoder thread. All tasks are executed on it.
   base::Thread encoder_thread_;
-  scoped_refptr<base::MessageLoopProxy> encoder_thread_proxy_;
+  scoped_refptr<base::SingleThreadTaskRunner> encoder_thread_task_runner_;
 
-  const scoped_refptr<base::MessageLoopProxy> child_message_loop_proxy_;
+  const scoped_refptr<base::SingleThreadTaskRunner> child_task_runner_;
 
   // To expose client callbacks from VideoEncodeAccelerator.
   // NOTE: all calls to these objects *MUST* be executed on
-  // child_message_loop_proxy_.
+  // child_task_runner_.
   scoped_ptr<base::WeakPtrFactory<Client> > client_ptr_factory_;
   base::WeakPtr<Client> client_;
 

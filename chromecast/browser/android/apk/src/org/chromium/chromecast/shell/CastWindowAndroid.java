@@ -127,7 +127,7 @@ public class CastWindowAndroid extends LinearLayout {
     private void initFromNativeWebContents(WebContents webContents, int renderProcessId) {
         Context context = getContext();
         mContentViewCore = new ContentViewCore(context);
-        ContentView view = ContentView.newInstance(context, mContentViewCore);
+        ContentView view = new ContentView(context, mContentViewCore);
         mContentViewCore.initialize(view, view, webContents, mWindow);
         mWebContents = mContentViewCore.getWebContents();
         mNavigationController = mWebContents.getNavigationController();
@@ -166,5 +166,12 @@ public class CastWindowAndroid extends LinearLayout {
      */
     public ContentViewCore getContentViewCore() {
         return mContentViewCore;
+    }
+
+    /**
+     * @return The {@link WebContents} managed by this class.
+     */
+    public WebContents getWebContents() {
+        return mWebContents;
     }
 }

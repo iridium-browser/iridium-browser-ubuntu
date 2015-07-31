@@ -81,46 +81,29 @@ SigninManagerFactory* SigninManagerFactory::GetInstance() {
 
 void SigninManagerFactory::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterStringPref(
-      prefs::kGoogleServicesHostedDomain,
-      std::string(),
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterStringPref(
-      prefs::kGoogleServicesLastUsername,
-      std::string(),
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterStringPref(prefs::kGoogleServicesHostedDomain,
+                               std::string());
+  registry->RegisterStringPref(prefs::kGoogleServicesLastUsername,
+                               std::string());
   registry->RegisterInt64Pref(
       prefs::kGoogleServicesRefreshTokenAnnotateScheduledTime,
-      base::Time().ToInternalValue(),
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterStringPref(
-      prefs::kGoogleServicesSigninScopedDeviceId,
-      std::string(),
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterStringPref(
-      prefs::kGoogleServicesUserAccountId,
-      std::string(),
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterStringPref(
-      prefs::kGoogleServicesUsername,
-      std::string(),
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kAutologinEnabled,
-      true,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kReverseAutologinEnabled,
-      true,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+      base::Time().ToInternalValue());
+  registry->RegisterStringPref(prefs::kGoogleServicesSigninScopedDeviceId,
+                               std::string());
+  registry->RegisterStringPref(prefs::kGoogleServicesAccountId, std::string());
+  registry->RegisterStringPref(prefs::kGoogleServicesUserAccountId,
+                               std::string());
+  registry->RegisterBooleanPref(prefs::kAutologinEnabled, true);
+  registry->RegisterBooleanPref(prefs::kReverseAutologinEnabled, true);
   registry->RegisterListPref(prefs::kReverseAutologinRejectedEmailList,
-                             new base::ListValue,
-                             user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterInt64Pref(
-      prefs::kSignedInTime,
-      base::Time().ToInternalValue(),
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+                             new base::ListValue);
+  registry->RegisterInt64Pref(prefs::kSignedInTime,
+                              base::Time().ToInternalValue());
+
   LocalAuth::RegisterLocalAuthPrefs(registry);
+
+  // Deprecated prefs: will be removed in a future release.
+  registry->RegisterStringPref(prefs::kGoogleServicesUsername, std::string());
 }
 
 // static
@@ -149,7 +132,9 @@ KeyedService* SigninManagerFactory::BuildServiceInstanceFor(
   SigninClient* client =
       ChromeSigninClientFactory::GetInstance()->GetForProfile(profile);
 #if defined(OS_CHROMEOS)
-  service = new SigninManagerBase(client);
+  service = new SigninManagerBase(
+      client,
+      AccountTrackerServiceFactory::GetForProfile(profile));
 #else
   service = new SigninManager(
       client,

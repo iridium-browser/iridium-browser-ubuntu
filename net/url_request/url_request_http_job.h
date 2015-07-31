@@ -19,6 +19,7 @@
 #include "net/cookies/cookie_store.h"
 #include "net/filter/filter.h"
 #include "net/http/http_request_info.h"
+#include "net/socket/connection_attempts.h"
 #include "net/url_request/url_request_job.h"
 #include "net/url_request/url_request_throttler_entry_interface.h"
 
@@ -52,6 +53,7 @@ class NET_EXPORT_PRIVATE URLRequestHttpJob : public URLRequestJob {
   void SetPriority(RequestPriority priority) override;
   void Start() override;
   void Kill() override;
+  void GetConnectionAttempts(ConnectionAttempts* out) const override;
 
   RequestPriority priority() const {
     return priority_;
@@ -87,7 +89,7 @@ class NET_EXPORT_PRIVATE URLRequestHttpJob : public URLRequestJob {
   // Processes the Public-Key-Pins header, if one exists.
   void ProcessPublicKeyPinsHeader();
 
-  // |result| should be net::OK, or the request is canceled.
+  // |result| should be OK, or the request is canceled.
   void OnHeadersReceivedCallback(int result);
   void OnStartCompleted(int result);
   void OnReadCompleted(int result);
@@ -138,7 +140,7 @@ class NET_EXPORT_PRIVATE URLRequestHttpJob : public URLRequestJob {
   // Starts the transaction if extensions using the webrequest API do not
   // object.
   void StartTransaction();
-  // If |result| is net::OK, calls StartTransactionInternal. Otherwise notifies
+  // If |result| is OK, calls StartTransactionInternal. Otherwise notifies
   // cancellation.
   void MaybeStartTransactionInternal(int result);
   void StartTransactionInternal();

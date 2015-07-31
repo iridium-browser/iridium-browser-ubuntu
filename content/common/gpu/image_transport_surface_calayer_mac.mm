@@ -8,6 +8,7 @@
 
 #include "base/command_line.h"
 #include "base/mac/sdk_forward_declarations.h"
+#include "base/trace_event/trace_event.h"
 #include "ui/accelerated_widget_mac/surface_handle_types.h"
 #include "ui/base/cocoa/animation_utils.h"
 #include "ui/gfx/geometry/size_conversions.h"
@@ -55,8 +56,12 @@ const base::TimeDelta kMinDeltaToSwitchToAsync =
 - (CGLContextObj)copyCGLContextForPixelFormat:(CGLPixelFormatObj)pixelFormat {
   if (!storageProvider_)
     return NULL;
-  didDrawCallback_ = storageProvider_->LayerShareGroupContextDirtiedCallback();
-  return CGLRetainContext(storageProvider_->LayerShareGroupContext());
+  CGLContextObj context = NULL;
+  CGLError error = CGLCreateContext(
+      pixelFormat, storageProvider_->LayerShareGroupContext(), &context);
+  if (error != kCGLNoError)
+    LOG(ERROR) << "CGLCreateContext failed with CGL error: " << error;
+  return context;
 }
 
 - (BOOL)canDrawInCGLContext:(CGLContextObj)glContext
@@ -86,10 +91,6 @@ const base::TimeDelta kMinDeltaToSwitchToAsync =
               pixelFormat:pixelFormat
              forLayerTime:timeInterval
               displayTime:timeStamp];
-
-
-  DCHECK(!didDrawCallback_.is_null());
-  didDrawCallback_.Run();
 }
 
 @end
@@ -290,9 +291,19 @@ void CALayerStorageProvider::FreeColorBufferStorage() {
   can_draw_returned_false_count_ = 0;
 }
 
-void CALayerStorageProvider::SwapBuffers(
-    const gfx::Size& size, float scale_factor) {
+void CALayerStorageProvider::FrameSizeChanged(const gfx::Size& pixel_size,
+                                              float scale_factor) {
+  DCHECK_EQ(fbo_pixel_size_.ToString(), pixel_size.ToString());
+  DCHECK_EQ(fbo_scale_factor_, scale_factor);
+}
+
+void CALayerStorageProvider::SwapBuffers() {
+  TRACE_EVENT0("gpu", "CALayerStorageProvider::SwapBuffers");
   DCHECK(!has_pending_draw_);
+
+  // A trace value of 2 indicates that there is a pending swap ack. See
+  // LayerCanDraw for other value meanings.
+  TRACE_COUNTER_ID1("gpu", "CALayerPendingSwap", this, 2);
 
   // Recreate the CALayer on the new GPU if a GPU switch has occurred. Note
   // that the CAContext will retain a reference to the old CALayer until the
@@ -411,6 +422,7 @@ void CALayerStorageProvider::DiscardBackbuffer() {
 
 void CALayerStorageProvider::SwapBuffersAckedByBrowser(
     bool disable_throttling) {
+  TRACE_EVENT0("gpu", "CALayerStorageProvider::SwapBuffersAckedByBrowser");
   throttling_disabled_ = disable_throttling;
   if (!previously_discarded_contexts_.empty())
     previously_discarded_contexts_.pop_front();
@@ -425,6 +437,24 @@ base::Closure CALayerStorageProvider::LayerShareGroupContextDirtiedCallback() {
 }
 
 bool CALayerStorageProvider::LayerCanDraw() {
+  TRACE_EVENT0("gpu", "CALayerStorageProvider::LayerCanDraw");
+
+  // This tracing would be more natural to do with a pseudo-thread for each
+  // layer, rather than a counter.
+  // http://crbug.com/366300
+  if (has_pending_draw_) {
+    // If there is a draw pending then increase the signal from 2 to 3, to
+    // indicate that there is a swap pending, and CoreAnimation has asked to
+    // draw it.
+    TRACE_COUNTER_ID1("gpu", "CALayerPendingSwap", this, 3);
+  } else {
+    // If there is not a draw pending, then give an instantaneous blip up from
+    // 0 to 1, indicating that CoreAnimation was ready to draw a frame but we
+    // were not (or didn't have new content to draw).
+    TRACE_COUNTER_ID1("gpu", "CALayerPendingSwap", this, 1);
+    TRACE_COUNTER_ID1("gpu", "CALayerPendingSwap", this, 0);
+  }
+
   if (has_pending_draw_) {
     can_draw_returned_false_count_ = 0;
     return true;
@@ -445,6 +475,7 @@ bool CALayerStorageProvider::LayerCanDraw() {
 }
 
 void CALayerStorageProvider::LayerDoDraw() {
+  TRACE_EVENT0("gpu", "CALayerStorageProvider::LayerDoDraw");
   if (gfx::GetGLImplementation() ==
       gfx::kGLImplementationDesktopGLCoreProfile) {
     glClearColor(1, 0, 1, 1);
@@ -545,6 +576,9 @@ void CALayerStorageProvider::UnblockBrowserIfNeeded() {
       ui::SurfaceHandleFromCAContextID([context_ contextId]),
       fbo_pixel_size_,
       fbo_scale_factor_);
+
+  // A trace value of 0 indicates that there is no longer a pending swap ack.
+  TRACE_COUNTER_ID1("gpu", "CALayerPendingSwap", this, 0);
 }
 
 }  //  namespace content

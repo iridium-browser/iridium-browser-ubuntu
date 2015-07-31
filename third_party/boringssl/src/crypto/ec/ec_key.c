@@ -74,9 +74,13 @@
 #include <openssl/err.h>
 #include <openssl/ex_data.h>
 #include <openssl/mem.h>
+#include <openssl/thread.h>
 
 #include "internal.h"
+#include "../internal.h"
 
+
+static CRYPTO_EX_DATA_CLASS g_ex_data_class = CRYPTO_EX_DATA_CLASS_INIT;
 
 EC_KEY *EC_KEY_new(void) { return EC_KEY_new_method(NULL); }
 
@@ -100,7 +104,7 @@ EC_KEY *EC_KEY_new_method(const ENGINE *engine) {
   ret->conv_form = POINT_CONVERSION_UNCOMPRESSED;
   ret->references = 1;
 
-  if (!CRYPTO_new_ex_data(CRYPTO_EX_INDEX_EC_KEY, ret, &ret->ex_data)) {
+  if (!CRYPTO_new_ex_data(&g_ex_data_class, ret, &ret->ex_data)) {
     goto err1;
   }
 
@@ -111,7 +115,7 @@ EC_KEY *EC_KEY_new_method(const ENGINE *engine) {
   return ret;
 
 err2:
-  CRYPTO_free_ex_data(CRYPTO_EX_INDEX_EC_KEY, ret, &ret->ex_data);
+  CRYPTO_free_ex_data(&g_ex_data_class, ret, &ret->ex_data);
 err1:
   if (ret->ecdsa_meth) {
     METHOD_unref(ret->ecdsa_meth);
@@ -123,6 +127,7 @@ err1:
 EC_KEY *EC_KEY_new_by_curve_name(int nid) {
   EC_KEY *ret = EC_KEY_new();
   if (ret == NULL) {
+    OPENSSL_PUT_ERROR(EC, EC_KEY_new_by_curve_name, ERR_R_MALLOC_FAILURE);
     return NULL;
   }
   ret->group = EC_GROUP_new_by_curve_name(nid);
@@ -149,17 +154,11 @@ void EC_KEY_free(EC_KEY *r) {
     METHOD_unref(r->ecdsa_meth);
   }
 
-  if (r->group != NULL) {
-    EC_GROUP_free(r->group);
-  }
-  if (r->pub_key != NULL) {
-    EC_POINT_free(r->pub_key);
-  }
-  if (r->priv_key != NULL) {
-    BN_clear_free(r->priv_key);
-  }
+  EC_GROUP_free(r->group);
+  EC_POINT_free(r->pub_key);
+  BN_clear_free(r->priv_key);
 
-  CRYPTO_free_ex_data(CRYPTO_EX_INDEX_EC_KEY, r, &r->ex_data);
+  CRYPTO_free_ex_data(&g_ex_data_class, r, &r->ex_data);
 
   OPENSSL_cleanse((void *)r, sizeof(EC_KEY));
   OPENSSL_free(r);
@@ -173,9 +172,7 @@ EC_KEY *EC_KEY_copy(EC_KEY *dest, const EC_KEY *src) {
   /* Copy the parameters. */
   if (src->group) {
     /* TODO(fork): duplicating the group seems wasteful. */
-    if (dest->group) {
-      EC_GROUP_free(dest->group);
-    }
+    EC_GROUP_free(dest->group);
     dest->group = EC_GROUP_dup(src->group);
     if (dest->group == NULL) {
       return NULL;
@@ -184,9 +181,7 @@ EC_KEY *EC_KEY_copy(EC_KEY *dest, const EC_KEY *src) {
 
   /* Copy the public key. */
   if (src->pub_key && src->group) {
-    if (dest->pub_key) {
-      EC_POINT_free(dest->pub_key);
-    }
+    EC_POINT_free(dest->pub_key);
     dest->pub_key = EC_POINT_dup(src->pub_key, src->group);
     if (dest->pub_key == NULL) {
       return NULL;
@@ -206,8 +201,13 @@ EC_KEY *EC_KEY_copy(EC_KEY *dest, const EC_KEY *src) {
     }
   }
   /* copy method/extra data */
-  CRYPTO_free_ex_data(CRYPTO_EX_INDEX_EC_KEY, dest, &dest->ex_data);
-  if (!CRYPTO_dup_ex_data(CRYPTO_EX_INDEX_EC_KEY, &dest->ex_data,
+  if (src->ecdsa_meth) {
+      METHOD_unref(dest->ecdsa_meth);
+      dest->ecdsa_meth = src->ecdsa_meth;
+      METHOD_ref(dest->ecdsa_meth);
+  }
+  CRYPTO_free_ex_data(&g_ex_data_class, dest, &dest->ex_data);
+  if (!CRYPTO_dup_ex_data(&g_ex_data_class, &dest->ex_data,
                           &src->ex_data)) {
     return NULL;
   }
@@ -244,9 +244,7 @@ int EC_KEY_is_opaque(const EC_KEY *key) {
 const EC_GROUP *EC_KEY_get0_group(const EC_KEY *key) { return key->group; }
 
 int EC_KEY_set_group(EC_KEY *key, const EC_GROUP *group) {
-  if (key->group != NULL) {
-    EC_GROUP_free(key->group);
-  }
+  EC_GROUP_free(key->group);
   /* TODO(fork): duplicating the group seems wasteful but see
    * |EC_KEY_set_conv_form|. */
   key->group = EC_GROUP_dup(group);
@@ -258,9 +256,7 @@ const BIGNUM *EC_KEY_get0_private_key(const EC_KEY *key) {
 }
 
 int EC_KEY_set_private_key(EC_KEY *key, const BIGNUM *priv_key) {
-  if (key->priv_key) {
-    BN_clear_free(key->priv_key);
-  }
+  BN_clear_free(key->priv_key);
   key->priv_key = BN_dup(priv_key);
   return (key->priv_key == NULL) ? 0 : 1;
 }
@@ -270,9 +266,7 @@ const EC_POINT *EC_KEY_get0_public_key(const EC_KEY *key) {
 }
 
 int EC_KEY_set_public_key(EC_KEY *key, const EC_POINT *pub_key) {
-  if (key->pub_key != NULL) {
-    EC_POINT_free(key->pub_key);
-  }
+  EC_POINT_free(key->pub_key);
   key->pub_key = EC_POINT_dup(pub_key, key->group);
   return (key->pub_key == NULL) ? 0 : 1;
 }
@@ -363,12 +357,8 @@ int EC_KEY_check_key(const EC_KEY *eckey) {
   ok = 1;
 
 err:
-  if (ctx != NULL) {
-    BN_CTX_free(ctx);
-  }
-  if (point != NULL) {
-    EC_POINT_free(point);
-  }
+  BN_CTX_free(ctx);
+  EC_POINT_free(point);
   return ok;
 }
 
@@ -419,12 +409,8 @@ int EC_KEY_set_public_key_affine_coordinates(EC_KEY *key, BIGNUM *x,
   ok = 1;
 
 err:
-  if (ctx) {
-    BN_CTX_free(ctx);
-  }
-  if (point) {
-    EC_POINT_free(point);
-  }
+  BN_CTX_free(ctx);
+  EC_POINT_free(point);
   return ok;
 }
 
@@ -485,26 +471,26 @@ int EC_KEY_generate_key(EC_KEY *eckey) {
   ok = 1;
 
 err:
-  if (order) {
-    BN_free(order);
-  }
-  if (pub_key != NULL && eckey->pub_key == NULL) {
+  BN_free(order);
+  if (eckey->pub_key == NULL) {
     EC_POINT_free(pub_key);
   }
-  if (priv_key != NULL && eckey->priv_key == NULL) {
+  if (eckey->priv_key == NULL) {
     BN_free(priv_key);
   }
-  if (ctx != NULL) {
-    BN_CTX_free(ctx);
-  }
+  BN_CTX_free(ctx);
   return ok;
 }
 
 int EC_KEY_get_ex_new_index(long argl, void *argp, CRYPTO_EX_new *new_func,
                             CRYPTO_EX_dup *dup_func,
                             CRYPTO_EX_free *free_func) {
-  return CRYPTO_get_ex_new_index(CRYPTO_EX_INDEX_EC_KEY, argl, argp, new_func,
-                                 dup_func, free_func);
+  int index;
+  if (!CRYPTO_get_ex_new_index(&g_ex_data_class, &index, argl, argp, new_func,
+                               dup_func, free_func)) {
+    return -1;
+  }
+  return index;
 }
 
 int EC_KEY_set_ex_data(EC_KEY *d, int idx, void *arg) {
@@ -514,3 +500,5 @@ int EC_KEY_set_ex_data(EC_KEY *d, int idx, void *arg) {
 void *EC_KEY_get_ex_data(const EC_KEY *d, int idx) {
   return CRYPTO_get_ex_data(&d->ex_data, idx);
 }
+
+void EC_KEY_set_asn1_flag(EC_KEY *key, int flag) {}

@@ -54,7 +54,7 @@ class WebBlobInfo;
 typedef WillBeHeapVector<RefPtrWillBeMember<MessagePort>, 1> MessagePortArray;
 typedef Vector<RefPtr<DOMArrayBuffer>, 1> ArrayBufferArray;
 typedef HashMap<String, RefPtr<BlobDataHandle>> BlobDataHandleMap;
-typedef Vector<blink::WebBlobInfo> WebBlobInfoArray;
+typedef Vector<WebBlobInfo> WebBlobInfoArray;
 
 class CORE_EXPORT SerializedScriptValue : public ThreadSafeRefCounted<SerializedScriptValue> {
 public:
@@ -81,8 +81,8 @@ public:
 
     // Deserializes the value (in the current context). Returns a null value in
     // case of failure.
-    v8::Handle<v8::Value> deserialize(MessagePortArray* = 0);
-    v8::Handle<v8::Value> deserialize(v8::Isolate*, MessagePortArray* = 0, const WebBlobInfoArray* = 0);
+    v8::Local<v8::Value> deserialize(MessagePortArray* = 0);
+    v8::Local<v8::Value> deserialize(v8::Isolate*, MessagePortArray* = 0, const WebBlobInfoArray* = 0);
 
     // Helper function which pulls the values out of a JS sequence and into a MessagePortArray.
     // Also validates the elements per sections 4.1.13 and 4.1.15 of the WebIDL spec and section 8.3.3

@@ -19,8 +19,7 @@ CONTENT_EXPORT extern const char kAllowFileAccessFromFiles[];
 CONTENT_EXPORT extern const char kAllowLoopbackInPeerConnection[];
 CONTENT_EXPORT extern const char kAllowNoSandboxJob[];
 CONTENT_EXPORT extern const char kAllowSandboxDebugging[];
-extern const char kAuditAllHandles[];
-extern const char kAuditHandles[];
+CONTENT_EXPORT extern const char kBlinkSettings[];
 CONTENT_EXPORT extern const char kBlinkPlatformLogChannels[];
 CONTENT_EXPORT extern const char kBlockCrossSiteDocuments[];
 CONTENT_EXPORT extern const char kBrowserCrashTest[];
@@ -35,9 +34,9 @@ CONTENT_EXPORT extern const char kDisableAccelerated2dCanvas[];
 CONTENT_EXPORT extern const char kDisableAcceleratedJpegDecoding[];
 CONTENT_EXPORT extern const char kDisableAcceleratedVideoDecode[];
 extern const char kDisableBackingStoreLimit[];
-CONTENT_EXPORT extern const char kDisableBlinkScheduler[];
 CONTENT_EXPORT extern const char kDisablePreferCompositingToLCDText[];
 CONTENT_EXPORT extern const char kDisableDatabases[];
+CONTENT_EXPORT extern const char kDisableDelayAgnosticAec[];
 CONTENT_EXPORT extern const char kDisableDelegatedRenderer[];
 extern const char kDisableDirectNPAPIRequests[];
 CONTENT_EXPORT extern const char kDisableDistanceFieldText[];
@@ -77,12 +76,13 @@ CONTENT_EXPORT extern const char kDisablePluginsDiscovery[];
 CONTENT_EXPORT extern const char kDisableReadingFromCanvas[];
 extern const char kDisableRemoteFonts[];
 extern const char kDisableRendererAccessibility[];
+CONTENT_EXPORT extern const char kDisableRendererBackgrounding[];
 CONTENT_EXPORT extern const char kDisableSeccompFilterSandbox[];
 CONTENT_EXPORT extern const char kDisableSetuidSandbox[];
 CONTENT_EXPORT extern const char kDisableSharedWorkers[];
-CONTENT_EXPORT extern const char kDisableSingleThreadProxyScheduler[];
 CONTENT_EXPORT extern const char kDisableSmoothScrolling[];
 CONTENT_EXPORT extern const char kDisableSoftwareRasterizer[];
+CONTENT_EXPORT extern const char kDisableSpeechAPI[];
 CONTENT_EXPORT extern const char kDisableSVG1DOM[];
 CONTENT_EXPORT extern const char kDisableTextBlobs[];
 CONTENT_EXPORT extern const char kDisableThreadedCompositing[];
@@ -120,9 +120,9 @@ CONTENT_EXPORT extern const char kEnableNetworkInformation[];
 CONTENT_EXPORT extern const char kEnableOneCopy[];
 CONTENT_EXPORT extern const char kEnableOverlayFullscreenVideo[];
 CONTENT_EXPORT extern const char kEnablePinch[];
+CONTENT_EXPORT extern const char kEnablePluginPlaceholderTesting[];
 CONTENT_EXPORT extern const char kEnablePreciseMemoryInfo[];
 CONTENT_EXPORT extern const char kEnablePushMessagePayload[];
-CONTENT_EXPORT extern const char kEnablePushMessagingHasPermission[];
 CONTENT_EXPORT extern const char kEnableRegionBasedColumns[];
 CONTENT_EXPORT extern const char kEnableSandboxLogging[];
 CONTENT_EXPORT extern const char kEnableSeccompFilterSandbox[];
@@ -148,6 +148,7 @@ CONTENT_EXPORT extern const char kEnableVtune[];
 CONTENT_EXPORT extern const char kEnableWebGLDraftExtensions[];
 CONTENT_EXPORT extern const char kEnableWebGLImageChromium[];
 CONTENT_EXPORT extern const char kEnableZeroCopy[];
+CONTENT_EXPORT extern const char kExplicitlyAllowedPorts[];
 CONTENT_EXPORT extern const char kExtraPluginDir[];
 CONTENT_EXPORT extern const char kForceDisplayList2dCanvas[];
 CONTENT_EXPORT extern const char kForceFieldTrials[];
@@ -181,7 +182,9 @@ extern const char kMemoryMetrics[];
 CONTENT_EXPORT extern const char kMuteAudio[];
 CONTENT_EXPORT extern const char kNoReferrers[];
 CONTENT_EXPORT extern const char kNoSandbox[];
+CONTENT_EXPORT extern const char kDisableAppContainer[];
 CONTENT_EXPORT extern const char kNumRasterThreads[];
+CONTENT_EXPORT extern const char kOverridePluginPowerSaverForTesting[];
 CONTENT_EXPORT extern const char kOverscrollHistoryNavigation[];
 extern const char kPluginLauncher[];
 CONTENT_EXPORT extern const char kPluginPath[];
@@ -218,6 +221,7 @@ CONTENT_EXPORT extern const char kTabCaptureUpscaleQuality[];
 CONTENT_EXPORT extern const char kTestingFixedHttpPort[];
 CONTENT_EXPORT extern const char kTestingFixedHttpsPort[];
 CONTENT_EXPORT extern const char kTestType[];
+CONTENT_EXPORT extern const char kTouchTextSelectionStrategy[];
 CONTENT_EXPORT extern const char kTraceShutdown[];
 extern const char kTraceShutdownFile[];
 extern const char kTraceStartup[];
@@ -238,6 +242,8 @@ extern const char kUtilityProcessAllowedDir[];
 CONTENT_EXPORT extern const char kUtilityProcessEnableMDns[];
 CONTENT_EXPORT extern const char kUtilityProcessRunningElevated[];
 CONTENT_EXPORT extern const char kV8CacheOptions[];
+CONTENT_EXPORT extern const char kV8NativesPassedByFD[];
+CONTENT_EXPORT extern const char kV8SnapshotPassedByFD[];
 CONTENT_EXPORT extern const char kValidateInputEventStream[];
 CONTENT_EXPORT extern const char kWaitForDebuggerChildren[];
 CONTENT_EXPORT extern const char kZygoteCmdPrefix[];
@@ -250,9 +256,6 @@ CONTENT_EXPORT extern const char kDisableWebRtcHWEncoding[];
 CONTENT_EXPORT extern const char kEnableWebRtcHWH264Encoding[];
 CONTENT_EXPORT extern const char kEnableWebRtcStunOrigin[];
 extern const char kWebRtcMaxCaptureFramerate[];
-#if defined(OS_LINUX) || defined(OS_MACOSX)
-CONTENT_EXPORT extern const char kEnableWebRtcCaptureToTexture[];
-#endif
 #endif
 
 #if defined(OS_ANDROID)
@@ -289,13 +292,12 @@ extern const char kDisableThreadedEventHandlingMac[];
 // like renderers, etc.
 CONTENT_EXPORT extern const char kDeviceScaleFactor[];
 CONTENT_EXPORT extern const char kDisableLegacyIntermediateWindow[];
-// This switch will be removed when we enable the win32K lockdown process
-// mitigation.
 CONTENT_EXPORT extern const char kDisableWin32kRendererLockDown[];
-CONTENT_EXPORT extern const char kEnableWin32kRendererLockDown[];
-// Switch to uniquely identify names shared memory section for font cache
-// across chromium flavors.
-CONTENT_EXPORT extern const char kFontCacheSharedMemSuffix[];
+CONTENT_EXPORT extern const char kEnableAcceleratedVpxDecode[];
+// Switch to pass the font cache shared memory handle to the renderer.
+CONTENT_EXPORT extern const char kFontCacheSharedHandle[];
+CONTENT_EXPORT extern const char kMemoryPressureThresholdsMb[];
+CONTENT_EXPORT extern const char kTraceExportEventsToETW[];
 #endif
 
 CONTENT_EXPORT extern const char kEnableNpapi[];

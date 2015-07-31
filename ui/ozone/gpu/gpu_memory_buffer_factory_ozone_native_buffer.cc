@@ -86,8 +86,8 @@ class GLImageOzoneNativePixmapDmaBuf : public gfx::GLImageLinuxDMABuffer {
 SurfaceFactoryOzone::BufferFormat GetOzoneFormatFor(
     gfx::GpuMemoryBuffer::Format format) {
   switch (format) {
-    case gfx::GpuMemoryBuffer::RGBA_8888:
-      return SurfaceFactoryOzone::RGBA_8888;
+    case gfx::GpuMemoryBuffer::BGRA_8888:
+      return SurfaceFactoryOzone::BGRA_8888;
     case gfx::GpuMemoryBuffer::RGBX_8888:
       return SurfaceFactoryOzone::RGBX_8888;
     case gfx::GpuMemoryBuffer::ATC:
@@ -95,13 +95,15 @@ SurfaceFactoryOzone::BufferFormat GetOzoneFormatFor(
     case gfx::GpuMemoryBuffer::DXT1:
     case gfx::GpuMemoryBuffer::DXT5:
     case gfx::GpuMemoryBuffer::ETC1:
-    case gfx::GpuMemoryBuffer::BGRA_8888:
+    case gfx::GpuMemoryBuffer::R_8:
+    case gfx::GpuMemoryBuffer::RGBA_8888:
+    case gfx::GpuMemoryBuffer::YUV_420:
       NOTREACHED();
-      return SurfaceFactoryOzone::RGBA_8888;
+      return SurfaceFactoryOzone::BGRA_8888;
   }
 
   NOTREACHED();
-  return SurfaceFactoryOzone::RGBA_8888;
+  return SurfaceFactoryOzone::BGRA_8888;
 }
 
 SurfaceFactoryOzone::BufferUsage GetOzoneUsageFor(

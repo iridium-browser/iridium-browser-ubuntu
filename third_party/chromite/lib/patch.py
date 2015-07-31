@@ -8,7 +8,6 @@ from __future__ import print_function
 
 import calendar
 import collections
-import logging
 import os
 import random
 import re
@@ -16,6 +15,7 @@ import time
 
 from chromite.cbuildbot import constants
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import git
 from chromite.lib import gob_util
 
@@ -487,6 +487,39 @@ def ParsePatchDep(text, no_change_id=False, no_sha1=False,
   raise ValueError('Cannot parse the dependency: %s' % original_text)
 
 
+def GetOptionLinesFromCommitMessage(commit_message, option_re):
+  """Finds lines in |commit_message| that start with |option_re|.
+
+  Args:
+    commit_message: (str) Text of the commit message.
+    option_re: (str) regular expression to match the key identifying this
+               option. Additionally, any whitespace surrounding the option
+               is ignored.
+
+  Returns:
+    list of line values that matched the option (with the option stripped
+    out) if at least 1 line matched the option (even if it provided no
+    valuse). None if no lines of the message matched the option.
+  """
+  option_lines = []
+  matched = False
+  lines = commit_message.splitlines()[2:]
+  for line in lines:
+    line = line.strip()
+    if re.match(option_re, line):
+      matched = True
+      line = re.sub(option_re, '', line, count=1).strip()
+      if line:
+        option_lines.append(line)
+
+  if matched:
+    return option_lines
+  else:
+    return None
+
+
+# TODO(akeshet): Refactor CQ-DEPEND parsing logic to use general purpose
+# GetOptionFromCommitMessage.
 def GetPaladinDeps(commit_message):
   """Get the paladin dependencies for the given |commit_message|."""
   PALADIN_DEPENDENCY_RE = re.compile(r'^([ \t]*CQ.?DEPEND.)(.*)$',
@@ -536,6 +569,7 @@ class PatchQuery(object):
       self.tracking_branch = os.path.basename(tracking_branch)
     self.project = project
     self.sha1 = None if sha1 is None else ParseSHA1(sha1)
+    self.tree_hash = None
     self.change_id = None if change_id is None else ParseChangeID(change_id)
     self.gerrit_number = (None if gerrit_number is None else
                           ParseGerritNumber(gerrit_number))
@@ -682,11 +716,151 @@ class GitRepoPatch(PatchQuery):
     self._subject_line = None
     self.ref = ref
     self._is_fetched = set()
+    self._committer_email = None
+    self._committer_name = None
+    self._commit_message = None
+
+  @property
+  def commit_message(self):
+    return self._commit_message
+
+  @commit_message.setter
+  def commit_message(self, value):
+    self._commit_message = self._AddFooters(value) if value else value
 
   @property
   def internal(self):
     """Whether patch is to an internal cros project."""
     return self.remote == constants.INTERNAL_REMOTE
+
+  def _GetFooters(self, msg):
+    """Get the Git footers of the specified commit message.
+
+    Args:
+      msg: A commit message
+
+    Returns:
+      The parsed footers from the commit message.  Footers are
+      lines of the form 'key: value' and are at the end of the commit
+      message in a separate paragraph.  We return a list of pairs like
+      ('key', 'value').
+    """
+    footers = []
+    data = re.split(r'\n{2,}', msg.rstrip('\n'))[-1]
+    for line in data.splitlines():
+      m = re.match(r'([A-Za-z0-9-]+): *(.*)', line.rstrip('\n'))
+      if m:
+        footers.append(m.groups())
+    return footers
+
+  def _AddFooters(self, msg):
+    """Ensure that commit messages have a change ID.
+
+    Args:
+      msg: The commit message.
+
+    Returns:
+      The modified commit message with necessary Gerrit footers.
+    """
+    if not msg:
+      msg = '<no commit message provided>'
+
+    if msg[-1] != '\n':
+      msg += '\n'
+
+    # This function is adapted from the version in Gerrit:
+    # goto/createCherryPickCommitMessage
+    old_footers = self._GetFooters(msg)
+
+    if not old_footers:
+      # Doesn't end in a "Signed-off-by: ..." style line? Add another line
+      # break to start a new paragraph for the reviewed-by tag lines.
+      msg += '\n'
+
+    # This replicates the behavior of
+    # goto/createCherryPickCommitMessage, but can result in multiple
+    # Change-Id footers.  We should consider changing this behavior.
+    if ('Change-Id', self.change_id) not in old_footers and self.change_id:
+      msg += 'Change-Id: %s\n' % self.change_id
+
+    return msg
+
+  def _PullData(self, rev, git_repo):
+    """Returns info about a commit object in the local repository.
+
+    Args:
+      rev: The commit to find information about
+      git_repo: The path of the local git repository.
+
+    Returns:
+      A 6-tuple of (sha1, tree_hash, commit subject, commit message,
+      committer email, committer name).
+    """
+    f = '%H%x00%T%x00%s%x00%B%x00%ce%x00%cn'
+    cmd = ['log', '--pretty=format:%s' % f, '-n1', rev]
+    ret = git.RunGit(git_repo, cmd, error_code_ok=True)
+    # TODO(phobbs): this should probably use a namedtuple...
+    if ret.returncode != 0:
+      return None, None, None, None, None, None
+    output = ret.output.split('\0')
+    if len(output) != 6:
+      return None, None, None, None, None, None
+    return [unicode(x.strip(), 'ascii', 'ignore') for x in output]
+
+  def UpdateMetadataFromRepo(self, git_repo, sha1):
+    """Update this this object's metadata given a sha1.
+
+    This updates various internal fields such as the committer name and email,
+    the commit message, tree hash, etc.
+
+    Raises a PatchException if the found sha1 differs from self.sha1.
+
+    Args:
+      git_repo: The path to the git repository that this commit exists in.
+      sha1: The sha1 of the commit.  If None, assumes it was just fetched and
+        uses "FETCH_HEAD".
+
+    Returns:
+      The sha1 of the commit.
+    """
+    sha1 = sha1 or 'FETCH_HEAD'
+    sha1, tree_hash, subject, msg, email, name = self._PullData(sha1, git_repo)
+    sha1 = ParseSHA1(sha1, error_ok=False)
+
+    if self.sha1 is not None and sha1 != self.sha1:
+      # Even if we know the sha1, still do a sanity check to ensure we
+      # actually just fetched it.
+      raise PatchException(self,
+                           'Patch %s specifies sha1 %s, yet in fetching from '
+                           '%s we could not find that sha1.  Internal error '
+                           'most likely.' % (self, self.sha1, self.ref))
+
+    self._committer_email = email
+    self._committer_name = name
+    self.sha1 = sha1
+    self.tree_hash = tree_hash
+    self.commit_message = msg
+    self._EnsureId(self.commit_message)
+    self._subject_line = subject
+    self._is_fetched.add(git_repo)
+    return self.sha1
+
+  def HasBeenFetched(self, git_repo):
+    """Whether this patch has already exists locally in `git_repo`
+
+    Args:
+      git_repo: The git repository to fetch this patch into.
+
+    Returns:
+      If it exists, the sha1 of this patch in `git_repo`.
+    """
+    git_repo = os.path.normpath(git_repo)
+    if git_repo in self._is_fetched:
+      return self.sha1
+
+    # See if we've already got the object.
+    if self.sha1 is not None:
+      return self._PullData(self.sha1, git_repo)[0]
 
   def Fetch(self, git_repo):
     """Fetch this patch into the given git repository.
@@ -708,46 +882,13 @@ class GitRepoPatch(PatchQuery):
     Returns:
       The sha1 of the patch.
     """
-    git_repo = os.path.normpath(git_repo)
-    if git_repo in self._is_fetched:
-      return self.sha1
-
-    def _PullData(rev):
-      ret = git.RunGit(
-          git_repo, ['log', '--pretty=format:%H%x00%s%x00%B', '-n1', rev],
-          error_code_ok=True)
-      if ret.returncode != 0:
-        return None, None, None
-      output = ret.output.split('\0')
-      if len(output) != 3:
-        return None, None, None
-      return [unicode(x.strip(), 'ascii', 'ignore') for x in output]
-
-    sha1 = None
-    if self.sha1 is not None:
-      # See if we've already got the object.
-      sha1, subject, msg = _PullData(self.sha1)
+    sha1 = self.HasBeenFetched(git_repo)
 
     if sha1 is None:
       git.RunGit(git_repo, ['fetch', '-f', self.project_url, self.ref],
                  print_cmd=True)
-      sha1, subject, msg = _PullData(self.sha1 or 'FETCH_HEAD')
 
-    sha1 = ParseSHA1(sha1, error_ok=False)
-
-    if self.sha1 is not None and sha1 != self.sha1:
-      # Even if we know the sha1, still do a sanity check to ensure we
-      # actually just fetched it.
-      raise PatchException(self,
-                           'Patch %s specifies sha1 %s, yet in fetching from '
-                           '%s we could not find that sha1.  Internal error '
-                           'most likely.' % (self, self.sha1, self.ref))
-    self.sha1 = sha1
-    self._EnsureId(msg)
-    self.commit_message = msg
-    self._subject_line = subject
-    self._is_fetched.add(git_repo)
-    return self.sha1
+    return self.UpdateMetadataFromRepo(git_repo, sha1=sha1 or self.sha1)
 
   def GetDiffStatus(self, git_repo):
     """Isolate the paths and modifications this patch induces.
@@ -780,6 +921,13 @@ class GitRepoPatch(PatchQuery):
     lines = lines.output.splitlines()
     return dict(line.split('\t', 1)[::-1] for line in lines)
 
+  def _AmendCommitMessage(self, git_repo):
+    """"Amend the commit and update our sha1 with the new commit."""
+    git.RunGit(git_repo, ['commit', '--amend', '-m', self.commit_message],
+               extra_env={'GIT_COMMITTER_NAME': self._committer_name or '',
+                          'GIT_COMMITTER_EMAIL': self._committer_email or ''})
+    self.sha1 = ParseSHA1(self._PullData('HEAD', git_repo)[0], error_ok=False)
+
   def CherryPick(self, git_repo, trivial=False, inflight=False,
                  leave_dirty=False):
     """Attempts to cherry-pick the given rev into branch.
@@ -803,14 +951,13 @@ class GitRepoPatch(PatchQuery):
     reset_target = None if leave_dirty else 'HEAD'
     try:
       git.RunGit(git_repo, cmd)
+      self._AmendCommitMessage(git_repo)
       reset_target = None
       return
     except cros_build_lib.RunCommandError as error:
       ret = error.result.returncode
       if ret not in (1, 2):
-        cros_build_lib.Error(
-            'Unknown cherry-pick exit code %s; %s',
-            ret, error)
+        logging.error('Unknown cherry-pick exit code %s; %s', ret, error)
         raise ApplyPatchException(
             self, inflight=inflight,
             message=('Unknown exit code %s returned from cherry-pick '
@@ -868,7 +1015,7 @@ class GitRepoPatch(PatchQuery):
 
     self.Fetch(git_repo)
 
-    cros_build_lib.Info('Attempting to cherry-pick change %s', self)
+    logging.info('Attempting to cherry-pick change %s', self)
 
     # If the patch branch exists use it, otherwise create it and switch to it.
     if git.DoesCommitExistInRepo(git_repo, constants.PATCH_BRANCH):
@@ -954,7 +1101,7 @@ class GitRepoPatch(PatchQuery):
     try:
       self.change_id = self._ParseChangeId(commit_message)
     except BrokenChangeID:
-      cros_build_lib.Warning(
+      logging.warning(
           'Change %s, sha1 %s lacks a change-id in its commit '
           'message.  CQ-DEPEND against this rev may not work, nor '
           'will any gerrit querying.  Please add the appropriate '
@@ -1003,8 +1150,7 @@ class GitRepoPatch(PatchQuery):
     CQ-DEPEND=10001,10002
     """
     dependencies = []
-    cros_build_lib.Debug('Checking for CQ-DEPEND dependencies for change %s',
-                         self)
+    logging.debug('Checking for CQ-DEPEND dependencies for change %s', self)
 
     # Only fetch the commit message if needed.
     if self.commit_message is None:
@@ -1016,8 +1162,8 @@ class GitRepoPatch(PatchQuery):
       raise BrokenCQDepends(self, str(e))
 
     if dependencies:
-      cros_build_lib.Debug('Found %s Paladin dependencies for change %s',
-                           dependencies, self)
+      logging.debug('Found %s Paladin dependencies for change %s',
+                    dependencies, self)
     return dependencies
 
   def _FindEbuildConflicts(self, git_repo, upstream, inflight=False):
@@ -1121,8 +1267,8 @@ class GitRepoPatch(PatchQuery):
       The local SHA1 for this patch, if it is present in the given |manifest|.
       If this patch is not present, returns None.
     """
-    match = '\n'.join(x for x in self.commit_message.split('\n') if x)
-    cmd = ['log', '-F', '--all-match', '--grep', match,
+    query = 'Change-Id: %s' % self.change_id
+    cmd = ['log', '-F', '--all-match', '--grep', query,
            '--format=%H', '%s..HEAD' % revision]
     output = git.RunGit(git_repo, cmd).output.split()
     if len(output) == 1:
@@ -1222,30 +1368,39 @@ class LocalPatch(GitRepoPatch):
       ref_to_upload = self.sha1
 
     cmd = ['push']
+
+    # This matches repo's project.py:Project.UploadForReview logic.
     if reviewers or cc:
-      pack = '--receive-pack=git receive-pack '
-      if reviewers:
-        pack += ' '.join(['--reviewer=' + x for x in reviewers])
-      if cc:
-        pack += ' '.join(['--cc=' + x for x in cc])
-      cmd.append(pack)
+      if push_url.startswith('ssh://'):
+        rp = (['gerrit receive-pack'] +
+              ['--reviewer=%s' % x for x in reviewers] +
+              ['--cc=%s' % x for x in cc])
+        cmd.append('--receive-pack=%s' % ' '.join(rp))
+      else:
+        rp = ['r=%s' % x for x in reviewers] + ['cc=%s' % x for x in cc]
+        remote_ref += '%' + ','.join(rp)
+
     cmd += [push_url, '%s:%s' % (ref_to_upload, remote_ref)]
     if dryrun:
       cmd.append('--dry-run')
 
-    lines = git.RunGit(self.project_url, cmd).error.splitlines()
+    # Depending on git/gerrit/weather, the URL might be written to stdout or
+    # stderr.  Just combine them so we don't have to worry about it.
+    result = git.RunGit(self.project_url, cmd, capture_output=True,
+                        combine_stdout_stderr=True)
+    lines = result.output.splitlines()
     urls = []
     for num, line in enumerate(lines):
       # Look for output like:
       # remote: New Changes:
-      # remote:   https://chromium-review.googlesource.com/36756
+      # remote:   https://chromium-review.googlesource.com/36756 Enforce a ...
       if 'New Changes:' in line:
         urls = []
         for line in lines[num + 1:]:
           line = line.split()
-          if len(line) != 2 or not line[1].startswith('http'):
+          if len(line) < 2 or not line[1].startswith('http'):
             break
-          urls.append(line[-1])
+          urls.append(line[1])
         break
     return urls
 
@@ -1347,7 +1502,7 @@ class GerritFetchOnlyPatch(GitRepoPatch):
             % (self.change_id, self.sha1, parsed_id))
 
     except BrokenChangeID:
-      cros_build_lib.Warning(
+      logging.warning(
           'Change %s, Change-Id %s, sha1 %s lacks a change-id in its commit '
           'message.  This can break the ability for any children to depend on '
           'this Change as a parent.  Please add the appropriate '
@@ -1401,6 +1556,7 @@ class GerritPatch(GerritFetchOnlyPatch):
     self.approval_timestamp = max(
         self.commit_timestamp,
         max(x['grantedOn'] for x in self._approvals) if self._approvals else 0)
+    self._commit_message = None
     self.commit_message = patch_dict.get('commitMessage')
 
   @staticmethod
@@ -1421,9 +1577,9 @@ class GerritPatch(GerritFetchOnlyPatch):
       _convert_tm = lambda tm: calendar.timegm(
           time.strptime(tm.partition('.')[0], '%Y-%m-%d %H:%M:%S'))
       _convert_user = lambda u: {
-          'name': u.get('name', '??unknown??'),
+          'name': u.get('name'),
           'email': u.get('email'),
-          'username': u.get('name', '??unknown??'),
+          'username': u.get('name'),
       }
       change_id = change['change_id'].split('~')[-1]
       patch_dict = {
@@ -1612,6 +1768,33 @@ class GerritPatch(GerritFetchOnlyPatch):
     """Return a CL link for this patch."""
     return 'CL:%s' % (self.gerrit_number_str,)
 
+  def _AddFooters(self, msg):
+    """Ensure that commit messages have necessary Gerrit footers on the end.
+
+    Args:
+      msg: The commit message.
+
+    Returns:
+      The modified commit message with necessary Gerrit footers.
+    """
+    msg = super(GerritPatch, self)._AddFooters(msg)
+
+    # This function is adapted from the version in Gerrit:
+    # goto/createCherryPickCommitMessage
+    old_footers = self._GetFooters(msg)
+
+    gerrit_host = constants.GERRIT_HOSTS[self.remote]
+    reviewed_on = 'https://%s/%s' % (gerrit_host, self.gerrit_number)
+    if ('Reviewed-on', reviewed_on) not in old_footers:
+      msg += 'Reviewed-on: %s\n' % reviewed_on
+
+    for approval in self._approvals:
+      footer = FooterForApproval(approval, old_footers)
+      if footer and footer not in old_footers:
+        msg += '%s: %s\n' % footer
+
+    return msg
+
   def __str__(self):
     """Returns custom string to identify this patch."""
     s = '%s:%s' % (self.owner, self.gerrit_number_str)
@@ -1620,6 +1803,55 @@ class GerritPatch(GerritFetchOnlyPatch):
     if self._subject_line:
       s += ':"%s"' % (self._subject_line,)
     return s
+
+
+FOOTER_TAGS_BY_APPROVAL_TYPE = {
+    'CRVW': 'Reviewed-by',
+    'VRIF': 'Tested-by',
+    'COMR': 'Commit-Ready',
+    'TRY': None,
+    'SUBM': 'Submitted-by',
+}
+
+
+def FooterForApproval(approval, footers):
+  """Return a commit-message footer for a given approver.
+
+  Args:
+    approval: A dict containing the information about an approver
+    footers: A sequence of existing footers in the commit message.
+
+  Returns:
+    A 'footer', which is a tuple (tag, id).
+  """
+  if int(approval.get('value', 0)) <= 0:
+    # Negative votes aren't counted.
+    return
+
+  name = approval.get('by', {}).get('name')
+  email = approval.get('by', {}).get('email')
+  ident = ' '.join(x for x in [name, email and '<%s>' % email] if x)
+
+  # Nothing reasonable to describe them by? Ignore them.
+  if not ident:
+    return
+
+  # Don't bother adding additional footers if the CL has already been
+  # signed off.
+  if ('Signed-off-by', ident) in footers:
+    return
+
+  # If the tag is unknown, don't return anything at all.
+  if approval['type'] not in FOOTER_TAGS_BY_APPROVAL_TYPE:
+    logging.warn('unknown gerrit type %s (%r)', approval['type'], approval)
+    return
+
+  # We don't care about certain gerrit flags as they aren't approval related.
+  tag = FOOTER_TAGS_BY_APPROVAL_TYPE[approval['type']]
+  if not tag:
+    return
+
+  return tag, ident
 
 
 def GeneratePatchesFromRepo(git_repo, project, tracking_branch, branch, remote,

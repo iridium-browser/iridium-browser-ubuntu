@@ -38,6 +38,7 @@
 #include "core/dom/DocumentMarker.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/IconURL.h"
+#include "core/editing/SelectionType.h"
 #include "core/editing/TextAffinity.h"
 #include "core/fileapi/FileError.h"
 #include "core/frame/Settings.h"
@@ -47,13 +48,12 @@
 #include "core/html/HTMLMediaElement.h"
 #include "core/html/shadow/TextControlInnerElements.h"
 #include "core/layout/compositing/CompositedSelectionBound.h"
-#include "core/style/ComputedStyleConstants.h"
 #include "core/loader/FrameLoaderClient.h"
 #include "core/loader/FrameLoaderTypes.h"
 #include "core/loader/NavigationPolicy.h"
 #include "core/loader/appcache/ApplicationCacheHost.h"
-#include "core/page/InjectedStyleSheets.h"
 #include "core/page/PageVisibilityState.h"
+#include "core/style/ComputedStyleConstants.h"
 #include "modules/accessibility/AXObject.h"
 #include "modules/geolocation/GeolocationError.h"
 #include "modules/geolocation/GeolocationPosition.h"
@@ -87,14 +87,7 @@
 #include "public/platform/WebFileError.h"
 #include "public/platform/WebFileInfo.h"
 #include "public/platform/WebFileSystem.h"
-#include "public/platform/WebIDBCursor.h"
-#include "public/platform/WebIDBDatabase.h"
-#include "public/platform/WebIDBDatabaseException.h"
-#include "public/platform/WebIDBFactory.h"
-#include "public/platform/WebIDBKey.h"
-#include "public/platform/WebIDBKeyPath.h"
-#include "public/platform/WebIDBMetadata.h"
-#include "public/platform/WebIDBTypes.h"
+#include "public/platform/WebHistoryScrollRestorationType.h"
 #include "public/platform/WebMediaPlayer.h"
 #include "public/platform/WebMediaPlayerClient.h"
 #include "public/platform/WebMediaSource.h"
@@ -108,6 +101,14 @@
 #include "public/platform/WebStorageQuotaType.h"
 #include "public/platform/WebURLRequest.h"
 #include "public/platform/WebURLResponse.h"
+#include "public/platform/modules/indexeddb/WebIDBCursor.h"
+#include "public/platform/modules/indexeddb/WebIDBDatabase.h"
+#include "public/platform/modules/indexeddb/WebIDBDatabaseException.h"
+#include "public/platform/modules/indexeddb/WebIDBFactory.h"
+#include "public/platform/modules/indexeddb/WebIDBKey.h"
+#include "public/platform/modules/indexeddb/WebIDBKeyPath.h"
+#include "public/platform/modules/indexeddb/WebIDBMetadata.h"
+#include "public/platform/modules/indexeddb/WebIDBTypes.h"
 #include "public/web/WebAXEnums.h"
 #include "public/web/WebAXObject.h"
 #include "public/web/WebConsoleMessage.h"
@@ -126,6 +127,7 @@
 #include "public/web/WebNavigatorContentUtilsClient.h"
 #include "public/web/WebSandboxFlags.h"
 #include "public/web/WebSecurityPolicy.h"
+#include "public/web/WebSelection.h"
 #include "public/web/WebSerializedScriptValueVersion.h"
 #include "public/web/WebSettings.h"
 #include "public/web/WebSpeechRecognizerClient.h"
@@ -281,7 +283,6 @@ STATIC_ASSERT_MATCHING_ENUM(WebAXRoleTabPanel, TabPanelRole);
 STATIC_ASSERT_MATCHING_ENUM(WebAXRoleTab, TabRole);
 STATIC_ASSERT_MATCHING_ENUM(WebAXRoleTableHeaderContainer, TableHeaderContainerRole);
 STATIC_ASSERT_MATCHING_ENUM(WebAXRoleTable, TableRole);
-STATIC_ASSERT_MATCHING_ENUM(WebAXRoleTextArea, TextAreaRole);
 STATIC_ASSERT_MATCHING_ENUM(WebAXRoleTextField, TextFieldRole);
 STATIC_ASSERT_MATCHING_ENUM(WebAXRoleTime, TimeRole);
 STATIC_ASSERT_MATCHING_ENUM(WebAXRoleTimer, TimerRole);
@@ -306,6 +307,7 @@ STATIC_ASSERT_MATCHING_ENUM(WebAXStateHovered, AXHoveredState);
 STATIC_ASSERT_MATCHING_ENUM(WebAXStateIndeterminate, AXIndeterminateState);
 STATIC_ASSERT_MATCHING_ENUM(WebAXStateInvisible, AXInvisibleState);
 STATIC_ASSERT_MATCHING_ENUM(WebAXStateLinked, AXLinkedState);
+STATIC_ASSERT_MATCHING_ENUM(WebAXStateMultiline, AXMultilineState);
 STATIC_ASSERT_MATCHING_ENUM(WebAXStateMultiselectable, AXMultiselectableState);
 STATIC_ASSERT_MATCHING_ENUM(WebAXStateOffscreen, AXOffscreenState);
 STATIC_ASSERT_MATCHING_ENUM(WebAXStatePressed, AXPressedState);
@@ -317,10 +319,10 @@ STATIC_ASSERT_MATCHING_ENUM(WebAXStateSelected, AXSelectedState);
 STATIC_ASSERT_MATCHING_ENUM(WebAXStateVertical, AXVerticalState);
 STATIC_ASSERT_MATCHING_ENUM(WebAXStateVisited, AXVisitedState);
 
-STATIC_ASSERT_MATCHING_ENUM(WebAXTextDirectionLR, AccessibilityTextDirectionLeftToRight);
-STATIC_ASSERT_MATCHING_ENUM(WebAXTextDirectionRL, AccessibilityTextDirectionRightToLeft);
-STATIC_ASSERT_MATCHING_ENUM(WebAXTextDirectionTB, AccessibilityTextDirectionTopToBottom);
-STATIC_ASSERT_MATCHING_ENUM(WebAXTextDirectionBT, AccessibilityTextDirectionBottomToTop);
+STATIC_ASSERT_MATCHING_ENUM(WebAXTextDirectionLR, AccessibilityTextDirectionLTR);
+STATIC_ASSERT_MATCHING_ENUM(WebAXTextDirectionRL, AccessibilityTextDirectionRTL);
+STATIC_ASSERT_MATCHING_ENUM(WebAXTextDirectionTB, AccessibilityTextDirectionTTB);
+STATIC_ASSERT_MATCHING_ENUM(WebAXTextDirectionBT, AccessibilityTextDirectionBTT);
 
 STATIC_ASSERT_MATCHING_ENUM(WebAXSortDirectionUndefined, SortDirectionUndefined);
 STATIC_ASSERT_MATCHING_ENUM(WebAXSortDirectionNone, SortDirectionNone);
@@ -346,6 +348,20 @@ STATIC_ASSERT_MATCHING_ENUM(WebAXInvalidStateTrue, InvalidStateTrue);
 STATIC_ASSERT_MATCHING_ENUM(WebAXInvalidStateSpelling, InvalidStateSpelling);
 STATIC_ASSERT_MATCHING_ENUM(WebAXInvalidStateGrammar, InvalidStateGrammar);
 STATIC_ASSERT_MATCHING_ENUM(WebAXInvalidStateOther, InvalidStateOther);
+
+STATIC_ASSERT_MATCHING_ENUM(WebAXTextStyleNone, TextStyleNone);
+STATIC_ASSERT_MATCHING_ENUM(WebAXTextStyleBold, TextStyleBold);
+STATIC_ASSERT_MATCHING_ENUM(WebAXTextStyleItalic, TextStyleItalic);
+STATIC_ASSERT_MATCHING_ENUM(WebAXTextStyleUnderline, TextStyleUnderline);
+STATIC_ASSERT_MATCHING_ENUM(WebAXTextStyleLineThrough, TextStyleLineThrough);
+
+STATIC_ASSERT_MATCHING_ENUM(WebAXNameFromAttribute, AXNameFromAttribute);
+STATIC_ASSERT_MATCHING_ENUM(WebAXNameFromContents, AXNameFromContents);
+STATIC_ASSERT_MATCHING_ENUM(WebAXNameFromPlaceholder, AXNameFromPlaceholder);
+STATIC_ASSERT_MATCHING_ENUM(WebAXNameFromRelatedElement, AXNameFromRelatedElement);
+
+STATIC_ASSERT_MATCHING_ENUM(WebAXDescriptionFromPlaceholder, AXDescriptionFromPlaceholder);
+STATIC_ASSERT_MATCHING_ENUM(WebAXDescriptionFromRelatedElement, AXDescriptionFromRelatedElement);
 
 STATIC_ASSERT_MATCHING_ENUM(WebApplicationCacheHost::Uncached, ApplicationCacheHost::UNCACHED);
 STATIC_ASSERT_MATCHING_ENUM(WebApplicationCacheHost::Idle, ApplicationCacheHost::IDLE);
@@ -500,9 +516,6 @@ STATIC_ASSERT_MATCHING_ENUM(WebSettings::EditingBehaviorAndroid, EditingAndroidB
 STATIC_ASSERT_MATCHING_ENUM(WebTextAffinityUpstream, UPSTREAM);
 STATIC_ASSERT_MATCHING_ENUM(WebTextAffinityDownstream, DOWNSTREAM);
 
-STATIC_ASSERT_MATCHING_ENUM(WebView::InjectStyleInAllFrames, InjectStyleInAllFrames);
-STATIC_ASSERT_MATCHING_ENUM(WebView::InjectStyleInTopFrameOnly, InjectStyleInTopFrameOnly);
-
 STATIC_ASSERT_MATCHING_ENUM(WebIDBDatabaseExceptionUnknownError, UnknownError);
 STATIC_ASSERT_MATCHING_ENUM(WebIDBDatabaseExceptionConstraintError, ConstraintError);
 STATIC_ASSERT_MATCHING_ENUM(WebIDBDatabaseExceptionDataError, DataError);
@@ -631,6 +644,9 @@ STATIC_ASSERT_MATCHING_ENUM(WebHistoryInertCommit, HistoryInertCommit);
 STATIC_ASSERT_MATCHING_ENUM(WebHistorySameDocumentLoad, HistorySameDocumentLoad);
 STATIC_ASSERT_MATCHING_ENUM(WebHistoryDifferentDocumentLoad, HistoryDifferentDocumentLoad);
 
+STATIC_ASSERT_MATCHING_ENUM(WebHistoryScrollRestorationManual, ScrollRestorationManual);
+STATIC_ASSERT_MATCHING_ENUM(WebHistoryScrollRestorationAuto, ScrollRestorationAuto);
+
 STATIC_ASSERT_MATCHING_ENUM(WebConsoleMessage::LevelDebug, DebugMessageLevel);
 STATIC_ASSERT_MATCHING_ENUM(WebConsoleMessage::LevelLog, LogMessageLevel);
 STATIC_ASSERT_MATCHING_ENUM(WebConsoleMessage::LevelWarning, WarningMessageLevel);
@@ -643,13 +659,17 @@ STATIC_ASSERT_MATCHING_ENUM(WebCustomHandlersDeclined, NavigatorContentUtilsClie
 
 STATIC_ASSERT_MATCHING_ENUM(WebTouchActionNone, TouchActionNone);
 STATIC_ASSERT_MATCHING_ENUM(WebTouchActionAuto, TouchActionAuto);
+STATIC_ASSERT_MATCHING_ENUM(WebTouchActionPanLeft, TouchActionPanLeft);
+STATIC_ASSERT_MATCHING_ENUM(WebTouchActionPanRight, TouchActionPanRight);
 STATIC_ASSERT_MATCHING_ENUM(WebTouchActionPanX, TouchActionPanX);
+STATIC_ASSERT_MATCHING_ENUM(WebTouchActionPanUp, TouchActionPanUp);
+STATIC_ASSERT_MATCHING_ENUM(WebTouchActionPanDown, TouchActionPanDown);
 STATIC_ASSERT_MATCHING_ENUM(WebTouchActionPanY, TouchActionPanY);
 STATIC_ASSERT_MATCHING_ENUM(WebTouchActionPinchZoom, TouchActionPinchZoom);
 
-STATIC_ASSERT_MATCHING_ENUM(WebSelectionBound::Caret, CompositedSelectionBound::Caret);
-STATIC_ASSERT_MATCHING_ENUM(WebSelectionBound::SelectionLeft, CompositedSelectionBound::SelectionLeft);
-STATIC_ASSERT_MATCHING_ENUM(WebSelectionBound::SelectionRight, CompositedSelectionBound::SelectionRight);
+STATIC_ASSERT_MATCHING_ENUM(WebSelection::NoSelection, NoSelection);
+STATIC_ASSERT_MATCHING_ENUM(WebSelection::CaretSelection, CaretSelection);
+STATIC_ASSERT_MATCHING_ENUM(WebSelection::RangeSelection, RangeSelection);
 
 STATIC_ASSERT_MATCHING_ENUM(WebSettings::ImageAnimationPolicyAllowed, ImageAnimationPolicyAllowed);
 STATIC_ASSERT_MATCHING_ENUM(WebSettings::ImageAnimationPolicyAnimateOnce, ImageAnimationPolicyAnimateOnce);

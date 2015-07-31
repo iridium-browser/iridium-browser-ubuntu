@@ -5,6 +5,7 @@
 #ifndef CSSAnimationUpdate_h
 #define CSSAnimationUpdate_h
 
+#include "core/animation/AnimationStack.h"
 #include "core/animation/Interpolation.h"
 #include "core/animation/KeyframeEffectModel.h"
 #include "core/animation/css/CSSAnimatableValueFactory.h"
@@ -17,8 +18,8 @@
 
 namespace blink {
 
-class AnimationPlayer;
-class InertAnimation;
+class Animation;
+class InertEffect;
 
 // This class stores the CSS Animations/Transitions information we use during a style recalc.
 // This includes updates to animations/transitions as well as the Interpolations to be applied.
@@ -32,9 +33,9 @@ public:
         {
         }
 
-        NewAnimation(AtomicString name, PassRefPtrWillBeRawPtr<InertAnimation> animation, Timing timing, PassRefPtrWillBeRawPtr<StyleRuleKeyframes> styleRule)
+        NewAnimation(AtomicString name, PassRefPtrWillBeRawPtr<InertEffect> effect, Timing timing, PassRefPtrWillBeRawPtr<StyleRuleKeyframes> styleRule)
             : name(name)
-            , animation(animation)
+            , effect(effect)
             , timing(timing)
             , styleRule(styleRule)
             , styleRuleVersion(this->styleRule->version())
@@ -43,12 +44,12 @@ public:
 
         DEFINE_INLINE_TRACE()
         {
-            visitor->trace(animation);
+            visitor->trace(effect);
             visitor->trace(styleRule);
         }
 
         AtomicString name;
-        RefPtrWillBeMember<InertAnimation> animation;
+        RefPtrWillBeMember<InertEffect> effect;
         Timing timing;
         RefPtrWillBeMember<StyleRuleKeyframes> styleRule;
         unsigned styleRuleVersion;
@@ -62,10 +63,10 @@ public:
         {
         }
 
-        UpdatedAnimation(AtomicString name, AnimationPlayer* player, PassRefPtrWillBeRawPtr<InertAnimation> animation, Timing specifiedTiming, PassRefPtrWillBeRawPtr<StyleRuleKeyframes> styleRule)
+        UpdatedAnimation(AtomicString name, Animation* animation, PassRefPtrWillBeRawPtr<InertEffect> effect, Timing specifiedTiming, PassRefPtrWillBeRawPtr<StyleRuleKeyframes> styleRule)
             : name(name)
-            , player(player)
             , animation(animation)
+            , effect(effect)
             , specifiedTiming(specifiedTiming)
             , styleRule(styleRule)
             , styleRuleVersion(this->styleRule->version())
@@ -74,14 +75,14 @@ public:
 
         DEFINE_INLINE_TRACE()
         {
-            visitor->trace(player);
             visitor->trace(animation);
+            visitor->trace(effect);
             visitor->trace(styleRule);
         }
 
         AtomicString name;
-        RawPtrWillBeMember<AnimationPlayer> player;
-        RefPtrWillBeMember<InertAnimation> animation;
+        RawPtrWillBeMember<Animation> animation;
+        RefPtrWillBeMember<InertEffect> effect;
         Timing specifiedTiming;
         RefPtrWillBeMember<StyleRuleKeyframes> styleRule;
         unsigned styleRuleVersion;
@@ -110,72 +111,71 @@ public:
         {
         }
 
-        UpdatedAnimationStyle(AnimationPlayer* player, KeyframeEffectModelBase* effect, const UpdatedAnimationStyle::CompositableStyleSnapshot& snapshot)
-            : player(player)
-            , effect(effect)
+        UpdatedAnimationStyle(Animation* animation, KeyframeEffectModelBase* model, const UpdatedAnimationStyle::CompositableStyleSnapshot& snapshot)
+            : animation(animation)
+            , model(model)
             , snapshot(snapshot)
         {
         }
 
         DEFINE_INLINE_TRACE()
         {
-            visitor->trace(player);
-            visitor->trace(effect);
+            visitor->trace(animation);
+            visitor->trace(model);
             visitor->trace(snapshot);
         }
 
-        RawPtrWillBeMember<AnimationPlayer> player;
-        RawPtrWillBeMember<KeyframeEffectModelBase> effect;
+        RawPtrWillBeMember<Animation> animation;
+        RawPtrWillBeMember<KeyframeEffectModelBase> model;
         CompositableStyleSnapshot snapshot;
     };
 
-    void startAnimation(const AtomicString& animationName, PassRefPtrWillBeRawPtr<InertAnimation> animation, const Timing& timing, PassRefPtrWillBeRawPtr<StyleRuleKeyframes> styleRule)
+    void startAnimation(const AtomicString& animationName, PassRefPtrWillBeRawPtr<InertEffect> effect, const Timing& timing, PassRefPtrWillBeRawPtr<StyleRuleKeyframes> styleRule)
     {
-        animation->setName(animationName);
-        m_newAnimations.append(NewAnimation(animationName, animation, timing, styleRule));
+        effect->setName(animationName);
+        m_newAnimations.append(NewAnimation(animationName, effect, timing, styleRule));
     }
-    // Returns whether player has been suppressed and should be filtered during style application.
-    bool isSuppressedAnimation(const AnimationPlayer* player) const { return m_suppressedAnimationPlayers.contains(player); }
-    void cancelAnimation(const AtomicString& name, AnimationPlayer& player)
+    // Returns whether animation has been suppressed and should be filtered during style application.
+    bool isSuppressedAnimation(const Animation* animation) const { return m_suppressedAnimations.contains(animation); }
+    void cancelAnimation(const AtomicString& name, Animation& animation)
     {
         m_cancelledAnimationNames.append(name);
-        m_suppressedAnimationPlayers.add(&player);
+        m_suppressedAnimations.add(&animation);
     }
     void toggleAnimationPaused(const AtomicString& name)
     {
         m_animationsWithPauseToggled.append(name);
     }
-    void updateAnimation(const AtomicString& name, AnimationPlayer* player, PassRefPtrWillBeRawPtr<InertAnimation> animation, const Timing& specifiedTiming,
+    void updateAnimation(const AtomicString& name, Animation* animation, PassRefPtrWillBeRawPtr<InertEffect> effect, const Timing& specifiedTiming,
         PassRefPtrWillBeRawPtr<StyleRuleKeyframes> styleRule)
     {
-        m_animationsWithUpdates.append(UpdatedAnimation(name, player, animation, specifiedTiming, styleRule));
-        m_suppressedAnimationPlayers.add(player);
+        m_animationsWithUpdates.append(UpdatedAnimation(name, animation, effect, specifiedTiming, styleRule));
+        m_suppressedAnimations.add(animation);
     }
-    void updateAnimationStyle(AnimationPlayer* player, KeyframeEffectModelBase* effect, LayoutObject* renderer, const ComputedStyle& newStyle)
+    void updateAnimationStyle(Animation* animation, KeyframeEffectModelBase* model, LayoutObject* layoutObject, const ComputedStyle& newStyle)
     {
         UpdatedAnimationStyle::CompositableStyleSnapshot snapshot;
-        if (renderer) {
-            const ComputedStyle& oldStyle = renderer->styleRef();
-            if (!CSSPropertyEquality::propertiesEqual(CSSPropertyOpacity, oldStyle, newStyle) && effect->affects(CSSPropertyOpacity))
+        if (layoutObject) {
+            const ComputedStyle& oldStyle = layoutObject->styleRef();
+            if (!CSSPropertyEquality::propertiesEqual(CSSPropertyOpacity, oldStyle, newStyle) && model->affects(PropertyHandle(CSSPropertyOpacity)))
                 snapshot.opacity = CSSAnimatableValueFactory::create(CSSPropertyOpacity, newStyle);
-            if (!CSSPropertyEquality::propertiesEqual(CSSPropertyTransform, oldStyle, newStyle) && effect->affects(CSSPropertyTransform))
+            if (!CSSPropertyEquality::propertiesEqual(CSSPropertyTransform, oldStyle, newStyle) && model->affects(PropertyHandle(CSSPropertyTransform)))
                 snapshot.transform = CSSAnimatableValueFactory::create(CSSPropertyTransform, newStyle);
-            if (!CSSPropertyEquality::propertiesEqual(CSSPropertyWebkitFilter, oldStyle, newStyle) && effect->affects(CSSPropertyWebkitFilter))
+            if (!CSSPropertyEquality::propertiesEqual(CSSPropertyWebkitFilter, oldStyle, newStyle) && model->affects(PropertyHandle(CSSPropertyWebkitFilter)))
                 snapshot.webkitFilter = CSSAnimatableValueFactory::create(CSSPropertyWebkitFilter, newStyle);
         }
 
-        m_animationsWithStyleUpdates.append(UpdatedAnimationStyle(player, effect, snapshot));
+        m_animationsWithStyleUpdates.append(UpdatedAnimationStyle(animation, model, snapshot));
     }
 
-    void startTransition(CSSPropertyID id, CSSPropertyID eventId, const AnimatableValue* from, const AnimatableValue* to, PassRefPtrWillBeRawPtr<InertAnimation> animation)
+    void startTransition(CSSPropertyID id, const AnimatableValue* from, const AnimatableValue* to, PassRefPtrWillBeRawPtr<InertEffect> effect)
     {
-        animation->setName(getPropertyName(id));
+        effect->setName(getPropertyName(id));
         NewTransition newTransition;
         newTransition.id = id;
-        newTransition.eventId = eventId;
         newTransition.from = from;
         newTransition.to = to;
-        newTransition.animation = animation;
+        newTransition.effect = effect;
         m_newTransitions.set(id, newTransition);
     }
     bool isCancelledTransition(CSSPropertyID id) const { return m_cancelledTransitions.contains(id); }
@@ -184,7 +184,7 @@ public:
 
     const WillBeHeapVector<NewAnimation>& newAnimations() const { return m_newAnimations; }
     const Vector<AtomicString>& cancelledAnimationNames() const { return m_cancelledAnimationNames; }
-    const WillBeHeapHashSet<RawPtrWillBeMember<const AnimationPlayer>>& suppressedAnimationAnimationPlayers() const { return m_suppressedAnimationPlayers; }
+    const WillBeHeapHashSet<RawPtrWillBeMember<const Animation>>& suppressedAnimations() const { return m_suppressedAnimations; }
     const Vector<AtomicString>& animationsWithPauseToggled() const { return m_animationsWithPauseToggled; }
     const WillBeHeapVector<UpdatedAnimation>& animationsWithUpdates() const { return m_animationsWithUpdates; }
     const WillBeHeapVector<UpdatedAnimationStyle>& animationsWithStyleUpdates() const { return m_animationsWithStyleUpdates; }
@@ -196,31 +196,30 @@ public:
         {
             visitor->trace(from);
             visitor->trace(to);
-            visitor->trace(animation);
+            visitor->trace(effect);
         }
 
         CSSPropertyID id;
-        CSSPropertyID eventId;
         RawPtrWillBeMember<const AnimatableValue> from;
         RawPtrWillBeMember<const AnimatableValue> to;
-        RefPtrWillBeMember<InertAnimation> animation;
+        RefPtrWillBeMember<InertEffect> effect;
     };
     using NewTransitionMap = WillBeHeapHashMap<CSSPropertyID, NewTransition>;
     const NewTransitionMap& newTransitions() const { return m_newTransitions; }
     const HashSet<CSSPropertyID>& cancelledTransitions() const { return m_cancelledTransitions; }
     const HashSet<CSSPropertyID>& finishedTransitions() const { return m_finishedTransitions; }
 
-    void adoptActiveInterpolationsForAnimations(WillBeHeapHashMap<CSSPropertyID, RefPtrWillBeMember<Interpolation>>& newMap) { newMap.swap(m_activeInterpolationsForAnimations); }
-    void adoptActiveInterpolationsForTransitions(WillBeHeapHashMap<CSSPropertyID, RefPtrWillBeMember<Interpolation>>& newMap) { newMap.swap(m_activeInterpolationsForTransitions); }
-    const WillBeHeapHashMap<CSSPropertyID, RefPtrWillBeMember<Interpolation>>& activeInterpolationsForAnimations() const { return m_activeInterpolationsForAnimations; }
-    const WillBeHeapHashMap<CSSPropertyID, RefPtrWillBeMember<Interpolation>>& activeInterpolationsForTransitions() const { return m_activeInterpolationsForTransitions; }
-    WillBeHeapHashMap<CSSPropertyID, RefPtrWillBeMember<Interpolation>>& activeInterpolationsForAnimations() { return m_activeInterpolationsForAnimations; }
+    void adoptActiveInterpolationsForAnimations(ActiveInterpolationMap& newMap) { newMap.swap(m_activeInterpolationsForAnimations); }
+    void adoptActiveInterpolationsForTransitions(ActiveInterpolationMap& newMap) { newMap.swap(m_activeInterpolationsForTransitions); }
+    const ActiveInterpolationMap& activeInterpolationsForAnimations() const { return m_activeInterpolationsForAnimations; }
+    const ActiveInterpolationMap& activeInterpolationsForTransitions() const { return m_activeInterpolationsForTransitions; }
+    ActiveInterpolationMap& activeInterpolationsForAnimations() { return m_activeInterpolationsForAnimations; }
 
     bool isEmpty() const
     {
         return m_newAnimations.isEmpty()
             && m_cancelledAnimationNames.isEmpty()
-            && m_suppressedAnimationPlayers.isEmpty()
+            && m_suppressedAnimations.isEmpty()
             && m_animationsWithPauseToggled.isEmpty()
             && m_animationsWithUpdates.isEmpty()
             && m_animationsWithStyleUpdates.isEmpty()
@@ -240,7 +239,7 @@ private:
     // incomplete keyframes.
     WillBeHeapVector<NewAnimation> m_newAnimations;
     Vector<AtomicString> m_cancelledAnimationNames;
-    WillBeHeapHashSet<RawPtrWillBeMember<const AnimationPlayer>> m_suppressedAnimationPlayers;
+    WillBeHeapHashSet<RawPtrWillBeMember<const Animation>> m_suppressedAnimations;
     Vector<AtomicString> m_animationsWithPauseToggled;
     WillBeHeapVector<UpdatedAnimation> m_animationsWithUpdates;
     WillBeHeapVector<UpdatedAnimationStyle> m_animationsWithStyleUpdates;
@@ -249,13 +248,14 @@ private:
     HashSet<CSSPropertyID> m_cancelledTransitions;
     HashSet<CSSPropertyID> m_finishedTransitions;
 
-    WillBeHeapHashMap<CSSPropertyID, RefPtrWillBeMember<Interpolation>> m_activeInterpolationsForAnimations;
-    WillBeHeapHashMap<CSSPropertyID, RefPtrWillBeMember<Interpolation>> m_activeInterpolationsForTransitions;
+    ActiveInterpolationMap m_activeInterpolationsForAnimations;
+    ActiveInterpolationMap m_activeInterpolationsForTransitions;
 };
 
 } // namespace blink
 
 WTF_ALLOW_INIT_WITH_MEM_FUNCTIONS(blink::CSSAnimationUpdate::NewAnimation);
 WTF_ALLOW_INIT_WITH_MEM_FUNCTIONS(blink::CSSAnimationUpdate::UpdatedAnimation);
+WTF_ALLOW_INIT_WITH_MEM_FUNCTIONS(blink::CSSAnimationUpdate::UpdatedAnimationStyle);
 
 #endif

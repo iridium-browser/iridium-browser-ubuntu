@@ -7,10 +7,10 @@
 #include "base/bind_helpers.h"
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_vector.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/stringprintf.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "base/version.h"
 #include "chrome/browser/apps/ephemeral_app_launcher.h"
@@ -427,7 +427,7 @@ void WebstorePrivateBeginInstallWithManifest3Function::InstallUIProceedHook() {
   // for all extension installs, so we only need to record the web store
   // specific histogram here.
   ExtensionService::RecordPermissionMessagesHistogram(
-      dummy_extension().get(), "Extensions.Permissions_WebStoreInstall2");
+      dummy_extension().get(), "WebStoreInstall");
 }
 
 void WebstorePrivateBeginInstallWithManifest3Function::InstallUIAbortHook(
@@ -435,14 +435,12 @@ void WebstorePrivateBeginInstallWithManifest3Function::InstallUIAbortHook(
   // The web store install histograms are a subset of the install histograms.
   // We need to record both histograms here since CrxInstaller::InstallUIAbort
   // is never called for web store install cancellations.
-  std::string histogram_name =
-      user_initiated ? "Extensions.Permissions_WebStoreInstallCancel2"
-                     : "Extensions.Permissions_WebStoreInstallAbort2";
+  std::string histogram_name = user_initiated ? "WebStoreInstallCancel"
+                                              : "WebStoreInstallAbort";
   ExtensionService::RecordPermissionMessagesHistogram(dummy_extension().get(),
                                                       histogram_name.c_str());
 
-  histogram_name = user_initiated ? "Extensions.Permissions_InstallCancel2"
-                                  : "Extensions.Permissions_InstallAbort2";
+  histogram_name = user_initiated ? "InstallCancel" : "InstallAbort";
   ExtensionService::RecordPermissionMessagesHistogram(dummy_extension().get(),
                                                       histogram_name.c_str());
 }
@@ -621,7 +619,7 @@ ExtensionFunction::ResponseAction WebstorePrivateInstallBundleFunction::Run() {
         net::URLRequest::CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE,
         net::LOAD_DO_NOT_SAVE_COOKIES | net::LOAD_DO_NOT_SEND_COOKIES);
   } else {
-    base::MessageLoopProxy::current()->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::Bind(&WebstorePrivateInstallBundleFunction::OnFetchComplete,
                    this, GURL(), nullptr));
@@ -769,8 +767,8 @@ ExtensionFunction::ResponseAction WebstorePrivateGetWebGLStatusFunction::Run() {
 
 void WebstorePrivateGetWebGLStatusFunction::OnFeatureCheck(
     bool feature_allowed) {
-  Respond(ArgumentList(GetWebGLStatus::Results::Create(
-      GetWebGLStatus::Results::ParseWebgl_status(
+  Respond(ArgumentList(
+      GetWebGLStatus::Results::Create(api::webstore_private::ParseWebGlStatus(
           feature_allowed ? "webgl_allowed" : "webgl_blocked"))));
 }
 

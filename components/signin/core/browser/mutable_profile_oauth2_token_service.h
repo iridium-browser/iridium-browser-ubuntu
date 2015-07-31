@@ -11,6 +11,7 @@
 #include "components/signin/core/browser/signin_error_controller.h"
 #include "components/webdata/common/web_data_service_base.h"
 #include "components/webdata/common/web_data_service_consumer.h"
+#include "net/base/backoff_entry.h"
 
 // A specialization of ProfileOAuth2TokenService that can can mutate its OAuth2
 // tokens.
@@ -52,7 +53,6 @@ class MutableProfileOAuth2TokenService : public ProfileOAuth2TokenService,
 
     // SigninErrorController::AuthStatusProvider implementation.
     std::string GetAccountId() const override;
-    std::string GetUsername() const override;
     GoogleServiceAuthError GetAuthStatus() const override;
 
    private:
@@ -88,7 +88,7 @@ class MutableProfileOAuth2TokenService : public ProfileOAuth2TokenService,
 
   virtual std::string GetRefreshToken(const std::string& account_id) const;
 
-  bool HasPermanentError(const std::string& account_id);
+  bool HasPersistentError(const std::string& account_id);
 
   AccountInfoMap& refresh_tokens() { return refresh_tokens_; }
 
@@ -105,6 +105,10 @@ class MutableProfileOAuth2TokenService : public ProfileOAuth2TokenService,
                            CanonicalizeAccountId);
   FRIEND_TEST_ALL_PREFIXES(MutableProfileOAuth2TokenServiceTest,
                            FetchPersistentError);
+  FRIEND_TEST_ALL_PREFIXES(MutableProfileOAuth2TokenServiceTest,
+                           RetryBackoff);
+  FRIEND_TEST_ALL_PREFIXES(MutableProfileOAuth2TokenServiceTest,
+                           CanonAndNonCanonAccountId);
 
   // WebDataServiceConsumer implementation:
   void OnWebDataServiceRequestDone(WebDataServiceBase::Handle handle,
@@ -144,6 +148,11 @@ class MutableProfileOAuth2TokenService : public ProfileOAuth2TokenService,
   // Used to verify that certain methods are called only on the thread on which
   // this instance was created.
   base::ThreadChecker thread_checker_;
+
+  // Used to rate-limit network token requests so as to not overload the server.
+  net::BackoffEntry::Policy backoff_policy_;
+  net::BackoffEntry backoff_entry_;
+  GoogleServiceAuthError backoff_error_;
 
   DISALLOW_COPY_AND_ASSIGN(MutableProfileOAuth2TokenService);
 };

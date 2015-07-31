@@ -71,8 +71,10 @@ __attribute__((section(SEG_DATA ",__crashpad_info"),
 
 #elif defined(OS_WIN)
 
-// TODO(scottmg): Tag in a way that makes it easy to locate on Windows.
-CrashpadInfo g_crashpad_info;
+// Put the struct in a section name CPADinfo where it can be found without the
+// symbol table.
+#pragma section("CPADinfo", read, write)
+__declspec(allocate("CPADinfo")) CrashpadInfo g_crashpad_info;
 
 #endif
 
@@ -90,7 +92,5 @@ CrashpadInfo::CrashpadInfo()
       padding_0_(0),
       simple_annotations_(nullptr) {
 }
-
-const uint32_t CrashpadInfo::kSignature;
 
 }  // namespace crashpad

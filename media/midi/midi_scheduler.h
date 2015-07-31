@@ -7,15 +7,18 @@
 
 #include "base/callback.h"
 #include "base/memory/weak_ptr.h"
+#include "media/midi/midi_export.h"
 
 namespace media {
+namespace midi {
 
+class MidiManager;
 class MidiManagerClient;
 
 // TODO(crbug.com/467442): Make tasks cancelable per client.
-class MidiScheduler final {
+class MIDI_EXPORT MidiScheduler final {
  public:
-  MidiScheduler();
+  explicit MidiScheduler(MidiManager* manager);
   ~MidiScheduler();
 
   // Post |closure| to the current message loop safely. The |closure| will not
@@ -27,13 +30,18 @@ class MidiScheduler final {
                         const base::Closure& closure);
 
  private:
-  void InvokeClosure(const base::Closure& closure);
+  void InvokeClosure(MidiManagerClient* client,
+                     size_t length,
+                     const base::Closure& closure);
 
+  // MidiManager should own the MidiScheduler and be alive longer.
+  MidiManager* manager_;
   base::WeakPtrFactory<MidiScheduler> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(MidiScheduler);
 };
 
+}  // namespace midi
 }  // namespace media
 
 #endif  // MEDIA_MIDI_MIDI_SCHEDULER_H_

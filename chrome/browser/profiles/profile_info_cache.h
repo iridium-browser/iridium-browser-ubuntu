@@ -46,7 +46,8 @@ class ProfileInfoCache : public ProfileInfoInterface,
   // be shown in the menu.
   void AddProfileToCache(const base::FilePath& profile_path,
                          const base::string16& name,
-                         const base::string16& username,
+                         const std::string& gaia_id,
+                         const base::string16& user_name,
                          size_t icon_index,
                          const std::string& supervised_user_id);
   void DeleteProfileFromCache(const base::FilePath& profile_path);
@@ -62,7 +63,7 @@ class ProfileInfoCache : public ProfileInfoInterface,
   base::FilePath GetPathOfProfileAtIndex(size_t index) const override;
   base::Time GetProfileActiveTimeAtIndex(size_t index) const override;
   base::string16 GetUserNameOfProfileAtIndex(size_t index) const override;
-  const gfx::Image& GetAvatarIconOfProfileAtIndex(size_t index) const override;
+  const gfx::Image& GetAvatarIconOfProfileAtIndex(size_t index) override;
   std::string GetLocalAuthCredentialsOfProfileAtIndex(
       size_t index) const override;
   // Note that a return value of false could mean an error in collection or
@@ -71,6 +72,7 @@ class ProfileInfoCache : public ProfileInfoInterface,
   bool GetBackgroundStatusOfProfileAtIndex(size_t index) const override;
   base::string16 GetGAIANameOfProfileAtIndex(size_t index) const override;
   base::string16 GetGAIAGivenNameOfProfileAtIndex(size_t index) const override;
+  std::string GetGAIAIdOfProfileAtIndex(size_t index) const override;
   // Returns the GAIA picture for the given profile. This may return NULL
   // if the profile does not have a GAIA picture or if the picture must be
   // loaded from disk.
@@ -84,6 +86,7 @@ class ProfileInfoCache : public ProfileInfoInterface,
   std::string GetSupervisedUserIdOfProfileAtIndex(size_t index) const override;
   bool ProfileIsEphemeralAtIndex(size_t index) const override;
   bool ProfileIsUsingDefaultNameAtIndex(size_t index) const override;
+  bool ProfileIsAuthenticatedAtIndex(size_t index) const override;
   bool ProfileIsUsingDefaultAvatarAtIndex(size_t index) const override;
   bool ProfileIsAuthErrorAtIndex(size_t index) const;
 
@@ -94,7 +97,8 @@ class ProfileInfoCache : public ProfileInfoInterface,
   void SetNameOfProfileAtIndex(size_t index, const base::string16& name);
   void SetShortcutNameOfProfileAtIndex(size_t index,
                                        const base::string16& name);
-  void SetUserNameOfProfileAtIndex(size_t index,
+  void SetAuthInfoOfProfileAtIndex(size_t index,
+                                   const std::string& gaia_id,
                                    const base::string16& user_name);
   void SetAvatarIconOfProfileAtIndex(size_t index, size_t icon_index);
   void SetIsOmittedProfileAtIndex(size_t index, bool is_omitted);
@@ -147,6 +151,11 @@ class ProfileInfoCache : public ProfileInfoInterface,
 
   void AddObserver(ProfileInfoCacheObserver* obs);
   void RemoveObserver(ProfileInfoCacheObserver* obs);
+
+  void set_disable_avatar_download_for_testing(
+      bool disable_avatar_download_for_testing) {
+    disable_avatar_download_for_testing_ = disable_avatar_download_for_testing;
+  }
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ProfileInfoCacheTest, DownloadHighResAvatarTest);
@@ -223,6 +232,10 @@ class ProfileInfoCache : public ProfileInfoInterface,
   // or when the ProfileInfoCache is destroyed.
   std::map<std::string, ProfileAvatarDownloader*>
       avatar_images_downloads_in_progress_;
+
+  // Determines of the ProfileAvatarDownloader should be created and executed
+  // or not. Only set to true for tests.
+  bool disable_avatar_download_for_testing_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileInfoCache);
 };

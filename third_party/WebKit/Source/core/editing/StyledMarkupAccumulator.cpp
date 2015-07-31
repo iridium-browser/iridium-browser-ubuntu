@@ -30,78 +30,100 @@
 #include "core/editing/StyledMarkupAccumulator.h"
 
 #include "core/css/StylePropertySet.h"
-#include "core/dom/Document.h"
-#include "core/dom/Element.h"
-#include "core/dom/NodeTraversal.h"
 #include "core/dom/Text.h"
-#include "core/editing/EditingStyle.h"
 #include "core/editing/htmlediting.h"
-#include "core/editing/markup.h"
-#include "core/html/HTMLElement.h"
+#include "core/editing/iterators/TextIterator.h"
 #include "wtf/text/StringBuilder.h"
 
 namespace blink {
 
-using namespace HTMLNames;
+namespace {
 
-StyledMarkupAccumulator::StyledMarkupAccumulator(EAbsoluteURLs shouldResolveURLs, EAnnotateForInterchange shouldAnnotate, const Position& start, const Position& end, Node* highestNodeToBeSerialized)
-    : MarkupAccumulator(nullptr, shouldResolveURLs, start, end)
-    , m_shouldAnnotate(shouldAnnotate)
-    , m_highestNodeToBeSerialized(highestNodeToBeSerialized)
-{
-}
-
-void StyledMarkupAccumulator::wrapWithNode(ContainerNode& node, bool convertBlocksToInlines, RangeFullySelectsNode rangeFullySelectsNode)
-{
-    StringBuilder markup;
-    if (node.isElementNode())
-        appendElement(markup, toElement(node), convertBlocksToInlines && isBlock(&node), rangeFullySelectsNode);
-    else
-        appendStartMarkup(markup, node, 0);
-    m_reversedPrecedingMarkup.append(markup.toString());
-    if (node.isElementNode())
-        appendEndTag(toElement(node));
-}
-
-void StyledMarkupAccumulator::wrapWithStyleNode(StylePropertySet* style, const Document& document, bool isBlock)
-{
-    StringBuilder openTag;
-    appendStyleNodeOpenTag(openTag, style, document, isBlock);
-    m_reversedPrecedingMarkup.append(openTag.toString());
-    appendString(styleNodeCloseTag(isBlock));
-}
-
-void StyledMarkupAccumulator::appendStyleNodeOpenTag(StringBuilder& out, StylePropertySet* style, const Document& document, bool isBlock)
-{
-    // wrappingStyleForSerialization should have removed -webkit-text-decorations-in-effect
-    ASSERT(propertyMissingOrEqualToNone(style, CSSPropertyWebkitTextDecorationsInEffect));
-    if (isBlock)
-        out.appendLiteral("<div style=\"");
-    else
-        out.appendLiteral("<span style=\"");
-    appendAttributeValue(out, style->asText(), document.isHTMLDocument());
-    out.appendLiteral("\">");
-}
-
-const String& StyledMarkupAccumulator::styleNodeCloseTag(bool isBlock)
+const String& styleNodeCloseTag(bool isBlock)
 {
     DEFINE_STATIC_LOCAL(const String, divClose, ("</div>"));
     DEFINE_STATIC_LOCAL(const String, styleSpanClose, ("</span>"));
     return isBlock ? divClose : styleSpanClose;
 }
 
-String StyledMarkupAccumulator::takeResults()
+} // namespace
+
+using namespace HTMLNames;
+
+TextOffset::TextOffset()
+    : m_offset(0)
 {
-    StringBuilder result;
-    result.reserveCapacity(totalLength(m_reversedPrecedingMarkup) + length());
+}
 
-    for (size_t i = m_reversedPrecedingMarkup.size(); i > 0; --i)
-        result.append(m_reversedPrecedingMarkup[i - 1]);
+TextOffset::TextOffset(PassRefPtrWillBeRawPtr<Text> text, int offset)
+    : m_text(text)
+    , m_offset(offset)
+{
+}
 
-    concatenateMarkup(result);
+TextOffset::TextOffset(const TextOffset& other)
+    : m_text(other.m_text)
+    , m_offset(other.m_offset)
+{
+}
 
-    // We remove '\0' characters because they are not visibly rendered to the user.
-    return result.toString().replace(0, "");
+bool TextOffset::isNull() const
+{
+    return !m_text;
+}
+
+bool TextOffset::isNotNull() const
+{
+    return m_text;
+}
+
+StyledMarkupAccumulator::StyledMarkupAccumulator(EAbsoluteURLs shouldResolveURLs, const TextOffset& start, const TextOffset& end, const PassRefPtrWillBeRawPtr<Document> document, EAnnotateForInterchange shouldAnnotate, Node* highestNodeToBeSerialized)
+    : m_accumulator(shouldResolveURLs)
+    , m_start(start)
+    , m_end(end)
+    , m_document(document)
+    , m_shouldAnnotate(shouldAnnotate)
+    , m_highestNodeToBeSerialized(highestNodeToBeSerialized)
+{
+}
+
+void StyledMarkupAccumulator::appendString(const String& str)
+{
+    m_accumulator.appendString(str);
+}
+
+void StyledMarkupAccumulator::appendStartTag(Node& node, Namespaces* namespaces)
+{
+    StringBuilder out;
+    appendStartMarkup(out, node, namespaces);
+    appendString(out.toString());
+}
+
+void StyledMarkupAccumulator::appendEndTag(const Element& element)
+{
+    StringBuilder out;
+    appendEndMarkup(out, element);
+    appendString(out.toString());
+}
+
+void StyledMarkupAccumulator::appendStartMarkup(StringBuilder& result, Node& node, Namespaces* namespaces)
+{
+    switch (node.nodeType()) {
+    case Node::TEXT_NODE:
+        appendText(result, toText(node));
+        break;
+    case Node::ELEMENT_NODE:
+        appendElement(result, toElement(node), namespaces);
+        break;
+    default:
+        m_accumulator.appendStartMarkup(result, node, namespaces);
+        break;
+    }
+}
+
+void StyledMarkupAccumulator::appendEndMarkup(StringBuilder& result, const Element& element)
+{
+    m_accumulator.appendEndMarkup(result, element);
 }
 
 void StyledMarkupAccumulator::appendText(StringBuilder& out, Text& text)
@@ -116,27 +138,45 @@ void StyledMarkupAccumulator::appendText(StringBuilder& out, Text& text)
         // FIXME: Should this be included in forceInline?
         wrappingStyle->style()->setProperty(CSSPropertyFloat, CSSValueNone);
 
-        appendStyleNodeOpenTag(out, wrappingStyle->style(), text.document());
+        appendStyleNodeOpenTag(out, wrappingStyle->style());
     }
 
     if (!shouldAnnotate() || parentIsTextarea) {
-        MarkupAccumulator::appendText(out, text);
+        const String& str = text.data();
+        unsigned length = str.length();
+        unsigned start = 0;
+        if (m_end.isNotNull()) {
+            if (text == m_end.text())
+                length = m_end.offset();
+        }
+        if (m_start.isNotNull()) {
+            if (text == m_start.text()) {
+                start = m_start.offset();
+                length -= start;
+            }
+        }
+        m_accumulator.appendCharactersReplacingEntities(out, str, start, length, m_accumulator.entityMaskForText(text));
     } else {
         const bool useRenderedText = !enclosingElementWithTag(firstPositionInNode(&text), selectTag);
         String content = useRenderedText ? renderedText(text) : stringValueForRange(text);
         StringBuilder buffer;
-        appendCharactersReplacingEntities(buffer, content, 0, content.length(), EntityMaskInPCDATA);
+        MarkupAccumulator::appendCharactersReplacingEntities(buffer, content, 0, content.length(), EntityMaskInPCDATA);
         out.append(convertHTMLTextToInterchangeFormat(buffer.toString(), text));
     }
 
     if (wrappingSpan)
-        out.append(styleNodeCloseTag());
+        out.append(styleNodeCloseTag(false));
 }
 
-void StyledMarkupAccumulator::appendElement(StringBuilder& out, Element& element, bool addDisplayInline, RangeFullySelectsNode rangeFullySelectsNode)
+void StyledMarkupAccumulator::appendElement(StringBuilder& out, Element& element, Namespaces*)
+{
+    appendElement(out, element, false, DoesFullySelectNode);
+}
+
+void StyledMarkupAccumulator::appendElement(StringBuilder& out, Element& element, bool addDisplayInline, StyledMarkupAccumulator::RangeFullySelectsNode rangeFullySelectsNode)
 {
     const bool documentIsHTML = element.document().isHTMLDocument();
-    appendOpenTag(out, element, 0);
+    m_accumulator.appendOpenTag(out, element, 0);
 
     const bool shouldAnnotateOrForceInline = element.isHTMLElement() && (shouldAnnotate() || addDisplayInline);
     const bool shouldOverrideStyleAttr = shouldAnnotateOrForceInline || shouldApplyWrappingStyle(element);
@@ -146,7 +186,7 @@ void StyledMarkupAccumulator::appendElement(StringBuilder& out, Element& element
         // We'll handle the style attribute separately, below.
         if (attribute.name() == styleAttr && shouldOverrideStyleAttr)
             continue;
-        appendAttribute(out, element, attribute, 0);
+        m_accumulator.appendAttribute(out, element, attribute, 0);
     }
 
     if (shouldOverrideStyleAttr) {
@@ -181,112 +221,61 @@ void StyledMarkupAccumulator::appendElement(StringBuilder& out, Element& element
 
         if (!newInlineStyle->isEmpty()) {
             out.appendLiteral(" style=\"");
-            appendAttributeValue(out, newInlineStyle->style()->asText(), documentIsHTML);
+            m_accumulator.appendAttributeValue(out, newInlineStyle->style()->asText(), documentIsHTML);
             out.append('\"');
         }
     }
 
-    appendCloseTag(out, element);
+    m_accumulator.appendCloseTag(out, element);
 }
 
-Node* StyledMarkupAccumulator::serializeNodes(Node* startNode, Node* pastEnd)
+void StyledMarkupAccumulator::appendStyleNodeOpenTag(StringBuilder& out, StylePropertySet* style, bool isBlock)
 {
-    if (!m_highestNodeToBeSerialized) {
-        Node* lastClosed = traverseNodesForSerialization(startNode, pastEnd, DoNotEmitString);
-        m_highestNodeToBeSerialized = lastClosed;
-    }
-
-    if (m_highestNodeToBeSerialized && m_highestNodeToBeSerialized->parentNode()) {
-        m_wrappingStyle = EditingStyle::wrappingStyleForSerialization(m_highestNodeToBeSerialized->parentNode(), shouldAnnotate());
-        if (m_shouldAnnotate == AnnotateForNavigationTransition) {
-            m_wrappingStyle->style()->removeProperty(CSSPropertyBackgroundColor);
-            m_wrappingStyle->style()->removeProperty(CSSPropertyBackgroundImage);
-        }
-    }
-
-
-    return traverseNodesForSerialization(startNode, pastEnd, EmitString);
+    // wrappingStyleForSerialization should have removed -webkit-text-decorations-in-effect
+    ASSERT(propertyMissingOrEqualToNone(style, CSSPropertyWebkitTextDecorationsInEffect));
+    if (isBlock)
+        out.appendLiteral("<div style=\"");
+    else
+        out.appendLiteral("<span style=\"");
+    ASSERT(m_document);
+    m_accumulator.appendAttributeValue(out, style->asText(), m_document->isHTMLDocument());
+    out.appendLiteral("\">");
 }
 
-Node* StyledMarkupAccumulator::traverseNodesForSerialization(Node* startNode, Node* pastEnd, NodeTraversalMode traversalMode)
+void StyledMarkupAccumulator::concatenateMarkup(StringBuilder& result) const
 {
-    const bool shouldEmit = traversalMode == EmitString;
-    WillBeHeapVector<RawPtrWillBeMember<ContainerNode>> ancestorsToClose;
-    Node* next;
-    Node* lastClosed = nullptr;
-    for (Node* n = startNode; n != pastEnd; n = next) {
-        // According to <rdar://problem/5730668>, it is possible for n to blow
-        // past pastEnd and become null here. This shouldn't be possible.
-        // This null check will prevent crashes (but create too much markup)
-        // and the ASSERT will hopefully lead us to understanding the problem.
-        ASSERT(n);
-        if (!n)
-            break;
+    m_accumulator.concatenateMarkup(result);
+}
 
-        next = NodeTraversal::next(*n);
-        bool openedTag = false;
+String StyledMarkupAccumulator::renderedText(Text& textNode)
+{
+    int startOffset = 0;
+    int endOffset = textNode.length();
+    if (m_start.text() == textNode)
+        startOffset = m_start.offset();
+    if (m_end.text() == textNode)
+        endOffset = m_end.offset();
+    return plainText(Position(&textNode, startOffset), Position(&textNode, endOffset));
+}
 
-        if (isBlock(n) && canHaveChildrenForEditing(n) && next == pastEnd) {
-            // Don't write out empty block containers that aren't fully selected.
-            continue;
-        }
+String StyledMarkupAccumulator::stringValueForRange(const Text& node)
+{
+    if (m_start.isNull())
+        return node.data();
 
-        if (!n->layoutObject() && !enclosingElementWithTag(firstPositionInOrBeforeNode(n), selectTag) && m_shouldAnnotate != AnnotateForNavigationTransition) {
-            next = NodeTraversal::nextSkippingChildren(*n);
-            // Don't skip over pastEnd.
-            if (pastEnd && pastEnd->isDescendantOf(n))
-                next = pastEnd;
-        } else {
-            // Add the node to the markup if we're not skipping the descendants
-            if (shouldEmit)
-                appendStartTag(*n);
+    String str = node.data();
+    if (m_start.text() == node)
+        str.truncate(m_end.offset());
+    if (m_end.text() == node)
+        str.remove(0, m_start.offset());
+    return str;
+}
 
-            // If node has no children, close the tag now.
-            if (n->isContainerNode() && toContainerNode(n)->hasChildren()) {
-                openedTag = true;
-                ancestorsToClose.append(toContainerNode(n));
-            } else {
-                if (shouldEmit && n->isElementNode())
-                    appendEndTag(toElement(*n));
-                lastClosed = n;
-            }
-        }
-
-        // If we didn't insert open tag and there's no more siblings or we're at the end of the traversal, take care of ancestors.
-        // FIXME: What happens if we just inserted open tag and reached the end?
-        if (!openedTag && (!n->nextSibling() || next == pastEnd)) {
-            // Close up the ancestors.
-            while (!ancestorsToClose.isEmpty()) {
-                ContainerNode* ancestor = ancestorsToClose.last();
-                ASSERT(ancestor);
-                if (next != pastEnd && next->isDescendantOf(ancestor))
-                    break;
-                // Not at the end of the range, close ancestors up to sibling of next node.
-                if (shouldEmit && ancestor->isElementNode())
-                    appendEndTag(toElement(*ancestor));
-                lastClosed = ancestor;
-                ancestorsToClose.removeLast();
-            }
-
-            // Surround the currently accumulated markup with markup for ancestors we never opened as we leave the subtree(s) rooted at those ancestors.
-            ContainerNode* nextParent = next ? next->parentNode() : 0;
-            if (next != pastEnd && n != nextParent) {
-                Node* lastAncestorClosedOrSelf = n->isDescendantOf(lastClosed) ? lastClosed : n;
-                for (ContainerNode* parent = lastAncestorClosedOrSelf->parentNode(); parent && parent != nextParent; parent = parent->parentNode()) {
-                    // All ancestors that aren't in the ancestorsToClose list should either be a) unrendered:
-                    if (!parent->layoutObject())
-                        continue;
-                    // or b) ancestors that we never encountered during a pre-order traversal starting at startNode:
-                    ASSERT(startNode->isDescendantOf(parent));
-                    if (shouldEmit)
-                        wrapWithNode(*parent);
-                    lastClosed = parent;
-                }
-            }
-        }
-    }
-
-    return lastClosed;
+bool StyledMarkupAccumulator::shouldApplyWrappingStyle(const Node& node) const
+{
+    // TODO(hajimehoshi): Use Strategy
+    return m_highestNodeToBeSerialized && m_highestNodeToBeSerialized->parentNode() == node.parentNode()
+        && m_wrappingStyle && m_wrappingStyle->style();
 }
 
 } // namespace blink

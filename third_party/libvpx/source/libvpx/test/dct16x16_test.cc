@@ -356,13 +356,13 @@ class Trans16x16TestBase {
     int64_t total_error = 0;
     const int count_test_block = 10000;
     for (int i = 0; i < count_test_block; ++i) {
-      DECLARE_ALIGNED_ARRAY(16, int16_t, test_input_block, kNumCoeffs);
-      DECLARE_ALIGNED_ARRAY(16, tran_low_t, test_temp_block, kNumCoeffs);
-      DECLARE_ALIGNED_ARRAY(16, uint8_t, dst, kNumCoeffs);
-      DECLARE_ALIGNED_ARRAY(16, uint8_t, src, kNumCoeffs);
+      DECLARE_ALIGNED(16, int16_t, test_input_block[kNumCoeffs]);
+      DECLARE_ALIGNED(16, tran_low_t, test_temp_block[kNumCoeffs]);
+      DECLARE_ALIGNED(16, uint8_t, dst[kNumCoeffs]);
+      DECLARE_ALIGNED(16, uint8_t, src[kNumCoeffs]);
 #if CONFIG_VP9_HIGHBITDEPTH
-      DECLARE_ALIGNED_ARRAY(16, uint16_t, dst16, kNumCoeffs);
-      DECLARE_ALIGNED_ARRAY(16, uint16_t, src16, kNumCoeffs);
+      DECLARE_ALIGNED(16, uint16_t, dst16[kNumCoeffs]);
+      DECLARE_ALIGNED(16, uint16_t, src16[kNumCoeffs]);
 #endif
 
       // Initialize a test block with input range [-mask_, mask_].
@@ -416,9 +416,9 @@ class Trans16x16TestBase {
   void RunCoeffCheck() {
     ACMRandom rnd(ACMRandom::DeterministicSeed());
     const int count_test_block = 1000;
-    DECLARE_ALIGNED_ARRAY(16, int16_t, input_block, kNumCoeffs);
-    DECLARE_ALIGNED_ARRAY(16, tran_low_t, output_ref_block, kNumCoeffs);
-    DECLARE_ALIGNED_ARRAY(16, tran_low_t, output_block, kNumCoeffs);
+    DECLARE_ALIGNED(16, int16_t, input_block[kNumCoeffs]);
+    DECLARE_ALIGNED(16, tran_low_t, output_ref_block[kNumCoeffs]);
+    DECLARE_ALIGNED(16, tran_low_t, output_block[kNumCoeffs]);
 
     for (int i = 0; i < count_test_block; ++i) {
       // Initialize a test block with input range [-mask_, mask_].
@@ -437,15 +437,13 @@ class Trans16x16TestBase {
   void RunMemCheck() {
     ACMRandom rnd(ACMRandom::DeterministicSeed());
     const int count_test_block = 1000;
-    DECLARE_ALIGNED_ARRAY(16, int16_t, input_block, kNumCoeffs);
-    DECLARE_ALIGNED_ARRAY(16, int16_t, input_extreme_block, kNumCoeffs);
-    DECLARE_ALIGNED_ARRAY(16, tran_low_t, output_ref_block, kNumCoeffs);
-    DECLARE_ALIGNED_ARRAY(16, tran_low_t, output_block, kNumCoeffs);
+    DECLARE_ALIGNED(16, int16_t, input_extreme_block[kNumCoeffs]);
+    DECLARE_ALIGNED(16, tran_low_t, output_ref_block[kNumCoeffs]);
+    DECLARE_ALIGNED(16, tran_low_t, output_block[kNumCoeffs]);
 
     for (int i = 0; i < count_test_block; ++i) {
       // Initialize a test block with input range [-mask_, mask_].
       for (int j = 0; j < kNumCoeffs; ++j) {
-        input_block[j] = (rnd.Rand16() & mask_) - (rnd.Rand16() & mask_);
         input_extreme_block[j] = rnd.Rand8() % 2 ? mask_ : -mask_;
       }
       if (i == 0) {
@@ -472,24 +470,19 @@ class Trans16x16TestBase {
   void RunQuantCheck(int dc_thred, int ac_thred) {
     ACMRandom rnd(ACMRandom::DeterministicSeed());
     const int count_test_block = 100000;
-    DECLARE_ALIGNED_ARRAY(16, int16_t, input_block, kNumCoeffs);
-    DECLARE_ALIGNED_ARRAY(16, int16_t, input_extreme_block, kNumCoeffs);
-    DECLARE_ALIGNED_ARRAY(16, tran_low_t, output_ref_block, kNumCoeffs);
+    DECLARE_ALIGNED(16, int16_t, input_extreme_block[kNumCoeffs]);
+    DECLARE_ALIGNED(16, tran_low_t, output_ref_block[kNumCoeffs]);
 
-    DECLARE_ALIGNED_ARRAY(16, uint8_t, dst, kNumCoeffs);
-    DECLARE_ALIGNED_ARRAY(16, uint8_t, ref, kNumCoeffs);
+    DECLARE_ALIGNED(16, uint8_t, dst[kNumCoeffs]);
+    DECLARE_ALIGNED(16, uint8_t, ref[kNumCoeffs]);
 #if CONFIG_VP9_HIGHBITDEPTH
-    DECLARE_ALIGNED_ARRAY(16, uint16_t, dst16, kNumCoeffs);
-    DECLARE_ALIGNED_ARRAY(16, uint16_t, ref16, kNumCoeffs);
+    DECLARE_ALIGNED(16, uint16_t, dst16[kNumCoeffs]);
+    DECLARE_ALIGNED(16, uint16_t, ref16[kNumCoeffs]);
 #endif
 
     for (int i = 0; i < count_test_block; ++i) {
       // Initialize a test block with input range [-mask_, mask_].
       for (int j = 0; j < kNumCoeffs; ++j) {
-        if (bit_depth_ == VPX_BITS_8)
-          input_block[j] = rnd.Rand8() - rnd.Rand8();
-        else
-          input_block[j] = (rnd.Rand16() & mask_) - (rnd.Rand16() & mask_);
         input_extreme_block[j] = rnd.Rand8() % 2 ? mask_ : -mask_;
       }
       if (i == 0)
@@ -502,11 +495,11 @@ class Trans16x16TestBase {
       fwd_txfm_ref(input_extreme_block, output_ref_block, pitch_, tx_type_);
 
       // clear reconstructed pixel buffers
-      vpx_memset(dst, 0, kNumCoeffs * sizeof(uint8_t));
-      vpx_memset(ref, 0, kNumCoeffs * sizeof(uint8_t));
+      memset(dst, 0, kNumCoeffs * sizeof(uint8_t));
+      memset(ref, 0, kNumCoeffs * sizeof(uint8_t));
 #if CONFIG_VP9_HIGHBITDEPTH
-      vpx_memset(dst16, 0, kNumCoeffs * sizeof(uint16_t));
-      vpx_memset(ref16, 0, kNumCoeffs * sizeof(uint16_t));
+      memset(dst16, 0, kNumCoeffs * sizeof(uint16_t));
+      memset(ref16, 0, kNumCoeffs * sizeof(uint16_t));
 #endif
 
       // quantization with maximum allowed step sizes
@@ -539,13 +532,13 @@ class Trans16x16TestBase {
   void RunInvAccuracyCheck() {
     ACMRandom rnd(ACMRandom::DeterministicSeed());
     const int count_test_block = 1000;
-    DECLARE_ALIGNED_ARRAY(16, int16_t, in, kNumCoeffs);
-    DECLARE_ALIGNED_ARRAY(16, tran_low_t, coeff, kNumCoeffs);
-    DECLARE_ALIGNED_ARRAY(16, uint8_t, dst, kNumCoeffs);
-    DECLARE_ALIGNED_ARRAY(16, uint8_t, src, kNumCoeffs);
+    DECLARE_ALIGNED(16, int16_t, in[kNumCoeffs]);
+    DECLARE_ALIGNED(16, tran_low_t, coeff[kNumCoeffs]);
+    DECLARE_ALIGNED(16, uint8_t, dst[kNumCoeffs]);
+    DECLARE_ALIGNED(16, uint8_t, src[kNumCoeffs]);
 #if CONFIG_VP9_HIGHBITDEPTH
-    DECLARE_ALIGNED_ARRAY(16, uint16_t, dst16, kNumCoeffs);
-    DECLARE_ALIGNED_ARRAY(16, uint16_t, src16, kNumCoeffs);
+    DECLARE_ALIGNED(16, uint16_t, dst16[kNumCoeffs]);
+    DECLARE_ALIGNED(16, uint16_t, src16[kNumCoeffs]);
 #endif  // CONFIG_VP9_HIGHBITDEPTH
 
     for (int i = 0; i < count_test_block; ++i) {
@@ -599,12 +592,12 @@ class Trans16x16TestBase {
     const int count_test_block = 10000;
     const int eob = 10;
     const int16_t *scan = vp9_default_scan_orders[TX_16X16].scan;
-    DECLARE_ALIGNED_ARRAY(16, tran_low_t, coeff, kNumCoeffs);
-    DECLARE_ALIGNED_ARRAY(16, uint8_t, dst, kNumCoeffs);
-    DECLARE_ALIGNED_ARRAY(16, uint8_t, ref, kNumCoeffs);
+    DECLARE_ALIGNED(16, tran_low_t, coeff[kNumCoeffs]);
+    DECLARE_ALIGNED(16, uint8_t, dst[kNumCoeffs]);
+    DECLARE_ALIGNED(16, uint8_t, ref[kNumCoeffs]);
 #if CONFIG_VP9_HIGHBITDEPTH
-    DECLARE_ALIGNED_ARRAY(16, uint16_t, dst16, kNumCoeffs);
-    DECLARE_ALIGNED_ARRAY(16, uint16_t, ref16, kNumCoeffs);
+    DECLARE_ALIGNED(16, uint16_t, dst16[kNumCoeffs]);
+    DECLARE_ALIGNED(16, uint16_t, ref16[kNumCoeffs]);
 #endif  // CONFIG_VP9_HIGHBITDEPTH
 
     for (int i = 0; i < count_test_block; ++i) {
@@ -934,11 +927,18 @@ INSTANTIATE_TEST_CASE_P(
                    &idct16x16_256_add_12_sse2, 3167, VPX_BITS_12)));
 #endif  // HAVE_SSE2 && CONFIG_VP9_HIGHBITDEPTH && !CONFIG_EMULATE_HARDWARE
 
-#if HAVE_SSSE3 && !CONFIG_VP9_HIGHBITDEPTH && !CONFIG_EMULATE_HARDWARE
+#if HAVE_MSA && !CONFIG_VP9_HIGHBITDEPTH && !CONFIG_EMULATE_HARDWARE
 INSTANTIATE_TEST_CASE_P(
-    SSSE3, Trans16x16DCT,
+    MSA, Trans16x16DCT,
     ::testing::Values(
-        make_tuple(&vp9_fdct16x16_c, &vp9_idct16x16_256_add_ssse3, 0,
-                   VPX_BITS_8)));
-#endif  // HAVE_SSSE3 && !CONFIG_VP9_HIGHBITDEPTH && !CONFIG_EMULATE_HARDWARE
+        make_tuple(&vp9_fdct16x16_c,
+                   &vp9_idct16x16_256_add_msa, 0, VPX_BITS_8)));
+INSTANTIATE_TEST_CASE_P(
+    MSA, Trans16x16HT,
+    ::testing::Values(
+        make_tuple(&vp9_fht16x16_c, &vp9_iht16x16_256_add_msa, 0, VPX_BITS_8),
+        make_tuple(&vp9_fht16x16_c, &vp9_iht16x16_256_add_msa, 1, VPX_BITS_8),
+        make_tuple(&vp9_fht16x16_c, &vp9_iht16x16_256_add_msa, 2, VPX_BITS_8),
+        make_tuple(&vp9_fht16x16_c, &vp9_iht16x16_256_add_msa, 3, VPX_BITS_8)));
+#endif  // HAVE_MSA && !CONFIG_VP9_HIGHBITDEPTH && !CONFIG_EMULATE_HARDWARE
 }  // namespace

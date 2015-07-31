@@ -7,6 +7,7 @@
 
 #include "public/platform/WebString.h"
 #include "public/platform/WebURL.h"
+#include "public/platform/WebVector.h"
 
 namespace blink {
 
@@ -23,25 +24,14 @@ struct WebNotificationData {
     {
     }
 
-    // FIXME: Remove this constructor when Chromium has switched to the new one.
-    WebNotificationData(const WebString& title, Direction direction, const WebString& lang, const WebString& body, const WebString& tag, const WebURL& icon, bool silent)
+    WebNotificationData(const WebString& title, Direction direction, const WebString& lang, const WebString& body, const WebString& tag, const WebURL& icon, const WebVector<int>& vibrate, bool silent, const WebVector<char>& data)
         : title(title)
         , direction(direction)
         , lang(lang)
         , body(body)
         , tag(tag)
         , icon(icon)
-        , silent(silent)
-    {
-    }
-
-    WebNotificationData(const WebString& title, Direction direction, const WebString& lang, const WebString& body, const WebString& tag, const WebURL& icon, bool silent, const WebString& data)
-        : title(title)
-        , direction(direction)
-        , lang(lang)
-        , body(body)
-        , tag(tag)
-        , icon(icon)
+        , vibrate(vibrate)
         , silent(silent)
         , data(data)
     {
@@ -53,8 +43,9 @@ struct WebNotificationData {
     WebString body;
     WebString tag;
     WebURL icon;
+    WebVector<int> vibrate;
     bool silent;
-    WebString data;
+    WebVector<char> data;
 };
 
 } // namespace blink

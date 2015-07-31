@@ -19,6 +19,7 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/common/referrer.h"
 #include "ui/base/page_transition_types.h"
+#include "url/origin.h"
 
 namespace content {
 class BrowserContext;
@@ -124,6 +125,7 @@ class CONTENT_EXPORT RenderFrameHostManager : public NotificationObserver {
     virtual bool CreateRenderFrameForRenderManager(
         RenderFrameHost* render_frame_host,
         int parent_routing_id,
+        int previous_sibling_routing_id,
         int proxy_routing_id) = 0;
     virtual void BeforeUnloadFiredFromRenderManager(
         bool proceed, const base::TimeTicks& proceed_time,
@@ -417,17 +419,43 @@ class CONTENT_EXPORT RenderFrameHostManager : public NotificationObserver {
   // window.name property.
   void OnDidUpdateName(const std::string& name);
 
+  // Send updated origin to all frame proxies when the frame navigates to a new
+  // origin.
+  void OnDidUpdateOrigin(const url::Origin& origin);
+
   void EnsureRenderViewInitialized(FrameTreeNode* source,
                                    RenderViewHostImpl* render_view_host,
                                    SiteInstance* instance);
 
  private:
+  friend class FrameTreeVisualizer;
   friend class NavigatorTestWithBrowserSideNavigation;
   friend class RenderFrameHostManagerTest;
   friend class TestWebContents;
 
-  FRIEND_TEST_ALL_PREFIXES(CrossProcessFrameTreeBrowserTest,
-                           CreateCrossProcessSubframeProxies);
+  // Stores information regarding a SiteInstance targeted at a specific URL to
+  // allow for comparisons without having to actually create new instances. It
+  // can point to an existing one or store the details needed to create a new
+  // one.
+  struct CONTENT_EXPORT SiteInstanceDescriptor {
+    explicit SiteInstanceDescriptor(content::SiteInstance* site_instance)
+        : existing_site_instance(site_instance),
+          new_is_related_to_current(false) {}
+
+    SiteInstanceDescriptor(BrowserContext* browser_context,
+                           GURL dest_url,
+                           bool related_to_current);
+
+    // Set with an existing SiteInstance to be reused.
+    content::SiteInstance* existing_site_instance;
+
+    // In case |existing_site_instance| is null, specify a new site URL.
+    GURL new_site_url;
+
+    // In case |existing_site_instance| is null, specify if the new site should
+    // be created in a new BrowsingInstance or not.
+    bool new_is_related_to_current;
+  };
 
   // Used with FrameTree::ForEach to erase RenderFrameProxyHosts from a
   // FrameTreeNode's RenderFrameHostManager.
@@ -477,29 +505,40 @@ class CONTENT_EXPORT RenderFrameHostManager : public NotificationObserver {
   SiteInstance* GetSiteInstanceForNavigation(const GURL& dest_url,
                                              SiteInstance* source_instance,
                                              SiteInstance* dest_instance,
+                                             SiteInstance* candidate_instance,
                                              ui::PageTransition transition,
                                              bool dest_is_restore,
                                              bool dest_is_view_source_mode);
 
-  // Returns an appropriate SiteInstance object for the given |dest_url|,
-  // possibly reusing the current SiteInstance.  If --process-per-tab is used,
-  // this is only called when ShouldSwapBrowsingInstancesForNavigation returns
-  // true. |source_instance| is the SiteInstance of the frame that initiated the
+  // Returns a descriptor of the appropriate SiteInstance object for the given
+  // |dest_url|, possibly reusing the current, source or destination
+  // SiteInstance. The actual SiteInstance can then be obtained calling
+  // ConvertToSiteInstance with the descriptor.
+  //
+  // |source_instance| is the SiteInstance of the frame that initiated the
   // navigation. |current_instance| is the SiteInstance of the frame that is
-  // currently navigating. |dest_instance|, is a predetermined SiteInstance
-  // that'll be used if not null.
+  // currently navigating. |dest_instance| is a predetermined SiteInstance that
+  // will be used if not null.
   // For example, if you have a parent frame A, which has a child frame B, and
   // A is trying to change the src attribute of B, this will cause a navigation
   // where the source SiteInstance is A and B is the current SiteInstance.
+  //
   // This is a helper function for GetSiteInstanceForNavigation.
-  SiteInstance* GetSiteInstanceForURL(const GURL& dest_url,
-                                      SiteInstance* source_instance,
-                                      SiteInstance* current_instance,
-                                      SiteInstance* dest_instance,
-                                      ui::PageTransition transition,
-                                      bool dest_is_restore,
-                                      bool dest_is_view_source_mode,
-                                      bool force_browsing_instance_swap);
+  SiteInstanceDescriptor DetermineSiteInstanceForURL(
+      const GURL& dest_url,
+      SiteInstance* source_instance,
+      SiteInstance* current_instance,
+      SiteInstance* dest_instance,
+      ui::PageTransition transition,
+      bool dest_is_restore,
+      bool dest_is_view_source_mode,
+      bool force_browsing_instance_swap);
+
+  // Converts a SiteInstanceDescriptor to the actual SiteInstance it describes.
+  // If a |candidate_instance| is provided (is not nullptr) and it matches the
+  // description, it is returned as is.
+  SiteInstance* ConvertToSiteInstance(const SiteInstanceDescriptor& descriptor,
+                                      SiteInstance* candidate_instance);
 
   // Determines the appropriate url to use as the current url for SiteInstance
   // selection.
@@ -583,10 +622,12 @@ class CONTENT_EXPORT RenderFrameHostManager : public NotificationObserver {
   void MoveToPendingDeleteHosts(
       scoped_ptr<RenderFrameHostImpl> render_frame_host);
 
-  // Shutdown all RenderFrameProxyHosts in a SiteInstance. This is called to
-  // shutdown frames when all the frames in a SiteInstance are confirmed to be
-  // swapped out.
-  void ShutdownRenderFrameProxyHostsInSiteInstance(int32 site_instance_id);
+  // If |render_frame_host| is the last remaining active frame in its
+  // SiteInstance, this will shutdown all the RenderFrameProxyHosts in the
+  // SiteInstance. This is appropriate if |render_frame_host| is about to be
+  // destroyed.
+  void ShutdownProxiesIfLastActiveFrameInSiteInstance(
+      RenderFrameHostImpl* render_frame_host);
 
   // Helper method to terminate the pending RenderFrameHost. The frame may be
   // deleted immediately, or it may be kept around in hopes of later reuse.
@@ -623,13 +664,6 @@ class CONTENT_EXPORT RenderFrameHostManager : public NotificationObserver {
 
   // Our delegate, not owned by us. Guaranteed non-NULL.
   Delegate* delegate_;
-
-  // Whether a navigation requiring different RenderFrameHosts is pending. This
-  // is either for cross-site requests or when required for the process type
-  // (like WebUI).
-  // PlzNavigate: |cross_navigation_pending_| is not used for browser-side
-  // navigation.
-  bool cross_navigation_pending_;
 
   // Implemented by the owner of this class.  These delegates are installed into
   // all the RenderFrameHosts that we create.

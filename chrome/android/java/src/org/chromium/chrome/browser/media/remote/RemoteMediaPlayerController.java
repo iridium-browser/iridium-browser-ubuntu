@@ -25,8 +25,8 @@ import org.chromium.base.ApplicationStatus;
 import org.chromium.base.CommandLine;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
-import org.chromium.chrome.ChromeSwitches;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.media.remote.RemoteVideoInfo.PlayerState;
 
 import java.lang.ref.WeakReference;
@@ -349,18 +349,13 @@ public class RemoteMediaPlayerController implements MediaRouteController.UiListe
         return mLockScreenControl;
     }
 
-    /**
-     *
-     */
     private void createLockScreen() {
         mLockScreenControl = LockScreenTransportControl.getOrCreate(
                 mChromeVideoActivity.get(), mCurrentRouteController);
-        if (mLockScreenControl != null) {
-            mLockScreenControl.setError(null);
-            mLockScreenControl.setScreenName(mCurrentRouteController.getRouteName());
-            mLockScreenControl.addListener(mCurrentRouteController);
-        }
-        if (mLockScreenControl != null) mLockScreenControl.setPosterBitmap(getPoster());
+        mLockScreenControl.setError(null);
+        mLockScreenControl.setScreenName(mCurrentRouteController.getRouteName());
+        mLockScreenControl.addListener(mCurrentRouteController);
+        mLockScreenControl.setPosterBitmap(getPoster());
     }
 
     @Override

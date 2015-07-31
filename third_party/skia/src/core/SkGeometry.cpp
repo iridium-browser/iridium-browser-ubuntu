@@ -9,6 +9,7 @@
 #include "SkMatrix.h"
 #include "SkNx.h"
 
+#if 0
 static Sk2s from_point(const SkPoint& point) {
     return Sk2s::Load(&point.fX);
 }
@@ -18,6 +19,7 @@ static SkPoint to_point(const Sk2s& x) {
     x.store(&point.fX);
     return point;
 }
+#endif
 
 static SkVector to_vector(const Sk2s& x) {
     SkVector vector;
@@ -60,7 +62,7 @@ static int valid_unit_divide(SkScalar numer, SkScalar denom, SkScalar* ratio) {
         return 0;
     }
 
-    SkScalar r = SkScalarDiv(numer, denom);
+    SkScalar r = numer / denom;
     if (SkScalarIsNaN(r)) {
         return 0;
     }
@@ -133,6 +135,18 @@ static SkScalar eval_quad_derivative(const SkScalar src[], SkScalar t) {
     SkScalar B = src[2] - src[0];
 
     return 2 * SkScalarMulAdd(A, t, B);
+}
+
+void SkQuadToCoeff(const SkPoint pts[3], SkPoint coeff[3]) {
+    Sk2s p0 = from_point(pts[0]);
+    Sk2s p1 = from_point(pts[1]);
+    Sk2s p2 = from_point(pts[2]);
+
+    Sk2s p1minus2 = p1 - p0;
+
+    coeff[0] = to_point(p2 - p1 - p1 + p0);     // A * t^2
+    coeff[1] = to_point(p1minus2 + p1minus2);   // B * t
+    coeff[2] = pts[0];                          // C
 }
 
 void SkEvalQuadAt(const SkPoint src[3], SkScalar t, SkPoint* pt, SkVector* tangent) {
@@ -327,24 +341,6 @@ void SkConvertQuadToCubic(const SkPoint src[3], SkPoint dst[4]) {
 ///// CUBICS // CUBICS // CUBICS // CUBICS // CUBICS // CUBICS // CUBICS /////
 //////////////////////////////////////////////////////////////////////////////
 
-static void get_cubic_coeff(const SkScalar pt[], SkScalar coeff[4]) {
-    coeff[0] = pt[6] + 3*(pt[2] - pt[4]) - pt[0];
-    coeff[1] = 3*(pt[4] - pt[2] - pt[2] + pt[0]);
-    coeff[2] = 3*(pt[2] - pt[0]);
-    coeff[3] = pt[0];
-}
-
-void SkGetCubicCoeff(const SkPoint pts[4], SkScalar cx[4], SkScalar cy[4]) {
-    SkASSERT(pts);
-
-    if (cx) {
-        get_cubic_coeff(&pts[0].fX, cx);
-    }
-    if (cy) {
-        get_cubic_coeff(&pts[0].fY, cy);
-    }
-}
-
 static SkScalar eval_cubic(const SkScalar src[], SkScalar t) {
     SkASSERT(src);
     SkASSERT(t >= 0 && t <= SK_Scalar1);
@@ -450,6 +446,26 @@ void SkChopCubicAt(const SkPoint src[4], SkPoint dst[7], SkScalar t) {
     dst[4] = to_point(bcd);
     dst[5] = to_point(cd);
     dst[6] = src[3];
+}
+
+void SkCubicToCoeff(const SkPoint pts[4], SkPoint coeff[4]) {
+    Sk2s p0 = from_point(pts[0]);
+    Sk2s p1 = from_point(pts[1]);
+    Sk2s p2 = from_point(pts[2]);
+    Sk2s p3 = from_point(pts[3]);
+
+    const Sk2s three(3);
+    Sk2s p1minusp2 = p1 - p2;
+
+    Sk2s D = p0;
+    Sk2s A = p3 + three * p1minusp2 - D;
+    Sk2s B = three * (D - p1minusp2 - p1);
+    Sk2s C = three * (p1 - D);
+
+    coeff[0] = to_point(A);
+    coeff[1] = to_point(B);
+    coeff[2] = to_point(C);
+    coeff[3] = to_point(D);
 }
 
 /*  http://code.google.com/p/skia/issues/detail?id=32
@@ -900,6 +916,33 @@ int SkChopCubicAtMaxCurvature(const SkPoint src[4], SkPoint dst[13],
     return count + 1;
 }
 
+#include "../pathops/SkPathOpsCubic.h"
+
+typedef int (SkDCubic::*InterceptProc)(double intercept, double roots[3]) const;
+
+static bool cubic_dchop_at_intercept(const SkPoint src[4], SkScalar intercept, SkPoint dst[7],
+                                     InterceptProc method) {
+    SkDCubic cubic;
+    double roots[3];
+    int count = (cubic.set(src).*method)(intercept, roots);
+    if (count > 0) {
+        SkDCubicPair pair = cubic.chopAt(roots[0]);
+        for (int i = 0; i < 7; ++i) {
+            dst[i] = pair.pts[i].asSkPoint();
+        }
+        return true;
+    }
+    return false;
+}
+
+bool SkChopMonoCubicAtY(SkPoint src[4], SkScalar y, SkPoint dst[7]) {
+    return cubic_dchop_at_intercept(src, y, dst, &SkDCubic::horizontalIntersect);
+}
+
+bool SkChopMonoCubicAtX(SkPoint src[4], SkScalar x, SkPoint dst[7]) {
+    return cubic_dchop_at_intercept(src, x, dst, &SkDCubic::verticalIntersect);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 /*  Find t value for quadratic [a, b, c] = d.
@@ -1106,7 +1149,7 @@ static SkScalar conic_eval_pos(const SkScalar src[], SkScalar w, SkScalar t) {
     A = -B;
     SkScalar denom = SkScalarMulAdd(SkScalarMulAdd(A, t, B), t, C);
 
-    return SkScalarDiv(numer, denom);
+    return numer / denom;
 }
 
 // F' = 2 (C t (1 + t (-1 + w)) - A (-1 + t) (t (-1 + w) - w) + B (1 - 2 t) w)
@@ -1514,7 +1557,7 @@ int SkConic::BuildUnitArc(const SkVector& uStart, const SkVector& uStop, SkRotat
     const SkScalar dot = SkVector::DotProduct(lastQ, finalP);
     SkASSERT(0 <= dot && dot <= SK_Scalar1 + SK_ScalarNearlyZero);
 
-    if (dot < 1 - SK_ScalarNearlyZero) {
+    if (dot < 1) {
         SkVector offCurve = { lastQ.x() + x, lastQ.y() + y };
         // compute the bisector vector, and then rescale to be the off-curve point.
         // we compute its length from cos(theta/2) = length / 1, using half-angle identity we get

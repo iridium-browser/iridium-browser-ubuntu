@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("../../../mojo_application.gni")
 import("../../../mojo_sdk.gni")
 
 mojo_sdk_source_set("tests") {
@@ -9,11 +10,13 @@ mojo_sdk_source_set("tests") {
 
   sources = [
     "array_unittest.cc",
+    "binding_callback_unittest.cc",
     "binding_unittest.cc",
     "bounds_checker_unittest.cc",
     "buffer_unittest.cc",
     "callback_unittest.cc",
     "connector_unittest.cc",
+    "constant_unittest.cc",
     "container_test_util.cc",
     "equals_unittest.cc",
     "handle_passing_unittest.cc",
@@ -26,7 +29,6 @@ mojo_sdk_source_set("tests") {
     "string_unittest.cc",
     "struct_unittest.cc",
     "type_conversion_unittest.cc",
-    "union_unittest.cc",
     "validation_unittest.cc",
   ]
 

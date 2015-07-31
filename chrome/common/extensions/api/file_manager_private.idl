@@ -8,8 +8,8 @@
  implemented_in="chrome/browser/chromeos/extensions/file_manager/file_manager_private_api_functions.h"]
 namespace fileManagerPrivate {
 // Type of the mounted volume.
-enum VolumeType { drive, downloads, removable, archive, cloud_device, provided,
-                  mtp, testing };
+enum VolumeType { drive, downloads, removable, archive, provided, mtp,
+                  testing };
 
 // Device type. Available if this is removable volume.
 enum DeviceType { usb, sd, optical, mobile, unknown };
@@ -151,6 +151,7 @@ enum EntryPropertyName {
   size,
   modificationTime,
   thumbnailUrl,
+  croppedThumbnailUrl,
   imageWidth,
   imageHeight,
   imageRotation,
@@ -171,6 +172,14 @@ enum EntryPropertyName {
 enum EntryTagVisibility {
   private,
   public
+};
+
+// Source of the volume data.
+enum Source {
+  file,
+  device,
+  network,
+  system
 };
 
 // A file task represents an action that the file manager can perform over the
@@ -207,6 +216,9 @@ dictionary EntryProperties {
 
   // URL to the Drive thumbnail image for this file.
   DOMString? thumbnailUrl;
+
+  // URL to the Drive cropped thumbnail image for this file.
+  DOMString? croppedThumbnailUrl;
 
   // Width, if the entry is an image.
   long? imageWidth;
@@ -280,11 +292,14 @@ dictionary VolumeMetadata {
   // ID of the disk volume.
   DOMString volumeId;
 
-  // Id the provided file system (for proviided file systems).
+  // Id the provided file system (for provided file systems).
   DOMString? fileSystemId;
 
   // Extension providing this volume (for provided file systems).
   DOMString? extensionId;
+
+  // Source of the volume's data.
+  Source source;
 
   // Label of the volume (if available).
   DOMString? volumeLabel;
@@ -315,6 +330,9 @@ dictionary VolumeMetadata {
 
   // Flag that specifies whether the volume contains media.
   boolean hasMedia;
+
+  // Flag that specifies whether the volume is configurable.
+  boolean configurable;
 
   // Additional data about mount, for example, that the filesystem is not
   // supported.
@@ -501,6 +519,24 @@ dictionary DeviceEvent {
   DOMString devicePath;
 };
 
+// Describes an installed providing extension.
+dictionary ProvidingExtension {
+  // ID of the providing extension.
+  DOMString extensionId;
+
+  // Name of the providing extension.
+  DOMString name;
+
+  // Whether supports configuration dialog.
+  boolean configurable;
+
+  // Whether supports mounting multiple instances.
+  boolean multipleMounts;
+
+  // Source of file systems' data.
+  manifestTypes.FileSystemProviderSource source;
+};
+
 // Callback that does not take arguments.
 callback SimpleCallback = void();
 
@@ -524,10 +560,6 @@ callback AddFileWatchCallback = void(optional boolean success);
 
 // |success| True when file watch is successfully removed.
 callback RemoveFileWatchCallback = void(optional boolean success);
-
-// |fileSystem| A DOMFileSystem instance for local file system access. null if
-// the caller has no appropriate permissions.
-callback RequestFileSystemCallback = void(optional object fileSystem);
 
 // |entryProperties| A dictionary containing properties of the requested
 // entries.
@@ -597,6 +629,9 @@ callback ResolveEntriesCallback =
 
 // |checksum| Result checksum.
 callback ComputeChecksumCallback = void(DOMString checksum);
+
+// |extensions| List of providing extensions.
+callback GetProvidingExtensionsCallback = void(ProvidingExtension[] extensions);
 
 interface Functions {
   // Logout the current user for navigating to the re-authentication screen for
@@ -875,6 +910,18 @@ interface Functions {
 
   // Returns if Piex loader is enabled.
   static void isPiexLoaderEnabled(BooleanCallback callback);
+
+  // Returns list of available providing extensions.
+  static void getProvidingExtensions(GetProvidingExtensionsCallback callback);
+
+  // Requests adding a new provided file system. If not possible, then an error
+  // via chrome.runtime.lastError is returned.
+  static void addProvidedFileSystem(DOMString extension_id,
+                                    SimpleCallback callback);
+
+  // Requests configuring an existing volume. If not possible, then returns
+  // an error via chrome.runtime.lastError.
+  static void configureVolume(DOMString volumeId, SimpleCallback callback);
 };
 
 interface Events {

@@ -74,6 +74,9 @@ void LayoutSVGRoot::computeIntrinsicRatioInformation(FloatSize& intrinsicSize, d
     intrinsicSize.setWidth(floatValueForLength(svg->intrinsicWidth(), 0));
     intrinsicSize.setHeight(floatValueForLength(svg->intrinsicHeight(), 0));
 
+    if (!isHorizontalWritingMode())
+        intrinsicSize = intrinsicSize.transposedSize();
+
     if (!intrinsicSize.isEmpty()) {
         intrinsicRatio = intrinsicSize.width() / static_cast<double>(intrinsicSize.height());
     } else {
@@ -85,6 +88,8 @@ void LayoutSVGRoot::computeIntrinsicRatioInformation(FloatSize& intrinsicSize, d
         if (!viewBoxSize.isEmpty()) {
             // The viewBox can only yield an intrinsic ratio, not an intrinsic size.
             intrinsicRatio = viewBoxSize.width() / static_cast<double>(viewBoxSize.height());
+            if (!isHorizontalWritingMode())
+                intrinsicRatio = 1 / intrinsicRatio;
         }
     }
 }
@@ -110,16 +115,8 @@ bool LayoutSVGRoot::isEmbeddedThroughFrameContainingSVGDocument() const
     return frame->document()->isSVGDocument();
 }
 
-static inline LayoutUnit resolveLengthAttributeForSVG(const Length& length, float scale, float maxSize)
-{
-    return static_cast<LayoutUnit>(valueForLength(length, maxSize) * (length.isFixed() ? scale : 1));
-}
-
 LayoutUnit LayoutSVGRoot::computeReplacedLogicalWidth(ShouldComputePreferred shouldComputePreferred) const
 {
-    SVGSVGElement* svg = toSVGSVGElement(node());
-    ASSERT(svg);
-
     // When we're embedded through SVGImage (border-image/background-image/<html:img>/...) we're forced to resize to a specific size.
     if (!m_containerSize.isEmpty())
         return m_containerSize.width();
@@ -130,18 +127,12 @@ LayoutUnit LayoutSVGRoot::computeReplacedLogicalWidth(ShouldComputePreferred sho
     if (style()->logicalWidth().isSpecified() || style()->logicalMaxWidth().isSpecified())
         return LayoutReplaced::computeReplacedLogicalWidth(shouldComputePreferred);
 
-    if (svg->hasIntrinsicWidth())
-        return resolveLengthAttributeForSVG(svg->intrinsicWidth(), style()->effectiveZoom(), containingBlock()->availableLogicalWidth().toFloat());
-
     // SVG embedded via SVGImage (background-image/border-image/etc) / Inline SVG.
     return LayoutReplaced::computeReplacedLogicalWidth(shouldComputePreferred);
 }
 
 LayoutUnit LayoutSVGRoot::computeReplacedLogicalHeight() const
 {
-    SVGSVGElement* svg = toSVGSVGElement(node());
-    ASSERT(svg);
-
     // When we're embedded through SVGImage (border-image/background-image/<html:img>/...) we're forced to resize to a specific size.
     if (!m_containerSize.isEmpty())
         return m_containerSize.height();
@@ -151,9 +142,6 @@ LayoutUnit LayoutSVGRoot::computeReplacedLogicalHeight() const
 
     if (style()->logicalHeight().isSpecified() || style()->logicalMaxHeight().isSpecified())
         return LayoutReplaced::computeReplacedLogicalHeight();
-
-    if (svg->hasIntrinsicHeight())
-        return resolveLengthAttributeForSVG(svg->intrinsicHeight(), style()->effectiveZoom(), containingBlock()->availableLogicalHeight(IncludeMarginBorderPadding).toFloat());
 
     // SVG embedded via SVGImage (background-image/border-image/etc) / Inline SVG.
     return LayoutReplaced::computeReplacedLogicalHeight();

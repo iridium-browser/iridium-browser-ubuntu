@@ -4,7 +4,10 @@
 
 {
   'variables': {
+    'chromium_code': 1,
     'chromecast_branding%': 'Chromium',
+    'libcast_media_gyp%': '',
+    'use_default_libcast_media%': 1,
   },
   'targets': [
     {
@@ -14,6 +17,7 @@
         '../../base/base.gyp:base',
         '../../crypto/crypto.gyp:crypto',
         '../../third_party/widevine/cdm/widevine_cdm.gyp:widevine_cdm_version_h',
+        '<(libcast_media_gyp):libcast_media_1.0',
       ],
       'sources': [
         'base/decrypt_context.cc',
@@ -24,6 +28,8 @@
         'base/key_systems_common.h',
         'base/media_caps.cc',
         'base/media_caps.h',
+        'base/media_codec_support.cc',
+        'base/media_codec_support.h',
         'base/switching_media_renderer.cc',
         'base/switching_media_renderer.h',
       ],
@@ -50,6 +56,14 @@
       'sources': [
         'cdm/browser_cdm_cast.cc',
         'cdm/browser_cdm_cast.h',
+      ],
+      'conditions': [
+        ['use_playready==1', {
+          'sources': [
+            'cdm/playready_drm_delegate_android.cc',
+            'cdm/playready_drm_delegate_android.h',
+          ],
+        }],
       ],
     },
     {
@@ -81,6 +95,8 @@
         'cma/base/decoder_buffer_adapter.h',
         'cma/base/decoder_buffer_base.cc',
         'cma/base/decoder_buffer_base.h',
+        'cma/base/decoder_config_adapter.cc',
+        'cma/base/decoder_config_adapter.h',
         'cma/base/media_task_runner.cc',
         'cma/base/media_task_runner.h',
       ],
@@ -281,5 +297,24 @@
         'cma/test/run_all_unittests.cc',
       ],
     },
+  ], # end of targets
+  'conditions': [
+    ['use_default_libcast_media==1', {
+      'targets': [
+        {
+          'target_name': 'libcast_media_1.0',
+          'type': 'shared_library',
+          'dependencies': [
+            '../../chromecast/chromecast.gyp:cast_public_api'
+          ],
+          'include_dirs': [
+            '../..',
+          ],
+          'sources': [
+            'base/cast_media_default.cc',
+          ],
+        }
+      ]
+    }],
   ],
 }

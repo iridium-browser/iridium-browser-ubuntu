@@ -11,10 +11,10 @@
 #include <stdio.h>
 
 #include "common/angleutils.h"
+#include "common/debug.h"
 #include "common/utilities.h"
 #include "compiler/translator/BuiltInFunctionEmulator.h"
 #include "compiler/translator/BuiltInFunctionEmulatorHLSL.h"
-#include "compiler/translator/DetectDiscontinuity.h"
 #include "compiler/translator/FlagStd140Structs.h"
 #include "compiler/translator/InfoSink.h"
 #include "compiler/translator/NodeSearch.h"
@@ -27,7 +27,6 @@
 #include "compiler/translator/UniformHLSL.h"
 #include "compiler/translator/UtilsHLSL.h"
 #include "compiler/translator/blocklayout.h"
-#include "compiler/translator/compilerdebug.h"
 #include "compiler/translator/util.h"
 
 namespace sh
@@ -109,7 +108,8 @@ OutputHLSL::OutputHLSL(sh::GLenum shaderType, int shaderVersion,
       mSourcePath(sourcePath),
       mOutputType(outputType),
       mNumRenderTargets(numRenderTargets),
-      mCompileOptions(compileOptions)
+      mCompileOptions(compileOptions),
+      mCurrentFunctionMetadata(nullptr)
 {
     mUnfoldShortCircuit = new UnfoldShortCircuit(this);
     mInsideFunction = false;
@@ -130,8 +130,6 @@ OutputHLSL::OutputHLSL(sh::GLenum shaderType, int shaderVersion,
 
     mUniqueIndex = 0;
 
-    mContainsLoopDiscontinuity = false;
-    mContainsAnyLoop = false;
     mOutputLod0Function = false;
     mInsideDiscontinuousLoop = false;
     mNestedLoopDepth = 0;
@@ -170,8 +168,6 @@ OutputHLSL::~OutputHLSL()
 
 void OutputHLSL::output(TIntermNode *treeRoot, TInfoSinkBase &objSink)
 {
-    mContainsLoopDiscontinuity = mShaderType == GL_FRAGMENT_SHADER && containsLoopDiscontinuity(treeRoot);
-    mContainsAnyLoop = containsAnyLoop(treeRoot);
     const std::vector<TIntermTyped*> &flaggedStructs = FlagStd140ValueStructs(treeRoot);
     makeFlaggedStructMaps(flaggedStructs);
 
@@ -185,6 +181,12 @@ void OutputHLSL::output(TIntermNode *treeRoot, TInfoSinkBase &objSink)
     BuiltInFunctionEmulator builtInFunctionEmulator;
     InitBuiltInFunctionEmulatorForHLSL(&builtInFunctionEmulator);
     builtInFunctionEmulator.MarkBuiltInFunctionsForEmulation(treeRoot);
+
+    // Now that we are done changing the AST, do the analyses need for HLSL generation
+    CallDAG::InitResult success = mCallDag.init(treeRoot, &objSink);
+    ASSERT(success == CallDAG::INITDAG_SUCCESS);
+    UNUSED_ASSERTION_VARIABLE(success);
+    mASTMetadataList = CreateASTMetadataHLSL(treeRoot, mCallDag);
 
     // Output the body and footer first to determine what has to go in the header
     mInfoSinkStack.push(&mBody);
@@ -351,6 +353,14 @@ void OutputHLSL::header(const BuiltInFunctionEmulator *builtInFunctionEmulator)
         for (const auto &assignmentFunction : mArrayAssignmentFunctions)
         {
             out << assignmentFunction.functionDefinition << "\n";
+        }
+    }
+    if (!mArrayConstructIntoFunctions.empty())
+    {
+        out << "\n// Array constructor functions\n\n";
+        for (const auto &constructIntoFunction : mArrayConstructIntoFunctions)
+        {
+            out << constructIntoFunction.functionDefinition << "\n";
         }
     }
 
@@ -1311,8 +1321,8 @@ void OutputHLSL::visitSymbol(TIntermSymbol *node)
 
         if (qualifier == EvqUniform)
         {
-            const TType& nodeType = node->getType();
-            const TInterfaceBlock* interfaceBlock = nodeType.getInterfaceBlock();
+            const TType &nodeType = node->getType();
+            const TInterfaceBlock *interfaceBlock = nodeType.getInterfaceBlock();
 
             if (interfaceBlock)
             {
@@ -1322,6 +1332,8 @@ void OutputHLSL::visitSymbol(TIntermSymbol *node)
             {
                 mReferencedUniforms[name] = node;
             }
+
+            ensureStructDefined(nodeType);
 
             out << DecorateUniform(name, nodeType);
         }
@@ -1380,7 +1392,7 @@ void OutputHLSL::visitSymbol(TIntermSymbol *node)
             mUsesFragDepth = true;
             out << "gl_Depth";
         }
-        else if (qualifier == EvqInternal)
+        else if (node->isInternal())
         {
             out << name;
         }
@@ -1451,6 +1463,24 @@ bool OutputHLSL::visitBinary(Visit visit, TIntermBinary *node)
       case EOpAssign:
         if (node->getLeft()->isArray())
         {
+            TIntermAggregate *rightAgg = node->getRight()->getAsAggregate();
+            if (rightAgg != nullptr && rightAgg->isConstructor())
+            {
+                const TString &functionName = addArrayConstructIntoFunction(node->getType());
+                out << functionName << "(";
+                node->getLeft()->traverse(this);
+                TIntermSequence *seq = rightAgg->getSequence();
+                for (auto &arrayElement : *seq)
+                {
+                    out << ", ";
+                    arrayElement->traverse(this);
+                }
+                out << ")";
+                return false;
+            }
+            // ArrayReturnValueToOutParameter should have eliminated expressions where a function call is assigned.
+            ASSERT(rightAgg == nullptr || rightAgg->getOp() != EOpFunctionCall);
+
             const TString &functionName = addArrayAssignmentFunction(node->getType());
             outputTriplet(visit, (functionName + "(").c_str(), ", ", ")");
         }
@@ -1849,12 +1879,7 @@ bool OutputHLSL::visitAggregate(Visit visit, TIntermAggregate *node)
 
             if (variable && (variable->getQualifier() == EvqTemporary || variable->getQualifier() == EvqGlobal))
             {
-                TStructure *structure = variable->getType().getStruct();
-
-                if (structure)
-                {
-                    mStructureHLSL->addConstructor(variable->getType(), StructNameString(*structure), NULL);
-                }
+                ensureStructDefined(variable->getType());
 
                 if (!variable->getAsSymbolNode() || variable->getAsSymbolNode()->getSymbol() != "")   // Variable declaration
                 {
@@ -1928,6 +1953,13 @@ bool OutputHLSL::visitAggregate(Visit visit, TIntermAggregate *node)
       case EOpPrototype:
         if (visit == PreVisit)
         {
+            size_t index = mCallDag.findIndex(node);
+            // Skip the prototype if it is not implemented (and thus not used)
+            if (index == CallDAG::InvalidIndex)
+            {
+                return false;
+            }
+
             out << TypeString(node->getType()) << " " << Decorate(TFunction::unmangleName(node->getName())) << (mOutputLod0Function ? "Lod0(" : "(");
 
             TIntermSequence *arguments = node->getSequence();
@@ -1951,7 +1983,8 @@ bool OutputHLSL::visitAggregate(Visit visit, TIntermAggregate *node)
             out << ");\n";
 
             // Also prototype the Lod0 variant if needed
-            if (mContainsLoopDiscontinuity && !mOutputLod0Function)
+            bool needsLod0 = mASTMetadataList[index].mNeedsLod0;
+            if (needsLod0 && !mOutputLod0Function && mShaderType == GL_FRAGMENT_SHADER)
             {
                 mOutputLod0Function = true;
                 node->traverse(this);
@@ -1964,7 +1997,12 @@ bool OutputHLSL::visitAggregate(Visit visit, TIntermAggregate *node)
       case EOpComma:            outputTriplet(visit, "(", ", ", ")");                break;
       case EOpFunction:
         {
+            ASSERT(mCurrentFunctionMetadata == nullptr);
             TString name = TFunction::unmangleName(node->getName());
+
+            size_t index = mCallDag.findIndex(node);
+            ASSERT(index != CallDAG::InvalidIndex);
+            mCurrentFunctionMetadata = &mASTMetadataList[index];
 
             out << TypeString(node->getType()) << " ";
 
@@ -1986,12 +2024,7 @@ bool OutputHLSL::visitAggregate(Visit visit, TIntermAggregate *node)
 
                 if (symbol)
                 {
-                    TStructure *structure = symbol->getType().getStruct();
-
-                    if (structure)
-                    {
-                        mStructureHLSL->addConstructor(symbol->getType(), StructNameString(*structure), NULL);
-                    }
+                    ensureStructDefined(symbol->getType());
 
                     out << argumentString(symbol);
 
@@ -2015,14 +2048,15 @@ bool OutputHLSL::visitAggregate(Visit visit, TIntermAggregate *node)
 
             out << "}\n";
 
-            if (mContainsLoopDiscontinuity && !mOutputLod0Function)
+            mCurrentFunctionMetadata = nullptr;
+
+            bool needsLod0 = mASTMetadataList[index].mNeedsLod0;
+            if (needsLod0 && !mOutputLod0Function && mShaderType == GL_FRAGMENT_SHADER)
             {
-                if (name != "main")
-                {
-                    mOutputLod0Function = true;
-                    node->traverse(this);
-                    mOutputLod0Function = false;
-                }
+                ASSERT(name != "main");
+                mOutputLod0Function = true;
+                node->traverse(this);
+                mOutputLod0Function = false;
             }
 
             return false;
@@ -2031,11 +2065,19 @@ bool OutputHLSL::visitAggregate(Visit visit, TIntermAggregate *node)
       case EOpFunctionCall:
         {
             TString name = TFunction::unmangleName(node->getName());
-            bool lod0 = mInsideDiscontinuousLoop || mOutputLod0Function;
             TIntermSequence *arguments = node->getSequence();
 
+            bool lod0 = mInsideDiscontinuousLoop || mOutputLod0Function;
             if (node->isUserDefined())
             {
+                if (node->isArray())
+                {
+                    UNIMPLEMENTED();
+                }
+                size_t index = mCallDag.findIndex(node);
+                ASSERT(index != CallDAG::InvalidIndex);
+                lod0 &= mASTMetadataList[index].mNeedsLod0;
+
                 out << Decorate(name) << (lod0 ? "Lod0(" : "(");
             }
             else
@@ -2202,6 +2244,10 @@ bool OutputHLSL::visitAggregate(Visit visit, TIntermAggregate *node)
       case EOpConstructMat4:    outputConstructor(visit, node->getType(), "mat4", node->getSequence());  break;
       case EOpConstructStruct:
         {
+            if (node->getType().isArray())
+            {
+                UNIMPLEMENTED();
+            }
             const TString &structName = StructNameString(*node->getType().getStruct());
             mStructureHLSL->addConstructor(node->getType(), structName, node->getSequence());
             outputTriplet(visit, (structName + "_ctor(").c_str(), ", ", ")");
@@ -2262,11 +2308,10 @@ bool OutputHLSL::visitSelection(Visit visit, TIntermSelection *node)
     {
         mUnfoldShortCircuit->traverse(node->getCondition());
 
-        // D3D errors when there is a gradient operation in a loop in an unflattened if
-        // however flattening all the ifs in branch heavy shaders made D3D error too.
-        // As a temporary workaround we flatten the ifs only if there is at least a loop
-        // present somewhere in the shader.
-        if (mShaderType == GL_FRAGMENT_SHADER && mContainsAnyLoop)
+        // D3D errors when there is a gradient operation in a loop in an unflattened if.
+        if (mShaderType == GL_FRAGMENT_SHADER
+            && mCurrentFunctionMetadata->hasDiscontinuousLoop(node)
+            && mCurrentFunctionMetadata->hasGradientInCallGraph(node))
         {
             out << "FLATTEN ";
         }
@@ -2361,11 +2406,8 @@ bool OutputHLSL::visitLoop(Visit visit, TIntermLoop *node)
     mNestedLoopDepth++;
 
     bool wasDiscontinuous = mInsideDiscontinuousLoop;
-
-    if (mContainsLoopDiscontinuity && !mInsideDiscontinuousLoop)
-    {
-        mInsideDiscontinuousLoop = containsLoopDiscontinuity(node);
-    }
+    mInsideDiscontinuousLoop = mInsideDiscontinuousLoop ||
+    mCurrentFunctionMetadata->mDiscontinuousLoops.count(node) > 0;
 
     if (mOutputType == SH_HLSL9_OUTPUT)
     {
@@ -2380,16 +2422,17 @@ bool OutputHLSL::visitLoop(Visit visit, TIntermLoop *node)
 
     TInfoSinkBase &out = getInfoSink();
 
+    const char *unroll = mCurrentFunctionMetadata->hasGradientInCallGraph(node) ? "LOOP" : "";
     if (node->getType() == ELoopDoWhile)
     {
-        out << "{LOOP do\n";
+        out << "{" << unroll << " do\n";
 
         outputLineDirective(node->getLine().first_line);
         out << "{\n";
     }
     else
     {
-        out << "{LOOP for(";
+        out << "{" << unroll << " for(";
 
         if (node->getInit())
         {
@@ -2695,8 +2738,9 @@ bool OutputHLSL::handleExcessiveLoop(TIntermLoop *node)
                 }
 
                 // for(int index = initial; index < clampedLimit; index += increment)
+                const char *unroll = mCurrentFunctionMetadata->hasGradientInCallGraph(node) ? "LOOP" : "";
 
-                out << "LOOP for(";
+                out << unroll << " for(";
                 index->traverse(this);
                 out << " = ";
                 out << initial;
@@ -2795,7 +2839,7 @@ TString OutputHLSL::argumentString(const TIntermSymbol *symbol)
     {
         name = "x" + str(mUniqueIndex++);
     }
-    else
+    else if (!symbol->isInternal())
     {
         name = Decorate(name);
     }
@@ -2829,6 +2873,10 @@ TString OutputHLSL::initializer(const TType &type)
 
 void OutputHLSL::outputConstructor(Visit visit, const TType &type, const char *name, const TIntermSequence *parameters)
 {
+    if (type.isArray())
+    {
+        UNIMPLEMENTED();
+    }
     TInfoSinkBase &out = getInfoSink();
 
     if (visit == PreVisit)
@@ -2847,7 +2895,7 @@ void OutputHLSL::outputConstructor(Visit visit, const TType &type, const char *n
     }
 }
 
-const ConstantUnion *OutputHLSL::writeConstantUnion(const TType &type, const ConstantUnion *constUnion)
+const TConstantUnion *OutputHLSL::writeConstantUnion(const TType &type, const TConstantUnion *constUnion)
 {
     TInfoSinkBase &out = getInfoSink();
 
@@ -3107,5 +3155,60 @@ TString OutputHLSL::addArrayAssignmentFunction(const TType& type)
 
     return function.functionName;
 }
+
+TString OutputHLSL::addArrayConstructIntoFunction(const TType& type)
+{
+    for (const auto &constructIntoFunction : mArrayConstructIntoFunctions)
+    {
+        if (constructIntoFunction.type == type)
+        {
+            return constructIntoFunction.functionName;
+        }
+    }
+
+    const TString &typeName = TypeString(type);
+
+    ArrayHelperFunction function;
+    function.type = type;
+
+    TInfoSinkBase fnNameOut;
+    fnNameOut << "angle_construct_into_" << type.getArraySize() << "_" << typeName;
+    function.functionName = fnNameOut.c_str();
+
+    TInfoSinkBase fnOut;
+
+    fnOut << "void " << function.functionName << "(out "
+          << typeName << " a[" << type.getArraySize() << "]";
+    for (int i = 0; i < type.getArraySize(); ++i)
+    {
+        fnOut << ", " << typeName << " b" << i;
+    }
+    fnOut << ")\n"
+             "{\n";
+
+    for (int i = 0; i < type.getArraySize(); ++i)
+    {
+        fnOut << "    a[" << i << "] = b" << i << ";\n";
+    }
+    fnOut << "}\n";
+
+    function.functionDefinition = fnOut.c_str();
+
+    mArrayConstructIntoFunctions.push_back(function);
+
+    return function.functionName;
+}
+
+void OutputHLSL::ensureStructDefined(const TType &type)
+{
+    TStructure *structure = type.getStruct();
+
+    if (structure)
+    {
+        mStructureHLSL->addConstructor(type, StructNameString(*structure), nullptr);
+    }
+}
+
+
 
 }

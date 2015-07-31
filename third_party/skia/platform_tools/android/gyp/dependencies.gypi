@@ -35,6 +35,19 @@
       ],
     },
     {
+      'target_name': 'ashmem',
+      'type': 'static_library',
+      'sources': [
+        '../third_party/ashmem/cutils/ashmem.h',
+        '../third_party/ashmem/cutils/ashmem-dev.c'
+      ],
+      'direct_dependent_settings': {
+        'include_dirs': [
+          '../third_party/ashmem',
+        ]
+      },
+    },
+    {
       'target_name': 'expat',
       'type': 'static_library',
       'sources': [
@@ -102,6 +115,9 @@
     {
       'target_name': 'jpeg',
       'type': 'static_library',
+      'dependencies': [
+        'ashmem'
+      ],
       'sources': [
         '../third_party/externals/jpeg/jcapimin.c',
         '../third_party/externals/jpeg/jcapistd.c',
@@ -144,14 +160,14 @@
         '../third_party/externals/jpeg/jidctfst.c',
         '../third_party/externals/jpeg/jidctint.c',
         '../third_party/externals/jpeg/jidctred.c',
-        '../third_party/externals/jpeg/jmem-android.c',
+        '../third_party/externals/jpeg/jmem-ashmem.c',
         '../third_party/externals/jpeg/jmemmgr.c',
         '../third_party/externals/jpeg/jquant1.c',
         '../third_party/externals/jpeg/jquant2.c',
         '../third_party/externals/jpeg/jutils.c',
       ],
       'conditions': [
-        [ 'arm_neon == 1',
+        [ 'arm_neon == 1 and skia_clang_build == 0',
           {
             'sources' : [
               '../third_party/externals/jpeg/armv6_idct.S',
@@ -192,6 +208,7 @@
         '-w',
         '-fvisibility=hidden',
         '-DAVOID_TABLES',
+        '-DUSE_ANDROID_ASHMEM',
         '-O3',
         '-fstrict-aliasing',
         '-fprefetch-loop-arrays',

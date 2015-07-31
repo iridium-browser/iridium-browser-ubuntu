@@ -11,6 +11,9 @@ namespace prefs {
 // 64-bit integer serialization of the base::Time when the last sync occurred.
 const char kSyncLastSyncedTime[] = "sync.last_synced_time";
 
+// 64-bit integer serialization of the base::Time of the last sync poll.
+const char kSyncLastPollTime[] = "sync.last_poll_time";
+
 // Boolean specifying whether the user finished setting up sync.
 const char kSyncHasSetupCompleted[] = "sync.has_setup_completed";
 
@@ -95,6 +98,17 @@ const char kSyncRemainingRollbackTries[] = "sync.remaining_rollback_tries";
 
 // Stores the timestamp of first sync.
 const char kSyncFirstSyncTime[] = "sync.first_sync_time";
+
+// Stores whether a platform specific passphrase error prompt has been shown to
+// the user (e.g. an Android system notification). Used for out of band prompts
+// that we only want to use once.
+const char kSyncPassphrasePrompted[] = "sync.passphrase_prompted";
+
+// Stores how many times received MEMORY_PRESSURE_LEVEL_CRITICAL.
+const char kSyncMemoryPressureWarningCount[] = "sync.memory_warning_count";
+
+// Stores if sync shutdown cleanly.
+const char kSyncShutdownCleanly[] = "sync.shutdown_cleanly";
 
 }  // namespace prefs
 

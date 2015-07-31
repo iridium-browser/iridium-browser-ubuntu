@@ -18,7 +18,7 @@ namespace {
 
 class XmppSocketDataProvider: public net::SocketDataProvider {
  public:
-  net::MockRead GetNextRead() override {
+  net::MockRead OnRead() override {
     return net::MockRead(net::ASYNC, net::ERR_IO_PENDING);
   }
 
@@ -28,6 +28,14 @@ class XmppSocketDataProvider: public net::SocketDataProvider {
   }
 
   void Reset() override {}
+
+  bool AllReadDataConsumed() const override {
+    return true;
+  }
+
+  bool AllWriteDataConsumed() const override {
+    return true;
+  }
 
   void ReceiveData(const std::string& text) {
     socket()->OnReadComplete(

@@ -90,10 +90,13 @@
 //<include src="metadata/metadata_cache_set.js">
 //<include src="metadata/new_metadata_provider.js">
 //
-//<include src="app_installer.js">
+//<include src="../../../../../components/chrome_apps/webstore_widget/cws_widget/app_installer.js">
+//<include src="../../../../../components/chrome_apps/webstore_widget/cws_widget/cws_webview_client.js">
+//<include src="../../../../../components/chrome_apps/webstore_widget/cws_widget/cws_widget_container.js">
+//<include src="../../../../../components/chrome_apps/webstore_widget/cws_widget/cws_widget_container_error_dialog.js">
+//
 //<include src="app_state_controller.js">
 //<include src="column_visibility_controller.js">
-//<include src="cws_container_client.js">
 //<include src="dialog_action_controller.js">
 //<include src="dialog_type.js">
 //<include src="directory_contents.js">
@@ -106,6 +109,7 @@
 //<include src="file_transfer_controller.js">
 //<include src="file_watcher.js">
 //<include src="folder_shortcuts_data_model.js">
+//<include src="sort_menu_controller.js">
 //<include src="gear_menu_controller.js">
 //<include src="import_controller.js">
 //<include src="launch_param.js">
@@ -129,6 +133,7 @@
 //<include src="toolbar_controller.js">
 //<include src="thumbnail_loader.js">
 //<include src="list_thumbnail_loader.js">
+//<include src="providers_model.js">
 //<include src="ui/banners.js" >
 //<include src="ui/conflict_dialog.js">
 //<include src="ui/default_action_dialog.js">
@@ -147,6 +152,7 @@
 //<include src="ui/location_line.js">
 //<include src="ui/multi_profile_share_dialog.js">
 //<include src="ui/progress_center_panel.js">
+//<include src="ui/providers_menu.js">
 //<include src="ui/scrollbar.js">
 //<include src="ui/search_box.js">
 //<include src="ui/share_dialog.js">

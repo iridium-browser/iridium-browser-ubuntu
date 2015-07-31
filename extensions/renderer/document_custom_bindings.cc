@@ -9,7 +9,7 @@
 #include "base/bind.h"
 #include "extensions/renderer/script_context.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
-#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "v8/include/v8.h"
 
 namespace extensions {
@@ -34,7 +34,7 @@ void DocumentCustomBindings::RegisterElement(
 
   blink::WebExceptionCode ec = 0;
   blink::WebDocument document = context()->web_frame()->document();
-  v8::Handle<v8::Value> constructor = document.registerEmbedderCustomElement(
+  v8::Local<v8::Value> constructor = document.registerEmbedderCustomElement(
       blink::WebString::fromUTF8(element_name), options, ec);
   args.GetReturnValue().Set(constructor);
 }

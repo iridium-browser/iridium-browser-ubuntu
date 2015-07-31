@@ -311,7 +311,6 @@ PassRefPtrWillBeRawPtr<AnimatableValue> CSSAnimatableValueFactory::create(CSSPro
     case CSSPropertyBackgroundPositionY:
         return createFromFillLayers<CSSPropertyBackgroundPositionY>(style.backgroundLayers(), style);
     case CSSPropertyBackgroundSize:
-    case CSSPropertyWebkitBackgroundSize:
         return createFromFillLayers<CSSPropertyBackgroundSize>(style.backgroundLayers(), style);
     case CSSPropertyBaselineShift:
         switch (style.svgStyle().baselineShift()) {
@@ -357,8 +356,7 @@ PassRefPtrWillBeRawPtr<AnimatableValue> CSSAnimatableValueFactory::create(CSSPro
     case CSSPropertyBottom:
         return createFromLength(style.bottom(), style);
     case CSSPropertyBoxShadow:
-    case CSSPropertyWebkitBoxShadow:
-        return AnimatableShadow::create(style.boxShadow());
+        return AnimatableShadow::create(style.boxShadow(), style.color());
     case CSSPropertyClip:
         if (style.hasAutoClip())
             return AnimatableUnknown::create(CSSPrimitiveValue::create(CSSValueAuto));
@@ -468,7 +466,7 @@ PassRefPtrWillBeRawPtr<AnimatableValue> CSSAnimatableValueFactory::create(CSSPro
     case CSSPropertyTextIndent:
         return createFromLength(style.textIndent(), style);
     case CSSPropertyTextShadow:
-        return AnimatableShadow::create(style.textShadow());
+        return AnimatableShadow::create(style.textShadow(), style.color());
     case CSSPropertyTop:
         return createFromLength(style.top(), style);
     case CSSPropertyWebkitBorderHorizontalSpacing:

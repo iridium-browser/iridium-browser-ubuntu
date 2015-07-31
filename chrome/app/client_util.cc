@@ -192,9 +192,22 @@ int MainDllLoader::Launch(HINSTANCE instance) {
       return chrome::RESULT_CODE_UNSUPPORTED_PARAM;
     }
 
+    base::FilePath default_user_data_directory;
+    if (!PathService::Get(chrome::DIR_USER_DATA, &default_user_data_directory))
+      return chrome::RESULT_CODE_MISSING_DATA;
+    // The actual user data directory may differ from the default according to
+    // policy and command-line arguments evaluated in the browser process.
+    // The hang monitor will simply be disabled if a window with this name is
+    // never instantiated by the browser process. Since this should be
+    // exceptionally rare it should not impact stability efforts.
+    base::string16 message_window_name = default_user_data_directory.value();
+
     base::FilePath watcher_data_directory;
     if (!PathService::Get(chrome::DIR_WATCHER_DATA, &watcher_data_directory))
       return chrome::RESULT_CODE_MISSING_DATA;
+
+    base::string16 channel_name = GoogleUpdateSettings::GetChromeChannel(
+        !InstallUtil::IsPerUserInstall(cmd_line.GetProgram()));
 
     // Intentionally leaked.
     HMODULE watcher_dll = Load(&version, &file);
@@ -206,7 +219,8 @@ int MainDllLoader::Launch(HINSTANCE instance) {
             ::GetProcAddress(watcher_dll, kChromeWatcherDLLEntrypoint));
     return watcher_main(chrome::kBrowserExitCodesRegistryPath,
                         parent_process.Take(), on_initialized_event.Take(),
-                        watcher_data_directory.value().c_str());
+                        watcher_data_directory.value().c_str(),
+                        message_window_name.c_str(), channel_name.c_str());
   }
 
   // Initialize the sandbox services.

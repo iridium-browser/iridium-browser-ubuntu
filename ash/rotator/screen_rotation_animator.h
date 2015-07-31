@@ -23,8 +23,10 @@ class ASH_EXPORT ScreenRotationAnimator {
   // www.crbug.com/479503.
   bool CanAnimate() const;
 
-  // Rotates |display_| to the |new_rotation| orientation, for the given
-  // |source|. The rotation will also become active.
+  // Rotates the gfx::Display specified by |display_id_| to the |new_rotation|
+  // orientation, for the given |source|. The rotation will also become active.
+  // Clients should only call |Rotate(gfx::Display::Rotation)| if |CanAnimate()|
+  // returns true.
   void Rotate(gfx::Display::Rotation new_rotation,
               gfx::Display::RotationSource source);
 

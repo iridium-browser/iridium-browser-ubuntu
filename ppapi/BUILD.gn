@@ -10,6 +10,7 @@ copy("copy_test_files") {
     "tests/test_case.html",
     "tests/test_case.html.mock-http-headers",
     "tests/test_page.css",
+    "tests/test_page.css.mock-http-headers",
   ]
   outputs = [
     "$root_out_dir/{{source_file_part}}",
@@ -44,6 +45,18 @@ shared_library("ppapi_tests") {
   ]
 }
 
+shared_library("power_saver_test_plugin") {
+  sources = [
+    "tests/power_saver_test_plugin.cc",
+    "tests/test_utils.cc",
+  ]
+
+  deps = [
+    "//ppapi/cpp",
+    "//ppapi/shared_impl",
+  ]
+}
+
 test("ppapi_unittests") {
   sources = [
     "host/resource_message_filter_unittest.cc",
@@ -66,7 +79,6 @@ test("ppapi_unittests") {
     "proxy/printing_resource_unittest.cc",
     "proxy/raw_var_data_unittest.cc",
     "proxy/serialized_var_unittest.cc",
-    "proxy/talk_resource_unittest.cc",
     "proxy/tracked_callback_unittest.cc",
     "proxy/video_decoder_resource_unittest.cc",
     "proxy/video_encoder_resource_unittest.cc",

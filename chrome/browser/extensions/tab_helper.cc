@@ -143,7 +143,9 @@ bool TabHelper::CanCreateApplicationShortcuts() const {
 }
 
 bool TabHelper::CanCreateBookmarkApp() const {
-  return IsValidBookmarkAppUrl(web_contents()->GetURL());
+  return !profile_->IsGuestSession() &&
+         !profile_->IsSystemProfile() &&
+         IsValidBookmarkAppUrl(web_contents()->GetURL());
 }
 
 void TabHelper::AddScriptExecutionObserver(ScriptExecutionObserver* observer) {

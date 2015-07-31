@@ -21,8 +21,6 @@
 
 namespace ppapi {
 
-const char kFilePrefix[] = "files/";
-
 // IPC channel is asynchronously set up. So, the NaCl process may try to
 // send a OpenResource message to the host before the connection is
 // established. In such a case, it is necessary to wait for the set up
@@ -35,7 +33,7 @@ class ManifestMessageFilter : public IPC::SyncMessageFilter {
             true /* manual_reset */, false /* initially_signaled */) {
   }
 
-  virtual bool Send(IPC::Message* message) override {
+  bool Send(IPC::Message* message) override {
     // Wait until set up is actually done.
     connected_event_.Wait();
     return SyncMessageFilter::Send(message);
@@ -43,19 +41,19 @@ class ManifestMessageFilter : public IPC::SyncMessageFilter {
 
   // When set up is done, OnFilterAdded is called on IO thread. Unblocks the
   // Send().
-  virtual void OnFilterAdded(IPC::Sender* sender) override {
+  void OnFilterAdded(IPC::Sender* sender) override {
     SyncMessageFilter::OnFilterAdded(sender);
     connected_event_.Signal();
   }
 
   // If an error is found, unblocks the Send(), too, to return an error.
-  virtual void OnChannelError() override {
+  void OnChannelError() override {
     SyncMessageFilter::OnChannelError();
     connected_event_.Signal();
   }
 
   // Similar to OnChannelError, unblocks the Send() on the channel closing.
-  virtual void OnChannelClosing() override {
+  void OnChannelClosing() override {
     SyncMessageFilter::OnChannelClosing();
     connected_event_.Signal();
   }
@@ -101,7 +99,7 @@ bool ManifestService::OpenResource(const char* file, int* fd) {
   uint64_t file_token_lo = 0;
   uint64_t file_token_hi = 0;
   if (!filter_->Send(new PpapiHostMsg_OpenResource(
-          std::string(kFilePrefix) + file,
+          file,
           &ipc_fd,
           &file_token_lo,
           &file_token_hi))) {

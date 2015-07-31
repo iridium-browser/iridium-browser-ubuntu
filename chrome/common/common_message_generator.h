@@ -7,7 +7,6 @@
 #include "chrome/common/benchmarking_messages.h"
 #include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/mac/app_shim_messages.h"
-#include "chrome/common/prefetch_messages.h"
 #include "chrome/common/prerender_messages.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/tts_messages.h"
@@ -38,6 +37,6 @@
 #include "chrome/common/media/webrtc_logging_messages.h"
 #endif
 
-#if defined(FULL_SAFE_BROWSING) || defined(MOBILE_SAFE_BROWSING)
+#if defined(SAFE_BROWSING_SERVICE)
 #include "chrome/common/safe_browsing/safebrowsing_messages.h"
 #endif

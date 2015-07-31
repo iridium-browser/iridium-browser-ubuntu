@@ -1609,11 +1609,21 @@ int vp9_compute_qdelta_by_rate(const RATE_CONTROL *rc, FRAME_TYPE frame_type,
   return target_index - qindex;
 }
 
-void vp9_rc_set_gf_max_interval(const VP9_COMP *const cpi,
-                                RATE_CONTROL *const rc) {
+#define MIN_GF_INTERVAL     4
+#define MAX_GF_INTERVAL     16
+void vp9_rc_set_gf_interval_range(const VP9_COMP *const cpi,
+                                  RATE_CONTROL *const rc) {
   const VP9EncoderConfig *const oxcf = &cpi->oxcf;
-  // Set Maximum gf/arf interval
-  rc->max_gf_interval = 16;
+
+  // Set a minimum interval.
+  rc->min_gf_interval =
+    MIN(MAX_GF_INTERVAL, MAX(MIN_GF_INTERVAL, (int)(cpi->framerate * 0.125)));
+
+  // Set Maximum gf/arf interval.
+  rc->max_gf_interval =
+    MIN(MAX_GF_INTERVAL, (int)(cpi->framerate * 0.75));
+  // Round up to next even number if odd.
+  rc->max_gf_interval += (rc->max_gf_interval & 0x01);
 
   // Extended interval for genuinely static scenes
   rc->static_scene_max_gf_interval = MAX_LAG_BUFFERS * 2;
@@ -1625,6 +1635,9 @@ void vp9_rc_set_gf_max_interval(const VP9_COMP *const cpi,
 
   if (rc->max_gf_interval > rc->static_scene_max_gf_interval)
     rc->max_gf_interval = rc->static_scene_max_gf_interval;
+
+  // Clamp min to max
+  rc->min_gf_interval = MIN(rc->min_gf_interval, rc->max_gf_interval);
 }
 
 void vp9_rc_update_framerate(VP9_COMP *cpi) {
@@ -1651,7 +1664,7 @@ void vp9_rc_update_framerate(VP9_COMP *cpi) {
   rc->max_frame_bandwidth = MAX(MAX((cm->MBs * MAX_MB_RATE), MAXRATE_1080P),
                                     vbr_max_bits);
 
-  vp9_rc_set_gf_max_interval(cpi, rc);
+  vp9_rc_set_gf_interval_range(cpi, rc);
 }
 
 #define VBR_PCT_ADJUSTMENT_LIMIT 50

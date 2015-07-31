@@ -17,6 +17,7 @@
 #endif  // OS_WIN
 #include "build/build_config.h"
 #include "chrome/browser/component_updater/component_patcher_operation_out_of_process.h"
+#include "chrome/browser/component_updater/component_updater_url_constants.h"
 #include "chrome/browser/update_client/chrome_update_query_params_delegate.h"
 #include "chrome/common/chrome_version_info.h"
 #include "components/component_updater/component_updater_switches.h"
@@ -49,17 +50,6 @@ extern const char kSwitchDisablePings[] = "disable-pings";
 
 // Sets the URL for updates.
 const char kSwitchUrlSource[] = "url-source";
-
-#define COMPONENT_UPDATER_SERVICE_ENDPOINT \
-  "//clients2.google.com/service/update2"
-
-// The default URL for the v3 protocol service endpoint. In some cases, the
-// component updater is allowed to fall back to and alternate URL source, if
-// the request to the default URL source fails.
-// The value of |kDefaultUrlSource| can be overridden with
-// --component-updater=url-source=someurl.
-const char kDefaultUrlSource[] = "https:" COMPONENT_UPDATER_SERVICE_ENDPOINT;
-const char kAltUrlSource[] = "http:" COMPONENT_UPDATER_SERVICE_ENDPOINT;
 
 // Disables differential updates.
 const char kSwitchDisableDeltaUpdates[] = "disable-delta-updates";
@@ -115,14 +105,13 @@ class ChromeConfigurator : public Configurator {
   ChromeConfigurator(const base::CommandLine* cmdline,
                      net::URLRequestContextGetter* url_request_getter);
 
-  ~ChromeConfigurator() override {}
-
   int InitialDelay() const override;
   int NextCheckDelay() override;
   int StepDelay() const override;
   int StepDelayMedium() override;
   int MinimumReCheckWait() const override;
   int OnDemandDelay() const override;
+  int UpdateDelay() const override;
   std::vector<GURL> UpdateUrl() const override;
   std::vector<GURL> PingUrl() const override;
   base::Version GetBrowserVersion() const override;
@@ -141,6 +130,10 @@ class ChromeConfigurator : public Configurator {
       const override;
 
  private:
+  friend class base::RefCountedThreadSafe<ChromeConfigurator>;
+
+  ~ChromeConfigurator() override {}
+
   net::URLRequestContextGetter* url_request_getter_;
   std::string extra_info_;
   GURL url_source_override_;
@@ -213,14 +206,18 @@ int ChromeConfigurator::OnDemandDelay() const {
   return fast_update_ ? 2 : (30 * kDelayOneMinute);
 }
 
+int ChromeConfigurator::UpdateDelay() const {
+  return fast_update_ ? 1 : (15 * kDelayOneMinute);
+}
+
 std::vector<GURL> ChromeConfigurator::UpdateUrl() const {
   std::vector<GURL> urls;
   if (url_source_override_.is_valid()) {
     urls.push_back(GURL(url_source_override_));
   } else {
-    urls.push_back(GURL(kDefaultUrlSource));
+    urls.push_back(GURL(kUpdaterDefaultUrl));
     if (fallback_to_alt_source_url_enabled_) {
-      urls.push_back(GURL(kAltUrlSource));
+      urls.push_back(GURL(kUpdaterAltUrl));
     }
   }
   return urls;
@@ -287,7 +284,8 @@ ChromeConfigurator::GetSingleThreadTaskRunner() const {
 
 }  // namespace
 
-Configurator* MakeChromeComponentUpdaterConfigurator(
+scoped_refptr<update_client::Configurator>
+MakeChromeComponentUpdaterConfigurator(
     const base::CommandLine* cmdline,
     net::URLRequestContextGetter* context_getter) {
   return new ChromeConfigurator(cmdline, context_getter);

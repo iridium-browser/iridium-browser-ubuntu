@@ -41,7 +41,7 @@
 
     [TypeChecking=Interface] CSSStyleDeclaration computedStyleIncludingVisitedInfo(Node node);
 
-    [TypeChecking=Interface] ShadowRoot createClosedShadowRoot(Element host);
+    [TypeChecking=Interface] ShadowRoot createUserAgentShadowRoot(Element host);
 
     [TypeChecking=Interface] ShadowRoot shadowRoot(Element host);
     [TypeChecking=Interface] ShadowRoot youngestShadowRoot(Element host);
@@ -59,7 +59,6 @@
     [RaisesException, TypeChecking=Interface] boolean hasSelectorForIdInShadow(Element host, DOMString id);
     [RaisesException, TypeChecking=Interface] boolean hasSelectorForClassInShadow(Element host, DOMString className);
     [RaisesException, TypeChecking=Interface] boolean hasSelectorForAttributeInShadow(Element host, DOMString attributeName);
-    [RaisesException, TypeChecking=Interface] boolean hasSelectorForPseudoClassInShadow(Element host, DOMString pseudoClass);
     [RaisesException, TypeChecking=Interface] unsigned short compareTreeScopePosition(Node treeScope1, Node treeScope2);
     [RaisesException] unsigned long updateStyleAndReturnAffectedElementCount();
     [RaisesException] unsigned long needsLayoutCount();
@@ -67,6 +66,10 @@
 
     // CSS Animation and Transition testing.
     [RaisesException] void pauseAnimations(double pauseTime);
+
+    // Modifies m_desiredFrameStartTime in BitmapImage to advance the next frame time
+    // for testing whether animated images work properly.
+    [RaisesException] void advanceTimeForImage(Element image, double deltaTimeInSeconds);
 
     [RaisesException, TypeChecking=Interface] Node nextSiblingInComposedTree(Node node);
     [RaisesException, TypeChecking=Interface] Node firstChildInComposedTree(Node node);
@@ -135,6 +138,8 @@
     [TypeChecking=Interface] unsigned long scrollEventHandlerCount(Document document);
     [TypeChecking=Interface] unsigned long touchEventHandlerCount(Document document);
     [RaisesException, TypeChecking=Interface] LayerRectList touchEventTargetLayerRects(Document document);
+
+    [RaisesException, TypeChecking=Interface] boolean executeCommand(Document document, DOMString name, DOMString value);
 
     DOMString htmlNamespace();
     sequence<DOMString> htmlTags();
@@ -233,8 +238,10 @@
     [RaisesException, TypeChecking=Interface] ClientRectList nonDraggableRegions(Document document);
 
     // Returns a string with information about the mouse cursor used at the specified client location.
-    [RaisesException, TypeChecking=Interface] DOMString getCurrentCursorInfo(Document document);
+    [TypeChecking=Interface] DOMString getCurrentCursorInfo();
 
+    readonly attribute boolean cursorUpdatePending;
+    
     [TypeChecking=Interface] DOMString markerTextForListItem(Element element);
 
     SerializedScriptValue deserializeBuffer(ArrayBuffer buffer);
@@ -307,5 +314,12 @@
 
     void setVisualViewportOffset(long x, long y);
 
+    boolean isUseCounted(Document document, long useCounterId);
+
     iterable<long>;
+
+    [Unscopeable] readonly attribute DOMString unscopeableAttribute;
+    [Unscopeable] DOMString unscopeableMethod();
+
+    ClientRectList focusRingRects(Element element);
 };

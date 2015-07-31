@@ -6,7 +6,7 @@
 #define BluetoothDiscovery_h
 
 #include "bindings/core/v8/ScriptWrappable.h"
-#include "platform/heap/Visitor.h"
+#include "platform/heap/Handle.h"
 
 namespace blink {
 

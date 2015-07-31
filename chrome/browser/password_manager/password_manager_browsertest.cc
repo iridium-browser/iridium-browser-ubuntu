@@ -670,10 +670,10 @@ IN_PROC_BROWSER_TEST_F(
       "var frame_doc = first_frame.contentDocument;"
       "frame_doc.getElementById('username_failed').value = 'temp';"
       "frame_doc.getElementById('password_failed').value = 'random';"
-      "frame_doc.getElementById('submit_failed').click();"
-      "window.parent.location.href = 'multi_frames.html';";
+      "frame_doc.getElementById('submit_failed').click();";
 
   ASSERT_TRUE(content::ExecuteScript(RenderViewHost(), fill_and_submit));
+  observer.SetPathToWaitFor("/password/failed.html");
   observer.Wait();
   EXPECT_FALSE(prompt_observer->IsShowingPrompt());
 }
@@ -1189,6 +1189,24 @@ IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTest,
 }
 
 IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTest,
+                       DontPromptForPasswordFormWithReadonlyPasswordField) {
+  NavigateToFile("/password/password_form_with_password_readonly.html");
+
+  // Fill a form and submit through a <input type="submit"> button. Nothing
+  // special.
+  NavigationObserver observer(WebContents());
+  scoped_ptr<PromptObserver> prompt_observer(
+      PromptObserver::Create(WebContents()));
+  std::string fill_and_submit =
+      "document.getElementById('username_field').value = 'temp';"
+      "document.getElementById('password_field').value = 'random';"
+      "document.getElementById('input_submit_button').click()";
+  ASSERT_TRUE(content::ExecuteScript(RenderViewHost(), fill_and_submit));
+  observer.Wait();
+  EXPECT_FALSE(prompt_observer->IsShowingPrompt());
+}
+
+IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTest,
                        PromptWhenEnableAutomaticPasswordSavingSwitchIsNotSet) {
   NavigateToFile("/password/password_form.html");
 
@@ -1348,8 +1366,17 @@ IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTest, NoLastLoadGoodLastLoad) {
 // all-but-action match. Normally, the former should be preferred, but if the
 // former has not finished matching, and the latter has, the latter should be
 // used (otherwise we'd give up even though we could have saved the password).
+//
+// Disabled on Mac due to flakiness: http://crbug.com/477812
+#if defined(OS_MACOSX)
+#define MAYBE_PreferPasswordFormManagerWhichFinishedMatching \
+  DISABLED_PreferPasswordFormManagerWhichFinishedMatching
+#else
+#define MAYBE_PreferPasswordFormManagerWhichFinishedMatching \
+  PreferPasswordFormManagerWhichFinishedMatching
+#endif
 IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTest,
-                       PreferPasswordFormManagerWhichFinishedMatching) {
+                       MAYBE_PreferPasswordFormManagerWhichFinishedMatching) {
   NavigateToFile("/password/create_form_copy_on_submit.html");
 
   NavigationObserver observer(WebContents());

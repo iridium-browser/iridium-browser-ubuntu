@@ -82,6 +82,17 @@ WebSecurityOrigin WebDocument::securityOrigin() const
     return WebSecurityOrigin(constUnwrap<Document>()->securityOrigin());
 }
 
+bool WebDocument::isPrivilegedContext(WebString& errorMessage) const
+{
+    const Document* document = constUnwrap<Document>();
+    if (!document)
+        return false;
+    String message;
+    bool result = document->isPrivilegedContext(message);
+    errorMessage = message;
+    return result;
+}
+
 WebString WebDocument::encoding() const
 {
     return constUnwrap<Document>()->encodingName();
@@ -155,6 +166,13 @@ WebElement WebDocument::head()
 WebString WebDocument::title() const
 {
     return WebString(constUnwrap<Document>()->title());
+}
+
+WebString WebDocument::contentAsTextForTesting() const
+{
+    if (Element* documentElement = constUnwrap<Document>()->documentElement())
+        return WebString(documentElement->innerText());
+    return WebString();
 }
 
 WebElementCollection WebDocument::all()

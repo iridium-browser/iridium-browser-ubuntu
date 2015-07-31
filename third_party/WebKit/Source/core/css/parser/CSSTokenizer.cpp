@@ -9,6 +9,7 @@ namespace blink {
 #include "core/CSSTokenizerCodepoints.cpp"
 }
 
+#include "core/css/parser/CSSParserObserverWrapper.h"
 #include "core/css/parser/CSSParserTokenRange.h"
 #include "core/css/parser/CSSParserValues.h"
 #include "core/css/parser/CSSTokenizerInputStream.h"
@@ -47,9 +48,41 @@ CSSTokenizer::Scope::Scope(const String& string)
     }
 }
 
+CSSTokenizer::Scope::Scope(const String& string, CSSParserObserverWrapper& wrapper)
+: m_string(string)
+{
+    if (string.isEmpty())
+        return;
+
+    CSSTokenizerInputStream input(string);
+    CSSTokenizer tokenizer(input, *this);
+
+    unsigned offset = 0;
+    while (true) {
+        CSSParserToken token = tokenizer.nextToken();
+        if (token.type() == EOFToken)
+            break;
+        if (token.type() == CommentToken) {
+            wrapper.addComment(offset, input.offset(), m_tokens.size());
+        } else {
+            m_tokens.append(token);
+            wrapper.addToken(offset);
+        }
+        offset = input.offset();
+    }
+
+    wrapper.addToken(offset);
+    wrapper.finalizeConstruction(m_tokens.begin());
+}
+
 CSSParserTokenRange CSSTokenizer::Scope::tokenRange()
 {
     return m_tokens;
+}
+
+unsigned CSSTokenizer::Scope::tokenCount()
+{
+    return m_tokens.size();
 }
 
 // http://dev.w3.org/csswg/css-syntax/#name-start-code-point
@@ -220,7 +253,8 @@ CSSParserToken CSSTokenizer::solidus(UChar cc)
 {
     if (consumeIfNext('*')) {
         // These get ignored, but we need a value to return.
-        return consumeUntilCommentEndFound() ? CSSParserToken(CommentToken) : CSSParserToken(EOFToken);
+        consumeUntilCommentEndFound();
+        return CSSParserToken(CommentToken);
     }
 
     return CSSParserToken(DelimiterToken, cc);
@@ -556,7 +590,7 @@ CSSParserToken CSSTokenizer::consumeUrlToken()
             m_input.advance(size + 1);
             return CSSParserToken(UrlToken, m_input.rangeAsCSSParserString(startOffset, size));
         }
-        if (cc == '\0' || cc == '\\' || cc == '"' || cc == '\'' || cc == '(' || isNonPrintableCodePoint(cc) || isHTMLSpace(cc))
+        if (cc <= ' ' || cc == '\\' || cc == '"' || cc == '\'' || cc == '(' || cc == '\x7f')
             break;
     }
 
@@ -620,21 +654,20 @@ void CSSTokenizer::consumeSingleWhitespaceIfNext()
         consume();
 }
 
-bool CSSTokenizer::consumeUntilCommentEndFound()
+void CSSTokenizer::consumeUntilCommentEndFound()
 {
     UChar c = consume();
     while (true) {
         if (c == kEndOfFileMarker)
-            return false;
+            return;
         if (c != '*') {
             c = consume();
             continue;
         }
         c = consume();
         if (c == '/')
-            break;
+            return;
     }
-    return true;
 }
 
 bool CSSTokenizer::consumeIfNext(UChar character)
@@ -696,12 +729,12 @@ UChar32 CSSTokenizer::consumeEscape()
         UChar32 codePoint = hexChars.toString().toUIntStrict(&ok, 16);
         ASSERT(ok);
         if (codePoint == 0 || (0xD800 <= codePoint && codePoint <= 0xDFFF) || codePoint > 0x10FFFF)
-            return WTF::Unicode::replacementCharacter;
+            return replacementCharacter;
         return codePoint;
     }
 
     if (cc == kEndOfFileMarker)
-        return WTF::Unicode::replacementCharacter;
+        return replacementCharacter;
     return cc;
 }
 

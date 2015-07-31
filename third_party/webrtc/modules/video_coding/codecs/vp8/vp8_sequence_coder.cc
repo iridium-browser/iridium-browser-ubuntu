@@ -10,7 +10,6 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webrtc/base/scoped_ptr.h"
-#include "webrtc/common_video/interface/i420_video_frame.h"
 #include "webrtc/common_video/interface/video_image.h"
 #include "webrtc/common_video/libyuv/include/webrtc_libyuv.h"
 #include "webrtc/modules/video_coding/codecs/vp8/include/vp8.h"
@@ -18,6 +17,7 @@
 #include "webrtc/test/testsupport/fileutils.h"
 #include "webrtc/test/testsupport/metrics/video_metrics.h"
 #include "webrtc/tools/simple_command_line_parser.h"
+#include "webrtc/video_frame.h"
 
 class Vp8SequenceCoderEncodeCallback : public webrtc::EncodedImageCallback {
  public:
@@ -230,6 +230,7 @@ int main(int argc, char** argv) {
   parser.ProcessFlags();
   if (parser.GetFlag("help") == "true") {
     parser.PrintUsageMessage();
+    exit(EXIT_SUCCESS);
   }
   parser.PrintEnteredFlags();
 

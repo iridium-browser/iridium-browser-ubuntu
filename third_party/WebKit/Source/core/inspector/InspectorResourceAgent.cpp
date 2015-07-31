@@ -49,6 +49,7 @@
 #include "core/inspector/ConsoleMessage.h"
 #include "core/inspector/ConsoleMessageStorage.h"
 #include "core/inspector/IdentifiersFactory.h"
+#include "core/inspector/InspectorIdentifiers.h"
 #include "core/inspector/InspectorOverlay.h"
 #include "core/inspector/InspectorPageAgent.h"
 #include "core/inspector/InspectorState.h"
@@ -322,11 +323,12 @@ void InspectorResourceAgent::willSendRequest(unsigned long identifier, DocumentL
     if (initiatorInfo.name == FetchInitiatorTypeNames::internal)
         return;
 
-    if (initiatorInfo.name == FetchInitiatorTypeNames::document && loader && loader->substituteData().isValid())
+    if (initiatorInfo.name == FetchInitiatorTypeNames::document && loader->substituteData().isValid())
         return;
 
     String requestId = IdentifiersFactory::requestId(identifier);
-    m_resourcesData->resourceCreated(requestId, m_pageAgent->loaderId(loader));
+    String loaderId = InspectorIdentifiers<DocumentLoader>::identifier(loader);
+    m_resourcesData->resourceCreated(requestId, loaderId);
 
     InspectorPageAgent::ResourceType type = InspectorPageAgent::OtherResource;
     if (initiatorInfo.name == FetchInitiatorTypeNames::xmlhttprequest) {
@@ -354,8 +356,7 @@ void InspectorResourceAgent::willSendRequest(unsigned long identifier, DocumentL
         request.setShouldResetAppCache(true);
     }
 
-    String frameId = m_pageAgent->frameId(loader->frame());
-
+    String frameId = loader->frame() ? InspectorIdentifiers<LocalFrame>::identifier(loader->frame()) : "";
     RefPtr<TypeBuilder::Network::Initiator> initiatorObject = buildInitiatorObject(loader->frame() ? loader->frame()->document() : 0, initiatorInfo);
     if (initiatorInfo.name == FetchInitiatorTypeNames::document) {
         FrameNavigationInitiatorMap::iterator it = m_frameNavigationInitiatorMap.find(frameId);
@@ -369,7 +370,7 @@ void InspectorResourceAgent::willSendRequest(unsigned long identifier, DocumentL
         request.addHTTPHeaderField(kDevToolsEmulateNetworkConditionsClientId, AtomicString(m_hostId));
 
     TypeBuilder::Page::ResourceType::Enum resourceType = InspectorPageAgent::resourceTypeJson(type);
-    frontend()->requestWillBeSent(requestId, frameId, m_pageAgent->loaderId(loader), urlWithoutFragment(loader->url()).string(), requestInfo.release(), monotonicallyIncreasingTime(), currentTime(), initiatorObject, buildObjectForResourceResponse(redirectResponse), &resourceType);
+    frontend()->requestWillBeSent(requestId, frameId, loaderId, urlWithoutFragment(loader->url()).string(), requestInfo.release(), monotonicallyIncreasingTime(), currentTime(), initiatorObject, buildObjectForResourceResponse(redirectResponse), &resourceType);
 }
 
 void InspectorResourceAgent::markResourceAsCached(unsigned long identifier)
@@ -418,11 +419,13 @@ void InspectorResourceAgent::didReceiveResourceResponse(LocalFrame* frame, unsig
 
     if (cachedResource)
         m_resourcesData->addResource(requestId, cachedResource);
-    m_resourcesData->responseReceived(requestId, m_pageAgent->frameId(frame), response);
+    String frameId = InspectorIdentifiers<LocalFrame>::identifier(frame);
+    String loaderId = loader ? InspectorIdentifiers<DocumentLoader>::identifier(loader) : "";
+    m_resourcesData->responseReceived(requestId, frameId, response);
     m_resourcesData->setResourceType(requestId, type);
 
     if (!isResponseEmpty(resourceResponse))
-        frontend()->responseReceived(requestId, m_pageAgent->frameId(frame), m_pageAgent->loaderId(loader), monotonicallyIncreasingTime(), InspectorPageAgent::resourceTypeJson(type), resourceResponse);
+        frontend()->responseReceived(requestId, frameId, loaderId, monotonicallyIncreasingTime(), InspectorPageAgent::resourceTypeJson(type), resourceResponse);
     // If we revalidated the resource and got Not modified, send content length following didReceiveResponse
     // as there will be no calls to didReceiveData from the network stack.
     if (isNotModified && cachedResource && cachedResource->encodedSize())
@@ -460,7 +463,7 @@ void InspectorResourceAgent::didReceiveCORSRedirectResponse(LocalFrame* frame, u
 {
     // Update the response and finish loading
     didReceiveResourceResponse(frame, identifier, loader, response, resourceLoader);
-    didFinishLoading(identifier, 0, blink::WebURLLoaderClient::kUnknownEncodedDataLength);
+    didFinishLoading(identifier, 0, WebURLLoaderClient::kUnknownEncodedDataLength);
 }
 
 void InspectorResourceAgent::didFailLoading(unsigned long identifier, const ResourceError& error)
@@ -726,13 +729,36 @@ void InspectorResourceAgent::setExtraHTTPHeaders(ErrorString*, const RefPtr<JSON
     m_state->setObject(ResourceAgentState::extraRequestHeaders, headers);
 }
 
-void InspectorResourceAgent::getResponseBody(ErrorString* errorString, const String& requestId, PassRefPtrWillBeRawPtr<GetResponseBodyCallback> callback)
+bool InspectorResourceAgent::getResponseBodyBlob(const String& requestId, PassRefPtrWillBeRawPtr<GetResponseBodyCallback> callback)
 {
+    NetworkResourcesData::ResourceData const* resourceData = m_resourcesData->data(requestId);
+    if (!resourceData)
+        return false;
+    if (BlobDataHandle* blob = resourceData->downloadedFileBlob()) {
+        if (LocalFrame* frame = m_pageAgent->frameForId(resourceData->frameId())) {
+            if (Document* document = frame->document()) {
+                InspectorFileReaderLoaderClient* client = new InspectorFileReaderLoaderClient(blob, InspectorPageAgent::createResourceTextDecoder(resourceData->mimeType(), resourceData->textEncodingName()), callback);
+                client->start(document);
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+
+void InspectorResourceAgent::getResponseBody(ErrorString* errorString, const String& requestId, PassRefPtrWillBeRawPtr<GetResponseBodyCallback> passCallback)
+{
+    RefPtrWillBeRawPtr<GetResponseBodyCallback> callback = passCallback;
     NetworkResourcesData::ResourceData const* resourceData = m_resourcesData->data(requestId);
     if (!resourceData) {
         callback->sendFailure("No resource with given identifier found");
         return;
     }
+
+    // XHR with ResponseTypeBlob should be returned as blob.
+    if (resourceData->xhrReplayData() && getResponseBodyBlob(requestId, callback))
+        return;
 
     if (resourceData->hasContent()) {
         callback->sendSuccess(resourceData->content(), resourceData->base64Encoded());
@@ -761,15 +787,8 @@ void InspectorResourceAgent::getResponseBody(ErrorString* errorString, const Str
         }
     }
 
-    if (BlobDataHandle* blob = resourceData->downloadedFileBlob()) {
-        if (LocalFrame* frame = m_pageAgent->frameForId(resourceData->frameId())) {
-            if (Document* document = frame->document()) {
-                InspectorFileReaderLoaderClient* client = new InspectorFileReaderLoaderClient(blob, InspectorPageAgent::createResourceTextDecoder(resourceData->mimeType(), resourceData->textEncodingName()), callback);
-                client->start(document);
-                return;
-            }
-        }
-    }
+    if (getResponseBodyBlob(requestId, callback))
+        return;
 
     callback->sendFailure("No data found for resource with given identifier");
 }
@@ -845,18 +864,18 @@ void InspectorResourceAgent::didCommitLoad(LocalFrame* frame, DocumentLoader* lo
     if (m_state->getBoolean(ResourceAgentState::cacheDisabled))
         memoryCache()->evictResources();
 
-    m_resourcesData->clear(m_pageAgent->loaderId(loader));
+    m_resourcesData->clear(InspectorIdentifiers<DocumentLoader>::identifier(loader));
 }
 
 void InspectorResourceAgent::frameScheduledNavigation(LocalFrame* frame, double)
 {
     RefPtr<TypeBuilder::Network::Initiator> initiator = buildInitiatorObject(frame->document(), FetchInitiatorInfo());
-    m_frameNavigationInitiatorMap.set(m_pageAgent->frameId(frame), initiator);
+    m_frameNavigationInitiatorMap.set(InspectorIdentifiers<LocalFrame>::identifier(frame), initiator);
 }
 
 void InspectorResourceAgent::frameClearedScheduledNavigation(LocalFrame* frame)
 {
-    m_frameNavigationInitiatorMap.remove(m_pageAgent->frameId(frame));
+    m_frameNavigationInitiatorMap.remove(InspectorIdentifiers<LocalFrame>::identifier(frame));
 }
 
 void InspectorResourceAgent::setHostId(const String& hostId)

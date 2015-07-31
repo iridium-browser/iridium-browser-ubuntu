@@ -47,7 +47,7 @@ public:
     void appendArgument(const String&);
     void appendArgument(int);
     void appendArgument(bool);
-    void appendArgument(const Vector<ScriptValue>&);
+    bool appendArgument(const Vector<ScriptValue>&);
     void appendUndefinedArgument();
 
 protected:
@@ -60,6 +60,8 @@ public:
     ScriptFunctionCall(const ScriptValue& thisObject, const String& name);
     ScriptValue call(bool& hadException, bool reportExceptions = true);
     ScriptValue call();
+    v8::Handle<v8::Function> function();
+    ScriptValue callWithoutExceptionHandling();
 
 protected:
     ScriptValue m_thisObject;

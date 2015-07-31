@@ -230,6 +230,36 @@ void GLES2TraceImplementation::CompressedTexSubImage2D(GLenum target,
                                format, imageSize, data);
 }
 
+void GLES2TraceImplementation::CompressedTexImage3D(GLenum target,
+                                                    GLint level,
+                                                    GLenum internalformat,
+                                                    GLsizei width,
+                                                    GLsizei height,
+                                                    GLsizei depth,
+                                                    GLint border,
+                                                    GLsizei imageSize,
+                                                    const void* data) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "GLES2Trace::CompressedTexImage3D");
+  gl_->CompressedTexImage3D(target, level, internalformat, width, height, depth,
+                            border, imageSize, data);
+}
+
+void GLES2TraceImplementation::CompressedTexSubImage3D(GLenum target,
+                                                       GLint level,
+                                                       GLint xoffset,
+                                                       GLint yoffset,
+                                                       GLint zoffset,
+                                                       GLsizei width,
+                                                       GLsizei height,
+                                                       GLsizei depth,
+                                                       GLenum format,
+                                                       GLsizei imageSize,
+                                                       const void* data) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "GLES2Trace::CompressedTexSubImage3D");
+  gl_->CompressedTexSubImage3D(target, level, xoffset, yoffset, zoffset, width,
+                               height, depth, format, imageSize, data);
+}
+
 void GLES2TraceImplementation::CopyBufferSubData(GLenum readtarget,
                                                  GLenum writetarget,
                                                  GLintptr readoffset,
@@ -595,6 +625,25 @@ void GLES2TraceImplementation::GetFramebufferAttachmentParameteriv(
   gl_->GetFramebufferAttachmentParameteriv(target, attachment, pname, params);
 }
 
+void GLES2TraceImplementation::GetInteger64v(GLenum pname, GLint64* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "GLES2Trace::GetInteger64v");
+  gl_->GetInteger64v(pname, params);
+}
+
+void GLES2TraceImplementation::GetIntegeri_v(GLenum pname,
+                                             GLuint index,
+                                             GLint* data) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "GLES2Trace::GetIntegeri_v");
+  gl_->GetIntegeri_v(pname, index, data);
+}
+
+void GLES2TraceImplementation::GetInteger64i_v(GLenum pname,
+                                               GLuint index,
+                                               GLint64* data) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "GLES2Trace::GetInteger64i_v");
+  gl_->GetInteger64i_v(pname, index, data);
+}
+
 void GLES2TraceImplementation::GetIntegerv(GLenum pname, GLint* params) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "GLES2Trace::GetIntegerv");
   gl_->GetIntegerv(pname, params);
@@ -738,6 +787,13 @@ void GLES2TraceImplementation::GetUniformiv(GLuint program,
   gl_->GetUniformiv(program, location, params);
 }
 
+void GLES2TraceImplementation::GetUniformuiv(GLuint program,
+                                             GLint location,
+                                             GLuint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "GLES2Trace::GetUniformuiv");
+  gl_->GetUniformuiv(program, location, params);
+}
+
 void GLES2TraceImplementation::GetUniformIndices(GLuint program,
                                                  GLsizei count,
                                                  const char* const* names,
@@ -764,6 +820,20 @@ void GLES2TraceImplementation::GetVertexAttribiv(GLuint index,
                                                  GLint* params) {
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "GLES2Trace::GetVertexAttribiv");
   gl_->GetVertexAttribiv(index, pname, params);
+}
+
+void GLES2TraceImplementation::GetVertexAttribIiv(GLuint index,
+                                                  GLenum pname,
+                                                  GLint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "GLES2Trace::GetVertexAttribIiv");
+  gl_->GetVertexAttribIiv(index, pname, params);
+}
+
+void GLES2TraceImplementation::GetVertexAttribIuiv(GLuint index,
+                                                   GLenum pname,
+                                                   GLuint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "GLES2Trace::GetVertexAttribIuiv");
+  gl_->GetVertexAttribIuiv(index, pname, params);
 }
 
 void GLES2TraceImplementation::GetVertexAttribPointerv(GLuint index,

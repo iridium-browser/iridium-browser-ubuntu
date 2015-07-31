@@ -32,17 +32,21 @@
 
 namespace blink {
 
-GainHandler::GainHandler(AudioNode& node, float sampleRate)
+GainHandler::GainHandler(AudioNode& node, float sampleRate, AudioParamHandler& gain)
     : AudioHandler(NodeTypeGain, node, sampleRate)
     , m_lastGain(1.0)
+    , m_gain(gain)
     , m_sampleAccurateGainValues(ProcessingSizeInFrames) // FIXME: can probably share temp buffer in context
 {
-    m_gain = AudioParam::create(context(), 1.0);
-
     addInput();
     addOutput(1);
 
     initialize();
+}
+
+PassRefPtr<GainHandler> GainHandler::create(AudioNode& node, float sampleRate, AudioParamHandler& gain)
+{
+    return adoptRef(new GainHandler(node, sampleRate, gain));
 }
 
 void GainHandler::process(size_t framesToProcess)
@@ -51,25 +55,25 @@ void GainHandler::process(size_t framesToProcess)
     // happen in the summing junction input of the AudioNode we're connected to.
     // Then we can avoid all of the following:
 
-    AudioBus* outputBus = output(0)->bus();
+    AudioBus* outputBus = output(0).bus();
     ASSERT(outputBus);
 
-    if (!isInitialized() || !input(0)->isConnected()) {
+    if (!isInitialized() || !input(0).isConnected()) {
         outputBus->zero();
     } else {
-        AudioBus* inputBus = input(0)->bus();
+        AudioBus* inputBus = input(0).bus();
 
-        if (gain()->handler().hasSampleAccurateValues()) {
+        if (m_gain->hasSampleAccurateValues()) {
             // Apply sample-accurate gain scaling for precise envelopes, grain windows, etc.
             ASSERT(framesToProcess <= m_sampleAccurateGainValues.size());
             if (framesToProcess <= m_sampleAccurateGainValues.size()) {
                 float* gainValues = m_sampleAccurateGainValues.data();
-                gain()->handler().calculateSampleAccurateValues(gainValues, framesToProcess);
+                m_gain->calculateSampleAccurateValues(gainValues, framesToProcess);
                 outputBus->copyWithSampleAccurateGainValuesFrom(*inputBus, gainValues, framesToProcess);
             }
         } else {
             // Apply the gain with de-zippering into the output bus.
-            outputBus->copyWithGainFrom(*inputBus, &m_lastGain, gain()->value());
+            outputBus->copyWithGainFrom(*inputBus, &m_lastGain, m_gain->value());
         }
     }
 }
@@ -85,48 +89,49 @@ void GainHandler::checkNumberOfChannelsForInput(AudioNodeInput* input)
     ASSERT(context()->isGraphOwner());
 
     ASSERT(input);
-    ASSERT(input == this->input(0));
-    if (input != this->input(0))
+    ASSERT(input == &this->input(0));
+    if (input != &this->input(0))
         return;
 
     unsigned numberOfChannels = input->numberOfChannels();
 
-    if (isInitialized() && numberOfChannels != output(0)->numberOfChannels()) {
+    if (isInitialized() && numberOfChannels != output(0).numberOfChannels()) {
         // We're already initialized but the channel count has changed.
         uninitialize();
     }
 
     if (!isInitialized()) {
         // This will propagate the channel count to any nodes connected further downstream in the graph.
-        output(0)->setNumberOfChannels(numberOfChannels);
+        output(0).setNumberOfChannels(numberOfChannels);
         initialize();
     }
 
     AudioHandler::checkNumberOfChannelsForInput(input);
 }
 
-DEFINE_TRACE(GainHandler)
-{
-    visitor->trace(m_gain);
-    AudioHandler::trace(visitor);
-}
-
 // ----------------------------------------------------------------
 
-GainNode::GainNode(AudioContext& context, float sampelRate)
+GainNode::GainNode(AudioContext& context, float sampleRate)
     : AudioNode(context)
+    , m_gain(AudioParam::create(context, 1.0))
 {
-    setHandler(new GainHandler(*this, sampelRate));
+    setHandler(GainHandler::create(*this, sampleRate, m_gain->handler()));
 }
 
-GainNode* GainNode::create(AudioContext* context, float sampleRate)
+GainNode* GainNode::create(AudioContext& context, float sampleRate)
 {
-    return new GainNode(*context, sampleRate);
+    return new GainNode(context, sampleRate);
 }
 
 AudioParam* GainNode::gain() const
 {
-    return static_cast<GainHandler&>(handler()).gain();
+    return m_gain;
+}
+
+DEFINE_TRACE(GainNode)
+{
+    visitor->trace(m_gain);
+    AudioNode::trace(visitor);
 }
 
 } // namespace blink

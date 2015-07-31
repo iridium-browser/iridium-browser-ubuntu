@@ -63,19 +63,6 @@ DEFINE_TRACE(SVGFilterPrimitiveStandardAttributes)
     SVGElement::trace(visitor);
 }
 
-bool SVGFilterPrimitiveStandardAttributes::isSupportedAttribute(const QualifiedName& attrName)
-{
-    DEFINE_STATIC_LOCAL(HashSet<QualifiedName>, supportedAttributes, ());
-    if (supportedAttributes.isEmpty()) {
-        supportedAttributes.add(SVGNames::xAttr);
-        supportedAttributes.add(SVGNames::yAttr);
-        supportedAttributes.add(SVGNames::widthAttr);
-        supportedAttributes.add(SVGNames::heightAttr);
-        supportedAttributes.add(SVGNames::resultAttr);
-    }
-    return supportedAttributes.contains<SVGAttributeHashTranslator>(attrName);
-}
-
 bool SVGFilterPrimitiveStandardAttributes::setFilterEffectAttribute(FilterEffect*, const QualifiedName&)
 {
     // When all filters support this method, it will be changed to a pure virtual method.
@@ -85,13 +72,15 @@ bool SVGFilterPrimitiveStandardAttributes::setFilterEffectAttribute(FilterEffect
 
 void SVGFilterPrimitiveStandardAttributes::svgAttributeChanged(const QualifiedName& attrName)
 {
-    if (!isSupportedAttribute(attrName)) {
-        SVGElement::svgAttributeChanged(attrName);
+    if (attrName == SVGNames::xAttr || attrName == SVGNames::yAttr
+        || attrName == SVGNames::widthAttr || attrName == SVGNames::heightAttr
+        || attrName == SVGNames::resultAttr) {
+        SVGElement::InvalidationGuard invalidationGuard(this);
+        invalidate();
         return;
     }
 
-    SVGElement::InvalidationGuard invalidationGuard(this);
-    invalidate();
+    SVGElement::svgAttributeChanged(attrName);
 }
 
 void SVGFilterPrimitiveStandardAttributes::childrenChanged(const ChildrenChange& change)
@@ -133,14 +122,14 @@ bool SVGFilterPrimitiveStandardAttributes::layoutObjectIsNeeded(const ComputedSt
 
 void SVGFilterPrimitiveStandardAttributes::invalidate()
 {
-    if (LayoutObject* primitiveRenderer = layoutObject())
-        markForLayoutAndParentResourceInvalidation(primitiveRenderer);
+    if (LayoutObject* primitiveLayoutObject = layoutObject())
+        markForLayoutAndParentResourceInvalidation(primitiveLayoutObject);
 }
 
 void SVGFilterPrimitiveStandardAttributes::primitiveAttributeChanged(const QualifiedName& attribute)
 {
-    if (LayoutObject* primitiveRenderer = layoutObject())
-        static_cast<LayoutSVGResourceFilterPrimitive*>(primitiveRenderer)->primitiveAttributeChanged(attribute);
+    if (LayoutObject* primitiveLayoutObject = layoutObject())
+        static_cast<LayoutSVGResourceFilterPrimitive*>(primitiveLayoutObject)->primitiveAttributeChanged(attribute);
 }
 
 void invalidateFilterPrimitiveParent(SVGElement* element)
@@ -153,11 +142,11 @@ void invalidateFilterPrimitiveParent(SVGElement* element)
     if (!parent)
         return;
 
-    LayoutObject* renderer = parent->layoutObject();
-    if (!renderer || !renderer->isSVGResourceFilterPrimitive())
+    LayoutObject* layoutObject = parent->layoutObject();
+    if (!layoutObject || !layoutObject->isSVGResourceFilterPrimitive())
         return;
 
-    LayoutSVGResourceContainer::markForLayoutAndParentResourceInvalidation(renderer, false);
+    LayoutSVGResourceContainer::markForLayoutAndParentResourceInvalidation(layoutObject, false);
 }
 
 }

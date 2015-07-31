@@ -323,7 +323,7 @@
 
 .styles-section.matched-styles .style-properties li.parent .expand-element {
     -webkit-user-select: none;
-    background-image: url(Images/statusbarButtonGlyphs.png);
+    background-image: url(Images/toolbarButtonGlyphs.png);
     background-size: 320px 144px;
     margin-right: 2px;
     margin-left: -6px;
@@ -335,7 +335,7 @@
 
 @media (-webkit-min-device-pixel-ratio: 1.5) {
 .styles-section.matched-styles .style-properties li.parent .expand-element {
-    background-image: url(Images/statusbarButtonGlyphs_2x.png);
+    background-image: url(Images/toolbarButtonGlyphs_2x.png);
 }
 } /* media */
 
@@ -443,7 +443,7 @@
     align-items: center;
 }
 
-.animations-controls > .status-bar {
+.animations-controls > .toolbar {
     display: inline-block;
 }
 
@@ -592,7 +592,7 @@
     border-bottom: none;
 }
 
-.sidebar-pane > .body > .split-view {
+.sidebar-pane > .body > .split-widget {
     position: absolute;
     top: 0;
     bottom: 0;
@@ -752,4 +752,13 @@ label.checkbox-with-label {
     padding: 3px 6px 8px 18px;
     margin: -1px -6px -8px -6px;
     text-overflow: clip;
+}
+
+.styles-pane-toolbar {
+    float: right;
+    margin-top: -3px;
+}
+
+.properties-widget-section {
+    padding: 2px 0px 2px 5px;
 }

@@ -39,12 +39,16 @@ WebInspector.NetworkPanel = function()
     WebInspector.Panel.call(this, "network");
     this.registerRequiredCSS("network/networkPanel.css");
 
-    /** @type {?WebInspector.NetworkFilmStripView} */
-    this._filmStripView = null;
-    /** @type {boolean} */
-    this._shouldRecordFilmStrip = false;
+    this._networkLogShowOverviewSetting = WebInspector.settings.createSetting("networkLogShowOverview", true);
+    this._networkLogLargeRowsSetting = WebInspector.settings.createSetting("networkLogLargeRows", false);
+    this._networkRecordFilmStripSetting = WebInspector.settings.createSetting("networkRecordFilmStripSetting", false);
 
-    this._panelStatusBar = new WebInspector.StatusBar(this.element);
+    /** @type {?WebInspector.FilmStripView} */
+    this._filmStripView = null;
+    /** @type {?WebInspector.NetworkPanel.FilmStripRecorder} */
+    this._filmStripRecorder = null;
+
+    this._panelToolbar = new WebInspector.Toolbar(this.element);
     this._filterBar = new WebInspector.FilterBar();
     this._filtersContainer = this.element.createChild("div", "network-filters-header hidden");
     this._filtersContainer.appendChild(this._filterBar.filtersElement());
@@ -52,45 +56,47 @@ WebInspector.NetworkPanel = function()
     this._filterBar.setName("networkPanel", true);
 
     this._searchableView = new WebInspector.SearchableView(this);
+    this._searchableView.setPlaceholder(WebInspector.UIString("Find by filename or path"));
     this._searchableView.show(this.element);
 
     this._overview = new WebInspector.NetworkOverview();
 
-    this._splitView = new WebInspector.SplitView(true, false, "networkPanelSplitViewState");
-    this._splitView.hideMain();
+    this._splitWidget = new WebInspector.SplitWidget(true, false, "networkPanelSplitViewState");
+    this._splitWidget.hideMain();
 
-    this._splitView.show(this._searchableView.element);
+    this._splitWidget.show(this._searchableView.element);
 
     this._progressBarContainer = createElement("div");
-    this._createStatusbarButtons();
+    this._createToolbarButtons();
 
     /** @type {!WebInspector.NetworkLogView} */
-    this._networkLogView = new WebInspector.NetworkLogView(this._overview, this._filterBar, this._progressBarContainer);
-    this._splitView.setSidebarView(this._networkLogView);
+    this._networkLogView = new WebInspector.NetworkLogView(this._overview, this._filterBar, this._progressBarContainer, this._networkLogLargeRowsSetting);
+    this._splitWidget.setSidebarWidget(this._networkLogView);
 
-    this._detailsView = new WebInspector.VBox();
-    this._detailsView.element.classList.add("network-details-view");
-    this._splitView.setMainView(this._detailsView);
+    this._detailsWidget = new WebInspector.VBox();
+    this._detailsWidget.element.classList.add("network-details-view");
+    this._splitWidget.setMainWidget(this._detailsWidget);
 
-    this._closeButtonElement = createElementWithClass("div", "close-button");
-    this._closeButtonElement.classList.add("network-close-button");
+    this._closeButtonElement = createElementWithClass("div", "network-close-button", "dt-close-button");
     this._closeButtonElement.addEventListener("click", this._showRequest.bind(this, null), false);
 
+    this._networkLogShowOverviewSetting.addChangeListener(this._toggleShowOverview, this);
+    this._networkLogLargeRowsSetting.addChangeListener(this._toggleLargerRequests, this);
+    this._networkRecordFilmStripSetting.addChangeListener(this._toggleRecordFilmStrip, this);
+
     this._toggleRecordButton(true);
-    this._toggleShowOverviewButton(WebInspector.settings.networkLogShowOverview.get());
-    this._toggleLargerRequests(WebInspector.settings.networkLogLargeRows.get());
+    this._toggleShowOverview();
+    this._toggleLargerRequests();
+    this._toggleRecordFilmStrip();
     this._dockSideChanged();
 
     WebInspector.dockController.addEventListener(WebInspector.DockController.Events.DockSideChanged, this._dockSideChanged.bind(this));
-    WebInspector.settings.splitVerticallyWhenDockedToRight.addChangeListener(this._dockSideChanged.bind(this));
+    WebInspector.moduleSetting("splitVerticallyWhenDockedToRight").addChangeListener(this._dockSideChanged.bind(this));
     WebInspector.targetManager.addModelListener(WebInspector.ResourceTreeModel, WebInspector.ResourceTreeModel.EventTypes.WillReloadPage, this._willReloadPage, this);
     WebInspector.targetManager.addModelListener(WebInspector.ResourceTreeModel, WebInspector.ResourceTreeModel.EventTypes.Load, this._load, this);
-    WebInspector.targetManager.addModelListener(WebInspector.ResourceTreeModel, WebInspector.ResourceTreeModel.EventTypes.MainFrameNavigated, this._mainFrameNavigated, this);
-    WebInspector.targetManager.addEventListener(WebInspector.TargetManager.Events.SuspendStateChanged, this._onSuspendStateChange, this);
     this._networkLogView.addEventListener(WebInspector.NetworkLogView.EventTypes.RequestSelected, this._onRequestSelected, this);
     this._networkLogView.addEventListener(WebInspector.NetworkLogView.EventTypes.SearchCountUpdated, this._onSearchCountUpdated, this);
     this._networkLogView.addEventListener(WebInspector.NetworkLogView.EventTypes.SearchIndexUpdated, this._onSearchIndexUpdated, this);
-    this._networkLogView.addEventListener(WebInspector.NetworkLogView.EventTypes.TimeHovered, this._onTimeHovered, this);
 
     /**
      * @this {WebInspector.NetworkPanel}
@@ -101,107 +107,47 @@ WebInspector.NetworkPanel = function()
         return this._networkItemView.currentSourceFrame();
     }
     WebInspector.GoToLineDialog.install(this, sourceFrameGetter.bind(this));
+    WebInspector.DataSaverInfobar.maybeShowInPanel(this);
 }
 
 WebInspector.NetworkPanel.prototype = {
-    /**
-     * @param {!WebInspector.Event} event
-     */
-    _onFilmFrameSelected: function(event)
+    _createToolbarButtons: function()
     {
-        var frameTime = /** @type {number} */ (event.data);
-        this._networkLogView.setSelectedFrameTime(frameTime);
-    },
-
-    /**
-     * @param {!WebInspector.Event} event
-     */
-    _onSuspendStateChange: function(event)
-    {
-        this._toggleRecordFilmStripButton(this._recordFilmStripButton.toggled());
-    },
-
-    /**
-     * @param {!WebInspector.Event} event
-     */
-    _onFilmRecordingFinished: function(event)
-    {
-        this._toggleRecordFilmStripButton(false);
-    },
-
-    /**
-     * @param {boolean} toggled
-     */
-    _toggleRecordFilmStripButton: function(toggled)
-    {
-        this._recordFilmStripButton.setEnabled(toggled || !WebInspector.targetManager.allTargetsSuspended());
-        this._recordFilmStripButton.setToggled(toggled);
-        this._recordFilmStripButton.setTitle(WebInspector.UIString(toggled ? "Stop Recording Film Strip" : "Clear Log, Reload Page and Record Film Strip"));
-    },
-
-    /**
-     * @param {!WebInspector.Event} event
-     */
-    _onTimeHovered: function(event)
-    {
-        var time = /** @type {number} */ (event.data);
-        if (this._filmStripView)
-            this._filmStripView.selectFrame(time);
-    },
-
-    _createStatusbarButtons: function()
-    {
-        this._recordButton = new WebInspector.StatusBarButton("", "record-status-bar-item");
+        this._recordButton = new WebInspector.ToolbarButton("", "record-toolbar-item");
         this._recordButton.addEventListener("click", this._onRecordButtonClicked, this);
-        this._panelStatusBar.appendStatusBarItem(this._recordButton);
+        this._panelToolbar.appendToolbarItem(this._recordButton);
 
-        this._recordFilmStripButton = new WebInspector.StatusBarButton("", "record-filmstrip-status-bar-item");
-        this._toggleRecordFilmStripButton(false);
-        this._recordFilmStripButton.addEventListener("click", this._onRecordFilmStripButtonClicked, this);
-        if (Runtime.experiments.isEnabled("recordFilmStrimInNetworkPanel"))
-            this._panelStatusBar.appendStatusBarItem(this._recordFilmStripButton);
-
-        this._clearButton = new WebInspector.StatusBarButton(WebInspector.UIString("Clear"), "clear-status-bar-item");
+        this._clearButton = new WebInspector.ToolbarButton(WebInspector.UIString("Clear"), "clear-toolbar-item");
         this._clearButton.addEventListener("click", this._onClearButtonClicked, this);
-        this._panelStatusBar.appendStatusBarItem(this._clearButton);
+        this._panelToolbar.appendToolbarItem(this._clearButton);
 
-        this._panelStatusBar.appendStatusBarItem(this._filterBar.filterButton());
-
-        var viewModeLabel = new WebInspector.StatusBarText(WebInspector.UIString("View:"), "status-bar-group-label");
-        this._panelStatusBar.appendStatusBarItem(viewModeLabel);
-
-        this._largerRequestsButton = new WebInspector.StatusBarButton(WebInspector.UIString(""), "large-list-status-bar-item");
-        this._largerRequestsButton.addEventListener("click", this._onLargerRequestsClicked, this);
-        this._panelStatusBar.appendStatusBarItem(this._largerRequestsButton);
-
-        this._showOverviewButton = new WebInspector.StatusBarButton(WebInspector.UIString(""), "waterfall-status-bar-item");
-        this._showOverviewButton.addEventListener("click", this._onShowOverviewButtonClicked, this);
-        this._panelStatusBar.appendStatusBarItem(this._showOverviewButton);
-
-        var optionsLabel = new WebInspector.StatusBarText(WebInspector.UIString("Options:"), "status-bar-group-label");
-        this._panelStatusBar.appendStatusBarItem(optionsLabel);
-
-        this._preserveLogCheckbox = new WebInspector.StatusBarCheckbox(WebInspector.UIString("Preserve log"), WebInspector.UIString("Do not clear log on page reload / navigation."));
-        this._preserveLogCheckbox.inputElement.addEventListener("change", this._onPreserveLogCheckboxChanged.bind(this), false);
-        this._panelStatusBar.appendStatusBarItem(this._preserveLogCheckbox);
-
-        this._disableCacheCheckbox = new WebInspector.StatusBarCheckbox(WebInspector.UIString("Disable cache"), WebInspector.UIString("Disable cache (while DevTools is open)."), WebInspector.settings.cacheDisabled);
-        this._panelStatusBar.appendStatusBarItem(this._disableCacheCheckbox);
-
-        this._panelStatusBar.appendStatusBarItem(new WebInspector.StatusBarItem(this._progressBarContainer));
-    },
-
-    /**
-     * @param {!WebInspector.Event} event
-     */
-    _onRecordFilmStripButtonClicked: function(event)
-    {
-        if (this._recordFilmStripButton.toggled()) {
-            this._filmStripView.stopRecording();
-        } else {
-            this._shouldRecordFilmStrip = true;
-            WebInspector.targetManager.reloadPage();
+        if (Runtime.experiments.isEnabled("filmStripInNetworkAndTimeline")) {
+            var recordFilmStripButton = new WebInspector.ToolbarSettingToggle(this._networkRecordFilmStripSetting, "record-filmstrip-toolbar-item", WebInspector.UIString("Capture screenshots"));
+            this._panelToolbar.appendToolbarItem(recordFilmStripButton);
         }
+
+        this._panelToolbar.appendToolbarItem(this._filterBar.filterButton());
+
+        var viewModeLabel = new WebInspector.ToolbarText(WebInspector.UIString("View:"), "toolbar-group-label");
+        this._panelToolbar.appendToolbarItem(viewModeLabel);
+
+        var largerRequestsButton = new WebInspector.ToolbarSettingToggle(this._networkLogLargeRowsSetting, "large-list-toolbar-item", WebInspector.UIString("Use large request rows"), WebInspector.UIString("Use small request rows"));
+        this._panelToolbar.appendToolbarItem(largerRequestsButton);
+
+        var showOverviewButton = new WebInspector.ToolbarSettingToggle(this._networkLogShowOverviewSetting, "waterfall-toolbar-item", WebInspector.UIString("Show overview"), WebInspector.UIString("Hide overview"));
+        this._panelToolbar.appendToolbarItem(showOverviewButton);
+
+        var optionsLabel = new WebInspector.ToolbarText(WebInspector.UIString("Options:"), "toolbar-group-label");
+        this._panelToolbar.appendToolbarItem(optionsLabel);
+
+        this._preserveLogCheckbox = new WebInspector.ToolbarCheckbox(WebInspector.UIString("Preserve log"), WebInspector.UIString("Do not clear log on page reload / navigation"));
+        this._preserveLogCheckbox.inputElement.addEventListener("change", this._onPreserveLogCheckboxChanged.bind(this), false);
+        this._panelToolbar.appendToolbarItem(this._preserveLogCheckbox);
+
+        this._disableCacheCheckbox = new WebInspector.ToolbarCheckbox(WebInspector.UIString("Disable cache"), WebInspector.UIString("Disable cache (while DevTools is open)"), WebInspector.moduleSetting("cacheDisabled"));
+        this._panelToolbar.appendToolbarItem(this._disableCacheCheckbox);
+
+        this._panelToolbar.appendToolbarItem(new WebInspector.ToolbarItem(this._progressBarContainer));
     },
 
     /**
@@ -222,6 +168,21 @@ WebInspector.NetworkPanel.prototype = {
         this._recordButton.setToggled(toggled);
         this._recordButton.setTitle(toggled ? WebInspector.UIString("Stop Recording Network Log") : WebInspector.UIString("Record Network Log"));
         this._networkLogView.setRecording(toggled);
+        if (!toggled && this._filmStripRecorder)
+            this._filmStripRecorder.stopRecording(this._filmStripAvailable.bind(this));
+    },
+
+    /**
+     * @param {?WebInspector.FilmStripModel} filmStripModel
+     */
+    _filmStripAvailable: function(filmStripModel)
+    {
+        if (!filmStripModel)
+            return;
+        this._filmStripView.setModel(filmStripModel, this._networkLogView.timeCalculator().zeroTime() * 1000);
+        this._overview.setFilmStripModel(filmStripModel);
+        for (var frame of filmStripModel.frames())
+            this._networkLogView.addFilmStripFrame(frame.timestamp / 1000);
     },
 
     /**
@@ -238,17 +199,9 @@ WebInspector.NetworkPanel.prototype = {
     _onClearButtonClicked: function(event)
     {
         this._overview.reset();
-        this._hideFilmStrip();
         this._networkLogView.reset();
-    },
-
-    /**
-     */
-    _mainFrameNavigated: function(event)
-    {
-        if (this._preserveLogCheckbox.checked() || !this._filmStripView || this._filmStripView.recording())
-            return;
-        this._hideFilmStrip();
+        if (this._filmStripView)
+            this._filmStripView.reset();
     },
 
     /**
@@ -257,19 +210,10 @@ WebInspector.NetworkPanel.prototype = {
     _willReloadPage: function(event)
     {
         this._toggleRecordButton(true);
-        this._hideFilmStrip();
-        if (!this._preserveLogCheckbox.checked() || this._shouldRecordFilmStrip)
+        if (!this._preserveLogCheckbox.checked())
             this._networkLogView.reset();
-        if (this._shouldRecordFilmStrip) {
-            this._shouldRecordFilmStrip = false;
-            this._toggleRecordFilmStripButton(true);
-            this._networkLogView.setShowSelectedFrame(true);
-            this._filmStripView = new WebInspector.NetworkFilmStripView(this._networkLogView.timeCalculator());
-            this._filmStripView.show(this._searchableView.element, this._showOverviewButton.toggled() ? this._overview.element : this._splitView.element);
-            this._filmStripView.addEventListener(WebInspector.NetworkFilmStripView.Events.FrameSelected, this._onFilmFrameSelected, this);
-            this._filmStripView.addEventListener(WebInspector.NetworkFilmStripView.Events.RecordingFinished, this._onFilmRecordingFinished, this);
-            this._filmStripView.startRecording();
-        }
+        if (this.isShowing() && this._filmStripRecorder)
+            this._filmStripRecorder.startRecording();
     },
 
     /**
@@ -277,61 +221,42 @@ WebInspector.NetworkPanel.prototype = {
      */
     _load: function(event)
     {
-        if (this._filmStripView)
-            setTimeout(this._filmStripView.stopRecording.bind(this._filmStripView), 1000);
+        if (this._filmStripRecorder && this._filmStripRecorder.isRecording())
+            setTimeout(this._toggleRecordButton.bind(this, false), 1000);
     },
 
-    _hideFilmStrip: function()
+    _toggleLargerRequests: function()
     {
-        if (!this._filmStripView)
-            return;
-        this._networkLogView.setSelectedFrameTime(-1);
-        this._filmStripView.stopRecording();
-        this._filmStripView.detach();
-        this._filmStripView = null;
-        this._networkLogView.setShowSelectedFrame(false);
-    },
-
-    /**
-     * @param {!WebInspector.Event=} event
-     */
-    _onLargerRequestsClicked: function(event)
-    {
-        this._toggleLargerRequests(!this._largerRequestsButton.toggled());
-    },
-
-    /**
-     * @param {boolean} toggled
-     */
-    _toggleLargerRequests: function(toggled)
-    {
-        WebInspector.settings.networkLogLargeRows.set(toggled);
-        this._largerRequestsButton.setToggled(toggled);
-        this._largerRequestsButton.setTitle(WebInspector.UIString(toggled ? "Use small request rows." : "Use large request rows."));
         this._updateUI();
     },
 
-    /**
-     * @param {!WebInspector.Event} event
-     */
-    _onShowOverviewButtonClicked: function(event)
+    _toggleShowOverview: function()
     {
-        this._toggleShowOverviewButton(!WebInspector.settings.networkLogShowOverview.get());
+        var toggled = this._networkLogShowOverviewSetting.get();
+        if (toggled)
+            this._overview.show(this._searchableView.element, this._splitWidget.element);
+        else
+            this._overview.detach();
         this.doResize();
     },
 
-    /**
-     * @param {boolean} toggled
-     */
-    _toggleShowOverviewButton: function(toggled)
+    _toggleRecordFilmStrip: function()
     {
-        WebInspector.settings.networkLogShowOverview.set(toggled);
-        this._showOverviewButton.setTitle(toggled ? WebInspector.UIString("Hide overview.") : WebInspector.UIString("Show overview."));
-        this._showOverviewButton.setToggled(toggled);
-        if (toggled) {
-            this._overview.show(this._searchableView.element, this._splitView.element);
-        } else {
-            this._overview.detach();
+        var toggled = this._networkRecordFilmStripSetting.get();
+        if (toggled && !this._filmStripRecorder) {
+            this._filmStripView = new WebInspector.FilmStripView();
+            this._filmStripView.element.classList.add("network-film-strip");
+            this._filmStripRecorder = new WebInspector.NetworkPanel.FilmStripRecorder(this._filmStripView);
+            this._filmStripView.show(this._searchableView.element, this._searchableView.element.firstElementChild);
+            this._filmStripView.addEventListener(WebInspector.FilmStripView.Events.FrameSelected, this._onFilmFrameSelected, this);
+            this._filmStripView.addEventListener(WebInspector.FilmStripView.Events.FrameEnter, this._onFilmFrameEnter, this);
+            this._filmStripView.addEventListener(WebInspector.FilmStripView.Events.FrameExit, this._onFilmFrameExit, this);
+        }
+
+        if (!toggled && this._filmStripRecorder) {
+            this._filmStripView.detach();
+            this._filmStripView = null;
+            this._filmStripRecorder = null;
         }
     },
 
@@ -340,13 +265,13 @@ WebInspector.NetworkPanel.prototype = {
      */
     _isDetailsPaneAtBottom: function()
     {
-        return WebInspector.settings.splitVerticallyWhenDockedToRight.get() && WebInspector.dockController.isVertical();
+        return WebInspector.moduleSetting("splitVerticallyWhenDockedToRight").get() && WebInspector.dockController.isVertical();
     },
 
     _dockSideChanged: function()
     {
         var detailsViewAtBottom = this._isDetailsPaneAtBottom();
-        this._splitView.setVertical(!detailsViewAtBottom);
+        this._splitWidget.setVertical(!detailsViewAtBottom);
         this._updateUI();
     },
 
@@ -456,11 +381,11 @@ WebInspector.NetworkPanel.prototype = {
         if (request) {
             this._networkItemView = new WebInspector.NetworkItemView(request, this._networkLogView.timeCalculator());
             this._networkItemView.insertBeforeTabStrip(this._closeButtonElement);
-            this._networkItemView.show(this._detailsView.element);
-            this._splitView.showBoth();
+            this._networkItemView.show(this._detailsWidget.element);
+            this._splitWidget.showBoth();
             this._networkLogView.revealSelectedItem();
         } else {
-            this._splitView.hideMain();
+            this._splitWidget.hideMain();
             this._networkLogView.clearSelection();
         }
         this._updateUI();
@@ -469,8 +394,8 @@ WebInspector.NetworkPanel.prototype = {
     _updateUI: function()
     {
         var detailsPaneAtBottom = this._isDetailsPaneAtBottom();
-        this._detailsView.element.classList.toggle("network-details-view-tall-header", WebInspector.settings.networkLogLargeRows.get() && !detailsPaneAtBottom);
-        this._networkLogView.switchViewMode(!this._splitView.isResizable() || detailsPaneAtBottom);
+        this._detailsWidget.element.classList.toggle("network-details-view-tall-header", this._networkLogLargeRowsSetting.get() && !detailsPaneAtBottom);
+        this._networkLogView.switchViewMode(!this._splitWidget.isResizable() || detailsPaneAtBottom);
     },
 
     /**
@@ -578,6 +503,34 @@ WebInspector.NetworkPanel.prototype = {
         appendRevealItem.call(this, request);
     },
 
+    /**
+     * @param {!WebInspector.Event} event
+     */
+    _onFilmFrameSelected: function(event)
+    {
+        var timestamp = /** @type {number} */ (event.data);
+        this._overview.setWindow(0, timestamp / 1000);
+    },
+
+    /**
+     * @param {!WebInspector.Event} event
+     */
+    _onFilmFrameEnter: function(event)
+    {
+        var timestamp = /** @type {number} */ (event.data);
+        this._overview.selectFilmStripFrame(timestamp / 1000);
+        this._networkLogView.selectFilmStripFrame(timestamp / 1000);
+    },
+
+    /**
+     * @param {!WebInspector.Event} event
+     */
+    _onFilmFrameExit: function(event)
+    {
+        this._overview.clearFilmStripFrame();
+        this._networkLogView.clearFilmStripFrame();
+    },
+
     __proto__: WebInspector.Panel.prototype
 }
 
@@ -660,5 +613,94 @@ WebInspector.NetworkPanelFactory.prototype = {
     createPanel: function()
     {
         return WebInspector.NetworkPanel._instance();
+    }
+}
+
+/**
+ * @constructor
+ * @implements {WebInspector.TracingManagerClient}
+ * @param {!WebInspector.FilmStripView} filmStripView
+ */
+WebInspector.NetworkPanel.FilmStripRecorder = function(filmStripView)
+{
+    this._filmStripView = filmStripView;
+}
+
+WebInspector.NetworkPanel.FilmStripRecorder.prototype = {
+    /**
+     * @override
+     */
+    tracingStarted: function()
+    {
+    },
+
+    /**
+     * @override
+     * @param {!Array.<!WebInspector.TracingManager.EventPayload>} events
+     */
+    traceEventsCollected: function(events)
+    {
+        if (this._tracingModel)
+            this._tracingModel.addEvents(events);
+    },
+
+    /**
+     * @override
+     */
+    tracingComplete: function()
+    {
+        if (!this._tracingModel)
+            return;
+        this._tracingModel.tracingComplete();
+        this._callback(new WebInspector.FilmStripModel(this._tracingModel));
+        delete this._callback;
+    },
+
+    /**
+     * @override
+     */
+    tracingBufferUsage: function()
+    {
+    },
+
+    /**
+     * @override
+     * @param {number} progress
+     */
+    eventsRetrievalProgress: function(progress)
+    {
+    },
+
+    startRecording: function()
+    {
+        if (this._target)
+            return;
+
+        this._target = WebInspector.targetManager.mainTarget();
+        this._tracingModel = new WebInspector.TracingModel(new WebInspector.TempFileBackingStorage("tracing"));
+        this._target.tracingManager.start(this, "-*,disabled-by-default-devtools.screenshot", "");
+        this._filmStripView.setRecording();
+    },
+
+    /**
+     * @return {boolean}
+     */
+    isRecording: function()
+    {
+        return !!this._target;
+    },
+
+    /**
+     * @param {function(?WebInspector.FilmStripModel)} callback
+     */
+    stopRecording: function(callback)
+    {
+        if (!this._target)
+            return;
+
+        this._target.tracingManager.stop();
+        this._target = null;
+        this._callback = callback;
+        this._filmStripView.setFetching();
     }
 }

@@ -34,24 +34,32 @@ struct NackConfig {
 // Settings for forward error correction, see RFC 5109 for details. Set the
 // payload types to '-1' to disable.
 struct FecConfig {
-  FecConfig() : ulpfec_payload_type(-1), red_payload_type(-1) {}
+  FecConfig()
+      : ulpfec_payload_type(-1),
+        red_payload_type(-1),
+        red_rtx_payload_type(-1) {}
   std::string ToString() const;
   // Payload type used for ULPFEC packets.
   int ulpfec_payload_type;
 
   // Payload type used for RED packets.
   int red_payload_type;
+
+  // RTX payload type for RED payload.
+  int red_rtx_payload_type;
 };
 
 // RTP header extension to use for the video stream, see RFC 5285.
 struct RtpExtension {
   RtpExtension(const std::string& name, int id) : name(name), id(id) {}
   std::string ToString() const;
-  static bool IsSupported(const std::string& name);
+  static bool IsSupportedForAudio(const std::string& name);
+  static bool IsSupportedForVideo(const std::string& name);
 
   static const char* kTOffset;
   static const char* kAbsSendTime;
   static const char* kVideoRotation;
+  static const char* kAudioLevel;
   std::string name;
   int id;
 };
@@ -85,9 +93,9 @@ struct VideoStream {
 };
 
 struct VideoEncoderConfig {
-  enum ContentType {
+  enum class ContentType {
     kRealtimeVideo,
-    kScreenshare,
+    kScreen,
   };
 
   VideoEncoderConfig();
@@ -103,6 +111,20 @@ struct VideoEncoderConfig {
   // maintaining a higher bitrate estimate. Padding will however not be sent
   // unless the estimated bandwidth indicates that the link can handle it.
   int min_transmit_bitrate_bps;
+};
+
+// Controls the capacity of the packet buffer in NetEq. The capacity is the
+// maximum number of packets that the buffer can contain. If the limit is
+// exceeded, the buffer will be flushed. The capacity does not affect the actual
+// audio delay in the general case, since this is governed by the target buffer
+// level (calculated from the jitter profile). It is only in the rare case of
+// severe network freezes that a higher capacity will lead to a (transient)
+// increase in audio delay.
+struct NetEqCapacityConfig {
+  NetEqCapacityConfig() : enabled(false), capacity(0) {}
+  explicit NetEqCapacityConfig(int value) : enabled(true), capacity(value) {}
+  bool enabled;
+  int capacity;
 };
 
 }  // namespace webrtc

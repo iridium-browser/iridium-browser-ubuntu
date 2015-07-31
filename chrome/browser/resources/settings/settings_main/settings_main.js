@@ -8,47 +8,57 @@
  *
  * Example:
  *
- *     <cr-settings-main pages="{{pages}}" selectedPageId="{{selectedId}}">
+ *     <cr-settings-main pages="[[pages]]" selected-page-id="{{selectedId}}">
  *     </cr-settings-main>
  *
- * See cr-settings-drawer for example of use in 'core-drawer-panel'.
+ * See cr-settings-drawer for example of use in 'paper-drawer-panel'.
  *
  * @group Chrome Settings Elements
  * @element cr-settings-main
  */
-Polymer('cr-settings-main', {
-  publish: {
+Polymer({
+  is: 'cr-settings-main',
+
+  properties: {
     /**
      * Preferences state.
      *
-     * @attribute prefs
-     * @type CrSettingsPrefsElement
-     * @default null
+     * @type {?CrSettingsPrefsElement}
      */
-    prefs: null,
+    prefs: {
+      type: Object,
+      notify: true,
+    },
 
     /**
      * Pages that may be shown.
-     *
-     * @attribute pages
-     * @type Array<!Object>
-     * @default null
+     * @type {!Array<!HTMLElement>}
      */
-    pages: null,
+    pages: {
+      type: Array,
+      value: function() { return []; },
+      notify: true,
+      readOnly: true,
+    },
+
+    /**
+     * Currently selected page.
+     * @type {?HTMLElement}
+     */
+    selectedPage: {
+      type: Object,
+      notify: true,
+    },
 
     /**
      * ID of the currently selected page.
-     *
-     * @attribute selectedPageId
-     * @type string
-     * default ''
      */
-    selectedPageId: '',
-  },
-
-  /** @override */
-  created: function() {
-    this.pages = [];
+    selectedPageId: {
+      type: String,
+      notify: true,
+      value: '',
+      observer: 'selectedPageIdChanged_',
+    },
   },
 
   /** @override */
@@ -58,14 +68,37 @@ Polymer('cr-settings-main', {
                      /** @type {MutationObserverInit} */ {
                        childList: true,
                      });
-    this.pages = this.$.pageContainer.items;
-    this.ensureSelection_();
+    this.pageContainerUpdated_();
+  },
+
+  /**
+   * Polymer changed event for selectedPageId. See note for onIronSelect_ below.
+   * @private
+   */
+  selectedPageIdChanged_: function() {
+    this.$.pageContainer.selected = this.selectedPageId;
+  },
+
+  /**
+   * We observe $.pageContainer.on-iron-select instead of using data binding
+   * for two reasons:
+   * 1) We need to exclude subpages
+   * 2) There is a bug with data binding or our useage of it here causing
+   *    this.selectedPage to get set to the index of $.pageContainer instead of
+   *    the valueattr identifier (PAGE_ID). TODO(stevenjb/jlklien): Investigate
+   *    fixing this and using filters once we switch to Polymer 0.8.
+   * @private
+   */
+  onIronSelect_: function(event) {
+    if (event.target != this.$.pageContainer || event.detail.item.subpage) {
+      return;
+    }
+    this.selectedPageId = event.detail.item.PAGE_ID;
   },
 
   /**
    * If no page is selected, selects the first page. This happens on load and
    * when a selected page is removed.
-   *
    * @private
    */
   ensureSelection_: function() {
@@ -76,12 +109,13 @@ Polymer('cr-settings-main', {
   },
 
   /**
-   * Updates the list of pages using the pages in core-animated-pages.
-   *
+   * Updates the list of pages using the pages in iron-pages.
    * @private
    */
   pageContainerUpdated_: function() {
-    this.pages = this.$.pageContainer.items;
+    this._setPages(this.$.pageContainer.items.filter(function(item) {
+      return !item.subpage;
+    }));
     this.ensureSelection_();
   },
 });

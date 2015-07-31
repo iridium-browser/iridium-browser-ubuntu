@@ -1,6 +1,5 @@
 include_rules = [
   "+crypto",
-  "+jni",
-  "+third_party/mojo_services",
-  "+ui",
+  "+third_party/mojo_services/src/content_handler/public/interfaces",
+  "-mojo/runner",
 ]

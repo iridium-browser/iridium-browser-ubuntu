@@ -27,11 +27,7 @@
 #include "config.h"
 #include "core/dom/ClientRectList.h"
 
-#include "core/dom/ClientRect.h"
-
 namespace blink {
-
-DEFINE_EMPTY_DESTRUCTOR_WILL_BE_REMOVED(ClientRectList);
 
 ClientRectList::ClientRectList()
 {

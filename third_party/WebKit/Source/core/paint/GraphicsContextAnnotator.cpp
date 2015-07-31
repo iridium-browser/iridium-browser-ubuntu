@@ -34,18 +34,18 @@
 
 #include "core/dom/DOMNodeIds.h"
 #include "core/layout/LayoutObject.h"
-#include "core/layout/PaintInfo.h"
+#include "core/paint/PaintInfo.h"
 #include "platform/graphics/GraphicsContextAnnotation.h"
 #include "wtf/text/StringBuilder.h"
 
 namespace {
 
-const char AnnotationKeyRendererName[]    = "RENDERER";
-const char AnnotationKeyPaintPhase[]      = "PHASE";
-const char AnnotationKeyElementId[]       = "ID";
-const char AnnotationKeyElementClass[]    = "CLASS";
-const char AnnotationKeyElementTag[]      = "TAG";
-const char AnnotationKeyInspectorNodeId[] = "INSPECTOR_ID";
+const char AnnotationKeyLayoutObjectName[] = "LAYOUT_OBJECT";
+const char AnnotationKeyPaintPhase[]       = "PHASE";
+const char AnnotationKeyElementId[]        = "ID";
+const char AnnotationKeyElementClass[]     = "CLASS";
+const char AnnotationKeyElementTag[]       = "TAG";
+const char AnnotationKeyInspectorNodeId[]  = "INSPECTOR_ID";
 
 static const char* paintPhaseName(blink::PaintPhase phase)
 {
@@ -97,8 +97,8 @@ void GraphicsContextAnnotator::annotate(const PaintInfo& paintInfo, const Layout
     AnnotationModeFlags mode = paintInfo.context->annotationMode();
     Element* element = object->node() && object->node()->isElementNode() ? toElement(object->node()) : 0;
 
-    if (mode & AnnotateRendererName)
-        annotations.append(std::make_pair(AnnotationKeyRendererName, object->decoratedName()));
+    if (mode & AnnotateLayoutObjectName)
+        annotations.append(std::make_pair(AnnotationKeyLayoutObjectName, object->decoratedName()));
 
     if (mode & AnnotatePaintPhase)
         annotations.append(std::make_pair(AnnotationKeyPaintPhase, paintPhaseName(paintInfo.phase)));

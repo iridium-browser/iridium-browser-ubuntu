@@ -130,12 +130,12 @@ class SwitchToMetroUIHandler
     default_browser_worker_->StartCheckIsDefault();
   }
 
-  virtual ~SwitchToMetroUIHandler() {
+  ~SwitchToMetroUIHandler() override {
     default_browser_worker_->ObserverDestroyed();
   }
 
  private:
-  virtual void SetDefaultWebClientUIState(
+  void SetDefaultWebClientUIState(
       ShellIntegration::DefaultWebClientUIState state) override {
     switch (state) {
       case ShellIntegration::STATE_PROCESSING:
@@ -157,7 +157,7 @@ class SwitchToMetroUIHandler
     delete this;
   }
 
-  virtual void OnSetAsDefaultConcluded(bool success)  override {
+  void OnSetAsDefaultConcluded(bool success) override {
     if (!success) {
       delete this;
       return;
@@ -166,7 +166,7 @@ class SwitchToMetroUIHandler
     default_browser_worker_->StartCheckIsDefault();
   }
 
-  virtual bool IsInteractiveSetDefaultPermitted() override {
+  bool IsInteractiveSetDefaultPermitted() override {
     return true;
   }
 
@@ -606,13 +606,9 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
 
     // Clipboard commands
     case IDC_CUT:
-      Cut(browser_);
-      break;
     case IDC_COPY:
-      Copy(browser_);
-      break;
     case IDC_PASTE:
-      Paste(browser_);
+      CutCopyPaste(browser_, id);
       break;
 
     // Find-in-page
@@ -958,7 +954,10 @@ void BrowserCommandController::InitCommandState() {
   command_updater_.UpdateCommandEnabled(IDC_ZOOM_MINUS, true);
 
   // Show various bits of UI
-  const bool guest_session = profile()->IsGuestSession();
+  const bool guest_session = profile()->IsGuestSession() ||
+                             profile()->IsSystemProfile();
+  DCHECK(!profile()->IsSystemProfile())
+      << "Ought to never have browser for the system profile.";
   const bool normal_window = browser_->is_type_tabbed();
   UpdateOpenFileState(&command_updater_);
   command_updater_.UpdateCommandEnabled(IDC_CREATE_SHORTCUTS, false);
@@ -1197,6 +1196,7 @@ void BrowserCommandController::UpdateCommandsForBookmarkBar() {
   command_updater_.UpdateCommandEnabled(
       IDC_SHOW_BOOKMARK_BAR,
       browser_defaults::bookmarks_enabled && !profile()->IsGuestSession() &&
+          !profile()->IsSystemProfile() &&
           !profile()->GetPrefs()->IsManagedPreference(
               bookmarks::prefs::kShowBookmarkBar) &&
           IsShowingMainUI());

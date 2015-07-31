@@ -279,7 +279,7 @@ void ExtensionDownloader::StartBlacklistUpdate(
   // by a public key signature like .crx files are.
   scoped_ptr<ManifestFetchData> blacklist_fetch(CreateManifestFetchData(
       extension_urls::GetWebstoreUpdateUrl(), request_id));
-  DCHECK(blacklist_fetch->base_url().SchemeIsSecure());
+  DCHECK(blacklist_fetch->base_url().SchemeIsCryptographic());
   blacklist_fetch->AddExtension(kBlacklistAppID,
                                 version,
                                 &ping_data,
@@ -313,7 +313,7 @@ bool ExtensionDownloader::AddExtensionData(
 
   // Make sure we use SSL for store-hosted extensions.
   if (extension_urls::IsWebstoreUpdateUrl(update_url) &&
-      !update_url.SchemeIsSecure())
+      !update_url.SchemeIsCryptographic())
     update_url = extension_urls::GetWebstoreUpdateUrl();
 
   // Skip extensions with empty IDs.
@@ -473,11 +473,9 @@ void ExtensionDownloader::CreateManifestFetcher() {
             << " for " << id_list;
   }
 
-  manifest_fetcher_.reset(
-      net::URLFetcher::Create(kManifestFetcherId,
-                              manifests_queue_.active_request()->full_url(),
-                              net::URLFetcher::GET,
-                              this));
+  manifest_fetcher_ = net::URLFetcher::Create(
+      kManifestFetcherId, manifests_queue_.active_request()->full_url(),
+      net::URLFetcher::GET, this);
   manifest_fetcher_->SetRequestContext(request_context_.get());
   manifest_fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |
                                   net::LOAD_DO_NOT_SAVE_COOKIES |
@@ -591,7 +589,7 @@ void ExtensionDownloader::HandleManifestResults(
       DCHECK(extension_urls::IsBlacklistUpdateUrl(crx_url)) << crx_url;
 
       // Force https (crbug.com/129587).
-      if (!crx_url.SchemeIsSecure()) {
+      if (!crx_url.SchemeIsCryptographic()) {
         url::Replacements<char> replacements;
         std::string scheme("https");
         replacements.SetScheme(scheme.c_str(),
@@ -762,13 +760,13 @@ void ExtensionDownloader::CacheInstallDone(
 
 void ExtensionDownloader::CreateExtensionFetcher() {
   const ExtensionFetch* fetch = extensions_queue_.active_request();
-  extension_fetcher_.reset(net::URLFetcher::Create(
-      kExtensionFetcherId, fetch->url, net::URLFetcher::GET, this));
+  extension_fetcher_ = net::URLFetcher::Create(kExtensionFetcherId, fetch->url,
+                                               net::URLFetcher::GET, this);
   extension_fetcher_->SetRequestContext(request_context_.get());
   extension_fetcher_->SetAutomaticallyRetryOnNetworkChanges(3);
 
   int load_flags = net::LOAD_DISABLE_CACHE;
-  bool is_secure = fetch->url.SchemeIsSecure();
+  bool is_secure = fetch->url.SchemeIsCryptographic();
   if (fetch->credentials != ExtensionFetch::CREDENTIALS_COOKIES || !is_secure) {
     load_flags |= net::LOAD_DO_NOT_SEND_COOKIES | net::LOAD_DO_NOT_SAVE_COOKIES;
   }

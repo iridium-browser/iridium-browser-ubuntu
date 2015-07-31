@@ -9,49 +9,64 @@
  *
  * Example:
  *
- *    <core-animated-pages>
+ *    <iron-animated-pages>
  *      <cr-settings-a11y-page prefs="{{prefs}}"></cr-settings-a11y-page>
  *      ... other pages ...
- *    </core-animated-pages>
+ *    </iron-animated-pages>
  *
  * @group Chrome Settings Elements
  * @element cr-settings-a11y-page
  */
-Polymer('cr-settings-a11y-page', {
-  publish: {
+Polymer({
+  is: 'cr-settings-a11y-page',
+
+  properties: {
     /**
      * Preferences state.
-     *
-     * @attribute prefs
-     * @type CrSettingsPrefsElement
-     * @default null
      */
-    prefs: null,
+    prefs: {
+      type: Object,
+      notify: true,
+    },
+
+    /**
+     * Route for the page.
+     */
+    route: String,
+
+    /**
+     * Whether the page is a subpage.
+     */
+    subpage: {
+      type: Boolean,
+      value: false,
+      readOnly: true,
+    },
 
     /**
      * ID of the page.
-     *
-     * @attribute PAGE_ID
-     * @const string
-     * @default 'a11y'
      */
-    PAGE_ID: 'a11y',
+    PAGE_ID: {
+      type: String,
+      value: 'a11y',
+      readOnly: true,
+    },
 
     /**
      * Title for the page header and navigation menu.
-     *
-     * @attribute pageTitle
-     * @type string
      */
-    pageTitle: loadTimeData.getString('a11yPageTitle'),
+    pageTitle: {
+      type: String,
+      value: function() { return loadTimeData.getString('a11yPageTitle'); },
+    },
 
     /**
-     * Name of the 'core-icon' to show.
-     *
-     * @attribute icon
-     * @type string
-     * @default 'accessibility'
+     * Name of the 'iron-icon' to show.
      */
-    icon: 'accessibility',
+    icon: {
+      type: String,
+      value: 'accessibility',
+      readOnly: true,
+    },
   },
 });

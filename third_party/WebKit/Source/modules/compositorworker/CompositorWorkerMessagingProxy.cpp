@@ -10,7 +10,7 @@
 
 namespace blink {
 
-CompositorWorkerMessagingProxy::CompositorWorkerMessagingProxy(Worker* worker, PassOwnPtrWillBeRawPtr<WorkerClients> workerClients)
+CompositorWorkerMessagingProxy::CompositorWorkerMessagingProxy(InProcessWorkerBase* worker, PassOwnPtrWillBeRawPtr<WorkerClients> workerClients)
     : WorkerMessagingProxy(worker, workerClients)
 {
 }
@@ -19,9 +19,9 @@ CompositorWorkerMessagingProxy::~CompositorWorkerMessagingProxy()
 {
 }
 
-PassRefPtr<WorkerThread> CompositorWorkerMessagingProxy::createWorkerThread(double originTime, PassOwnPtr<WorkerThreadStartupData> startupData)
+PassRefPtr<WorkerThread> CompositorWorkerMessagingProxy::createWorkerThread(double originTime)
 {
-    return CompositorWorkerThread::create(loaderProxy(), workerObjectProxy(), originTime, startupData);
+    return CompositorWorkerThread::create(loaderProxy(), workerObjectProxy(), originTime);
 }
 
 } // namespace blink

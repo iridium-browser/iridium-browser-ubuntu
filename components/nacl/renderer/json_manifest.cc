@@ -8,6 +8,7 @@
 
 #include "base/logging.h"
 #include "base/macros.h"
+#include "components/nacl/common/nacl_types.h"
 #include "components/nacl/renderer/nexe_load_manager.h"
 #include "third_party/jsoncpp/source/include/json/reader.h"
 #include "third_party/jsoncpp/source/include/json/value.h"
@@ -443,7 +444,7 @@ bool JsonManifest::GetProgramURL(std::string* full_url,
 }
 
 void JsonManifest::GetPrefetchableFiles(
-    std::vector<std::pair<std::string, std::string> >* out_files) const {
+    std::vector<NaClResourcePrefetchRequest>* out_files) const {
   const Json::Value& files = dictionary_[kFilesKey];
   if (!files.isObject())
     return;
@@ -455,7 +456,7 @@ void JsonManifest::GetPrefetchableFiles(
     // We skip invalid entries in "files".
     if (GetKeyUrl(files, keys[i], &full_url, &unused_pnacl_options)) {
       if (GURL(full_url).SchemeIs("chrome-extension"))
-        out_files->push_back(std::make_pair(keys[i], full_url));
+        out_files->push_back(NaClResourcePrefetchRequest(keys[i], full_url));
     }
   }
 }
@@ -463,25 +464,8 @@ void JsonManifest::GetPrefetchableFiles(
 bool JsonManifest::ResolveKey(const std::string& key,
                               std::string* full_url,
                               PP_PNaClOptions* pnacl_options) const {
-  // key must be one of kProgramKey or kFileKey '/' file-section-key
   if (full_url == NULL || pnacl_options == NULL)
     return false;
-
-  if (key == kProgramKey)
-    return GetKeyUrl(dictionary_, key, full_url, pnacl_options);
-
-  std::string::const_iterator p = std::find(key.begin(), key.end(), '/');
-  if (p == key.end()) {
-    VLOG(1) << "ResolveKey failed: invalid key, no slash: " << key;
-    return false;
-  }
-
-  // generalize to permit other sections?
-  std::string prefix(key.begin(), p);
-  if (prefix != kFilesKey) {
-    VLOG(1) << "ResolveKey failed: invalid key, no \"files\" prefix: " << key;
-    return false;
-  }
 
   const Json::Value& files = dictionary_[kFilesKey];
   if (!files.isObject()) {
@@ -489,12 +473,11 @@ bool JsonManifest::ResolveKey(const std::string& key,
     return false;
   }
 
-  std::string rest(p + 1, key.end());
-  if (!files.isMember(rest)) {
+  if (!files.isMember(key)) {
     VLOG(1) << "ResolveKey failed: no such \"files\" entry: " << key;
     return false;
   }
-  return GetKeyUrl(files, rest, full_url, pnacl_options);
+  return GetKeyUrl(files, key, full_url, pnacl_options);
 }
 
 bool JsonManifest::MatchesSchema(ErrorInfo* error_info) {

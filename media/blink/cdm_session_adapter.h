@@ -7,18 +7,21 @@
 
 #include <map>
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/containers/hash_tables.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "media/base/media_keys.h"
+#include "third_party/WebKit/public/platform/WebContentDecryptionModuleResult.h"
 #include "third_party/WebKit/public/platform/WebContentDecryptionModuleSession.h"
 
 class GURL;
 
 namespace media {
 
+struct CdmConfig;
 class CdmFactory;
 class WebContentDecryptionModuleSessionImpl;
 
@@ -30,17 +33,17 @@ class CdmSessionAdapter : public base::RefCounted<CdmSessionAdapter> {
  public:
   CdmSessionAdapter();
 
-  // Returns true on success.
-  bool Initialize(CdmFactory* cdm_factory,
-                  const std::string& key_system,
-                  bool allow_distinctive_identifier,
-                  bool allow_persistent_state,
-                  const GURL& security_origin);
+  // Creates the CDM for |key_system| using |cdm_factory| and returns the result
+  // via |result|.
+  void CreateCdm(CdmFactory* cdm_factory,
+                 const std::string& key_system,
+                 const GURL& security_origin,
+                 const CdmConfig& cdm_config,
+                 blink::WebContentDecryptionModuleResult result);
 
   // Provides a server certificate to be used to encrypt messages to the
   // license server.
-  void SetServerCertificate(const uint8* server_certificate,
-                            int server_certificate_length,
+  void SetServerCertificate(const std::vector<uint8_t>& certificate,
                             scoped_ptr<SimpleCdmPromise> promise);
 
   // Creates a new session and adds it to the internal map. The caller owns the
@@ -61,8 +64,7 @@ class CdmSessionAdapter : public base::RefCounted<CdmSessionAdapter> {
   // Initializes a session with the |init_data_type|, |init_data| and
   // |session_type| provided.
   void InitializeNewSession(EmeInitDataType init_data_type,
-                            const uint8* init_data,
-                            int init_data_length,
+                            const std::vector<uint8_t>& init_data,
                             MediaKeys::SessionType session_type,
                             scoped_ptr<NewSessionCdmPromise> promise);
 
@@ -73,8 +75,7 @@ class CdmSessionAdapter : public base::RefCounted<CdmSessionAdapter> {
 
   // Updates the session specified by |session_id| with |response|.
   void UpdateSession(const std::string& session_id,
-                     const uint8* response,
-                     int response_length,
+                     const std::vector<uint8_t>& response,
                      scoped_ptr<SimpleCdmPromise> promise);
 
   // Closes the session specified by |session_id|.
@@ -99,16 +100,24 @@ class CdmSessionAdapter : public base::RefCounted<CdmSessionAdapter> {
 
  private:
   friend class base::RefCounted<CdmSessionAdapter>;
+
+  // Session ID to WebContentDecryptionModuleSessionImpl mapping.
   typedef base::hash_map<std::string,
                          base::WeakPtr<WebContentDecryptionModuleSessionImpl> >
       SessionMap;
 
   ~CdmSessionAdapter();
 
+  // Callback for CreateCdm().
+  void OnCdmCreated(const std::string& key_system,
+                    blink::WebContentDecryptionModuleResult result,
+                    scoped_ptr<MediaKeys> cdm,
+                    const std::string& error_message);
+
   // Callbacks for firing session events.
   void OnSessionMessage(const std::string& session_id,
                         MediaKeys::MessageType message_type,
-                        const std::vector<uint8>& message,
+                        const std::vector<uint8_t>& message,
                         const GURL& legacy_destination_url);
   void OnSessionKeysChange(const std::string& session_id,
                            bool has_additional_usable_key,
@@ -118,14 +127,14 @@ class CdmSessionAdapter : public base::RefCounted<CdmSessionAdapter> {
   void OnSessionClosed(const std::string& session_id);
   void OnLegacySessionError(const std::string& session_id,
                             MediaKeys::Exception exception_code,
-                            uint32 system_code,
+                            uint32_t system_code,
                             const std::string& error_message);
 
   // Helper function of the callbacks.
   WebContentDecryptionModuleSessionImpl* GetSession(
       const std::string& session_id);
 
-  scoped_ptr<MediaKeys> media_keys_;
+  scoped_ptr<MediaKeys> cdm_;
 
   SessionMap sessions_;
 

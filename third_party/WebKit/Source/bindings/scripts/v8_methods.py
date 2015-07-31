@@ -70,7 +70,9 @@ def method_context(interface, method, is_visible=True):
     is_static = method.is_static
     name = method.name
 
-    idl_type.add_includes_for_type()
+    if is_visible:
+        idl_type.add_includes_for_type(extended_attributes)
+
     this_cpp_value = cpp_value(interface, method, len(arguments))
 
     def function_template():
@@ -117,9 +119,12 @@ def method_context(interface, method, is_visible=True):
     is_raises_exception = 'RaisesException' in extended_attributes
     is_custom_call_epilogue = has_extended_attribute_value(method, 'Custom', 'CallEpilogue')
 
+    if 'LenientThis' in extended_attributes:
+        raise Exception('[LenientThis] is not supported for operations.')
+
     return {
         'activity_logging_world_list': v8_utilities.activity_logging_world_list(method),  # [ActivityLogging]
-        'arguments': [argument_context(interface, method, argument, index)
+        'arguments': [argument_context(interface, method, argument, index, is_visible=is_visible)
                       for index, argument in enumerate(arguments)],
         'argument_declarations_for_private_script':
             argument_declarations_for_private_script(interface, method),
@@ -178,7 +183,6 @@ def method_context(interface, method, is_visible=True):
             argument for argument in arguments
             if not argument.is_optional]),
         'only_exposed_to_private_script': is_only_exposed_to_private_script,
-        'per_context_enabled_function': v8_utilities.per_context_enabled_function_name(method),  # [PerContextEnabled]
         'private_script_v8_value_to_local_cpp_value': idl_type.v8_value_to_local_cpp_value(
             extended_attributes, 'v8Value', 'cppValue', isolate='scriptState->isolate()', bailout_return_value='false'),
         'property_attributes': property_attributes(interface, method),
@@ -195,9 +199,11 @@ def method_context(interface, method, is_visible=True):
     }
 
 
-def argument_context(interface, method, argument, index):
+def argument_context(interface, method, argument, index, is_visible=True):
     extended_attributes = argument.extended_attributes
     idl_type = argument.idl_type
+    if is_visible:
+        idl_type.add_includes_for_type(extended_attributes)
     this_cpp_value = cpp_value(interface, method, index)
     is_variadic_wrapper_type = argument.is_variadic and idl_type.is_wrapper_type
 
@@ -251,7 +257,6 @@ def argument_context(interface, method, argument, index):
         'v8_set_return_value': v8_set_return_value(interface.name, method, this_cpp_value),
         'v8_set_return_value_for_main_world': v8_set_return_value(interface.name, method, this_cpp_value, for_main_world=True),
         'v8_value_to_local_cpp_value': v8_value_to_local_cpp_value(method, argument, index),
-        'vector_type': v8_types.cpp_ptr_type('Vector', 'HeapVector', idl_type.gc_type),
     }
 
 

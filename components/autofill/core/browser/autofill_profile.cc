@@ -15,6 +15,7 @@
 #include "base/i18n/case_conversion.h"
 #include "base/i18n/char_iterator.h"
 #include "base/logging.h"
+#include "base/sha1.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversion_utils.h"
 #include "base/strings/utf_string_conversions.h"
@@ -27,6 +28,7 @@
 #include "components/autofill/core/browser/phone_number.h"
 #include "components/autofill/core/browser/phone_number_i18n.h"
 #include "components/autofill/core/browser/validation.h"
+#include "components/autofill/core/common/autofill_l10n_util.h"
 #include "components/autofill/core/common/form_field_data.h"
 #include "grit/components_strings.h"
 #include "third_party/icu/source/common/unicode/uchar.h"
@@ -236,21 +238,6 @@ class FindByPhone {
   std::string app_locale_;
 };
 
-// Functor used to check for case-insensitive equality of two strings.
-struct CaseInsensitiveStringEquals {
- public:
-  CaseInsensitiveStringEquals(const base::string16& other)
-      : other_(other) {}
-
-  bool operator()(const base::string16& x) const {
-    return x.size() == other_.size() &&
-        base::StringToLowerASCII(x) == base::StringToLowerASCII(other_);
-  }
-
- private:
-  const base::string16& other_;
-};
-
 }  // namespace
 
 AutofillProfile::AutofillProfile(const std::string& guid,
@@ -267,7 +254,8 @@ AutofillProfile::AutofillProfile(RecordType type, const std::string& server_id)
       record_type_(type),
       name_(1),
       email_(1),
-      phone_number_(1, PhoneNumber(this)) {
+      phone_number_(1, PhoneNumber(this)),
+      server_id_(server_id) {
   DCHECK(type == SERVER_PROFILE);
 }
 
@@ -310,6 +298,8 @@ AutofillProfile& AutofillProfile::operator=(const AutofillProfile& profile) {
 
   address_ = profile.address_;
   set_language_code(profile.language_code());
+
+  server_id_ = profile.server_id();
 
   return *this;
 }
@@ -573,6 +563,8 @@ bool AutofillProfile::IsSubsetOfForFieldSet(
     const AutofillProfile& profile,
     const std::string& app_locale,
     const ServerFieldTypeSet& types) const {
+  scoped_ptr<l10n::CaseInsensitiveCompare> compare;
+
   for (ServerFieldType type : types) {
     base::string16 value = GetRawInfo(type);
     if (value.empty())
@@ -595,9 +587,11 @@ bool AutofillProfile::IsSubsetOfForFieldSet(
                      app_locale)) {
         return false;
       }
-    } else if (base::StringToLowerASCII(value) !=
-               base::StringToLowerASCII(profile.GetRawInfo(type))) {
-      return false;
+    } else {
+      if (!compare)
+        compare.reset(new l10n::CaseInsensitiveCompare());
+      if (!compare->StringsEqual(value, profile.GetRawInfo(type)))
+        return false;
     }
   }
 
@@ -627,6 +621,7 @@ void AutofillProfile::OverwriteOrAppendNames(
     const std::vector<NameInfo>& names,
     const std::string& app_locale) {
   std::vector<NameInfo> results(name_);
+  l10n::CaseInsensitiveCompare compare;
   for (std::vector<NameInfo>::const_iterator it = names.begin();
        it != names.end();
        ++it) {
@@ -647,8 +642,8 @@ void AutofillProfile::OverwriteOrAppendNames(
 
       AutofillType type = AutofillType(NAME_FULL);
       base::string16 full_name = current_name.GetInfo(type, app_locale);
-      if (base::StringToLowerASCII(full_name) ==
-          base::StringToLowerASCII(imported_name.GetInfo(type, app_locale))) {
+      if (compare.StringsEqual(full_name,
+                               imported_name.GetInfo(type, app_locale))) {
         // The imported name has the same full name string as one of the
         // existing names for this profile.  Because full names are
         // _heuristically_ parsed into {first, middle, last} name components,
@@ -703,6 +698,8 @@ void AutofillProfile::OverwriteWithOrAddTo(const AutofillProfile& profile,
   // than full addresses.
   field_types.erase(ADDRESS_HOME_STREET_ADDRESS);
 
+  l10n::CaseInsensitiveCompare compare;
+
   for (ServerFieldTypeSet::const_iterator iter = field_types.begin();
        iter != field_types.end(); ++iter) {
     FieldTypeGroup group = AutofillType(*iter).group();
@@ -715,10 +712,8 @@ void AutofillProfile::OverwriteWithOrAddTo(const AutofillProfile& profile,
     // Single value field --- overwrite.
     if (!AutofillProfile::SupportsMultiValue(*iter)) {
       base::string16 new_value = profile.GetRawInfo(*iter);
-      if (base::StringToLowerASCII(GetRawInfo(*iter)) !=
-              base::StringToLowerASCII(new_value)) {
+      if (!compare.StringsEqual(GetRawInfo(*iter), new_value))
         SetRawInfo(*iter, new_value);
-      }
       continue;
     }
 
@@ -750,7 +745,9 @@ void AutofillProfile::OverwriteWithOrAddTo(const AutofillProfile& profile,
       } else {
         existing_iter =
             std::find_if(existing_values.begin(), existing_values.end(),
-                         CaseInsensitiveStringEquals(*value_iter));
+                         [&compare, value_iter](base::string16& rhs) {
+                           return compare.StringsEqual(*value_iter, rhs);
+                         });
       }
 
       if (existing_iter == existing_values.end())
@@ -822,6 +819,26 @@ void AutofillProfile::CreateInferredLabels(
                                  minimal_fields_shown, app_locale, labels);
     }
   }
+}
+
+void AutofillProfile::GenerateServerProfileIdentifier() {
+  DCHECK_EQ(SERVER_PROFILE, record_type());
+  base::string16 contents = MultiString(*this, NAME_FIRST);
+  contents.append(MultiString(*this, NAME_MIDDLE));
+  contents.append(MultiString(*this, NAME_LAST));
+  contents.append(MultiString(*this, EMAIL_ADDRESS));
+  contents.append(GetRawInfo(COMPANY_NAME));
+  contents.append(GetRawInfo(ADDRESS_HOME_STREET_ADDRESS));
+  contents.append(GetRawInfo(ADDRESS_HOME_DEPENDENT_LOCALITY));
+  contents.append(GetRawInfo(ADDRESS_HOME_CITY));
+  contents.append(GetRawInfo(ADDRESS_HOME_STATE));
+  contents.append(GetRawInfo(ADDRESS_HOME_ZIP));
+  contents.append(GetRawInfo(ADDRESS_HOME_SORTING_CODE));
+  contents.append(GetRawInfo(ADDRESS_HOME_COUNTRY));
+  contents.append(MultiString(*this, PHONE_HOME_WHOLE_NUMBER));
+  std::string contents_utf8 = UTF16ToUTF8(contents);
+  contents_utf8.append(language_code());
+  server_id_ = base::SHA1HashString(contents_utf8);
 }
 
 // static

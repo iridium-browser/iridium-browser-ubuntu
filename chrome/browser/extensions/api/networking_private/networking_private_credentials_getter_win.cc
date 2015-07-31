@@ -6,13 +6,15 @@
 
 #include "base/base64.h"
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/common/extensions/api/networking_private/networking_private_crypto.h"
 #include "chrome/common/extensions/chrome_utility_extensions_messages.h"
+#include "chrome/grit/generated_resources.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/utility_process_host.h"
 #include "content/public/browser/utility_process_host_client.h"
+#include "ui/base/l10n/l10n_util.h"
 
 using content::BrowserThread;
 using content::UtilityProcessHost;
@@ -24,8 +26,6 @@ namespace {
 class CredentialsGetterHostClient : public UtilityProcessHostClient {
  public:
   explicit CredentialsGetterHostClient(const std::string& public_key);
-
-  ~CredentialsGetterHostClient() override;
 
   // UtilityProcessHostClient
   bool OnMessageReceived(const IPC::Message& message) override;
@@ -41,6 +41,8 @@ class CredentialsGetterHostClient : public UtilityProcessHostClient {
       const NetworkingPrivateCredentialsGetter::CredentialsCallback& callback);
 
  private:
+  ~CredentialsGetterHostClient() override;
+
   // Public key used to encrypt results
   std::vector<uint8> public_key_;
 
@@ -54,8 +56,6 @@ CredentialsGetterHostClient::CredentialsGetterHostClient(
     const std::string& public_key)
     : public_key_(public_key.begin(), public_key.end()) {
 }
-
-CredentialsGetterHostClient::~CredentialsGetterHostClient() {}
 
 bool CredentialsGetterHostClient::OnMessageReceived(
     const IPC::Message& message) {
@@ -98,11 +98,16 @@ void CredentialsGetterHostClient::StartProcessOnIOThread(
     const std::string& network_guid,
     const NetworkingPrivateCredentialsGetter::CredentialsCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  UtilityProcessHost* host =
-      UtilityProcessHost::Create(this, base::MessageLoopProxy::current());
   callback_ = callback;
+  UtilityProcessHost* host =
+      UtilityProcessHost::Create(this, base::ThreadTaskRunnerHandle::Get());
+  host->SetName(l10n_util::GetStringUTF16(
+      IDS_UTILITY_PROCESS_WIFI_CREDENTIALS_GETTER_NAME));
   host->ElevatePrivileges();
   host->Send(new ChromeUtilityHostMsg_GetWiFiCredentials(network_guid));
+}
+
+CredentialsGetterHostClient::~CredentialsGetterHostClient() {
 }
 
 }  // namespace

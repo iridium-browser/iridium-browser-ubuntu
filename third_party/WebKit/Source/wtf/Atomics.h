@@ -134,7 +134,9 @@ ALWAYS_INLINE void atomicSetOneToZero(int volatile* ptr)
 #endif
 
 #if defined(THREAD_SANITIZER)
-
+// The definitions below assume an LP64 data model. This is fine because
+// TSan is only supported on x86_64 Linux.
+#if CPU(64BIT) && OS(LINUX)
 ALWAYS_INLINE void releaseStore(volatile int* ptr, int value)
 {
     __tsan_atomic32_store(ptr, value, __tsan_memory_order_release);
@@ -143,13 +145,17 @@ ALWAYS_INLINE void releaseStore(volatile unsigned* ptr, unsigned value)
 {
     __tsan_atomic32_store(reinterpret_cast<volatile int*>(ptr), static_cast<int>(value), __tsan_memory_order_release);
 }
+ALWAYS_INLINE void releaseStore(volatile unsigned long* ptr, unsigned long value)
+{
+    __tsan_atomic64_store(reinterpret_cast<volatile __tsan_atomic64*>(ptr), static_cast<__tsan_atomic64>(value), __tsan_memory_order_release);
+}
+ALWAYS_INLINE void releaseStore(volatile unsigned long long* ptr, unsigned long long value)
+{
+    __tsan_atomic64_store(reinterpret_cast<volatile __tsan_atomic64*>(ptr), static_cast<__tsan_atomic64>(value), __tsan_memory_order_release);
+}
 ALWAYS_INLINE void releaseStore(void* volatile* ptr, void* value)
 {
-#if CPU(64BIT)
-    __tsan_atomic64_store(reinterpret_cast<volatile long*>(ptr), reinterpret_cast<long>(value), __tsan_memory_order_release);
-#else
-    __tsan_atomic32_store(reinterpret_cast<volatile long*>(ptr), reinterpret_cast<long>(value), __tsan_memory_order_release);
-#endif
+    __tsan_atomic64_store(reinterpret_cast<volatile __tsan_atomic64*>(ptr), reinterpret_cast<__tsan_atomic64>(value), __tsan_memory_order_release);
 }
 
 ALWAYS_INLINE int acquireLoad(volatile const int* ptr)
@@ -162,22 +168,15 @@ ALWAYS_INLINE unsigned acquireLoad(volatile const unsigned* ptr)
 }
 ALWAYS_INLINE unsigned long acquireLoad(volatile const unsigned long* ptr)
 {
-#if CPU(64BIT)
-    return static_cast<unsigned long>(__tsan_atomic64_load(reinterpret_cast<volatile const long*>(ptr), __tsan_memory_order_acquire));
-#else
-    return static_cast<unsigned long>(__tsan_atomic32_load(reinterpret_cast<volatile const long*>(ptr), __tsan_memory_order_acquire));
-#endif
+    return static_cast<unsigned long>(__tsan_atomic64_load(reinterpret_cast<volatile const __tsan_atomic64*>(ptr), __tsan_memory_order_acquire));
 }
 ALWAYS_INLINE void* acquireLoad(void* volatile const* ptr)
 {
-#if CPU(64BIT)
-    return reinterpret_cast<void*>(__tsan_atomic64_load(reinterpret_cast<volatile const long*>(ptr), __tsan_memory_order_acquire));
-#else
-    return reinterpret_cast<void*>(__tsan_atomic32_load(reinterpret_cast<volatile const long*>(ptr), __tsan_memory_order_acquire));
-#endif
+    return reinterpret_cast<void*>(__tsan_atomic64_load(reinterpret_cast<volatile const __tsan_atomic64*>(ptr), __tsan_memory_order_acquire));
 }
+#endif
 
-#else
+#else // defined(THREAD_SANITIZER)
 
 #if CPU(X86) || CPU(X86_64)
 // Only compiler barrier is needed.
@@ -211,6 +210,16 @@ ALWAYS_INLINE void releaseStore(volatile int* ptr, int value)
     *ptr = value;
 }
 ALWAYS_INLINE void releaseStore(volatile unsigned* ptr, unsigned value)
+{
+    MEMORY_BARRIER();
+    *ptr = value;
+}
+ALWAYS_INLINE void releaseStore(volatile unsigned long* ptr, unsigned long value)
+{
+    MEMORY_BARRIER();
+    *ptr = value;
+}
+ALWAYS_INLINE void releaseStore(volatile unsigned long long* ptr, unsigned long long value)
 {
     MEMORY_BARRIER();
     *ptr = value;

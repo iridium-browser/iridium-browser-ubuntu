@@ -970,7 +970,7 @@ TEST_F(PasswordFormManagerTest, TestUpdateIncompleteCredentials) {
 
   // Feed the incomplete credentials to the manager.
   ScopedVector<PasswordForm> simulated_results;
-  simulated_results.push_back(incomplete_form.release());
+  simulated_results.push_back(incomplete_form.Pass());
   form_manager.OnGetPasswordStoreResults(simulated_results.Pass());
 
   form_manager.ProvisionallySave(
@@ -1372,7 +1372,7 @@ TEST_F(PasswordFormManagerTest, DriverDeletedBeforeStoreDone) {
   client_with_store.KillDriver();
 
   ScopedVector<PasswordForm> simulated_results;
-  simulated_results.push_back(form.release());
+  simulated_results.push_back(form.Pass());
   form_manager.OnGetPasswordStoreResults(simulated_results.Pass());
 }
 
@@ -1518,6 +1518,28 @@ TEST_F(PasswordFormManagerTest, PasswordToSave_NewValue) {
   base::string16 kNewValue = base::ASCIIToUTF16("new_val");
   form.new_password_value = kNewValue;
   EXPECT_EQ(kNewValue, PasswordFormManager::PasswordToSave(form));
+}
+
+TEST_F(PasswordFormManagerTest, TestSuggestingPasswordChangeForms) {
+  // Suggesting password on the password change form on the previously visited
+  // site. Credentials are found in the password store, and are not blacklisted.
+  TestPasswordManager password_manager(client());
+  PasswordForm observed_change_password_form = *observed_form();
+  observed_change_password_form.new_password_element =
+      base::ASCIIToUTF16("new_pwd");
+  PasswordFormManager manager_creds(&password_manager, client(),
+                                    client()->driver(),
+                                    observed_change_password_form, false);
+  manager_creds.SimulateFetchMatchingLoginsFromPasswordStore();
+  ScopedVector<PasswordForm> simulated_results;
+  simulated_results.push_back(CreateSavedMatch(false));
+  manager_creds.OnGetPasswordStoreResults(simulated_results.Pass());
+  Mock::VerifyAndClearExpectations(client()->mock_driver());
+
+  // Check that Autofill message was sent.
+  EXPECT_EQ(1u, password_manager.GetLatestBestMatches().size());
+  // Check that we suggest, not autofill.
+  EXPECT_TRUE(password_manager.GetLatestWaitForUsername());
 }
 
 }  // namespace password_manager

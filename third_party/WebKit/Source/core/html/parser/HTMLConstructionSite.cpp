@@ -50,7 +50,6 @@
 #include "core/loader/FrameLoaderClient.h"
 #include "core/svg/SVGScriptElement.h"
 #include "platform/NotImplemented.h"
-#include "platform/ScriptForbiddenScope.h"
 #include "platform/text/TextBreakIterator.h"
 #include <limits>
 
@@ -103,11 +102,6 @@ static inline void insert(HTMLConstructionSiteTask& task)
     if (isHTMLTemplateElement(*task.parent))
         task.parent = toHTMLTemplateElement(task.parent.get())->content();
 
-    if (ContainerNode* parent = task.child->parentNode()) {
-        ScriptForbiddenScope forbidScript;
-        parent->parserRemoveChild(*task.child);
-    }
-
     if (task.nextChild)
         task.parent->parserInsertBefore(task.child.get(), *task.nextChild);
     else
@@ -152,11 +146,6 @@ static inline void executeInsertTextTask(HTMLConstructionSiteTask& task)
 static inline void executeReparentTask(HTMLConstructionSiteTask& task)
 {
     ASSERT(task.operation == HTMLConstructionSiteTask::Reparent);
-
-    if (ContainerNode* parent = task.child->parentNode()) {
-        ScriptForbiddenScope forbidScript;
-        parent->parserRemoveChild(*task.child);
-    }
 
     task.parent->parserAppendChild(task.child);
 }
@@ -360,6 +349,7 @@ HTMLConstructionSite::~HTMLConstructionSite()
 
 DEFINE_TRACE(HTMLConstructionSite)
 {
+#if ENABLE(OILPAN)
     visitor->trace(m_document);
     visitor->trace(m_attachmentRoot);
     visitor->trace(m_head);
@@ -368,6 +358,7 @@ DEFINE_TRACE(HTMLConstructionSite)
     visitor->trace(m_activeFormattingElements);
     visitor->trace(m_taskQueue);
     visitor->trace(m_pendingText);
+#endif
 }
 
 void HTMLConstructionSite::detach()

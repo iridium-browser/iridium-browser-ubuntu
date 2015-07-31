@@ -4,13 +4,19 @@
 
 package org.chromium.chrome.browser;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.AnimatorSet;
+import android.animation.ObjectAnimator;
 import android.app.Dialog;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
+import android.support.v7.widget.AppCompatTextView;
 import android.text.Layout;
 import android.text.Spannable;
+import android.text.SpannableString;
 import android.text.SpannableStringBuilder;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.StyleSpan;
@@ -35,15 +41,18 @@ import org.chromium.base.CalledByNative;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.omnibox.OmniboxUrlEmphasizer;
 import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.ssl.ConnectionSecurityHelper;
+import org.chromium.chrome.browser.ssl.ConnectionSecurityHelperSecurityLevel;
 import org.chromium.chrome.browser.toolbar.ToolbarModel;
-import org.chromium.chrome.browser.ui.toolbar.ToolbarModelSecurityLevel;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContentsObserver;
 import org.chromium.ui.base.Clipboard;
 import org.chromium.ui.base.DeviceFormFactor;
+import org.chromium.ui.interpolators.BakedBezierInterpolator;
 
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -78,7 +87,7 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
      * A TextView which truncates and displays a URL such that the origin is always visible.
      * The URL can be expanded by clicking on the it.
      */
-    public static class ElidedUrlTextView extends TextView {
+    public static class ElidedUrlTextView extends AppCompatTextView {
         // The number of lines to display when the URL is truncated. This number
         // should still allow the origin to be displayed. NULL before
         // setUrlAfterLayout() is called.
@@ -188,6 +197,13 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
         }
     }
 
+    // Delay enter to allow the triggering button to animate before we cover it.
+    private static final int ENTER_START_DELAY = 100;
+    private static final int FADE_DURATION = 200;
+    private static final int FADE_IN_BASE_DELAY = 150;
+    private static final int FADE_IN_DELAY_OFFSET = 20;
+    private static final int CLOSE_CLEANUP_DELAY = 10;
+
     private static final int MAX_TABLET_DIALOG_WIDTH_DP = 400;
 
     private final Context mContext;
@@ -213,6 +229,9 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
     // The dialog the container is placed in.
     private final Dialog mDialog;
 
+    // Animation which is currently running, if there is one.
+    private AnimatorSet mCurrentAnimation = null;
+
     // The full URL from the URL bar, which is copied to the user's clipboard when they select 'Copy
     // URL'.
     private String mFullUrl;
@@ -225,7 +244,7 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
     // chrome://settings page).
     private boolean mIsInternalPage;
 
-    // The security level of the page (a valid ToolbarModelSecurityLevel).
+    // The security level of the page (a valid ConnectionSecurityHelperSecurityLevel).
     private int mSecurityLevel;
 
     // Whether the security level of the page was deprecated due to SHA-1.
@@ -247,6 +266,18 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
         // Find the container and all it's important subviews.
         mContainer = (LinearLayout) LayoutInflater.from(mContext).inflate(
                 R.layout.website_settings, null);
+        mContainer.setVisibility(View.INVISIBLE);
+        mContainer.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
+            @Override
+            public void onLayoutChange(
+                    View v, int l, int t, int r, int b, int ol, int ot, int or, int ob) {
+                // Trigger the entrance animations once the main container has been laid out and has
+                // a height.
+                mContainer.removeOnLayoutChangeListener(this);
+                mContainer.setVisibility(View.VISIBLE);
+                createAllAnimations(true).start();
+            }
+        });
 
         mUrlTitle = (ElidedUrlTextView) mContainer.findViewById(R.id.website_settings_url);
         mUrlTitle.setProfile(mProfile);
@@ -277,7 +308,36 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
         setVisibilityOfLowerDialogArea(false);
 
         // Create the dialog.
-        mDialog = new Dialog(mContext);
+        mDialog = new Dialog(mContext) {
+            private void superDismiss() {
+                super.dismiss();
+            }
+
+            @Override
+            public void dismiss() {
+                if (DeviceFormFactor.isTablet(mContext)) {
+                    // Dismiss the dialog without any custom animations on tablet.
+                    super.dismiss();
+                } else {
+                    Animator animator = createAllAnimations(false);
+                    animator.addListener(new AnimatorListenerAdapter() {
+                        @Override
+                        public void onAnimationEnd(Animator animation) {
+                            // onAnimationEnd is called during the final frame of the animation.
+                            // Delay the cleanup by a tiny amount to give this frame a chance to be
+                            // displayed before we destroy the dialog.
+                            mContainer.postDelayed(new Runnable() {
+                                @Override
+                                public void run() {
+                                    superDismiss();
+                                }
+                            }, CLOSE_CLEANUP_DELAY);
+                        }
+                    });
+                    animator.start();
+                }
+            }
+        };
         mDialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
         mDialog.setCanceledOnTouchOutside(true);
 
@@ -316,17 +376,18 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
             mParsedUrl = null;
             mIsInternalPage = false;
         }
-        mSecurityLevel = ToolbarModel.getSecurityLevelForWebContents(mWebContents);
+        mSecurityLevel = ConnectionSecurityHelper.getSecurityLevelForWebContents(mWebContents);
         mDeprecatedSHA1Present = ToolbarModel.isDeprecatedSHA1Present(mWebContents);
 
         SpannableStringBuilder urlBuilder = new SpannableStringBuilder(mFullUrl);
         OmniboxUrlEmphasizer.emphasizeUrl(urlBuilder, mContext.getResources(), mProfile,
-                mSecurityLevel, mIsInternalPage, true);
+                mSecurityLevel, mIsInternalPage, true, true);
         mUrlTitle.setText(urlBuilder);
 
         // Set the URL connection message now, and the URL after layout (so it
         // can calculate its ideal height).
         mUrlConnectionMessage.setText(getUrlConnectionMessage());
+        if (isConnectionDetailsLinkVisible()) mUrlConnectionMessage.setOnClickListener(this);
     }
 
     /**
@@ -356,7 +417,7 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
             case ContentSettingsType.CONTENT_SETTINGS_TYPE_GEOLOCATION:
                 return R.drawable.permission_location;
             case ContentSettingsType.CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA:
-                return R.drawable.permission_media;
+                return R.drawable.permission_camera;
             case ContentSettingsType.CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC:
                 return R.drawable.permission_mic;
             case ContentSettingsType.CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
@@ -373,28 +434,36 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
      * Gets the message to display in the connection message box for the given security level. Does
      * not apply to SECURITY_ERROR pages, since these have their own coloured/formatted message.
      *
-     * @param toolbarModelSecurityLevel A valid ToolbarModelSecurityLevel, which is the security
-     *                                  level of the page.
+     * @param securityLevel A valid ConnectionSecurityHelperSecurityLevel, which is the security
+     *                      level of the page.
      * @param isInternalPage Whether or not this page is an internal chrome page (e.g. the
      *                       chrome://settings page).
      * @return The ID of the message to display in the connection message box.
      */
-    private int getConnectionMessageId(int toolbarModelSecurityLevel, boolean isInternalPage) {
+    private int getConnectionMessageId(int securityLevel, boolean isInternalPage) {
         if (isInternalPage) return R.string.page_info_connection_internal_page;
 
-        switch (toolbarModelSecurityLevel) {
-            case ToolbarModelSecurityLevel.NONE:
+        switch (securityLevel) {
+            case ConnectionSecurityHelperSecurityLevel.NONE:
                 return R.string.page_info_connection_http;
-            case ToolbarModelSecurityLevel.SECURE:
-            case ToolbarModelSecurityLevel.EV_SECURE:
+            case ConnectionSecurityHelperSecurityLevel.SECURE:
+            case ConnectionSecurityHelperSecurityLevel.EV_SECURE:
                 return R.string.page_info_connection_https;
-            case ToolbarModelSecurityLevel.SECURITY_WARNING:
-            case ToolbarModelSecurityLevel.SECURITY_POLICY_WARNING:
+            case ConnectionSecurityHelperSecurityLevel.SECURITY_WARNING:
+            case ConnectionSecurityHelperSecurityLevel.SECURITY_POLICY_WARNING:
                 return R.string.page_info_connection_mixed;
             default:
-                assert false : "Invalid security level specified: " + toolbarModelSecurityLevel;
+                assert false : "Invalid security level specified: " + securityLevel;
                 return R.string.page_info_connection_http;
         }
+    }
+
+    /**
+     * Whether to show a 'Details' link to the connection info popup. The link is only shown for
+     * HTTPS connections.
+     */
+    private boolean isConnectionDetailsLinkVisible() {
+        return !mIsInternalPage && mSecurityLevel != ConnectionSecurityHelperSecurityLevel.NONE;
     }
 
     /**
@@ -406,7 +475,7 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
         if (mDeprecatedSHA1Present) {
             messageBuilder.append(
                     mContext.getResources().getString(R.string.page_info_connection_sha1));
-        } else if (mSecurityLevel != ToolbarModelSecurityLevel.SECURITY_ERROR) {
+        } else if (mSecurityLevel != ConnectionSecurityHelperSecurityLevel.SECURITY_ERROR) {
             messageBuilder.append(mContext.getResources().getString(
                     getConnectionMessageId(mSecurityLevel, mIsInternalPage)));
         } else {
@@ -432,6 +501,18 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
             messageBuilder.setSpan(boldSpan, 0, leadingText.length(),
                     Spannable.SPAN_INCLUSIVE_EXCLUSIVE);
         }
+
+        if (isConnectionDetailsLinkVisible()) {
+            messageBuilder.append(" ");
+            SpannableString detailsText = new SpannableString(
+                    mContext.getResources().getString(R.string.page_info_details_link));
+            final ForegroundColorSpan blueSpan = new ForegroundColorSpan(
+                    mContext.getResources().getColor(R.color.website_settings_popup_text_link));
+            detailsText.setSpan(
+                    blueSpan, 0, detailsText.length(), Spannable.SPAN_INCLUSIVE_EXCLUSIVE);
+            messageBuilder.append(detailsText);
+        }
+
         return messageBuilder;
     }
 
@@ -553,7 +634,112 @@ public class WebsiteSettingsPopup implements OnClickListener, OnItemSelectedList
         } else if (view == mUrlTitle) {
             // Expand/collapse the displayed URL title.
             mUrlTitle.toggleTruncation();
+        } else if (view == mUrlConnectionMessage) {
+            if (DeviceFormFactor.isTablet(mContext)) {
+                ConnectionInfoPopup.show(mContext, mWebContents);
+            } else {
+                // Delay while the WebsiteSettingsPopup closes.
+                mContainer.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        ConnectionInfoPopup.show(mContext, mWebContents);
+                    }
+                }, FADE_DURATION + CLOSE_CLEANUP_DELAY);
+            }
+            mDialog.dismiss();
         }
+    }
+
+    /**
+     * Create a list of all the views which we want to individually fade in.
+     */
+    private List<View> collectAnimatableViews() {
+        List<View> animatableViews = new ArrayList<View>();
+        animatableViews.add(mUrlTitle);
+        animatableViews.add(mUrlConnectionMessage);
+        animatableViews.add(mCopyUrlButton);
+        animatableViews.add(mHorizontalSeparator);
+        for (int i = 0; i < mPermissionsList.getChildCount(); i++) {
+            animatableViews.add(mPermissionsList.getChildAt(i));
+        }
+
+        return animatableViews;
+    }
+
+    /**
+     * Create an animator to fade an individual dialog element.
+     */
+    private Animator createInnerFadeAnimator(final View view, int position, boolean isEnter) {
+        ObjectAnimator alphaAnim;
+
+        if (isEnter) {
+            view.setAlpha(0f);
+            alphaAnim = ObjectAnimator.ofFloat(view, View.ALPHA, 1f);
+            alphaAnim.setStartDelay(FADE_IN_BASE_DELAY + FADE_IN_DELAY_OFFSET * position);
+        } else {
+            alphaAnim = ObjectAnimator.ofFloat(view, View.ALPHA, 0f);
+        }
+
+        alphaAnim.setDuration(FADE_DURATION);
+        return alphaAnim;
+    }
+
+    /**
+     * Create an animator to slide in the entire dialog from the top of the screen.
+     */
+    private Animator createDialogSlideAnimator(boolean isEnter) {
+        final float animHeight = -1f * mContainer.getHeight();
+        ObjectAnimator translateAnim;
+        if (isEnter) {
+            mContainer.setTranslationY(animHeight);
+            translateAnim = ObjectAnimator.ofFloat(mContainer, View.TRANSLATION_Y, 0f);
+            translateAnim.setInterpolator(BakedBezierInterpolator.FADE_IN_CURVE);
+        } else {
+            translateAnim = ObjectAnimator.ofFloat(mContainer, View.TRANSLATION_Y, animHeight);
+            translateAnim.setInterpolator(BakedBezierInterpolator.FADE_OUT_CURVE);
+        }
+        translateAnim.setDuration(FADE_DURATION);
+        return translateAnim;
+    }
+
+    /**
+     * Create animations for showing/hiding the popup.
+     *
+     * Tablets use the default Dialog fade-in instead of sliding in manually.
+     */
+    private Animator createAllAnimations(boolean isEnter) {
+        AnimatorSet animation = new AnimatorSet();
+        AnimatorSet.Builder builder = null;
+        Animator startAnim;
+
+        if (DeviceFormFactor.isTablet(mContext)) {
+            // The start time of the entire AnimatorSet is the start time of the first animation
+            // added to the Builder. We use a blank AnimatorSet on tablet as an easy way to
+            // co-ordinate this start time.
+            startAnim = new AnimatorSet();
+        } else {
+            startAnim = createDialogSlideAnimator(isEnter);
+        }
+
+        if (isEnter) startAnim.setStartDelay(ENTER_START_DELAY);
+        builder = animation.play(startAnim);
+
+        List<View> animatableViews = collectAnimatableViews();
+        for (int i = 0; i < animatableViews.size(); i++) {
+            View view = animatableViews.get(i);
+            Animator anim = createInnerFadeAnimator(view, i, isEnter);
+            builder.with(anim);
+        }
+
+        animation.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                mCurrentAnimation = null;
+            }
+        });
+        if (mCurrentAnimation != null) mCurrentAnimation.cancel();
+        mCurrentAnimation = animation;
+        return animation;
     }
 
     /**

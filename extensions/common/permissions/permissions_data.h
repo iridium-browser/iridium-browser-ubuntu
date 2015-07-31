@@ -138,18 +138,10 @@ class PermissionsData {
   PermissionMessageIDs GetLegacyPermissionMessageIDs() const;
 
   // Returns the full list of permission messages that should display at install
-  // time as strings.
+  // time, including their submessages, as strings.
+  // TODO(treib): Remove this and move callers over to
+  // GetCoalescedPermissionMessages once we've fully switched to the new system.
   PermissionMessageStrings GetPermissionMessageStrings() const;
-
-  // Returns the full list of permission messages that should display at install
-  // time as strings.
-  // TODO(sashab): Deprecate this in favor of GetPermissionMessageStrings.
-  std::vector<base::string16> GetLegacyPermissionMessageStrings() const;
-
-  // Returns the full list of permission details for messages that should
-  // display at install time as strings.
-  // TODO(sashab): Deprecate this in favor of GetPermissionMessageStrings.
-  std::vector<base::string16> GetLegacyPermissionMessageDetailsStrings() const;
 
   // Returns the full list of permission details for messages that should
   // display at install time, in a nested format ready for display.
@@ -209,22 +201,19 @@ class PermissionsData {
   // page itself.
   bool CanCaptureVisiblePage(int tab_id, std::string* error) const;
 
-  const scoped_refptr<const PermissionSet>& active_permissions() const {
+  // Returns the tab permissions map.
+  TabPermissionsMap CopyTabSpecificPermissionsMap() const;
+
+  scoped_refptr<const PermissionSet> active_permissions() const {
     // We lock so that we can't also be setting the permissions while returning.
     base::AutoLock auto_lock(runtime_lock_);
     return active_permissions_unsafe_;
   }
 
-  const scoped_refptr<const PermissionSet>& withheld_permissions() const {
+  scoped_refptr<const PermissionSet> withheld_permissions() const {
     // We lock so that we can't also be setting the permissions while returning.
     base::AutoLock auto_lock(runtime_lock_);
     return withheld_permissions_unsafe_;
-  }
-
-  const TabPermissionsMap& tab_specific_permissions() const {
-    // We lock so that we can't also be setting the permissions while returning.
-    base::AutoLock auto_lock(runtime_lock_);
-    return tab_specific_permissions_;
   }
 
 #if defined(UNIT_TEST)

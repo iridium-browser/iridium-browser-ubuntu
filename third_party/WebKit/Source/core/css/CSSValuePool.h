@@ -28,19 +28,19 @@
 
 #include "core/CSSPropertyNames.h"
 #include "core/CSSValueKeywords.h"
+#include "core/CoreExport.h"
 #include "core/css/CSSInheritedValue.h"
 #include "core/css/CSSInitialValue.h"
 #include "core/css/CSSPrimitiveValue.h"
 #include "core/css/CSSUnsetValue.h"
+#include "core/css/CSSValueList.h"
 #include "wtf/HashMap.h"
 #include "wtf/RefPtr.h"
 #include "wtf/text/AtomicStringHash.h"
 
 namespace blink {
 
-class CSSValueList;
-
-class CSSValuePool :  public NoBaseWillBeGarbageCollectedFinalized<CSSValuePool> {
+class CORE_EXPORT CSSValuePool :  public NoBaseWillBeGarbageCollectedFinalized<CSSValuePool> {
     WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(CSSValuePool);
 public:
     PassRefPtrWillBeRawPtr<CSSValueList> createFontFaceValue(const AtomicString&);
@@ -88,10 +88,10 @@ private:
     typedef WillBeHeapHashMap<String, RefPtrWillBeMember<CSSPrimitiveValue>> FontFamilyValueCache;
     FontFamilyValueCache m_fontFamilyValueCache;
 
-    friend CSSValuePool& cssValuePool();
+    friend CORE_EXPORT CSSValuePool& cssValuePool();
 };
 
-CSSValuePool& cssValuePool();
+CORE_EXPORT CSSValuePool& cssValuePool();
 
 }
 

@@ -35,7 +35,7 @@
 #include "platform/Task.h"
 #include "platform/TraceEvent.h"
 #include "platform/heap/CallbackStack.h"
-#include "platform/heap/MarkingVisitorImpl.h"
+#include "platform/heap/MarkingVisitor.h"
 #include "platform/heap/SafePoint.h"
 #include "platform/heap/ThreadState.h"
 #include "public/platform/Platform.h"
@@ -44,6 +44,7 @@
 #include "wtf/LeakAnnotations.h"
 #include "wtf/MainThread.h"
 #include "wtf/PageAllocator.h"
+#include "wtf/Partitions.h"
 #include "wtf/PassOwnPtr.h"
 #if ENABLE(GC_PROFILING)
 #include "platform/TracedValue.h"
@@ -105,11 +106,6 @@ static String classOf(const void* object)
     return "unknown";
 }
 #endif
-
-static bool vTableInitialized(void* objectPointer)
-{
-    return !!(*reinterpret_cast<Address*>(objectPointer));
-}
 
 static size_t roundToOsPageSize(size_t size)
 {
@@ -581,6 +577,17 @@ void BaseHeap::prepareForSweep()
     m_firstUnsweptPage = m_firstPage;
     m_firstPage = nullptr;
 }
+
+#if defined(ADDRESS_SANITIZER)
+void BaseHeap::poisonUnmarkedObjects()
+{
+    // This method is called just before starting sweeping.
+    // Thus all dead objects are in the list of m_firstUnsweptPage.
+    for (BasePage* page = m_firstUnsweptPage; page; page = page->next()) {
+        page->poisonUnmarkedObjects();
+    }
+}
+#endif
 
 Address BaseHeap::lazySweep(size_t allocationSize, size_t gcInfoIndex)
 {
@@ -1149,6 +1156,7 @@ Address LargeObjectHeap::doAllocateLargeObjectPage(size_t allocationSize, size_t
 
 void LargeObjectHeap::freeLargeObjectPage(LargeObjectPage* object)
 {
+    ASAN_UNPOISON_MEMORY_REGION(object->payload(), object->payloadSize());
     object->heapObjectHeader()->finalize(object->payload(), object->payloadSize());
     Heap::decreaseAllocatedSpace(object->size());
 
@@ -1505,8 +1513,9 @@ void NormalPage::sweep()
             Address payload = header->payload();
             // For ASan we unpoison the specific object when calling the
             // finalizer and poison it again when done to allow the object's own
-            // finalizer to operate on the object, but not have other finalizers
-            // be allowed to access it.
+            // finalizer to operate on the object. Given all other unmarked
+            // objects are poisoned, ASan will detect an error if the finalizer
+            // touches any other on-heap object that die at the same GC cycle.
             ASAN_UNPOISON_MEMORY_REGION(payload, payloadSize);
             header->finalize(payload, payloadSize);
             // This memory will be added to the freelist. Maintain the invariant
@@ -1555,6 +1564,27 @@ void NormalPage::markUnmarkedObjectsDead()
     if (markedObjectSize)
         Heap::increaseMarkedObjectSize(markedObjectSize);
 }
+
+#if defined(ADDRESS_SANITIZER)
+void NormalPage::poisonUnmarkedObjects()
+{
+    for (Address headerAddress = payload(); headerAddress < payloadEnd();) {
+        HeapObjectHeader* header = reinterpret_cast<HeapObjectHeader*>(headerAddress);
+        ASSERT(header->size() < blinkPagePayloadSize());
+        // Check if a free list entry first since we cannot call
+        // isMarked on a free list entry.
+        if (header->isFree()) {
+            headerAddress += header->size();
+            continue;
+        }
+        header->checkHeader();
+        if (!header->isMarked()) {
+            ASAN_POISON_MEMORY_REGION(header->payload(), header->payloadSize());
+        }
+        headerAddress += header->size();
+    }
+}
+#endif
 
 void NormalPage::populateObjectStartBitMap()
 {
@@ -1641,6 +1671,17 @@ static void markPointer(Visitor* visitor, HeapObjectHeader* header)
 {
     const GCInfo* gcInfo = Heap::gcInfo(header->gcInfoIndex());
     if (gcInfo->hasVTable() && !vTableInitialized(header->payload())) {
+        // We hit this branch when a GC strikes before GarbageCollected<>'s
+        // constructor runs.
+        //
+        // class A : public GarbageCollected<A> { virtual void f() = 0; };
+        // class B : public A {
+        //   B() : A(foo()) { };
+        // };
+        //
+        // If foo() allocates something and triggers a GC, the vtable of A
+        // has not yet been initialized. In this case, we should mark the A
+        // object without tracing any member of the A object.
         visitor->markHeaderNoTracing(header);
         ASSERT(isUninitializedMemory(header->payload(), header->payloadSize()));
     } else {
@@ -1811,6 +1852,15 @@ void LargeObjectPage::markUnmarkedObjectsDead()
     }
 }
 
+#if defined(ADDRESS_SANITIZER)
+void LargeObjectPage::poisonUnmarkedObjects()
+{
+    HeapObjectHeader* header = heapObjectHeader();
+    if (!header->isMarked())
+        ASAN_POISON_MEMORY_REGION(header->payload(), header->payloadSize());
+}
+#endif
+
 void LargeObjectPage::checkAndMarkPointer(Visitor* visitor, Address address)
 {
     ASSERT(contains(address));
@@ -1947,206 +1997,6 @@ void Heap::flushHeapDoesNotContainCache()
     s_heapDoesNotContainCache->flush();
 }
 
-enum MarkingMode {
-    GlobalMarking,
-    ThreadLocalMarking,
-};
-
-template <MarkingMode Mode>
-class MarkingVisitor final : public Visitor, public MarkingVisitorImpl<MarkingVisitor<Mode>> {
-public:
-    using Impl = MarkingVisitorImpl<MarkingVisitor<Mode>>;
-    friend class MarkingVisitorImpl<MarkingVisitor<Mode>>;
-
-#if ENABLE(GC_PROFILING)
-    using LiveObjectSet = HashSet<uintptr_t>;
-    using LiveObjectMap = HashMap<String, LiveObjectSet>;
-    using ObjectGraph = HashMap<uintptr_t, std::pair<uintptr_t, String>>;
-#endif
-
-    MarkingVisitor()
-        : Visitor(Mode == GlobalMarking ? Visitor::GlobalMarkingVisitorType : Visitor::GenericVisitorType)
-    {
-    }
-
-    virtual void markHeader(HeapObjectHeader* header, TraceCallback callback) override
-    {
-        Impl::visitHeader(header, header->payload(), callback);
-    }
-
-    virtual void mark(const void* objectPointer, TraceCallback callback) override
-    {
-        Impl::mark(objectPointer, callback);
-    }
-
-    virtual void registerDelayedMarkNoTracing(const void* object) override
-    {
-        Impl::registerDelayedMarkNoTracing(object);
-    }
-
-    virtual void registerWeakMembers(const void* closure, const void* objectPointer, WeakPointerCallback callback) override
-    {
-        Impl::registerWeakMembers(closure, objectPointer, callback);
-    }
-
-    virtual void registerWeakTable(const void* closure, EphemeronCallback iterationCallback, EphemeronCallback iterationDoneCallback)
-    {
-        Impl::registerWeakTable(closure, iterationCallback, iterationDoneCallback);
-    }
-
-#if ENABLE(ASSERT)
-    virtual bool weakTableRegistered(const void* closure)
-    {
-        return Impl::weakTableRegistered(closure);
-    }
-#endif
-
-    virtual bool isMarked(const void* objectPointer) override
-    {
-        return Impl::isMarked(objectPointer);
-    }
-
-    virtual bool ensureMarked(const void* objectPointer) override
-    {
-        return Impl::ensureMarked(objectPointer);
-    }
-
-#if ENABLE(GC_PROFILING)
-    virtual void recordObjectGraphEdge(const void* objectPointer) override
-    {
-        MutexLocker locker(objectGraphMutex());
-        String className(classOf(objectPointer));
-        {
-            LiveObjectMap::AddResult result = currentlyLive().add(className, LiveObjectSet());
-            result.storedValue->value.add(reinterpret_cast<uintptr_t>(objectPointer));
-        }
-        ObjectGraph::AddResult result = objectGraph().add(reinterpret_cast<uintptr_t>(objectPointer), std::make_pair(reinterpret_cast<uintptr_t>(m_hostObject), m_hostName));
-        ASSERT(result.isNewEntry);
-        // fprintf(stderr, "%s[%p] -> %s[%p]\n", m_hostName.ascii().data(), m_hostObject, className.ascii().data(), objectPointer);
-    }
-
-    void reportStats()
-    {
-        fprintf(stderr, "\n---------- AFTER MARKING -------------------\n");
-        for (LiveObjectMap::iterator it = currentlyLive().begin(), end = currentlyLive().end(); it != end; ++it) {
-            fprintf(stderr, "%s %u", it->key.ascii().data(), it->value.size());
-
-            if (it->key == "blink::Document")
-                reportStillAlive(it->value, previouslyLive().get(it->key));
-
-            fprintf(stderr, "\n");
-        }
-
-        previouslyLive().swap(currentlyLive());
-        currentlyLive().clear();
-
-        for (uintptr_t object : objectsToFindPath()) {
-            dumpPathToObjectFromObjectGraph(objectGraph(), object);
-        }
-    }
-
-    static void reportStillAlive(LiveObjectSet current, LiveObjectSet previous)
-    {
-        int count = 0;
-
-        fprintf(stderr, " [previously %u]", previous.size());
-        for (uintptr_t object : current) {
-            if (previous.find(object) == previous.end())
-                continue;
-            count++;
-        }
-
-        if (!count)
-            return;
-
-        fprintf(stderr, " {survived 2GCs %d: ", count);
-        for (uintptr_t object : current) {
-            if (previous.find(object) == previous.end())
-                continue;
-            fprintf(stderr, "%ld", object);
-            if (--count)
-                fprintf(stderr, ", ");
-        }
-        ASSERT(!count);
-        fprintf(stderr, "}");
-    }
-
-    static void dumpPathToObjectFromObjectGraph(const ObjectGraph& graph, uintptr_t target)
-    {
-        ObjectGraph::const_iterator it = graph.find(target);
-        if (it == graph.end())
-            return;
-        fprintf(stderr, "Path to %lx of %s\n", target, classOf(reinterpret_cast<const void*>(target)).ascii().data());
-        while (it != graph.end()) {
-            fprintf(stderr, "<- %lx of %s\n", it->value.first, it->value.second.utf8().data());
-            it = graph.find(it->value.first);
-        }
-        fprintf(stderr, "\n");
-    }
-
-    static void dumpPathToObjectOnNextGC(void* p)
-    {
-        objectsToFindPath().add(reinterpret_cast<uintptr_t>(p));
-    }
-
-    static Mutex& objectGraphMutex()
-    {
-        AtomicallyInitializedStaticReference(Mutex, mutex, new Mutex);
-        return mutex;
-    }
-
-    static LiveObjectMap& previouslyLive()
-    {
-        DEFINE_STATIC_LOCAL(LiveObjectMap, map, ());
-        return map;
-    }
-
-    static LiveObjectMap& currentlyLive()
-    {
-        DEFINE_STATIC_LOCAL(LiveObjectMap, map, ());
-        return map;
-    }
-
-    static ObjectGraph& objectGraph()
-    {
-        DEFINE_STATIC_LOCAL(ObjectGraph, graph, ());
-        return graph;
-    }
-
-    static HashSet<uintptr_t>& objectsToFindPath()
-    {
-        DEFINE_STATIC_LOCAL(HashSet<uintptr_t>, set, ());
-        return set;
-    }
-#endif
-
-protected:
-    virtual void registerWeakCellWithCallback(void** cell, WeakPointerCallback callback) override
-    {
-        Impl::registerWeakCellWithCallback(cell, callback);
-    }
-
-    inline bool shouldMarkObject(const void* objectPointer)
-    {
-        if (Mode != ThreadLocalMarking)
-            return true;
-
-        BasePage* page = pageFromObject(objectPointer);
-        ASSERT(!page->orphaned());
-        // When doing a thread local GC, the marker checks if
-        // the object resides in another thread's heap. If it
-        // does, the object should not be marked & traced.
-        return page->terminating();
-    }
-
-#if ENABLE(ASSERT)
-    virtual void checkMarkingAllowed() override
-    {
-        ASSERT(ThreadState::current()->isInGC());
-    }
-#endif
-};
-
 void Heap::init()
 {
     ThreadState::init();
@@ -2155,16 +2005,13 @@ void Heap::init()
     s_weakCallbackStack = new CallbackStack();
     s_ephemeronStack = new CallbackStack();
     s_heapDoesNotContainCache = new HeapDoesNotContainCache();
-    s_markingVisitor = new MarkingVisitor<GlobalMarking>();
+    s_markingVisitor = new MarkingVisitor<Visitor::GlobalMarking>();
     s_freePagePool = new FreePagePool();
     s_orphanedPagePool = new OrphanedPagePool();
     s_allocatedObjectSize = 0;
     s_allocatedSpace = 0;
     s_markedObjectSize = 0;
-
-    // Use 8ms as initial estimated marking time.
-    // 8ms is long enough for low-end mobile devices to mark common real-world object graphs.
-    s_markingTimeInLastGC = 0.008;
+    s_estimatedMarkingTimePerByte = 0.0;
 
     GCInfoTable::init();
 }
@@ -2261,7 +2108,7 @@ const GCInfo* Heap::findGCInfo(Address address)
 #if ENABLE(GC_PROFILING)
 void Heap::dumpPathToObjectOnNextGC(void* p)
 {
-    static_cast<MarkingVisitor<GlobalMarking>*>(s_markingVisitor)->dumpPathToObjectOnNextGC(p);
+    static_cast<MarkingVisitor<Visitor::GlobalMarking>*>(s_markingVisitor)->dumpPathToObjectOnNextGC(p);
 }
 
 String Heap::createBacktraceString()
@@ -2409,7 +2256,7 @@ const char* Heap::gcReasonString(GCReason reason)
         STRINGIFY_REASON(IdleGC);
         STRINGIFY_REASON(PreciseGC);
         STRINGIFY_REASON(ConservativeGC);
-        STRINGIFY_REASON(ForcedGCForTesting);
+        STRINGIFY_REASON(ForcedGC);
 #undef STRINGIFY_REASON
     case NumberOfGCReason: ASSERT_NOT_REACHED();
     }
@@ -2419,6 +2266,8 @@ const char* Heap::gcReasonString(GCReason reason)
 void Heap::collectGarbage(ThreadState::StackState stackState, ThreadState::GCType gcType, GCReason reason)
 {
     ThreadState* state = ThreadState::current();
+    RELEASE_ASSERT(!state->isInGC());
+    state->completeSweep();
     ThreadState::GCState originalGCState = state->gcState();
     state->setGCState(ThreadState::StoppingOtherThreads);
 
@@ -2427,7 +2276,8 @@ void Heap::collectGarbage(ThreadState::StackState stackState, ThreadState::GCTyp
     // the GC.
     if (!gcScope.allThreadsParked()) {
         // Restore the original GCState.
-        state->setGCState(originalGCState);
+        if (LIKELY(state->gcState() == ThreadState::StoppingOtherThreads))
+            state->setGCState(originalGCState);
         return;
     }
 
@@ -2442,7 +2292,7 @@ void Heap::collectGarbage(ThreadState::StackState stackState, ThreadState::GCTyp
     TRACE_EVENT_SCOPED_SAMPLING_STATE("blink_gc", "BlinkGC");
     double timeStamp = WTF::currentTimeMS();
 #if ENABLE(GC_PROFILING)
-    static_cast<MarkingVisitor<GlobalMarking>*>(s_markingVisitor)->objectGraph().clear();
+    static_cast<MarkingVisitor<Visitor::GlobalMarking>*>(s_markingVisitor)->objectGraph().clear();
 #endif
 
     // Disallow allocation during garbage collection (but not during the
@@ -2450,9 +2300,10 @@ void Heap::collectGarbage(ThreadState::StackState stackState, ThreadState::GCTyp
     ThreadState::NoAllocationScope noAllocationScope(state);
 
     preGC();
-    s_markingVisitor->configureEagerTraceLimit();
-    ASSERT(s_markingVisitor->canTraceEagerly());
 
+    StackFrameDepthScope stackDepthScope;
+
+    size_t totalObjectSize = Heap::allocatedObjectSize() + Heap::markedObjectSize();
     Heap::resetHeapCounters();
 
     // 1. Trace persistent roots.
@@ -2483,18 +2334,18 @@ void Heap::collectGarbage(ThreadState::StackState stackState, ThreadState::GCTyp
     postGC(gcType);
 
 #if ENABLE(GC_PROFILING)
-    static_cast<MarkingVisitor<GlobalMarking>*>(s_markingVisitor)->reportStats();
+    static_cast<MarkingVisitor<Visitor::GlobalMarking>*>(s_markingVisitor)->reportStats();
 #endif
 
     double markingTimeInMilliseconds = WTF::currentTimeMS() - timeStamp;
-    s_markingTimeInLastGC = markingTimeInMilliseconds / 1000;
+    s_estimatedMarkingTimePerByte = totalObjectSize ? (markingTimeInMilliseconds / 1000 / totalObjectSize) : 0;
 
-    if (Platform::current()) {
-        Platform::current()->histogramCustomCounts("BlinkGC.CollectGarbage", markingTimeInMilliseconds, 0, 10 * 1000, 50);
-        Platform::current()->histogramCustomCounts("BlinkGC.TotalObjectSpace", Heap::allocatedObjectSize() / 1024, 0, 4 * 1024 * 1024, 50);
-        Platform::current()->histogramCustomCounts("BlinkGC.TotalAllocatedSpace", Heap::allocatedSpace() / 1024, 0, 4 * 1024 * 1024, 50);
-        Platform::current()->histogramEnumeration("BlinkGC.GCReason", reason, NumberOfGCReason);
-    }
+    Platform::current()->histogramCustomCounts("BlinkGC.CollectGarbage", markingTimeInMilliseconds, 0, 10 * 1000, 50);
+    Platform::current()->histogramCustomCounts("BlinkGC.TotalObjectSpace", Heap::allocatedObjectSize() / 1024, 0, 4 * 1024 * 1024, 50);
+    Platform::current()->histogramCustomCounts("BlinkGC.TotalAllocatedSpace", Heap::allocatedSpace() / 1024, 0, 4 * 1024 * 1024, 50);
+    Platform::current()->histogramEnumeration("BlinkGC.GCReason", reason, NumberOfGCReason);
+    Heap::reportMemoryUsageHistogram();
+    WTF::Partitions::reportMemoryUsageHistogram();
 
     if (state->isMainThread())
         ScriptForbiddenScope::exit();
@@ -2506,12 +2357,11 @@ void Heap::collectGarbageForTerminatingThread(ThreadState* state)
     // garbage collection since we don't want to allow a global GC at the
     // same time as a thread local GC.
     {
-        MarkingVisitor<ThreadLocalMarking> markingVisitor;
+        MarkingVisitor<Visitor::ThreadLocalMarking> markingVisitor;
         ThreadState::NoAllocationScope noAllocationScope(state);
 
         state->preGC();
-        s_markingVisitor->configureEagerTraceLimit();
-        ASSERT(s_markingVisitor->canTraceEagerly());
+        StackFrameDepthScope stackDepthScope;
 
         // 1. Trace the thread local persistent roots. For thread local GCs we
         // don't trace the stack (ie. no conservative scanning) since this is
@@ -2595,31 +2445,32 @@ void Heap::collectAllGarbage()
     // because the hierarchy was not completely moved to the heap and
     // some heap allocated objects own objects that contain persistents
     // pointing to other heap allocated objects.
-    for (int i = 0; i < 5; ++i)
-        collectGarbage(ThreadState::NoHeapPointersOnStack, ThreadState::GCWithSweep, ForcedGCForTesting);
+    size_t previousLiveObjects = 0;
+    for (int i = 0; i < 5; ++i) {
+        collectGarbage(ThreadState::NoHeapPointersOnStack, ThreadState::GCWithSweep, ForcedGC);
+        size_t liveObjects = Heap::markedObjectSize();
+        if (liveObjects == previousLiveObjects)
+            break;
+        previousLiveObjects = liveObjects;
+    }
 }
 
 double Heap::estimatedMarkingTime()
 {
     ASSERT(ThreadState::current()->isMainThread());
 
-    // Marking algorithm takes O(N_live_objs), so the next marking time can be estimated as:
-    //        ~             N_live_objs
-    // t_next = t_last * ------------------
-    //                    N_last_live_objs
-    // By estimating N_{,last}_live_objs ratio using object size ratio, we get:
-    //        ~           (Size_new_objs + Size_last_marked_objs) * Rate_alive
-    // t_next = t_last * ------------------------------------------------------
-    //                                     Size_last_marked_objs
+    // Use 8 ms as initial estimated marking time.
+    // 8 ms is long enough for low-end mobile devices to mark common
+    // real-world object graphs.
+    if (s_estimatedMarkingTimePerByte == 0)
+        return 0.008;
 
-    double estimatedObjectCountIncreaseRatio = 1.0;
-    if (Heap::markedObjectSize() > 0)
-        estimatedObjectCountIncreaseRatio = (Heap::allocatedObjectSize() + Heap::markedObjectSize()) * ThreadState::current()->collectionRate() / Heap::markedObjectSize();
-
-    return s_markingTimeInLastGC * estimatedObjectCountIncreaseRatio;
+    // Assuming that the collection rate of this GC will be mostly equal to
+    // the collection rate of the last GC, estimate the marking time of this GC.
+    return s_estimatedMarkingTimePerByte * (Heap::allocatedObjectSize() + Heap::markedObjectSize());
 }
 
-void Heap::reportMemoryUsage()
+void Heap::reportMemoryUsageHistogram()
 {
     static size_t supportedMaxSizeInMB = 4 * 1024;
     static size_t observedMaxSizeInMB = 0;
@@ -2634,8 +2485,7 @@ void Heap::reportMemoryUsage()
     if (sizeInMB > observedMaxSizeInMB) {
         // Send a UseCounter only when we see the highest memory usage
         // we've ever seen.
-        if (Platform::current())
-            Platform::current()->histogramEnumeration("BlinkGC.CommittedSize", sizeInMB, supportedMaxSizeInMB);
+        Platform::current()->histogramEnumeration("BlinkGC.CommittedSize", sizeInMB, supportedMaxSizeInMB);
         observedMaxSizeInMB = sizeInMB;
     }
 }
@@ -2652,116 +2502,6 @@ size_t Heap::objectPayloadSizeForTesting()
         state->setGCState(ThreadState::NoGCScheduled);
     }
     return objectPayloadSize;
-}
-
-void HeapAllocator::backingFree(void* address)
-{
-    if (!address)
-        return;
-
-    ThreadState* state = ThreadState::current();
-    if (state->sweepForbidden())
-        return;
-    ASSERT(!state->isInGC());
-
-    // Don't promptly free large objects because their page is never reused.
-    // Don't free backings allocated on other threads.
-    BasePage* page = pageFromObject(address);
-    if (page->isLargeObjectPage() || page->heap()->threadState() != state)
-        return;
-
-    HeapObjectHeader* header = HeapObjectHeader::fromPayload(address);
-    header->checkHeader();
-    NormalPageHeap* heap = static_cast<NormalPage*>(page)->heapForNormalPage();
-    state->promptlyFreed(header->gcInfoIndex());
-    heap->promptlyFreeObject(header);
-}
-
-void HeapAllocator::freeVectorBacking(void* address)
-{
-    backingFree(address);
-}
-
-void HeapAllocator::freeInlineVectorBacking(void* address)
-{
-    backingFree(address);
-}
-
-void HeapAllocator::freeHashTableBacking(void* address)
-{
-    backingFree(address);
-}
-
-bool HeapAllocator::backingExpand(void* address, size_t newSize)
-{
-    if (!address)
-        return false;
-
-    ThreadState* state = ThreadState::current();
-    if (state->sweepForbidden())
-        return false;
-    ASSERT(!state->isInGC());
-    ASSERT(state->isAllocationAllowed());
-
-    // FIXME: Support expand for large objects.
-    // Don't expand backings allocated on other threads.
-    BasePage* page = pageFromObject(address);
-    if (page->isLargeObjectPage() || page->heap()->threadState() != state)
-        return false;
-
-    HeapObjectHeader* header = HeapObjectHeader::fromPayload(address);
-    header->checkHeader();
-    NormalPageHeap* heap = static_cast<NormalPage*>(page)->heapForNormalPage();
-    bool succeed = heap->expandObject(header, newSize);
-    if (succeed)
-        state->allocationPointAdjusted(heap->heapIndex());
-    return succeed;
-}
-
-bool HeapAllocator::expandVectorBacking(void* address, size_t newSize)
-{
-    return backingExpand(address, newSize);
-}
-
-bool HeapAllocator::expandInlineVectorBacking(void* address, size_t newSize)
-{
-    return backingExpand(address, newSize);
-}
-
-bool HeapAllocator::expandHashTableBacking(void* address, size_t newSize)
-{
-    return backingExpand(address, newSize);
-}
-
-void HeapAllocator::backingShrink(void* address, size_t quantizedCurrentSize, size_t quantizedShrunkSize)
-{
-    // We shrink the object only if the shrinking will make a non-small
-    // prompt-free block.
-    // FIXME: Optimize the threshold size.
-    if (quantizedCurrentSize <= quantizedShrunkSize + sizeof(HeapObjectHeader) + sizeof(void*) * 32)
-        return;
-
-    if (!address)
-        return;
-
-    ThreadState* state = ThreadState::current();
-    if (state->sweepForbidden())
-        return;
-    ASSERT(!state->isInGC());
-    ASSERT(state->isAllocationAllowed());
-
-    // FIXME: Support shrink for large objects.
-    // Don't shrink backings allocated on other threads.
-    BasePage* page = pageFromObject(address);
-    if (page->isLargeObjectPage() || page->heap()->threadState() != state)
-        return;
-
-    HeapObjectHeader* header = HeapObjectHeader::fromPayload(address);
-    header->checkHeader();
-    NormalPageHeap* heap = static_cast<NormalPage*>(page)->heapForNormalPage();
-    bool succeed = heap->shrinkObject(header, quantizedShrunkSize);
-    if (succeed)
-        state->allocationPointAdjusted(heap->heapIndex());
 }
 
 BasePage* Heap::lookup(Address address)
@@ -2861,24 +2601,7 @@ void Heap::resetHeapCounters()
 
     s_allocatedObjectSize = 0;
     s_markedObjectSize = 0;
-
-    // Similarly, reset the amount of externally allocated memory.
-    s_externallyAllocatedBytes = 0;
-    s_externallyAllocatedBytesAlive = 0;
-
-    s_requestedUrgentGC = false;
-}
-
-void Heap::requestUrgentGC()
-{
-    // The urgent-gc flag will be considered the next time an out-of-line
-    // allocation is made. Bump allocations from the current block will
-    // go ahead until it can no longer service an allocation request.
-    //
-    // FIXME: if that delays urgently needed GCs for too long, consider
-    // flushing out per-heap "allocation points" to trigger the GC
-    // right away.
-    releaseStore(&s_requestedUrgentGC, 1);
+    s_externalObjectSizeAtLastGC = WTF::Partitions::totalSizeOfCommittedPages();
 }
 
 Visitor* Heap::s_markingVisitor;
@@ -2895,10 +2618,10 @@ Heap::RegionTree* Heap::s_regionTree = nullptr;
 size_t Heap::s_allocatedObjectSize = 0;
 size_t Heap::s_allocatedSpace = 0;
 size_t Heap::s_markedObjectSize = 0;
-
-size_t Heap::s_externallyAllocatedBytes = 0;
-size_t Heap::s_externallyAllocatedBytesAlive = 0;
-unsigned Heap::s_requestedUrgentGC = false;
-double Heap::s_markingTimeInLastGC = 0.0;
+// We don't want to use 0 KB for the initial value because it may end up
+// triggering the first GC of some thread too prematurely.
+size_t Heap::s_estimatedLiveObjectSize = 512 * 1024;
+size_t Heap::s_externalObjectSizeAtLastGC = 0;
+double Heap::s_estimatedMarkingTimePerByte = 0.0;
 
 } // namespace blink

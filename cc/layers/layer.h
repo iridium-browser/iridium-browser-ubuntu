@@ -55,7 +55,6 @@ class Animation;
 class AnimationDelegate;
 struct AnimationEvent;
 class CopyOutputRequest;
-class LayerAnimationDelegate;
 class LayerAnimationEventObserver;
 class LayerClient;
 class LayerImpl;
@@ -477,15 +476,24 @@ class CC_EXPORT Layer : public base::RefCounted<Layer>,
   void Set3dSortingContextId(int id);
   int sorting_context_id() const { return sorting_context_id_; }
 
-  void set_transform_tree_index(int index) { transform_tree_index_ = index; }
-  void set_clip_tree_index(int index) { clip_tree_index_ = index; }
-  void set_opacity_tree_index(int index) { opacity_tree_index_ = index; }
-  int clip_tree_index() const { return clip_tree_index_; }
-  int transform_tree_index() const { return transform_tree_index_; }
-  int opacity_tree_index() const { return opacity_tree_index_; }
+  void set_property_tree_sequence_number(int sequence_number) {
+    property_tree_sequence_number_ = sequence_number;
+  }
+
+  void SetTransformTreeIndex(int index);
+  int transform_tree_index() const;
+
+  void SetClipTreeIndex(int index);
+  int clip_tree_index() const;
+
+  void SetOpacityTreeIndex(int index);
+  int opacity_tree_index() const;
 
   void set_offset_to_transform_parent(gfx::Vector2dF offset) {
+    if (offset_to_transform_parent_ == offset)
+      return;
     offset_to_transform_parent_ = offset;
+    SetNeedsPushProperties();
   }
   gfx::Vector2dF offset_to_transform_parent() const {
     return offset_to_transform_parent_;
@@ -501,17 +509,18 @@ class CC_EXPORT Layer : public base::RefCounted<Layer>,
     return visible_rect_from_property_trees_;
   }
   void set_visible_rect_from_property_trees(const gfx::Rect& rect) {
+    // No push properties here, as this acts like a draw property.
     visible_rect_from_property_trees_ = rect;
   }
 
-  gfx::Transform screen_space_transform_from_property_trees(
-      const TransformTree& tree) const;
-  gfx::Transform draw_transform_from_property_trees(
-      const TransformTree& tree) const;
-  float DrawOpacityFromPropertyTrees(const OpacityTree& tree) const;
-
   void set_should_flatten_transform_from_property_tree(bool should_flatten) {
+    if (should_flatten_transform_from_property_tree_ == should_flatten)
+      return;
     should_flatten_transform_from_property_tree_ = should_flatten;
+    SetNeedsPushProperties();
+  }
+  bool should_flatten_transform_from_property_tree() const {
+    return should_flatten_transform_from_property_tree_;
   }
 
   // TODO(vollick): These values are temporary and will be removed as soon as
@@ -528,7 +537,27 @@ class CC_EXPORT Layer : public base::RefCounted<Layer>,
   // Sets new frame timing requests for this layer.
   void SetFrameTimingRequests(const std::vector<FrameTimingRequest>& requests);
 
+  // Accessor for unit tests
+  const std::vector<FrameTimingRequest>& FrameTimingRequests() const {
+    return frame_timing_requests_;
+  }
+
   void DidBeginTracing();
+  void set_num_layer_or_descandant_with_copy_request(
+      int num_layer_or_descendants_with_copy_request) {
+    num_layer_or_descendants_with_copy_request_ =
+        num_layer_or_descendants_with_copy_request;
+  }
+
+  void set_num_layer_or_descandant_with_input_handler(
+      int num_layer_or_descendants_with_input_handler) {
+    num_layer_or_descendants_with_input_handler_ =
+        num_layer_or_descendants_with_input_handler;
+  }
+
+  int num_layer_or_descendants_with_input_handler() {
+    return num_layer_or_descendants_with_input_handler_;
+  }
 
  protected:
   friend class LayerImpl;
@@ -547,6 +576,9 @@ class CC_EXPORT Layer : public base::RefCounted<Layer>,
   // knows immediately that a commit is required.  This implies SetNeedsUpdate
   // as well as SetNeedsPushProperties to push that property.
   void SetNeedsCommit();
+  // This is identical to SetNeedsCommit, but the former requests a rebuild of
+  // the property trees.
+  void SetNeedsCommitNoRebuild();
   // Called when there's been a change in layer structure.  Implies both
   // SetNeedsUpdate and SetNeedsCommit, but not SetNeedsPushProperties.
   void SetNeedsFullTreeSync();
@@ -642,6 +674,13 @@ class CC_EXPORT Layer : public base::RefCounted<Layer>,
   // children.
   void RemoveFromClipTree();
 
+  // When we detach or attach layer to new LayerTreeHost, all property trees'
+  // indices becomes invalid.
+  void InvalidatePropertyTreesIndices();
+
+  void UpdateNumCopyRequestsForSubtree(bool add);
+  void UpdateNumInputHandlersForSubtree(bool add);
+
   LayerList children_;
   Layer* parent_;
 
@@ -665,6 +704,9 @@ class CC_EXPORT Layer : public base::RefCounted<Layer>,
   int transform_tree_index_;
   int opacity_tree_index_;
   int clip_tree_index_;
+  int property_tree_sequence_number_;
+  int num_layer_or_descendants_with_copy_request_;
+  int num_layer_or_descendants_with_input_handler_;
   gfx::Vector2dF offset_to_transform_parent_;
   bool should_flatten_transform_from_property_tree_ : 1;
   bool should_scroll_on_main_thread_ : 1;

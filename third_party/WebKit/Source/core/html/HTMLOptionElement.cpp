@@ -68,7 +68,7 @@ HTMLOptionElement::~HTMLOptionElement()
 PassRefPtrWillBeRawPtr<HTMLOptionElement> HTMLOptionElement::create(Document& document)
 {
     RefPtrWillBeRawPtr<HTMLOptionElement> option = adoptRefWillBeNoop(new HTMLOptionElement(document));
-    option->ensureClosedShadowRoot();
+    option->ensureUserAgentShadowRoot();
     return option.release();
 }
 
@@ -76,7 +76,7 @@ PassRefPtrWillBeRawPtr<HTMLOptionElement> HTMLOptionElement::createForJSConstruc
     bool defaultSelected, bool selected, ExceptionState& exceptionState)
 {
     RefPtrWillBeRawPtr<HTMLOptionElement> element = adoptRefWillBeNoop(new HTMLOptionElement(document));
-    element->ensureClosedShadowRoot();
+    element->ensureUserAgentShadowRoot();
     element->appendChild(Text::create(document, data.isNull() ? "" : data), exceptionState);
     if (exceptionState.hadException())
         return nullptr;
@@ -204,8 +204,8 @@ void HTMLOptionElement::parseAttribute(const QualifiedName& name, const AtomicSt
         if (oldDisabled != m_disabled) {
             pseudoStateChanged(CSSSelector::PseudoDisabled);
             pseudoStateChanged(CSSSelector::PseudoEnabled);
-            if (layoutObject() && layoutObject()->style()->hasAppearance())
-                LayoutTheme::theme().stateChanged(layoutObject(), EnabledControlState);
+            if (layoutObject())
+                LayoutTheme::theme().controlStateChanged(*layoutObject(), EnabledControlState);
         }
     } else if (name == selectedAttr) {
         if (bool willBeSelected = !value.isNull())
@@ -317,7 +317,7 @@ void HTMLOptionElement::updateNonComputedStyle()
 {
     m_style = originalStyleForLayoutObject();
     if (HTMLSelectElement* select = ownerSelectElement())
-        select->updateListOnRenderer();
+        select->updateListOnLayoutObject();
 }
 
 ComputedStyle* HTMLOptionElement::nonLayoutObjectComputedStyle() const
@@ -338,8 +338,8 @@ void HTMLOptionElement::didRecalcStyle(StyleRecalcChange change)
 
     // FIXME: We ask our owner select to repaint regardless of which property changed.
     if (HTMLSelectElement* select = ownerSelectElement()) {
-        if (LayoutObject* renderer = select->layoutObject())
-            renderer->setShouldDoFullPaintInvalidation();
+        if (LayoutObject* layoutObject = select->layoutObject())
+            layoutObject->setShouldDoFullPaintInvalidation();
     }
 }
 
@@ -406,14 +406,14 @@ HTMLFormElement* HTMLOptionElement::form() const
     return nullptr;
 }
 
-void HTMLOptionElement::didAddClosedShadowRoot(ShadowRoot& root)
+void HTMLOptionElement::didAddUserAgentShadowRoot(ShadowRoot& root)
 {
     updateLabel();
 }
 
 void HTMLOptionElement::updateLabel()
 {
-    if (ShadowRoot* root = closedShadowRoot())
+    if (ShadowRoot* root = userAgentShadowRoot())
         root->setTextContent(text());
 }
 

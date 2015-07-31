@@ -5,14 +5,12 @@
 #include "media/midi/usb_midi_input_stream.h"
 
 #include <string.h>
-#include <map>
-#include <vector>
 
 #include "base/logging.h"
 #include "media/midi/usb_midi_device.h"
-#include "media/midi/usb_midi_jack.h"
 
 namespace media {
+namespace midi {
 
 UsbMidiInputStream::JackUniqueKey::JackUniqueKey(UsbMidiDevice* device,
                                                  int endpoint_number,
@@ -90,4 +88,5 @@ void UsbMidiInputStream::ProcessOnePacket(UsbMidiDevice* device,
     delegate_->OnReceivedData(it->second, &packet[1], packet_size, time);
 }
 
+}  // namespace midi
 }  // namespace media

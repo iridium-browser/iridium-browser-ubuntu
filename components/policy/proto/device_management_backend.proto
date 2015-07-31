@@ -350,6 +350,18 @@ message PolicyData {
   // Indicates the state that the device should be in.
   optional DeviceState device_state = 17;
 
+  // The object source which hosts command queue objects within the
+  // invalidation service. This value is combined with
+  // command_invalidation_name to form the object ID used to
+  // register for invalidations to the command queue.
+  optional int32 command_invalidation_source = 18;
+
+  // The name which uniquely identifies this device’s queue within
+  // the invalidation service object source. This value is combined
+  // with command_invalidation_source to form the object ID used to
+  // register for invalidations to the command queue.
+  optional bytes command_invalidation_name = 19;
+
   // The free-text location info the admin enters to associate the device
   // with a location.
   optional string annotated_location = 20;
@@ -425,6 +437,9 @@ message RemoteCommand {
 
     // Reboot the device.
     DEVICE_REBOOT = 0;
+
+    // Take a screenshot.
+    DEVICE_SCREENSHOT = 1;
   }
 
   // The command type.
@@ -433,12 +448,12 @@ message RemoteCommand {
   // An opaque unique identifier for the command.
   optional int64 unique_id = 2;
 
-  // The time at which the command was issued, in milliseconds.
-  optional int64 timestamp = 3;
+  // The age of the command (in milliseconds) when it is sent from server to
+  // client, defined as current_server_time - command_generated_time.
+  optional int64 age_of_command = 3;
 
-  // Extra parameters for this command, might be a serialization of another
-  // protobuf.
-  optional bytes payload = 4;
+  // Extra parameters for this command, expected to be a JSON string.
+  optional string payload = 4;
 }
 
 // This protobuf defines the execution result of a single remote command
@@ -461,9 +476,9 @@ message RemoteCommandResult {
   // RESULT_SUCCESS.
   optional int64 timestamp = 3;
 
-  // Extra information sent to server as result of execution, might be a
-  // serialization of another protobuf.
-  optional bytes payload = 4;
+  // Extra information sent to server as result of execution, expected to be a
+  // JSON string.
+  optional string payload = 4;
 }
 
 message DeviceRemoteCommandRequest {
@@ -708,10 +723,10 @@ message DeviceStatusReportRequest {
 // Provides status information for an installed app/extension.
 message AppStatus {
   // ID of the installed app/extension
-  required string app_id = 1;
+  optional string app_id = 1;
 
   // Currently installed version of the app.
-  required string extension_version = 2;
+  optional string extension_version = 2;
 
   // Self-reported status summary (via chrome.reporting APIs)
   optional string status = 3;

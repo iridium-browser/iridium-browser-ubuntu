@@ -5,6 +5,15 @@
 #include "config.h"
 #include "modules/bluetooth/BluetoothDevice.h"
 
+#include "bindings/core/v8/CallbackPromiseAdapter.h"
+#include "bindings/core/v8/ScriptPromise.h"
+#include "bindings/core/v8/ScriptPromiseResolver.h"
+#include "core/dom/DOMException.h"
+#include "core/dom/ExceptionCode.h"
+#include "modules/bluetooth/BluetoothError.h"
+#include "modules/bluetooth/BluetoothGATTRemoteServer.h"
+#include "public/platform/Platform.h"
+#include "public/platform/modules/bluetooth/WebBluetooth.h"
 #include "wtf/OwnPtr.h"
 
 namespace blink {
@@ -65,26 +74,28 @@ unsigned BluetoothDevice::productVersion(bool& isNull)
     return m_webDevice.productVersion;
 }
 
-bool BluetoothDevice::paired(bool& isNull)
+bool BluetoothDevice::paired()
 {
-    isNull = false;
     return m_webDevice.paired;
 }
 
-bool BluetoothDevice::connected(bool& isNull)
+Vector<String> BluetoothDevice::uuids()
 {
-    isNull = false;
-    return m_webDevice.connected;
-}
-
-Vector<String> BluetoothDevice::uuids(bool& isNull)
-{
-    isNull = false;
     Vector<String> uuids(m_webDevice.uuids.size());
     for (size_t i = 0; i < m_webDevice.uuids.size(); ++i)
         uuids[i] = m_webDevice.uuids[i];
     return uuids;
 }
 
-} // namespace blink
+ScriptPromise BluetoothDevice::connectGATT(ScriptState* scriptState)
+{
+    WebBluetooth* webbluetooth = Platform::current()->bluetooth();
+    if (!webbluetooth)
+        return ScriptPromise::rejectWithDOMException(scriptState, DOMException::create(NotSupportedError));
+    RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
+    ScriptPromise promise = resolver->promise();
+    webbluetooth->connectGATT(instanceID(), new CallbackPromiseAdapter<BluetoothGATTRemoteServer, BluetoothError>(resolver));
+    return promise;
+}
 
+} // namespace blink

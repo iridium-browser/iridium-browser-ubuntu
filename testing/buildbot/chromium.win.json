@@ -99,6 +99,9 @@
         "test": "gfx_unittests"
       },
       {
+        "test": "gl_unittests"
+      },
+      {
         "test": "google_apis_unittests"
       },
       {
@@ -128,6 +131,12 @@
           "can_use_on_swarming_builders": true
         },
         "test": "media_unittests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "midi_unittests"
       },
       {
         "test": "mojo_common_unittests"
@@ -211,16 +220,7 @@
         "test": "wm_unittests"
       }
     ],
-    "scripts": [
-      {
-        "name": "telemetry_unittests",
-        "script": "telemetry_unittests.py"
-      },
-      {
-        "name": "telemetry_perf_unittests",
-        "script": "telemetry_perf_unittests.py"
-      }
-    ]
+    "scripts": []
   },
   "Win 7 Tests x64 (1)": {
     "gtest_tests": [
@@ -343,6 +343,9 @@
         "test": "gfx_unittests"
       },
       {
+        "test": "gl_unittests"
+      },
+      {
         "test": "google_apis_unittests"
       },
       {
@@ -378,6 +381,12 @@
       },
       {
         "test": "message_center_unittests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "midi_unittests"
       },
       {
         "test": "mojo_common_unittests"
@@ -473,6 +482,122 @@
       {
         "name": "nacl_integration",
         "script": "nacl_integration.py"
+      }
+    ]
+  },
+  "Win x64 GN": {
+    "additional_compile_targets": [
+      "accessibility_unittests",
+      "app_list_unittests",
+      "app_shell_unittests",
+      "ash_unittests",
+      "aura_unittests",
+      "cacheinvalidation_unittests",
+      "cast_unittests",
+      "cc_unittests",
+      "chrome",
+      "chrome_elf_unittests",
+      "chromedriver_unittests",
+      "components_browsertests",
+      "components_unittests",
+      "compositor_unittests",
+      "content_browsertests",
+      "content_unittests",
+      "courgette_unittests",
+      "crypto_unittests",
+      "device_unittests",
+      "events_unittests",
+      "extensions_browsertests",
+      "extensions_unittests",
+      "gcm_unit_tests",
+      "gfx_unittests",
+      "gl_unittests",
+      "google_apis_unittests",
+      "gpu_unittests",
+      "interactive_ui_tests",
+      "ipc_mojo_unittests",
+      "ipc_tests",
+      "jingle_unittests",
+      "keyboard_unittests",
+      "mandoline:all",
+      "media_unittests",
+      "message_center_unittests",
+      "ppapi_unittests",
+      "printing_unittests",
+      "sbox_integration_tests",
+      "sbox_unittests",
+      "sbox_validation_tests",
+      "skia_unittests",
+      "sql_unittests",
+      "sync_integration_tests",
+      "sync_unit_tests",
+      "ui_base_unittests",
+      "ui_touch_selection_unittests",
+      "url_unittests",
+      "views_unittests",
+      "wm_unittests"
+    ],
+    "gtest_tests": [
+      {
+        "test": "base_unittests"
+      }
+    ]
+  },
+  "Win x64 GN (dbg)": {
+    "additional_compile_targets": [
+      "accessibility_unittests",
+      "app_list_unittests",
+      "app_shell_unittests",
+      "ash_unittests",
+      "aura_unittests",
+      "cacheinvalidation_unittests",
+      "cast_unittests",
+      "cc_unittests",
+      "chrome",
+      "chrome_elf_unittests",
+      "chromedriver_unittests",
+      "components_browsertests",
+      "components_unittests",
+      "compositor_unittests",
+      "content_browsertests",
+      "content_unittests",
+      "courgette_unittests",
+      "crypto_unittests",
+      "device_unittests",
+      "events_unittests",
+      "extensions_browsertests",
+      "extensions_unittests",
+      "gcm_unit_tests",
+      "gfx_unittests",
+      "gl_unittests",
+      "google_apis_unittests",
+      "gpu_unittests",
+      "interactive_ui_tests",
+      "ipc_mojo_unittests",
+      "ipc_tests",
+      "jingle_unittests",
+      "keyboard_unittests",
+      "mandoline:all",
+      "media_unittests",
+      "message_center_unittests",
+      "ppapi_unittests",
+      "printing_unittests",
+      "sbox_integration_tests",
+      "sbox_unittests",
+      "sbox_validation_tests",
+      "skia_unittests",
+      "sql_unittests",
+      "sync_integration_tests",
+      "sync_unit_tests",
+      "ui_base_unittests",
+      "ui_touch_selection_unittests",
+      "url_unittests",
+      "views_unittests",
+      "wm_unittests"
+    ],
+    "gtest_tests": [
+      {
+        "test": "base_unittests"
       }
     ]
   },
@@ -597,6 +722,9 @@
         "test": "gfx_unittests"
       },
       {
+        "test": "gl_unittests"
+      },
+      {
         "test": "google_apis_unittests"
       },
       {
@@ -632,6 +760,12 @@
       },
       {
         "test": "message_center_unittests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "midi_unittests"
       },
       {
         "test": "mojo_common_unittests"
@@ -862,6 +996,12 @@
         "test": "media_unittests"
       },
       {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "midi_unittests"
+      },
+      {
         "test": "mojo_common_unittests"
       },
       {
@@ -983,6 +1123,122 @@
       }
     ]
   },
+  "Win8 GN": {
+    "additional_compile_targets": [
+      "accessibility_unittests",
+      "app_list_unittests",
+      "app_shell_unittests",
+      "ash_unittests",
+      "aura_unittests",
+      "cacheinvalidation_unittests",
+      "cast_unittests",
+      "cc_unittests",
+      "chrome",
+      "chrome_elf_unittests",
+      "chromedriver_unittests",
+      "components_browsertests",
+      "components_unittests",
+      "compositor_unittests",
+      "content_browsertests",
+      "content_unittests",
+      "courgette_unittests",
+      "crypto_unittests",
+      "device_unittests",
+      "events_unittests",
+      "extensions_browsertests",
+      "extensions_unittests",
+      "gcm_unit_tests",
+      "gfx_unittests",
+      "gl_unittests",
+      "google_apis_unittests",
+      "gpu_unittests",
+      "interactive_ui_tests",
+      "ipc_mojo_unittests",
+      "ipc_tests",
+      "jingle_unittests",
+      "keyboard_unittests",
+      "mandoline:all",
+      "media_unittests",
+      "message_center_unittests",
+      "ppapi_unittests",
+      "printing_unittests",
+      "sbox_integration_tests",
+      "sbox_unittests",
+      "sbox_validation_tests",
+      "skia_unittests",
+      "sql_unittests",
+      "sync_integration_tests",
+      "sync_unit_tests",
+      "ui_base_unittests",
+      "ui_touch_selection_unittests",
+      "url_unittests",
+      "views_unittests",
+      "wm_unittests"
+    ],
+    "gtest_tests": [
+      {
+        "test": "base_unittests"
+      }
+    ]
+  },
+  "Win8 GN (dbg)": {
+    "additional_compile_targets": [
+      "accessibility_unittests",
+      "app_list_unittests",
+      "app_shell_unittests",
+      "ash_unittests",
+      "aura_unittests",
+      "cacheinvalidation_unittests",
+      "cast_unittests",
+      "cc_unittests",
+      "chrome",
+      "chrome_elf_unittests",
+      "chromedriver_unittests",
+      "components_browsertests",
+      "components_unittests",
+      "compositor_unittests",
+      "content_browsertests",
+      "content_unittests",
+      "courgette_unittests",
+      "crypto_unittests",
+      "device_unittests",
+      "events_unittests",
+      "extensions_browsertests",
+      "extensions_unittests",
+      "gcm_unit_tests",
+      "gfx_unittests",
+      "gl_unittests",
+      "google_apis_unittests",
+      "gpu_unittests",
+      "interactive_ui_tests",
+      "ipc_mojo_unittests",
+      "ipc_tests",
+      "jingle_unittests",
+      "keyboard_unittests",
+      "mandoline:all",
+      "media_unittests",
+      "message_center_unittests",
+      "ppapi_unittests",
+      "printing_unittests",
+      "sbox_integration_tests",
+      "sbox_unittests",
+      "sbox_validation_tests",
+      "skia_unittests",
+      "sql_unittests",
+      "sync_integration_tests",
+      "sync_unit_tests",
+      "ui_base_unittests",
+      "ui_touch_selection_unittests",
+      "url_unittests",
+      "views_unittests",
+      "wm_unittests"
+    ],
+    "gtest_tests": [
+      {
+        "test": "base_unittests"
+      }
+    ]
+  },
   "XP Tests (1)": {
     "gtest_tests": [
       {
@@ -1089,6 +1345,9 @@
         "test": "gfx_unittests"
       },
       {
+        "test": "gl_unittests"
+      },
+      {
         "test": "google_apis_unittests"
       },
       {
@@ -1121,6 +1380,12 @@
           "can_use_on_swarming_builders": true
         },
         "test": "media_unittests"
+      },
+      {
+        "swarming": {
+          "can_use_on_swarming_builders": true
+        },
+        "test": "midi_unittests"
       },
       {
         "test": "nacl_loader_unittests"

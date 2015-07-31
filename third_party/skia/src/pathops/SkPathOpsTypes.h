@@ -24,22 +24,23 @@ enum SkPathOpsMask {
 
 class SkOpCoincidence;
 class SkOpContour;
+class SkOpContourHead;
 
 class SkOpGlobalState {
 public:
-    SkOpGlobalState(SkOpCoincidence* coincidence  PATH_OPS_DEBUG_PARAMS(SkOpContour* head))
+    SkOpGlobalState(SkOpCoincidence* coincidence, SkOpContourHead* head)
         : fCoincidence(coincidence)
+        , fContourHead(head)
         , fWindingFailed(false)
         , fAngleCoincidence(false)
 #if DEBUG_VALIDATE
         , fPhase(kIntersecting)
 #endif
-        PATH_OPS_DEBUG_PARAMS(fHead(head))
-        PATH_OPS_DEBUG_PARAMS(fAngleID(0))
-        PATH_OPS_DEBUG_PARAMS(fContourID(0))
-        PATH_OPS_DEBUG_PARAMS(fPtTID(0))
-        PATH_OPS_DEBUG_PARAMS(fSegmentID(0))
-        PATH_OPS_DEBUG_PARAMS(fSpanID(0)) {
+        SkDEBUGPARAMS(fAngleID(0))
+        SkDEBUGPARAMS(fContourID(0))
+        SkDEBUGPARAMS(fPtTID(0))
+        SkDEBUGPARAMS(fSegmentID(0))
+        SkDEBUGPARAMS(fSpanID(0)) {
     }
 
 #if DEBUG_VALIDATE
@@ -49,12 +50,20 @@ public:
     };
 #endif
 
+    enum {
+        kMaxWindingTries = 10
+    };
+
     bool angleCoincidence() {
         return fAngleCoincidence;
     }
 
     SkOpCoincidence* coincidence() {
         return fCoincidence;
+    }
+
+    SkOpContourHead* contourHead() {
+        return fContourHead;
     }
 
 #ifdef SK_DEBUG
@@ -94,6 +103,10 @@ public:
         fAngleCoincidence = true;
     }
     
+    void setContourHead(SkOpContourHead* contourHead) {
+        fContourHead = contourHead;
+    }
+
 #if DEBUG_VALIDATE
     void setPhase(Phase phase) {
         SkASSERT(fPhase != phase);
@@ -112,13 +125,13 @@ public:
 
 private:
     SkOpCoincidence* fCoincidence;
+    SkOpContourHead* fContourHead;
     bool fWindingFailed;
     bool fAngleCoincidence;
 #if DEBUG_VALIDATE
     Phase fPhase;
 #endif
 #ifdef SK_DEBUG
-    SkOpContour* fHead;
     int fAngleID;
     int fContourID;
     int fPtTID;
@@ -438,6 +451,7 @@ struct SkDPoint;
 struct SkDVector;
 struct SkDLine;
 struct SkDQuad;
+struct SkDConic;
 struct SkDCubic;
 struct SkDRect;
 
@@ -456,11 +470,12 @@ inline SkPath::Verb SkPathOpsPointsToVerb(int points) {
 }
 
 inline int SkPathOpsVerbToPoints(SkPath::Verb verb) {
-    int points = (int) verb - ((int) verb >> 2);
+    int points = (int) verb - (((int) verb + 1) >> 2);
 #ifdef SK_DEBUG
     switch (verb) {
         case SkPath::kLine_Verb: SkASSERT(1 == points); break;
         case SkPath::kQuad_Verb: SkASSERT(2 == points); break;
+        case SkPath::kConic_Verb: SkASSERT(2 == points); break;
         case SkPath::kCubic_Verb: SkASSERT(3 == points); break;
         default: SkDEBUGFAIL("should not get here");
     }

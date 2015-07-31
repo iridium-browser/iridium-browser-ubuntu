@@ -21,8 +21,6 @@ source_set("audio_coding") {
     "main/acm2/acm_codec_database.cc",
     "main/acm2/acm_codec_database.h",
     "main/acm2/acm_common_defs.h",
-    "main/acm2/acm_generic_codec.cc",
-    "main/acm2/acm_generic_codec.h",
     "main/acm2/acm_receiver.cc",
     "main/acm2/acm_receiver.h",
     "main/acm2/acm_resampler.cc",
@@ -34,6 +32,8 @@ source_set("audio_coding") {
     "main/acm2/call_statistics.h",
     "main/acm2/codec_manager.cc",
     "main/acm2/codec_manager.h",
+    "main/acm2/codec_owner.cc",
+    "main/acm2/codec_owner.h",
     "main/acm2/initial_delay_manager.cc",
     "main/acm2/initial_delay_manager.h",
     "main/acm2/nack.cc",
@@ -50,12 +50,6 @@ source_set("audio_coding") {
     "../..:common_inherited_config",
     ":audio_coding_config",
   ]
-
-  if (is_clang) {
-    # Suppress warnings from Chrome's Clang plugins.
-    # See http://code.google.com/p/webrtc/issues/detail?id=163 for details.
-    configs -= [ "//build/config/clang:find_bad_constructs" ]
-  }
 
   if (is_win) {
     cflags = [
@@ -504,7 +498,9 @@ source_set("isacfix") {
     "codecs/isac/fix/source/lpc_tables.h",
     "codecs/isac/fix/source/pitch_estimator.c",
     "codecs/isac/fix/source/pitch_estimator.h",
+    "codecs/isac/fix/source/pitch_estimator_c.c",
     "codecs/isac/fix/source/pitch_filter.c",
+    "codecs/isac/fix/source/pitch_filter_c.c",
     "codecs/isac/fix/source/pitch_gain_tables.c",
     "codecs/isac/fix/source/pitch_gain_tables.h",
     "codecs/isac/fix/source/pitch_lag_tables.c",
@@ -534,6 +530,10 @@ source_set("isacfix") {
     "../../system_wrappers",
   ]
 
+  if (current_cpu == "arm64") {
+    deps += [ ":isac_neon" ]
+  }
+
   if (rtc_build_armv7_neon) {
     deps += [ ":isac_neon" ]
 
@@ -552,8 +552,9 @@ source_set("isacfix") {
       "codecs/isac/fix/source/lattice_armv7.S",
       "codecs/isac/fix/source/pitch_filter_armv6.S",
     ]
-  } else {
-    sources += [ "codecs/isac/fix/source/pitch_filter_c.c" ]
+    sources -= [
+      "codecs/isac/fix/source/pitch_filter_c.c",
+    ]
   }
 
   if (current_cpu == "mipsel") {
@@ -564,19 +565,23 @@ source_set("isacfix") {
       "codecs/isac/fix/source/pitch_estimator_mips.c",
       "codecs/isac/fix/source/transform_mips.c",
     ]
+    sources -= [
+      "codecs/isac/fix/source/pitch_estimator_c.c"
+    ]
     if (mips_dsp_rev > 0) {
-      sources += [ "codecs/isac/fix/source/filterbanks_mips.c" ]
+      sources += [
+        "codecs/isac/fix/source/filterbanks_mips.c"
+      ]
     }
     if (mips_dsp_rev > 1) {
       sources += [
         "codecs/isac/fix/source/lpc_masking_model_mips.c",
         "codecs/isac/fix/source/pitch_filter_mips.c",
       ]
-    } else {
-      sources += [ "codecs/isac/fix/source/pitch_filter_c.c" ]
+      sources -= [
+        "codecs/isac/fix/source/pitch_filter_c.c"
+      ]
     }
-  } else {
-    sources += [ "codecs/isac/fix/source/pitch_estimator_c.c" ]
   }
 
   if (!rtc_build_armv7_neon && current_cpu != "mipsel") {
@@ -584,20 +589,34 @@ source_set("isacfix") {
   }
 }
 
-if (rtc_build_armv7_neon) {
+if (rtc_build_armv7_neon || current_cpu == "arm64") {
   source_set("isac_neon") {
     sources = [
       "codecs/isac/fix/source/entropy_coding_neon.c",
-      "codecs/isac/fix/source/filterbanks_neon.S",
-      "codecs/isac/fix/source/filters_neon.S",
-      "codecs/isac/fix/source/lattice_neon.S",
-      "codecs/isac/fix/source/lpc_masking_model_neon.S",
-      "codecs/isac/fix/source/transform_neon.S",
+      "codecs/isac/fix/source/filters_neon.c",
+      "codecs/isac/fix/source/lattice_neon.c",
+      "codecs/isac/fix/source/transform_neon.c",
     ]
 
-    include_dirs = [
-      "../../..",
-    ]
+    if (rtc_build_armv7_neon) {
+      # Enable compilation for the ARM v7 Neon instruction set. This is needed
+      # since //build/config/arm.gni only enables Neon for iOS, not Android.
+      # This provides the same functionality as webrtc/build/arm_neon.gypi.
+      # TODO(kjellander): Investigate if this can be moved into webrtc.gni or
+      # //build/config/arm.gni instead, to reduce code duplication.
+      # Remove the -mfpu=vfpv3-d16 cflag.
+      configs -= [ "//build/config/compiler:compiler_arm_fpu" ]
+      cflags = [
+        "-mfpu=neon",
+      ]
+    }
+
+    if (current_cpu != "arm64" || !is_clang) {
+      # Disable AllpassFilter2FixDec16Neon function due to a clang bug.
+      # Refer more details at:
+      # https://code.google.com/p/webrtc/issues/detail?id=4567
+        sources += [ "codecs/isac/fix/source/filterbanks_neon.c", ]
+    }
 
     # Disable LTO in audio_processing_neon target due to compiler bug.
     if (rtc_use_lto) {
@@ -606,17 +625,6 @@ if (rtc_build_armv7_neon) {
         "-ffat-lto-objects",
       ]
     }
-
-    # Enable compilation for the ARM v7 Neon instruction set. This is needed
-    # since //build/config/arm.gni only enables Neon for iOS, not Android.
-    # This provides the same functionality as webrtc/build/arm_neon.gypi.
-    # TODO(kjellander): Investigate if this can be moved into webrtc.gni or
-    # //build/config/arm.gni instead, to reduce code duplication.
-    # Remove the -mfpu=vfpv3-d16 cflag.
-    configs -= [ "//build/config/compiler:compiler_arm_fpu" ]
-    cflags = [
-      "-mfpu=neon",
-    ]
 
     configs += [ "../..:common_config" ]
     public_configs = [ "../..:common_inherited_config" ]
@@ -762,12 +770,6 @@ source_set("neteq") {
     "../..:common_inherited_config",
     ":neteq_config",
   ]
-
-  if (is_clang) {
-    # Suppress warnings from Chrome's Clang plugins.
-    # See http://code.google.com/p/webrtc/issues/detail?id=163 for details.
-    configs -= [ "//build/config/clang:find_bad_constructs" ]
-  }
 
   deps = [
     ":audio_decoder_interface",

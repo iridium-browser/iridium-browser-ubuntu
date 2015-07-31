@@ -16,13 +16,15 @@
 #include "base/threading/thread.h"
 #include "cc/output/compositor_frame.h"
 #include "cc/output/output_surface.h"
-#include "cc/resources/task_graph_runner.h"
+#include "cc/raster/task_graph_runner.h"
 #include "cc/surfaces/onscreen_display_client.h"
 #include "cc/surfaces/surface_display_output_surface.h"
 #include "cc/surfaces/surface_manager.h"
 #include "content/browser/compositor/browser_compositor_output_surface.h"
+#include "content/browser/compositor/browser_compositor_overlay_candidate_validator.h"
 #include "content/browser/compositor/gpu_browser_compositor_output_surface.h"
 #include "content/browser/compositor/gpu_surfaceless_browser_compositor_output_surface.h"
+#include "content/browser/compositor/offscreen_browser_compositor_output_surface.h"
 #include "content/browser/compositor/reflector_impl.h"
 #include "content/browser/compositor/software_browser_compositor_output_surface.h"
 #include "content/browser/gpu/browser_gpu_channel_host_factory.h"
@@ -51,7 +53,7 @@
 #if defined(OS_WIN)
 #include "content/browser/compositor/software_output_device_win.h"
 #elif defined(USE_OZONE)
-#include "content/browser/compositor/overlay_candidate_validator_ozone.h"
+#include "content/browser/compositor/browser_compositor_overlay_candidate_validator_ozone.h"
 #include "content/browser/compositor/software_output_device_ozone.h"
 #include "ui/ozone/public/ozone_switches.h"
 #include "ui/ozone/public/surface_factory_ozone.h"
@@ -106,6 +108,9 @@ GpuProcessTransportFactory::GpuProcessTransportFactory()
     raster_thread_.reset(new RasterThread(task_graph_runner_.get()));
     raster_thread_->Start();
   }
+#if defined(OS_WIN)
+  software_backing_.reset(new OutputDeviceBacking);
+#endif
 }
 
 GpuProcessTransportFactory::~GpuProcessTransportFactory() {
@@ -128,11 +133,12 @@ GpuProcessTransportFactory::CreateOffscreenCommandBufferContext() {
   return CreateContextCommon(gpu_channel_host, 0);
 }
 
-scoped_ptr<cc::SoftwareOutputDevice> CreateSoftwareOutputDevice(
+scoped_ptr<cc::SoftwareOutputDevice>
+GpuProcessTransportFactory::CreateSoftwareOutputDevice(
     ui::Compositor* compositor) {
 #if defined(OS_WIN)
-  return scoped_ptr<cc::SoftwareOutputDevice>(new SoftwareOutputDeviceWin(
-      compositor));
+  return scoped_ptr<cc::SoftwareOutputDevice>(
+      new SoftwareOutputDeviceWin(software_backing_.get(), compositor));
 #elif defined(USE_OZONE)
   return scoped_ptr<cc::SoftwareOutputDevice>(new SoftwareOutputDeviceOzone(
       compositor));
@@ -148,8 +154,8 @@ scoped_ptr<cc::SoftwareOutputDevice> CreateSoftwareOutputDevice(
 #endif
 }
 
-scoped_ptr<cc::OverlayCandidateValidator> CreateOverlayCandidateValidator(
-    gfx::AcceleratedWidget widget) {
+scoped_ptr<BrowserCompositorOverlayCandidateValidator>
+CreateOverlayCandidateValidator(gfx::AcceleratedWidget widget) {
 #if defined(USE_OZONE)
   ui::OverlayCandidatesOzone* overlay_candidates =
       ui::SurfaceFactoryOzone::GetInstance()->GetOverlayCandidates(widget);
@@ -157,11 +163,12 @@ scoped_ptr<cc::OverlayCandidateValidator> CreateOverlayCandidateValidator(
   if (overlay_candidates &&
       (command_line->HasSwitch(switches::kEnableHardwareOverlays) ||
        command_line->HasSwitch(switches::kOzoneTestSingleOverlaySupport))) {
-    return scoped_ptr<cc::OverlayCandidateValidator>(
-        new OverlayCandidateValidatorOzone(widget, overlay_candidates));
+    return scoped_ptr<BrowserCompositorOverlayCandidateValidator>(
+        new BrowserCompositorOverlayCandidateValidatorOzone(
+            widget, overlay_candidates));
   }
 #endif
-  return scoped_ptr<cc::OverlayCandidateValidator>();
+  return scoped_ptr<BrowserCompositorOverlayCandidateValidator>();
 }
 
 static bool ShouldCreateGpuOutputSurface(ui::Compositor* compositor) {
@@ -254,7 +261,7 @@ void GpuProcessTransportFactory::EstablishedGpuChannel(
       context_provider = ContextProviderCommandBuffer::Create(
           GpuProcessTransportFactory::CreateContextCommon(gpu_channel_host,
                                                           data->surface_id),
-          "Compositor");
+          BROWSER_COMPOSITOR_ONSCREEN_CONTEXT);
       if (context_provider && !context_provider->BindToCurrentThread())
         context_provider = nullptr;
     }
@@ -281,6 +288,11 @@ void GpuProcessTransportFactory::EstablishedGpuChannel(
         compositor->vsync_manager()));
   } else {
     DCHECK(context_provider);
+    if (!data->surface_id) {
+      surface = make_scoped_ptr(new OffscreenBrowserCompositorOutputSurface(
+          context_provider, compositor->vsync_manager(),
+          scoped_ptr<BrowserCompositorOverlayCandidateValidator>()));
+    } else
 #if defined(USE_OZONE)
     if (ui::SurfaceFactoryOzone::GetInstance()
             ->CanShowPrimaryPlaneAsOverlay()) {
@@ -364,7 +376,8 @@ void GpuProcessTransportFactory::RemoveCompositor(ui::Compositor* compositor) {
   // output_surface_map_ here.
   if (data->surface)
     output_surface_map_.Remove(data->surface_id);
-  GpuSurfaceTracker::Get()->RemoveSurface(data->surface_id);
+  if (data->surface_id)
+    GpuSurfaceTracker::Get()->RemoveSurface(data->surface_id);
   delete data;
   per_compositor_data_.erase(it);
   if (per_compositor_data_.empty()) {
@@ -467,8 +480,9 @@ void GpuProcessTransportFactory::OnSurfaceDisplayed(int surface_id) {
     surface->OnSurfaceDisplayed();
 }
 
-void GpuProcessTransportFactory::OnCompositorRecycled(
-    ui::Compositor* compositor) {
+void GpuProcessTransportFactory::SetCompositorSuspendedForRecycle(
+    ui::Compositor* compositor,
+    bool suspended) {
   PerCompositorDataMap::iterator it = per_compositor_data_.find(compositor);
   if (it == per_compositor_data_.end())
     return;
@@ -477,15 +491,15 @@ void GpuProcessTransportFactory::OnCompositorRecycled(
   BrowserCompositorOutputSurface* surface =
       output_surface_map_.Lookup(data->surface_id);
   if (surface)
-    surface->OnSurfaceRecycled();
+    surface->SetSurfaceSuspendedForRecycle(suspended);
 }
 
-bool GpuProcessTransportFactory::SurfaceShouldNotShowFramesAfterRecycle(
-    int surface_id) const {
+bool GpuProcessTransportFactory::
+    SurfaceShouldNotShowFramesAfterSuspendForRecycle(int surface_id) const {
   BrowserCompositorOutputSurface* surface =
       output_surface_map_.Lookup(surface_id);
   if (surface)
-    return surface->ShouldNotShowFramesAfterRecycle();
+    return surface->SurfaceShouldNotShowFramesAfterSuspendForRecycle();
   return false;
 }
 #endif
@@ -501,7 +515,7 @@ GpuProcessTransportFactory::SharedMainThreadContextProvider() {
   // context so that skia and gl_helper don't step on each other.
   shared_main_thread_contexts_ = ContextProviderCommandBuffer::Create(
       GpuProcessTransportFactory::CreateOffscreenCommandBufferContext(),
-      "Offscreen-MainThread");
+      BROWSER_OFFSCREEN_MAINTHREAD_CONTEXT);
 
   if (shared_main_thread_contexts_.get()) {
     shared_main_thread_contexts_->SetLostContextCallback(
@@ -523,10 +537,13 @@ GpuProcessTransportFactory::CreatePerCompositorData(
   GpuSurfaceTracker* tracker = GpuSurfaceTracker::Get();
 
   PerCompositorData* data = new PerCompositorData;
-  data->surface_id = tracker->AddSurfaceForNativeWidget(widget);
-  tracker->SetSurfaceHandle(
-      data->surface_id,
-      gfx::GLSurfaceHandle(widget, gfx::NATIVE_DIRECT));
+  if (compositor->widget() == gfx::kNullAcceleratedWidget) {
+    data->surface_id = 0;
+  } else {
+    data->surface_id = tracker->AddSurfaceForNativeWidget(widget);
+    tracker->SetSurfaceHandle(data->surface_id,
+                              gfx::GLSurfaceHandle(widget, gfx::NATIVE_DIRECT));
+  }
 
   per_compositor_data_[compositor] = data;
 

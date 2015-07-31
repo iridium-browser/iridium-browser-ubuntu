@@ -41,8 +41,8 @@ namespace blink {
 class InjectedScript;
 class InjectedScriptManager;
 class JSONArray;
-class ScriptState;
 class ScriptDebugServer;
+class ScriptState;
 
 typedef String ErrorString;
 
@@ -61,8 +61,8 @@ public:
     DECLARE_VIRTUAL_TRACE();
 
     // Part of the protocol.
-    virtual void enable(ErrorString*) override;
-    virtual void evaluate(ErrorString*,
+    void enable(ErrorString*) override;
+    void evaluate(ErrorString*,
         const String& expression,
         const String* objectGroup,
         const bool* includeCommandLineAPI,
@@ -73,7 +73,7 @@ public:
         RefPtr<TypeBuilder::Runtime::RemoteObject>& result,
         TypeBuilder::OptOutput<bool>* wasThrown,
         RefPtr<TypeBuilder::Debugger::ExceptionDetails>&) override final;
-    virtual void callFunctionOn(ErrorString*,
+    void callFunctionOn(ErrorString*,
                         const String& objectId,
                         const String& expression,
                         const RefPtr<JSONArray>* optionalArguments,
@@ -82,12 +82,12 @@ public:
                         const bool* generatePreview,
                         RefPtr<TypeBuilder::Runtime::RemoteObject>& result,
                         TypeBuilder::OptOutput<bool>* wasThrown) override final;
-    virtual void releaseObject(ErrorString*, const String& objectId) override final;
-    virtual void getProperties(ErrorString*, const String& objectId, const bool* ownProperties, const bool* accessorPropertiesOnly, const bool* generatePreview, RefPtr<TypeBuilder::Array<TypeBuilder::Runtime::PropertyDescriptor>>& result, RefPtr<TypeBuilder::Array<TypeBuilder::Runtime::InternalPropertyDescriptor>>& internalProperties) override final;
-    virtual void releaseObjectGroup(ErrorString*, const String& objectGroup) override final;
-    virtual void run(ErrorString*) override;
-    virtual void isRunRequired(ErrorString*, bool* out_result) override;
-    virtual void setCustomObjectFormatterEnabled(ErrorString*, bool) override final;
+    void releaseObject(ErrorString*, const String& objectId) override final;
+    void getProperties(ErrorString*, const String& objectId, const bool* ownProperties, const bool* accessorPropertiesOnly, const bool* generatePreview, RefPtr<TypeBuilder::Array<TypeBuilder::Runtime::PropertyDescriptor>>& result, RefPtr<TypeBuilder::Array<TypeBuilder::Runtime::InternalPropertyDescriptor>>& internalProperties, RefPtr<TypeBuilder::Debugger::ExceptionDetails>&) override final;
+    void releaseObjectGroup(ErrorString*, const String& objectGroup) override final;
+    void run(ErrorString*) override;
+    void isRunRequired(ErrorString*, bool* out_result) override;
+    void setCustomObjectFormatterEnabled(ErrorString*, bool) override final;
 
     void disable(ErrorString*) override final;
     void restore() override final;
@@ -108,6 +108,8 @@ protected:
     ScriptStateToId m_scriptStateToId;
 
 private:
+    class InjectedScriptCallScope;
+
     RawPtrWillBeMember<InjectedScriptManager> m_injectedScriptManager;
     ScriptDebugServer* m_scriptDebugServer;
     Client* m_client;

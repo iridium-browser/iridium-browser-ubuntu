@@ -7,6 +7,7 @@
 #include "base/base_switches.h"
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/debug/dump_without_crashing.h"
 #include "base/files/file_path.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
@@ -52,9 +53,9 @@ void NotifyProcessHostDisconnected(const ChildProcessData& data) {
                     BrowserChildProcessHostDisconnected(data));
 }
 
-void NotifyProcessCrashed(const ChildProcessData& data) {
+void NotifyProcessCrashed(const ChildProcessData& data, int exit_code) {
   FOR_EACH_OBSERVER(BrowserChildProcessObserver, g_observers.Get(),
-                    BrowserChildProcessCrashed(data));
+                    BrowserChildProcessCrashed(data, exit_code));
 }
 
 }  // namespace
@@ -254,6 +255,11 @@ void BrowserChildProcessHostImpl::OnBadMessageReceived(
   }
   LOG(ERROR) << "Terminating child process for bad IPC message of type "
       << message.type();
+
+  // Create a memory dump. This will contain enough stack frames to work out
+  // what the bad message was.
+  base::debug::DumpWithoutCrashing();
+
   child_process_->GetProcess().Terminate(RESULT_CODE_KILLED_BAD_MESSAGE, false);
 }
 
@@ -276,8 +282,9 @@ void BrowserChildProcessHostImpl::OnChildDisconnected() {
       case base::TERMINATION_STATUS_PROCESS_CRASHED:
       case base::TERMINATION_STATUS_ABNORMAL_TERMINATION: {
         delegate_->OnProcessCrashed(exit_code);
-        BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                                base::Bind(&NotifyProcessCrashed, data_));
+        BrowserThread::PostTask(
+            BrowserThread::UI, FROM_HERE,
+            base::Bind(&NotifyProcessCrashed, data_, exit_code));
         UMA_HISTOGRAM_ENUMERATION("ChildProcess.Crashed2",
                                   data_.process_type,
                                   PROCESS_TYPE_MAX);

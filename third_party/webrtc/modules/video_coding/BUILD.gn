@@ -22,7 +22,6 @@ source_set("video_coding") {
     "main/source/decoding_state.h",
     "main/source/encoded_frame.cc",
     "main/source/encoded_frame.h",
-    "main/source/er_tables_xor.h",
     "main/source/fec_tables_xor.h",
     "main/source/frame_buffer.cc",
     "main/source/frame_buffer.h",
@@ -95,8 +94,9 @@ source_set("video_coding_utility") {
   sources = [
     "utility/frame_dropper.cc",
     "utility/include/frame_dropper.h",
+    "utility/include/moving_average.h",
+    "utility/include/quality_scaler.h",
     "utility/quality_scaler.cc",
-    "utility/quality_scaler.h",
   ]
 
   configs += [ "../..:common_config" ]
@@ -182,6 +182,8 @@ source_set("webrtc_vp9") {
   if (rtc_build_vp9) {
     sources = [
       "codecs/vp9/include/vp9.h",
+      "codecs/vp9/vp9_frame_buffer_pool.cc",
+      "codecs/vp9/vp9_frame_buffer_pool.h",
       "codecs/vp9/vp9_impl.cc",
       "codecs/vp9/vp9_impl.h",
     ]

@@ -24,6 +24,7 @@
 #define HTMLPlugInElement_h
 
 #include "bindings/core/v8/SharedPersistent.h"
+#include "core/CoreExport.h"
 #include "core/html/HTMLFrameOwnerElement.h"
 #include <v8.h>
 
@@ -42,7 +43,7 @@ enum PreferPlugInsForImagesOption {
     ShouldNotPreferPlugInsForImages
 };
 
-class HTMLPlugInElement : public HTMLFrameOwnerElement {
+class CORE_EXPORT HTMLPlugInElement : public HTMLFrameOwnerElement {
 public:
     virtual ~HTMLPlugInElement();
     DECLARE_VIRTUAL_TRACE();
@@ -74,8 +75,8 @@ public:
 
     bool shouldAccelerate() const;
 
-    void requestPluginCreationWithoutRendererIfPossible();
-    void createPluginWithoutRenderer();
+    void requestPluginCreationWithoutLayoutObjectIfPossible();
+    void createPluginWithoutLayoutObject();
 
     // Public for Internals::forcePluginPlaceholder.
     bool usePlaceholderContent() const { return m_placeholder; }
@@ -130,7 +131,7 @@ private:
     virtual bool supportsFocus() const override final { return true; }
     virtual bool layoutObjectIsFocusable() const override final;
     virtual bool isKeyboardFocusable() const override final;
-    virtual void didAddClosedShadowRoot(ShadowRoot&) override final;
+    virtual void didAddUserAgentShadowRoot(ShadowRoot&) override final;
     virtual void willAddFirstOpenShadowRoot() override final;
 
     // HTMLElement function:
@@ -142,7 +143,7 @@ private:
     virtual LayoutPart* existingLayoutPart() const = 0;
     virtual void updateWidgetInternal() = 0;
 
-    bool loadPlugin(const KURL&, const String& mimeType, const Vector<String>& paramNames, const Vector<String>& paramValues, bool useFallback, bool requireRenderer);
+    bool loadPlugin(const KURL&, const String& mimeType, const Vector<String>& paramNames, const Vector<String>& paramValues, bool useFallback, bool requireLayoutObject);
     bool pluginIsLoadable(const KURL&, const String& mimeType);
     bool wouldLoadAsNetscapePlugin(const String& url, const String& serviceType);
 

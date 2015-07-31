@@ -8,7 +8,6 @@ import re
 import shutil
 import subprocess
 import tempfile
-import time
 
 from telemetry.core.backends import adb_commands
 from telemetry.core import exceptions
@@ -32,22 +31,31 @@ from telemetry.util import external_modules
 psutil = external_modules.ImportOptionalModule('psutil')
 util.AddDirToPythonPath(util.GetChromiumSrcDir(),
                         'third_party', 'webpagereplay')
-import adb_install_cert  # pylint: disable=F0401
-import certutils  # pylint: disable=F0401
+import adb_install_cert  # pylint: disable=import-error
+import certutils  # pylint: disable=import-error
+import platformsettings  # pylint: disable=import-error
 
 # Get build/android scripts into our path.
 util.AddDirToPythonPath(util.GetChromiumSrcDir(), 'build', 'android')
-from pylib.device import device_errors  # pylint: disable=F0401
+from pylib import constants # pylint: disable=F0401
+from pylib import screenshot  # pylint: disable=F0401
+from pylib.device import battery_utils # pylint: disable=F0401
 from pylib.perf import cache_control  # pylint: disable=F0401
 from pylib.perf import perf_control  # pylint: disable=F0401
 from pylib.perf import thermal_throttle  # pylint: disable=F0401
 from pylib.utils import device_temp_file # pylint: disable=F0401
-from pylib import screenshot  # pylint: disable=F0401
 
 try:
-  from pylib.perf import surface_stats_collector  # pylint: disable=F0401
+  from pylib.perf import surface_stats_collector  # pylint: disable=import-error
 except Exception:
   surface_stats_collector = None
+
+
+_DEVICE_COPY_SCRIPT_FILE = os.path.join(
+    constants.DIR_SOURCE_ROOT, 'build', 'android', 'pylib',
+    'efficient_android_directory_copy.sh')
+_DEVICE_COPY_SCRIPT_LOCATION = (
+    '/data/local/tmp/efficient_android_directory_copy.sh')
 
 
 class AndroidPlatformBackend(
@@ -69,17 +77,19 @@ class AndroidPlatformBackend(
       # Ignore result.
       self._adb.EnableAdbRoot()
     self._device = self._adb.device()
+    self._battery = battery_utils.BatteryUtils(self._device)
     self._enable_performance_mode = device.enable_performance_mode
     self._surface_stats_collector = None
     self._perf_tests_setup = perf_control.PerfControl(self._device)
     self._thermal_throttle = thermal_throttle.ThermalThrottle(self._device)
     self._raw_display_frame_rate_measurements = []
-    self._can_access_protected_file_contents = \
-        self._device.old_interface.CanAccessProtectedFileContents()
+    self._can_access_protected_file_contents = (
+        self._device.HasRoot() or self._device.NeedsSU())
+    self._device_copy_script = None
     power_controller = power_monitor_controller.PowerMonitorController([
         monsoon_power_monitor.MonsoonPowerMonitor(self._device, self),
         android_ds2784_power_monitor.DS2784PowerMonitor(self._device, self),
-        android_dumpsys_power_monitor.DumpsysPowerMonitor(self._device, self),
+        android_dumpsys_power_monitor.DumpsysPowerMonitor(self._battery, self),
     ])
     self._power_monitor = android_temperature_monitor.AndroidTemperatureMonitor(
         power_controller, self._device)
@@ -199,11 +209,11 @@ class AndroidPlatformBackend(
     if not android_prebuilt_profiler_helper.InstallOnDevice(
         self._device, 'purge_ashmem'):
       raise Exception('Error installing purge_ashmem.')
-    (status, output) = self._device.old_interface.GetAndroidToolStatusAndOutput(
+    output = self._device.RunShellCommand(
         android_prebuilt_profiler_helper.GetDevicePath('purge_ashmem'),
-        log_result=True)
-    if status != 0:
-      raise Exception('Error while purging ashmem: ' + '\n'.join(output))
+        check_return=True)
+    for l in output:
+      logging.info(l)
 
   def GetMemoryStats(self, pid):
     memory_usage = self._device.GetMemoryUsageForPid(pid)
@@ -262,17 +272,14 @@ class AndroidPlatformBackend(
     self._device.ForceStop(application)
 
   def KillApplication(self, application):
-    """Kill the given application.
+    """Kill the given |application|.
+
+    Might be used instead of ForceStop for efficiency reasons.
 
     Args:
       application: The full package name string of the application to kill.
     """
-    # We use KillAll rather than ForceStop for efficiency reasons.
-    try:
-      self._adb.device().KillAll(application, retries=0)
-      time.sleep(3)
-    except device_errors.CommandFailedError:
-      pass
+    self._device.KillAll(application, blocking=True, quiet=True)
 
   def LaunchApplication(
       self, application, parameters=None, elevate_privilege=False):
@@ -345,6 +352,15 @@ class AndroidPlatformBackend(
 
   def StopMonitoringPower(self):
     return self._power_monitor.StopMonitoringPower()
+
+  def CanMonitorNetworkData(self):
+    if (self._device.build_version_sdk <
+        constants.ANDROID_SDK_VERSION_CODES.LOLLIPOP):
+      return False
+    return True
+
+  def GetNetworkData(self, browser):
+    return self._battery.GetNetworkData(browser._browser_backend.package)
 
   def GetFileContents(self, fname):
     if not self._can_access_protected_file_contents:
@@ -449,7 +465,7 @@ class AndroidPlatformBackend(
           'The OpenSSL module is unavailable. '
           'Will fallback to ignoring certificate errors.')
       return
-    if not certutils.has_sni():
+    if not platformsettings.HasSniSupport():
       logging.warning(
           'Web Page Replay requires SNI support (pyOpenSSL 0.13 or greater) '
           'to generate certificates from a test CA. '
@@ -522,7 +538,7 @@ class AndroidPlatformBackend(
     self._device.PushChangedFiles([(new_profile_dir, saved_profile_location)])
 
     profile_dir = self._GetProfileDir(package)
-    self._device.old_interface.EfficientDeviceDirectoryCopy(
+    self._EfficientDeviceDirectoryCopy(
         saved_profile_location, profile_dir)
     dumpsys = self._device.RunShellCommand('dumpsys package %s' % package)
     id_line = next(line for line in dumpsys if 'userId=' in line)
@@ -535,6 +551,16 @@ class AndroidPlatformBackend(
       extended_path = '%s %s/* %s/*/* %s/*/*/*' % (path, path, path, path)
       self._device.RunShellCommand(
           'chown %s.%s %s' % (uid, uid, extended_path))
+
+  def _EfficientDeviceDirectoryCopy(self, source, dest):
+    if not self._device_copy_script:
+      self._device.adb.Push(
+          _DEVICE_COPY_SCRIPT_FILE,
+          _DEVICE_COPY_SCRIPT_LOCATION)
+      self._device_copy_script = _DEVICE_COPY_SCRIPT_FILE
+    self._device.RunShellCommand(
+        ['sh', self._device_copy_script, source, dest],
+        check_return=True)
 
   def RemoveProfile(self, package, ignore_list):
     """Delete application profile on device.
@@ -566,17 +592,14 @@ class AndroidPlatformBackend(
     # pulled down is really needed e.g. .pak files.
     if not os.path.exists(output_profile_path):
       os.makedirs(output_profile_path)
-    files = self._device.RunShellCommand('ls "%s"' % profile_dir)
+    files = self._device.RunShellCommand(
+        ['ls', profile_dir], check_return=True)
     for f in files:
       # Don't pull lib, since it is created by the installer.
       if f != 'lib':
         source = '%s%s' % (profile_dir, f)
         dest = os.path.join(output_profile_path, f)
-        # self._adb.Pull(source, dest) doesn't work because its timeout
-        # is fixed in android's adb_interface at 60 seconds, which may
-        # be too short to pull the cache.
-        cmd = 'pull %s %s' % (source, dest)
-        self._device.old_interface.Adb().SendCommand(cmd, timeout_time=240)
+        self._device.PullFile(source, dest, timeout=240)
 
   def _GetProfileDir(self, package):
     """Returns the on-device location where the application profile is stored
@@ -715,10 +738,11 @@ def _FixPossibleAdbInstability():
     return
   for process in psutil.process_iter():
     try:
-      if 'adb' in process.name:
-        if 'set_cpu_affinity' in dir(process):
-          process.set_cpu_affinity([0])  # Older versions.
-        else:
-          process.cpu_affinity([0])  # New versions of psutil.
+      if psutil.version_info >= (2, 0):
+        if 'adb' in process.name():
+          process.cpu_affinity([0])
+      else:
+        if 'adb' in process.name:
+          process.set_cpu_affinity([0])
     except (psutil.NoSuchProcess, psutil.AccessDenied):
       logging.warn('Failed to set adb process CPU affinity')

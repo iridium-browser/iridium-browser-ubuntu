@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/local_discovery/privet_http_asynchronous_factory.h"
-
 #include "chrome/browser/local_discovery/privet_http_impl.h"
 #include "chrome/browser/local_discovery/privet_notifications.h"
 #include "net/url_request/test_url_fetcher_factory.h"
@@ -33,7 +33,7 @@ const char kInfoResponseNoUptime[] = "{}";
 class MockPrivetNotificationsListenerDeleagate
     : public PrivetNotificationsListener::Delegate {
  public:
-  MOCK_METHOD2(PrivetNotify, void(bool multiple, bool added));
+  MOCK_METHOD2(PrivetNotify, void(int devices_active, bool added));
   MOCK_METHOD0(PrivetRemoveNotification, void());
 };
 
@@ -80,8 +80,9 @@ class MockPrivetHttpFactory : public PrivetHTTPAsynchronousFactory {
 
 class PrivetNotificationsListenerTest : public ::testing::Test {
  public:
-  PrivetNotificationsListenerTest() : request_context_(
-      new net::TestURLRequestContextGetter(base::MessageLoopProxy::current())) {
+  PrivetNotificationsListenerTest()
+      : request_context_(new net::TestURLRequestContextGetter(
+            base::ThreadTaskRunnerHandle::Get())) {
     notification_listener_.reset(new PrivetNotificationsListener(
         scoped_ptr<PrivetHTTPAsynchronousFactory>(
             new MockPrivetHttpFactory(request_context_.get())),
@@ -122,7 +123,7 @@ class PrivetNotificationsListenerTest : public ::testing::Test {
 TEST_F(PrivetNotificationsListenerTest, DisappearReappearTest) {
 
   EXPECT_CALL(mock_delegate_, PrivetNotify(
-      false,
+      1,
       true));
 
   notification_listener_->DeviceChanged(
@@ -152,7 +153,7 @@ TEST_F(PrivetNotificationsListenerTest, DisappearReappearTest) {
 
 TEST_F(PrivetNotificationsListenerTest, RegisterTest) {
   EXPECT_CALL(mock_delegate_, PrivetNotify(
-      false,
+      1,
       true));
 
   notification_listener_->DeviceChanged(

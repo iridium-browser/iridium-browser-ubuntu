@@ -15,6 +15,7 @@
 #include "content/browser/android/in_process/synchronous_input_event_filter.h"
 #include "content/browser/renderer_host/render_widget_host_view_android.h"
 #include "content/common/input/did_overscroll_params.h"
+#include "content/common/input_messages.h"
 #include "content/public/browser/android/synchronous_compositor_client.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
@@ -78,14 +79,9 @@ SynchronousCompositorImpl::SynchronousCompositorImpl(WebContents* contents)
       weak_ptr_factory_(this) {
   DCHECK(contents);
   DCHECK_NE(routing_id_, MSG_ROUTING_NONE);
-  SynchronousCompositorRegistry::GetInstance()->RegisterCompositor(routing_id_,
-                                                                   this);
 }
 
 SynchronousCompositorImpl::~SynchronousCompositorImpl() {
-  SynchronousCompositorRegistry::GetInstance()->UnregisterCompositor(
-      routing_id_, this);
-
   DCHECK(!output_surface_);
   DCHECK(!begin_frame_source_);
   DCHECK(!input_handler_);
@@ -94,7 +90,22 @@ SynchronousCompositorImpl::~SynchronousCompositorImpl() {
 void SynchronousCompositorImpl::SetClient(
     SynchronousCompositorClient* compositor_client) {
   DCHECK(CalledOnValidThread());
+  DCHECK_IMPLIES(compositor_client, !compositor_client_);
+  DCHECK_IMPLIES(!compositor_client, compositor_client_);
+
+  if (!compositor_client) {
+    SynchronousCompositorRegistry::GetInstance()->UnregisterCompositor(
+        routing_id_, this);
+  }
+
   compositor_client_ = compositor_client;
+
+  // SetClient is essentially the constructor and destructor of
+  // SynchronousCompositorImpl.
+  if (compositor_client_) {
+    SynchronousCompositorRegistry::GetInstance()->RegisterCompositor(
+        routing_id_, this);
+  }
 }
 
 // static
@@ -139,46 +150,14 @@ void SynchronousCompositorImpl::DidInitializeRendererObjects(
 void SynchronousCompositorImpl::DidDestroyRendererObjects() {
   DCHECK(output_surface_);
   DCHECK(begin_frame_source_);
+  DCHECK(compositor_client_);
 
   begin_frame_source_->SetCompositor(nullptr);
   output_surface_->SetCompositor(nullptr);
-  if (compositor_client_)
-    compositor_client_->DidDestroyCompositor(this);
-  compositor_client_ = nullptr;
+  SetInputHandler(nullptr);
+  compositor_client_->DidDestroyCompositor(this);
   output_surface_ = nullptr;
   begin_frame_source_ = nullptr;
-  SetInputHandler(nullptr);
-}
-
-void SynchronousCompositorImpl::NotifyDidDestroyCompositorToClient() {
-  if (compositor_client_)
-    compositor_client_->DidDestroyCompositor(this);
-  compositor_client_ = nullptr;
-}
-
-bool SynchronousCompositorImpl::InitializeHwDraw() {
-  DCHECK(CalledOnValidThread());
-  DCHECK(output_surface_);
-
-  scoped_refptr<cc::ContextProvider> onscreen_context =
-      g_factory.Get().CreateContextProviderForCompositor();
-
-  scoped_refptr<cc::ContextProvider> worker_context =
-      g_factory.Get().CreateContextProviderForCompositor();
-
-  bool success =
-      output_surface_->InitializeHwDraw(onscreen_context, worker_context);
-
-  if (success)
-    g_factory.Get().CompositorInitializedHardwareDraw();
-  return success;
-}
-
-void SynchronousCompositorImpl::ReleaseHwDraw() {
-  DCHECK(CalledOnValidThread());
-  DCHECK(output_surface_);
-  output_surface_->ReleaseHwDraw();
-  g_factory.Get().CompositorReleasedHardwareDraw();
 }
 
 scoped_ptr<cc::CompositorFrame> SynchronousCompositorImpl::DemandDrawHw(
@@ -241,7 +220,14 @@ void SynchronousCompositorImpl::SetMemoryPolicy(size_t bytes_limit) {
   DCHECK(CalledOnValidThread());
   DCHECK(output_surface_);
 
+  size_t current_bytes_limit = output_surface_->GetMemoryPolicy();
   output_surface_->SetMemoryPolicy(bytes_limit);
+
+  if (bytes_limit && !current_bytes_limit) {
+    g_factory.Get().CompositorInitializedHardwareDraw();
+  } else if (!bytes_limit && current_bytes_limit) {
+    g_factory.Get().CompositorReleasedHardwareDraw();
+  }
 }
 
 void SynchronousCompositorImpl::PostInvalidate() {
@@ -295,18 +281,18 @@ void SynchronousCompositorImpl::SetInputHandler(
 
 void SynchronousCompositorImpl::DidOverscroll(
     const DidOverscrollParams& params) {
-  if (compositor_client_) {
-    compositor_client_->DidOverscroll(params.accumulated_overscroll,
-                                      params.latest_overscroll_delta,
-                                      params.current_fling_velocity);
-  }
+  DCHECK(compositor_client_);
+  compositor_client_->DidOverscroll(params.accumulated_overscroll,
+                                    params.latest_overscroll_delta,
+                                    params.current_fling_velocity);
 }
 
 void SynchronousCompositorImpl::DidStopFlinging() {
-  RenderWidgetHostViewAndroid* rwhv = static_cast<RenderWidgetHostViewAndroid*>(
-      contents_->GetRenderWidgetHostView());
-  if (rwhv)
-    rwhv->DidStopFlinging();
+  // It's important that the fling-end notification follow the same path as it
+  // takes on other platforms (using an IPC). This ensures consistent
+  // bookkeeping at all stages of the input pipeline.
+  contents_->GetRenderProcessHost()->OnMessageReceived(
+      InputHostMsg_DidStopFlinging(routing_id_));
 }
 
 InputEventAckState SynchronousCompositorImpl::HandleInputEvent(
@@ -328,26 +314,24 @@ void SynchronousCompositorImpl::DeliverMessages() {
 }
 
 void SynchronousCompositorImpl::DidActivatePendingTree() {
-  if (compositor_client_)
-    compositor_client_->DidUpdateContent();
+  DCHECK(compositor_client_);
+  compositor_client_->DidUpdateContent();
+  DeliverMessages();
 }
 
 gfx::ScrollOffset SynchronousCompositorImpl::GetTotalScrollOffset() {
   DCHECK(CalledOnValidThread());
-  if (compositor_client_) {
-    // TODO(miletus): Make GetTotalRootLayerScrollOffset return
-    // ScrollOffset. crbug.com/414283.
-    return gfx::ScrollOffset(
-        compositor_client_->GetTotalRootLayerScrollOffset());
-  }
-  return gfx::ScrollOffset();
+  DCHECK(compositor_client_);
+  // TODO(miletus): Make GetTotalRootLayerScrollOffset return
+  // ScrollOffset. crbug.com/414283.
+  return gfx::ScrollOffset(
+      compositor_client_->GetTotalRootLayerScrollOffset());
 }
 
 bool SynchronousCompositorImpl::IsExternalFlingActive() const {
   DCHECK(CalledOnValidThread());
-  if (compositor_client_)
-    return compositor_client_->IsExternalFlingActive();
-  return false;
+  DCHECK(compositor_client_);
+  return compositor_client_->IsExternalFlingActive();
 }
 
 void SynchronousCompositorImpl::UpdateRootLayerState(
@@ -358,8 +342,7 @@ void SynchronousCompositorImpl::UpdateRootLayerState(
     float min_page_scale_factor,
     float max_page_scale_factor) {
   DCHECK(CalledOnValidThread());
-  if (!compositor_client_)
-    return;
+  DCHECK(compositor_client_);
 
   // TODO(miletus): Pass in ScrollOffset. crbug.com/414283.
   compositor_client_->UpdateRootLayerState(

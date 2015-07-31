@@ -236,8 +236,14 @@ Request.prototype.downloadOriginal_ = function(onSuccess, onFailure) {
   }
 
   // Load RAW images by using Piex loader instead of XHR.
-  if (FileType.getTypeForName(this.request_.url).type === 'raw') {
+  var fileType = FileType.getTypeForName(this.request_.url);
+  if (fileType.type === 'raw') {
+    var timer = metrics.getTracker().startTiming(
+        metrics.Categories.INTERNALS,
+        metrics.timing.Variables.EXTRACT_THUMBNAIL_FROM_RAW,
+        fileType.subtype);
     this.piexLoader_.load(this.request_.url).then(function(data) {
+      timer.send();
       var blob = new Blob([data.thumbnail], {type: 'image/jpeg'});
       var url = URL.createObjectURL(blob);
       this.image_.src = url;
@@ -481,7 +487,7 @@ Request.prototype.onImageLoad_ = function() {
       ImageLoader.shouldProcess(this.image_.width,
                                 this.image_.height,
                                 this.request_)) {
-    ImageLoader.resize(this.image_, this.canvas_, this.request_);
+    ImageLoader.resizeAndCrop(this.image_, this.canvas_, this.request_);
     ImageLoader.convertColorSpace(
         this.canvas_, this.request_.colorSpace || ColorSpace.SRGB);
     this.sendImage_(true);  // Image changed.

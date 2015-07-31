@@ -13,7 +13,7 @@
 #include <security.h>
 #undef SECURITY_WIN32
 
-#include "chrome/browser/password_manager/password_manager_util.h"
+#include "components/password_manager/core/browser/password_manager_util.h"
 
 #include "base/bind.h"
 #include "base/prefs/pref_service.h"
@@ -182,7 +182,7 @@ void ReplyOsPasswordStatus(const base::Callback<void(OsPasswordStatus)>& reply,
 
 void GetOsPasswordStatus(const base::Callback<void(OsPasswordStatus)>& reply) {
   // Preferences can be accessed on the UI thread only.
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   PrefService* local_state = g_browser_process->local_state();
   PasswordCheckPrefs* prefs = new PasswordCheckPrefs;
   prefs->Read(local_state);

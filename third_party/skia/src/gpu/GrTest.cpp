@@ -18,8 +18,6 @@ void GrTestTarget::init(GrContext* ctx, GrDrawTarget* target) {
 
     fContext.reset(SkRef(ctx));
     fDrawTarget.reset(SkRef(target));
-
-    SkNEW_IN_TLAZY(&fAGP, GrDrawTarget::AutoGeometryPush, (target));
 }
 
 void GrContext::getTestTarget(GrTestTarget* tar) {
@@ -71,7 +69,7 @@ void GrGpu::Stats::dump(SkString* out) {
     out->appendf("Shader Compilations: %d\n", fShaderCompilations);
     out->appendf("Textures Created: %d\n", fTextureCreates);
     out->appendf("Texture Uploads: %d\n", fTextureUploads);
-    out->appendf("Stencil Buffer Creates: %d\n", fStencilBufferCreates);
+    out->appendf("Stencil Buffer Creates: %d\n", fStencilAttachmentCreates);
 }
 #endif
 
@@ -133,7 +131,6 @@ void GrResourceCache::changeTimestamp(uint32_t newTimestamp) { fTimestamp = newT
 // Code for the mock context. It's built on a mock GrGpu class that does nothing.
 ////
 
-#include "GrBufferAllocPool.h"
 #include "GrInOrderDrawBuffer.h"
 #include "GrGpu.h"
 
@@ -172,15 +169,17 @@ public:
         return false;
     }
 
+    void xferBarrier(GrRenderTarget*, GrXferBarrierType) override {}
+
 private:
     void onResetContext(uint32_t resetBits) override {}
 
-    GrTexture* onCreateTexture(const GrSurfaceDesc& desc, bool budgeted, const void* srcData,
-                               size_t rowBytes) override {
+    GrTexture* onCreateTexture(const GrSurfaceDesc& desc, GrGpuResource::LifeCycle lifeCycle,
+                               const void* srcData, size_t rowBytes) override {
         return NULL;
     }
 
-    GrTexture* onCreateCompressedTexture(const GrSurfaceDesc& desc, bool budgeted,
+    GrTexture* onCreateCompressedTexture(const GrSurfaceDesc& desc, GrGpuResource::LifeCycle,
                                          const void* srcData) override {
         return NULL;
     }
@@ -200,7 +199,7 @@ private:
 
     void onClearStencilClip(GrRenderTarget*, const SkIRect& rect, bool insideClip) override {}
 
-    void onDraw(const DrawArgs&, const GrDrawTarget::DrawInfo&) override {}
+    void onDraw(const DrawArgs&, const GrNonInstancedVertices&) override {}
 
     void onStencilPath(const GrPath* path, const StencilPathState& state) override {}
 
@@ -232,11 +231,11 @@ private:
 
     void onResolveRenderTarget(GrRenderTarget* target) override { return; }
 
-    bool createStencilBufferForRenderTarget(GrRenderTarget*, int width, int height) override {
+    bool createStencilAttachmentForRenderTarget(GrRenderTarget*, int width, int height) override {
         return false;
     }
 
-    bool attachStencilBufferToRenderTarget(GrStencilBuffer*, GrRenderTarget*) override {
+    bool attachStencilAttachmentToRenderTarget(GrStencilAttachment*, GrRenderTarget*) override {
         return false;
     }
 
@@ -266,10 +265,6 @@ void GrContext::initMockContext() {
     // these objects are required for any of tests that use this context. TODO: make stop allocating
     // resources in the buffer pools.
     SkDELETE(fDrawBuffer);
-    SkDELETE(fDrawBufferVBAllocPool);
-    SkDELETE(fDrawBufferIBAllocPool);
-
     fDrawBuffer = NULL;
-    fDrawBufferVBAllocPool = NULL;
-    fDrawBufferIBAllocPool = NULL;
+
 }

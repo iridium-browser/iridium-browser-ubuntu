@@ -144,6 +144,7 @@ source_set("common") {
     "//build/util:webkit_version",
     "//components/tracing",
     "//gpu/command_buffer/client:gles2_interface",
+    "//gpu/command_buffer/common:gles2_utils",
     "//net",
     "//skia",
     "//third_party/icu",
@@ -176,15 +177,15 @@ source_set("common") {
       "//gpu/ipc",
       "//gpu/skia_bindings",
       "//media",
+      "//media/midi",
       "//media:shared_memory_support",
+      "//mojo/application/public/interfaces",
       "//mojo/environment:chromium",
       "//sandbox",
       "//storage/common",
       "//third_party/WebKit/public:blink",
       "//third_party/mojo/src/mojo/edk/system",
-      "//third_party/mojo/src/mojo/public/interfaces/application",
       "//ui/gl",
-      "//webkit/common/gpu",
     ]
   }
 
@@ -206,6 +207,11 @@ source_set("common") {
     sources += [
                  "gpu/client/gpu_memory_buffer_impl_io_surface.cc",
                  "gpu/client/gpu_memory_buffer_impl_io_surface.h",
+                 "gpu/gpu_memory_buffer_factory_io_surface.cc",
+                 "gpu/gpu_memory_buffer_factory_io_surface.h",
+                 "gpu/media/vt.h",
+                 "gpu/media/vt_video_decode_accelerator.cc",
+                 "gpu/media/vt_video_decode_accelerator.h",
                ] + get_target_outputs(":libvt_generate_stubs")
 
     sources -= [ "plugin_list_posix.cc" ]
@@ -218,7 +224,11 @@ source_set("common") {
       "//third_party/WebKit/public:resources",
       "//ui/accelerated_widget_mac",
     ]
-    libs += [ "QuartzCore.framework" ]
+    libs += [
+      "IOSurface.framework",
+      "OpenGL.framework",
+      "QuartzCore.framework",
+    ]
   }
 
   if (is_android) {
@@ -235,6 +245,13 @@ source_set("common") {
     ]
 
     libs += [ "android" ]
+  }
+
+  if (is_debug && !is_component_build) {
+    # Content depends on the PPAPI message logging stuff; if this isn't here,
+    # some unit test binaries won't compile. This only worked in release mode
+    # because logging is disabled there.
+    deps += [ "//ppapi/proxy:ipc_sources" ]
   }
 
   if (is_ios) {
@@ -279,8 +296,10 @@ source_set("common") {
   }
 
   if (use_x11) {
-    include_dirs += [ "//third_party/khronos" ]
-    configs += [ "//build/config/linux:xcomposite" ]
+    configs += [
+      "//build/config/linux:xcomposite",
+      "//third_party/khronos:khronos_headers",
+    ]
 
     if (current_cpu != "arm" || !is_chromeos) {
       sources += [ "gpu/x_util.h" ]
@@ -317,6 +336,17 @@ source_set("common") {
   }
 
   if (is_chromeos) {
+    sources += [
+      "gpu/media/accelerated_video_decoder.h",
+      "gpu/media/h264_decoder.cc",
+      "gpu/media/h264_decoder.h",
+      "gpu/media/h264_dpb.cc",
+      "gpu/media/h264_dpb.h",
+      "gpu/media/vp8_decoder.cc",
+      "gpu/media/vp8_decoder.h",
+      "gpu/media/vp8_picture.cc",
+      "gpu/media/vp8_picture.h",
+    ]
     if (use_v4lplugin) {
       defines += [ "USE_LIBV4L2" ]
       sources += get_target_outputs(":libv4l2_generate_stubs")
@@ -325,13 +355,8 @@ source_set("common") {
     if (use_v4l2_codec) {
       defines += [ "USE_V4L2_CODEC" ]
       sources += [
-        "gpu/media/accelerated_video_decoder.h",
         "gpu/media/generic_v4l2_device.cc",
         "gpu/media/generic_v4l2_device.h",
-        "gpu/media/h264_decoder.cc",
-        "gpu/media/h264_decoder.h",
-        "gpu/media/h264_dpb.cc",
-        "gpu/media/h264_dpb.h",
         "gpu/media/v4l2_device.cc",
         "gpu/media/v4l2_device.h",
         "gpu/media/v4l2_image_processor.cc",
@@ -342,10 +367,6 @@ source_set("common") {
         "gpu/media/v4l2_video_decode_accelerator.h",
         "gpu/media/v4l2_video_encode_accelerator.cc",
         "gpu/media/v4l2_video_encode_accelerator.h",
-        "gpu/media/vp8_decoder.cc",
-        "gpu/media/vp8_decoder.h",
-        "gpu/media/vp8_picture.cc",
-        "gpu/media/vp8_picture.h",
       ]
       libs = [
         "EGL",
@@ -361,10 +382,6 @@ source_set("common") {
     if (current_cpu != "arm") {
       sources += [
                    "gpu/media/va_surface.h",
-                   "gpu/media/vaapi_h264_decoder.cc",
-                   "gpu/media/vaapi_h264_decoder.h",
-                   "gpu/media/vaapi_h264_dpb.cc",
-                   "gpu/media/vaapi_h264_dpb.h",
                    "gpu/media/vaapi_picture.cc",
                    "gpu/media/vaapi_picture.h",
                    "gpu/media/vaapi_video_decode_accelerator.cc",
@@ -403,7 +420,7 @@ source_set("common") {
       "gpu/media/dxva_video_decode_accelerator.cc",
       "gpu/media/dxva_video_decode_accelerator.h",
     ]
-    include_dirs += [ "//third_party/khronos" ]
+    configs += [ "//third_party/khronos:khronos_headers" ]
     deps += [ "//ui/gl" ]
     libs += [
       "d3d9.lib",
@@ -465,6 +482,7 @@ source_set("common") {
 mojom("mojo_bindings") {
   sources = [
     "application_setup.mojom",
+    "background_sync_service.mojom",
     "geolocation_service.mojom",
     "permission_service.mojom",
     "presentation/presentation_service.mojom",
@@ -473,6 +491,6 @@ mojom("mojo_bindings") {
 
   deps = [
     "//content/public/common:mojo_bindings",
-    "//third_party/mojo/src/mojo/public/interfaces/application:application",
+    "//mojo/application/public/interfaces",
   ]
 }

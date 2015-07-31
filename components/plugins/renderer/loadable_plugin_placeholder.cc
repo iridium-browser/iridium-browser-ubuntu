@@ -6,18 +6,27 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/command_line.h"
 #include "base/json/string_escape.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/values.h"
+#include "content/public/child/v8_value_converter.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_thread.h"
+#include "gin/handle.h"
 #include "gin/object_template_builder.h"
+#include "third_party/WebKit/public/web/WebDOMMessageEvent.h"
+#include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebElement.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
+#include "third_party/WebKit/public/web/WebKit.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebPluginContainer.h"
 #include "third_party/WebKit/public/web/WebScriptSource.h"
+#include "third_party/WebKit/public/web/WebSerializedScriptValue.h"
 #include "third_party/WebKit/public/web/WebView.h"
 #include "third_party/re2/re2/re2.h"
 
@@ -47,16 +56,14 @@ void LoadablePluginPlaceholder::BlockForPowerSaverPoster() {
                  weak_factory_.GetWeakPtr(),
                  PluginInstanceThrottler::UNTHROTTLE_METHOD_BY_WHITELIST));
 }
-#endif
 
 void LoadablePluginPlaceholder::SetPremadePlugin(
     content::PluginInstanceThrottler* throttler) {
   DCHECK(throttler);
   DCHECK(!premade_throttler_);
   premade_throttler_ = throttler;
-
-  premade_throttler_->AddObserver(this);
 }
+#endif
 
 LoadablePluginPlaceholder::LoadablePluginPlaceholder(
     content::RenderFrame* render_frame,
@@ -73,34 +80,24 @@ LoadablePluginPlaceholder::LoadablePluginPlaceholder(
       is_blocked_for_prerendering_(false),
       is_blocked_for_power_saver_poster_(false),
       power_saver_enabled_(false),
-      plugin_marked_essential_(false),
       premade_throttler_(nullptr),
       allow_loading_(false),
-      placeholder_was_replaced_(false),
       hidden_(false),
       finished_loading_(false),
       weak_factory_(this) {
 }
 
 LoadablePluginPlaceholder::~LoadablePluginPlaceholder() {
-#if defined(ENABLE_PLUGINS)
-  DCHECK(!premade_throttler_);
-
-  if (!plugin_marked_essential_ && !placeholder_was_replaced_ &&
-      !is_blocked_for_prerendering_ && is_blocked_for_power_saver_poster_) {
-    PluginInstanceThrottler::RecordUnthrottleMethodMetric(
-        PluginInstanceThrottler::UNTHROTTLE_METHOD_NEVER);
-  }
-#endif
 }
 
 #if defined(ENABLE_PLUGINS)
 void LoadablePluginPlaceholder::MarkPluginEssential(
     PluginInstanceThrottler::PowerSaverUnthrottleMethod method) {
-  if (plugin_marked_essential_)
+  if (!power_saver_enabled_)
     return;
 
-  plugin_marked_essential_ = true;
+  power_saver_enabled_ = false;
+
   if (premade_throttler_)
     premade_throttler_->MarkPluginEssential(method);
   else
@@ -113,6 +110,18 @@ void LoadablePluginPlaceholder::MarkPluginEssential(
   }
 }
 #endif
+
+void LoadablePluginPlaceholder::BindWebFrame(blink::WebFrame* frame) {
+  v8::Isolate* isolate = blink::mainThreadIsolate();
+  v8::HandleScope handle_scope(isolate);
+  v8::Local<v8::Context> context = frame->mainWorldScriptContext();
+  DCHECK(!context.IsEmpty());
+
+  v8::Context::Scope context_scope(context);
+  v8::Local<v8::Object> global = context->Global();
+  global->Set(gin::StringToV8(isolate, "plugin"),
+              gin::CreateHandle(isolate, this).ToV8());
+}
 
 gin::ObjectTemplateBuilder LoadablePluginPlaceholder::GetObjectTemplateBuilder(
     v8::Isolate* isolate) {
@@ -148,8 +157,6 @@ void LoadablePluginPlaceholder::ReplacePlugin(WebPlugin* new_plugin) {
     return;
   }
 
-  placeholder_was_replaced_ = true;
-
   // During initialization, the new plugin might have replaced itself in turn
   // with another plugin. Make sure not to use the passed in |new_plugin| after
   // this point.
@@ -173,7 +180,7 @@ void LoadablePluginPlaceholder::HidePlugin() {
   // same dimensions. If we find such a parent, hide that as well.
   // This makes much more uncovered page content usable (including clickable)
   // as opposed to merely visible.
-  // TODO(cevans) -- it's a foul heurisitc but we're going to tolerate it for
+  // TODO(cevans) -- it's a foul heuristic but we're going to tolerate it for
   // now for these reasons:
   // 1) Makes the user experience better.
   // 2) Foulness is encapsulated within this single function.
@@ -226,15 +233,36 @@ void LoadablePluginPlaceholder::UpdateMessage() {
 }
 
 void LoadablePluginPlaceholder::PluginDestroyed() {
-  // Since the premade plugin has been detached from the container, it will not
-  // be automatically destroyed along with the page.
-  if (!placeholder_was_replaced_ && premade_throttler_) {
-    premade_throttler_->RemoveObserver(this);
-    premade_throttler_->GetWebPlugin()->destroy();
-    premade_throttler_ = nullptr;
+#if defined(ENABLE_PLUGINS)
+  if (power_saver_enabled_) {
+    if (premade_throttler_) {
+      // Since the premade plugin has been detached from the container, it will
+      // not be automatically destroyed along with the page.
+      premade_throttler_->GetWebPlugin()->destroy();
+      premade_throttler_ = nullptr;
+    } else if (is_blocked_for_power_saver_poster_) {
+      // Record the NEVER unthrottle count only if there is no throttler.
+      PluginInstanceThrottler::RecordUnthrottleMethodMetric(
+          PluginInstanceThrottler::UNTHROTTLE_METHOD_NEVER);
+    }
+
+    // Prevent processing subsequent calls to MarkPluginEssential.
+    power_saver_enabled_ = false;
   }
+#endif
 
   PluginPlaceholder::PluginDestroyed();
+}
+
+v8::Local<v8::Object> LoadablePluginPlaceholder::GetV8ScriptableObject(
+    v8::Isolate* isolate) const {
+#if defined(ENABLE_PLUGINS)
+  // Pass through JavaScript access to the underlying throttled plugin.
+  if (premade_throttler_ && premade_throttler_->GetWebPlugin()) {
+    return premade_throttler_->GetWebPlugin()->v8ScriptableObject(isolate);
+  }
+#endif
+  return v8::Local<v8::Object>();
 }
 
 void LoadablePluginPlaceholder::WasShown() {
@@ -242,14 +270,6 @@ void LoadablePluginPlaceholder::WasShown() {
     is_blocked_for_background_tab_ = false;
     if (!LoadingBlocked())
       LoadPlugin();
-  }
-}
-
-void LoadablePluginPlaceholder::OnThrottleStateChange() {
-  DCHECK(premade_throttler_);
-  if (!premade_throttler_->IsThrottled()) {
-    // Premade plugin has been unthrottled externally (by audio playback, etc.).
-    LoadPlugin();
   }
 }
 
@@ -286,26 +306,11 @@ void LoadablePluginPlaceholder::LoadPlugin() {
   }
 
   if (premade_throttler_) {
-    premade_throttler_->RemoveObserver(this);
     premade_throttler_->SetHiddenForPlaceholder(false /* hidden */);
-
     ReplacePlugin(premade_throttler_->GetWebPlugin());
     premade_throttler_ = nullptr;
   } else {
-    // TODO(mmenke):  In the case of prerendering, feed into
-    //                ChromeContentRendererClient::CreatePlugin instead, to
-    //                reduce the chance of future regressions.
-    scoped_ptr<PluginInstanceThrottler> throttler;
-#if defined(ENABLE_PLUGINS)
-    // If the plugin has already been marked essential in its placeholder form,
-    // we shouldn't create a new throttler and start the process all over again.
-    if (!plugin_marked_essential_ && power_saver_enabled_)
-      throttler = PluginInstanceThrottler::Create();
-#endif
-    WebPlugin* plugin = render_frame()->CreatePlugin(
-        GetFrame(), plugin_info_, GetPluginParams(), throttler.Pass());
-
-    ReplacePlugin(plugin);
+    ReplacePlugin(CreatePlugin());
   }
 }
 
@@ -331,8 +336,34 @@ void LoadablePluginPlaceholder::DidFinishLoadingCallback() {
 
   // Wait for the placeholder to finish loading to hide the premade plugin.
   // This is necessary to prevent a flicker.
-  if (premade_throttler_ && !placeholder_was_replaced_)
+  if (premade_throttler_ && power_saver_enabled_)
     premade_throttler_->SetHiddenForPlaceholder(true /* hidden */);
+
+  // Set an attribute and post an event, so browser tests can wait for the
+  // placeholder to be ready to receive simulated user input.
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnablePluginPlaceholderTesting)) {
+    WebElement element = plugin()->container()->element();
+    element.setAttribute("placeholderLoaded", "true");
+
+    scoped_ptr<content::V8ValueConverter> converter(
+        content::V8ValueConverter::create());
+    base::StringValue value("placeholderLoaded");
+    blink::WebSerializedScriptValue message_data =
+        blink::WebSerializedScriptValue::serialize(converter->ToV8Value(
+            &value, element.document().frame()->mainWorldScriptContext()));
+
+    blink::WebDOMEvent event = element.document().createEvent("MessageEvent");
+    blink::WebDOMMessageEvent msg_event = event.to<blink::WebDOMMessageEvent>();
+    msg_event.initMessageEvent("message",     // type
+                               false,         // canBubble
+                               false,         // cancelable
+                               message_data,  // data
+                               "",            // origin [*]
+                               NULL,          // source [*]
+                               "");           // lastEventId
+    element.dispatchEvent(msg_event);
+  }
 }
 
 void LoadablePluginPlaceholder::SetPluginInfo(
@@ -346,6 +377,10 @@ const content::WebPluginInfo& LoadablePluginPlaceholder::GetPluginInfo() const {
 
 void LoadablePluginPlaceholder::SetIdentifier(const std::string& identifier) {
   identifier_ = identifier;
+}
+
+const std::string& LoadablePluginPlaceholder::GetIdentifier() const {
+  return identifier_;
 }
 
 bool LoadablePluginPlaceholder::LoadingBlocked() const {

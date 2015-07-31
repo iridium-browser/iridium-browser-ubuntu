@@ -51,40 +51,33 @@ MediaStreamAudioDestinationHandler::MediaStreamAudioDestinationHandler(AudioNode
     initialize();
 }
 
+PassRefPtr<MediaStreamAudioDestinationHandler> MediaStreamAudioDestinationHandler::create(AudioNode& node, size_t numberOfChannels)
+{
+    return adoptRef(new MediaStreamAudioDestinationHandler(node, numberOfChannels));
+}
+
 MediaStreamAudioDestinationHandler::~MediaStreamAudioDestinationHandler()
 {
-    ASSERT(!isInitialized());
-}
-
-void MediaStreamAudioDestinationHandler::dispose()
-{
     uninitialize();
-    AudioBasicInspectorHandler::dispose();
-}
-
-DEFINE_TRACE(MediaStreamAudioDestinationHandler)
-{
-    visitor->trace(m_stream);
-    AudioBasicInspectorHandler::trace(visitor);
 }
 
 void MediaStreamAudioDestinationHandler::process(size_t numberOfFrames)
 {
-    m_mixBus->copyFrom(*input(0)->bus());
+    m_mixBus->copyFrom(*input(0).bus());
     m_source->consumeAudio(m_mixBus.get(), numberOfFrames);
 }
 
 // ----------------------------------------------------------------
 
 MediaStreamAudioDestinationNode::MediaStreamAudioDestinationNode(AudioContext& context, size_t numberOfChannels)
-    : AudioNode(context)
+    : AudioBasicInspectorNode(context)
 {
-    setHandler(new MediaStreamAudioDestinationHandler(*this, numberOfChannels));
+    setHandler(MediaStreamAudioDestinationHandler::create(*this, numberOfChannels));
 }
 
-MediaStreamAudioDestinationNode* MediaStreamAudioDestinationNode::create(AudioContext* context, size_t numberOfChannels)
+MediaStreamAudioDestinationNode* MediaStreamAudioDestinationNode::create(AudioContext& context, size_t numberOfChannels)
 {
-    return new MediaStreamAudioDestinationNode(*context, numberOfChannels);
+    return new MediaStreamAudioDestinationNode(context, numberOfChannels);
 }
 
 MediaStream* MediaStreamAudioDestinationNode::stream() const

@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <vector>
+
 #include "ash/desktop_background/desktop_background_controller.h"
 #include "ash/desktop_background/desktop_background_controller_observer.h"
 #include "ash/shell.h"
@@ -14,11 +16,9 @@
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/synchronization/lock.h"
-#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/app_mode/fake_cws.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_launch_error.h"
@@ -35,13 +35,13 @@
 #include "chrome/browser/chromeos/login/users/mock_user_manager.h"
 #include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
+#include "chrome/browser/chromeos/ownership/fake_owner_settings_service.h"
+#include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/policy/device_policy_cros_browser_test.h"
-#include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
-#include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_oauth2_token_service.h"
 #include "chrome/browser/chromeos/settings/device_oauth2_token_service_factory.h"
-#include "chrome/browser/chromeos/settings/device_settings_service.h"
+#include "chrome/browser/chromeos/settings/scoped_cros_settings_test_helper.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile_impl.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -410,74 +410,18 @@ class AppDataLoadWaiter : public KioskAppManagerObserver {
   DISALLOW_COPY_AND_ASSIGN(AppDataLoadWaiter);
 };
 
-class CrosSettingsPermanentlyUntrustedMaker :
-    public DeviceSettingsService::Observer {
- public:
-  CrosSettingsPermanentlyUntrustedMaker();
-
-  // DeviceSettingsService::Observer:
-  void OwnershipStatusChanged() override;
-  void DeviceSettingsUpdated() override;
-  void OnDeviceSettingsServiceShutdown() override;
-
- private:
-  bool untrusted_check_running_;
-  base::RunLoop run_loop_;
-
-  void CheckIfUntrusted();
-
-  DISALLOW_COPY_AND_ASSIGN(CrosSettingsPermanentlyUntrustedMaker);
-};
-
-CrosSettingsPermanentlyUntrustedMaker::CrosSettingsPermanentlyUntrustedMaker()
-    : untrusted_check_running_(false) {
-  DeviceSettingsService::Get()->AddObserver(this);
-
-  policy::DevicePolicyCrosTestHelper().InstallOwnerKey();
-  DeviceSettingsService::Get()->OwnerKeySet(true);
-
-  run_loop_.Run();
-}
-
-void CrosSettingsPermanentlyUntrustedMaker::OwnershipStatusChanged() {
-  if (untrusted_check_running_)
-    return;
-
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE,
-      base::Bind(&CrosSettingsPermanentlyUntrustedMaker::CheckIfUntrusted,
-                 base::Unretained(this)));
-}
-
-void CrosSettingsPermanentlyUntrustedMaker::DeviceSettingsUpdated() {
-}
-
-void CrosSettingsPermanentlyUntrustedMaker::OnDeviceSettingsServiceShutdown() {
-}
-
-void CrosSettingsPermanentlyUntrustedMaker::CheckIfUntrusted() {
-  untrusted_check_running_ = true;
-  const CrosSettingsProvider::TrustedStatus trusted_status =
-      CrosSettings::Get()->PrepareTrustedValues(
-          base::Bind(&CrosSettingsPermanentlyUntrustedMaker::CheckIfUntrusted,
-                     base::Unretained(this)));
-  if (trusted_status == CrosSettingsProvider::TEMPORARILY_UNTRUSTED)
-    return;
-  untrusted_check_running_ = false;
-
-  if (trusted_status == CrosSettingsProvider::TRUSTED)
-    return;
-
-  DeviceSettingsService::Get()->RemoveObserver(this);
-  run_loop_.Quit();
-}
-
 }  // namespace
 
-class KioskTest : public OobeBaseTest {
+// Boolean parameter is used to run this test for webview (true) and for
+// iframe (false) GAIA sign in.
+class KioskTest : public OobeBaseTest,
+                  public testing::WithParamInterface<bool> {
  public:
-  KioskTest() : use_consumer_kiosk_mode_(true),
-                fake_cws_(new FakeCWS) {
+  KioskTest()
+      : settings_helper_(false),
+        use_consumer_kiosk_mode_(true),
+        fake_cws_(new FakeCWS) {
+    set_use_webview(GetParam());
     set_exit_when_last_browser_closes(false);
   }
 
@@ -507,9 +451,13 @@ class KioskTest : public OobeBaseTest {
     // Needed to avoid showing Gaia screen instead of owner signin for
     // consumer network down test cases.
     StartupUtils::MarkDeviceRegistered(base::Closure());
+    settings_helper_.ReplaceProvider(kAccountsPrefDeviceLocalAccounts);
+    owner_settings_service_ = settings_helper_.CreateOwnerSettingsService(
+        ProfileManager::GetPrimaryUserProfile());
   }
 
   void TearDownOnMainThread() override {
+    settings_helper_.RestoreProvider();
     AppLaunchController::SetNetworkTimeoutCallbackForTesting(NULL);
     AppLaunchSigninScreen::SetUserManagerForTesting(NULL);
 
@@ -537,8 +485,9 @@ class KioskTest : public OobeBaseTest {
     SetupTestAppUpdateCheck();
 
     // Remove then add to ensure NOTIFICATION_KIOSK_APPS_LOADED fires.
-    KioskAppManager::Get()->RemoveApp(test_app_id_);
-    KioskAppManager::Get()->AddApp(test_app_id_);
+    KioskAppManager::Get()->RemoveApp(test_app_id_,
+                                      owner_settings_service_.get());
+    KioskAppManager::Get()->AddApp(test_app_id_, owner_settings_service_.get());
   }
 
   void FireKioskAppSettingsChanged() {
@@ -555,8 +504,9 @@ class KioskTest : public OobeBaseTest {
   void ReloadAutolaunchKioskApps() {
     SetupTestAppUpdateCheck();
 
-    KioskAppManager::Get()->AddApp(test_app_id_);
-    KioskAppManager::Get()->SetAutoLaunchApp(test_app_id_);
+    KioskAppManager::Get()->AddApp(test_app_id_, owner_settings_service_.get());
+    KioskAppManager::Get()->SetAutoLaunchApp(test_app_id_,
+                                             owner_settings_service_.get());
   }
 
   void StartUIForAppLaunch() {
@@ -800,6 +750,9 @@ class KioskTest : public OobeBaseTest {
     use_consumer_kiosk_mode_ = use;
   }
 
+  ScopedCrosSettingsTestHelper settings_helper_;
+  scoped_ptr<FakeOwnerSettingsService> owner_settings_service_;
+
  private:
   bool use_consumer_kiosk_mode_;
   std::string test_app_id_;
@@ -811,7 +764,7 @@ class KioskTest : public OobeBaseTest {
   DISALLOW_COPY_AND_ASSIGN(KioskTest);
 };
 
-IN_PROC_BROWSER_TEST_F(KioskTest, InstallAndLaunchApp) {
+IN_PROC_BROWSER_TEST_P(KioskTest, InstallAndLaunchApp) {
   StartAppLaunchFromLoginScreen(SimulateNetworkOnlineClosure());
   WaitForAppLaunchSuccess();
   KioskAppManager::App app;
@@ -819,7 +772,7 @@ IN_PROC_BROWSER_TEST_F(KioskTest, InstallAndLaunchApp) {
   EXPECT_FALSE(app.was_auto_launched_with_zero_delay);
 }
 
-IN_PROC_BROWSER_TEST_F(KioskTest, ZoomSupport) {
+IN_PROC_BROWSER_TEST_P(KioskTest, ZoomSupport) {
   ExtensionTestMessageListener
       app_window_loaded_listener("appWindowLoaded", false);
   StartAppLaunchFromLoginScreen(SimulateNetworkOnlineClosure());
@@ -886,7 +839,7 @@ IN_PROC_BROWSER_TEST_F(KioskTest, ZoomSupport) {
   content::RunAllPendingInMessageLoop();
 }
 
-IN_PROC_BROWSER_TEST_F(KioskTest, NotSignedInWithGAIAAccount) {
+IN_PROC_BROWSER_TEST_P(KioskTest, NotSignedInWithGAIAAccount) {
   // Tests that the kiosk session is not considered to be logged in with a GAIA
   // account.
   StartAppLaunchFromLoginScreen(SimulateNetworkOnlineClosure());
@@ -898,18 +851,18 @@ IN_PROC_BROWSER_TEST_F(KioskTest, NotSignedInWithGAIAAccount) {
       SigninManagerFactory::GetForProfile(app_profile)->IsAuthenticated());
 }
 
-IN_PROC_BROWSER_TEST_F(KioskTest, PRE_LaunchAppNetworkDown) {
+IN_PROC_BROWSER_TEST_P(KioskTest, PRE_LaunchAppNetworkDown) {
   // Tests the network down case for the initial app download and launch.
   RunAppLaunchNetworkDownTest();
 }
 
-IN_PROC_BROWSER_TEST_F(KioskTest, LaunchAppNetworkDown) {
+IN_PROC_BROWSER_TEST_P(KioskTest, LaunchAppNetworkDown) {
   // Tests the network down case for launching an existing app that is
   // installed in PRE_LaunchAppNetworkDown.
   RunAppLaunchNetworkDownTest();
 }
 
-IN_PROC_BROWSER_TEST_F(KioskTest, LaunchAppWithNetworkConfigAccelerator) {
+IN_PROC_BROWSER_TEST_P(KioskTest, LaunchAppWithNetworkConfigAccelerator) {
   ScopedCanConfigureNetwork can_configure_network(true, false);
 
   // Block app loading until the network screen is shown.
@@ -946,7 +899,7 @@ IN_PROC_BROWSER_TEST_F(KioskTest, LaunchAppWithNetworkConfigAccelerator) {
   WaitForAppLaunchSuccess();
 }
 
-IN_PROC_BROWSER_TEST_F(KioskTest, LaunchAppNetworkDownConfigureNotAllowed) {
+IN_PROC_BROWSER_TEST_P(KioskTest, LaunchAppNetworkDownConfigureNotAllowed) {
   // Mock network could not be configured.
   ScopedCanConfigureNetwork can_configure_network(false, true);
 
@@ -964,7 +917,7 @@ IN_PROC_BROWSER_TEST_F(KioskTest, LaunchAppNetworkDownConfigureNotAllowed) {
   WaitForAppLaunchSuccess();
 }
 
-IN_PROC_BROWSER_TEST_F(KioskTest, LaunchAppNetworkPortal) {
+IN_PROC_BROWSER_TEST_P(KioskTest, LaunchAppNetworkPortal) {
   // Mock network could be configured without the owner password.
   ScopedCanConfigureNetwork can_configure_network(true, false);
 
@@ -983,14 +936,14 @@ IN_PROC_BROWSER_TEST_F(KioskTest, LaunchAppNetworkPortal) {
   WaitForAppLaunchSuccess();
 }
 
-IN_PROC_BROWSER_TEST_F(KioskTest, LaunchAppUserCancel) {
+IN_PROC_BROWSER_TEST_P(KioskTest, LaunchAppUserCancel) {
   // Make fake_cws_ return empty update response.
   set_test_app_version("");
   StartAppLaunchFromLoginScreen(SimulateNetworkOfflineClosure());
   OobeScreenWaiter splash_waiter(OobeDisplay::SCREEN_APP_LAUNCH_SPLASH);
   splash_waiter.Wait();
 
-  CrosSettings::Get()->SetBoolean(
+  settings_helper_.SetBoolean(
       kAccountsPrefDeviceLocalAccountAutoLoginBailoutEnabled, true);
   content::WindowedNotificationObserver signal(
       chrome::NOTIFICATION_APP_TERMINATING,
@@ -1002,7 +955,7 @@ IN_PROC_BROWSER_TEST_F(KioskTest, LaunchAppUserCancel) {
             chromeos::KioskAppLaunchError::Get());
 }
 
-IN_PROC_BROWSER_TEST_F(KioskTest, LaunchInDiagnosticMode) {
+IN_PROC_BROWSER_TEST_P(KioskTest, LaunchInDiagnosticMode) {
   PrepareAppLaunch();
   SimulateNetworkOnline();
 
@@ -1027,7 +980,7 @@ IN_PROC_BROWSER_TEST_F(KioskTest, LaunchInDiagnosticMode) {
   WaitForAppLaunchSuccess();
 }
 
-IN_PROC_BROWSER_TEST_F(KioskTest, AutolaunchWarningCancel) {
+IN_PROC_BROWSER_TEST_P(KioskTest, AutolaunchWarningCancel) {
   EnableConsumerKioskMode();
 
   chromeos::WizardController::SkipPostLoginScreensForTesting();
@@ -1059,7 +1012,7 @@ IN_PROC_BROWSER_TEST_F(KioskTest, AutolaunchWarningCancel) {
   EXPECT_FALSE(KioskAppManager::Get()->IsAutoLaunchEnabled());
 }
 
-IN_PROC_BROWSER_TEST_F(KioskTest, AutolaunchWarningConfirm) {
+IN_PROC_BROWSER_TEST_P(KioskTest, AutolaunchWarningConfirm) {
   EnableConsumerKioskMode();
 
   chromeos::WizardController::SkipPostLoginScreensForTesting();
@@ -1098,7 +1051,7 @@ IN_PROC_BROWSER_TEST_F(KioskTest, AutolaunchWarningConfirm) {
   EXPECT_TRUE(app.was_auto_launched_with_zero_delay);
 }
 
-IN_PROC_BROWSER_TEST_F(KioskTest, KioskEnableCancel) {
+IN_PROC_BROWSER_TEST_P(KioskTest, KioskEnableCancel) {
   chromeos::WizardController::SkipPostLoginScreensForTesting();
   chromeos::WizardController* wizard_controller =
       chromeos::WizardController::default_controller();
@@ -1132,7 +1085,7 @@ IN_PROC_BROWSER_TEST_F(KioskTest, KioskEnableCancel) {
             GetConsumerKioskModeStatus());
 }
 
-IN_PROC_BROWSER_TEST_F(KioskTest, KioskEnableConfirmed) {
+IN_PROC_BROWSER_TEST_P(KioskTest, KioskEnableConfirmed) {
   // Start UI, find menu entry for this app and launch it.
   chromeos::WizardController::SkipPostLoginScreensForTesting();
   chromeos::WizardController* wizard_controller =
@@ -1165,7 +1118,7 @@ IN_PROC_BROWSER_TEST_F(KioskTest, KioskEnableConfirmed) {
             GetConsumerKioskModeStatus());
 }
 
-IN_PROC_BROWSER_TEST_F(KioskTest, KioskEnableAfter2ndSigninScreen) {
+IN_PROC_BROWSER_TEST_P(KioskTest, KioskEnableAfter2ndSigninScreen) {
   chromeos::WizardController::SkipPostLoginScreensForTesting();
   chromeos::WizardController* wizard_controller =
       chromeos::WizardController::default_controller();
@@ -1209,12 +1162,13 @@ IN_PROC_BROWSER_TEST_F(KioskTest, KioskEnableAfter2ndSigninScreen) {
       content::NotificationService::AllSources()).Wait();
 }
 
-IN_PROC_BROWSER_TEST_F(KioskTest, DoNotLaunchWhenUntrusted) {
+IN_PROC_BROWSER_TEST_P(KioskTest, DoNotLaunchWhenUntrusted) {
   PrepareAppLaunch();
   SimulateNetworkOnline();
 
   // Make cros settings untrusted.
-  CrosSettingsPermanentlyUntrustedMaker();
+  settings_helper_.SetTrustedStatus(
+      CrosSettingsProvider::PERMANENTLY_UNTRUSTED);
 
   // Check that the attempt to start a kiosk app fails with an error.
   LaunchApp(test_app_id(), false);
@@ -1234,7 +1188,7 @@ IN_PROC_BROWSER_TEST_F(KioskTest, DoNotLaunchWhenUntrusted) {
 
 // Verifies that a consumer device does not auto-launch kiosk mode when cros
 // settings are untrusted.
-IN_PROC_BROWSER_TEST_F(KioskTest, NoConsumerAutoLaunchWhenUntrusted) {
+IN_PROC_BROWSER_TEST_P(KioskTest, NoConsumerAutoLaunchWhenUntrusted) {
   EnableConsumerKioskMode();
 
   // Wait for and confirm the auto-launch warning.
@@ -1253,14 +1207,15 @@ IN_PROC_BROWSER_TEST_F(KioskTest, NoConsumerAutoLaunchWhenUntrusted) {
       base::FundamentalValue(true));
 
   // Make cros settings untrusted.
-  CrosSettingsPermanentlyUntrustedMaker();
+  settings_helper_.SetTrustedStatus(
+      CrosSettingsProvider::PERMANENTLY_UNTRUSTED);
 
   // Check that the attempt to auto-launch a kiosk app fails with an error.
   OobeScreenWaiter(OobeDisplay::SCREEN_ERROR_MESSAGE).Wait();
 }
 
 // Verifies available volumes for kiosk apps in kiosk session.
-IN_PROC_BROWSER_TEST_F(KioskTest, GetVolumeList) {
+IN_PROC_BROWSER_TEST_P(KioskTest, GetVolumeList) {
   set_test_app_id(kTestGetVolumeListKioskApp);
   set_test_app_version("0.1");
   set_test_crx_file(test_app_id() + ".crx");
@@ -1272,12 +1227,13 @@ IN_PROC_BROWSER_TEST_F(KioskTest, GetVolumeList) {
 
 // Verifies that an enterprise device does not auto-launch kiosk mode when cros
 // settings are untrusted.
-IN_PROC_BROWSER_TEST_F(KioskTest, NoEnterpriseAutoLaunchWhenUntrusted) {
+IN_PROC_BROWSER_TEST_P(KioskTest, NoEnterpriseAutoLaunchWhenUntrusted) {
   PrepareAppLaunch();
   SimulateNetworkOnline();
 
   // Make cros settings untrusted.
-  CrosSettingsPermanentlyUntrustedMaker();
+  settings_helper_.SetTrustedStatus(
+      CrosSettingsProvider::PERMANENTLY_UNTRUSTED);
 
   // Trigger the code that handles auto-launch on enterprise devices. This would
   // normally be called from ShowLoginWizard(), which runs so early that it is
@@ -1309,7 +1265,19 @@ class KioskUpdateTest : public KioskTest {
     KioskTest::TearDown();
   }
 
-  void SetUpOnMainThread() override { KioskTest::SetUpOnMainThread(); }
+  void SetUpOnMainThread() override {
+    // For update tests, we cache the app in the PRE part, and then we load it
+    // in the test, so we need to both store the apps list on teardown (so that
+    // the app manager would accept existing files in its extension cache on the
+    // next startup) and copy the list to our stub settings provider as well.
+    settings_helper_.CopyStoredValue(kAccountsPrefDeviceLocalAccounts);
+    KioskTest::SetUpOnMainThread();
+  }
+
+  void TearDownOnMainThread() override {
+    settings_helper_.StoreCachedDeviceSetting(kAccountsPrefDeviceLocalAccounts);
+    KioskTest::TearDownOnMainThread();
+  }
 
   void PreCacheApp(const std::string& app_id,
                    const std::string& version,
@@ -1437,13 +1405,13 @@ class KioskUpdateTest : public KioskTest {
   DISALLOW_COPY_AND_ASSIGN(KioskUpdateTest);
 };
 
-IN_PROC_BROWSER_TEST_F(KioskUpdateTest, PRE_LaunchOfflineEnabledAppNoNetwork) {
+IN_PROC_BROWSER_TEST_P(KioskUpdateTest, PRE_LaunchOfflineEnabledAppNoNetwork) {
   PreCacheAndLaunchApp(kTestOfflineEnabledKioskApp,
                        "1.0.0",
                        std::string(kTestOfflineEnabledKioskApp) + "_v1.crx");
 }
 
-IN_PROC_BROWSER_TEST_F(KioskUpdateTest, LaunchOfflineEnabledAppNoNetwork) {
+IN_PROC_BROWSER_TEST_P(KioskUpdateTest, LaunchOfflineEnabledAppNoNetwork) {
   set_test_app_id(kTestOfflineEnabledKioskApp);
   StartUIForAppLaunch();
   SimulateNetworkOffline();
@@ -1453,14 +1421,14 @@ IN_PROC_BROWSER_TEST_F(KioskUpdateTest, LaunchOfflineEnabledAppNoNetwork) {
   EXPECT_EQ("1.0.0", GetInstalledAppVersion().GetString());
 }
 
-IN_PROC_BROWSER_TEST_F(KioskUpdateTest,
+IN_PROC_BROWSER_TEST_P(KioskUpdateTest,
                        PRE_LaunchCachedOfflineEnabledAppNoNetwork) {
   PreCacheApp(kTestOfflineEnabledKioskApp,
               "1.0.0",
               std::string(kTestOfflineEnabledKioskApp) + "_v1.crx");
 }
 
-IN_PROC_BROWSER_TEST_F(KioskUpdateTest,
+IN_PROC_BROWSER_TEST_P(KioskUpdateTest,
                        LaunchCachedOfflineEnabledAppNoNetwork) {
   set_test_app_id(kTestOfflineEnabledKioskApp);
   EXPECT_TRUE(
@@ -1475,7 +1443,7 @@ IN_PROC_BROWSER_TEST_F(KioskUpdateTest,
 
 // Network offline, app v1.0 has run before, has cached v2.0 crx and v2.0 should
 // be installed and launched during next launch.
-IN_PROC_BROWSER_TEST_F(KioskUpdateTest,
+IN_PROC_BROWSER_TEST_P(KioskUpdateTest,
                        PRE_LaunchCachedNewVersionOfflineEnabledAppNoNetwork) {
   // Install and launch v1 app.
   PreCacheAndLaunchApp(kTestOfflineEnabledKioskApp,
@@ -1488,7 +1456,7 @@ IN_PROC_BROWSER_TEST_F(KioskUpdateTest,
   EXPECT_EQ("1.0.0", GetInstalledAppVersion().GetString());
 }
 
-IN_PROC_BROWSER_TEST_F(KioskUpdateTest,
+IN_PROC_BROWSER_TEST_P(KioskUpdateTest,
                        LaunchCachedNewVersionOfflineEnabledAppNoNetwork) {
   set_test_app_id(kTestOfflineEnabledKioskApp);
   EXPECT_TRUE(KioskAppManager::Get()->HasCachedCrx(test_app_id()));
@@ -1502,13 +1470,13 @@ IN_PROC_BROWSER_TEST_F(KioskUpdateTest,
   EXPECT_EQ("2.0.0", GetInstalledAppVersion().GetString());
 }
 
-IN_PROC_BROWSER_TEST_F(KioskUpdateTest, PRE_LaunchOfflineEnabledAppNoUpdate) {
+IN_PROC_BROWSER_TEST_P(KioskUpdateTest, PRE_LaunchOfflineEnabledAppNoUpdate) {
   PreCacheAndLaunchApp(kTestOfflineEnabledKioskApp,
                        "1.0.0",
                        std::string(kTestOfflineEnabledKioskApp) + "_v1.crx");
 }
 
-IN_PROC_BROWSER_TEST_F(KioskUpdateTest, LaunchOfflineEnabledAppNoUpdate) {
+IN_PROC_BROWSER_TEST_P(KioskUpdateTest, LaunchOfflineEnabledAppNoUpdate) {
   set_test_app_id(kTestOfflineEnabledKioskApp);
   fake_cws()->SetNoUpdate(test_app_id());
 
@@ -1520,13 +1488,13 @@ IN_PROC_BROWSER_TEST_F(KioskUpdateTest, LaunchOfflineEnabledAppNoUpdate) {
   EXPECT_EQ("1.0.0", GetInstalledAppVersion().GetString());
 }
 
-IN_PROC_BROWSER_TEST_F(KioskUpdateTest, PRE_LaunchOfflineEnabledAppHasUpdate) {
+IN_PROC_BROWSER_TEST_P(KioskUpdateTest, PRE_LaunchOfflineEnabledAppHasUpdate) {
   PreCacheAndLaunchApp(kTestOfflineEnabledKioskApp,
                        "1.0.0",
                        std::string(kTestOfflineEnabledKioskApp) + "_v1.crx");
 }
 
-IN_PROC_BROWSER_TEST_F(KioskUpdateTest, LaunchOfflineEnabledAppHasUpdate) {
+IN_PROC_BROWSER_TEST_P(KioskUpdateTest, LaunchOfflineEnabledAppHasUpdate) {
   set_test_app_id(kTestOfflineEnabledKioskApp);
   fake_cws()->SetUpdateCrx(
       test_app_id(), "ajoggoflpgplnnjkjamcmbepjdjdnpdp.crx", "2.0.0");
@@ -1541,7 +1509,7 @@ IN_PROC_BROWSER_TEST_F(KioskUpdateTest, LaunchOfflineEnabledAppHasUpdate) {
 
 // Pre-cache v1 kiosk app, then launch the app without network,
 // plug in usb stick with a v2 app for offline updating.
-IN_PROC_BROWSER_TEST_F(KioskUpdateTest, PRE_UsbStickUpdateAppNoNetwork) {
+IN_PROC_BROWSER_TEST_P(KioskUpdateTest, PRE_UsbStickUpdateAppNoNetwork) {
   PreCacheApp(kTestOfflineEnabledKioskApp,
               "1.0.0",
               std::string(kTestOfflineEnabledKioskApp) + "_v1.crx");
@@ -1572,7 +1540,7 @@ IN_PROC_BROWSER_TEST_F(KioskUpdateTest, PRE_UsbStickUpdateAppNoNetwork) {
 }
 
 // Restart the device, verify the app has been updated to v2.
-IN_PROC_BROWSER_TEST_F(KioskUpdateTest, UsbStickUpdateAppNoNetwork) {
+IN_PROC_BROWSER_TEST_P(KioskUpdateTest, UsbStickUpdateAppNoNetwork) {
   // Verify the kiosk app has been updated to v2.
   set_test_app_id(kTestOfflineEnabledKioskApp);
   StartUIForAppLaunch();
@@ -1583,7 +1551,7 @@ IN_PROC_BROWSER_TEST_F(KioskUpdateTest, UsbStickUpdateAppNoNetwork) {
 }
 
 // Usb stick is plugged in without a manifest file on it.
-IN_PROC_BROWSER_TEST_F(KioskUpdateTest, UsbStickUpdateAppNoManifest) {
+IN_PROC_BROWSER_TEST_P(KioskUpdateTest, UsbStickUpdateAppNoManifest) {
   PreCacheAndLaunchApp(kTestOfflineEnabledKioskApp,
                        "1.0.0",
                        std::string(kTestOfflineEnabledKioskApp) + "_v1.crx");
@@ -1605,7 +1573,7 @@ IN_PROC_BROWSER_TEST_F(KioskUpdateTest, UsbStickUpdateAppNoManifest) {
 }
 
 // Usb stick is plugged in with a bad manifest file on it.
-IN_PROC_BROWSER_TEST_F(KioskUpdateTest, UsbStickUpdateAppBadManifest) {
+IN_PROC_BROWSER_TEST_P(KioskUpdateTest, UsbStickUpdateAppBadManifest) {
   PreCacheAndLaunchApp(kTestOfflineEnabledKioskApp,
                        "1.0.0",
                        std::string(kTestOfflineEnabledKioskApp) + "_v1.crx");
@@ -1628,7 +1596,7 @@ IN_PROC_BROWSER_TEST_F(KioskUpdateTest, UsbStickUpdateAppBadManifest) {
 
 // Usb stick is plugged in with a lower version of crx file specified in
 // manifest.
-IN_PROC_BROWSER_TEST_F(KioskUpdateTest, UsbStickUpdateAppLowerAppVersion) {
+IN_PROC_BROWSER_TEST_P(KioskUpdateTest, UsbStickUpdateAppLowerAppVersion) {
   // Precache v2 version of app.
   PreCacheAndLaunchApp(kTestOfflineEnabledKioskApp,
                        "2.0.0",
@@ -1652,7 +1620,7 @@ IN_PROC_BROWSER_TEST_F(KioskUpdateTest, UsbStickUpdateAppLowerAppVersion) {
 
 // Usb stick is plugged in with a v1 crx file, although the manifest says
 // this is a v3 version.
-IN_PROC_BROWSER_TEST_F(KioskUpdateTest, UsbStickUpdateAppLowerCrxVersion) {
+IN_PROC_BROWSER_TEST_P(KioskUpdateTest, UsbStickUpdateAppLowerCrxVersion) {
   PreCacheAndLaunchApp(kTestOfflineEnabledKioskApp,
                        "2.0.0",
                        std::string(kTestOfflineEnabledKioskApp) + ".crx");
@@ -1675,7 +1643,7 @@ IN_PROC_BROWSER_TEST_F(KioskUpdateTest, UsbStickUpdateAppLowerCrxVersion) {
 }
 
 // Usb stick is plugged in with a bad crx file.
-IN_PROC_BROWSER_TEST_F(KioskUpdateTest, UsbStickUpdateAppBadCrx) {
+IN_PROC_BROWSER_TEST_P(KioskUpdateTest, UsbStickUpdateAppBadCrx) {
   PreCacheAndLaunchApp(kTestOfflineEnabledKioskApp,
                        "1.0.0",
                        std::string(kTestOfflineEnabledKioskApp) + "_v1.crx");
@@ -1697,13 +1665,13 @@ IN_PROC_BROWSER_TEST_F(KioskUpdateTest, UsbStickUpdateAppBadCrx) {
   EXPECT_EQ("1.0.0", cached_version);
 }
 
-IN_PROC_BROWSER_TEST_F(KioskUpdateTest, PRE_PermissionChange) {
+IN_PROC_BROWSER_TEST_P(KioskUpdateTest, PRE_PermissionChange) {
   PreCacheAndLaunchApp(kTestOfflineEnabledKioskApp,
                        "2.0.0",
                        std::string(kTestOfflineEnabledKioskApp) + ".crx");
 }
 
-IN_PROC_BROWSER_TEST_F(KioskUpdateTest, PermissionChange) {
+IN_PROC_BROWSER_TEST_P(KioskUpdateTest, PermissionChange) {
   set_test_app_id(kTestOfflineEnabledKioskApp);
   set_test_app_version("2.0.0");
   set_test_crx_file(test_app_id() + "_v2_permission_change.crx");
@@ -1716,7 +1684,7 @@ IN_PROC_BROWSER_TEST_F(KioskUpdateTest, PermissionChange) {
   EXPECT_EQ("2.0.0", GetInstalledAppVersion().GetString());
 }
 
-IN_PROC_BROWSER_TEST_F(KioskUpdateTest, PRE_PreserveLocalData) {
+IN_PROC_BROWSER_TEST_P(KioskUpdateTest, PRE_PreserveLocalData) {
   // Installs v1 app and writes some local data.
   set_test_app_id(kTestLocalFsKioskApp);
   set_test_app_version("1.0.0");
@@ -1729,7 +1697,7 @@ IN_PROC_BROWSER_TEST_F(KioskUpdateTest, PRE_PreserveLocalData) {
   ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
 
-IN_PROC_BROWSER_TEST_F(KioskUpdateTest, PreserveLocalData) {
+IN_PROC_BROWSER_TEST_P(KioskUpdateTest, PreserveLocalData) {
   // Update existing v1 app installed in PRE_PreserveLocalData to v2
   // that reads and verifies the local data.
   set_test_app_id(kTestLocalFsKioskApp);
@@ -1751,8 +1719,9 @@ class KioskEnterpriseTest : public KioskTest {
   }
 
   void SetUpInProcessBrowserTestFixture() override {
-    device_policy_test_helper_.MarkAsEnterpriseOwned();
-    device_policy_test_helper_.InstallOwnerKey();
+    policy::DevicePolicyCrosTestHelper::MarkAsEnterpriseOwnedBy(
+        kTestOwnerEmail);
+    settings_helper_.SetCurrentUserIsOwner(false);
 
     KioskTest::SetUpInProcessBrowserTestFixture();
   }
@@ -1795,47 +1764,27 @@ class KioskEnterpriseTest : public KioskTest {
     base::RunLoop().RunUntilIdle();
   }
 
-  static void StorePolicyCallback(const base::Closure& callback, bool result) {
-    ASSERT_TRUE(result);
-    callback.Run();
-  }
-
   void ConfigureKioskAppInPolicy(const std::string& account_id,
                                  const std::string& app_id,
                                  const std::string& update_url) {
-    em::DeviceLocalAccountsProto* accounts =
-        device_policy_test_helper_.device_policy()->payload()
-            .mutable_device_local_accounts();
-    em::DeviceLocalAccountInfoProto* account = accounts->add_account();
-    account->set_account_id(account_id);
-    account->set_type(
-        em::DeviceLocalAccountInfoProto::ACCOUNT_TYPE_KIOSK_APP);
-    account->mutable_kiosk_app()->set_app_id(app_id);
-    if (!update_url.empty())
-      account->mutable_kiosk_app()->set_update_url(update_url);
-    accounts->set_auto_login_id(account_id);
-    em::PolicyData& policy_data =
-        device_policy_test_helper_.device_policy()->policy_data();
-    policy_data.set_service_account_identity(kTestEnterpriseServiceAccountId);
-    device_policy_test_helper_.device_policy()->Build();
-
-    base::RunLoop run_loop;
-    DBusThreadManager::Get()->GetSessionManagerClient()->StoreDevicePolicy(
-        device_policy_test_helper_.device_policy()->GetBlob(),
-        base::Bind(&KioskEnterpriseTest::StorePolicyCallback,
-                   run_loop.QuitClosure()));
-    run_loop.Run();
-
-    DeviceSettingsService::Get()->Load();
+    settings_helper_.SetCurrentUserIsOwner(true);
+    std::vector<policy::DeviceLocalAccount> accounts;
+    accounts.push_back(
+        policy::DeviceLocalAccount(policy::DeviceLocalAccount::TYPE_KIOSK_APP,
+                                   account_id, app_id, update_url));
+    policy::SetDeviceLocalAccounts(owner_settings_service_.get(), accounts);
+    settings_helper_.SetString(kAccountsPrefDeviceLocalAccountAutoLoginId,
+                               account_id);
+    settings_helper_.SetString(kServiceAccountIdentity,
+                               kTestEnterpriseServiceAccountId);
+    settings_helper_.SetCurrentUserIsOwner(false);
   }
-
-  policy::DevicePolicyCrosTestHelper device_policy_test_helper_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(KioskEnterpriseTest);
 };
 
-IN_PROC_BROWSER_TEST_F(KioskEnterpriseTest, EnterpriseKioskApp) {
+IN_PROC_BROWSER_TEST_P(KioskEnterpriseTest, EnterpriseKioskApp) {
   // Prepare Fake CWS to serve app crx.
   set_test_app_id(kTestEnterpriseKioskApp);
   set_test_app_version("1.0.0");
@@ -1890,7 +1839,7 @@ IN_PROC_BROWSER_TEST_F(KioskEnterpriseTest, EnterpriseKioskApp) {
   content::RunAllPendingInMessageLoop();
 }
 
-IN_PROC_BROWSER_TEST_F(KioskEnterpriseTest, PrivateStore) {
+IN_PROC_BROWSER_TEST_P(KioskEnterpriseTest, PrivateStore) {
   set_test_app_id(kTestEnterpriseKioskApp);
 
   const char kPrivateStoreUpdate[] = "/private_store_update";
@@ -1975,7 +1924,7 @@ class KioskHiddenWebUITest : public KioskTest,
   DISALLOW_COPY_AND_ASSIGN(KioskHiddenWebUITest);
 };
 
-IN_PROC_BROWSER_TEST_F(KioskHiddenWebUITest, AutolaunchWarning) {
+IN_PROC_BROWSER_TEST_P(KioskHiddenWebUITest, AutolaunchWarning) {
   // Add a device owner.
   FakeChromeUserManager* user_manager = new FakeChromeUserManager();
   user_manager->AddUser(kTestOwnerEmail);
@@ -2005,5 +1954,14 @@ IN_PROC_BROWSER_TEST_F(KioskHiddenWebUITest, AutolaunchWarning) {
   WaitForWallpaper();
   EXPECT_TRUE(wallpaper_loaded());
 }
+
+INSTANTIATE_TEST_CASE_P(KioskSuite, KioskTest, testing::Bool());
+INSTANTIATE_TEST_CASE_P(KioskUpdateSuite, KioskUpdateTest, testing::Bool());
+INSTANTIATE_TEST_CASE_P(KioskEnterpriseSuite,
+                        KioskEnterpriseTest,
+                        testing::Bool());
+INSTANTIATE_TEST_CASE_P(KioskHiddenWebUISuite,
+                        KioskHiddenWebUITest,
+                        testing::Bool());
 
 }  // namespace chromeos

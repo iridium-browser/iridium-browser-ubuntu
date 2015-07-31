@@ -56,7 +56,7 @@ public:
     PassOwnPtr<FloatingObject> unsafeClone() const;
 
     Type type() const { return static_cast<Type>(m_type); }
-    LayoutBox* layoutObject() const { return m_renderer; }
+    LayoutBox* layoutObject() const { return m_layoutObject; }
 
     bool isPlaced() const { return m_isPlaced; }
     void setIsPlaced(bool placed = true) { m_isPlaced = placed; }
@@ -96,7 +96,7 @@ private:
     explicit FloatingObject(LayoutBox*);
     FloatingObject(LayoutBox*, Type, const LayoutRect&, bool shouldPaint, bool isDescendant);
 
-    LayoutBox* m_renderer;
+    LayoutBox* m_layoutObject;
     RootInlineBox* m_originatingLine;
     LayoutRect m_frameRect;
     int m_paginationStrut; // FIXME: Is this class size-sensitive? Does this need 32-bits?
@@ -130,7 +130,7 @@ typedef FloatingObjectSet::const_iterator FloatingObjectSetIterator;
 typedef PODInterval<int, FloatingObject*> FloatingObjectInterval;
 typedef PODIntervalTree<int, FloatingObject*> FloatingObjectTree;
 typedef PODFreeListArena<PODRedBlackTree<FloatingObjectInterval>::Node> IntervalArena;
-typedef HashMap<LayoutBox*, OwnPtr<FloatingObject>> RendererToFloatInfoMap;
+typedef HashMap<LayoutBox*, OwnPtr<FloatingObject>> LayoutBoxToFloatInfoMap;
 
 class FloatingObjects {
     WTF_MAKE_NONCOPYABLE(FloatingObjects); WTF_MAKE_FAST_ALLOCATED(FloatingObjects);
@@ -139,7 +139,7 @@ public:
     ~FloatingObjects();
 
     void clear();
-    void moveAllToFloatInfoMap(RendererToFloatInfoMap&);
+    void moveAllToFloatInfoMap(LayoutBoxToFloatInfoMap&);
     FloatingObject* add(PassOwnPtr<FloatingObject>);
     void remove(FloatingObject*);
     void addPlacedObject(FloatingObject*);
@@ -181,7 +181,7 @@ private:
     unsigned m_leftObjectsCount;
     unsigned m_rightObjectsCount;
     bool m_horizontalWritingMode;
-    const LayoutBlockFlow* m_renderer;
+    const LayoutBlockFlow* m_layoutObject;
 
     struct FloatBottomCachedValue {
         FloatBottomCachedValue();

@@ -75,7 +75,7 @@ WebInspector.NetworkDataGridNode.prototype = {
      */
     createCells: function()
     {
-        this._showTiming = !WebInspector.settings.networkColorCodeResourceTypes.get() && !this._parentView.calculator().startAtZero;
+        this._showTiming = !WebInspector.moduleSetting("networkColorCodeResourceTypes").get() && !this._parentView.calculator().startAtZero;
         this._nameCell = null;
         this._timelineCell = null;
         this._initiatorCell = null;
@@ -154,11 +154,6 @@ WebInspector.NetworkDataGridNode.prototype = {
     {
         WebInspector.SortableDataGridNode.prototype.select.apply(this, arguments);
         this._parentView.dispatchEventToListeners(WebInspector.NetworkLogView.EventTypes.RequestSelected, this._request);
-
-        WebInspector.notifications.dispatchEventToListeners(WebInspector.UserMetrics.UserAction, {
-            action: WebInspector.UserMetrics.UserActionNames.NetworkRequestSelected,
-            url: this._request.url
-        });
     },
 
     /**

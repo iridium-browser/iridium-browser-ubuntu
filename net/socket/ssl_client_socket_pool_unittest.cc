@@ -109,7 +109,6 @@ class SSLClientSocketPoolTest
         http_proxy_socket_params_(
             new HttpProxySocketParams(proxy_transport_socket_params_,
                                       NULL,
-                                      GURL("http://host"),
                                       std::string(),
                                       HostPortPair("host", 80),
                                       session_->http_auth_cache(),
@@ -149,7 +148,6 @@ class SSLClientSocketPoolTest
         ssl_config_,
         PRIVACY_MODE_DISABLED,
         0,
-        false,
         want_spdy_over_npn));
   }
 
@@ -229,6 +227,8 @@ TEST_P(SSLClientSocketPoolTest, TCPFail) {
   EXPECT_FALSE(handle.is_initialized());
   EXPECT_FALSE(handle.socket());
   EXPECT_FALSE(handle.is_ssl_error());
+  ASSERT_EQ(1u, handle.connection_attempts().size());
+  EXPECT_EQ(ERR_CONNECTION_FAILED, handle.connection_attempts()[0].result);
 }
 
 TEST_P(SSLClientSocketPoolTest, TCPFailAsync) {
@@ -252,6 +252,8 @@ TEST_P(SSLClientSocketPoolTest, TCPFailAsync) {
   EXPECT_FALSE(handle.is_initialized());
   EXPECT_FALSE(handle.socket());
   EXPECT_FALSE(handle.is_ssl_error());
+  ASSERT_EQ(1u, handle.connection_attempts().size());
+  EXPECT_EQ(ERR_CONNECTION_FAILED, handle.connection_attempts()[0].result);
 }
 
 TEST_P(SSLClientSocketPoolTest, BasicDirect) {
@@ -273,6 +275,7 @@ TEST_P(SSLClientSocketPoolTest, BasicDirect) {
   EXPECT_TRUE(handle.is_initialized());
   EXPECT_TRUE(handle.socket());
   TestLoadTimingInfo(handle);
+  EXPECT_EQ(0u, handle.connection_attempts().size());
 }
 
 // Make sure that SSLConnectJob passes on its priority to its
@@ -642,7 +645,7 @@ TEST_P(SSLClientSocketPoolTest, HttpProxyBasic) {
   MockWrite writes[] = {
       MockWrite(SYNCHRONOUS,
                 "CONNECT host:80 HTTP/1.1\r\n"
-                "Host: host\r\n"
+                "Host: host:80\r\n"
                 "Proxy-Connection: keep-alive\r\n"
                 "Proxy-Authorization: Basic Zm9vOmJhcg==\r\n\r\n"),
   };
@@ -677,7 +680,7 @@ TEST_P(SSLClientSocketPoolTest, SetTransportPriorityOnInitHTTP) {
   MockWrite writes[] = {
       MockWrite(SYNCHRONOUS,
                 "CONNECT host:80 HTTP/1.1\r\n"
-                "Host: host\r\n"
+                "Host: host:80\r\n"
                 "Proxy-Connection: keep-alive\r\n"
                 "Proxy-Authorization: Basic Zm9vOmJhcg==\r\n\r\n"),
   };
@@ -705,10 +708,11 @@ TEST_P(SSLClientSocketPoolTest, SetTransportPriorityOnInitHTTP) {
 
 TEST_P(SSLClientSocketPoolTest, HttpProxyBasicAsync) {
   MockWrite writes[] = {
-      MockWrite("CONNECT host:80 HTTP/1.1\r\n"
-                "Host: host\r\n"
-                "Proxy-Connection: keep-alive\r\n"
-                "Proxy-Authorization: Basic Zm9vOmJhcg==\r\n\r\n"),
+      MockWrite(
+          "CONNECT host:80 HTTP/1.1\r\n"
+          "Host: host:80\r\n"
+          "Proxy-Connection: keep-alive\r\n"
+          "Proxy-Authorization: Basic Zm9vOmJhcg==\r\n\r\n"),
   };
   MockRead reads[] = {
       MockRead("HTTP/1.1 200 Connection Established\r\n\r\n"),
@@ -740,9 +744,10 @@ TEST_P(SSLClientSocketPoolTest, HttpProxyBasicAsync) {
 
 TEST_P(SSLClientSocketPoolTest, NeedProxyAuth) {
   MockWrite writes[] = {
-      MockWrite("CONNECT host:80 HTTP/1.1\r\n"
-                "Host: host\r\n"
-                "Proxy-Connection: keep-alive\r\n\r\n"),
+      MockWrite(
+          "CONNECT host:80 HTTP/1.1\r\n"
+          "Host: host:80\r\n"
+          "Proxy-Connection: keep-alive\r\n\r\n"),
   };
   MockRead reads[] = {
       MockRead("HTTP/1.1 407 Proxy Authentication Required\r\n"),

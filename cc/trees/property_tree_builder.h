@@ -24,9 +24,14 @@ class PropertyTreeBuilder {
                                  float device_scale_factor,
                                  const gfx::Rect& viewport,
                                  const gfx::Transform& device_transform,
-                                 TransformTree* transform_tree,
-                                 ClipTree* clip_tree,
-                                 OpacityTree* opacity_tree);
+                                 PropertyTrees* property_trees);
+  static void BuildPropertyTrees(LayerImpl* root_layer,
+                                 const LayerImpl* page_scale_layer,
+                                 float page_scale_factor,
+                                 float device_scale_factor,
+                                 const gfx::Rect& viewport,
+                                 const gfx::Transform& device_transform,
+                                 PropertyTrees* property_trees);
 };
 
 }  // namespace cc

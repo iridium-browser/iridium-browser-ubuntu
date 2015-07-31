@@ -112,7 +112,7 @@ static X509* MakeCertificate(EVP_PKEY* pkey, const SSLIdentityParams& params) {
       !X509_gmtime_adj(X509_get_notAfter(x509), params.not_after))
     goto error;
 
-  if (!X509_sign(x509, pkey, EVP_sha1()))
+  if (!X509_sign(x509, pkey, EVP_sha256()))
     goto error;
 
   BN_free(serial_number);
@@ -322,7 +322,7 @@ std::string OpenSSLCertificate::ToPEMString() const {
 
 void OpenSSLCertificate::ToDER(Buffer* der_buffer) const {
   // In case of failure, make sure to leave the buffer empty.
-  der_buffer->SetData(NULL, 0);
+  der_buffer->SetSize(0);
 
   // Calculates the DER representation of the certificate, from scratch.
   BIO* bio = BIO_new(BIO_s_mem());

@@ -27,11 +27,19 @@ public:
     PassRefPtr<const SkPicture> picture() const { return m_picture; }
 
     DrawingDisplayItem(const DisplayItemClientWrapper& client, Type type, PassRefPtr<const SkPicture> picture)
-        : DisplayItem(client, type), m_picture(picture)
+        : DisplayItem(client, type)
+        , m_picture(picture && picture->approximateOpCount() ? picture : nullptr)
+#if ENABLE(ASSERT)
+        , m_skipUnderInvalidationChecking(false)
+#endif
     {
-        ASSERT(m_picture);
         ASSERT(isDrawingType(type));
     }
+
+#if ENABLE(ASSERT)
+    void setSkipUnderInvalidationChecking() { m_skipUnderInvalidationChecking = true; }
+    bool skipUnderInvalidationChecking() const { return m_skipUnderInvalidationChecking; }
+#endif
 
 private:
 #ifndef NDEBUG
@@ -39,6 +47,10 @@ private:
 #endif
 
     RefPtr<const SkPicture> m_picture;
+
+#if ENABLE(ASSERT)
+    bool m_skipUnderInvalidationChecking;
+#endif
 };
 
 } // namespace blink

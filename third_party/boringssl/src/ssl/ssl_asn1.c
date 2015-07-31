@@ -85,9 +85,10 @@
 
 #include <openssl/bytestring.h>
 #include <openssl/err.h>
+#include <openssl/mem.h>
 #include <openssl/x509.h>
 
-#include "ssl_locl.h"
+#include "internal.h"
 
 
 /* An SSL_SESSION is serialized as the following ASN.1 structure:
@@ -381,7 +382,7 @@ static int d2i_SSL_SESSION_get_string(CBS *cbs, char **out, unsigned tag) {
       OPENSSL_PUT_ERROR(SSL, d2i_SSL_SESSION, ERR_R_MALLOC_FAILURE);
       return 0;
     }
-  } else if (*out) {
+  } else {
     OPENSSL_free(*out);
     *out = NULL;
   }
@@ -409,7 +410,7 @@ static int d2i_SSL_SESSION_get_octet_string(CBS *cbs, uint8_t **out_ptr,
 }
 
 SSL_SESSION *d2i_SSL_SESSION(SSL_SESSION **a, const uint8_t **pp, long length) {
-  SSL_SESSION *ret = NULL;
+  SSL_SESSION *ret, *allocated = NULL;
   CBS cbs, session, cipher, session_id, master_key;
   CBS peer, sid_ctx, peer_sha256, original_handshake_hash;
   int has_peer, has_peer_sha256, extended_master_secret;
@@ -419,8 +420,8 @@ SSL_SESSION *d2i_SSL_SESSION(SSL_SESSION **a, const uint8_t **pp, long length) {
   if (a && *a) {
     ret = *a;
   } else {
-    ret = SSL_SESSION_new();
-    if (ret == NULL) {
+    ret = allocated = SSL_SESSION_new();
+    if (allocated == NULL) {
       goto err;
     }
   }
@@ -525,10 +526,8 @@ SSL_SESSION *d2i_SSL_SESSION(SSL_SESSION **a, const uint8_t **pp, long length) {
   ret->time = session_time;
   ret->timeout = timeout;
 
-  if (ret->peer != NULL) {
-    X509_free(ret->peer);
-    ret->peer = NULL;
-  }
+  X509_free(ret->peer);
+  ret->peer = NULL;
   if (has_peer) {
     const uint8_t *ptr;
     ptr = CBS_data(&peer);
@@ -584,8 +583,6 @@ SSL_SESSION *d2i_SSL_SESSION(SSL_SESSION **a, const uint8_t **pp, long length) {
   return ret;
 
 err:
-  if (a && *a != ret) {
-    SSL_SESSION_free(ret);
-  }
+  SSL_SESSION_free(allocated);
   return NULL;
 }

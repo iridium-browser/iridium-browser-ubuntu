@@ -81,10 +81,8 @@ class VideoAnalyzer : public PacketReceiver,
         dropped_frames_(0),
         last_render_time_(0),
         rtp_timestamp_delta_(0),
-        crit_(CriticalSectionWrapper::CreateCriticalSection()),
         avg_psnr_threshold_(avg_psnr_threshold),
         avg_ssim_threshold_(avg_ssim_threshold),
-        comparison_lock_(CriticalSectionWrapper::CreateCriticalSection()),
         comparison_available_event_(EventWrapper::Create()),
         done_(EventWrapper::Create()) {
     // Create thread pool for CPU-expensive PSNR/SSIM calculations.
@@ -123,17 +121,18 @@ class VideoAnalyzer : public PacketReceiver,
 
   virtual void SetReceiver(PacketReceiver* receiver) { receiver_ = receiver; }
 
-  DeliveryStatus DeliverPacket(const uint8_t* packet, size_t length) override {
+  DeliveryStatus DeliverPacket(MediaType media_type, const uint8_t* packet,
+                               size_t length) override {
     rtc::scoped_ptr<RtpHeaderParser> parser(RtpHeaderParser::Create());
     RTPHeader header;
     parser->Parse(packet, length, &header);
     {
-      CriticalSectionScoped lock(crit_.get());
+      rtc::CritScope lock(&crit_);
       recv_times_[header.timestamp - rtp_timestamp_delta_] =
           Clock::GetRealTimeClock()->CurrentNtpInMilliseconds();
     }
 
-    return receiver_->DeliverPacket(packet, length);
+    return receiver_->DeliverPacket(media_type, packet, length);
   }
 
   void IncomingCapturedFrame(const I420VideoFrame& video_frame) override {
@@ -141,7 +140,7 @@ class VideoAnalyzer : public PacketReceiver,
     copy.set_timestamp(copy.ntp_time_ms() * 90);
 
     {
-      CriticalSectionScoped lock(crit_.get());
+      rtc::CritScope lock(&crit_);
       if (first_send_frame_.IsZeroSize() && rtp_timestamp_delta_ == 0)
         first_send_frame_ = copy;
 
@@ -157,7 +156,7 @@ class VideoAnalyzer : public PacketReceiver,
     parser->Parse(packet, length, &header);
 
     {
-      CriticalSectionScoped lock(crit_.get());
+      rtc::CritScope lock(&crit_);
       if (rtp_timestamp_delta_ == 0) {
         rtp_timestamp_delta_ =
             header.timestamp - first_send_frame_.timestamp();
@@ -180,7 +179,7 @@ class VideoAnalyzer : public PacketReceiver,
         Clock::GetRealTimeClock()->CurrentNtpInMilliseconds();
     uint32_t send_timestamp = video_frame.timestamp() - rtp_timestamp_delta_;
 
-    CriticalSectionScoped lock(crit_.get());
+    rtc::CritScope lock(&crit_);
 
     while (frames_.front().timestamp() < send_timestamp) {
       AddFrameComparison(frames_.front(), last_rendered_frame_, true,
@@ -212,7 +211,7 @@ class VideoAnalyzer : public PacketReceiver,
            kEventSignaled) {
       int frames_processed;
       {
-        CriticalSectionScoped crit(comparison_lock_.get());
+        rtc::CritScope crit(&comparison_lock_);
         frames_processed = frames_processed_;
       }
       if (last_frames_processed == -1) {
@@ -265,7 +264,7 @@ class VideoAnalyzer : public PacketReceiver,
     int64_t recv_time_ms = recv_times_[reference.timestamp()];
     recv_times_.erase(reference.timestamp());
 
-    CriticalSectionScoped crit(comparison_lock_.get());
+    rtc::CritScope crit(&comparison_lock_);
     comparisons_.push_back(FrameComparison(reference,
                                            render,
                                            dropped,
@@ -311,7 +310,7 @@ class VideoAnalyzer : public PacketReceiver,
   }
 
   bool PopComparison(FrameComparison* comparison) {
-    CriticalSectionScoped crit(comparison_lock_.get());
+    rtc::CritScope crit(&comparison_lock_);
     // If AllFramesRecorded() is true, it means we have already popped
     // frames_to_process_ frames from comparisons_, so there is no more work
     // for this thread to be done. frames_processed_ might still be lower if
@@ -329,13 +328,13 @@ class VideoAnalyzer : public PacketReceiver,
 
   // Increment counter for number of frames received for comparison.
   void FrameRecorded() {
-    CriticalSectionScoped crit(comparison_lock_.get());
+    rtc::CritScope crit(&comparison_lock_);
     ++frames_recorded_;
   }
 
   // Returns true if all frames to be compared have been taken from the queue.
   bool AllFramesRecorded() {
-    CriticalSectionScoped crit(comparison_lock_.get());
+    rtc::CritScope crit(&comparison_lock_);
     assert(frames_recorded_ <= frames_to_process_);
     return frames_recorded_ == frames_to_process_;
   }
@@ -343,14 +342,14 @@ class VideoAnalyzer : public PacketReceiver,
   // Increase count of number of frames processed. Returns true if this was the
   // last frame to be processed.
   bool FrameProcessed() {
-    CriticalSectionScoped crit(comparison_lock_.get());
+    rtc::CritScope crit(&comparison_lock_);
     ++frames_processed_;
     assert(frames_processed_ <= frames_to_process_);
     return frames_processed_ == frames_to_process_;
   }
 
   void PrintResults() {
-    CriticalSectionScoped crit(comparison_lock_.get());
+    rtc::CritScope crit(&comparison_lock_);
     PrintResult("psnr", psnr_, " dB");
     PrintResult("ssim", ssim_, "");
     PrintResult("sender_time", sender_time_, " ms");
@@ -368,7 +367,7 @@ class VideoAnalyzer : public PacketReceiver,
     double psnr = I420PSNR(&comparison.reference, &comparison.render);
     double ssim = I420SSIM(&comparison.reference, &comparison.render);
 
-    CriticalSectionScoped crit(comparison_lock_.get());
+    rtc::CritScope crit(&comparison_lock_);
     psnr_.AddSample(psnr);
     ssim_.AddSample(ssim);
     if (comparison.dropped) {
@@ -411,7 +410,7 @@ class VideoAnalyzer : public PacketReceiver,
   int64_t last_render_time_;
   uint32_t rtp_timestamp_delta_;
 
-  const rtc::scoped_ptr<CriticalSectionWrapper> crit_;
+  rtc::CriticalSection crit_;
   std::deque<I420VideoFrame> frames_ GUARDED_BY(crit_);
   I420VideoFrame last_rendered_frame_ GUARDED_BY(crit_);
   std::map<uint32_t, int64_t> send_times_ GUARDED_BY(crit_);
@@ -420,7 +419,7 @@ class VideoAnalyzer : public PacketReceiver,
   const double avg_psnr_threshold_;
   const double avg_ssim_threshold_;
 
-  const rtc::scoped_ptr<CriticalSectionWrapper> comparison_lock_;
+  rtc::CriticalSection comparison_lock_;
   std::vector<ThreadWrapper*> comparison_thread_pool_;
   const rtc::scoped_ptr<EventWrapper> comparison_available_event_;
   std::deque<FrameComparison> comparisons_ GUARDED_BY(comparison_lock_);
@@ -460,7 +459,7 @@ void FullStackTest::RunTest(const FullStackTestParams& params) {
   stream->max_framerate = params.clip.fps;
 
   if (params.screenshare) {
-    encoder_config_.content_type = VideoEncoderConfig::kScreenshare;
+    encoder_config_.content_type = VideoEncoderConfig::ContentType::kScreen;
     encoder_config_.min_transmit_bitrate_bps = 400 * 1000;
     VideoCodecVP8 vp8_settings = VideoEncoder::GetDefaultVp8Settings();
     vp8_settings.denoisingOn = false;

@@ -36,8 +36,6 @@ void _sanitizer_options_link_helper() { }
 
 #if defined(ADDRESS_SANITIZER)
 // Default options for AddressSanitizer in various configurations:
-//   strict_memcmp=1 - disable the strict memcmp() checking
-//     (http://crbug.com/178677 and http://crbug.com/178404).
 //   malloc_context_size=5 - limit the size of stack traces collected by ASan
 //     for each malloc/free by 5 frames. These stack traces tend to accumulate
 //     very fast in applications using JIT (v8 in Chrome's case), see
@@ -52,8 +50,6 @@ void _sanitizer_options_link_helper() { }
 //     they reside in shared memory). This option is going to be deprecated in
 //     upstream AddressSanitizer and must not be used anywhere except the
 //     official builds.
-//   replace_intrin=0 - do not intercept memcpy(), memmove() and memset() to
-//     work around http://crbug.com/162461 (ASan report in OpenCL on Mac).
 //   check_printf=1 - check the memory accesses to printf (and other formatted
 //     output routines) arguments.
 //   use_sigaltstack=1 - handle signals on an alternate signal stack. Useful
@@ -66,32 +62,28 @@ void _sanitizer_options_link_helper() { }
 //     so the slow unwinder may not work properly.
 //   detect_stack_use_after_return=1 - use fake stack to delay the reuse of
 //     stack allocations and detect stack-use-after-return errors.
-//   detect_container_overflow=0 - do not detect overflows in containers
-//     until crbug.com/459632 is fixed.
 #if defined(OS_LINUX)
 #if defined(GOOGLE_CHROME_BUILD)
 // Default AddressSanitizer options for the official build. These do not affect
 // tests on buildbots (which don't set GOOGLE_CHROME_BUILD) or non-official
 // Chromium builds.
 const char kAsanDefaultOptions[] =
-    "legacy_pthread_cond=1 malloc_context_size=5 strict_memcmp=0 "
+    "legacy_pthread_cond=1 malloc_context_size=5 "
     "symbolize=false check_printf=1 use_sigaltstack=1 detect_leaks=0 "
-    "strip_path_prefix=Release/../../ fast_unwind_on_fatal=1 "
-    "detect_container_overflow=0 ";
+    "strip_path_prefix=Release/../../ fast_unwind_on_fatal=1";
 #else
 // Default AddressSanitizer options for buildbots and non-official builds.
 const char *kAsanDefaultOptions =
-    "strict_memcmp=0 symbolize=false check_printf=1 use_sigaltstack=1 "
+    "symbolize=false check_printf=1 use_sigaltstack=1 "
     "detect_leaks=0 strip_path_prefix=Release/../../ fast_unwind_on_fatal=1 "
-    "detect_stack_use_after_return=1 detect_container_overflow=0 ";
+    "detect_stack_use_after_return=1 ";
 #endif  // GOOGLE_CHROME_BUILD
 
 #elif defined(OS_MACOSX)
 const char *kAsanDefaultOptions =
-    "strict_memcmp=0 replace_intrin=0 check_printf=1 use_sigaltstack=1 "
+    "check_printf=1 use_sigaltstack=1 "
     "strip_path_prefix=Release/../../ fast_unwind_on_fatal=1 "
-    "detect_stack_use_after_return=1 detect_odr_violation=0 "
-    "detect_container_overflow=0 ";
+    "detect_stack_use_after_return=1 detect_odr_violation=0 ";
 static const char kNaClDefaultOptions[] = "handle_segv=0";
 static const char kNaClFlag[] = "--type=nacl-loader";
 #endif  // OS_LINUX
@@ -111,6 +103,12 @@ SANITIZER_HOOK_ATTRIBUTE const char *__asan_default_options() {
   }
 #endif
   return kAsanDefaultOptions;
+}
+
+extern "C" char kASanDefaultSuppressions[];
+
+SANITIZER_HOOK_ATTRIBUTE const char *__asan_default_suppressions() {
+  return kASanDefaultSuppressions;
 }
 #endif  // OS_LINUX || OS_MACOSX
 #endif  // ADDRESS_SANITIZER

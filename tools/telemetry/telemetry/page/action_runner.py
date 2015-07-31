@@ -11,6 +11,8 @@ from telemetry.internal.actions.javascript_click import ClickElementAction
 from telemetry.internal.actions.loop import LoopAction
 from telemetry.internal.actions.mouse_click import MouseClickAction
 from telemetry.internal.actions.navigate import NavigateAction
+from telemetry.internal.actions.page_action import GESTURE_SOURCE_DEFAULT
+from telemetry.internal.actions.page_action import SUPPORTED_GESTURE_SOURCES
 from telemetry.internal.actions.pinch import PinchAction
 from telemetry.internal.actions.play import PlayAction
 from telemetry.internal.actions.repaint_continuously import (
@@ -34,14 +36,22 @@ class ActionRunner(object):
     action.WillRunAction(self._tab)
     action.RunAction(self._tab)
 
-  def BeginInteraction(self, label, repeatable=False):
-    """Marks the beginning of an interaction record.
+  def CreateInteraction(self, label, repeatable=False):
+    """ Create an action.Interaction object that issues interaction record.
 
     An interaction record is a labeled time period containing
     interaction that developers care about. Each set of metrics
-    specified in flags will be calculated for this time period.. The
-    End() method in the returned object must be called once to mark
-    the end of the timeline.
+    specified in flags will be calculated for this time period.
+
+    To mark the start of interaction record, call Begin() method on the returned
+    object. To mark the finish of interaction record, call End() method on
+    it. Or better yet, use the with statement to create an
+    interaction record that covers the actions in the with block.
+
+    e.g:
+      with action_runner.CreateInteraction('Animation-1'):
+        action_runner.TapElement(...)
+        action_runner.WaitForJavaScriptCondition(...)
 
     Args:
       label: A label for this particular interaction. This can be any
@@ -49,17 +59,19 @@ class ActionRunner(object):
       repeatable: Whether other interactions may use the same logical name
           as this interaction. All interactions with the same logical name must
           have the same flags.
+
+    Returns:
+      An instance of action_runner.Interaction
     """
     flags = []
     if repeatable:
       flags.append(timeline_interaction_record.REPEATABLE)
 
-    interaction = Interaction(self._tab, label, flags)
-    interaction.Begin()
-    return interaction
+    return Interaction(self._tab, label, flags)
 
-  def BeginGestureInteraction(self, label, repeatable=False):
-    """Marks the beginning of a gesture-based interaction record.
+  def CreateGestureInteraction(self, label, repeatable=False):
+    """ Create an action.Interaction object that issues gesture-based
+    interaction record.
 
     This is similar to normal interaction record, but it will
     auto-narrow the interaction time period to only include the
@@ -69,14 +81,21 @@ class ActionRunner(object):
 
     The interaction record label will be prepended with 'Gesture_'.
 
+    e.g:
+      with action_runner.CreateGestureInteraction('Scroll-1'):
+        action_runner.ScrollPage()
+
     Args:
       label: A label for this particular interaction. This can be any
           user-defined string, but must not contain '/'.
       repeatable: Whether other interactions may use the same logical name
           as this interaction. All interactions with the same logical name must
           have the same flags.
+
+    Returns:
+      An instance of action_runner.Interaction
     """
-    return self.BeginInteraction('Gesture_' + label, repeatable)
+    return self.CreateInteraction('Gesture_' + label, repeatable)
 
   def NavigateToPage(self, page, timeout_in_seconds=60):
     """Navigates to the given page.
@@ -317,7 +336,8 @@ class ActionRunner(object):
 
   def ScrollPage(self, left_start_ratio=0.5, top_start_ratio=0.5,
                  direction='down', distance=None, distance_expr=None,
-                 speed_in_pixels_per_second=800, use_touch=False):
+                 speed_in_pixels_per_second=800, use_touch=False,
+                 synthetic_gesture_source=GESTURE_SOURCE_DEFAULT):
     """Perform scroll gesture on the page.
 
     You may specify distance or distance_expr, but not both. If
@@ -332,24 +352,28 @@ class ActionRunner(object):
           gesture, as a ratio of the visible bounding rectangle for
           document.body.
       direction: The direction of scroll, either 'left', 'right',
-          'up', or 'down'
+          'up', 'down', 'upleft', 'upright', 'downleft', or 'downright'
       distance: The distance to scroll (in pixel).
       distance_expr: A JavaScript expression (as string) that can be
           evaluated to compute scroll distance. Example:
           'window.scrollTop' or '(function() { return crazyMath(); })()'.
       speed_in_pixels_per_second: The speed of the gesture (in pixels/s).
       use_touch: Whether scrolling should be done with touch input.
+      synthetic_gesture_source: the source input device type for the
+          synthetic gesture: 'DEFAULT', 'TOUCH' or 'MOUSE'.
     """
+    assert synthetic_gesture_source in SUPPORTED_GESTURE_SOURCES
     self._RunAction(ScrollAction(
         left_start_ratio=left_start_ratio, top_start_ratio=top_start_ratio,
         direction=direction, distance=distance, distance_expr=distance_expr,
         speed_in_pixels_per_second=speed_in_pixels_per_second,
-        use_touch=use_touch))
+        use_touch=use_touch, synthetic_gesture_source=synthetic_gesture_source))
 
   def ScrollElement(self, selector=None, text=None, element_function=None,
                     left_start_ratio=0.5, top_start_ratio=0.5,
                     direction='down', distance=None, distance_expr=None,
-                    speed_in_pixels_per_second=800, use_touch=False):
+                    speed_in_pixels_per_second=800, use_touch=False,
+                    synthetic_gesture_source=GESTURE_SOURCE_DEFAULT):
     """Perform scroll gesture on the element.
 
     The element may be selected via selector, text, or element_function.
@@ -372,20 +396,23 @@ class ActionRunner(object):
           gesture, as a ratio of the visible bounding rectangle for
           the element.
       direction: The direction of scroll, either 'left', 'right',
-          'up', or 'down'
+          'up', 'down', 'upleft', 'upright', 'downleft', or 'downright'
       distance: The distance to scroll (in pixel).
       distance_expr: A JavaScript expression (as string) that can be
           evaluated to compute scroll distance. Example:
           'window.scrollTop' or '(function() { return crazyMath(); })()'.
       speed_in_pixels_per_second: The speed of the gesture (in pixels/s).
       use_touch: Whether scrolling should be done with touch input.
+      synthetic_gesture_source: the source input device type for the
+          synthetic gesture: 'DEFAULT', 'TOUCH' or 'MOUSE'.
     """
+    assert synthetic_gesture_source in SUPPORTED_GESTURE_SOURCES
     self._RunAction(ScrollAction(
         selector=selector, text=text, element_function=element_function,
         left_start_ratio=left_start_ratio, top_start_ratio=top_start_ratio,
         direction=direction, distance=distance, distance_expr=distance_expr,
         speed_in_pixels_per_second=speed_in_pixels_per_second,
-        use_touch=use_touch))
+        use_touch=use_touch, synthetic_gesture_source=synthetic_gesture_source))
 
   def ScrollBouncePage(self, left_start_ratio=0.5, top_start_ratio=0.5,
                        direction='down', distance=100,
@@ -406,7 +433,7 @@ class ActionRunner(object):
           gesture, as a ratio of the visible bounding rectangle for
           document.body.
       direction: The direction of scroll, either 'left', 'right',
-          'up', or 'down'
+          'up', 'down', 'upleft', 'upright', 'downleft', or 'downright'
       distance: The distance to scroll (in pixel).
       overscroll: The number of additional pixels to scroll back, in
           addition to the givendistance.
@@ -444,7 +471,7 @@ class ActionRunner(object):
           gesture, as a ratio of the visible bounding rectangle for
           document.body.
       direction: The direction of scroll, either 'left', 'right',
-          'up', or 'down'
+          'up', 'down', 'upleft', 'upright', 'downleft', or 'downright'
       distance: The distance to scroll (in pixel).
       overscroll: The number of additional pixels to scroll back, in
           addition to the givendistance.
@@ -623,6 +650,18 @@ class Interaction(object):
     self._label = label
     self._flags = flags
     self._started = False
+
+  def __enter__(self):
+    self.Begin()
+    return self
+
+  def __exit__(self, exc_type, exc_value, traceback):
+    if exc_value is None:
+      self.End()
+    else:
+      logging.warning(
+          'Exception was raised in the with statement block, the end of '
+          'interaction record is not marked.')
 
   def Begin(self):
     assert not self._started

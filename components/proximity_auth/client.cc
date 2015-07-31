@@ -7,9 +7,9 @@
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/values.h"
-#include "components/proximity_auth/base64url.h"
 #include "components/proximity_auth/client_observer.h"
 #include "components/proximity_auth/connection.h"
+#include "components/proximity_auth/cryptauth/base64url.h"
 #include "components/proximity_auth/remote_status_update.h"
 #include "components/proximity_auth/secure_context.h"
 #include "components/proximity_auth/wire_message.h"
@@ -177,10 +177,10 @@ void Client::HandleUnlockResponseMessage(const base::DictionaryValue& message) {
   FOR_EACH_OBSERVER(ClientObserver, observers_, OnUnlockResponse(true));
 }
 
-void Client::OnConnectionStatusChanged(const Connection& connection,
+void Client::OnConnectionStatusChanged(Connection* connection,
                                        Connection::Status old_status,
                                        Connection::Status new_status) {
-  DCHECK_EQ(&connection, connection_.get());
+  DCHECK_EQ(connection, connection_.get());
   if (new_status != Connection::CONNECTED) {
     VLOG(1) << "[Client] Secure channel disconnected...";
     connection_->RemoveObserver(this);

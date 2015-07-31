@@ -63,6 +63,12 @@ enum ServiceWorkerStatusCode {
   // An error occurred during initial script evaluation.
   SERVICE_WORKER_ERROR_SCRIPT_EVALUATE_FAILED,
 
+  // Generic error to indicate failure to read/write the disk cache.
+  SERVICE_WORKER_ERROR_DISK_CACHE,
+
+  // The worker is in REDUNDANT state.
+  SERVICE_WORKER_ERROR_REDUNDANT,
+
   SERVICE_WORKER_ERROR_MAX_VALUE
 };
 

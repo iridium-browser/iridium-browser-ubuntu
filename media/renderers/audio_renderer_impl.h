@@ -36,6 +36,7 @@
 
 namespace base {
 class SingleThreadTaskRunner;
+class TickClock;
 }
 
 namespace media {
@@ -68,10 +69,12 @@ class MEDIA_EXPORT AudioRendererImpl
   // TimeSource implementation.
   void StartTicking() override;
   void StopTicking() override;
-  void SetPlaybackRate(float rate) override;
+  void SetPlaybackRate(double rate) override;
   void SetMediaTime(base::TimeDelta time) override;
   base::TimeDelta CurrentMediaTime() override;
-  base::TimeTicks GetWallClockTime(base::TimeDelta time) override;
+  bool GetWallClockTimes(
+      const std::vector<base::TimeDelta>& media_timestamps,
+      std::vector<base::TimeTicks>* wall_clock_times) override;
 
   // AudioRenderer implementation.
   void Initialize(DemuxerStream* stream,
@@ -173,10 +176,6 @@ class MEDIA_EXPORT AudioRendererImpl
   // completed.
   void DoFlush_Locked();
 
-  // Calls |decoder_|.Reset() and arranges for ResetDecoderDone() to get
-  // called when the reset completes.
-  void ResetDecoder();
-
   // Called when the |decoder_|.Reset() has completed.
   void ResetDecoderDone();
 
@@ -219,6 +218,9 @@ class MEDIA_EXPORT AudioRendererImpl
   // Callback provided to Flush().
   base::Closure flush_cb_;
 
+  // Overridable tick clock for testing.
+  scoped_ptr<base::TickClock> tick_clock_;
+
   // After Initialize() has completed, all variables below must be accessed
   // under |lock_|. ------------------------------------------------------------
   base::Lock lock_;
@@ -259,7 +261,8 @@ class MEDIA_EXPORT AudioRendererImpl
   base::TimeTicks last_render_time_;
 
   // Set to the value of |last_render_time_| when StopRendering_Locked() is
-  // called for any reason.  Cleared by the next successful Render() call.
+  // called for any reason.  Cleared by the next successful Render() call after
+  // being used to adjust for lost time between the last call.
   base::TimeTicks stop_rendering_time_;
 
   // Set upon receipt of the first decoded buffer after a StartPlayingFrom().

@@ -39,7 +39,7 @@ class DeprecatedPaintLayerCompositor;
 
 // A GraphicsLayerPaintInfo contains all the info needed to paint a partial subtree of Layers into a GraphicsLayer.
 struct GraphicsLayerPaintInfo {
-    DeprecatedPaintLayer* renderLayer;
+    DeprecatedPaintLayer* paintLayer;
 
     LayoutRect compositedBounds;
 
@@ -47,10 +47,10 @@ struct GraphicsLayerPaintInfo {
     IntRect localClipRectForSquashedLayer;
 
     // Offset describing where this squashed Layer paints into the shared GraphicsLayer backing.
-    IntSize offsetFromRenderer;
-    bool offsetFromRendererSet;
+    IntSize offsetFromLayoutObject;
+    bool offsetFromLayoutObjectSet;
 
-    GraphicsLayerPaintInfo() : renderLayer(0), offsetFromRendererSet(false) { }
+    GraphicsLayerPaintInfo() : paintLayer(0), offsetFromLayoutObjectSet(false) { }
 };
 
 enum GraphicsLayerUpdateScope {
@@ -59,7 +59,7 @@ enum GraphicsLayerUpdateScope {
     GraphicsLayerUpdateSubtree,
 };
 
-// CompositedDeprecatedPaintLayerMapping keeps track of how Layers of the render tree correspond to
+// CompositedDeprecatedPaintLayerMapping keeps track of how Layers of the layout tree correspond to
 // GraphicsLayers of the composited layer tree. Each instance of CompositedDeprecatedPaintLayerMapping
 // manages a small cluster of GraphicsLayers and the references to which Layers
 // and paint phases contribute to each GraphicsLayer.
@@ -109,21 +109,20 @@ public:
     GraphicsLayer* parentForSublayers() const;
     GraphicsLayer* childForSuperlayers() const;
 
+    bool hasChildTransformLayer() const { return m_childTransformLayer; }
     GraphicsLayer* childTransformLayer() const { return m_childTransformLayer.get(); }
 
     GraphicsLayer* squashingContainmentLayer() const { return m_squashingContainmentLayer.get(); }
     GraphicsLayer* squashingLayer() const { return m_squashingLayer.get(); }
-    // Contains the bottommost layer in the hierarchy that can contain the children transform.
-    GraphicsLayer* layerForChildrenTransform() const;
 
     void setSquashingContentsNeedDisplay();
     void setContentsNeedDisplay();
-    // r is in the coordinate space of the layer's render object
+    // LayoutRect is in the coordinate space of the layer's layout object.
     void setContentsNeedDisplayInRect(const LayoutRect&, PaintInvalidationReason);
 
     void invalidateDisplayItemClient(const DisplayItemClientWrapper&);
 
-    // Notification from the renderer that its content changed.
+    // Notification from the layoutObject that its content changed.
     void contentChanged(ContentChangeType);
 
     LayoutRect compositedBounds() const { return m_compositedBounds; }
@@ -240,7 +239,7 @@ private:
     bool requiresScrollCornerLayer() const { return m_owningLayer.scrollableArea() && !m_owningLayer.scrollableArea()->scrollCornerAndResizerRect().isEmpty(); }
     bool updateScrollingLayers(bool scrollingLayers);
     void updateScrollParent(DeprecatedPaintLayer*);
-    void updateClipParent();
+    void updateClipParent(DeprecatedPaintLayer* scrollParent);
     bool updateSquashingLayers(bool needsSquashingLayers);
     void updateDrawsContent();
     void updateChildrenTransform();
@@ -263,17 +262,17 @@ private:
     void updateIsRootForIsolatedGroup();
     void updateScrollBlocksOn(const ComputedStyle&);
     // Return the opacity value that this layer should use for compositing.
-    float compositingOpacity(float rendererOpacity) const;
+    float compositingOpacity(float layoutObjectOpacity) const;
 
     bool paintsChildren() const;
 
-    // Returns true if this layer has content that needs to be rendered by painting into the backing store.
+    // Returns true if this layer has content that needs to be displayed by painting into the backing store.
     bool containsPaintedContent() const;
     // Returns true if the Layer just contains an image that we can composite directly.
     bool isDirectlyCompositedImage() const;
     void updateImageContents();
 
-    Color rendererBackgroundColor() const;
+    Color layoutObjectBackgroundColor() const;
     void updateBackgroundColor();
     void updateContentsRect();
     void updateContentsOffsetInCompositingLayer(const IntPoint& snappedOffsetFromCompositedAncestor, const IntPoint& graphicsLayerParentLocation);
@@ -293,7 +292,7 @@ private:
 
     // Return true if |m_owningLayer|'s compositing ancestor is not a descendant (inclusive) of the
     // clipping container for |m_owningLayer|.
-    bool owningLayerClippedByLayerNotAboveCompositedAncestor();
+    bool owningLayerClippedByLayerNotAboveCompositedAncestor(DeprecatedPaintLayer* scrollParent);
 
     DeprecatedPaintLayer* scrollParent();
 
@@ -302,16 +301,16 @@ private:
     // The hierarchy of layers that is maintained by the CompositedDeprecatedPaintLayerMapping looks like this:
     //
     //  + m_ancestorClippingLayer [OPTIONAL]
-    //     + m_graphicsLayer
-    //        + m_childContainmentLayer [OPTIONAL] <-OR-> m_scrollingLayer [OPTIONAL] <-OR-> m_childTransformLayer
-    //        |                                            + m_scrollingContentsLayer [Present iff m_scrollingLayer is present]
-    //        |                                               + m_scrollingBlockSelectionLayer [Present iff m_scrollingLayer is present]
-    //        |
-    //        + m_overflowControlsClippingLayer [OPTIONAL] // *The overflow controls may need to be repositioned in the
-    //          + m_overflowControlsHostLayer              //  graphics layer tree by the RLC to ensure that they stack
-    //            + m_layerForVerticalScrollbar            //  above scrolling content.
-    //            + m_layerForHorizontalScrollbar
-    //            + m_layerForScrollCorner
+    //    + m_graphicsLayer
+    //      + m_childTransformLayer [OPTIONAL]
+    //      | + m_childContainmentLayer [OPTIONAL] <-OR-> m_scrollingLayer [OPTIONAL]
+    //      |                                             + m_scrollingContentsLayer [Present iff m_scrollingLayer is present]
+    //      |                                               + m_scrollingBlockSelectionLayer [Present iff m_scrollingLayer is present]
+    //      + m_overflowControlsClippingLayer [OPTIONAL] // *The overflow controls may need to be repositioned in the
+    //        + m_overflowControlsHostLayer [OPTIONAL]   //  graphics layer tree by the RLC to ensure that they stack
+    //          + m_layerForVerticalScrollbar [OPTIONAL] //  above scrolling content.
+    //          + m_layerForHorizontalScrollbar [OPTIONAL]
+    //          + m_layerForScrollCorner [OPTIONAL]
     //
     // We need an ancestor clipping layer if our clipping ancestor is not our ancestor in the
     // clipping tree. Here's what that might look like.
@@ -336,7 +335,7 @@ private:
     OwnPtr<GraphicsLayer> m_ancestorClippingLayer; // Only used if we are clipped by an ancestor which is not a stacking context.
     OwnPtr<GraphicsLayer> m_graphicsLayer;
     OwnPtr<GraphicsLayer> m_childContainmentLayer; // Only used if we have clipping on a stacking context with compositing children.
-    OwnPtr<GraphicsLayer> m_childTransformLayer; // Only used if we have perspective and no m_childContainmentLayer.
+    OwnPtr<GraphicsLayer> m_childTransformLayer; // Only used if we have perspective.
     OwnPtr<GraphicsLayer> m_scrollingLayer; // Only used if the layer is using composited scrolling.
     OwnPtr<GraphicsLayer> m_scrollingContentsLayer; // Only used if the layer is using composited scrolling.
     OwnPtr<GraphicsLayer> m_scrollingBlockSelectionLayer; // Only used if the layer is using composited scrolling, but has no scrolling contents apart from block selection gaps.

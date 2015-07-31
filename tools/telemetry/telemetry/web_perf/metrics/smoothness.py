@@ -61,7 +61,8 @@ class SmoothnessMetric(timeline_based_metric.TimelineBasedMetric):
     values = [
         self._ComputeQueueingDuration(page, stats),
         self._ComputeFrameTimeDiscrepancy(page, stats),
-        self._ComputeMeanPixelsApproximated(page, stats)
+        self._ComputeMeanPixelsApproximated(page, stats),
+        self._ComputeMeanPixelsCheckerboarded(page, stats)
     ]
     values += self._ComputeLatencyMetric(page, stats, 'input_event_latency',
                                          stats.input_event_latency)
@@ -87,6 +88,21 @@ class SmoothnessMetric(timeline_based_metric.TimelineBasedMetric):
                 if d / refresh_period >= min_normalized_delta]
     return (deltas, [delta / refresh_period for delta in deltas])
 
+  @staticmethod
+  def _JoinTimestampRanges(frame_timestamps):
+    """Joins ranges of timestamps, adjusting timestamps to remove deltas
+    between the start of a range and the end of the prior range.
+    """
+    timestamps = []
+    for timestamp_range in frame_timestamps:
+      if len(timestamps) == 0:
+        timestamps.extend(timestamp_range)
+      else:
+        for i in range(1, len(timestamp_range)):
+          timestamps.append(timestamps[-1] +
+              timestamp_range[i] - timestamp_range[i-1])
+    return timestamps
+
   def _ComputeSurfaceFlingerMetric(self, page, stats):
     jank_count = None
     avg_surface_fps = None
@@ -94,7 +110,7 @@ class SmoothnessMetric(timeline_based_metric.TimelineBasedMetric):
     frame_lengths = None
     none_value_reason = None
     if self._HasEnoughFrames(stats.frame_timestamps):
-      timestamps = FlattenList(stats.frame_timestamps)
+      timestamps = self._JoinTimestampRanges(stats.frame_timestamps)
       frame_count = len(timestamps)
       milliseconds = timestamps[-1] - timestamps[0]
       min_normalized_frame_length = 0.5
@@ -285,4 +301,28 @@ class SmoothnessMetric(timeline_based_metric.TimelineBasedMetric):
         page, 'mean_pixels_approximated', 'percent', mean_pixels_approximated,
         description='Percentage of pixels that were approximated '
                     '(checkerboarding, low-resolution tiles, etc.).',
+        none_value_reason=none_value_reason)
+
+  def _ComputeMeanPixelsCheckerboarded(self, page, stats):
+    """Add the mean percentage of pixels checkerboarded.
+
+    This looks at tiles which are only missing.
+    It does not take into consideration tiles which are of low or
+    non-ideal resolution.
+    """
+    mean_pixels_checkerboarded = None
+    none_value_reason = None
+    if self._HasEnoughFrames(stats.frame_timestamps):
+      if rendering_stats.CHECKERBOARDED_PIXEL_ERROR in stats.errors:
+        none_value_reason = stats.errors[
+            rendering_stats.CHECKERBOARDED_PIXEL_ERROR]
+      else:
+        mean_pixels_checkerboarded = round(statistics.ArithmeticMean(
+            FlattenList(stats.checkerboarded_pixel_percentages)), 3)
+    else:
+      none_value_reason = NOT_ENOUGH_FRAMES_MESSAGE
+    return scalar.ScalarValue(
+        page, 'mean_pixels_checkerboarded', 'percent',
+        mean_pixels_checkerboarded,
+        description='Percentage of pixels that were checkerboarded.',
         none_value_reason=none_value_reason)

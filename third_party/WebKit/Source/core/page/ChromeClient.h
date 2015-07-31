@@ -22,6 +22,7 @@
 #ifndef ChromeClient_h
 #define ChromeClient_h
 
+#include "core/CoreExport.h"
 #include "core/dom/AXObjectCache.h"
 #include "core/inspector/ConsoleAPITypes.h"
 #include "core/loader/FrameLoader.h"
@@ -63,14 +64,14 @@ class PagePopupDriver;
 class PopupMenuClient;
 class WebCompositorAnimationTimeline;
 
-struct CompositedSelectionBound;
+struct CompositedSelection;
 struct DateTimeChooserParameters;
 struct FrameLoadRequest;
 struct GraphicsDeviceAdapter;
 struct ViewportDescription;
 struct WindowFeatures;
 
-class ChromeClient {
+class CORE_EXPORT ChromeClient {
 public:
     virtual void chromeDestroyed() = 0;
 
@@ -132,7 +133,7 @@ public:
     // Methods used by HostWindow.
     virtual void invalidateRect(const IntRect&) = 0;
     virtual IntRect viewportToScreen(const IntRect&) const = 0;
-    virtual blink::WebScreenInfo screenInfo() const = 0;
+    virtual WebScreenInfo screenInfo() const = 0;
     virtual void setCursor(const Cursor&) = 0;
     virtual void scheduleAnimation() = 0;
     // End methods used by HostWindow.
@@ -153,8 +154,6 @@ public:
     virtual void print(LocalFrame*) = 0;
 
     virtual void annotatedRegionsChanged() = 0;
-
-    virtual bool paintCustomOverhangArea(GraphicsContext*, const IntRect&, const IntRect&, const IntRect&) = 0;
 
     virtual PassOwnPtrWillBeRawPtr<ColorChooser> createColorChooser(LocalFrame*, ColorChooserClient*, const Color&) = 0;
 
@@ -187,8 +186,8 @@ public:
     virtual void enterFullScreenForElement(Element*) { }
     virtual void exitFullScreenForElement(Element*) { }
 
-    virtual void clearCompositedSelectionBounds() { }
-    virtual void updateCompositedSelectionBounds(const CompositedSelectionBound& anchor, const CompositedSelectionBound& focus) { }
+    virtual void clearCompositedSelection() { }
+    virtual void updateCompositedSelection(const CompositedSelection&) { }
 
     virtual void needTouchEvents(bool) = 0;
 

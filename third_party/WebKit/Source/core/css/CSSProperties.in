@@ -4,13 +4,14 @@
 
 
 // - alias_for=other-property
-// Properties specifying alias_for do not get their own enum and instead map
-// directly onto the CSSPropertyID they alias. Currently this means that the
-// UseCounter will not pick up on these (crbug.com/304855)
+// Properties specifying alias_for should be virtually identical to the
+// properties they alias. Minor parsing differences are allowed as long as
+// the CSSValues created are of the same format of the aliased property.
 
 
 // - runtime_flag=CSSGridLayout
-// The flag on RuntimeEnabledFeatures conditionally enables the property
+// The flag on RuntimeEnabledFeatures conditionally enables the property.
+// This doesn't currently work with alias_for.
 
 
 // - longhands=property;other-property
@@ -99,10 +100,18 @@ font-weight animatable, inherited, font, type_name=FontWeight, name_for_methods=
 text-rendering inherited, font, type_name=TextRenderingMode
 zoom custom_all
 
-align-content custom_all
-align-items custom_all
+align-content initial=initialContentAlignment, converter=convertContentAlignmentData
+align-items initial=initialSelfAlignment, converter=convertSelfOrDefaultAlignmentData
 alignment-baseline svg
-align-self custom_all
+align-self initial=initialSelfAlignment, converter=convertSelfOrDefaultAlignmentData
+animation-delay custom_all
+animation-direction custom_all
+animation-duration custom_all
+animation-fill-mode custom_all
+animation-iteration-count custom_all
+animation-name custom_all
+animation-play-state custom_all
+animation-timing-function custom_all
 backface-visibility
 background-attachment custom_all
 background-blend-mode custom_all
@@ -187,9 +196,9 @@ grid-template-rows runtime_flag=CSSGridLayout, custom_all
 height animatable, initial=initialSize, converter=convertLengthSizing
 image-rendering inherited
 isolation runtime_flag=CSSCompositing
-justify-content custom_all
-justify-items runtime_flag=CSSGridLayout, custom_all
-justify-self runtime_flag=CSSGridLayout, custom_all
+justify-content initial=initialContentAlignment, converter=convertContentAlignmentData
+justify-items runtime_flag=CSSGridLayout, initial=initialSelfAlignment, converter=convertSelfOrDefaultAlignmentData
+justify-self runtime_flag=CSSGridLayout, initial=initialSelfAlignment, converter=convertSelfOrDefaultAlignmentData
 left animatable, initial=initialOffset, converter=convertLengthOrAuto
 letter-spacing animatable, inherited, initial=initialLetterWordSpacing, converter=convertSpacing
 lighting-color animatable, svg, converter=convertSVGColor
@@ -284,27 +293,21 @@ touch-action converter=convertFlags<TouchAction>
 transform animatable, custom_value
 transform-origin animatable, converter=convertTransformOrigin
 transform-style name_for_methods=TransformStyle3D
+transition-delay custom_all
+transition-duration custom_all
+transition-property custom_all
+transition-timing-function custom_all
 unicode-bidi
 vector-effect svg
 vertical-align animatable, custom_inherit, custom_value
 visibility animatable, inherited
 x animatable, svg, converter=convertLength
 y animatable, svg, converter=convertLength
--webkit-animation-delay custom_all
--webkit-animation-direction custom_all
--webkit-animation-duration custom_all
--webkit-animation-fill-mode custom_all
--webkit-animation-iteration-count custom_all
--webkit-animation-name custom_all
--webkit-animation-play-state custom_all
--webkit-animation-timing-function custom_all
 -webkit-appearance type_name=ControlPart
 -webkit-app-region custom_all
--webkit-backface-visibility use_handlers_for=CSSPropertyBackfaceVisibility
 -webkit-background-clip use_handlers_for=CSSPropertyBackgroundClip
 -webkit-background-composite custom_all
 -webkit-background-origin use_handlers_for=CSSPropertyBackgroundOrigin
--webkit-background-size animatable, use_handlers_for=CSSPropertyBackgroundSize
 -webkit-border-horizontal-spacing animatable, inherited, name_for_methods=HorizontalBorderSpacing, converter=convertComputedLength<short>
 -webkit-border-image initial=initialNinePieceImage, custom_value
 -webkit-border-vertical-spacing animatable, inherited, name_for_methods=VerticalBorderSpacing, converter=convertComputedLength<short>
@@ -318,7 +321,6 @@ y animatable, svg, converter=convertLength
 -webkit-box-orient
 -webkit-box-pack
 -webkit-box-reflect converter=convertBoxReflect
--webkit-box-shadow animatable, use_handlers_for=CSSPropertyBoxShadow
 -webkit-clip-path animatable, custom_value
 -webkit-column-break-after type_name=EPageBreak, initial=initialPageBreak
 -webkit-column-break-before type_name=EPageBreak, initial=initialPageBreak
@@ -354,8 +356,6 @@ y animatable, svg, converter=convertLength
 -webkit-mask-repeat-x custom_all
 -webkit-mask-repeat-y custom_all
 -webkit-mask-size animatable, custom_all
--webkit-perspective use_handlers_for=CSSPropertyPerspective
--webkit-perspective-origin use_handlers_for=CSSPropertyPerspectiveOrigin
 -webkit-perspective-origin-x animatable, converter=convertLength
 -webkit-perspective-origin-y animatable, converter=convertLength
 -webkit-print-color-adjust inherited, type_name=PrintColorAdjust
@@ -370,16 +370,9 @@ y animatable, svg, converter=convertLength
 -webkit-text-security inherited
 -webkit-text-stroke-color animatable, inherited, custom_all
 -webkit-text-stroke-width inherited, converter=convertTextStrokeWidth
--webkit-transform use_handlers_for=CSSPropertyTransform
--webkit-transform-origin use_handlers_for=CSSPropertyTransformOrigin
 -webkit-transform-origin-x animatable, converter=convertLength
 -webkit-transform-origin-y animatable, converter=convertLength
 -webkit-transform-origin-z animatable, converter=convertComputedLength<float>
--webkit-transform-style name_for_methods=TransformStyle3D
--webkit-transition-delay custom_all
--webkit-transition-duration custom_all
--webkit-transition-property custom_all
--webkit-transition-timing-function custom_all
 -webkit-user-drag
 -webkit-user-modify inherited
 -webkit-user-select inherited
@@ -423,29 +416,16 @@ z-index animatable, type_name=int, custom_all
 -webkit-max-logical-width direction_aware
 -webkit-max-logical-height direction_aware
 
-// Properties that we ignore in the StyleBuilder. Note that unprefixed animation
-// and transition properties are here due to the way they have been unprefixed
-// FIXME: We should see if any of these should actually be unreachable
+// Properties that we ignore in the StyleBuilder.
+// TODO(timloh): This seems wrong, most of these shouldn't reach the StyleBuilder
 
 all builder_skip
-animation-delay runtime_flag=CSSAnimationUnprefixed, builder_skip
-animation-direction runtime_flag=CSSAnimationUnprefixed, builder_skip
-animation-duration runtime_flag=CSSAnimationUnprefixed, builder_skip
-animation-fill-mode runtime_flag=CSSAnimationUnprefixed, builder_skip
-animation-iteration-count runtime_flag=CSSAnimationUnprefixed, builder_skip
-animation-name runtime_flag=CSSAnimationUnprefixed, builder_skip
-animation-play-state runtime_flag=CSSAnimationUnprefixed, builder_skip
-animation-timing-function runtime_flag=CSSAnimationUnprefixed, builder_skip
 enable-background builder_skip
 max-zoom builder_skip
 min-zoom builder_skip
 orientation builder_skip
 page builder_skip
 src builder_skip
-transition-delay builder_skip
-transition-duration builder_skip
-transition-property builder_skip
-transition-timing-function builder_skip
 unicode-range builder_skip
 user-zoom builder_skip
 -webkit-font-size-delta builder_skip
@@ -453,7 +433,7 @@ user-zoom builder_skip
 
 // Shorthands
 
-animation runtime_flag=CSSAnimationUnprefixed, longhands=animation-name;animation-duration;animation-timing-function;animation-delay;animation-iteration-count;animation-direction;animation-fill-mode;animation-play-state
+animation longhands=animation-name;animation-duration;animation-timing-function;animation-delay;animation-iteration-count;animation-direction;animation-fill-mode;animation-play-state
 background longhands=background-image;background-position-x;background-position-y;background-size;background-repeat-x;background-repeat-y;background-attachment;background-origin;background-clip;background-color
 background-position longhands=background-position-x;background-position-y
 background-repeat longhands=background-repeat-x;background-repeat-y
@@ -484,12 +464,9 @@ outline longhands=outline-color;outline-style;outline-width
 overflow longhands=overflow-x;overflow-y
 padding longhands=padding-top;padding-right;padding-bottom;padding-left
 transition longhands=transition-property;transition-duration;transition-timing-function;transition-delay
--webkit-animation longhands=-webkit-animation-name;-webkit-animation-duration;-webkit-animation-timing-function;-webkit-animation-delay;-webkit-animation-iteration-count;-webkit-animation-direction;-webkit-animation-fill-mode;-webkit-animation-play-state
 -webkit-border-after longhands=-webkit-border-after-width;-webkit-border-after-style;-webkit-border-after-color
 -webkit-border-before longhands=-webkit-border-before-width;-webkit-border-before-style;-webkit-border-before-color
 -webkit-border-end longhands=-webkit-border-end-width;-webkit-border-end-style;-webkit-border-end-color
-// "-webkit-border-radius: 1px 2px" behaves as "border-radius: 1px / 2px"
--webkit-border-radius longhands=border-top-left-radius;border-top-right-radius;border-bottom-right-radius;border-bottom-left-radius
 -webkit-border-start longhands=-webkit-border-start-width;-webkit-border-start-style;-webkit-border-start-color
 -webkit-column-rule longhands=-webkit-column-rule-width;-webkit-column-rule-style;-webkit-column-rule-color
 -webkit-columns longhands=-webkit-column-width;-webkit-column-count
@@ -500,7 +477,6 @@ transition longhands=transition-property;transition-duration;transition-timing-f
 -webkit-mask-repeat longhands=-webkit-mask-repeat-x;-webkit-mask-repeat-y
 -webkit-text-emphasis longhands=-webkit-text-emphasis-style;-webkit-text-emphasis-color
 -webkit-text-stroke longhands=-webkit-text-stroke-width;-webkit-text-stroke-color
--webkit-transition longhands=-webkit-transition-property;-webkit-transition-duration;-webkit-transition-timing-function;-webkit-transition-delay
 
 // Aliases; these map to the same CSSPropertyID
 
@@ -516,10 +492,25 @@ transition longhands=transition-property;transition-duration;transition-timing-f
 -webkit-align-content alias_for=align-content
 -webkit-align-items alias_for=align-items
 -webkit-align-self alias_for=align-self
+-webkit-animation alias_for=animation
+-webkit-animation-delay alias_for=animation-delay
+-webkit-animation-direction alias_for=animation-direction
+-webkit-animation-duration alias_for=animation-duration
+-webkit-animation-fill-mode alias_for=animation-fill-mode
+-webkit-animation-iteration-count alias_for=animation-iteration-count
+-webkit-animation-name alias_for=animation-name
+-webkit-animation-play-state alias_for=animation-play-state
+-webkit-animation-timing-function alias_for=animation-timing-function
+-webkit-backface-visibility alias_for=backface-visibility
+// "-webkit-background-size: 10px" behaves as "background-size: 10px 10px"
+-webkit-background-size alias_for=background-size
 -webkit-border-bottom-left-radius alias_for=border-bottom-left-radius
 -webkit-border-bottom-right-radius alias_for=border-bottom-right-radius
+// "-webkit-border-radius: 1px 2px" behaves as "border-radius: 1px / 2px"
+-webkit-border-radius alias_for=border-radius
 -webkit-border-top-left-radius alias_for=border-top-left-radius
 -webkit-border-top-right-radius alias_for=border-top-right-radius
+-webkit-box-shadow alias_for=box-shadow
 -webkit-box-sizing alias_for=box-sizing
 -webkit-flex alias_for=flex
 -webkit-flex-basis alias_for=flex-basis
@@ -531,6 +522,16 @@ transition longhands=transition-property;transition-duration;transition-timing-f
 -webkit-justify-content alias_for=justify-content
 -webkit-opacity alias_for=opacity
 -webkit-order alias_for=order
+-webkit-perspective alias_for=perspective
+-webkit-perspective-origin alias_for=perspective-origin
 -webkit-shape-image-threshold alias_for=shape-image-threshold
 -webkit-shape-margin alias_for=shape-margin
 -webkit-shape-outside alias_for=shape-outside
+-webkit-transform alias_for=transform
+-webkit-transform-origin alias_for=transform-origin
+-webkit-transform-style alias_for=transform-style
+-webkit-transition alias_for=transition
+-webkit-transition-delay alias_for=transition-delay
+-webkit-transition-duration alias_for=transition-duration
+-webkit-transition-property alias_for=transition-property
+-webkit-transition-timing-function alias_for=transition-timing-function

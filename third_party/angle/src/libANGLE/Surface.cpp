@@ -12,7 +12,6 @@
 
 #include "libANGLE/Config.h"
 #include "libANGLE/Texture.h"
-#include "libANGLE/renderer/SurfaceImpl.h"
 
 #include <EGL/eglext.h>
 
@@ -20,7 +19,7 @@ namespace egl
 {
 
 Surface::Surface(rx::SurfaceImpl *impl, EGLint surfaceType, const egl::Config *config, const AttributeMap &attributes)
-    : RefCountObject(0), // id unused
+    : FramebufferAttachmentObject(0), // id unused
       mImplementation(impl),
       mType(surfaceType),
       mConfig(config),
@@ -59,7 +58,7 @@ Surface::~Surface()
     {
         if (mImplementation)
         {
-            mImplementation->releaseTexImage(mTexture->id());
+            mImplementation->releaseTexImage(EGL_BACK_BUFFER);
         }
         mTexture->releaseTexImageFromSurface();
         mTexture.set(nullptr);
@@ -165,6 +164,17 @@ void Surface::releaseTexImageFromTexture()
 {
     ASSERT(mTexture.get());
     mTexture.set(nullptr);
+}
+
+GLenum Surface::getAttachmentInternalFormat(const gl::FramebufferAttachment::Target &target) const
+{
+    const egl::Config *config = getConfig();
+    return (target.binding() == GL_BACK ? config->renderTargetFormat : config->depthStencilFormat);
+}
+
+GLsizei Surface::getAttachmentSamples(const gl::FramebufferAttachment::Target &target) const
+{
+    return getConfig()->samples;
 }
 
 }

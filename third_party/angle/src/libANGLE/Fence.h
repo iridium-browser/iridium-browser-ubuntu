@@ -30,11 +30,11 @@ class FenceNV final : angle::NonCopyable
     explicit FenceNV(rx::FenceNVImpl *impl);
     virtual ~FenceNV();
 
-    GLboolean isFence() const;
-    Error setFence(GLenum condition);
-    Error testFence(GLboolean *outResult);
-    Error finishFence();
+    Error set(GLenum condition);
+    Error test(GLboolean *outResult);
+    Error finish();
 
+    bool isSet() const { return mIsSet; }
     GLboolean getStatus() const { return mStatus; }
     GLenum getCondition() const { return mCondition; }
 
@@ -53,17 +53,19 @@ class FenceSync final : public RefCountObject
     explicit FenceSync(rx::FenceSyncImpl *impl, GLuint id);
     virtual ~FenceSync();
 
-    Error set(GLenum condition);
+    Error set(GLenum condition, GLbitfield flags);
     Error clientWait(GLbitfield flags, GLuint64 timeout, GLenum *outResult);
     Error serverWait(GLbitfield flags, GLuint64 timeout);
     Error getStatus(GLint *outResult) const;
 
     GLenum getCondition() const { return mCondition; }
+    GLbitfield getFlags() const { return mFlags; }
 
   private:
     rx::FenceSyncImpl *mFence;
 
     GLenum mCondition;
+    GLbitfield mFlags;
 };
 
 }

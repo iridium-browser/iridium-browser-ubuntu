@@ -14,9 +14,11 @@ import os
 from chromite.cbuildbot import constants
 from chromite.lib import commandline
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import osutils
 from chromite.lib import parallel
 from chromite.lib import toolchain
+from chromite.lib import workspace_lib
 
 # Needs to be after chromite imports.
 import lddtree
@@ -53,6 +55,7 @@ TARGET_VERSION_MAP = {
 # Overrides for {gcc,binutils}-config, pick a package with particular suffix.
 CONFIG_TARGET_SUFFIXES = {
     'binutils' : {
+        'armv7a-cros-linux-gnueabi': '-gold',
         'i686-pc-linux-gnu' : '-gold',
         'x86_64-cros-linux-gnu' : '-gold',
     },
@@ -501,30 +504,30 @@ def ExpandTargets(targets_wanted):
     targets_wanted: The targets specified by the user.
 
   Returns:
-    Full list of tuples with pseudo targets removed.
+    Dictionary of concrete targets and their toolchain tuples.
   """
-  alltargets = toolchain.GetAllTargets()
   targets_wanted = set(targets_wanted)
+  if targets_wanted in (set(['boards']), set(['bricks'])):
+    # Only pull targets from the included boards/bricks.
+    return {}
+
+  all_targets = toolchain.GetAllTargets()
   if targets_wanted == set(['all']):
-    targets = alltargets
-  elif targets_wanted == set(['sdk']):
+    return all_targets
+  if targets_wanted == set(['sdk']):
     # Filter out all the non-sdk toolchains as we don't want to mess
     # with those in all of our builds.
-    targets = toolchain.FilterToolchains(alltargets, 'sdk', True)
-  elif targets_wanted == set(['boards']):
-    # Only pull targets from the boards.
-    targets = {}
-  else:
-    # Verify user input.
-    nonexistent = targets_wanted.difference(alltargets)
-    if nonexistent:
-      raise ValueError('Invalid targets: %s', ','.join(nonexistent))
-    targets = dict((t, alltargets[t]) for t in targets_wanted)
-  return targets
+    return toolchain.FilterToolchains(all_targets, 'sdk', True)
+
+  # Verify user input.
+  nonexistent = targets_wanted.difference(all_targets)
+  if nonexistent:
+    raise ValueError('Invalid targets: %s', ','.join(nonexistent))
+  return {t: all_targets[t] for t in targets_wanted}
 
 
 def UpdateToolchains(usepkg, deleteold, hostonly, reconfig,
-                     targets_wanted, boards_wanted):
+                     targets_wanted, boards_wanted, bricks_wanted):
   """Performs all steps to create a synchronized toolchain enviroment.
 
   Args:
@@ -534,6 +537,7 @@ def UpdateToolchains(usepkg, deleteold, hostonly, reconfig,
     reconfig: Reload crossdev config and reselect toolchains
     targets_wanted: All the targets to update
     boards_wanted: Load targets from these boards
+    bricks_wanted: Load targets from these bricks
   """
   targets, crossdev_targets, reconfig_targets = {}, {}, {}
   if not hostonly:
@@ -541,10 +545,12 @@ def UpdateToolchains(usepkg, deleteold, hostonly, reconfig,
     # work on bare systems where this is useful.
     targets = ExpandTargets(targets_wanted)
 
-    # Now re-add any targets that might be from this board.  This is
-    # to allow unofficial boards to declare their own toolchains.
+    # Now re-add any targets that might be from this board/brick. This is to
+    # allow unofficial boards to declare their own toolchains.
     for board in boards_wanted:
       targets.update(toolchain.GetToolchainsForBoard(board))
+    for brick in bricks_wanted:
+      targets.update(toolchain.GetToolchainsForBrick(brick))
 
     # First check and initialize all cross targets that need to be.
     for target in targets:
@@ -574,13 +580,16 @@ def UpdateToolchains(usepkg, deleteold, hostonly, reconfig,
   RebuildLibtool()
 
 
-def ShowBoardConfig(board):
-  """Show the toolchain tuples used by |board|
+def ShowConfig(name):
+  """Show the toolchain tuples used by |name|
 
   Args:
-    board: The board to query.
+    name: The board name or brick locator to query.
   """
-  toolchains = toolchain.GetToolchainsForBoard(board)
+  if workspace_lib.IsLocator(name):
+    toolchains = toolchain.GetToolchainsForBrick(name)
+  else:
+    toolchains = toolchain.GetToolchainsForBoard(name)
   # Make sure we display the default toolchain first.
   print(','.join(
       toolchain.FilterToolchains(toolchains, 'default', True).keys() +
@@ -702,7 +711,7 @@ def _GetFilesForTarget(target, root='/'):
     atom = GetPortagePackage(target, pkg)
     cat, pn = atom.split('/')
     ver = GetInstalledPackageVersions(atom)[0]
-    cros_build_lib.Info('packaging %s-%s', atom, ver)
+    logging.info('packaging %s-%s', atom, ver)
 
     # pylint: disable=E1101
     dblink = portage.dblink(cat, pn + '-' + ver, myroot=root,
@@ -787,7 +796,7 @@ def _BuildInitialPackageRoot(output_dir, paths, elfs, ldpaths,
 
       src = path = lib_data['path']
       if path is None:
-        cros_build_lib.Warning('%s: could not locate %s', elf, lib)
+        logging.warning('%s: could not locate %s', elf, lib)
         continue
       donelibs.add(lib)
 
@@ -844,8 +853,7 @@ def _ProcessBinutilsConfig(target, output_dir):
 
     # Nope, no gold support to be found.
     gold_supported = False
-    cros_build_lib.Warning('%s: binutils lacks support for the gold linker',
-                           target)
+    logging.warning('%s: binutils lacks support for the gold linker', target)
   else:
     assert len(srcpath) == 1, '%s: did not match exactly 1 path' % globpath
     gold_supported = True
@@ -957,7 +965,7 @@ def CreatePackages(targets_wanted, output_dir, root='/'):
     output_dir: The directory to put the packages in.
     root: The root path to pull all packages/files from.
   """
-  cros_build_lib.Info('Writing tarballs to %s', output_dir)
+  logging.info('Writing tarballs to %s', output_dir)
   osutils.SafeMakedirs(output_dir)
   ldpaths = lddtree.LoadLdpaths(root)
   targets = ExpandTargets(targets_wanted)
@@ -989,19 +997,22 @@ def main(argv):
                       help='Unmerge deprecated packages')
   parser.add_argument('-t', '--targets',
                       dest='targets', default='sdk',
-                      help='Comma separated list of tuples. '
-                           'Special keyword \'host\' is allowed. Default: sdk')
-  parser.add_argument('--include-boards',
-                      dest='include_boards', default='',
-                      help='Comma separated list of boards whose toolchains we'
-                           ' will always include. Default: none')
+                      help="Comma separated list of tuples. Special keywords "
+                           "'host', 'sdk', 'boards', 'bricks' and 'all' are "
+                           "allowed. Defaults to 'sdk'.")
+  parser.add_argument('--include-boards', default='', metavar='BOARDS',
+                      help='Comma separated list of boards whose toolchains we '
+                           'will always include. Default: none')
+  parser.add_argument('--include-bricks', default='', metavar='BRICKS',
+                      help='Comma separated list of bricks whose toolchains we '
+                           'will always include. Default: none')
   parser.add_argument('--hostonly',
                       dest='hostonly', default=False, action='store_true',
                       help='Only setup the host toolchain. '
                            'Useful for bootstrapping chroot')
-  parser.add_argument('--show-board-cfg',
-                      dest='board_cfg', default=None,
-                      help='Board to list toolchain tuples for')
+  parser.add_argument('--show-board-cfg', '--show-cfg',
+                      dest='cfg_name', default=None,
+                      help='Board or brick to list toolchains tuples for')
   parser.add_argument('--create-packages',
                       action='store_true', default=False,
                       help='Build redistributable packages')
@@ -1014,19 +1025,21 @@ def main(argv):
   options.Freeze()
 
   # Figure out what we're supposed to do and reject conflicting options.
-  if options.board_cfg and options.create_packages:
+  if options.cfg_name and options.create_packages:
     parser.error('conflicting options: create-packages & show-board-cfg')
 
-  targets = set(options.targets.split(','))
-  boards = (set(options.include_boards.split(',')) if options.include_boards
-            else set())
+  targets_wanted = set(options.targets.split(','))
+  boards_wanted = (set(options.include_boards.split(','))
+                   if options.include_boards else set())
+  bricks_wanted = (set(options.include_bricks.split(','))
+                   if options.include_bricks else set())
 
-  if options.board_cfg:
-    ShowBoardConfig(options.board_cfg)
+  if options.cfg_name:
+    ShowConfig(options.cfg_name)
   elif options.create_packages:
     cros_build_lib.AssertInsideChroot()
     Crossdev.Load(False)
-    CreatePackages(targets, options.output_dir)
+    CreatePackages(targets_wanted, options.output_dir)
   else:
     cros_build_lib.AssertInsideChroot()
     # This has to be always run as root.
@@ -1035,7 +1048,8 @@ def main(argv):
 
     Crossdev.Load(options.reconfig)
     UpdateToolchains(options.usepkg, options.deleteold, options.hostonly,
-                     options.reconfig, targets, boards)
+                     options.reconfig, targets_wanted, boards_wanted,
+                     bricks_wanted)
     Crossdev.Save()
 
   return 0

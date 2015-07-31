@@ -7,11 +7,11 @@
 #include "apps/ui/views/app_window_frame_view.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
-#include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/views/apps/desktop_keyboard_capture.h"
 #include "chrome/browser/ui/views/extensions/extension_keybinding_registry_views.h"
 #include "chrome/browser/ui/views/frame/taskbar_decorator.h"
+#include "components/favicon/content/content_favicon_driver.h"
 #include "components/ui/zoom/page_zoom.h"
 #include "components/ui/zoom/zoom_controller.h"
 #include "ui/views/controls/webview/webview.h"
@@ -108,6 +108,7 @@ void ChromeNativeAppWindowViews::OnBeforeWidgetInit(
 }
 
 void ChromeNativeAppWindowViews::OnBeforePanelWidgetInit(
+    bool use_default_bounds,
     views::Widget::InitParams* init_params,
     views::Widget* widget) {
 }
@@ -142,7 +143,7 @@ void ChromeNativeAppWindowViews::InitializeDefaultWindow(
   SetContentSizeConstraints(create_params.GetContentMinimumSize(frame_insets),
                             create_params.GetContentMaximumSize(frame_insets));
   if (!window_bounds.IsEmpty()) {
-    typedef AppWindow::BoundsSpecification BoundsSpecification;
+    using BoundsSpecification = AppWindow::BoundsSpecification;
     bool position_specified =
         window_bounds.x() != BoundsSpecification::kUnspecifiedPosition &&
         window_bounds.y() != BoundsSpecification::kUnspecifiedPosition;
@@ -210,8 +211,18 @@ void ChromeNativeAppWindowViews::InitializePanelWindow(
   else if (preferred_size_.height() < kMinPanelHeight)
     preferred_size_.set_height(kMinPanelHeight);
 
-  params.bounds = gfx::Rect(preferred_size_);
-  OnBeforePanelWidgetInit(&params, widget());
+  // When a panel is not docked it will be placed at a default origin in the
+  // currently active target root window.
+  bool use_default_bounds = create_params.state != ui::SHOW_STATE_DOCKED;
+  // Sanitize initial origin reseting it in case it was not specified.
+  using BoundsSpecification = AppWindow::BoundsSpecification;
+  bool position_specified =
+      initial_window_bounds.x() != BoundsSpecification::kUnspecifiedPosition &&
+      initial_window_bounds.y() != BoundsSpecification::kUnspecifiedPosition;
+  params.bounds = (use_default_bounds || !position_specified) ?
+      gfx::Rect(preferred_size_) :
+      gfx::Rect(initial_window_bounds.origin(), preferred_size_);
+  OnBeforePanelWidgetInit(use_default_bounds, &params, widget());
   widget()->Init(params);
   widget()->set_focus_on_creation(create_params.focused);
 }
@@ -219,15 +230,6 @@ void ChromeNativeAppWindowViews::InitializePanelWindow(
 views::NonClientFrameView*
 ChromeNativeAppWindowViews::CreateStandardDesktopAppFrame() {
   return views::WidgetDelegateView::CreateNonClientFrameView(widget());
-}
-
-apps::AppWindowFrameView*
-ChromeNativeAppWindowViews::CreateNonStandardAppFrame() {
-  apps::AppWindowFrameView* frame =
-      new apps::AppWindowFrameView(widget(), this, has_frame_color_,
-                                   active_frame_color_, inactive_frame_color_);
-  frame->Init();
-  return frame;
 }
 
 // ui::BaseWindow implementation.
@@ -263,9 +265,9 @@ gfx::ImageSkia ChromeNativeAppWindowViews::GetWindowAppIcon() {
 gfx::ImageSkia ChromeNativeAppWindowViews::GetWindowIcon() {
   content::WebContents* web_contents = app_window()->web_contents();
   if (web_contents) {
-    FaviconTabHelper* favicon_tab_helper =
-        FaviconTabHelper::FromWebContents(web_contents);
-    gfx::Image app_icon = favicon_tab_helper->GetFavicon();
+    favicon::FaviconDriver* favicon_driver =
+        favicon::ContentFaviconDriver::FromWebContents(web_contents);
+    gfx::Image app_icon = favicon_driver->GetFavicon();
     if (!app_icon.IsEmpty())
       return *app_icon.ToImageSkia();
   }
@@ -340,22 +342,6 @@ void ChromeNativeAppWindowViews::SetFullscreen(int fullscreen_types) {
 
 bool ChromeNativeAppWindowViews::IsFullscreenOrPending() const {
   return is_fullscreen_;
-}
-
-void ChromeNativeAppWindowViews::UpdateBadgeIcon() {
-  const gfx::Image* icon = NULL;
-  if (!app_window()->badge_icon().IsEmpty()) {
-    icon = &app_window()->badge_icon();
-    // chrome::DrawTaskbarDecoration can do interesting things with non-square
-    // bitmaps.
-    // TODO(benwells): Refactor chrome::DrawTaskbarDecoration to not be avatar
-    // specific, and lift this restriction.
-    if (icon->Width() != icon->Height()) {
-      LOG(ERROR) << "Attempt to set a non-square badge; request ignored.";
-      return;
-    }
-  }
-  chrome::DrawTaskbarDecoration(GetNativeWindow(), icon);
 }
 
 void ChromeNativeAppWindowViews::UpdateShape(scoped_ptr<SkRegion> region) {

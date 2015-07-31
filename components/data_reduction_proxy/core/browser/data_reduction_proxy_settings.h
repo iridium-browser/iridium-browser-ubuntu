@@ -15,6 +15,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_member.h"
 #include "base/threading/thread_checker.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_metrics.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_service_observer.h"
 #include "url/gurl.h"
 
 class PrefService;
@@ -27,20 +29,10 @@ class DataReductionProxyIOData;
 class DataReductionProxyService;
 class DataReductionProxyCompressionStats;
 
-// The number of days of bandwidth usage statistics that are tracked.
-const unsigned int kNumDaysInHistory = 60;
-
 // The header used to request a data reduction proxy pass through. When a
 // request is sent to the data reduction proxy with this header, it will respond
 // with the original uncompressed response.
 extern const char kDataReductionPassThroughHeader[];
-
-// The number of days of bandwidth usage statistics that are presented.
-const unsigned int kNumDaysInHistorySummary = 30;
-
-static_assert(kNumDaysInHistorySummary <= kNumDaysInHistory,
-              "kNumDaysInHistorySummary should be no larger than "
-              "kNumDaysInHistory");
 
 // Values of the UMA DataReductionProxy.StartupState histogram.
 // This enum must remain synchronized with DataReductionProxyStartupState
@@ -57,9 +49,8 @@ enum ProxyStartupState {
 // be called from there.
 // TODO(marq): Convert this to be a KeyedService with an
 // associated factory class, and refactor the Java call sites accordingly.
-class DataReductionProxySettings {
+class DataReductionProxySettings : public DataReductionProxyServiceObserver {
  public:
-  typedef std::vector<long long> ContentLengthList;
   typedef base::Callback<bool(const std::string&, const std::string&)>
       SyntheticFieldTrialRegistrationCallback;
 
@@ -112,11 +103,6 @@ class DataReductionProxySettings {
   // daily original and received content lengths.
   int64 GetDataReductionLastUpdateTime();
 
-  // Returns a vector containing the total size of all HTTP content that was
-  // received over the last |kNumDaysInHistory| before any compression by the
-  // data reduction proxy. Each element in the vector contains one day of data.
-  ContentLengthList GetDailyOriginalContentLengths();
-
   // Returns aggregate received and original content lengths over the specified
   // number of days, as well as the time these stats were last updated.
   void GetContentLengths(unsigned int days,
@@ -132,10 +118,6 @@ class DataReductionProxySettings {
   // some of them should have.
   bool IsDataReductionProxyUnreachable();
 
-  // Returns an vector containing the aggregate received HTTP content in the
-  // last |kNumDaysInHistory| days.
-  ContentLengthList GetDailyReceivedContentLengths();
-
   ContentLengthList GetDailyContentLengths(const char* pref_name);
 
   // Configures data reduction proxy. |at_startup| is true when this method is
@@ -144,9 +126,7 @@ class DataReductionProxySettings {
 
   // Returns the event store being used. May be null if
   // InitDataReductionProxySettings has not been called.
-  DataReductionProxyEventStore* GetEventStore() const {
-    return event_store_;
-  }
+  DataReductionProxyEventStore* GetEventStore() const;
 
   // Returns true if the data reduction proxy configuration may be used.
   bool Allowed() const {
@@ -222,6 +202,9 @@ class DataReductionProxySettings {
   FRIEND_TEST_ALL_PREFIXES(DataReductionProxySettingsTest,
                            CheckInitMetricsWhenNotAllowed);
 
+  // Override of DataReductionProxyService::Observer.
+  void OnServiceInitialized() override;
+
   // Returns true if both LoFi and the proxy are enabled.
   bool IsLoFiEnabled() const;
 
@@ -242,7 +225,18 @@ class DataReductionProxySettings {
 
   void ResetDataReductionStatistics();
 
+  // Update IO thread objects in response to UI thread changes.
+  void UpdateIOData(bool at_startup);
+
   bool unreachable_;
+
+  // A call to MaybeActivateDataReductionProxy may take place before the
+  // |data_reduction_proxy_service_| has received a DataReductionProxyIOData
+  // pointer. In that case, the operation against the IO objects will not
+  // succeed and |deferred_initialization_| will be set to true. When
+  // OnServiceInitialized is called, if |deferred_initialization_| is true,
+  // IO object calls will be performed at that time.
+  bool deferred_initialization_;
 
   // The following values are cached in order to access the values on the
   // correct thread.
@@ -256,9 +250,6 @@ class DataReductionProxySettings {
   scoped_ptr<DataReductionProxyService> data_reduction_proxy_service_;
 
   PrefService* prefs_;
-
-  // The caller must ensure that the |event_store_| outlives this instance.
-  DataReductionProxyEventStore* event_store_;
 
   // The caller must ensure that the |config_| outlives this instance.
   DataReductionProxyConfig* config_;

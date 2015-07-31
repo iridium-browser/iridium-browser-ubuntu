@@ -51,7 +51,6 @@
 #include "modules/push_messaging/PushMessageData.h"
 #include "modules/serviceworkers/ExtendableEvent.h"
 #include "modules/serviceworkers/FetchEvent.h"
-#include "modules/serviceworkers/InstallEvent.h"
 #include "modules/serviceworkers/ServiceWorkerGlobalScope.h"
 #include "modules/serviceworkers/WaitUntilObserver.h"
 #include "platform/RuntimeEnabledFeatures.h"
@@ -102,8 +101,10 @@ void ServiceWorkerGlobalScopeProxy::dispatchFetchEvent(int eventID, const WebSer
 
     Request* request = Request::create(m_workerGlobalScope, webRequest);
     request->headers()->setGuard(Headers::ImmutableGuard);
-    RefPtrWillBeRawPtr<FetchEvent> fetchEvent(FetchEvent::create(observer, request));
-    fetchEvent->setIsReload(webRequest.isReload());
+    FetchEventInit eventInit;
+    eventInit.setRequest(request);
+    eventInit.setIsReload(webRequest.isReload());
+    RefPtrWillBeRawPtr<FetchEvent> fetchEvent(FetchEvent::create(EventTypeNames::fetch, eventInit, observer));
     defaultPrevented = !m_workerGlobalScope->dispatchEvent(fetchEvent.release());
     observer->didDispatchEvent(defaultPrevented);
 }
@@ -119,7 +120,7 @@ void ServiceWorkerGlobalScopeProxy::dispatchInstallEvent(int eventID)
 {
     ASSERT(m_workerGlobalScope);
     WaitUntilObserver* observer = WaitUntilObserver::create(m_workerGlobalScope, WaitUntilObserver::Install, eventID);
-    RefPtrWillBeRawPtr<Event> event(InstallEvent::create(EventTypeNames::install, InstallEventInit(), observer));
+    RefPtrWillBeRawPtr<Event> event(ExtendableEvent::create(EventTypeNames::install, ExtendableEventInit(), observer));
     m_workerGlobalScope->dispatchExtendableEvent(event.release(), observer);
 }
 
@@ -132,7 +133,7 @@ void ServiceWorkerGlobalScopeProxy::dispatchMessageEvent(const WebString& messag
     m_workerGlobalScope->dispatchEvent(MessageEvent::create(ports.release(), value));
 }
 
-void ServiceWorkerGlobalScopeProxy::dispatchNotificationClickEvent(int eventID, const WebString& notificationID, const WebNotificationData& data)
+void ServiceWorkerGlobalScopeProxy::dispatchNotificationClickEvent(int eventID, int64_t notificationID, const WebNotificationData& data)
 {
     ASSERT(m_workerGlobalScope);
     WaitUntilObserver* observer = WaitUntilObserver::create(m_workerGlobalScope, WaitUntilObserver::NotificationClick, eventID);

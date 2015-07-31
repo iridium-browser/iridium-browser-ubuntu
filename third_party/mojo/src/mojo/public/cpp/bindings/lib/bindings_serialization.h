@@ -7,12 +7,12 @@
 
 #include <vector>
 
+#include "mojo/public/cpp/bindings/interface_ptr.h"
+#include "mojo/public/cpp/bindings/lib/bindings_internal.h"
 #include "mojo/public/cpp/system/core.h"
 
 namespace mojo {
 namespace internal {
-
-class BoundsChecker;
 
 // Please note that this is a different value than |mojo::kInvalidHandleValue|,
 // which is the "decoded" invalid handle.
@@ -41,15 +41,16 @@ inline void DecodePointer(const uint64_t* offset, T** ptr) {
   *ptr = reinterpret_cast<T*>(const_cast<void*>(DecodePointerRaw(offset)));
 }
 
-// Checks whether decoding the pointer will overflow and produce a pointer
-// smaller than |offset|.
-bool ValidateEncodedPointer(const uint64_t* offset);
-
 // Handles are encoded as indices into a vector of handles. These functions
 // manipulate the value of |handle|, mapping it to and from an index.
+
 void EncodeHandle(Handle* handle, std::vector<Handle>* handles);
-// Note: This function doesn't validate the encoded handle value.
+void EncodeHandle(Interface_Data* data, std::vector<Handle>* handles);
+void EncodeHandle(MojoHandle* handle, std::vector<Handle>* handles);
+// Note: The following three functions don't validate the encoded handle value.
 void DecodeHandle(Handle* handle, std::vector<Handle>* handles);
+void DecodeHandle(Interface_Data* data, std::vector<Handle>* handles);
+void DecodeHandle(MojoHandle* handle, std::vector<Handle>* handles);
 
 // The following 2 functions are used to encode/decode all objects (structs and
 // arrays) in a consistent manner.
@@ -69,15 +70,20 @@ inline void Decode(T* obj, std::vector<Handle>* handles) {
     obj->ptr->DecodePointersAndHandles(handles);
 }
 
-// Validates that |data| contains a valid struct header, in terms of alignment
-// and size (i.e., the |num_bytes| field of the header is sufficient for storing
-// the header itself). Besides, it checks that the memory range
-// [data, data + num_bytes) is not marked as occupied by other objects in
-// |bounds_checker|. On success, the memory range is marked as occupied.
-// Note: Does not verify |version| or that |num_bytes| is correct for the
-// claimed version.
-bool ValidateStructHeaderAndClaimMemory(const void* data,
-                                        BoundsChecker* bounds_checker);
+template <typename T>
+inline void InterfacePointerToData(InterfacePtr<T> input,
+                                   Interface_Data* output) {
+  InterfacePtrInfo<T> info = input.PassInterface();
+  output->handle = info.PassHandle().release();
+  output->version = info.version();
+}
+
+template <typename T>
+inline void InterfaceDataToPointer(Interface_Data* input,
+                                   InterfacePtr<T>* output) {
+  output->Bind(InterfacePtrInfo<T>(
+      MakeScopedHandle(FetchAndReset(&input->handle)), input->version));
+}
 
 }  // namespace internal
 }  // namespace mojo

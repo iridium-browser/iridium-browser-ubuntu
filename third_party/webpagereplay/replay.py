@@ -47,7 +47,6 @@ import socket
 import sys
 import traceback
 
-import certutils
 import customhandlers
 import dnsproxy
 import httparchive
@@ -202,11 +201,12 @@ class OptionsWrapper(object):
     if value:
       try:
         socket.inet_aton(value)
-      except:
+      except Exception:
         self._parser.error('Option --%s must be a valid IPv4 address.' % name)
 
   def _CheckFeatureSupport(self):
-    if self._options.should_generate_certs and not certutils.has_sni():
+    if (self._options.should_generate_certs and
+        not platformsettings.HasSniSupport()):
       self._parser.error('Option --should_generate_certs requires pyOpenSSL '
                          '0.13 or greater for SNI support.')
 
@@ -345,7 +345,7 @@ def replay(options, replay_filename):
           platformsettings.DnsUpdateError) as e:
     logging.critical('%s: %s', e.__class__.__name__, e)
     exit_status = 1
-  except:
+  except Exception:
     logging.critical(traceback.format_exc())
     exit_status = 2
 

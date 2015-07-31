@@ -133,7 +133,8 @@ remoting.updateLocalHostState = function() {
   };
 
   remoting.hostController.hasFeature(
-      remoting.HostController.Feature.PAIRING_REGISTRY, onHasFeatureResponse);
+      remoting.HostController.Feature.PAIRING_REGISTRY).
+      then(onHasFeatureResponse);
   remoting.hostController.getLocalHostState(onHostState);
 };
 
@@ -177,7 +178,7 @@ remoting.showErrorMessage = function(error) {
 
 
 remoting.startDesktopRemoting = function() {
-  remoting.app = new remoting.DesktopRemoting(remoting.app_capabilities());
+  remoting.app = new remoting.DesktopRemoting();
   remoting.app.start();
 };
 

@@ -17,7 +17,7 @@
 #define WEBRTC_MODULES_AUDIO_CODING_MAIN_ACM2_ACM_CODEC_DATABASE_H_
 
 #include "webrtc/common_types.h"
-#include "webrtc/modules/audio_coding/main/acm2/acm_generic_codec.h"
+#include "webrtc/engine_configurations.h"
 #include "webrtc/modules/audio_coding/neteq/interface/neteq.h"
 
 namespace webrtc {
@@ -146,7 +146,7 @@ class ACMCodecDB {
   //                        implement ACMGenericCodec::Decoder(), which returns
   //                        a pointer to AudioDecoder. This pointer is injected
   //                        into NetEq when this codec is registered as receive
-  //                        codec.
+  //                        codec. DEPRECATED.
   struct CodecSettings {
     int num_packet_sizes;
     int packet_sizes_samples[kMaxNumPacketSize];
@@ -166,36 +166,17 @@ class ACMCodecDB {
   //   0 if successful, otherwise -1.
   static int Codec(int codec_id, CodecInst* codec_inst);
 
-  // Returns codec id and mirror id from database, given the information
-  // received in the input [codec_inst]. Mirror id is a number that tells
-  // where to find the codec's memory (instance). The number is either the
-  // same as codec id (most common), or a number pointing at a different
-  // entry in the database, if the codec has several entries with different
-  // payload types. This is used for codecs that must share one struct even if
-  // the payload type differs.
-  // One example is the codec iSAC which has the same struct for both 16 and
-  // 32 khz, but they have different entries in the database. Let's say the
-  // function is called with iSAC 32kHz. The function will return 1 as that is
-  // the entry in the data base, and [mirror_id] = 0, as that is the entry for
-  // iSAC 16 kHz, which holds the shared memory.
+  // Returns codec id from database, given the information received in the input
+  // [codec_inst].
   // Input:
   //   [codec_inst] - Information about the codec for which we require the
   //                  database id.
-  // Output:
-  //   [mirror_id] - mirror id, which most often is the same as the return
-  //                 value, see above.
-  //   [err_message] - if present, in the event of a mismatch found between the
-  //                   input and the database, a descriptive error message is
-  //                   written here.
-  //   [err_message] - if present, the length of error message is returned here.
   // Return:
   //   codec id if successful, otherwise < 0.
-  static int CodecNumber(const CodecInst& codec_inst, int* mirror_id,
-                         char* err_message, int max_message_len_byte);
-  static int CodecNumber(const CodecInst& codec_inst, int* mirror_id);
+  static int CodecNumber(const CodecInst& codec_inst);
   static int CodecId(const CodecInst& codec_inst);
   static int CodecId(const char* payload_name, int frequency, int channels);
-  static int ReceiverCodecNumber(const CodecInst& codec_inst, int* mirror_id);
+  static int ReceiverCodecNumber(const CodecInst& codec_inst);
 
   // Returns the codec sampling frequency for codec with id = "codec_id" in
   // database.
@@ -220,35 +201,6 @@ class ACMCodecDB {
 
   // Returns the NetEQ decoder database.
   static const NetEqDecoder* NetEQDecoders();
-
-  // Returns mirror id, which is a number that tells where to find the codec's
-  // memory (instance). It is either the same as codec id (most common), or a
-  // number pointing at a different entry in the database, if the codec have
-  // several entries with different payload types. This is used for codecs that
-  // must share struct even if the payload type differs.
-  // TODO(tlegrand): Check if function is needed, or if we can change
-  // to access database directly.
-  // Input:
-  //   [codec_id] - number that specifies codec's position in the database.
-  // Return:
-  //   Mirror id on success, otherwise -1.
-  static int MirrorID(int codec_id);
-
-  // Creates a codec wrapper containing an AudioEncoder object (or an
-  // ACMGenericCodec subclass during the refactoring time). The type of
-  // AudioEncoder is decided by looking at the information in |codec_inst|.
-  // The |cng_pt_*| parameters should contain the RTP payload type used for each
-  // type of comfort noise; if not used (or not know when this function is
-  // called), -1 can be set. The parameter |enable_red| indicates that RED
-  // is enabled, and that |red_payload_type| should be used as RTP payload type
-  // for RED encodings.
-  static ACMGenericCodec* CreateCodecInstance(const CodecInst& codec_inst,
-                                              int cng_pt_nb,
-                                              int cng_pt_wb,
-                                              int cng_pt_swb,
-                                              int cng_pt_fb,
-                                              bool enable_red,
-                                              int red_payload_type);
 
   // Specifies if the codec specified by |codec_id| MUST own its own decoder.
   // This is the case for codecs which *should* share a single codec instance

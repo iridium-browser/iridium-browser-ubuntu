@@ -5,6 +5,8 @@
 #ifndef NET_PROXY_MOJO_PROXY_RESOLVER_FACTORY_H_
 #define NET_PROXY_MOJO_PROXY_RESOLVER_FACTORY_H_
 
+#include "base/callback_helpers.h"
+#include "base/memory/scoped_ptr.h"
 #include "net/interfaces/host_resolver_service.mojom.h"
 #include "net/interfaces/proxy_resolver_service.mojom.h"
 #include "third_party/mojo/src/mojo/public/cpp/bindings/interface_request.h"
@@ -15,10 +17,15 @@ namespace net {
 class MojoProxyResolverFactory {
  public:
   // Connect to a new ProxyResolver service using request |req|, using
-  // |host_resolver| as the DNS resolver.
+  // |host_resolver| as the DNS resolver. The return value should be released
+  // when the connection to |req| is no longer needed.
   // Note: The connection request |req| may be resolved asynchronously.
-  virtual void Create(mojo::InterfaceRequest<interfaces::ProxyResolver> req,
-                      interfaces::HostResolverPtr host_resolver) = 0;
+  virtual scoped_ptr<base::ScopedClosureRunner> CreateResolver(
+      const mojo::String& pac_script,
+      mojo::InterfaceRequest<interfaces::ProxyResolver> req,
+      interfaces::HostResolverPtr host_resolver,
+      interfaces::ProxyResolverErrorObserverPtr error_observer,
+      interfaces::ProxyResolverFactoryRequestClientPtr client) = 0;
 
  protected:
   virtual ~MojoProxyResolverFactory() = default;

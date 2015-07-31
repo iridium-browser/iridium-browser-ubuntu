@@ -21,39 +21,55 @@ var remoting = remoting || {};
 remoting.HostListApiImpl = function() {
 };
 
-/**
- * Fetch the list of hosts for a user.
- *
- * @param {function(Array<remoting.Host>):void} onDone
- * @param {function(!remoting.Error):void} onError
- */
-remoting.HostListApiImpl.prototype.get = function(onDone, onError) {
-  /** @type {function(!remoting.Xhr.Response):void} */
-  var parseHostListResponse =
-      this.parseHostListResponse_.bind(this, onDone, onError);
-  /** @param {string} token */
-  var onToken = function(token) {
-    new remoting.Xhr({
-      method: 'GET',
-      url: remoting.settings.DIRECTORY_API_BASE_URL + '/@me/hosts',
-      oauthToken: token
-    }).start().then(parseHostListResponse);
-  };
-  remoting.identity.getToken().then(onToken, remoting.Error.handler(onError));
+/** @override */
+remoting.HostListApiImpl.prototype.register = function(
+    newHostId, hostName, publicKey, hostClientId) {
+  var newHostDetails = { data: {
+    hostId: newHostId,
+    hostName: hostName,
+    publicKey: publicKey
+  } };
+
+  return new remoting.Xhr({
+    method: 'POST',
+    url: remoting.settings.DIRECTORY_API_BASE_URL + '/@me/hosts',
+    urlParams: {
+      hostClientId: hostClientId
+    },
+    jsonContent: newHostDetails,
+    acceptJson: true,
+    useIdentity: true
+  }).start().then(function(response) {
+    if (response.status == 200) {
+      var result = /** @type {!Object} */ (response.getJson());
+      var data = base.getObjectAttr(result, 'data');
+      var authCode = base.getStringAttr(data, 'authorizationCode');
+      return { authCode: authCode, email: '', gcdId: '' };
+    } else {
+      console.log(
+          'Failed to register the host. Status: ' + response.status +
+          ' response: ' + response.getText());
+      throw new remoting.Error(remoting.Error.Tag.REGISTRATION_FAILED);
+    }
+  });
 };
 
-/**
- * Update the information for a host.
- *
- * @param {function():void} onDone
- * @param {function(!remoting.Error):void} onError
- * @param {string} hostId
- * @param {string} hostName
- * @param {string} hostPublicKey
- */
+/** @override */
+remoting.HostListApiImpl.prototype.get = function() {
+  var that = this;
+  return new remoting.Xhr({
+    method: 'GET',
+    url: remoting.settings.DIRECTORY_API_BASE_URL + '/@me/hosts',
+    useIdentity: true
+  }).start().then(function(/** !remoting.Xhr.Response */ response) {
+    return that.parseHostListResponse_(response);
+  });
+};
+
+/** @override */
 remoting.HostListApiImpl.prototype.put =
-    function(hostId, hostName, hostPublicKey, onDone, onError) {
-  new remoting.Xhr({
+    function(hostId, hostName, hostPublicKey) {
+  return new remoting.Xhr({
     method: 'PUT',
     url: remoting.settings.DIRECTORY_API_BASE_URL + '/@me/hosts/' + hostId,
     jsonContent: {
@@ -64,23 +80,17 @@ remoting.HostListApiImpl.prototype.put =
       }
     },
     useIdentity: true
-  }).start().then(remoting.HostListApiImpl.defaultResponse_(onDone, onError));
+  }).start().then(remoting.HostListApiImpl.defaultResponse_());
 };
 
-/**
- * Delete a host.
- *
- * @param {function():void} onDone
- * @param {function(!remoting.Error):void} onError
- * @param {string} hostId
- */
-remoting.HostListApiImpl.prototype.remove = function(hostId, onDone, onError) {
-  new remoting.Xhr({
+/** @override */
+remoting.HostListApiImpl.prototype.remove = function(hostId) {
+  return new remoting.Xhr({
     method: 'DELETE',
     url: remoting.settings.DIRECTORY_API_BASE_URL + '/@me/hosts/' + hostId,
     useIdentity: true
   }).start().then(remoting.HostListApiImpl.defaultResponse_(
-      onDone, onError, [remoting.Error.Tag.NOT_FOUND]));
+      [remoting.Error.Tag.NOT_FOUND]));
 };
 
 /**
@@ -88,19 +98,17 @@ remoting.HostListApiImpl.prototype.remove = function(hostId, onDone, onError) {
  * include a JSON-encoded list of host descriptions, which is parsed and
  * passed to the callback.
  *
- * @param {function(Array<remoting.Host>):void} onDone
- * @param {function(!remoting.Error):void} onError
  * @param {!remoting.Xhr.Response} response
+ * @return {!Array<!remoting.Host>}
  * @private
  */
-remoting.HostListApiImpl.prototype.parseHostListResponse_ =
-    function(onDone, onError, response) {
+remoting.HostListApiImpl.prototype.parseHostListResponse_ = function(response) {
   if (response.status == 200) {
     var obj = /** @type {{data: {items: Array}}} */
         (base.jsonParseSafe(response.getText()));
     if (!obj || !obj.data) {
       console.error('Invalid "hosts" response from server.');
-      onError(remoting.Error.unexpected());
+      throw remoting.Error.unexpected();
     } else {
       var items = obj.data.items || [];
       var hosts = items.map(
@@ -118,43 +126,66 @@ remoting.HostListApiImpl.prototype.parseHostListResponse_ =
               base.getStringAttr(item, 'hostOfflineReason', '');
           return host;
       });
-      onDone(hosts);
+      return hosts;
     }
   } else {
-    onError(remoting.Error.fromHttpStatus(response.status));
+    throw remoting.Error.fromHttpStatus(response.status);
   }
 };
 
 /**
  * Generic success/failure response proxy.
  *
- * @param {function():void} onDone
- * @param {function(!remoting.Error):void} onError
  * @param {Array<remoting.Error.Tag>=} opt_ignoreErrors
  * @return {function(!remoting.Xhr.Response):void}
  * @private
  */
-remoting.HostListApiImpl.defaultResponse_ = function(
-    onDone, onError, opt_ignoreErrors) {
+remoting.HostListApiImpl.defaultResponse_ = function(opt_ignoreErrors) {
   /** @param {!remoting.Xhr.Response} response */
   var result = function(response) {
     var error = remoting.Error.fromHttpStatus(response.status);
     if (error.isNone()) {
-      onDone();
       return;
     }
 
     if (opt_ignoreErrors && error.hasTag.apply(error, opt_ignoreErrors)) {
-      onDone();
       return;
     }
 
-    onError(error);
+    throw error;
   };
   return result;
 };
 
-/** @type {remoting.HostListApi} */
-remoting.hostListApi = new remoting.HostListApiImpl();
+/** @override */
+remoting.HostListApiImpl.prototype.getSupportHost = function(supportId) {
+  return new remoting.Xhr({
+    method: 'GET',
+    url: remoting.settings.DIRECTORY_API_BASE_URL + '/support-hosts/' +
+        encodeURIComponent(supportId),
+    useIdentity: true
+  }).start().then(function(xhrResponse) {
+    if (xhrResponse.status == 200) {
+      var response =
+          /** @type {{data: {jabberId: string, publicKey: string}}} */
+          (base.jsonParseSafe(xhrResponse.getText()));
+      if (response && response.data &&
+          response.data.jabberId && response.data.publicKey) {
+        var host = new remoting.Host(supportId);
+        host.jabberId = response.data.jabberId;
+        host.publicKey = response.data.publicKey;
+        host.hostName = response.data.jabberId.split('/')[0];
+        return host;
+      } else {
+        console.error('Invalid "support-hosts" response from server.');
+        throw remoting.Error.unexpected();
+      }
+    } else if (xhrResponse.status == 404) {
+      throw new remoting.Error(remoting.Error.Tag.INVALID_ACCESS_CODE);
+    } else {
+      throw remoting.Error.fromHttpStatus(xhrResponse.status);
+    }
+  });
+};
 
 })();

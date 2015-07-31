@@ -24,8 +24,13 @@ using chrome_browser_net::CertificateErrorReporter;
 using content::BrowserThread;
 
 namespace {
-// URL to upload invalid certificate chain reports
-const char kExtendedReportingUploadUrl[] =
+// URLs to upload invalid certificate chain reports. The HTTP URL is
+// preferred since a client seeing an invalid cert might not be able to
+// make an HTTPS connection to report it.
+const char kExtendedReportingUploadUrlInsecure[] =
+    "http://safebrowsing.googleusercontent.com/safebrowsing/clientreport/"
+    "chrome-certs";
+const char kExtendedReportingUploadUrlSecure[] =
     "https://sb-ssl.google.com/safebrowsing/clientreport/chrome-certs";
 }  // namespace
 
@@ -35,7 +40,7 @@ const char kExtendedReportingUploadUrl[] =
 SafeBrowsingPingManager* SafeBrowsingPingManager::Create(
     net::URLRequestContextGetter* request_context_getter,
     const SafeBrowsingProtocolConfig& config) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   return new SafeBrowsingPingManager(request_context_getter, config);
 }
 
@@ -44,15 +49,29 @@ SafeBrowsingPingManager::SafeBrowsingPingManager(
     const SafeBrowsingProtocolConfig& config)
     : client_name_(config.client_name),
       request_context_getter_(request_context_getter),
-      url_prefix_(config.url_prefix),
-      certificate_error_reporter_(
-          request_context_getter
-              ? new CertificateErrorReporter(
-                    request_context_getter->GetURLRequestContext(),
-                    GURL(kExtendedReportingUploadUrl),
-                    CertificateErrorReporter::SEND_COOKIES)
-              : nullptr) {
+      url_prefix_(config.url_prefix) {
   DCHECK(!url_prefix_.empty());
+
+  if (request_context_getter) {
+    // Set the upload URL and whether or not to send cookies with
+    // certificate reports sent to Safe Browsing servers.
+    bool use_insecure_certificate_upload_url =
+        CertificateErrorReporter::IsHttpUploadUrlSupported();
+
+    CertificateErrorReporter::CookiesPreference cookies_preference;
+    GURL certificate_upload_url;
+    if (use_insecure_certificate_upload_url) {
+      cookies_preference = CertificateErrorReporter::DO_NOT_SEND_COOKIES;
+      certificate_upload_url = GURL(kExtendedReportingUploadUrlInsecure);
+    } else {
+      cookies_preference = CertificateErrorReporter::SEND_COOKIES;
+      certificate_upload_url = GURL(kExtendedReportingUploadUrlSecure);
+    }
+
+    certificate_error_reporter_.reset(new CertificateErrorReporter(
+        request_context_getter->GetURLRequestContext(), certificate_upload_url,
+        cookies_preference));
+  }
 
   version_ = SafeBrowsingProtocolManagerHelper::Version();
 }
@@ -85,10 +104,11 @@ void SafeBrowsingPingManager::ReportSafeBrowsingHit(
   GURL report_url = SafeBrowsingHitUrl(malicious_url, page_url,
                                        referrer_url, is_subresource,
                                        threat_type);
-  net::URLFetcher* report = net::URLFetcher::Create(
-      report_url,
-      post_data.empty() ? net::URLFetcher::GET : net::URLFetcher::POST,
-      this);
+  net::URLFetcher* report =
+      net::URLFetcher::Create(
+          report_url,
+          post_data.empty() ? net::URLFetcher::GET : net::URLFetcher::POST,
+          this).release();
   report->SetLoadFlags(net::LOAD_DISABLE_CACHE);
   report->SetRequestContext(request_context_getter_.get());
   if (!post_data.empty())
@@ -101,8 +121,9 @@ void SafeBrowsingPingManager::ReportSafeBrowsingHit(
 void SafeBrowsingPingManager::ReportMalwareDetails(
     const std::string& report) {
   GURL report_url = MalwareDetailsUrl();
-  net::URLFetcher* fetcher = net::URLFetcher::Create(
-      report_url, net::URLFetcher::POST, this);
+  net::URLFetcher* fetcher =
+      net::URLFetcher::Create(report_url, net::URLFetcher::POST, this)
+          .release();
   fetcher->SetLoadFlags(net::LOAD_DISABLE_CACHE);
   fetcher->SetRequestContext(request_context_getter_.get());
   fetcher->SetUploadData("application/octet-stream", report);
@@ -113,12 +134,11 @@ void SafeBrowsingPingManager::ReportMalwareDetails(
 }
 
 void SafeBrowsingPingManager::ReportInvalidCertificateChain(
-    const std::string& hostname,
-    const net::SSLInfo& ssl_info) {
+    const std::string& serialized_report) {
   DCHECK(certificate_error_reporter_);
   certificate_error_reporter_->SendReport(
-      CertificateErrorReporter::REPORT_TYPE_EXTENDED_REPORTING, hostname,
-      ssl_info);
+      CertificateErrorReporter::REPORT_TYPE_EXTENDED_REPORTING,
+      serialized_report);
 }
 
 void SafeBrowsingPingManager::SetCertificateErrorReporterForTesting(

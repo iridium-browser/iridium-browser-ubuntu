@@ -640,12 +640,6 @@ process_common_toolchain() {
       *i[3456]86*)
         tgt_isa=x86
         ;;
-      *powerpc64*)
-        tgt_isa=ppc64
-        ;;
-      *powerpc*)
-        tgt_isa=ppc32
-        ;;
       *sparc*)
         tgt_isa=sparc
         ;;
@@ -795,7 +789,6 @@ process_common_toolchain() {
   case ${toolchain} in
     sparc-solaris-*)
       add_extralibs -lposix4
-      disable_feature fast_unaligned
       ;;
     *-solaris-*)
       add_extralibs -lposix4
@@ -819,11 +812,9 @@ process_common_toolchain() {
             die "Disabling neon while keeping neon-asm is not supported"
           fi
           soft_enable media
-          soft_enable fast_unaligned
           ;;
         armv6)
           soft_enable media
-          soft_enable fast_unaligned
           ;;
       esac
 
@@ -1039,34 +1030,38 @@ EOF
       tune_cflags="-mtune="
       if enabled dspr2; then
         check_add_cflags -mips32r2 -mdspr2
-        disable_feature fast_unaligned
       fi
+
+      if enabled runtime_cpu_detect; then
+        disable_feature runtime_cpu_detect
+      fi
+
+      if [ -n "${tune_cpu}" ]; then
+        case ${tune_cpu} in
+          p5600)
+            check_add_cflags -mips32r5 -funroll-loops -mload-store-pairs
+            check_add_cflags -msched-weight -mhard-float -mfp64
+            check_add_asflags -mips32r5 -mhard-float -mfp64
+            check_add_ldflags -mfp64
+            ;;
+          i6400)
+            check_add_cflags -mips64r6 -mabi=64 -funroll-loops -msched-weight 
+            check_add_cflags  -mload-store-pairs -mhard-float -mfp64
+            check_add_asflags -mips64r6 -mabi=64 -mhard-float -mfp64
+            check_add_ldflags -mips64r6 -mabi=64 -mfp64
+            ;;
+        esac
+
+        if enabled msa; then
+          add_cflags -mmsa
+          add_asflags -mmsa
+          add_ldflags -mmsa
+        fi
+      fi
+
       check_add_cflags -march=${tgt_isa}
       check_add_asflags -march=${tgt_isa}
       check_add_asflags -KPIC
-      ;;
-    ppc*)
-      enable_feature ppc
-      bits=${tgt_isa##ppc}
-      link_with_cc=gcc
-      setup_gnu_toolchain
-      add_asflags -force_cpusubtype_ALL -I"\$(dir \$<)darwin"
-      soft_enable altivec
-      enabled altivec && add_cflags -maltivec
-
-      case "$tgt_os" in
-        linux*)
-          add_asflags -maltivec -mregnames -I"\$(dir \$<)linux"
-          ;;
-        darwin*)
-          darwin_arch="-arch ppc"
-          enabled ppc64 && darwin_arch="${darwin_arch}64"
-          add_cflags  ${darwin_arch} -m${bits} -fasm-blocks
-          add_asflags ${darwin_arch} -force_cpusubtype_ALL -I"\$(dir \$<)darwin"
-          add_ldflags ${darwin_arch} -m${bits}
-          enabled altivec && add_cflags -faltivec
-          ;;
-      esac
       ;;
     x86*)
       case  ${tgt_os} in
@@ -1304,10 +1299,14 @@ EOF
   # only for MIPS platforms
   case ${toolchain} in
     mips*)
-      if enabled dspr2; then
-        if enabled big_endian; then
+      if enabled big_endian; then
+        if enabled dspr2; then
           echo "dspr2 optimizations are available only for little endian platforms"
           disable_feature dspr2
+        fi
+        if enabled msa; then
+          echo "msa optimizations are available only for little endian platforms"
+          disable_feature msa
         fi
       fi
       ;;

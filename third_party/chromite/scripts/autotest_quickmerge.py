@@ -12,7 +12,6 @@ from __future__ import print_function
 
 import argparse
 import glob
-import logging
 import os
 import re
 import sys
@@ -20,6 +19,7 @@ from collections import namedtuple
 
 from chromite.cbuildbot import constants
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import git
 from chromite.lib import osutils
 from chromite.lib import portage_util
@@ -59,36 +59,6 @@ ItemizedChangeReport = namedtuple('ItemizedChangeReport',
 
 class PortagePackageAPIError(Exception):
   """Exception thrown when unable to retrieve a portage package API."""
-
-
-def GetNewestFileTime(path, ignore_subdirs=[]):
-  # pylint: disable=dangerous-default-value
-  """Recursively determine the newest file modification time.
-
-  Args:
-    path: The absolute path of the directory to recursively search.
-    ignore_subdirs: list of names of subdirectores of given path, to be
-                    ignored by recursive search. Useful as a speed
-                    optimization, to ignore directories full of many
-                    files.
-
-  Returns:
-    The modification time of the most recently modified file recursively
-    contained within the specified directory. Returned as seconds since
-    Jan. 1, 1970, 00:00 GMT, with fractional part (floating point number).
-  """
-  command = ['find', path]
-  for ignore in ignore_subdirs:
-    command.extend(['-path', os.path.join(path, ignore), '-prune', '-o'])
-  command.extend(['-printf', r'%T@\n'])
-
-  command_result = cros_build_lib.RunCommand(command, error_code_ok=True,
-                                             capture_output=True)
-  float_times = [float(str_time) for str_time in
-                 command_result.output.split('\n')
-                 if str_time != '']
-
-  return max(float_times)
 
 
 def GetStalePackageNames(change_list, autotest_sysroot):
@@ -339,8 +309,7 @@ def ParseArguments(argv):
   parser.add_argument('--overwrite', action='store_true',
                       help='Overwrite existing files even if newer.')
   parser.add_argument('--force', action='store_true',
-                      help='Do not check whether destination tree is newer '
-                      'than source tree, always perform quickmerge.')
+                      help=argparse.SUPPRESS)
   parser.add_argument('--verbose', action='store_true',
                       help='Print detailed change report.')
 
@@ -371,7 +340,7 @@ def main(argv):
 
   manifest = git.ManifestCheckout.Cached(constants.SOURCE_ROOT)
   checkout = manifest.FindCheckout(AUTOTEST_PROJECT_NAME)
-  source_path = os.path.join(checkout.GetPath(absolute=True), '')
+  brillo_autotest_src_path = os.path.join(checkout.GetPath(absolute=True), '')
 
   script_path = os.path.dirname(__file__)
   include_pattern_file = os.path.join(script_path, INCLUDE_PATTERNS_FILENAME)
@@ -384,28 +353,36 @@ def main(argv):
     sysroot_autotest_path = os.path.join(sysroot_path, 'usr/local/autotest',
                                          '')
 
-  if not args.force:
-    newest_dest_time = GetNewestFileTime(sysroot_autotest_path, IGNORE_SUBDIRS)
-    newest_source_time = GetNewestFileTime(source_path, IGNORE_SUBDIRS)
-    if newest_dest_time >= newest_source_time:
-      logging.info('The sysroot appears to be newer than the source tree, '
-                   'doing nothing and exiting now.')
-      return 0
+  # Generate the list of source paths to copy.
+  src_paths = {os.path.abspath(brillo_autotest_src_path)}
+  for quickmerge_file in glob.glob(os.path.join(sysroot_autotest_path,
+                                                'quickmerge', '*', '*')):
+    try:
+      path = osutils.ReadFile(quickmerge_file).strip()
+      if path and os.path.exists(path):
+        src_paths.add(os.path.abspath(path))
+    except IOError:
+      logging.error('Could not quickmerge for project: %s',
+                    os.path.basename(quickmerge_file))
 
-  rsync_output = RsyncQuickmerge(source_path, sysroot_autotest_path,
-                                 include_pattern_file, args.pretend,
-                                 args.overwrite)
+  num_new_files = 0
+  num_modified_files = 0
+  for src_path in src_paths:
+    rsync_output = RsyncQuickmerge(src_path +'/', sysroot_autotest_path,
+                                   include_pattern_file, args.pretend,
+                                   args.overwrite)
 
-  if args.verbose:
-    logging.info(rsync_output.output)
-
-  change_report = ItemizeChangesFromRsyncOutput(rsync_output.output,
-                                                sysroot_autotest_path)
+    if args.verbose:
+      logging.info(rsync_output.output)
+    change_report = ItemizeChangesFromRsyncOutput(rsync_output.output,
+                                                  sysroot_autotest_path)
+    num_new_files = num_new_files + len(change_report.new_files)
+    num_modified_files = num_modified_files + len(change_report.modified_files)
+    if not args.pretend:
+      logging.info('Updating portage database.')
+      UpdatePackageContents(change_report, AUTOTEST_EBUILD, sysroot_path)
 
   if not args.pretend:
-    logging.info('Updating portage database.')
-    UpdatePackageContents(change_report, AUTOTEST_EBUILD,
-                          sysroot_path)
     for logfile in glob.glob(os.path.join(sysroot_autotest_path, 'packages',
                                           '*.log')):
       try:
@@ -431,7 +408,6 @@ def main(argv):
     logging.info('The following message is pretend only. No filesystem '
                  'changes made.')
   logging.info('Quickmerge complete. Created or modified %s files.',
-               len(change_report.new_files) +
-               len(change_report.modified_files))
+               num_new_files + num_modified_files)
 
   return 0

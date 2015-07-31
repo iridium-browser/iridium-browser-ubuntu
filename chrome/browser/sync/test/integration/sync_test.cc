@@ -21,6 +21,7 @@
 #include "base/threading/platform_thread.h"
 #include "base/values.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/invalidation/profile_invalidation_provider_factory.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
@@ -43,6 +44,7 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/webui/signin/login_ui_service.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
@@ -60,6 +62,7 @@
 #include "components/os_crypt/os_crypt.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/signin/core/browser/signin_manager.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/test_browser_thread.h"
 #include "google_apis/gaia/gaia_urls.h"
@@ -377,6 +380,8 @@ std::vector<ProfileSyncService*> SyncTest::GetSyncServices() {
 }
 
 Profile* SyncTest::verifier() {
+  if (!use_verifier_)
+    LOG(FATAL) << "Verifier account is disabled.";
   if (verifier_ == NULL)
     LOG(FATAL) << "SetupClients() has not yet been called.";
   return verifier_;
@@ -403,15 +408,24 @@ bool SyncTest::SetupClients() {
     InitializeInstance(i);
   }
 
+  // Verifier account is not useful when running against external servers.
+  if (UsingExternalServers())
+    DisableVerifier();
+
   // Create the verifier profile.
-  verifier_ = MakeProfile(FILE_PATH_LITERAL("Verifier"));
-  bookmarks::test::WaitForBookmarkModelToLoad(
-      BookmarkModelFactory::GetForProfile(verifier()));
-  ui_test_utils::WaitForHistoryToLoad(HistoryServiceFactory::GetForProfile(
-      verifier(), ServiceAccessType::EXPLICIT_ACCESS));
-  ui_test_utils::WaitForTemplateURLServiceToLoad(
-      TemplateURLServiceFactory::GetForProfile(verifier()));
-  return (verifier_ != NULL);
+  if (use_verifier_) {
+    verifier_ = MakeProfile(FILE_PATH_LITERAL("Verifier"));
+    bookmarks::test::WaitForBookmarkModelToLoad(
+        BookmarkModelFactory::GetForProfile(verifier()));
+    ui_test_utils::WaitForHistoryToLoad(HistoryServiceFactory::GetForProfile(
+        verifier(), ServiceAccessType::EXPLICIT_ACCESS));
+    ui_test_utils::WaitForTemplateURLServiceToLoad(
+        TemplateURLServiceFactory::GetForProfile(verifier()));
+  }
+  // Error cases are all handled by LOG(FATAL) messages. So there is not really
+  // a case that returns false.  In case we failed to create a verifier profile,
+  // any call to the verifier() would fail.
+  return true;
 }
 
 void SyncTest::InitializeInstance(int index) {
@@ -419,7 +433,7 @@ void SyncTest::InitializeInstance(int index) {
       base::StringPrintf(FILE_PATH_LITERAL("Profile%d"), index);
   // If running against an EXTERNAL_LIVE_SERVER, we need to signin profiles
   // using real GAIA server. This requires creating profiles with no test hooks.
-  if (server_type_ == EXTERNAL_LIVE_SERVER) {
+  if (UsingExternalServers()) {
     profiles_[index] = MakeProfileForUISignin(profile_name);
   } else {
     // Without need of real GAIA authentication, we create new test profiles.
@@ -451,8 +465,7 @@ void SyncTest::InitializeInstance(int index) {
             new fake_server::FakeServerNetworkResources(fake_server_.get())));
   }
 
-  ProfileSyncServiceHarness::SigninType singin_type =
-      (server_type_ == EXTERNAL_LIVE_SERVER)
+  ProfileSyncServiceHarness::SigninType singin_type = UsingExternalServers()
           ? ProfileSyncServiceHarness::SigninType::UI_SIGNIN
           : ProfileSyncServiceHarness::SigninType::FAKE_SIGNIN;
 
@@ -474,7 +487,11 @@ void SyncTest::InitializeInstance(int index) {
 }
 
 void SyncTest::InitializeInvalidations(int index) {
-  if (server_type_ == IN_PROCESS_FAKE_SERVER) {
+  if (UsingExternalServers()) {
+    // DO NOTHING. External live sync servers use GCM to notify profiles of any
+    // invalidations in sync'ed data. In this case, to notify other profiles of
+    // invalidations, we use sync refresh notifications instead.
+  } else if (server_type_ == IN_PROCESS_FAKE_SERVER) {
     CHECK(fake_server_.get());
     fake_server::FakeServerInvalidationService* invalidation_service =
         static_cast<fake_server::FakeServerInvalidationService*>(
@@ -491,10 +508,6 @@ void SyncTest::InitializeInvalidations(int index) {
       invalidation_service->DisableSelfNotifications();
     }
     fake_server_invalidation_services_[index] = invalidation_service;
-  } else if (server_type_ == EXTERNAL_LIVE_SERVER) {
-    // DO NOTHING. External live sync servers use GCM to notify profiles of any
-    // invalidations in sync'ed data. In this case, to notify other profiles of
-    // invalidations, we use sync refresh notifications instead.
   } else {
     invalidation::P2PInvalidationService* p2p_invalidation_service =
         static_cast<invalidation::P2PInvalidationService*>(
@@ -545,9 +558,19 @@ bool SyncTest::SetupSync() {
   // automatically after signing in. To avoid misleading sync commit
   // notifications at start up, we start the SyncRefresher observers post
   // client set up.
-  if (server_type_ == EXTERNAL_LIVE_SERVER) {
+  if (UsingExternalServers()) {
     for (int i = 0; i < num_clients_; ++i) {
       sync_refreshers_[i] = new P2PSyncRefresher(clients_[i]->service());
+    }
+
+    // OneClickSigninSyncStarter observer is created with a real user sign in.
+    // It is deleted on certain conditions which are not satisfied by our tests,
+    // and this causes the SigninTracker observer to stay hanging at shutdown.
+    // Calling LoginUIService::SyncConfirmationUIClosed forces the observer to
+    // be removed. http://crbug.com/484388
+    for (int i = 0; i < num_clients_; ++i) {
+      LoginUIServiceFactory::GetForProfile(GetProfile(i))->
+          SyncConfirmationUIClosed(false /* configure_sync_first */);
     }
   }
 
@@ -742,7 +765,9 @@ void SyncTest::DecideServerType() {
 // Start up a local sync server based on the value of server_type_, which
 // was determined from the command line parameters.
 void SyncTest::SetUpTestServerIfRequired() {
-  if (server_type_ == LOCAL_PYTHON_SERVER) {
+  if (UsingExternalServers()) {
+    // Nothing to do; we'll just talk to the URL we were given.
+  } else if (server_type_ == LOCAL_PYTHON_SERVER) {
     if (!SetUpLocalPythonTestServer())
       LOG(FATAL) << "Failed to set up local python sync and XMPP servers";
     SetupMockGaiaResponses();
@@ -755,8 +780,6 @@ void SyncTest::SetUpTestServerIfRequired() {
   } else if (server_type_ == IN_PROCESS_FAKE_SERVER) {
     fake_server_.reset(new fake_server::FakeServer());
     SetupMockGaiaResponses();
-  } else if (server_type_ == EXTERNAL_LIVE_SERVER) {
-    // Nothing to do; we'll just talk to the URL we were given.
   } else {
     LOG(FATAL) << "Don't know which server environment to run test in.";
   }
@@ -860,8 +883,8 @@ bool SyncTest::IsTestServerRunning() {
   std::string sync_url = cl->GetSwitchValueASCII(switches::kSyncServiceURL);
   GURL sync_url_status(sync_url.append("/healthz"));
   SyncServerStatusChecker delegate;
-  scoped_ptr<net::URLFetcher> fetcher(net::URLFetcher::Create(
-    sync_url_status, net::URLFetcher::GET, &delegate));
+  scoped_ptr<net::URLFetcher> fetcher =
+      net::URLFetcher::Create(sync_url_status, net::URLFetcher::GET, &delegate);
   fetcher->SetLoadFlags(net::LOAD_DISABLE_CACHE |
                         net::LOAD_DO_NOT_SEND_COOKIES |
                         net::LOAD_DO_NOT_SAVE_COOKIES);
@@ -906,6 +929,10 @@ bool SyncTest::AwaitEncryptionComplete(int index) {
 
 bool SyncTest::AwaitQuiescence() {
   return ProfileSyncServiceHarness::AwaitQuiescence(clients());
+}
+
+bool SyncTest::UsingExternalServers() {
+  return server_type_ == EXTERNAL_LIVE_SERVER;
 }
 
 bool SyncTest::ServerSupportsNotificationControl() const {
@@ -1016,6 +1043,14 @@ void SyncTest::SetupNetwork(net::URLRequestContextGetter* context_getter) {
 
 fake_server::FakeServer* SyncTest::GetFakeServer() const {
   return fake_server_.get();
+}
+
+void SyncTest::TriggerSyncForModelTypes(int index,
+                                        syncer::ModelTypeSet model_types) {
+  content::NotificationService::current()->Notify(
+      chrome::NOTIFICATION_SYNC_REFRESH_LOCAL,
+      content::Source<Profile>(GetProfile(index)),
+      content::Details<const syncer::ModelTypeSet>(&model_types));
 }
 
 void SyncTest::SetPreexistingPreferencesFileContents(

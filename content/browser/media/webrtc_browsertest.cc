@@ -45,10 +45,6 @@ class MAYBE_WebRtcBrowserTest : public WebRtcContentBrowserTest {
   // Convenience function since most peerconnection-call.html tests just load
   // the page, kick off some javascript and wait for the title to change to OK.
   void MakeTypicalPeerConnectionCall(const std::string& javascript) {
-    if (OnWinXp()) {
-      // Test is flaky on Win XP. http://crbug.com/470013.
-      return;
-    }
     ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
     GURL url(embedded_test_server()->GetURL("/media/peerconnection-call.html"));
@@ -148,15 +144,9 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
 }
 
 // Flaky on TSAN v2. http://crbug.com/408006
-#if defined(THREAD_SANITIZER)
-#define MAYBE_CanSetupVideoCallAndDisableLocalVideo \
-  DISABLED_CanSetupVideoCallAndDisableLocalVideo
-#else
-#define MAYBE_CanSetupVideoCallAndDisableLocalVideo \
-  CanSetupVideoCallAndDisableLocalVideo
-#endif
+// Flaky everywhere: http://crbug.com/477498
 IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
-                       MAYBE_CanSetupVideoCallAndDisableLocalVideo) {
+                       DISABLED_CanSetupVideoCallAndDisableLocalVideo) {
   const std::string javascript =
       "callAndDisableLocalVideo({video: true});";
   MakeTypicalPeerConnectionCall(javascript);
@@ -193,8 +183,14 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
   MakeTypicalPeerConnectionCall(kJavascript);
 }
 
+#if defined(OS_MACOSX)
+// Flaky on Mac-10.9: https://crbug.com/484826
+#define MAYBE_CanMakeVideoCallAndThenRenegotiateToAudio DISABLED_CanMakeVideoCallAndThenRenegotiateToAudio
+#else
+#define MAYBE_CanMakeVideoCallAndThenRenegotiateToAudio CanMakeVideoCallAndThenRenegotiateToAudio
+#endif
 IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcBrowserTest,
-                       CanMakeVideoCallAndThenRenegotiateToAudio) {
+                       MAYBE_CanMakeVideoCallAndThenRenegotiateToAudio) {
   MakeAudioDetectingPeerConnectionCall(base::StringPrintf(
       "callAndRenegotiateToAudio("
       "    %s, {audio: true, video:true}, {audio: true});",

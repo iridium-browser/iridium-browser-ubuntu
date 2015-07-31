@@ -10,9 +10,16 @@ LayerTreeHostAnimationTestContinuousAnimate.RunMultiThread_DirectRenderer_MainTh
 # http://crbug.com/416643
 LayerTreeHostCopyRequestTestMultipleRequests.GLRenderer_RunSingleThread
 LayerTreeHostCopyRequestTestMultipleRequests.SoftwareRenderer_RunSingleThread
+LayerTreeHostTestReadyToDrawNonEmpty.*
+LayerTreeHostTestMaxTransferBufferUsageBytes.*
+LayerTreeHostTestAbortedCommitDoesntStallSynchronousCompositor.*
+LayerTreeHostTestReadyToActivateNonEmpty.*
 
 # http://crbug.com/430400
 PixelResourceTest*
 
 # https://crbug.com/460581
 LayerTreeHostPictureTestRSLLMembershipWithScale.RunMultiThread_DirectRenderer_ImplSidePaint
+
+# https://crbug.com/486619
+LayerTreeHostTestWillBeginImplFrameHasDidFinishImplFrame.RunSingleThread*

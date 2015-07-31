@@ -29,6 +29,7 @@ const char kDriveV2FileDeleteUrlFormat[] = "drive/v2/files/%s";
 const char kDriveV2FileTrashUrlFormat[] = "drive/v2/files/%s/trash";
 const char kDriveV2UploadNewFileUrl[] = "upload/drive/v2/files";
 const char kDriveV2UploadExistingFileUrlPrefix[] = "upload/drive/v2/files/";
+const char kDriveV2BatchUploadUrl[] = "upload/drive";
 const char kDriveV2PermissionsUrlFormat[] = "drive/v2/files/%s/permissions";
 const char kDriveV2DownloadUrlFormat[] = "host/%s";
 const char kDriveV2ThumbnailUrlFormat[] = "thumb/%s?width=%d&height=%d";
@@ -282,10 +283,21 @@ GURL DriveApiUrlGenerator::GetPermissionsInsertUrl(
 
 GURL DriveApiUrlGenerator::GetThumbnailUrl(const std::string& resource_id,
                                            int width,
-                                           int height) const {
-  return base_download_url_.Resolve(
+                                           int height,
+                                           bool crop) const {
+  GURL url = base_download_url_.Resolve(
       base::StringPrintf(kDriveV2ThumbnailUrlFormat,
                          net::EscapePath(resource_id).c_str(), width, height));
+
+  // crop is "false" by default.
+  if (crop)
+    url = net::AppendOrReplaceQueryParameter(url, "crop", "true");
+
+  return url;
+}
+
+GURL DriveApiUrlGenerator::GetBatchUploadUrl() const {
+  return base_url_.Resolve(kDriveV2BatchUploadUrl);
 }
 
 }  // namespace google_apis

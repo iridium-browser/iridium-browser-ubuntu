@@ -92,8 +92,8 @@ struct DictionaryIdComparator {
     b_dict->GetString(kNameId, &b_str);
     if (collator_ == NULL)
       return a_str < b_str;
-    return base::i18n::CompareString16WithCollator(
-        collator_, a_str, b_str) == UCOL_LESS;
+    return base::i18n::CompareString16WithCollator(*collator_, a_str, b_str) ==
+           UCOL_LESS;
   }
 
   icu::Collator* collator_;
@@ -1116,9 +1116,9 @@ void CertificateManagerHandler::ShowError(const std::string& title,
   args.push_back(new base::StringValue(title));
   args.push_back(new base::StringValue(error));
   args.push_back(new base::StringValue(l10n_util::GetStringUTF8(IDS_OK)));
-  args.push_back(base::Value::CreateNullValue());  // cancelTitle
-  args.push_back(base::Value::CreateNullValue());  // okCallback
-  args.push_back(base::Value::CreateNullValue());  // cancelCallback
+  args.push_back(base::Value::CreateNullValue().release());  // cancelTitle
+  args.push_back(base::Value::CreateNullValue().release());  // okCallback
+  args.push_back(base::Value::CreateNullValue().release());  // cancelCallback
   web_ui()->CallJavascriptFunction("AlertOverlay.show", args.get());
 }
 

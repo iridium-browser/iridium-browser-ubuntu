@@ -31,9 +31,16 @@
 #include "config.h"
 #include "core/inspector/InspectorDOMDebuggerAgent.h"
 
+#include "bindings/core/v8/ScriptEventListener.h"
 #include "core/InspectorFrontend.h"
 #include "core/dom/Element.h"
+#include "core/dom/Node.h"
 #include "core/events/Event.h"
+#include "core/events/EventTarget.h"
+#include "core/frame/LocalDOMWindow.h"
+#include "core/inspector/EventListenerInfo.h"
+#include "core/inspector/InjectedScript.h"
+#include "core/inspector/InjectedScriptManager.h"
 #include "core/inspector/InspectorDOMAgent.h"
 #include "core/inspector/InspectorState.h"
 #include "core/inspector/InstrumentingAgents.h"
@@ -81,13 +88,14 @@ static const char pauseOnAllXHRs[] = "pauseOnAllXHRs";
 static const char xhrBreakpoints[] = "xhrBreakpoints";
 }
 
-PassOwnPtrWillBeRawPtr<InspectorDOMDebuggerAgent> InspectorDOMDebuggerAgent::create(InspectorDOMAgent* domAgent, InspectorDebuggerAgent* debuggerAgent)
+PassOwnPtrWillBeRawPtr<InspectorDOMDebuggerAgent> InspectorDOMDebuggerAgent::create(InjectedScriptManager* injectedScriptManager, InspectorDOMAgent* domAgent, InspectorDebuggerAgent* debuggerAgent)
 {
-    return adoptPtrWillBeNoop(new InspectorDOMDebuggerAgent(domAgent, debuggerAgent));
+    return adoptPtrWillBeNoop(new InspectorDOMDebuggerAgent(injectedScriptManager, domAgent, debuggerAgent));
 }
 
-InspectorDOMDebuggerAgent::InspectorDOMDebuggerAgent(InspectorDOMAgent* domAgent, InspectorDebuggerAgent* debuggerAgent)
+InspectorDOMDebuggerAgent::InspectorDOMDebuggerAgent(InjectedScriptManager* injectedScriptManager, InspectorDOMAgent* domAgent, InspectorDebuggerAgent* debuggerAgent)
     : InspectorBaseAgent<InspectorDOMDebuggerAgent, InspectorFrontend::DOMDebugger>("DOMDebugger")
+    , m_injectedScriptManager(injectedScriptManager)
     , m_domAgent(domAgent)
     , m_debuggerAgent(debuggerAgent)
 {
@@ -106,6 +114,7 @@ InspectorDOMDebuggerAgent::~InspectorDOMDebuggerAgent()
 
 DEFINE_TRACE(InspectorDOMDebuggerAgent)
 {
+    visitor->trace(m_injectedScriptManager);
     visitor->trace(m_domAgent);
     visitor->trace(m_debuggerAgent);
 #if ENABLE(OILPAN)
@@ -135,6 +144,19 @@ void InspectorDOMDebuggerAgent::domAgentWasEnabled()
 void InspectorDOMDebuggerAgent::domAgentWasDisabled()
 {
     disable(nullptr);
+}
+
+bool InspectorDOMDebuggerAgent::checkEnabled(ErrorString* errorString)
+{
+    if (!m_domAgent->enabled()) {
+        *errorString = "DOM domain required by DOMDebugger is not enabled";
+        return false;
+    }
+    if (!m_debuggerAgent->enabled()) {
+        *errorString = "Debugger domain required by DOMDebugger is not enabled";
+        return false;
+    }
+    return true;
 }
 
 void InspectorDOMDebuggerAgent::disable(ErrorString*)
@@ -174,18 +196,12 @@ static PassRefPtr<JSONObject> ensurePropertyObject(JSONObject* object, const Str
 
 void InspectorDOMDebuggerAgent::setBreakpoint(ErrorString* error, const String& eventName, const String* targetName)
 {
+    if (!checkEnabled(error))
+        return;
     if (eventName.isEmpty()) {
         *error = "Event name is empty";
         return;
     }
-
-    // Backward compatibility. Some extensions expect that DOMDebuggerAgent is always enabled.
-    // See https://stackoverflow.com/questions/25764336/chrome-extension-domdebugger-api-does-not-work-anymore
-    if (!m_domAgent->enabled())
-        m_domAgent->enable(error);
-
-    if (error->length())
-        return;
 
     RefPtr<JSONObject> eventListenerBreakpoints = m_state->getObject(DOMDebuggerAgentState::eventListenerBreakpoints);
     RefPtr<JSONObject> breakpointsByTarget = ensurePropertyObject(eventListenerBreakpoints.get(), eventName);
@@ -284,6 +300,8 @@ static String domTypeName(int type)
 
 void InspectorDOMDebuggerAgent::setDOMBreakpoint(ErrorString* errorString, int nodeId, const String& typeString)
 {
+    if (!checkEnabled(errorString))
+        return;
     Node* node = m_domAgent->assertNode(errorString, nodeId);
     if (!node)
         return;
@@ -302,6 +320,8 @@ void InspectorDOMDebuggerAgent::setDOMBreakpoint(ErrorString* errorString, int n
 
 void InspectorDOMDebuggerAgent::removeDOMBreakpoint(ErrorString* errorString, int nodeId, const String& typeString)
 {
+    if (!checkEnabled(errorString))
+        return;
     Node* node = m_domAgent->assertNode(errorString, nodeId);
     if (!node)
         return;
@@ -320,6 +340,60 @@ void InspectorDOMDebuggerAgent::removeDOMBreakpoint(ErrorString* errorString, in
         for (Node* child = InspectorDOMAgent::innerFirstChild(node); child; child = InspectorDOMAgent::innerNextSibling(child))
             updateSubtreeBreakpoints(child, rootBit, false);
     }
+}
+
+void InspectorDOMDebuggerAgent::getEventListeners(ErrorString* errorString, const String& objectId, RefPtr<TypeBuilder::Array<TypeBuilder::DOMDebugger::EventListener>>& listenersArray)
+{
+    InjectedScript injectedScript = m_injectedScriptManager->injectedScriptForObjectId(objectId);
+    if (injectedScript.isEmpty()) {
+        *errorString = "Inspected frame has gone";
+        return;
+    }
+    EventTarget* target = injectedScript.eventTargetForObjectId(objectId);
+    if (!target) {
+        *errorString = "No event target with passed objectId";
+        return;
+    }
+
+    listenersArray = TypeBuilder::Array<TypeBuilder::DOMDebugger::EventListener>::create();
+    Vector<EventListenerInfo> eventInformation;
+    EventListenerInfo::getEventListeners(target, eventInformation, false);
+    if (eventInformation.isEmpty())
+        return;
+
+    String objectGroup = injectedScript.objectIdToObjectGroupName(objectId);
+    RegisteredEventListenerIterator iterator(eventInformation);
+    while (const RegisteredEventListener* listener = iterator.nextRegisteredEventListener()) {
+        const EventListenerInfo& info = iterator.currentEventListenerInfo();
+        RefPtr<TypeBuilder::DOMDebugger::EventListener> listenerObject = buildObjectForEventListener(*listener, info.eventType, info.eventTarget, objectGroup);
+        if (listenerObject)
+            listenersArray->addItem(listenerObject);
+    }
+}
+
+PassRefPtr<TypeBuilder::DOMDebugger::EventListener> InspectorDOMDebuggerAgent::buildObjectForEventListener(const RegisteredEventListener& registeredEventListener, const AtomicString& eventType, EventTarget* target, const String& objectGroupId)
+{
+    RefPtr<EventListener> eventListener = registeredEventListener.listener;
+    String scriptId;
+    int lineNumber;
+    int columnNumber;
+    ExecutionContext* context = target->executionContext();
+    if (!context)
+        return nullptr;
+    if (!eventListenerHandlerLocation(context, eventListener.get(), scriptId, lineNumber, columnNumber))
+        return nullptr;
+
+    RefPtr<TypeBuilder::Debugger::Location> location = TypeBuilder::Debugger::Location::create()
+        .setScriptId(scriptId)
+        .setLineNumber(lineNumber);
+    location->setColumnNumber(columnNumber);
+    RefPtr<TypeBuilder::DOMDebugger::EventListener> value = TypeBuilder::DOMDebugger::EventListener::create()
+        .setType(eventType)
+        .setUseCapture(registeredEventListener.useCapture)
+        .setLocation(location);
+    if (!objectGroupId.isEmpty())
+        value->setHandler(eventHandlerObject(context, eventListener.get(), m_injectedScriptManager, &objectGroupId));
+    return value.release();
 }
 
 void InspectorDOMDebuggerAgent::willInsertDOMNode(Node* parent)
@@ -543,8 +617,10 @@ void InspectorDOMDebuggerAgent::didFireWebGLErrorOrWarning(const String& message
         didFireWebGLWarning();
 }
 
-void InspectorDOMDebuggerAgent::setXHRBreakpoint(ErrorString*, const String& url)
+void InspectorDOMDebuggerAgent::setXHRBreakpoint(ErrorString* errorString, const String& url)
 {
+    if (!checkEnabled(errorString))
+        return;
     if (url.isEmpty()) {
         m_state->setBoolean(DOMDebuggerAgentState::pauseOnAllXHRs, true);
         return;
@@ -555,7 +631,7 @@ void InspectorDOMDebuggerAgent::setXHRBreakpoint(ErrorString*, const String& url
     m_state->setObject(DOMDebuggerAgentState::xhrBreakpoints, xhrBreakpoints.release());
 }
 
-void InspectorDOMDebuggerAgent::removeXHRBreakpoint(ErrorString*, const String& url)
+void InspectorDOMDebuggerAgent::removeXHRBreakpoint(ErrorString* errorString, const String& url)
 {
     if (url.isEmpty()) {
         m_state->setBoolean(DOMDebuggerAgentState::pauseOnAllXHRs, false);

@@ -53,6 +53,14 @@ bool StubNotificationUIManager::Update(const Notification& notification,
 const Notification* StubNotificationUIManager::FindById(
     const std::string& delegate_id,
     ProfileID profile_id) const {
+  auto iter = notifications_.begin();
+  for (; iter != notifications_.end(); ++iter) {
+    if (iter->first.delegate_id() != delegate_id || iter->second != profile_id)
+      continue;
+
+    return &iter->first;
+  }
+
   return nullptr;
 }
 
@@ -79,6 +87,16 @@ StubNotificationUIManager::GetAllIdsByProfileAndSourceOrigin(
   std::set<std::string> delegate_ids;
   for (const auto& pair : notifications_) {
     if (pair.second == profile && pair.first.origin_url() == source)
+      delegate_ids.insert(pair.first.delegate_id());
+  }
+  return delegate_ids;
+}
+
+std::set<std::string> StubNotificationUIManager::GetAllIdsByProfile(
+    Profile* profile) {
+  std::set<std::string> delegate_ids;
+  for (const auto& pair : notifications_) {
+    if (pair.second == profile)
       delegate_ids.insert(pair.first.delegate_id());
   }
   return delegate_ids;

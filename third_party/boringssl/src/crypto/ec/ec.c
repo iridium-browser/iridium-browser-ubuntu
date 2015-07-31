@@ -219,11 +219,18 @@ static const struct curve_data P521 = {
      0xB7, 0x1E, 0x91, 0x38, 0x64, 0x09}};
 
 const struct built_in_curve OPENSSL_built_in_curves[] = {
-  {NID_secp224r1, &P224, 0},
-  {NID_X9_62_prime256v1, &P256, 0},
-  {NID_secp384r1, &P384, 0},
-  {NID_secp521r1, &P521, 0},
-  {NID_undef, 0, 0},
+    {NID_secp224r1, &P224, 0},
+    {
+        NID_X9_62_prime256v1, &P256,
+#if defined(OPENSSL_64_BIT) && !defined(OPENSSL_WINDOWS)
+        EC_GFp_nistp256_method,
+#else
+        0,
+#endif
+    },
+    {NID_secp384r1, &P384, 0},
+    {NID_secp521r1, &P521, 0},
+    {NID_undef, 0, 0},
 };
 
 EC_GROUP *ec_group_new(const EC_METHOD *meth) {
@@ -357,30 +364,14 @@ err:
     EC_GROUP_free(group);
     group = NULL;
   }
-  if (P) {
-    EC_POINT_free(P);
-  }
-  if (ctx) {
-    BN_CTX_free(ctx);
-  }
-  if (p) {
-    BN_free(p);
-  }
-  if (a) {
-    BN_free(a);
-  }
-  if (b) {
-    BN_free(b);
-  }
-  if (order) {
-    BN_free(order);
-  }
-  if (x) {
-    BN_free(x);
-  }
-  if (y) {
-    BN_free(y);
-  }
+  EC_POINT_free(P);
+  BN_CTX_free(ctx);
+  BN_free(p);
+  BN_free(a);
+  BN_free(b);
+  BN_free(order);
+  BN_free(x);
+  BN_free(y);
   return group;
 }
 
@@ -417,9 +408,7 @@ void EC_GROUP_free(EC_GROUP *group) {
 
   ec_pre_comp_free(group->pre_comp);
 
-  if (group->generator != NULL) {
-    EC_POINT_free(group->generator);
-  }
+  EC_POINT_free(group->generator);
   BN_free(&group->order);
   BN_free(&group->cofactor);
 
@@ -490,9 +479,7 @@ EC_GROUP *EC_GROUP_dup(const EC_GROUP *a) {
 
 err:
   if (!ok) {
-    if (t) {
-      EC_GROUP_free(t);
-    }
+    EC_GROUP_free(t);
     return NULL;
   } else {
     return t;
@@ -860,4 +847,21 @@ int ec_point_set_Jprojective_coordinates_GFp(const EC_GROUP *group, EC_POINT *po
   }
   return group->meth->point_set_Jprojective_coordinates_GFp(group, point, x, y,
                                                             z, ctx);
+}
+
+void EC_GROUP_set_asn1_flag(EC_GROUP *group, int flag) {}
+
+const EC_METHOD *EC_GROUP_method_of(const EC_GROUP *group) {
+  return NULL;
+}
+
+int EC_METHOD_get_field_type(const EC_METHOD *meth) {
+  return NID_X9_62_prime_field;
+}
+
+void EC_GROUP_set_point_conversion_form(EC_GROUP *group,
+                                        point_conversion_form_t form) {
+  if (form != POINT_CONVERSION_UNCOMPRESSED) {
+    abort();
+  }
 }

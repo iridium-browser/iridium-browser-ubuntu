@@ -14,7 +14,6 @@
 
 #include <errno.h>
 #include <getopt.h>
-#include <libgen.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,10 +24,13 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/logging.h"
 #include "base/files/file_path.h"
+#include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
 #include "client/crash_report_database.h"
 #include "client/settings.h"
 #include "tools/tool_support.h"
@@ -39,9 +41,9 @@
 namespace crashpad {
 namespace {
 
-void Usage(const std::string& me) {
+void Usage(const base::FilePath& me) {
   fprintf(stderr,
-"Usage: %s [OPTION]... PID\n"
+"Usage: %" PRFilePath " [OPTION]... PID\n"
 "Operate on Crashpad crash report databases.\n"
 "\n"
 "  -d, --database=PATH             operate on the crash report database at PATH\n"
@@ -60,7 +62,7 @@ void Usage(const std::string& me) {
 "      --utc                       show and set UTC times instead of local\n"
 "      --help                      display this help and exit\n"
 "      --version                   output version information and exit\n",
-          me.c_str());
+          me.value().c_str());
   ToolSupport::UsageTail(me);
 }
 
@@ -104,14 +106,14 @@ bool StringToBool(const char* string, bool* boolean) {
   };
 
   for (size_t index = 0; index < arraysize(kFalseWords); ++index) {
-    if (strcasecmp(string, kFalseWords[index]) == 0) {
+    if (base::strcasecmp(string, kFalseWords[index]) == 0) {
       *boolean = false;
       return true;
     }
   }
 
   for (size_t index = 0; index < arraysize(kTrueWords); ++index) {
-    if (strcasecmp(string, kTrueWords[index]) == 0) {
+    if (base::strcasecmp(string, kTrueWords[index]) == 0) {
       *boolean = true;
       return true;
     }
@@ -133,7 +135,7 @@ std::string BoolToString(bool boolean) {
 // when true, causes |string| to be interpreted as a UTC time rather than a
 // local time when the time zone is ambiguous.
 bool StringToTime(const char* string, time_t* time, bool utc) {
-  if (strcasecmp(string, "never") == 0) {
+  if (base::strcasecmp(string, "never") == 0) {
     *time = 0;
     return true;
   }
@@ -153,7 +155,7 @@ bool StringToTime(const char* string, time_t* time, bool utc) {
       if (utc) {
         *time = timegm(&time_tm);
       } else {
-        *time = timelocal(&time_tm);
+        *time = mktime(&time_tm);
       }
 
       return true;
@@ -172,7 +174,7 @@ bool StringToTime(const char* string, time_t* time, bool utc) {
   return false;
 }
 
-// Converst |time_tt| to a string, and returns it. |utc| determines whether the
+// Converts |time_tt| to a string, and returns it. |utc| determines whether the
 // converted time will reference local time or UTC. If |time_tt| is 0, the
 // string "never" will be returned as a special case.
 std::string TimeToString(time_t time_tt, bool utc) {
@@ -203,7 +205,9 @@ void ShowReport(const CrashReportDatabase::Report& report,
                 bool utc) {
   std::string spaces(space_count, ' ');
 
-  printf("%sPath: %s\n", spaces.c_str(), report.file_path.value().c_str());
+  printf("%sPath: %" PRFilePath "\n",
+         spaces.c_str(),
+         report.file_path.value().c_str());
   if (!report.id.empty()) {
     printf("%sRemote ID: %s\n", spaces.c_str(), report.id.c_str());
   }
@@ -239,7 +243,9 @@ void ShowReports(const std::vector<CrashReportDatabase::Report>& reports,
 }
 
 int DatabaseUtilMain(int argc, char* argv[]) {
-  const std::string me(basename(argv[0]));
+  const base::FilePath argv0(
+      ToolSupport::CommandLineArgumentToFilePathStringType(argv[0]));
+  const base::FilePath me(argv0.BaseName());
 
   enum OptionFlags {
     // “Short” (single-character) options.
@@ -349,7 +355,8 @@ int DatabaseUtilMain(int argc, char* argv[]) {
         break;
       }
       case kOptionNewReport: {
-        options.new_report_paths.push_back(base::FilePath(optarg));
+        options.new_report_paths.push_back(base::FilePath(
+            ToolSupport::CommandLineArgumentToFilePathStringType(optarg)));
         break;
       }
       case kOptionUTC: {
@@ -408,8 +415,9 @@ int DatabaseUtilMain(int argc, char* argv[]) {
     return EXIT_FAILURE;
   }
 
-  scoped_ptr<CrashReportDatabase> database(
-      CrashReportDatabase::Initialize(base::FilePath(options.database)));
+  scoped_ptr<CrashReportDatabase> database(CrashReportDatabase::Initialize(
+      base::FilePath(ToolSupport::CommandLineArgumentToFilePathStringType(
+          options.database))));
   if (!database) {
     return EXIT_FAILURE;
   }
@@ -453,7 +461,7 @@ int DatabaseUtilMain(int argc, char* argv[]) {
     printf("%s%s (%ld)\n",
            prefix,
            TimeToString(last_upload_attempt_time, options.utc).c_str(),
-           implicit_cast<long>(last_upload_attempt_time));
+           static_cast<long>(last_upload_attempt_time));
   }
 
   if (options.show_pending_reports) {
@@ -497,7 +505,8 @@ int DatabaseUtilMain(int argc, char* argv[]) {
       // If only asked to do one thing, a failure to find the single requested
       // report should result in a failure exit status.
       if (show_operations + set_operations == 1) {
-        fprintf(stderr, "%s: Report not found\n", me.c_str());
+        fprintf(
+            stderr, "%" PRFilePath ": Report not found\n", me.value().c_str());
         return EXIT_FAILURE;
       }
       printf("Report %s not found\n", uuid.ToString().c_str());
@@ -562,6 +571,12 @@ int DatabaseUtilMain(int argc, char* argv[]) {
 }  // namespace
 }  // namespace crashpad
 
+#if defined(OS_POSIX)
 int main(int argc, char* argv[]) {
   return crashpad::DatabaseUtilMain(argc, argv);
 }
+#elif defined(OS_WIN)
+int wmain(int argc, wchar_t* argv[]) {
+  return crashpad::ToolSupport::Wmain(argc, argv, crashpad::DatabaseUtilMain);
+}
+#endif  // OS_POSIX

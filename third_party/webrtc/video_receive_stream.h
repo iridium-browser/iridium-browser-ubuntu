@@ -77,7 +77,7 @@ class VideoReceiveStream {
     int target_delay_ms = 0;
     int jitter_buffer_ms = 0;
     int min_playout_delay_ms = 0;
-    int render_delay_ms = 0;
+    int render_delay_ms = 10;
 
     int total_bitrate_bps = 0;
     int discarded_packets = 0;
@@ -107,8 +107,8 @@ class VideoReceiveStream {
       Rtp()
           : remote_ssrc(0),
             local_ssrc(0),
-            rtcp_mode(newapi::kRtcpReducedSize),
-            remb(true) {}
+            rtcp_mode(newapi::kRtcpCompound),
+            remb(false) {}
       std::string ToString() const;
 
       // Synchronization source (stream identifier) to be received.

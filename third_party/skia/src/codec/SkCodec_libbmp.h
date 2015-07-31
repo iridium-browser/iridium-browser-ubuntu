@@ -63,9 +63,9 @@ protected:
      * Initiates the bmp decode
      *
      */
-    virtual Result onGetPixels(const SkImageInfo& dstInfo, void* dst,
-                               size_t dstRowBytes, const Options&, SkPMColor*,
-                               int*) override;
+    Result onGetPixels(const SkImageInfo& dstInfo, void* dst,
+                       size_t dstRowBytes, const Options&, SkPMColor*,
+                       int*) override;
 
     SkEncodedFormat onGetEncodedFormat() const override { return kBMP_SkEncodedFormat; }
 
@@ -86,9 +86,9 @@ private:
     /*
      *
      * Creates the color table
-     *
+     * Sets colorCount to the new color count if it is non-NULL
      */
-     bool createColorTable(SkAlphaType alphaType);
+     bool createColorTable(SkAlphaType alphaType, int* colorCount);
 
     /*
      *
@@ -103,6 +103,7 @@ private:
      * Read enough of the stream to initialize the SkBmpCodec. Returns a bool
      * representing success or failure. If it returned true, and codecOut was
      * not NULL, it will be set to a new SkBmpCodec.
+     * Does *not* take ownership of the passed in SkStream.
      *
      */
     static bool ReadHeader(SkStream*, bool isIco, SkCodec** codecOut);
@@ -113,14 +114,14 @@ private:
      *
      */
     Result decodeMask(const SkImageInfo& dstInfo, void* dst,
-                      size_t dstRowBytes);
+                      size_t dstRowBytes, const Options& opts);
 
     /*
      *
      * Set an RLE pixel using the color table
      *
      */
-    void setRLEPixel(SkPMColor* dst, size_t dstRowBytes,
+    void setRLEPixel(void* dst, size_t dstRowBytes,
                      const SkImageInfo& dstInfo, uint32_t x, uint32_t y,
                      uint8_t index);
     /*
@@ -128,7 +129,7 @@ private:
      * Set an RLE24 pixel from R, G, B values
      *
      */
-    void setRLE24Pixel(SkPMColor* dst, size_t dstRowBytes,
+    void setRLE24Pixel(void* dst, size_t dstRowBytes,
                        const SkImageInfo& dstInfo, uint32_t x, uint32_t y,
                        uint8_t red, uint8_t green, uint8_t blue);
 
@@ -138,14 +139,14 @@ private:
      *
      */
     Result decodeRLE(const SkImageInfo& dstInfo, void* dst,
-                     size_t dstRowBytes);
+                     size_t dstRowBytes, const Options& opts);
 
     /*
      *
      * Performs the bitmap decoding for standard input format
      *
      */
-    Result decode(const SkImageInfo& dstInfo, void* dst, size_t dstRowBytes);
+    Result decode(const SkImageInfo& dstInfo, void* dst, size_t dstRowBytes, const Options& opts);
 
     /*
      *
@@ -180,7 +181,7 @@ private:
     const uint16_t                      fBitsPerPixel;
     const BitmapInputFormat             fInputFormat;
     SkAutoTDelete<SkMasks>              fMasks;          // owned
-    SkAutoTDelete<SkColorTable>         fColorTable;     // owned
+    SkAutoTUnref<SkColorTable>          fColorTable;     // owned
     uint32_t                            fNumColors;
     const uint32_t                      fBytesPerColor;
     const uint32_t                      fOffset;

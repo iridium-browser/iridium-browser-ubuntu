@@ -15,7 +15,6 @@ are part of the prebuilt package.
 from __future__ import print_function
 
 import argparse
-import logging
 import os
 import pickle
 import sys
@@ -26,8 +25,10 @@ from chromite.lib import binpkg
 from chromite.lib import cache
 from chromite.lib import commandline
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import osutils
 from chromite.lib import parallel
+from chromite.lib import path_util
 from chromite.lib import gs
 
 if cros_build_lib.IsInsideChroot():
@@ -207,7 +208,7 @@ def GetPackageIndex(binhost, binhost_cache=None):
     if urlparts.scheme not in ('file', ''):
       # Don't fail the build on network errors. Print a warning message and
       # continue.
-      cros_build_lib.Warning('Could not get package index %s' % binhost)
+      logging.warning('Could not get package index %s' % binhost)
       return None
 
     binhost = urlparts.path
@@ -285,7 +286,7 @@ def main(argv):
 
   vartree = trees[sysroot]['vartree']
 
-  cache_dir = os.path.join(commandline.BaseParser.FindCacheDir(None, None),
+  cache_dir = os.path.join(path_util.FindCacheDir(),
                            'cros_install_debug_syms-v' + CACHE_VERSION)
 
   if options.clearcache:
@@ -311,7 +312,7 @@ def main(argv):
                 if ShouldGetSymbols(p, vartree.dbapi, symbols_mapping)]
 
   if not to_install:
-    cros_build_lib.Info('nothing to do, exit')
+    logging.info('nothing to do, exit')
     return
 
   with DebugSymbolsInstaller(vartree, gs_context, sysroot,
@@ -320,7 +321,7 @@ def main(argv):
     parallel.RunTasksInProcessPool(installer.Install, args,
                                    processes=options.jobs)
 
-  cros_build_lib.Debug('installation done, updating packages index file')
+  logging.debug('installation done, updating packages index file')
   packages_dir = os.path.join(sysroot, 'packages')
   packages_file = os.path.join(packages_dir, 'Packages')
   # binpkg will set DEBUG_SYMBOLS automatically if it detects the debug symbols

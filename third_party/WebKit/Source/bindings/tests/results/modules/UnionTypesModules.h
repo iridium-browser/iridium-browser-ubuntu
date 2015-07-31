@@ -33,14 +33,9 @@ public:
     void setString(String);
     static BooleanOrString fromString(String);
 
-#if COMPILER(MSVC) && defined(COMPONENT_BUILD) && LINK_CORE_MODULES_SEPARATELY
-    // Explicit declarations of copy constructor, destructor and operator=,
-    // because msvc automatically generates them if they are not declared in
-    // this header.
     BooleanOrString(const BooleanOrString&);
     ~BooleanOrString();
     BooleanOrString& operator=(const BooleanOrString&);
-#endif
 private:
     enum SpecificTypes {
         SpecificTypeNone,
@@ -70,9 +65,15 @@ inline void v8SetReturnValue(const CallbackInfo& callbackInfo, BooleanOrString& 
 
 template <>
 struct NativeValueTraits<BooleanOrString> {
-    static BooleanOrString nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
+    MODULES_EXPORT static BooleanOrString nativeValue(v8::Isolate*, v8::Local<v8::Value>, ExceptionState&);
 };
 
 } // namespace blink
+
+// We need to set canInitializeWithMemset=true because HeapVector supports
+// items that can initialize with memset or have a vtable. It is safe to
+// set canInitializeWithMemset=true for a union type object in practice.
+// See https://codereview.chromium.org/1118993002/#msg5 for more details.
+WTF_ALLOW_MOVE_AND_INIT_WITH_MEM_FUNCTIONS(blink::BooleanOrString);
 
 #endif // UnionTypeModules_h

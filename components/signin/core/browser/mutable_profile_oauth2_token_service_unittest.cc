@@ -415,6 +415,46 @@ TEST_F(MutableProfileOAuth2TokenServiceTest, FetchPersistentError) {
   EXPECT_EQ(1, access_token_failure_count_);
 }
 
+TEST_F(MutableProfileOAuth2TokenServiceTest, RetryBackoff) {
+  oauth2_service_.UpdateCredentials(kEmail, "refreshToken");
+  EXPECT_EQ(GoogleServiceAuthError::AuthErrorNone(),
+            signin_error_controller_.auth_error());
+
+  GoogleServiceAuthError authfail(GoogleServiceAuthError::SERVICE_UNAVAILABLE);
+  oauth2_service_.UpdateAuthError(kEmail, authfail);
+  EXPECT_EQ(GoogleServiceAuthError::AuthErrorNone(),
+            signin_error_controller_.auth_error());
+
+  // Create a "success" fetch we don't expect to get called just yet.
+  factory_.SetFakeResponse(GaiaUrls::GetInstance()->oauth2_token_url(),
+                           GetValidTokenResponse("token", 3600),
+                           net::HTTP_OK,
+                           net::URLRequestStatus::SUCCESS);
+
+  // Transient error will repeat until backoff period expires.
+  EXPECT_EQ(0, access_token_success_count_);
+  EXPECT_EQ(0, access_token_failure_count_);
+  std::vector<std::string> scope_list;
+  scope_list.push_back("scope");
+  scoped_ptr<OAuth2AccessTokenFetcher> fetcher1(
+      oauth2_service_.CreateAccessTokenFetcher(
+          kEmail, oauth2_service_.GetRequestContext(), this));
+  fetcher1->Start("foo", "bar", scope_list);
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(0, access_token_success_count_);
+  EXPECT_EQ(1, access_token_failure_count_);
+
+  // Pretend that backoff has expired and try again.
+  oauth2_service_.backoff_entry_.SetCustomReleaseTime(base::TimeTicks());
+  scoped_ptr<OAuth2AccessTokenFetcher> fetcher2(
+      oauth2_service_.CreateAccessTokenFetcher(
+          kEmail, oauth2_service_.GetRequestContext(), this));
+  fetcher2->Start("foo", "bar", scope_list);
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(1, access_token_success_count_);
+  EXPECT_EQ(1, access_token_failure_count_);
+}
+
 TEST_F(MutableProfileOAuth2TokenServiceTest, CanonicalizeAccountId) {
   std::map<std::string, std::string> tokens;
   tokens["AccountId-user@gmail.com"] = "refresh_token";
@@ -426,4 +466,17 @@ TEST_F(MutableProfileOAuth2TokenServiceTest, CanonicalizeAccountId) {
   EXPECT_TRUE(oauth2_service_.RefreshTokenIsAvailable("user@gmail.com"));
   EXPECT_TRUE(oauth2_service_.RefreshTokenIsAvailable("foobar@gmail.com"));
   EXPECT_TRUE(oauth2_service_.RefreshTokenIsAvailable("12345"));
+}
+
+TEST_F(MutableProfileOAuth2TokenServiceTest, CanonAndNonCanonAccountId) {
+  std::map<std::string, std::string> tokens;
+  tokens["AccountId-Foo.Bar@gmail.com"] = "bad_token";
+  tokens["AccountId-foobar@gmail.com"] = "good_token";
+
+  oauth2_service_.LoadAllCredentialsIntoMemory(tokens);
+
+  EXPECT_EQ(1u, oauth2_service_.GetAccounts().size());
+  EXPECT_TRUE(oauth2_service_.RefreshTokenIsAvailable("foobar@gmail.com"));
+  EXPECT_STREQ("good_token",
+               oauth2_service_.GetRefreshToken("foobar@gmail.com").c_str());
 }

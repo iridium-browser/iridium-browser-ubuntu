@@ -105,12 +105,43 @@ class AudioEncoder {
   // coding efforts, such as FEC.
   virtual void SetProjectedPacketLossRate(double fraction) {}
 
- protected:
+  // This is the encode function that the inherited classes must implement. It
+  // is called from Encode in the base class.
   virtual EncodedInfo EncodeInternal(uint32_t rtp_timestamp,
                                      const int16_t* audio,
                                      size_t max_encoded_bytes,
                                      uint8_t* encoded) = 0;
 };
 
+class AudioEncoderMutable : public AudioEncoder {
+ public:
+  enum Application { kApplicationSpeech, kApplicationAudio };
+
+  // Discards unprocessed audio data.
+  virtual void Reset() = 0;
+
+  // Enables codec-internal FEC, if the implementation supports it.
+  virtual bool SetFec(bool enable) = 0;
+
+  // Enables or disables codec-internal VAD/DTX, if the implementation supports
+  // it.
+  virtual bool SetDtx(bool enable) = 0;
+
+  // Sets the application mode. The implementation is free to disregard this
+  // setting.
+  virtual bool SetApplication(Application application) = 0;
+
+  // Sets an upper limit on the payload size produced by the encoder. The
+  // implementation is free to disregard this setting.
+  virtual void SetMaxPayloadSize(int max_payload_size_bytes) = 0;
+
+  // Sets the maximum rate which the codec may not exceed for any packet.
+  virtual void SetMaxRate(int max_rate_bps) = 0;
+
+  // Informs the encoder about the maximum sample rate which the decoder will
+  // use when decoding the bitstream. The implementation is free to disregard
+  // this hint.
+  virtual bool SetMaxPlaybackRate(int frequency_hz) = 0;
+};
 }  // namespace webrtc
 #endif  // WEBRTC_MODULES_AUDIO_CODING_CODECS_AUDIO_ENCODER_H_

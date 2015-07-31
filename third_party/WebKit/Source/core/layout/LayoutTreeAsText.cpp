@@ -138,7 +138,7 @@ String quoteAndEscapeNonPrintables(const String& s)
         } else if (c == '"') {
             result.append('\\');
             result.append('"');
-        } else if (c == '\n' || c == noBreakSpace) {
+        } else if (c == '\n' || c == noBreakSpaceCharacter) {
             result.append(' ');
         } else {
             if (c >= 0x20 && c < 0x7F) {
@@ -332,13 +332,13 @@ void LayoutTreeAsText::writeLayoutObject(TextStream& ts, const LayoutObject& o, 
                 text = quoteAndEscapeNonPrintables(text);
             } else {
                 switch (text[0]) {
-                case bullet:
+                case bulletCharacter:
                     text = "bullet";
                     break;
-                case blackSquare:
+                case blackSquareCharacter:
                     text = "black square";
                     break;
-                case whiteBullet:
+                case whiteBulletCharacter:
                     text = "white bullet";
                     break;
                 default:
@@ -489,7 +489,7 @@ void write(TextStream& ts, const LayoutObject& o, int indent, LayoutAsTextBehavi
             FrameView* view = toFrameView(widget);
             LayoutView* root = view->layoutView();
             if (root) {
-                view->layout();
+                root->document().updateLayout();
                 DeprecatedPaintLayer* layer = root->layer();
                 if (layer)
                     LayoutTreeAsText::writeLayers(ts, layer, layer, layer->rect(), indent + 1, behavior);
@@ -703,15 +703,15 @@ static void writeSelection(TextStream& ts, const LayoutObject* o)
     }
 }
 
-static String externalRepresentation(LayoutBox* renderer, LayoutAsTextBehavior behavior)
+static String externalRepresentation(LayoutBox* layoutObject, LayoutAsTextBehavior behavior)
 {
     TextStream ts;
-    if (!renderer->hasLayer())
+    if (!layoutObject->hasLayer())
         return ts.release();
 
-    DeprecatedPaintLayer* layer = renderer->layer();
+    DeprecatedPaintLayer* layer = layoutObject->layer();
     LayoutTreeAsText::writeLayers(ts, layer, layer, layer->rect(), 0, behavior);
-    writeSelection(ts, renderer);
+    writeSelection(ts, layoutObject);
     return ts.release();
 }
 
@@ -720,15 +720,15 @@ String externalRepresentation(LocalFrame* frame, LayoutAsTextBehavior behavior)
     if (!(behavior & LayoutAsTextDontUpdateLayout))
         frame->document()->updateLayout();
 
-    LayoutObject* renderer = frame->contentRenderer();
-    if (!renderer || !renderer->isBox())
+    LayoutObject* layoutObject = frame->contentLayoutObject();
+    if (!layoutObject || !layoutObject->isBox())
         return String();
 
     PrintContext printContext(frame);
     if (behavior & LayoutAsTextPrintingMode)
-        printContext.begin(toLayoutBox(renderer)->size().width().toFloat());
+        printContext.begin(toLayoutBox(layoutObject)->size().width().toFloat());
 
-    return externalRepresentation(toLayoutBox(renderer), behavior);
+    return externalRepresentation(toLayoutBox(layoutObject), behavior);
 }
 
 String externalRepresentation(Element* element, LayoutAsTextBehavior behavior)
@@ -738,11 +738,11 @@ String externalRepresentation(Element* element, LayoutAsTextBehavior behavior)
     if (!(behavior & LayoutAsTextDontUpdateLayout))
         element->document().updateLayout();
 
-    LayoutObject* renderer = element->layoutObject();
-    if (!renderer || !renderer->isBox())
+    LayoutObject* layoutObject = element->layoutObject();
+    if (!layoutObject || !layoutObject->isBox())
         return String();
 
-    return externalRepresentation(toLayoutBox(renderer), behavior | LayoutAsTextShowAllLayers);
+    return externalRepresentation(toLayoutBox(layoutObject), behavior | LayoutAsTextShowAllLayers);
 }
 
 static void writeCounterValuesFromChildren(TextStream& stream, LayoutObject* parent, bool& isFirstCounter)
@@ -765,10 +765,10 @@ String counterValueForElement(Element* element)
     element->document().updateLayout();
     TextStream stream;
     bool isFirstCounter = true;
-    // The counter renderers should be children of :before or :after pseudo-elements.
-    if (LayoutObject* before = element->pseudoElementRenderer(BEFORE))
+    // The counter layoutObjects should be children of :before or :after pseudo-elements.
+    if (LayoutObject* before = element->pseudoElementLayoutObject(BEFORE))
         writeCounterValuesFromChildren(stream, before, isFirstCounter);
-    if (LayoutObject* after = element->pseudoElementRenderer(AFTER))
+    if (LayoutObject* after = element->pseudoElementLayoutObject(AFTER))
         writeCounterValuesFromChildren(stream, after, isFirstCounter);
     return stream.release();
 }
@@ -779,11 +779,11 @@ String markerTextForListItem(Element* element)
     RefPtrWillBeRawPtr<Element> protector(element);
     element->document().updateLayout();
 
-    LayoutObject* renderer = element->layoutObject();
-    if (!renderer || !renderer->isListItem())
+    LayoutObject* layoutObject = element->layoutObject();
+    if (!layoutObject || !layoutObject->isListItem())
         return String();
 
-    return toLayoutListItem(renderer)->markerText();
+    return toLayoutListItem(layoutObject)->markerText();
 }
 
 } // namespace blink

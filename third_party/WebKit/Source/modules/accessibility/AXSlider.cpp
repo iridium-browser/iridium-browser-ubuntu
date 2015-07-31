@@ -49,11 +49,11 @@ PassRefPtr<AXSlider> AXSlider::create(LayoutObject* layoutObject, AXObjectCacheI
     return adoptRef(new AXSlider(layoutObject, axObjectCache));
 }
 
-AccessibilityRole AXSlider::roleValue() const
+AccessibilityRole AXSlider::determineAccessibilityRole()
 {
-    AccessibilityRole ariaRole = ariaRoleAttribute();
-    if (ariaRole != UnknownRole)
-        return ariaRole;
+    if ((m_ariaRole = determineAriaRoleAttribute()) != UnknownRole)
+        return m_ariaRole;
+
     return SliderRole;
 }
 
@@ -156,12 +156,12 @@ LayoutRect AXSliderThumb::elementRect() const
     LayoutObject* sliderLayoutObject = m_parent->layoutObject();
     if (!sliderLayoutObject || !sliderLayoutObject->isSlider())
         return LayoutRect();
-    return toElement(sliderLayoutObject->node())->closedShadowRoot()->getElementById(ShadowElementNames::sliderThumb())->boundingBox();
+    return toElement(sliderLayoutObject->node())->userAgentShadowRoot()->getElementById(ShadowElementNames::sliderThumb())->boundingBox();
 }
 
-bool AXSliderThumb::computeAccessibilityIsIgnored() const
+bool AXSliderThumb::computeAccessibilityIsIgnored(IgnoredReasons* ignoredReasons) const
 {
-    return accessibilityIsIgnoredByDefault();
+    return accessibilityIsIgnoredByDefault(ignoredReasons);
 }
 
 } // namespace blink

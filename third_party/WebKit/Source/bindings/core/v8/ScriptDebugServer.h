@@ -31,12 +31,13 @@
 #ifndef ScriptDebugServer_h
 #define ScriptDebugServer_h
 
-#include "bindings/core/v8/V8PersistentValueMap.h"
+#include "core/CoreExport.h"
+#include "core/InspectorTypeBuilder.h"
 #include "core/inspector/ScriptBreakpoint.h"
-#include "core/inspector/ScriptCallStack.h"
 #include "core/inspector/ScriptDebugListener.h"
-#include "wtf/HashMap.h"
-#include "wtf/PassOwnPtr.h"
+#include "platform/heap/Handle.h"
+#include "wtf/Forward.h"
+
 #include <v8-debug.h>
 #include <v8.h>
 
@@ -44,18 +45,34 @@ namespace blink {
 
 class ScriptState;
 class ScriptDebugListener;
-class ScriptSourceCode;
 class ScriptValue;
 class JavaScriptCallFrame;
 
-class ScriptDebugServer : public NoBaseWillBeGarbageCollectedFinalized<ScriptDebugServer> {
+class CORE_EXPORT ScriptDebugServer : public NoBaseWillBeGarbageCollectedFinalized<ScriptDebugServer> {
     WTF_MAKE_NONCOPYABLE(ScriptDebugServer);
 public:
+    class Client : public WillBeGarbageCollectedMixin {
+    public:
+        virtual ~Client() { }
+        virtual v8::Local<v8::Object> compileDebuggerScript() = 0;
+        virtual ScriptDebugListener* getDebugListenerForContext(v8::Local<v8::Context>) = 0;
+        virtual void runMessageLoopOnPause(v8::Local<v8::Context>) = 0;
+        virtual void quitMessageLoopOnPause() = 0;
+
+        DEFINE_INLINE_VIRTUAL_TRACE() { }
+    };
+
+    static PassOwnPtrWillBeRawPtr<ScriptDebugServer> create(v8::Isolate* isolate, Client* client)
+    {
+        return adoptPtrWillBeNoop(new ScriptDebugServer(isolate, client));
+    }
+
     virtual ~ScriptDebugServer();
     DECLARE_VIRTUAL_TRACE();
 
     void enable();
     void disable();
+    bool enabled() const;
 
     static void setContextDebugData(v8::Local<v8::Context>, const String& contextDebugData);
     // Each script inherits debug data from v8::Context where it has been compiled.
@@ -109,30 +126,17 @@ public:
     v8::Local<v8::Value> generatorObjectDetails(v8::Local<v8::Object>&);
     v8::Local<v8::Value> collectionEntries(v8::Local<v8::Object>&);
     v8::Local<v8::Value> getInternalProperties(v8::Local<v8::Object>&);
-    v8::Local<v8::Value> setFunctionVariableValue(v8::Local<v8::Value> functionValue, int scopeNumber, const String& variableName, v8::Local<v8::Value> newValue);
-    v8::Local<v8::Value> callDebuggerMethod(const char* functionName, int argc, v8::Local<v8::Value> argv[]);
-
-    virtual void compileScript(ScriptState*, const String& expression, const String& sourceURL, bool persistScript, String* scriptId, String* exceptionDetailsText, int* lineNumber, int* columnNumber, RefPtrWillBeRawPtr<ScriptCallStack>* stackTrace);
-    virtual void runScript(ScriptState*, const String& scriptId, ScriptValue* result, bool* wasThrown, String* exceptionDetailsText, int* lineNumber, int* columnNumber, RefPtrWillBeRawPtr<ScriptCallStack>* stackTrace);
-
-    virtual void muteWarningsAndDeprecations() { }
-    virtual void unmuteWarningsAndDeprecations() { }
+    v8::MaybeLocal<v8::Value> setFunctionVariableValue(v8::Local<v8::Value> functionValue, int scopeNumber, const String& variableName, v8::Local<v8::Value> newValue);
 
     v8::Isolate* isolate() const { return m_isolate; }
 
-protected:
-    explicit ScriptDebugServer(v8::Isolate*);
-
-    virtual void clearCompiledScripts();
-
-    virtual ScriptDebugListener* getDebugListenerForContext(v8::Local<v8::Context>) = 0;
-    virtual void runMessageLoopOnPause(v8::Local<v8::Context>) = 0;
-    virtual void quitMessageLoopOnPause() = 0;
-
 private:
-    bool enabled() const;
-    void ensureDebuggerScriptCompiled();
+    ScriptDebugServer(v8::Isolate*, Client*);
+
+    void compileDebuggerScript();
+    v8::MaybeLocal<v8::Value> callDebuggerMethod(const char* functionName, int argc, v8::Local<v8::Value> argv[]);
     v8::Local<v8::Object> debuggerScriptLocal() const;
+    v8::Local<v8::Context> debuggerContext() const;
     void clearBreakpoints();
 
     void dispatchDidParseSource(ScriptDebugListener*, v8::Local<v8::Object> sourceObject, CompileResult);
@@ -157,10 +161,11 @@ private:
     void handleV8PromiseEvent(ScriptDebugListener*, ScriptState* pausedScriptState, v8::Local<v8::Object> executionState, v8::Local<v8::Object> eventData);
 
     v8::Isolate* m_isolate;
+    Client* m_client;
     bool m_breakpointsActivated;
-    V8PersistentValueMap<String, v8::Script, false> m_compiledScripts;
     v8::UniquePersistent<v8::FunctionTemplate> m_breakProgramCallbackTemplate;
     v8::UniquePersistent<v8::Object> m_debuggerScript;
+    v8::UniquePersistent<v8::Context> m_debuggerContext;
     v8::Local<v8::Object> m_executionState;
     RefPtr<ScriptState> m_pausedScriptState;
     bool m_runningNestedMessageLoop;

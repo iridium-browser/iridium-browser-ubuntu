@@ -59,9 +59,9 @@
 
 #include <openssl/base.h>
 
-#include <stdarg.h>
 #include <stdio.h>  /* For FILE */
 
+#include <openssl/err.h> /* for ERR_print_errors_fp */
 #include <openssl/ex_data.h>
 #include <openssl/stack.h>
 
@@ -95,6 +95,9 @@ OPENSSL_EXPORT int BIO_free(BIO *bio);
  *
  * TODO(fork): remove. */
 OPENSSL_EXPORT void BIO_vfree(BIO *bio);
+
+/* BIO_up_ref increments the reference count of |bio| and returns it. */
+OPENSSL_EXPORT BIO *BIO_up_ref(BIO *bio);
 
 
 /* Basic I/O. */
@@ -330,10 +333,6 @@ OPENSSL_EXPORT int BIO_indent(BIO *bio, unsigned indent, unsigned max_indent);
  * by |indent| spaces. */
 OPENSSL_EXPORT int BIO_hexdump(BIO *bio, const uint8_t *data, size_t len,
                                unsigned indent);
-
-/* BIO_print_errors_fp prints the current contents of the error stack to |out|
- * using human readable strings where possible. */
-OPENSSL_EXPORT void BIO_print_errors_fp(FILE *out);
 
 /* BIO_print_errors prints the current contents of the error stack to |bio|
  * using human readable strings where possible. */
@@ -693,8 +692,6 @@ OPENSSL_EXPORT int BIO_zero_copy_get_write_buf_done(BIO* bio,
 #define BIO_CTRL_INFO		3  /* opt - extra tit-bits */
 #define BIO_CTRL_SET		4  /* man - set the 'IO' type */
 #define BIO_CTRL_GET		5  /* man - get the 'IO' type */
-#define BIO_CTRL_PUSH		6  /* opt - internal, used to signify change */
-#define BIO_CTRL_POP		7  /* opt - internal, used to signify change */
 #define BIO_CTRL_GET_CLOSE	8  /* man - set the 'close' on free */
 #define BIO_CTRL_SET_CLOSE	9  /* man - set the 'close' on free */
 #define BIO_CTRL_PENDING	10  /* opt - is their more data buffered */
@@ -704,6 +701,14 @@ OPENSSL_EXPORT int BIO_zero_copy_get_write_buf_done(BIO* bio,
 #define BIO_CTRL_SET_CALLBACK	14  /* opt - set callback function */
 #define BIO_CTRL_GET_CALLBACK	15  /* opt - set callback function */
 #define BIO_CTRL_SET_FILENAME	30	/* BIO_s_file special */
+
+
+/* Android compatibility section.
+ *
+ * A previous version of BoringSSL used in Android renamed ERR_print_errors_fp
+ * to BIO_print_errors_fp. It has subsequently been renamed back to
+ * ERR_print_errors_fp. */
+#define BIO_print_errors_fp ERR_print_errors_fp
 
 
 /* Private functions */
@@ -779,17 +784,12 @@ struct bio_st {
   /* num is a BIO-specific value. For example, in fd BIOs it's used to store a
    * file descriptor. */
   int num;
-  /* TODO(fork): reference counting is only used by the SSL BIO code. If we can
-   * dump that then we can remove this. We could also drop
-   * BIO_CTRL_PUSH/BIO_CTRL_POP. */
   int references;
   void *ptr;
   /* next_bio points to the next |BIO| in a chain. This |BIO| owns a reference
    * to |next_bio|. */
   struct bio_st *next_bio; /* used by filter BIOs */
   size_t num_read, num_write;
-
-  CRYPTO_EX_DATA ex_data;
 };
 
 #define BIO_C_SET_CONNECT			100

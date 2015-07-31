@@ -87,7 +87,9 @@ using StaticNodeList = StaticNodeTypeList<Node>;
 class TagCollection;
 class Text;
 class TouchEvent;
-class WeakNodeMap;
+#if !ENABLE(OILPAN)
+template <typename T> struct WeakIdentifierMapTraits;
+#endif
 
 const int nodeStyleChangeShift = 19;
 
@@ -114,7 +116,6 @@ protected:
 
 class Node;
 WILL_NOT_BE_EAGERLY_TRACED_CLASS(Node);
-WILL_HAVE_ALL_INSTANCES_ON_SAME_GC_HEAP(Node);
 
 #if ENABLE(OILPAN)
 #define NODE_BASE_CLASSES public EventTarget
@@ -164,13 +165,18 @@ public:
     };
 
 #if ENABLE(OILPAN)
-    // Node is now a GarbageCollected<EventTarget> instead of a GarbageCollected<Node>, which confuses Oilpan's
-    // static type dispatching of typed heap for Nodes. We override GarbageCollected<>'s operator new here, to put
-    // Node descendants into typed heap for Nodes. <http://crbug.com/443854>
-    using GarbageCollectedBase = EventTarget;
-
+    // Override operator new to allocate Node subtype objects onto
+    // a dedicated heap.
     GC_PLUGIN_IGNORE("crbug.com/443854")
-    void* operator new(size_t size) { return Heap::allocate<Node>(size); }
+    void* operator new(size_t size)
+    {
+        return allocateObject(size);
+    }
+    static void* allocateObject(size_t size)
+    {
+        ThreadState* state = ThreadStateFor<ThreadingTrait<Node>::Affinity>::state();
+        return Heap::allocateOnHeapIndex(state, size, NodeHeapIndex, GCInfoTrait<EventTarget>::index());
+    }
 #else // !ENABLE(OILPAN)
     // All Nodes are placed in their own heap partition for security.
     // See http://crbug.com/246860 for detail.
@@ -287,9 +293,6 @@ public:
 
     bool hasCustomStyleCallbacks() const { return getFlag(HasCustomStyleCallbacksFlag); }
 
-    bool hasSyntheticAttrChildNodes() const { return getFlag(HasSyntheticAttrChildNodesFlag); }
-    void setHasSyntheticAttrChildNodes(bool flag) { setFlag(flag, HasSyntheticAttrChildNodesFlag); }
-
     // If this node is in a shadow tree, returns its shadow host. Otherwise, returns nullptr.
     Element* shadowHost() const;
     ShadowRoot* containingShadowRoot() const;
@@ -355,6 +358,10 @@ public:
     bool active() const { return isUserActionElement() && isUserActionElementActive(); }
     bool inActiveChain() const { return isUserActionElement() && isUserActionElementInActiveChain(); }
     bool hovered() const { return isUserActionElement() && isUserActionElementHovered(); }
+    // Note: As a shadow host whose tabStop=false may become focused state when an inner element
+    // gets focused in its shadow, in that case more than one elements in a document can return
+    // true for |focused()|.  Use Element::isFocusedElementInDocument() or Document::focusedElement()
+    // to check which element is exactly focused.
     bool focused() const { return isUserActionElement() && isUserActionElementFocused(); }
 
     bool needsAttach() const { return styleChangeType() == NeedsReattachStyleChange; }
@@ -370,6 +377,10 @@ public:
 
     void setNeedsStyleRecalc(StyleChangeType, const StyleChangeReasonForTracing&);
     void clearNeedsStyleRecalc();
+
+#if ENABLE(ASSERT)
+    bool needsDistributionRecalc() const;
+#endif
 
     bool childNeedsDistributionRecalc() const { return getFlag(ChildNeedsDistributionRecalcFlag); }
     void setChildNeedsDistributionRecalc()  { setFlag(ChildNeedsDistributionRecalcFlag); }
@@ -494,7 +505,7 @@ public:
 
     // Used to determine whether range offsets use characters or node indices.
     bool offsetInCharacters() const;
-    // Number of DOM 16-bit units contained in node. Note that rendered text length can be different - e.g. because of
+    // Number of DOM 16-bit units contained in node. Note that laid out text length can be different - e.g. because of
     // css-transform:capitalize breaking up precomposed characters and ligatures.
     virtual int maxCharacterOffset() const;
 
@@ -502,10 +513,10 @@ public:
     virtual bool canStartSelection() const;
 
     // -----------------------------------------------------------------------------
-    // Integration with rendering tree
+    // Integration with layout tree
 
     // As layoutObject() includes a branch you should avoid calling it repeatedly in hot code paths.
-    // Note that if a Node has a renderer, it's parentNode is guaranteed to have one as well.
+    // Note that if a Node has a layoutObject, it's parentNode is guaranteed to have one as well.
     LayoutObject* layoutObject() const { return hasRareData() ? m_data.m_rareData->layoutObject() : m_data.m_layoutObject; };
     void setLayoutObject(LayoutObject* layoutObject)
     {
@@ -526,13 +537,13 @@ public:
         AttachContext() : resolvedStyle(nullptr), performingReattach(false) { }
     };
 
-    // Attaches this node to the rendering tree. This calculates the style to be applied to the node and creates an
+    // Attaches this node to the layout tree. This calculates the style to be applied to the node and creates an
     // appropriate LayoutObject which will be inserted into the tree (except when the style has display: none). This
     // makes the node visible in the FrameView.
     virtual void attach(const AttachContext& = AttachContext());
 
-    // Detaches the node from the rendering tree, making it invisible in the rendered view. This method will remove
-    // the node's rendering object from the rendering tree and delete it.
+    // Detaches the node from the layout tree, making it invisible in the rendered view. This method will remove
+    // the node's layout object from the layout tree and delete it.
     virtual void detach(const AttachContext& = AttachContext());
 
 #if ENABLE(ASSERT)
@@ -545,7 +556,7 @@ public:
     // Returns true if recalcStyle should be called on the object, if there is such a method (on Document and Element).
     bool shouldCallRecalcStyle(StyleRecalcChange);
 
-    // Wrapper for nodes that don't have a renderer, but still cache the style (like HTMLOptionElement).
+    // Wrapper for nodes that don't have a layoutObject, but still cache the style (like HTMLOptionElement).
     ComputedStyle* mutableComputedStyle() const;
     const ComputedStyle* computedStyle() const;
     const ComputedStyle* parentComputedStyle() const;
@@ -679,8 +690,8 @@ public:
 
     unsigned lengthOfContents() const;
 
-    virtual v8::Handle<v8::Object> wrap(v8::Handle<v8::Object> creationContext, v8::Isolate*) override;
-    virtual v8::Handle<v8::Object> associateWithWrapper(v8::Isolate*, const WrapperTypeInfo*, v8::Handle<v8::Object> wrapper) override;
+    virtual v8::Local<v8::Object> wrap(v8::Isolate*, v8::Local<v8::Object> creationContext) override;
+    virtual v8::Local<v8::Object> associateWithWrapper(v8::Isolate*, const WrapperTypeInfo*, v8::Local<v8::Object> wrapper) override;
 
 private:
     enum NodeFlags {
@@ -725,14 +736,13 @@ private:
         HasNameOrIsEditingTextFlag = 1 << 23,
         HasWeakReferencesFlag = 1 << 24,
         V8CollectableDuringMinorGCFlag = 1 << 25,
-        HasSyntheticAttrChildNodesFlag = 1 << 26,
-        HasEventTargetDataFlag = 1 << 27,
-        AlreadySpellCheckedFlag = 1 << 28,
+        HasEventTargetDataFlag = 1 << 26,
+        AlreadySpellCheckedFlag = 1 << 27,
 
         DefaultNodeFlags = IsFinishedParsingChildrenFlag | ChildNeedsStyleRecalcFlag | NeedsReattachStyleChange
     };
 
-    // 2 bits remaining.
+    // 3 bits remaining.
 
     bool getFlag(NodeFlags mask) const { return m_nodeFlags & mask; }
     void setFlag(bool f, NodeFlags mask) { m_nodeFlags = (m_nodeFlags & ~mask) | (-(int32_t)f & mask); }
@@ -789,9 +799,10 @@ protected:
 
 private:
     friend class TreeShared<Node>;
-    friend class WeakNodeMap;
-
 #if !ENABLE(OILPAN)
+    // FIXME: consider exposing proper API for this instead.
+    friend struct WeakIdentifierMapTraits<Node>;
+
     void removedLastRef();
 #endif
     bool hasTreeSharedParent() const { return !!parentOrShadowHostNode(); }
@@ -821,7 +832,7 @@ private:
     RawPtrWillBeMember<TreeScope> m_treeScope;
     RawPtrWillBeMember<Node> m_previous;
     RawPtrWillBeMember<Node> m_next;
-    // When a node has rare data we move the renderer into the rare data.
+    // When a node has rare data we move the layoutObject into the rare data.
     union DataUnion {
         DataUnion() : m_layoutObject(nullptr) { }
         LayoutObject* m_layoutObject;

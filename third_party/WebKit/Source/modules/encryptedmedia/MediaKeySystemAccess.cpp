@@ -35,9 +35,8 @@ class NewCdmResultPromise : public ContentDecryptionModuleResultPromise {
     WTF_MAKE_NONCOPYABLE(NewCdmResultPromise);
 
 public:
-    NewCdmResultPromise(ScriptState* scriptState, const String& keySystem, const blink::WebVector<blink::WebEncryptedMediaSessionType>& supportedSessionTypes)
+    NewCdmResultPromise(ScriptState* scriptState, const WebVector<WebEncryptedMediaSessionType>& supportedSessionTypes)
         : ContentDecryptionModuleResultPromise(scriptState)
-        , m_keySystem(keySystem)
         , m_supportedSessionTypes(supportedSessionTypes)
     {
     }
@@ -51,15 +50,14 @@ public:
     {
         // NOTE: Continued from step 2.8 of createMediaKeys().
         // 2.9. Let media keys be a new MediaKeys object.
-        MediaKeys* mediaKeys = new MediaKeys(executionContext(), m_keySystem, m_supportedSessionTypes, adoptPtr(cdm));
+        MediaKeys* mediaKeys = MediaKeys::create(executionContext(), m_supportedSessionTypes, adoptPtr(cdm));
 
         // 2.10. Resolve promise with media keys.
         resolve(mediaKeys);
     }
 
 private:
-    const String m_keySystem;
-    blink::WebVector<blink::WebEncryptedMediaSessionType> m_supportedSessionTypes;
+    WebVector<WebEncryptedMediaSessionType> m_supportedSessionTypes;
 };
 
 // These methods are the inverses of those with the same names in
@@ -73,9 +71,9 @@ static Vector<String> convertInitDataTypes(const WebVector<WebEncryptedMediaInit
     return result;
 }
 
-static Vector<MediaKeySystemMediaCapability> convertCapabilities(const WebVector<WebMediaKeySystemMediaCapability>& capabilities)
+static HeapVector<MediaKeySystemMediaCapability> convertCapabilities(const WebVector<WebMediaKeySystemMediaCapability>& capabilities)
 {
-    Vector<MediaKeySystemMediaCapability> result;
+    HeapVector<MediaKeySystemMediaCapability> result;
     result.reserveCapacity(capabilities.size());
     for (size_t i = 0; i < capabilities.size(); i++) {
         MediaKeySystemMediaCapability capability;
@@ -89,11 +87,11 @@ static Vector<MediaKeySystemMediaCapability> convertCapabilities(const WebVector
 static String convertMediaKeysRequirement(WebMediaKeySystemConfiguration::Requirement requirement)
 {
     switch (requirement) {
-    case blink::WebMediaKeySystemConfiguration::Requirement::Required:
+    case WebMediaKeySystemConfiguration::Requirement::Required:
         return "required";
-    case blink::WebMediaKeySystemConfiguration::Requirement::Optional:
+    case WebMediaKeySystemConfiguration::Requirement::Optional:
         return "optional";
-    case blink::WebMediaKeySystemConfiguration::Requirement::NotAllowed:
+    case WebMediaKeySystemConfiguration::Requirement::NotAllowed:
         return "not-allowed";
     }
 
@@ -155,7 +153,7 @@ ScriptPromise MediaKeySystemAccess::createMediaKeys(ScriptState* scriptState)
     WebMediaKeySystemConfiguration configuration = m_access->getConfiguration();
 
     // 1. Let promise be a new promise.
-    NewCdmResultPromise* helper = new NewCdmResultPromise(scriptState, m_keySystem, configuration.sessionTypes);
+    NewCdmResultPromise* helper = new NewCdmResultPromise(scriptState, configuration.sessionTypes);
     ScriptPromise promise = helper->promise();
 
     // 2. Asynchronously create and initialize the MediaKeys object.

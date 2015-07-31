@@ -5,6 +5,7 @@
 #ifndef CSSSelectorParser_h
 #define CSSSelectorParser_h
 
+#include "core/CoreExport.h"
 #include "core/css/parser/CSSParserTokenRange.h"
 #include "core/css/parser/CSSParserValues.h"
 
@@ -15,7 +16,7 @@ class StyleSheetContents;
 
 // FIXME: We should consider building CSSSelectors directly instead of using
 // the intermediate CSSParserSelector.
-class CSSSelectorParser {
+class CORE_EXPORT CSSSelectorParser {
 public:
     static void parseSelector(CSSParserTokenRange, const CSSParserContext&, const AtomicString& defaultNamespace, StyleSheetContents*, CSSSelectorList&);
 
@@ -50,11 +51,10 @@ private:
     CSSSelector::AttributeMatchType consumeAttributeFlags(CSSParserTokenRange&);
 
     QualifiedName determineNameInNamespace(const AtomicString& prefix, const AtomicString& localName);
-    void rewriteSpecifiersWithNamespaceIfNeeded(CSSParserSelector*);
-    void rewriteSpecifiersWithElementName(const AtomicString& namespacePrefix, const AtomicString& elementName, CSSParserSelector*, bool tagIsForNamespaceRule = false);
-    void rewriteSpecifiersWithElementNameForCustomPseudoElement(const QualifiedName& tag, const AtomicString& elementName, CSSParserSelector*, bool tagIsForNamespaceRule);
-    void rewriteSpecifiersWithElementNameForContentPseudoElement(const QualifiedName& tag, const AtomicString& elementName, CSSParserSelector*, bool tagIsForNamespaceRule);
-    static PassOwnPtr<CSSParserSelector> rewriteSpecifiers(PassOwnPtr<CSSParserSelector> specifiers, PassOwnPtr<CSSParserSelector> newSpecifier);
+    void prependTypeSelectorIfNeeded(const AtomicString& namespacePrefix, const AtomicString& elementName, CSSParserSelector*);
+    void rewriteSpecifiersWithElementNameForCustomPseudoElement(const QualifiedName& tag, CSSParserSelector*, bool tagIsImplicit);
+    void rewriteSpecifiersWithElementNameForContentPseudoElement(const QualifiedName& tag, CSSParserSelector*, bool tagIsImplicit);
+    static PassOwnPtr<CSSParserSelector> addSimpleSelectorToCompound(PassOwnPtr<CSSParserSelector> compoundSelector, PassOwnPtr<CSSParserSelector> simpleSelector);
 
     const CSSParserContext& m_context;
     AtomicString m_defaultNamespace;

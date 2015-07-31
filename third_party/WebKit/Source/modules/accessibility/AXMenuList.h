@@ -40,18 +40,20 @@ public:
     virtual bool isCollapsed() const override;
     virtual AccessibilityExpanded isExpanded() const override final;
     virtual bool press() const override;
+    virtual void clearChildren() override;
 
     void didUpdateActiveOption(int optionIndex);
+    void didShowPopup();
+    void didHidePopup();
 
 private:
     AXMenuList(LayoutMenuList*, AXObjectCacheImpl*);
 
     virtual bool isMenuList() const override { return true; }
-    virtual AccessibilityRole roleValue() const override;
+    virtual AccessibilityRole determineAccessibilityRole() override final;
     virtual bool canSetFocusAttribute() const override;
 
     virtual void addChildren() override;
-    virtual void childrenChanged() override;
 };
 
 DEFINE_AX_OBJECT_TYPE_CASTS(AXMenuList, isMenuList());

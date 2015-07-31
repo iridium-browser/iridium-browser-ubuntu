@@ -30,7 +30,6 @@
 #include "core/dom/Document.h"
 #include "core/dom/Element.h"
 #include "core/dom/Range.h"
-#include "core/editing/VisibleUnits.h"
 #include "core/editing/htmlediting.h"
 #include "core/editing/iterators/CharacterIterator.h"
 #include "core/layout/LayoutObject.h"
@@ -210,6 +209,29 @@ PassRefPtrWillBeRawPtr<Range> VisibleSelection::toNormalizedRange() const
     return nullptr;
 }
 
+template <typename PositionType>
+void normalizePositionsAlgorithm(const PositionType& start, const PositionType& end, PositionType* outStart, PositionType* outEnd)
+{
+    ASSERT(start.isNotNull());
+    ASSERT(end.isNotNull());
+    ASSERT(start.compareTo(end) <= 0);
+    start.document()->updateLayoutIgnorePendingStylesheets();
+
+    PositionType normalizedStart = start.downstream();
+    PositionType normalizedEnd = end.upstream();
+    // The order of the positions of |start| and |end| can be swapped after
+    // upstream/downstream. e.g. editing/pasteboard/copy-display-none.html
+    if (normalizedStart.compareTo(normalizedEnd) > 0)
+        std::swap(normalizedStart, normalizedEnd);
+    *outStart = normalizedStart.parentAnchoredEquivalent();
+    *outEnd = normalizedEnd.parentAnchoredEquivalent();
+}
+
+void VisibleSelection::normalizePositions(const Position& start, const Position& end, Position* outStart, Position* outEnd)
+{
+    return normalizePositionsAlgorithm<Position>(start, end, outStart, outEnd);
+}
+
 bool VisibleSelection::toNormalizedPositions(Position& start, Position& end) const
 {
     if (isNone())
@@ -244,17 +266,7 @@ bool VisibleSelection::toNormalizedPositions(Position& start, Position& end) con
         //                       ^ selected
         //
         ASSERT(isRange());
-        start = m_start.downstream();
-        end = m_end.upstream();
-        if (comparePositions(start, end) > 0) {
-            // Make sure the start is before the end.
-            // The end can wind up before the start if collapsed whitespace is the only thing selected.
-            Position tmp = start;
-            start = end;
-            end = tmp;
-        }
-        start = start.parentAnchoredEquivalent();
-        end = end.parentAnchoredEquivalent();
+        normalizePositions(m_start, m_end, &start, &end);
     }
 
     if (!start.containerNode() || !end.containerNode())
@@ -316,7 +328,7 @@ void VisibleSelection::appendTrailingWhitespace()
 
     for (; charIt.length(); charIt.advance(1)) {
         UChar c = charIt.characterAt(0);
-        if ((!isSpaceOrNewline(c) && c != noBreakSpace) || c == '\n')
+        if ((!isSpaceOrNewline(c) && c != noBreakSpaceCharacter) || c == '\n')
             break;
         m_end = charIt.endPosition();
         changed = true;
@@ -350,7 +362,7 @@ void VisibleSelection::setBaseAndExtentToDeepEquivalents()
         m_baseIsFirst = comparePositions(m_base, m_extent) <= 0;
 }
 
-void VisibleSelection::setStartRespectingGranularity(TextGranularity granularity)
+void VisibleSelection::setStartRespectingGranularity(TextGranularity granularity, EWordSide wordSide)
 {
     ASSERT(m_base.isNotNull());
     ASSERT(m_extent.isNotNull());
@@ -362,13 +374,14 @@ void VisibleSelection::setStartRespectingGranularity(TextGranularity granularity
         // Don't do any expansion.
         break;
     case WordGranularity: {
-        // General case: Select the word the caret is positioned inside of, or at the start of (RightWordIfOnBoundary).
+        // General case: Select the word the caret is positioned inside of.
+        // If the caret is on the word boundary, select the word according to |wordSide|.
         // Edge case: If the caret is after the last word in a soft-wrapped line or the last word in
         // the document, select that last word (LeftWordIfOnBoundary).
         // Edge case: If the caret is after the last word in a paragraph, select from the the end of the
         // last word to the line break (also RightWordIfOnBoundary);
         VisiblePosition visibleStart = VisiblePosition(m_start, m_affinity);
-        EWordSide side = RightWordIfOnBoundary;
+        EWordSide side = wordSide;
         if (isEndOfEditableOrNonEditableContent(visibleStart) || (isEndOfLine(visibleStart) && !isStartOfLine(visibleStart) && !isEndOfParagraph(visibleStart)))
             side = LeftWordIfOnBoundary;
         m_start = startOfWord(visibleStart, side).deepEquivalent();
@@ -408,7 +421,7 @@ void VisibleSelection::setStartRespectingGranularity(TextGranularity granularity
         m_start = m_baseIsFirst ? m_base : m_extent;
 }
 
-void VisibleSelection::setEndRespectingGranularity(TextGranularity granularity)
+void VisibleSelection::setEndRespectingGranularity(TextGranularity granularity, EWordSide wordSide)
 {
     ASSERT(m_base.isNotNull());
     ASSERT(m_extent.isNotNull());
@@ -420,13 +433,14 @@ void VisibleSelection::setEndRespectingGranularity(TextGranularity granularity)
         // Don't do any expansion.
         break;
     case WordGranularity: {
-        // General case: Select the word the caret is positioned inside of, or at the start of (RightWordIfOnBoundary).
+        // General case: Select the word the caret is positioned inside of.
+        // If the caret is on the word boundary, select the word according to |wordSide|.
         // Edge case: If the caret is after the last word in a soft-wrapped line or the last word in
         // the document, select that last word (LeftWordIfOnBoundary).
         // Edge case: If the caret is after the last word in a paragraph, select from the the end of the
         // last word to the line break (also RightWordIfOnBoundary);
         VisiblePosition originalEnd(m_end, m_affinity);
-        EWordSide side = RightWordIfOnBoundary;
+        EWordSide side = wordSide;
         if (isEndOfEditableOrNonEditableContent(originalEnd) || (isEndOfLine(originalEnd) && !isStartOfLine(originalEnd) && !isEndOfParagraph(originalEnd)))
             side = LeftWordIfOnBoundary;
 

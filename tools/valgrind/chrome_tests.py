@@ -401,6 +401,9 @@ class ChromeTests:
   def TestMessageCenter(self):
     return self.SimpleTest("message_center", "message_center_unittests")
 
+  def TestMidi(self):
+    return self.SimpleTest("chrome", "midi_unittests")
+
   def TestMojoCommon(self):
     return self.SimpleTest("mojo_common", "mojo_common_unittests")
 
@@ -568,7 +571,7 @@ class ChromeTests:
                   # http://crbug.com/176908: Don't launch a browser when done.
                   "--no-show-results",
                   "--nocheck-sys-deps",
-                  "--additional-drt-flag=--no-sandbox"]
+                  "--additional-driver-flag=--no-sandbox"]
     # Pass build mode to run-webkit-tests.  We aren't passed it directly,
     # so parse it out of build_dir.  run-webkit-tests can only handle
     # the two values "Release" and "Debug".
@@ -696,6 +699,7 @@ class ChromeTests:
     "media": TestMedia,          "media_unittests": TestMedia,
     "message_center": TestMessageCenter,
     "message_center_unittests" : TestMessageCenter,
+    "midi": TestMidi,             "midi_unittests": TestMidi,
     "mojo_common": TestMojoCommon,
     "mojo_system": TestMojoSystem,
     "mojo_public_system": TestMojoPublicSystem,

@@ -23,18 +23,20 @@
 #include "chrome/browser/android/content_view_util.h"
 #include "chrome/browser/android/cookies/cookies_fetcher.h"
 #include "chrome/browser/android/dev_tools_server.h"
-#include "chrome/browser/android/dom_distiller/feedback_reporter_android.h"
+#include "chrome/browser/android/dom_distiller/external_feedback_reporter_android.h"
 #include "chrome/browser/android/download/chrome_download_delegate.h"
 #include "chrome/browser/android/favicon_helper.h"
 #include "chrome/browser/android/feature_utilities.h"
+#include "chrome/browser/android/feedback/connectivity_checker.h"
 #include "chrome/browser/android/find_in_page/find_in_page_bridge.h"
 #include "chrome/browser/android/foreign_session_helper.h"
 #include "chrome/browser/android/fullscreen/fullscreen_infobar_delegate.h"
 #include "chrome/browser/android/intent_helper.h"
+#include "chrome/browser/android/java_exception_reporter.h"
+#include "chrome/browser/android/large_icon_bridge.h"
 #include "chrome/browser/android/location_settings_impl.h"
 #include "chrome/browser/android/logo_bridge.h"
 #include "chrome/browser/android/metrics/launch_metrics.h"
-#include "chrome/browser/android/metrics/uma_bridge.h"
 #include "chrome/browser/android/metrics/uma_session_stats.h"
 #include "chrome/browser/android/metrics/uma_utils.h"
 #include "chrome/browser/android/metrics/variations_session.h"
@@ -51,7 +53,6 @@
 #include "chrome/browser/android/profiles/profile_downloader_android.h"
 #include "chrome/browser/android/provider/chrome_browser_provider.h"
 #include "chrome/browser/android/recently_closed_tabs_bridge.h"
-#include "chrome/browser/android/service_tab_launcher.h"
 #include "chrome/browser/android/shortcut_helper.h"
 #include "chrome/browser/android/signin/account_management_screen_helper.h"
 #include "chrome/browser/android/signin/signin_manager_android.h"
@@ -78,17 +79,21 @@
 #include "chrome/browser/search_engines/template_url_service_android.h"
 #include "chrome/browser/signin/android_profile_oauth2_token_service.h"
 #include "chrome/browser/speech/tts_android.h"
+#include "chrome/browser/ssl/connection_security_helper_android.h"
 #include "chrome/browser/supervised_user/child_accounts/child_account_feedback_reporter_android.h"
 #include "chrome/browser/supervised_user/child_accounts/child_account_service_android.h"
 #include "chrome/browser/sync/profile_sync_service_android.h"
 #include "chrome/browser/ui/android/autofill/autofill_dialog_controller_android.h"
 #include "chrome/browser/ui/android/autofill/autofill_dialog_result.h"
+#include "chrome/browser/ui/android/autofill/autofill_keyboard_accessory_view.h"
 #include "chrome/browser/ui/android/autofill/autofill_logger_android.h"
 #include "chrome/browser/ui/android/autofill/autofill_popup_view_android.h"
 #include "chrome/browser/ui/android/autofill/card_unmask_prompt_view_android.h"
 #include "chrome/browser/ui/android/autofill/credit_card_scanner_view_android.h"
 #include "chrome/browser/ui/android/autofill/password_generation_popup_view_android.h"
+#include "chrome/browser/ui/android/certificate_viewer_android.h"
 #include "chrome/browser/ui/android/chrome_http_auth_handler.h"
+#include "chrome/browser/ui/android/connection_info_popup_android.h"
 #include "chrome/browser/ui/android/context_menu_helper.h"
 #include "chrome/browser/ui/android/infobars/account_chooser_infobar.h"
 #include "chrome/browser/ui/android/infobars/app_banner_infobar.h"
@@ -114,6 +119,7 @@
 #include "components/gcm_driver/android/component_jni_registrar.h"
 #include "components/invalidation/android/component_jni_registrar.h"
 #include "components/navigation_interception/component_jni_registrar.h"
+#include "components/service_tab_launcher/component_jni_registrar.h"
 #include "components/variations/android/component_jni_registrar.h"
 #include "components/web_contents_delegate_android/component_jni_registrar.h"
 
@@ -153,12 +159,16 @@ static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
          RegisterAutofillDialogControllerAndroid},
     {"AutofillDialogResult",
      autofill::AutofillDialogResult::RegisterAutofillDialogResult},
+    {"AutofillKeyboardAccessory",
+     autofill::AutofillKeyboardAccessoryView::
+         RegisterAutofillKeyboardAccessoryView},
     {"AutofillLoggerAndroid", autofill::AutofillLoggerAndroid::Register},
     {"AutofillPopup",
      autofill::AutofillPopupViewAndroid::RegisterAutofillPopupViewAndroid},
     {"AutofillProfileBridge", autofill::RegisterAutofillProfileBridge},
     {"BookmarksBridge", BookmarksBridge::RegisterBookmarksBridge},
     {"CardUnmaskPrompt", autofill::CardUnmaskPromptViewAndroid::Register},
+    {"CertificateViewer", RegisterCertificateViewer},
     {"ChildAccountFeedbackReporter", RegisterChildAccountFeedbackReporter},
     {"ChildAccountService", RegisterChildAccountService},
     {"ChromeBrowserProvider",
@@ -169,6 +179,10 @@ static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
      RegisterChromeWebContentsDelegateAndroid},
     {"ChromiumApplication", ChromiumApplication::RegisterBindings},
     {"ConfirmInfoBarDelegate", RegisterConfirmInfoBarDelegate},
+    {"ConnectionInfoPopupAndroid",
+     ConnectionInfoPopupAndroid::RegisterConnectionInfoPopupAndroid},
+    {"ConnectionSecurityHelper", RegisterConnectionSecurityHelperAndroid},
+    {"ConnectivityChecker", RegisterConnectivityChecker},
     {"ContentViewUtil", RegisterContentViewUtil},
     {"ContextMenuHelper", RegisterContextMenuHelper},
     {"CookiesFetcher", RegisterCookiesFetcher},
@@ -203,8 +217,10 @@ static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
      invalidation::InvalidationServiceFactoryAndroid::Register},
     {"ShortcutHelper", ShortcutHelper::RegisterShortcutHelper},
     {"IntentHelper", RegisterIntentHelper},
+    {"JavaExceptionReporter", RegisterJavaExceptionReporterJni},
     {"JavascriptAppModalDialog",
      JavascriptAppModalDialogAndroid::RegisterJavascriptAppModalDialog},
+    {"LargeIconBridge", LargeIconBridge::RegisterLargeIconBridge},
     {"LaunchMetrics", metrics::RegisterLaunchMetrics},
     {"LayerTitleCache", chrome::android::RegisterLayerTitleCache},
     {"LocationSettings", LocationSettingsImpl::Register},
@@ -238,7 +254,7 @@ static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
      remote_media::RemoteMediaPlayerBridge::RegisterRemoteMediaPlayerBridge},
     {"SavePasswordInfoBar", SavePasswordInfoBar::Register},
     {"SceneLayer", chrome::android::RegisterSceneLayer},
-    {"ServiceTabLauncher", ServiceTabLauncher::RegisterServiceTabLauncher},
+    {"ServiceTabLauncher", service_tab_launcher::RegisterServiceTabLauncherJni},
     {"SigninManager", SigninManagerAndroid::Register},
     {"SingleTabModel", RegisterSingleTabModel},
     {"SqliteCursor", SQLiteCursor::RegisterSqliteCursor},
@@ -254,7 +270,6 @@ static base::android::RegistrationMethod kChromeRegisteredMethods[] = {
     {"TransitionPageHelper", TransitionPageHelper::Register},
     {"TranslateInfoBarDelegate", RegisterTranslateInfoBarDelegate},
     {"TtsPlatformImpl", TtsPlatformImplAndroid::Register},
-    {"UmaBridge", RegisterUmaBridge},
     {"UmaSessionStats", RegisterUmaSessionStats},
     {"UrlUtilities", RegisterUrlUtilities},
     {"Variations", variations::android::RegisterVariations},

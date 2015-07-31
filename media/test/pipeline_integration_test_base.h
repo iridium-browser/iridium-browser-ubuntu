@@ -12,6 +12,7 @@
 #include "media/base/audio_hardware_config.h"
 #include "media/base/demuxer.h"
 #include "media/base/media_keys.h"
+#include "media/base/null_video_sink.h"
 #include "media/base/pipeline.h"
 #include "media/base/text_track.h"
 #include "media/base/text_track_config.h"
@@ -105,6 +106,7 @@ class PipelineIntegrationTestBase {
   scoped_ptr<Pipeline> pipeline_;
   scoped_refptr<NullAudioSink> audio_sink_;
   scoped_refptr<ClocklessAudioSink> clockless_audio_sink_;
+  scoped_ptr<NullVideoSink> video_sink_;
   bool ended_;
   PipelineStatus pipeline_status_;
   Demuxer::EncryptedMediaInitDataCB encrypted_media_init_data_cb_;

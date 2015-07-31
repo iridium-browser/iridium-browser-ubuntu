@@ -15,6 +15,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
+#include "components/mime_util/mime_util.h"
 #include "content/child/child_thread_impl.h"
 #include "content/child/ftp_directory_listing_response_delegate.h"
 #include "content/child/multipart_response_delegate.h"
@@ -32,7 +33,6 @@
 #include "content/public/common/content_switches.h"
 #include "net/base/data_url.h"
 #include "net/base/filename_util.h"
-#include "net/base/mime_util.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_util.h"
@@ -71,9 +71,6 @@ namespace content {
 
 namespace {
 
-const char kThrottledErrorDescription[] =
-    "Request throttled. Visit http://dev.chromium.org/throttling for more "
-    "information.";
 const size_t kBodyStreamPipeCapacity = 4 * 1024;
 
 typedef ResourceDevToolsInfo::HeadersVector HeadersVector;
@@ -449,13 +446,6 @@ void WebURLLoaderImpl::Context::Start(const WebURLRequest& request,
     url = stream_override_->stream_url;
   }
 
-  // PlzNavigate: the only navigation requests going through the WebURLLoader
-  // are the ones created by CommitNavigation.
-  DCHECK(!base::CommandLine::ForCurrentProcess()->HasSwitch(
-             switches::kEnableBrowserSideNavigation) ||
-         stream_override_.get() ||
-         request.frameType() == WebURLRequest::FrameTypeNone);
-
   if (CanHandleDataURLRequestLocally()) {
     if (sync_load_response) {
       // This is a sync load. Do the work now.
@@ -469,6 +459,15 @@ void WebURLLoaderImpl::Context::Start(const WebURLRequest& request,
     }
     return;
   }
+
+  // PlzNavigate: outside of tests, the only navigation requests going through
+  // the WebURLLoader are the ones created by CommitNavigation. Several browser
+  // tests load HTML directly through a data url which will be handled by the
+  // block above.
+  DCHECK_IMPLIES(base::CommandLine::ForCurrentProcess()->HasSwitch(
+                     switches::kEnableBrowserSideNavigation),
+                 stream_override_.get() ||
+                     request.frameType() == WebURLRequest::FrameTypeNone);
 
   GURL referrer_url(
       request.httpHeaderField(WebString::fromUTF8("Referer")).latin1());
@@ -690,10 +689,8 @@ void WebURLLoaderImpl::Context::OnReceivedData(const char* data,
     // TODO(yhirano): Support ftp listening and multipart.
     MojoResult rv = WriteDataOnBodyStream(data, data_length);
     if (rv != MOJO_RESULT_OK && client_) {
-      client_->didFail(loader_,
-                       loader_->CreateError(request_.url(),
-                                            false,
-                                            net::ERR_FAILED));
+      client_->didFail(
+          loader_, CreateWebURLError(request_.url(), false, net::ERR_FAILED));
     }
   } else if (ftp_listing_delegate_) {
     // The FTP listing delegate will make the appropriate calls to
@@ -743,9 +740,9 @@ void WebURLLoaderImpl::Context::OnCompletedRequest(
 
   if (client_) {
     if (error_code != net::OK) {
-      client_->didFail(loader_, CreateError(request_.url(),
-                                            stale_copy_in_cache,
-                                            error_code));
+      client_->didFail(
+          loader_,
+          CreateWebURLError(request_.url(), stale_copy_in_cache, error_code));
     } else {
       if (request_.useStreamOnResponse()) {
         got_all_stream_body_data_ = true;
@@ -806,7 +803,7 @@ bool WebURLLoaderImpl::Context::CanHandleDataURLRequestLocally() const {
 
   std::string mime_type, unused_charset;
   if (net::DataURL::Parse(request_.url(), &mime_type, &unused_charset, NULL) &&
-      net::IsSupportedMimeType(mime_type))
+      mime_util::IsSupportedMimeType(mime_type))
     return true;
 
   return false;
@@ -906,10 +903,8 @@ MojoResult WebURLLoaderImpl::Context::WriteDataOnBodyStream(const char* data,
 void WebURLLoaderImpl::Context::OnHandleGotWritable(MojoResult result) {
   if (result != MOJO_RESULT_OK) {
     if (client_) {
-      client_->didFail(loader_,
-                       loader_->CreateError(request_.url(),
-                                            false,
-                                            net::ERR_FAILED));
+      client_->didFail(
+          loader_, CreateWebURLError(request_.url(), false, net::ERR_FAILED));
       // |this| can be deleted here.
     }
     return;
@@ -931,9 +926,8 @@ void WebURLLoaderImpl::Context::OnHandleGotWritable(MojoResult result) {
     }
   } else {
     if (client_) {
-      client_->didFail(loader_, loader_->CreateError(request_.url(),
-                                                     false,
-                                                     net::ERR_FAILED));
+      client_->didFail(
+          loader_, CreateWebURLError(request_.url(), false, net::ERR_FAILED));
       // |this| can be deleted here.
     }
   }
@@ -949,26 +943,6 @@ WebURLLoaderImpl::WebURLLoaderImpl(
 
 WebURLLoaderImpl::~WebURLLoaderImpl() {
   cancel();
-}
-
-WebURLError WebURLLoaderImpl::CreateError(const WebURL& unreachable_url,
-                                          bool stale_copy_in_cache,
-                                          int reason) {
-  WebURLError error;
-  error.domain = WebString::fromUTF8(net::kErrorDomain);
-  error.reason = reason;
-  error.unreachableURL = unreachable_url;
-  error.staleCopyInCache = stale_copy_in_cache;
-  if (reason == net::ERR_ABORTED) {
-    error.isCancellation = true;
-  } else if (reason == net::ERR_TEMPORARILY_THROTTLED) {
-    error.localizedDescription = WebString::fromUTF8(
-        kThrottledErrorDescription);
-  } else {
-    error.localizedDescription = WebString::fromUTF8(
-        net::ErrorToString(reason));
-  }
-  return error;
 }
 
 void WebURLLoaderImpl::PopulateURLResponse(const GURL& url,

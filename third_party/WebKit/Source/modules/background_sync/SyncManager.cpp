@@ -25,13 +25,6 @@
 namespace blink {
 namespace {
 
-/* This is the minimum period which will be allowed by the Background
- * Sync manager process. It is recorded here in order to be able to
- * respond to syncManager.minAllowablePeriod.
- * The time is expressed in milliseconds,
- */
-unsigned long kMinAllowablePeriod = 12 * 60 * 60 * 1000;
-
 WebSyncProvider* backgroundSyncProvider()
 {
     WebSyncProvider* webSyncProvider = Platform::current()->backgroundSyncProvider();
@@ -47,12 +40,7 @@ SyncManager::SyncManager(ServiceWorkerRegistration* registration)
     ASSERT(registration);
 }
 
-unsigned long SyncManager::minAllowablePeriod()
-{
-    return kMinAllowablePeriod;
-}
-
-ScriptPromise SyncManager::registerFunction(blink::ScriptState* scriptState, const SyncRegistrationOptions& options)
+ScriptPromise SyncManager::registerFunction(ScriptState* scriptState, const SyncRegistrationOptions& options)
 {
     if (!m_registration->active())
         return ScriptPromise::rejectWithDOMException(scriptState, DOMException::create(AbortError, "Registration failed - no active Service Worker"));
@@ -60,24 +48,20 @@ ScriptPromise SyncManager::registerFunction(blink::ScriptState* scriptState, con
     RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
 
-    WebSyncRegistration::NetworkType networkType;
-    String minRequiredNetwork = options.minRequiredNetwork();
-    if (minRequiredNetwork == "network-any") {
-        networkType = WebSyncRegistration::NetworkType::NetworkTypeAny;
-    } else if (minRequiredNetwork == "network-non-mobile") {
-        networkType = WebSyncRegistration::NetworkType::NetworkTypeNonMobile;
-    } else if (minRequiredNetwork ==  "network-offline") {
-        networkType = WebSyncRegistration::NetworkType::NetworkTypeOffline;
-    } else {
-        networkType = WebSyncRegistration::NetworkType::NetworkTypeOnline;
-    }
-    WebSyncRegistration webSyncRegistration = WebSyncRegistration(options.id(), options.minDelay(), options.maxDelay(), options.minPeriod(), networkType, options.allowOnBattery(), options.idleRequired());
-    backgroundSyncProvider()->registerBackgroundSync(&webSyncRegistration, m_registration->webRegistration(), new SyncRegistrationCallbacks(resolver, m_registration));
+    WebSyncRegistration* webSyncRegistration = new WebSyncRegistration(
+        WebSyncRegistration::UNREGISTERED_SYNC_ID /* id */,
+        WebSyncRegistration::PeriodicityOneShot,
+        options.tag(),
+        0 /* minPeriod */,
+        WebSyncRegistration::NetworkStateAny /* networkState */,
+        WebSyncRegistration::PowerStateAuto /* powerState */
+    );
+    backgroundSyncProvider()->registerBackgroundSync(webSyncRegistration, m_registration->webRegistration(), new SyncRegistrationCallbacks(resolver, m_registration));
 
     return promise;
 }
 
-ScriptPromise SyncManager::getRegistration(blink::ScriptState* scriptState, const String& syncRegistrationId)
+ScriptPromise SyncManager::getRegistration(ScriptState* scriptState, const String& syncRegistrationId)
 {
     if (!m_registration->active())
         return ScriptPromise::rejectWithDOMException(scriptState, DOMException::create(AbortError, "Operation failed - no active Service Worker"));
@@ -85,12 +69,12 @@ ScriptPromise SyncManager::getRegistration(blink::ScriptState* scriptState, cons
     RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
 
-    backgroundSyncProvider()->getRegistration(syncRegistrationId, m_registration->webRegistration(), new SyncRegistrationCallbacks(resolver, m_registration));
+    backgroundSyncProvider()->getRegistration(WebSyncRegistration::PeriodicityOneShot, syncRegistrationId, m_registration->webRegistration(), new SyncRegistrationCallbacks(resolver, m_registration));
 
     return promise;
 }
 
-ScriptPromise SyncManager::getRegistrations(blink::ScriptState* scriptState)
+ScriptPromise SyncManager::getRegistrations(ScriptState* scriptState)
 {
     if (!m_registration->active())
         return ScriptPromise::rejectWithDOMException(scriptState, DOMException::create(AbortError, "Operation failed - no active Service Worker"));
@@ -98,8 +82,19 @@ ScriptPromise SyncManager::getRegistrations(blink::ScriptState* scriptState)
     RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
 
-    backgroundSyncProvider()->getRegistrations(m_registration->webRegistration(), new SyncGetRegistrationsCallbacks(resolver, m_registration));
+    backgroundSyncProvider()->getRegistrations(WebSyncRegistration::PeriodicityOneShot, m_registration->webRegistration(), new SyncGetRegistrationsCallbacks(resolver, m_registration));
 
+    return promise;
+}
+
+ScriptPromise SyncManager::permissionState(ScriptState* scriptState)
+{
+    if (!m_registration->active())
+        return ScriptPromise::rejectWithDOMException(scriptState, DOMException::create(AbortError, "Operation failed - no active Service Worker"));
+
+    RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
+    ScriptPromise promise = resolver->promise();
+    resolver->resolve(String::fromUTF8("granted"));
     return promise;
 }
 

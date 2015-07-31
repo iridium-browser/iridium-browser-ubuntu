@@ -54,7 +54,7 @@ typedef void (*DerefObjectFunction)(ScriptWrappable*);
 typedef void (*TraceFunction)(Visitor*, ScriptWrappable*);
 typedef ActiveDOMObject* (*ToActiveDOMObjectFunction)(v8::Local<v8::Object>);
 typedef void (*ResolveWrapperReachabilityFunction)(v8::Isolate*, ScriptWrappable*, const v8::Persistent<v8::Object>&);
-typedef void (*InstallConditionallyEnabledMethodsFunction)(v8::Local<v8::Object>, v8::Isolate*);
+typedef void (*PreparePrototypeObjectFunction)(v8::Isolate*, v8::Local<v8::Object>);
 typedef void (*InstallConditionallyEnabledPropertiesFunction)(v8::Local<v8::Object>, v8::Isolate*);
 
 inline void setObjectGroup(v8::Isolate* isolate, ScriptWrappable* scriptWrappable, const v8::Persistent<v8::Object>& wrapper)
@@ -92,7 +92,7 @@ struct WrapperTypeInfo {
         RefCountedObject,
     };
 
-    static const WrapperTypeInfo* unwrap(v8::Handle<v8::Value> typeInfoWrapper)
+    static const WrapperTypeInfo* unwrap(v8::Local<v8::Value> typeInfoWrapper)
     {
         return reinterpret_cast<const WrapperTypeInfo*>(v8::External::Cast(*typeInfoWrapper)->Value());
     }
@@ -142,10 +142,10 @@ struct WrapperTypeInfo {
         return traceFunction(visitor, scriptWrappable);
     }
 
-    void installConditionallyEnabledMethods(v8::Local<v8::Object> prototypeTemplate, v8::Isolate* isolate) const
+    void preparePrototypeObject(v8::Isolate* isolate, v8::Local<v8::Object> prototypeTemplate) const
     {
-        if (installConditionallyEnabledMethodsFunction)
-            installConditionallyEnabledMethodsFunction(prototypeTemplate, isolate);
+        if (preparePrototypeObjectFunction)
+            preparePrototypeObjectFunction(isolate, prototypeTemplate);
     }
 
     void installConditionallyEnabledProperties(v8::Local<v8::Object> prototypeTemplate, v8::Isolate* isolate) const
@@ -161,7 +161,7 @@ struct WrapperTypeInfo {
         return toActiveDOMObjectFunction(object);
     }
 
-    EventTarget* toEventTarget(v8::Handle<v8::Object>) const;
+    EventTarget* toEventTarget(v8::Local<v8::Object>) const;
 
     void visitDOMWrapper(v8::Isolate* isolate, ScriptWrappable* scriptWrappable, const v8::Persistent<v8::Object>& wrapper) const
     {
@@ -180,7 +180,7 @@ struct WrapperTypeInfo {
     const TraceFunction traceFunction;
     const ToActiveDOMObjectFunction toActiveDOMObjectFunction;
     const ResolveWrapperReachabilityFunction visitDOMWrapperFunction;
-    InstallConditionallyEnabledMethodsFunction installConditionallyEnabledMethodsFunction;
+    PreparePrototypeObjectFunction preparePrototypeObjectFunction;
     const InstallConditionallyEnabledPropertiesFunction installConditionallyEnabledPropertiesFunction;
     const char* const interfaceName;
     const WrapperTypeInfo* parentClass;
@@ -193,15 +193,15 @@ struct WrapperTypeInfo {
 
 static_assert(offsetof(struct WrapperTypeInfo, ginEmbedder) == offsetof(struct gin::WrapperInfo, embedder), "offset of WrapperTypeInfo.ginEmbedder must be the same as gin::WrapperInfo.embedder");
 
-template<typename T, int offset>
-inline T* getInternalField(const v8::Persistent<v8::Object>& persistent)
+template <typename T, int offset>
+inline T* getInternalField(const v8::PersistentBase<v8::Object>& persistent)
 {
     ASSERT(offset < v8::Object::InternalFieldCount(persistent));
     return static_cast<T*>(v8::Object::GetAlignedPointerFromInternalField(persistent, offset));
 }
 
 template<typename T, int offset>
-inline T* getInternalField(v8::Handle<v8::Object> wrapper)
+inline T* getInternalField(v8::Local<v8::Object> wrapper)
 {
     ASSERT(offset < wrapper->InternalFieldCount());
     return static_cast<T*>(wrapper->GetAlignedPointerFromInternalField(offset));
@@ -212,7 +212,12 @@ inline ScriptWrappable* toScriptWrappable(const v8::Persistent<v8::Object>& wrap
     return getInternalField<ScriptWrappable, v8DOMWrapperObjectIndex>(wrapper);
 }
 
-inline ScriptWrappable* toScriptWrappable(v8::Handle<v8::Object> wrapper)
+inline ScriptWrappable* toScriptWrappable(const v8::Global<v8::Object>& wrapper)
+{
+    return getInternalField<ScriptWrappable, v8DOMWrapperObjectIndex>(wrapper);
+}
+
+inline ScriptWrappable* toScriptWrappable(v8::Local<v8::Object> wrapper)
 {
     return getInternalField<ScriptWrappable, v8DOMWrapperObjectIndex>(wrapper);
 }
@@ -222,12 +227,22 @@ inline const WrapperTypeInfo* toWrapperTypeInfo(const v8::Persistent<v8::Object>
     return getInternalField<WrapperTypeInfo, v8DOMWrapperTypeIndex>(wrapper);
 }
 
-inline const WrapperTypeInfo* toWrapperTypeInfo(v8::Handle<v8::Object> wrapper)
+inline const WrapperTypeInfo* toWrapperTypeInfo(const v8::Global<v8::Object>& wrapper)
 {
     return getInternalField<WrapperTypeInfo, v8DOMWrapperTypeIndex>(wrapper);
 }
 
-inline void releaseObject(v8::Handle<v8::Object> wrapper)
+inline const WrapperTypeInfo* toWrapperTypeInfo(v8::Local<v8::Object> wrapper)
+{
+    return getInternalField<WrapperTypeInfo, v8DOMWrapperTypeIndex>(wrapper);
+}
+
+inline void releaseObject(v8::Local<v8::Object> wrapper)
+{
+    toWrapperTypeInfo(wrapper)->derefObject(toScriptWrappable(wrapper));
+}
+
+inline void releaseObject(v8::Global<v8::Object>& wrapper)
 {
     toWrapperTypeInfo(wrapper)->derefObject(toScriptWrappable(wrapper));
 }

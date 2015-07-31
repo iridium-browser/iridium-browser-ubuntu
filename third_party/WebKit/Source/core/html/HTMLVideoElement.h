@@ -75,6 +75,8 @@ public:
 
     KURL posterImageURL() const;
 
+    bool hasAvailableVideoFrame() const;
+
     // FIXME: Remove this when WebMediaPlayerClientImpl::loadInternal does not depend on it.
     virtual KURL mediaPlayerPosterURL() override;
 
@@ -82,7 +84,7 @@ public:
     virtual PassRefPtr<Image> getSourceImageForCanvas(SourceImageMode, SourceImageStatus*) const override;
     virtual bool isVideoElement() const override { return true; }
     virtual bool wouldTaintOrigin(SecurityOrigin*) const override;
-    virtual FloatSize sourceSize() const override;
+    virtual FloatSize elementSize() const override;
     virtual const KURL& sourceURL() const override { return currentSrc(); }
 
     virtual bool isHTMLVideoElement() const override { return true; }
@@ -101,7 +103,6 @@ private:
     virtual bool isURLAttribute(const Attribute&) const override;
     virtual const AtomicString imageSourceURL() const override;
 
-    bool hasAvailableVideoFrame() const;
     virtual void updateDisplayState() override;
     virtual void didMoveToNewDocument(Document& oldDocument) override;
     virtual void setDisplayMode(DisplayMode) override;

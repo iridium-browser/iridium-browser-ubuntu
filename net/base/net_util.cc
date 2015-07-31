@@ -258,27 +258,20 @@ bool IsCanonicalizedHostCompliant(const std::string& host) {
 
   bool in_component = false;
   bool most_recent_component_started_alphanumeric = false;
-  bool last_char_was_underscore = false;
 
   for (std::string::const_iterator i(host.begin()); i != host.end(); ++i) {
     const char c = *i;
     if (!in_component) {
       most_recent_component_started_alphanumeric = IsHostCharAlphanumeric(c);
-      if (!most_recent_component_started_alphanumeric && (c != '-'))
-        return false;
-      in_component = true;
-    } else {
-      if (c == '.') {
-        if (last_char_was_underscore)
-          return false;
-        in_component = false;
-      } else if (IsHostCharAlphanumeric(c) || (c == '-')) {
-        last_char_was_underscore = false;
-      } else if (c == '_') {
-        last_char_was_underscore = true;
-      } else {
+      if (!most_recent_component_started_alphanumeric && (c != '-') &&
+          (c != '_')) {
         return false;
       }
+      in_component = true;
+    } else if (c == '.') {
+      in_component = false;
+    } else if (!IsHostCharAlphanumeric(c) && (c != '-') && (c != '_')) {
+      return false;
     }
   }
 
@@ -1029,6 +1022,29 @@ bool IsLocalhostTLD(const std::string& host) {
   const char* host_suffix = host.data() + host_len - kLocalhostTLDLength;
   return base::strncasecmp(host_suffix, kLocalhostTLD, kLocalhostTLDLength) ==
          0;
+}
+
+bool HasGoogleHost(const GURL& url) {
+  static const char* kGoogleHostSuffixes[] = {
+      ".google.com",
+      ".youtube.com",
+      ".gmail.com",
+      ".doubleclick.net",
+      ".gstatic.com",
+      ".googlevideo.com",
+      ".googleusercontent.com",
+      ".googlesyndication.com",
+      ".google-analytics.com",
+      ".googleadservices.com",
+      ".googleapis.com",
+      ".ytimg.com",
+  };
+  const std::string& host = url.host();
+  for (const char* suffix : kGoogleHostSuffixes) {
+    if (EndsWith(host, suffix, false))
+      return true;
+  }
+  return false;
 }
 
 NetworkInterface::NetworkInterface()

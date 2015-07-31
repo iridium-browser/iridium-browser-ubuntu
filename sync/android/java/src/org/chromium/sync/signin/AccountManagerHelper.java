@@ -5,6 +5,7 @@
 package org.chromium.sync.signin;
 
 
+import android.Manifest;
 import android.accounts.Account;
 import android.accounts.AccountManager;
 import android.accounts.AccountManagerFuture;
@@ -13,10 +14,13 @@ import android.accounts.AuthenticatorException;
 import android.accounts.OperationCanceledException;
 import android.app.Activity;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.os.AsyncTask;
 import android.os.Bundle;
+import android.os.Process;
 import android.util.Log;
 
+import org.chromium.base.BuildInfo;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.net.NetworkChangeNotifier;
@@ -52,11 +56,23 @@ public class AccountManagerHelper {
 
     private static final int MAX_TRIES = 3;
 
+    private static AccountManagerDelegate sDefaultAccountManagerDelegate;
+
     private static AccountManagerHelper sAccountManagerHelper;
 
     private final AccountManagerDelegate mAccountManager;
 
     private Context mApplicationContext;
+
+    /**
+     * Provides functionality to set the default {@link AccountManagerDelegate} to be used when
+     * the AccountManagerHelper is created. This may be set during application startup to ensure
+     * all callers get the correct implementation.
+     * @param delegate the default AccountManagerDelegate to use when constructing the instance.
+     */
+    public static void setDefaultAccountManagerDelegate(AccountManagerDelegate delegate) {
+        sDefaultAccountManagerDelegate = delegate;
+    }
 
     /**
      * A simple callback for getAuthToken.
@@ -74,8 +90,7 @@ public class AccountManagerHelper {
      * @param context the Android context
      * @param accountManager the account manager to use as a backend service
      */
-    private AccountManagerHelper(Context context,
-                                 AccountManagerDelegate accountManager) {
+    private AccountManagerHelper(Context context, AccountManagerDelegate accountManager) {
         mApplicationContext = context.getApplicationContext();
         mAccountManager = accountManager;
     }
@@ -93,8 +108,13 @@ public class AccountManagerHelper {
     public static AccountManagerHelper get(Context context) {
         synchronized (sLock) {
             if (sAccountManagerHelper == null) {
-                sAccountManagerHelper = new AccountManagerHelper(context,
-                        new SystemAccountManagerDelegate(context));
+                if (sDefaultAccountManagerDelegate == null) {
+                    sAccountManagerHelper = new AccountManagerHelper(context,
+                            new SystemAccountManagerDelegate(context));
+                } else {
+                    sAccountManagerHelper = new AccountManagerHelper(context,
+                            sDefaultAccountManagerDelegate);
+                }
             }
         }
         return sAccountManagerHelper;
@@ -123,6 +143,10 @@ public class AccountManagerHelper {
         return accountNames;
     }
 
+    /**
+     * Returns all Google accounts on the device.
+     * @return an array of accounts.
+     */
     public Account[] getGoogleAccounts() {
         return mAccountManager.getAccountsByType(GOOGLE_ACCOUNT_TYPE);
     }
@@ -236,6 +260,17 @@ public class AccountManagerHelper {
         }
     }
 
+    private boolean hasUseCredentialsPermission() {
+        return BuildInfo.isMncOrLater()
+                || mApplicationContext.checkPermission("android.permission.USE_CREDENTIALS",
+                Process.myPid(), Process.myUid()) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    public boolean hasGetAccountsPermission() {
+        return mApplicationContext.checkPermission(Manifest.permission.GET_ACCOUNTS,
+                Process.myPid(), Process.myUid()) == PackageManager.PERMISSION_GRANTED;
+    }
+
     // Gets the auth token synchronously
     private String getAuthTokenInner(AccountManagerFuture<Bundle> future,
             AtomicBoolean errorEncountered) {
@@ -261,6 +296,11 @@ public class AccountManagerHelper {
             final String authTokenType, final GetAuthTokenCallback callback,
             final AtomicInteger numTries, final AtomicBoolean errorEncountered,
             final ConnectionRetry retry) {
+        // Return null token for no USE_CREDENTIALS permission.
+        if (!hasUseCredentialsPermission()) {
+            callback.tokenAvailable(null);
+            return;
+        }
         final AccountManagerFuture<Bundle> future = mAccountManager.getAuthToken(
                 account, authTokenType, true, null, null);
         errorEncountered.set(false);
@@ -305,33 +345,6 @@ public class AccountManagerHelper {
     }
 
     /**
-     * Invalidates the old token (if non-null/non-empty) and synchronously generates a new one.
-     * Also notifies the user (via status bar) if any user action is required. The method will
-     * return null if any user action is required to generate the new token.
-     *
-     * - Assumes that the account is a valid account.
-     * - Should not be called on the main thread.
-     */
-    @Deprecated
-    public String getNewAuthToken(Account account, String authToken, String authTokenType) {
-        invalidateAuthToken(authToken);
-
-        // TODO(dsmyers): consider reimplementing using an AccountManager function with an
-        // explicit timeout.
-        // Bug: https://code.google.com/p/chromium/issues/detail?id=172394.
-        try {
-            return mAccountManager.blockingGetAuthToken(account, authTokenType, true);
-        } catch (OperationCanceledException e) {
-            Log.w(TAG, "Auth token - operation cancelled", e);
-        } catch (AuthenticatorException e) {
-            Log.w(TAG, "Auth token - authenticator exception", e);
-        } catch (IOException e) {
-            Log.w(TAG, "Auth token - IO exception", e);
-        }
-        return null;
-    }
-
-    /**
      * Invalidates the old token (if non-null/non-empty) and asynchronously generates a new one.
      *
      * - Assumes that the account is a valid account.
@@ -349,6 +362,10 @@ public class AccountManagerHelper {
      * Removes an auth token from the AccountManager's cache.
      */
     public void invalidateAuthToken(String authToken) {
+        // Cancel operation for no USE_CREDENTIALS permission.
+        if (!hasUseCredentialsPermission()) {
+            return;
+        }
         if (authToken != null && !authToken.isEmpty()) {
             mAccountManager.invalidateAuthToken(GOOGLE_ACCOUNT_TYPE, authToken);
         }

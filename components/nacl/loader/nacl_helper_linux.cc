@@ -108,11 +108,7 @@ void BecomeNaClLoader(base::ScopedFD browser_fd,
 
   // Finish layer-1 sandbox initialization and initialize the layer-2 sandbox.
   CHECK(!nacl_sandbox->HasOpenDirectory());
-#if !defined(OS_NACL_NONSFI)
-  // Currently Layer-two sandbox is not yet supported on nacl_helper_nonsfi.
-  // TODO(hidehiko): Enable the sandbox.
   nacl_sandbox->InitializeLayerTwoSandbox(uses_nonsfi_mode);
-#endif
   nacl_sandbox->SealLayerOneSandbox();
   nacl_sandbox->CheckSandboxingStateWithPolicy();
 
@@ -433,7 +429,7 @@ int main(int argc, char* argv[]) {
   // NSS is only needed for SFI NaCl.
   // Allows NSS to fopen() /dev/urandom.
   sandbox::InitLibcUrandomOverrides();
-#if defined(USE_NSS)
+#if defined(USE_NSS_CERTS)
   // Configure NSS for use inside the NaCl process.
   // The fork check has not caused problems for NaCl, but this appears to be
   // best practice (see other places LoadNSSLibraries is called.)
@@ -445,7 +441,7 @@ int main(int argc, char* argv[]) {
   // Load shared libraries before sandbox is raised.
   // NSS is needed to perform hashing for validation caching.
   crypto::LoadNSSLibraries();
-#endif  // defined(USE_NSS)
+#endif  // defined(USE_NSS_CERTS)
 #endif  // defined(OS_NACL_NONSFI)
   const NaClLoaderSystemInfo system_info = {
 #if !defined(OS_NACL_NONSFI)

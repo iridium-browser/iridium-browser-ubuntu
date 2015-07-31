@@ -6,8 +6,16 @@
 
 #include <set>
 
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "cc/base/math_util.h"
 #include "cc/output/compositor_frame_metadata.h"
+#include "cc/output/copy_output_request.h"
+#include "cc/output/copy_output_result.h"
+#include "cc/output/overlay_strategy_single_on_top.h"
+#include "cc/output/texture_mailbox_deleter.h"
+#include "cc/quads/texture_draw_quad.h"
 #include "cc/resources/resource_provider.h"
 #include "cc/test/fake_impl_proxy.h"
 #include "cc/test/fake_layer_tree_host_impl.h"
@@ -115,15 +123,7 @@ class GLRendererShaderPixelTest : public GLRendererPixelTest {
   }
 
   void TestShadersWithPrecision(TexCoordPrecision precision) {
-    EXPECT_PROGRAM_VALID(renderer()->GetTextureProgram(precision));
-    EXPECT_PROGRAM_VALID(
-        renderer()->GetNonPremultipliedTextureProgram(precision));
-    EXPECT_PROGRAM_VALID(renderer()->GetTextureBackgroundProgram(precision));
-    EXPECT_PROGRAM_VALID(
-        renderer()->GetNonPremultipliedTextureBackgroundProgram(precision));
     EXPECT_PROGRAM_VALID(renderer()->GetTextureIOSurfaceProgram(precision));
-    EXPECT_PROGRAM_VALID(renderer()->GetVideoYUVProgram(precision));
-    EXPECT_PROGRAM_VALID(renderer()->GetVideoYUVAProgram(precision));
     if (renderer()->Capabilities().using_egl_image)
       EXPECT_PROGRAM_VALID(renderer()->GetVideoStreamTextureProgram(precision));
     else
@@ -146,6 +146,15 @@ class GLRendererShaderPixelTest : public GLRendererPixelTest {
       return;
     }
 
+    EXPECT_PROGRAM_VALID(renderer()->GetTextureProgram(precision, sampler));
+    EXPECT_PROGRAM_VALID(
+        renderer()->GetNonPremultipliedTextureProgram(precision, sampler));
+    EXPECT_PROGRAM_VALID(
+        renderer()->GetTextureBackgroundProgram(precision, sampler));
+    EXPECT_PROGRAM_VALID(
+        renderer()->GetNonPremultipliedTextureBackgroundProgram(precision,
+                                                                sampler));
+
     EXPECT_PROGRAM_VALID(renderer()->GetTileProgram(precision, sampler));
     EXPECT_PROGRAM_VALID(renderer()->GetTileProgramOpaque(precision, sampler));
     EXPECT_PROGRAM_VALID(renderer()->GetTileProgramAA(precision, sampler));
@@ -154,6 +163,8 @@ class GLRendererShaderPixelTest : public GLRendererPixelTest {
         renderer()->GetTileProgramSwizzleOpaque(precision, sampler));
     EXPECT_PROGRAM_VALID(
         renderer()->GetTileProgramSwizzleAA(precision, sampler));
+    EXPECT_PROGRAM_VALID(renderer()->GetVideoYUVProgram(precision, sampler));
+    EXPECT_PROGRAM_VALID(renderer()->GetVideoYUVAProgram(precision, sampler));
   }
 
   void TestShadersWithMasks(TexCoordPrecision precision,
@@ -288,6 +299,22 @@ class FakeRendererGL : public GLRenderer {
                    resource_provider,
                    NULL,
                    0) {}
+
+  FakeRendererGL(RendererClient* client,
+                 const RendererSettings* settings,
+                 OutputSurface* output_surface,
+                 ResourceProvider* resource_provider,
+                 TextureMailboxDeleter* texture_mailbox_deleter)
+      : GLRenderer(client,
+                   settings,
+                   output_surface,
+                   resource_provider,
+                   texture_mailbox_deleter,
+                   0) {}
+
+  void SetOverlayProcessor(OverlayProcessor* processor) {
+    overlay_processor_.reset(processor);
+  }
 
   // GLRenderer methods.
 
@@ -998,11 +1025,11 @@ TEST_F(GLRendererTest, ActiveTextureState) {
   // During initialization we are allowed to set any texture parameters.
   EXPECT_CALL(*context, texParameteri(_, _, _)).Times(AnyNumber());
 
-  RenderPassId id(1, 1);
-  TestRenderPass* root_pass = AddRenderPass(
-      &render_passes_in_draw_order_, id, gfx::Rect(100, 100), gfx::Transform());
+  TestRenderPass* root_pass =
+      AddRenderPass(&render_passes_in_draw_order_, RenderPassId(1, 1),
+                    gfx::Rect(100, 100), gfx::Transform());
   root_pass->AppendOneOfEveryQuadType(resource_provider.get(),
-                                      RenderPassId(2, 1));
+                                      RenderPassId(0, 0));
 
   renderer.DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
 
@@ -1090,6 +1117,12 @@ TEST_F(GLRendererTest, ShouldClearRootRenderPass) {
 
   gfx::Rect viewport_rect(10, 10);
 
+  RenderPassId child_pass_id(2, 0);
+  TestRenderPass* child_pass =
+      AddRenderPass(&render_passes_in_draw_order_, child_pass_id, viewport_rect,
+                    gfx::Transform());
+  AddQuad(child_pass, viewport_rect, SK_ColorBLUE);
+
   RenderPassId root_pass_id(1, 0);
   TestRenderPass* root_pass = AddRenderPass(&render_passes_in_draw_order_,
                                             root_pass_id,
@@ -1097,12 +1130,6 @@ TEST_F(GLRendererTest, ShouldClearRootRenderPass) {
                                             gfx::Transform());
   AddQuad(root_pass, viewport_rect, SK_ColorGREEN);
 
-  RenderPassId child_pass_id(2, 0);
-  TestRenderPass* child_pass = AddRenderPass(&render_passes_in_draw_order_,
-                                             child_pass_id,
-                                             viewport_rect,
-                                             gfx::Transform());
-  AddQuad(child_pass, viewport_rect, SK_ColorBLUE);
 
   AddRenderPassQuad(root_pass, child_pass);
 
@@ -2032,7 +2059,7 @@ TEST_F(GLRendererTestSyncPoint, SignalSyncPointOnLostContext) {
   // Make the sync point happen.
   gl->Finish();
   // Post a task after the sync point.
-  base::MessageLoop::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::Bind(&OtherCallback, &other_callback_count));
 
   base::MessageLoop::current()->Run();
@@ -2061,7 +2088,7 @@ TEST_F(GLRendererTestSyncPoint, SignalSyncPoint) {
   // Make the sync point happen.
   gl->Finish();
   // Post a task after the sync point.
-  base::MessageLoop::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::Bind(&OtherCallback, &other_callback_count));
 
   base::MessageLoop::current()->Run();
@@ -2071,6 +2098,236 @@ TEST_F(GLRendererTestSyncPoint, SignalSyncPoint) {
   EXPECT_EQ(1, other_callback_count);
 }
 #endif  // OS_ANDROID
+
+class TestOverlayProcessor : public OverlayProcessor {
+ public:
+  class Strategy : public OverlayProcessor::Strategy {
+   public:
+    Strategy() {}
+    ~Strategy() override {}
+    MOCK_METHOD2(Attempt,
+                 bool(RenderPassList* render_passes_in_draw_order,
+                      OverlayCandidateList* candidates));
+  };
+
+  TestOverlayProcessor(OutputSurface* surface,
+                       ResourceProvider* resource_provider)
+      : OverlayProcessor(surface, resource_provider) {}
+  ~TestOverlayProcessor() override {}
+  void Initialize() override {
+    strategy_ = new Strategy();
+    strategies_.push_back(scoped_ptr<OverlayProcessor::Strategy>(strategy_));
+  }
+
+  Strategy* strategy_;
+};
+
+void MailboxReleased(unsigned sync_point,
+                     bool lost_resource,
+                     BlockingTaskRunner* main_thread_task_runner) {
+}
+
+void IgnoreCopyResult(scoped_ptr<CopyOutputResult> result) {
+}
+
+TEST_F(GLRendererTest, DontOverlayWithCopyRequests) {
+  scoped_ptr<DiscardCheckingContext> context_owned(new DiscardCheckingContext);
+  FakeOutputSurfaceClient output_surface_client;
+  scoped_ptr<OutputSurface> output_surface(
+      FakeOutputSurface::Create3d(context_owned.Pass()));
+  CHECK(output_surface->BindToClient(&output_surface_client));
+
+  scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
+      new TestSharedBitmapManager());
+  scoped_ptr<ResourceProvider> resource_provider(ResourceProvider::Create(
+      output_surface.get(), shared_bitmap_manager.get(), NULL, NULL, 0, false,
+      1));
+  scoped_ptr<TextureMailboxDeleter> mailbox_deleter(
+      new TextureMailboxDeleter(base::ThreadTaskRunnerHandle::Get()));
+
+  RendererSettings settings;
+  FakeRendererClient renderer_client;
+  FakeRendererGL renderer(&renderer_client, &settings, output_surface.get(),
+                          resource_provider.get(), mailbox_deleter.get());
+
+  TestOverlayProcessor* processor =
+      new TestOverlayProcessor(output_surface.get(), resource_provider.get());
+  processor->Initialize();
+  renderer.SetOverlayProcessor(processor);
+
+  gfx::Rect viewport_rect(1, 1);
+  TestRenderPass* root_pass =
+      AddRenderPass(&render_passes_in_draw_order_, RenderPassId(1, 0),
+                    viewport_rect, gfx::Transform());
+  root_pass->has_transparent_background = false;
+  root_pass->copy_requests.push_back(
+      CopyOutputRequest::CreateRequest(base::Bind(&IgnoreCopyResult)));
+
+  unsigned sync_point = 0;
+  TextureMailbox mailbox =
+      TextureMailbox(gpu::Mailbox::Generate(), GL_TEXTURE_2D, sync_point);
+  mailbox.set_allow_overlay(true);
+  scoped_ptr<SingleReleaseCallbackImpl> release_callback =
+      SingleReleaseCallbackImpl::Create(base::Bind(&MailboxReleased));
+  ResourceProvider::ResourceId resource_id =
+      resource_provider->CreateResourceFromTextureMailbox(
+          mailbox, release_callback.Pass());
+  bool premultiplied_alpha = false;
+  bool flipped = false;
+  bool nearest_neighbor = false;
+  float vertex_opacity[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+
+  TextureDrawQuad* overlay_quad =
+      root_pass->CreateAndAppendDrawQuad<TextureDrawQuad>();
+  overlay_quad->SetNew(root_pass->CreateAndAppendSharedQuadState(),
+                       viewport_rect, viewport_rect, viewport_rect, resource_id,
+                       premultiplied_alpha, gfx::PointF(0, 0),
+                       gfx::PointF(1, 1), SK_ColorTRANSPARENT, vertex_opacity,
+                       flipped, nearest_neighbor);
+
+  // DirectRenderer::DrawFrame calls into OverlayProcessor::ProcessForOverlays.
+  // Attempt will be called for each strategy in OverlayProcessor. We have
+  // added a fake strategy, so checking for Attempt calls checks if there was
+  // any attempt to overlay, which there shouldn't be. We can't use the quad
+  // list because the render pass is cleaned up by DrawFrame.
+  EXPECT_CALL(*processor->strategy_, Attempt(_, _)).Times(0);
+  renderer.DrawFrame(&render_passes_in_draw_order_, 1.f, viewport_rect,
+                     viewport_rect, false);
+  Mock::VerifyAndClearExpectations(processor->strategy_);
+
+  // Without a copy request Attempt() should be called once.
+  root_pass = AddRenderPass(&render_passes_in_draw_order_, RenderPassId(1, 0),
+                            viewport_rect, gfx::Transform());
+  root_pass->has_transparent_background = false;
+
+  overlay_quad = root_pass->CreateAndAppendDrawQuad<TextureDrawQuad>();
+  overlay_quad->SetNew(root_pass->CreateAndAppendSharedQuadState(),
+                       viewport_rect, viewport_rect, viewport_rect, resource_id,
+                       premultiplied_alpha, gfx::PointF(0, 0),
+                       gfx::PointF(1, 1), SK_ColorTRANSPARENT, vertex_opacity,
+                       flipped, nearest_neighbor);
+
+  EXPECT_CALL(*processor->strategy_, Attempt(_, _)).Times(1);
+  renderer.DrawFrame(&render_passes_in_draw_order_, 1.f, viewport_rect,
+                     viewport_rect, false);
+}
+
+class SingleOverlayOnTopProcessor : public OverlayProcessor {
+ public:
+  class SingleOverlayValidator : public OverlayCandidateValidator {
+   public:
+    void CheckOverlaySupport(OverlayCandidateList* surfaces) override {
+      ASSERT_EQ(2U, surfaces->size());
+      OverlayCandidate& candidate = surfaces->back();
+      candidate.overlay_handled = true;
+    }
+  };
+
+  SingleOverlayOnTopProcessor(OutputSurface* surface,
+                              ResourceProvider* resource_provider)
+      : OverlayProcessor(surface, resource_provider) {}
+
+  void Initialize() override {
+    strategies_.push_back(scoped_ptr<Strategy>(
+        new OverlayStrategySingleOnTop(&validator_, resource_provider_)));
+  }
+
+  SingleOverlayValidator validator_;
+};
+
+class WaitSyncPointCountingContext : public TestWebGraphicsContext3D {
+ public:
+  MOCK_METHOD1(waitSyncPoint, void(unsigned sync_point));
+};
+
+class MockOverlayScheduler {
+ public:
+  MOCK_METHOD5(Schedule,
+               void(int plane_z_order,
+                    gfx::OverlayTransform plane_transform,
+                    unsigned overlay_texture_id,
+                    const gfx::Rect& display_bounds,
+                    const gfx::RectF& uv_rect));
+};
+
+TEST_F(GLRendererTest, OverlaySyncPointsAreProcessed) {
+  scoped_ptr<WaitSyncPointCountingContext> context_owned(
+      new WaitSyncPointCountingContext);
+  WaitSyncPointCountingContext* context = context_owned.get();
+
+  MockOverlayScheduler overlay_scheduler;
+  scoped_refptr<TestContextProvider> context_provider =
+      TestContextProvider::Create(context_owned.Pass());
+  context_provider->support()->SetScheduleOverlayPlaneCallback(base::Bind(
+      &MockOverlayScheduler::Schedule, base::Unretained(&overlay_scheduler)));
+
+  FakeOutputSurfaceClient output_surface_client;
+  scoped_ptr<OutputSurface> output_surface(
+      FakeOutputSurface::Create3d(context_provider));
+  CHECK(output_surface->BindToClient(&output_surface_client));
+
+  scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
+      new TestSharedBitmapManager());
+  scoped_ptr<ResourceProvider> resource_provider(ResourceProvider::Create(
+      output_surface.get(), shared_bitmap_manager.get(), NULL, NULL, 0, false,
+      1));
+  scoped_ptr<TextureMailboxDeleter> mailbox_deleter(
+      new TextureMailboxDeleter(base::ThreadTaskRunnerHandle::Get()));
+
+  RendererSettings settings;
+  FakeRendererClient renderer_client;
+  FakeRendererGL renderer(&renderer_client, &settings, output_surface.get(),
+                          resource_provider.get(), mailbox_deleter.get());
+
+  SingleOverlayOnTopProcessor* processor = new SingleOverlayOnTopProcessor(
+      output_surface.get(), resource_provider.get());
+  processor->Initialize();
+  renderer.SetOverlayProcessor(processor);
+
+  gfx::Rect viewport_rect(1, 1);
+  TestRenderPass* root_pass =
+      AddRenderPass(&render_passes_in_draw_order_, RenderPassId(1, 0),
+                    viewport_rect, gfx::Transform());
+  root_pass->has_transparent_background = false;
+
+  unsigned sync_point = TestRenderPass::kSyncPointForMailboxTextureQuad;
+  TextureMailbox mailbox =
+      TextureMailbox(gpu::Mailbox::Generate(), GL_TEXTURE_2D, sync_point);
+  mailbox.set_allow_overlay(true);
+  scoped_ptr<SingleReleaseCallbackImpl> release_callback =
+      SingleReleaseCallbackImpl::Create(base::Bind(&MailboxReleased));
+  ResourceProvider::ResourceId resource_id =
+      resource_provider->CreateResourceFromTextureMailbox(
+          mailbox, release_callback.Pass());
+  bool premultiplied_alpha = false;
+  bool flipped = false;
+  bool nearest_neighbor = false;
+  float vertex_opacity[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+  gfx::PointF uv_top_left(0, 0);
+  gfx::PointF uv_bottom_right(1, 1);
+
+  TextureDrawQuad* overlay_quad =
+      root_pass->CreateAndAppendDrawQuad<TextureDrawQuad>();
+  SharedQuadState* shared_state = root_pass->CreateAndAppendSharedQuadState();
+  shared_state->SetAll(gfx::Transform(), viewport_rect.size(), viewport_rect,
+                       viewport_rect, false, 1, SkXfermode::kSrcOver_Mode, 0);
+  overlay_quad->SetNew(shared_state, viewport_rect, viewport_rect,
+                       viewport_rect, resource_id, premultiplied_alpha,
+                       uv_top_left, uv_bottom_right, SK_ColorTRANSPARENT,
+                       vertex_opacity, flipped, nearest_neighbor);
+
+  // Verify that overlay_quad actually gets turned into an overlay, and even
+  // though it's not drawn, that its sync point is waited on.
+  EXPECT_CALL(*context,
+              waitSyncPoint(TestRenderPass::kSyncPointForMailboxTextureQuad))
+      .Times(1);
+  EXPECT_CALL(overlay_scheduler,
+              Schedule(1, gfx::OVERLAY_TRANSFORM_NONE, _, viewport_rect,
+                       BoundingRect(uv_top_left, uv_bottom_right))).Times(1);
+
+  renderer.DrawFrame(&render_passes_in_draw_order_, 1.f, viewport_rect,
+                     viewport_rect, false);
+}
 
 }  // namespace
 }  // namespace cc

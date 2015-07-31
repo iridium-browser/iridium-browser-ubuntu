@@ -7,7 +7,7 @@
 #include "base/logging.h"
 #include "base/time/time.h"
 #include "ui/ozone/platform/drm/gpu/drm_device.h"
-#include "ui/ozone/platform/drm/gpu/page_flip_observer.h"
+#include "ui/ozone/platform/drm/gpu/page_flip_request.h"
 #include "ui/ozone/platform/drm/gpu/scanout_buffer.h"
 
 namespace ui {
@@ -19,14 +19,14 @@ CrtcController::CrtcController(const scoped_refptr<DrmDevice>& drm,
       crtc_(crtc),
       connector_(connector),
       is_disabled_(true),
-      page_flip_pending_(false),
       time_of_last_flip_(0) {
 }
 
 CrtcController::~CrtcController() {
   if (!is_disabled_) {
-    UnsetCursor();
+    SetCursor(nullptr);
     drm_->DisableCrtc(crtc_);
+    SignalPageFlipRequest();
   }
 }
 
@@ -50,8 +50,10 @@ bool CrtcController::Modeset(const OverlayPlane& plane, drmModeModeInfo mode) {
   // pending planes to the same values so that the callback keeps the correct
   // state.
   current_planes_ = std::vector<OverlayPlane>(1, plane);
-  if (page_flip_pending_)
+  if (page_flip_request_.get())
     pending_planes_ = current_planes_;
+
+  ResetCursor();
 
   return true;
 }
@@ -64,14 +66,16 @@ bool CrtcController::Disable() {
   return drm_->DisableCrtc(crtc_);
 }
 
-bool CrtcController::SchedulePageFlip(HardwareDisplayPlaneList* plane_list,
-                                      const OverlayPlaneList& overlays) {
-  DCHECK(!page_flip_pending_);
+bool CrtcController::SchedulePageFlip(
+    HardwareDisplayPlaneList* plane_list,
+    const OverlayPlaneList& overlays,
+    scoped_refptr<PageFlipRequest> page_flip_request) {
+  DCHECK(!page_flip_request_.get());
   DCHECK(!is_disabled_);
   const OverlayPlane* primary = OverlayPlane::GetPrimaryPlane(overlays);
   if (!primary) {
     LOG(ERROR) << "No primary plane to display on crtc " << crtc_;
-    FOR_EACH_OBSERVER(PageFlipObserver, observers_, OnPageFlipEvent());
+    page_flip_request->Signal();
     return true;
   }
   DCHECK(primary->buffer.get());
@@ -81,31 +85,31 @@ bool CrtcController::SchedulePageFlip(HardwareDisplayPlaneList* plane_list,
             << mode_.hdisplay << "x" << mode_.vdisplay << " got "
             << primary->buffer->GetSize().ToString() << " for"
             << " crtc=" << crtc_ << " connector=" << connector_;
-    FOR_EACH_OBSERVER(PageFlipObserver, observers_, OnPageFlipEvent());
+    page_flip_request->Signal();
     return true;
   }
 
   if (!drm_->plane_manager()->AssignOverlayPlanes(plane_list, overlays, crtc_,
                                                   this)) {
     PLOG(ERROR) << "Failed to assign overlay planes for crtc " << crtc_;
+    page_flip_request->Signal();
     return false;
   }
 
-  page_flip_pending_ = true;
   pending_planes_ = overlays;
+  page_flip_request_ = page_flip_request;
 
   return true;
 }
 
 void CrtcController::PageFlipFailed() {
   pending_planes_.clear();
-  page_flip_pending_ = false;
+  SignalPageFlipRequest();
 }
 
 void CrtcController::OnPageFlipEvent(unsigned int frame,
                                      unsigned int seconds,
                                      unsigned int useconds) {
-  page_flip_pending_ = false;
   time_of_last_flip_ =
       static_cast<uint64_t>(seconds) * base::Time::kMicrosecondsPerSecond +
       useconds;
@@ -113,19 +117,14 @@ void CrtcController::OnPageFlipEvent(unsigned int frame,
   current_planes_.clear();
   current_planes_.swap(pending_planes_);
 
-  FOR_EACH_OBSERVER(PageFlipObserver, observers_, OnPageFlipEvent());
+  SignalPageFlipRequest();
 }
 
 bool CrtcController::SetCursor(const scoped_refptr<ScanoutBuffer>& buffer) {
-  DCHECK(!is_disabled_);
+  DCHECK(!is_disabled_ || !buffer);
   cursor_buffer_ = buffer;
-  return drm_->SetCursor(crtc_, buffer->GetHandle(), buffer->GetSize());
-}
 
-bool CrtcController::UnsetCursor() {
-  bool state = drm_->SetCursor(crtc_, 0, gfx::Size());
-  cursor_buffer_ = NULL;
-  return state;
+  return ResetCursor();
 }
 
 bool CrtcController::MoveCursor(const gfx::Point& location) {
@@ -133,12 +132,35 @@ bool CrtcController::MoveCursor(const gfx::Point& location) {
   return drm_->MoveCursor(crtc_, location);
 }
 
-void CrtcController::AddObserver(PageFlipObserver* observer) {
-  observers_.AddObserver(observer);
+bool CrtcController::ResetCursor() {
+  uint32_t handle = 0;
+  gfx::Size size;
+
+  if (cursor_buffer_) {
+    handle = cursor_buffer_->GetHandle();
+    size = cursor_buffer_->GetSize();
+  }
+
+  bool status = drm_->SetCursor(crtc_, handle, size);
+  if (!status) {
+    PLOG(ERROR) << "drmModeSetCursor: device " << drm_->device_path().value()
+                << " crtc " << crtc_ << " handle " << handle << " size "
+                << size.ToString();
+  }
+
+  return status;
 }
 
-void CrtcController::RemoveObserver(PageFlipObserver* observer) {
-  observers_.RemoveObserver(observer);
+void CrtcController::SignalPageFlipRequest() {
+  if (page_flip_request_.get()) {
+    // If another frame is queued up and available immediately, calling Signal()
+    // may result in a call to SchedulePageFlip(), which will override
+    // page_flip_request_ and possibly release the ref. Stash previous request
+    // locally to  avoid deleting the object we are making a call on.
+    scoped_refptr<PageFlipRequest> last_request;
+    last_request.swap(page_flip_request_);
+    last_request->Signal();
+  }
 }
 
 }  // namespace ui

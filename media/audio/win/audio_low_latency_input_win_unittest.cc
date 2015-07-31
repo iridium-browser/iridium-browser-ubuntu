@@ -22,7 +22,6 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using base::win::ScopedCOMInitializer;
 using ::testing::_;
 using ::testing::AnyNumber;
 using ::testing::AtLeast;
@@ -62,16 +61,16 @@ class FakeAudioInputCallback : public AudioInputStream::AudioInputCallback {
     data_event_.Wait();
   }
 
-  virtual void OnData(AudioInputStream* stream,
-                      const AudioBus* src,
-                      uint32 hardware_delay_bytes,
-                      double volume) override {
+  void OnData(AudioInputStream* stream,
+              const AudioBus* src,
+              uint32 hardware_delay_bytes,
+              double volume) override {
     EXPECT_NE(hardware_delay_bytes, 0u);
     num_received_audio_frames_ += src->frames();
     data_event_.Signal();
   }
 
-  virtual void OnError(AudioInputStream* stream) override {
+  void OnError(AudioInputStream* stream) override {
     error_ = true;
   }
 
@@ -104,7 +103,7 @@ class WriteToFileAudioSink : public AudioInputStream::AudioInputCallback {
     VLOG(0) << "bits_per_sample_:" << bits_per_sample_;
   }
 
-  virtual ~WriteToFileAudioSink() {
+  ~WriteToFileAudioSink() override {
     size_t bytes_written = 0;
     while (bytes_written < bytes_to_write_) {
       const uint8* chunk;
@@ -123,10 +122,10 @@ class WriteToFileAudioSink : public AudioInputStream::AudioInputCallback {
   }
 
   // AudioInputStream::AudioInputCallback implementation.
-  virtual void OnData(AudioInputStream* stream,
-                      const AudioBus* src,
-                      uint32 hardware_delay_bytes,
-                      double volume) {
+  void OnData(AudioInputStream* stream,
+              const AudioBus* src,
+              uint32 hardware_delay_bytes,
+              double volume) override {
     EXPECT_EQ(bits_per_sample_, 16);
     const int num_samples = src->frames() * src->channels();
     scoped_ptr<int16> interleaved(new int16[num_samples]);
@@ -142,7 +141,7 @@ class WriteToFileAudioSink : public AudioInputStream::AudioInputCallback {
     }
   }
 
-  virtual void OnError(AudioInputStream* stream) {}
+  void OnError(AudioInputStream* stream) override {}
 
  private:
   int bits_per_sample_;
@@ -163,8 +162,7 @@ static bool HasCoreAudioAndInputDevices(AudioManager* audio_man) {
 class AudioInputStreamWrapper {
  public:
   explicit AudioInputStreamWrapper(AudioManager* audio_manager)
-      : com_init_(ScopedCOMInitializer::kMTA),
-        audio_man_(audio_manager),
+      : audio_man_(audio_manager),
         default_params_(
             audio_manager->GetInputStreamParameters(
                   AudioManagerBase::kDefaultDeviceId)) {
@@ -207,7 +205,6 @@ class AudioInputStreamWrapper {
     return ais;
   }
 
-  ScopedCOMInitializer com_init_;
   AudioManager* audio_man_;
   const AudioParameters default_params_;
   int frames_per_buffer_;
@@ -259,8 +256,6 @@ class ScopedAudioInputStream {
 TEST(WinAudioInputTest, WASAPIAudioInputStreamHardwareSampleRate) {
   scoped_ptr<AudioManager> audio_manager(AudioManager::CreateForTesting());
   ABORT_AUDIO_TEST_IF_NOT(HasCoreAudioAndInputDevices(audio_manager.get()));
-
-  ScopedCOMInitializer com_init(ScopedCOMInitializer::kMTA);
 
   // Retrieve a list of all available input devices.
   media::AudioDeviceNames device_names;

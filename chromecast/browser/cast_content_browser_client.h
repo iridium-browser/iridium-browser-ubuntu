@@ -6,6 +6,8 @@
 #define CHROMECAST_BROWSER_CAST_CONTENT_BROWSER_CLIENT_H_
 
 #include <map>
+#include <string>
+#include <vector>
 
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
@@ -17,6 +19,14 @@ class CrashHandlerHostLinux;
 
 namespace content {
 class BrowserMessageFilter;
+}
+
+namespace media {
+class AudioManagerFactory;
+}
+
+namespace net {
+class HostResolver;
 }
 
 namespace chromecast {
@@ -55,6 +65,7 @@ class CastContentBrowserClient: public content::ContentBrowserClient {
                            content::WebPreferences* prefs) override;
   void ResourceDispatcherHostCreated() override;
   std::string GetApplicationLocale() override;
+  content::QuotaPermissionContext* CreateQuotaPermissionContext() override;
   void AllowCertificateError(
       int render_process_id,
       int render_view_id,
@@ -86,7 +97,6 @@ class CastContentBrowserClient: public content::ContentBrowserClient {
       int render_process_id,
       int opener_id,
       bool* no_javascript_access) override;
-  content::DevToolsManagerDelegate* GetDevToolsManagerDelegate() override;
   void GetAdditionalMappedFilesForChildProcess(
       const base::CommandLine& command_line,
       int child_process_id,
@@ -98,9 +108,14 @@ class CastContentBrowserClient: public content::ContentBrowserClient {
 #endif  // defined(OS_ANDROID) && defined(VIDEO_HOLE)
 
  private:
+  void AddNetworkHintsMessageFilter(int render_process_id,
+                                    net::URLRequestContext* context);
+
   net::X509Certificate* SelectClientCertificateOnIOThread(
       GURL requesting_url,
       int render_process_id);
+
+  scoped_ptr<::media::AudioManagerFactory> PlatformCreateAudioManagerFactory();
 
 #if !defined(OS_ANDROID)
   // Returns the crash signal FD corresponding to the current process type.
@@ -113,6 +128,9 @@ class CastContentBrowserClient: public content::ContentBrowserClient {
   // A static cache to hold crash_handlers for each process_type
   std::map<std::string, breakpad::CrashHandlerHostLinux*> crash_handlers_;
 #endif
+
+  base::ScopedFD v8_natives_fd_;
+  base::ScopedFD v8_snapshot_fd_;
 
   scoped_ptr<URLRequestContextFactory> url_request_context_factory_;
 

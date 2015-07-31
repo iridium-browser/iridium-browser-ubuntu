@@ -23,11 +23,11 @@ class Thread;
 // continue to run as is.
 class FontCacheHandler : public UtilityMessageHandler {
  public:
-  FontCacheHandler() {}
-  virtual ~FontCacheHandler() {}
+  FontCacheHandler();
+  ~FontCacheHandler() override;
 
   // IPC::Listener implementation
-  virtual bool OnMessageReceived(const IPC::Message& message) override;
+  bool OnMessageReceived(const IPC::Message& message) override;
 
  private:
   void OnBuildFontCache(const base::FilePath& full_path);

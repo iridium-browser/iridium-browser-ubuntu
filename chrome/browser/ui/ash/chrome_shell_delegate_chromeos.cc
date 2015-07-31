@@ -25,6 +25,7 @@
 #include "chrome/browser/speech/tts_controller.h"
 #include "chrome/browser/sync/sync_error_notifier_factory_ash.h"
 #include "chrome/browser/ui/ash/chrome_new_window_delegate_chromeos.h"
+#include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
 #include "chrome/browser/ui/ash/media_delegate_chromeos.h"
 #include "chrome/browser/ui/ash/session_state_delegate_chromeos.h"
 #include "chrome/browser/ui/ash/system_tray_delegate_chromeos.h"
@@ -42,7 +43,7 @@
 
 namespace {
 
-void InitAfterSessionStart() {
+void InitAfterFirstSessionStart() {
   // Restore focus after the user session is started.  It's needed because some
   // windows can be opened in background while login UI is still active because
   // we currently restore browser windows before login UI is deleted.
@@ -217,10 +218,13 @@ void ChromeShellDelegate::PreInit() {
   // in Shell::Init.
   display_configuration_observer_.reset(
       new chromeos::DisplayConfigurationObserver());
+
+  chrome_user_metrics_recorder_.reset(new ChromeUserMetricsRecorder);
 }
 
 void ChromeShellDelegate::PreShutdown() {
   display_configuration_observer_.reset();
+  chrome_user_metrics_recorder_.reset();
 }
 
 ash::SessionStateDelegate* ChromeShellDelegate::CreateSessionStateDelegate() {
@@ -259,11 +263,19 @@ void ChromeShellDelegate::Observe(int type,
         SigninErrorNotifierFactory::GetForProfile(profile);
         SyncErrorNotifierFactory::GetForProfile(profile);
       }
+      // Do not use chrome::NOTIFICATION_PROFILE_ADDED because the
+      // profile is not fully initialized by user_manager.  Use
+      // chrome::NOTIFICATION_LOGIN_USER_PROFILE_PREPARED instead.
+      if (shelf_delegate_)
+        shelf_delegate_->OnUserProfileReadyToSwitch(profile);
       ash::Shell::GetInstance()->OnLoginUserProfilePrepared();
       break;
     }
     case chrome::NOTIFICATION_SESSION_STARTED:
-      InitAfterSessionStart();
+      // InitAfterFirstSessionStart() should only be called once upon system
+      // start.
+      if (user_manager::UserManager::Get()->GetLoggedInUsers().size() < 2)
+        InitAfterFirstSessionStart();
       ash::Shell::GetInstance()->ShowShelf();
       break;
     default:

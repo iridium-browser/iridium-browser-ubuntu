@@ -13,6 +13,7 @@
 #include "SkCodec_libpng.h"
 #include "SkCodec_wbmp.h"
 #include "SkCodecPriv.h"
+#include "SkJpegCodec.h"
 #include "SkStream.h"
 
 struct DecoderProc {
@@ -22,6 +23,7 @@ struct DecoderProc {
 
 static const DecoderProc gDecoderProcs[] = {
     { SkPngCodec::IsPng, SkPngCodec::NewFromStream },
+    { SkJpegCodec::IsJpeg, SkJpegCodec::NewFromStream },
     { SkGifCodec::IsGif, SkGifCodec::NewFromStream },
     { SkIcoCodec::IsIco, SkIcoCodec::NewFromStream },
     { SkBmpCodec::IsBmp, SkBmpCodec::NewFromStream },
@@ -32,8 +34,10 @@ SkCodec* SkCodec::NewFromStream(SkStream* stream) {
     if (!stream) {
         return NULL;
     }
+
+    SkAutoTDelete<SkStream> streamDeleter(stream);
     
-    SkCodec* codec = NULL;
+    SkAutoTDelete<SkCodec> codec(NULL);
     for (uint32_t i = 0; i < SK_ARRAY_COUNT(gDecoderProcs); i++) {
         DecoderProc proc = gDecoderProcs[i];
         const bool correctFormat = proc.IsFormat(stream);
@@ -41,7 +45,7 @@ SkCodec* SkCodec::NewFromStream(SkStream* stream) {
             return NULL;
         }
         if (correctFormat) {
-            codec = proc.NewFromStream(stream);
+            codec.reset(proc.NewFromStream(streamDeleter.detach()));
             break;
         }
     }
@@ -50,12 +54,11 @@ SkCodec* SkCodec::NewFromStream(SkStream* stream) {
     // This is about 4x smaller than a test image that takes a few minutes for
     // dm to decode and draw.
     const int32_t maxSize = 1 << 27;
-    if (codec != NULL &&
-            codec->getInfo().width() * codec->getInfo().height() > maxSize) {
+    if (codec && codec->getInfo().width() * codec->getInfo().height() > maxSize) {
         SkCodecPrintf("Error: Image size too large, cannot decode.\n");
         return NULL;
     } else {
-        return codec;
+        return codec.detach();
     }
 }
 
@@ -68,9 +71,6 @@ SkCodec* SkCodec::NewFromData(SkData* data) {
 
 SkCodec::SkCodec(const SkImageInfo& info, SkStream* stream)
     : INHERITED(info)
-#ifdef SK_SUPPORT_LEGACY_BOOL_ONGETINFO
-    , fInfo(info)
-#endif
     , fStream(stream)
     , fNeedsRewind(false)
 {}
@@ -87,7 +87,23 @@ SkCodec::RewindState SkCodec::rewindIfNeeded() {
                              : kCouldNotRewind_RewindState;
 }
 
-SkScanlineDecoder* SkCodec::getScanlineDecoder(const SkImageInfo& dstInfo) {
-    fScanlineDecoder.reset(this->onGetScanlineDecoder(dstInfo));
+SkScanlineDecoder* SkCodec::getScanlineDecoder(const SkImageInfo& dstInfo, const Options* options,
+        SkPMColor ctable[], int* ctableCount) {
+
+    // Set options.
+    Options optsStorage;
+    if (NULL == options) {
+        options = &optsStorage;
+    }
+
+    fScanlineDecoder.reset(this->onGetScanlineDecoder(dstInfo, *options, ctable, ctableCount));
     return fScanlineDecoder.get();
+}
+
+SkScanlineDecoder* SkCodec::getScanlineDecoder(const SkImageInfo& dstInfo) {
+    SkASSERT(kIndex_8_SkColorType != dstInfo.colorType());
+    if (kIndex_8_SkColorType == dstInfo.colorType()) {
+        return NULL;
+    }
+    return this->getScanlineDecoder(dstInfo, NULL, NULL, NULL);
 }

@@ -62,72 +62,83 @@ const char DownloadProtectionService::kDownloadRequestUrl[] =
     "https://sb-ssl.google.com/safebrowsing/clientreport/download";
 
 namespace {
-// List of extensions for which we track some UMA stats.
-enum MaliciousExtensionType {
-  EXTENSION_EXE,
-  EXTENSION_MSI,
-  EXTENSION_CAB,
-  EXTENSION_SYS,
-  EXTENSION_SCR,
-  EXTENSION_DRV,
-  EXTENSION_BAT,
-  EXTENSION_ZIP,
-  EXTENSION_RAR,
-  EXTENSION_DLL,
-  EXTENSION_PIF,
-  EXTENSION_COM,
-  EXTENSION_JAR,
-  EXTENSION_CLASS,
-  EXTENSION_PDF,
-  EXTENSION_VB,
-  EXTENSION_REG,
-  EXTENSION_GRP,
-  EXTENSION_OTHER,  // Groups all other extensions into one bucket.
-  EXTENSION_CRX,
-  EXTENSION_APK,
-  EXTENSION_DMG,
-  EXTENSION_PKG,
-  EXTENSION_TORRENT,
-  EXTENSION_WEBSITE,
-  EXTENSION_URL,
-  EXTENSION_MAX,
+// List of extensions for which we track some UMA stats. The position of the
+// extension in kDangerousFileTypes is considered to be the UMA enumeration
+// value. Naturally, new values should only be added at the end.
+const base::FilePath::CharType* const kDangerousFileTypes[] = {
+    FILE_PATH_LITERAL(".exe"),
+    FILE_PATH_LITERAL(".msi"),
+    FILE_PATH_LITERAL(".cab"),
+    FILE_PATH_LITERAL(".sys"),
+    FILE_PATH_LITERAL(".scr"),
+    FILE_PATH_LITERAL(".drv"),
+    FILE_PATH_LITERAL(".bat"),
+    FILE_PATH_LITERAL(".zip"),
+    FILE_PATH_LITERAL(".rar"),
+    FILE_PATH_LITERAL(".dll"),
+    FILE_PATH_LITERAL(".pif"),
+    FILE_PATH_LITERAL(".com"),
+    FILE_PATH_LITERAL(".jar"),
+    FILE_PATH_LITERAL(".class"),
+    FILE_PATH_LITERAL(".pdf"),
+    FILE_PATH_LITERAL(".vb"),
+    FILE_PATH_LITERAL(".reg"),
+    FILE_PATH_LITERAL(".grp"),
+    nullptr,  // The "Other" bucket. This is in the middle of the array due to
+              // historical reasons.
+    FILE_PATH_LITERAL(".crx"),
+    FILE_PATH_LITERAL(".apk"),
+    FILE_PATH_LITERAL(".dmg"),
+    FILE_PATH_LITERAL(".pkg"),
+    FILE_PATH_LITERAL(".torrent"),
+    FILE_PATH_LITERAL(".website"),
+    FILE_PATH_LITERAL(".url"),
+    FILE_PATH_LITERAL(".vbe"),
+    FILE_PATH_LITERAL(".vbs"),
+    FILE_PATH_LITERAL(".js"),
+    FILE_PATH_LITERAL(".jse"),
+    FILE_PATH_LITERAL(".mht"),
+    FILE_PATH_LITERAL(".mhtml"),
+    FILE_PATH_LITERAL(".msc"),
+    FILE_PATH_LITERAL(".msp"),
+    FILE_PATH_LITERAL(".mst"),
+    FILE_PATH_LITERAL(".bas"),
+    FILE_PATH_LITERAL(".hta"),
+    FILE_PATH_LITERAL(".msh"),
+    FILE_PATH_LITERAL(".msh1"),
+    FILE_PATH_LITERAL(".msh1xml"),
+    FILE_PATH_LITERAL(".msh2"),
+    FILE_PATH_LITERAL(".msh2xml"),
+    FILE_PATH_LITERAL(".mshxml"),
+    FILE_PATH_LITERAL(".ps1"),
+    FILE_PATH_LITERAL(".ps1xml"),
+    FILE_PATH_LITERAL(".ps2"),
+    FILE_PATH_LITERAL(".ps2xml"),
+    FILE_PATH_LITERAL(".psc1"),
+    FILE_PATH_LITERAL(".psc2"),
+    FILE_PATH_LITERAL(".scf"),
+    FILE_PATH_LITERAL(".sct"),
+    FILE_PATH_LITERAL(".wsf"),
 };
 
-MaliciousExtensionType GetExtensionType(const base::FilePath& f) {
-  if (f.MatchesExtension(FILE_PATH_LITERAL(".exe"))) return EXTENSION_EXE;
-  if (f.MatchesExtension(FILE_PATH_LITERAL(".msi"))) return EXTENSION_MSI;
-  if (f.MatchesExtension(FILE_PATH_LITERAL(".cab"))) return EXTENSION_CAB;
-  if (f.MatchesExtension(FILE_PATH_LITERAL(".sys"))) return EXTENSION_SYS;
-  if (f.MatchesExtension(FILE_PATH_LITERAL(".scr"))) return EXTENSION_SCR;
-  if (f.MatchesExtension(FILE_PATH_LITERAL(".drv"))) return EXTENSION_DRV;
-  if (f.MatchesExtension(FILE_PATH_LITERAL(".bat"))) return EXTENSION_BAT;
-  if (f.MatchesExtension(FILE_PATH_LITERAL(".zip"))) return EXTENSION_ZIP;
-  if (f.MatchesExtension(FILE_PATH_LITERAL(".rar"))) return EXTENSION_RAR;
-  if (f.MatchesExtension(FILE_PATH_LITERAL(".dll"))) return EXTENSION_DLL;
-  if (f.MatchesExtension(FILE_PATH_LITERAL(".pif"))) return EXTENSION_PIF;
-  if (f.MatchesExtension(FILE_PATH_LITERAL(".com"))) return EXTENSION_COM;
-  if (f.MatchesExtension(FILE_PATH_LITERAL(".jar"))) return EXTENSION_JAR;
-  if (f.MatchesExtension(FILE_PATH_LITERAL(".class"))) return EXTENSION_CLASS;
-  if (f.MatchesExtension(FILE_PATH_LITERAL(".pdf"))) return EXTENSION_PDF;
-  if (f.MatchesExtension(FILE_PATH_LITERAL(".vb"))) return EXTENSION_VB;
-  if (f.MatchesExtension(FILE_PATH_LITERAL(".reg"))) return EXTENSION_REG;
-  if (f.MatchesExtension(FILE_PATH_LITERAL(".grp"))) return EXTENSION_GRP;
-  if (f.MatchesExtension(FILE_PATH_LITERAL(".crx"))) return EXTENSION_CRX;
-  if (f.MatchesExtension(FILE_PATH_LITERAL(".apk"))) return EXTENSION_APK;
-  if (f.MatchesExtension(FILE_PATH_LITERAL(".dmg"))) return EXTENSION_DMG;
-  if (f.MatchesExtension(FILE_PATH_LITERAL(".pkg"))) return EXTENSION_PKG;
-  if (f.MatchesExtension(FILE_PATH_LITERAL(".torrent")))
-    return EXTENSION_TORRENT;
-  if (f.MatchesExtension(FILE_PATH_LITERAL(".website")))
-    return EXTENSION_WEBSITE;
-  if (f.MatchesExtension(FILE_PATH_LITERAL(".url"))) return EXTENSION_URL;
-  return EXTENSION_OTHER;
-}
+// UMA enumeration value for unrecognized file types. This is the array index of
+// the "Other" bucket in kDangerousFileTypes.
+const int EXTENSION_OTHER = 18;
 
 void RecordFileExtensionType(const base::FilePath& file) {
+  DCHECK_EQ(static_cast<base::FilePath::CharType*>(nullptr),
+            kDangerousFileTypes[EXTENSION_OTHER]);
+
+  int extension_type = EXTENSION_OTHER;
+  for (const auto& extension : kDangerousFileTypes) {
+    if (extension && file.MatchesExtension(extension)) {
+      extension_type = &extension - kDangerousFileTypes;
+      break;
+    }
+  }
+
   UMA_HISTOGRAM_ENUMERATION("SBClientDownload.DownloadExtensions",
-                            GetExtensionType(file),
-                            EXTENSION_MAX);
+                            extension_type, arraysize(kDangerousFileTypes));
 }
 
 // Enumerate for histogramming purposes.
@@ -260,7 +271,7 @@ class DownloadUrlSBClient : public DownloadSBClient {
         database_manager_(database_manager) { }
 
   void StartCheck() override {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+    DCHECK_CURRENTLY_ON(BrowserThread::IO);
     if (!database_manager_.get() ||
         database_manager_->CheckDownloadUrl(url_chain_, this)) {
       CheckDone(SB_THREAT_TYPE_SAFE);
@@ -318,14 +329,14 @@ class DownloadProtectionService::CheckClientDownloadRequest
         type_(ClientDownloadRequest::WIN_EXECUTABLE),
         start_time_(base::TimeTicks::Now()),
         weakptr_factory_(this) {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    DCHECK_CURRENTLY_ON(BrowserThread::UI);
     item_->AddObserver(this);
   }
 
   void Start() {
     DVLOG(2) << "Starting SafeBrowsing download check for: "
              << item_->DebugString(true);
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    DCHECK_CURRENTLY_ON(BrowserThread::UI);
     // TODO(noelutz): implement some cache to make sure we don't issue the same
     // request over and over again if a user downloads the same binary multiple
     // times.
@@ -367,7 +378,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
   // Start a timeout to cancel the request if it takes too long.
   // This should only be called after we have finished accessing the file.
   void StartTimeout() {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    DCHECK_CURRENTLY_ON(BrowserThread::UI);
     if (!service_) {
       // Request has already been cancelled.
       return;
@@ -385,7 +396,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
   // Canceling a request will cause us to always report the result as UNKNOWN
   // unless a pending request is about to call FinishRequest.
   void Cancel() {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    DCHECK_CURRENTLY_ON(BrowserThread::UI);
     if (fetcher_.get()) {
       // The DownloadProtectionService is going to release its reference, so we
       // might be destroyed before the URLFetcher completes.  Cancel the
@@ -409,7 +420,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
 
   // From the net::URLFetcherDelegate interface.
   void OnURLFetchComplete(const net::URLFetcher* source) override {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    DCHECK_CURRENTLY_ON(BrowserThread::UI);
     DCHECK_EQ(source, fetcher_.get());
     DVLOG(2) << "Received a response for URL: "
              << item_->GetUrlChain().back() << ": success="
@@ -509,7 +520,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
   friend class base::DeleteHelper<CheckClientDownloadRequest>;
 
   ~CheckClientDownloadRequest() override {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    DCHECK_CURRENTLY_ON(BrowserThread::UI);
     DCHECK(item_ == NULL);
   }
 
@@ -534,7 +545,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
   }
 
   void StartExtractFileFeatures() {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    DCHECK_CURRENTLY_ON(BrowserThread::UI);
     DCHECK(item_);  // Called directly from Start(), item should still exist.
     // Since we do blocking I/O, offload this to a worker thread.
     // The task does not need to block shutdown.
@@ -575,7 +586,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
   }
 
   void StartExtractZipFeatures() {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    DCHECK_CURRENTLY_ON(BrowserThread::UI);
     DCHECK(item_);  // Called directly from Start(), item should still exist.
     zip_analysis_start_time_ = base::TimeTicks::Now();
     // We give the zip analyzer a weak pointer to this object.  Since the
@@ -588,7 +599,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
   }
 
   void OnZipAnalysisFinished(const zip_analyzer::Results& results) {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    DCHECK_CURRENTLY_ON(BrowserThread::UI);
     if (!service_)
       return;
     if (results.success) {
@@ -619,7 +630,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
   }
 
   void CheckWhitelists() {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+    DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
     if (!database_manager_.get()) {
       PostFinishTask(UNKNOWN, REASON_SB_DISABLED);
@@ -627,6 +638,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
     }
 
     const GURL& url = url_chain_.back();
+    // TODO(asanka): This may acquire a lock on the SB DB on the IO thread.
     if (url.is_valid() && database_manager_->MatchDownloadWhitelistUrl(url)) {
       DVLOG(2) << url << " is on the download whitelist.";
       RecordCountOfSignedOrWhitelistedDownload();
@@ -656,17 +668,9 @@ class DownloadProtectionService::CheckClientDownloadRequest
       return;
     }
 
-    // Currently, the UI only works on Windows so we don't even bother with
-    // pinging the server if we're not on Windows.
-    // TODO(noelutz): change this code once the UI is done for Linux and Mac.
-#if defined(OS_MACOSX)
-  // TODO(mattm): remove this (see crbug.com/414834).
-  if (base::FieldTrialList::FindFullName("SafeBrowsingOSXClientDownloadPings")
-      != "Enabled") {
-    PostFinishTask(UNKNOWN, REASON_OS_NOT_SUPPORTED);
-    return;
-  }
-#endif
+    // Currently, the UI is only enabled on Windows and OSX so we don't even
+    // bother with pinging the server if we're not on one of those platforms.
+    // TODO(noelutz): change this code once the UI is done for Linux.
 #if defined(OS_WIN) || defined(OS_MACOSX)
     // The URLFetcher is owned by the UI thread, so post a message to
     // start the pingback.
@@ -680,7 +684,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
   }
 
   void GetTabRedirects() {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    DCHECK_CURRENTLY_ON(BrowserThread::UI);
     if (!service_)
       return;
 
@@ -707,7 +711,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
 
   void OnGotTabRedirects(const GURL& url,
                          const history::RedirectList* redirect_list) {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    DCHECK_CURRENTLY_ON(BrowserThread::UI);
     DCHECK_EQ(url, tab_url_);
     if (!service_)
       return;
@@ -721,7 +725,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
   }
 
   void SendRequest() {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
     // This is our last chance to check whether the request has been canceled
     // before sending it.
@@ -786,10 +790,9 @@ class DownloadProtectionService::CheckClientDownloadRequest
 
     DVLOG(2) << "Sending a request for URL: "
              << item_->GetUrlChain().back();
-    fetcher_.reset(net::URLFetcher::Create(0 /* ID used for testing */,
-                                           GetDownloadRequestUrl(),
-                                           net::URLFetcher::POST,
-                                           this));
+    fetcher_ = net::URLFetcher::Create(0 /* ID used for testing */,
+                                       GetDownloadRequestUrl(),
+                                       net::URLFetcher::POST, this);
     fetcher_->SetLoadFlags(net::LOAD_DISABLE_CACHE);
     fetcher_->SetAutomaticallyRetryOn5xx(false);  // Don't retry on error.
     fetcher_->SetRequestContext(service_->request_context_getter_.get());
@@ -812,7 +815,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
 
   void FinishRequest(DownloadCheckResult result,
                      DownloadCheckResultReason reason) {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    DCHECK_CURRENTLY_ON(BrowserThread::UI);
     if (finished_) {
       return;
     }
@@ -850,13 +853,6 @@ class DownloadProtectionService::CheckClientDownloadRequest
       UMA_HISTOGRAM_ENUMERATION("SBClientDownload.CheckDownloadStats",
                                 reason,
                                 REASON_MAX);
-#if defined(OS_MACOSX)
-      // OSX is currently sending pings only for evaluation purposes, ignore
-      // the result for now.
-      // TODO(mattm): remove this and update the ifdef in
-      // DownloadItemImpl::IsDangerous (see crbug.com/413968).
-      result = UNKNOWN;
-#endif
       callback_.Run(result);
       item_->RemoveObserver(this);
       item_ = NULL;
@@ -872,7 +868,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
 
   bool CertificateChainIsWhitelisted(
       const ClientDownloadRequest_CertificateChain& chain) {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+    DCHECK_CURRENTLY_ON(BrowserThread::IO);
     if (chain.element_size() < 2) {
       // We need to have both a signing certificate and its issuer certificate
       // present to construct a whitelist entry.
@@ -966,12 +962,12 @@ DownloadProtectionService::DownloadProtectionService(
 }
 
 DownloadProtectionService::~DownloadProtectionService() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   CancelPendingRequests();
 }
 
 void DownloadProtectionService::SetEnabled(bool enabled) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (enabled == enabled_) {
     return;
   }
@@ -1008,11 +1004,10 @@ void DownloadProtectionService::CheckDownloadUrl(
 bool DownloadProtectionService::IsSupportedDownload(
     const content::DownloadItem& item,
     const base::FilePath& target_path) const {
-  // Currently, the UI is only enabled on Windows.  On Mac we send the ping but
-  // ignore the result (see ifdef in FinishRequest).  On Linux we still
+  // Currently, the UI is only enabled on Windows and OSX.  On Linux we still
   // want to show the dangerous file type warning if the file is possibly
   // dangerous which means we have to always return false here.
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_MACOSX)
   DownloadCheckResultReason reason = REASON_MAX;
   ClientDownloadRequest::DownloadType type =
       ClientDownloadRequest::WIN_EXECUTABLE;
@@ -1027,12 +1022,12 @@ bool DownloadProtectionService::IsSupportedDownload(
 DownloadProtectionService::ClientDownloadRequestSubscription
 DownloadProtectionService::RegisterClientDownloadRequestCallback(
     const ClientDownloadRequestCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   return client_download_request_callbacks_.Add(callback);
 }
 
 void DownloadProtectionService::CancelPendingRequests() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   for (std::set<scoped_refptr<CheckClientDownloadRequest> >::iterator it =
            download_requests_.begin();
        it != download_requests_.end();) {
@@ -1046,7 +1041,7 @@ void DownloadProtectionService::CancelPendingRequests() {
 
 void DownloadProtectionService::RequestFinished(
     CheckClientDownloadRequest* request) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   std::set<scoped_refptr<CheckClientDownloadRequest> >::iterator it =
       download_requests_.find(request);
   DCHECK(it != download_requests_.end());

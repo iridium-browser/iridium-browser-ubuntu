@@ -59,8 +59,8 @@ protected:
         dummyPageHolder->page().setDeviceScaleFactor(1.0);
         documentLoader = DocumentLoader::create(&dummyPageHolder->frame(), ResourceRequest("http://www.example.com"), SubstituteData());
         document = toHTMLDocument(&dummyPageHolder->document());
-        fetchContext = &static_cast<FrameFetchContext&>(documentLoader->fetcher()->context());
-        fetchContext->setDocument(document.get());
+        fetchContext = &documentLoader->fetcher()->context();
+        FrameFetchContext::provideDocumentToContext(*fetchContext, document.get());
     }
 
     void expectUpgrade(const char* input, const char* expected)
@@ -98,7 +98,7 @@ protected:
         fetchContext->upgradeInsecureRequest(fetchRequest);
 
         EXPECT_STREQ(shouldPrefer ? "1" : "",
-            fetchRequest.resourceRequest().httpHeaderField("HTTPS").utf8().data());
+            fetchRequest.resourceRequest().httpHeaderField("Upgrade-Insecure-Requests").utf8().data());
     }
 
     KURL secureURL;
@@ -110,7 +110,7 @@ protected:
     // as the ResourceFetcher and Document live due to indirect usage.
     RefPtr<DocumentLoader> documentLoader;
     RefPtrWillBePersistent<Document> document;
-    FrameFetchContext* fetchContext;
+    FetchContext* fetchContext;
 };
 
 TEST_F(FrameFetchContextUpgradeTest, UpgradeInsecureResourceRequests)
@@ -132,9 +132,10 @@ TEST_F(FrameFetchContextUpgradeTest, UpgradeInsecureResourceRequests)
         { "ftp://example.test:1212/image.png", "ftp://example.test:1212/image.png" },
     };
 
+    FrameFetchContext::provideDocumentToContext(*fetchContext, document.get());
     document->setInsecureRequestsPolicy(SecurityContext::InsecureRequestsUpgrade);
 
-    for (auto test : tests) {
+    for (const auto& test : tests) {
         document->insecureNavigationsToUpgrade()->clear();
 
         // We always upgrade for FrameTypeNone and FrameTypeNested.
@@ -158,6 +159,7 @@ TEST_F(FrameFetchContextUpgradeTest, UpgradeInsecureResourceRequests)
 
 TEST_F(FrameFetchContextUpgradeTest, DoNotUpgradeInsecureResourceRequests)
 {
+    FrameFetchContext::provideDocumentToContext(*fetchContext, document.get());
     document->setSecurityOrigin(secureOrigin);
     document->setInsecureRequestsPolicy(SecurityContext::InsecureRequestsDoNotUpgrade);
 
@@ -174,7 +176,7 @@ TEST_F(FrameFetchContextUpgradeTest, DoNotUpgradeInsecureResourceRequests)
     expectUpgrade("ftp://example.test:1212/image.png", "ftp://example.test:1212/image.png");
 }
 
-TEST_F(FrameFetchContextUpgradeTest, SendPreferHeader)
+TEST_F(FrameFetchContextUpgradeTest, SendHTTPSHeader)
 {
     struct TestCase {
         const char* toRequest;
@@ -191,7 +193,20 @@ TEST_F(FrameFetchContextUpgradeTest, SendPreferHeader)
         { "https://example.test/page.html", WebURLRequest::FrameTypeTopLevel, true }
     };
 
-    for (auto test : tests) {
+    // This should work correctly both when the FrameFetchContext has a Document, and
+    // when it doesn't (e.g. during main frame navigations), so run through the tests
+    // both before and after providing a document to the context.
+    for (const auto& test : tests) {
+        document->setInsecureRequestsPolicy(SecurityContext::InsecureRequestsDoNotUpgrade);
+        expectHTTPSHeader(test.toRequest, test.frameType, test.shouldPrefer);
+
+        document->setInsecureRequestsPolicy(SecurityContext::InsecureRequestsUpgrade);
+        expectHTTPSHeader(test.toRequest, test.frameType, test.shouldPrefer);
+    }
+
+    FrameFetchContext::provideDocumentToContext(*fetchContext, document.get());
+
+    for (const auto& test : tests) {
         document->setInsecureRequestsPolicy(SecurityContext::InsecureRequestsDoNotUpgrade);
         expectHTTPSHeader(test.toRequest, test.frameType, test.shouldPrefer);
 
@@ -211,8 +226,8 @@ protected:
         dummyPageHolder->page().setDeviceScaleFactor(1.0);
         documentLoader = DocumentLoader::create(&dummyPageHolder->frame(), ResourceRequest("http://www.example.com"), SubstituteData());
         document = toHTMLDocument(&dummyPageHolder->document());
-        fetchContext = &static_cast<FrameFetchContext&>(documentLoader->fetcher()->context());
-        fetchContext->setDocument(document.get());
+        fetchContext = &documentLoader->fetcher()->context();
+        FrameFetchContext::provideDocumentToContext(*fetchContext, document.get());
     }
 
     void expectHeader(const char* input, const char* headerName, bool isPresent, const char* headerValue)
@@ -230,13 +245,15 @@ protected:
     // as the ResourceFetcher and Document live due to indirect usage.
     RefPtr<DocumentLoader> documentLoader;
     RefPtrWillBePersistent<Document> document;
-    FrameFetchContext* fetchContext;
+    FetchContext* fetchContext;
 };
 
 TEST_F(FrameFetchContextHintsTest, MonitorDPRHints)
 {
     expectHeader("http://www.example.com/1.gif", "DPR", false, "");
-    dummyPageHolder->frame().setShouldSendDPRHint();
+    ClientHintsPreferences preferences;
+    preferences.setShouldSendDPR(true);
+    document->setClientHintsPreferences(preferences);
     expectHeader("http://www.example.com/1.gif", "DPR", true, "1");
     dummyPageHolder->page().setDeviceScaleFactor(2.5);
     expectHeader("http://www.example.com/1.gif", "DPR", true, "2.5");
@@ -246,7 +263,9 @@ TEST_F(FrameFetchContextHintsTest, MonitorDPRHints)
 TEST_F(FrameFetchContextHintsTest, MonitorRWHints)
 {
     expectHeader("http://www.example.com/1.gif", "RW", false, "");
-    dummyPageHolder->frame().setShouldSendRWHint();
+    ClientHintsPreferences preferences;
+    preferences.setShouldSendRW(true);
+    document->setClientHintsPreferences(preferences);
     expectHeader("http://www.example.com/1.gif", "RW", true, "500");
     dummyPageHolder->frameView().setLayoutSizeFixedToFrameSize(false);
     dummyPageHolder->frameView().setLayoutSize(IntSize(800, 800));
@@ -259,8 +278,10 @@ TEST_F(FrameFetchContextHintsTest, MonitorBothHints)
     expectHeader("http://www.example.com/1.gif", "DPR", false, "");
     expectHeader("http://www.example.com/1.gif", "RW", false, "");
 
-    dummyPageHolder->frame().setShouldSendDPRHint();
-    dummyPageHolder->frame().setShouldSendRWHint();
+    ClientHintsPreferences preferences;
+    preferences.setShouldSendDPR(true);
+    preferences.setShouldSendRW(true);
+    document->setClientHintsPreferences(preferences);
     expectHeader("http://www.example.com/1.gif", "DPR", true, "1");
     expectHeader("http://www.example.com/1.gif", "RW", true, "500");
 }

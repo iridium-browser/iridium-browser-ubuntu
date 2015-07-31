@@ -309,6 +309,25 @@ class GCMClient {
 
   // Updates the timer used by the HeartbeatManager for sending heartbeats.
   virtual void UpdateHeartbeatTimer(scoped_ptr<base::Timer> timer) = 0;
+
+  // Adds the Instance ID data for a specific app to the persistent store.
+  virtual void AddInstanceIDData(const std::string& app_id,
+                                 const std::string& instance_id_data) = 0;
+
+  // Removes the Instance ID data for a specific app from the persistent store.
+  virtual void RemoveInstanceIDData(const std::string& app_id) = 0;
+
+  // Retrieves the Instance ID data for a specific app from the persistent
+  // store.
+  virtual std::string GetInstanceIDData(const std::string& app_id) = 0;
+
+  // Gets and sets custom heartbeat interval for the MCS connection.
+  // |scope| is used to identify the component that requests a custom interval
+  // to be set, and allows that component to later revoke the setting. It should
+  // be unique.
+  virtual void AddHeartbeatInterval(const std::string& scope,
+                                    int interval_ms) = 0;
+  virtual void RemoveHeartbeatInterval(const std::string& scope) = 0;
 };
 
 }  // namespace gcm

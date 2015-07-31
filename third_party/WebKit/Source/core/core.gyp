@@ -116,7 +116,6 @@
             'inspector/InspectorInstrumentation.idl',
           ],
           'outputs': [
-            '<(blink_core_output_dir)/InspectorCanvasInstrumentationInl.h',
             '<(blink_core_output_dir)/InspectorConsoleInstrumentationInl.h',
             '<(blink_core_output_dir)/InspectorInstrumentationInl.h',
             '<(blink_core_output_dir)/InspectorOverridesInl.h',
@@ -577,6 +576,12 @@
             ['include', '<(DEPTH)/third_party/WebKit/Source/build/win/Precompile.cpp'],
           ],
         }],
+        ['use_default_render_theme==0 and OS != "android"', {
+          'sources!': [
+            'paint/ThemePainterDefault.cpp',
+            'paint/ThemePainterDefault.h',
+          ],
+        }],
       ],
       # Disable c4267 warnings until we fix size_t to int truncations.
       'msvs_disabled_warnings': [ 4267, 4334, ],
@@ -760,6 +765,8 @@
               'sources!': [
                 'layout/LayoutThemeDefault.cpp',
                 'layout/LayoutThemeDefault.h',
+                'paint/ThemePainterDefault.cpp',
+                'paint/ThemePainterDefault.h',
               ],
             }],
             ['OS=="win"', {
@@ -770,6 +777,17 @@
               # XPathGrammar.cpp and CSSGrammar.cpp.
               # Disable c4267 warnings until we fix size_t to int truncations.
               'msvs_disabled_warnings': [ 4065, 4267, 4305, 4334, 4701, 4702 ],
+              # Disable incremental link when building debug binary to avoid
+              # "LNK1210: exceeded internal ILK size limit;".
+              'configurations': {
+                'Debug_Base': {
+                  'msvs_settings': {
+                    'VCLinkerTool': {
+                      'LinkIncremental': '1',
+                    },
+                  },
+                },
+              },
             }, {
               'sources!': [
                 'layout/LayoutThemeFontProviderWin.cpp',
@@ -779,6 +797,15 @@
               'libraries': [
                 '-lm -lstdc++',
               ],
+            }],
+            # Enable bigobj to fix fatal error C1128: number of sections
+            # exceeded object file format limit while compiling Document.cpp.
+            ['OS=="win" and target_arch=="x64"', {
+              'msvs_settings': {
+                'VCCLCompilerTool': {
+                  'AdditionalOptions': ['/bigobj'],
+                },
+              },
             }],
             ['OS=="win" and chromium_win_pch==1', {
               'sources/': [

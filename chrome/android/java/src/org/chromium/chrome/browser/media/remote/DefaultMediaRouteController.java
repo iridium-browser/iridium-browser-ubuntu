@@ -27,8 +27,8 @@ import com.google.android.gms.cast.CastMediaControlIntent;
 import org.chromium.base.ApplicationState;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.CommandLine;
-import org.chromium.chrome.ChromeSwitches;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.media.remote.RemoteVideoInfo.PlayerState;
 
 import java.net.URI;
@@ -158,6 +158,8 @@ public class DefaultMediaRouteController extends AbstractMediaRouteController {
                     release();
                 }
             };
+
+    private String mUserAgent;
 
     /**
      * Default and only constructor.
@@ -1013,10 +1015,11 @@ public class DefaultMediaRouteController extends AbstractMediaRouteController {
     }
 
     @Override
-    public void setDataSource(Uri uri, String cookies) {
+    public void setDataSource(Uri uri, String cookies, String userAgent) {
         if (mDebug) Log.d(TAG, "setDataSource called, uri = " + uri);
         mLocalVideoUri = uri;
         mLocalVideoCookies = cookies;
+        mUserAgent = userAgent;
     }
 
     @Override
@@ -1031,7 +1034,7 @@ public class DefaultMediaRouteController extends AbstractMediaRouteController {
 
         // Create a new MediaUrlResolver since the previous one may still be running despite the
         // cancel() call.
-        mMediaUrlResolver = new MediaUrlResolver(getContext(), mMediaUrlResolverDelegate);
+        mMediaUrlResolver = new MediaUrlResolver(mMediaUrlResolverDelegate, mUserAgent);
 
         mStartPositionMillis = startPositionMillis;
         mMediaUrlResolver.execute();

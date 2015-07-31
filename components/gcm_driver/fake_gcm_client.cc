@@ -137,6 +137,24 @@ void FakeGCMClient::SetLastTokenFetchTime(const base::Time& time) {
 void FakeGCMClient::UpdateHeartbeatTimer(scoped_ptr<base::Timer> timer) {
 }
 
+void FakeGCMClient::AddInstanceIDData(const std::string& app_id,
+                                      const std::string& instance_id_data) {
+}
+
+void FakeGCMClient::RemoveInstanceIDData(const std::string& app_id) {
+}
+
+std::string FakeGCMClient::GetInstanceIDData(const std::string& app_id) {
+  return std::string();
+}
+
+void FakeGCMClient::AddHeartbeatInterval(const std::string& scope,
+                                         int interval_ms) {
+}
+
+void FakeGCMClient::RemoveHeartbeatInterval(const std::string& scope) {
+}
+
 void FakeGCMClient::PerformDelayedStart() {
   DCHECK(ui_thread_->RunsTasksOnCurrentThread());
 

@@ -25,8 +25,8 @@ body.uber-frame > .page.big-topbar-page {
 }
 
 #spinner {
-  position: relative;
-  top: 3px;
+  -webkit-margin-end: 5px;
+  vertical-align: bottom;
 }
 
 #notification-bar {
@@ -415,6 +415,11 @@ html[dir='rtl'] .site-domain {
   -webkit-padding-end: 6px;
   -webkit-padding-start: 6px;
   border-radius: 2px;
+}
+
+.entry-box > div,
+.site-domain-row > div {
+  min-width: 0;
 }
 
 .active :-webkit-any(.entry-box, .site-domain-row) {

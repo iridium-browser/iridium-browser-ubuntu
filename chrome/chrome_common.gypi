@@ -79,6 +79,8 @@
       'common/media/webrtc_logging_message_data.h',
       'common/media/webrtc_logging_messages.h',
       'common/media_galleries/metadata_types.h',
+      'common/metrics/version_utils.cc',
+      'common/metrics/version_utils.h',
       'common/multi_process_lock.h',
       'common/multi_process_lock_linux.cc',
       'common/multi_process_lock_mac.cc',
@@ -99,6 +101,8 @@
       'common/search_types.h',
       'common/search_urls.cc',
       'common/search_urls.h',
+      'common/secure_origin_whitelist.cc',
+      'common/secure_origin_whitelist.h',
       'common/spellcheck_common.cc',
       'common/spellcheck_common.h',
       'common/spellcheck_marker.h',
@@ -127,10 +131,6 @@
       'common/extensions/api/commands/commands_handler.h',
       'common/extensions/api/extension_action/action_info.cc',
       'common/extensions/api/extension_action/action_info.h',
-      'common/extensions/api/file_browser_handlers/file_browser_handler.cc',
-      'common/extensions/api/file_browser_handlers/file_browser_handler.h',
-      'common/extensions/api/input_ime/input_components_handler.cc',
-      'common/extensions/api/input_ime/input_components_handler.h',
       'common/extensions/api/notifications/notification_style.cc',
       'common/extensions/api/notifications/notification_style.h',
       'common/extensions/api/omnibox/omnibox_handler.cc',
@@ -143,8 +143,6 @@
       'common/extensions/api/spellcheck/spellcheck_handler.h',
       'common/extensions/api/storage/storage_schema_manifest_handler.cc',
       'common/extensions/api/storage/storage_schema_manifest_handler.h',
-      'common/extensions/api/supervised_user_private/supervised_user_handler.cc',
-      'common/extensions/api/supervised_user_private/supervised_user_handler.h',
       'common/extensions/api/system_indicator/system_indicator_handler.cc',
       'common/extensions/api/system_indicator/system_indicator_handler.h',
       'common/extensions/api/url_handlers/url_handlers_parser.cc',
@@ -187,6 +185,8 @@
       'common/extensions/manifest_handlers/copresence_manifest.h',
       'common/extensions/manifest_handlers/extension_action_handler.cc',
       'common/extensions/manifest_handlers/extension_action_handler.h',
+      'common/extensions/manifest_handlers/linked_app_icons.cc',
+      'common/extensions/manifest_handlers/linked_app_icons.h',
       'common/extensions/manifest_handlers/minimum_chrome_version_checker.cc',
       'common/extensions/manifest_handlers/minimum_chrome_version_checker.h',
       'common/extensions/manifest_handlers/settings_overrides_handler.cc',
@@ -203,6 +203,14 @@
       'common/extensions/permissions/chrome_permission_message_rules.h',
       'common/extensions/sync_helper.cc',
       'common/extensions/sync_helper.h',
+    ],
+    'chrome_common_extensions_chromeos_sources': [
+      'common/extensions/api/file_browser_handlers/file_browser_handler.cc',
+      'common/extensions/api/file_browser_handlers/file_browser_handler.h',
+      'common/extensions/api/file_system_provider_capabilities/file_system_provider_capabilities_handler.cc',
+      'common/extensions/api/file_system_provider_capabilities/file_system_provider_capabilities_handler.h',
+      'common/extensions/api/input_ime/input_components_handler.cc',
+      'common/extensions/api/input_ime/input_components_handler.h',
     ],
     'chrome_common_full_safe_browsing_sources': [
       'common/safe_browsing/binary_feature_extractor.cc',
@@ -363,6 +371,14 @@
           'export_dependent_settings': [
             '<(DEPTH)/chrome/common/extensions/api/api.gyp:chrome_api',
           ],
+          'conditions': [
+            ['chromeos==1', {
+              'sources': [ '<@(chrome_common_extensions_chromeos_sources)' ],
+            }],
+          ],
+        }],
+        ['enable_extensions==1 and chromeos==1', {
+          'sources': [ '<@(chrome_common_extensions_chromeos_sources)' ],
         }],
         ['OS=="win" or OS=="mac"', {
           'sources': [ '<@(chrome_common_win_mac_sources)' ],
@@ -523,11 +539,7 @@
           ],
         }],
         ['safe_browsing==1', {
-          'defines': [ 'FULL_SAFE_BROWSING' ],
           'sources': [ '<@(chrome_common_full_safe_browsing_sources)', ],
-        }],
-        ['safe_browsing==2', {
-          'defines': [ 'MOBILE_SAFE_BROWSING' ],
         }],
       ],
       'target_conditions': [
@@ -563,20 +575,8 @@
             'version_py_path': '<(DEPTH)/build/util/version.py',
             'version_path': 'VERSION',
             'template_input_path': 'common/chrome_version_info_values.h.version',
+            'branding_path': 'app/theme/<(branding_path_component)/BRANDING',
           },
-          'conditions': [
-            [ 'branding == "Chrome"', {
-              'variables': {
-                  'branding_path':
-                    'app/theme/google_chrome/BRANDING',
-              },
-            }, { # else branding!="Chrome"
-              'variables': {
-                  'branding_path':
-                    'app/theme/chromium/BRANDING',
-              },
-            }],
-          ],
           'inputs': [
             '<(template_input_path)',
             '<(version_path)',
@@ -634,42 +634,30 @@
         }, {  # OS == ios
           'sources!': [
             'common/net/net_resource_provider.cc',
+          ],
+        }],
+        ['OS == "android" or OS == "ios"', {
+          'sources!': [
             'common/net/x509_certificate_model.cc',
           ],
         }],
-        ['os_posix == 1 and OS != "mac" and OS != "ios" and OS != "android"', {
-            'dependencies': [
-              '../build/linux/system.gyp:ssl',
-            ],
-          },
-        ],
-        ['os_posix != 1 or OS == "mac" or OS == "ios"', {
-            'sources!': [
-              'common/net/x509_certificate_model_nss.cc',
-              'common/net/x509_certificate_model_openssl.cc',
-            ],
-          },
-        ],
-        ['OS == "android"', {
-            'dependencies': [
-              '../third_party/boringssl/boringssl.gyp:boringssl',
-            ],
-            'sources!': [
-              'common/net/x509_certificate_model.cc',
-              'common/net/x509_certificate_model_openssl.cc',
-            ],
-        }],
-        ['use_openssl==1', {
-            'sources!': [
-              'common/net/x509_certificate_model_nss.cc',
-            ],
+        ['use_openssl_certs == 1 and OS != "android"', {
             'dependencies': [
               '<(DEPTH)/third_party/boringssl/boringssl.gyp:boringssl',
             ],
-          },
-          {  # else !use_openssl: remove the unneeded files
+        }, {
             'sources!': [
               'common/net/x509_certificate_model_openssl.cc',
+            ],
+          },
+        ],
+        ['use_nss_certs == 1', {
+            'dependencies': [
+              '../build/linux/system.gyp:ssl',
+            ],
+        }, {
+            'sources!': [
+              'common/net/x509_certificate_model_nss.cc',
             ],
           },
         ],

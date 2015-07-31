@@ -436,14 +436,10 @@ CFX_WideString PDF_DecodeText(FX_LPCBYTE src_data, FX_DWORD src_len, CFX_CharMap
     }
     return result;
 }
-CFX_WideString PDF_DecodeText(const CFX_ByteString& bstr, CFX_CharMap* pCharMap)
-{
-    return PDF_DecodeText((FX_LPCBYTE)bstr.c_str(), bstr.GetLength(), pCharMap);
-}
 CFX_ByteString PDF_EncodeText(FX_LPCWSTR pString, int len, CFX_CharMap* pCharMap)
 {
     if (len == -1) {
-        len = (FX_STRSIZE)FXSYS_wcslen(pString);
+        len = FXSYS_wcslen(pString);
     }
     CFX_ByteString result;
     if (pCharMap == NULL) {

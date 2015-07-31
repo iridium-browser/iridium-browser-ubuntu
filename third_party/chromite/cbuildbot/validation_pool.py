@@ -14,7 +14,6 @@ import contextlib
 import cPickle
 import functools
 import httplib
-import logging
 import os
 import random
 import sys
@@ -28,6 +27,7 @@ from chromite.cbuildbot import tree_status
 from chromite.cbuildbot import triage_lib
 from chromite.lib import clactions
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import gerrit
 from chromite.lib import git
 from chromite.lib import gob_util
@@ -526,8 +526,8 @@ class PatchSeries(object):
     Args:
       changes: A list of cros_patch.GitRepoPatch instances to generate
         transactions for.
-      max_txn_length: The maximum length of any given transaction. Optional.
-        By default, do not limit the length of transactions.
+      max_txn_length: The maximum length of any given transaction.  By default,
+        do not limit the length of transactions.
       merge_projects: If set, put all changes to a given project in the same
         transaction.
 
@@ -632,13 +632,6 @@ class PatchSeries(object):
         self._AddChangeToPlanWithDeps(dep, plan, gerrit_deps_seen, cq_deps_seen,
                                       limit_to=limit_to, include_cq_deps=False)
 
-    # If there are cyclic dependencies, we might have already applied this
-    # patch as part of dependency resolution. If not, apply this patch.
-    if change not in plan:
-      plan.append(change)
-
-    # Process CQ deps last, so as to avoid circular dependencies between
-    # Gerrit dependencies and CQ dependencies.
     if include_cq_deps and change not in cq_deps_seen:
       cq_deps = self._LookupUncommittedChanges(
           cq_deps, limit_to=limit_to)
@@ -649,6 +642,11 @@ class PatchSeries(object):
         if dep not in cq_deps_seen:
           self._AddChangeToPlanWithDeps(dep, plan, gerrit_deps_seen,
                                         cq_deps_seen, limit_to=limit_to)
+
+    # If there are cyclic dependencies, we might have already applied this
+    # patch as part of dependency resolution. If not, apply this patch.
+    if change not in plan:
+      plan.append(change)
 
   @_PatchWrapException
   def GetDepChangesForChange(self, change):
@@ -743,16 +741,25 @@ class PatchSeries(object):
     # 'change' object, so make sure we grab all of that information.
     with parallel.Manager() as manager:
       fetched_changes = manager.dict()
-      def FetchChangesForRepo(repo):
-        for change in by_repo[repo]:
-          original_id = change.id
-          change.Fetch(repo)
-          fetched_changes[original_id] = change
-      parallel.RunTasksInProcessPool(FetchChangesForRepo,
-                                     [[repo] for repo in by_repo])
+      fetch_repo = functools.partial(
+          self._FetchChangesForRepo, fetched_changes, by_repo)
+      parallel.RunTasksInProcessPool(fetch_repo, [[repo] for repo in by_repo])
 
-      # Return the list of fetched changes in the order they were requested.
       return [fetched_changes[c.id] for c in changes_to_fetch]
+
+  def _FetchChangesForRepo(self, fetched_changes, by_repo, repo):
+    """Fetch the changes for a given `repo`.
+
+    Args:
+      fetched_changes: A dict from change ids to changes which is updated by
+        this method.
+      by_repo: A mapping from repositories to changes.
+      repo: The repository we should fetch the changes for.
+    """
+    for change in by_repo[repo]:
+      original_id = change.id
+      change.Fetch(repo)
+      fetched_changes[original_id] = change
 
   @_ManifestDecorator
   def Apply(self, changes, frozen=True, honor_ordering=False,
@@ -833,8 +840,9 @@ class PatchSeries(object):
       # over shorter transactions.
       position = dict((change, idx) for idx, change in enumerate(changes))
       def mk_key(data):
-        ids = [x.id for x in data[1]]
-        return -len(ids), position[data[0]]
+        change, plan = data
+        ids = [x.id for x in plan]
+        return -len(ids), position[change]
       resolved.sort(key=mk_key)
 
     for inducing_change, transaction_changes in resolved:
@@ -899,8 +907,6 @@ class PatchSeries(object):
 
     try:
       yield
-      # Reaching here means it was applied cleanly, thus return.
-      return
     except Exception:
       logging.info("Rewinding transaction: failed changes: %s .",
                    ', '.join(map(str, commits)), exc_info=True)
@@ -1066,9 +1072,9 @@ class ValidationPool(object):
       pre_cq_trybot: If set to True, this is a Pre-CQ trybot. (Note: The Pre-CQ
         launcher is NOT considered a Pre-CQ trybot.)
       tree_was_open: Whether the tree was open when the pool was created.
-      builder_run: Optional BuilderRun instance used to fetch cidb handle and
-        metadata instance. Please note due to the pickling logic, this MUST be
-        the last kwarg listed.
+      builder_run: BuilderRun instance used to fetch cidb handle and metadata
+        instance. Please note due to the pickling logic, this MUST be the last
+        kwarg listed.
     """
 
     self.build_root = build_root
@@ -1250,8 +1256,7 @@ class ValidationPool(object):
       check_tree_open: If True, only return when the tree is open.
       change_filter: If set, use change_filter(pool, changes,
         non_manifest_changes) to filter out unwanted patches.
-      builder_run: Optional BuilderRun instance used to record CL actions to
-        metadata and cidb.
+      builder_run: instance used to record CL actions to metadata and cidb.
 
     Returns:
       ValidationPool object.
@@ -1406,8 +1411,8 @@ class ValidationPool(object):
       is_master: Boolean that indicates whether this is a pool for a master.
         config or not.
       dryrun: Don't submit anything to gerrit.
-      builder_run: Optional BuilderRun instance used to record CL actions to
-        metadata and cidb.
+      builder_run: BuilderRun instance used to record CL actions to metadata and
+        cidb.
 
     Returns:
       ValidationPool object.
@@ -1592,7 +1597,7 @@ class ValidationPool(object):
             'patches.' % (e,)
         )
         links = cros_patch.GetChangesAsString(self.changes)
-        cros_build_lib.Error('%s\nAffected Patches are: %s', msg, links)
+        logging.error('%s\nAffected Patches are: %s', msg, links)
         errors = [InternalCQError(patch, msg) for patch in self.changes]
         self._HandleApplyFailure(errors)
         raise
@@ -1667,9 +1672,8 @@ class ValidationPool(object):
 
     Args:
       filename: path of file to load from.
-      builder_run: Optional BuilderRun instance to use in unpickled
-        validation pool, used for fetching cidb handle for access to
-        metadata.
+      builder_run: BuilderRun instance to use in unpickled validation pool, used
+        for fetching cidb handle for access to metadata.
     """
     with open(filename, 'rb') as p_file:
       pool = cPickle.load(p_file)
@@ -1685,7 +1689,8 @@ class ValidationPool(object):
   # Note: All submit code, all gerrit code, and basically everything other
   # than patch resolution/applying needs to use .change_id from patch objects.
   # Basically all code from this point forward.
-  def _SubmitChangeWithDeps(self, patch_series, change, errors, limit_to):
+  def _SubmitChangeWithDeps(self, patch_series, change, errors, limit_to,
+                            reason=None):
     """Submit |change| and its dependencies.
 
     If you call this function multiple times with the same PatchSeries, each
@@ -1698,6 +1703,7 @@ class ValidationPool(object):
         encountered errors, and map them to the associated exception object.
       limit_to: The list of patches that were approved by this CQ run. We will
         only consider submitting patches that are in this list.
+      reason: string reason for submission to be recorded in cidb.
 
     Returns:
       A copy of the errors object. If new errors have occurred while submitting
@@ -1712,34 +1718,45 @@ class ValidationPool(object):
       errors[change] = e
       return errors
 
-    error_stack, submitted = [], []
+    submitted = []
+    dep_error = None
     for dep_change in plan:
       # Has this change failed to submit before?
       dep_error = errors.get(dep_change)
-      if dep_error is None and error_stack:
-        # One of the dependencies failed to submit. Report an error.
-        dep_error = cros_patch.DependencyError(dep_change, error_stack[-1])
+      if dep_error is not None:
+        break
 
-      # If there were no errors, submit the patch.
-      if dep_error is None:
+    if dep_error is None:
+      for dep_change in plan:
         try:
-          if self._SubmitChange(dep_change) or self.dryrun:
+          success = self._SubmitChange(dep_change,
+                                       patch_series.manifest,
+                                       reason=reason)
+          if success or self.dryrun:
             submitted.append(dep_change)
-          else:
-            msg = self.INCONSISTENT_SUBMIT_MSG
-            dep_error = PatchFailedToSubmit(dep_change, msg)
         except (gob_util.GOBError, gerrit.GerritException) as e:
           if getattr(e, 'http_status', None) == httplib.CONFLICT:
-            dep_error = PatchConflict(dep_change)
+            if e.message.rstrip().endswith('change is merged'):
+              submitted.append(dep_change)
+            else:
+              dep_error = PatchConflict(dep_change)
           else:
             dep_error = PatchFailedToSubmit(dep_change, str(e))
-          logging.error('%s', dep_error)
 
-      # Add any error we saw to the stack.
-      if dep_error is not None:
-        logging.info('%s', dep_error)
-        errors[dep_change] = dep_error
-        error_stack.append(dep_error)
+        if dep_change not in submitted:
+          if dep_error is None:
+            msg = self.INCONSISTENT_SUBMIT_MSG
+            dep_error = PatchFailedToSubmit(dep_change, msg)
+
+          # Log any errors we saw.
+          logging.error('%s', dep_error)
+          errors[dep_change] = dep_error
+          break
+
+    if (dep_error is not None and change not in errors and
+        change not in submitted):
+      # One of the dependencies failed to submit. Report an error.
+      errors[change] = cros_patch.DependencyError(change, dep_error)
 
     # Track submitted patches so that we don't submit them again.
     patch_series.InjectCommittedPatches(submitted)
@@ -1759,10 +1776,12 @@ class ValidationPool(object):
           error = PatchSubmittedWithoutDeps(submitted_change, dep_error)
           self._HandleIncorrectSubmission(error)
           logging.error('%s was erroneously submitted.', submitted_change)
+          break
 
     return errors
 
-  def SubmitChanges(self, changes, check_tree_open=True, throttled_ok=True):
+  def SubmitChanges(self, changes, check_tree_open=True, throttled_ok=True,
+                    reason=None):
     """Submits the given changes to Gerrit.
 
     Args:
@@ -1770,6 +1789,7 @@ class ValidationPool(object):
       check_tree_open: Whether to check that the tree is open before submitting
         changes. If this is False, TreeIsClosedException will never be raised.
       throttled_ok: if |check_tree_open|, treat a throttled tree as open
+      reason: string reason for submission to be recorded in cidb.
 
     Returns:
       (submitted, errors) where submitted is a set of changes that were
@@ -1815,7 +1835,7 @@ class ValidationPool(object):
       def _SubmitPlan(*plan):
         for change in plan:
           p_errors.update(self._SubmitChangeWithDeps(
-              patch_series, change, dict(p_errors), plan))
+              patch_series, change, dict(p_errors), plan, reason=reason))
       parallel.RunTasksInProcessPool(_SubmitPlan, plans, processes=4)
 
       for patch, error in p_errors.items():
@@ -1908,8 +1928,37 @@ class ValidationPool(object):
     """
     return gerrit.GetGerritPatchInfoWithPatchQueries(changes)
 
-  def _SubmitChange(self, change):
-    """Submits patch using Gerrit Review."""
+  def _SubmitChange(self, change, manifest, reason=None):
+    """Submits patch using Git or Gerrit.
+
+    Changes in the manifest are pushed using git for performance and
+    reliability.  Non-manifest changes should be pushed with Gerrit because we
+    don't have a local checkout.
+
+    Args:
+      change: GerritPatch to submit.
+      manifest: The manifest associated with the changes.
+      reason: string reason to be recorded in cidb.
+    """
+    logging.info('Change %s will be submitted', change)
+    candidates = ()
+    if manifest:
+      candidates = manifest.FindCheckouts(
+          change.project, change.tracking_branch, only_patchable=True)
+
+    if not candidates:
+      return self._SubmitChangeUsingGerrit(change, reason=reason)
+    else:
+      checkout = candidates[0].GetPath()
+      return self._SubmitChangeUsingGit(change, checkout, reason=reason)
+
+  def _SubmitChangeUsingGerrit(self, change, reason=None):
+    """Submits patch using Gerrit Review.
+
+    Args:
+      change: GerritPatch to submit.
+      reason: string reason to be recorded in cidb.
+    """
     logging.info('Change %s will be submitted', change)
     was_change_submitted = False
     helper = self._helper_pool.ForChange(change)
@@ -1947,7 +1996,7 @@ class ValidationPool(object):
                      ' will eventually transition to "MERGED".',
                      change.gerrit_number_str)
       else:
-        logging.error('Most likely gerrit was unable to merge change %s.',
+        logging.error('Gerrit likely was unable to merge change %s.',
                       change.gerrit_number_str)
 
     if self._run:
@@ -1959,10 +2008,76 @@ class ValidationPool(object):
       timestamp = int(time.time())
       metadata.RecordCLAction(change, action, timestamp)
       _, db = self._run.GetCIDBHandle()
+      # NOTE(akeshet): The same |reason| will be recorded, regardless of whether
+      # the change was submitted successfully or unsuccessfully. This is
+      # probably what we want, because it gives us a way to determine why we
+      # tried to submit changes that failed to submit.
       if db:
-        self._InsertCLActionToDatabase(change, action)
+        self._InsertCLActionToDatabase(change, action, reason)
 
     return was_change_submitted
+
+  def _SubmitChangeUsingGit(self, change, checkout, reason=None):
+    """Submits a local patch using Git.
+
+    Args:
+      change: GerritPatch to submit.
+      checkout: A path to the checkout of the repo containing the change.
+      reason: string reason to be recorded in cidb.
+    """
+    helper = self._helper_pool.ForChange(change)
+    push_success = helper.SubmitChangeUsingGit(
+        change, checkout, dryrun=self.dryrun)
+    updated_change = helper.QuerySingleRecord(change.gerrit_number)
+
+    # If we succeeded in pushing but the change is 'NEW' give gerrit some time
+    # to resolve that to 'MERGED' or fail outright.
+    # TODO(phobbs): Use a helper process to check that Gerrit marked the change
+    # as merged asynchronously.
+    if push_success and updated_change.status == 'NEW':
+      def _Query():
+        return helper.QuerySingleRecord(change.gerrit_number)
+      def _Retry(value):
+        return value and value.status == 'NEW'
+
+      try:
+        updated_change = timeout_util.WaitForSuccess(
+            _Retry, _Query, timeout=SUBMITTED_WAIT_TIMEOUT, period=1)
+      except timeout_util.TimeoutError:
+        # The change really is stuck on submitted, not merged, then.
+        logging.warning('Timed out waiting for gerrit to notice that we'
+                        ' submitted change %s, but status is still "%s".',
+                        change.gerrit_number_str, updated_change.status)
+        helper.SetReview(change, msg='This change was pushed, but we timed out'
+                         'waiting for Gerrit to notice that it was submitted.')
+
+    if push_success and not updated_change.status == 'MERGED':
+      logging.warning(
+          'Change %s was pushed without errors, but gerrit is'
+          ' reporting it with status "%s" (expected "MERGED").',
+          change.gerrit_number_str, updated_change.status)
+      if updated_change.status == 'SUBMITTED':
+        # So far we have never seen a SUBMITTED CL that did not eventually
+        # transition to MERGED.  If it is stuck on SUBMITTED treat as MERGED.
+        logging.info('Proceeding now with the assumption that change %s'
+                     ' will eventually transition to "MERGED".',
+                     change.gerrit_number_str)
+
+    if self._run:
+      metadata = self._run.attrs.metadata
+      action = (constants.CL_ACTION_SUBMITTED if push_success
+                else constants.CL_ACTION_SUBMIT_FAILED)
+      timestamp = int(time.time())
+      metadata.RecordCLAction(change, action, timestamp)
+      _, db = self._run.GetCIDBHandle()
+      # NOTE(akeshet): The same |reason| will be recorded, regardless of whether
+      # the change was submitted successfully or unsuccessfully. This is
+      # probably what we want, because it gives us a way to determine why we
+      # tried to submit changes that failed to submit.
+      if db:
+        self._InsertCLActionToDatabase(change, action, reason)
+
+    return push_success
 
   def RemoveReady(self, change, reason=None):
     """Remove the commit ready and trybot ready bits for |change|."""
@@ -1983,7 +2098,7 @@ class ValidationPool(object):
 
     Args:
       change: A GerritPatch or GerritPatchTuple object.
-      reason: Optional reason field for the CLAction that will be inserted.
+      reason: reason field for the CLAction that will be inserted.
     """
     self._InsertCLActionToDatabase(change, constants.CL_ACTION_FORGIVEN, reason)
 
@@ -1993,7 +2108,7 @@ class ValidationPool(object):
     Args:
       change: A GerritPatch or GerritPatchTuple object.
       action: The action taken, should be one of constants.CL_ACTIONS
-      reason: Optional reason field for the CLAction that will be inserted.
+      reason: reason field for the CLAction that will be inserted.
     """
     build_id, db = self._run.GetCIDBHandle()
     if db:
@@ -2001,26 +2116,29 @@ class ValidationPool(object):
           build_id,
           [clactions.CLAction.FromGerritPatchAndAction(change, action, reason)])
 
-  def SubmitNonManifestChanges(self, check_tree_open=True):
+  def SubmitNonManifestChanges(self, check_tree_open=True, reason=None):
     """Commits changes to Gerrit from Pool that aren't part of the checkout.
 
     Args:
       check_tree_open: Whether to check that the tree is open before submitting
         changes. If this is False, TreeIsClosedException will never be raised.
+      reason: string reason for submission to be recorded in cidb.
 
     Raises:
       TreeIsClosedException: if the tree is closed.
     """
     self.SubmitChanges(self.non_manifest_changes,
-                       check_tree_open=check_tree_open)
+                       check_tree_open=check_tree_open,
+                       reason=reason)
 
-  def SubmitPool(self, check_tree_open=True, throttled_ok=True):
+  def SubmitPool(self, check_tree_open=True, throttled_ok=True, reason=None):
     """Commits changes to Gerrit from Pool.  This is only called by a master.
 
     Args:
       check_tree_open: Whether to check that the tree is open before submitting
         changes. If this is False, TreeIsClosedException will never be raised.
       throttled_ok: if |check_tree_open|, treat a throttled tree as open
+      reason: string reason for submission to be recorded in cidb.
 
     Raises:
       TreeIsClosedException: if the tree is closed.
@@ -2034,7 +2152,8 @@ class ValidationPool(object):
     # to minimize wasting the developers time.
     submitted, errors = self.SubmitChanges(self.changes,
                                            check_tree_open=check_tree_open,
-                                           throttled_ok=throttled_ok)
+                                           throttled_ok=throttled_ok,
+                                           reason=reason)
     if errors:
       raise FailedToSubmitAllChangesException(errors, len(submitted))
 
@@ -2042,7 +2161,7 @@ class ValidationPool(object):
       self._HandleApplyFailure(self.changes_that_failed_to_apply_earlier)
 
   def SubmitPartialPool(self, changes, messages, changes_by_config, failing,
-                        inflight, no_stat):
+                        inflight, no_stat, reason=None):
     """If the build failed, push any CLs that don't care about the failure.
 
     In this function we calculate what CLs are definitely innocent and submit
@@ -2061,6 +2180,7 @@ class ValidationPool(object):
       failing: Names of the builders that failed.
       inflight: Names of the builders that timed out.
       no_stat: Set of builder names of slave builders that had status None.
+      reason: string reason for submission to be recorded in cidb.
 
     Returns:
       A set of the non-submittable changes.
@@ -2072,7 +2192,13 @@ class ValidationPool(object):
       logging.info('The following changes will be submitted using '
                    'board-aware submission logic: %s',
                    cros_patch.GetChangesAsString(fully_verified))
-    self.SubmitChanges(fully_verified)
+    # TODO(akeshet): We have no way to record different submission reasons for
+    # different CLs, if we had multiple different BAS strategies at work for
+    # them. If we add new strategies to GetFullyVerifiedChanges
+    # strategy above, we should move responsibility to determining |reason| from
+    # the caller of SubmitPartialPool to either SubmitPartialPool or
+    # GetFullyVerifiedChanges.
+    self.SubmitChanges(fully_verified, reason=reason)
 
     # Return the list of non-submittable changes.
     return set(changes) - set(fully_verified)
@@ -2301,7 +2427,7 @@ class ValidationPool(object):
     else:
       if infra_fail:
         msg.append('The build failure may have been caused by infrastructure '
-                   'issues and/or bad chromite changes.')
+                   'issues and/or bad %s changes.' % constants.INFRA_PROJECTS)
 
       if change in suspects:
         if other_suspects_str:
@@ -2395,16 +2521,15 @@ class ValidationPool(object):
     else:
       candidates.extend(changes)
 
-    suspects = set()
-    infra_fail = lab_fail = False
-    if sanity:
-      # If the build was sane, determine the cause of the failures and
-      # the changes that are likely at fault for the failure.
-      lab_fail = triage_lib.CalculateSuspects.OnlyLabFailures(messages, no_stat)
-      infra_fail = triage_lib.CalculateSuspects.OnlyInfraFailures(
-          messages, no_stat)
-      suspects = triage_lib.CalculateSuspects.FindSuspects(
-          candidates, messages, infra_fail=infra_fail, lab_fail=lab_fail)
+    # Determine the cause of the failures and the changes that are likely at
+    # fault for the failure.
+    lab_fail = triage_lib.CalculateSuspects.OnlyLabFailures(messages, no_stat)
+    infra_fail = triage_lib.CalculateSuspects.OnlyInfraFailures(
+        messages, no_stat)
+    suspects = triage_lib.CalculateSuspects.FindSuspects(
+        candidates, messages, infra_fail=infra_fail, lab_fail=lab_fail,
+        sanity=sanity)
+
     # Send out failure notifications for each change.
     inputs = [[change, messages, suspects, sanity, infra_fail,
                lab_fail, no_stat] for change in candidates]
@@ -2436,8 +2561,8 @@ class ValidationPool(object):
     Args:
       manifest: Manifest to use.
       changes: List of changes to use.
-      max_txn_length: The maximum length of any given transaction. Optional.
-        By default, do not limit the length of transactions.
+      max_txn_length: The maximum length of any given transaction.  By default,
+        do not limit the length of transactions.
 
     Returns:
       A list of disjoint transactions. Each transaction can be tried

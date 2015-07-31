@@ -6,20 +6,23 @@
 
 from __future__ import print_function
 
+import argparse
 import cPickle
 import signal
 import os
 import sys
 
+from chromite.cli import command
 from chromite.lib import commandline
+from chromite.lib import cros_build_lib
 from chromite.lib import cros_build_lib_unittest
 from chromite.lib import cros_test_lib
 from chromite.lib import gs
-from chromite.lib import partial_mock
+from chromite.lib import path_util
+from chromite.lib import workspace_lib
 
-from chromite.cbuildbot import constants
+# pylint: disable=protected-access
 
-# pylint: disable=W0212
 class TestShutDownException(cros_test_lib.TestCase):
   """Test that ShutDownException can be pickled."""
 
@@ -31,7 +34,7 @@ class TestShutDownException(cros_test_lib.TestCase):
     self.assertEqual(ex.message, ex2.message)
 
 
-class GSPathTest(cros_test_lib.TestCase):
+class GSPathTest(cros_test_lib.OutputTestCase):
   """Test type=gs_path normalization functionality."""
 
   GS_REL_PATH = 'bucket/path/to/artifacts'
@@ -40,7 +43,7 @@ class GSPathTest(cros_test_lib.TestCase):
   def _ParseCommandLine(argv):
     parser = commandline.OptionParser()
     parser.add_option('-g', '--gs-path', type='gs_path',
-                      help=('GS path that contains the chrome to deploy.'))
+                      help='GS path that contains the chrome to deploy.')
     return parser.parse_args(argv)
 
   def _RunGSPathTestCase(self, raw, parsed):
@@ -77,14 +80,49 @@ class GSPathTest(cros_test_lib.TestCase):
 
   def testInvalidPath(self):
     """Path cannot be normalized."""
-    with cros_test_lib.OutputCapturer():
+    with self.OutputCapturer():
       self.assertRaises2(
           SystemExit, self._RunGSPathTestCase, 'http://badhost.com/path', '',
           check_attrs={'code': 2})
 
 
-class DeviceParseTest(cros_test_lib.TestCase):
+class BoolTest(cros_test_lib.TestCase):
+  """Test type='bool' functionality."""
+
+  @staticmethod
+  def _ParseCommandLine(argv):
+    parser = commandline.ArgumentParser()
+    parser.add_argument('-e', '--enable', type='bool',
+                        help='Boolean Argument.')
+    return parser.parse_args(argv)
+
+  def _RunBoolTestCase(self, enable, expected):
+    options = self._ParseCommandLine(['--enable', enable])
+    self.assertEquals(options.enable, expected)
+
+  def testBoolTrue(self):
+    """Test case setting the value to true."""
+    self._RunBoolTestCase('True', True)
+    self._RunBoolTestCase('1', True)
+    self._RunBoolTestCase('true', True)
+    self._RunBoolTestCase('yes', True)
+    self._RunBoolTestCase('TrUe', True)
+
+  def testBoolFalse(self):
+    """Test case setting the value to false."""
+    self._RunBoolTestCase('False', False)
+    self._RunBoolTestCase('0', False)
+    self._RunBoolTestCase('false', False)
+    self._RunBoolTestCase('no', False)
+    self._RunBoolTestCase('FaLse', False)
+
+
+class DeviceParseTest(cros_test_lib.OutputTestCase):
   """Test device parsing functionality."""
+
+  _ALL_SCHEMES = (commandline.DEVICE_SCHEME_FILE,
+                  commandline.DEVICE_SCHEME_SSH,
+                  commandline.DEVICE_SCHEME_USB)
 
   def _CheckDeviceParse(self, device_input, scheme, username=None,
                         hostname=None, port=None, path=None):
@@ -99,7 +137,7 @@ class DeviceParseTest(cros_test_lib.TestCase):
       path: String expected path or None.
     """
     parser = commandline.ArgumentParser()
-    parser.add_argument('device', type='device')
+    parser.add_argument('device', type=commandline.DeviceParser(scheme))
     device = parser.parse_args([device_input]).device
     self.assertEqual(device.scheme, scheme)
     self.assertEqual(device.username, username)
@@ -107,15 +145,16 @@ class DeviceParseTest(cros_test_lib.TestCase):
     self.assertEqual(device.port, port)
     self.assertEqual(device.path, path)
 
-  def _CheckDeviceParseFails(self, device_input):
+  def _CheckDeviceParseFails(self, device_input, schemes=_ALL_SCHEMES):
     """Checks that parsing a device input fails.
 
     Args:
       device_input: String input specifying a device.
+      schemes: A scheme or list of allowed schemes, by default allows all.
     """
     parser = commandline.ArgumentParser()
-    parser.add_argument('device', type='device')
-    with cros_test_lib.OutputCapturer():
+    parser.add_argument('device', type=commandline.DeviceParser(schemes))
+    with self.OutputCapturer():
       self.assertRaises2(SystemExit, parser.parse_args, [device_input])
 
   def testNoDevice(self):
@@ -183,6 +222,14 @@ class DeviceParseTest(cros_test_lib.TestCase):
 
   def testUnsupportedScheme(self):
     """Verify that an unsupported scheme fails."""
+    self._CheckDeviceParseFails('ssh://192.168.1.200',
+                                schemes=commandline.DEVICE_SCHEME_USB)
+    self._CheckDeviceParseFails('usb://path/to/my/device',
+                                schemes=[commandline.DEVICE_SCHEME_SSH,
+                                         commandline.DEVICE_SCHEME_FILE])
+
+  def testUnknownScheme(self):
+    """Verify that an unknown scheme fails."""
     self._CheckDeviceParseFails('ftp://192.168.1.200')
 
   def testSchemeCaseInsensitive(self):
@@ -192,146 +239,115 @@ class DeviceParseTest(cros_test_lib.TestCase):
                            hostname='foo_host')
 
 
-class DetermineCheckoutTest(cros_test_lib.MockTempDirTestCase):
-  """Verify functionality for figuring out what checkout we're in."""
+class NormalizeWorkspacePathTest(cros_test_lib.WorkspaceTestCase):
+  """Tests for NormalizeWorkspacePath() and associated functions."""
 
   def setUp(self):
-    self.rc_mock = cros_build_lib_unittest.RunCommandMock()
-    self.StartPatcher(self.rc_mock)
-    self.rc_mock.SetDefaultCmdResult()
+    self.CreateWorkspace()
+    # By default set the CWD to be the workspace directory.
+    self.cwd_mock = self.PatchObject(os, 'getcwd')
+    self.cwd_mock.return_value = self.workspace_path
 
-  def RunTest(self, dir_struct, cwd, expected_root, expected_type,
-              expected_src):
-    """Run a test with specific parameters and expected results."""
-    cros_test_lib.CreateOnDiskHierarchy(self.tempdir, dir_struct)
-    cwd = os.path.join(self.tempdir, cwd)
-    checkout_info = commandline.DetermineCheckout(cwd)
-    full_root = expected_root
-    if expected_root is not None:
-      full_root = os.path.join(self.tempdir, expected_root)
-    full_src = expected_src
-    if expected_src is not None:
-      full_src = os.path.join(self.tempdir, expected_src)
+  def _VerifyNormalized(self, path, expected, **kwargs):
+    """Verifies tests on NormalizeWorkspacePath().
 
-    self.assertEquals(checkout_info.root, full_root)
-    self.assertEquals(checkout_info.type, expected_type)
-    self.assertEquals(checkout_info.chrome_src_dir, full_src)
+    Args:
+      path: Input path to test.
+      expected: Expected output.
+      kwargs: Keyword args for NormalizeWorkspacePath().
+    """
+    self.assertEqual(expected,
+                     commandline.NormalizeWorkspacePath(path, **kwargs))
 
-  def testGclientRepo(self):
-    dir_struct = [
-        'a/.gclient',
-        'a/b/.repo/',
-        'a/b/c/.gclient',
-        'a/b/c/d/somefile',
-    ]
-    self.RunTest(dir_struct, 'a/b/c', 'a/b/c',
-                 commandline.CHECKOUT_TYPE_GCLIENT,
-                 'a/b/c/src')
-    self.RunTest(dir_struct, 'a/b/c/d', 'a/b/c',
-                 commandline.CHECKOUT_TYPE_GCLIENT,
-                 'a/b/c/src')
-    self.RunTest(dir_struct, 'a/b', 'a/b',
-                 commandline.CHECKOUT_TYPE_REPO,
-                 None)
-    self.RunTest(dir_struct, 'a', 'a',
-                 commandline.CHECKOUT_TYPE_GCLIENT,
-                 'a/src')
 
-  def testGitSubmodule(self):
-    """Recognizes a chrome git submodule checkout."""
-    self.rc_mock.AddCmdResult(
-        partial_mock.In('config'), output=constants.CHROMIUM_GOB_URL)
-    dir_struct = [
-        'a/.gclient',
-        'a/.repo',
-        'a/b/.git/',
-    ]
-    self.RunTest(dir_struct, 'a/b', 'a/b',
-                 commandline.CHECKOUT_TYPE_SUBMODULE,
-                 'a/b')
+  def testLocatorConversion(self):
+    """Tests NormalizeWorkspacePath() conversion to a locator."""
+    # Relative paths.
+    self._VerifyNormalized('a', '//a')
+    self._VerifyNormalized('a/b', '//a/b')
 
-  def testBadGit1(self):
-    """.git is not a directory."""
-    self.RunTest(['a/.git'], 'a', None,
-                 commandline.CHECKOUT_TYPE_UNKNOWN, None)
+    # Absolute paths.
+    self._VerifyNormalized(os.path.join(self.workspace_path, 'a'), '//a')
+    self._VerifyNormalized(os.path.join(self.workspace_path, 'a', 'b'), '//a/b')
 
-  def testBadGit2(self):
-    """'git config' returns nothing."""
-    self.RunTest(['a/.repo/', 'a/b/.git/'], 'a/b', 'a',
-                 commandline.CHECKOUT_TYPE_REPO, None)
+    # Locators should be unchanged.
+    self._VerifyNormalized('//a', '//a')
+    self._VerifyNormalized('//a/b', '//a/b')
 
-  def testBadGit3(self):
-    """'git config' returns error."""
-    self.rc_mock.AddCmdResult(partial_mock.In('config'), returncode=5)
-    self.RunTest(['a/.git/'], 'a', None,
-                 commandline.CHECKOUT_TYPE_UNKNOWN, None)
+    # Paths outside the workspace should fail.
+    for path in ('/', '..'):
+      with self.assertRaises(ValueError):
+        commandline.NormalizeWorkspacePath(path)
+
+  def testDefaultDir(self):
+    """Tests the default_dir parameter."""
+    self._VerifyNormalized('a', '//default/a', default_dir='//default')
+    self._VerifyNormalized('a/b', '//a/b', default_dir='//default')
+    self._VerifyNormalized('./a', '//a', default_dir='//default')
+
+  def testExtension(self):
+    """Tests the extension parameter."""
+    self._VerifyNormalized('a', '//a.txt', extension='txt')
+    self._VerifyNormalized('a.bin', '//a.bin.txt', extension='txt')
+    self._VerifyNormalized('a.txt', '//a.txt', extension='txt')
+
+  def testSpecificPaths(self):
+    """Tests normalizing brick/BSP/blueprint paths."""
+    self.assertEqual('//bricks/a', commandline.NormalizeBrickPath('a'))
+    self.assertEqual('//bsps/a', commandline.NormalizeBspPath('a'))
+    self.assertEqual('//blueprints/a.json',
+                     commandline.NormalizeBlueprintPath('a'))
+
+  def testParser(self):
+    """Tests adding these types to a parser."""
+    parser = commandline.ArgumentParser()
+    parser.add_argument('path', type='workspace_path')
+    parser.add_argument('brick', type='brick_path')
+    parser.add_argument('bsp', type='bsp_path')
+    parser.add_argument('blueprint', type='blueprint_path')
+
+    options = parser.parse_args(['my_path', 'my_brick', 'my_bsp',
+                                 'my_blueprint'])
+    self.assertEqual('//my_path', options.path)
+    self.assertEqual('//bricks/my_brick', options.brick)
+    self.assertEqual('//bsps/my_bsp', options.bsp)
+    self.assertEqual('//blueprints/my_blueprint.json', options.blueprint)
 
 
 class CacheTest(cros_test_lib.MockTempDirTestCase):
-  """Test cache dir specification and finding functionality."""
+  """Test cache dir default / override functionality."""
 
-  REPO_ROOT = '/fake/repo/root'
-  GCLIENT_ROOT = '/fake/gclient/root'
-  SUBMODULE_ROOT = '/fake/submodule/root'
   CACHE_DIR = '/fake/cache/dir'
 
   def setUp(self):
     self.PatchObject(commandline.ArgumentParser, 'ConfigureCacheDir')
     dir_struct = [
         'repo/.repo/',
-        'gclient/.gclient',
-        'submodule/.git/',
     ]
     cros_test_lib.CreateOnDiskHierarchy(self.tempdir, dir_struct)
     self.repo_root = os.path.join(self.tempdir, 'repo')
-    self.gclient_root = os.path.join(self.tempdir, 'gclient')
-    self.submodule_root = os.path.join(self.tempdir, 'submodule')
-    self.nocheckout_root = os.path.join(self.tempdir, 'nothing')
-
-    self.rc_mock = self.StartPatcher(cros_build_lib_unittest.RunCommandMock())
-    self.rc_mock.AddCmdResult(
-        partial_mock.In('config'), output=constants.CHROMIUM_GOB_URL)
     self.cwd_mock = self.PatchObject(os, 'getcwd')
     self.parser = commandline.ArgumentParser(caching=True)
 
-  def _CheckCall(self, expected):
+  def _CheckCall(self, cwd_retval, args_to_parse, expected, assert_func):
     # pylint: disable=E1101
-    f = self.parser.ConfigureCacheDir
-    self.assertEquals(1, f.call_count)
-    self.assertTrue(f.call_args[0][0].startswith(expected))
+    self.cwd_mock.return_value = cwd_retval
+    self.parser.parse_args(args_to_parse)
+    cache_dir_mock = self.parser.ConfigureCacheDir
+    self.assertEquals(1, cache_dir_mock.call_count)
+    assert_func(cache_dir_mock.call_args[0][0], expected)
 
-  def testRepoRoot(self):
-    """Test when we are inside a repo checkout."""
-    self.cwd_mock.return_value = self.repo_root
-    self.parser.parse_args([])
-    self._CheckCall(self.repo_root)
+  def testRepoRootNoOverride(self):
+    """Test default cache location when in a repo checkout."""
+    self._CheckCall(self.repo_root, [], self.repo_root, self.assertStartsWith)
 
-  def testGclientRoot(self):
-    """Test when we are inside a gclient checkout."""
-    self.cwd_mock.return_value = self.gclient_root
-    self.parser.parse_args([])
-    self._CheckCall(self.gclient_root)
-
-  def testSubmoduleRoot(self):
-    """Test when we are inside a git submodule Chrome checkout."""
-    self.cwd_mock.return_value = self.submodule_root
-    self.parser.parse_args([])
-    self._CheckCall(self.submodule_root)
-
-  def testTempdir(self):
-    """Test when we are not in any checkout."""
-    self.cwd_mock.return_value = self.nocheckout_root
-    self.parser.parse_args([])
-    self._CheckCall('/tmp')
-
-  def testSpecifiedDir(self):
-    """Test when user specifies a cache dir."""
-    self.cwd_mock.return_value = self.repo_root
-    self.parser.parse_args(['--cache-dir', self.CACHE_DIR])
-    self._CheckCall(self.CACHE_DIR)
+  def testRepoRootWithOverride(self):
+    """User provided cache location overrides repo checkout default."""
+    self._CheckCall(self.repo_root, ['--cache-dir', self.CACHE_DIR],
+                    self.CACHE_DIR, self.assertEquals)
 
 
-class ParseArgsTest(cros_test_lib.TestCase):
+class ParseArgsTest(cros_test_lib.OutputTestCase):
   """Test parse_args behavior of our custom argument parsing classes."""
 
   def _CreateOptionParser(self, cls):
@@ -431,53 +447,252 @@ class ParseArgsTest(cros_test_lib.TestCase):
   def testArgumentParser(self):
     self._TestParser(self._CreateArgumentParser(commandline.ArgumentParser))
 
+  def testArgumentParserSetupLocatorTranslation(self):
+    """Tests ArgumentParser._SetupLocatorTranslation().
+
+    This verifies that ArgumentParser objects automatically add the
+    locator translation arguments and that they properly override
+    the original argument.
+    """
+    for option in commandline._LOCATOR_OVERRIDE_OPTIONS:
+      parser = commandline.ArgumentParser()
+      parser.add_argument(option)
+      options = parser.parse_args(
+          ['original', '--%s-locator-override' % option, 'override'])
+      self.assertEqual('override', getattr(options, option))
+      # Make sure the order doesn't matter.
+      options = parser.parse_args(
+          ['--%s-locator-override' % option, 'override', 'original'])
+      self.assertEqual('override', getattr(options, option))
+
+  def testArgumentParserLocatorGroupIsHidden(self):
+    """Tests that the locator group doesn't show up in --help."""
+    parser = commandline.ArgumentParser()
+    with self.OutputCapturer():
+      with self.assertRaises(SystemExit):
+        parser.parse_args(['--help'])
+    self.AssertOutputContainsLine('locator-override', invert=True)
+
 
 class ScriptWrapperMainTest(cros_test_lib.MockTestCase):
   """Test the behavior of the ScriptWrapperMain function."""
 
   def setUp(self):
     self.PatchObject(sys, 'exit')
+    self.lastTargetFound = None
 
-  # pylint: disable=W0613
-  @staticmethod
-  def _DummyChrootTarget(args):
-    raise commandline.ChrootRequiredError()
+  SYS_ARGV = ['/cmd', '/cmd', 'arg1', 'arg2']
+  CMD_ARGS = ['/cmd', 'arg1', 'arg2']
+  CHROOT_ARGS = ['--workspace', '/work']
 
-  DUMMY_CHROOT_TARGET_ARGS = ['cmd', 'arg1', 'arg2']
-
-  DUMMY_EXTRA_ARGS = ['extra', 'arg']
-
-  @staticmethod
-  def _DummyChrootTargetArgs(args):
-    args = ScriptWrapperMainTest.DUMMY_CHROOT_TARGET_ARGS
-    raise commandline.ChrootRequiredError(args)
-
-  @staticmethod
-  def _DummyChrootTargetExtraArgs(args):
-    extra_args = ScriptWrapperMainTest.DUMMY_EXTRA_ARGS
-    raise commandline.ChrootRequiredError(extra_args=extra_args)
-
-  def testRestartInChroot(self):
+  def testRestartInChrootPreserveArgs(self):
+    """Verify args to ScriptWrapperMain are passed through to chroot.."""
+    # Setup Mocks/Fakes
     rc = self.StartPatcher(cros_build_lib_unittest.RunCommandMock())
     rc.SetDefaultCmdResult()
 
-    ret = lambda x: ScriptWrapperMainTest._DummyChrootTarget
-    commandline.ScriptWrapperMain(ret)
+    def findTarget(target):
+      """ScriptWrapperMain needs a function to find a function to run."""
+      def raiseChrootRequiredError(args):
+        raise commandline.ChrootRequiredError(args)
+
+      self.lastTargetFound = target
+      return raiseChrootRequiredError
+
+    # Run Test
+    commandline.ScriptWrapperMain(findTarget, self.SYS_ARGV)
+
+    # Verify Results
     rc.assertCommandContains(enter_chroot=True)
-    rc.assertCommandContains(self.DUMMY_CHROOT_TARGET_ARGS, expected=False)
+    rc.assertCommandContains(self.CMD_ARGS)
+    self.assertEqual('/cmd', self.lastTargetFound)
 
-  def testRestartInChrootArgs(self):
+  def testRestartInChrootWithChrootArgs(self):
+    """Verify args and chroot args from exception are used."""
+    # Setup Mocks/Fakes
     rc = self.StartPatcher(cros_build_lib_unittest.RunCommandMock())
     rc.SetDefaultCmdResult()
 
-    ret = lambda x: ScriptWrapperMainTest._DummyChrootTargetArgs
-    commandline.ScriptWrapperMain(ret)
-    rc.assertCommandContains(self.DUMMY_CHROOT_TARGET_ARGS, enter_chroot=True)
+    def findTarget(_):
+      """ScriptWrapperMain needs a function to find a function to run."""
+      def raiseChrootRequiredError(_args):
+        raise commandline.ChrootRequiredError(self.CMD_ARGS, self.CHROOT_ARGS)
 
-  def testRestartInChrootExtraArgs(self):
-    rc = self.StartPatcher(cros_build_lib_unittest.RunCommandMock())
-    rc.SetDefaultCmdResult()
+      return raiseChrootRequiredError
 
-    ret = lambda x: ScriptWrapperMainTest._DummyChrootTargetExtraArgs
-    commandline.ScriptWrapperMain(ret)
-    rc.assertCommandContains(self.DUMMY_EXTRA_ARGS, enter_chroot=True)
+    # Run Test
+    commandline.ScriptWrapperMain(findTarget, ['unrelated'])
+
+    # Verify Results
+    rc.assertCommandContains(enter_chroot=True)
+    rc.assertCommandContains(self.CMD_ARGS)
+    rc.assertCommandContains(chroot_args=self.CHROOT_ARGS)
+
+
+class TestAddCliCommandOption(cros_test_lib.TestCase):
+  """Test commandline._AddCliCommandOption()."""
+
+  def testAddOption(self):
+    """Tests adding an option without a value."""
+    self.assertListEqual(
+        ['brillo', 'chroot', '--debug', 'ls'],
+        commandline._AddCliCommandOption(['brillo', 'chroot', 'ls'], '--debug'))
+
+  def testAddOptionAndValue(self):
+    """Tests adding an option with a value."""
+    self.assertListEqual(
+        ['brillo', 'chroot', '--brick', '//foo', 'ls'],
+        commandline._AddCliCommandOption(['brillo', 'chroot', 'ls'],
+                                         '--brick', '//foo'))
+
+  def testInvalidArg(self):
+    """Tests that trying to add a positional arg fails."""
+    with self.assertRaises(ValueError):
+      commandline._AddCliCommandOption(['brillo', 'chroot', 'ls'], 'positional')
+
+
+class TestRunInsideChroot(cros_test_lib.MockTestCase):
+  """Test commandline.RunInsideChroot()."""
+
+  def setUp(self):
+    self.orig_argv = sys.argv
+    sys.argv = ['/cmd', 'arg1', 'arg2']
+
+    self.mockFromHostToChrootPath = self.PatchObject(
+        path_util, 'ToChrootPath', return_value='/inside/cmd')
+
+    # Return values for these two should be set by each test.
+    self.mock_inside_chroot = self.PatchObject(cros_build_lib, 'IsInsideChroot')
+    self.mock_workspace_path = self.PatchObject(workspace_lib, 'WorkspacePath')
+
+    # Mocked CliCommand object to pass to RunInsideChroot.
+    self.cmd = command.CliCommand(argparse.Namespace())
+
+  def teardown(self):
+    sys.argv = self.orig_argv
+
+  def _VerifyRunInsideChroot(self, expected_cmd, expected_chroot_args,
+                             **kwargs):
+    """Run RunInsideChroot, and verify it raises with expected values.
+
+    Args:
+      expected_cmd: Command that should be executed inside the chroot.
+      expected_chroot_args: Args that should be passed as chroot args.
+      kwargs: Additional args to pass to RunInsideChroot().
+    """
+    with self.assertRaises(commandline.ChrootRequiredError) as cm:
+      commandline.RunInsideChroot(self.cmd, **kwargs)
+
+    self.assertEqual(expected_cmd, cm.exception.cmd)
+    self.assertEqual(expected_chroot_args, cm.exception.chroot_args)
+
+  def testRunInsideChrootNoWorkspace(self):
+    """Test we can restart inside the chroot, with no workspace."""
+    self.mock_inside_chroot.return_value = False
+    self.mock_workspace_path.return_value = None
+
+    self._VerifyRunInsideChroot(['/inside/cmd', 'arg1', 'arg2'], None)
+
+  def testRunInsideChrootWithWorkspace(self):
+    """Test we can restart inside the chroot, with a workspace."""
+    self.mock_inside_chroot.return_value = False
+    self.mock_workspace_path.return_value = '/work'
+
+    self._VerifyRunInsideChroot(
+        ['/inside/cmd', 'arg1', 'arg2'],
+        ['--chroot', '/work/.chroot', '--workspace', '/work'])
+
+  def testRunInsideChrootAlreadyInside(self):
+    """Test we don't restart inside the chroot if we are already there."""
+    self.mock_inside_chroot.return_value = True
+
+    # Since we are in the chroot, it should return, doing nothing.
+    commandline.RunInsideChroot(self.cmd)
+
+  def _VerifyBrickAutoDetect(self, expect_auto_detect=True):
+    """Verifies that brick auto-detect is working as expected.
+
+    Configures function return values and |curr_brick_locator| to turn
+    on auto-detect for //bricks/foo. To use, just set up any additional
+    |self.cmd| attributes required for the test before calling this.
+
+    Args:
+      expect_auto_detect: Whether a brick should be auto-detected.
+    """
+    self.mock_inside_chroot.return_value = False
+    self.mock_workspace_path.return_value = None
+    self.cmd.curr_brick_locator = '//bricks/foo'
+    if expect_auto_detect:
+      expected_args = ['/inside/cmd', 'arg1', '--brick', '//bricks/foo', 'arg2']
+    else:
+      expected_args = ['/inside/cmd', 'arg1', 'arg2']
+    self._VerifyRunInsideChroot(expected_args, None, auto_detect_brick=True)
+
+  def testRunInsideChrootAutoDetectBrick(self):
+    """Test auto-detecting the brick."""
+    self._VerifyBrickAutoDetect()
+
+  def testRunInsideChrootAutoDetectBrickExplicit(self):
+    """Test that explicit --brick disables brick auto-detect."""
+    self.cmd.options.brick = '//bricks/bar'
+    self._VerifyBrickAutoDetect(expect_auto_detect=False)
+
+  def testRunInsideChrootAutoDetectBrickBlueprint(self):
+    """Test that --blueprint disables brick auto-detect."""
+    self.cmd.options.blueprint = '//blueprints/foo.json'
+    self._VerifyBrickAutoDetect(expect_auto_detect=False)
+
+  def testRunInsideChrootAutoDetectBrickBoard(self):
+    """Test that --board disables brick auto-detect."""
+    self.cmd.options.board = 'foo_board'
+    self._VerifyBrickAutoDetect(expect_auto_detect=False)
+
+  def testRunInsideChrootAutoDetectBrickHost(self):
+    """Test that --host disables brick auto-detect."""
+    self.cmd.options.host = True
+    self._VerifyBrickAutoDetect(expect_auto_detect=False)
+
+  def _VerifyBrickLocatorOverride(self, expected_override=None, **kwargs):
+    """Verifies that brick locator override is working as expected.
+
+    This sets common state for all brick locator override tests and
+    calls _VerifyRunInsideChroot() to check the resulting command line.
+
+    Args:
+      expected_override: What value --brick-locator-override should
+        have, or None if it shouldn't be present.
+      kwargs: keyword args to pass to _VerifyRunInsideChroot().
+    """
+    self.mock_inside_chroot.return_value = False
+    self.mock_workspace_path.return_value = None
+    if expected_override:
+      expected_args = ['/inside/cmd', 'arg1',
+                       '--brick-locator-override', expected_override, 'arg2']
+    else:
+      expected_args = ['/inside/cmd', 'arg1', 'arg2']
+    self._VerifyRunInsideChroot(expected_args, None, **kwargs)
+
+  def testRunInsideChrootBrickLocatorOverride(self):
+    """Test RunInsideChroot() populates --brick-locator-override."""
+    self.cmd.options.brick = '/absolute/path'
+    self.PatchObject(workspace_lib, 'PathToLocator', return_value='//my/brick')
+    self._VerifyBrickLocatorOverride(expected_override='//my/brick')
+
+  def testRunInsideChrootBrickLocatorOverrideDisabled(self):
+    """Test RunInsideChroot() when locator override is disabled."""
+    self.cmd.options.brick = '/absolute/path'
+    self.PatchObject(workspace_lib, 'PathToLocator', return_value='//my/brick')
+    self._VerifyBrickLocatorOverride(expected_override=None,
+                                     auto_locator_override=False)
+
+  def testRunInsideChrootBrickLocatorOverrideNotNeeded(self):
+    """Test RunInsideChroot() when locators aren't needed."""
+    self.cmd.options.brick = '//already/a/locator'
+    self.PatchObject(workspace_lib, 'PathToLocator', return_value='//my/brick')
+    self._VerifyBrickLocatorOverride(expected_override=None)
+
+  def testRunInsideChrootBrickLocatorOverrideUnavailable(self):
+    """Test RunInsideChroot() when locators can't be found."""
+    self.cmd.options.brick = '/absolute/path'
+    self.PatchObject(workspace_lib, 'PathToLocator', return_value=None)
+    self._VerifyBrickLocatorOverride(expected_override=None)

@@ -15,7 +15,8 @@ import android.util.Log;
 import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
 import org.chromium.base.NativeClassQualifiedName;
-import org.chromium.base.UsedByReflection;
+import org.chromium.base.VisibleForTesting;
+import org.chromium.base.annotations.UsedByReflection;
 
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -121,10 +122,11 @@ public class CronetUrlRequestContext extends UrlRequestContext  {
     }
 
     @Override
-    public void startNetLogToFile(String fileName) {
+    public void startNetLogToFile(String fileName, boolean logAll) {
         synchronized (mLock) {
             checkHaveAdapter();
-            nativeStartNetLogToFile(mUrlRequestContextAdapter, fileName);
+            nativeStartNetLogToFile(mUrlRequestContextAdapter, fileName,
+                    logAll);
         }
     }
 
@@ -152,6 +154,7 @@ public class CronetUrlRequestContext extends UrlRequestContext  {
         mActiveRequestCount.decrementAndGet();
     }
 
+    @VisibleForTesting
     long getUrlRequestContextAdapter() {
         synchronized (mLock) {
             checkHaveAdapter();
@@ -206,7 +209,7 @@ public class CronetUrlRequestContext extends UrlRequestContext  {
 
     @NativeClassQualifiedName("CronetURLRequestContextAdapter")
     private native void nativeStartNetLogToFile(long nativePtr,
-            String fileName);
+            String fileName, boolean logAll);
 
     @NativeClassQualifiedName("CronetURLRequestContextAdapter")
     private native void nativeStopNetLog(long nativePtr);

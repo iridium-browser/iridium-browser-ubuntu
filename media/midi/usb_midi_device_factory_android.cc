@@ -4,20 +4,17 @@
 
 #include "media/midi/usb_midi_device_factory_android.h"
 
-#include <jni.h>
-#include <vector>
 
-#include "base/android/scoped_java_ref.h"
 #include "base/bind.h"
 #include "base/containers/hash_tables.h"
 #include "base/lazy_instance.h"
-#include "base/memory/scoped_vector.h"
 #include "base/message_loop/message_loop.h"
 #include "base/synchronization/lock.h"
 #include "jni/UsbMidiDeviceFactoryAndroid_jni.h"
 #include "media/midi/usb_midi_device_android.h"
 
 namespace media {
+namespace midi {
 
 namespace {
 
@@ -95,4 +92,5 @@ bool UsbMidiDeviceFactoryAndroid::RegisterUsbMidiDeviceFactory(JNIEnv* env) {
   return RegisterNativesImpl(env);
 }
 
+}  // namespace midi
 }  // namespace media

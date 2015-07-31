@@ -43,6 +43,8 @@ public:
     WebSettingsImpl(Settings*, DevToolsEmulator*);
     virtual ~WebSettingsImpl() { }
 
+    virtual void setFromStrings(const WebString& name, const WebString& value) override;
+
     virtual bool mainFrameResizesAreOrientationChanges() const override;
     virtual bool shrinksViewportContentToFit() const override;
     virtual int availablePointerTypes() const override;
@@ -90,6 +92,8 @@ public:
     virtual void setEditingBehavior(EditingBehavior) override;
     virtual void setEnableScrollAnimator(bool) override;
     virtual void setEnableTouchAdjustment(bool) override;
+    virtual bool multiTargetTapNotificationEnabled() override;
+    virtual void setMultiTargetTapNotificationEnabled(bool) override;
     virtual void setRegionBasedColumnsEnabled(bool) override;
     virtual void setExperimentalWebGLEnabled(bool) override;
     virtual void setFantasyFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON) override;
@@ -136,6 +140,7 @@ public:
     virtual void setSansSerifFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON) override;
     virtual void setSelectTrailingWhitespaceEnabled(bool override);
     virtual void setSelectionIncludesAltImageText(bool) override;
+    virtual void setSelectionStrategy(SelectionStrategyType) override;
     virtual void setSerifFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON) override;
     virtual void setShouldPrintBackgrounds(bool) override;
     virtual void setShouldClearDocumentBackground(bool) override;
@@ -143,7 +148,6 @@ public:
     virtual void setShowContextMenuOnMouseUp(bool) override;
     virtual void setShowFPSCounter(bool) override;
     virtual void setShowPaintRects(bool) override;
-    virtual void setShrinksStandaloneImagesToFit(bool) override;
     virtual void setShrinksViewportContentToFit(bool) override;
     virtual void setSmartInsertDeleteEnabled(bool) override;
     virtual void setSpatialNavigationEnabled(bool) override;
@@ -194,6 +198,7 @@ public:
     bool doubleTapToZoomEnabled() const;
     bool perTilePaintingEnabled() const { return m_perTilePaintingEnabled; }
     bool supportDeprecatedTargetDensityDPI() const { return m_supportDeprecatedTargetDensityDPI; }
+    bool viewportMetaEnabled() const;
     bool viewportMetaLayoutSizeQuirk() const { return m_viewportMetaLayoutSizeQuirk; }
     bool viewportMetaNonUserScalableQuirk() const { return m_viewportMetaNonUserScalableQuirk; }
     bool clobberUserAgentInitialScaleQuirk() const { return m_clobberUserAgentInitialScaleQuirk; }

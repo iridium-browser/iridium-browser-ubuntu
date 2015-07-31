@@ -6,7 +6,6 @@
 
 from __future__ import print_function
 
-import logging
 import os
 import re
 from xml.dom import minidom
@@ -15,8 +14,8 @@ from chromite.cbuildbot import cbuildbot_config
 from chromite.cbuildbot import constants
 from chromite.cbuildbot import manifest_version
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import git
-from chromite.lib import timeout_util
 
 
 # Paladin constants for manifest names.
@@ -268,7 +267,7 @@ class LKGMManager(manifest_version.BuildSpecsManager):
     self.RefreshManifestCheckout()
     self.InitializeManifestVariables(version_info)
 
-    self._GenerateBlameListSinceLKGM()
+    self.GenerateBlameListSinceLKGM()
     new_manifest = self.CreateManifest()
 
     # For Chrome PFQ, add the version of Chrome to use.
@@ -373,60 +372,6 @@ class LKGMManager(manifest_version.BuildSpecsManager):
 
     raise manifest_version.GenerateBuildSpecException(last_error)
 
-  def GetLatestCandidate(self, timeout=10 * 60):
-    """Gets and syncs to the next candiate manifest.
-
-    Args:
-      timeout: The timeout in seconds.
-
-    Returns:
-      Local path to manifest to build or None in case of no need to build.
-
-    Raises:
-      GenerateBuildSpecException in case of failure to generate a buildspec
-    """
-    def _AttemptToGetLatestCandidate():
-      """Attempts to acquire latest candidate using manifest repo."""
-      self.RefreshManifestCheckout()
-      self.InitializeManifestVariables(self.GetCurrentVersionInfo())
-      if self.latest_unprocessed:
-        return self.latest_unprocessed
-      elif self.dry_run and self.latest:
-        return self.latest
-
-    def _PrintRemainingTime(remaining):
-      logging.info('Found nothing new to build, will keep trying for %s',
-                   remaining)
-      logging.info('If this is a PFQ, then you should have forced the master'
-                   ', which runs cbuildbot_master')
-
-    # TODO(sosa):  We only really need the overlay for the version info but we
-    # do a full checkout here because we have no way of refining it currently.
-    self.CheckoutSourceCode()
-    try:
-      version_to_build = timeout_util.WaitForSuccess(
-          lambda x: x is None,
-          _AttemptToGetLatestCandidate,
-          timeout,
-          period=self.SLEEP_TIMEOUT,
-          fallback_timeout=max(10, timeout),
-          side_effect_func=_PrintRemainingTime)
-    except timeout_util.TimeoutError:
-      _PrintRemainingTime(0)
-      version_to_build = _AttemptToGetLatestCandidate()
-
-    if version_to_build:
-      logging.info('Starting build spec: %s', version_to_build)
-      self.current_version = version_to_build
-
-      # Actually perform the sync.
-      manifest = self.GetLocalManifest(version_to_build)
-      self.cros_source.Sync(manifest)
-      self._GenerateBlameListSinceLKGM()
-      return manifest
-    else:
-      return None
-
   def PromoteCandidate(self, retries=manifest_version.NUM_RETRIES):
     """Promotes the current LKGM candidate to be a real versioned LKGM."""
     assert self.current_version, 'No current manifest exists.'
@@ -450,9 +395,9 @@ class LKGMManager(manifest_version.BuildSpecsManager):
         return
       except cros_build_lib.RunCommandError as e:
         last_error = 'Failed to promote manifest. error: %s' % e
-        logging.error(last_error)
-        logging.error('Retrying to promote manifest:  Retry %d/%d', attempt + 1,
-                      retries)
+        logging.info(last_error)
+        logging.info('Retrying to promote manifest:  Retry %d/%d', attempt + 1,
+                     retries)
 
     raise PromoteCandidateException(last_error)
 
@@ -464,7 +409,7 @@ class LKGMManager(manifest_version.BuildSpecsManager):
             cbuildbot_config.IsPFQType(self.build_type) and
             self.build_type != constants.CHROME_PFQ_TYPE)
 
-  def _GenerateBlameListSinceLKGM(self):
+  def GenerateBlameListSinceLKGM(self):
     """Prints out links to all CL's that have been committed since LKGM.
 
     Add buildbot trappings to print <a href='url'>text</a> in the waterfall for
@@ -503,7 +448,7 @@ def GenerateBlameList(source_repo, lkgm_path, only_print_chumps=False):
     # Additional case in case the repo has been removed from the manifest.
     src_path = source_repo.GetRelativePath(rel_src_path)
     if not os.path.exists(src_path):
-      cros_build_lib.Info('Detected repo removed from manifest %s' % project)
+      logging.info('Detected repo removed from manifest %s' % project)
       continue
 
     revision = checkout['revision']
@@ -514,7 +459,7 @@ def GenerateBlameList(source_repo, lkgm_path, only_print_chumps=False):
       # Git returns 128 when the revision does not exist.
       if ex.result.returncode != 128:
         raise
-      cros_build_lib.Warning('Detected branch removed from local checkout.')
+      logging.warning('Detected branch removed from local checkout.')
       cros_build_lib.PrintBuildbotStepWarnings()
       return
     current_author = None

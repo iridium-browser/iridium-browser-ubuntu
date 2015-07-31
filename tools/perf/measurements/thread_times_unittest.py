@@ -4,13 +4,22 @@
 
 from telemetry.core import wpr_modes
 from telemetry import decorators
+from telemetry.page import page
 from telemetry.unittest_util import options_for_unittests
 from telemetry.unittest_util import page_test_test_case
-from telemetry.web_perf.metrics.layout import LayoutMetric
 
-from measurements import smoothness_unittest
 from measurements import thread_times
 from metrics import timeline
+
+
+class AnimatedPage(page.Page):
+  def __init__(self, page_set):
+    super(AnimatedPage, self).__init__(
+      url='file://animated_page.html',
+      page_set=page_set, base_dir=page_set.base_dir)
+
+  def RunPageInteractions(self, action_runner):
+    action_runner.Wait(.2)
 
 
 class ThreadTimesUnitTest(page_test_test_case.PageTestTestCase):
@@ -24,33 +33,30 @@ class ThreadTimesUnitTest(page_test_test_case.PageTestTestCase):
     measurement = thread_times.ThreadTimes()
     timeline_options = self._options
     results = self.RunMeasurement(measurement, ps, options = timeline_options)
-    self.assertEquals(0, len(results.failures))
+    self.assertFalse(len(results.failures), results.failures)
 
-    for category in timeline.TimelineThreadCategories.values():
-      cpu_time_name = timeline.ThreadCpuTimeResultName(category)
-      cpu_time = results.FindAllPageSpecificValuesNamed(cpu_time_name)
-      self.assertEquals(len(cpu_time), 1)
-
-    for short_name in LayoutMetric.EVENTS.itervalues():
-      self.assertEquals(len(results.FindAllPageSpecificValuesNamed(
-        short_name + '_avg')), 1)
-      self.assertEquals(len(results.FindAllPageSpecificValuesNamed(
-        short_name + '_stddev')), 1)
+    for interval in timeline.IntervalNames:
+      for category in timeline.TimelineThreadCategories.values():
+        cpu_time_name = timeline.ThreadCpuTimeResultName(category, interval)
+        cpu_time = results.FindAllPageSpecificValuesNamed(cpu_time_name)
+        self.assertEquals(len(cpu_time), 1)
 
   def testBasicForPageWithNoGesture(self):
     ps = self.CreateEmptyPageSet()
-    ps.AddUserStory(smoothness_unittest.AnimatedPage(ps))
+    ps.AddUserStory(AnimatedPage(ps))
 
     measurement = thread_times.ThreadTimes()
     timeline_options = self._options
     results = self.RunMeasurement(measurement, ps, options = timeline_options)
     self.assertEquals(0, len(results.failures))
 
-    for category in timeline.TimelineThreadCategories.values():
-      cpu_time_name = timeline.ThreadCpuTimeResultName(category)
-      cpu_time = results.FindAllPageSpecificValuesNamed(cpu_time_name)
-      self.assertEquals(len(cpu_time), 1)
+    for interval in timeline.IntervalNames:
+      for category in timeline.TimelineThreadCategories.values():
+        cpu_time_name = timeline.ThreadCpuTimeResultName(category, interval)
+        cpu_time = results.FindAllPageSpecificValuesNamed(cpu_time_name)
+        self.assertEquals(len(cpu_time), 1)
 
+  @decorators.Disabled('chromeos')  # crbug.com/483212
   def testWithSilkDetails(self):
     ps = self.CreatePageSetFromFileInUnittestDataDir('scrollable_page.html')
     measurement = thread_times.ThreadTimes(report_silk_details=True)
@@ -59,10 +65,12 @@ class ThreadTimesUnitTest(page_test_test_case.PageTestTestCase):
 
     main_thread = "renderer_main"
     expected_trace_categories = ["blink", "cc", "idle"]
-    for trace_category in expected_trace_categories:
-      value_name = timeline.ThreadDetailResultName(main_thread, trace_category)
-      values = results.FindAllPageSpecificValuesNamed(value_name)
-      self.assertEquals(len(values), 1)
+    for interval in timeline.IntervalNames:
+      for trace_category in expected_trace_categories:
+        value_name = timeline.ThreadDetailResultName(
+            main_thread, interval, trace_category)
+        values = results.FindAllPageSpecificValuesNamed(value_name)
+        self.assertEquals(len(values), 1)
 
   def testCleanUpTrace(self):
     self.TestTracingCleanedUp(thread_times.ThreadTimes, self._options)

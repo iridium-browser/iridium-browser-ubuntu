@@ -10,7 +10,6 @@ import base64
 import datetime
 import filecmp
 import json
-import logging
 import os
 import shutil
 import sys
@@ -18,6 +17,7 @@ import tempfile
 
 from chromite.cbuildbot import constants
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import osutils
 from chromite.lib.paygen import dryrun_lib
 from chromite.lib.paygen import filelib
@@ -25,6 +25,7 @@ from chromite.lib.paygen import gspaths
 from chromite.lib.paygen import signer_payloads_client
 from chromite.lib.paygen import urilib
 from chromite.lib.paygen import utils
+
 
 # Needed for the dev.host.lib import below.
 sys.path.insert(0, os.path.join(constants.SOURCE_ROOT, 'src', 'platform'))
@@ -112,7 +113,8 @@ class _PaygenPayload(object):
       self.signer = signer_payloads_client.SignerPayloadsClientGoogleStorage(
           payload.tgt_image.channel,
           payload.tgt_image.board,
-          payload.tgt_image.version)
+          payload.tgt_image.version,
+          payload.tgt_image.bucket)
 
   def _MetadataUri(self, uri):
     """Given a payload uri, find the uri for the metadata signature."""
@@ -162,7 +164,6 @@ class _PaygenPayload(object):
 
     Raises:
       cros_build_lib.RunCommandError if the command exited with a nonzero code.
-
     """
     # Adjust the command name to match the directory it's in.
     cmd[0] = os.path.join(self.generator_dir, cmd[0])
@@ -208,7 +209,6 @@ class _PaygenPayload(object):
       'bar']), unless flag is empty/None, in which case returns a list
       containing only the value argument (e.g.  ['bar']). Otherwise, returns an
       empty list.
-
     """
     arg_list = []
     val = dict_obj.get(key) or default
@@ -521,7 +521,7 @@ class _PaygenPayload(object):
 
     Returns:
       List of payload signatures, List of metadata signatures.
-      """
+    """
     # Create hashes to sign.
     payload_hash = self._GenPayloadHash()
     metadata_hash = self._GenMetadataHash()

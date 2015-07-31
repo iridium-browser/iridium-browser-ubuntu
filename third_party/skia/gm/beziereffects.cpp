@@ -13,7 +13,6 @@
 #if SK_SUPPORT_GPU
 
 #include "GrBatchTarget.h"
-#include "GrBufferAllocPool.h"
 #include "GrContext.h"
 #include "GrPathUtils.h"
 #include "GrTest.h"
@@ -46,7 +45,7 @@ public:
 private:
     BezierCubicOrConicTestBatch(const GrGeometryProcessor* gp, const Geometry& geo,
                                 const SkScalar klmEqs[9], SkScalar sign)
-        : INHERITED(gp) {
+        : INHERITED(gp, geo.fBounds) {
         for (int i = 0; i < 9; i++) {
             fKlmEqs[i] = klmEqs[i];
         }
@@ -65,24 +64,19 @@ private:
         return &fGeometry;
     }
 
+    const Geometry* geoData(int index) const override {
+        SkASSERT(0 == index);
+        return &fGeometry;
+    }
+
     void onGenerateGeometry(GrBatchTarget* batchTarget, const GrPipeline* pipeline) override {
+        QuadHelper helper;
         size_t vertexStride = this->geometryProcessor()->getVertexStride();
-
-        const GrVertexBuffer* vertexBuffer;
-        int firstVertex;
-
-        void* vertices = batchTarget->vertexPool()->makeSpace(vertexStride,
-                                                              kVertsPerCubic,
-                                                              &vertexBuffer,
-                                                              &firstVertex);
-
-        if (!vertices || !batchTarget->quadIndexBuffer()) {
-            SkDebugf("Could not allocate buffers\n");
+        SkASSERT(vertexStride == sizeof(Vertex));
+        Vertex* verts = reinterpret_cast<Vertex*>(helper.init(batchTarget, vertexStride, 1));
+        if (!verts) {
             return;
         }
-
-        SkASSERT(vertexStride == sizeof(Vertex));
-        Vertex* verts = reinterpret_cast<Vertex*>(vertices);
 
         verts[0].fPosition.setRectFan(fGeometry.fBounds.fLeft, fGeometry.fBounds.fTop,
                                       fGeometry.fBounds.fRight, fGeometry.fBounds.fBottom,
@@ -92,16 +86,7 @@ private:
             verts[v].fKLM[1] = eval_line(verts[v].fPosition, fKlmEqs + 3, fSign);
             verts[v].fKLM[2] = eval_line(verts[v].fPosition, fKlmEqs + 6, 1.f);
         }
-
-        GrDrawTarget::DrawInfo drawInfo;
-        drawInfo.setPrimitiveType(kTriangleFan_GrPrimitiveType);
-        drawInfo.setVertexBuffer(vertexBuffer);
-        drawInfo.setStartVertex(firstVertex);
-        drawInfo.setVertexCount(kVertsPerCubic);
-        drawInfo.setStartIndex(0);
-        drawInfo.setIndexCount(kIndicesPerCubic);
-        drawInfo.setIndexBuffer(batchTarget->quadIndexBuffer());
-        batchTarget->draw(drawInfo);
+        helper.issueDraw(batchTarget);
     }
 
     Geometry fGeometry;
@@ -158,6 +143,7 @@ protected:
         SkScalar h = SkIntToScalar(rt->height()) / numRows;
         int row = 0;
         int col = 0;
+        static const GrColor color = 0xff000000;
 
         for (int i = 0; i < kNumCubics; ++i) {
             SkPoint baseControlPts[] = {
@@ -175,7 +161,7 @@ protected:
                         continue;
                     }
                     GrPrimitiveEdgeType et = (GrPrimitiveEdgeType)edgeType;
-                    gp.reset(GrCubicEffect::Create(0xff000000, SkMatrix::I(), et,
+                    gp.reset(GrCubicEffect::Create(color, SkMatrix::I(), et,
                                                    *tt.target()->caps()));
                     if (!gp) {
                         continue;
@@ -237,13 +223,13 @@ protected:
                     pipelineBuilder.setRenderTarget(rt);
 
                     BezierCubicOrConicTestBatch::Geometry geometry;
-                    geometry.fColor = gp->color();
+                    geometry.fColor = color;
                     geometry.fBounds = bounds;
 
                     SkAutoTUnref<GrBatch> batch(
                             BezierCubicOrConicTestBatch::Create(gp, geometry, klmEqs, klmSigns[c]));
 
-                    tt.target()->drawBatch(&pipelineBuilder, batch, NULL);
+                    tt.target()->drawBatch(&pipelineBuilder, batch);
                 }
                 ++col;
                 if (numCols == col) {
@@ -305,6 +291,7 @@ protected:
         SkScalar h = SkIntToScalar(rt->height()) / numRows;
         int row = 0;
         int col = 0;
+        static const GrColor color = 0xff000000;
 
         for (int i = 0; i < kNumConics; ++i) {
             SkPoint baseControlPts[] = {
@@ -322,7 +309,7 @@ protected:
                         continue;
                     }
                     GrPrimitiveEdgeType et = (GrPrimitiveEdgeType)edgeType;
-                    gp.reset(GrConicEffect::Create(0xff000000, SkMatrix::I(), et,
+                    gp.reset(GrConicEffect::Create(color, SkMatrix::I(), et,
                                                    *tt.target()->caps(), SkMatrix::I()));
                     if (!gp) {
                         continue;
@@ -381,13 +368,13 @@ protected:
                     pipelineBuilder.setRenderTarget(rt);
 
                     BezierCubicOrConicTestBatch::Geometry geometry;
-                    geometry.fColor = gp->color();
+                    geometry.fColor = color;
                     geometry.fBounds = bounds;
 
                     SkAutoTUnref<GrBatch> batch(
                             BezierCubicOrConicTestBatch::Create(gp, geometry, klmEqs, 1.f));
 
-                    tt.target()->drawBatch(&pipelineBuilder, batch, NULL);
+                    tt.target()->drawBatch(&pipelineBuilder, batch);
                 }
                 ++col;
                 if (numCols == col) {
@@ -457,7 +444,7 @@ public:
 private:
     BezierQuadTestBatch(const GrGeometryProcessor* gp, const Geometry& geo,
                         const GrPathUtils::QuadUVMatrix& devToUV)
-        : INHERITED(gp)
+        : INHERITED(gp, geo.fBounds)
         , fGeometry(geo)
         , fDevToUV(devToUV) {
     }
@@ -472,41 +459,24 @@ private:
         return &fGeometry;
     }
 
+    const Geometry* geoData(int index) const override {
+        SkASSERT(0 == index);
+        return &fGeometry;
+    }
+
     void onGenerateGeometry(GrBatchTarget* batchTarget, const GrPipeline* pipeline) override {
+        QuadHelper helper;
         size_t vertexStride = this->geometryProcessor()->getVertexStride();
-
-        const GrVertexBuffer* vertexBuffer;
-        int firstVertex;
-
-        void* vertices = batchTarget->vertexPool()->makeSpace(vertexStride,
-                                                              kVertsPerCubic,
-                                                              &vertexBuffer,
-                                                              &firstVertex);
-
-        if (!vertices || !batchTarget->quadIndexBuffer()) {
-            SkDebugf("Could not allocate buffers\n");
+        SkASSERT(vertexStride == sizeof(Vertex));
+        Vertex* verts = reinterpret_cast<Vertex*>(helper.init(batchTarget, vertexStride, 1));
+        if (!verts) {
             return;
         }
-
-        SkASSERT(vertexStride == sizeof(Vertex));
-        Vertex* verts = reinterpret_cast<Vertex*>(vertices);
-
         verts[0].fPosition.setRectFan(fGeometry.fBounds.fLeft, fGeometry.fBounds.fTop,
                                       fGeometry.fBounds.fRight, fGeometry.fBounds.fBottom,
                                       sizeof(Vertex));
-
         fDevToUV.apply<4, sizeof(Vertex), sizeof(SkPoint)>(verts);
-
-
-        GrDrawTarget::DrawInfo drawInfo;
-        drawInfo.setPrimitiveType(kTriangles_GrPrimitiveType);
-        drawInfo.setVertexBuffer(vertexBuffer);
-        drawInfo.setStartVertex(firstVertex);
-        drawInfo.setVertexCount(kVertsPerCubic);
-        drawInfo.setStartIndex(0);
-        drawInfo.setIndexCount(kIndicesPerCubic);
-        drawInfo.setIndexBuffer(batchTarget->quadIndexBuffer());
-        batchTarget->draw(drawInfo);
+        helper.issueDraw(batchTarget);
     }
 
     Geometry fGeometry;
@@ -562,6 +532,7 @@ protected:
         SkScalar h = SkIntToScalar(rt->height()) / numRows;
         int row = 0;
         int col = 0;
+        static const GrColor color = 0xff000000;
 
         for (int i = 0; i < kNumQuads; ++i) {
             SkPoint baseControlPts[] = {
@@ -578,7 +549,7 @@ protected:
                         continue;
                     }
                     GrPrimitiveEdgeType et = (GrPrimitiveEdgeType)edgeType;
-                    gp.reset(GrQuadEffect::Create(0xff000000, SkMatrix::I(), et,
+                    gp.reset(GrQuadEffect::Create(color, SkMatrix::I(), et,
                                                   *tt.target()->caps(), SkMatrix::I()));
                     if (!gp) {
                         continue;
@@ -636,12 +607,12 @@ protected:
                     GrPathUtils::QuadUVMatrix DevToUV(pts);
 
                     BezierQuadTestBatch::Geometry geometry;
-                    geometry.fColor = gp->color();
+                    geometry.fColor = color;
                     geometry.fBounds = bounds;
 
                     SkAutoTUnref<GrBatch> batch(BezierQuadTestBatch::Create(gp, geometry, DevToUV));
 
-                    tt.target()->drawBatch(&pipelineBuilder, batch, NULL);
+                    tt.target()->drawBatch(&pipelineBuilder, batch);
                 }
                 ++col;
                 if (numCols == col) {

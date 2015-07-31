@@ -109,6 +109,8 @@
         'rms_level.h',
         'splitting_filter.cc',
         'splitting_filter.h',
+        'three_band_filter_bank.cc',
+        'three_band_filter_bank.h',
         'transient/common.h',
         'transient/daubechies_8_wavelet_coeffs.h',
         'transient/dyadic_decimator.h',
@@ -156,7 +158,7 @@
             'ns/nsx_defines.h',
           ],
           'conditions': [
-            ['target_arch=="mipsel" and mips_arch_variant!="r6" and android_webview_build==0', {
+            ['target_arch=="mipsel" and mips_arch_variant!="r6"', {
               'sources': [
                 'ns/nsx_core_mips.c',
               ],
@@ -183,7 +185,7 @@
         ['(target_arch=="arm" and arm_version>=7) or target_arch=="arm64"', {
           'dependencies': ['audio_processing_neon',],
         }],
-        ['target_arch=="mipsel" and mips_arch_variant!="r6" and android_webview_build==0', {
+        ['target_arch=="mipsel" and mips_arch_variant!="r6"', {
           'sources': [
             'aecm/aecm_core_mips.c',
           ],
@@ -232,10 +234,14 @@
             'aec/aec_core_sse2.c',
             'aec/aec_rdft_sse2.c',
           ],
-          'cflags': ['-msse2',],
-          'xcode_settings': {
-            'OTHER_CFLAGS': ['-msse2',],
-          },
+          'conditions': [
+            ['os_posix==1', {
+              'cflags': [ '-msse2', ],
+              'xcode_settings': {
+                'OTHER_CFLAGS': [ '-msse2', ],
+              },
+            }],
+          ],
         },
       ],
     }],

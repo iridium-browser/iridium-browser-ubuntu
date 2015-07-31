@@ -314,7 +314,7 @@ WebInspector.DOMNode.prototype = {
     /**
      * @return {?WebInspector.DOMNode}
      */
-    ancestorClosedShadowRoot: function()
+    ancestorUserAgentShadowRoot: function()
     {
         var ancestorShadowRoot = this.ancestorShadowRoot();
         if (!ancestorShadowRoot)
@@ -537,7 +537,12 @@ WebInspector.DOMNode.prototype = {
      */
     eventListeners: function(objectGroupId, callback)
     {
-        var target = this.target();
+        var domModel = this._domModel;
+        var debuggerModel = WebInspector.DebuggerModel.fromTarget(domModel.target());
+        if (!debuggerModel) {
+            callback(null);
+            return;
+        }
 
         /**
          * @param {?Protocol.Error} error
@@ -550,7 +555,7 @@ WebInspector.DOMNode.prototype = {
                 return;
             }
             callback(payloads.map(function(payload) {
-                return new WebInspector.DOMModel.EventListener(target, payload);
+                return new WebInspector.DOMModel.EventListener(domModel, /** @type {!WebInspector.DebuggerModel} */ (debuggerModel), payload);
             }));
         }
         this._agent.getEventListenersForNode(this.id, objectGroupId, mycallback);
@@ -947,7 +952,7 @@ WebInspector.DOMNode.prototype = {
     {
         var node = this;
         while (true) {
-            var ancestor = node.ancestorClosedShadowRoot();
+            var ancestor = node.ancestorUserAgentShadowRoot();
             if (!ancestor)
                 break;
             ancestor = node.ancestorShadowHost();
@@ -969,7 +974,7 @@ WebInspector.DOMNode.prototype = {
  */
 WebInspector.DeferredDOMNode = function(target, backendNodeId)
 {
-    this._domModel = target.domModel;
+    this._domModel = WebInspector.DOMModel.fromTarget(target);
     this._backendNodeId = backendNodeId;
 }
 
@@ -979,6 +984,11 @@ WebInspector.DeferredDOMNode.prototype = {
      */
     resolve: function(callback)
     {
+        if (!this._domModel) {
+            callback(null);
+            return;
+        }
+
         this._domModel.pushNodesByBackendIdsToFrontend(new Set([this._backendNodeId]), onGotNode.bind(this));
 
         /**
@@ -1001,7 +1011,8 @@ WebInspector.DeferredDOMNode.prototype = {
 
     highlight: function()
     {
-        this._domModel.highlightDOMNode(undefined, undefined, this._backendNodeId);
+        if (this._domModel)
+            this._domModel.highlightDOMNode(undefined, undefined, this._backendNodeId);
     }
 }
 
@@ -1047,6 +1058,7 @@ WebInspector.DOMModel = function(target) {
     WebInspector.SDKModel.call(this, WebInspector.DOMModel, target);
 
     this._agent = target.domAgent();
+    WebInspector.targetManager.addEventListener(WebInspector.TargetManager.Events.SuspendStateChanged, this._suspendStateChanged, this);
 
     /** @type {!Object.<number, !WebInspector.DOMNode>} */
     this._idToDOMNode = {};
@@ -1056,11 +1068,13 @@ WebInspector.DOMModel = function(target) {
     this._attributeLoadNodeIds = {};
     target.registerDOMDispatcher(new WebInspector.DOMDispatcher(this));
 
+    this._showRulers = false;
+    this._showExtensionLines = false;
+
     this._defaultHighlighter = new WebInspector.DefaultDOMNodeHighlighter(this._agent);
     this._highlighter = this._defaultHighlighter;
 
-    if (target.isPage())
-        this._agent.enable();
+    this._agent.enable();
 }
 
 WebInspector.DOMModel.Events = {
@@ -1075,26 +1089,48 @@ WebInspector.DOMModel.Events = {
     UndoRedoRequested: "UndoRedoRequested",
     UndoRedoCompleted: "UndoRedoCompleted",
     DistributedNodesChanged: "DistributedNodesChanged",
-    ModelSuspended: "ModelSuspended"
+    ModelSuspended: "ModelSuspended",
+    InspectModeWillBeToggled: "InspectModeWillBeToggled"
+}
+
+
+/**
+ * @param {!WebInspector.RemoteObject} object
+ */
+WebInspector.DOMModel.highlightObjectAsDOMNode = function(object)
+{
+    var domModel = WebInspector.DOMModel.fromTarget(object.target());
+    if (domModel)
+        domModel.highlightDOMNode(undefined, undefined, undefined, object.objectId);
+}
+
+/**
+ * @return {!Array<!WebInspector.DOMModel>}
+ */
+WebInspector.DOMModel.instances = function()
+{
+    var result = [];
+    for (var target of WebInspector.targetManager.targets()) {
+        var domModel = WebInspector.DOMModel.fromTarget(target);
+        if (domModel)
+            result.push(domModel);
+    }
+    return result;
+}
+
+WebInspector.DOMModel.hideDOMNodeHighlight = function()
+{
+    for (var domModel of WebInspector.DOMModel.instances())
+        domModel.highlightDOMNode(0);
+}
+
+WebInspector.DOMModel.cancelSearch = function()
+{
+    for (var domModel of WebInspector.DOMModel.instances())
+        domModel._cancelSearch();
 }
 
 WebInspector.DOMModel.prototype = {
-    suspendModel: function()
-    {
-        if (!this.target().isPage())
-            return;
-        this._agent.disable();
-        this.dispatchEventToListeners(WebInspector.DOMModel.Events.ModelSuspended);
-    },
-
-    resumeModel: function()
-    {
-        if (!this.target().isPage())
-            return;
-        this._agent.enable();
-        this._setDocument(null);
-    },
-
     /**
      * @param {function(!WebInspector.DOMDocument)=} callback
      */
@@ -1527,7 +1563,7 @@ WebInspector.DOMModel.prototype = {
      */
     performSearch: function(query, includeUserAgentShadowDOM, searchCallback)
     {
-        this.cancelSearch();
+        WebInspector.DOMModel.cancelSearch();
 
         /**
          * @param {?Protocol.Error} error
@@ -1605,7 +1641,7 @@ WebInspector.DOMModel.prototype = {
         }
     },
 
-    cancelSearch: function()
+    _cancelSearch: function()
     {
         if (this._searchId) {
             this._agent.discardSearchResults(this._searchId);
@@ -1663,18 +1699,13 @@ WebInspector.DOMModel.prototype = {
         this._highlighter.highlightDOMNode(this.nodeForId(nodeId || 0), highlightConfig, backendNodeId, objectId);
     },
 
-    hideDOMNodeHighlight: function()
-    {
-        this.highlightDOMNode(0);
-    },
-
     /**
      * @param {!DOMAgent.NodeId} nodeId
      */
     highlightDOMNodeForTwoSeconds: function(nodeId)
     {
         this.highlightDOMNode(nodeId);
-        this._hideDOMNodeHighlightTimeout = setTimeout(this.hideDOMNodeHighlight.bind(this), 2000);
+        this._hideDOMNodeHighlightTimeout = setTimeout(WebInspector.DOMModel.hideDOMNodeHighlight.bind(WebInspector.DOMModel), 2000);
     },
 
     /**
@@ -1697,9 +1728,20 @@ WebInspector.DOMModel.prototype = {
          */
         function onDocumentAvailable()
         {
+            this.dispatchEventToListeners(WebInspector.DOMModel.Events.InspectModeWillBeToggled, enabled);
             this._highlighter.setInspectModeEnabled(enabled, inspectUAShadowDOM, this._buildHighlightConfig(), callback);
         }
         this.requestDocument(onDocumentAvailable.bind(this));
+    },
+
+    /**
+     * @param {boolean} showRulers
+     * @param {boolean} showExtensionLines
+     */
+    setHighlightSettings: function(showRulers, showExtensionLines)
+    {
+        this._showRulers = showRulers;
+        this._showExtensionLines = showExtensionLines;
     },
 
     /**
@@ -1709,7 +1751,7 @@ WebInspector.DOMModel.prototype = {
     _buildHighlightConfig: function(mode)
     {
         mode = mode || "all";
-        var highlightConfig = { showInfo: mode === "all", showRulers: WebInspector.overridesSupport.showMetricsRulers(), showExtensionLines: WebInspector.overridesSupport.showExtensionLines()};
+        var highlightConfig = { showInfo: mode === "all", showRulers: this._showRulers, showExtensionLines: this._showExtensionLines };
         if (mode === "all" || mode === "content")
             highlightConfig.contentColor = WebInspector.Color.PageHighlight.Content.toProtocolRGBA();
 
@@ -1751,52 +1793,6 @@ WebInspector.DOMModel.prototype = {
                 callback.apply(this, arguments);
         }
         return wrapperFunction.bind(this);
-    },
-
-    /**
-     * @param {boolean} emulationEnabled
-     * @param {string} configuration
-     */
-    emulateTouchEventObjects: function(emulationEnabled, configuration)
-    {
-        /**
-         * @suppressGlobalPropertiesCheck
-         */
-        const injectedFunction = function() {
-            const touchEvents = ["ontouchstart", "ontouchend", "ontouchmove", "ontouchcancel"];
-            var recepients = [window.__proto__, document.__proto__];
-            for (var i = 0; i < touchEvents.length; ++i) {
-                for (var j = 0; j < recepients.length; ++j) {
-                    if (!(touchEvents[i] in recepients[j]))
-                        Object.defineProperty(recepients[j], touchEvents[i], { value: null, writable: true, configurable: true, enumerable: true });
-                }
-            }
-        }
-
-        if (emulationEnabled && !this._addTouchEventsScriptInjecting) {
-            this._addTouchEventsScriptInjecting = true;
-            this.target().pageAgent().addScriptToEvaluateOnLoad("(" + injectedFunction.toString() + ")()", scriptAddedCallback.bind(this));
-        } else {
-            if (typeof this._addTouchEventsScriptId !== "undefined") {
-                this.target().pageAgent().removeScriptToEvaluateOnLoad(this._addTouchEventsScriptId);
-                delete this._addTouchEventsScriptId;
-            }
-        }
-
-        /**
-         * @param {?Protocol.Error} error
-         * @param {string} scriptId
-         * @this {WebInspector.DOMModel}
-         */
-        function scriptAddedCallback(error, scriptId)
-        {
-            delete this._addTouchEventsScriptInjecting;
-            if (error)
-                return;
-            this._addTouchEventsScriptId = scriptId;
-        }
-
-        this.target().emulationAgent().setTouchEmulationEnabled(emulationEnabled, configuration);
     },
 
     markUndoableState: function()
@@ -1886,12 +1882,14 @@ WebInspector.DOMModel.prototype = {
             callback(null);
     },
 
-    /**
-     * @param {!WebInspector.RemoteObject} object
-     */
-    highlightObjectAsDOMNode: function(object)
+    _suspendStateChanged: function()
     {
-        this.highlightDOMNode(undefined, undefined, undefined, object.objectId);
+        if (WebInspector.targetManager.allTargetsSuspended()) {
+            this._agent.disable();
+        } else {
+            this._agent.enable();
+            this._setDocument(null);
+        }
     },
 
     __proto__: WebInspector.SDKModel.prototype
@@ -2060,14 +2058,17 @@ WebInspector.DOMDispatcher.prototype = {
 /**
  * @constructor
  * @extends {WebInspector.SDKObject}
- * @param {!WebInspector.Target} target
+ * @param {!WebInspector.DOMModel} domModel
+ * @param {!WebInspector.DebuggerModel} debuggerModel
  * @param {!DOMAgent.EventListener} payload
  */
-WebInspector.DOMModel.EventListener = function(target, payload)
+WebInspector.DOMModel.EventListener = function(domModel, debuggerModel, payload)
 {
-    WebInspector.SDKObject.call(this, target);
+    WebInspector.SDKObject.call(this, domModel.target());
+    this._domModel = domModel;
+    this._debuggerModel = debuggerModel;
     this._payload = payload;
-    var script = target.debuggerModel.scriptForId(payload.location.scriptId);
+    var script = debuggerModel.scriptForId(payload.location.scriptId);
     var sourceName = script ? script.contentURL() : "";
     this._sourceName = sourceName;
 }
@@ -2086,7 +2087,7 @@ WebInspector.DOMModel.EventListener.prototype = {
      */
     node: function()
     {
-        return this.target().domModel.nodeForId(this._payload.nodeId);
+        return this._domModel.nodeForId(this._payload.nodeId);
     },
 
     /**
@@ -2094,7 +2095,7 @@ WebInspector.DOMModel.EventListener.prototype = {
      */
     location: function()
     {
-        return WebInspector.DebuggerModel.Location.fromPayload(this.target(), this._payload.location);
+        return WebInspector.DebuggerModel.Location.fromPayload(this._debuggerModel, this._payload.location);
     },
 
     /**
@@ -2180,7 +2181,6 @@ WebInspector.DefaultDOMNodeHighlighter.prototype = {
      */
     setInspectModeEnabled: function(enabled, inspectUAShadowDOM, config, callback)
     {
-        WebInspector.overridesSupport.setTouchEmulationSuspended(enabled);
         this._agent.setInspectModeEnabled(enabled, inspectUAShadowDOM, config, callback);
     },
 
@@ -2192,4 +2192,13 @@ WebInspector.DefaultDOMNodeHighlighter.prototype = {
     {
         this._agent.highlightFrame(frameId, WebInspector.Color.PageHighlight.Content.toProtocolRGBA(), WebInspector.Color.PageHighlight.ContentOutline.toProtocolRGBA());
     }
+}
+
+/**
+ * @param {!WebInspector.Target} target
+ * @return {?WebInspector.DOMModel}
+ */
+WebInspector.DOMModel.fromTarget = function(target)
+{
+    return /** @type {?WebInspector.DOMModel} */ (target.model(WebInspector.DOMModel));
 }

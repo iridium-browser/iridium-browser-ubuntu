@@ -7,17 +7,14 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/metrics/histogram.h"
-#include "base/prefs/pref_service.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_bypass_stats.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_compression_stats.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_configurator.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_experiments_stats.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_io_data.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_request_options.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_service.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_response_headers.h"
@@ -80,33 +77,30 @@ DataReductionProxyNetworkDelegate::DataReductionProxyNetworkDelegate(
     scoped_ptr<net::NetworkDelegate> network_delegate,
     DataReductionProxyConfig* config,
     DataReductionProxyRequestOptions* request_options,
-    const DataReductionProxyConfigurator* configurator)
+    const DataReductionProxyConfigurator* configurator,
+    DataReductionProxyExperimentsStats* experiments_stats)
     : LayeredNetworkDelegate(network_delegate.Pass()),
-      ui_task_runner_(NULL),
       received_content_length_(0),
       original_content_length_(0),
-      data_reduction_proxy_enabled_(NULL),
       data_reduction_proxy_config_(config),
-      data_reduction_proxy_bypass_stats_(NULL),
+      data_reduction_proxy_bypass_stats_(nullptr),
       data_reduction_proxy_request_options_(request_options),
-      configurator_(configurator) {
+      data_reduction_proxy_io_data_(nullptr),
+      configurator_(configurator),
+      experiments_stats_(experiments_stats) {
   DCHECK(data_reduction_proxy_config_);
   DCHECK(data_reduction_proxy_request_options_);
+  DCHECK(experiments_stats_);
 }
 
 DataReductionProxyNetworkDelegate::~DataReductionProxyNetworkDelegate() {
 }
 
 void DataReductionProxyNetworkDelegate::InitIODataAndUMA(
-    scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
     DataReductionProxyIOData* io_data,
-    BooleanPrefMember* data_reduction_proxy_enabled,
     DataReductionProxyBypassStats* bypass_stats) {
-  DCHECK(data_reduction_proxy_enabled);
   DCHECK(bypass_stats);
-  ui_task_runner_ = ui_task_runner;
   data_reduction_proxy_io_data_ = io_data;
-  data_reduction_proxy_enabled_ = data_reduction_proxy_enabled;
   data_reduction_proxy_bypass_stats_ = bypass_stats;
 }
 
@@ -127,9 +121,9 @@ void DataReductionProxyNetworkDelegate::OnResolveProxyInternal(
     const net::ProxyService& proxy_service,
     net::ProxyInfo* result) {
   if (configurator_) {
-    OnResolveProxyHandler(
-        url, load_flags, configurator_->GetProxyConfigOnIOThread(),
-        proxy_service.proxy_retry_info(), data_reduction_proxy_config_, result);
+    OnResolveProxyHandler(url, load_flags, configurator_->GetProxyConfig(),
+                          proxy_service.proxy_retry_info(),
+                          data_reduction_proxy_config_, result);
   }
 }
 
@@ -181,10 +175,9 @@ void DataReductionProxyNetworkDelegate::OnCompletedInternal(
         request->response_info().headers->GetFreshnessLifetimes(
             request->response_info().response_time).freshness;
     DataReductionProxyRequestType request_type =
-        GetDataReductionProxyRequestType(
-            *request,
-            configurator_->GetProxyConfigOnIOThread(),
-            *data_reduction_proxy_config_);
+        GetDataReductionProxyRequestType(*request,
+                                         configurator_->GetProxyConfig(),
+                                         *data_reduction_proxy_config_);
 
     int64 adjusted_original_content_length =
         GetAdjustedOriginalContentLength(request_type,
@@ -196,13 +189,14 @@ void DataReductionProxyNetworkDelegate::OnCompletedInternal(
     RecordContentLengthHistograms(received_content_length,
                                   original_content_length,
                                   freshness_lifetime);
+    experiments_stats_->RecordBytes(request->request_time(), request_type,
+                                    received_content_length,
+                                    original_content_length);
 
-    if (data_reduction_proxy_enabled_ &&
-        data_reduction_proxy_bypass_stats_) {
+    if (data_reduction_proxy_io_data_ && data_reduction_proxy_bypass_stats_) {
       data_reduction_proxy_bypass_stats_->RecordBytesHistograms(
-          *request,
-          *data_reduction_proxy_enabled_,
-          configurator_->GetProxyConfigOnIOThread());
+          *request, data_reduction_proxy_io_data_->IsEnabled(),
+          configurator_->GetProxyConfig());
     }
     DVLOG(2) << __FUNCTION__
         << " received content length: " << received_content_length
@@ -217,50 +211,13 @@ void DataReductionProxyNetworkDelegate::AccumulateContentLength(
     DataReductionProxyRequestType request_type) {
   DCHECK_GE(received_content_length, 0);
   DCHECK_GE(original_content_length, 0);
-  if (data_reduction_proxy_enabled_) {
-    ui_task_runner_->PostTask(
-        FROM_HERE,
-        base::Bind(&DataReductionProxyNetworkDelegate::UpdateContentLengthPrefs,
-                   base::Unretained(this),
-                   received_content_length,
-                   original_content_length,
-                   data_reduction_proxy_enabled_->GetValue(),
-                   request_type));
+  if (data_reduction_proxy_io_data_) {
+    data_reduction_proxy_io_data_->UpdateContentLengths(
+        received_content_length, original_content_length,
+        data_reduction_proxy_io_data_->IsEnabled(), request_type);
   }
   received_content_length_ += received_content_length;
   original_content_length_ += original_content_length;
-}
-
-void DataReductionProxyNetworkDelegate::UpdateContentLengthPrefs(
-    int64 received_content_length,
-    int64 original_content_length,
-    bool data_reduction_proxy_enabled,
-    DataReductionProxyRequestType request_type) {
-  if (data_reduction_proxy_io_data_ &&
-      data_reduction_proxy_io_data_->service()) {
-    DataReductionProxyCompressionStats* data_reduction_proxy_compression_stats =
-        data_reduction_proxy_io_data_->service()->compression_stats();
-    int64 total_received = data_reduction_proxy_compression_stats->GetInt64(
-        data_reduction_proxy::prefs::kHttpReceivedContentLength);
-    int64 total_original = data_reduction_proxy_compression_stats->GetInt64(
-        data_reduction_proxy::prefs::kHttpOriginalContentLength);
-    total_received += received_content_length;
-    total_original += original_content_length;
-    data_reduction_proxy_compression_stats->SetInt64(
-        data_reduction_proxy::prefs::kHttpReceivedContentLength,
-        total_received);
-    data_reduction_proxy_compression_stats->SetInt64(
-        data_reduction_proxy::prefs::kHttpOriginalContentLength,
-        total_original);
-
-    UpdateContentLengthPrefsForDataReductionProxy(
-        received_content_length,
-        original_content_length,
-        data_reduction_proxy_enabled,
-        request_type,
-        base::Time::Now(),
-        data_reduction_proxy_compression_stats);
-  }
 }
 
 void OnResolveProxyHandler(const GURL& url,

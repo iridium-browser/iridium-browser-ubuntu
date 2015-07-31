@@ -49,9 +49,7 @@
 #include "modules/serviceworkers/ServiceWorkerError.h"
 #include "modules/serviceworkers/ServiceWorkerRegistration.h"
 #include "platform/RuntimeEnabledFeatures.h"
-#include "public/platform/WebPageVisibilityState.h"
 #include "public/platform/WebServiceWorker.h"
-#include "public/platform/WebServiceWorkerClientsInfo.h"
 #include "public/platform/WebServiceWorkerProvider.h"
 #include "public/platform/WebServiceWorkerRegistration.h"
 #include "public/platform/WebString.h"
@@ -138,7 +136,7 @@ ScriptPromise ServiceWorkerContainer::registerServiceWorker(ScriptState* scriptS
     ExecutionContext* executionContext = scriptState->executionContext();
     RefPtr<SecurityOrigin> documentOrigin = executionContext->securityOrigin();
     String errorMessage;
-    if (!documentOrigin->canAccessFeatureRequiringSecureOrigin(errorMessage)) {
+    if (!executionContext->isPrivilegedContext(errorMessage)) {
         resolver->reject(DOMException::create(NotSupportedError, errorMessage));
         return promise;
     }
@@ -183,19 +181,6 @@ ScriptPromise ServiceWorkerContainer::registerServiceWorker(ScriptState* scriptS
     return promise;
 }
 
-class BooleanValue {
-public:
-    typedef bool WebType;
-    static bool take(ScriptPromiseResolver* resolver, WebType* boolean)
-    {
-        return *boolean;
-    }
-    static void dispose(WebType* boolean) { }
-
-private:
-    BooleanValue();
-};
-
 ScriptPromise ServiceWorkerContainer::getRegistration(ScriptState* scriptState, const String& documentURL)
 {
     ASSERT(RuntimeEnabledFeatures::serviceWorkerEnabled());
@@ -210,7 +195,7 @@ ScriptPromise ServiceWorkerContainer::getRegistration(ScriptState* scriptState, 
     ExecutionContext* executionContext = scriptState->executionContext();
     RefPtr<SecurityOrigin> documentOrigin = executionContext->securityOrigin();
     String errorMessage;
-    if (!documentOrigin->canAccessFeatureRequiringSecureOrigin(errorMessage)) {
+    if (!executionContext->isPrivilegedContext(errorMessage)) {
         resolver->reject(DOMException::create(NotSupportedError, errorMessage));
         return promise;
     }
@@ -291,25 +276,6 @@ void ServiceWorkerContainer::dispatchMessageEvent(const WebString& message, cons
 const AtomicString& ServiceWorkerContainer::interfaceName() const
 {
     return EventTargetNames::ServiceWorkerContainer;
-}
-
-bool ServiceWorkerContainer::getClientInfo(WebServiceWorkerClientInfo* info)
-{
-    ExecutionContext* context = executionContext();
-    // FIXME: Make this work for non-document context (e.g. shared workers).
-    if (!context || !context->isDocument())
-        return false;
-    Document* document = toDocument(context);
-    info->pageVisibilityState = static_cast<WebPageVisibilityState>(document->pageVisibilityState());
-    info->isFocused = document->hasFocus();
-    info->url = document->url();
-    if (!document->frame())
-        info->frameType = WebURLRequest::FrameTypeNone;
-    else if (document->frame()->isMainFrame())
-        info->frameType = WebURLRequest::FrameTypeTopLevel;
-    else
-        info->frameType = WebURLRequest::FrameTypeNested;
-    return true;
 }
 
 ServiceWorkerContainer::ServiceWorkerContainer(ExecutionContext* executionContext)

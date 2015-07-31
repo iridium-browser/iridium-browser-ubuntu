@@ -33,7 +33,6 @@
 
 namespace blink {
 
-class AudioContext;
 class AudioNodeInput;
 
 // AudioNodeOutput represents a single output for an AudioNode.
@@ -44,11 +43,6 @@ public:
     // setNumberOfChannels() must be called later on.
     static PassOwnPtr<AudioNodeOutput> create(AudioHandler*, unsigned numberOfChannels);
     void dispose();
-
-    // Can be called from any thread.
-    // TODO(tkent): Rename it.
-    AudioHandler* node() const { return &m_handler; }
-    AudioContext* context() { return m_handler.context(); }
 
     // Causes our AudioNode to process if it hasn't already for this render quantum.
     // It returns the bus containing the processed audio for this output, returning inPlaceBus if in-place processing was possible.
@@ -92,9 +86,12 @@ public:
 
 private:
     AudioNodeOutput(AudioHandler*, unsigned numberOfChannels);
+    // Can be called from any thread.
+    AudioHandler& handler() const { return m_handler; }
+    DeferredTaskHandler& deferredTaskHandler() const { return m_handler.context()->deferredTaskHandler(); }
 
-    // This reference to an Oilpan object is safe because the AudioNode owns
-    // this AudioNodeOutput object.
+    // This reference is safe because the AudioHandler owns this AudioNodeOutput
+    // object.
     AudioHandler& m_handler;
 
     friend class AudioNodeInput;

@@ -10,12 +10,15 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "components/favicon/core/fallback_icon_service.h"
-#include "components/favicon_base/favicon_types.h"
 #include "content/public/browser/url_data_source.h"
 
 namespace favicon {
 class FallbackIconService;
-class FaviconService;
+class LargeIconService;
+}
+
+namespace favicon_base {
+struct LargeIconResult;
 }
 
 // LargeIconSource services explicit chrome:// requests for large icons.
@@ -33,10 +36,10 @@ class FaviconService;
 //    This requests a 48x48 large icon for http://www.google.com.
 class LargeIconSource : public content::URLDataSource {
  public:
-  // |favicon_service| and |fallback_icon_service| are owned by caller and may
-  // be null.
-  LargeIconSource(favicon::FaviconService* favicon_service,
-                  favicon::FallbackIconService* fallback_icon_service);
+  // |fallback_icon_service| and |large_icon_service| are owned by caller and
+  // may be null.
+  LargeIconSource(favicon::FallbackIconService* fallback_icon_service,
+                  favicon::LargeIconService* large_icon_service);
 
   ~LargeIconSource() override;
 
@@ -51,27 +54,13 @@ class LargeIconSource : public content::URLDataSource {
   bool ShouldReplaceExistingSource() const override;
   bool ShouldServiceRequest(const net::URLRequest* request) const override;
 
- protected:
-  struct IconRequest {
-    IconRequest();
-    IconRequest(const content::URLDataSource::GotDataCallback& callback_in,
-                const GURL& path_in,
-                int size_in);
-    ~IconRequest();
-
-    content::URLDataSource::GotDataCallback callback;
-    GURL url;
-    int size;
-  };
-
  private:
-  // Callback for icon data retrieval request.
-  void OnIconDataAvailable(
-      const IconRequest& request,
-      const favicon_base::FaviconRawBitmapResult& bitmap_result);
-
-  // Renders and sends a fallback icon.
-  void SendFallbackIcon(const IconRequest& request);
+  // Called with results of large icon retrieval request.
+  void OnLargeIconDataAvailable(
+      const content::URLDataSource::GotDataCallback& callback,
+      const GURL& url,
+      int size,
+      const favicon_base::LargeIconResult& bitmap_result);
 
   // Returns null to trigger "Not Found" response.
   void SendNotFoundResponse(
@@ -79,9 +68,11 @@ class LargeIconSource : public content::URLDataSource {
 
   base::CancelableTaskTracker cancelable_task_tracker_;
 
-  favicon::FaviconService* favicon_service_;
-
+  // Owned by client.
   favicon::FallbackIconService* fallback_icon_service_;
+
+  // Owned by client.
+  favicon::LargeIconService* large_icon_service_;
 
   DISALLOW_COPY_AND_ASSIGN(LargeIconSource);
 };

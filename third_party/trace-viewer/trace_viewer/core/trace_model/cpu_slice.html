@@ -12,7 +12,7 @@ found in the LICENSE file.
 'use strict';
 
 /**
- * @fileoverview Provides the Cpu class.
+ * @fileoverview Provides the CpuSlice class.
  */
 tv.exportTo('tv.c.trace_model', function() {
 
@@ -34,23 +34,6 @@ tv.exportTo('tv.c.trace_model', function() {
 
     get analysisTypeName() {
       return 'tv.c.analysis.CpuSlice';
-    },
-
-    toJSON: function() {
-      var obj = new Object();
-      var keys = Object.keys(this);
-      for (var i = 0; i < keys.length; i++) {
-        var key = keys[i];
-        if (typeof this[key] == 'function')
-          continue;
-        if (key == 'cpu' || key == 'threadThatWasRunning') {
-          if (this[key])
-            obj[key] = this[key].guid;
-          continue;
-        }
-        obj[key] = this[key];
-      }
-      return obj;
     },
 
     getAssociatedTimeslice: function() {
@@ -75,7 +58,7 @@ tv.exportTo('tv.c.trace_model', function() {
         name: 'cpuSlice',
         pluralName: 'cpuSlices',
         singleViewElementName: 'tv-c-single-cpu-slice-sub-view',
-        multiViewElementName: 'tv-c-multi-slice-sub-view'
+        multiViewElementName: 'tv-c-a-multi-cpu-slice-sub-view'
       });
 
   return {

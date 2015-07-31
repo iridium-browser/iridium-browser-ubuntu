@@ -97,6 +97,7 @@ const (
 type CurveID uint16
 
 const (
+	CurveP224 CurveID = 21
 	CurveP256 CurveID = 23
 	CurveP384 CurveID = 24
 	CurveP521 CurveID = 25
@@ -433,6 +434,11 @@ type ProtocolBugs struct {
 	// HelloVerifyRequest message.
 	SkipHelloVerifyRequest bool
 
+	// SkipCertificateStatus, if true, causes the server to skip the
+	// CertificateStatus message. This is legal because CertificateStatus is
+	// optional, even with a status_request in ServerHello.
+	SkipCertificateStatus bool
+
 	// SkipServerKeyExchange causes the server to skip sending
 	// ServerKeyExchange messages.
 	SkipServerKeyExchange bool
@@ -505,6 +511,13 @@ type ProtocolBugs struct {
 	// isn't sent until we receive an application data record
 	// from the peer.
 	ExpectFalseStart bool
+
+	// AlertBeforeFalseStartTest, if non-zero, causes the server to, on full
+	// handshakes, send an alert just before reading the application data
+	// record to test False Start. This can be used in a negative False
+	// Start test to determine whether the peer processed the alert (and
+	// closed the connection) before or after sending app data.
+	AlertBeforeFalseStartTest alert
 
 	// SSL3RSAKeyExchange causes the client to always send an RSA
 	// ClientKeyExchange message without the two-byte length
@@ -583,6 +596,10 @@ type ProtocolBugs struct {
 	// CertificateRequest message. None the less, the configured set will
 	// still be enforced.
 	NoSignatureAndHashes bool
+
+	// NoSupportedCurves, if true, causes the client to omit the
+	// supported_curves extension.
+	NoSupportedCurves bool
 
 	// RequireSameRenegoClientVersion, if true, causes the server
 	// to require that all ClientHellos match in offered version
@@ -664,9 +681,9 @@ type ProtocolBugs struct {
 	// fragments in DTLS.
 	SendEmptyFragments bool
 
-	// NeverResumeOnRenego, if true, causes renegotiations to always be full
-	// handshakes.
-	NeverResumeOnRenego bool
+	// FailIfResumeOnRenego, if true, causes renegotiations to fail if the
+	// client offers a resumption or the server accepts one.
+	FailIfResumeOnRenego bool
 
 	// NoSignatureAlgorithmsOnRenego, if true, causes renegotiations to omit
 	// the signature_algorithms extension.
@@ -680,9 +697,16 @@ type ProtocolBugs struct {
 	// signature algorithm preferences to be ignored.
 	IgnorePeerSignatureAlgorithmPreferences bool
 
+	// IgnorePeerCurvePreferences, if true, causes the peer's curve
+	// preferences to be ignored.
+	IgnorePeerCurvePreferences bool
+
 	// SendWarningAlerts, if non-zero, causes every record to be prefaced by
 	// a warning alert.
 	SendWarningAlerts alert
+
+	// BadFinished, if true, causes the Finished hash to be broken.
+	BadFinished bool
 }
 
 func (c *Config) serverInit() {

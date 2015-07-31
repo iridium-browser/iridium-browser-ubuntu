@@ -5,9 +5,8 @@
 #include "config.h"
 #include "core/paint/FilterPainter.h"
 
-#include "core/layout/FilterEffectRenderer.h"
-#include "core/layout/LayoutView.h"
 #include "core/paint/DeprecatedPaintLayer.h"
+#include "core/paint/FilterEffectBuilder.h"
 #include "core/paint/LayerClipRecorder.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/graphics/GraphicsContext.h"
@@ -28,13 +27,13 @@ FilterPainter::FilterPainter(DeprecatedPaintLayer& layer, GraphicsContext* conte
     , m_context(context)
     , m_layoutObject(layer.layoutObject())
 {
-    if (!layer.filterRenderer() || !layer.paintsWithFilters())
+    if (!layer.filterEffectBuilder() || !layer.paintsWithFilters())
         return;
 
     ASSERT(layer.filterInfo());
 
-    SkiaImageFilterBuilder builder(context);
-    RefPtrWillBeRawPtr<FilterEffect> lastEffect = layer.filterRenderer()->lastEffect();
+    SkiaImageFilterBuilder builder;
+    RefPtrWillBeRawPtr<FilterEffect> lastEffect = layer.filterEffectBuilder()->lastEffect();
     lastEffect->determineFilterPrimitiveSubregion(MapRectForward);
     RefPtr<SkImageFilter> imageFilter = builder.build(lastEffect.get(), ColorSpaceDeviceRGB);
     if (!imageFilter)
@@ -59,13 +58,15 @@ FilterPainter::FilterPainter(DeprecatedPaintLayer& layer, GraphicsContext* conte
 
     ASSERT(m_layoutObject);
     if (RuntimeEnabledFeatures::slimmingPaintEnabled()) {
-        FilterOperations filterOperations(layer.computeFilterOperations(m_layoutObject->styleRef()));
-        OwnPtr<WebFilterOperations> webFilterOperations = adoptPtr(Platform::current()->compositorSupport()->createFilterOperations());
-        builder.buildFilterOperations(filterOperations, webFilterOperations.get());
-        OwnPtr<BeginFilterDisplayItem> filterDisplayItem = BeginFilterDisplayItem::create(*m_layoutObject, imageFilter, rootRelativeBounds, webFilterOperations.release());
-
         ASSERT(context->displayItemList());
-        context->displayItemList()->add(filterDisplayItem.release());
+        if (!context->displayItemList()->displayItemConstructionIsDisabled()) {
+            FilterOperations filterOperations(layer.computeFilterOperations(m_layoutObject->styleRef()));
+            OwnPtr<WebFilterOperations> webFilterOperations = adoptPtr(Platform::current()->compositorSupport()->createFilterOperations());
+            builder.buildFilterOperations(filterOperations, webFilterOperations.get());
+            OwnPtr<BeginFilterDisplayItem> filterDisplayItem = BeginFilterDisplayItem::create(*m_layoutObject, imageFilter, rootRelativeBounds, webFilterOperations.release());
+
+            context->displayItemList()->add(filterDisplayItem.release());
+        }
     } else {
         OwnPtr<BeginFilterDisplayItem> filterDisplayItem = BeginFilterDisplayItem::create(*m_layoutObject, imageFilter, rootRelativeBounds);
 
@@ -83,6 +84,8 @@ FilterPainter::~FilterPainter()
     OwnPtr<EndFilterDisplayItem> endFilterDisplayItem = EndFilterDisplayItem::create(*m_layoutObject);
     if (RuntimeEnabledFeatures::slimmingPaintEnabled()) {
         ASSERT(m_context->displayItemList());
+        if (m_context->displayItemList()->displayItemConstructionIsDisabled())
+            return;
         m_context->displayItemList()->add(endFilterDisplayItem.release());
     } else {
         endFilterDisplayItem->replay(*m_context);

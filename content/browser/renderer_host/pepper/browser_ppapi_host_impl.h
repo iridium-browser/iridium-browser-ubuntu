@@ -72,6 +72,11 @@ class CONTENT_EXPORT BrowserPpapiHostImpl : public BrowserPpapiHost {
   void SetOnKeepaliveCallback(
       const BrowserPpapiHost::OnKeepaliveCallback& callback) override;
 
+  // Whether the plugin context is secure. That is, it is served from a secure
+  // origin and it is embedded within a hierarchy of secure frames. This value
+  // comes from the renderer so should not be trusted. It is used for metrics.
+  bool IsPotentiallySecurePluginContext(PP_Instance instance);
+
   void set_plugin_process(base::Process process) {
     plugin_process_ = process.Pass();
   }
@@ -155,7 +160,7 @@ class CONTENT_EXPORT BrowserPpapiHostImpl : public BrowserPpapiHost {
   scoped_refptr<SSLContextHelper> ssl_context_helper_;
 
   // Tracks all PP_Instances in this plugin and associated data.
-  base::ScopedPtrHashMap<PP_Instance, InstanceData> instance_map_;
+  base::ScopedPtrHashMap<PP_Instance, scoped_ptr<InstanceData>> instance_map_;
 
   scoped_refptr<HostMessageFilter> message_filter_;
 

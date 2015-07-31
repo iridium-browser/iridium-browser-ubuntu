@@ -8,13 +8,13 @@ from __future__ import print_function
 
 import glob
 import json
-import logging
 import os
 
 from chromite.cbuildbot import commands
 from chromite.cbuildbot import constants
 from chromite.cbuildbot.stages import generic_stages
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import osutils
 from chromite.lib import perf_uploader
 from chromite.lib import portage_util
@@ -122,7 +122,7 @@ class SDKPackageStage(generic_stages.BuilderStage):
       sdk_path: Path to the root of the SDK to describe.
       dest_manifest: Path to the manifest that should be generated.
     """
-    cros_build_lib.Info('Generating manifest for new sdk')
+    logging.info('Generating manifest for new sdk')
     package_data = {}
     for key, version in portage_util.ListInstalledPackages(sdk_path):
       package_data.setdefault(key, []).append((version, {}))

@@ -10,7 +10,7 @@ import android.app.Notification;
 import android.content.Intent;
 import android.os.Bundle;
 import android.provider.Browser;
-import android.support.v7.app.ActionBarActivity;
+import android.support.v7.app.AppCompatActivity;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.KeyEvent;
@@ -31,8 +31,9 @@ import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.chrome.browser.DevToolsServer;
 import org.chromium.chrome.browser.FileProviderHelper;
-import org.chromium.chrome.browser.ServiceTabLauncher;
 import org.chromium.chrome.browser.Tab;
+import org.chromium.chrome.browser.WarmupManager;
+import org.chromium.chrome.browser.WebsiteSettingsPopup;
 import org.chromium.chrome.browser.appmenu.AppMenuHandler;
 import org.chromium.chrome.browser.appmenu.AppMenuPropertiesDelegate;
 import org.chromium.chrome.browser.dom_distiller.DomDistillerTabUtils;
@@ -49,6 +50,7 @@ import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.shell.sync.AccountChooserFragment;
 import org.chromium.chrome.shell.sync.SignoutFragment;
 import org.chromium.components.dom_distiller.core.DomDistillerUrlUtils;
+import org.chromium.components.service_tab_launcher.ServiceTabLauncher;
 import org.chromium.content.app.ContentApplication;
 import org.chromium.content.browser.ActivityContentVideoViewClient;
 import org.chromium.content.browser.BrowserStartupController;
@@ -64,7 +66,7 @@ import org.chromium.ui.base.WindowAndroid;
 /**
  * The {@link android.app.Activity} component of a basic test shell to test Chrome features.
  */
-public class ChromeShellActivity extends ActionBarActivity implements AppMenuPropertiesDelegate {
+public class ChromeShellActivity extends AppCompatActivity implements AppMenuPropertiesDelegate {
     private static final String TAG = "ChromeShellActivity";
 
     /**
@@ -81,11 +83,12 @@ public class ChromeShellActivity extends ActionBarActivity implements AppMenuPro
             new ActivityWindowAndroidFactory() {
                 @Override
                 public ActivityWindowAndroid getActivityWindowAndroid(Activity activity) {
-                    return new ActivityWindowAndroid(activity);
+                    final boolean listenToActivityState = true;
+                    return new ActivityWindowAndroid(activity, listenToActivityState);
                 }
             };
 
-    private WindowAndroid mWindow;
+    private ActivityWindowAndroid mWindow;
     private TabManager mTabManager;
     private ChromeShellToolbar mToolbar;
     private DevToolsServer mDevToolsServer;
@@ -122,6 +125,11 @@ public class ChromeShellActivity extends ActionBarActivity implements AppMenuPro
         waitForDebuggerIfNeeded();
 
         DeviceUtils.addDeviceSpecificUserAgentSwitch(this);
+
+        String url = getUrlFromIntent(getIntent());
+        if (url != null) {
+            WarmupManager.getInstance().maybePrefetchDnsForUrlInBackground(this, url);
+        }
 
         BrowserStartupController.StartupCallback callback =
                 new BrowserStartupController.StartupCallback() {
@@ -271,9 +279,6 @@ public class ChromeShellActivity extends ActionBarActivity implements AppMenuPro
         super.onStop();
 
         if (mToolbar != null) mToolbar.hideSuggestions();
-
-        Tab activeTab = getActiveTab();
-        if (activeTab != null) activeTab.onActivityStop();
     }
 
     @Override
@@ -391,6 +396,9 @@ public class ChromeShellActivity extends ActionBarActivity implements AppMenuPro
             if (activeTab != null && activeTab.canGoForward()) {
                 activeTab.goForward();
             }
+            return true;
+        } else if (id == R.id.info_menu_id) {
+            WebsiteSettingsPopup.show(this, activeTab.getProfile(), activeTab.getWebContents());
             return true;
         } else if (id == R.id.new_tab_menu_id) {
             mTabManager.createNewTab();

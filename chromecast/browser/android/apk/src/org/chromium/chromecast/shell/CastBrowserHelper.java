@@ -19,6 +19,7 @@ import org.chromium.content.app.ContentApplication;
 import org.chromium.content.browser.BrowserStartupController;
 import org.chromium.content.browser.DeviceUtils;
 import org.chromium.content.common.ContentSwitches;
+import org.chromium.net.NetworkChangeNotifier;
 
 /**
  * Static, one-time initialization for the browser process.
@@ -68,6 +69,9 @@ public class CastBrowserHelper {
             Log.d(TAG, "Loading BrowserStartupController...");
             BrowserStartupController.get(context, LibraryProcessType.PROCESS_BROWSER)
                     .startBrowserProcessesSync(false);
+            NetworkChangeNotifier.init(context);
+            // Cast shell always expects to receive notifications to track network state.
+            NetworkChangeNotifier.registerToReceiveNotificationsAlways();
             sIsBrowserInitialized = true;
             return true;
         } catch (ProcessInitException e) {

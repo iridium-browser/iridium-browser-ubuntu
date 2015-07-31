@@ -9,7 +9,7 @@
 #include <utility>
 
 #include "base/synchronization/waitable_event.h"
-#include "cc/resources/picture_pile.h"
+#include "cc/playback/picture_pile.h"
 #include "cc/test/impl_side_painting_settings.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -114,9 +114,7 @@ void FakePicturePileImpl::PlaybackToCanvas(SkCanvas* canvas,
 
 bool FakePicturePileImpl::HasRecordingAt(int x, int y) const {
   PictureMap::const_iterator found = picture_map_.find(PictureMapKey(x, y));
-  if (found == picture_map_.end())
-    return false;
-  return !!found->second.GetPicture();
+  return found != picture_map_.end();
 }
 
 }  // namespace cc

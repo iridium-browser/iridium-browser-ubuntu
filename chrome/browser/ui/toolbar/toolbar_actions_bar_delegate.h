@@ -5,10 +5,15 @@
 #ifndef CHROME_BROWSER_UI_TOOLBAR_TOOLBAR_ACTIONS_BAR_DELEGATE_H_
 #define CHROME_BROWSER_UI_TOOLBAR_TOOLBAR_ACTIONS_BAR_DELEGATE_H_
 
+#include "base/memory/scoped_ptr.h"
 #include "ui/gfx/animation/tween.h"
 #include "ui/gfx/geometry/size.h"
 
 class ToolbarActionViewController;
+
+namespace extensions {
+class ExtensionMessageBubbleController;
+}
 
 // The delegate class (which, in production, represents the view) of the
 // ToolbarActionsBar.
@@ -52,13 +57,17 @@ class ToolbarActionsBarDelegate {
   // Returns the width (including padding) for the overflow chevron.
   virtual int GetChevronWidth() const = 0;
 
-  // Returns true if there is currently a popup running.
-  virtual bool IsPopupRunning() const = 0;
-
   // Notifies the delegate that the value of whether or not any overflowed
   // action wants to run has changed.
   virtual void OnOverflowedActionWantsToRunChanged(
       bool overflowed_action_wants_to_run) = 0;
+
+  // Displays the bubble for the passed ExtensionMessageBubbleController,
+  // anchored to |anchor_action|. If |anchor_action| is null, it should be
+  // anchored to the hotdog menu.
+  virtual void ShowExtensionMessageBubble(
+      scoped_ptr<extensions::ExtensionMessageBubbleController> controller,
+      ToolbarActionViewController* anchor_action) = 0;
 };
 
 #endif  // CHROME_BROWSER_UI_TOOLBAR_TOOLBAR_ACTIONS_BAR_DELEGATE_H_

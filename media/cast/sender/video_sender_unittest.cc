@@ -52,7 +52,7 @@ class TestPacketSender : public PacketSender {
         paused_(false) {}
 
   // A singular packet implies a RTCP packet.
-  bool SendPacket(PacketRef packet, const base::Closure& cb) override {
+  bool SendPacket(PacketRef packet, const base::Closure& cb) final {
     if (paused_) {
       stored_packet_ = packet;
       callback_ = cb;
@@ -72,7 +72,7 @@ class TestPacketSender : public PacketSender {
     return true;
   }
 
-  int64 GetBytesSent() override { return 0; }
+  int64 GetBytesSent() final { return 0; }
 
   int number_of_rtp_packets() const { return number_of_rtp_packets_; }
 
@@ -151,7 +151,7 @@ class VideoSenderTest : public ::testing::Test {
 
   ~VideoSenderTest() override {}
 
-  void TearDown() override {
+  void TearDown() final {
     video_sender_.reset();
     task_runner_->RunTasks();
   }
@@ -163,19 +163,8 @@ class VideoSenderTest : public ::testing::Test {
   // If |external| is true then external video encoder (VEA) is used.
   // |expect_init_sucess| is true if initialization is expected to succeed.
   void InitEncoder(bool external, bool expect_init_success) {
-    VideoSenderConfig video_config;
-    video_config.ssrc = 1;
-    video_config.receiver_ssrc = 2;
-    video_config.rtp_payload_type = 127;
+    VideoSenderConfig video_config = GetDefaultVideoSenderConfig();
     video_config.use_external_encoder = external;
-    video_config.max_bitrate = 5000000;
-    video_config.min_bitrate = 1000000;
-    video_config.start_bitrate = 1000000;
-    video_config.max_qp = 56;
-    video_config.min_qp = 0;
-    video_config.max_frame_rate = 30;
-    video_config.max_number_of_video_buffers_used = 1;
-    video_config.codec = CODEC_VIDEO_VP8;
 
     ASSERT_EQ(operational_status_, STATUS_UNINITIALIZED);
 

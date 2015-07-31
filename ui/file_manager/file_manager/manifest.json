@@ -35,7 +35,7 @@
     "https://docs.google.com/",
     "https://drive.google.com/",
     "https://www.google-analytics.com/",
-    "management",
+    "launcherSearchProvider",
     "mediaPlayerPrivate",
     "metricsPrivate",
     "notifications",
@@ -43,6 +43,7 @@
     "storage",
     "syncFileSystem",
     "unlimitedStorage",
+    "webstoreWidgetPrivate",
     "webview"
   ],
   "file_browser_handlers": [
@@ -151,6 +152,9 @@
     "common/js/async_util.js",
     "common/js/error_util.js",
     "common/js/file_type.js",
+    "common/js/metrics_base.js",
+    "common/js/metrics_events.js",
+    "common/js/metrics.js",
     "common/js/path_util.js",
     "common/js/util.js",
     "common/js/volume_manager_common.js",
@@ -177,6 +181,7 @@
         "chrome://resources/js/analytics.js",
         "common/js/async_util.js",
         "common/js/file_type.js",
+        "common/js/lru_cache.js",
         "common/js/metrics_base.js",
         "common/js/metrics_events.js",
         "common/js/metrics.js",
@@ -193,6 +198,7 @@
         "background/js/file_operation_manager.js",
         "background/js/file_operation_util.js",
         "background/js/import_history.js",
+        "background/js/launcher_search.js",
         "background/js/task_queue.js",
         "background/js/media_import_handler.js",
         "background/js/media_scanner.js",
@@ -204,6 +210,6 @@
       ]
     },
     // chrome-extension://pmfjbimdmchhbnneeidfognadeopoehp is the image loader extension.
-    "content_security_policy": "default-src 'none'; script-src 'self' chrome://resources chrome-extension://pmfjbimdmchhbnneeidfognadeopoehp; style-src 'self' 'unsafe-inline' chrome://resources; frame-src 'self' about:; img-src 'self' chrome://resources chrome://theme data: https://docs.google.com https://*.googleusercontent.com chrome://extension-icon; media-src 'self' https://*.googleusercontent.com; connect-src https://drive.google.com https://www.google-analytics.com chrome://resources; object-src 'self'"
+    "content_security_policy": "default-src 'none'; script-src 'self' chrome://resources chrome-extension://pmfjbimdmchhbnneeidfognadeopoehp chrome-extension://fbjakikfhfdajcamjleinfciajelkpek; style-src 'self' 'unsafe-inline' chrome://resources chrome-extension://fbjakikfhfdajcamjleinfciajelkpek; frame-src 'self' about:; img-src 'self' chrome://resources chrome://theme data: https://docs.google.com https://*.googleusercontent.com chrome://extension-icon; media-src 'self' https://*.googleusercontent.com; connect-src https://drive.google.com https://www.google-analytics.com chrome://resources; object-src 'self'"
   }
 }

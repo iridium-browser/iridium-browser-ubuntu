@@ -220,6 +220,8 @@ class VIEWS_EXPORT Textfield : public View,
   bool OnKeyPressed(const ui::KeyEvent& event) override;
   ui::TextInputClient* GetTextInputClient() override;
   void OnGestureEvent(ui::GestureEvent* event) override;
+  bool AcceleratorPressed(const ui::Accelerator& accelerator) override;
+  bool CanHandleAccelerators() const override;
   void AboutToRequestFocusFromTabTraversal(bool reverse) override;
   bool SkipDefaultKeyEventProcessing(const ui::KeyEvent& event) override;
   bool GetDropFormats(

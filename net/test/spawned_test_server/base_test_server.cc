@@ -29,11 +29,17 @@ namespace {
 
 std::string GetHostname(BaseTestServer::Type type,
                         const BaseTestServer::SSLOptions& options) {
-  if (BaseTestServer::UsingSSL(type) &&
-      options.server_certificate ==
-          BaseTestServer::SSLOptions::CERT_MISMATCHED_NAME) {
-    // Return a different hostname string that resolves to the same hostname.
-    return "localhost";
+  if (BaseTestServer::UsingSSL(type)) {
+    if (options.server_certificate ==
+            BaseTestServer::SSLOptions::CERT_MISMATCHED_NAME ||
+        options.server_certificate ==
+            BaseTestServer::SSLOptions::CERT_COMMON_NAME_IS_DOMAIN) {
+      // For |CERT_MISMATCHED_NAME|, return a different hostname string
+      // that resolves to the same hostname. For
+      // |CERT_COMMON_NAME_IS_DOMAIN|, the certificate is issued for
+      // "localhost" instead of "127.0.0.1".
+      return "localhost";
+    }
   }
 
   // Use the 127.0.0.1 as default.
@@ -44,8 +50,6 @@ std::string GetClientCertType(SSLClientCertType type) {
   switch (type) {
     case CLIENT_CERT_RSA_SIGN:
       return "rsa_sign";
-    case CLIENT_CERT_DSS_SIGN:
-      return "dss_sign";
     case CLIENT_CERT_ECDSA_SIGN:
       return "ecdsa_sign";
     default:
@@ -135,6 +139,8 @@ base::FilePath BaseTestServer::SSLOptions::GetCertificateFile() const {
     case CERT_OK:
     case CERT_MISMATCHED_NAME:
       return base::FilePath(FILE_PATH_LITERAL("ok_cert.pem"));
+    case CERT_COMMON_NAME_IS_DOMAIN:
+      return base::FilePath(FILE_PATH_LITERAL("localhost_cert.pem"));
     case CERT_EXPIRED:
       return base::FilePath(FILE_PATH_LITERAL("expired_cert.pem"));
     case CERT_CHAIN_WRONG_ROOT:
@@ -239,7 +245,7 @@ bool BaseTestServer::GetAddressList(AddressList* address_list) const {
                              BoundNetLog());
   if (rv == ERR_IO_PENDING)
     rv = callback.WaitForResult();
-  if (rv != net::OK) {
+  if (rv != OK) {
     LOG(ERROR) << "Failed to resolve hostname: " << host_port_pair_.host();
     return false;
   }
@@ -304,6 +310,24 @@ bool BaseTestServer::GetFilePathWithReplacements(
   return true;
 }
 
+bool BaseTestServer::LoadTestRootCert() const {
+  TestRootCerts* root_certs = TestRootCerts::GetInstance();
+  if (!root_certs)
+    return false;
+
+  // Should always use absolute path to load the root certificate.
+  base::FilePath root_certificate_path = certificates_dir_;
+  if (!certificates_dir_.IsAbsolute()) {
+    base::FilePath src_dir;
+    if (!PathService::Get(base::DIR_SOURCE_ROOT, &src_dir))
+      return false;
+    root_certificate_path = src_dir.Append(certificates_dir_);
+  }
+
+  return root_certs->AddFromFile(
+      root_certificate_path.AppendASCII("root_ca_cert.pem"));
+}
+
 void BaseTestServer::Init(const std::string& host) {
   host_port_pair_ = HostPortPair(host, 0);
 
@@ -344,24 +368,6 @@ bool BaseTestServer::ParseServerData(const std::string& server_data) {
   host_port_pair_.set_port(port);
 
   return true;
-}
-
-bool BaseTestServer::LoadTestRootCert() const {
-  TestRootCerts* root_certs = TestRootCerts::GetInstance();
-  if (!root_certs)
-    return false;
-
-  // Should always use absolute path to load the root certificate.
-  base::FilePath root_certificate_path = certificates_dir_;
-  if (!certificates_dir_.IsAbsolute()) {
-    base::FilePath src_dir;
-    if (!PathService::Get(base::DIR_SOURCE_ROOT, &src_dir))
-      return false;
-    root_certificate_path = src_dir.Append(certificates_dir_);
-  }
-
-  return root_certs->AddFromFile(
-      root_certificate_path.AppendASCII("root_ca_cert.pem"));
 }
 
 bool BaseTestServer::SetupWhenServerStarted() {

@@ -7,6 +7,7 @@
 
 #include "bindings/core/v8/CallbackPromiseAdapter.h"
 #include "bindings/core/v8/ScriptPromiseResolver.h"
+#include "core/dom/DOMException.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/workers/WorkerGlobalScope.h"
 #include "core/workers/WorkerLocation.h"
@@ -24,7 +25,7 @@ namespace {
 
 class ClientArray {
 public:
-    typedef blink::WebServiceWorkerClientsInfo WebType;
+    typedef WebServiceWorkerClientsInfo WebType;
     static HeapVector<Member<ServiceWorkerClient>> take(ScriptPromiseResolver*, WebType* webClientsRaw)
     {
         OwnPtr<WebType> webClients = adoptPtr(webClientsRaw);

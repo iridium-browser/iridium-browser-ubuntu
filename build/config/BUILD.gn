@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//build/config/allocator.gni")
+import("//build/config/chrome_build.gni")
 import("//build/config/crypto.gni")
 import("//build/config/features.gni")
 import("//build/config/ui.gni")
@@ -23,7 +24,7 @@ declare_args() {
   # TODO(maruel): This decision should be revisited because having an
   # official deterministic build has high value too but MSVC toolset can't
   # generate anything deterministic with WPO enabled AFAIK.
-  dont_embed_build_metadata = is_official_build
+  dont_embed_build_metadata = !is_official_build
 
   # Set to true to enable dcheck in Release builds.
   dcheck_always_on = false
@@ -40,11 +41,8 @@ declare_args() {
 #
 # For now we define these globally to match the current GYP build.
 config("feature_flags") {
-  # TODO(brettw) most of these need to be parameterized.
-  defines = [
-    "CHROMIUM_BUILD",
-    "V8_DEPRECATION_WARNINGS",  # Don't use deprecated V8 APIs anywhere.
-  ]
+  # TODO(brettw) this probably needs to be parameterized.
+  defines = [ "V8_DEPRECATION_WARNINGS" ]  # Don't use deprecated V8 APIs anywhere.
 
   if (cld_version > 0) {
     defines += [ "CLD_VERSION=$cld_version" ]
@@ -122,14 +120,12 @@ config("feature_flags") {
   }
   if (use_openssl) {
     defines += [ "USE_OPENSSL=1" ]
-    if (use_openssl_certs) {
-      defines += [ "USE_OPENSSL_CERTS=1" ]
-    }
-  } else if (use_nss_certs) {
-    # USE_NSS really means "use nss for certificate validation and storage"
-    # (like USE_OPENSSL_CERTS) and not "we're linking to NSS." It might be nice
-    # to rename this but we're hoping to transition away from NSS.
-    defines += [ "USE_NSS=1" ]
+  }
+  if (use_openssl_certs) {
+    defines += [ "USE_OPENSSL_CERTS=1" ]
+  }
+  if (use_nss_certs) {
+    defines += [ "USE_NSS_CERTS=1" ]
   }
   if (use_ozone) {
     defines += [ "USE_OZONE=1" ]
@@ -231,6 +227,30 @@ config("feature_flags") {
   if (enable_video_hole) {
     defines += [ "VIDEO_HOLE=1" ]
   }
+  if (safe_browsing_mode == 1) {
+    defines += [ "FULL_SAFE_BROWSING" ]
+    defines += [ "SAFE_BROWSING_CSD" ]
+    defines += [ "SAFE_BROWSING_DB_LOCAL" ]
+    defines += [ "SAFE_BROWSING_SERVICE" ]
+  } else if (safe_browsing_mode == 2) {
+    defines += [ "MOBILE_SAFE_BROWSING" ]
+    defines += [ "SAFE_BROWSING_SERVICE" ]
+  } else if (safe_browsing_mode == 3) {
+    defines += [ "MOBILE_SAFE_BROWSING" ]
+    defines += [ "SAFE_BROWSING_DB_REMOTE" ]
+    defines += [ "SAFE_BROWSING_SERVICE" ]
+  }
+  if (is_official_build) {
+    defines += [ "OFFICIAL_BUILD" ]
+  }
+  if (is_chrome_branded) {
+    defines += [ "GOOGLE_CHROME_BUILD" ]
+  } else {
+    defines += [ "CHROMIUM_BUILD" ]
+  }
+  if (enable_media_router) {
+    defines += [ "ENABLE_MEDIA_ROUTER=1" ]
+  }
 }
 
 # Debug/release ----------------------------------------------------------------
@@ -263,6 +283,18 @@ config("debug") {
 
 config("release") {
   defines = [ "NDEBUG" ]
+
+  # Sanitizers.
+  # TODO(GYP) The GYP build has "release_valgrind_build == 0" for this
+  # condition. When Valgrind is set up, we need to do the same here.
+  if (!is_tsan) {
+    defines += [ "NVALGRIND" ]
+    if (!is_nacl) {
+      # NaCl always enables dynamic annotations. Currently this value is set to
+      # 1 for all .nexes.
+      defines += [ "DYNAMIC_ANNOTATIONS_ENABLED=0" ]
+    }
+  }
 }
 
 # Default libraries ------------------------------------------------------------

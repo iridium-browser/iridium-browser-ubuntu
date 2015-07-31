@@ -66,7 +66,9 @@ class ImageDecoder : public content::UtilityProcessHostClient {
 
   enum ImageCodec {
     DEFAULT_CODEC = 0,  // Uses WebKit image decoding (via WebImage).
+#if defined(OS_CHROMEOS)
     ROBUST_JPEG_CODEC,  // Restrict decoding to robust jpeg codec.
+#endif  // defined(OS_CHROMEOS)
   };
 
   // Calls StartWithOptions() with ImageCodec::DEFAULT_CODEC and
@@ -117,7 +119,12 @@ class ImageDecoder : public content::UtilityProcessHostClient {
   // |kBatchModeTimeoutSeconds|.
   void StopBatchMode();
 
+  // Fails all outstanding requests.
+  void FailAllRequests();
+
   // Overidden from UtilityProcessHostClient.
+  void OnProcessCrashed(int exit_code) override;
+  void OnProcessLaunchFailed() override;
   bool OnMessageReceived(const IPC::Message& message) override;
 
   // IPC message handlers.
@@ -141,11 +148,9 @@ class ImageDecoder : public content::UtilityProcessHostClient {
   // The UtilityProcessHost requests are sent to.
   base::WeakPtr<content::UtilityProcessHost> utility_process_host_;
 
-  // Calls StopBatchMode() after |kBatchModeTimeoutSeconds| have elapsed.
-  base::RepeatingTimer<ImageDecoder> batch_mode_timer_;
-
-  // The time Start() was last called.
-  base::TimeTicks last_request_;
+  // Calls StopBatchMode() after |kBatchModeTimeoutSeconds| have elapsed,
+  // unless a new decoding request resets the timer.
+  scoped_ptr<base::DelayTimer<ImageDecoder>> batch_mode_timer_;
 
   DISALLOW_COPY_AND_ASSIGN(ImageDecoder);
 };

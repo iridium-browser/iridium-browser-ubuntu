@@ -7,6 +7,7 @@
 
 #include "core/frame/LocalFrameLifecycleObserver.h"
 #include "core/frame/PlatformEventController.h"
+#include "modules/ModulesExport.h"
 #include "platform/Supplementable.h"
 #include "platform/Timer.h"
 #include "public/platform/WebLockOrientationCallback.h"
@@ -19,7 +20,7 @@ class FrameView;
 class ScreenOrientation;
 class WebScreenOrientationClient;
 
-class ScreenOrientationController final
+class MODULES_EXPORT ScreenOrientationController final
     : public NoBaseWillBeGarbageCollectedFinalized<ScreenOrientationController>
     , public WillBeHeapSupplement<LocalFrame>
     , public LocalFrameLifecycleObserver
@@ -44,7 +45,7 @@ public:
 private:
     ScreenOrientationController(LocalFrame&, WebScreenOrientationClient*);
 
-    static WebScreenOrientationType computeOrientation(FrameView*);
+    static WebScreenOrientationType computeOrientation(Chrome&);
 
     // Inherited from PlatformEventController.
     virtual void didUpdateData() override;

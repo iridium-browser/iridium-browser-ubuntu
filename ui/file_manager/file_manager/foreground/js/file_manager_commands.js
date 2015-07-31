@@ -321,7 +321,8 @@ CommandHandler.prototype.onCommand_ = function(event) {
   if (this.shouldIgnoreEvents_())
     return;
   var handler = CommandHandler.COMMANDS_[event.command.id];
-  handler.execute.call(/** @type {Command} */ (this), event, this.fileManager_);
+  handler.execute.call(/** @type {Command} */ (handler), event,
+                       this.fileManager_);
 };
 
 /**
@@ -333,7 +334,7 @@ CommandHandler.prototype.onCanExecute_ = function(event) {
   if (this.shouldIgnoreEvents_())
     return;
   var handler = CommandHandler.COMMANDS_[event.command.id];
-  handler.canExecute.call(/** @type {Command} */ (this), event,
+  handler.canExecute.call(/** @type {Command} */ (handler), event,
                           this.fileManager_);
 };
 
@@ -383,7 +384,7 @@ CommandHandler.COMMANDS_['unmount'] = /** @type {Command} */ ({
     var root = CommandUtil.getCommandEntry(event.target);
     if (!root)
       return;
-    var locationInfo = this.fileManager_.volumeManager.getLocationInfo(root);
+    var locationInfo = fileManager.volumeManager.getLocationInfo(root);
     var rootType =
         locationInfo && locationInfo.isRootEntry && locationInfo.rootType;
 
@@ -1024,6 +1025,7 @@ CommandHandler.COMMANDS_['zip-selection'] = /** @type {Command} */ ({
         dirEntry &&
         !fileManager.isOnReadonlyDirectory() &&
         !fileManager.isOnDrive() &&
+        !fileManager.isOnMTP() &&
         selection && selection.totalCount > 0;
   }
 });
@@ -1192,6 +1194,54 @@ CommandHandler.COMMANDS_['zoom-reset'] = /** @type {Command} */ ({
 });
 
 /**
+ * Sort the file list by name (in ascending order).
+ * @type {Command}
+ */
+CommandHandler.COMMANDS_['sort-by-name'] = /** @type {Command} */ ({
+  execute: function(event, fileManager) {
+    if (fileManager.directoryModel.getFileList())
+      fileManager.directoryModel.getFileList().sort('name', 'asc');
+  },
+  canExecute: CommandUtil.canExecuteAlways
+});
+
+/**
+ * Sort the file list by size (in descending order).
+ * @type {Command}
+ */
+CommandHandler.COMMANDS_['sort-by-size'] = /** @type {Command} */ ({
+  execute: function(event, fileManager) {
+    if (fileManager.directoryModel.getFileList())
+      fileManager.directoryModel.getFileList().sort('size', 'desc');
+  },
+  canExecute: CommandUtil.canExecuteAlways
+});
+
+/**
+ * Sort the file list by type (in ascending order).
+ * @type {Command}
+ */
+CommandHandler.COMMANDS_['sort-by-type'] = /** @type {Command} */ ({
+  execute: function(event, fileManager) {
+    if (fileManager.directoryModel.getFileList())
+      fileManager.directoryModel.getFileList().sort('type', 'asc');
+  },
+  canExecute: CommandUtil.canExecuteAlways
+});
+
+/**
+ * Sort the file list by date-modified (in descending order).
+ * @type {Command}
+ */
+CommandHandler.COMMANDS_['sort-by-date'] = /** @type {Command} */ ({
+  execute: function(event, fileManager) {
+    if (fileManager.directoryModel.getFileList())
+      fileManager.directoryModel.getFileList().sort('modificationTime', 'desc');
+  },
+  canExecute: CommandUtil.canExecuteAlways
+});
+
+/**
  * Open inspector for foreground page.
  * @type {Command}
  */
@@ -1255,7 +1305,7 @@ CommandHandler.COMMANDS_['inspect-background'] = /** @type {Command} */ ({
  * Shows a suggest dialog with new services to be added to the left nav.
  * @type {Command}
  */
-CommandHandler.COMMANDS_['add-new-services'] = /** @type {Command} */ ({
+CommandHandler.COMMANDS_['install-new-extension'] = /** @type {Command} */ ({
   /**
    * @param {!Event} event Command event.
    * @param {!FileManager} fileManager FileManager to use.
@@ -1265,9 +1315,80 @@ CommandHandler.COMMANDS_['add-new-services'] = /** @type {Command} */ ({
         function(result, itemId) {
           // If a new provider is installed, then launch it so the configuration
           // dialog is shown (if it's available).
-          if (result === SuggestAppsDialog.Result.INSTALL_SUCCESSFUL)
-            chrome.management.launchApp(assert(itemId), function() {});
+          if (result === SuggestAppsDialog.Result.SUCCESS)
+            fileManager.providersModel.requestMount(assert(itemId));
         });
   },
-  canExecute: CommandUtil.canExecuteAlways
+  canExecute: function(event, fileManager) {
+    event.canExecute = fileManager.dialogType === DialogType.FULL_PAGE;
+    event.command.setHidden(!event.canExecute);
+  }
 });
+
+/**
+ * Configures the currently selected volume.
+ */
+CommandHandler.COMMANDS_['configure'] = (function() {
+  /**
+   * @constructor
+   * @implements {Command}
+   */
+  var ConfigureCommand = function() {
+  };
+
+  ConfigureCommand.prototype = {
+    __proto__: Command.prototype,
+
+    /**
+     * @param {EventTarget} element
+     * @param {!FileManager} fileManager
+     * @return {VolumeInfo}
+     * @private
+     */
+    getElementVolumeInfo_: function(element, fileManager) {
+      if (element instanceof VolumeItem)
+        return element.volumeInfo;
+      if (element instanceof ShortcutItem) {
+        return element.entry && fileManager.volumeManager.getVolumeInfo(
+            element.entry);
+      }
+    },
+
+    /**
+     * If the command is executed on the navigation list, then use it's volume
+     * info, otherwise use the currently opened volume.
+     *
+     * @param {!Event} event
+     * @param {!FileManager} fileManager
+     * @return {VolumeInfo}
+     * @private
+     */
+    getCommandVolumeInfo_: function(event, fileManager) {
+      var currentDirEntry = fileManager.directoryModel.getCurrentDirEntry();
+      return this.getElementVolumeInfo_(event.target, fileManager) ||
+          currentDirEntry && fileManager.volumeManager.getVolumeInfo(
+              currentDirEntry);
+    },
+
+    /**
+     * @override
+     */
+    execute: function(event, fileManager) {
+      var volumeInfo = this.getCommandVolumeInfo_(event, fileManager);
+      if (volumeInfo && volumeInfo.configurable)
+        fileManager.volumeManager.configure(volumeInfo);
+    },
+
+    /**
+     * @override
+     */
+    canExecute: function(event, fileManager) {
+      var volumeInfo = this.getCommandVolumeInfo_(event, fileManager);
+      event.canExecute = volumeInfo && volumeInfo.configurable;
+      event.command.setHidden(!event.canExecute);
+    }
+  };
+
+  return new ConfigureCommand();
+})();
+

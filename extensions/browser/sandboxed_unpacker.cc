@@ -212,6 +212,13 @@ bool ReadMessageCatalogsFromFile(const base::FilePath& extension_path,
 
 }  // namespace
 
+SandboxedUnpackerClient::SandboxedUnpackerClient()
+    : RefCountedDeleteOnMessageLoop<SandboxedUnpackerClient>(
+          content::BrowserThread::GetMessageLoopProxyForThread(
+              content::BrowserThread::UI)) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+}
+
 SandboxedUnpacker::SandboxedUnpacker(
     const CRXFileInfo& file,
     Manifest::Location location,
@@ -315,6 +322,9 @@ void SandboxedUnpacker::Start() {
 }
 
 SandboxedUnpacker::~SandboxedUnpacker() {
+  // To avoid blocking shutdown, don't delete temporary directory here if it
+  // hasn't been cleaned up or passed on to another owner yet.
+  temp_dir_.Take();
 }
 
 bool SandboxedUnpacker::OnMessageReceived(const IPC::Message& message) {
@@ -348,6 +358,8 @@ void SandboxedUnpacker::StartProcessOnIOThread(
     const base::FilePath& temp_crx_path) {
   UtilityProcessHost* host =
       UtilityProcessHost::Create(this, unpacker_io_task_runner_.get());
+  host->SetName(
+      l10n_util::GetStringUTF16(IDS_UTILITY_PROCESS_EXTENSION_UNPACKER_NAME));
   // Grant the subprocess access to the entire subdir the extension file is
   // in, so that it can unpack to that dir.
   host->SetExposedDir(temp_crx_path.DirName());

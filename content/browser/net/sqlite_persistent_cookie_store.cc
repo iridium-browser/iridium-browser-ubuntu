@@ -20,6 +20,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -138,6 +139,10 @@ class SQLitePersistentCookieStore::Backend
   ~Backend() {
     DCHECK(!db_.get()) << "Close should have already been called.";
     DCHECK(num_pending_ == 0 && pending_.empty());
+
+    for (net::CanonicalCookie* cookie : cookies_) {
+      delete cookie;
+    }
   }
 
   // Database upgrade statements.
@@ -248,6 +253,8 @@ class SQLitePersistentCookieStore::Backend
   // Temporary buffer for cookies loaded from DB. Accumulates cookies to reduce
   // the number of messages sent to the client runner. Sent back in response to
   // individual load requests for domain keys or when all loading completes.
+  // Ownership of the cookies in this vector is transferred to the client in
+  // response to individual load requests or when all loading completes.
   std::vector<net::CanonicalCookie*> cookies_;
 
   // Map of domain keys(eTLD+1) to domains/hosts that are to be loaded from DB.
@@ -306,6 +313,11 @@ namespace {
 
 // Version number of the database.
 //
+// Version 9 adds a partial index to track non-persistent cookies.
+// Non-persistent cookies sometimes need to be deleted on startup. There are
+// frequently few or no non-persistent cookies, so the partial index allows the
+// deletion to be sped up or skipped, without having to page in the DB.
+//
 // Version 8 adds "first-party only" cookies.
 //
 // Version 7 adds encrypted values.  Old values will continue to be used but
@@ -331,7 +343,7 @@ namespace {
 // Version 3 updated the database to include the last access time, so we can
 // expire them in decreasing order of use when we've reached the maximum
 // number of cookies.
-const int kCurrentVersionNumber = 8;
+const int kCurrentVersionNumber = 9;
 const int kCompatibleVersionNumber = 5;
 
 // Possible values for the 'priority' column.
@@ -394,35 +406,43 @@ class IncrementTimeDelta {
 
 // Initializes the cookies table, returning true on success.
 bool InitTable(sql::Connection* db) {
-  if (!db->DoesTableExist("cookies")) {
-    std::string stmt(base::StringPrintf(
-        "CREATE TABLE cookies ("
-        "creation_utc INTEGER NOT NULL UNIQUE PRIMARY KEY,"
-        "host_key TEXT NOT NULL,"
-        "name TEXT NOT NULL,"
-        "value TEXT NOT NULL,"
-        "path TEXT NOT NULL,"
-        "expires_utc INTEGER NOT NULL,"
-        "secure INTEGER NOT NULL,"
-        "httponly INTEGER NOT NULL,"
-        "last_access_utc INTEGER NOT NULL, "
-        "has_expires INTEGER NOT NULL DEFAULT 1, "
-        "persistent INTEGER NOT NULL DEFAULT 1,"
-        "priority INTEGER NOT NULL DEFAULT %d,"
-        "encrypted_value BLOB DEFAULT '',"
-        "firstpartyonly INTEGER NOT NULL DEFAULT 0)",
-        CookiePriorityToDBCookiePriority(net::COOKIE_PRIORITY_DEFAULT)));
-    if (!db->Execute(stmt.c_str()))
-      return false;
+  if (db->DoesTableExist("cookies"))
+    return true;
+
+  std::string stmt(base::StringPrintf(
+      "CREATE TABLE cookies ("
+      "creation_utc INTEGER NOT NULL UNIQUE PRIMARY KEY,"
+      "host_key TEXT NOT NULL,"
+      "name TEXT NOT NULL,"
+      "value TEXT NOT NULL,"
+      "path TEXT NOT NULL,"
+      "expires_utc INTEGER NOT NULL,"
+      "secure INTEGER NOT NULL,"
+      "httponly INTEGER NOT NULL,"
+      "last_access_utc INTEGER NOT NULL, "
+      "has_expires INTEGER NOT NULL DEFAULT 1, "
+      "persistent INTEGER NOT NULL DEFAULT 1,"
+      "priority INTEGER NOT NULL DEFAULT %d,"
+      "encrypted_value BLOB DEFAULT '',"
+      "firstpartyonly INTEGER NOT NULL DEFAULT 0)",
+      CookiePriorityToDBCookiePriority(net::COOKIE_PRIORITY_DEFAULT)));
+  if (!db->Execute(stmt.c_str()))
+    return false;
+
+  if (!db->Execute("CREATE INDEX domain ON cookies(host_key)"))
+    return false;
+
+#if defined(OS_IOS)
+  // iOS 8.1 and older doesn't support partial indices. iOS 8.2 supports
+  // partial indices.
+  if (!db->Execute("CREATE INDEX is_transient ON cookies(persistent)")) {
+#else
+  if (!db->Execute(
+          "CREATE INDEX is_transient ON cookies(persistent) "
+          "where persistent != 1")) {
+#endif
+    return false;
   }
-
-  // Older code created an index on creation_utc, which is already
-  // primary key for the table.
-  if (!db->Execute("DROP INDEX IF EXISTS cookie_times"))
-    return false;
-
-  if (!db->Execute("CREATE INDEX IF NOT EXISTS domain ON cookies(host_key)"))
-    return false;
 
   return true;
 }
@@ -431,8 +451,6 @@ bool InitTable(sql::Connection* db) {
 
 void SQLitePersistentCookieStore::Backend::Load(
     const LoadedCallback& loaded_callback) {
-  // This function should be called only once per instance.
-  DCHECK(!db_.get());
   PostBackgroundTask(FROM_HERE, base::Bind(
       &Backend::LoadAndNotifyInBackground, this,
       loaded_callback, base::Time::Now()));
@@ -682,6 +700,9 @@ bool SQLitePersistentCookieStore::Backend::InitializeDatabase() {
       50);
 
   initialized_ = true;
+
+  if (!restore_old_session_cookies_)
+    DeleteSessionCookiesOnStartup();
   return true;
 }
 
@@ -944,6 +965,47 @@ bool SQLitePersistentCookieStore::Backend::EnsureDatabaseVersion() {
                         base::TimeTicks::Now() - start_time);
   }
 
+  if (cur_version == 8) {
+    const base::TimeTicks start_time = base::TimeTicks::Now();
+    sql::Transaction transaction(db_.get());
+    if (!transaction.Begin())
+      return false;
+
+    if (!db_->Execute("DROP INDEX IF EXISTS cookie_times")) {
+      LOG(WARNING)
+          << "Unable to drop table cookie_times in update to version 9.";
+      return false;
+    }
+
+    if (!db_->Execute(
+        "CREATE INDEX IF NOT EXISTS domain ON cookies(host_key)")) {
+      LOG(WARNING) << "Unable to create index domain in update to version 9.";
+      return false;
+    }
+
+#if defined(OS_IOS)
+    // iOS 8.1 and older doesn't support partial indices. iOS 8.2 supports
+    // partial indices.
+    if (!db_->Execute(
+        "CREATE INDEX IF NOT EXISTS is_transient ON cookies(persistent)")) {
+#else
+    if (!db_->Execute(
+        "CREATE INDEX IF NOT EXISTS is_transient ON cookies(persistent) "
+        "where persistent != 1")) {
+#endif
+      LOG(WARNING)
+          << "Unable to create index is_transient in update to version 9.";
+      return false;
+    }
+    ++cur_version;
+    meta_table_.SetVersionNumber(cur_version);
+    meta_table_.SetCompatibleVersionNumber(
+        std::min(cur_version, kCompatibleVersionNumber));
+    transaction.Commit();
+    UMA_HISTOGRAM_TIMES("Cookie.TimeDatabaseMigrationToV9",
+                        base::TimeTicks::Now() - start_time);
+  }
+
   // Put future migration cases here.
 
   if (cur_version < kCurrentVersionNumber) {
@@ -951,7 +1013,7 @@ bool SQLitePersistentCookieStore::Backend::EnsureDatabaseVersion() {
 
     meta_table_.Reset();
     db_.reset(new sql::Connection);
-    if (!base::DeleteFile(path_, false) ||
+    if (!sql::Connection::Delete(path_) ||
         !db_->Open(path_) ||
         !meta_table_.Init(
             db_.get(), kCurrentVersionNumber, kCompatibleVersionNumber)) {
@@ -1243,8 +1305,14 @@ void SQLitePersistentCookieStore::Backend::SetForceKeepSessionState() {
 
 void SQLitePersistentCookieStore::Backend::DeleteSessionCookiesOnStartup() {
   DCHECK(background_task_runner_->RunsTasksOnCurrentThread());
-  if (!db_->Execute("DELETE FROM cookies WHERE persistent == 0"))
+  base::Time start_time = base::Time::Now();
+  if (!db_->Execute("DELETE FROM cookies WHERE persistent != 1"))
     LOG(WARNING) << "Unable to delete session cookies.";
+
+  UMA_HISTOGRAM_TIMES("Cookie.Startup.TimeSpentDeletingCookies",
+                      base::Time::Now() - start_time);
+  UMA_HISTOGRAM_COUNTS("Cookie.Startup.NumberOfCookiesDeleted",
+                       db_->GetLastChangeCount());
 }
 
 void SQLitePersistentCookieStore::Backend::PostBackgroundTask(
@@ -1268,8 +1336,6 @@ void SQLitePersistentCookieStore::Backend::FinishedLoadingCookies(
     bool success) {
   PostClientTask(FROM_HERE, base::Bind(&Backend::CompleteLoadInForeground, this,
                                        loaded_callback, success));
-  if (success && !restore_old_session_cookies_)
-    DeleteSessionCookiesOnStartup();
 }
 
 SQLitePersistentCookieStore::SQLitePersistentCookieStore(
@@ -1347,6 +1413,10 @@ CookieStoreConfig::~CookieStoreConfig() {
 }
 
 net::CookieStore* CreateCookieStore(const CookieStoreConfig& config) {
+  // TODO(bcwhite): Remove ScopedTracker below once crbug.com/483686 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("483686 content::CreateCookieStore"));
+
   net::CookieMonster* cookie_monster = NULL;
 
   if (config.path.empty()) {

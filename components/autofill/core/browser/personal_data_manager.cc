@@ -30,6 +30,7 @@
 #include "components/autofill/core/browser/validation.h"
 #include "components/autofill/core/common/autofill_pref_names.h"
 #include "components/autofill/core/common/autofill_switches.h"
+#include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/common/signin_pref_names.h"
 #include "third_party/libaddressinput/src/cpp/include/libaddressinput/address_data.h"
 #include "third_party/libaddressinput/src/cpp/include/libaddressinput/address_formatter.h"
@@ -241,14 +242,17 @@ PersonalDataManager::PersonalDataManager(const std::string& app_locale)
       pending_server_creditcards_query_(0),
       app_locale_(app_locale),
       pref_service_(NULL),
+      account_tracker_(NULL),
       is_off_the_record_(false),
       has_logged_profile_count_(false) {}
 
 void PersonalDataManager::Init(scoped_refptr<AutofillWebDataService> database,
                                PrefService* pref_service,
+                               AccountTrackerService* account_tracker,
                                bool is_off_the_record) {
   database_ = database;
   SetPrefService(pref_service);
+  account_tracker_ = account_tracker;
   is_off_the_record_ = is_off_the_record;
 
   if (!is_off_the_record_)
@@ -306,8 +310,11 @@ void PersonalDataManager::OnWebDataServiceRequestDone(
                               &server_profiles_);
 
         if (!server_profiles_.empty()) {
-          base::string16 email = base::UTF8ToUTF16(
-              pref_service_->GetString(::prefs::kGoogleServicesUsername));
+          std::string account_id =
+              pref_service_->GetString(::prefs::kGoogleServicesAccountId);
+          base::string16 email =
+              base::UTF8ToUTF16(
+                  account_tracker_->GetAccountInfo(account_id).email);
           DCHECK(!email.empty());
           for (AutofillProfile* profile : server_profiles_)
             profile->SetRawInfo(EMAIL_ADDRESS, email);
@@ -518,16 +525,10 @@ void PersonalDataManager::RecordUseOf(const AutofillDataModel& data_model) {
   if (credit_card) {
     credit_card->RecordUse();
 
-    if (credit_card->record_type() == CreditCard::LOCAL_CARD) {
+    if (credit_card->record_type() == CreditCard::LOCAL_CARD)
       database_->UpdateCreditCard(*credit_card);
-    } else if (credit_card->record_type() == CreditCard::FULL_SERVER_CARD) {
-      database_->UpdateUnmaskedCardUsageStats(*credit_card);
-    } else {
-      // It's possible to get a masked server card here if the user decides not
-      // to store a card while verifying it. We don't currently track usage
-      // of masked cards, so no-op.
-      return;
-    }
+    else
+      database_->UpdateServerCardUsageStats(*credit_card);
 
     Refresh();
     return;
@@ -536,7 +537,12 @@ void PersonalDataManager::RecordUseOf(const AutofillDataModel& data_model) {
   AutofillProfile* profile = GetProfileByGUID(data_model.guid());
   if (profile) {
     profile->RecordUse();
-    database_->UpdateAutofillProfile(*profile);
+
+    if (profile->record_type() == AutofillProfile::LOCAL_PROFILE)
+      database_->UpdateAutofillProfile(*profile);
+    else if (profile->record_type() == AutofillProfile::SERVER_PROFILE)
+      database_->UpdateServerAddressUsageStats(*profile);
+
     Refresh();
   }
 }
@@ -674,7 +680,7 @@ void PersonalDataManager::UpdateServerCreditCard(
   DCHECK_NE(existing_credit_card->record_type(), credit_card.record_type());
   DCHECK_EQ(existing_credit_card->Label(), credit_card.Label());
   if (existing_credit_card->record_type() == CreditCard::MASKED_SERVER_CARD) {
-    database_->UnmaskServerCreditCard(credit_card.server_id(),
+    database_->UnmaskServerCreditCard(credit_card,
                                       credit_card.number());
   } else {
     database_->MaskServerCreditCard(credit_card.server_id());
@@ -947,18 +953,28 @@ std::vector<Suggestion> PersonalDataManager::GetCreditCardSuggestions(
     cards_to_suggest.push_back(credit_card);
   }
 
-  // Server cards shadow identical local cards.
+  // De-dupe card suggestions. Full server cards shadow local cards, and
+  // local cards shadow masked server cards.
   for (auto outer_it = cards_to_suggest.begin();
        outer_it != cards_to_suggest.end();
        ++outer_it) {
-    if ((*outer_it)->record_type() == CreditCard::LOCAL_CARD)
-      continue;
 
-    for (auto inner_it = cards_to_suggest.begin();
-         inner_it != cards_to_suggest.end();) {
-      auto inner_it_copy = inner_it++;
-      if ((*inner_it_copy)->IsLocalDuplicateOfServerCard(**outer_it))
-        cards_to_suggest.erase(inner_it_copy);
+    if ((*outer_it)->record_type() == CreditCard::FULL_SERVER_CARD) {
+      for (auto inner_it = cards_to_suggest.begin();
+           inner_it != cards_to_suggest.end();) {
+        auto inner_it_copy = inner_it++;
+        if ((*inner_it_copy)->IsLocalDuplicateOfServerCard(**outer_it))
+          cards_to_suggest.erase(inner_it_copy);
+      }
+    } else if ((*outer_it)->record_type() == CreditCard::LOCAL_CARD) {
+      for (auto inner_it = cards_to_suggest.begin();
+           inner_it != cards_to_suggest.end();) {
+        auto inner_it_copy = inner_it++;
+        if ((*inner_it_copy)->record_type() == CreditCard::MASKED_SERVER_CARD &&
+            (*outer_it)->IsLocalDuplicateOfServerCard(**inner_it_copy)) {
+          cards_to_suggest.erase(inner_it_copy);
+        }
+      }
     }
   }
 

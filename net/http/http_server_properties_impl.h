@@ -81,6 +81,7 @@ class NET_EXPORT HttpServerPropertiesImpl
   base::WeakPtr<HttpServerProperties> GetWeakPtr() override;
   void Clear() override;
   bool SupportsRequestPriority(const HostPortPair& server) override;
+  bool GetSupportsSpdy(const HostPortPair& server) override;
   void SetSupportsSpdy(const HostPortPair& server, bool support_spdy) override;
   bool RequiresHTTP11(const HostPortPair& server) override;
   void SetHTTP11Required(const HostPortPair& server) override;
@@ -103,7 +104,7 @@ class NET_EXPORT HttpServerPropertiesImpl
   void ClearAlternativeService(const HostPortPair& origin) override;
   const AlternativeServiceMap& alternative_service_map() const override;
   base::Value* GetAlternativeServiceInfoAsValue() const override;
-  void SetAlternateProtocolProbabilityThreshold(double threshold) override;
+  void SetAlternativeServiceProbabilityThreshold(double threshold) override;
   const SettingsMap& GetSpdySettings(
       const HostPortPair& host_port_pair) override;
   bool SetSpdySetting(const HostPortPair& host_port_pair,
@@ -170,7 +171,7 @@ class NET_EXPORT HttpServerPropertiesImpl
   // ".googlevideo.com", ".googleusercontent.com") of canonical hostnames.
   CanonicalSufficList canonical_suffixes_;
 
-  double alternate_protocol_probability_threshold_;
+  double alternative_service_probability_threshold_;
 
   base::WeakPtrFactory<HttpServerPropertiesImpl> weak_ptr_factory_;
 

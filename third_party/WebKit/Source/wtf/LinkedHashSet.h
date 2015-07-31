@@ -182,6 +182,7 @@ public:
     ~LinkedHashSet();
 
     static void finalize(void* pointer) { reinterpret_cast<LinkedHashSet*>(pointer)->~LinkedHashSet(); }
+    void finalizeGarbageCollectedObject() { finalize(this); }
 
     void swap(LinkedHashSet&);
 
@@ -245,7 +246,9 @@ public:
     template<typename Collection>
     void removeAll(const Collection& other) { WTF::removeAll(*this, other); }
 
-    void trace(typename Allocator::Visitor* visitor) { m_impl.trace(visitor); }
+    using HasInlinedTraceMethodMarker = int;
+    template<typename VisitorDispatcher>
+    void trace(VisitorDispatcher visitor) { m_impl.trace(visitor); }
 
     int64_t modifications() const { return m_impl.modifications(); }
     void checkModifications(int64_t mods) const { m_impl.checkModifications(mods); }
@@ -705,10 +708,15 @@ template<typename T, typename Allocator>
 inline void swap(LinkedHashSetNode<T, Allocator>& a, LinkedHashSetNode<T, Allocator>& b)
 {
     typedef LinkedHashSetNodeBase Base;
-    Allocator::enterNoAllocationScope();
+    // The key and value cannot be swapped atomically, and it would be
+    // wrong to have a GC when only one was swapped and the other still
+    // contained garbage (eg. from a previous use of the same slot).
+    // Therefore we forbid a GC until both the key and the value are
+    // swapped.
+    Allocator::enterGCForbiddenScope();
     swap(static_cast<Base&>(a), static_cast<Base&>(b));
     swap(a.m_value, b.m_value);
-    Allocator::leaveNoAllocationScope();
+    Allocator::leaveGCForbiddenScope();
 }
 
 // Warning: After and while calling this you have a collection with deleted

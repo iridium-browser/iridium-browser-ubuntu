@@ -422,6 +422,7 @@ const char kWifiPhyMode[] = "WiFi.PhyMode";
 const char kWifiAuthMode[] = "WiFi.AuthMode";
 const char kWifiChannelProperty[] = "WiFi.Channel";
 const char kWifiPreferredDeviceProperty[] = "WiFi.PreferredDevice";
+const char kWifiRoamThresholdProperty[] = "WiFi.RoamThreshold";
 
 // Flimflam EAP property names.
 const char kEapIdentityProperty[] = "EAP.Identity";
@@ -438,6 +439,7 @@ const char kEapCaCertProperty[] = "EAP.CACert";
 const char kEapCaCertIdProperty[] = "EAP.CACertID";
 const char kEapCaCertNssProperty[] = "EAP.CACertNSS";
 const char kEapUseSystemCasProperty[] = "EAP.UseSystemCAs";
+const char kEapUseProactiveKeyCachingProperty[] = "EAP.UseProactiveKeyCaching";
 const char kEapPinProperty[] = "EAP.PIN";
 const char kEapPasswordProperty[] = "EAP.Password";
 const char kEapKeyMgmtProperty[] = "EAP.KeyMgmt";
@@ -472,6 +474,7 @@ const char kArpGatewayProperty[] = "ArpGateway";
 const char kCountryProperty[] = "Country";
 const char kPortalURLProperty[] = "PortalURL";
 const char kConnectionStateProperty[] = "ConnectionState";
+const char kClaimedDevicesProperty[] = "ClaimedDevices";
 
 // Flimflam Profile property names.
 const char kEntriesProperty[] = "Entries";
@@ -607,6 +610,7 @@ const char kEapMethodLEAP[] = "LEAP";
 // Flimflam EAP phase 2 auth options.
 const char kEapPhase2AuthPEAPMD5[] = "auth=MD5";
 const char kEapPhase2AuthPEAPMSCHAPV2[] = "auth=MSCHAPV2";
+const char kEapPhase2AuthPEAPGTC[] = "auth=GTC";
 const char kEapPhase2AuthTTLSMD5[] = "autheap=MD5";  // crosbug/26822
 const char kEapPhase2AuthTTLSEAPMD5[] = "autheap=MD5";
 const char kEapPhase2AuthTTLSEAPMSCHAPV2[] = "autheap=MSCHAPV2";
@@ -614,6 +618,8 @@ const char kEapPhase2AuthTTLSMSCHAPV2[] = "auth=MSCHAPV2";
 const char kEapPhase2AuthTTLSMSCHAP[] = "auth=MSCHAP";
 const char kEapPhase2AuthTTLSPAP[] = "auth=PAP";
 const char kEapPhase2AuthTTLSCHAP[] = "auth=CHAP";
+const char kEapPhase2AuthTTLSGTC[] = "auth=GTC";
+const char kEapPhase2AuthTTLSEAPGTC[] = "autheap=GTC";
 
 // Flimflam VPN provider types.
 const char kProviderL2tpIpsec[] = "l2tpipsec";
@@ -713,6 +719,7 @@ const char kBroadcastProperty[] = "Broadcast";
 const char kPeerAddressProperty[] = "PeerAddress";
 const char kGatewayProperty[] = "Gateway";
 const char kDomainNameProperty[] = "DomainName";
+const char kAcceptedHostnameProperty[] = "AcceptedHostname";
 const char kNameServersProperty[] = "NameServers";
 
 // IPConfig type options.
@@ -1223,6 +1230,10 @@ const char kAdapterProperty[] = "Adapter";
 const char kLegacyPairingProperty[] = "LegacyPairing";
 const char kModaliasProperty[] = "Modalias";
 const char kRSSIProperty[] = "RSSI";
+const char kTxPowerProperty[] = "TxPower";
+const char kManufacturerDataProperty[] = "ManufacturerData";
+const char kServiceDataProperty[] = "ServiceData";
+const char kGattServicesProperty[] = "GattServices";
 // TODO(tengs): Remove deprecated constants after they are removed in the Chrome
 // codebase. (See crbug.com/430665).
 const char kConnectionRSSI[] = "ConnectionRSSI";             // DEPRECATED
@@ -1332,6 +1343,16 @@ const char kDeviceProperty[] = "Device";
 const char kPrimaryProperty[] = "Primary";
 const char kIncludesProperty[] = "Includes";
 const char kCharacteristicsProperty[] = "Characteristics";
+
+// Bluetooth GATT Service errors.
+const char kErrorFailed[] = "org.bluez.Error.Failed";
+const char kErrorInProgress[] = "org.bluez.Error.InProgress";
+const char kErrorInvalidValueLength[] = "org.bluez.Error.InvalidValueLength";
+const char kErrorNotAuthorized[] = "org.bluez.Error.NotAuthorized";
+const char kErrorNotPaired[] = "org.bluez.Error.NotPaired";
+const char kErrorNotSupported[] = "org.bluez.Error.NotSupported";
+const char kErrorReadNotPermitted[] = "org.bluez.Error.ReadNotPermitted";
+const char kErrorWriteNotPermitted[] = "org.bluez.Error.WriteNotPermitted";
 }  // namespace bluetooth_gatt_service
 
 namespace bluetooth_input {
@@ -1348,6 +1369,65 @@ const char kHostReconnectModeProperty[] = "host";
 const char kDeviceReconnectModeProperty[] = "device";
 const char kAnyReconnectModeProperty[] = "any";
 }  // namespace bluetooth_input
+
+namespace bluetooth_media {
+// Bluetooth Media service identifiers
+const char kBluetoothMediaServiceName[] = "org.bluez";
+const char kBluetoothMediaInterface[] = "org.bluez.Media1";
+
+// Bluetooth Media methods
+const char kRegisterEndpoint[] = "RegisterEndpoint";
+const char kUnregisterEndpoint[] = "UnregisterEndpoint";
+const char kRegisterPlayer[] = "RegisterPlayer";
+const char kUnregisterPlayer[] = "UnregisterPlayer";
+
+// Bluetooth Media errors
+const char kErrorFailed[] = "org.bluez.Error.Failed";
+const char kErrorInvalidArguments[] = "org.bluez.Error.InvalidArguments";
+const char kErrorNotSupported[] = "org.bluez.Error.NotSupported";
+}  // namespace bluetooth_media
+
+namespace bluetooth_media_endpoint {
+// Bluetooth Media Endpoint service identifiers
+const char kBluetoothMediaEndpointServiceName[] = "org.bluez";
+const char kBluetoothMediaEndpointInterface[] = "org.bluez.MediaEndpoint1";
+
+// Bluetooth Media Endpoint methods
+const char kSetConfiguration[] = "SetConfiguration";
+const char kSelectConfiguration[] = "SelectConfiguration";
+const char kClearConfiguration[] = "ClearConfiguration";
+const char kRelease[] = "Release";
+}  // namespace bluetooth_media_endpoint
+
+namespace bluetooth_media_transport {
+// Bluetooth Media Transport service identifiers
+const char kBluetoothMediaTransportServiceName[] = "org.bluez";
+const char kBluetoothMediaTransportInterface[] = "org.bluez.MediaTransport1";
+
+// Bluetooth Media Transport methods
+const char kAcquire[] = "Acquire";
+const char kTryAcquire[] = "TryAcquire";
+const char kRelease[] = "Release";
+
+// Bluetooth Media Transport property names.
+const char kDeviceProperty[] = "Device";
+const char kUUIDProperty[] = "UUID";
+const char kCodecProperty[] = "Codec";
+const char kConfigurationProperty[] = "Configuration";
+const char kStateProperty[] = "State";
+const char kDelayProperty[] = "Delay";
+const char kVolumeProperty[] = "Volume";
+
+// Possible states for the "State" property
+const char kStateIdle[] = "idle";
+const char kStatePending[] = "pending";
+const char kStateActive[] = "active";
+
+// Bluetooth Media Transport errors.
+const char kErrorFailed[] = "org.bluez.Error.Failed";
+const char kErrorNotAuthorized[] = "org.bluez.Error.NotAuthorized";
+const char kErrorNotAvailable[] = "org.bluez.Error.NotAvailable";
+}  // namespace bluetooth_media_transport
 
 namespace bluetooth_object_manager {
 // Bluetooth daemon Object Manager service identifiers.
@@ -1406,6 +1486,47 @@ const char kFeaturesProperty[] = "Features";
 const char kErrorRejected[] = "org.bluez.Error.Rejected";
 const char kErrorCanceled[] = "org.bluez.Error.Canceled";
 }  // namespace bluetooth_profile
+
+namespace bluetooth_advertisement {
+// Bluetooth LE Advertisement service identifiers.
+const char kBluetoothAdvertisementServiceName[] = "org.bluez";
+const char kBluetoothAdvertisementInterface[] =
+    "org.bluez.LEAdvertisement1";
+
+// Bluetooth Advertisement methods.
+const char kRelease[] = "Release";
+
+// Bluetooth Advertisement properties.
+const char kManufacturerDataProperty[] = "ManufacturerData";
+const char kServiceUUIDsProperty[] = "ServiceUUIDs";
+const char kServiceDataProperty[] = "ServiceData";
+const char kSolicitUUIDsProperty[] = "SolicitUUIDs";
+const char kTypeProperty[] = "Type";
+const char kIncludeTxPowerProperty[] = "IncludeTxPower";
+
+// Possible values for the "Type" property.
+const char kTypeBroadcast[] = "broadcast";
+const char kTypePeripheral[] = "peripheral";
+
+}  // namespace bluetooth_advertisement
+
+namespace bluetooth_advertising_manager {
+// Bluetooth LE Advertising Manager service identifiers.
+const char kBluetoothAdvertisingManagerServiceName[] = "org.bluez";
+const char kBluetoothAdvertisingManagerInterface[] =
+    "org.bluez.LEAdvertisingManager1";
+
+// Bluetooth LE Advertising Manager methods.
+const char kRegisterAdvertisement[] = "RegisterAdvertisement";
+const char kUnregisterAdvertisement[] = "UnregisterAdvertisement";
+
+// Bluetooth LE Advertising Manager errors.
+const char kErrorAlreadyExists[] = "org.bluez.Error.AlreadyExists";
+const char kErrorDoesNotExist[] = "org.bluez.Error.DoesNotExist";
+const char kErrorFailed[] = "org.bluez.Error.Failed";
+const char kErrorInvalidArguments[] = "org.bluez.Error.InvalidArguments";
+const char kErrorInvalidLength[] = "org.bluez.Error.InvalidLength";
+}  // namespace bluetooth_advertising_manager
 
 namespace nfc_adapter {
 // NFC Adapter service identifiers.

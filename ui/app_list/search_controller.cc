@@ -35,7 +35,6 @@ SearchController::SearchController(SearchBoxModel* search_box,
       mixer_(new Mixer(results)),
       history_(history),
       is_voice_query_(false) {
-  mixer_->Init();
 }
 
 SearchController::~SearchController() {
@@ -83,6 +82,13 @@ void SearchController::OpenResult(SearchResult* result, int event_flags) {
                             result->display_type(),
                             SearchResult::DISPLAY_TYPE_LAST);
 
+  UMA_HISTOGRAM_COUNTS_100(kSearchQueryLength, search_box_->text().size());
+
+  if (result->distance_from_origin() >= 0) {
+    UMA_HISTOGRAM_COUNTS_100(kSearchResultDistanceFromOrigin,
+                             result->distance_from_origin());
+  }
+
   result->Open(event_flags);
 
   if (history_ && history_->IsReady()) {
@@ -98,12 +104,24 @@ void SearchController::InvokeResultAction(SearchResult* result,
   result->InvokeAction(action_index, event_flags);
 }
 
-void SearchController::AddProvider(Mixer::GroupId group,
+size_t SearchController::AddGroup(size_t max_results,
+                                  double boost,
+                                  double multiplier) {
+  return mixer_->AddGroup(max_results, boost, multiplier);
+}
+
+size_t SearchController::AddOmniboxGroup(size_t max_results,
+                                         double boost,
+                                         double multiplier) {
+  return mixer_->AddOmniboxGroup(max_results, boost, multiplier);
+}
+
+void SearchController::AddProvider(size_t group_id,
                                    scoped_ptr<SearchProvider> provider) {
   provider->set_result_changed_callback(base::Bind(
       &SearchController::OnResultsChanged,
       base::Unretained(this)));
-  mixer_->AddProviderToGroup(group, provider.get());
+  mixer_->AddProviderToGroup(group_id, provider.get());
   providers_.push_back(provider.release());  // Takes ownership.
 }
 

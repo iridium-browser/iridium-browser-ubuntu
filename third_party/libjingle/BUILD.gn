@@ -99,10 +99,7 @@ config("jingle_public_configs") {
     defines += [ "ANDROID" ]
   }
   if (is_posix) {
-    defines += [
-      "POSIX",
-      "WEBRTC_POSIX",
-    ]
+    defines += [ "WEBRTC_POSIX" ]
   }
 
   # TODO(GYP): Support these in GN.
@@ -167,10 +164,6 @@ static_library("libjingle") {
     "$p2p_dir/base/port.h",
     "$p2p_dir/base/portallocator.cc",
     "$p2p_dir/base/portallocator.h",
-    "$p2p_dir/base/portallocatorsessionproxy.cc",
-    "$p2p_dir/base/portallocatorsessionproxy.h",
-    "$p2p_dir/base/portproxy.cc",
-    "$p2p_dir/base/portproxy.h",
     "$p2p_dir/base/pseudotcp.cc",
     "$p2p_dir/base/pseudotcp.h",
     "$p2p_dir/base/rawtransport.cc",
@@ -498,6 +491,7 @@ if (enable_webrtc) {
     public_configs = [ ":jingle_public_configs" ]
 
     deps = [
+      ":libjingle",
       "//third_party/libsrtp",
       "//third_party/webrtc/modules/media_file",
       "//third_party/webrtc/modules/video_capture",
@@ -537,6 +531,8 @@ if (enable_webrtc) {
     configs += [ "//build/config/compiler:no_chromium_code" ]
 
     deps = [
+      # TODO(GYP): crbug.com/481633. Consider depending on :libjingle_webrtc
+      # instead.
       ":libjingle_webrtc_common",
       "//third_party/webrtc",
       "//third_party/webrtc/system_wrappers",

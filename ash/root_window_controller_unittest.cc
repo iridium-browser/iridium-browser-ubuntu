@@ -4,12 +4,14 @@
 
 #include "ash/root_window_controller.h"
 
+#include "ash/display/display_manager.h"
 #include "ash/session/session_state_delegate.h"
 #include "ash/shelf/shelf_layout_manager.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/test/ash_test_base.h"
+#include "ash/test/display_manager_test_api.h"
 #include "ash/wm/system_modal_container_layout_manager.h"
 #include "ash/wm/window_properties.h"
 #include "ash/wm/window_state.h"
@@ -287,6 +289,89 @@ TEST_F(RootWindowControllerTest, MoveWindows_Modal) {
   EXPECT_TRUE(wm::IsActiveWindow(modal->GetNativeView()));
   generator_1st.ClickLeftButton();
   EXPECT_TRUE(wm::IsActiveWindow(modal->GetNativeView()));
+}
+
+// Make sure lock related windows moves.
+TEST_F(RootWindowControllerTest, MoveWindows_LockWindowsInUnified) {
+  if (!SupportsMultipleDisplays())
+    return;
+  test::DisplayManagerTestApi::EnableUnifiedDesktopForTest();
+
+  UpdateDisplay("500x500");
+  const int kLockScreenWindowId = 1000;
+  const int kLockBackgroundWindowId = 1001;
+
+  RootWindowController* controller =
+      Shell::GetInstance()->GetPrimaryRootWindowController();
+
+  aura::Window* lock_container =
+      controller->GetContainer(kShellWindowId_LockScreenContainer);
+  aura::Window* lock_background_container =
+      controller->GetContainer(kShellWindowId_LockScreenBackgroundContainer);
+
+  views::Widget* lock_screen =
+      CreateModalWidgetWithParent(gfx::Rect(10, 10, 100, 100), lock_container);
+  lock_screen->GetNativeWindow()->set_id(kLockScreenWindowId);
+  lock_screen->SetFullscreen(true);
+
+  views::Widget* lock_background = CreateModalWidgetWithParent(
+      gfx::Rect(10, 10, 100, 100), lock_background_container);
+  lock_background->GetNativeWindow()->set_id(kLockBackgroundWindowId);
+
+  ASSERT_EQ(lock_screen->GetNativeWindow(),
+            controller->GetRootWindow()->GetChildById(kLockScreenWindowId));
+  ASSERT_EQ(lock_background->GetNativeWindow(),
+            controller->GetRootWindow()->GetChildById(kLockBackgroundWindowId));
+  EXPECT_EQ("0,0 500x500", lock_screen->GetNativeWindow()->bounds().ToString());
+
+  // Switch to unified.
+  UpdateDisplay("500x500,500x500");
+
+  // In unified mode, RWC is created
+  controller = Shell::GetInstance()->GetPrimaryRootWindowController();
+
+  ASSERT_EQ(lock_screen->GetNativeWindow(),
+            controller->GetRootWindow()->GetChildById(kLockScreenWindowId));
+  ASSERT_EQ(lock_background->GetNativeWindow(),
+            controller->GetRootWindow()->GetChildById(kLockBackgroundWindowId));
+  EXPECT_EQ("0,0 500x500", lock_screen->GetNativeWindow()->bounds().ToString());
+
+  // Switch to mirror.
+  DisplayManager* display_manager = Shell::GetInstance()->display_manager();
+  display_manager->SetMirrorMode(true);
+  EXPECT_TRUE(display_manager->IsInMirrorMode());
+
+  controller = Shell::GetInstance()->GetPrimaryRootWindowController();
+  ASSERT_EQ(lock_screen->GetNativeWindow(),
+            controller->GetRootWindow()->GetChildById(kLockScreenWindowId));
+  ASSERT_EQ(lock_background->GetNativeWindow(),
+            controller->GetRootWindow()->GetChildById(kLockBackgroundWindowId));
+  EXPECT_EQ("0,0 500x500", lock_screen->GetNativeWindow()->bounds().ToString());
+
+  // Switch to unified.
+  display_manager->SetMirrorMode(false);
+  EXPECT_TRUE(display_manager->IsInUnifiedMode());
+
+  controller = Shell::GetInstance()->GetPrimaryRootWindowController();
+
+  ASSERT_EQ(lock_screen->GetNativeWindow(),
+            controller->GetRootWindow()->GetChildById(kLockScreenWindowId));
+  ASSERT_EQ(lock_background->GetNativeWindow(),
+            controller->GetRootWindow()->GetChildById(kLockBackgroundWindowId));
+  EXPECT_EQ("0,0 500x500", lock_screen->GetNativeWindow()->bounds().ToString());
+
+  // Switch to single display.
+  UpdateDisplay("600x500");
+  EXPECT_FALSE(display_manager->IsInUnifiedMode());
+  EXPECT_FALSE(display_manager->IsInMirrorMode());
+
+  controller = Shell::GetInstance()->GetPrimaryRootWindowController();
+
+  ASSERT_EQ(lock_screen->GetNativeWindow(),
+            controller->GetRootWindow()->GetChildById(kLockScreenWindowId));
+  ASSERT_EQ(lock_background->GetNativeWindow(),
+            controller->GetRootWindow()->GetChildById(kLockBackgroundWindowId));
+  EXPECT_EQ("0,0 600x500", lock_screen->GetNativeWindow()->bounds().ToString());
 }
 
 TEST_F(RootWindowControllerTest, ModalContainer) {
@@ -744,15 +829,14 @@ TEST_F(VirtualKeyboardRootWindowControllerTest, RestoreWorkspaceAfterLogin) {
   aura::Window* keyboard_window = controller->proxy()->GetKeyboardWindow();
   keyboard_container->AddChild(keyboard_window);
   keyboard_window->set_owned_by_parent(false);
-  keyboard_window->SetBounds(keyboard::KeyboardBoundsFromWindowBounds(
-      keyboard_container->bounds(), 100));
+  keyboard_window->SetBounds(keyboard::FullWidthKeyboardBoundsFromRootBounds(
+      root_window->bounds(), 100));
   keyboard_window->Show();
 
   gfx::Rect before = ash::Shell::GetScreen()->GetPrimaryDisplay().work_area();
 
   // Notify keyboard bounds changing.
-  controller->NotifyKeyboardBoundsChanging(
-      controller->proxy()->GetKeyboardWindow()->bounds());
+  controller->NotifyKeyboardBoundsChanging(keyboard_container->bounds());
 
   if (!keyboard::IsKeyboardOverscrollEnabled()) {
     gfx::Rect after = ash::Shell::GetScreen()->GetPrimaryDisplay().work_area();
@@ -777,8 +861,8 @@ TEST_F(VirtualKeyboardRootWindowControllerTest, ClickWithActiveModalDialog) {
       proxy()->GetKeyboardWindow();
   keyboard_container->AddChild(keyboard_window);
   keyboard_window->set_owned_by_parent(false);
-  keyboard_window->SetBounds(keyboard::KeyboardBoundsFromWindowBounds(
-      keyboard_container->bounds(), 100));
+  keyboard_window->SetBounds(keyboard::FullWidthKeyboardBoundsFromRootBounds(
+      root_window->bounds(), 100));
 
   ui::test::TestEventHandler handler;
   root_window->AddPreTargetHandler(&handler);
@@ -833,13 +917,13 @@ TEST_F(VirtualKeyboardRootWindowControllerTest, EnsureCaretInWorkArea) {
   aura::Window* keyboard_window =proxy->GetKeyboardWindow();
   keyboard_container->AddChild(keyboard_window);
   keyboard_window->set_owned_by_parent(false);
-  keyboard_window->SetBounds(keyboard::KeyboardBoundsFromWindowBounds(
-      keyboard_container->bounds(), keyboard_height));
+  keyboard_window->SetBounds(keyboard::FullWidthKeyboardBoundsFromRootBounds(
+      root_window->bounds(), keyboard_height));
 
   proxy->EnsureCaretInWorkArea();
-  ASSERT_EQ(keyboard_container->bounds().width(),
+  ASSERT_EQ(root_window->bounds().width(),
             text_input_client.visible_rect().width());
-  ASSERT_EQ(keyboard_container->bounds().height() - keyboard_height,
+  ASSERT_EQ(root_window->bounds().height() - keyboard_height,
             text_input_client.visible_rect().height());
 
   if (switches::IsTextInputFocusManagerEnabled()) {
@@ -869,8 +953,8 @@ TEST_F(VirtualKeyboardRootWindowControllerTest, ZOrderTest) {
   aura::Window* keyboard_window = proxy->GetKeyboardWindow();
   keyboard_container->AddChild(keyboard_window);
   keyboard_window->set_owned_by_parent(false);
-  gfx::Rect keyboard_bounds = keyboard::KeyboardBoundsFromWindowBounds(
-      keyboard_container->bounds(), keyboard_height);
+  gfx::Rect keyboard_bounds = keyboard::FullWidthKeyboardBoundsFromRootBounds(
+      root_window->bounds(), keyboard_height);
   keyboard_window->SetBounds(keyboard_bounds);
   keyboard_window->Show();
 
@@ -952,11 +1036,15 @@ TEST_F(VirtualKeyboardRootWindowControllerTest, MAYBE_DisplayRotation) {
   aura::Window* keyboard_container =
       Shell::GetContainer(root_window, kShellWindowId_VirtualKeyboardContainer);
   ASSERT_TRUE(keyboard_container);
-  keyboard_container->Show();
-  EXPECT_EQ("0,0 800x600", keyboard_container->bounds().ToString());
+  keyboard::KeyboardController* keyboard_controller =
+      keyboard::KeyboardController::GetInstance();
+  keyboard_controller->ShowKeyboard(false);
+  keyboard_controller->proxy()->GetKeyboardWindow()->SetBounds(
+      gfx::Rect(0, 400, 800, 200));
+  EXPECT_EQ("0,400 800x200", keyboard_container->bounds().ToString());
 
   UpdateDisplay("600x800");
-  EXPECT_EQ("0,0 600x800", keyboard_container->bounds().ToString());
+  EXPECT_EQ("0,600 600x200", keyboard_container->bounds().ToString());
 }
 
 }  // namespace test

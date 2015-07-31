@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "ash/host/ash_window_tree_host_init_params.h"
+#include "ash/host/ash_window_tree_host_unified.h"
 #include "ash/host/root_window_transformer.h"
 #include "base/basictypes.h"
 #include "base/sys_info.h"
@@ -34,6 +35,7 @@ namespace ash {
 
 AshWindowTreeHostX11::AshWindowTreeHostX11(const gfx::Rect& initial_bounds)
     : WindowTreeHostX11(initial_bounds), transformer_helper_(this) {
+  transformer_helper_.Init();
   aura::Env::GetInstance()->AddObserver(this);
 }
 
@@ -280,6 +282,8 @@ void AshWindowTreeHostX11::SetCrOSTapPaused(bool state) {
 
 AshWindowTreeHost* AshWindowTreeHost::Create(
     const AshWindowTreeHostInitParams& init_params) {
+  if (init_params.offscreen)
+    return new AshWindowTreeHostUnified(init_params.initial_bounds);
   return new AshWindowTreeHostX11(init_params.initial_bounds);
 }
 

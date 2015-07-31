@@ -37,6 +37,7 @@
 #include "platform/Supplementable.h"
 #include "platform/heap/Handle.h"
 #include "platform/weborigin/KURL.h"
+#include "platform/weborigin/ReferrerPolicy.h"
 #include "wtf/Deque.h"
 #include "wtf/Noncopyable.h"
 #include "wtf/OwnPtr.h"
@@ -61,6 +62,14 @@ class CORE_EXPORT ExecutionContext
     WTF_MAKE_NONCOPYABLE(ExecutionContext);
 public:
     DECLARE_VIRTUAL_TRACE();
+
+    // Used to specify whether |isPrivilegedContext| should walk the
+    // ancestor tree to decide whether to restrict usage of a powerful
+    // feature.
+    enum PrivilegeContextCheck {
+        StandardPrivilegeCheck,
+        WebCryptoPrivilegeCheck
+    };
 
     virtual bool isDocument() const { return false; }
     virtual bool isWorkerGlobalScope() const { return false; }
@@ -90,7 +99,7 @@ public:
 
     virtual void reportBlockedScriptExecutionToInspector(const String& directiveText) = 0;
 
-    virtual SecurityContext& securityContext() = 0;
+    virtual const SecurityContext& securityContext() const = 0;
     KURL contextURL() const { return virtualURL(); }
     KURL contextCompleteURL(const String& url) const { return virtualCompleteURL(url); }
 
@@ -141,6 +150,13 @@ public:
     void consumeWindowInteraction();
     bool isWindowInteractionAllowed() const;
 
+    // Decides whether this context is privileged, as described in
+    // https://w3c.github.io/webappsec/specs/powerfulfeatures/#settings-privileged.
+    virtual bool isPrivilegedContext(String& errorMessage, const PrivilegeContextCheck = StandardPrivilegeCheck) const = 0;
+
+    virtual void setReferrerPolicy(ReferrerPolicy);
+    ReferrerPolicy referrerPolicy() const { return m_referrerPolicy; }
+
 protected:
     ExecutionContext();
     virtual ~ExecutionContext();
@@ -179,6 +195,8 @@ private:
 
     Deque<OwnPtr<SuspendableTask>> m_suspendedTasks;
     bool m_isRunSuspendableTasksScheduled;
+
+    ReferrerPolicy m_referrerPolicy;
 };
 
 } // namespace blink

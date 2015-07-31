@@ -11,6 +11,7 @@
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "content/common/service_worker/service_worker_types.h"
 #include "content/public/browser/notification_database_data.h"
+#include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -19,6 +20,9 @@ namespace content {
 
 // Fake render process id to use in tests requiring one.
 const int kFakeRenderProcessId = 99;
+
+// Fake Service Worker registration id to use in tests requiring one.
+const int64_t kFakeServiceWorkerRegistrationId = 42;
 
 class PlatformNotificationContextTest : public ::testing::Test {
  public:
@@ -64,13 +68,28 @@ class PlatformNotificationContextTest : public ::testing::Test {
     *store_status = status;
   }
 
+  // Callback to provide when reading multiple notifications from the database.
+  // Will store the success value in the class member, and write the read
+  // notification datas to |store_notification_datas|.
+  void DidReadAllNotificationDatas(
+      std::vector<NotificationDatabaseData>* store_notification_datas,
+      bool success,
+      const std::vector<NotificationDatabaseData>& notification_datas) {
+    DCHECK(store_notification_datas);
+
+    success_ = success;
+    *store_notification_datas = notification_datas;
+  }
+
  protected:
   // Creates a new PlatformNotificationContextImpl instance. When using this
   // method, the underlying database will always be created in memory. The
   // current message loop proxy will be used as the task runner.
   PlatformNotificationContextImpl* CreatePlatformNotificationContext() {
     PlatformNotificationContextImpl* context =
-        new PlatformNotificationContextImpl(base::FilePath(), nullptr);
+        new PlatformNotificationContextImpl(base::FilePath(),
+                                            &browser_context_,
+                                            nullptr);
     context->Initialize();
 
     OverrideTaskRunnerForTesting(context);
@@ -82,6 +101,9 @@ class PlatformNotificationContextTest : public ::testing::Test {
   void OverrideTaskRunnerForTesting(PlatformNotificationContextImpl* context) {
     context->SetTaskRunnerForTesting(base::MessageLoopProxy::current());
   }
+
+  // Returns the testing browsing context that can be used for this test.
+  BrowserContext* browser_context() { return &browser_context_; }
 
   // Returns whether the last invoked callback finished successfully.
   bool success() const { return success_; }
@@ -97,6 +119,7 @@ class PlatformNotificationContextTest : public ::testing::Test {
 
  private:
   TestBrowserThreadBundle thread_bundle_;
+  TestBrowserContext browser_context_;
 
   bool success_;
   NotificationDatabaseData database_data_;
@@ -224,6 +247,7 @@ TEST_F(PlatformNotificationContextTest, ServiceWorkerUnregistered) {
   scoped_refptr<PlatformNotificationContextImpl> notification_context(
       new PlatformNotificationContextImpl(
           base::FilePath(),
+          browser_context(),
           embedded_worker_test_helper->context_wrapper()));
   notification_context->Initialize();
 
@@ -327,7 +351,9 @@ TEST_F(PlatformNotificationContextTest, DestroyOnDiskDatabase) {
   // Manually construct the PlatformNotificationContextImpl because this test
   // requires the database to be created on the filesystem.
   scoped_refptr<PlatformNotificationContextImpl> context(
-      new PlatformNotificationContextImpl(database_dir.path(), nullptr));
+      new PlatformNotificationContextImpl(database_dir.path(),
+                                          browser_context(),
+                                          nullptr));
 
   OverrideTaskRunnerForTesting(context.get());
 
@@ -350,6 +376,73 @@ TEST_F(PlatformNotificationContextTest, DestroyOnDiskDatabase) {
 
   // The database's directory should be empty at this point.
   EXPECT_TRUE(IsDirectoryEmpty(database_dir.path()));
+}
+
+TEST_F(PlatformNotificationContextTest, ReadAllServiceWorkerDataEmpty) {
+  scoped_refptr<PlatformNotificationContextImpl> context =
+      CreatePlatformNotificationContext();
+
+  GURL origin("https://example.com");
+
+  std::vector<NotificationDatabaseData> notification_database_datas;
+  context->ReadAllNotificationDataForServiceWorkerRegistration(
+      origin,
+      kFakeServiceWorkerRegistrationId,
+      base::Bind(&PlatformNotificationContextTest::DidReadAllNotificationDatas,
+                 base::Unretained(this),
+                 &notification_database_datas));
+
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_TRUE(success());
+  EXPECT_EQ(0u, notification_database_datas.size());
+}
+
+TEST_F(PlatformNotificationContextTest, ReadAllServiceWorkerDataFilled) {
+  scoped_refptr<PlatformNotificationContextImpl> context =
+      CreatePlatformNotificationContext();
+
+  GURL origin("https://example.com");
+
+  NotificationDatabaseData notification_database_data;
+  notification_database_data.origin = origin;
+  notification_database_data.service_worker_registration_id =
+      kFakeServiceWorkerRegistrationId;
+
+  // Insert ten notifications into the database belonging to origin and the
+  // test Service Worker Registration id.
+  for (int i = 0; i < 10; ++i) {
+    context->WriteNotificationData(
+        origin,
+        notification_database_data,
+        base::Bind(&PlatformNotificationContextTest::DidWriteNotificationData,
+                   base::Unretained(this)));
+
+    base::RunLoop().RunUntilIdle();
+
+    ASSERT_TRUE(success());
+  }
+
+  // Now read the notifications from the database again. There should be ten,
+  // all set with the correct origin and Service Worker Registration id.
+  std::vector<NotificationDatabaseData> notification_database_datas;
+  context->ReadAllNotificationDataForServiceWorkerRegistration(
+      origin,
+      kFakeServiceWorkerRegistrationId,
+      base::Bind(&PlatformNotificationContextTest::DidReadAllNotificationDatas,
+                 base::Unretained(this),
+                 &notification_database_datas));
+
+  base::RunLoop().RunUntilIdle();
+
+  ASSERT_TRUE(success());
+  ASSERT_EQ(10u, notification_database_datas.size());
+
+  for (int i = 0; i < 10; ++i) {
+    EXPECT_EQ(origin, notification_database_datas[i].origin);
+    EXPECT_EQ(kFakeServiceWorkerRegistrationId,
+              notification_database_datas[i].service_worker_registration_id);
+  }
 }
 
 }  // namespace content

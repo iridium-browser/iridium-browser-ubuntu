@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include <map>
+#include <queue>
 #include <string>
 #include <vector>
 
@@ -17,6 +18,7 @@
 #include "base/observer_list.h"
 #include "base/timer/timer.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
+#include "ui/display/chromeos/query_content_protection_task.h"
 #include "ui/display/display_export.h"
 #include "ui/display/types/display_constants.h"
 #include "ui/display/types/native_display_observer.h"
@@ -29,6 +31,8 @@ class Size;
 
 namespace ui {
 struct DisplayConfigureRequest;
+struct GammaRampRGBEntry;
+class DisplayLayoutManager;
 class DisplayMode;
 class DisplaySnapshot;
 class NativeDisplayDelegate;
@@ -42,7 +46,28 @@ class DISPLAY_EXPORT DisplayConfigurator : public NativeDisplayObserver {
 
   typedef base::Callback<void(bool)> ConfigurationCallback;
 
+  typedef base::Callback<void(bool /* success */)> EnableProtectionCallback;
+
+  struct QueryProtectionResponse {
+    // True if the query succeeded, false otherwise.
+    bool success = false;
+
+    // The type of connected display links, which is a bitmask of
+    // DisplayConnectionType values.
+    uint32_t link_mask = 0;
+
+    // The desired protection methods, which is a bitmask of the
+    // ContentProtectionMethod values.
+    uint32_t protection_mask = 0;
+  };
+
+  typedef base::Callback<void(const QueryProtectionResponse&)>
+      QueryProtectionCallback;
+
   typedef std::vector<DisplaySnapshot*> DisplayStateList;
+
+  // Mapping a display_id to a protection request bitmask.
+  typedef std::map<int64_t, uint32_t> ContentProtections;
 
   class Observer {
    public:
@@ -87,33 +112,6 @@ class DISPLAY_EXPORT DisplayConfigurator : public NativeDisplayObserver {
     // Called when the hardware mirroring failed.
     virtual void SetSoftwareMirroring(bool enabled) = 0;
     virtual bool SoftwareMirroringEnabled() const = 0;
-  };
-
-  class DisplayLayoutManager {
-   public:
-    virtual ~DisplayLayoutManager() {}
-
-    virtual SoftwareMirroringController* GetSoftwareMirroringController()
-        const = 0;
-
-    virtual StateController* GetStateController() const = 0;
-
-    // Returns the current display state.
-    virtual MultipleDisplayState GetDisplayState() const = 0;
-
-    // Returns the current power state.
-    virtual chromeos::DisplayPowerState GetPowerState() const = 0;
-
-    // Based on the given |displays|, display state and power state, it will
-    // create display configuration requests which will then be used to
-    // configure the hardware. The requested configuration is stored in
-    // |requests| and |framebuffer_size|.
-    virtual bool GetDisplayLayout(
-        const std::vector<DisplaySnapshot*>& displays,
-        MultipleDisplayState new_display_state,
-        chromeos::DisplayPowerState new_power_state,
-        std::vector<DisplayConfigureRequest>* requests,
-        gfx::Size* framebuffer_size) const = 0;
   };
 
   // Helper class used by tests.
@@ -241,23 +239,20 @@ class DISPLAY_EXPORT DisplayConfigurator : public NativeDisplayObserver {
   // Unregisters the client.
   void UnregisterContentProtectionClient(ContentProtectionClientId client_id);
 
-  // Queries link status and protection status.
-  // |link_mask| is the type of connected display links, which is a bitmask of
-  // DisplayConnectionType values. |protection_mask| is the desired protection
-  // methods, which is a bitmask of the ContentProtectionMethod values.
-  // Returns true on success.
-  bool QueryContentProtectionStatus(ContentProtectionClientId client_id,
+  // Queries link status and protection status. |callback| is used to respond
+  // to the query.
+  void QueryContentProtectionStatus(ContentProtectionClientId client_id,
                                     int64_t display_id,
-                                    uint32_t* link_mask,
-                                    uint32_t* protection_mask);
+                                    const QueryProtectionCallback& callback);
 
   // Requests the desired protection methods.
   // |protection_mask| is the desired protection methods, which is a bitmask
   // of the ContentProtectionMethod values.
   // Returns true when the protection request has been made.
-  bool EnableContentProtection(ContentProtectionClientId client_id,
+  void EnableContentProtection(ContentProtectionClientId client_id,
                                int64_t display_id,
-                               uint32_t desired_protection_mask);
+                               uint32_t protection_mask,
+                               const EnableProtectionCallback& callback);
 
   // Checks the available color profiles for |display_id| and fills the result
   // into |profiles|.
@@ -268,11 +263,13 @@ class DISPLAY_EXPORT DisplayConfigurator : public NativeDisplayObserver {
   bool SetColorCalibrationProfile(int64_t display_id,
                                   ui::ColorCalibrationProfile new_profile);
 
+  // Sets the gamma ramp for |display_id| to the values in |lut|.
+  bool SetGammaRamp(int64_t display_id,
+                    const std::vector<GammaRampRGBEntry>& lut);
+
  private:
   class DisplayLayoutManagerImpl;
 
-  // Mapping a display_id to a protection request bitmask.
-  typedef std::map<int64_t, uint32_t> ContentProtections;
   // Mapping a client to its protection request.
   typedef std::map<ContentProtectionClientId, ContentProtections>
       ProtectionRequests;
@@ -294,9 +291,6 @@ class DISPLAY_EXPORT DisplayConfigurator : public NativeDisplayObserver {
   // in |power_state|.
   MultipleDisplayState ChooseDisplayState(
       chromeos::DisplayPowerState power_state) const;
-
-  // Returns true if in either hardware or software mirroring mode.
-  bool IsMirroring() const;
 
   // Applies display protections according to requests.
   bool ApplyProtections(const ContentProtections& requests);
@@ -324,6 +318,19 @@ class DISPLAY_EXPORT DisplayConfigurator : public NativeDisplayObserver {
   // the configuration status used when calling the callbacks.
   void CallAndClearInProgressCallbacks(bool success);
   void CallAndClearQueuedCallbacks(bool success);
+
+  // Content protection callbacks called by the tasks when they finish. These
+  // are responsible for destroying the task, replying to the caller that made
+  // the task and starting the a new content protection task if one is queued.
+  void OnContentProtectionQueried(
+      ContentProtectionClientId client_id,
+      int64_t display_id,
+      QueryContentProtectionTask::Response response);
+  void OnContentProtectionEnabled(ContentProtectionClientId client_id,
+                                  int64_t display_id,
+                                  uint32_t desired_method_mask,
+                                  bool success);
+  void OnContentProtectionClientUnregistered(bool success);
 
   StateController* state_controller_;
   SoftwareMirroringController* mirroring_controller_;
@@ -367,6 +374,10 @@ class DISPLAY_EXPORT DisplayConfigurator : public NativeDisplayObserver {
   // List of callbacks belonging to the currently running display configuration
   // task.
   std::vector<ConfigurationCallback> in_progress_configuration_callbacks_;
+
+  std::queue<base::Closure> content_protection_tasks_;
+  std::queue<QueryProtectionCallback> query_protection_callbacks_;
+  std::queue<EnableProtectionCallback> enable_protection_callbacks_;
 
   // True if the caller wants to force the display configuration process.
   bool force_configure_;

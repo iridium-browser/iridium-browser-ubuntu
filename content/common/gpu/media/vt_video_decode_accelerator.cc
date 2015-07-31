@@ -33,6 +33,19 @@ using content_common_gpu_media::StubPathMap;
 
 namespace content {
 
+// Only H.264 with 4:2:0 chroma sampling is supported.
+static const media::VideoCodecProfile kSupportedProfiles[] = {
+  media::H264PROFILE_BASELINE,
+  media::H264PROFILE_MAIN,
+  media::H264PROFILE_EXTENDED,
+  media::H264PROFILE_HIGH,
+  media::H264PROFILE_HIGH10PROFILE,
+  media::H264PROFILE_SCALABLEBASELINE,
+  media::H264PROFILE_SCALABLEHIGH,
+  media::H264PROFILE_STEREOHIGH,
+  media::H264PROFILE_MULTIVIEWHIGH,
+};
+
 // Size to use for NALU length headers in AVC format (can be 1, 2, or 4).
 static const int kNALUHeaderLength = 4;
 
@@ -289,13 +302,15 @@ bool VTVideoDecodeAccelerator::Initialize(
   if (!InitializeVideoToolbox())
     return false;
 
-  // Only H.264 with 4:2:0 chroma sampling is supported.
-  if (profile < media::H264PROFILE_MIN ||
-      profile > media::H264PROFILE_MAX ||
-      profile == media::H264PROFILE_HIGH422PROFILE ||
-      profile == media::H264PROFILE_HIGH444PREDICTIVEPROFILE) {
-    return false;
+  bool profile_supported = false;
+  for (const auto& supported_profile : kSupportedProfiles) {
+    if (profile == supported_profile) {
+      profile_supported = true;
+      break;
+    }
   }
+  if (!profile_supported)
+    return false;
 
   // Spawn a thread to handle parsing and calling VideoToolbox.
   if (!decoder_thread_.Start())
@@ -309,7 +324,7 @@ bool VTVideoDecodeAccelerator::Initialize(
 }
 
 bool VTVideoDecodeAccelerator::FinishDelayedFrames() {
-  DCHECK(decoder_thread_.message_loop_proxy()->BelongsToCurrentThread());
+  DCHECK(decoder_thread_.task_runner()->BelongsToCurrentThread());
   if (session_) {
     OSStatus status = VTDecompressionSessionWaitForAsynchronousFrames(session_);
     if (status) {
@@ -322,7 +337,7 @@ bool VTVideoDecodeAccelerator::FinishDelayedFrames() {
 }
 
 bool VTVideoDecodeAccelerator::ConfigureDecoder() {
-  DCHECK(decoder_thread_.message_loop_proxy()->BelongsToCurrentThread());
+  DCHECK(decoder_thread_.task_runner()->BelongsToCurrentThread());
   DCHECK(!last_sps_.empty());
   DCHECK(!last_pps_.empty());
 
@@ -432,7 +447,7 @@ bool VTVideoDecodeAccelerator::ConfigureDecoder() {
 void VTVideoDecodeAccelerator::DecodeTask(
     const media::BitstreamBuffer& bitstream,
     Frame* frame) {
-  DCHECK(decoder_thread_.message_loop_proxy()->BelongsToCurrentThread());
+  DCHECK(decoder_thread_.task_runner()->BelongsToCurrentThread());
 
   // Map the bitstream buffer.
   base::SharedMemory memory(bitstream.handle(), true);
@@ -626,6 +641,16 @@ void VTVideoDecodeAccelerator::DecodeTask(
     return;
   }
 
+  // Make sure that the memory is actually allocated.
+  // CMBlockBufferReplaceDataBytes() is documented to do this, but prints a
+  // message each time starting in Mac OS X 10.10.
+  status = CMBlockBufferAssureBlockMemory(data);
+  if (status) {
+    NOTIFY_STATUS("CMBlockBufferAssureBlockMemory()", status,
+                  SFT_PLATFORM_ERROR);
+    return;
+  }
+
   // Copy NALU data into the CMBlockBuffer, inserting length headers.
   size_t offset = 0;
   for (size_t i = 0; i < nalus.size(); i++) {
@@ -660,8 +685,8 @@ void VTVideoDecodeAccelerator::DecodeTask(
       1,                    // num_samples
       0,                    // num_sample_timing_entries
       nullptr,              // &sample_timing_array
-      0,                    // num_sample_size_entries
-      nullptr,              // &sample_size_array
+      1,                    // num_sample_size_entries
+      &data_size,           // &sample_size_array
       sample.InitializeInto());
   if (status) {
     NOTIFY_STATUS("CMSampleBufferCreate()", status, SFT_PLATFORM_ERROR);
@@ -729,7 +754,7 @@ void VTVideoDecodeAccelerator::DecodeDone(Frame* frame) {
 }
 
 void VTVideoDecodeAccelerator::FlushTask(TaskType type) {
-  DCHECK(decoder_thread_.message_loop_proxy()->BelongsToCurrentThread());
+  DCHECK(decoder_thread_.task_runner()->BelongsToCurrentThread());
   FinishDelayedFrames();
 
   // Always queue a task, even if FinishDelayedFrames() fails, so that
@@ -750,9 +775,9 @@ void VTVideoDecodeAccelerator::Decode(const media::BitstreamBuffer& bitstream) {
   assigned_bitstream_ids_.insert(bitstream.id());
   Frame* frame = new Frame(bitstream.id());
   pending_frames_[frame->bitstream_id] = make_linked_ptr(frame);
-  decoder_thread_.message_loop_proxy()->PostTask(FROM_HERE, base::Bind(
-      &VTVideoDecodeAccelerator::DecodeTask, base::Unretained(this),
-      bitstream, frame));
+  decoder_thread_.task_runner()->PostTask(
+      FROM_HERE, base::Bind(&VTVideoDecodeAccelerator::DecodeTask,
+                            base::Unretained(this), bitstream, frame));
 }
 
 void VTVideoDecodeAccelerator::AssignPictureBuffers(
@@ -989,9 +1014,9 @@ void VTVideoDecodeAccelerator::NotifyError(
 void VTVideoDecodeAccelerator::QueueFlush(TaskType type) {
   DCHECK(gpu_thread_checker_.CalledOnValidThread());
   pending_flush_tasks_.push(type);
-  decoder_thread_.message_loop_proxy()->PostTask(FROM_HERE, base::Bind(
-      &VTVideoDecodeAccelerator::FlushTask, base::Unretained(this),
-      type));
+  decoder_thread_.task_runner()->PostTask(
+      FROM_HERE, base::Bind(&VTVideoDecodeAccelerator::FlushTask,
+                            base::Unretained(this), type));
 
   // If this is a new flush request, see if we can make progress.
   if (pending_flush_tasks_.size() == 1)
@@ -1030,6 +1055,20 @@ void VTVideoDecodeAccelerator::Destroy() {
 
 bool VTVideoDecodeAccelerator::CanDecodeOnIOThread() {
   return false;
+}
+
+// static
+media::VideoDecodeAccelerator::SupportedProfiles
+VTVideoDecodeAccelerator::GetSupportedProfiles() {
+  SupportedProfiles profiles;
+  for (const auto& supported_profile : kSupportedProfiles) {
+    SupportedProfile profile;
+    profile.profile = supported_profile;
+    profile.min_resolution.SetSize(16, 16);
+    profile.max_resolution.SetSize(4096, 2160);
+    profiles.push_back(profile);
+  }
+  return profiles;
 }
 
 }  // namespace content

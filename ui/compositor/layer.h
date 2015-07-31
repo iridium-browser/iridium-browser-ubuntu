@@ -14,6 +14,7 @@
 #include "base/message_loop/message_loop.h"
 #include "cc/animation/animation_events.h"
 #include "cc/animation/layer_animation_event_observer.h"
+#include "cc/base/region.h"
 #include "cc/base/scoped_ptr_vector.h"
 #include "cc/layers/content_layer_client.h"
 #include "cc/layers/layer_client.h"
@@ -150,7 +151,7 @@ class COMPOSITOR_EXPORT Layer
 
   // The offset from our parent (stored in bounds.origin()) is an integer but we
   // may need to be at a fractional pixel offset to align properly on screen.
-  void SetSubpixelPositionOffset(const gfx::Vector2dF offset);
+  void SetSubpixelPositionOffset(const gfx::Vector2dF& offset);
   const gfx::Vector2dF& subpixel_position_offset() const {
     return subpixel_position_offset_;
   }
@@ -321,8 +322,9 @@ class COMPOSITOR_EXPORT Layer
   // Uses damaged rectangles recorded in |damaged_region_| to invalidate the
   // |cc_layer_|.
   void SendDamagedRects();
+  void ClearDamagedRects();
 
-  const SkRegion& damaged_region() const { return damaged_region_; }
+  const cc::Region& damaged_region() const { return damaged_region_; }
 
   void CompleteAllAnimations();
 
@@ -344,7 +346,8 @@ class COMPOSITOR_EXPORT Layer
       SkCanvas* canvas,
       const gfx::Rect& clip,
       ContentLayerClient::PaintingControlSetting painting_control) override;
-  scoped_refptr<cc::DisplayItemList> PaintContentsToDisplayList(
+  void PaintContentsToDisplayList(
+      cc::DisplayItemList* display_list,
       const gfx::Rect& clip,
       ContentLayerClient::PaintingControlSetting painting_control) override;
   bool FillsBoundsCompletely() const override;
@@ -460,9 +463,9 @@ class COMPOSITOR_EXPORT Layer
   bool fills_bounds_opaquely_;
   bool fills_bounds_completely_;
 
-  // Union of damaged rects, in pixel coordinates, to be used when
-  // compositor is ready to paint the content.
-  SkRegion damaged_region_;
+  // Union of damaged rects, in layer space, to be used when compositor is ready
+  // to paint the content.
+  cc::Region damaged_region_;
 
   int background_blur_radius_;
 

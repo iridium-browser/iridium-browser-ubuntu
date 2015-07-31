@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/libgtk2ui/gtk2_ui.h"
 
+#include <math.h>
 #include <set>
 
 #include <pango/pango.h>
@@ -201,9 +202,6 @@ const int kOtherToolbarButtonIDs[] = {
   IDR_TOOLBAR_BEZEL_HOVER,
   IDR_TOOLBAR_BEZEL_PRESSED,
   IDR_BROWSER_ACTIONS_OVERFLOW,
-  IDR_THROBBER,
-  IDR_THROBBER_WAITING,
-  IDR_THROBBER_LIGHT,
 
   // TODO(erg): The dropdown arrow should be tinted because we're injecting
   // various background GTK colors, but the code that accesses them needs to be
@@ -697,9 +695,10 @@ void Gtk2UI::SetNonClientMiddleClickAction(NonClientMiddleClickAction action) {
 }
 
 scoped_ptr<ui::LinuxInputMethodContext> Gtk2UI::CreateInputMethodContext(
-    ui::LinuxInputMethodContextDelegate* delegate) const {
+    ui::LinuxInputMethodContextDelegate* delegate,
+    bool is_simple) const {
   return scoped_ptr<ui::LinuxInputMethodContext>(
-      new X11InputMethodContextImplGtk2(delegate));
+      new X11InputMethodContextImplGtk2(delegate, is_simple));
 }
 
 gfx::FontRenderParams Gtk2UI::GetDefaultFontRenderParams() const {
@@ -1388,7 +1387,7 @@ void Gtk2UI::ClearAllThemeData() {
 void Gtk2UI::UpdateDefaultFont(const PangoFontDescription* desc) {
   // Use gfx::FontRenderParams to select a family and determine the rendering
   // settings.
-  gfx::FontRenderParamsQuery query(false /* for_web_contents */);
+  gfx::FontRenderParamsQuery query;
   base::SplitString(pango_font_description_get_family(desc), ',',
                     &query.families);
 

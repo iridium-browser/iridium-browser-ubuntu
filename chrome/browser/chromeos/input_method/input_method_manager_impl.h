@@ -207,6 +207,7 @@ class InputMethodManagerImpl : public InputMethodManager,
 
   // Change system input method.
   void ChangeInputMethodInternal(const InputMethodDescriptor& descriptor,
+                                 Profile* profile,
                                  bool show_message,
                                  bool notify_menu);
 
@@ -254,7 +255,8 @@ class InputMethodManagerImpl : public InputMethodManager,
 
   // The engine map from extension_id to an engine.
   typedef std::map<std::string, InputMethodEngineInterface*> EngineMap;
-  EngineMap engine_map_;
+  typedef std::map<Profile*, EngineMap, ProfileCompare> ProfileEngineMap;
+  ProfileEngineMap engine_map_;
 
   // The map from input method id to the input method stat id.
   // The stat id has the format: <category#><first char after prefix><index>

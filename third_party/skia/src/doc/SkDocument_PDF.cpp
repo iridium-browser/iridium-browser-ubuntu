@@ -9,7 +9,6 @@
 #include "SkPDFCanon.h"
 #include "SkPDFDevice.h"
 #include "SkPDFFont.h"
-#include "SkPDFResourceDict.h"
 #include "SkPDFStream.h"
 #include "SkPDFTypes.h"
 #include "SkStream.h"
@@ -32,7 +31,7 @@ static void emit_pdf_footer(SkWStream* stream,
     // TODO(vandebo): Linearized format will take a Prev entry too.
     // TODO(vandebo): PDF/A requires an ID entry.
     trailerDict.insertInt("Size", int(objCount));
-    trailerDict.insert("Root", new SkPDFObjRef(docCatalog))->unref();
+    trailerDict.insertObjRef("Root", SkRef(docCatalog));
 
     stream->writeText("trailer\n");
     trailerDict.emitObject(stream, objNumMap, substitutes);
@@ -62,24 +61,20 @@ static void perform_font_subsetting(
     }
 }
 
+static SkPDFObject* create_pdf_page_content(const SkPDFDevice* pageDevice) {
+    SkAutoTDelete<SkStreamAsset> content(pageDevice->content());
+    return SkNEW_ARGS(SkPDFStream, (content.get()));
+}
+
 static SkPDFDict* create_pdf_page(const SkPDFDevice* pageDevice) {
     SkAutoTUnref<SkPDFDict> page(SkNEW_ARGS(SkPDFDict, ("Page")));
-    SkAutoTUnref<SkPDFResourceDict> deviceResourceDict(
-            pageDevice->createResourceDict());
-    page->insert("Resources", deviceResourceDict.get());
-
-    SkAutoTUnref<SkPDFArray> mediaBox(pageDevice->copyMediaBox());
-    page->insert("MediaBox", mediaBox.get());
-
-    SkPDFArray* annots = pageDevice->getAnnotations();
-    if (annots && annots->size() > 0) {
-        page->insert("Annots", annots);
+    page->insertObject("Resources", pageDevice->createResourceDict());
+    page->insertObject("MediaBox", pageDevice->copyMediaBox());
+    if (SkPDFArray* annots = pageDevice->getAnnotations()) {
+        SkASSERT(annots->size() > 0);
+        page->insertObject("Annots", SkRef(annots));
     }
-
-    SkAutoTDelete<SkStreamAsset> content(pageDevice->content());
-    SkAutoTUnref<SkPDFStream> contentStream(
-            SkNEW_ARGS(SkPDFStream, (content.get())));
-    page->insert("Contents", new SkPDFObjRef(contentStream.get()))->unref();
+    page->insertObjRef("Contents", create_pdf_page_content(pageDevice));
     return page.detach();
 }
 
@@ -94,10 +89,6 @@ static void generate_page_tree(const SkTDArray<SkPDFDict*>& pages,
     // builds the tree bottom up, skipping internal nodes that would have only
     // one child.
     static const int kNodeSize = 8;
-
-    SkAutoTUnref<SkPDFName> kidsName(new SkPDFName("Kids"));
-    SkAutoTUnref<SkPDFName> countName(new SkPDFName("Count"));
-    SkAutoTUnref<SkPDFName> parentName(new SkPDFName("Parent"));
 
     // curNodes takes a reference to its items, which it passes to pageTree.
     SkTDArray<SkPDFDict*> curNodes;
@@ -119,16 +110,14 @@ static void generate_page_tree(const SkTDArray<SkPDFDict*>& pages,
                 break;
             }
 
-            SkPDFDict* newNode = new SkPDFDict("Pages");
-            SkAutoTUnref<SkPDFObjRef> newNodeRef(new SkPDFObjRef(newNode));
-
+            SkAutoTUnref<SkPDFDict> newNode(new SkPDFDict("Pages"));
             SkAutoTUnref<SkPDFArray> kids(new SkPDFArray);
             kids->reserve(kNodeSize);
 
             int count = 0;
             for (; i < curNodes.count() && count < kNodeSize; i++, count++) {
-                curNodes[i]->insert(parentName.get(), newNodeRef.get());
-                kids->append(new SkPDFObjRef(curNodes[i]))->unref();
+                curNodes[i]->insertObjRef("Parent", SkRef(newNode.get()));
+                kids->appendObjRef(SkRef(curNodes[i]));
 
                 // TODO(vandebo): put the objects in strict access order.
                 // Probably doesn't matter because they are so small.
@@ -150,9 +139,9 @@ static void generate_page_tree(const SkTDArray<SkPDFDict*>& pages,
             if (i == curNodes.count()) {
                 pageCount = ((pages.count() - 1) % treeCapacity) + 1;
             }
-            newNode->insert(countName.get(), new SkPDFInt(pageCount))->unref();
-            newNode->insert(kidsName.get(), kids.get());
-            nextRoundNodes.push(newNode);  // Transfer reference.
+            newNode->insertInt("Count", pageCount);
+            newNode->insertObject("Kids", kids.detach());
+            nextRoundNodes.push(newNode.detach());  // Transfer reference.
         }
 
         curNodes = nextRoundNodes;
@@ -189,23 +178,20 @@ static bool emit_pdf_document(const SkTDArray<const SkPDFDevice*>& pageDevices,
 
     SkPDFDict* pageTreeRoot;
     generate_page_tree(pages, &pageTree, &pageTreeRoot);
+    docCatalog->insertObjRef("Pages", SkRef(pageTreeRoot));
 
-    docCatalog->insert("Pages", new SkPDFObjRef(pageTreeRoot))->unref();
+    if (dests->size() > 0) {
+        docCatalog->insertObjRef("Dests", dests.detach());
+    }
 
     /* TODO(vandebo): output intent
     SkAutoTUnref<SkPDFDict> outputIntent = new SkPDFDict("OutputIntent");
-    outputIntent->insert("S", new SkPDFName("GTS_PDFA1"))->unref();
-    outputIntent->insert("OutputConditionIdentifier",
-                         new SkPDFString("sRGB"))->unref();
-    SkAutoTUnref<SkPDFArray> intentArray = new SkPDFArray;
-    intentArray->append(outputIntent.get());
-    docCatalog->insert("OutputIntent", intentArray.get());
+    outputIntent->insertName("S", "GTS_PDFA1");
+    outputIntent->insertString("OutputConditionIdentifier", "sRGB");
+    SkAutoTUnref<SkPDFArray> intentArray(new SkPDFArray);
+    intentArray->appendObject(SkRef(outputIntent.get()));
+    docCatalog->insertObject("OutputIntent", intentArray.detach());
     */
-
-    if (dests->size() > 0) {
-        docCatalog->insert("Dests", SkNEW_ARGS(SkPDFObjRef, (dests.get())))
-                ->unref();
-    }
 
     // Build font subsetting info before proceeding.
     SkPDFSubstituteMap substitutes;
@@ -310,8 +296,8 @@ public:
     }
 
 protected:
-    virtual SkCanvas* onBeginPage(SkScalar width, SkScalar height,
-                                  const SkRect& trimBox) override {
+    SkCanvas* onBeginPage(SkScalar width, SkScalar height,
+                          const SkRect& trimBox) override {
         SkASSERT(!fCanvas.get());
 
         SkISize pageSize = SkISize::Make(

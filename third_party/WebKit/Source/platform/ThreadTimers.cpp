@@ -31,7 +31,8 @@
 #include "platform/SharedTimer.h"
 #include "platform/Timer.h"
 #include "platform/TraceEvent.h"
-#include "platform/scheduler/Scheduler.h"
+#include "public/platform/Platform.h"
+#include "public/platform/WebScheduler.h"
 #include "wtf/CurrentTime.h"
 #include "wtf/MainThread.h"
 
@@ -136,19 +137,13 @@ void ThreadTimers::sharedTimerFiredInternal()
         timer.fired();
 
         // Catch the case where the timer asked timers to fire in a nested event loop, or we are over time limit.
-        if (!m_firingTimers || timeToQuit < monotonicallyIncreasingTime() || (isMainThread() && Scheduler::shared()->shouldYieldForHighPriorityWork()))
+        if (!m_firingTimers || timeToQuit < monotonicallyIncreasingTime()
+            || (isMainThread() && Platform::current()->currentThread()->scheduler()->shouldYieldForHighPriorityWork()))
             break;
     }
 
     m_firingTimers = false;
 
-    updateSharedTimer();
-}
-
-void ThreadTimers::fireTimersInNestedEventLoop()
-{
-    // Reset the reentrancy guard so the timers can fire again.
-    m_firingTimers = false;
     updateSharedTimer();
 }
 

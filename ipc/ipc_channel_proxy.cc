@@ -9,6 +9,7 @@
 #include "base/location.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/single_thread_task_runner.h"
 #include "base/thread_task_runner_handle.h"
 #include "ipc/ipc_channel_factory.h"
@@ -29,6 +30,7 @@ ChannelProxy::Context::Context(
       listener_(listener),
       ipc_task_runner_(ipc_task_runner),
       channel_connected_called_(false),
+      channel_send_thread_safe_(false),
       message_filter_router_(new MessageFilterRouter()),
       peer_pid_(base::kNullProcessId) {
   DCHECK(ipc_task_runner_.get());
@@ -59,9 +61,11 @@ void ChannelProxy::Context::SetListenerTaskRunner(
 }
 
 void ChannelProxy::Context::CreateChannel(scoped_ptr<ChannelFactory> factory) {
+  base::AutoLock l(channel_lifetime_lock_);
   DCHECK(!channel_);
   channel_id_ = factory->GetName();
   channel_ = factory->BuildChannel(this);
+  channel_send_thread_safe_ = channel_->IsSendThreadSafe();
 }
 
 bool ChannelProxy::Context::TryFilters(const Message& message) {
@@ -146,6 +150,10 @@ void ChannelProxy::Context::OnChannelOpened() {
 
 // Called on the IPC::Channel thread
 void ChannelProxy::Context::OnChannelClosed() {
+  // TODO(pkasting): Remove ScopedTracker below once crbug.com/477117 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "477117 ChannelProxy::Context::OnChannelClosed"));
   // It's okay for IPC::ChannelProxy::Close to be called more than once, which
   // would result in this branch being taken.
   if (!channel_)
@@ -163,7 +171,7 @@ void ChannelProxy::Context::OnChannelClosed() {
   // access it any more.
   pending_filters_.clear();
 
-  channel_.reset();
+  ClearChannel();
 
   // Balance with the reference taken during startup.  This may result in
   // self-destruction.
@@ -176,6 +184,10 @@ void ChannelProxy::Context::Clear() {
 
 // Called on the IPC::Channel thread
 void ChannelProxy::Context::OnSendMessage(scoped_ptr<Message> message) {
+  // TODO(pkasting): Remove ScopedTracker below once crbug.com/477117 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "477117 ChannelProxy::Context::OnSendMessage"));
   if (!channel_) {
     OnChannelClosed();
     return;
@@ -311,6 +323,31 @@ void ChannelProxy::Context::OnDispatchBadMessage(const Message& message) {
     listener_->OnBadMessageReceived(message);
 }
 
+void ChannelProxy::Context::ClearChannel() {
+  base::AutoLock l(channel_lifetime_lock_);
+  channel_.reset();
+}
+
+void ChannelProxy::Context::SendFromThisThread(Message* message) {
+  base::AutoLock l(channel_lifetime_lock_);
+  if (!channel_)
+    return;
+  DCHECK(channel_->IsSendThreadSafe());
+  channel_->Send(message);
+}
+
+void ChannelProxy::Context::Send(Message* message) {
+  if (channel_send_thread_safe_) {
+    SendFromThisThread(message);
+    return;
+  }
+
+  ipc_task_runner()->PostTask(
+      FROM_HERE, base::Bind(&ChannelProxy::Context::OnSendMessage, this,
+                            base::Passed(scoped_ptr<Message>(message))));
+}
+
+
 //-----------------------------------------------------------------------------
 
 // static
@@ -429,10 +466,7 @@ bool ChannelProxy::Send(Message* message) {
   Logging::GetInstance()->OnSendMessage(message, context_->channel_id());
 #endif
 
-  context_->ipc_task_runner()->PostTask(
-      FROM_HERE,
-      base::Bind(&ChannelProxy::Context::OnSendMessage,
-                 context_, base::Passed(scoped_ptr<Message>(message))));
+  context_->Send(message);
   return true;
 }
 

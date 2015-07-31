@@ -13,19 +13,20 @@
 #include "base/lazy_instance.h"
 #include "base/message_loop/message_loop.h"
 #include "base/values.h"
+#include "components/guest_view/common/guest_view_constants.h"
 #include "content/public/child/v8_value_converter.h"
 #include "content/public/common/child_process_host.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_thread.h"
 #include "extensions/common/api/messaging/message.h"
 #include "extensions/common/extension_messages.h"
-#include "extensions/common/guest_view/guest_view_constants.h"
 #include "extensions/common/manifest_handlers/externally_connectable.h"
 #include "extensions/renderer/dispatcher.h"
 #include "extensions/renderer/event_bindings.h"
 #include "extensions/renderer/object_backed_native_handler.h"
 #include "extensions/renderer/script_context.h"
 #include "extensions/renderer/script_context_set.h"
+#include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebScopedMicrotaskSuppression.h"
 #include "third_party/WebKit/public/web/WebScopedUserGesture.h"
@@ -181,27 +182,33 @@ class ExtensionImpl : public ObjectBackedNativeHandler {
   // not be executed re-entrantly to avoid running JS in an unexpected state.
   class GCCallback {
    public:
-    static void Bind(v8::Handle<v8::Object> object,
-                     v8::Handle<v8::Function> callback,
+    static void Bind(v8::Local<v8::Object> object,
+                     v8::Local<v8::Function> callback,
                      v8::Isolate* isolate) {
       GCCallback* cb = new GCCallback(object, callback, isolate);
-      cb->object_.SetWeak(cb, NearDeathCallback);
+      cb->object_.SetWeak(cb, FirstWeakCallback,
+                          v8::WeakCallbackType::kParameter);
     }
 
    private:
-    static void NearDeathCallback(
-        const v8::WeakCallbackData<v8::Object, GCCallback>& data) {
+    static void FirstWeakCallback(
+        const v8::WeakCallbackInfo<GCCallback>& data) {
       // v8 says we need to explicitly reset weak handles from their callbacks.
       // It's not implicit as one might expect.
       data.GetParameter()->object_.Reset();
+      data.SetSecondPassCallback(SecondWeakCallback);
+    }
+
+    static void SecondWeakCallback(
+        const v8::WeakCallbackInfo<GCCallback>& data) {
       base::MessageLoop::current()->PostTask(
           FROM_HERE,
           base::Bind(&GCCallback::RunCallback,
                      base::Owned(data.GetParameter())));
     }
 
-    GCCallback(v8::Handle<v8::Object> object,
-               v8::Handle<v8::Function> callback,
+    GCCallback(v8::Local<v8::Object> object,
+               v8::Local<v8::Function> callback,
                v8::Isolate* isolate)
         : object_(isolate, object),
           callback_(isolate, callback),
@@ -209,9 +216,9 @@ class ExtensionImpl : public ObjectBackedNativeHandler {
 
     void RunCallback() {
       v8::HandleScope handle_scope(isolate_);
-      v8::Handle<v8::Function> callback =
+      v8::Local<v8::Function> callback =
           v8::Local<v8::Function>::New(isolate_, callback_);
-      v8::Handle<v8::Context> context = callback->CreationContext();
+      v8::Local<v8::Context> context = callback->CreationContext();
       if (context.IsEmpty())
         return;
       v8::Context::Scope context_scope(context);
@@ -267,9 +274,9 @@ void DispatchOnConnectToScriptContext(
   std::string target_extension_id = script_context->GetExtensionID();
   const Extension* extension = script_context->extension();
 
-  v8::Handle<v8::Value> tab = v8::Null(isolate);
-  v8::Handle<v8::Value> tls_channel_id_value = v8::Undefined(isolate);
-  v8::Handle<v8::Value> guest_process_id = v8::Undefined(isolate);
+  v8::Local<v8::Value> tab = v8::Null(isolate);
+  v8::Local<v8::Value> tls_channel_id_value = v8::Undefined(isolate);
+  v8::Local<v8::Value> guest_process_id = v8::Undefined(isolate);
 
   if (extension) {
     if (!source->tab.empty() && !extension->is_platform_app())
@@ -289,14 +296,12 @@ void DispatchOnConnectToScriptContext(
       guest_process_id = v8::Integer::New(isolate, info.guest_process_id);
   }
 
-  v8::Handle<v8::Value> arguments[] = {
+  v8::Local<v8::Value> arguments[] = {
       // portId
       v8::Integer::New(isolate, target_port_id),
       // channelName
-      v8::String::NewFromUtf8(isolate,
-                              channel_name.c_str(),
-                              v8::String::kNormalString,
-                              channel_name.size()),
+      v8::String::NewFromUtf8(isolate, channel_name.c_str(),
+                              v8::String::kNormalString, channel_name.size()),
       // sourceTab
       tab,
       // source_frame_id
@@ -304,25 +309,21 @@ void DispatchOnConnectToScriptContext(
       // guestProcessId
       guest_process_id,
       // sourceExtensionId
-      v8::String::NewFromUtf8(isolate,
-                              info.source_id.c_str(),
-                              v8::String::kNormalString,
-                              info.source_id.size()),
+      v8::String::NewFromUtf8(isolate, info.source_id.c_str(),
+                              v8::String::kNormalString, info.source_id.size()),
       // targetExtensionId
-      v8::String::NewFromUtf8(isolate,
-                              target_extension_id.c_str(),
+      v8::String::NewFromUtf8(isolate, target_extension_id.c_str(),
                               v8::String::kNormalString,
                               target_extension_id.size()),
       // sourceUrl
-      v8::String::NewFromUtf8(isolate,
-                              source_url_spec.c_str(),
+      v8::String::NewFromUtf8(isolate, source_url_spec.c_str(),
                               v8::String::kNormalString,
                               source_url_spec.size()),
       // tlsChannelId
       tls_channel_id_value,
   };
 
-  v8::Handle<v8::Value> retval =
+  v8::Local<v8::Value> retval =
       script_context->module_system()->CallModuleMethod(
           "messaging", "dispatchOnConnect", arraysize(arguments), arguments);
 
@@ -334,7 +335,7 @@ void DispatchOnConnectToScriptContext(
   }
 }
 
-void DeliverMessageToScriptContext(const std::string& message_data,
+void DeliverMessageToScriptContext(const Message& message,
                                    int target_port_id,
                                    ScriptContext* script_context) {
   v8::Isolate* isolate = script_context->isolate();
@@ -342,22 +343,35 @@ void DeliverMessageToScriptContext(const std::string& message_data,
 
   // Check to see whether the context has this port before bothering to create
   // the message.
-  v8::Handle<v8::Value> port_id_handle =
+  v8::Local<v8::Value> port_id_handle =
       v8::Integer::New(isolate, target_port_id);
-  v8::Handle<v8::Value> has_port =
-      script_context->module_system()->CallModuleMethod(
-          "messaging", "hasPort", 1, &port_id_handle);
+  v8::Local<v8::Value> has_port =
+      script_context->module_system()->CallModuleMethod("messaging", "hasPort",
+                                                        1, &port_id_handle);
 
   CHECK(!has_port.IsEmpty());
   if (!has_port->BooleanValue())
     return;
 
-  std::vector<v8::Handle<v8::Value> > arguments;
+  std::vector<v8::Local<v8::Value>> arguments;
   arguments.push_back(v8::String::NewFromUtf8(isolate,
-                                              message_data.c_str(),
+                                              message.data.c_str(),
                                               v8::String::kNormalString,
-                                              message_data.size()));
+                                              message.data.size()));
   arguments.push_back(port_id_handle);
+
+  scoped_ptr<blink::WebScopedUserGesture> web_user_gesture;
+  scoped_ptr<blink::WebScopedWindowFocusAllowedIndicator> allow_window_focus;
+  if (message.user_gesture) {
+    web_user_gesture.reset(new blink::WebScopedUserGesture);
+
+    if (script_context->web_frame()) {
+      blink::WebDocument document = script_context->web_frame()->document();
+      allow_window_focus.reset(new blink::WebScopedWindowFocusAllowedIndicator(
+          &document));
+    }
+  }
+
   script_context->module_system()->CallModuleMethod(
       "messaging", "dispatchOnMessage", &arguments);
 }
@@ -368,7 +382,7 @@ void DispatchOnDisconnectToScriptContext(int port_id,
   v8::Isolate* isolate = script_context->isolate();
   v8::HandleScope handle_scope(isolate);
 
-  std::vector<v8::Handle<v8::Value> > arguments;
+  std::vector<v8::Local<v8::Value>> arguments;
   arguments.push_back(v8::Integer::New(isolate, port_id));
   if (!error_message.empty()) {
     arguments.push_back(
@@ -421,20 +435,13 @@ void MessagingBindings::DeliverMessage(
     int target_port_id,
     const Message& message,
     content::RenderFrame* restrict_to_render_frame) {
-  scoped_ptr<blink::WebScopedUserGesture> web_user_gesture;
-  scoped_ptr<blink::WebScopedWindowFocusAllowedIndicator> allow_window_focus;
-  if (message.user_gesture) {
-    web_user_gesture.reset(new blink::WebScopedUserGesture);
-    allow_window_focus.reset(new blink::WebScopedWindowFocusAllowedIndicator);
-  }
-
   // TODO(robwu): ScriptContextSet.ForEach should accept RenderFrame*.
   content::RenderView* restrict_to_render_view =
       restrict_to_render_frame ? restrict_to_render_frame->GetRenderView()
                                : NULL;
   context_set.ForEach(
       restrict_to_render_view,
-      base::Bind(&DeliverMessageToScriptContext, message.data, target_port_id));
+      base::Bind(&DeliverMessageToScriptContext, message, target_port_id));
 }
 
 // static

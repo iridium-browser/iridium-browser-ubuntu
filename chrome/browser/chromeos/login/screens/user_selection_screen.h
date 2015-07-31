@@ -12,10 +12,12 @@
 #include "base/compiler_specific.h"
 #include "base/timer/timer.h"
 #include "base/values.h"
+#include "chrome/browser/chromeos/login/signin/token_handle_util.h"
 #include "chrome/browser/chromeos/login/ui/login_display.h"
 #include "chrome/browser/chromeos/login/ui/models/user_board_model.h"
-#include "chrome/browser/signin/screenlock_bridge.h"
+#include "components/proximity_auth/screenlock_bridge.h"
 #include "components/user_manager/user.h"
+#include "components/user_manager/user_id.h"
 #include "ui/base/user_activity/user_activity_observer.h"
 
 class EasyUnlockService;
@@ -26,9 +28,10 @@ class LoginDisplayWebUIHandler;
 class UserBoardView;
 
 // This class represents User Selection screen: user pod-based login screen.
-class UserSelectionScreen : public ui::UserActivityObserver,
-                            public ScreenlockBridge::LockHandler,
-                            public UserBoardModel {
+class UserSelectionScreen
+    : public ui::UserActivityObserver,
+      public proximity_auth::ScreenlockBridge::LockHandler,
+      public UserBoardModel {
  public:
   explicit UserSelectionScreen(const std::string& display_type);
   ~UserSelectionScreen() override;
@@ -52,17 +55,19 @@ class UserSelectionScreen : public ui::UserActivityObserver,
   void OnPasswordClearTimerExpired();
 
   void HandleGetUsers();
+  void CheckUserStatus(const std::string& user_id);
 
   // ui::UserActivityDetector implementation:
   void OnUserActivity(const ui::Event* event) override;
 
   void InitEasyUnlock();
 
-  // ScreenlockBridge::LockHandler implementation:
+  // proximity_auth::ScreenlockBridge::LockHandler implementation:
   void ShowBannerMessage(const base::string16& message) override;
   void ShowUserPodCustomIcon(
       const std::string& user_email,
-      const ScreenlockBridge::UserPodCustomIconOptions& icon) override;
+      const proximity_auth::ScreenlockBridge::UserPodCustomIconOptions& icon)
+      override;
   void HideUserPodCustomIcon(const std::string& user_email) override;
 
   void EnableInput() override;
@@ -118,6 +123,9 @@ class UserSelectionScreen : public ui::UserActivityObserver,
   EasyUnlockService* GetEasyUnlockServiceForUser(
       const std::string& user_id) const;
 
+  void OnUserStatusChecked(const user_manager::UserID& user_id,
+                           TokenHandleUtil::TokenHandleStatus status);
+
   // Whether to show guest login.
   bool show_guest_;
 
@@ -129,11 +137,16 @@ class UserSelectionScreen : public ui::UserActivityObserver,
 
   // Map of usernames to their current authentication type. If a user is not
   // contained in the map, it is using the default authentication type.
-  std::map<std::string, ScreenlockBridge::LockHandler::AuthType>
+  std::map<std::string, proximity_auth::ScreenlockBridge::LockHandler::AuthType>
       user_auth_type_map_;
 
   // Timer for measuring idle state duration before password clear.
   base::OneShotTimer<UserSelectionScreen> password_clear_timer_;
+
+  // Token handler util for checking user OAuth token status.
+  scoped_ptr<TokenHandleUtil> token_handle_util_;
+
+  base::WeakPtrFactory<UserSelectionScreen> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(UserSelectionScreen);
 };

@@ -27,21 +27,21 @@
 #ifndef LayoutMultiColumnSet_h
 #define LayoutMultiColumnSet_h
 
+#include "core/CoreExport.h"
 #include "core/layout/LayoutMultiColumnFlowThread.h"
-#include "core/layout/LayoutRegion.h"
 #include "core/layout/MultiColumnFragmentainerGroup.h"
 #include "wtf/Vector.h"
 
 namespace blink {
 
 // A set of columns in a multicol container. A column set is inserted as an anonymous child of the
-// actual multicol container (i.e. the renderer whose style computes to non-auto column-count and/or
+// actual multicol container (i.e. the layoutObject whose style computes to non-auto column-count and/or
 // column-width), next to the flow thread. There'll be one column set for each contiguous run of
 // column content. The only thing that can interrupt a contiguous run of column content is a column
 // spanner, which means that if there are no spanners, there'll only be one column set.
 //
 // Since a spanner interrupts an otherwise contiguous run of column content, inserting one may
-// result in the creation of additional new column sets. A placeholder for the spanning renderer has
+// result in the creation of additional new column sets. A placeholder for the spanning layoutObject has
 // to be placed in between the column sets that come before and after the spanner, if there's
 // actually column content both before and after the spanner.
 //
@@ -58,7 +58,7 @@ namespace blink {
 // may need to group the columns, so that we get one MultiColumnFragmentainerGroup for each outer
 // fragmentainer (page / column) that the inner multicol container lives in. Each fragmentainer
 // group has its own column height, but the column height is uniform within a group.
-class LayoutMultiColumnSet : public LayoutRegion {
+class CORE_EXPORT LayoutMultiColumnSet : public LayoutBlockFlow {
 public:
     static LayoutMultiColumnSet* createAnonymous(LayoutFlowThread&, const ComputedStyle& parentStyle);
 
@@ -68,10 +68,14 @@ public:
     const MultiColumnFragmentainerGroup& fragmentainerGroupAtFlowThreadOffset(LayoutUnit) const;
     const MultiColumnFragmentainerGroup& fragmentainerGroupAtVisualPoint(const LayoutPoint&) const;
 
-    virtual bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectLayoutMultiColumnSet || LayoutRegion::isOfType(type); }
+    virtual bool isOfType(LayoutObjectType type) const override { return type == LayoutObjectLayoutMultiColumnSet || LayoutBlockFlow::isOfType(type); }
+    virtual bool canHaveChildren() const override final { return false; }
 
-    virtual LayoutUnit pageLogicalWidth() const final { return flowThread()->logicalWidth(); }
-    virtual LayoutUnit pageLogicalHeight() const final;
+    // Return the width and height of a single column or page in the set.
+    LayoutUnit pageLogicalWidth() const { return flowThread()->logicalWidth(); }
+    LayoutUnit pageLogicalHeight() const;
+
+    LayoutFlowThread* flowThread() const { return m_flowThread; }
 
     LayoutBlockFlow* multiColumnBlockFlow() const { return toLayoutBlockFlow(parent()); }
     LayoutMultiColumnFlowThread* multiColumnFlowThread() const
@@ -86,6 +90,9 @@ public:
     LayoutUnit logicalTopInFlowThread() const;
     LayoutUnit logicalBottomInFlowThread() const;
     LayoutUnit logicalHeightInFlowThread() const { return logicalBottomInFlowThread() - logicalTopInFlowThread(); }
+    LayoutRect flowThreadPortionRect() const;
+    LayoutRect flowThreadPortionOverflowRect() const;
+    LayoutRect overflowRectForFlowThreadPortion(const LayoutRect& flowThreadPortionRect, bool isFirstPortion, bool isLastPortion) const;
 
     // The used CSS value of column-count, i.e. how many columns there are room for without overflowing.
     unsigned usedColumnCount() const { return multiColumnFlowThread()->columnCount(); }
@@ -134,12 +141,12 @@ public:
     // overflow. Only to be called on the last set.
     void expandToEncompassFlowThreadContentsIfNeeded();
 
-    void attachRegion();
-    void detachRegion();
+    virtual void computeIntrinsicLogicalWidths(LayoutUnit& minLogicalWidth, LayoutUnit& maxLogicalWidth) const override final;
 
-    // The top of the nearest page inside the region. For LayoutRegions, this is just the logical top of the
-    // flow thread portion we contain. For sets, we have to figure out the top of the nearest column or
-    // page.
+    void attachToFlowThread();
+    void detachFromFlowThread();
+
+    // The top of the page nearest to the specified block offset. All in flowthread coordinates.
     LayoutUnit pageLogicalTopForOffset(LayoutUnit offset) const;
 
     void collectLayerFragments(DeprecatedPaintLayerFragments&, const LayoutRect& layerBoundingBox, const LayoutRect& dirtyRect);
@@ -167,9 +174,8 @@ private:
 
     virtual void addOverflowFromChildren() override;
 
-    virtual LayoutRect flowThreadPortionRect() const override;
-
     MultiColumnFragmentainerGroupList m_fragmentainerGroups;
+    LayoutFlowThread* m_flowThread;
 };
 
 DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutMultiColumnSet, isLayoutMultiColumnSet());

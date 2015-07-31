@@ -26,33 +26,6 @@ tv.exportTo('tv.c.trace_model', function() {
   var ThreadSlice = tv.c.trace_model.ThreadSlice;
 
   /**
-   * A ThreadSlice represents an interval of time on a thread resource
-   * with associated nestinged slice information.
-   *
-   * ThreadSlices are typically associated with a specific trace event pair on a
-   * specific thread.
-   * For example,
-   *   TRACE_EVENT_BEGIN1("x","myArg", 7) at time=0.1ms
-   *   TRACE_EVENT_END0()                 at time=0.3ms
-   * This results in a single slice from 0.1 with duration 0.2 on a
-   * specific thread.
-   *
-   * @constructor
-   */
-  function ThreadSlice(cat, title, colorId, start, args, opt_duration,
-                       opt_cpuStart, opt_cpuDuration) {
-    Slice.call(this, cat, title, colorId, start, args, opt_duration,
-               opt_cpuStart, opt_cpuDuration);
-    // Do not modify this directly.
-    // subSlices is configured by SliceGroup.rebuildSubRows_.
-    this.subSlices = [];
-  }
-
-  ThreadSlice.prototype = {
-    __proto__: Slice.prototype
-  };
-
-  /**
    * A Thread stores all the trace events collected for a particular
    * thread. We organize the synchronous slices on a thread by "subrows," where
    * subrow 0 has all the root slices, subrow 1 those nested 1 deep, and so on.
@@ -88,7 +61,8 @@ tv.exportTo('tv.c.trace_model', function() {
 
     this.sliceGroup = new SliceGroup(this, ThreadSliceForThisThread, 'slices');
     this.timeSlices = undefined;
-    this.kernelSliceGroup = new SliceGroup(this, undefined, 'kernel-slices');
+    this.kernelSliceGroup = new SliceGroup(
+        this, ThreadSliceForThisThread, 'kernel-slices');
     this.asyncSliceGroup = new AsyncSliceGroup(this, 'async-slices');
     this.bounds = new tv.b.Range();
   }
@@ -109,22 +83,6 @@ tv.exportTo('tv.c.trace_model', function() {
 
     compareTo: function(that) {
       return Thread.compare(this, that);
-    },
-
-    toJSON: function() {
-      var obj = new Object();
-      var keys = Object.keys(this);
-      for (var i = 0; i < keys.length; i++) {
-        var key = keys[i];
-        if (typeof this[key] == 'function')
-          continue;
-        if (key == 'parent') {
-          obj[key] = this[key].guid;
-          continue;
-        }
-        obj[key] = this[key];
-      }
-      return obj;
     },
 
     /**
@@ -291,6 +249,30 @@ tv.exportTo('tv.c.trace_model', function() {
         this.kernelSliceGroup.iterateAllEventContainers(callback);
       if (this.asyncSliceGroup.length)
         this.asyncSliceGroup.iterateAllEventContainers(callback);
+    },
+
+    getSchedulingStatsForRange: function(start, end) {
+      var stats = {};
+
+      if (!this.timeSlices) return stats;
+
+      function addStatsForSlice(threadTimeSlice) {
+        var overlapStart = Math.max(threadTimeSlice.start, start);
+        var overlapEnd = Math.min(threadTimeSlice.end, end);
+        var schedulingState = threadTimeSlice.schedulingState;
+
+        if (!(schedulingState in stats))
+          stats[schedulingState] = 0;
+        stats[schedulingState] += overlapEnd - overlapStart;
+      }
+
+      tv.b.iterateOverIntersectingIntervals(this.timeSlices,
+                                            function(x) { return x.start; },
+                                            function(x) { return x.end; },
+                                            start,
+                                            end,
+                                            addStatsForSlice);
+      return stats;
     },
 
     get samples() {

@@ -11,6 +11,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
+#include "content/browser/service_worker/service_worker_metrics.h"
 #include "content/browser/streams/stream_read_observer.h"
 #include "content/browser/streams/stream_register_observer.h"
 #include "content/common/content_export.h"
@@ -58,6 +59,7 @@ class CONTENT_EXPORT ServiceWorkerURLRequestJob
       const ResourceContext* resource_context,
       FetchRequestMode request_mode,
       FetchCredentialsMode credentials_mode,
+      bool is_main_resource_load,
       RequestContextType request_context_type,
       RequestContextFrameType frame_type,
       scoped_refptr<ResourceRequestBody> body);
@@ -127,6 +129,12 @@ class CONTENT_EXPORT ServiceWorkerURLRequestJob
     FORWARD_TO_SERVICE_WORKER,
   };
 
+  enum ResponseBodyType {
+    UNKNOWN,
+    BLOB,
+    STREAM,
+  };
+
   // We start processing the request if Start() is called AND response_type_
   // is determined.
   void MaybeStartRequest();
@@ -158,6 +166,11 @@ class CONTENT_EXPORT ServiceWorkerURLRequestJob
 
   // Creates and commits a response header indicating error.
   void DeliverErrorResponse();
+
+  // For UMA.
+  void SetResponseBodyType(ResponseBodyType type);
+  bool ShouldRecordResult();
+  void RecordResult(ServiceWorkerMetrics::URLRequestJobResult result);
 
   // Releases the resources for streaming.
   void ClearStream();
@@ -196,6 +209,7 @@ class CONTENT_EXPORT ServiceWorkerURLRequestJob
 
   FetchRequestMode request_mode_;
   FetchCredentialsMode credentials_mode_;
+  const bool is_main_resource_load_;
   RequestContextType request_context_type_;
   RequestContextFrameType frame_type_;
   bool fall_back_required_;
@@ -204,6 +218,9 @@ class CONTENT_EXPORT ServiceWorkerURLRequestJob
   scoped_refptr<ResourceRequestBody> body_;
   scoped_ptr<storage::BlobDataHandle> request_body_blob_data_handle_;
   scoped_refptr<ServiceWorkerVersion> streaming_version_;
+
+  ResponseBodyType response_body_type_ = UNKNOWN;
+  bool did_record_result_ = false;
 
   base::WeakPtrFactory<ServiceWorkerURLRequestJob> weak_factory_;
 

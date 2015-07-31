@@ -123,7 +123,6 @@ class CONTENT_EXPORT RenderViewHostImpl
   void AllowBindings(int binding_flags) override;
   void ClearFocusedElement() override;
   bool IsFocusedElementEditable() override;
-  void ClosePage() override;
   void CopyImageAt(int x, int y) override;
   void SaveImageAt(int x, int y) override;
   void DirectoryEnumerationFinished(
@@ -227,6 +226,10 @@ class CONTENT_EXPORT RenderViewHostImpl
   // longer on the stack when we attempt to swap it out.
   void SuppressDialogsUntilSwapOut();
 
+  // Tells the renderer process to run the page's unload handler.
+  // A ClosePage_ACK ack is sent back when the handler execution completes.
+  void ClosePage();
+
   // Close the page ignoring whether it has unload events registers.
   // This is called after the beforeunload and unload events have fired
   // and the user has agreed to continue with closing the page.
@@ -295,13 +298,6 @@ class CONTENT_EXPORT RenderViewHostImpl
                                           size_t start_offset,
                                           size_t end_offset);
 
-  // Update the FrameTree to use this RenderViewHost's main frame
-  // RenderFrameHost. Called when the RenderViewHost is committed.
-  //
-  // TODO(ajwong): Remove once RenderViewHost no longer owns the main frame
-  // RenderFrameHost.
-  void AttachToFrameTree();
-
   // Increases the refcounting on this RVH. This is done by the FrameTree on
   // creation of a RenderFrameHost.
   void increment_ref_count() { ++frames_ref_count_; }
@@ -327,7 +323,8 @@ class CONTENT_EXPORT RenderViewHostImpl
   void OnRenderAutoResized(const gfx::Size& size) override;
   void RequestToLockMouse(bool user_gesture,
                           bool last_unlocked_by_target) override;
-  bool IsFullscreen() const override;
+  bool IsFullscreenGranted() const override;
+  blink::WebDisplayMode GetDisplayMode() const override;
   void OnFocus() override;
   void OnBlur() override;
 
@@ -348,7 +345,6 @@ class CONTENT_EXPORT RenderViewHostImpl
   void OnDidContentsPreferredSizeChange(const gfx::Size& new_size);
   void OnPasteFromSelectionClipboard();
   void OnRouteCloseEvent();
-  void OnRouteMessageEvent(const ViewMsg_PostMessage_Params& params);
   void OnStartDragging(const DropData& drop_data,
                        blink::WebDragOperationsMask operations_allowed,
                        const SkBitmap& bitmap,

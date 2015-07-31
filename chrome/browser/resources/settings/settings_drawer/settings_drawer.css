@@ -5,7 +5,8 @@
 :host {
   background-color: rgb(38, 50, 56);
   color: white;
-  display: block;
+  display: flex;
+  flex-direction: column;
   overflow: auto;
 }
 

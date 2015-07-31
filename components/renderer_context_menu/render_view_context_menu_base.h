@@ -169,17 +169,13 @@ class RenderViewContextMenuBase : public ui::SimpleMenuModel::Delegate,
                                const std::string& extra_headers);
 
   content::ContextMenuParams params_;
-  content::WebContents* source_web_contents_;
-  // In the case of a MimeHandlerView this will point to the WebContents that
-  // embeds the MimeHandlerViewGuest. Otherwise this will be the same as
-  // source_web_contents_.
-  content::WebContents* embedder_web_contents_;
-  content::BrowserContext* browser_context_;
+  content::WebContents* const source_web_contents_;
+  content::BrowserContext* const browser_context_;
 
   ui::SimpleMenuModel menu_model_;
 
   // Renderer's frame id.
-  int render_frame_id_;
+  const int render_frame_id_;
 
   // Our observers.
   mutable ObserverList<RenderViewContextMenuObserver> observers_;
@@ -194,7 +190,7 @@ class RenderViewContextMenuBase : public ui::SimpleMenuModel::Delegate,
   bool AppendCustomItems();
 
   // The RenderFrameHost's IDs.
-  int render_process_id_;
+  const int render_process_id_;
 
   scoped_ptr<ToolkitDelegate> toolkit_delegate_;
 

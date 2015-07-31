@@ -46,11 +46,13 @@ WebInspector.TimelineOverviewPane = function(model)
 
     model.addEventListener(WebInspector.TimelineModel.Events.RecordsCleared, this._reset, this);
     this._overviewGrid.addEventListener(WebInspector.OverviewGrid.Events.WindowChanged, this._onWindowChanged, this);
+    this._overviewGrid.addEventListener(WebInspector.OverviewGrid.Events.Click, this._onClick, this);
     this._overviewControls = [];
 }
 
 WebInspector.TimelineOverviewPane.Events = {
-    WindowChanged: "WindowChanged"
+    WindowChanged: "WindowChanged",
+    SelectionChanged: "SelectionChanged"
 };
 
 WebInspector.TimelineOverviewPane.prototype = {
@@ -75,15 +77,14 @@ WebInspector.TimelineOverviewPane.prototype = {
      */
     setOverviewControls: function(overviewControls)
     {
-        for (var i = 0; i < this._overviewControls.length; ++i) {
-            var overviewControl = this._overviewControls[i];
-            overviewControl.detach();
-            overviewControl.dispose();
-        }
+        for (var i = 0; i < this._overviewControls.length; ++i)
+            this._overviewControls[i].dispose();
 
         for (var i = 0; i < overviewControls.length; ++i) {
             overviewControls[i].setOverviewGrid(this._overviewGrid);
             overviewControls[i].show(this._overviewGrid.element);
+            if (this._currentSelection)
+                overviewControls[i].select(this._currentSelection);
         }
         this._overviewControls = overviewControls;
         this.update();
@@ -105,6 +106,16 @@ WebInspector.TimelineOverviewPane.prototype = {
         this._overviewGrid.updateDividers(this._overviewCalculator);
         this._updateEventDividers();
         this._updateWindow();
+    },
+
+    /**
+     * @param {?WebInspector.TimelineSelection} selection
+     */
+    select: function(selection)
+    {
+        this._currentSelection = selection;
+        for (var overviewControl of this._overviewControls)
+            overviewControl.select(selection);
     },
 
     _updateEventDividers: function()
@@ -133,6 +144,24 @@ WebInspector.TimelineOverviewPane.prototype = {
         for (var i = 0; i < this._overviewControls.length; ++i)
             this._overviewControls[i].reset();
         this.update();
+    },
+
+    /**
+     * @param {!WebInspector.Event} event
+     */
+    _onClick: function(event)
+    {
+        var domEvent = /** @type {!Event} */ (event.data);
+        var selection;
+        for (var overviewControl of this._overviewControls) {
+            selection = overviewControl.selectionFromEvent(domEvent);
+            if (selection)
+                break;
+        }
+        if (typeof selection !== "object")
+            return;
+        event.preventDefault();
+        this.dispatchEventToListeners(WebInspector.TimelineOverviewPane.Events.SelectionChanged, selection);
     },
 
     /**
@@ -306,6 +335,17 @@ WebInspector.TimelineOverview.prototype = {
     reset: function() { },
 
     /**
+     * @param {!WebInspector.TimelineSelection} selection
+     */
+    select: function(selection) { },
+
+    /**
+     * @param {!Event} event
+     * @return {?WebInspector.TimelineSelection|undefined}
+     */
+    selectionFromEvent: function(event) { },
+
+    /**
      * @param {number} windowLeft
      * @param {number} windowRight
      * @return {!{startTime: number, endTime: number}}
@@ -318,6 +358,10 @@ WebInspector.TimelineOverview.prototype = {
      * @return {!{left: number, right: number}}
      */
     windowBoundaries: function(startTime, endTime) { },
+
+    timelineStarted: function() { },
+
+    timelineStopped: function() { },
 }
 
 /**
@@ -357,6 +401,7 @@ WebInspector.TimelineOverviewBase.prototype = {
      */
     dispose: function()
     {
+        this.detach();
     },
 
     /**
@@ -366,12 +411,34 @@ WebInspector.TimelineOverviewBase.prototype = {
     {
     },
 
+    /**
+     * @override
+     */
     timelineStarted: function()
     {
     },
 
+    /**
+     * @override
+     */
     timelineStopped: function()
     {
+    },
+
+    /**
+     * @override
+     * @param {!WebInspector.TimelineSelection} selection
+     */
+    select: function(selection) { },
+
+    /**
+     * @override
+     * @param {!Event} event
+     * @return {?WebInspector.TimelineSelection|undefined}
+     */
+    selectionFromEvent: function(event)
+    {
+        return undefined;
     },
 
     /**

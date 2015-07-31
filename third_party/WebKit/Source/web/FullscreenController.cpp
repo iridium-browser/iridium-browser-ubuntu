@@ -177,9 +177,9 @@ void FullscreenController::updateSize()
 
     updatePageScaleConstraints(false);
 
-    LayoutFullScreen* renderer = Fullscreen::from(*m_fullScreenFrame->document()).fullScreenRenderer();
-    if (renderer)
-        renderer->updateStyle();
+    LayoutFullScreen* layoutObject = Fullscreen::from(*m_fullScreenFrame->document()).fullScreenLayoutObject();
+    if (layoutObject)
+        layoutObject->updateStyle();
 }
 
 void FullscreenController::updatePageScaleConstraints(bool removeConstraints)

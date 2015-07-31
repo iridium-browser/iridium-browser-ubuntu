@@ -169,8 +169,8 @@ cr.define('cr.ui', function() {
    * Shows password changed screen that offers migration.
    * @param {boolean} showError Whether to show the incorrect password error.
    */
-  Oobe.showPasswordChangedScreen = function(showError) {
-    DisplayManager.showPasswordChangedScreen(showError);
+  Oobe.showPasswordChangedScreen = function(showError, email) {
+    DisplayManager.showPasswordChangedScreen(showError, email);
   };
 
   /**
@@ -230,8 +230,8 @@ cr.define('cr.ui', function() {
    * If the text is empty, the entire notification will be hidden.
    * @param {string} messageText The message text.
    */
-  Oobe.setEnterpriseInfo = function(messageText) {
-    DisplayManager.setEnterpriseInfo(messageText);
+  Oobe.setEnterpriseInfo = function(messageText, assetId) {
+    DisplayManager.setEnterpriseInfo(messageText, assetId);
   };
 
   /**
@@ -323,6 +323,13 @@ cr.define('cr.ui', function() {
   };
 
   /**
+   * Begin enterprise enrollment for telemetry.
+   */
+  Oobe.switchToEnterpriseEnrollmentForTesting = function() {
+    chrome.send('toggleEnrollmentScreen');
+  };
+
+  /**
    * Finish enterprise enrollment for telemetry.
    */
   Oobe.enterpriseEnrollmentDone = function() {
@@ -351,6 +358,13 @@ cr.define('cr.ui', function() {
    */
   Oobe.setClientAreaSize = function(width, height) {
     Oobe.getInstance().setClientAreaSize(width, height);
+  };
+
+  /**
+   * Checks whether the New Gaia flow is active.
+   */
+  Oobe.isNewGaiaFlow = function() {
+    return document.querySelector('.new-gaia-flow') != undefined;
   };
 
   // Export

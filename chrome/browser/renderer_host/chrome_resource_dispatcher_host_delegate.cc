@@ -15,6 +15,7 @@
 #include "chrome/browser/component_updater/component_updater_resource_throttle.h"
 #include "chrome/browser/download/download_request_limiter.h"
 #include "chrome/browser/download/download_resource_throttle.h"
+#include "chrome/browser/mod_pagespeed/mod_pagespeed_metrics.h"
 #include "chrome/browser/net/resource_prefetch_predictor_observer.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/browser/prefetch/prefetch.h"
@@ -55,7 +56,7 @@
 #include "net/url_request/url_request.h"
 
 #if !defined(DISABLE_NACL)
-#include "chrome/browser/component_updater/pnacl/pnacl_component_installer.h"
+#include "chrome/browser/component_updater/pnacl_component_installer.h"
 #endif
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
@@ -237,8 +238,12 @@ bool IsPluginEnabledForExtension(const Extension* extension,
 }
 #endif  // !defined(ENABLE_EXTENSIONS)
 
-#if !defined(OS_ANDROID)
-void LaunchURL(const GURL& url, int render_process_id, int render_view_id) {
+void LaunchURL(
+    const GURL& url,
+    int render_process_id,
+    int render_view_id,
+    ui::PageTransition page_transition,
+    bool has_user_gesture) {
   // If there is no longer a WebContents, the request may have raced with tab
   // closing. Don't fire the external request. (It may have been a prerender.)
   content::WebContents* web_contents =
@@ -259,9 +264,10 @@ void LaunchURL(const GURL& url, int render_process_id, int render_view_id) {
       url,
       render_process_id,
       render_view_id,
+      page_transition,
+      has_user_gesture,
       g_external_protocol_handler_delegate);
 }
-#endif  // !defined(OS_ANDROID)
 
 #if !defined(DISABLE_NACL)
 void AppendComponentUpdaterThrottles(
@@ -514,24 +520,28 @@ ResourceDispatcherHostLoginDelegate*
 bool ChromeResourceDispatcherHostDelegate::HandleExternalProtocol(
     const GURL& url,
     int child_id,
-    int route_id) {
-#if defined(OS_ANDROID)
-  // Android use a resource throttle to handle external as well as internal
-  // protocols.
-  return false;
-#else
-
+    int route_id,
+    bool is_main_frame,
+    ui::PageTransition page_transition,
+    bool has_user_gesture) {
 #if defined(ENABLE_EXTENSIONS)
   if (extensions::WebViewRendererState::GetInstance()->IsGuest(child_id))
     return false;
-
 #endif  // defined(ENABLE_EXTENSIONS)
 
-  BrowserThread::PostTask(BrowserThread::UI,
-                          FROM_HERE,
-                          base::Bind(&LaunchURL, url, child_id, route_id));
+#if defined(OS_ANDROID)
+  // Main frame external protocols are handled by
+  // InterceptNavigationResourceThrottle.
+  if (is_main_frame)
+    return false;
+#endif  // defined(ANDROID)
+
+  BrowserThread::PostTask(
+      BrowserThread::UI,
+      FROM_HERE,
+      base::Bind(&LaunchURL, url, child_id, route_id, page_transition,
+                 has_user_gesture));
   return true;
-#endif
 }
 
 void ChromeResourceDispatcherHostDelegate::AppendStandardResourceThrottles(
@@ -540,7 +550,7 @@ void ChromeResourceDispatcherHostDelegate::AppendStandardResourceThrottles(
     ResourceType resource_type,
     ScopedVector<content::ResourceThrottle>* throttles) {
   ProfileIOData* io_data = ProfileIOData::FromResourceContext(resource_context);
-#if defined(FULL_SAFE_BROWSING) || defined(MOBILE_SAFE_BROWSING)
+#if defined(SAFE_BROWSING_SERVICE)
   // Insert safe browsing at the front of the list, so it gets to decide on
   // policies first.
   if (io_data->safe_browsing_enabled()->GetValue()
@@ -713,7 +723,8 @@ void ChromeResourceDispatcherHostDelegate::OnResponseStarted(
       response_headers->RemoveHeader("x-frame-options");
   }
 
-  prerender::URLRequestResponseStarted(request);
+  mod_pagespeed::RecordMetrics(info->GetResourceType(), request->url(),
+                               request->response_headers());
 }
 
 void ChromeResourceDispatcherHostDelegate::OnRequestRedirected(

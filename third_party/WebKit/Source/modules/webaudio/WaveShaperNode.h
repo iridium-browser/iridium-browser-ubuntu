@@ -26,8 +26,7 @@
 #define WaveShaperNode_h
 
 #include "core/dom/DOMTypedArray.h"
-#include "modules/webaudio/AudioBasicProcessorNode.h"
-#include "modules/webaudio/BiquadProcessor.h"
+#include "modules/webaudio/AudioNode.h"
 #include "modules/webaudio/WaveShaperProcessor.h"
 
 namespace blink {
@@ -37,7 +36,7 @@ class ExceptionState;
 class WaveShaperNode final : public AudioNode {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static WaveShaperNode* create(AudioContext* context)
+    static WaveShaperNode* create(AudioContext& context)
     {
         return new WaveShaperNode(context);
     }
@@ -50,7 +49,7 @@ public:
     String oversample() const;
 
 private:
-    explicit WaveShaperNode(AudioContext*);
+    explicit WaveShaperNode(AudioContext&);
 
     WaveShaperProcessor* waveShaperProcessor() const;
 };

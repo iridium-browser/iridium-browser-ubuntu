@@ -31,13 +31,16 @@ URLResponsePtr MakeURLResponse(const net::URLRequest* url_request) {
     response->status_code = headers->response_code();
     response->status_line = headers->GetStatusLine();
 
+    response->headers = Array<HTTPHeaderPtr>::New(0);
     std::vector<String> header_lines;
     void* iter = nullptr;
     std::string name, value;
-    while (headers->EnumerateHeaderLines(&iter, &name, &value))
-      header_lines.push_back(name + ": " + value);
-    if (!header_lines.empty())
-      response->headers.Swap(&header_lines);
+    while (headers->EnumerateHeaderLines(&iter, &name, &value)) {
+      HTTPHeaderPtr header = HTTPHeader::New();
+      header->name = name;
+      header->value = value;
+      response->headers.push_back(header.Pass());
+    }
   }
 
   std::string mime_type;
@@ -129,10 +132,22 @@ void URLLoaderImpl::Start(URLRequestPtr request,
   url_request_ = context_->url_request_context()->CreateRequest(
       GURL(request->url), net::DEFAULT_PRIORITY, this);
   url_request_->set_method(request->method);
+  // TODO(jam): need to specify this policy.
+  url_request_->set_referrer_policy(
+      net::URLRequest::CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE);
   if (request->headers) {
     net::HttpRequestHeaders headers;
-    for (size_t i = 0; i < request->headers.size(); ++i)
-      headers.AddHeaderFromString(request->headers[i].To<base::StringPiece>());
+    for (size_t i = 0; i < request->headers.size(); ++i) {
+      base::StringPiece header =
+          request->headers[i]->name.To<base::StringPiece>();
+      base::StringPiece value =
+          request->headers[i]->value.To<base::StringPiece>();
+      if (header == net::HttpRequestHeaders::kReferer) {
+        url_request_->SetReferrer(value.as_string());
+      } else {
+        headers.SetHeader(header, value);
+      }
+    }
     url_request_->SetExtraRequestHeaders(headers);
   }
   if (request->body) {
@@ -169,6 +184,7 @@ void URLLoaderImpl::FollowRedirect(
 
   // TODO(darin): Verify that it makes sense to call FollowDeferredRedirect.
   url_request_->FollowDeferredRedirect();
+  callback_ = callback;
 }
 
 void URLLoaderImpl::QueryStatus(
@@ -206,6 +222,7 @@ void URLLoaderImpl::OnReceivedRedirect(net::URLRequest* url_request,
   URLResponsePtr response = MakeURLResponse(url_request);
   response->redirect_method = redirect_info.new_method;
   response->redirect_url = String::From(redirect_info.new_url);
+  response->redirect_referrer = redirect_info.new_referrer;
 
   SendResponse(response.Pass());
 
@@ -277,6 +294,7 @@ void URLLoaderImpl::OnResponseBodyStreamReady(MojoResult result) {
 }
 
 void URLLoaderImpl::OnResponseBodyStreamClosed(MojoResult result) {
+  url_request_.reset();
   response_body_stream_.reset();
   pending_write_ = nullptr;
   DeleteIfNeeded();

@@ -130,6 +130,10 @@ void FakeHostPairingController::OnEnrollmentStatusChanged(
     EnrollmentStatus enrollment_status) {
 }
 
+void FakeHostPairingController::SetPermanentId(
+    const std::string& permanent_id) {
+}
+
 void FakeHostPairingController::PairingStageChanged(Stage new_stage) {
   switch (new_stage) {
     case STAGE_WAITING_FOR_CONTROLLER: {
@@ -167,17 +171,6 @@ void FakeHostPairingController::PairingStageChanged(Stage new_stage) {
     }
     default: { break; }
   }
-}
-
-void FakeHostPairingController::ConfigureHost(
-    bool accepted_eula,
-    const std::string& lang,
-    const std::string& timezone,
-    bool send_reports,
-    const std::string& keyboard_layout) {
-}
-
-void FakeHostPairingController::EnrollHost(const std::string& auth_token) {
 }
 
 }  // namespace pairing_chromeos

@@ -14,6 +14,7 @@
 #include "base/containers/scoped_ptr_hash_map.h"
 #include "base/cpu.h"
 #include "base/files/file.h"
+#include "base/json/json_reader.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/rand_util.h"
@@ -61,8 +62,6 @@
 #include "third_party/WebKit/public/web/WebPluginContainer.h"
 #include "third_party/WebKit/public/web/WebSecurityOrigin.h"
 #include "third_party/WebKit/public/web/WebURLLoaderOptions.h"
-#include "third_party/jsoncpp/source/include/json/reader.h"
-#include "third_party/jsoncpp/source/include/json/value.h"
 
 namespace nacl {
 namespace {
@@ -129,7 +128,8 @@ class NaClPluginInstance {
   uint64_t pexe_size;
 };
 
-typedef base::ScopedPtrHashMap<PP_Instance, NaClPluginInstance> InstanceMap;
+typedef base::ScopedPtrHashMap<PP_Instance, scoped_ptr<NaClPluginInstance>>
+    InstanceMap;
 base::LazyInstance<InstanceMap> g_instance_map = LAZY_INSTANCE_INITIALIZER;
 
 NaClPluginInstance* GetNaClPluginInstance(PP_Instance instance) {
@@ -385,7 +385,6 @@ void LaunchSelLdr(PP_Instance instance,
   scoped_ptr<ManifestServiceChannel::Delegate> manifest_service_proxy(
       new ManifestServiceProxy(instance, process_type));
 
-  FileDescriptor result_socket;
   IPC::Sender* sender = content::RenderThread::Get();
   DCHECK(sender);
   int routing_id = GetRoutingID(instance);
@@ -415,28 +414,26 @@ void LaunchSelLdr(PP_Instance instance,
     perm_bits |= ppapi::PERMISSION_DEV;
   instance_info.permissions =
       ppapi::PpapiPermissions::GetForCommandLine(perm_bits);
-  std::string error_message_string;
-  NaClLaunchResult launch_result;
 
-  IPC::PlatformFileForTransit nexe_for_transit =
-      IPC::InvalidPlatformFileForTransit();
-
-  std::vector<std::pair<
-    std::string /*key*/, std::string /*url*/> > resource_files_to_prefetch;
-  if (process_type == kNativeNaClProcessType && uses_nonsfi_mode) {
+  std::vector<NaClResourcePrefetchRequest> resource_prefetch_request_list;
+  if (process_type == kNativeNaClProcessType) {
     JsonManifest* manifest = GetJsonManifest(instance);
-    if (manifest)
-      manifest->GetPrefetchableFiles(&resource_files_to_prefetch);
-    for (size_t i = 0; i < resource_files_to_prefetch.size(); ++i) {
-      const GURL gurl(resource_files_to_prefetch[i].second);
-      // Important security check. Do not remove.
-      if (!CanOpenViaFastPath(plugin_instance, gurl)) {
-        resource_files_to_prefetch.clear();
-        break;
+    if (manifest) {
+      manifest->GetPrefetchableFiles(&resource_prefetch_request_list);
+
+      for (size_t i = 0; i < resource_prefetch_request_list.size(); ++i) {
+        const GURL gurl(resource_prefetch_request_list[i].resource_url);
+        // Important security check. Do not remove.
+        if (!CanOpenViaFastPath(plugin_instance, gurl)) {
+          resource_prefetch_request_list.clear();
+          break;
+        }
       }
     }
   }
 
+  IPC::PlatformFileForTransit nexe_for_transit =
+      IPC::InvalidPlatformFileForTransit();
 #if defined(OS_POSIX)
   if (nexe_file_info->handle != PP_kInvalidFileHandle)
     nexe_for_transit = base::FileDescriptor(nexe_file_info->handle, true);
@@ -446,15 +443,18 @@ void LaunchSelLdr(PP_Instance instance,
   // it's simpler to do the duplication in the browser anyway.
   nexe_for_transit = nexe_file_info->handle;
 #else
-#error Unsupported target platform.
+# error Unsupported target platform.
 #endif
+
+  std::string error_message_string;
+  NaClLaunchResult launch_result;
   if (!sender->Send(new NaClHostMsg_LaunchNaCl(
           NaClLaunchParams(
               instance_info.url.spec(),
               nexe_for_transit,
               nexe_file_info->token_lo,
               nexe_file_info->token_hi,
-              resource_files_to_prefetch,
+              resource_prefetch_request_list,
               routing_id,
               perm_bits,
               PP_ToBool(uses_nonsfi_mode),
@@ -471,6 +471,12 @@ void LaunchSelLdr(PP_Instance instance,
   load_manager->set_nonsfi(PP_ToBool(uses_nonsfi_mode));
 
   if (!error_message_string.empty()) {
+    // Even on error, some FDs/handles may be passed to here.
+    // We must release those resources.
+    // See also nacl_process_host.cc.
+    IPC::PlatformFileForTransitToFile(launch_result.imc_channel_handle);
+    base::SharedMemory::CloseHandle(launch_result.crash_info_shmem_handle);
+
     if (PP_ToBool(main_service_runtime)) {
       load_manager->ReportLoadError(PP_NACL_ERROR_SEL_LDR_LAUNCH,
                                     "ServiceRuntime: failed to start",
@@ -482,7 +488,7 @@ void LaunchSelLdr(PP_Instance instance,
                    static_cast<int32_t>(PP_ERROR_FAILED)));
     return;
   }
-  result_socket = launch_result.imc_channel_handle;
+
   instance_info.channel_handle = launch_result.ppapi_ipc_channel_handle;
   instance_info.plugin_pid = launch_result.plugin_pid;
   instance_info.plugin_child_id = launch_result.plugin_child_id;
@@ -493,7 +499,9 @@ void LaunchSelLdr(PP_Instance instance,
     nacl_plugin_instance->instance_info.reset(new InstanceInfo(instance_info));
   }
 
-  *(static_cast<NaClHandle*>(imc_handle)) = ToNativeHandle(result_socket);
+  *(static_cast<NaClHandle*>(imc_handle)) =
+      IPC::PlatformFileForTransitToPlatformFile(
+          launch_result.imc_channel_handle);
 
   // Store the crash information shared memory handle.
   load_manager->set_crash_info_shmem_handle(
@@ -501,13 +509,13 @@ void LaunchSelLdr(PP_Instance instance,
 
   // Create the trusted plugin channel.
   if (IsValidChannelHandle(launch_result.trusted_ipc_channel_handle)) {
-    bool report_exit_status = PP_ToBool(main_service_runtime);
+    bool is_helper_nexe = !PP_ToBool(main_service_runtime);
     scoped_ptr<TrustedPluginChannel> trusted_plugin_channel(
         new TrustedPluginChannel(
             load_manager,
             launch_result.trusted_ipc_channel_handle,
             content::RenderThread::Get()->GetShutdownEvent(),
-            report_exit_status));
+            is_helper_nexe));
     load_manager->set_trusted_plugin_channel(trusted_plugin_channel.Pass());
   } else {
     PostPPCompletionCallback(callback, PP_ERROR_FAILED);
@@ -1107,18 +1115,8 @@ bool ManifestResolveKey(PP_Instance instance,
   // keys manually as there is no existing .nmf file to parse.
   if (is_helper_process) {
     pnacl_options->translate = PP_FALSE;
-    // We can only resolve keys in the files/ namespace.
-    const std::string kFilesPrefix = "files/";
-    if (key.find(kFilesPrefix) == std::string::npos) {
-      nacl::NexeLoadManager* load_manager = GetNexeLoadManager(instance);
-      if (load_manager)
-        load_manager->ReportLoadError(PP_NACL_ERROR_MANIFEST_RESOLVE_URL,
-                                      "key did not start with files/");
-      return false;
-    }
-    std::string key_basename = key.substr(kFilesPrefix.length());
     *full_url = std::string(kPNaClTranslatorBaseUrl) + GetSandboxArch() + "/" +
-                key_basename;
+                key;
     return true;
   }
 
@@ -1189,43 +1187,41 @@ PP_Bool GetPNaClResourceInfo(PP_Instance instance,
   buffer.get()[rc] = 0;
 
   // Expect the JSON file to contain a top-level object (dictionary).
-  Json::Reader json_reader;
-  Json::Value json_data;
-  if (!json_reader.parse(buffer.get(), json_data)) {
+  base::JSONReader json_reader;
+  int json_read_error_code;
+  std::string json_read_error_msg;
+  base::Value* json_data = json_reader.ReadAndReturnError(
+      buffer.get(),
+      base::JSON_PARSE_RFC,
+      &json_read_error_code,
+      &json_read_error_msg);
+  if (json_data == NULL) {
     load_manager->ReportLoadError(
         PP_NACL_ERROR_PNACL_RESOURCE_FETCH,
         std::string("Parsing resource info failed: JSON parse error: ") +
-            json_reader.getFormattedErrorMessages());
+            json_read_error_msg);
     return PP_FALSE;
   }
 
-  if (!json_data.isObject()) {
+  base::DictionaryValue* json_dict;
+  if (!json_data->GetAsDictionary(&json_dict)) {
     load_manager->ReportLoadError(
         PP_NACL_ERROR_PNACL_RESOURCE_FETCH,
         "Parsing resource info failed: Malformed JSON dictionary");
     return PP_FALSE;
   }
 
-  if (json_data.isMember("pnacl-llc-name")) {
-    Json::Value json_name = json_data["pnacl-llc-name"];
-    if (json_name.isString()) {
-      *llc_tool_name = ppapi::StringVar::StringToPPVar(json_name.asString());
-    }
-  }
+  std::string pnacl_llc_name;
+  if (json_dict->GetString("pnacl-llc-name", &pnacl_llc_name))
+    *llc_tool_name = ppapi::StringVar::StringToPPVar(pnacl_llc_name);
 
-  if (json_data.isMember("pnacl-ld-name")) {
-    Json::Value json_name = json_data["pnacl-ld-name"];
-    if (json_name.isString()) {
-      *ld_tool_name = ppapi::StringVar::StringToPPVar(json_name.asString());
-    }
-  }
+  std::string pnacl_ld_name;
+  if (json_dict->GetString("pnacl-ld-name", &pnacl_ld_name))
+    *ld_tool_name = ppapi::StringVar::StringToPPVar(pnacl_ld_name);
 
-  if (json_data.isMember("pnacl-sz-name")) {
-    Json::Value json_name = json_data["pnacl-sz-name"];
-    if (json_name.isString()) {
-      *subzero_tool_name =
-          ppapi::StringVar::StringToPPVar(json_name.asString());
-    }
+  std::string pnacl_sz_name;
+  if (json_dict->GetString("pnacl-sz-name", &pnacl_sz_name)) {
+    *subzero_tool_name = ppapi::StringVar::StringToPPVar(pnacl_sz_name);
   } else {
     // TODO(jvoung): remove fallback after one chrome release
     // or when we bump the kMinPnaclVersion.
@@ -1497,22 +1493,6 @@ void DownloadFile(PP_Instance instance,
   file_downloader->Load(url_request);
 }
 
-void ReportSelLdrStatus(PP_Instance instance,
-                        int32_t load_status,
-                        int32_t max_status) {
-  HistogramEnumerate("NaCl.LoadStatus.SelLdr", load_status, max_status);
-  NexeLoadManager* load_manager = GetNexeLoadManager(instance);
-  DCHECK(load_manager);
-  if (!load_manager)
-    return;
-
-  // Gather data to see if being installed changes load outcomes.
-  const char* name = load_manager->is_installed() ?
-      "NaCl.LoadStatus.SelLdr.InstalledApp" :
-      "NaCl.LoadStatus.SelLdr.NotInstalledApp";
-  HistogramEnumerate(name, load_status, max_status);
-}
-
 void LogTranslateTime(const char* histogram_name,
                       int64_t time_in_us) {
   ppapi::PpapiGlobals::Get()->GetMainThreadMessageLoop()->PostTask(
@@ -1730,7 +1710,6 @@ const PPB_NaCl_Private nacl_interface = {
   &GetPNaClResourceInfo,
   &GetCpuFeatureAttrs,
   &DownloadNexe,
-  &ReportSelLdrStatus,
   &LogTranslateTime,
   &LogBytesCompiledVsDowloaded,
   &SetPNaClStartTime,

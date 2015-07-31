@@ -34,16 +34,14 @@
 #include "ppapi/cpp/var.h"
 #include "ppapi/cpp/var_dictionary.h"
 #include "printing/units.h"
-#include "third_party/pdfium/fpdfsdk/include/fpdf_ext.h"
-#include "third_party/pdfium/fpdfsdk/include/fpdf_flatten.h"
-#include "third_party/pdfium/fpdfsdk/include/fpdf_searchex.h"
-#include "third_party/pdfium/fpdfsdk/include/fpdf_sysfontinfo.h"
-#include "third_party/pdfium/fpdfsdk/include/fpdf_transformpage.h"
-#include "third_party/pdfium/fpdfsdk/include/fpdfedit.h"
-#include "third_party/pdfium/fpdfsdk/include/fpdfppo.h"
-#include "third_party/pdfium/fpdfsdk/include/fpdfsave.h"
-#include "third_party/pdfium/fpdfsdk/include/pdfwindow/PDFWindow.h"
-#include "third_party/pdfium/fpdfsdk/include/pdfwindow/PWL_FontMap.h"
+#include "third_party/pdfium/public/fpdf_edit.h"
+#include "third_party/pdfium/public/fpdf_ext.h"
+#include "third_party/pdfium/public/fpdf_flatten.h"
+#include "third_party/pdfium/public/fpdf_ppo.h"
+#include "third_party/pdfium/public/fpdf_save.h"
+#include "third_party/pdfium/public/fpdf_searchex.h"
+#include "third_party/pdfium/public/fpdf_sysfontinfo.h"
+#include "third_party/pdfium/public/fpdf_transformpage.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 
 using printing::ConvertUnit;
@@ -146,12 +144,9 @@ PP_BrowserFont_Trusted_Weight WeightToBrowserFontTrustedWeight(int weight) {
 void EnumFonts(struct _FPDF_SYSFONTINFO* sysfontinfo, void* mapper) {
   FPDF_AddInstalledFont(mapper, "Arial", FXFONT_DEFAULT_CHARSET);
 
-  int i = 0;
-  while (CPWL_FontMap::defaultTTFMap[i].charset != -1) {
-    FPDF_AddInstalledFont(mapper,
-                          CPWL_FontMap::defaultTTFMap[i].fontname,
-                          CPWL_FontMap::defaultTTFMap[i].charset);
-    ++i;
+  const FPDF_CharsetFontMap* font_map = FPDF_GetDefaultTTFMap();
+  for (; font_map->charset != -1; ++font_map) {
+    FPDF_AddInstalledFont(mapper, font_map->fontname, font_map->charset);
   }
 }
 
@@ -666,17 +661,11 @@ PDFiumEngine::~PDFiumEngine() {
     pages_[i]->Unload();
 
   if (doc_) {
-    if (form_) {
-      FORM_DoDocumentAAction(form_, FPDFDOC_AACTION_WC);
-    }
+    FORM_DoDocumentAAction(form_, FPDFDOC_AACTION_WC);
     FPDF_CloseDocument(doc_);
-    if (form_) {
-      FPDFDOC_ExitFormFillEnvironment(form_);
-    }
+    FPDFDOC_ExitFormFillEnvironment(form_);
   }
-
-  if (fpdf_availability_)
-    FPDFAvail_Destroy(fpdf_availability_);
+  FPDFAvail_Destroy(fpdf_availability_);
 
   STLDeleteElements(&pages_);
 }
@@ -975,8 +964,8 @@ int PDFiumEngine::GetBlock(void* param, unsigned long position,
   return loader->GetBlock(position, size, buffer);
 }
 
-bool PDFiumEngine::IsDataAvail(FX_FILEAVAIL* param,
-                               size_t offset, size_t size) {
+FPDF_BOOL PDFiumEngine::IsDataAvail(FX_FILEAVAIL* param,
+                                    size_t offset, size_t size) {
   PDFiumEngine::FileAvail* file_avail =
       static_cast<PDFiumEngine::FileAvail*>(param);
   return file_avail->loader->IsDataAvailable(offset, size);

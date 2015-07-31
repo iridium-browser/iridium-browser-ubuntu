@@ -16,6 +16,7 @@
 #include "content/public/browser/navigation_type.h"
 #include "content/public/common/media_stream_request.h"
 #include "content/public/common/window_container_type.h"
+#include "third_party/WebKit/public/platform/WebDisplayMode.h"
 #include "third_party/WebKit/public/web/WebDragOperation.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/window_open_disposition.h"
@@ -214,6 +215,11 @@ class CONTENT_EXPORT WebContentsDelegate {
   // to live. Default is true.
   virtual bool ShouldFocusPageAfterCrash();
 
+  // Returns whether the page should resume accepting requests for the new
+  // window. This is used when window creation is asynchronous
+  // and the navigations need to be delayed. Default is true.
+  virtual bool ShouldResumeRequestsForCreatedWindow();
+
   // This is called when WebKit tells us that it is done tabbing through
   // controls on the page. Provides a way for WebContentsDelegates to handle
   // this. Returns true if the delegate successfully handled it.
@@ -222,9 +228,6 @@ class CONTENT_EXPORT WebContentsDelegate {
 
   // Invoked when the page loses mouse capture.
   virtual void LostCapture() {}
-
-  // Notification that |contents| has gained focus.
-  virtual void WebContentsFocused(WebContents* contents) {}
 
   // Asks the delegate if the given tab can download.
   // Invoking the |callback| synchronously is OK.
@@ -358,6 +361,14 @@ class CONTENT_EXPORT WebContentsDelegate {
   virtual void ExitFullscreenModeForTab(WebContents*) {}
 
   virtual bool IsFullscreenForTabOrPending(
+      const WebContents* web_contents) const;
+
+  // Returns the actual display mode of the top-level browsing context.
+  // For example, it should return 'blink::WebDisplayModeFullscreen' whenever
+  // the browser window is put to fullscreen mode (either by the end user,
+  // or HTML API or from a web manifest setting).
+  // See http://w3c.github.io/manifest/#dfn-display-mode
+  virtual blink::WebDisplayMode GetDisplayMode(
       const WebContents* web_contents) const;
 
   // Register a new handler for URL requests with the given scheme.

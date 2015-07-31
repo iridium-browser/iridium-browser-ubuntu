@@ -2,13 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef ASH_USER_METRICS_RECORDER_H_
-#define ASH_USER_METRICS_RECORDER_H_
+#ifndef ASH_METRICS_USER_METRICS_RECORDER_H_
+#define ASH_METRICS_USER_METRICS_RECORDER_H_
 
 #include "ash/ash_export.h"
+#include "ash/metrics/task_switch_metrics_recorder.h"
 #include "base/timer/timer.h"
 
 namespace ash {
+
+namespace test {
+class UserMetricsRecorderTestAPI;
+}
 
 enum UserMetricsAction {
   UMA_ACCEL_EXIT_FIRST_Q,
@@ -30,6 +35,8 @@ enum UserMetricsAction {
   UMA_LAUNCHER_CLICK_ON_APP,
   UMA_LAUNCHER_CLICK_ON_APPLIST_BUTTON,
   UMA_LAUNCHER_LAUNCH_TASK,
+  UMA_LAUNCHER_MINIMIZE_TASK,
+  UMA_LAUNCHER_SWITCH_TASK,
   UMA_MAXIMIZE_MODE_DISABLED,
   UMA_MAXIMIZE_MODE_ENABLED,
   UMA_MAXIMIZE_MODE_INITIALLY_DISABLED,
@@ -61,6 +68,7 @@ enum UserMetricsAction {
   UMA_STATUS_AREA_DETAILED_AUDIO_VIEW,
   UMA_STATUS_AREA_DETAILED_BLUETOOTH_VIEW,
   UMA_STATUS_AREA_DETAILED_BRIGHTNESS_VIEW,
+  UMA_STATUS_AREA_DETAILED_CAST_VIEW,
   UMA_STATUS_AREA_DETAILED_DRIVE_VIEW,
   UMA_STATUS_AREA_DETAILED_NETWORK_VIEW,
   UMA_STATUS_AREA_DETAILED_VPN_VIEW,
@@ -99,6 +107,7 @@ enum UserMetricsAction {
   UMA_TOUCHSCREEN_TAP_DOWN,
   UMA_TRAY_HELP,
   UMA_TRAY_LOCK_SCREEN,
+  UMA_TRAY_OVERVIEW,
   UMA_TRAY_SHUT_DOWN,
   UMA_WINDOW_APP_CLOSE_BUTTON_CLICK,
   UMA_WINDOW_CLOSE_BUTTON_CLICK,
@@ -111,6 +120,10 @@ enum UserMetricsAction {
 
   // Thumbnail sized overview of windows triggered by pressing the overview key.
   UMA_WINDOW_OVERVIEW,
+
+  // User selected a window in overview mode different from the
+  // previously-active window.
+  UMA_WINDOW_OVERVIEW_ACTIVE_WINDOW_CHANGED,
 
   // Selecting a window in overview mode by pressing the enter key.
   UMA_WINDOW_OVERVIEW_ENTER_KEY,
@@ -127,16 +140,48 @@ enum UserMetricsAction {
 // (RecordUserMetricsAction) are passed through the UserMetricsRecorder.
 class ASH_EXPORT UserMetricsRecorder {
  public:
+  // Creates a UserMetricsRecorder that records metrics periodically. Equivalent
+  // to calling UserMetricsRecorder(true).
   UserMetricsRecorder();
-  ~UserMetricsRecorder();
 
+  virtual ~UserMetricsRecorder();
+
+  // Records an Ash owned user action.
   void RecordUserMetricsAction(ash::UserMetricsAction action);
+
+  TaskSwitchMetricsRecorder& task_switch_metrics_recorder() {
+    return task_switch_metrics_recorder_;
+  }
+
  private:
+  friend class test::UserMetricsRecorderTestAPI;
+
+  // Creates a UserMetricsRecorder and will only record periodic metrics if
+  // |record_periodic_metrics| is true. This is used by tests that do not want
+  // the timer to be started.
+  // TODO(bruthig): Add a constructor that accepts a base::RepeatingTimer so
+  // that tests can inject a test double that can be controlled by the test. The
+  // missing piece is a suitable base::RepeatingTimer test double.
+  explicit UserMetricsRecorder(bool record_periodic_metrics);
+
+  // Records UMA metrics. Invoked periodically by the |timer_|.
   void RecordPeriodicMetrics();
 
+  // Returns true if the user's session is active and they are in a desktop
+  // environment.
+  bool IsUserInActiveDesktopEnvironment() const;
+
+  // Starts the |timer_| and binds it to |RecordPeriodicMetrics|.
+  void StartTimer();
+
+  // The periodic timer that triggers metrics to be recorded.
   base::RepeatingTimer<UserMetricsRecorder> timer_;
+
+  TaskSwitchMetricsRecorder task_switch_metrics_recorder_;
+
+  DISALLOW_COPY_AND_ASSIGN(UserMetricsRecorder);
 };
 
 }  // namespace ash
 
-#endif  // ASH_USER_METRICS_RECORDER_H_
+#endif  // ASH_METRICS_USER_METRICS_RECORDER_H_

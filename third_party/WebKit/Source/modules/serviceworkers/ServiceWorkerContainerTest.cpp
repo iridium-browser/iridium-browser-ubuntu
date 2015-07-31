@@ -1,3 +1,4 @@
+
 // Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -42,7 +43,7 @@ public:
 
     // The returned ScriptFunction can outlive the StubScriptFunction,
     // but it should not be called after the StubScriptFunction dies.
-    v8::Handle<v8::Function> function(ScriptState* scriptState)
+    v8::Local<v8::Function> function(ScriptState* scriptState)
     {
         return ScriptFunctionImpl::createFunction(scriptState, *this);
     }
@@ -56,7 +57,7 @@ private:
 
     class ScriptFunctionImpl : public ScriptFunction {
     public:
-        static v8::Handle<v8::Function> createFunction(ScriptState* scriptState, StubScriptFunction& owner)
+        static v8::Local<v8::Function> createFunction(ScriptState* scriptState, StubScriptFunction& owner)
         {
             ScriptFunctionImpl* self = new ScriptFunctionImpl(scriptState, owner);
             return self->bindToV8Function();
@@ -159,7 +160,7 @@ protected:
 
     void provide(PassOwnPtr<WebServiceWorkerProvider> provider)
     {
-        m_page->document().DocumentSupplementable::provideSupplement(ServiceWorkerContainerClient::supplementName(), ServiceWorkerContainerClient::create(provider));
+        m_page->document().WillBeHeapSupplementable<Document>::provideSupplement(ServiceWorkerContainerClient::supplementName(), ServiceWorkerContainerClient::create(provider));
     }
 
     void setPageURL(const String& url)
@@ -169,17 +170,6 @@ protected:
 
         // The basis for security checks.
         m_page->document().setSecurityOrigin(SecurityOrigin::createFromString(url));
-    }
-
-    void setPageVisibilityState(PageVisibilityState visibilityState)
-    {
-        m_page->page().setVisibilityState(visibilityState, true); // Set as initial state
-    }
-
-    void setFocused(bool focused)
-    {
-        m_page->page().focusController().setActive(focused);
-        m_page->page().focusController().setFocused(focused);
     }
 
     void testRegisterRejected(const String& scriptURL, const String& scope, const ScriptValueTest& valueTest)
@@ -220,7 +210,7 @@ TEST_F(ServiceWorkerContainerTest, Register_NonSecureOriginIsRejected)
     testRegisterRejected(
         "http://www.example.com/worker.js",
         "http://www.example.com/",
-        ExpectDOMException("NotSupportedError", "Only secure origins are allowed. http://goo.gl/lq4gCo"));
+        ExpectDOMException("NotSupportedError", "Only secure origins are allowed (see: https://goo.gl/Y0ZkNV)."));
 }
 
 TEST_F(ServiceWorkerContainerTest, Register_CrossOriginScriptIsRejected)
@@ -246,7 +236,7 @@ TEST_F(ServiceWorkerContainerTest, GetRegistration_NonSecureOriginIsRejected)
     setPageURL("http://www.example.com/");
     testGetRegistrationRejected(
         "http://www.example.com/",
-        ExpectDOMException("NotSupportedError", "Only secure origins are allowed. http://goo.gl/lq4gCo"));
+        ExpectDOMException("NotSupportedError", "Only secure origins are allowed (see: https://goo.gl/Y0ZkNV)."));
 }
 
 TEST_F(ServiceWorkerContainerTest, GetRegistration_CrossOriginURLIsRejected)
@@ -360,28 +350,6 @@ TEST_F(ServiceWorkerContainerTest, GetRegistration_OmittedDocumentURLDefaultsToP
     }
 
     container->willBeDetachedFromFrame();
-}
-
-TEST_F(ServiceWorkerContainerTest, GetClientInfo)
-{
-    setPageVisibilityState(PageVisibilityStateVisible);
-    setFocused(true);
-    setPageURL("http://localhost/x/index.html");
-
-    ServiceWorkerContainer* container = ServiceWorkerContainer::create(executionContext());
-
-    WebServiceWorkerClientInfo info;
-    ASSERT_TRUE(container->getClientInfo(&info));
-    EXPECT_EQ(WebPageVisibilityStateVisible, info.pageVisibilityState);
-    EXPECT_TRUE(info.isFocused);
-    EXPECT_EQ(WebURL(KURL(KURL(), "http://localhost/x/index.html")), info.url);
-    EXPECT_EQ(WebURLRequest::FrameTypeTopLevel, info.frameType);
-
-    setPageVisibilityState(PageVisibilityStateHidden);
-    setFocused(false);
-    ASSERT_TRUE(container->getClientInfo(&info));
-    EXPECT_EQ(WebPageVisibilityStateHidden, info.pageVisibilityState);
-    EXPECT_FALSE(info.isFocused);
 }
 
 } // namespace

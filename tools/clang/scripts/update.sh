@@ -11,7 +11,7 @@
 CLANG_REVISION=233105
 
 # This is incremented when pushing a new build of Clang at the same revision.
-CLANG_SUB_REVISION=1
+CLANG_SUB_REVISION=2
 
 PACKAGE_VERSION="${CLANG_REVISION}-${CLANG_SUB_REVISION}"
 
@@ -56,19 +56,12 @@ set -eu
 
 
 if [[ -n ${LLVM_FORCE_HEAD_REVISION:-''} ]]; then
-  # Use a real version number rather than HEAD to make sure that
-  # --print-revision, stamp file logic, etc. all works naturally.
+  # Use a real revision number rather than HEAD to make sure that the stamp file
+  # logic works.
   CLANG_REVISION=$(svn info "$LLVM_REPO_URL" \
-      | grep 'Last Changed Rev' | awk '{ printf $4; }')
+      | grep 'Revision:' | awk '{ printf $2; }')
   PACKAGE_VERSION="${CLANG_REVISION}-0"
 fi
-
-# Use both the clang revision and the plugin revisions to test for updates.
-BLINKGCPLUGIN_REVISION=\
-$(grep 'set(LIBRARYNAME' "$THIS_DIR"/../blink_gc_plugin/CMakeLists.txt \
-    | cut -d ' ' -f 2 | tr -cd '[0-9]')
-CLANG_AND_PLUGINS_REVISION="${CLANG_REVISION}-${BLINKGCPLUGIN_REVISION}"
-
 
 OS="$(uname -s)"
 
@@ -98,7 +91,11 @@ while [[ $# > 0 ]]; do
       force_local_build=yes
       ;;
     --print-revision)
-      echo $PACKAGE_VERSION
+      if [[ -n ${LLVM_FORCE_HEAD_REVISION:-''} ]]; then
+        svn info "$LLVM_DIR" | grep 'Revision:' | awk '{ printf $2; }'
+      else
+        echo $PACKAGE_VERSION
+      fi
       exit 0
       ;;
     --run-tests)
@@ -190,14 +187,13 @@ if [[ -n ${LLVM_FORCE_HEAD_REVISION:-''} ]]; then
     fi
   fi
 
-  if [[ "${OS}" == "Linux" ]]; then
-    # TODO(hans): Might need to make this work on Mac eventually.
+  if [[ "${OS}" == "Linux" || "${OS}" == "Darwin" ]]; then
     if [[ $(cmake --version | grep -Eo '[0-9.]+') < "3.0" ]]; then
       # We need a newer CMake version.
       if [[ ! -e "${LLVM_BUILD_TOOLS_DIR}/cmake310" ]]; then
         echo "Downloading pre-built CMake 3.10..."
         mkdir -p "${LLVM_BUILD_TOOLS_DIR}"
-        curl --fail -L "${CDS_URL}/tools/cmake310.tgz" | \
+        curl --fail -L "${CDS_URL}/tools/cmake310_${OS}.tgz" | \
           tar zxf - -C "${LLVM_BUILD_TOOLS_DIR}"
         echo Done
       fi
@@ -322,6 +318,7 @@ for i in \
       "${CLANG_DIR}/test/SemaCXX/typo-correction-delayed.cpp" \
       "${COMPILER_RT_DIR}/lib/sanitizer_common/sanitizer_stoptheworld_linux_libcdep.cc" \
       "${COMPILER_RT_DIR}/test/tsan/signal_segv_handler.cc" \
+      "${COMPILER_RT_DIR}/lib/sanitizer_common/sanitizer_coverage_libcdep.cc" \
       ; do
   if [[ -e "${i}" ]]; then
     rm -f "${i}"  # For unversioned files.
@@ -402,6 +399,27 @@ cat << 'EOF' |
    const char *MFile = "#include \"HeaderFile.h\"\nint main() {"
 EOF
   patch -p0
+  popd
+
+  # Cherry-pick r234010 [sancov] Shrink pc array on Android back to 2**24."
+  pushd "${COMPILER_RT_DIR}"
+  cat << 'EOF' |
+diff --git a/lib/sanitizer_common/sanitizer_coverage_libcdep.cc b/lib/sanitizer_common/sanitizer_coverage_libcdep.cc
+index 4b976fc..cfd9e7e 100644
+--- a/lib/sanitizer_common/sanitizer_coverage_libcdep.cc
++++ b/lib/sanitizer_common/sanitizer_coverage_libcdep.cc
+@@ -109,7 +109,8 @@ class CoverageData {
+ 
+   // Maximal size pc array may ever grow.
+   // We MmapNoReserve this space to ensure that the array is contiguous.
+-  static const uptr kPcArrayMaxSize = FIRST_32_SECOND_64(1 << 26, 1 << 27);
++  static const uptr kPcArrayMaxSize =
++      FIRST_32_SECOND_64(1 << (SANITIZER_ANDROID ? 24 : 26), 1 << 27);
+   // The amount file mapping for the pc array is grown by.
+   static const uptr kPcArrayMmapSize = 64 * 1024;
+
+EOF
+  patch -p1
   popd
 
   # This Go bindings test doesn't work after the bootstrap build on Linux. (PR21552)
@@ -549,6 +567,14 @@ fi
 BINUTILS_INCDIR=""
 if [ "${OS}" = "Linux" ]; then
   BINUTILS_INCDIR="${ABS_BINUTILS_DIR}/Linux_x64/Release/include"
+fi
+
+
+# If building at head, define a macro that plugins can use for #ifdefing
+# out code that builds at head, but not at CLANG_REVISION or vice versa.
+if [[ -n ${LLVM_FORCE_HEAD_REVISION:-''} ]]; then
+  CFLAGS="${CFLAGS} -DLLVM_FORCE_HEAD_REVISION"
+  CXXFLAGS="${CXXFLAGS} -DLLVM_FORCE_HEAD_REVISION"
 fi
 
 # Hook the Chromium tools into the LLVM build. Several Chromium tools have

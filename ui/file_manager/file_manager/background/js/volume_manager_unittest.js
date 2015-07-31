@@ -91,14 +91,18 @@ function setUp() {
       volumeLabel: '',
       volumeType: VolumeManagerCommon.VolumeType.DOWNLOADS,
       isReadOnly: false,
-      profile: getMockProfile()
+      profile: getMockProfile(),
+      configurable: false,
+      source: VolumeManagerCommon.Source.SYSTEM
     },
     {
       volumeId: 'drive:drive-foobar%40chromium.org-hash',
       volumeLabel: '',
       volumeType: VolumeManagerCommon.VolumeType.DRIVE,
       isReadOnly: false,
-      profile: getMockProfile()
+      profile: getMockProfile(),
+      configurable: false,
+      source: VolumeManagerCommon.Source.NETWORK
     }
   ];
   chrome.fileManagerPrivate.fileSystemMap_ = {
@@ -185,7 +189,9 @@ function testMountArchiveAndUnmount(callback) {
           volumeType: VolumeManagerCommon.VolumeType.ARCHIVE,
           isReadOnly: true,
           sourcePath: mountSourcePath,
-          profile: getMockProfile()
+          profile: getMockProfile(),
+          configurable: false,
+          source: VolumeManagerCommon.Source.FILE
         }
       });
     }).then(function(result) {
@@ -254,7 +260,9 @@ function testVolumeInfoListWhenReady(callback) {
       /* profile */ {},
       /* label */ null,
       /* extensionid */ null,
-      /* hasMedia */ false);
+      /* hasMedia */ false,
+      /* configurable */ false,
+      /* source */ VolumeManagerCommon.Source.FILE);
   list.add(volumeInfo);
   var promiseAfterAdd = list.whenVolumeInfoReady('volumeId');
   reportPromise(Promise.all([promiseBeforeAdd, promiseAfterAdd]).then(

@@ -4,21 +4,24 @@
 
 package org.chromium.chrome.browser.preferences;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Fragment;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
+import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.content.res.Resources;
 import android.graphics.BitmapFactory;
 import android.nfc.NfcAdapter;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Process;
 import android.preference.Preference;
 import android.preference.PreferenceFragment;
 import android.preference.PreferenceFragment.OnPreferenceStartFragmentCallback;
 import android.support.v4.view.ViewCompat;
-import android.support.v7.app.ActionBarActivity;
+import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -37,7 +40,7 @@ import org.chromium.chrome.R;
  * may freely modify its activity's action bar or title. This mimics the behavior of
  * android.preference.PreferenceActivity.
  */
-public abstract class Preferences extends ActionBarActivity implements
+public abstract class Preferences extends AppCompatActivity implements
         OnPreferenceStartFragmentCallback {
 
     public static final String EXTRA_SHOW_FRAGMENT = "show_fragment";
@@ -152,10 +155,14 @@ public abstract class Preferences extends ActionBarActivity implements
                     .commit();
         }
 
-        // Disable Android Beam on JB and later devices.
-        // In ICS it does nothing - i.e. we will send a Play Store link if NFC is used.
-        NfcAdapter nfcAdapter = NfcAdapter.getDefaultAdapter(this);
-        if (nfcAdapter != null) nfcAdapter.setNdefPushMessage(null, this);
+        if (checkPermission(Manifest.permission.NFC, Process.myPid(), Process.myUid())
+                == PackageManager.PERMISSION_GRANTED) {
+            // Disable Android Beam on JB and later devices.
+            // In ICS it does nothing - i.e. we will send a Play Store link if NFC is used.
+            NfcAdapter nfcAdapter = NfcAdapter.getDefaultAdapter(this);
+            if (nfcAdapter != null) nfcAdapter.setNdefPushMessage(null, this);
+        }
+
 
         Resources res = getResources();
         ApiCompatibilityUtils.setTaskDescription(this, res.getString(R.string.app_name),
@@ -236,7 +243,7 @@ public abstract class Preferences extends ActionBarActivity implements
         super.onCreateOptionsMenu(menu);
         // By default, every screen in Settings shows a "Help & feedback" menu item.
         MenuItem help = menu.add(
-                Menu.NONE, R.id.menu_id_help_general, Menu.NONE, R.string.menu_help);
+                Menu.NONE, R.id.menu_id_help_general, Menu.CATEGORY_SECONDARY, R.string.menu_help);
         help.setIcon(R.drawable.ic_help_and_feedback);
         return true;
     }

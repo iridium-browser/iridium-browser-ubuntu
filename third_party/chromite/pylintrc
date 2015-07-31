@@ -23,7 +23,7 @@
 
 # List of plugins (as comma separated values of python modules names) to load,
 # usually to register additional checkers.
-load-plugins=chromite.cros.commands.lint
+load-plugins=chromite.cli.cros.lint
 
 
 [MESSAGES CONTROL]
@@ -31,7 +31,9 @@ load-plugins=chromite.cros.commands.lint
 # Enable the message, report, category or checker with the given id(s). You can
 # either give multiple identifier separated by comma (,) or put this option
 # multiple times.
-#enable=
+# R9301: logging is deprecated. Use "from chromite.lib import cros_logging as
+# logging" to import chromite/lib/cros_logging
+enable=cros-logging-import
 
 # Disable the message, report, category or checker with the given id(s). You
 # can either give multiple identifier separated by comma (,) or put this option

@@ -26,6 +26,7 @@ using std::max;
 using std::min;
 using std::string;
 using testing::AnyNumber;
+using testing::Invoke;
 using testing::_;
 
 namespace net {
@@ -236,79 +237,69 @@ QuicPacketWriter* NiceMockPacketWriterFactory::Create(
 }
 
 MockConnection::MockConnection(Perspective perspective)
-    : QuicConnection(kTestConnectionId,
-                     IPEndPoint(TestPeerIPAddress(), kTestPort),
-                     new testing::NiceMock<MockHelper>(),
-                     NiceMockPacketWriterFactory(),
-                     /* owns_writer= */ true,
-                     perspective,
-                     /* is_secure= */ false,
-                     QuicSupportedVersions()),
-      helper_(helper()) {
+    : MockConnection(perspective,
+                     /* is_secure= */ false) {
 }
 
 MockConnection::MockConnection(Perspective perspective, bool is_secure)
-    : QuicConnection(kTestConnectionId,
+    : MockConnection(kTestConnectionId,
                      IPEndPoint(TestPeerIPAddress(), kTestPort),
-                     new testing::NiceMock<MockHelper>(),
-                     NiceMockPacketWriterFactory(),
-                     /* owns_writer= */ true,
                      perspective,
                      is_secure,
-                     QuicSupportedVersions()),
-      helper_(helper()) {
+                     QuicSupportedVersions()) {
 }
 
 MockConnection::MockConnection(IPEndPoint address, Perspective perspective)
-    : QuicConnection(kTestConnectionId,
+    : MockConnection(kTestConnectionId,
                      address,
-                     new testing::NiceMock<MockHelper>(),
-                     NiceMockPacketWriterFactory(),
-                     /* owns_writer= */ true,
                      perspective,
                      /* is_secure= */ false,
-                     QuicSupportedVersions()),
-      helper_(helper()) {
+                     QuicSupportedVersions()) {
 }
 
 MockConnection::MockConnection(QuicConnectionId connection_id,
                                Perspective perspective)
-    : QuicConnection(connection_id,
-                     IPEndPoint(TestPeerIPAddress(), kTestPort),
-                     new testing::NiceMock<MockHelper>(),
-                     NiceMockPacketWriterFactory(),
-                     /* owns_writer= */ true,
+    : MockConnection(connection_id,
                      perspective,
-                     /* is_secure= */ false,
-                     QuicSupportedVersions()),
-      helper_(helper()) {
+                     /* is_secure= */ false) {
 }
 
 MockConnection::MockConnection(QuicConnectionId connection_id,
                                Perspective perspective,
                                bool is_secure)
-    : QuicConnection(connection_id,
+    : MockConnection(connection_id,
                      IPEndPoint(TestPeerIPAddress(), kTestPort),
+                     perspective,
+                     is_secure,
+                     QuicSupportedVersions()) {
+}
+
+MockConnection::MockConnection(Perspective perspective,
+                               const QuicVersionVector& supported_versions)
+    : MockConnection(kTestConnectionId,
+                     IPEndPoint(TestPeerIPAddress(), kTestPort),
+                     perspective,
+                     /* is_secure= */ false,
+                     supported_versions) {
+}
+
+MockConnection::MockConnection(QuicConnectionId connection_id,
+                               IPEndPoint address,
+                               Perspective perspective,
+                               bool is_secure,
+                               const QuicVersionVector& supported_versions)
+    : QuicConnection(connection_id,
+                     address,
                      new testing::NiceMock<MockHelper>(),
                      NiceMockPacketWriterFactory(),
                      /* owns_writer= */ true,
                      perspective,
                      is_secure,
-                     QuicSupportedVersions()),
-      helper_(helper()) {
-}
-
-MockConnection::MockConnection(Perspective perspective,
-                               const QuicVersionVector& supported_versions)
-    : QuicConnection(kTestConnectionId,
-                     IPEndPoint(TestPeerIPAddress(), kTestPort),
-                     new testing::NiceMock<MockHelper>(),
-                     NiceMockPacketWriterFactory(),
-                     /* owns_writer= */ true,
-                     perspective,
-                     /* is_secure= */ false,
                      supported_versions),
       helper_(helper()) {
+  ON_CALL(*this, OnError(_))
+      .WillByDefault(
+          Invoke(this, &PacketSavingConnection::QuicConnection_OnError));
 }
 
 MockConnection::~MockConnection() {
@@ -333,6 +324,11 @@ PacketSavingConnection::~PacketSavingConnection() {
 }
 
 void PacketSavingConnection::SendOrQueuePacket(QueuedPacket packet) {
+  if (!packet.serialized_packet.packet->owns_buffer()) {
+    scoped_ptr<QuicEncryptedPacket> encrypted_deleter(
+        packet.serialized_packet.packet);
+    packet.serialized_packet.packet = packet.serialized_packet.packet->Clone();
+  }
   encrypted_packets_.push_back(packet.serialized_packet.packet);
   // Transfer ownership of the packet to the SentPacketManager and the
   // ack notifier to the AckNotifierManager.
@@ -383,6 +379,14 @@ void TestClientSession::SetCryptoStream(QuicCryptoStream* stream) {
 
 QuicCryptoStream* TestClientSession::GetCryptoStream() {
   return crypto_stream_;
+}
+
+TestServerSession::TestServerSession(const QuicConfig& config,
+                                     QuicConnection* connection)
+    : QuicServerSession(config, connection, nullptr) {
+}
+
+TestServerSession::~TestServerSession() {
 }
 
 MockPacketWriter::MockPacketWriter() {
@@ -475,6 +479,12 @@ IPAddressNumber Loopback6() {
   return addr;
 }
 
+IPAddressNumber Any4() {
+  IPAddressNumber any4;
+  CHECK(net::ParseIPLiteralToNumber("0.0.0.0", &any4));
+  return any4;
+}
+
 void GenerateBody(string* body, int length) {
   body->clear();
   body->reserve(length);
@@ -502,6 +512,20 @@ QuicEncryptedPacket* ConstructEncryptedPacket(
     const string& data,
     QuicConnectionIdLength connection_id_length,
     QuicSequenceNumberLength sequence_number_length) {
+  return ConstructEncryptedPacket(connection_id, version_flag, reset_flag,
+                                  sequence_number, data, connection_id_length,
+                                  sequence_number_length, nullptr);
+}
+
+QuicEncryptedPacket* ConstructEncryptedPacket(
+    QuicConnectionId connection_id,
+    bool version_flag,
+    bool reset_flag,
+    QuicPacketSequenceNumber sequence_number,
+    const string& data,
+    QuicConnectionIdLength connection_id_length,
+    QuicSequenceNumberLength sequence_number_length,
+    QuicVersionVector* versions) {
   QuicPacketHeader header;
   header.public_header.connection_id = connection_id;
   header.public_header.connection_id_length = connection_id_length;
@@ -518,16 +542,52 @@ QuicEncryptedPacket* ConstructEncryptedPacket(
   QuicFrame frame(&stream_frame);
   QuicFrames frames;
   frames.push_back(frame);
-  QuicFramer framer(QuicSupportedVersions(), QuicTime::Zero(),
-                    Perspective::IS_CLIENT);
+  QuicFramer framer(versions != nullptr ? *versions : QuicSupportedVersions(),
+                    QuicTime::Zero(), Perspective::IS_CLIENT);
+
   scoped_ptr<QuicPacket> packet(
       BuildUnsizedDataPacket(&framer, header, frames));
   EXPECT_TRUE(packet != nullptr);
-  QuicEncryptedPacket* encrypted = framer.EncryptPacket(ENCRYPTION_NONE,
-                                                        sequence_number,
-                                                        *packet);
+  char buffer[kMaxPacketSize];
+  scoped_ptr<QuicEncryptedPacket> encrypted(framer.EncryptPacket(
+      ENCRYPTION_NONE, sequence_number, *packet, buffer, kMaxPacketSize));
   EXPECT_TRUE(encrypted != nullptr);
-  return encrypted;
+  return encrypted->Clone();
+}
+
+QuicEncryptedPacket* ConstructMisFramedEncryptedPacket(
+    QuicConnectionId connection_id,
+    bool version_flag,
+    bool reset_flag,
+    QuicPacketSequenceNumber sequence_number,
+    const string& data,
+    QuicConnectionIdLength connection_id_length,
+    QuicSequenceNumberLength sequence_number_length,
+    QuicVersionVector* versions) {
+  QuicPacketHeader header;
+  header.public_header.connection_id = connection_id;
+  header.public_header.connection_id_length = connection_id_length;
+  header.public_header.version_flag = version_flag;
+  header.public_header.reset_flag = reset_flag;
+  header.public_header.sequence_number_length = sequence_number_length;
+  header.packet_sequence_number = sequence_number;
+  header.entropy_flag = false;
+  header.entropy_hash = 0;
+  header.fec_flag = false;
+  header.is_in_fec_group = NOT_IN_FEC_GROUP;
+  header.fec_group = 0;
+  QuicFrames frames;
+  QuicFramer framer(versions ? *versions : QuicSupportedVersions(),
+                    QuicTime::Zero(), Perspective::IS_CLIENT);
+  // Build a packet with zero frames, which is an error.
+  scoped_ptr<QuicPacket> packet(
+      BuildUnsizedDataPacket(&framer, header, frames));
+  EXPECT_TRUE(packet != nullptr);
+  char buffer[kMaxPacketSize];
+  scoped_ptr<QuicEncryptedPacket> encrypted(framer.EncryptPacket(
+      ENCRYPTION_NONE, sequence_number, *packet, buffer, kMaxPacketSize));
+  EXPECT_TRUE(encrypted != nullptr);
+  return encrypted->Clone();
 }
 
 void CompareCharArraysWithHexError(
@@ -659,6 +719,14 @@ QuicConfig DefaultQuicConfig() {
   return config;
 }
 
+QuicConfig DefaultQuicConfigStatelessRejects() {
+  QuicConfig config = DefaultQuicConfig();
+  QuicTagVector copt;
+  copt.push_back(kSREJ);
+  config.SetConnectionOptionsToSend(copt);
+  return config;
+}
+
 QuicVersionVector SupportedVersions(QuicVersion version) {
   QuicVersionVector versions;
   versions.push_back(version);
@@ -708,16 +776,69 @@ WriteResult TestWriterFactory::PerConnectionPacketWriter::WritePacket(
   // in a different way, so TestWriterFactory::OnPacketSent might never be
   // called.
   factory_->current_writer_ = this;
-  return tools::QuicPerConnectionPacketWriter::WritePacket(buffer,
-                                                    buf_len,
-                                                    self_address,
-                                                    peer_address);
+  return tools::QuicPerConnectionPacketWriter::WritePacket(
+      buffer, buf_len, self_address, peer_address);
 }
 
 MockQuicConnectionDebugVisitor::MockQuicConnectionDebugVisitor() {
 }
 
 MockQuicConnectionDebugVisitor::~MockQuicConnectionDebugVisitor() {
+}
+
+void SetupCryptoClientStreamForTest(
+    QuicServerId server_id,
+    bool supports_stateless_rejects,
+    QuicTime::Delta connection_start_time,
+    QuicCryptoClientConfig* crypto_client_config,
+    PacketSavingConnection** client_connection,
+    TestClientSession** client_session,
+    QuicCryptoClientStream** client_stream) {
+  CHECK(crypto_client_config);
+  CHECK(client_connection);
+  CHECK(client_session);
+  CHECK(client_stream);
+  CHECK(!connection_start_time.IsZero())
+      << "Connections must start at non-zero times, otherwise the "
+      << "strike-register will be unhappy.";
+
+  QuicConfig config = supports_stateless_rejects
+                          ? DefaultQuicConfigStatelessRejects()
+                          : DefaultQuicConfig();
+  *client_connection = new PacketSavingConnection(Perspective::IS_CLIENT);
+  *client_session = new TestClientSession(*client_connection, config);
+  *client_stream = new QuicCryptoClientStream(server_id, *client_session,
+                                              nullptr, crypto_client_config);
+  (*client_session)->SetCryptoStream(*client_stream);
+  (*client_connection)->AdvanceTime(connection_start_time);
+}
+
+// Setup or create?
+void SetupCryptoServerStreamForTest(
+    QuicServerId server_id,
+    QuicTime::Delta connection_start_time,
+    QuicCryptoServerConfig* server_crypto_config,
+    PacketSavingConnection** server_connection,
+    TestServerSession** server_session,
+    QuicCryptoServerStream** server_stream) {
+  CHECK(server_crypto_config);
+  CHECK(server_connection);
+  CHECK(server_session);
+  CHECK(server_stream);
+  CHECK(!connection_start_time.IsZero())
+      << "Connections must start at non-zero times, otherwise the "
+      << "strike-register will be unhappy.";
+
+  *server_connection = new PacketSavingConnection(Perspective::IS_SERVER);
+  *server_session =
+      new TestServerSession(DefaultQuicConfig(), *server_connection);
+  *server_stream =
+      new QuicCryptoServerStream(server_crypto_config, *server_session);
+  (*server_session)->InitializeSession(server_crypto_config);
+
+  // We advance the clock initially because the default time is zero and the
+  // strike register worries that we've just overflowed a uint32 time.
+  (*server_connection)->AdvanceTime(connection_start_time);
 }
 
 }  // namespace test

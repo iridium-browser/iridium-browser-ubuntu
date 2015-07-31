@@ -17,7 +17,7 @@ var WebViewInternal = require('webViewInternal').WebViewInternal;
 // Represents the internal state of <webview>.
 function WebViewImpl(webviewElement) {
   GuestViewContainer.call(this, webviewElement, 'webview');
-
+  this.cachedZoom = 1;
   this.setupElementProperties();
   new WebViewEvents(this, this.viewInstanceId);
 }
@@ -92,11 +92,7 @@ WebViewImpl.prototype.setupElementProperties = function() {
   // dynamic getter value.
   Object.defineProperty(this.element, 'contentWindow', {
     get: function() {
-      if (this.guest.getContentWindow()) {
-        return this.guest.getContentWindow();
-      }
-      window.console.error(
-          WebViewConstants.ERROR_MSG_CONTENTWINDOW_NOT_AVAILABLE);
+      return this.guest.getContentWindow();
     }.bind(this),
     // No setter.
     enumerable: true
@@ -172,7 +168,8 @@ WebViewImpl.prototype.onAttach = function(storagePartitionId) {
 };
 
 WebViewImpl.prototype.buildContainerParams = function() {
-  var params = { 'userAgentOverride': this.userAgentOverride };
+  var params = { 'initialZoomFactor': this.cachedZoomFactor,
+                 'userAgentOverride': this.userAgentOverride };
   for (var i in this.attributes) {
     var value = this.attributes[i].getValueIfDirty();
     if (value)

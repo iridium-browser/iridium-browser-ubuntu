@@ -33,6 +33,7 @@ const int kNumMessagesPerApp = 20;
 
 // App name for testing.
 const char kAppName[] = "my_app";
+const char kAppName2[] = "my_app_2";
 
 // Category name for testing.
 const char kCategoryName[] = "my_category";
@@ -610,6 +611,57 @@ TEST_F(GCMStoreImplTest, AccountMapping) {
   EXPECT_EQ(account_mapping2.last_message_id, iter->last_message_id);
 }
 
+TEST_F(GCMStoreImplTest, HeartbeatInterval) {
+  scoped_ptr<GCMStore> gcm_store(BuildGCMStore());
+  scoped_ptr<GCMStore::LoadResult> load_result;
+  gcm_store->Load(base::Bind(
+      &GCMStoreImplTest::LoadCallback, base::Unretained(this), &load_result));
+
+  std::string scope1 = "scope1";
+  std::string scope2 = "scope2";
+  int heartbeat1 = 120 * 1000;
+  int heartbeat2 = 360 * 1000;
+
+  gcm_store->AddHeartbeatInterval(
+      scope1,
+      heartbeat1,
+      base::Bind(&GCMStoreImplTest::UpdateCallback, base::Unretained(this)));
+  PumpLoop();
+  gcm_store->AddHeartbeatInterval(
+      scope2,
+      heartbeat2,
+      base::Bind(&GCMStoreImplTest::UpdateCallback, base::Unretained(this)));
+  PumpLoop();
+
+  gcm_store = BuildGCMStore().Pass();
+  gcm_store->Load(base::Bind(
+      &GCMStoreImplTest::LoadCallback, base::Unretained(this), &load_result));
+  PumpLoop();
+
+  EXPECT_EQ(2UL, load_result->heartbeat_intervals.size());
+  ASSERT_TRUE(load_result->heartbeat_intervals.find(scope1) !=
+              load_result->heartbeat_intervals.end());
+  EXPECT_EQ(heartbeat1, load_result->heartbeat_intervals[scope1]);
+  ASSERT_TRUE(load_result->heartbeat_intervals.find(scope2) !=
+              load_result->heartbeat_intervals.end());
+  EXPECT_EQ(heartbeat2, load_result->heartbeat_intervals[scope2]);
+
+  gcm_store->RemoveHeartbeatInterval(
+      scope2,
+      base::Bind(&GCMStoreImplTest::UpdateCallback, base::Unretained(this)));
+  PumpLoop();
+
+  gcm_store = BuildGCMStore().Pass();
+  gcm_store->Load(base::Bind(
+      &GCMStoreImplTest::LoadCallback, base::Unretained(this), &load_result));
+  PumpLoop();
+
+  EXPECT_EQ(1UL, load_result->heartbeat_intervals.size());
+  ASSERT_TRUE(load_result->heartbeat_intervals.find(scope1) !=
+              load_result->heartbeat_intervals.end());
+  EXPECT_EQ(heartbeat1, load_result->heartbeat_intervals[scope1]);
+}
+
 // When the database is destroyed, all database updates should fail. At the
 // same time, they per-app message counts should not go up, as failures should
 // result in decrementing the counts.
@@ -688,6 +740,56 @@ TEST_F(GCMStoreImplTest, LastTokenFetchTime) {
       &GCMStoreImplTest::LoadCallback, base::Unretained(this), &load_result));
   PumpLoop();
   EXPECT_EQ(base::Time(), load_result->last_token_fetch_time);
+}
+
+TEST_F(GCMStoreImplTest, InstanceIDData) {
+  scoped_ptr<GCMStore> gcm_store(BuildGCMStore());
+  scoped_ptr<GCMStore::LoadResult> load_result;
+  gcm_store->Load(base::Bind(
+      &GCMStoreImplTest::LoadCallback, base::Unretained(this), &load_result));
+  PumpLoop();
+
+  std::string instance_id_data("Foo");
+  gcm_store->AddInstanceIDData(
+      kAppName,
+      instance_id_data,
+      base::Bind(&GCMStoreImplTest::UpdateCallback, base::Unretained(this)));
+  PumpLoop();
+
+  std::string instance_id_data2("Hello Instance ID");
+  gcm_store->AddInstanceIDData(
+      kAppName2,
+      instance_id_data2,
+      base::Bind(&GCMStoreImplTest::UpdateCallback, base::Unretained(this)));
+  PumpLoop();
+
+  gcm_store = BuildGCMStore().Pass();
+  gcm_store->Load(base::Bind(
+      &GCMStoreImplTest::LoadCallback, base::Unretained(this), &load_result));
+  PumpLoop();
+
+  ASSERT_EQ(2u, load_result->instance_id_data.size());
+  ASSERT_TRUE(load_result->instance_id_data.find(kAppName) !=
+              load_result->instance_id_data.end());
+  ASSERT_TRUE(load_result->instance_id_data.find(kAppName2) !=
+              load_result->instance_id_data.end());
+  EXPECT_EQ(instance_id_data, load_result->instance_id_data[kAppName]);
+  EXPECT_EQ(instance_id_data2, load_result->instance_id_data[kAppName2]);
+
+  gcm_store->RemoveInstanceIDData(
+      kAppName,
+      base::Bind(&GCMStoreImplTest::UpdateCallback, base::Unretained(this)));
+  PumpLoop();
+
+  gcm_store = BuildGCMStore().Pass();
+  gcm_store->Load(base::Bind(
+      &GCMStoreImplTest::LoadCallback, base::Unretained(this), &load_result));
+  PumpLoop();
+
+  ASSERT_EQ(1u, load_result->instance_id_data.size());
+  ASSERT_TRUE(load_result->instance_id_data.find(kAppName2) !=
+              load_result->instance_id_data.end());
+  EXPECT_EQ(instance_id_data2, load_result->instance_id_data[kAppName2]);
 }
 
 }  // namespace

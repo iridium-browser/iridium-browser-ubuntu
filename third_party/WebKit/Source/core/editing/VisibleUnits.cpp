@@ -34,6 +34,7 @@
 #include "core/dom/NodeTraversal.h"
 #include "core/dom/Position.h"
 #include "core/dom/Text.h"
+#include "core/editing/FrameSelection.h"
 #include "core/editing/RenderedPosition.h"
 #include "core/editing/VisiblePosition.h"
 #include "core/editing/htmlediting.h"
@@ -42,9 +43,13 @@
 #include "core/editing/iterators/SimplifiedBackwardsTextIterator.h"
 #include "core/editing/iterators/TextIterator.h"
 #include "core/html/HTMLBRElement.h"
+#include "core/layout/HitTestRequest.h"
+#include "core/layout/HitTestResult.h"
 #include "core/layout/LayoutBlockFlow.h"
 #include "core/layout/LayoutObject.h"
+#include "core/layout/LayoutView.h"
 #include "core/layout/line/InlineTextBox.h"
+#include "core/paint/DeprecatedPaintLayer.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/heap/Handle.h"
 #include "platform/text/TextBoundaries.h"
@@ -404,11 +409,11 @@ static VisiblePosition visualWordPosition(const VisiblePosition& visiblePosition
         bool movingBackward = (direction == MoveLeft && box->direction() == LTR) || (direction == MoveRight && box->direction() == RTL);
         if ((skipsSpaceWhenMovingRight && boxHasSameDirectionalityAsBlock)
             || (!skipsSpaceWhenMovingRight && movingBackward)) {
-            bool logicalStartInRenderer = offsetInBox == static_cast<int>(textBox->start()) && previousBoxInDifferentBlock;
-            isWordBreak = isLogicalStartOfWord(iter, offsetInIterator, logicalStartInRenderer);
+            bool logicalStartInLayoutObject = offsetInBox == static_cast<int>(textBox->start()) && previousBoxInDifferentBlock;
+            isWordBreak = isLogicalStartOfWord(iter, offsetInIterator, logicalStartInLayoutObject);
         } else {
-            bool logicalEndInRenderer = offsetInBox == static_cast<int>(textBox->start() + textBox->len()) && nextBoxInDifferentBlock;
-            isWordBreak = islogicalEndOfWord(iter, offsetInIterator, logicalEndInRenderer);
+            bool logicalEndInLayoutObject = offsetInBox == static_cast<int>(textBox->start() + textBox->len()) && nextBoxInDifferentBlock;
+            isWordBreak = islogicalEndOfWord(iter, offsetInIterator, logicalEndInLayoutObject);
         }
 
         if (isWordBreak)
@@ -472,7 +477,7 @@ static VisiblePosition previousBoundary(const VisiblePosition& c, BoundarySearch
         TextIterator forwardsIterator(forwardsScanRange->startPosition(), forwardsScanRange->endPosition());
         while (!forwardsIterator.atEnd()) {
             Vector<UChar, 1024> characters;
-            forwardsIterator.appendTextTo(characters);
+            forwardsIterator.text().appendTextTo(characters);
             int i = endOfFirstWordBoundaryContext(characters.data(), characters.size());
             string.append(characters.data(), i);
             suffixLength += i;
@@ -570,7 +575,7 @@ static VisiblePosition nextBoundary(const VisiblePosition& c, BoundarySearchFunc
         // returns an end value not equal to the length of the string passed to it.
         bool inTextSecurityMode = it.node() && it.node()->layoutObject() && it.node()->layoutObject()->style()->textSecurity() != TSNONE;
         if (!inTextSecurityMode)
-            it.appendTextTo(string);
+            it.text().appendTextTo(string);
         else {
             // Treat bullets used in the text security mode as regular characters when looking for boundaries
             Vector<UChar, 1024> iteratorString;
@@ -924,8 +929,8 @@ VisiblePosition previousLinePosition(const VisiblePosition &visiblePosition, Lay
 
     node->document().updateLayoutIgnorePendingStylesheets();
 
-    LayoutObject* renderer = node->layoutObject();
-    if (!renderer)
+    LayoutObject* layoutObject = node->layoutObject();
+    if (!layoutObject)
         return VisiblePosition();
 
     RootInlineBox* root = 0;
@@ -953,11 +958,11 @@ VisiblePosition previousLinePosition(const VisiblePosition &visiblePosition, Lay
     if (root) {
         // FIXME: Can be wrong for multi-column layout and with transforms.
         LayoutPoint pointInLine = absoluteLineDirectionPointToLocalPointInBlock(root, lineDirectionPoint);
-        LayoutObject& renderer = root->closestLeafChildForPoint(pointInLine, isEditablePosition(p))->layoutObject();
-        Node* node = renderer.node();
+        LayoutObject& layoutObject = root->closestLeafChildForPoint(pointInLine, isEditablePosition(p))->layoutObject();
+        Node* node = layoutObject.node();
         if (node && editingIgnoresContent(node))
             return VisiblePosition(positionInParentBeforeNode(*node));
-        return VisiblePosition(renderer.positionForPoint(pointInLine));
+        return VisiblePosition(layoutObject.positionForPoint(pointInLine));
     }
 
     // Could not find a previous line. This means we must already be on the first line.
@@ -979,8 +984,8 @@ VisiblePosition nextLinePosition(const VisiblePosition &visiblePosition, LayoutU
 
     node->document().updateLayoutIgnorePendingStylesheets();
 
-    LayoutObject* renderer = node->layoutObject();
-    if (!renderer)
+    LayoutObject* layoutObject = node->layoutObject();
+    if (!layoutObject)
         return VisiblePosition();
 
     RootInlineBox* root = 0;
@@ -1011,11 +1016,11 @@ VisiblePosition nextLinePosition(const VisiblePosition &visiblePosition, LayoutU
     if (root) {
         // FIXME: Can be wrong for multi-column layout and with transforms.
         LayoutPoint pointInLine = absoluteLineDirectionPointToLocalPointInBlock(root, lineDirectionPoint);
-        LayoutObject& renderer = root->closestLeafChildForPoint(pointInLine, isEditablePosition(p))->layoutObject();
-        Node* node = renderer.node();
+        LayoutObject& layoutObject = root->closestLeafChildForPoint(pointInLine, isEditablePosition(p))->layoutObject();
+        Node* node = layoutObject.node();
         if (node && editingIgnoresContent(node))
             return VisiblePosition(positionInParentBeforeNode(*node));
-        return VisiblePosition(renderer.positionForPoint(pointInLine));
+        return VisiblePosition(layoutObject.positionForPoint(pointInLine));
     }
 
     // Could not find a next line. This means we must already be on the last line.
@@ -1124,7 +1129,7 @@ VisiblePosition startOfParagraph(const VisiblePosition& c, EditingBoundaryCrossi
         if (r->isBR() || isBlock(n))
             break;
 
-        if (r->isText() && toLayoutText(r)->renderedTextLength()) {
+        if (r->isText() && toLayoutText(r)->resolvedTextLength()) {
             ASSERT_WITH_SECURITY_IMPLICATION(n->isTextNode());
             type = Position::PositionIsOffsetInAnchor;
             if (style.preserveNewline()) {
@@ -1203,8 +1208,8 @@ VisiblePosition endOfParagraph(const VisiblePosition &c, EditingBoundaryCrossing
         if (r->isBR() || isBlock(n))
             break;
 
-        // FIXME: We avoid returning a position where the renderer can't accept the caret.
-        if (r->isText() && toLayoutText(r)->renderedTextLength()) {
+        // FIXME: We avoid returning a position where the layoutObject can't accept the caret.
+        if (r->isText() && toLayoutText(r)->resolvedTextLength()) {
             ASSERT_WITH_SECURITY_IMPLICATION(n->isTextNode());
             int length = toLayoutText(r)->textLength();
             type = Position::PositionIsOffsetInAnchor;
@@ -1390,16 +1395,16 @@ VisiblePosition rightBoundaryOfLine(const VisiblePosition& c, TextDirection dire
     return direction == LTR ? logicalEndOfLine(c) : logicalStartOfLine(c);
 }
 
-LayoutRect localCaretRectOfPosition(const PositionWithAffinity& position, LayoutObject*& renderer)
+LayoutRect localCaretRectOfPosition(const PositionWithAffinity& position, LayoutObject*& layoutObject)
 {
     if (position.position().isNull()) {
-        renderer = nullptr;
+        layoutObject = nullptr;
         return LayoutRect();
     }
     Node* node = position.position().anchorNode();
 
-    renderer = node->layoutObject();
-    if (!renderer)
+    layoutObject = node->layoutObject();
+    if (!layoutObject)
         return LayoutRect();
 
     InlineBox* inlineBox;
@@ -1407,9 +1412,20 @@ LayoutRect localCaretRectOfPosition(const PositionWithAffinity& position, Layout
     position.position().getInlineBoxAndOffset(position.affinity(), inlineBox, caretOffset);
 
     if (inlineBox)
-        renderer = &inlineBox->layoutObject();
+        layoutObject = &inlineBox->layoutObject();
 
-    return renderer->localCaretRect(inlineBox, caretOffset);
+    return layoutObject->localCaretRect(inlineBox, caretOffset);
+}
+
+VisiblePosition visiblePositionForContentsPoint(const IntPoint& contentsPoint, LocalFrame* frame)
+{
+    HitTestRequest request = HitTestRequest::Move | HitTestRequest::ReadOnly | HitTestRequest::Active | HitTestRequest::IgnoreClipping;
+    HitTestResult result(request, contentsPoint);
+    frame->document()->layoutView()->hitTest(result);
+
+    if (Node* node = result.innerNode())
+        return frame->selection().selection().visiblePositionRespectingEditingBoundary(result.localPoint(), node);
+    return VisiblePosition();
 }
 
 }

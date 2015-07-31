@@ -251,7 +251,7 @@ class RealHttpFetch(object):
           logging.warning(
               'Response header in wrong format [%s]', line)
           continue
-        name, value = name_value
+        name, value = name_value  # pylint: disable=unpacking-non-sequence
       all_headers.append((name, value))
     return all_headers
 
@@ -294,7 +294,7 @@ class RealHttpFetch(object):
     if is_ssl:
       connection = DetailedHTTPSConnection(connection_ip, connection_port)
       if system_proxy:
-        connection.set_tunnel(self, request_host, request_port)
+        connection.set_tunnel(request_host, request_port)
     else:
       connection = DetailedHTTPConnection(connection_ip, connection_port)
     return connection

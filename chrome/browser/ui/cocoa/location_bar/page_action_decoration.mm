@@ -39,8 +39,8 @@ PageActionDecoration::PageActionDecoration(
           page_action->extension_id());
   DCHECK(extension);
 
-  viewController_.reset(
-      new ExtensionActionViewController(extension, browser, page_action));
+  viewController_.reset(new ExtensionActionViewController(
+      extension, browser, page_action, nullptr));
   viewController_->SetDelegate(this);
 
   // We set the owner last of all so that we can determine whether we are in
@@ -144,20 +144,19 @@ void PageActionDecoration::SetToolTip(const base::string16& tooltip) {
   tooltip_.reset([nsTooltip retain]);
 }
 
-ToolbarActionViewController*
-PageActionDecoration::GetPreferredPopupViewController() {
-  return viewController_.get();
-}
-
 content::WebContents* PageActionDecoration::GetCurrentWebContents() const {
+  // If we have no owner, that means this class is still being constructed.
   return owner_ ? owner_->GetWebContents() : nullptr;
 }
 
 void PageActionDecoration::UpdateState() {
-  // If we have no owner, that means this class is still being constructed.
-  WebContents* web_contents = owner_ ? owner_->GetWebContents() : NULL;
+  WebContents* web_contents = GetCurrentWebContents();
   if (web_contents) {
     UpdateVisibility(web_contents);
     owner_->RedrawDecoration(this);
   }
+}
+
+bool PageActionDecoration::IsMenuRunning() const {
+  return contextMenuController_.get() && [contextMenuController_ isMenuOpen];
 }

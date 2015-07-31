@@ -55,18 +55,6 @@ DEFINE_TRACE(SVGForeignObjectElement)
 
 DEFINE_NODE_FACTORY(SVGForeignObjectElement)
 
-bool SVGForeignObjectElement::isSupportedAttribute(const QualifiedName& attrName)
-{
-    DEFINE_STATIC_LOCAL(HashSet<QualifiedName>, supportedAttributes, ());
-    if (supportedAttributes.isEmpty()) {
-        supportedAttributes.add(SVGNames::xAttr);
-        supportedAttributes.add(SVGNames::yAttr);
-        supportedAttributes.add(SVGNames::widthAttr);
-        supportedAttributes.add(SVGNames::heightAttr);
-    }
-    return supportedAttributes.contains<SVGAttributeHashTranslator>(attrName);
-}
-
 bool SVGForeignObjectElement::isPresentationAttribute(const QualifiedName& name) const
 {
     if (name == SVGNames::xAttr || name == SVGNames::yAttr
@@ -100,26 +88,25 @@ void SVGForeignObjectElement::collectStyleForPresentationAttribute(const Qualifi
 
 void SVGForeignObjectElement::svgAttributeChanged(const QualifiedName& attrName)
 {
-    if (!isSupportedAttribute(attrName)) {
-        SVGGraphicsElement::svgAttributeChanged(attrName);
-        return;
-    }
-
-    SVGElement::InvalidationGuard invalidationGuard(this);
-
     bool isWidthHeightAttribute = attrName == SVGNames::widthAttr
         || attrName == SVGNames::heightAttr;
     bool isXYAttribute = attrName == SVGNames::xAttr || attrName == SVGNames::yAttr;
 
     if (isXYAttribute || isWidthHeightAttribute) {
+        SVGElement::InvalidationGuard invalidationGuard(this);
+
         invalidateSVGPresentationAttributeStyle();
         setNeedsStyleRecalc(LocalStyleChange,
             isWidthHeightAttribute ? StyleChangeReasonForTracing::create(StyleChangeReason::SVGContainerSizeChange) : StyleChangeReasonForTracing::fromAttribute(attrName));
 
         updateRelativeLengthsInformation();
-        if (LayoutObject* renderer = this->layoutObject())
-            markForLayoutAndParentResourceInvalidation(renderer);
+        if (LayoutObject* layoutObject = this->layoutObject())
+            markForLayoutAndParentResourceInvalidation(layoutObject);
+
+        return;
     }
+
+    SVGGraphicsElement::svgAttributeChanged(attrName);
 }
 
 LayoutObject* SVGForeignObjectElement::createLayoutObject(const ComputedStyle&)
@@ -129,7 +116,7 @@ LayoutObject* SVGForeignObjectElement::createLayoutObject(const ComputedStyle&)
 
 bool SVGForeignObjectElement::layoutObjectIsNeeded(const ComputedStyle& style)
 {
-    // Suppress foreignObject renderers in SVG hidden containers.
+    // Suppress foreignObject layoutObjects in SVG hidden containers.
     // (https://bugs.webkit.org/show_bug.cgi?id=87297)
     // Note that we currently do not support foreignObject instantiation via <use>, hence it is safe
     // to use parentElement() here. If that changes, this method should be updated to use

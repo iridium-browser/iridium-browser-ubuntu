@@ -33,27 +33,31 @@
 // access Bluetooth devices (requestDevice).
 // """
 //
-// From: Device Discovery:
+// From: Per-origin Bluetooth device properties:
 // """
-// The UA must maintain an allowed devices list for each origin, storing a set
-// of Bluetooth devices the origin is allowed to access. For each device in the
-// allowed devices list for an origin, the UA must maintain an allowed services
-// list consisting of UUIDs for GATT Primary Services the origin is allowed to
-// access on the device. The UA may remove devices from the allowed devices list
-// at any time based on signals from the user. For example, if the user chooses
-// not to remember access, the UA might remove a device when the tab that was
-// granted access to it is closed. Or the UA might provide a revocation UI that
-// allows the user to explicitly remove a device even while a tab is actively
-// using that device. If a device is removed from this list while a Promise is
-// pending to do something with the device, it must be treated the same as if
-// the device moved out of Bluetooth range.
+// For each origin, the UA must maintain an allowed devices map, whose keys are
+// the Bluetooth devices the origin is allowed to access, and whose values are
+// pairs of a DOMString device id and an allowed services list consisting of
+// UUIDs for GATT Primary Services the origin is allowed to access on the
+// device.
+//
+// The UA may remove devices from the allowed devices map at any time based on
+// signals from the user. This needs a definition involving removing
+// BluetoothDevice instances from device instance maps and clearing out their
+// [[representedDevice]] fields. For example, if the user chooses not to
+// remember access, the UA might remove a device when the tab that was granted
+// access to it is closed. Or the UA might provide a revocation UI that allows
+// the user to explicitly remove a device even while a tab is actively using
+// that device. If a device is removed from this list while a Promise is pending
+// to do something with the device, it must be treated the same as if the device
+// moved out of Bluetooth range.
 // """
 //
 // From: Device Discovery: requestDevice
 // http://webbluetoothcg.github.io/web-bluetooth/#device-discovery
 // """
-// Display a prompt to the user requesting that the user specify some devices
-// from the result of the scan. The UA should show the user the human-readable
+// Even if scanResult is empty, display a prompt to the user requesting that the
+// user select a device from it. The UA should show the user the human-readable
 // name of each device. If this name is not available because the UA's Bluetooth
 // system doesn't support privacy-enabled scans, the UA should allow the user to
 // indicate interest and then perform a privacy-disabled scan to retrieve the
@@ -62,20 +66,16 @@
 // The UA may allow the user to select a nearby device that does not match
 // filters.
 //
-// Wait for the user to have made their selection.
+// Wait for the user to have selected a device or cancelled the prompt.
 //
-// If the user cancels the prompt, reject the Promise with a NotFoundError and
-// abort these steps.
+// If the user cancels the prompt, reject promise with a NotFoundError and abort
+// these steps.
 //
-// Record the selected device in the origin's allowed devices list and the union
-// of the service UUIDs from filters and options.optionalServices in the device
-// and origin's allowed services list.
+// Add device to the origin's allowed devices map. with the union of the service
+// UUIDs from filters and options.optionalServices as allowed services.
 //
-// Connect to the device. ([BLUETOOTH41] 3.G.6.2.1) If the connection fails,
-// reject the Promise with a NetworkError and abort these steps.
-//
-// Resolve the Promise with a BluetoothDevice instance representing the selected
-// device.
+// Get the BluetoothDevice representing device and resolve promise with the
+// result.
 // """
 
 #include "ipc/ipc_message_macros.h"
@@ -97,7 +97,6 @@ IPC_STRUCT_TRAITS_MEMBER(vendor_id)
 IPC_STRUCT_TRAITS_MEMBER(product_id)
 IPC_STRUCT_TRAITS_MEMBER(product_version)
 IPC_STRUCT_TRAITS_MEMBER(paired)
-IPC_STRUCT_TRAITS_MEMBER(connected)
 IPC_STRUCT_TRAITS_MEMBER(uuids)
 IPC_STRUCT_TRAITS_END()
 
@@ -118,6 +117,12 @@ IPC_MESSAGE_CONTROL3(BluetoothMsg_RequestDeviceError,
                      int /* request_id */,
                      content::BluetoothError /* result */)
 
+// Informs the renderer that the connection request |request_id| succeeded.
+IPC_MESSAGE_CONTROL3(BluetoothMsg_ConnectGATTSuccess,
+                     int /* thread_id */,
+                     int /* request_id */,
+                     std::string /* device_instance_id */)
+
 // Messages sent from the renderer to the browser.
 
 // Requests a bluetooth device from the browser.
@@ -130,6 +135,12 @@ IPC_MESSAGE_CONTROL3(BluetoothMsg_RequestDeviceError,
 IPC_MESSAGE_CONTROL2(BluetoothHostMsg_RequestDevice,
                      int /* thread_id */,
                      int /* request_id */)
+
+// Connects to a bluetooth device.
+IPC_MESSAGE_CONTROL3(BluetoothHostMsg_ConnectGATT,
+                     int /* thread_id */,
+                     int /* request_id */,
+                     std::string /* device_instance_id */)
 
 // Configures the mock data set in the browser used while under test.
 // TODO(scheib): Disable testing in non-test executables. crbug.com/436284.

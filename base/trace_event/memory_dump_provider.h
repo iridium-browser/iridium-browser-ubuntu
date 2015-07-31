@@ -6,7 +6,7 @@
 #define BASE_TRACE_EVENT_MEMORY_DUMP_PROVIDER_H_
 
 #include "base/base_export.h"
-#include "base/trace_event/memory_allocator_attributes.h"
+#include "base/macros.h"
 
 namespace base {
 namespace trace_event {
@@ -17,26 +17,15 @@ class ProcessMemoryDump;
 class BASE_EXPORT MemoryDumpProvider {
  public:
   // Called by the MemoryDumpManager when generating memory dumps.
-  // Returns: true if the |pmd| was successfully populated, false otherwise.
-  virtual bool DumpInto(ProcessMemoryDump* pmd) = 0;
-
-  virtual const char* GetFriendlyName() const = 0;
-
-  const MemoryAllocatorDeclaredAttributes& allocator_attributes() const {
-    return allocator_attributes_;
-  }
+  // The embedder should return true if the |pmd| was successfully populated,
+  // false if something went wrong and the dump should be considered invalid.
+  // (Note, the MemoryDumpManager has a fail-safe logic which will disable the
+  // MemoryDumpProvider for the entire trace session if it fails consistently).
+  virtual bool OnMemoryDump(ProcessMemoryDump* pmd) = 0;
 
  protected:
-  MemoryDumpProvider();
-  virtual ~MemoryDumpProvider();
-
-  void DeclareAllocatorAttribute(const MemoryAllocatorDeclaredAttribute& attr);
-
- private:
-  // The map (attribute name -> type) that specifies the semantic of the
-  // extra attributes that the MemoryAllocatorDump(s) produced by this
-  // MemoryDumpProvider will have.
-  MemoryAllocatorDeclaredAttributes allocator_attributes_;
+  MemoryDumpProvider() {}
+  virtual ~MemoryDumpProvider() {}
 
   DISALLOW_COPY_AND_ASSIGN(MemoryDumpProvider);
 };

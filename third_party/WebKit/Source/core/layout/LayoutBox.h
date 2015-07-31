@@ -190,8 +190,8 @@ public:
 
     // FIXME: Currently scrollbars are using int geometry and positioned based on
     // pixelSnappedBorderBoxRect whose size may change when location changes because of
-    // pixel snapping. This function is used to change location of the RenderBox outside
-    // of RenderBox::layout(). Will remove when we use LayoutUnits for scrollbars.
+    // pixel snapping. This function is used to change location of the LayoutBox outside
+    // of LayoutBox::layout(). Will remove when we use LayoutUnits for scrollbars.
     void setLocationAndUpdateOverflowControlsIfNeeded(const LayoutPoint&);
 
     void setSize(const LayoutSize& size)
@@ -291,7 +291,7 @@ public:
     LayoutUnit contentLogicalWidth() const { return style()->isHorizontalWritingMode() ? contentWidth() : contentHeight(); }
     LayoutUnit contentLogicalHeight() const { return style()->isHorizontalWritingMode() ? contentHeight() : contentWidth(); }
 
-    // IE extensions. Used to calculate offsetWidth/Height.  Overridden by inlines (RenderFlow)
+    // IE extensions. Used to calculate offsetWidth/Height.  Overridden by inlines (LayoutFlow)
     // to return the remaining width on a given line (and the height of a single line).
     virtual LayoutUnit offsetWidth() const override { return m_frameRect.width(); }
     virtual LayoutUnit offsetHeight() const override { return m_frameRect.height(); }
@@ -400,8 +400,8 @@ public:
     // include the scrollbar height/width.
     LayoutUnit overrideLogicalContentWidth() const;
     LayoutUnit overrideLogicalContentHeight() const;
-    bool hasOverrideHeight() const;
-    bool hasOverrideWidth() const;
+    bool hasOverrideLogicalContentHeight() const;
+    bool hasOverrideLogicalContentWidth() const;
     void setOverrideLogicalContentHeight(LayoutUnit);
     void setOverrideLogicalContentWidth(LayoutUnit);
     void clearOverrideSize();
@@ -476,6 +476,8 @@ public:
     virtual void mapRectToPaintInvalidationBacking(const LayoutBoxModelObject* paintInvalidationContainer, LayoutRect&, const PaintInvalidationState*) const override;
     virtual void invalidatePaintForOverhangingFloats(bool paintAllDescendants);
 
+    LayoutUnit containingBlockLogicalHeightForGetComputedStyle() const;
+
     virtual LayoutUnit containingBlockLogicalWidthForContent() const override;
     LayoutUnit containingBlockLogicalHeightForContent(AvailableLogicalHeightType) const;
 
@@ -485,6 +487,11 @@ public:
     virtual void updateLogicalWidth();
     void updateLogicalHeight();
     virtual void computeLogicalHeight(LayoutUnit logicalHeight, LayoutUnit logicalTop, LogicalExtentComputedValues&) const;
+    // This function will compute the logical border-box height, without laying out the box. This means that the result
+    // is only "correct" when the height is explicitly specified. This function exists so that intrinsic width calculations
+    // have a way to deal with children that have orthogonal flows.
+    // When there is no explicit height, this function assumes a content height of zero (and returns just border+padding)
+    LayoutUnit computeLogicalHeightWithoutLayout() const;
 
     void computeLogicalWidth(LogicalExtentComputedValues&) const;
 
@@ -505,12 +512,12 @@ public:
     LayoutUnit shrinkLogicalWidthToAvoidFloats(LayoutUnit childMarginStart, LayoutUnit childMarginEnd, const LayoutBlockFlow* cb) const;
 
     LayoutUnit computeLogicalWidthUsing(SizeType, const Length& logicalWidth, LayoutUnit availableLogicalWidth, const LayoutBlock* containingBlock) const;
-    LayoutUnit computeLogicalHeightUsing(const Length& height, LayoutUnit intrinsicContentHeight) const;
-    LayoutUnit computeContentLogicalHeight(const Length& height, LayoutUnit intrinsicContentHeight) const;
-    LayoutUnit computeContentAndScrollbarLogicalHeightUsing(const Length& height, LayoutUnit intrinsicContentHeight) const;
-    LayoutUnit computeReplacedLogicalWidthUsing(const Length& width) const;
+    LayoutUnit computeLogicalHeightUsing(SizeType, const Length& height, LayoutUnit intrinsicContentHeight) const;
+    LayoutUnit computeContentLogicalHeight(SizeType, const Length& height, LayoutUnit intrinsicContentHeight) const;
+    LayoutUnit computeContentAndScrollbarLogicalHeightUsing(SizeType, const Length& height, LayoutUnit intrinsicContentHeight) const;
+    LayoutUnit computeReplacedLogicalWidthUsing(SizeType, const Length& width) const;
     LayoutUnit computeReplacedLogicalWidthRespectingMinMaxWidth(LayoutUnit logicalWidth, ShouldComputePreferred  = ComputeActual) const;
-    LayoutUnit computeReplacedLogicalHeightUsing(const Length& height) const;
+    LayoutUnit computeReplacedLogicalHeightUsing(SizeType, const Length& height) const;
     LayoutUnit computeReplacedLogicalHeightRespectingMinMaxHeight(LayoutUnit logicalHeight) const;
 
     virtual LayoutUnit computeReplacedLogicalWidth(ShouldComputePreferred  = ComputeActual) const;
@@ -558,7 +565,7 @@ public:
 
     // Elements such as the <input> field override this to specify that they are scrollable
     // outside the context of the CSS overflow style
-    virtual bool isIntristicallyScrollable(ScrollbarOrientation orientation) const { return false; }
+    virtual bool isIntrinsicallyScrollable(ScrollbarOrientation orientation) const { return false; }
 
     bool hasUnsplittableScrollingOverflow() const;
     bool isUnsplittableForPagination() const;
@@ -713,6 +720,9 @@ public:
     bool backgroundHasOpaqueTopLayer() const;
 
     void setIntrinsicContentLogicalHeight(LayoutUnit intrinsicContentLogicalHeight) const { m_intrinsicContentLogicalHeight = intrinsicContentLogicalHeight; }
+
+    bool canRenderBorderImage() const;
+
 protected:
     virtual void willBeDestroyed() override;
 
@@ -756,6 +766,10 @@ protected:
     virtual bool hasNonCompositedScrollbars() const override final;
 
 private:
+    bool mustInvalidateBackgroundOrBorderPaintOnHeightChange() const;
+    bool mustInvalidateBackgroundOrBorderPaintOnWidthChange() const;
+    inline bool mustInvalidateFillLayersPaintOnWidthChange(const FillLayer&) const;
+
     void invalidatePaintRectClippedByOldAndNewBounds(const LayoutBoxModelObject& paintInvalidationContainer, const LayoutRect&, const LayoutRect& oldBounds, const LayoutRect& newBounds);
 
     void updateShapeOutsideInfoAfterStyleChange(const ComputedStyle&, const ComputedStyle* oldStyle);
@@ -773,11 +787,11 @@ private:
     LayoutUnit containingBlockLogicalHeightForPositioned(const LayoutBoxModelObject* containingBlock, bool checkForPerpendicularWritingMode = true) const;
 
     void computePositionedLogicalHeight(LogicalExtentComputedValues&) const;
-    void computePositionedLogicalWidthUsing(Length logicalWidth, const LayoutBoxModelObject* containerBlock, TextDirection containerDirection,
+    void computePositionedLogicalWidthUsing(SizeType, Length logicalWidth, const LayoutBoxModelObject* containerBlock, TextDirection containerDirection,
         LayoutUnit containerLogicalWidth, LayoutUnit bordersPlusPadding,
         const Length& logicalLeft, const Length& logicalRight, const Length& marginLogicalLeft,
         const Length& marginLogicalRight, LogicalExtentComputedValues&) const;
-    void computePositionedLogicalHeightUsing(Length logicalHeightLength, const LayoutBoxModelObject* containerBlock,
+    void computePositionedLogicalHeightUsing(SizeType, Length logicalHeightLength, const LayoutBoxModelObject* containerBlock,
         LayoutUnit containerLogicalHeight, LayoutUnit bordersPlusPadding, LayoutUnit logicalHeight,
         const Length& logicalTop, const Length& logicalBottom, const Length& marginLogicalTop,
         const Length& marginLogicalBottom, LogicalExtentComputedValues&) const;
@@ -906,8 +920,8 @@ inline void LayoutBox::setInlineBoxWrapper(InlineBox* boxWrapper)
     if (boxWrapper) {
         ASSERT(!inlineBoxWrapper());
         // m_inlineBoxWrapper should already be 0. Deleting it is a safeguard against security issues.
-        // Otherwise, there will two line box wrappers keeping the reference to this renderer, and
-        // only one will be notified when the renderer is getting destroyed. The second line box wrapper
+        // Otherwise, there will two line box wrappers keeping the reference to this layoutObject, and
+        // only one will be notified when the layoutObject is getting destroyed. The second line box wrapper
         // will keep a stale reference.
         if (UNLIKELY(inlineBoxWrapper() != 0))
             deleteLineBoxWrapper();

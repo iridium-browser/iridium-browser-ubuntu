@@ -82,9 +82,6 @@ BMPImageReader::BMPImageReader(ImageDecoder* parent, size_t decodedAndHeaderOffs
     , m_isInICO(isInICO)
     , m_decodingAndMask(false)
 {
-    for (size_t i = 0; i < arraysize(m_bitMasks); i++)
-        m_bitMasks[i] = 0;
-
     // Clue-in decodeBMP() that we need to detect the correct info header size.
     memset(&m_infoHeader, 0, sizeof(m_infoHeader));
 }
@@ -131,18 +128,12 @@ bool BMPImageReader::decodeBMP(bool onlySize)
     }
 
     // Decode the data.
-    if (!m_decodingAndMask && !pastEndOfImage(0)) {
-        if ((m_infoHeader.biCompression != RLE4) && (m_infoHeader.biCompression != RLE8) && (m_infoHeader.biCompression != RLE24)) {
-            const ProcessingResult result = processNonRLEData(false, 0);
-            if (result != Success)
-                return (result == Failure) ? m_parent->setFailed() : false;
-        } else if (!processRLEData())
-            return false;
-    }
+    if (!m_decodingAndMask && !pastEndOfImage(0) && !decodePixelData((m_infoHeader.biCompression != RLE4) && (m_infoHeader.biCompression != RLE8) && (m_infoHeader.biCompression != RLE24)))
+        return false;
 
     // If the image has an AND mask and there was no alpha data, process the
     // mask.
-    if (m_isInICO && !m_decodingAndMask && (!m_bitMasks[3] || !m_seenNonZeroAlphaPixel)) {
+    if (m_isInICO && !m_decodingAndMask && ((m_infoHeader.biBitCount < 16) || !m_bitMasks[3] || !m_seenNonZeroAlphaPixel)) {
         // Reset decoding coordinates to start of image.
         m_coord.setX(0);
         m_coord.setY(m_isTopDown ? 0 : (m_parent->size().height() - 1));
@@ -152,15 +143,21 @@ bool BMPImageReader::decodeBMP(bool onlySize)
 
         m_decodingAndMask = true;
     }
-    if (m_decodingAndMask) {
-        const ProcessingResult result = processNonRLEData(false, 0);
-        if (result != Success)
-            return (result == Failure) ? m_parent->setFailed() : false;
-    }
+    if (m_decodingAndMask && !decodePixelData(true))
+        return false;
 
     // Done!
     m_buffer->setStatus(ImageFrame::FrameComplete);
     return true;
+}
+
+bool BMPImageReader::decodePixelData(bool nonRLE)
+{
+    const IntPoint coord(m_coord);
+    const ProcessingResult result = nonRLE ? processNonRLEData(false, 0) : processRLEData();
+    if (m_coord != coord)
+        m_buffer->setPixelsChanged(true);
+    return (result == Failure) ? m_parent->setFailed() : (result == Success);
 }
 
 bool BMPImageReader::readInfoHeaderSize()
@@ -562,10 +559,10 @@ bool BMPImageReader::processColorTable()
     return true;
 }
 
-bool BMPImageReader::processRLEData()
+BMPImageReader::ProcessingResult BMPImageReader::processRLEData()
 {
     if (m_decodedOffset > m_data->size())
-        return false;
+        return InsufficientData;
 
     // RLE decoding is poorly specified.  Two main problems:
     // (1) Are EOL markers necessary?  What happens when we have too many
@@ -593,14 +590,14 @@ bool BMPImageReader::processRLEData()
         // Every entry takes at least two bytes; bail if there isn't enough
         // data.
         if ((m_data->size() - m_decodedOffset) < 2)
-            return false;
+            return InsufficientData;
 
         // For every entry except EOF, we'd better not have reached the end of
         // the image.
         const uint8_t count = m_data->data()[m_decodedOffset];
         const uint8_t code = m_data->data()[m_decodedOffset + 1];
         if ((count || (code != 1)) && pastEndOfImage(0))
-            return m_parent->setFailed();
+            return Failure;
 
         // Decode.
         if (!count) {
@@ -618,13 +615,17 @@ bool BMPImageReader::processRLEData()
                 // Skip any remaining pixels in the image.
                 if ((m_coord.x() < m_parent->size().width()) || (m_isTopDown ? (m_coord.y() < (m_parent->size().height() - 1)) : (m_coord.y() > 0)))
                     m_buffer->setHasAlpha(true);
-                return true;
+                // There's no need to move |m_coord| here to trigger the caller
+                // to call setPixelsChanged().  If the only thing that's changed
+                // is the alpha state, that will be properly written into the
+                // underlying SkBitmap when we mark the frame complete.
+                return Success;
 
             case 2: {  // Magic token: Delta
                 // The next two bytes specify dx and dy.  Bail if there isn't
                 // enough data.
                 if ((m_data->size() - m_decodedOffset) < 4)
-                    return false;
+                    return InsufficientData;
 
                 // Fail if this takes us past the end of the desired row or
                 // past the end of the image.
@@ -633,7 +634,7 @@ bool BMPImageReader::processRLEData()
                 if (dx || dy)
                     m_buffer->setHasAlpha(true);
                 if (((m_coord.x() + dx) > m_parent->size().width()) || pastEndOfImage(dy))
-                    return m_parent->setFailed();
+                    return Failure;
 
                 // Skip intervening pixels.
                 m_coord.move(dx, m_isTopDown ? dy : -dy);
@@ -650,11 +651,9 @@ bool BMPImageReader::processRLEData()
                 // the escape bytes and then reset if decoding failed.
                 m_decodedOffset += 2;
                 const ProcessingResult result = processNonRLEData(true, code);
-                if (result == Failure)
-                    return m_parent->setFailed();
-                if (result == InsufficientData) {
+                if (result != Success) {
                     m_decodedOffset -= 2;
-                    return false;
+                    return result;
                 }
                 break;
             }
@@ -668,7 +667,7 @@ bool BMPImageReader::processRLEData()
             if (m_infoHeader.biCompression == RLE24) {
                 // Bail if there isn't enough data.
                 if ((m_data->size() - m_decodedOffset) < 4)
-                    return false;
+                    return InsufficientData;
 
                 // One BGR triple that we copy |count| times.
                 fillRGBA(endX, m_data->data()[m_decodedOffset + 3], m_data->data()[m_decodedOffset + 2], code, 0xff);

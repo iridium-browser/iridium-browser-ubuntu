@@ -11,18 +11,18 @@
 #include "ash/shell_window_ids.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/test/cursor_manager_test_api.h"
+#include "ash/test/display_manager_test_api.h"
 #include "ash/wm/drag_window_controller.h"
 #include "ash/wm/window_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "ui/aura/client/aura_constants.h"
+#include "ui/aura/env.h"
 #include "ui/aura/test/test_window_delegate.h"
-#include "ui/aura/window_event_dispatcher.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/compositor/layer_tree_owner.h"
 #include "ui/gfx/geometry/insets.h"
-#include "ui/gfx/screen.h"
 #include "ui/views/widget/widget.h"
 #include "ui/wm/core/window_util.h"
 
@@ -121,13 +121,9 @@ class DragWindowResizerTest : public test::AshTestBase {
         aura::client::WINDOW_MOVE_SOURCE_MOUSE).release();
   }
 
-  bool WarpMouseCursorIfNecessary(aura::Window* target_root,
-                                  const gfx::Point& point_in_screen) {
-    MouseCursorEventFilter* event_filter =
-        Shell::GetInstance()->mouse_cursor_filter();
-    bool is_warped = event_filter->WarpMouseCursorIfNecessaryForTest(
-        target_root, point_in_screen);
-    return is_warped;
+  bool TestIfMouseWarpsAt(const gfx::Point& point_in_screen) {
+    return test::DisplayManagerTestApi::TestIfMouseWarpsAt(GetEventGenerator(),
+                                                           point_in_screen);
   }
 
   aura::test::TestWindowDelegate delegate_;
@@ -181,19 +177,19 @@ TEST_F(DragWindowResizerTest, WindowDragWithMultiDisplays) {
                              Shell::GetScreen()->GetPrimaryDisplay());
   EXPECT_EQ(root_windows[0], window_->GetRootWindow());
   {
-    // Grab (0, 0) of the window and move the pointer to (790, 10).
+    // Grab (0, 0) of the window and move the pointer to (775, 10).
     scoped_ptr<WindowResizer> resizer(CreateDragWindowResizer(
         window_.get(), gfx::Point(), HTCAPTION));
     ASSERT_TRUE(resizer.get());
     resizer->Drag(CalculateDragPoint(*resizer, 795, 10), 0);
-    // Window should be adjusted for minimum visibility (10px) during the drag.
-    EXPECT_EQ("790,10 50x60", window_->bounds().ToString());
+    // Window should be adjusted for minimum visibility (25px) during the drag.
+    EXPECT_EQ("775,10 50x60", window_->bounds().ToString());
     resizer->CompleteDrag();
     // Since the pointer is still on the primary root window, the parent should
     // not be changed.
-    // Window origin should be adjusted for minimum visibility (10px).
+    // Window origin should be adjusted for minimum visibility (25px).
     EXPECT_EQ(root_windows[0], window_->GetRootWindow());
-    EXPECT_EQ("790,10 50x60", window_->bounds().ToString());
+    EXPECT_EQ("775,10 50x60", window_->bounds().ToString());
   }
 
   window_->SetBoundsInScreen(gfx::Rect(0, 0, 50, 60),
@@ -211,8 +207,9 @@ TEST_F(DragWindowResizerTest, WindowDragWithMultiDisplays) {
     // even though only small fraction of the window is within the secondary
     // root window's bounds.
     EXPECT_EQ(root_windows[1], window_->GetRootWindow());
-    // Window origin should be adjusted for minimum visibility (10px).
-    int expected_x = -50 + 10;
+    // Window origin should be adjusted for minimum visibility (25px).
+    int expected_x = -50 + kMinimumOnScreenArea;
+
     EXPECT_EQ(base::IntToString(expected_x) + ",10 50x60",
               window_->bounds().ToString());
   }
@@ -330,10 +327,8 @@ TEST_F(DragWindowResizerTest, WindowDragWithMultiDisplaysRightToLeft) {
     resizer->Drag(CalculateDragPoint(*resizer, -2, 0), ui::EF_CONTROL_DOWN);
     resizer->CompleteDrag();
     EXPECT_EQ(root_windows[0], window_->GetRootWindow());
-    // Window origin should be adjusted for minimum visibility (10px).
-    int expected_x = 800 - 10;
-    EXPECT_EQ(base::IntToString(expected_x) + ",0 50x60",
-              window_->bounds().ToString());
+    // Window origin should be adjusted for minimum visibility (25px).
+    EXPECT_EQ("775,0 50x60", window_->bounds().ToString());
   }
 }
 
@@ -427,49 +422,40 @@ TEST_F(DragWindowResizerTest, WarpMousePointer) {
   ASSERT_TRUE(event_filter);
   window_->SetBounds(gfx::Rect(0, 0, 50, 60));
 
-  EXPECT_EQ(MouseCursorEventFilter::WARP_ALWAYS,
-            event_filter->mouse_warp_mode_);
+  EXPECT_TRUE(event_filter->mouse_warp_enabled_);
   {
     scoped_ptr<WindowResizer> resizer(CreateDragWindowResizer(
         window_.get(), gfx::Point(), HTCAPTION));
     // While dragging a window, warp should be allowed.
-    EXPECT_EQ(MouseCursorEventFilter::WARP_DRAG,
-              event_filter->mouse_warp_mode_);
+    EXPECT_TRUE(event_filter->mouse_warp_enabled_);
     resizer->CompleteDrag();
   }
-  EXPECT_EQ(MouseCursorEventFilter::WARP_ALWAYS,
-            event_filter->mouse_warp_mode_);
+  EXPECT_TRUE(event_filter->mouse_warp_enabled_);
 
   {
     scoped_ptr<WindowResizer> resizer(CreateDragWindowResizer(
         window_.get(), gfx::Point(), HTCAPTION));
-    EXPECT_EQ(MouseCursorEventFilter::WARP_DRAG,
-              event_filter->mouse_warp_mode_);
+    EXPECT_TRUE(event_filter->mouse_warp_enabled_);
     resizer->RevertDrag();
   }
-  EXPECT_EQ(MouseCursorEventFilter::WARP_ALWAYS,
-            event_filter->mouse_warp_mode_);
+  EXPECT_TRUE(event_filter->mouse_warp_enabled_);
 
   {
     scoped_ptr<WindowResizer> resizer(CreateDragWindowResizer(
         window_.get(), gfx::Point(), HTRIGHT));
     // While resizing a window, warp should NOT be allowed.
-    EXPECT_EQ(MouseCursorEventFilter::WARP_NONE,
-              event_filter->mouse_warp_mode_);
+    EXPECT_FALSE(event_filter->mouse_warp_enabled_);
     resizer->CompleteDrag();
   }
-  EXPECT_EQ(MouseCursorEventFilter::WARP_ALWAYS,
-            event_filter->mouse_warp_mode_);
+  EXPECT_TRUE(event_filter->mouse_warp_enabled_);
 
   {
     scoped_ptr<WindowResizer> resizer(CreateDragWindowResizer(
         window_.get(), gfx::Point(), HTRIGHT));
-    EXPECT_EQ(MouseCursorEventFilter::WARP_NONE,
-              event_filter->mouse_warp_mode_);
+    EXPECT_FALSE(event_filter->mouse_warp_enabled_);
     resizer->RevertDrag();
   }
-  EXPECT_EQ(MouseCursorEventFilter::WARP_ALWAYS,
-            event_filter->mouse_warp_mode_);
+  EXPECT_TRUE(event_filter->mouse_warp_enabled_);
 }
 
 // Verifies cursor's device scale factor is updated whe a window is moved across
@@ -498,7 +484,7 @@ TEST_F(DragWindowResizerTest, CursorDeviceScaleFactor) {
     EXPECT_EQ(1.0f, cursor_test_api.GetCurrentCursor().device_scale_factor());
     ASSERT_TRUE(resizer.get());
     resizer->Drag(CalculateDragPoint(*resizer, 399, 200), 0);
-    WarpMouseCursorIfNecessary(root_windows[0], gfx::Point(399, 200));
+    TestIfMouseWarpsAt(gfx::Point(399, 200));
     EXPECT_EQ(2.0f, cursor_test_api.GetCurrentCursor().device_scale_factor());
     resizer->CompleteDrag();
     EXPECT_EQ(2.0f, cursor_test_api.GetCurrentCursor().device_scale_factor());
@@ -522,7 +508,7 @@ TEST_F(DragWindowResizerTest, CursorDeviceScaleFactor) {
     EXPECT_EQ(2.0f, cursor_test_api.GetCurrentCursor().device_scale_factor());
     ASSERT_TRUE(resizer.get());
     resizer->Drag(CalculateDragPoint(*resizer, -200, 200), 0);
-    WarpMouseCursorIfNecessary(root_windows[1], gfx::Point(400, 200));
+    TestIfMouseWarpsAt(gfx::Point(400, 200));
     EXPECT_EQ(1.0f, cursor_test_api.GetCurrentCursor().device_scale_factor());
     resizer->CompleteDrag();
     EXPECT_EQ(1.0f, cursor_test_api.GetCurrentCursor().device_scale_factor());
@@ -551,8 +537,9 @@ TEST_F(DragWindowResizerTest, MoveWindowAcrossDisplays) {
         window, gfx::Point(), HTCAPTION));
     ASSERT_TRUE(resizer.get());
     resizer->Drag(CalculateDragPoint(*resizer, 399, 200), 0);
-    EXPECT_TRUE(WarpMouseCursorIfNecessary(root_windows[0],
-                                           gfx::Point(399, 200)));
+    EXPECT_TRUE(TestIfMouseWarpsAt(gfx::Point(399, 200)));
+    EXPECT_EQ("401,200",
+              aura::Env::GetInstance()->last_mouse_location().ToString());
     resizer->CompleteDrag();
   }
 
@@ -566,8 +553,9 @@ TEST_F(DragWindowResizerTest, MoveWindowAcrossDisplays) {
         window, gfx::Point(), HTCAPTION));
     ASSERT_TRUE(resizer.get());
     resizer->Drag(CalculateDragPoint(*resizer, 399, 200), 0);
-    EXPECT_TRUE(WarpMouseCursorIfNecessary(root_windows[0],
-                                           gfx::Point(399, 200)));
+    EXPECT_TRUE(TestIfMouseWarpsAt(gfx::Point(399, 200)));
+    EXPECT_EQ("401,200",
+              aura::Env::GetInstance()->last_mouse_location().ToString());
     resizer->CompleteDrag();
   }
 
@@ -576,13 +564,15 @@ TEST_F(DragWindowResizerTest, MoveWindowAcrossDisplays) {
     aura::Window* window = system_modal_window_.get();
     window->SetBoundsInScreen(gfx::Rect(0, 0, 50, 60),
                               Shell::GetScreen()->GetPrimaryDisplay());
+    aura::Env::GetInstance()->set_last_mouse_location(gfx::Point(0, 0));
     // Grab (0, 0) of the window.
     scoped_ptr<WindowResizer> resizer(CreateDragWindowResizer(
         window, gfx::Point(), HTCAPTION));
     ASSERT_TRUE(resizer.get());
     resizer->Drag(CalculateDragPoint(*resizer, 399, 200), 0);
-    EXPECT_TRUE(WarpMouseCursorIfNecessary(root_windows[0],
-                                           gfx::Point(399, 200)));
+    EXPECT_TRUE(TestIfMouseWarpsAt(gfx::Point(399, 200)));
+    EXPECT_EQ("401,200",
+              aura::Env::GetInstance()->last_mouse_location().ToString());
     resizer->CompleteDrag();
   }
 
@@ -596,9 +586,9 @@ TEST_F(DragWindowResizerTest, MoveWindowAcrossDisplays) {
         window, gfx::Point(), HTCAPTION));
     ASSERT_TRUE(resizer.get());
     resizer->Drag(CalculateDragPoint(*resizer, 399, 200), 0);
-    EXPECT_FALSE(WarpMouseCursorIfNecessary(
-        root_windows[0],
-        gfx::Point(399, 200)));
+    EXPECT_FALSE(TestIfMouseWarpsAt(gfx::Point(399, 200)));
+    EXPECT_EQ("399,200",
+              aura::Env::GetInstance()->last_mouse_location().ToString());
     resizer->CompleteDrag();
   }
 
@@ -612,8 +602,9 @@ TEST_F(DragWindowResizerTest, MoveWindowAcrossDisplays) {
         window, gfx::Point(), HTCAPTION));
     ASSERT_TRUE(resizer.get());
     resizer->Drag(CalculateDragPoint(*resizer, 399, 200), 0);
-    EXPECT_TRUE(WarpMouseCursorIfNecessary(root_windows[0],
-                                           gfx::Point(399, 200)));
+    EXPECT_TRUE(TestIfMouseWarpsAt(gfx::Point(399, 200)));
+    EXPECT_EQ("401,200",
+              aura::Env::GetInstance()->last_mouse_location().ToString());
     resizer->CompleteDrag();
   }
 
@@ -627,8 +618,9 @@ TEST_F(DragWindowResizerTest, MoveWindowAcrossDisplays) {
         window, gfx::Point(), HTCAPTION));
     ASSERT_TRUE(resizer.get());
     resizer->Drag(CalculateDragPoint(*resizer, 399, 200), 0);
-    EXPECT_TRUE(WarpMouseCursorIfNecessary(root_windows[0],
-                                           gfx::Point(399, 200)));
+    EXPECT_TRUE(TestIfMouseWarpsAt(gfx::Point(399, 200)));
+    EXPECT_EQ("401,200",
+              aura::Env::GetInstance()->last_mouse_location().ToString());
     resizer->CompleteDrag();
   }
 }

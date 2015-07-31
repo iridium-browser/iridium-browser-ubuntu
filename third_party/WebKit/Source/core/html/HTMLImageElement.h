@@ -29,6 +29,7 @@
 #include "core/html/HTMLImageLoader.h"
 #include "core/html/canvas/CanvasImageSource.h"
 #include "platform/graphics/GraphicsTypes.h"
+#include "platform/network/ResourceResponse.h"
 #include "wtf/WeakPtr.h"
 
 namespace blink {
@@ -96,7 +97,7 @@ public:
     // CanvasImageSource implementation
     virtual PassRefPtr<Image> getSourceImageForCanvas(SourceImageMode, SourceImageStatus*) const override;
     virtual bool wouldTaintOrigin(SecurityOrigin*) const override;
-    virtual FloatSize sourceSize() const override;
+    virtual FloatSize elementSize() const override;
     virtual FloatSize defaultDestinationSize() const override;
     virtual const KURL& sourceURL() const override;
     virtual bool isOpaque() const override;
@@ -107,13 +108,17 @@ public:
     void setUseFallbackContent();
     void setIsFallbackImage() { m_isFallbackImage = true; }
 
+    float sourceSize(Element&);
+
+    void forceReload() const;
+
 protected:
     explicit HTMLImageElement(Document&, HTMLFormElement* = 0, bool createdByParser = false);
 
     virtual void didMoveToNewDocument(Document& oldDocument) override;
     virtual bool useFallbackContent() const { return m_useFallbackContent; }
 
-    virtual void didAddClosedShadowRoot(ShadowRoot&) override;
+    virtual void didAddUserAgentShadowRoot(ShadowRoot&) override;
     virtual PassRefPtr<ComputedStyle> customStyleForLayoutObject() override;
 private:
     virtual bool areAuthorShadowsAllowed() const override { return false; }

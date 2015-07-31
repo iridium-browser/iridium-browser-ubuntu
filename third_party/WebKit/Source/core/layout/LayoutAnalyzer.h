@@ -5,11 +5,12 @@
 #ifndef LayoutAnalyzer_h
 #define LayoutAnalyzer_h
 
-#include "wtf/LinkedStack.h"
-#include "wtf/Vector.h"
+#include "platform/LayoutUnit.h"
+#include "wtf/PassRefPtr.h"
 
 namespace blink {
 
+class LayoutBlock;
 class LayoutObject;
 class TracedValue;
 
@@ -19,8 +20,10 @@ class TracedValue;
 class LayoutAnalyzer {
 public:
     enum Counter {
-        LayoutBlockRectangleChanged,
-        LayoutBlockRectangleDidNotChange,
+        LayoutBlockWidthChanged,
+        LayoutBlockHeightChanged,
+        LayoutBlockSizeChanged,
+        LayoutBlockSizeDidNotChange,
         LayoutObjectsThatSpecifyColumns,
         LayoutAnalyzerStackMaximumDepth,
         LayoutObjectsThatAreFloating,
@@ -39,7 +42,7 @@ public:
         CharactersInLayoutObjectsThatAreTextAndCanUseTheSimpleFontCodePath,
         TotalLayoutObjectsThatWereLaidOut,
     };
-    static const size_t NumCounters = 19;
+    static const size_t NumCounters = 21;
 
     class Scope {
     public:
@@ -49,6 +52,17 @@ public:
     private:
         const LayoutObject& m_layoutObject;
         LayoutAnalyzer* m_analyzer;
+    };
+
+    class BlockScope {
+    public:
+        explicit BlockScope(const LayoutBlock&);
+        ~BlockScope();
+
+    private:
+        const LayoutBlock& m_block;
+        LayoutUnit m_width;
+        LayoutUnit m_height;
     };
 
     LayoutAnalyzer() { }
@@ -67,8 +81,9 @@ public:
 private:
     const char* nameForCounter(Counter) const;
 
-    WTF::Vector<unsigned> m_counters;
-    WTF::LinkedStack<const LayoutObject*> m_stack;
+    double m_startMs;
+    unsigned m_depth;
+    unsigned m_counters[NumCounters];
 };
 
 } // namespace blink

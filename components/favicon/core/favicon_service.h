@@ -117,7 +117,7 @@ class FaviconService : public KeyedService {
       base::CancelableTaskTracker* tracker);
 
   // See HistoryService::GetLargestFaviconForPageURL().
-  base::CancelableTaskTracker::TaskId GetLargestRawFaviconForPageURL(
+  virtual base::CancelableTaskTracker::TaskId GetLargestRawFaviconForPageURL(
       const GURL& page_url,
       const std::vector<int>& icon_types,
       int minimum_size_in_pixels,
@@ -170,13 +170,6 @@ class FaviconService : public KeyedService {
 
   // Marks all types of favicon for the page as being out of date.
   void SetFaviconOutOfDateForPage(const GURL& page_url);
-
-  // Clones all icons from an existing page. This associates the icons from
-  // |old_page_url| with |new_page_url|, provided |new_page_url| has no
-  // recorded associations to any other icons.
-  // Needed if you want to declare favicons (tentatively) in advance, before a
-  // page is ever visited.
-  void CloneFavicon(const GURL& old_page_url, const GURL& new_page_url);
 
   // Allows the importer to set many favicons for many pages at once. The pages
   // must exist, any favicon sets for unknown pages will be discarded. Existing

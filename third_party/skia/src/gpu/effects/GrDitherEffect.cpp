@@ -26,7 +26,7 @@ public:
 
     const char* name() const override { return "Dither"; }
 
-    void getGLProcessorKey(const GrGLCaps&, GrProcessorKeyBuilder*) const override;
+    void getGLProcessorKey(const GrGLSLCaps&, GrProcessorKeyBuilder*) const override;
 
     GrGLFragmentProcessor* createGLInstance() const override;
 
@@ -87,7 +87,7 @@ void GLDitherEffect::emitCode(GrGLFPBuilder* builder,
                               const char* inputColor,
                               const TransformedCoordsArray&,
                               const TextureSamplerArray& samplers) {
-    GrGLFPFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+    GrGLFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
     // Generate a random number based on the fragment position. For this
     // random number generator, we use the "GLSL rand" function
     // that seems to be floating around on the internet. It works under
@@ -106,7 +106,7 @@ void GLDitherEffect::emitCode(GrGLFPBuilder* builder,
 
 //////////////////////////////////////////////////////////////////////////////
 
-void DitherEffect::getGLProcessorKey(const GrGLCaps& caps,
+void DitherEffect::getGLProcessorKey(const GrGLSLCaps& caps,
                                      GrProcessorKeyBuilder* b) const {
     GLDitherEffect::GenKey(*this, caps, b);
 }

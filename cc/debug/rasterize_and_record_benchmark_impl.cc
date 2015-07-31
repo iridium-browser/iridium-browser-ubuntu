@@ -12,7 +12,7 @@
 #include "cc/debug/lap_timer.h"
 #include "cc/layers/layer_impl.h"
 #include "cc/layers/picture_layer_impl.h"
-#include "cc/resources/tile_task_worker_pool.h"
+#include "cc/raster/tile_task_worker_pool.h"
 #include "cc/trees/layer_tree_host_common.h"
 #include "cc/trees/layer_tree_host_impl.h"
 #include "cc/trees/layer_tree_impl.h"
@@ -72,8 +72,8 @@ class FixedInvalidationPictureLayerTilingClient
       const Region invalidation)
       : base_client_(base_client), invalidation_(invalidation) {}
 
-  scoped_refptr<Tile> CreateTile(float contents_scale,
-                                 const gfx::Rect& content_rect) override {
+  ScopedTilePtr CreateTile(float contents_scale,
+                           const gfx::Rect& content_rect) override {
     return base_client_->CreateTile(contents_scale, content_rect);
   }
 
@@ -90,16 +90,9 @@ class FixedInvalidationPictureLayerTilingClient
     return base_client_->GetPendingOrActiveTwinTiling(tiling);
   }
 
-  PictureLayerTiling* GetRecycledTwinTiling(
-      const PictureLayerTiling* tiling) override {
-    return base_client_->GetRecycledTwinTiling(tiling);
-  }
-
   TilePriority::PriorityBin GetMaxTilePriorityBin() const override {
     return base_client_->GetMaxTilePriorityBin();
   }
-
-  WhichTree GetTree() const override { return base_client_->GetTree(); }
 
   bool RequiresHighResToDraw() const override {
     return base_client_->RequiresHighResToDraw();
@@ -113,10 +106,10 @@ class FixedInvalidationPictureLayerTilingClient
 }  // namespace
 
 RasterizeAndRecordBenchmarkImpl::RasterizeAndRecordBenchmarkImpl(
-    scoped_refptr<base::MessageLoopProxy> origin_loop,
+    scoped_refptr<base::SingleThreadTaskRunner> origin_task_runner,
     base::Value* value,
     const MicroBenchmarkImpl::DoneCallback& callback)
-    : MicroBenchmarkImpl(callback, origin_loop),
+    : MicroBenchmarkImpl(callback, origin_task_runner),
       rasterize_repeat_count_(kDefaultRasterizeRepeatCount) {
   base::DictionaryValue* settings = nullptr;
   value->GetAsDictionary(&settings);
@@ -177,20 +170,20 @@ void RasterizeAndRecordBenchmarkImpl::RunOnLayer(PictureLayerImpl* layer) {
   // really matter.
   const LayerTreeSettings& settings = layer->layer_tree_impl()->settings();
   scoped_ptr<PictureLayerTilingSet> tiling_set = PictureLayerTilingSet::Create(
-      &client, settings.max_tiles_for_interest_area,
+      layer->GetTree(), &client, settings.max_tiles_for_interest_area,
       settings.skewport_target_time_in_seconds,
       settings.skewport_extrapolation_limit_in_content_pixels);
 
   PictureLayerTiling* tiling = tiling_set->AddTiling(layer->contents_scale_x(),
                                                      layer->GetRasterSource());
   tiling->CreateAllTilesForTesting();
+  RasterSource* raster_source = tiling->raster_source();
   for (PictureLayerTiling::CoverageIterator it(
            tiling, layer->contents_scale_x(), layer->visible_content_rect());
        it;
        ++it) {
     DCHECK(*it);
 
-    RasterSource* raster_source = (*it)->raster_source();
     gfx::Rect content_rect = (*it)->content_rect();
     float contents_scale = (*it)->contents_scale();
 

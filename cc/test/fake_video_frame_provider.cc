@@ -14,8 +14,17 @@ FakeVideoFrameProvider::~FakeVideoFrameProvider() {
     client_->StopUsingProvider();
 }
 
+bool FakeVideoFrameProvider::UpdateCurrentFrame(base::TimeTicks deadline_min,
+                                                base::TimeTicks deadline_max) {
+  return false;
+}
+
 void FakeVideoFrameProvider::SetVideoFrameProviderClient(Client* client) {
   client_ = client;
+}
+
+bool FakeVideoFrameProvider::HasCurrentFrame() {
+  return frame_;
 }
 
 scoped_refptr<media::VideoFrame> FakeVideoFrameProvider::GetCurrentFrame() {

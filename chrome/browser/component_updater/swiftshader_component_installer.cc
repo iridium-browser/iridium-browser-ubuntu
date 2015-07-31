@@ -92,11 +92,11 @@ bool GetLatestSwiftShaderDirectory(base::FilePath* result,
 }
 
 void RegisterSwiftShaderWithChrome(const base::FilePath& path) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   GpuDataManager::GetInstance()->RegisterSwiftShaderPath(path);
 }
 
-class SwiftShaderComponentInstaller : public update_client::ComponentInstaller {
+class SwiftShaderComponentInstaller : public update_client::CrxInstaller {
  public:
   explicit SwiftShaderComponentInstaller(const Version& version);
 
@@ -171,14 +171,15 @@ bool SwiftShaderComponentInstaller::Uninstall() {
 
 void FinishSwiftShaderUpdateRegistration(ComponentUpdateService* cus,
                                          const Version& version) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   update_client::CrxComponent swiftshader;
   swiftshader.name = "Swift Shader";
   swiftshader.installer = new SwiftShaderComponentInstaller(version);
   swiftshader.version = version;
   swiftshader.pk_hash.assign(kSha2Hash, &kSha2Hash[sizeof(kSha2Hash)]);
-  if (cus->RegisterComponent(swiftshader) != ComponentUpdateService::kOk) {
+  if (cus->RegisterComponent(swiftshader) !=
+      ComponentUpdateService::Status::kOk) {
     NOTREACHED() << "SwiftShader component registration fail";
   }
 }
@@ -203,7 +204,7 @@ void UpdateChecker::OnGpuInfoUpdate() {
       gpu_data_manager->IsFeatureBlacklisted(gpu::GPU_FEATURE_TYPE_WEBGL) ||
       gpu_data_manager->ShouldUseSwiftShader()) {
     gpu_data_manager->RemoveObserver(this);
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+    DCHECK_CURRENTLY_ON(BrowserThread::FILE);
     base::FilePath path = GetSwiftShaderBaseDirectory();
 
     Version version(kNullVersion);
@@ -221,7 +222,7 @@ void UpdateChecker::OnGpuInfoUpdate() {
 // Check if there already is a version of swiftshader installed,
 // and if so register it.
 void RegisterSwiftShaderPath(ComponentUpdateService* cus) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  DCHECK_CURRENTLY_ON(BrowserThread::FILE);
   base::FilePath path = GetSwiftShaderBaseDirectory();
   if (!base::PathExists(path)) {
     if (!base::CreateDirectory(path)) {

@@ -4,6 +4,8 @@
 
 #include "components/favicon_base/favicon_types.h"
 
+#include "components/favicon_base/fallback_icon_style.h"
+
 namespace favicon_base {
 
 // ---------------------------------------------------------
@@ -20,7 +22,17 @@ FaviconRawBitmapResult::FaviconRawBitmapResult()
     : expired(false), icon_type(INVALID_ICON) {
 }
 
-FaviconRawBitmapResult::~FaviconRawBitmapResult() {
-}
+FaviconRawBitmapResult::~FaviconRawBitmapResult() {}
+
+// --------------------------------------------------------
+// LargeIconResult
+
+LargeIconResult::LargeIconResult(const FaviconRawBitmapResult& bitmap_in)
+    : bitmap(bitmap_in) {}
+
+LargeIconResult::LargeIconResult(FallbackIconStyle* fallback_icon_style_in)
+    : fallback_icon_style(fallback_icon_style_in) {}
+
+LargeIconResult::~LargeIconResult() {}
 
 }  // namespace favicon_base

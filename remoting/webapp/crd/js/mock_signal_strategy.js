@@ -23,11 +23,30 @@ remoting.MockSignalStrategy = function(jid, type) {
   /** @type {remoting.SignalStrategy.State} */
   this.state_ = remoting.SignalStrategy.State.NOT_CONNECTED;
 
+  /** @type {!remoting.Error} */
+  this.error_ = remoting.Error.none();
+
   this.onIncomingStanzaCallback_ = function() {};
-  this.dispose = sinon.spy();
-  this.connect = sinon.spy();
-  this.sendMessage = sinon.spy();
-  this.sendConnectionSetupResults = sinon.spy();
+};
+
+/** @override */
+remoting.MockSignalStrategy.prototype.dispose = function() {
+};
+
+/** @override */
+remoting.MockSignalStrategy.prototype.connect = function() {
+  var that = this;
+  Promise.resolve().then(function() {
+    that.setStateForTesting(remoting.SignalStrategy.State.CONNECTED);
+  });
+};
+
+/** @override */
+remoting.MockSignalStrategy.prototype.sendMessage = function() {
+};
+
+/** @override */
+remoting.MockSignalStrategy.prototype.sendConnectionSetupResults = function() {
 };
 
 /**
@@ -50,6 +69,11 @@ remoting.MockSignalStrategy.prototype.setIncomingStanzaCallback =
                                : function() {};
 };
 
+/** @param {Element} stanza */
+remoting.MockSignalStrategy.prototype.mock$onIncomingStanza = function(stanza) {
+  this.onIncomingStanzaCallback_(stanza);
+};
+
 /** @return {remoting.SignalStrategy.State} */
 remoting.MockSignalStrategy.prototype.getState = function() {
   return this.state_;
@@ -57,7 +81,7 @@ remoting.MockSignalStrategy.prototype.getState = function() {
 
 /** @return {!remoting.Error} */
 remoting.MockSignalStrategy.prototype.getError = function() {
-  return remoting.Error.none();
+  return this.error_;
 };
 
 /** @return {string} */
@@ -75,5 +99,10 @@ remoting.MockSignalStrategy.prototype.getType = function() {
  */
 remoting.MockSignalStrategy.prototype.setStateForTesting = function(state) {
   this.state_ = state;
+  if (state == remoting.SignalStrategy.State.FAILED) {
+    this.error_ = remoting.Error.unexpected('setStateForTesting');
+  } else {
+    this.error_ = remoting.Error.none();
+  }
   this.onStateChangedCallback_(state);
 };

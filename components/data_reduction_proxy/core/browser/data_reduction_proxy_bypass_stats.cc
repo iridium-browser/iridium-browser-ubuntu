@@ -4,12 +4,9 @@
 
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_bypass_stats.h"
 
-#include "base/bind.h"
 #include "base/callback.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/sparse_histogram.h"
-#include "base/prefs/pref_member.h"
-#include "base/single_thread_task_runner.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_tamper_detection.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_headers.h"
@@ -104,28 +101,24 @@ void DataReductionProxyBypassStats::DetectAndRecordMissingViaHeaderResponseCode(
 
 DataReductionProxyBypassStats::DataReductionProxyBypassStats(
     DataReductionProxyConfig* config,
-    UnreachableCallback unreachable_callback,
-    const scoped_refptr<base::SingleThreadTaskRunner>& ui_task_runner)
+    UnreachableCallback unreachable_callback)
     : data_reduction_proxy_config_(config),
       unreachable_callback_(unreachable_callback),
       last_bypass_type_(BYPASS_EVENT_TYPE_MAX),
       triggering_request_(true),
-      ui_task_runner_(ui_task_runner),
       successful_requests_through_proxy_count_(0),
       proxy_net_errors_count_(0),
       unavailable_(false) {
   DCHECK(config);
   NetworkChangeNotifier::AddNetworkChangeObserver(this);
-};
+}
 
 DataReductionProxyBypassStats::~DataReductionProxyBypassStats() {
   NetworkChangeNotifier::RemoveNetworkChangeObserver(this);
-};
+}
 
 void DataReductionProxyBypassStats::OnUrlRequestCompleted(
     const net::URLRequest* request, bool started) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-
   DataReductionProxyTypeInfo proxy_info;
   // Ignore requests that did not use the data reduction proxy. The check for
   // LOAD_BYPASS_PROXY is necessary because the proxy_server() in the |request|
@@ -176,7 +169,7 @@ DataReductionProxyBypassStats::GetBypassType() const {
 
 void DataReductionProxyBypassStats::RecordBytesHistograms(
     const net::URLRequest& request,
-    const BooleanPrefMember& data_reduction_proxy_enabled,
+    bool data_reduction_proxy_enabled,
     const net::ProxyConfig& data_reduction_proxy_config) {
   RecordBypassedBytesHistograms(request, data_reduction_proxy_enabled,
                                 data_reduction_proxy_config);
@@ -230,14 +223,29 @@ void DataReductionProxyBypassStats::OnConnectComplete(
   }
 }
 
+void DataReductionProxyBypassStats::ClearRequestCounts() {
+  successful_requests_through_proxy_count_ = 0;
+  proxy_net_errors_count_ = 0;
+}
+
+void DataReductionProxyBypassStats::NotifyUnavailabilityIfChanged() {
+  bool prev_unavailable = unavailable_;
+  unavailable_ =
+      (proxy_net_errors_count_ >= kMinFailedRequestsWhenUnavailable &&
+       successful_requests_through_proxy_count_ <=
+           kMaxSuccessfulRequestsWhenUnavailable);
+  if (prev_unavailable != unavailable_)
+    unreachable_callback_.Run(unavailable_);
+}
+
 void DataReductionProxyBypassStats::RecordBypassedBytesHistograms(
     const net::URLRequest& request,
-    const BooleanPrefMember& data_reduction_proxy_enabled,
+    bool data_reduction_proxy_enabled,
     const net::ProxyConfig& data_reduction_proxy_config) {
   int64 content_length = request.received_response_content_length();
 
   // Only record histograms when the data reduction proxy is enabled.
-  if (!data_reduction_proxy_enabled.GetValue())
+  if (!data_reduction_proxy_enabled)
     return;
 
   // TODO(bengr): Add histogram(s) for byte counts of unsupported schemes, e.g.,
@@ -289,26 +297,37 @@ void DataReductionProxyBypassStats::RecordBypassedBytesHistograms(
     return;
   }
 
+  std::string mime_type;
+  request.GetMimeType(&mime_type);
+  // MIME types are named by <media-type>/<subtype>. Check to see if the media
+  // type is audio or video in order to record audio/video bypasses separately
+  // for current bypasses and for the triggering requests of short bypasses.
+  if ((last_bypass_type_ == BYPASS_EVENT_TYPE_CURRENT ||
+       (triggering_request_ && last_bypass_type_ == BYPASS_EVENT_TYPE_SHORT)) &&
+      (mime_type.compare(0, 6, "audio/") == 0 ||
+       mime_type.compare(0, 6, "video/") == 0)) {
+    RecordBypassedBytes(last_bypass_type_,
+                        DataReductionProxyBypassStats::AUDIO_VIDEO,
+                        content_length);
+    triggering_request_ = false;
+    return;
+  }
+
+  // Report current bypasses of MIME type "application/octet-stream" separately.
+  if (last_bypass_type_ == BYPASS_EVENT_TYPE_CURRENT &&
+      mime_type.find("application/octet-stream") != std::string::npos) {
+    RecordBypassedBytes(last_bypass_type_,
+                        DataReductionProxyBypassStats::APPLICATION_OCTET_STREAM,
+                        content_length);
+    return;
+  }
+
   // Only record separate triggering request UMA for short, medium, and long
   // bypass events.
   if (triggering_request_ &&
      (last_bypass_type_ == BYPASS_EVENT_TYPE_SHORT ||
       last_bypass_type_ == BYPASS_EVENT_TYPE_MEDIUM ||
       last_bypass_type_ == BYPASS_EVENT_TYPE_LONG)) {
-    std::string mime_type;
-    request.GetMimeType(&mime_type);
-    // MIME types are named by <media-type>/<subtype>. Check to see if the
-    // media type is audio or video. Only record when triggered by short bypass,
-    // there isn't an audio or video bucket for medium or long bypasses.
-    if (last_bypass_type_ == BYPASS_EVENT_TYPE_SHORT &&
-        (mime_type.compare(0, 6, "audio/") == 0 ||
-         mime_type.compare(0, 6, "video/") == 0)) {
-      RecordBypassedBytes(last_bypass_type_,
-                          DataReductionProxyBypassStats::AUDIO_VIDEO,
-                          content_length);
-      return;
-    }
-
     RecordBypassedBytes(last_bypass_type_,
                         DataReductionProxyBypassStats::TRIGGERING_REQUEST,
                         content_length);
@@ -358,34 +377,7 @@ void DataReductionProxyBypassStats::RecordMissingViaHeaderBytes(
 
 void DataReductionProxyBypassStats::OnNetworkChanged(
     NetworkChangeNotifier::ConnectionType type) {
-  DCHECK(thread_checker_.CalledOnValidThread());
   ClearRequestCounts();
-}
-
-void DataReductionProxyBypassStats::ClearRequestCounts() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  successful_requests_through_proxy_count_ = 0;
-  proxy_net_errors_count_ = 0;
-}
-
-void DataReductionProxyBypassStats::NotifyUnavailabilityIfChanged() {
-  bool prev_unavailable = unavailable_;
-  unavailable_ =
-      (proxy_net_errors_count_ >= kMinFailedRequestsWhenUnavailable &&
-       successful_requests_through_proxy_count_ <=
-           kMaxSuccessfulRequestsWhenUnavailable);
-  if (prev_unavailable != unavailable_) {
-    ui_task_runner_->PostTask(FROM_HERE, base::Bind(
-        &DataReductionProxyBypassStats::NotifyUnavailabilityOnUIThread,
-        base::Unretained(this),
-        unavailable_));
-  }
-}
-
-void DataReductionProxyBypassStats::NotifyUnavailabilityOnUIThread(
-    bool unavailable) {
-  DCHECK(ui_task_runner_->BelongsToCurrentThread());
-  unreachable_callback_.Run(unavailable);
 }
 
 void DataReductionProxyBypassStats::RecordBypassedBytes(
@@ -415,10 +407,30 @@ void DataReductionProxyBypassStats::RecordBypassedBytes(
           content_length);
       break;
     case DataReductionProxyBypassStats::AUDIO_VIDEO:
-      if (last_bypass_type_ == BYPASS_EVENT_TYPE_SHORT) {
-        UMA_HISTOGRAM_COUNTS(
-            "DataReductionProxy.BypassedBytes.ShortAudioVideo",
-            content_length);
+      switch (bypass_type) {
+        case BYPASS_EVENT_TYPE_CURRENT:
+          UMA_HISTOGRAM_COUNTS(
+              "DataReductionProxy.BypassedBytes.CurrentAudioVideo",
+              content_length);
+          break;
+        case BYPASS_EVENT_TYPE_SHORT:
+          UMA_HISTOGRAM_COUNTS(
+              "DataReductionProxy.BypassedBytes.ShortAudioVideo",
+              content_length);
+          break;
+        default:
+          NOTREACHED();
+      }
+      break;
+    case DataReductionProxyBypassStats::APPLICATION_OCTET_STREAM:
+      switch (bypass_type) {
+        case BYPASS_EVENT_TYPE_CURRENT:
+          UMA_HISTOGRAM_COUNTS(
+              "DataReductionProxy.BypassedBytes.CurrentApplicationOctetStream",
+              content_length);
+          break;
+        default:
+          NOTREACHED();
       }
       break;
     case DataReductionProxyBypassStats::TRIGGERING_REQUEST:

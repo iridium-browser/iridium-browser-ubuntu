@@ -18,6 +18,7 @@
 #include "net/proxy/proxy_service.h"
 #include "net/quic/quic_stream_factory.h"
 #include "net/socket/client_socket_handle.h"
+#include "net/socket/client_socket_pool_manager.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/spdy/spdy_session_key.h"
 #include "net/ssl/ssl_config_service.h"
@@ -139,6 +140,50 @@ class HttpStreamFactoryImpl::Job {
     STATUS_SUCCEEDED
   };
 
+  // Wrapper class for SpdySessionPool methods to enforce certificate
+  // requirements for SpdySessions.
+  class ValidSpdySessionPool {
+   public:
+    ValidSpdySessionPool(SpdySessionPool* spdy_session_pool,
+                         GURL& origin_url,
+                         bool is_spdy_alternate);
+
+    // Returns OK if a SpdySession was not found (in which case |spdy_session|
+    // is set to nullptr), or if one was found (in which case |spdy_session| is
+    // set to it) and it has an associated SSL certificate with is valid for
+    // |origin_url_|, or if this requirement does not apply because the Job is
+    // not a SPDY alternate job.  Returns the appropriate error code otherwise,
+    // in which case |spdy_session| should not be used.
+    int FindAvailableSession(const SpdySessionKey& key,
+                             const BoundNetLog& net_log,
+                             base::WeakPtr<SpdySession>* spdy_session);
+
+    // Creates a SpdySession and sets |spdy_session| to point to it.  Returns OK
+    // if the associated SSL certificate is valid for |origin_url_|, or if this
+    // requirement does not apply because the Job is not a SPDY alternate job.
+    // Returns the appropriate error code otherwise, in which case
+    // |spdy_session| should not be used.
+    int CreateAvailableSessionFromSocket(
+        const SpdySessionKey& key,
+        scoped_ptr<ClientSocketHandle> connection,
+        const BoundNetLog& net_log,
+        int certificate_error_code,
+        bool is_secure,
+        base::WeakPtr<SpdySession>* spdy_session);
+
+   private:
+    // Returns OK if |spdy_session| has an associated SSL certificate with is
+    // valid for |origin_url_|, or if this requirement does not apply because
+    // the Job is not a SPDY alternate job, or if |spdy_session| is null.
+    // Returns appropriate error code otherwise.
+    int CheckAlternativeServiceValidityForOrigin(
+        base::WeakPtr<SpdySession> spdy_session);
+
+    SpdySessionPool* const spdy_session_pool_;
+    const GURL origin_url_;
+    const bool is_spdy_alternate_;
+  };
+
   void OnStreamReadyCallback();
   void OnWebSocketHandshakeStreamReadyCallback();
   // This callback function is called when a new SPDY session is created.
@@ -185,9 +230,13 @@ class HttpStreamFactoryImpl::Job {
   void SetSocketMotivation();
 
   bool IsHttpsProxyAndHttpUrl() const;
+
   // Returns true iff this Job is an alternate, that is, iff MarkAsAlternate has
   // been called.
   bool IsAlternate() const;
+
+  // Returns true if this Job is a SPDY alternate job.
+  bool IsSpdyAlternate() const;
 
   // Sets several fields of |ssl_config| for |server| based on the proxy info
   // and other factors.
@@ -224,16 +273,14 @@ class HttpStreamFactoryImpl::Job {
   // Moves this stream request into SPDY mode.
   void SwitchToSpdyMode();
 
-  // Should we force SPDY to run over SSL for this stream request.
-  bool ShouldForceSpdySSL() const;
-
-  // Should we force SPDY to run without SSL for this stream request.
-  bool ShouldForceSpdyWithoutSSL() const;
-
   // Should we force QUIC for this stream request.
   bool ShouldForceQuic() const;
 
   void MaybeMarkAlternativeServiceBroken();
+
+  ClientSocketPoolManager::SocketGroupType GetSocketGroup() const;
+
+  void MaybeCopyConnectionAttemptsFromSocketOrHandle();
 
   // Record histograms of latency until Connect() completes.
   static void LogHttpConnectedMetrics(const ClientSocketHandle& handle);
@@ -274,12 +321,6 @@ class HttpStreamFactoryImpl::Job {
 
   // AlternateProtocol for this job if this is an alternate job.
   AlternativeService alternative_service_;
-
-  // The URL to be used for proxy resolution and socket pools. If the alternate
-  // service is SPDY, the URL will containg the host:port from
-  // |alternate_service_| and "https://" scheme. Otherwise, this will be the
-  // same as |origin_url_|.
-  GURL alternative_service_url_;
 
   // AlternateProtocol for the other job if this is not an alternate job.
   AlternativeService other_job_alternative_service_;
@@ -331,6 +372,8 @@ class HttpStreamFactoryImpl::Job {
   // 0 if we're not preconnecting. Otherwise, the number of streams to
   // preconnect.
   int num_streams_;
+
+  scoped_ptr<ValidSpdySessionPool> valid_spdy_session_pool_;
 
   // Initialized when we create a new SpdySession.
   base::WeakPtr<SpdySession> new_spdy_session_;

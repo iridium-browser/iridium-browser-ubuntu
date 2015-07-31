@@ -27,17 +27,28 @@ const ResourceFormat kRGBResourceFormat = RGBA_8888;
 
 class SyncPointClientImpl : public media::VideoFrame::SyncPointClient {
  public:
-  explicit SyncPointClientImpl(gpu::gles2::GLES2Interface* gl) : gl_(gl) {}
+  explicit SyncPointClientImpl(gpu::gles2::GLES2Interface* gl,
+                               uint32 sync_point)
+      : gl_(gl), sync_point_(sync_point) {}
   ~SyncPointClientImpl() override {}
   uint32 InsertSyncPoint() override {
-    return GLC(gl_, gl_->InsertSyncPointCHROMIUM());
+    if (sync_point_)
+      return sync_point_;
+    return gl_->InsertSyncPointCHROMIUM();
   }
   void WaitSyncPoint(uint32 sync_point) override {
-    GLC(gl_, gl_->WaitSyncPointCHROMIUM(sync_point));
+    if (!sync_point)
+      return;
+    gl_->WaitSyncPointCHROMIUM(sync_point);
+    if (sync_point_) {
+      gl_->WaitSyncPointCHROMIUM(sync_point_);
+      sync_point_ = 0;
+    }
   }
 
  private:
   gpu::gles2::GLES2Interface* gl_;
+  uint32 sync_point_;
 };
 
 }  // namespace
@@ -108,10 +119,10 @@ VideoResourceUpdater::AllocateResource(const gfx::Size& plane_size,
 
     gpu::gles2::GLES2Interface* gl = context_provider_->ContextGL();
 
-    GLC(gl, gl->GenMailboxCHROMIUM(mailbox.name));
+    gl->GenMailboxCHROMIUM(mailbox.name);
     ResourceProvider::ScopedWriteLockGL lock(resource_provider_, resource_id);
-    GLC(gl, gl->ProduceTextureDirectCHROMIUM(lock.texture_id(), GL_TEXTURE_2D,
-                                             mailbox.name));
+    gl->ProduceTextureDirectCHROMIUM(lock.texture_id(), GL_TEXTURE_2D,
+                                     mailbox.name);
   }
   all_resources_.push_front(
       PlaneResource(resource_id, plane_size, format, mailbox));
@@ -377,10 +388,11 @@ void VideoResourceUpdater::ReturnTexture(
   // resource.
   if (lost_resource || !updater.get())
     return;
-  // VideoFrame::UpdateReleaseSyncPoint() creates new sync point using the same
-  // GL context which created the given |sync_point|, so discard the
-  // |sync_point|.
-  SyncPointClientImpl client(updater->context_provider_->ContextGL());
+  // Update the release sync point in |video_frame| with |sync_point|
+  // returned by the compositor and emit a WaitSyncPointCHROMIUM on
+  // |video_frame|'s previous sync point using the current GL context.
+  SyncPointClientImpl client(updater->context_provider_->ContextGL(),
+                             sync_point);
   video_frame->UpdateReleaseSyncPoint(&client);
 }
 
@@ -390,38 +402,53 @@ VideoFrameExternalResources VideoResourceUpdater::CreateForHardwarePlanes(
   media::VideoFrame::Format frame_format = video_frame->format();
 
   DCHECK_EQ(frame_format, media::VideoFrame::NATIVE_TEXTURE);
-  if (frame_format != media::VideoFrame::NATIVE_TEXTURE)
-      return VideoFrameExternalResources();
-
   if (!context_provider_)
     return VideoFrameExternalResources();
 
-  const gpu::MailboxHolder* mailbox_holder = video_frame->mailbox_holder();
+  size_t textures =
+      media::VideoFrame::NumTextures(video_frame->texture_format());
+  DCHECK_GE(textures, 1u);
   VideoFrameExternalResources external_resources;
-  switch (mailbox_holder->texture_target) {
-    case GL_TEXTURE_2D:
-      external_resources.type = VideoFrameExternalResources::RGB_RESOURCE;
+  switch (video_frame->texture_format()) {
+    case media::VideoFrame::TEXTURE_RGBA:
+    case media::VideoFrame::TEXTURE_RGB:
+      DCHECK_EQ(1u, textures);
+      switch (video_frame->mailbox_holder(0).texture_target) {
+        case GL_TEXTURE_2D:
+          if (video_frame->texture_format() == media::VideoFrame::TEXTURE_RGB)
+            external_resources.type = VideoFrameExternalResources::RGB_RESOURCE;
+          else
+            external_resources.type =
+                VideoFrameExternalResources::RGBA_RESOURCE;
+          break;
+        case GL_TEXTURE_EXTERNAL_OES:
+          external_resources.type =
+              VideoFrameExternalResources::STREAM_TEXTURE_RESOURCE;
+          break;
+        case GL_TEXTURE_RECTANGLE_ARB:
+          external_resources.type = VideoFrameExternalResources::IO_SURFACE;
+          break;
+        default:
+          NOTREACHED();
+          return VideoFrameExternalResources();
+      }
       break;
-    case GL_TEXTURE_EXTERNAL_OES:
-      external_resources.type =
-          VideoFrameExternalResources::STREAM_TEXTURE_RESOURCE;
+    case media::VideoFrame::TEXTURE_YUV_420:
+      external_resources.type = VideoFrameExternalResources::YUV_RESOURCE;
       break;
-    case GL_TEXTURE_RECTANGLE_ARB:
-      external_resources.type = VideoFrameExternalResources::IO_SURFACE;
-      break;
-    default:
-      NOTREACHED();
-      return VideoFrameExternalResources();
   }
+  DCHECK_NE(VideoFrameExternalResources::NONE, external_resources.type);
 
-  external_resources.mailboxes.push_back(
-      TextureMailbox(mailbox_holder->mailbox,
-                     mailbox_holder->texture_target,
-                     mailbox_holder->sync_point));
-  external_resources.mailboxes.back().set_allow_overlay(
-      video_frame->allow_overlay());
-  external_resources.release_callbacks.push_back(
-      base::Bind(&ReturnTexture, AsWeakPtr(), video_frame));
+  for (size_t i = 0; i < textures; ++i) {
+    const gpu::MailboxHolder& mailbox_holder = video_frame->mailbox_holder(i);
+    external_resources.mailboxes.push_back(
+        TextureMailbox(mailbox_holder.mailbox, mailbox_holder.texture_target,
+                       mailbox_holder.sync_point));
+    external_resources.mailboxes.back().set_allow_overlay(
+        video_frame->allow_overlay());
+    external_resources.release_callbacks.push_back(
+        base::Bind(&ReturnTexture, AsWeakPtr(), video_frame));
+  }
   return external_resources;
 }
 
@@ -447,8 +474,7 @@ void VideoResourceUpdater::RecycleResource(
 
   ContextProvider* context_provider = updater->context_provider_;
   if (context_provider && sync_point) {
-    GLC(context_provider->ContextGL(),
-        context_provider->ContextGL()->WaitSyncPointCHROMIUM(sync_point));
+    context_provider->ContextGL()->WaitSyncPointCHROMIUM(sync_point);
   }
 
   if (lost_resource) {

@@ -123,7 +123,7 @@ public:
 
     virtual int caretMinOffset() const override;
     virtual int caretMaxOffset() const override;
-    unsigned renderedTextLength() const;
+    unsigned resolvedTextLength() const;
 
     virtual int previousOffset(int current) const override final;
     virtual int previousOffsetForBackwardDeletion(int current) const override final;
@@ -175,7 +175,6 @@ private:
     void deleteTextBoxes();
     bool containsOnlyWhitespace(unsigned from, unsigned len) const;
     float widthFromCache(const Font&, int start, int len, float xPos, TextDirection, HashSet<const SimpleFontData*>* fallbackFonts, GlyphOverflow*) const;
-    bool isAllASCII() const { return m_isAllASCII; }
 
     void secureText(UChar mask);
 
@@ -198,7 +197,6 @@ private:
     // or removed).
     bool m_linesDirty : 1;
     bool m_containsReversedText : 1;
-    bool m_isAllASCII : 1;
     bool m_canUseSimpleFontCodePath : 1;
     mutable bool m_knownToHaveNoOverflowAndNoFallbackFonts : 1;
 

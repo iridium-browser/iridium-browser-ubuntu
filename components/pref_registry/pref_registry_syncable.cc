@@ -17,107 +17,23 @@ PrefRegistrySyncable::PrefRegistrySyncable() {
 PrefRegistrySyncable::~PrefRegistrySyncable() {
 }
 
-const PrefRegistrySyncable::PrefToStatus&
-PrefRegistrySyncable::syncable_preferences() const {
-  return syncable_preferences_;
-}
-
 void PrefRegistrySyncable::SetSyncableRegistrationCallback(
     const SyncableRegistrationCallback& cb) {
   callback_ = cb;
 }
 
-void PrefRegistrySyncable::RegisterBooleanPref(const char* path,
-                                               bool default_value,
-                                               PrefSyncStatus sync_status) {
-  RegisterSyncablePreference(
-      path, new base::FundamentalValue(default_value), sync_status);
-}
+void PrefRegistrySyncable::OnPrefRegistered(const std::string& path,
+                                            base::Value* default_value,
+                                            uint32 flags) {
+  // Tests that |flags| does not contain both SYNCABLE_PREF and
+  // SYNCABLE_PRIORITY_PREF flags at the same time.
+  DCHECK(!(flags & PrefRegistrySyncable::SYNCABLE_PREF) ||
+         !(flags & PrefRegistrySyncable::SYNCABLE_PRIORITY_PREF));
 
-void PrefRegistrySyncable::RegisterIntegerPref(const char* path,
-                                               int default_value,
-                                               PrefSyncStatus sync_status) {
-  RegisterSyncablePreference(
-      path, new base::FundamentalValue(default_value), sync_status);
-}
-
-void PrefRegistrySyncable::RegisterDoublePref(const char* path,
-                                              double default_value,
-                                              PrefSyncStatus sync_status) {
-  RegisterSyncablePreference(
-      path, new base::FundamentalValue(default_value), sync_status);
-}
-
-void PrefRegistrySyncable::RegisterStringPref(const char* path,
-                                              const std::string& default_value,
-                                              PrefSyncStatus sync_status) {
-  RegisterSyncablePreference(
-      path, new base::StringValue(default_value), sync_status);
-}
-
-void PrefRegistrySyncable::RegisterFilePathPref(
-    const char* path,
-    const base::FilePath& default_value,
-    PrefSyncStatus sync_status) {
-  RegisterSyncablePreference(
-      path, new base::StringValue(default_value.value()), sync_status);
-}
-
-void PrefRegistrySyncable::RegisterListPref(const char* path,
-                                            PrefSyncStatus sync_status) {
-  RegisterSyncablePreference(path, new base::ListValue(), sync_status);
-}
-
-void PrefRegistrySyncable::RegisterListPref(const char* path,
-                                            base::ListValue* default_value,
-                                            PrefSyncStatus sync_status) {
-  RegisterSyncablePreference(path, default_value, sync_status);
-}
-
-void PrefRegistrySyncable::RegisterDictionaryPref(const char* path,
-                                                  PrefSyncStatus sync_status) {
-  RegisterSyncablePreference(path, new base::DictionaryValue(), sync_status);
-}
-
-void PrefRegistrySyncable::RegisterDictionaryPref(
-    const char* path,
-    base::DictionaryValue* default_value,
-    PrefSyncStatus sync_status) {
-  RegisterSyncablePreference(path, default_value, sync_status);
-}
-
-void PrefRegistrySyncable::RegisterInt64Pref(
-    const char* path,
-    int64 default_value,
-    PrefSyncStatus sync_status) {
-  RegisterSyncablePreference(
-      path,
-      new base::StringValue(base::Int64ToString(default_value)),
-      sync_status);
-}
-
-void PrefRegistrySyncable::RegisterUint64Pref(
-    const char* path,
-    uint64 default_value,
-    PrefSyncStatus sync_status) {
-  RegisterSyncablePreference(
-      path,
-      new base::StringValue(base::Uint64ToString(default_value)),
-      sync_status);
-}
-
-void PrefRegistrySyncable::RegisterSyncablePreference(
-    const char* path,
-    base::Value* default_value,
-    PrefSyncStatus sync_status) {
-  PrefRegistry::RegisterPreference(path, default_value);
-
-  if (sync_status == PrefRegistrySyncable::SYNCABLE_PREF ||
-      sync_status == PrefRegistrySyncable::SYNCABLE_PRIORITY_PREF) {
-    syncable_preferences_[path] = sync_status;
-
+  if (flags & PrefRegistrySyncable::SYNCABLE_PREF ||
+      flags & PrefRegistrySyncable::SYNCABLE_PRIORITY_PREF) {
     if (!callback_.is_null())
-      callback_.Run(path, sync_status);
+      callback_.Run(path, flags);
   }
 }
 

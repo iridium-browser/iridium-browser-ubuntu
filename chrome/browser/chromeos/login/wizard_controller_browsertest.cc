@@ -7,6 +7,8 @@
 #include "base/basictypes.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
+#include "base/json/json_file_value_serializer.h"
+#include "base/path_service.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/pref_service_factory.h"
@@ -46,8 +48,10 @@
 #include "chrome/browser/chromeos/policy/server_backed_device_state.h"
 #include "chrome/browser/chromeos/policy/stub_enterprise_install_attributes.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
+#include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -144,7 +148,8 @@ void RunSwitchLanguageTest(const std::string& locale,
   SwitchLanguageTestData data;
   locale_util::SwitchLanguageCallback callback(
       base::Bind(&OnLocaleSwitched, base::Unretained(&data)));
-  locale_util::SwitchLanguage(locale, true, false, callback);
+  locale_util::SwitchLanguage(locale, true, false, callback,
+                              ProfileManager::GetActiveUserProfile());
 
   // Token writing moves control to BlockingPool and back.
   content::RunAllBlockingPoolTasksUntilIdle();
@@ -373,28 +378,25 @@ IN_PROC_BROWSER_TEST_F(WizardControllerTest, VolumeIsAdjustedForChromeVox) {
 class WizardControllerTestURLFetcherFactory
     : public net::TestURLFetcherFactory {
  public:
-  net::URLFetcher* CreateURLFetcher(int id,
-                                    const GURL& url,
-                                    net::URLFetcher::RequestType request_type,
-                                    net::URLFetcherDelegate* d) override {
+  scoped_ptr<net::URLFetcher> CreateURLFetcher(
+      int id,
+      const GURL& url,
+      net::URLFetcher::RequestType request_type,
+      net::URLFetcherDelegate* d) override {
     if (StartsWithASCII(
             url.spec(),
             SimpleGeolocationProvider::DefaultGeolocationProviderURL().spec(),
             true)) {
-      return new net::FakeURLFetcher(url,
-                                     d,
-                                     std::string(kGeolocationResponseBody),
-                                     net::HTTP_OK,
-                                     net::URLRequestStatus::SUCCESS);
+      return scoped_ptr<net::URLFetcher>(new net::FakeURLFetcher(
+          url, d, std::string(kGeolocationResponseBody), net::HTTP_OK,
+          net::URLRequestStatus::SUCCESS));
     }
     if (StartsWithASCII(url.spec(),
                         chromeos::DefaultTimezoneProviderURL().spec(),
                         true)) {
-      return new net::FakeURLFetcher(url,
-                                     d,
-                                     std::string(kTimezoneResponseBody),
-                                     net::HTTP_OK,
-                                     net::URLRequestStatus::SUCCESS);
+      return scoped_ptr<net::URLFetcher>(new net::FakeURLFetcher(
+          url, d, std::string(kTimezoneResponseBody), net::HTTP_OK,
+          net::URLRequestStatus::SUCCESS));
     }
     return net::TestURLFetcherFactory::CreateURLFetcher(
         id, url, request_type, d);
@@ -965,7 +967,11 @@ IN_PROC_BROWSER_TEST_F(WizardControllerBrokenLocalStateTest,
   ASSERT_EQ(1, fake_session_manager_client()->start_device_wipe_call_count());
 }
 
-class WizardControllerProxyAuthOnSigninTest : public WizardControllerTest {
+// Boolean parameter is used to run this test for webview (true) and for
+// iframe (false) GAIA sign in.
+class WizardControllerProxyAuthOnSigninTest
+    : public WizardControllerTest,
+      public testing::WithParamInterface<bool> {
  protected:
   WizardControllerProxyAuthOnSigninTest()
       : proxy_server_(net::SpawnedTestServer::TYPE_BASIC_AUTH_PROXY,
@@ -991,6 +997,27 @@ class WizardControllerProxyAuthOnSigninTest : public WizardControllerTest {
                                     proxy_server_.host_port_pair().ToString());
   }
 
+  bool SetUpUserDataDirectory() override {
+    base::FilePath user_data_dir;
+    CHECK(PathService::Get(chrome::DIR_USER_DATA, &user_data_dir));
+    base::FilePath local_state_path =
+        user_data_dir.Append(chrome::kLocalStateFilename);
+
+    // Set webview disabled flag only when local state file does not exist.
+    // Otherwise, we break PRE tests that leave state in it.
+    if (!base::PathExists(local_state_path)) {
+      base::DictionaryValue local_state_dict;
+
+      if (!GetParam())
+        local_state_dict.SetBoolean(prefs::kWebviewSigninDisabled, true);
+
+      CHECK(JSONFileValueSerializer(local_state_path)
+                .Serialize(local_state_dict));
+    }
+
+    return WizardControllerTest::SetUpUserDataDirectory();
+  }
+
   net::SpawnedTestServer& proxy_server() { return proxy_server_; }
 
  private:
@@ -999,7 +1026,7 @@ class WizardControllerProxyAuthOnSigninTest : public WizardControllerTest {
   DISALLOW_COPY_AND_ASSIGN(WizardControllerProxyAuthOnSigninTest);
 };
 
-IN_PROC_BROWSER_TEST_F(WizardControllerProxyAuthOnSigninTest,
+IN_PROC_BROWSER_TEST_P(WizardControllerProxyAuthOnSigninTest,
                        ProxyAuthDialogOnSigninScreen) {
   content::WindowedNotificationObserver auth_needed_waiter(
       chrome::NOTIFICATION_AUTH_NEEDED,
@@ -1010,6 +1037,10 @@ IN_PROC_BROWSER_TEST_F(WizardControllerProxyAuthOnSigninTest,
   LoginDisplayHostImpl::default_host()->StartSignInScreen(LoginScreenContext());
   auth_needed_waiter.Wait();
 }
+
+INSTANTIATE_TEST_CASE_P(WizardControllerProxyAuthOnSigninSuite,
+                        WizardControllerProxyAuthOnSigninTest,
+                        testing::Bool());
 
 class WizardControllerKioskFlowTest : public WizardControllerFlowTest {
  protected:

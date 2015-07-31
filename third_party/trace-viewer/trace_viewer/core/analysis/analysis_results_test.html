@@ -26,7 +26,7 @@ tv.b.unittest.testSuite(function() {
       didRequestSelectionChange = true;
     });
     linkEl.click();
-    assertTrue(didRequestSelectionChange);
+    assert.isTrue(didRequestSelectionChange);
   });
 
   test('displayValuesInInfoRow', function() {
@@ -34,43 +34,43 @@ tv.b.unittest.testSuite(function() {
     var table = new tv.c.analysis.StubAnalysisTable();
     var node;
     var sectionNode;
-    assertEquals(0, table.nodeCount);
+    assert.equal(table.nodeCount, 0);
 
     r.appendInfoRow(table, 'false_value', false);
-    assertEquals(1, table.nodeCount);
+    assert.equal(table.nodeCount, 1);
     sectionNode = table.lastNode;
-    assertEquals(1, sectionNode.nodeCount);
+    assert.equal(sectionNode.nodeCount, 1);
     node = sectionNode.lastNode;
-    assertEquals('false_value', node.children[0].innerText);
-    assertEquals('false', node.children[1].innerText);
+    assert.equal(node.children[0].innerText, 'false_value');
+    assert.equal(node.children[1].$.content.textContent, 'false');
 
     r.appendInfoRow(table, 'true_value', true);
 
-    assertEquals(1, sectionNode.nodeCount);
+    assert.equal(sectionNode.nodeCount, 1);
     node = sectionNode.lastNode;
-    assertEquals('true_value', node.children[0].innerText);
-    assertEquals('true', node.children[1].innerText);
+    assert.equal(node.children[0].innerText, 'true_value');
+    assert.equal(node.children[1].$.content.textContent, 'true');
 
     r.appendInfoRow(table, 'string_value', 'a string');
-    assertEquals(1, sectionNode.nodeCount);
+    assert.equal(sectionNode.nodeCount, 1);
     node = sectionNode.lastNode;
-    assertEquals('string_value', node.children[0].innerText);
-    assertEquals('"a string"', node.children[1].innerText);
+    assert.equal(node.children[0].innerText, 'string_value');
+    assert.equal(node.children[1].$.content.textContent, '"a string"');
 
     r.appendInfoRow(table, 'number_value', 12345);
-    assertEquals(1, sectionNode.nodeCount);
+    assert.equal(sectionNode.nodeCount, 1);
     node = sectionNode.lastNode;
-    assertEquals('number_value', node.children[0].innerText);
-    assertEquals('12345', node.children[1].innerText);
+    assert.equal(node.children[0].innerText, 'number_value');
+    assert.equal(node.children[1].$.content.textContent, '12345');
 
     r.appendInfoRow(table, 'undefined', undefined);
-    assertEquals(1, sectionNode.nodeCount);
+    assert.equal(sectionNode.nodeCount, 1);
     node = sectionNode.lastNode;
-    assertEquals('undefined', node.children[0].innerText);
-    assertEquals('', node.children[1].innerText);
+    assert.equal(node.children[0].innerText, 'undefined');
+    assert.equal(node.children[1].innerText, '');
 
-    assertEquals(0, sectionNode.nodeCount);
-    assertEquals(0, table.nodeCount);
+    assert.equal(sectionNode.nodeCount, 0);
+    assert.equal(table.nodeCount, 0);
   });
 });
 </script>

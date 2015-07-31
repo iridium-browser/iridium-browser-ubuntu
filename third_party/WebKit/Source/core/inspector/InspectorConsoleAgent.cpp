@@ -126,7 +126,6 @@ static TypeBuilder::Console::ConsoleMessage::Source::Enum messageSourceValue(Mes
     case StorageMessageSource: return TypeBuilder::Console::ConsoleMessage::Source::Storage;
     case AppCacheMessageSource: return TypeBuilder::Console::ConsoleMessage::Source::Appcache;
     case RenderingMessageSource: return TypeBuilder::Console::ConsoleMessage::Source::Rendering;
-    case CSSMessageSource: return TypeBuilder::Console::ConsoleMessage::Source::Css;
     case SecurityMessageSource: return TypeBuilder::Console::ConsoleMessage::Source::Security;
     case OtherMessageSource: return TypeBuilder::Console::ConsoleMessage::Source::Other;
     case DeprecationMessageSource: return TypeBuilder::Console::ConsoleMessage::Source::Deprecation;
@@ -162,6 +161,7 @@ static TypeBuilder::Console::ConsoleMessage::Level::Enum messageLevelValue(Messa
     case WarningMessageLevel: return TypeBuilder::Console::ConsoleMessage::Level::Warning;
     case ErrorMessageLevel: return TypeBuilder::Console::ConsoleMessage::Level::Error;
     case InfoMessageLevel: return TypeBuilder::Console::ConsoleMessage::Level::Info;
+    case RevokedErrorMessageLevel: return TypeBuilder::Console::ConsoleMessage::Level::RevokedError;
     }
     return TypeBuilder::Console::ConsoleMessage::Level::Log;
 }
@@ -221,6 +221,10 @@ void InspectorConsoleAgent::sendConsoleMessageToFrontend(ConsoleMessage* console
         if (asyncCallStack)
             jsonObj->setAsyncStackTrace(asyncCallStack->buildInspectorObject());
     }
+    if (consoleMessage->messageId())
+        jsonObj->setMessageId(consoleMessage->messageId());
+    if (consoleMessage->relatedMessageId())
+        jsonObj->setRelatedMessageId(consoleMessage->relatedMessageId());
     frontend()->messageAdded(jsonObj);
     frontend()->flush();
 }

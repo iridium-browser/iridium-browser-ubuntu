@@ -22,6 +22,7 @@
 #ifndef Chrome_h
 #define Chrome_h
 
+#include "core/CoreExport.h"
 #include "core/loader/NavigationPolicy.h"
 #include "platform/Cursor.h"
 #include "platform/HostWindow.h"
@@ -51,7 +52,7 @@ struct DateTimeChooserParameters;
 struct ViewportDescription;
 struct WindowFeatures;
 
-class Chrome final : public HostWindow {
+class CORE_EXPORT Chrome final : public HostWindow {
 public:
     virtual ~Chrome();
 
@@ -62,15 +63,16 @@ public:
     // HostWindow methods.
     virtual void invalidateRect(const IntRect&) override;
     virtual IntRect viewportToScreen(const IntRect&) const override;
-    virtual blink::WebScreenInfo screenInfo() const override;
-
     virtual void scheduleAnimation() override;
+
+    WebScreenInfo screenInfo() const;
 
     void scheduleAnimationForFrame(LocalFrame* localRoot);
 
     void contentsSizeChanged(LocalFrame*, const IntSize&) const;
 
     void setCursor(const Cursor&);
+    Cursor getLastSetCursorForTesting() const;
 
     void setWindowRect(const IntRect&) const;
     IntRect windowRect() const;
@@ -137,6 +139,7 @@ private:
     Page* m_page;
     ChromeClient* m_client;
     Vector<PopupOpeningObserver*> m_popupOpeningObservers;
+    Cursor m_lastSetMouseCursorForTesting;
 };
 
 } // namespace blink

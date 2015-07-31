@@ -27,8 +27,13 @@ FakeRendererScheduler::LoadingTaskRunner() {
   return nullptr;
 }
 
-scoped_refptr<SingleThreadIdleTaskRunner>
+scoped_refptr<scheduler::SingleThreadIdleTaskRunner>
 FakeRendererScheduler::IdleTaskRunner() {
+  return nullptr;
+}
+
+scoped_refptr<base::SingleThreadTaskRunner>
+FakeRendererScheduler::TimerTaskRunner() {
   return nullptr;
 }
 
@@ -41,7 +46,12 @@ void FakeRendererScheduler::BeginFrameNotExpectedSoon() {
 void FakeRendererScheduler::DidCommitFrameToCompositor() {
 }
 
-void FakeRendererScheduler::DidReceiveInputEventOnCompositorThread(
+void FakeRendererScheduler::DidHandleInputEventOnCompositorThread(
+    const blink::WebInputEvent& web_input_event,
+    InputEventState event_state) {
+}
+
+void FakeRendererScheduler::DidHandleInputEventOnMainThread(
     const blink::WebInputEvent& web_input_event) {
 }
 
@@ -50,6 +60,12 @@ void FakeRendererScheduler::DidAnimateForInputOnCompositorThread() {
 
 bool FakeRendererScheduler::IsHighPriorityWorkAnticipated() {
   return false;
+}
+
+void FakeRendererScheduler::OnRendererHidden() {
+}
+
+void FakeRendererScheduler::OnRendererVisible() {
 }
 
 bool FakeRendererScheduler::ShouldYieldForHighPriorityWork() {
@@ -69,6 +85,12 @@ void FakeRendererScheduler::RemoveTaskObserver(
 }
 
 void FakeRendererScheduler::Shutdown() {
+}
+
+void FakeRendererScheduler::SuspendTimerQueue() {
+}
+
+void FakeRendererScheduler::ResumeTimerQueue() {
 }
 
 }  // namespace content

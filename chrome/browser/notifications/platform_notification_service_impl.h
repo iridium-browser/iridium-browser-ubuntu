@@ -5,6 +5,11 @@
 #ifndef CHROME_BROWSER_NOTIFICATIONS_PLATFORM_NOTIFICATION_SERVICE_IMPL_H_
 #define CHROME_BROWSER_NOTIFICATIONS_PLATFORM_NOTIFICATION_SERVICE_IMPL_H_
 
+#include <stdint.h>
+#include <map>
+#include <set>
+#include <string>
+
 #include "base/gtest_prod_util.h"
 #include "base/memory/singleton.h"
 #include "base/strings/string16.h"
@@ -34,12 +39,17 @@ class PlatformNotificationServiceImpl
   // needed, on which the event will be fired. Must be called on the UI thread.
   void OnPersistentNotificationClick(
       content::BrowserContext* browser_context,
-      int64 service_worker_registration_id,
-      const std::string& notification_id,
-      const GURL& origin,
-      const content::PlatformNotificationData& notification_data,
-      const base::Callback<void(content::PersistentNotificationStatus)>&
-          callback) const;
+      int64_t persistent_notification_id,
+      const GURL& origin) const;
+
+  // To be called when a persistent notification has been closed. The data
+  // associated with the notification has to be pruned from the database in this
+  // case, to make sure that it continues to be in sync. Must be called on the
+  // UI thread.
+  void OnPersistentNotificationClose(
+      content::BrowserContext* browser_context,
+      int64_t persistent_notification_id,
+      const GURL& origin) const;
 
   // Returns the Notification UI Manager through which notifications can be
   // displayed to the user. Can be overridden for testing.
@@ -63,13 +73,16 @@ class PlatformNotificationServiceImpl
       base::Closure* cancel_callback) override;
   void DisplayPersistentNotification(
       content::BrowserContext* browser_context,
-      int64 service_worker_registration_id,
+      int64_t persistent_notification_id,
       const GURL& origin,
       const SkBitmap& icon,
       const content::PlatformNotificationData& notification_data) override;
   void ClosePersistentNotification(
       content::BrowserContext* browser_context,
-      const std::string& persistent_notification_id) override;
+      int64_t persistent_notification_id) override;
+  bool GetDisplayedPersistentNotifications(
+      content::BrowserContext* browser_context,
+      std::set<std::string>* displayed_notifications) override;
 
  private:
   friend struct DefaultSingletonTraits<PlatformNotificationServiceImpl>;
@@ -113,6 +126,10 @@ class PlatformNotificationServiceImpl
 
   // Weak reference. Ownership maintains with the test.
   NotificationUIManager* notification_ui_manager_for_tests_;
+
+  // Mapping between a persistent notification id and the id of the associated
+  // message_center::Notification object. Must only be used on the UI thread.
+  std::map<int64_t, std::string> persistent_notifications_;
 
   DISALLOW_COPY_AND_ASSIGN(PlatformNotificationServiceImpl);
 };

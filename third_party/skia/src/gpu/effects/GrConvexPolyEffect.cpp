@@ -25,7 +25,7 @@ public:
 
     const char* name() const override { return "AARect"; }
 
-    void getGLProcessorKey(const GrGLCaps&, GrProcessorKeyBuilder*) const override;
+    void getGLProcessorKey(const GrGLSLCaps&, GrProcessorKeyBuilder*) const override;
 
     GrGLFragmentProcessor* createGLInstance() const override;
 
@@ -92,7 +92,7 @@ public:
                           const TransformedCoordsArray&,
                           const TextureSamplerArray&) override;
 
-    static inline void GenKey(const GrProcessor&, const GrGLCaps&, GrProcessorKeyBuilder*);
+    static inline void GenKey(const GrProcessor&, const GrGLSLCaps&, GrProcessorKeyBuilder*);
 
     void setData(const GrGLProgramDataManager&, const GrProcessor&) override;
 
@@ -122,7 +122,7 @@ void GLAARectEffect::emitCode(GrGLFPBuilder* builder,
                                        "rect",
                                        &rectName);
 
-    GrGLFPFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+    GrGLFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
     const char* fragmentPos = fsBuilder->fragmentPosition();
     if (GrProcessorEdgeTypeIsAA(aare.getEdgeType())) {
         // The amount of coverage removed in x and y by the edges is computed as a pair of negative
@@ -160,13 +160,13 @@ void GLAARectEffect::setData(const GrGLProgramDataManager& pdman, const GrProces
     }
 }
 
-void GLAARectEffect::GenKey(const GrProcessor& processor, const GrGLCaps&,
+void GLAARectEffect::GenKey(const GrProcessor& processor, const GrGLSLCaps&,
                             GrProcessorKeyBuilder* b) {
     const AARectEffect& aare = processor.cast<AARectEffect>();
     b->add32(aare.getEdgeType());
 }
 
-void AARectEffect::getGLProcessorKey(const GrGLCaps& caps, GrProcessorKeyBuilder* b) const {
+void AARectEffect::getGLProcessorKey(const GrGLSLCaps& caps, GrProcessorKeyBuilder* b) const {
     GLAARectEffect::GenKey(*this, caps, b);
 }
 
@@ -187,7 +187,7 @@ public:
                           const TransformedCoordsArray&,
                           const TextureSamplerArray&) override;
 
-    static inline void GenKey(const GrProcessor&, const GrGLCaps&, GrProcessorKeyBuilder*);
+    static inline void GenKey(const GrProcessor&, const GrGLSLCaps&, GrProcessorKeyBuilder*);
 
     void setData(const GrGLProgramDataManager&, const GrProcessor&) override;
 
@@ -216,7 +216,7 @@ void GrGLConvexPolyEffect::emitCode(GrGLFPBuilder* builder,
                                              "edges",
                                             cpe.getEdgeCount(),
                                             &edgeArrayName);
-    GrGLFPFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+    GrGLFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
     fsBuilder->codeAppend("\t\tfloat alpha = 1.0;\n");
     fsBuilder->codeAppend("\t\tfloat edge;\n");
     const char* fragmentPos = fsBuilder->fragmentPosition();
@@ -252,7 +252,7 @@ void GrGLConvexPolyEffect::setData(const GrGLProgramDataManager& pdman, const Gr
     }
 }
 
-void GrGLConvexPolyEffect::GenKey(const GrProcessor& processor, const GrGLCaps&,
+void GrGLConvexPolyEffect::GenKey(const GrProcessor& processor, const GrGLSLCaps&,
                                   GrProcessorKeyBuilder* b) {
     const GrConvexPolyEffect& cpe = processor.cast<GrConvexPolyEffect>();
     GR_STATIC_ASSERT(kGrProcessorEdgeTypeCnt <= 8);
@@ -326,7 +326,7 @@ void GrConvexPolyEffect::onComputeInvariantOutput(GrInvariantOutput* inout) cons
     inout->mulByUnknownSingleComponent();
 }
 
-void GrConvexPolyEffect::getGLProcessorKey(const GrGLCaps& caps,
+void GrConvexPolyEffect::getGLProcessorKey(const GrGLSLCaps& caps,
                                            GrProcessorKeyBuilder* b) const {
     GrGLConvexPolyEffect::GenKey(*this, caps, b);
 }

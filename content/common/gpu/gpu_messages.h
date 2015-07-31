@@ -54,6 +54,7 @@ IPC_ENUM_TRAITS_MAX_VALUE(gfx::SurfaceType,
                           gfx::SURFACE_TYPE_LAST)
 IPC_ENUM_TRAITS_MAX_VALUE(gpu::MemoryAllocation::PriorityCutoff,
                           gpu::MemoryAllocation::CUTOFF_LAST)
+IPC_ENUM_TRAITS_MAX_VALUE(gpu::error::Error, gpu::error::kErrorLast)
 IPC_ENUM_TRAITS_MAX_VALUE(gpu::error::ContextLostReason,
                           gpu::error::kContextLostReasonLast)
 IPC_ENUM_TRAITS_MAX_VALUE(media::VideoEncodeAccelerator::Error,
@@ -78,12 +79,12 @@ IPC_STRUCT_BEGIN(GPUCreateCommandBufferConfig)
 IPC_STRUCT_END()
 
 IPC_STRUCT_BEGIN(GpuMsg_CreateGpuMemoryBuffer_Params)
-IPC_STRUCT_MEMBER(int32, id)
-IPC_STRUCT_MEMBER(gfx::Size, size)
-IPC_STRUCT_MEMBER(gfx::GpuMemoryBuffer::Format, format)
-IPC_STRUCT_MEMBER(gfx::GpuMemoryBuffer::Usage, usage)
-IPC_STRUCT_MEMBER(int32, client_id)
-IPC_STRUCT_MEMBER(gfx::PluginWindowHandle, surface_handle)
+  IPC_STRUCT_MEMBER(int32, id)
+  IPC_STRUCT_MEMBER(gfx::Size, size)
+  IPC_STRUCT_MEMBER(gfx::GpuMemoryBuffer::Format, format)
+  IPC_STRUCT_MEMBER(gfx::GpuMemoryBuffer::Usage, usage)
+  IPC_STRUCT_MEMBER(int32, client_id)
+  IPC_STRUCT_MEMBER(gfx::PluginWindowHandle, surface_handle)
 IPC_STRUCT_END()
 
 IPC_STRUCT_BEGIN(GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params)
@@ -146,6 +147,12 @@ IPC_STRUCT_TRAITS_BEGIN(gpu::GPUInfo::GPUDevice)
   IPC_STRUCT_TRAITS_MEMBER(device_string)
 IPC_STRUCT_TRAITS_END()
 
+IPC_STRUCT_TRAITS_BEGIN(gpu::VideoDecodeAcceleratorSupportedProfile)
+  IPC_STRUCT_TRAITS_MEMBER(profile)
+  IPC_STRUCT_TRAITS_MEMBER(max_resolution)
+  IPC_STRUCT_TRAITS_MEMBER(min_resolution)
+IPC_STRUCT_TRAITS_END()
+
 IPC_STRUCT_TRAITS_BEGIN(gpu::VideoEncodeAcceleratorSupportedProfile)
   IPC_STRUCT_TRAITS_MEMBER(profile)
   IPC_STRUCT_TRAITS_MEMBER(max_resolution)
@@ -166,6 +173,7 @@ IPC_STRUCT_TRAITS_BEGIN(gpu::GPUInfo)
   IPC_STRUCT_TRAITS_MEMBER(driver_date)
   IPC_STRUCT_TRAITS_MEMBER(pixel_shader_version)
   IPC_STRUCT_TRAITS_MEMBER(vertex_shader_version)
+  IPC_STRUCT_TRAITS_MEMBER(max_msaa_samples)
   IPC_STRUCT_TRAITS_MEMBER(machine_model_name)
   IPC_STRUCT_TRAITS_MEMBER(machine_model_version)
   IPC_STRUCT_TRAITS_MEMBER(gl_version)
@@ -187,6 +195,7 @@ IPC_STRUCT_TRAITS_BEGIN(gpu::GPUInfo)
   IPC_STRUCT_TRAITS_MEMBER(dx_diagnostics_info_state)
   IPC_STRUCT_TRAITS_MEMBER(dx_diagnostics)
 #endif
+  IPC_STRUCT_TRAITS_MEMBER(video_decode_accelerator_supported_profiles)
   IPC_STRUCT_TRAITS_MEMBER(video_encode_accelerator_supported_profiles)
 IPC_STRUCT_TRAITS_END()
 
@@ -544,8 +553,9 @@ IPC_SYNC_MESSAGE_ROUTED5_1(GpuCommandBufferMsg_CreateVideoEncoder,
 
 // Tells the proxy that there was an error and the command buffer had to be
 // destroyed for some reason.
-IPC_MESSAGE_ROUTED1(GpuCommandBufferMsg_Destroyed,
-                    gpu::error::ContextLostReason /* reason */)
+IPC_MESSAGE_ROUTED2(GpuCommandBufferMsg_Destroyed,
+                    gpu::error::ContextLostReason, /* reason */
+                    gpu::error::Error /* error */)
 
 // Tells the browser that SwapBuffers returned and passes latency info
 IPC_MESSAGE_ROUTED1(GpuCommandBufferMsg_SwapBuffersCompleted,

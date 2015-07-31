@@ -109,9 +109,9 @@
 #ifndef OPENSSL_HEADER_ERR_H
 #define OPENSSL_HEADER_ERR_H
 
+#include <stdio.h>
+
 #include <openssl/base.h>
-#include <openssl/thread.h>
-#include <openssl/lhash.h>
 
 #if defined(__cplusplus)
 extern "C" {
@@ -142,13 +142,18 @@ extern "C" {
 
 /* Startup and shutdown. */
 
+/* ERR_load_BIO_strings does nothing.
+ *
+ * TODO(fork): remove. libjingle calls this. */
+OPENSSL_EXPORT void ERR_load_BIO_strings(void);
+
+/* ERR_load_ERR_strings does nothing. */
+OPENSSL_EXPORT void ERR_load_ERR_strings(void);
+
 /* ERR_load_crypto_strings does nothing. */
 OPENSSL_EXPORT void ERR_load_crypto_strings(void);
 
-/* ERR_free_strings frees any memory retained by the error system, expect for
- * per-thread structures which are assumed to have already been freed with
- * |ERR_remove_thread_state|. This should only be called at process
- * shutdown. */
+/* ERR_free_strings does nothing. */
 OPENSSL_EXPORT void ERR_free_strings(void);
 
 
@@ -254,13 +259,21 @@ OPENSSL_EXPORT void ERR_print_errors_cb(ERR_print_errors_callback_t callback,
                                         void *ctx);
 
 
+/* ERR_print_errors_fp prints the current contents of the error stack to |file|
+ * using human readable strings where possible. */
+OPENSSL_EXPORT void ERR_print_errors_fp(FILE *file);
+
 /* Clearing errors. */
 
 /* ERR_clear_error clears the error queue for the current thread. */
 OPENSSL_EXPORT void ERR_clear_error(void);
 
-/* ERR_remove_thread_state deletes the error queue for the given thread. If
- * |tid| is NULL then the error queue for the current thread is deleted. */
+/* ERR_remove_thread_state clears the error queue for the current thread if
+ * |tid| is NULL. Otherwise it calls |assert(0)|, because it's no longer
+ * possible to delete the error queue for other threads.
+ *
+ * Error queues are thread-local data and are deleted automatically. You do not
+ * need to call this function. Use |ERR_clear_error|. */
 OPENSSL_EXPORT void ERR_remove_thread_state(const CRYPTO_THREADID *tid);
 
 
@@ -270,6 +283,12 @@ OPENSSL_EXPORT void ERR_remove_thread_state(const CRYPTO_THREADID *tid);
  * |library| argument to |ERR_put_error|. This is intended for code that wishes
  * to push its own, non-standard errors to the error queue. */
 OPENSSL_EXPORT int ERR_get_next_error_library(void);
+
+
+/* Deprecated functions. */
+
+/* |ERR_remove_state| calls |ERR_clear_error|. */
+OPENSSL_EXPORT void ERR_remove_state(unsigned long pid);
 
 
 /* Private functions. */
@@ -354,9 +373,6 @@ struct err_error_st {
 
 /* ERR_STATE contains the per-thread, error queue. */
 typedef struct err_state_st {
-  /* tid is the identifier of the thread that owns this queue. */
-  CRYPTO_THREADID tid;
-
   /* errors contains the ERR_NUM_ERRORS most recent errors, organised as a ring
    * buffer. */
   struct err_error_st errors[ERR_NUM_ERRORS];
@@ -471,26 +487,6 @@ enum {
 #define ERR_GET_FUNC(packed_error) ((int)(((packed_error) >> 12) & 0xfff))
 #define ERR_GET_REASON(packed_error) ((int)((packed_error) & 0xfff))
 
-/* ERR_FNS_st is a structure of function pointers that contains the actual
- * implementation of the error queue handling functions. */
-struct ERR_FNS_st {
-  void (*shutdown)(void (*err_state_free_cb)(ERR_STATE*));
-
-  /* get_state returns the ERR_STATE for the current thread. This function
-   * never returns NULL. */
-  ERR_STATE *(*get_state)(void);
-
-  /* release_state returns the |ERR_STATE| for the given thread, or NULL if
-   * none exists. It the return value is not NULL, it also returns ownership of
-   * the |ERR_STATE| and deletes it from its data structures. */
-  ERR_STATE *(*release_state)(const CRYPTO_THREADID *tid);
-
-  /* get_next_library returns a unique value suitable for passing as the
-   * |library| to error calls. It will be distinct from all built-in library
-   * values. */
-  int (*get_next_library)(void);
-};
-
 /* OPENSSL_DECLARE_ERROR_REASON is used by util/make_errors.h (which generates
  * the error defines) to recognise that an additional reason value is needed.
  * This is needed when the reason value is used outside of an
@@ -504,20 +500,6 @@ struct ERR_FNS_st {
  * |OPENSSL_PUT_ERROR| * macro. The resulting define will be
  * ${lib}_F_${reason}. */
 #define OPENSSL_DECLARE_ERROR_FUNCTION(lib, function_name)
-
-/* ERR_load_BIO_strings does nothing.
- *
- * TODO(fork): remove. libjingle calls this. */
-OPENSSL_EXPORT void ERR_load_BIO_strings(void);
-
-
-/* Android compatibility section.
- *
- * These functions are declared, temporarily, for Android because
- * wpa_supplicant will take a little time to sync with upstream. Outside of
- * Android they'll have no definition. */
-
-OPENSSL_EXPORT void ERR_remove_state(unsigned long pid);
 
 
 #if defined(__cplusplus)

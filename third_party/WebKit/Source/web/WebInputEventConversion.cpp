@@ -87,20 +87,6 @@ static FloatPoint convertHitPointToWindow(const Widget* widget, FloatPoint point
         (point.y() - offset.height()) / scale + pinchViewport.y() + overscrollOffset.height());
 }
 
-static int toWebEventModifiers(unsigned platformModifiers)
-{
-    int newModifiers = 0;
-    if (platformModifiers & PlatformEvent::ShiftKey)
-        newModifiers |= WebInputEvent::ShiftKey;
-    if (platformModifiers & PlatformEvent::CtrlKey)
-        newModifiers |= WebInputEvent::ControlKey;
-    if (platformModifiers & PlatformEvent::AltKey)
-        newModifiers |= WebInputEvent::AltKey;
-    if (platformModifiers & PlatformEvent::MetaKey)
-        newModifiers |= WebInputEvent::MetaKey;
-    return newModifiers;
-}
-
 static unsigned toPlatformEventModifiers(int webModifiers)
 {
     unsigned newModifiers = 0;
@@ -320,7 +306,9 @@ PlatformKeyboardEventBuilder::PlatformKeyboardEventBuilder(const WebKeyboardEven
     m_nativeVirtualKeyCode = e.nativeKeyCode;
     m_isKeypad = (e.modifiers & WebInputEvent::IsKeyPad);
     m_isSystemKey = e.isSystemKey;
+    // TODO: BUG482880 Fix this initialization to lazy initialization.
     m_code = Platform::current()->domCodeStringFromEnum(e.domCode);
+    m_key = Platform::current()->domKeyStringFromEnum(e.domKey);
 
     m_modifiers = toPlatformEventModifiers(e.modifiers);
 
@@ -598,48 +586,6 @@ WebMouseEventBuilder::WebMouseEventBuilder(const Widget* widget, const LayoutObj
     y = localPoint.y();
 }
 
-WebMouseEventBuilder::WebMouseEventBuilder(const Widget* widget, const PlatformMouseEvent& event)
-{
-    switch (event.type()) {
-    case PlatformEvent::MouseMoved:
-        type = MouseMove;
-        break;
-    case PlatformEvent::MousePressed:
-        type = MouseDown;
-        break;
-    case PlatformEvent::MouseReleased:
-        type = MouseUp;
-        break;
-    default:
-        ASSERT_NOT_REACHED();
-        type = Undefined;
-        return;
-    }
-
-    modifiers = toWebEventModifiers(event.modifiers());
-    timeStampSeconds = event.timestamp();
-
-    // FIXME: Widget is always toplevel, unless it's a popup. We may be able
-    // to get rid of this once we abstract popups into a WebKit API.
-    IntPoint position = widget->convertToContainingWindow(event.position());
-    float scale = 1;
-    if (widget) {
-        FrameView* rootView = toFrameView(widget->root());
-        if (rootView)
-            scale = rootView->inputEventsScaleFactor();
-    }
-    position.scale(scale, scale);
-    x = position.x();
-    y = position.y();
-    globalX = event.globalPosition().x();
-    globalY = event.globalPosition().y();
-    movementX = event.movementDelta().x() * scale;
-    movementY = event.movementDelta().y() * scale;
-
-    button = static_cast<Button>(event.button());
-    clickCount = event.clickCount();
-}
-
 WebMouseWheelEventBuilder::WebMouseWheelEventBuilder(const Widget* widget, const LayoutObject* layoutObject, const WheelEvent& event)
 {
     if (event.type() != EventTypeNames::wheel && event.type() != EventTypeNames::mousewheel)
@@ -683,6 +629,7 @@ WebKeyboardEventBuilder::WebKeyboardEventBuilder(const KeyboardEvent& event)
         return;
     nativeKeyCode = event.keyEvent()->nativeVirtualKeyCode();
     domCode = Platform::current()->domEnumFromCodeString(event.keyEvent()->code());
+    domKey = Platform::current()->domKeyEnumFromString(event.keyEvent()->key());
     unsigned numberOfCharacters = std::min(event.keyEvent()->text().length(), static_cast<unsigned>(textLengthCap));
     for (unsigned i = 0; i < numberOfCharacters; ++i) {
         text[i] = event.keyEvent()->text()[i];
@@ -707,26 +654,6 @@ WebInputEvent::Type toWebKeyboardEventType(PlatformEvent::Type type)
     }
 }
 
-WebKeyboardEventBuilder::WebKeyboardEventBuilder(const PlatformKeyboardEvent& event)
-{
-    type = toWebKeyboardEventType(event.type());
-    modifiers = toWebEventModifiers(event.modifiers());
-    if (event.isAutoRepeat())
-        modifiers |= WebInputEvent::IsAutoRepeat;
-    if (event.isKeypad())
-        modifiers |= WebInputEvent::IsKeyPad;
-    isSystemKey = event.isSystemKey();
-    nativeKeyCode = event.nativeVirtualKeyCode();
-    domCode = Platform::current()->domEnumFromCodeString(event.code());
-
-    windowsKeyCode = windowsKeyCodeWithoutLocation(event.windowsVirtualKeyCode());
-    modifiers |= locationModifiersFromWindowsKeyCode(event.windowsVirtualKeyCode());
-
-    event.text().copyTo(text, 0, textLengthCap);
-    event.unmodifiedText().copyTo(unmodifiedText, 0, textLengthCap);
-    memcpy(keyIdentifier, event.keyIdentifier().ascii().data(), std::min(static_cast<unsigned>(keyIdentifierLengthCap), event.keyIdentifier().length()));
-}
-
 static WebTouchPoint toWebTouchPoint(const Touch* touch, const LayoutObject* layoutObject, WebTouchPoint::State state)
 {
     WebTouchPoint point;
@@ -741,16 +668,16 @@ static WebTouchPoint toWebTouchPoint(const Touch* touch, const LayoutObject* lay
     return point;
 }
 
-static bool hasTouchPointWithId(const WebTouchPoint* touchPoints, unsigned touchPointsLength, unsigned id)
+static unsigned indexOfTouchPointWithId(const WebTouchPoint* touchPoints, unsigned touchPointsLength, unsigned id)
 {
     for (unsigned i = 0; i < touchPointsLength; ++i) {
         if (touchPoints[i].id == static_cast<int>(id))
-            return true;
+            return i;
     }
-    return false;
+    return std::numeric_limits<unsigned>::max();
 }
 
-static void addTouchPointsIfNotYetAdded(const Widget* widget, WebTouchPoint::State state, TouchList* touches, WebTouchPoint* touchPoints, unsigned* touchPointsLength, const LayoutObject* layoutObject)
+static void addTouchPointsUpdateStateIfNecessary(WebTouchPoint::State state, TouchList* touches, WebTouchPoint* touchPoints, unsigned* touchPointsLength, const LayoutObject* layoutObject)
 {
     unsigned initialTouchPointsLength = *touchPointsLength;
     for (unsigned i = 0; i < touches->length(); ++i) {
@@ -759,15 +686,17 @@ static void addTouchPointsIfNotYetAdded(const Widget* widget, WebTouchPoint::Sta
             return;
 
         const Touch* touch = touches->item(i);
-        if (hasTouchPointWithId(touchPoints, initialTouchPointsLength, touch->identifier()))
-            continue;
-
-        touchPoints[pointIndex] = toWebTouchPoint(touch, layoutObject, state);
-        ++(*touchPointsLength);
+        unsigned existingPointIndex = indexOfTouchPointWithId(touchPoints, initialTouchPointsLength, touch->identifier());
+        if (existingPointIndex != std::numeric_limits<unsigned>::max()) {
+            touchPoints[existingPointIndex].state = state;
+        } else {
+            touchPoints[pointIndex] = toWebTouchPoint(touch, layoutObject, state);
+            ++(*touchPointsLength);
+        }
     }
 }
 
-WebTouchEventBuilder::WebTouchEventBuilder(const Widget* widget, const LayoutObject* layoutObject, const TouchEvent& event)
+WebTouchEventBuilder::WebTouchEventBuilder(const LayoutObject* layoutObject, const TouchEvent& event)
 {
     if (event.type() == EventTypeNames::touchstart)
         type = TouchStart;
@@ -788,14 +717,22 @@ WebTouchEventBuilder::WebTouchEventBuilder(const Widget* widget, const LayoutObj
     cancelable = event.cancelable();
     causesScrollingIfUncanceled = event.causesScrollingIfUncanceled();
 
-    addTouchPointsIfNotYetAdded(widget, toWebTouchPointState(event.type()), event.changedTouches(), touches, &touchesLength, layoutObject);
-    addTouchPointsIfNotYetAdded(widget, WebTouchPoint::StateStationary, event.touches(), touches, &touchesLength, layoutObject);
+    // Currently touches[] is empty, add stationary points as-is.
+    for (unsigned i = 0; i < event.touches()->length() && i < static_cast<unsigned>(WebTouchEvent::touchesLengthCap); ++i) {
+        touches[i] = toWebTouchPoint(event.touches()->item(i), layoutObject, WebTouchPoint::StateStationary);
+        ++touchesLength;
+    }
+    // If any existing points are also in the change list, we should update
+    // their state, otherwise just add the new points.
+    addTouchPointsUpdateStateIfNecessary(toWebTouchPointState(event.type()), event.changedTouches(), touches, &touchesLength, layoutObject);
 }
 
-WebGestureEventBuilder::WebGestureEventBuilder(const Widget* widget, const LayoutObject* layoutObject, const GestureEvent& event)
+WebGestureEventBuilder::WebGestureEventBuilder(const LayoutObject* layoutObject, const GestureEvent& event)
 {
     if (event.type() == EventTypeNames::gestureshowpress)
         type = GestureShowPress;
+    else if (event.type() == EventTypeNames::gesturelongpress)
+        type = GestureLongPress;
     else if (event.type() == EventTypeNames::gesturetapdown)
         type = GestureTapDown;
     else if (event.type() == EventTypeNames::gesturescrollstart)

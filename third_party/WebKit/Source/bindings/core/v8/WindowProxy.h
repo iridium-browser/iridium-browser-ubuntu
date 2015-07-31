@@ -52,7 +52,7 @@ class SecurityOrigin;
 // persist between navigations.
 class WindowProxy final : public NoBaseWillBeGarbageCollectedFinalized<WindowProxy> {
 public:
-    static PassOwnPtrWillBeRawPtr<WindowProxy> create(Frame*, DOMWrapperWorld&, v8::Isolate*);
+    static PassOwnPtrWillBeRawPtr<WindowProxy> create(v8::Isolate*, Frame*, DOMWrapperWorld&);
 
     ~WindowProxy();
     DECLARE_TRACE();
@@ -74,7 +74,7 @@ public:
     bool isGlobalInitialized() { return !m_global.isEmpty(); }
 
     bool initializeIfNeeded();
-    void updateDocumentWrapper(v8::Handle<v8::Object> wrapper);
+    void updateDocumentWrapper(v8::Local<v8::Object> wrapper);
 
     void clearForNavigation();
     void clearForClose();

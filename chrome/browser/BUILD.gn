@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/chrome_build.gni")
 import("//build/config/crypto.gni")
 import("//build/config/features.gni")
 import("//build/config/ui.gni")
@@ -15,6 +16,13 @@ if (is_android) {
 }
 if (is_desktop_linux) {
   import("//build/config/linux/pkg_config.gni")
+}
+
+declare_args() {
+  # 'Ok Google' hotwording is disabled by default in open source builds. Set to
+  # true to enable. (This will download a closed-source NaCl module at startup.)
+  # Chrome-branded builds have this enabled by default.
+  enable_hotwording = is_chrome_branded
 }
 
 about_credits_file = "$target_gen_dir/about_credits.html"
@@ -48,7 +56,7 @@ if (is_desktop_linux) {
   }
 }
 
-static_library("browser") {
+source_set("browser") {
   configs += [
     "//build/config/compiler:wexit_time_destructors",
     "//third_party/WebKit/public:debug_devtools",
@@ -75,8 +83,9 @@ static_library("browser") {
     "//chrome/app/resources:platform_locale_settings",
     "//chrome/app/theme:theme_resources",
     "//chrome/browser/autocomplete:in_memory_url_index_cache_proto",
-    "//chrome/browser/net:cert_logger_proto",
+    "//chrome/browser/net:encrypted_cert_logger_proto",
     "//chrome/browser/net:probe_message_proto",
+    "//chrome/browser/ssl:cert_logger_proto",
     "//chrome/browser/ui",
     "//chrome/common",
     "//chrome/common/net",
@@ -86,6 +95,7 @@ static_library("browser") {
     "//components/captive_portal",
     "//components/cloud_devices/common",
     "//components/component_updater",
+    "//components/content_settings/content/common",
     "//components/content_settings/core/browser",
     "//components/content_settings/core/common",
     "//components/crx_file",
@@ -96,7 +106,9 @@ static_library("browser") {
     "//components/favicon/core",
     "//components/favicon_base",
     "//components/gcm_driver",
+    "//components/gcm_driver/instance_id",
     "//components/google/core/browser",
+    "//components/guest_view:guest_view",
     "//components/handoff",
     "//components/history/core/browser",
     "//components/history/core/common",
@@ -106,6 +118,7 @@ static_library("browser") {
     "//components/metrics:net",
     "//components/metrics:profiler",
     "//components/metrics/proto:proto",
+    "//components/mime_util",
     "//components/navigation_metrics",
     "//components/network_time",
     "//components/omnibox",
@@ -129,6 +142,7 @@ static_library("browser") {
     "//components/translate/core/browser",
     "//components/translate/core/common",
     "//components/ui/zoom:ui_zoom",
+    "//components/undo",
     "//components/update_client",
     "//components/url_fixer",
     "//components/user_prefs",
@@ -181,6 +195,9 @@ static_library("browser") {
                            ".",
                            "//chrome")
     sources += rebase_path(gypi_values.chrome_browser_content_settings_sources,
+                           ".",
+                           "//chrome")
+    sources += rebase_path(gypi_values.chrome_browser_engagement_sources,
                            ".",
                            "//chrome")
     sources +=
@@ -237,14 +254,17 @@ static_library("browser") {
       "//components/autofill/content/browser",
       "//components/browsing_data",
       "//components/data_reduction_proxy/content/browser",
+      "//components/devtools_discovery",
+      "//components/devtools_http_handler",
       "//components/dom_distiller/content",
       "//components/favicon/content",
       "//components/history/content/browser",
       "//components/keyed_service/content",
       "//components/navigation_interception",
       "//components/password_manager/content/browser",
+      "//components/plugins/common",
       "//components/precache/content",
-      "//components/sessions:sessions_content",
+      "//components/sessions",
       "//components/storage_monitor",
       "//components/translate/content/browser",
       "//components/url_matcher",
@@ -328,6 +348,7 @@ static_library("browser") {
       "//chrome/browser/sync_file_system/drive_backend:sync_file_system_drive_proto",
       "//chrome/common/extensions/api",
       "//chrome/common/extensions/api:api_registration",
+      "//components/proximity_auth/ble",
       "//components/proximity_auth/cryptauth",
       "//extensions/components/javascript_dialog_extensions_client",
       "//media/cast:net",
@@ -353,7 +374,7 @@ static_library("browser") {
     sources += rebase_path(gypi_values.chrome_browser_spellchecker_sources,
                            ".",
                            "//chrome")
-    deps += [ "//third_party/hunspell" ]
+    deps += [ "//third_party/hunspell_new" ]
   }
   if (enable_nacl) {
     sources +=
@@ -432,11 +453,17 @@ static_library("browser") {
           rebase_path(gypi_values.chrome_browser_safe_browsing_full_sources,
                       ".",
                       "//chrome")
-      defines += [ "FULL_SAFE_BROWSING" ]
       deps += [ "//chrome/common/safe_browsing:proto" ]
-    } else if (safe_browsing_mode == 2) {
-      defines += [ "MOBILE_SAFE_BROWSING" ]
+    } else if (safe_browsing_mode == 3) {
+      sources += rebase_path(
+              gypi_values.chrome_browser_safe_browsing_mobile_extended_sources,
+              ".",
+              "//chrome")
     }
+  }
+
+  if (enable_hotwording) {
+    defines += [ "ENABLE_HOTWORDING" ]
   }
 
   if (is_linux) {
@@ -611,8 +638,10 @@ static_library("browser") {
       "//components/cdm/browser",
       "//components/enhanced_bookmarks",
       "//components/resources:components_resources",
+      "//components/service_tab_launcher",
       "//components/web_contents_delegate_android",
       "//third_party/android_opengl/etc1",
+      "//third_party/android_tools:cpu_features",
       "//third_party/libaddressinput:util",
     ]
     deps -= [
@@ -621,6 +650,10 @@ static_library("browser") {
       "//components/web_modal",
     ]
     defines += [ "ENABLE_DATA_REDUCTION_PROXY_DEBUGGING" ]
+
+    if (use_seccomp_bpf) {
+      defines += [ "USE_SECCOMP_BPF" ]
+    }
   }
 
   if (is_mac) {
@@ -683,7 +716,10 @@ static_library("browser") {
       "//ui/metro_viewer",
       "//win8:metro_viewer",
     ]
-    libs += [ "credui.lib" ]
+    libs += [
+      "credui.lib",
+      "netapi32.lib",
+    ]
   } else {
     # Non-Windows.
     sources +=
@@ -769,6 +805,9 @@ static_library("browser") {
               ".",
               "//chrome")
     }
+  }
+  if (enable_media_router) {
+    deps += [ "//chrome/browser/media/router" ]
   }
 }
 
@@ -932,10 +971,10 @@ source_set("test_support") {
     "sessions/session_restore_test_helper.h",
     "sessions/session_service_test_helper.cc",
     "sessions/session_service_test_helper.h",
-    "signin/fake_account_reconcilor.cc",
-    "signin/fake_account_reconcilor.h",
     "signin/fake_account_tracker_service.cc",
     "signin/fake_account_tracker_service.h",
+    "signin/fake_gaia_cookie_manager_service.cc",
+    "signin/fake_gaia_cookie_manager_service.h",
     "signin/fake_profile_oauth2_token_service.cc",
     "signin/fake_profile_oauth2_token_service.h",
     "signin/fake_profile_oauth2_token_service_builder.cc",

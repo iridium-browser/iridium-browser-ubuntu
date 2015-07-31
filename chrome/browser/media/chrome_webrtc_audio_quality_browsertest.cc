@@ -13,6 +13,7 @@
 #include "base/scoped_native_library.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/media/webrtc_browsertest_audio.h"
 #include "chrome/browser/media/webrtc_browsertest_base.h"
 #include "chrome/browser/media/webrtc_browsertest_common.h"
@@ -42,6 +43,17 @@ static const char kReferenceFileRelativeUrl[] =
 
 static const char kWebRtcAudioTestHtmlPage[] =
     "/webrtc/webrtc_audio_quality_test.html";
+
+// For the AGC test, there are 6 speech segments split on silence. If one
+// segment is significantly different in length compared to the same segment in
+// the reference file, there's something fishy going on.
+const int kMaxAgcSegmentDiffMs =
+#if defined(OS_MACOSX)
+  // Something is different on Mac; http://crbug.com/477653.
+  600;
+#else
+  200;
+#endif
 
 #if defined(OS_LINUX) || defined(OS_WIN) || defined(OS_MACOSX)
 #define MAYBE_WebRtcAudioQualityBrowserTest WebRtcAudioQualityBrowserTest
@@ -170,6 +182,8 @@ class MAYBE_WebRtcAudioQualityBrowserTest : public WebRtcTestBase {
                                const base::FilePath& recording,
                                const std::string& constraints,
                                const base::TimeDelta recording_time);
+  void TestWithFakeDeviceGetUserMedia(const std::string& constraints,
+                                      const std::string& perf_modifier);
 };
 
 namespace {
@@ -336,7 +350,7 @@ bool RemoveSilence(const base::FilePath& input_file,
   // THRESHOLD: value used to indicate what sample value is treats as silence.
   const char* kAbovePeriods = "1";
   const char* kDuration = "2";
-  const char* kTreshold = "3%";
+  const char* kTreshold = "1.5%";
 
   base::CommandLine command_line = MakeSoxCommandLine();
   if (command_line.GetProgram().empty())
@@ -361,11 +375,12 @@ bool RemoveSilence(const base::FilePath& input_file,
   return ok;
 }
 
-// Looks for 0.3-second silences (under 1% audio power) and splits the input
-// file on those silences. Output files are written according to the output file
-// template (e.g. /tmp/out.wav writes /tmp/out001.wav, /tmp/out002.wav, etc if
-// there are two silence-padded regions in the file). The silences between
-// speech segments must be at least 500 ms for this to be reliable.
+// Looks for 0.2 second audio segments surrounded by silences under 0.3% audio
+// power and splits the input file on those silences. Output files are written
+// according to the output file template (e.g. /tmp/out.wav writes
+// /tmp/out001.wav, /tmp/out002.wav, etc if there are two silence-padded
+// regions in the file). The silences between speech segments must be at
+// least 500 ms for this to be reliable.
 bool SplitFileOnSilence(const base::FilePath& input_file,
                         const base::FilePath& output_file_template) {
   base::CommandLine command_line = MakeSoxCommandLine();
@@ -375,8 +390,8 @@ bool SplitFileOnSilence(const base::FilePath& input_file,
   // These are experimentally determined and work on the files we use.
   const char* kAbovePeriods = "1";
   const char* kUnderPeriods = "1";
-  const char* kDuration = "0.3";
-  const char* kTreshold = "1%";
+  const char* kDuration = "0.2";
+  const char* kTreshold = "0.5%";
   command_line.AppendArgPath(input_file);
   command_line.AppendArgPath(output_file_template);
   command_line.AppendArg("silence");
@@ -467,6 +482,14 @@ base::FilePath CreateTemporaryWaveFile() {
   return wav_filename;
 }
 
+void DeleteFileUnlessTestFailed(const base::FilePath& path, bool recursive) {
+  if (::testing::Test::HasFailure())
+    printf("Test failed; keeping recording(s) at\n\t%" PRFilePath ".\n",
+           path.value().c_str());
+  else
+    EXPECT_TRUE(base::DeleteFile(path, recursive));
+}
+
 std::vector<base::FilePath> ListWavFilesInDir(const base::FilePath& dir) {
   base::FileEnumerator files(dir, false, base::FileEnumerator::FILES,
                              FILE_PATH_LITERAL("*.wav"));
@@ -490,7 +513,7 @@ void SplitFileOnSilenceIntoDir(const base::FilePath& to_split,
 
   ASSERT_TRUE(SplitFileOnSilence(
       trimmed_audio, workdir.Append(FILE_PATH_LITERAL("output.wav"))));
-  ASSERT_TRUE(base::DeleteFile(trimmed_audio, false));
+  DeleteFileUnlessTestFailed(trimmed_audio, false);
 }
 
 // Computes the difference between the actual and reference segment. A positive
@@ -507,12 +530,26 @@ float AnalyzeOneSegment(const base::FilePath& ref_segment,
 
   base::TimeDelta difference_in_length = ref_parameters.GetBufferDuration() -
                                          actual_parameters.GetBufferDuration();
-  EXPECT_LE(difference_in_length, base::TimeDelta::FromMilliseconds(200))
+
+  EXPECT_LE(difference_in_length,
+            base::TimeDelta::FromMilliseconds(kMaxAgcSegmentDiffMs))
       << "Segments differ " << difference_in_length.InMilliseconds() << " ms "
       << "in length for segment " << segment_number << "; we're likely "
       << "comparing unrelated segments or silence splitting is busted.";
 
   return actual_energy - ref_energy;
+}
+
+std::string MakeTraceName(const base::FilePath& ref_filename,
+                          size_t segment_number) {
+  std::string ascii_filename;
+#if defined(OS_WIN)
+  ascii_filename = base::WideToUTF8(ref_filename.BaseName().value());
+#else
+  ascii_filename = ref_filename.BaseName().value();
+#endif
+  return base::StringPrintf(
+      "%s_segment_%d", ascii_filename.c_str(), (int)segment_number);
 }
 
 void AnalyzeSegmentsAndPrintResult(
@@ -531,8 +568,7 @@ void AnalyzeSegmentsAndPrintResult(
     float difference_in_decibel = AnalyzeOneSegment(ref_segments[i],
                                                     actual_segments[i],
                                                     i);
-    std::string trace_name = base::StringPrintf(
-        "%s_segment_%zu", reference_file.BaseName().value().c_str(), i);
+    std::string trace_name = MakeTraceName(reference_file, i);
     perf_test::PrintResult("agc_energy_diff", perf_modifier, trace_name,
                            difference_in_decibel, "dB", false);
   }
@@ -549,16 +585,18 @@ void ComputeAndPrintPesqResults(const base::FilePath& reference_file,
 
   std::string raw_mos;
   std::string mos_lqo;
-  ASSERT_TRUE(RunPesq(trimmed_reference, trimmed_recording, 16000,
-                      &raw_mos, &mos_lqo));
+  bool succeeded = RunPesq(trimmed_reference, trimmed_recording, 16000,
+                           &raw_mos, &mos_lqo);
+  EXPECT_TRUE(succeeded) << "Failed to run PESQ.";
+  if (succeeded) {
+    perf_test::PrintResult(
+        "audio_pesq", perf_modifier, "raw_mos", raw_mos, "score", true);
+    perf_test::PrintResult(
+        "audio_pesq", perf_modifier, "mos_lqo", mos_lqo, "score", true);
+  }
 
-  perf_test::PrintResult(
-      "audio_pesq", perf_modifier, "raw_mos", raw_mos, "score", true);
-  perf_test::PrintResult(
-      "audio_pesq", perf_modifier, "mos_lqo", mos_lqo, "score", true);
-
-  EXPECT_TRUE(base::DeleteFile(trimmed_reference, false));
-  EXPECT_TRUE(base::DeleteFile(trimmed_recording, false));
+  DeleteFileUnlessTestFailed(trimmed_reference, false);
+  DeleteFileUnlessTestFailed(trimmed_recording, false);
 }
 
 }  // namespace
@@ -566,11 +604,11 @@ void ComputeAndPrintPesqResults(const base::FilePath& reference_file,
 // Sets up a two-way WebRTC call and records its output to |recording|, using
 // getUserMedia.
 //
-// |reference_file| should have at least two seconds of silence in the
+// |reference_file| should have at least five seconds of silence in the
 // beginning: otherwise all the reference audio will not be picked up by the
 // recording. Note that the reference file will start playing as soon as the
 // audio device is up following the getUserMedia call in the left tab. The time
-// it takes to negotiate a call isn't deterministic, but two seconds should be
+// it takes to negotiate a call isn't deterministic, but five seconds should be
 // plenty of time. Similarly, the recording time should be enough to catch the
 // whole reference file. If you then silence-trim the reference file and actual
 // file, you should end up with two time-synchronized files.
@@ -608,8 +646,9 @@ void MAYBE_WebRtcAudioQualityBrowserTest::SetupAndRecordAudioCall(
   HangUp(left_tab);
 }
 
-IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcAudioQualityBrowserTest,
-                       MANUAL_TestCallQualityWithAudioFromFakeDevice) {
+void MAYBE_WebRtcAudioQualityBrowserTest::TestWithFakeDeviceGetUserMedia(
+    const std::string& constraints,
+    const std::string& perf_modifier) {
   if (OnWinXp() || OnWin8()) {
     // http://crbug.com/379798.
     LOG(ERROR) << "This test is not implemented for Windows XP/Win8.";
@@ -621,11 +660,25 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcAudioQualityBrowserTest,
   base::FilePath recording = CreateTemporaryWaveFile();
 
   ASSERT_NO_FATAL_FAILURE(SetupAndRecordAudioCall(
-      reference_file, recording, kAudioOnlyCallConstraints,
-      base::TimeDelta::FromSeconds(25)));
-  ComputeAndPrintPesqResults(reference_file, recording, "_getusermedia");
+      reference_file, recording, constraints,
+      base::TimeDelta::FromSeconds(30)));
 
-  EXPECT_TRUE(base::DeleteFile(recording, false));
+  ComputeAndPrintPesqResults(reference_file, recording, perf_modifier);
+  DeleteFileUnlessTestFailed(recording, false);
+}
+
+IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcAudioQualityBrowserTest,
+                       MANUAL_TestCallQualityWithAudioFromFakeDevice) {
+  TestWithFakeDeviceGetUserMedia(kAudioOnlyCallConstraints, "_getusermedia");
+}
+
+// Test the new 48KHz audio processing path.
+IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcAudioQualityBrowserTest,
+                       MANUAL_TestCallQualityWithAudioFromFakeDevice48Khz) {
+  const char* kAudio48KhzAudioProcessingConstraints =
+      "{audio: { optional: [{ googAudioProcessing48kHzSupport: true }] } }";
+  TestWithFakeDeviceGetUserMedia(kAudio48KhzAudioProcessingConstraints,
+                                 "_getusermedia_48khz");
 }
 
 IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcAudioQualityBrowserTest,
@@ -651,10 +704,10 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcAudioQualityBrowserTest,
 
   base::FilePath recording = CreateTemporaryWaveFile();
 
-  // Note: the sound clip is about 13 seconds: record for 20 seconds to get some
+  // Note: the sound clip is 21.6 seconds: record for 25 seconds to get some
   // safety margins on each side.
   AudioRecorder recorder;
-  ASSERT_TRUE(recorder.StartRecording(base::TimeDelta::FromSeconds(20),
+  ASSERT_TRUE(recorder.StartRecording(base::TimeDelta::FromSeconds(25),
                                       recording));
 
   PlayAudioFileThroughWebAudio(left_tab);
@@ -716,10 +769,8 @@ void MAYBE_WebRtcAudioQualityBrowserTest::TestAutoGainControl(
 
   ASSERT_NO_FATAL_FAILURE(SetupAndRecordAudioCall(
       reference_file, recording, constraints,
-      base::TimeDelta::FromSeconds(25)));
+      base::TimeDelta::FromSeconds(30)));
 
-  // Call Take() on the scoped temp dirs if you want to look at the files after
-  // the test exits (the default is to delete the files).
   base::ScopedTempDir split_ref_files;
   ASSERT_TRUE(split_ref_files.CreateUniqueTempDir());
   ASSERT_NO_FATAL_FAILURE(
@@ -731,43 +782,29 @@ void MAYBE_WebRtcAudioQualityBrowserTest::TestAutoGainControl(
   ASSERT_TRUE(split_actual_files.CreateUniqueTempDir());
   ASSERT_NO_FATAL_FAILURE(
       SplitFileOnSilenceIntoDir(recording, split_actual_files.path()));
+
+  // Keep the recording and split files if the analysis fails.
+  base::FilePath actual_files_dir = split_actual_files.Take();
   std::vector<base::FilePath> actual_segments =
-      ListWavFilesInDir(split_actual_files.path());
+      ListWavFilesInDir(actual_files_dir);
 
-  AnalyzeSegmentsAndPrintResult(ref_segments, actual_segments, reference_file,
-                                perf_modifier);
+  AnalyzeSegmentsAndPrintResult(
+      ref_segments, actual_segments, reference_file, perf_modifier);
 
-  EXPECT_TRUE(base::DeleteFile(recording, false));
+  DeleteFileUnlessTestFailed(recording, false);
+  DeleteFileUnlessTestFailed(actual_files_dir, true);
 }
-
-// Only implemented for Linux for now.
-#if defined(OS_LINUX)
-#define MAYBE_MANUAL_TestAutoGainControlOnLowAudio \
-        MANUAL_TestAutoGainControlOnLowAudio
-#else
-#define MAYBE_MANUAL_TestAutoGainControlOnLowAudio \
-        DISABLED_MANUAL_TestAutoGainControlOnLowAudio
-#endif
 
 // The AGC should apply non-zero gain here.
 IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcAudioQualityBrowserTest,
-                       MAYBE_MANUAL_TestAutoGainControlOnLowAudio) {
+                       MANUAL_TestAutoGainControlOnLowAudio) {
   ASSERT_NO_FATAL_FAILURE(TestAutoGainControl(
       kReferenceFile, kAudioOnlyCallConstraints, "_with_agc"));
 }
 
-// Only implemented for Linux for now.
-#if defined(OS_LINUX)
-#define MAYBE_MANUAL_TestAutoGainIsOffWithAudioProcessingOff \
-        MANUAL_TestAutoGainIsOffWithAudioProcessingOff
-#else
-#define MAYBE_MANUAL_TestAutoGainIsOffWithAudioProcessingOff \
-        DISABLED_MANUAL_TestAutoGainIsOffWithAudioProcessingOff
-#endif
-
 // Since the AGC is off here there should be no gain at all.
 IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcAudioQualityBrowserTest,
-                       MAYBE_MANUAL_TestAutoGainIsOffWithAudioProcessingOff) {
+                       MANUAL_TestAutoGainIsOffWithAudioProcessingOff) {
   const char* kAudioCallWithoutAudioProcessing =
       "{audio: { mandatory: { echoCancellation: false } } }";
   ASSERT_NO_FATAL_FAILURE(TestAutoGainControl(

@@ -22,6 +22,7 @@
 #include "webrtc/modules/audio_processing/beamformer/mock_nonlinear_beamformer.h"
 #include "webrtc/modules/audio_processing/common.h"
 #include "webrtc/modules/audio_processing/include/audio_processing.h"
+#include "webrtc/modules/audio_processing/test/protobuf_utils.h"
 #include "webrtc/modules/audio_processing/test/test_utils.h"
 #include "webrtc/modules/interface/module_common_types.h"
 #include "webrtc/system_wrappers/interface/event_wrapper.h"
@@ -323,9 +324,6 @@ class ApmTest : public ::testing::Test {
 
   static void SetUpTestCase() {
     Trace::CreateTrace();
-    std::string trace_filename =
-        test::TempFilename(test::OutputPath(), "audioproc_trace");
-    ASSERT_EQ(0, Trace::SetTraceFile(trace_filename.c_str()));
   }
 
   static void TearDownTestCase() {
@@ -1744,6 +1742,8 @@ void ApmTest::VerifyDebugDumpTest(Format format) {
   EXPECT_NE(0, feof(out_file));
   ASSERT_EQ(0, fclose(ref_file));
   ASSERT_EQ(0, fclose(out_file));
+  remove(ref_filename.c_str());
+  remove(out_filename.c_str());
 }
 
 TEST_F(ApmTest, VerifyDebugDumpInt) {

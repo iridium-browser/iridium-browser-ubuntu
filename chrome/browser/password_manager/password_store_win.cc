@@ -30,7 +30,7 @@ class PasswordStoreWin::DBHandler : public WebDataServiceConsumer {
             PasswordStoreWin* password_store)
       : web_data_service_(web_data_service), password_store_(password_store) {}
 
-  ~DBHandler();
+  ~DBHandler() override;
 
   // Requests the IE7 login for |form|. This is async. |result_callback| will be
   // run when complete.
@@ -60,7 +60,7 @@ class PasswordStoreWin::DBHandler : public WebDataServiceConsumer {
       const PasswordForm& form);
 
   // WebDataServiceConsumer implementation.
-  virtual void OnWebDataServiceRequestDone(
+  void OnWebDataServiceRequestDone(
       PasswordWebDataService::Handle handle,
       const WDTypedResult* result) override;
 
@@ -76,7 +76,7 @@ class PasswordStoreWin::DBHandler : public WebDataServiceConsumer {
 };
 
 PasswordStoreWin::DBHandler::~DBHandler() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
+  DCHECK_CURRENTLY_ON(BrowserThread::DB);
   for (PendingRequestMap::const_iterator i = pending_requests_.begin();
        i != pending_requests_.end();
        ++i) {
@@ -88,7 +88,7 @@ PasswordStoreWin::DBHandler::~DBHandler() {
 void PasswordStoreWin::DBHandler::GetIE7Login(
     const PasswordForm& form,
     const ResultCallback& result_callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
+  DCHECK_CURRENTLY_ON(BrowserThread::DB);
   IE7PasswordInfo info;
   info.url_hash =
       ie7_password::GetUrlHash(base::UTF8ToWide(form.origin.spec()));
@@ -101,7 +101,7 @@ void PasswordStoreWin::DBHandler::GetIE7Login(
 ScopedVector<autofill::PasswordForm> PasswordStoreWin::DBHandler::GetIE7Results(
     const WDTypedResult* result,
     const PasswordForm& form) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
+  DCHECK_CURRENTLY_ON(BrowserThread::DB);
   ScopedVector<autofill::PasswordForm> matched_forms;
   const WDResult<IE7PasswordInfo>* r =
       static_cast<const WDResult<IE7PasswordInfo>*>(result);
@@ -124,7 +124,7 @@ ScopedVector<autofill::PasswordForm> PasswordStoreWin::DBHandler::GetIE7Results(
         autofill->signon_realm = form.signon_realm;
         autofill->origin = form.origin;
         autofill->preferred = true;
-        autofill->ssl_valid = form.origin.SchemeIsSecure();
+        autofill->ssl_valid = form.origin.SchemeIsCryptographic();
         autofill->date_created = info.date_created;
 
         matched_forms.push_back(autofill);
@@ -146,7 +146,7 @@ void PasswordStoreWin::DBHandler::OnWebDataServiceRequestDone(
       FROM_HERE_WITH_EXPLICIT_FUNCTION(
           "422460 PasswordStoreWin::DBHandler::OnWebDataServiceRequestDone"));
 
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
+  DCHECK_CURRENTLY_ON(BrowserThread::DB);
 
   PendingRequestMap::iterator i = pending_requests_.find(handle);
   DCHECK(i != pending_requests_.end());
@@ -181,7 +181,7 @@ PasswordStoreWin::~PasswordStoreWin() {
 }
 
 void PasswordStoreWin::ShutdownOnDBThread() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
+  DCHECK_CURRENTLY_ON(BrowserThread::DB);
   db_handler_.reset();
 }
 

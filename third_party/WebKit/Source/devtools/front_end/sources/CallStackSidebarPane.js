@@ -35,11 +35,11 @@ WebInspector.CallStackSidebarPane = function()
     this.callFrameList = new WebInspector.UIList();
     this.callFrameList.show(this.bodyElement);
 
-    var asyncCheckbox = this.titleElement.appendChild(WebInspector.SettingsUI.createSettingCheckbox(WebInspector.UIString("Async"), WebInspector.settings.enableAsyncStackTraces, true, WebInspector.UIString("Capture async stack traces")));
+    var asyncCheckbox = this.titleElement.appendChild(WebInspector.SettingsUI.createSettingCheckbox(WebInspector.UIString("Async"), WebInspector.moduleSetting("enableAsyncStackTraces"), true, WebInspector.UIString("Capture async stack traces")));
     asyncCheckbox.classList.add("scripts-callstack-async");
     asyncCheckbox.addEventListener("click", consumeEvent, false);
-    WebInspector.settings.enableAsyncStackTraces.addChangeListener(this._asyncStackTracesStateChanged, this);
-    WebInspector.settings.skipStackFramesPattern.addChangeListener(this._blackboxingStateChanged, this);
+    WebInspector.moduleSetting("enableAsyncStackTraces").addChangeListener(this._asyncStackTracesStateChanged, this);
+    WebInspector.moduleSetting("skipStackFramesPattern").addChangeListener(this._blackboxingStateChanged, this);
 }
 
 /** @enum {string} */
@@ -65,7 +65,7 @@ WebInspector.CallStackSidebarPane.prototype = {
         }
 
         this.callFrameList.show(this.bodyElement);
-        this._target = details.target();
+        this._debuggerModel = details.debuggerModel;
         var callFrames = details.callFrames;
         var asyncStackTrace = details.asyncStackTrace;
 
@@ -225,7 +225,7 @@ WebInspector.CallStackSidebarPane.prototype = {
     {
         if (blackbox) {
             if (isContentScript)
-                WebInspector.settings.skipContentScripts.set(true);
+                WebInspector.moduleSetting("skipContentScripts").set(true);
             else
                 WebInspector.BlackboxSupport.blackboxURL(url);
         } else {
@@ -235,13 +235,13 @@ WebInspector.CallStackSidebarPane.prototype = {
 
     _blackboxingStateChanged: function()
     {
-        if (!this._target)
+        if (!this._debuggerModel)
             return;
-        var details = this._target.debuggerModel.debuggerPausedDetails();
+        var details = this._debuggerModel.debuggerPausedDetails();
         if (!details)
             return;
         this.update(details);
-        var selectedCallFrame = this._target.debuggerModel.selectedCallFrame();
+        var selectedCallFrame = this._debuggerModel.selectedCallFrame();
         if (selectedCallFrame)
             this.setSelectedCallFrame(selectedCallFrame);
     },
@@ -256,7 +256,7 @@ WebInspector.CallStackSidebarPane.prototype = {
 
     _asyncStackTracesStateChanged: function()
     {
-        var enabled = WebInspector.settings.enableAsyncStackTraces.get();
+        var enabled = WebInspector.moduleSetting("enableAsyncStackTraces").get();
         if (!enabled && this.callFrames)
             this._removeAsyncCallFrames();
     },
@@ -339,7 +339,9 @@ WebInspector.CallStackSidebarPane.prototype = {
      */
     _selectedCallFrameIndex: function()
     {
-        var selectedCallFrame = this._target.debuggerModel.selectedCallFrame();
+        if (!this._debuggerModel)
+            return -1;
+        var selectedCallFrame = this._debuggerModel.selectedCallFrame();
         if (!selectedCallFrame)
             return -1;
         for (var i = 0; i < this.callFrames.length; ++i) {

@@ -44,7 +44,7 @@ public:
         Rejected,
     };
 
-    static v8::Handle<v8::Function> createFunction(ScriptState* scriptState, WaitUntilObserver* observer, ResolveType type)
+    static v8::Local<v8::Function> createFunction(ScriptState* scriptState, WaitUntilObserver* observer, ResolveType type)
     {
         ThenFunction* self = new ThenFunction(scriptState, observer, type);
         return self->bindToV8Function();
@@ -68,8 +68,10 @@ private:
     {
         ASSERT(m_observer);
         ASSERT(m_resolveType == Fulfilled || m_resolveType == Rejected);
-        if (m_resolveType == Rejected)
+        if (m_resolveType == Rejected) {
             m_observer->reportError(value);
+            value = ScriptPromise::reject(value.scriptState(), value).scriptValue();
+        }
         m_observer->decrementPendingActivity();
         m_observer = nullptr;
         return value;

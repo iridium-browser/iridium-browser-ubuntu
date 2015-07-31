@@ -23,6 +23,9 @@
 #include "content/browser/gpu/gpu_process_host.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/utility_process_host_impl.h"
+#if defined(V8_USE_EXTERNAL_STARTUP_DATA)
+#include "gin/v8_initializer.h"
+#endif
 #endif
 
 #if defined(OS_ANDROID)
@@ -43,9 +46,6 @@
 #include "ui/ozone/public/ozone_platform.h"
 #endif
 
-#ifdef V8_USE_EXTERNAL_STARTUP_DATA
-#include "gin/public/isolate_holder.h"
-#endif
 
 namespace content {
 
@@ -53,7 +53,7 @@ class ContentTestSuiteBaseListener : public testing::EmptyTestEventListener {
  public:
   ContentTestSuiteBaseListener() {
   }
-  virtual void OnTestEnd(const testing::TestInfo& test_info) override {
+  void OnTestEnd(const testing::TestInfo& test_info) override {
     BrowserThreadImpl::FlushThreadPoolHelperForTesting();
   }
  private:
@@ -72,8 +72,8 @@ void ContentTestSuiteBase::Initialize() {
   // by tests.
   base::StatisticsRecorder::Initialize();
 
-#ifdef V8_USE_EXTERNAL_STARTUP_DATA
-  gin::IsolateHolder::LoadV8Snapshot();
+#if !defined(OS_IOS) && defined(V8_USE_EXTERNAL_STARTUP_DATA)
+  gin::V8Initializer::LoadV8Snapshot();
 #endif
 
 #if defined(OS_ANDROID)

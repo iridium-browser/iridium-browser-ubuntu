@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_UI_VIEWS_HUNG_RENDERER_VIEW_H_
 
 #include "base/memory/scoped_vector.h"
-#include "chrome/browser/favicon/favicon_tab_helper.h"
+#include "components/favicon/content/content_favicon_driver.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "ui/base/models/table_model.h"
 #include "ui/views/controls/button/button.h"
@@ -19,6 +19,7 @@ class WebContents;
 }
 
 namespace views {
+class Label;
 class LabelButton;
 }
 
@@ -64,8 +65,8 @@ class HungPagesTableModel : public ui::TableModel, public views::TableGrouper {
     WebContentsObserverImpl(HungPagesTableModel* model,
                             content::WebContents* tab);
 
-    FaviconTabHelper* favicon_tab_helper() {
-      return FaviconTabHelper::FromWebContents(web_contents());
+    favicon::FaviconDriver* favicon_driver() {
+      return favicon::ContentFaviconDriver::FromWebContents(web_contents());
     }
 
     // WebContentsObserver overrides:
@@ -149,6 +150,12 @@ class HungRendererDialogView : public views::DialogDelegateView,
 
   static void InitClass();
 
+  // An amusing icon image.
+  static gfx::ImageSkia* frozen_icon_;
+
+  // The label describing the list.
+  views::Label* info_label_;
+
   // Controls within the dialog box.
   views::TableView* hung_pages_table_;
 
@@ -161,9 +168,6 @@ class HungRendererDialogView : public views::DialogDelegateView,
 
   // Whether or not we've created controls for ourself.
   bool initialized_;
-
-  // An amusing icon image.
-  static gfx::ImageSkia* frozen_icon_;
 
   DISALLOW_COPY_AND_ASSIGN(HungRendererDialogView);
 };

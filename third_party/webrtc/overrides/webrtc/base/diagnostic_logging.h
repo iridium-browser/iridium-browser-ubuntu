@@ -61,6 +61,8 @@ std::string ErrorName(int err, const ConstantLabel* err_table);
 // severity numbers than or equal to the current severity level are written to
 // file. Also, note that the values are explicitly defined here for convenience
 // since the command line flag must be set using numerical values.
+// TODO(tommi): To keep things simple, we should just use the same values for
+// these constants as Chrome does.
 enum LoggingSeverity { LS_ERROR = 1,
                        LS_WARNING = 2,
                        LS_INFO = 3,
@@ -69,6 +71,40 @@ enum LoggingSeverity { LS_ERROR = 1,
                        INFO = LS_INFO,
                        WARNING = LS_WARNING,
                        LERROR = LS_ERROR };
+
+inline int WebRtcSevToChromeSev(LoggingSeverity sev) {
+  switch (sev) {
+    case LS_ERROR:
+      return ::logging::LOG_ERROR;
+    case LS_WARNING:
+      return ::logging::LOG_WARNING;
+    case LS_INFO:
+      return ::logging::LOG_INFO;
+    case LS_VERBOSE:
+    case LS_SENSITIVE:
+      return ::logging::LOG_VERBOSE;
+    default:
+      NOTREACHED();
+      return ::logging::LOG_FATAL;
+  }
+}
+
+inline int WebRtcVerbosityLevel(LoggingSeverity sev) {
+  switch (sev) {
+    case LS_ERROR:
+      return -2;
+    case LS_WARNING:
+      return -1;
+    case LS_INFO:  // We treat 'info' and 'verbose' as the same verbosity level.
+    case LS_VERBOSE:
+      return 1;
+    case LS_SENSITIVE:
+      return 2;
+    default:
+      NOTREACHED();
+      return 0;
+  }
+}
 
 // LogErrorContext assists in interpreting the meaning of an error value.
 enum LogErrorContext {

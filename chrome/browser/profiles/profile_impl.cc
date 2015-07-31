@@ -137,11 +137,11 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
+#include "components/guest_view/browser/guest_view_manager.h"
 #include "extensions/browser/extension_pref_store.h"
 #include "extensions/browser/extension_pref_value_map.h"
 #include "extensions/browser/extension_pref_value_map_factory.h"
 #include "extensions/browser/extension_system.h"
-#include "extensions/browser/guest_view/guest_view_manager.h"
 #endif
 
 #if defined(ENABLE_SUPERVISED_USERS)
@@ -309,34 +309,12 @@ const char* const ProfileImpl::kPrefExitTypeNormal = "Normal";
 // static
 void ProfileImpl::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterBooleanPref(
-      prefs::kSavingBrowserHistoryDisabled,
-      false,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kAllowDeletingBrowserHistory,
-      true,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kSigninAllowed,
-      true,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kForceSafeSearch,
-      false,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kForceGoogleSafeSearch,
-      false,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kForceYouTubeSafetyMode,
-      false,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kRecordHistory,
-      false,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kSavingBrowserHistoryDisabled, false);
+  registry->RegisterBooleanPref(prefs::kAllowDeletingBrowserHistory, true);
+  registry->RegisterBooleanPref(prefs::kSigninAllowed, true);
+  registry->RegisterBooleanPref(prefs::kForceGoogleSafeSearch, false);
+  registry->RegisterBooleanPref(prefs::kForceYouTubeSafetyMode, false);
+  registry->RegisterBooleanPref(prefs::kRecordHistory, false);
   registry->RegisterIntegerPref(
       prefs::kProfileAvatarIndex,
       -1,
@@ -356,10 +334,7 @@ void ProfileImpl::RegisterProfilePrefs(
       prefs::kProfileUsingDefaultName,
       true,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-  registry->RegisterStringPref(
-      prefs::kSupervisedUserId,
-      std::string(),
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterStringPref(prefs::kSupervisedUserId, std::string());
   registry->RegisterStringPref(prefs::kProfileName,
                                std::string(),
                                user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
@@ -367,33 +342,15 @@ void ProfileImpl::RegisterProfilePrefs(
                                std::string(),
                                user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
 #if defined(ENABLE_PRINTING)
-  registry->RegisterBooleanPref(
-      prefs::kPrintingEnabled,
-      true,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kPrintingEnabled, true);
 #endif
-  registry->RegisterBooleanPref(
-      prefs::kPrintPreviewDisabled,
-      false,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kForceEphemeralProfiles,
-      false,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kPrintPreviewDisabled, false);
+  registry->RegisterBooleanPref(prefs::kForceEphemeralProfiles, false);
 
   // Initialize the cache prefs.
-  registry->RegisterFilePathPref(
-      prefs::kDiskCacheDir,
-      base::FilePath(),
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterIntegerPref(
-      prefs::kDiskCacheSize,
-      0,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterIntegerPref(
-      prefs::kMediaCacheSize,
-      0,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterFilePathPref(prefs::kDiskCacheDir, base::FilePath());
+  registry->RegisterIntegerPref(prefs::kDiskCacheSize, 0);
+  registry->RegisterIntegerPref(prefs::kMediaCacheSize, 0);
 
   // Deprecated. Kept around for migration.
   registry->RegisterBooleanPref(
@@ -518,11 +475,11 @@ ProfileImpl::ProfileImpl(
     // (successfully or not).  Note that we can use base::Unretained
     // because the PrefService is owned by this class and lives on
     // the same thread.
-    prefs_->AddPrefInitObserver(base::Bind(&ProfileImpl::OnPrefsLoaded,
-                                           base::Unretained(this)));
+    prefs_->AddPrefInitObserver(base::Bind(
+        &ProfileImpl::OnPrefsLoaded, base::Unretained(this), create_mode));
   } else {
     // Prefs were loaded synchronously so we can continue directly.
-    OnPrefsLoaded(true);
+    OnPrefsLoaded(create_mode, true);
   }
 }
 
@@ -845,15 +802,9 @@ ExtensionSpecialStoragePolicy*
 #endif
 }
 
-void ProfileImpl::OnPrefsLoaded(bool success) {
-  TRACE_EVENT0("browser", "ProfileImpl::OnPrefsLoaded");
-  SCOPED_UMA_HISTOGRAM_TIMER("Profile.OnPrefsLoadedTime");
-  if (!success) {
-    if (delegate_)
-      delegate_->OnProfileCreated(this, false, false);
-    return;
-  }
-
+void ProfileImpl::OnLocaleReady() {
+  TRACE_EVENT0("browser", "ProfileImpl::OnLocaleReady");
+  SCOPED_UMA_HISTOGRAM_TIMER("Profile.OnLocaleReadyTime");
   // Migrate obsolete prefs.
   if (g_browser_process->local_state())
     chrome::MigrateObsoleteBrowserPrefs(this, g_browser_process->local_state());
@@ -877,11 +828,10 @@ void ProfileImpl::OnPrefsLoaded(bool success) {
   // TODO(sky): remove this in a couple of releases (m28ish).
   prefs_->SetBoolean(prefs::kSessionExitedCleanly, true);
 
-#if defined(OS_ANDROID) && defined(FULL_SAFE_BROWSING)
-  // Clear safe browsing setting in the case we need to roll back
-  // for users enrolled in Finch trial before.
-  if (!SafeBrowsingService::IsEnabledByFieldTrial())
-    prefs_->ClearPref(prefs::kSafeBrowsingEnabled);
+#if defined(SAFE_BROWSING_DB_REMOTE)
+  // Hardcode this pref on this build of Android until the UX is developed.
+  // http://crbug.com/481558
+  prefs_->SetBoolean(prefs::kSafeBrowsingEnabled, true);
 #endif
 
   g_browser_process->profile_manager()->InitProfileUserPrefs(this);
@@ -902,6 +852,28 @@ void ProfileImpl::OnPrefsLoaded(bool success) {
 
   ChromeVersionService::OnProfileLoaded(prefs_.get(), IsNewProfile());
   DoFinalInit();
+}
+
+void ProfileImpl::OnPrefsLoaded(CreateMode create_mode, bool success) {
+  TRACE_EVENT0("browser", "ProfileImpl::OnPrefsLoaded");
+  if (!success) {
+    if (delegate_)
+      delegate_->OnProfileCreated(this, false, false);
+    return;
+  }
+
+#if defined(OS_CHROMEOS)
+  if (create_mode == CREATE_MODE_SYNCHRONOUS) {
+    // Synchronous create mode implies that either it is restart after crash,
+    // or we are in tests. In both cases the first loaded locale is correct.
+    OnLocaleReady();
+  } else {
+    chromeos::UserSessionManager::GetInstance()->RespectLocalePreferenceWrapper(
+        this, base::Bind(&ProfileImpl::OnLocaleReady, base::Unretained(this)));
+  }
+#else
+  OnLocaleReady();
+#endif
 }
 
 bool ProfileImpl::WasCreatedByVersionOrLater(const std::string& version) {
@@ -1057,7 +1029,7 @@ HostContentSettingsMap* ProfileImpl::GetHostContentSettingsMap() {
 
 content::BrowserPluginGuestManager* ProfileImpl::GetGuestManager() {
 #if defined(ENABLE_EXTENSIONS)
-  return extensions::GuestViewManager::FromBrowserContext(this);
+  return guest_view::GuestViewManager::FromBrowserContext(this);
 #else
   return NULL;
 #endif

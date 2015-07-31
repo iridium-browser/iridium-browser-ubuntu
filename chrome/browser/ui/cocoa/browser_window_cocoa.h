@@ -95,6 +95,7 @@ class BrowserWindowCocoa
   void UpdateToolbar(content::WebContents* contents) override;
   void ResetToolbarTabState(content::WebContents* contents) override;
   void FocusToolbar() override;
+  void ToolbarSizeChanged(bool is_animating) override;
   void FocusAppMenu() override;
   void FocusBookmarksToolbar() override;
   void FocusInfobars() override;
@@ -134,7 +135,6 @@ class BrowserWindowCocoa
       bool app_modal,
       const base::Callback<void(bool)>& callback) override;
   void UserChangedTheme() override;
-  void WebContentsFocused(content::WebContents* contents) override;
   void ShowWebsiteSettings(Profile* profile,
                            content::WebContents* web_contents,
                            const GURL& url,
@@ -144,9 +144,7 @@ class BrowserWindowCocoa
                               bool* is_keyboard_shortcut) override;
   void HandleKeyboardEvent(
       const content::NativeWebKeyboardEvent& event) override;
-  void Cut() override;
-  void Copy() override;
-  void Paste() override;
+  void CutCopyPaste(int command_id) override;
   WindowOpenDisposition GetDispositionForPopupBounds(
       const gfx::Rect& bounds) override;
   FindBar* CreateFindBar() override;

@@ -66,7 +66,6 @@ class CONTENT_EXPORT RenderWidgetCompositor
   // Calling QueueSwapPromise() to directly queue a SwapPromise into
   // LayerTreeHost.
   void QueueSwapPromise(scoped_ptr<cc::SwapPromise> swap_promise);
-  int GetLayerTreeId() const;
   int GetSourceFrameNumber() const;
   void SetNeedsUpdateLayers();
   void SetNeedsCommit();
@@ -78,6 +77,7 @@ class CONTENT_EXPORT RenderWidgetCompositor
       const base::Callback<void(scoped_ptr<base::Value>)>& callback);
   bool SendMessageToMicroBenchmark(int id, scoped_ptr<base::Value> value);
   void StartCompositor();
+  void SetSurfaceIdNamespace(uint32_t surface_id_namespace);
 
   // WebLayerTreeView implementation.
   virtual void setRootLayer(const blink::WebLayer& layer);
@@ -106,6 +106,8 @@ class CONTENT_EXPORT RenderWidgetCompositor
   virtual void setNeedsAnimate();
   virtual bool commitRequested() const;
   virtual void didStopFlinging();
+  virtual void layoutAndPaintAsync(
+      blink::WebLayoutAndPaintAsyncCallback* callback);
   virtual void compositeAndReadbackAsync(
       blink::WebCompositeAndReadbackAsyncCallback* callback);
   virtual void finishAllRendering();
@@ -117,9 +119,9 @@ class CONTENT_EXPORT RenderWidgetCompositor
       const blink::WebLayer* innerViewportScrollLayer,
       const blink::WebLayer* outerViewportScrollLayer) override;
   virtual void clearViewportLayers() override;
-  virtual void registerSelection(const blink::WebSelectionBound& start,
-                                 const blink::WebSelectionBound& end) override;
+  virtual void registerSelection(const blink::WebSelection& selection) override;
   virtual void clearSelection() override;
+  virtual int layerTreeId() const;
   virtual void setShowFPSCounter(bool show);
   virtual void setShowPaintRects(bool show);
   virtual void setShowDebugBorders(bool show);
@@ -174,11 +176,16 @@ class CONTENT_EXPORT RenderWidgetCompositor
   cc::LayerTreeHost* layer_tree_host() { return layer_tree_host_.get(); }
 
  private:
+  void ScheduleCommit();
+  bool CommitIsSynchronous() const;
+  void SynchronousCommit();
+
   int num_failed_recreate_attempts_;
   RenderWidget* widget_;
   CompositorDependencies* compositor_deps_;
   scoped_ptr<cc::LayerTreeHost> layer_tree_host_;
 
+  blink::WebLayoutAndPaintAsyncCallback* layout_and_paint_async_callback_;
   scoped_ptr<cc::CopyOutputRequest> temporary_copy_output_request_;
 
   base::WeakPtrFactory<RenderWidgetCompositor> weak_factory_;

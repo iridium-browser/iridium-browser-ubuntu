@@ -31,7 +31,7 @@
 // Events are issued against categories. Whereas LOG's
 // categories are statically defined, TRACE categories are created
 // implicitly with a string. For example:
-//   TRACE_EVENT_INSTANT0("MY_SUBSYSTEM", "SomeImportantEvent")
+//   TRACE_EVENT_INSTANT0("MY_SUBSYSTEM", "SomeImportantEvent", TRACE_EVENT_SCOPE_THREAD)
 //
 // Events can be INSTANT, or can be pairs of BEGIN and END in the same scope:
 //   TRACE_EVENT_BEGIN0("MY_SUBSYSTEM", "SomethingCostly")
@@ -115,7 +115,7 @@
 // in for category, name, and arg_names. Thus, the following code will
 // cause problems:
 //     char* str = strdup("impprtantName");
-//     TRACE_EVENT_INSTANT0("SUBSYSTEM", str);  // BAD!
+//     TRACE_EVENT_INSTANT0("SUBSYSTEM", str, TRACE_EVENT_SCOPE_THREAD);  // BAD!
 //     free(str);                   // Trace system now has dangling pointer
 //
 // To avoid this issue with the |name| and |arg_name| parameters, use the
@@ -203,27 +203,27 @@
 // does nothing.
 // - category and name strings must have application lifetime (statics or
 //   literals). They may not include " chars.
-#define TRACE_EVENT_INSTANT0(category, name) \
+#define TRACE_EVENT_INSTANT0(category, name, scope) \
     INTERNAL_TRACE_EVENT_ADD(TRACE_EVENT_PHASE_INSTANT, \
-        category, name, TRACE_EVENT_FLAG_NONE)
-#define TRACE_EVENT_INSTANT1(category, name, arg1_name, arg1_val) \
+        category, name, TRACE_EVENT_FLAG_NONE | scope)
+#define TRACE_EVENT_INSTANT1(category, name, scope, arg1_name, arg1_val) \
     INTERNAL_TRACE_EVENT_ADD(TRACE_EVENT_PHASE_INSTANT, \
-        category, name, TRACE_EVENT_FLAG_NONE, arg1_name, arg1_val)
-#define TRACE_EVENT_INSTANT2(category, name, arg1_name, arg1_val, \
+        category, name, TRACE_EVENT_FLAG_NONE | scope, arg1_name, arg1_val)
+#define TRACE_EVENT_INSTANT2(category, name, scope, arg1_name, arg1_val, \
         arg2_name, arg2_val) \
     INTERNAL_TRACE_EVENT_ADD(TRACE_EVENT_PHASE_INSTANT, \
-        category, name, TRACE_EVENT_FLAG_NONE, arg1_name, arg1_val, \
+        category, name, TRACE_EVENT_FLAG_NONE | scope, arg1_name, arg1_val, \
         arg2_name, arg2_val)
-#define TRACE_EVENT_COPY_INSTANT0(category, name) \
+#define TRACE_EVENT_COPY_INSTANT0(category, name, scope) \
     INTERNAL_TRACE_EVENT_ADD(TRACE_EVENT_PHASE_INSTANT, \
-        category, name, TRACE_EVENT_FLAG_COPY)
-#define TRACE_EVENT_COPY_INSTANT1(category, name, arg1_name, arg1_val) \
+        category, name, TRACE_EVENT_FLAG_COPY | scope)
+#define TRACE_EVENT_COPY_INSTANT1(category, name, scope, arg1_name, arg1_val) \
     INTERNAL_TRACE_EVENT_ADD(TRACE_EVENT_PHASE_INSTANT, \
-        category, name, TRACE_EVENT_FLAG_COPY, arg1_name, arg1_val)
-#define TRACE_EVENT_COPY_INSTANT2(category, name, arg1_name, arg1_val, \
+        category, name, TRACE_EVENT_FLAG_COPY | scope, arg1_name, arg1_val)
+#define TRACE_EVENT_COPY_INSTANT2(category, name, scope, arg1_name, arg1_val, \
         arg2_name, arg2_val) \
     INTERNAL_TRACE_EVENT_ADD(TRACE_EVENT_PHASE_INSTANT, \
-        category, name, TRACE_EVENT_FLAG_COPY, arg1_name, arg1_val, \
+        category, name, TRACE_EVENT_FLAG_COPY | scope, arg1_name, arg1_val, \
         arg2_name, arg2_val)
 
 // Records a single BEGIN event called "name" immediately, with 0, 1 or 2
@@ -740,15 +740,14 @@
 
 // Add a trace event to the platform tracing system.
 // blink::TraceEvent::TraceEventHandle TRACE_EVENT_API_ADD_TRACE_EVENT(
-//                    char phase,
-//                    const unsigned char* category_enabled,
 //                    const char* name,
 //                    unsigned long long id,
+//                    double timestamp,
 //                    int num_args,
 //                    const char** arg_names,
 //                    const unsigned char* arg_types,
 //                    const unsigned long long* arg_values,
-//                    const RefPtr<ConvertableToTraceFormat>* convertableValues
+//                    PassRefPtr<ConvertableToTraceFormat> convertableValues[],
 //                    unsigned char flags)
 #define TRACE_EVENT_API_ADD_TRACE_EVENT \
     blink::EventTracer::addTraceEvent
@@ -888,6 +887,11 @@
 #define TRACE_EVENT_FLAG_COPY        (static_cast<unsigned char>(1 << 0))
 #define TRACE_EVENT_FLAG_HAS_ID      (static_cast<unsigned char>(1 << 1))
 #define TRACE_EVENT_FLAG_MANGLE_ID   (static_cast<unsigned char>(1 << 2))
+#define TRACE_EVENT_FLAG_SCOPE_OFFSET (static_cast<unsigned char>(1 << 3))
+#define TRACE_EVENT_FLAG_SCOPE_EXTRA  (static_cast<unsigned char>(1 << 4))
+
+#define TRACE_EVENT_FLAG_SCOPE_MASK   (static_cast<unsigned char>( \
+    TRACE_EVENT_FLAG_SCOPE_OFFSET | TRACE_EVENT_FLAG_SCOPE_EXTRA))
 
 // Type values for identifying types in the TraceValue union.
 #define TRACE_VALUE_TYPE_BOOL         (static_cast<unsigned char>(1))
@@ -898,6 +902,12 @@
 #define TRACE_VALUE_TYPE_STRING       (static_cast<unsigned char>(6))
 #define TRACE_VALUE_TYPE_COPY_STRING  (static_cast<unsigned char>(7))
 #define TRACE_VALUE_TYPE_CONVERTABLE  (static_cast<unsigned char>(8))
+
+// Enum reflecting the scope of an INSTANT event. Must fit within
+// TRACE_EVENT_FLAG_SCOPE_MASK.
+#define TRACE_EVENT_SCOPE_GLOBAL  (static_cast<unsigned char>(0 << 3))
+#define TRACE_EVENT_SCOPE_PROCESS (static_cast<unsigned char>(1 << 3))
+#define TRACE_EVENT_SCOPE_THREAD  (static_cast<unsigned char>(2 << 3))
 
 // These values must be in sync with base::debug::TraceLog::CategoryGroupEnabledFlags.
 #define ENABLED_FOR_RECORDING (1 << 0)
@@ -1038,29 +1048,17 @@ template<typename T> static inline void setTraceValue(const PassRefPtr<T>& ptr, 
 
 template<typename T> struct ConvertableToTraceFormatTraits {
     static const bool isConvertable = false;
-    static void assignIfConvertable(ConvertableToTraceFormat*& left, const T&)
+    static PassRefPtr<ConvertableToTraceFormat> moveFromIfConvertable(const T&)
     {
-        left = 0;
-    }
-};
-
-template<typename T> struct ConvertableToTraceFormatTraits<T*> {
-    static const bool isConvertable = WTF::IsSubclass<T, TraceEvent::ConvertableToTraceFormat>::value;
-    static void assignIfConvertable(ConvertableToTraceFormat*& left, ...)
-    {
-        left = 0;
-    }
-    static void assignIfConvertable(ConvertableToTraceFormat*& left, ConvertableToTraceFormat* const& right)
-    {
-        left = right;
+        return nullptr;
     }
 };
 
 template<typename T> struct ConvertableToTraceFormatTraits<PassRefPtr<T>> {
     static const bool isConvertable = WTF::IsSubclass<T, TraceEvent::ConvertableToTraceFormat>::value;
-    static void assignIfConvertable(ConvertableToTraceFormat*& left, const PassRefPtr<T>& right)
+    static PassRefPtr<ConvertableToTraceFormat> moveFromIfConvertable(const PassRefPtr<T>& convertableToTraceFormat)
     {
-        ConvertableToTraceFormatTraits<T*>::assignIfConvertable(left, right.get());
+        return convertableToTraceFormat;
     }
 };
 
@@ -1069,9 +1067,9 @@ template<typename T> bool isConvertableToTraceFormat(const T&)
     return ConvertableToTraceFormatTraits<T>::isConvertable;
 }
 
-template<typename T> void assignIfConvertableToTraceFormat(ConvertableToTraceFormat*& left, const T& right)
+template<typename T> PassRefPtr<ConvertableToTraceFormat> moveFromIfConvertableToTraceFormat(const T& value)
 {
-    ConvertableToTraceFormatTraits<T>::assignIfConvertable(left, right);
+    return ConvertableToTraceFormatTraits<T>::moveFromIfConvertable(value);
 }
 
 // These addTraceEvent template functions are defined here instead of in the
@@ -1109,12 +1107,11 @@ static inline TraceEventHandle addTraceEvent(
     unsigned long long argValues[1];
     setTraceValue(arg1Val, &argTypes[0], &argValues[0]);
     if (isConvertableToTraceFormat(arg1Val)) {
-        ConvertableToTraceFormat* convertableValues[1];
-        assignIfConvertableToTraceFormat(convertableValues[0], arg1Val);
         return TRACE_EVENT_API_ADD_TRACE_EVENT(
             phase, categoryEnabled, name, id, timestamp,
             numArgs, &arg1Name, argTypes, argValues,
-            convertableValues,
+            moveFromIfConvertableToTraceFormat(arg1Val),
+            nullptr,
             flags);
     }
     return TRACE_EVENT_API_ADD_TRACE_EVENT(
@@ -1143,13 +1140,11 @@ static inline TraceEventHandle addTraceEvent(
     setTraceValue(arg1Val, &argTypes[0], &argValues[0]);
     setTraceValue(arg2Val, &argTypes[1], &argValues[1]);
     if (isConvertableToTraceFormat(arg1Val) || isConvertableToTraceFormat(arg2Val)) {
-        ConvertableToTraceFormat* convertableValues[2];
-        assignIfConvertableToTraceFormat(convertableValues[0], arg1Val);
-        assignIfConvertableToTraceFormat(convertableValues[1], arg2Val);
         return TRACE_EVENT_API_ADD_TRACE_EVENT(
             phase, categoryEnabled, name, id, timestamp,
             numArgs, argNames, argTypes, argValues,
-            convertableValues,
+            moveFromIfConvertableToTraceFormat(arg1Val),
+            moveFromIfConvertableToTraceFormat(arg2Val),
             flags);
     }
     return TRACE_EVENT_API_ADD_TRACE_EVENT(
@@ -1250,13 +1245,13 @@ public:
     }
 
     // FIXME: Make load/store to traceSamplingState[] thread-safe and atomic.
-    static inline const char* current()
+    static const char* current()
     {
         return reinterpret_cast<const char*>(*blink::traceSamplingState[BucketNumber]);
     }
-    static inline void set(const char* categoryAndName)
+    static void set(const char* categoryAndName)
     {
-        *blink::traceSamplingState[BucketNumber] = reinterpret_cast<long>(const_cast<char*>(categoryAndName));
+        *blink::traceSamplingState[BucketNumber] = reinterpret_cast<TraceEventAPIAtomicWord>(categoryAndName);
     }
 
 private:

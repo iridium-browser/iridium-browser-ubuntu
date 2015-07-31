@@ -24,25 +24,25 @@
 #include "base/md5.h"
 
 #include <stddef.h>
-#include <stdint.h>
 
 namespace {
 
 struct Context {
   uint32_t buf[4];
   uint32_t bits[2];
-  unsigned char in[64];
+  uint8_t in[64];
 };
 
 /*
  * Note: this code is harmless on little-endian machines.
  */
-void byteReverse(unsigned char *buf, unsigned longs) {
-  uint32_t t;
+void byteReverse(uint8_t* buf, unsigned longs) {
   do {
-    t = (uint32_t)((unsigned)buf[3] << 8 | buf[2]) << 16 |
-        ((unsigned)buf[1] << 8 | buf[0]);
-    *(uint32_t*)buf = t;
+    uint32_t temp = static_cast<uint32_t>(
+        static_cast<unsigned>(buf[3]) << 8 |
+        buf[2]) << 16 |
+        (static_cast<unsigned>(buf[1]) << 8 | buf[0]);
+    *reinterpret_cast<uint32_t*>(buf) = temp;
     buf += 4;
   } while (--longs);
 }
@@ -155,7 +155,7 @@ namespace base {
  * initialization constants.
  */
 void MD5Init(MD5Context* context) {
-  struct Context* ctx = (struct Context*)context;
+  struct Context* ctx = reinterpret_cast<struct Context*>(context);
   ctx->buf[0] = 0x67452301;
   ctx->buf[1] = 0xefcdab89;
   ctx->buf[2] = 0x98badcfe;
@@ -169,16 +169,14 @@ void MD5Init(MD5Context* context) {
  * of bytes.
  */
 void MD5Update(MD5Context* context, const StringPiece& data) {
-  const unsigned char* inbuf = (const unsigned char*)data.data();
+  struct Context* ctx = reinterpret_cast<struct Context*>(context);
+  const uint8_t* buf = reinterpret_cast<const uint8_t*>(data.data());
   size_t len = data.size();
-  struct Context* ctx = (struct Context*)context;
-  const unsigned char* buf = (const unsigned char*)inbuf;
-  uint32_t t;
 
   /* Update bitcount */
 
-  t = ctx->bits[0];
-  if ((ctx->bits[0] = t + ((uint32_t)len << 3)) < t)
+  uint32_t t = ctx->bits[0];
+  if ((ctx->bits[0] = t + (static_cast<uint32_t>(len) << 3)) < t)
     ctx->bits[1]++; /* Carry from low to high */
   ctx->bits[1] += static_cast<uint32_t>(len >> 29);
 
@@ -187,7 +185,7 @@ void MD5Update(MD5Context* context, const StringPiece& data) {
   /* Handle any leading odd-sized chunks */
 
   if (t) {
-    unsigned char* p = (unsigned char*)ctx->in + t;
+    uint8_t* p = static_cast<uint8_t*>(ctx->in + t);
 
     t = 64 - t;
     if (len < t) {
@@ -196,7 +194,7 @@ void MD5Update(MD5Context* context, const StringPiece& data) {
     }
     memcpy(p, buf, t);
     byteReverse(ctx->in, 16);
-    MD5Transform(ctx->buf, (uint32_t*)ctx->in);
+    MD5Transform(ctx->buf, reinterpret_cast<uint32_t*>(ctx->in));
     buf += t;
     len -= t;
   }
@@ -206,7 +204,7 @@ void MD5Update(MD5Context* context, const StringPiece& data) {
   while (len >= 64) {
     memcpy(ctx->in, buf, 64);
     byteReverse(ctx->in, 16);
-    MD5Transform(ctx->buf, (uint32_t*)ctx->in);
+    MD5Transform(ctx->buf, reinterpret_cast<uint32_t*>(ctx->in));
     buf += 64;
     len -= 64;
   }
@@ -221,9 +219,9 @@ void MD5Update(MD5Context* context, const StringPiece& data) {
  * 1 0* (64-bit count of bits processed, MSB-first)
  */
 void MD5Final(MD5Digest* digest, MD5Context* context) {
-  struct Context* ctx = (struct Context*)context;
+  struct Context* ctx = reinterpret_cast<struct Context*>(context);
   unsigned count;
-  unsigned char* p;
+  uint8_t* p;
 
   /* Compute number of bytes mod 64 */
   count = (ctx->bits[0] >> 3) & 0x3F;
@@ -241,7 +239,7 @@ void MD5Final(MD5Digest* digest, MD5Context* context) {
     /* Two lots of padding:  Pad the first block to 64 bytes */
     memset(p, 0, count);
     byteReverse(ctx->in, 16);
-    MD5Transform(ctx->buf, (uint32_t*)ctx->in);
+    MD5Transform(ctx->buf, reinterpret_cast<uint32_t*>(ctx->in));
 
     /* Now fill the next block with 56 bytes */
     memset(ctx->in, 0, 56);
@@ -257,8 +255,8 @@ void MD5Final(MD5Digest* digest, MD5Context* context) {
   memcpy(&ctx->in[15 * sizeof(ctx->bits[1])], &ctx->bits[1],
          sizeof(ctx->bits[1]));
 
-  MD5Transform(ctx->buf, (uint32_t*)ctx->in);
-  byteReverse((unsigned char*)ctx->buf, 4);
+  MD5Transform(ctx->buf, reinterpret_cast<uint32_t*>(ctx->in));
+  byteReverse(reinterpret_cast<uint8_t*>(ctx->buf), 4);
   memcpy(digest->a, ctx->buf, 16);
   memset(ctx, 0, sizeof(*ctx)); /* In case it's sensitive */
 }
@@ -277,11 +275,10 @@ std::string MD5DigestToBase16(const MD5Digest& digest) {
   std::string ret;
   ret.resize(32);
 
-  int j = 0;
-  for (int i = 0; i < 16; i++) {
-    int a = digest.a[i];
-    ret[j++] = zEncode[(a >> 4) & 0xf];
-    ret[j++] = zEncode[a & 0xf];
+  for (int i = 0, j = 0; i < 16; i++, j += 2) {
+    uint8_t a = digest.a[i];
+    ret[j] = zEncode[(a >> 4) & 0xf];
+    ret[j + 1] = zEncode[a & 0xf];
   }
   return ret;
 }

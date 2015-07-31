@@ -19,8 +19,8 @@
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/overlay_transform.h"
 #include "ui/ozone/ozone_export.h"
+#include "ui/ozone/platform/drm/common/scoped_drm_types.h"
 #include "ui/ozone/platform/drm/gpu/hardware_display_plane_manager.h"
-#include "ui/ozone/platform/drm/gpu/scoped_drm_types.h"
 
 typedef struct _drmEventContext drmEventContext;
 typedef struct _drmModeModeInfo drmModeModeInfo;
@@ -34,6 +34,7 @@ class SingleThreadTaskRunner;
 namespace ui {
 
 class HardwareDisplayPlaneManager;
+struct GammaRampRGBEntry;
 
 // Wraps DRM calls into a nice interface. Used to provide different
 // implementations of the DRM calls. For the actual implementation the DRM API
@@ -146,19 +147,26 @@ class OZONE_EXPORT DrmDevice : public base::RefCountedThreadSafe<DrmDevice> {
 
   virtual bool CreateDumbBuffer(const SkImageInfo& info,
                                 uint32_t* handle,
-                                uint32_t* stride,
-                                void** pixels);
+                                uint32_t* stride);
 
-  virtual void DestroyDumbBuffer(const SkImageInfo& info,
-                                 uint32_t handle,
-                                 uint32_t stride,
-                                 void* pixels);
+  virtual bool DestroyDumbBuffer(uint32_t handle);
+
+  virtual bool MapDumbBuffer(uint32_t handle, size_t size, void** pixels);
+
+  virtual bool UnmapDumbBuffer(void* pixels, size_t size);
 
   virtual bool CloseBufferHandle(uint32_t handle);
 
   virtual bool CommitProperties(drmModePropertySet* properties,
                                 uint32_t flags,
+                                bool is_sync,
                                 const PageFlipCallback& callback);
+
+  // Set the gamma ramp for |crtc_id| to reflect the ramps in |lut|.
+  virtual bool SetGammaRamp(uint32_t crtc_id,
+                            const std::vector<GammaRampRGBEntry>& lut);
+
+  virtual bool SetCapability(uint64_t capability, uint64_t value);
 
   // Drm master related
   virtual bool SetMaster();
@@ -179,6 +187,7 @@ class OZONE_EXPORT DrmDevice : public base::RefCountedThreadSafe<DrmDevice> {
 
  private:
   class IOWatcher;
+  class PageFlipManager;
 
   // Path to DRM device.
   const base::FilePath device_path_;
@@ -191,6 +200,8 @@ class OZONE_EXPORT DrmDevice : public base::RefCountedThreadSafe<DrmDevice> {
 
   // Watcher for |fd_| listening for page flip events.
   scoped_refptr<IOWatcher> watcher_;
+
+  scoped_refptr<PageFlipManager> page_flip_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(DrmDevice);
 };

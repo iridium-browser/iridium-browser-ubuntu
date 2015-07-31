@@ -6,7 +6,6 @@
 
 from __future__ import print_function
 
-import logging
 import os
 
 from chromite.compute import bot_constants
@@ -14,6 +13,7 @@ from chromite.compute import compute_configs
 from chromite.compute import gcloud
 from chromite.lib import commandline
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import gs
 from chromite.lib import osutils
 
@@ -135,7 +135,6 @@ def CreateAndArchiveImageFromInstance(instance, project, zone, image_name):
     project: GCloud Project that the |instance| belongs to.
     zone: Zone of the GCE instance.
     image_name: Name of the image.
-
   """
   image_name_with_suffix = '%s%s' % (image_name, compute_configs.IMAGE_SUFFIX)
   archive_path = os.path.join(
@@ -191,7 +190,7 @@ def CreateImageForCrosBots(project, zone, address=None, testing=False):
   instance = ('chromeos-temp-%s'
               % cros_build_lib.GetRandomString())
   gcctx.CreateInstance(instance, image=compute_configs.DEFAULT_BASE_IMAGE,
-                       address=address)
+                       address=address, **compute_configs.IMAGE_CREATION_CONFIG)
   try:
     BotifyInstance(instance, project, zone, testing=testing)
   except:
@@ -235,6 +234,9 @@ def main(argv):
   parser.add_argument(
       '--config', type=str, default=None,
       help='Config to create the instance from')
+  parser.add_argument(
+      '--quiet', '-q', action='store_true',
+      help='Do not prompt user for verification.')
   parser.add_argument(
       '--chromeos', default=False, action='store_true',
       help='Turn on the offical Chrome OS flag (e.g. to create '
@@ -287,7 +289,8 @@ def main(argv):
             'One and only one of the two options should be specified: '
             'source image (--image) or the builder (--config)')
       if opts.image:
-        gcctx.CreateInstance(opts.instance, image=opts.image)
+        gcctx.CreateInstance(opts.instance, image=opts.image,
+                             address=opts.address)
       elif opts.config:
         config = compute_configs.configs.get(opts.config, None)
         if not config:
@@ -296,7 +299,7 @@ def main(argv):
     elif opts.operation == 'delete':
       if not opts.instance:
         cros_build_lib.Die('Please specify the instance name (--instance)')
-      gcctx.DeleteInstance(opts.instance)
+      gcctx.DeleteInstance(opts.instance, quiet=opts.quiet)
     elif opts.operation == 'list':
       gcctx.ListInstances()
     elif opts.operation == 'ssh':

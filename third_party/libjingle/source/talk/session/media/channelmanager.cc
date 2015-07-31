@@ -76,16 +76,6 @@ static DataEngineInterface* ConstructDataEngine() {
 #endif
 }
 
-#if !defined(DISABLE_MEDIA_ENGINE_FACTORY)
-ChannelManager::ChannelManager(rtc::Thread* worker_thread) {
-  Construct(MediaEngineFactory::Create(),
-            ConstructDataEngine(),
-            cricket::DeviceManagerFactory::Create(),
-            new CaptureManager(),
-            worker_thread);
-}
-#endif
-
 ChannelManager::ChannelManager(MediaEngineInterface* me,
                                DataEngineInterface* dme,
                                DeviceManagerInterface* dm,
@@ -131,10 +121,6 @@ void ChannelManager::Construct(MediaEngineInterface* me,
   SignalDevicesChange.repeat(device_manager_->SignalDevicesChange);
   device_manager_->Init();
 
-  // Camera is started asynchronously, request callbacks when startup
-  // completes to be able to forward them to the rendering manager.
-  media_engine_->SignalVideoCaptureStateChange().connect(
-      this, &ChannelManager::OnVideoCaptureStateChange);
   capture_manager_->SignalCapturerStateChange.connect(
       this, &ChannelManager::OnVideoCaptureStateChange);
 }
@@ -323,7 +309,7 @@ void ChannelManager::Terminate_w() {
     DestroyVideoChannel_w(video_channels_.back());
   }
   while (!voice_channels_.empty()) {
-    DestroyVoiceChannel_w(voice_channels_.back());
+    DestroyVoiceChannel_w(voice_channels_.back(), nullptr);
   }
   while (!soundclips_.empty()) {
     DestroySoundclip_w(soundclips_.back());
@@ -343,8 +329,8 @@ VoiceChannel* ChannelManager::CreateVoiceChannel(
 
 VoiceChannel* ChannelManager::CreateVoiceChannel_w(
     BaseSession* session, const std::string& content_name, bool rtcp) {
-  // This is ok to alloc from a thread other than the worker thread
   ASSERT(initialized_);
+  ASSERT(worker_thread_ == rtc::Thread::Current());
   VoiceMediaChannel* media_channel = media_engine_->CreateChannel();
   if (media_channel == NULL)
     return NULL;
@@ -360,22 +346,29 @@ VoiceChannel* ChannelManager::CreateVoiceChannel_w(
   return voice_channel;
 }
 
-void ChannelManager::DestroyVoiceChannel(VoiceChannel* voice_channel) {
+void ChannelManager::DestroyVoiceChannel(VoiceChannel* voice_channel,
+                                         VideoChannel* video_channel) {
   if (voice_channel) {
     worker_thread_->Invoke<void>(
-        Bind(&ChannelManager::DestroyVoiceChannel_w, this, voice_channel));
+        Bind(&ChannelManager::DestroyVoiceChannel_w, this, voice_channel,
+             video_channel));
   }
 }
 
-void ChannelManager::DestroyVoiceChannel_w(VoiceChannel* voice_channel) {
+void ChannelManager::DestroyVoiceChannel_w(VoiceChannel* voice_channel,
+                                           VideoChannel* video_channel) {
   // Destroy voice channel.
   ASSERT(initialized_);
+  ASSERT(worker_thread_ == rtc::Thread::Current());
   VoiceChannels::iterator it = std::find(voice_channels_.begin(),
       voice_channels_.end(), voice_channel);
   ASSERT(it != voice_channels_.end());
   if (it == voice_channels_.end())
     return;
 
+  if (video_channel) {
+    video_channel->media_channel()->DetachVoiceChannel();
+  }
   voice_channels_.erase(it);
   delete voice_channel;
 }
@@ -417,8 +410,8 @@ VideoChannel* ChannelManager::CreateVideoChannel_w(
     bool rtcp,
     const VideoOptions& options,
     VoiceChannel* voice_channel) {
-  // This is ok to alloc from a thread other than the worker thread
   ASSERT(initialized_);
+  ASSERT(worker_thread_ == rtc::Thread::Current());
   VideoMediaChannel* media_channel =
       // voice_channel can be NULL in case of NullVoiceEngine.
       media_engine_->CreateVideoChannel(
@@ -428,7 +421,7 @@ VideoChannel* ChannelManager::CreateVideoChannel_w(
 
   VideoChannel* video_channel = new VideoChannel(
       worker_thread_, media_engine_.get(), media_channel,
-      session, content_name, rtcp, voice_channel);
+      session, content_name, rtcp);
   if (!video_channel->Init()) {
     delete video_channel;
     return NULL;
@@ -447,6 +440,7 @@ void ChannelManager::DestroyVideoChannel(VideoChannel* video_channel) {
 void ChannelManager::DestroyVideoChannel_w(VideoChannel* video_channel) {
   // Destroy video channel.
   ASSERT(initialized_);
+  ASSERT(worker_thread_ == rtc::Thread::Current());
   VideoChannels::iterator it = std::find(video_channels_.begin(),
       video_channels_.end(), video_channel);
   ASSERT(it != video_channels_.end());
@@ -1011,11 +1005,6 @@ void ChannelManager::SetVideoCaptureDeviceMaxFormat(
     const std::string& usb_id,
     const VideoFormat& max_format) {
   device_manager_->SetVideoCaptureDeviceMaxFormat(usb_id, max_format);
-}
-
-VideoFormat ChannelManager::GetStartCaptureFormat() {
-  return worker_thread_->Invoke<VideoFormat>(
-      Bind(&MediaEngineInterface::GetStartCaptureFormat, media_engine_.get()));
 }
 
 bool ChannelManager::StartAecDump(rtc::PlatformFile file) {

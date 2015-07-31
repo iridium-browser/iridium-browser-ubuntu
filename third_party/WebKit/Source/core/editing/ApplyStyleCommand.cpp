@@ -372,8 +372,12 @@ void ApplyStyleCommand::applyRelativeFontStyleChange(EditingStyle* style)
     if (startNode == beyondEnd)
         return;
 
-    if (startNode->isTextNode() && start.deprecatedEditingOffset() >= caretMaxOffset(startNode)) // Move out of text node if range does not include its characters.
+    if (startNode->isTextNode() && start.deprecatedEditingOffset() >= caretMaxOffset(startNode)) {
+        // Move out of text node if range does not include its characters.
         startNode = NodeTraversal::next(*startNode);
+        if (!startNode)
+            return;
+    }
 
     // Store away font size before making any changes to the document.
     // This ensures that changes to one node won't effect another.
@@ -1022,7 +1026,7 @@ void ApplyStyleCommand::applyInlineStyleToPushDown(Node* node, EditingStyle* sty
 {
     ASSERT(node);
 
-    node->document().updateRenderTreeIfNeeded();
+    node->document().updateLayoutTreeIfNeeded();
 
     if (!style || style->isEmpty() || !node->layoutObject() || isHTMLIFrameElement(*node))
         return;
@@ -1033,7 +1037,7 @@ void ApplyStyleCommand::applyInlineStyleToPushDown(Node* node, EditingStyle* sty
         newInlineStyle->mergeInlineStyleOfElement(toHTMLElement(node), EditingStyle::OverrideValues);
     }
 
-    // Since addInlineStyleIfNeeded can't add styles to block-flow render objects, add style attribute instead.
+    // Since addInlineStyleIfNeeded can't add styles to block-flow layout objects, add style attribute instead.
     // FIXME: applyInlineStyleToRange should be used here instead.
     if ((node->layoutObject()->isLayoutBlockFlow() || node->hasChildren()) && node->isHTMLElement()) {
         setNodeAttribute(toHTMLElement(node), styleAttr, AtomicString(newInlineStyle->style()->asText()));
@@ -1544,7 +1548,8 @@ float ApplyStyleCommand::computedFontSize(Node* node)
     if (!value)
         return 0;
 
-    return clampTo<float>(value->deprecatedGetDoubleValue());
+    ASSERT(value->primitiveType() == CSSPrimitiveValue::CSS_PX);
+    return value->getFloatValue();
 }
 
 void ApplyStyleCommand::joinChildTextNodes(ContainerNode* node, const Position& start, const Position& end)

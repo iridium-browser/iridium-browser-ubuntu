@@ -29,10 +29,42 @@ Note: If paths to input files are passed in this way, it is important that:
 import optparse
 import os
 import sys
+import xml.dom.minidom
 
 from util import build_utils
 
 import write_ordered_libraries
+
+class AndroidManifest(object):
+  def __init__(self, path):
+    self.path = path
+    dom = xml.dom.minidom.parse(path)
+    manifests = dom.getElementsByTagName('manifest')
+    assert len(manifests) == 1
+    self.manifest = manifests[0]
+
+  def GetInstrumentation(self):
+    instrumentation_els = self.manifest.getElementsByTagName('instrumentation')
+    if len(instrumentation_els) == 0:
+      return None
+    if len(instrumentation_els) != 1:
+      raise Exception(
+          'More than one <instrumentation> element found in %s' % self.path)
+    return instrumentation_els[0]
+
+  def CheckInstrumentation(self, expected_package):
+    instr = self.GetInstrumentation()
+    if not instr:
+      raise Exception('No <instrumentation> elements found in %s' % self.path)
+    instrumented_package = instr.getAttributeNS(
+        'http://schemas.android.com/apk/res/android', 'targetPackage')
+    if instrumented_package != expected_package:
+      raise Exception(
+          'Wrong instrumented package. Expected %s, got %s'
+          % (expected_package, instrumented_package))
+
+  def GetPackageName(self):
+    return self.manifest.getAttribute('package')
 
 
 dep_config_cache = {}
@@ -47,9 +79,32 @@ def DepsOfType(wanted_type, configs):
 
 
 def GetAllDepsConfigsInOrder(deps_config_paths):
-  def Deps(path):
+  def GetDeps(path):
     return set(GetDepConfig(path)['deps_configs'])
-  return build_utils.GetSortedTransitiveDependencies(deps_config_paths, Deps)
+  return build_utils.GetSortedTransitiveDependencies(deps_config_paths, GetDeps)
+
+
+class Deps(object):
+  def __init__(self, direct_deps_config_paths):
+    self.all_deps_config_paths = GetAllDepsConfigsInOrder(
+        direct_deps_config_paths)
+    self.direct_deps_configs = [
+        GetDepConfig(p) for p in direct_deps_config_paths]
+    self.all_deps_configs = [
+        GetDepConfig(p) for p in self.all_deps_config_paths]
+
+  def All(self, wanted_type=None):
+    if type is None:
+      return self.all_deps_configs
+    return DepsOfType(wanted_type, self.all_deps_configs)
+
+  def Direct(self, wanted_type=None):
+    if wanted_type is None:
+      return self.direct_deps_configs
+    return DepsOfType(wanted_type, self.direct_deps_configs)
+
+  def AllConfigPaths(self):
+    return self.all_deps_config_paths
 
 
 def main(argv):
@@ -68,6 +123,7 @@ def main(argv):
   # android_resources options
   parser.add_option('--srcjar', help='Path to target\'s resources srcjar.')
   parser.add_option('--resources-zip', help='Path to target\'s resources zip.')
+  parser.add_option('--r-text', help='Path to target\'s R.txt file.')
   parser.add_option('--package-name',
       help='Java package name for these resources.')
   parser.add_option('--android-manifest', help='Path to android manifest.')
@@ -87,6 +143,10 @@ def main(argv):
   # native library options
   parser.add_option('--native-libs', help='List of top-level native libs.')
   parser.add_option('--readelf-path', help='Path to toolchain\'s readelf.')
+
+  parser.add_option('--tested-apk-config',
+      help='Path to the build config of the tested apk (for an instrumentation '
+      'test apk).')
 
   options, args = parser.parse_args(argv)
 
@@ -129,19 +189,22 @@ def main(argv):
 
   direct_deps_config_paths = [
       c for c in possible_deps_config_paths if not c in unknown_deps]
-  all_deps_config_paths = GetAllDepsConfigsInOrder(direct_deps_config_paths)
 
-  direct_deps_configs = [GetDepConfig(p) for p in direct_deps_config_paths]
-  all_deps_configs = [GetDepConfig(p) for p in all_deps_config_paths]
+  deps = Deps(direct_deps_config_paths)
+  direct_library_deps = deps.Direct('java_library')
+  all_library_deps = deps.All('java_library')
 
-  direct_library_deps = DepsOfType('java_library', direct_deps_configs)
-  all_library_deps = DepsOfType('java_library', all_deps_configs)
-
-  direct_resources_deps = DepsOfType('android_resources', direct_deps_configs)
-  all_resources_deps = DepsOfType('android_resources', all_deps_configs)
+  direct_resources_deps = deps.Direct('android_resources')
+  all_resources_deps = deps.All('android_resources')
   # Resources should be ordered with the highest-level dependency first so that
   # overrides are done correctly.
   all_resources_deps.reverse()
+
+  if options.type == 'android_apk' and options.tested_apk_config:
+    tested_apk_deps = Deps([options.tested_apk_config])
+    tested_apk_resources_deps = tested_apk_deps.All('android_resources')
+    all_resources_deps = [
+        d for d in all_resources_deps if not d in tested_apk_resources_deps]
 
   # Initialize some common config.
   config = {
@@ -153,7 +216,6 @@ def main(argv):
     }
   }
   deps_info = config['deps_info']
-
 
   if options.type == 'java_library' and not options.bypass_platform_checks:
     deps_info['requires_android'] = options.requires_android
@@ -171,7 +233,6 @@ def main(argv):
     if deps_not_support_android and options.supports_android:
       raise Exception('Not all deps support the Android platform: ' +
           str(deps_not_support_android))
-
 
   if options.type in ['java_library', 'android_apk']:
     javac_classpath = [c['jar_path'] for c in direct_library_deps]
@@ -203,27 +264,50 @@ def main(argv):
     deps_info['resources_zip'] = options.resources_zip
     if options.srcjar:
       deps_info['srcjar'] = options.srcjar
+    if options.android_manifest:
+      manifest = AndroidManifest(options.android_manifest)
+      deps_info['package_name'] = manifest.GetPackageName()
     if options.package_name:
       deps_info['package_name'] = options.package_name
+    if options.r_text:
+      deps_info['r_text'] = options.r_text
 
   if options.type == 'android_resources' or options.type == 'android_apk':
     config['resources'] = {}
     config['resources']['dependency_zips'] = [
         c['resources_zip'] for c in all_resources_deps]
     config['resources']['extra_package_names'] = []
+    config['resources']['extra_r_text_files'] = []
 
   if options.type == 'android_apk':
     config['resources']['extra_package_names'] = [
         c['package_name'] for c in all_resources_deps if 'package_name' in c]
+    config['resources']['extra_r_text_files'] = [
+        c['r_text'] for c in all_resources_deps if 'r_text' in c]
 
+  if options.type in ['android_apk', 'deps_dex']:
+    deps_dex_files = [c['dex_path'] for c in all_library_deps]
+
+  # An instrumentation test apk should exclude the dex files that are in the apk
+  # under test.
+  if options.type == 'android_apk' and options.tested_apk_config:
+    tested_apk_deps = Deps([options.tested_apk_config])
+    tested_apk_library_deps = tested_apk_deps.All('java_library')
+    tested_apk_deps_dex_files = [c['dex_path'] for c in tested_apk_library_deps]
+    deps_dex_files = [
+        p for p in deps_dex_files if not p in tested_apk_deps_dex_files]
+
+    tested_apk_config = GetDepConfig(options.tested_apk_config)
+    expected_tested_package = tested_apk_config['package_name']
+    AndroidManifest(options.android_manifest).CheckInstrumentation(
+        expected_tested_package)
 
   # Dependencies for the final dex file of an apk or a 'deps_dex'.
   if options.type in ['android_apk', 'deps_dex']:
     config['final_dex'] = {}
     dex_config = config['final_dex']
     # TODO(cjhopman): proguard version
-    dex_deps_files = [c['dex_path'] for c in all_library_deps]
-    dex_config['dependency_dex_files'] = dex_deps_files
+    dex_config['dependency_dex_files'] = deps_dex_files
 
   if options.type == 'android_apk':
     config['dist_jar'] = {
@@ -231,6 +315,11 @@ def main(argv):
         c['jar_path'] for c in all_library_deps
       ]
     }
+    manifest = AndroidManifest(options.android_manifest)
+    deps_info['package_name'] = manifest.GetPackageName()
+    if not options.tested_apk_config and manifest.GetInstrumentation():
+      # This must then have instrumentation only for itself.
+      manifest.CheckInstrumentation(manifest.GetPackageName())
 
     library_paths = []
     java_libraries_list = []
@@ -260,7 +349,7 @@ def main(argv):
   if options.depfile:
     build_utils.WriteDepfile(
         options.depfile,
-        all_deps_config_paths + build_utils.GetPythonDependencies())
+        deps.AllConfigPaths() + build_utils.GetPythonDependencies())
 
 
 if __name__ == '__main__':

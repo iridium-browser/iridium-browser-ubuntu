@@ -16,11 +16,11 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
+#include "components/guest_view/browser/guest_view_manager.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
-#include "extensions/browser/guest_view/guest_view_manager.h"
 #include "grit/browser_resources.h"
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/startup_utils.h"
@@ -127,7 +127,7 @@ InlineLoginUI::InlineLoginUI(content::WebUI* web_ui)
 InlineLoginUI::~InlineLoginUI() {}
 
 // Gets the Gaia iframe within a WebContents.
-content::RenderFrameHost* InlineLoginUI::GetAuthIframe(
+content::RenderFrameHost* InlineLoginUI::GetAuthFrame(
     content::WebContents* web_contents,
     const GURL& parent_origin,
     const std::string& parent_frame_name) {
@@ -137,11 +137,13 @@ content::RenderFrameHost* InlineLoginUI::GetAuthIframe(
   is_webview = is_webview || chromeos::StartupUtils::IsWebviewSigninEnabled();
 #endif
   if (is_webview) {
-    extensions::GuestViewManager* manager =
-        extensions::GuestViewManager::FromBrowserContext(
+    guest_view::GuestViewManager* manager =
+        guest_view::GuestViewManager::FromBrowserContext(
             web_contents->GetBrowserContext());
-    manager->ForEachGuest(web_contents,
-                          base::Bind(&AddToSetIfSigninWebview, &frame_set));
+    if (manager) {
+      manager->ForEachGuest(web_contents,
+                            base::Bind(&AddToSetIfSigninWebview, &frame_set));
+    }
   } else {
     web_contents->ForEachFrame(
         base::Bind(&AddToSetIfIsAuthIframe, &frame_set,

@@ -27,12 +27,15 @@
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
+#include "chrome/browser/chromeos/chromeos_utils.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/login/error_screens_histogram_helper.h"
 #include "chrome/browser/chromeos/login/hwid_checker.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
+#include "chrome/browser/chromeos/login/reauth_stats.h"
 #include "chrome/browser/chromeos/login/screens/core_oobe_actor.h"
 #include "chrome/browser/chromeos/login/screens/network_error.h"
+#include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
 #include "chrome/browser/chromeos/login/ui/webui_login_display.h"
@@ -49,6 +52,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/signin/easy_unlock_service.h"
+#include "chrome/browser/signin/proximity_auth_facade.h"
 #include "chrome/browser/ui/webui/chromeos/login/error_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/gaia_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/l10n_util.h"
@@ -292,8 +296,8 @@ SigninScreenHandler::~SigninScreenHandler() {
     max_mode_delegate_->RemoveObserver(this);
     max_mode_delegate_.reset(NULL);
   }
-  ScreenlockBridge::Get()->SetLockHandler(NULL);
-  ScreenlockBridge::Get()->SetFocusedUser("");
+  GetScreenlockBridgeInstance()->SetLockHandler(NULL);
+  GetScreenlockBridgeInstance()->SetFocusedUser("");
 }
 
 // static
@@ -361,6 +365,7 @@ void SigninScreenHandler::DeclareLocalizedValues(
   builder->Add("shutDown", IDS_SHUTDOWN_BUTTON);
   builder->Add("addUser", IDS_ADD_USER_BUTTON);
   builder->Add("browseAsGuest", IDS_GO_INCOGNITO_BUTTON);
+  builder->Add("moreOptions", IDS_MORE_OPTIONS_BUTTON);
   builder->Add("addSupervisedUser", IDS_CREATE_SUPERVISED_USER_MENU_LABEL);
   builder->Add("cancel", IDS_CANCEL);
   builder->Add("signOutUser", IDS_SCREEN_LOCK_SIGN_OUT);
@@ -412,6 +417,16 @@ void SigninScreenHandler::DeclareLocalizedValues(
                IDS_LOGIN_PASSWORD_CHANGED_PROCEED_ANYWAY);
   builder->Add("proceedAnywayButton",
                IDS_LOGIN_PASSWORD_CHANGED_PROCEED_ANYWAY_BUTTON);
+  builder->Add("nextButtonText", IDS_NEWGAIA_OFFLINE_NEXT_BUTTON_TEXT);
+  builder->Add("forgotOldPasswordButtonText",
+               IDS_LOGIN_NEWGAIA_PASSWORD_CHANGED_FORGOT_PASSWORD);
+  builder->AddF("passwordChangedTitle",
+                IDS_LOGIN_NEWGAIA_PASSWORD_CHANGED_TITLE,
+                GetChromeDeviceType());
+  builder->Add("passwordChangedProceedAnywayTitle",
+               IDS_LOGIN_NEWGAIA_PASSWORD_CHANGED_PROCEED_ANYWAY);
+  builder->Add("passwordChangedTryAgain",
+               IDS_LOGIN_NEWGAIA_PASSWORD_CHANGED_TRY_AGAIN);
   builder->Add("publicAccountInfoFormat", IDS_LOGIN_PUBLIC_ACCOUNT_INFO_FORMAT);
   builder->Add("publicAccountReminder",
                IDS_LOGIN_PUBLIC_ACCOUNT_SIGNOUT_REMINDER);
@@ -430,15 +445,31 @@ void SigninScreenHandler::DeclareLocalizedValues(
   builder->Add("removeUserWarningButtonTitle",
                IDS_LOGIN_POD_USER_REMOVE_WARNING_BUTTON);
 
-  builder->Add("samlNotice", IDS_LOGIN_SAML_NOTICE);
-
-  builder->Add("confirmPasswordTitle", IDS_LOGIN_CONFIRM_PASSWORD_TITLE);
-  builder->Add("confirmPasswordLabel", IDS_LOGIN_CONFIRM_PASSWORD_LABEL);
+  if (StartupUtils::IsWebviewSigninEnabled()) {
+    builder->Add("samlNotice", IDS_LOGIN_SAML_NOTICE_NEW_GAIA_FLOW);
+    builder->Add("confirmPasswordTitle",
+                 IDS_LOGIN_CONFIRM_PASSWORD_TITLE_NEW_GAIA_FLOW);
+    builder->Add("confirmPasswordLabel",
+                 IDS_LOGIN_CONFIRM_PASSWORD_LABEL_NEW_GAIA_FLOW);
+  } else {
+    builder->Add("samlNotice", IDS_LOGIN_SAML_NOTICE);
+    builder->Add("confirmPasswordTitle", IDS_LOGIN_CONFIRM_PASSWORD_TITLE);
+    builder->Add("confirmPasswordLabel", IDS_LOGIN_CONFIRM_PASSWORD_LABEL);
+  }
   builder->Add("confirmPasswordConfirmButton",
                IDS_LOGIN_CONFIRM_PASSWORD_CONFIRM_BUTTON);
   builder->Add("confirmPasswordText", IDS_LOGIN_CONFIRM_PASSWORD_TEXT);
   builder->Add("confirmPasswordErrorText",
                IDS_LOGIN_CONFIRM_PASSWORD_ERROR_TEXT);
+
+  builder->Add("confirmPasswordIncorrectPassword",
+               IDS_LOGIN_CONFIRM_PASSWORD_INCORRECT_PASSWORD);
+  builder->Add("accountSetupCancelDialogTitle",
+               IDS_LOGIN_ACCOUNT_SETUP_CANCEL_DIALOG_TITLE);
+  builder->Add("accountSetupCancelDialogNo",
+               IDS_LOGIN_ACCOUNT_SETUP_CANCEL_DIALOG_NO);
+  builder->Add("accountSetupCancelDialogYes",
+               IDS_LOGIN_ACCOUNT_SETUP_CANCEL_DIALOG_YES);
 
   builder->Add("fatalEnrollmentError",
                IDS_ENTERPRISE_ENROLLMENT_AUTH_FATAL_ERROR);
@@ -495,6 +526,10 @@ void SigninScreenHandler::RegisterMessages() {
               &SigninScreenHandler::HandleGetTouchViewState);
   AddCallback("logRemoveUserWarningShown",
               &SigninScreenHandler::HandleLogRemoveUserWarningShown);
+  AddCallback("firstIncorrectPasswordAttempt",
+              &SigninScreenHandler::HandleFirstIncorrectPasswordAttempt);
+  AddCallback("maxIncorrectPasswordAttempts",
+              &SigninScreenHandler::HandleMaxIncorrectPasswordAttempts);
 
   // This message is sent by the kiosk app menu, but is handled here
   // so we can tell the delegate to launch the app.
@@ -917,8 +952,9 @@ void SigninScreenHandler::ShowGaiaPasswordChanged(const std::string& username) {
          base::StringValue(""));
 }
 
-void SigninScreenHandler::ShowPasswordChangedDialog(bool show_password_error) {
-  core_oobe_actor_->ShowPasswordChangedScreen(show_password_error);
+void SigninScreenHandler::ShowPasswordChangedDialog(bool show_password_error,
+                                                    const std::string& email) {
+  core_oobe_actor_->ShowPasswordChangedScreen(show_password_error, email);
 }
 
 void SigninScreenHandler::ShowSigninScreenForCreds(
@@ -926,6 +962,11 @@ void SigninScreenHandler::ShowSigninScreenForCreds(
     const std::string& password) {
   DCHECK(gaia_screen_handler_);
   gaia_screen_handler_->ShowSigninScreenForCreds(username, password);
+}
+
+void SigninScreenHandler::ShowWhitelistCheckFailedError() {
+  DCHECK(gaia_screen_handler_);
+  gaia_screen_handler_->ShowWhitelistCheckFailedError();
 }
 
 void SigninScreenHandler::Observe(int type,
@@ -988,7 +1029,7 @@ void SigninScreenHandler::HandleAuthenticateUser(const std::string& username,
                                                  const std::string& password) {
   if (!delegate_)
     return;
-  UserContext user_context(username);
+  UserContext user_context(gaia::SanitizeEmail(username));
   user_context.SetKey(Key(password));
   delegate_->Login(user_context, SigninSpecifics());
 }
@@ -1066,6 +1107,8 @@ void SigninScreenHandler::HandleShowAddUser(const base::ListValue* args) {
   if (args)
     args->GetString(0, &email);
   gaia_screen_handler_->PopulateEmail(email);
+  if (!email.empty())
+    SendReauthReason(email);
   OnShowAddUser();
 }
 
@@ -1170,7 +1213,10 @@ void SigninScreenHandler::HandleLoginVisible(const std::string& source) {
     OnPreferencesChanged();
 }
 
-void SigninScreenHandler::HandleCancelPasswordChangedFlow() {
+void SigninScreenHandler::HandleCancelPasswordChangedFlow(
+    const std::string& user_id) {
+  if (!user_id.empty())
+    RecordReauthReason(user_id, ReauthReason::PASSWORD_UPDATE_SKIPPED);
   gaia_screen_handler_->StartClearingCookies(
       base::Bind(&SigninScreenHandler::CancelPasswordChangedFlowInternal,
                  weak_factory_.GetWeakPtr()));
@@ -1235,7 +1281,9 @@ void SigninScreenHandler::HandleUpdateOfflineLogin(bool offline_login_active) {
 void SigninScreenHandler::HandleFocusPod(const std::string& user_id) {
   SetUserInputMethod(user_id, ime_state_.get());
   WallpaperManager::Get()->SetUserWallpaperDelayed(user_id);
-  ScreenlockBridge::Get()->SetFocusedUser(user_id);
+  GetScreenlockBridgeInstance()->SetFocusedUser(user_id);
+  if (delegate_)
+    delegate_->CheckUserStatus(user_id);
   if (!test_focus_pod_callback_.is_null())
     test_focus_pod_callback_.Run();
 }
@@ -1291,6 +1339,20 @@ void SigninScreenHandler::HandleGetTouchViewState() {
 void SigninScreenHandler::HandleLogRemoveUserWarningShown() {
   ProfileMetrics::LogProfileDeleteUser(
       ProfileMetrics::DELETE_PROFILE_USER_MANAGER_SHOW_WARNING);
+}
+
+void SigninScreenHandler::HandleFirstIncorrectPasswordAttempt(
+    const std::string& email) {
+  // TODO(ginkage): Fix this case once crbug.com/469987 is ready.
+  /*
+    if (user_manager::UserManager::Get()->FindUsingSAML(email))
+      RecordReauthReason(email, ReauthReason::INCORRECT_SAML_PASSWORD_ENTERED);
+  */
+}
+
+void SigninScreenHandler::HandleMaxIncorrectPasswordAttempts(
+    const std::string& email) {
+  RecordReauthReason(email, ReauthReason::INCORRECT_PASSWORD_ENTERED);
 }
 
 bool SigninScreenHandler::AllWhitelistedUsersPresent() {

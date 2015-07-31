@@ -4,6 +4,7 @@
 
 #include "extensions/browser/guest_view/web_view/web_view_permission_helper.h"
 
+#include "components/guest_view/browser/guest_view_event.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/user_metrics.h"
@@ -15,6 +16,7 @@
 
 using content::BrowserPluginGuestDelegate;
 using content::RenderViewHost;
+using guest_view::GuestViewEvent;
 
 namespace extensions {
 
@@ -141,7 +143,7 @@ void RecordUserInitiatedUMA(
 
 WebViewPermissionHelper::WebViewPermissionHelper(WebViewGuest* web_view_guest)
     : content::WebContentsObserver(web_view_guest->web_contents()),
-      next_permission_request_id_(guestview::kInstanceIDNone),
+      next_permission_request_id_(guest_view::kInstanceIDNone),
       web_view_guest_(web_view_guest),
       weak_factory_(this) {
       web_view_permission_helper_delegate_.reset(
@@ -191,7 +193,7 @@ void WebViewPermissionHelper::RequestMediaAccessPermission(
     const content::MediaStreamRequest& request,
     const content::MediaResponseCallback& callback) {
   base::DictionaryValue request_info;
-  request_info.SetString(guestview::kUrl, request.security_origin.spec());
+  request_info.SetString(guest_view::kUrl, request.security_origin.spec());
   RequestPermission(
       WEB_VIEW_PERMISSION_TYPE_MEDIA,
       request_info,
@@ -330,18 +332,18 @@ int WebViewPermissionHelper::RequestPermission(
   switch (permission_type) {
     case WEB_VIEW_PERMISSION_TYPE_NEW_WINDOW: {
       web_view_guest_->DispatchEventToView(
-          new GuestViewBase::Event(webview::kEventNewWindow, args.Pass()));
+          new GuestViewEvent(webview::kEventNewWindow, args.Pass()));
       break;
     }
     case WEB_VIEW_PERMISSION_TYPE_JAVASCRIPT_DIALOG: {
       web_view_guest_->DispatchEventToView(
-          new GuestViewBase::Event(webview::kEventDialog, args.Pass()));
+          new GuestViewEvent(webview::kEventDialog, args.Pass()));
       break;
     }
     default: {
       args->SetString(webview::kPermission,
                       PermissionTypeToString(permission_type));
-      web_view_guest_->DispatchEventToView(new GuestViewBase::Event(
+      web_view_guest_->DispatchEventToView(new GuestViewEvent(
           webview::kEventPermissionRequest, args.Pass()));
       break;
     }

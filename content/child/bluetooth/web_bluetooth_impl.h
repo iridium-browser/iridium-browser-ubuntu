@@ -10,7 +10,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "content/common/content_export.h"
-#include "third_party/WebKit/public/platform/WebBluetooth.h"
+#include "third_party/WebKit/public/platform/modules/bluetooth/WebBluetooth.h"
 
 namespace content {
 
@@ -28,6 +28,9 @@ class CONTENT_EXPORT WebBluetoothImpl
   // blink::WebBluetooth interface:
   void requestDevice(
       blink::WebBluetoothRequestDeviceCallbacks* callbacks) override;
+
+  void connectGATT(const blink::WebString& device_instance_id,
+      blink::WebBluetoothConnectGATTCallbacks* callbacks) override;
 
   // Testing interface:
   void SetBluetoothMockDataSetForTesting(const std::string& name);

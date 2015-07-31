@@ -95,6 +95,26 @@ virtual void CompressedTexSubImage2D(GLenum target,
                                      GLenum format,
                                      GLsizei imageSize,
                                      const void* data) = 0;
+virtual void CompressedTexImage3D(GLenum target,
+                                  GLint level,
+                                  GLenum internalformat,
+                                  GLsizei width,
+                                  GLsizei height,
+                                  GLsizei depth,
+                                  GLint border,
+                                  GLsizei imageSize,
+                                  const void* data) = 0;
+virtual void CompressedTexSubImage3D(GLenum target,
+                                     GLint level,
+                                     GLint xoffset,
+                                     GLint yoffset,
+                                     GLint zoffset,
+                                     GLsizei width,
+                                     GLsizei height,
+                                     GLsizei depth,
+                                     GLenum format,
+                                     GLsizei imageSize,
+                                     const void* data) = 0;
 virtual void CopyBufferSubData(GLenum readtarget,
                                GLenum writetarget,
                                GLintptr readoffset,
@@ -225,6 +245,9 @@ virtual void GetFramebufferAttachmentParameteriv(GLenum target,
                                                  GLenum attachment,
                                                  GLenum pname,
                                                  GLint* params) = 0;
+virtual void GetInteger64v(GLenum pname, GLint64* params) = 0;
+virtual void GetIntegeri_v(GLenum pname, GLuint index, GLint* data) = 0;
+virtual void GetInteger64i_v(GLenum pname, GLuint index, GLint64* data) = 0;
 virtual void GetIntegerv(GLenum pname, GLint* params) = 0;
 virtual void GetInternalformativ(GLenum target,
                                  GLenum format,
@@ -278,6 +301,7 @@ virtual void GetTransformFeedbackVarying(GLuint program,
 virtual GLuint GetUniformBlockIndex(GLuint program, const char* name) = 0;
 virtual void GetUniformfv(GLuint program, GLint location, GLfloat* params) = 0;
 virtual void GetUniformiv(GLuint program, GLint location, GLint* params) = 0;
+virtual void GetUniformuiv(GLuint program, GLint location, GLuint* params) = 0;
 virtual void GetUniformIndices(GLuint program,
                                GLsizei count,
                                const char* const* names,
@@ -285,6 +309,10 @@ virtual void GetUniformIndices(GLuint program,
 virtual GLint GetUniformLocation(GLuint program, const char* name) = 0;
 virtual void GetVertexAttribfv(GLuint index, GLenum pname, GLfloat* params) = 0;
 virtual void GetVertexAttribiv(GLuint index, GLenum pname, GLint* params) = 0;
+virtual void GetVertexAttribIiv(GLuint index, GLenum pname, GLint* params) = 0;
+virtual void GetVertexAttribIuiv(GLuint index,
+                                 GLenum pname,
+                                 GLuint* params) = 0;
 virtual void GetVertexAttribPointerv(GLuint index,
                                      GLenum pname,
                                      void** pointer) = 0;

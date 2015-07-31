@@ -17,6 +17,7 @@
 #include "chrome/browser/ui/cocoa/omnibox/omnibox_view_mac.h"
 #include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/omnibox/suggestion_answer.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/font.h"
 
@@ -180,7 +181,23 @@ NSAttributedString* CreateClassifiedAttributedString(
       match_.contents, ContentTextColor(), match_.contents_class);
   [self setAttributedTitle:contents];
 
-  if (match_.description.empty()) {
+  if (match_.answer) {
+    base::string16 answerString;
+    DCHECK(!match_.answer->second_line().text_fields().empty());
+    for (const SuggestionAnswer::TextField& textField :
+         match_.answer->second_line().text_fields())
+      answerString += textField.text();
+    const base::char16 space(' ');
+    const SuggestionAnswer::TextField* textField =
+        match_.answer->second_line().additional_text();
+    if (textField)
+      answerString += space + textField->text();
+    textField = match_.answer->second_line().status_text();
+    if (textField)
+      answerString += space + textField->text();
+    description_.reset([CreateClassifiedAttributedString(
+        answerString, DimTextColor(), match_.description_class) retain]);
+  } else if (match_.description.empty()) {
     description_.reset();
   } else {
     description_.reset([CreateClassifiedAttributedString(
@@ -301,7 +318,7 @@ NSAttributedString* CreateClassifiedAttributedString(
     // the prefix should be rendered at |contentsOffset_|. If that is not
     // sufficient to render the widest suggestion, we increase it to
     // |maxMatchContentsWidth_|.  If |remainingWidth| is not sufficient to
-    // accomodate that, we reduce the offset so that the prefix gets rendered.
+    // accommodate that, we reduce the offset so that the prefix gets rendered.
     prefixOffset = std::min(
         remainingWidth - prefixWidth, std::max(contentsOffset_,
                                                maxMatchContentsWidth_));

@@ -32,10 +32,10 @@
 #include "core/events/ErrorEvent.h"
 #include "core/events/EventTarget.h"
 #include "core/fetch/MemoryCache.h"
+#include "core/frame/UseCounter.h"
 #include "core/html/PublicURLManager.h"
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/inspector/ScriptCallStack.h"
-#include "core/page/WindowFocusAllowedIndicator.h"
 #include "core/workers/WorkerGlobalScope.h"
 #include "core/workers/WorkerThread.h"
 #include "wtf/MainThread.h"
@@ -74,6 +74,7 @@ ExecutionContext::ExecutionContext()
     , m_strictMixedContentCheckingEnforced(false)
     , m_windowInteractionTokens(0)
     , m_isRunSuspendableTasksScheduled(false)
+    , m_referrerPolicy(ReferrerPolicyDefault)
 {
 }
 
@@ -246,10 +247,17 @@ void ExecutionContext::consumeWindowInteraction()
 
 bool ExecutionContext::isWindowInteractionAllowed() const
 {
-    // FIXME: WindowFocusAllowedIndicator::windowFocusAllowed() is temporary,
-    // it will be removed as soon as WebScopedWindowFocusAllowedIndicator will
-    // be updated to not use WindowFocusAllowedIndicator.
-    return m_windowInteractionTokens > 0 || WindowFocusAllowedIndicator::windowFocusAllowed();
+    return m_windowInteractionTokens > 0;
+}
+
+void ExecutionContext::setReferrerPolicy(ReferrerPolicy referrerPolicy)
+{
+    // FIXME: Can we adopt the CSP referrer policy merge algorithm? Or does the web rely on being able to modify the referrer policy in-flight?
+    UseCounter::count(this, UseCounter::SetReferrerPolicy);
+    if (m_referrerPolicy != ReferrerPolicyDefault)
+        UseCounter::count(this, UseCounter::ResetReferrerPolicy);
+
+    m_referrerPolicy = referrerPolicy;
 }
 
 void ExecutionContext::removeURLFromMemoryCache(const KURL& url)

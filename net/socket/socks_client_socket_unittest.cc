@@ -11,7 +11,9 @@
 #include "net/dns/host_resolver.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/log/net_log.h"
-#include "net/log/net_log_unittest.h"
+#include "net/log/test_net_log.h"
+#include "net/log/test_net_log_entry.h"
+#include "net/log/test_net_log_util.h"
 #include "net/socket/client_socket_factory.h"
 #include "net/socket/socket_test_util.h"
 #include "net/socket/tcp_client_socket.h"
@@ -144,7 +146,7 @@ TEST_F(SOCKSClientSocketTest, CompleteHandshake) {
   MockRead data_reads[] = {
       MockRead(ASYNC, kSOCKSOkReply, arraysize(kSOCKSOkReply)),
       MockRead(ASYNC, payload_read.data(), payload_read.size()) };
-  CapturingNetLog log;
+  TestNetLog log;
 
   user_sock_ = BuildMockSocket(data_reads, arraysize(data_reads),
                                data_writes, arraysize(data_writes),
@@ -159,7 +161,7 @@ TEST_F(SOCKSClientSocketTest, CompleteHandshake) {
   int rv = user_sock_->Connect(callback_.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
-  CapturingNetLog::CapturedEntryList entries;
+  TestNetLogEntry::List entries;
   log.GetEntries(&entries);
   EXPECT_TRUE(
       LogContainsBeginEvent(entries, 0, NetLog::TYPE_SOCKS_CONNECT));
@@ -220,7 +222,7 @@ TEST_F(SOCKSClientSocketTest, HandshakeFailures) {
     MockRead data_reads[] = {
         MockRead(SYNCHRONOUS, tests[i].fail_reply,
                  arraysize(tests[i].fail_reply)) };
-    CapturingNetLog log;
+    TestNetLog log;
 
     user_sock_ = BuildMockSocket(data_reads, arraysize(data_reads),
                                  data_writes, arraysize(data_writes),
@@ -231,7 +233,7 @@ TEST_F(SOCKSClientSocketTest, HandshakeFailures) {
     int rv = user_sock_->Connect(callback_.callback());
     EXPECT_EQ(ERR_IO_PENDING, rv);
 
-    CapturingNetLog::CapturedEntryList entries;
+    TestNetLogEntry::List entries;
     log.GetEntries(&entries);
     EXPECT_TRUE(LogContainsBeginEvent(
         entries, 0, NetLog::TYPE_SOCKS_CONNECT));
@@ -257,7 +259,7 @@ TEST_F(SOCKSClientSocketTest, PartialServerReads) {
   MockRead data_reads[] = {
       MockRead(ASYNC, kSOCKSPartialReply1, arraysize(kSOCKSPartialReply1)),
       MockRead(ASYNC, kSOCKSPartialReply2, arraysize(kSOCKSPartialReply2)) };
-  CapturingNetLog log;
+  TestNetLog log;
 
   user_sock_ = BuildMockSocket(data_reads, arraysize(data_reads),
                                data_writes, arraysize(data_writes),
@@ -267,7 +269,7 @@ TEST_F(SOCKSClientSocketTest, PartialServerReads) {
 
   int rv = user_sock_->Connect(callback_.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
-  CapturingNetLog::CapturedEntryList entries;
+  TestNetLogEntry::List entries;
   log.GetEntries(&entries);
   EXPECT_TRUE(LogContainsBeginEvent(
       entries, 0, NetLog::TYPE_SOCKS_CONNECT));
@@ -295,7 +297,7 @@ TEST_F(SOCKSClientSocketTest, PartialClientWrites) {
   };
   MockRead data_reads[] = {
       MockRead(ASYNC, kSOCKSOkReply, arraysize(kSOCKSOkReply)) };
-  CapturingNetLog log;
+  TestNetLog log;
 
   user_sock_ = BuildMockSocket(data_reads, arraysize(data_reads),
                                data_writes, arraysize(data_writes),
@@ -305,7 +307,7 @@ TEST_F(SOCKSClientSocketTest, PartialClientWrites) {
 
   int rv = user_sock_->Connect(callback_.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
-  CapturingNetLog::CapturedEntryList entries;
+  TestNetLogEntry::List entries;
   log.GetEntries(&entries);
   EXPECT_TRUE(LogContainsBeginEvent(
       entries, 0, NetLog::TYPE_SOCKS_CONNECT));
@@ -327,7 +329,7 @@ TEST_F(SOCKSClientSocketTest, FailedSocketRead) {
       MockRead(ASYNC, kSOCKSOkReply, arraysize(kSOCKSOkReply) - 2),
       // close connection unexpectedly
       MockRead(SYNCHRONOUS, 0) };
-  CapturingNetLog log;
+  TestNetLog log;
 
   user_sock_ = BuildMockSocket(data_reads, arraysize(data_reads),
                                data_writes, arraysize(data_writes),
@@ -337,7 +339,7 @@ TEST_F(SOCKSClientSocketTest, FailedSocketRead) {
 
   int rv = user_sock_->Connect(callback_.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
-  CapturingNetLog::CapturedEntryList entries;
+  TestNetLogEntry::List entries;
   log.GetEntries(&entries);
   EXPECT_TRUE(LogContainsBeginEvent(
       entries, 0, NetLog::TYPE_SOCKS_CONNECT));
@@ -357,7 +359,7 @@ TEST_F(SOCKSClientSocketTest, FailedDNS) {
 
   host_resolver_->rules()->AddSimulatedFailure(hostname);
 
-  CapturingNetLog log;
+  TestNetLog log;
 
   user_sock_ = BuildMockSocket(NULL, 0,
                                NULL, 0,
@@ -367,7 +369,7 @@ TEST_F(SOCKSClientSocketTest, FailedDNS) {
 
   int rv = user_sock_->Connect(callback_.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
-  CapturingNetLog::CapturedEntryList entries;
+  TestNetLogEntry::List entries;
   log.GetEntries(&entries);
   EXPECT_TRUE(LogContainsBeginEvent(
       entries, 0, NetLog::TYPE_SOCKS_CONNECT));

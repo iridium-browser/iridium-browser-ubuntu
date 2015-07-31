@@ -18,10 +18,10 @@ import os
 
 from xml.etree import ElementTree
 
-from chromite.cbuildbot import cbuildbot_config
+from chromite.cbuildbot import constants
 from chromite.cbuildbot import manifest_version
 from chromite.lib import commandline
-from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import osutils
 
 
@@ -137,15 +137,14 @@ def main(argv):
   options = parser.parse_args(argv)
 
   # Clone manifest-versions repository.
-  manifest_repo_url = cbuildbot_config.GetManifestVersionsRepoUrl(
-      internal_build=True, read_only=False)
+  manifest_repo_url = constants.MANIFEST_VERSIONS_INT_GOB_URL
   if not options.skip_update:
     manifest_version.RefreshManifestCheckout(
         options.manifest_versions_dir, manifest_repo_url)
 
   if options.remotes_summary:
     # Find all unique remotes.
-    cros_build_lib.Info('Scanning manifests for remotes...')
+    logging.info('Scanning manifests for remotes...')
     remotes = set()
     for manifest in EnumerateManifests(options.manifest_versions_dir):
       remotes.update(GetRemotes(manifest))
@@ -159,16 +158,16 @@ def main(argv):
       print(row_formatter(remote.name, remote.fetch, remote.review or ''))
     return 0
 
-  cros_build_lib.Info('Updating manifests...')
+  logging.info('Updating manifests...')
   up_to_date = True
   for manifest in EnumerateManifests(options.manifest_versions_dir):
     if UpdateRemotes(manifest):
       up_to_date = False
-      cros_build_lib.Info('Updated manifest: %s', manifest)
+      logging.info('Updated manifest: %s', manifest)
 
   if up_to_date:
-    cros_build_lib.Info('All manifests are up to date')
+    logging.info('All manifests are up to date')
   else:
-    cros_build_lib.Info('Done')
+    logging.info('Done')
 
   return 0

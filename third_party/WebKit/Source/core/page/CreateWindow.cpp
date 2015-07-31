@@ -43,12 +43,15 @@
 #include "platform/weborigin/KURL.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "platform/weborigin/SecurityPolicy.h"
+#include "public/platform/WebURLRequest.h"
 
 namespace blink {
 
 static LocalFrame* createWindow(LocalFrame& openerFrame, LocalFrame& lookupFrame, const FrameLoadRequest& request, const WindowFeatures& features, NavigationPolicy policy, ShouldSendReferrer shouldSendReferrer, bool& created)
 {
     ASSERT(!features.dialog || request.frameName().isEmpty());
+    ASSERT(request.resourceRequest().requestorOrigin() || openerFrame.document()->url().isEmpty());
+    ASSERT(request.resourceRequest().frameType() == WebURLRequest::FrameTypeAuxiliary);
 
     if (!request.frameName().isEmpty() && request.frameName() != "_blank" && policy == NavigationPolicyIgnore) {
         if (Frame* frame = lookupFrame.findFrameForNavigation(request.frameName(), openerFrame)) {
@@ -113,13 +116,11 @@ static LocalFrame* createWindow(LocalFrame& openerFrame, LocalFrame& lookupFrame
     if (features.heightSet)
         windowRect.setHeight(features.height + (windowRect.height() - viewportSize.height()));
 
-    // Ensure minimum size as well as being within valid screen area.
-    IntRect newWindowRect = LocalDOMWindow::adjustWindowRect(frame, windowRect);
-
-    host->chrome().setWindowRect(newWindowRect);
+    host->chrome().setWindowRect(windowRect);
     host->chrome().show(policy);
 
-    frame.loader().forceSandboxFlags(openerFrame.document()->sandboxFlags());
+    if (openerFrame.document()->isSandboxed(SandboxPropagatesToAuxiliaryBrowsingContexts))
+        frame.loader().forceSandboxFlags(openerFrame.document()->sandboxFlags());
 
     created = true;
     return &frame;
@@ -139,6 +140,8 @@ LocalFrame* createWindow(const String& urlString, const AtomicString& frameName,
     }
 
     FrameLoadRequest frameRequest(callingWindow.document(), completedURL, frameName);
+    frameRequest.resourceRequest().setFrameType(WebURLRequest::FrameTypeAuxiliary);
+    frameRequest.resourceRequest().setRequestorOrigin(SecurityOrigin::create(activeFrame->document()->url()));
 
     // Normally, FrameLoader would take care of setting the referrer for a navigation that is
     // triggered from javascript. However, creating a window goes through sufficient processing
@@ -173,6 +176,8 @@ LocalFrame* createWindow(const String& urlString, const AtomicString& frameName,
 
 void createWindowForRequest(const FrameLoadRequest& request, LocalFrame& openerFrame, NavigationPolicy policy, ShouldSendReferrer shouldSendReferrer)
 {
+    ASSERT(request.resourceRequest().requestorOrigin() || (openerFrame.document() && openerFrame.document()->url().isEmpty()));
+
     if (openerFrame.document()->pageDismissalEventBeingDispatched() != Document::NoDismissal)
         return;
 
@@ -195,7 +200,7 @@ void createWindowForRequest(const FrameLoadRequest& request, LocalFrame& openerF
         newFrame->document()->setReferrerPolicy(openerFrame.document()->referrerPolicy());
     }
     FrameLoadRequest newRequest(0, request.resourceRequest());
-    newRequest.setFormState(request.formState());
+    newRequest.setForm(request.form());
     newFrame->loader().load(newRequest);
 }
 

@@ -151,10 +151,10 @@ QuicVersionVector QuicSupportedVersions() {
 
 QuicTag QuicVersionToQuicTag(const QuicVersion version) {
   switch (version) {
-    case QUIC_VERSION_23:
-      return MakeQuicTag('Q', '0', '2', '3');
     case QUIC_VERSION_24:
       return MakeQuicTag('Q', '0', '2', '4');
+    case QUIC_VERSION_25:
+      return MakeQuicTag('Q', '0', '2', '5');
     default:
       // This shold be an ERROR because we should never attempt to convert an
       // invalid QuicVersion to be written to the wire.
@@ -181,8 +181,8 @@ return #x
 
 string QuicVersionToString(const QuicVersion version) {
   switch (version) {
-    RETURN_STRING_LITERAL(QUIC_VERSION_23);
     RETURN_STRING_LITERAL(QUIC_VERSION_24);
+    RETURN_STRING_LITERAL(QUIC_VERSION_25);
     default:
       return "QUIC_VERSION_UNSUPPORTED";
   }
@@ -376,7 +376,7 @@ ostream& operator<<(ostream& os, const QuicFrame& frame) {
       break;
     }
     case RST_STREAM_FRAME: {
-      os << "type { " << RST_STREAM_FRAME << " } " << *(frame.rst_stream_frame);
+      os << "type { RST_STREAM_FRAME } " << *(frame.rst_stream_frame);
       break;
     }
     case CONNECTION_CLOSE_FRAME: {

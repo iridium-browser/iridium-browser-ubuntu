@@ -181,7 +181,7 @@ void OmniboxViewMac::SaveStateToTab(WebContents* tab) {
   if (hasFocus) {
     range = GetSelectedRange();
   } else {
-    // If we are not focussed, there is no selection.  Manufacture
+    // If we are not focused, there is no selection.  Manufacture
     // something reasonable in case it starts to matter in the future.
     range = NSMakeRange(0, GetTextLength());
   }
@@ -214,8 +214,6 @@ void OmniboxViewMac::ResetTabState(WebContents* web_contents) {
 }
 
 void OmniboxViewMac::Update() {
-  UpdatePlaceholderText();
-
   if (model()->UpdatePermanentText()) {
     // Something visibly changed.  Re-enable URL replacement.
     controller()->GetToolbarModel()->set_url_replacement_enabled(true);
@@ -234,20 +232,6 @@ void OmniboxViewMac::Update() {
     // security level.  Dig in and figure out why this isn't a no-op
     // that should go away.
     EmphasizeURLComponents();
-  }
-}
-
-void OmniboxViewMac::UpdatePlaceholderText() {
-  if (OmniboxFieldTrial::DisplayHintTextWhenPossible()) {
-    NSDictionary* placeholder_attributes = @{
-      NSForegroundColorAttributeName : [NSColor disabledControlTextColor]
-    };
-    base::scoped_nsobject<NSMutableAttributedString> placeholder_text(
-        [[NSMutableAttributedString alloc]
-            initWithString:base::SysUTF16ToNSString(GetHintText())
-                attributes:placeholder_attributes]);
-    ApplyTextStyle(placeholder_text);
-    [[field_ cell] setPlaceholderAttributedString:placeholder_text];
   }
 }
 
@@ -392,7 +376,7 @@ void OmniboxViewMac::UpdatePopup() {
   }
 
   model()->StartAutocomplete([editor selectedRange].length != 0,
-                            prevent_inline_autocomplete);
+                            prevent_inline_autocomplete, false);
 }
 
 void OmniboxViewMac::CloseOmniboxPopup() {
@@ -528,23 +512,24 @@ void OmniboxViewMac::ApplyTextAttributes(const base::string16& display_text,
   // TODO(shess): GTK has this as a member var, figure out why.
   // [Could it be to not change if no change?  If so, I'm guessing
   // AppKit may already handle that.]
-  const ToolbarModel::SecurityLevel security_level =
+  const ConnectionSecurityHelper::SecurityLevel security_level =
       controller()->GetToolbarModel()->GetSecurityLevel(false);
 
   // Emphasize the scheme for security UI display purposes (if necessary).
   if (!model()->user_input_in_progress() && model()->CurrentTextIsURL() &&
-      scheme.is_nonempty() && (security_level != ToolbarModel::NONE)) {
+      scheme.is_nonempty() &&
+      (security_level != ConnectionSecurityHelper::NONE)) {
     NSColor* color;
-    if (security_level == ToolbarModel::EV_SECURE ||
-        security_level == ToolbarModel::SECURE) {
+    if (security_level == ConnectionSecurityHelper::EV_SECURE ||
+        security_level == ConnectionSecurityHelper::SECURE) {
       color = SecureSchemeColor();
-    } else if (security_level == ToolbarModel::SECURITY_ERROR) {
+    } else if (security_level == ConnectionSecurityHelper::SECURITY_ERROR) {
       color = SecurityErrorSchemeColor();
       // Add a strikethrough through the scheme.
       [as addAttribute:NSStrikethroughStyleAttributeName
                  value:[NSNumber numberWithInt:NSUnderlineStyleSingle]
                  range:ComponentToNSRange(scheme)];
-    } else if (security_level == ToolbarModel::SECURITY_WARNING) {
+    } else if (security_level == ConnectionSecurityHelper::SECURITY_WARNING) {
       color = BaseTextColor();
     } else {
       NOTREACHED();
@@ -603,7 +588,7 @@ bool OmniboxViewMac::IsFirstResponder() const {
 }
 
 void OmniboxViewMac::OnBeforePossibleChange() {
-  // We should only arrive here when the field is focussed.
+  // We should only arrive here when the field is focused.
   DCHECK(IsFirstResponder());
 
   selection_before_change_ = GetSelectedRange();
@@ -612,7 +597,7 @@ void OmniboxViewMac::OnBeforePossibleChange() {
 }
 
 bool OmniboxViewMac::OnAfterPossibleChange() {
-  // We should only arrive here when the field is focussed.
+  // We should only arrive here when the field is focused.
   DCHECK(IsFirstResponder());
 
   const NSRange new_selection(GetSelectedRange());
@@ -634,7 +619,7 @@ bool OmniboxViewMac::OnAfterPossibleChange() {
   // selection point will have moved towards the end of the text.
   // TODO(shess): In our implementation, we can catch -deleteBackward:
   // and other methods to provide positive knowledge that a delete
-  // occured, rather than intuiting it from context.  Consider whether
+  // occurred, rather than intuiting it from context.  Consider whether
   // that would be a stronger approach.
   const bool just_deleted_text =
       (length < text_before_change_.length() &&
@@ -700,7 +685,7 @@ bool OmniboxViewMac::IsImeComposing() const {
 }
 
 void OmniboxViewMac::OnDidBeginEditing() {
-  // We should only arrive here when the field is focussed.
+  // We should only arrive here when the field is focused.
   DCHECK([field_ currentEditor]);
 }
 
@@ -736,7 +721,7 @@ bool OmniboxViewMac::OnDoCommandBySelector(SEL cmd) {
     if (cmd == @selector(insertBacktab:)) {
       if (model()->popup_model()->selected_line_state() ==
             OmniboxPopupModel::KEYWORD) {
-        model()->ClearKeyword(GetText());
+        model()->ClearKeyword();
         return true;
       } else {
         model()->OnUpOrDownKeyPressed(-1);
@@ -901,7 +886,7 @@ void OmniboxViewMac::ShowURL() {
 }
 
 void OmniboxViewMac::OnPaste() {
-  // This code currently expects |field_| to be focussed.
+  // This code currently expects |field_| to be focused.
   DCHECK([field_ currentEditor]);
 
   base::string16 text = GetClipboardText();
@@ -987,7 +972,7 @@ bool OmniboxViewMac::OnBackspacePressed() {
 
   // We're showing a keyword and the user pressed backspace at the
   // beginning of the text.  Delete the selected keyword.
-  model()->ClearKeyword(GetText());
+  model()->ClearKeyword();
   return true;
 }
 

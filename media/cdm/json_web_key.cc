@@ -19,8 +19,6 @@ namespace media {
 const char kKeysTag[] = "keys";
 const char kKeyTypeTag[] = "kty";
 const char kKeyTypeOct[] = "oct";  // Octet sequence.
-const char kAlgTag[] = "alg";
-const char kAlgA128KW[] = "A128KW";  // AES key wrap using a 128-bit key.
 const char kKeyTag[] = "k";
 const char kKeyIdTag[] = "kid";
 const char kKeyIdsTag[] = "kids";
@@ -104,22 +102,59 @@ static std::string ShortenTo64Characters(const std::string& input) {
   return escaped_str.substr(0, 61).append("...");
 }
 
-std::string GenerateJWKSet(const uint8* key, int key_length,
-                           const uint8* key_id, int key_id_length) {
-  // Both |key| and |key_id| need to be base64 encoded strings in the JWK.
-  std::string key_base64 = EncodeBase64Url(key, key_length);
-  std::string key_id_base64 = EncodeBase64Url(key_id, key_id_length);
-
-  // Create the JWK, and wrap it into a JWK Set.
+static scoped_ptr<base::DictionaryValue> CreateJSONDictionary(
+    const uint8* key,
+    int key_length,
+    const uint8* key_id,
+    int key_id_length) {
   scoped_ptr<base::DictionaryValue> jwk(new base::DictionaryValue());
   jwk->SetString(kKeyTypeTag, kKeyTypeOct);
-  jwk->SetString(kAlgTag, kAlgA128KW);
-  jwk->SetString(kKeyTag, key_base64);
-  jwk->SetString(kKeyIdTag, key_id_base64);
+  jwk->SetString(kKeyTag, EncodeBase64Url(key, key_length));
+  jwk->SetString(kKeyIdTag, EncodeBase64Url(key_id, key_id_length));
+  return jwk.Pass();
+}
+
+std::string GenerateJWKSet(const uint8* key, int key_length,
+                           const uint8* key_id, int key_id_length) {
+  // Create the JWK, and wrap it into a JWK Set.
   scoped_ptr<base::ListValue> list(new base::ListValue());
-  list->Append(jwk.release());
+  list->Append(
+      CreateJSONDictionary(key, key_length, key_id, key_id_length).release());
   base::DictionaryValue jwk_set;
   jwk_set.Set(kKeysTag, list.release());
+
+  // Finally serialize |jwk_set| into a string and return it.
+  std::string serialized_jwk;
+  JSONStringValueSerializer serializer(&serialized_jwk);
+  serializer.Serialize(jwk_set);
+  return serialized_jwk;
+}
+
+std::string GenerateJWKSet(const KeyIdAndKeyPairs& keys,
+                           MediaKeys::SessionType session_type) {
+  scoped_ptr<base::ListValue> list(new base::ListValue());
+  for (const auto& key_pair : keys) {
+    list->Append(CreateJSONDictionary(
+                     reinterpret_cast<const uint8*>(key_pair.second.data()),
+                     key_pair.second.length(),
+                     reinterpret_cast<const uint8*>(key_pair.first.data()),
+                     key_pair.first.length())
+                     .release());
+  }
+
+  base::DictionaryValue jwk_set;
+  jwk_set.Set(kKeysTag, list.release());
+  switch (session_type) {
+    case MediaKeys::TEMPORARY_SESSION:
+      jwk_set.SetString(kTypeTag, kTemporarySession);
+      break;
+    case MediaKeys::PERSISTENT_LICENSE_SESSION:
+      jwk_set.SetString(kTypeTag, kPersistentLicenseSession);
+      break;
+    case MediaKeys::PERSISTENT_RELEASE_MESSAGE_SESSION:
+      jwk_set.SetString(kTypeTag, kPersistentReleaseMessageSession);
+      break;
+  }
 
   // Finally serialize |jwk_set| into a string and return it.
   std::string serialized_jwk;
@@ -135,12 +170,6 @@ static bool ConvertJwkToKeyPair(const base::DictionaryValue& jwk,
   std::string type;
   if (!jwk.GetString(kKeyTypeTag, &type) || type != kKeyTypeOct) {
     DVLOG(1) << "Missing or invalid '" << kKeyTypeTag << "': " << type;
-    return false;
-  }
-
-  std::string alg;
-  if (!jwk.GetString(kAlgTag, &alg) || alg != kAlgA128KW) {
-    DVLOG(1) << "Missing or invalid '" << kAlgTag << "': " << alg;
     return false;
   }
 
@@ -336,6 +365,25 @@ void CreateLicenseRequest(const KeyIdList& key_ids,
   // Convert the serialized license request into std::vector and return it.
   std::vector<uint8> result(json.begin(), json.end());
   license->swap(result);
+}
+
+void CreateKeyIdsInitData(const KeyIdList& key_ids,
+                          std::vector<uint8>* init_data) {
+  // Create the init_data.
+  scoped_ptr<base::DictionaryValue> dictionary(new base::DictionaryValue());
+  scoped_ptr<base::ListValue> list(new base::ListValue());
+  for (const auto& key_id : key_ids)
+    list->AppendString(EncodeBase64Url(&key_id[0], key_id.size()));
+  dictionary->Set(kKeyIdsTag, list.release());
+
+  // Serialize the dictionary as a string.
+  std::string json;
+  JSONStringValueSerializer serializer(&json);
+  serializer.Serialize(*dictionary);
+
+  // Convert the serialized data into std::vector and return it.
+  std::vector<uint8> result(json.begin(), json.end());
+  init_data->swap(result);
 }
 
 bool ExtractFirstKeyIdFromLicenseRequest(const std::vector<uint8>& license,

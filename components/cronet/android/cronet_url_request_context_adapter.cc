@@ -10,6 +10,7 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_file.h"
 #include "base/logging.h"
+#include "base/memory/scoped_vector.h"
 #include "base/single_thread_task_runner.h"
 #include "base/values.h"
 #include "components/cronet/url_request_context_config.h"
@@ -18,10 +19,16 @@
 #include "net/base/net_errors.h"
 #include "net/base/network_delegate_impl.h"
 #include "net/http/http_auth_handler_factory.h"
-#include "net/log/net_log_logger.h"
+#include "net/log/write_to_file_net_log_observer.h"
 #include "net/proxy/proxy_service.h"
+#include "net/sdch/sdch_owner.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_builder.h"
+#include "net/url_request/url_request_interceptor.h"
+
+#if defined(DATA_REDUCTION_PROXY_SUPPORT)
+#include "components/cronet/android/cronet_data_reduction_proxy.h"
+#endif
 
 namespace {
 
@@ -150,10 +157,34 @@ void CronetURLRequestContextAdapter::InitializeOnNetworkThread(
   DCHECK(proxy_config_service_);
   // TODO(mmenke):  Add method to have the builder enable SPDY.
   net::URLRequestContextBuilder context_builder;
-  context_builder.set_network_delegate(new BasicNetworkDelegate());
+
+  scoped_ptr<net::NetLog> net_log(new net::NetLog);
+  scoped_ptr<net::NetworkDelegate> network_delegate(new BasicNetworkDelegate());
+#if defined(DATA_REDUCTION_PROXY_SUPPORT)
+  DCHECK(!data_reduction_proxy_);
+  // For now, the choice to enable the data reduction proxy happens once,
+  // at initialization. It cannot be disabled thereafter.
+  if (!config->data_reduction_proxy_key.empty()) {
+    data_reduction_proxy_.reset(
+        new CronetDataReductionProxy(
+            config->data_reduction_proxy_key,
+            config->data_reduction_primary_proxy,
+            config->data_reduction_fallback_proxy,
+            config->data_reduction_secure_proxy_check_url,
+            config->user_agent,
+            GetNetworkTaskRunner(),
+            net_log.get()));
+    network_delegate =
+        data_reduction_proxy_->CreateNetworkDelegate(network_delegate.Pass());
+    ScopedVector<net::URLRequestInterceptor> interceptors;
+    interceptors.push_back(data_reduction_proxy_->CreateInterceptor());
+    context_builder.SetInterceptors(interceptors.Pass());
+  }
+#endif  // defined(DATA_REDUCTION_PROXY_SUPPORT)
+  context_builder.set_network_delegate(network_delegate.release());
+  context_builder.set_net_log(net_log.release());
   context_builder.set_proxy_config_service(proxy_config_service_.release());
   config->ConfigureURLRequestContextBuilder(&context_builder);
-
   context_.reset(context_builder.Build());
 
   default_load_flags_ = net::LOAD_DO_NOT_SAVE_COOKIES |
@@ -161,10 +192,16 @@ void CronetURLRequestContextAdapter::InitializeOnNetworkThread(
   if (config->load_disable_cache)
     default_load_flags_ |= net::LOAD_DISABLE_CACHE;
 
+  if (config->enable_sdch) {
+    DCHECK(context_->sdch_manager());
+    sdch_owner_.reset(
+        new net::SdchOwner(context_->sdch_manager(), context_.get()));
+  }
+
   // Currently (circa M39) enabling QUIC requires setting probability threshold.
   if (config->enable_quic) {
     context_->http_server_properties()
-        ->SetAlternateProtocolProbabilityThreshold(0.0f);
+        ->SetAlternativeServiceProbabilityThreshold(0.0f);
     for (auto hint = config->quic_hints.begin();
          hint != config->quic_hints.end(); ++hint) {
       const URLRequestContextConfig::QuicHint& quic_hint = **hint;
@@ -209,6 +246,10 @@ void CronetURLRequestContextAdapter::InitializeOnNetworkThread(
   Java_CronetUrlRequestContext_initNetworkThread(
       env, jcronet_url_request_context.obj());
 
+#if defined(DATA_REDUCTION_PROXY_SUPPORT)
+  if (data_reduction_proxy_)
+    data_reduction_proxy_->Init(true, GetURLRequestContext());
+#endif
   is_context_initialized_ = true;
   while (!tasks_waiting_for_context_.empty()) {
     tasks_waiting_for_context_.front().Run();
@@ -264,13 +305,14 @@ CronetURLRequestContextAdapter::GetNetworkTaskRunner() const {
 
 void CronetURLRequestContextAdapter::StartNetLogToFile(JNIEnv* env,
                                                        jobject jcaller,
-                                                       jstring jfile_name) {
+                                                       jstring jfile_name,
+                                                       jboolean jlog_all) {
   PostTaskToNetworkThread(
       FROM_HERE,
       base::Bind(
           &CronetURLRequestContextAdapter::StartNetLogToFileOnNetworkThread,
           base::Unretained(this),
-          base::android::ConvertJavaStringToUTF8(env, jfile_name)));
+          base::android::ConvertJavaStringToUTF8(env, jfile_name), jlog_all));
 }
 
 void CronetURLRequestContextAdapter::StopNetLog(JNIEnv* env, jobject jcaller) {
@@ -281,28 +323,32 @@ void CronetURLRequestContextAdapter::StopNetLog(JNIEnv* env, jobject jcaller) {
 }
 
 void CronetURLRequestContextAdapter::StartNetLogToFileOnNetworkThread(
-    const std::string& file_name) {
+    const std::string& file_name, bool log_all) {
   DCHECK(GetNetworkTaskRunner()->BelongsToCurrentThread());
   DCHECK(is_context_initialized_);
   DCHECK(context_);
   // Do nothing if already logging to a file.
-  if (net_log_logger_)
+  if (write_to_file_observer_)
     return;
   base::FilePath file_path(file_name);
   base::ScopedFILE file(base::OpenFile(file_path, "w"));
   if (!file)
     return;
 
-  net_log_logger_.reset(new net::NetLogLogger());
-  net_log_logger_->StartObserving(context_->net_log(), file.Pass(), nullptr,
-                                  context_.get());
+  write_to_file_observer_.reset(new net::WriteToFileNetLogObserver());
+  if (log_all) {
+    write_to_file_observer_->set_capture_mode(
+        net::NetLogCaptureMode::IncludeSocketBytes());
+  }
+  write_to_file_observer_->StartObserving(context_->net_log(), file.Pass(),
+                                  nullptr, context_.get());
 }
 
 void CronetURLRequestContextAdapter::StopNetLogOnNetworkThread() {
   DCHECK(GetNetworkTaskRunner()->BelongsToCurrentThread());
-  if (net_log_logger_) {
-    net_log_logger_->StopObserving(context_.get());
-    net_log_logger_.reset();
+  if (write_to_file_observer_) {
+    write_to_file_observer_->StopObserving(context_.get());
+    write_to_file_observer_.reset();
   }
 }
 

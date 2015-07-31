@@ -9,7 +9,6 @@ from __future__ import print_function
 import collections
 import errno
 import hashlib
-import logging
 import os
 import re
 import string
@@ -18,6 +17,7 @@ from xml import sax
 
 from chromite.cbuildbot import constants
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import osutils
 from chromite.lib import retry_util
 
@@ -69,7 +69,7 @@ GIT_TRANSIENT_ERRORS_RE = re.compile('|'.join(GIT_TRANSIENT_ERRORS),
                                      re.IGNORECASE)
 
 DEFAULT_RETRY_INTERVAL = 3
-DEFAULT_RETRIES = 5
+DEFAULT_RETRIES = 10
 
 
 class GitException(Exception):
@@ -124,27 +124,6 @@ def IsSubmoduleCheckoutRoot(path, remote, url):
     if remote_url == url:
       return True
   return False
-
-
-def ReinterpretPathForChroot(path):
-  """Returns reinterpreted path from outside the chroot for use inside.
-
-  Args:
-    path: The path to reinterpret.  Must be in src tree.
-  """
-  root_path = os.path.join(FindRepoDir(path), '..')
-
-  path_abs_path = os.path.abspath(path)
-  root_abs_path = os.path.abspath(root_path)
-
-  # Strip the repository root from the path and strip first /.
-  relative_path = path_abs_path.replace(root_abs_path, '')[1:]
-
-  if relative_path == path_abs_path:
-    raise Exception('Error: path is outside your src tree, cannot reinterpret.')
-
-  new_path = os.path.join('/home', os.getenv('USER'), 'trunk', relative_path)
-  return new_path
 
 
 def IsGitRepo(cwd):
@@ -294,10 +273,36 @@ class ProjectCheckout(dict):
       raise AssertionError('Remote %s is not pushable.' % (remote,))
 
   def IsBranchableProject(self):
-    """Return whether this project is hosted on ChromeOS git servers."""
-    return (
-        self['remote'] in constants.CROS_REMOTES and
-        re.match(constants.BRANCHABLE_PROJECTS[self['remote']], self['name']))
+    """Return whether we can create a branch in the repo for this project."""
+    # Backwards compatibility is an issue here. Older manifests used a heuristic
+    # based on where the project is hosted. We must continue supporting it.
+    # (crbug.com/470690)
+    # Prefer explicit tagging.
+    if (self[constants.MANIFEST_ATTR_BRANCHING] ==
+        constants.MANIFEST_ATTR_BRANCHING_CREATE):
+      return True
+    if self[constants.MANIFEST_ATTR_BRANCHING] in (
+        constants.MANIFEST_ATTR_BRANCHING_PIN,
+        constants.MANIFEST_ATTR_BRANCHING_TOT):
+      return False
+
+    # Old heuristic.
+    if (self['remote'] not in constants.CROS_REMOTES or
+        self['remote'] not in constants.BRANCHABLE_PROJECTS):
+      return False
+    return re.match(constants.BRANCHABLE_PROJECTS[self['remote']], self['name'])
+
+  def IsPinnableProject(self):
+    """Return whether we should pin to a revision on the CrOS branch."""
+    # Backwards compatibility is an issue here. Older manifests used a different
+    # tag to spcify pinning behaviour. Support both for now. (crbug.com/470690)
+    # Prefer explicit tagging.
+    if self[constants.MANIFEST_ATTR_BRANCHING] != '':
+      return (self[constants.MANIFEST_ATTR_BRANCHING] ==
+              constants.MANIFEST_ATTR_BRANCHING_PIN)
+
+    # Old heuristic.
+    return cros_build_lib.BooleanShellValue(self.get('pin'), True)
 
   def IsPatchable(self):
     """Returns whether this project is patchable.
@@ -363,6 +368,9 @@ class Manifest(object):
     """
     self.source = source
     self.default = {}
+    self._current_project_path = None
+    self._current_project_name = None
+    self._annotations = {}
     self.checkouts_by_path = {}
     self.checkouts_by_name = {}
     self.remotes = {}
@@ -372,26 +380,43 @@ class Manifest(object):
     self._RunParser(source)
     self.includes = tuple(self.includes)
 
+  def _RequireAttr(self, attr, attrs):
+    name = attrs.get('name')
+    assert attr in attrs, ('%s is missing a "%s" attribute; attrs: %r' %
+                           (name, attr, attrs))
+
   def _RunParser(self, source, finalize=True):
     parser = sax.make_parser()
     handler = sax.handler.ContentHandler()
-    handler.startElement = self._ProcessElement
+    handler.startElement = self._StartElement
+    handler.endElement = self._EndElement
     parser.setContentHandler(handler)
     parser.parse(source)
     if finalize:
       self._FinalizeAllProjectData()
 
-  def _ProcessElement(self, name, attrs):
+  def _StartElement(self, name, attrs):
     """Stores the default manifest properties and per-project overrides."""
     attrs = dict(attrs.items())
     if name == 'default':
       self.default = attrs
     elif name == 'remote':
+      self._RequireAttr('name', attrs)
       attrs.setdefault('alias', attrs['name'])
       self.remotes[attrs['name']] = attrs
     elif name == 'project':
-      self.checkouts_by_path[attrs.get('path', attrs['name'])] = attrs
-      self.checkouts_by_name.setdefault(attrs['name'], []).append(attrs)
+      self._RequireAttr('name', attrs)
+      self._current_project_path = attrs.get('path', attrs['name'])
+      self._current_project_name = attrs['name']
+      self.checkouts_by_path[self._current_project_path] = attrs
+      checkout = self.checkouts_by_name.setdefault(self._current_project_name,
+                                                   [])
+      checkout.append(attrs)
+      self._annotations = {}
+    elif name == 'annotation':
+      self._RequireAttr('name', attrs)
+      self._RequireAttr('value', attrs)
+      self._annotations[attrs['name']] = attrs['value']
     elif name == 'manifest':
       self.revision = attrs.get('revision')
     elif name == 'include':
@@ -406,6 +431,19 @@ class Manifest(object):
           os.path.join(original_include_dir, attrs['name']))
       self.includes.append((attrs['name'], include_path))
       self._RunParser(include_path, finalize=False)
+
+  def _EndElement(self, name):
+    """Store any child element properties into the parent element."""
+    if name == 'project':
+      assert (self._current_project_name is not None and
+              self._current_project_path is not None), (
+                  'Malformed xml: Encountered unmatched </project>')
+      self.checkouts_by_path[self._current_project_path].update(
+          self._annotations)
+      for checkout in self.checkouts_by_name[self._current_project_name]:
+        checkout.update(self._annotations)
+      self._current_project_path = None
+      self._current_project_name = None
 
   def _FinalizeAllProjectData(self):
     """Rewrite projects mixing defaults in and adding our attributes."""
@@ -461,6 +499,12 @@ class Manifest(object):
     attrs.setdefault('path', attrs['name'])
     for key in ('name', 'path'):
       attrs[key] = os.path.normpath(attrs[key])
+
+    if constants.MANIFEST_ATTR_BRANCHING in attrs:
+      assert (attrs[constants.MANIFEST_ATTR_BRANCHING] in
+              constants.MANIFEST_ATTR_BRANCHING_ALL)
+    else:
+      attrs[constants.MANIFEST_ATTR_BRANCHING] = ''
 
   @staticmethod
   def _GetManifestHash(source, ignore_missing=False):
@@ -549,6 +593,30 @@ class ManifestCheckout(Manifest):
     if manifest_path is None:
       manifest_path = os.path.join(root, '.repo', 'manifest.xml')
     return root, manifest_path
+
+  @staticmethod
+  def IsFullManifest(checkout_root):
+    """Returns True iff the given checkout is using a full manifest.
+
+    This method should go away as part of the cleanup related to brbug.com/854.
+
+    Args:
+      checkout_root: path to the root of an SDK checkout.
+
+    Returns:
+      True iff the manifest selected for the given SDK is a full manifest.
+      In this context we'll accept any manifest for which there are no groups
+      defined.
+    """
+    manifests_git_repo = os.path.join(checkout_root, '.repo', 'manifests.git')
+    cmd = ['config', '--local', '--get', 'manifest.groups']
+    result = RunGit(manifests_git_repo, cmd, error_code_ok=True)
+
+    if result.output.strip():
+      # Full layouts don't define groups.
+      return False
+
+    return True
 
   def FindCheckouts(self, project, branch=None, only_patchable=False):
     """Returns the list of checkouts for a given |project|/|branch|.
@@ -675,7 +743,7 @@ class ManifestCheckout(Manifest):
         path, 'default', allow_broken_merge_settings=True, for_checkout=False)
 
     if result is not None:
-      return StripRefsHeads(result[1], False)
+      return StripRefsHeads(result.ref, False)
 
     raise OSError(errno.ENOENT,
                   "Manifest repository at %s is checked out to 'default', but "
@@ -737,8 +805,8 @@ def RunGit(git_repo, cmd, retry=True, **kwargs):
     if (isinstance(exc, cros_build_lib.RunCommandError)
         and exc.result and exc.result.error and
         GIT_TRANSIENT_ERRORS_RE.search(exc.result.error)):
-      cros_build_lib.Warning('git reported transient error (cmd=%s); retrying',
-                             cros_build_lib.CmdToStr(cmd), exc_info=True)
+      logging.warning('git reported transient error (cmd=%s); retrying',
+                      cros_build_lib.CmdToStr(cmd), exc_info=True)
       return True
     return False
 
@@ -750,6 +818,17 @@ def RunGit(git_repo, cmd, retry=True, **kwargs):
   return retry_util.GenericRetry(
       _ShouldRetry, max_retry, cros_build_lib.RunCommand,
       ['git'] + cmd, **kwargs)
+
+
+def Init(git_repo):
+  """Create a new git repository, in the given location.
+
+  Args:
+    git_repo: Path for where to create a git repo. Directory will be created if
+              it doesnt exist.
+  """
+  osutils.SafeMakedirs(git_repo)
+  RunGit(git_repo, ['init'])
 
 
 def GetProjectUserEmail(git_repo):
@@ -822,8 +901,8 @@ def GetTrackingBranchViaGitConfig(git_repo, branch, for_checkout=True,
       remotes. Disabling it is a matter of passing 0.
 
   Returns:
-    A tuple of the remote and the ref name of the tracking branch, or
-    None if it couldn't be found.
+    A RemoteRef, or None.  If for_checkout, then it returns the localized
+    version of it.
   """
   try:
     cmd = ['config', '--get-regexp',
@@ -848,7 +927,7 @@ def GetTrackingBranchViaGitConfig(git_repo, branch, for_checkout=True,
     # which is wrong (git hates it, nor will it honor it).
     if rev.startswith('refs/remotes/'):
       if for_checkout:
-        return remote, rev
+        return RemoteRef(remote, rev)
       # We can't backtrack from here, or at least don't want to.
       # This is likely refs/remotes/m/ which repo writes when dealing
       # with a revision locked manifest.
@@ -869,7 +948,7 @@ def GetTrackingBranchViaGitConfig(git_repo, branch, for_checkout=True,
           recurse=recurse - 1)
     elif for_checkout:
       rev = 'refs/remotes/%s/%s' % (remote, StripRefsHeads(rev))
-    return remote, rev
+    return RemoteRef(remote, rev)
   except cros_build_lib.RunCommandError as e:
     # 1 is the retcode for no matches.
     if e.result.returncode != 1:
@@ -892,9 +971,8 @@ def GetTrackingBranchViaManifest(git_repo, for_checkout=True, for_push=False,
       ManifestCheckout is created and used.
 
   Returns:
-    A tuple of a git target repo and the remote ref to push to, or
-    None if it couldnt be found.  If for_checkout, then it returns
-    the localized version of it.
+    A RemoteRef, or None.  If for_checkout, then it returns the localized
+    version of it.
   """
   try:
     if manifest is None:
@@ -920,7 +998,7 @@ def GetTrackingBranchViaManifest(git_repo, for_checkout=True, for_push=False,
       if not revision.startswith('refs/heads/'):
         return None
 
-    return remote, revision
+    return RemoteRef(remote, revision)
   except EnvironmentError as e:
     if e.errno != errno.ENOENT:
       raise
@@ -955,9 +1033,8 @@ def GetTrackingBranch(git_repo, branch=None, for_checkout=True, fallback=True,
       ManifestCheckout is created and used.
 
   Returns:
-    A tuple of a git target repo and the remote ref to push to.
+    A RemoteRef, or None.
   """
-
   result = GetTrackingBranchViaManifest(git_repo, for_checkout=for_checkout,
                                         manifest=manifest, for_push=for_push)
   if result is not None:
@@ -969,15 +1046,15 @@ def GetTrackingBranch(git_repo, branch=None, for_checkout=True, fallback=True,
     result = GetTrackingBranchViaGitConfig(git_repo, branch,
                                            for_checkout=for_checkout)
     if result is not None:
-      if (result[1].startswith('refs/heads/') or
-          result[1].startswith('refs/remotes/')):
+      if (result.ref.startswith('refs/heads/') or
+          result.ref.startswith('refs/remotes/')):
         return result
 
   if not fallback:
     return None
   if for_checkout:
-    return 'origin', 'refs/remotes/origin/master'
-  return 'origin', 'master'
+    return RemoteRef('origin', 'refs/remotes/origin/master')
+  return RemoteRef('origin', 'master')
 
 
 def CreateBranch(git_repo, branch, branch_point='HEAD', track=False):
@@ -1044,13 +1121,14 @@ def RevertPath(git_repo, filename, rev):
   RunGit(git_repo, ['checkout', rev, '--', filename])
 
 
-def Commit(git_repo, message, amend=False):
+def Commit(git_repo, message, amend=False, allow_empty=False):
   """Commit with git.
 
   Args:
     git_repo: Path to the git repository to commit in.
     message: Commit message to use.
     amend: Whether to 'amend' the CL, default False
+    allow_empty: Whether to allow an empty commit. Default False.
 
   Returns:
     The Gerrit Change-ID assigned to the CL if it exists.
@@ -1058,6 +1136,8 @@ def Commit(git_repo, message, amend=False):
   cmd = ['commit', '-m', message]
   if amend:
     cmd.append('--amend')
+  if allow_empty:
+    cmd.append('--allow-empty')
   RunGit(git_repo, cmd)
 
   log = RunGit(git_repo, ['log', '-n', '1', '--format=format:%B']).output
@@ -1156,21 +1236,19 @@ def CreatePushBranch(branch, git_repo, sync=True, remote_push_branch=None):
     branch: Local branch to create.
     git_repo: Git repository to create the branch in.
     sync: Update remote before creating push branch.
-    remote_push_branch: A tuple of the (remote, branch) to push to. i.e.,
-                        ('cros', 'master').  By default it tries to
+    remote_push_branch: A RemoteRef to push to. i.e.,
+                        RemoteRef('cros', 'master').  By default it tries to
                         automatically determine which tracking branch to use
                         (see GetTrackingBranch()).
   """
   if not remote_push_branch:
-    remote, push_branch = GetTrackingBranch(git_repo, for_push=True)
-  else:
-    remote, push_branch = remote_push_branch
+    remote_push_branch = GetTrackingBranch(git_repo, for_push=True)
 
   if sync:
-    cmd = ['remote', 'update', remote]
+    cmd = ['remote', 'update', remote_push_branch.remote]
     RunGit(git_repo, cmd)
 
-  RunGit(git_repo, ['checkout', '-B', branch, '-t', push_branch])
+  RunGit(git_repo, ['checkout', '-B', branch, '-t', remote_push_branch.ref])
 
 
 def SyncPushBranch(git_repo, remote, rebase_target):
@@ -1219,33 +1297,38 @@ def PushWithRetry(branch, git_repo, dryrun=False, retries=5):
   Raises:
     GitPushFailed if push was unsuccessful after retries
   """
-  remote, ref = GetTrackingBranch(git_repo, branch, for_checkout=False,
-                                  for_push=True)
+  remote_ref = GetTrackingBranch(git_repo, branch, for_checkout=False,
+                                 for_push=True)
   # Don't like invoking this twice, but there is a bit of API
   # impedence here; cros_mark_as_stable
-  _, local_ref = GetTrackingBranch(git_repo, branch, for_push=True)
+  local_ref = GetTrackingBranch(git_repo, branch, for_push=True)
 
-  if not ref.startswith('refs/heads/'):
-    raise Exception('Was asked to push to a non branch namespace: %s' % (ref,))
+  if not remote_ref.ref.startswith('refs/heads/'):
+    raise Exception('Was asked to push to a non branch namespace: %s' %
+                    remote_ref.ref)
 
-  push_command = ['push', remote, '%s:%s' % (branch, ref)]
-  cros_build_lib.Debug('Trying to push %s to %s:%s', git_repo, branch, ref)
+  push_command = ['push', remote_ref.remote, '%s:%s' %
+                  (branch, remote_ref.ref)]
+  logging.debug('Trying to push %s to %s:%s',
+                git_repo, branch, remote_ref.ref)
 
   if dryrun:
     push_command.append('--dry-run')
   for retry in range(1, retries + 1):
-    SyncPushBranch(git_repo, remote, local_ref)
+    SyncPushBranch(git_repo, remote_ref.remote, local_ref.ref)
     try:
       RunGit(git_repo, push_command)
       break
     except cros_build_lib.RunCommandError:
       if retry < retries:
-        Warning('Error pushing changes trying again (%s/%s)', retry, retries)
+        logging.warning('Error pushing changes trying again (%s/%s)',
+                        retry, retries)
         time.sleep(5 * retry)
         continue
       raise
 
-  cros_build_lib.Info('Successfully pushed %s to %s:%s', git_repo, branch, ref)
+  logging.info('Successfully pushed %s to %s:%s',
+               git_repo, branch, remote_ref.ref)
 
 
 def CleanAndDetachHead(git_repo):
@@ -1270,20 +1353,19 @@ def CleanAndCheckoutUpstream(git_repo, refresh_upstream=True):
     git_repo: Directory of git repository.
     refresh_upstream: If True, run a remote update prior to checking it out.
   """
-  remote, local_upstream = GetTrackingBranch(git_repo,
-                                             for_push=refresh_upstream)
+  remote_ref = GetTrackingBranch(git_repo, for_push=refresh_upstream)
   CleanAndDetachHead(git_repo)
   if refresh_upstream:
-    RunGit(git_repo, ['remote', 'update', remote])
-  RunGit(git_repo, ['checkout', local_upstream])
+    RunGit(git_repo, ['remote', 'update', remote_ref.remote])
+  RunGit(git_repo, ['checkout', remote_ref.ref])
 
 
 def GetChromiteTrackingBranch():
   """Returns the remote branch associated with chromite."""
   cwd = os.path.dirname(os.path.realpath(__file__))
-  result = GetTrackingBranch(cwd, for_checkout=False, fallback=False)
-  if result:
-    _remote, branch = result
+  result_ref = GetTrackingBranch(cwd, for_checkout=False, fallback=False)
+  if result_ref:
+    branch = result_ref.ref
     if branch.startswith('refs/heads/'):
       # Normal scenario.
       return StripRefsHeads(branch)
@@ -1301,7 +1383,7 @@ def GetChromiteTrackingBranch():
       raise
 
   # Not a manifest checkout.
-  Warning(
+  logging.warning(
       "Chromite checkout at %s isn't controlled by repo, nor is it on a "
       'branch (or if it is, the tracking configuration is missing or broken).  '
       'Falling back to assuming the chromite checkout is derived from '

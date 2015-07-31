@@ -10,7 +10,9 @@
 
 
 #include "./vpx_config.h"
-#include "vp8_rtcd.h"
+#include "./vp8_rtcd.h"
+#include "./vpx_dsp_rtcd.h"
+#include "./vpx_scale_rtcd.h"
 #include "vpx/vpx_codec.h"
 #include "vpx/internal/vpx_codec_internal.h"
 #include "vpx_version.h"
@@ -365,9 +367,9 @@ static vpx_codec_err_t set_vp8e_config(VP8_CONFIG *oxcf,
     if (oxcf->number_of_layers > 1)
     {
         memcpy (oxcf->target_bitrate, cfg.ts_target_bitrate,
-                          sizeof(cfg.ts_target_bitrate));
+                sizeof(cfg.ts_target_bitrate));
         memcpy (oxcf->rate_decimator, cfg.ts_rate_decimator,
-                          sizeof(cfg.ts_rate_decimator));
+                sizeof(cfg.ts_rate_decimator));
         memcpy (oxcf->layer_id, cfg.ts_layer_id, sizeof(cfg.ts_layer_id));
     }
 
@@ -649,6 +651,8 @@ static vpx_codec_err_t vp8e_init(vpx_codec_ctx_t *ctx,
 
 
     vp8_rtcd();
+    vpx_dsp_rtcd();
+    vpx_scale_rtcd();
 
     if (!ctx->priv)
     {
@@ -857,9 +861,6 @@ static vpx_codec_err_t vp8e_encode(vpx_codec_alg_priv_t  *ctx,
                                    unsigned long          deadline)
 {
     vpx_codec_err_t res = VPX_CODEC_OK;
-
-    if (!ctx->cfg.rc_target_bitrate)
-        return res;
 
     if (!ctx->cfg.rc_target_bitrate)
         return res;

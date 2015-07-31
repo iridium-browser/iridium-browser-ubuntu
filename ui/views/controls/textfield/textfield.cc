@@ -288,6 +288,13 @@ Textfield::Textfield()
     password_reveal_duration_ = ViewsDelegate::views_delegate->
         GetDefaultTextfieldObscuredRevealDuration();
   }
+
+  // These allow BrowserView to pass edit commands from the Chrome menu to us
+  // when we're focused by simply asking the FocusManager to
+  // ProcessAccelerator() with the relevant accelerators.
+  AddAccelerator(ui::Accelerator(ui::VKEY_X, ui::EF_CONTROL_DOWN));
+  AddAccelerator(ui::Accelerator(ui::VKEY_C, ui::EF_CONTROL_DOWN));
+  AddAccelerator(ui::Accelerator(ui::VKEY_V, ui::EF_CONTROL_DOWN));
 }
 
 Textfield::~Textfield() {}
@@ -647,11 +654,14 @@ bool Textfield::OnMouseDragged(const ui::MouseEvent& event) {
   }
 
   // A timer is used to continuously scroll while selecting beyond side edges.
-  if ((event.location().x() > 0 && event.location().x() < size().width()) ||
-      GetDragSelectionDelay() == 0) {
+  const int x = event.location().x();
+  if ((x >= 0 && x <= width()) || GetDragSelectionDelay() == 0) {
     drag_selection_timer_.Stop();
     SelectThroughLastDragLocation();
   } else if (!drag_selection_timer_.IsRunning()) {
+    // Select through the edge of the visible text, then start the scroll timer.
+    last_drag_location_.set_x(std::min(std::max(0, x), width()));
+    SelectThroughLastDragLocation();
     drag_selection_timer_.Start(
         FROM_HERE, base::TimeDelta::FromMilliseconds(GetDragSelectionDelay()),
         this, &Textfield::SelectThroughLastDragLocation);
@@ -804,6 +814,18 @@ void Textfield::OnGestureEvent(ui::GestureEvent* event) {
     default:
       return;
   }
+}
+
+// This function is called by BrowserView to execute clipboard commands.
+bool Textfield::AcceleratorPressed(const ui::Accelerator& accelerator) {
+  ui::KeyEvent event(accelerator.type(), accelerator.key_code(),
+                     accelerator.modifiers());
+  ExecuteCommand(GetCommandForKeyEvent(event, HasSelection()));
+  return true;
+}
+
+bool Textfield::CanHandleAccelerators() const {
+  return GetRenderText()->focused() && View::CanHandleAccelerators();
 }
 
 void Textfield::AboutToRequestFocusFromTabTraversal(bool reverse) {

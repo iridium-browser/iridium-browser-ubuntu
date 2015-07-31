@@ -11,11 +11,17 @@ found in the LICENSE file.
 <link rel="import" href="/core/analysis/analysis_sub_view.html">
 
 <!-- Sub Views. -->
-<link rel="import" href="/core/analysis/single_slice_sub_view.html">
-<link rel="import" href="/core/analysis/multi_slice_sub_view.html">
+<link rel="import" href="/core/analysis/single_thread_slice_sub_view.html">
+<link rel="import" href="/core/analysis/multi_thread_slice_sub_view.html">
+
+<link rel="import" href="/core/analysis/single_async_slice_sub_view.html">
+<link rel="import" href="/core/analysis/multi_async_slice_sub_view.html">
+
+<link rel="import" href="/core/analysis/single_cpu_slice_sub_view.html">
+<link rel="import" href="/core/analysis/multi_cpu_slice_sub_view.html">
 
 <link rel="import" href="/core/analysis/single_thread_time_slice_sub_view.html">
-<link rel="import" href="/core/analysis/single_cpu_slice_sub_view.html">
+<link rel="import" href="/core/analysis/multi_thread_time_slice_sub_view.html">
 
 <link rel="import" href="/core/analysis/single_instant_event_sub_view.html">
 <link rel="import" href="/core/analysis/multi_instant_event_sub_view.html">
@@ -37,10 +43,12 @@ found in the LICENSE file.
 <link rel="import"
     href="/core/analysis/multi_interaction_record_sub_view.html">
 
+<link rel="import" href="/core/analysis/alert_sub_view.html">
+
 <link rel="import"
-    href="/core/analysis/single_alert_sub_view.html">
+    href="/core/analysis/single_frame_sub_view.html">
 <link rel="import"
-    href="/core/analysis/multi_alert_sub_view.html">
+    href="/core/analysis/multi_frame_sub_view.html">
 
 <link rel="import"
     href="/core/analysis/single_global_memory_dump_sub_view.html">
@@ -118,12 +126,31 @@ using custom elements specialized for different event types.
 
         this.tallMode = false;
         this.tabView_.textContent = '';
+        if (selection.length == 0) {
+          this.tabView_.tabStripHeadingText = 'Nothing selected. Tap stuff.';
+        } else if (selection.length == 1) {
+          this.tabView_.tabStripHeadingText = '1 item selected: ';
+        } else {
+          this.tabView_.tabStripHeadingText = selection.length +
+              ' items selected: ';
+        }
 
         var eventsByBaseTypeName = selection.getEventsOrganizedByBaseType(true);
 
         var numBaseTypesToAnalyze = tv.b.dictionaryLength(eventsByBaseTypeName);
 
-        for (var eventTypeName in eventsByBaseTypeName) {
+        // Sort selected event types by their priorities.
+        var selectionTypeNames = tv.b.dictionaryKeys(eventsByBaseTypeName);
+        selectionTypeNames.sort(function(x, y) {
+          var priorityDiff =
+              EventRegistry.getEventTypeInfoByTypeName(x).metadata.priority -
+              EventRegistry.getEventTypeInfoByTypeName(y).metadata.priority;
+          if (priorityDiff != 0)
+            return priorityDiff;
+          return x.localeCompare(y);
+        });
+
+        selectionTypeNames.forEach(function(eventTypeName) {
           var subSelection = eventsByBaseTypeName[eventTypeName];
           var subView = this.createSubViewForSelection_(
             eventTypeName, subSelection);
@@ -132,7 +159,7 @@ using custom elements specialized for different event types.
           this.tabView_.appendChild(subView);
 
           subView.selection = subSelection;
-        }
+        }, this);
 
         // Restore the tab type that was previously selected. First try by tag
         // name.
@@ -176,7 +203,7 @@ using custom elements specialized for different event types.
           camelLabel = EventRegistry.getUserFriendlySingularName(eventTypeName);
         else
           camelLabel = EventRegistry.getUserFriendlyPluralName(eventTypeName);
-        subView.tabLabel = camelLabel;
+        subView.tabLabel = camelLabel + ' (' + subSelection.length + ')';
 
         return subView;
       },

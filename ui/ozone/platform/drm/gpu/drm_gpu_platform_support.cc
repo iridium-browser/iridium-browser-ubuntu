@@ -10,6 +10,7 @@
 #include "ui/ozone/common/gpu/ozone_gpu_message_params.h"
 #include "ui/ozone/common/gpu/ozone_gpu_messages.h"
 #include "ui/ozone/platform/drm/gpu/drm_device.h"
+#include "ui/ozone/platform/drm/gpu/drm_device_manager.h"
 #include "ui/ozone/platform/drm/gpu/drm_gpu_display_manager.h"
 #include "ui/ozone/platform/drm/gpu/drm_window.h"
 #include "ui/ozone/platform/drm/gpu/screen_manager.h"
@@ -213,6 +214,9 @@ bool DrmGpuPlatformSupport::OnMessageReceived(const IPC::Message& message) {
                       OnRelinquishDisplayControl)
   IPC_MESSAGE_HANDLER(OzoneGpuMsg_AddGraphicsDevice, OnAddGraphicsDevice)
   IPC_MESSAGE_HANDLER(OzoneGpuMsg_RemoveGraphicsDevice, OnRemoveGraphicsDevice)
+  IPC_MESSAGE_HANDLER(OzoneGpuMsg_GetHDCPState, OnGetHDCPState)
+  IPC_MESSAGE_HANDLER(OzoneGpuMsg_SetHDCPState, OnSetHDCPState)
+  IPC_MESSAGE_HANDLER(OzoneGpuMsg_SetGammaRamp, OnSetGammaRamp);
   IPC_MESSAGE_UNHANDLED(handled = false);
   IPC_END_MESSAGE_MAP()
 
@@ -284,11 +288,17 @@ void DrmGpuPlatformSupport::OnRelinquishDisplayControl() {
 void DrmGpuPlatformSupport::OnAddGraphicsDevice(
     const base::FilePath& path,
     const base::FileDescriptor& fd) {
-  ndd_->AddGraphicsDevice(path, fd);
+  drm_device_manager_->AddDrmDevice(path, fd);
 }
 
 void DrmGpuPlatformSupport::OnRemoveGraphicsDevice(const base::FilePath& path) {
-  ndd_->RemoveGraphicsDevice(path);
+  drm_device_manager_->RemoveDrmDevice(path);
+}
+
+void DrmGpuPlatformSupport::OnSetGammaRamp(
+    int64_t id,
+    const std::vector<GammaRampRGBEntry>& lut) {
+  ndd_->SetGammaRamp(id, lut);
 }
 
 void DrmGpuPlatformSupport::RelinquishGpuResources(
@@ -296,9 +306,21 @@ void DrmGpuPlatformSupport::RelinquishGpuResources(
   callback.Run();
 }
 
+void DrmGpuPlatformSupport::OnGetHDCPState(int64_t display_id) {
+  HDCPState state = HDCP_STATE_UNDESIRED;
+  bool success = ndd_->GetHDCPState(display_id, &state);
+  sender_->Send(new OzoneHostMsg_HDCPStateReceived(display_id, success, state));
+}
+
+void DrmGpuPlatformSupport::OnSetHDCPState(int64_t display_id,
+                                           HDCPState state) {
+  sender_->Send(new OzoneHostMsg_HDCPStateUpdated(
+      display_id, ndd_->SetHDCPState(display_id, state)));
+}
+
 void DrmGpuPlatformSupport::SetIOTaskRunner(
     const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner) {
-  ndd_->InitializeIOTaskRunner(io_task_runner);
+  drm_device_manager_->InitializeIOTaskRunner(io_task_runner);
 }
 
 IPC::MessageFilter* DrmGpuPlatformSupport::GetMessageFilter() {

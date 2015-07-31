@@ -93,6 +93,23 @@ public:
         HoverTypeHover = 1 << 2
     };
 
+    // Selection strategy defines how the selection granularity changes when the
+    // selection extent is moved.
+    enum class SelectionStrategyType {
+        // Always uses character granularity.
+        Character,
+        // "Expand by word, shrink by character" selection strategy.
+        // Uses character granularity when selection is shrinking. If the
+        // selection is expanding, granularity doesn't change until a word
+        // boundary is passed, after which the granularity switches to "word".
+        Direction
+    };
+
+    // Sets value of a setting by its string identifier from Settings.in and
+    // string representation of value. An enum's string representation is the
+    // string representation of the integer value of the enum.
+    virtual void setFromStrings(const WebString& name, const WebString& value) = 0;
+
     virtual bool mainFrameResizesAreOrientationChanges() const = 0;
     virtual int availablePointerTypes() const = 0;
     virtual PointerType primaryPointerType() const = 0;
@@ -148,6 +165,8 @@ public:
     virtual void setEditingBehavior(EditingBehavior) = 0;
     virtual void setEnableScrollAnimator(bool) = 0;
     virtual void setEnableTouchAdjustment(bool) = 0;
+    virtual bool multiTargetTapNotificationEnabled() = 0;
+    virtual void setMultiTargetTapNotificationEnabled(bool) = 0;
     virtual void setRegionBasedColumnsEnabled(bool) = 0;
     virtual void setExperimentalWebGLEnabled(bool) = 0;
     virtual void setFantasyFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON) = 0;
@@ -199,6 +218,7 @@ public:
     virtual void setSansSerifFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON) = 0;
     virtual void setSelectTrailingWhitespaceEnabled(bool) = 0;
     virtual void setSelectionIncludesAltImageText(bool) = 0;
+    virtual void setSelectionStrategy(SelectionStrategyType) = 0;
     virtual void setSerifFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON) = 0;
     virtual void setShouldPrintBackgrounds(bool) = 0;
     virtual void setShouldClearDocumentBackground(bool) = 0;
@@ -206,7 +226,6 @@ public:
     virtual void setShowContextMenuOnMouseUp(bool) = 0;
     virtual void setShowFPSCounter(bool) = 0;
     virtual void setShowPaintRects(bool) = 0;
-    virtual void setShrinksStandaloneImagesToFit(bool) = 0;
     virtual void setShrinksViewportContentToFit(bool) = 0;
     virtual void setSmartInsertDeleteEnabled(bool) = 0;
     // Spatial navigation feature, when enabled, improves the experience

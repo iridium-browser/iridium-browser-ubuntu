@@ -117,7 +117,6 @@
   '../third_party/skia/src/utils/SkNinePatch.cpp',
   '../third_party/skia/src/utils/SkOSFile.cpp',
   '../third_party/skia/src/utils/SkParsePath.cpp',
-  '../third_party/skia/src/utils/SkPathUtils.cpp',
   '../third_party/skia/src/utils/SkSHA1.cpp',
   '../third_party/skia/src/utils/SkSHA1.h',
   '../third_party/skia/src/utils/SkTFitsIn.h',
@@ -210,8 +209,8 @@
       'sources': [
         '../third_party/skia/src/core/SkUtilsArm.cpp',
       ],
-      'includes': [
-        '../build/android/cpufeatures.gypi',
+      'dependencies': [
+        '../build/android/ndk.gyp:cpu_features',
       ],
     }],
     [ 'desktop_linux == 1 or chromeos == 1', {

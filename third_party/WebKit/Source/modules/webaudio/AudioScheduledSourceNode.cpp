@@ -144,14 +144,17 @@ void AudioScheduledSourceHandler::start(double when, ExceptionState& exceptionSt
     if (when < 0) {
         exceptionState.throwDOMException(
             InvalidAccessError,
-            "Start time must be a finite non-negative number: " + String::number(when));
+            ExceptionMessages::indexExceedsMinimumBound(
+                "start time",
+                when,
+                0.0));
         return;
     }
 
     // The node is started. Add a reference to keep us alive so that audio will eventually get
     // played even if Javascript should drop all references to this node. The reference will get
     // dropped when the source has finished playing.
-    context()->refNode(node());
+    context()->notifySourceNodeStartedProcessing(node());
 
     // If |when| < currentTime, the source must start now according to the spec.
     // So just set startTime to currentTime in this case to start the source now.
@@ -174,7 +177,10 @@ void AudioScheduledSourceHandler::stop(double when, ExceptionState& exceptionSta
     if (when < 0) {
         exceptionState.throwDOMException(
             InvalidAccessError,
-            "Stop time must be a non-negative number: " + String::number(when));
+            ExceptionMessages::indexExceedsMinimumBound(
+                "stop time",
+                when,
+                0.0));
         return;
     }
 
@@ -189,7 +195,7 @@ void AudioScheduledSourceHandler::finishWithoutOnEnded()
 {
     if (m_playbackState != FINISHED_STATE) {
         // Let the context dereference this AudioNode.
-        context()->notifyNodeFinishedProcessing(node());
+        context()->notifySourceNodeFinishedProcessing(this);
         m_playbackState = FINISHED_STATE;
     }
 }
@@ -198,13 +204,15 @@ void AudioScheduledSourceHandler::finish()
     finishWithoutOnEnded();
 
     if (m_hasEndedListener && context()->executionContext()) {
-        context()->executionContext()->postTask(FROM_HERE, createCrossThreadTask(&AudioScheduledSourceHandler::notifyEnded, this));
+        context()->executionContext()->postTask(FROM_HERE, createCrossThreadTask(&AudioScheduledSourceHandler::notifyEnded, PassRefPtr<AudioScheduledSourceHandler>(this)));
     }
 }
 
 void AudioScheduledSourceHandler::notifyEnded()
 {
-    node()->dispatchEvent(Event::create(EventTypeNames::ended));
+    ASSERT(isMainThread());
+    if (node())
+        node()->dispatchEvent(Event::create(EventTypeNames::ended));
 }
 
 // ----------------------------------------------------------------

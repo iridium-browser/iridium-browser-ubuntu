@@ -53,6 +53,12 @@ static void standardTestCases(skiatest::Reporter* reporter) {
 }
 
 static const SkDQuad testSet[] = {
+{{{1, 1}, {0, 2}, {3, 3}}},
+{{{3, 0}, {0, 1}, {1, 2}}},
+
+{{{0.33333333333333326, 0.81481481481481488}, {0.63395173631977997, 0.68744136726313931}, {1.205684411948591, 0.81344322326274499}}},
+{{{0.33333333333333326, 0.81481481481481488}, {0.63396444791444551, 0.68743368362444768}, {1.205732763658403, 0.81345617746834109}}},
+
 {{{4981.9990234375, 1590}, {4981.9990234375, 1617.7523193359375}, {4962.375, 1637.3760986328125}}},
 {{{4962.3759765625, 1637.3760986328125}, {4982, 1617.7523193359375}, {4982, 1590}}},
 
@@ -321,12 +327,12 @@ static void oneOffTest1(skiatest::Reporter* reporter, size_t outer, size_t inner
     SkASSERT(ValidQuad(quad1));
     const SkDQuad& quad2 = testSet[inner];
     SkASSERT(ValidQuad(quad2));
-    SkIntersections intersections2;
-    intersections2.intersect(quad1, quad2);
-    for (int pt = 0; pt < intersections2.used(); ++pt) {
-        double tt1 = intersections2[0][pt];
+    SkIntersections intersections;
+    intersections.intersect(quad1, quad2);
+    for (int pt = 0; pt < intersections.used(); ++pt) {
+        double tt1 = intersections[0][pt];
         SkDPoint xy1 = quad1.ptAtT(tt1);
-        double tt2 = intersections2[1][pt];
+        double tt2 = intersections[1][pt];
         SkDPoint xy2 = quad2.ptAtT(tt2);
         if (!xy1.approximatelyEqual(xy2)) {
             SkDebugf("%s [%d,%d] x!= t1=%g (%g,%g) t2=%g (%g,%g)\n",
@@ -371,9 +377,9 @@ static void coincidentTestOne(skiatest::Reporter* reporter, int test1, int test2
     SkASSERT(ValidQuad(quad2));
     SkIntersections intersections2;
     intersections2.intersect(quad1, quad2);
-    REPORTER_ASSERT(reporter, intersections2.coincidentUsed() >= 2);
+    REPORTER_ASSERT(reporter, intersections2.debugCoincidentUsed() >= 2);
     REPORTER_ASSERT(reporter, intersections2.used() >= 2);
-    for (int pt = 0; pt < intersections2.coincidentUsed(); pt += 2) {
+    for (int pt = 0; pt < intersections2.debugCoincidentUsed(); pt += 2) {
         double tt1 = intersections2[0][pt];
         double tt2 = intersections2[1][pt];
         SkDPoint pt1 = quad1.ptAtT(tt1);
@@ -386,70 +392,6 @@ static void coincidentTest(skiatest::Reporter* reporter) {
     for (int testIndex = 0; testIndex < coincidentTestSetCount - 1; testIndex += 2) {
         coincidentTestOne(reporter, testIndex, testIndex + 1);
     }
-}
-
-static int floatSign(double x) {
-    return x < 0 ? -1 : x > 0 ? 1 : 0;
-}
-
-static const SkDQuad pointFinderTestSet[] = {
-                                                                                                                                //>=0.633974464         0.633974846 <=
-{{{1.2071879545809394, 0.82163474041730045}, {1.1534203513372994, 0.52790870069930229},
-        {1.0880000000000001, 0.29599999999999982}}},  //t=0.63155333662549329, 0.80000000000000004
-{{{1.2071879545809394, 0.82163474041730045}, {1.2065040319428038, 0.81766753259119995},
-        {1.2058123269101506, 0.81370135061854221}}},  //t=0.63155333662549329, 0.6339049773632347
-{{{1.2058123269101506, 0.81370135061854221}, {1.152376363978022, 0.5244097415381026},
-        {1.0880000000000001, 0.29599999999999982}}},  //t=0.6339049773632347,  0.80000000000000004
-                                                                                                                                //>=0.633974083         0.633975227 <=
-{{{0.33333333333333326, 0.81481481481481488}, {0.63395173631977997, 0.68744136726313931},
-        {1.205684411948591, 0.81344322326274499}}},   //t=0.33333333333333331, 0.63395173631977986
-{{{0.33333333333333326, 0.81481481481481488}, {0.63396444791444551, 0.68743368362444768},
-        {1.205732763658403, 0.81345617746834109}}},   //t=0.33333333333333331, 0.63396444791444551
-{{{1.205684411948591, 0.81344322326274499}, {1.2057085875611198, 0.81344969999329253},
-        {1.205732763658403, 0.81345617746834109}}},   //t=0.63395173631977986, 0.63396444791444551
-{{{1.205732763658403, 0.81345617746834109}, {1.267928895828891, 0.83008534558465619},
-        {1.3333333333333333, 0.85185185185185175}}},  //t=0.63396444791444551, 0.66666666666666663
-};
-
-static void pointFinder(const SkDQuad& q1, const SkDQuad& q2) {
-    for (int index = 0; index < 3; ++index) {
-        double t = q1.nearestT(q2[index]);
-        SkDPoint onQuad = q1.ptAtT(t);
-        SkDebugf("%s t=%1.9g (%1.9g,%1.9g) dist=%1.9g\n", __FUNCTION__, t, onQuad.fX, onQuad.fY,
-                onQuad.distance(q2[index]));
-        double left[3];
-        left[0] = ((const SkDLine&) q1[0]).isLeft(q2[index]);
-        left[1] = ((const SkDLine&) q1[1]).isLeft(q2[index]);
-        SkDLine diag = {{q1[0], q1[2]}};
-        left[2] = diag.isLeft(q2[index]);
-        SkDebugf("%s left=(%d, %d, %d)\n", __FUNCTION__, floatSign(left[0]),
-                floatSign(left[1]), floatSign(left[2]));
-    }
-    SkDebugf("\n");
-}
-
-static void hullIntersect(const SkDQuad& q1, const SkDQuad& q2) {
-    SkDebugf("%s", __FUNCTION__);
-    SkIntersections ts;
-    for (int i1 = 0; i1 < 3; ++i1) {
-        SkDLine l1 = {{q1[i1], q1[(i1 + 1) % 3]}};
-        for (int i2 = 0; i2 < 3; ++i2) {
-            SkDLine l2 = {{q2[i2], q2[(i2 + 1) % 3]}};
-            if (ts.intersect(l1, l2)) {
-                SkDebugf(" [%d,%d]", i1, i2);
-            }
-        }
-    }
-    SkDebugf("\n");
-}
-
-static void QuadraticIntersection_PointFinder() {
-    pointFinder(pointFinderTestSet[0], pointFinderTestSet[4]);
-    pointFinder(pointFinderTestSet[4], pointFinderTestSet[0]);
-    pointFinder(pointFinderTestSet[0], pointFinderTestSet[6]);
-    pointFinder(pointFinderTestSet[6], pointFinderTestSet[0]);
-    hullIntersect(pointFinderTestSet[0], pointFinderTestSet[4]);
-    hullIntersect(pointFinderTestSet[0], pointFinderTestSet[6]);
 }
 
 static void intersectionFinder(int test1, int test2) {
@@ -551,7 +493,7 @@ static void QuadraticIntersection_IntersectionFinder() {
 }
 
 DEF_TEST(PathOpsQuadIntersectionOneOff, reporter) {
-    oneOffTest1(reporter, 10, 11);
+    oneOffTest1(reporter, 0, 1);
 }
 
 DEF_TEST(PathOpsQuadIntersectionCoincidenceOneOff, reporter) {
@@ -563,7 +505,6 @@ DEF_TEST(PathOpsQuadIntersection, reporter) {
     coincidentTest(reporter);
     standardTestCases(reporter);
     if (false) QuadraticIntersection_IntersectionFinder();
-    if (false) QuadraticIntersection_PointFinder();
 }
 
 #include "SkCommonFlags.h"

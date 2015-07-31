@@ -28,7 +28,6 @@ namespace net {
 
 HttpProxyClientSocket::HttpProxyClientSocket(
     ClientSocketHandle* transport_socket,
-    const GURL& request_url,
     const std::string& user_agent,
     const HostPortPair& endpoint,
     const HostPortPair& proxy_server,
@@ -60,8 +59,8 @@ HttpProxyClientSocket::HttpProxyClientSocket(
       proxy_delegate_(proxy_delegate),
       net_log_(transport_socket->socket()->NetLog()) {
   // Synthesize the bits of a request that we actually use.
-  request_.url = request_url;
-  request_.method = "GET";
+  request_.url = GURL("https://" + endpoint.ToString());
+  request_.method = "CONNECT";
   if (!user_agent.empty())
     request_.extra_headers.SetHeader(HttpRequestHeaders::kUserAgent,
                                      user_agent);
@@ -214,6 +213,11 @@ bool HttpProxyClientSocket::GetSSLInfo(SSLInfo* ssl_info) {
   return false;
 }
 
+void HttpProxyClientSocket::GetConnectionAttempts(
+    ConnectionAttempts* out) const {
+  out->clear();
+}
+
 int HttpProxyClientSocket::Read(IOBuffer* buf, int buf_len,
                                 const CompletionCallback& callback) {
   DCHECK(user_callback_.is_null());
@@ -302,7 +306,6 @@ int HttpProxyClientSocket::DidDrainBodyForAuthRestart(bool keep_alive) {
 void HttpProxyClientSocket::LogBlockedTunnelResponse() const {
   ProxyClientSocket::LogBlockedTunnelResponse(
       response_.headers->response_code(),
-      request_.url,
       is_https_proxy_);
 }
 
@@ -414,7 +417,12 @@ int HttpProxyClientSocket::DoSendRequest() {
       proxy_delegate_->OnBeforeTunnelRequest(proxy_server_,
                                              &authorization_headers);
     }
-    BuildTunnelRequest(request_, authorization_headers, endpoint_,
+    std::string user_agent;
+    if (!request_.extra_headers.GetHeader(HttpRequestHeaders::kUserAgent,
+                                          &user_agent)) {
+      user_agent.clear();
+    }
+    BuildTunnelRequest(endpoint_, authorization_headers, user_agent,
                        &request_line_, &request_headers_);
 
     net_log_.AddEvent(

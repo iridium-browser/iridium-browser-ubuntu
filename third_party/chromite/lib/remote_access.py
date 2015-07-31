@@ -7,15 +7,17 @@
 from __future__ import print_function
 
 import glob
-import logging
 import os
 import shutil
 import socket
 import stat
+import string
 import tempfile
 import time
 
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
+from chromite.lib import debug_link
 from chromite.lib import osutils
 from chromite.lib import timeout_util
 
@@ -43,8 +45,21 @@ KNOWN_HOSTS_PATH = os.path.expanduser('~/.ssh/known_hosts')
 # Dev/test packages are installed in these paths.
 DEV_BIN_PATHS = '/usr/local/bin:/usr/local/sbin'
 
+# Path to the lsb-release file on the device.
+LSB_RELEASE_PATH = '/etc/lsb-release'
 
-class SSHConnectionError(Exception):
+# Brillo device.
+BRILLO_DEBUG_LINK_SERVICE_NAME = '_brdebug._tcp.local'
+BRILLO_DEVICE_PROPERTY_DIR = '/var/lib/brillo-device'
+BRILLO_DEVICE_PROPERTY_MAX_LEN = 128
+BRILLO_DEVICE_PROPERTY_ALIAS = 'alias'
+
+
+class RemoteAccessException(Exception):
+  """Base exception for this module."""
+
+
+class SSHConnectionError(RemoteAccessException):
   """Raised when SSH connection has failed."""
 
   def IsKnownHostsMismatch(self):
@@ -61,8 +76,24 @@ class SSHConnectionError(Exception):
     return 'REMOTE HOST IDENTIFICATION HAS CHANGED' in str(self)
 
 
-class DeviceNotPingable(Exception):
+class DeviceNotPingableError(RemoteAccessException):
   """Raised when device is not pingable."""
+
+
+class DefaultDeviceError(RemoteAccessException):
+  """Raised when a default ChromiumOSDevice can't be found."""
+
+
+class CatFileError(RemoteAccessException):
+  """Raised when error occurs while trying to cat a remote file."""
+
+
+class RunningPidsError(RemoteAccessException):
+  """Raised when unable to get running pids on the device."""
+
+
+class InvalidDevicePropertyError(RemoteAccessException):
+  """Raised when Brillo device property is invalid."""
 
 
 def NormalizePort(port, str_ok=True):
@@ -199,15 +230,20 @@ def RemoveKnownHost(host, known_hosts_path=KNOWN_HOSTS_PATH):
   Raises:
     cros_build_lib.RunCommandError if ssh-keygen fails.
   """
-  with tempfile.NamedTemporaryFile() as f:
+  # `ssh-keygen -R` creates a backup file to retain the old 'known_hosts'
+  # content and never deletes it. Using TempDir here to make sure both the temp
+  # files created by us and `ssh-keygen -R` are deleted afterwards.
+  with osutils.TempDir(prefix='remote-access-') as tempdir:
+    temp_file = os.path.join(tempdir, 'temp_known_hosts')
     try:
-      shutil.copyfile(known_hosts_path, f.name)
+      # Using shutil.copy2 to preserve the file ownership and permissions.
+      shutil.copy2(known_hosts_path, temp_file)
     except IOError:
       # If |known_hosts_path| doesn't exist neither does |host| so we're done.
       return
-    cros_build_lib.RunCommand(['ssh-keygen', '-R', host, '-f', f.name],
+    cros_build_lib.RunCommand(['ssh-keygen', '-R', host, '-f', temp_file],
                               quiet=True)
-    shutil.copyfile(f.name, known_hosts_path)
+    shutil.copy2(temp_file, known_hosts_path)
 
 
 class RemoteAccess(object):
@@ -264,8 +300,8 @@ class RemoteAccess(object):
     """Run a sh command on the remote device through ssh.
 
     Args:
-      cmd: The command string or list to run. None will start an interactive
-           session.
+      cmd: The command string or list to run. None or empty string/list will
+           start an interactive session.
       connect_settings: The SSH connect settings to use.
       error_code_ok: Does not throw an exception when the command exits with a
                      non-zero returncode.  This does not cover the case where
@@ -285,7 +321,6 @@ class RemoteAccess(object):
       RunCommandError when error is not ignored through the error_code_ok flag.
       SSHConnectionError when ssh command error is not ignored through
       the ssh_error_ok flag.
-
     """
     kwargs.setdefault('capture_output', True)
     kwargs.setdefault('debug_level', self.debug_level)
@@ -296,7 +331,7 @@ class RemoteAccess(object):
     ssh_cmd = self._GetSSHCmd(connect_settings)
     ssh_cmd.append(self.target_ssh_url)
 
-    if cmd is not None:
+    if cmd:
       ssh_cmd.append('--')
 
       if remote_sudo and self.username != ROOT_ACCOUNT:
@@ -528,18 +563,23 @@ class RemoteDevice(object):
 
   def __init__(self, hostname, port=None, username=None,
                base_dir=DEFAULT_BASE_DIR, connect_settings=None,
-               private_key=None, debug_level=logging.DEBUG, ping=True):
+               private_key=None, debug_level=logging.DEBUG, ping=True,
+               connect=True):
     """Initializes a RemoteDevice object.
 
     Args:
       hostname: The hostname of the device.
       port: The ssh port of the device.
       username: The ssh login username.
-      base_dir: The base directory of the working directory on the device.
+      base_dir: The base work directory to create on the device, or
+        None. Required in order to use RunCommand(), but
+        BaseRunCommand() will be available in either case.
       connect_settings: Default SSH connection settings.
       private_key: The identify file to pass to `ssh -i`.
       debug_level: Setting debug level for logging.
       ping: Whether to ping the device before attempting to connect.
+      connect: True to set up the connection, otherwise set up will
+        be automatically deferred until device use.
     """
     self.hostname = hostname
     self.port = port
@@ -549,24 +589,19 @@ class RemoteDevice(object):
     self.connect_settings = (connect_settings if connect_settings else
                              CompileSSHConnectSettings())
     self.private_key = private_key
-    self.agent = self._SetupSSH()
     self.debug_level = debug_level
-    # Setup a working directory on the device.
-    self.base_dir = base_dir
+    # The temporary work directories on the device.
+    self._base_dir = base_dir
+    self._work_dir = None
+    # Use GetAgent() instead of accessing this directly for deferred connect.
+    self._agent = None
+    self.cleanup_cmds = []
 
     if ping and not self.Pingable():
-      raise DeviceNotPingable('Device %s is not pingable.' % self.hostname)
+      raise DeviceNotPingableError('Device %s is not pingable.' % self.hostname)
 
-    # Do not call RunCommand here because we have not set up work directory yet.
-    self.BaseRunCommand(['mkdir', '-p', self.base_dir])
-    self.work_dir = self.BaseRunCommand(
-        ['mktemp', '-d', '--tmpdir=%s' % base_dir],
-        capture_output=True).output.strip()
-    logging.debug(
-        'The tempory working directory on the device is %s', self.work_dir)
-
-    self.cleanup_cmds = []
-    self.RegisterCleanupCmd(['rm', '-rf', self.work_dir])
+    if connect:
+      self._Connect()
 
   def Pingable(self, timeout=20):
     """Returns True if the device is pingable.
@@ -583,15 +618,47 @@ class RemoteDevice(object):
         capture_output=True)
     return result.returncode == 0
 
-  def _SetupSSH(self):
-    """Setup the ssh connection with device."""
-    return RemoteAccess(self.hostname, self.tempdir.tempdir, port=self.port,
-                        username=self.username, private_key=self.private_key)
+  def GetAgent(self):
+    """Agent accessor; connects the agent if necessary."""
+    if not self._agent:
+      self._Connect()
+    return self._agent
 
+  def _Connect(self):
+    """Sets up the SSH connection and internal state."""
+    self._agent = RemoteAccess(self.hostname, self.tempdir.tempdir,
+                               port=self.port, username=self.username,
+                               private_key=self.private_key)
+
+  @property
+  def work_dir(self):
+    """The work directory to create on the device.
+
+    This property exists so we can create the remote paths on demand.  For
+    some use cases, it'll never be needed, so skipping creation is faster.
+    """
+    if self._base_dir is None:
+      return None
+
+    if self._work_dir is None:
+      self.BaseRunCommand(['mkdir', '-p', self._base_dir])
+      self._work_dir = self.BaseRunCommand(
+          ['mktemp', '-d', '--tmpdir=%s' % self._base_dir],
+          capture_output=True).output.strip()
+      logging.debug('The temporary working directory on the device is %s',
+                    self._work_dir)
+      self.RegisterCleanupCmd(['rm', '-rf', self._work_dir])
+
+    return self._work_dir
+
+  # Since this object is instantiated once per device, we can safely cache the
+  # result of the rsync test.  We assume the remote side doesn't go and delete
+  # or break rsync on us, but that's fine.
+  @cros_build_lib.MemoizedSingleCall
   def HasRsync(self):
     """Checks if rsync exists on the device."""
-    result = self.agent.RemoteSh(['PATH=%s:$PATH rsync' % DEV_BIN_PATHS,
-                                  '--version'], error_code_ok=True)
+    result = self.GetAgent().RemoteSh(['PATH=%s:$PATH rsync' % DEV_BIN_PATHS,
+                                       '--version'], error_code_ok=True)
     return result.returncode == 0
 
   def RegisterCleanupCmd(self, cmd, **kwargs):
@@ -623,9 +690,9 @@ class RemoteDevice(object):
     if mode == 'scp':
       # scp always follow symlinks
       kwargs.pop('follow_symlinks', None)
-      func = self.agent.Scp
+      func = self.GetAgent().Scp
     else:
-      func = self.agent.Rsync
+      func = self.GetAgent().Rsync
 
     return RunCommandFuncWrapper(func, msg, src, dest, **kwargs)
 
@@ -639,9 +706,9 @@ class RemoteDevice(object):
     if mode == 'scp':
       # scp always follow symlinks
       kwargs.pop('follow_symlinks', None)
-      func = self.agent.ScpToLocal
+      func = self.GetAgent().ScpToLocal
     else:
-      func = self.agent.RsyncToLocal
+      func = self.GetAgent().RsyncToLocal
 
     return RunCommandFuncWrapper(func, msg, src, dest, **kwargs)
 
@@ -660,13 +727,14 @@ class RemoteDevice(object):
       path: path on the device to check.
     """
     tmp_file = os.path.join(path, 'tmp.remote_access')
-    result = self.agent.RemoteSh(['touch', tmp_file], remote_sudo=True,
-                                 error_code_ok=True, capture_output=True)
+    result = self.GetAgent().RemoteSh(['touch', tmp_file], remote_sudo=True,
+                                      error_code_ok=True, capture_output=True)
 
     if result.returncode != 0:
       return False
 
-    self.agent.RemoteSh(['rm', tmp_file], error_code_ok=True, remote_sudo=True)
+    self.GetAgent().RemoteSh(['rm', tmp_file], error_code_ok=True,
+                             remote_sudo=True)
 
     return True
 
@@ -681,18 +749,90 @@ class RemoteDevice(object):
       not executable.
     """
     cmd = ['test', '-f', path, '-a', '-x', path,]
-    result = self.agent.RemoteSh(cmd, remote_sudo=True, error_code_ok=True,
-                                 capture_output=True)
+    result = self.GetAgent().RemoteSh(cmd, remote_sudo=True, error_code_ok=True,
+                                      capture_output=True)
     return result.returncode == 0
+
+  def GetSize(self, path):
+    """Gets the size of the given file on the device.
+
+    Args:
+      path: full path to the file on the device.
+
+    Returns:
+      Size of the file in number of bytes.
+
+    Raises:
+      ValueError if failed to get file size from the remote output.
+      cros_build_lib.RunCommandError if |path| does not exist or the remote
+      command to get file size has failed.
+    """
+    cmd = ['du', '-Lb', '--max-depth=0', path]
+    result = self.BaseRunCommand(cmd, remote_sudo=True, capture_output=True)
+    return int(result.output.split()[0])
+
+  def CatFile(self, path, max_size=1000000):
+    """Reads the file on device to string if its size is less than |max_size|.
+
+    Args:
+      path: The full path to the file on the device to read.
+      max_size: Read the file only if its size is less than |max_size| in bytes.
+        The default is 1,000,000(~1MB).
+
+    Returns:
+      A string of the file content.
+
+    Raises:
+      CatFileError if failed to read the remote file or the file size is larger
+      than |max_size|.
+    """
+    try:
+      file_size = self.GetSize(path)
+    except (ValueError, cros_build_lib.RunCommandError) as e:
+      raise CatFileError('Failed to get size of file "%s": %s' % (path, e))
+    if file_size > max_size:
+      raise CatFileError('File "%s" is larger than %d bytes' % (path, max_size))
+
+    result = self.BaseRunCommand(['cat', path], remote_sudo=True,
+                                 error_code_ok=True, capture_output=True)
+    if result.returncode:
+      raise CatFileError('Failed to read file "%s" on the device' % path)
+    return result.output
 
   def PipeOverSSH(self, filepath, cmd, **kwargs):
     """Cat a file and pipe over SSH."""
     producer_cmd = ['cat', filepath]
-    return self.agent.PipeToRemoteSh(producer_cmd, cmd, **kwargs)
+    return self.GetAgent().PipeToRemoteSh(producer_cmd, cmd, **kwargs)
+
+  def GetRunningPids(self, exe, full_path=True):
+    """Get all the running pids on the device with the executable path.
+
+    Args:
+      exe: The executable path to get pids for.
+      full_path: Whether |exe| is a full executable path.
+
+    Raises:
+      RunningPidsError when failing to parse out pids from command output.
+      SSHConnectionError when error occurs during SSH connection.
+    """
+    try:
+      cmd = ['pgrep', exe]
+      if full_path:
+        cmd.append('-f')
+      result = self.GetAgent().RemoteSh(cmd, error_code_ok=True,
+                                        capture_output=True)
+      try:
+        return [int(pid) for pid in result.output.splitlines()]
+      except ValueError:
+        logging.error('Parsing output failed:\n%s', result.output)
+        raise RunningPidsError('Unable to get running pids of %s' % exe)
+    except SSHConnectionError:
+      logging.error('Error connecting to device %s', self.hostname)
+      raise
 
   def Reboot(self):
     """Reboot the device."""
-    return self.agent.RemoteReboot()
+    return self.GetAgent().RemoteReboot()
 
   def BaseRunCommand(self, cmd, **kwargs):
     """Executes a shell command on the device with output captured by default.
@@ -705,7 +845,7 @@ class RemoteDevice(object):
     kwargs.setdefault('debug_level', self.debug_level)
     kwargs.setdefault('connect_settings', self.connect_settings)
     try:
-      return self.agent.RemoteSh(cmd, **kwargs)
+      return self.GetAgent().RemoteSh(cmd, **kwargs)
     except SSHConnectionError:
       logging.error('Error connecting to device %s', self.hostname)
       raise
@@ -721,27 +861,44 @@ class RemoteDevice(object):
       **kwargs: keyword arguments to pass along with cmd. See
         RemoteAccess.RemoteSh documentation.
     """
-    new_cmd = cmd
     # Handle setting environment variables on the device by copying
     # and sourcing a temporary environment file.
     extra_env = kwargs.pop('extra_env', None)
     if extra_env:
-      env_list = ['export %s=%s' % (k, cros_build_lib.ShellQuote(v))
-                  for k, v in extra_env.iteritems()]
       remote_sudo = kwargs.pop('remote_sudo', False)
-      with tempfile.NamedTemporaryFile(dir=self.tempdir.tempdir,
-                                       prefix='env') as f:
-        logging.debug('Environment variables: %s', ' '.join(env_list))
-        osutils.WriteFile(f.name, '\n'.join(env_list))
-        self.CopyToWorkDir(f.name)
-        env_file = os.path.join(self.work_dir, os.path.basename(f.name))
-        new_cmd = ['.', '%s;' % env_file]
-        if remote_sudo and self.agent.username != ROOT_ACCOUNT:
-          new_cmd += ['sudo', '-E']
+      if remote_sudo and self.GetAgent().username == ROOT_ACCOUNT:
+        remote_sudo = False
 
-        new_cmd += cmd
+      new_cmd = []
+      flat_vars = ['%s=%s' % (k, cros_build_lib.ShellQuote(v))
+                   for k, v in extra_env.iteritems()]
 
-    return self.BaseRunCommand(new_cmd, **kwargs)
+      # If the vars are too large for the command line, do it indirectly.
+      # We pick 32k somewhat arbitrarily -- the kernel should accept this
+      # and rarely should remote commands get near that size.
+      ARG_MAX = 32 * 1024
+
+      # What the command line would generally look like on the remote.
+      cmdline = ' '.join(flat_vars + cmd)
+      if len(cmdline) > ARG_MAX:
+        env_list = ['export %s' % x for x in flat_vars]
+        with tempfile.NamedTemporaryFile(dir=self.tempdir.tempdir,
+                                         prefix='env') as f:
+          logging.debug('Environment variables: %s', ' '.join(env_list))
+          osutils.WriteFile(f.name, '\n'.join(env_list))
+          self.CopyToWorkDir(f.name)
+          env_file = os.path.join(self.work_dir, os.path.basename(f.name))
+          new_cmd += ['.', '%s;' % env_file]
+          if remote_sudo:
+            new_cmd += ['sudo', '-E']
+      else:
+        if remote_sudo:
+          new_cmd += ['sudo']
+        new_cmd += flat_vars
+
+      cmd = new_cmd + cmd
+
+    return self.BaseRunCommand(cmd, **kwargs)
 
 
 class ChromiumOSDevice(RemoteDevice):
@@ -751,39 +908,163 @@ class ChromiumOSDevice(RemoteDevice):
   MOUNT_ROOTFS_RW_CMD = ['mount', '-o', 'remount,rw', '/']
   LIST_MOUNTS_CMD = ['cat', '/proc/mounts']
 
-  def __init__(self, *args, **kwargs):
-    super(ChromiumOSDevice, self).__init__(*args, **kwargs)
-    self.path = self._GetPath()
-    self.lsb_release = self._GetLSBRelease()
-    self.board = self.lsb_release.get('CHROMEOS_RELEASE_BOARD', '')
-    # TODO(garnold) Use the actual SDK version field, once known (brillo:280).
-    self.sdk_version = self.lsb_release.get('CHROMEOS_RELEASE_VERSION', '')
+  def __init__(self, hostname, alias=None, **kwargs):
+    """Initializes this object.
 
-  def _GetPath(self):
-    """Gets $PATH on the device and prepend it with DEV_BIN_PATHS."""
-    try:
-      result = self.BaseRunCommand(['echo', "${PATH}"])
-    except cros_build_lib.RunCommandError as e:
-      logging.error('Failed to get $PATH on the device: %s', e.result.error)
-      raise
+    Args:
+      hostname: A network hostname or a user-friendly USB device name (alias);
+        None to find the default ChromiumOSDevice.
+      alias: A user-friendly USB device name.
+    """
+    if hostname:
+      self._alias = alias
+      hostname = self._ResolveHostname(hostname)
+    else:
+      service = _GetDefaultService()
+      self._alias = service.text[BRILLO_DEVICE_PROPERTY_ALIAS]
+      hostname = service.ip
+      # We know this exists because it responded to the mDNS, no need to ping.
+      kwargs['ping'] = False
+    super(ChromiumOSDevice, self).__init__(hostname, **kwargs)
+    self._orig_path = None
+    self._path = None
+    self._lsb_release = {}
 
-    return '%s:%s' % (DEV_BIN_PATHS, result.output.strip())
+  @property
+  def orig_path(self):
+    """The $PATH variable on the device."""
+    if not self._orig_path:
+      try:
+        result = self.BaseRunCommand(['echo', "${PATH}"])
+      except cros_build_lib.RunCommandError as e:
+        logging.error('Failed to get $PATH on the device: %s', e.result.error)
+        raise
 
-  def _GetLSBRelease(self):
-    """Gets /etc/lsb-release on the device.
+      self._orig_path = result.output.strip()
+
+    return self._orig_path
+
+  @property
+  def path(self):
+    """The $PATH variable on the device prepended with DEV_BIN_PATHS."""
+    if not self._path:
+      # If the remote path already has our dev paths (which is common), then
+      # there is no need for us to prepend.
+      orig_paths = self.orig_path.split(':')
+      for path in reversed(DEV_BIN_PATHS.split(':')):
+        if path not in orig_paths:
+          orig_paths.insert(0, path)
+
+      self._path = ':'.join(orig_paths)
+
+    return self._path
+
+  @property
+  def lsb_release(self):
+    """The /etc/lsb-release content on the device.
 
     Returns a dict of entries in /etc/lsb-release file. If multiple entries
     have the same key, only the first entry is recorded. Returns an empty dict
     if the reading command failed or the file is corrupted (i.e., does not have
     the format of <key>=<value> for every line).
     """
+    if not self._lsb_release:
+      try:
+        content = self.CatFile(LSB_RELEASE_PATH)
+      except CatFileError as e:
+        logging.debug(
+            'Failed to read "%s" on the device: %s', LSB_RELEASE_PATH, e)
+      else:
+        try:
+          self._lsb_release = dict(e.split('=', 1)
+                                   for e in reversed(content.splitlines()))
+        except ValueError:
+          logging.error('File "%s" on the device is mal-formatted.',
+                        LSB_RELEASE_PATH)
+    return self._lsb_release
+
+  @property
+  def board(self):
+    """The board name of the device."""
+    return self.lsb_release.get('CHROMEOS_RELEASE_BOARD', '')
+
+  @property
+  def sdk_version(self):
+    """The SDK version of the device."""
+    # TODO(garnold) Use the actual SDK version field, once known (brillo:280).
+    return self.lsb_release.get('CHROMEOS_RELEASE_VERSION', '')
+
+  @property
+  def alias(self):
+    """The user-friendly alias name assigned to the device."""
+    if not self._alias:
+      alias_file_path = os.path.join(BRILLO_DEVICE_PROPERTY_DIR,
+                                     BRILLO_DEVICE_PROPERTY_ALIAS)
+      try:
+        self._alias = self.CatFile(alias_file_path,
+                                   BRILLO_DEVICE_PROPERTY_MAX_LEN+1)
+      except CatFileError as e:
+        logging.debug('Unable to read alias of the device: %s', e)
+      else:
+        self._alias = self._alias.strip()
+
+    return self._alias
+
+  def SetAlias(self, alias_name):
+    """Assign to the device a user-friendly alias name.
+
+    Args:
+      alias_name: The alias name to set. It must be no more than 128 in length
+        containing only alphanumeric characters and/or underscores.
+
+    Raises:
+      InvalidDevicePropertyError if |alias_name| is invalid.
+    """
+    if len(alias_name) > BRILLO_DEVICE_PROPERTY_MAX_LEN:
+      raise InvalidDevicePropertyError(
+          'The alias name cannot be more than %d characters.' %
+          BRILLO_DEVICE_PROPERTY_MAX_LEN)
+    valid_alias_chars = string.ascii_letters + string.digits + '_'
+    if not all(c in valid_alias_chars for c in alias_name):
+      raise InvalidDevicePropertyError(
+          'The alias name can only contain alphanumeric characters and/or '
+          'underscores.')
+
+    self.RunCommand(['mkdir', '-p', BRILLO_DEVICE_PROPERTY_DIR],
+                    remote_sudo=True)
+    alias_file_path = os.path.join(BRILLO_DEVICE_PROPERTY_DIR,
+                                   BRILLO_DEVICE_PROPERTY_ALIAS)
+    self.RunCommand(['echo', alias_name, '>', alias_file_path],
+                    remote_sudo=True)
+    self._alias = alias_name
+
+    logging.info('Successfully set alias to "%s".', alias_name)
+
+  def _ResolveHostname(self, hostname):
+    """Resolve |hostname| into a network hostname.
+
+    If |hostname| is an alias, |self._alias| is updated to be |hostname|.
+
+    Args:
+      hostname: Can either be a network hostname or user-friendly USB device
+        name (aka alias).
+
+    Returns:
+      Network hostname as as string.
+    """
+    # If |hostname| is resolvable via DNS, then it's a valid hostname.
+    # If |hostname| is resolvable via Debug Link mDNS, then it's an alias.
     try:
-      result = self.BaseRunCommand(['cat', '/etc/lsb-release'])
-      return dict(e.split('=', 1) for e in reversed(result.output.splitlines()))
-    except Exception as e:
-      logging.error('Failed to read "/etc/lsb-release" on the device or the'
-                    'file may be corrupted: %s', e.result.error)
-      return {}
+      socket.getaddrinfo(hostname, 0)
+      return hostname
+    except socket.gaierror:
+      ip = GetUSBDeviceIP(hostname)
+      if ip:
+        self._alias = hostname
+        return ip
+      # |hostname| is not resolvable but may still be valid (eg. ssh hostname).
+      # Leave the hostname be.
+      return hostname
 
   def _RemountRootfsAsWritable(self):
     """Attempts to Remount the root partition."""
@@ -851,7 +1132,103 @@ class ChromiumOSDevice(RemoteDevice):
     """
     extra_env = kwargs.pop('extra_env', {})
     path_env = extra_env.get('PATH', None)
-    path_env = self.path if not path_env else '%s:%s' % (path_env, self.path)
-    extra_env['PATH'] = path_env
+    if path_env is None:
+      # Optimization: if the default path is already what we want, don't bother
+      # passing it through.
+      if self.orig_path != self.path:
+        path_env = self.path
+    if path_env is not None:
+      extra_env['PATH'] = path_env
     kwargs['extra_env'] = extra_env
     return super(ChromiumOSDevice, self).RunCommand(cmd, **kwargs)
+
+
+def _DiscoverServices():
+  """Performs service discovery.
+
+  Initializes the USB link and sends the mDNS query to find all
+  available Brillo services.
+
+  GetUSBConnectedDevices() can be used instead to get a list of full
+  ChromiumOSDevice objects.
+
+  Returns:
+    A list of mdns.Service objects.
+  """
+  # Lazy import mdns so that we don't break the chromite requirement that
+  # bootstrapping should not depend on third_party packages. mdns pulls in
+  # dpkt which is a third_party package.
+  from chromite.lib import mdns
+  try:
+    source_ip = debug_link.InitializeDebugLink()
+    return mdns.FindServices(source_ip, BRILLO_DEBUG_LINK_SERVICE_NAME)
+  except debug_link.DebugLinkException as e:
+    logging.debug('Failed to initialize debug link: %s', e)
+    return []
+
+
+def _GetDefaultService():
+  """Returns the default service if one exists.
+
+  If there is exactly one device connected over USB it will be
+  returned. Otherwise DefaultDeviceError will be raised.
+
+  Returns:
+    The mdns.Service object for the default device.
+
+  Raises:
+    DefaultDeviceError: no default device was found.
+  """
+  services = _DiscoverServices()
+  if not services:
+    raise DefaultDeviceError('No default device could be found.')
+  elif len(services) > 1:
+    raise DefaultDeviceError(
+        'More than one device was found, please specify a device from: %s.' %
+        ', '.join(service.text[BRILLO_DEVICE_PROPERTY_ALIAS]
+                  for service in services))
+  return services[0]
+
+
+def GetUSBConnectedDevices():
+  """Returns a list of all USB-connected devices."""
+  # Use connect=False so that we don't try to set up the device connections
+  # until the device is used.
+  return [ChromiumOSDevice(
+      service.ip, alias=service.text[BRILLO_DEVICE_PROPERTY_ALIAS],
+      ping=False, connect=False) for service in _DiscoverServices()]
+
+
+def GetUSBDeviceIP(alias):
+  """Gets the USB-connected device IP address using its |alias|.
+
+  Args:
+    alias: User-friendly name of USB-connected device.
+
+  Returns:
+    USB-connected device IP address or None if |alias| is not found.  If there
+    are duplicate aliases on the network, the first IP address is returned.
+  """
+  if not alias:
+    return None
+
+  # Lazy import mdns so that we don't break the chromite requirement that
+  # bootstrapping should not depend on third_party packages. mdns pulls in
+  # dpkt which is a third_party package.
+  from chromite.lib import mdns
+
+  # For now, swallow missing debug link error until we have a better way of
+  # differentiating between ChromeOS and Brillo.
+  try:
+    source_ip = debug_link.InitializeDebugLink()
+  except debug_link.DebugLinkMissingError:
+    return None
+
+  should_add = lambda x: x.text.get(BRILLO_DEVICE_PROPERTY_ALIAS) == alias
+  should_continue = lambda x: x.text.get(BRILLO_DEVICE_PROPERTY_ALIAS) != alias
+  services = mdns.FindServices(source_ip, BRILLO_DEBUG_LINK_SERVICE_NAME,
+                               should_add_func=should_add,
+                               should_continue_func=should_continue)
+  if not services:
+    return None
+  return services[0].ip

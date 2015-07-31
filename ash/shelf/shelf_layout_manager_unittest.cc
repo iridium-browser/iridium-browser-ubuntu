@@ -22,6 +22,7 @@
 #include "ash/system/tray/system_tray.h"
 #include "ash/system/tray/system_tray_item.h"
 #include "ash/test/ash_test_base.h"
+#include "ash/test/display_manager_test_api.h"
 #include "ash/test/shelf_test_api.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
@@ -1032,6 +1033,9 @@ TEST_F(ShelfLayoutManagerTest, AutoHideShelfOnScreenBoundary) {
 
 // Assertions around the lock screen showing.
 TEST_F(ShelfLayoutManagerTest, VisibleWhenLockScreenShowing) {
+  if (!SupportsHostWindowResize())
+    return;
+
   // Since ShelfLayoutManager queries for mouse location, move the mouse so
   // it isn't over the shelf.
   ui::test::EventGenerator generator(Shell::GetPrimaryRootWindow(),
@@ -1580,7 +1584,7 @@ TEST_F(ShelfLayoutManagerTest, ShelfWithSystemModalWindowDualDisplay) {
 
   DisplayController* display_controller = shell->display_controller();
   aura::Window::Windows root_windows = display_controller->GetAllRootWindows();
-  EXPECT_EQ(root_windows.size(), 2U);
+  EXPECT_EQ(2U, root_windows.size());
 
   // Get the shelves in both displays and set them to be 'AutoHide'.
   ShelfLayoutManager* shelf_1 =
@@ -1837,6 +1841,73 @@ TEST_F(ShelfLayoutManagerTest, GestureEdgeSwipe) {
   EXPECT_EQ(SHELF_AUTO_HIDE, shelf->visibility_state());
   EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf->auto_hide_state());
   EXPECT_TRUE(widget->IsFullscreen());
+}
+
+// Tests that gesture edge swipe events are forwarded to the right shelf on the
+// right monitor (crbug.com/449851).
+TEST_F(ShelfLayoutManagerTest, GestureEdgeSwipeMultiMonitor) {
+  if (!SupportsMultipleDisplays())
+    return;
+
+  // Create two displays.
+  Shell* shell = Shell::GetInstance();
+  DisplayManager* display_manager = shell->display_manager();
+  UpdateDisplay("200x200,100x100");
+  ASSERT_EQ(2U, display_manager->GetNumDisplays());
+
+  auto root_window_controllers = Shell::GetAllRootWindowControllers();
+  ASSERT_EQ(2U, root_window_controllers.size());
+  ShelfLayoutManager* shelf_1 =
+      root_window_controllers[0]->GetShelfLayoutManager();
+  ShelfLayoutManager* shelf_2 =
+      root_window_controllers[1]->GetShelfLayoutManager();
+
+  // Create two maximized windows, one in each display.
+  aura::Window* window_1 =
+      CreateTestWindowInParent(root_window_controllers[0]->GetRootWindow());
+  window_1->SetBounds(gfx::Rect(0, 0, 100, 100));
+  window_1->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
+  window_1->Show();
+  aura::Window* window_2 =
+      CreateTestWindowInParent(root_window_controllers[1]->GetRootWindow());
+  window_2->SetBounds(gfx::Rect(201, 0, 100, 100));
+  window_2->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
+  window_2->Show();
+
+  // Make sure both are set to auto-hide and both are hidden.
+  shelf_1->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
+  shelf_2->SetAutoHideBehavior(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS);
+  shelf_1->LayoutShelf();
+  shelf_2->LayoutShelf();
+  EXPECT_EQ(SHELF_AUTO_HIDE, shelf_1->visibility_state());
+  EXPECT_EQ(SHELF_AUTO_HIDE, shelf_2->visibility_state());
+  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf_1->auto_hide_state());
+  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf_2->auto_hide_state());
+
+  ui::test::EventGenerator monitor_1_generator(
+      root_window_controllers[0]->GetRootWindow());
+  ui::test::EventGenerator monitor_2_generator(
+      root_window_controllers[1]->GetRootWindow());
+
+  // An edge swipe in one display should only affect the shelf in that display.
+  monitor_1_generator.GestureEdgeSwipe();
+  EXPECT_EQ(SHELF_AUTO_HIDE, shelf_1->visibility_state());
+  EXPECT_EQ(SHELF_AUTO_HIDE, shelf_2->visibility_state());
+  EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf_1->auto_hide_state());
+  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf_2->auto_hide_state());
+
+  // Back to normal after an update.
+  shell->UpdateShelfVisibility();
+  EXPECT_EQ(SHELF_AUTO_HIDE, shelf_1->visibility_state());
+  EXPECT_EQ(SHELF_AUTO_HIDE, shelf_2->visibility_state());
+  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf_1->auto_hide_state());
+  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf_2->auto_hide_state());
+
+  monitor_2_generator.GestureEdgeSwipe();
+  EXPECT_EQ(SHELF_AUTO_HIDE, shelf_1->visibility_state());
+  EXPECT_EQ(SHELF_AUTO_HIDE, shelf_2->visibility_state());
+  EXPECT_EQ(SHELF_AUTO_HIDE_HIDDEN, shelf_1->auto_hide_state());
+  EXPECT_EQ(SHELF_AUTO_HIDE_SHOWN, shelf_2->auto_hide_state());
 }
 
 #if defined(OS_WIN)
@@ -2267,6 +2338,21 @@ TEST_F(ShelfLayoutManagerTest, ShutdownHandlesWindowActivation) {
   // would normally cause the ShelfLayoutManager to update its state. However
   // during shutdown we want to handle this without crashing.
   delete window1;
+}
+
+TEST_F(ShelfLayoutManagerTest, ShelfLayoutInUnifiedDesktop) {
+  if (!SupportsMultipleDisplays())
+    return;
+  test::DisplayManagerTestApi::EnableUnifiedDesktopForTest();
+
+  UpdateDisplay("500x500, 500x500");
+
+  StatusAreaWidget* status_area_widget =
+      Shell::GetPrimaryRootWindowController()->shelf()->status_area_widget();
+  EXPECT_TRUE(status_area_widget->IsVisible());
+  // Shelf should be in the first display's area.
+  EXPECT_EQ("348,453 152x47",
+            status_area_widget->GetWindowBoundsInScreen().ToString());
 }
 
 }  // namespace ash

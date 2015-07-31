@@ -60,7 +60,7 @@ class SubstituteData;
 
 struct FrameLoadRequest;
 
-bool isBackForwardLoadType(FrameLoadType);
+CORE_EXPORT bool isBackForwardLoadType(FrameLoadType);
 
 class CORE_EXPORT FrameLoader final {
     WTF_MAKE_NONCOPYABLE(FrameLoader);
@@ -168,7 +168,7 @@ public:
 
     bool allowPlugins(ReasonForCallingAllowPlugins);
 
-    void updateForSameDocumentNavigation(const KURL&, SameDocumentNavigationSource, PassRefPtr<SerializedScriptValue>, FrameLoadType);
+    void updateForSameDocumentNavigation(const KURL&, SameDocumentNavigationSource, PassRefPtr<SerializedScriptValue>, HistoryScrollRestorationType, FrameLoadType);
 
     HistoryItem* currentItem() const { return m_currentItem.get(); }
     void saveScrollState();
@@ -185,7 +185,6 @@ private:
     bool prepareRequestForThisFrame(FrameLoadRequest&);
     static void setReferrerForFrameRequest(ResourceRequest&, ShouldSendReferrer, Document*);
     FrameLoadType determineFrameLoadType(const FrameLoadRequest&);
-    bool isScriptTriggeredFormSubmissionInChildFrame(const FrameLoadRequest&) const;
 
     SubstituteData defaultSubstituteDataForURL(const KURL&);
 
@@ -197,7 +196,7 @@ private:
     bool validateTransitionNavigationMode();
     bool dispatchNavigationTransitionData();
 
-    void setHistoryItemStateForCommit(HistoryCommitType, bool isPushOrReplaceState = false, PassRefPtr<SerializedScriptValue> = nullptr);
+    void setHistoryItemStateForCommit(HistoryCommitType, bool isPushOrReplaceState = false, HistoryScrollRestorationType = ScrollRestorationAuto, PassRefPtr<SerializedScriptValue> = nullptr);
 
     void loadInSameDocument(const KURL&, PassRefPtr<SerializedScriptValue> stateObject, FrameLoadType, ClientRedirectPolicy);
 

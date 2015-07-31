@@ -6,7 +6,7 @@
 
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/favicon/fallback_icon_service_factory.h"
-#include "chrome/browser/favicon/favicon_service_factory.h"
+#include "chrome/browser/favicon/large_icon_service_factory.h"
 #include "chrome/browser/history/top_sites_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/instant_io_context.h"
@@ -16,9 +16,6 @@
 #include "chrome/browser/search/suggestions/suggestions_source.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/search_engines/ui_thread_search_terms_data.h"
-#include "chrome/browser/themes/theme_properties.h"
-#include "chrome/browser/themes/theme_service.h"
-#include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/thumbnails/thumbnail_list_source.h"
 #include "chrome/browser/ui/search/instant_search_prerenderer.h"
 #include "chrome/browser/ui/webui/fallback_icon_source.h"
@@ -28,7 +25,7 @@
 #include "chrome/browser/ui/webui/theme_source.h"
 #include "chrome/common/render_messages.h"
 #include "components/favicon/core/fallback_icon_service.h"
-#include "components/favicon/core/favicon_service.h"
+#include "components/favicon/core/large_icon_service.h"
 #include "components/history/core/browser/top_sites.h"
 #include "components/keyed_service/core/service_access_type.h"
 #include "components/search_engines/template_url_service.h"
@@ -47,21 +44,11 @@
 #include "chrome/browser/search/local_ntp_source.h"
 #endif
 
-namespace {
-
-const int kSectionBorderAlphaTransparency = 80;
-
-// Converts SkColor to RGBAColor
-RGBAColor SkColorToRGBAColor(const SkColor& sKColor) {
-  RGBAColor color;
-  color.r = SkColorGetR(sKColor);
-  color.g = SkColorGetG(sKColor);
-  color.b = SkColorGetB(sKColor);
-  color.a = SkColorGetA(sKColor);
-  return color;
-}
-
-}  // namespace
+#if defined(ENABLE_THEMES)
+#include "chrome/browser/themes/theme_properties.h"
+#include "chrome/browser/themes/theme_service.h"
+#include "chrome/browser/themes/theme_service_factory.h"
+#endif  // defined(ENABLE_THEMES)
 
 InstantService::InstantService(Profile* profile)
     : profile_(profile),
@@ -131,18 +118,16 @@ InstantService::InstantService(Profile* profile)
   content::URLDataSource::Add(profile_, new ThumbnailListSource(profile_));
 #endif  // !defined(OS_ANDROID)
 
-  favicon::FaviconService* favicon_service =
-      FaviconServiceFactory::GetForProfile(profile_,
-                                           ServiceAccessType::EXPLICIT_ACCESS);
   favicon::FallbackIconService* fallback_icon_service =
       FallbackIconServiceFactory::GetForBrowserContext(profile_);
-
-  content::URLDataSource::Add(profile_,
-      new LargeIconSource(favicon_service, fallback_icon_service));
+  favicon::LargeIconService* large_icon_service =
+      LargeIconServiceFactory::GetForBrowserContext(profile_);
   content::URLDataSource::Add(
       profile_, new FallbackIconSource(fallback_icon_service));
   content::URLDataSource::Add(
       profile_, new FaviconSource(profile_, FaviconSource::FAVICON));
+  content::URLDataSource::Add(
+      profile_, new LargeIconSource(fallback_icon_service, large_icon_service));
   content::URLDataSource::Add(profile_, new MostVisitedIframeSource());
   content::URLDataSource::Add(
       profile_, new suggestions::SuggestionsSource(profile_));
@@ -204,12 +189,14 @@ void InstantService::UndoAllMostVisitedDeletions() {
 }
 
 void InstantService::UpdateThemeInfo() {
+#if defined(ENABLE_THEMES)
   // Update theme background info.
   // Initialize |theme_info| if necessary.
   if (!theme_info_)
     OnThemeChanged(ThemeServiceFactory::GetForProfile(profile_));
   else
     OnThemeChanged(NULL);
+#endif  // defined(ENABLE_THEMES)
 }
 
 void InstantService::UpdateMostVisitedItemsInfo() {
@@ -299,6 +286,24 @@ void InstantService::NotifyAboutMostVisitedItems() {
   FOR_EACH_OBSERVER(InstantServiceObserver, observers_,
                     MostVisitedItemsChanged(most_visited_items_));
 }
+
+#if defined(ENABLE_THEMES)
+
+namespace {
+
+const int kSectionBorderAlphaTransparency = 80;
+
+// Converts SkColor to RGBAColor
+RGBAColor SkColorToRGBAColor(const SkColor& sKColor) {
+  RGBAColor color;
+  color.r = SkColorGetR(sKColor);
+  color.g = SkColorGetG(sKColor);
+  color.b = SkColorGetB(sKColor);
+  color.a = SkColorGetA(sKColor);
+  return color;
+}
+
+}  // namespace
 
 void InstantService::OnThemeChanged(ThemeService* theme_service) {
   if (!theme_service) {
@@ -407,6 +412,7 @@ void InstantService::OnThemeChanged(ThemeService* theme_service) {
   FOR_EACH_OBSERVER(InstantServiceObserver, observers_,
                     ThemeInfoChanged(*theme_info_));
 }
+#endif  // defined(ENABLE_THEMES)
 
 void InstantService::OnTemplateURLServiceChanged() {
   // Check whether the default search provider was changed.

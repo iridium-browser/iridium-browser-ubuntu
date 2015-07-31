@@ -46,7 +46,12 @@ public:
 
     void set(const ComputedStyle&, const ComputedStyle& parentStyle, const MatchResult&);
     void clear();
-    DEFINE_INLINE_TRACE() { visitor->trace(matchedProperties); }
+    DEFINE_INLINE_TRACE()
+    {
+#if ENABLE(OILPAN)
+        visitor->trace(matchedProperties);
+#endif
+    }
 };
 
 // Specialize the HashTraits for CachedMatchedProperties to check for dead
@@ -66,7 +71,7 @@ struct CachedMatchedPropertiesHashTraits : HashTraits<Member<CachedMatchedProper
             // in the CachedMatchedProperties value contain a dead "properties" field.
             // If there is a dead field the entire cache entry is removed.
             for (const auto& matchedProperties : cachedProperties->matchedProperties) {
-                if (!visitor->isAlive(matchedProperties.properties)) {
+                if (!visitor->isHeapObjectAlive(matchedProperties.properties)) {
                     // For now report the cache entry as dead. This might not
                     // be the final result if in a subsequent call for this entry,
                     // the "properties" field has been marked via another path.
@@ -78,7 +83,7 @@ struct CachedMatchedPropertiesHashTraits : HashTraits<Member<CachedMatchedProper
         // had a dead "properties" field so trace CachedMatchedProperties strongly.
         // FIXME: traceInCollection is also called from WeakProcessing to check if the entry is dead.
         // Avoid calling trace in that case by only calling trace when cachedProperties is not yet marked.
-        if (!visitor->isAlive(cachedProperties))
+        if (!visitor->isHeapObjectAlive(cachedProperties))
             visitor->trace(cachedProperties);
         return false;
     }

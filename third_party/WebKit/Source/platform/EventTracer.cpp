@@ -39,11 +39,13 @@
 namespace blink {
 
 static_assert(sizeof(Platform::TraceEventHandle) == sizeof(TraceEvent::TraceEventHandle), "TraceEventHandle types must be compatible");
+static_assert(sizeof(Platform::TraceEventAPIAtomicWord) == sizeof(TraceEvent::TraceEventAPIAtomicWord), "TraceEventAPIAtomicWord types must be compatible");
+static_assert(sizeof(TraceEvent::TraceEventAPIAtomicWord) == sizeof(const char*), "TraceEventAPIAtomicWord must be pointer-sized.");
 
 // The dummy variable is needed to avoid a crash when someone updates the state variables
 // before EventTracer::initialize() is called.
-long dummyTraceSamplingState = 0;
-long* traceSamplingState[3] = {&dummyTraceSamplingState, &dummyTraceSamplingState, &dummyTraceSamplingState };
+TraceEvent::TraceEventAPIAtomicWord dummyTraceSamplingState = 0;
+TraceEvent::TraceEventAPIAtomicWord* traceSamplingState[3] = {&dummyTraceSamplingState, &dummyTraceSamplingState, &dummyTraceSamplingState };
 
 void EventTracer::initialize()
 {
@@ -77,18 +79,13 @@ TraceEvent::TraceEventHandle EventTracer::addTraceEvent(char phase, const unsign
     const char* name, unsigned long long id, double timestamp,
     int numArgs, const char* argNames[], const unsigned char argTypes[],
     const unsigned long long argValues[],
-    TraceEvent::ConvertableToTraceFormat* convertableValues[],
+    PassRefPtr<TraceEvent::ConvertableToTraceFormat> convertableValue1,
+    PassRefPtr<TraceEvent::ConvertableToTraceFormat> convertableValue2,
     unsigned char flags)
 {
     WebConvertableToTraceFormat webConvertableValues[2];
-    if (numArgs <= static_cast<int>(WTF_ARRAY_LENGTH(webConvertableValues))) {
-        for (int i = 0; i < numArgs; ++i) {
-            if (convertableValues[i])
-                webConvertableValues[i] = WebConvertableToTraceFormat(convertableValues[i]);
-        }
-    } else {
-        ASSERT_NOT_REACHED();
-    }
+    webConvertableValues[0] = WebConvertableToTraceFormat(convertableValue1);
+    webConvertableValues[1] = WebConvertableToTraceFormat(convertableValue2);
     return Platform::current()->addTraceEvent(phase, categoryEnabledFlag, name, id, timestamp, numArgs, argNames, argTypes, argValues, webConvertableValues, flags);
 }
 

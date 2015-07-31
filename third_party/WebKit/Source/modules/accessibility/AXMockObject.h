@@ -26,13 +26,14 @@
 #ifndef AXMockObject_h
 #define AXMockObject_h
 
+#include "modules/ModulesExport.h"
 #include "modules/accessibility/AXObject.h"
 
 namespace blink {
 
 class AXObjectCacheImpl;
 
-class AXMockObject : public AXObject {
+class MODULES_EXPORT AXMockObject : public AXObject {
 
 protected:
     explicit AXMockObject(AXObjectCacheImpl*);
@@ -47,7 +48,7 @@ public:
 private:
     virtual bool isMockObject() const override final { return true; }
 
-    virtual bool computeAccessibilityIsIgnored() const override;
+    virtual bool computeAccessibilityIsIgnored(IgnoredReasons* = nullptr) const override;
 };
 
 DEFINE_AX_OBJECT_TYPE_CASTS(AXMockObject, isMockObject());

@@ -27,8 +27,9 @@
 #ifndef InternalSettings_h
 #define InternalSettings_h
 
-#include "core/InternalSettingsGenerated.h"
 #include "core/editing/EditingBehaviorTypes.h"
+#include "core/page/Page.h"
+#include "core/testing/InternalSettingsGenerated.h"
 #include "platform/geometry/IntSize.h"
 #include "platform/graphics/ImageAnimationPolicy.h"
 #include "platform/heap/Handle.h"
@@ -73,7 +74,6 @@ public:
         bool m_imagesEnabled;
         String m_defaultVideoPosterURL;
         bool m_originalLayerSquashingEnabled;
-        bool m_originalPseudoClassesInMatchingCriteriaInAuthorShadowTreesEnabled;
         bool m_originalImageColorProfilesEnabled;
         ImageAnimationPolicy m_originalImageAnimationPolicy;
         bool m_originalScrollTopLeftInteropEnabled;
@@ -120,7 +120,6 @@ public:
     void setLangAttributeAwareFormControlUIEnabled(bool);
     void setOverlayScrollbarsEnabled(bool);
     void setExperimentalContentSecurityPolicyFeaturesEnabled(bool);
-    void setPseudoClassesInMatchingCriteriaInAuthorShadowTreesEnabled(bool);
     void setImageColorProfilesEnabled(bool);
     void setImageAnimationPolicy(const String&, ExceptionState&);
     void setScrollTopLeftInteropEnabled(bool);
@@ -133,6 +132,7 @@ public:
     void setAvailableHoverTypes(const String&, ExceptionState&);
     void setPrimaryHoverType(const String&, ExceptionState&);
     void setDnsPrefetchLogging(bool, ExceptionState&);
+    void setPreloadLogging(bool, ExceptionState&);
 
 private:
     explicit InternalSettings(Page&);

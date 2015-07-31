@@ -56,6 +56,9 @@ class CONTENT_EXPORT BrowserPluginEmbedder : public WebContentsObserver {
   // Called when the screen info has changed.
   void ScreenInfoChanged();
 
+  // Closes modal dialogs in all of the guests.
+  void CancelGuestDialogs();
+
   // Called by WebContentsViewGuest when a drag operation is started within
   // |guest|. This |guest| will be signaled at the end of the drag operation.
   void StartDrag(BrowserPluginGuest* guest);
@@ -67,12 +70,10 @@ class CONTENT_EXPORT BrowserPluginEmbedder : public WebContentsObserver {
   // Used to handle special keyboard events.
   bool HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
 
-  // Find the given |search_text| in the page. Returns true if the find request
-  // is handled by this browser plugin embedder.
-  bool Find(int request_id,
-            const base::string16& search_text,
-            const blink::WebFindOptions& options);
-  bool StopFinding(StopFindAction action);
+  // Returns the "full page" guest if there is one. That is, if there is a
+  // single BrowserPlugin in the embedder which takes up the full page, then it
+  // is returned.
+  BrowserPluginGuest* GetFullPageGuest();
 
  private:
   explicit BrowserPluginEmbedder(WebContentsImpl* web_contents);
@@ -86,14 +87,11 @@ class CONTENT_EXPORT BrowserPluginEmbedder : public WebContentsObserver {
   // Notifies a guest that the embedder's screen info has changed.
   static bool NotifyScreenInfoChanged(WebContents* guest_web_contents);
 
+  // Closes modal dialogs in |guest_web_contents|.
+  static bool CancelDialogs(WebContents* guest_web_contents);
+
   static bool UnlockMouseIfNecessaryCallback(bool* mouse_unlocked,
                                              WebContents* guest);
-
-  static bool FindInGuest(int request_id,
-                          const base::string16& search_text,
-                          const blink::WebFindOptions& options,
-                          WebContents* guest);
-  static bool StopFindingInGuest(StopFindAction action, WebContents* guest);
 
   // Message handlers.
 

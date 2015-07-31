@@ -137,8 +137,6 @@ cr.define('ntp', function() {
             function() { chrome.send('onLearnMore'); });
       }
     }
-    if (loadTimeData.getBoolean('isDiscoveryInNTPEnabled'))
-      sectionsToWaitFor++;
     measureNavDots();
 
     // Load the current theme colors.
@@ -149,14 +147,6 @@ cr.define('ntp', function() {
     notificationContainer = getRequiredElement('notification-container');
     notificationContainer.addEventListener(
         'webkitTransitionEnd', onNotificationTransitionEnd);
-
-    if (loadTimeData.getBoolean('showRecentlyClosed')) {
-      cr.ui.decorate(getRequiredElement('recently-closed-menu-button'),
-          ntp.RecentMenuButton);
-      chrome.send('getRecentlyClosedTabs');
-    } else {
-      $('recently-closed-menu-button').hidden = true;
-    }
 
     if (loadTimeData.getBoolean('showOtherSessionsMenu')) {
       otherSessionsButton = /** @type {!ntp.OtherSessionsMenuButton} */(
@@ -177,21 +167,6 @@ cr.define('ntp', function() {
                                 loadTimeData.getString('mostvisited'),
                                 false);
       chrome.send('getMostVisited');
-    }
-
-    if (loadTimeData.getBoolean('isDiscoveryInNTPEnabled')) {
-      var suggestionsScript = document.createElement('script');
-      suggestionsScript.src = 'suggestions_page.js';
-      suggestionsScript.onload = function() {
-         newTabView.appendTilePage(new ntp.SuggestionsPage(),
-                                   loadTimeData.getString('suggestions'),
-                                   false,
-                                   (newTabView.appsPages.length > 0) ?
-                                       newTabView.appsPages[0] : null);
-         chrome.send('getSuggestions');
-         cr.dispatchSimpleEvent(document, 'sectionready', true, true);
-      };
-      document.querySelector('head').appendChild(suggestionsScript);
     }
 
     if (!loadTimeData.getBoolean('showWebStoreIcon')) {
@@ -546,11 +521,6 @@ cr.define('ntp', function() {
       notificationContainer.hidden = true;
   }
 
-  function setRecentlyClosedTabs(dataItems) {
-    $('recently-closed-menu-button').dataItems = dataItems;
-    layoutFooter();
-  }
-
   /**
    * @param {Array<PageData>} data
    * @param {boolean} hasBlacklistedUrls
@@ -558,10 +528,6 @@ cr.define('ntp', function() {
   function setMostVisitedPages(data, hasBlacklistedUrls) {
     newTabView.mostVisitedPage.data = data;
     cr.dispatchSimpleEvent(document, 'sectionready', true, true);
-  }
-
-  function setSuggestionsPages(data, hasBlacklistedUrls) {
-    newTabView.suggestionsPage.data = data;
   }
 
   /**
@@ -772,8 +738,6 @@ cr.define('ntp', function() {
     setBookmarkBarAttached: setBookmarkBarAttached,
     setForeignSessions: setForeignSessions,
     setMostVisitedPages: setMostVisitedPages,
-    setSuggestionsPages: setSuggestionsPages,
-    setRecentlyClosedTabs: setRecentlyClosedTabs,
     setFaviconDominantColor: setFaviconDominantColor,
     showNotification: showNotification,
     themeChanged: themeChanged,

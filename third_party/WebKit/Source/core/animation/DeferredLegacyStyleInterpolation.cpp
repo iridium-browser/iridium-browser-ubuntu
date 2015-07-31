@@ -7,6 +7,7 @@
 
 #include "core/animation/ElementAnimations.h"
 #include "core/animation/css/CSSAnimatableValueFactory.h"
+#include "core/css/CSSBasicShapes.h"
 #include "core/css/CSSImageValue.h"
 #include "core/css/CSSPrimitiveValue.h"
 #include "core/css/CSSSVGDocumentValue.h"
@@ -44,8 +45,8 @@ void DeferredLegacyStyleInterpolation::apply(StyleResolverState& state) const
 
 bool DeferredLegacyStyleInterpolation::interpolationRequiresStyleResolve(const CSSValue& value)
 {
-    // FIXME: should not require resolving styles for initial.
-    if (value.isInitialValue() || value.isInheritedValue() || value.isUnsetValue())
+    // FIXME: should not require resolving styles for inherit/initial/unset.
+    if (value.isCSSWideKeyword())
         return true;
     if (value.isPrimitiveValue())
         return interpolationRequiresStyleResolve(toCSSPrimitiveValue(value));

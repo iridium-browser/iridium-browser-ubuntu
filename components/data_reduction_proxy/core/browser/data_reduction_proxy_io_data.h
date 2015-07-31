@@ -5,55 +5,67 @@
 #ifndef COMPONENTS_DATA_REDUCTION_PROXY_CORE_BROWSER_DATA_REDUCTION_PROXY_IO_DATA_H_
 #define COMPONENTS_DATA_REDUCTION_PROXY_CORE_BROWSER_DATA_REDUCTION_PROXY_IO_DATA_H_
 
+#include "base/gtest_prod_util.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/prefs/pref_member.h"
+#include "base/single_thread_task_runner.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_debug_ui_service.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_delegate.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_metrics.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_network_delegate.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_request_options.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_event_storage_delegate.h"
+
+namespace base {
+class Value;
+}
 
 namespace net {
 class NetLog;
+class URLRequestContextGetter;
 class URLRequestInterceptor;
 }
 
 namespace data_reduction_proxy {
 
+class DataReductionProxyBypassStats;
 class DataReductionProxyConfig;
 class DataReductionProxyConfigServiceClient;
 class DataReductionProxyConfigurator;
-class DataReductionProxyEventStore;
+class DataReductionProxyEventCreator;
+class DataReductionProxyExperimentsStats;
 class DataReductionProxyService;
-class DataReductionProxyBypassStats;
 
 // Contains and initializes all Data Reduction Proxy objects that operate on
 // the IO thread.
-class DataReductionProxyIOData {
+class DataReductionProxyIOData : public DataReductionProxyEventStorageDelegate {
  public:
   // Constructs a DataReductionProxyIOData object. |param_flags| is used to
   // set information about the DNS names used by the proxy, and allowable
-  // configurations.
+  // configurations. |enabled| sets the initial state of the Data Reduction
+  // Proxy.
   DataReductionProxyIOData(
       const Client& client,
       int param_flags,
       net::NetLog* net_log,
       scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
-      bool enable_quic);
+      bool enabled,
+      bool enable_quic,
+      const std::string& user_agent);
 
   virtual ~DataReductionProxyIOData();
 
-  // Initializes preferences, including a preference to track whether the
-  // Data Reduction Proxy is enabled.
-  void InitOnUIThread(PrefService* pref_service);
-
-  // Destroys the statistics preferences.
+  // Performs UI thread specific shutdown logic.
   void ShutdownOnUIThread();
 
   // Sets the Data Reduction Proxy service after it has been created.
-  void SetDataReductionProxyService(
+  // Virtual for testing.
+  virtual void SetDataReductionProxyService(
       base::WeakPtr<DataReductionProxyService> data_reduction_proxy_service);
+
+  void RetrieveConfig();
 
   // Creates an interceptor suitable for following the Data Reduction Proxy
   // bypass protocol.
@@ -67,9 +79,31 @@ class DataReductionProxyIOData {
       scoped_ptr<net::NetworkDelegate> wrapped_network_delegate,
       bool track_proxy_bypass_statistics);
 
+  // Sets user defined preferences for how the Data Reduction Proxy
+  // configuration should be set. Use the alternative configuration only if
+  // |enabled| and |alternative_enabled| are true. |at_startup| is true only
+  // when DataReductionProxySettings is initialized.
+  void SetProxyPrefs(bool enabled, bool alternative_enabled, bool at_startup);
+
+  // Bridge methods to safely call to the UI thread objects.
+  void UpdateContentLengths(int64 received_content_length,
+                            int64 original_content_length,
+                            bool data_reduction_proxy_enabled,
+                            DataReductionProxyRequestType request_type);
+
+  // Overrides of DataReductionProxyEventStorageDelegate. Bridges to the UI
+  // thread objects.
+  void AddEvent(scoped_ptr<base::Value> event) override;
+  void AddEnabledEvent(scoped_ptr<base::Value> event, bool enabled) override;
+  void AddEventAndSecureProxyCheckState(scoped_ptr<base::Value> event,
+                                        SecureProxyCheckState state) override;
+  void AddAndSetLastBypassEvent(scoped_ptr<base::Value> event,
+                                int64 expiration_ticks) override;
+
   // Returns true if the Data Reduction Proxy is enabled and false otherwise.
   bool IsEnabled() const;
 
+  // Various accessor methods.
   DataReductionProxyConfigurator* configurator() const {
     return configurator_.get();
   }
@@ -78,12 +112,20 @@ class DataReductionProxyIOData {
     return config_.get();
   }
 
-  DataReductionProxyEventStore* event_store() const {
-    return event_store_.get();
+  DataReductionProxyEventCreator* event_creator() const {
+    return event_creator_.get();
   }
 
   DataReductionProxyRequestOptions* request_options() const {
     return request_options_.get();
+  }
+
+  DataReductionProxyConfigServiceClient* config_client() const {
+    return config_client_.get();
+  }
+
+  DataReductionProxyExperimentsStats* experiments_stats() const {
+    return experiments_stats_.get();
   }
 
   net::ProxyDelegate* proxy_delegate() const {
@@ -94,8 +136,8 @@ class DataReductionProxyIOData {
     return net_log_;
   }
 
-  base::WeakPtr<DataReductionProxyService> service() const {
-    return service_;
+  const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner() const {
+    return io_task_runner_;
   }
 
   // Used for testing.
@@ -114,12 +156,23 @@ class DataReductionProxyIOData {
 
  private:
   friend class TestDataReductionProxyIOData;
+  FRIEND_TEST_ALL_PREFIXES(DataReductionProxyIODataTest, TestConstruction);
+  FRIEND_TEST_ALL_PREFIXES(DataReductionProxyIODataTest,
+                           TestResetBadProxyListOnDisableDataSaver);
 
   // Used for testing.
   DataReductionProxyIOData();
 
+  // Initializes the weak pointer to |this| on the IO thread. It must be done
+  // on the IO thread, since it is used for posting tasks from the UI thread
+  // to IO thread objects in a thread safe manner.
+  void InitializeOnIOThread();
+
   // Records that the data reduction proxy is unreachable or not.
   void SetUnreachable(bool unreachable);
+
+  // Stores an int64 value in preferences storage.
+  void SetInt64Pref(const std::string& pref_path, int64 value);
 
   // The type of Data Reduction Proxy client.
   Client client_;
@@ -131,8 +184,8 @@ class DataReductionProxyIOData {
   // interstitials.
   mutable scoped_ptr<DataReductionProxyDebugUIService> debug_ui_service_;
 
-  // Tracker of Data Reduction Proxy-related events, e.g., for logging.
-  scoped_ptr<DataReductionProxyEventStore> event_store_;
+  // Creates Data Reduction Proxy-related events for logging.
+  scoped_ptr<DataReductionProxyEventCreator> event_creator_;
 
   // Setter of the Data Reduction Proxy-specific proxy configuration.
   scoped_ptr<DataReductionProxyConfigurator> configurator_;
@@ -153,6 +206,9 @@ class DataReductionProxyIOData {
   // Requests new Data Reduction Proxy configurations from a remote service.
   scoped_ptr<DataReductionProxyConfigServiceClient> config_client_;
 
+  // Used to track stats for experiments.
+  scoped_ptr<DataReductionProxyExperimentsStats> experiments_stats_;
+
   // A net log.
   net::NetLog* net_log_;
 
@@ -160,16 +216,21 @@ class DataReductionProxyIOData {
   scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner_;
 
-  // Used
-  bool shutdown_on_ui_;
+  // Whether the Data Reduction Proxy has been enabled or not by the user. In
+  // practice, this can be overridden by the command line.
+  bool enabled_;
 
-  // Preference that determines if the Data Reduction Proxy has been enabled
-  // by the user. In practice, this can be overridden by the command line.
-  BooleanPrefMember enabled_;
+  // The net::URLRequestContextGetter used for making URL requests.
+  net::URLRequestContextGetter* url_request_context_getter_;
+
+  // A net::URLRequestContextGetter used for making secure proxy checks. It
+  // does not use alternate protocols.
+  scoped_refptr<net::URLRequestContextGetter> basic_url_request_context_getter_;
+
+  base::WeakPtrFactory<DataReductionProxyIOData> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(DataReductionProxyIOData);
 };
 
 }  // namespace data_reduction_proxy
 #endif  // COMPONENTS_DATA_REDUCTION_PROXY_CORE_BROWSER_DATA_REDUCTION_PROXY_IO_DATA_H_
-

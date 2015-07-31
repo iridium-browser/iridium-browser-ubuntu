@@ -44,6 +44,7 @@
 #ifndef DeprecatedPaintLayerScrollableArea_h
 #define DeprecatedPaintLayerScrollableArea_h
 
+#include "core/CoreExport.h"
 #include "core/layout/LayoutBox.h"
 #include "core/paint/DeprecatedPaintLayerFragment.h"
 #include "platform/scroll/ScrollableArea.h"
@@ -60,7 +61,7 @@ class LayoutBox;
 class DeprecatedPaintLayer;
 class LayoutScrollbarPart;
 
-class DeprecatedPaintLayerScrollableArea final : public ScrollableArea {
+class CORE_EXPORT DeprecatedPaintLayerScrollableArea final : public ScrollableArea {
     friend class Internals;
 
 public:
@@ -99,11 +100,10 @@ public:
     virtual DoublePoint scrollPositionDouble() const override;
     virtual IntPoint minimumScrollPosition() const override;
     virtual IntPoint maximumScrollPosition() const override;
-    virtual IntRect visibleContentRect(IncludeScrollbarsInRect) const override;
+    virtual IntRect visibleContentRect(IncludeScrollbarsInRect = ExcludeScrollbars) const override;
     virtual int visibleHeight() const override;
     virtual int visibleWidth() const override;
     virtual IntSize contentsSize() const override;
-    virtual IntSize overhangAmount() const override;
     virtual IntPoint lastKnownMousePosition() const override;
     virtual bool scrollAnimatorEnabled() const override;
     virtual bool shouldSuspendScrollAnimations() const override;
@@ -180,7 +180,7 @@ public:
 
     bool hitTestResizerInFragments(const DeprecatedPaintLayerFragments&, const HitTestLocation&) const;
 
-    LayoutRect exposeRect(const LayoutRect&, const ScrollAlignment& alignX, const ScrollAlignment& alignY);
+    virtual LayoutRect scrollIntoView(const LayoutRect&, const ScrollAlignment& alignX, const ScrollAlignment& alignY) override;
 
     // Returns true if scrollable area is in the FrameView's collection of scrollable areas. This can
     // only happen if we're scrollable, visible to hit test, and do in fact overflow. This means that
@@ -216,7 +216,8 @@ public:
     IntRect rectForHorizontalScrollbar(const IntRect& borderBoxRect) const;
     IntRect rectForVerticalScrollbar(const IntRect& borderBoxRect) const;
 
-    virtual String debugName() const override { return "ScrollableArea for " + box().debugName(); }
+protected:
+    virtual ScrollBehavior scrollBehaviorStyle() const override;
 
 private:
     bool hasHorizontalOverflow() const;
@@ -278,10 +279,10 @@ private:
     RefPtrWillBePersistent<Scrollbar> m_hBar;
     RefPtrWillBePersistent<Scrollbar> m_vBar;
 
-    // Renderers to hold our custom scroll corner.
+    // LayoutObject to hold our custom scroll corner.
     LayoutScrollbarPart* m_scrollCorner;
 
-    // Renderers to hold our custom resizer.
+    // LayoutObject to hold our custom resizer.
     LayoutScrollbarPart* m_resizer;
 };
 

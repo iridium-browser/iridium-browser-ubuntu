@@ -25,19 +25,21 @@ public class TabRedirectHandler {
      * An invalid entry index.
      */
     public static final int INVALID_ENTRY_INDEX = -1;
+    private static final long INVALID_TIME = -1;
 
     private static final int NAVIGATION_TYPE_NONE = 0;
     private static final int NAVIGATION_TYPE_FROM_INTENT = 1;
     private static final int NAVIGATION_TYPE_FROM_USER_TYPING = 2;
     private static final int NAVIGATION_TYPE_FROM_LINK_WITHOUT_USER_GESTURE = 3;
-    private static final int NAVIGATION_TYPE_OTHER = 4;
+    private static final int NAVIGATION_TYPE_FROM_RELOAD = 4;
+    private static final int NAVIGATION_TYPE_OTHER = 5;
 
     private Intent mInitialIntent;
     // A resolver list which includes all resolvers of |mInitialIntent|.
     private final HashSet<ComponentName> mCachedResolvers = new HashSet<ComponentName>();
     private boolean mIsInitialIntentHeadingToChrome;
 
-    private long mLastNewUrlLoadingTime;
+    private long mLastNewUrlLoadingTime = INVALID_TIME;
     private boolean mIsOnEffectiveRedirectChain;
     private int mInitialNavigationType;
     private int mLastCommittedEntryIndexBeforeStartingNavigation;
@@ -136,7 +138,8 @@ public class TabRedirectHandler {
                 isNewLoadingStartedByUser = true;
             } else if (pageTransitionCore != PageTransition.LINK) {
                 isNewLoadingStartedByUser = true;
-            } else if (lastUserInteractionTime > prevNewUrlLoadingTime || isFromIntent) {
+            } else if (prevNewUrlLoadingTime == INVALID_TIME || isFromIntent
+                    || lastUserInteractionTime > prevNewUrlLoadingTime) {
                 isNewLoadingStartedByUser = true;
             }
         }
@@ -149,6 +152,9 @@ public class TabRedirectHandler {
                 clearIntentHistory();
                 if (pageTransitionCore == PageTransition.TYPED) {
                     mInitialNavigationType = NAVIGATION_TYPE_FROM_USER_TYPING;
+                } else if (pageTransitionCore == PageTransition.RELOAD
+                        || (pageTransType & PageTransition.FORWARD_BACK) != 0) {
+                    mInitialNavigationType = NAVIGATION_TYPE_FROM_RELOAD;
                 } else if (pageTransitionCore == PageTransition.LINK && !hasUserGesture) {
                     mInitialNavigationType = NAVIGATION_TYPE_FROM_LINK_WITHOUT_USER_GESTURE;
                 } else {
@@ -176,7 +182,8 @@ public class TabRedirectHandler {
      */
     public boolean shouldStayInChrome() {
         return mIsInitialIntentHeadingToChrome
-                || mInitialNavigationType == NAVIGATION_TYPE_FROM_LINK_WITHOUT_USER_GESTURE;
+                || mInitialNavigationType == NAVIGATION_TYPE_FROM_LINK_WITHOUT_USER_GESTURE
+                || mInitialNavigationType == NAVIGATION_TYPE_FROM_RELOAD;
     }
 
     /**

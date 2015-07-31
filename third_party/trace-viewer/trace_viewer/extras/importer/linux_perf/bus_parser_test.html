@@ -54,12 +54,12 @@ tv.b.unittest.testSuite(function() { // @suppress longLineCheck
 
     ];
     var m = new tv.c.TraceModel(lines.join('\n'), false);
-    assertFalse(m.hasImportWarnings);
+    assert.isFalse(m.hasImportWarnings);
 
     var counters = m.getAllCounters();
-    assertEquals(10, counters.length);
+    assert.equal(counters.length, 10);
 
-    assertEquals(2, counters[0].series[0].samples.length);
+    assert.equal(counters[0].series[0].samples.length, 2);
   });
 });
 </script>

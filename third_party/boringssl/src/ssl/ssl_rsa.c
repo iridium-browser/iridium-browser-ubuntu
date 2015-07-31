@@ -64,7 +64,7 @@
 #include <openssl/pem.h>
 #include <openssl/x509.h>
 
-#include "ssl_locl.h"
+#include "internal.h"
 
 static int ssl_set_cert(CERT *c, X509 *x509);
 static int ssl_set_pkey(CERT *c, EVP_PKEY *pkey);
@@ -114,12 +114,8 @@ int SSL_use_certificate_file(SSL *ssl, const char *file, int type) {
   ret = SSL_use_certificate(ssl, x);
 
 end:
-  if (x != NULL) {
-    X509_free(x);
-  }
-  if (in != NULL) {
-    BIO_free(in);
-  }
+  X509_free(x);
+  BIO_free(in);
 
   return ret;
 }
@@ -183,10 +179,8 @@ static int ssl_set_pkey(CERT *c, EVP_PKEY *pkey) {
     }
   }
 
-  if (c->pkeys[i].privatekey != NULL) {
-    EVP_PKEY_free(c->pkeys[i].privatekey);
-  }
-  c->pkeys[i].privatekey = EVP_PKEY_dup(pkey);
+  EVP_PKEY_free(c->pkeys[i].privatekey);
+  c->pkeys[i].privatekey = EVP_PKEY_up_ref(pkey);
   c->key = &(c->pkeys[i]);
 
   return 1;
@@ -229,9 +223,7 @@ int SSL_use_RSAPrivateKey_file(SSL *ssl, const char *file, int type) {
   RSA_free(rsa);
 
 end:
-  if (in != NULL) {
-    BIO_free(in);
-  }
+  BIO_free(in);
   return ret;
 }
 
@@ -300,9 +292,7 @@ int SSL_use_PrivateKey_file(SSL *ssl, const char *file, int type) {
   EVP_PKEY_free(pkey);
 
 end:
-  if (in != NULL) {
-    BIO_free(in);
-  }
+  BIO_free(in);
   return ret;
 }
 
@@ -367,9 +357,7 @@ static int ssl_set_cert(CERT *c, X509 *x) {
 
   EVP_PKEY_free(pkey);
 
-  if (c->pkeys[i].x509 != NULL) {
-    X509_free(c->pkeys[i].x509);
-  }
+  X509_free(c->pkeys[i].x509);
   c->pkeys[i].x509 = X509_up_ref(x);
   c->key = &(c->pkeys[i]);
 
@@ -414,12 +402,8 @@ int SSL_CTX_use_certificate_file(SSL_CTX *ctx, const char *file, int type) {
   ret = SSL_CTX_use_certificate(ctx, x);
 
 end:
-  if (x != NULL) {
-    X509_free(x);
-  }
-  if (in != NULL) {
-    BIO_free(in);
-  }
+  X509_free(x);
+  BIO_free(in);
   return ret;
 }
 
@@ -499,9 +483,7 @@ int SSL_CTX_use_RSAPrivateKey_file(SSL_CTX *ctx, const char *file, int type) {
   RSA_free(rsa);
 
 end:
-  if (in != NULL) {
-    BIO_free(in);
-  }
+  BIO_free(in);
   return ret;
 }
 
@@ -567,9 +549,7 @@ int SSL_CTX_use_PrivateKey_file(SSL_CTX *ctx, const char *file, int type) {
   EVP_PKEY_free(pkey);
 
 end:
-  if (in != NULL) {
-    BIO_free(in);
-  }
+  BIO_free(in);
   return ret;
 }
 
@@ -631,7 +611,7 @@ int SSL_CTX_use_certificate_chain_file(SSL_CTX *ctx, const char *file) {
      * certificates. */
     X509 *ca;
     int r;
-    unsigned long err;
+    uint32_t err;
 
     SSL_CTX_clear_chain_certs(ctx);
 
@@ -660,11 +640,7 @@ int SSL_CTX_use_certificate_chain_file(SSL_CTX *ctx, const char *file) {
   }
 
 end:
-  if (x != NULL) {
-    X509_free(x);
-  }
-  if (in != NULL) {
-    BIO_free(in);
-  }
+  X509_free(x);
+  BIO_free(in);
   return ret;
 }

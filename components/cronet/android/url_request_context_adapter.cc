@@ -21,8 +21,9 @@
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_network_layer.h"
 #include "net/http/http_server_properties.h"
-#include "net/log/net_log_logger.h"
+#include "net/log/write_to_file_net_log_observer.h"
 #include "net/proxy/proxy_service.h"
+#include "net/sdch/sdch_owner.h"
 #include "net/ssl/ssl_config_service_defaults.h"
 #include "net/url_request/static_http_user_agent_settings.h"
 #include "net/url_request/url_request_context_builder.h"
@@ -151,10 +152,16 @@ void URLRequestContextAdapter::InitRequestContextOnNetworkThread() {
 
   context_.reset(context_builder.Build());
 
+  if (config_->enable_sdch) {
+    DCHECK(context_->sdch_manager());
+    sdch_owner_.reset(
+        new net::SdchOwner(context_->sdch_manager(), context_.get()));
+  }
+
   // Currently (circa M39) enabling QUIC requires setting probability threshold.
   if (config_->enable_quic) {
     context_->http_server_properties()
-        ->SetAlternateProtocolProbabilityThreshold(0.0f);
+        ->SetAlternativeServiceProbabilityThreshold(0.0f);
     for (size_t hint = 0; hint < config_->quic_hints.size(); ++hint) {
       const URLRequestContextConfig::QuicHint& quic_hint =
           *config_->quic_hints[hint];
@@ -199,8 +206,9 @@ void URLRequestContextAdapter::InitRequestContextOnNetworkThread() {
 
   if (VLOG_IS_ON(2)) {
     net_log_observer_.reset(new NetLogObserver());
-    context_->net_log()->DeprecatedAddObserver(net_log_observer_.get(),
-                                               net::NetLog::LOG_ALL_BUT_BYTES);
+    context_->net_log()->DeprecatedAddObserver(
+        net_log_observer_.get(),
+        net::NetLogCaptureMode::IncludeCookiesAndCredentials());
   }
 
   is_context_initialized_ = true;
@@ -261,11 +269,12 @@ URLRequestContextAdapter::GetNetworkTaskRunner() const {
   return network_thread_->message_loop_proxy();
 }
 
-void URLRequestContextAdapter::StartNetLogToFile(const std::string& file_name) {
+void URLRequestContextAdapter::StartNetLogToFile(const std::string& file_name,
+                                                 bool log_all) {
   PostTaskToNetworkThread(
       FROM_HERE,
-      base::Bind(
-          &URLRequestContextAdapter::StartNetLogToFileHelper, this, file_name));
+      base::Bind(&URLRequestContextAdapter::StartNetLogToFileHelper, this,
+                 file_name, log_all));
 }
 
 void URLRequestContextAdapter::StopNetLog() {
@@ -274,10 +283,10 @@ void URLRequestContextAdapter::StopNetLog() {
 }
 
 void URLRequestContextAdapter::StartNetLogToFileHelper(
-    const std::string& file_name) {
+    const std::string& file_name, bool log_all) {
   DCHECK(GetNetworkTaskRunner()->BelongsToCurrentThread());
   // Do nothing if already logging to a file.
-  if (net_log_logger_)
+  if (write_to_file_observer_)
     return;
 
   base::FilePath file_path(file_name);
@@ -285,16 +294,20 @@ void URLRequestContextAdapter::StartNetLogToFileHelper(
   if (!file)
     return;
 
-  net_log_logger_.reset(new net::NetLogLogger());
-  net_log_logger_->StartObserving(context_->net_log(), file.Pass(), nullptr,
-                                  context_.get());
+  write_to_file_observer_.reset(new net::WriteToFileNetLogObserver());
+  if (log_all) {
+    write_to_file_observer_->set_capture_mode(
+        net::NetLogCaptureMode::IncludeSocketBytes());
+  }
+  write_to_file_observer_->StartObserving(context_->net_log(), file.Pass(),
+                                  nullptr, context_.get());
 }
 
 void URLRequestContextAdapter::StopNetLogHelper() {
   DCHECK(GetNetworkTaskRunner()->BelongsToCurrentThread());
-  if (net_log_logger_) {
-    net_log_logger_->StopObserving(context_.get());
-    net_log_logger_.reset();
+  if (write_to_file_observer_) {
+    write_to_file_observer_->StopObserving(context_.get());
+    write_to_file_observer_.reset();
   }
 }
 

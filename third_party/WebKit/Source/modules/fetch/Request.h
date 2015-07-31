@@ -8,6 +8,7 @@
 #include "bindings/core/v8/Dictionary.h"
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "bindings/modules/v8/UnionTypesModules.h"
+#include "modules/ModulesExport.h"
 #include "modules/fetch/Body.h"
 #include "modules/fetch/FetchRequestData.h"
 #include "modules/fetch/Headers.h"
@@ -25,18 +26,18 @@ class WebServiceWorkerRequest;
 
 typedef RequestOrUSVString RequestInfo;
 
-class Request final : public Body {
+class MODULES_EXPORT Request final : public Body {
     DEFINE_WRAPPERTYPEINFO();
 public:
     ~Request() override { }
 
     // From Request.idl:
-    static Request* create(ExecutionContext*, const RequestInfo&, const Dictionary&, ExceptionState&);
+    static Request* create(ScriptState*, const RequestInfo&, const Dictionary&, ExceptionState&);
 
-    static Request* create(ExecutionContext*, const String&, ExceptionState&);
-    static Request* create(ExecutionContext*, const String&, const Dictionary&, ExceptionState&);
-    static Request* create(ExecutionContext*, Request*, ExceptionState&);
-    static Request* create(ExecutionContext*, Request*, const Dictionary&, ExceptionState&);
+    static Request* create(ScriptState*, const String&, ExceptionState&);
+    static Request* create(ScriptState*, const String&, const Dictionary&, ExceptionState&);
+    static Request* create(ScriptState*, Request*, ExceptionState&);
+    static Request* create(ScriptState*, Request*, const Dictionary&, ExceptionState&);
     static Request* create(ExecutionContext*, FetchRequestData*);
     static Request* create(ExecutionContext*, const WebServiceWorkerRequest&);
 
@@ -46,6 +47,7 @@ public:
     String method() const;
     KURL url() const;
     Headers* headers() const { return m_headers; }
+    String context() const;
     String referrer() const;
     String mode() const;
     String credentials() const;
@@ -67,7 +69,7 @@ private:
     Request(ExecutionContext*, const WebServiceWorkerRequest&);
     Request(ExecutionContext*, FetchRequestData*, Headers*);
 
-    static Request* createRequestWithRequestOrString(ExecutionContext*, Request*, const String&, const RequestInit&, ExceptionState&);
+    static Request* createRequestWithRequestOrString(ScriptState*, Request*, const String&, const RequestInit&, ExceptionState&);
     void clearHeaderList();
 
     PassRefPtr<BlobDataHandle> blobDataHandle() const override;

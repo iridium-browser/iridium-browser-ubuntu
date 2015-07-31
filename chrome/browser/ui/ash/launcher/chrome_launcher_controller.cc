@@ -30,7 +30,6 @@
 #include "chrome/browser/extensions/app_icon_loader_impl.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/launch_util.h"
-#include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/prefs/pref_service_syncable.h"
 #include "chrome/browser/profiles/profile.h"
@@ -67,9 +66,8 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/favicon/content/content_favicon_driver.h"
 #include "content/public/browser/navigation_entry.h"
-#include "content/public/browser/notification_registrar.h"
-#include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
@@ -204,6 +202,8 @@ std::string GetPrefForRootWindow(PrefService* pref_service,
 ash::ShelfAutoHideBehavior GetShelfAutoHideBehaviorFromPrefs(
     Profile* profile,
     aura::Window* root_window) {
+  DCHECK(profile);
+
   // Don't show the shelf in app mode.
   if (chrome::IsRunningInAppMode())
     return ash::SHELF_AUTO_HIDE_ALWAYS_HIDDEN;
@@ -227,6 +227,8 @@ ash::ShelfAutoHideBehavior GetShelfAutoHideBehaviorFromPrefs(
 // Gets the shelf alignment from prefs for a root window.
 ash::ShelfAlignment GetShelfAlignmentFromPrefs(Profile* profile,
                                                aura::Window* root_window) {
+  DCHECK(profile);
+
   // See comment in |kShelfAlignment| as to why we consider two prefs.
   const std::string alignment_value(
       GetPrefForRootWindow(profile->GetPrefs(),
@@ -271,20 +273,13 @@ std::string GetSourceFromAppListSource(ash::LaunchSource source) {
 // A class to get events from ChromeOS when a user gets changed or added.
 class ChromeLauncherControllerUserSwitchObserverChromeOS
     : public ChromeLauncherControllerUserSwitchObserver,
-      public user_manager::UserManager::UserSessionStateObserver,
-      content::NotificationObserver {
+      public user_manager::UserManager::UserSessionStateObserver {
  public:
   ChromeLauncherControllerUserSwitchObserverChromeOS(
       ChromeLauncherController* controller)
       : controller_(controller) {
     DCHECK(user_manager::UserManager::IsInitialized());
     user_manager::UserManager::Get()->AddSessionStateObserver(this);
-    // A UserAddedToSession notification can be sent before a profile is loaded.
-    // Since our observers require that we have already a profile, we might have
-    // to postpone the notification until the ProfileManager lets us know that
-    // the profile for that newly added user was added to the ProfileManager.
-    registrar_.Add(this, chrome::NOTIFICATION_PROFILE_ADDED,
-                   content::NotificationService::AllSources());
   }
   ~ChromeLauncherControllerUserSwitchObserverChromeOS() override {
     user_manager::UserManager::Get()->RemoveSessionStateObserver(this);
@@ -293,10 +288,8 @@ class ChromeLauncherControllerUserSwitchObserverChromeOS
   // user_manager::UserManager::UserSessionStateObserver overrides:
   void UserAddedToSession(const user_manager::User* added_user) override;
 
-  // content::NotificationObserver overrides:
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override;
+  // ChromeLauncherControllerUserSwitchObserver:
+  void OnUserProfileReadyToSwitch(Profile* profile) override;
 
  private:
   // Add a user to the session.
@@ -304,10 +297,6 @@ class ChromeLauncherControllerUserSwitchObserverChromeOS
 
   // The owning ChromeLauncherController.
   ChromeLauncherController* controller_;
-
-  // The notification registrar to track the Profile creations after a user got
-  // added to the session (if required).
-  content::NotificationRegistrar registrar_;
 
   // Users which were just added to the system, but which profiles were not yet
   // (fully) loaded.
@@ -328,14 +317,10 @@ void ChromeLauncherControllerUserSwitchObserverChromeOS::UserAddedToSession(
     AddUser(profile);
 }
 
-void ChromeLauncherControllerUserSwitchObserverChromeOS::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  if (type == chrome::NOTIFICATION_PROFILE_ADDED &&
-      !added_user_ids_waiting_for_profiles_.empty()) {
+void ChromeLauncherControllerUserSwitchObserverChromeOS::
+    OnUserProfileReadyToSwitch(Profile* profile) {
+  if (!added_user_ids_waiting_for_profiles_.empty()) {
     // Check if the profile is from a user which was on the waiting list.
-    Profile* profile = content::Source<Profile>(source).ptr();
     std::string user_id = multi_user_util::GetUserIDFromProfile(profile);
     std::set<std::string>::iterator it = std::find(
         added_user_ids_waiting_for_profiles_.begin(),
@@ -370,9 +355,9 @@ ChromeLauncherController::ChromeLauncherController(Profile* profile,
     // Use the original profile as on chromeos we may get a temporary off the
     // record profile, unless in guest session (where off the record profile is
     // the right one).
-    Profile* active_profile = ProfileManager::GetActiveUserProfile();
-    profile_ = active_profile->IsGuestSession() ? active_profile :
-        active_profile->GetOriginalProfile();
+    profile_ = ProfileManager::GetActiveUserProfile();
+    if (!profile_->IsGuestSession() && !profile_->IsSystemProfile())
+      profile_ = profile_->GetOriginalProfile();
 
     app_sync_ui_state_ = AppSyncUIState::Get(profile_);
     if (app_sync_ui_state_)
@@ -565,7 +550,7 @@ void ChromeLauncherController::CloseLauncherItem(ash::ShelfID id) {
 }
 
 void ChromeLauncherController::Pin(ash::ShelfID id) {
-  DCHECK(HasItemController(id));
+  DCHECK(HasShelfIDToAppIDMapping(id));
 
   int index = model_->ItemIndexByID(id);
   DCHECK_GE(index, 0);
@@ -607,7 +592,7 @@ bool ChromeLauncherController::IsPinned(ash::ShelfID id) {
 }
 
 void ChromeLauncherController::TogglePinned(ash::ShelfID id) {
-  if (!HasItemController(id))
+  if (!HasShelfIDToAppIDMapping(id))
     return;  // May happen if item closed with menu open.
 
   if (IsPinned(id))
@@ -700,7 +685,7 @@ bool ChromeLauncherController::IsOpen(ash::ShelfID id) {
 }
 
 bool ChromeLauncherController::IsPlatformApp(ash::ShelfID id) {
-  if (!HasItemController(id))
+  if (!HasShelfIDToAppIDMapping(id))
     return false;
 
   std::string app_id = GetAppIDForShelfID(id);
@@ -796,6 +781,11 @@ ash::ShelfID ChromeLauncherController::GetShelfIDForAppID(
       return i->first;
   }
   return 0;
+}
+
+bool ChromeLauncherController::HasShelfIDToAppIDMapping(ash::ShelfID id) const {
+  return id_to_item_controller_map_.find(id) !=
+         id_to_item_controller_map_.end();
 }
 
 const std::string& ChromeLauncherController::GetAppIDForShelfID(
@@ -978,6 +968,13 @@ ash::ShelfAutoHideBehavior ChromeLauncherController::GetShelfAutoHideBehavior(
 
 bool ChromeLauncherController::CanUserModifyShelfAutoHideBehavior(
     aura::Window* root_window) const {
+#if defined(OS_WIN)
+  // Disable shelf auto-hide behavior on screen sides in Metro mode.
+  if (ash::Shell::GetInstance()->GetShelfAlignment(root_window) !=
+      ash::SHELF_ALIGNMENT_BOTTOM) {
+    return false;
+  }
+#endif
   return profile_->GetPrefs()->
       FindPreference(prefs::kShelfAutoHideBehaviorLocal)->IsUserModifiable();
 }
@@ -1075,7 +1072,8 @@ const Extension* ChromeLauncherController::GetExtensionForAppID(
       app_id, extensions::ExtensionRegistry::EVERYTHING);
 }
 
-void ChromeLauncherController::ActivateWindowOrMinimizeIfActive(
+ash::ShelfItemDelegate::PerformedAction
+ChromeLauncherController::ActivateWindowOrMinimizeIfActive(
     ui::BaseWindow* window,
     bool allow_minimize) {
   // In separated desktop mode we might have to teleport a window back to the
@@ -1092,7 +1090,7 @@ void ChromeLauncherController::ActivateWindowOrMinimizeIfActive(
           ash::MultiProfileUMA::TELEPORT_WINDOW_RETURN_BY_LAUNCHER);
       manager->ShowWindowForUser(native_window, current_user);
       window->Activate();
-      return;
+      return ash::ShelfItemDelegate::kExistingWindowActivated;
     }
   }
 
@@ -1103,11 +1101,14 @@ void ChromeLauncherController::ActivateWindowOrMinimizeIfActive(
                     wm::WINDOW_ANIMATION_TYPE_BOUNCE);
     } else {
       window->Minimize();
+      return ash::ShelfItemDelegate::kExistingWindowMinimized;
     }
   } else {
     window->Show();
     window->Activate();
+    return ash::ShelfItemDelegate::kExistingWindowActivated;
   }
+  return ash::ShelfItemDelegate::kNoAction;
 }
 
 void ChromeLauncherController::OnShelfCreated(ash::Shelf* shelf) {
@@ -1146,8 +1147,8 @@ void ChromeLauncherController::ShelfItemMoved(int start_index,
   const ash::ShelfItem& item = model_->items()[target_index];
   // We remember the moved item position if it is either pinnable or
   // it is the app list with the alternate shelf layout.
-  if ((HasItemController(item.id) && IsPinned(item.id)) ||
-       item.type == ash::TYPE_APP_LIST)
+  if ((HasShelfIDToAppIDMapping(item.id) && IsPinned(item.id)) ||
+      item.type == ash::TYPE_APP_LIST)
     PersistPinnedState();
 }
 
@@ -1364,9 +1365,9 @@ gfx::Image ChromeLauncherController::GetAppListIcon(
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   if (IsIncognito(web_contents))
     return rb.GetImageNamed(IDR_ASH_SHELF_LIST_INCOGNITO_BROWSER);
-  FaviconTabHelper* favicon_tab_helper =
-      FaviconTabHelper::FromWebContents(web_contents);
-  gfx::Image result = favicon_tab_helper->GetFavicon();
+  favicon::FaviconDriver* favicon_driver =
+      favicon::ContentFaviconDriver::FromWebContents(web_contents);
+  gfx::Image result = favicon_driver->GetFavicon();
   if (result.IsEmpty())
     return rb.GetImageNamed(IDR_DEFAULT_FAVICON);
   return result;
@@ -1470,7 +1471,7 @@ ash::ShelfID ChromeLauncherController::CreateAppShortcutLauncherItemWithType(
 
 LauncherItemController* ChromeLauncherController::GetLauncherItemController(
     const ash::ShelfID id) {
-  if (!HasItemController(id))
+  if (!HasShelfIDToAppIDMapping(id))
     return NULL;
   return id_to_item_controller_map_[id];
 }
@@ -1501,6 +1502,11 @@ bool ChromeLauncherController::ShelfBoundsChangesProbablyWithUser(
   return currently_shown != other_shown ||
          GetShelfAlignmentFromPrefs(profile_, root_window) !=
              GetShelfAlignmentFromPrefs(other_profile, root_window);
+}
+
+void ChromeLauncherController::OnUserProfileReadyToSwitch(Profile* profile) {
+  if (user_switch_observer_.get())
+    user_switch_observer_->OnUserProfileReadyToSwitch(profile);
 }
 
 void ChromeLauncherController::LauncherItemClosed(ash::ShelfID id) {
@@ -1824,7 +1830,7 @@ ash::ShelfID ChromeLauncherController::InsertAppLauncherItem(
     int index,
     ash::ShelfItemType shelf_item_type) {
   ash::ShelfID id = model_->next_id();
-  CHECK(!HasItemController(id));
+  CHECK(!HasShelfIDToAppIDMapping(id));
   CHECK(controller);
   id_to_item_controller_map_[id] = controller;
   controller->set_shelf_id(id);
@@ -1847,11 +1853,6 @@ ash::ShelfID ChromeLauncherController::InsertAppLauncherItem(
   SetShelfItemDelegate(id, controller);
 
   return id;
-}
-
-bool ChromeLauncherController::HasItemController(ash::ShelfID id) const {
-  return id_to_item_controller_map_.find(id) !=
-         id_to_item_controller_map_.end();
 }
 
 std::vector<content::WebContents*>
@@ -2037,7 +2038,8 @@ bool ChromeLauncherController::IsIncognito(
     const content::WebContents* web_contents) const {
   const Profile* profile =
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
-  return profile->IsOffTheRecord() && !profile->IsGuestSession();
+  return profile->IsOffTheRecord() && !profile->IsGuestSession() &&
+         !profile->IsSystemProfile();
 }
 
 void ChromeLauncherController::CloseWindowedAppsFromRemovedExtension(

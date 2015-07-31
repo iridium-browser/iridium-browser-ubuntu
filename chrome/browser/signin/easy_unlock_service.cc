@@ -22,11 +22,13 @@
 #include "chrome/browser/signin/easy_unlock_app_manager.h"
 #include "chrome/browser/signin/easy_unlock_service_factory.h"
 #include "chrome/browser/signin/easy_unlock_service_observer.h"
-#include "chrome/browser/signin/screenlock_bridge.h"
+#include "chrome/browser/signin/proximity_auth_facade.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/proximity_auth/ble/proximity_auth_ble_system.h"
+#include "components/proximity_auth/screenlock_bridge.h"
 #include "components/proximity_auth/switches.h"
 #include "components/user_manager/user.h"
 #include "device/bluetooth/bluetooth_adapter.h"
@@ -46,6 +48,8 @@
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
 #endif
+
+using proximity_auth::ScreenlockState;
 
 namespace {
 
@@ -260,18 +264,10 @@ EasyUnlockService::~EasyUnlockService() {
 // static
 void EasyUnlockService::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterBooleanPref(
-      prefs::kEasyUnlockAllowed,
-      true,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kEasyUnlockEnabled,
-      false,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterDictionaryPref(
-      prefs::kEasyUnlockPairing,
-      new base::DictionaryValue(),
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kEasyUnlockAllowed, true);
+  registry->RegisterBooleanPref(prefs::kEasyUnlockEnabled, false);
+  registry->RegisterDictionaryPref(prefs::kEasyUnlockPairing,
+                                   new base::DictionaryValue());
   registry->RegisterBooleanPref(
       prefs::kEasyUnlockProximityRequired,
       false,
@@ -440,8 +436,7 @@ void EasyUnlockService::ShowInitialUserState() {
 
   if (state == EasyUnlockScreenlockStateHandler::NO_HARDLOCK) {
     // Show connecting icon early when there is a persisted non hardlock state.
-    UpdateScreenlockState(
-        EasyUnlockScreenlockStateHandler::STATE_BLUETOOTH_CONNECTING);
+    UpdateScreenlockState(ScreenlockState::BLUETOOTH_CONNECTING);
   } else {
     screenlock_state_handler_->MaybeShowHardlockUI();
   }
@@ -453,22 +448,19 @@ EasyUnlockScreenlockStateHandler*
     return NULL;
   if (!screenlock_state_handler_) {
     screenlock_state_handler_.reset(new EasyUnlockScreenlockStateHandler(
-        GetUserEmail(),
-        GetHardlockState(),
-        ScreenlockBridge::Get()));
+        GetUserEmail(), GetHardlockState(), GetScreenlockBridgeInstance()));
   }
   return screenlock_state_handler_.get();
 }
 
-bool EasyUnlockService::UpdateScreenlockState(
-    EasyUnlockScreenlockStateHandler::State state) {
+bool EasyUnlockService::UpdateScreenlockState(ScreenlockState state) {
   EasyUnlockScreenlockStateHandler* handler = GetScreenlockStateHandler();
   if (!handler)
     return false;
 
   handler->ChangeState(state);
 
-  if (state == EasyUnlockScreenlockStateHandler::STATE_AUTHENTICATED) {
+  if (state == ScreenlockState::AUTHENTICATED) {
 #if defined(OS_CHROMEOS)
     if (power_monitor_)
       power_monitor_->RecordStartUpTime();
@@ -487,11 +479,10 @@ bool EasyUnlockService::UpdateScreenlockState(
   return true;
 }
 
-EasyUnlockScreenlockStateHandler::State
-EasyUnlockService::GetScreenlockState() {
+ScreenlockState EasyUnlockService::GetScreenlockState() {
   EasyUnlockScreenlockStateHandler* handler = GetScreenlockStateHandler();
   if (!handler)
-    return EasyUnlockScreenlockStateHandler::STATE_INACTIVE;
+    return ScreenlockState::INACTIVE;
 
   return handler->state();
 }
@@ -502,13 +493,24 @@ void EasyUnlockService::AttemptAuth(const std::string& user_id) {
 
 void EasyUnlockService::AttemptAuth(const std::string& user_id,
                                     const AttemptAuthCallback& callback) {
+  const EasyUnlockAuthAttempt::Type auth_attempt_type =
+      GetType() == TYPE_REGULAR ? EasyUnlockAuthAttempt::TYPE_UNLOCK
+                                : EasyUnlockAuthAttempt::TYPE_SIGNIN;
+  const std::string user_email = GetUserEmail();
+  if (user_email.empty()) {
+    LOG(ERROR) << "Empty user email. Refresh token might go bad.";
+    if (!callback.is_null()) {
+      const bool kFailure = false;
+      callback.Run(auth_attempt_type, kFailure, user_id, std::string(),
+                   std::string());
+    }
+    return;
+  }
+
   CHECK_EQ(GetUserEmail(), user_id);
 
-  auth_attempt_.reset(new EasyUnlockAuthAttempt(
-      app_manager_.get(), user_id,
-      GetType() == TYPE_REGULAR ? EasyUnlockAuthAttempt::TYPE_UNLOCK
-                                : EasyUnlockAuthAttempt::TYPE_SIGNIN,
-      callback));
+  auth_attempt_.reset(new EasyUnlockAuthAttempt(app_manager_.get(), user_id,
+                                                auth_attempt_type, callback));
   if (!auth_attempt_->Start())
     auth_attempt_.reset();
 }
@@ -646,6 +648,15 @@ void EasyUnlockService::UpdateAppState() {
     app_manager_->LoadApp();
     NotifyUserUpdated();
 
+    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+            proximity_auth::switches::kEnableBluetoothLowEnergyDiscovery) &&
+        GetType() == EasyUnlockService::TYPE_REGULAR &&
+        !proximity_auth_ble_system_) {
+      proximity_auth_ble_system_.reset(
+          new proximity_auth::ProximityAuthBleSystem(
+              GetScreenlockBridgeInstance(), profile_));
+    }
+
 #if defined(OS_CHROMEOS)
     if (!power_monitor_)
       power_monitor_.reset(new PowerMonitor(this));
@@ -664,6 +675,7 @@ void EasyUnlockService::UpdateAppState() {
     if (!bluetooth_waking_up) {
       app_manager_->DisableAppIfLoaded();
       ResetScreenlockState();
+      proximity_auth_ble_system_.reset();
 #if defined(OS_CHROMEOS)
       power_monitor_.reset();
 #endif
@@ -774,30 +786,29 @@ EasyUnlockAuthEvent EasyUnlockService::GetPasswordAuthEvent() const {
     return PASSWORD_ENTRY_NO_SCREENLOCK_STATE_HANDLER;
   } else {
     switch (screenlock_state_handler()->state()) {
-      case EasyUnlockScreenlockStateHandler::STATE_INACTIVE:
+      case ScreenlockState::INACTIVE:
         return PASSWORD_ENTRY_SERVICE_NOT_ACTIVE;
-      case EasyUnlockScreenlockStateHandler::STATE_NO_BLUETOOTH:
+      case ScreenlockState::NO_BLUETOOTH:
         return PASSWORD_ENTRY_NO_BLUETOOTH;
-      case EasyUnlockScreenlockStateHandler::STATE_BLUETOOTH_CONNECTING:
+      case ScreenlockState::BLUETOOTH_CONNECTING:
         return PASSWORD_ENTRY_BLUETOOTH_CONNECTING;
-      case EasyUnlockScreenlockStateHandler::STATE_NO_PHONE:
+      case ScreenlockState::NO_PHONE:
         return PASSWORD_ENTRY_NO_PHONE;
-      case EasyUnlockScreenlockStateHandler::STATE_PHONE_NOT_AUTHENTICATED:
+      case ScreenlockState::PHONE_NOT_AUTHENTICATED:
         return PASSWORD_ENTRY_PHONE_NOT_AUTHENTICATED;
-      case EasyUnlockScreenlockStateHandler::STATE_PHONE_LOCKED:
+      case ScreenlockState::PHONE_LOCKED:
         return PASSWORD_ENTRY_PHONE_LOCKED;
-      case EasyUnlockScreenlockStateHandler::STATE_PHONE_UNLOCKABLE:
+      case ScreenlockState::PHONE_NOT_LOCKABLE:
         return PASSWORD_ENTRY_PHONE_NOT_LOCKABLE;
-      case EasyUnlockScreenlockStateHandler::STATE_PHONE_UNSUPPORTED:
+      case ScreenlockState::PHONE_UNSUPPORTED:
         return PASSWORD_ENTRY_PHONE_UNSUPPORTED;
-      case EasyUnlockScreenlockStateHandler::STATE_RSSI_TOO_LOW:
+      case ScreenlockState::RSSI_TOO_LOW:
         return PASSWORD_ENTRY_RSSI_TOO_LOW;
-      case EasyUnlockScreenlockStateHandler::STATE_TX_POWER_TOO_HIGH:
+      case ScreenlockState::TX_POWER_TOO_HIGH:
         return PASSWORD_ENTRY_TX_POWER_TOO_HIGH;
-      case EasyUnlockScreenlockStateHandler::
-               STATE_PHONE_LOCKED_AND_TX_POWER_TOO_HIGH:
+      case ScreenlockState::PHONE_LOCKED_AND_TX_POWER_TOO_HIGH:
         return PASSWORD_ENTRY_PHONE_LOCKED_AND_TX_POWER_TOO_HIGH;
-      case EasyUnlockScreenlockStateHandler::STATE_AUTHENTICATED:
+      case ScreenlockState::AUTHENTICATED:
         return PASSWORD_ENTRY_WITH_AUTHENTICATED_PHONE;
     }
   }
@@ -837,15 +848,15 @@ void EasyUnlockService::OnCryptohomeKeysFetchedForChecking(
 
 void EasyUnlockService::PrepareForSuspend() {
   app_manager_->DisableAppIfLoaded();
-  if (screenlock_state_handler_ && screenlock_state_handler_->IsActive()) {
-    UpdateScreenlockState(
-        EasyUnlockScreenlockStateHandler::STATE_BLUETOOTH_CONNECTING);
-  }
+  if (screenlock_state_handler_ && screenlock_state_handler_->IsActive())
+    UpdateScreenlockState(ScreenlockState::BLUETOOTH_CONNECTING);
 }
 
 void EasyUnlockService::EnsureTpmKeyPresentIfNeeded() {
-  if (tpm_key_checked_ || GetType() != TYPE_REGULAR || GetUserEmail().empty())
+  if (tpm_key_checked_ || GetType() != TYPE_REGULAR || GetUserEmail().empty() ||
+      GetHardlockState() == EasyUnlockScreenlockStateHandler::NO_PAIRING) {
     return;
+  }
 
 #if defined(OS_CHROMEOS)
   // If this is called before the session is started, the chances are Chrome

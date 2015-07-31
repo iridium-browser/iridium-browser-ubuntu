@@ -8,12 +8,14 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
+#include "base/scoped_observer.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -28,7 +30,6 @@
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
-#include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/net/prediction_options.h"
 #include "chrome/browser/predictors/autocomplete_action_predictor.h"
 #include "chrome/browser/predictors/autocomplete_action_predictor_factory.h"
@@ -43,8 +44,10 @@
 #include "chrome/browser/profiles/profile_io_data.h"
 #include "chrome/browser/renderer_host/chrome_resource_dispatcher_host_delegate.h"
 #include "chrome/browser/safe_browsing/database_manager.h"
+#include "chrome/browser/safe_browsing/local_database_manager.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/safe_browsing/safe_browsing_util.h"
+#include "chrome/browser/safe_browsing/test_database_manager.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/browser/task_manager/task_manager_browsertest_util.h"
 #include "chrome/browser/ui/browser.h"
@@ -66,6 +69,8 @@
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/favicon/content/content_favicon_driver.h"
+#include "components/favicon/core/favicon_driver_observer.h"
 #include "components/variations/entropy_provider.h"
 #include "components/variations/variations_associated_data.h"
 #include "content/public/browser/browser_message_filter.h"
@@ -81,6 +86,7 @@
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test_utils.h"
+#include "content/public/test/ppapi_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/common/constants.h"
@@ -99,6 +105,7 @@
 #include "net/url_request/url_request_filter.h"
 #include "net/url_request/url_request_interceptor.h"
 #include "net/url_request/url_request_job.h"
+#include "ppapi/shared_impl/ppapi_switches.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
 
@@ -130,6 +137,43 @@ using task_manager::browsertest_util::WaitForTaskManagerRows;
 namespace prerender {
 
 namespace {
+
+class FaviconUpdateWatcher : public favicon::FaviconDriverObserver {
+ public:
+  explicit FaviconUpdateWatcher(content::WebContents* web_contents)
+      : seen_(false), running_(false), scoped_observer_(this) {
+    scoped_observer_.Add(
+        favicon::ContentFaviconDriver::FromWebContents(web_contents));
+  }
+
+  void Wait() {
+    if (seen_)
+      return;
+
+    running_ = true;
+    message_loop_runner_ = new content::MessageLoopRunner;
+    message_loop_runner_->Run();
+  }
+
+ private:
+  void OnFaviconAvailable(const gfx::Image& image) override {}
+  void OnFaviconUpdated(favicon::FaviconDriver* favicon_driver,
+                        bool icon_url_changed) override {
+    seen_ = true;
+    if (!running_)
+      return;
+
+    message_loop_runner_->Quit();
+    running_ = false;
+  }
+
+  bool seen_;
+  bool running_;
+  ScopedObserver<favicon::FaviconDriver, FaviconUpdateWatcher> scoped_observer_;
+  scoped_refptr<content::MessageLoopRunner> message_loop_runner_;
+
+  DISALLOW_COPY_AND_ASSIGN(FaviconUpdateWatcher);
+};
 
 class MockNetworkChangeNotifierWIFI : public NetworkChangeNotifier {
  public:
@@ -251,7 +295,7 @@ class ChannelDestructionWatcher {
   };
 
   void OnChannelDestroyed() {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
     EXPECT_FALSE(channel_destroyed_);
     channel_destroyed_ = true;
@@ -393,8 +437,7 @@ class TestPrerenderContents : public PrerenderContents {
       const content::Referrer& referrer,
       Origin origin,
       FinalStatus expected_final_status)
-      : PrerenderContents(prerender_manager, profile, url,
-                          referrer, origin, PrerenderManager::kNoExperiment),
+      : PrerenderContents(prerender_manager, profile, url, referrer, origin),
         expected_final_status_(expected_final_status),
         new_render_view_host_(NULL),
         was_hidden_(false),
@@ -625,8 +668,7 @@ class TestPrerenderContentsFactory : public PrerenderContents::Factory {
       Profile* profile,
       const GURL& url,
       const content::Referrer& referrer,
-      Origin origin,
-      uint8 experiment_id) override {
+      Origin origin) override {
     ExpectedContents expected;
     if (!expected_contents_queue_.empty()) {
       expected = expected_contents_queue_.front();
@@ -660,14 +702,17 @@ class TestPrerenderContentsFactory : public PrerenderContents::Factory {
   std::deque<ExpectedContents> expected_contents_queue_;
 };
 
+// TODO(nparker): Switch this to use TestSafeBrowsingDatabaseManager and run
+// with SAFE_BROWSING_DB_LOCAL || SAFE_BROWSING_DB_REMOTE.
 #if defined(FULL_SAFE_BROWSING)
 // A SafeBrowsingDatabaseManager implementation that returns a fixed result for
 // a given URL.
-class FakeSafeBrowsingDatabaseManager :  public SafeBrowsingDatabaseManager {
+class FakeSafeBrowsingDatabaseManager
+    : public LocalSafeBrowsingDatabaseManager {
  public:
   explicit FakeSafeBrowsingDatabaseManager(SafeBrowsingService* service)
-      : SafeBrowsingDatabaseManager(service),
-        threat_type_(SB_THREAT_TYPE_SAFE) { }
+      : LocalSafeBrowsingDatabaseManager(service),
+        threat_type_(SB_THREAT_TYPE_SAFE) {}
 
   // Called on the IO thread to check if the given url is safe or not.  If we
   // can synchronously determine that the url is safe, CheckUrl returns true.
@@ -677,7 +722,7 @@ class FakeSafeBrowsingDatabaseManager :  public SafeBrowsingDatabaseManager {
   // specified by the user, and the user-specified result is not SAFE
   // (in which that result will be communicated back via a call into the
   // client, and false will be returned).
-  // Overrides SafeBrowsingService::CheckBrowseUrl.
+  // Overrides SafeBrowsingDatabaseManager::CheckBrowseUrl.
   bool CheckBrowseUrl(const GURL& gurl, Client* client) override {
     if (gurl != url_ || threat_type_ == SB_THREAT_TYPE_SAFE)
       return true;
@@ -701,14 +746,16 @@ class FakeSafeBrowsingDatabaseManager :  public SafeBrowsingDatabaseManager {
     std::vector<SBThreatType> expected_threats;
     expected_threats.push_back(SB_THREAT_TYPE_URL_MALWARE);
     expected_threats.push_back(SB_THREAT_TYPE_URL_PHISHING);
-    SafeBrowsingDatabaseManager::SafeBrowsingCheck sb_check(
+    // TODO(nparker): Replace SafeBrowsingCheck w/ a call to
+    // client->OnCheckBrowseUrlResult()
+    LocalSafeBrowsingDatabaseManager::SafeBrowsingCheck sb_check(
         std::vector<GURL>(1, gurl),
         std::vector<SBFullHash>(),
         client,
         safe_browsing_util::MALWARE,
         expected_threats);
     sb_check.url_results[0] = threat_type_;
-    client->OnSafeBrowsingResult(sb_check);
+    sb_check.OnSafeBrowsingResult();
   }
 
   GURL url_;
@@ -1017,7 +1064,9 @@ class NeverRunsExternalProtocolHandlerDelegate
   void BlockRequest() override {}
   void RunExternalProtocolDialog(const GURL& url,
                                  int render_process_host_id,
-                                 int routing_id) override {
+                                 int routing_id,
+                                 ui::PageTransition page_transition,
+                                 bool has_user_gesture) override {
     NOTREACHED();
   }
   void LaunchUrlWithoutSecurityCheck(const GURL& url) override { NOTREACHED(); }
@@ -1032,7 +1081,6 @@ base::FilePath GetTestPath(const std::string& file_name) {
 
 }  // namespace
 
-// Many of these tests are flaky. See http://crbug.com/249179
 class PrerenderBrowserTest : virtual public InProcessBrowserTest {
  public:
   PrerenderBrowserTest()
@@ -1070,83 +1118,11 @@ class PrerenderBrowserTest : virtual public InProcessBrowserTest {
   void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitchASCII(switches::kPrerenderMode,
                                     switches::kPrerenderModeSwitchValueEnabled);
-#if defined(OS_MACOSX)
-    // The plugins directory isn't read by default on the Mac, so it needs to be
-    // explicitly registered.
-    base::FilePath app_dir;
-    PathService::Get(chrome::DIR_APP, &app_dir);
-    command_line->AppendSwitchPath(
-        switches::kExtraPluginDir,
-        app_dir.Append(FILE_PATH_LITERAL("plugins")));
-#endif
-    command_line->AppendSwitch(switches::kAlwaysAuthorizePlugins);
-    command_line->AppendSwitch(switches::kEnableNpapi);
-  }
+    command_line->AppendSwitch(switches::kEnablePepperTesting);
+    command_line->AppendSwitchASCII(
+        switches::kOverridePluginPowerSaverForTesting, "ignore-list");
 
-  void SetPreference(NetworkPredictionOptions value) {
-    browser()->profile()->GetPrefs()->SetInteger(
-        prefs::kNetworkPredictionOptions, value);
-  }
-
-  // Verifies whether ShouldDisableLocalPredictorDueToPreferencesAndNetwork
-  // produces the desired output.
-  void TestShouldDisableLocalPredictorPreferenceNetworkMatrix(
-      bool preference_wifi_network_wifi,
-      bool preference_wifi_network_4g,
-      bool preference_always_network_wifi,
-      bool preference_always_network_4g,
-      bool preference_never_network_wifi,
-      bool preference_never_network_4g) {
-    Profile* profile = browser()->profile();
-
-    // Set real NetworkChangeNotifier singleton aside.
-    scoped_ptr<NetworkChangeNotifier::DisableForTest> disable_for_test(
-        new NetworkChangeNotifier::DisableForTest);
-
-    // Set preference to WIFI_ONLY: prefetch when not on cellular.
-    SetPreference(NetworkPredictionOptions::NETWORK_PREDICTION_WIFI_ONLY);
-    {
-      scoped_ptr<NetworkChangeNotifier> mock(new MockNetworkChangeNotifierWIFI);
-      EXPECT_EQ(
-          ShouldDisableLocalPredictorDueToPreferencesAndNetwork(profile),
-          preference_wifi_network_wifi);
-    }
-    {
-      scoped_ptr<NetworkChangeNotifier> mock(new MockNetworkChangeNotifier4G);
-      EXPECT_EQ(
-          ShouldDisableLocalPredictorDueToPreferencesAndNetwork(profile),
-          preference_wifi_network_4g);
-    }
-
-    // Set preference to ALWAYS: always prefetch.
-    SetPreference(NetworkPredictionOptions::NETWORK_PREDICTION_ALWAYS);
-    {
-      scoped_ptr<NetworkChangeNotifier> mock(new MockNetworkChangeNotifierWIFI);
-      EXPECT_EQ(
-          ShouldDisableLocalPredictorDueToPreferencesAndNetwork(profile),
-          preference_always_network_wifi);
-    }
-    {
-      scoped_ptr<NetworkChangeNotifier> mock(new MockNetworkChangeNotifier4G);
-      EXPECT_EQ(
-          ShouldDisableLocalPredictorDueToPreferencesAndNetwork(profile),
-          preference_always_network_4g);
-    }
-
-    // Set preference to NEVER: never prefetch.
-    SetPreference(NetworkPredictionOptions::NETWORK_PREDICTION_NEVER);
-    {
-      scoped_ptr<NetworkChangeNotifier> mock(new MockNetworkChangeNotifierWIFI);
-      EXPECT_EQ(
-          ShouldDisableLocalPredictorDueToPreferencesAndNetwork(profile),
-          preference_never_network_wifi);
-    }
-    {
-      scoped_ptr<NetworkChangeNotifier> mock(new MockNetworkChangeNotifier4G);
-      EXPECT_EQ(
-          ShouldDisableLocalPredictorDueToPreferencesAndNetwork(profile),
-          preference_never_network_4g);
-    }
+    ASSERT_TRUE(ppapi::RegisterPowerSaverTestPlugin(command_line));
   }
 
   void SetUpOnMainThread() override {
@@ -1693,8 +1669,8 @@ class PrerenderBrowserTest : virtual public InProcessBrowserTest {
 
     if (new_web_contents) {
       NewTabNavigationOrSwapObserver observer;
-      render_frame_host->
-          ExecuteJavaScriptForTests(base::ASCIIToUTF16(javascript));
+      render_frame_host->ExecuteJavaScriptWithUserGestureForTests(
+          base::ASCIIToUTF16(javascript));
       observer.Wait();
     } else {
       NavigationOrSwapObserver observer(current_browser()->tab_strip_model(),
@@ -2005,44 +1981,40 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderAlertAfterOnload) {
 
 // Checks that plugins are not loaded while a page is being preloaded, but
 // are loaded when the page is displayed.
-#if defined(USE_AURA) && !defined(OS_WIN)
-// http://crbug.com/103496
-#define MAYBE_PrerenderDelayLoadPlugin DISABLED_PrerenderDelayLoadPlugin
-#define MAYBE_PrerenderPluginPowerSaver DISABLED_PrerenderPluginPowerSaver
-#elif defined(OS_MACOSX)
-// http://crbug.com/100514
-#define MAYBE_PrerenderDelayLoadPlugin DISABLED_PrerenderDelayLoadPlugin
-#define MAYBE_PrerenderPluginPowerSaver DISABLED_PrerenderPluginPowerSaver
-#elif defined(OS_WIN) && defined(ARCH_CPU_X86_64)
-// TODO(jschuh): Failing plugin tests. crbug.com/244653
-#define MAYBE_PrerenderDelayLoadPlugin DISABLED_PrerenderDelayLoadPlugin
-#define MAYBE_PrerenderPluginPowerSaver DISABLED_PrerenderPluginPowerSaver
-#elif defined(OS_LINUX)
-// http://crbug.com/306715
-#define MAYBE_PrerenderDelayLoadPlugin DISABLED_PrerenderDelayLoadPlugin
-#define MAYBE_PrerenderPluginPowerSaver DISABLED_PrerenderPluginPowerSaver
-#else
-#define MAYBE_PrerenderDelayLoadPlugin PrerenderDelayLoadPlugin
-#define MAYBE_PrerenderPluginPowerSaver PrerenderPluginPowerSaver
-#endif
-// http://crbug.com/306715
-IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, MAYBE_PrerenderDelayLoadPlugin) {
-  PrerenderTestURL("files/prerender/plugin_delay_load.html",
-                   FINAL_STATUS_USED,
-                   1);
+IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderDelayLoadPlugin) {
+  PrerenderTestURL("files/prerender/prerender_plugin_delay_load.html",
+                   FINAL_STATUS_USED, 1);
   NavigateToDestURL();
 }
 
-// For enabled Plugin Power Saver, checks that plugins are not loaded while
+// For Content Setting DETECT, checks that plugins are not loaded while
 // a page is being preloaded, but are loaded when the page is displayed.
-IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, MAYBE_PrerenderPluginPowerSaver) {
-  // Enable click-to-play.
+IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderContentSettingDetect) {
   HostContentSettingsMap* content_settings_map =
       current_browser()->profile()->GetHostContentSettingsMap();
   content_settings_map->SetDefaultContentSetting(
       CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_DETECT_IMPORTANT_CONTENT);
 
   PrerenderTestURL("files/prerender/prerender_plugin_power_saver.html",
+                   FINAL_STATUS_USED, 1);
+
+  DisableJavascriptCalls();
+  NavigateToDestURL();
+  bool second_placeholder_present = false;
+  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
+      GetActiveWebContents(), "AwaitPluginPrerollAndPlaceholder();",
+      &second_placeholder_present));
+  EXPECT_TRUE(second_placeholder_present);
+}
+
+// For Content Setting BLOCK, checks that plugins are never loaded.
+IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderContentSettingBlock) {
+  HostContentSettingsMap* content_settings_map =
+      current_browser()->profile()->GetHostContentSettingsMap();
+  content_settings_map->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_PLUGINS,
+                                                 CONTENT_SETTING_BLOCK);
+
+  PrerenderTestURL("files/prerender/prerender_plugin_never_load.html",
                    FINAL_STATUS_USED, 1);
   NavigateToDestURL();
 }
@@ -3143,16 +3115,14 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderFavicon) {
                        1);
   NavigateToDestURL();
 
-  if (!FaviconTabHelper::FromWebContents(
-          GetActiveWebContents())->FaviconIsValid()) {
+  favicon::FaviconDriver* favicon_driver =
+      favicon::ContentFaviconDriver::FromWebContents(GetActiveWebContents());
+  if (!favicon_driver->FaviconIsValid()) {
     // If the favicon has not been set yet, wait for it to be.
-    content::WindowedNotificationObserver favicon_update_watcher(
-        chrome::NOTIFICATION_FAVICON_UPDATED,
-        content::Source<WebContents>(GetActiveWebContents()));
+    FaviconUpdateWatcher favicon_update_watcher(GetActiveWebContents());
     favicon_update_watcher.Wait();
   }
-  EXPECT_TRUE(FaviconTabHelper::FromWebContents(
-      GetActiveWebContents())->FaviconIsValid());
+  EXPECT_TRUE(favicon_driver->FaviconIsValid());
 }
 
 // Checks that when a prerendered page is swapped in to a referring page, the
@@ -3396,43 +3366,6 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, MatchCompleteDummy) {
                                       0);
   histogram_tester().ExpectTotalCount(
       "Prerender.websame_PerceivedPLTMatchedComplete", 1);
-}
-
-class PrerenderBrowserTestWithNaCl : public PrerenderBrowserTest {
- public:
-  PrerenderBrowserTestWithNaCl() {}
-  ~PrerenderBrowserTestWithNaCl() override {}
-
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    PrerenderBrowserTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitch(switches::kEnableNaCl);
-  }
-};
-
-// Check that NaCl plugins work when enabled, with prerendering.
-IN_PROC_BROWSER_TEST_F(PrerenderBrowserTestWithNaCl,
-                       PrerenderNaClPluginEnabled) {
-#if defined(OS_WIN) && defined(USE_ASH)
-  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kAshBrowserTests))
-    return;
-#endif
-
-  PrerenderTestURL("files/prerender/prerender_plugin_nacl_enabled.html",
-                   FINAL_STATUS_USED,
-                   1);
-  NavigateToDestURL();
-
-  // To avoid any chance of a race, we have to let the script send its response
-  // asynchronously.
-  WebContents* web_contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  bool display_test_result = false;
-  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(web_contents,
-                                                   "DidDisplayReallyPass()",
-                                                   &display_test_result));
-  ASSERT_TRUE(display_test_result);
 }
 
 // Checks that the referrer policy is used when prerendering.
@@ -4107,17 +4040,44 @@ IN_PROC_BROWSER_TEST_F(PrerenderOmniboxBrowserTest,
       GetAutocompleteActionPredictor()->IsPrerenderAbandonedForTesting());
 }
 
-// Prefetch should be allowed depending on preference and network type.
-// This test is for the bsae case: no Finch overrides should never disable.
-IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
-                       LocalPredictorDisableWorksBaseCase) {
-  TestShouldDisableLocalPredictorPreferenceNetworkMatrix(
-      false /*preference_wifi_network_wifi*/,
-      false /*preference_wifi_network_4g*/,
-      false /*preference_always_network_wifi*/,
-      false /*preference_always_network_4g*/,
-      false /*preference_never_network_wifi*/,
-      false /*preference_never_network_4g*/);
+// Can't run tests with NaCl plugins if built with DISABLE_NACL.
+#if !defined(DISABLE_NACL)
+class PrerenderBrowserTestWithNaCl : public PrerenderBrowserTest {
+ public:
+  PrerenderBrowserTestWithNaCl() {}
+  ~PrerenderBrowserTestWithNaCl() override {}
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    PrerenderBrowserTest::SetUpCommandLine(command_line);
+    command_line->AppendSwitch(switches::kEnableNaCl);
+  }
+};
+
+// Check that NaCl plugins work when enabled, with prerendering.
+IN_PROC_BROWSER_TEST_F(PrerenderBrowserTestWithNaCl,
+                       PrerenderNaClPluginEnabled) {
+#if defined(OS_WIN) && defined(USE_ASH)
+  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
+    return;
+#endif
+
+  PrerenderTestURL("files/prerender/prerender_plugin_nacl_enabled.html",
+                   FINAL_STATUS_USED,
+                   1);
+  NavigateToDestURL();
+
+  // To avoid any chance of a race, we have to let the script send its response
+  // asynchronously.
+  WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  bool display_test_result = false;
+  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(web_contents,
+                                                   "DidDisplayReallyPass()",
+                                                   &display_test_result));
+  ASSERT_TRUE(display_test_result);
 }
+#endif  // !defined(DISABLE_NACL)
 
 }  // namespace prerender

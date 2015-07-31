@@ -111,12 +111,12 @@ ProfileImplIOData::Handle::Handle(Profile* profile)
     : io_data_(new ProfileImplIOData),
       profile_(profile),
       initialized_(false) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(profile);
 }
 
 ProfileImplIOData::Handle::~Handle() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (io_data_->predictor_ != NULL) {
     // io_data_->predictor_ might be NULL if Init() was never called
     // (i.e. we shut down before ProfileImpl::DoFinalInit() got called).
@@ -154,7 +154,7 @@ void ProfileImplIOData::Handle::Init(
     storage::SpecialStoragePolicy* special_storage_policy,
     scoped_ptr<domain_reliability::DomainReliabilityMonitor>
         domain_reliability_monitor) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!io_data_->lazy_params_);
   DCHECK(predictor);
 
@@ -207,14 +207,14 @@ void ProfileImplIOData::Handle::Init(
 
 content::ResourceContext*
     ProfileImplIOData::Handle::GetResourceContext() const {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   LazyInitialize();
   return GetResourceContextNoInit();
 }
 
 content::ResourceContext*
 ProfileImplIOData::Handle::GetResourceContextNoInit() const {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   // Don't call LazyInitialize here, since the resource context is created at
   // the beginning of initalization and is used by some members while they're
   // being initialized (i.e. AppCacheService).
@@ -227,7 +227,7 @@ ProfileImplIOData::Handle::CreateMainRequestContextGetter(
     content::URLRequestInterceptorScopedVector request_interceptors,
     PrefService* local_state,
     IOThread* io_thread) const {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   LazyInitialize();
   DCHECK(!main_request_context_getter_.get());
   main_request_context_getter_ = ChromeURLRequestContextGetter::Create(
@@ -249,7 +249,7 @@ ProfileImplIOData::Handle::CreateMainRequestContextGetter(
 
 scoped_refptr<ChromeURLRequestContextGetter>
 ProfileImplIOData::Handle::GetMediaRequestContextGetter() const {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   LazyInitialize();
   if (!media_request_context_getter_.get()) {
     media_request_context_getter_ =
@@ -260,7 +260,7 @@ ProfileImplIOData::Handle::GetMediaRequestContextGetter() const {
 
 scoped_refptr<ChromeURLRequestContextGetter>
 ProfileImplIOData::Handle::GetExtensionsRequestContextGetter() const {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   LazyInitialize();
   if (!extensions_request_context_getter_.get()) {
     extensions_request_context_getter_ =
@@ -275,7 +275,7 @@ ProfileImplIOData::Handle::CreateIsolatedAppRequestContextGetter(
     bool in_memory,
     content::ProtocolHandlerMap* protocol_handlers,
     content::URLRequestInterceptorScopedVector request_interceptors) const {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   // Check that the partition_path is not the same as the base profile path. We
   // expect isolated partition, which will never go to the default profile path.
   CHECK(partition_path != profile_->GetPath());
@@ -309,7 +309,7 @@ scoped_refptr<ChromeURLRequestContextGetter>
 ProfileImplIOData::Handle::GetIsolatedMediaRequestContextGetter(
     const base::FilePath& partition_path,
     bool in_memory) const {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   // We must have a non-default path, or this will act like the default media
   // context.
   CHECK(partition_path != profile_->GetPath());
@@ -338,14 +338,14 @@ ProfileImplIOData::Handle::GetIsolatedMediaRequestContextGetter(
 
 DevToolsNetworkController*
 ProfileImplIOData::Handle::GetDevToolsNetworkController() const {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   return io_data_->network_controller();
 }
 
 void ProfileImplIOData::Handle::ClearNetworkingHistorySince(
     base::Time time,
     const base::Closure& completion) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   LazyInitialize();
 
   BrowserThread::PostTask(
@@ -358,7 +358,7 @@ void ProfileImplIOData::Handle::ClearNetworkingHistorySince(
 }
 
 void ProfileImplIOData::Handle::LazyInitialize() const {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (initialized_)
     return;
 
@@ -376,7 +376,7 @@ void ProfileImplIOData::Handle::LazyInitialize() const {
       prefs::kRestoreOnStartup, pref_service);
   io_data_->session_startup_pref()->MoveToThread(
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO));
-#if defined(FULL_SAFE_BROWSING) || defined(MOBILE_SAFE_BROWSING)
+#if defined(SAFE_BROWSING_SERVICE)
   io_data_->safe_browsing_enabled()->Init(prefs::kSafeBrowsingEnabled,
       pref_service);
   io_data_->safe_browsing_enabled()->MoveToThread(
@@ -438,11 +438,6 @@ void ProfileImplIOData::InitializeInternal(
     ProfileParams* profile_params,
     content::ProtocolHandlerMap* protocol_handlers,
     content::URLRequestInterceptorScopedVector request_interceptors) const {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "436671 ProfileImplIOData::InitializeInternal"));
-
   // Set up a persistent store for use by the network stack on the IO thread.
   base::FilePath network_json_store_filepath(
       profile_path_.Append(chrome::kNetworkPersistentStateFilename));
@@ -461,11 +456,6 @@ void ProfileImplIOData::InitializeInternal(
   chrome_network_delegate->set_predictor(predictor_.get());
 
   if (domain_reliability_monitor_) {
-    // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
-    tracked_objects::ScopedTracker tracking_profile1(
-        FROM_HERE_WITH_EXPLICIT_FUNCTION(
-            "436671 ProfileImplIOData::InitializeInternal1"));
-
     domain_reliability::DomainReliabilityMonitor* monitor =
         domain_reliability_monitor_.get();
     monitor->InitURLRequestContext(main_context);
@@ -473,11 +463,6 @@ void ProfileImplIOData::InitializeInternal(
     monitor->SetDiscardUploads(!GetMetricsEnabledStateOnIOThread());
     chrome_network_delegate->set_domain_reliability_monitor(monitor);
   }
-
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
-  tracked_objects::ScopedTracker tracking_profile2(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "436671 ProfileImplIOData::InitializeInternal2"));
 
   ApplyProfileParamsToContext(main_context);
 
@@ -513,12 +498,7 @@ void ProfileImplIOData::InitializeInternal(
   scoped_refptr<net::CookieStore> cookie_store = NULL;
   net::ChannelIDService* channel_id_service = NULL;
 
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
-  tracked_objects::ScopedTracker tracking_profile5(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "436671 ProfileImplIOData::InitializeInternal5"));
-
-  // setup cookie store
+  // Set up cookie store.
   if (!cookie_store.get()) {
     DCHECK(!lazy_params_->cookie_path.empty());
 
@@ -534,12 +514,7 @@ void ProfileImplIOData::InitializeInternal(
 
   main_context->set_cookie_store(cookie_store.get());
 
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
-  tracked_objects::ScopedTracker tracking_profile6(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "436671 ProfileImplIOData::InitializeInternal6"));
-
-  // Setup server bound cert service.
+  // Set up server bound cert service.
   if (!channel_id_service) {
     DCHECK(!lazy_params_->channel_id_path.empty());
 
@@ -557,25 +532,20 @@ void ProfileImplIOData::InitializeInternal(
   set_channel_id_service(channel_id_service);
   main_context->set_channel_id_service(channel_id_service);
 
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
-  tracked_objects::ScopedTracker tracking_profile7(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "436671 ProfileImplIOData::InitializeInternal7"));
-
-  net::HttpCache::DefaultBackend* main_backend =
-      new net::HttpCache::DefaultBackend(
-          net::DISK_CACHE,
-          ChooseCacheBackendType(),
-          lazy_params_->cache_path,
-          lazy_params_->cache_max_size,
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::CACHE));
-  scoped_ptr<net::HttpCache> main_cache = CreateMainHttpFactory(
-      profile_params, main_backend);
-
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
-  tracked_objects::ScopedTracker tracking_profile71(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "436671 ProfileImplIOData::InitializeInternal71"));
+  scoped_ptr<net::HttpCache> main_cache;
+  {
+    // TODO(ttuttle): Remove ScopedTracker below once crbug.com/436671 is fixed.
+    tracked_objects::ScopedTracker tracking_profile(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION("436671 HttpCache construction"));
+    net::HttpCache::DefaultBackend* main_backend =
+        new net::HttpCache::DefaultBackend(
+            net::DISK_CACHE,
+            ChooseCacheBackendType(),
+            lazy_params_->cache_path,
+            lazy_params_->cache_max_size,
+            BrowserThread::GetMessageLoopProxyForThread(BrowserThread::CACHE));
+    main_cache = CreateMainHttpFactory(profile_params, main_backend);
+  }
 
   main_http_factory_.reset(main_cache.release());
   main_context->set_http_transaction_factory(main_http_factory_.get());
@@ -584,11 +554,6 @@ void ProfileImplIOData::InitializeInternal(
   ftp_factory_.reset(
       new net::FtpNetworkLayer(io_thread_globals->host_resolver.get()));
 #endif  // !defined(DISABLE_FTP_SUPPORT)
-
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
-  tracked_objects::ScopedTracker tracking_profile8(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "436671 ProfileImplIOData::InitializeInternal8"));
 
   scoped_ptr<net::URLRequestJobFactoryImpl> main_job_factory(
       new net::URLRequestJobFactoryImpl());
@@ -606,11 +571,6 @@ void ProfileImplIOData::InitializeInternal(
       main_context->network_delegate(),
       ftp_factory_.get());
   main_context->set_job_factory(main_job_factory_.get());
-
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
-  tracked_objects::ScopedTracker tracking_profile9(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "436671 ProfileImplIOData::InitializeInternal9"));
 
 #if defined(ENABLE_EXTENSIONS)
   InitializeExtensionsRequestContext(profile_params);
@@ -847,7 +807,7 @@ ProfileImplIOData::AcquireIsolatedMediaRequestContext(
 void ProfileImplIOData::ClearNetworkingHistorySinceOnIOThread(
     base::Time time,
     const base::Closure& completion) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(initialized());
 
   DCHECK(transport_security_state());

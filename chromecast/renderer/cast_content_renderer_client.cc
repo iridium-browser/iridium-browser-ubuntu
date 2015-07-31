@@ -95,7 +95,7 @@ CastContentRendererClient::~CastContentRendererClient() {
 
 void CastContentRendererClient::RenderThreadStarted() {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-#if defined(USE_NSS)
+#if defined(USE_NSS_CERTS)
   // Note: Copied from chrome_render_process_observer.cc to fix b/8676652.
   //
   // On platforms where the system NSS shared libraries are used,
@@ -146,6 +146,13 @@ void CastContentRendererClient::RenderViewCreated(
     // embedders, though Android has enabled by default for mobile browsers.
     webview->settings()->setShrinksViewportContentToFit(false);
     webview->settings()->setMediaControlsOverlayPlayButtonEnabled(false);
+
+    // Scale 1 ensures window.innerHeight/Width match application resolution.
+    // PageScaleOverride is the 'user agent' value which overrides page
+    // settings (from meta viewport tag) - thus preventing inconsistency
+    // between Android and non-Android cast_shell.
+    webview->setDefaultPageScaleLimits(1.f, 1.f);
+    webview->setInitialPageScaleOverride(1.f);
 
     // Disable application cache as Chromecast doesn't support off-line
     // application running.

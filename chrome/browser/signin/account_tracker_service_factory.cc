@@ -39,13 +39,11 @@ AccountTrackerServiceFactory* AccountTrackerServiceFactory::GetInstance() {
 
 void AccountTrackerServiceFactory::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterListPref(
-      AccountTrackerService::kAccountInfoPref,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterIntegerPref(
-      prefs::kAccountIdMigrationState,
-      AccountTrackerService::MIGRATION_NOT_STARTED,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterListPref(AccountTrackerService::kAccountInfoPref);
+  registry->RegisterIntegerPref(prefs::kAccountIdMigrationState,
+                                AccountTrackerService::MIGRATION_NOT_STARTED);
+  registry->RegisterInt64Pref(
+      AccountTrackerService::kAccountTrackerServiceLastUpdate, 0);
 }
 
 KeyedService* AccountTrackerServiceFactory::BuildServiceInstanceFor(

@@ -5,7 +5,6 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_API_DEVELOPER_PRIVATE_INSPECTABLE_VIEWS_FINDER_H_
 #define CHROME_BROWSER_EXTENSIONS_API_DEVELOPER_PRIVATE_INSPECTABLE_VIEWS_FINDER_H_
 
-#include <set>
 #include <vector>
 
 #include "base/macros.h"
@@ -15,13 +14,9 @@
 class Profile;
 class GURL;
 
-namespace content {
-class RenderFrameHost;
-class RenderViewHost;
-}
-
 namespace extensions {
 class Extension;
+class ProcessManager;
 
 namespace api {
 namespace developer_private {
@@ -36,11 +31,7 @@ class InspectableViewsFinder {
   using View = linked_ptr<api::developer_private::ExtensionView>;
   using ViewList = std::vector<View>;
 
-  // |deleting_rvh| refers to a RenderViewHost that is being deleted, and
-  // should thus be omitted from any lists.
-  // TODO(devlin): This is hacky.
-  InspectableViewsFinder(Profile* profile,
-                         content::RenderViewHost* deleting_rvh);
+  explicit InspectableViewsFinder(Profile* profile);
   ~InspectableViewsFinder();
 
   // Construct a view from the given parameters.
@@ -64,7 +55,7 @@ class InspectableViewsFinder {
   // Returns all inspectable views for the extension process.
   void GetViewsForExtensionProcess(
       const Extension& extension,
-      const std::set<content::RenderFrameHost*>& frames,
+      ProcessManager* process_manager,
       bool is_incognito,
       ViewList* result);
 
@@ -73,8 +64,6 @@ class InspectableViewsFinder {
                                      ViewList* result);
 
   Profile* profile_;
-
-  content::RenderViewHost* deleting_rvh_;
 
   DISALLOW_COPY_AND_ASSIGN(InspectableViewsFinder);
 };

@@ -9,12 +9,15 @@
 #include <string>
 
 #include "base/atomic_sequence_num.h"
+#include "base/auto_reset.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/message_loop/message_loop.h"
+#include "base/location.h"
 #include "base/metrics/histogram.h"
+#include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_event_argument.h"
 #include "cc/animation/animation_registrar.h"
@@ -35,6 +38,7 @@
 #include "cc/resources/prioritized_resource_manager.h"
 #include "cc/resources/ui_resource_request.h"
 #include "cc/scheduler/begin_frame_source.h"
+#include "cc/trees/draw_property_utils.h"
 #include "cc/trees/layer_tree_host_client.h"
 #include "cc/trees/layer_tree_host_common.h"
 #include "cc/trees/layer_tree_host_impl.h"
@@ -52,60 +56,48 @@ static base::StaticAtomicSequenceNumber s_layer_tree_host_sequence_number;
 
 namespace cc {
 
+LayerTreeHost::InitParams::InitParams() {
+}
+
+LayerTreeHost::InitParams::~InitParams() {
+}
+
 scoped_ptr<LayerTreeHost> LayerTreeHost::CreateThreaded(
-    LayerTreeHostClient* client,
-    SharedBitmapManager* shared_bitmap_manager,
-    gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
-    TaskGraphRunner* task_graph_runner,
-    const LayerTreeSettings& settings,
-    scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> impl_task_runner,
-    scoped_ptr<BeginFrameSource> external_begin_frame_source) {
-  DCHECK(main_task_runner.get());
+    InitParams* params) {
+  DCHECK(params->main_task_runner.get());
   DCHECK(impl_task_runner.get());
-  scoped_ptr<LayerTreeHost> layer_tree_host(new LayerTreeHost(
-      client, shared_bitmap_manager, gpu_memory_buffer_manager,
-      task_graph_runner, settings));
-  layer_tree_host->InitializeThreaded(main_task_runner,
-                                      impl_task_runner,
-                                      external_begin_frame_source.Pass());
+  DCHECK(params->settings);
+  scoped_ptr<LayerTreeHost> layer_tree_host(new LayerTreeHost(params));
+  layer_tree_host->InitializeThreaded(
+      params->main_task_runner, impl_task_runner,
+      params->external_begin_frame_source.Pass());
   return layer_tree_host.Pass();
 }
 
 scoped_ptr<LayerTreeHost> LayerTreeHost::CreateSingleThreaded(
-    LayerTreeHostClient* client,
     LayerTreeHostSingleThreadClient* single_thread_client,
-    SharedBitmapManager* shared_bitmap_manager,
-    gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
-    TaskGraphRunner* task_graph_runner,
-    const LayerTreeSettings& settings,
-    scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
-    scoped_ptr<BeginFrameSource> external_begin_frame_source) {
-  scoped_ptr<LayerTreeHost> layer_tree_host(new LayerTreeHost(
-      client, shared_bitmap_manager, gpu_memory_buffer_manager,
-      task_graph_runner, settings));
-  layer_tree_host->InitializeSingleThreaded(single_thread_client,
-                                            main_task_runner,
-                                            external_begin_frame_source.Pass());
+    InitParams* params) {
+  DCHECK(params->settings);
+  scoped_ptr<LayerTreeHost> layer_tree_host(new LayerTreeHost(params));
+  layer_tree_host->InitializeSingleThreaded(
+      single_thread_client, params->main_task_runner,
+      params->external_begin_frame_source.Pass());
   return layer_tree_host.Pass();
 }
 
-LayerTreeHost::LayerTreeHost(
-    LayerTreeHostClient* client,
-    SharedBitmapManager* shared_bitmap_manager,
-    gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
-    TaskGraphRunner* task_graph_runner,
-    const LayerTreeSettings& settings)
+LayerTreeHost::LayerTreeHost(InitParams* params)
     : micro_benchmark_controller_(this),
       next_ui_resource_id_(1),
       inside_begin_main_frame_(false),
       needs_full_tree_sync_(true),
-      client_(client),
+      needs_meta_info_recomputation_(true),
+      client_(params->client),
       source_frame_number_(0),
       rendering_stats_instrumentation_(RenderingStatsInstrumentation::Create()),
       output_surface_lost_(true),
-      settings_(settings),
-      debug_state_(settings.initial_debug_state),
+      settings_(*params->settings),
+      debug_state_(settings_.initial_debug_state),
       top_controls_shrink_blink_size_(false),
       top_controls_height_(0.f),
       top_controls_shown_ratio_(0.f),
@@ -124,9 +116,9 @@ LayerTreeHost::LayerTreeHost(
       in_paint_layer_contents_(false),
       id_(s_layer_tree_host_sequence_number.GetNext() + 1),
       next_commit_forces_redraw_(false),
-      shared_bitmap_manager_(shared_bitmap_manager),
-      gpu_memory_buffer_manager_(gpu_memory_buffer_manager),
-      task_graph_runner_(task_graph_runner),
+      shared_bitmap_manager_(params->shared_bitmap_manager),
+      gpu_memory_buffer_manager_(params->gpu_memory_buffer_manager),
+      task_graph_runner_(params->task_graph_runner),
       surface_id_namespace_(0u),
       next_surface_sequence_(1u) {
   if (settings_.accelerated_animation_enabled)
@@ -323,7 +315,7 @@ void LayerTreeHost::FinishCommitOnImplThread(LayerTreeHostImpl* host_impl) {
     sync_tree->ClearViewportLayers();
   }
 
-  sync_tree->RegisterSelection(selection_start_, selection_end_);
+  sync_tree->RegisterSelection(selection_);
 
   sync_tree->PushPageScaleFromMainThread(
       page_scale_factor_, min_page_scale_factor_, max_page_scale_factor_);
@@ -338,7 +330,9 @@ void LayerTreeHost::FinishCommitOnImplThread(LayerTreeHostImpl* host_impl) {
   sync_tree->set_top_controls_height(top_controls_height_);
   sync_tree->PushTopControlsFromMainThread(top_controls_shown_ratio_);
 
-  host_impl->SetGpuRasterizationStatus(GetGpuRasterizationStatus());
+  host_impl->SetHasGpuRasterizationTrigger(has_gpu_rasterization_trigger_);
+  host_impl->SetContentIsSuitableForGpuRasterization(
+      content_is_suitable_for_gpu_rasterization_);
   RecordGpuRasterizationHistogram();
 
   host_impl->SetViewportSize(device_viewport_size_);
@@ -362,6 +356,7 @@ void LayerTreeHost::FinishCommitOnImplThread(LayerTreeHostImpl* host_impl) {
   }
 
   sync_tree->set_has_ever_been_drawn(false);
+  sync_tree->SetPropertyTrees(property_trees_);
 
   {
     TRACE_EVENT0("cc", "LayerTreeHost::PushProperties");
@@ -439,7 +434,9 @@ scoped_ptr<LayerTreeHostImpl> LayerTreeHost::CreateLayerTreeHostImpl(
       settings_, client, proxy_.get(), rendering_stats_instrumentation_.get(),
       shared_bitmap_manager_, gpu_memory_buffer_manager_, task_graph_runner_,
       id_);
-  host_impl->SetGpuRasterizationStatus(GetGpuRasterizationStatus());
+  host_impl->SetHasGpuRasterizationTrigger(has_gpu_rasterization_trigger_);
+  host_impl->SetContentIsSuitableForGpuRasterization(
+      content_is_suitable_for_gpu_rasterization_);
   shared_bitmap_manager_ = NULL;
   gpu_memory_buffer_manager_ = NULL;
   task_graph_runner_ = NULL;
@@ -508,7 +505,14 @@ void LayerTreeHost::SetNeedsCommit() {
 
 void LayerTreeHost::SetNeedsFullTreeSync() {
   needs_full_tree_sync_ = true;
+  needs_meta_info_recomputation_ = true;
+
+  property_trees_.needs_rebuild = true;
   SetNeedsCommit();
+}
+
+void LayerTreeHost::SetNeedsMetaInfoRecomputation(bool needs_recomputation) {
+  needs_meta_info_recomputation_ = needs_recomputation;
 }
 
 void LayerTreeHost::SetNeedsRedraw() {
@@ -581,21 +585,6 @@ void LayerTreeHost::SetDebugState(const LayerTreeDebugState& debug_state) {
   proxy_->SetDebugState(debug_state);
 }
 
-GpuRasterizationStatus LayerTreeHost::GetGpuRasterizationStatus() const {
-  if (settings_.gpu_rasterization_forced) {
-    return GpuRasterizationStatus::ON_FORCED;
-  } else if (settings_.gpu_rasterization_enabled) {
-    if (!has_gpu_rasterization_trigger_) {
-      return GpuRasterizationStatus::OFF_VIEWPORT;
-    } else if (!content_is_suitable_for_gpu_rasterization_) {
-      return GpuRasterizationStatus::OFF_CONTENT;
-    } else {
-      return GpuRasterizationStatus::ON;
-    }
-  }
-  return GpuRasterizationStatus::OFF_DEVICE;
-}
-
 void LayerTreeHost::SetHasGpuRasterizationTrigger(bool has_trigger) {
   if (has_trigger == has_gpu_rasterization_trigger_)
     return;
@@ -614,6 +603,7 @@ void LayerTreeHost::SetViewportSize(const gfx::Size& device_viewport_size) {
 
   device_viewport_size_ = device_viewport_size;
 
+  property_trees_.needs_rebuild = true;
   SetNeedsCommit();
 }
 
@@ -637,7 +627,10 @@ void LayerTreeHost::SetTopControlsShownRatio(float ratio) {
 
 void LayerTreeHost::ApplyPageScaleDeltaFromImplSide(float page_scale_delta) {
   DCHECK(CommitRequested());
+  if (page_scale_delta == 1.f)
+    return;
   page_scale_factor_ *= page_scale_delta;
+  property_trees_.needs_rebuild = true;
 }
 
 void LayerTreeHost::SetPageScaleFactorAndLimits(float page_scale_factor,
@@ -651,6 +644,7 @@ void LayerTreeHost::SetPageScaleFactorAndLimits(float page_scale_factor,
   page_scale_factor_ = page_scale_factor;
   min_page_scale_factor_ = min_page_scale_factor;
   max_page_scale_factor_ = max_page_scale_factor;
+  property_trees_.needs_rebuild = true;
   SetNeedsCommit();
 }
 
@@ -764,36 +758,80 @@ bool LayerTreeHost::UpdateLayers(Layer* root_layer,
   TRACE_EVENT1("cc", "LayerTreeHost::UpdateLayers",
                "source_frame_number", source_frame_number());
 
-  RenderSurfaceLayerList update_list;
-  {
-    UpdateHudLayer();
+  RenderSurfaceLayerList render_surface_layer_list;
 
-    Layer* root_scroll = FindFirstScrollableLayer(root_layer);
-    Layer* page_scale_layer = page_scale_layer_.get();
-    if (!page_scale_layer && root_scroll)
-      page_scale_layer = root_scroll->parent();
+  UpdateHudLayer();
 
-    if (hud_layer_.get()) {
-      hud_layer_->PrepareForCalculateDrawProperties(
-          device_viewport_size(), device_scale_factor_);
+  Layer* root_scroll = FindFirstScrollableLayer(root_layer);
+  Layer* page_scale_layer = page_scale_layer_.get();
+  if (!page_scale_layer && root_scroll)
+    page_scale_layer = root_scroll->parent();
+
+  if (hud_layer_.get()) {
+    hud_layer_->PrepareForCalculateDrawProperties(device_viewport_size(),
+                                                  device_scale_factor_);
+  }
+
+  bool can_render_to_separate_surface = true;
+  // TODO(vmpstr): Passing 0 as the current render surface layer list id means
+  // that we won't be able to detect if a layer is part of
+  // |render_surface_layer_list|.  Change this if this information is
+  // required.
+  int render_surface_layer_list_id = 0;
+  LayerTreeHostCommon::CalcDrawPropsMainInputs inputs(
+      root_layer, device_viewport_size(), gfx::Transform(),
+      device_scale_factor_, page_scale_factor_, page_scale_layer,
+      elastic_overscroll_, overscroll_elasticity_layer_.get(),
+      GetRendererCapabilities().max_texture_size, settings_.can_use_lcd_text,
+      settings_.layers_always_allowed_lcd_text, can_render_to_separate_surface,
+      settings_.layer_transforms_should_scale_layer_contents,
+      settings_.verify_property_trees, &render_surface_layer_list,
+      render_surface_layer_list_id, &property_trees_);
+
+  // This is a temporary state of affairs until impl-side painting is shipped
+  // everywhere and main thread property trees can be used in all cases.
+  // This code here implies that even if verify property trees is on,
+  // no verification will occur and only property trees will be used on the
+  // main thread.
+  if (using_only_property_trees()) {
+    TRACE_EVENT0("cc", "LayerTreeHost::UpdateLayers::CalcDrawProps");
+
+    LayerTreeHostCommon::PreCalculateMetaInformation(root_layer);
+
+    bool preserves_2d_axis_alignment = false;
+    gfx::Transform identity_transform;
+    LayerList update_layer_list;
+
+    LayerTreeHostCommon::UpdateRenderSurfaces(
+        root_layer, can_render_to_separate_surface, identity_transform,
+        preserves_2d_axis_alignment);
+    {
+      TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug.cdp-perf"),
+                   "LayerTreeHostCommon::ComputeVisibleRectsWithPropertyTrees");
+      BuildPropertyTreesAndComputeVisibleRects(
+          root_layer, page_scale_layer, page_scale_factor_,
+          device_scale_factor_, gfx::Rect(device_viewport_size_),
+          identity_transform, &property_trees_, &update_layer_list);
     }
 
+    for (const auto& layer : update_layer_list)
+      layer->SavePaintProperties();
+
+    base::AutoReset<bool> painting(&in_paint_layer_contents_, true);
+    bool did_paint_content = false;
+    for (const auto& layer : update_layer_list) {
+      // TODO(enne): temporarily clobber draw properties visible rect.
+      layer->draw_properties().visible_content_rect =
+          layer->visible_rect_from_property_trees();
+      did_paint_content |= layer->Update(queue, nullptr);
+      content_is_suitable_for_gpu_rasterization_ &=
+          layer->IsSuitableForGpuRasterization();
+    }
+    return did_paint_content;
+  }
+
+  {
     TRACE_EVENT0("cc", "LayerTreeHost::UpdateLayers::CalcDrawProps");
-    bool can_render_to_separate_surface = true;
-    // TODO(vmpstr): Passing 0 as the current render surface layer list id means
-    // that we won't be able to detect if a layer is part of |update_list|.
-    // Change this if this information is required.
-    int render_surface_layer_list_id = 0;
-    LayerTreeHostCommon::CalcDrawPropsMainInputs inputs(
-        root_layer, device_viewport_size(), gfx::Transform(),
-        device_scale_factor_, page_scale_factor_, page_scale_layer,
-        elastic_overscroll_, overscroll_elasticity_layer_.get(),
-        GetRendererCapabilities().max_texture_size, settings_.can_use_lcd_text,
-        settings_.layers_always_allowed_lcd_text,
-        can_render_to_separate_surface,
-        settings_.layer_transforms_should_scale_layer_contents,
-        settings_.verify_property_trees, &update_list,
-        render_surface_layer_list_id);
     LayerTreeHostCommon::CalculateDrawProperties(&inputs);
   }
 
@@ -802,15 +840,15 @@ bool LayerTreeHost::UpdateLayers(Layer* root_layer,
 
   bool did_paint_content = false;
   bool need_more_updates = false;
-  PaintLayerContents(
-      update_list, queue, &did_paint_content, &need_more_updates);
+  PaintLayerContents(render_surface_layer_list, queue, &did_paint_content,
+                     &need_more_updates);
   if (need_more_updates) {
     TRACE_EVENT0("cc", "LayerTreeHost::UpdateLayers::posting prepaint task");
     prepaint_callback_.Reset(base::Bind(&LayerTreeHost::TriggerPrepaint,
                                         base::Unretained(this)));
     static base::TimeDelta prepaint_delay =
         base::TimeDelta::FromMilliseconds(100);
-    base::MessageLoop::current()->PostDelayedTask(
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE, prepaint_callback_.callback(), prepaint_delay);
   }
 
@@ -1106,6 +1144,7 @@ void LayerTreeHost::SetDeviceScaleFactor(float device_scale_factor) {
     return;
   device_scale_factor_ = device_scale_factor;
 
+  property_trees_.needs_rebuild = true;
   SetNeedsCommit();
 }
 
@@ -1126,8 +1165,12 @@ void LayerTreeHost::AnimateLayers(base::TimeTicks monotonic_time) {
   if (!settings_.accelerated_animation_enabled)
     return;
 
-  if (animation_registrar_->AnimateLayers(monotonic_time))
-    animation_registrar_->UpdateAnimationState(true, NULL);
+  AnimationEventsVector events;
+  if (animation_registrar_->AnimateLayers(monotonic_time)) {
+    animation_registrar_->UpdateAnimationState(true, &events);
+    if (!events.empty())
+      property_trees_.needs_rebuild = true;
+  }
 }
 
 UIResourceId LayerTreeHost::CreateUIResource(UIResourceClient* client) {
@@ -1195,13 +1238,11 @@ void LayerTreeHost::RegisterViewportLayers(
   outer_viewport_scroll_layer_ = outer_viewport_scroll_layer;
 }
 
-void LayerTreeHost::RegisterSelection(const LayerSelectionBound& start,
-                                      const LayerSelectionBound& end) {
-  if (selection_start_ == start && selection_end_ == end)
+void LayerTreeHost::RegisterSelection(const LayerSelection& selection) {
+  if (selection_ == selection)
     return;
 
-  selection_start_ = start;
-  selection_end_ = end;
+  selection_ = selection;
   SetNeedsCommit();
 }
 
@@ -1238,8 +1279,8 @@ void LayerTreeHost::QueueSwapPromise(scoped_ptr<SwapPromise> swap_promise) {
 }
 
 void LayerTreeHost::BreakSwapPromises(SwapPromise::DidNotSwapReason reason) {
-  for (size_t i = 0; i < swap_promise_list_.size(); i++)
-    swap_promise_list_[i]->DidNotSwap(reason);
+  for (auto* swap_promise : swap_promise_list_)
+    swap_promise->DidNotSwap(reason);
   swap_promise_list_.clear();
 }
 

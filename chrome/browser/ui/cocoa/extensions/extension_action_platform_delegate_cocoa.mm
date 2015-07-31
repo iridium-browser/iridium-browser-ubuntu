@@ -9,6 +9,7 @@
 
 #include "base/logging.h"
 #include "chrome/browser/extensions/extension_action.h"
+#include "chrome/browser/extensions/extension_view_host.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
@@ -23,6 +24,7 @@
 #include "content/public/browser/notification_source.h"
 #include "extensions/browser/notification_types.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/feature_switch.h"
 
 namespace {
 
@@ -54,11 +56,6 @@ ExtensionActionPlatformDelegateCocoa::ExtensionActionPlatformDelegateCocoa(
 ExtensionActionPlatformDelegateCocoa::~ExtensionActionPlatformDelegateCocoa() {
 }
 
-bool ExtensionActionPlatformDelegateCocoa::IsMenuRunning() const {
-  // TODO(devlin): Also account for context menus.
-  return controller_->is_showing_popup();
-}
-
 void ExtensionActionPlatformDelegateCocoa::RegisterCommand() {
   // Commands are handled elsewhere for Cocoa.
 }
@@ -66,25 +63,24 @@ void ExtensionActionPlatformDelegateCocoa::RegisterCommand() {
 void ExtensionActionPlatformDelegateCocoa::OnDelegateSet() {
   registrar_.Add(
       this,
-      extensions::NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE,
-      content::Source<Profile>(controller_->browser()->profile()));
-  registrar_.Add(
-      this,
       GetNotificationTypeForAction(*controller_->extension_action()),
       content::Source<Profile>(controller_->browser()->profile()));
 }
 
-void ExtensionActionPlatformDelegateCocoa::CloseActivePopup() {
-  ExtensionPopupController* popup = [ExtensionPopupController popup];
-  if (popup && ![popup isClosing])
-    [popup close];
+void ExtensionActionPlatformDelegateCocoa::ShowPopup(
+    scoped_ptr<extensions::ExtensionViewHost> host,
+    bool grant_tab_permissions,
+    ExtensionActionViewController::PopupShowAction show_action) {
+  BOOL devMode =
+      show_action == ExtensionActionViewController::SHOW_POPUP_AND_INSPECT;
+  [ExtensionPopupController host:host.Pass()
+                       inBrowser:controller_->browser()
+                      anchoredAt:GetPopupPoint()
+                   arrowLocation:info_bubble::kTopRight
+                         devMode:devMode];
 }
 
-extensions::ExtensionViewHost*
-ExtensionActionPlatformDelegateCocoa::ShowPopupWithUrl(
-    ExtensionActionViewController::PopupShowAction show_action,
-    const GURL& popup_url,
-    bool grant_tab_permissions) {
+void ExtensionActionPlatformDelegateCocoa::CloseOverflowMenu() {
   // If this was triggered by an action overflowed to the wrench menu, then
   // the wrench menu will be open. Close it before opening the popup.
   WrenchMenuController* wrenchMenuController =
@@ -94,16 +90,6 @@ ExtensionActionPlatformDelegateCocoa::ShowPopupWithUrl(
           toolbarController] wrenchMenuController];
   if ([wrenchMenuController isMenuOpen])
     [wrenchMenuController cancel];
-
-  BOOL devMode =
-      show_action == ExtensionActionViewController::SHOW_POPUP_AND_INSPECT;
-  ExtensionPopupController* popupController =
-      [ExtensionPopupController showURL:popup_url
-                              inBrowser:controller_->browser()
-                             anchoredAt:GetPopupPoint()
-                          arrowLocation:info_bubble::kTopRight
-                                devMode:devMode];
-  return [popupController extensionViewHost];
 }
 
 NSPoint ExtensionActionPlatformDelegateCocoa::GetPopupPoint() const {
@@ -112,15 +98,16 @@ NSPoint ExtensionActionPlatformDelegateCocoa::GetPopupPoint() const {
           controller_->browser()->window()->GetNativeWindow()];
   NSPoint popupPoint;
   if (controller_->extension_action()->action_type() ==
-          extensions::ActionInfo::TYPE_PAGE) {
-    popupPoint = [windowController locationBarBridge]->GetPageActionBubblePoint(
-        controller_->extension_action());
-  } else {
-    DCHECK_EQ(extensions::ActionInfo::TYPE_BROWSER,
-              controller_->extension_action()->action_type());
+          extensions::ActionInfo::TYPE_BROWSER ||
+      extensions::FeatureSwitch::extension_action_redesign()->IsEnabled()) {
     BrowserActionsController* actionsController =
         [[windowController toolbarController] browserActionsController];
     popupPoint = [actionsController popupPointForId:controller_->GetId()];
+  } else {
+    DCHECK_EQ(extensions::ActionInfo::TYPE_PAGE,
+              controller_->extension_action()->action_type());
+    popupPoint = [windowController locationBarBridge]->GetPageActionBubblePoint(
+        controller_->extension_action());
   }
   return popupPoint;
 }
@@ -130,9 +117,6 @@ void ExtensionActionPlatformDelegateCocoa::Observe(
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
   switch (type) {
-    case extensions::NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE:
-      CloseActivePopup();
-      break;
     case extensions::NOTIFICATION_EXTENSION_COMMAND_BROWSER_ACTION_MAC:
     case extensions::NOTIFICATION_EXTENSION_COMMAND_PAGE_ACTION_MAC: {
       DCHECK_EQ(type,

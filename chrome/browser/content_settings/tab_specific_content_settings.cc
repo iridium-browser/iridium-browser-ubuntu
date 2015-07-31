@@ -27,6 +27,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
+#include "components/content_settings/content/common/content_settings_messages.h"
 #include "components/content_settings/core/browser/content_settings_details.h"
 #include "components/content_settings/core/browser/content_settings_utils.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
@@ -234,6 +235,20 @@ void TabSpecificContentSettings::FileSystemAccessed(int render_process_id,
       render_process_id, render_frame_id);
   if (settings)
     settings->OnFileSystemAccessed(url, blocked_by_policy);
+}
+
+// static
+void TabSpecificContentSettings::ServiceWorkerAccessed(int render_process_id,
+                                                       int render_frame_id,
+                                                       const GURL& scope,
+                                                       bool blocked_by_policy) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK(scope.is_valid());
+
+  TabSpecificContentSettings* settings =
+      GetForFrame(render_process_id, render_frame_id);
+  if (settings)
+    settings->OnServiceWorkerAccessed(scope, blocked_by_policy);
 }
 
 bool TabSpecificContentSettings::IsContentBlocked(
@@ -459,6 +474,21 @@ void TabSpecificContentSettings::OnLocalStorageAccessed(
     OnContentAllowed(CONTENT_SETTINGS_TYPE_COOKIES);
 
   NotifySiteDataObservers();
+}
+
+void TabSpecificContentSettings::OnServiceWorkerAccessed(
+    const GURL& scope,
+    bool blocked_by_policy) {
+  DCHECK(scope.is_valid());
+  if (blocked_by_policy) {
+    blocked_local_shared_objects_.service_workers()->AddServiceWorker(
+        scope.GetOrigin(), std::vector<GURL>(1, scope));
+    OnContentBlocked(CONTENT_SETTINGS_TYPE_COOKIES);
+  } else {
+    allowed_local_shared_objects_.service_workers()->AddServiceWorker(
+        scope.GetOrigin(), std::vector<GURL>(1, scope));
+    OnContentAllowed(CONTENT_SETTINGS_TYPE_COOKIES);
+  }
 }
 
 void TabSpecificContentSettings::OnWebDatabaseAccessed(

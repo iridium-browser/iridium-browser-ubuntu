@@ -5,7 +5,7 @@
 #include "cc/layers/picture_image_layer.h"
 
 #include "cc/layers/picture_image_layer_impl.h"
-#include "cc/resources/drawing_display_item.h"
+#include "cc/playback/drawing_display_item.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkPictureRecorder.h"
 #include "ui/gfx/skia_util.h"
@@ -63,18 +63,18 @@ void PictureImageLayer::PaintContents(
   canvas->drawBitmap(bitmap_, 0, 0);
 }
 
-scoped_refptr<DisplayItemList> PictureImageLayer::PaintContentsToDisplayList(
+void PictureImageLayer::PaintContentsToDisplayList(
+    DisplayItemList* display_list,
     const gfx::Rect& clip,
     ContentLayerClient::PaintingControlSetting painting_control) {
-  scoped_refptr<DisplayItemList> display_item_list = DisplayItemList::Create();
-
   SkPictureRecorder recorder;
   SkCanvas* canvas = recorder.beginRecording(gfx::RectToSkRect(clip));
   PaintContents(canvas, clip, painting_control);
 
-  skia::RefPtr<SkPicture> picture = skia::AdoptRef(recorder.endRecording());
-  display_item_list->AppendItem(DrawingDisplayItem::Create(picture));
-  return display_item_list;
+  skia::RefPtr<SkPicture> picture =
+      skia::AdoptRef(recorder.endRecordingAsPicture());
+  auto* item = display_list->CreateAndAppendItem<DrawingDisplayItem>();
+  item->SetNew(picture.Pass());
 }
 
 bool PictureImageLayer::FillsBoundsCompletely() const {

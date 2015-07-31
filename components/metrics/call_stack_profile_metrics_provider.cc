@@ -8,8 +8,11 @@
 #include <map>
 #include <utility>
 
+#include "base/bind.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/message_loop/message_loop_proxy.h"
+#include "base/metrics/field_trial.h"
 #include "base/profiler/stack_sampling_profiler.h"
 #include "components/metrics/metrics_hashes.h"
 #include "components/metrics/proto/chrome_user_metrics_extension.pb.h"
@@ -19,6 +22,12 @@ using base::StackSamplingProfiler;
 namespace metrics {
 
 namespace {
+
+// Accepts and ignores the completed profiles. Used when metrics reporting is
+// disabled.
+void IgnoreCompletedProfiles(
+    const StackSamplingProfiler::CallStackProfiles& profiles) {
+}
 
 // The protobuf expects the MD5 checksum prefix of the module name.
 uint64 HashModuleFilename(const base::FilePath& filename) {
@@ -42,7 +51,7 @@ void CopySampleToProto(
     // A frame may not have a valid module. If so, we can't compute the
     // instruction pointer offset, and we don't want to send bare pointers, so
     // leave call_stack_entry empty.
-    if (frame.module_index < 0)
+    if (frame.module_index == StackSamplingProfiler::Frame::kUnknownModuleIndex)
       continue;
     int64 module_offset =
         reinterpret_cast<const char*>(frame.instruction_pointer) -
@@ -55,7 +64,7 @@ void CopySampleToProto(
 
 // Transcode |profile| into |proto_profile|.
 void CopyProfileToProto(
-    const StackSamplingProfiler::Profile& profile,
+    const StackSamplingProfiler::CallStackProfile& profile,
     CallStackProfile* proto_profile) {
   if (profile.samples.empty())
     return;
@@ -104,30 +113,104 @@ void CopyProfileToProto(
   proto_profile->set_sampling_period_ms(
       profile.sampling_period.InMilliseconds());
 }
+
+// Translates CallStackProfileMetricsProvider's trigger to the corresponding
+// SampledProfile TriggerEvent.
+SampledProfile::TriggerEvent ToSampledProfileTriggerEvent(
+    CallStackProfileMetricsProvider::Trigger trigger) {
+  switch (trigger) {
+    case CallStackProfileMetricsProvider::UNKNOWN:
+      return SampledProfile::UNKNOWN_TRIGGER_EVENT;
+      break;
+    case CallStackProfileMetricsProvider::PROCESS_STARTUP:
+      return SampledProfile::PROCESS_STARTUP;
+      break;
+    case CallStackProfileMetricsProvider::JANKY_TASK:
+      return SampledProfile::JANKY_TASK;
+      break;
+    case CallStackProfileMetricsProvider::THREAD_HUNG:
+      return SampledProfile::THREAD_HUNG;
+      break;
+  }
+  NOTREACHED();
+  return SampledProfile::UNKNOWN_TRIGGER_EVENT;
+}
+
 }  // namespace
 
-CallStackProfileMetricsProvider::CallStackProfileMetricsProvider() {}
+const char CallStackProfileMetricsProvider::kFieldTrialName[] =
+    "StackProfiling";
+const char CallStackProfileMetricsProvider::kReportProfilesGroupName[] =
+    "Report profiles";
 
-CallStackProfileMetricsProvider::~CallStackProfileMetricsProvider() {}
+CallStackProfileMetricsProvider::CallStackProfileMetricsProvider()
+    : weak_factory_(this) {
+}
+
+CallStackProfileMetricsProvider::~CallStackProfileMetricsProvider() {
+  StackSamplingProfiler::SetDefaultCompletedCallback(
+      StackSamplingProfiler::CompletedCallback());
+}
+
+void CallStackProfileMetricsProvider::OnRecordingEnabled() {
+  StackSamplingProfiler::SetDefaultCompletedCallback(
+      base::Bind(&CallStackProfileMetricsProvider::ReceiveCompletedProfiles,
+                 base::MessageLoopProxy::current(),
+                 weak_factory_.GetWeakPtr()));
+}
+
+void CallStackProfileMetricsProvider::OnRecordingDisabled() {
+  StackSamplingProfiler::SetDefaultCompletedCallback(
+      base::Bind(&IgnoreCompletedProfiles));
+  pending_profiles_.clear();
+}
 
 void CallStackProfileMetricsProvider::ProvideGeneralMetrics(
     ChromeUserMetricsExtension* uma_proto) {
-  std::vector<StackSamplingProfiler::Profile> profiles;
-  if (!source_profiles_for_test_.empty())
-    profiles.swap(source_profiles_for_test_);
-  else
-    StackSamplingProfiler::GetPendingProfiles(&profiles);
-
-  for (const StackSamplingProfiler::Profile& profile : profiles) {
-    CallStackProfile* call_stack_profile =
-        uma_proto->add_sampled_profile()->mutable_call_stack_profile();
-    CopyProfileToProto(profile, call_stack_profile);
+  DCHECK(IsSamplingProfilingReportingEnabled() || pending_profiles_.empty());
+  for (const StackSamplingProfiler::CallStackProfile& profile :
+       pending_profiles_) {
+    SampledProfile* sampled_profile = uma_proto->add_sampled_profile();
+    sampled_profile->set_trigger_event(ToSampledProfileTriggerEvent(
+        static_cast<CallStackProfileMetricsProvider::Trigger>(
+            profile.user_data)));
+    CopyProfileToProto(profile, sampled_profile->mutable_call_stack_profile());
   }
+  pending_profiles_.clear();
 }
 
-void CallStackProfileMetricsProvider::SetSourceProfilesForTesting(
-    const std::vector<StackSamplingProfiler::Profile>& profiles) {
-  source_profiles_for_test_ = profiles;
+void CallStackProfileMetricsProvider::AppendSourceProfilesForTesting(
+    const std::vector<StackSamplingProfiler::CallStackProfile>& profiles) {
+  AppendCompletedProfiles(profiles);
+}
+
+// static
+bool CallStackProfileMetricsProvider::IsSamplingProfilingReportingEnabled() {
+  const std::string group_name = base::FieldTrialList::FindFullName(
+      CallStackProfileMetricsProvider::kFieldTrialName);
+  return group_name ==
+      CallStackProfileMetricsProvider::kReportProfilesGroupName;
+}
+
+// static
+// Posts a message back to our own thread to collect the profiles.
+void CallStackProfileMetricsProvider::ReceiveCompletedProfiles(
+    scoped_refptr<base::MessageLoopProxy> message_loop,
+    base::WeakPtr<CallStackProfileMetricsProvider> provider,
+    const StackSamplingProfiler::CallStackProfiles& profiles) {
+  message_loop->PostTask(
+      FROM_HERE,
+      base::Bind(&CallStackProfileMetricsProvider::AppendCompletedProfiles,
+                 provider, profiles));
+}
+
+void CallStackProfileMetricsProvider::AppendCompletedProfiles(
+    const StackSamplingProfiler::CallStackProfiles& profiles) {
+  // Don't bother to record profiles if reporting is not enabled.
+  if (IsSamplingProfilingReportingEnabled()) {
+    pending_profiles_.insert(pending_profiles_.end(), profiles.begin(),
+                             profiles.end());
+  }
 }
 
 }  // namespace metrics

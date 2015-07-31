@@ -7,25 +7,36 @@
 
 #include <string>
 
+#include "base/callback.h"
 #include "base/containers/scoped_ptr_hash_map.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "media/base/cdm_factory.h"
 #include "media/base/media_export.h"
-#include "third_party/WebKit/public/platform/WebContentDecryptionModuleResult.h"
+#include "media/blink/key_system_config_selector.h"
 #include "third_party/WebKit/public/platform/WebEncryptedMediaClient.h"
-#include "third_party/WebKit/public/web/WebSecurityOrigin.h"
+
+namespace blink {
+
+class WebContentDecryptionModuleResult;
+struct WebMediaKeySystemConfiguration;
+class WebSecurityOrigin;
+
+}  // namespace blink
 
 namespace media {
 
+struct CdmConfig;
+class CdmFactory;
 class KeySystems;
 class MediaPermission;
 
 class MEDIA_EXPORT WebEncryptedMediaClientImpl
     : public blink::WebEncryptedMediaClient {
  public:
-  WebEncryptedMediaClientImpl(CdmFactory* cdm_factory,
-                              MediaPermission* media_permission);
+  WebEncryptedMediaClientImpl(
+      base::Callback<bool(void)> are_secure_codecs_supported_cb,
+      CdmFactory* cdm_factory,
+      MediaPermission* media_permission);
   virtual ~WebEncryptedMediaClientImpl();
 
   // WebEncryptedMediaClient implementation.
@@ -35,36 +46,38 @@ class MEDIA_EXPORT WebEncryptedMediaClientImpl
   // Create the CDM for |key_system| and |security_origin|. The caller owns
   // the created cdm (passed back using |result|).
   void CreateCdm(const blink::WebString& key_system,
-                 bool allow_distinctive_identifier,
-                 bool allow_persistent_state,
                  const blink::WebSecurityOrigin& security_origin,
+                 const CdmConfig& cdm_config,
                  blink::WebContentDecryptionModuleResult result);
 
  private:
-  // Pick a supported configuration if possible, and complete the request. This
-  // method may asynchronously invoke itself after prompting for permissions.
-  void SelectSupportedConfiguration(blink::WebEncryptedMediaRequest request,
-                                    bool was_permission_requested,
-                                    bool is_permission_granted);
-
   // Report usage of key system to UMA. There are 2 different counts logged:
   // 1. The key system is requested.
   // 2. The requested key system and options are supported.
   // Each stat is only reported once per renderer frame per key system.
   class Reporter;
 
+  // Complete a requestMediaKeySystemAccess() request with a supported
+  // accumulated configuration.
+  void OnRequestSucceeded(
+      blink::WebEncryptedMediaRequest request,
+      const blink::WebMediaKeySystemConfiguration& accumulated_configuration,
+      const CdmConfig& cdm_config);
+
+  // Complete a requestMediaKeySystemAccess() request with an error message.
+  void OnRequestNotSupported(blink::WebEncryptedMediaRequest request,
+                             const blink::WebString& error_message);
+
   // Gets the Reporter for |key_system|. If it doesn't already exist,
   // create one.
-  Reporter* GetReporter(const std::string& key_system);
+  Reporter* GetReporter(const blink::WebString& key_system);
 
-  // Key system <-> Reporter map.
-  typedef base::ScopedPtrHashMap<std::string, Reporter> Reporters;
-  Reporters reporters_;
+  // Reporter singletons.
+  base::ScopedPtrHashMap<std::string, scoped_ptr<Reporter>> reporters_;
 
-  const KeySystems& key_systems_;
+  base::Callback<bool(void)> are_secure_codecs_supported_cb_;
   CdmFactory* cdm_factory_;
-  MediaPermission* media_permission_;
-
+  KeySystemConfigSelector key_system_config_selector_;
   base::WeakPtrFactory<WebEncryptedMediaClientImpl> weak_factory_;
 };
 

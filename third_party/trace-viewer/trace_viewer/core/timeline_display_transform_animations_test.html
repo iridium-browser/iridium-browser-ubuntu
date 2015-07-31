@@ -31,13 +31,13 @@ tv.b.unittest.testSuite(function() { // @suppress longLineCheck
     controller.target = target;
     controller.queueAnimation(a, 0);
 
-    assertTrue(a.affectsPanY);
+    assert.isTrue(a.affectsPanY);
     tv.b.forcePendingRAFTasksToRun(50);
-    assertTrue(target.panX > 0);
+    assert.isAbove(target.panX, 0);
     tv.b.forcePendingRAFTasksToRun(100);
-    assertFalse(controller.hasActiveAnimation);
-    assertEquals(10, target.panX);
-    assertEquals(20, target.panY);
+    assert.isFalse(controller.hasActiveAnimation);
+    assert.equal(target.panX, 10);
+    assert.equal(target.panY, 20);
   });
 
   test('zoomBasic', function() {
@@ -53,9 +53,9 @@ tv.b.unittest.testSuite(function() { // @suppress longLineCheck
     controller.target = target;
     controller.queueAnimation(a, 0);
 
-    assertFalse(a.affectsPanY);
+    assert.isFalse(a.affectsPanY);
     tv.b.forcePendingRAFTasksToRun(100);
-    assertEquals(5, target.scaleX);
+    assert.equal(target.scaleX, 5);
   });
 
   test('panTakeover', function() {
@@ -75,11 +75,11 @@ tv.b.unittest.testSuite(function() { // @suppress longLineCheck
     controller.queueAnimation(b, 50);
 
     tv.b.forcePendingRAFTasksToRun(100);
-    assertTrue(controller.hasActiveAnimation);
+    assert.isTrue(controller.hasActiveAnimation);
 
     tv.b.forcePendingRAFTasksToRun(150);
-    assertFalse(controller.hasActiveAnimation);
-    assertEquals(20, target.panX);
+    assert.isFalse(controller.hasActiveAnimation);
+    assert.equal(target.panX, 20);
   });
 });
 </script>

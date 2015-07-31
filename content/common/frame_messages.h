@@ -18,6 +18,7 @@
 #include "content/public/common/context_menu_params.h"
 #include "content/public/common/frame_navigate_params.h"
 #include "content/public/common/javascript_message_type.h"
+#include "content/public/common/message_port_types.h"
 #include "content/public/common/page_state.h"
 #include "content/public/common/resource_response.h"
 #include "content/public/common/transition_element.h"
@@ -123,6 +124,7 @@ IPC_STRUCT_END()
 
 IPC_STRUCT_TRAITS_BEGIN(content::FrameNavigateParams)
   IPC_STRUCT_TRAITS_MEMBER(page_id)
+  IPC_STRUCT_TRAITS_MEMBER(nav_entry_id)
   IPC_STRUCT_TRAITS_MEMBER(url)
   IPC_STRUCT_TRAITS_MEMBER(base_url)
   IPC_STRUCT_TRAITS_MEMBER(referrer)
@@ -140,6 +142,15 @@ IPC_STRUCT_TRAITS_END()
 IPC_STRUCT_BEGIN_WITH_PARENT(FrameHostMsg_DidCommitProvisionalLoad_Params,
                              content::FrameNavigateParams)
   IPC_STRUCT_TRAITS_PARENT(content::FrameNavigateParams)
+
+  // This is the value from the browser (copied from the navigation request)
+  // indicating whether it intended to make a new entry. TODO(avi): Remove this
+  // when the pending entry situation is made sane and the browser keeps them
+  // around long enough to match them via nav_entry_id.
+  IPC_STRUCT_MEMBER(bool, intended_as_new_entry)
+
+  // Whether this commit created a new entry.
+  IPC_STRUCT_MEMBER(bool, did_create_new_entry)
 
   // Information regarding the security of the connection (empty if the
   // connection was not secure).
@@ -205,6 +216,37 @@ IPC_STRUCT_BEGIN_WITH_PARENT(FrameHostMsg_DidCommitProvisionalLoad_Params,
   IPC_STRUCT_MEMBER(base::TimeTicks, ui_timestamp)
 IPC_STRUCT_END()
 
+IPC_STRUCT_BEGIN(FrameMsg_PostMessage_Params)
+  // Whether the data format is supplied as serialized script value, or as
+  // a simple string. If it is a raw string, must be converted from string to a
+  // WebSerializedScriptValue in the renderer process.
+  IPC_STRUCT_MEMBER(bool, is_data_raw_string)
+
+  // The serialized script value.
+  IPC_STRUCT_MEMBER(base::string16, data)
+
+  // When sent to the browser, this is the routing ID of the source frame in
+  // the source process.  The browser replaces it with the routing ID of the
+  // equivalent frame proxy in the destination process.
+  IPC_STRUCT_MEMBER(int, source_routing_id)
+
+  // When sent from the browser, this is the routing ID of the source view in
+  // the destination process.  This currently exists only to support legacy
+  // postMessage to Android WebView and will be removed once crbug.com/473258
+  // is fixed.
+  IPC_STRUCT_MEMBER(int, source_view_routing_id)
+
+  // The origin of the source frame.
+  IPC_STRUCT_MEMBER(base::string16, source_origin)
+
+  // The origin for the message's target.
+  IPC_STRUCT_MEMBER(base::string16, target_origin)
+
+  // Information about the MessagePorts this message contains.
+  IPC_STRUCT_MEMBER(std::vector<content::TransferredMessagePort>, message_ports)
+  IPC_STRUCT_MEMBER(std::vector<int>, new_routing_ids)
+IPC_STRUCT_END()
+
 IPC_STRUCT_TRAITS_BEGIN(content::CommonNavigationParams)
   IPC_STRUCT_TRAITS_MEMBER(url)
   IPC_STRUCT_TRAITS_MEMBER(referrer)
@@ -238,10 +280,11 @@ IPC_STRUCT_TRAITS_BEGIN(content::RequestNavigationParams)
   IPC_STRUCT_TRAITS_MEMBER(browser_navigation_start)
   IPC_STRUCT_TRAITS_MEMBER(redirects)
   IPC_STRUCT_TRAITS_MEMBER(can_load_local_resources)
-  IPC_STRUCT_TRAITS_MEMBER(frame_to_navigate)
   IPC_STRUCT_TRAITS_MEMBER(request_time)
   IPC_STRUCT_TRAITS_MEMBER(page_state)
   IPC_STRUCT_TRAITS_MEMBER(page_id)
+  IPC_STRUCT_TRAITS_MEMBER(nav_entry_id)
+  IPC_STRUCT_TRAITS_MEMBER(intended_as_new_entry)
   IPC_STRUCT_TRAITS_MEMBER(pending_history_list_offset)
   IPC_STRUCT_TRAITS_MEMBER(current_history_list_offset)
   IPC_STRUCT_TRAITS_MEMBER(current_history_list_length)
@@ -265,6 +308,35 @@ IPC_STRUCT_BEGIN(FrameMsg_NewFrame_WidgetParams)
 
   // Tells the new RenderWidget whether it is initially hidden.
   IPC_STRUCT_MEMBER(bool, hidden)
+IPC_STRUCT_END()
+
+IPC_STRUCT_BEGIN(FrameMsg_NewFrame_Params)
+  // Specifies the routing ID of the new RenderFrame object.
+  IPC_STRUCT_MEMBER(int, routing_id)
+
+  // The new frame should be created as a child of the object
+  // identified by |parent_routing_id| or as top level if that is
+  // MSG_ROUTING_NONE.
+  IPC_STRUCT_MEMBER(int, parent_routing_id)
+
+  // Identifies the previous sibling of the new frame, so that the new frame is
+  // inserted into the correct place in the frame tree.  If this is
+  // MSG_ROUTING_NONE, the frame will be created as the leftmost child of its
+  // parent frame, in front of any other children.
+  IPC_STRUCT_MEMBER(int, previous_sibling_routing_id)
+
+  // If a valid |proxy_routing_id| is provided, the new frame will be
+  // configured to replace the proxy on commit.
+  IPC_STRUCT_MEMBER(int, proxy_routing_id)
+
+  // When the new frame has a parent, |replication_state| holds the new frame's
+  // properties replicated from the process rendering the parent frame, such as
+  // the new frame's sandbox flags.
+  IPC_STRUCT_MEMBER(content::FrameReplicationState, replication_state)
+
+  // Specifies properties for a new RenderWidget that will be attached to the
+  // new RenderFrame (if one is needed).
+  IPC_STRUCT_MEMBER(FrameMsg_NewFrame_WidgetParams, widget_params)
 IPC_STRUCT_END()
 
 IPC_STRUCT_BEGIN(FrameHostMsg_OpenURL_Params)
@@ -358,19 +430,8 @@ IPC_MESSAGE_ROUTED0(FrameMsg_DisownOpener)
 // commit, activation and frame swap of the current DOM tree in blink.
 IPC_MESSAGE_ROUTED1(FrameMsg_VisualStateRequest, uint64 /* id */)
 
-// Instructs the renderer to create a new RenderFrame object with |routing_id|.
-// The new frame should be created as a child of the object identified by
-// |parent_routing_id| or as top level if that is MSG_ROUTING_NONE.
-// If a valid |proxy_routing_id| is provided, the new frame will be configured
-// to replace the proxy on commit.  When the new frame has a parent,
-// |replication_state| holds properties replicated from the process rendering
-// the parent frame, such as the new frame's sandbox flags.
-IPC_MESSAGE_CONTROL5(FrameMsg_NewFrame,
-                     int /* routing_id */,
-                     int /* parent_routing_id */,
-                     int /* proxy_routing_id */,
-                     content::FrameReplicationState /* replication_state */,
-                     FrameMsg_NewFrame_WidgetParams /* widget_params */)
+// Instructs the renderer to create a new RenderFrame object.
+IPC_MESSAGE_CONTROL1(FrameMsg_NewFrame, FrameMsg_NewFrame_Params /* params */)
 
 // Instructs the renderer to create a new RenderFrameProxy object with
 // |routing_id|. The new proxy should be created as a child of the object
@@ -430,6 +491,14 @@ IPC_MESSAGE_ROUTED3(FrameMsg_JavaScriptExecuteRequest,
                     int,  /* ID */
                     bool  /* if true, a reply is requested */)
 
+// ONLY FOR TESTS: Same as above but adds a fake UserGestureindicator around
+// execution. (crbug.com/408426)
+IPC_MESSAGE_ROUTED4(FrameMsg_JavaScriptExecuteRequestForTests,
+                    base::string16,  /* javascript */
+                    int,  /* ID */
+                    bool, /* if true, a reply is requested */
+                    bool  /* if true, a user gesture indicator is created */)
+
 // Same as FrameMsg_JavaScriptExecuteRequest above except the script is
 // run in the isolated world specified by the fourth parameter.
 IPC_MESSAGE_ROUTED4(FrameMsg_JavaScriptExecuteRequestInIsolatedWorld,
@@ -437,13 +506,6 @@ IPC_MESSAGE_ROUTED4(FrameMsg_JavaScriptExecuteRequestInIsolatedWorld,
                     int, /* ID */
                     bool, /* if true, a reply is requested */
                     int /* world_id */)
-
-// ONLY FOR TESTS: Same as above but adds a fake UserGestureindicator around
-// execution. (crbug.com/408426)
-IPC_MESSAGE_ROUTED3(FrameMsg_JavaScriptExecuteRequestForTests,
-                    base::string16,  /* javascript */
-                    int,  /* ID */
-                    bool  /* if true, a reply is requested */)
 
 // Selects between the given start and end offsets in the currently focused
 // editable field.
@@ -511,10 +573,17 @@ IPC_MESSAGE_ROUTED1(FrameMsg_DidUpdateSandboxFlags, content::SandboxFlags)
 // changed in another process.
 IPC_MESSAGE_ROUTED1(FrameMsg_DidUpdateName, std::string /* name */)
 
+// Update a proxy's replicated origin.  Used when the frame is navigated to a
+// new origin.
+IPC_MESSAGE_ROUTED1(FrameMsg_DidUpdateOrigin, url::Origin /* origin */)
+
 // Send to the RenderFrame to set text track style settings.
 // Sent for top-level frames.
 IPC_MESSAGE_ROUTED1(FrameMsg_SetTextTrackSettings,
                     FrameMsg_TextTrackSettings_Params /* params */)
+
+// Posts a message from a frame in another process to the current renderer.
+IPC_MESSAGE_ROUTED1(FrameMsg_PostMessageEvent, FrameMsg_PostMessage_Params)
 
 #if defined(OS_ANDROID)
 
@@ -540,6 +609,15 @@ IPC_MESSAGE_ROUTED4(FrameMsg_CommitNavigation,
                     GURL,                            /* stream_url */
                     content::CommonNavigationParams, /* common_params */
                     content::RequestNavigationParams /* request_params */)
+
+// PlzNavigate
+// Tells the renderer that a navigation failed with the error code |error_code|
+// and that the renderer should display an appropriate error page.
+IPC_MESSAGE_ROUTED4(FrameMsg_FailedNavigation,
+                    content::CommonNavigationParams,  /* common_params */
+                    content::RequestNavigationParams, /* request_params */
+                    bool,                             /* stale_copy_in_cache */
+                    int                               /* error_code */)
 
 #if defined(ENABLE_PLUGINS)
 // Notifies the renderer of updates to the Plugin Power Saver origin whitelist.
@@ -679,6 +757,30 @@ IPC_MESSAGE_ROUTED1(FrameHostMsg_UpdateEncoding,
 IPC_MESSAGE_ROUTED2(FrameHostMsg_DomOperationResponse,
                     std::string  /* json_string */,
                     int  /* automation_id */)
+
+// Used to set a cookie. The cookie is set asynchronously, but will be
+// available to a subsequent FrameHostMsg_GetCookies request.
+IPC_MESSAGE_CONTROL4(FrameHostMsg_SetCookie,
+                     int /* render_frame_id */,
+                     GURL /* url */,
+                     GURL /* first_party_for_cookies */,
+                     std::string /* cookie */)
+
+// Used to get cookies for the given URL. This may block waiting for a
+// previous SetCookie message to be processed.
+IPC_SYNC_MESSAGE_CONTROL3_1(FrameHostMsg_GetCookies,
+                            int /* render_frame_id */,
+                            GURL /* url */,
+                            GURL /* first_party_for_cookies */,
+                            std::string /* cookies */)
+
+// Used to check if cookies are enabled for the given URL. This may block
+// waiting for a previous SetCookie message to be processed.
+IPC_SYNC_MESSAGE_CONTROL3_1(FrameHostMsg_CookiesEnabled,
+                            int /* render_frame_id */,
+                            GURL /* url */,
+                            GURL /* first_party_for_cookies */,
+                            bool /* cookies_enabled */)
 
 #if defined(ENABLE_PLUGINS)
 // Sent to the browser when the renderer detects it is blocked on a pepper
@@ -860,6 +962,11 @@ IPC_MESSAGE_ROUTED1(FrameHostMsg_ToggleFullscreen, bool /* enter_fullscreen */)
 // Dispatch a load event for this frame in the iframe element of an
 // out-of-process parent frame.
 IPC_MESSAGE_ROUTED0(FrameHostMsg_DispatchLoad)
+
+// Sent to the browser from a frame proxy to post a message to the frame's
+// active renderer.
+IPC_MESSAGE_ROUTED1(FrameHostMsg_RouteMessageEvent,
+                    FrameMsg_PostMessage_Params)
 
 #if defined(OS_MACOSX) || defined(OS_ANDROID)
 

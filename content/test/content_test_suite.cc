@@ -52,12 +52,12 @@ class TestInitializationListener : public testing::EmptyTestEventListener {
   TestInitializationListener() : test_content_client_initializer_(NULL) {
   }
 
-  virtual void OnTestStart(const testing::TestInfo& test_info) override {
+  void OnTestStart(const testing::TestInfo& test_info) override {
     test_content_client_initializer_ =
         new content::TestContentClientInitializer();
   }
 
-  virtual void OnTestEnd(const testing::TestInfo& test_info) override {
+  void OnTestEnd(const testing::TestInfo& test_info) override {
     delete test_content_client_initializer_;
   }
 
@@ -68,7 +68,7 @@ class TestInitializationListener : public testing::EmptyTestEventListener {
 };
 
 #if defined(OS_ANDROID)
-class SurfaceTextureManagerImpl : public SurfaceTextureManager {
+class TestSurfaceTextureManager : public SurfaceTextureManager {
  public:
   // Overridden from SurfaceTextureManager:
   void RegisterSurfaceTexture(int surface_texture_id,
@@ -122,7 +122,7 @@ void ContentTestSuite::Initialize() {
   }
   RegisterPathProvider();
 #if !defined(OS_IOS)
-  media::InitializeMediaLibraryForTesting();
+  media::InitializeMediaLibrary();
   // When running in a child process for Mac sandbox tests, the sandbox exists
   // to initialize GL, so don't do it here.
   if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -135,7 +135,7 @@ void ContentTestSuite::Initialize() {
       testing::UnitTest::GetInstance()->listeners();
   listeners.Append(new TestInitializationListener);
 #if defined(OS_ANDROID)
-  SurfaceTextureManager::InitInstance(new SurfaceTextureManagerImpl);
+  SurfaceTextureManager::InitInstance(new TestSurfaceTextureManager);
 #endif
 }
 

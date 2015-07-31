@@ -50,20 +50,6 @@ WebInspector.Target.Type = {
 WebInspector.Target._nextId = 1;
 
 WebInspector.Target.prototype = {
-    suspend: function()
-    {
-        this.debuggerModel.suspendModel();
-        this.cssModel.suspendModel();
-        this.domModel.suspendModel();
-    },
-
-    resume: function()
-    {
-        this.domModel.resumeModel();
-        this.cssModel.resumeModel();
-        this.debuggerModel.resumeModel();
-    },
-
     /**
      * @return {number}
      */
@@ -130,14 +116,18 @@ WebInspector.Target.prototype = {
         this.resourceTreeModel = new WebInspector.ResourceTreeModel(this);
         /** @type {!WebInspector.NetworkLog} */
         this.networkLog = new WebInspector.NetworkLog(this);
-        /** @type {!WebInspector.DebuggerModel} */
-        this.debuggerModel = new WebInspector.DebuggerModel(this);
+
+        if (this.hasJSContext())
+            new WebInspector.DebuggerModel(this);
+
         /** @type {!WebInspector.RuntimeModel} */
         this.runtimeModel = new WebInspector.RuntimeModel(this);
-        /** @type {!WebInspector.DOMModel} */
-        this.domModel = new WebInspector.DOMModel(this);
-        /** @type {!WebInspector.CSSStyleModel} */
-        this.cssModel = new WebInspector.CSSStyleModel(this);
+
+        if (this._type === WebInspector.Target.Type.Page) {
+            new WebInspector.DOMModel(this);
+            new WebInspector.CSSStyleModel(this);
+        }
+
         /** @type {?WebInspector.WorkerManager} */
         this.workerManager = !this.isDedicatedWorker() ? new WebInspector.WorkerManager(this) : null;
         /** @type {!WebInspector.CPUProfilerModel} */
@@ -148,11 +138,6 @@ WebInspector.Target.prototype = {
         this.layerTreeModel = new WebInspector.LayerTreeModel(this);
         /** @type {!WebInspector.AnimationModel} */
         this.animationModel = new WebInspector.AnimationModel(this);
-
-        if (this._parentTarget && this._parentTarget.isServiceWorker()) {
-            /** @type {!WebInspector.ServiceWorkerCacheModel} */
-            this.serviceWorkerCacheModel = new WebInspector.ServiceWorkerCacheModel(this);
-        }
 
         this.tracingManager = new WebInspector.TracingManager(this);
 
@@ -229,11 +214,10 @@ WebInspector.Target.prototype = {
 
     _dispose: function()
     {
-        this.debuggerModel.dispose();
+        WebInspector.targetManager.dispatchEventToListeners(WebInspector.TargetManager.Events.TargetDisposed, this);
         this.networkManager.dispose();
         this.cpuProfilerModel.dispose();
-        if (this.serviceWorkerCacheModel)
-            this.serviceWorkerCacheModel.dispose();
+        WebInspector.ServiceWorkerCacheModel.fromTarget(this).dispose();
         if (this.workerManager)
             this.workerManager.dispose();
     },
@@ -244,6 +228,15 @@ WebInspector.Target.prototype = {
     isDetached: function()
     {
         return this._connection.isClosed();
+    },
+
+    /**
+     * @param {!Function} modelClass
+     * @return {?WebInspector.SDKModel}
+     */
+    model: function(modelClass)
+    {
+        return this._modelByConstructor.get(modelClass) || null;
     },
 
     __proto__: Protocol.Agents.prototype
@@ -302,8 +295,8 @@ WebInspector.TargetManager = function()
     this._observerTypeSymbol = Symbol("observerType");
     /** @type {!Object.<string, !Array.<{modelClass: !Function, thisObject: (!Object|undefined), listener: function(!WebInspector.Event)}>>} */
     this._modelListeners = {};
-    /** @type {boolean} */
-    this._allTargetsSuspended = false;
+    /** @type {number} */
+    this._suspendCount = 0;
 }
 
 WebInspector.TargetManager.Events = {
@@ -311,33 +304,23 @@ WebInspector.TargetManager.Events = {
     MainFrameNavigated: "MainFrameNavigated",
     Load: "Load",
     WillReloadPage: "WillReloadPage",
-    SuspendStateChanged: "SuspendStateChanged"
+    SuspendStateChanged: "SuspendStateChanged",
+    TargetDisposed: "TargetDisposed"
 }
 
 WebInspector.TargetManager.prototype = {
     suspendAllTargets: function()
     {
-        console.assert(!this._allTargetsSuspended);
-        if (this._allTargetsSuspended)
+        if (this._suspendCount++)
             return;
-        this._allTargetsSuspended = true;
-        this._targets.forEach(function(target)
-        {
-            target.suspend();
-        });
         this.dispatchEventToListeners(WebInspector.TargetManager.Events.SuspendStateChanged);
     },
 
     resumeAllTargets: function()
     {
-        console.assert(this._allTargetsSuspended);
-        if (!this._allTargetsSuspended)
+        console.assert(this._suspendCount > 0);
+        if (--this._suspendCount)
             return;
-        this._allTargetsSuspended = false;
-        this._targets.forEach(function(target)
-        {
-            target.resume();
-        });
         this.dispatchEventToListeners(WebInspector.TargetManager.Events.SuspendStateChanged);
     },
 
@@ -346,7 +329,7 @@ WebInspector.TargetManager.prototype = {
      */
     allTargetsSuspended: function()
     {
-        return this._allTargetsSuspended;
+        return !!this._suspendCount;
     },
 
     /**

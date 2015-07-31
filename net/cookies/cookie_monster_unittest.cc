@@ -2064,8 +2064,8 @@ class FlushablePersistentStore : public CookieMonster::PersistentCookieStore {
     std::vector<CanonicalCookie*> out_cookies;
     base::MessageLoop::current()->PostTask(
         FROM_HERE,
-        base::Bind(&net::LoadedCallbackTask::Run,
-                   new net::LoadedCallbackTask(loaded_callback, out_cookies)));
+        base::Bind(&LoadedCallbackTask::Run,
+                   new LoadedCallbackTask(loaded_callback, out_cookies)));
   }
 
   void LoadCookiesForKey(const std::string& key,
@@ -2311,6 +2311,20 @@ TEST_F(CookieMonsterTest, ComputeCookieDiff) {
   EXPECT_FALSE(IsCookieInList(cookie7_with_new_path, cookies_to_delete));
 }
 
+// Check that DeleteAll does flush (as a sanity check that flush_count()
+// works).
+TEST_F(CookieMonsterTest, DeleteAll) {
+  scoped_refptr<FlushablePersistentStore> store(new FlushablePersistentStore());
+  scoped_refptr<CookieMonster> cm(new CookieMonster(store.get(), NULL));
+  cm->SetPersistSessionCookies(true);
+
+  EXPECT_TRUE(SetCookie(cm.get(), url_google_, "X=Y; path=/"));
+
+  ASSERT_EQ(0, store->flush_count());
+  EXPECT_EQ(1, DeleteAll(cm.get()));
+  EXPECT_EQ(1, store->flush_count());
+}
+
 TEST_F(CookieMonsterTest, HistogramCheck) {
   scoped_refptr<CookieMonster> cm(new CookieMonster(NULL, NULL));
   // Should match call in InitializeHistograms, but doesn't really matter
@@ -2452,7 +2466,7 @@ TEST_F(MultiThreadedCookieMonsterTest, ThreadCheckGetAllCookies) {
   ASSERT_TRUE(++it == cookies.end());
   GetCookieListCallback callback(&other_thread_);
   base::Closure task =
-      base::Bind(&net::MultiThreadedCookieMonsterTest::GetAllCookiesTask,
+      base::Bind(&MultiThreadedCookieMonsterTest::GetAllCookiesTask,
                  base::Unretained(this), cm, &callback);
   RunOnOtherThread(task);
   EXPECT_TRUE(callback.did_run());
@@ -2474,7 +2488,7 @@ TEST_F(MultiThreadedCookieMonsterTest, ThreadCheckGetAllCookiesForURL) {
   ASSERT_TRUE(++it == cookies.end());
   GetCookieListCallback callback(&other_thread_);
   base::Closure task =
-      base::Bind(&net::MultiThreadedCookieMonsterTest::GetAllCookiesForURLTask,
+      base::Bind(&MultiThreadedCookieMonsterTest::GetAllCookiesForURLTask,
                  base::Unretained(this), cm, url_google_, &callback);
   RunOnOtherThread(task);
   EXPECT_TRUE(callback.did_run());
@@ -2498,7 +2512,7 @@ TEST_F(MultiThreadedCookieMonsterTest, ThreadCheckGetAllCookiesForURLWithOpt) {
   ASSERT_TRUE(++it == cookies.end());
   GetCookieListCallback callback(&other_thread_);
   base::Closure task = base::Bind(
-      &net::MultiThreadedCookieMonsterTest::GetAllCookiesForURLWithOptionsTask,
+      &MultiThreadedCookieMonsterTest::GetAllCookiesForURLWithOptionsTask,
       base::Unretained(this), cm, url_google_, options, &callback);
   RunOnOtherThread(task);
   EXPECT_TRUE(callback.did_run());
@@ -2516,7 +2530,7 @@ TEST_F(MultiThreadedCookieMonsterTest, ThreadCheckSetCookieWithDetails) {
                                    false, false, COOKIE_PRIORITY_DEFAULT));
   ResultSavingCookieCallback<bool> callback(&other_thread_);
   base::Closure task =
-      base::Bind(&net::MultiThreadedCookieMonsterTest::SetCookieWithDetailsTask,
+      base::Bind(&MultiThreadedCookieMonsterTest::SetCookieWithDetailsTask,
                  base::Unretained(this), cm, url_google_foo_, &callback);
   RunOnOtherThread(task);
   EXPECT_TRUE(callback.did_run());
@@ -2532,10 +2546,10 @@ TEST_F(MultiThreadedCookieMonsterTest, ThreadCheckDeleteAllCreatedBetween) {
                                        Time()));
   EXPECT_TRUE(SetCookieWithOptions(cm.get(), url_google_, "A=B", options));
   ResultSavingCookieCallback<int> callback(&other_thread_);
-  base::Closure task = base::Bind(
-      &net::MultiThreadedCookieMonsterTest::DeleteAllCreatedBetweenTask,
-      base::Unretained(this), cm, now - TimeDelta::FromDays(99), Time(),
-      &callback);
+  base::Closure task =
+      base::Bind(&MultiThreadedCookieMonsterTest::DeleteAllCreatedBetweenTask,
+                 base::Unretained(this), cm, now - TimeDelta::FromDays(99),
+                 Time(), &callback);
   RunOnOtherThread(task);
   EXPECT_TRUE(callback.did_run());
   EXPECT_EQ(1, callback.result());
@@ -2549,7 +2563,7 @@ TEST_F(MultiThreadedCookieMonsterTest, ThreadCheckDeleteAllForHost) {
   EXPECT_TRUE(SetCookieWithOptions(cm.get(), url_google_, "A=B", options));
   ResultSavingCookieCallback<int> callback(&other_thread_);
   base::Closure task =
-      base::Bind(&net::MultiThreadedCookieMonsterTest::DeleteAllForHostTask,
+      base::Bind(&MultiThreadedCookieMonsterTest::DeleteAllForHostTask,
                  base::Unretained(this), cm, url_google_, &callback);
   RunOnOtherThread(task);
   EXPECT_TRUE(callback.did_run());
@@ -2590,7 +2604,7 @@ TEST_F(MultiThreadedCookieMonsterTest,
 
   // 2. Second set of deletions.
   base::Closure task = base::Bind(
-      &net::MultiThreadedCookieMonsterTest::DeleteAllCreatedBetweenForHostTask,
+      &MultiThreadedCookieMonsterTest::DeleteAllCreatedBetweenForHostTask,
       base::Unretained(this), cm, ago1, Time(), url_google_, &callback);
   RunOnOtherThread(task);
   EXPECT_TRUE(callback.did_run());
@@ -2609,9 +2623,9 @@ TEST_F(MultiThreadedCookieMonsterTest, ThreadCheckDeleteCanonicalCookie) {
   ResultSavingCookieCallback<bool> callback(&other_thread_);
   cookies = GetAllCookies(cm.get());
   it = cookies.begin();
-  base::Closure task = base::Bind(
-      &net::MultiThreadedCookieMonsterTest::DeleteCanonicalCookieTask,
-      base::Unretained(this), cm, *it, &callback);
+  base::Closure task =
+      base::Bind(&MultiThreadedCookieMonsterTest::DeleteCanonicalCookieTask,
+                 base::Unretained(this), cm, *it, &callback);
   RunOnOtherThread(task);
   EXPECT_TRUE(callback.did_run());
   EXPECT_TRUE(callback.result());
@@ -2817,9 +2831,9 @@ class CookieMonsterNotificationTest : public CookieMonsterTest {
   scoped_refptr<CookieMonster> monster_;
 };
 
-void RecordCookieChanges(std::vector<net::CanonicalCookie>* out_cookies,
+void RecordCookieChanges(std::vector<CanonicalCookie>* out_cookies,
                          std::vector<bool>* out_removes,
-                         const net::CanonicalCookie& cookie,
+                         const CanonicalCookie& cookie,
                          bool removed) {
   DCHECK(out_cookies);
   out_cookies->push_back(cookie);
@@ -2828,7 +2842,7 @@ void RecordCookieChanges(std::vector<net::CanonicalCookie>* out_cookies,
 }
 
 TEST_F(CookieMonsterNotificationTest, NoNotifyWithNoCookie) {
-  std::vector<net::CanonicalCookie> cookies;
+  std::vector<CanonicalCookie> cookies;
   scoped_ptr<CookieStore::CookieChangedSubscription> sub(
       monster()->AddCallbackForCookie(
           test_url_, "abc",
@@ -2838,7 +2852,7 @@ TEST_F(CookieMonsterNotificationTest, NoNotifyWithNoCookie) {
 }
 
 TEST_F(CookieMonsterNotificationTest, NoNotifyWithInitialCookie) {
-  std::vector<net::CanonicalCookie> cookies;
+  std::vector<CanonicalCookie> cookies;
   SetCookie(monster(), test_url_, "abc=def");
   base::MessageLoop::current()->RunUntilIdle();
   scoped_ptr<CookieStore::CookieChangedSubscription> sub(
@@ -2850,7 +2864,7 @@ TEST_F(CookieMonsterNotificationTest, NoNotifyWithInitialCookie) {
 }
 
 TEST_F(CookieMonsterNotificationTest, NotifyOnSet) {
-  std::vector<net::CanonicalCookie> cookies;
+  std::vector<CanonicalCookie> cookies;
   std::vector<bool> removes;
   scoped_ptr<CookieStore::CookieChangedSubscription> sub(
       monster()->AddCallbackForCookie(
@@ -2867,7 +2881,7 @@ TEST_F(CookieMonsterNotificationTest, NotifyOnSet) {
 }
 
 TEST_F(CookieMonsterNotificationTest, NotifyOnDelete) {
-  std::vector<net::CanonicalCookie> cookies;
+  std::vector<CanonicalCookie> cookies;
   std::vector<bool> removes;
   scoped_ptr<CookieStore::CookieChangedSubscription> sub(
       monster()->AddCallbackForCookie(
@@ -2889,7 +2903,7 @@ TEST_F(CookieMonsterNotificationTest, NotifyOnDelete) {
 }
 
 TEST_F(CookieMonsterNotificationTest, NotifyOnUpdate) {
-  std::vector<net::CanonicalCookie> cookies;
+  std::vector<CanonicalCookie> cookies;
   std::vector<bool> removes;
   scoped_ptr<CookieStore::CookieChangedSubscription> sub(
       monster()->AddCallbackForCookie(
@@ -2917,8 +2931,8 @@ TEST_F(CookieMonsterNotificationTest, NotifyOnUpdate) {
 }
 
 TEST_F(CookieMonsterNotificationTest, MultipleNotifies) {
-  std::vector<net::CanonicalCookie> cookies0;
-  std::vector<net::CanonicalCookie> cookies1;
+  std::vector<CanonicalCookie> cookies0;
+  std::vector<CanonicalCookie> cookies1;
   scoped_ptr<CookieStore::CookieChangedSubscription> sub0(
       monster()->AddCallbackForCookie(
           test_url_, "abc",
@@ -2938,8 +2952,8 @@ TEST_F(CookieMonsterNotificationTest, MultipleNotifies) {
 }
 
 TEST_F(CookieMonsterNotificationTest, MultipleSameNotifies) {
-  std::vector<net::CanonicalCookie> cookies0;
-  std::vector<net::CanonicalCookie> cookies1;
+  std::vector<CanonicalCookie> cookies0;
+  std::vector<CanonicalCookie> cookies1;
   scoped_ptr<CookieStore::CookieChangedSubscription> sub0(
       monster()->AddCallbackForCookie(
           test_url_, "abc",

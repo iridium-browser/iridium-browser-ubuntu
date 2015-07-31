@@ -21,9 +21,9 @@
 #ifndef CSSComputedStyleDeclaration_h
 #define CSSComputedStyleDeclaration_h
 
+#include "core/CoreExport.h"
 #include "core/css/CSSStyleDeclaration.h"
 #include "core/style/ComputedStyleConstants.h"
-#include "platform/fonts/FixedPitchFontType.h"
 #include "wtf/HashMap.h"
 #include "wtf/RefPtr.h"
 #include "wtf/text/AtomicString.h"
@@ -44,7 +44,7 @@ class ShadowList;
 class StyleColor;
 class StylePropertyShorthand;
 
-class CSSComputedStyleDeclaration final : public CSSStyleDeclaration {
+class CORE_EXPORT CSSComputedStyleDeclaration final : public CSSStyleDeclaration {
 public:
     static PassRefPtrWillBeRawPtr<CSSComputedStyleDeclaration> create(PassRefPtrWillBeRawPtr<Node> node, bool allowVisitedStyle = false, const String& pseudoElementName = String())
     {
@@ -64,7 +64,7 @@ public:
 
     PassRefPtrWillBeRawPtr<CSSValue> getPropertyCSSValue(CSSPropertyID) const;
     PassRefPtrWillBeRawPtr<CSSValue> getFontSizeCSSValuePreferringKeyword() const;
-    FixedPitchFontType fixedPitchFontType() const;
+    bool isMonospaceFont() const;
 
     PassRefPtrWillBeRawPtr<MutableStylePropertySet> copyPropertiesInSet(const Vector<CSSPropertyID>&) const;
 

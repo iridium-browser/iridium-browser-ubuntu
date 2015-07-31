@@ -75,10 +75,8 @@ class PrefsSyncableServiceTest : public testing::Test {
       next_pref_remote_sync_node_id_(0) {}
 
   void SetUp() override {
-    prefs_.registry()->RegisterStringPref(
-        kUnsyncedPreferenceName,
-        kUnsyncedPreferenceDefaultValue,
-        user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+    prefs_.registry()->RegisterStringPref(kUnsyncedPreferenceName,
+                                          kUnsyncedPreferenceDefaultValue);
     prefs_.registry()->RegisterStringPref(
         prefs::kHomePage,
         std::string(),
@@ -86,9 +84,7 @@ class PrefsSyncableServiceTest : public testing::Test {
     prefs_.registry()->RegisterListPref(
         prefs::kURLsToRestoreOnStartup,
         user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-    prefs_.registry()->RegisterListPref(
-        prefs::kURLsToRestoreOnStartupOld,
-        user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+    prefs_.registry()->RegisterListPref(prefs::kURLsToRestoreOnStartupOld);
     prefs_.registry()->RegisterStringPref(
         prefs::kDefaultCharset,
         l10n_util::GetStringUTF8(IDS_DEFAULT_ENCODING),
@@ -715,7 +711,7 @@ TEST_F(PrefsSyncableServiceTest, DeletePreference) {
 
   InitWithNoSyncData();
 
-  scoped_ptr<base::Value> null_value(base::Value::CreateNullValue());
+  scoped_ptr<base::Value> null_value = base::Value::CreateNullValue();
   syncer::SyncChangeList list;
   list.push_back(MakeRemoteChange(
       1, prefs::kHomePage, *null_value, SyncChange::ACTION_DELETE));

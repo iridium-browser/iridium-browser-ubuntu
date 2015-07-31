@@ -13,6 +13,7 @@
 #include <stack>
 
 #include "angle_gl.h"
+#include "compiler/translator/ASTMetadataHLSL.h"
 #include "compiler/translator/IntermNode.h"
 #include "compiler/translator/ParseContext.h"
 
@@ -75,7 +76,7 @@ class OutputHLSL : public TIntermTraverser
 
     // Emit constructor. Called with literal names so using const char* instead of TString.
     void outputConstructor(Visit visit, const TType &type, const char *name, const TIntermSequence *parameters);
-    const ConstantUnion *writeConstantUnion(const TType &type, const ConstantUnion *constUnion);
+    const TConstantUnion *writeConstantUnion(const TType &type, const TConstantUnion *constUnion);
 
     void outputEqual(Visit visit, const TType &type, TOperator op, TInfoSinkBase &out);
 
@@ -90,6 +91,10 @@ class OutputHLSL : public TIntermTraverser
     TString addStructEqualityFunction(const TStructure &structure);
     TString addArrayEqualityFunction(const TType &type);
     TString addArrayAssignmentFunction(const TType &type);
+    TString addArrayConstructIntoFunction(const TType &type);
+
+    // Ensures if the type is a struct, the struct is defined
+    void ensureStructDefined(const TType &type);
 
     sh::GLenum mShaderType;
     int mShaderVersion;
@@ -168,8 +173,9 @@ class OutputHLSL : public TIntermTraverser
 
     int mUniqueIndex;   // For creating unique names
 
-    bool mContainsLoopDiscontinuity;
-    bool mContainsAnyLoop;
+    CallDAG mCallDag;
+    MetadataList mASTMetadataList;
+    ASTMetadataHLSL *mCurrentFunctionMetadata;
     bool mOutputLod0Function;
     bool mInsideDiscontinuousLoop;
     int mNestedLoopDepth;
@@ -214,6 +220,11 @@ class OutputHLSL : public TIntermTraverser
     std::vector<ArrayHelperFunction*> mArrayEqualityFunctions;
 
     std::vector<ArrayHelperFunction> mArrayAssignmentFunctions;
+
+    // The construct-into functions are functions that fill an N-element array passed as an out parameter
+    // with the other N parameters of the function. This is used to work around that arrays can't be
+    // return values in HLSL.
+    std::vector<ArrayHelperFunction> mArrayConstructIntoFunctions;
 };
 
 }

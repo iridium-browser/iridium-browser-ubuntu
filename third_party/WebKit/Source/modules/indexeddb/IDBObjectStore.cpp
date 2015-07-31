@@ -44,9 +44,9 @@
 #include "platform/SharedBuffer.h"
 #include "public/platform/WebBlobInfo.h"
 #include "public/platform/WebData.h"
-#include "public/platform/WebIDBKey.h"
-#include "public/platform/WebIDBKeyRange.h"
 #include "public/platform/WebVector.h"
+#include "public/platform/modules/indexeddb/WebIDBKey.h"
+#include "public/platform/modules/indexeddb/WebIDBKeyRange.h"
 #include <v8.h>
 
 using blink::WebBlobInfo;
@@ -118,6 +118,34 @@ IDBRequest* IDBObjectStore::get(ScriptState* scriptState, const ScriptValue& key
     return request;
 }
 
+IDBRequest* IDBObjectStore::getAll(ScriptState* scriptState, const ScriptValue& keyRange, unsigned long maxCount, ExceptionState& exceptionState)
+{
+    IDB_TRACE("IDBObjectStore::getAll");
+    if (isDeleted()) {
+        exceptionState.throwDOMException(InvalidStateError, IDBDatabase::objectStoreDeletedErrorMessage);
+        return 0;
+    }
+    if (m_transaction->isFinished() || m_transaction->isFinishing()) {
+        exceptionState.throwDOMException(TransactionInactiveError, IDBDatabase::transactionFinishedErrorMessage);
+        return 0;
+    }
+    if (!m_transaction->isActive()) {
+        exceptionState.throwDOMException(TransactionInactiveError, IDBDatabase::transactionInactiveErrorMessage);
+        return 0;
+    }
+    IDBKeyRange* range = IDBKeyRange::fromScriptValue(scriptState->executionContext(), keyRange, exceptionState);
+    if (exceptionState.hadException())
+        return 0;
+    if (!backendDB()) {
+        exceptionState.throwDOMException(InvalidStateError, IDBDatabase::databaseClosedErrorMessage);
+        return 0;
+    }
+
+    IDBRequest* request = IDBRequest::create(scriptState, IDBAny::create(this), m_transaction.get());
+    backendDB()->getAll(m_transaction->id(), id(), IDBIndexMetadata::InvalidId, range, maxCount, false, WebIDBCallbacksImpl::create(request).leakPtr());
+    return request;
+}
+
 static void generateIndexKeysForValue(v8::Isolate* isolate, const IDBIndexMetadata& indexMetadata, const ScriptValue& objectValue, IDBObjectStore::IndexKeys* indexKeys)
 {
     ASSERT(indexKeys);
@@ -180,7 +208,7 @@ IDBRequest* IDBObjectStore::put(ScriptState* scriptState, WebIDBPutMode putMode,
     }
 
     Vector<WebBlobInfo> blobInfo;
-    RefPtr<SerializedScriptValue> serializedValue = SerializedScriptValueFactory::instance().create(value, &blobInfo, exceptionState, scriptState->isolate());
+    RefPtr<SerializedScriptValue> serializedValue = SerializedScriptValueFactory::instance().create(scriptState->isolate(), value, &blobInfo, exceptionState);
     if (exceptionState.hadException())
         return 0;
 

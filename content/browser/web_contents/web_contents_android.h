@@ -55,6 +55,7 @@ class CONTENT_EXPORT WebContentsAndroid
   jboolean IsIncognito(JNIEnv* env, jobject obj);
 
   void ResumeResponseDeferredAtStart(JNIEnv* env, jobject obj);
+  void ResumeLoadingCreatedWebContents(JNIEnv* env, jobject obj);
   void SetHasPendingNavigationTransitionForTesting(JNIEnv* env, jobject obj);
   void SetupTransitionView(JNIEnv* env, jobject jobj, jstring markup);
   void BeginExitTransition(JNIEnv* env, jobject jobj, jstring css_selector,
@@ -115,6 +116,11 @@ class CONTENT_EXPORT WebContentsAndroid
 
   jint GetThemeColor(JNIEnv* env, jobject obj);
 
+  void RequestAccessibilitySnapshot(JNIEnv* env,
+                                    jobject obj,
+                                    jobject callback,
+                                    jfloat y_offset,
+                                    jfloat x_scroll);
  private:
   RenderWidgetHostViewAndroid* GetRenderWidgetHostViewAndroid();
 

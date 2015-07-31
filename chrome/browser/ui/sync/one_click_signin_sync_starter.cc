@@ -73,6 +73,7 @@ void SetUserChoiceHistogram(SigninChoice choice) {
 OneClickSigninSyncStarter::OneClickSigninSyncStarter(
     Profile* profile,
     Browser* browser,
+    const std::string& gaia_id,
     const std::string& email,
     const std::string& password,
     const std::string& refresh_token,
@@ -98,7 +99,7 @@ OneClickSigninSyncStarter::OneClickSigninSyncStarter(
   // before signin completes.
   SigninManagerFactory::GetForProfile(profile_)->
       StartSignInWithRefreshToken(
-          refresh_token, email, password,
+          refresh_token, gaia_id, email, password,
           base::Bind(&OneClickSigninSyncStarter::ConfirmSignin,
                      weak_pointer_factory_.GetWeakPtr()));
 }
@@ -149,7 +150,7 @@ void OneClickSigninSyncStarter::Initialize(Profile* profile, Browser* browser) {
 void OneClickSigninSyncStarter::ConfirmSignin(const std::string& oauth_token) {
   DCHECK(!oauth_token.empty());
   SigninManager* signin = SigninManagerFactory::GetForProfile(profile_);
-  // If this is a new signin (no authenticated username yet) try loading
+  // If this is a new signin (no account authenticated yet) try loading
   // policy for this user now, before any signed in services are initialized.
   if (!signin->IsAuthenticated()) {
 #if defined(ENABLE_CONFIGURATION_POLICY)
@@ -431,9 +432,9 @@ void OneClickSigninSyncStarter::SigninFailed(
 void OneClickSigninSyncStarter::SigninSuccess() {
 }
 
-void OneClickSigninSyncStarter::MergeSessionComplete(
+void OneClickSigninSyncStarter::AccountAddedToCookie(
     const GoogleServiceAuthError& error) {
-  // Regardless of whether the merge session completed sucessfully or not,
+  // Regardless of whether the account was successfully added or not,
   // continue with sync starting.
 
   if (!sync_setup_completed_callback_.is_null())

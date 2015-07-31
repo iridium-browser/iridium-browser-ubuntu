@@ -64,6 +64,7 @@
 
 #include <openssl/engine.h>
 #include <openssl/ex_data.h>
+#include <openssl/thread.h>
 
 #if defined(__cplusplus)
 extern "C" {
@@ -301,7 +302,7 @@ OPENSSL_EXPORT DH *DSA_dup_DH(const DSA *dsa);
 
 /* ex_data functions.
  *
- * These functions are wrappers. See |ex_data.h| for details. */
+ * See |ex_data.h| for details. */
 
 OPENSSL_EXPORT int DSA_get_ex_new_index(long argl, void *argp,
                                         CRYPTO_EX_new *new_func,
@@ -351,6 +352,7 @@ struct dsa_st {
 
   int flags;
   /* Normally used to cache montgomery values */
+  CRYPTO_MUTEX method_mont_p_lock;
   BN_MONT_CTX *method_mont_p;
   int references;
   CRYPTO_EX_DATA ex_data;

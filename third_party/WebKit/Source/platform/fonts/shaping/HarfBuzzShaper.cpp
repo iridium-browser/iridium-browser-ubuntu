@@ -365,11 +365,11 @@ static void normalizeCharacters(const TextRun& run, unsigned length, UChar* dest
         U16_NEXT(source, position, length, character);
         // Don't normalize tabs as they are not treated as spaces for word-end.
         if (run.normalizeSpace() && Character::isNormalizedCanvasSpaceCharacter(character))
-            character = space;
-        else if (Character::treatAsSpace(character) && character != characterTabulation)
-            character = space;
+            character = spaceCharacter;
+        else if (Character::treatAsSpace(character) && character != tabulationCharacter)
+            character = spaceCharacter;
         else if (Character::treatAsZeroWidthSpaceInComplexScript(character))
-            character = zeroWidthSpace;
+            character = zeroWidthSpaceCharacter;
 
         U16_APPEND(destination, *destinationLength, length, character, error);
         ASSERT_UNUSED(error, !error);
@@ -594,7 +594,7 @@ static inline bool collectCandidateRuns(const UChar* normalizedBuffer,
             nextScript = uscript_getScript(character, &errorCode);
             if (U_FAILURE(errorCode))
                 return false;
-            if (lastCharacter == zeroWidthJoiner)
+            if (lastCharacter == zeroWidthJoinerCharacter)
                 currentFontData = nextFontData;
             if ((nextFontData != currentFontData) || ((currentScript != nextScript) && (nextScript != USCRIPT_INHERITED) && (!uscript_hasScript(character, currentScript))))
                 break;
@@ -602,7 +602,7 @@ static inline bool collectCandidateRuns(const UChar* normalizedBuffer,
             lastCharacter = character;
         }
 
-        CandidateRun run = { character, startIndexOfCurrentRun, iterator.offset(), currentFontData, currentScript };
+        CandidateRun run = { character, startIndexOfCurrentRun, static_cast<unsigned>(iterator.offset()), currentFontData, currentScript };
         runs->append(run);
 
         startIndexOfCurrentRun = iterator.offset();
@@ -818,6 +818,7 @@ bool HarfBuzzShaper::shapeHarfBuzzRuns()
     const FontDescription& fontDescription = m_font->fontDescription();
     const String& localeString = fontDescription.locale();
     CString locale = localeString.latin1();
+    const hb_language_t language = hb_language_from_string(locale.data(), locale.length());
     HarfBuzzRun* previousRun = nullptr;
 
     for (unsigned i = 0; i < m_harfBuzzRuns.size(); ++i) {
@@ -830,7 +831,7 @@ bool HarfBuzzShaper::shapeHarfBuzzRuns()
         if (!face)
             return false;
 
-        hb_buffer_set_language(harfBuzzBuffer.get(), hb_language_from_string(locale.data(), locale.length()));
+        hb_buffer_set_language(harfBuzzBuffer.get(), language);
         hb_buffer_set_script(harfBuzzBuffer.get(), currentRun->script());
         hb_buffer_set_direction(harfBuzzBuffer.get(), currentRun->direction());
 
@@ -854,7 +855,7 @@ bool HarfBuzzShaper::shapeHarfBuzzRuns()
 
         // Add a space as pre-context to the buffer. This prevents showing dotted-circle
         // for combining marks at the beginning of runs.
-        static const uint16_t preContext = space;
+        static const uint16_t preContext = spaceCharacter;
         hb_buffer_add_utf16(harfBuzzBuffer.get(), &preContext, 1, 1, 0);
 
         addToHarfBuzzBufferInternal(harfBuzzBuffer.get(),

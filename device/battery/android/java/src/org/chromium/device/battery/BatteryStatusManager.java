@@ -45,36 +45,49 @@ class BatteryStatusManager {
     // This is to workaround a Galaxy Nexus bug, see the comment in the constructor.
     private final boolean mIgnoreBatteryPresentState;
 
-    // Only used in L (API level 21 and higher).
-    private BatteryManager mLollipopBatteryManager;
+    // Only used in L (API level 21) and higher.
+    private AndroidBatteryManagerWrapper mAndroidBatteryManager;
 
     private boolean mEnabled = false;
 
-    private BatteryStatusManager(
-            Context context, BatteryStatusCallback callback, boolean ignoreBatteryPresentState,
-            @Nullable BatteryManager batteryManager) {
+    @VisibleForTesting
+    static class AndroidBatteryManagerWrapper {
+        private final BatteryManager mBatteryManager;
+
+        protected AndroidBatteryManagerWrapper(BatteryManager batteryManager) {
+            mBatteryManager = batteryManager;
+        }
+
+        public int getIntProperty(int id) {
+            return mBatteryManager.getIntProperty(id);
+        }
+    }
+
+    private BatteryStatusManager(Context context, BatteryStatusCallback callback,
+            boolean ignoreBatteryPresentState,
+            @Nullable AndroidBatteryManagerWrapper batteryManager) {
         mAppContext = context.getApplicationContext();
         mCallback = callback;
         mIgnoreBatteryPresentState = ignoreBatteryPresentState;
-        mLollipopBatteryManager = batteryManager;
+        mAndroidBatteryManager = batteryManager;
     }
 
     BatteryStatusManager(Context context, BatteryStatusCallback callback) {
         // BatteryManager.EXTRA_PRESENT appears to be unreliable on Galaxy Nexus,
         // Android 4.2.1, it always reports false. See http://crbug.com/384348.
         this(context, callback, Build.MODEL.equals("Galaxy Nexus"),
-             Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP ? new BatteryManager()
-                                                                   : null);
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP
+                        ? new AndroidBatteryManagerWrapper(
+                                (BatteryManager) context.getSystemService(Context.BATTERY_SERVICE))
+                        : null);
     }
 
     /**
      * Creates a BatteryStatusManager without the Galaxy Nexus workaround for consistency in
      * testing.
      */
-    static BatteryStatusManager createBatteryStatusManagerForTesting(
-            Context context,
-            BatteryStatusCallback callback,
-            @Nullable BatteryManager batteryManager) {
+    static BatteryStatusManager createBatteryStatusManagerForTesting(Context context,
+            BatteryStatusCallback callback, @Nullable AndroidBatteryManagerWrapper batteryManager) {
         return new BatteryStatusManager(context, callback, false, batteryManager);
     }
 
@@ -142,7 +155,7 @@ class BatteryStatusManager {
         batteryStatus.dischargingTime = dischargingTimeSeconds;
         batteryStatus.level = level;
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+        if (mAndroidBatteryManager != null) {
             updateBatteryStatusForLollipop(batteryStatus);
         }
 
@@ -151,14 +164,14 @@ class BatteryStatusManager {
 
     @TargetApi(Build.VERSION_CODES.LOLLIPOP)
     private void updateBatteryStatusForLollipop(BatteryStatus batteryStatus) {
-        assert mLollipopBatteryManager != null;
+        assert mAndroidBatteryManager != null;
 
         // On Lollipop we can provide a better estimate for chargingTime and dischargingTime.
-        double remainingCapacityRatio = mLollipopBatteryManager.getIntProperty(
+        double remainingCapacityRatio = mAndroidBatteryManager.getIntProperty(
                 BatteryManager.BATTERY_PROPERTY_CAPACITY) / 100.0;
-        double batteryCapacityMicroAh = mLollipopBatteryManager.getIntProperty(
+        double batteryCapacityMicroAh = mAndroidBatteryManager.getIntProperty(
                 BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER);
-        double averageCurrentMicroA = mLollipopBatteryManager.getIntProperty(
+        double averageCurrentMicroA = mAndroidBatteryManager.getIntProperty(
                 BatteryManager.BATTERY_PROPERTY_CURRENT_AVERAGE);
 
         if (batteryStatus.charging) {

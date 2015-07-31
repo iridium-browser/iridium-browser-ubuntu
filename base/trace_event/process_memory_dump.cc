@@ -10,31 +10,28 @@
 namespace base {
 namespace trace_event {
 
-ProcessMemoryDump::ProcessMemoryDump()
-    : has_process_totals_(false), has_process_mmaps_(false) {
+ProcessMemoryDump::ProcessMemoryDump(
+    const scoped_refptr<MemoryDumpSessionState>& session_state)
+    : has_process_totals_(false),
+      has_process_mmaps_(false),
+      session_state_(session_state) {
 }
 
 ProcessMemoryDump::~ProcessMemoryDump() {
 }
 
 MemoryAllocatorDump* ProcessMemoryDump::CreateAllocatorDump(
-    const std::string& name) {
-  return CreateAllocatorDump(name, nullptr);
-}
-
-MemoryAllocatorDump* ProcessMemoryDump::CreateAllocatorDump(
-    const std::string& name,
-    MemoryAllocatorDump* parent) {
-  DCHECK_EQ(0ul, allocator_dumps_.count(name));
-  MemoryAllocatorDump* mad = new MemoryAllocatorDump(name, parent);
+    const std::string& absolute_name) {
+  MemoryAllocatorDump* mad = new MemoryAllocatorDump(absolute_name, this);
+  DCHECK_EQ(0ul, allocator_dumps_.count(absolute_name));
   allocator_dumps_storage_.push_back(mad);
-  allocator_dumps_[name] = mad;
+  allocator_dumps_[absolute_name] = mad;
   return mad;
 }
 
 MemoryAllocatorDump* ProcessMemoryDump::GetAllocatorDump(
-    const std::string& name) const {
-  auto it = allocator_dumps_.find(name);
+    const std::string& absolute_name) const {
+  auto it = allocator_dumps_.find(absolute_name);
   return it == allocator_dumps_.end() ? nullptr : it->second;
 }
 

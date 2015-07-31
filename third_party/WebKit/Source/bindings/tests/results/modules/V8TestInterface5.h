@@ -27,7 +27,7 @@ public:
     MODULES_EXPORT static v8::Local<v8::FunctionTemplate> domTemplate(v8::Isolate*);
     static TestInterface5Implementation* toImpl(v8::Local<v8::Object> object)
     {
-        return blink::toScriptWrappable(object)->toImpl<TestInterface5Implementation>();
+        return toScriptWrappable(object)->toImpl<TestInterface5Implementation>();
     }
     MODULES_EXPORT static TestInterface5Implementation* toImplWithTypeCheck(v8::Isolate*, v8::Local<v8::Value>);
     MODULES_EXPORT static const WrapperTypeInfo wrapperTypeInfo;
@@ -42,26 +42,8 @@ public:
     static void legacyCallCustom(const v8::FunctionCallbackInfo<v8::Value>&);
     static const int internalFieldCount = v8DefaultWrapperInternalFieldCount + 0;
     static void installConditionallyEnabledProperties(v8::Local<v8::Object>, v8::Isolate*);
-    static void installConditionallyEnabledMethods(v8::Local<v8::Object>, v8::Isolate*);
+    static void preparePrototypeObject(v8::Isolate*, v8::Local<v8::Object>);
 };
-
-template<typename CallbackInfo>
-inline void v8SetReturnValue(const CallbackInfo& callbackInfo, TestInterface5Implementation* impl)
-{
-    v8SetReturnValue(callbackInfo, toV8(impl, callbackInfo.Holder(), callbackInfo.GetIsolate()));
-}
-
-template<typename CallbackInfo>
-inline void v8SetReturnValueForMainWorld(const CallbackInfo& callbackInfo, TestInterface5Implementation* impl)
-{
-     v8SetReturnValue(callbackInfo, toV8(impl, callbackInfo.Holder(), callbackInfo.GetIsolate()));
-}
-
-template<typename CallbackInfo>
-inline void v8SetReturnValueFast(const CallbackInfo& callbackInfo, TestInterface5Implementation* impl, const ScriptWrappable*)
-{
-     v8SetReturnValue(callbackInfo, toV8(impl, callbackInfo.Holder(), callbackInfo.GetIsolate()));
-}
 
 template <>
 struct V8TypeOf<TestInterface5Implementation> {

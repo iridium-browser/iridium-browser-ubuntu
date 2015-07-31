@@ -57,6 +57,7 @@ namespace blink {
 
 class WebApplicationCacheHost;
 class WebApplicationCacheHostClient;
+class WebAppBannerClient;
 class WebCachedURLRequest;
 class WebColorChooser;
 class WebColorChooserClient;
@@ -85,6 +86,7 @@ class WebString;
 class WebURL;
 class WebURLResponse;
 class WebUserMediaClient;
+class WebVRClient;
 class WebWorkerContentSettingsClientProxy;
 struct WebColorSuggestion;
 struct WebConsoleMessage;
@@ -460,10 +462,10 @@ public:
     // Notifies that a new script context has been created for this frame.
     // This is similar to didClearWindowObject but only called once per
     // frame context.
-    virtual void didCreateScriptContext(WebLocalFrame*, v8::Handle<v8::Context>, int extensionGroup, int worldId) { }
+    virtual void didCreateScriptContext(WebLocalFrame*, v8::Local<v8::Context>, int extensionGroup, int worldId) { }
 
     // WebKit is about to release its reference to a v8 context for a frame.
-    virtual void willReleaseScriptContext(WebLocalFrame*, v8::Handle<v8::Context>, int worldId) { }
+    virtual void willReleaseScriptContext(WebLocalFrame*, v8::Local<v8::Context>, int worldId) { }
 
 
     // Geometry notifications ----------------------------------------------
@@ -641,6 +643,14 @@ public:
 
     // Access the embedder API for permission client.
     virtual WebPermissionClient* permissionClient() { return 0; }
+
+    // Virtual Reality -----------------------------------------------------
+
+    // Access the embedder API for virtual reality client.
+    virtual WebVRClient* webVRClient() { return 0; }
+
+    // App Banners ---------------------------------------------------------
+    virtual WebAppBannerClient* appBannerClient() { return 0; }
 
 protected:
     virtual ~WebFrameClient() { }

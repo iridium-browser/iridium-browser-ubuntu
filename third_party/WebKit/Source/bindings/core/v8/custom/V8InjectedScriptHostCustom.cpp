@@ -54,6 +54,7 @@
 #include "bindings/core/v8/V8ScriptRunner.h"
 #include "core/events/EventTarget.h"
 #include "core/frame/LocalDOMWindow.h"
+#include "core/inspector/EventListenerInfo.h"
 #include "core/inspector/InjectedScript.h"
 #include "core/inspector/InjectedScriptHost.h"
 #include "core/inspector/InspectorDOMAgent.h"
@@ -80,6 +81,25 @@ ScriptValue InjectedScriptHost::nodeAsScriptValue(ScriptState* scriptState, Node
     return ScriptValue(scriptState, toV8(node, scriptState->context()->Global(), isolate));
 }
 
+static EventTarget* eventTargetFromScriptValue(v8::Isolate* isolate, v8::Local<v8::Value> value)
+{
+    EventTarget* target = V8EventTarget::toImplWithTypeCheck(isolate, value);
+    // We need to handle LocalDOMWindow specially, because LocalDOMWindow wrapper exists on prototype chain.
+    if (!target)
+        target = toDOMWindow(isolate, value);
+    if (!target || !target->executionContext())
+        return nullptr;
+    return target;
+}
+
+EventTarget* InjectedScriptHost::scriptValueAsEventTarget(ScriptState* scriptState, ScriptValue value)
+{
+    ScriptState::Scope scope(scriptState);
+    if (value.isNull() || !value.isObject())
+        return nullptr;
+    return eventTargetFromScriptValue(scriptState->isolate(), value.v8Value());
+}
+
 void V8InjectedScriptHost::inspectedObjectMethodCustom(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     if (info.Length() < 1)
@@ -91,7 +111,7 @@ void V8InjectedScriptHost::inspectedObjectMethodCustom(const v8::FunctionCallbac
     }
 
     InjectedScriptHost* host = V8InjectedScriptHost::toImpl(info.Holder());
-    InjectedScriptHost::InspectableObject* object = host->inspectedObject(info[0]->ToInt32(info.GetIsolate())->Value());
+    InjectedScriptHost::InspectableObject* object = host->inspectedObject(info[0].As<v8::Int32>()->Value());
     v8SetReturnValue(info, object->get(ScriptState::current(info.GetIsolate())).v8Value());
 }
 
@@ -117,7 +137,7 @@ void V8InjectedScriptHost::internalConstructorNameMethodCustom(const v8::Functio
     if (info.Length() < 1 || !info[0]->IsObject())
         return;
 
-    v8::Local<v8::Object> object = info[0]->ToObject(info.GetIsolate());
+    v8::Local<v8::Object> object = info[0].As<v8::Object>();
     v8::Local<v8::String> result = object->GetConstructorName();
 
     if (!result.IsEmpty() && toCoreStringWithUndefinedOrNullCheck(result) == "Object") {
@@ -286,7 +306,7 @@ void V8InjectedScriptHost::getInternalPropertiesMethodCustom(const v8::FunctionC
     v8SetReturnValue(info, debugServer.getInternalProperties(object));
 }
 
-static v8::Local<v8::Array> getJSListenerFunctions(ExecutionContext* executionContext, const EventListenerInfo& listenerInfo, v8::Isolate* isolate)
+static v8::Local<v8::Array> getJSListenerFunctions(v8::Isolate* isolate, ExecutionContext* executionContext, const EventListenerInfo& listenerInfo)
 {
     v8::Local<v8::Array> result = v8::Array::New(isolate);
     size_t handlersCount = listenerInfo.eventListenerVector.size();
@@ -323,24 +343,16 @@ void V8InjectedScriptHost::getEventListenersMethodCustom(const v8::FunctionCallb
     if (info.Length() < 1)
         return;
 
-
-    v8::Local<v8::Value> value = info[0];
-    EventTarget* target = V8EventTarget::toImplWithTypeCheck(info.GetIsolate(), value);
-
-    // We need to handle a LocalDOMWindow specially, because a LocalDOMWindow wrapper exists on a prototype chain.
+    EventTarget* target = eventTargetFromScriptValue(info.GetIsolate(), info[0]);
     if (!target)
-        target = toDOMWindow(info.GetIsolate(), value);
-
-    if (!target || !target->executionContext())
         return;
-
     InjectedScriptHost* host = V8InjectedScriptHost::toImpl(info.Holder());
     Vector<EventListenerInfo> listenersArray;
     host->getEventListenersImpl(target, listenersArray);
 
     v8::Local<v8::Object> result = v8::Object::New(info.GetIsolate());
     for (size_t i = 0; i < listenersArray.size(); ++i) {
-        v8::Local<v8::Array> listeners = getJSListenerFunctions(target->executionContext(), listenersArray[i], info.GetIsolate());
+        v8::Local<v8::Array> listeners = getJSListenerFunctions(info.GetIsolate(), target->executionContext(), listenersArray[i]);
         if (!listeners->Length())
             continue;
         AtomicString eventType = listenersArray[i].eventType;
@@ -435,7 +447,7 @@ void V8InjectedScriptHost::setFunctionVariableValueMethodCustom(const v8::Functi
         return;
 
     v8::Local<v8::Value> functionValue = info[0];
-    int scopeIndex = info[1]->Int32Value();
+    int scopeIndex = info[1].As<v8::Int32>()->Value();
     String variableName = toCoreStringWithUndefinedOrNullCheck(info[2]);
     v8::Local<v8::Value> newValue = info[3];
 
@@ -537,8 +549,10 @@ void V8InjectedScriptHost::callFunctionMethodCustom(const v8::FunctionCallbackIn
     v8::Local<v8::Array> arguments = v8::Local<v8::Array>::Cast(info[2]);
     size_t argc = arguments->Length();
     OwnPtr<v8::Local<v8::Value>[]> argv = adoptArrayPtr(new v8::Local<v8::Value>[argc]);
-    for (size_t i = 0; i < argc; ++i)
-        argv[i] = arguments->Get(i);
+    for (size_t i = 0; i < argc; ++i) {
+        if (!arguments->Get(info.GetIsolate()->GetCurrentContext(), v8::Integer::New(info.GetIsolate(), i)).ToLocal(&argv[i]))
+            return;
+    }
 
     v8::Local<v8::Value> result = function->Call(receiver, argc, argv.get());
     v8SetReturnValue(info, result);
@@ -547,12 +561,11 @@ void V8InjectedScriptHost::callFunctionMethodCustom(const v8::FunctionCallbackIn
 void V8InjectedScriptHost::suppressWarningsAndCallFunctionMethodCustom(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     InjectedScriptHost* host = V8InjectedScriptHost::toImpl(info.Holder());
-    ScriptDebugServer& debugServer = host->scriptDebugServer();
-    debugServer.muteWarningsAndDeprecations();
+    host->client()->muteWarningsAndDeprecations();
 
     callFunctionMethodCustom(info);
 
-    debugServer.unmuteWarningsAndDeprecations();
+    host->client()->unmuteWarningsAndDeprecations();
 }
 
 void V8InjectedScriptHost::setNonEnumPropertyMethodCustom(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -560,7 +573,7 @@ void V8InjectedScriptHost::setNonEnumPropertyMethodCustom(const v8::FunctionCall
     if (info.Length() < 3 || !info[0]->IsObject() || !info[1]->IsString())
         return;
 
-    v8::Local<v8::Object> object = info[0]->ToObject(info.GetIsolate());
+    v8::Local<v8::Object> object = info[0].As<v8::Object>();
     object->ForceSet(info.GetIsolate()->GetCurrentContext(), info[1], info[2], v8::DontEnum);
 }
 
@@ -580,12 +593,12 @@ void V8InjectedScriptHost::bindMethodCustom(const v8::FunctionCallbackInfo<v8::V
 
 void V8InjectedScriptHost::objectForIdMethodCustom(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
-    if (info.Length() < 1)
+    if (info.Length() < 1 || !info[0]->IsInt32())
         return;
     InjectedScriptNative* injectedScriptNative = InjectedScriptNative::fromInjectedScriptHost(info.Holder());
     if (!injectedScriptNative)
         return;
-    int id = info[0]->ToInt32(info.GetIsolate())->Value();
+    int id = info[0].As<v8::Int32>()->Value();
     v8::Local<v8::Value> value = injectedScriptNative->objectForId(id);
     if (!value.IsEmpty())
         info.GetReturnValue().Set(value);
@@ -598,7 +611,7 @@ void V8InjectedScriptHost::idToObjectGroupNameMethodCustom(const v8::FunctionCal
     InjectedScriptNative* injectedScriptNative = InjectedScriptNative::fromInjectedScriptHost(info.Holder());
     if (!injectedScriptNative)
         return;
-    int id = info[0]->ToInt32(info.GetIsolate())->Value();
+    int id = info[0].As<v8::Int32>()->Value();
     String groupName = injectedScriptNative->groupName(id);
     if (!groupName.isEmpty())
         info.GetReturnValue().Set(v8String(info.GetIsolate(), groupName));

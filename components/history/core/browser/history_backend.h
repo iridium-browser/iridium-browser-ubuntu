@@ -42,7 +42,9 @@ class SingleThreadTaskRunner;
 namespace history {
 class CommitLaterTask;
 struct DownloadRow;
+class HistoryBackendDBBaseTest;
 class HistoryBackendObserver;
+class HistoryBackendTest;
 class HistoryClient;
 class HistoryDatabase;
 struct HistoryDatabaseParams;
@@ -117,10 +119,6 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
     // there may be no in-memory database.
     virtual void SetInMemoryBackend(
         scoped_ptr<InMemoryHistoryBackend> backend) = 0;
-
-    // Notify HistoryService that VisitDatabase was changed. The event will be
-    // forwarded to the HistoryServiceObservers in the UI thread.
-    virtual void NotifyAddVisit(const BriefVisitInfo& info) = 0;
 
     // Notify HistoryService that some URLs favicon changed that will forward
     // the events to the FaviconChangedObservers in the correct thread.
@@ -300,8 +298,6 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 
   void SetFaviconsOutOfDateForPage(const GURL& page_url);
 
-  void CloneFavicons(const GURL& old_page_url, const GURL& new_page_url);
-
   void SetImportedFavicons(
       const favicon_base::FaviconUsageDataList& favicon_usage);
 
@@ -456,7 +452,8 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   friend class base::RefCountedThreadSafe<HistoryBackend>;
   friend class CommitLaterTask;  // The commit task needs to call Commit().
   friend class HistoryBackendTest;
-  friend class HistoryBackendDBTest;  // So the unit tests can poke our innards.
+  friend class HistoryBackendDBBaseTest;  // So the unit tests can poke our
+                                          // innards.
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, DeleteAll);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, DeleteAllThenAddData);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, AddPagesWithDetails);
@@ -495,6 +492,8 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
                            MergeFaviconMaxFaviconBitmapsPerIconURL);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
+                           MergeIdenticalFaviconDoesNotChangeLastUpdatedTime);
+  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
                            UpdateFaviconMappingsAndFetchMultipleIconTypes);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, GetFaviconsFromDBEmpty);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
@@ -505,8 +504,6 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, GetFaviconsFromDBExpired);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
                            UpdateFaviconMappingsAndFetchNoDB);
-  FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest,
-                           CloneFaviconIsRestrictedToSameDomain);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, QueryFilteredURLs);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, UpdateVisitDuration);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, ExpireHistoryForTimes);
@@ -745,9 +742,6 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // Returns the HistoryClient, blocking until the bookmarks are loaded. This
   // may return null during testing.
   HistoryClient* GetHistoryClient();
-
-  // Notify any observers of an addition to the visit database.
-  void NotifyVisitObservers(const VisitRow& visit);
 
   // Data ----------------------------------------------------------------------
 

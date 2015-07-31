@@ -11,7 +11,6 @@
 #include "../../include/javascript/JS_Value.h"
 #include "../../include/javascript/Field.h"
 #include "../../include/javascript/JS_EventHandler.h"
-//#include "../include/JS_ResMgr.h"
 #include "../../include/javascript/JS_Context.h"
 #include "../../include/javascript/JS_Runtime.h"
 #include "../../include/javascript/Document.h"
@@ -81,32 +80,32 @@ BEGIN_JS_STATIC_PROP(CJS_Field)
 END_JS_STATIC_PROP()
 
 BEGIN_JS_STATIC_METHOD(CJS_Field)
-	JS_STATIC_METHOD_ENTRY(browseForFileToSubmit,      0)
-	JS_STATIC_METHOD_ENTRY(buttonGetCaption,           1)
-	JS_STATIC_METHOD_ENTRY(buttonGetIcon,              1)
-	JS_STATIC_METHOD_ENTRY(buttonImportIcon,           0)
-	JS_STATIC_METHOD_ENTRY(buttonSetCaption,           2)
-	JS_STATIC_METHOD_ENTRY(buttonSetIcon,              2)
-	JS_STATIC_METHOD_ENTRY(checkThisBox,               2)
-	JS_STATIC_METHOD_ENTRY(clearItems,                 0)
-	JS_STATIC_METHOD_ENTRY(defaultIsChecked,           2)
-	JS_STATIC_METHOD_ENTRY(deleteItemAt,               1)
-	JS_STATIC_METHOD_ENTRY(getArray ,                  0)
-	JS_STATIC_METHOD_ENTRY(getItemAt,                  0)
-	JS_STATIC_METHOD_ENTRY(getLock,                    0)
-	JS_STATIC_METHOD_ENTRY(insertItemAt,               0)
-	JS_STATIC_METHOD_ENTRY(isBoxChecked,               1)
-	JS_STATIC_METHOD_ENTRY(isDefaultChecked,           1)
-	JS_STATIC_METHOD_ENTRY(setAction,                  2)
-	JS_STATIC_METHOD_ENTRY(setFocus,                   0)
-	JS_STATIC_METHOD_ENTRY(setItems,                   1)
-	JS_STATIC_METHOD_ENTRY(setLock,                    0)
-	JS_STATIC_METHOD_ENTRY(signatureGetModifications,  0)
-	JS_STATIC_METHOD_ENTRY(signatureGetSeedValue,      0)
-	JS_STATIC_METHOD_ENTRY(signatureInfo,              0)
-	JS_STATIC_METHOD_ENTRY(signatureSetSeedValue,      0)
-	JS_STATIC_METHOD_ENTRY(signatureSign,              0)
-	JS_STATIC_METHOD_ENTRY(signatureValidate,          0)
+	JS_STATIC_METHOD_ENTRY(browseForFileToSubmit)
+	JS_STATIC_METHOD_ENTRY(buttonGetCaption)
+	JS_STATIC_METHOD_ENTRY(buttonGetIcon)
+	JS_STATIC_METHOD_ENTRY(buttonImportIcon)
+	JS_STATIC_METHOD_ENTRY(buttonSetCaption)
+	JS_STATIC_METHOD_ENTRY(buttonSetIcon)
+	JS_STATIC_METHOD_ENTRY(checkThisBox)
+	JS_STATIC_METHOD_ENTRY(clearItems)
+	JS_STATIC_METHOD_ENTRY(defaultIsChecked)
+	JS_STATIC_METHOD_ENTRY(deleteItemAt)
+	JS_STATIC_METHOD_ENTRY(getArray )
+	JS_STATIC_METHOD_ENTRY(getItemAt)
+	JS_STATIC_METHOD_ENTRY(getLock)
+	JS_STATIC_METHOD_ENTRY(insertItemAt)
+	JS_STATIC_METHOD_ENTRY(isBoxChecked)
+	JS_STATIC_METHOD_ENTRY(isDefaultChecked)
+	JS_STATIC_METHOD_ENTRY(setAction)
+	JS_STATIC_METHOD_ENTRY(setFocus)
+	JS_STATIC_METHOD_ENTRY(setItems)
+	JS_STATIC_METHOD_ENTRY(setLock)
+	JS_STATIC_METHOD_ENTRY(signatureGetModifications)
+	JS_STATIC_METHOD_ENTRY(signatureGetSeedValue)
+	JS_STATIC_METHOD_ENTRY(signatureInfo)
+	JS_STATIC_METHOD_ENTRY(signatureSetSeedValue)
+	JS_STATIC_METHOD_ENTRY(signatureSign)
+	JS_STATIC_METHOD_ENTRY(signatureValidate)
 END_JS_STATIC_METHOD()
 
 IMPLEMENT_JS_CLASS(CJS_Field, Field)
@@ -259,7 +258,7 @@ void Field::UpdateFormField(CPDFSDK_Document* pDocument, CPDF_FormField* pFormFi
 				FX_BOOL bFormated = FALSE;
 				CFX_WideString sValue = pWidget->OnFormat(0, bFormated);
 				if (bFormated)
-					pWidget->ResetAppearance(sValue, FALSE);
+					pWidget->ResetAppearance(sValue.c_str(), FALSE);
 				else
 					pWidget->ResetAppearance(NULL, FALSE);
 			}
@@ -316,7 +315,7 @@ void Field::UpdateFormControl(CPDFSDK_Document* pDocument, CPDF_FormControl* pFo
 				FX_BOOL bFormated = FALSE;
 				CFX_WideString sValue = pWidget->OnFormat(0, bFormated);
 				if (bFormated)
-					pWidget->ResetAppearance(sValue, FALSE);
+					pWidget->ResetAppearance(sValue.c_str(), FALSE);
 				else
 					pWidget->ResetAppearance(NULL, FALSE);
 			}
@@ -1072,7 +1071,7 @@ FX_BOOL Field::currentValueIndices(IFXJS_Context* cc, CJS_PropValue& vp, CFX_Wid
 			for (int i=0,sz=SelArray.GetLength(); i<sz; i++)
 			{
 				SelArray.GetElement(i,SelValue);
-				iSelecting = (FX_INT32)SelValue;
+				iSelecting = SelValue.ToInt();
 				array.Add(iSelecting);
 			}
 		}
@@ -1500,26 +1499,22 @@ void Field::SetDisplay(CPDFSDK_Document* pDocument, const CFX_WideString& swFiel
 
 FX_BOOL Field::doc(IFXJS_Context* cc, CJS_PropValue& vp, CFX_WideString& sError)
 {
-	ASSERT(m_pJSDoc != NULL);
-
-	if (!vp.IsGetting())return FALSE;
-
-	vp << (CJS_Object*)(*m_pJSDoc);
-
+	if (!vp.IsGetting()) {
+		return FALSE;
+	}
+	vp << m_pJSDoc->GetCJSDoc();
 	return TRUE;
 }
 
 FX_BOOL Field::editable(IFXJS_Context* cc, CJS_PropValue& vp, CFX_WideString& sError)
 {
 	ASSERT(m_pDocument != NULL);
-
 	if (vp.IsSetting())
 	{
 		if (!m_bCanSet) return FALSE;
 
 		bool bVP;
 		vp >> bVP;
-
 	}
 	else
 	{
@@ -2379,10 +2374,10 @@ FX_BOOL Field::rect(IFXJS_Context* cc, CJS_PropValue& vp, CFX_WideString& sError
 		rcArray.GetElement(3, Lower_Righty);
 
 		FX_FLOAT pArray[4] = {0.0f,0.0f,0.0f,0.0f};
-		pArray[0] = (FX_FLOAT)(FX_INT32)Upper_Leftx;
-		pArray[1] = (FX_FLOAT)(FX_INT32)Lower_Righty;
-		pArray[2] = (FX_FLOAT)(FX_INT32)Lower_Rightx;
-		pArray[3] = (FX_FLOAT)(FX_INT32)Upper_Lefty;
+		pArray[0] = (FX_FLOAT)Upper_Leftx.ToInt();
+		pArray[1] = (FX_FLOAT)Lower_Righty.ToInt();
+		pArray[2] = (FX_FLOAT)Lower_Rightx.ToInt();
+		pArray[3] = (FX_FLOAT)Upper_Lefty.ToInt();
 
 		CPDF_Rect crRect(pArray);
 
@@ -3089,7 +3084,7 @@ FX_BOOL Field::value(IFXJS_Context* cc, CJS_PropValue& vp, CFX_WideString& sErro
 			{
 				CJS_Value ElementValue(m_isolate);
 				ValueArray.GetElement(i, ElementValue);
-				strArray.Add(ElementValue.operator CFX_WideString());
+				strArray.Add(ElementValue.ToCFXWideString());
 			}
 		}
 		else
@@ -3131,7 +3126,7 @@ FX_BOOL Field::value(IFXJS_Context* cc, CJS_PropValue& vp, CFX_WideString& sErro
 
 				double dRet;
 				FX_BOOL bDot;
-				if (CJS_PublicMethods::ConvertStringToNumber(swValue,dRet,bDot))
+				if (CJS_PublicMethods::ConvertStringToNumber(swValue.c_str(), dRet, bDot))
 				{
 					if (bDot)
 						vp << dRet;
@@ -3152,9 +3147,9 @@ FX_BOOL Field::value(IFXJS_Context* cc, CJS_PropValue& vp, CFX_WideString& sErro
 					for (int i = 0, sz = pFormField->CountSelectedItems(); i < sz; i++)
 					{
 						iIndex = pFormField->GetSelectedIndex(i);
-						ElementValue = pFormField->GetOptionValue(iIndex);
-						if (FXSYS_wcslen((FX_LPCWSTR)ElementValue.operator CFX_WideString()) == 0)
-							ElementValue = pFormField->GetOptionLabel(iIndex);
+						ElementValue = pFormField->GetOptionValue(iIndex).c_str();
+						if (FXSYS_wcslen(ElementValue.ToCFXWideString().c_str()) == 0)
+							ElementValue = pFormField->GetOptionLabel(iIndex).c_str();
 						ValueArray.SetElement(i, ElementValue);
 					}
 					vp << ValueArray;
@@ -3165,7 +3160,7 @@ FX_BOOL Field::value(IFXJS_Context* cc, CJS_PropValue& vp, CFX_WideString& sErro
 				
 					double dRet;
 					FX_BOOL bDot;
-					if (CJS_PublicMethods::ConvertStringToNumber(swValue,dRet,bDot))
+					if (CJS_PublicMethods::ConvertStringToNumber(swValue.c_str(), dRet, bDot))
 					{
 						if (bDot)
 							vp << dRet;
@@ -3186,10 +3181,9 @@ FX_BOOL Field::value(IFXJS_Context* cc, CJS_PropValue& vp, CFX_WideString& sErro
 					if (pFormField->GetControl(i)->IsChecked())
 					{
 						CFX_WideString swValue = pFormField->GetControl(i)->GetExportValue();
-						
 						double dRet;
 						FX_BOOL bDot;
-						if (CJS_PublicMethods::ConvertStringToNumber(swValue,dRet,bDot))
+						if (CJS_PublicMethods::ConvertStringToNumber(swValue.c_str(), dRet, bDot))
 						{
 							if (bDot)
 								vp << dRet;
@@ -3378,8 +3372,8 @@ FX_BOOL Field::buttonGetCaption(IFXJS_Context* cc, const CJS_Parameters& params,
 
 	int nface = 0;
 	int iSize = params.size();
-	if ( iSize >= 1)
-		nface = (FX_INT32) params[0];
+	if (iSize >= 1)
+		nface = params[0].ToInt();
 
 	CFX_PtrArray FieldArray;
 	GetFormFields(m_FieldName,FieldArray);
@@ -3395,11 +3389,11 @@ FX_BOOL Field::buttonGetCaption(IFXJS_Context* cc, const CJS_Parameters& params,
 	if (!pFormControl)return FALSE;
 	
 	if (nface == 0)
-		vRet = pFormControl->GetNormalCaption();
+		vRet = pFormControl->GetNormalCaption().c_str();
 	else if (nface == 1)
-		vRet = pFormControl->GetDownCaption();
+		vRet = pFormControl->GetDownCaption().c_str();
 	else if (nface == 2)
-		vRet = pFormControl->GetRolloverCaption();
+		vRet = pFormControl->GetRolloverCaption().c_str();
 	else
 		return FALSE;
 
@@ -3414,8 +3408,8 @@ FX_BOOL Field::buttonGetIcon(IFXJS_Context* cc, const CJS_Parameters& params, CJ
 
 	int nface = 0;
 	int iSize = params.size();
-	if ( iSize >= 1)
-		nface = (FX_INT32) params[0];
+	if (iSize >= 1)
+		nface = params[0].ToInt();
 	
 	CFX_PtrArray FieldArray;
 	GetFormFields(m_FieldName,FieldArray);
@@ -3523,15 +3517,14 @@ FX_BOOL Field::checkThisBox(IFXJS_Context* cc, const CJS_Parameters& params, CJS
 	if (!m_bCanSet) return FALSE;
 
 	int iSize = params.size();
-	int nWidget = -1;
-	if ( iSize >= 1)
-		nWidget= (FX_INT32) params[0];
-	else
+	if (iSize < 1)
 		return FALSE;
-	FX_BOOL bCheckit = TRUE;
-	if ( iSize >= 2)
-		bCheckit = params[1];
 
+	int nWidget = params[0].ToInt();
+
+	FX_BOOL bCheckit = TRUE;
+	if (iSize >= 2)
+		bCheckit = params[1].ToBool();
 
 	CFX_PtrArray FieldArray;
 	GetFormFields(m_FieldName,FieldArray);
@@ -3539,9 +3532,9 @@ FX_BOOL Field::checkThisBox(IFXJS_Context* cc, const CJS_Parameters& params, CJS
 
 	CPDF_FormField* pFormField = (CPDF_FormField*)FieldArray.ElementAt(0);
 	ASSERT(pFormField != NULL);
-	
+
 	if (pFormField->GetFieldType() != FIELDTYPE_CHECKBOX && pFormField->GetFieldType() != FIELDTYPE_RADIOBUTTON)
-		return FALSE;	
+		return FALSE;
 	if(nWidget <0 || nWidget >= pFormField->CountControls())
 		return FALSE;
 	if (pFormField->GetFieldType() == FIELDTYPE_RADIOBUTTON)
@@ -3550,7 +3543,6 @@ FX_BOOL Field::checkThisBox(IFXJS_Context* cc, const CJS_Parameters& params, CJS
 		pFormField->CheckControl(nWidget, bCheckit, TRUE);
 
 	UpdateFormField(m_pDocument, pFormField, TRUE, TRUE, TRUE);
-
 	return TRUE;
 }
 
@@ -3566,14 +3558,10 @@ FX_BOOL Field::defaultIsChecked(IFXJS_Context* cc, const CJS_Parameters& params,
 	if (!m_bCanSet) return FALSE;
 
 	int iSize = params.size();
-	int nWidget = -1;
-	if ( iSize >= 1)
-		nWidget= (FX_INT32) params[0];
-	else
+	if (iSize < 1)
 		return FALSE;
-	//FX_BOOL bIsDefaultChecked = TRUE;
-	//if ( iSize >= 2)
-	//	bIsDefaultChecked =  params[1];
+
+	int nWidget = params[0].ToInt();
 
 	CFX_PtrArray FieldArray;
 	GetFormFields(m_FieldName,FieldArray);
@@ -3669,16 +3657,15 @@ FX_BOOL Field::getArray(IFXJS_Context* cc, const CJS_Parameters& params, CJS_Val
 FX_BOOL Field::getItemAt(IFXJS_Context* cc, const CJS_Parameters& params, CJS_Value& vRet, CFX_WideString& sError)
 {
 	ASSERT(m_pDocument != NULL);
+	int iSize = params.size();
 
 	int nIdx = -1;
-	if (params.size() >=1)
-		nIdx = (FX_INT32) params[0];
+	if (iSize >= 1)
+		nIdx = params[0].ToInt();
+
 	FX_BOOL bExport = TRUE;
-	int iSize = params.size();
-	if ( iSize >= 2)
-	{
-		bExport =(FX_BOOL) params[1];
-	}
+	if (iSize >= 2)
+		bExport = params[1].ToBool();
 
 	CFX_PtrArray FieldArray;
 	GetFormFields(m_FieldName,FieldArray);
@@ -3696,12 +3683,12 @@ FX_BOOL Field::getItemAt(IFXJS_Context* cc, const CJS_Parameters& params, CJS_Va
 		{
 			CFX_WideString strval = pFormField->GetOptionValue(nIdx);
 			if (strval.IsEmpty())
-				vRet = pFormField->GetOptionLabel(nIdx);
+				vRet = pFormField->GetOptionLabel(nIdx).c_str();
 			else
-				vRet = strval;
+				vRet = strval.c_str();
 		}
 		else
-			vRet = pFormField->GetOptionLabel(nIdx);
+			vRet = pFormField->GetOptionLabel(nIdx).c_str();
 	}
 	else
 		return FALSE;
@@ -3724,8 +3711,8 @@ FX_BOOL Field::isBoxChecked(IFXJS_Context* cc, const CJS_Parameters& params, CJS
 	ASSERT(m_pDocument != NULL);
 
 	int nIndex = -1;
-	if (params.size() >=1)
-		nIndex = (FX_INT32) params[0];
+	if (params.size() >= 1)
+		nIndex = params[0].ToInt();
 
 	CFX_PtrArray FieldArray;
 	GetFormFields(m_FieldName,FieldArray);
@@ -3759,8 +3746,8 @@ FX_BOOL Field::isDefaultChecked(IFXJS_Context* cc, const CJS_Parameters& params,
 	ASSERT(m_pDocument != NULL);
 
 	int nIndex = -1;
-	if (params.size() >=1)
-		nIndex = (FX_INT32) params[0];
+	if (params.size() >= 1)
+		nIndex = params[0].ToInt();
 
 	CFX_PtrArray FieldArray;
 	GetFormFields(m_FieldName,FieldArray);

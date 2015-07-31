@@ -29,6 +29,7 @@ namespace webrtc {
 RtpRtcp::Configuration::Configuration()
     : id(-1),
       audio(false),
+      receiver_only(false),
       clock(NULL),
       receive_statistics(NullObjectReceiveStatistics()),
       outgoing_transport(NULL),
@@ -74,6 +75,7 @@ ModuleRtpRtcpImpl::ModuleRtpRtcpImpl(const Configuration& configuration)
                    configuration.rtcp_packet_type_counter_observer),
       rtcp_receiver_(configuration.id,
                      configuration.clock,
+                     configuration.receiver_only,
                      configuration.rtcp_packet_type_counter_observer,
                      configuration.bandwidth_callback,
                      configuration.intra_frame_callback,
@@ -85,7 +87,7 @@ ModuleRtpRtcpImpl::ModuleRtpRtcpImpl(const Configuration& configuration)
       last_process_time_(configuration.clock->TimeInMilliseconds()),
       last_bitrate_process_time_(configuration.clock->TimeInMilliseconds()),
       last_rtt_process_time_(configuration.clock->TimeInMilliseconds()),
-      packet_overhead_(28),  // IPV4 UDP.
+      packet_overhead_(28),                     // IPV4 UDP.
       padding_index_(static_cast<size_t>(-1)),  // Start padding at first child.
       nack_method_(kNackOff),
       nack_last_time_sent_full_(0),
@@ -206,8 +208,13 @@ void ModuleRtpRtcpImpl::SetRtxSsrc(uint32_t ssrc) {
   rtp_sender_.SetRtxSsrc(ssrc);
 }
 
-void ModuleRtpRtcpImpl::SetRtxSendPayloadType(int payload_type) {
-  rtp_sender_.SetRtxPayloadType(payload_type);
+void ModuleRtpRtcpImpl::SetRtxSendPayloadType(int payload_type,
+                                              int associated_payload_type) {
+  rtp_sender_.SetRtxPayloadType(payload_type, associated_payload_type);
+}
+
+std::pair<int, int> ModuleRtpRtcpImpl::RtxSendPayloadType() const {
+  return rtp_sender_.RtxPayloadType();
 }
 
 int32_t ModuleRtpRtcpImpl::IncomingRtcpPacket(
@@ -403,7 +410,7 @@ int32_t ModuleRtpRtcpImpl::SendOutgoingData(
   }
   return rtp_sender_.SendOutgoingData(
       frame_type, payload_type, time_stamp, capture_time_ms, payload_data,
-      payload_size, fragmentation, NULL, rtp_video_hdr);
+      payload_size, fragmentation, rtp_video_hdr);
 }
 
 bool ModuleRtpRtcpImpl::TimeToSendPacket(uint32_t ssrc,
@@ -493,12 +500,6 @@ void ModuleRtpRtcpImpl::SetRTCPStatus(const RTCPMethod method) {
   rtcp_receiver_.SetRTCPStatus(method);
 }
 
-// Only for internal test.
-uint32_t ModuleRtpRtcpImpl::LastSendReport(
-    int64_t& last_rtcptime) {
-  return rtcp_sender_.LastSendReport(last_rtcptime);
-}
-
 int32_t ModuleRtpRtcpImpl::SetCNAME(const char c_name[RTCP_CNAME_SIZE]) {
   return rtcp_sender_.SetCNAME(c_name);
 }
@@ -555,8 +556,15 @@ int32_t ModuleRtpRtcpImpl::ResetSendDataCountersRTP() {
 
 // Force a send of an RTCP packet.
 // Normal SR and RR are triggered via the process function.
-int32_t ModuleRtpRtcpImpl::SendRTCP(uint32_t rtcp_packet_type) {
-  return rtcp_sender_.SendRTCP(GetFeedbackState(), rtcp_packet_type);
+int32_t ModuleRtpRtcpImpl::SendRTCP(RTCPPacketType packet_type) {
+  return rtcp_sender_.SendRTCP(GetFeedbackState(), packet_type);
+}
+
+// Force a send of an RTCP packet.
+// Normal SR and RR are triggered via the process function.
+int32_t ModuleRtpRtcpImpl::SendCompoundRTCP(
+    const std::set<RTCPPacketType>& packet_types) {
+  return rtcp_sender_.SendCompoundRTCP(GetFeedbackState(), packet_types);
 }
 
 int32_t ModuleRtpRtcpImpl::SetRTCPApplicationSpecificData(

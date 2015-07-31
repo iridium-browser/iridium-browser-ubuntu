@@ -38,10 +38,11 @@
 #include "platform/heap/Handle.h"
 #include "platform/heap/Heap.h"
 #include "platform/heap/SafePoint.h"
-#include "platform/scheduler/Scheduler.h"
 #include "public/platform/Platform.h"
+#include "public/platform/WebScheduler.h"
 #include "public/platform/WebThread.h"
 #include "public/platform/WebTraceLocation.h"
+#include "wtf/Partitions.h"
 #include "wtf/ThreadingPrimitives.h"
 #if ENABLE(GC_PROFILING)
 #include "platform/TracedValue.h"
@@ -90,15 +91,14 @@ ThreadState::ThreadState()
     , m_safePointScopeMarker(nullptr)
     , m_atSafePoint(false)
     , m_interruptors()
-    , m_didV8GCAfterLastGC(false)
     , m_sweepForbidden(false)
     , m_noAllocationCount(0)
     , m_gcForbiddenCount(0)
     , m_vectorBackingHeapIndex(Vector1HeapIndex)
     , m_currentHeapAges(0)
     , m_isTerminating(false)
+    , m_gcMixinMarker(nullptr)
     , m_shouldFlushHeapDoesNotContainCache(false)
-    , m_collectionRate(1.0)
     , m_gcState(NoGCScheduled)
     , m_traceDOMWrappers(nullptr)
 #if defined(ADDRESS_SANITIZER)
@@ -501,23 +501,31 @@ Mutex& ThreadState::globalRootsMutex()
     return mutex;
 }
 
-// FIXME: We should improve the GC heuristics.
+// TODO(haraken): We should improve the GC heuristics.
 // These heuristics affect performance significantly.
 bool ThreadState::shouldScheduleIdleGC()
 {
     if (gcState() != NoGCScheduled)
         return false;
 #if ENABLE(OILPAN)
-    // Trigger garbage collection on a 50% increase in size since the last GC,
-    // but not for less than 512 KB.
-    size_t newSize = Heap::allocatedObjectSize();
-    return newSize >= 512 * 1024 && newSize > Heap::markedObjectSize() / 2;
+    // The estimated size is updated when the main thread finishes lazy
+    // sweeping. If this thread reaches here before the main thread finishes
+    // lazy sweeping, the thread will use the estimated size of the last GC.
+    size_t estimatedLiveObjectSize = Heap::estimatedLiveObjectSize();
+    size_t allocatedObjectSize = Heap::allocatedObjectSize();
+    // Heap::markedObjectSize() may be underestimated if any thread has not
+    // finished completeSweep().
+    size_t currentObjectSize = allocatedObjectSize + Heap::markedObjectSize() + WTF::Partitions::totalSizeOfCommittedPages();
+    // Schedule an idle GC if Oilpan has allocated more than 1 MB since
+    // the last GC and the current memory usage is >50% larger than
+    // the estimated live memory usage.
+    return allocatedObjectSize >= 1024 * 1024 && currentObjectSize > estimatedLiveObjectSize * 3 / 2;
 #else
     return false;
 #endif
 }
 
-// FIXME: We should improve the GC heuristics.
+// TODO(haraken): We should improve the GC heuristics.
 // These heuristics affect performance significantly.
 bool ThreadState::shouldSchedulePreciseGC()
 {
@@ -526,60 +534,59 @@ bool ThreadState::shouldSchedulePreciseGC()
 #if ENABLE(OILPAN)
     return false;
 #else
-    // Trigger garbage collection on a 50% increase in size since the last GC,
-    // but not for less than 512 KB.
-    size_t newSize = Heap::allocatedObjectSize();
-    return newSize >= 512 * 1024 && newSize > Heap::markedObjectSize() / 2;
+    // The estimated size is updated when the main thread finishes lazy
+    // sweeping. If this thread reaches here before the main thread finishes
+    // lazy sweeping, the thread will use the estimated size of the last GC.
+    size_t estimatedLiveObjectSize = Heap::estimatedLiveObjectSize();
+    size_t allocatedObjectSize = Heap::allocatedObjectSize();
+    // Heap::markedObjectSize() may be underestimated if any thread has not
+    // finished completeSweep().
+    size_t currentObjectSize = allocatedObjectSize + Heap::markedObjectSize() + WTF::Partitions::totalSizeOfCommittedPages();
+    // Schedule a precise GC if Oilpan has allocated more than 1 MB since
+    // the last GC and the current memory usage is >50% larger than
+    // the estimated live memory usage.
+    return allocatedObjectSize >= 1024 * 1024 && currentObjectSize > estimatedLiveObjectSize * 3 / 2;
 #endif
 }
 
-// FIXME: We should improve the GC heuristics.
+// TODO(haraken): We should improve the GC heuristics.
 // These heuristics affect performance significantly.
 bool ThreadState::shouldForceConservativeGC()
 {
-    if (UNLIKELY(m_gcForbiddenCount))
+    if (UNLIKELY(isGCForbidden()))
         return false;
 
-    if (Heap::isUrgentGCRequested())
-        return true;
-
-    size_t newSize = Heap::allocatedObjectSize();
-    if (newSize >= 300 * 1024 * 1024) {
-        // If we consume too much memory, trigger a conservative GC
-        // on a 50% increase in size since the last GC. This is a safe guard
-        // to avoid OOM.
-        return newSize > Heap::markedObjectSize() / 2;
+    // The estimated size is updated when the main thread finishes lazy
+    // sweeping. If this thread reaches here before the main thread finishes
+    // lazy sweeping, the thread will use the estimated size of the last GC.
+    size_t estimatedLiveObjectSize = Heap::estimatedLiveObjectSize();
+    size_t allocatedObjectSize = Heap::allocatedObjectSize();
+    // Heap::markedObjectSize() may be underestimated if any thread has not
+    // finished completeSweep().
+    size_t currentObjectSize = allocatedObjectSize + Heap::markedObjectSize() + WTF::Partitions::totalSizeOfCommittedPages();
+    if (currentObjectSize >= 300 * 1024 * 1024) {
+        // If we're consuming too much memory, trigger a conservative GC
+        // aggressively. This is a safe guard to avoid OOM.
+        return currentObjectSize > estimatedLiveObjectSize * 3 / 2;
     }
-    if (m_didV8GCAfterLastGC && m_collectionRate > 0.5) {
-        // If we had a V8 GC after the last Oilpan GC and the last collection
-        // rate was higher than 50%, trigger a conservative GC on a 200%
-        // increase in size since the last GC, but not for less than 4 MB.
-        return newSize >= 4 * 1024 * 1024 && newSize > 2 * Heap::markedObjectSize();
-    }
-    // Otherwise, trigger a conservative GC on a 400% increase in size since
-    // the last GC, but not for less than 32 MB. We set the higher limit in
-    // this case because Oilpan GC is unlikely to collect a lot of objects
-    // without having a V8 GC.
-    return newSize >= 32 * 1024 * 1024 && newSize > 4 * Heap::markedObjectSize();
+    // Schedule a conservative GC if Oilpan has allocated more than 32 MB since
+    // the last GC and the current memory usage is >400% larger than
+    // the estimated live memory usage.
+    // TODO(haraken): 400% is too large. Lower the heap growing factor.
+    return allocatedObjectSize >= 32 * 1024 * 1024 && currentObjectSize > 5 * estimatedLiveObjectSize;
 }
 
 void ThreadState::scheduleGCIfNeeded()
 {
     checkThread();
     // Allocation is allowed during sweeping, but those allocations should not
-    // trigger nested GCs. Does not apply if an urgent GC has been requested.
-    if (isSweepingInProgress() && UNLIKELY(!Heap::isUrgentGCRequested()))
+    // trigger nested GCs.
+    if (isSweepingInProgress())
         return;
     ASSERT(!sweepForbidden());
 
     if (shouldForceConservativeGC()) {
-        if (Heap::isUrgentGCRequested()) {
-            // If GC is deemed urgent, eagerly sweep and finalize any external allocations right away.
-            Heap::collectGarbage(HeapPointersOnStack, GCWithSweep, Heap::ConservativeGC);
-        } else {
-            // Otherwise, schedule a lazy sweeping in an idle task.
-            Heap::collectGarbage(HeapPointersOnStack, GCWithoutSweep, Heap::ConservativeGC);
-        }
+        Heap::collectGarbage(HeapPointersOnStack, GCWithoutSweep, Heap::ConservativeGC);
         return;
     }
     if (shouldSchedulePreciseGC())
@@ -596,7 +603,7 @@ void ThreadState::performIdleGC(double deadlineSeconds)
         return;
 
     double idleDeltaInSeconds = deadlineSeconds - Platform::current()->monotonicallyIncreasingTime();
-    if (idleDeltaInSeconds <= Heap::estimatedMarkingTime() && !Scheduler::shared()->canExceedIdleDeadlineIfRequired()) {
+    if (idleDeltaInSeconds <= Heap::estimatedMarkingTime() && !Platform::current()->currentThread()->scheduler()->canExceedIdleDeadlineIfRequired()) {
         // If marking is estimated to take longer than the deadline and we can't
         // exceed the deadline, then reschedule for the next idle period.
         scheduleIdleGC();
@@ -659,7 +666,7 @@ void ThreadState::scheduleIdleGC()
         return;
     }
 
-    Scheduler::shared()->postNonNestableIdleTask(FROM_HERE, WTF::bind<double>(&ThreadState::performIdleGC, this));
+    Platform::current()->currentThread()->scheduler()->postNonNestableIdleTask(FROM_HERE, WTF::bind<double>(&ThreadState::performIdleGC, this));
     setGCState(IdleGCScheduled);
 }
 
@@ -671,7 +678,7 @@ void ThreadState::scheduleIdleLazySweep()
 
     // TODO(haraken): Remove this. Lazy sweeping is not yet enabled in non-oilpan builds.
 #if ENABLE(OILPAN)
-    Scheduler::shared()->postIdleTask(FROM_HERE, WTF::bind<double>(&ThreadState::performIdleLazySweep, this));
+    Platform::current()->currentThread()->scheduler()->postIdleTask(FROM_HERE, WTF::bind<double>(&ThreadState::performIdleLazySweep, this));
 #endif
 }
 
@@ -695,7 +702,7 @@ void unexpectedGCState(ThreadState::GCState gcState)
         UNEXPECTED_GCSTATE(NoGCScheduled);
         UNEXPECTED_GCSTATE(IdleGCScheduled);
         UNEXPECTED_GCSTATE(PreciseGCScheduled);
-        UNEXPECTED_GCSTATE(GCScheduledForTesting);
+        UNEXPECTED_GCSTATE(FullGCScheduled);
         UNEXPECTED_GCSTATE(StoppingOtherThreads);
         UNEXPECTED_GCSTATE(GCRunning);
         UNEXPECTED_GCSTATE(EagerSweepScheduled);
@@ -724,15 +731,14 @@ void ThreadState::setGCState(GCState gcState)
         break;
     case IdleGCScheduled:
     case PreciseGCScheduled:
-    case GCScheduledForTesting:
+    case FullGCScheduled:
         checkThread();
-        VERIFY_STATE_TRANSITION(m_gcState == NoGCScheduled || m_gcState == IdleGCScheduled || m_gcState == PreciseGCScheduled || m_gcState == GCScheduledForTesting || m_gcState == StoppingOtherThreads || m_gcState == SweepingAndIdleGCScheduled || m_gcState == SweepingAndPreciseGCScheduled);
+        VERIFY_STATE_TRANSITION(m_gcState == NoGCScheduled || m_gcState == IdleGCScheduled || m_gcState == PreciseGCScheduled || m_gcState == FullGCScheduled || m_gcState == StoppingOtherThreads || m_gcState == SweepingAndIdleGCScheduled || m_gcState == SweepingAndPreciseGCScheduled);
         completeSweep();
         break;
     case StoppingOtherThreads:
         checkThread();
-        VERIFY_STATE_TRANSITION(m_gcState == NoGCScheduled || m_gcState == IdleGCScheduled || m_gcState == PreciseGCScheduled || m_gcState == GCScheduledForTesting || m_gcState == Sweeping || m_gcState == SweepingAndIdleGCScheduled || m_gcState == SweepingAndPreciseGCScheduled);
-        completeSweep();
+        VERIFY_STATE_TRANSITION(m_gcState == NoGCScheduled || m_gcState == IdleGCScheduled || m_gcState == PreciseGCScheduled || m_gcState == FullGCScheduled || m_gcState == Sweeping || m_gcState == SweepingAndIdleGCScheduled || m_gcState == SweepingAndPreciseGCScheduled);
         break;
     case GCRunning:
         ASSERT(!isInGC());
@@ -745,12 +751,12 @@ void ThreadState::setGCState(GCState gcState)
         break;
     case Sweeping:
         checkThread();
-        VERIFY_STATE_TRANSITION(m_gcState == EagerSweepScheduled || m_gcState == LazySweepScheduled);
+        VERIFY_STATE_TRANSITION(m_gcState == StoppingOtherThreads || m_gcState == EagerSweepScheduled || m_gcState == LazySweepScheduled);
         break;
     case SweepingAndIdleGCScheduled:
     case SweepingAndPreciseGCScheduled:
         checkThread();
-        VERIFY_STATE_TRANSITION(m_gcState == Sweeping || m_gcState == SweepingAndIdleGCScheduled || m_gcState == SweepingAndPreciseGCScheduled || m_gcState == StoppingOtherThreads);
+        VERIFY_STATE_TRANSITION(m_gcState == StoppingOtherThreads || m_gcState == Sweeping || m_gcState == SweepingAndIdleGCScheduled || m_gcState == SweepingAndPreciseGCScheduled);
         break;
     default:
         ASSERT_NOT_REACHED();
@@ -768,7 +774,12 @@ ThreadState::GCState ThreadState::gcState() const
 void ThreadState::didV8GC()
 {
     checkThread();
-    m_didV8GCAfterLastGC = true;
+    if (isMainThread()) {
+        // Lower the estimated live object size because the V8 major GC is
+        // expected to have collected a lot of DOM wrappers and dropped
+        // references to their DOM objects.
+        Heap::setEstimatedLiveObjectSize(Heap::estimatedLiveObjectSize() / 2);
+    }
 }
 
 void ThreadState::runScheduledGC(StackState stackState)
@@ -778,7 +789,7 @@ void ThreadState::runScheduledGC(StackState stackState)
         return;
 
     switch (gcState()) {
-    case GCScheduledForTesting:
+    case FullGCScheduled:
         Heap::collectAllGarbage();
         break;
     case PreciseGCScheduled:
@@ -789,89 +800,6 @@ void ThreadState::runScheduledGC(StackState stackState)
         break;
     default:
         break;
-    }
-}
-
-void ThreadState::makeConsistentForSweeping()
-{
-    ASSERT(isInGC());
-    TRACE_EVENT0("blink_gc", "ThreadState::makeConsistentForSweeping");
-    for (int i = 0; i < NumberOfHeaps; ++i)
-        m_heaps[i]->makeConsistentForSweeping();
-}
-
-void ThreadState::completeSweep()
-{
-    // If we are not in a sweeping phase, there is nothing to do here.
-    if (!isSweepingInProgress())
-        return;
-
-    // completeSweep() can be called recursively if finalizers can allocate
-    // memory and the allocation triggers completeSweep(). This check prevents
-    // the sweeping from being executed recursively.
-    if (sweepForbidden())
-        return;
-
-    ThreadState::SweepForbiddenScope scope(this);
-    {
-        if (isMainThread())
-            ScriptForbiddenScope::enter();
-
-        TRACE_EVENT0("blink_gc", "ThreadState::completeSweep");
-        double timeStamp = WTF::currentTimeMS();
-
-        for (int i = 0; i < NumberOfHeaps; i++)
-            m_heaps[i]->completeSweep();
-
-        if (Platform::current()) {
-            Platform::current()->histogramCustomCounts("BlinkGC.CompleteSweep", WTF::currentTimeMS() - timeStamp, 0, 10 * 1000, 50);
-        }
-
-        if (isMainThread())
-            ScriptForbiddenScope::exit();
-    }
-
-    postSweep();
-}
-
-void ThreadState::postSweep()
-{
-    if (isMainThread() && m_allocatedObjectSizeBeforeGC) {
-        // FIXME: Heap::markedObjectSize() may not be accurate because other
-        // threads may not have finished sweeping.
-        m_collectionRate = 1.0 * Heap::markedObjectSize() / m_allocatedObjectSizeBeforeGC;
-        ASSERT(m_collectionRate >= 0);
-
-        // The main thread might be at a safe point, with other
-        // threads leaving theirs and accumulating marked object size
-        // while continuing to sweep. That accumulated size might end up
-        // exceeding what the main thread sampled in preGC() (recorded
-        // in m_allocatedObjectSizeBeforeGC), resulting in a non-sensical
-        // > 1.0 rate.
-        //
-        // This is rare (cf. HeapTest.Threading for a case though);
-        // reset the invalid rate if encountered.
-        //
-        if (m_collectionRate > 1.0)
-            m_collectionRate = 1.0;
-    } else {
-        // FIXME: We should make m_collectionRate available in non-main threads.
-        m_collectionRate = 1.0;
-    }
-
-    switch (gcState()) {
-    case Sweeping:
-        setGCState(NoGCScheduled);
-        break;
-    case SweepingAndPreciseGCScheduled:
-        setGCState(PreciseGCScheduled);
-        break;
-    case SweepingAndIdleGCScheduled:
-        setGCState(NoGCScheduled);
-        scheduleIdleGC();
-        break;
-    default:
-        ASSERT_NOT_REACHED();
     }
 }
 
@@ -891,6 +819,14 @@ void ThreadState::flushHeapDoesNotContainCacheIfNeeded()
     }
 }
 
+void ThreadState::makeConsistentForSweeping()
+{
+    ASSERT(isInGC());
+    TRACE_EVENT0("blink_gc", "ThreadState::makeConsistentForSweeping");
+    for (int i = 0; i < NumberOfHeaps; ++i)
+        m_heaps[i]->makeConsistentForSweeping();
+}
+
 void ThreadState::preGC()
 {
     ASSERT(!isInGC());
@@ -898,9 +834,6 @@ void ThreadState::preGC()
     makeConsistentForSweeping();
     prepareRegionTree();
     flushHeapDoesNotContainCacheIfNeeded();
-    if (isMainThread())
-        m_allocatedObjectSizeBeforeGC = Heap::allocatedObjectSize() + Heap::markedObjectSize();
-
     clearHeapAges();
 }
 
@@ -929,6 +862,125 @@ void ThreadState::postGC(GCType gcType)
     setGCState(gcType == GCWithSweep ? EagerSweepScheduled : LazySweepScheduled);
     for (int i = 0; i < NumberOfHeaps; i++)
         m_heaps[i]->prepareForSweep();
+}
+
+void ThreadState::preSweep()
+{
+    checkThread();
+    if (gcState() != EagerSweepScheduled && gcState() != LazySweepScheduled)
+        return;
+
+    {
+        if (isMainThread())
+            ScriptForbiddenScope::enter();
+
+        SweepForbiddenScope forbiddenScope(this);
+        {
+            // Disallow allocation during weak processing.
+            NoAllocationScope noAllocationScope(this);
+            {
+                TRACE_EVENT0("blink_gc", "ThreadState::threadLocalWeakProcessing");
+                // Perform thread-specific weak processing.
+                while (popAndInvokeWeakPointerCallback(Heap::s_markingVisitor)) { }
+            }
+            {
+                TRACE_EVENT0("blink_gc", "ThreadState::invokePreFinalizers");
+                invokePreFinalizers(*Heap::s_markingVisitor);
+            }
+        }
+
+        if (isMainThread())
+            ScriptForbiddenScope::exit();
+    }
+
+#if defined(ADDRESS_SANITIZER)
+// TODO(haraken): Currently we cannot enable the poisoning because we have
+// real bugs where destructors touch other on-heap objects. Remove all the bugs
+// and enable the poisoning.
+#if 0
+    for (int i = 0; i < NumberOfHeaps; i++)
+        m_heaps[i]->poisonUnmarkedObjects();
+#endif
+#endif
+
+#if ENABLE(OILPAN)
+    if (gcState() == EagerSweepScheduled) {
+        // Eager sweeping should happen only in testing.
+        setGCState(Sweeping);
+        completeSweep();
+    } else {
+        // The default behavior is lazy sweeping.
+        setGCState(Sweeping);
+        scheduleIdleLazySweep();
+    }
+#else
+    // FIXME: For now, we disable lazy sweeping in non-oilpan builds
+    // to avoid unacceptable behavior regressions on trunk.
+    setGCState(Sweeping);
+    completeSweep();
+#endif
+
+#if ENABLE(GC_PROFILING)
+    snapshotFreeListIfNecessary();
+#endif
+}
+
+void ThreadState::completeSweep()
+{
+    // If we are not in a sweeping phase, there is nothing to do here.
+    if (!isSweepingInProgress())
+        return;
+
+    // completeSweep() can be called recursively if finalizers can allocate
+    // memory and the allocation triggers completeSweep(). This check prevents
+    // the sweeping from being executed recursively.
+    if (sweepForbidden())
+        return;
+
+    ThreadState::SweepForbiddenScope scope(this);
+    {
+        if (isMainThread())
+            ScriptForbiddenScope::enter();
+
+        TRACE_EVENT0("blink_gc", "ThreadState::completeSweep");
+        double timeStamp = WTF::currentTimeMS();
+
+        for (int i = 0; i < NumberOfHeaps; i++)
+            m_heaps[i]->completeSweep();
+
+        Platform::current()->histogramCustomCounts("BlinkGC.CompleteSweep", WTF::currentTimeMS() - timeStamp, 0, 10 * 1000, 50);
+
+        if (isMainThread())
+            ScriptForbiddenScope::exit();
+    }
+
+    postSweep();
+}
+
+void ThreadState::postSweep()
+{
+    if (isMainThread()) {
+        // At the point where the main thread finishes lazy sweeping,
+        // we estimate the live object size. Heap::markedObjectSize()
+        // may be underestimated if any other thread has not finished
+        // lazy sweeping.
+        Heap::setEstimatedLiveObjectSize(Heap::markedObjectSize() + Heap::externalObjectSizeAtLastGC());
+    }
+
+    switch (gcState()) {
+    case Sweeping:
+        setGCState(NoGCScheduled);
+        break;
+    case SweepingAndPreciseGCScheduled:
+        setGCState(PreciseGCScheduled);
+        break;
+    case SweepingAndIdleGCScheduled:
+        setGCState(NoGCScheduled);
+        scheduleIdleGC();
+        break;
+    default:
+        ASSERT_NOT_REACHED();
+    }
 }
 
 void ThreadState::prepareHeapForTermination()
@@ -1013,6 +1065,7 @@ void ThreadState::enterSafePoint(StackState stackState, void* scopeMarker)
         scopeMarker = adjustScopeMarkerForAdressSanitizer(scopeMarker);
 #endif
     ASSERT(stackState == NoHeapPointersOnStack || scopeMarker);
+    ASSERT(!isGCForbidden());
     runScheduledGC(stackState);
     ASSERT(!m_atSafePoint);
     m_atSafePoint = true;
@@ -1058,63 +1111,10 @@ void ThreadState::copyStackUntilSafePointScope()
     }
 }
 
-void ThreadState::preSweep()
-{
-    checkThread();
-    if (gcState() != EagerSweepScheduled && gcState() != LazySweepScheduled)
-        return;
-
-    m_didV8GCAfterLastGC = false;
-
-    {
-        if (isMainThread())
-            ScriptForbiddenScope::enter();
-
-        SweepForbiddenScope forbiddenScope(this);
-        {
-            // Disallow allocation during weak processing.
-            NoAllocationScope noAllocationScope(this);
-            {
-                TRACE_EVENT0("blink_gc", "ThreadState::threadLocalWeakProcessing");
-                // Perform thread-specific weak processing.
-                while (popAndInvokeWeakPointerCallback(Heap::s_markingVisitor)) { }
-            }
-            {
-                TRACE_EVENT0("blink_gc", "ThreadState::invokePreFinalizers");
-                invokePreFinalizers(*Heap::s_markingVisitor);
-            }
-        }
-
-        if (isMainThread())
-            ScriptForbiddenScope::exit();
-    }
-
-#if ENABLE(OILPAN)
-    if (gcState() == EagerSweepScheduled) {
-        // Eager sweeping should happen only in testing.
-        setGCState(Sweeping);
-        completeSweep();
-    } else {
-        // The default behavior is lazy sweeping.
-        setGCState(Sweeping);
-        scheduleIdleLazySweep();
-    }
-#else
-    // FIXME: For now, we disable lazy sweeping in non-oilpan builds
-    // to avoid unacceptable behavior regressions on trunk.
-    setGCState(Sweeping);
-    completeSweep();
-#endif
-
-#if ENABLE(GC_PROFILING)
-    snapshotFreeListIfNecessary();
-#endif
-}
-
 void ThreadState::addInterruptor(Interruptor* interruptor)
 {
     checkThread();
-    SafePointScope scope(HeapPointersOnStack, SafePointScope::AllowNesting);
+    SafePointScope scope(HeapPointersOnStack);
     {
         MutexLocker locker(threadAttachMutex());
         m_interruptors.append(interruptor);
@@ -1124,7 +1124,7 @@ void ThreadState::addInterruptor(Interruptor* interruptor)
 void ThreadState::removeInterruptor(Interruptor* interruptor)
 {
     checkThread();
-    SafePointScope scope(HeapPointersOnStack, SafePointScope::AllowNesting);
+    SafePointScope scope(HeapPointersOnStack);
     {
         MutexLocker locker(threadAttachMutex());
         size_t index = m_interruptors.find(interruptor);

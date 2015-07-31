@@ -12,9 +12,12 @@ class ScrollAction(page_action.PageAction):
   def __init__(self, selector=None, text=None, element_function=None,
                left_start_ratio=0.5, top_start_ratio=0.5, direction='down',
                distance=None, distance_expr=None,
-               speed_in_pixels_per_second=800, use_touch=False):
+               speed_in_pixels_per_second=800, use_touch=False,
+               synthetic_gesture_source=page_action.GESTURE_SOURCE_DEFAULT):
     super(ScrollAction, self).__init__()
-    if direction not in ['down', 'up', 'left', 'right']:
+    if direction not in ('down', 'up', 'left', 'right',
+                         'downleft', 'downright',
+                         'upleft', 'upright'):
       raise page_action.PageActionNotSupported(
           'Invalid scroll direction: %s' % self.direction)
     self._selector = selector
@@ -25,6 +28,8 @@ class ScrollAction(page_action.PageAction):
     self._direction = direction
     self._speed = speed_in_pixels_per_second
     self._use_touch = use_touch
+    self._synthetic_gesture_source = ('chrome.gpuBenchmarking.%s_INPUT' %
+                                      synthetic_gesture_source)
 
     self._distance_func = 'null'
     if distance:
@@ -35,6 +40,14 @@ class ScrollAction(page_action.PageAction):
                              distance_expr)
 
   def WillRunAction(self, tab):
+    if self._direction in ('downleft', 'downright', 'upleft', 'upright'):
+      # Diagonal scrolling support was added in Chrome branch number 2332.
+      branch_num = (
+          tab.browser._browser_backend.devtools_client.GetChromeBranchNumber())
+      if branch_num < 2332:
+        raise ValueError('Diagonal scrolling requires Chrome branch number'
+                         ' 2332 or later. Found branch number %d' %
+                         branch_num)
     for js_file in ['gesture_common.js', 'scroll.js']:
       with open(os.path.join(os.path.dirname(__file__), js_file)) as f:
         js = f.read()
@@ -51,7 +64,7 @@ class ScrollAction(page_action.PageAction):
         raise page_action.PageActionNotSupported(
             'Touch scroll not supported for this browser')
 
-      if (page_action.GetGestureSourceTypeFromOptions(tab) ==
+      if (self._synthetic_gesture_source ==
           'chrome.gpuBenchmarking.MOUSE_INPUT'):
         raise page_action.PageActionNotSupported(
             'Scroll requires touch on this page but mouse input was requested')
@@ -67,7 +80,7 @@ class ScrollAction(page_action.PageAction):
         self._element_function is None):
       self._element_function = 'document.body'
 
-    gesture_source_type = page_action.GetGestureSourceTypeFromOptions(tab)
+    gesture_source_type = self._synthetic_gesture_source
     if self._use_touch:
       gesture_source_type = 'chrome.gpuBenchmarking.TOUCH_INPUT'
 

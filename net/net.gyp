@@ -5,7 +5,9 @@
 {
   'variables': {
     'chromium_code': 1,
-
+    # Defines an extra set of libs with an alternate copy of org.apache.http.
+    # TODO(yfriedman): Remove this when crbug.com/488192 is fixed.
+    'net_test_extra_libs': [],
     'linux_link_kerberos%': 0,
     'conditions': [
       ['chromeos==1 or embedded==1 or OS=="android" or OS=="ios"', {
@@ -103,6 +105,7 @@
       ],
     },
     {
+      # GN version: //net
       'target_name': 'net',
       'dependencies': [
         '../base/base.gyp:base_i18n',
@@ -120,6 +123,7 @@
       'includes': [ 'net_common.gypi' ],
     },
     {
+      # GN version: //net:net_unittests
       'target_name': 'net_unittests',
       'type': '<(gtest_target_type)',
       'dependencies': [
@@ -170,17 +174,17 @@
           'sources!': [
             # See bug http://crbug.com/344533.
             'disk_cache/blockfile/index_table_v3_unittest.cc',
-            # No res_ninit() et al on Android, so this doesn't make a lot of
-            # sense.
-            'dns/dns_config_service_posix_unittest.cc',
           ],
           'dependencies': [
             'net_javatests',
             'net_test_jni_headers',
           ],
         }],
-        [ 'use_nss != 1', {
+        [ 'use_nss_certs != 1', {
           'sources!': [
+            'cert/nss_cert_database_unittest.cc',
+            'cert/nss_cert_database_chromeos_unittest.cc',
+            'cert/nss_profile_filter_chromeos_unittest.cc',
             'ssl/client_cert_store_chromeos_unittest.cc',
             'ssl/client_cert_store_nss_unittest.cc',
           ],
@@ -190,7 +194,8 @@
           'dependencies': [
             '../third_party/boringssl/boringssl.gyp:boringssl',
           ],
-        }, {  # use_openssl == 0
+        }],
+        [ 'use_nss_certs == 1 or OS == "ios" or use_openssl == 0', {
           'conditions': [
             [ 'desktop_linux == 1 or chromeos == 1', {
               'dependencies': [
@@ -201,9 +206,6 @@
                 '../third_party/nss/nss.gyp:nspr',
                 '../third_party/nss/nss.gyp:nss',
                 'third_party/nss/ssl.gyp:libssl',
-              ],
-              'sources!': [
-                'cert/nss_cert_database_unittest.cc',
               ],
             }],
           ],
@@ -233,7 +235,7 @@
           # Only include this test when on Posix and using NSS for
           # cert verification or on iOS (which also uses NSS for certs).
           'sources!': [
-            'ocsp/nss_ocsp_unittest.cc',
+            'cert_net/nss_ocsp_unittest.cc',
           ],
         }],
         [ 'use_openssl==1', {
@@ -242,9 +244,6 @@
             # TODO(bulach): Add equivalent tests when the underlying
             #               functionality is ported to OpenSSL.
             'sources!': [
-              'cert/nss_cert_database_chromeos_unittest.cc',
-              'cert/nss_cert_database_unittest.cc',
-              'cert/nss_profile_filter_chromeos_unittest.cc',
               'cert/x509_util_nss_unittest.cc',
               'quic/test_tools/crypto_test_utils_nss.cc',
             ],
@@ -253,7 +252,7 @@
               'cert/x509_util_openssl_unittest.cc',
               'quic/test_tools/crypto_test_utils_openssl.cc',
               'socket/ssl_client_socket_openssl_unittest.cc',
-              'socket/ssl_session_cache_openssl_unittest.cc',
+              'ssl/ssl_client_session_cache_openssl_unittest.cc',
             ],
           },
         ],
@@ -322,6 +321,7 @@
               'proxy/load_state_change_coalescer_unittest.cc',
               'proxy/mojo_proxy_resolver_factory_impl_unittest.cc',
               'proxy/mojo_proxy_resolver_impl_unittest.cc',
+              'proxy/proxy_resolver_error_observer_mojo_unittest.cc',
               'proxy/proxy_resolver_mojo_unittest.cc',
               'proxy/proxy_service_mojo_unittest.cc',
             ],
@@ -380,6 +380,7 @@
               # Need to read input data files.
               'filter/gzip_filter_unittest.cc',
               # Need TestServer.
+              "cert_net/cert_net_fetcher_impl_unittest.cc",
               'proxy/proxy_script_fetcher_impl_unittest.cc',
               'socket/ssl_client_socket_unittest.cc',
               'socket/ssl_server_socket_unittest.cc',
@@ -400,12 +401,6 @@
               'disk_cache/blockfile/index_table_v3_unittest.cc',
             ],
         }],
-        [ 'OS == "android"', {
-            'sources!': [
-              'dns/dns_config_service_posix_unittest.cc',
-            ],
-          },
-        ],
         ['OS == "android"', {
           # TODO(mmenke):  This depends on test_support_base, which depends on
           #                icu.  Figure out a way to remove that dependency.
@@ -423,7 +418,7 @@
             ],
           },
         ],
-        ['v8_use_external_startup_data==1', {
+        ['use_v8_in_net==1 and v8_use_external_startup_data==1', {
           'dependencies': [
             '../gin/gin.gyp:gin',
           ]
@@ -514,6 +509,7 @@
         # TODO(mmenke):  This depends on icu, figure out a way to build tests
         #                without icu.
         '../base/base.gyp:test_support_base',
+        '../crypto/crypto.gyp:crypto',
         '../testing/gtest.gyp:gtest',
         '../testing/gmock.gyp:gmock',
       ],
@@ -546,12 +542,12 @@
         'dns/mock_mdns_socket_factory.h',
         'http/http_transaction_test_util.cc',
         'http/http_transaction_test_util.h',
-        'log/captured_net_log_entry.cc',
-        'log/captured_net_log_entry.h',
-        'log/capturing_net_log.cc',
-        'log/capturing_net_log.h',
-        'log/capturing_net_log_observer.cc',
-        'log/capturing_net_log_observer.h',
+        'log/test_net_log.cc',
+        'log/test_net_log.h',
+        'log/test_net_log_entry.cc',
+        'log/test_net_log_entry.h',
+        'log/test_net_log_util.cc',
+        'log/test_net_log_util.h',
         'proxy/mock_proxy_resolver.cc',
         'proxy/mock_proxy_resolver.h',
         'proxy/mock_proxy_script_fetcher.cc',
@@ -593,14 +589,10 @@
         'test/url_request/url_request_failed_job.h',
         'test/url_request/url_request_mock_data_job.cc',
         'test/url_request/url_request_mock_data_job.h',
-        'test/url_request/url_request_mock_http_job.cc',
-        'test/url_request/url_request_mock_http_job.h',
         'test/url_request/url_request_slow_download_job.cc',
         'test/url_request/url_request_slow_download_job.h',
         'url_request/test_url_fetcher_factory.cc',
         'url_request/test_url_fetcher_factory.h',
-        'url_request/test_url_request_interceptor.cc',
-        'url_request/test_url_request_interceptor.h',
         'url_request/url_request_test_util.cc',
         'url_request/url_request_test_util.h',
       ],
@@ -610,7 +602,7 @@
             '../third_party/protobuf/protobuf.gyp:py_proto',
           ],
         }],
-        ['use_openssl == 0 and (use_nss == 1 or OS == "ios")', {
+        ['use_openssl == 0 and (use_nss_certs == 1 or OS == "ios")', {
           'conditions': [
             [ 'desktop_linux == 1 or chromeos == 1', {
               'dependencies': [
@@ -654,10 +646,18 @@
               'dns/mock_mdns_socket_factory.h'
             ]
         }],
-        [ 'use_nss != 1', {
+        [ 'use_nss_certs != 1', {
             'sources!': [
               'test/cert_test_util_nss.cc',
             ],
+        }],
+        ['disable_file_support != 1', {
+          'sources': [
+            'test/url_request/url_request_mock_http_job.cc',
+            'test/url_request/url_request_mock_http_job.h',
+            'url_request/test_url_request_interceptor.cc',
+            'url_request/test_url_request_interceptor.h',
+          ],
         }],
       ],
       # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
@@ -745,7 +745,7 @@
       # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
       'msvs_disabled_warnings': [4267, ],
     },
-    {
+    { # GN version: //net:balsa
       'target_name': 'balsa',
       'type': 'static_library',
       'dependencies': [
@@ -769,8 +769,8 @@
         'tools/balsa/split.cc',
         'tools/balsa/split.h',
         'tools/balsa/string_piece_utils.h',
-        'tools/quic/spdy_utils.cc',
-        'tools/quic/spdy_utils.h',
+        'tools/quic/spdy_balsa_utils.cc',
+        'tools/quic/spdy_balsa_utils.h',
       ],
     },
     {
@@ -926,6 +926,8 @@
             'proxy/mojo_proxy_resolver_factory_impl.h',
             'proxy/mojo_proxy_resolver_impl.cc',
             'proxy/mojo_proxy_resolver_impl.h',
+            'proxy/proxy_resolver_error_observer_mojo.cc',
+            'proxy/proxy_resolver_error_observer_mojo.h',
           ],
           'dependencies': [
             'mojo_type_converters',
@@ -1318,6 +1320,7 @@
             'disable_ftp_support': 1,
             'disable_file_support': 1,
             'enable_websockets': 0,
+            'use_icu_alternatives_on_android': 1,
           },
           'dependencies': [
             '../url/url.gyp:url_lib_use_icu_alternatives_on_android',
@@ -1400,7 +1403,20 @@
           'variables': {
             'java_in_dir': '../net/test/android/javatests',
           },
+          'dependencies': [
+            'url_request_failed_job_java',
+            '../base/base.gyp:base_java',
+            '<@(net_test_extra_libs)',
+          ],
           'includes': [ '../build/java.gypi' ],
+        },
+        {
+          'target_name': 'url_request_failed_job_java',
+          'type': 'none',
+          'variables': {
+            'source_file': 'test/url_request/url_request_failed_job.h',
+          },
+          'includes': [ '../build/android/java_cpp_enum.gypi' ],
         },
         {
           'target_name': 'net_javatests',

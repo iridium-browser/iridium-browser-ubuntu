@@ -10,6 +10,7 @@
 #include <errno.h>
 #include <openssl/bio.h>
 #include <openssl/err.h>
+#include <openssl/mem.h>
 #include <openssl/ssl.h>
 #include <string.h>
 
@@ -30,14 +31,14 @@
 #include "net/cert/cert_verifier.h"
 #include "net/cert/ct_ev_whitelist.h"
 #include "net/cert/ct_verifier.h"
-#include "net/cert/single_request_cert_verifier.h"
 #include "net/cert/x509_certificate_net_log_param.h"
 #include "net/cert/x509_util_openssl.h"
 #include "net/http/transport_security_state.h"
-#include "net/socket/ssl_session_cache_openssl.h"
 #include "net/ssl/scoped_openssl_types.h"
 #include "net/ssl/ssl_cert_request_info.h"
+#include "net/ssl/ssl_client_session_cache_openssl.h"
 #include "net/ssl/ssl_connection_status_flags.h"
+#include "net/ssl/ssl_failure_state.h"
 #include "net/ssl/ssl_info.h"
 
 #if defined(OS_WIN)
@@ -100,10 +101,6 @@ int EncodeSSLConnectionStatus(uint16 cipher_suite,
 // this SSL connection.
 int GetNetSSLVersion(SSL* ssl) {
   switch (SSL_version(ssl)) {
-    case SSL2_VERSION:
-      return SSL_CONNECTION_VERSION_SSL2;
-    case SSL3_VERSION:
-      return SSL_CONNECTION_VERSION_SSL3;
     case TLS1_VERSION:
       return SSL_CONNECTION_VERSION_TLS1;
     case TLS1_1_VERSION:
@@ -111,6 +108,7 @@ int GetNetSSLVersion(SSL* ssl) {
     case TLS1_2_VERSION:
       return SSL_CONNECTION_VERSION_TLS1_2;
     default:
+      NOTREACHED();
       return SSL_CONNECTION_VERSION_UNKNOWN;
   }
 }
@@ -145,26 +143,13 @@ int LogErrorCallback(const char* str, size_t len, void* context) {
   return 1;
 }
 
-bool IsOCSPStaplingSupported() {
-#if defined(OS_WIN)
-  // CERT_OCSP_RESPONSE_PROP_ID is only implemented on Vista+, but it can be
-  // set on Windows XP without error. There is some overhead from the server
-  // sending the OCSP response if it supports the extension, for the subset of
-  // XP clients who will request it but be unable to use it, but this is an
-  // acceptable trade-off for simplicity of implementation.
-  return true;
-#else
-  return false;
-#endif
-}
-
 }  // namespace
 
 class SSLClientSocketOpenSSL::SSLContext {
  public:
   static SSLContext* GetInstance() { return Singleton<SSLContext>::get(); }
   SSL_CTX* ssl_ctx() { return ssl_ctx_.get(); }
-  SSLSessionCacheOpenSSL* session_cache() { return &session_cache_; }
+  SSLClientSessionCacheOpenSSL* session_cache() { return &session_cache_; }
 
   SSLClientSocketOpenSSL* GetClientSocketFromSSL(const SSL* ssl) {
     DCHECK(ssl);
@@ -181,12 +166,11 @@ class SSLClientSocketOpenSSL::SSLContext {
  private:
   friend struct DefaultSingletonTraits<SSLContext>;
 
-  SSLContext() {
+  SSLContext() : session_cache_(SSLClientSessionCacheOpenSSL::Config()) {
     crypto::EnsureOpenSSLInit();
     ssl_socket_data_index_ = SSL_get_ex_new_index(0, 0, 0, 0, 0);
     DCHECK_NE(ssl_socket_data_index_, -1);
     ssl_ctx_.reset(SSL_CTX_new(SSLv23_client_method()));
-    session_cache_.Reset(ssl_ctx_.get(), kDefaultSessionCacheConfig);
     SSL_CTX_set_cert_verify_callback(ssl_ctx_.get(), CertVerifyCallback, NULL);
     SSL_CTX_set_cert_cb(ssl_ctx_.get(), ClientCertRequestCallback, NULL);
     SSL_CTX_set_verify(ssl_ctx_.get(), SSL_VERIFY_PEER, NULL);
@@ -200,6 +184,12 @@ class SSLClientSocketOpenSSL::SSLContext {
     SSL_CTX_set_next_proto_select_cb(ssl_ctx_.get(), SelectNextProtoCallback,
                                      NULL);
     ssl_ctx_->tlsext_channel_id_enabled_new = 1;
+    SSL_CTX_set_info_callback(ssl_ctx_.get(), InfoCallback);
+
+    // Disable the internal session cache. Session caching is handled
+    // externally (i.e. by SSLClientSessionCacheOpenSSL).
+    SSL_CTX_set_session_cache_mode(
+        ssl_ctx_.get(), SSL_SESS_CACHE_CLIENT | SSL_SESS_CACHE_NO_INTERNAL);
 
     scoped_ptr<base::Environment> env(base::Environment::Create());
     std::string ssl_keylog_file;
@@ -215,14 +205,6 @@ class SSLClientSocketOpenSSL::SSLContext {
       }
     }
   }
-
-  static std::string GetSessionCacheKey(const SSL* ssl) {
-    SSLClientSocketOpenSSL* socket = GetInstance()->GetClientSocketFromSSL(ssl);
-    CHECK(socket);
-    return socket->GetSessionCacheKey();
-  }
-
-  static SSLSessionCacheOpenSSL::Config kDefaultSessionCacheConfig;
 
   static int ClientCertRequestCallback(SSL* ssl, void* arg) {
     SSLClientSocketOpenSSL* socket = GetInstance()->GetClientSocketFromSSL(ssl);
@@ -247,13 +229,23 @@ class SSLClientSocketOpenSSL::SSLContext {
     return socket->SelectNextProtoCallback(out, outlen, in, inlen);
   }
 
+  static void InfoCallback(const SSL* ssl, int type, int val) {
+    SSLClientSocketOpenSSL* socket = GetInstance()->GetClientSocketFromSSL(ssl);
+    socket->InfoCallback(type, val);
+  }
+
   // This is the index used with SSL_get_ex_data to retrieve the owner
   // SSLClientSocketOpenSSL object from an SSL instance.
   int ssl_socket_data_index_;
 
   ScopedSSL_CTX ssl_ctx_;
-  // |session_cache_| must be destroyed before |ssl_ctx_|.
-  SSLSessionCacheOpenSSL session_cache_;
+
+  // TODO(davidben): Use a separate cache per URLRequestContext.
+  // https://crbug.com/458365
+  //
+  // TODO(davidben): Sessions should be invalidated on fatal
+  // alerts. https://crbug.com/466352
+  SSLClientSessionCacheOpenSSL session_cache_;
 };
 
 // PeerCertificateChain is a helper object which extracts the certificate
@@ -338,15 +330,6 @@ SSLClientSocketOpenSSL::PeerCertificateChain::AsOSChain() const {
 }
 
 // static
-SSLSessionCacheOpenSSL::Config
-    SSLClientSocketOpenSSL::SSLContext::kDefaultSessionCacheConfig = {
-        &GetSessionCacheKey,  // key_func
-        1024,                 // max_entries
-        256,                  // expiration_check_count
-        60 * 60,              // timeout_seconds
-};
-
-// static
 void SSLClientSocket::ClearSessionCache() {
   SSLClientSocketOpenSSL::SSLContext* context =
       SSLClientSocketOpenSSL::SSLContext::GetInstance();
@@ -372,7 +355,6 @@ SSLClientSocketOpenSSL::SSLClientSocketOpenSSL(
       server_cert_chain_(new PeerCertificateChain(NULL)),
       completed_connect_(false),
       was_ever_used_(false),
-      client_auth_cert_needed_(false),
       cert_verifier_(context.cert_verifier),
       cert_transparency_verifier_(context.cert_transparency_verifier),
       channel_id_service_(context.channel_id_service),
@@ -382,14 +364,17 @@ SSLClientSocketOpenSSL::SSLClientSocketOpenSSL(
       host_and_port_(host_and_port),
       ssl_config_(ssl_config),
       ssl_session_cache_shard_(context.ssl_session_cache_shard),
-      trying_cached_session_(false),
       next_handshake_state_(STATE_NONE),
       npn_status_(kNextProtoUnsupported),
-      channel_id_xtn_negotiated_(false),
+      channel_id_sent_(false),
+      handshake_completed_(false),
+      certificate_verified_(false),
+      ssl_failure_state_(SSL_FAILURE_NONE),
       transport_security_state_(context.transport_security_state),
       policy_enforcer_(context.cert_policy_enforcer),
       net_log_(transport_->socket()->NetLog()),
       weak_factory_(this) {
+  DCHECK(cert_verifier_);
 }
 
 SSLClientSocketOpenSSL::~SSLClientSocketOpenSSL() {
@@ -404,7 +389,7 @@ void SSLClientSocketOpenSSL::GetSSLCertRequestInfo(
 }
 
 SSLClientSocket::NextProtoStatus SSLClientSocketOpenSSL::GetNextProto(
-    std::string* proto) {
+    std::string* proto) const {
   *proto = npn_proto_;
   return npn_status_;
 }
@@ -414,16 +399,23 @@ SSLClientSocketOpenSSL::GetChannelIDService() const {
   return channel_id_service_;
 }
 
+SSLFailureState SSLClientSocketOpenSSL::GetSSLFailureState() const {
+  return ssl_failure_state_;
+}
+
 int SSLClientSocketOpenSSL::ExportKeyingMaterial(
     const base::StringPiece& label,
     bool has_context, const base::StringPiece& context,
     unsigned char* out, unsigned int outlen) {
+  if (!IsConnected())
+    return ERR_SOCKET_NOT_CONNECTED;
+
   crypto::OpenSSLErrStackTracer err_tracer(FROM_HERE);
 
   int rv = SSL_export_keying_material(
       ssl_, out, outlen, label.data(), label.size(),
-      reinterpret_cast<const unsigned char*>(context.data()),
-      context.length(), context.length() > 0);
+      reinterpret_cast<const unsigned char*>(context.data()), context.length(),
+      has_context ? 1 : 0);
 
   if (rv != 1) {
     int ssl_error = SSL_get_error(ssl_, rv);
@@ -457,11 +449,6 @@ int SSLClientSocketOpenSSL::Connect(const CompletionCallback& callback) {
   // Set SSL to client mode. Handshake happens in the loop below.
   SSL_set_connect_state(ssl_);
 
-  // Enable fastradio padding.
-  SSL_enable_fastradio_padding(ssl_,
-                               ssl_config_.fastradio_padding_enabled &&
-                                   ssl_config_.fastradio_padding_eligible);
-
   GotoState(STATE_HANDSHAKE);
   rv = DoHandshakeLoop(OK);
   if (rv == ERR_IO_PENDING) {
@@ -487,7 +474,7 @@ void SSLClientSocketOpenSSL::Disconnect() {
   }
 
   // Shut down anything that may call us back.
-  verifier_.reset();
+  cert_verifier_request_.reset();
   transport_->socket()->Disconnect();
 
   // Null all callbacks, delete all buffers.
@@ -516,15 +503,17 @@ void SSLClientSocketOpenSSL::Disconnect() {
 
   cert_authorities_.clear();
   cert_key_types_.clear();
-  client_auth_cert_needed_ = false;
 
   start_cert_verification_time_ = base::TimeTicks();
 
   npn_status_ = kNextProtoUnsupported;
   npn_proto_.clear();
 
-  channel_id_xtn_negotiated_ = false;
+  channel_id_sent_ = false;
+  handshake_completed_ = false;
+  certificate_verified_ = false;
   channel_id_request_handle_.Cancel();
+  ssl_failure_state_ = SSL_FAILURE_NONE;
 }
 
 bool SSLClientSocketOpenSSL::IsConnected() const {
@@ -612,7 +601,7 @@ bool SSLClientSocketOpenSSL::GetSSLInfo(SSLInfo* ssl_info) {
     server_cert_verify_result_.public_key_hashes;
   ssl_info->client_cert_sent =
       ssl_config_.send_client_cert && ssl_config_.client_cert.get();
-  ssl_info->channel_id_sent = WasChannelIDSent();
+  ssl_info->channel_id_sent = channel_id_sent_;
   ssl_info->pinning_failure_log = pinning_failure_log_;
 
   AddSCTInfoToSSLInfo(ssl_info);
@@ -639,6 +628,11 @@ bool SSLClientSocketOpenSSL::GetSSLInfo(SSLInfo* ssl_info) {
       << " version = "
       << SSLConnectionStatusToVersion(ssl_info->connection_status);
   return true;
+}
+
+void SSLClientSocketOpenSSL::GetConnectionAttempts(
+    ConnectionAttempts* out) const {
+  out->clear();
 }
 
 int SSLClientSocketOpenSSL::Read(IOBuffer* buf,
@@ -703,8 +697,9 @@ int SSLClientSocketOpenSSL::Init() {
   if (!SSL_set_tlsext_host_name(ssl_, host_and_port_.host().c_str()))
     return ERR_UNEXPECTED;
 
-  trying_cached_session_ = context->session_cache()->SetSSLSessionWithKey(
-      ssl_, GetSessionCacheKey());
+  SSL_SESSION* session = context->session_cache()->Lookup(GetSessionCacheKey());
+  if (session != nullptr)
+    SSL_set_session(ssl_, session);
 
   send_buffer_ = new GrowableIOBuffer();
   send_buffer_->SetCapacity(KDefaultOpenSSLBufferSize);
@@ -729,24 +724,14 @@ int SSLClientSocketOpenSSL::Init() {
 
   SSL_set_bio(ssl_, ssl_bio, ssl_bio);
 
+  DCHECK_LT(SSL3_VERSION, ssl_config_.version_min);
+  DCHECK_LT(SSL3_VERSION, ssl_config_.version_max);
+  SSL_set_min_version(ssl_, ssl_config_.version_min);
+  SSL_set_max_version(ssl_, ssl_config_.version_max);
+
   // OpenSSL defaults some options to on, others to off. To avoid ambiguity,
   // set everything we care about to an absolute value.
   SslSetClearMask options;
-  options.ConfigureFlag(SSL_OP_NO_SSLv2, true);
-  bool ssl3_enabled = (ssl_config_.version_min == SSL_PROTOCOL_VERSION_SSL3);
-  options.ConfigureFlag(SSL_OP_NO_SSLv3, !ssl3_enabled);
-  bool tls1_enabled = (ssl_config_.version_min <= SSL_PROTOCOL_VERSION_TLS1 &&
-                       ssl_config_.version_max >= SSL_PROTOCOL_VERSION_TLS1);
-  options.ConfigureFlag(SSL_OP_NO_TLSv1, !tls1_enabled);
-  bool tls1_1_enabled =
-      (ssl_config_.version_min <= SSL_PROTOCOL_VERSION_TLS1_1 &&
-       ssl_config_.version_max >= SSL_PROTOCOL_VERSION_TLS1_1);
-  options.ConfigureFlag(SSL_OP_NO_TLSv1_1, !tls1_1_enabled);
-  bool tls1_2_enabled =
-      (ssl_config_.version_min <= SSL_PROTOCOL_VERSION_TLS1_2 &&
-       ssl_config_.version_max >= SSL_PROTOCOL_VERSION_TLS1_2);
-  options.ConfigureFlag(SSL_OP_NO_TLSv1_2, !tls1_2_enabled);
-
   options.ConfigureFlag(SSL_OP_NO_COMPRESSION, true);
 
   // TODO(joth): Set this conditionally, see http://crbug.com/55410
@@ -851,8 +836,17 @@ int SSLClientSocketOpenSSL::Init() {
     SSL_enable_ocsp_stapling(ssl_);
   }
 
-  if (IsOCSPStaplingSupported())
+  if (cert_verifier_->SupportsOCSPStapling())
     SSL_enable_ocsp_stapling(ssl_);
+
+  // Enable fastradio padding.
+  SSL_enable_fastradio_padding(ssl_,
+                               ssl_config_.fastradio_padding_enabled &&
+                                   ssl_config_.fastradio_padding_eligible);
+
+  // By default, renegotiations are rejected. After the initial handshake
+  // completes, some application protocols may re-enable it.
+  SSL_set_reject_peer_renegotiations(ssl_, 1);
 
   return OK;
 }
@@ -892,134 +886,141 @@ bool SSLClientSocketOpenSSL::DoTransportIO() {
   return network_moved;
 }
 
-// TODO(vadimt): Remove including "base/threading/thread_local.h" and
+// TODO(cbentzel): Remove including "base/threading/thread_local.h" and
 // g_first_run_completed once crbug.com/424386 is fixed.
 base::LazyInstance<base::ThreadLocalBoolean>::Leaky g_first_run_completed =
     LAZY_INSTANCE_INITIALIZER;
 
 int SSLClientSocketOpenSSL::DoHandshake() {
   crypto::OpenSSLErrStackTracer err_tracer(FROM_HERE);
-  int net_error = OK;
 
   int rv;
 
-  // TODO(vadimt): Leave only 1 call to SSL_do_handshake once crbug.com/424386
+  // TODO(cbentzel): Leave only 1 call to SSL_do_handshake once crbug.com/424386
   // is fixed.
   if (ssl_config_.send_client_cert && ssl_config_.client_cert.get()) {
-    // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is fixed.
-    tracked_objects::ScopedTracker tracking_profile1(
-        FROM_HERE_WITH_EXPLICIT_FUNCTION("424386 DoHandshake_WithCert"));
-
     rv = SSL_do_handshake(ssl_);
   } else {
     if (g_first_run_completed.Get().Get()) {
-      // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is
+      // TODO(cbentzel): Remove ScopedTracker below once crbug.com/424386 is
       // fixed.
-      tracked_objects::ScopedTracker tracking_profile1(
-          FROM_HERE_WITH_EXPLICIT_FUNCTION(
-              "424386 DoHandshake_WithoutCert Not First"));
+      tracked_objects::ScopedTracker tracking_profile(
+          FROM_HERE_WITH_EXPLICIT_FUNCTION("424386 SSL_do_handshake()"));
 
       rv = SSL_do_handshake(ssl_);
     } else {
       g_first_run_completed.Get().Set(true);
-
-      // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is
-      // fixed.
-      tracked_objects::ScopedTracker tracking_profile1(
-          FROM_HERE_WITH_EXPLICIT_FUNCTION(
-              "424386 DoHandshake_WithoutCert First"));
-
       rv = SSL_do_handshake(ssl_);
     }
   }
 
-  if (rv == 1) {
-    // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is fixed.
-    tracked_objects::ScopedTracker tracking_profile3(
-        FROM_HERE_WITH_EXPLICIT_FUNCTION(
-            "424386 SSLClientSocketOpenSSL::DoHandshake3"));
-
-    if (trying_cached_session_ && logging::DEBUG_MODE) {
-      DVLOG(2) << "Result of session reuse for " << host_and_port_.ToString()
-               << " is: " << (SSL_session_reused(ssl_) ? "Success" : "Fail");
-    }
-
-    if (ssl_config_.version_fallback &&
-        ssl_config_.version_max < ssl_config_.version_fallback_min) {
-      return ERR_SSL_FALLBACK_BEYOND_MINIMUM_VERSION;
-    }
-
-    // SSL handshake is completed. If NPN wasn't negotiated, see if ALPN was.
-    if (npn_status_ == kNextProtoUnsupported) {
-      const uint8_t* alpn_proto = NULL;
-      unsigned alpn_len = 0;
-      SSL_get0_alpn_selected(ssl_, &alpn_proto, &alpn_len);
-      if (alpn_len > 0) {
-        npn_proto_.assign(reinterpret_cast<const char*>(alpn_proto), alpn_len);
-        npn_status_ = kNextProtoNegotiated;
-        set_negotiation_extension(kExtensionALPN);
-      }
-    }
-
-    RecordChannelIDSupport(channel_id_service_,
-                           channel_id_xtn_negotiated_,
-                           ssl_config_.channel_id_enabled,
-                           crypto::ECPrivateKey::IsSupported());
-
-    // Only record OCSP histograms if OCSP was requested.
-    if (ssl_config_.signed_cert_timestamps_enabled ||
-        IsOCSPStaplingSupported()) {
-      const uint8_t* ocsp_response;
-      size_t ocsp_response_len;
-      SSL_get0_ocsp_response(ssl_, &ocsp_response, &ocsp_response_len);
-
-      set_stapled_ocsp_response_received(ocsp_response_len != 0);
-      UMA_HISTOGRAM_BOOLEAN("Net.OCSPResponseStapled", ocsp_response_len != 0);
-    }
-
-    const uint8_t* sct_list;
-    size_t sct_list_len;
-    SSL_get0_signed_cert_timestamp_list(ssl_, &sct_list, &sct_list_len);
-    set_signed_cert_timestamps_received(sct_list_len != 0);
-
-    // Verify the certificate.
-    UpdateServerCert();
-    GotoState(STATE_VERIFY_CERT);
-  } else {
-    // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is fixed.
-    tracked_objects::ScopedTracker tracking_profile4(
-        FROM_HERE_WITH_EXPLICIT_FUNCTION(
-            "424386 SSLClientSocketOpenSSL::DoHandshake4"));
-
-    if (client_auth_cert_needed_)
-      return ERR_SSL_CLIENT_AUTH_CERT_NEEDED;
-
+  int net_error = OK;
+  if (rv <= 0) {
     int ssl_error = SSL_get_error(ssl_, rv);
-
     if (ssl_error == SSL_ERROR_WANT_CHANNEL_ID_LOOKUP) {
       // The server supports channel ID. Stop to look one up before returning to
       // the handshake.
-      channel_id_xtn_negotiated_ = true;
       GotoState(STATE_CHANNEL_ID_LOOKUP);
       return OK;
+    }
+    if (ssl_error == SSL_ERROR_WANT_X509_LOOKUP &&
+        !ssl_config_.send_client_cert) {
+      return ERR_SSL_CLIENT_AUTH_CERT_NEEDED;
     }
 
     OpenSSLErrorInfo error_info;
     net_error = MapOpenSSLErrorWithDetails(ssl_error, err_tracer, &error_info);
-
-    // If not done, stay in this state
     if (net_error == ERR_IO_PENDING) {
+      // If not done, stay in this state
       GotoState(STATE_HANDSHAKE);
+      return ERR_IO_PENDING;
+    }
+
+    LOG(ERROR) << "handshake failed; returned " << rv << ", SSL error code "
+               << ssl_error << ", net_error " << net_error;
+    net_log_.AddEvent(
+        NetLog::TYPE_SSL_HANDSHAKE_ERROR,
+        CreateNetLogOpenSSLErrorCallback(net_error, ssl_error, error_info));
+
+    // Classify the handshake failure. This is used to determine causes of the
+    // TLS version fallback.
+
+    // |cipher| is the current outgoing cipher suite, so it is non-null iff
+    // ChangeCipherSpec was sent.
+    const SSL_CIPHER* cipher = SSL_get_current_cipher(ssl_);
+    if (SSL_get_state(ssl_) == SSL3_ST_CR_SRVR_HELLO_A) {
+      ssl_failure_state_ = SSL_FAILURE_CLIENT_HELLO;
+    } else if (cipher && (SSL_CIPHER_get_id(cipher) ==
+                              TLS1_CK_DHE_RSA_WITH_AES_128_GCM_SHA256 ||
+                          SSL_CIPHER_get_id(cipher) ==
+                              TLS1_CK_RSA_WITH_AES_128_GCM_SHA256)) {
+      ssl_failure_state_ = SSL_FAILURE_BUGGY_GCM;
+    } else if (cipher && ssl_config_.send_client_cert) {
+      ssl_failure_state_ = SSL_FAILURE_CLIENT_AUTH;
+    } else if (ERR_GET_LIB(error_info.error_code) == ERR_LIB_SSL &&
+               ERR_GET_REASON(error_info.error_code) ==
+                   SSL_R_OLD_SESSION_VERSION_NOT_RETURNED) {
+      ssl_failure_state_ = SSL_FAILURE_SESSION_MISMATCH;
+    } else if (cipher && npn_status_ != kNextProtoUnsupported) {
+      ssl_failure_state_ = SSL_FAILURE_NEXT_PROTO;
     } else {
-      LOG(ERROR) << "handshake failed; returned " << rv
-                 << ", SSL error code " << ssl_error
-                 << ", net_error " << net_error;
-      net_log_.AddEvent(
-          NetLog::TYPE_SSL_HANDSHAKE_ERROR,
-          CreateNetLogOpenSSLErrorCallback(net_error, ssl_error, error_info));
+      ssl_failure_state_ = SSL_FAILURE_UNKNOWN;
     }
   }
+
+  GotoState(STATE_HANDSHAKE_COMPLETE);
   return net_error;
+}
+
+int SSLClientSocketOpenSSL::DoHandshakeComplete(int result) {
+  if (result < 0)
+    return result;
+
+  if (ssl_config_.version_fallback &&
+      ssl_config_.version_max < ssl_config_.version_fallback_min) {
+    return ERR_SSL_FALLBACK_BEYOND_MINIMUM_VERSION;
+  }
+
+  // SSL handshake is completed. If NPN wasn't negotiated, see if ALPN was.
+  if (npn_status_ == kNextProtoUnsupported) {
+    const uint8_t* alpn_proto = NULL;
+    unsigned alpn_len = 0;
+    SSL_get0_alpn_selected(ssl_, &alpn_proto, &alpn_len);
+    if (alpn_len > 0) {
+      npn_proto_.assign(reinterpret_cast<const char*>(alpn_proto), alpn_len);
+      npn_status_ = kNextProtoNegotiated;
+      set_negotiation_extension(kExtensionALPN);
+    }
+  }
+
+  RecordNegotiationExtension();
+  RecordChannelIDSupport(channel_id_service_, channel_id_sent_,
+                         ssl_config_.channel_id_enabled,
+                         crypto::ECPrivateKey::IsSupported());
+
+  // Only record OCSP histograms if OCSP was requested.
+  if (ssl_config_.signed_cert_timestamps_enabled ||
+      cert_verifier_->SupportsOCSPStapling()) {
+    const uint8_t* ocsp_response;
+    size_t ocsp_response_len;
+    SSL_get0_ocsp_response(ssl_, &ocsp_response, &ocsp_response_len);
+
+    set_stapled_ocsp_response_received(ocsp_response_len != 0);
+    UMA_HISTOGRAM_BOOLEAN("Net.OCSPResponseStapled", ocsp_response_len != 0);
+  }
+
+  const uint8_t* sct_list;
+  size_t sct_list_len;
+  SSL_get0_signed_cert_timestamp_list(ssl_, &sct_list, &sct_list_len);
+  set_signed_cert_timestamps_received(sct_list_len != 0);
+
+  if (IsRenegotiationAllowed())
+    SSL_set_reject_peer_renegotiations(ssl_, 0);
+
+  // Verify the certificate.
+  UpdateServerCert();
+  GotoState(STATE_VERIFY_CERT);
+  return OK;
 }
 
 int SSLClientSocketOpenSSL::DoChannelIDLookup() {
@@ -1069,7 +1070,7 @@ int SSLClientSocketOpenSSL::DoChannelIDLookupComplete(int result) {
   }
 
   // Return to the handshake.
-  set_channel_id_sent(true);
+  channel_id_sent_ = true;
   net_log_.AddEvent(NetLog::TYPE_SSL_CHANNEL_ID_PROVIDED);
   GotoState(STATE_HANDSHAKE);
   return OK;
@@ -1106,6 +1107,15 @@ int SSLClientSocketOpenSSL::DoVerifyCert(int result) {
     return ERR_CERT_INVALID;
   }
 
+  std::string ocsp_response;
+  if (cert_verifier_->SupportsOCSPStapling()) {
+    const uint8_t* ocsp_response_raw;
+    size_t ocsp_response_len;
+    SSL_get0_ocsp_response(ssl_, &ocsp_response_raw, &ocsp_response_len);
+    ocsp_response.assign(reinterpret_cast<const char*>(ocsp_response_raw),
+                         ocsp_response_len);
+  }
+
   start_cert_verification_time_ = base::TimeTicks::Now();
 
   int flags = 0;
@@ -1117,22 +1127,18 @@ int SSLClientSocketOpenSSL::DoVerifyCert(int result) {
     flags |= CertVerifier::VERIFY_CERT_IO_ENABLED;
   if (ssl_config_.rev_checking_required_local_anchors)
     flags |= CertVerifier::VERIFY_REV_CHECKING_REQUIRED_LOCAL_ANCHORS;
-  verifier_.reset(new SingleRequestCertVerifier(cert_verifier_));
-  return verifier_->Verify(
-      server_cert_.get(),
-      host_and_port_.host(),
-      flags,
+  return cert_verifier_->Verify(
+      server_cert_.get(), host_and_port_.host(), ocsp_response, flags,
       // TODO(davidben): Route the CRLSet through SSLConfig so
       // SSLClientSocket doesn't depend on SSLConfigService.
-      SSLConfigService::GetCRLSet().get(),
-      &server_cert_verify_result_,
+      SSLConfigService::GetCRLSet().get(), &server_cert_verify_result_,
       base::Bind(&SSLClientSocketOpenSSL::OnHandshakeIOComplete,
                  base::Unretained(this)),
-      net_log_);
+      &cert_verifier_request_, net_log_);
 }
 
 int SSLClientSocketOpenSSL::DoVerifyCertComplete(int result) {
-  verifier_.reset();
+  cert_verifier_request_.reset();
 
   if (!start_cert_verification_time_.is_null()) {
     base::TimeDelta verify_time =
@@ -1171,9 +1177,9 @@ int SSLClientSocketOpenSSL::DoVerifyCertComplete(int result) {
     // the connection.
     VerifyCT();
 
-    // TODO(joth): Work out if we need to remember the intermediate CA certs
-    // when the server sends them to us, and do so here.
-    SSLContext::GetInstance()->session_cache()->MarkSSLSessionAsGood(ssl_);
+    DCHECK(!certificate_verified_);
+    certificate_verified_ = true;
+    MaybeCacheSession();
   } else {
     DVLOG(1) << "DoVerifyCertComplete error " << ErrorToString(result)
              << " (" << result << ")";
@@ -1194,55 +1200,13 @@ void SSLClientSocketOpenSSL::DoConnectCallback(int rv) {
 }
 
 void SSLClientSocketOpenSSL::UpdateServerCert() {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "424386 SSLClientSocketOpenSSL::UpdateServerCert"));
-
   server_cert_chain_->Reset(SSL_get_peer_cert_chain(ssl_));
-
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is fixed.
-  tracked_objects::ScopedTracker tracking_profile1(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "424386 SSLClientSocketOpenSSL::UpdateServerCert1"));
   server_cert_ = server_cert_chain_->AsOSChain();
-
   if (server_cert_.get()) {
     net_log_.AddEvent(
         NetLog::TYPE_SSL_CERTIFICATES_RECEIVED,
         base::Bind(&NetLogX509CertificateCallback,
                    base::Unretained(server_cert_.get())));
-
-    // TODO(rsleevi): Plumb an OCSP response into the Mac system library and
-    // update IsOCSPStaplingSupported for Mac. https://crbug.com/430714
-    if (IsOCSPStaplingSupported()) {
-#if defined(OS_WIN)
-      // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is
-      // fixed.
-      tracked_objects::ScopedTracker tracking_profile2(
-          FROM_HERE_WITH_EXPLICIT_FUNCTION(
-              "424386 SSLClientSocketOpenSSL::UpdateServerCert2"));
-
-      const uint8_t* ocsp_response_raw;
-      size_t ocsp_response_len;
-      SSL_get0_ocsp_response(ssl_, &ocsp_response_raw, &ocsp_response_len);
-
-      CRYPT_DATA_BLOB ocsp_response_blob;
-      ocsp_response_blob.cbData = ocsp_response_len;
-      ocsp_response_blob.pbData = const_cast<BYTE*>(ocsp_response_raw);
-      BOOL ok = CertSetCertificateContextProperty(
-          server_cert_->os_cert_handle(),
-          CERT_OCSP_RESPONSE_PROP_ID,
-          CERT_SET_PROPERTY_IGNORE_PERSIST_ERROR_FLAG,
-          &ocsp_response_blob);
-      if (!ok) {
-        VLOG(1) << "Failed to set OCSP response property: "
-                << GetLastError();
-      }
-#else
-      NOTREACHED();
-#endif
-    }
   }
 }
 
@@ -1367,6 +1331,9 @@ int SSLClientSocketOpenSSL::DoHandshakeLoop(int last_io_result) {
       case STATE_HANDSHAKE:
         rv = DoHandshake();
         break;
+      case STATE_HANDSHAKE_COMPLETE:
+        rv = DoHandshakeComplete(rv);
+        break;
       case STATE_CHANNEL_ID_LOOKUP:
         DCHECK_EQ(OK, rv);
         rv = DoChannelIDLookup();
@@ -1457,9 +1424,7 @@ int SSLClientSocketOpenSSL::DoPayloadRead() {
   // Although only the final SSL_read call may have failed, the failure needs to
   // processed immediately, while the information still available in OpenSSL's
   // error queue.
-  if (client_auth_cert_needed_) {
-    pending_read_error_ = ERR_SSL_CLIENT_AUTH_CERT_NEEDED;
-  } else if (ssl_ret <= 0) {
+  if (ssl_ret <= 0) {
     // A zero return from SSL_read may mean any of:
     // - The underlying BIO_read returned 0.
     // - The peer sent a close_notify.
@@ -1471,6 +1436,9 @@ int SSLClientSocketOpenSSL::DoPayloadRead() {
     pending_read_ssl_error_ = SSL_get_error(ssl_, ssl_ret);
     if (pending_read_ssl_error_ == SSL_ERROR_ZERO_RETURN) {
       pending_read_error_ = 0;
+    } else if (pending_read_ssl_error_ == SSL_ERROR_WANT_X509_LOOKUP &&
+               !ssl_config_.send_client_cert) {
+      pending_read_error_ = ERR_SSL_CLIENT_AUTH_CERT_NEEDED;
     } else {
       pending_read_error_ = MapOpenSSLErrorWithDetails(
           pending_read_ssl_error_, err_tracer, &pending_read_error_info_);
@@ -1667,11 +1635,6 @@ int SSLClientSocketOpenSSL::TransportReadComplete(int result) {
 }
 
 int SSLClientSocketOpenSSL::ClientCertRequestCallback(SSL* ssl) {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "424386 SSLClientSocketOpenSSL::ClientCertRequestCallback"));
-
   DVLOG(3) << "OpenSSL ClientCertRequestCallback called";
   DCHECK(ssl == ssl_);
 
@@ -1687,7 +1650,6 @@ int SSLClientSocketOpenSSL::ClientCertRequestCallback(SSL* ssl) {
   if (!ssl_config_.send_client_cert) {
     // First pass: we know that a client certificate is needed, but we do not
     // have one at hand.
-    client_auth_cert_needed_ = true;
     STACK_OF(X509_NAME) *authorities = SSL_get_client_CA_list(ssl);
     for (size_t i = 0; i < sk_X509_NAME_num(authorities); i++) {
       X509_NAME *ca_name = (X509_NAME *)sk_X509_NAME_value(authorities, i);
@@ -1707,7 +1669,8 @@ int SSLClientSocketOpenSSL::ClientCertRequestCallback(SSL* ssl) {
           static_cast<SSLClientCertType>(client_cert_types[i]));
     }
 
-    return -1;  // Suspends handshake.
+    // Suspends handshake. SSL_get_error will return SSL_ERROR_WANT_X509_LOOKUP.
+    return -1;
   }
 
   // Second pass: a client certificate should have been selected.
@@ -1769,11 +1732,6 @@ int SSLClientSocketOpenSSL::ClientCertRequestCallback(SSL* ssl) {
 }
 
 int SSLClientSocketOpenSSL::CertVerifyCallback(X509_STORE_CTX* store_ctx) {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "424386 SSLClientSocketOpenSSL::CertVerifyCallback"));
-
   if (!completed_connect_) {
     // If the first handshake hasn't completed then we accept any certificates
     // because we verify after the handshake.
@@ -1808,11 +1766,6 @@ int SSLClientSocketOpenSSL::SelectNextProtoCallback(unsigned char** out,
                                                     unsigned char* outlen,
                                                     const unsigned char* in,
                                                     unsigned int inlen) {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "424386 SSLClientSocketOpenSSL::SelectNextProtoCallback"));
-
   if (ssl_config_.next_protos.empty()) {
     *out = reinterpret_cast<uint8*>(
         const_cast<char*>(kDefaultSupportedNPNProtocol));
@@ -1893,16 +1846,33 @@ long SSLClientSocketOpenSSL::BIOCallback(
     int cmd,
     const char *argp, int argi, long argl,
     long retvalue) {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/424386 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "424386 SSLClientSocketOpenSSL::BIOCallback"));
-
   SSLClientSocketOpenSSL* socket = reinterpret_cast<SSLClientSocketOpenSSL*>(
       BIO_get_callback_arg(bio));
   CHECK(socket);
   return socket->MaybeReplayTransportError(
       bio, cmd, argp, argi, argl, retvalue);
+}
+
+void SSLClientSocketOpenSSL::MaybeCacheSession() {
+  // Only cache the session once both the handshake has completed and the
+  // certificate has been verified.
+  if (!handshake_completed_ || !certificate_verified_ ||
+      SSL_session_reused(ssl_)) {
+    return;
+  }
+
+  SSLContext::GetInstance()->session_cache()->Insert(GetSessionCacheKey(),
+                                                     SSL_get_session(ssl_));
+}
+
+void SSLClientSocketOpenSSL::InfoCallback(int type, int val) {
+  // Note that SSL_CB_HANDSHAKE_DONE may be signaled multiple times if the
+  // socket renegotiates.
+  if (type != SSL_CB_HANDSHAKE_DONE || handshake_completed_)
+    return;
+
+  handshake_completed_ = true;
+  MaybeCacheSession();
 }
 
 void SSLClientSocketOpenSSL::AddSCTInfoToSSLInfo(SSLInfo* ssl_info) const {
@@ -1936,9 +1906,6 @@ std::string SSLClientSocketOpenSSL::GetSessionCacheKey() const {
   // fallback connections to use a separate session cache.
   result.append("/");
   switch (ssl_config_.version_max) {
-    case SSL_PROTOCOL_VERSION_SSL3:
-      result.append("ssl3");
-      break;
     case SSL_PROTOCOL_VERSION_TLS1:
       result.append("tls1");
       break;
@@ -1957,6 +1924,18 @@ std::string SSLClientSocketOpenSSL::GetSessionCacheKey() const {
     result.append("deprecated");
 
   return result;
+}
+
+bool SSLClientSocketOpenSSL::IsRenegotiationAllowed() const {
+  if (npn_status_ == kNextProtoUnsupported)
+    return ssl_config_.renego_allowed_default;
+
+  NextProto next_proto = NextProtoFromString(npn_proto_);
+  for (NextProto allowed : ssl_config_.renego_allowed_for_protos) {
+    if (next_proto == allowed)
+      return true;
+  }
+  return false;
 }
 
 scoped_refptr<X509Certificate>

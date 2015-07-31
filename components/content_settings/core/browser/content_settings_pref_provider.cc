@@ -13,6 +13,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/metrics/histogram.h"
+#include "base/prefs/pref_registry.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/string_split.h"
@@ -112,23 +113,20 @@ void PrefProvider::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterIntegerPref(
       prefs::kContentSettingsVersion,
-      ContentSettingsPattern::kContentSettingsPatternVersion,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+      ContentSettingsPattern::kContentSettingsPatternVersion);
   registry->RegisterDictionaryPref(
       prefs::kContentSettingsPatternPairs,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kMigratedContentSettingsPatternPairs,
-      false,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kMigratedContentSettingsPatternPairs,
+                                false);
 
   for (int i = 0; i < CONTENT_SETTINGS_NUM_TYPES; ++i) {
-    registry->RegisterDictionaryPref(
-        kContentSettingsExceptionsPrefs[i],
-        IsContentSettingsTypeSyncable(ContentSettingsType(i))
-            ? user_prefs::PrefRegistrySyncable::SYNCABLE_PREF
-            : user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF
-    );
+    if (IsContentSettingsTypeSyncable(ContentSettingsType(i))) {
+      registry->RegisterDictionaryPref(kContentSettingsExceptionsPrefs[i],
+          user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+    } else {
+      registry->RegisterDictionaryPref(kContentSettingsExceptionsPrefs[i]);
+    }
   }
 }
 
@@ -300,7 +298,7 @@ void PrefProvider::MigrateObsoleteMediaContentSetting() {
   std::vector<Rule> rules_to_delete;
   {
     scoped_ptr<RuleIterator> rule_iterator(GetRuleIterator(
-        CONTENT_SETTINGS_TYPE_MEDIASTREAM, std::string(), false));
+        CONTENT_SETTINGS_TYPE_MEDIASTREAM, ResourceIdentifier(), false));
     while (rule_iterator->HasNext()) {
       // Skip default setting and rules without a value.
       const content_settings::Rule& rule = rule_iterator->Next();
@@ -325,7 +323,7 @@ void PrefProvider::MigrateObsoleteMediaContentSetting() {
       SetWebsiteSetting(it->primary_pattern,
                         it->secondary_pattern,
                         CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC,
-                        std::string(),
+                        ResourceIdentifier(),
                         new base::FundamentalValue(CONTENT_SETTING_ALLOW));
     }
     // Add the exception to the new camera content setting.
@@ -333,7 +331,7 @@ void PrefProvider::MigrateObsoleteMediaContentSetting() {
       SetWebsiteSetting(it->primary_pattern,
                         it->secondary_pattern,
                         CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA,
-                        std::string(),
+                        ResourceIdentifier(),
                         new base::FundamentalValue(CONTENT_SETTING_ALLOW));
     }
 
@@ -341,7 +339,7 @@ void PrefProvider::MigrateObsoleteMediaContentSetting() {
     SetWebsiteSetting(it->primary_pattern,
                       it->secondary_pattern,
                       CONTENT_SETTINGS_TYPE_MEDIASTREAM,
-                      std::string(),
+                      ResourceIdentifier(),
                       NULL);
   }
 }

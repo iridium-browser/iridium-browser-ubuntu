@@ -399,7 +399,8 @@ class Generator(generator.Generator):
     'has_method_with_response': HasMethodWithResponse,
     'interface_response_name': GetInterfaceResponseName,
     'is_array_kind': mojom.IsArrayKind,
-    'is_handle': mojom.IsNonInterfaceHandleKind,
+    'is_any_handle_kind': mojom.IsAnyHandleKind,
+    'is_interface_request_kind': mojom.IsInterfaceRequestKind,
     'is_map_kind': mojom.IsMapKind,
     'is_nullable_kind': mojom.IsNullableKind,
     'is_pointer_array_kind': IsPointerArrayKind,
@@ -410,8 +411,6 @@ class Generator(generator.Generator):
     'method_ordinal_name': GetMethodOrdinalName,
     'name': GetNameForElement,
     'new_array': NewArray,
-    'response_struct_from_method': generator.GetResponseStructFromMethod,
-    'struct_from_method': generator.GetStructFromMethod,
   }
 
   def GetJinjaExports(self):
@@ -464,7 +463,7 @@ class Generator(generator.Generator):
       self.Write(self.GenerateEnumSource(enum),
                  '%s.java' % GetNameForElement(enum))
 
-    for interface in self.module.interfaces:
+    for interface in self.GetInterfaces():
       self.Write(self.GenerateInterfaceSource(interface),
                  '%s.java' % GetNameForElement(interface))
       self.Write(self.GenerateInterfaceInternalSource(interface),

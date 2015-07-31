@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_UI_EXTENSIONS_EXTENSION_ACTION_VIEW_CONTROLLER_H_
 #define CHROME_BROWSER_UI_EXTENSIONS_EXTENSION_ACTION_VIEW_CONTROLLER_H_
 
+#include "base/memory/weak_ptr.h"
 #include "base/scoped_observer.h"
 #include "chrome/browser/extensions/extension_action_icon_factory.h"
 #include "chrome/browser/extensions/extension_context_menu_model.h"
@@ -16,6 +17,7 @@ class Browser;
 class ExtensionAction;
 class ExtensionActionPlatformDelegate;
 class GURL;
+class ToolbarActionsBar;
 
 namespace extensions {
 class Command;
@@ -40,7 +42,8 @@ class ExtensionActionViewController
 
   ExtensionActionViewController(const extensions::Extension* extension,
                                 Browser* browser,
-                                ExtensionAction* extension_action);
+                                ExtensionAction* extension_action,
+                                ToolbarActionsBar* toolbar_actions_bar);
   ~ExtensionActionViewController() override;
 
   // ToolbarActionViewController:
@@ -58,7 +61,7 @@ class ExtensionActionViewController
   void HidePopup() override;
   gfx::NativeView GetPopupNativeView() override;
   ui::MenuModel* GetContextMenu() override;
-  bool IsMenuRunning() const override;
+  void OnContextMenuClosed() override;
   bool CanDrag() const override;
   bool ExecuteAction(bool by_user) override;
   void UpdateState() override;
@@ -70,11 +73,15 @@ class ExtensionActionViewController
   // ExtensionContextMenuModel::PopupDelegate:
   void InspectPopup() override;
 
+  // Closes the active popup (whether it was this action's popup or not).
+  void HideActivePopup();
+
+
   // Populates |command| with the command associated with |extension|, if one
   // exists. Returns true if |command| was populated.
   bool GetExtensionCommand(extensions::Command* command);
 
-  const extensions::Extension* extension() const { return extension_; }
+  const extensions::Extension* extension() const { return extension_.get(); }
   Browser* browser() { return browser_; }
   ExtensionAction* extension_action() { return extension_action_; }
   const ExtensionAction* extension_action() const { return extension_action_; }
@@ -98,26 +105,38 @@ class ExtensionActionViewController
   // itself before we're notified to remove it.
   bool ExtensionIsValid() const;
 
+  // In some cases (such as when an action is shown in a menu), a substitute
+  // ToolbarActionViewController should be used for showing popups. This
+  // returns the preferred controller.
+  ExtensionActionViewController* GetPreferredPopupViewController();
+
   // Executes the extension action with |show_action|. If
   // |grant_tab_permissions| is true, this will grant the extension active tab
   // permissions. Only do this if this was done through a user action (and not
   // e.g. an API). Returns true if a popup is shown.
   bool ExecuteAction(PopupShowAction show_action, bool grant_tab_permissions);
 
-  // Shows the popup for the extension action, given the associated |popup_url|.
-  // |grant_tab_permissions| is true if active tab permissions should be given
-  // to the extension; this is only true if the popup is opened through a user
-  // action.
-  // Returns true if a popup is successfully shown.
-  bool ShowPopupWithUrl(PopupShowAction show_action,
-                        const GURL& popup_url,
-                        bool grant_tab_permissions);
+  // Begins the process of showing the popup for the extension action, given the
+  // associated |popup_url|. |grant_tab_permissions| is true if active tab
+  // permissions should be given to the extension; this is only true if the
+  // popup is opened through a user action.
+  // The popup may not be shown synchronously if the extension is hidden and
+  // first needs to slide itself out.
+  // Returns true if a popup will be shown.
+  bool TriggerPopupWithUrl(PopupShowAction show_action,
+                           const GURL& popup_url,
+                           bool grant_tab_permissions);
+
+  // Shows the popup with the given |host|.
+  void ShowPopup(scoped_ptr<extensions::ExtensionViewHost> host,
+                 bool grant_tab_permissions,
+                 PopupShowAction show_action);
 
   // Handles cleanup after the popup closes.
   void OnPopupClosed();
 
   // The extension associated with the action we're displaying.
-  const extensions::Extension* extension_;
+  scoped_refptr<const extensions::Extension> extension_;
 
   // The corresponding browser.
   Browser* browser_;
@@ -125,6 +144,13 @@ class ExtensionActionViewController
   // The browser action this view represents. The ExtensionAction is not owned
   // by this class.
   ExtensionAction* extension_action_;
+
+  // The owning ToolbarActionsBar, if any. This will be null if this is a
+  // page action without the toolbar redesign turned on.
+  // TODO(devlin): Would this be better behind a delegate interface? On the one
+  // hand, it's odd for this class to know about ToolbarActionsBar, but on the
+  // other, yet-another-delegate-class might just confuse things.
+  ToolbarActionsBar* toolbar_actions_bar_;
 
   // The extension popup's host if the popup is visible; null otherwise.
   extensions::ExtensionViewHost* popup_host_;
@@ -153,6 +179,8 @@ class ExtensionActionViewController
 
   ScopedObserver<extensions::ExtensionHost, extensions::ExtensionHostObserver>
       popup_host_observer_;
+
+  base::WeakPtrFactory<ExtensionActionViewController> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionActionViewController);
 };

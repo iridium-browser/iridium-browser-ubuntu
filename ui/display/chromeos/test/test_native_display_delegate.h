@@ -35,6 +35,14 @@ class TestNativeDisplayDelegate : public NativeDisplayDelegate {
     max_configurable_pixels_ = pixels;
   }
 
+  void set_get_hdcp_state_expectation(bool success) {
+    get_hdcp_expectation_ = success;
+  }
+
+  void set_set_hdcp_state_expectation(bool success) {
+    set_hdcp_expectation_ = success;
+  }
+
   void set_hdcp_state(HDCPState state) { hdcp_state_ = state; }
 
   void set_run_async(bool run_async) { run_async_ = run_async; }
@@ -55,13 +63,18 @@ class TestNativeDisplayDelegate : public NativeDisplayDelegate {
                  const gfx::Point& origin,
                  const ConfigureCallback& callback) override;
   void CreateFrameBuffer(const gfx::Size& size) override;
-  bool GetHDCPState(const DisplaySnapshot& output, HDCPState* state) override;
-  bool SetHDCPState(const DisplaySnapshot& output, HDCPState state) override;
+  void GetHDCPState(const DisplaySnapshot& output,
+                    const GetHDCPStateCallback& callback) override;
+  void SetHDCPState(const DisplaySnapshot& output,
+                    HDCPState state,
+                    const SetHDCPStateCallback& callback) override;
   std::vector<ui::ColorCalibrationProfile> GetAvailableColorCalibrationProfiles(
       const DisplaySnapshot& output) override;
   bool SetColorCalibrationProfile(
       const DisplaySnapshot& output,
       ui::ColorCalibrationProfile new_profile) override;
+  bool SetGammaRamp(const ui::DisplaySnapshot& output,
+                    const std::vector<GammaRampRGBEntry>& lut) override;
   void AddObserver(NativeDisplayObserver* observer) override;
   void RemoveObserver(NativeDisplayObserver* observer) override;
 
@@ -80,6 +93,9 @@ class TestNativeDisplayDelegate : public NativeDisplayDelegate {
   // A value of 0 means that no limit is enforced and Configure will
   // return success regardless of the resolution.
   int max_configurable_pixels_;
+
+  bool get_hdcp_expectation_;
+  bool set_hdcp_expectation_;
 
   // Result value of GetHDCPState().
   HDCPState hdcp_state_;

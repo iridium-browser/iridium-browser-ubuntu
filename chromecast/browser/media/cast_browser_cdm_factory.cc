@@ -9,19 +9,22 @@
 #include "base/message_loop/message_loop_proxy.h"
 #include "chromecast/browser/media/cma_message_loop.h"
 #include "chromecast/media/cdm/browser_cdm_cast.h"
+#include "media/base/bind_to_current_loop.h"
+#include "media/base/cdm_key_information.h"
 
 namespace chromecast {
 namespace media {
 
 scoped_ptr<::media::BrowserCdm> CastBrowserCdmFactory::CreateBrowserCdm(
     const std::string& key_system_name,
-    bool use_secure_surface,
+    bool use_hw_secure_codecs,
     const ::media::SessionMessageCB& session_message_cb,
     const ::media::SessionClosedCB& session_closed_cb,
     const ::media::LegacySessionErrorCB& legacy_session_error_cb,
     const ::media::SessionKeysChangeCB& session_keys_change_cb,
     const ::media::SessionExpirationUpdateCB& session_expiration_update_cb) {
-  DCHECK(!use_secure_surface) << "Chromecast does not use |use_secure_surface|";
+  DCHECK(!use_hw_secure_codecs)
+      << "Chromecast does not use |use_hw_secure_codecs|";
 
   CastKeySystem key_system(GetKeySystemByName(key_system_name));
 
@@ -36,9 +39,12 @@ scoped_ptr<::media::BrowserCdm> CastBrowserCdmFactory::CreateBrowserCdm(
     CmaMessageLoop::GetMessageLoopProxy()->PostTask(
         FROM_HERE,
         base::Bind(&BrowserCdmCast::Initialize,
-                   base::Unretained(browser_cdm.get()), session_message_cb,
-                   session_closed_cb, legacy_session_error_cb,
-                   session_keys_change_cb, session_expiration_update_cb));
+                   base::Unretained(browser_cdm.get()),
+                   ::media::BindToCurrentLoop(session_message_cb),
+                   ::media::BindToCurrentLoop(session_closed_cb),
+                   ::media::BindToCurrentLoop(legacy_session_error_cb),
+                   ::media::BindToCurrentLoop(session_keys_change_cb),
+                   ::media::BindToCurrentLoop(session_expiration_update_cb)));
     return make_scoped_ptr(
         new BrowserCdmCastUi(browser_cdm.Pass(),
                              CmaMessageLoop::GetMessageLoopProxy()));

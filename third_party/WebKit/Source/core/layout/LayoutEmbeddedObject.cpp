@@ -31,7 +31,6 @@
 #include "core/html/HTMLPlugInElement.h"
 #include "core/layout/LayoutAnalyzer.h"
 #include "core/layout/LayoutView.h"
-#include "core/layout/PaintInfo.h"
 #include "core/page/Page.h"
 #include "core/paint/EmbeddedObjectPainter.h"
 #include "core/plugins/PluginView.h"
@@ -129,10 +128,28 @@ void LayoutEmbeddedObject::layout()
 
     updateLayerTransformAfterLayout();
 
-    if (!widget() && frameView())
+    Widget* widget = this->widget();
+    if (widget) {
+        if (widget->isPluginView())
+            toPluginView(widget)->layoutIfNeeded();
+    } else if (frameView()) {
         frameView()->addPartToUpdate(*this);
+    }
 
     clearNeedsLayout();
+}
+
+PaintInvalidationReason LayoutEmbeddedObject::invalidatePaintIfNeeded(
+    PaintInvalidationState& paintInvalidationState, const LayoutBoxModelObject& newPaintInvalidationContainer)
+{
+    PaintInvalidationReason reason =
+        LayoutPart::invalidatePaintIfNeeded(paintInvalidationState, newPaintInvalidationContainer);
+
+    Widget* widget = this->widget();
+    if (widget && widget->isPluginView())
+        toPluginView(widget)->invalidatePaintIfNeeded();
+
+    return reason;
 }
 
 bool LayoutEmbeddedObject::scroll(ScrollDirection direction, ScrollGranularity granularity, float)

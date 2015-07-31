@@ -10,7 +10,6 @@ import collections
 import contextlib
 import datetime
 import multiprocessing
-import logging
 import optparse
 import os
 import re
@@ -20,6 +19,7 @@ from chromite.cbuildbot import cbuildbot_config
 from chromite.cbuildbot import constants
 from chromite.cbuildbot import manifest_version
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import parallel
 
 
@@ -110,7 +110,7 @@ class CrashTriager(object):
     """Create a worker process for processing crash lists."""
     with parallel.BackgroundTaskRunner(self._ProcessCrashListForBot,
                                        processes=self.jobs) as queue:
-      for bot_id, build_config in cbuildbot_config.config.iteritems():
+      for bot_id, build_config in cbuildbot_config.GetConfig().iteritems():
         if build_config['vm_tests']:
           queue.put((bot_id, build_config))
       yield

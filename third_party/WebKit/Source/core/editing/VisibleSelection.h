@@ -30,11 +30,11 @@
 #include "core/editing/SelectionType.h"
 #include "core/editing/TextGranularity.h"
 #include "core/editing/VisiblePosition.h"
+#include "core/editing/VisibleUnits.h"
 
 namespace blink {
 
 class LayoutPoint;
-class Position;
 
 const EAffinity SEL_DEFAULT_AFFINITY = DOWNSTREAM;
 enum SelectionDirection { DirectionForward, DirectionBackward, DirectionRight, DirectionLeft };
@@ -106,6 +106,7 @@ public:
     // moves the caret upstream before returning the range/positions.
     PassRefPtrWillBeRawPtr<Range> toNormalizedRange() const;
     bool toNormalizedPositions(Position& start, Position& end) const;
+    static void normalizePositions(const Position& start, const Position& end, Position* normalizedStart, Position* normalizedEnd);
 
     Element* rootEditableElement() const;
     bool isContentEditable() const;
@@ -146,8 +147,8 @@ public:
     void showTreeForThis() const;
 #endif
 
-    void setStartRespectingGranularity(TextGranularity);
-    void setEndRespectingGranularity(TextGranularity);
+    void setStartRespectingGranularity(TextGranularity, EWordSide = RightWordIfOnBoundary);
+    void setEndRespectingGranularity(TextGranularity, EWordSide = RightWordIfOnBoundary);
 
 private:
     void validate(TextGranularity = CharacterGranularity);
@@ -182,8 +183,14 @@ private:
 
 inline bool operator==(const VisibleSelection& a, const VisibleSelection& b)
 {
-    return a.start() == b.start() && a.end() == b.end() && a.affinity() == b.affinity() && a.isBaseFirst() == b.isBaseFirst()
-        && a.isDirectional() == b.isDirectional();
+    if (a.affinity() != b.affinity() || a.isDirectional() != b.isDirectional())
+        return false;
+
+    if (a.isNone())
+        return b.isNone();
+
+    return a.start() == b.start() && a.end() == b.end() && a.affinity() == b.affinity()
+        && a.isDirectional() == b.isDirectional() && a.base() == b.base() && a.extent() == b.extent();
 }
 
 inline bool operator!=(const VisibleSelection& a, const VisibleSelection& b)

@@ -106,10 +106,7 @@ HostContentSettingsMap::HostContentSettingsMap(PrefService* prefs,
 // static
 void HostContentSettingsMap::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterIntegerPref(
-      prefs::kContentSettingsWindowLastTabIndex,
-      0,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterIntegerPref(prefs::kContentSettingsWindowLastTabIndex, 0);
 
   // Register the prefs for the content settings providers.
   content_settings::DefaultProvider::RegisterProfilePrefs(registry);
@@ -493,6 +490,14 @@ bool HostContentSettingsMap::IsDefaultSettingAllowedForType(
     return false;
   }
 #endif
+
+  // Don't support ALLOW for the default media settings.
+  if ((content_type == CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA ||
+       content_type == CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC) &&
+      setting == CONTENT_SETTING_ALLOW) {
+    return false;
+  }
+
   return IsSettingAllowedForType(prefs, setting, content_type);
 }
 
@@ -654,7 +659,7 @@ bool HostContentSettingsMap::ShouldAllowAllContent(
 #endif
   if (secondary_url.SchemeIs(kChromeUIScheme) &&
       content_type == CONTENT_SETTINGS_TYPE_COOKIES &&
-      primary_url.SchemeIsSecure()) {
+      primary_url.SchemeIsCryptographic()) {
     return true;
   }
 #if defined(ENABLE_EXTENSIONS)

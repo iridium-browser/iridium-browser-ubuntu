@@ -57,19 +57,18 @@ bool TestRemoteCommandJob::ParseCommandPayload(
   return true;
 }
 
-bool TestRemoteCommandJob::IsExpired(base::Time now) {
+bool TestRemoteCommandJob::IsExpired(base::TimeTicks now) {
   return !issued_time().is_null() &&
          now > issued_time() +
                    base::TimeDelta::FromHours(kCommandExpirationTimeInHours);
 }
 
-void TestRemoteCommandJob::RunImpl(const SucceededCallback& succeed_callback,
-                                   const FailedCallback& failed_callback) {
+void TestRemoteCommandJob::RunImpl(const CallbackWithResult& succeed_callback,
+                                   const CallbackWithResult& failed_callback) {
   scoped_ptr<ResultPayload> echo_payload(new EchoPayload(command_payload_));
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-      FROM_HERE,
-      succeed_ ? base::Bind(succeed_callback, base::Passed(&echo_payload))
-               : failed_callback,
+      FROM_HERE, base::Bind(succeed_ ? succeed_callback : failed_callback,
+                            base::Passed(&echo_payload)),
       execution_duration_);
 }
 

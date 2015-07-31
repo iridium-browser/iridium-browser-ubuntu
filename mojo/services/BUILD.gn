@@ -5,38 +5,17 @@
 import("//build/config/ui.gni")
 
 group("services") {
+  # Meta-target, don't link into production code.
+  testonly = true
   deps = [
     "//mojo/services/network/public/interfaces",
-    "//third_party/mojo_services/src/clipboard/public/interfaces",
-    "//third_party/mojo_services/src/content_handler/public/interfaces",
-    "//third_party/mojo_services/src/geometry/public/interfaces",
-    "//third_party/mojo_services/src/input_events/public/interfaces",
-    "//third_party/mojo_services/src/native_viewport/public/interfaces",
-    "//third_party/mojo_services/src/navigation/public/interfaces",
-    "//third_party/mojo_services/src/surfaces/public/interfaces",
-    "//third_party/mojo_services/src/view_manager/public/interfaces",
+    "//mojo/services/test_service",
   ]
 
   if (!is_component_build) {
     deps += [
-      "//mojo/services/clipboard",
-      "//mojo/services/html_viewer",
-      "//mojo/services/kiosk_wm",
-      "//mojo/services/native_viewport",
       "//mojo/services/network",
-      "//mojo/services/surfaces",
       "//mojo/services/tracing",
-      "//mojo/services/view_manager",
     ]
-
-    # TODO(GYP): Make this work.
-    if (is_mac) {
-      deps -= [
-        "//mojo/services/html_viewer",
-        "//mojo/services/kiosk_wm",
-        "//mojo/services/native_viewport",
-        "//mojo/services/view_manager",
-      ]
-    }
   }
 }

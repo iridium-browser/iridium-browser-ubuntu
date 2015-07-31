@@ -6,22 +6,18 @@
   display: block;
 }
 
-core-menu {
+paper-menu {
   margin: 0;
   padding-top: 20px;
 }
 
-paper-item {
+paper-menu > * {
   -webkit-padding-start: 40px;
   font-size: 15px;
   margin-bottom: 5px;
   min-height: 45px;
 }
 
-paper-item.core-selected {
+paper-menu > *.iron-selected {
   background-color: rgb(38, 166, 154);
-}
-
-paper-item core-icon {
-  -webkit-margin-end: 10px;
 }

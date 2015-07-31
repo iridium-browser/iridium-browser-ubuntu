@@ -85,6 +85,7 @@
 #include "config.h"
 #include "web/WebLocalFrameImpl.h"
 
+#include "bindings/core/v8/BindingSecurity.h"
 #include "bindings/core/v8/DOMWrapperWorld.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
@@ -124,6 +125,7 @@
 #include "core/html/HTMLFrameElementBase.h"
 #include "core/html/HTMLFrameOwnerElement.h"
 #include "core/html/HTMLHeadElement.h"
+#include "core/html/HTMLImageElement.h"
 #include "core/html/HTMLInputElement.h"
 #include "core/html/HTMLLinkElement.h"
 #include "core/html/PluginDocument.h"
@@ -157,6 +159,7 @@
 #include "modules/presentation/PresentationController.h"
 #include "modules/push_messaging/PushController.h"
 #include "modules/screen_orientation/ScreenOrientationController.h"
+#include "modules/vr/VRController.h"
 #include "platform/ScriptForbiddenScope.h"
 #include "platform/TraceEvent.h"
 #include "platform/UserGestureIndicator.h"
@@ -194,6 +197,7 @@
 #include "public/web/WebHistoryItem.h"
 #include "public/web/WebIconURL.h"
 #include "public/web/WebInputElement.h"
+#include "public/web/WebKit.h"
 #include "public/web/WebNode.h"
 #include "public/web/WebPerformance.h"
 #include "public/web/WebPlugin.h"
@@ -252,7 +256,7 @@ static void frameContentAsPlainText(size_t maxChars, LocalFrame* frame, StringBu
         // size and also copy the results directly into a wstring, avoiding the
         // string conversion.
         for (TextIterator it(range->startPosition(), range->endPosition()); !it.atEnd(); it.advance()) {
-            it.appendTextToStringBuilder(output, 0, maxChars - output.length());
+            it.text().appendTextToStringBuilder(output, 0, maxChars - output.length());
             if (output.length() >= maxChars)
                 return; // Filled up the buffer.
         }
@@ -269,10 +273,10 @@ static void frameContentAsPlainText(size_t maxChars, LocalFrame* frame, StringBu
             continue;
         LocalFrame* curLocalChild = toLocalFrame(curChild);
         // Ignore the text of non-visible frames.
-        LayoutView* contentRenderer = curLocalChild->contentRenderer();
+        LayoutView* contentLayoutObject = curLocalChild->contentLayoutObject();
         LayoutPart* ownerLayoutObject = curLocalChild->ownerLayoutObject();
-        if (!contentRenderer || !contentRenderer->size().width() || !contentRenderer->size().height()
-            || (contentRenderer->location().x() + contentRenderer->size().width() <= 0) || (contentRenderer->location().y() + contentRenderer->size().height() <= 0)
+        if (!contentLayoutObject || !contentLayoutObject->size().width() || !contentLayoutObject->size().height()
+            || (contentLayoutObject->location().x() + contentLayoutObject->size().width() <= 0) || (contentLayoutObject->location().y() + contentLayoutObject->size().height() <= 0)
             || (ownerLayoutObject && ownerLayoutObject->style() && ownerLayoutObject->style()->visibility() != VISIBLE)) {
             continue;
         }
@@ -481,7 +485,7 @@ public:
         m_pageRects.fill(IntRect(printRect), m_plugin->printBegin(m_printParams));
     }
 
-    virtual void computePageRectsWithPageSize(const FloatSize& pageSizeInPixels, bool allowHorizontalTiling) override
+    virtual void computePageRectsWithPageSize(const FloatSize& pageSizeInPixels) override
     {
         ASSERT_NOT_REACHED();
     }
@@ -895,17 +899,24 @@ void WebLocalFrameImpl::requestExecuteScriptInIsolatedWorld(int worldID, const W
     SuspendableScriptExecutor::createAndRun(frame(), worldID, createSourcesVector(sourcesIn, numSources), extensionGroup, userGesture, callback);
 }
 
-v8::Handle<v8::Value> WebLocalFrameImpl::callFunctionEvenIfScriptDisabled(v8::Handle<v8::Function> function, v8::Handle<v8::Value> receiver, int argc, v8::Handle<v8::Value> argv[])
+// TODO(bashi): Consider returning MaybeLocal.
+v8::Local<v8::Value> WebLocalFrameImpl::callFunctionEvenIfScriptDisabled(v8::Local<v8::Function> function, v8::Local<v8::Value> receiver, int argc, v8::Local<v8::Value> argv[])
 {
     ASSERT(frame());
-    // TODO(bashi): Change the signature of callFunctionEvenIfScriptDisabled()
-    // so that it takes v8::Local instead of v8::Handle.
-    return frame()->script().callFunction(v8::Local<v8::Function>(function), v8::Local<v8::Value>(receiver), argc, static_cast<v8::Local<v8::Value>*>(argv));
+    v8::Local<v8::Value> result;
+    if (!frame()->script().callFunction(function, receiver, argc, static_cast<v8::Local<v8::Value>*>(argv)).ToLocal(&result))
+        return v8::Local<v8::Value>();
+    return result;
 }
 
 v8::Local<v8::Context> WebLocalFrameImpl::mainWorldScriptContext() const
 {
     return toV8Context(frame(), DOMWrapperWorld::mainWorld());
+}
+
+bool WebFrame::scriptCanAccess(WebFrame* target)
+{
+    return BindingSecurity::shouldAllowAccessToFrame(mainThreadIsolate(), toCoreFrame(target), DoNotReportSecurityError);
 }
 
 void WebLocalFrameImpl::reload(bool ignoreCache)
@@ -918,6 +929,15 @@ void WebLocalFrameImpl::reloadWithOverrideURL(const WebURL& overrideUrl, bool ig
 {
     ASSERT(frame());
     frame()->loader().reload(ignoreCache ? EndToEndReload : NormalReload, overrideUrl);
+}
+
+void WebLocalFrameImpl::reloadImage(const WebNode& webNode)
+{
+    const Node* node = webNode.constUnwrap<Node>();
+    if (isHTMLImageElement(*node)) {
+        const HTMLImageElement& imageElement = toHTMLImageElement(*node);
+        imageElement.forceReload();
+    }
 }
 
 void WebLocalFrameImpl::loadRequest(const WebURLRequest& request)
@@ -1075,7 +1095,8 @@ bool WebLocalFrameImpl::firstRectForCharacterRange(unsigned location, unsigned l
         length = 0;
 
     Element* editable = frame()->selection().rootEditableElementOrDocumentElement();
-    ASSERT(editable);
+    if (!editable)
+        return false;
     RefPtrWillBeRawPtr<Range> range = PlainTextRange(location, location + length).createRange(*editable);
     if (!range)
         return false;
@@ -1244,12 +1265,9 @@ void WebLocalFrameImpl::selectRange(const WebRange& webRange)
         frame()->selection().setSelectedRange(range.get(), VP_DEFAULT_AFFINITY, FrameSelection::NonDirectional, NotUserTriggered);
 }
 
-void WebLocalFrameImpl::moveRangeSelectionExtent(const WebPoint& pointInViewport, WebFrame::TextGranularity granularity)
+void WebLocalFrameImpl::moveRangeSelectionExtent(const WebPoint& point)
 {
-    blink::TextGranularity blinkGranularity = blink::CharacterGranularity;
-    if (granularity == WebFrame::WordGranularity)
-        blinkGranularity = blink::WordGranularity;
-    frame()->selection().moveRangeSelectionExtent(visiblePositionForViewportPoint(pointInViewport), blinkGranularity);
+    frame()->selection().moveRangeSelectionExtent(frame()->view()->viewportToContents(point));
 }
 
 void WebLocalFrameImpl::moveRangeSelection(const WebPoint& baseInViewport, const WebPoint& extentInViewport, WebFrame::TextGranularity granularity)
@@ -1310,13 +1328,7 @@ void WebLocalFrameImpl::setCaretVisible(bool visible)
 
 VisiblePosition WebLocalFrameImpl::visiblePositionForViewportPoint(const WebPoint& pointInViewport)
 {
-    HitTestRequest request = HitTestRequest::Move | HitTestRequest::ReadOnly | HitTestRequest::Active | HitTestRequest::IgnoreClipping;
-    HitTestResult result(request, frame()->view()->viewportToContents(pointInViewport));
-    frame()->document()->layoutView()->layer()->hitTest(result);
-
-    if (Node* node = result.innerNode())
-        return frame()->selection().selection().visiblePositionRespectingEditingBoundary(result.localPoint(), node);
-    return VisiblePosition();
+    return visiblePositionForContentsPoint(frame()->view()->viewportToContents(pointInViewport), frame());
 }
 
 WebPlugin* WebLocalFrameImpl::focusedPluginIfInputMethodSupported()
@@ -1366,9 +1378,9 @@ float WebLocalFrameImpl::printPage(int page, WebCanvas* canvas)
 #if ENABLE(PRINTING)
     ASSERT(m_printContext && page >= 0 && frame() && frame()->document());
 
-    GraphicsContext graphicsContext(canvas, nullptr);
-    graphicsContext.setPrinting(true);
-    return m_printContext->spoolSinglePage(graphicsContext, page);
+    OwnPtr<GraphicsContext> graphicsContext = GraphicsContext::deprecatedCreateWithCanvas(canvas);
+    graphicsContext->setPrinting(true);
+    return m_printContext->spoolSinglePage(*graphicsContext, page);
 #else
     return 0;
 #endif
@@ -1504,7 +1516,6 @@ void WebLocalFrameImpl::setTickmarks(const WebVector<WebRect>& tickmarks)
         for (size_t i = 0; i < tickmarks.size(); ++i)
             tickmarksConverted[i] = tickmarks[i];
         frameView()->setTickmarks(tickmarksConverted);
-        invalidateScrollbar();
     }
 }
 
@@ -1546,10 +1557,10 @@ void WebLocalFrameImpl::printPagesWithBoundaries(WebCanvas* canvas, const WebSiz
 {
     ASSERT(m_printContext);
 
-    GraphicsContext graphicsContext(canvas, nullptr);
-    graphicsContext.setPrinting(true);
+    OwnPtr<GraphicsContext> graphicsContext = GraphicsContext::deprecatedCreateWithCanvas(canvas);
+    graphicsContext->setPrinting(true);
 
-    m_printContext->spoolAllPagesWithBoundaries(graphicsContext, FloatSize(pageSizeInPixels.width, pageSizeInPixels.height));
+    m_printContext->spoolAllPagesWithBoundaries(*graphicsContext, FloatSize(pageSizeInPixels.width, pageSizeInPixels.height));
 }
 
 WebRect WebLocalFrameImpl::selectionBoundsRect() const
@@ -1653,6 +1664,8 @@ void WebLocalFrameImpl::setCoreFrame(PassRefPtrWillBeRawPtr<LocalFrame> frame)
             PresentationController::provideTo(*m_frame, m_client ? m_client->presentationClient() : nullptr);
         if (RuntimeEnabledFeatures::permissionsEnabled())
             PermissionController::provideTo(*m_frame, m_client ? m_client->permissionClient() : nullptr);
+        if (RuntimeEnabledFeatures::webVREnabled())
+            VRController::provideTo(*m_frame, m_client ? m_client->webVRClient() : nullptr);
     }
 }
 
@@ -2026,12 +2039,17 @@ void WebLocalFrameImpl::sendOrientationChangeEvent()
         frame()->localDOMWindow()->sendOrientationChangeEvent();
 }
 
-void WebLocalFrameImpl::willShowInstallBannerPrompt(const WebString& platform, WebAppBannerPromptReply* reply)
+void WebLocalFrameImpl::willShowInstallBannerPrompt(int requestId, const WebVector<WebString>& platforms, WebAppBannerPromptReply* reply)
 {
     if (!RuntimeEnabledFeatures::appBannerEnabled() || !frame())
         return;
 
-    AppBannerController::willShowInstallBannerPrompt(frame(), platform, reply);
+    AppBannerController::willShowInstallBannerPrompt(requestId, client()->appBannerClient(), frame(), platforms, reply);
+}
+
+void WebLocalFrameImpl::willShowInstallBannerPrompt(const WebVector<WebString>& platforms, WebAppBannerPromptReply* reply)
+{
+    willShowInstallBannerPrompt(-1, platforms, reply);
 }
 
 void WebLocalFrameImpl::requestRunTask(WebSuspendableTask* task) const
@@ -2083,24 +2101,6 @@ TextFinder& WebLocalFrameImpl::ensureTextFinder()
         m_textFinder = TextFinder::create(*this);
 
     return *m_textFinder;
-}
-
-void WebLocalFrameImpl::invalidateScrollbar() const
-{
-    ASSERT(frame() && frame()->view());
-    FrameView* view = frame()->view();
-    // Invalidate the vertical scroll bar region for the view.
-    Scrollbar* scrollbar = view->verticalScrollbar();
-    if (scrollbar)
-        scrollbar->invalidate();
-}
-
-void WebLocalFrameImpl::invalidateAll() const
-{
-    ASSERT(frame() && frame()->view());
-    FrameView* view = frame()->view();
-    view->invalidateRect(view->frameRect());
-    invalidateScrollbar();
 }
 
 void WebLocalFrameImpl::setFrameWidget(WebFrameWidgetImpl* frameWidget)

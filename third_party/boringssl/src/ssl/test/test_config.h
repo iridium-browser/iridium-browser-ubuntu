@@ -72,6 +72,12 @@ struct TestConfig {
   bool fail_ddos_callback = false;
   bool fail_second_ddos_callback = false;
   std::string cipher;
+  bool handshake_never_done = false;
+  int export_keying_material = 0;
+  std::string export_label;
+  std::string export_context;
+  bool use_export_context = false;
+  bool reject_peer_renegotiations = false;
 };
 
 bool ParseConfig(int argc, char **argv, TestConfig *out_config);

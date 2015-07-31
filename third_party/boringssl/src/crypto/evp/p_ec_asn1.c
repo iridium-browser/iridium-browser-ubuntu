@@ -147,7 +147,6 @@ static EC_KEY *eckey_type2param(int ptype, void *pval) {
      * by an asn1 OID */
     eckey = EC_KEY_new_by_curve_name(OBJ_obj2nid(poid));
     if (eckey == NULL) {
-      OPENSSL_PUT_ERROR(EVP, eckey_type2param, ERR_R_MALLOC_FAILURE);
       goto err;
     }
   } else {
@@ -481,18 +480,10 @@ err:
   if (!ret) {
     OPENSSL_PUT_ERROR(EVP, do_EC_KEY_print, reason);
   }
-  if (pub_key_bytes) {
-    OPENSSL_free(pub_key_bytes);
-  }
-  if (order) {
-    BN_free(order);
-  }
-  if (ctx) {
-    BN_CTX_free(ctx);
-  }
-  if (buffer != NULL) {
-    OPENSSL_free(buffer);
-  }
+  OPENSSL_free(pub_key_bytes);
+  BN_free(order);
+  BN_CTX_free(ctx);
+  OPENSSL_free(buffer);
   return ret;
 }
 

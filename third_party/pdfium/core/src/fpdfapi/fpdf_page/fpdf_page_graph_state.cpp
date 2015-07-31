@@ -73,7 +73,7 @@ CPDF_ClipPathData::CPDF_ClipPathData(const CPDF_ClipPathData& src)
         m_pTextList = FX_Alloc(CPDF_TextObject*, m_TextCount);
         for (int i = 0; i < m_TextCount; i ++) {
             if (src.m_pTextList[i]) {
-                m_pTextList[i] = FX_NEW CPDF_TextObject;
+                m_pTextList[i] = new CPDF_TextObject;
                 m_pTextList[i]->Copy(src.m_pTextList[i]);
             } else {
                 m_pTextList[i] = NULL;
@@ -192,8 +192,7 @@ void CPDF_ClipPath::AppendTexts(CPDF_TextObject** pTexts, int count)
     CPDF_ClipPathData* pData = GetModify();
     if (pData->m_TextCount + count > FPDF_CLIPPATH_MAX_TEXTS) {
         for (int i = 0; i < count; i ++) {
-            if (pTexts[i])
-                pTexts[i]->Release();
+            delete pTexts[i];
         }
         return;
     }
@@ -428,7 +427,7 @@ void CPDF_GeneralStateData::SetBlendMode(FX_BSTR blend_mode)
     if (blend_mode.GetLength() > 15) {
         return;
     }
-    FXSYS_memcpy32(m_BlendMode, (FX_LPCBYTE)blend_mode, blend_mode.GetLength());
+    FXSYS_memcpy32(m_BlendMode, blend_mode.GetPtr(), blend_mode.GetLength());
     m_BlendMode[blend_mode.GetLength()] = 0;
     m_BlendType = ::GetBlendType(blend_mode);
 }

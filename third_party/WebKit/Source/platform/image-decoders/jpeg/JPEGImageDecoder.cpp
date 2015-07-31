@@ -6,8 +6,6 @@
  * Other contributors:
  *   Stuart Parmenter <stuart@mozilla.com>
  *
- * Copyright (C) 2007-2009 Torch Mobile, Inc.
- *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
  * License as published by the Free Software Foundation; either
@@ -322,6 +320,7 @@ public:
         jpeg_create_decompress(&m_info);
 
         decoder_source_mgr* src = 0;
+        // FIXME: why would m_info.src be anything but null at decompressor creation time?
         if (!m_info.src) {
             src = (decoder_source_mgr*)fastZeroedMalloc(sizeof(decoder_source_mgr));
             if (!src) {
@@ -676,27 +675,17 @@ boolean fill_input_buffer(j_decompress_ptr)
 void term_source(j_decompress_ptr jd)
 {
     decoder_source_mgr *src = (decoder_source_mgr *)jd->src;
-    src->decoder->decoder()->jpegComplete();
+    src->decoder->decoder()->complete();
 }
 
-JPEGImageDecoder::JPEGImageDecoder(ImageSource::AlphaOption alphaOption,
-    ImageSource::GammaAndColorProfileOption gammaAndColorProfileOption,
-    size_t maxDecodedBytes)
-    : ImageDecoder(alphaOption, gammaAndColorProfileOption, maxDecodedBytes)
+JPEGImageDecoder::JPEGImageDecoder(ImageSource::AlphaOption alphaOption, ImageSource::GammaAndColorProfileOption colorOptions, size_t maxDecodedBytes)
+    : ImageDecoder(alphaOption, colorOptions, maxDecodedBytes)
     , m_hasColorProfile(false)
 {
 }
 
 JPEGImageDecoder::~JPEGImageDecoder()
 {
-}
-
-bool JPEGImageDecoder::isSizeAvailable()
-{
-    if (!ImageDecoder::isSizeAvailable())
-         decode(true);
-
-    return ImageDecoder::isSizeAvailable();
 }
 
 bool JPEGImageDecoder::setSize(unsigned width, unsigned height)
@@ -740,11 +729,11 @@ unsigned JPEGImageDecoder::desiredScaleNumerator() const
     return scaleNumerator;
 }
 
-bool JPEGImageDecoder::canDecodeToYUV() const
+bool JPEGImageDecoder::canDecodeToYUV()
 {
-    ASSERT(ImageDecoder::isSizeAvailable() && m_reader);
-
-    return m_reader->info()->out_color_space == JCS_YCbCr;
+    // Calling isSizeAvailable() ensures the reader is created and the output
+    // color space is set.
+    return isSizeAvailable() && m_reader->info()->out_color_space == JCS_YCbCr;
 }
 
 bool JPEGImageDecoder::decodeToYUV()
@@ -755,27 +744,6 @@ bool JPEGImageDecoder::decodeToYUV()
     decode(false);
     PlatformInstrumentation::didDecodeImage();
     return !failed();
-}
-
-ImageFrame* JPEGImageDecoder::frameBufferAtIndex(size_t index)
-{
-    if (index)
-        return 0;
-
-    if (m_frameBufferCache.isEmpty()) {
-        m_frameBufferCache.resize(1);
-        m_frameBufferCache[0].setPremultiplyAlpha(m_premultiplyAlpha);
-    }
-
-    ImageFrame& frame = m_frameBufferCache[0];
-    if (frame.status() != ImageFrame::FrameComplete) {
-        PlatformInstrumentation::willDecodeImage("JPEG");
-        decode(false);
-        PlatformInstrumentation::didDecodeImage();
-    }
-
-    frame.notifyBitmapIfPixelsChanged();
-    return &frame;
 }
 
 bool JPEGImageDecoder::setFailed()
@@ -942,7 +910,7 @@ bool JPEGImageDecoder::outputScanlines()
             return setFailed();
         buffer.setStatus(ImageFrame::FramePartial);
         // The buffer is transparent outside the decoded area while the image is
-        // loading. The completed image will be marked fully opaque in jpegComplete().
+        // loading. The image will be marked fully opaque in complete().
         buffer.setHasAlpha(true);
 
         // For JPEGs, the frame always fills the entire image.
@@ -977,13 +945,11 @@ bool JPEGImageDecoder::outputScanlines()
     return setFailed();
 }
 
-void JPEGImageDecoder::jpegComplete()
+void JPEGImageDecoder::complete()
 {
     if (m_frameBufferCache.isEmpty())
         return;
 
-    // Hand back an appropriately sized buffer, even if the image ended up being
-    // empty.
     ImageFrame& buffer = m_frameBufferCache[0];
     buffer.setHasAlpha(false);
     buffer.setStatus(ImageFrame::FrameComplete);
@@ -994,9 +960,8 @@ void JPEGImageDecoder::decode(bool onlySize)
     if (failed())
         return;
 
-    if (!m_reader) {
+    if (!m_reader)
         m_reader = adoptPtr(new JPEGImageReader(this));
-    }
 
     // If we couldn't decode the image but we've received all the data, decoding
     // has failed.
@@ -1004,6 +969,7 @@ void JPEGImageDecoder::decode(bool onlySize)
         setFailed();
     // If we're done decoding the image, we don't need the JPEGImageReader
     // anymore.  (If we failed, |m_reader| has already been cleared.)
+    // FIXME: factor these cases into an isComplete() routine, refer to the PNG encoder.
     else if ((!m_frameBufferCache.isEmpty() && (m_frameBufferCache[0].status() == ImageFrame::FrameComplete)) || (hasImagePlanes() && !onlySize))
         m_reader.clear();
 }

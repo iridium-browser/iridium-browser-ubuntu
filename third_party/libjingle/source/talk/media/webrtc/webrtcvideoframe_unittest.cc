@@ -30,19 +30,6 @@
 #include "talk/media/base/videoframe_unittest.h"
 #include "talk/media/webrtc/webrtcvideoframe.h"
 
-class NativeHandleImpl : public webrtc::NativeHandle {
- public:
-  NativeHandleImpl() : ref_count_(0) {}
-  virtual ~NativeHandleImpl() {}
-  virtual int32_t AddRef() { return ++ref_count_; }
-  virtual int32_t Release() { return --ref_count_; }
-  virtual void* GetHandle() { return NULL; }
-
-  int32_t ref_count() { return ref_count_; }
- private:
-  int32_t ref_count_;
-};
-
 namespace {
 
 class WebRtcVideoTestFrame : public cricket::WebRtcVideoFrame {
@@ -133,7 +120,6 @@ TEST_WEBRTCVIDEOFRAME(ConstructYuy2Wide)
 TEST_WEBRTCVIDEOFRAME(ConstructYV12)
 TEST_WEBRTCVIDEOFRAME(ConstructUyvy)
 TEST_WEBRTCVIDEOFRAME(ConstructM420)
-TEST_WEBRTCVIDEOFRAME(ConstructQ420)
 TEST_WEBRTCVIDEOFRAME(ConstructNV21)
 TEST_WEBRTCVIDEOFRAME(ConstructNV12)
 TEST_WEBRTCVIDEOFRAME(ConstructABGR)
@@ -230,18 +216,6 @@ TEST_WEBRTCVIDEOFRAME(ConvertToRGB24BufferInverted)
 TEST_WEBRTCVIDEOFRAME(ConvertToRGB565Buffer)
 TEST_WEBRTCVIDEOFRAME(ConvertToRGB565BufferStride)
 TEST_WEBRTCVIDEOFRAME(ConvertToRGB565BufferInverted)
-TEST_WEBRTCVIDEOFRAME(ConvertToBayerBGGRBuffer)
-TEST_WEBRTCVIDEOFRAME(ConvertToBayerBGGRBufferStride)
-TEST_WEBRTCVIDEOFRAME(ConvertToBayerBGGRBufferInverted)
-TEST_WEBRTCVIDEOFRAME(ConvertToBayerGRBGBuffer)
-TEST_WEBRTCVIDEOFRAME(ConvertToBayerGRBGBufferStride)
-TEST_WEBRTCVIDEOFRAME(ConvertToBayerGRBGBufferInverted)
-TEST_WEBRTCVIDEOFRAME(ConvertToBayerGBRGBuffer)
-TEST_WEBRTCVIDEOFRAME(ConvertToBayerGBRGBufferStride)
-TEST_WEBRTCVIDEOFRAME(ConvertToBayerGBRGBufferInverted)
-TEST_WEBRTCVIDEOFRAME(ConvertToBayerRGGBBuffer)
-TEST_WEBRTCVIDEOFRAME(ConvertToBayerRGGBBufferStride)
-TEST_WEBRTCVIDEOFRAME(ConvertToBayerRGGBBufferInverted)
 TEST_WEBRTCVIDEOFRAME(ConvertToI400Buffer)
 TEST_WEBRTCVIDEOFRAME(ConvertToI400BufferStride)
 TEST_WEBRTCVIDEOFRAME(ConvertToI400BufferInverted)
@@ -275,18 +249,6 @@ TEST_WEBRTCVIDEOFRAME(ConvertFromRGB24BufferInverted)
 TEST_WEBRTCVIDEOFRAME(ConvertFromRGB565Buffer)
 TEST_WEBRTCVIDEOFRAME(ConvertFromRGB565BufferStride)
 TEST_WEBRTCVIDEOFRAME(ConvertFromRGB565BufferInverted)
-TEST_WEBRTCVIDEOFRAME(ConvertFromBayerBGGRBuffer)
-TEST_WEBRTCVIDEOFRAME(ConvertFromBayerBGGRBufferStride)
-TEST_WEBRTCVIDEOFRAME(ConvertFromBayerBGGRBufferInverted)
-TEST_WEBRTCVIDEOFRAME(ConvertFromBayerGRBGBuffer)
-TEST_WEBRTCVIDEOFRAME(ConvertFromBayerGRBGBufferStride)
-TEST_WEBRTCVIDEOFRAME(ConvertFromBayerGRBGBufferInverted)
-TEST_WEBRTCVIDEOFRAME(ConvertFromBayerGBRGBuffer)
-TEST_WEBRTCVIDEOFRAME(ConvertFromBayerGBRGBufferStride)
-TEST_WEBRTCVIDEOFRAME(ConvertFromBayerGBRGBufferInverted)
-TEST_WEBRTCVIDEOFRAME(ConvertFromBayerRGGBBuffer)
-TEST_WEBRTCVIDEOFRAME(ConvertFromBayerRGGBBufferStride)
-TEST_WEBRTCVIDEOFRAME(ConvertFromBayerRGGBBufferInverted)
 TEST_WEBRTCVIDEOFRAME(ConvertFromI400Buffer)
 TEST_WEBRTCVIDEOFRAME(ConvertFromI400BufferStride)
 TEST_WEBRTCVIDEOFRAME(ConvertFromI400BufferInverted)
@@ -297,10 +259,6 @@ TEST_WEBRTCVIDEOFRAME(ConvertFromUYVYBuffer)
 TEST_WEBRTCVIDEOFRAME(ConvertFromUYVYBufferStride)
 TEST_WEBRTCVIDEOFRAME(ConvertFromUYVYBufferInverted)
 // TEST_WEBRTCVIDEOFRAME(ConvertToI422Buffer)
-TEST_WEBRTCVIDEOFRAME(ConvertARGBToBayerGRBG)
-TEST_WEBRTCVIDEOFRAME(ConvertARGBToBayerGBRG)
-TEST_WEBRTCVIDEOFRAME(ConvertARGBToBayerBGGR)
-TEST_WEBRTCVIDEOFRAME(ConvertARGBToBayerRGGB)
 TEST_WEBRTCVIDEOFRAME(CopyToBuffer)
 TEST_WEBRTCVIDEOFRAME(CopyToFrame)
 TEST_WEBRTCVIDEOFRAME(Write)
@@ -339,10 +297,12 @@ TEST_F(WebRtcVideoFrameTest, InitRotated90DontApplyRotation) {
 }
 
 TEST_F(WebRtcVideoFrameTest, TextureInitialValues) {
-  NativeHandleImpl handle;
-  cricket::WebRtcVideoFrame frame(&handle, 640, 480, 100, 200,
-                                  webrtc::kVideoRotation_0);
-  EXPECT_EQ(&handle, frame.GetNativeHandle());
+  void* dummy_handle = reinterpret_cast<void*>(0x1);
+  webrtc::TextureBuffer* buffer =
+      new rtc::RefCountedObject<webrtc::TextureBuffer>(dummy_handle, 640, 480,
+                                                       rtc::Callback0<void>());
+  cricket::WebRtcVideoFrame frame(buffer, 100, 200, webrtc::kVideoRotation_0);
+  EXPECT_EQ(dummy_handle, frame.GetNativeHandle());
   EXPECT_EQ(640u, frame.GetWidth());
   EXPECT_EQ(480u, frame.GetHeight());
   EXPECT_EQ(100, frame.GetElapsedTime());
@@ -354,9 +314,11 @@ TEST_F(WebRtcVideoFrameTest, TextureInitialValues) {
 }
 
 TEST_F(WebRtcVideoFrameTest, CopyTextureFrame) {
-  NativeHandleImpl handle;
-  cricket::WebRtcVideoFrame frame1(&handle, 640, 480, 100, 200,
-                                   webrtc::kVideoRotation_0);
+  void* dummy_handle = reinterpret_cast<void*>(0x1);
+  webrtc::TextureBuffer* buffer =
+      new rtc::RefCountedObject<webrtc::TextureBuffer>(dummy_handle, 640, 480,
+                                                       rtc::Callback0<void>());
+  cricket::WebRtcVideoFrame frame1(buffer, 100, 200, webrtc::kVideoRotation_0);
   cricket::VideoFrame* frame2 = frame1.Copy();
   EXPECT_EQ(frame1.GetNativeHandle(), frame2->GetNativeHandle());
   EXPECT_EQ(frame1.GetWidth(), frame2->GetWidth());

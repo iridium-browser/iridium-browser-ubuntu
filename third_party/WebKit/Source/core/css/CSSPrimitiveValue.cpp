@@ -52,64 +52,6 @@ namespace {
 const int maxValueForCssLength = INT_MAX / kFixedPointDenominator - 2;
 const int minValueForCssLength = INT_MIN / kFixedPointDenominator + 2;
 
-static inline bool isValidCSSUnitTypeForDoubleConversion(CSSPrimitiveValue::UnitType unitType)
-{
-    switch (unitType) {
-    case CSSPrimitiveValue::CSS_CALC:
-    case CSSPrimitiveValue::CSS_CALC_PERCENTAGE_WITH_NUMBER:
-    case CSSPrimitiveValue::CSS_CALC_PERCENTAGE_WITH_LENGTH:
-    case CSSPrimitiveValue::CSS_CM:
-    case CSSPrimitiveValue::CSS_DEG:
-    case CSSPrimitiveValue::CSS_DPPX:
-    case CSSPrimitiveValue::CSS_DPI:
-    case CSSPrimitiveValue::CSS_DPCM:
-    case CSSPrimitiveValue::CSS_EMS:
-    case CSSPrimitiveValue::CSS_EXS:
-    case CSSPrimitiveValue::CSS_GRAD:
-    case CSSPrimitiveValue::CSS_HZ:
-    case CSSPrimitiveValue::CSS_IN:
-    case CSSPrimitiveValue::CSS_KHZ:
-    case CSSPrimitiveValue::CSS_MM:
-    case CSSPrimitiveValue::CSS_MS:
-    case CSSPrimitiveValue::CSS_NUMBER:
-    case CSSPrimitiveValue::CSS_PERCENTAGE:
-    case CSSPrimitiveValue::CSS_PC:
-    case CSSPrimitiveValue::CSS_PT:
-    case CSSPrimitiveValue::CSS_PX:
-    case CSSPrimitiveValue::CSS_RAD:
-    case CSSPrimitiveValue::CSS_REMS:
-    case CSSPrimitiveValue::CSS_CHS:
-    case CSSPrimitiveValue::CSS_S:
-    case CSSPrimitiveValue::CSS_TURN:
-    case CSSPrimitiveValue::CSS_VW:
-    case CSSPrimitiveValue::CSS_VH:
-    case CSSPrimitiveValue::CSS_VMIN:
-    case CSSPrimitiveValue::CSS_VMAX:
-    case CSSPrimitiveValue::CSS_FR:
-        return true;
-    case CSSPrimitiveValue::CSS_ATTR:
-    case CSSPrimitiveValue::CSS_COUNTER:
-    case CSSPrimitiveValue::CSS_COUNTER_NAME:
-    case CSSPrimitiveValue::CSS_IDENT:
-    case CSSPrimitiveValue::CSS_PROPERTY_ID:
-    case CSSPrimitiveValue::CSS_VALUE_ID:
-    case CSSPrimitiveValue::CSS_PAIR:
-    case CSSPrimitiveValue::CSS_RECT:
-    case CSSPrimitiveValue::CSS_QUAD:
-    case CSSPrimitiveValue::CSS_RGBCOLOR:
-    case CSSPrimitiveValue::CSS_SHAPE:
-    case CSSPrimitiveValue::CSS_CUSTOM_IDENT:
-    case CSSPrimitiveValue::CSS_STRING:
-    case CSSPrimitiveValue::CSS_UNICODE_RANGE:
-    case CSSPrimitiveValue::CSS_UNKNOWN:
-    case CSSPrimitiveValue::CSS_URI:
-        return false;
-    }
-
-    ASSERT_NOT_REACHED();
-    return false;
-}
-
 typedef HashMap<String, CSSPrimitiveValue::UnitType> StringToUnitTable;
 
 StringToUnitTable createStringToUnitTable()
@@ -171,8 +113,6 @@ CSSPrimitiveValue::UnitType CSSPrimitiveValue::fromName(const String& unit)
 
 CSSPrimitiveValue::UnitCategory CSSPrimitiveValue::unitCategory(UnitType type)
 {
-    // Here we violate the spec (http://www.w3.org/TR/DOM-Level-2-Style/css.html#CSS-CSSPrimitiveValue) and allow conversions
-    // between CSS_PX and relative lengths (see cssPixelsPerInch comment in core/css/CSSHelper.h for the topic treatment).
     switch (type) {
     case CSS_NUMBER:
         return CSSPrimitiveValue::UNumber;
@@ -259,12 +199,6 @@ CSSPrimitiveValue::UnitType CSSPrimitiveValue::primitiveType() const
 
 static const AtomicString& propertyName(CSSPropertyID propertyID)
 {
-    ASSERT_ARG(propertyID, propertyID >= 0);
-    ASSERT_ARG(propertyID, (propertyID >= firstCSSProperty && propertyID < firstCSSProperty + numCSSProperties));
-
-    if (propertyID < 0)
-        return nullAtom;
-
     return getPropertyNameAtomicString(propertyID);
 }
 
@@ -320,10 +254,9 @@ CSSPrimitiveValue::CSSPrimitiveValue(const LengthSize& lengthSize, const Compute
     init(lengthSize, style);
 }
 
-CSSPrimitiveValue::CSSPrimitiveValue(RGBA32 color, UnitType type)
+CSSPrimitiveValue::CSSPrimitiveValue(RGBA32 color)
     : CSSValue(PrimitiveClass)
 {
-    ASSERT(type == CSS_RGBCOLOR);
     m_primitiveUnitType = CSS_RGBCOLOR;
     m_value.rgbcolor = color;
 }
@@ -773,26 +706,6 @@ Length CSSPrimitiveValue::convertToLength(const CSSToLengthConversionData& conve
     return Length(cssCalcValue()->toCalcValue(conversionData));
 }
 
-// TODO(timloh): This function doesn't make much sense since we need a
-// CSSToLengthConversionData to convert an arbitrary <length>s to pixels.
-// We should see if this can be removed.
-double CSSPrimitiveValue::deprecatedGetDoubleValue() const
-{
-    // Returns the double value in pixels
-    if (!isValidCSSUnitTypeForDoubleConversion(static_cast<UnitType>(m_primitiveUnitType)))
-        return 0;
-
-    UnitType type = primitiveType();
-    if (type == CSS_NUMBER)
-        type = CSS_PX;
-    UnitCategory category = unitCategory(type);
-    ASSERT(category != UOther);
-
-    if (category != ULength)
-        return 0;
-    return getDoubleValue() * conversionToCanonicalUnitsScaleFactor(type);
-}
-
 double CSSPrimitiveValue::getDoubleValue() const
 {
     return m_primitiveUnitType != CSS_CALC ? m_value.num : m_value.calc->doubleValue();
@@ -800,7 +713,7 @@ double CSSPrimitiveValue::getDoubleValue() const
 
 CSSPrimitiveValue::UnitType CSSPrimitiveValue::canonicalUnitTypeForCategory(UnitCategory category)
 {
-    // The canonical unit type is chosen according to the way BisonCSSParser::validUnit() chooses the default unit
+    // The canonical unit type is chosen according to the way CSSPropertyParser::validUnit() chooses the default unit
     // in each category (based on unitflags).
     switch (category) {
     case UNumber:
@@ -1062,9 +975,10 @@ String CSSPrimitiveValue::customCSSText() const
         case CSS_CUSTOM_IDENT:
             text = quoteCSSStringIfNeeded(m_value.string);
             break;
-        case CSS_STRING:
-            text = quoteCSSString(m_value.string);
+        case CSS_STRING: {
+            text = serializeString(m_value.string);
             break;
+        }
         case CSS_URI:
             text = "url(" + quoteCSSURLIfNeeded(m_value.string) + ")";
             break;
@@ -1098,7 +1012,7 @@ String CSSPrimitiveValue::customCSSText() const
             result.append(m_value.counter->identifier());
             if (!separator.isEmpty()) {
                 result.appendLiteral(", ");
-                result.append(quoteCSSStringIfNeeded(separator));
+                result.append(serializeString(separator));
             }
             String listStyle = m_value.counter->listStyle();
             if (!listStyle.isEmpty()) {
@@ -1174,9 +1088,9 @@ bool CSSPrimitiveValue::equals(const CSSPrimitiveValue& other) const
     case CSS_FR:
         return m_value.num == other.m_value.num;
     case CSS_PROPERTY_ID:
-        return propertyName(m_value.propertyID) == propertyName(other.m_value.propertyID);
+        return m_value.propertyID == other.m_value.propertyID;
     case CSS_VALUE_ID:
-        return valueName(m_value.valueID) == valueName(other.m_value.valueID);
+        return m_value.valueID == other.m_value.valueID;
     case CSS_CUSTOM_IDENT:
     case CSS_STRING:
     case CSS_URI:

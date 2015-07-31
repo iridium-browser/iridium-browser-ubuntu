@@ -50,6 +50,8 @@ public:
     virtual void onDrawBitmap(const SkBitmap&, SkScalar left, SkScalar top, const SkPaint*) override;
     virtual void onDrawBitmapRect(const SkBitmap&, const SkRect* src, const SkRect& dst, const SkPaint*, DrawBitmapRectFlags) override;
     virtual void onDrawBitmapNine(const SkBitmap&, const SkIRect& center, const SkRect& dst, const SkPaint*) override;
+    virtual void onDrawImage(const SkImage*, SkScalar, SkScalar, const SkPaint*) override;
+    virtual void onDrawImageRect(const SkImage*, const SkRect* src, const SkRect& dst, const SkPaint*) override;
     virtual void onDrawSprite(const SkBitmap&, int left, int top, const SkPaint*) override;
     virtual void onDrawVertices(VertexMode vmode, int vertexCount, const SkPoint vertices[], const SkPoint texs[],
         const SkColor colors[], SkXfermode* xmode, const uint16_t indices[], int indexCount, const SkPaint&) override;
@@ -78,58 +80,12 @@ private:
     friend class AutoLogger;
 
     RefPtr<JSONArray> m_log;
-
-    struct VerbParams {
-        String name;
-        unsigned pointCount;
-        unsigned pointOffset;
-
-        VerbParams(const String& name, unsigned pointCount, unsigned pointOffset)
-            : name(name)
-            , pointCount(pointCount)
-            , pointOffset(pointOffset) { }
-    };
-
-    PassRefPtr<JSONObject> addItem(const String& name);
-    PassRefPtr<JSONObject> addItemWithParams(const String& name);
-    PassRefPtr<JSONObject> objectForSkRect(const SkRect&);
-    PassRefPtr<JSONObject> objectForSkIRect(const SkIRect&);
-    String pointModeName(PointMode);
-    PassRefPtr<JSONObject> objectForSkPoint(const SkPoint&);
-    PassRefPtr<JSONArray> arrayForSkPoints(size_t count, const SkPoint points[]);
-    PassRefPtr<JSONObject> objectForSkPicture(const SkPicture&);
-    PassRefPtr<JSONObject> objectForRadius(const SkRRect& rrect, SkRRect::Corner);
-    String rrectTypeName(SkRRect::Type);
-    String radiusName(SkRRect::Corner);
-    PassRefPtr<JSONObject> objectForSkRRect(const SkRRect&);
-    String fillTypeName(SkPath::FillType);
-    String convexityName(SkPath::Convexity);
-    String verbName(SkPath::Verb);
-    VerbParams segmentParams(SkPath::Verb);
-    PassRefPtr<JSONObject> objectForSkPath(const SkPath&);
-    String colorTypeName(SkColorType);
-    PassRefPtr<JSONObject> objectForBitmapData(const SkBitmap&);
-    PassRefPtr<JSONObject> objectForSkBitmap(const SkBitmap&);
-    PassRefPtr<JSONObject> objectForSkShader(const SkShader&);
-    String stringForSkColor(const SkColor&);
-    void appendFlagToString(String* flagsString, bool isSet, const String& name);
-    String stringForSkPaintFlags(const SkPaint&);
-    String filterQualityName(SkFilterQuality);
-    String textAlignName(SkPaint::Align);
-    String strokeCapName(SkPaint::Cap);
-    String strokeJoinName(SkPaint::Join);
-    String styleName(SkPaint::Style);
-    String textEncodingName(SkPaint::TextEncoding);
-    String hintingName(SkPaint::Hinting);
-    PassRefPtr<JSONObject> objectForSkPaint(const SkPaint&);
-    PassRefPtr<JSONArray> arrayForSkMatrix(const SkMatrix&);
-    PassRefPtr<JSONArray> arrayForSkScalars(size_t n, const SkScalar scalars[]);
-    String regionOpName(SkRegion::Op);
-    String saveFlagsToString(SkCanvas::SaveFlags);
-    String textEncodingCanonicalName(SkPaint::TextEncoding);
-    String stringForUTFText(const void* text, size_t length, SkPaint::TextEncoding);
-    String stringForText(const void* text, size_t byteLength, const SkPaint&);
 };
+
+#ifndef NDEBUG
+String pictureAsDebugString(const SkPicture*);
+void showSkPicture(const SkPicture*);
+#endif
 
 } // namespace blink
 

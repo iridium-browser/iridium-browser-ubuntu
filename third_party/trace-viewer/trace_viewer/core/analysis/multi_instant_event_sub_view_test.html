@@ -24,9 +24,7 @@ tv.b.unittest.testSuite(function() {
     var t53 = p52.getOrCreateThread(53);
 
     var ie1 = new trace_model.ProcessInstantEvent('cat', 'title', 7, 10, {});
-    ie1.duration = 20;
     var ie2 = new trace_model.ProcessInstantEvent('cat', 'title', 7, 20, {});
-    ie2.duration = 30;
     p52.instantEvents.push(ie1);
     p52.instantEvents.push(ie2);
 
@@ -34,14 +32,12 @@ tv.b.unittest.testSuite(function() {
     var selection = new Selection();
     selection.push(ie1);
     selection.push(ie2);
-    assertEquals(2, selection.length);
+    assert.equal(selection.length, 2);
 
     var subView = document.createElement('tv-c-multi-instant-event-sub-view');
     subView.selection = selection;
 
     this.addHTMLOutput(subView);
-
-    assertEquals(1, subView.children.length);
   });
 });
 </script>

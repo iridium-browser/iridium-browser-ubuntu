@@ -95,6 +95,7 @@
                         'devtools_static_files_list': '<|(devtools_static_grd_files.tmp <@(_static_files))',
                         'generated_files': [
                             # Core and remote modules should not be listed here.
+                            # TODO(dgozman): remove remote modules from here once experiment is over.
                             '<(PRODUCT_DIR)/resources/inspector/devtools.css',
                             '<(PRODUCT_DIR)/resources/inspector/devtools.html',
                             '<(PRODUCT_DIR)/resources/inspector/devtools.js',
@@ -106,6 +107,7 @@
                             '<(PRODUCT_DIR)/resources/inspector/toolbox.js',
                             '<(PRODUCT_DIR)/resources/inspector/accessibility_module.js',
                             '<(PRODUCT_DIR)/resources/inspector/audits_module.js',
+                            '<(PRODUCT_DIR)/resources/inspector/cm_modes_module.js',
                             '<(PRODUCT_DIR)/resources/inspector/components_lazy_module.js',
                             '<(PRODUCT_DIR)/resources/inspector/console_module.js',
                             '<(PRODUCT_DIR)/resources/inspector/elements_module.js',
@@ -269,6 +271,7 @@
                             '<(_output_path)/toolbox.js',
                             '<(_output_path)/accessibility_module.js',
                             '<(_output_path)/audits_module.js',
+                            '<(_output_path)/cm_modes_module.js',
                             '<(_output_path)/components_lazy_module.js',
                             '<(_output_path)/console_module.js',
                             '<(_output_path)/elements_module.js',
@@ -312,9 +315,9 @@
                             ],
                         },
                         {
-                            'destination': '<(_output_path)/UglifyJS',
+                            'destination': '<(_output_path)/acorn',
                             'files': [
-                                '<@(devtools_uglify_files)',
+                                '<@(devtools_acorn_files)',
                             ],
                         },
                         {

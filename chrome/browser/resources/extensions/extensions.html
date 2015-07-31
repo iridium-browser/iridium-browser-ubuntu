@@ -100,18 +100,6 @@
       <button id="update-extensions-now"
           i18n-content="extensionSettingsUpdateButton"></button>
     </div>
-    <!-- NOTE: the code that shows/hides #dev-controls assumes the ADT promo is
-         directly underneath .button-container. -->
-    <div id="apps-developer-tools-promo">
-      <img alt=""></img>
-      <span id="apps-developer-tools-promo-text"
-          i18n-values=".innerHTML:extensionSettingsAppsDevToolsPromoHTML">
-      </span>
-      <div id="apps-developer-tools-promo-close-wrapper">
-        <button i18n-values="title:extensionSettingsAppDevToolsPromoClose"
-            class="custom-appearance close-button"></button>
-      </div>
-    </div>
   </div>
   <include src="extension_load_error.html">
   <div id="extension-list-wrapper" hidden>
@@ -158,6 +146,10 @@
               i18n-content="extensionSettingsLaunch" hidden></a>
           <a is="action-link" role="button" class="reload-link"
               i18n-content="extensionSettingsReloadUnpacked" hidden></a>
+          <a is="action-link" role="button" class="errors-link">
+            <img class="extension-error-icon"></img>
+            <span i18n-content="extensionErrorHeading"></span>
+          </a>
         </div>
         <div class="permanent-warnings">
           <div class="extension-warnings" hidden>
@@ -196,8 +188,6 @@
             <span i18n-content="extensionSettingsInspectViews"></span>
             <a is="action-link"></a>
           </div>
-          <div class="manifest-errors" hidden></div>
-          <div class="runtime-errors" hidden></div>
           <div class="install-warnings" hidden>
             <span i18n-content="extensionSettingsInstallWarnings"></span>
             <ul></ul>
@@ -273,7 +263,7 @@
 </div>
 
 <script src="chrome://extensions-frame/strings.js"></script>
-<script src="chrome://resources/js/i18n_template2.js"></script>
+<script src="chrome://resources/js/i18n_template.js"></script>
 
 </body>
 </html>

@@ -6,85 +6,113 @@
 
 #include "base/format_macros.h"
 #include "base/strings/stringprintf.h"
-#include "base/trace_event/memory_allocator_attributes.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/memory_dump_provider.h"
+#include "base/trace_event/process_memory_dump.h"
 #include "base/trace_event/trace_event_argument.h"
 #include "base/values.h"
 
 namespace base {
 namespace trace_event {
 
-MemoryAllocatorDump::MemoryAllocatorDump(const std::string& name,
-                                         MemoryAllocatorDump* parent)
-    : name_(name),
-      parent_(parent),
-      physical_size_in_bytes_(0),
-      allocated_objects_count_(0),
-      allocated_objects_size_in_bytes_(0) {
-  // Dots are not allowed in the name as the underlying base::DictionaryValue
+namespace {
+// Returns the c-string pointer from a dictionary value without performing extra
+// std::string copies. The ptr will be valid as long as the value exists.
+bool GetDictionaryValueAsCStr(const DictionaryValue* dict_value,
+                              const std::string& key,
+                              const char** out_cstr) {
+  const Value* value = nullptr;
+  const StringValue* str_value = nullptr;
+  if (!dict_value->GetWithoutPathExpansion(key, &value))
+    return false;
+  if (!value->GetAsString(&str_value))
+    return false;
+  *out_cstr = str_value->GetString().c_str();
+  return true;
+}
+}  // namespace
+
+const char MemoryAllocatorDump::kNameOuterSize[] = "outer_size";
+const char MemoryAllocatorDump::kNameInnerSize[] = "inner_size";
+const char MemoryAllocatorDump::kNameObjectsCount[] = "objects_count";
+const char MemoryAllocatorDump::kTypeScalar[] = "scalar";
+const char MemoryAllocatorDump::kTypeString[] = "string";
+const char MemoryAllocatorDump::kUnitsBytes[] = "bytes";
+const char MemoryAllocatorDump::kUnitsObjects[] = "objects";
+
+MemoryAllocatorDump::MemoryAllocatorDump(const std::string& absolute_name,
+                                         ProcessMemoryDump* process_memory_dump)
+    : absolute_name_(absolute_name), process_memory_dump_(process_memory_dump) {
+  // The |absolute_name| cannot be empty.
+  DCHECK(!absolute_name.empty());
+
+  // The |absolute_name| can contain slash separator, but not leading or
+  // trailing ones.
+  DCHECK(absolute_name[0] != '/' && *absolute_name.rbegin() != '/');
+
+  // Dots are not allowed anywhere as the underlying base::DictionaryValue
   // would treat them magically and split in sub-nodes, which is not intended.
-  DCHECK_EQ(std::string::npos, name.find_first_of('.'));
+  DCHECK_EQ(std::string::npos, absolute_name.find_first_of('.'));
 }
 
 MemoryAllocatorDump::~MemoryAllocatorDump() {
 }
 
-void MemoryAllocatorDump::SetExtraAttribute(const std::string& name,
-                                            int value) {
-  extra_attributes_.SetInteger(name, value);
+void MemoryAllocatorDump::Add(const std::string& name,
+                              const char* type,
+                              const char* units,
+                              scoped_ptr<Value> value) {
+  scoped_ptr<DictionaryValue> attribute(new DictionaryValue());
+  DCHECK(!attributes_.HasKey(name));
+  attribute->SetStringWithoutPathExpansion("type", type);
+  attribute->SetStringWithoutPathExpansion("units", units);
+  attribute->SetWithoutPathExpansion("value", value.Pass());
+  attributes_.SetWithoutPathExpansion(name, attribute.Pass());
 }
 
-int MemoryAllocatorDump::GetExtraIntegerAttribute(
-    const std::string& name) const {
-  bool res;
-  int value = -1;
-  res = extra_attributes_.GetInteger(name, &value);
-  DCHECK(res) << "Allocator attribute '" << name << "' not found";
-  return value;
+bool MemoryAllocatorDump::Get(const std::string& name,
+                              const char** out_type,
+                              const char** out_units,
+                              const Value** out_value) const {
+  const DictionaryValue* attribute = nullptr;
+  if (!attributes_.GetDictionaryWithoutPathExpansion(name, &attribute))
+    return false;
+
+  if (!GetDictionaryValueAsCStr(attribute, "type", out_type))
+    return false;
+
+  if (!GetDictionaryValueAsCStr(attribute, "units", out_units))
+    return false;
+
+  if (!attribute->GetWithoutPathExpansion("value", out_value))
+    return false;
+
+  return true;
+}
+
+void MemoryAllocatorDump::AddScalar(const std::string& name,
+                                    const char* units,
+                                    uint64 value) {
+  scoped_ptr<Value> hex_value(new StringValue(StringPrintf("%" PRIx64, value)));
+  Add(name, kTypeScalar, units, hex_value.Pass());
+}
+
+void MemoryAllocatorDump::AddString(const std::string& name,
+                                    const char* units,
+                                    const std::string& value) {
+  scoped_ptr<Value> str_value(new StringValue(value));
+  Add(name, kTypeString, units, str_value.Pass());
 }
 
 void MemoryAllocatorDump::AsValueInto(TracedValue* value) const {
-  static const char kHexFmt[] = "%" PRIx64;
+  value->BeginDictionary(absolute_name_.c_str());
+  value->BeginDictionary("attrs");
 
-  value->BeginDictionary(name_.c_str());
+  for (DictionaryValue::Iterator it(attributes_); !it.IsAtEnd(); it.Advance())
+    value->SetValue(it.key().c_str(), it.value().CreateDeepCopy());
 
-  value->SetString("parent", parent_ ? parent_->name_ : "");
-  value->SetString("physical_size_in_bytes",
-                   StringPrintf(kHexFmt, physical_size_in_bytes_));
-  value->SetString("allocated_objects_count",
-                   StringPrintf(kHexFmt, allocated_objects_count_));
-  value->SetString("allocated_objects_size_in_bytes",
-                   StringPrintf(kHexFmt, allocated_objects_size_in_bytes_));
-
-  // Copy all the extra attributes.
-  const MemoryDumpProvider* mdp =
-      MemoryDumpManager::GetInstance()->dump_provider_currently_active();
-  const MemoryAllocatorDeclaredAttributes& extra_attributes_types =
-      mdp->allocator_attributes();
-
-  value->BeginDictionary("args");
-  for (DictionaryValue::Iterator it(extra_attributes_); !it.IsAtEnd();
-       it.Advance()) {
-    const std::string& attr_name = it.key();
-    const Value& attr_value = it.value();
-    value->BeginDictionary(attr_name.c_str());
-    value->SetValue("value", attr_value.DeepCopy());
-
-    auto attr_it = extra_attributes_types.find(attr_name);
-    DCHECK(attr_it != extra_attributes_types.end())
-        << "Allocator attribute " << attr_name
-        << " not declared for the dumper " << mdp->GetFriendlyName();
-
-    // TODO(primiano): the "type" should be dumped just once, not repeated on
-    // on every event. The ability of doing so depends on crbug.com/466121.
-    value->SetString("type", attr_it->second.type);
-
-    value->EndDictionary();  // "arg_name": { "type": "...", "value": "..." }
-  }
-  value->EndDictionary();  // "args": {}
-
-  value->EndDictionary();  // "allocator name": {}
+  value->EndDictionary();  // "attrs": { ... }
+  value->EndDictionary();  // "allocator_name/heap_subheap": { ... }
 }
 
 }  // namespace trace_event

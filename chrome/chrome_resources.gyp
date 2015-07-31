@@ -322,15 +322,8 @@
           ['OS=="linux"', {
             'conditions': [
               ['chromeos==1', {
-                'conditions': [
-                  ['branding=="Chrome"', {
-                    'platform_locale_settings_grd':
-                        'app/resources/locale_settings_google_chromeos.grd',
-                  }, {  # branding!=Chrome
-                    'platform_locale_settings_grd':
-                        'app/resources/locale_settings_chromiumos.grd',
-                  }],
-                ]
+                'platform_locale_settings_grd':
+                    'app/resources/locale_settings_<(branding_path_component)os.grd',
               }, {  # chromeos==0
                 'platform_locale_settings_grd':
                     'app/resources/locale_settings_linux.grd',
@@ -453,13 +446,12 @@
             '<(DEPTH)/third_party/WebKit/public/blink_resources.gyp:blink_resources',
           ],
         }, {  # else
+          'dependencies': [
+            '<(DEPTH)/ios/chrome/ios_chrome_resources.gyp:ios_strings_resources_gen',
+          ],
           'actions': [
             {
-              'conditions': [
-                ['OS == "ios"', {
-                  'includes': ['chrome_repack_chrome_300_percent.gypi']
-                }],
-              ],
+              'includes': ['chrome_repack_chrome_300_percent.gypi']
             },
           ],
         }],

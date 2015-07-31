@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<!--
+Copyright (c) 2013 The Chromium Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+
+<link rel="import" href="/core/analysis/analysis_sub_view.html">
+<link rel="import" href="/core/analysis/time_span.html">
+<link rel="import" href="/core/analysis/time_stamp.html">
+<link rel="import" href="/core/analysis/stack_frame.html">
+<link rel="import" href="/core/analysis/generic_object_view.html">
+<link rel="import" href="/core/analysis/table_builder.html">
+<link rel="import" href="/core/analysis/util.html">
+<link rel="import" href="/base/base.html">
+<link rel="import" href="/base/ui.html">
+
+<polymer-element name="tv-c-a-single-event-sub-view"
+    extends="tracing-analysis-sub-view">
+  <template>
+    <style>
+    :host {
+      display: flex;
+      flex-direction: column;
+    }
+    #table {
+      flex: 1 1 auto;
+      align-self: stretch;
+    }
+    </style>
+    <tracing-analysis-nested-table id="table">
+    </tracing-analysis-nested-table>
+  </template>
+  <script>
+  'use strict';
+
+  Polymer({
+    ready: function() {
+      this.currentSelection_ = undefined;
+      this.$.table.tableColumns = [
+        {
+          title: 'Label',
+          value: function(row) { return row.name; },
+          width: '150px'
+        },
+        {
+          title: 'Value',
+          width: '100%',
+          value: function(row) { return row.value; }
+        }
+      ];
+      this.$.table.showHeader = false;
+    },
+
+    get selection() {
+      return this.currentSelection_;
+    },
+
+    set selection(selection) {
+      if (selection.length !== 1)
+        throw new Error('Only supports single slices');
+      this.setSelectionWithoutErrorChecks(selection);
+    },
+
+    setSelectionWithoutErrorChecks: function(selection) {
+      this.currentSelection_ = selection;
+      this.updateContents_();
+    },
+
+    getEventRows_: function(event) {
+      var rows = [];
+
+      if (event.error)
+        rows.push({ name: 'Error', value: event.error });
+
+      if (event.title)
+        rows.push({ name: 'Title', value: event.title });
+
+      if (event.category)
+        rows.push({ name: 'Category', value: event.category });
+
+      var startEl = document.createElement('tv-c-a-time-stamp');
+      startEl.timestamp = event.start;
+      rows.push({ name: 'Start', value: startEl });
+
+      if (event.duration) {
+        var wallDurationEl = document.createElement('tv-c-a-time-span');
+        wallDurationEl.duration = event.duration;
+        rows.push({ name: 'Wall Duration', value: wallDurationEl });
+      }
+
+      if (event.cpuDuration) {
+        var cpuDurationEl = document.createElement('tv-c-a-time-span');
+        cpuDurationEl.duration = event.cpuDuration;
+        rows.push({ name: 'CPU Duration', value: cpuDurationEl });
+      }
+
+      if (event.subSlices !== undefined && event.subSlices.length !== 0) {
+        if (event.selfTime) {
+          var selfTimeEl = document.createElement('tv-c-a-time-span');
+          selfTimeEl.duration = event.selfTime;
+          rows.push({ name: 'Self Time', value: selfTimeEl });
+        }
+
+        if (event.cpuSelfTime) {
+          var cpuSelfTimeEl = document.createElement('tv-c-a-time-span');
+          cpuSelfTimeEl.duration = event.cpuSelfTime;
+          if (event.cpuSelfTime > event.selfTime) {
+            cpuSelfTimeEl.warning =
+                ' Note that CPU Self Time is larger than Self Time. ' +
+                'This is a known limitation of this system, which occurs ' +
+                'due to several subslices, rounding issues, and imprecise ' +
+                'time at which we get cpu- and real-time.';
+          }
+          rows.push({name: 'CPU Self Time',
+                     value: cpuSelfTimeEl});
+        }
+      }
+
+      if (event.durationInUserTime) {
+        var durationInUserTimeEl = document.createElement('tv-c-a-time-span');
+        durationInUserTimeEl.duration = event.durationInUserTime;
+        rows.push({ name: 'Duration (U)', value: durationInUserTimeEl });
+      }
+
+      function createStackFrameEl(sf) {
+        var sfEl = document.createElement('tv-c-a-stack-frame');
+        sfEl.stackFrame = sf;
+        return sfEl;
+      }
+      if (event.startStackFrame && event.endStackFrame) {
+        if (event.startStackFrame === event.endStackFrame) {
+          rows.push({name: 'Start+End Stack Trace',
+              value: createStackFrameEl(event.startStackFrame)});
+
+        } else {
+          rows.push({ name: 'Start Stack Trace',
+              value: createStackFrameEl(event.startStackFrame)});
+          rows.push({ name: 'End Stack Trace',
+              value: createStackFrameEl(event.endStackFrame)});
+        }
+      } else if (event.startStackFrame) {
+        rows.push({ name: 'Start Stack Trace',
+            value: createStackFrameEl(event.startStackFrame)});
+
+      } else if (event.endStackFrame) {
+        rows.push({ name: 'End Stack Trace',
+            value: createStackFrameEl(event.endStackFrame)});
+      }
+
+      if (event.info) {
+        var descriptionEl = tv.b.ui.createDiv({
+            textContent: event.info.description,
+            maxWidth: '300px'
+        });
+        rows.push({
+          name: 'Description',
+          value: descriptionEl
+        });
+
+        if (event.info.docUrl) {
+          var linkEl = document.createElement('a');
+          linkEl.href = event.info.docUrl;
+          linkEl.textContent = event.info.docUrl;
+          linkEl.target = '_blank';
+          rows.push({
+          name: 'Additional reading',
+          value: linkEl
+          });
+        }
+      }
+
+      if (event.associatedAlerts.length) {
+        var alertSubRows = [];
+        event.associatedAlerts.forEach(function(alert) {
+          var linkEl = document.createElement('tv-c-analysis-link');
+          linkEl.setSelectionAndContent(function() {
+            return new tv.c.Selection(alert);
+          }, alert.info.description);
+          alertSubRows.push({
+            name: alert.title,
+            value: linkEl
+          });
+        });
+
+        rows.push({
+          name: 'Alerts', value: '',
+          isExpanded: true, subRows: alertSubRows
+        });
+      }
+
+      var n = 0;
+      for (var argName in event.args) {
+        n += 1;
+      }
+      if (n > 0) {
+        var subRows = [];
+        for (var argName in event.args) {
+          var argView =
+              document.createElement('tv-c-analysis-generic-object-view');
+          argView.object = event.args[argName];
+          subRows.push({ name: argName,
+                      value: argView});
+        }
+        rows.push({
+          name: 'Args', value: '',
+          isExpanded: true, subRows: subRows
+        });
+      }
+      return rows;
+    },
+
+    updateContents_: function() {
+      if (this.currentSelection_ === undefined) {
+        this.$.table.rows = [];
+        this.$.table.rebuild();
+        return;
+      }
+
+      var event = this.currentSelection_[0];
+      this.$.table.tableRows = this.getEventRows_(event);
+      this.$.table.rebuild();
+    }
+  });
+  </script>
+</polymer>

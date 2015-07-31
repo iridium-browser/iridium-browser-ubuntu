@@ -66,6 +66,7 @@
 #include <openssl/err.h>
 #include <openssl/rand.h>
 #include <openssl/sha.h>
+#include <openssl/thread.h>
 
 #include "internal.h"
 
@@ -122,8 +123,9 @@ static int sign_setup(const DSA *dsa, BN_CTX *ctx_in, BIGNUM **kinvp,
 
   BN_set_flags(&k, BN_FLG_CONSTTIME);
 
-  if (!BN_MONT_CTX_set_locked((BN_MONT_CTX **)&dsa->method_mont_p,
-                              CRYPTO_LOCK_DSA, dsa->p, ctx)) {
+  if (BN_MONT_CTX_set_locked((BN_MONT_CTX **)&dsa->method_mont_p,
+                             (CRYPTO_MUTEX *)&dsa->method_mont_p_lock, dsa->p,
+                             ctx) == NULL) {
     goto err;
   }
 
@@ -160,14 +162,10 @@ static int sign_setup(const DSA *dsa, BN_CTX *ctx_in, BIGNUM **kinvp,
     goto err;
   }
 
-  if (*kinvp != NULL) {
-    BN_clear_free(*kinvp);
-  }
+  BN_clear_free(*kinvp);
   *kinvp = kinv;
   kinv = NULL;
-  if (*rp != NULL) {
-    BN_clear_free(*rp);
-  }
+  BN_clear_free(*rp);
   *rp = r;
   ret = 1;
 
@@ -275,15 +273,10 @@ err:
     BN_free(r);
     BN_free(s);
   }
-  if (ctx != NULL) {
-    BN_CTX_free(ctx);
-  }
+  BN_CTX_free(ctx);
   BN_clear_free(&m);
   BN_clear_free(&xr);
-  if (kinv != NULL) {
-    /* dsa->kinv is NULL now if we used it */
-    BN_clear_free(kinv);
-  }
+  BN_clear_free(kinv);
 
   return ret;
 }
@@ -364,12 +357,14 @@ static int verify(int *out_valid, const uint8_t *dgst, size_t digest_len,
   }
 
   mont = BN_MONT_CTX_set_locked((BN_MONT_CTX **)&dsa->method_mont_p,
-                                CRYPTO_LOCK_DSA, dsa->p, ctx);
+                                (CRYPTO_MUTEX *)&dsa->method_mont_p_lock,
+                                dsa->p, ctx);
   if (!mont) {
     goto err;
   }
 
-  if (!BN_mod_exp2_mont(&t1, dsa->g, &u1, dsa->pub_key, &u2, dsa->p, ctx, mont)) {
+  if (!BN_mod_exp2_mont(&t1, dsa->g, &u1, dsa->pub_key, &u2, dsa->p, ctx,
+                        mont)) {
     goto err;
   }
 
@@ -388,9 +383,7 @@ err:
   if (ret != 1) {
     OPENSSL_PUT_ERROR(DSA, verify, ERR_R_BN_LIB);
   }
-  if (ctx != NULL) {
-    BN_CTX_free(ctx);
-  }
+  BN_CTX_free(ctx);
   BN_free(&u1);
   BN_free(&u2);
   BN_free(&t1);
@@ -443,15 +436,13 @@ static int keygen(DSA *dsa) {
   ok = 1;
 
 err:
-  if (pub_key != NULL && dsa->pub_key == NULL) {
+  if (dsa->pub_key == NULL) {
     BN_free(pub_key);
   }
-  if (priv_key != NULL && dsa->priv_key == NULL) {
+  if (dsa->priv_key == NULL) {
     BN_free(priv_key);
   }
-  if (ctx != NULL) {
-    BN_CTX_free(ctx);
-  }
+  BN_CTX_free(ctx);
 
   return ok;
 }
@@ -702,15 +693,9 @@ end:
 
 err:
   if (ok) {
-    if (ret->p) {
-      BN_free(ret->p);
-    }
-    if (ret->q) {
-      BN_free(ret->q);
-    }
-    if (ret->g) {
-      BN_free(ret->g);
-    }
+    BN_free(ret->p);
+    BN_free(ret->q);
+    BN_free(ret->g);
     ret->p = BN_dup(p);
     ret->q = BN_dup(q);
     ret->g = BN_dup(g);
@@ -731,9 +716,7 @@ err:
     BN_CTX_free(ctx);
   }
 
-  if (mont != NULL) {
-    BN_MONT_CTX_free(mont);
-  }
+  BN_MONT_CTX_free(mont);
 
   return ok;
 }

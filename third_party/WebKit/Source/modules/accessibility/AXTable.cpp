@@ -397,7 +397,7 @@ void AXTable::addChildren()
         unsigned numRows = tableSection->numRows();
         for (unsigned rowIndex = 0; rowIndex < numRows; ++rowIndex) {
 
-            LayoutTableRow* layoutRow = tableSection->rowRendererAt(rowIndex);
+            LayoutTableRow* layoutRow = tableSection->rowLayoutObjectAt(rowIndex);
             if (!layoutRow)
                 continue;
 
@@ -554,24 +554,24 @@ AccessibilityRole AXTable::roleValue() const
     return TableRole;
 }
 
-bool AXTable::computeAccessibilityIsIgnored() const
+bool AXTable::computeAccessibilityIsIgnored(IgnoredReasons* ignoredReasons) const
 {
-    AXObjectInclusion decision = defaultObjectInclusion();
+    AXObjectInclusion decision = defaultObjectInclusion(ignoredReasons);
     if (decision == IncludeObject)
         return false;
     if (decision == IgnoreObject)
         return true;
 
     if (!isAXTable())
-        return AXLayoutObject::computeAccessibilityIsIgnored();
+        return AXLayoutObject::computeAccessibilityIsIgnored(ignoredReasons);
 
     return false;
 }
 
-String AXTable::title(TextUnderElementMode mode) const
+String AXTable::deprecatedTitle(TextUnderElementMode mode) const
 {
     if (!isAXTable())
-        return AXLayoutObject::title(mode);
+        return AXLayoutObject::deprecatedTitle(mode);
 
     String title;
     if (!m_layoutObject)
@@ -587,7 +587,7 @@ String AXTable::title(TextUnderElementMode mode) const
 
     // try the standard
     if (title.isEmpty())
-        title = AXLayoutObject::title(mode);
+        title = AXLayoutObject::deprecatedTitle(mode);
 
     return title;
 }

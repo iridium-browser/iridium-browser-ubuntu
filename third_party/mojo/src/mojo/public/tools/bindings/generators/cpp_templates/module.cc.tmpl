@@ -25,15 +25,20 @@
 #include "mojo/public/cpp/bindings/lib/string_serialization.h"
 #include "mojo/public/cpp/bindings/lib/validate_params.h"
 #include "mojo/public/cpp/bindings/lib/validation_errors.h"
+#include "mojo/public/cpp/bindings/lib/validation_util.h"
+#include "mojo/public/cpp/environment/lib/scoped_task_tracking.h"
 #include "mojo/public/cpp/environment/logging.h"
+#include "mojo/public/interfaces/bindings/interface_control_messages.mojom.h"
 
 {%- for namespace in namespaces_as_array %}
 namespace {{namespace}} {
 {%- endfor %}
 
 {#--- Constants #}
-{%  for constant in module.constants %}
+{%- for constant in module.constants %}
+{%-   if not constant.kind|is_integral_kind %}
 const {{constant.kind|cpp_pod_type}} {{constant.name}} = {{constant|constant_value}};
+{%-   endif %}
 {%- endfor %}
 
 namespace internal {
@@ -46,11 +51,11 @@ namespace {
 {%-   for method in interface.methods %}
 {%-     set method_name = "k%s_%s_Name"|format(interface.name, method.name) %}
 const uint32_t {{method_name}} = {{method.ordinal}};
-{%      set struct = method|struct_from_method %}
+{%      set struct = method.param_struct %}
 {%      include "struct_declaration.tmpl" %}
 {%-     include "struct_definition.tmpl" %}
 {%-     if method.response_parameters != None %}
-{%-       set struct = method|response_struct_from_method %}
+{%-       set struct = method.response_param_struct %}
 {%        include "struct_declaration.tmpl" %}
 {%-       include "struct_definition.tmpl" %}
 {%-     endif %}
@@ -75,8 +80,12 @@ const uint32_t {{method_name}} = {{method.ordinal}};
 
 {#--- Struct Constants #}
 {%- for struct in structs %}
-{%     for constant in struct.constants %}
-const {{constant.kind|cpp_pod_type}} {{struct.name}}::{{constant.name}} = {{constant|constant_value}};
+{%-   for constant in struct.constants %}
+{%-     if constant.kind|is_integral_kind %}
+MOJO_STATIC_CONST_MEMBER_DEFINITION const {{constant.kind|cpp_pod_type}} {{struct.name}}::{{constant.name}};
+{%-     else %}
+MOJO_STATIC_CONST_MEMBER_DEFINITION const {{constant.kind|cpp_pod_type}} {{struct.name}}::{{constant.name}} = {{constant|constant_value}};
+{%-     endif %}
 {%-   endfor %}
 {%- endfor %}
 

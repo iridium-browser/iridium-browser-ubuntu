@@ -5,6 +5,7 @@
 #include "ash/shelf/shelf_view.h"
 
 #include <algorithm>
+#include <utility>
 #include <vector>
 
 #include "ash/root_window_controller.h"
@@ -33,6 +34,8 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/test/user_action_tester.h"
+#include "base/time/time.h"
 #include "ui/aura/test/aura_test_base.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
@@ -42,6 +45,7 @@
 #include "ui/events/event_constants.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/test/event_generator.h"
+#include "ui/gfx/geometry/point.h"
 #include "ui/views/view_model.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
@@ -120,13 +124,20 @@ class ShelfViewIconObserverTest : public AshTestBase {
 // TestShelfItemDelegate which tracks whether it gets selected.
 class ShelfItemSelectionTracker : public TestShelfItemDelegate {
  public:
-  ShelfItemSelectionTracker() : TestShelfItemDelegate(NULL), selected_(false) {
-  }
+  ShelfItemSelectionTracker()
+      : TestShelfItemDelegate(NULL),
+        selected_(false),
+        item_selected_action_(kNoAction) {}
 
   ~ShelfItemSelectionTracker() override {}
 
   // Resets to the initial state.
   void Reset() { selected_ = false; }
+
+  void set_item_selected_action(
+      ShelfItemDelegate::PerformedAction item_selected_action) {
+    item_selected_action_ = item_selected_action;
+  }
 
   // Returns true if the delegate was selected.
   bool WasSelected() {
@@ -134,13 +145,17 @@ class ShelfItemSelectionTracker : public TestShelfItemDelegate {
   }
 
   // TestShelfItemDelegate:
-  bool ItemSelected(const ui::Event& event) override {
+  ShelfItemDelegate::PerformedAction ItemSelected(
+      const ui::Event& event) override {
     selected_ = true;
-    return false;
+    return item_selected_action_;
   }
 
  private:
   bool selected_;
+
+  // The action returned from ItemSelected(const ui::Event&).
+  ShelfItemDelegate::PerformedAction item_selected_action_;
 
   DISALLOW_COPY_AND_ASSIGN(ShelfItemSelectionTracker);
 };
@@ -223,13 +238,16 @@ TEST_F(ShelfViewIconObserverTest, BoundsChanged) {
 ////////////////////////////////////////////////////////////////////////////////
 // ShelfView tests.
 
-// Simple ShelfDelegate implmentation for ShelfViewTest.OverflowBubbleSize
-// and CheckDragAndDropFromOverflowBubbleToShelf
+// A ShelfDelegate test double that will always convert between ShelfIDs and app
+// ids. This does not support pinning and unpinning operations however CanPin()
+// will return true and the return value of IsAppPinned(...) is configurable.
 class TestShelfDelegateForShelfView : public ShelfDelegate {
  public:
   explicit TestShelfDelegateForShelfView(ShelfModel* model)
       : model_(model) {}
   ~TestShelfDelegateForShelfView() override {}
+
+  void set_is_app_pinned(bool is_pinned) { is_app_pinned_ = is_pinned; }
 
   // ShelfDelegate overrides:
   void OnShelfCreated(Shelf* shelf) override {}
@@ -242,6 +260,8 @@ class TestShelfDelegateForShelfView : public ShelfDelegate {
     return id;
   }
 
+  bool HasShelfIDToAppIDMapping(ShelfID id) const override { return true; }
+
   const std::string& GetAppIDForShelfID(ShelfID id) override {
     // Use |app_id_| member variable because returning a reference to local
     // variable is not allowed.
@@ -249,28 +269,21 @@ class TestShelfDelegateForShelfView : public ShelfDelegate {
     return app_id_;
   }
 
-  void PinAppWithID(const std::string& app_id) override {}
+  void PinAppWithID(const std::string& app_id) override { NOTREACHED(); }
 
   bool IsAppPinned(const std::string& app_id) override {
-    // Returns true for ShelfViewTest.OverflowBubbleSize. To test ripping off in
-    // that test, an item is already pinned state.
-    return true;
+    return is_app_pinned_;
   }
 
   bool CanPin() const override { return true; }
 
-  void UnpinAppWithID(const std::string& app_id) override {
-    ShelfID id = 0;
-    EXPECT_TRUE(base::StringToInt(app_id, &id));
-    ASSERT_GT(id, 0);
-    int index = model_->ItemIndexByID(id);
-    ASSERT_GE(index, 0);
-
-    model_->RemoveItemAt(index);
-  }
+  void UnpinAppWithID(const std::string& app_id) override { NOTREACHED(); }
 
  private:
   ShelfModel* model_;
+
+  // Tracks whether apps are pinned or not.
+  bool is_app_pinned_ = false;
 
   // Temp member variable for returning a value. See the comment in the
   // GetAppIDForShelfID().
@@ -301,6 +314,8 @@ class ShelfViewTest : public AshTestBase {
     test_api_.reset(new ShelfViewTestAPI(shelf_view_));
     test_api_->SetAnimationDuration(1);  // Speeds up animation for test.
 
+    ReplaceShelfDelegate();
+
     item_manager_ = Shell::GetInstance()->shelf_item_delegate_manager();
     DCHECK(item_manager_);
 
@@ -309,6 +324,7 @@ class ShelfViewTest : public AshTestBase {
   }
 
   void TearDown() override {
+    shelf_delegate_ = nullptr;
     test_api_.reset();
     AshTestBase::TearDown();
   }
@@ -600,20 +616,24 @@ class ShelfViewTest : public AshTestBase {
     return model_->items()[index].id;
   }
 
-  void ReplaceShelfDelegateForRipOffTest() {
+  void ReplaceShelfDelegate() {
     // Replace ShelfDelegate.
-    test::ShellTestApi test_api(Shell::GetInstance());
-    test_api.SetShelfDelegate(NULL);
-    ShelfDelegate* delegate = new TestShelfDelegateForShelfView(model_);
-    test_api.SetShelfDelegate(delegate);
-    test::ShelfTestAPI(Shelf::ForPrimaryDisplay()).SetShelfDelegate(delegate);
-    test_api_->SetShelfDelegate(delegate);
+    test::ShellTestApi shell_test_api(Shell::GetInstance());
+    shell_test_api.SetShelfDelegate(NULL);
+    shelf_delegate_ = new TestShelfDelegateForShelfView(model_);
+    shell_test_api.SetShelfDelegate(shelf_delegate_);
+    test::ShelfTestAPI(Shelf::ForPrimaryDisplay())
+        .SetShelfDelegate(shelf_delegate_);
+    test_api_->SetShelfDelegate(shelf_delegate_);
   }
 
   ShelfModel* model_;
   ShelfView* shelf_view_;
   int browser_index_;
   ShelfItemDelegateManager* item_manager_;
+
+  // Owned by ash::Shell.
+  TestShelfDelegateForShelfView* shelf_delegate_;
 
   scoped_ptr<ShelfViewTestAPI> test_api_;
 
@@ -1486,9 +1506,7 @@ TEST_F(ShelfViewTest, ResizeDuringOverflowAddAnimation) {
 
 // Checks the overflow bubble size when an item is ripped off and re-inserted.
 TEST_F(ShelfViewTest, OverflowBubbleSize) {
-  // Replace current ShelfDelegate with TestShelfDelegateForShelfView.
-  ReplaceShelfDelegateForRipOffTest();
-
+  shelf_delegate_->set_is_app_pinned(true);
   AddButtonsUntilOverflow();
   // Add one more button to prevent the overflow bubble to disappear upon
   // dragging an item out on windows (flakiness, see crbug.com/436131).
@@ -1706,9 +1724,6 @@ TEST_F(ShelfViewTest, CheckRipOffFromLeftShelfAlignmentWithMultiMonitor) {
 
 // Checks various drag and drop operations from OverflowBubble to Shelf.
 TEST_F(ShelfViewTest, CheckDragAndDropFromOverflowBubbleToShelf) {
-  // Replace current ShelfDelegate with TestShelfDelegateForShelfView.
-  ReplaceShelfDelegateForRipOffTest();
-
   AddButtonsUntilOverflow();
   // Add one more button to prevent the overflow bubble to disappear upon
   // dragging an item out on windows (flakiness, see crbug.com/425097).
@@ -1758,6 +1773,91 @@ TEST_F(ShelfViewTest, AppListButtonTouchFeedbackCancellation) {
   generator.ReleaseTouch();
   EXPECT_FALSE(app_list_button->draw_background_as_active());
   EXPECT_FALSE(Shell::GetInstance()->GetAppListTargetVisibility());
+}
+
+// Verifies that Launcher_ButtonPressed_* UMA user actions are recorded when an
+// item is selected.
+TEST_F(ShelfViewTest,
+       Launcher_ButtonPressedUserActionsRecordedWhenItemSelected) {
+  base::UserActionTester user_action_tester;
+
+  ShelfID browser_shelf_id = model_->items()[browser_index_].id;
+  ShelfItemSelectionTracker* selection_tracker = new ShelfItemSelectionTracker;
+  item_manager_->SetShelfItemDelegate(
+      browser_shelf_id,
+      scoped_ptr<ShelfItemDelegate>(selection_tracker).Pass());
+
+  SimulateClick(browser_index_);
+  EXPECT_EQ(1,
+            user_action_tester.GetActionCount("Launcher_ButtonPressed_Mouse"));
+}
+
+// Verifies that Launcher_*Task UMA user actions are recorded when an item is
+// selected.
+TEST_F(ShelfViewTest, Launcher_TaskUserActionsRecordedWhenItemSelected) {
+  base::UserActionTester user_action_tester;
+
+  ShelfID browser_shelf_id = model_->items()[browser_index_].id;
+  ShelfItemSelectionTracker* selection_tracker = new ShelfItemSelectionTracker;
+  selection_tracker->set_item_selected_action(
+      ShelfItemDelegate::kNewWindowCreated);
+  item_manager_->SetShelfItemDelegate(
+      browser_shelf_id,
+      scoped_ptr<ShelfItemDelegate>(selection_tracker).Pass());
+
+  SimulateClick(browser_index_);
+  EXPECT_EQ(1, user_action_tester.GetActionCount("Launcher_LaunchTask"));
+}
+
+// Verifies that a Launcher_ButtonPressed_Mouse UMA user action is recorded when
+// an icon is activated by a mouse event.
+TEST_F(ShelfViewTest,
+       Launcher_ButtonPressed_MouseIsRecordedWhenIconActivatedByMouse) {
+  base::UserActionTester user_action_tester;
+  ui::MouseEvent mouse_event(ui::ET_MOUSE_PRESSED, gfx::Point(), gfx::Point(),
+                             base::TimeDelta(), 0, 0);
+  test_api_->RecordIconActivatedSource(mouse_event);
+  EXPECT_EQ(1,
+            user_action_tester.GetActionCount("Launcher_ButtonPressed_Mouse"));
+}
+
+// Verifies that a Launcher_ButtonPressed_Touch UMA user action is recorded when
+// an icon is activated by a touch event.
+TEST_F(ShelfViewTest,
+       Launcher_ButtonPressed_MouseIsRecordedWhenIconActivatedByTouch) {
+  base::UserActionTester user_action_tester;
+  ui::TouchEvent touch_event(ui::ET_GESTURE_TAP, gfx::Point(), 0,
+                             base::TimeDelta());
+  test_api_->RecordIconActivatedSource(touch_event);
+  EXPECT_EQ(1,
+            user_action_tester.GetActionCount("Launcher_ButtonPressed_Touch"));
+}
+
+// Verifies that a Launcher_LaunchTask UMA user action is recorded when
+// selecting an icon causes a new window to be created.
+TEST_F(ShelfViewTest, Launcher_LaunchTaskIsRecordedWhenNewWindowIsCreated) {
+  base::UserActionTester user_action_tester;
+  test_api_->RecordIconActivatedAction(ShelfItemDelegate::kNewWindowCreated);
+  EXPECT_EQ(1, user_action_tester.GetActionCount("Launcher_LaunchTask"));
+}
+
+// Verifies that a Launcher_MinimizeTask UMA user action is recorded when
+// selecting an icon causes an existing window to be minimized.
+TEST_F(ShelfViewTest, Launcher_MinimizeTaskIsRecordedWhenWindowIsMinimized) {
+  base::UserActionTester user_action_tester;
+  test_api_->RecordIconActivatedAction(
+      ShelfItemDelegate::kExistingWindowMinimized);
+  EXPECT_EQ(1, user_action_tester.GetActionCount("Launcher_MinimizeTask"));
+}
+
+// Verifies that a Launcher_SwitchTask UMA user action is recorded when
+// selecting an icon causes an existing window to be activated.
+TEST_F(ShelfViewTest,
+       Launcher_SwitchTaskIsRecordedWhenExistingWindowIsActivated) {
+  base::UserActionTester user_action_tester;
+  test_api_->RecordIconActivatedAction(
+      ShelfItemDelegate::kExistingWindowActivated);
+  EXPECT_EQ(1, user_action_tester.GetActionCount("Launcher_SwitchTask"));
 }
 
 class ShelfViewVisibleBoundsTest : public ShelfViewTest,

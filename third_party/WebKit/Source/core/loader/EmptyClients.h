@@ -29,6 +29,7 @@
 #ifndef EmptyClients_h
 #define EmptyClients_h
 
+#include "core/CoreExport.h"
 #include "core/editing/UndoStep.h"
 #include "core/loader/FrameLoaderClient.h"
 #include "core/page/ChromeClient.h"
@@ -62,7 +63,7 @@
 
 namespace blink {
 
-class EmptyChromeClient : public ChromeClient {
+class CORE_EXPORT EmptyChromeClient : public ChromeClient {
     WTF_MAKE_FAST_ALLOCATED(EmptyChromeClient);
 public:
     virtual ~EmptyChromeClient() { }
@@ -124,7 +125,7 @@ public:
     virtual void scheduleAnimation() override { }
 
     virtual IntRect viewportToScreen(const IntRect& r) const override { return r; }
-    virtual blink::WebScreenInfo screenInfo() const override { return blink::WebScreenInfo(); }
+    virtual WebScreenInfo screenInfo() const override { return WebScreenInfo(); }
     virtual void contentsSizeChanged(LocalFrame*, const IntSize&) const override { }
 
     virtual void mouseDidMoveOverElement(const HitTestResult&) override { }
@@ -151,11 +152,10 @@ public:
     virtual void didAssociateFormControls(const WillBeHeapVector<RefPtrWillBeMember<Element>>&, LocalFrame* frame) override { }
 
     virtual void annotatedRegionsChanged() override { }
-    virtual bool paintCustomOverhangArea(GraphicsContext*, const IntRect&, const IntRect&, const IntRect&) override { return false; }
     virtual String acceptLanguages() override;
 };
 
-class EmptyFrameLoaderClient : public FrameLoaderClient {
+class CORE_EXPORT EmptyFrameLoaderClient : public FrameLoaderClient {
     WTF_MAKE_NONCOPYABLE(EmptyFrameLoaderClient); WTF_MAKE_FAST_ALLOCATED(EmptyFrameLoaderClient);
 public:
     EmptyFrameLoaderClient() { }
@@ -231,21 +231,21 @@ public:
     virtual void dispatchDidClearWindowObjectInMainWorld() override { }
     virtual void documentElementAvailable() override { }
 
-    virtual void didCreateScriptContext(v8::Handle<v8::Context>, int extensionGroup, int worldId) override { }
-    virtual void willReleaseScriptContext(v8::Handle<v8::Context>, int worldId) override { }
+    virtual void didCreateScriptContext(v8::Local<v8::Context>, int extensionGroup, int worldId) override { }
+    virtual void willReleaseScriptContext(v8::Local<v8::Context>, int worldId) override { }
     virtual bool allowScriptExtension(const String& extensionName, int extensionGroup, int worldId) override { return false; }
 
-    virtual blink::WebCookieJar* cookieJar() const override { return 0; }
+    virtual WebCookieJar* cookieJar() const override { return 0; }
 
     virtual void didRequestAutocomplete(HTMLFormElement*) override;
 
-    virtual PassOwnPtr<blink::WebServiceWorkerProvider> createServiceWorkerProvider() override;
+    virtual PassOwnPtr<WebServiceWorkerProvider> createServiceWorkerProvider() override;
     virtual bool isControlledByServiceWorker(DocumentLoader&) override { return false; }
     virtual int64_t serviceWorkerID(DocumentLoader&) override { return -1; }
-    virtual PassOwnPtr<blink::WebApplicationCacheHost> createApplicationCacheHost(blink::WebApplicationCacheHostClient*) override;
+    virtual PassOwnPtr<WebApplicationCacheHost> createApplicationCacheHost(WebApplicationCacheHostClient*) override;
 };
 
-class EmptyTextCheckerClient : public TextCheckerClient {
+class CORE_EXPORT EmptyTextCheckerClient : public TextCheckerClient {
 public:
     ~EmptyTextCheckerClient() { }
 
@@ -309,8 +309,8 @@ public:
     virtual void startDrag(DragImage*, const IntPoint&, const IntPoint&, DataTransfer*, LocalFrame*, bool) override { }
 };
 
-void fillWithEmptyClients(Page::PageClients&);
+CORE_EXPORT void fillWithEmptyClients(Page::PageClients&);
 
-}
+} // namespace blink
 
 #endif // EmptyClients_h

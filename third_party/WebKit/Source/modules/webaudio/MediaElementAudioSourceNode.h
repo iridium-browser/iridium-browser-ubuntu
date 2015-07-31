@@ -39,10 +39,9 @@ namespace blink {
 class AudioContext;
 class HTMLMediaElement;
 
-class MediaElementAudioSourceHandler final : public AudioHandler, public AudioSourceProviderClient {
-    USING_GARBAGE_COLLECTED_MIXIN(MediaElementAudioSourceHandler);
+class MediaElementAudioSourceHandler final : public AudioHandler {
 public:
-    MediaElementAudioSourceHandler(AudioNode&, HTMLMediaElement*);
+    static PassRefPtr<MediaElementAudioSourceHandler> create(AudioNode&, HTMLMediaElement&);
     virtual ~MediaElementAudioSourceHandler();
 
     HTMLMediaElement* mediaElement() { return m_mediaElement.get(); }
@@ -51,16 +50,15 @@ public:
     virtual void dispose() override;
     virtual void process(size_t framesToProcess) override;
 
-    // AudioSourceProviderClient
-    virtual void setFormat(size_t numberOfChannels, float sampleRate) override;
-    virtual void onCurrentSrcChanged(const KURL& currentSrc) override;
-
-    virtual void lock() override;
-    virtual void unlock() override;
-
-    DECLARE_VIRTUAL_TRACE();
+    // Helpers for AudioSourceProviderClient implementation of
+    // MediaElementAudioSourceNode.
+    void setFormat(size_t numberOfChannels, float sampleRate);
+    void onCurrentSrcChanged(const KURL& currentSrc);
+    void lock();
+    void unlock();
 
 private:
+    MediaElementAudioSourceHandler(AudioNode&, HTMLMediaElement&);
     // As an audio source, we will never propagate silence.
     virtual bool propagatesSilence() const override { return false; }
 
@@ -71,7 +69,7 @@ private:
     bool passesCurrentSrcCORSAccessCheck(const KURL& currentSrc);
 
     // Print warning if CORS restrictions cause MediaElementAudioSource to output zeroes.
-    void printCORSMessage();
+    void printCORSMessage(const String& message);
 
     // This Persistent doesn't make a reference cycle. The reference from
     // HTMLMediaElement to AudioSourceProvideClient, which
@@ -95,21 +93,29 @@ private:
     // access to it. Must be protected by |m_processLock|.
     bool m_maybePrintCORSMessage;
 
-    // The value of mediaElement()->currentSrc() in the ctor and onCurrentSrcChanged().  Protected
-    // by |m_processLock|.
-    KURL m_currentSrc;
+    // The value of mediaElement()->currentSrc().string() in the ctor and onCurrentSrcChanged().
+    // Protected by |m_processLock|.
+    String m_currentSrcString;
 };
 
-class MediaElementAudioSourceNode final : public AudioSourceNode {
+class MediaElementAudioSourceNode final : public AudioSourceNode, public AudioSourceProviderClient {
     DEFINE_WRAPPERTYPEINFO();
+    USING_GARBAGE_COLLECTED_MIXIN(MediaElementAudioSourceNode);
 public:
-    static MediaElementAudioSourceNode* create(AudioContext*, HTMLMediaElement*);
+    static MediaElementAudioSourceNode* create(AudioContext&, HTMLMediaElement&);
+    DECLARE_VIRTUAL_TRACE();
     MediaElementAudioSourceHandler& mediaElementAudioSourceHandler() const;
 
     HTMLMediaElement* mediaElement() const;
 
+    // AudioSourceProviderClient functions:
+    void setFormat(size_t numberOfChannels, float sampleRate) override;
+    void onCurrentSrcChanged(const KURL& currentSrc) override;
+    void lock() override;
+    void unlock() override;
+
 private:
-    MediaElementAudioSourceNode(AudioContext&, HTMLMediaElement*);
+    MediaElementAudioSourceNode(AudioContext&, HTMLMediaElement&);
 };
 
 } // namespace blink

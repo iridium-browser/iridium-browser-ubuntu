@@ -50,6 +50,7 @@ namespace blink {
 class ConsoleMessage;
 class WebApplicationCacheHost;
 class WebApplicationCacheHostClient;
+class WebLocalFrameImpl;
 class WebServiceWorkerNetworkProvider;
 class WebSharedWorkerClient;
 class WebString;
@@ -125,7 +126,7 @@ private:
     void didReceiveScriptLoaderResponse();
     void onScriptLoaderFinished();
 
-    static void connectTask(ExecutionContext*, PassOwnPtr<WebMessagePortChannel>);
+    static void connectTask(PassOwnPtr<WebMessagePortChannel>, ExecutionContext*);
     // Tasks that are run on the main thread.
     void workerGlobalScopeClosedOnMainThread();
     void workerThreadTerminatedOnMainThread();
@@ -139,7 +140,7 @@ private:
     // 'shadow page' - created to proxy loading requests from the worker.
     RefPtrWillBePersistent<ExecutionContext> m_loadingDocument;
     WebView* m_webView;
-    WebFrame* m_mainFrame;
+    WebLocalFrameImpl* m_mainFrame;
     bool m_askedToTerminate;
 
     // This one is bound to and used only on the main thread.

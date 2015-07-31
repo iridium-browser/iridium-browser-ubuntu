@@ -118,19 +118,20 @@
 #include <openssl/bn.h>
 #include <openssl/buf.h>
 #include <openssl/dh.h>
+#include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/md5.h>
 #include <openssl/obj.h>
 #include <openssl/rand.h>
 #include <openssl/x509.h>
 
-#include "ssl_locl.h"
+#include "internal.h"
 
 
 int dtls1_accept(SSL *s) {
   BUF_MEM *buf = NULL;
   void (*cb)(const SSL *ssl, int type, int val) = NULL;
-  unsigned long alg_a;
+  uint32_t alg_a;
   int ret = -1;
   int new_state, state, skip = 0;
 
@@ -176,11 +177,6 @@ int dtls1_accept(SSL *s) {
           }
           s->init_buf = buf;
           buf = NULL;
-        }
-
-        if (!ssl3_setup_buffers(s)) {
-          ret = -1;
-          goto end;
         }
 
         s->init_num = 0;
@@ -320,13 +316,6 @@ int dtls1_accept(SSL *s) {
              * don't request cert during re-negotiation: */
             ((s->session->peer != NULL) &&
              (s->verify_mode & SSL_VERIFY_CLIENT_ONCE)) ||
-            /* never request cert in anonymous ciphersuites
-             * (see section "Certificate request" in SSL 3 drafts
-             * and in RFC 2246): */
-            ((s->s3->tmp.new_cipher->algorithm_auth & SSL_aNULL) &&
-             /* ... except when the application insists on verification
-              * (against the specs, but s3_clnt.c accepts this for SSL 3) */
-             !(s->verify_mode & SSL_VERIFY_FAIL_IF_NO_PEER_CERT)) ||
             /* With normal PSK Certificates and
              * Certificate Requests are omitted */
             (s->s3->tmp.new_cipher->algorithm_mkey & SSL_kPSK)) {
@@ -485,7 +474,7 @@ int dtls1_accept(SSL *s) {
         if (s->renegotiate == 2) {
           /* skipped if we just sent a HelloRequest */
           s->renegotiate = 0;
-          s->new_session = 0;
+          s->s3->initial_handshake_complete = 1;
 
           ssl_update_cache(s, SSL_SESS_CACHE_SERVER);
 
@@ -522,9 +511,7 @@ int dtls1_accept(SSL *s) {
 
 end:
   s->in_handshake--;
-  if (buf != NULL) {
-    BUF_MEM_free(buf);
-  }
+  BUF_MEM_free(buf);
   if (cb != NULL) {
     cb(s, SSL_CB_ACCEPT_EXIT, ret);
   }

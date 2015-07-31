@@ -7,7 +7,7 @@ found in the LICENSE file.
 <link rel="import" href="/base/ui.html">
 <link rel="import" href="/base/settings.html">
 <style>
-.labeled-checkbox {
+* /deep/ .labeled-checkbox {
   display: flex;
   white-space: nowrap;
 }
@@ -28,6 +28,12 @@ tv.exportTo('tv.b.ui', function() {
         opt_dictionary.parent.appendChild(spanEl);
       if (opt_dictionary.bold)
         spanEl.style.fontWeight = 'bold';
+      if (opt_dictionary.marginLeft)
+        spanEl.style.marginLeft = opt_dictionary.marginLeft;
+      if (opt_dictionary.marginRight)
+        spanEl.style.marginRight = opt_dictionary.marginRight;
+      if (opt_dictionary.backgroundColor)
+        spanEl.style.backgroundColor = opt_dictionary.backgroundColor;
     }
     return spanEl;
   };
@@ -39,6 +45,10 @@ tv.exportTo('tv.b.ui', function() {
         divEl.className = opt_dictionary.className;
       if (opt_dictionary.parent)
         opt_dictionary.parent.appendChild(divEl);
+      if (opt_dictionary.textContent)
+        divEl.textContent = opt_dictionary.textContent;
+      if (opt_dictionary.maxWidth)
+        divEl.style.maxWidth = opt_dictionary.maxWidth;
     }
     return divEl;
   };
@@ -247,7 +257,7 @@ tv.exportTo('tv.b.ui', function() {
     var cur = el;
     while (cur.parentNode)
       cur = cur.parentNode;
-    return cur == el.ownerDocument;
+    return (cur === el.ownerDocument || cur.nodeName === '#document-fragment');
   }
 
   return {

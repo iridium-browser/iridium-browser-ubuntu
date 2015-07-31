@@ -43,8 +43,8 @@ struct PaintInfo;
 class LayoutInline;
 class WordMeasurement;
 
-typedef WTF::ListHashSet<LayoutBox*, 16> TrackedRendererListHashSet;
-typedef WTF::HashMap<const LayoutBlock*, OwnPtr<TrackedRendererListHashSet>> TrackedDescendantsMap;
+typedef WTF::ListHashSet<LayoutBox*, 16> TrackedLayoutBoxListHashSet;
+typedef WTF::HashMap<const LayoutBlock*, OwnPtr<TrackedLayoutBoxListHashSet>> TrackedDescendantsMap;
 typedef WTF::HashMap<const LayoutBox*, OwnPtr<HashSet<LayoutBlock*>>> TrackedContainerMap;
 typedef Vector<WordMeasurement, 64> WordMeasurements;
 
@@ -79,7 +79,7 @@ public:
     virtual LayoutUnit lineHeight(bool firstLine, LineDirectionMode, LinePositionMode = PositionOnContainingLine) const override final;
     virtual int baselinePosition(FontBaseline, bool firstLine, LineDirectionMode, LinePositionMode = PositionOnContainingLine) const override;
 
-    LayoutUnit minLineHeightForReplacedRenderer(bool isFirstLine, LayoutUnit replacedHeight) const;
+    LayoutUnit minLineHeightForReplacedObject(bool isFirstLine, LayoutUnit replacedHeight) const;
 
     LineBoxList* lineBoxes() { return &m_lineBoxes; }
 
@@ -105,10 +105,10 @@ public:
     static void removePositionedObject(LayoutBox*);
     void removePositionedObjects(LayoutBlock*, ContainingBlockState = SameContainingBlock);
 
-    TrackedRendererListHashSet* positionedObjects() const;
+    TrackedLayoutBoxListHashSet* positionedObjects() const;
     bool hasPositionedObjects() const
     {
-        TrackedRendererListHashSet* objects = positionedObjects();
+        TrackedLayoutBoxListHashSet* objects = positionedObjects();
         return objects && !objects->isEmpty();
     }
 
@@ -119,10 +119,10 @@ public:
     static void clearPercentHeightDescendantsFrom(LayoutBox*);
     static void removePercentHeightDescendantIfNeeded(LayoutBox*);
 
-    TrackedRendererListHashSet* percentHeightDescendants() const;
+    TrackedLayoutBoxListHashSet* percentHeightDescendants() const;
     bool hasPercentHeightDescendants() const
     {
-        TrackedRendererListHashSet* descendants = percentHeightDescendants();
+        TrackedLayoutBoxListHashSet* descendants = percentHeightDescendants();
         return descendants && !descendants->isEmpty();
     }
 
@@ -184,12 +184,12 @@ public:
     using LayoutBoxModelObject::continuation;
     using LayoutBoxModelObject::setContinuation;
 
-    static LayoutBlock* createAnonymousWithParentRendererAndDisplay(const LayoutObject*, EDisplay = BLOCK);
-    static LayoutBlockFlow* createAnonymousColumnsWithParentRenderer(const LayoutObject*);
-    static LayoutBlockFlow* createAnonymousColumnSpanWithParentRenderer(const LayoutObject*);
-    LayoutBlock* createAnonymousBlock(EDisplay display = BLOCK) const { return createAnonymousWithParentRendererAndDisplay(this, display); }
-    LayoutBlockFlow* createAnonymousColumnsBlock() const { return createAnonymousColumnsWithParentRenderer(this); }
-    LayoutBlockFlow* createAnonymousColumnSpanBlock() const { return createAnonymousColumnSpanWithParentRenderer(this); }
+    static LayoutBlock* createAnonymousWithParentAndDisplay(const LayoutObject*, EDisplay = BLOCK);
+    static LayoutBlockFlow* createAnonymousColumnsWithParent(const LayoutObject*);
+    static LayoutBlockFlow* createAnonymousColumnSpanWithParent(const LayoutObject*);
+    LayoutBlock* createAnonymousBlock(EDisplay display = BLOCK) const { return createAnonymousWithParentAndDisplay(this, display); }
+    LayoutBlockFlow* createAnonymousColumnsBlock() const { return createAnonymousColumnsWithParent(this); }
+    LayoutBlockFlow* createAnonymousColumnSpanBlock() const { return createAnonymousColumnSpanWithParent(this); }
 
     virtual LayoutBox* createAnonymousBoxWithSameTypeAs(const LayoutObject* parent) const override;
 
@@ -353,8 +353,8 @@ private:
 
     void removeAnonymousWrappersIfRequired();
 
-    void insertIntoTrackedRendererMaps(LayoutBox* descendant, TrackedDescendantsMap*&, TrackedContainerMap*&);
-    static void removeFromTrackedRendererMaps(LayoutBox* descendant, TrackedDescendantsMap*&, TrackedContainerMap*&);
+    void insertIntoTrackedLayoutBoxMaps(LayoutBox* descendant, TrackedDescendantsMap*&, TrackedContainerMap*&);
+    static void removeFromTrackedLayoutBoxMaps(LayoutBox* descendant, TrackedDescendantsMap*&, TrackedContainerMap*&);
 
     Node* nodeForHitTest() const;
 
@@ -382,9 +382,6 @@ private:
     virtual void childBecameNonInline(LayoutObject* child) override final;
 
     bool isSelectionRoot() const;
-
-    // FIXME-BLOCKFLOW: Remove virtualizaion when all callers have moved to LayoutBlockFlow
-    virtual void clipOutFloatingObjects(const LayoutBlock*, const PaintInfo*, const LayoutPoint&, const LayoutSize&) const { };
 
     virtual void absoluteRects(Vector<IntRect>&, const LayoutPoint& accumulatedOffset) const override;
     virtual void absoluteQuads(Vector<FloatQuad>&, bool* wasFixed) const override;
@@ -443,7 +440,7 @@ protected:
     // column balancer to help set a good minimum column height.
     void updateMinimumPageHeight(LayoutUnit offset, LayoutUnit minHeight);
 
-    // Adjust from painting offsets to the local coords of this renderer
+    // Adjust from painting offsets to the local coords of this layoutObject
     void offsetForContents(LayoutPoint&) const;
 
     bool requiresColumns(int desiredColumnCount) const;

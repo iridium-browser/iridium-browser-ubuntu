@@ -71,7 +71,7 @@ void CanvasRenderingContext2DAPITest::SetUp()
     m_dummyPageHolder = DummyPageHolder::create(IntSize(800, 600), &pageClients);
     m_document = toHTMLDocument(&m_dummyPageHolder->document());
     m_document->documentElement()->setInnerHTML("<body><canvas id='c'></canvas></body>", ASSERT_NO_EXCEPTION);
-    m_document->view()->updateLayoutAndStyleIfNeededRecursive();
+    m_document->view()->updateLayoutAndStyleForPainting();
     m_canvasElement = toHTMLCanvasElement(m_document->getElementById("c"));
 }
 
@@ -177,6 +177,24 @@ TEST_F(CanvasRenderingContext2DAPITest, DefaultAttributeValues)
     EXPECT_EQ(String("rgba(0, 0, 0, 0)"), context2d()->shadowColor());
 }
 
+TEST_F(CanvasRenderingContext2DAPITest, LineDashStateSave)
+{
+    createContext(NonOpaque);
+
+    Vector<float> simpleDash;
+    simpleDash.append(4);
+    simpleDash.append(2);
+
+    context2d()->setLineDash(simpleDash);
+    EXPECT_EQ(simpleDash, context2d()->getLineDash());
+    context2d()->save();
+    // Realize the save.
+    context2d()->scale(2, 2);
+    EXPECT_EQ(simpleDash, context2d()->getLineDash());
+    context2d()->restore();
+    EXPECT_EQ(simpleDash, context2d()->getLineDash());
+}
+
 TEST_F(CanvasRenderingContext2DAPITest, CreateImageData)
 {
     createContext(NonOpaque);
@@ -184,7 +202,7 @@ TEST_F(CanvasRenderingContext2DAPITest, CreateImageData)
     NonThrowableExceptionState exceptionState;
 
     // create a 100x50 imagedata and fill it with white pixels
-    RefPtrWillBeRawPtr<ImageData> imageData = context2d()->createImageData(100, 50, exceptionState);
+    ImageData* imageData = context2d()->createImageData(100, 50, exceptionState);
     EXPECT_FALSE(exceptionState.hadException());
     EXPECT_EQ(100, imageData->width());
     EXPECT_EQ(50, imageData->height());
@@ -197,20 +215,20 @@ TEST_F(CanvasRenderingContext2DAPITest, CreateImageData)
     // createImageData(imageData) should create a new ImageData of the same size as 'imageData'
     // but filled with transparent black
 
-    RefPtrWillBeRawPtr<ImageData> sameSizeImageData = context2d()->createImageData(imageData);
+    ImageData* sameSizeImageData = context2d()->createImageData(imageData);
     EXPECT_EQ(100, sameSizeImageData->width());
     EXPECT_EQ(50, sameSizeImageData->height());
     EXPECT_EQ(0, sameSizeImageData->data()->data()[32]);
 
     // createImageData(width, height) takes the absolute magnitude of the size arguments
 
-    RefPtrWillBeRawPtr<ImageData> imgdata1 = context2d()->createImageData(10, 20, exceptionState);
+    ImageData* imgdata1 = context2d()->createImageData(10, 20, exceptionState);
     EXPECT_FALSE(exceptionState.hadException());
-    RefPtrWillBeRawPtr<ImageData> imgdata2 = context2d()->createImageData(-10, 20, exceptionState);
+    ImageData* imgdata2 = context2d()->createImageData(-10, 20, exceptionState);
     EXPECT_FALSE(exceptionState.hadException());
-    RefPtrWillBeRawPtr<ImageData> imgdata3 = context2d()->createImageData(10, -20, exceptionState);
+    ImageData* imgdata3 = context2d()->createImageData(10, -20, exceptionState);
     EXPECT_FALSE(exceptionState.hadException());
-    RefPtrWillBeRawPtr<ImageData> imgdata4 = context2d()->createImageData(-10, -20, exceptionState);
+    ImageData* imgdata4 = context2d()->createImageData(-10, -20, exceptionState);
     EXPECT_FALSE(exceptionState.hadException());
 
     EXPECT_EQ((unsigned)800, imgdata1->data()->length());

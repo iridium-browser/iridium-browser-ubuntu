@@ -26,7 +26,7 @@ class SocketDataProvider: public net::SocketDataProvider {
   SocketDataProvider()
       : write_limit_(-1), async_write_(false), next_write_error_(net::OK) {}
 
-  net::MockRead GetNextRead() override {
+  net::MockRead OnRead() override {
     return net::MockRead(net::ASYNC, net::ERR_IO_PENDING);
   }
 
@@ -43,6 +43,14 @@ class SocketDataProvider: public net::SocketDataProvider {
     written_data_.append(data, 0, size);
     return net::MockWriteResult(async_write_ ? net::ASYNC : net::SYNCHRONOUS,
                                 size);
+  }
+
+  bool AllReadDataConsumed() const override {
+    return true;
+  }
+
+  bool AllWriteDataConsumed() const override {
+    return true;
   }
 
   void Reset() override {}

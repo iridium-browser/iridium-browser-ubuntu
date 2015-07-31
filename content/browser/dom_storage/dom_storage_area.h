@@ -150,6 +150,7 @@ class CONTENT_EXPORT DOMStorageArea
   // disk on the commit sequence, and to call back on the primary
   // task sequence when complete.
   CommitBatch* CreateCommitBatchIfNeeded();
+  void StartCommitTimer();
   void OnCommitTimer();
   void PostCommitTask();
   void CommitChanges(const CommitBatch* commit_batch);

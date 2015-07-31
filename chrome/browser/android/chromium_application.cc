@@ -32,7 +32,7 @@ namespace {
 
 void FlushCookiesOnIOThread(
     scoped_refptr<net::URLRequestContextGetter> getter) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   getter->GetURLRequestContext()
       ->cookie_store()
       ->GetCookieMonster()
@@ -59,7 +59,7 @@ void CommitPendingWritesForProfile(Profile* profile) {
 
 void RemoveSessionCookiesOnIOThread(
     scoped_refptr<net::URLRequestContextGetter> getter) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   getter->GetURLRequestContext()->cookie_store()->DeleteSessionCookiesAsync(
       net::CookieStore::DeleteCallback());
 }
@@ -73,7 +73,7 @@ void RemoveSessionCookiesForProfile(Profile* profile) {
 
 void ChangeAppStatusOnIOThread(SafeBrowsingService* sb_service,
                                jboolean foreground) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   SafeBrowsingProtocolManager* proto_manager = sb_service->protocol_manager();
   if (proto_manager)
     proto_manager->SetAppInForeground(foreground);
@@ -117,12 +117,6 @@ namespace android {
 // static
 bool ChromiumApplication::RegisterBindings(JNIEnv* env) {
   return RegisterNativesImpl(env);
-}
-
-void ChromiumApplication::OpenProtectedContentSettings() {
-  Java_ChromiumApplication_openProtectedContentSettings(
-      base::android::AttachCurrentThread(),
-      base::android::GetApplicationContext());
 }
 
 void ChromiumApplication::ShowAutofillSettings() {

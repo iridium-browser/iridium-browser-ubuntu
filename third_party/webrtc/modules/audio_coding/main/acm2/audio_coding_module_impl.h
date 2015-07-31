@@ -30,14 +30,13 @@ class AudioCodingImpl;
 namespace acm2 {
 
 class ACMDTMFDetection;
-class ACMGenericCodec;
 
 class AudioCodingModuleImpl : public AudioCodingModule {
  public:
   friend webrtc::AudioCodingImpl;
 
   explicit AudioCodingModuleImpl(const AudioCodingModule::Config& config);
-  ~AudioCodingModuleImpl();
+  ~AudioCodingModuleImpl() override;
 
   /////////////////////////////////////////
   //   Sender
@@ -59,6 +58,11 @@ class AudioCodingModuleImpl : public AudioCodingModule {
   // Adaptive rate codecs return their current encode target rate, while other
   // codecs return there long-term average or their fixed rate.
   int SendBitrate() const override;
+
+  // Sets the bitrate to the specified value in bits/sec. In case the codec does
+  // not support the requested value it will choose an appropriate value
+  // instead.
+  void SetBitRate(int bitrate_bps) override;
 
   // Set available bandwidth, inform the encoder about the
   // estimated bandwidth received from the remote party.
@@ -168,10 +172,10 @@ class AudioCodingModuleImpl : public AudioCodingModule {
   //
   // Configure Dtmf playout status i.e on/off playout the incoming outband Dtmf
   // tone.
-  int SetDtmfPlayoutStatus(bool enable) override { return 0; }
+  int SetDtmfPlayoutStatus(bool enable) override;
 
   // Get Dtmf playout status.
-  bool DtmfPlayoutStatus() const override { return true; }
+  bool DtmfPlayoutStatus() const override;
 
   // Estimate the Bandwidth based on the incoming stream, needed
   // for one way audio where the RTCP send the BW estimate.
@@ -217,14 +221,13 @@ class AudioCodingModuleImpl : public AudioCodingModule {
                                    int rate_bit_per_sec,
                                    bool enforce_frame_size = false) override;
 
-  int SetOpusApplication(OpusApplicationMode application,
-                         bool disable_dtx_if_needed) override;
+  int SetOpusApplication(OpusApplicationMode application) override;
 
   // If current send codec is Opus, informs it about the maximum playback rate
   // the receiver will render.
   int SetOpusMaxPlaybackRate(int frequency_hz) override;
 
-  int EnableOpusDtx(bool force_voip) override;
+  int EnableOpusDtx() override;
 
   int DisableOpusDtx() override;
 
@@ -249,8 +252,10 @@ class AudioCodingModuleImpl : public AudioCodingModule {
     int16_t buffer[WEBRTC_10MS_PCM_AUDIO];
   };
 
-  int Add10MsDataInternal(const AudioFrame& audio_frame, InputData* input_data);
-  int Encode(const InputData& input_data);
+  int Add10MsDataInternal(const AudioFrame& audio_frame, InputData* input_data)
+      EXCLUSIVE_LOCKS_REQUIRED(acm_crit_sect_);
+  int Encode(const InputData& input_data)
+      EXCLUSIVE_LOCKS_REQUIRED(acm_crit_sect_);
 
   int InitializeReceiverSafe() EXCLUSIVE_LOCKS_REQUIRED(acm_crit_sect_);
 
@@ -314,19 +319,8 @@ class AudioCodingModuleImpl : public AudioCodingModule {
 
 class AudioCodingImpl : public AudioCoding {
  public:
-  AudioCodingImpl(const Config& config) {
-    AudioCodingModule::Config config_old = config.ToOldConfig();
-    acm_old_.reset(new acm2::AudioCodingModuleImpl(config_old));
-    acm_old_->RegisterTransportCallback(config.transport);
-    acm_old_->RegisterVADCallback(config.vad_callback);
-    acm_old_->SetDtmfPlayoutStatus(config.play_dtmf);
-    if (config.initial_playout_delay_ms > 0) {
-      acm_old_->SetInitialPlayoutDelay(config.initial_playout_delay_ms);
-    }
-    playout_frequency_hz_ = config.playout_frequency_hz;
-  }
-
-  ~AudioCodingImpl() override{};
+  AudioCodingImpl(const Config& config);
+  ~AudioCodingImpl() override;
 
   bool RegisterSendCodec(AudioEncoder* send_codec) override;
 

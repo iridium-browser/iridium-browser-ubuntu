@@ -26,7 +26,7 @@
 #ifndef DocumentXPathEvaluator_h
 #define DocumentXPathEvaluator_h
 
-#include "core/dom/DocumentSupplementable.h"
+#include "core/dom/Document.h"
 #include "core/xml/XPathEvaluator.h"
 #include "core/xml/XPathNSResolver.h"
 
@@ -36,16 +36,16 @@ class ExceptionState;
 class XPathExpression;
 class XPathResult;
 
-class DocumentXPathEvaluator final : public NoBaseWillBeGarbageCollected<DocumentXPathEvaluator>, public DocumentSupplement {
+class DocumentXPathEvaluator final : public NoBaseWillBeGarbageCollected<DocumentXPathEvaluator>, public WillBeHeapSupplement<Document> {
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(DocumentXPathEvaluator);
 public:
-    static DocumentXPathEvaluator& from(DocumentSupplementable&);
+    static DocumentXPathEvaluator& from(WillBeHeapSupplementable<Document>&);
 
-    static PassRefPtrWillBeRawPtr<XPathExpression> createExpression(DocumentSupplementable&,
-        const String& expression, PassRefPtrWillBeRawPtr<XPathNSResolver>, ExceptionState&);
-    static PassRefPtrWillBeRawPtr<XPathNSResolver> createNSResolver(DocumentSupplementable&, Node* nodeResolver);
-    static PassRefPtrWillBeRawPtr<XPathResult> evaluate(DocumentSupplementable&,
-        const String& expression, Node* contextNode, PassRefPtrWillBeRawPtr<XPathNSResolver>,
+    static XPathExpression* createExpression(WillBeHeapSupplementable<Document>&,
+        const String& expression, XPathNSResolver*, ExceptionState&);
+    static XPathNSResolver* createNSResolver(WillBeHeapSupplementable<Document>&, Node* nodeResolver);
+    static XPathResult* evaluate(WillBeHeapSupplementable<Document>&,
+        const String& expression, Node* contextNode, XPathNSResolver*,
         unsigned short type, const ScriptValue&, ExceptionState&);
 
     DECLARE_VIRTUAL_TRACE();
@@ -55,7 +55,7 @@ private:
 
     static const char* supplementName() { return "DocumentXPathEvaluator"; }
 
-    RefPtrWillBeMember<XPathEvaluator> m_xpathEvaluator;
+    PersistentWillBeMember<XPathEvaluator> m_xpathEvaluator;
 };
 
 } // namespace blink

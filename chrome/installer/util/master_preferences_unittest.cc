@@ -19,11 +19,11 @@
 namespace {
 class MasterPreferencesTest : public testing::Test {
  protected:
-  virtual void SetUp() {
+  void SetUp() override {
     ASSERT_TRUE(base::CreateTemporaryFile(&prefs_file_));
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     EXPECT_TRUE(base::DeleteFile(prefs_file_, false));
   }
 
@@ -57,6 +57,7 @@ TEST_F(MasterPreferencesTest, ParseDistroParams) {
     "     \"import_bookmarks\": true,\n"
     "     \"import_bookmarks_from_file\": \"c:\\\\foo\",\n"
     "     \"import_home_page\": true,\n"
+    "     \"welcome_page_on_os_upgrade_enabled\": true,\n"
     "     \"do_not_create_any_shortcuts\": true,\n"
     "     \"do_not_create_desktop_shortcut\": true,\n"
     "     \"do_not_create_quick_launch_shortcut\": true,\n"
@@ -76,7 +77,8 @@ TEST_F(MasterPreferencesTest, ParseDistroParams) {
     "  }\n"
     "} \n";
 
-  EXPECT_TRUE(base::WriteFile(prefs_file(), text, strlen(text)));
+  EXPECT_TRUE(base::WriteFile(prefs_file(), text,
+                              static_cast<int>(strlen(text))));
   installer::MasterPreferences prefs(prefs_file());
   EXPECT_TRUE(prefs.read_from_file());
 
@@ -85,6 +87,7 @@ TEST_F(MasterPreferencesTest, ParseDistroParams) {
     installer::master_preferences::kDistroImportHistoryPref,
     installer::master_preferences::kDistroImportBookmarksPref,
     installer::master_preferences::kDistroImportHomePagePref,
+    installer::master_preferences::kDistroWelcomePageOnOSUpgradeEnabled,
     installer::master_preferences::kDoNotCreateAnyShortcuts,
     installer::master_preferences::kDoNotCreateDesktopShortcut,
     installer::master_preferences::kDoNotCreateQuickLaunchShortcut,
@@ -135,7 +138,8 @@ TEST_F(MasterPreferencesTest, ParseMissingDistroParams) {
     "  }\n"
     "} \n";
 
-  EXPECT_TRUE(base::WriteFile(prefs_file(), text, strlen(text)));
+  EXPECT_TRUE(base::WriteFile(prefs_file(), text,
+                              static_cast<int>(strlen(text))));
   installer::MasterPreferences prefs(prefs_file());
   EXPECT_TRUE(prefs.read_from_file());
 
@@ -155,6 +159,7 @@ TEST_F(MasterPreferencesTest, ParseMissingDistroParams) {
 
   const char* const missing_bools[] = {
     installer::master_preferences::kDistroImportHomePagePref,
+    installer::master_preferences::kDistroWelcomePageOnOSUpgradeEnabled,
     installer::master_preferences::kDoNotRegisterForUpdateLaunch,
     installer::master_preferences::kMakeChromeDefault,
     installer::master_preferences::kMakeChromeDefaultForUser,
@@ -194,7 +199,8 @@ TEST_F(MasterPreferencesTest, FirstRunTabs) {
     "  ]\n"
     "} \n";
 
-  EXPECT_TRUE(base::WriteFile(prefs_file(), text, strlen(text)));
+  EXPECT_TRUE(base::WriteFile(prefs_file(), text,
+                              static_cast<int>(strlen(text))));
   installer::MasterPreferences prefs(prefs_file());
   typedef std::vector<std::string> TabsVector;
   TabsVector tabs = prefs.GetFirstRunTabs();
@@ -252,7 +258,8 @@ TEST_F(MasterPreferencesTest, GetInstallPreferencesTest) {
     "     \"verbose_logging\": false\n"
     "  }\n"
     "} \n";
-  EXPECT_TRUE(base::WriteFile(prefs_file, text, strlen(text)));
+  EXPECT_TRUE(base::WriteFile(prefs_file, text,
+                              static_cast<int>(strlen(text))));
 
   // Make sure command line values override the values in master preferences.
   std::wstring cmd_str(

@@ -106,6 +106,12 @@ void SetFavicon(int profile,
                 const gfx::Image& image,
                 FaviconSource source);
 
+// Expires the favicon for |node| in the bookmark model for |profile|.
+void ExpireFavicon(int profile, const bookmarks::BookmarkNode* node);
+
+// Checks whether the favicon at |icon_url| for |profile| is expired;
+void CheckFaviconExpired(int profile, const GURL& icon_url);
+
 // Changes the url of the node |node| in the bookmark model of profile
 // |profile| to |new_url|. Returns a pointer to the node with the changed url.
 const bookmarks::BookmarkNode* SetURL(int profile,
@@ -155,6 +161,13 @@ bool AllModelsMatch() WARN_UNUSED_RESULT;
 // AllModelsMatch. Returns true if bookmark models match and don't timeout
 // while checking.
 bool AwaitAllModelsMatch() WARN_UNUSED_RESULT;
+
+// Blocks the caller until the given |profile| contains |expected_count|
+// bookmarks with |title| or until waiting times out.
+bool AwaitCountBookmarksWithTitlesMatching(int profile,
+                                           const std::string& title,
+                                           int expected_count)
+    WARN_UNUSED_RESULT;
 
 // Checks if the bookmark model of profile |profile| contains any instances of
 // two bookmarks with the same URL under the same parent folder. Returns true

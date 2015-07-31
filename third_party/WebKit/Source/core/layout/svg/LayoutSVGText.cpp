@@ -33,9 +33,7 @@
 #include "core/layout/HitTestResult.h"
 #include "core/layout/LayoutAnalyzer.h"
 #include "core/layout/LayoutState.h"
-#include "core/layout/PaintInfo.h"
 #include "core/layout/PointerEventsHitRules.h"
-#include "core/style/ShadowList.h"
 #include "core/layout/svg/LayoutSVGInline.h"
 #include "core/layout/svg/LayoutSVGInlineText.h"
 #include "core/layout/svg/LayoutSVGRoot.h"
@@ -43,6 +41,7 @@
 #include "core/layout/svg/SVGResourcesCache.h"
 #include "core/layout/svg/line/SVGRootInlineBox.h"
 #include "core/paint/SVGTextPainter.h"
+#include "core/style/ShadowList.h"
 #include "core/svg/SVGLengthList.h"
 #include "core/svg/SVGTextElement.h"
 #include "core/svg/SVGTransformList.h"
@@ -293,7 +292,6 @@ void LayoutSVGText::subtreeTextDidChange(LayoutSVGInlineText* text)
     // subtree. If this changes, clear the cache. It's going to be rebuilt below.
     m_layoutAttributesBuilder.clearTextPositioningElements();
 
-    checkLayoutAttributesConsistency(this, m_layoutAttributes);
     for (LayoutObject* descendant = text; descendant; descendant = descendant->nextInPreOrder(text)) {
         if (descendant->isSVGInlineText())
             m_layoutAttributesBuilder.buildLayoutAttributesForText(toLayoutSVGInlineText(descendant));
@@ -394,6 +392,10 @@ void LayoutSVGText::layout()
 
     if (m_needsReordering)
         m_needsReordering = false;
+
+    // If we don't have any line boxes, then make sure the frame rect is still cleared.
+    if (!firstLineBox())
+        setFrameRect(LayoutRect());
 
     if (!updateCachedBoundariesInParents)
         updateCachedBoundariesInParents = oldBoundaries != objectBoundingBox();

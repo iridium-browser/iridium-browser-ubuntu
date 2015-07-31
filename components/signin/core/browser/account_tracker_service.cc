@@ -28,6 +28,12 @@ const char kAccountKeyPath[] = "account_id";
 const char kAccountEmailPath[] = "email";
 const char kAccountGaiaPath[] = "gaia";
 const char kAccountHostedDomainPath[] = "hd";
+const char kAccountFullNamePath[] = "full_name";
+const char kAccountGivenNamePath[] = "given_name";
+const char kAccountLocalePath[] = "locale";
+
+const base::TimeDelta kRefreshFromTokenServiceDelay =
+    base::TimeDelta::FromHours(24);
 
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
 // IsRefreshTokenDeviceIdExperimentEnabled is called from
@@ -167,12 +173,15 @@ AccountTrackerService::AccountInfo::AccountInfo() {}
 AccountTrackerService::AccountInfo::~AccountInfo() {}
 
 bool AccountTrackerService::AccountInfo::IsValid() {
-  return account_id.empty() || email.empty() || gaia.empty() ||
-         hosted_domain.empty();
+  return !account_id.empty() && !email.empty() && !gaia.empty() &&
+         !hosted_domain.empty() && !full_name.empty() && !given_name.empty() &&
+         !locale.empty();
 }
 
 
 const char AccountTrackerService::kAccountInfoPref[] = "account_info";
+const char AccountTrackerService::kAccountTrackerServiceLastUpdate[] =
+    "account_tracker_service_last_update";
 
 AccountTrackerService::AccountTrackerService()
     : token_service_(NULL),
@@ -196,16 +205,22 @@ void AccountTrackerService::Initialize(
   signin_client_ = signin_client;
   token_service_->AddObserver(this);
   LoadFromPrefs();
-  LoadFromTokenService();
+  StartFetchingInvalidAccounts();
 }
 
 void AccountTrackerService::EnableNetworkFetches() {
   DCHECK(CalledOnValidThread());
   DCHECK(!network_fetches_enabled_);
   network_fetches_enabled_ = true;
+  // If there are accounts in |pending_user_info_fetches_|, they were deemed
+  // invalid after being loaded from prefs and need to be fetched now instead of
+  // waiting after the timer.
   for (std::string account_id : pending_user_info_fetches_)
     StartFetchingUserInfo(account_id);
   pending_user_info_fetches_.clear();
+
+  // Now that network fetches are enabled, schedule the next refresh.
+  ScheduleNextRefreshFromTokenService();
 }
 
 void AccountTrackerService::Shutdown() {
@@ -251,13 +266,15 @@ AccountTrackerService::AccountInfo AccountTrackerService::GetAccountInfo(
 AccountTrackerService::AccountInfo
 AccountTrackerService::FindAccountInfoByGaiaId(
     const std::string& gaia_id) {
-  for (std::map<std::string, AccountState>::const_iterator it =
-           accounts_.begin();
-       it != accounts_.end();
-       ++it) {
-    const AccountState& state = it->second;
-    if (state.info.gaia == gaia_id)
-      return state.info;
+  if (!gaia_id.empty()) {
+    for (std::map<std::string, AccountState>::const_iterator it =
+             accounts_.begin();
+         it != accounts_.end();
+         ++it) {
+      const AccountState& state = it->second;
+      if (state.info.gaia == gaia_id)
+        return state.info;
+    }
   }
 
   return AccountInfo();
@@ -266,13 +283,15 @@ AccountTrackerService::FindAccountInfoByGaiaId(
 AccountTrackerService::AccountInfo
 AccountTrackerService::FindAccountInfoByEmail(
     const std::string& email) {
-  for (std::map<std::string, AccountState>::const_iterator it =
-           accounts_.begin();
-       it != accounts_.end();
-       ++it) {
-    const AccountState& state = it->second;
-    if (gaia::AreEmailsSame(state.info.email, email))
-      return state.info;
+  if (!email.empty()) {
+    for (std::map<std::string, AccountState>::const_iterator it =
+             accounts_.begin();
+         it != accounts_.end();
+         ++it) {
+      const AccountState& state = it->second;
+      if (gaia::AreEmailsSame(state.info.email, email))
+        return state.info;
+    }
   }
 
   return AccountInfo();
@@ -290,8 +309,8 @@ AccountTrackerService::GetMigrationState(PrefService* pref_service) {
       pref_service->GetInteger(prefs::kAccountIdMigrationState));
 }
 
-void AccountTrackerService::OnRefreshTokenAvailable(
-    const std::string& account_id) {
+void AccountTrackerService::RefreshAccountInfo(const std::string& account_id,
+                                               bool force_remote_fetch) {
   // TODO(robliao): Remove ScopedTracker below once https://crbug.com/422460 is
   // fixed.
   tracked_objects::ScopedTracker tracking_profile(
@@ -314,16 +333,27 @@ void AccountTrackerService::OnRefreshTokenAvailable(
   if (account_id == "managed_user@localhost")
     return;
 
+  if (signin_client_->UpdateAccountInfo(&state.info))
+    SaveToPrefs(state);
+
+  // Only fetch the user info if it's currently invalid or if
+  // |force_remote_fetch| is true (meaning the service is due for a timed
+  // update).
 #if defined(OS_ANDROID)
   // TODO(mlerman): Change this condition back to state.info.IsValid() and
   // ensure the Fetch doesn't occur until after ProfileImpl::OnPrefsLoaded().
-  if (state.info.gaia.empty())
+  if (force_remote_fetch || state.info.gaia.empty())
 #else
-  if (state.info.IsValid())
+  if (force_remote_fetch || !state.info.IsValid())
 #endif
     StartFetchingUserInfo(account_id);
 
   SendRefreshTokenAnnotationRequest(account_id);
+}
+
+void AccountTrackerService::OnRefreshTokenAvailable(
+    const std::string& account_id) {
+  RefreshAccountInfo(account_id, false);
 }
 
 void AccountTrackerService::OnRefreshTokenRevoked(
@@ -353,6 +383,14 @@ void AccountTrackerService::NotifyAccountRemoved(const AccountState& state) {
   DCHECK(!state.info.gaia.empty());
   FOR_EACH_OBSERVER(
       Observer, observer_list_, OnAccountRemoved(state.info));
+}
+
+void AccountTrackerService::StartFetchingInvalidAccounts() {
+  std::vector<std::string> accounts = token_service_->GetAccounts();
+  for (std::vector<std::string>::const_iterator it = accounts.begin();
+       it != accounts.end(); ++it) {
+      RefreshAccountInfo(*it, false);
+  }
 }
 
 void AccountTrackerService::StartTrackingAccount(
@@ -388,17 +426,16 @@ void AccountTrackerService::StartFetchingUserInfo(
     return;
   }
 
-  if (ContainsKey(user_info_requests_, account_id))
-    DeleteFetcher(user_info_requests_[account_id]);
-
-  DVLOG(1) << "StartFetching " << account_id;
-  AccountInfoFetcher* fetcher =
-      new AccountInfoFetcher(token_service_,
-                             signin_client_->GetURLRequestContext(),
-                             this,
-                             account_id);
-  user_info_requests_[account_id] = fetcher;
-  fetcher->Start();
+  if (!ContainsKey(user_info_requests_, account_id)) {
+    DVLOG(1) << "StartFetching " << account_id;
+    AccountInfoFetcher* fetcher =
+        new AccountInfoFetcher(token_service_,
+                               signin_client_->GetURLRequestContext(),
+                               this,
+                               account_id);
+    user_info_requests_[account_id] = fetcher;
+    fetcher->Start();
+  }
 }
 
 void AccountTrackerService::SetAccountStateFromUserInfo(
@@ -420,6 +457,10 @@ void AccountTrackerService::SetAccountStateFromUserInfo(
       state.info.hosted_domain = kNoHostedDomainFound;
     }
 
+    user_info->GetString("name", &state.info.full_name);
+    user_info->GetString("given_name", &state.info.given_name);
+    user_info->GetString("locale", &state.info.locale);
+
     NotifyAccountUpdated(state);
     SaveToPrefs(state);
   }
@@ -440,7 +481,6 @@ void AccountTrackerService::OnUserInfoFetchFailure(
   LOG(WARNING) << "Failed to get UserInfo for " << fetcher->account_id();
   NotifyAccountUpdateFailed(fetcher->account_id());
   DeleteFetcher(fetcher);
-  // TODO(rogerta): figure out when to retry.
 }
 
 void AccountTrackerService::DeleteFetcher(AccountInfoFetcher* fetcher) {
@@ -455,12 +495,21 @@ void AccountTrackerService::DeleteFetcher(AccountInfoFetcher* fetcher) {
 void AccountTrackerService::LoadFromPrefs() {
   const base::ListValue* list =
       signin_client_->GetPrefs()->GetList(kAccountInfoPref);
+  std::set<std::string> to_remove;
   for (size_t i = 0; i < list->GetSize(); ++i) {
     const base::DictionaryValue* dict;
     if (list->GetDictionary(i, &dict)) {
       base::string16 value;
       if (dict->GetString(kAccountKeyPath, &value)) {
         std::string account_id = base::UTF16ToUTF8(value);
+
+        // Ignore incorrectly persisted non-canonical account ids.
+        if (account_id.find('@') != std::string::npos &&
+            account_id != gaia::CanonicalizeEmail(account_id)) {
+          to_remove.insert(account_id);
+          continue;
+        }
+
         StartTrackingAccount(account_id);
         AccountState& state = accounts_[account_id];
 
@@ -470,10 +519,25 @@ void AccountTrackerService::LoadFromPrefs() {
           state.info.email = base::UTF16ToUTF8(value);
         if (dict->GetString(kAccountHostedDomainPath, &value))
           state.info.hosted_domain = base::UTF16ToUTF8(value);
-        if (!state.info.IsValid())
+        if (dict->GetString(kAccountFullNamePath, &value))
+          state.info.full_name = base::UTF16ToUTF8(value);
+        if (dict->GetString(kAccountGivenNamePath, &value))
+          state.info.given_name = base::UTF16ToUTF8(value);
+        if (dict->GetString(kAccountLocalePath, &value))
+          state.info.locale = base::UTF16ToUTF8(value);
+        if (state.info.IsValid())
           NotifyAccountUpdated(state);
       }
     }
+  }
+  last_updated_ = base::Time::FromInternalValue(
+      signin_client_->GetPrefs()->GetInt64(kAccountTrackerServiceLastUpdate));
+
+  // Remove any obsolete prefs.
+  for (auto account_id : to_remove) {
+    AccountState state;
+    state.info.account_id = account_id;
+    RemoveFromPrefs(state);
   }
 }
 
@@ -501,6 +565,9 @@ void AccountTrackerService::SaveToPrefs(const AccountState& state) {
   dict->SetString(kAccountEmailPath, state.info.email);
   dict->SetString(kAccountGaiaPath, state.info.gaia);
   dict->SetString(kAccountHostedDomainPath, state.info.hosted_domain);
+  dict->SetString(kAccountFullNamePath, state.info.full_name);
+  dict->SetString(kAccountGivenNamePath, state.info.given_name);
+  dict->SetString(kAccountLocalePath, state.info.locale);
 }
 
 void AccountTrackerService::RemoveFromPrefs(const AccountState& state) {
@@ -525,8 +592,18 @@ void AccountTrackerService::LoadFromTokenService() {
   std::vector<std::string> accounts = token_service_->GetAccounts();
   for (std::vector<std::string>::const_iterator it = accounts.begin();
        it != accounts.end(); ++it) {
-    OnRefreshTokenAvailable(*it);
+    RefreshAccountInfo(*it, true);
   }
+}
+
+void AccountTrackerService::RefreshFromTokenService() {
+  DCHECK(network_fetches_enabled_);
+  LoadFromTokenService();
+
+  last_updated_ = base::Time::Now();
+  signin_client_->GetPrefs()->SetInt64(kAccountTrackerServiceLastUpdate,
+                                       last_updated_.ToInternalValue());
+  ScheduleNextRefreshFromTokenService();
 }
 
 void AccountTrackerService::SendRefreshTokenAnnotationRequest(
@@ -562,12 +639,28 @@ std::string AccountTrackerService::PickAccountIdForAccount(
   return PickAccountIdForAccount(signin_client_->GetPrefs(), gaia, email);
 }
 
+void AccountTrackerService::ScheduleNextRefreshFromTokenService() {
+  DCHECK(!timer_.IsRunning());
+  DCHECK(network_fetches_enabled_);
+
+  const base::TimeDelta time_since_update = base::Time::Now() - last_updated_;
+  if(time_since_update > kRefreshFromTokenServiceDelay) {
+    RefreshFromTokenService();
+  } else {
+    timer_.Start(FROM_HERE,
+                 kRefreshFromTokenServiceDelay - time_since_update,
+                 this,
+                 &AccountTrackerService::RefreshFromTokenService);
+  }
+}
+
 // static
 std::string AccountTrackerService::PickAccountIdForAccount(
     PrefService* pref_service,
     const std::string& gaia,
     const std::string& email) {
-  DCHECK(!gaia.empty());
+  DCHECK(!gaia.empty() ||
+      GetMigrationState(pref_service) == MIGRATION_NOT_STARTED);
   DCHECK(!email.empty());
   switch(GetMigrationState(pref_service)) {
     case MIGRATION_NOT_STARTED:
@@ -584,20 +677,21 @@ std::string AccountTrackerService::PickAccountIdForAccount(
   }
 }
 
-void AccountTrackerService::SeedAccountInfo(const std::string& gaia,
-                                            const std::string& email) {
-  DVLOG(1) << "AccountTrackerService::SeedAccountInfo"
-           << " gaia_id=" << gaia
-           << " email=" << email;
-
-  DCHECK(!gaia.empty());
-  DCHECK(!email.empty());
+std::string AccountTrackerService::SeedAccountInfo(const std::string& gaia,
+                                                   const std::string& email) {
   const std::string account_id = PickAccountIdForAccount(gaia, email);
   const bool already_exists = ContainsKey(accounts_, account_id);
   StartTrackingAccount(account_id);
   AccountState& state = accounts_[account_id];
-  DCHECK(!already_exists || state.info.gaia == gaia);
+  DCHECK(!already_exists || state.info.gaia.empty() || state.info.gaia == gaia);
   state.info.gaia = gaia;
   state.info.email = email;
   SaveToPrefs(state);
+
+  DVLOG(1) << "AccountTrackerService::SeedAccountInfo"
+           << " account_id=" << account_id
+           << " gaia_id=" << gaia
+           << " email=" << email;
+
+  return account_id;
 }

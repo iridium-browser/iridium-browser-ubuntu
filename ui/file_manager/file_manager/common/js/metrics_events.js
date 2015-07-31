@@ -46,7 +46,15 @@ metrics.Dimension_ = {
  * @enum {string}
  */
 metrics.FileSystemProviders = {
-  oedeeodfidgoollimchfdnbmhcpnklnd: 'ZipUnpacker'
+  oedeeodfidgoollimchfdnbmhcpnklnd: 'ZipUnpacker',
+  hlffpaajmfllggclnjppbblobdhokjhe: 'File System for Dropbox (YT)',
+  jbfdfcehgafdbfpniaimfbfomafoadgo: 'File System for OneDrive (YT)',
+  gbheifiifcfekkamhepkeogobihicgmn: 'SFTP File System (YT)',
+  dikonaebkejmpbpcnnmfaeopkaenicgf: 'Box for Chrome OS',
+  iibcngmpkgghccnakicfmgajlkhnohep: 'TED Talks (FB)',
+  hmckflbfniicjijmdoffagjkpnjgbieh: 'WebDAV File System (YT)',
+  ibfbhbegfkamboeglpnianlggahglbfi: 'Cloud Storage (FB)',
+  pmnllmkmjilbojkpgplbdmckghmaocjh: 'Scan (FB)'
 };
 
 /**
@@ -155,5 +163,6 @@ metrics.timing = metrics.timing || {};
 metrics.timing.Variables = {
   COMPUTE_HASH: 'Compute Content Hash',
   SEARCH_BY_HASH: 'Search By Hash',
-  HISTORY_LOAD: 'History Load'
+  HISTORY_LOAD: 'History Load',
+  EXTRACT_THUMBNAIL_FROM_RAW: 'Extract Thumbnail From RAW'
 };

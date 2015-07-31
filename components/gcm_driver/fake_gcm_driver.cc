@@ -98,4 +98,15 @@ void FakeGCMDriver::SetLastTokenFetchTime(const base::Time& time) {
 void FakeGCMDriver::WakeFromSuspendForHeartbeat(bool wake) {
 }
 
+InstanceIDStore* FakeGCMDriver::GetInstanceIDStore() {
+  return NULL;
+}
+
+void FakeGCMDriver::AddHeartbeatInterval(const std::string& scope,
+                                         int interval_ms) {
+}
+
+void FakeGCMDriver::RemoveHeartbeatInterval(const std::string& scope) {
+}
+
 }  // namespace gcm

@@ -9,18 +9,20 @@ namespace switches {
 // Allow users to specify a custom buffer size for debugging purpose.
 const char kAudioBufferSize[] = "audio-buffer-size";
 
+// Disables the new vsync driven video renderering path.
+const char kDisableNewVideoRenderer[] = "disable-new-video-renderer";
+
 // Set number of threads to use for video decoding.
 const char kVideoThreads[] = "video-threads";
-
-// Bypass autodetection of the upper limit on resolution of streams that can
-// be hardware decoded.
-const char kIgnoreResolutionLimitsForAcceleratedVideoDecode[] =
-    "ignore-resolution-limits-for-accelerated-video-decode";
 
 #if defined(OS_ANDROID)
 // Disables the infobar popup for accessing protected media identifier.
 const char kDisableInfobarForProtectedMediaIdentifier[] =
     "disable-infobar-for-protected-media-identifier";
+
+// Sets the MediaSource player that uses the separate media thread
+const char kEnableMediaThreadForMediaPlayback[] =
+    "enable-media-thread-for-media-playback";
 #endif
 
 #if defined(OS_LINUX) || defined(OS_FREEBSD) || defined(OS_SOLARIS)

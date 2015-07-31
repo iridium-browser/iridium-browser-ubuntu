@@ -84,14 +84,16 @@
     'enable_protobuf%': 1,
 
     # Disable these to not build components which can be externally provided.
+    'build_expat%': 1,
+    'build_icu%': 1,
     'build_json%': 1,
     'build_libjpeg%': 1,
-    'build_libyuv%': 1,
     'build_libvpx%': 1,
-    'build_vp9%': 1,
-    'build_ssl%': 1,
+    'build_libyuv%': 1,
     'build_openmax_dl%': 1,
     'build_opus%': 1,
+    'build_ssl%': 1,
+    'build_vp9%': 1,
 
     # Disable by default
     'have_dbus_glib%': 0,
@@ -285,7 +287,7 @@
           }],
         ],
       }],
-      ['target_arch=="mipsel" and mips_arch_variant!="r6" and android_webview_build==0', {
+      ['target_arch=="mipsel" and mips_arch_variant!="r6"', {
         'defines': [
           'MIPS32_LE',
         ],

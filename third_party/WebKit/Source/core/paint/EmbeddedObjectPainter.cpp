@@ -8,8 +8,8 @@
 #include "core/frame/Settings.h"
 #include "core/layout/LayoutEmbeddedObject.h"
 #include "core/layout/LayoutTheme.h"
-#include "core/layout/PaintInfo.h"
 #include "core/paint/LayoutObjectDrawingRecorder.h"
+#include "core/paint/PaintInfo.h"
 #include "platform/fonts/Font.h"
 #include "platform/fonts/FontSelector.h"
 #include "platform/graphics/GraphicsContextStateSaver.h"
@@ -54,6 +54,11 @@ void EmbeddedObjectPainter::paintReplaced(const PaintInfo& paintInfo, const Layo
     context->clip(contentRect);
 
     Font font = replacementTextFont();
+    // TODO(trchen): Speculative fix for crbug.com/481880
+    // With last resort font, how could this ever be null?
+    ASSERT(font.primaryFont());
+    if (!font.primaryFont())
+        return;
     TextRun textRun(m_layoutEmbeddedObject.unavailablePluginReplacementText());
     FloatSize textGeometry(font.width(textRun), font.fontMetrics().height());
 

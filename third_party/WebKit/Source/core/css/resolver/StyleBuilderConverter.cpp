@@ -28,6 +28,7 @@
 #include "core/css/resolver/StyleBuilderConverter.h"
 
 #include "core/css/BasicShapeFunctions.h"
+#include "core/css/CSSContentDistributionValue.h"
 #include "core/css/CSSFontFeatureValue.h"
 #include "core/css/CSSFunctionValue.h"
 #include "core/css/CSSGridLineNamesValue.h"
@@ -329,6 +330,37 @@ EGlyphOrientation StyleBuilderConverter::convertGlyphOrientation(StyleResolverSt
     if (angle > 135.0f && angle <= 225.0f)
         return GO_180DEG;
     return GO_270DEG;
+}
+
+StyleSelfAlignmentData StyleBuilderConverter::convertSelfOrDefaultAlignmentData(StyleResolverState&, CSSValue* value)
+{
+    StyleSelfAlignmentData alignmentData = ComputedStyle::initialSelfAlignment();
+    CSSPrimitiveValue* primitiveValue = toCSSPrimitiveValue(value);
+    if (Pair* pairValue = primitiveValue->getPairValue()) {
+        if (pairValue->first()->getValueID() == CSSValueLegacy) {
+            alignmentData.setPositionType(LegacyPosition);
+            alignmentData.setPosition(*pairValue->second());
+        } else {
+            alignmentData.setPosition(*pairValue->first());
+            alignmentData.setOverflow(*pairValue->second());
+        }
+    } else {
+        alignmentData.setPosition(*primitiveValue);
+    }
+    return alignmentData;
+}
+
+StyleContentAlignmentData StyleBuilderConverter::convertContentAlignmentData(StyleResolverState&, CSSValue* value)
+{
+    StyleContentAlignmentData alignmentData = ComputedStyle::initialContentAlignment();
+    CSSContentDistributionValue* contentValue = toCSSContentDistributionValue(value);
+    if (contentValue->distribution()->getValueID() != CSSValueInvalid)
+        alignmentData.setDistribution(*contentValue->distribution());
+    if (contentValue->position()->getValueID() != CSSValueInvalid)
+        alignmentData.setPosition(*contentValue->position());
+    if (contentValue->overflow()->getValueID() != CSSValueInvalid)
+        alignmentData.setOverflow(*contentValue->overflow());
+    return alignmentData;
 }
 
 GridAutoFlow StyleBuilderConverter::convertGridAutoFlow(StyleResolverState&, CSSValue* value)
@@ -638,13 +670,6 @@ float StyleBuilderConverter::convertPerspective(StyleResolverState& state, CSSVa
 
     if (primitiveValue->getValueID() == CSSValueNone)
         return ComputedStyle::initialPerspective();
-
-    // CSSPropertyWebkitPerspective accepts unitless numbers.
-    if (primitiveValue->isNumber()) {
-        RefPtrWillBeRawPtr<CSSPrimitiveValue> px = CSSPrimitiveValue::create(primitiveValue->getDoubleValue(), CSSPrimitiveValue::CSS_PX);
-        return convertPerspectiveLength(state, px.get());
-    }
-
     return convertPerspectiveLength(state, primitiveValue);
 }
 
@@ -768,11 +793,9 @@ PassRefPtr<ShadowList> StyleBuilderConverter::convertShadow(StyleResolverState& 
         float blur = item->blur ? item->blur->computeLength<float>(state.cssToLengthConversionData()) : 0;
         float spread = item->spread ? item->spread->computeLength<float>(state.cssToLengthConversionData()) : 0;
         ShadowStyle shadowStyle = item->style && item->style->getValueID() == CSSValueInset ? Inset : Normal;
-        Color color;
+        StyleColor color = StyleColor::currentColor();
         if (item->color)
-            color = convertColor(state, item->color.get());
-        else
-            color = state.style()->color();
+            color = convertStyleColor(state, item->color.get());
         shadows.append(ShadowData(FloatPoint(x, y), blur, spread, shadowStyle, color));
     }
     return ShadowList::adopt(shadows);

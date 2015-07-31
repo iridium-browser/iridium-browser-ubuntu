@@ -27,6 +27,7 @@ namespace media {
 class AudioRendererSink;
 class DemuxerStreamProviderShim;
 class Renderer;
+class VideoRendererSink;
 
 // A mojo::MediaRenderer implementation that uses media::AudioRenderer to
 // decode and render audio to a sink obtained from the ApplicationConnection.
@@ -43,7 +44,7 @@ class MEDIA_EXPORT MojoRendererService
                   const mojo::Closure& callback) override;
   void Flush(const mojo::Closure& callback) override;
   void StartPlayingFrom(int64_t time_delta_usec) override;
-  void SetPlaybackRate(float playback_rate) override;
+  void SetPlaybackRate(double playback_rate) override;
   void SetVolume(float volume) override;
 
  private:
@@ -89,6 +90,7 @@ class MEDIA_EXPORT MojoRendererService
   State state_;
 
   scoped_refptr<AudioRendererSink> audio_renderer_sink_;
+  scoped_ptr<VideoRendererSink> video_renderer_sink_;
   scoped_ptr<Renderer> renderer_;
   scoped_ptr<DemuxerStreamProviderShim> stream_provider_;
 

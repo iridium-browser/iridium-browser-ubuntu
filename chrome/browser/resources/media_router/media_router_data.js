@@ -1,9 +1,9 @@
-// Copyright (c) 2015 The Chromium Authors. All rights reserved.
+// Copyright 2015 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Any strings used here will already be localized. Values such as castMode or
-// IDs will be defined elsewhere and determined later.
+// Any strings used here will already be localized. Values such as
+// CastMode.type or IDs will be defined elsewhere and determined later.
 cr.define('media_router', function() {
   'use strict';
 
@@ -18,15 +18,16 @@ cr.define('media_router', function() {
 
 
   /**
-   * @param {number} castMode The type of cast mode.
+   * @param {number} type The type of cast mode. This corresponds to the
+   *   C++ MediaCastMode.
    * @param {string} title The title of the cast mode.
    * @param {string} description The description of the cast mode.
    * @constructor
    * @struct
    */
-  var CastMode = function(castMode, title, description) {
+  var CastMode = function(type, title, description) {
     /** @type {number} */
-    this.castMode = castMode;
+    this.type = type;
 
     /** @type {string} */
     this.title = title;

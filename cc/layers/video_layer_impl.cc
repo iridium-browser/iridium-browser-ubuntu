@@ -34,7 +34,8 @@ scoped_ptr<VideoLayerImpl> VideoLayerImpl::Create(
   DCHECK(tree_impl->proxy()->IsImplThread());
 
   scoped_refptr<VideoFrameProviderClientImpl> provider_client_impl =
-      VideoFrameProviderClientImpl::Create(provider);
+      VideoFrameProviderClientImpl::Create(
+          provider, tree_impl->GetVideoFrameControllerClient());
 
   return make_scoped_ptr(
       new VideoLayerImpl(tree_impl, id, provider_client_impl, video_rotation));
@@ -183,10 +184,6 @@ void VideoLayerImpl::AppendQuads(RenderPass* render_pass,
       static_cast<float>(visible_rect.width()) / coded_size.width();
   const float tex_height_scale =
       static_cast<float>(visible_rect.height()) / coded_size.height();
-  const float tex_x_offset =
-      static_cast<float>(visible_rect.x()) / coded_size.width();
-  const float tex_y_offset =
-      static_cast<float>(visible_rect.y()) / coded_size.height();
 
   switch (frame_resource_type_) {
     // TODO(danakj): Remove this, hide it in the hardware path.
@@ -215,12 +212,12 @@ void VideoLayerImpl::AppendQuads(RenderPass* render_pass,
                            opacity,
                            flipped,
                            nearest_neighbor);
+      ValidateQuadResources(texture_quad);
       break;
     }
     case VideoFrameExternalResources::YUV_RESOURCE: {
       DCHECK_GE(frame_resources_.size(), 3u);
-      if (frame_resources_.size() < 3u)
-        break;
+
       YUVVideoDrawQuad::ColorSpace color_space = YUVVideoDrawQuad::REC_601;
       if (frame_->format() == media::VideoFrame::YV12J) {
         color_space = YUVVideoDrawQuad::JPEG;
@@ -229,33 +226,58 @@ void VideoLayerImpl::AppendQuads(RenderPass* render_pass,
       }
 
       const gfx::Size ya_tex_size = coded_size;
-      const gfx::Size uv_tex_size = media::VideoFrame::PlaneSize(
-          frame_->format(), media::VideoFrame::kUPlane, coded_size);
-      DCHECK(uv_tex_size ==
-             media::VideoFrame::PlaneSize(
-                 frame_->format(), media::VideoFrame::kVPlane, coded_size));
-      if (frame_resources_.size() > 3) {
-        DCHECK(ya_tex_size ==
+      gfx::Size uv_tex_size;
+
+      if (frame_->format() == media::VideoFrame::NATIVE_TEXTURE) {
+        DCHECK_EQ(media::VideoFrame::TEXTURE_YUV_420, frame_->texture_format());
+        DCHECK_EQ(3u, frame_resources_.size());  // Alpha is not supported yet.
+        DCHECK(visible_rect.origin().IsOrigin());
+        DCHECK(visible_rect.size() == coded_size);
+        uv_tex_size.SetSize((ya_tex_size.width() + 1) / 2,
+                            (ya_tex_size.height() + 1) / 2);
+      } else {
+        uv_tex_size = media::VideoFrame::PlaneSize(
+            frame_->format(), media::VideoFrame::kUPlane, coded_size);
+        DCHECK(uv_tex_size ==
                media::VideoFrame::PlaneSize(
-                   frame_->format(), media::VideoFrame::kAPlane, coded_size));
+                   frame_->format(), media::VideoFrame::kVPlane, coded_size));
+        DCHECK_IMPLIES(
+            frame_resources_.size() > 3,
+            ya_tex_size ==
+                media::VideoFrame::PlaneSize(
+                    frame_->format(), media::VideoFrame::kAPlane, coded_size));
       }
 
-      gfx::RectF tex_coord_rect(
-          tex_x_offset, tex_y_offset, tex_width_scale, tex_height_scale);
+      // Compute the UV sub-sampling factor based on the ratio between
+      // |ya_tex_size| and |uv_tex_size|.
+      float uv_subsampling_factor_x =
+          static_cast<float>(ya_tex_size.width()) / uv_tex_size.width();
+      float uv_subsampling_factor_y =
+          static_cast<float>(ya_tex_size.height()) / uv_tex_size.height();
+      gfx::RectF ya_tex_coord_rect(visible_rect);
+      gfx::RectF uv_tex_coord_rect(
+          visible_rect.x() / uv_subsampling_factor_x,
+          visible_rect.y() / uv_subsampling_factor_y,
+          visible_rect.width() / uv_subsampling_factor_x,
+          visible_rect.height() / uv_subsampling_factor_y);
+
       YUVVideoDrawQuad* yuv_video_quad =
           render_pass->CreateAndAppendDrawQuad<YUVVideoDrawQuad>();
       yuv_video_quad->SetNew(
           shared_quad_state, quad_rect, opaque_rect, visible_quad_rect,
-          tex_coord_rect, ya_tex_size, uv_tex_size, frame_resources_[0],
-          frame_resources_[1], frame_resources_[2],
+          ya_tex_coord_rect, uv_tex_coord_rect, ya_tex_size, uv_tex_size,
+          frame_resources_[0], frame_resources_[1], frame_resources_[2],
           frame_resources_.size() > 3 ? frame_resources_[3] : 0, color_space);
+      ValidateQuadResources(yuv_video_quad);
       break;
     }
+    case VideoFrameExternalResources::RGBA_RESOURCE:
     case VideoFrameExternalResources::RGB_RESOURCE: {
       DCHECK_EQ(frame_resources_.size(), 1u);
       if (frame_resources_.size() < 1u)
         break;
-      bool premultiplied_alpha = true;
+      bool premultiplied_alpha =
+          (frame_resource_type_ == VideoFrameExternalResources::RGBA_RESOURCE);
       gfx::PointF uv_top_left(0.f, 0.f);
       gfx::PointF uv_bottom_right(tex_width_scale, tex_height_scale);
       float opacity[] = {1.0f, 1.0f, 1.0f, 1.0f};
@@ -275,6 +297,7 @@ void VideoLayerImpl::AppendQuads(RenderPass* render_pass,
                            opacity,
                            flipped,
                            nearest_neighbor);
+      ValidateQuadResources(texture_quad);
       break;
     }
     case VideoFrameExternalResources::STREAM_TEXTURE_RESOURCE: {
@@ -289,6 +312,7 @@ void VideoLayerImpl::AppendQuads(RenderPass* render_pass,
           shared_quad_state, quad_rect, opaque_rect, visible_quad_rect,
           frame_resources_[0],
           scale * provider_client_impl_->StreamTextureMatrix());
+      ValidateQuadResources(stream_video_quad);
       break;
     }
     case VideoFrameExternalResources::IO_SURFACE: {
@@ -304,6 +328,7 @@ void VideoLayerImpl::AppendQuads(RenderPass* render_pass,
                               visible_rect.size(),
                               frame_resources_[0],
                               IOSurfaceDrawQuad::UNFLIPPED);
+      ValidateQuadResources(io_surface_quad);
       break;
     }
 #if defined(VIDEO_HOLE)
@@ -357,10 +382,17 @@ void VideoLayerImpl::DidDraw(ResourceProvider* resource_provider) {
     frame_resources_.clear();
   }
 
-  provider_client_impl_->PutCurrentFrame(frame_);
+  provider_client_impl_->PutCurrentFrame();
   frame_ = nullptr;
 
   provider_client_impl_->ReleaseLock();
+}
+
+SimpleEnclosedRegion VideoLayerImpl::VisibleContentOpaqueRegion() const {
+  // If we don't have a frame yet, then we don't have an opaque region.
+  if (!provider_client_impl_->HasCurrentFrame())
+    return SimpleEnclosedRegion();
+  return LayerImpl::VisibleContentOpaqueRegion();
 }
 
 void VideoLayerImpl::ReleaseResources() {

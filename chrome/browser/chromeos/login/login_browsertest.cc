@@ -5,6 +5,8 @@
 #include "ash/shell.h"
 #include "ash/system/tray/system_tray.h"
 #include "base/command_line.h"
+#include "base/json/json_file_value_serializer.h"
+#include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/login/login_manager_test.h"
@@ -17,7 +19,9 @@
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_constants.h"
+#include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/tracing.h"
@@ -38,6 +42,7 @@ using ::testing::Return;
 
 namespace {
 
+const char kGaiaId[] = "12345";
 const char kTestUser[] = "test-user@gmail.com";
 const char kPassword[] = "password";
 
@@ -111,13 +116,13 @@ class LoginTest : public chromeos::LoginManagerTest {
   void StartGaiaAuthOffline() {
     content::DOMMessageQueue message_queue;
     const std::string js = "(function() {"
-      "var frame = $('signin-frame');"
-      "var onload= function() {"
-        "frame.removeEventListener('load', onload);"
-        "window.domAutomationController.setAutomationId(0);"
-        "window.domAutomationController.send('frameLoaded');"
-      "};"
-      "frame.addEventListener('load', onload);"
+      "var authenticator = $('gaia-signin').gaiaAuthHost_;"
+      "authenticator.addEventListener('ready',"
+        "function f() {"
+          "authenticator.removeEventListener('ready', f);"
+          "window.domAutomationController.setAutomationId(0);"
+          "window.domAutomationController.send('offlineLoaded');"
+        "});"
       "$('error-offline-login-link').onclick();"
     "})();";
     ASSERT_TRUE(content::ExecuteScript(web_contents(), js));
@@ -125,12 +130,14 @@ class LoginTest : public chromeos::LoginManagerTest {
     std::string message;
     do {
       ASSERT_TRUE(message_queue.WaitForMessage(&message));
-    } while (message != "\"frameLoaded\"");
+    } while (message != "\"offlineLoaded\"");
   }
 
-  void SubmitGaiaAuthOfflineForm(const std::string& user_email,
-                                 const std::string& password) {
+  void SubmitOldGaiaAuthOfflineForm(const std::string& user_email,
+                                    const std::string& password) {
     // Note the input elements must match gaia_auth/offline.html.
+    JSExpect("document.querySelector('#offline-gaia').hidden");
+    JSExpect("!document.querySelector('#signin-frame').hidden");
     std::string js =
         "(function(){"
           "document.getElementsByName('email')[0].value = '$Email';"
@@ -140,6 +147,93 @@ class LoginTest : public chromeos::LoginManagerTest {
     ReplaceSubstringsAfterOffset(&js, 0, "$Email", user_email);
     ReplaceSubstringsAfterOffset(&js, 0, "$Password", password);
     ExecuteJsInGaiaAuthFrame(js);
+  }
+
+  void SubmitGaiaAuthOfflineForm(const std::string& user_email,
+                                 const std::string& password) {
+    const std::string animated_pages =
+        "document.querySelector('#offline-gaia /deep/ "
+        "#animatedPages')";
+    const std::string email_input =
+        "document.querySelector('#offline-gaia /deep/ #emailInput')";
+    const std::string email_next_button =
+        "document.querySelector('#offline-gaia /deep/ #emailSection "
+        "/deep/ .blue-button')";
+    const std::string password_input =
+        "document.querySelector('#offline-gaia /deep/ "
+        "#passwordInput')";
+    const std::string password_next_button =
+        "document.querySelector('#offline-gaia /deep/ #passwordSection"
+        " /deep/ .blue-button')";
+
+    content::DOMMessageQueue message_queue;
+    JSExpect("!document.querySelector('#offline-gaia').hidden");
+    JSExpect("document.querySelector('#signin-frame').hidden");
+    const std::string js =
+        animated_pages +
+        ".addEventListener('core-animated-pages-transition-end',"
+        "function() {"
+        "window.domAutomationController.setAutomationId(0);"
+        "window.domAutomationController.send('switchToPassword');"
+        "})";
+    ASSERT_TRUE(content::ExecuteScript(web_contents(), js));
+    std::string set_email = email_input + ".value = '$Email'";
+    ReplaceSubstringsAfterOffset(&set_email, 0, "$Email", user_email);
+    ASSERT_TRUE(content::ExecuteScript(web_contents(), set_email));
+    ASSERT_TRUE(content::ExecuteScript(web_contents(),
+                                       email_next_button + ".fire('tap')"));
+    std::string message;
+    do {
+      ASSERT_TRUE(message_queue.WaitForMessage(&message));
+      LOG(ERROR) << message;
+    } while (message != "\"switchToPassword\"");
+
+    std::string set_password = password_input + ".value = '$Password'";
+    ReplaceSubstringsAfterOffset(&set_password, 0, "$Password", password);
+    ASSERT_TRUE(content::ExecuteScript(web_contents(), set_password));
+    ASSERT_TRUE(content::ExecuteScript(web_contents(),
+                                       password_next_button + ".fire('tap')"));
+  }
+
+  void PrepareOfflineLogin() {
+    bool show_user;
+    ASSERT_TRUE(chromeos::CrosSettings::Get()->GetBoolean(
+        chromeos::kAccountsPrefShowUserNamesOnSignIn, &show_user));
+    ASSERT_FALSE(show_user);
+
+    StartGaiaAuthOffline();
+
+    chromeos::UserContext user_context(kTestUser);
+    user_context.SetGaiaID(kGaiaId);
+    user_context.SetKey(chromeos::Key(kPassword));
+    SetExpectedCredentials(user_context);
+  }
+};
+
+class LoginOfflineTest : public LoginTest {
+ public:
+  LoginOfflineTest() {}
+  ~LoginOfflineTest() override {}
+
+  bool SetUpUserDataDirectory() override {
+    base::FilePath user_data_dir;
+    CHECK(PathService::Get(chrome::DIR_USER_DATA, &user_data_dir));
+    base::FilePath local_state_path =
+        user_data_dir.Append(chrome::kLocalStateFilename);
+    base::DictionaryValue local_state_dict;
+
+    // Set webview disabled flag only when local state file does not exist.
+    // Otherwise, we break PRE tests that leave state in it.
+    if (!base::PathExists(local_state_path)) {
+      // TODO(rsorokin): Fix offline test for webview signin.
+      // http://crbug.com/475569
+      local_state_dict.SetBoolean(prefs::kWebviewSigninDisabled, true);
+
+      CHECK(JSONFileValueSerializer(local_state_path)
+                .Serialize(local_state_dict));
+    }
+
+    return LoginTest::SetUpUserDataDirectory();
   }
 };
 
@@ -215,6 +309,24 @@ IN_PROC_BROWSER_TEST_F(LoginSigninTest, WebUIVisible) {
   ASSERT_TRUE(tracing::EndTracing(&json_events));
 }
 
+IN_PROC_BROWSER_TEST_F(LoginOfflineTest, PRE_OldGaiaAuthOffline) {
+  RegisterUser(kTestUser);
+  chromeos::StartupUtils::MarkOobeCompleted();
+  chromeos::CrosSettings::Get()->SetBoolean(
+      chromeos::kAccountsPrefShowUserNamesOnSignIn, false);
+}
+
+IN_PROC_BROWSER_TEST_F(LoginOfflineTest, OldGaiaAuthOffline) {
+  PrepareOfflineLogin();
+  content::WindowedNotificationObserver session_start_waiter(
+      chrome::NOTIFICATION_SESSION_STARTED,
+      content::NotificationService::AllSources());
+  SubmitOldGaiaAuthOfflineForm(kTestUser, kPassword);
+  session_start_waiter.Wait();
+
+  TestSystemTrayIsVisible();
+}
+
 IN_PROC_BROWSER_TEST_F(LoginTest, PRE_GaiaAuthOffline) {
   RegisterUser(kTestUser);
   chromeos::StartupUtils::MarkOobeCompleted();
@@ -223,22 +335,12 @@ IN_PROC_BROWSER_TEST_F(LoginTest, PRE_GaiaAuthOffline) {
 }
 
 IN_PROC_BROWSER_TEST_F(LoginTest, GaiaAuthOffline) {
-  bool show_user;
-  ASSERT_TRUE(chromeos::CrosSettings::Get()->GetBoolean(
-      chromeos::kAccountsPrefShowUserNamesOnSignIn, &show_user));
-  ASSERT_FALSE(show_user);
-
-  StartGaiaAuthOffline();
-
-  chromeos::UserContext user_context(kTestUser);
-  user_context.SetKey(chromeos::Key(kPassword));
-  SetExpectedCredentials(user_context);
-
-  SubmitGaiaAuthOfflineForm(kTestUser, kPassword);
-
-  content::WindowedNotificationObserver(
+  PrepareOfflineLogin();
+  content::WindowedNotificationObserver session_start_waiter(
       chrome::NOTIFICATION_SESSION_STARTED,
-      content::NotificationService::AllSources()).Wait();
+      content::NotificationService::AllSources());
+  SubmitGaiaAuthOfflineForm(kTestUser, kPassword);
+  session_start_waiter.Wait();
 
   TestSystemTrayIsVisible();
 }

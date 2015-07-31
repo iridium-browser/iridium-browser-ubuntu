@@ -29,10 +29,18 @@ static const char kTestVcdiffDictionary[] = "DictionaryFor"
 class MockSdchObserver : public SdchObserver {
  public:
   MockSdchObserver()
-      : dictionary_used_notifications_(0),
+      : dictionary_added_notifications_(0),
+        dictionary_removed_notifications_(0),
+        dictionary_used_notifications_(0),
         get_dictionary_notifications_(0),
         clear_dictionaries_notifications_(0) {}
 
+  int dictionary_added_notifications() const {
+    return dictionary_added_notifications_;
+  }
+  int dictionary_removed_notifications() const {
+    return dictionary_removed_notifications_;
+  }
   std::string last_server_hash() const { return last_server_hash_; }
   int dictionary_used_notifications() const {
     return dictionary_used_notifications_;
@@ -50,24 +58,34 @@ class MockSdchObserver : public SdchObserver {
   }
 
   // SdchObserver implementation
-  void OnDictionaryUsed(SdchManager* manager,
-                        const std::string& server_hash) override {
+  void OnDictionaryAdded(const GURL& dictionary_url,
+                         const std::string& server_hash) override {
+    last_server_hash_ = server_hash;
+    last_dictionary_url_ = dictionary_url;
+    ++dictionary_added_notifications_;
+  }
+  void OnDictionaryRemoved(const std::string& server_hash) override {
+    last_server_hash_ = server_hash;
+    ++dictionary_removed_notifications_;
+  }
+  void OnDictionaryUsed(const std::string& server_hash) override {
     last_server_hash_ = server_hash;
     ++dictionary_used_notifications_;
   }
 
-  void OnGetDictionary(SdchManager* manager,
-                       const GURL& request_url,
+  void OnGetDictionary(const GURL& request_url,
                        const GURL& dictionary_url) override {
     ++get_dictionary_notifications_;
     last_dictionary_request_url_ = request_url;
     last_dictionary_url_ = dictionary_url;
   }
-  void OnClearDictionaries(SdchManager* manager) override {
+  void OnClearDictionaries() override {
     ++clear_dictionaries_notifications_;
   }
 
  private:
+  int dictionary_added_notifications_;
+  int dictionary_removed_notifications_;
   int dictionary_used_notifications_;
   int get_dictionary_notifications_;
   int clear_dictionaries_notifications_;
@@ -272,7 +290,7 @@ TEST_F(SdchManagerTest, CanUseHTTPSDictionaryOverHTTPSIfEnabled) {
           target_url, server_hash, &problem_code));
   EXPECT_EQ(SDCH_OK, problem_code);
   EXPECT_TRUE(dict_set.get());
-  EXPECT_TRUE(dict_set->GetDictionary(server_hash));
+  EXPECT_TRUE(dict_set->GetDictionaryText(server_hash));
 }
 
 TEST_F(SdchManagerTest, CanNotUseHTTPDictionaryOverHTTPS) {
@@ -419,46 +437,6 @@ TEST_F(SdchManagerTest, CanStillSetExactMatchDictionary) {
                                 GURL("http://" + dictionary_domain)));
 }
 
-TEST_F(SdchManagerTest, PathMatch) {
-  bool (*PathMatch)(const std::string& path, const std::string& restriction) =
-      SdchManager::Dictionary::PathMatch;
-  // Perfect match is supported.
-  EXPECT_TRUE(PathMatch("/search", "/search"));
-  EXPECT_TRUE(PathMatch("/search/", "/search/"));
-
-  // Prefix only works if last character of restriction is a slash, or first
-  // character in path after a match is a slash. Validate each case separately.
-
-  // Rely on the slash in the path (not at the end of the restriction).
-  EXPECT_TRUE(PathMatch("/search/something", "/search"));
-  EXPECT_TRUE(PathMatch("/search/s", "/search"));
-  EXPECT_TRUE(PathMatch("/search/other", "/search"));
-  EXPECT_TRUE(PathMatch("/search/something", "/search"));
-
-  // Rely on the slash at the end of the restriction.
-  EXPECT_TRUE(PathMatch("/search/something", "/search/"));
-  EXPECT_TRUE(PathMatch("/search/s", "/search/"));
-  EXPECT_TRUE(PathMatch("/search/other", "/search/"));
-  EXPECT_TRUE(PathMatch("/search/something", "/search/"));
-
-  // Make sure less that sufficient prefix match is false.
-  EXPECT_FALSE(PathMatch("/sear", "/search"));
-  EXPECT_FALSE(PathMatch("/", "/search"));
-  EXPECT_FALSE(PathMatch(std::string(), "/search"));
-
-  // Add examples with several levels of direcories in the restriction.
-  EXPECT_FALSE(PathMatch("/search/something", "search/s"));
-  EXPECT_FALSE(PathMatch("/search/", "/search/s"));
-
-  // Make sure adding characters to path will also fail.
-  EXPECT_FALSE(PathMatch("/searching", "/search/"));
-  EXPECT_FALSE(PathMatch("/searching", "/search"));
-
-  // Make sure we're case sensitive.
-  EXPECT_FALSE(PathMatch("/ABC", "/abc"));
-  EXPECT_FALSE(PathMatch("/abc", "/ABC"));
-}
-
 // The following are only applicable while we have a latency test in the code,
 // and can be removed when that functionality is stripped.
 TEST_F(SdchManagerTest, LatencyTestControls) {
@@ -515,7 +493,7 @@ TEST_F(SdchManagerTest, CanUseMultipleManagers) {
       GURL("http://" + dictionary_domain_1 + "/random_url"),
       server_hash_1, &problem_code);
   EXPECT_TRUE(dict_set);
-  EXPECT_TRUE(dict_set->GetDictionary(server_hash_1));
+  EXPECT_TRUE(dict_set->GetDictionaryText(server_hash_1));
   EXPECT_EQ(SDCH_OK, problem_code);
 
   second_manager.AddSdchDictionary(
@@ -524,7 +502,7 @@ TEST_F(SdchManagerTest, CanUseMultipleManagers) {
       GURL("http://" + dictionary_domain_2 + "/random_url"),
       server_hash_2, &problem_code);
   EXPECT_TRUE(dict_set);
-  EXPECT_TRUE(dict_set->GetDictionary(server_hash_2));
+  EXPECT_TRUE(dict_set->GetDictionaryText(server_hash_2));
   EXPECT_EQ(SDCH_OK, problem_code);
 
   dict_set = sdch_manager()->GetDictionarySetByHash(
@@ -577,7 +555,7 @@ TEST_F(SdchManagerTest, ClearDictionaryData) {
       GURL("http://" + dictionary_domain + "/random_url"),
       server_hash, &problem_code);
   EXPECT_TRUE(dict_set);
-  EXPECT_TRUE(dict_set->GetDictionary(server_hash));
+  EXPECT_TRUE(dict_set->GetDictionaryText(server_hash));
   EXPECT_EQ(SDCH_OK, problem_code);
 
   sdch_manager()->BlacklistDomain(GURL(blacklist_url), SDCH_OK);
@@ -616,8 +594,8 @@ TEST_F(SdchManagerTest, GetDictionaryNotification) {
 TEST_F(SdchManagerTest, ExpirationCheckedProperly) {
   // Create an SDCH dictionary with an expiration time in the past.
   std::string dictionary_domain("x.y.z.google.com");
-  std::string dictionary_text(base::StringPrintf(
-      "Domain: %s\nMax-age: 0\n\n", dictionary_domain.c_str()));
+  std::string dictionary_text(base::StringPrintf("Domain: %s\nMax-age: -1\n\n",
+                                                 dictionary_domain.c_str()));
   dictionary_text.append(
       kTestVcdiffDictionary, sizeof(kTestVcdiffDictionary) - 1);
   std::string client_hash;
@@ -627,18 +605,12 @@ TEST_F(SdchManagerTest, ExpirationCheckedProperly) {
   AddSdchDictionary(dictionary_text, target_gurl);
 
   // It should be visible if looked up by hash whether expired or not.
-  scoped_ptr<base::SimpleTestClock> clock(new base::SimpleTestClock);
-  clock->SetNow(base::Time::Now());
-  clock->Advance(base::TimeDelta::FromMinutes(5));
   SdchProblemCode problem_code;
   scoped_ptr<SdchManager::DictionarySet> hash_set(
       sdch_manager()->GetDictionarySetByHash(
           target_gurl, server_hash, &problem_code).Pass());
   ASSERT_TRUE(hash_set);
   ASSERT_EQ(SDCH_OK, problem_code);
-  const_cast<SdchManager::Dictionary*>(
-      hash_set->GetDictionary(server_hash))->SetClockForTesting(
-      clock.Pass());
 
   // Make sure it's not visible for advertisement, but is visible
   // if looked up by hash.
@@ -674,19 +646,37 @@ TEST_F(SdchManagerTest, SdchDictionaryUsed) {
   std::string server_hash;
   SdchManager::GenerateHash(dictionary_text, &client_hash, &server_hash);
   EXPECT_TRUE(AddSdchDictionary(dictionary_text, target_gurl));
-  EXPECT_EQ("xyzzy", observer.last_server_hash());
   EXPECT_EQ(1, observer.dictionary_used_notifications());
 
   EXPECT_TRUE(sdch_manager()->GetDictionarySet(target_gurl));
-  EXPECT_EQ("xyzzy", observer.last_server_hash());
   EXPECT_EQ(1, observer.dictionary_used_notifications());
 
   sdch_manager()->RemoveObserver(&observer);
   EXPECT_EQ(1, observer.dictionary_used_notifications());
-  EXPECT_EQ("xyzzy", observer.last_server_hash());
   sdch_manager()->OnDictionaryUsed("plugh");
   EXPECT_EQ(1, observer.dictionary_used_notifications());
-  EXPECT_EQ("xyzzy", observer.last_server_hash());
+}
+
+TEST_F(SdchManagerTest, AddRemoveNotifications) {
+  MockSdchObserver observer;
+  sdch_manager()->AddObserver(&observer);
+
+  std::string dictionary_domain("x.y.z.google.com");
+  GURL target_gurl("http://" + dictionary_domain);
+  std::string dictionary_text(NewSdchDictionary(dictionary_domain));
+  std::string client_hash;
+  std::string server_hash;
+  SdchManager::GenerateHash(dictionary_text, &client_hash, &server_hash);
+  EXPECT_TRUE(AddSdchDictionary(dictionary_text, target_gurl));
+  EXPECT_EQ(1, observer.dictionary_added_notifications());
+  EXPECT_EQ(target_gurl, observer.last_dictionary_url());
+  EXPECT_EQ(server_hash, observer.last_server_hash());
+
+  EXPECT_EQ(SDCH_OK, sdch_manager()->RemoveSdchDictionary(server_hash));
+  EXPECT_EQ(1, observer.dictionary_removed_notifications());
+  EXPECT_EQ(server_hash, observer.last_server_hash());
+
+  sdch_manager()->RemoveObserver(&observer);
 }
 
 }  // namespace net

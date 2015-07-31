@@ -523,6 +523,102 @@ TEST_F(GLES2FormatTest, CompressedTexSubImage2D) {
   CheckBytesWrittenMatchesExpectedSize(next_cmd, sizeof(cmd));
 }
 
+TEST_F(GLES2FormatTest, CompressedTexImage3DBucket) {
+  cmds::CompressedTexImage3DBucket& cmd =
+      *GetBufferAs<cmds::CompressedTexImage3DBucket>();
+  void* next_cmd = cmd.Set(&cmd, static_cast<GLenum>(11),
+                           static_cast<GLint>(12), static_cast<GLenum>(13),
+                           static_cast<GLsizei>(14), static_cast<GLsizei>(15),
+                           static_cast<GLsizei>(16), static_cast<GLuint>(17));
+  EXPECT_EQ(static_cast<uint32_t>(cmds::CompressedTexImage3DBucket::kCmdId),
+            cmd.header.command);
+  EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
+  EXPECT_EQ(static_cast<GLenum>(11), cmd.target);
+  EXPECT_EQ(static_cast<GLint>(12), cmd.level);
+  EXPECT_EQ(static_cast<GLenum>(13), cmd.internalformat);
+  EXPECT_EQ(static_cast<GLsizei>(14), cmd.width);
+  EXPECT_EQ(static_cast<GLsizei>(15), cmd.height);
+  EXPECT_EQ(static_cast<GLsizei>(16), cmd.depth);
+  EXPECT_EQ(static_cast<GLuint>(17), cmd.bucket_id);
+  CheckBytesWrittenMatchesExpectedSize(next_cmd, sizeof(cmd));
+}
+
+TEST_F(GLES2FormatTest, CompressedTexImage3D) {
+  cmds::CompressedTexImage3D& cmd = *GetBufferAs<cmds::CompressedTexImage3D>();
+  void* next_cmd =
+      cmd.Set(&cmd, static_cast<GLenum>(11), static_cast<GLint>(12),
+              static_cast<GLenum>(13), static_cast<GLsizei>(14),
+              static_cast<GLsizei>(15), static_cast<GLsizei>(16),
+              static_cast<GLsizei>(17), static_cast<uint32_t>(18),
+              static_cast<uint32_t>(19));
+  EXPECT_EQ(static_cast<uint32_t>(cmds::CompressedTexImage3D::kCmdId),
+            cmd.header.command);
+  EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
+  EXPECT_EQ(static_cast<GLenum>(11), cmd.target);
+  EXPECT_EQ(static_cast<GLint>(12), cmd.level);
+  EXPECT_EQ(static_cast<GLenum>(13), cmd.internalformat);
+  EXPECT_EQ(static_cast<GLsizei>(14), cmd.width);
+  EXPECT_EQ(static_cast<GLsizei>(15), cmd.height);
+  EXPECT_EQ(static_cast<GLsizei>(16), cmd.depth);
+  EXPECT_EQ(static_cast<GLsizei>(17), cmd.imageSize);
+  EXPECT_EQ(static_cast<uint32_t>(18), cmd.data_shm_id);
+  EXPECT_EQ(static_cast<uint32_t>(19), cmd.data_shm_offset);
+  CheckBytesWrittenMatchesExpectedSize(next_cmd, sizeof(cmd));
+}
+
+TEST_F(GLES2FormatTest, CompressedTexSubImage3DBucket) {
+  cmds::CompressedTexSubImage3DBucket& cmd =
+      *GetBufferAs<cmds::CompressedTexSubImage3DBucket>();
+  void* next_cmd =
+      cmd.Set(&cmd, static_cast<GLenum>(11), static_cast<GLint>(12),
+              static_cast<GLint>(13), static_cast<GLint>(14),
+              static_cast<GLint>(15), static_cast<GLsizei>(16),
+              static_cast<GLsizei>(17), static_cast<GLsizei>(18),
+              static_cast<GLenum>(19), static_cast<GLuint>(20));
+  EXPECT_EQ(static_cast<uint32_t>(cmds::CompressedTexSubImage3DBucket::kCmdId),
+            cmd.header.command);
+  EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
+  EXPECT_EQ(static_cast<GLenum>(11), cmd.target);
+  EXPECT_EQ(static_cast<GLint>(12), cmd.level);
+  EXPECT_EQ(static_cast<GLint>(13), cmd.xoffset);
+  EXPECT_EQ(static_cast<GLint>(14), cmd.yoffset);
+  EXPECT_EQ(static_cast<GLint>(15), cmd.zoffset);
+  EXPECT_EQ(static_cast<GLsizei>(16), cmd.width);
+  EXPECT_EQ(static_cast<GLsizei>(17), cmd.height);
+  EXPECT_EQ(static_cast<GLsizei>(18), cmd.depth);
+  EXPECT_EQ(static_cast<GLenum>(19), cmd.format);
+  EXPECT_EQ(static_cast<GLuint>(20), cmd.bucket_id);
+  CheckBytesWrittenMatchesExpectedSize(next_cmd, sizeof(cmd));
+}
+
+TEST_F(GLES2FormatTest, CompressedTexSubImage3D) {
+  cmds::CompressedTexSubImage3D& cmd =
+      *GetBufferAs<cmds::CompressedTexSubImage3D>();
+  void* next_cmd =
+      cmd.Set(&cmd, static_cast<GLenum>(11), static_cast<GLint>(12),
+              static_cast<GLint>(13), static_cast<GLint>(14),
+              static_cast<GLint>(15), static_cast<GLsizei>(16),
+              static_cast<GLsizei>(17), static_cast<GLsizei>(18),
+              static_cast<GLenum>(19), static_cast<GLsizei>(20),
+              static_cast<uint32_t>(21), static_cast<uint32_t>(22));
+  EXPECT_EQ(static_cast<uint32_t>(cmds::CompressedTexSubImage3D::kCmdId),
+            cmd.header.command);
+  EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
+  EXPECT_EQ(static_cast<GLenum>(11), cmd.target);
+  EXPECT_EQ(static_cast<GLint>(12), cmd.level);
+  EXPECT_EQ(static_cast<GLint>(13), cmd.xoffset);
+  EXPECT_EQ(static_cast<GLint>(14), cmd.yoffset);
+  EXPECT_EQ(static_cast<GLint>(15), cmd.zoffset);
+  EXPECT_EQ(static_cast<GLsizei>(16), cmd.width);
+  EXPECT_EQ(static_cast<GLsizei>(17), cmd.height);
+  EXPECT_EQ(static_cast<GLsizei>(18), cmd.depth);
+  EXPECT_EQ(static_cast<GLenum>(19), cmd.format);
+  EXPECT_EQ(static_cast<GLsizei>(20), cmd.imageSize);
+  EXPECT_EQ(static_cast<uint32_t>(21), cmd.data_shm_id);
+  EXPECT_EQ(static_cast<uint32_t>(22), cmd.data_shm_offset);
+  CheckBytesWrittenMatchesExpectedSize(next_cmd, sizeof(cmd));
+}
+
 TEST_F(GLES2FormatTest, CopyBufferSubData) {
   cmds::CopyBufferSubData& cmd = *GetBufferAs<cmds::CopyBufferSubData>();
   void* next_cmd =
@@ -1283,6 +1379,50 @@ TEST_F(GLES2FormatTest, GetFramebufferAttachmentParameteriv) {
   CheckBytesWrittenMatchesExpectedSize(next_cmd, sizeof(cmd));
 }
 
+TEST_F(GLES2FormatTest, GetInteger64v) {
+  cmds::GetInteger64v& cmd = *GetBufferAs<cmds::GetInteger64v>();
+  void* next_cmd =
+      cmd.Set(&cmd, static_cast<GLenum>(11), static_cast<uint32_t>(12),
+              static_cast<uint32_t>(13));
+  EXPECT_EQ(static_cast<uint32_t>(cmds::GetInteger64v::kCmdId),
+            cmd.header.command);
+  EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
+  EXPECT_EQ(static_cast<GLenum>(11), cmd.pname);
+  EXPECT_EQ(static_cast<uint32_t>(12), cmd.params_shm_id);
+  EXPECT_EQ(static_cast<uint32_t>(13), cmd.params_shm_offset);
+  CheckBytesWrittenMatchesExpectedSize(next_cmd, sizeof(cmd));
+}
+
+TEST_F(GLES2FormatTest, GetIntegeri_v) {
+  cmds::GetIntegeri_v& cmd = *GetBufferAs<cmds::GetIntegeri_v>();
+  void* next_cmd =
+      cmd.Set(&cmd, static_cast<GLenum>(11), static_cast<GLuint>(12),
+              static_cast<uint32_t>(13), static_cast<uint32_t>(14));
+  EXPECT_EQ(static_cast<uint32_t>(cmds::GetIntegeri_v::kCmdId),
+            cmd.header.command);
+  EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
+  EXPECT_EQ(static_cast<GLenum>(11), cmd.pname);
+  EXPECT_EQ(static_cast<GLuint>(12), cmd.index);
+  EXPECT_EQ(static_cast<uint32_t>(13), cmd.data_shm_id);
+  EXPECT_EQ(static_cast<uint32_t>(14), cmd.data_shm_offset);
+  CheckBytesWrittenMatchesExpectedSize(next_cmd, sizeof(cmd));
+}
+
+TEST_F(GLES2FormatTest, GetInteger64i_v) {
+  cmds::GetInteger64i_v& cmd = *GetBufferAs<cmds::GetInteger64i_v>();
+  void* next_cmd =
+      cmd.Set(&cmd, static_cast<GLenum>(11), static_cast<GLuint>(12),
+              static_cast<uint32_t>(13), static_cast<uint32_t>(14));
+  EXPECT_EQ(static_cast<uint32_t>(cmds::GetInteger64i_v::kCmdId),
+            cmd.header.command);
+  EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
+  EXPECT_EQ(static_cast<GLenum>(11), cmd.pname);
+  EXPECT_EQ(static_cast<GLuint>(12), cmd.index);
+  EXPECT_EQ(static_cast<uint32_t>(13), cmd.data_shm_id);
+  EXPECT_EQ(static_cast<uint32_t>(14), cmd.data_shm_offset);
+  CheckBytesWrittenMatchesExpectedSize(next_cmd, sizeof(cmd));
+}
+
 TEST_F(GLES2FormatTest, GetIntegerv) {
   cmds::GetIntegerv& cmd = *GetBufferAs<cmds::GetIntegerv>();
   void* next_cmd =
@@ -1563,6 +1703,21 @@ TEST_F(GLES2FormatTest, GetUniformiv) {
   CheckBytesWrittenMatchesExpectedSize(next_cmd, sizeof(cmd));
 }
 
+TEST_F(GLES2FormatTest, GetUniformuiv) {
+  cmds::GetUniformuiv& cmd = *GetBufferAs<cmds::GetUniformuiv>();
+  void* next_cmd =
+      cmd.Set(&cmd, static_cast<GLuint>(11), static_cast<GLint>(12),
+              static_cast<uint32_t>(13), static_cast<uint32_t>(14));
+  EXPECT_EQ(static_cast<uint32_t>(cmds::GetUniformuiv::kCmdId),
+            cmd.header.command);
+  EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
+  EXPECT_EQ(static_cast<GLuint>(11), cmd.program);
+  EXPECT_EQ(static_cast<GLint>(12), cmd.location);
+  EXPECT_EQ(static_cast<uint32_t>(13), cmd.params_shm_id);
+  EXPECT_EQ(static_cast<uint32_t>(14), cmd.params_shm_offset);
+  CheckBytesWrittenMatchesExpectedSize(next_cmd, sizeof(cmd));
+}
+
 TEST_F(GLES2FormatTest, GetUniformIndices) {
   cmds::GetUniformIndices& cmd = *GetBufferAs<cmds::GetUniformIndices>();
   void* next_cmd =
@@ -1614,6 +1769,36 @@ TEST_F(GLES2FormatTest, GetVertexAttribiv) {
       cmd.Set(&cmd, static_cast<GLuint>(11), static_cast<GLenum>(12),
               static_cast<uint32_t>(13), static_cast<uint32_t>(14));
   EXPECT_EQ(static_cast<uint32_t>(cmds::GetVertexAttribiv::kCmdId),
+            cmd.header.command);
+  EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
+  EXPECT_EQ(static_cast<GLuint>(11), cmd.index);
+  EXPECT_EQ(static_cast<GLenum>(12), cmd.pname);
+  EXPECT_EQ(static_cast<uint32_t>(13), cmd.params_shm_id);
+  EXPECT_EQ(static_cast<uint32_t>(14), cmd.params_shm_offset);
+  CheckBytesWrittenMatchesExpectedSize(next_cmd, sizeof(cmd));
+}
+
+TEST_F(GLES2FormatTest, GetVertexAttribIiv) {
+  cmds::GetVertexAttribIiv& cmd = *GetBufferAs<cmds::GetVertexAttribIiv>();
+  void* next_cmd =
+      cmd.Set(&cmd, static_cast<GLuint>(11), static_cast<GLenum>(12),
+              static_cast<uint32_t>(13), static_cast<uint32_t>(14));
+  EXPECT_EQ(static_cast<uint32_t>(cmds::GetVertexAttribIiv::kCmdId),
+            cmd.header.command);
+  EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
+  EXPECT_EQ(static_cast<GLuint>(11), cmd.index);
+  EXPECT_EQ(static_cast<GLenum>(12), cmd.pname);
+  EXPECT_EQ(static_cast<uint32_t>(13), cmd.params_shm_id);
+  EXPECT_EQ(static_cast<uint32_t>(14), cmd.params_shm_offset);
+  CheckBytesWrittenMatchesExpectedSize(next_cmd, sizeof(cmd));
+}
+
+TEST_F(GLES2FormatTest, GetVertexAttribIuiv) {
+  cmds::GetVertexAttribIuiv& cmd = *GetBufferAs<cmds::GetVertexAttribIuiv>();
+  void* next_cmd =
+      cmd.Set(&cmd, static_cast<GLuint>(11), static_cast<GLenum>(12),
+              static_cast<uint32_t>(13), static_cast<uint32_t>(14));
+  EXPECT_EQ(static_cast<uint32_t>(cmds::GetVertexAttribIuiv::kCmdId),
             cmd.header.command);
   EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
   EXPECT_EQ(static_cast<GLuint>(11), cmd.index);

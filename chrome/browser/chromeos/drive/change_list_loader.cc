@@ -10,6 +10,8 @@
 #include "base/callback_helpers.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/synchronization/cancellation_flag.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chrome/browser/chromeos/drive/change_list_loader_observer.h"
 #include "chrome/browser/chromeos/drive/change_list_processor.h"
@@ -225,7 +227,7 @@ void AboutResourceLoader::GetAboutResource(
   }
 
   if (cached_about_resource_) {
-    base::MessageLoopProxy::current()->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::Bind(
             callback,
@@ -294,6 +296,7 @@ ChangeListLoader::ChangeListLoader(
     LoaderController* loader_controller)
     : logger_(logger),
       blocking_task_runner_(blocking_task_runner),
+      in_shutdown_(new base::CancellationFlag),
       resource_metadata_(resource_metadata),
       scheduler_(scheduler),
       about_resource_loader_(about_resource_loader),
@@ -303,6 +306,10 @@ ChangeListLoader::ChangeListLoader(
 }
 
 ChangeListLoader::~ChangeListLoader() {
+  in_shutdown_->Set();
+  // Delete |in_shutdown_| with the blocking task runner so that it gets deleted
+  // after all active ChangeListProcessors.
+  blocking_task_runner_->DeleteSoon(FROM_HERE, in_shutdown_.release());
 }
 
 bool ChangeListLoader::IsRefreshing() const {
@@ -455,7 +462,7 @@ void ChangeListLoader::OnChangeListLoadComplete(FileError error) {
   }
 
   for (size_t i = 0; i < pending_load_callback_.size(); ++i) {
-    base::MessageLoopProxy::current()->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::Bind(pending_load_callback_[i], error));
   }
@@ -526,7 +533,7 @@ void ChangeListLoader::LoadChangeListFromServerAfterLoadChangeList(
   }
 
   ChangeListProcessor* change_list_processor =
-      new ChangeListProcessor(resource_metadata_);
+      new ChangeListProcessor(resource_metadata_, in_shutdown_.get());
   // Don't send directory content change notification while performing
   // the initial content retrieval.
   const bool should_notify_changed_directories = is_delta_update;

@@ -9,16 +9,14 @@
     android:layout_height="wrap_content"
     android:overScrollMode="ifContentScrolls">
     <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:padding="25dp"
-        android:orientation="vertical">
+        android:orientation="vertical"
+        style="@style/AlertDialogContent">
         <TextView
             android:id="@+id/prompt_text"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="25dp" />
-        <EditText
+        <org.chromium.chrome.browser.widget.AlertDialogEditText
             android:id="@+id/passphrase"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

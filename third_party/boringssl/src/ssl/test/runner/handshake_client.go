@@ -83,6 +83,10 @@ func (c *Conn) clientHandshake() error {
 		hello.extendedMasterSecret = false
 	}
 
+	if c.config.Bugs.NoSupportedCurves {
+		hello.supportedCurves = nil
+	}
+
 	if len(c.clientVerify) > 0 && !c.config.Bugs.EmptyRenegotiationInfo {
 		if c.config.Bugs.BadRenegotiationInfo {
 			hello.secureRenegotiation = append(hello.secureRenegotiation, c.clientVerify...)
@@ -129,16 +133,13 @@ NextCipherSuite:
 		return errors.New("tls: short read from Rand: " + err.Error())
 	}
 
-	if hello.vers >= VersionTLS12 && !c.config.Bugs.NoSignatureAndHashes && (c.cipherSuite == 0 || !c.config.Bugs.NoSignatureAlgorithmsOnRenego) {
+	if hello.vers >= VersionTLS12 && !c.config.Bugs.NoSignatureAndHashes && (c.cipherSuite == nil || !c.config.Bugs.NoSignatureAlgorithmsOnRenego) {
 		hello.signatureAndHashes = c.config.signatureAndHashesForClient()
 	}
 
 	var session *ClientSessionState
 	var cacheKey string
 	sessionCache := c.config.ClientSessionCache
-	if c.config.Bugs.NeverResumeOnRenego && c.cipherSuite != 0 {
-		sessionCache = nil
-	}
 
 	if sessionCache != nil {
 		hello.ticketSupported = !c.config.SessionTicketsDisabled
@@ -351,7 +352,10 @@ NextCipherSuite:
 
 	c.didResume = isResume
 	c.handshakeComplete = true
-	c.cipherSuite = suite.id
+	c.cipherSuite = suite
+	copy(c.clientRandom[:], hs.hello.random)
+	copy(c.serverRandom[:], hs.serverHello.random)
+	copy(c.masterSecret[:], hs.masterSecret)
 	return nil
 }
 
@@ -720,6 +724,12 @@ func (hs *clientHandshakeState) processServerHello() (bool, error) {
 	}
 
 	if hs.serverResumedSession() {
+		// For test purposes, assert that the server never accepts the
+		// resumption offer on renegotiation.
+		if c.cipherSuite != nil && c.config.Bugs.FailIfResumeOnRenego {
+			return false, errors.New("tls: server resumed session on renegotiation")
+		}
+
 		// Restore masterSecret and peerCerts from previous state
 		hs.masterSecret = hs.session.masterSecret
 		c.peerCertificates = hs.session.serverCertificates
@@ -851,6 +861,9 @@ func (hs *clientHandshakeState) sendFinished(isResume bool) error {
 		finished.verifyData = hs.finishedHash.clientSum(nil)
 	} else {
 		finished.verifyData = hs.finishedHash.clientSum(hs.masterSecret)
+	}
+	if c.config.Bugs.BadFinished {
+		finished.verifyData[0]++
 	}
 	c.clientVerify = append(c.clientVerify[:0], finished.verifyData...)
 	hs.finishedBytes = finished.marshal()

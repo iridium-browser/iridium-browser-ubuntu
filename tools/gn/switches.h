@@ -40,6 +40,10 @@ extern const char kDotfile[];
 extern const char kDotfile_HelpShort[];
 extern const char kDotfile_Help[];
 
+extern const char kMarkdown[];
+extern const char kMarkdown_HelpShort[];
+extern const char kMarkdown_Help[];
+
 extern const char kNoColor[];
 extern const char kNoColor_HelpShort[];
 extern const char kNoColor_Help[];
@@ -51,6 +55,10 @@ extern const char kQuiet_Help[];
 extern const char kRoot[];
 extern const char kRoot_HelpShort[];
 extern const char kRoot_Help[];
+
+extern const char kRuntimeDepsListFile[];
+extern const char kRuntimeDepsListFile_HelpShort[];
+extern const char kRuntimeDepsListFile_Help[];
 
 extern const char kThreads[];
 extern const char kThreads_HelpShort[];

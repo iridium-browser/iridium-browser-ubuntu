@@ -177,7 +177,6 @@ enum WebAXRole {
     WebAXRoleTab,
     WebAXRoleTableHeaderContainer,
     WebAXRoleTable,
-    WebAXRoleTextArea,
     WebAXRoleTextField,
     WebAXRoleTime,
     WebAXRoleTimer,
@@ -205,6 +204,7 @@ enum WebAXState {
     WebAXStateIndeterminate,
     WebAXStateInvisible,
     WebAXStateLinked,
+    WebAXStateMultiline,
     WebAXStateMultiselectable,
     WebAXStateOffscreen,
     WebAXStatePressed,
@@ -217,7 +217,6 @@ enum WebAXState {
     WebAXStateVisited,
 };
 
-// Text direction, only used for role=WebAXRoleInlineTextBox.
 enum WebAXTextDirection {
     WebAXTextDirectionLR,
     WebAXTextDirectionRL,
@@ -270,6 +269,33 @@ enum WebAXInvalidState {
     WebAXInvalidStateSpelling,
     WebAXInvalidStateGrammar,
     WebAXInvalidStateOther
+};
+
+// Used for exposing text attributes.
+enum WebAXTextStyle {
+    WebAXTextStyleNone = 0,
+    WebAXTextStyleBold = 1 << 0,
+    WebAXTextStyleItalic = 1 << 1,
+    WebAXTextStyleUnderline = 1 << 2,
+    WebAXTextStyleLineThrough = 1 << 3
+};
+
+// The source of the accessible name of an element. This is needed
+// because on some platforms this determines how the accessible name
+// is exposed.
+enum WebAXNameFrom {
+    WebAXNameFromAttribute = 0,
+    WebAXNameFromContents,
+    WebAXNameFromPlaceholder,
+    WebAXNameFromRelatedElement,
+};
+
+// The source of the accessible description of an element. This is needed
+// because on some platforms this determines how the accessible description
+// is exposed.
+enum WebAXDescriptionFrom {
+    WebAXDescriptionFromPlaceholder,
+    WebAXDescriptionFromRelatedElement
 };
 
 } // namespace blink

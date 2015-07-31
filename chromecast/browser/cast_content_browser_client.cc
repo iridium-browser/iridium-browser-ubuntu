@@ -17,8 +17,8 @@
 #include "chromecast/browser/cast_browser_main_parts.h"
 #include "chromecast/browser/cast_browser_process.h"
 #include "chromecast/browser/cast_network_delegate.h"
+#include "chromecast/browser/cast_quota_permission_context.h"
 #include "chromecast/browser/cast_resource_dispatcher_host_delegate.h"
-#include "chromecast/browser/devtools/cast_dev_tools_delegate.h"
 #include "chromecast/browser/geolocation/cast_access_token_store.h"
 #include "chromecast/browser/media/cma_message_filter_host.h"
 #include "chromecast/browser/url_request_context_factory.h"
@@ -37,22 +37,24 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/common/web_preferences.h"
+#include "gin/v8_initializer.h"
+#include "media/audio/audio_manager_factory.h"
 #include "net/ssl/ssl_cert_request_info.h"
+#include "net/url_request/url_request_context_getter.h"
 #include "ui/gl/gl_switches.h"
 
 #if defined(OS_ANDROID)
-#include "chromecast/browser/android/external_video_surface_container_impl.h"
-#endif  // defined(OS_ANDROID)
-
-#if defined(OS_ANDROID)
 #include "components/crash/browser/crash_dump_manager_android.h"
+#include "components/external_video_surface/browser/android/external_video_surface_container_impl.h"
 #endif  // defined(OS_ANDROID)
 
 namespace chromecast {
 namespace shell {
 
 CastContentBrowserClient::CastContentBrowserClient()
-    : url_request_context_factory_(new URLRequestContextFactory()) {
+    : v8_natives_fd_(-1),
+      v8_snapshot_fd_(-1),
+      url_request_context_factory_(new URLRequestContextFactory()) {
 }
 
 CastContentBrowserClient::~CastContentBrowserClient() {
@@ -65,25 +67,47 @@ CastContentBrowserClient::~CastContentBrowserClient() {
 content::BrowserMainParts* CastContentBrowserClient::CreateBrowserMainParts(
     const content::MainFunctionParams& parameters) {
   return new CastBrowserMainParts(parameters,
-                                  url_request_context_factory_.get());
+                                  url_request_context_factory_.get(),
+                                  PlatformCreateAudioManagerFactory());
 }
 
 void CastContentBrowserClient::RenderProcessWillLaunch(
     content::RenderProcessHost* host) {
-  scoped_refptr<content::BrowserMessageFilter> network_hints_message_filter(
-      new network_hints::NetworkHintsMessageFilter(
-          url_request_context_factory_->host_resolver()));
-  host->AddFilter(network_hints_message_filter.get());
 #if !defined(OS_ANDROID)
   scoped_refptr<media::CmaMessageFilterHost> cma_message_filter(
       new media::CmaMessageFilterHost(host->GetID()));
   host->AddFilter(cma_message_filter.get());
 #endif  // !defined(OS_ANDROID)
 
+  // Forcibly trigger I/O-thread URLRequestContext initialization before
+  // getting HostResolver.
+  content::BrowserThread::PostTaskAndReplyWithResult(
+      content::BrowserThread::IO, FROM_HERE,
+      base::Bind(&net::URLRequestContextGetter::GetURLRequestContext,
+                 base::Unretained(
+                    url_request_context_factory_->GetSystemGetter())),
+      base::Bind(&CastContentBrowserClient::AddNetworkHintsMessageFilter,
+                 base::Unretained(this), host->GetID()));
+
   auto extra_filters = PlatformGetBrowserMessageFilters();
   for (auto const& filter : extra_filters) {
     host->AddFilter(filter.get());
   }
+}
+
+void CastContentBrowserClient::AddNetworkHintsMessageFilter(
+    int render_process_id, net::URLRequestContext* context) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+  content::RenderProcessHost* host =
+      content::RenderProcessHost::FromID(render_process_id);
+  if (!host)
+    return;
+
+  scoped_refptr<content::BrowserMessageFilter> network_hints_message_filter(
+      new network_hints::NetworkHintsMessageFilter(
+          url_request_context_factory_->host_resolver()));
+  host->AddFilter(network_hints_message_filter.get());
 }
 
 net::URLRequestContextGetter* CastContentBrowserClient::CreateRequestContext(
@@ -106,9 +130,6 @@ bool CastContentBrowserClient::IsHandledURL(const GURL& url) {
       content::kChromeUIScheme,
       content::kChromeDevToolsScheme,
       url::kDataScheme,
-#if defined(OS_ANDROID)
-      url::kFileScheme,
-#endif  // defined(OS_ANDROID)
   };
 
   const std::string& scheme = url.scheme();
@@ -116,6 +137,12 @@ bool CastContentBrowserClient::IsHandledURL(const GURL& url) {
     if (scheme == kProtocolList[i])
       return true;
   }
+
+  if (scheme == url::kFileScheme) {
+    return base::CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kEnableLocalFileAccesses);
+  }
+
   return false;
 }
 
@@ -127,6 +154,13 @@ void CastContentBrowserClient::AppendExtraCommandLineSwitches(
       command_line->GetSwitchValueNative(switches::kProcessType);
   base::CommandLine* browser_command_line =
       base::CommandLine::ForCurrentProcess();
+
+#if defined(V8_USE_EXTERNAL_STARTUP_DATA)
+  if (process_type != switches::kZygoteProcess) {
+    command_line->AppendSwitch(::switches::kV8NativesPassedByFD);
+    command_line->AppendSwitch(::switches::kV8SnapshotPassedByFD);
+  }
+#endif  // V8_USE_EXTERNAL_STARTUP_DATA
 
   // IsCrashReporterEnabled() is set when InitCrashReporter() is called, and
   // controlled by GetBreakpadClient()->EnableBreakpadForProcess(), therefore
@@ -182,6 +216,11 @@ void CastContentBrowserClient::ResourceDispatcherHostCreated() {
 std::string CastContentBrowserClient::GetApplicationLocale() {
   const std::string locale(base::i18n::GetConfiguredLocale());
   return locale.empty() ? "en-US" : locale;
+}
+
+content::QuotaPermissionContext*
+CastContentBrowserClient::CreateQuotaPermissionContext() {
+  return new CastQuotaPermissionContext();
 }
 
 void CastContentBrowserClient::AllowCertificateError(
@@ -272,15 +311,24 @@ bool CastContentBrowserClient::CanCreateWindow(
   return false;
 }
 
-content::DevToolsManagerDelegate*
-CastContentBrowserClient::GetDevToolsManagerDelegate() {
-  return new CastDevToolsManagerDelegate();
-}
-
 void CastContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
     const base::CommandLine& command_line,
     int child_process_id,
     content::FileDescriptorInfo* mappings) {
+#if defined(V8_USE_EXTERNAL_STARTUP_DATA)
+  if (v8_natives_fd_.get() == -1 || v8_snapshot_fd_.get() == -1) {
+    int v8_natives_fd = -1;
+    int v8_snapshot_fd = -1;
+    if (gin::V8Initializer::OpenV8FilesForChildProcesses(&v8_natives_fd,
+                                                         &v8_snapshot_fd)) {
+      v8_natives_fd_.reset(v8_natives_fd);
+      v8_snapshot_fd_.reset(v8_snapshot_fd);
+    }
+  }
+  DCHECK(v8_natives_fd_.get() != -1 && v8_snapshot_fd_.get() != -1);
+  mappings->Share(kV8NativesDataDescriptor, v8_natives_fd_.get());
+  mappings->Share(kV8SnapshotDataDescriptor, v8_snapshot_fd_.get());
+#endif  // V8_USE_EXTERNAL_STARTUP_DATA
 #if defined(OS_ANDROID)
   const int flags_open_read = base::File::FLAG_OPEN | base::File::FLAG_READ;
   base::FilePath pak_file_path;
@@ -327,7 +375,8 @@ void CastContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
 content::ExternalVideoSurfaceContainer*
 CastContentBrowserClient::OverrideCreateExternalVideoSurfaceContainer(
     content::WebContents* web_contents) {
-  return new ExternalVideoSurfaceContainerImpl(web_contents);
+  return external_video_surface::ExternalVideoSurfaceContainerImpl::Create(
+      web_contents);
 }
 #endif  // defined(OS_ANDROID) && defined(VIDEO_HOLE)
 

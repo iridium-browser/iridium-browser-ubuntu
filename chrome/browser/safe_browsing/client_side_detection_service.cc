@@ -119,12 +119,12 @@ ClientSideDetectionService::~ClientSideDetectionService() {
 // static
 ClientSideDetectionService* ClientSideDetectionService::Create(
     net::URLRequestContextGetter* request_context_getter) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   return new ClientSideDetectionService(request_context_getter);
 }
 
 void ClientSideDetectionService::SetEnabledAndRefreshState(bool enabled) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   SendModelToRenderers();  // always refresh the renderer state
   if (enabled == enabled_)
     return;
@@ -167,7 +167,7 @@ void ClientSideDetectionService::SetEnabledAndRefreshState(bool enabled) {
 void ClientSideDetectionService::SendClientReportPhishingRequest(
     ClientPhishingRequest* verdict,
     const ClientReportPhishingRequestCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   base::MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(&ClientSideDetectionService::StartClientReportPhishingRequest,
@@ -177,7 +177,7 @@ void ClientSideDetectionService::SendClientReportPhishingRequest(
 void ClientSideDetectionService::SendClientReportMalwareRequest(
     ClientMalwareRequest* verdict,
     const ClientReportMalwareRequestCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   base::MessageLoop::current()->PostTask(
       FROM_HERE,
       base::Bind(&ClientSideDetectionService::StartClientReportMalwareRequest,
@@ -223,7 +223,7 @@ void ClientSideDetectionService::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(type == content::NOTIFICATION_RENDERER_PROCESS_CREATED);
   if (!model_.get()) {
     // Model might not be ready or maybe there was an error.
@@ -273,9 +273,9 @@ void ClientSideDetectionService::StartFetchModel() {
   if (enabled_) {
     // Start fetching the model either from the cache or possibly from the
     // network if the model isn't in the cache.
-    model_fetcher_.reset(net::URLFetcher::Create(
-        0 /* ID used for testing */, GURL(kClientModelUrl),
-        net::URLFetcher::GET, this));
+    model_fetcher_ = net::URLFetcher::Create(0 /* ID used for testing */,
+                                             GURL(kClientModelUrl),
+                                             net::URLFetcher::GET, this);
     model_fetcher_->SetRequestContext(request_context_getter_.get());
     model_fetcher_->Start();
   }
@@ -308,7 +308,7 @@ void ClientSideDetectionService::EndFetchModel(ClientModelStatus status) {
 void ClientSideDetectionService::StartClientReportPhishingRequest(
     ClientPhishingRequest* verdict,
     const ClientReportPhishingRequestCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   scoped_ptr<ClientPhishingRequest> request(verdict);
 
   if (!enabled_) {
@@ -326,10 +326,10 @@ void ClientSideDetectionService::StartClientReportPhishingRequest(
     return;
   }
 
-  net::URLFetcher* fetcher = net::URLFetcher::Create(
-      0 /* ID used for testing */,
-      GetClientReportUrl(kClientReportPhishingUrl),
-      net::URLFetcher::POST, this);
+  net::URLFetcher* fetcher =
+      net::URLFetcher::Create(0 /* ID used for testing */,
+                              GetClientReportUrl(kClientReportPhishingUrl),
+                              net::URLFetcher::POST, this).release();
 
   // Remember which callback and URL correspond to the current fetcher object.
   ClientReportInfo* info = new ClientReportInfo;
@@ -349,7 +349,7 @@ void ClientSideDetectionService::StartClientReportPhishingRequest(
 void ClientSideDetectionService::StartClientReportMalwareRequest(
     ClientMalwareRequest* verdict,
     const ClientReportMalwareRequestCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   scoped_ptr<ClientMalwareRequest> request(verdict);
 
   if (!enabled_) {
@@ -367,10 +367,10 @@ void ClientSideDetectionService::StartClientReportMalwareRequest(
     return;
   }
 
-  net::URLFetcher* fetcher = net::URLFetcher::Create(
-      0 /* ID used for testing */,
-      GetClientReportUrl(kClientReportMalwareUrl),
-      net::URLFetcher::POST, this);
+  net::URLFetcher* fetcher =
+      net::URLFetcher::Create(0 /* ID used for testing */,
+                              GetClientReportUrl(kClientReportMalwareUrl),
+                              net::URLFetcher::POST, this).release();
 
   // Remember which callback and URL correspond to the current fetcher object.
   ClientMalwareReportInfo* info = new ClientMalwareReportInfo;

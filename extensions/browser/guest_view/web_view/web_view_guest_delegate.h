@@ -6,7 +6,7 @@
 #define EXTENSIONS_BROWSER_GUEST_VIEW_WEB_VIEW_WEB_VIEW_GUEST_DELEGATE_H_
 
 #include "base/callback.h"
-#include "extensions/browser/guest_view/guest_view_base.h"
+#include "components/guest_view/browser/guest_view_base.h"
 
 namespace content {
 class RenderViewHost;
@@ -32,24 +32,14 @@ class WebViewGuestDelegate {
   typedef std::vector<linked_ptr<api::web_view_internal::ContextMenuItem> >
       MenuItemVector;
 
-  // Clears http cache for this guest's StoragePartition.
-  virtual void ClearCache(base::Time remove_since,
-                          const base::Closure& callback) = 0;
-
   // Called when context menu operation was handled.
   virtual bool HandleContextMenu(const content::ContextMenuParams& params) = 0;
 
   // Called to attach helpers just after additional initialization is performed.
   virtual void OnAttachWebViewHelpers(content::WebContents* contents) = 0;
 
-  // Called when the guest WebContents commits a provisional load in any frame.
-  virtual void OnDidCommitProvisionalLoadForFrame(bool is_main_frame) = 0;
-
   // Called just after additional initialization is performed.
   virtual void OnDidInitialize() = 0;
-
-  virtual void OnDocumentLoadedInFrame(
-      content::RenderFrameHost* render_frame_host) = 0;
 
   // Called immediately after the guest WebContents has been destroyed.
   virtual void OnGuestDestroyed() = 0;

@@ -15,6 +15,7 @@ class MenuRunner;
 
 namespace app_list {
 
+class AppListViewDelegate;
 class SearchResult;
 class SearchResultContainerView;
 
@@ -24,10 +25,11 @@ class APP_LIST_EXPORT SearchResultTileItemView
       public views::ContextMenuController,
       public SearchResultObserver {
  public:
-  explicit SearchResultTileItemView(
-      SearchResultContainerView* result_container);
+  explicit SearchResultTileItemView(SearchResultContainerView* result_container,
+                                    AppListViewDelegate* view_delegate);
   ~SearchResultTileItemView() override;
 
+  SearchResult* result() { return item_; }
   void SetSearchResult(SearchResult* item);
 
   // Overridden from TileItemView:
@@ -48,6 +50,8 @@ class APP_LIST_EXPORT SearchResultTileItemView
 
   // Owned by the model provided by the AppListViewDelegate.
   SearchResult* item_;
+
+  AppListViewDelegate* view_delegate_;
 
   scoped_ptr<views::MenuRunner> context_menu_runner_;
 

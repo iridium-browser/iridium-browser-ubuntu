@@ -136,6 +136,28 @@ void GLES2InterfaceStub::CompressedTexSubImage2D(GLenum /* target */,
                                                  GLsizei /* imageSize */,
                                                  const void* /* data */) {
 }
+void GLES2InterfaceStub::CompressedTexImage3D(GLenum /* target */,
+                                              GLint /* level */,
+                                              GLenum /* internalformat */,
+                                              GLsizei /* width */,
+                                              GLsizei /* height */,
+                                              GLsizei /* depth */,
+                                              GLint /* border */,
+                                              GLsizei /* imageSize */,
+                                              const void* /* data */) {
+}
+void GLES2InterfaceStub::CompressedTexSubImage3D(GLenum /* target */,
+                                                 GLint /* level */,
+                                                 GLint /* xoffset */,
+                                                 GLint /* yoffset */,
+                                                 GLint /* zoffset */,
+                                                 GLsizei /* width */,
+                                                 GLsizei /* height */,
+                                                 GLsizei /* depth */,
+                                                 GLenum /* format */,
+                                                 GLsizei /* imageSize */,
+                                                 const void* /* data */) {
+}
 void GLES2InterfaceStub::CopyBufferSubData(GLenum /* readtarget */,
                                            GLenum /* writetarget */,
                                            GLintptr /* readoffset */,
@@ -346,6 +368,17 @@ void GLES2InterfaceStub::GetFramebufferAttachmentParameteriv(
     GLenum /* pname */,
     GLint* /* params */) {
 }
+void GLES2InterfaceStub::GetInteger64v(GLenum /* pname */,
+                                       GLint64* /* params */) {
+}
+void GLES2InterfaceStub::GetIntegeri_v(GLenum /* pname */,
+                                       GLuint /* index */,
+                                       GLint* /* data */) {
+}
+void GLES2InterfaceStub::GetInteger64i_v(GLenum /* pname */,
+                                         GLuint /* index */,
+                                         GLint64* /* data */) {
+}
 void GLES2InterfaceStub::GetIntegerv(GLenum /* pname */, GLint* /* params */) {
 }
 void GLES2InterfaceStub::GetInternalformativ(GLenum /* target */,
@@ -431,6 +464,10 @@ void GLES2InterfaceStub::GetUniformiv(GLuint /* program */,
                                       GLint /* location */,
                                       GLint* /* params */) {
 }
+void GLES2InterfaceStub::GetUniformuiv(GLuint /* program */,
+                                       GLint /* location */,
+                                       GLuint* /* params */) {
+}
 void GLES2InterfaceStub::GetUniformIndices(GLuint /* program */,
                                            GLsizei /* count */,
                                            const char* const* /* names */,
@@ -447,6 +484,14 @@ void GLES2InterfaceStub::GetVertexAttribfv(GLuint /* index */,
 void GLES2InterfaceStub::GetVertexAttribiv(GLuint /* index */,
                                            GLenum /* pname */,
                                            GLint* /* params */) {
+}
+void GLES2InterfaceStub::GetVertexAttribIiv(GLuint /* index */,
+                                            GLenum /* pname */,
+                                            GLint* /* params */) {
+}
+void GLES2InterfaceStub::GetVertexAttribIuiv(GLuint /* index */,
+                                             GLenum /* pname */,
+                                             GLuint* /* params */) {
 }
 void GLES2InterfaceStub::GetVertexAttribPointerv(GLuint /* index */,
                                                  GLenum /* pname */,

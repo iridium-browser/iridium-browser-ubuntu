@@ -18,15 +18,17 @@ namespace dom_distiller {
 
 class SourcePageHandleWebContents : public SourcePageHandle {
  public:
-  explicit SourcePageHandleWebContents(
-      scoped_ptr<content::WebContents> web_contents);
+  SourcePageHandleWebContents(content::WebContents* web_contents, bool owned);
   ~SourcePageHandleWebContents() override;
 
-  scoped_ptr<content::WebContents> GetWebContents();
+  // Retreives the WebContents. The SourcePageHandleWebContents keeps ownership.
+  content::WebContents* web_contents() { return web_contents_; }
 
  private:
-  // The WebContents this class owns.
-  scoped_ptr<content::WebContents> web_contents_;
+  // The WebContents this class holds.
+  content::WebContents* web_contents_;
+  // Whether this owns |web_contents_|.
+  bool owned_;
 };
 
 class DistillerPageWebContentsFactory : public DistillerPageFactory {
@@ -98,6 +100,7 @@ class DistillerPageWebContents : public DistillerPage,
 
   // Called when the distillation is done or if the page load failed.
   void OnWebContentsDistillationDone(const GURL& page_url,
+                                     const base::TimeTicks& javascript_start,
                                      const base::Value* value);
 
   // The current state of the |DistillerPage|, initially |IDLE|.
@@ -106,7 +109,8 @@ class DistillerPageWebContents : public DistillerPage,
   // The JavaScript to inject to extract content.
   std::string script_;
 
-  scoped_ptr<content::WebContents> web_contents_;
+  scoped_ptr<SourcePageHandleWebContents> source_page_handle_;
+
   content::BrowserContext* browser_context_;
   gfx::Size render_view_size_;
   DISALLOW_COPY_AND_ASSIGN(DistillerPageWebContents);

@@ -52,25 +52,19 @@ public:
         CUSTOM = 4
     };
 
-    OscillatorHandler(AudioNode&, float sampleRate);
+    static PassRefPtr<OscillatorHandler> create(AudioNode&, float sampleRate, AudioParamHandler& frequency, AudioParamHandler& detune);
     virtual ~OscillatorHandler();
 
     // AudioHandler
-    virtual void dispose() override;
     virtual void process(size_t framesToProcess) override;
 
     String type() const;
-
     void setType(const String&);
-
-    AudioParam* frequency() { return m_frequency.get(); }
-    AudioParam* detune() { return m_detune.get(); }
 
     void setPeriodicWave(PeriodicWave*);
 
-    DECLARE_VIRTUAL_TRACE();
-
 private:
+    OscillatorHandler(AudioNode&, float sampleRate, AudioParamHandler& frequency, AudioParamHandler& detune);
     bool setType(unsigned); // Returns true on success.
 
     // Returns true if there are sample-accurate timeline parameter changes.
@@ -82,10 +76,10 @@ private:
     unsigned short m_type;
 
     // Frequency value in Hertz.
-    Member<AudioParam> m_frequency;
+    RefPtr<AudioParamHandler> m_frequency;
 
     // Detune value (deviating from the frequency) in Cents.
-    Member<AudioParam> m_detune;
+    RefPtr<AudioParamHandler> m_detune;
 
     bool m_firstRender;
 
@@ -100,13 +94,16 @@ private:
     AudioFloatArray m_phaseIncrements;
     AudioFloatArray m_detuneValues;
 
-    Member<PeriodicWave> m_periodicWave;
+    // This Persistent doesn't make a reference cycle including the owner
+    // OscillatorNode.
+    Persistent<PeriodicWave> m_periodicWave;
 };
 
 class OscillatorNode final : public AudioScheduledSourceNode {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static OscillatorNode* create(AudioContext*, float sampleRate);
+    static OscillatorNode* create(AudioContext&, float sampleRate);
+    DECLARE_VIRTUAL_TRACE();
 
     String type() const;
     void setType(const String&);
@@ -117,6 +114,9 @@ public:
 private:
     OscillatorNode(AudioContext&, float sampleRate);
     OscillatorHandler& oscillatorHandler() const;
+
+    Member<AudioParam> m_frequency;
+    Member<AudioParam> m_detune;
 };
 
 } // namespace blink

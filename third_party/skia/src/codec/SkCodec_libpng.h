@@ -12,9 +12,11 @@
 #include "SkRefCnt.h"
 #include "SkSwizzler.h"
 
-extern "C" {
-    #include "png.h"
-}
+#ifdef SKIA_PNG_PREFIXED
+    // this must proceed png.h
+    #include "pngprefix.h"
+#endif
+#include "png.h"
 
 class SkScanlineDecoder;
 class SkStream;
@@ -28,7 +30,8 @@ protected:
     Result onGetPixels(const SkImageInfo&, void*, size_t, const Options&, SkPMColor*, int*)
             override;
     SkEncodedFormat onGetEncodedFormat() const override { return kPNG_SkEncodedFormat; }
-    SkScanlineDecoder* onGetScanlineDecoder(const SkImageInfo& dstInfo) override;
+    SkScanlineDecoder* onGetScanlineDecoder(const SkImageInfo& dstInfo, const Options& options,
+                                            SkPMColor ctable[], int* ctableCount) override;
     bool onReallyHasAlpha() const override { return fReallyHasAlpha; }
 private:
     png_structp                 fPng_ptr;
@@ -47,10 +50,10 @@ private:
 
     // Helper to set up swizzler and color table. Also calls png_read_update_info.
     Result initializeSwizzler(const SkImageInfo& requestedInfo, void* dst,
-                              size_t rowBytes, const Options&);
+                              size_t rowBytes, const Options&, SkPMColor*, int* ctableCount);
     // Calls rewindIfNeeded, and returns true if the decoder can continue.
     bool handleRewind();
-    bool decodePalette(bool premultiply);
+    bool decodePalette(bool premultiply, int bitDepth, int* ctableCount);
     void finish();
     void destroyReadStruct();
 

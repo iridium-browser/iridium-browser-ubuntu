@@ -19,6 +19,7 @@
 #include "net/base/request_priority.h"
 #include "net/base/upload_progress.h"
 #include "net/cookies/canonical_cookie.h"
+#include "net/socket/connection_attempts.h"
 #include "net/url_request/redirect_info.h"
 #include "net/url_request/url_request.h"
 #include "url/gurl.h"
@@ -226,6 +227,11 @@ class NET_EXPORT URLRequestJob
   // canceled by an explicit NetworkDelegate::NotifyURLRequestDestroyed() call.
   virtual void NotifyURLRequestDestroyed();
 
+  // Populates |out| with the connection attempts made at the socket layer in
+  // the course of executing the URLRequestJob. Should be called after the job
+  // has failed or the response headers have been received.
+  virtual void GetConnectionAttempts(ConnectionAttempts* out) const;
+
   // Given |policy|, |referrer|, and |redirect_destination|, returns the
   // referrer URL mandated by |request|'s referrer policy.
   static GURL ComputeReferrerForRedirect(URLRequest::ReferrerPolicy policy,
@@ -339,16 +345,13 @@ class NET_EXPORT URLRequestJob
   // Set the proxy server that was used, if any.
   void SetProxyServer(const HostPortPair& proxy_server);
 
-  // The number of bytes read before passing to the filter.
+  // The number of bytes read before passing to the filter. This value reflects
+  // bytes read even when there is no filter.
   int64 prefilter_bytes_read() const { return prefilter_bytes_read_; }
 
-  // The number of bytes read after passing through the filter.
+  // The number of bytes read after passing through the filter. This value
+  // reflects bytes read even when there is no filter.
   int64 postfilter_bytes_read() const { return postfilter_bytes_read_; }
-
-  // Total number of bytes read from network (or cache) and typically handed
-  // to filter to process.  Used to histogram compression ratios, and error
-  // recovery scenarios in filters.
-  int64 filter_input_byte_count() const { return filter_input_byte_count_; }
 
   // The request that initiated this job. This value MAY BE NULL if the
   // request was released by DetachRequest().
@@ -384,7 +387,8 @@ class NET_EXPORT URLRequestJob
   bool FilterHasData();
 
   // Subclasses may implement this method to record packet arrival times.
-  // The default implementation does nothing.
+  // The default implementation does nothing.  Only invoked when bytes have been
+  // read since the last invocation.
   virtual void UpdatePacketReadTimes();
 
   // Computes a new RedirectInfo based on receiving a redirect response of
@@ -398,7 +402,6 @@ class NET_EXPORT URLRequestJob
 
   int64 prefilter_bytes_read_;
   int64 postfilter_bytes_read_;
-  int64 filter_input_byte_count_;
 
   // The data stream filter which is enabled on demand.
   scoped_ptr<Filter> filter_;

@@ -15,6 +15,8 @@
 #include "base/timer/timer.h"
 #include "components/metrics/daily_event.h"
 #include "components/rappor/rappor_parameters.h"
+#include "components/rappor/sample.h"
+#include "components/rappor/sampler.h"
 
 class PrefRegistrySimple;
 class PrefService;
@@ -31,10 +33,13 @@ class RapporReports;
 
 // The type of data stored in a metric.
 enum RapporType {
-  // For sampling the eTLD+1 of a URL.
-  ETLD_PLUS_ONE_RAPPOR_TYPE = 0,
+  // Generic metrics from UMA opt-in users.
+  UMA_RAPPOR_TYPE = 0,
+  // Generic metrics for SafeBrowsing users.
   COARSE_RAPPOR_TYPE,
-  NUM_RAPPOR_TYPES
+  // Deprecated: Use UMA_RAPPOR_TYPE for new metrics
+  ETLD_PLUS_ONE_RAPPOR_TYPE,
+  NUM_RAPPOR_TYPES,
 };
 
 // This class provides an interface for recording samples for rappor metrics,
@@ -62,6 +67,26 @@ class RapporService {
   // generated and queued for upload.
   // If |may_upload| is true, reports will be uploaded from the queue.
   void Update(RecordingLevel recording_level, bool may_upload);
+
+  // Constructs a Sample object for the caller to record fields in.
+  scoped_ptr<Sample> CreateSample(RapporType);
+
+  // Records a Sample of rappor metric specified by |metric_name|.
+  //
+  // TODO(holte): Rename RecordSample to RecordString and then rename this
+  // to RecordSample.
+  //
+  // example:
+  // scoped_ptr<Sample> sample = rappor_service->CreateSample(MY_METRIC_TYPE);
+  // sample->SetStringField("Field1", "some string");
+  // sample->SetFlagsValue("Field2", SOME|FLAGS);
+  // rappor_service->RecordSample("MyMetric", sample.Pass());
+  //
+  // This will result in a report setting two metrics "MyMetric.Field1" and
+  // "MyMetric.Field2", and they will both be generated from the same sample,
+  // to allow for correllations to be computed.
+  void RecordSampleObj(const std::string& metric_name,
+                       scoped_ptr<Sample> sample);
 
   // Records a sample of the rappor metric specified by |metric_name|.
   // Creates and initializes the metric, if it doesn't yet exist.
@@ -140,6 +165,8 @@ class RapporService {
   // We keep all registered metrics in a map, from name to metric.
   // The map owns the metrics it contains.
   std::map<std::string, RapporMetric*> metrics_map_;
+
+  internal::Sampler sampler_;
 
   DISALLOW_COPY_AND_ASSIGN(RapporService);
 };

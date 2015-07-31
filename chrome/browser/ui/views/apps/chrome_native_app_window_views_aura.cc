@@ -18,6 +18,7 @@
 #include "chrome/browser/ui/ash/ash_util.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_context_menu.h"
 #include "chrome/browser/ui/host_desktop.h"
+#include "chrome/browser/ui/views/apps/app_window_easy_resize_window_targeter.h"
 #include "chrome/browser/ui/views/apps/shaped_app_window_targeter.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "ui/aura/client/aura_constants.h"
@@ -28,7 +29,6 @@
 #include "ui/gfx/image/image_skia.h"
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/widget/widget.h"
-#include "ui/wm/core/easy_resize_window_targeter.h"
 
 #if defined(OS_CHROMEOS)
 #include "ash/shell_window_ids.h"
@@ -118,6 +118,19 @@ ChromeNativeAppWindowViewsAura::ChromeNativeAppWindowViewsAura() {
 ChromeNativeAppWindowViewsAura::~ChromeNativeAppWindowViewsAura() {
 }
 
+void ChromeNativeAppWindowViewsAura::InitializeWindow(
+    AppWindow* app_window,
+    const AppWindow::CreateParams& create_params) {
+  ChromeNativeAppWindowViews::InitializeWindow(app_window, create_params);
+  // Restore docked state on ash desktop and ignore it elsewhere.
+  if (create_params.state == ui::SHOW_STATE_DOCKED &&
+      chrome::GetHostDesktopTypeForNativeWindow(widget()->GetNativeWindow()) ==
+          chrome::HOST_DESKTOP_TYPE_ASH) {
+    widget()->GetNativeWindow()->SetProperty(aura::client::kShowStateKey,
+                                             create_params.state);
+  }
+}
+
 void ChromeNativeAppWindowViewsAura::OnBeforeWidgetInit(
     const AppWindow::CreateParams& create_params,
     views::Widget::InitParams* init_params,
@@ -147,21 +160,26 @@ void ChromeNativeAppWindowViewsAura::OnBeforeWidgetInit(
 }
 
 void ChromeNativeAppWindowViewsAura::OnBeforePanelWidgetInit(
+    bool use_default_bounds,
     views::Widget::InitParams* init_params,
     views::Widget* widget) {
-  ChromeNativeAppWindowViews::OnBeforePanelWidgetInit(init_params, widget);
+  ChromeNativeAppWindowViews::OnBeforePanelWidgetInit(use_default_bounds,
+                                                      init_params,
+                                                      widget);
 
-  if (ash::Shell::HasInstance()) {
+  if (ash::Shell::HasInstance() && use_default_bounds) {
     // Open a new panel on the target root.
     init_params->bounds = ash::ScreenUtil::ConvertRectToScreen(
         ash::Shell::GetTargetRootWindow(), gfx::Rect(GetPreferredSize()));
   }
 }
 
-apps::AppWindowFrameView*
+views::NonClientFrameView*
 ChromeNativeAppWindowViewsAura::CreateNonStandardAppFrame() {
   apps::AppWindowFrameView* frame =
-      ChromeNativeAppWindowViews::CreateNonStandardAppFrame();
+      new apps::AppWindowFrameView(widget(), this, HasFrameColor(),
+                                   ActiveFrameColor(), InactiveFrameColor());
+  frame->Init();
 
   // For Aura windows on the Ash desktop the sizes are different and the user
   // can resize the window from slightly outside the bounds as well.
@@ -180,11 +198,11 @@ ChromeNativeAppWindowViewsAura::CreateNonStandardAppFrame() {
     int resize_inside = frame->resize_inside_bounds_size();
     gfx::Insets inset(resize_inside, resize_inside, resize_inside,
                       resize_inside);
-    // Add the EasyResizeWindowTargeter on the window, not its root window. The
-    // root window does not have a delegate, which is needed to handle the event
-    // in Linux.
+    // Add the AppWindowEasyResizeWindowTargeter on the window, not its root
+    // window. The root window does not have a delegate, which is needed to
+    // handle the event in Linux.
     window->SetEventTargeter(scoped_ptr<ui::EventTargeter>(
-        new wm::EasyResizeWindowTargeter(window, inset, inset)));
+        new AppWindowEasyResizeWindowTargeter(window, inset, this)));
   }
 #endif
 
@@ -223,6 +241,10 @@ ui::WindowShowState ChromeNativeAppWindowViewsAura::GetRestoredState() const {
       }
       return ui::SHOW_STATE_FULLSCREEN;
     }
+    if (widget()->GetNativeWindow()->GetProperty(aura::client::kShowStateKey) ==
+        ui::SHOW_STATE_DOCKED) {
+      return ui::SHOW_STATE_DOCKED;
+    }
   }
   // Whitelist states to return so that invalid and transient states
   // are not saved and used to restore windows when they are recreated.
@@ -235,6 +257,7 @@ ui::WindowShowState ChromeNativeAppWindowViewsAura::GetRestoredState() const {
     case ui::SHOW_STATE_DEFAULT:
     case ui::SHOW_STATE_MINIMIZED:
     case ui::SHOW_STATE_INACTIVE:
+    case ui::SHOW_STATE_DOCKED:
     case ui::SHOW_STATE_END:
       return ui::SHOW_STATE_NORMAL;
   }

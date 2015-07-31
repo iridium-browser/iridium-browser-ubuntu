@@ -37,7 +37,6 @@ APP_LIST_EXPORT extern const SkColor kResultDimmedTextColor;
 APP_LIST_EXPORT extern const SkColor kResultURLTextColor;
 
 APP_LIST_EXPORT extern const SkColor kGridTitleColor;
-APP_LIST_EXPORT extern const SkColor kGridTitleHoverColor;
 
 APP_LIST_EXPORT extern const SkColor kFolderTitleColor;
 APP_LIST_EXPORT extern const SkColor kFolderTitleHintTextColor;
@@ -83,6 +82,8 @@ APP_LIST_EXPORT extern const ui::ResourceBundle::FontStyle kItemTextFontStyle;
 
 APP_LIST_EXPORT extern const char kPageOpenedHistogram[];
 APP_LIST_EXPORT extern const char kSearchResultOpenDisplayTypeHistogram[];
+APP_LIST_EXPORT extern const char kSearchQueryLength[];
+APP_LIST_EXPORT extern const char kSearchResultDistanceFromOrigin[];
 
 #if defined(OS_LINUX)
 // The WM_CLASS name for the app launcher window on Linux.

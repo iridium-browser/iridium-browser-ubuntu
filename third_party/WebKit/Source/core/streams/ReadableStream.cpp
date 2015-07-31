@@ -20,7 +20,7 @@ namespace {
 
 class ConstUndefined : public ScriptFunction {
 public:
-    static v8::Handle<v8::Function> create(ScriptState* scriptState)
+    static v8::Local<v8::Function> create(ScriptState* scriptState)
     {
         return (new ConstUndefined(scriptState))->bindToV8Function();
     }
@@ -113,7 +113,7 @@ ScriptPromise ReadableStream::cancelInternal(ScriptState* scriptState, ScriptVal
     return m_source->cancelSource(scriptState, reason).then(ConstUndefined::create(scriptState));
 }
 
-void ReadableStream::error(PassRefPtrWillBeRawPtr<DOMException> exception)
+void ReadableStream::error(DOMException* exception)
 {
     if (m_state != ReadableStream::Readable)
         return;

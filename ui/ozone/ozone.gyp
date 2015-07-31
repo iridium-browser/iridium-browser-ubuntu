@@ -176,7 +176,6 @@
       'target_name': 'ozone_unittests',
       'type': '<(gtest_target_type)',
       'sources': [
-        'common/display_util_unittest.cc',
         'run_all_unittests.cc',
       ],
       'dependencies': [
@@ -194,6 +193,11 @@
     ['<(ozone_platform_caca) == 1', {
       'includes': [
         'platform/caca/caca.gypi',
+      ],
+    }],
+    ['<(ozone_platform_cast) == 1', {
+      'includes': [
+        'platform/cast/cast.gypi',
       ],
     }],
     ['<(ozone_platform_dri) == 1 or <(ozone_platform_drm) == 1 or <(ozone_platform_gbm) == 1', {

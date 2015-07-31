@@ -27,8 +27,9 @@
 #ifndef ComposedTreeTraversal_h
 #define ComposedTreeTraversal_h
 
+#include "core/CoreExport.h"
 #include "core/dom/Document.h"
-#include "core/dom/NodeRenderingTraversal.h"
+#include "core/dom/LayoutTreeBuilderTraversal.h"
 #include "core/dom/shadow/InsertionPoint.h"
 #include "core/dom/shadow/ShadowRoot.h"
 
@@ -47,9 +48,9 @@ class Node;
 //
 // FIXME: Make some functions inline to optimise the performance.
 // https://bugs.webkit.org/show_bug.cgi?id=82702
-class ComposedTreeTraversal {
+class CORE_EXPORT ComposedTreeTraversal {
 public:
-    typedef NodeRenderingTraversal::ParentDetails ParentTraversalDetails;
+    typedef LayoutTreeBuilderTraversal::ParentDetails ParentTraversalDetails;
 
     static Node* next(const Node&);
     static Node* next(const Node&, const Node* stayWithin);
@@ -84,6 +85,15 @@ public:
     // false. If |other| is |node|, this function returns false.
     static bool isDescendantOf(const Node& /*node*/, const Node& other);
 
+    static bool contains(const ContainerNode& container, const Node& node)
+    {
+        assertPrecondition(container);
+        assertPrecondition(node);
+        return container == node || isDescendantOf(node, container);
+    }
+
+    static bool containsIncludingPseudoElement(const ContainerNode&, const Node&);
+
     // Returns a common ancestor of |nodeA| and |nodeB| if exists, otherwise
     // returns |nullptr|.
     static Node* commonAncestor(const Node& nodeA, const Node& nodeB);
@@ -110,7 +120,7 @@ private:
     static void assertPrecondition(const Node& node)
     {
 #if ENABLE(ASSERT)
-        ASSERT(node.inDocument() ? !node.document().childNeedsDistributionRecalc() : !node.childNeedsDistributionRecalc());
+        ASSERT(!node.needsDistributionRecalc());
         ASSERT(node.canParticipateInComposedTree());
 #endif
     }

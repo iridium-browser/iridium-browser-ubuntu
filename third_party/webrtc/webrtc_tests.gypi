@@ -148,6 +148,8 @@
         'video/bitrate_estimator_tests.cc',
         'video/end_to_end_tests.cc',
         'video/send_statistics_proxy_unittest.cc',
+        'video/video_decoder_unittest.cc',
+        'video/video_encoder_unittest.cc',
         'video/video_send_stream_tests.cc',
       ],
       'dependencies': [
@@ -178,6 +180,8 @@
       'type': '<(gtest_target_type)',
       'sources': [
         'modules/audio_coding/neteq/test/neteq_performance_unittest.cc',
+        'modules/remote_bitrate_estimator/remote_bitrate_estimators_test.cc',
+
         'tools/agc/agc_manager_integrationtest.cc',
         'video/call_perf_tests.cc',
         'video/full_stack.cc',
@@ -190,7 +194,8 @@
         '<(webrtc_root)/modules/modules.gyp:video_capture',
         '<(webrtc_root)/test/test.gyp:channel_transport',
         '<(webrtc_root)/voice_engine/voice_engine.gyp:voice_engine',
-        'modules/modules.gyp:neteq_test_support',  # Needed by neteq_performance_unittest.
+        'modules/modules.gyp:neteq_test_support',
+        'modules/modules.gyp:bwe_simulator',
         'modules/modules.gyp:rtp_rtcp',
         'test/test.gyp:test_main',
         'test/webrtc_test_common.gyp:webrtc_test_common',

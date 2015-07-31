@@ -8,6 +8,7 @@
 #ifndef CONTENT_COMMON_GPU_MEDIA_VAAPI_VIDEO_DECODE_ACCELERATOR_H_
 #define CONTENT_COMMON_GPU_MEDIA_VAAPI_VIDEO_DECODE_ACCELERATOR_H_
 
+#include <list>
 #include <map>
 #include <queue>
 #include <utility>
@@ -22,7 +23,6 @@
 #include "base/synchronization/lock.h"
 #include "base/threading/thread.h"
 #include "content/common/content_export.h"
-#include "content/common/gpu/media/vaapi_h264_decoder.h"
 #include "content/common/gpu/media/vaapi_wrapper.h"
 #include "media/base/bitstream_buffer.h"
 #include "media/video/picture.h"
@@ -34,6 +34,7 @@ class GLImage;
 
 namespace content {
 
+class AcceleratedVideoDecoder;
 class VaapiPicture;
 
 // Class to provide video decode acceleration for Intel systems with hardware
@@ -47,6 +48,8 @@ class VaapiPicture;
 class CONTENT_EXPORT VaapiVideoDecodeAccelerator
     : public media::VideoDecodeAccelerator {
  public:
+  class VaapiDecodeSurface;
+
   VaapiVideoDecodeAccelerator(
       const base::Callback<bool(void)>& make_context_current,
       const base::Callback<void(uint32, uint32, scoped_refptr<gfx::GLImage>)>&
@@ -54,8 +57,7 @@ class CONTENT_EXPORT VaapiVideoDecodeAccelerator
   ~VaapiVideoDecodeAccelerator() override;
 
   // media::VideoDecodeAccelerator implementation.
-  bool Initialize(media::VideoCodecProfile profile,
-                  Client* client) override;
+  bool Initialize(media::VideoCodecProfile profile, Client* client) override;
   void Decode(const media::BitstreamBuffer& bitstream_buffer) override;
   void AssignPictureBuffers(
       const std::vector<media::PictureBuffer>& buffers) override;
@@ -65,7 +67,13 @@ class CONTENT_EXPORT VaapiVideoDecodeAccelerator
   void Destroy() override;
   bool CanDecodeOnIOThread() override;
 
-private:
+  static media::VideoDecodeAccelerator::SupportedProfiles
+      GetSupportedProfiles();
+
+ private:
+  class VaapiH264Accelerator;
+  class VaapiVP8Accelerator;
+
   // Notify the client that an error has occurred and decoding cannot continue.
   void NotifyError(Error error);
 
@@ -84,11 +92,10 @@ private:
   // returned. Will also release the mapping.
   void ReturnCurrInputBuffer_Locked();
 
-  // Pass one or more output buffers to the decoder. This will sleep
-  // if no buffers are available. Return true if buffers have been set up or
-  // false if an early exit has been requested (due to initiated
+  // Wait for more surfaces to become available. Return true once they do or
+  // false if an early exit has been requested (due to an initiated
   // reset/flush/destroy).
-  bool FeedDecoderWithOutputSurfaces_Locked();
+  bool WaitForSurfaces_Locked();
 
   // Continue decoding given input buffers and sleep waiting for input/output
   // as needed. Will exit if a new set of surfaces or reset/flush/destroy
@@ -124,10 +131,6 @@ private:
   // or return false on failure.
   bool InitializeFBConfig();
 
-  // Callback for the decoder to execute when it wants us to output given
-  // |va_surface|.
-  void SurfaceReady(int32 input_id, const scoped_refptr<VASurface>& va_surface);
-
   // Callback to be executed once we have a |va_surface| to be output and
   // an available |picture| to use for output.
   // Puts contents of |va_surface| into given |picture|, releases the
@@ -147,8 +150,31 @@ private:
   // Initiate wait cycle for surfaces to be released before we release them
   // and allocate new ones, as requested by the decoder.
   void InitiateSurfaceSetChange(size_t num_pics, gfx::Size size);
+
   // Check if the surfaces have been released or post ourselves for later.
   void TryFinishSurfaceSetChange();
+
+  //
+  // Below methods are used by accelerator implementations.
+  //
+  // Decode of |dec_surface| is ready to be submitted and all codec-specific
+  // settings are set in hardware.
+  bool DecodeSurface(const scoped_refptr<VaapiDecodeSurface>& dec_surface);
+
+  // |dec_surface| is ready to be outputted once decode is finished.
+  // This can be called before decode is actually done in hardware, and this
+  // method is responsible for maintaining the ordering, i.e. the surfaces have
+  // to be outputted in the same order as SurfaceReady is called.
+  // On Intel, we don't have to explicitly maintain the ordering however, as the
+  // driver will maintain ordering, as well as dependencies, and will process
+  // each submitted command in order, and run each command only if its
+  // dependencies are ready.
+  void SurfaceReady(const scoped_refptr<VaapiDecodeSurface>& dec_surface);
+
+  // Return a new VaapiDecodeSurface for decoding into, or nullptr if not
+  // available.
+  scoped_refptr<VaapiDecodeSurface> CreateSurface();
+
 
   // Client-provided GL state.
   base::Callback<bool(void)> make_context_current_;
@@ -246,14 +272,17 @@ private:
   scoped_ptr<base::WeakPtrFactory<Client> > client_ptr_factory_;
   base::WeakPtr<Client> client_;
 
-  // Comes after vaapi_wrapper_ to ensure its destructor is executed before
-  // vaapi_wrapper_ is destroyed.
-  scoped_ptr<VaapiH264Decoder> decoder_;
+  // Accelerators come after vaapi_wrapper_ to ensure they are destroyed first.
+  scoped_ptr<VaapiH264Accelerator> h264_accelerator_;
+  scoped_ptr<VaapiVP8Accelerator> vp8_accelerator_;
+  // After *_accelerator_ to ensure correct destruction order.
+  scoped_ptr<AcceleratedVideoDecoder> decoder_;
+
   base::Thread decoder_thread_;
   // Use this to post tasks to |decoder_thread_| instead of
   // |decoder_thread_.message_loop()| because the latter will be NULL once
   // |decoder_thread_.Stop()| returns.
-  scoped_refptr<base::MessageLoopProxy> decoder_thread_proxy_;
+  scoped_refptr<base::SingleThreadTaskRunner> decoder_thread_task_runner_;
 
   int num_frames_at_client_;
   int num_stream_bufs_at_decoder_;

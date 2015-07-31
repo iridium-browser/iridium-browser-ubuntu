@@ -111,7 +111,9 @@ func extractComment(lines []string, lineNo int) (comment []string, rest []string
 			err = fmt.Errorf("comment doesn't start with block prefix on line %d: %s", restLineNo, line)
 			return
 		}
-		line = line[2:]
+		if len(line) == 2 || line[2] != '/' {
+			line = line[2:]
+		}
 		if strings.HasPrefix(line, "   ") {
 			/* Identing the lines of a paragraph marks them as
 			* preformatted. */
@@ -193,12 +195,23 @@ func extractDecl(lines []string, lineNo int) (decl string, rest []string, restLi
 func skipPast(s, skip string) string {
 	i := strings.Index(s, skip)
 	if i > 0 {
-		return s[len(skip):]
+		return s[i:]
 	}
 	return s
 }
 
+func skipLine(s string) string {
+	i := strings.Index(s, "\n")
+	if i > 0 {
+		return s[i:]
+	}
+	return ""
+}
+
 func getNameFromDecl(decl string) (string, bool) {
+	for strings.HasPrefix(decl, "#if") {
+		decl = skipLine(decl)
+	}
 	if strings.HasPrefix(decl, "struct ") {
 		return "", false
 	}
@@ -582,8 +595,8 @@ func generateIndex(outPath string, config *Config, headerDescriptions map[string
 
 func main() {
 	var (
-		configFlag *string = flag.String("config", "", "Location of config file")
-		outputDir  *string = flag.String("out", "", "Path to the directory where the output will be written")
+		configFlag *string = flag.String("config", "doc.config", "Location of config file")
+		outputDir  *string = flag.String("out", ".", "Path to the directory where the output will be written")
 		config     Config
 	)
 

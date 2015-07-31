@@ -1,4 +1,115 @@
 {
+  "Linux ChromiumOS GN": {
+    "additional_compile_targets": [
+      "accessibility_unittests",
+      "app_list_unittests",
+      "aura_unittests",
+      "browser_tests",
+      "cacheinvalidation_unittests",
+      "chromedriver_unittests",
+      "chromeos_unittests",
+      "components_browsertests",
+      "components_unittests",
+      "content_browsertests",
+      "content_unittests",
+      "crypto_unittests",
+      "dbus_unittests",
+      "device_unittests",
+      "display_unittests",
+      "events_unittests",
+      "extensions_browsertests",
+      "extensions_unittests",
+      "gcm_unit_tests",
+      "gfx_unittests",
+      "gn_unittests",
+      "google_apis_unittests",
+      "gpu_unittests",
+      "interactive_ui_tests",
+      "ipc_tests",
+      "jingle_unittests",
+      "media_unittests",
+      "mojo_common_unittests",
+      "mojo_public_bindings_unittests",
+      "mojo_public_environment_unittests",
+      "mojo_public_system_unittests",
+      "mojo_public_utility_unittests",
+      "mojo_system_unittests",
+      "net_unittests",
+      "ppapi_unittests",
+      "printing_unittests",
+      "remoting_unittests",
+      "sandbox_linux_unittests",
+      "skia_unittests",
+      "sql_unittests",
+      "sync_unit_tests",
+      "ui_base_unittests",
+      "ui_chromeos_unittests",
+      "ui_touch_selection_unittests",
+      "unit_tests",
+      "url_unittests",
+      "views_unittests",
+      "wm_unittests"
+    ],
+    "gtest_tests": [
+      {
+        "test": "base_unittests"
+      }
+    ]
+  },
+  "Linux ChromiumOS GN (dbg)": {
+    "additional_compile_targets": [
+      "accessibility_unittests",
+      "app_list_unittests",
+      "aura_unittests",
+      "browser_tests",
+      "cacheinvalidation_unittests",
+      "chromedriver_unittests",
+      "chromeos_unittests",
+      "content_unittests",
+      "crypto_unittests",
+      "dbus_unittests",
+      "device_unittests",
+      "display_unittests",
+      "events_unittests",
+      "extensions_browsertests",
+      "extensions_unittests",
+      "gcm_unit_tests",
+      "gfx_unittests",
+      "gn_unittests",
+      "google_apis_unittests",
+      "gpu_unittests",
+      "interactive_ui_tests",
+      "ipc_tests",
+      "jingle_unittests",
+      "media_unittests",
+      "mojo_common_unittests",
+      "mojo_public_bindings_unittests",
+      "mojo_public_environment_unittests",
+      "mojo_public_system_unittests",
+      "mojo_public_utility_unittests",
+      "mojo_system_unittests",
+      "net_unittests",
+      "ppapi_unittests",
+      "printing_unittests",
+      "remoting_unittests",
+      "sandbox_linux_unittests",
+      "skia_unittests",
+      "sql_unittests",
+      "sync_unit_tests",
+      "ui_base_unittests",
+      "ui_chromeos_unittests",
+      "ui_touch_selection_unittests",
+      "unit_tests",
+      "url_unittests",
+      "views_unittests",
+      "wm_unittests"
+    ],
+    "gtest_tests": [
+      {
+        "test": "base_unittests"
+      }
+    ]
+  },
   "Linux ChromiumOS Ozone Tests (1)": {
     "gtest_tests": [
       {
@@ -104,6 +215,9 @@
       },
       {
         "test": "message_center_unittests"
+      },
+      {
+        "test": "midi_unittests"
       },
       {
         "test": "nacl_loader_unittests"
@@ -291,6 +405,9 @@
         "test": "message_center_unittests"
       },
       {
+        "test": "midi_unittests"
+      },
+      {
         "test": "nacl_loader_unittests"
       },
       {
@@ -470,6 +587,9 @@
       },
       {
         "test": "message_center_unittests"
+      },
+      {
+        "test": "midi_unittests"
       },
       {
         "test": "nacl_loader_unittests"

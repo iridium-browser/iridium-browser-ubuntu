@@ -8,6 +8,7 @@
 #include "chrome/test/base/testing_profile.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/test/test_bookmark_client.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
@@ -18,7 +19,11 @@ using bookmarks::BookmarkNode;
 
 namespace {
 
-TEST(BookmarkUIUtilsTest, HasBookmarkURLs) {
+class BookmarkUIUtilsTest : public testing::Test {
+  content::TestBrowserThreadBundle thread_bundle_;
+};
+
+TEST_F(BookmarkUIUtilsTest, HasBookmarkURLs) {
   bookmarks::TestBookmarkClient client;
   scoped_ptr<BookmarkModel> model(client.CreateModel());
 
@@ -50,7 +55,7 @@ TEST(BookmarkUIUtilsTest, HasBookmarkURLs) {
   // folder to create a two level hierarchy.
 
   // But first we have to remove the URL from |folder1|.
-  model->Remove(folder1, 0);
+  model->Remove(folder1->GetChild(0));
 
   const BookmarkNode* subfolder1 =
       model->AddFolder(folder1, 0, ASCIIToUTF16("Subfolder1"));
@@ -60,7 +65,7 @@ TEST(BookmarkUIUtilsTest, HasBookmarkURLs) {
   EXPECT_FALSE(chrome::HasBookmarkURLs(nodes));
 }
 
-TEST(BookmarkUIUtilsTest, HasBookmarkURLsAllowedInIncognitoMode) {
+TEST_F(BookmarkUIUtilsTest, HasBookmarkURLsAllowedInIncognitoMode) {
   bookmarks::TestBookmarkClient client;
   scoped_ptr<BookmarkModel> model(client.CreateModel());
   TestingProfile profile;
@@ -109,7 +114,7 @@ TEST(BookmarkUIUtilsTest, HasBookmarkURLsAllowedInIncognitoMode) {
   // folder to create a two level hierarchy.
 
   // But first we have to remove the URL from |folder1|.
-  model->Remove(folder1, 0);
+  model->Remove(folder1->GetChild(0));
 
   const BookmarkNode* subfolder1 =
       model->AddFolder(folder1, 0, ASCIIToUTF16("Subfolder1"));

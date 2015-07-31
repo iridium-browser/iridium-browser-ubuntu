@@ -15,16 +15,14 @@ class WebContents;
 // ToolbarActionViewController.
 class ToolbarActionViewDelegate {
  public:
-  // In some cases (such as when an action is shown in a menu), a substitute
-  // ToolbarActionViewController should be used for showing popups. This
-  // returns the preferred controller.
-  virtual ToolbarActionViewController* GetPreferredPopupViewController() = 0;
-
   // Returns the current web contents.
   virtual content::WebContents* GetCurrentWebContents() const = 0;
 
   // Updates the view to reflect current state.
   virtual void UpdateState() = 0;
+
+  // Returns true if a context menu is running.
+  virtual bool IsMenuRunning() const = 0;
 
   // Called when a popup is shown. If |by_user| is true, then this was through
   // a direct user action (as oppposed to, e.g., an API call).

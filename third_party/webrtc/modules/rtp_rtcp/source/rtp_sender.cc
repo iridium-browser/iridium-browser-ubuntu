@@ -11,7 +11,9 @@
 #include "webrtc/modules/rtp_rtcp/source/rtp_sender.h"
 
 #include <stdlib.h>  // srand
+#include <utility>
 
+#include "webrtc/base/checks.h"
 #include "webrtc/modules/rtp_rtcp/interface/rtp_cvo.h"
 #include "webrtc/modules/rtp_rtcp/source/byte_io.h"
 #include "webrtc/modules/rtp_rtcp/source/rtp_sender_audio.h"
@@ -155,7 +157,7 @@ RTPSender::RTPSender(int32_t id,
       last_packet_marker_bit_(false),
       csrcs_(),
       rtx_(kRtxOff),
-      payload_type_rtx_(-1),
+      rtx_payload_type_(-1),
       target_bitrate_critsect_(CriticalSectionWrapper::CreateCriticalSection()),
       target_bitrate_(0) {
   memset(nack_byte_count_times_, 0, sizeof(nack_byte_count_times_));
@@ -323,14 +325,14 @@ int32_t RTPSender::RegisterPayload(
     }
     return -1;
   }
-  int32_t ret_val = -1;
+  int32_t ret_val = 0;
   RtpUtility::Payload* payload = NULL;
   if (audio_configured_) {
+    // TODO(mflodman): Change to CreateAudioPayload and make static.
     ret_val = audio_->RegisterAudioPayload(payload_name, payload_number,
                                            frequency, channels, rate, payload);
   } else {
-    ret_val = video_->RegisterVideoPayload(payload_name, payload_number, rate,
-                                           payload);
+    payload = video_->CreateVideoPayload(payload_name, payload_number, rate);
   }
   if (payload) {
     payload_type_map_[payload_number] = payload;
@@ -421,9 +423,28 @@ uint32_t RTPSender::RtxSsrc() const {
   return ssrc_rtx_;
 }
 
-void RTPSender::SetRtxPayloadType(int payload_type) {
+void RTPSender::SetRtxPayloadType(int payload_type,
+                                  int associated_payload_type) {
   CriticalSectionScoped cs(send_critsect_.get());
-  payload_type_rtx_ = payload_type;
+  DCHECK_LE(payload_type, 127);
+  DCHECK_LE(associated_payload_type, 127);
+  if (payload_type < 0) {
+    LOG(LS_ERROR) << "Invalid RTX payload type: " << payload_type;
+    return;
+  }
+
+  rtx_payload_type_map_[associated_payload_type] = payload_type;
+  rtx_payload_type_ = payload_type;
+}
+
+std::pair<int, int> RTPSender::RtxPayloadType() const {
+  CriticalSectionScoped cs(send_critsect_.get());
+  for (const auto& kv : rtx_payload_type_map_) {
+    if (kv.second == rtx_payload_type_) {
+      return std::make_pair(rtx_payload_type_, kv.first);
+    }
+  }
+  return std::make_pair(-1, -1);
 }
 
 int32_t RTPSender::CheckPayloadType(int8_t payload_type,
@@ -484,7 +505,6 @@ int32_t RTPSender::SendOutgoingData(FrameType frame_type,
                                     const uint8_t* payload_data,
                                     size_t payload_size,
                                     const RTPFragmentationHeader* fragmentation,
-                                    VideoCodecInformation* codec_info,
                                     const RTPVideoHeader* rtp_hdr) {
   uint32_t ssrc;
   {
@@ -521,7 +541,7 @@ int32_t RTPSender::SendOutgoingData(FrameType frame_type,
     ret_val =
         video_->SendVideo(video_type, frame_type, payload_type,
                           capture_timestamp, capture_time_ms, payload_data,
-                          payload_size, fragmentation, codec_info, rtp_hdr);
+                          payload_size, fragmentation, rtp_hdr);
   }
 
   CriticalSectionScoped cs(statistics_crit_.get());
@@ -633,8 +653,7 @@ size_t RTPSender::SendPadData(uint32_t timestamp,
         ssrc = ssrc_rtx_;
         sequence_number = sequence_number_rtx_;
         ++sequence_number_rtx_;
-        payload_type = ((rtx_ & kRtxRedundantPayloads) > 0) ? payload_type_rtx_
-                                                            : payload_type_;
+        payload_type = rtx_payload_type_;
         over_rtx = true;
       }
     }
@@ -740,7 +759,8 @@ int RTPSender::SelectiveRetransmissions() const {
 int RTPSender::SetSelectiveRetransmissions(uint8_t settings) {
   if (!video_)
     return -1;
-  return video_->SetSelectiveRetransmissions(settings);
+  video_->SetSelectiveRetransmissions(settings);
+  return 0;
 }
 
 void RTPSender::OnReceivedNACK(const std::list<uint16_t>& nack_sequence_numbers,
@@ -1081,9 +1101,11 @@ size_t RTPSender::RTPHeaderLength() const {
   return rtp_header_length;
 }
 
-uint16_t RTPSender::IncrementSequenceNumber() {
+uint16_t RTPSender::AllocateSequenceNumber(uint16_t packets_to_send) {
   CriticalSectionScoped cs(send_critsect_.get());
-  return sequence_number_++;
+  uint16_t first_allocated_sequence_number = sequence_number_;
+  sequence_number_ += packets_to_send;
+  return first_allocated_sequence_number;
 }
 
 void RTPSender::ResetDataCounters() {
@@ -1724,14 +1746,6 @@ int32_t RTPSender::RED(int8_t *payload_type) const {
   return audio_->RED(*payload_type);
 }
 
-// Video
-VideoCodecInformation *RTPSender::CodecInformationVideo() {
-  if (audio_configured_) {
-    return NULL;
-  }
-  return video_->CodecInformationVideo();
-}
-
 RtpVideoCodecTypes RTPSender::VideoCodecType() const {
   assert(!audio_configured_ && "Sender is an audio stream!");
   return video_->VideoCodecType();
@@ -1757,8 +1771,8 @@ int32_t RTPSender::SetGenericFECStatus(bool enable,
   if (audio_configured_) {
     return -1;
   }
-  return video_->SetGenericFECStatus(enable, payload_type_red,
-                                     payload_type_fec);
+  video_->SetGenericFECStatus(enable, payload_type_red, payload_type_fec);
+  return 0;
 }
 
 int32_t RTPSender::GenericFECStatus(bool* enable,
@@ -1767,8 +1781,8 @@ int32_t RTPSender::GenericFECStatus(bool* enable,
   if (audio_configured_) {
     return -1;
   }
-  return video_->GenericFECStatus(
-      *enable, *payload_type_red, *payload_type_fec);
+  video_->GenericFECStatus(*enable, *payload_type_red, *payload_type_fec);
+  return 0;
 }
 
 int32_t RTPSender::SetFecParameters(
@@ -1777,7 +1791,8 @@ int32_t RTPSender::SetFecParameters(
   if (audio_configured_) {
     return -1;
   }
-  return video_->SetFecParameters(delta_params, key_params);
+  video_->SetFecParameters(delta_params, key_params);
+  return 0;
 }
 
 void RTPSender::BuildRtxPacket(uint8_t* buffer, size_t* length,
@@ -1795,8 +1810,8 @@ void RTPSender::BuildRtxPacket(uint8_t* buffer, size_t* length,
   memcpy(data_buffer_rtx, buffer, rtp_header.headerLength);
 
   // Replace payload type, if a specific type is set for RTX.
-  if (payload_type_rtx_ != -1) {
-    data_buffer_rtx[1] = static_cast<uint8_t>(payload_type_rtx_);
+  if (rtx_payload_type_ != -1) {
+    data_buffer_rtx[1] = static_cast<uint8_t>(rtx_payload_type_);
     if (rtp_header.markerBit)
       data_buffer_rtx[1] |= kRtpMarkerBitMask;
   }

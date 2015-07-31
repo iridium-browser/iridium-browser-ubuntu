@@ -23,6 +23,7 @@
 #ifndef SVGComputedStyle_h
 #define SVGComputedStyle_h
 
+#include "core/CoreExport.h"
 #include "core/style/DataRef.h"
 #include "core/style/ComputedStyleConstants.h"
 #include "core/style/SVGComputedStyleDefs.h"
@@ -33,7 +34,7 @@
 
 namespace blink {
 
-class SVGComputedStyle : public RefCounted<SVGComputedStyle> {
+class CORE_EXPORT SVGComputedStyle : public RefCounted<SVGComputedStyle> {
 public:
     static PassRefPtr<SVGComputedStyle> create() { return adoptRef(new SVGComputedStyle); }
     PassRefPtr<SVGComputedStyle> copy() const { return adoptRef(new SVGComputedStyle(*this));}
@@ -372,6 +373,8 @@ public:
     bool hasMarkers() const { return !markerStartResource().isEmpty() || !markerMidResource().isEmpty() || !markerEndResource().isEmpty(); }
     bool hasStroke() const { return strokePaintType() != SVG_PAINTTYPE_NONE; }
     bool hasVisibleStroke() const { return hasStroke() && !strokeWidth().isZero(); }
+    bool hasSquareCapStyle() const { return capStyle() == SquareCap; }
+    bool hasMiterJoinStyle() const { return joinStyle() == MiterJoin; }
     bool hasFill() const { return fillPaintType() != SVG_PAINTTYPE_NONE; }
     bool isVerticalWritingMode() const { return writingMode() == WM_TBRL || writingMode() == WM_TB; }
 

@@ -5,6 +5,7 @@
 #include "ash/ash_switches.h"
 
 #include "base/command_line.h"
+#include "base/sys_info.h"
 
 namespace ash {
 namespace switches {
@@ -17,9 +18,6 @@ namespace switches {
 const char kAshAnimateFromBootSplashScreen[] =
     "ash-animate-from-boot-splash-screen";
 
-// Constrains the pointer movement within a root window on desktop.
-const char kAshConstrainPointerToRoot[] = "ash-constrain-pointer-to-root";
-
 // Copies the host window's content to the system background layer at startup.
 // Can make boot slightly slower, but also hides an even-longer awkward period
 // where we display a white background if the login wallpaper takes a long time
@@ -28,10 +26,6 @@ const char kAshCopyHostBackgroundAtBoot[] = "ash-copy-host-background-at-boot";
 
 // Enable keyboard shortcuts useful for debugging.
 const char kAshDebugShortcuts[] = "ash-debug-shortcuts";
-
-// Disables LockLayoutManager used for LockScreenContainer, return back to
-// WorkspaceLayoutManager.
-const char kAshDisableLockLayoutManager[] = "ash-disable-lock-layout-manager";
 
 // Disables the window backdrops normally used in maximize mode (TouchView).
 const char kAshDisableMaximizeModeWindowBackdrop[] =
@@ -56,6 +50,10 @@ const char kAshEnableFullscreenAppList[] = "ash-enable-fullscreen-app-list";
 // Enables key bindings to scroll magnified screen.
 const char kAshEnableMagnifierKeyScroller[] =
     "ash-enable-magnifier-key-scroller";
+
+// Enables unified desktop mode.
+const char kAshEnableUnifiedDesktop[] = "ash-enable-unified-desktop";
+
 #endif
 
 // Enables mirrored screen.
@@ -119,6 +117,23 @@ const char kAuraLegacyPowerButton[] = "aura-legacy-power-button";
 // Force Ash to open its root window on the desktop, even on Windows 8 where
 // it would normally end up in metro.
 const char kForceAshToDesktop[] = "ash-force-desktop";
+
+#endif
+
+#if defined(OS_CHROMEOS)
+// Constrains the pointer movement within a root window on desktop.
+bool ConstrainPointerToRoot() {
+  const char kAshConstrainPointerToRoot[] = "ash-constrain-pointer-to-root";
+
+  return base::SysInfo::IsRunningOnChromeOS() ||
+         base::CommandLine::ForCurrentProcess()->HasSwitch(
+             kAshConstrainPointerToRoot);
+}
+
+bool UnifiedDesktopEnabled() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+      kAshEnableUnifiedDesktop);
+}
 
 #endif
 

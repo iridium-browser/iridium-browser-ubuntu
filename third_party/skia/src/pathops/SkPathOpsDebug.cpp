@@ -7,12 +7,20 @@
 
 #include "SkPathOpsDebug.h"
 #include "SkPath.h"
-#if DEBUG_ANGLE
 #include "SkString.h"
-#endif
+#include "SkThread.h"
 
 #if DEBUG_VALIDATE
 extern bool FLAGS_runFail;
+#endif
+
+#if DEBUG_SORT
+int SkPathOpsDebug::gSortCountDefault = SK_MaxS32;
+int SkPathOpsDebug::gSortCount;
+#endif
+
+#if DEBUG_ACTIVE_OP
+const char* SkPathOpsDebug::kPathOpStr[] = {"diff", "sect", "union", "xor"};
 #endif
 
 #if defined SK_DEBUG || !FORCE_RELEASE
@@ -22,15 +30,6 @@ const char* SkPathOpsDebug::kLVerbStr[] = {"", "line", "quad", "cubic"};
 #if defined(SK_DEBUG) || !FORCE_RELEASE
 int SkPathOpsDebug::gContourID = 0;
 int SkPathOpsDebug::gSegmentID = 0;
-#endif
-
-#if DEBUG_SORT || DEBUG_SWAP_TOP
-int SkPathOpsDebug::gSortCountDefault = SK_MaxS32;
-int SkPathOpsDebug::gSortCount;
-#endif
-
-#if DEBUG_ACTIVE_OP
-const char* SkPathOpsDebug::kPathOpStr[] = {"diff", "sect", "union", "xor"};
 #endif
 
 bool SkPathOpsDebug::ChaseContains(const SkTDArray<SkOpSpanBase* >& chaseArray,
@@ -101,24 +100,59 @@ void SkPathOpsDebug::BumpTestName(char* test) {
 }
 #endif
 
-#if !DEBUG_SHOW_TEST_NAME  // enable when building without extended test
-void SkPathOpsDebug::ShowPath(const SkPath& one, const SkPath& two, SkPathOp op, const char* name) {
+static void show_function_header(const char* functionName) {
+    SkDebugf("\nstatic void %s(skiatest::Reporter* reporter, const char* filename) {\n", functionName);
+    if (strcmp("skphealth_com76", functionName) == 0) {
+        SkDebugf("found it\n");
+    }
 }
-#endif
+
+static const char* gOpStrs[] = {
+    "kDifference_SkPathOp",
+    "kIntersect_SkPathOp",
+    "kUnion_SkPathOp",
+    "kXor_PathOp",
+    "kReverseDifference_SkPathOp",
+};
+
+const char* SkPathOpsDebug::OpStr(SkPathOp op) {
+    return gOpStrs[op];
+}
+
+static void show_op(SkPathOp op, const char* pathOne, const char* pathTwo) {
+    SkDebugf("    testPathOp(reporter, %s, %s, %s, filename);\n", pathOne, pathTwo, gOpStrs[op]);
+    SkDebugf("}\n");
+}
+
+SK_DECLARE_STATIC_MUTEX(gTestMutex);
+
+void SkPathOpsDebug::ShowPath(const SkPath& a, const SkPath& b, SkPathOp shapeOp,
+        const char* testName) {
+    SkAutoMutexAcquire ac(gTestMutex);
+    show_function_header(testName);
+    ShowOnePath(a, "path", true);
+    ShowOnePath(b, "pathB", true);
+    show_op(shapeOp, "path", "pathB");
+}
+
+#include "SkPathOpsCubic.h"
+#include "SkPathOpsQuad.h"
+
+SkDCubic SkDQuad::debugToCubic() const {
+    SkDCubic cubic;
+    cubic[0] = fPts[0];
+    cubic[2] = fPts[1];
+    cubic[3] = fPts[2];
+    cubic[1].fX = (cubic[0].fX + cubic[2].fX * 2) / 3;
+    cubic[1].fY = (cubic[0].fY + cubic[2].fY * 2) / 3;
+    cubic[2].fX = (cubic[3].fX + cubic[2].fX * 2) / 3;
+    cubic[2].fY = (cubic[3].fY + cubic[2].fY * 2) / 3;
+    return cubic;
+}
 
 #include "SkOpAngle.h"
+#include "SkOpCoincidence.h"
 #include "SkOpSegment.h"
-
-#if DEBUG_SWAP_TOP
-int SkOpSegment::debugInflections(const SkOpSpanBase* start, const SkOpSpanBase* end) const {
-    if (fVerb != SkPath::kCubic_Verb) {
-        return false;
-    }
-    SkDCubic dst = SkDCubic::SubDivide(fPts, start->t(), end->t());
-    double inflections[2];
-    return dst.findInflections(inflections);
-}
-#endif
 
 SkOpAngle* SkOpSegment::debugLastAngle() {
     SkOpAngle* result = NULL;
@@ -134,7 +168,7 @@ SkOpAngle* SkOpSegment::debugLastAngle() {
 }
 
 void SkOpSegment::debugReset() {
-    this->init(this->fPts, this->contour(), this->verb());
+    this->init(this->fPts, this->fWeight, this->contour(), this->verb());
 }
 
 #if DEBUG_ACTIVE_SPANS
@@ -150,26 +184,36 @@ void SkOpSegment::debugShowActiveSpans() const {
         if (span->done()) {
             continue;
         }
-        if (lastId == fID && lastT == span->t()) {
+        if (lastId == this->debugID() && lastT == span->t()) {
             continue;
         }
-        lastId = fID;
+        lastId = this->debugID();
         lastT = span->t();
-        SkDebugf("%s id=%d", __FUNCTION__, fID);
+        SkDebugf("%s id=%d", __FUNCTION__, this->debugID());
         SkDebugf(" (%1.9g,%1.9g", fPts[0].fX, fPts[0].fY);
         for (int vIndex = 1; vIndex <= SkPathOpsVerbToPoints(fVerb); ++vIndex) {
             SkDebugf(" %1.9g,%1.9g", fPts[vIndex].fX, fPts[vIndex].fY);
         }
+        if (SkPath::kConic_Verb == fVerb) {
+            SkDebugf(" %1.9gf", fWeight);
+        }
         const SkOpPtT* ptT = span->ptT();
         SkDebugf(") t=%1.9g (%1.9g,%1.9g)", ptT->fT, ptT->fPt.fX, ptT->fPt.fY);
         SkDebugf(" tEnd=%1.9g", span->next()->t());
-        SkDebugf(" windSum=");
         if (span->windSum() == SK_MinS32) {
-            SkDebugf("?");
+            SkDebugf(" windSum=?");
         } else {
-            SkDebugf("%d", span->windSum());
+            SkDebugf(" windSum=%d", span->windSum());
         }
-        SkDebugf(" windValue=%d oppValue=%d", span->windValue(), span->oppValue());
+        if (span->oppValue() && span->oppSum() == SK_MinS32) {
+            SkDebugf(" oppSum=?");
+        } else if (span->oppValue() || span->oppSum() != SK_MinS32) {
+            SkDebugf(" oppSum=%d", span->oppSum());
+        }
+        SkDebugf(" windValue=%d", span->windValue());
+        if (span->oppValue() || span->oppSum() != SK_MinS32) {
+            SkDebugf(" oppValue=%d", span->oppValue());
+        }
         SkDebugf("\n");
    } while ((span = span->next()->upCastable()));
 }
@@ -178,7 +222,7 @@ void SkOpSegment::debugShowActiveSpans() const {
 #if DEBUG_MARK_DONE
 void SkOpSegment::debugShowNewWinding(const char* fun, const SkOpSpan* span, int winding) {
     const SkPoint& pt = span->ptT()->fPt;
-    SkDebugf("%s id=%d", fun, fID);
+    SkDebugf("%s id=%d", fun, this->debugID());
     SkDebugf(" (%1.9g,%1.9g", fPts[0].fX, fPts[0].fY);
     for (int vIndex = 1; vIndex <= SkPathOpsVerbToPoints(fVerb); ++vIndex) {
         SkDebugf(" %1.9g,%1.9g", fPts[vIndex].fX, fPts[vIndex].fY);
@@ -202,7 +246,7 @@ void SkOpSegment::debugShowNewWinding(const char* fun, const SkOpSpan* span, int
 void SkOpSegment::debugShowNewWinding(const char* fun, const SkOpSpan* span, int winding,
                                       int oppWinding) {
     const SkPoint& pt = span->ptT()->fPt;
-    SkDebugf("%s id=%d", fun, fID);
+    SkDebugf("%s id=%d", fun, this->debugID());
     SkDebugf(" (%1.9g,%1.9g", fPts[0].fX, fPts[0].fY);
     for (int vIndex = 1; vIndex <= SkPathOpsVerbToPoints(fVerb); ++vIndex) {
         SkDebugf(" %1.9g,%1.9g", fPts[vIndex].fX, fPts[vIndex].fY);
@@ -247,6 +291,11 @@ SkString SkOpAngle::debugPart() const {
             break;
         case SkPath::kQuad_Verb:
             result.printf(QUAD_DEBUG_STR " id=%d", QUAD_DEBUG_DATA(fCurvePart),
+                    this->segment()->debugID());
+            break;
+        case SkPath::kConic_Verb:
+            result.printf(CONIC_DEBUG_STR " id=%d",
+                    CONIC_DEBUG_DATA(fCurvePart, fCurvePart.fConic.fWeight),
                     this->segment()->debugID());
             break;
         case SkPath::kCubic_Verb:
@@ -302,20 +351,20 @@ void SkOpAngle::debugValidate() const {
         bool useXor = op ? oppXor : isXor;
         SkASSERT(lastXor == -1 || lastXor == (int) useXor);
         lastXor = (int) useXor;
-        wind += next->sign() * (op ? minSpan->oppValue() : minSpan->windValue());
+        wind += next->debugSign() * (op ? minSpan->oppValue() : minSpan->windValue());
         if (useXor) {
             wind &= 1;
         }
         useXor = op ? isXor : oppXor;
         SkASSERT(lastOppXor == -1 || lastOppXor == (int) useXor);
         lastOppXor = (int) useXor;
-        opp += next->sign() * (op ? minSpan->windValue() : minSpan->oppValue());
+        opp += next->debugSign() * (op ? minSpan->windValue() : minSpan->oppValue());
         if (useXor) {
             opp &= 1;
         }
         next = next->fNext;
     } while (next && next != first);
-    SkASSERT(wind == 0);
+    SkASSERT(wind == 0 || !FLAGS_runFail);
     SkASSERT(opp == 0 || !FLAGS_runFail);
 #endif
 }
@@ -338,6 +387,19 @@ void SkOpAngle::debugValidateNext() const {
         }
     } while (true);
 #endif
+}
+
+void SkOpCoincidence::debugShowCoincidence() const {
+    SkCoincidentSpans* span = fHead;
+    while (span) {
+        SkDebugf("%s - id=%d t=%1.9g tEnd=%1.9g\n", __FUNCTION__,
+                span->fCoinPtTStart->segment()->debugID(),
+                span->fCoinPtTStart->fT, span->fCoinPtTEnd->fT);
+        SkDebugf("%s + id=%d t=%1.9g tEnd=%1.9g\n", __FUNCTION__,
+                span->fOppPtTStart->segment()->debugID(),
+                span->fOppPtTStart->fT, span->fOppPtTEnd->fT);
+        span = span->fNext;
+    }
 }
 
 void SkOpSegment::debugValidate() const {
@@ -363,6 +425,7 @@ void SkOpSegment::debugValidate() const {
     } while (!span->final() && (span = span->upCast()->next()));
     SkASSERT(count == fCount);
     SkASSERT(done == fDoneCount);
+    SkASSERT(count >= fDoneCount);
     SkASSERT(span->final());
     span->debugValidate();
 #endif
@@ -436,6 +499,28 @@ bool SkOpSpan::debugCoinLoopCheck() const {
     return true;
 }
 
+// called only by test code
+int SkIntersections::debugCoincidentUsed() const {
+    if (!fIsCoincident[0]) {
+        SkASSERT(!fIsCoincident[1]);
+        return 0;
+    }
+    int count = 0;
+    SkDEBUGCODE(int count2 = 0;)
+    for (int index = 0; index < fUsed; ++index) {
+        if (fIsCoincident[0] & (1 << index)) {
+            ++count;
+        }
+#ifdef SK_DEBUG
+        if (fIsCoincident[1] & (1 << index)) {
+            ++count2;
+        }
+#endif
+    }
+    SkASSERT(count == count2);
+    return count;
+}
+
 #include "SkOpContour.h"
 
 int SkOpPtT::debugLoopLimit(bool report) const {
@@ -470,4 +555,108 @@ void SkOpPtT::debugValidate() const {
     SkASSERT(fNext->fNext);
     SkASSERT(debugLoopLimit(false) == 0);
 #endif
+}
+
+static void output_scalar(SkScalar num) {
+    if (num == (int) num) {
+        SkDebugf("%d", (int) num);
+    } else {
+        SkString str;
+        str.printf("%1.9g", num);
+        int width = (int) str.size();
+        const char* cStr = str.c_str();
+        while (cStr[width - 1] == '0') {
+            --width;
+        }
+        str.resize(width);
+        SkDebugf("%sf", str.c_str());
+    }
+}
+
+static void output_points(const SkPoint* pts, int count) {
+    for (int index = 0; index < count; ++index) {
+        output_scalar(pts[index].fX);
+        SkDebugf(", ");
+        output_scalar(pts[index].fY);
+        if (index + 1 < count) {
+            SkDebugf(", ");
+        }
+    }
+}
+
+static void showPathContours(SkPath::RawIter& iter, const char* pathName) {
+    uint8_t verb;
+    SkPoint pts[4];
+    while ((verb = iter.next(pts)) != SkPath::kDone_Verb) {
+        switch (verb) {
+            case SkPath::kMove_Verb:
+                SkDebugf("    %s.moveTo(", pathName);
+                output_points(&pts[0], 1);
+                SkDebugf(");\n");
+                continue;
+            case SkPath::kLine_Verb:
+                SkDebugf("    %s.lineTo(", pathName);
+                output_points(&pts[1], 1);
+                SkDebugf(");\n");
+                break;
+            case SkPath::kQuad_Verb:
+                SkDebugf("    %s.quadTo(", pathName);
+                output_points(&pts[1], 2);
+                SkDebugf(");\n");
+                break;
+            case SkPath::kConic_Verb:
+                SkDebugf("    %s.conicTo(", pathName);
+                output_points(&pts[1], 2);
+                SkDebugf(", %1.9gf);\n", iter.conicWeight());
+                break;
+            case SkPath::kCubic_Verb:
+                SkDebugf("    %s.cubicTo(", pathName);
+                output_points(&pts[1], 3);
+                SkDebugf(");\n");
+                break;
+            case SkPath::kClose_Verb:
+                SkDebugf("    %s.close();\n", pathName);
+                break;
+            default:
+                SkDEBUGFAIL("bad verb");
+                return;
+        }
+    }
+}
+
+static const char* gFillTypeStr[] = {
+    "kWinding_FillType",
+    "kEvenOdd_FillType",
+    "kInverseWinding_FillType",
+    "kInverseEvenOdd_FillType"
+};
+
+void SkPathOpsDebug::ShowOnePath(const SkPath& path, const char* name, bool includeDeclaration) {
+    SkPath::RawIter iter(path);
+#define SUPPORT_RECT_CONTOUR_DETECTION 0
+#if SUPPORT_RECT_CONTOUR_DETECTION
+    int rectCount = path.isRectContours() ? path.rectContours(NULL, NULL) : 0;
+    if (rectCount > 0) {
+        SkTDArray<SkRect> rects;
+        SkTDArray<SkPath::Direction> directions;
+        rects.setCount(rectCount);
+        directions.setCount(rectCount);
+        path.rectContours(rects.begin(), directions.begin());
+        for (int contour = 0; contour < rectCount; ++contour) {
+            const SkRect& rect = rects[contour];
+            SkDebugf("path.addRect(%1.9g, %1.9g, %1.9g, %1.9g, %s);\n", rect.fLeft, rect.fTop,
+                    rect.fRight, rect.fBottom, directions[contour] == SkPath::kCCW_Direction
+                    ? "SkPath::kCCW_Direction" : "SkPath::kCW_Direction");
+        }
+        return;
+    }
+#endif
+    SkPath::FillType fillType = path.getFillType();
+    SkASSERT(fillType >= SkPath::kWinding_FillType && fillType <= SkPath::kInverseEvenOdd_FillType);
+    if (includeDeclaration) {
+        SkDebugf("    SkPath %s;\n", name);
+    }
+    SkDebugf("    %s.setFillType(SkPath::%s);\n", name, gFillTypeStr[fillType]);
+    iter.setPath(path);
+    showPathContours(iter, name);
 }

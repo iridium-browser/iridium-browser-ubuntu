@@ -6,6 +6,7 @@
 #define NavigatorServiceWorker_h
 
 #include "core/frame/Navigator.h"
+#include "modules/ModulesExport.h"
 #include "platform/Supplementable.h"
 #include "platform/heap/Handle.h"
 
@@ -15,14 +16,14 @@ class Document;
 class Navigator;
 class ServiceWorkerContainer;
 
-class NavigatorServiceWorker final : public NoBaseWillBeGarbageCollected<NavigatorServiceWorker>, public WillBeHeapSupplement<Navigator>, DOMWindowProperty {
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(NavigatorServiceWorker);
-    DECLARE_EMPTY_VIRTUAL_DESTRUCTOR_WILL_BE_REMOVED(NavigatorServiceWorker);
+class MODULES_EXPORT NavigatorServiceWorker final : public GarbageCollectedFinalized<NavigatorServiceWorker>, public HeapSupplement<Navigator>, public DOMWindowProperty {
+    USING_GARBAGE_COLLECTED_MIXIN(NavigatorServiceWorker);
 public:
     static NavigatorServiceWorker* from(Document&);
     static NavigatorServiceWorker& from(Navigator&);
     static NavigatorServiceWorker* toNavigatorServiceWorker(Navigator&);
-    static const char* supplementName();
+
+    virtual ~NavigatorServiceWorker();
 
     static ServiceWorkerContainer* serviceWorker(Navigator&);
 
@@ -32,10 +33,12 @@ private:
     explicit NavigatorServiceWorker(Navigator&);
     ServiceWorkerContainer* serviceWorker();
 
+    static const char* supplementName();
+
     // DOMWindowProperty override.
     virtual void willDetachGlobalObjectFromFrame() override;
 
-    PersistentWillBeMember<ServiceWorkerContainer> m_serviceWorker;
+    Member<ServiceWorkerContainer> m_serviceWorker;
 };
 
 } // namespace blink

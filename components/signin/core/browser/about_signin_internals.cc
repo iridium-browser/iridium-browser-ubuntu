@@ -20,11 +20,6 @@
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/signin/core/common/signin_switches.h"
-#include "google_apis/gaia/gaia_auth_fetcher.h"
-#include "google_apis/gaia/gaia_auth_util.h"
-#include "google_apis/gaia/gaia_constants.h"
-#include "google_apis/gaia/gaia_urls.h"
-#include "net/cookies/canonical_cookie.h"
 
 using base::Time;
 using namespace signin_internals_util;
@@ -135,12 +130,14 @@ AboutSigninInternals::AboutSigninInternals(
     ProfileOAuth2TokenService* token_service,
     AccountTrackerService* account_tracker,
     SigninManagerBase* signin_manager,
-    SigninErrorController* signin_error_controller)
+    SigninErrorController* signin_error_controller,
+    GaiaCookieManagerService* cookie_manager_service)
     : token_service_(token_service),
       account_tracker_(account_tracker),
       signin_manager_(signin_manager),
       client_(NULL),
-      signin_error_controller_(signin_error_controller) {}
+      signin_error_controller_(signin_error_controller),
+      cookie_manager_service_(cookie_manager_service) {}
 
 AboutSigninInternals::~AboutSigninInternals() {}
 
@@ -211,18 +208,14 @@ void AboutSigninInternals::Initialize(SigninClient* client) {
   signin_error_controller_->AddObserver(this);
   signin_manager_->AddSigninDiagnosticsObserver(this);
   token_service_->AddDiagnosticsObserver(this);
-  cookie_changed_subscription_ = client_->AddCookieChangedCallback(
-      GaiaUrls::GetInstance()->gaia_url(),
-      "LSID",
-      base::Bind(&AboutSigninInternals::OnCookieChanged,
-                 base::Unretained(this)));
+  cookie_manager_service_->AddObserver(this);
 }
 
 void AboutSigninInternals::Shutdown() {
   signin_error_controller_->RemoveObserver(this);
   signin_manager_->RemoveSigninDiagnosticsObserver(this);
   token_service_->RemoveDiagnosticsObserver(this);
-  cookie_changed_subscription_.reset();
+  cookie_manager_service_->RemoveObserver(this);
 }
 
 void AboutSigninInternals::NotifyObservers() {
@@ -247,6 +240,7 @@ void AboutSigninInternals::NotifyObservers() {
       signin_status_.ToValue(account_tracker_,
                              signin_manager_,
                              signin_error_controller_,
+                             token_service_,
                              product_version);
 
   // TODO(robliao): Remove ScopedTracker below once https://crbug.com/422460 is
@@ -264,6 +258,7 @@ scoped_ptr<base::DictionaryValue> AboutSigninInternals::GetSigninStatus() {
   return signin_status_.ToValue(account_tracker_,
                                 signin_manager_,
                                 signin_error_controller_,
+                                token_service_,
                                 client_->GetProductVersion()).Pass();
 }
 
@@ -327,46 +322,8 @@ void AboutSigninInternals::OnAuthenticationResultReceived(std::string status) {
   NotifySigninValueChanged(AUTHENTICATION_RESULT_RECEIVED, status);
 }
 
-void AboutSigninInternals::OnCookieChanged(const net::CanonicalCookie& cookie,
-                                           bool removed) {
-  DCHECK_EQ("LSID", cookie.Name());
-  DCHECK_EQ(GaiaUrls::GetInstance()->gaia_url().host(), cookie.Domain());
-  if (cookie.IsSecure() && cookie.IsHttpOnly()) {
-    GetCookieAccountsAsync();
-  }
-}
-
 void AboutSigninInternals::OnErrorChanged() {
   NotifyObservers();
-}
-
-void AboutSigninInternals::GetCookieAccountsAsync() {
-  // Don't bother calling /ListAccounts if no one will observe the response.
-  if (!gaia_fetcher_ && signin_observers_.might_have_observers()) {
-    // There is no list account request in flight.
-    gaia_fetcher_.reset(new GaiaAuthFetcher(
-        this, GaiaConstants::kChromeSource, client_->GetURLRequestContext()));
-    gaia_fetcher_->StartListAccounts();
-  }
-}
-
-void AboutSigninInternals::OnListAccountsSuccess(const std::string& data) {
-  gaia_fetcher_.reset();
-
-  // Get account information from response data.
-  std::vector<std::pair<std::string, bool> > gaia_accounts;
-  bool valid_json = gaia::ParseListAccountsData(data, &gaia_accounts);
-  if (!valid_json) {
-    VLOG(1) << "AboutSigninInternals::OnListAccountsSuccess: parsing error";
-  } else {
-    OnListAccountsComplete(gaia_accounts);
-  }
-}
-
-void AboutSigninInternals::OnListAccountsFailure(
-    const GoogleServiceAuthError& error) {
-  gaia_fetcher_.reset();
-  VLOG(1) << "AboutSigninInternals::OnListAccountsFailure:" << error.ToString();
 }
 
 void AboutSigninInternals::GoogleSigninFailed(
@@ -385,8 +342,12 @@ void AboutSigninInternals::GoogleSignedOut(const std::string& account_id,
   NotifyObservers();
 }
 
-void AboutSigninInternals::OnListAccountsComplete(
-    std::vector<std::pair<std::string, bool> >& gaia_accounts) {
+void AboutSigninInternals::OnGaiaAccountsInCookieUpdated(
+    const std::vector<std::pair<std::string, bool> >& gaia_accounts,
+    const GoogleServiceAuthError& error) {
+  if (error.state() != GoogleServiceAuthError::NONE)
+    return;
+
   base::DictionaryValue cookie_status;
   base::ListValue* cookie_info = new base::ListValue();
   cookie_status.Set("cookie_info", cookie_info);
@@ -419,8 +380,13 @@ AboutSigninInternals::TokenInfo::~TokenInfo() {}
 
 bool AboutSigninInternals::TokenInfo::LessThan(const TokenInfo* a,
                                                const TokenInfo* b) {
-  return a->consumer_id < b->consumer_id ||
-      (a->consumer_id == b->consumer_id && a->scopes < b->scopes);
+  if (a->request_time == b->request_time) {
+    if (a->consumer_id == b->consumer_id) {
+      return a->scopes < b->scopes;
+    }
+    return a->consumer_id < b->consumer_id;
+  }
+  return a->request_time < b->request_time;
 }
 
 void AboutSigninInternals::TokenInfo::Invalidate() { removed_ = true; }
@@ -492,6 +458,7 @@ scoped_ptr<base::DictionaryValue> AboutSigninInternals::SigninStatus::ToValue(
     AccountTrackerService* account_tracker,
     SigninManagerBase* signin_manager,
     SigninErrorController* signin_error_controller,
+    ProfileOAuth2TokenService* token_service,
     const std::string& product_version) {
   // TODO(robliao): Remove ScopedTracker below once https://crbug.com/422460 is
   // fixed.
@@ -538,10 +505,14 @@ scoped_ptr<base::DictionaryValue> AboutSigninInternals::SigninStatus::ToValue(
                         static_cast<UntimedSigninStatusField>(USERNAME)),
                     signin_manager->GetAuthenticatedUsername());
     if (signin_error_controller->HasError()) {
+      const std::string error_account_id =
+          signin_error_controller->error_account_id();
+      const std::string error_username =
+          account_tracker->GetAccountInfo(error_account_id).email;
       AddSectionEntry(basic_info, "Auth Error",
           signin_error_controller->auth_error().ToString());
-      AddSectionEntry(basic_info, "Auth Error Username",
-          signin_error_controller->error_username());
+      AddSectionEntry(basic_info, "Auth Error Account Id", error_account_id);
+      AddSectionEntry(basic_info, "Auth Error Username", error_username);
     } else {
       AddSectionEntry(basic_info, "Auth Error", "None");
     }
@@ -607,6 +578,23 @@ scoped_ptr<base::DictionaryValue> AboutSigninInternals::SigninStatus::ToValue(
       base::DictionaryValue* token_info = tokens[i]->ToValue();
       token_details->Append(token_info);
     }
+  }
+
+  base::ListValue* account_info = new base::ListValue();
+  signin_status->Set("accountInfo", account_info);
+  const std::vector<std::string>& accounts_in_token_service =
+      token_service->GetAccounts();
+
+  if(accounts_in_token_service.size() == 0) {
+    base::DictionaryValue* no_token_entry = new base::DictionaryValue();
+    no_token_entry->SetString("accountId", "No token in Token Service.");
+    account_info->Append(no_token_entry);
+  }
+
+  for(const std::string& account_id : accounts_in_token_service) {
+    base::DictionaryValue* entry = new base::DictionaryValue();
+    entry->SetString("accountId", account_id);
+    account_info->Append(entry);
   }
 
   return signin_status.Pass();

@@ -14,28 +14,22 @@ import argparse
 import collections
 import datetime
 import functools
-import logging
 import os
 import optparse
 import signal
 import sys
-import tempfile
 import urlparse
 
 # TODO(build): sort the cbuildbot.constants/lib.constants issue;
 # lib shouldn't have to import from buildbot like this.
 from chromite.cbuildbot import constants
 from chromite.lib import cros_build_lib
-from chromite.lib import git
+from chromite.lib import cros_logging as logging
 from chromite.lib import gs
 from chromite.lib import osutils
+from chromite.lib import path_util
 from chromite.lib import terminal
-
-
-CHECKOUT_TYPE_UNKNOWN = 'unknown'
-CHECKOUT_TYPE_GCLIENT = 'gclient'
-CHECKOUT_TYPE_REPO = 'repo'
-CHECKOUT_TYPE_SUBMODULE = 'submodule'
+from chromite.lib import workspace_lib
 
 
 DEVICE_SCHEME_FILE = 'file'
@@ -43,88 +37,52 @@ DEVICE_SCHEME_SSH = 'ssh'
 DEVICE_SCHEME_USB = 'usb'
 
 
-CheckoutInfo = collections.namedtuple(
-    'CheckoutInfo', ['type', 'root', 'chrome_src_dir'])
+# Command line options to automatically convert from relative or absolute paths
+# to locator paths when RunInsideChroot() is used.
+_LOCATOR_OVERRIDE_OPTIONS = ('brick', 'blueprint')
 
 
 class ChrootRequiredError(Exception):
   """Raised when a command must be run in the chroot
 
   This exception is intended to be caught by code which will restart execution
-  in the chroot. If none of the arguments passed to the script need to be
-  adjusted when that happens, it can be constructed with no parameters. If
-  something does need to be adjusted, for instance an argument that's a path,
-  the command can construct a custom command line and pass it into this
-  exception which will be used instead.
+  in the chroot. Throwing this exception allows contexts to be exited and
+  general cleanup to happen before we exec an external binary.
 
-  When customizing the command line, argv[0] will have to be fixed up manually
-  like any other element of argv.
+  The command to run inside the chroot, and (optionally) special cros_sdk
+  arguments are attached to the exception. Any adjustments to the arguments
+  should be done before raising the exception.
   """
+  def __init__(self, cmd, chroot_args=None):
+    """Constructor for ChrootRequiredError.
 
-  def __init__(self, new_argv=None, extra_args=None, *args, **kwargs):
-    Exception.__init__(self, *args, **kwargs)
-    if new_argv is None:
-      new_argv = sys.argv[:]
-      new_argv = [git.ReinterpretPathForChroot(new_argv[0])] + new_argv[1:]
-
-    if extra_args:
-      new_argv += extra_args
-    self.new_argv = new_argv
+    Args:
+      cmd: Command line to run inside the chroot as a list of strings.
+      chroot_args: Arguments to pass directly to cros_sdk.
+    """
+    super(ChrootRequiredError, self).__init__(self)
+    self.cmd = cmd
+    self.chroot_args = chroot_args
 
 
-def DetermineCheckout(cwd):
-  """Gather information on the checkout we are in.
+class ExecRequiredError(Exception):
+  """Raised when a command needs to exec, after cleanup.
 
-  Returns:
-    A CheckoutInfo object with these attributes:
-      type: The type of checkout.  Valid values are CHECKOUT_TYPE_*.
-      root: The root of the checkout.
-      chrome_src_dir: If the checkout is a Chrome checkout, the path to the
-        Chrome src/ directory.
+  This exception is intended to be caught by code which will exec another
+  command. Throwing this exception allows contexts to be exited and general
+  cleanup to happen before we exec an external binary.
+
+  The command to run is attached to the exception. Any adjustments to the
+  arguments should be done before raising the exception.
   """
-  checkout_type = CHECKOUT_TYPE_UNKNOWN
-  root, path = None, None
-  for path in osutils.IteratePathParents(cwd):
-    repo_dir = os.path.join(path, '.repo')
-    if os.path.isdir(repo_dir):
-      checkout_type = CHECKOUT_TYPE_REPO
-      break
-    gclient_file = os.path.join(path, '.gclient')
-    if os.path.exists(gclient_file):
-      checkout_type = CHECKOUT_TYPE_GCLIENT
-      break
-    submodule_git = os.path.join(path, '.git')
-    if (os.path.isdir(submodule_git) and
-        git.IsSubmoduleCheckoutRoot(cwd, 'origin', constants.CHROMIUM_GOB_URL)):
-      checkout_type = CHECKOUT_TYPE_SUBMODULE
-      break
+  def __init__(self, cmd):
+    """Constructor for ExecRequiredError.
 
-  if checkout_type != CHECKOUT_TYPE_UNKNOWN:
-    root = path
-
-  # Determine the chrome src directory.
-  chrome_src_dir = None
-  if checkout_type == CHECKOUT_TYPE_GCLIENT:
-    chrome_src_dir = os.path.join(root, 'src')
-  elif checkout_type == CHECKOUT_TYPE_SUBMODULE:
-    chrome_src_dir = root
-
-  return CheckoutInfo(checkout_type, root, chrome_src_dir)
-
-
-def GetCacheDir():
-  """Calculate the current cache dir.
-
-  Users can configure the cache dir using the --cache-dir argument and it is
-  shared between cbuildbot and all child processes. If no cache dir is
-  specified, FindCacheDir finds an alternative location to store the cache.
-
-  Returns:
-    The path to the cache dir.
-  """
-  return os.environ.get(
-      constants.SHARED_CACHE_ENVVAR,
-      BaseParser.FindCacheDir(None, None))
+    Args:
+      cmd: Command line to run inside the chroot as a list of strings.
+    """
+    super(ExecRequiredError, self).__init__(self)
+    self.cmd = cmd
 
 
 def AbsolutePath(_option, _opt, value):
@@ -144,6 +102,24 @@ def NormalizeLocalOrGSPath(value):
   return VALID_TYPES[ptype](value)
 
 
+def ParseBool(value):
+  """Parse bool argument into a bool value.
+
+  For the existing type=bool functionality, the parser uses the built-in bool(x)
+  function to determine the value.  This function will only return false if x
+  is False or omitted.  Even with this type specified, however, arguments that
+  are generated from a command line initially get parsed as a string, and for
+  any string value passed in to bool(x), it will always return True.
+
+  Args:
+    value: String representing a boolean value.
+
+  Returns:
+    True or False.
+  """
+  return cros_build_lib.BooleanShellValue(value, False)
+
+
 def ParseDate(value):
   """Parse date argument into a datetime.date object.
 
@@ -159,7 +135,7 @@ def ParseDate(value):
     # Give a helpful error message about the format expected.  Putting this
     # message in the exception is useless because argparse ignores the
     # exception message and just says the value is invalid.
-    cros_build_lib.Error('Date is expected to be in format YYYY-MM-DD.')
+    logging.error('Date is expected to be in format YYYY-MM-DD.')
     raise
 
 
@@ -183,29 +159,116 @@ def NormalizeUri(value):
 #   hostname: String SSH hostname or None.
 #   port: Int SSH port or None.
 #   path: String USB/file path or None.
+#   raw: String raw input from the command line.
 # For now this is a superset of all information for USB, SSH, or file devices.
 # If functionality diverges based on type, it may be useful to split this into
 # separate device classes instead.
 Device = cros_build_lib.Collection(
-    'Device', scheme=None, username=None, hostname=None, port=None, path=None)
+    'Device', scheme=None, username=None, hostname=None, port=None, path=None,
+    raw=None)
 
 
-def ParseDevice(value):
-  """Parse a device argument.
+class DeviceParser(object):
+  """Parses devices as an argparse argument type.
 
-  Args:
-    value: String representing a device target. Valid options are:
-      - [ssh://][username@]hostname[:port].
-      - usb://[path].
-      - file://path.
+  In addition to parsing user input, this class will also ensure that only
+  supported device schemes are accepted by the parser. For example,
+  `cros deploy` only makes sense with an SSH device, but `cros flash` can use
+  SSH, USB, or file device schemes.
 
-  Returns:
-    A Device object.
+  If the device input is malformed or the scheme is wrong, an error message will
+  be printed and the program will exit.
 
-  Raises:
-    ValueError: |value| is not a valid device specifier.
+  Valid device inputs are:
+    - [ssh://][username@]hostname[:port].
+    - usb://[path].
+    - file://path or /absolute_path.
+
+  Usage:
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+      'ssh_device',
+      type=commandline.DeviceParser(commandline.DEVICE_SCHEME_SSH))
+
+    parser.add_argument(
+      'usb_or_file_device',
+      type=commandline.DeviceParser([commandline.DEVICE_SCHEME_USB,
+                                     commandline.DEVICE_SCHEME_FILE]))
   """
-  try:
+
+  def __init__(self, schemes):
+    """Initializes the parser.
+
+    See the class comments for usage examples.
+
+    Args:
+      schemes: A scheme or list of schemes to accept.
+    """
+    self.schemes = [schemes] if isinstance(schemes, basestring) else schemes
+    # Provide __name__ for argparse to print on failure, or else it will use
+    # repr() which creates a confusing error message.
+    self.__name__ = type(self).__name__
+
+  def __call__(self, value):
+    """Parses a device input and enforces constraints.
+
+    DeviceParser is an object so that a set of valid schemes can be specified,
+    but argparse expects a parsing function, so we overload __call__() for
+    argparse to use.
+
+    Args:
+      value: String representing a device target. See class comments for
+        valid device input formats.
+
+    Returns:
+      A Device object.
+
+    Raises:
+      ValueError: |value| is not a valid device specifier or doesn't
+        match the supported list of schemes.
+    """
+    try:
+      device = self._ParseDevice(value)
+      self._EnforceConstraints(device, value)
+      return device
+    except ValueError as e:
+      # argparse ignores exception messages, so print the message manually.
+      logging.error(e)
+      raise
+    except Exception as e:
+      logging.error('Internal error while parsing device input: %s', e)
+      raise
+
+  def _EnforceConstraints(self, device, value):
+    """Verifies that user-specified constraints are upheld.
+
+    Checks that the parsed device has a scheme that matches what the user
+    expects. Additional constraints can be added if needed.
+
+    Args:
+      device: Device object.
+      value: String representing a device target.
+
+    Raises:
+      ValueError: |device| has the wrong scheme.
+    """
+    if device.scheme not in self.schemes:
+      raise ValueError('Unsupported scheme "%s" for device "%s"' %
+                       (device.scheme, value))
+
+  def _ParseDevice(self, value):
+    """Parse a device argument.
+
+    Args:
+      value: String representing a device target.
+
+    Returns:
+      A Device object.
+
+    Raises:
+      ValueError: |value| is not a valid device specifier.
+    """
     parsed = urlparse.urlparse(value)
     if not parsed.scheme:
       # Default to a file scheme for absolute paths, SSH scheme otherwise.
@@ -224,22 +287,121 @@ def ParseDevice(value):
       if not hostname:
         raise ValueError('Hostname is required for device "%s"' % value)
       return Device(scheme=scheme, username=parsed.username, hostname=hostname,
-                    port=parsed.port)
+                    port=parsed.port, raw=value)
     elif scheme == DEVICE_SCHEME_USB:
       path = parsed.netloc + parsed.path
       # Change path '' to None for consistency.
-      return Device(scheme=scheme, path=path if path else None)
+      return Device(scheme=scheme, path=path if path else None, raw=value)
     elif scheme == DEVICE_SCHEME_FILE:
       path = parsed.netloc + parsed.path
       if not path:
         raise ValueError('Path is required for "%s"' % value)
-      return Device(scheme=scheme, path=path)
+      return Device(scheme=scheme, path=path, raw=value)
     else:
-      raise ValueError('Invalid device scheme "%s" in "%s"' % (scheme, value))
-  except ValueError as e:
-    # argparse ignores exception messages, so print the message manually.
-    cros_build_lib.Error(e)
-    raise
+      raise ValueError('Unknown device scheme "%s" in "%s"' % (scheme, value))
+
+
+def NormalizeWorkspacePath(path, default_dir=None, extension=None):
+  """Normalize a workspace path.
+
+  Converts |path| into a locator and applies |default_dir| and/or
+  |extension| if specified.
+
+  Args:
+    path: Relative, absolute, or locator path in the CWD workspace.
+    default_dir: If |path| does not contain '/', prepend this
+      directory to the result.
+    extension: If |path| doesn't end in this extension, append this
+      extension to the result.
+
+  Returns:
+    Workspace locator corresponding to the modified |path|.
+
+  Raises:
+    ValueError: |path| isn't in the workspace.
+  """
+  if default_dir and '/' not in path:
+    path = os.path.join(default_dir, path)
+
+  if extension:
+    extension = '.' + extension
+    if os.path.splitext(path)[1] != extension:
+      path += extension
+
+  if workspace_lib.IsLocator(path):
+    return path
+
+  locator = workspace_lib.PathToLocator(path)
+  if not locator:
+    # argparse ignores exception messages; log it as well so the user sees it.
+    error_message = '%s is not in the current workspace.' % path
+    logging.error(error_message)
+    raise ValueError(error_message)
+  return locator
+
+
+def NormalizeBrickPath(path):
+  """Normalize a brick path using some common assumptions.
+
+  Makes the following changes to |path|:
+    1. Put non-paths in //bricks (e.g. foo -> //bricks/foo).
+    2. Convert to a workspace locator.
+
+  Args:
+    path: brick path.
+
+  Returns:
+    Locator to the brick.
+  """
+  return NormalizeWorkspacePath(path, default_dir='//bricks')
+
+
+def NormalizeBspPath(path):
+  """Normalize a BSP path using some common assumptions.
+
+  Makes the following changes to |path|:
+    1. Put non-paths in //bsps (e.g. foo -> //bsps/foo).
+    2. Convert to a workspace locator.
+
+  Args:
+    path: BSP path.
+
+  Returns:
+    Locator to the BSP.
+  """
+  return NormalizeWorkspacePath(path, default_dir='//bsps')
+
+
+def NormalizeBlueprintPath(path):
+  """Normalize a blueprint path using some common assumptions.
+
+  Makes the following changes to |path|:
+    1. Put non-paths in //blueprints (e.g. foo -> //blueprints/foo).
+    2. Add .json if not already present.
+    3. Convert to a workspace locator.
+
+  Args:
+    path: blueprint path.
+
+  Returns:
+    Locator to the blueprint.
+  """
+  return NormalizeWorkspacePath(path, default_dir='//blueprints',
+                                extension='json')
+
+
+VALID_TYPES = {
+    'bool': ParseBool,
+    'date': ParseDate,
+    'path': osutils.ExpandPath,
+    'gs_path': NormalizeGSPath,
+    'local_or_gs_path': NormalizeLocalOrGSPath,
+    'path_or_uri': NormalizeUri,
+    'blueprint_path': NormalizeBlueprintPath,
+    'brick_path': NormalizeBrickPath,
+    'bsp_path': NormalizeBspPath,
+    'workspace_path': NormalizeWorkspacePath,
+}
 
 
 def OptparseWrapCheck(desc, check_f, _option, opt, value):
@@ -249,16 +411,6 @@ def OptparseWrapCheck(desc, check_f, _option, opt, value):
   except ValueError:
     raise optparse.OptionValueError(
         'Invalid %s given: --%s=%s' % (desc, opt, value))
-
-
-VALID_TYPES = {
-    'date': ParseDate,
-    'path': osutils.ExpandPath,
-    'gs_path': NormalizeGSPath,
-    'local_or_gs_path': NormalizeLocalOrGSPath,
-    'path_or_uri': NormalizeUri,
-    'device': ParseDevice,
-}
 
 
 class Option(optparse.Option):
@@ -324,14 +476,11 @@ class ChromiteStreamHandler(logging.StreamHandler):
 class BaseParser(object):
   """Base parser class that includes the logic to add logging controls."""
 
-  DEFAULT_LOG_LEVELS = ('fatal', 'critical', 'error', 'warning', 'info',
-                        'debug')
+  DEFAULT_LOG_LEVELS = ('fatal', 'critical', 'error', 'warning', 'notice',
+                        'info', 'debug')
 
   DEFAULT_LOG_LEVEL = 'info'
   ALLOW_LOGGING = True
-
-  REPO_CACHE_DIR = '.cache'
-  CHROME_CACHE_DIR = '.cros_cache'
 
   def __init__(self, **kwargs):
     """Initialize this parser instance.
@@ -458,6 +607,12 @@ class BaseParser(object):
       if opts.cache_dir is not None:
         self.ConfigureCacheDir(opts.cache_dir)
 
+    # Overrides for automatic path-to-locator conversion.
+    for option in _LOCATOR_OVERRIDE_OPTIONS:
+      value = getattr(opts, '%s_locator_override' % option, None)
+      if value:
+        setattr(opts, option, value)
+
     return opts, args
 
   @staticmethod
@@ -472,18 +627,7 @@ class BaseParser(object):
   @classmethod
   def FindCacheDir(cls, _parser, _opts):
     logging.debug('Cache dir lookup.')
-    checkout = DetermineCheckout(os.getcwd())
-    path = None
-    if checkout.type == CHECKOUT_TYPE_REPO:
-      path = os.path.join(checkout.root, cls.REPO_CACHE_DIR)
-    elif checkout.type in (CHECKOUT_TYPE_GCLIENT, CHECKOUT_TYPE_SUBMODULE):
-      path = os.path.join(checkout.root, cls.CHROME_CACHE_DIR)
-    elif checkout.type == CHECKOUT_TYPE_UNKNOWN:
-      path = os.path.join(tempfile.gettempdir(), 'chromeos-cache')
-    else:
-      raise AssertionError('Unexpected type %s' % checkout.type)
-
-    return path
+    return path_util.FindCacheDir()
 
   def add_option_group(self, *args, **kwargs):
     """Returns a new option group see optparse.OptionParser.add_option_group."""
@@ -598,6 +742,14 @@ class FilteringParser(OptionParser):
     return accepted, removed
 
 
+class SharedParser(argparse.ArgumentParser):
+  """A type of parser that may be used as a shared parent for subparsers."""
+
+  def __init__(self, **kwargs):
+    kwargs.setdefault('add_help', False)
+    argparse.ArgumentParser.__init__(self, **kwargs)
+
+
 class ArgumentParser(BaseParser, argparse.ArgumentParser):
   """Custom argument parser for use by chromite.
 
@@ -613,11 +765,19 @@ class ArgumentParser(BaseParser, argparse.ArgumentParser):
     argparse.ArgumentParser.__init__(self, usage=usage, **kwargs)
     self._SetupTypes()
     self.SetupOptions()
+    self._SetupLocatorOverride()
 
   def _SetupTypes(self):
     """Register types with ArgumentParser."""
     for t, check_f in VALID_TYPES.iteritems():
       self.register('type', t, check_f)
+
+  def _SetupLocatorOverride(self):
+    """Create hidden arguments for automatic path-to-locator conversion."""
+    group = self.add_argument_group('Locators', description=argparse.SUPPRESS)
+    for option in _LOCATOR_OVERRIDE_OPTIONS:
+      group.add_argument('--%s-locator-override' % option,
+                         help=argparse.SUPPRESS)
 
   def add_option_group(self, *args, **kwargs):
     """Return an argument group rather than an option group."""
@@ -660,10 +820,113 @@ def _DefaultHandler(signum, _frame):
       signum, 'Received signal %i; shutting down' % (signum,))
 
 
-def _RestartInChroot(argv):
-  """Rerun the current command inside the chroot"""
-  return cros_build_lib.RunCommand(argv, enter_chroot=True, error_code_ok=True,
-                                   cwd=constants.SOURCE_ROOT).returncode
+def _RestartInChroot(cmd, chroot_args):
+  """Rerun inside the chroot.
+
+  Args:
+    cmd: Command line to run inside the chroot as a list of strings.
+    chroot_args: Arguments to pass directly to cros_sdk (or None).
+  """
+  return cros_build_lib.RunCommand(cmd, error_code_ok=True,
+                                   enter_chroot=True, chroot_args=chroot_args,
+                                   cwd=constants.SOURCE_ROOT,
+                                   mute_output=False).returncode
+
+
+def _AddCliCommandOption(argv, option, value=None):
+  """Adds an option to command line |argv|.
+
+  Use this to add options to a CliCommand argument list rather than
+  extending the list directly in order to avoid bugs when using
+  argparse.REMAINDER.
+
+  For example, with `brillo chroot` we want this:
+    brillo chroot --extra-arg -- ls
+  not this:
+    brillo chroot -- ls --extra-arg
+
+  Args:
+    argv: Current argument list; will be modified by this function.
+    option: New option to add.
+    value: Option value if required; None to omit.
+
+  Returns:
+    |argv|.
+
+  Raises:
+    ValueError: |option| is not an optional argument.
+  """
+  if not option.startswith('-'):
+    raise ValueError('"%s" must be an option (starting with -)' % option)
+
+  # Insert at index 2 to put the option after the subcommand for readability,
+  # e.g. `brillo chroot --option` rather than `brillo --option chroot`.
+  argv.insert(2, option)
+  if value is not None:
+    argv.insert(3, value)
+  return argv
+
+
+def RunInsideChroot(command, auto_detect_brick=False,
+                    auto_detect_workspace=True, auto_locator_override=True):
+  """Restart the current command inside the chroot.
+
+  This method is only valid for any code that is run via ScriptWrapperMain.
+  It allows proper cleanup of the local context by raising an exception handled
+  in ScriptWrapperMain.
+
+  If cwd is in a brick, and --board/--host is not explicitly set, set
+  --brick explicitly as we might not be able to detect the curr_brick_locator
+  inside the chroot (cwd will have changed).
+
+  Args:
+    command: An instance of CliCommand to be restarted inside the chroot.
+    auto_detect_brick: If true, sets --brick explicitly.
+    auto_detect_workspace: If true, sets up workspace automatically.
+    auto_locator_override: If true, adds arguments to override absolute
+      or relative paths with locators for certain options.
+  """
+  if cros_build_lib.IsInsideChroot():
+    return
+
+  # Produce the command line to execute inside the chroot.
+  argv = sys.argv[:]
+  argv[0] = path_util.ToChrootPath(argv[0])
+
+  target_arg = any(getattr(command.options, arg, None)
+                   for arg in ('blueprint', 'board', 'brick', 'host'))
+  if auto_detect_brick and not target_arg and command.curr_brick_locator:
+    _AddCliCommandOption(argv, '--brick', command.curr_brick_locator)
+
+  # Provide locators so that paths can be found from inside the chroot.
+  if auto_locator_override:
+    for option in _LOCATOR_OVERRIDE_OPTIONS:
+      path = getattr(command.options, option, None)
+      if path and not workspace_lib.IsLocator(path):
+        locator = workspace_lib.PathToLocator(path)
+        if locator:
+          _AddCliCommandOption(argv, '--%s-locator-override' % option, locator)
+
+  # Enter the chroot for the workspace, if we are in a workspace.
+  chroot_args = None
+  if auto_detect_workspace:
+    workspace_path = workspace_lib.WorkspacePath()
+    if workspace_path:
+      chroot_args = ['--chroot', workspace_lib.ChrootPath(workspace_path),
+                     '--workspace', workspace_path]
+
+  raise ChrootRequiredError(argv, chroot_args)
+
+
+def ReExec():
+  """Restart the current command.
+
+  This method is only valid for any code that is run via ScriptWrapperMain.
+  It allows proper cleanup of the local context by raising an exception handled
+  in ScriptWrapperMain.
+  """
+  # The command to exec.
+  raise ExecRequiredError(sys.argv[:])
 
 
 def ScriptWrapperMain(find_target_func, argv=None,
@@ -723,7 +986,11 @@ def ScriptWrapperMain(find_target_func, argv=None,
     # in question to not use sys.exit, and make this into a flagged error.
     raise
   except ChrootRequiredError as e:
-    ret = _RestartInChroot(e.new_argv)
+    ret = _RestartInChroot(e.cmd, e.chroot_args)
+  except ExecRequiredError as e:
+    logging.shutdown()
+    # This does not return.
+    os.execv(e.cmd[0], e.cmd)
   except Exception as e:
     sys.stdout.flush()
     print('%s: Unhandled exception:' % (name,), file=sys.stderr)

@@ -46,6 +46,8 @@ public:
 
     static String pseudoElementNameForEvents(PseudoId);
 
+    Node* findAssociatedNode() const;
+
     virtual void dispose();
 
 protected:
@@ -59,7 +61,7 @@ private:
 
 const QualifiedName& pseudoElementTagName();
 
-inline bool pseudoElementRendererIsNeeded(const ComputedStyle* style)
+inline bool pseudoElementLayoutObjectIsNeeded(const ComputedStyle* style)
 {
     if (!style)
         return false;

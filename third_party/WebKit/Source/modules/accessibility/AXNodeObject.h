@@ -29,6 +29,7 @@
 #ifndef AXNodeObject_h
 #define AXNodeObject_h
 
+#include "modules/ModulesExport.h"
 #include "modules/accessibility/AXObject.h"
 #include "wtf/Forward.h"
 
@@ -40,7 +41,7 @@ class HTMLLabelElement;
 class LayoutRect;
 class Node;
 
-class AXNodeObject : public AXObject {
+class MODULES_EXPORT AXNodeObject : public AXObject {
 protected:
     AXNodeObject(Node*, AXObjectCacheImpl*);
 
@@ -56,8 +57,8 @@ protected:
     bool m_initialized;
 #endif
 
-    virtual bool computeAccessibilityIsIgnored() const override;
-    virtual bool computeHasInheritedPresentationalRole() const override;
+    virtual bool computeAccessibilityIsIgnored(IgnoredReasons* = nullptr) const override;
+    virtual const AXObject* inheritsPresentationalRoleFrom() const override;
     virtual AccessibilityRole determineAccessibilityRole();
     AccessibilityRole determineAccessibilityRoleUtil();
     String accessibilityDescriptionForElements(WillBeHeapVector<RawPtrWillBeMember<Element>> &elements) const;
@@ -65,17 +66,18 @@ protected:
     String ariaAccessibilityDescription() const;
     String ariaAutoComplete() const;
     void ariaLabeledByElements(WillBeHeapVector<RawPtrWillBeMember<Element>>& elements) const;
-    void changeValueByStep(bool increase);
     AccessibilityRole determineAriaRoleAttribute() const;
     void elementsFromAttribute(WillBeHeapVector<RawPtrWillBeMember<Element>>& elements, const QualifiedName&) const;
     bool hasContentEditableAttributeSet() const;
+    bool isTextControl() const override;
+    bool allowsTextRanges() const { return isTextControl(); }
     // This returns true if it's focusable but it's not content editable and it's not a control or ARIA control.
     bool isGenericFocusableElement() const;
     HTMLLabelElement* labelForElement(Element*) const;
     AXObject* menuButtonForMenu() const;
     Element* menuItemElementForMenu() const;
     Element* mouseButtonListener() const;
-    String placeholder() const;
+    String deprecatedPlaceholder() const;
     AccessibilityRole remapAriaRoleDueToParent(AccessibilityRole) const;
     bool isNativeCheckboxOrRadio() const;
     void setNode(Node*);
@@ -113,6 +115,7 @@ protected:
     virtual bool isPasswordField() const override final;
     virtual bool isProgressIndicator() const override;
     virtual bool isSlider() const override;
+    virtual bool isNativeSlider() const override;
 
     // Check object state.
     virtual bool isChecked() const override final;
@@ -129,16 +132,16 @@ protected:
     virtual bool canSetValueAttribute() const override;
 
     // Properties of static elements.
+    virtual RGBA32 colorValue() const override final;
     virtual bool canvasHasFallbackContent() const override final;
-    virtual bool exposesTitleUIElement() const override;
+    virtual bool deprecatedExposesTitleUIElement() const override;
     virtual int headingLevel() const override final;
     virtual unsigned hierarchicalLevel() const override final;
     virtual String text() const override;
-    virtual AXObject* titleUIElement() const override;
+    virtual AXObject* deprecatedTitleUIElement() const override;
 
     // Properties of interactive elements.
     virtual AccessibilityButtonState checkboxOrRadioValue() const override final;
-    virtual void colorValue(int& r, int& g, int& b) const override final;
     virtual InvalidState invalidState() const override final;
     // Only used when invalidState() returns InvalidStateOther.
     virtual String ariaInvalidValue() const override final;
@@ -157,11 +160,14 @@ protected:
     virtual AccessibilityOptionalBool isAriaGrabbed() const override final;
 
     // Accessibility Text.
-    virtual String textUnderElement(TextUnderElementMode) const override;
-    virtual String accessibilityDescription() const override;
-    virtual String title(TextUnderElementMode) const override;
-    virtual String helpText() const override;
+    virtual String deprecatedTextUnderElement(TextUnderElementMode) const override;
+    virtual String deprecatedAccessibilityDescription() const override;
+    virtual String deprecatedTitle(TextUnderElementMode) const override;
+    virtual String deprecatedHelpText() const override;
     virtual String computedName() const override;
+
+    // New AX name calculation.
+    virtual String textAlternative(bool recursive, bool inAriaLabelledByTraversal, HashSet<AXObject*>& visited, AXNameFrom*, Vector<AXObject*>* nameObjects) override;
 
     // Location and click point in frame-relative coordinates.
     virtual LayoutRect elementRect() const override;
@@ -195,15 +201,19 @@ protected:
     virtual void textChanged() override;
     virtual void updateAccessibilityRole() override final;
 
+    // Position in set and Size of set
+    virtual int posInSet() const override;
+    virtual int setSize() const override;
+
 private:
     Node* m_node;
 
     String alternativeTextForWebArea() const;
     void alternativeText(Vector<AccessibilityText>&) const;
     void ariaLabeledByText(Vector<AccessibilityText>&) const;
-    void changeValueByPercent(float percentChange);
     float stepValueForRange() const;
     AXObject* findChildWithTagName(const HTMLQualifiedName&) const;
+    bool isDescendantOfElementType(const HTMLQualifiedName& tagName) const;
 };
 
 DEFINE_AX_OBJECT_TYPE_CASTS(AXNodeObject, isAXNodeObject());

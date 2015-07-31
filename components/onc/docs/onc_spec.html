@@ -456,10 +456,10 @@
         (optional, read-only)
         <span class="type">string</span>
       </span>
-      The current error state for this network. Error states are provided by
-      the system and are not explicitly defined here. They may or may not be
-      human-readable. This field will be empty or absent if the network is not
-      in an error state.
+      The current error state for this network, if any. Error states are
+      provided by the system and are not explicitly defined here. They may or
+      may not be human-readable. This field will be empty or absent if the
+      network is not in an error state.
     </dd>
 
     <dt class="field">MacAddress</dt>
@@ -722,6 +722,17 @@
       connections. If <span class="value">WEP-PSK</span> is used, the passphrase
       must be of the format 0x&lt;hex-number&gt;, where &lt;hex-number&gt; is
       40, 104, 128, or 232 bits.
+    </dd>
+
+    <dt class="field">RoamThreshold</dt>
+    <dd>
+      <span class="field_meta">
+        (optional)
+        <span class="type">integer</span>
+      </span>
+      The roam threshold for this network, which is the signal-to-noise value
+      (in dB) below which we will attempt to roam to a new network. If this
+      value is not set, the default value will be used.
     </dd>
 
     <dt class="field">Security</dt>
@@ -1032,6 +1043,17 @@
     </p>
 
     <dl class="field_list">
+      <dt class="field">LcpEchoDisabled</dt>
+      <dd>
+        <span class="field_meta">
+          (optional, defaults to <span class="value">false</span>)
+          <span class="type">boolean</span>
+        </span>
+        Disable L2TP connection monitoring via PPP LCP frames.  This
+        allows the VPN client to work around server implementations
+        that do not support the LCP echo feature.
+      </dd>
+
       <dt class="field">Password</dt>
       <dd>
         <span class="field_meta">
@@ -1951,8 +1973,8 @@
         <span class="rule_id"></span>
         Allowed values are <span class="value">Automatic</span>,
         <span class="value">MD5</span>, <span class="value">MSCHAPv2</span>,
-        <span class="value">EAP-MSCHAPv2</span>, and
-        <span class="value">PAP</span>.
+        <span class="value">EAP-MSCHAPv2</span>,
+        <span class="value">PAP</span>, and <span class="value">GTC</span>.
       </span>
       For tunneling outer protocols.
     </dd>
@@ -2026,6 +2048,16 @@
       CA or to one of the given CA certificates. If <span class="field">UseSystemCAs</span>
       is <span class="value">false</span>, and no <span class="field">ServerCARef</span> is set, the certificate
       must be a self signed certificate, and no CA signature is required.
+    </dd>
+
+    <dt class="field">UseProactiveKeyCaching</dt>
+    <dd>
+      <span class="field_meta">
+        (optional, defaults to <span class="value">false</span>)
+        <span class="type">boolean</span>
+      </span>
+      Indicates whether Proactive Key Caching (also known as Opportunistic
+      Key Caching) should be used on a per-service basis.
     </dd>
   </dl>
 
@@ -2317,6 +2349,15 @@
       </span>
     </dd>
 
+    <dt class="field">PaymentPortal</dt>
+    <dd>
+      <span class="field_meta">(optional, read-only)
+        <span class="type">PaymentPortal</span>
+      </span>
+      Properties describing the online payment portal (OLP) at which a user can
+      sign up for or modify a mobile data plan.
+    </dd>
+
     <dt class="field">PRLVersion</dt>
     <dd>
       <span class="field_meta">(optional, read-only)
@@ -2480,6 +2521,35 @@
         <span class="type">string</span>
       </span>
       Long-format name of the network operator.
+    </dd>
+  </dl>
+
+  <p><span class="type">PaymentPortal</span> type contains the following:</p>
+  <dl class="field_list">
+    <dt class="field">Method</dt>
+    <dd>
+      <span class="field_meta">(required)
+        <span class="type">string</span>
+      </span>
+      The HTTP method to use, "GET" or "POST"
+    </dd>
+
+    <dt class="field">PostData</dt>
+    <dd>
+      <span class="field_meta">
+        (required if <span class="field">Method</span> is
+        <span class="value">POST</span>, otherwise ignored)
+        <span class="type">string</span>
+      </span>
+      The postdata to send.
+    </dd>
+
+    <dt class="field">Url</dt>
+    <dd>
+      <span class="field_meta">(required)
+        <span class="type">string</span>
+      </span>
+      The URL for the portal.
     </dd>
   </dl>
 

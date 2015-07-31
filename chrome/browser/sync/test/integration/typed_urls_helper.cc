@@ -169,7 +169,6 @@ void AddToHistory(history::HistoryService* service,
                    transition,
                    source,
                    false);
-  service->SetPageTitle(url, base::ASCIIToUTF16(url.spec() + " - title"));
 }
 
 history::URLRows GetTypedUrlsFromHistoryService(
@@ -251,6 +250,16 @@ history::VisitVector GetVisitsFromClient(int index, history::URLID id) {
   return GetVisitsFromHistoryService(service, id);
 }
 
+history::VisitVector GetVisitsForURLFromClient(int index, const GURL& url) {
+  history::HistoryService* service =
+      HistoryServiceFactory::GetForProfileWithoutCreating(
+          test()->GetProfile(index));
+  history::URLRow url_row;
+  if (!GetUrlFromHistoryService(service, url, &url_row))
+    return history::VisitVector();
+  return GetVisitsFromHistoryService(service, url_row.id());
+}
+
 void RemoveVisitsFromClient(int index, const history::VisitVector& visits) {
   history::HistoryService* service =
       HistoryServiceFactory::GetForProfileWithoutCreating(
@@ -319,6 +328,16 @@ void DeleteUrlsFromHistory(int index, const std::vector<GURL>& urls) {
     HistoryServiceFactory::GetForProfile(test()->verifier(),
                                          ServiceAccessType::IMPLICIT_ACCESS)
         ->DeleteURLsForTest(urls);
+  WaitForHistoryDBThread(index);
+}
+
+void SetPageTitle(int index, const GURL& url, const std::string& title) {
+  HistoryServiceFactory::GetForProfileWithoutCreating(test()->GetProfile(index))
+      ->SetPageTitle(url, base::UTF8ToUTF16(title));
+  if (test()->use_verifier())
+    HistoryServiceFactory::GetForProfile(test()->verifier(),
+                                         ServiceAccessType::IMPLICIT_ACCESS)
+        ->SetPageTitle(url, base::UTF8ToUTF16(title));
   WaitForHistoryDBThread(index);
 }
 

@@ -29,6 +29,8 @@
     'app/android/library_loader_hooks.h',
     'app/content_main.cc',
     'app/content_main_runner.cc',
+    'app/mac/mac_init.mm',
+    'app/mac/mac_init.h',
     'app/mojo/mojo_init.cc',
     'app/mojo/mojo_init.h',
     'public/app/content_jni_onload.h',
@@ -50,11 +52,9 @@
       ],
       'dependencies': [
         'content.gyp:content_jni_headers',
+        '../build/android/ndk.gyp:cpu_features',
         '../skia/skia.gyp:skia',
         '../ui/android/ui_android.gyp:ui_android',
-      ],
-      'includes': [
-        '../build/android/cpufeatures.gypi',
       ],
     }],
     ['OS=="win"', {

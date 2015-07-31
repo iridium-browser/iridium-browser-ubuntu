@@ -6,6 +6,7 @@ found in the LICENSE file.
 -->
 
 <link rel="import" href="/core/test_utils.html">
+<link rel="import" href="/core/trace_model/annotation.html">
 <link rel="import" href="/core/trace_model/trace_model.html">
 <link rel="import" href="/extras/full_config.html">
 
@@ -16,6 +17,7 @@ tv.b.unittest.testSuite(function() {
   var ThreadSlice = tv.c.trace_model.ThreadSlice;
   var TraceModel = tv.c.TraceModel;
   var TitleOrCategoryFilter = tv.c.TitleOrCategoryFilter;
+  var Frame = tv.c.trace_model.Frame;
 
   var createTraceModelWithOneOfEverything = function() {
     var m = new TraceModel();
@@ -24,7 +26,8 @@ tv.b.unittest.testSuite(function() {
 
     var p = m.getOrCreateProcess(1);
     var t = p.getOrCreateThread(1);
-    t.sliceGroup.pushSlice(new ThreadSlice('', 'a', 0, 1, {}, 4));
+    var slice = new ThreadSlice('', 'a', 0, 1, {}, 4);
+    t.sliceGroup.pushSlice(slice);
     t.asyncSliceGroup.push(tv.c.test_utils.newAsyncSlice(0, 1, t, t));
 
     var c = p.getOrCreateCounter('', 'ProcessCounter');
@@ -59,6 +62,9 @@ tv.b.unittest.testSuite(function() {
     bSeries.addCounterSample(2, 12);
     bSeries.addCounterSample(3, 16);
 
+    var frame1 = new Frame([slice], [{thread: t, start: 1, end: 5}]);
+    p.frames.push.apply(p.frames, frame1);
+
     var gd = new tv.c.trace_model.GlobalMemoryDump(m, 2);
     var pd = new tv.c.trace_model.ProcessMemoryDump(gd, p, 2);
     gd.processMemoryDumps[1] = pd;
@@ -73,16 +79,16 @@ tv.b.unittest.testSuite(function() {
   test('traceModelBounds_EmptyTraceModel', function() {
     var m = new TraceModel();
     m.updateBounds();
-    assertEquals(undefined, m.bounds.min);
-    assertEquals(undefined, m.bounds.max);
+    assert.isUndefined(m.bounds.min);
+    assert.isUndefined(m.bounds.max);
   });
 
   test('traceModelBounds_OneEmptyThread', function() {
     var m = new TraceModel();
     var t = m.getOrCreateProcess(1).getOrCreateThread(1);
     m.updateBounds();
-    assertEquals(undefined, m.bounds.min);
-    assertEquals(undefined, m.bounds.max);
+    assert.isUndefined(m.bounds.min);
+    assert.isUndefined(m.bounds.max);
   });
 
   test('traceModelBounds_OneThread', function() {
@@ -90,8 +96,8 @@ tv.b.unittest.testSuite(function() {
     var t = m.getOrCreateProcess(1).getOrCreateThread(1);
     t.sliceGroup.pushSlice(new ThreadSlice('', 'a', 0, 1, {}, 3));
     m.updateBounds();
-    assertEquals(1, m.bounds.min);
-    assertEquals(4, m.bounds.max);
+    assert.equal(m.bounds.min, 1);
+    assert.equal(m.bounds.max, 4);
   });
 
   test('traceModelBounds_OneThreadAndOneEmptyThread', function() {
@@ -100,8 +106,8 @@ tv.b.unittest.testSuite(function() {
     t1.sliceGroup.pushSlice(new ThreadSlice('', 'a', 0, 1, {}, 3));
     var t2 = m.getOrCreateProcess(1).getOrCreateThread(1);
     m.updateBounds();
-    assertEquals(1, m.bounds.min);
-    assertEquals(4, m.bounds.max);
+    assert.equal(m.bounds.min, 1);
+    assert.equal(m.bounds.max, 4);
   });
 
   test('traceModelBounds_OneCpu', function() {
@@ -109,8 +115,8 @@ tv.b.unittest.testSuite(function() {
     var cpu = m.kernel.getOrCreateCpu(1);
     cpu.slices.push(tv.c.test_utils.newSlice(1, 3));
     m.updateBounds();
-    assertEquals(1, m.bounds.min);
-    assertEquals(4, m.bounds.max);
+    assert.equal(m.bounds.min, 1);
+    assert.equal(m.bounds.max, 4);
   });
 
   test('traceModelBounds_OneCpuOneThread', function() {
@@ -122,8 +128,8 @@ tv.b.unittest.testSuite(function() {
     t.sliceGroup.pushSlice(new ThreadSlice('', 'a', 0, 1, {}, 4));
 
     m.updateBounds();
-    assertEquals(1, m.bounds.min);
-    assertEquals(5, m.bounds.max);
+    assert.equal(m.bounds.min, 1);
+    assert.equal(m.bounds.max, 5);
   });
 
   test('traceModelBounds_GlobalMemoryDumps', function() {
@@ -133,8 +139,8 @@ tv.b.unittest.testSuite(function() {
     m.globalMemoryDumps.push(new tv.c.trace_model.GlobalMemoryDump(m, 5));
 
     m.updateBounds();
-    assertEquals(1, m.bounds.min);
-    assertEquals(5, m.bounds.max);
+    assert.equal(m.bounds.min, 1);
+    assert.equal(m.bounds.max, 5);
   });
 
   test('traceModelBounds_ProcessMemoryDumps', function() {
@@ -146,8 +152,8 @@ tv.b.unittest.testSuite(function() {
     p.memoryDumps.push(new tv.c.trace_model.ProcessMemoryDump(gd, m, 5));
 
     m.updateBounds();
-    assertEquals(1, m.bounds.min);
-    assertEquals(5, m.bounds.max);
+    assert.equal(m.bounds.min, 1);
+    assert.equal(m.bounds.max, 5);
   });
 
   test('traceModelCanImportEmpty', function() {
@@ -177,21 +183,38 @@ tv.b.unittest.testSuite(function() {
 
     var m = new TraceModel();
     m.importTraces([combined]);
-    assertEquals(1, tv.b.dictionaryValues(m.processes).length);
+    assert.equal(tv.b.dictionaryValues(m.processes).length, 1);
 
     var p1 = m.processes[1];
-    assertNotUndefined(p1);
+    assert.isDefined(p1);
 
     var t2 = p1.threads[2];
     var t3 = p1.threads[3];
-    assertNotUndefined(t2);
-    assertNotUndefined(t3);
+    assert.isDefined(t2);
+    assert.isDefined(t3);
 
-    assertEquals(1, t2.sliceGroup.length, 1);
-    assertEquals('taskA', t2.sliceGroup.slices[0].title);
+    assert.equal(1, 1, t2.sliceGroup.length);
+    assert.equal(t2.sliceGroup.slices[0].title, 'taskA');
 
-    assertEquals(1, t3.sliceGroup.length);
-    assertEquals('taskB', t3.sliceGroup.slices[0].title);
+    assert.equal(t3.sliceGroup.length, 1);
+    assert.equal(t3.sliceGroup.slices[0].title, 'taskB');
+  });
+
+  test('traceModelCanImportCompressedSingleSubtrace', function() {
+    var compressedTrace = atob('H4sIACKfFVUC/wsuLUpLTE51y8nMS08t0jVSUIg2MDCMV' +
+        'dDT0zNUMDQwMNAzsFIAIqcaw5qSxOJsR65gfDqMEDpcATiC61ZbAAAA');
+    var m = new TraceModel();
+    m.importTraces([compressedTrace]);
+    assert.equal(1, tv.b.dictionaryValues(m.processes).length);
+
+    var p1 = m.processes[1];
+    assert.isDefined(p1);
+
+    var t2 = p1.threads[2];
+    assert.isDefined(t2);
+
+    assert.equal(1, t2.sliceGroup.length, 1);
+    assert.equal('taskA', t2.sliceGroup.slices[0].title);
   });
 
   test('traceModelCanImportSubtracesRecursively', function() {
@@ -223,45 +246,40 @@ tv.b.unittest.testSuite(function() {
 
     var m = new TraceModel();
     m.importTraces([outerTrace]);
-    assertEquals(1, tv.b.dictionaryValues(m.processes).length);
+    assert.equal(tv.b.dictionaryValues(m.processes).length, 1);
 
     var p1 = m.processes[1];
-    assertNotUndefined(p1);
+    assert.isDefined(p1);
 
     var t2 = p1.threads[2];
     var t3 = p1.threads[3];
-    assertNotUndefined(t2);
-    assertNotUndefined(t3);
+    assert.isDefined(t2);
+    assert.isDefined(t3);
 
-    assertEquals(1, t2.sliceGroup.length, 1);
-    assertEquals('taskA', t2.sliceGroup.slices[0].title);
+    assert.equal(1, 1, t2.sliceGroup.length);
+    assert.equal(t2.sliceGroup.slices[0].title, 'taskA');
 
-    assertEquals(1, t3.sliceGroup.length);
-    assertEquals('taskB', t3.sliceGroup.slices[0].title);
+    assert.equal(t3.sliceGroup.length, 1);
+    assert.equal(t3.sliceGroup.slices[0].title, 'taskB');
   });
 
   test('traceModelWithImportFailure', function() {
     var malformed = '{traceEvents: [{garbage';
     var m = new TraceModel();
-    assertThrows(function() {
+    assert.throw(function() {
       m.importTraces([malformed]);
     });
   });
 
   test('TitleOrCategoryFilter', function() {
     var s0 = tv.c.test_utils.newSlice(1, 3);
-    assertTrue(new TitleOrCategoryFilter('a').matchSlice(s0));
-    assertFalse(new TitleOrCategoryFilter('x').matchSlice(s0));
+    assert.isTrue(new TitleOrCategoryFilter('a').matchSlice(s0));
+    assert.isFalse(new TitleOrCategoryFilter('x').matchSlice(s0));
 
     var s1 = tv.c.test_utils.newSliceNamed('ba', 1, 3);
-    assertTrue(new TitleOrCategoryFilter('a').matchSlice(s1));
-    assertTrue(new TitleOrCategoryFilter('ba').matchSlice(s1));
-    assertFalse(new TitleOrCategoryFilter('x').matchSlice(s1));
-  });
-
-  test('traceModel_toJSON', function() {
-    var m = createTraceModelWithOneOfEverything();
-    assertNotNull(JSON.stringify(m));
+    assert.isTrue(new TitleOrCategoryFilter('a').matchSlice(s1));
+    assert.isTrue(new TitleOrCategoryFilter('ba').matchSlice(s1));
+    assert.isFalse(new TitleOrCategoryFilter('x').matchSlice(s1));
   });
 
   test('traceModel_findAllThreadsNamed', function() {
@@ -271,9 +289,9 @@ tv.b.unittest.testSuite(function() {
 
     m.updateBounds();
     var f = m.findAllThreadsNamed('CrBrowserMain');
-    assertArrayEquals([t], f);
+    assert.deepEqual([t], f);
     f = m.findAllThreadsNamed('NoSuchThread');
-    assertEquals(0, f.length);
+    assert.equal(f.length, 0);
   });
 
   test('traceModel_updateCategories', function() {
@@ -285,17 +303,17 @@ tv.b.unittest.testSuite(function() {
     t.sliceGroup.pushSlice(new ThreadSlice('categoryA', 'a', 0, 1, {}, 3));
     t.sliceGroup.pushSlice(new ThreadSlice('', 'a', 0, 1, {}, 3));
     m.updateCategories_();
-    assertArrayEquals(['categoryA', 'categoryB'], m.categories);
+    assert.deepEqual(['categoryA', 'categoryB'], m.categories);
   });
 
   test('traceModel_iterateAllEvents', function() {
     var m = createTraceModelWithOneOfEverything();
     var wasCalled = false;
     m.iterateAllEvents(function(event) {
-      assertTrue(event instanceof tv.c.trace_model.Event);
+      assert.isTrue(event instanceof tv.c.trace_model.Event);
       wasCalled = true;
     });
-    assertTrue(wasCalled);
+    assert.isTrue(wasCalled);
   });
 
   test('customizeCallback', function() {
@@ -311,8 +329,8 @@ tv.b.unittest.testSuite(function() {
       browserMain.sliceGroup.endSlice(30);
     });
     var t2 = m.processes[1].threads[2];
-    assertEquals(3, t2.sliceGroup.length);
-    assertEquals(2, t2.sliceGroup.topLevelSlices.length);
+    assert.equal(t2.sliceGroup.length, 3);
+    assert.equal(t2.sliceGroup.topLevelSlices.length, 2);
   });
 
   test('traceModel_sortsSamples', function() {
@@ -324,9 +342,9 @@ tv.b.unittest.testSuite(function() {
     m.importTraces(['tick,0x9a,184,0,0x0,5',
                     'tick,0x9b,0,0,0x0,5',
                     'tick,0x9c,185,0,0x0,5']);
-    assertEquals(0, m.samples[0].start);
-    assertEquals(0.184, m.samples[1].start);
-    assertEquals(0.185, m.samples[2].start);
+    assert.equal(m.samples[0].start, 0);
+    assert.equal(m.samples[1].start, 0.184);
+    assert.equal(m.samples[2].start, 0.185);
   });
 
   test('traceModel_sortsGlobalMemoryDumps', function() {
@@ -336,23 +354,59 @@ tv.b.unittest.testSuite(function() {
       m.globalMemoryDumps.push(new tv.c.trace_model.GlobalMemoryDump(m, 5));
       m.globalMemoryDumps.push(new tv.c.trace_model.GlobalMemoryDump(m, 3));
     });
-    assertEquals(0, m.globalMemoryDumps[0].start);
-    assertEquals(2, m.globalMemoryDumps[1].start);
-    assertEquals(4, m.globalMemoryDumps[2].start);
+    assert.equal(m.globalMemoryDumps[0].start, 0);
+    assert.equal(m.globalMemoryDumps[1].start, 2);
+    assert.equal(m.globalMemoryDumps[2].start, 4);
   });
 
-  test('traceModel_sortsProcessMemoryDumps', function() {
+  test('traceModel_finalizesProcessMemoryDumps', function() {
     var m = new tv.c.TraceModel();
     var p = m.getOrCreateProcess(1);
     m.importTraces([], true /* shiftWorldToZero */, false, function() {
       var g = new tv.c.trace_model.GlobalMemoryDump(m, -1);
-      p.memoryDumps.push(new tv.c.trace_model.ProcessMemoryDump(g, p, 1));
-      p.memoryDumps.push(new tv.c.trace_model.ProcessMemoryDump(g, p, 5));
-      p.memoryDumps.push(new tv.c.trace_model.ProcessMemoryDump(g, p, 3));
+
+      var pmd1 = new tv.c.trace_model.ProcessMemoryDump(g, p, 1);
+      p.memoryDumps.push(pmd1);
+
+      var pmd2 = new tv.c.trace_model.ProcessMemoryDump(g, p, 5);
+      p.memoryDumps.push(pmd2);
+
+      var pmd3 = new tv.c.trace_model.ProcessMemoryDump(g, p, 3);
+      p.memoryDumps.push(pmd3);
+      pmd3.vmRegions = [];
     });
-    assertEquals(0, p.memoryDumps[0].start);
-    assertEquals(2, p.memoryDumps[1].start);
-    assertEquals(4, p.memoryDumps[2].start);
+
+    // Check the sort order.
+    assert.equal(p.memoryDumps[0].start, 0);
+    assert.equal(p.memoryDumps[1].start, 2);
+    assert.equal(p.memoryDumps[2].start, 4);
+
+    // Check that the most recent VM regions are linked correctly.
+    assert.isUndefined(p.memoryDumps[0].mostRecentVmRegions);
+    assert.lengthOf(p.memoryDumps[1].mostRecentVmRegions, 0);
+    assert.strictEqual(
+        p.memoryDumps[1].mostRecentVmRegions,
+        p.memoryDumps[2].mostRecentVmRegions);
+  });
+
+  test('traceModel_annotationAddRemove', function() {
+    var m = new tv.c.TraceModel();
+    var a1 = new tv.c.trace_model.Annotation();
+    var a2 = new tv.c.trace_model.Annotation();
+
+    assert.equal(m.getAllAnnotations().length, 0);
+    m.addAnnotation(a1);
+    assert.equal(m.getAllAnnotations().length, 1);
+    m.addAnnotation(a2);
+    assert.equal(m.getAllAnnotations().length, 2);
+
+    assert.equal(m.getAnnotationByGUID(a1.guid), a1);
+    assert.equal(m.getAnnotationByGUID(a2.guid), a2);
+
+    m.removeAnnotation(a1);
+    assert.isUndefined(m.getAnnotationByGUID(a1.guid));
+    assert.equal(m.getAnnotationByGUID(a2.guid), a2);
+    assert.equal(m.getAllAnnotations().length, 1);
   });
 });
 </script>

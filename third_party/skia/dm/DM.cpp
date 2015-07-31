@@ -25,10 +25,10 @@
 #include "Test.h"
 #include "Timer.h"
 
-DEFINE_string(src, "tests gm skp image subset codec scanline", "Source types to test.");
+DEFINE_string(src, "tests gm skp image", "Source types to test.");
 DEFINE_bool(nameByHash, false,
             "If true, write to FLAGS_writePath[0]/<hash>.png instead of "
-            "to FLAGS_writePath[0]/<config>/<sourceType>/<name>.png");
+            "to FLAGS_writePath[0]/<config>/<sourceType>/<sourceOptions>/<name>.png");
 DEFINE_bool2(pathOpsExtended, x, false, "Run extended pathOps tests.");
 DEFINE_string(matrix, "1 0 0 1",
               "2x2 scale+skew matrix to apply or upright when using "
@@ -36,11 +36,18 @@ DEFINE_string(matrix, "1 0 0 1",
 DEFINE_bool(gpu_threading, false, "Allow GPU work to run on multiple threads?");
 
 DEFINE_string(blacklist, "",
-        "Space-separated config/src/name triples to blacklist.  '_' matches anything.  E.g. \n"
-        "'--blacklist gpu skp _' will blacklist all SKPs drawn into the gpu config.\n"
-        "'--blacklist gpu skp _ 8888 gm aarects' will also blacklist the aarects GM on 8888.");
+        "Space-separated config/src/srcOptions/name quadruples to blacklist.  '_' matches anything.  E.g. \n"
+        "'--blacklist gpu skp _ _' will blacklist all SKPs drawn into the gpu config.\n"
+        "'--blacklist gpu skp _ _ 8888 gm _ aarects' will also blacklist the aarects GM on 8888.");
 
 DEFINE_string2(readPath, r, "", "If set check for equality with golden results in this directory.");
+
+DEFINE_string(uninterestingHashesFile, "",
+        "File containing a list of uninteresting hashes. If a result hashes to something in "
+        "this list, no image is written for that result.");
+
+DEFINE_int32(shards, 1, "We're splitting source data into this many shards.");
+DEFINE_int32(shard,  0, "Which shard do I run?");
 
 __SK_FORCE_IMAGE_DECODER_LINKING;
 using namespace DM;
@@ -62,9 +69,10 @@ SK_DECLARE_STATIC_MUTEX(gRunningMutex);
 static SkTArray<SkString> gRunning;
 
 static void done(double ms,
-                 ImplicitString config, ImplicitString src, ImplicitString name,
-                 ImplicitString note, ImplicitString log) {
-    SkString id = SkStringPrintf("%s %s %s", config.c_str(), src.c_str(), name.c_str());
+                 ImplicitString config, ImplicitString src, ImplicitString srcOptions,
+                 ImplicitString name, ImplicitString note, ImplicitString log) {
+    SkString id = SkStringPrintf("%s %s %s %s", config.c_str(), src.c_str(),
+                                                srcOptions.c_str(), name.c_str());
     {
         SkAutoMutexAcquire lock(gRunningMutex);
         for (int i = 0; i < gRunning.count(); i++) {
@@ -81,8 +89,9 @@ static void done(double ms,
         log.prepend("\n");
     }
     auto pending = sk_atomic_dec(&gPending)-1;
-    SkDebugf("%s(%4dMB %5d) %s\t%s%s%s", FLAGS_verbose ? "\n" : kSkOverwriteLine
-                                       , sk_tools::getBestResidentSetSizeMB()
+    SkDebugf("%s(%4d/%-4dMB %5d) %s\t%s%s%s", FLAGS_verbose ? "\n" : kSkOverwriteLine
+                                       , sk_tools::getCurrResidentSetSizeMB()
+                                       , sk_tools::getMaxResidentSetSizeMB()
                                        , pending
                                        , HumanizeMs(ms).c_str()
                                        , id.c_str()
@@ -95,8 +104,10 @@ static void done(double ms,
     }
 }
 
-static void start(ImplicitString config, ImplicitString src, ImplicitString name) {
-    SkString id = SkStringPrintf("%s %s %s", config.c_str(), src.c_str(), name.c_str());
+static void start(ImplicitString config, ImplicitString src,
+                  ImplicitString srcOptions, ImplicitString name) {
+    SkString id = SkStringPrintf("%s %s %s %s", config.c_str(), src.c_str(),
+                                                srcOptions.c_str(), name.c_str());
     SkAutoMutexAcquire lock(gRunningMutex);
     gRunning.push_back(id);
 }
@@ -105,10 +116,12 @@ static void start(ImplicitString config, ImplicitString src, ImplicitString name
 
 struct Gold : public SkString {
     Gold() : SkString("") {}
-    Gold(ImplicitString sink, ImplicitString src, ImplicitString name, ImplicitString md5)
+    Gold(ImplicitString sink, ImplicitString src, ImplicitString srcOptions,
+         ImplicitString name, ImplicitString md5)
         : SkString("") {
         this->append(sink);
         this->append(src);
+        this->append(srcOptions);
         this->append(name);
         this->append(md5);
     }
@@ -117,7 +130,7 @@ struct Gold : public SkString {
 static SkTHashSet<Gold, Gold::Hash> gGold;
 
 static void add_gold(JsonWriter::BitmapResult r) {
-    gGold.add(Gold(r.config, r.sourceType, r.name, r.md5));
+    gGold.add(Gold(r.config, r.sourceType, r.sourceOptions, r.name, r.md5));
 }
 
 static void gather_gold() {
@@ -132,30 +145,95 @@ static void gather_gold() {
 
 /*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
 
+static SkTHashSet<SkString> gUninterestingHashes;
+
+static void gather_uninteresting_hashes() {
+    if (!FLAGS_uninterestingHashesFile.isEmpty()) {
+        SkAutoTUnref<SkData> data(SkData::NewFromFileName(FLAGS_uninterestingHashesFile[0]));
+        SkTArray<SkString> hashes;
+        SkStrSplit((const char*)data->data(), "\n", &hashes);
+        for (const SkString& hash : hashes) {
+            gUninterestingHashes.add(hash);
+        }
+    }
+}
+
+/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
+
 template <typename T>
-struct Tagged : public SkAutoTDelete<T> { const char* tag; };
+struct Tagged : public SkAutoTDelete<T> {
+  const char* tag;
+  const char* options;
+};
 
 static const bool kMemcpyOK = true;
 
 static SkTArray<Tagged<Src>,  kMemcpyOK>  gSrcs;
 static SkTArray<Tagged<Sink>, kMemcpyOK> gSinks;
 
-static void push_src(const char* tag, Src* s) {
+static bool in_shard() {
+    static int N = 0;
+    return N++ % FLAGS_shards == FLAGS_shard;
+}
+
+static void push_src(const char* tag, const char* options, Src* s) {
     SkAutoTDelete<Src> src(s);
-    if (FLAGS_src.contains(tag) &&
+    if (in_shard() &&
+        FLAGS_src.contains(tag) &&
         !SkCommandLineFlags::ShouldSkip(FLAGS_match, src->name().c_str())) {
         Tagged<Src>& s = gSrcs.push_back();
         s.reset(src.detach());
         s.tag = tag;
+        s.options = options;
     }
+}
+
+static void push_codec_srcs(Path path) {
+    SkAutoTUnref<SkData> encoded(SkData::NewFromFileName(path.c_str()));
+    if (!encoded) {
+        SkDebugf("Couldn't read %s.", path.c_str());
+        return;
+    }
+    SkAutoTDelete<SkCodec> codec(SkCodec::NewFromData(encoded));
+    if (NULL == codec.get()) {
+        SkDebugf("Couldn't create codec for %s.", path.c_str());
+        return;
+    }
+
+    // Build additional test cases for images that decode natively to non-canvas types
+    switch(codec->getInfo().colorType()) {
+        case kGray_8_SkColorType:
+            push_src("image", "codec_kGray8", new CodecSrc(path, CodecSrc::kNormal_Mode,
+                    CodecSrc::kGrayscale_Always_DstColorType));
+            push_src("image", "scanline_kGray8", new CodecSrc(path, CodecSrc::kScanline_Mode,
+                    CodecSrc::kGrayscale_Always_DstColorType));
+            // Intentional fall through
+            // FIXME: Is this a long term solution for testing wbmps decodes to kIndex8?
+            // Further discussion on this topic is at skbug.com/3683
+      case kIndex_8_SkColorType:
+          push_src("image", "codec_kIndex8", new CodecSrc(path, CodecSrc::kNormal_Mode,
+                  CodecSrc::kIndex8_Always_DstColorType));
+          push_src("image", "scanline_kIndex8", new CodecSrc(path, CodecSrc::kScanline_Mode,
+                  CodecSrc::kIndex8_Always_DstColorType));
+        break;
+      default:
+        // Do nothing
+        break;
+    }
+
+    // Decode all images to the canvas color type
+    push_src("image", "codec", new CodecSrc(path, CodecSrc::kNormal_Mode,
+            CodecSrc::kGetFromCanvas_DstColorType));
+    push_src("image", "scanline", new CodecSrc(path, CodecSrc::kScanline_Mode,
+            CodecSrc::kGetFromCanvas_DstColorType));
 }
 
 static bool codec_supported(const char* ext) {
     // FIXME: Once other versions of SkCodec are available, we can add them to this
     // list (and eventually we can remove this check once they are all supported).
     static const char* const exts[] = {
-        "bmp", "gif", "png", "ico", "wbmp",
-        "BMP", "GIF", "PNG", "ICO", "WBMP"
+        "bmp", "gif", "jpg", "jpeg", "png", "ico", "wbmp",
+        "BMP", "GIF", "JPG", "JPEG", "PNG", "ICO", "WBMP"
     };
 
     for (uint32_t i = 0; i < SK_ARRAY_COUNT(exts); i++) {
@@ -168,17 +246,17 @@ static bool codec_supported(const char* ext) {
 
 static void gather_srcs() {
     for (const skiagm::GMRegistry* r = skiagm::GMRegistry::Head(); r; r = r->next()) {
-        push_src("gm", new GMSrc(r->factory()));
+        push_src("gm", "", new GMSrc(r->factory()));
     }
     for (int i = 0; i < FLAGS_skps.count(); i++) {
         const char* path = FLAGS_skps[i];
         if (sk_isdir(path)) {
             SkOSFile::Iter it(path, "skp");
             for (SkString file; it.next(&file); ) {
-                push_src("skp", new SKPSrc(SkOSPath::Join(path, file.c_str())));
+                push_src("skp", "", new SKPSrc(SkOSPath::Join(path, file.c_str())));
             }
         } else {
-            push_src("skp", new SKPSrc(path));
+            push_src("skp", "", new SKPSrc(path));
         }
     }
     static const char* const exts[] = {
@@ -192,20 +270,18 @@ static void gather_srcs() {
                 SkOSFile::Iter it(flag, exts[j]);
                 for (SkString file; it.next(&file); ) {
                     SkString path = SkOSPath::Join(flag, file.c_str());
-                    push_src("image", new ImageSrc(path));     // Decode entire image.
-                    push_src("subset", new ImageSrc(path, 2)); // Decode into 2 x 2 subsets
+                    push_src("image", "decode", new ImageSrc(path)); // Decode entire image
+                    push_src("image", "subset", new ImageSrc(path, 2)); // Decode into 2x2 subsets
                     if (codec_supported(exts[j])) {
-                        push_src("codec", new CodecSrc(path, CodecSrc::kNormal_Mode));
-                        push_src("scanline", new CodecSrc(path, CodecSrc::kScanline_Mode));
+                        push_codec_srcs(path);
                     }
                 }
             }
         } else if (sk_exists(flag)) {
             // assume that FLAGS_images[i] is a valid image if it is a file.
-            push_src("image", new ImageSrc(flag));     // Decode entire image.
-            push_src("subset", new ImageSrc(flag, 2)); // Decode into 2 x 2 subsets
-            push_src("codec", new CodecSrc(flag, CodecSrc::kNormal_Mode));
-            push_src("scanline", new CodecSrc(flag, CodecSrc::kScanline_Mode));
+            push_src("image", "decode", new ImageSrc(flag)); // Decode entire image.
+            push_src("image", "subset", new ImageSrc(flag, 2)); // Decode into 2 x 2 subsets
+            push_codec_srcs(flag);
         }
     }
 }
@@ -233,8 +309,8 @@ static void push_sink(const char* tag, Sink* s) {
     SkString log;
     Error err = sink->draw(noop, &bitmap, &stream, &log);
     if (err.isFatal()) {
-        SkDebugf("Skipping %s: %s\n", tag, err.c_str());
-        return;
+        SkDebugf("Could not run %s: %s\n", tag, err.c_str());
+        exit(1);
     }
 
     Tagged<Sink>& ts = gSinks.push_back();
@@ -290,8 +366,12 @@ static Sink* create_sink(const char* tag) {
 
 static Sink* create_via(const char* tag, Sink* wrapped) {
 #define VIA(t, via, ...) if (0 == strcmp(t, tag)) { return new via(__VA_ARGS__); }
+    VIA("twice",     ViaTwice,         wrapped);
     VIA("pipe",      ViaPipe,          wrapped);
     VIA("serialize", ViaSerialization, wrapped);
+    VIA("deferred",  ViaDeferred,      wrapped);
+    VIA("2ndpic",    ViaSecondPicture, wrapped);
+    VIA("sp",        ViaSingletonPictures, wrapped);
     VIA("tiles",     ViaTiles, 256, 256,               NULL, wrapped);
     VIA("tiles_rt",  ViaTiles, 256, 256, new SkRTreeFactory, wrapped);
 
@@ -342,13 +422,16 @@ static bool match(const char* needle, const char* haystack) {
     return 0 == strcmp("_", needle) || NULL != strstr(haystack, needle);
 }
 
-static ImplicitString is_blacklisted(const char* sink, const char* src, const char* name) {
-    for (int i = 0; i < FLAGS_blacklist.count() - 2; i += 3) {
+static ImplicitString is_blacklisted(const char* sink, const char* src,
+                                     const char* srcOptions, const char* name) {
+    for (int i = 0; i < FLAGS_blacklist.count() - 3; i += 4) {
         if (match(FLAGS_blacklist[i+0], sink) &&
-            match(FLAGS_blacklist[i+1],  src) &&
-            match(FLAGS_blacklist[i+2], name)) {
-            return SkStringPrintf("%s %s %s",
-                                  FLAGS_blacklist[i+0], FLAGS_blacklist[i+1], FLAGS_blacklist[i+2]);
+            match(FLAGS_blacklist[i+1], src) &&
+            match(FLAGS_blacklist[i+2], srcOptions) &&
+            match(FLAGS_blacklist[i+3], name)) {
+            return SkStringPrintf("%s %s %s %s",
+                                  FLAGS_blacklist[i+0], FLAGS_blacklist[i+1],
+                                  FLAGS_blacklist[i+2], FLAGS_blacklist[i+3]);
         }
     }
     return "";
@@ -364,7 +447,8 @@ struct Task {
     static void Run(Task* task) {
         SkString name = task->src->name();
         SkString note;
-        SkString whyBlacklisted = is_blacklisted(task->sink.tag, task->src.tag, name.c_str());
+        SkString whyBlacklisted = is_blacklisted(task->sink.tag, task->src.tag,
+                                                 task->src.options, name.c_str());
         if (!whyBlacklisted.isEmpty()) {
             note.appendf(" (--blacklist %s)", whyBlacklisted.c_str());
         }
@@ -374,20 +458,22 @@ struct Task {
         if (!FLAGS_dryRun && whyBlacklisted.isEmpty()) {
             SkBitmap bitmap;
             SkDynamicMemoryWStream stream;
-            start(task->sink.tag, task->src.tag, name.c_str());
+            start(task->sink.tag, task->src.tag, task->src.options, name.c_str());
             Error err = task->sink->draw(*task->src, &bitmap, &stream, &log);
             if (!err.isEmpty()) {
                 timer.end();
                 if (err.isFatal()) {
-                    fail(SkStringPrintf("%s %s %s: %s",
+                    fail(SkStringPrintf("%s %s %s %s: %s",
                                         task->sink.tag,
                                         task->src.tag,
+                                        task->src.options,
                                         name.c_str(),
                                         err.c_str()));
                 } else {
                     note.appendf(" (skipped: %s)", err.c_str());
                 }
-                done(timer.fWall, task->sink.tag, task->src.tag, name, note, log);
+                done(timer.fWall, task->sink.tag, task->src.tag, task->src.options,
+                     name, note, log);
                 return;
             }
             SkAutoTDelete<SkStreamAsset> data(stream.detachAsStream());
@@ -409,11 +495,13 @@ struct Task {
             }
 
             if (!FLAGS_readPath.isEmpty() &&
-                !gGold.contains(Gold(task->sink.tag, task->src.tag, name, md5))) {
-                fail(SkStringPrintf("%s not found for %s %s %s in %s",
+                !gGold.contains(Gold(task->sink.tag, task->src.tag,
+                                     task->src.options, name, md5))) {
+                fail(SkStringPrintf("%s not found for %s %s %s %s in %s",
                                     md5.c_str(),
                                     task->sink.tag,
                                     task->src.tag,
+                                    task->src.options,
                                     name.c_str(),
                                     FLAGS_readPath[0]));
             }
@@ -429,7 +517,7 @@ struct Task {
             }
         }
         timer.end();
-        done(timer.fWall, task->sink.tag, task->src.tag, name, note, log);
+        done(timer.fWall, task->sink.tag, task->src.tag, task->src.options, name, note, log);
     }
 
     static void WriteToDisk(const Task& task,
@@ -438,12 +526,19 @@ struct Task {
                             SkStream* data, size_t len,
                             const SkBitmap* bitmap) {
         JsonWriter::BitmapResult result;
-        result.name       = task.src->name();
-        result.config     = task.sink.tag;
-        result.sourceType = task.src.tag;
-        result.ext        = ext;
-        result.md5        = md5;
+        result.name          = task.src->name();
+        result.config        = task.sink.tag;
+        result.sourceType    = task.src.tag;
+        result.sourceOptions = task.src.options;
+        result.ext           = ext;
+        result.md5           = md5;
         JsonWriter::AddBitmapResult(result);
+
+        // If an MD5 is uninteresting, we want it noted in the JSON file,
+        // but don't want to dump it out as a .png (or whatever ext is).
+        if (gUninterestingHashes.contains(md5)) {
+            return;
+        }
 
         const char* dir = FLAGS_writePath[0];
         if (0 == strcmp(dir, "@")) {  // Needed for iOS.
@@ -464,6 +559,10 @@ struct Task {
             sk_mkdir(path.c_str());
             path = SkOSPath::Join(path.c_str(), task.src.tag);
             sk_mkdir(path.c_str());
+            if (strcmp(task.src.options, "") != 0) {
+              path = SkOSPath::Join(path.c_str(), task.src.options);
+              sk_mkdir(path.c_str());
+            }
             path = SkOSPath::Join(path.c_str(), task.src->name().c_str());
             path.append(".");
             path.append(ext);
@@ -516,8 +615,10 @@ static void gather_tests() {
     if (!FLAGS_src.contains("tests")) {
         return;
     }
-    for (const skiatest::TestRegistry* r = skiatest::TestRegistry::Head(); r;
-         r = r->next()) {
+    for (const skiatest::TestRegistry* r = skiatest::TestRegistry::Head(); r; r = r->next()) {
+        if (!in_shard()) {
+            continue;
+        }
         // Despite its name, factory() is returning a reference to
         // link-time static const POD data.
         const skiatest::Test& test = r->factory();
@@ -546,12 +647,12 @@ static void run_test(skiatest::Test* test) {
     WallTimer timer;
     timer.start();
     if (!FLAGS_dryRun) {
-        start("unit", "test", test->name);
+        start("unit", "test", "", test->name);
         GrContextFactory factory;
         test->proc(&reporter, &factory);
     }
     timer.end();
-    done(timer.fWall, "unit", "test", test->name, "", "");
+    done(timer.fWall, "unit", "test", "", test->name, "", "");
 }
 
 /*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
@@ -603,6 +704,7 @@ int dm_main() {
     start_keepalive();
 
     gather_gold();
+    gather_uninteresting_hashes();
 
     gather_srcs();
     gather_sinks();

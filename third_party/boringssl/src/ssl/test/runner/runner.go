@@ -135,6 +135,9 @@ type testCase struct {
 	// expectedResumeVersion, if non-zero, specifies the TLS version that
 	// must be negotiated on resumption. If zero, expectedVersion is used.
 	expectedResumeVersion uint16
+	// expectedCipher, if non-zero, specifies the TLS cipher suite that
+	// should be negotiated.
+	expectedCipher uint16
 	// expectChannelID controls whether the connection should have
 	// negotiated a Channel ID with channelIDKey.
 	expectChannelID bool
@@ -184,6 +187,12 @@ type testCase struct {
 	// damageFirstWrite, if true, configures the underlying transport to
 	// damage the final byte of the first application data write.
 	damageFirstWrite bool
+	// exportKeyingMaterial, if non-zero, configures the test to exchange
+	// keying material and verify they match.
+	exportKeyingMaterial int
+	exportLabel          string
+	exportContext        string
+	useExportContext     bool
 	// flags, if not empty, contains a list of command-line flags that will
 	// be passed to the shim program.
 	flags []string
@@ -293,6 +302,18 @@ var testCases = []testCase{
 		},
 		shouldFail:    true,
 		expectedError: ":UNEXPECTED_MESSAGE:",
+	},
+	{
+		name: "SkipCertificateStatus",
+		config: Config{
+			CipherSuites: []uint16{TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256},
+			Bugs: ProtocolBugs{
+				SkipCertificateStatus: true,
+			},
+		},
+		flags: []string{
+			"-enable-ocsp-stapling",
+		},
 	},
 	{
 		name: "SkipServerKeyExchange",
@@ -689,6 +710,8 @@ var testCases = []testCase{
 				AppDataAfterChangeCipherSpec: []byte("TEST MESSAGE"),
 			},
 		},
+		// BoringSSL's DTLS implementation will drop the out-of-order
+		// application data.
 	},
 	{
 		name: "AlertAfterChangeCipherSpec",
@@ -781,6 +804,7 @@ var testCases = []testCase{
 		},
 		flags: []string{
 			"-false-start",
+			"-handshake-never-done",
 			"-advertise-alpn", "\x03foo",
 		},
 		shimWritesFirst: true,
@@ -801,6 +825,7 @@ var testCases = []testCase{
 		flags: []string{
 			"-implicit-handshake",
 			"-false-start",
+			"-handshake-never-done",
 			"-advertise-alpn", "\x03foo",
 		},
 		shouldFail:    true,
@@ -905,6 +930,20 @@ var testCases = []testCase{
 		expectedError: ":WRONG_CIPHER_RETURNED:",
 	},
 	{
+		name: "UnsupportedCurve",
+		config: Config{
+			CipherSuites: []uint16{TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256},
+			// BoringSSL implements P-224 but doesn't enable it by
+			// default.
+			CurvePreferences: []CurveID{CurveP224},
+			Bugs: ProtocolBugs{
+				IgnorePeerCurvePreferences: true,
+			},
+		},
+		shouldFail:    true,
+		expectedError: ":WRONG_CURVE:",
+	},
+	{
 		name: "SendWarningAlerts",
 		config: Config{
 			Bugs: ProtocolBugs{
@@ -920,6 +959,131 @@ var testCases = []testCase{
 				SendWarningAlerts: alertAccessDenied,
 			},
 		},
+	},
+	{
+		name: "BadFinished",
+		config: Config{
+			Bugs: ProtocolBugs{
+				BadFinished: true,
+			},
+		},
+		shouldFail:    true,
+		expectedError: ":DIGEST_CHECK_FAILED:",
+	},
+	{
+		name: "FalseStart-BadFinished",
+		config: Config{
+			CipherSuites: []uint16{TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256},
+			NextProtos:   []string{"foo"},
+			Bugs: ProtocolBugs{
+				BadFinished:      true,
+				ExpectFalseStart: true,
+			},
+		},
+		flags: []string{
+			"-false-start",
+			"-handshake-never-done",
+			"-advertise-alpn", "\x03foo",
+		},
+		shimWritesFirst: true,
+		shouldFail:      true,
+		expectedError:   ":DIGEST_CHECK_FAILED:",
+	},
+	{
+		name: "NoFalseStart-NoALPN",
+		config: Config{
+			CipherSuites: []uint16{TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256},
+			Bugs: ProtocolBugs{
+				ExpectFalseStart:          true,
+				AlertBeforeFalseStartTest: alertAccessDenied,
+			},
+		},
+		flags: []string{
+			"-false-start",
+		},
+		shimWritesFirst:    true,
+		shouldFail:         true,
+		expectedError:      ":TLSV1_ALERT_ACCESS_DENIED:",
+		expectedLocalError: "tls: peer did not false start: EOF",
+	},
+	{
+		name: "NoFalseStart-NoAEAD",
+		config: Config{
+			CipherSuites: []uint16{TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA},
+			NextProtos:   []string{"foo"},
+			Bugs: ProtocolBugs{
+				ExpectFalseStart:          true,
+				AlertBeforeFalseStartTest: alertAccessDenied,
+			},
+		},
+		flags: []string{
+			"-false-start",
+			"-advertise-alpn", "\x03foo",
+		},
+		shimWritesFirst:    true,
+		shouldFail:         true,
+		expectedError:      ":TLSV1_ALERT_ACCESS_DENIED:",
+		expectedLocalError: "tls: peer did not false start: EOF",
+	},
+	{
+		name: "NoFalseStart-RSA",
+		config: Config{
+			CipherSuites: []uint16{TLS_RSA_WITH_AES_128_GCM_SHA256},
+			NextProtos:   []string{"foo"},
+			Bugs: ProtocolBugs{
+				ExpectFalseStart:          true,
+				AlertBeforeFalseStartTest: alertAccessDenied,
+			},
+		},
+		flags: []string{
+			"-false-start",
+			"-advertise-alpn", "\x03foo",
+		},
+		shimWritesFirst:    true,
+		shouldFail:         true,
+		expectedError:      ":TLSV1_ALERT_ACCESS_DENIED:",
+		expectedLocalError: "tls: peer did not false start: EOF",
+	},
+	{
+		name: "NoFalseStart-DHE_RSA",
+		config: Config{
+			CipherSuites: []uint16{TLS_DHE_RSA_WITH_AES_128_GCM_SHA256},
+			NextProtos:   []string{"foo"},
+			Bugs: ProtocolBugs{
+				ExpectFalseStart:          true,
+				AlertBeforeFalseStartTest: alertAccessDenied,
+			},
+		},
+		flags: []string{
+			"-false-start",
+			"-advertise-alpn", "\x03foo",
+		},
+		shimWritesFirst:    true,
+		shouldFail:         true,
+		expectedError:      ":TLSV1_ALERT_ACCESS_DENIED:",
+		expectedLocalError: "tls: peer did not false start: EOF",
+	},
+	{
+		testType: serverTest,
+		name:     "NoSupportedCurves",
+		config: Config{
+			CipherSuites: []uint16{TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256},
+			Bugs: ProtocolBugs{
+				NoSupportedCurves: true,
+			},
+		},
+	},
+	{
+		testType: serverTest,
+		name:     "NoCommonCurves",
+		config: Config{
+			CipherSuites: []uint16{
+				TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+				TLS_DHE_RSA_WITH_AES_128_GCM_SHA256,
+			},
+			CurvePreferences: []CurveID{CurveP224},
+		},
+		expectedCipher: TLS_DHE_RSA_WITH_AES_128_GCM_SHA256,
 	},
 }
 
@@ -984,6 +1148,10 @@ func doExchange(test *testCase, config *Config, conn net.Conn, messageLen int, i
 		return fmt.Errorf("got version %x, expected %x", vers, expectedVersion)
 	}
 
+	if cipher := tlsConn.ConnectionState().CipherSuite; test.expectedCipher != 0 && cipher != test.expectedCipher {
+		return fmt.Errorf("got cipher %x, expected %x", cipher, test.expectedCipher)
+	}
+
 	if test.expectChannelID {
 		channelID := tlsConn.ConnectionState().ChannelID
 		if channelID == nil {
@@ -1010,6 +1178,20 @@ func doExchange(test *testCase, config *Config, conn net.Conn, messageLen int, i
 
 	if p := tlsConn.ConnectionState().SRTPProtectionProfile; p != test.expectedSRTPProtectionProfile {
 		return fmt.Errorf("SRTP profile mismatch: got %d, wanted %d", p, test.expectedSRTPProtectionProfile)
+	}
+
+	if test.exportKeyingMaterial > 0 {
+		actual := make([]byte, test.exportKeyingMaterial)
+		if _, err := io.ReadFull(tlsConn, actual); err != nil {
+			return err
+		}
+		expected, err := tlsConn.ExportKeyingMaterial(test.exportKeyingMaterial, []byte(test.exportLabel), []byte(test.exportContext), test.useExportContext)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(actual, expected) {
+			return fmt.Errorf("keying material mismatch")
+		}
 	}
 
 	if test.shimWritesFirst {
@@ -1049,21 +1231,14 @@ func doExchange(test *testCase, config *Config, conn net.Conn, messageLen int, i
 		return err
 	}
 
-	var testMessage []byte
-	if config.Bugs.AppDataAfterChangeCipherSpec != nil {
-		// We've already sent a message. Expect the shim to echo it
-		// back.
-		testMessage = config.Bugs.AppDataAfterChangeCipherSpec
-	} else {
-		if messageLen == 0 {
-			messageLen = 32
-		}
-		testMessage = make([]byte, messageLen)
-		for i := range testMessage {
-			testMessage[i] = 0x42
-		}
-		tlsConn.Write(testMessage)
+	if messageLen == 0 {
+		messageLen = 32
 	}
+	testMessage := make([]byte, messageLen)
+	for i := range testMessage {
+		testMessage[i] = 0x42
+	}
+	tlsConn.Write(testMessage)
 
 	buf := make([]byte, len(testMessage))
 	if test.protocol == dtls {
@@ -1188,6 +1363,15 @@ func runTest(test *testCase, buildDir string, mallocNumToFail int64) error {
 		flags = append(flags, "-shim-writes-first")
 	}
 
+	if test.exportKeyingMaterial > 0 {
+		flags = append(flags, "-export-keying-material", strconv.Itoa(test.exportKeyingMaterial))
+		flags = append(flags, "-export-label", test.exportLabel)
+		flags = append(flags, "-export-context", test.exportContext)
+		if test.useExportContext {
+			flags = append(flags, "-use-export-context")
+		}
+	}
+
 	flags = append(flags, test.flags...)
 
 	var shim *exec.Cmd
@@ -1279,7 +1463,7 @@ func runTest(test *testCase, buildDir string, mallocNumToFail int64) error {
 	stdout := string(stdoutBuf.Bytes())
 	stderr := string(stderrBuf.Bytes())
 	failed := err != nil || childErr != nil
-	correctFailure := len(test.expectedError) == 0 || strings.Contains(stdout, test.expectedError)
+	correctFailure := len(test.expectedError) == 0 || strings.Contains(stderr, test.expectedError)
 	localError := "none"
 	if err != nil {
 		localError = err.Error()
@@ -1306,10 +1490,10 @@ func runTest(test *testCase, buildDir string, mallocNumToFail int64) error {
 			panic("internal error")
 		}
 
-		return fmt.Errorf("%s: local error '%s', child error '%s', stdout:\n%s\nstderr:\n%s", msg, localError, childError, string(stdoutBuf.Bytes()), stderr)
+		return fmt.Errorf("%s: local error '%s', child error '%s', stdout:\n%s\nstderr:\n%s", msg, localError, childError, stdout, stderr)
 	}
 
-	if !*useValgrind && len(stderr) > 0 {
+	if !*useValgrind && !failed && len(stderr) > 0 {
 		println(stderr)
 	}
 
@@ -1345,20 +1529,23 @@ var testCipherSuites = []struct {
 	{"DHE-RSA-AES256-GCM", TLS_DHE_RSA_WITH_AES_256_GCM_SHA384},
 	{"DHE-RSA-AES256-SHA", TLS_DHE_RSA_WITH_AES_256_CBC_SHA},
 	{"DHE-RSA-AES256-SHA256", TLS_DHE_RSA_WITH_AES_256_CBC_SHA256},
+	{"DHE-RSA-CHACHA20-POLY1305", TLS_DHE_RSA_WITH_CHACHA20_POLY1305_SHA256},
 	{"ECDHE-ECDSA-AES128-GCM", TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256},
 	{"ECDHE-ECDSA-AES128-SHA", TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA},
 	{"ECDHE-ECDSA-AES128-SHA256", TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256},
 	{"ECDHE-ECDSA-AES256-GCM", TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384},
 	{"ECDHE-ECDSA-AES256-SHA", TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA},
 	{"ECDHE-ECDSA-AES256-SHA384", TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384},
+	{"ECDHE-ECDSA-CHACHA20-POLY1305", TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256},
 	{"ECDHE-ECDSA-RC4-SHA", TLS_ECDHE_ECDSA_WITH_RC4_128_SHA},
-	{"ECDHE-PSK-WITH-AES-128-GCM-SHA256", TLS_ECDHE_PSK_WITH_AES_128_GCM_SHA256},
+	{"ECDHE-PSK-AES128-GCM-SHA256", TLS_ECDHE_PSK_WITH_AES_128_GCM_SHA256},
 	{"ECDHE-RSA-AES128-GCM", TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256},
 	{"ECDHE-RSA-AES128-SHA", TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA},
 	{"ECDHE-RSA-AES128-SHA256", TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256},
 	{"ECDHE-RSA-AES256-GCM", TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384},
 	{"ECDHE-RSA-AES256-SHA", TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA},
 	{"ECDHE-RSA-AES256-SHA384", TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384},
+	{"ECDHE-RSA-CHACHA20-POLY1305", TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256},
 	{"ECDHE-RSA-RC4-SHA", TLS_ECDHE_RSA_WITH_RC4_128_SHA},
 	{"PSK-AES128-CBC-SHA", TLS_PSK_WITH_AES_128_CBC_SHA},
 	{"PSK-AES256-CBC-SHA", TLS_PSK_WITH_AES_256_CBC_SHA},
@@ -1374,7 +1561,8 @@ func hasComponent(suiteName, component string) bool {
 func isTLS12Only(suiteName string) bool {
 	return hasComponent(suiteName, "GCM") ||
 		hasComponent(suiteName, "SHA256") ||
-		hasComponent(suiteName, "SHA384")
+		hasComponent(suiteName, "SHA384") ||
+		hasComponent(suiteName, "POLY1305")
 }
 
 func isDTLSCipher(suiteName string) bool {
@@ -2573,27 +2761,40 @@ func addResumptionVersionTests() {
 					suffix += "-DTLS"
 				}
 
-				testCases = append(testCases, testCase{
-					protocol:      protocol,
-					name:          "Resume-Client" + suffix,
-					resumeSession: true,
-					config: Config{
-						MaxVersion:   sessionVers.version,
-						CipherSuites: []uint16{TLS_RSA_WITH_AES_128_CBC_SHA},
-						Bugs: ProtocolBugs{
-							AllowSessionVersionMismatch: true,
+				if sessionVers.version == resumeVers.version {
+					testCases = append(testCases, testCase{
+						protocol:      protocol,
+						name:          "Resume-Client" + suffix,
+						resumeSession: true,
+						config: Config{
+							MaxVersion:   sessionVers.version,
+							CipherSuites: []uint16{TLS_RSA_WITH_AES_128_CBC_SHA},
 						},
-					},
-					expectedVersion: sessionVers.version,
-					resumeConfig: &Config{
-						MaxVersion:   resumeVers.version,
-						CipherSuites: []uint16{TLS_RSA_WITH_AES_128_CBC_SHA},
-						Bugs: ProtocolBugs{
-							AllowSessionVersionMismatch: true,
+						expectedVersion:       sessionVers.version,
+						expectedResumeVersion: resumeVers.version,
+					})
+				} else {
+					testCases = append(testCases, testCase{
+						protocol:      protocol,
+						name:          "Resume-Client-Mismatch" + suffix,
+						resumeSession: true,
+						config: Config{
+							MaxVersion:   sessionVers.version,
+							CipherSuites: []uint16{TLS_RSA_WITH_AES_128_CBC_SHA},
 						},
-					},
-					expectedResumeVersion: resumeVers.version,
-				})
+						expectedVersion: sessionVers.version,
+						resumeConfig: &Config{
+							MaxVersion:   resumeVers.version,
+							CipherSuites: []uint16{TLS_RSA_WITH_AES_128_CBC_SHA},
+							Bugs: ProtocolBugs{
+								AllowSessionVersionMismatch: true,
+							},
+						},
+						expectedResumeVersion: resumeVers.version,
+						shouldFail:            true,
+						expectedError:         ":OLD_SESSION_VERSION_NOT_RETURNED:",
+					})
+				}
 
 				testCases = append(testCases, testCase{
 					protocol:      protocol,
@@ -2637,21 +2838,31 @@ func addResumptionVersionTests() {
 			}
 		}
 	}
+
+	testCases = append(testCases, testCase{
+		name:          "Resume-Client-CipherMismatch",
+		resumeSession: true,
+		config: Config{
+			CipherSuites: []uint16{TLS_RSA_WITH_AES_128_GCM_SHA256},
+		},
+		resumeConfig: &Config{
+			CipherSuites: []uint16{TLS_RSA_WITH_AES_128_GCM_SHA256},
+			Bugs: ProtocolBugs{
+				SendCipherSuite: TLS_RSA_WITH_AES_128_CBC_SHA,
+			},
+		},
+		shouldFail:    true,
+		expectedError: ":OLD_SESSION_CIPHER_NOT_RETURNED:",
+	})
 }
 
 func addRenegotiationTests() {
 	testCases = append(testCases, testCase{
-		testType:        serverTest,
-		name:            "Renegotiate-Server",
-		flags:           []string{"-renegotiate"},
-		shimWritesFirst: true,
-	})
-	testCases = append(testCases, testCase{
 		testType: serverTest,
-		name:     "Renegotiate-Server-Full",
+		name:     "Renegotiate-Server",
 		config: Config{
 			Bugs: ProtocolBugs{
-				NeverResumeOnRenego: true,
+				FailIfResumeOnRenego: true,
 			},
 		},
 		flags:           []string{"-renegotiate"},
@@ -2711,13 +2922,21 @@ func addRenegotiationTests() {
 		},
 		flags: []string{"-allow-unsafe-legacy-renegotiation"},
 	})
+	testCases = append(testCases, testCase{
+		testType:           serverTest,
+		name:               "Renegotiate-Server-ClientInitiated-Forbidden",
+		renegotiate:        true,
+		flags:              []string{"-reject-peer-renegotiations"},
+		shouldFail:         true,
+		expectedError:      ":NO_RENEGOTIATION:",
+		expectedLocalError: "remote error: no renegotiation",
+	})
 	// Regression test for CVE-2015-0291.
 	testCases = append(testCases, testCase{
 		testType: serverTest,
 		name:     "Renegotiate-Server-NoSignatureAlgorithms",
 		config: Config{
 			Bugs: ProtocolBugs{
-				NeverResumeOnRenego:           true,
 				NoSignatureAlgorithmsOnRenego: true,
 			},
 		},
@@ -2726,14 +2945,10 @@ func addRenegotiationTests() {
 	})
 	// TODO(agl): test the renegotiation info SCSV.
 	testCases = append(testCases, testCase{
-		name:        "Renegotiate-Client",
-		renegotiate: true,
-	})
-	testCases = append(testCases, testCase{
-		name: "Renegotiate-Client-Full",
+		name: "Renegotiate-Client",
 		config: Config{
 			Bugs: ProtocolBugs{
-				NeverResumeOnRenego: true,
+				FailIfResumeOnRenego: true,
 			},
 		},
 		renegotiate: true,
@@ -2775,6 +2990,14 @@ func addRenegotiationTests() {
 			CipherSuites: []uint16{TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256},
 		},
 		renegotiateCiphers: []uint16{TLS_RSA_WITH_RC4_128_SHA},
+	})
+	testCases = append(testCases, testCase{
+		name:               "Renegotiate-Client-Forbidden",
+		renegotiate:        true,
+		flags:              []string{"-reject-peer-renegotiations"},
+		shouldFail:         true,
+		expectedError:      ":NO_RENEGOTIATION:",
+		expectedLocalError: "remote error: no renegotiation",
 	})
 	testCases = append(testCases, testCase{
 		name:        "Renegotiate-SameClientVersion",
@@ -3076,6 +3299,61 @@ func addDTLSRetransmitTests() {
 	})
 }
 
+func addExportKeyingMaterialTests() {
+	for _, vers := range tlsVersions {
+		if vers.version == VersionSSL30 {
+			continue
+		}
+		testCases = append(testCases, testCase{
+			name: "ExportKeyingMaterial-" + vers.name,
+			config: Config{
+				MaxVersion: vers.version,
+			},
+			exportKeyingMaterial: 1024,
+			exportLabel:          "label",
+			exportContext:        "context",
+			useExportContext:     true,
+		})
+		testCases = append(testCases, testCase{
+			name: "ExportKeyingMaterial-NoContext-" + vers.name,
+			config: Config{
+				MaxVersion: vers.version,
+			},
+			exportKeyingMaterial: 1024,
+		})
+		testCases = append(testCases, testCase{
+			name: "ExportKeyingMaterial-EmptyContext-" + vers.name,
+			config: Config{
+				MaxVersion: vers.version,
+			},
+			exportKeyingMaterial: 1024,
+			useExportContext:     true,
+		})
+		testCases = append(testCases, testCase{
+			name: "ExportKeyingMaterial-Small-" + vers.name,
+			config: Config{
+				MaxVersion: vers.version,
+			},
+			exportKeyingMaterial: 1,
+			exportLabel:          "label",
+			exportContext:        "context",
+			useExportContext:     true,
+		})
+	}
+	testCases = append(testCases, testCase{
+		name: "ExportKeyingMaterial-SSL3",
+		config: Config{
+			MaxVersion: VersionSSL30,
+		},
+		exportKeyingMaterial: 1024,
+		exportLabel:          "label",
+		exportContext:        "context",
+		useExportContext:     true,
+		shouldFail:           true,
+		expectedError:        "failed to export keying material",
+	})
+}
+
 func worker(statusChan chan statusMsg, c chan *testCase, buildDir string, wg *sync.WaitGroup) {
 	defer wg.Done()
 
@@ -3173,6 +3451,7 @@ func main() {
 	addSigningHashTests()
 	addFastRadioPaddingTests()
 	addDTLSRetransmitTests()
+	addExportKeyingMaterialTests()
 	for _, async := range []bool{false, true} {
 		for _, splitHandshake := range []bool{false, true} {
 			for _, protocol := range []protocol{tls, dtls} {
@@ -3213,5 +3492,9 @@ func main() {
 		if err := testOutput.writeTo(*jsonOutput); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 		}
+	}
+
+	if !testOutput.allPassed {
+		os.Exit(1)
 	}
 }

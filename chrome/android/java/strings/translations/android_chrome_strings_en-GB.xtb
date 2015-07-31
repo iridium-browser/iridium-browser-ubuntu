@@ -7,9 +7,7 @@
 <translation id="1657479659644194568">Set up Chrome</translation>
 <translation id="6448273550210938826">Search and URL suggestions</translation>
 <translation id="7998918019931843664">Re-open closed tab</translation>
-<translation id="8425213833346101688">Change</translation>
 <translation id="4996978546172906250">Share via</translation>
-<translation id="8607727265103077134">From Google Wallet</translation>
 <translation id="6292937202013477045">Attackers might be trying to steal your information (for example, photos, passwords, messages and credit cards) from <ph name="DOMAIN_NAME"/>.</translation>
 <translation id="5968595432776860642">Playing “<ph name="VIDEO_TITLE"/>”</translation>
 <translation id="1994173015038366702">Site URL</translation>
@@ -17,10 +15,12 @@
 <translation id="1506061864768559482">Search engine</translation>
 <translation id="346339498574870680">Copy image URL</translation>
 <translation id="5063480226653192405">Usage</translation>
-<translation id="6657585470893396449">Password</translation>
 <translation id="5578795271662203820">Search <ph name="SEARCH_ENGINE"/> for this image</translation>
 <translation id="7764225426217299476">Add address</translation>
 <translation id="4816465935029283692">Data types</translation>
+<translation id="5098185943924922330">Help us to prioritise the features and improvements that we should work on by sending Google information about the files, applications and services running whenever you experience a crash.
+
+        Usage statistics include information such as preferences, button clicks and memory usage. They do not include web page URLs or any personal information. Crash reports contain system information at the time of the crash, and may contain web page URLs or personal information, depending on what was happening at the time of the crash.</translation>
 <translation id="4042870126885713738">Show suggestions when a web address does not resolve or a connection cannot be made</translation>
 <translation id="8237438615979997762">The data stored on this device as well as the data stored in your Google Account will remain in both places. However, new data or changes that you make to your data will not be synchronised between them.</translation>
 <translation id="6831043979455480757">Translate</translation>
@@ -36,13 +36,13 @@
 <translation id="5676636989614905379">Cannot play video on <ph name="SCREEN_NAME"/>.</translation>
 <translation id="8069239273282989646">After compression</translation>
 <translation id="1644574205037202324">History</translation>
+<translation id="3485544713029068372">Smart Lock for Passwords</translation>
 <translation id="6999892069268112724">Confirm Google Account</translation>
 <translation id="1446450296470737166">Allow full control of MIDI devices</translation>
 <translation id="1404122904123200417">Embedded in <ph name="WEBSITE_URL"/></translation>
 <translation id="3895926599014793903">Force enable zoom</translation>
 <translation id="4099578267706723511">Help make Chrome better by sending usage statistics and crash reports to Google.</translation>
 <translation id="2440823041667407902">Location access</translation>
-<translation id="6600253697437303777">Ask before accessing camera and microphone (recommended)</translation>
 <translation id="1491151370853475546">Reload this Page</translation>
 <translation id="5233638681132016545">New tab</translation>
 <translation id="641643625718530986">Print…</translation>
@@ -80,7 +80,6 @@ You are signing in with a managed account and giving its administrator control o
 <translation id="4684427112815847243">Sync everything</translation>
 <translation id="563535393368633106">Ask before accessing (recommended)</translation>
 <translation id="666981079809192359">Chrome Privacy Notice</translation>
-<translation id="7142571697412577603">Show addresses and credit cards from Google Wallet</translation>
 <translation id="1966710179511230534">Please update your sign-in details.</translation>
 <translation id="9099292894781394535">Data savings</translation>
 <translation id="3410346880900521918">If you're seeing this frequently, try these <ph name="BEGIN_LINK"/>suggestions<ph name="END_LINK"/>.</translation>
@@ -92,20 +91,20 @@ You are signing in with a managed account and giving its administrator control o
 <translation id="2498359688066513246">Help &amp; feedback</translation>
 <translation id="1091134514807961917">You’re signed in to the following Google Account.</translation>
 <translation id="7019652137705190998">Go incognito to browse privately or sign in temporarily</translation>
-<translation id="1426410128494586442">Yes</translation>
 <translation id="2206488550163399966"><ph name="APP_NAME"/>, web app. <ph name="APP_URL"/></translation>
 <translation id="200669432486043882">Replace file</translation>
 <translation id="5595485650161345191">Edit address</translation>
+<translation id="8413385045638830869">Ask first (recommended)</translation>
 <translation id="2100273922101894616">Auto Sign-in</translation>
 <translation id="5313967007315987356">Add site</translation>
 <translation id="5733727110006255111">When this feature is turned on, Chrome will use Google servers to compress pages that you visit before downloading them. SSL and incognito pages will not be included.</translation>
 <translation id="4256782883801055595">Open-source licences</translation>
+<translation id="813082847718468539">View site information</translation>
 <translation id="8218346974737627104">Confirm sign-in</translation>
 <translation id="3350687908700087792">Close all incognito tabs</translation>
 <translation id="2902702728133930130">Chrome failed during start-up with an unexpected error.</translation>
 <translation id="5017989644593831205">Not <ph name="NOT_YOU_USER_NAME"/>?</translation>
 <translation id="8997842057643556822">Cannot create download directory on USB storage.</translation>
-<translation id="6948694623901096205">Camera or microphone</translation>
 <translation id="8853345339104747198"><ph name="TAB_TITLE"/>, tab</translation>
 <translation id="8157532349231307196"><ph name="NUMBER_OF_ACCOUNTS"/> accounts</translation>
 <translation id="1272079795634619415">Stop</translation>
@@ -119,6 +118,7 @@ You are signing in with a managed account and giving its administrator control o
 <translation id="4378154925671717803">Phone</translation>
 <translation id="988938288723502454">Cannot create download directory on SD card.</translation>
 <translation id="3896036286668839683">Certificate Viewer</translation>
+<translation id="8660471606262461360">From Google Payments</translation>
 <translation id="2321958826496381788">Drag the slider until you can read this comfortably. Text should look at least this big after double-tapping on a paragraph.</translation>
 <translation id="3282568296779691940">Sign in to Chrome</translation>
 <translation id="1098052486217676340">Finished</translation>
@@ -126,7 +126,6 @@ You are signing in with a managed account and giving its administrator control o
 <translation id="8583805026567836021">Clearing account data</translation>
 <translation id="5860033963881614850">Off</translation>
 <translation id="2960796085439532066">Copyright <ph name="YEAR"/> Google Inc. All rights reserved.</translation>
-<translation id="4250680216510889253">No</translation>
 <translation id="6388207532828177975">Clear &amp; reset</translation>
 <translation id="3198916472715691905"><ph name="STORAGE_AMOUNT"/> stored data</translation>
 <translation id="7473891865547856676">No Thanks</translation>
@@ -135,16 +134,12 @@ You are signing in with a managed account and giving its administrator control o
 <translation id="7423098979219808738">Ask first</translation>
 <translation id="8073388330009372546">Open image in new tab</translation>
 <translation id="9060538597317784206">View app <ph name="APP_NAME"/> on the Play Store.  Rating: <ph name="APP_RATING"/>.</translation>
-<translation id="552553974213252141">Was the text extracted correctly?</translation>
 <translation id="5317780077021120954">Save</translation>
-<translation id="1151972924205500581">Password required</translation>
 <translation id="2870560284913253234">Site</translation>
-<translation id="3101226206443094477">Sign in with your Google Account:</translation>
 <translation id="2718352093833049315">Only on Wi-Fi</translation>
 <translation id="7029809446516969842">Passwords</translation>
 <translation id="5487729733663684359">Chrome updates are no longer supported for this version of Android.</translation>
 <translation id="5100237604440890931">Collapsed – click to expand.</translation>
-<translation id="1201402288615127009">Next</translation>
 <translation id="2414886740292270097">Dark</translation>
 <translation id="2487368562788861256">Spend less on data by using Google to <ph name="BEGIN_LINK"/>optimise the pages you visit<ph name="END_LINK"/>.</translation>
 <translation id="5911030830365207728">Google Translate</translation>
@@ -157,18 +152,20 @@ You are signing in with a managed account and giving its administrator control o
 <translation id="473775607612524610">Update</translation>
 <translation id="138361230106469022">Hi, <ph name="FULL_NAME"/></translation>
 <translation id="6600954340915313787">Copied to Chrome</translation>
-<translation id="6317463785365643240">Don’t encrypt</translation>
 <translation id="8627706565932943526">Sync error</translation>
 <translation id="1807246157184219062">Light</translation>
+<translation id="9219103736887031265">Images</translation>
 <translation id="7053983685419859001">Block</translation>
 <translation id="8374821112118309944">You need to update TalkBack to a newer version.</translation>
 <translation id="6406506848690869874">Sync</translation>
 <translation id="6857778194843072568">Only send on Wi-Fi</translation>
 <translation id="5380554235172449987">Never send</translation>
 <translation id="5715468759630044318">Choose account</translation>
+<translation id="5000922062037820727">Blocked (recommended)</translation>
 <translation id="544291274896356069">Leaving incognito mode if this link is opened in an external application. Continue?</translation>
 <translation id="3917783807003067648">Location is blocked</translation>
 <translation id="1379156015317873965">Improve page load performance</translation>
+<translation id="5953603475187800576">Show addresses and credit cards from Google Payments</translation>
 <translation id="8481940801237642152">Your connection to this site is private, but someone on the network might be able to change the look of the page.</translation>
 <translation id="2593272815202181319">Monospace</translation>
 <translation id="4807098396393229769">Name on card</translation>
@@ -177,6 +174,7 @@ You are signing in with a managed account and giving its administrator control o
 For example, some websites may respond to this request by showing you ads that aren’t based on other websites that you’ve visited. Many websites will still collect and use your browsing data – for example to improve security, to provide content, ads and recommendations on their websites, and to generate reporting statistics.</translation>
 <translation id="656628257199996201">Always translate <ph name="SOURCE_LANGUAGE"/></translation>
 <translation id="2387895666653383613">Text scaling</translation>
+<translation id="3227137524299004712">Microphone</translation>
 <translation id="6447842834002726250">Cookies</translation>
 <translation id="2748463065602559597">You are viewing a secure Google Chrome page.</translation>
 <translation id="5511351932351731210">Always send</translation>
@@ -202,6 +200,8 @@ Hit the back button to exit.</translation>
 <translation id="5684874026226664614">Oops. This page could not be translated.</translation>
 <translation id="1987317783729300807">Accounts</translation>
 <translation id="6064211167623632605">Executable path</translation>
+<translation id="4522570452068850558">Details</translation>
+<translation id="1620510694547887537">Camera</translation>
 <translation id="10614374240317010">Never saved</translation>
 <translation id="1312168552565502328">Cookies, site data</translation>
 <translation id="2903493209154104877">Addresses</translation>
@@ -212,7 +212,6 @@ Hit the back button to exit.</translation>
 <translation id="6231464350722415003">Allow JavaScript on websites that you specify while blocking it for the rest of the web</translation>
 <translation id="7366340029385295517">Casting to <ph name="SCREEN_NAME"/></translation>
 <translation id="8026334261755873520">Clear browsing data</translation>
-<translation id="8503813439785031346">Username</translation>
 <translation id="583891442612896534">Chrome is unable to reach Google servers for data compression. Your data savings may be limited.</translation>
 <translation id="4827948050554950725">Add credit card</translation>
 <translation id="3489120686474540259">Add an account to get your tabs, bookmarks, history and other settings on all your devices.</translation>
@@ -235,11 +234,13 @@ Hit the back button to exit.</translation>
 <translation id="3254409185687681395">Bookmark this page</translation>
 <translation id="907015151729920253">Smart card</translation>
 <translation id="2482878487686419369">Notifications</translation>
+<translation id="857943718398505171">Allowed (recommended)</translation>
 <translation id="4412992751769744546">Allow third-party cookies</translation>
 <translation id="5016205925109358554">Serif</translation>
 <translation id="3063601790762993062">Save video</translation>
 <translation id="8106211421800660735">Credit card number</translation>
 <translation id="6042308850641462728">More</translation>
+<translation id="4526249700380860531">View and manage saved passwords at <ph name="BEGIN_LINK"/>passwords.google.com<ph name="END_LINK"/></translation>
 <translation id="2496180316473517155">Browsing history</translation>
 <translation id="6108923351542677676">Setup in progress…</translation>
 <translation id="7358682983403815415">Your open tabs, bookmarks, history and more are being synced with your Google Account.</translation>
@@ -255,7 +256,6 @@ Hit the back button to exit.</translation>
 <translation id="5324858694974489420">Parental Settings</translation>
 <translation id="5435662027590074193"><ph name="SEARCH_ENGINE_NAME"/> (<ph name="SEARCH_ENGINE_DOMAIN"/>)</translation>
 <translation id="7521387064766892559">JavaScript</translation>
-<translation id="4065916988127915326">Block all sites</translation>
 <translation id="8168435359814927499">Content</translation>
 <translation id="5424715742813396254">Edit saved name/password or exception</translation>
 <translation id="6978479750597523876">Reset translate settings</translation>
@@ -267,11 +267,10 @@ Hit the back button to exit.</translation>
 <translation id="2526148617758225454">Data Saver is on. Manage it in Settings.</translation>
 <translation id="4195643157523330669">Open in new tab</translation>
 <translation id="3102119246920354026">Cache</translation>
-<translation id="651048280540227067">Dismiss the menu</translation>
 <translation id="748127970106343339">Confirm device credential deletion</translation>
 <translation id="3089395242580810162">Open in incognito tab</translation>
 <translation id="5899349522111170522">Create new file</translation>
-<translation id="1082482054625560856">Manage saved passwords in your <ph name="BEGIN_LINK"/>Google Account<ph name="END_LINK"/></translation>
+<translation id="7232255641409319872">Allow images on websites that you specify while blocking them for the rest of the web</translation>
 <translation id="2360035970720276770">Can only download http or https URLs</translation>
 <translation id="6570560778840017462">You won't be signed out of your <ph name="BEGIN_LINK"/>Google Accounts<ph name="END_LINK"/></translation>
 <translation id="5414836363063783498">Verifying…</translation>
@@ -283,7 +282,6 @@ Hit the back button to exit.</translation>
 <translation id="7977858705483383621">SafeSearch</translation>
 <translation id="8909135823018751308">Share…</translation>
 <translation id="1056898198331236512">Warning</translation>
-<translation id="3338301885994755905">Block (recommended)</translation>
 <translation id="6575643671698722332">Reset failed. Ensure that your device is online and try again.</translation>
 <translation id="8987061207681586800">Make Chrome yours</translation>
 <translation id="654446541061731451">Select a tab to beam</translation>
@@ -342,13 +340,9 @@ Hit the back button to exit.</translation>
 <translation id="5138299137310274655">This page is in <ph name="SOURCE_LANGUAGE"/>. Translate it to <ph name="TARGET_LANGUAGE"/>?</translation>
 <translation id="2913331724188855103">Allow sites to save and read cookie data (recommended)</translation>
 <translation id="5512137114520586844">This account is managed by <ph name="PARENT_NAME"/>.</translation>
-<translation id="7649070708921625228">Help</translation>
 <translation id="1373696734384179344">Insufficient memory to download the selected content.</translation>
 <translation id="969096075394517431">Change languages</translation>
 <translation id="5085880389019676122">USB storage unavailable</translation>
-<translation id="1614564776292091138">When protected content is ON, websites will be able to authenticate your device to ensure that it is authorised to play premium, protected videos.
-
-If it is OFF, you may not be able to play premium videos on this device.</translation>
 <translation id="8928220460877261598">You're now signed in to Chrome.</translation>
 <translation id="7811044698839470685">Only someone with your passphrase can read your encrypted data. This passphrase is not sent to or stored by Google. If you forget your passphrase, you will need to reset sync.</translation>
 <translation id="8547287415299944404">Browsing history can't be cleared with accounts for kids</translation>
@@ -366,6 +360,7 @@ If it is OFF, you may not be able to play premium videos on this device.</transl
 <translation id="7961015016161918242">Never</translation>
 <translation id="7607002721634913082">Paused</translation>
 <translation id="5040262127954254034">Privacy</translation>
+<translation id="6112702117600201073">Refreshing page</translation>
 <translation id="6820607729870073286">You have no saved website settings.</translation>
 <translation id="6990079615885386641">Get the app from the Google Play Store: <ph name="APP_ACTION"/></translation>
 <translation id="1121094540300013208">Usage and crash reports</translation>
@@ -394,7 +389,6 @@ If it is OFF, you may not be able to play premium videos on this device.</transl
 <translation id="6965382102122355670">OK</translation>
 <translation id="4440256989292146959">Browse more for less</translation>
 <translation id="4023950129927433024">If you've forgotten your passphrase, stop and reset Sync via <ph name="BEGIN_LINK"/>Google Dashboard<ph name="END_LINK"/>.</translation>
-<translation id="6375900123462779979">Access your mic and camera</translation>
 <translation id="7437998757836447326">Sign out of Chrome</translation>
 <translation id="1178581264944972037">Pause</translation>
 <translation id="5127805178023152808">Sync is off</translation>

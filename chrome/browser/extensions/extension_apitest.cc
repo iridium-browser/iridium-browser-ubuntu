@@ -4,6 +4,7 @@
 
 #include "chrome/browser/extensions/extension_apitest.h"
 
+#include "base/base_switches.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -14,6 +15,7 @@
 #include "chrome/browser/ui/extensions/app_launch_params.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/public/common/content_switches.h"
 #include "extensions/browser/api/test/test_api.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
@@ -204,6 +206,16 @@ bool ExtensionApiTest::RunExtensionTestIncognitoNoFileAccess(
       extension_name, std::string(), NULL, kFlagEnableIncognito);
 }
 
+bool ExtensionApiTest::ExtensionSubtestsAreSkipped() {
+  // See http://crbug.com/177163 for details.
+#if defined(OS_WIN) && !defined(NDEBUG)
+  LOG(WARNING) << "Workaround for 177163, prematurely returning";
+  return true;
+#else
+  return false;
+#endif
+}
+
 bool ExtensionApiTest::RunExtensionSubtest(const std::string& extension_name,
                                            const std::string& page_url) {
   return RunExtensionSubtest(extension_name, page_url, kFlagEnableFileAccess);
@@ -213,15 +225,10 @@ bool ExtensionApiTest::RunExtensionSubtest(const std::string& extension_name,
                                            const std::string& page_url,
                                            int flags) {
   DCHECK(!page_url.empty()) << "Argument page_url is required.";
-  // See http://crbug.com/177163 for details.
-#if defined(OS_WIN) && !defined(NDEBUG)
-  LOG(WARNING) << "Workaround for 177163, prematurely returning";
-  return true;
-#else
+  if (ExtensionSubtestsAreSkipped())
+    return true;
   return RunExtensionTestImpl(extension_name, page_url, NULL, flags);
-#endif
 }
-
 
 bool ExtensionApiTest::RunPageTest(const std::string& page_url) {
   return RunExtensionSubtest(std::string(), page_url);
@@ -416,4 +423,8 @@ bool ExtensionApiTest::StartSpawnedTestServer() {
 void ExtensionApiTest::SetUpCommandLine(base::CommandLine* command_line) {
   ExtensionBrowserTest::SetUpCommandLine(command_line);
   test_data_dir_ = test_data_dir_.AppendASCII("api_test");
+  // Backgrounded renderer processes run at a lower priority, causing the
+  // tests to take more time to complete. Disable backgrounding so that the
+  // tests don't time out.
+  command_line->AppendSwitch(switches::kDisableRendererBackgrounding);
 }

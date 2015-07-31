@@ -182,7 +182,7 @@ void ContentSettingsPref::ClearAllContentSettingsRules() {
   notify_callback_.Run(ContentSettingsPattern(),
                        ContentSettingsPattern(),
                        content_type_,
-                       std::string());
+                       ResourceIdentifier());
 }
 
 void ContentSettingsPref::UpdateLastUsage(
@@ -412,7 +412,7 @@ void ContentSettingsPref::OnPrefChanged() {
   notify_callback_.Run(ContentSettingsPattern(),
                        ContentSettingsPattern(),
                        content_type_,
-                       std::string());
+                       ResourceIdentifier());
 }
 
 void ContentSettingsPref::UpdatePref(

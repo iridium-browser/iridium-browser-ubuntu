@@ -133,7 +133,7 @@ void ScriptController::clearForClose()
 {
     double start = currentTime();
     m_windowProxyManager->clearForClose();
-    blink::Platform::current()->histogramCustomCounts("WebCore.ScriptController.clearForClose", (currentTime() - start) * 1000, 0, 10000, 50);
+    Platform::current()->histogramCustomCounts("WebCore.ScriptController.clearForClose", (currentTime() - start) * 1000, 0, 10000, 50);
 }
 
 void ScriptController::updateSecurityOrigin(SecurityOrigin* origin)
@@ -141,18 +141,18 @@ void ScriptController::updateSecurityOrigin(SecurityOrigin* origin)
     m_windowProxyManager->mainWorldProxy()->updateSecurityOrigin(origin);
 }
 
-v8::Local<v8::Value> ScriptController::callFunction(v8::Local<v8::Function> function, v8::Local<v8::Value> receiver, int argc, v8::Local<v8::Value> info[])
+v8::MaybeLocal<v8::Value> ScriptController::callFunction(v8::Local<v8::Function> function, v8::Local<v8::Value> receiver, int argc, v8::Local<v8::Value> info[])
 {
     // Keep LocalFrame (and therefore ScriptController) alive.
     RefPtrWillBeRawPtr<LocalFrame> protect(frame());
     return ScriptController::callFunction(frame()->document(), function, receiver, argc, info, isolate());
 }
 
-v8::Local<v8::Value> ScriptController::callFunction(ExecutionContext* context, v8::Local<v8::Function> function, v8::Local<v8::Value> receiver, int argc, v8::Local<v8::Value> info[], v8::Isolate* isolate)
+v8::MaybeLocal<v8::Value> ScriptController::callFunction(ExecutionContext* context, v8::Local<v8::Function> function, v8::Local<v8::Value> receiver, int argc, v8::Local<v8::Value> info[], v8::Isolate* isolate)
 {
     TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "FunctionCall", "data", devToolsTraceEventData(isolate, context, function));
     InspectorInstrumentationCookie cookie = InspectorInstrumentation::willCallFunction(context, DevToolsFunctionInfo(function));
-    v8::Local<v8::Value> result = V8ScriptRunner::callFunction(function, context, receiver, argc, info, isolate);
+    v8::MaybeLocal<v8::Value> result = V8ScriptRunner::callFunction(function, context, receiver, argc, info, isolate);
     InspectorInstrumentation::didCallFunction(cookie);
     return result;
 }
@@ -189,7 +189,7 @@ v8::Local<v8::Value> ScriptController::executeScriptAndReturnValue(v8::Local<v8:
     }
 
     InspectorInstrumentation::didEvaluateScript(cookie);
-    TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "UpdateCounters", "data", InspectorUpdateCountersEvent::data());
+    TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "UpdateCounters", TRACE_EVENT_SCOPE_THREAD, "data", InspectorUpdateCountersEvent::data());
 
     return result;
 }
@@ -235,17 +235,17 @@ TextPosition ScriptController::eventHandlerPosition() const
 }
 
 // Create a V8 object with an interceptor of NPObjectPropertyGetter.
-void ScriptController::bindToWindowObject(LocalFrame* frame, const String& key, NPObject* object)
+bool ScriptController::bindToWindowObject(LocalFrame* frame, const String& key, NPObject* object)
 {
     ScriptState* scriptState = ScriptState::forMainWorld(frame);
     if (!scriptState->contextIsValid())
-        return;
+        return false;
 
     ScriptState::Scope scope(scriptState);
     v8::Local<v8::Object> value = createV8ObjectForNPObject(isolate(), object, 0);
 
     // Attach to the global object.
-    scriptState->context()->Global()->Set(v8String(isolate(), key), value);
+    return v8CallBoolean(scriptState->context()->Global()->Set(scriptState->context(), v8String(isolate(), key), value));
 }
 
 void ScriptController::enableEval()
@@ -353,6 +353,8 @@ static NPObject* createScriptObject(LocalFrame* frame, v8::Isolate* isolate)
     ScriptState::Scope scope(scriptState);
     LocalDOMWindow* window = frame->localDOMWindow();
     v8::Local<v8::Value> global = toV8(window, scriptState->context()->Global(), scriptState->isolate());
+    if (global.IsEmpty())
+        return createNoScriptObject();
     ASSERT(global->IsObject());
     return npCreateV8ScriptObject(isolate, 0, v8::Local<v8::Object>::Cast(global), window);
 }
@@ -389,7 +391,7 @@ NPObject* ScriptController::createScriptObjectForPluginElement(HTMLPlugInElement
     ScriptState::Scope scope(scriptState);
     LocalDOMWindow* window = frame()->localDOMWindow();
     v8::Local<v8::Value> v8plugin = toV8(plugin, scriptState->context()->Global(), scriptState->isolate());
-    if (!v8plugin->IsObject())
+    if (v8plugin.IsEmpty() || !v8plugin->IsObject())
         return createNoScriptObject();
 
     return npCreateV8ScriptObject(scriptState->isolate(), 0, v8::Local<v8::Object>::Cast(v8plugin), window);
@@ -406,7 +408,7 @@ void ScriptController::clearWindowProxy()
     clearScriptObjects();
 
     m_windowProxyManager->clearForNavigation();
-    blink::Platform::current()->histogramCustomCounts("WebCore.ScriptController.clearWindowProxy", (currentTime() - start) * 1000, 0, 10000, 50);
+    Platform::current()->histogramCustomCounts("WebCore.ScriptController.clearWindowProxy", (currentTime() - start) * 1000, 0, 10000, 50);
 }
 
 void ScriptController::setCaptureCallStackForUncaughtExceptions(bool value)
@@ -583,12 +585,17 @@ void ScriptController::executeScriptInIsolatedWorld(int worldID, const WillBeHea
         v8::Local<v8::Value> evaluationResult = executeScriptAndReturnValue(scriptState->context(), sources[i]);
         if (evaluationResult.IsEmpty())
             evaluationResult = v8::Local<v8::Value>::New(isolate(), v8::Undefined(isolate()));
-        resultArray->Set(i, evaluationResult);
+        if (!v8CallBoolean(resultArray->Set(scriptState->context(), v8::Integer::New(scriptState->isolate(), i), evaluationResult)))
+            return;
     }
 
     if (results) {
-        for (size_t i = 0; i < resultArray->Length(); ++i)
-            results->append(resultArray->Get(i));
+        for (size_t i = 0; i < resultArray->Length(); ++i) {
+            v8::Local<v8::Value> value;
+            if (!resultArray->Get(scriptState->context(), i).ToLocal(&value))
+                return;
+            results->append(value);
+        }
     }
 }
 

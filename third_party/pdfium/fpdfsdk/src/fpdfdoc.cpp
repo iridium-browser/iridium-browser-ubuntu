@@ -5,13 +5,13 @@
 // Original code copyright 2014 Foxit Software Inc. http://www.foxitsoftware.com
 
 #include "../include/fsdk_define.h"
-#include "../include/fpdfdoc.h"
+#include "../../public/fpdf_doc.h"
 
 static int THISMODULE = 0;
 
 static CPDF_Bookmark FindBookmark(const CPDF_BookmarkTree& tree, CPDF_Bookmark bookmark, const CFX_WideString& title)
 {
-	if (bookmark && bookmark.GetTitle().CompareNoCase(title) == 0) {
+	if (bookmark && bookmark.GetTitle().CompareNoCase(title.c_str()) == 0) {
 		// First check this item
 		return bookmark;
 	}
@@ -173,7 +173,7 @@ DLLEXPORT FPDF_LINK STDCALL FPDFLink_GetLinkAtPoint(FPDF_PAGE page, double x, do
 	CPDF_Document* pDoc = pPage->m_pDocument;
 	CPDF_LinkList* pLinkList = (CPDF_LinkList*)pDoc->GetPrivateData(&THISMODULE);
 	if (!pLinkList) {
-		pLinkList = FX_NEW CPDF_LinkList(pDoc);
+		pLinkList = new CPDF_LinkList(pDoc);
 		pDoc->SetPrivateData(&THISMODULE, pLinkList, ReleaseLinkList);
 	}
 	return pLinkList->GetLinkAtPoint(pPage, (FX_FLOAT)x, (FX_FLOAT)y).GetDict();

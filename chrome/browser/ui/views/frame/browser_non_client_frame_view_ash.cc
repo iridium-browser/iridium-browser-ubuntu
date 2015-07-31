@@ -204,11 +204,6 @@ int BrowserNonClientFrameViewAsh::GetThemeBackgroundXInset() const {
 }
 
 void BrowserNonClientFrameViewAsh::UpdateThrobber(bool running) {
-  // TODO(robliao): Remove ScopedTracker below once crbug.com/461137 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "461137 BrowserNonClientFrameViewAsh::UpdateThrobber"));
-
   if (window_icon_)
     window_icon_->Update();
 }
@@ -409,6 +404,8 @@ void BrowserNonClientFrameViewAsh::
   // UpdateSizeButtonVisibility(false). Due to this a new size is not available
   // until the completion of the animation. Layout in response to the preferred
   // size changes.
+  if (!browser_view()->initialized())
+    return;
   if (child == caption_button_container_ || child == new_avatar_button()) {
     InvalidateLayout();
     frame()->GetRootView()->Layout();

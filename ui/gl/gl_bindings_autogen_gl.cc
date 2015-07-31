@@ -87,6 +87,7 @@ void DriverGL::InitializeStaticBindings() {
   fn.glCompressedTexSubImage2DFn =
       reinterpret_cast<glCompressedTexSubImage2DProc>(
           GetGLProcAddress("glCompressedTexSubImage2D"));
+  fn.glCompressedTexSubImage3DFn = 0;
   fn.glCopyBufferSubDataFn = 0;
   fn.glCopyTexImage2DFn = reinterpret_cast<glCopyTexImage2DProc>(
       GetGLProcAddress("glCopyTexImage2D"));
@@ -245,6 +246,7 @@ void DriverGL::InitializeStaticBindings() {
       reinterpret_cast<glGetUniformivProc>(GetGLProcAddress("glGetUniformiv"));
   fn.glGetUniformLocationFn = reinterpret_cast<glGetUniformLocationProc>(
       GetGLProcAddress("glGetUniformLocation"));
+  fn.glGetUniformuivFn = 0;
   fn.glGetVertexAttribfvFn = reinterpret_cast<glGetVertexAttribfvProc>(
       GetGLProcAddress("glGetVertexAttribfv"));
   fn.glGetVertexAttribivFn = reinterpret_cast<glGetVertexAttribivProc>(
@@ -346,6 +348,7 @@ void DriverGL::InitializeStaticBindings() {
   fn.glTexStorage3DFn = 0;
   fn.glTexSubImage2DFn = reinterpret_cast<glTexSubImage2DProc>(
       GetGLProcAddress("glTexSubImage2D"));
+  fn.glTexSubImage3DFn = 0;
   fn.glTransformFeedbackVaryingsFn = 0;
   fn.glUniform1fFn =
       reinterpret_cast<glUniform1fProc>(GetGLProcAddress("glUniform1f"));
@@ -737,6 +740,14 @@ void DriverGL::InitializeDynamicBindings(GLContext* context) {
     fn.glCompressedTexImage3DFn = reinterpret_cast<glCompressedTexImage3DProc>(
         GetGLProcAddress("glCompressedTexImage3D"));
     DCHECK(fn.glCompressedTexImage3DFn);
+  }
+
+  debug_fn.glCompressedTexSubImage3DFn = 0;
+  if (!ver->is_es || ver->IsAtLeastGLES(3u, 0u)) {
+    fn.glCompressedTexSubImage3DFn =
+        reinterpret_cast<glCompressedTexSubImage3DProc>(
+            GetGLProcAddress("glCompressedTexSubImage3D"));
+    DCHECK(fn.glCompressedTexSubImage3DFn);
   }
 
   debug_fn.glCopyBufferSubDataFn = 0;
@@ -1425,6 +1436,13 @@ void DriverGL::InitializeDynamicBindings(GLContext* context) {
     DCHECK(fn.glGetUniformIndicesFn);
   }
 
+  debug_fn.glGetUniformuivFn = 0;
+  if (ver->IsAtLeastGL(3u, 0u) || ver->IsAtLeastGLES(3u, 0u)) {
+    fn.glGetUniformuivFn = reinterpret_cast<glGetUniformuivProc>(
+        GetGLProcAddress("glGetUniformuiv"));
+    DCHECK(fn.glGetUniformuivFn);
+  }
+
   debug_fn.glInsertEventMarkerEXTFn = 0;
   if (ext.b_GL_EXT_debug_marker) {
     fn.glInsertEventMarkerEXTFn = reinterpret_cast<glInsertEventMarkerEXTProc>(
@@ -1792,6 +1810,13 @@ void DriverGL::InitializeDynamicBindings(GLContext* context) {
     fn.glTexStorage3DFn = reinterpret_cast<glTexStorage3DProc>(
         GetGLProcAddress("glTexStorage3D"));
     DCHECK(fn.glTexStorage3DFn);
+  }
+
+  debug_fn.glTexSubImage3DFn = 0;
+  if (!ver->is_es || ver->IsAtLeastGLES(3u, 0u)) {
+    fn.glTexSubImage3DFn = reinterpret_cast<glTexSubImage3DProc>(
+        GetGLProcAddress("glTexSubImage3D"));
+    DCHECK(fn.glTexSubImage3DFn);
   }
 
   debug_fn.glTransformFeedbackVaryingsFn = 0;
@@ -2395,6 +2420,28 @@ static void GL_BINDING_CALL Debug_glCompressedTexSubImage2D(GLenum target,
                  << imageSize << ", " << static_cast<const void*>(data) << ")");
   g_driver_gl.debug_fn.glCompressedTexSubImage2DFn(
       target, level, xoffset, yoffset, width, height, format, imageSize, data);
+}
+
+static void GL_BINDING_CALL Debug_glCompressedTexSubImage3D(GLenum target,
+                                                            GLint level,
+                                                            GLint xoffset,
+                                                            GLint yoffset,
+                                                            GLint zoffset,
+                                                            GLsizei width,
+                                                            GLsizei height,
+                                                            GLsizei depth,
+                                                            GLenum format,
+                                                            GLsizei imageSize,
+                                                            const void* data) {
+  GL_SERVICE_LOG("glCompressedTexSubImage3D"
+                 << "(" << GLEnums::GetStringEnum(target) << ", " << level
+                 << ", " << xoffset << ", " << yoffset << ", " << zoffset
+                 << ", " << width << ", " << height << ", " << depth << ", "
+                 << GLEnums::GetStringEnum(format) << ", " << imageSize << ", "
+                 << static_cast<const void*>(data) << ")");
+  g_driver_gl.debug_fn.glCompressedTexSubImage3DFn(
+      target, level, xoffset, yoffset, zoffset, width, height, depth, format,
+      imageSize, data);
 }
 
 static void GL_BINDING_CALL Debug_glCopyBufferSubData(GLenum readTarget,
@@ -3477,6 +3524,14 @@ Debug_glGetUniformLocation(GLuint program, const char* name) {
 }
 
 static void GL_BINDING_CALL
+Debug_glGetUniformuiv(GLuint program, GLint location, GLuint* params) {
+  GL_SERVICE_LOG("glGetUniformuiv"
+                 << "(" << program << ", " << location << ", "
+                 << static_cast<const void*>(params) << ")");
+  g_driver_gl.debug_fn.glGetUniformuivFn(program, location, params);
+}
+
+static void GL_BINDING_CALL
 Debug_glGetVertexAttribfv(GLuint index, GLenum pname, GLfloat* params) {
   GL_SERVICE_LOG("glGetVertexAttribfv"
                  << "(" << index << ", " << GLEnums::GetStringEnum(pname)
@@ -4165,6 +4220,29 @@ static void GL_BINDING_CALL Debug_glTexSubImage2D(GLenum target,
                                          height, format, type, pixels);
 }
 
+static void GL_BINDING_CALL Debug_glTexSubImage3D(GLenum target,
+                                                  GLint level,
+                                                  GLint xoffset,
+                                                  GLint yoffset,
+                                                  GLint zoffset,
+                                                  GLsizei width,
+                                                  GLsizei height,
+                                                  GLsizei depth,
+                                                  GLenum format,
+                                                  GLenum type,
+                                                  const void* pixels) {
+  GL_SERVICE_LOG("glTexSubImage3D"
+                 << "(" << GLEnums::GetStringEnum(target) << ", " << level
+                 << ", " << xoffset << ", " << yoffset << ", " << zoffset
+                 << ", " << width << ", " << height << ", " << depth << ", "
+                 << GLEnums::GetStringEnum(format) << ", "
+                 << GLEnums::GetStringEnum(type) << ", "
+                 << static_cast<const void*>(pixels) << ")");
+  g_driver_gl.debug_fn.glTexSubImage3DFn(target, level, xoffset, yoffset,
+                                         zoffset, width, height, depth, format,
+                                         type, pixels);
+}
+
 static void GL_BINDING_CALL
 Debug_glTransformFeedbackVaryings(GLuint program,
                                   GLsizei count,
@@ -4818,6 +4896,10 @@ void DriverGL::InitializeDebugBindings() {
     debug_fn.glCompressedTexSubImage2DFn = fn.glCompressedTexSubImage2DFn;
     fn.glCompressedTexSubImage2DFn = Debug_glCompressedTexSubImage2D;
   }
+  if (!debug_fn.glCompressedTexSubImage3DFn) {
+    debug_fn.glCompressedTexSubImage3DFn = fn.glCompressedTexSubImage3DFn;
+    fn.glCompressedTexSubImage3DFn = Debug_glCompressedTexSubImage3D;
+  }
   if (!debug_fn.glCopyBufferSubDataFn) {
     debug_fn.glCopyBufferSubDataFn = fn.glCopyBufferSubDataFn;
     fn.glCopyBufferSubDataFn = Debug_glCopyBufferSubData;
@@ -5287,6 +5369,10 @@ void DriverGL::InitializeDebugBindings() {
     debug_fn.glGetUniformLocationFn = fn.glGetUniformLocationFn;
     fn.glGetUniformLocationFn = Debug_glGetUniformLocation;
   }
+  if (!debug_fn.glGetUniformuivFn) {
+    debug_fn.glGetUniformuivFn = fn.glGetUniformuivFn;
+    fn.glGetUniformuivFn = Debug_glGetUniformuiv;
+  }
   if (!debug_fn.glGetVertexAttribfvFn) {
     debug_fn.glGetVertexAttribfvFn = fn.glGetVertexAttribfvFn;
     fn.glGetVertexAttribfvFn = Debug_glGetVertexAttribfv;
@@ -5582,6 +5668,10 @@ void DriverGL::InitializeDebugBindings() {
   if (!debug_fn.glTexSubImage2DFn) {
     debug_fn.glTexSubImage2DFn = fn.glTexSubImage2DFn;
     fn.glTexSubImage2DFn = Debug_glTexSubImage2D;
+  }
+  if (!debug_fn.glTexSubImage3DFn) {
+    debug_fn.glTexSubImage3DFn = fn.glTexSubImage3DFn;
+    fn.glTexSubImage3DFn = Debug_glTexSubImage3D;
   }
   if (!debug_fn.glTransformFeedbackVaryingsFn) {
     debug_fn.glTransformFeedbackVaryingsFn = fn.glTransformFeedbackVaryingsFn;
@@ -6077,6 +6167,22 @@ void GLApiBase::glCompressedTexSubImage2DFn(GLenum target,
                                             const void* data) {
   driver_->fn.glCompressedTexSubImage2DFn(
       target, level, xoffset, yoffset, width, height, format, imageSize, data);
+}
+
+void GLApiBase::glCompressedTexSubImage3DFn(GLenum target,
+                                            GLint level,
+                                            GLint xoffset,
+                                            GLint yoffset,
+                                            GLint zoffset,
+                                            GLsizei width,
+                                            GLsizei height,
+                                            GLsizei depth,
+                                            GLenum format,
+                                            GLsizei imageSize,
+                                            const void* data) {
+  driver_->fn.glCompressedTexSubImage3DFn(target, level, xoffset, yoffset,
+                                          zoffset, width, height, depth, format,
+                                          imageSize, data);
 }
 
 void GLApiBase::glCopyBufferSubDataFn(GLenum readTarget,
@@ -6724,6 +6830,12 @@ GLint GLApiBase::glGetUniformLocationFn(GLuint program, const char* name) {
   return driver_->fn.glGetUniformLocationFn(program, name);
 }
 
+void GLApiBase::glGetUniformuivFn(GLuint program,
+                                  GLint location,
+                                  GLuint* params) {
+  driver_->fn.glGetUniformuivFn(program, location, params);
+}
+
 void GLApiBase::glGetVertexAttribfvFn(GLuint index,
                                       GLenum pname,
                                       GLfloat* params) {
@@ -7126,6 +7238,21 @@ void GLApiBase::glTexSubImage2DFn(GLenum target,
                                   const void* pixels) {
   driver_->fn.glTexSubImage2DFn(target, level, xoffset, yoffset, width, height,
                                 format, type, pixels);
+}
+
+void GLApiBase::glTexSubImage3DFn(GLenum target,
+                                  GLint level,
+                                  GLint xoffset,
+                                  GLint yoffset,
+                                  GLint zoffset,
+                                  GLsizei width,
+                                  GLsizei height,
+                                  GLsizei depth,
+                                  GLenum format,
+                                  GLenum type,
+                                  const void* pixels) {
+  driver_->fn.glTexSubImage3DFn(target, level, xoffset, yoffset, zoffset, width,
+                                height, depth, format, type, pixels);
 }
 
 void GLApiBase::glTransformFeedbackVaryingsFn(GLuint program,
@@ -7753,6 +7880,23 @@ void TraceGLApi::glCompressedTexSubImage2DFn(GLenum target,
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glCompressedTexSubImage2D")
   gl_api_->glCompressedTexSubImage2DFn(target, level, xoffset, yoffset, width,
                                        height, format, imageSize, data);
+}
+
+void TraceGLApi::glCompressedTexSubImage3DFn(GLenum target,
+                                             GLint level,
+                                             GLint xoffset,
+                                             GLint yoffset,
+                                             GLint zoffset,
+                                             GLsizei width,
+                                             GLsizei height,
+                                             GLsizei depth,
+                                             GLenum format,
+                                             GLsizei imageSize,
+                                             const void* data) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glCompressedTexSubImage3D")
+  gl_api_->glCompressedTexSubImage3DFn(target, level, xoffset, yoffset, zoffset,
+                                       width, height, depth, format, imageSize,
+                                       data);
 }
 
 void TraceGLApi::glCopyBufferSubDataFn(GLenum readTarget,
@@ -8527,6 +8671,13 @@ GLint TraceGLApi::glGetUniformLocationFn(GLuint program, const char* name) {
   return gl_api_->glGetUniformLocationFn(program, name);
 }
 
+void TraceGLApi::glGetUniformuivFn(GLuint program,
+                                   GLint location,
+                                   GLuint* params) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glGetUniformuiv")
+  gl_api_->glGetUniformuivFn(program, location, params);
+}
+
 void TraceGLApi::glGetVertexAttribfvFn(GLuint index,
                                        GLenum pname,
                                        GLfloat* params) {
@@ -9004,6 +9155,22 @@ void TraceGLApi::glTexSubImage2DFn(GLenum target,
   TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glTexSubImage2D")
   gl_api_->glTexSubImage2DFn(target, level, xoffset, yoffset, width, height,
                              format, type, pixels);
+}
+
+void TraceGLApi::glTexSubImage3DFn(GLenum target,
+                                   GLint level,
+                                   GLint xoffset,
+                                   GLint yoffset,
+                                   GLint zoffset,
+                                   GLsizei width,
+                                   GLsizei height,
+                                   GLsizei depth,
+                                   GLenum format,
+                                   GLenum type,
+                                   const void* pixels) {
+  TRACE_EVENT_BINARY_EFFICIENT0("gpu", "TraceGLAPI::glTexSubImage3D")
+  gl_api_->glTexSubImage3DFn(target, level, xoffset, yoffset, zoffset, width,
+                             height, depth, format, type, pixels);
 }
 
 void TraceGLApi::glTransformFeedbackVaryingsFn(GLuint program,
@@ -9721,6 +9888,23 @@ void NoContextGLApi::glCompressedTexSubImage2DFn(GLenum target,
   NOTREACHED() << "Trying to call glCompressedTexSubImage2D() without current "
                   "GL context";
   LOG(ERROR) << "Trying to call glCompressedTexSubImage2D() without current GL "
+                "context";
+}
+
+void NoContextGLApi::glCompressedTexSubImage3DFn(GLenum target,
+                                                 GLint level,
+                                                 GLint xoffset,
+                                                 GLint yoffset,
+                                                 GLint zoffset,
+                                                 GLsizei width,
+                                                 GLsizei height,
+                                                 GLsizei depth,
+                                                 GLenum format,
+                                                 GLsizei imageSize,
+                                                 const void* data) {
+  NOTREACHED() << "Trying to call glCompressedTexSubImage3D() without current "
+                  "GL context";
+  LOG(ERROR) << "Trying to call glCompressedTexSubImage3D() without current GL "
                 "context";
 }
 
@@ -10624,6 +10808,13 @@ GLint NoContextGLApi::glGetUniformLocationFn(GLuint program, const char* name) {
   return 0;
 }
 
+void NoContextGLApi::glGetUniformuivFn(GLuint program,
+                                       GLint location,
+                                       GLuint* params) {
+  NOTREACHED() << "Trying to call glGetUniformuiv() without current GL context";
+  LOG(ERROR) << "Trying to call glGetUniformuiv() without current GL context";
+}
+
 void NoContextGLApi::glGetVertexAttribfvFn(GLuint index,
                                            GLenum pname,
                                            GLfloat* params) {
@@ -11184,6 +11375,21 @@ void NoContextGLApi::glTexSubImage2DFn(GLenum target,
                                        const void* pixels) {
   NOTREACHED() << "Trying to call glTexSubImage2D() without current GL context";
   LOG(ERROR) << "Trying to call glTexSubImage2D() without current GL context";
+}
+
+void NoContextGLApi::glTexSubImage3DFn(GLenum target,
+                                       GLint level,
+                                       GLint xoffset,
+                                       GLint yoffset,
+                                       GLint zoffset,
+                                       GLsizei width,
+                                       GLsizei height,
+                                       GLsizei depth,
+                                       GLenum format,
+                                       GLenum type,
+                                       const void* pixels) {
+  NOTREACHED() << "Trying to call glTexSubImage3D() without current GL context";
+  LOG(ERROR) << "Trying to call glTexSubImage3D() without current GL context";
 }
 
 void NoContextGLApi::glTransformFeedbackVaryingsFn(GLuint program,

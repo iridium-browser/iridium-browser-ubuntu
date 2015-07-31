@@ -7,6 +7,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/time/time.h"
+#include "content/browser/frame_host/navigator_delegate.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/navigation_controller.h"
 #include "ui/base/window_open_disposition.h"
@@ -26,7 +27,6 @@ class FrameTreeNode;
 class NavigationControllerImpl;
 class NavigationEntryImpl;
 class NavigationRequest;
-class NavigatorDelegate;
 class RenderFrameHostImpl;
 class ResourceRequestBody;
 class StreamHandle;
@@ -43,6 +43,9 @@ struct ResourceResponse;
 // from WebContentsImpl to this interface.
 class CONTENT_EXPORT Navigator : public base::RefCounted<Navigator> {
  public:
+  // Returns the delegate of this Navigator.
+  virtual NavigatorDelegate* GetDelegate();
+
   // Returns the NavigationController associated with this Navigator.
   virtual NavigationController* GetController();
 
@@ -87,7 +90,6 @@ class CONTENT_EXPORT Navigator : public base::RefCounted<Navigator> {
   virtual bool NavigateToPendingEntry(
       FrameTreeNode* frame_tree_node,
       NavigationController::ReloadType reload_type);
-
 
   // Navigation requests -------------------------------------------------------
 
@@ -141,6 +143,15 @@ class CONTENT_EXPORT Navigator : public base::RefCounted<Navigator> {
   virtual void CommitNavigation(FrameTreeNode* frame_tree_node,
                                 ResourceResponse* response,
                                 scoped_ptr<StreamHandle> body);
+
+  // PlzNavigate
+  // Called when a NavigationRequest for |frame_tree_node| failed. An
+  // appropriate RenderFrameHost should be selected and asked to show an error
+  // page. |has_stale_copy_in_cache| is true if there is a stale copy of the
+  // unreachable page in cache.
+  virtual void FailedNavigation(FrameTreeNode* frame_tree_node,
+                                bool has_stale_copy_in_cache,
+                                int error_code) {}
 
   // PlzNavigate
   // Cancel a NavigationRequest for |frame_tree_node|. Called when

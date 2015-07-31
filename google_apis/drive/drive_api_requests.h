@@ -66,6 +66,21 @@ class Property {
 // List of properties for a single file or a directory.
 typedef std::vector<Property> Properties;
 
+// Child response embedded in multipart parent response.
+struct MultipartHttpResponse {
+  MultipartHttpResponse();
+  ~MultipartHttpResponse();
+  DriveApiErrorCode code;
+  std::string body;
+};
+
+// Splits multipart |response| into |parts|. Each part must be HTTP sub-response
+// of drive batch request. |content_type| is a value of Content-Type response
+// header. Returns true on succcess.
+bool ParseMultipartResponse(const std::string& content_type,
+                            const std::string& response,
+                            std::vector<MultipartHttpResponse>* parts);
+
 //============================ DriveApiPartialFieldRequest ====================
 
 // This is base class of the Drive API related requests. All Drive API requests
@@ -113,11 +128,11 @@ class DriveApiDataRequest : public DriveApiPartialFieldRequest {
         weak_ptr_factory_(this) {
     DCHECK(!callback_.is_null());
   }
-  virtual ~DriveApiDataRequest() {}
+  ~DriveApiDataRequest() override {}
 
  protected:
   // UrlFetchRequestBase overrides.
-  virtual void ProcessURLFetchResults(const net::URLFetcher* source) override {
+  void ProcessURLFetchResults(const net::URLFetcher* source) override {
     DriveApiErrorCode error = GetErrorCode();
     switch (error) {
       case HTTP_SUCCESS:
@@ -136,7 +151,7 @@ class DriveApiDataRequest : public DriveApiPartialFieldRequest {
     }
   }
 
-  virtual void RunCallbackOnPrematureFailure(DriveApiErrorCode error) override {
+  void RunCallbackOnPrematureFailure(DriveApiErrorCode error) override {
     callback_.Run(error, scoped_ptr<DataType>());
   }
 
@@ -953,28 +968,28 @@ class GetUploadStatusRequest : public GetUploadStatusRequestBase {
   DISALLOW_COPY_AND_ASSIGN(GetUploadStatusRequest);
 };
 
-//======================= MultipartUploadNewFileRequest =======================
+//======================= MultipartUploadNewFileDelegate =======================
 
 // This class performs the request for initiating the upload of a new file.
-class MultipartUploadNewFileRequest : public MultipartUploadRequestBase {
+class MultipartUploadNewFileDelegate : public MultipartUploadRequestBase {
  public:
   // |parent_resource_id| should be the resource id of the parent directory.
   // |title| should be set.
   // See also the comments of MultipartUploadRequestBase for more details
   // about the other parameters.
-  MultipartUploadNewFileRequest(RequestSender* sender,
-                                const std::string& title,
-                                const std::string& parent_resource_id,
-                                const std::string& content_type,
-                                int64 content_length,
-                                const base::Time& modified_date,
-                                const base::Time& last_viewed_by_me_date,
-                                const base::FilePath& local_file_path,
-                                const Properties& properties,
-                                const DriveApiUrlGenerator& url_generator,
-                                const FileResourceCallback& callback,
-                                const ProgressCallback& progress_callback);
-  ~MultipartUploadNewFileRequest() override;
+  MultipartUploadNewFileDelegate(base::SequencedTaskRunner* task_runner,
+                                 const std::string& title,
+                                 const std::string& parent_resource_id,
+                                 const std::string& content_type,
+                                 int64 content_length,
+                                 const base::Time& modified_date,
+                                 const base::Time& last_viewed_by_me_date,
+                                 const base::FilePath& local_file_path,
+                                 const Properties& properties,
+                                 const DriveApiUrlGenerator& url_generator,
+                                 const FileResourceCallback& callback,
+                                 const ProgressCallback& progress_callback);
+  ~MultipartUploadNewFileDelegate() override;
 
  protected:
   // UrlFetchRequestBase overrides.
@@ -985,33 +1000,34 @@ class MultipartUploadNewFileRequest : public MultipartUploadRequestBase {
   const bool has_modified_date_;
   const DriveApiUrlGenerator url_generator_;
 
-  DISALLOW_COPY_AND_ASSIGN(MultipartUploadNewFileRequest);
+  DISALLOW_COPY_AND_ASSIGN(MultipartUploadNewFileDelegate);
 };
 
-//======================= MultipartUploadExistingFileRequest ===================
+//====================== MultipartUploadExistingFileDelegate ===================
 
 // This class performs the request for initiating the upload of a new file.
-class MultipartUploadExistingFileRequest : public MultipartUploadRequestBase {
+class MultipartUploadExistingFileDelegate : public MultipartUploadRequestBase {
  public:
   // |parent_resource_id| should be the resource id of the parent directory.
   // |title| should be set.
   // See also the comments of MultipartUploadRequestBase for more details
   // about the other parameters.
-  MultipartUploadExistingFileRequest(RequestSender* sender,
-                                     const std::string& title,
-                                     const std::string& resource_id,
-                                     const std::string& parent_resource_id,
-                                     const std::string& content_type,
-                                     int64 content_length,
-                                     const base::Time& modified_date,
-                                     const base::Time& last_viewed_by_me_date,
-                                     const base::FilePath& local_file_path,
-                                     const std::string& etag,
-                                     const Properties& properties,
-                                     const DriveApiUrlGenerator& url_generator,
-                                     const FileResourceCallback& callback,
-                                     const ProgressCallback& progress_callback);
-  ~MultipartUploadExistingFileRequest() override;
+  MultipartUploadExistingFileDelegate(
+      base::SequencedTaskRunner* task_runner,
+      const std::string& title,
+      const std::string& resource_id,
+      const std::string& parent_resource_id,
+      const std::string& content_type,
+      int64 content_length,
+      const base::Time& modified_date,
+      const base::Time& last_viewed_by_me_date,
+      const base::FilePath& local_file_path,
+      const std::string& etag,
+      const Properties& properties,
+      const DriveApiUrlGenerator& url_generator,
+      const FileResourceCallback& callback,
+      const ProgressCallback& progress_callback);
+  ~MultipartUploadExistingFileDelegate() override;
 
  protected:
   // UrlFetchRequestBase overrides.
@@ -1025,7 +1041,7 @@ class MultipartUploadExistingFileRequest : public MultipartUploadRequestBase {
   const bool has_modified_date_;
   const DriveApiUrlGenerator url_generator_;
 
-  DISALLOW_COPY_AND_ASSIGN(MultipartUploadExistingFileRequest);
+  DISALLOW_COPY_AND_ASSIGN(MultipartUploadExistingFileDelegate);
 };
 
 //========================== DownloadFileRequest ==========================
@@ -1094,13 +1110,50 @@ class PermissionsInsertRequest : public EntryActionRequest {
   DISALLOW_COPY_AND_ASSIGN(PermissionsInsertRequest);
 };
 
+//======================= SingleBatchableDelegateRequest =======================
+
+// Request that is operated by single BatchableDelegate.
+class SingleBatchableDelegateRequest : public UrlFetchRequestBase {
+ public:
+  // The instance takes ownership of |delegate|.
+  SingleBatchableDelegateRequest(RequestSender* sender,
+                                 BatchableDelegate* delegate);
+  ~SingleBatchableDelegateRequest() override;
+
+ private:
+  GURL GetURL() const override;
+  net::URLFetcher::RequestType GetRequestType() const override;
+  std::vector<std::string> GetExtraRequestHeaders() const override;
+  void Prepare(const PrepareCallback& callback) override;
+  bool GetContentData(std::string* upload_content_type,
+                      std::string* upload_content) override;
+  void RunCallbackOnPrematureFailure(DriveApiErrorCode code) override;
+  void ProcessURLFetchResults(const net::URLFetcher* source) override;
+  void OnURLFetchUploadProgress(const net::URLFetcher* source,
+                                int64 current,
+                                int64 total) override;
+  scoped_ptr<BatchableDelegate> delegate_;
+
+  // Note: This should remain the last member so it'll be destroyed and
+  // invalidate its weak pointers before any other members are destroyed.
+  base::WeakPtrFactory<SingleBatchableDelegateRequest> weak_ptr_factory_;
+
+  DISALLOW_COPY_AND_ASSIGN(SingleBatchableDelegateRequest);
+};
+
 //========================== BatchUploadRequest ==========================
 
-struct BatchUploadChildEntry {
-  explicit BatchUploadChildEntry(UrlFetchRequestBase* request)
-      : request(request), prepared(false) {}
-  UrlFetchRequestBase* request;
+class BatchUploadChildEntry {
+ public:
+  explicit BatchUploadChildEntry(BatchableDelegate* request);
+  ~BatchUploadChildEntry();
+  scoped_ptr<BatchableDelegate> request;
   bool prepared;
+  int64 data_offset;
+  int64 data_size;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(BatchUploadChildEntry);
 };
 
 class BatchUploadRequest : public UrlFetchRequestBase {
@@ -1109,30 +1162,73 @@ class BatchUploadRequest : public UrlFetchRequestBase {
                      const DriveApiUrlGenerator& url_generator);
   ~BatchUploadRequest() override;
 
-  // Adds request to the batch request.
-  void AddRequest(UrlFetchRequestBase* request);
+  // Adds request to the batch request. The instance takes ownership of
+  // |request|.
+  void AddRequest(BatchableDelegate* request);
 
   // Completes building batch upload request, and starts to send the request to
-  // server.
+  // server. Must add at least one request before calling |Commit|.
   void Commit();
 
   // Obtains weak pointer of this.
   base::WeakPtr<BatchUploadRequest> GetWeakPtrAsBatchUploadRequest();
 
+  // Set boundary. Only tests can use this method.
+  void SetBoundaryForTesting(const std::string& boundary);
+
   // Obtains reference to RequestSender that owns the request.
   RequestSender* sender() const { return sender_; }
-  DriveApiUrlGenerator url_generator() const { return url_generator_; }
 
-  // Returns URL of this request.
+  // Obtains URLGenerator.
+  const DriveApiUrlGenerator& url_generator() const { return url_generator_; }
+
+  // UrlFetchRequestBase overrides.
+  void Prepare(const PrepareCallback& callback) override;
+  void Cancel() override;
   GURL GetURL() const override;
-
+  net::URLFetcher::RequestType GetRequestType() const override;
+  std::vector<std::string> GetExtraRequestHeaders() const override;
+  bool GetContentData(std::string* upload_content_type,
+                      std::string* upload_content) override;
   void ProcessURLFetchResults(const net::URLFetcher* source) override;
   void RunCallbackOnPrematureFailure(DriveApiErrorCode code) override;
 
+  // content::UrlFetcherDelegate overrides.
+  void OnURLFetchUploadProgress(const net::URLFetcher* source,
+                                int64 current,
+                                int64 total) override;
+
  private:
+  typedef void* RequestID;
+  // Obtains corresponding child entry of |request_id|. Returns NULL if the
+  // entry is not found.
+  ScopedVector<BatchUploadChildEntry>::iterator GetChildEntry(
+      RequestID request_id);
+
+  // Called after child requests' |Prepare| method.
+  void OnChildRequestPrepared(RequestID request_id, DriveApiErrorCode result);
+
+  // Complete |Prepare| if possible.
+  void MayCompletePrepare();
+
+  // Process result for each child.
+  void ProcessURLFetchResultsForChild(RequestID id, const std::string& body);
+
   RequestSender* const sender_;
   const DriveApiUrlGenerator url_generator_;
-  std::vector<BatchUploadChildEntry> child_requests_;
+  ScopedVector<BatchUploadChildEntry> child_requests_;
+
+  PrepareCallback prepare_callback_;
+  bool committed_;
+
+  // Boundary of multipart body.
+  std::string boundary_;
+
+  // Multipart of child requests.
+  ContentTypeAndData upload_content_;
+
+  // Last reported progress value.
+  int64 last_progress_value_;
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.

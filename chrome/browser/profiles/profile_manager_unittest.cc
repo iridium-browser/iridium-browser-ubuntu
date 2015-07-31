@@ -148,7 +148,7 @@ class ProfileManagerTest : public testing::Test {
     size_t num_profiles = cache.GetNumberOfProfiles();
     base::FilePath path = temp_dir_.path().AppendASCII(path_suffix);
     cache.AddProfileToCache(path, profile_name,
-                            base::string16(), 0, std::string());
+                            std::string(), base::string16(), 0, std::string());
     EXPECT_EQ(num_profiles + 1, cache.GetNumberOfProfiles());
     return profile_manager->GetProfile(path);
   }
@@ -476,13 +476,13 @@ TEST_F(ProfileManagerTest, AutoloadProfilesWithBackgroundApps) {
 
   EXPECT_EQ(0u, cache.GetNumberOfProfiles());
   cache.AddProfileToCache(cache.GetUserDataDir().AppendASCII("path_1"),
-                          ASCIIToUTF16("name_1"), base::string16(), 0,
+                          ASCIIToUTF16("name_1"), "12345", base::string16(), 0,
                           std::string());
   cache.AddProfileToCache(cache.GetUserDataDir().AppendASCII("path_2"),
-                          ASCIIToUTF16("name_2"), base::string16(), 0,
+                          ASCIIToUTF16("name_2"), "23456", base::string16(), 0,
                           std::string());
   cache.AddProfileToCache(cache.GetUserDataDir().AppendASCII("path_3"),
-                          ASCIIToUTF16("name_3"), base::string16(), 0,
+                          ASCIIToUTF16("name_3"), "34567", base::string16(), 0,
                           std::string());
   cache.SetBackgroundStatusOfProfileAtIndex(0, true);
   cache.SetBackgroundStatusOfProfileAtIndex(2, true);
@@ -501,10 +501,10 @@ TEST_F(ProfileManagerTest, DoNotAutoloadProfilesIfBackgroundModeOff) {
 
   EXPECT_EQ(0u, cache.GetNumberOfProfiles());
   cache.AddProfileToCache(cache.GetUserDataDir().AppendASCII("path_1"),
-                          ASCIIToUTF16("name_1"), base::string16(), 0,
+                          ASCIIToUTF16("name_1"), "12345", base::string16(), 0,
                           std::string());
   cache.AddProfileToCache(cache.GetUserDataDir().AppendASCII("path_2"),
-                          ASCIIToUTF16("name_2"), base::string16(), 0,
+                          ASCIIToUTF16("name_2"), "23456", base::string16(), 0,
                           std::string());
   cache.SetBackgroundStatusOfProfileAtIndex(0, false);
   cache.SetBackgroundStatusOfProfileAtIndex(1, true);
@@ -876,6 +876,53 @@ TEST_F(ProfileManagerTest, EphemeralProfilesDontEndUpAsLastOpenedAtShutdown) {
   EXPECT_EQ(normal_profile, last_opened_profiles[0]);
 }
 
+TEST_F(ProfileManagerTest, CleanUpEphemeralProfiles) {
+  // Create two profiles, one of them ephemeral.
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+  ProfileInfoCache& cache = profile_manager->GetProfileInfoCache();
+  ASSERT_EQ(0u, cache.GetNumberOfProfiles());
+
+  const std::string profile_name1 = "Homer";
+  base::FilePath path1 = temp_dir_.path().AppendASCII(profile_name1);
+  cache.AddProfileToCache(path1, base::UTF8ToUTF16(profile_name1),
+                          std::string(), base::UTF8ToUTF16(profile_name1), 0,
+                          std::string());
+  cache.SetProfileIsEphemeralAtIndex(0, true);
+  ASSERT_TRUE(base::CreateDirectory(path1));
+
+  const std::string profile_name2 = "Marge";
+  base::FilePath path2 = temp_dir_.path().AppendASCII(profile_name2);
+  cache.AddProfileToCache(path2, base::UTF8ToUTF16(profile_name2),
+                          std::string(), base::UTF8ToUTF16(profile_name2), 0,
+                          std::string());
+  ASSERT_EQ(2u, cache.GetNumberOfProfiles());
+  ASSERT_TRUE(base::CreateDirectory(path2));
+
+  // Set the active profile.
+  PrefService* local_state = g_browser_process->local_state();
+  local_state->SetString(prefs::kProfileLastUsed, profile_name1);
+
+  profile_manager->CleanUpEphemeralProfiles();
+  base::RunLoop().RunUntilIdle();
+
+  // The ephemeral profile should be deleted, and the last used profile set to
+  // the other one.
+  EXPECT_FALSE(base::DirectoryExists(path1));
+  EXPECT_TRUE(base::DirectoryExists(path2));
+  EXPECT_EQ(profile_name2, local_state->GetString(prefs::kProfileLastUsed));
+  ASSERT_EQ(1u, cache.GetNumberOfProfiles());
+
+  // Mark the remaining profile ephemeral and clean up.
+  cache.SetProfileIsEphemeralAtIndex(0, true);
+  profile_manager->CleanUpEphemeralProfiles();
+  base::RunLoop().RunUntilIdle();
+
+  // The profile should be deleted, and the last used profile set to a new one.
+  EXPECT_FALSE(base::DirectoryExists(path2));
+  EXPECT_EQ(0u, cache.GetNumberOfProfiles());
+  EXPECT_EQ("Profile 1", local_state->GetString(prefs::kProfileLastUsed));
+}
+
 TEST_F(ProfileManagerTest, ActiveProfileDeleted) {
   ProfileManager* profile_manager = g_browser_process->profile_manager();
   ASSERT_TRUE(profile_manager);
@@ -1112,14 +1159,14 @@ TEST_F(ProfileManagerTest, ProfileDisplayNamePreservesSignedInName) {
 
   // For a signed in profile with a default name we still display
   // IDS_SINGLE_PROFILE_DISPLAY_NAME.
-  cache.SetUserNameOfProfileAtIndex(0, ASCIIToUTF16("user@gmail.com"));
+  cache.SetAuthInfoOfProfileAtIndex(0, "12345", ASCIIToUTF16("user@gmail.com"));
   EXPECT_EQ(profile_name1, cache.GetNameOfProfileAtIndex(0));
   EXPECT_EQ(default_profile_name,
             profiles::GetAvatarNameForProfile(profile1->GetPath()));
 
   // For a signed in profile with a non-default Gaia given name we display the
   // Gaia given name.
-  cache.SetUserNameOfProfileAtIndex(0, ASCIIToUTF16("user@gmail.com"));
+  cache.SetAuthInfoOfProfileAtIndex(0, "12345", ASCIIToUTF16("user@gmail.com"));
   const base::string16 gaia_given_name(ASCIIToUTF16("given name"));
   cache.SetGAIAGivenNameOfProfileAtIndex(0, gaia_given_name);
   EXPECT_EQ(gaia_given_name, cache.GetNameOfProfileAtIndex(0));
@@ -1173,18 +1220,18 @@ TEST_F(ProfileManagerTest, ProfileDisplayNameIsEmailIfDefaultName) {
   const base::string16 email3(ASCIIToUTF16("user3@gmail.com"));
 
   int index = cache.GetIndexOfProfileWithPath(profile1->GetPath());
-  cache.SetUserNameOfProfileAtIndex(index, email1);
+  cache.SetAuthInfoOfProfileAtIndex(index, "12345", email1);
   cache.SetGAIAGivenNameOfProfileAtIndex(index, base::string16());
   cache.SetGAIANameOfProfileAtIndex(index, base::string16());
 
   // This may resort the cache, so be extra cautious to use the right profile.
   index = cache.GetIndexOfProfileWithPath(profile2->GetPath());
-  cache.SetUserNameOfProfileAtIndex(index, email2);
+  cache.SetAuthInfoOfProfileAtIndex(index, "23456", email2);
   cache.SetGAIAGivenNameOfProfileAtIndex(index, base::string16());
   cache.SetGAIANameOfProfileAtIndex(index, base::string16());
 
   index = cache.GetIndexOfProfileWithPath(profile3->GetPath());
-  cache.SetUserNameOfProfileAtIndex(index, email3);
+  cache.SetAuthInfoOfProfileAtIndex(index, "34567", email3);
   cache.SetGAIAGivenNameOfProfileAtIndex(index, base::string16());
   cache.SetGAIANameOfProfileAtIndex(index, base::string16());
 
@@ -1227,7 +1274,7 @@ TEST_F(ProfileManagerTest, ActiveProfileDeletedNeedsToLoadNextProfile) {
 
   // Track the profile, but don't load it.
   ProfileInfoCache& cache = profile_manager->GetProfileInfoCache();
-  cache.AddProfileToCache(dest_path2, ASCIIToUTF16(profile_name2),
+  cache.AddProfileToCache(dest_path2, ASCIIToUTF16(profile_name2), "23456",
                           base::string16(), 0, std::string());
   base::RunLoop().RunUntilIdle();
 
@@ -1278,9 +1325,11 @@ TEST_F(ProfileManagerTest, ActiveProfileDeletedNextProfileDeletedToo) {
   // and not randomly by the avatar name.
   ProfileInfoCache& cache = profile_manager->GetProfileInfoCache();
   cache.AddProfileToCache(dest_path2, ASCIIToUTF16(profile_name2),
-                          ASCIIToUTF16(profile_name2), 1, std::string());
+                          "23456", ASCIIToUTF16(profile_name2), 1,
+                          std::string());
   cache.AddProfileToCache(dest_path3, ASCIIToUTF16(profile_name3),
-                          ASCIIToUTF16(profile_name3), 2, std::string());
+                          "34567", ASCIIToUTF16(profile_name3), 2,
+                          std::string());
 
   base::RunLoop().RunUntilIdle();
 

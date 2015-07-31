@@ -9,6 +9,7 @@
 #include "base/macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/trace_event/trace_event.h"
+#include "content/browser/tracing/file_tracing_provider_impl.h"
 #include "content/browser/tracing/trace_message_filter.h"
 #include "content/browser/tracing/tracing_ui.h"
 #include "content/common/child_process_messages.h"
@@ -35,127 +36,6 @@ namespace {
 base::LazyInstance<TracingControllerImpl>::Leaky g_controller =
     LAZY_INSTANCE_INITIALIZER;
 
-class FileTraceDataSink : public TracingController::TraceDataSink {
- public:
-  explicit FileTraceDataSink(const base::FilePath& trace_file_path,
-                             const base::Closure& callback)
-      : file_path_(trace_file_path),
-        completion_callback_(callback),
-        file_(NULL) {}
-
-  void AddTraceChunk(const std::string& chunk) override {
-    std::string tmp = chunk;
-    scoped_refptr<base::RefCountedString> chunk_ptr =
-        base::RefCountedString::TakeString(&tmp);
-    BrowserThread::PostTask(
-        BrowserThread::FILE,
-        FROM_HERE,
-        base::Bind(
-            &FileTraceDataSink::AddTraceChunkOnFileThread, this, chunk_ptr));
-  }
-  void SetSystemTrace(const std::string& data) override {
-    system_trace_ = data;
-  }
-  void Close() override {
-    BrowserThread::PostTask(
-        BrowserThread::FILE,
-        FROM_HERE,
-        base::Bind(&FileTraceDataSink::CloseOnFileThread, this));
-  }
-
- private:
-  ~FileTraceDataSink() override { DCHECK(file_ == NULL); }
-
-  void AddTraceChunkOnFileThread(
-      const scoped_refptr<base::RefCountedString> chunk) {
-    if (file_ != NULL)
-      fputc(',', file_);
-    else if (!OpenFileIfNeededOnFileThread())
-      return;
-    ignore_result(fwrite(chunk->data().c_str(), strlen(chunk->data().c_str()),
-        1, file_));
-  }
-
-  bool OpenFileIfNeededOnFileThread() {
-    if (file_ != NULL)
-      return true;
-    file_ = base::OpenFile(file_path_, "w");
-    if (file_ == NULL) {
-      LOG(ERROR) << "Failed to open " << file_path_.value();
-      return false;
-    }
-    const char preamble[] = "{\"traceEvents\": [";
-    ignore_result(fwrite(preamble, strlen(preamble), 1, file_));
-    return true;
-  }
-
-  void CloseOnFileThread() {
-    if (OpenFileIfNeededOnFileThread()) {
-      fputc(']', file_);
-      if (!system_trace_.empty()) {
-        const char systemTraceEvents[] = ",\"systemTraceEvents\": ";
-        ignore_result(fwrite(systemTraceEvents, strlen(systemTraceEvents),
-            1, file_));
-        ignore_result(fwrite(system_trace_.c_str(),
-            strlen(system_trace_.c_str()), 1, file_));
-      }
-      fputc('}', file_);
-      base::CloseFile(file_);
-      file_ = NULL;
-    }
-    BrowserThread::PostTask(
-        BrowserThread::UI,
-        FROM_HERE,
-        base::Bind(&FileTraceDataSink::FinalizeOnUIThread, this));
-  }
-
-  void FinalizeOnUIThread() { completion_callback_.Run(); }
-
-  base::FilePath file_path_;
-  base::Closure completion_callback_;
-  FILE* file_;
-  std::string system_trace_;
-
-  DISALLOW_COPY_AND_ASSIGN(FileTraceDataSink);
-};
-
-class StringTraceDataSink : public TracingController::TraceDataSink {
- public:
-  typedef base::Callback<void(base::RefCountedString*)> CompletionCallback;
-
-  explicit StringTraceDataSink(CompletionCallback callback)
-      : completion_callback_(callback) {}
-
-  // TracingController::TraceDataSink implementation
-  void AddTraceChunk(const std::string& chunk) override {
-    if (!trace_.empty())
-      trace_ += ",";
-    trace_ += chunk;
-  }
-  void SetSystemTrace(const std::string& data) override {
-    system_trace_ = data;
-  }
-  void Close() override {
-    std::string result = "{\"traceEvents\":[" + trace_ + "]";
-    if (!system_trace_.empty())
-      result += ",\"systemTraceEvents\": " + system_trace_;
-    result += "}";
-
-    scoped_refptr<base::RefCountedString> str =
-        base::RefCountedString::TakeString(&result);
-    completion_callback_.Run(str.get());
-  }
-
- private:
-  ~StringTraceDataSink() override {}
-
-  std::string trace_;
-  std::string system_trace_;
-  CompletionCallback completion_callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(StringTraceDataSink);
-};
-
 }  // namespace
 
 TracingController* TracingController::GetInstance() {
@@ -168,6 +48,8 @@ TracingControllerImpl::TracingControllerImpl()
       pending_trace_log_status_ack_count_(0),
       maximum_trace_buffer_usage_(0),
       approximate_event_count_(0),
+      pending_memory_dump_ack_count_(0),
+      failed_memory_dump_count_(0),
     // Tracing may have been enabled by ContentMainRunner if kTraceStartup
     // is specified in command line.
 #if defined(OS_CHROMEOS) || defined(OS_WIN)
@@ -176,6 +58,9 @@ TracingControllerImpl::TracingControllerImpl()
       is_recording_(TraceLog::GetInstance()->IsEnabled()),
       is_monitoring_(false) {
   base::trace_event::MemoryDumpManager::GetInstance()->SetDelegate(this);
+
+  // Deliberately leaked, like this class.
+  base::FileTracing::SetProvider(new FileTracingProviderImpl);
 }
 
 TracingControllerImpl::~TracingControllerImpl() {
@@ -425,18 +310,6 @@ bool TracingControllerImpl::DisableMonitoring(
   return true;
 }
 
-scoped_refptr<TracingController::TraceDataSink>
-TracingController::CreateStringSink(
-    const base::Callback<void(base::RefCountedString*)>& callback) {
-  return new StringTraceDataSink(callback);
-}
-
-scoped_refptr<TracingController::TraceDataSink>
-TracingController::CreateFileSink(const base::FilePath& file_path,
-                                  const base::Closure& callback) {
-  return new FileTraceDataSink(file_path, callback);
-}
-
 void TracingControllerImpl::OnDisableMonitoringDone(
     const DisableMonitoringDoneCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
@@ -649,7 +522,18 @@ void TracingControllerImpl::RemoveTraceMessageFilter(
                      base::trace_event::TraceLogStatus()));
     }
   }
-
+  if (pending_memory_dump_ack_count_ > 0) {
+    TraceMessageFilterSet::const_iterator it =
+        pending_memory_dump_filters_.find(trace_message_filter);
+    if (it != pending_memory_dump_filters_.end()) {
+      BrowserThread::PostTask(
+          BrowserThread::UI, FROM_HERE,
+          base::Bind(&TracingControllerImpl::OnProcessMemoryDumpResponse,
+                     base::Unretained(this),
+                     make_scoped_refptr(trace_message_filter),
+                     pending_memory_dump_guid_, false /* success */));
+    }
+  }
   trace_message_filters_.erase(trace_message_filter);
 }
 
@@ -890,11 +774,42 @@ void TracingControllerImpl::RequestGlobalMemoryDump(
                    base::Unretained(this), args, callback));
     return;
   }
-  // TODO(primiano): send a local dump request to each of the child processes
-  // and do the bookkeeping to keep track of the outstanding requests.
-  // Also, at this point, this should check for collisions and bail out if a
-  // global dump is requested while another is already in progress.
-  NOTIMPLEMENTED();
+  // Abort if another dump is already in progress.
+  if (pending_memory_dump_guid_) {
+    DVLOG(1) << "Requested memory dump " << args.dump_guid
+             << " while waiting for " << pending_memory_dump_guid_;
+    if (!callback.is_null())
+      callback.Run(args.dump_guid, false /* success */);
+    return;
+  }
+
+  // Count myself (local trace) in pending_memory_dump_ack_count_, acked by
+  // OnBrowserProcessMemoryDumpDone().
+  pending_memory_dump_ack_count_ = trace_message_filters_.size() + 1;
+  pending_memory_dump_filters_.clear();
+  failed_memory_dump_count_ = 0;
+
+  MemoryDumpManagerDelegate::CreateProcessDump(
+      args, base::Bind(&TracingControllerImpl::OnBrowserProcessMemoryDumpDone,
+                       base::Unretained(this)));
+
+  // If there are no child processes we are just done.
+  if (pending_memory_dump_ack_count_ == 1) {
+    if (!callback.is_null())
+      callback.Run(args.dump_guid, true /* success */);
+    return;
+  }
+
+  pending_memory_dump_guid_ = args.dump_guid;
+  pending_memory_dump_callback_ = callback;
+  pending_memory_dump_filters_ = trace_message_filters_;
+
+  for (const scoped_refptr<TraceMessageFilter>& tmf : trace_message_filters_)
+    tmf->SendProcessMemoryDumpRequest(args);
+}
+
+bool TracingControllerImpl::IsCoordinatorProcess() const {
+  return true;
 }
 
 void TracingControllerImpl::OnProcessMemoryDumpResponse(
@@ -910,11 +825,46 @@ void TracingControllerImpl::OnProcessMemoryDumpResponse(
                    success));
     return;
   }
-  // TODO(primiano): update the bookkeeping structs and, if this was the
-  // response from the last pending child, fire the completion callback, which
-  // in turn will cause a GlobalMemoryDumpResponse message to be sent back to
-  // the child, if this global dump was NOT initiated by the browser.
-  NOTIMPLEMENTED();
+
+  TraceMessageFilterSet::iterator it =
+      pending_memory_dump_filters_.find(trace_message_filter);
+
+  if (pending_memory_dump_guid_ != dump_guid ||
+      it == pending_memory_dump_filters_.end()) {
+    DLOG(WARNING) << "Received unexpected memory dump response: " << dump_guid;
+    return;
+  }
+
+  DCHECK_GT(pending_memory_dump_ack_count_, 0);
+  --pending_memory_dump_ack_count_;
+  pending_memory_dump_filters_.erase(it);
+  if (!success) {
+    ++failed_memory_dump_count_;
+    DLOG(WARNING) << "Global memory dump failed because of NACK from child "
+                  << trace_message_filter->peer_pid();
+  }
+  FinalizeGlobalMemoryDumpIfAllProcessesReplied();
+}
+
+void TracingControllerImpl::OnBrowserProcessMemoryDumpDone(uint64 dump_guid,
+                                                           bool success) {
+  DCHECK_GT(pending_memory_dump_ack_count_, 0);
+  --pending_memory_dump_ack_count_;
+  FinalizeGlobalMemoryDumpIfAllProcessesReplied();
+}
+
+void TracingControllerImpl::FinalizeGlobalMemoryDumpIfAllProcessesReplied() {
+  if (pending_memory_dump_ack_count_ > 0)
+    return;
+
+  DCHECK_NE(0u, pending_memory_dump_guid_);
+  const bool global_success = failed_memory_dump_count_ == 0;
+  if (!pending_memory_dump_callback_.is_null()) {
+    pending_memory_dump_callback_.Run(pending_memory_dump_guid_,
+                                      global_success);
+    pending_memory_dump_callback_.Reset();
+  }
+  pending_memory_dump_guid_ = 0;
 }
 
 void TracingControllerImpl::OnMonitoringStateChanged(bool is_monitoring) {

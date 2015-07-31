@@ -4,7 +4,6 @@
 
 #include "printing/printing_context_mac.h"
 
-#import <ApplicationServices/ApplicationServices.h>
 #import <AppKit/AppKit.h>
 
 #import <iomanip>
@@ -170,7 +169,8 @@ PrintingContext::Result PrintingContextMac::UseDefaultSettings() {
 
 PrintingContext::Result PrintingContextMac::UpdatePrinterSettings(
     bool external_preview,
-    bool show_system_dialog) {
+    bool show_system_dialog,
+    int page_count) {
   DCHECK(!show_system_dialog);
   DCHECK(!in_print_job_);
 

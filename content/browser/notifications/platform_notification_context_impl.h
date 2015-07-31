@@ -6,6 +6,8 @@
 #define CONTENT_BROWSER_NOTIFICATIONS_PLATFORM_NOTIFICATION_CONTEXT_IMPL_H_
 
 #include <stdint.h>
+#include <set>
+#include <string>
 
 #include "base/callback.h"
 #include "base/compiler_specific.h"
@@ -25,6 +27,7 @@ class SequencedTaskRunner;
 
 namespace content {
 
+class BrowserContext;
 class NotificationDatabase;
 struct NotificationDatabaseData;
 class ServiceWorkerContextWrapper;
@@ -34,9 +37,7 @@ class ServiceWorkerContextWrapper;
 // otherwise specified.
 class CONTENT_EXPORT PlatformNotificationContextImpl
     : NON_EXPORTED_BASE(public PlatformNotificationContext),
-      NON_EXPORTED_BASE(public ServiceWorkerContextObserver),
-      public base::RefCountedThreadSafe<PlatformNotificationContextImpl,
-                                        BrowserThread::DeleteOnUIThread> {
+      NON_EXPORTED_BASE(public ServiceWorkerContextObserver) {
  public:
   // Constructs a new platform notification context. If |path| is non-empty, the
   // database will be initialized in the "Platform Notifications" subdirectory
@@ -44,6 +45,7 @@ class CONTENT_EXPORT PlatformNotificationContextImpl
   // constructor must only be called on the IO thread.
   PlatformNotificationContextImpl(
       const base::FilePath& path,
+      BrowserContext* browser_context,
       const scoped_refptr<ServiceWorkerContextWrapper>& service_worker_context);
 
   // To be called on the UI thread to initialize the instance.
@@ -62,6 +64,10 @@ class CONTENT_EXPORT PlatformNotificationContextImpl
   void DeleteNotificationData(int64_t notification_id,
                               const GURL& origin,
                               const DeleteResultCallback& callback) override;
+  void ReadAllNotificationDataForServiceWorkerRegistration(
+      const GURL& origin,
+      int64_t service_worker_registration_id,
+      const ReadAllResultCallback& callback) override;
 
   // ServiceWorkerContextObserver implementation.
   void OnRegistrationDeleted(int64_t registration_id,
@@ -69,10 +75,6 @@ class CONTENT_EXPORT PlatformNotificationContextImpl
   void OnStorageWiped() override;
 
  private:
-  friend class base::DeleteHelper<PlatformNotificationContextImpl>;
-  friend class base::RefCountedThreadSafe<PlatformNotificationContextImpl,
-                                        BrowserThread::DeleteOnUIThread>;
-  friend struct BrowserThread::DeleteOnThread<BrowserThread::UI>;
   friend class PlatformNotificationContextTest;
 
   ~PlatformNotificationContextImpl() override;
@@ -99,6 +101,14 @@ class CONTENT_EXPORT PlatformNotificationContextImpl
   void DoReadNotificationData(int64_t notification_id,
                               const GURL& origin,
                               const ReadResultCallback& callback);
+
+  // Actually reads all notification data from the database. Must only be
+  // called on the |task_runner_| thread. |callback| will be invoked on the
+  // IO thread when the operation has completed.
+  void DoReadAllNotificationDataForServiceWorkerRegistration(
+      const GURL& origin,
+      int64_t service_worker_registration_id,
+      const ReadAllResultCallback& callback);
 
   // Actually writes the notification database to the database. Must only be
   // called on the |task_runner_| thread. |callback| will be invoked on the
@@ -133,11 +143,15 @@ class CONTENT_EXPORT PlatformNotificationContextImpl
       const scoped_refptr<base::SequencedTaskRunner>& task_runner);
 
   base::FilePath path_;
+  BrowserContext* browser_context_;
 
   scoped_refptr<ServiceWorkerContextWrapper> service_worker_context_;
 
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
   scoped_ptr<NotificationDatabase> database_;
+
+  // Indicates whether the database should be pruned when it's opened.
+  bool prune_database_on_open_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(PlatformNotificationContextImpl);
 };

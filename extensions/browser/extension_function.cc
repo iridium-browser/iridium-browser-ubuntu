@@ -273,6 +273,11 @@ void ExtensionFunction::SetResult(base::Value* result) {
   results_->Append(result);
 }
 
+void ExtensionFunction::SetResult(scoped_ptr<base::Value> result) {
+  results_.reset(new base::ListValue());
+  results_->Append(result.Pass());
+}
+
 void ExtensionFunction::SetResultList(scoped_ptr<base::ListValue> results) {
   results_ = results.Pass();
 }
@@ -304,6 +309,11 @@ ExtensionFunction::ResponseValue ExtensionFunction::OneArgument(
   args->Append(arg);
   return ResponseValue(
       new ArgumentListResponseValue(name(), "OneArgument", this, args.Pass()));
+}
+
+ExtensionFunction::ResponseValue ExtensionFunction::OneArgument(
+    scoped_ptr<base::Value> arg) {
+  return OneArgument(arg.release());
 }
 
 ExtensionFunction::ResponseValue ExtensionFunction::TwoArguments(

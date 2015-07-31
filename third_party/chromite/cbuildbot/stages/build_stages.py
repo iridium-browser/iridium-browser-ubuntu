@@ -18,6 +18,7 @@ from chromite.cbuildbot import repository
 from chromite.cbuildbot.stages import generic_stages
 from chromite.cbuildbot.stages import test_stages
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import git
 from chromite.lib import osutils
 from chromite.lib import parallel
@@ -126,8 +127,8 @@ class CleanUpStage(generic_stages.BuilderStage):
         # way, the checkout needs to be wiped since it's in an unknown
         # state.
         if os.path.exists(self._build_root):
-          cros_build_lib.Warning("ManifestCheckout at %s is unusable: %s",
-                                 self._build_root, e)
+          logging.warning("ManifestCheckout at %s is unusable: %s",
+                          self._build_root, e)
 
     # Clean mount points first to be safe about deleting.
     commands.CleanUpMountPoints(self._build_root)
@@ -317,9 +318,9 @@ class BuildPackagesStage(generic_stages.BoardSpecificBuilderStage,
       # packages failures separately. Note that we only categorize CLs
       # on the package-level if dependencies are extracted
       # successfully, so it is safe to ignore the exception.
-      cros_build_lib.Warning('Unable to gather packages under test: %s', e)
+      logging.warning('Unable to gather packages under test: %s', e)
     else:
-      cros_build_lib.Info('Recording packages under test')
+      logging.info('Recording packages under test')
       self.board_runattrs.SetParallel('packages_under_test', set(deps.keys()))
 
   def PerformStage(self):

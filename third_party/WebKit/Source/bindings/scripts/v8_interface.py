@@ -174,7 +174,6 @@ def interface_context(interface):
                                        interface.name != 'Window' and
                                        interface.name != 'EventTarget'),
         'has_custom_legacy_call_as_function': has_extended_attribute_value(interface, 'Custom', 'LegacyCallAsFunction'),  # [Custom=LegacyCallAsFunction]
-        'has_custom_to_v8': has_extended_attribute_value(interface, 'Custom', 'ToV8'),  # [Custom=ToV8]
         'has_partial_interface': len(interface.partial_interfaces) > 0,
         'has_visit_dom_wrapper': has_visit_dom_wrapper,
         'header_includes': header_includes,
@@ -243,6 +242,15 @@ def interface_context(interface):
         includes.add('bindings/core/v8/V8ObjectConstructor.h')
         includes.add('core/frame/LocalDOMWindow.h')
 
+    # [Unscopeable] attributes and methods
+    unscopeables = []
+    for attribute in interface.attributes:
+        if 'Unscopeable' in attribute.extended_attributes:
+            unscopeables.append((attribute.name, v8_utilities.runtime_enabled_function_name(attribute)))
+    for method in interface.operations:
+        if 'Unscopeable' in method.extended_attributes:
+            unscopeables.append((method.name, v8_utilities.runtime_enabled_function_name(method)))
+
     context.update({
         'any_type_attributes': any_type_attributes,
         'constructors': constructors,
@@ -252,6 +260,7 @@ def interface_context(interface):
             interface_length(interface, constructors + custom_constructors),
         'is_constructor_raises_exception': extended_attributes.get('RaisesException') == 'Constructor',  # [RaisesException=Constructor]
         'named_constructor': named_constructor,
+        'unscopeables': sorted(unscopeables),
     })
 
     constants = [constant_context(constant, interface) for constant in interface.constants]
@@ -285,7 +294,7 @@ def interface_context(interface):
     attributes = [v8_attributes.attribute_context(interface, attribute)
                   for attribute in interface.attributes]
 
-    has_conditional_attributes = any(attribute['per_context_enabled_function'] or attribute['exposed_test'] for attribute in attributes)
+    has_conditional_attributes = any(attribute['exposed_test'] for attribute in attributes)
     if has_conditional_attributes and interface.is_partial:
         raise Exception('Conditional attributes between partial interfaces in modules and the original interfaces(%s) in core are not allowed.' % interface.name)
 
@@ -294,15 +303,13 @@ def interface_context(interface):
         'has_accessor_configuration': any(
             attribute['is_expose_js_accessors'] and
             not (attribute['is_static'] or
-                 attribute['runtime_enabled_function'] or
-                 attribute['per_context_enabled_function']) and
+                 attribute['runtime_enabled_function']) and
             attribute['should_be_exposed_to_script']
             for attribute in attributes),
         'has_attribute_configuration': any(
              not (attribute['is_expose_js_accessors'] or
                   attribute['is_static'] or
-                  attribute['runtime_enabled_function'] or
-                  attribute['per_context_enabled_function'])
+                  attribute['runtime_enabled_function'])
              and attribute['should_be_exposed_to_script']
              for attribute in attributes),
         'has_conditional_attributes': has_conditional_attributes,
@@ -516,7 +523,6 @@ def interface_context(interface):
             # original interface will register instead of partial interface.
             if overloads['has_partial_overloads'] and interface.is_partial:
                 continue
-            per_context_enabled_function = overloads['per_context_enabled_function_all']
             conditionally_exposed_function = overloads['exposed_test_all']
             runtime_enabled_function = overloads['runtime_enabled_function_all']
             has_custom_registration = (overloads['has_custom_registration_all'] or
@@ -524,7 +530,6 @@ def interface_context(interface):
         else:
             if not method['visible']:
                 continue
-            per_context_enabled_function = method['per_context_enabled_function']
             conditionally_exposed_function = method['exposed_test']
             runtime_enabled_function = method['runtime_enabled_function']
             has_custom_registration = method['has_custom_registration']
@@ -532,7 +537,7 @@ def interface_context(interface):
         if has_custom_registration:
             custom_registration_methods.append(method)
             continue
-        if per_context_enabled_function or conditionally_exposed_function:
+        if conditionally_exposed_function:
             conditionally_enabled_methods.append(method)
             continue
         if runtime_enabled_function:
@@ -553,7 +558,7 @@ def interface_context(interface):
         # enabled overloads are actually enabled, so length may be incorrect.
         # E.g., [RuntimeEnabled=Foo] void f(); void f(long x);
         # should have length 1 if Foo is not enabled, but length 0 if it is.
-        method['length'] = (method['overloads']['minarg'] if 'overloads' in method else
+        method['length'] = (method['overloads']['length'] if 'overloads' in method else
                             method['number_of_required_arguments'])
 
     context.update({
@@ -657,33 +662,58 @@ def overloads_context(interface, overloads):
     lengths = [length for length, _ in effective_overloads_by_length]
     name = overloads[0].get('name', '<constructor>')
 
-    # Check if all overloads with the shortest acceptable arguments list are
-    # runtime enabled, in which case we need to have a runtime determined
-    # Function.length. The exception is if all overloads are controlled by the
-    # same runtime enabled feature, in which case there would be no function
-    # object at all if it is not enabled.
-    shortest_overloads = effective_overloads_by_length[0][1]
-    if (all(method.get('runtime_enabled_function')
-            for method, _, _ in shortest_overloads) and
-        not common_value(overloads, 'runtime_enabled_function')):
-        # Generate a list of (length, runtime_enabled_functions) tuples.
-        runtime_determined_lengths = []
-        for length, effective_overloads in effective_overloads_by_length:
-            runtime_enabled_functions = set(
-                method['runtime_enabled_function']
-                for method, _, _ in effective_overloads
-                if method.get('runtime_enabled_function'))
-            if not runtime_enabled_functions:
-                # This "length" is unconditionally enabled, so stop here.
-                runtime_determined_lengths.append((length, [None]))
-                break
-            runtime_determined_lengths.append(
-                (length, sorted(runtime_enabled_functions)))
-        length = ('%sV8Internal::%sMethodLength()'
-                  % (cpp_name_or_partial(interface), name))
-    else:
-        runtime_determined_lengths = None
-        length = lengths[0]
+    runtime_determined_lengths = None
+    function_length = lengths[0]
+    runtime_determined_maxargs = None
+    maxarg = lengths[-1]
+
+    # The special case handling below is not needed if all overloads are
+    # runtime enabled by the same feature.
+    if not common_value(overloads, 'runtime_enabled_function'):
+        # Check if all overloads with the shortest acceptable arguments list are
+        # runtime enabled, in which case we need to have a runtime determined
+        # Function.length.
+        shortest_overloads = effective_overloads_by_length[0][1]
+        if (all(method.get('runtime_enabled_function')
+                for method, _, _ in shortest_overloads)):
+            # Generate a list of (length, runtime_enabled_functions) tuples.
+            runtime_determined_lengths = []
+            for length, effective_overloads in effective_overloads_by_length:
+                runtime_enabled_functions = set(
+                    method['runtime_enabled_function']
+                    for method, _, _ in effective_overloads
+                    if method.get('runtime_enabled_function'))
+                if not runtime_enabled_functions:
+                    # This "length" is unconditionally enabled, so stop here.
+                    runtime_determined_lengths.append((length, [None]))
+                    break
+                runtime_determined_lengths.append(
+                    (length, sorted(runtime_enabled_functions)))
+            function_length = ('%sV8Internal::%sMethodLength()'
+                               % (cpp_name_or_partial(interface), name))
+
+        # Check if all overloads with the longest required arguments list are
+        # runtime enabled, in which case we need to have a runtime determined
+        # maximum distinguishing argument index.
+        longest_overloads = effective_overloads_by_length[-1][1]
+        if (not common_value(overloads, 'runtime_enabled_function') and
+            all(method.get('runtime_enabled_function')
+                for method, _, _ in longest_overloads)):
+            # Generate a list of (length, runtime_enabled_functions) tuples.
+            runtime_determined_maxargs = []
+            for length, effective_overloads in reversed(effective_overloads_by_length):
+                runtime_enabled_functions = set(
+                    method['runtime_enabled_function']
+                    for method, _, _ in effective_overloads
+                    if method.get('runtime_enabled_function'))
+                if not runtime_enabled_functions:
+                    # This "length" is unconditionally enabled, so stop here.
+                    runtime_determined_maxargs.append((length, [None]))
+                    break
+                runtime_determined_maxargs.append(
+                    (length, sorted(runtime_enabled_functions)))
+            maxarg = ('%sV8Internal::%sMethodMaxArg()'
+                      % (cpp_name_or_partial(interface), name))
 
     # Check and fail if overloads disagree on any of the extended attributes
     # that affect how the method should be registered.
@@ -723,16 +753,15 @@ def overloads_context(interface, overloads):
         'deprecate_all_as': common_value(overloads, 'deprecate_as'),  # [DeprecateAs]
         'exposed_test_all': common_value(overloads, 'exposed_test'),  # [Exposed]
         'has_custom_registration_all': common_value(overloads, 'has_custom_registration'),
-        'length': length,
+        'length': function_length,
         'length_tests_methods': length_tests_methods(effective_overloads_by_length),
         # 1. Let maxarg be the length of the longest type list of the
         # entries in S.
-        'maxarg': lengths[-1],
+        'maxarg': maxarg,
         'measure_all_as': common_value(overloads, 'measure_as'),  # [MeasureAs]
-        'minarg': lengths[0],
-        'per_context_enabled_function_all': common_value(overloads, 'per_context_enabled_function'),  # [PerContextEnabled]
         'returns_promise_all': promise_overload_count > 0,
         'runtime_determined_lengths': runtime_determined_lengths,
+        'runtime_determined_maxargs': runtime_determined_maxargs,
         'runtime_enabled_function_all': common_value(overloads, 'runtime_enabled_function'),  # [RuntimeEnabled]
         'valid_arities': lengths
             # Only need to report valid arities if there is a gap in the
@@ -1252,8 +1281,9 @@ def property_getter(getter, cpp_arguments):
             return 'result.isEmpty()'
         return ''
 
-    idl_type = getter.idl_type
     extended_attributes = getter.extended_attributes
+    idl_type = getter.idl_type
+    idl_type.add_includes_for_type(extended_attributes)
     is_call_with_script_state = v8_utilities.has_extended_attribute_value(getter, 'CallWith', 'ScriptState')
     is_raises_exception = 'RaisesException' in extended_attributes
     use_output_parameter_for_result = idl_type.use_output_parameter_for_result
@@ -1296,8 +1326,9 @@ def property_setter(setter, interface):
     if not setter:
         return None
 
-    idl_type = setter.arguments[1].idl_type
     extended_attributes = setter.extended_attributes
+    idl_type = setter.arguments[1].idl_type
+    idl_type.add_includes_for_type(extended_attributes)
     is_call_with_script_state = v8_utilities.has_extended_attribute_value(setter, 'CallWith', 'ScriptState')
     is_raises_exception = 'RaisesException' in extended_attributes
 
@@ -1325,8 +1356,8 @@ def property_deleter(deleter):
     if not deleter:
         return None
 
-    idl_type = deleter.idl_type
     extended_attributes = deleter.extended_attributes
+    idl_type = deleter.idl_type
     is_call_with_script_state = v8_utilities.has_extended_attribute_value(deleter, 'CallWith', 'ScriptState')
     return {
         'is_call_with_script_state': is_call_with_script_state,

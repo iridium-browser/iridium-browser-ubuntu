@@ -304,31 +304,17 @@ DevToolsWindow::~DevToolsWindow() {
 // static
 void DevToolsWindow::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterDictionaryPref(
-      prefs::kDevToolsEditedFiles,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterDictionaryPref(
-      prefs::kDevToolsFileSystemPaths,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterStringPref(
-      prefs::kDevToolsAdbKey, std::string(),
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterDictionaryPref(prefs::kDevToolsEditedFiles);
+  registry->RegisterDictionaryPref(prefs::kDevToolsFileSystemPaths);
+  registry->RegisterStringPref(prefs::kDevToolsAdbKey, std::string());
 
-  registry->RegisterBooleanPref(
-      prefs::kDevToolsDiscoverUsbDevicesEnabled,
-      true,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kDevToolsPortForwardingEnabled,
-      false,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kDevToolsPortForwardingDefaultSet,
-      false,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterDictionaryPref(
-      prefs::kDevToolsPortForwardingConfig,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kDevToolsDiscoverUsbDevicesEnabled,
+                                true);
+  registry->RegisterBooleanPref(prefs::kDevToolsPortForwardingEnabled, false);
+  registry->RegisterBooleanPref(prefs::kDevToolsPortForwardingDefaultSet,
+                                false);
+  registry->RegisterDictionaryPref(prefs::kDevToolsPortForwardingConfig);
+  registry->RegisterDictionaryPref(prefs::kDevToolsPreferences);
 }
 
 // static
@@ -837,7 +823,8 @@ WebContents* DevToolsWindow::OpenURLFromTab(
 void DevToolsWindow::ActivateContents(WebContents* contents) {
   if (is_docked_) {
     WebContents* inspected_tab = GetInspectedWebContents();
-    inspected_tab->GetDelegate()->ActivateContents(inspected_tab);
+    if (inspected_tab)
+      inspected_tab->GetDelegate()->ActivateContents(inspected_tab);
   } else if (browser_) {
     browser_->window()->Activate();
   }
@@ -969,15 +956,6 @@ void DevToolsWindow::RunFileChooser(WebContents* web_contents,
   FileSelectHelper::RunFileChooser(web_contents, params);
 }
 
-void DevToolsWindow::WebContentsFocused(WebContents* contents) {
-  Browser* inspected_browser = NULL;
-  int inspected_tab_index = -1;
-  if (is_docked_ && FindInspectedBrowserAndTabIndex(GetInspectedWebContents(),
-                                                    &inspected_browser,
-                                                    &inspected_tab_index))
-    inspected_browser->window()->WebContentsFocused(contents);
-}
-
 bool DevToolsWindow::PreHandleGestureEvent(
     WebContents* source,
     const blink::WebGestureEvent& event) {
@@ -1078,7 +1056,7 @@ void DevToolsWindow::SetWhitelistedShortcuts(
 void DevToolsWindow::InspectedContentsClosing() {
   intercepted_page_beforeunload_ = false;
   life_stage_ = kClosing;
-  main_web_contents_->GetRenderViewHost()->ClosePage();
+  main_web_contents_->ClosePage();
 }
 
 InfoBarService* DevToolsWindow::GetInfoBarService() {

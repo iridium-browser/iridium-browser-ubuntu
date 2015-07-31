@@ -9,17 +9,23 @@
 #include "chrome/browser/sync/test/integration/sync_integration_test_util.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "chrome/browser/sync/test/integration/typed_urls_helper.h"
+#include "chrome/common/url_constants.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/sessions/session_types.h"
+#include "sync/test/fake_server/fake_server_verifier.h"
+#include "sync/test/fake_server/sessions_hierarchy.h"
 #include "sync/util/time.h"
 
+using fake_server::SessionsHierarchy;
 using sessions_helper::CheckInitialState;
 using sessions_helper::GetLocalWindows;
 using sessions_helper::GetSessionData;
+using sessions_helper::ModelAssociatorHasTabWithUrl;
 using sessions_helper::OpenTabAndGetLocalWindows;
 using sessions_helper::ScopedWindowMap;
 using sessions_helper::SessionWindowMap;
 using sessions_helper::SyncedSessionVector;
+using sessions_helper::WaitForTabsToLoad;
 using sessions_helper::WindowsMatch;
 using sync_integration_test_util::AwaitCommitActivityCompletion;
 using typed_urls_helper::GetUrlFromClient;
@@ -33,23 +39,15 @@ class SingleClientSessionsSyncTest : public SyncTest {
   DISALLOW_COPY_AND_ASSIGN(SingleClientSessionsSyncTest);
 };
 
-// Timeout on Windows, see http://crbug.com/99819
-#if defined(OS_WIN)
-#define MAYBE_Sanity DISABLED_Sanity
-#else
-#define MAYBE_Sanity Sanity
-#endif
-
-IN_PROC_BROWSER_TEST_F(SingleClientSessionsSyncTest, MAYBE_Sanity) {
+IN_PROC_BROWSER_TEST_F(SingleClientSessionsSyncTest, Sanity) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
 
   ASSERT_TRUE(CheckInitialState(0));
 
   // Add a new session to client 0 and wait for it to sync.
   ScopedWindowMap old_windows;
-  ASSERT_TRUE(OpenTabAndGetLocalWindows(0,
-                                        GURL("http://127.0.0.1/bubba"),
-                                        old_windows.GetMutable()));
+  GURL url = GURL("http://127.0.0.1/bubba");
+  ASSERT_TRUE(OpenTabAndGetLocalWindows(0, url, old_windows.GetMutable()));
   ASSERT_TRUE(AwaitCommitActivityCompletion(GetSyncService((0))));
 
   // Get foreign session data from client 0.
@@ -61,6 +59,38 @@ IN_PROC_BROWSER_TEST_F(SingleClientSessionsSyncTest, MAYBE_Sanity) {
   ScopedWindowMap new_windows;
   ASSERT_TRUE(GetLocalWindows(0, new_windows.GetMutable()));
   ASSERT_TRUE(WindowsMatch(*old_windows.Get(), *new_windows.Get()));
+
+  fake_server::FakeServerVerifier fake_server_verifier(GetFakeServer());
+  SessionsHierarchy expected_sessions;
+  expected_sessions.AddWindow(url.spec());
+  ASSERT_TRUE(fake_server_verifier.VerifySessions(expected_sessions));
+}
+
+IN_PROC_BROWSER_TEST_F(SingleClientSessionsSyncTest, NoSessions) {
+  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+
+  fake_server::FakeServerVerifier fake_server_verifier(GetFakeServer());
+  SessionsHierarchy expected_sessions;
+  ASSERT_TRUE(fake_server_verifier.VerifySessions(expected_sessions));
+}
+
+IN_PROC_BROWSER_TEST_F(SingleClientSessionsSyncTest, ChromeHistory) {
+  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+
+  ASSERT_TRUE(CheckInitialState(0));
+
+  // Add a new session to client 0 and wait for it to sync.
+  ScopedWindowMap old_windows;
+  ASSERT_TRUE(OpenTabAndGetLocalWindows(0,
+                                        GURL(chrome::kChromeUIHistoryURL),
+                                        old_windows.GetMutable()));
+  std::vector<GURL> urls;
+  urls.push_back(GURL(chrome::kChromeUIHistoryURL));
+  ASSERT_TRUE(WaitForTabsToLoad(0, urls));
+
+  // Verify the chrome history page synced.
+  ASSERT_TRUE(ModelAssociatorHasTabWithUrl(0,
+                                           GURL(chrome::kChromeUIHistoryURL)));
 }
 
 IN_PROC_BROWSER_TEST_F(SingleClientSessionsSyncTest, TimestampMatchesHistory) {

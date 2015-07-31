@@ -5,8 +5,9 @@
 #ifndef LayerClipRecorder_h
 #define LayerClipRecorder_h
 
-#include "core/layout/PaintPhase.h"
+#include "core/CoreExport.h"
 #include "core/paint/DeprecatedPaintLayerPaintingInfo.h"
+#include "core/paint/PaintPhase.h"
 #include "platform/graphics/paint/ClipDisplayItem.h"
 #include "platform/graphics/paint/DisplayItem.h"
 #include "wtf/Vector.h"
@@ -17,7 +18,7 @@ class ClipRect;
 class GraphicsContext;
 class LayoutBoxModelObject;
 
-class LayerClipRecorder {
+class CORE_EXPORT LayerClipRecorder {
 public:
 
     enum BorderRadiusClippingRule { IncludeSelfForBorderRadius, DoNotIncludeSelfForBorderRadius };

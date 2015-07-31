@@ -7,13 +7,15 @@
 #include "PathOpsExtendedTest.h"
 #include "PathOpsThreadedCommon.h"
 
+static int loopNo = 158;
+
 static void testOpCubicsMain(PathOpsThreadState* data) {
 #if DEBUG_SHOW_TEST_NAME
     strncpy(DEBUG_FILENAME_STRING, "", DEBUG_FILENAME_STRING_LENGTH);
 #endif
     SkASSERT(data);
     PathOpsThreadState& state = *data;
-    char pathStr[1024];  // gdb: set print elements 400
+    char pathStr[1024];
     bool progress = state.fReporter->verbose(); // FIXME: break out into its own parameter?
     if (progress) {
         sk_bzero(pathStr, sizeof(pathStr));
@@ -25,30 +27,6 @@ static void testOpCubicsMain(PathOpsThreadState* data) {
                     for (int e = SkPath::kWinding_FillType ; e <= SkPath::kEvenOdd_FillType; ++e) {
     for (int f = SkPath::kWinding_FillType ; f <= SkPath::kEvenOdd_FillType; ++f) {
         SkPath pathA, pathB;
-        if (progress) {
-            char* str = pathStr;
-            const int loopNo = 129;
-            str += sprintf(str, "static void cubicOp%d(skiatest::Reporter* reporter,"
-                    " const char* filename) {\n", loopNo);
-            str += sprintf(str, "    SkPath path, pathB;\n");
-            str += sprintf(str, "    path.setFillType(SkPath::k%s_FillType);\n",
-                    e == SkPath::kWinding_FillType ? "Winding" : e == SkPath::kEvenOdd_FillType
-                    ? "EvenOdd" : "?UNDEFINED");
-            str += sprintf(str, "    path.moveTo(%d,%d);\n", state.fA, state.fB);
-            str += sprintf(str, "    path.cubicTo(%d,%d, %d,%d, %d,%d);\n", state.fC, state.fD,
-                    b, a, d, c);
-            str += sprintf(str, "    path.close();\n");
-            str += sprintf(str, "    pathB.setFillType(SkPath::k%s_FillType);\n",
-                    f == SkPath::kWinding_FillType ? "Winding" : f == SkPath::kEvenOdd_FillType
-                    ? "EvenOdd" : "?UNDEFINED");
-            str += sprintf(str, "    pathB.moveTo(%d,%d);\n", a, b);
-            str += sprintf(str, "    pathB.cubicTo(%d,%d, %d,%d, %d,%d);\n", c, d,
-                    state.fB, state.fA, state.fD, state.fC);
-            str += sprintf(str, "    pathB.close();\n");
-            str += sprintf(str, "    testPathOp(reporter, path, pathB, kDifference_SkPathOp,"
-                    " filename);\n");
-            str += sprintf(str, "}\n");
-        }
         pathA.setFillType((SkPath::FillType) e);
         pathA.moveTo(SkIntToScalar(state.fA), SkIntToScalar(state.fB));
         pathA.cubicTo(SkIntToScalar(state.fC), SkIntToScalar(state.fD), SkIntToScalar(b),
@@ -63,10 +41,39 @@ static void testOpCubicsMain(PathOpsThreadState* data) {
             if (progress) {
                 outputProgress(state.fPathStr, pathStr, (SkPathOp) op);
             }
-            testThreadedPathOp(state.fReporter, pathA, pathB, (SkPathOp) op, "cubics");
+            if (progress) {
+                char* str = pathStr;
+                str += sprintf(str, "static void cubicOp%d(skiatest::Reporter* reporter,"
+                        " const char* filename) {\n", loopNo);
+                str += sprintf(str, "    SkPath path, pathB;\n");
+                str += sprintf(str, "    path.setFillType(SkPath::k%s_FillType);\n",
+                        e == SkPath::kWinding_FillType ? "Winding" : e == SkPath::kEvenOdd_FillType
+                        ? "EvenOdd" : "?UNDEFINED");
+                str += sprintf(str, "    path.moveTo(%d,%d);\n", state.fA, state.fB);
+                str += sprintf(str, "    path.cubicTo(%d,%d, %d,%d, %d,%d);\n", state.fC, state.fD,
+                        b, a, d, c);
+                str += sprintf(str, "    path.close();\n");
+                str += sprintf(str, "    pathB.setFillType(SkPath::k%s_FillType);\n",
+                        f == SkPath::kWinding_FillType ? "Winding" : f == SkPath::kEvenOdd_FillType
+                        ? "EvenOdd" : "?UNDEFINED");
+                str += sprintf(str, "    pathB.moveTo(%d,%d);\n", a, b);
+                str += sprintf(str, "    pathB.cubicTo(%d,%d, %d,%d, %d,%d);\n", c, d,
+                        state.fB, state.fA, state.fD, state.fC);
+                str += sprintf(str, "    pathB.close();\n");
+                str += sprintf(str, "    testPathOp(reporter, path, pathB, %s, filename);\n",
+                        SkPathOpsDebug::OpStr((SkPathOp) op));
+                str += sprintf(str, "}\n");
+            }
+            if (!testPathOp(state.fReporter, pathA, pathB, (SkPathOp) op, "cubics")) {
+                if (progress) {
+                    ++loopNo;
+                    goto skipToNext;
+                }
+            }
         }
     }
                     }
+skipToNext: ;
                 }
             }
         }
@@ -89,5 +96,5 @@ DEF_TEST(PathOpsOpCubicsThreaded, reporter) {
     }
 finish:
     testRunner.render();
-    ShowTestArray();
+    ShowTestArray("cubicOp");
 }

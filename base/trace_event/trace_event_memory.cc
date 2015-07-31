@@ -6,9 +6,10 @@
 
 #include "base/debug/leak_annotations.h"
 #include "base/lazy_instance.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread_local_storage.h"
@@ -70,13 +71,12 @@ void DeleteStackOnThreadCleanup(void* value) {
   delete stack;
 }
 
-// Initializes the thread-local TraceMemoryStack pointer. Returns true on
-// success or if it is already initialized.
-bool InitThreadLocalStorage() {
+// Initializes the thread-local TraceMemoryStack pointer.
+void InitThreadLocalStorage() {
   if (tls_trace_memory_stack.initialized())
-    return true;
-  // Initialize the thread-local storage key, returning true on success.
-  return tls_trace_memory_stack.Initialize(&DeleteStackOnThreadCleanup);
+    return;
+  // Initialize the thread-local storage key.
+  tls_trace_memory_stack.Initialize(&DeleteStackOnThreadCleanup);
 }
 
 // Clean up thread-local-storage in the main thread.
@@ -144,11 +144,11 @@ int GetPseudoStack(int skip_count_ignored, void** stack_out) {
 //////////////////////////////////////////////////////////////////////////////
 
 TraceMemoryController::TraceMemoryController(
-    scoped_refptr<MessageLoopProxy> message_loop_proxy,
+    scoped_refptr<SingleThreadTaskRunner> task_runner,
     HeapProfilerStartFunction heap_profiler_start_function,
     HeapProfilerStopFunction heap_profiler_stop_function,
     GetHeapProfileFunction get_heap_profile_function)
-    : message_loop_proxy_(message_loop_proxy),
+    : task_runner_(task_runner.Pass()),
       heap_profiler_start_function_(heap_profiler_start_function),
       heap_profiler_stop_function_(heap_profiler_stop_function),
       get_heap_profile_function_(get_heap_profile_function),
@@ -174,10 +174,9 @@ void TraceMemoryController::OnTraceLogEnabled() {
   if (!enabled)
     return;
   DVLOG(1) << "OnTraceLogEnabled";
-  message_loop_proxy_->PostTask(
-      FROM_HERE,
-      base::Bind(&TraceMemoryController::StartProfiling,
-                 weak_factory_.GetWeakPtr()));
+  task_runner_->PostTask(FROM_HERE,
+                         base::Bind(&TraceMemoryController::StartProfiling,
+                                    weak_factory_.GetWeakPtr()));
 }
 
 void TraceMemoryController::OnTraceLogDisabled() {
@@ -185,10 +184,9 @@ void TraceMemoryController::OnTraceLogDisabled() {
   // called, so we cannot tell if it was enabled before. Always try to turn
   // off profiling.
   DVLOG(1) << "OnTraceLogDisabled";
-  message_loop_proxy_->PostTask(
-      FROM_HERE,
-      base::Bind(&TraceMemoryController::StopProfiling,
-                 weak_factory_.GetWeakPtr()));
+  task_runner_->PostTask(FROM_HERE,
+                         base::Bind(&TraceMemoryController::StopProfiling,
+                                    weak_factory_.GetWeakPtr()));
 }
 
 void TraceMemoryController::StartProfiling() {
@@ -196,8 +194,7 @@ void TraceMemoryController::StartProfiling() {
   if (dump_timer_.IsRunning())
     return;
   DVLOG(1) << "Starting trace memory";
-  if (!InitThreadLocalStorage())
-    return;
+  InitThreadLocalStorage();
   ScopedTraceMemory::set_enabled(true);
   // Call ::HeapProfilerWithPseudoStackStart().
   heap_profiler_start_function_(&GetPseudoStack);

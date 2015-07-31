@@ -612,7 +612,7 @@ bool ExtractSignonRealmComponents(const std::string& signon_realm,
   if (server)
     *server = realm_as_url.host();
   if (is_secure)
-    *is_secure = realm_as_url.SchemeIsSecure();
+    *is_secure = realm_as_url.SchemeIsCryptographic();
   if (port)
     *port = realm_as_url.has_port() ? atoi(realm_as_url.port().c_str()) : 0;
   if (security_domain) {
@@ -930,7 +930,7 @@ PasswordStoreMac::~PasswordStoreMac() {}
 
 bool PasswordStoreMac::Init(
     const syncer::SyncableService::StartSyncFlare& flare) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   thread_.reset(new base::Thread("Chrome_PasswordStore_Thread"));
 
   if (!thread_->Start()) {
@@ -952,7 +952,7 @@ void PasswordStoreMac::InitOnBackgroundThread() {
 }
 
 void PasswordStoreMac::Shutdown() {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   password_manager::PasswordStore::Shutdown();
   thread_->Stop();
 }
@@ -1160,6 +1160,27 @@ bool PasswordStoreMac::FillAutofillableLogins(
 bool PasswordStoreMac::FillBlacklistLogins(ScopedVector<PasswordForm>* forms) {
   DCHECK_EQ(thread_->message_loop(), base::MessageLoop::current());
   return login_metadata_db_ && login_metadata_db_->GetBlacklistLogins(forms);
+}
+
+void PasswordStoreMac::AddSiteStatsImpl(
+    const password_manager::InteractionsStats& stats) {
+  DCHECK(thread_->message_loop() == base::MessageLoop::current());
+  if (login_metadata_db_)
+    login_metadata_db_->stats_table().AddRow(stats);
+}
+
+void PasswordStoreMac::RemoveSiteStatsImpl(const GURL& origin_domain) {
+  DCHECK(thread_->message_loop() == base::MessageLoop::current());
+  if (login_metadata_db_)
+    login_metadata_db_->stats_table().RemoveRow(origin_domain);
+}
+
+scoped_ptr<password_manager::InteractionsStats>
+PasswordStoreMac::GetSiteStatsImpl(const GURL& origin_domain) {
+  DCHECK(thread_->message_loop() == base::MessageLoop::current());
+  return login_metadata_db_
+             ? login_metadata_db_->stats_table().GetRow(origin_domain)
+             : scoped_ptr<password_manager::InteractionsStats>();
 }
 
 bool PasswordStoreMac::AddToKeychainIfNecessary(const PasswordForm& form) {

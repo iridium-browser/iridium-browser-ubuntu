@@ -137,7 +137,7 @@ OmniboxViewViews::OmniboxViewViews(OmniboxEditController* controller,
                                    const gfx::FontList& font_list)
     : OmniboxView(profile, controller, command_updater),
       popup_window_mode_(popup_window_mode),
-      security_level_(ToolbarModel::NONE),
+      security_level_(ConnectionSecurityHelper::NONE),
       saved_selection_for_focus_change_(gfx::Range::InvalidRange()),
       ime_composing_before_change_(false),
       delete_at_end_pressed_(false),
@@ -223,9 +223,8 @@ void OmniboxViewViews::ResetTabState(content::WebContents* web_contents) {
 }
 
 void OmniboxViewViews::Update() {
-  UpdatePlaceholderText();
-
-  const ToolbarModel::SecurityLevel old_security_level = security_level_;
+  const ConnectionSecurityHelper::SecurityLevel old_security_level =
+      security_level_;
   security_level_ = controller()->GetToolbarModel()->GetSecurityLevel(false);
   if (model()->UpdatePermanentText()) {
     // Something visibly changed.  Re-enable URL replacement.
@@ -256,11 +255,6 @@ void OmniboxViewViews::Update() {
   } else if (old_security_level != security_level_) {
     EmphasizeURLComponents();
   }
-}
-
-void OmniboxViewViews::UpdatePlaceholderText() {
-  if (OmniboxFieldTrial::DisplayHintTextWhenPossible())
-    set_placeholder_text(GetHintText());
 }
 
 base::string16 OmniboxViewViews::GetText() const {
@@ -332,7 +326,7 @@ void OmniboxViewViews::OnNativeThemeChanged(const ui::NativeTheme* theme) {
   views::Textfield::OnNativeThemeChanged(theme);
   if (location_bar_view_) {
     SetBackgroundColor(location_bar_view_->GetColor(
-        ToolbarModel::NONE, LocationBarView::BACKGROUND));
+        ConnectionSecurityHelper::NONE, LocationBarView::BACKGROUND));
   }
   EmphasizeURLComponents();
 }
@@ -416,10 +410,8 @@ bool OmniboxViewViews::HandleEarlyTabActions(const ui::KeyEvent& event) {
   if (!views::FocusManager::IsTabTraversalKeyEvent(event))
     return false;
 
-  if (model()->is_keyword_hint() && !event.IsShiftDown()) {
-    model()->AcceptKeyword(ENTERED_KEYWORD_MODE_VIA_TAB);
-    return true;
-  }
+  if (model()->is_keyword_hint() && !event.IsShiftDown())
+    return model()->AcceptKeyword(ENTERED_KEYWORD_MODE_VIA_TAB);
 
   if (!model()->popup_model()->IsOpen())
     return false;
@@ -427,7 +419,7 @@ bool OmniboxViewViews::HandleEarlyTabActions(const ui::KeyEvent& event) {
   if (event.IsShiftDown() &&
       (model()->popup_model()->selected_line_state() ==
           OmniboxPopupModel::KEYWORD))
-    model()->ClearKeyword(text());
+    model()->ClearKeyword();
   else
     model()->OnUpOrDownKeyPressed(event.IsShiftDown() ? -1 : 1);
 
@@ -468,7 +460,8 @@ void OmniboxViewViews::UpdatePopup() {
 
   // Prevent inline autocomplete when the caret isn't at the end of the text.
   const gfx::Range sel = GetSelectedRange();
-  model()->StartAutocomplete(!sel.is_empty(), sel.GetMax() < text().length());
+  model()->StartAutocomplete(!sel.is_empty(), sel.GetMax() < text().length(),
+                             false);
 }
 
 void OmniboxViewViews::ApplyCaretVisibility() {
@@ -639,10 +632,12 @@ void OmniboxViewViews::EmphasizeURLComponents() {
   // may have incorrectly identified a qualifier as a scheme.
   SetStyle(gfx::DIAGONAL_STRIKE, false);
   if (!model()->user_input_in_progress() && model()->CurrentTextIsURL() &&
-      scheme.is_nonempty() && (security_level_ != ToolbarModel::NONE)) {
+      scheme.is_nonempty() &&
+      (security_level_ != ConnectionSecurityHelper::NONE)) {
     SkColor security_color = location_bar_view_->GetColor(
         security_level_, LocationBarView::SECURITY_TEXT);
-    const bool strike = (security_level_ == ToolbarModel::SECURITY_ERROR);
+    const bool strike =
+        (security_level_ == ConnectionSecurityHelper::SECURITY_ERROR);
     const gfx::Range scheme_range(scheme.begin, scheme.end());
     ApplyColor(security_color, scheme_range);
     ApplyStyle(gfx::DIAGONAL_STRIKE, strike, scheme_range);
@@ -817,6 +812,8 @@ bool OmniboxViewViews::SkipDefaultKeyEventProcessing(
        model()->popup_model()->IsOpen())) {
     return true;
   }
+  if (event.key_code() == ui::VKEY_ESCAPE)
+    return model()->WillHandleEscapeKey();
   return Textfield::SkipDefaultKeyEventProcessing(event);
 }
 
@@ -859,7 +856,16 @@ void OmniboxViewViews::OnBlur() {
 
   views::Textfield::OnBlur();
   model()->OnWillKillFocus();
-  CloseOmniboxPopup();
+
+  // If ZeroSuggest is active, we may have refused to show an update to the
+  // underlying permanent URL that happened while the popup was open, so
+  // revert to ensure that update is shown now.  Otherwise, make sure to call
+  // CloseOmniboxPopup() unconditionally, so that if ZeroSuggest is in the midst
+  // of running but hasn't yet opened the popup, it will be halted.
+  if (!model()->user_input_in_progress() && model()->popup_model()->IsOpen())
+    RevertAll();
+  else
+    CloseOmniboxPopup();
 
   // Tell the model to reset itself.
   model()->OnKillFocus();
@@ -918,7 +924,7 @@ bool OmniboxViewViews::HandleKeyEvent(views::Textfield* textfield,
     if (model()->is_keyword_hint() || model()->keyword().empty() ||
         HasSelection() || GetCursorPosition() != 0)
       return false;
-    model()->ClearKeyword(text());
+    model()->ClearKeyword();
     return true;
   }
 

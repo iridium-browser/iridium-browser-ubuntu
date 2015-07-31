@@ -24,6 +24,7 @@
 #ifndef MouseEvent_h
 #define MouseEvent_h
 
+#include "core/CoreExport.h"
 #include "core/events/EventDispatchMediator.h"
 #include "core/events/MouseEventInit.h"
 #include "core/events/MouseRelatedEvent.h"
@@ -34,7 +35,7 @@ namespace blink {
 class DataTransfer;
 class EventDispatcher;
 
-class MouseEvent : public MouseRelatedEvent {
+class CORE_EXPORT MouseEvent : public MouseRelatedEvent {
     DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<MouseEvent> create()
@@ -46,7 +47,7 @@ public:
         int detail, int screenX, int screenY, int windowX, int windowY,
         int movementX, int movementY,
         bool ctrlKey, bool altKey, bool shiftKey, bool metaKey, unsigned short button, unsigned short buttons,
-        PassRefPtrWillBeRawPtr<EventTarget> relatedTarget, PassRefPtrWillBeRawPtr<DataTransfer>,
+        PassRefPtrWillBeRawPtr<EventTarget> relatedTarget, DataTransfer*,
         bool isSimulated = false, PlatformMouseEvent::SyntheticEventType = PlatformMouseEvent::RealOrIndistinguishable,
         double uiCreateTime = 0);
 
@@ -91,7 +92,7 @@ protected:
         int detail, int screenX, int screenY, int windowX, int windowY,
         int movementX, int movementY,
         bool ctrlKey, bool altKey, bool shiftKey, bool metaKey, unsigned short button, unsigned short buttons,
-        PassRefPtrWillBeRawPtr<EventTarget> relatedTarget, PassRefPtrWillBeRawPtr<DataTransfer>,
+        PassRefPtrWillBeRawPtr<EventTarget> relatedTarget, DataTransfer*,
         bool isSimulated, PlatformMouseEvent::SyntheticEventType, double uiCreateTime = 0);
 
     MouseEvent(const AtomicString& type, const MouseEventInit&);
@@ -103,7 +104,7 @@ private:
     unsigned short m_buttons;
     bool m_buttonDown;
     RefPtrWillBeMember<EventTarget> m_relatedTarget;
-    RefPtrWillBeMember<DataTransfer> m_dataTransfer;
+    PersistentWillBeMember<DataTransfer> m_dataTransfer;
     PlatformMouseEvent::SyntheticEventType m_syntheticEventType;
 };
 

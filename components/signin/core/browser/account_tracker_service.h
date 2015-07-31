@@ -13,6 +13,7 @@
 #include "base/containers/scoped_ptr_hash_map.h"
 #include "base/memory/ref_counted.h"
 #include "base/threading/non_thread_safe.h"
+#include "base/timer/timer.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "google_apis/gaia/oauth2_token_service.h"
 
@@ -36,6 +37,10 @@ class AccountTrackerService : public KeyedService,
   // tracked by this service.
   static const char kAccountInfoPref[];
 
+  // Name of the preference that tracks the int64 representation of the last
+  // time the AccountTrackerService was updated.
+  static const char kAccountTrackerServiceLastUpdate[];
+
   // TODO(mlerman): Remove all references to Profile::kNoHostedDomainFound in
   // favour of this.
   // Value representing no hosted domain in the kProfileHostedDomain preference.
@@ -49,7 +54,10 @@ class AccountTrackerService : public KeyedService,
     std::string account_id;  // The account ID used by OAuth2TokenService.
     std::string gaia;
     std::string email;
+    std::string full_name;
+    std::string given_name;
     std::string hosted_domain;
+    std::string locale;
     // TODO(rogerta): eventually this structure will include other information
     // about the account, like full name, profile picture URL, etc.
 
@@ -112,8 +120,10 @@ class AccountTrackerService : public KeyedService,
                                              const std::string& email);
 
   // Seeds the account whose account_id is given by PickAccountIdForAccount()
-  // with its corresponding gaia id and email address.
-  void SeedAccountInfo(const std::string& gaia, const std::string& email);
+  // with its corresponding gaia id and email address.  Returns the same
+  // value PickAccountIdForAccount() when given the same arguments.
+  std::string SeedAccountInfo(const std::string& gaia,
+                              const std::string& email);
 
   AccountIdMigrationState GetMigrationState();
   static AccountIdMigrationState GetMigrationState(PrefService* pref_service);
@@ -131,6 +141,11 @@ class AccountTrackerService : public KeyedService,
                               const base::DictionaryValue* user_info);
   void OnUserInfoFetchFailure(AccountInfoFetcher* fetcher);
 
+  // Refreshes the AccountInfo associated with |account_id| if it's invalid or
+  // if |force_remote_fetch| is true.
+  void RefreshAccountInfo(
+      const std::string& account_id, bool force_remote_fetch);
+
   // OAuth2TokenService::Observer implementation.
   void OnRefreshTokenAvailable(const std::string& account_id) override;
   void OnRefreshTokenRevoked(const std::string& account_id) override;
@@ -143,6 +158,7 @@ class AccountTrackerService : public KeyedService,
   void NotifyAccountUpdateFailed(const std::string& account_id);
   void NotifyAccountRemoved(const AccountState& state);
 
+  void StartFetchingInvalidAccounts();
   void StartTrackingAccount(const std::string& account_id);
   void StopTrackingAccount(const std::string& account_id);
 
@@ -156,10 +172,13 @@ class AccountTrackerService : public KeyedService,
   void RemoveFromPrefs(const AccountState& account);
 
   void LoadFromTokenService();
+  void RefreshFromTokenService();
 
   // Virtual so that tests can override the network fetching behaviour.
   virtual void SendRefreshTokenAnnotationRequest(const std::string& account_id);
   void RefreshTokenAnnotationRequestDone(const std::string& account_id);
+
+  void ScheduleNextRefreshFromTokenService();
 
   OAuth2TokenService* token_service_;  // Not owned.
   SigninClient* signin_client_;  // Not owned.
@@ -169,9 +188,11 @@ class AccountTrackerService : public KeyedService,
   bool shutdown_called_;
   bool network_fetches_enabled_;
   std::list<std::string> pending_user_info_fetches_;
+  base::Time last_updated_;
+  base::OneShotTimer<AccountTrackerService> timer_;
 
   // Holds references to refresh token annotation requests keyed by account_id.
-  base::ScopedPtrHashMap<std::string, RefreshTokenAnnotationRequest>
+  base::ScopedPtrHashMap<std::string, scoped_ptr<RefreshTokenAnnotationRequest>>
       refresh_token_annotation_requests_;
 
   DISALLOW_COPY_AND_ASSIGN(AccountTrackerService);

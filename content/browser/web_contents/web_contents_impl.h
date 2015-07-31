@@ -24,6 +24,7 @@
 #include "content/browser/frame_host/render_frame_host_manager.h"
 #include "content/browser/media/audio_state_provider.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
+#include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_delegate.h"
 #include "content/common/accessibility_mode_enums.h"
 #include "content/common/content_export.h"
@@ -43,7 +44,6 @@
 
 struct BrowserPluginHostMsg_ResizeGuest_Params;
 struct ViewHostMsg_DateTimeDialogValue_Params;
-struct ViewMsg_PostMessage_Params;
 
 namespace content {
 class BrowserPluginEmbedder;
@@ -60,7 +60,6 @@ class PluginContentOriginWhitelist;
 class PowerSaveBlocker;
 class RenderViewHost;
 class RenderViewHostDelegateView;
-class RenderViewHostImpl;
 class RenderWidgetHostImpl;
 class SavePackage;
 class ScreenOrientationDispatcherHost;
@@ -157,6 +156,10 @@ class CONTENT_EXPORT WebContentsImpl
   // already exist.
   void CreateBrowserPluginEmbedderIfNecessary();
 
+  // Cancels modal dialogs in this WebContents, as well as in any browser
+  // plugins it is hosting.
+  void CancelActiveAndPendingDialogs();
+
   // Gets the current fullscreen render widget's routing ID. Returns
   // MSG_ROUTING_NONE when there is no fullscreen render widget.
   int GetFullscreenWidgetRoutingID() const;
@@ -177,6 +180,9 @@ class CONTENT_EXPORT WebContentsImpl
   void DidGetRedirectForResourceRequest(
       RenderFrameHost* render_frame_host,
       const ResourceRedirectDetails& details);
+
+  // Notify observers that the web contents has been focused.
+  void NotifyWebContentsFocused();
 
   WebContentsView* GetView() const;
 
@@ -205,6 +211,12 @@ class CONTENT_EXPORT WebContentsImpl
   // have been removed.
   void RemoveAccessibilityMode(AccessibilityMode mode);
 
+  // Request a one-time snapshot of the accessibility tree without changing
+  // the accessibility mode.
+  typedef base::Callback<void(const ui::AXTreeUpdate&)>
+      AXTreeSnapshotCallback;
+  void RequestAXTreeSnapshot(AXTreeSnapshotCallback callback);
+
   // Clear the navigation transition data when the user navigates back to Chrome
   // from a native app.
   void ClearNavigationTransitionData();
@@ -220,13 +232,14 @@ class CONTENT_EXPORT WebContentsImpl
   const GURL& GetLastCommittedURL() const override;
   RenderProcessHost* GetRenderProcessHost() const override;
   RenderFrameHostImpl* GetMainFrame() override;
-  RenderFrameHost* GetFocusedFrame() override;
+  RenderFrameHostImpl* GetFocusedFrame() override;
   void ForEachFrame(
       const base::Callback<void(RenderFrameHost*)>& on_frame) override;
   void SendToAllFrames(IPC::Message* message) override;
-  RenderViewHost* GetRenderViewHost() const override;
+  RenderViewHostImpl* GetRenderViewHost() const override;
   int GetRoutingID() const override;
   RenderWidgetHostView* GetRenderWidgetHostView() const override;
+  void ClosePage() override;
   RenderWidgetHostView* GetFullscreenRenderWidgetHostView() const override;
   SkColor GetThemeColor() const override;
   WebUI* CreateWebUI(const GURL& url) override;
@@ -238,7 +251,7 @@ class CONTENT_EXPORT WebContentsImpl
   bool IsTreeOnlyAccessibilityModeForTesting() const override;
   bool IsFullAccessibilityModeForTesting() const override;
 #if defined(OS_WIN)
-  virtual void SetParentNativeViewAccessible(
+  void SetParentNativeViewAccessible(
       gfx::NativeViewAccessible accessible_parent) override;
 #endif
   const base::string16& GetTitle() const override;
@@ -267,6 +280,7 @@ class CONTENT_EXPORT WebContentsImpl
   bool IsBeingDestroyed() const override;
   void NotifyNavigationStateChanged(InvalidateTypes changed_flags) override;
   base::TimeTicks GetLastActiveTime() const override;
+  void SetLastActiveTime(base::TimeTicks last_active_time) override;
   void WasShown() override;
   void WasHidden() override;
   bool NeedToFireBeforeUnload() override;
@@ -350,6 +364,7 @@ class CONTENT_EXPORT WebContentsImpl
   bool WasRecentlyAudible() override;
   void GetManifest(const GetManifestCallback&) override;
   void ExitFullscreen() override;
+  void ResumeLoadingCreatedWebContents() override;
 #if defined(OS_ANDROID)
   base::android::ScopedJavaLocalRef<jobject> GetJavaWebContents() override;
   virtual WebContentsAndroid* GetWebContentsAndroid();
@@ -370,9 +385,6 @@ class CONTENT_EXPORT WebContentsImpl
   const GURL& GetMainFrameLastCommittedURL() const override;
   void RenderFrameCreated(RenderFrameHost* render_frame_host) override;
   void RenderFrameDeleted(RenderFrameHost* render_frame_host) override;
-  void DidStartLoading(RenderFrameHost* render_frame_host,
-                       bool to_different_document) override;
-  void DidStopLoading() override;
   void SwappedOut(RenderFrameHost* render_frame_host) override;
   void DidDeferAfterResponseStarted(
       const TransitionLayerData& transition_data) override;
@@ -412,6 +424,10 @@ class CONTENT_EXPORT WebContentsImpl
   GeolocationServiceContext* GetGeolocationServiceContext() override;
   void EnterFullscreenMode(const GURL& origin) override;
   void ExitFullscreenMode() override;
+  bool ShouldRouteMessageEvent(
+      RenderFrameHost* target_rfh,
+      SiteInstance* source_site_instance) const override;
+  int EnsureOpenerRenderViewsExist(RenderFrameHost* source_rfh) override;
 #if defined(OS_WIN)
   gfx::NativeViewAccessible GetParentNativeViewAccessible() override;
 #endif
@@ -422,7 +438,7 @@ class CONTENT_EXPORT WebContentsImpl
                          const IPC::Message& message) override;
   // RenderFrameHostDelegate has the same method, so list it there because this
   // interface is going away.
-  // virtual WebContents* GetAsWebContents() override;
+  // WebContents* GetAsWebContents() override;
   gfx::Rect GetRootWindowResizerRect() const override;
   void RenderViewCreated(RenderViewHost* render_view_host) override;
   void RenderViewReady(RenderViewHost* render_view_host) override;
@@ -440,8 +456,6 @@ class CONTENT_EXPORT WebContentsImpl
   void DidCancelLoading() override;
   void DocumentAvailableInMainFrame(RenderViewHost* render_view_host) override;
   void RouteCloseEvent(RenderViewHost* rvh) override;
-  void RouteMessageEvent(RenderViewHost* rvh,
-                         const ViewMsg_PostMessage_Params& params) override;
   bool AddMessageToConsole(int32 level,
                            const base::string16& message,
                            int32 line_no,
@@ -462,6 +476,7 @@ class CONTENT_EXPORT WebContentsImpl
   void RunFileChooser(RenderViewHost* render_view_host,
                       const FileChooserParams& params) override;
   bool IsFullscreenForCurrentTab() const override;
+  blink::WebDisplayMode GetDisplayMode() const override;
   void UpdatePreferredSize(const gfx::Size& pref_size) override;
   void ResizeDueToAutoResize(const gfx::Size& new_size) override;
   void RequestToLockMouse(bool user_gesture,
@@ -536,6 +551,10 @@ class CONTENT_EXPORT WebContentsImpl
   void RequestOpenURL(RenderFrameHostImpl* render_frame_host,
                       const OpenURLParams& params) override;
   bool ShouldPreserveAbortedURLs() override;
+  void DidStartLoading(FrameTreeNode* frame_tree_node,
+                       bool to_different_document) override;
+  void DidStopLoading() override;
+  void DidChangeLoadProgress() override;
 
   // RenderWidgetHostDelegate --------------------------------------------------
 
@@ -563,6 +582,7 @@ class CONTENT_EXPORT WebContentsImpl
       bool for_main_frame_navigation) override;
   bool CreateRenderFrameForRenderManager(RenderFrameHost* render_frame_host,
                                          int parent_routing_id,
+                                         int previous_sibling_routing_id,
                                          int proxy_routing_id) override;
   void BeforeUnloadFiredFromRenderManager(
       bool proceed,
@@ -775,9 +795,6 @@ class CONTENT_EXPORT WebContentsImpl
                                const GURL& target_url);
   void OnDocumentLoadedInFrame();
   void OnDidFinishLoad(const GURL& url);
-  void OnDidStartLoading(bool to_different_document);
-  void OnDidStopLoading();
-  void OnDidChangeLoadProgress(double load_progress);
   void OnGoToEntryAtOffset(int offset);
   void OnUpdateZoomLimits(int minimum_percent,
                           int maximum_percent);
@@ -908,11 +925,11 @@ class CONTENT_EXPORT WebContentsImpl
 
   // Tracking loading progress -------------------------------------------------
 
-  // Resets the tracking state of the current load.
+  // Resets the tracking state of the current load progress.
   void ResetLoadProgressState();
 
-  // Calculates the progress of the current load and notifies the delegate.
-  void SendLoadProgressChanged();
+  // Notifies the delegate that the load progress was updated.
+  void SendChangeLoadProgress();
 
   // Misc non-view stuff -------------------------------------------------------
 
@@ -932,8 +949,6 @@ class CONTENT_EXPORT WebContentsImpl
   // TODO(creis): This should take in a FrameTreeNode to know which node's
   // render manager to return.  For now, we just return the root's.
   RenderFrameHostManager* GetRenderManager() const;
-
-  RenderViewHostImpl* GetRenderViewHostImpl();
 
   // Removes browser plugin embedder if there is one.
   void RemoveBrowserPluginEmbedder();
@@ -1068,8 +1083,6 @@ class CONTENT_EXPORT WebContentsImpl
   // The current load state and the URL associated with it.
   net::LoadStateWithParam load_state_;
   base::string16 load_state_host_;
-
-  double loading_total_progress_;
 
   base::TimeTicks loading_last_progress_update_;
 

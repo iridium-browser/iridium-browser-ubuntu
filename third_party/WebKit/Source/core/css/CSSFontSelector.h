@@ -26,6 +26,7 @@
 #ifndef CSSFontSelector_h
 #define CSSFontSelector_h
 
+#include "core/CoreExport.h"
 #include "core/css/FontFaceCache.h"
 #include "core/css/FontLoader.h"
 #include "platform/fonts/FontSelector.h"
@@ -41,7 +42,7 @@ class CSSFontSelectorClient;
 class Document;
 class FontDescription;
 
-class CSSFontSelector : public FontSelector {
+class CORE_EXPORT CSSFontSelector : public FontSelector {
 public:
     static PassRefPtrWillBeRawPtr<CSSFontSelector> create(Document* document)
     {
@@ -81,10 +82,9 @@ public:
 protected:
     explicit CSSFontSelector(Document*);
 
-private:
-
     void dispatchInvalidationCallbacks();
 
+private:
     // FIXME: Oilpan: Ideally this should just be a traced Member but that will
     // currently leak because ComputedStyle and its data are not on the heap.
     // See crbug.com/383860 for details.

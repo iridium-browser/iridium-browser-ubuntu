@@ -89,8 +89,8 @@ bool BluetoothDeviceWin::IsEqual(
 
   // Checks service collection
   typedef std::set<BluetoothUUID> UUIDSet;
-  typedef base::ScopedPtrHashMap<std::string, BluetoothServiceRecordWin>
-      ServiceRecordMap;
+  typedef base::ScopedPtrHashMap<
+      std::string, scoped_ptr<BluetoothServiceRecordWin>> ServiceRecordMap;
 
   UUIDSet known_services;
   for (UUIDList::const_iterator iter = uuids_.begin(); iter != uuids_.end();
@@ -186,6 +186,15 @@ bool BluetoothDeviceWin::IsConnecting() const {
 
 BluetoothDevice::UUIDList BluetoothDeviceWin::GetUUIDs() const {
   return uuids_;
+}
+
+int16 BluetoothDeviceWin::GetInquiryRSSI() const {
+  return kUnknownPower;
+}
+
+int16 BluetoothDeviceWin::GetInquiryTxPower() const {
+  NOTIMPLEMENTED();
+  return kUnknownPower;
 }
 
 bool BluetoothDeviceWin::ExpectingPinCode() const {

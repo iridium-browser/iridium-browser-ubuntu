@@ -9,16 +9,40 @@
 #include "base/json/json_writer.h"
 #include "base/location.h"
 #include "base/sequenced_task_runner.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_piece.h"
+#include "base/strings/stringprintf.h"
 #include "base/task_runner_util.h"
 #include "base/values.h"
 #include "google_apis/drive/request_sender.h"
 #include "google_apis/drive/request_util.h"
 #include "google_apis/drive/time_util.h"
 #include "net/base/url_util.h"
+#include "net/http/http_response_headers.h"
 
 namespace google_apis {
 namespace drive {
 namespace {
+
+// Format of one request in batch uploading request.
+const char kBatchUploadRequestFormat[] =
+    "%s %s HTTP/1.1\n"
+    "Host: %s\n"
+    "X-Goog-Upload-Protocol: multipart\n"
+    "Content-Type: %s\n"
+    "\n";
+
+// Request header for specifying batch upload.
+const char kBatchUploadHeader[] = "X-Goog-Upload-Protocol: batch";
+
+// Content type of HTTP request.
+const char kHttpContentType[] = "application/http";
+
+// Break line in HTTP message.
+const char kHttpBr[] = "\r\n";
+
+// Mime type of multipart mixed.
+const char kMultipartMixedMimeTypePrefix[] = "multipart/mixed; boundary=";
 
 // Parses the JSON value to FileResource instance and runs |callback| on the
 // UI thread once parsing is done.
@@ -110,7 +134,176 @@ std::string CreateMultipartUploadMetadataJson(
   return json_string;
 }
 
+// Splits |string| into lines by |kHttpBr|.
+// Each line does not include |kHttpBr|.
+void SplitIntoLines(const std::string& string,
+                    std::vector<base::StringPiece>* output) {
+  const size_t br_size = std::string(kHttpBr).size();
+  std::string::const_iterator it = string.begin();
+  std::vector<base::StringPiece> lines;
+  while (true) {
+    const std::string::const_iterator next_pos =
+        std::search(it, string.end(), kHttpBr, kHttpBr + br_size);
+    lines.push_back(base::StringPiece(it, next_pos));
+    if (next_pos == string.end())
+      break;
+    it = next_pos + br_size;
+  }
+  output->swap(lines);
+}
+
+// Remove transport padding (spaces and tabs at the end of line) from |piece|.
+base::StringPiece TrimTransportPadding(const base::StringPiece& piece) {
+  size_t trim_size = 0;
+  while (trim_size < piece.size() &&
+         (piece[piece.size() - 1 - trim_size] == ' ' ||
+          piece[piece.size() - 1 - trim_size] == '\t')) {
+    ++trim_size;
+  }
+  return piece.substr(0, piece.size() - trim_size);
+}
+
+void EmptyClosure(scoped_ptr<BatchableDelegate>) {
+}
+
 }  // namespace
+
+MultipartHttpResponse::MultipartHttpResponse() : code(HTTP_SUCCESS) {
+}
+
+MultipartHttpResponse::~MultipartHttpResponse() {
+}
+
+// The |response| must be multipart/mixed format that contains child HTTP
+// response of drive batch request.
+// https://www.ietf.org/rfc/rfc2046.txt
+//
+// It looks like:
+// --Boundary
+// Content-type: application/http
+//
+// HTTP/1.1 200 OK
+// Header of child response
+//
+// Body of child response
+// --Boundary
+// Content-type: application/http
+//
+// HTTP/1.1 404 Not Found
+// Header of child response
+//
+// Body of child response
+// --Boundary--
+bool ParseMultipartResponse(const std::string& content_type,
+                            const std::string& response,
+                            std::vector<MultipartHttpResponse>* parts) {
+  if (response.empty())
+    return false;
+
+  base::StringPiece content_type_piece(content_type);
+  if (!content_type_piece.starts_with(kMultipartMixedMimeTypePrefix)) {
+    return false;
+  }
+  content_type_piece.remove_prefix(
+      base::StringPiece(kMultipartMixedMimeTypePrefix).size());
+
+  if (content_type_piece.empty())
+    return false;
+  if (content_type_piece[0] == '"') {
+    if (content_type_piece.size() <= 2 ||
+        content_type_piece[content_type_piece.size() - 1] != '"') {
+      return false;
+    }
+    content_type_piece =
+        content_type_piece.substr(1, content_type_piece.size() - 2);
+  }
+
+  std::string boundary;
+  content_type_piece.CopyToString(&boundary);
+  const std::string header = "--" + boundary;
+  const std::string terminator = "--" + boundary + "--";
+
+  std::vector<base::StringPiece> lines;
+  SplitIntoLines(response, &lines);
+
+  enum {
+    STATE_START,
+    STATE_PART_HEADER,
+    STATE_PART_HTTP_STATUS_LINE,
+    STATE_PART_HTTP_HEADER,
+    STATE_PART_HTTP_BODY
+  } state = STATE_START;
+
+  const std::string kHttpStatusPrefix = "HTTP/1.1 ";
+  std::vector<MultipartHttpResponse> responses;
+  DriveApiErrorCode code = DRIVE_PARSE_ERROR;
+  std::string body;
+  for (const auto& line : lines) {
+    if (state == STATE_PART_HEADER && line.empty()) {
+      state = STATE_PART_HTTP_STATUS_LINE;
+      continue;
+    }
+
+    if (state == STATE_PART_HTTP_STATUS_LINE) {
+      if (line.starts_with(kHttpStatusPrefix)) {
+        int int_code;
+        base::StringToInt(
+            line.substr(base::StringPiece(kHttpStatusPrefix).size()),
+            &int_code);
+        if (int_code > 0)
+          code = static_cast<DriveApiErrorCode>(int_code);
+        else
+          code = DRIVE_PARSE_ERROR;
+      } else {
+        code = DRIVE_PARSE_ERROR;
+      }
+      state = STATE_PART_HTTP_HEADER;
+      continue;
+    }
+
+    if (state == STATE_PART_HTTP_HEADER && line.empty()) {
+      state = STATE_PART_HTTP_BODY;
+      body.clear();
+      continue;
+    }
+    const base::StringPiece chopped_line = TrimTransportPadding(line);
+    const bool is_new_part = chopped_line == header;
+    const bool was_last_part = chopped_line == terminator;
+    if (is_new_part || was_last_part) {
+      switch (state) {
+        case STATE_START:
+          break;
+        case STATE_PART_HEADER:
+        case STATE_PART_HTTP_STATUS_LINE:
+          responses.push_back(MultipartHttpResponse());
+          responses.back().code = DRIVE_PARSE_ERROR;
+          break;
+        case STATE_PART_HTTP_HEADER:
+          responses.push_back(MultipartHttpResponse());
+          responses.back().code = code;
+          break;
+        case STATE_PART_HTTP_BODY:
+          // Drop the last kHttpBr.
+          if (!body.empty())
+            body.resize(body.size() - 2);
+          responses.push_back(MultipartHttpResponse());
+          responses.back().code = code;
+          responses.back().body.swap(body);
+          break;
+      }
+      if (is_new_part)
+        state = STATE_PART_HEADER;
+      if (was_last_part)
+        break;
+    } else if (state == STATE_PART_HTTP_BODY) {
+      line.AppendToString(&body);
+      body.append(kHttpBr);
+    }
+  }
+
+  parts->swap(responses);
+  return true;
+}
 
 Property::Property() : visibility_(VISIBILITY_PRIVATE) {
 }
@@ -781,10 +974,10 @@ void GetUploadStatusRequest::OnRangeRequestComplete(
   ParseFileResourceWithUploadRangeAndRun(callback_, response, value.Pass());
 }
 
-//======================= MultipartUploadNewFileRequest =======================
+//======================= MultipartUploadNewFileDelegate =======================
 
-MultipartUploadNewFileRequest::MultipartUploadNewFileRequest(
-    RequestSender* sender,
+MultipartUploadNewFileDelegate::MultipartUploadNewFileDelegate(
+    base::SequencedTaskRunner* task_runner,
     const std::string& title,
     const std::string& parent_resource_id,
     const std::string& content_type,
@@ -797,7 +990,7 @@ MultipartUploadNewFileRequest::MultipartUploadNewFileRequest(
     const FileResourceCallback& callback,
     const ProgressCallback& progress_callback)
     : MultipartUploadRequestBase(
-          sender,
+          task_runner,
           CreateMultipartUploadMetadataJson(title,
                                             parent_resource_id,
                                             modified_date,
@@ -812,22 +1005,22 @@ MultipartUploadNewFileRequest::MultipartUploadNewFileRequest(
       url_generator_(url_generator) {
 }
 
-MultipartUploadNewFileRequest::~MultipartUploadNewFileRequest() {
+MultipartUploadNewFileDelegate::~MultipartUploadNewFileDelegate() {
 }
 
-GURL MultipartUploadNewFileRequest::GetURL() const {
+GURL MultipartUploadNewFileDelegate::GetURL() const {
   return url_generator_.GetMultipartUploadNewFileUrl(has_modified_date_);
 }
 
-net::URLFetcher::RequestType MultipartUploadNewFileRequest::GetRequestType()
+net::URLFetcher::RequestType MultipartUploadNewFileDelegate::GetRequestType()
     const {
   return net::URLFetcher::POST;
 }
 
-//======================= MultipartUploadExistingFileRequest ===================
+//====================== MultipartUploadExistingFileDelegate ===================
 
-MultipartUploadExistingFileRequest::MultipartUploadExistingFileRequest(
-    RequestSender* sender,
+MultipartUploadExistingFileDelegate::MultipartUploadExistingFileDelegate(
+    base::SequencedTaskRunner* task_runner,
     const std::string& title,
     const std::string& resource_id,
     const std::string& parent_resource_id,
@@ -842,7 +1035,7 @@ MultipartUploadExistingFileRequest::MultipartUploadExistingFileRequest(
     const FileResourceCallback& callback,
     const ProgressCallback& progress_callback)
     : MultipartUploadRequestBase(
-          sender,
+          task_runner,
           CreateMultipartUploadMetadataJson(title,
                                             parent_resource_id,
                                             modified_date,
@@ -859,24 +1052,24 @@ MultipartUploadExistingFileRequest::MultipartUploadExistingFileRequest(
       url_generator_(url_generator) {
 }
 
-MultipartUploadExistingFileRequest::~MultipartUploadExistingFileRequest() {
+MultipartUploadExistingFileDelegate::~MultipartUploadExistingFileDelegate() {
 }
 
 std::vector<std::string>
-MultipartUploadExistingFileRequest::GetExtraRequestHeaders() const {
+MultipartUploadExistingFileDelegate::GetExtraRequestHeaders() const {
   std::vector<std::string> headers(
       MultipartUploadRequestBase::GetExtraRequestHeaders());
   headers.push_back(util::GenerateIfMatchHeader(etag_));
   return headers;
 }
 
-GURL MultipartUploadExistingFileRequest::GetURL() const {
+GURL MultipartUploadExistingFileDelegate::GetURL() const {
   return url_generator_.GetMultipartUploadExistingFileUrl(resource_id_,
                                                           has_modified_date_);
 }
 
 net::URLFetcher::RequestType
-MultipartUploadExistingFileRequest::GetRequestType() const {
+MultipartUploadExistingFileDelegate::GetRequestType() const {
   return net::URLFetcher::PUT;
 }
 
@@ -969,7 +1162,72 @@ bool PermissionsInsertRequest::GetContentData(std::string* upload_content_type,
   return true;
 }
 
+//======================= SingleBatchableDelegateRequest =======================
+
+SingleBatchableDelegateRequest::SingleBatchableDelegateRequest(
+    RequestSender* sender,
+    BatchableDelegate* delegate)
+    : UrlFetchRequestBase(sender),
+      delegate_(delegate),
+      weak_ptr_factory_(this) {
+}
+
+SingleBatchableDelegateRequest::~SingleBatchableDelegateRequest() {
+}
+
+GURL SingleBatchableDelegateRequest::GetURL() const {
+  return delegate_->GetURL();
+}
+
+net::URLFetcher::RequestType SingleBatchableDelegateRequest::GetRequestType()
+    const {
+  return delegate_->GetRequestType();
+}
+
+std::vector<std::string>
+SingleBatchableDelegateRequest::GetExtraRequestHeaders() const {
+  return delegate_->GetExtraRequestHeaders();
+}
+
+void SingleBatchableDelegateRequest::Prepare(const PrepareCallback& callback) {
+  delegate_->Prepare(callback);
+}
+
+bool SingleBatchableDelegateRequest::GetContentData(
+    std::string* upload_content_type,
+    std::string* upload_content) {
+  return delegate_->GetContentData(upload_content_type, upload_content);
+}
+
+void SingleBatchableDelegateRequest::ProcessURLFetchResults(
+    const net::URLFetcher* source) {
+  delegate_->NotifyResult(
+      GetErrorCode(), response_writer()->data(),
+      base::Bind(
+          &SingleBatchableDelegateRequest::OnProcessURLFetchResultsComplete,
+          weak_ptr_factory_.GetWeakPtr()));
+}
+
+void SingleBatchableDelegateRequest::RunCallbackOnPrematureFailure(
+    DriveApiErrorCode code) {
+  delegate_->NotifyError(code);
+}
+
+void SingleBatchableDelegateRequest::OnURLFetchUploadProgress(
+    const net::URLFetcher* source,
+    int64 current,
+    int64 total) {
+  delegate_->NotifyUploadProgress(source, current, total);
+}
+
 //========================== BatchUploadRequest ==========================
+
+BatchUploadChildEntry::BatchUploadChildEntry(BatchableDelegate* request)
+    : request(request), prepared(false), data_offset(0), data_size(0) {
+}
+
+BatchUploadChildEntry::~BatchUploadChildEntry() {
+}
 
 BatchUploadRequest::BatchUploadRequest(
     RequestSender* sender,
@@ -977,23 +1235,134 @@ BatchUploadRequest::BatchUploadRequest(
     : UrlFetchRequestBase(sender),
       sender_(sender),
       url_generator_(url_generator),
+      committed_(false),
+      last_progress_value_(0),
       weak_ptr_factory_(this) {
 }
 
 BatchUploadRequest::~BatchUploadRequest() {
-  for (const auto& child : child_requests_) {
-    // Request will be deleted in RequestFinished method.
-    sender_->RequestFinished(child.request);
-  }
 }
 
-void BatchUploadRequest::AddRequest(UrlFetchRequestBase* request) {
+void BatchUploadRequest::SetBoundaryForTesting(const std::string& boundary) {
+  boundary_ = boundary;
+}
+
+void BatchUploadRequest::AddRequest(BatchableDelegate* request) {
+  DCHECK(CalledOnValidThread());
   DCHECK(request);
-  child_requests_.push_back(BatchUploadChildEntry(request));
+  DCHECK(GetChildEntry(request) == child_requests_.end());
+  DCHECK(!committed_);
+  child_requests_.push_back(new BatchUploadChildEntry(request));
+  request->Prepare(base::Bind(&BatchUploadRequest::OnChildRequestPrepared,
+                              weak_ptr_factory_.GetWeakPtr(), request));
+}
+
+void BatchUploadRequest::OnChildRequestPrepared(RequestID request_id,
+                                                DriveApiErrorCode result) {
+  DCHECK(CalledOnValidThread());
+  auto const child = GetChildEntry(request_id);
+  DCHECK(child != child_requests_.end());
+  if (IsSuccessfulDriveApiErrorCode(result)) {
+    (*child)->prepared = true;
+  } else {
+    (*child)->request->NotifyError(result);
+    child_requests_.erase(child);
+  }
+  MayCompletePrepare();
 }
 
 void BatchUploadRequest::Commit() {
-  NOTIMPLEMENTED();
+  DCHECK(CalledOnValidThread());
+  DCHECK(!committed_);
+  if (child_requests_.empty()) {
+    Cancel();
+  } else {
+    committed_ = true;
+    MayCompletePrepare();
+  }
+}
+
+void BatchUploadRequest::Prepare(const PrepareCallback& callback) {
+  DCHECK(CalledOnValidThread());
+  DCHECK(!callback.is_null());
+  prepare_callback_ = callback;
+  MayCompletePrepare();
+}
+
+void BatchUploadRequest::Cancel() {
+  child_requests_.clear();
+  UrlFetchRequestBase::Cancel();
+}
+
+// Obtains corresponding child entry of |request_id|. Returns NULL if the
+// entry is not found.
+ScopedVector<BatchUploadChildEntry>::iterator BatchUploadRequest::GetChildEntry(
+    RequestID request_id) {
+  for (auto it = child_requests_.begin(); it != child_requests_.end(); ++it) {
+    if ((*it)->request.get() == request_id)
+      return it;
+  }
+  return child_requests_.end();
+}
+
+void BatchUploadRequest::MayCompletePrepare() {
+  if (!committed_ || prepare_callback_.is_null())
+    return;
+  for (const auto& child : child_requests_) {
+    if (!child->prepared)
+      return;
+  }
+
+  // Build multipart body here.
+  std::vector<ContentTypeAndData> parts;
+  for (auto& child : child_requests_) {
+    std::string type;
+    std::string data;
+    const bool result = child->request->GetContentData(&type, &data);
+    // Upload request must have content data.
+    DCHECK(result);
+
+    const GURL url = child->request->GetURL();
+    std::string method;
+    switch (child->request->GetRequestType()) {
+      case net::URLFetcher::POST:
+        method = "POST";
+        break;
+      case net::URLFetcher::PUT:
+        method = "PUT";
+        break;
+      default:
+        NOTREACHED();
+        break;
+    }
+    const std::string header = base::StringPrintf(
+        kBatchUploadRequestFormat, method.c_str(), url.path().c_str(),
+        url_generator_.GetBatchUploadUrl().host().c_str(), type.c_str());
+
+    child->data_offset = header.size();
+    child->data_size = data.size();
+
+    parts.push_back(ContentTypeAndData());
+    parts.back().type = kHttpContentType;
+    parts.back().data = header;
+    parts.back().data.append(data);
+  }
+
+  std::vector<uint64> part_data_offset;
+  GenerateMultipartBody(MULTIPART_MIXED, boundary_, parts, &upload_content_,
+                        &part_data_offset);
+  DCHECK(part_data_offset.size() == child_requests_.size());
+  for (size_t i = 0; i < child_requests_.size(); ++i) {
+    child_requests_[i]->data_offset += part_data_offset[i];
+  }
+  prepare_callback_.Run(HTTP_SUCCESS);
+}
+
+bool BatchUploadRequest::GetContentData(std::string* upload_content_type,
+                                        std::string* upload_content_data) {
+  upload_content_type->assign(upload_content_.type);
+  upload_content_data->assign(upload_content_.data);
+  return true;
 }
 
 base::WeakPtr<BatchUploadRequest>
@@ -1002,17 +1371,74 @@ BatchUploadRequest::GetWeakPtrAsBatchUploadRequest() {
 }
 
 GURL BatchUploadRequest::GetURL() const {
-  NOTIMPLEMENTED();
-  return GURL();
+  return url_generator_.GetBatchUploadUrl();
+}
+
+net::URLFetcher::RequestType BatchUploadRequest::GetRequestType() const {
+  return net::URLFetcher::PUT;
+}
+
+std::vector<std::string> BatchUploadRequest::GetExtraRequestHeaders() const {
+  std::vector<std::string> headers;
+  headers.push_back(kBatchUploadHeader);
+  return headers;
 }
 
 void BatchUploadRequest::ProcessURLFetchResults(const net::URLFetcher* source) {
-  NOTIMPLEMENTED();
+  if (!IsSuccessfulDriveApiErrorCode(GetErrorCode())) {
+    RunCallbackOnPrematureFailure(GetErrorCode());
+    sender_->RequestFinished(this);
+    return;
+  }
+
+  std::string content_type;
+  source->GetResponseHeaders()->EnumerateHeader(
+      /* need only first header */ NULL, "Content-Type", &content_type);
+
+  std::vector<MultipartHttpResponse> parts;
+  if (!ParseMultipartResponse(content_type, response_writer()->data(),
+                              &parts) ||
+      child_requests_.size() != parts.size()) {
+    RunCallbackOnPrematureFailure(DRIVE_PARSE_ERROR);
+    sender_->RequestFinished(this);
+    return;
+  }
+
+  for (size_t i = 0; i < parts.size(); ++i) {
+    BatchableDelegate* const delegate = child_requests_[i]->request.get();
+    // Pass onwership of |delegate| so that child_requests_.clear() won't
+    // kill the delegate. It has to be deleted after the notification.
+    delegate->NotifyResult(
+        parts[i].code, parts[i].body,
+        base::Bind(&EmptyClosure, base::Passed(&child_requests_[i]->request)));
+  }
+  child_requests_.clear();
+
+  sender_->RequestFinished(this);
 }
 
 void BatchUploadRequest::RunCallbackOnPrematureFailure(DriveApiErrorCode code) {
-  NOTIMPLEMENTED();
+  for (auto child : child_requests_) {
+    child->request->NotifyError(code);
+  }
+  child_requests_.clear();
 }
 
+void BatchUploadRequest::OnURLFetchUploadProgress(const net::URLFetcher* source,
+                                                  int64 current,
+                                                  int64 total) {
+  for (auto child : child_requests_) {
+    if (child->data_offset <= current &&
+        current <= child->data_offset + child->data_size) {
+      child->request->NotifyUploadProgress(source, current - child->data_offset,
+                                           child->data_size);
+    } else if (last_progress_value_ < child->data_offset + child->data_size &&
+               child->data_offset + child->data_size < current) {
+      child->request->NotifyUploadProgress(source, child->data_size,
+                                           child->data_size);
+    }
+  }
+  last_progress_value_ = current;
+}
 }  // namespace drive
 }  // namespace google_apis

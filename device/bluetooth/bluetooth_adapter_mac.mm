@@ -64,16 +64,6 @@ BluetoothAdapterMac::BluetoothAdapterMac()
 BluetoothAdapterMac::~BluetoothAdapterMac() {
 }
 
-void BluetoothAdapterMac::AddObserver(BluetoothAdapter::Observer* observer) {
-  DCHECK(observer);
-  observers_.AddObserver(observer);
-}
-
-void BluetoothAdapterMac::RemoveObserver(BluetoothAdapter::Observer* observer) {
-  DCHECK(observer);
-  observers_.RemoveObserver(observer);
-}
-
 std::string BluetoothAdapterMac::GetAddress() const {
   return address_;
 }
@@ -150,6 +140,14 @@ void BluetoothAdapterMac::RegisterAudioSink(
   error_callback.Run(BluetoothAudioSink::ERROR_UNSUPPORTED_PLATFORM);
 }
 
+void BluetoothAdapterMac::RegisterAdvertisement(
+    scoped_ptr<BluetoothAdvertisement::Data> advertisement_data,
+    const CreateAdvertisementCallback& callback,
+    const CreateAdvertisementErrorCallback& error_callback) {
+  NOTIMPLEMENTED();
+  error_callback.Run(BluetoothAdvertisement::ERROR_UNSUPPORTED_PLATFORM);
+}
+
 void BluetoothAdapterMac::DeviceFound(IOBluetoothDevice* device) {
   DeviceAdded(device);
 }
@@ -173,13 +171,8 @@ void BluetoothAdapterMac::DeviceConnected(IOBluetoothDevice* device) {
   DeviceAdded(device);
 }
 
-void BluetoothAdapterMac::DeleteOnCorrectThread() const {
-  if (ui_task_runner_->RunsTasksOnCurrentThread() ||
-      !ui_task_runner_->DeleteSoon(FROM_HERE, this))
-    delete this;
-}
-
 void BluetoothAdapterMac::AddDiscoverySession(
+    BluetoothDiscoveryFilter* discovery_filter,
     const base::Closure& callback,
     const ErrorCallback& error_callback) {
   DVLOG(1) << __func__;
@@ -207,6 +200,7 @@ void BluetoothAdapterMac::AddDiscoverySession(
 }
 
 void BluetoothAdapterMac::RemoveDiscoverySession(
+    BluetoothDiscoveryFilter* discovery_filter,
     const base::Closure& callback,
     const ErrorCallback& error_callback) {
   DVLOG(1) << __func__;
@@ -236,6 +230,14 @@ void BluetoothAdapterMac::RemoveDiscoverySession(
   callback.Run();
 }
 
+void BluetoothAdapterMac::SetDiscoveryFilter(
+    scoped_ptr<BluetoothDiscoveryFilter> discovery_filter,
+    const base::Closure& callback,
+    const ErrorCallback& error_callback) {
+  NOTIMPLEMENTED();
+  error_callback.Run();
+}
+
 void BluetoothAdapterMac::RemovePairingDelegateInternal(
     BluetoothDevice::PairingDelegate* pairing_delegate) {
 }
@@ -258,7 +260,6 @@ void BluetoothAdapterMac::PollAdapter() {
       FROM_HERE_WITH_EXPLICIT_FUNCTION(
           "461181 BluetoothAdapterMac::PollAdapter::Start"));
   bool was_present = IsPresent();
-  std::string name;
   std::string address;
   bool powered = false;
   IOBluetoothHostController* controller =
@@ -270,14 +271,21 @@ void BluetoothAdapterMac::PollAdapter() {
       FROM_HERE_WITH_EXPLICIT_FUNCTION(
           "461181 BluetoothAdapterMac::PollAdapter::GetControllerStats"));
   if (controller != nil) {
-    name = base::SysNSStringToUTF8([controller nameAsString]);
     address = BluetoothDevice::CanonicalizeAddress(
         base::SysNSStringToUTF8([controller addressAsString]));
     powered = ([controller powerState] == kBluetoothHCIPowerStateON);
+
+    // For performance reasons, cache the adapter's name. It's not uncommon for
+    // a call to [controller nameAsString] to take tens of milliseconds. Note
+    // that this caching strategy might result in clients receiving a stale
+    // name. If this is a significant issue, then some more sophisticated
+    // workaround for the performance bottleneck will be needed. For additional
+    // context, see http://crbug.com/461181 and http://crbug.com/467316
+    if (address != address_ || (!address.empty() && name_.empty()))
+      name_ = base::SysNSStringToUTF8([controller nameAsString]);
   }
 
   bool is_present = !address.empty();
-  name_ = name;
   address_ = address;
 
   // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/461181

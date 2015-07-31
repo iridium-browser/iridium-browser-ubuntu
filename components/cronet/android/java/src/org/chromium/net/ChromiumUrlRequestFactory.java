@@ -7,7 +7,7 @@ package org.chromium.net;
 import android.content.Context;
 import android.os.Build;
 
-import org.chromium.base.UsedByReflection;
+import org.chromium.base.annotations.UsedByReflection;
 
 import java.nio.channels.WritableByteChannel;
 import java.util.Map;
@@ -58,8 +58,8 @@ public class ChromiumUrlRequestFactory extends HttpUrlRequestFactory {
     }
 
     @Override
-    public void startNetLogToFile(String fileName) {
-        mRequestContext.startNetLogToFile(fileName);
+    public void startNetLogToFile(String fileName, boolean logAll) {
+        mRequestContext.startNetLogToFile(fileName, logAll);
     }
 
     @Override

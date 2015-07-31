@@ -72,10 +72,6 @@ const char kDisableHIDDetectionOnOOBE[] = "disable-hid-detection-on-oobe";
 // Avoid doing expensive animations upon login.
 const char kDisableLoginAnimations[] = "disable-login-animations";
 
-// Disable login/lock UI (user pods) scrolling into view on JS side when virtual
-// keyboard is shown.
-const char kDisableLoginScrollIntoView[] = "disable-login-scroll-into-view";
-
 // Disable new channel switcher UI.
 const char kDisableNewChannelSwitcherUI[] = "disable-new-channel-switcher-ui";
 
@@ -108,9 +104,6 @@ const char kDisableNetworkPortalNotification[] =
 const char kEafeUrl[] = "eafe-url";
 const char kEafePath[] = "eafe-path";
 
-// Enables switching between different cellular carriers from the UI.
-const char kEnableCarrierSwitching[] = "enable-carrier-switching";
-
 // Enables consumer management, which allows user to enroll, remotely lock and
 // locate the device.
 const char kEnableConsumerManagement[] = "enable-consumer-management";
@@ -118,12 +111,12 @@ const char kEnableConsumerManagement[] = "enable-consumer-management";
 // If this switch is set, the device cannot be remotely disabled by its owner.
 const char kDisableDeviceDisabling[] = "disable-device-disabling";
 
-// If this switch is set, the new Korean IME will be available in
+// If this switch is set, the new Korean IME will not be available in
 // chrome://settings/languages.
-const char kEnableNewKoreanIme[] = "enable-new-korean-ime";
+const char kDisableNewKoreanIme[] = "disable-new-korean-ime";
 
-// If this switch is set, the input view keyboard will disable materia design.
-const char kDisableNewMDInputView[] = "disable-new-md-input-view";
+// Disables mtp write support.
+const char kDisableMtpWriteSupport[] = "disable-mtp-write-support";
 
 // If this switch is set, the options for suggestions as typing on physical
 // keyboard will be enabled.
@@ -135,14 +128,8 @@ const char kEnablePhysicalKeyboardAutocorrect[] =
 const char kDisablePhysicalKeyboardAutocorrect[] =
     "disable-physical-keyboard-autocorrect";
 
-// If this switch is set, the voice input will be disabled.
-const char kDisableVoiceInput[] = "disable-voice-input";
-
 // Enabled sharing assets for installed default apps.
 const char kEnableExtensionAssetsSharing[]  = "enable-extension-assets-sharing";
-
-// Enables mtp write support.
-const char kEnableMtpWriteSupport[] = "enable-mtp-write-support";
 
 // Enables notifications about captive portals in session.
 const char kEnableNetworkPortalNotification[] =
@@ -222,6 +209,10 @@ const char kHostPairingOobe[] = "host-pairing-oobe";
 // turn on multi-profile feature on ChromeOS.
 const char kIgnoreUserProfileMappingForTests[] =
     "ignore-user-profile-mapping-for-tests";
+
+// File to load internal display ICC file from.
+const char kInternalDisplayColorProfileFile[] =
+    "internal-display-color-profile-file";
 
 // Enables Chrome-as-a-login-manager behavior.
 const char kLoginManager[] = "login-manager";
@@ -330,20 +321,19 @@ const char kDisableCaptivePortalBypassProxy[] =
 const char kDisableTimeZoneTrackingOption[] =
     "disable-timezone-tracking-option";
 
-// Enable OAuth token validation on sign in screen.
-const char kEnableOAuthTokenHandlers[] = "enable-oauth-token-handlers";
-
 // Disable new GAIA sign-in flow.
 const char kDisableWebviewSigninFlow[] = "disable-webview-signin-flow";
-
-// Enable Chrome OS firewall hole-punching for Chrome Apps.
-const char kEnableFirewallHolePunching[] = "enable-firewall-hole-punching";
 
 // Enables searching for an app that supports a plugged in USB printer. When a
 // user plugs in USB printer, they are shown a notification offering to search
 // Chroem Web Store for an app that has printerProvider permission and can
 // handle the plugged in printer.
 const char kEnablePrinterAppSearch[] = "enable-printer-app-search";
+
+// Switches and optional value for Data Saver prompt on cellular networks.
+const char kDisableDataSaverPrompt[] = "disable-datasaver-prompt";
+const char kEnableDataSaverPrompt[] = "enable-datasaver-prompt";
+const char kDataSaverPromptDemoMode[] = "demo";
 
 bool WakeOnWifiEnabled() {
   return !base::CommandLine::ForCurrentProcess()->HasSwitch(kDisableWakeOnWifi);
@@ -358,40 +348,38 @@ bool MemoryPressureHandlingEnabled() {
   return true;
 }
 
-base::MemoryPressureObserverChromeOS::MemoryPressureThresholds
+base::chromeos::MemoryPressureMonitor::MemoryPressureThresholds
 GetMemoryPressureThresholds() {
+  using MemoryPressureMonitor = base::chromeos::MemoryPressureMonitor;
+
   if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
           kMemoryPressureThresholds)) {
     const std::string group_name =
         base::FieldTrialList::FindFullName(kMemoryPressureExperimentName);
     if (group_name == kConservativeThreshold)
-      return base::MemoryPressureObserverChromeOS::THRESHOLD_CONSERVATIVE;
+      return MemoryPressureMonitor::THRESHOLD_CONSERVATIVE;
     if (group_name == kAggressiveCacheDiscardThreshold)
-      return base::MemoryPressureObserverChromeOS::
-          THRESHOLD_AGGRESSIVE_CACHE_DISCARD;
+      return MemoryPressureMonitor::THRESHOLD_AGGRESSIVE_CACHE_DISCARD;
     if (group_name == kAggressiveTabDiscardThreshold)
-      return base::MemoryPressureObserverChromeOS::
-          THRESHOLD_AGGRESSIVE_TAB_DISCARD;
+      return MemoryPressureMonitor::THRESHOLD_AGGRESSIVE_TAB_DISCARD;
     if (group_name == kAggressiveThreshold)
-      return base::MemoryPressureObserverChromeOS::THRESHOLD_AGGRESSIVE;
-    return base::MemoryPressureObserverChromeOS::THRESHOLD_DEFAULT;
+      return MemoryPressureMonitor::THRESHOLD_AGGRESSIVE;
+    return MemoryPressureMonitor::THRESHOLD_DEFAULT;
   }
 
   const std::string option =
       base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           kMemoryPressureThresholds);
   if (option == kConservativeThreshold)
-    return base::MemoryPressureObserverChromeOS::THRESHOLD_CONSERVATIVE;
+    return MemoryPressureMonitor::THRESHOLD_CONSERVATIVE;
   if (option == kAggressiveCacheDiscardThreshold)
-    return base::MemoryPressureObserverChromeOS::
-        THRESHOLD_AGGRESSIVE_CACHE_DISCARD;
+    return MemoryPressureMonitor::THRESHOLD_AGGRESSIVE_CACHE_DISCARD;
   if (option == kAggressiveTabDiscardThreshold)
-    return base::MemoryPressureObserverChromeOS::
-        THRESHOLD_AGGRESSIVE_TAB_DISCARD;
+    return MemoryPressureMonitor::THRESHOLD_AGGRESSIVE_TAB_DISCARD;
   if (option == kAggressiveThreshold)
-    return base::MemoryPressureObserverChromeOS::THRESHOLD_AGGRESSIVE;
+    return MemoryPressureMonitor::THRESHOLD_AGGRESSIVE;
 
-  return base::MemoryPressureObserverChromeOS::THRESHOLD_DEFAULT;
+  return MemoryPressureMonitor::THRESHOLD_DEFAULT;
 }
 
 }  // namespace switches

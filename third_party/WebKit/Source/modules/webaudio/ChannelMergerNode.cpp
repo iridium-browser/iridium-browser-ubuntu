@@ -58,21 +58,25 @@ ChannelMergerHandler::ChannelMergerHandler(AudioNode& node, float sampleRate, un
     initialize();
 }
 
+PassRefPtr<ChannelMergerHandler> ChannelMergerHandler::create(AudioNode& node, float sampleRate, unsigned numberOfInputs)
+{
+    return adoptRef(new ChannelMergerHandler(node, sampleRate, numberOfInputs));
+}
+
 void ChannelMergerHandler::process(size_t framesToProcess)
 {
-    AudioNodeOutput* output = this->output(0);
-    ASSERT(output);
-    ASSERT_UNUSED(framesToProcess, framesToProcess == output->bus()->length());
+    AudioNodeOutput& output = this->output(0);
+    ASSERT_UNUSED(framesToProcess, framesToProcess == output.bus()->length());
 
-    unsigned numberOfOutputChannels = output->numberOfChannels();
+    unsigned numberOfOutputChannels = output.numberOfChannels();
     ASSERT(numberOfInputs() == numberOfOutputChannels);
 
     // Merge multiple inputs into one output.
     for (unsigned i = 0; i < numberOfOutputChannels; ++i) {
-        AudioNodeInput* input = this->input(i);
-        ASSERT(input->numberOfChannels() == 1);
-        AudioChannel* outputChannel = output->bus()->channel(i);
-        if (input->isConnected()) {
+        AudioNodeInput& input = this->input(i);
+        ASSERT(input.numberOfChannels() == 1);
+        AudioChannel* outputChannel = output.bus()->channel(i);
+        if (input.isConnected()) {
 
             // The mixing rules will be applied so multiple channels are down-
             // mixed to mono (when the mixing rule is defined). Note that only
@@ -80,7 +84,7 @@ void ChannelMergerHandler::process(size_t framesToProcess)
             // layout.
             //
             // See: http://webaudio.github.io/web-audio-api/#channel-up-mixing-and-down-mixing
-            AudioChannel* inputChannel = input->bus()->channel(0);
+            AudioChannel* inputChannel = input.bus()->channel(0);
             outputChannel->copyFrom(inputChannel);
 
         } else {
@@ -99,10 +103,7 @@ void ChannelMergerHandler::setChannelCount(unsigned long channelCount, Exception
     if (channelCount != 1) {
         exceptionState.throwDOMException(
             InvalidStateError,
-            ExceptionMessages::failedToSet(
-                "channelCount",
-                "ChannelMergerNode",
-                "channelCount cannot be changed"));
+            "ChannelMerger: channelCount cannot be changed from 1");
     }
 }
 
@@ -115,10 +116,7 @@ void ChannelMergerHandler::setChannelCountMode(const String& mode, ExceptionStat
     if (mode != "explicit") {
         exceptionState.throwDOMException(
             InvalidStateError,
-            ExceptionMessages::failedToSet(
-                "channelCountMode",
-                "ChannelMergerNode",
-                "channelCountMode cannot be changed"));
+            "ChannelMerger: channelCountMode cannot be changed from 'explicit'");
     }
 }
 
@@ -127,14 +125,14 @@ void ChannelMergerHandler::setChannelCountMode(const String& mode, ExceptionStat
 ChannelMergerNode::ChannelMergerNode(AudioContext& context, float sampleRate, unsigned numberOfInputs)
     : AudioNode(context)
 {
-    setHandler(new ChannelMergerHandler(*this, sampleRate, numberOfInputs));
+    setHandler(ChannelMergerHandler::create(*this, sampleRate, numberOfInputs));
 }
 
-ChannelMergerNode* ChannelMergerNode::create(AudioContext* context, float sampleRate, unsigned numberOfInputs)
+ChannelMergerNode* ChannelMergerNode::create(AudioContext& context, float sampleRate, unsigned numberOfInputs)
 {
     if (!numberOfInputs || numberOfInputs > AudioContext::maxNumberOfChannels())
         return nullptr;
-    return new ChannelMergerNode(*context, sampleRate, numberOfInputs);
+    return new ChannelMergerNode(context, sampleRate, numberOfInputs);
 }
 
 } // namespace blink

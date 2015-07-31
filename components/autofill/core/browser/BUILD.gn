@@ -2,23 +2,15 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-# GYP version: components/autofill.gyp:autofill_regexes
-action("regexes") {
-  visibility = [ "//components/autofill/*" ]
-  script = "//build/escape_unicode.py"
+import("//build/config/chrome_build.gni")
 
-  inputs = [
-    "autofill_regex_constants.cc.utf8",
-  ]
-  outputs = [
-    "$target_gen_dir/autofill_regex_constants.cc",
-  ]
-
-  args = [
-    "-o",
-    rebase_path(target_gen_dir, root_build_dir),
-  ]
-  args += rebase_path(inputs, root_build_dir)
+# This config sets the define that controls which Wallet service to contact
+# for features using Wallet integration. Unofficial builds won't have the
+# proper API keys so it uses the "sandbox" test servers instead.
+config("wallet_service") {
+  if (is_official_build) {
+    defines = [ "ENABLE_PROD_WALLET_SERVICE=1" ]
+  }
 }
 
 # GYP version: components/autofill.gyp:autofill_core_browser
@@ -59,10 +51,8 @@ static_library("browser") {
     "autofill_popup_delegate.h",
     "autofill_profile.cc",
     "autofill_profile.h",
-    "autofill_regex_constants.cc.utf8",
+    "autofill_regex_constants.cc",
     "autofill_regex_constants.h",
-    "autofill_regexes.cc",
-    "autofill_regexes.h",
     "autofill_scanner.cc",
     "autofill_scanner.h",
     "autofill_server_field_info.h",
@@ -94,6 +84,8 @@ static_library("browser") {
     "form_structure.h",
     "name_field.cc",
     "name_field.h",
+    "options_util.cc",
+    "options_util.h",
     "password_generator.cc",
     "password_generator.h",
     "personal_data_manager.cc",
@@ -138,16 +130,7 @@ static_library("browser") {
     "webdata/autofill_webdata_service_observer.h",
   ]
 
-  # Compile the generated regex file.
-  sources += get_target_outputs(":regexes")
-
-  # Controls whether Wallet cards can be saved to the local instance of chrome.
-  if (!is_desktop_linux) {
-    defines = [ "ENABLE_SAVE_WALLET_CARDS_LOCALLY" ]
-  }
-
   deps = [
-    ":regexes",
     "//base",
     "//base:i18n",
     "//base:prefs",
@@ -176,7 +159,14 @@ static_library("browser") {
     "//url",
   ]
 
-  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
+  configs += [
+    ":wallet_service",
+    "//build/config/compiler:no_size_t_to_int_warning",
+  ]
+
+  if (is_mac) {
+    libs = [ "AddressBook.framework" ]
+  }
 }
 
 static_library("test_support") {
@@ -208,6 +198,7 @@ static_library("test_support") {
     "//components/os_crypt",
     "//components/pref_registry",
     "//components/rappor",
+    "//google_apis:test_support",
     "//skia",
     "//testing/gtest",
   ]
@@ -229,7 +220,6 @@ source_set("unit_tests") {
     "autofill_merge_unittest.cc",
     "autofill_metrics_unittest.cc",
     "autofill_profile_unittest.cc",
-    "autofill_regexes_unittest.cc",
     "autofill_type_unittest.cc",
     "autofill_xml_parser_unittest.cc",
     "contact_info_unittest.cc",
@@ -238,6 +228,7 @@ source_set("unit_tests") {
     "form_field_unittest.cc",
     "form_structure_unittest.cc",
     "name_field_unittest.cc",
+    "options_util_unittest.cc",
     "password_generator_unittest.cc",
     "personal_data_manager_unittest.cc",
     "phone_field_unittest.cc",
@@ -259,7 +250,9 @@ source_set("unit_tests") {
     "//components/os_crypt",
     "//components/rappor:test_support",
     "//components/resources",
+    "//components/signin/core/browser:test_support",
     "//components/strings",
+    "//components/sync_driver",
     "//components/webdata/common",
     "//net:test_support",
     "//sql",

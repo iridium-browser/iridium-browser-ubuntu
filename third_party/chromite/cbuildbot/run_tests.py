@@ -13,7 +13,6 @@ You can add a .testignore file to a dir to disable scanning it.
 from __future__ import print_function
 
 import errno
-import logging
 import multiprocessing
 import os
 import signal
@@ -25,6 +24,7 @@ from chromite.cbuildbot import constants
 from chromite.lib import cgroups
 from chromite.lib import commandline
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import namespaces
 from chromite.lib import osutils
 from chromite.lib import proctitle
@@ -56,9 +56,13 @@ SKIP = 'skip'
 SPECIAL_TESTS = {
     # Tests that need to run inside the chroot.
     'cbuildbot/stages/test_stages_unittest': INSIDE,
-    'cros/commands/cros_build_unittest': INSIDE,
-    'cros/commands/cros_deploy_unittest': INSIDE,
-    'cros/commands/lint_unittest': INSIDE,
+    'cli/cros/cros_build_unittest': INSIDE,
+    'cli/cros/cros_chroot_unittest': INSIDE,
+    'cli/cros/cros_debug_unittest': INSIDE,
+    'cli/cros/lint_unittest': INSIDE,
+    'cli/deploy_unittest': INSIDE,
+    'lib/alerts_unittest': INSIDE,
+    'lib/chroot_util_unittest': INSIDE,
     'lib/filetype_unittest': INSIDE,
     'lib/upgrade_table_unittest': INSIDE,
     'scripts/cros_install_debug_syms_unittest': INSIDE,
@@ -107,16 +111,16 @@ def RunTest(test, cmd, tmpfile, finished, total):
   Returns:
     The exit code of the test.
   """
-  cros_build_lib.Info('Starting %s', test)
+  logging.info('Starting %s', test)
 
   def _Finished(_log_level, _log_msg, result, delta):
     with finished.get_lock():
       finished.value += 1
       if result.returncode:
-        func = cros_build_lib.Error
+        func = logging.error
         msg = 'Failed'
       else:
-        func = cros_build_lib.Info
+        func = logging.info
         msg = 'Finished'
       func('%s [%i/%i] %s (%s)', msg, finished.value, total, test, delta)
 
@@ -154,26 +158,26 @@ def BuildTestSets(tests, chroot_available, network):
     # See if this test requires special consideration.
     status = SPECIAL_TESTS.get(test)
     if status is SKIP:
-      cros_build_lib.Info('Skipping %s', test)
+      logging.info('Skipping %s', test)
       continue
     elif status is INSIDE:
       if not cros_build_lib.IsInsideChroot():
         if not chroot_available:
-          cros_build_lib.Info('Skipping %s: chroot not available', test)
+          logging.info('Skipping %s: chroot not available', test)
           continue
         cmd = ['cros_sdk', '--', os.path.join('..', '..', 'chromite', test)]
     elif status is OUTSIDE:
       if cros_build_lib.IsInsideChroot():
-        cros_build_lib.Info('Skipping %s: must be outside the chroot', test)
+        logging.info('Skipping %s: must be outside the chroot', test)
         continue
     else:
       mode = os.stat(test).st_mode
       if stat.S_ISREG(mode):
         if not mode & 0o111:
-          cros_build_lib.Debug('Skipping %s: not executable', test)
+          logging.debug('Skipping %s: not executable', test)
           continue
       else:
-        cros_build_lib.Debug('Skipping %s: not a regular file', test)
+        logging.debug('Skipping %s: not a regular file', test)
         continue
 
     # Build up the final test command.
@@ -221,7 +225,7 @@ def RunTests(tests, jobs=1, chroot_available=True, network=False, dryrun=False,
     # Fork each test and add it to the list.
     for test, cmd, tmpfile in testsets:
       if failed and failfast:
-        cros_build_lib.Error('failure detected; stopping new tests')
+        logging.error('failure detected; stopping new tests')
         break
 
       if len(pids) >= jobs:
@@ -233,15 +237,14 @@ def RunTests(tests, jobs=1, chroot_available=True, network=False, dryrun=False,
         ret = 1
         try:
           if dryrun:
-            cros_build_lib.Info('Would have run: %s',
-                                cros_build_lib.CmdToStr(cmd))
+            logging.info('Would have run: %s', cros_build_lib.CmdToStr(cmd))
             ret = 0
           else:
             ret = RunTest(test, cmd, tmpfile, finished, len(testsets))
         except KeyboardInterrupt:
           pass
         except BaseException:
-          cros_build_lib.Error('%s failed', test, exc_info=True)
+          logging.error('%s failed', test, exc_info=True)
         # We cannot run clean up hooks in the child because it'll break down
         # things like tempdir context managers.
         os._exit(ret)  # pylint: disable=protected-access
@@ -254,7 +257,7 @@ def RunTests(tests, jobs=1, chroot_available=True, network=False, dryrun=False,
 
   except KeyboardInterrupt:
     # If the user wants to stop, reap all the pending children.
-    cros_build_lib.Warning('CTRL+C received; cleaning up tests')
+    logging.warning('CTRL+C received; cleaning up tests')
     aborted = True
     CleanupChildren(pids)
 
@@ -266,13 +269,13 @@ def RunTests(tests, jobs=1, chroot_available=True, network=False, dryrun=False,
     if output:
       failed_tests.append(test)
       print()
-      cros_build_lib.Error('### LOG: %s', test)
+      logging.error('### LOG: %s', test)
       print(output.rstrip())
       print()
 
   if failed_tests:
-    cros_build_lib.Error('The following %i tests failed:\n  %s',
-                         len(failed_tests), '\n  '.join(sorted(failed_tests)))
+    logging.error('The following %i tests failed:\n  %s', len(failed_tests),
+                  '\n  '.join(sorted(failed_tests)))
     return False
   elif aborted or failed:
     return False
@@ -371,9 +374,11 @@ def _ReExecuteIfNeeded(argv, network):
     # We got our namespaces, so switch back to the user to run the tests.
     gid = int(os.environ.pop('SUDO_GID'))
     uid = int(os.environ.pop('SUDO_UID'))
+    user = os.environ.pop('SUDO_USER')
+    os.initgroups(user, gid)
     os.setresgid(gid, gid, gid)
     os.setresuid(uid, uid, uid)
-    os.environ['USER'] = os.environ.pop('SUDO_USER')
+    os.environ['USER'] = user
 
 
 def GetParser():
@@ -402,11 +407,21 @@ def main(argv):
 
   # Process list output quickly as it takes no privileges.
   if opts.list:
-    print('\n'.join(sorted(opts.tests or FindTests())))
+    print('\n'.join(sorted(opts.tests or FindTests((constants.CHROMITE_DIR,)))))
     return
+
+  # Many of our tests require a valid chroot to run. Make sure it's created
+  # before we block network access.
+  chroot = os.path.join(constants.SOURCE_ROOT, constants.DEFAULT_CHROOT_DIR)
+  if (not os.path.exists(chroot) and
+      ChrootAvailable() and
+      not cros_build_lib.IsInsideChroot()):
+    cros_build_lib.RunCommand(['cros_sdk', '--create'])
 
   # Now let's run some tests.
   _ReExecuteIfNeeded([sys.argv[0]] + argv, opts.network)
+  # A lot of pieces here expect to be run in the root of the chromite tree.
+  # Make them happy.
   os.chdir(constants.CHROMITE_DIR)
   tests = opts.tests or FindTests()
 
@@ -427,7 +442,7 @@ def main(argv):
 
     def _Finished(_log_level, _log_msg, result, delta):
       if result:
-        cros_build_lib.Info('All tests succeeded! (%s total)', delta)
+        logging.info('All tests succeeded! (%s total)', delta)
 
     ret = cros_build_lib.TimedCommand(
         RunTests, tests, jobs=jobs, chroot_available=ChrootAvailable(),
@@ -437,4 +452,4 @@ def main(argv):
       return 1
 
   if not opts.network:
-    cros_build_lib.Warning('Network tests skipped; use --network to run them')
+    logging.warning('Network tests skipped; use --network to run them')

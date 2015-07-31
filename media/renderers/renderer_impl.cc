@@ -35,6 +35,7 @@ RendererImpl::RendererImpl(
       video_renderer_(video_renderer.Pass()),
       time_source_(NULL),
       time_ticking_(false),
+      playback_rate_(0.0),
       audio_buffering_state_(BUFFERING_HAVE_NOTHING),
       video_buffering_state_(BUFFERING_HAVE_NOTHING),
       audio_ended_(false),
@@ -80,7 +81,6 @@ void RendererImpl::Initialize(
     const PipelineStatusCB& init_cb,
     const StatisticsCB& statistics_cb,
     const BufferingStateCB& buffering_state_cb,
-    const PaintCB& paint_cb,
     const base::Closure& ended_cb,
     const PipelineStatusCB& error_cb,
     const base::Closure& waiting_for_decryption_key_cb) {
@@ -90,7 +90,6 @@ void RendererImpl::Initialize(
   DCHECK(!init_cb.is_null());
   DCHECK(!statistics_cb.is_null());
   DCHECK(!buffering_state_cb.is_null());
-  DCHECK(!paint_cb.is_null());
   DCHECK(!ended_cb.is_null());
   DCHECK(!error_cb.is_null());
   DCHECK(demuxer_stream_provider->GetStream(DemuxerStream::AUDIO) ||
@@ -99,7 +98,6 @@ void RendererImpl::Initialize(
   demuxer_stream_provider_ = demuxer_stream_provider;
   statistics_cb_ = statistics_cb;
   buffering_state_cb_ = buffering_state_cb;
-  paint_cb_ = paint_cb;
   ended_cb_ = ended_cb;
   error_cb_ = error_cb;
   init_cb_ = init_cb;
@@ -168,7 +166,7 @@ void RendererImpl::StartPlayingFrom(base::TimeDelta time) {
     video_renderer_->StartPlayingFrom(time);
 }
 
-void RendererImpl::SetPlaybackRate(float playback_rate) {
+void RendererImpl::SetPlaybackRate(double playback_rate) {
   DVLOG(1) << __FUNCTION__ << "(" << playback_rate << ")";
   DCHECK(task_runner_->BelongsToCurrentThread());
 
@@ -177,6 +175,16 @@ void RendererImpl::SetPlaybackRate(float playback_rate) {
     return;
 
   time_source_->SetPlaybackRate(playback_rate);
+
+  const double old_rate = playback_rate_;
+  playback_rate_ = playback_rate;
+  if (!time_ticking_ || !video_renderer_)
+    return;
+
+  if (old_rate == 0 && playback_rate > 0)
+    video_renderer_->OnTimeStateChanged(true);
+  else if (old_rate > 0 && playback_rate == 0)
+    video_renderer_->OnTimeStateChanged(false);
 }
 
 void RendererImpl::SetVolume(float volume) {
@@ -221,16 +229,21 @@ void RendererImpl::EnableClocklessVideoPlaybackForTesting() {
   clockless_video_playback_enabled_for_testing_ = true;
 }
 
-base::TimeTicks RendererImpl::GetWallClockTime(base::TimeDelta time) {
+bool RendererImpl::GetWallClockTimes(
+    const std::vector<base::TimeDelta>& media_timestamps,
+    std::vector<base::TimeTicks>* wall_clock_times) {
   // No BelongsToCurrentThread() checking because this can be called from other
   // threads.
   //
   // TODO(scherkus): Currently called from VideoRendererImpl's internal thread,
   // which should go away at some point http://crbug.com/110814
-  if (clockless_video_playback_enabled_for_testing_)
-    return base::TimeTicks::Now();
+  if (clockless_video_playback_enabled_for_testing_) {
+    *wall_clock_times = std::vector<base::TimeTicks>(media_timestamps.size(),
+                                                     base::TimeTicks::Now());
+    return true;
+  }
 
-  return time_source_->GetWallClockTime(time);
+  return time_source_->GetWallClockTimes(media_timestamps, wall_clock_times);
 }
 
 void RendererImpl::SetDecryptorReadyCallback(
@@ -326,10 +339,9 @@ void RendererImpl::InitializeVideoRenderer() {
       base::Bind(&RendererImpl::OnUpdateStatistics, weak_this_),
       base::Bind(&RendererImpl::OnBufferingStateChanged, weak_this_,
                  &video_buffering_state_),
-      base::ResetAndReturn(&paint_cb_),
       base::Bind(&RendererImpl::OnVideoRendererEnded, weak_this_),
       base::Bind(&RendererImpl::OnError, weak_this_),
-      base::Bind(&RendererImpl::GetWallClockTime, base::Unretained(this)),
+      base::Bind(&RendererImpl::GetWallClockTimes, base::Unretained(this)),
       waiting_for_decryption_key_cb_);
 }
 
@@ -538,6 +550,8 @@ void RendererImpl::PausePlayback() {
 
   time_ticking_ = false;
   time_source_->StopTicking();
+  if (playback_rate_ > 0 && video_renderer_)
+    video_renderer_->OnTimeStateChanged(false);
 }
 
 void RendererImpl::StartPlayback() {
@@ -549,6 +563,8 @@ void RendererImpl::StartPlayback() {
 
   time_ticking_ = true;
   time_source_->StartTicking();
+  if (playback_rate_ > 0 && video_renderer_)
+    video_renderer_->OnTimeStateChanged(true);
 }
 
 void RendererImpl::OnAudioRendererEnded() {

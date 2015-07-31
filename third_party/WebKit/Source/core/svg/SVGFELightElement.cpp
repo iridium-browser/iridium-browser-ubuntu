@@ -85,33 +85,8 @@ FloatPoint3D SVGFELightElement::pointsAt() const
     return FloatPoint3D(pointsAtX()->currentValue()->value(), pointsAtY()->currentValue()->value(), pointsAtZ()->currentValue()->value());
 }
 
-bool SVGFELightElement::isSupportedAttribute(const QualifiedName& attrName)
-{
-    DEFINE_STATIC_LOCAL(HashSet<QualifiedName>, supportedAttributes, ());
-    if (supportedAttributes.isEmpty()) {
-        supportedAttributes.add(SVGNames::azimuthAttr);
-        supportedAttributes.add(SVGNames::elevationAttr);
-        supportedAttributes.add(SVGNames::xAttr);
-        supportedAttributes.add(SVGNames::yAttr);
-        supportedAttributes.add(SVGNames::zAttr);
-        supportedAttributes.add(SVGNames::pointsAtXAttr);
-        supportedAttributes.add(SVGNames::pointsAtYAttr);
-        supportedAttributes.add(SVGNames::pointsAtZAttr);
-        supportedAttributes.add(SVGNames::specularExponentAttr);
-        supportedAttributes.add(SVGNames::limitingConeAngleAttr);
-    }
-    return supportedAttributes.contains<SVGAttributeHashTranslator>(attrName);
-}
-
 void SVGFELightElement::svgAttributeChanged(const QualifiedName& attrName)
 {
-    if (!isSupportedAttribute(attrName)) {
-        SVGElement::svgAttributeChanged(attrName);
-        return;
-    }
-
-    SVGElement::InvalidationGuard invalidationGuard(this);
-
     if (attrName == SVGNames::azimuthAttr
         || attrName == SVGNames::elevationAttr
         || attrName == SVGNames::xAttr
@@ -126,10 +101,11 @@ void SVGFELightElement::svgAttributeChanged(const QualifiedName& attrName)
         if (!parent)
             return;
 
-        LayoutObject* renderer = parent->layoutObject();
-        if (!renderer || !renderer->isSVGResourceFilterPrimitive())
+        LayoutObject* layoutObject = parent->layoutObject();
+        if (!layoutObject || !layoutObject->isSVGResourceFilterPrimitive())
             return;
 
+        SVGElement::InvalidationGuard invalidationGuard(this);
         if (isSVGFEDiffuseLightingElement(*parent)) {
             toSVGFEDiffuseLightingElement(*parent).lightElementAttributeChanged(this, attrName);
             return;
@@ -138,9 +114,11 @@ void SVGFELightElement::svgAttributeChanged(const QualifiedName& attrName)
             toSVGFESpecularLightingElement(*parent).lightElementAttributeChanged(this, attrName);
             return;
         }
+
+        ASSERT_NOT_REACHED();
     }
 
-    ASSERT_NOT_REACHED();
+    SVGElement::svgAttributeChanged(attrName);
 }
 
 void SVGFELightElement::childrenChanged(const ChildrenChange& change)
@@ -149,9 +127,9 @@ void SVGFELightElement::childrenChanged(const ChildrenChange& change)
 
     if (!change.byParser) {
         if (ContainerNode* parent = parentNode()) {
-            LayoutObject* renderer = parent->layoutObject();
-            if (renderer && renderer->isSVGResourceFilterPrimitive())
-                markForLayoutAndParentResourceInvalidation(renderer);
+            LayoutObject* layoutObject = parent->layoutObject();
+            if (layoutObject && layoutObject->isSVGResourceFilterPrimitive())
+                markForLayoutAndParentResourceInvalidation(layoutObject);
         }
     }
 }

@@ -5,7 +5,21 @@
 import("//build/config/ui.gni")
 import("//third_party/protobuf/proto_library.gni")
 
-source_set("service") {
+group("service") {
+  if (is_component_build) {
+    public_deps = [
+      "//gpu",
+    ]
+  } else {
+    public_deps = [
+      ":service_sources",
+    ]
+  }
+}
+
+source_set("service_sources") {
+  visibility = [ "//gpu/*" ]
+
   sources = [
     "async_pixel_transfer_delegate.cc",
     "async_pixel_transfer_delegate.h",
@@ -62,7 +76,6 @@ source_set("service") {
     "gles2_cmd_validation_implementation_autogen.h",
     "gpu_scheduler.cc",
     "gpu_scheduler.h",
-    "gpu_scheduler_mock.h",
     "gpu_state_tracer.cc",
     "gpu_state_tracer.h",
     "gpu_switches.cc",
@@ -86,7 +99,6 @@ source_set("service") {
     "mailbox_manager_sync.h",
     "memory_program_cache.cc",
     "memory_program_cache.h",
-    "mocks.h",
     "program_cache.cc",
     "program_cache.h",
     "program_manager.cc",
@@ -128,13 +140,14 @@ source_set("service") {
   include_dirs = [ "//third_party/mesa/src/include" ]
 
   public_deps = [
-    "//gpu/command_buffer/common",
+    "//gpu/command_buffer/common:common_sources",
   ]
   deps = [
     ":disk_cache_proto",
     "//base",
     "//base/third_party/dynamic_annotations",
     "//crypto",
+    "//gpu/config:config_sources",
     "//third_party/angle:translator",
     "//third_party/protobuf:protobuf_lite",
     "//third_party/re2",
@@ -144,14 +157,18 @@ source_set("service") {
     "//ui/gl",
   ]
 
-  if (ui_compositor_image_transport) {
-    include_dirs += [ "//third_party/khronos" ]
-  }
-
   if (is_win || is_android || (is_linux && use_x11)) {
     sources += [
       "async_pixel_transfer_manager_egl.cc",
       "async_pixel_transfer_manager_egl.h",
+    ]
+  }
+
+  if (is_mac) {
+    # Required by gles2_cmd_decoder.cc on Mac.
+    libs = [
+      "IOSurface.framework",
+      "OpenGL.framework",
     ]
   }
 

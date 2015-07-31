@@ -13,7 +13,6 @@
 #include "cc/output/compositor_frame_ack.h"
 #include "content/common/content_export.h"
 #include "content/common/content_param_traits.h"
-#include "content/common/cookie_data.h"
 #include "content/common/date_time_suggestion.h"
 #include "content/common/frame_replication_state.h"
 #include "content/common/navigation_gesture.h"
@@ -39,9 +38,11 @@
 #include "media/base/channel_layout.h"
 #include "media/base/media_log_event.h"
 #include "net/base/network_change_notifier.h"
+#include "third_party/WebKit/public/platform/WebDisplayMode.h"
 #include "third_party/WebKit/public/platform/WebFloatPoint.h"
 #include "third_party/WebKit/public/platform/WebFloatRect.h"
 #include "third_party/WebKit/public/platform/WebScreenInfo.h"
+#include "third_party/WebKit/public/platform/WebScreenOrientationType.h"
 #include "third_party/WebKit/public/web/WebDeviceEmulationParams.h"
 #include "third_party/WebKit/public/web/WebFindOptions.h"
 #include "third_party/WebKit/public/web/WebMediaPlayerAction.h"
@@ -82,9 +83,15 @@ IPC_ENUM_TRAITS_MAX_VALUE(blink::WebPluginAction::Type,
                           blink::WebPluginAction::Type::TypeLast)
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebPopupType,
                           blink::WebPopupType::WebPopupTypeLast)
+// TODO(dcheng): Update WebScreenOrientationType to have a "Last" enum member.
+IPC_ENUM_TRAITS_MIN_MAX_VALUE(blink::WebScreenOrientationType,
+                              blink::WebScreenOrientationUndefined,
+                              blink::WebScreenOrientationLandscapeSecondary)
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebTextDirection,
                           blink::WebTextDirection::WebTextDirectionLast)
-IPC_ENUM_TRAITS(WindowContainerType)
+IPC_ENUM_TRAITS_MAX_VALUE(blink::WebDisplayMode,
+                          blink::WebDisplayMode::WebDisplayModeLast)
+IPC_ENUM_TRAITS_MAX_VALUE(WindowContainerType, WINDOW_CONTAINER_TYPE_MAX_VALUE)
 IPC_ENUM_TRAITS(content::FaviconURL::IconType)
 IPC_ENUM_TRAITS(content::FileChooserParams::Mode)
 IPC_ENUM_TRAITS(content::MenuItem::Type)
@@ -93,8 +100,10 @@ IPC_ENUM_TRAITS_MAX_VALUE(content::NavigationGesture,
 IPC_ENUM_TRAITS_MIN_MAX_VALUE(content::PageZoom,
                               content::PageZoom::PAGE_ZOOM_OUT,
                               content::PageZoom::PAGE_ZOOM_IN)
-IPC_ENUM_TRAITS(gfx::FontRenderParams::Hinting)
-IPC_ENUM_TRAITS(gfx::FontRenderParams::SubpixelRendering)
+IPC_ENUM_TRAITS_MAX_VALUE(gfx::FontRenderParams::Hinting,
+                          gfx::FontRenderParams::HINTING_MAX)
+IPC_ENUM_TRAITS_MAX_VALUE(gfx::FontRenderParams::SubpixelRendering,
+                          gfx::FontRenderParams::SUBPIXEL_RENDERING_MAX)
 IPC_ENUM_TRAITS_MAX_VALUE(content::TapMultipleTargetsStrategy,
                           content::TAP_MULTIPLE_TARGETS_STRATEGY_MAX)
 IPC_ENUM_TRAITS_MAX_VALUE(content::StopFindAction,
@@ -105,7 +114,7 @@ IPC_ENUM_TRAITS_MAX_VALUE(media::ChannelLayout, media::CHANNEL_LAYOUT_MAX - 1)
 IPC_ENUM_TRAITS_MAX_VALUE(media::MediaLogEvent::Type,
                           media::MediaLogEvent::TYPE_LAST)
 IPC_ENUM_TRAITS_MAX_VALUE(ui::TextInputMode, ui::TEXT_INPUT_MODE_MAX)
-IPC_ENUM_TRAITS(ui::TextInputType)
+IPC_ENUM_TRAITS_MAX_VALUE(ui::TextInputType, ui::TEXT_INPUT_TYPE_MAX)
 
 #if defined(OS_MACOSX)
 IPC_STRUCT_TRAITS_BEGIN(FontDescriptor)
@@ -217,6 +226,7 @@ IPC_STRUCT_TRAITS_BEGIN(content::PepperRendererInstanceData)
   IPC_STRUCT_TRAITS_MEMBER(render_frame_id)
   IPC_STRUCT_TRAITS_MEMBER(document_url)
   IPC_STRUCT_TRAITS_MEMBER(plugin_url)
+  IPC_STRUCT_TRAITS_MEMBER(is_potentially_secure_plugin_context)
 IPC_STRUCT_TRAITS_END()
 #endif
 
@@ -252,6 +262,8 @@ IPC_STRUCT_TRAITS_BEGIN(content::RendererPreferences)
   IPC_STRUCT_TRAITS_MEMBER(plugin_fullscreen_allowed)
   IPC_STRUCT_TRAITS_MEMBER(use_video_overlay_for_embedded_encrypted_video)
   IPC_STRUCT_TRAITS_MEMBER(use_view_overlay_for_all_video)
+  IPC_STRUCT_TRAITS_MEMBER(network_contry_iso)
+#if defined(OS_WIN)
   IPC_STRUCT_TRAITS_MEMBER(caption_font_family_name)
   IPC_STRUCT_TRAITS_MEMBER(caption_font_height)
   IPC_STRUCT_TRAITS_MEMBER(small_caption_font_family_name)
@@ -262,18 +274,11 @@ IPC_STRUCT_TRAITS_BEGIN(content::RendererPreferences)
   IPC_STRUCT_TRAITS_MEMBER(status_font_height)
   IPC_STRUCT_TRAITS_MEMBER(message_font_family_name)
   IPC_STRUCT_TRAITS_MEMBER(message_font_height)
-  IPC_STRUCT_TRAITS_MEMBER(network_contry_iso)
-IPC_STRUCT_TRAITS_END()
-
-IPC_STRUCT_TRAITS_BEGIN(content::CookieData)
-  IPC_STRUCT_TRAITS_MEMBER(name)
-  IPC_STRUCT_TRAITS_MEMBER(value)
-  IPC_STRUCT_TRAITS_MEMBER(domain)
-  IPC_STRUCT_TRAITS_MEMBER(path)
-  IPC_STRUCT_TRAITS_MEMBER(expires)
-  IPC_STRUCT_TRAITS_MEMBER(http_only)
-  IPC_STRUCT_TRAITS_MEMBER(secure)
-  IPC_STRUCT_TRAITS_MEMBER(session)
+  IPC_STRUCT_TRAITS_MEMBER(vertical_scroll_bar_width_in_dips)
+  IPC_STRUCT_TRAITS_MEMBER(horizontal_scroll_bar_height_in_dips)
+  IPC_STRUCT_TRAITS_MEMBER(arrow_bitmap_height_vertical_scroll_bar_in_dips)
+  IPC_STRUCT_TRAITS_MEMBER(arrow_bitmap_width_horizontal_scroll_bar_in_dips)
+#endif
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(content::WebPluginGeometry)
@@ -464,8 +469,10 @@ IPC_STRUCT_BEGIN(ViewMsg_Resize_Params)
   IPC_STRUCT_MEMBER(gfx::Size, visible_viewport_size)
   // The resizer rect.
   IPC_STRUCT_MEMBER(gfx::Rect, resizer_rect)
-  // Indicates whether a page is fullscreen or not.
-  IPC_STRUCT_MEMBER(bool, is_fullscreen)
+  // Indicates whether tab-initiated fullscreen was granted.
+  IPC_STRUCT_MEMBER(bool, is_fullscreen_granted)
+  // The display mode.
+  IPC_STRUCT_MEMBER(blink::WebDisplayMode, display_mode)
   // If set, requests the renderer to reply with a ViewHostMsg_UpdateRect
   // with the ViewHostMsg_UpdateRect_Flags::IS_RESIZE_ACK bit set in flags.
   IPC_STRUCT_MEMBER(bool, needs_resize_ack)
@@ -536,29 +543,6 @@ IPC_STRUCT_BEGIN(ViewMsg_New_Params)
   IPC_STRUCT_MEMBER(gfx::Size, max_size)
 IPC_STRUCT_END()
 
-IPC_STRUCT_BEGIN(ViewMsg_PostMessage_Params)
-  // Whether the data format is supplied as serialized script value, or as
-  // a simple string. If it is a raw string, must be converted from string to a
-  // WebSerializedScriptValue in renderer.
-  IPC_STRUCT_MEMBER(bool, is_data_raw_string)
-  // The serialized script value.
-  IPC_STRUCT_MEMBER(base::string16, data)
-  // When sent to the browser, this is the routing ID of the source frame in
-  // the source process.  The browser replaces it with the routing ID of the
-  // equivalent (swapped out) frame in the destination process.
-  IPC_STRUCT_MEMBER(int, source_routing_id)
-
-  // The origin of the source frame.
-  IPC_STRUCT_MEMBER(base::string16, source_origin)
-
-  // The origin for the message's target.
-  IPC_STRUCT_MEMBER(base::string16, target_origin)
-
-  // Information about the MessagePorts this message contains.
-  IPC_STRUCT_MEMBER(std::vector<content::TransferredMessagePort>, message_ports)
-  IPC_STRUCT_MEMBER(std::vector<int>, new_routing_ids)
-IPC_STRUCT_END()
-
 // Messages sent from the browser to the renderer.
 
 #if defined(OS_ANDROID)
@@ -623,8 +607,9 @@ IPC_MESSAGE_ROUTED1(ViewMsg_SetRendererPrefs,
 IPC_MESSAGE_ROUTED1(ViewMsg_UpdateWebPreferences,
                     content::WebPreferences)
 
-// Informs the renderer that the timezone has changed.
-IPC_MESSAGE_CONTROL0(ViewMsg_TimezoneChange)
+// Informs the renderer that the timezone has changed along with a new
+// timezone ID.
+IPC_MESSAGE_CONTROL1(ViewMsg_TimezoneChange, std::string)
 
 // Tells the render view to close.
 // Expects a Close_ACK message when finished.
@@ -711,10 +696,6 @@ IPC_MESSAGE_ROUTED2(ViewMsg_MediaPlayerActionAt,
 IPC_MESSAGE_ROUTED2(ViewMsg_PluginActionAt,
                     gfx::Point, /* location */
                     blink::WebPluginAction)
-
-// Posts a message from a frame in another process to the current renderer.
-IPC_MESSAGE_ROUTED1(ViewMsg_PostMessageEvent,
-                    ViewMsg_PostMessage_Params)
 
 // Resets the page scale for the current main frame to the default page scale.
 IPC_MESSAGE_ROUTED0(ViewMsg_ResetPageScale)
@@ -1006,6 +987,11 @@ IPC_MESSAGE_ROUTED2(ViewMsg_ReclaimCompositorResources,
                     uint32 /* output_surface_id */,
                     cc::CompositorFrameAck /* ack */)
 
+// Sent by browser to give renderer compositor a new namespace ID for any
+// SurfaceSequences it has to create.
+IPC_MESSAGE_ROUTED1(ViewMsg_SetSurfaceIdNamespace,
+                    uint32_t /* surface_id_namespace */)
+
 IPC_MESSAGE_ROUTED0(ViewMsg_SelectWordAroundCaret)
 
 // Sent by the browser to ask the renderer to redraw.
@@ -1185,43 +1171,6 @@ IPC_MESSAGE_ROUTED2(ViewHostMsg_FocusedNodeChanged,
 
 IPC_MESSAGE_ROUTED1(ViewHostMsg_SetCursor, content::WebCursor)
 
-// Used to set a cookie. The cookie is set asynchronously, but will be
-// available to a subsequent ViewHostMsg_GetCookies request.
-IPC_MESSAGE_CONTROL4(ViewHostMsg_SetCookie,
-                     int /* render_frame_id */,
-                     GURL /* url */,
-                     GURL /* first_party_for_cookies */,
-                     std::string /* cookie */)
-
-// Used to get cookies for the given URL. This may block waiting for a
-// previous SetCookie message to be processed.
-IPC_SYNC_MESSAGE_CONTROL3_1(ViewHostMsg_GetCookies,
-                            int /* render_frame_id */,
-                            GURL /* url */,
-                            GURL /* first_party_for_cookies */,
-                            std::string /* cookies */)
-
-// Used to get raw cookie information for the given URL. This may block
-// waiting for a previous SetCookie message to be processed.
-IPC_SYNC_MESSAGE_CONTROL2_1(ViewHostMsg_GetRawCookies,
-                            GURL /* url */,
-                            GURL /* first_party_for_cookies */,
-                            std::vector<content::CookieData>
-                                /* raw_cookies */)
-
-// Used to delete cookie for the given URL and name
-IPC_SYNC_MESSAGE_CONTROL2_0(ViewHostMsg_DeleteCookie,
-                            GURL /* url */,
-                            std::string /* cookie_name */)
-
-// Used to check if cookies are enabled for the given URL. This may block
-// waiting for a previous SetCookie message to be processed.
-IPC_SYNC_MESSAGE_CONTROL3_1(ViewHostMsg_CookiesEnabled,
-                            int /* render_frame_id */,
-                            GURL /* url */,
-                            GURL /* first_party_for_cookies */,
-                            bool /* cookies_enabled */)
-
 // Used to get the list of plugins
 IPC_SYNC_MESSAGE_CONTROL1_1(ViewHostMsg_GetPlugins,
     bool /* refresh*/,
@@ -1286,11 +1235,6 @@ IPC_MESSAGE_ROUTED1(ViewHostMsg_GoToEntryAtOffset,
 // Sent from an inactive renderer for the browser to route to the active
 // renderer, instructing it to close.
 IPC_MESSAGE_ROUTED0(ViewHostMsg_RouteCloseEvent)
-
-// Sent to the browser from an inactive renderer to post a message to the
-// active renderer.
-IPC_MESSAGE_ROUTED1(ViewHostMsg_RouteMessageEvent,
-                    ViewMsg_PostMessage_Params)
 
 // Notifies that the preferred size of the content changed.
 IPC_MESSAGE_ROUTED1(ViewHostMsg_DidContentsPreferredSizeChange,

@@ -106,14 +106,14 @@
  * (eay@cryptsoft.com).  This product includes software written by Tim
  * Hudson (tjh@cryptsoft.com). */
 
-#include <stdio.h>
 #include <assert.h>
+#include <stdio.h>
+#include <string.h>
 
 #include <openssl/bytestring.h>
-#include <openssl/obj.h>
 #include <openssl/err.h>
 
-#include "ssl_locl.h"
+#include "internal.h"
 
 
 /* Add the client's renegotiation binding */

@@ -141,6 +141,7 @@ void UIResourceLayerImpl::AppendQuads(
                vertex_opacity_,
                flipped,
                nearest_neighbor);
+  ValidateQuadResources(quad);
 }
 
 const char* UIResourceLayerImpl::LayerTypeAsString() const {

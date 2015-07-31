@@ -45,6 +45,7 @@
 #include "core/page/Page.h"
 #include "core/page/scrolling/ScrollingCoordinator.h"
 #include "platform/TraceEvent.h"
+#include "platform/geometry/DoubleRect.h"
 #include "platform/geometry/FloatSize.h"
 #include "platform/graphics/GraphicsLayer.h"
 #include "platform/graphics/GraphicsLayerFactory.h"
@@ -77,11 +78,6 @@ PinchViewport::PinchViewport(FrameHost& owner)
 
 PinchViewport::~PinchViewport()
 {
-}
-
-DEFINE_TRACE(PinchViewport)
-{
-    visitor->trace(m_frameHost);
 }
 
 void PinchViewport::setSize(const IntSize& size)
@@ -172,29 +168,6 @@ FloatPoint PinchViewport::viewportCSSPixelsToRootFrame(const FloatPoint& point) 
     return pointInRootFrame;
 }
 
-void PinchViewport::scrollIntoView(const LayoutRect& rect)
-{
-    if (!mainFrame() || !mainFrame()->view())
-        return;
-
-    FrameView* view = mainFrame()->view();
-
-    // Snap the visible rect to layout units to match the input rect.
-    FloatRect visible = LayoutRect(visibleRect());
-
-    float centeringOffsetX = (visible.width() - rect.width()) / 2;
-    float centeringOffsetY = (visible.height() - rect.height()) / 2;
-
-    DoublePoint targetOffset(
-        rect.x() - centeringOffsetX - visible.x(),
-        rect.y() - centeringOffsetY - visible.y());
-
-    view->setScrollPosition(targetOffset);
-
-    DoublePoint remainder = DoublePoint(targetOffset - view->scrollPositionDouble());
-    move(toFloatPoint(remainder));
-}
-
 void PinchViewport::setLocation(const FloatPoint& newLocation)
 {
     setScaleAndLocation(m_scale, newLocation);
@@ -208,20 +181,6 @@ void PinchViewport::move(const FloatPoint& delta)
 void PinchViewport::move(const FloatSize& delta)
 {
     setLocation(m_offset + delta);
-}
-
-void PinchViewport::setLocationInDocument(const DoublePoint& location)
-{
-    if (!mainFrame() || !mainFrame()->view())
-        return;
-
-    ScrollableArea* layoutViewport = mainFrame()->view()->scrollableArea();
-
-    DoubleSize delta = location - visibleRectInDocument().location();
-    layoutViewport->setScrollPosition(layoutViewport->scrollPositionDouble() + delta);
-
-    delta = location - visibleRectInDocument().location();
-    move(toFloatSize(delta));
 }
 
 void PinchViewport::setScale(float scale)
@@ -328,7 +287,8 @@ void PinchViewport::attachToLayerTree(GraphicsLayer* currentLayerTreeRoot, Graph
 {
     TRACE_EVENT1("blink", "PinchViewport::attachToLayerTree", "currentLayerTreeRoot", (bool)currentLayerTreeRoot);
     if (!currentLayerTreeRoot) {
-        m_innerViewportScrollLayer->removeAllChildren();
+        if (m_innerViewportScrollLayer)
+            m_innerViewportScrollLayer->removeAllChildren();
         return;
     }
 
@@ -351,7 +311,7 @@ void PinchViewport::attachToLayerTree(GraphicsLayer* currentLayerTreeRoot, Graph
         m_overlayScrollbarHorizontal = GraphicsLayer::create(graphicsLayerFactory, this);
         m_overlayScrollbarVertical = GraphicsLayer::create(graphicsLayerFactory, this);
 
-        blink::ScrollingCoordinator* coordinator = frameHost().page().scrollingCoordinator();
+        ScrollingCoordinator* coordinator = frameHost().page().scrollingCoordinator();
         ASSERT(coordinator);
         coordinator->setLayerIsContainerForFixedPositionLayers(m_innerViewportScrollLayer.get(), true);
 
@@ -438,9 +398,9 @@ void PinchViewport::registerLayersWithTreeView(WebLayerTreeView* layerTreeView) 
     if (!mainFrame())
         return;
 
-    ASSERT(frameHost().page().deprecatedLocalMainFrame()->contentRenderer());
+    ASSERT(frameHost().page().deprecatedLocalMainFrame()->contentLayoutObject());
 
-    DeprecatedPaintLayerCompositor* compositor = frameHost().page().deprecatedLocalMainFrame()->contentRenderer()->compositor();
+    DeprecatedPaintLayerCompositor* compositor = frameHost().page().deprecatedLocalMainFrame()->contentLayoutObject()->compositor();
     // Get the outer viewport scroll layer.
     WebLayer* scrollLayer = compositor->scrollLayer() ? compositor->scrollLayer()->platformLayer() : 0;
 
@@ -462,42 +422,23 @@ void PinchViewport::clearLayersForTreeView(WebLayerTreeView* layerTreeView) cons
     layerTreeView->clearViewportLayers();
 }
 
-ScrollResult PinchViewport::wheelEvent(const PlatformWheelEvent& event)
+DoubleRect PinchViewport::visibleContentRectDouble(IncludeScrollbarsInRect) const
 {
-    FrameView* view = mainFrame()->view();
-    ScrollResult viewScrollResult = view->wheelEvent(event);
+    return visibleRect();
+}
 
-    // The virtual viewport will only accept pixel scrolls.
-    if (!event.canScroll() || event.granularity() == ScrollByPageWheelEvent)
-        return viewScrollResult;
-
-    // Move the location by the negative of the remaining scroll delta.
-    FloatPoint oldOffset = m_offset;
-    FloatPoint locationDelta;
-    if (viewScrollResult.didScroll) {
-        locationDelta = -FloatPoint(viewScrollResult.unusedScrollDeltaX, viewScrollResult.unusedScrollDeltaY);
-    } else {
-        if (event.railsMode() != PlatformEvent::RailsModeVertical)
-            locationDelta.setX(-event.deltaX());
-        if (event.railsMode() != PlatformEvent::RailsModeHorizontal)
-            locationDelta.setY(-event.deltaY());
-    }
-    move(locationDelta);
-
-    FloatPoint usedLocationDelta(m_offset - oldOffset);
-    if (!viewScrollResult.didScroll && usedLocationDelta == FloatPoint::zero())
-        return ScrollResult(false);
-
-    FloatPoint unusedLocationDelta(locationDelta - usedLocationDelta);
-    return ScrollResult(true, -unusedLocationDelta.x(), -unusedLocationDelta.y());
+IntRect PinchViewport::visibleContentRect(IncludeScrollbarsInRect scrollbarInclusion) const
+{
+    return enclosingIntRect(visibleContentRectDouble(scrollbarInclusion));
 }
 
 bool PinchViewport::shouldUseIntegerScrollOffset() const
 {
     LocalFrame* frame = mainFrame();
-    if (frame && frame->settings() && frame->settings()->preferCompositingToLCDTextEnabled())
+    if (frame && frame->settings() && !frame->settings()->preferCompositingToLCDTextEnabled())
         return true;
-    return false;
+
+    return ScrollableArea::shouldUseIntegerScrollOffset();
 }
 
 int PinchViewport::scrollSize(ScrollbarOrientation orientation) const
@@ -599,7 +540,12 @@ void PinchViewport::invalidateScrollbarRect(Scrollbar*, const IntRect&)
 
 void PinchViewport::setScrollOffset(const IntPoint& offset)
 {
-    setLocation(offset);
+    setScrollOffset(DoublePoint(offset));
+}
+
+void PinchViewport::setScrollOffset(const DoublePoint& offset)
+{
+    setLocation(toFloatPoint(offset));
 }
 
 GraphicsLayer* PinchViewport::layerForContainer() const

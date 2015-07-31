@@ -13,6 +13,7 @@
 #include "cc/base/cc_export.h"
 #include "cc/base/scoped_ptr_vector.h"
 #include "cc/layers/layer_lists.h"
+#include "cc/trees/property_tree.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/vector2d.h"
 #include "ui/gfx/transform.h"
@@ -22,6 +23,7 @@ namespace cc {
 class LayerImpl;
 class Layer;
 class SwapPromise;
+class PropertyTrees;
 
 class CC_EXPORT LayerTreeHostCommon {
  public:
@@ -47,7 +49,8 @@ class CC_EXPORT LayerTreeHostCommon {
                         bool can_adjust_raster_scales,
                         bool verify_property_trees,
                         RenderSurfaceLayerListType* render_surface_layer_list,
-                        int current_render_surface_layer_list_id)
+                        int current_render_surface_layer_list_id,
+                        PropertyTrees* property_trees)
         : root_layer(root_layer),
           device_viewport_size(device_viewport_size),
           device_transform(device_transform),
@@ -65,11 +68,12 @@ class CC_EXPORT LayerTreeHostCommon {
           verify_property_trees(verify_property_trees),
           render_surface_layer_list(render_surface_layer_list),
           current_render_surface_layer_list_id(
-              current_render_surface_layer_list_id) {}
+              current_render_surface_layer_list_id),
+          property_trees(property_trees) {}
 
     LayerType* root_layer;
     gfx::Size device_viewport_size;
-    const gfx::Transform& device_transform;
+    gfx::Transform device_transform;
     float device_scale_factor;
     float page_scale_factor;
     const LayerType* page_scale_application_layer;
@@ -83,6 +87,7 @@ class CC_EXPORT LayerTreeHostCommon {
     bool verify_property_trees;
     RenderSurfaceLayerListType* render_surface_layer_list;
     int current_render_surface_layer_list_id;
+    PropertyTrees* property_trees;
   };
 
   template <typename LayerType, typename RenderSurfaceLayerListType>
@@ -99,7 +104,7 @@ class CC_EXPORT LayerTreeHostCommon {
         RenderSurfaceLayerListType* render_surface_layer_list);
 
    private:
-    const gfx::Transform identity_transform_;
+    PropertyTrees temporary_property_trees;
   };
 
   typedef CalcDrawPropsInputs<Layer, RenderSurfaceLayerList>
@@ -115,11 +120,14 @@ class CC_EXPORT LayerTreeHostCommon {
                                   gfx::Transform* transform,
                                   bool* animation_preserves_axis_alignment);
   static void CalculateDrawProperties(CalcDrawPropsMainInputs* inputs);
+  static void PreCalculateMetaInformation(Layer* root_layer);
 
   typedef CalcDrawPropsInputs<LayerImpl, LayerImplList> CalcDrawPropsImplInputs;
   typedef CalcDrawPropsInputsForTesting<LayerImpl, LayerImplList>
       CalcDrawPropsImplInputsForTesting;
   static void CalculateDrawProperties(CalcDrawPropsImplInputs* inputs);
+  static void CalculateDrawProperties(
+      CalcDrawPropsImplInputsForTesting* inputs);
 
   template <typename LayerType>
   static bool RenderSurfaceContributesToTarget(LayerType*,
@@ -227,6 +235,11 @@ void LayerTreeHostCommon::CallFunctionForSubtree(LayerType* layer,
   }
 }
 
+CC_EXPORT PropertyTrees* GetPropertyTrees(Layer* layer,
+                                          PropertyTrees* trees_from_inputs);
+CC_EXPORT PropertyTrees* GetPropertyTrees(LayerImpl* layer,
+                                          PropertyTrees* trees_from_inputs);
+
 template <typename LayerType, typename RenderSurfaceLayerListType>
 LayerTreeHostCommon::CalcDrawPropsInputsForTesting<LayerType,
                                                    RenderSurfaceLayerListType>::
@@ -251,7 +264,8 @@ LayerTreeHostCommon::CalcDrawPropsInputsForTesting<LayerType,
           false,
           true,
           render_surface_layer_list,
-          0) {
+          0,
+          GetPropertyTrees(root_layer, &temporary_property_trees)) {
   DCHECK(root_layer);
   DCHECK(render_surface_layer_list);
 }
@@ -266,7 +280,7 @@ LayerTreeHostCommon::CalcDrawPropsInputsForTesting<LayerType,
     : CalcDrawPropsInputs<LayerType, RenderSurfaceLayerListType>(
           root_layer,
           device_viewport_size,
-          identity_transform_,
+          gfx::Transform(),
           1.f,
           1.f,
           NULL,
@@ -279,7 +293,8 @@ LayerTreeHostCommon::CalcDrawPropsInputsForTesting<LayerType,
           false,
           true,
           render_surface_layer_list,
-          0) {
+          0,
+          GetPropertyTrees(root_layer, &temporary_property_trees)) {
   DCHECK(root_layer);
   DCHECK(render_surface_layer_list);
 }

@@ -124,7 +124,7 @@
 #include <openssl/rand.h>
 #include <openssl/x509.h>
 
-#include "ssl_locl.h"
+#include "internal.h"
 
 
 /* TODO(davidben): 28 comes from the size of IP + UDP header. Is this reasonable
@@ -196,12 +196,11 @@ static hm_fragment *dtls1_hm_fragment_new(unsigned long frag_len,
 }
 
 void dtls1_hm_fragment_free(hm_fragment *frag) {
-  if (frag->fragment) {
-    OPENSSL_free(frag->fragment);
+  if (frag == NULL) {
+    return;
   }
-  if (frag->reassembly) {
-    OPENSSL_free(frag->reassembly);
-  }
+  OPENSSL_free(frag->fragment);
+  OPENSSL_free(frag->reassembly);
   OPENSSL_free(frag);
 }
 
@@ -471,8 +470,8 @@ static hm_fragment *dtls1_get_buffered_message(
  * be greater if the maximum certificate list size requires it. */
 static size_t dtls1_max_handshake_message_len(const SSL *s) {
   size_t max_len = DTLS1_HM_HEADER_LENGTH + SSL3_RT_MAX_ENCRYPTED_LENGTH;
-  if (max_len < (size_t)s->max_cert_list) {
-    return (size_t)s->max_cert_list;
+  if (max_len < s->max_cert_list) {
+    return s->max_cert_list;
   }
   return max_len;
 }
@@ -489,7 +488,6 @@ static int dtls1_process_fragment(SSL *s) {
   int ret = s->method->ssl_read_bytes(s, SSL3_RT_HANDSHAKE, header,
                                       DTLS1_HM_HEADER_LENGTH, 0);
   if (ret <= 0) {
-    s->rwstate = SSL_READING;
     return ret;
   }
   if (ret != DTLS1_HM_HEADER_LENGTH) {
@@ -658,12 +656,8 @@ long dtls1_get_message(SSL *s, int st1, int stn, int msg_type, long max,
 f_err:
   ssl3_send_alert(s, SSL3_AL_FATAL, al);
 err:
-  if (item != NULL) {
-    pitem_free(item);
-  }
-  if (frag != NULL) {
-    dtls1_hm_fragment_free(frag);
-  }
+  pitem_free(item);
+  dtls1_hm_fragment_free(frag);
   *ok = 0;
   return -1;
 }
@@ -717,7 +711,7 @@ int dtls1_read_failed(SSL *s, int code) {
     return code;
   }
 
-  return dtls1_handle_timeout(s);
+  return DTLSv1_handle_timeout(s);
 }
 
 int dtls1_get_queue_priority(unsigned short seq, int is_ccs) {

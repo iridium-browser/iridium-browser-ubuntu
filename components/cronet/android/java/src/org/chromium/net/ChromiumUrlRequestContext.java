@@ -12,6 +12,7 @@ import android.util.Log;
 
 import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
+import org.chromium.base.VisibleForTesting;
 
 /**
  * Provides context for the native HTTP operations.
@@ -77,14 +78,20 @@ public class ChromiumUrlRequestContext {
     }
 
     /**
-     * Starts NetLog logging to a file. The NetLog log level used is
-     * LOG_ALL_BUT_BYTES.
+     * Starts NetLog logging to a file. The NetLog capture mode is either
+     * NetLogCaptureMode::Default() or NetLogCaptureMode::IncludeSocketBytes().
+     * The IncludeSocketBytes() mode includes basic events, user cookies,
+     * credentials and all transferred bytes in the log.
      * @param fileName The complete file path. It must not be empty. If file
      *            exists, it is truncated before starting. If actively logging,
      *            this method is ignored.
+     * @param logAll {@code true} to use the
+     *            NetLogCaptureMode::IncludeSocketBytes() logging level. If
+     *            false, NetLogCaptureMode::Default() is used instead.
      */
-    public void startNetLogToFile(String fileName) {
-        nativeStartNetLogToFile(mChromiumUrlRequestContextAdapter, fileName);
+    public void startNetLogToFile(String fileName, boolean logAll) {
+        nativeStartNetLogToFile(mChromiumUrlRequestContextAdapter, fileName,
+                logAll);
     }
 
     /**
@@ -93,6 +100,15 @@ public class ChromiumUrlRequestContext {
      */
     public void stopNetLog() {
         nativeStopNetLog(mChromiumUrlRequestContextAdapter);
+    }
+
+    /**
+     * Returns the native URLRequestContextAdapter pointer.
+     * Currently this method is only used in testing.
+     */
+    @VisibleForTesting
+    long getUrlRequestContextAdapterForTesting() {
+        return mChromiumUrlRequestContextAdapter;
     }
 
     @CalledByNative
@@ -140,7 +156,8 @@ public class ChromiumUrlRequestContext {
     private native String nativeGetStatisticsJSON(String filter);
 
     private native void nativeStartNetLogToFile(
-            long chromiumUrlRequestContextAdapter, String fileName);
+            long chromiumUrlRequestContextAdapter, String fileName,
+            boolean logAll);
 
     private native void nativeStopNetLog(long chromiumUrlRequestContextAdapter);
 

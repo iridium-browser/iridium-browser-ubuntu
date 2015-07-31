@@ -46,15 +46,13 @@ var Dir = AutomationUtil.Dir;
  */
 Output = function() {
   // TODO(dtseng): Include braille specific rules.
-  /** @type {!cvox.Spannable} */
-  this.buffer_ = new cvox.Spannable();
-  /** @type {!cvox.Spannable} */
-  this.brailleBuffer_ = new cvox.Spannable();
+  /** @type {!Array<cvox.Spannable>} */
+  this.buffer_ = [];
+  /** @type {!Array<cvox.Spannable>} */
+  this.brailleBuffer_ = [];
   /** @type {!Array<Object>} */
   this.locations_ = [];
-  /** @type {function()} */
-  this.speechStartCallback_;
-  /** @type {function()} */
+  /** @type {function(?)} */
   this.speechEndCallback_;
 
   /**
@@ -78,51 +76,270 @@ Output.SPACE = ' ';
 
 /**
  * Metadata about supported automation roles.
- * @const {Object<string, {msgId: string, earcon: (string|undefined)}>}
+ * @const {Object<string, {msgId: string,
+ *                         earconId: (string|undefined),
+ *                         inherits: (string|undefined)}>}
+ * msgId: the message id of the role.
+ * earconId: an optional earcon to play when encountering the role.
+ * inherits: inherits rules from this role.
  * @private
  */
 Output.ROLE_INFO_ = {
   alert: {
     msgId: 'aria_role_alert',
-    earcon: 'ALERT_NONMODAL',
+    earconId: 'ALERT_NONMODAL',
+  },
+  alertDialog: {
+    msgId: 'aria_role_alertdialog'
+  },
+  article: {
+    msgId: 'aria_role_article',
+    inherits: 'abstractContainer'
+  },
+  application: {
+    msgId: 'aria_role_application',
+    inherits: 'abstractContainer'
+  },
+  banner: {
+    msgId: 'aria_role_banner',
+    inherits: 'abstractContainer'
   },
   button: {
     msgId: 'tag_button',
-    earcon: 'BUTTON'
+    earconId: 'BUTTON'
   },
-  checkbox: {
+  cell: {
+    msgId: 'aria_role_gridcell'
+  },
+  checkBox: {
     msgId: 'input_type_checkbox'
+  },
+  columnHeader: {
+    msgId: 'aria_role_columnheader',
+    inherits: 'abstractContainer'
+  },
+  comboBox: {
+    msgId: 'aria_role_combobox'
+  },
+  complementary: {
+    msgId: 'aria_role_complementary',
+    inherits: 'abstractContainer'
+  },
+  contentInfo: {
+    msgId: 'aria_role_contentinfo',
+    inherits: 'abstractContainer'
+  },
+  date: {
+    msgId: 'input_type_date',
+    inherits: 'abstractContainer'
+  },
+  definition: {
+    msgId: 'aria_role_definition',
+    inherits: 'abstractContainer'
+  },
+  dialog: {
+    msgId: 'dialog'
+  },
+  directory: {
+    msgId: 'aria_role_directory',
+    inherits: 'abstractContainer'
+  },
+  document: {
+    msgId: 'aria_role_document',
+    inherits: 'abstractContainer'
+  },
+  form: {
+    msgId: 'aria_role_form',
+    inherits: 'abstractContainer'
+  },
+  grid: {
+    msgId: 'aria_role_grid'
+  },
+  group: {
+    msgId: 'aria_role_group'
   },
   heading: {
     msgId: 'aria_role_heading',
   },
+  image: {
+    msgId: 'aria_role_img',
+  },
   link: {
     msgId: 'tag_link',
-    earcon: 'LINK'
+    earconId: 'LINK'
+  },
+  listBox: {
+    msgId: 'aria_role_listbox',
+    earconId: 'LISTBOX'
+  },
+  listBoxOption: {
+    msgId: 'aria_role_listitem',
+    earconId: 'LIST_ITEM'
   },
   listItem: {
-    msgId: 'ARIA_ROLE_LISTITEM',
-    earcon: 'list_item'
+    msgId: 'aria_role_listitem',
+    earconId: 'LIST_ITEM'
+  },
+  log: {
+    msgId: 'aria_role_log',
+  },
+  main: {
+    msgId: 'aria_role_main',
+    inherits: 'abstractContainer'
+  },
+  marquee: {
+    msgId: 'aria_role_marquee',
+  },
+  math: {
+    msgId: 'aria_role_math',
+    inherits: 'abstractContainer'
+  },
+  menu: {
+    msgId: 'aria_role_menu'
+  },
+  menuBar: {
+    msgId: 'aria_role_menubar',
+  },
+  menuItem: {
+    msgId: 'aria_role_menuitem'
+  },
+  menuItemCheckBox: {
+    msgId: 'aria_role_menuitemcheckbox'
+  },
+  menuItemRadio: {
+    msgId: 'aria_role_menuitemradio'
   },
   menuListOption: {
     msgId: 'aria_role_menuitem'
   },
+  menuListPopup: {
+    msgId: 'aria_role_menu'
+  },
+  navigation: {
+    msgId: 'aria_role_navigation',
+    inherits: 'abstractContainer'
+  },
+  note: {
+    msgId: 'aria_role_note',
+    inherits: 'abstractContainer'
+  },
+  region: {
+    msgId: 'aria_role_region',
+    inherits: 'abstractContainer'
+  },
   popUpButton: {
-    msgId: 'tag_button'
+    msgId: 'tag_button',
+    earcon: 'LISTBOX'
   },
   radioButton: {
     msgId: 'input_type_radio'
   },
+  radioGroup: {
+    msgId: 'aria_role_radiogroup',
+  },
+  rowHeader: {
+    msgId: 'aria_role_rowheader',
+    inherits: 'abstractContainer'
+  },
+  scrollBar: {
+    msgId: 'aria_role_scrollbar',
+  },
+  search: {
+    msgId: 'aria_role_search',
+    inherits: 'abstractContainer'
+  },
+  separator: {
+    msgId: 'aria_role_separator',
+    inherits: 'abstractContainer'
+  },
+  spinButton: {
+    msgId: 'aria_role_spinbutton',
+    earconId: 'LISTBOX'
+  },
+  status: {
+    msgId: 'aria_role_status'
+  },
+  tab: {
+    msgId: 'aria_role_tab'
+  },
+  tabList: {
+    msgId: 'aria_role_tablist'
+  },
+  tabPanel: {
+    msgId: 'aria_role_tabpanel'
+  },
   textBox: {
     msgId: 'input_type_text',
-    earcon: 'EDITABLE_TEXT'
+    earconId: 'EDITABLE_TEXT'
   },
   textField: {
     msgId: 'input_type_text',
-    earcon: 'EDITABLE_TEXT'
+    earconId: 'EDITABLE_TEXT'
+  },
+  time: {
+    msgId: 'tag_time',
+    inherits: 'abstractContainer'
+  },
+  timer: {
+    msgId: 'aria_role_timer'
   },
   toolbar: {
     msgId: 'aria_role_toolbar'
+  },
+  tree: {
+    msgId: 'aria_role_tree'
+  },
+  treeItem: {
+    msgId: 'aria_role_treeitem'
+  }
+};
+
+/**
+ * Metadata about supported automation states.
+ * @const {!Object<string,
+ *           {on: {msgId: string, earconId: string},
+ *            off: {msgId: string, earconId: string},
+ *            omitted: {msgId: string, earconId: string}}>}
+ *     on: info used to describe a state that is set to true.
+ *     off: info used to describe a state that is set to false.
+ *     omitted: info used to describe a state that is undefined.
+ * @private
+ */
+Output.STATE_INFO_ = {
+  checked: {
+    on: {
+      earconId: 'CHECK_ON',
+      msgId: 'checkbox_checked_state'
+    },
+    off: {
+      earconId: 'CHECK_OFF',
+      msgId: 'checkbox_unchecked_state'
+    },
+    omitted: {
+      earconId: 'CHECK_OFF',
+      msgId: 'checkbox_unchecked_state'
+    }
+  },
+  collapsed: {
+    on: {
+      msgId: 'aria_expanded_false'
+    },
+    off: {
+      msgId: 'aria_expanded_true'
+    }
+  },
+  expanded: {
+    on: {
+      msgId: 'aria_expanded_true'
+    },
+    off: {
+      msgId: 'aria_expanded_false'
+    }
+  },
+  visited: {
+    on: {
+      msgId: 'visited_state'
+    }
   }
 };
 
@@ -133,40 +350,54 @@ Output.ROLE_INFO_ = {
 Output.RULES = {
   navigate: {
     'default': {
-      speak: '$name $value $role',
+      speak: '$name $value $description $help $role',
       braille: ''
     },
+    abstractContainer: {
+      enter: '$name $role',
+      leave: '@exited_container($role)'
+    },
     alert: {
-      speak: '!doNotInterrupt ' +
-          '@aria_role_alert $name $earcon(ALERT_NONMODAL) $descendants'
+      speak: '!doNotInterrupt $role $descendants'
+    },
+    alertDialog: {
+      enter: '$name $role $descendants'
     },
     checkBox: {
-      speak: '$if($checked, @describe_checkbox_checked($name), ' +
-          '@describe_checkbox_unchecked($name)) ' +
-          '$if($checked, ' +
-              '$earcon(CHECK_ON, @input_type_checkbox), ' +
-              '$earcon(CHECK_OFF, @input_type_checkbox))'
+      speak: '$name $role $checked'
     },
     dialog: {
       enter: '$name $role'
     },
+    grid: {
+      enter: '$name $role'
+    },
     heading: {
-      enter: '@aria_role_heading',
-      speak: '@aria_role_heading $name='
+      enter: '@tag_h+$hierarchicalLevel',
+      speak: '@tag_h+$hierarchicalLevel $nameOrDescendants='
     },
     inlineTextBox: {
       speak: '$value='
     },
     link: {
-      enter: '$name= $visited $earcon(LINK, @tag_link)=',
-      stay: '$name= $visited @tag_link',
-      speak: '$name= $visited $earcon(LINK, @tag_link)='
+      enter: '$name $visited $role',
+      stay: '$name= $visited $role',
+      speak: '$name= $visited $role'
     },
     list: {
-      enter: '@aria_role_list @list_with_items($parentChildCount)'
+      enter: '$role @list_with_items($countChildren(listItem))'
+    },
+    listBox: {
+      enter: '$name $role @list_with_items($countChildren(listBoxOption))'
+    },
+    listBoxOption: {
+      speak: '$name $role @describe_index($indexInParent, $parentChildCount)'
     },
     listItem: {
       enter: '$role'
+    },
+    menu: {
+      enter: '$name $role @list_with_items($countChildren(menuItem))'
     },
     menuItem: {
       speak: '$if($haspopup, @describe_menu_item_with_submenu($name), ' +
@@ -181,27 +412,40 @@ Output.RULES = {
       speak: '$value'
     },
     popUpButton: {
-      speak: '$value $name @tag_button @aria_has_popup $earcon(LISTBOX) ' +
+      speak: '$value $name $role @aria_has_popup ' +
           '$if($collapsed, @aria_expanded_false, @aria_expanded_true)'
     },
     radioButton: {
       speak: '$if($checked, @describe_radio_selected($name), ' +
-          '@describe_radio_unselected($name)) ' +
-          '$if($checked, ' +
-              '$earcon(CHECK_ON, @input_type_radio), ' +
-              '$earcon(CHECK_OFF, @input_type_radio))'
+          '@describe_radio_unselected($name))'
+    },
+    radioGroup: {
+      enter: '$name $role'
     },
     slider: {
-      speak: '@describe_slider($value, $name)'
+      speak: '@describe_slider($value, $name) $help'
     },
     staticText: {
-      speak: '$value'
+      speak: '$value $name'
     },
     tab: {
       speak: '@describe_tab($name)'
     },
+    textField: {
+      speak: '$name $value $if(' +
+          '$textInputType, @input_type_+$textInputType, @input_type_text)',
+      braille: ''
+    },
     toolbar: {
       enter: '$name $role'
+    },
+    tree: {
+      enter: '$name $role @list_with_items($countChildren(treeItem))'
+    },
+    treeItem: {
+        enter: '$role $expanded $collapsed ' +
+            '@describe_index($indexInParent, $parentChildCount) ' +
+            '@describe_depth($hierarchicalLevel)'
     },
     window: {
       enter: '$name',
@@ -210,12 +454,12 @@ Output.RULES = {
   },
   menuStart: {
     'default': {
-      speak: '@chrome_menu_opened($name) $role $earcon(OBJECT_OPEN)'
+      speak: '@chrome_menu_opened($name)  $earcon(OBJECT_OPEN)'
     }
   },
   menuEnd: {
     'default': {
-      speak: '$earcon(OBJECT_CLOSE)'
+      speak: '@chrome_menu_closed $earcon(OBJECT_CLOSE)'
     }
   },
   menuListValueChanged: {
@@ -234,15 +478,6 @@ Output.RULES = {
 };
 
 /**
- * Alias equivalent attributes.
- * @type {!Object<string, string>}
- */
-Output.ATTRIBUTE_ALIAS = {
-  name: 'value',
-  value: 'name'
-};
-
-/**
  * Custom actions performed while rendering an output string.
  * @param {function()} action
  * @constructor
@@ -255,6 +490,23 @@ Output.Action.prototype = {
   run: function() {
     this.action_();
   }
+};
+
+/**
+ * Action to play a earcon.
+ * @param {string} earconId
+ * @constructor
+ * @extends {Output.Action}
+ */
+Output.EarconAction = function(earconId) {
+  Output.Action.call(this, function() {
+    cvox.ChromeVox.earcons.playEarcon(
+        cvox.AbstractEarcons[earconId]);
+  });
+};
+
+Output.EarconAction.prototype = {
+  __proto__: Output.Action.prototype
 };
 
 /**
@@ -280,10 +532,26 @@ Output.EventType = {
 Output.prototype = {
   /**
    * Gets the output buffer for speech.
+   * @param {string=} opt_separator Used to join components of the output.
    * @return {!cvox.Spannable}
    */
-  getBuffer: function() {
-    return this.buffer_;
+  toSpannable: function(opt_separator) {
+    opt_separator = opt_separator || '';
+    return this.buffer_.reduce(function(prev, cur) {
+      if (prev === null)
+        return cur;
+      prev.append(opt_separator);
+      prev.append(cur);
+      return prev;
+    }, null);
+  },
+
+  /**
+   * Gets the output buffer for speech with separator '|'.
+   * @return {!cvox.Spannable}
+   */
+  toSpannableForTest: function() {
+    return this.toSpannable('|');
   },
 
   /**
@@ -345,17 +613,11 @@ Output.prototype = {
    * Triggers callback for a speech event.
    * @param {function()} callback
    */
-  onSpeechStart: function(callback) {
-    this.speechStartCallback_ = callback;
-    return this;
-  },
-
-  /**
-   * Triggers callback for a speech event.
-   * @param {function()} callback
-   */
   onSpeechEnd: function(callback) {
-    this.speechEndCallback_ = callback;
+    this.speechEndCallback_ = function(opt_cleanupOnly) {
+      if (!opt_cleanupOnly)
+        callback();
+    }.bind(this);
     return this;
   },
 
@@ -364,45 +626,58 @@ Output.prototype = {
    */
   go: function() {
     // Speech.
-    var buff = this.buffer_;
-    if (buff.toString()) {
-      if (this.speechStartCallback_)
-        this.speechProperties_['startCallback'] = this.speechStartCallback_;
-      if (this.speechEndCallback_) {
-        this.speechProperties_['endCallback'] = this.speechEndCallback_;
+    var queueMode = cvox.QueueMode.FLUSH;
+    this.buffer_.forEach(function(buff, i, a) {
+      if (buff.toString()) {
+        (function() {
+          var scopedBuff = buff;
+          this.speechProperties_['startCallback'] = function() {
+            var actions = scopedBuff.getSpansInstanceOf(Output.Action);
+            if (actions) {
+              actions.forEach(function(a) {
+                a.run();
+              });
+            }
+          };
+        }.bind(this)());
+
+        if (this.speechEndCallback_ && i == a.length - 1)
+          this.speechProperties_['endCallback'] = this.speechEndCallback_;
+        else
+          this.speechProperties_['endCallback'] = null;
+        cvox.ChromeVox.tts.speak(
+            buff.toString(), queueMode, this.speechProperties_);
+        queueMode = cvox.QueueMode.QUEUE;
       }
-
-      cvox.ChromeVox.tts.speak(
-          buff.toString(), cvox.QueueMode.FLUSH, this.speechProperties_);
-    }
-
-    var actions = buff.getSpansInstanceOf(Output.Action);
-    if (actions) {
-      actions.forEach(function(a) {
-        a.run();
-      });
-    }
+    }.bind(this));
 
     // Braille.
+    var buff = this.brailleBuffer_.reduce(function(prev, cur) {
+      if (prev.getLength() > 0 && cur.getLength() > 0)
+        prev.append(Output.SPACE);
+      prev.append(cur);
+      return prev;
+    }, new cvox.Spannable());
+
     var selSpan =
-        this.brailleBuffer_.getSpanInstanceOf(Output.SelectionSpan);
+        buff.getSpanInstanceOf(Output.SelectionSpan);
     var startIndex = -1, endIndex = -1;
     if (selSpan) {
       // Casts ok, since the span is known to be in the spannable.
       var valueStart =
-          /** @type {number} */ (this.brailleBuffer_.getSpanStart(selSpan));
+          /** @type {number} */ (buff.getSpanStart(selSpan));
       var valueEnd =
-          /** @type {number} */ (this.brailleBuffer_.getSpanEnd(selSpan));
+          /** @type {number} */ (buff.getSpanEnd(selSpan));
       startIndex = valueStart + selSpan.startIndex;
       endIndex = valueStart + selSpan.endIndex;
-      this.brailleBuffer_.setSpan(new cvox.ValueSpan(0),
+        buff.setSpan(new cvox.ValueSpan(0),
                                   valueStart, valueEnd);
-      this.brailleBuffer_.setSpan(new cvox.ValueSelectionSpan(),
+      buff.setSpan(new cvox.ValueSelectionSpan(),
                                   startIndex, endIndex);
     }
 
     var output = new cvox.NavBraille({
-      text: this.brailleBuffer_,
+      text: buff,
       startIndex: startIndex,
       endIndex: endIndex
     });
@@ -420,7 +695,7 @@ Output.prototype = {
    * @param {!cursors.Range} range
    * @param {cursors.Range} prevRange
    * @param {chrome.automation.EventType|string} type
-   * @param {!cvox.Spannable} buff Buffer to receive rendered output.
+   * @param {!Array<cvox.Spannable>} buff Buffer to receive rendered output.
    * @private
    */
   render_: function(range, prevRange, type, buff) {
@@ -435,7 +710,7 @@ Output.prototype = {
    * @param {chrome.automation.AutomationNode} node
    * @param {string|!Object} format The output format either specified as an
    * output template string or a parsed output format tree.
-   * @param {!cvox.Spannable} buff Buffer to receive rendered output.
+   * @param {!Array<cvox.Spannable>} buff Buffer to receive rendered output.
    * @param {!Object=} opt_exclude A set of attributes to exclude.
    * @private
    */
@@ -469,8 +744,9 @@ Output.prototype = {
 
       // Set suffix options.
       var options = {};
-      options.ifEmpty = token[token.length - 1] == '=';
-      if (options.ifEmpty)
+      options.annotation = [];
+      options.isUnique = token[token.length - 1] == '=';
+      if (options.isUnique)
         token = token.substring(0, token.length - 1);
 
       // Process token based on prefix.
@@ -482,30 +758,50 @@ Output.prototype = {
 
       // All possible tokens based on prefix.
       if (prefix == '$') {
-        options.annotation = token;
         if (token == 'value') {
           var text = node.attributes.value;
           if (text !== undefined) {
-            var offset = buff.getLength();
             if (node.attributes.textSelStart !== undefined) {
-              options.annotation = new Output.SelectionSpan(
+              options.annotation.push(new Output.SelectionSpan(
                   node.attributes.textSelStart,
-                  node.attributes.textSelEnd);
+                  node.attributes.textSelEnd));
             }
-          } else if (node.role == chrome.automation.RoleType.staticText) {
-            // TODO(dtseng): Remove once Blink treats staticText values as
-            // names.
-            text = node.attributes.name;
           }
-          this.addToSpannable_(buff, text, options);
+          // Annotate this as a name so we don't duplicate names from ancestors.
+          if (node.role == chrome.automation.RoleType.inlineTextBox)
+            token = 'name';
+          options.annotation.push(token);
+          this.append_(buff, text, options);
+        } else if (token == 'name') {
+          options.annotation.push(token);
+          var earconFinder = node;
+          while (earconFinder) {
+            var info = Output.ROLE_INFO_[earconFinder.role];
+            if (info && info.earconId) {
+              options.annotation.push(
+                  new Output.EarconAction(info.earconId));
+              break;
+            }
+            earconFinder = earconFinder.parent;
+          }
+          this.append_(buff, node.attributes.name, options);
+        } else if (token == 'nameOrDescendants') {
+          options.annotation.push(token);
+          if (node.name)
+            this.append_(buff, node.name, options);
+          else
+            this.format_(node, '$descendants', buff);
         } else if (token == 'indexInParent') {
-          this.addToSpannable_(buff, node.indexInParent + 1);
+          options.annotation.push(token);
+          this.append_(buff, String(node.indexInParent + 1));
         } else if (token == 'parentChildCount') {
+          options.annotation.push(token);
           if (node.parent)
-          this.addToSpannable_(buff, node.parent.children.length);
+          this.append_(buff, String(node.parent.children.length));
         } else if (token == 'state') {
+          options.annotation.push(token);
           Object.getOwnPropertyNames(node.state).forEach(function(s) {
-            this.addToSpannable_(buff, s, options);
+            this.append_(buff, s, options);
           }.bind(this));
         } else if (token == 'find') {
           // Find takes two arguments: JSON query string and format string.
@@ -532,31 +828,48 @@ Output.prototype = {
           var subrange = new cursors.Range(
               new cursors.Cursor(leftmost, 0),
               new cursors.Cursor(rightmost, 0));
-          this.range_(subrange, null, 'navigate', buff);
+          var prev = null;
+          if (node)
+            prev = cursors.Range.fromNode(node);
+          this.range_(subrange, prev, 'navigate', buff);
         } else if (token == 'role') {
+          options.annotation.push(token);
           var msg = node.role;
-          var earconId = null;
           var info = Output.ROLE_INFO_[node.role];
           if (info) {
             if (this.formatOptions_.braille)
               msg = cvox.ChromeVox.msgs.getMsg(info.msgId + '_brl');
             else
               msg = cvox.ChromeVox.msgs.getMsg(info.msgId);
-            earconId = info.earcon;
           } else {
             console.error('Missing role info for ' + node.role);
           }
-          if (earconId) {
-            options.annotation = new Output.Action(function() {
-              cvox.ChromeVox.earcons.playEarcon(
-                  cvox.AbstractEarcons[earconId]);
-            });
+          this.append_(buff, msg, options);
+        } else if (node.attributes[token] !== undefined) {
+          options.annotation.push(token);
+          var value = node.attributes[token];
+          if (typeof value == 'number')
+            value = String(value);
+          this.append_(buff, value, options);
+        } else if (Output.STATE_INFO_[token]) {
+          options.annotation.push('state');
+          var stateInfo = Output.STATE_INFO_[token];
+          var resolvedInfo = {};
+          if (node.state[token] === undefined)
+            resolvedInfo = stateInfo.omitted;
+          else
+            resolvedInfo = node.state[token] ? stateInfo.on : stateInfo.off;
+          if (!resolvedInfo)
+            return;
+          if (resolvedInfo.earconId) {
+            options.annotation.push(
+                new Output.EarconAction(resolvedInfo.earconId));
           }
-          this.addToSpannable_(buff, msg, options);
-        } else if (node.attributes[token]) {
-          this.addToSpannable_(buff, node.attributes[token], options);
-        } else if (node.state[token]) {
-          this.addToSpannable_(buff, token, options);
+          var msgId =
+              this.formatOptions_.braille ? resolvedInfo.msgId + '_brl' :
+              resolvedInfo.msgId;
+          var msg = cvox.ChromeVox.msgs.getMsg(msgId);
+          this.append_(buff, msg, options);
         } else if (tree.firstChild) {
           // Custom functions.
           if (token == 'if') {
@@ -567,17 +880,30 @@ Output.prototype = {
             else
               this.format_(node, cond.nextSibling.nextSibling, buff);
           } else if (token == 'earcon') {
-            var contentBuff = new cvox.Spannable();
-            if (tree.firstChild.nextSibling)
-              this.format_(node, tree.firstChild.nextSibling, contentBuff);
-            options.annotation = new Output.Action(function() {
-              cvox.ChromeVox.earcons.playEarcon(
-                  cvox.AbstractEarcons[tree.firstChild.value]);
-            });
-            this.addToSpannable_(buff, contentBuff, options);
+            // Assumes there's existing output in our buffer.
+            var lastBuff = buff[buff.length - 1];
+            if (!lastBuff)
+              return;
+
+            lastBuff.setSpan(
+                new Output.EarconAction(tree.firstChild.value), 0, 0);
+          } else if (token == 'countChildren') {
+            var role = tree.firstChild.value;
+            var count = node.children.filter(function(e) {
+              return e.role == role;
+            }).length;
+            this.append_(buff, String(count));
           }
         }
       } else if (prefix == '@') {
+        // Tokens can have substitutions.
+        var pieces = token.split('+');
+        token = pieces.reduce(function(prev, cur) {
+          var lookup = cur;
+          if (cur[0] == '$')
+            lookup = node.attributes[cur.slice(1)];
+          return prev + lookup;
+        }.bind(this), '');
         var msgId = token;
         var msgArgs = [];
         var curMsg = tree.firstChild;
@@ -588,9 +914,9 @@ Output.prototype = {
             console.error('Unexpected value: ' + arg);
             return;
           }
-          var msgBuff = new cvox.Spannable();
-          this.format_(node, arg, msgBuff);
-          msgArgs.push(msgBuff.toString());
+          var msgBuff = [];
+          this.format_(node, curMsg, msgBuff);
+          msgArgs = msgArgs.concat(msgBuff);
           curMsg = curMsg.nextSibling;
         }
           var msg = cvox.ChromeVox.msgs.getMsg(msgId, msgArgs);
@@ -600,7 +926,7 @@ Output.prototype = {
         } catch(e) {}
 
         if (msg) {
-          this.addToSpannable_(buff, msg, options);
+          this.append_(buff, msg, options);
         }
       } else if (prefix == '!') {
         this.speechProperties_[token] = true;
@@ -612,7 +938,7 @@ Output.prototype = {
    * @param {!cursors.Range} range
    * @param {cursors.Range} prevRange
    * @param {chrome.automation.EventType|string} type
-   * @param {!cvox.Spannable} rangeBuff
+   * @param {!Array<cvox.Spannable>} rangeBuff
    * @private
    */
   range_: function(range, prevRange, type, rangeBuff) {
@@ -623,7 +949,7 @@ Output.prototype = {
     var prevNode = prevRange.getStart().getNode();
 
     var formatNodeAndAncestors = function(node, prevNode) {
-      var buff = new cvox.Spannable();
+      var buff = [];
       this.ancestry_(node, prevNode, type, buff);
       this.node_(node, prevNode, type, buff);
       if (this.formatOptions_.location)
@@ -633,22 +959,21 @@ Output.prototype = {
 
     while (cursor.getNode() != range.getEnd().getNode()) {
       var node = cursor.getNode();
-      this.addToSpannable_(
-          rangeBuff, formatNodeAndAncestors(node, prevNode));
+        rangeBuff.push.apply(rangeBuff, formatNodeAndAncestors(node, prevNode));
       prevNode = node;
       cursor = cursor.move(cursors.Unit.NODE,
                            cursors.Movement.DIRECTIONAL,
                            Dir.FORWARD);
     }
     var lastNode = range.getEnd().getNode();
-    this.addToSpannable_(rangeBuff, formatNodeAndAncestors(lastNode, prevNode));
+    rangeBuff.push.apply(rangeBuff, formatNodeAndAncestors(lastNode, prevNode));
   },
 
   /**
    * @param {!chrome.automation.AutomationNode} node
    * @param {!chrome.automation.AutomationNode} prevNode
    * @param {chrome.automation.EventType|string} type
-   * @param {!cvox.Spannable} buff
+   * @param {!Array<cvox.Spannable>} buff
    * @param {!Object=} opt_exclude A list of attributes to exclude from
    * processing.
    * @private
@@ -663,32 +988,46 @@ Output.prototype = {
     // Navigate is the default event.
     var eventBlock = Output.RULES[type] || Output.RULES['navigate'];
 
+    var getMergedRoleBlock = function(role) {
+      var parentRole = (Output.ROLE_INFO_[role] || {}).inherits;
+      var roleBlock = eventBlock[role] || eventBlock['default'];
+      var parentRoleBlock = parentRole ? eventBlock[parentRole] : {};
+      var mergedRoleBlock = {};
+      for (var key in parentRoleBlock)
+        mergedRoleBlock[key] = parentRoleBlock[key];
+      for (var key in roleBlock)
+        mergedRoleBlock[key] = roleBlock[key];
+      return mergedRoleBlock;
+    };
+
     for (var i = 0, formatPrevNode;
          (formatPrevNode = prevUniqueAncestors[i]);
          i++) {
-      var roleBlock = eventBlock[formatPrevNode.role] || eventBlock['default'];
+      var roleBlock = getMergedRoleBlock(formatPrevNode.role);
       if (roleBlock.leave)
         this.format_(formatPrevNode, roleBlock.leave, buff, opt_exclude);
     }
 
-    var enterOutput = [];
+    var enterOutputs = [];
     var enterRole = {};
     for (var j = uniqueAncestors.length - 2, formatNode;
          (formatNode = uniqueAncestors[j]);
          j--) {
-      var roleBlock = eventBlock[formatNode.role] || eventBlock['default'];
+      var roleBlock = getMergedRoleBlock(formatNode.role);
       if (roleBlock.enter) {
         if (enterRole[formatNode.role])
           continue;
         enterRole[formatNode.role] = true;
-        var tempBuff = new cvox.Spannable('');
+        var tempBuff = [];
         this.format_(formatNode, roleBlock.enter, tempBuff, opt_exclude);
-        enterOutput.unshift(tempBuff);
+        enterOutputs.unshift(tempBuff);
       }
+      if (formatNode.role == 'window')
+        break;
     }
-    enterOutput.forEach(function(c) {
-      this.addToSpannable_(buff, c);
-    }.bind(this));
+    enterOutputs.forEach(function(b) {
+      buff.push.apply(buff, b);
+    });
 
     if (!opt_exclude.stay) {
       var commonFormatNode = uniqueAncestors[0];
@@ -706,7 +1045,7 @@ Output.prototype = {
    * @param {!chrome.automation.AutomationNode} node
    * @param {!chrome.automation.AutomationNode} prevNode
    * @param {chrome.automation.EventType|string} type
-   * @param {!cvox.Spannable} buff
+   * @param {!Array<cvox.Spannable>} buff
    * @private
    */
   node_: function(node, prevNode, type, buff) {
@@ -721,7 +1060,7 @@ Output.prototype = {
    * @param {!cursors.Range} range
    * @param {cursors.Range} prevRange
    * @param {chrome.automation.EventType|string} type
-   * @param {!cvox.Spannable} buff
+   * @param {!Array<cvox.Spannable>} buff
    * @private
    */
   subNode_: function(range, prevRange, type, buff) {
@@ -736,38 +1075,47 @@ Output.prototype = {
     var endIndex = range.getEnd().getIndex();
     if (startIndex === endIndex)
       endIndex++;
-    this.addToSpannable_(
+    this.append_(
         buff, range.getStart().getText().substring(startIndex, endIndex));
   },
 
   /**
-   * Adds to the given buffer with proper delimiters added.
-   * @param {!cvox.Spannable} spannable
+   * Appends output to the |buff|.
+   * @param {!Array<cvox.Spannable>} buff
    * @param {string|!cvox.Spannable} value
-   * @param {{ifEmpty: boolean,
-   *      annotation: (string|Output.Action|undefined)}=} opt_options
+   * @param {{isUnique: (boolean|undefined),
+   *      annotation: !Array<*>}=} opt_options
    */
-  addToSpannable_: function(spannable, value, opt_options) {
-    opt_options = opt_options || {ifEmpty: false, annotation: undefined};
-    if ((!value || value.length == 0) && !opt_options.annotation)
+  append_: function(buff, value, opt_options) {
+    opt_options = opt_options || {isUnique: false, annotation: []};
+
+    // Reject empty values without annotations.
+    if ((!value || value.length == 0) && opt_options.annotation.length == 0)
       return;
 
-    var spannableToAdd = new cvox.Spannable(value, opt_options.annotation);
-    if (spannable.getLength() == 0) {
-      spannable.append(spannableToAdd);
+    var spannableToAdd = new cvox.Spannable(value);
+    opt_options.annotation.forEach(function(a) {
+      spannableToAdd.setSpan(a, 0, spannableToAdd.getLength());
+    });
+
+    // Early return if the buffer is empty.
+    if (buff.length == 0) {
+      buff.push(spannableToAdd);
       return;
     }
 
-    if (opt_options.ifEmpty &&
-        opt_options.annotation &&
-        (spannable.getSpanStart(opt_options.annotation) != undefined ||
-            spannable.getSpanStart(
-                Output.ATTRIBUTE_ALIAS[opt_options.annotation]) != undefined))
-      return;
+    // |isUnique| specifies an annotation that cannot be duplicated.
+    if (opt_options.isUnique) {
+      var alreadyAnnotated = buff.some(function(s) {
+        return opt_options.annotation.some(function(annotation) {
+          return s.getSpanStart(annotation) != undefined;
+        });
+      });
+      if (alreadyAnnotated)
+        return;
+    }
 
-    var prefixed = new cvox.Spannable(Output.SPACE);
-    prefixed.append(spannableToAdd);
-    spannable.append(prefixed);
+    buff.push(spannableToAdd);
   },
 
   /**

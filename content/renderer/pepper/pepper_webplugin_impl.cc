@@ -156,7 +156,7 @@ v8::Local<v8::Object> PepperWebPluginImpl::v8ScriptableObject(
       message_channel->SetPassthroughObject(object_var->GetHandle());
   }
 
-  v8::Handle<v8::Object> result = instance_->GetMessageChannelObject();
+  v8::Local<v8::Object> result = instance_->GetMessageChannelObject();
   return result;
 }
 
@@ -174,7 +174,7 @@ void PepperWebPluginImpl::updateGeometry(
     const WebVector<WebRect>& cut_outs_rects,
     bool is_visible) {
   plugin_rect_ = window_rect;
-  if (!instance_->FlashIsFullscreenOrPending()) {
+  if (instance_ && !instance_->FlashIsFullscreenOrPending()) {
     std::vector<gfx::Rect> cut_outs;
     for (size_t i = 0; i < cut_outs_rects.size(); ++i)
       cut_outs.push_back(cut_outs_rects[i]);

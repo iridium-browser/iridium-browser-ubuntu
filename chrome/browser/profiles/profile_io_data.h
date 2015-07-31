@@ -39,7 +39,6 @@ class DevToolsNetworkController;
 class HostContentSettingsMap;
 class MediaDeviceIDSalt;
 class ProtocolHandlerRegistry;
-class SigninNamesOnIOThread;
 class SupervisedUserURLFilter;
 
 namespace chrome_browser_net {
@@ -138,10 +137,6 @@ class ProfileIOData {
 
   IntegerPrefMember* session_startup_pref() const {
     return &session_startup_pref_;
-  }
-
-  SigninNamesOnIOThread* signin_names() const {
-    return signin_names_.get();
   }
 
   StringPrefMember* google_services_account_id() const {
@@ -333,7 +328,12 @@ class ProfileIOData {
       net::NetworkDelegate* network_delegate,
       net::FtpTransactionFactory* ftp_transaction_factory) const;
 
-  // Called when the profile is destroyed.
+  // Called when the Profile is destroyed. |context_getters| must include all
+  // URLRequestContextGetters that refer to the ProfileIOData's
+  // URLRequestContexts. Triggers destruction of the ProfileIOData and shuts
+  // down |context_getters| safely on the IO thread.
+  // TODO(mmenke):  Passing all those URLRequestContextGetters around like this
+  //     is really silly.  Can we do something cleaner?
   void ShutdownOnUIThread(
       scoped_ptr<ChromeURLRequestContextGetterVector> context_getters);
 
@@ -385,8 +385,6 @@ class ProfileIOData {
       net::HttpCache::BackendFactory* backend) const;
 
   void SetCookieSettingsForTesting(CookieSettings* cookie_settings);
-
-  void set_signin_names_for_testing(SigninNamesOnIOThread* signin_names);
 
  private:
   class ResourceContext : public content::ResourceContext {
@@ -490,9 +488,6 @@ class ProfileIOData {
   // Deleted after lazy initialization.
   mutable scoped_ptr<ProfileParams> profile_params_;
 
-  // Provides access to the email addresses of all signed in profiles.
-  mutable scoped_ptr<SigninNamesOnIOThread> signin_names_;
-
   // Used for testing.
   mutable base::Callback<scoped_ptr<net::ClientCertStore>()>
       client_cert_store_factory_;
@@ -504,7 +499,6 @@ class ProfileIOData {
   // Member variables which are pointed to by the various context objects.
   mutable BooleanPrefMember enable_referrers_;
   mutable BooleanPrefMember enable_do_not_track_;
-  mutable BooleanPrefMember force_safesearch_;
   mutable BooleanPrefMember force_google_safesearch_;
   mutable BooleanPrefMember force_youtube_safety_mode_;
   mutable BooleanPrefMember safe_browsing_enabled_;

@@ -36,6 +36,7 @@ const int kTransmissionTimeOffsetExtensionId = 1;
 const int kAbsoluteSendTimeExtensionId = 14;
 const int kTransportSequenceNumberExtensionId = 13;
 const int kPayload = 100;
+const int kRtxPayload = 98;
 const uint32_t kTimestamp = 10;
 const uint16_t kSeqNum = 33;
 const int kTimeOffset = 22222;
@@ -79,8 +80,9 @@ class LoopbackTransportTest : public webrtc::Transport {
   }
   int SendPacket(int channel, const void *data, size_t len) override {
     packets_sent_++;
-    rtc::Buffer* buffer = new rtc::Buffer(data, len);
-    last_sent_packet_ = reinterpret_cast<uint8_t*>(buffer->data());
+    rtc::Buffer* buffer =
+        new rtc::Buffer(reinterpret_cast<const uint8_t*>(data), len);
+    last_sent_packet_ = buffer->data();
     last_sent_packet_len_ = len;
     total_bytes_sent_ += len;
     sent_packets_.push_back(buffer);
@@ -768,8 +770,10 @@ TEST_F(RtpSenderTest, SendPadding) {
     EXPECT_EQ(kMaxPaddingLength + rtp_header_len,
               transport_.last_sent_packet_len_);
     // Parse sent packet.
-    ASSERT_TRUE(rtp_parser->Parse(transport_.last_sent_packet_, kPaddingBytes,
+    ASSERT_TRUE(rtp_parser->Parse(transport_.last_sent_packet_,
+                                  transport_.last_sent_packet_len_,
                                   &rtp_header));
+    EXPECT_EQ(kMaxPaddingLength, rtp_header.paddingLength);
 
     // Verify sequence number and timestamp.
     EXPECT_EQ(seq_num++, rtp_header.sequenceNumber);
@@ -821,6 +825,7 @@ TEST_F(RtpSenderTest, SendRedundantPayloads) {
   rtp_sender_.reset(new RTPSender(0, false, &fake_clock_, &transport, NULL,
                                   &mock_paced_sender_, NULL, NULL, NULL));
   rtp_sender_->SetSequenceNumber(kSeqNum);
+  rtp_sender_->SetRtxPayloadType(kRtxPayload, kPayload);
   // Make all packets go through the pacer.
   EXPECT_CALL(mock_paced_sender_,
               SendPacket(PacedSender::kNormalPriority, _, _, _, _, _)).
@@ -1290,7 +1295,7 @@ TEST_F(RtpSenderTest, BytesReportedCorrectly) {
   const uint8_t kPayloadType = 127;
   rtp_sender_->SetSSRC(1234);
   rtp_sender_->SetRtxSsrc(4321);
-  rtp_sender_->SetRtxPayloadType(kPayloadType - 1);
+  rtp_sender_->SetRtxPayloadType(kPayloadType - 1, kPayloadType);
   rtp_sender_->SetRtxStatus(kRtxRetransmitted | kRtxRedundantPayloads);
 
   ASSERT_EQ(
@@ -1353,7 +1358,7 @@ TEST_F(RtpSenderVideoTest, SendVideoWithCVO) {
 
   rtp_sender_video_->SendVideo(kRtpVideoGeneric, kVideoFrameKey, kPayload,
                                kTimestamp, 0, packet_, sizeof(packet_), NULL,
-                               NULL, &hdr);
+                               &hdr);
 
   RtpHeaderExtensionMap map;
   map.Register(kRtpExtensionVideoRotation, kVideoRotationExtensionId);
@@ -1361,7 +1366,7 @@ TEST_F(RtpSenderVideoTest, SendVideoWithCVO) {
   // Verify that this packet does have CVO byte.
   VerifyCVOPacket(
       reinterpret_cast<uint8_t*>(transport_.sent_packets_[0]->data()),
-      transport_.sent_packets_[0]->length(), true, &map, kSeqNum, hdr.rotation);
+      transport_.sent_packets_[0]->size(), true, &map, kSeqNum, hdr.rotation);
 
   // Verify that this packet does have CVO byte.
   VerifyCVOPacket(

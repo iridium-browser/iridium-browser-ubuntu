@@ -68,11 +68,6 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
 
   virtual bool IsContextLost();
 
-  static void DebugGLCall(gpu::gles2::GLES2Interface* gl,
-                          const char* command,
-                          const char* file,
-                          int line);
-
  protected:
   GLRenderer(RendererClient* client,
              const RendererSettings* settings,
@@ -392,21 +387,24 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
                                         BlendMode blend_mode,
                                         bool mask_for_background);
 
-  const TextureProgram* GetTextureProgram(
-      TexCoordPrecision precision);
+  const TextureProgram* GetTextureProgram(TexCoordPrecision precision,
+                                          SamplerType sampler);
   const NonPremultipliedTextureProgram* GetNonPremultipliedTextureProgram(
-      TexCoordPrecision precision);
+      TexCoordPrecision precision,
+      SamplerType sampler);
   const TextureBackgroundProgram* GetTextureBackgroundProgram(
-      TexCoordPrecision precision);
+      TexCoordPrecision precision,
+      SamplerType sampler);
   const NonPremultipliedTextureBackgroundProgram*
-      GetNonPremultipliedTextureBackgroundProgram(TexCoordPrecision precision);
+  GetNonPremultipliedTextureBackgroundProgram(TexCoordPrecision precision,
+                                              SamplerType sampler);
   const TextureProgram* GetTextureIOSurfaceProgram(
       TexCoordPrecision precision);
 
-  const VideoYUVProgram* GetVideoYUVProgram(
-      TexCoordPrecision precision);
-  const VideoYUVAProgram* GetVideoYUVAProgram(
-      TexCoordPrecision precision);
+  const VideoYUVProgram* GetVideoYUVProgram(TexCoordPrecision precision,
+                                            SamplerType sampler);
+  const VideoYUVAProgram* GetVideoYUVAProgram(TexCoordPrecision precision,
+                                              SamplerType sampler);
   const VideoStreamTextureProgram* GetVideoStreamTextureProgram(
       TexCoordPrecision precision);
 
@@ -430,14 +428,17 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
 
   TileCheckerboardProgram tile_checkerboard_program_;
 
-  TextureProgram texture_program_[LAST_TEX_COORD_PRECISION + 1];
+  TextureProgram
+      texture_program_[LAST_TEX_COORD_PRECISION + 1][LAST_SAMPLER_TYPE + 1];
   NonPremultipliedTextureProgram
-      nonpremultiplied_texture_program_[LAST_TEX_COORD_PRECISION + 1];
+      nonpremultiplied_texture_program_[LAST_TEX_COORD_PRECISION +
+                                        1][LAST_SAMPLER_TYPE + 1];
   TextureBackgroundProgram
-      texture_background_program_[LAST_TEX_COORD_PRECISION + 1];
+      texture_background_program_[LAST_TEX_COORD_PRECISION +
+                                  1][LAST_SAMPLER_TYPE + 1];
   NonPremultipliedTextureBackgroundProgram
       nonpremultiplied_texture_background_program_[LAST_TEX_COORD_PRECISION +
-                                                   1];
+                                                   1][LAST_SAMPLER_TYPE + 1];
   TextureProgram texture_io_surface_program_[LAST_TEX_COORD_PRECISION + 1];
 
   RenderPassProgram
@@ -471,8 +472,10 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
                                                [LAST_BLEND_MODE + 1]
                                                [LAST_MASK_VALUE + 1];
 
-  VideoYUVProgram video_yuv_program_[LAST_TEX_COORD_PRECISION + 1];
-  VideoYUVAProgram video_yuva_program_[LAST_TEX_COORD_PRECISION + 1];
+  VideoYUVProgram
+      video_yuv_program_[LAST_TEX_COORD_PRECISION + 1][LAST_SAMPLER_TYPE + 1];
+  VideoYUVAProgram
+      video_yuva_program_[LAST_TEX_COORD_PRECISION + 1][LAST_SAMPLER_TYPE + 1];
   VideoStreamTextureProgram
       video_stream_texture_program_[LAST_TEX_COORD_PRECISION + 1];
 
@@ -516,18 +519,6 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
   BoundGeometry bound_geometry_;
   DISALLOW_COPY_AND_ASSIGN(GLRenderer);
 };
-
-// Setting DEBUG_GL_CALLS to 1 will call glGetError() after almost every GL
-// call made by the compositor. Useful for debugging rendering issues but
-// will significantly degrade performance.
-#define DEBUG_GL_CALLS 0
-
-#if DEBUG_GL_CALLS && !defined(NDEBUG)
-#define GLC(context, x)                                                        \
-  (x, GLRenderer::DebugGLCall(&* context, #x, __FILE__, __LINE__))
-#else
-#define GLC(context, x) (x)
-#endif
 
 }  // namespace cc
 

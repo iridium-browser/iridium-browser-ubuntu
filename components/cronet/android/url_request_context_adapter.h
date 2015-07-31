@@ -20,11 +20,9 @@
 #include "net/url_request/url_request_context_getter.h"
 
 namespace net {
-
-class NetLogLogger;
-
+class WriteToFileNetLogObserver;
 class ProxyConfigService;
-
+class SdchOwner;
 }  // namespace net
 
 namespace cronet {
@@ -82,7 +80,7 @@ class URLRequestContextAdapter : public net::URLRequestContextGetter {
   scoped_refptr<base::SingleThreadTaskRunner> GetNetworkTaskRunner()
       const override;
 
-  void StartNetLogToFile(const std::string& file_name);
+  void StartNetLogToFile(const std::string& file_name, bool log_all);
   void StopNetLog();
 
   // Called on main Java thread to initialize URLRequestContext.
@@ -96,7 +94,7 @@ class URLRequestContextAdapter : public net::URLRequestContextGetter {
 
   // Helper function to start writing NetLog data to file. This should only be
   // run after context is initialized.
-  void StartNetLogToFileHelper(const std::string& file_name);
+  void StartNetLogToFileHelper(const std::string& file_name, bool log_all);
   // Helper function to stop writing NetLog data to file. This should only be
   // run after context is initialized.
   void StopNetLogHelper();
@@ -107,8 +105,9 @@ class URLRequestContextAdapter : public net::URLRequestContextGetter {
   bool load_disable_cache_;
   base::Thread* network_thread_;
   scoped_ptr<NetLogObserver> net_log_observer_;
-  scoped_ptr<net::NetLogLogger> net_log_logger_;
+  scoped_ptr<net::WriteToFileNetLogObserver> write_to_file_observer_;
   scoped_ptr<net::ProxyConfigService> proxy_config_service_;
+  scoped_ptr<net::SdchOwner> sdch_owner_;
   scoped_ptr<URLRequestContextConfig> config_;
 
   // A queue of tasks that need to be run after context has been initialized.

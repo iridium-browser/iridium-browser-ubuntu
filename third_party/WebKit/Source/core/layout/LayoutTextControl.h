@@ -43,7 +43,7 @@ protected:
     LayoutTextControl(HTMLTextFormControlElement*);
 
     // This convenience function should not be made public because
-    // innerEditorElement may outlive the render tree.
+    // innerEditorElement may outlive the layout tree.
     HTMLElement* innerEditorElement() const;
 
     int scrollbarThickness() const;
@@ -79,7 +79,6 @@ private:
     virtual void computePreferredLogicalWidths() override final;
     virtual void removeLeftoverAnonymousBlock(LayoutBlock*) override final { }
     virtual bool avoidsFloats() const override final { return true; }
-    virtual bool canHaveGeneratedChildren() const override final { return false; }
 
     virtual void addChild(LayoutObject* newChild, LayoutObject* beforeChild = 0) override final;
 
@@ -90,7 +89,7 @@ private:
 
 DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutTextControl, isTextControl());
 
-// Renderer for our inner container, for <search> and others.
+// LayoutObject for our inner container, for <search> and others.
 // We can't use LayoutFlexibleBox directly, because flexboxes have a different
 // baseline definition, and then inputs of different types wouldn't line up
 // anymore.

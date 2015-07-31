@@ -119,8 +119,10 @@ void ViEReceiver::SetNackStatus(bool enable,
   rtp_receiver_->SetNACKStatus(enable ? kNackRtcp : kNackOff);
 }
 
-void ViEReceiver::SetRtxPayloadType(int payload_type) {
-  rtp_payload_registry_->SetRtxPayloadType(payload_type);
+void ViEReceiver::SetRtxPayloadType(int payload_type,
+                                    int associated_payload_type) {
+  rtp_payload_registry_->SetRtxPayloadType(payload_type,
+                                           associated_payload_type);
 }
 
 void ViEReceiver::SetRtxSsrc(uint32_t ssrc) {
@@ -242,17 +244,6 @@ bool ViEReceiver::OnRecoveredPacket(const uint8_t* rtp_packet,
   header.payload_type_frequency = kVideoPayloadTypeFrequency;
   bool in_order = IsPacketInOrder(header);
   return ReceivePacket(rtp_packet, rtp_packet_length, header, in_order);
-}
-
-void ViEReceiver::ReceivedBWEPacket(
-    int64_t arrival_time_ms, size_t payload_size, const RTPHeader& header) {
-  // Only forward if the incoming packet *and* the channel are both configured
-  // to receive absolute sender time. RTP time stamps may have different rates
-  // for audio and video and shouldn't be mixed.
-  if (header.extension.hasAbsoluteSendTime && receiving_ast_enabled_) {
-    remote_bitrate_estimator_->IncomingPacket(arrival_time_ms, payload_size,
-                                              header);
-  }
 }
 
 int ViEReceiver::InsertRTPPacket(const uint8_t* rtp_packet,

@@ -13,7 +13,6 @@
 #include "content/browser/frame_host/frame_tree.h"
 #include "content/browser/frame_host/frame_tree_node.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
-#include "content/browser/service_worker/service_worker_context_core.h"
 #include "content/browser/service_worker/service_worker_context_watcher.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "content/browser/service_worker/service_worker_version.h"
@@ -23,6 +22,7 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/storage_partition.h"
+#include "content/public/common/push_messaging_status.h"
 #include "url/gurl.h"
 
 // Windows headers will redefine SendMessage.
@@ -41,6 +41,8 @@ namespace {
 void ResultNoOp(bool success) {
 }
 void StatusNoOp(ServiceWorkerStatusCode status) {
+}
+void PushDeliveryNoOp(PushDeliveryStatus status) {
 }
 
 const std::string GetVersionRunningStatusString(
@@ -127,11 +129,14 @@ scoped_refptr<ServiceWorkerDevToolsAgentHost> GetMatchingServiceWorker(
 }
 
 ServiceWorkerDevToolsAgentHost::Map GetMatchingServiceWorkers(
+    BrowserContext* browser_context,
     const std::set<GURL>& urls) {
-  ServiceWorkerDevToolsAgentHost::List agent_hosts;
-  ServiceWorkerDevToolsManager::GetInstance()->
-      AddAllAgentHosts(&agent_hosts);
   ServiceWorkerDevToolsAgentHost::Map result;
+  if (!browser_context)
+    return result;
+  ServiceWorkerDevToolsAgentHost::List agent_hosts;
+  ServiceWorkerDevToolsManager::GetInstance()
+      ->AddAllAgentHostsForBrowserContext(browser_context, &agent_hosts);
   for (const GURL& url : urls) {
     scoped_refptr<ServiceWorkerDevToolsAgentHost> host =
         GetMatchingServiceWorker(agent_hosts, url);
@@ -148,11 +153,8 @@ bool CollectURLs(std::set<GURL>* urls, FrameTreeNode* tree_node) {
 
 void StopServiceWorkerOnIO(scoped_refptr<ServiceWorkerContextWrapper> context,
                            int64 version_id) {
-  ServiceWorkerContextCore* context_core = context->context();
-  if (!context_core)
-    return;
   if (content::ServiceWorkerVersion* version =
-          context_core->GetLiveVersion(version_id)) {
+          context->GetLiveVersion(version_id)) {
     version->StopWorker(base::Bind(&StatusNoOp));
   }
 }
@@ -161,11 +163,8 @@ void GetDevToolsRouteInfoOnIO(
     scoped_refptr<ServiceWorkerContextWrapper> context,
     int64 version_id,
     const base::Callback<void(int, int)>& callback) {
-  ServiceWorkerContextCore* context_core = context->context();
-  if (!context_core)
-    return;
   if (content::ServiceWorkerVersion* version =
-          context_core->GetLiveVersion(version_id)) {
+          context->GetLiveVersion(version_id)) {
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
         base::Bind(
@@ -174,11 +173,11 @@ void GetDevToolsRouteInfoOnIO(
   }
 }
 
-Response CreateContextErrorResoponse() {
+Response CreateContextErrorResponse() {
   return Response::InternalError("Could not connect to the context");
 }
 
-Response CreateInvalidVersionIdErrorResoponse() {
+Response CreateInvalidVersionIdErrorResponse() {
   return Response::InternalError("Invalid version ID");
 }
 
@@ -217,14 +216,16 @@ void ServiceWorkerHandler::UpdateHosts() {
     return;
 
   urls_.clear();
+  BrowserContext* browser_context = nullptr;
   if (render_frame_host_) {
     render_frame_host_->frame_tree_node()->frame_tree()->ForEach(
         base::Bind(&CollectURLs, &urls_));
+    browser_context = render_frame_host_->GetProcess()->GetBrowserContext();
   }
 
   ServiceWorkerDevToolsAgentHost::Map old_hosts = attached_hosts_;
   ServiceWorkerDevToolsAgentHost::Map new_hosts =
-      GetMatchingServiceWorkers(urls_);
+      GetMatchingServiceWorkers(browser_context, urls_);
 
   for (auto pair : old_hosts) {
     if (new_hosts.find(pair.first) == new_hosts.end())
@@ -306,7 +307,7 @@ Response ServiceWorkerHandler::Unregister(const std::string& scope_url) {
   if (!enabled_)
     return Response::OK();
   if (!context_)
-    return CreateContextErrorResoponse();
+    return CreateContextErrorResponse();
   context_->UnregisterServiceWorker(GURL(scope_url), base::Bind(&ResultNoOp));
   return Response::OK();
 }
@@ -315,7 +316,7 @@ Response ServiceWorkerHandler::StartWorker(const std::string& scope_url) {
   if (!enabled_)
     return Response::OK();
   if (!context_)
-    return CreateContextErrorResoponse();
+    return CreateContextErrorResponse();
   context_->StartServiceWorker(GURL(scope_url), base::Bind(&StatusNoOp));
   return Response::OK();
 }
@@ -324,12 +325,22 @@ Response ServiceWorkerHandler::StopWorker(const std::string& version_id) {
   if (!enabled_)
     return Response::OK();
   if (!context_)
-    return CreateContextErrorResoponse();
+    return CreateContextErrorResponse();
   int64 id = 0;
   if (!base::StringToInt64(version_id, &id))
-    return CreateInvalidVersionIdErrorResoponse();
+    return CreateInvalidVersionIdErrorResponse();
   BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
                           base::Bind(&StopServiceWorkerOnIO, context_, id));
+  return Response::OK();
+}
+
+Response ServiceWorkerHandler::UpdateRegistration(
+    const std::string& scope_url) {
+  if (!enabled_)
+    return Response::OK();
+  if (!context_)
+    return CreateContextErrorResponse();
+  context_->UpdateRegistration(GURL(scope_url));
   return Response::OK();
 }
 
@@ -337,11 +348,11 @@ Response ServiceWorkerHandler::InspectWorker(const std::string& version_id) {
   if (!enabled_)
     return Response::OK();
   if (!context_)
-    return CreateContextErrorResoponse();
+    return CreateContextErrorResponse();
 
   int64 id = 0;
   if (!base::StringToInt64(version_id, &id))
-    return CreateInvalidVersionIdErrorResoponse();
+    return CreateInvalidVersionIdErrorResponse();
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       base::Bind(&GetDevToolsRouteInfoOnIO, context_, id,
@@ -350,9 +361,39 @@ Response ServiceWorkerHandler::InspectWorker(const std::string& version_id) {
   return Response::OK();
 }
 
+Response ServiceWorkerHandler::SkipWaiting(const std::string& version_id) {
+  if (!enabled_)
+    return Response::OK();
+  if (!context_)
+    return CreateContextErrorResponse();
+
+  int64 id = 0;
+  if (!base::StringToInt64(version_id, &id))
+    return CreateInvalidVersionIdErrorResponse();
+  context_->SimulateSkipWaiting(id);
+  return Response::OK();
+}
+
 Response ServiceWorkerHandler::SetDebugOnStart(bool debug_on_start) {
   ServiceWorkerDevToolsManager::GetInstance()
       ->set_debug_service_worker_on_start(debug_on_start);
+  return Response::OK();
+}
+
+Response ServiceWorkerHandler::DeliverPushMessage(
+    const std::string& origin,
+    const std::string& registration_id,
+    const std::string& data) {
+  if (!enabled_)
+    return Response::OK();
+  if (!render_frame_host_)
+    return CreateContextErrorResponse();
+  int64 id = 0;
+  if (!base::StringToInt64(registration_id, &id))
+    return CreateInvalidVersionIdErrorResponse();
+  BrowserContext::DeliverPushMessage(
+      render_frame_host_->GetProcess()->GetBrowserContext(), GURL(origin), id,
+      data, base::Bind(&PushDeliveryNoOp));
   return Response::OK();
 }
 
@@ -427,8 +468,13 @@ void ServiceWorkerHandler::AgentHostClosed(
 
 void ServiceWorkerHandler::WorkerCreated(
     ServiceWorkerDevToolsAgentHost* host) {
-  auto hosts = GetMatchingServiceWorkers(urls_);
-  if (hosts.find(host->GetId()) != hosts.end() && !host->IsAttached())
+  BrowserContext* browser_context = nullptr;
+  if (render_frame_host_)
+    browser_context = render_frame_host_->GetProcess()->GetBrowserContext();
+
+  auto hosts = GetMatchingServiceWorkers(browser_context, urls_);
+  if (hosts.find(host->GetId()) != hosts.end() && !host->IsAttached() &&
+      !host->IsPausedForDebugOnStart())
     host->PauseForDebugOnStart();
 }
 

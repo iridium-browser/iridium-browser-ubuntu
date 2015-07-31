@@ -47,9 +47,8 @@ bool DelegatedRendererLayerImpl::HasContributingDelegatedRenderPasses() const {
 static ResourceProvider::ResourceId ResourceRemapHelper(
     bool* invalid_frame,
     const ResourceProvider::ResourceIdMap& child_to_parent_map,
-    ResourceProvider::ResourceIdArray* resources_in_frame,
+    ResourceProvider::ResourceIdSet* resources_in_frame,
     ResourceProvider::ResourceId id) {
-
   ResourceProvider::ResourceIdMap::const_iterator it =
       child_to_parent_map.find(id);
   if (it == child_to_parent_map.end()) {
@@ -59,7 +58,7 @@ static ResourceProvider::ResourceId ResourceRemapHelper(
 
   DCHECK_EQ(it->first, id);
   ResourceProvider::ResourceId remapped_id = it->second;
-  resources_in_frame->push_back(id);
+  resources_in_frame->insert(id);
   return remapped_id;
 }
 
@@ -123,7 +122,18 @@ void DelegatedRendererLayerImpl::SetFrameData(
   RenderPass::CopyAll(frame_data->render_pass_list, &render_pass_list);
 
   bool invalid_frame = false;
-  ResourceProvider::ResourceIdArray resources_in_frame;
+  ResourceProvider::ResourceIdSet resources_in_frame;
+  size_t reserve_size = frame_data->resource_list.size();
+#if defined(COMPILER_MSVC)
+  resources_in_frame.reserve(reserve_size);
+#elif defined(COMPILER_GCC)
+  // Pre-standard hash-tables only implement resize, which behaves similarly
+  // to reserve for these keys. Resizing to 0 may also be broken (particularly
+  // on stlport).
+  // TODO(jbauman): Replace with reserve when C++11 is supported everywhere.
+  if (reserve_size)
+    resources_in_frame.resize(reserve_size);
+#endif
   DrawQuad::ResourceIteratorCallback remap_resources_to_parent_callback =
       base::Bind(&ResourceRemapHelper,
                  &invalid_frame,
@@ -164,7 +174,7 @@ void DelegatedRendererLayerImpl::SetFrameData(
 }
 
 void DelegatedRendererLayerImpl::TakeOwnershipOfResourcesIfOnActiveTree(
-    const ResourceProvider::ResourceIdArray& resources) {
+    const ResourceProvider::ResourceIdSet& resources) {
   DCHECK(child_id_);
   if (!layer_tree_impl()->IsActiveTree())
     return;
@@ -418,20 +428,18 @@ void DelegatedRendererLayerImpl::AppendRenderPassQuads(
   const SharedQuadState* delegated_shared_quad_state = nullptr;
   SharedQuadState* output_shared_quad_state = nullptr;
 
+  gfx::Transform delegated_frame_to_target_transform = draw_transform();
+  delegated_frame_to_target_transform.Scale(inverse_device_scale_factor_,
+                                            inverse_device_scale_factor_);
+  bool is_root_delegated_render_pass =
+      delegated_render_pass == render_passes_in_draw_order_.back();
   for (const auto& delegated_quad : delegated_render_pass->quad_list) {
-    bool is_root_delegated_render_pass =
-        delegated_render_pass == render_passes_in_draw_order_.back();
-
     if (delegated_quad->shared_quad_state != delegated_shared_quad_state) {
       delegated_shared_quad_state = delegated_quad->shared_quad_state;
       output_shared_quad_state = render_pass->CreateAndAppendSharedQuadState();
       output_shared_quad_state->CopyFrom(delegated_shared_quad_state);
 
       if (is_root_delegated_render_pass) {
-        gfx::Transform delegated_frame_to_target_transform = draw_transform();
-        delegated_frame_to_target_transform.Scale(inverse_device_scale_factor_,
-                                                  inverse_device_scale_factor_);
-
         output_shared_quad_state->content_to_target_transform.ConcatTransform(
             delegated_frame_to_target_transform);
 
@@ -464,7 +472,8 @@ void DelegatedRendererLayerImpl::AppendRenderPassQuads(
     if (!is_root_delegated_render_pass) {
       quad_content_to_delegated_target_space.ConcatTransform(
           delegated_render_pass->transform_to_root_target);
-      quad_content_to_delegated_target_space.ConcatTransform(draw_transform());
+      quad_content_to_delegated_target_space.ConcatTransform(
+          delegated_frame_to_target_transform);
     }
 
     Occlusion occlusion_in_quad_space =
@@ -483,6 +492,7 @@ void DelegatedRendererLayerImpl::AppendRenderPassQuads(
       DrawQuad* output_quad = render_pass->CopyFromAndAppendDrawQuad(
           delegated_quad, output_shared_quad_state);
       output_quad->visible_rect = quad_visible_rect;
+      ValidateQuadResources(output_quad);
     } else {
       RenderPassId delegated_contributing_render_pass_id =
           RenderPassDrawQuad::MaterialCast(delegated_quad)->render_pass_id;
@@ -491,19 +501,16 @@ void DelegatedRendererLayerImpl::AppendRenderPassQuads(
       bool present =
           ConvertDelegatedRenderPassId(delegated_contributing_render_pass_id,
                                        &output_contributing_render_pass_id);
+      // |present| being false means the child compositor sent an invalid frame.
+      DCHECK(present);
+      DCHECK(output_contributing_render_pass_id != render_pass->id);
 
-      // The frame may have a RenderPassDrawQuad that points to a RenderPass not
-      // part of the frame. Just ignore these quads.
-      if (present) {
-        DCHECK(output_contributing_render_pass_id != render_pass->id);
-
-        RenderPassDrawQuad* output_quad =
-            render_pass->CopyFromAndAppendRenderPassDrawQuad(
-                RenderPassDrawQuad::MaterialCast(delegated_quad),
-                output_shared_quad_state,
-                output_contributing_render_pass_id);
-        output_quad->visible_rect = quad_visible_rect;
-      }
+      RenderPassDrawQuad* output_quad =
+          render_pass->CopyFromAndAppendRenderPassDrawQuad(
+              RenderPassDrawQuad::MaterialCast(delegated_quad),
+              output_shared_quad_state, output_contributing_render_pass_id);
+      output_quad->visible_rect = quad_visible_rect;
+      ValidateQuadResources(output_quad);
     }
   }
 }

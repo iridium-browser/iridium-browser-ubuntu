@@ -113,36 +113,21 @@ void SVGFEImageElement::buildPendingResource()
     invalidate();
 }
 
-bool SVGFEImageElement::isSupportedAttribute(const QualifiedName& attrName)
-{
-    DEFINE_STATIC_LOCAL(HashSet<QualifiedName>, supportedAttributes, ());
-    if (supportedAttributes.isEmpty()) {
-        SVGURIReference::addSupportedAttributes(supportedAttributes);
-        supportedAttributes.add(SVGNames::preserveAspectRatioAttr);
-    }
-    return supportedAttributes.contains<SVGAttributeHashTranslator>(attrName);
-}
-
 void SVGFEImageElement::svgAttributeChanged(const QualifiedName& attrName)
 {
-    if (!isSupportedAttribute(attrName)) {
-        SVGFilterPrimitiveStandardAttributes::svgAttributeChanged(attrName);
-        return;
-    }
-
-    SVGElement::InvalidationGuard invalidationGuard(this);
-
     if (attrName == SVGNames::preserveAspectRatioAttr) {
+        SVGElement::InvalidationGuard invalidationGuard(this);
         invalidate();
         return;
     }
 
     if (SVGURIReference::isKnownAttribute(attrName)) {
+        SVGElement::InvalidationGuard invalidationGuard(this);
         buildPendingResource();
         return;
     }
 
-    ASSERT_NOT_REACHED();
+    SVGFilterPrimitiveStandardAttributes::svgAttributeChanged(attrName);
 }
 
 Node::InsertionNotificationRequest SVGFEImageElement::insertedInto(ContainerNode* rootParent)
@@ -168,8 +153,8 @@ void SVGFEImageElement::notifyFinished(Resource*)
     if (!parent || !isSVGFilterElement(parent) || !parent->layoutObject())
         return;
 
-    if (LayoutObject* renderer = this->layoutObject())
-        markForLayoutAndParentResourceInvalidation(renderer);
+    if (LayoutObject* layoutObject = this->layoutObject())
+        markForLayoutAndParentResourceInvalidation(layoutObject);
 }
 
 PassRefPtrWillBeRawPtr<FilterEffect> SVGFEImageElement::build(SVGFilterBuilder*, Filter* filter)

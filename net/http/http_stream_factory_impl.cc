@@ -105,9 +105,6 @@ HttpStreamRequest* HttpStreamFactoryImpl::RequestStreamInternal(
     request->AttachJob(alternate_job);
     alternate_job->MarkAsAlternate(alternative_service);
 
-    // Never share connection with other jobs for FTP requests.
-    DCHECK(!request_info.url.SchemeIs("ftp"));
-
     job->WaitFor(alternate_job);
     // Make sure to wait until we call WaitFor(), before starting
     // |alternate_job|, otherwise |alternate_job| will not notify |job|
@@ -162,11 +159,6 @@ AlternativeService HttpStreamFactoryImpl::GetAlternativeServiceFor(
 
   if (alternative_service.protocol == UNINITIALIZED_ALTERNATE_PROTOCOL)
     return kNoAlternativeService;
-  // TODO(bnc):  Make sure that callers connect to the specified host, and that
-  // certificate requirements are enforced.  Then remove the following two
-  // lines.
-  if (alternative_service.host != origin.host())
-    return kNoAlternativeService;
   if (http_server_properties.IsAlternativeServiceBroken(alternative_service)) {
     HistogramAlternateProtocolUsage(ALTERNATE_PROTOCOL_USAGE_BROKEN);
     return kNoAlternativeService;
@@ -201,11 +193,21 @@ AlternativeService HttpStreamFactoryImpl::GetAlternativeServiceFor(
   }
 
   DCHECK_EQ(QUIC, alternative_service.protocol);
+  // TODO(bnc):  Make sure that certificate requirements are enforced when using
+  // QUIC, then remove the following two lines.
+  if (alternative_service.host != origin.host())
+    return kNoAlternativeService;
+
   if (!session_->params().enable_quic)
     return kNoAlternativeService;
 
   if (session_->quic_stream_factory()->IsQuicDisabled(origin.port()))
     return kNoAlternativeService;
+
+  if (session_->params().disable_insecure_quic &&
+      !original_url.SchemeIs("https")) {
+    return kNoAlternativeService;
+  }
 
   return alternative_service;
 }

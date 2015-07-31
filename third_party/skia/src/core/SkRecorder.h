@@ -39,6 +39,10 @@ public:
     SkRecorder(SkRecord*, int width, int height);   // legacy version
     SkRecorder(SkRecord*, const SkRect& bounds);
 
+    void reset(SkRecord*, const SkRect& bounds);
+
+    size_t approxBytesUsedBySubPictures() const { return fApproxBytesUsedBySubPictures; }
+
     SkDrawableList* getDrawableList() const { return fDrawableList.get(); }
     SkDrawableList* detachDrawableList() { return fDrawableList.detach(); }
 
@@ -129,8 +133,8 @@ private:
         return devBounds;
     }
 
+    size_t fApproxBytesUsedBySubPictures;
     SkRecord* fRecord;
-
     SkAutoTDelete<SkDrawableList> fDrawableList;
 };
 

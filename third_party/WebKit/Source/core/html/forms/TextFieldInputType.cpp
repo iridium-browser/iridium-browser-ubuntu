@@ -124,7 +124,7 @@ TextFieldInputType::~TextFieldInputType()
 
 SpinButtonElement* TextFieldInputType::spinButtonElement() const
 {
-    return toSpinButtonElement(element().closedShadowRoot()->getElementById(ShadowElementNames::spinButton()));
+    return toSpinButtonElement(element().userAgentShadowRoot()->getElementById(ShadowElementNames::spinButton()));
 }
 
 bool TextFieldInputType::shouldShowFocusRingOnMouseFocus() const
@@ -228,21 +228,21 @@ void TextFieldInputType::forwardEvent(Event* event)
     }
 
     if (element().layoutObject() && (event->isMouseEvent() || event->isDragEvent() || event->hasInterface(EventNames::WheelEvent) || event->type() == EventTypeNames::blur || event->type() == EventTypeNames::focus)) {
-        LayoutTextControlSingleLine* renderTextControl = toLayoutTextControlSingleLine(element().layoutObject());
+        LayoutTextControlSingleLine* layoutTextControl = toLayoutTextControlSingleLine(element().layoutObject());
         if (event->type() == EventTypeNames::blur) {
-            if (LayoutBox* innerEditorRenderer = element().innerEditorElement()->layoutBox()) {
+            if (LayoutBox* innerEditorLayoutObject = element().innerEditorElement()->layoutBox()) {
                 // FIXME: This class has no need to know about DeprecatedPaintLayer!
-                if (DeprecatedPaintLayer* innerLayer = innerEditorRenderer->layer()) {
+                if (DeprecatedPaintLayer* innerLayer = innerEditorLayoutObject->layer()) {
                     if (DeprecatedPaintLayerScrollableArea* innerScrollableArea = innerLayer->scrollableArea()) {
-                        IntSize scrollOffset(!renderTextControl->style()->isLeftToRightDirection() ? innerScrollableArea->scrollWidth().toInt() : 0, 0);
+                        IntSize scrollOffset(!layoutTextControl->style()->isLeftToRightDirection() ? innerScrollableArea->scrollWidth().toInt() : 0, 0);
                         innerScrollableArea->scrollToOffset(scrollOffset, ScrollOffsetClamped);
                     }
                 }
             }
 
-            renderTextControl->capsLockStateMayHaveChanged();
+            layoutTextControl->capsLockStateMayHaveChanged();
         } else if (event->type() == EventTypeNames::focus) {
-            renderTextControl->capsLockStateMayHaveChanged();
+            layoutTextControl->capsLockStateMayHaveChanged();
         }
 
         element().forwardEvent(event);
@@ -281,7 +281,7 @@ bool TextFieldInputType::shouldHaveSpinButton() const
 void TextFieldInputType::createShadowSubtree()
 {
     ASSERT(element().shadow());
-    ShadowRoot* shadowRoot = element().closedShadowRoot();
+    ShadowRoot* shadowRoot = element().userAgentShadowRoot();
     ASSERT(!shadowRoot->hasChildren());
 
     Document& document = element().document();
@@ -316,7 +316,7 @@ void TextFieldInputType::createShadowSubtree()
 
 Element* TextFieldInputType::containerElement() const
 {
-    return element().closedShadowRoot()->getElementById(ShadowElementNames::textFieldContainer());
+    return element().userAgentShadowRoot()->getElementById(ShadowElementNames::textFieldContainer());
 }
 
 void TextFieldInputType::destroyShadowSubtree()
@@ -330,7 +330,7 @@ void TextFieldInputType::listAttributeTargetChanged()
 {
     if (Chrome* chrome = this->chrome())
         chrome->client().textFieldDataListChanged(element());
-    Element* picker = element().closedShadowRoot()->getElementById(ShadowElementNames::pickerIndicator());
+    Element* picker = element().userAgentShadowRoot()->getElementById(ShadowElementNames::pickerIndicator());
     bool didHavePickerIndicator = picker;
     bool willHavePickerIndicator = element().hasValidDataListOptions();
     if (didHavePickerIndicator == willHavePickerIndicator)
@@ -511,12 +511,12 @@ void TextFieldInputType::didSetValueByUserEdit(ValueChangeState state)
 
 void TextFieldInputType::spinButtonStepDown()
 {
-    stepUpFromRenderer(-1);
+    stepUpFromLayoutObject(-1);
 }
 
 void TextFieldInputType::spinButtonStepUp()
 {
-    stepUpFromRenderer(1);
+    stepUpFromLayoutObject(1);
 }
 
 void TextFieldInputType::updateView()

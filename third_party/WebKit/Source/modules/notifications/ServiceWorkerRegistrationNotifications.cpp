@@ -17,6 +17,7 @@
 #include "modules/notifications/GetNotificationOptions.h"
 #include "modules/notifications/Notification.h"
 #include "modules/notifications/NotificationOptions.h"
+#include "modules/vibration/NavigatorVibration.h"
 #include "platform/weborigin/KURL.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebSerializedOrigin.h"
@@ -38,7 +39,7 @@ public:
         HeapVector<Member<Notification>> notifications;
 
         for (const WebPersistentNotificationInfo& notificationInfo : *notificationInfos)
-            notifications.append(Notification::create(resolver->executionContext(), notificationInfo.persistentNotificationId, notificationInfo.data));
+            notifications.append(Notification::create(resolver->executionContext(), notificationInfo.persistentId, notificationInfo.data));
 
         return notifications;
     }
@@ -66,13 +67,17 @@ ScriptPromise ServiceWorkerRegistrationNotifications::showNotification(ScriptSta
     if (Notification::checkPermission(executionContext) != WebNotificationPermissionAllowed)
         return ScriptPromise::reject(scriptState, V8ThrowException::createTypeError(scriptState->isolate(), "No notification permission has been granted for this origin."));
 
+    if (options.hasVibrate() && options.silent())
+        return ScriptPromise::reject(scriptState, V8ThrowException::createTypeError(scriptState->isolate(), "Silent notifications must not specify vibration patterns."));
+
     // FIXME: Unify the code path here with the Notification.create() function.
-    String dataAsWireString;
+    Vector<char> dataAsWireBytes;
     if (options.hasData()) {
-        RefPtr<SerializedScriptValue> data = SerializedScriptValueFactory::instance().create(options.data(), nullptr, exceptionState, options.data().isolate());
+        RefPtr<SerializedScriptValue> data = SerializedScriptValueFactory::instance().create(options.data().isolate(), options.data(), nullptr, exceptionState);
         if (exceptionState.hadException())
             return exceptionState.reject(scriptState);
-        dataAsWireString = data->toWireString();
+
+        data->toWireBytes(dataAsWireBytes);
     }
 
     RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
@@ -88,7 +93,8 @@ ScriptPromise ServiceWorkerRegistrationNotifications::showNotification(ScriptSta
     }
 
     WebNotificationData::Direction dir = options.dir() == "rtl" ? WebNotificationData::DirectionRightToLeft : WebNotificationData::DirectionLeftToRight;
-    WebNotificationData notification(title, dir, options.lang(), options.body(), options.tag(), iconUrl, options.silent(), dataAsWireString);
+    NavigatorVibration::VibrationPattern vibrate = NavigatorVibration::sanitizeVibrationPattern(options.vibrate());
+    WebNotificationData notification(title, dir, options.lang(), options.body(), options.tag(), iconUrl, vibrate, options.silent(), dataAsWireBytes);
     WebNotificationShowCallbacks* callbacks = new CallbackPromiseAdapter<void, void>(resolver);
 
     SecurityOrigin* origin = executionContext->securityOrigin();

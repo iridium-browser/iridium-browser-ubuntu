@@ -142,6 +142,8 @@ blink::WebTouchEvent CreateWebTouchEventFromMotionEvent(
       (event.GetEventTime() - base::TimeTicks()).InSecondsF(),
   result.causesScrollingIfUncanceled = may_cause_scrolling;
   result.modifiers = EventFlagsToWebEventModifiers(event.GetFlags());
+  DCHECK_NE(event.GetUniqueEventId(), 0U);
+  result.uniqueTouchEventId = event.GetUniqueEventId();
   result.touchesLength =
       std::min(static_cast<unsigned>(event.GetPointerCount()),
                static_cast<unsigned>(WebTouchEvent::touchesLengthCap));
@@ -175,8 +177,6 @@ int EventFlagsToWebEventModifiers(int flags) {
     modifiers |= blink::WebInputEvent::CapsLockOn;
   if (flags & EF_IS_REPEAT)
     modifiers |= blink::WebInputEvent::IsAutoRepeat;
-  if (flags & EF_NUMPAD_KEY)
-    modifiers |= blink::WebInputEvent::IsKeyPad;
 
   return modifiers;
 }

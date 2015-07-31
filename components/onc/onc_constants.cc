@@ -114,6 +114,7 @@ const char kMEID[] = "MEID";
 const char kMIN[] = "MIN";
 const char kModelID[] = "ModelID";
 const char kNetworkTechnology[] = "NetworkTechnology";
+const char kPaymentPortal[] = "PaymentPortal";
 const char kPRLVersion[] = "PRLVersion";
 const char kRoamingHome[] = "Home";
 const char kRoamingRequired[] = "Required";
@@ -158,13 +159,19 @@ const char kNetworkId[] = "NetworkId";
 const char kShortName[] = "ShortName";
 const char kLongName[] = "LongName";
 const char kTechnology[] = "Technology";
-}  // namespace cellular_apn
+}  // namespace cellular_found_network
+
+namespace cellular_payment_portal {
+const char kMethod[] = "Method";
+const char kPostData[] = "PostData";
+const char kUrl[] = "Url";
+}  // namespace cellular_payment_portal
 
 namespace sim_lock_status {
 const char kLockEnabled[] = "LockEnabled";
 const char kLockType[] = "LockType";
 const char kRetriesLeft[] = "RetriesLeft";
-}
+}  // namespace sim_lock_status
 
 namespace connection_state {
 const char kConnected[] = "Connected";
@@ -201,6 +208,7 @@ const char kFrequencyList[] = "FrequencyList";
 const char kHexSSID[] = "HexSSID";
 const char kHiddenSSID[] = "HiddenSSID";
 const char kPassphrase[] = "Passphrase";
+const char kRoamThreshold[] = "RoamThreshold";
 const char kSSID[] = "SSID";
 const char kSecurity[] = "Security";
 const char kSecurityNone[] = "None";
@@ -271,6 +279,7 @@ const char kEAP_FAST[] = "EAP-FAST";
 const char kEAP_SIM[] = "EAP-SIM";
 const char kEAP_TLS[] = "EAP-TLS";
 const char kEAP_TTLS[] = "EAP-TTLS";
+const char kGTC[] = "GTC";
 const char kIdentity[] = "Identity";
 const char kInner[] = "Inner";
 const char kLEAP[] = "LEAP";
@@ -285,6 +294,7 @@ const char kServerCAPEMs[] = "ServerCAPEMs";
 const char kServerCARef[] = "ServerCARef";
 const char kServerCARefs[] = "ServerCARefs";
 const char kUseSystemCAs[] = "UseSystemCAs";
+const char kUseProactiveKeyCaching[] = "UseProactiveKeyCaching";
 }  // namespace eap
 
 namespace vpn {
@@ -313,6 +323,13 @@ const char kServerCARef[] = "ServerCARef";
 const char kServerCARefs[] = "ServerCARefs";
 const char kXAUTH[] = "XAUTH";
 }  // namespace ipsec
+
+namespace l2tp {
+const char kLcpEchoDisabled[] = "LcpEchoDisabled";
+const char kPassword[] = "Password";
+const char kSaveCredentials[] = "SaveCredentials";
+const char kUsername[] = "Username";
+}  // namespace l2tp
 
 namespace openvpn {
 const char kAuthNoCache[] = "AuthNoCache";
@@ -399,5 +416,12 @@ namespace global_network_config {
 const char kAllowOnlyPolicyNetworksToAutoconnect[] =
     "AllowOnlyPolicyNetworksToAutoconnect";
 }  // global_network_config
+
+namespace device_state {
+const char kUninitialized[] = "Uninitialized";
+const char kDisabled[] = "Disabled";
+const char kEnabling[] = "Enabling";
+const char kEnabled[] = "Enabled";
+}  // device_state
 
 }  // namespace onc

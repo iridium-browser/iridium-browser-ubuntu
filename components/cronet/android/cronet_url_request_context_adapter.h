@@ -22,12 +22,17 @@ class SingleThreadTaskRunner;
 }  // namespace base
 
 namespace net {
-class NetLogLogger;
+class WriteToFileNetLogObserver;
 class URLRequestContext;
 class ProxyConfigService;
+class SdchOwner;
 }  // namespace net
 
 namespace cronet {
+
+#if defined(DATA_REDUCTION_PROXY_SUPPORT)
+class CronetDataReductionProxy;
+#endif
 
 struct URLRequestContextConfig;
 
@@ -57,7 +62,8 @@ class CronetURLRequestContextAdapter {
 
   net::URLRequestContext* GetURLRequestContext();
 
-  void StartNetLogToFile(JNIEnv* env, jobject jcaller, jstring jfile_name);
+  void StartNetLogToFile(JNIEnv* env, jobject jcaller, jstring jfile_name,
+                         jboolean jlog_all);
 
   void StopNetLog(JNIEnv* env, jobject jcaller);
 
@@ -80,16 +86,19 @@ class CronetURLRequestContextAdapter {
 
   scoped_refptr<base::SingleThreadTaskRunner> GetNetworkTaskRunner() const;
 
-  void StartNetLogToFileOnNetworkThread(const std::string& file_name);
+  void StartNetLogToFileOnNetworkThread(const std::string& file_name,
+                                        bool log_all);
 
   void StopNetLogOnNetworkThread();
 
   // Network thread is owned by |this|, but is destroyed from java thread.
   base::Thread* network_thread_;
-  // |net_log_logger_| and |context_| should only be accessed on network thread.
-  scoped_ptr<net::NetLogLogger> net_log_logger_;
+  // |write_to_file_observer_| and |context_| should only be accessed on
+  // network thread.
+  scoped_ptr<net::WriteToFileNetLogObserver> write_to_file_observer_;
   scoped_ptr<net::URLRequestContext> context_;
   scoped_ptr<net::ProxyConfigService> proxy_config_service_;
+  scoped_ptr<net::SdchOwner> sdch_owner_;
 
   // Context config is only valid untng context is initialized.
   scoped_ptr<URLRequestContextConfig> context_config_;
@@ -98,6 +107,10 @@ class CronetURLRequestContextAdapter {
   std::queue<base::Closure> tasks_waiting_for_context_;
   bool is_context_initialized_;
   int default_load_flags_;
+
+#if defined(DATA_REDUCTION_PROXY_SUPPORT)
+  scoped_ptr<CronetDataReductionProxy> data_reduction_proxy_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(CronetURLRequestContextAdapter);
 };

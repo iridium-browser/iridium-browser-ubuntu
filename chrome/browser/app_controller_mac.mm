@@ -807,26 +807,18 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
   NSString* exitTitle = nil;
 
   // Set the dialog text based on whether or not there are multiple downloads.
-  if (downloadCount == 1) {
-    // Dialog text: warning and explanation.
-    titleText = l10n_util::GetNSString(
-        IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_TITLE);
-    explanationText = l10n_util::GetNSString(
-        IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_EXPLANATION);
-  } else {
-    // Dialog text: warning and explanation.
-    titleText = l10n_util::GetNSString(
-        IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_TITLE);
-    explanationText = l10n_util::GetNSString(
-        IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_EXPLANATION);
-  }
+  // Dialog text: warning and explanation.
+  titleText = l10n_util::GetPluralNSStringF(
+      IDS_DOWNLOAD_REMOVE_CONFIRM_TITLE, downloadCount);
+  explanationText = l10n_util::GetPluralNSStringF(
+      IDS_DOWNLOAD_REMOVE_CONFIRM_EXPLANATION, downloadCount);
   // Cancel download and exit button text.
-  exitTitle = l10n_util::GetNSString(
-      IDS_DOWNLOAD_REMOVE_CONFIRM_OK_BUTTON_LABEL);
+  exitTitle = l10n_util::GetPluralNSStringF(
+      IDS_DOWNLOAD_REMOVE_CONFIRM_OK_BUTTON_LABEL, downloadCount);
 
   // Wait for download button text.
-  waitTitle = l10n_util::GetNSString(
-      IDS_DOWNLOAD_REMOVE_CONFIRM_CANCEL_BUTTON_LABEL);
+  waitTitle = l10n_util::GetPluralNSStringF(
+      IDS_DOWNLOAD_REMOVE_CONFIRM_CANCEL_BUTTON_LABEL, downloadCount);
 
   // 'waitButton' is the default choice.
   int choice = NSRunAlertPanel(titleText, @"%@",
@@ -893,8 +885,13 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
   // to the old profile.
   // In a browser test, the application is not brought to the front, so
   // |lastProfile_| might be null.
-  if (!lastProfile_ || profilePath == lastProfile_->GetPath())
-    lastProfile_ = g_browser_process->profile_manager()->GetLastUsedProfile();
+  if (!lastProfile_ || profilePath == lastProfile_->GetPath()) {
+    // Force windowChangedToProfile: to set the lastProfile_ and also update the
+    // relevant menuBridge objects.
+    lastProfile_ = nullptr;
+    [self windowChangedToProfile:g_browser_process->profile_manager()->
+        GetLastUsedProfile()];
+  }
 
   auto it = profileBookmarkMenuBridgeMap_.find(profilePath);
   if (it != profileBookmarkMenuBridgeMap_.end()) {
@@ -1035,9 +1032,10 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
   NSInteger tag = [sender tag];
 
   // If there are no browser windows, and we are trying to open a browser
-  // for a locked profile, we have to show the User Manager instead as the
-  // locked profile needs authentication.
-  if (IsProfileSignedOut(lastProfile)) {
+  // for a locked profile or the system profile, we have to show the User
+  // Manager instead as the locked profile needs authentication and the system
+  // profile cannot have a browser.
+  if (IsProfileSignedOut(lastProfile) || lastProfile->IsSystemProfile()) {
     UserManager::Show(base::FilePath(),
                       profiles::USER_MANAGER_NO_TUTORIAL,
                       profiles::USER_MANAGER_SELECT_PROFILE_NO_ACTION);
@@ -1249,11 +1247,12 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
 
   // Otherwise open a new window.
   // If the last profile was locked, we have to open the User Manager, as the
-  // profile requires authentication. Similarly, because guest mode is
-  // implemented as forced incognito, we can't open a new guest browser either,
-  // so we have to show the User Manager as well.
+  // profile requires authentication. Similarly, because guest mode and system
+  // profile are implemented as forced incognito, we can't open a new guest
+  // browser either, so we have to show the User Manager as well.
   Profile* lastProfile = [self lastProfile];
-  if (lastProfile->IsGuestSession() || IsProfileSignedOut(lastProfile)) {
+  if (lastProfile->IsGuestSession() || IsProfileSignedOut(lastProfile) ||
+      lastProfile->IsSystemProfile()) {
     UserManager::Show(base::FilePath(),
                       profiles::USER_MANAGER_NO_TUTORIAL,
                       profiles::USER_MANAGER_SELECT_PROFILE_NO_ACTION);
@@ -1547,6 +1546,10 @@ class AppControllerProfileObserver : public ProfileInfoCacheObserver {
 
 - (BookmarkMenuBridge*)bookmarkMenuBridge {
   return bookmarkMenuBridge_;
+}
+
+- (HistoryMenuBridge*)historyMenuBridge {
+  return historyMenuBridge_.get();
 }
 
 - (void)addObserverForWorkAreaChange:(ui::WorkAreaWatcherObserver*)observer {

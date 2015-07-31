@@ -41,17 +41,20 @@ std::string DriverWGL::GetPlatformExtensions() {
 
 #if defined(OS_WIN) || defined(USE_X11) || defined(OS_ANDROID) || defined(USE_OZONE)
 std::string DriverEGL::GetPlatformExtensions() {
-  EGLDisplay display =
-#if defined(OS_WIN)
-    GLSurfaceEGL::GetPlatformDisplay(GetPlatformDefaultEGLNativeDisplay());
-#else
-    g_driver_egl.fn.eglGetDisplayFn(GetPlatformDefaultEGLNativeDisplay());
-#endif
+  EGLDisplay display = GLSurfaceEGL::InitializeDisplay();
+  if (display == EGL_NO_DISPLAY)
+    return "";
 
-  DCHECK(g_driver_egl.fn.eglInitializeFn);
-  g_driver_egl.fn.eglInitializeFn(display, NULL, NULL);
   DCHECK(g_driver_egl.fn.eglQueryStringFn);
   const char* str = g_driver_egl.fn.eglQueryStringFn(display, EGL_EXTENSIONS);
+  return str ? std::string(str) : "";
+}
+
+// static
+std::string DriverEGL::GetClientExtensions() {
+  DCHECK(g_driver_egl.fn.eglQueryStringFn);
+  const char* str =
+      g_driver_egl.fn.eglQueryStringFn(EGL_NO_DISPLAY, EGL_EXTENSIONS);
   return str ? std::string(str) : "";
 }
 #endif

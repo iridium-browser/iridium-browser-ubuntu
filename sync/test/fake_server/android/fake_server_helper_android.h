@@ -7,6 +7,7 @@
 
 #include <jni.h>
 
+#include "base/android/scoped_java_ref.h"
 #include "base/basictypes.h"
 #include "sync/test/fake_server/entity_builder_factory.h"
 
@@ -40,15 +41,26 @@ class FakeServerHelperAndroid {
                                           jstring model_type_string,
                                           jstring name);
 
-  // Injects a typed URL into |fake_server|.
-  //
-  // TODO(pvalenzuela): Generalize this method to accept a serialized
-  // EntitySpecifics so that a separate method is not required for each data
-  // type.
-  void InjectTypedUrl(JNIEnv* env,
-                      jobject obj,
-                      jlong fake_server,
-                      jstring url);
+  // Injects a UniqueClientEntity into |fake_server|.
+  void InjectUniqueClientEntity(JNIEnv* env,
+                                jobject obj,
+                                jlong fake_server,
+                                jstring name,
+                                jbyteArray serialized_entity_specifics);
+
+  // Injects a BookmarkEntity into |fake_server|.
+  void InjectBookmarkEntity(JNIEnv* env,
+                            jobject obj,
+                            jlong fake_server,
+                            jstring title,
+                            jstring url,
+                            jstring parent_id);
+
+  // Returns the bookmark bar folder ID.
+  base::android::ScopedJavaLocalRef<jstring> GetBookmarkBarFolderId(
+      JNIEnv* env,
+      jobject obj,
+      jlong fake_server);
 
  private:
   virtual ~FakeServerHelperAndroid();

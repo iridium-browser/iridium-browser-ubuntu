@@ -63,15 +63,16 @@ class BrowserAccessibilityRelation
   CONTENT_EXPORT void AddTarget(int target_id);
 
   // IAccessibleRelation methods.
-  CONTENT_EXPORT STDMETHODIMP get_relationType(BSTR* relation_type);
-  CONTENT_EXPORT STDMETHODIMP get_nTargets(long* n_targets);
-  CONTENT_EXPORT STDMETHODIMP get_target(long target_index, IUnknown** target);
-  CONTENT_EXPORT STDMETHODIMP get_targets(long max_targets,
-                                          IUnknown** targets,
-                                          long* n_targets);
+  CONTENT_EXPORT STDMETHODIMP get_relationType(BSTR* relation_type) override;
+  CONTENT_EXPORT STDMETHODIMP get_nTargets(long* n_targets) override;
+  CONTENT_EXPORT STDMETHODIMP
+  get_target(long target_index, IUnknown** target) override;
+  CONTENT_EXPORT STDMETHODIMP
+  get_targets(long max_targets, IUnknown** targets, long* n_targets) override;
 
   // IAccessibleRelation methods not implemented.
-  CONTENT_EXPORT STDMETHODIMP get_localizedRelationType(BSTR* relation_type) {
+  CONTENT_EXPORT STDMETHODIMP
+  get_localizedRelationType(BSTR* relation_type) override {
     return E_NOTIMPL;
   }
 
@@ -183,6 +184,9 @@ BrowserAccessibilityWin::WinAttributes::WinAttributes()
       ia_state(0),
       ia2_role(0),
       ia2_state(0) {
+}
+
+BrowserAccessibilityWin::WinAttributes::~WinAttributes() {
 }
 
 //
@@ -601,16 +605,14 @@ STDMETHODIMP BrowserAccessibilityWin::get_accValue(VARIANT var_id,
 
   // Expose color well value.
   if (target->ia2_role() == IA2_ROLE_COLOR_CHOOSER) {
-    int r = target->GetIntAttribute(
-        ui::AX_ATTR_COLOR_VALUE_RED);
-    int g = target->GetIntAttribute(
-        ui::AX_ATTR_COLOR_VALUE_GREEN);
-    int b = target->GetIntAttribute(
-        ui::AX_ATTR_COLOR_VALUE_BLUE);
+    int color = target->GetIntAttribute(ui::AX_ATTR_COLOR_VALUE);
+    int red = (color >> 16) & 0xFF;
+    int green = (color >> 8) & 0xFF;
+    int blue = color & 0xFF;
     base::string16 value_text;
-    value_text = base::IntToString16((r * 100) / 255) + L"% red " +
-                 base::IntToString16((g * 100) / 255) + L"% green " +
-                 base::IntToString16((b * 100) / 255) + L"% blue";
+    value_text = base::IntToString16((red * 100) / 255) + L"% red " +
+                 base::IntToString16((green * 100) / 255) + L"% green " +
+                 base::IntToString16((blue * 100) / 255) + L"% blue";
     *value = SysAllocString(value_text.c_str());
     DCHECK(*value);
     return S_OK;
@@ -686,6 +688,15 @@ STDMETHODIMP BrowserAccessibilityWin::accSelect(
   }
 
   return S_FALSE;
+}
+
+STDMETHODIMP
+BrowserAccessibilityWin::put_accName(VARIANT var_id, BSTR put_name) {
+  return E_NOTIMPL;
+}
+STDMETHODIMP
+BrowserAccessibilityWin::put_accValue(VARIANT var_id, BSTR put_val) {
+  return E_NOTIMPL;
 }
 
 //
@@ -903,15 +914,42 @@ STDMETHODIMP BrowserAccessibilityWin::get_groupPosition(
   if (!group_level || !similar_items_in_group || !position_in_group)
     return E_INVALIDARG;
 
-  if (GetRole() == ui::AX_ROLE_LIST_BOX_OPTION &&
-      GetParent() &&
-      GetParent()->GetRole() == ui::AX_ROLE_LIST_BOX) {
-    *group_level = 0;
-    *similar_items_in_group = GetParent()->PlatformChildCount();
-    *position_in_group = GetIndexInParent() + 1;
-    return S_OK;
-  }
+  *group_level = 0;
+  *similar_items_in_group = GetIntAttribute(ui::AX_ATTR_SET_SIZE);
+  *position_in_group = GetIntAttribute(ui::AX_ATTR_POS_IN_SET);
+  return S_OK;
+}
 
+//
+// IAccessibleEx methods not implemented.
+//
+
+STDMETHODIMP BrowserAccessibilityWin::get_extendedRole(BSTR* extended_role) {
+  return E_NOTIMPL;
+}
+STDMETHODIMP
+BrowserAccessibilityWin::get_localizedExtendedRole(
+    BSTR* localized_extended_role) {
+  return E_NOTIMPL;
+}
+STDMETHODIMP
+BrowserAccessibilityWin::get_nExtendedStates(LONG* n_extended_states) {
+  return E_NOTIMPL;
+}
+STDMETHODIMP
+BrowserAccessibilityWin::get_extendedStates(LONG max_extended_states,
+                                            BSTR** extended_states,
+                                            LONG* n_extended_states) {
+  return E_NOTIMPL;
+}
+STDMETHODIMP
+BrowserAccessibilityWin::get_localizedExtendedStates(
+    LONG max_localized_extended_states,
+    BSTR** localized_extended_states,
+    LONG* n_localized_extended_states) {
+  return E_NOTIMPL;
+}
+STDMETHODIMP BrowserAccessibilityWin::get_locale(IA2Locale* locale) {
   return E_NOTIMPL;
 }
 
@@ -1588,6 +1626,27 @@ STDMETHODIMP BrowserAccessibilityWin::get_rowColumnExtentsAtIndex(
   }
 
   return S_FALSE;
+}
+
+STDMETHODIMP BrowserAccessibilityWin::selectRow(long row) {
+  return E_NOTIMPL;
+}
+
+STDMETHODIMP BrowserAccessibilityWin::selectColumn(long column) {
+  return E_NOTIMPL;
+}
+
+STDMETHODIMP BrowserAccessibilityWin::unselectRow(long row) {
+  return E_NOTIMPL;
+}
+
+STDMETHODIMP BrowserAccessibilityWin::unselectColumn(long column) {
+  return E_NOTIMPL;
+}
+
+STDMETHODIMP
+BrowserAccessibilityWin::get_modelChange(IA2TableModelChange* model_change) {
+  return E_NOTIMPL;
 }
 
 //
@@ -2322,6 +2381,17 @@ STDMETHODIMP BrowserAccessibilityWin::setSelection(LONG selection_index,
 }
 
 //
+// IAccessibleText methods not implemented.
+//
+
+STDMETHODIMP BrowserAccessibilityWin::get_attributes(LONG offset,
+                                                     LONG* start_offset,
+                                                     LONG* end_offset,
+                                                     BSTR* text_attributes) {
+  return E_NOTIMPL;
+}
+
+//
 // IAccessibleHypertext methods.
 //
 
@@ -2382,6 +2452,56 @@ STDMETHODIMP BrowserAccessibilityWin::get_hyperlinkIndex(
 
   *hyperlink_index = it->second;
   return S_OK;
+}
+
+//
+// IAccessibleHyperlink not implemented.
+//
+
+STDMETHODIMP BrowserAccessibilityWin::get_anchor(long index, VARIANT* anchor) {
+  return E_NOTIMPL;
+}
+STDMETHODIMP
+BrowserAccessibilityWin::get_anchorTarget(long index, VARIANT* anchor_target) {
+  return E_NOTIMPL;
+}
+STDMETHODIMP BrowserAccessibilityWin::get_startIndex(long* index) {
+  return E_NOTIMPL;
+}
+STDMETHODIMP BrowserAccessibilityWin::get_endIndex(long* index) {
+  return E_NOTIMPL;
+}
+STDMETHODIMP BrowserAccessibilityWin::get_valid(boolean* valid) {
+  return E_NOTIMPL;
+}
+
+//
+// IAccessibleAction not implemented.
+//
+
+STDMETHODIMP BrowserAccessibilityWin::nActions(long* n_actions) {
+  return E_NOTIMPL;
+}
+STDMETHODIMP BrowserAccessibilityWin::doAction(long action_index) {
+  return E_NOTIMPL;
+}
+STDMETHODIMP
+BrowserAccessibilityWin::get_description(long action_index, BSTR* description) {
+  return E_NOTIMPL;
+}
+STDMETHODIMP BrowserAccessibilityWin::get_keyBinding(long action_index,
+                                                     long n_max_bindings,
+                                                     BSTR** key_bindings,
+                                                     long* n_bindings) {
+  return E_NOTIMPL;
+}
+STDMETHODIMP BrowserAccessibilityWin::get_name(long action_index, BSTR* name) {
+  return E_NOTIMPL;
+}
+STDMETHODIMP
+BrowserAccessibilityWin::get_localizedName(long action_index,
+                                           BSTR* localized_name) {
+  return E_NOTIMPL;
 }
 
 //
@@ -2494,6 +2614,17 @@ STDMETHODIMP BrowserAccessibilityWin::get_docType(BSTR* doc_type) {
 
   return GetStringAttributeAsBstr(
       ui::AX_ATTR_DOC_DOCTYPE, doc_type);
+}
+
+STDMETHODIMP
+BrowserAccessibilityWin::get_nameSpaceURIForID(short name_space_id,
+                                               BSTR* name_space_uri) {
+  return E_NOTIMPL;
+}
+STDMETHODIMP
+BrowserAccessibilityWin::put_alternateViewMediaTypes(
+    BSTR* comma_separated_media_types) {
+  return E_NOTIMPL;
 }
 
 //
@@ -2759,6 +2890,19 @@ STDMETHODIMP BrowserAccessibilityWin::get_childAt(
   return S_OK;
 }
 
+STDMETHODIMP BrowserAccessibilityWin::get_innerHTML(BSTR* innerHTML) {
+  return E_NOTIMPL;
+}
+
+STDMETHODIMP
+BrowserAccessibilityWin::get_localInterface(void** local_interface) {
+  return E_NOTIMPL;
+}
+
+STDMETHODIMP BrowserAccessibilityWin::get_language(BSTR* language) {
+  return E_NOTIMPL;
+}
+
 //
 // ISimpleDOMText methods.
 //
@@ -2836,6 +2980,10 @@ STDMETHODIMP BrowserAccessibilityWin::scrollToSubstring(
   return S_OK;
 }
 
+STDMETHODIMP BrowserAccessibilityWin::get_fontFamily(BSTR* font_family) {
+  return E_NOTIMPL;
+}
+
 //
 // IServiceProvider methods.
 //
@@ -2892,6 +3040,27 @@ STDMETHODIMP BrowserAccessibilityWin::QueryService(REFGUID guidService,
   return E_FAIL;
 }
 
+STDMETHODIMP
+BrowserAccessibilityWin::GetObjectForChild(long child_id, IAccessibleEx** ret) {
+  return E_NOTIMPL;
+}
+
+STDMETHODIMP
+BrowserAccessibilityWin::GetIAccessiblePair(IAccessible** acc, long* child_id) {
+  return E_NOTIMPL;
+}
+
+STDMETHODIMP BrowserAccessibilityWin::GetRuntimeId(SAFEARRAY** runtime_id) {
+  return E_NOTIMPL;
+}
+
+STDMETHODIMP
+BrowserAccessibilityWin::ConvertReturnedElement(
+    IRawElementProviderSimple* element,
+    IAccessibleEx** acc) {
+  return E_NOTIMPL;
+}
+
 STDMETHODIMP BrowserAccessibilityWin::GetPatternProvider(PATTERNID id,
                                                          IUnknown** provider) {
   DVLOG(1) << "In Function: "
@@ -2926,6 +3095,16 @@ STDMETHODIMP BrowserAccessibilityWin::GetPropertyValue(PROPERTYID id,
     }
   }
   return S_OK;
+}
+
+STDMETHODIMP BrowserAccessibilityWin::get_ProviderOptions(
+    enum ProviderOptions* ret) {
+  return E_NOTIMPL;
+}
+
+STDMETHODIMP BrowserAccessibilityWin::get_HostRawElementProvider(
+    IRawElementProviderSimple** provider) {
+  return E_NOTIMPL;
 }
 
 //
@@ -3002,15 +3181,9 @@ void BrowserAccessibilityWin::UpdateStep1ComputeWinAttributes() {
   // Expose "level" attribute for headings, trees, etc.
   IntAttributeToIA2(ui::AX_ATTR_HIERARCHICAL_LEVEL, "level");
 
-  // Expose the set size and position in set for listbox options.
-  if (GetRole() == ui::AX_ROLE_LIST_BOX_OPTION &&
-      GetParent() &&
-      GetParent()->GetRole() == ui::AX_ROLE_LIST_BOX) {
-    win_attributes_->ia2_attributes.push_back(
-        L"setsize:" + base::IntToString16(GetParent()->PlatformChildCount()));
-    win_attributes_->ia2_attributes.push_back(
-        L"setsize:" + base::IntToString16(GetIndexInParent() + 1));
-  }
+  // Expose the set size and position in set.
+  IntAttributeToIA2(ui::AX_ATTR_SET_SIZE, "setsize");
+  IntAttributeToIA2(ui::AX_ATTR_POS_IN_SET, "posinset");
 
   if (ia_role() == ROLE_SYSTEM_CHECKBUTTON ||
       ia_role() == ROLE_SYSTEM_RADIOBUTTON ||
@@ -3191,9 +3364,9 @@ void BrowserAccessibilityWin::UpdateStep1ComputeWinAttributes() {
   // WebKit stores the main accessible text in the "value" - swap it so
   // that it's the "name".
   if (name.empty() &&
-      (GetRole() == ui::AX_ROLE_LIST_BOX_OPTION ||
-       GetRole() == ui::AX_ROLE_STATIC_TEXT ||
-       GetRole() == ui::AX_ROLE_LIST_MARKER)) {
+      (GetRole() == ui::AX_ROLE_STATIC_TEXT ||
+       GetRole() == ui::AX_ROLE_LIST_MARKER ||
+       IsListBoxOptionOrMenuListOption())) {
     base::string16 tmp = value;
     value = name;
     name = tmp;
@@ -3310,10 +3483,22 @@ void BrowserAccessibilityWin::UpdateStep3FireEvents(bool is_subtree_creation) {
     bool is_selected_now = (ia_state() & STATE_SYSTEM_SELECTED) != 0;
     bool was_selected_before =
         (old_win_attributes_->ia_state & STATE_SYSTEM_SELECTED) != 0;
-    if (is_selected_now && !was_selected_before) {
-      manager->MaybeCallNotifyWinEvent(EVENT_OBJECT_SELECTIONADD, this);
-    } else if (!is_selected_now && was_selected_before) {
-      manager->MaybeCallNotifyWinEvent(EVENT_OBJECT_SELECTIONREMOVE, this);
+    if (is_selected_now || was_selected_before) {
+      bool multiselect = false;
+      if (GetParent() && GetParent()->HasState(ui::AX_STATE_MULTISELECTABLE))
+        multiselect = true;
+
+      if (multiselect) {
+        // In a multi-select box, fire SELECTIONADD and SELECTIONREMOVE events.
+        if (is_selected_now && !was_selected_before) {
+          manager->MaybeCallNotifyWinEvent(EVENT_OBJECT_SELECTIONADD, this);
+        } else if (!is_selected_now && was_selected_before) {
+          manager->MaybeCallNotifyWinEvent(EVENT_OBJECT_SELECTIONREMOVE, this);
+        }
+      } else if (is_selected_now && !was_selected_before) {
+        // In a single-select box, only fire SELECTION events.
+        manager->MaybeCallNotifyWinEvent(EVENT_OBJECT_SELECTION, this);
+      }
     }
 
     // Fire an event if this container object has scrolled.
@@ -3473,7 +3658,7 @@ base::string16 BrowserAccessibilityWin::GetValueText() {
 }
 
 base::string16 BrowserAccessibilityWin::TextForIAccessibleText() {
-  if (IsEditableText())
+  if (IsEditableText() || GetRole() == ui::AX_ROLE_MENU_LIST_OPTION)
     return value();
   return (GetRole() == ui::AX_ROLE_STATIC_TEXT) ? name() : hypertext();
 }
@@ -3597,6 +3782,26 @@ LONG BrowserAccessibilityWin::FindBoundary(
 
 BrowserAccessibilityWin* BrowserAccessibilityWin::GetFromID(int32 id) {
   return manager()->GetFromID(id)->ToBrowserAccessibilityWin();
+}
+
+bool BrowserAccessibilityWin::IsListBoxOptionOrMenuListOption() {
+  if (!GetParent())
+    return false;
+
+  int32 role = GetRole();
+  int32 parent_role = GetParent()->GetRole();
+
+  if (role == ui::AX_ROLE_LIST_BOX_OPTION &&
+      parent_role == ui::AX_ROLE_LIST_BOX) {
+    return true;
+  }
+
+  if (role == ui::AX_ROLE_MENU_LIST_OPTION &&
+      parent_role == ui::AX_ROLE_MENU_LIST_POPUP) {
+    return true;
+  }
+
+  return false;
 }
 
 void BrowserAccessibilityWin::InitRoleAndState() {
@@ -3921,10 +4126,12 @@ void BrowserAccessibilityWin::InitRoleAndState() {
       ia2_role = IA2_ROLE_RADIO_MENU_ITEM;
       break;
     case ui::AX_ROLE_MENU_LIST_POPUP:
-      ia_role = ROLE_SYSTEM_CLIENT;
+      ia_role = ROLE_SYSTEM_LIST;
+      ia2_state &= ~(IA2_STATE_EDITABLE);
       break;
     case ui::AX_ROLE_MENU_LIST_OPTION:
       ia_role = ROLE_SYSTEM_LISTITEM;
+      ia2_state &= ~(IA2_STATE_EDITABLE);
       if (ia_state & STATE_SYSTEM_SELECTABLE) {
         ia_state |= STATE_SYSTEM_FOCUSABLE;
         if (HasState(ui::AX_STATE_FOCUSED))
@@ -4064,16 +4271,13 @@ void BrowserAccessibilityWin::InitRoleAndState() {
       ia_role = ROLE_SYSTEM_PUSHBUTTON;
       ia2_role = IA2_ROLE_TOGGLE_BUTTON;
       break;
-    case ui::AX_ROLE_TEXT_AREA:
-      ia_role = ROLE_SYSTEM_TEXT;
-      ia2_state |= IA2_STATE_MULTI_LINE;
-      ia2_state |= IA2_STATE_EDITABLE;
-      ia2_state |= IA2_STATE_SELECTABLE_TEXT;
-      break;
     case ui::AX_ROLE_TEXT_FIELD:
     case ui::AX_ROLE_SEARCH_BOX:
       ia_role = ROLE_SYSTEM_TEXT;
-      ia2_state |= IA2_STATE_SINGLE_LINE;
+      if (HasState(ui::AX_STATE_MULTILINE))
+        ia2_state |= IA2_STATE_MULTI_LINE;
+      else
+        ia2_state |= IA2_STATE_SINGLE_LINE;
       ia2_state |= IA2_STATE_EDITABLE;
       ia2_state |= IA2_STATE_SELECTABLE_TEXT;
       break;

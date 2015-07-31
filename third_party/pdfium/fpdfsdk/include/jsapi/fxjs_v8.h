@@ -4,11 +4,18 @@
 
 // Original code copyright 2014 Foxit Software Inc. http://www.foxitsoftware.com
 
+// PDFium wrapper around V8 APIs. PDFium code should include this file rather
+// than including V8 headers directly.
+
 #ifndef FXJSAPI_H
 #define FXJSAPI_H
 
 #include <v8.h>
 #include "../../../core/include/fxcrt/fx_string.h"  // For CFX_WideString
+
+typedef v8::Value			JSValue;
+typedef v8::Handle<v8::Object>	JSObject;
+typedef v8::Handle<v8::Object>	JSFXObject;
 
 enum FXJSOBJTYPE
 {
@@ -47,11 +54,11 @@ typedef void (*LP_DESTRUCTOR)(v8::Handle<v8::Object> obj);
 
 
 int								JS_DefineObj(IJS_Runtime* pJSRuntime, const wchar_t* sObjName, FXJSOBJTYPE eObjType, LP_CONSTRUCTOR pConstructor, LP_DESTRUCTOR pDestructor, unsigned bApplyNew);
-int								JS_DefineObjMethod(IJS_Runtime* pJSRuntime, int nObjDefnID, const wchar_t* sMethodName, v8::FunctionCallback pMethodCall, unsigned nParamNum);
+int								JS_DefineObjMethod(IJS_Runtime* pJSRuntime, int nObjDefnID, const wchar_t* sMethodName, v8::FunctionCallback pMethodCall);
 int								JS_DefineObjProperty(IJS_Runtime* pJSRuntime, int nObjDefnID, const wchar_t* sPropName, v8::AccessorGetterCallback pPropGet, v8::AccessorSetterCallback pPropPut);
 int								JS_DefineObjAllProperties(IJS_Runtime* pJSRuntime, int nObjDefnID, v8::NamedPropertyQueryCallback pPropQurey, v8::NamedPropertyGetterCallback pPropGet, v8::NamedPropertySetterCallback pPropPut, v8::NamedPropertyDeleterCallback pPropDel);
 int								JS_DefineObjConst(IJS_Runtime* pJSRuntime, int nObjDefnID, const wchar_t* sConstName, v8::Handle<v8::Value> pDefault);
-int								JS_DefineGlobalMethod(IJS_Runtime* pJSRuntime, const wchar_t* sMethodName, v8::FunctionCallback pMethodCall, unsigned nParamNum);
+int								JS_DefineGlobalMethod(IJS_Runtime* pJSRuntime, const wchar_t* sMethodName, v8::FunctionCallback pMethodCall);
 int								JS_DefineGlobalConst(IJS_Runtime* pJSRuntime, const wchar_t* sConstName, v8::Handle<v8::Value> pDefault);
 
 void							JS_InitialRuntime(IJS_Runtime* pJSRuntime,IFXJS_Runtime* pFXRuntime, IFXJS_Context* context, v8::Persistent<v8::Context>& v8PersistentContext);
@@ -75,6 +82,7 @@ void							JS_SetPrivate(IJS_Runtime* pJSRuntime, v8::Handle<v8::Object> pObj, v
 void*							JS_GetPrivate(IJS_Runtime* pJSRuntime, v8::Handle<v8::Object> pObj);
 void							JS_SetPrivate(v8::Handle<v8::Object> pObj, void* p);
 void*							JS_GetPrivate(v8::Handle<v8::Object> pObj);
+void							JS_FreePrivate(void* p);
 void							JS_FreePrivate(v8::Handle<v8::Object> pObj);
 v8::Handle<v8::Value>			JS_GetObjectValue(v8::Handle<v8::Object> pObj);
 v8::Handle<v8::Value>			JS_GetObjectElement(IJS_Runtime* pJSRuntime, v8::Handle<v8::Object> pObj,const wchar_t* PropertyName);

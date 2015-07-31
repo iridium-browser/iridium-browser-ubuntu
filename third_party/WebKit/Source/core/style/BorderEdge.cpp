@@ -31,21 +31,27 @@ bool BorderEdge::hasVisibleColorAndStyle() const
     return style > BHIDDEN && !isTransparent;
 }
 
-bool BorderEdge::shouldRender() const { return isPresent && width && hasVisibleColorAndStyle(); }
-bool BorderEdge::presentButInvisible() const { return usedWidth() && !hasVisibleColorAndStyle(); }
-bool BorderEdge::obscuresBackgroundEdge(float scale) const
+bool BorderEdge::shouldRender() const
 {
-    if (!isPresent || isTransparent || (width * scale) < 2 || color.hasAlpha() || style == BHIDDEN)
+    return isPresent && width && hasVisibleColorAndStyle();
+}
+
+bool BorderEdge::presentButInvisible() const
+{
+    return usedWidth() && !hasVisibleColorAndStyle();
+}
+
+bool BorderEdge::obscuresBackgroundEdge() const
+{
+    if (!isPresent || isTransparent || color.hasAlpha() || style == BHIDDEN)
         return false;
 
     if (style == DOTTED || style == DASHED)
         return false;
 
-    if (style == DOUBLE)
-        return width >= 5 * scale; // The outer band needs to be >= 2px wide at unit scale.
-
     return true;
 }
+
 bool BorderEdge::obscuresBackground() const
 {
     if (!isPresent || isTransparent || color.hasAlpha() || style == BHIDDEN)
@@ -62,18 +68,14 @@ int BorderEdge::usedWidth() const
     return isPresent ? width : 0;
 }
 
-void BorderEdge::getDoubleBorderStripeWidths(int& outerWidth, int& innerWidth) const
+int BorderEdge::getDoubleBorderStripeWidth(DoubleBorderStripe stripe) const
 {
-    int fullWidth = usedWidth();
-    outerWidth = fullWidth / 3;
-    innerWidth = fullWidth * 2 / 3;
+    ASSERT(stripe == DoubleBorderStripeOuter || stripe == DoubleBorderStripeInner);
 
-    // We need certain integer rounding results
-    if (fullWidth % 3 == 2)
-        outerWidth += 1;
-
-    if (fullWidth % 3 == 1)
-        innerWidth += 1;
+    // We need certain integer rounding results.
+    return stripe == DoubleBorderStripeOuter
+        ? (usedWidth() + 1) / 3
+        : (usedWidth() * 2 + 1) / 3;
 }
 
 bool BorderEdge::sharesColorWith(const BorderEdge& other) const

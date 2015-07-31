@@ -28,6 +28,7 @@
 
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "bindings/core/v8/UnionTypesCore.h"
+#include "core/CoreExport.h"
 #include "core/html/canvas/Canvas2DContextAttributes.h"
 #include "core/html/canvas/CanvasContextCreationAttributes.h"
 #include "core/html/canvas/CanvasPathMethods.h"
@@ -62,7 +63,7 @@ typedef HTMLImageElementOrHTMLVideoElementOrHTMLCanvasElementOrImageBitmap Canva
 
 typedef WillBeHeapHashMap<String, RefPtrWillBeMember<MutableStylePropertySet>> MutableStylePropertyMap;
 
-class CanvasRenderingContext2D final : public CanvasRenderingContext, public ScriptWrappable, public CanvasPathMethods {
+class CORE_EXPORT CanvasRenderingContext2D final : public CanvasRenderingContext, public ScriptWrappable, public CanvasPathMethods {
     DEFINE_WRAPPERTYPEINFO();
 public:
     static PassOwnPtrWillBeRawPtr<CanvasRenderingContext2D> create(HTMLCanvasElement* canvas, const CanvasContextCreationAttributes& attrs, Document& document)
@@ -158,9 +159,9 @@ public:
     PassRefPtrWillBeRawPtr<CanvasGradient> createRadialGradient(float x0, float y0, float r0, float x1, float y1, float r1, ExceptionState&);
     PassRefPtrWillBeRawPtr<CanvasPattern> createPattern(const CanvasImageSourceUnion&, const String& repetitionType, ExceptionState&);
 
-    PassRefPtrWillBeRawPtr<ImageData> createImageData(PassRefPtrWillBeRawPtr<ImageData>) const;
-    PassRefPtrWillBeRawPtr<ImageData> createImageData(float width, float height, ExceptionState&) const;
-    PassRefPtrWillBeRawPtr<ImageData> getImageData(float sx, float sy, float sw, float sh, ExceptionState&) const;
+    ImageData* createImageData(ImageData*) const;
+    ImageData* createImageData(float width, float height, ExceptionState&) const;
+    ImageData* getImageData(float sx, float sy, float sw, float sh, ExceptionState&) const;
     void putImageData(ImageData*, float dx, float dy);
     void putImageData(ImageData*, float dx, float dy, float dirtyX, float dirtyY, float dirtyWidth, float dirtyHeight);
 
@@ -289,7 +290,6 @@ private:
 
     WillBeHeapVector<OwnPtrWillBeMember<CanvasRenderingContext2DState>> m_stateStack;
     OwnPtrWillBeMember<HitRegionManager> m_hitRegionManager;
-    bool m_usesCSSCompatibilityParseMode;
     AntiAliasingMode m_clipAntialiasing;
     bool m_hasAlpha;
     LostContextMode m_contextLostMode;

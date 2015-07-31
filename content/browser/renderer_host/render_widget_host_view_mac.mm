@@ -47,6 +47,8 @@
 #include "content/common/input_messages.h"
 #include "content/common/view_messages.h"
 #include "content/common/webplugin_geometry.h"
+#include "content/public/browser/browser_context.h"
+#include "content/public/browser/browser_plugin_guest_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/notification_service.h"
@@ -105,6 +107,23 @@ BOOL EventIsReservedBySystem(NSEvent* event) {
   content::SystemHotkeyHelperMac* helper =
       content::SystemHotkeyHelperMac::GetInstance();
   return helper->map()->IsEventReserved(event);
+}
+
+RenderWidgetHostViewMac* GetRenderWidgetHostViewToUse(
+    RenderWidgetHostViewMac* render_widget_host_view) {
+  WebContents* web_contents = render_widget_host_view->GetWebContents();
+  if (!web_contents)
+    return render_widget_host_view;
+  content::BrowserPluginGuestManager* guest_manager =
+      web_contents->GetBrowserContext()->GetGuestManager();
+  if (!guest_manager)
+    return render_widget_host_view;
+  content::WebContents* guest =
+      guest_manager->GetFullPageGuest(web_contents);
+  if (!guest)
+    return render_widget_host_view;
+  return static_cast<RenderWidgetHostViewMac*>(
+      guest->GetRenderWidgetHostView());
 }
 
 }  // namespace
@@ -499,9 +518,13 @@ void RenderWidgetHostViewMac::AcceleratedWidgetSwapCompleted(
     const std::vector<ui::LatencyInfo>& all_latency_info) {
   if (!render_widget_host_)
     return;
+  base::TimeTicks swap_time = base::TimeTicks::Now();
   for (auto latency_info : all_latency_info) {
-    latency_info.AddLatencyNumber(
-        ui::INPUT_EVENT_LATENCY_TERMINATED_FRAME_SWAP_COMPONENT, 0, 0);
+    latency_info.AddLatencyNumberWithTimestamp(
+        ui::INPUT_EVENT_GPU_SWAP_BUFFER_COMPONENT, 0, 0, swap_time, 1);
+    latency_info.AddLatencyNumberWithTimestamp(
+        ui::INPUT_EVENT_LATENCY_TERMINATED_FRAME_SWAP_COMPONENT, 0, 0,
+        swap_time, 1);
     render_widget_host_->FrameSwapped(latency_info);
   }
 }
@@ -545,9 +568,9 @@ RenderWidgetHostViewMac::RenderWidgetHostViewMac(RenderWidgetHost* widget,
   // Paint this view host with |background_color_| when there is no content
   // ready to draw.
   background_layer_.reset([[CALayer alloc] init]);
-  base::ScopedCFTypeRef<CGColorRef> background(
-      gfx::CGColorCreateFromSkColor(background_color_));
-  [background_layer_ setBackgroundColor:background];
+  // Set the default color to be white. This is the wrong thing to do, but many
+  // UI components expect this view to be opaque.
+  [background_layer_ setBackgroundColor:CGColorGetConstantColor(kCGColorWhite)];
   [cocoa_view_ setLayer:background_layer_];
   [cocoa_view_ setWantsLayer:YES];
 
@@ -823,7 +846,10 @@ void RenderWidgetHostViewMac::SendVSyncParametersToRenderer() {
     return;
   }
 
-  render_widget_host_->UpdateVSyncParameters(vsync_timebase_, vsync_interval_);
+  if (browser_compositor_) {
+    browser_compositor_->compositor()->vsync_manager()->UpdateVSyncParameters(
+        vsync_timebase_, vsync_interval_);
+  }
 }
 
 void RenderWidgetHostViewMac::SpeakText(const std::string& text) {
@@ -967,11 +993,6 @@ void RenderWidgetHostViewMac::MovePluginWindows(
 
 void RenderWidgetHostViewMac::Focus() {
   [[cocoa_view_ window] makeFirstResponder:cocoa_view_];
-}
-
-void RenderWidgetHostViewMac::Blur() {
-  UnlockMouse();
-  [[cocoa_view_ window] makeFirstResponder:nil];
 }
 
 bool RenderWidgetHostViewMac::HasFocus() const {
@@ -1223,10 +1244,10 @@ void RenderWidgetHostViewMac::CopyFromCompositingSurface(
     const gfx::Rect& src_subrect,
     const gfx::Size& dst_size,
     ReadbackRequestCallback& callback,
-    const SkColorType color_type) {
+    const SkColorType preferred_color_type) {
   if (delegated_frame_host_) {
     delegated_frame_host_->CopyFromCompositingSurface(
-        src_subrect, dst_size, callback, color_type);
+        src_subrect, dst_size, callback, preferred_color_type);
   }
 }
 
@@ -1545,6 +1566,13 @@ void RenderWidgetHostViewMac::WheelEventAck(
     [cocoa_view_ processedWheelEvent:event consumed:consumed];
 }
 
+uint32_t RenderWidgetHostViewMac::GetSurfaceIdNamespace() {
+  if (delegated_frame_host_)
+    return delegated_frame_host_->GetSurfaceIdNamespace();
+
+  return 0;
+}
+
 bool RenderWidgetHostViewMac::Send(IPC::Message* message) {
   if (render_widget_host_)
     return render_widget_host_->Send(message);
@@ -1613,11 +1641,6 @@ void RenderWidgetHostViewMac::SetBackgroundColor(SkColor color) {
   [cocoa_view_ setOpaque:opaque];
   if (browser_compositor_state_ != BrowserCompositorDestroyed)
     browser_compositor_->compositor()->SetHostHasTransparentBackground(!opaque);
-
-  if (background_layer_) {
-    [background_layer_
-        setBackgroundColor:gfx::CGColorCreateFromSkColor(background_color_)];
-  }
 }
 
 BrowserAccessibilityManager*
@@ -1699,10 +1722,6 @@ void RenderWidgetHostViewMac::PauseForPendingResizeOrRepaintsAndDraw() {
   render_widget_host_->PauseForPendingResizeOrRepaints();
   if (browser_compositor_)
     browser_compositor_->accelerated_widget_mac()->EndPumpingFrames();
-}
-
-SkColorType RenderWidgetHostViewMac::PreferredReadbackFormat() {
-  return kN32_SkColorType;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -3302,11 +3321,11 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
 }
 
 - (void)startSpeaking:(id)sender {
-  renderWidgetHostView_->SpeakSelection();
+  GetRenderWidgetHostViewToUse(renderWidgetHostView_.get())->SpeakSelection();
 }
 
 - (void)stopSpeaking:(id)sender {
-  renderWidgetHostView_->StopSpeaking();
+  GetRenderWidgetHostViewToUse(renderWidgetHostView_.get())->StopSpeaking();
 }
 
 - (void)cancelComposition {
@@ -3317,8 +3336,13 @@ extern NSString *NSTextInputReplacementRangeAttributeName;
   // doesn't call any NSTextInput functions, such as setMarkedText or
   // insertText. So, we need to send an IPC message to a renderer so it can
   // delete the composition node.
+  // TODO(erikchen): NSInputManager is deprecated since OSX 10.6. Switch to
+  // NSTextInputContext. http://www.crbug.com/479010.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
   NSInputManager *currentInputManager = [NSInputManager currentInputManager];
   [currentInputManager markedTextAbandoned:self];
+#pragma clang diagnostic pop
 
   hasMarkedText_ = NO;
   // Should not call [self unmarkText] here, because it'll send unnecessary

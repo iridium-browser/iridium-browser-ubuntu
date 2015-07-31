@@ -38,53 +38,51 @@ namespace blink {
 
 LayoutFlowThread::LayoutFlowThread()
     : LayoutBlockFlow(0)
-    , m_regionsInvalidated(false)
-    , m_regionsHaveUniformLogicalHeight(true)
+    , m_columnSetsInvalidated(false)
+    , m_columnSetsHaveUniformLogicalHeight(true)
     , m_pageLogicalSizeChanged(false)
 {
-    setFlowThreadState(InsideOutOfFlowThread);
 }
 
-void LayoutFlowThread::removeRegionFromThread(LayoutMultiColumnSet* columnSet)
+void LayoutFlowThread::removeColumnSetFromThread(LayoutMultiColumnSet* columnSet)
 {
     ASSERT(columnSet);
     m_multiColumnSetList.remove(columnSet);
 }
 
-void LayoutFlowThread::invalidateRegions()
+void LayoutFlowThread::invalidateColumnSets()
 {
-    if (m_regionsInvalidated) {
+    if (m_columnSetsInvalidated) {
         ASSERT(selfNeedsLayout());
         return;
     }
 
     setNeedsLayoutAndFullPaintInvalidation(LayoutInvalidationReason::ColumnsChanged);
 
-    m_regionsInvalidated = true;
+    m_columnSetsInvalidated = true;
 }
 
-void LayoutFlowThread::validateRegions()
+void LayoutFlowThread::validateColumnSets()
 {
-    if (m_regionsInvalidated) {
-        m_regionsInvalidated = false;
-        m_regionsHaveUniformLogicalHeight = true;
+    if (m_columnSetsInvalidated) {
+        m_columnSetsInvalidated = false;
+        m_columnSetsHaveUniformLogicalHeight = true;
 
-        if (hasRegions()) {
-            LayoutUnit previousRegionLogicalHeight = 0;
-            bool firstRegionVisited = false;
+        if (hasColumnSets()) {
+            LayoutUnit previousLogicalHeight = 0;
+            bool firstVisited = false;
 
-            for (LayoutMultiColumnSetList::iterator iter = m_multiColumnSetList.begin(); iter != m_multiColumnSetList.end(); ++iter) {
-                LayoutMultiColumnSet* columnSet = *iter;
-                LayoutUnit regionLogicalHeight = columnSet->pageLogicalHeight();
+            for (auto* columnSet : m_multiColumnSetList) {
+                LayoutUnit currentLogicalHeight = columnSet->pageLogicalHeight();
 
-                if (!firstRegionVisited) {
-                    firstRegionVisited = true;
+                if (!firstVisited) {
+                    firstVisited = true;
                 } else {
-                    if (m_regionsHaveUniformLogicalHeight && previousRegionLogicalHeight != regionLogicalHeight)
-                        m_regionsHaveUniformLogicalHeight = false;
+                    if (m_columnSetsHaveUniformLogicalHeight && previousLogicalHeight != currentLogicalHeight)
+                        m_columnSetsHaveUniformLogicalHeight = false;
                 }
 
-                previousRegionLogicalHeight = regionLogicalHeight;
+                previousLogicalHeight = currentLogicalHeight;
             }
         }
     }
@@ -107,7 +105,7 @@ void LayoutFlowThread::mapRectToPaintInvalidationBacking(const LayoutBoxModelObj
 
 void LayoutFlowThread::layout()
 {
-    m_pageLogicalSizeChanged = m_regionsInvalidated && everHadLayout();
+    m_pageLogicalSizeChanged = m_columnSetsInvalidated && everHadLayout();
     LayoutBlockFlow::layout();
     m_pageLogicalSizeChanged = false;
 }
@@ -157,20 +155,6 @@ LayoutUnit LayoutFlowThread::pageRemainingLogicalHeightForOffset(LayoutUnit offs
     return remainingHeight;
 }
 
-LayoutRegion* LayoutFlowThread::firstRegion() const
-{
-    if (!hasValidRegionInfo())
-        return 0;
-    return m_multiColumnSetList.first();
-}
-
-LayoutRegion* LayoutFlowThread::lastRegion() const
-{
-    if (!hasValidRegionInfo())
-        return 0;
-    return m_multiColumnSetList.last();
-}
-
 void LayoutFlowThread::generateColumnSetIntervalTree()
 {
     // FIXME: Optimize not to clear the interval all the time. This implies manually managing the tree nodes lifecycle.
@@ -182,7 +166,7 @@ void LayoutFlowThread::generateColumnSetIntervalTree()
 
 void LayoutFlowThread::collectLayerFragments(DeprecatedPaintLayerFragments& layerFragments, const LayoutRect& layerBoundingBox, const LayoutRect& dirtyRect)
 {
-    ASSERT(!m_regionsInvalidated);
+    ASSERT(!m_columnSetsInvalidated);
 
     for (LayoutMultiColumnSetList::const_iterator iter = m_multiColumnSetList.begin(); iter != m_multiColumnSetList.end(); ++iter) {
         LayoutMultiColumnSet* columnSet = *iter;
@@ -192,15 +176,13 @@ void LayoutFlowThread::collectLayerFragments(DeprecatedPaintLayerFragments& laye
 
 LayoutRect LayoutFlowThread::fragmentsBoundingBox(const LayoutRect& layerBoundingBox) const
 {
-    ASSERT(!m_regionsInvalidated);
+    ASSERT(!m_columnSetsInvalidated);
 
     LayoutRect result;
-    for (LayoutMultiColumnSetList::const_iterator iter = m_multiColumnSetList.begin(); iter != m_multiColumnSetList.end(); ++iter) {
-        LayoutMultiColumnSet* columnSet = *iter;
+    for (auto* columnSet : m_multiColumnSetList) {
         DeprecatedPaintLayerFragments fragments;
         columnSet->collectLayerFragments(fragments, layerBoundingBox, LayoutRect(LayoutRect::infiniteIntRect()));
-        for (size_t i = 0; i < fragments.size(); ++i) {
-            const DeprecatedPaintLayerFragment& fragment = fragments.at(i);
+        for (const auto& fragment : fragments) {
             LayoutRect fragmentRect(layerBoundingBox);
             fragmentRect.intersect(fragment.paginationClip);
             fragmentRect.moveBy(fragment.paginationOffset);

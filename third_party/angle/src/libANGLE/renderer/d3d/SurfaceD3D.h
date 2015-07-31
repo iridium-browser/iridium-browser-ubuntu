@@ -54,6 +54,9 @@ class SurfaceD3D : public SurfaceImpl
     // Returns true if swapchain changed due to resize or interval update
     bool checkForOutOfDateSwapChain();
 
+    gl::Error getAttachmentRenderTarget(const gl::FramebufferAttachment::Target &target,
+                                        FramebufferAttachmentRenderTarget **rtOut) override;
+
   private:
     SurfaceD3D(RendererD3D *renderer, egl::Display *display, const egl::Config *config, EGLint width, EGLint height,
                EGLint fixedSize, EGLClientBuffer shareHandle, EGLNativeWindowType window);
@@ -61,9 +64,6 @@ class SurfaceD3D : public SurfaceImpl
     egl::Error swapRect(EGLint x, EGLint y, EGLint width, EGLint height);
     egl::Error resetSwapChain(int backbufferWidth, int backbufferHeight);
     egl::Error resizeSwapChain(int backbufferWidth, int backbufferHeight);
-
-    void subclassWindow();
-    void unsubclassWindow();
 
     RendererD3D *mRenderer;
     egl::Display *mDisplay;
@@ -75,7 +75,6 @@ class SurfaceD3D : public SurfaceImpl
 
     SwapChainD3D *mSwapChain;
     bool mSwapIntervalDirty;
-    bool mWindowSubclassed;        // Indicates whether we successfully subclassed mWindow for WM_RESIZE hooking
 
     NativeWindow mNativeWindow;   // Handler for the Window that the surface is created for.
     EGLint mWidth;

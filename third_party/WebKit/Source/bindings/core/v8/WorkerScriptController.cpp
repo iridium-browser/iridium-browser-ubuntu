@@ -41,7 +41,7 @@
 #include "bindings/core/v8/V8ScriptRunner.h"
 #include "bindings/core/v8/V8SharedWorkerGlobalScope.h"
 #include "bindings/core/v8/V8WorkerGlobalScope.h"
-#include "bindings/core/v8/WorkerScriptDebugServer.h"
+#include "bindings/core/v8/WorkerThreadDebugger.h"
 #include "bindings/core/v8/WrapperTypeInfo.h"
 #include "core/events/ErrorEvent.h"
 #include "core/frame/DOMTimer.h"
@@ -144,13 +144,15 @@ bool WorkerScriptController::initializeContextIfNeeded()
     ScriptState::Scope scope(m_scriptState.get());
 
     // Name new context for debugging.
-    WorkerScriptDebugServer::setContextDebugData(context);
+    WorkerThreadDebugger::setContextDebugData(context);
 
     // Create a new JS object and use it as the prototype for the shadow global object.
     const WrapperTypeInfo* wrapperTypeInfo = m_workerGlobalScope.wrapperTypeInfo();
     v8::Local<v8::Function> workerGlobalScopeConstructor = m_scriptState->perContextData()->constructorForType(wrapperTypeInfo);
-    v8::Local<v8::Object> jsWorkerGlobalScope = V8ObjectConstructor::newInstance(isolate(), workerGlobalScopeConstructor);
-    if (jsWorkerGlobalScope.IsEmpty()) {
+    if (workerGlobalScopeConstructor.IsEmpty())
+        return false;
+    v8::Local<v8::Object> jsWorkerGlobalScope;
+    if (!V8ObjectConstructor::newInstance(isolate(), workerGlobalScopeConstructor).ToLocal(&jsWorkerGlobalScope)) {
         m_scriptState->disposePerContextData();
         return false;
     }
@@ -196,8 +198,14 @@ ScriptValue WorkerScriptController::evaluate(const String& script, const String&
         v8::Local<v8::Message> message = block.Message();
         m_globalScopeExecutionState->hadException = true;
         m_globalScopeExecutionState->errorMessage = toCoreString(message->Get());
-        m_globalScopeExecutionState->lineNumber = message->GetLineNumber();
-        m_globalScopeExecutionState->columnNumber = message->GetStartColumn() + 1;
+        if (v8Call(message->GetLineNumber(m_scriptState->context()), m_globalScopeExecutionState->lineNumber)
+            && v8Call(message->GetStartColumn(m_scriptState->context()), m_globalScopeExecutionState->columnNumber)) {
+            ++m_globalScopeExecutionState->columnNumber;
+        } else {
+            m_globalScopeExecutionState->lineNumber = 0;
+            m_globalScopeExecutionState->columnNumber = 0;
+        }
+
         TOSTRING_DEFAULT(V8StringResource<>, sourceURL, message->GetScriptOrigin().ResourceName(), ScriptValue());
         m_globalScopeExecutionState->sourceURL = sourceURL;
         m_globalScopeExecutionState->exception = ScriptValue(m_scriptState.get(), block.Exception());

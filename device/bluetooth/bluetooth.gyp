@@ -16,6 +16,7 @@
         '../../net/net.gyp:net',
         '../../ui/base/ui_base.gyp:ui_base',
         'bluetooth_strings.gyp:device_bluetooth_strings',
+        'uribeacon',
       ],
       'defines': [
         'DEVICE_BLUETOOTH_IMPLEMENTATION',
@@ -24,6 +25,8 @@
         # Note: file list duplicated in GN build.
         'bluetooth_adapter.cc',
         'bluetooth_adapter.h',
+        'bluetooth_adapter_android.cc',
+        'bluetooth_adapter_android.h',
         'bluetooth_adapter_chromeos.cc',
         'bluetooth_adapter_chromeos.h',
         'bluetooth_adapter_factory.cc',
@@ -34,6 +37,10 @@
         "bluetooth_adapter_profile_chromeos.h",
         'bluetooth_adapter_win.cc',
         'bluetooth_adapter_win.h',
+        'bluetooth_advertisement.cc',
+        'bluetooth_advertisement.h',
+        'bluetooth_advertisement_chromeos.cc',
+        'bluetooth_advertisement_chromeos.h',
         'bluetooth_audio_sink.cc',
         'bluetooth_audio_sink.h',
         'bluetooth_audio_sink_chromeos.cc',
@@ -106,8 +113,6 @@
         'bluetooth_task_manager_win.h',
         'bluetooth_uuid.cc',
         'bluetooth_uuid.h',
-        'uribeacon/uri_encoder.cc',
-        'uribeacon/uri_encoder.h',
       ],
       'conditions': [
         ['chromeos==1', {
@@ -119,6 +124,15 @@
           'export_dependent_settings': [
             '../../build/linux/system.gyp:dbus'
           ]
+        }],
+        ['OS == "android"', {
+          'dependencies': [
+            'device_bluetooth_jni_headers',
+          ],
+          'sources': [
+            'android/bluetooth_jni_registrar.cc',
+            'android/bluetooth_jni_registrar.h',
+          ],
         }],
         ['OS=="win"', {
           # The following two blocks are duplicated. They apply to static lib
@@ -153,9 +167,34 @@
             'libraries': [
               '$(SDKROOT)/System/Library/Frameworks/IOBluetooth.framework',
             ],
+            'conditions': [
+              ['mac_sdk == "10.10"', {
+                'xcode_settings': {
+                  # In the OSX 10.10 SDK, CoreBluetooth became a top level
+                  # framework. Previously, it was nested in IOBluetooth. In
+                  # order for Chrome to run on OSes older than OSX 10.10, the
+                  # top level CoreBluetooth framework must be weakly linked.
+                  'OTHER_LDFLAGS': [
+                    '-weak_framework CoreBluetooth',
+                  ],
+                },
+              }],
+            ],
           },
         }],
       ],
+    },
+    {
+      # GN version: //device/bluetooth/uribeacon
+      'target_name': 'uribeacon',
+      'type': 'static_library',
+      'dependencies': [
+        '../../base/base.gyp:base',
+      ],
+      'sources': [
+        'uribeacon/uri_encoder.cc',
+        'uribeacon/uri_encoder.h'
+      ]
     },
     {
       # GN version: //device/bluetooth:mocks
@@ -172,6 +211,8 @@
         # Note: file list duplicated in GN build.
         'test/mock_bluetooth_adapter.cc',
         'test/mock_bluetooth_adapter.h',
+        'test/mock_bluetooth_advertisement.cc',
+        'test/mock_bluetooth_advertisement.h',
         'test/mock_bluetooth_device.cc',
         'test/mock_bluetooth_device.h',
         'test/mock_bluetooth_discovery_session.cc',
@@ -190,5 +231,33 @@
         'test/mock_bluetooth_socket.h',
       ],
     },
+  ],
+  'conditions': [
+    ['OS == "android"', {
+      'targets': [
+        {
+          'target_name': 'device_bluetooth_jni_headers',
+          'type': 'none',
+          'sources': [
+            'android/java/src/org/chromium/device/bluetooth/BluetoothAdapter.java',
+          ],
+          'variables': {
+            'jni_gen_package': 'device_bluetooth',
+          },
+          'includes': [ '../../build/jni_generator.gypi' ],
+        },
+        {
+          'target_name': 'device_bluetooth_java',
+          'type': 'none',
+          'dependencies': [
+            '../../base/base.gyp:base',
+          ],
+          'variables': {
+            'java_in_dir': '../../device/bluetooth/android/java',
+          },
+          'includes': [ '../../build/java.gypi' ],
+        },
+      ],
+    }],
   ],
 }

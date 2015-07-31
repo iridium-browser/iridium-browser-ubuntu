@@ -25,9 +25,8 @@ namespace media {
 void WebContentDecryptionModuleImpl::Create(
     media::CdmFactory* cdm_factory,
     const base::string16& key_system,
-    bool allow_distinctive_identifier,
-    bool allow_persistent_state,
     const blink::WebSecurityOrigin& security_origin,
+    const CdmConfig& cdm_config,
     blink::WebContentDecryptionModuleResult result) {
   DCHECK(!security_origin.isNull());
   DCHECK(!key_system.empty());
@@ -62,21 +61,14 @@ void WebContentDecryptionModuleImpl::Create(
   }
 
   GURL security_origin_as_gurl(security_origin.toString());
+
+  // CdmSessionAdapter::CreateCdm() will keep a reference to |adapter|. Then
+  // if WebContentDecryptionModuleImpl is successfully created (returned in
+  // |result|), it will keep a reference to |adapter|. Otherwise, |adapter| will
+  // be destructed.
   scoped_refptr<CdmSessionAdapter> adapter(new CdmSessionAdapter());
-
-  // TODO(jrummell): Pass WebContentDecryptionModuleResult (or similar) to
-  // Initialize() so that more specific errors can be reported.
-  if (!adapter->Initialize(cdm_factory, key_system_ascii,
-                           allow_distinctive_identifier,
-                           allow_persistent_state, security_origin_as_gurl)) {
-    result.completeWithError(
-        blink::WebContentDecryptionModuleExceptionNotSupportedError, 0,
-        "Failed to initialize CDM.");
-    return;
-  }
-
-  result.completeWithContentDecryptionModule(
-      new WebContentDecryptionModuleImpl(adapter));
+  adapter->CreateCdm(cdm_factory, key_system_ascii, security_origin_as_gurl,
+                     cdm_config, result);
 }
 
 WebContentDecryptionModuleImpl::WebContentDecryptionModuleImpl(
@@ -99,8 +91,8 @@ void WebContentDecryptionModuleImpl::setServerCertificate(
     blink::WebContentDecryptionModuleResult result) {
   DCHECK(server_certificate);
   adapter_->SetServerCertificate(
-      server_certificate,
-      base::saturated_cast<int>(server_certificate_length),
+      std::vector<uint8>(server_certificate,
+                         server_certificate + server_certificate_length),
       scoped_ptr<SimpleCdmPromise>(
           new CdmResultPromise<>(result, std::string())));
 }

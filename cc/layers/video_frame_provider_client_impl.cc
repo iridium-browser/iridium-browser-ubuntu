@@ -13,13 +13,20 @@ namespace cc {
 
 // static
 scoped_refptr<VideoFrameProviderClientImpl>
-VideoFrameProviderClientImpl::Create(VideoFrameProvider* provider) {
-  return make_scoped_refptr(new VideoFrameProviderClientImpl(provider));
+VideoFrameProviderClientImpl::Create(VideoFrameProvider* provider,
+                                     VideoFrameControllerClient* client) {
+  return make_scoped_refptr(new VideoFrameProviderClientImpl(provider, client));
 }
 
 VideoFrameProviderClientImpl::VideoFrameProviderClientImpl(
-    VideoFrameProvider* provider)
-    : provider_(provider), active_video_layer_(nullptr), stopped_(false) {
+    VideoFrameProvider* provider,
+    VideoFrameControllerClient* client)
+    : provider_(provider),
+      client_(client),
+      active_video_layer_(nullptr),
+      stopped_(false),
+      rendering_(false),
+      needs_put_current_frame_(false) {
   // This only happens during a commit on the compositor thread while the main
   // thread is blocked. That makes this a thread-safe call to set the video
   // frame provider client that does not require a lock. The same is true of
@@ -59,6 +66,8 @@ void VideoFrameProviderClientImpl::Stop() {
     provider_->SetVideoFrameProviderClient(nullptr);
     provider_ = nullptr;
   }
+  if (rendering_)
+    StopRendering();
   active_video_layer_ = nullptr;
   stopped_ = true;
 }
@@ -78,17 +87,22 @@ VideoFrameProviderClientImpl::AcquireLockAndCurrentFrame() {
   return provider_->GetCurrentFrame();
 }
 
-void VideoFrameProviderClientImpl::PutCurrentFrame(
-    const scoped_refptr<media::VideoFrame>& frame) {
+void VideoFrameProviderClientImpl::PutCurrentFrame() {
   DCHECK(thread_checker_.CalledOnValidThread());
   provider_lock_.AssertAcquired();
-  provider_->PutCurrentFrame(frame);
+  provider_->PutCurrentFrame();
+  needs_put_current_frame_ = false;
 }
 
 void VideoFrameProviderClientImpl::ReleaseLock() {
   DCHECK(thread_checker_.CalledOnValidThread());
   provider_lock_.AssertAcquired();
   provider_lock_.Release();
+}
+
+bool VideoFrameProviderClientImpl::HasCurrentFrame() {
+  base::AutoLock locker(provider_lock_);
+  return provider_ && provider_->HasCurrentFrame();
 }
 
 const gfx::Transform& VideoFrameProviderClientImpl::StreamTextureMatrix()
@@ -98,10 +112,32 @@ const gfx::Transform& VideoFrameProviderClientImpl::StreamTextureMatrix()
 }
 
 void VideoFrameProviderClientImpl::StopUsingProvider() {
-  // Block the provider from shutting down until this client is done
-  // using the frame.
-  base::AutoLock locker(provider_lock_);
-  provider_ = nullptr;
+  {
+    // Block the provider from shutting down until this client is done
+    // using the frame.
+    base::AutoLock locker(provider_lock_);
+    provider_ = nullptr;
+  }
+  if (rendering_)
+    StopRendering();
+}
+
+void VideoFrameProviderClientImpl::StartRendering() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  TRACE_EVENT0("cc", "VideoFrameProviderClientImpl::StartRendering");
+  DCHECK(!rendering_);
+  DCHECK(!stopped_);
+  rendering_ = true;
+  client_->AddVideoFrameController(this);
+}
+
+void VideoFrameProviderClientImpl::StopRendering() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  TRACE_EVENT0("cc", "VideoFrameProviderClientImpl::StopRendering");
+  DCHECK(rendering_);
+  DCHECK(!stopped_);
+  client_->RemoveVideoFrameController(this);
+  rendering_ = false;
 }
 
 void VideoFrameProviderClientImpl::DidReceiveFrame() {
@@ -110,6 +146,7 @@ void VideoFrameProviderClientImpl::DidReceiveFrame() {
                "active_video_layer",
                !!active_video_layer_);
   DCHECK(thread_checker_.CalledOnValidThread());
+  needs_put_current_frame_ = true;
   if (active_video_layer_)
     active_video_layer_->SetNeedsRedraw();
 }
@@ -123,6 +160,39 @@ void VideoFrameProviderClientImpl::DidUpdateMatrix(const float* matrix) {
       matrix[3], matrix[7], matrix[11], matrix[15]);
   if (active_video_layer_)
     active_video_layer_->SetNeedsRedraw();
+}
+
+void VideoFrameProviderClientImpl::OnBeginFrame(const BeginFrameArgs& args) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK(rendering_);
+  DCHECK(!stopped_);
+
+  TRACE_EVENT0("cc", "VideoFrameProviderClientImpl::OnBeginFrame");
+  {
+    base::AutoLock locker(provider_lock_);
+
+    // We use frame_time + interval here because that is the estimated time at
+    // which a frame returned during this phase will end up being displayed.
+    if (!provider_ ||
+        !provider_->UpdateCurrentFrame(args.frame_time + args.interval,
+                                       args.frame_time + 2 * args.interval)) {
+      return;
+    }
+  }
+
+  // Warning: Do not hold |provider_lock_| while calling this function, it may
+  // lead to a reentrant call to HasCurrentFrame() above.
+  DidReceiveFrame();
+}
+
+void VideoFrameProviderClientImpl::DidDrawFrame() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  {
+    base::AutoLock locker(provider_lock_);
+    if (provider_ && needs_put_current_frame_)
+      provider_->PutCurrentFrame();
+  }
+  needs_put_current_frame_ = false;
 }
 
 }  // namespace cc

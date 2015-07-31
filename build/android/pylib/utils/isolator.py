@@ -24,15 +24,19 @@ def DefaultPathVariables():
 
 
 def DefaultConfigVariables():
+  # Note: This list must match the --config-vars in build/isolate.gypi
   return {
     'CONFIGURATION_NAME': constants.GetBuildType(),
     'OS': 'android',
     'asan': '0',
+    'branding': 'Chromium',
     'chromeos': '0',
     'component': 'static_library',
+    'enable_pepper_cdms': '0',
     'enable_plugins': '0',
     'fastbuild': '0',
     'icu_use_data_file_flag': '1',
+    'kasko': '0',
     'lsan': '0',
     'msan': '0',
     # TODO(maruel): This may not always be true.

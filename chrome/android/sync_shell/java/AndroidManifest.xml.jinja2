@@ -9,11 +9,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="org.chromium.chrome.sync_shell">
 
-    <uses-sdk android:minSdkVersion="14" android:targetSdkVersion="21" />
+    <uses-sdk android:minSdkVersion="16" android:targetSdkVersion="22" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
-    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.GET_ACCOUNTS"/>
     <uses-permission android:name="android.permission.INTERNET"/>
@@ -27,9 +26,9 @@
     <uses-permission android:name="android.permission.USE_CREDENTIALS" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
     <!-- Only Chrome can receive the messages and registration result for GCM -->
-    <permission android:name="org.chromium.chrome.shell.permission.C2D_MESSAGE"
+    <permission android:name="org.chromium.chrome.sync_shell.permission.C2D_MESSAGE"
                 android:protectionLevel="signature" />
-    <uses-permission android:name="org.chromium.chrome.shell.permission.C2D_MESSAGE" />
+    <uses-permission android:name="org.chromium.chrome.sync_shell.permission.C2D_MESSAGE" />
     <uses-permission android:name="com.google.android.c2dm.permission.RECEIVE" />
 
     <application android:name="org.chromium.chrome.shell.ChromeShellApplication"
@@ -124,9 +123,9 @@
 
         <!-- GCMDriver multiplexed GCM receiver -->
         <service android:exported="false"
-                 android:name="org.chromium.components.gcm_driver.GCMListener"/>
+                 android:name="org.chromium.chrome.browser.services.gcm.GCMListener"/>
         <receiver android:exported="false"
-                  android:name="org.chromium.components.gcm_driver.GCMListener$Receiver">
+                  android:name="org.chromium.chrome.browser.services.gcm.GCMListener$Receiver">
             <intent-filter>
                 <action android:name="com.google.ipc.invalidation.gcmmplex.EVENT" />
             </intent-filter>

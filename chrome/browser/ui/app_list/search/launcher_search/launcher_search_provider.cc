@@ -4,8 +4,11 @@
 
 #include "chrome/browser/ui/app_list/search/launcher_search/launcher_search_provider.h"
 
+#include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chromeos/launcher_search_provider/service.h"
+
+using chromeos::launcher_search_provider::Service;
 
 namespace app_list {
 
@@ -17,7 +20,9 @@ const int kLauncherSearchProviderMaxResults = 6;
 }  // namespace
 
 LauncherSearchProvider::LauncherSearchProvider(Profile* profile)
-    : profile_(profile), weak_ptr_factory_(this) {
+    : extension_results_deleter_(&extension_results_),
+      profile_(profile),
+      weak_ptr_factory_(this) {
 }
 
 LauncherSearchProvider::~LauncherSearchProvider() {
@@ -25,16 +30,57 @@ LauncherSearchProvider::~LauncherSearchProvider() {
 
 void LauncherSearchProvider::Start(bool /*is_voice_query*/,
                                    const base::string16& query) {
+  // Clear previously added search results.
+  ClearResults();
+
   DelayQuery(base::Bind(&LauncherSearchProvider::StartInternal,
                         weak_ptr_factory_.GetWeakPtr(), query));
 }
 
 void LauncherSearchProvider::Stop() {
+  // Since app_list code can call Stop() at any time, we stop timer here in
+  // order not to start query after Stop() is called.
+  query_timer_.Stop();
+
+  // Clear all search results of the previous query. Since results are
+  // duplicated when being exported from the map, there are no external pointers
+  // to |extension_results_|, so it is safe to clear the map.
+  STLDeleteValues(&extension_results_);
+
+  Service* service = Service::Get(profile_);
+
+  // Since we delay queries and filter out empty string queries, it can happen
+  // that no query is running at service side.
+  if (service->IsQueryRunning())
+    service->OnQueryEnded();
+}
+
+void LauncherSearchProvider::SetSearchResults(
+    const extensions::ExtensionId& extension_id,
+    ScopedVector<LauncherSearchResult> results) {
+  DCHECK(Service::Get(profile_)->IsQueryRunning());
+
+  // If it already has the results of this extension, delete it first.
+  if (ContainsKey(extension_results_, extension_id)) {
+    delete extension_results_[extension_id];
+    extension_results_.erase(extension_id);
+  }
+
+  // Add this extension's results.
+  extension_results_.insert(std::make_pair(
+      extension_id, new ScopedVector<LauncherSearchResult>(results.Pass())));
+
+  // Update results with other extension results.
+  ClearResults();
+  for (const auto& item : extension_results_) {
+    for (const auto* result : *item.second)
+      Add(result->Duplicate());
+  }
 }
 
 void LauncherSearchProvider::DelayQuery(const base::Closure& closure) {
-  base::TimeDelta delay = base::TimeDelta::FromMilliseconds(
-      kLauncherSearchProviderQueryDelayInMs);
+  base::TimeDelta delay =
+      base::TimeDelta::FromMilliseconds(kLauncherSearchProviderQueryDelayInMs);
   if (base::Time::Now() - last_query_time_ > delay) {
     query_timer_.Stop();
     closure.Run();
@@ -46,8 +92,8 @@ void LauncherSearchProvider::DelayQuery(const base::Closure& closure) {
 
 void LauncherSearchProvider::StartInternal(const base::string16& query) {
   if (!query.empty()) {
-    chromeos::launcher_search_provider::Service::Get(profile_)->OnQueryStarted(
-        base::UTF16ToUTF8(query), kLauncherSearchProviderMaxResults);
+    Service::Get(profile_)->OnQueryStarted(this, base::UTF16ToUTF8(query),
+                                           kLauncherSearchProviderMaxResults);
   }
 }
 

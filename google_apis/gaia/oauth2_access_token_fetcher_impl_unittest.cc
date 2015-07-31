@@ -8,6 +8,7 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/run_loop.h"
+#include "base/thread_task_runner_handle.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "google_apis/gaia/oauth2_access_token_consumer.h"
@@ -61,11 +62,19 @@ class MockUrlFetcherFactory : public ScopedURLFetcherFactory,
   MockUrlFetcherFactory() : ScopedURLFetcherFactory(this) {}
   virtual ~MockUrlFetcherFactory() {}
 
-  MOCK_METHOD4(CreateURLFetcher,
+  MOCK_METHOD4(CreateURLFetcherMock,
                URLFetcher*(int id,
                            const GURL& url,
                            URLFetcher::RequestType request_type,
                            URLFetcherDelegate* d));
+
+  scoped_ptr<URLFetcher> CreateURLFetcher(int id,
+                                          const GURL& url,
+                                          URLFetcher::RequestType request_type,
+                                          URLFetcherDelegate* d) override {
+    return scoped_ptr<URLFetcher>(
+        CreateURLFetcherMock(id, url, request_type, d));
+  }
 };
 
 class MockOAuth2AccessTokenConsumer : public OAuth2AccessTokenConsumer {
@@ -85,7 +94,7 @@ class OAuth2AccessTokenFetcherImplTest : public testing::Test {
  public:
   OAuth2AccessTokenFetcherImplTest()
       : request_context_getter_(new net::TestURLRequestContextGetter(
-            base::MessageLoopProxy::current())),
+            base::ThreadTaskRunnerHandle::Get())),
         fetcher_(&consumer_, request_context_getter_.get(), "refresh_token") {
     base::RunLoop().RunUntilIdle();
   }
@@ -107,7 +116,7 @@ class OAuth2AccessTokenFetcherImplTest : public testing::Test {
     if (!body.empty())
       url_fetcher->SetResponseString(body);
 
-    EXPECT_CALL(factory_, CreateURLFetcher(_, url, _, _))
+    EXPECT_CALL(factory_, CreateURLFetcherMock(_, url, _, _))
         .WillOnce(Return(url_fetcher));
     return url_fetcher;
   }

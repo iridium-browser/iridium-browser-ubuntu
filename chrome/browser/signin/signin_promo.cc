@@ -38,6 +38,10 @@
 #include "net/base/url_util.h"
 #include "url/gurl.h"
 
+#if defined(OS_WIN)
+#include "base/win/windows_version.h"
+#endif
+
 using content::WebContents;
 
 namespace {
@@ -114,6 +118,12 @@ bool ShouldShowPromoAtStartup(Profile* profile, bool is_new_profile) {
     if (!HasShownPromoAtStartup(profile))
       return false;
   }
+
+#if defined(OS_WIN)
+  // Do not show the promo on first run on Win10 and newer.
+  if (is_new_profile && base::win::GetVersion() >= base::win::VERSION_WIN10)
+    return false;
+#endif
 
   if (HasUserSkippedPromo(profile))
     return false;
@@ -252,22 +262,10 @@ void ForceWebBasedSigninFlowForTesting(bool force) {
 
 void RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterIntegerPref(
-      prefs::kSignInPromoStartupCount,
-      0,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kSignInPromoUserSkipped,
-      false,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kSignInPromoShowOnFirstRunAllowed,
-      true,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kSignInPromoShowNTPBubble,
-      false,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterIntegerPref(prefs::kSignInPromoStartupCount, 0);
+  registry->RegisterBooleanPref(prefs::kSignInPromoUserSkipped, false);
+  registry->RegisterBooleanPref(prefs::kSignInPromoShowOnFirstRunAllowed, true);
+  registry->RegisterBooleanPref(prefs::kSignInPromoShowNTPBubble, false);
 }
 
 }  // namespace signin

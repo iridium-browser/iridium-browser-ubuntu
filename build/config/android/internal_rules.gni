@@ -226,7 +226,8 @@ template("write_build_config") {
       dep_name = get_label_info(d, "name")
       possible_deps_configs += [ "$dep_gen_dir/$dep_name.build_config" ]
     }
-    rebase_possible_deps_configs = rebase_path(possible_deps_configs)
+    rebase_possible_deps_configs =
+        rebase_path(possible_deps_configs, root_build_dir)
 
     outputs = [
       depfile,
@@ -288,6 +289,19 @@ template("write_build_config") {
       args += [ "--bypass-platform-checks" ]
     }
 
+    if (defined(invoker.apk_under_test)) {
+      deps += [ invoker.apk_under_test ]
+      apk_under_test_gen_dir =
+          get_label_info(invoker.apk_under_test, "target_gen_dir")
+      apk_under_test_name = get_label_info(invoker.apk_under_test, "name")
+      apk_under_test_config =
+          "$apk_under_test_gen_dir/$apk_under_test_name.build_config"
+      args += [
+        "--tested-apk-config",
+        rebase_path(apk_under_test_config, root_build_dir),
+      ]
+    }
+
     if (is_android_resources || is_apk) {
       assert(defined(invoker.resources_zip))
       args += [
@@ -300,11 +314,19 @@ template("write_build_config") {
           "--android-manifest",
           rebase_path(invoker.android_manifest, root_build_dir),
         ]
+      } else {
+        assert(!is_apk, "apk build configs require an android_manifest")
       }
       if (defined(invoker.custom_package)) {
         args += [
           "--package-name",
           invoker.custom_package,
+        ]
+      }
+      if (defined(invoker.r_text)) {
+        args += [
+          "--r-text",
+          rebase_path(invoker.r_text, root_build_dir),
         ]
       }
     }
@@ -427,8 +449,13 @@ template("create_apk") {
   _android_manifest = invoker.android_manifest
   _base_path = invoker.base_path
   _final_apk_path = invoker.apk_path
-  _resources_zip = invoker.resources_zip
-  _dex_path = invoker.dex_path
+
+  if (defined(invoker.resources_zip)) {
+    _resources_zip = invoker.resources_zip
+  }
+  if (defined(invoker.dex_path)) {
+    _dex_path = invoker.dex_path
+  }
   _keystore_path = invoker.keystore_path
   _keystore_name = invoker.keystore_name
   _keystore_password = invoker.keystore_password
@@ -444,7 +471,6 @@ template("create_apk") {
     _native_libs_dir = invoker.native_libs_dir
   }
 
-  _asset_location = "//build/android/empty/res"
   if (defined(invoker.asset_location)) {
     _asset_location = invoker.asset_location
   }
@@ -471,14 +497,15 @@ template("create_apk") {
     depfile = "${target_gen_dir}/${target_name}.d"
     inputs = [
       _android_manifest,
-      _resources_zip,
     ]
+    if (defined(_resources_zip)) {
+      inputs += [ _resources_zip ]
+    }
     outputs = [
       depfile,
       _resource_packaged_apk_path,
     ]
 
-    _rebased_resources_zips = [ rebase_path(_resources_zip, root_build_dir) ]
     args = [
       "--depfile",
       rebase_path(depfile, root_build_dir),
@@ -493,13 +520,22 @@ template("create_apk") {
       _version_code,
       "--version-name",
       _version_name,
-      "--asset-dir",
-      rebase_path(_asset_location, root_build_dir),
-      "--resource-zips=$_rebased_resources_zips",
       "--apk-path",
       rebase_path(_resource_packaged_apk_path, root_build_dir),
     ]
 
+    if (defined(_asset_location)) {
+      args += [
+        "--asset-dir",
+        rebase_path(_asset_location, root_build_dir),
+      ]
+    }
+    if (defined(_resources_zip)) {
+      args += [
+        "--resource-zips",
+        rebase_path(_resources_zip, root_build_dir),
+      ]
+    }
     if (_shared_resources) {
       args += [ "--shared-resources" ]
     }
@@ -512,10 +548,12 @@ template("create_apk") {
     depfile = "$target_gen_dir/$target_name.d"
 
     inputs = [
-      _dex_path,
       _resource_packaged_apk_path,
       _ant_script,
     ]
+    if (defined(_dex_path)) {
+      inputs += [ _dex_path ]
+    }
 
     outputs = [
       depfile,
@@ -527,7 +565,6 @@ template("create_apk") {
         rebase_path(_resource_packaged_apk_path, root_build_dir)
     _rebased_packaged_apk_path = rebase_path(_packaged_apk_path, root_build_dir)
     _rebased_native_libs_dir = rebase_path(_native_libs_dir, root_build_dir)
-    _rebased_dex_path = rebase_path(_dex_path, root_build_dir)
     args = [
       "--depfile",
       rebase_path(depfile, root_build_dir),
@@ -542,11 +579,19 @@ template("create_apk") {
       "-DUNSIGNED_APK_PATH=$_rebased_packaged_apk_path",
       "-DEMMA_INSTRUMENT=0",
       "-DEMMA_DEVICE_JAR=$_rebased_emma_jar",
-      "-DDEX_FILE_PATH=$_rebased_dex_path",
       "-Dbasedir=.",
       "-buildfile",
       rebase_path(_ant_script, root_build_dir),
     ]
+    if (defined(_dex_path)) {
+      _rebased_dex_path = rebase_path(_dex_path, root_build_dir)
+      args += [
+        "-DDEX_FILE_PATH=$_rebased_dex_path",
+        "-DHAS_CODE=true",
+      ]
+    } else {
+      args += [ "-DHAS_CODE=false" ]
+    }
   }
 
   action("${target_name}__finalize") {
@@ -594,6 +639,7 @@ template("create_apk") {
   group(target_name) {
     deps = [
       ":${target_name}__finalize",
+      ":${target_name}__package_resources",
     ]
   }
 }
@@ -989,6 +1035,7 @@ template("process_resources") {
 
   zip_path = invoker.zip_path
   srcjar_path = invoker.srcjar_path
+  r_text_path = invoker.r_text_path
   build_config = invoker.build_config
   resource_dirs = invoker.resource_dirs
   android_manifest = invoker.android_manifest
@@ -1006,6 +1053,7 @@ template("process_resources") {
       depfile,
       zip_path,
       srcjar_path,
+      r_text_path,
     ]
 
     sources_build_rel = exec_script("//build/android/gyp/find.py",
@@ -1034,8 +1082,11 @@ template("process_resources") {
       rebase_path(srcjar_path, root_build_dir),
       "--resource-zip-out",
       rebase_path(zip_path, root_build_dir),
+      "--r-text-out",
+      rebase_path(r_text_path, root_build_dir),
       "--dependencies-res-zips=@FileArg($rebase_build_config:resources:dependency_zips)",
       "--extra-res-packages=@FileArg($rebase_build_config:resources:extra_package_names)",
+      "--extra-r-text-files=@FileArg($rebase_build_config:resources:extra_r_text_files)",
     ]
 
     if (non_constant_id) {
@@ -1053,8 +1104,17 @@ template("process_resources") {
       args += [ "--v14-verify-only" ]
     }
 
+    if (defined(invoker.v14_skip) && invoker.v14_skip) {
+      args += [ "--v14-skip" ]
+    }
+
     if (defined(invoker.shared_resources) && invoker.shared_resources) {
       args += [ "--shared-resources" ]
+    }
+
+    if (defined(invoker.include_all_resources) &&
+        invoker.include_all_resources) {
+      args += [ "--include-all-resources" ]
     }
 
     if (defined(invoker.all_resources_zip_path)) {
@@ -1143,5 +1203,55 @@ template("deps_dex") {
       excluded_jars = rebase_path(invoker.excluded_jars, root_build_dir)
       args += [ "--excluded-paths=${excluded_jars}" ]
     }
+  }
+}
+
+# Creates an AndroidManifest.xml for an APK split.
+template("generate_split_manifest") {
+  assert(defined(invoker.main_manifest))
+  assert(defined(invoker.out_manifest))
+  assert(defined(invoker.split_name))
+
+  action(target_name) {
+    depfile = "$target_gen_dir/$target_name.d"
+    args = [
+      "--main-manifest",
+      rebase_path(invoker.main_manifest, root_build_dir),
+      "--out-manifest",
+      rebase_path(invoker.out_manifest, root_build_dir),
+      "--split",
+      invoker.split_name,
+    ]
+    if (defined(invoker.version_code)) {
+      args += [
+        "--version-code",
+        invoker.version_code,
+      ]
+    }
+    if (defined(invoker.version_name)) {
+      args += [
+        "--version-name",
+        invoker.version_name,
+      ]
+    }
+    if (defined(invoker.has_code)) {
+      args += [
+        "--has-code",
+        invoker.has_code,
+      ]
+    }
+    args += [
+      "--depfile",
+      rebase_path(depfile, root_build_dir),
+    ]
+
+    script = "//build/android/gyp/generate_split_manifest.py"
+    outputs = [
+      depfile,
+      invoker.out_manifest,
+    ]
+    inputs = [
+      invoker.main_manifest,
+    ]
   }
 }

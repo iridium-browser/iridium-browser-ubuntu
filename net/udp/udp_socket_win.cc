@@ -13,7 +13,6 @@
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/sparse_histogram.h"
-#include "base/profiler/scoped_tracker.h"
 #include "base/rand_util.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
@@ -69,10 +68,10 @@ class UDPSocketWin::Core : public base::RefCounted<Core> {
   class ReadDelegate : public base::win::ObjectWatcher::Delegate {
    public:
     explicit ReadDelegate(Core* core) : core_(core) {}
-    virtual ~ReadDelegate() {}
+    ~ReadDelegate() override {}
 
     // base::ObjectWatcher::Delegate methods:
-    virtual void OnObjectSignaled(HANDLE object);
+    void OnObjectSignaled(HANDLE object) override;
 
    private:
     Core* const core_;
@@ -81,10 +80,10 @@ class UDPSocketWin::Core : public base::RefCounted<Core> {
   class WriteDelegate : public base::win::ObjectWatcher::Delegate {
    public:
     explicit WriteDelegate(Core* core) : core_(core) {}
-    virtual ~WriteDelegate() {}
+    ~WriteDelegate() override {}
 
     // base::ObjectWatcher::Delegate methods:
-    virtual void OnObjectSignaled(HANDLE object);
+    void OnObjectSignaled(HANDLE object) override;
 
    private:
     Core* const core_;
@@ -145,11 +144,6 @@ void UDPSocketWin::Core::WatchForWrite() {
 }
 
 void UDPSocketWin::Core::ReadDelegate::OnObjectSignaled(HANDLE object) {
-  // TODO(rtenneti): Remove ScopedTracker below once crbug.com/462789 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "462789 UDPSocketWin::Core::ReadDelegate::OnObjectSignaled"));
-
   DCHECK_EQ(object, core_->read_overlapped_.hEvent);
   if (core_->socket_)
     core_->socket_->DidCompleteRead();
@@ -329,10 +323,6 @@ int UDPSocketWin::GetPeerAddress(IPEndPoint* address) const {
   if (!is_connected())
     return ERR_SOCKET_NOT_CONNECTED;
 
-  // TODO(rtenneti): Remove ScopedTracker below once crbug.com/462789 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION("462789 UDPSocketWin::GetPeerAddress"));
-
   // TODO(szym): Simplify. http://crbug.com/126152
   if (!remote_address_.get()) {
     SockaddrStorage storage;
@@ -353,10 +343,6 @@ int UDPSocketWin::GetLocalAddress(IPEndPoint* address) const {
   DCHECK(address);
   if (!is_connected())
     return ERR_SOCKET_NOT_CONNECTED;
-
-  // TODO(rtenneti): Remove ScopedTracker below once crbug.com/462789 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION("462789 UDPSocketWin::GetLocalAddress"));
 
   // TODO(szym): Simplify. http://crbug.com/126152
   if (!local_address_.get()) {
@@ -570,11 +556,6 @@ void UDPSocketWin::DoReadCallback(int rv) {
   // since Run may result in Read being called, clear read_callback_ up front.
   CompletionCallback c = read_callback_;
   read_callback_.Reset();
-
-  // TODO(rtenneti): Remove ScopedTracker below once crbug.com/462789 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION("462789 UDPSocketWin::DoReadCallback"));
-
   c.Run(rv);
 }
 
@@ -700,7 +681,7 @@ void UDPSocketWin::LogRead(int result,
     return;
   }
 
-  if (net_log_.IsLogging()) {
+  if (net_log_.IsCapturing()) {
     net_log_.AddEvent(
         NetLog::TYPE_UDP_BYTES_RECEIVED,
         CreateNetLogUDPDataTranferCallback(result, bytes, address));
@@ -717,7 +698,7 @@ void UDPSocketWin::LogWrite(int result,
     return;
   }
 
-  if (net_log_.IsLogging()) {
+  if (net_log_.IsCapturing()) {
     net_log_.AddEvent(
         NetLog::TYPE_UDP_BYTES_SENT,
         CreateNetLogUDPDataTranferCallback(result, bytes, address));

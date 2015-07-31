@@ -22,7 +22,8 @@ void TestVideoEncoder::RunTests(const std::string& filter) {
 }
 
 std::string TestVideoEncoder::TestCreate() {
-  // Test that we get results for supported formats.
+  // Test that we get results for supported formats. We should at
+  // least get the software supported formats.
   {
     pp::VideoEncoder video_encoder(instance_);
     ASSERT_FALSE(video_encoder.is_null());
@@ -32,7 +33,7 @@ std::string TestVideoEncoder::TestCreate() {
     callback.WaitForResult(
         video_encoder.GetSupportedProfiles(callback.GetCallback()));
 
-    ASSERT_EQ(PP_OK, callback.result());
+    ASSERT_GE(callback.result(), 1U);
 
     const std::vector<PP_VideoProfileDescription> video_profiles =
         callback.output();
@@ -41,8 +42,13 @@ std::string TestVideoEncoder::TestCreate() {
     bool found_vp8 = false;
     for (uint32_t i = 0; i < video_profiles.size(); ++i) {
       const PP_VideoProfileDescription& description = video_profiles[i];
-      if (description.profile == PP_VIDEOPROFILE_VP8_ANY)
+      if (description.profile == PP_VIDEOPROFILE_VP8_ANY &&
+          description.hardware_accelerated == PP_FALSE) {
+        ASSERT_GE(description.max_framerate_numerator /
+                      description.max_framerate_denominator,
+                  30U);
         found_vp8 = true;
+      }
     }
     ASSERT_TRUE(found_vp8);
   }
@@ -84,6 +90,16 @@ std::string TestVideoEncoder::TestCreate() {
     ASSERT_EQ(PP_OK, video_encoder.GetFrameCodedSize(&coded_size));
     ASSERT_GE(coded_size.GetArea(), video_size.GetArea());
     ASSERT_GE(video_encoder.GetFramesRequired(), 1);
+
+    TestCompletionCallbackWithOutput<pp::VideoFrame> get_video_frame(
+        instance_->pp_instance(), false);
+    get_video_frame.WaitForResult(
+        video_encoder.GetVideoFrame(get_video_frame.GetCallback()));
+    ASSERT_EQ(PP_OK, get_video_frame.result());
+
+    pp::Size video_frame_size;
+    ASSERT_TRUE(get_video_frame.output().GetSize(&video_frame_size));
+    ASSERT_EQ(coded_size.GetArea(), video_frame_size.GetArea());
   }
 
   PASS();

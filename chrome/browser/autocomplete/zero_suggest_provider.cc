@@ -85,10 +85,7 @@ ZeroSuggestProvider* ZeroSuggestProvider::Create(
 // static
 void ZeroSuggestProvider::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterStringPref(
-      prefs::kZeroSuggestCachedResults,
-      std::string(),
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterStringPref(prefs::kZeroSuggestCachedResults, std::string());
 }
 
 void ZeroSuggestProvider::Start(const AutocompleteInput& input,
@@ -333,10 +330,8 @@ void ZeroSuggestProvider::Run(const GURL& suggest_url) {
     }
   } else {
     const int kFetcherID = 1;
-    fetcher_.reset(
-        net::URLFetcher::Create(kFetcherID,
-            suggest_url,
-            net::URLFetcher::GET, this));
+    fetcher_ = net::URLFetcher::Create(kFetcherID, suggest_url,
+                                       net::URLFetcher::GET, this);
     fetcher_->SetRequestContext(profile_->GetRequestContext());
     fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES);
     // Add Chrome experiment state to the request headers.

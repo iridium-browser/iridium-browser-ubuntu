@@ -289,19 +289,32 @@ Binding.prototype = {
         if (enumValues) {
           // Type IDs are qualified with the namespace during compilation,
           // unfortunately, so remove it here.
-          logging.DCHECK(
-              t.id.substr(0, schema.namespace.length) == schema.namespace);
+          logging.DCHECK($String.substr(t.id, 0, schema.namespace.length) ==
+                             schema.namespace);
           // Note: + 1 because it ends in a '.', e.g., 'fooApi.Type'.
-          var id = t.id.substr(schema.namespace.length + 1);
+          var id = $String.substr(t.id, schema.namespace.length + 1);
           mod[id] = {};
           $Array.forEach(enumValues, function(enumValue) {
             // Note: enums can be declared either as a list of strings
             // ['foo', 'bar'] or as a list of objects
             // [{'name': 'foo'}, {'name': 'bar'}].
-            enumValue =
-                enumValue.hasOwnProperty('name') ? enumValue.name : enumValue;
-            if (enumValue)  // Avoid setting any empty enums.
-              mod[id][enumValue] = enumValue;
+            enumValue = $Object.hasOwnProperty(enumValue, 'name') ?
+                enumValue.name : enumValue;
+            if (enumValue) {  // Avoid setting any empty enums.
+              // Make all properties in ALL_CAPS_STYLE.
+              // Replace myEnum-Foo with my_Enum-Foo:
+              var propertyName =
+                  $String.replace(enumValue, /([a-z])([A-Z])/g, '$1_$2');
+              // Replace my_Enum-Foo with my_Enum_Foo:
+              propertyName = $String.replace(propertyName, /\W/g, '_');
+              // If the first character is a digit (we know it must be one of
+              // a digit, a letter, or an underscore), precede it with an
+              // underscore.
+              propertyName = $String.replace(propertyName, /^(\d)/g, '_$1');
+              // Uppercase (replace my_Enum_Foo with MY_ENUM_FOO):
+              propertyName = $String.toUpperCase(propertyName);
+              mod[id][propertyName] = enumValue;
+            }
           });
         }
       }, this);

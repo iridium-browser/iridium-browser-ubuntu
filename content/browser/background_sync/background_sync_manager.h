@@ -5,12 +5,13 @@
 #ifndef CONTENT_BROWSER_BACKGROUND_SYNC_BACKGROUND_SYNC_MANAGER_H_
 #define CONTENT_BROWSER_BACKGROUND_SYNC_BACKGROUND_SYNC_MANAGER_H_
 
-#include <list>
 #include <map>
+#include <vector>
 
 #include "base/callback_forward.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "content/browser/background_sync/background_sync.pb.h"
 #include "content/browser/cache_storage/cache_storage_scheduler.h"
 #include "content/browser/service_worker/service_worker_context_observer.h"
 #include "content/browser/service_worker/service_worker_storage.h"
@@ -20,6 +21,7 @@
 
 namespace content {
 
+class BackgroundSyncNetworkObserver;
 class ServiceWorkerContextWrapper;
 
 // BackgroundSyncManager manages and stores the set of background sync
@@ -43,7 +45,8 @@ class CONTENT_EXPORT BackgroundSyncManager
   enum ErrorType {
     ERROR_TYPE_OK = 0,
     ERROR_TYPE_STORAGE,
-    ERROR_TYPE_NOT_FOUND
+    ERROR_TYPE_NOT_FOUND,
+    ERROR_TYPE_NO_SERVICE_WORKER
   };
 
   // TODO(jkarlin): Remove this and use the struct from IPC messages once it
@@ -51,75 +54,72 @@ class CONTENT_EXPORT BackgroundSyncManager
   struct CONTENT_EXPORT BackgroundSyncRegistration {
     using RegistrationId = int64;
     static const RegistrationId kInvalidRegistrationId;
+    static const RegistrationId kInitialId;
+    BackgroundSyncRegistration() {}
 
-    BackgroundSyncRegistration()
-        : BackgroundSyncRegistration(kInvalidRegistrationId, "") {}
-    explicit BackgroundSyncRegistration(const std::string& name)
-        : BackgroundSyncRegistration(kInvalidRegistrationId, name) {}
-    BackgroundSyncRegistration(int64 id, const std::string& name)
-        : id(id), min_period(0), name(name) {}
-
-    bool Equals(const BackgroundSyncRegistration& other) {
-      return this->name == other.name && this->min_period == other.min_period;
+    bool Equals(const BackgroundSyncRegistration& other) const {
+      return this->tag == other.tag && this->periodicity == other.periodicity &&
+             this->min_period == other.min_period &&
+             network_state == other.network_state &&
+             power_state == other.power_state;
     }
 
-    RegistrationId id;
-    int64 min_period;
-    std::string name;
-  };
+    // Registrations options from the specification
+    std::string tag;
+    int64 min_period = 0;
+    SyncNetworkState network_state = NETWORK_STATE_ONLINE;
+    SyncPowerState power_state = POWER_STATE_AVOID_DRAINING;
 
-  struct CONTENT_EXPORT BackgroundSyncRegistrations {
-    using NameToRegistrationMap =
-        std::map<std::string, BackgroundSyncRegistration>;
-    static const BackgroundSyncRegistration::RegistrationId kInitialId;
-
-    BackgroundSyncRegistrations();
-    explicit BackgroundSyncRegistrations(
-        BackgroundSyncRegistration::RegistrationId next_id);
-    ~BackgroundSyncRegistrations();
-
-    NameToRegistrationMap name_to_registration_map;
-    BackgroundSyncRegistration::RegistrationId next_id;
+    // Implementation specific members
+    RegistrationId id = kInvalidRegistrationId;
+    SyncPeriodicity periodicity = SYNC_ONE_SHOT;
+    SyncState sync_state = SYNC_STATE_PENDING;
   };
 
   using StatusCallback = base::Callback<void(ErrorType)>;
   using StatusAndRegistrationCallback =
       base::Callback<void(ErrorType, const BackgroundSyncRegistration&)>;
+  using StatusAndRegistrationsCallback =
+      base::Callback<void(ErrorType,
+                          const std::vector<BackgroundSyncRegistration>&)>;
 
   static scoped_ptr<BackgroundSyncManager> Create(
       const scoped_refptr<ServiceWorkerContextWrapper>& service_worker_context);
   ~BackgroundSyncManager() override;
 
   // Stores the given background sync registration and adds it to the scheduling
-  // queue. Overwrites any existing registration with the same name but
-  // different parameters (other than the id). Calls |callback| with ErrorTypeOK
-  // and the accepted registration on success. The accepted registration will
-  // have a unique id. It may also have altered parameters if the user or UA
-  // chose different parameters than those supplied.
-  void Register(const GURL& origin,
-                int64 sw_registration_id,
+  // queue. It will overwrite an existing registration with the same tag and
+  // periodicity unless they're identical (save for the id). Calls |callback|
+  // with ErrorTypeOK and the accepted registration on success. The accepted
+  // registration will have a unique id. It may also have altered parameters if
+  // the user or UA chose different parameters than those supplied.
+  void Register(int64 sw_registration_id,
                 const BackgroundSyncRegistration& sync_registration,
                 const StatusAndRegistrationCallback& callback);
 
-  // Removes the background sync registration with |sync_registration_name| if
-  // the |sync_registration_id| matches. |sync_registration_id| will not match
-  // if, for instance, a new registration with the same name has replaced it.
-  // Calls |callback| with ErrorTypeNotFound if no match is found. Calls
-  // |callback| with ErrorTypeOK on success.
+  // Removes the background sync with tag |sync_registration_tag|, periodicity
+  // |periodicity|, and id |sync_registration_id|. Calls |callback| with
+  // ErrorTypeNotFound if no match is found. Calls |callback| with ErrorTypeOK
+  // on success.
   void Unregister(
-      const GURL& origin,
       int64 sw_registration_id,
-      const std::string& sync_registration_name,
+      const std::string& sync_registration_tag,
+      SyncPeriodicity periodicity,
       BackgroundSyncRegistration::RegistrationId sync_registration_id,
       const StatusCallback& callback);
 
   // Finds the background sync registration associated with
-  // |sw_registration_id|. Calls |callback| with ErrorTypeNotFound if it doesn't
-  // exist. Calls |callback| with ErrorTypeOK on success.
-  void GetRegistration(const GURL& origin,
-                       int64 sw_registration_id,
-                       const std::string sync_registration_name,
+  // |sw_registration_id| with periodicity |periodicity|. Calls
+  // |callback| with ErrorTypeNotFound if it doesn't exist. Calls |callback|
+  // with ErrorTypeOK on success.
+  void GetRegistration(int64 sw_registration_id,
+                       const std::string& sync_registration_tag,
+                       SyncPeriodicity periodicity,
                        const StatusAndRegistrationCallback& callback);
+
+  void GetRegistrations(int64 sw_registration_id,
+                        SyncPeriodicity periodicity,
+                        const StatusAndRegistrationsCallback& callback);
 
   // ServiceWorkerContextObserver overrides.
   void OnRegistrationDeleted(int64 registration_id,
@@ -137,15 +137,45 @@ class CONTENT_EXPORT BackgroundSyncManager
   virtual void StoreDataInBackend(
       int64 sw_registration_id,
       const GURL& origin,
-      const std::string& key,
+      const std::string& backend_key,
       const std::string& data,
       const ServiceWorkerStorage::StatusCallback& callback);
   virtual void GetDataFromBackend(
-      const std::string& key,
+      const std::string& backend_key,
       const ServiceWorkerStorage::GetUserDataForAllRegistrationsCallback&
           callback);
+  virtual void FireOneShotSync(
+      const scoped_refptr<ServiceWorkerVersion>& active_version,
+      const ServiceWorkerVersion::StatusCallback& callback);
 
  private:
+  class RegistrationKey {
+   public:
+    explicit RegistrationKey(const BackgroundSyncRegistration& registration);
+    RegistrationKey(const std::string& tag, SyncPeriodicity periodicity);
+    RegistrationKey(const RegistrationKey& other) = default;
+    RegistrationKey& operator=(const RegistrationKey& other) = default;
+
+    bool operator<(const RegistrationKey& rhs) const {
+      return value_ < rhs.value_;
+    }
+
+   private:
+    std::string value_;
+  };
+
+  struct BackgroundSyncRegistrations {
+    using RegistrationMap =
+        std::map<RegistrationKey, BackgroundSyncRegistration>;
+
+    BackgroundSyncRegistrations();
+    ~BackgroundSyncRegistrations();
+
+    RegistrationMap registration_map;
+    BackgroundSyncRegistration::RegistrationId next_id;
+    GURL origin;
+  };
+
   using PermissionStatusCallback = base::Callback<void(bool)>;
   using SWIdToRegistrationsMap = std::map<int64, BackgroundSyncRegistrations>;
 
@@ -164,23 +194,21 @@ class CONTENT_EXPORT BackgroundSyncManager
 
   // Returns the existing registration in |existing_registration| if it is not
   // null.
-  bool LookupRegistration(int64 sw_registration_id,
-                          const std::string& sync_registration_name,
-                          BackgroundSyncRegistration* existing_registration);
+  BackgroundSyncRegistration* LookupRegistration(
+      int64 sw_registration_id,
+      const RegistrationKey& registration_key);
 
   // Store all registrations for a given |sw_registration_id|.
-  void StoreRegistrations(const GURL& origin,
-                          int64 sw_registration_id,
+  void StoreRegistrations(int64 sw_registration_id,
                           const ServiceWorkerStorage::StatusCallback& callback);
 
-  // If the registration is in the map, removes it and returns the removed
-  // registration in |old_registration|. |old_registration| may be null.
+  // Removes the registration if it is in the map.
   void RemoveRegistrationFromMap(int64 sw_registration_id,
-                                 const std::string& sync_registration_name,
-                                 BackgroundSyncRegistration* old_registration);
+                                 const RegistrationKey& registration_key);
 
   void AddRegistrationToMap(
       int64 sw_registration_id,
+      const GURL& origin,
       const BackgroundSyncRegistration& sync_registration);
 
   void InitImpl(const base::Closure& callback);
@@ -190,8 +218,7 @@ class CONTENT_EXPORT BackgroundSyncManager
       ServiceWorkerStatusCode status);
 
   // Register callbacks
-  void RegisterImpl(const GURL& origin,
-                    int64 sw_registration_id,
+  void RegisterImpl(int64 sw_registration_id,
                     const BackgroundSyncRegistration& sync_registration,
                     const StatusAndRegistrationCallback& callback);
   void RegisterDidStore(int64 sw_registration_id,
@@ -201,22 +228,56 @@ class CONTENT_EXPORT BackgroundSyncManager
 
   // Unregister callbacks
   void UnregisterImpl(
-      const GURL& origin,
       int64 sw_registration_id,
-      const std::string& sync_registration_name,
+      const RegistrationKey& registration_key,
       BackgroundSyncRegistration::RegistrationId sync_registration_id,
       const StatusCallback& callback);
   void UnregisterDidStore(
       int64 sw_registration_id,
-      const BackgroundSyncRegistration& old_sync_registration,
       const StatusCallback& callback,
       ServiceWorkerStatusCode status);
 
   // GetRegistration callbacks
-  void GetRegistrationImpl(const GURL& origin,
-                           int64 sw_registration_id,
-                           const std::string sync_registration_name,
+  void GetRegistrationImpl(int64 sw_registration_id,
+                           const RegistrationKey& registration_key,
                            const StatusAndRegistrationCallback& callback);
+
+  // GetRegistrations callbacks
+  void GetRegistrationsImpl(int64 sw_registration_id,
+                            SyncPeriodicity periodicity,
+                            const StatusAndRegistrationsCallback& callback);
+
+  bool IsRegistrationReadyToFire(
+      const BackgroundSyncRegistration& registration);
+
+  // FireReadyEvents and callbacks
+  void FireReadyEvents();
+  void FireReadyEventsImpl(const base::Closure& callback);
+  void FireReadyEventsDidFindRegistration(
+      const RegistrationKey& registration_key,
+      BackgroundSyncRegistration::RegistrationId registration_id,
+      const base::Closure& callback,
+      ServiceWorkerStatusCode service_worker_status,
+      const scoped_refptr<ServiceWorkerRegistration>&
+          service_worker_registration);
+
+  // Called when a sync event has completed.
+  void EventComplete(
+      const scoped_refptr<ServiceWorkerRegistration>&
+          service_worker_registration,
+      int64 service_worker_id,
+      const RegistrationKey& key,
+      BackgroundSyncRegistration::RegistrationId sync_registration_id,
+      ServiceWorkerStatusCode status_code);
+  void EventCompleteImpl(
+      int64 service_worker_id,
+      const RegistrationKey& key,
+      BackgroundSyncRegistration::RegistrationId sync_registration_id,
+      ServiceWorkerStatusCode status_code,
+      const base::Closure& callback);
+  void EventCompleteDidStore(int64 service_worker_id,
+                             const base::Closure& callback,
+                             ServiceWorkerStatusCode status_code);
 
   // OnRegistrationDeleted callbacks
   void OnRegistrationDeletedImpl(int64 registration_id,
@@ -225,24 +286,26 @@ class CONTENT_EXPORT BackgroundSyncManager
   // OnStorageWiped callbacks
   void OnStorageWipedImpl(const base::Closure& callback);
 
-  // Operation Scheduling callbacks
-  void PendingStatusAndRegistrationCallback(
-      const StatusAndRegistrationCallback& callback,
-      ErrorType error,
-      const BackgroundSyncRegistration& sync_registration);
-  void PendingStatusCallback(const StatusCallback& callback, ErrorType error);
-  void PendingClosure(const base::Closure& closure);
+  void OnNetworkChanged();
 
+  // Operation Scheduling callback and convenience functions.
+  template <typename CallbackT, typename... Params>
+  void CompleteOperationCallback(const CallbackT& callback,
+                                 Params... parameters);
+  base::Closure MakeEmptyCompletion();
   StatusAndRegistrationCallback MakeStatusAndRegistrationCompletion(
       const StatusAndRegistrationCallback& callback);
+  StatusAndRegistrationsCallback MakeStatusAndRegistrationsCompletion(
+      const StatusAndRegistrationsCallback& callback);
   BackgroundSyncManager::StatusCallback MakeStatusCompletion(
       const StatusCallback& callback);
-  base::Closure MakeEmptyCompletion();
 
   SWIdToRegistrationsMap sw_to_registrations_map_;
   CacheStorageScheduler op_scheduler_;
   scoped_refptr<ServiceWorkerContextWrapper> service_worker_context_;
   bool disabled_;
+
+  scoped_ptr<BackgroundSyncNetworkObserver> network_observer_;
 
   base::WeakPtrFactory<BackgroundSyncManager> weak_ptr_factory_;
 

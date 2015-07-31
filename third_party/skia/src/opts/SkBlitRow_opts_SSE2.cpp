@@ -232,63 +232,6 @@ void S32A_Blend_BlitRow32_SSE2(SkPMColor* SK_RESTRICT dst,
     }
 }
 
-/* SSE2 version of Color32()
- * portable version is in core/SkBlitRow_D32.cpp
- */
-void Color32_SSE2(SkPMColor dst[], const SkPMColor src[], int count,
-                  SkPMColor color) {
-    if (count <= 0) {
-        return;
-    }
-
-    if (0 == color) {
-        if (src != dst) {
-            memcpy(dst, src, count * sizeof(SkPMColor));
-        }
-        return;
-    }
-
-    unsigned colorA = SkGetPackedA32(color);
-    if (255 == colorA) {
-        sk_memset32(dst, color, count);
-    } else {
-        unsigned scale = 256 - SkAlpha255To256(colorA);
-
-        if (count >= 4) {
-            SkASSERT(((size_t)dst & 0x03) == 0);
-            while (((size_t)dst & 0x0F) != 0) {
-                *dst = color + SkAlphaMulQ(*src, scale);
-                src++;
-                dst++;
-                count--;
-            }
-
-            const __m128i *s = reinterpret_cast<const __m128i*>(src);
-            __m128i *d = reinterpret_cast<__m128i*>(dst);
-            __m128i color_wide = _mm_set1_epi32(color);
-            while (count >= 4) {
-                __m128i src_pixel = _mm_loadu_si128(s);
-                src_pixel = SkAlphaMulQ_SSE2(src_pixel, scale);
-
-                __m128i result = _mm_add_epi8(color_wide, src_pixel);
-                _mm_store_si128(d, result);
-                s++;
-                d++;
-                count -= 4;
-            }
-            src = reinterpret_cast<const SkPMColor*>(s);
-            dst = reinterpret_cast<SkPMColor*>(d);
-        }
-
-        while (count > 0) {
-            *dst = color + SkAlphaMulQ(*src, scale);
-            src += 1;
-            dst += 1;
-            count--;
-        }
-    }
-}
-
 void Color32A_D565_SSE2(uint16_t dst[], SkPMColor src, int count, int x, int y) {
     SkASSERT(count > 0);
 

@@ -103,6 +103,10 @@
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/text_elider.h"
 
+#if defined(ENABLE_EXTENSIONS)
+#include "extensions/browser/guest_view/mime_handler_view/mime_handler_view_guest.h"
+#endif
+
 #if defined(ENABLE_PRINTING)
 #include "chrome/browser/printing/print_view_manager_common.h"
 #include "components/printing/common/print_messages.h"
@@ -303,6 +307,19 @@ content::Referrer CreateSaveAsReferrer(
       content::Referrer(referring_url.GetAsReferrer(), params.referrer_policy));
 }
 
+content::WebContents* GetWebContentsToUse(content::WebContents* web_contents) {
+#if defined(ENABLE_EXTENSIONS)
+  // If we're viewing in a MimeHandlerViewGuest, use its embedder WebContents.
+  if (extensions::MimeHandlerViewGuest::FromWebContents(web_contents)) {
+    WebContents* top_level_web_contents =
+        guest_view::GuestViewBase::GetTopLevelWebContents(web_contents);
+    if (top_level_web_contents)
+      return top_level_web_contents;
+  }
+#endif
+  return web_contents;
+}
+
 bool g_custom_id_ranges_initialized = false;
 
 const int kSpellcheckRadioGroup = 1;
@@ -317,7 +334,7 @@ gfx::Vector2d RenderViewContextMenu::GetOffset(
   WebContents* web_contents =
       WebContents::FromRenderFrameHost(render_frame_host);
   WebContents* top_level_web_contents =
-      extensions::GuestViewBase::GetTopLevelWebContents(web_contents);
+      guest_view::GuestViewBase::GetTopLevelWebContents(web_contents);
   if (web_contents && top_level_web_contents &&
       web_contents != top_level_web_contents) {
     gfx::Rect bounds = web_contents->GetContainerBounds();
@@ -350,7 +367,8 @@ RenderViewContextMenu::RenderViewContextMenu(
                        base::Bind(MenuItemMatchesParams, params_)),
       protocol_handler_submenu_model_(this),
       protocol_handler_registry_(
-          ProtocolHandlerRegistryFactory::GetForBrowserContext(GetProfile())) {
+          ProtocolHandlerRegistryFactory::GetForBrowserContext(GetProfile())),
+      embedder_web_contents_(GetWebContentsToUse(source_web_contents_)) {
   if (!g_custom_id_ranges_initialized) {
     g_custom_id_ranges_initialized = true;
     SetContentCustomCommandIdRange(IDC_CONTENT_CONTEXT_CUSTOM_FIRST,
@@ -450,7 +468,8 @@ void RenderViewContextMenu::AppendAllExtensionItems() {
   // top level context menu title of the extension.
   std::set<MenuItem::ExtensionKey> ids = menu_manager->ExtensionIds();
   std::vector<base::string16> sorted_menu_titles;
-  std::map<base::string16, std::string> map_ids;
+  std::map<base::string16, std::vector<const Extension*>>
+      title_to_extensions_map;
   for (std::set<MenuItem::ExtensionKey>::iterator iter = ids.begin();
        iter != ids.end();
        ++iter) {
@@ -461,7 +480,7 @@ void RenderViewContextMenu::AppendAllExtensionItems() {
     if (extension && !extension->is_platform_app()) {
       base::string16 menu_title = extension_items_.GetTopLevelContextMenuTitle(
           *iter, printable_selection_text);
-      map_ids[menu_title] = iter->extension_id;
+      title_to_extensions_map[menu_title].push_back(extension);
       sorted_menu_titles.push_back(menu_title);
     }
   }
@@ -470,15 +489,20 @@ void RenderViewContextMenu::AppendAllExtensionItems() {
 
   const std::string app_locale = g_browser_process->GetApplicationLocale();
   l10n_util::SortStrings16(app_locale, &sorted_menu_titles);
+  sorted_menu_titles.erase(
+      std::unique(sorted_menu_titles.begin(), sorted_menu_titles.end()),
+      sorted_menu_titles.end());
 
   int index = 0;
   for (size_t i = 0; i < sorted_menu_titles.size(); ++i) {
-    const std::string& id = map_ids[sorted_menu_titles[i]];
-    const MenuItem::ExtensionKey extension_key(id);
-    extension_items_.AppendExtensionItems(extension_key,
-                                          printable_selection_text,
-                                          &index,
-                                          false);  // is_action_menu
+    std::vector<const Extension*>& extensions =
+        title_to_extensions_map[sorted_menu_titles[i]];
+    for (const auto& extension : extensions) {
+      MenuItem::ExtensionKey extension_key(extension->id());
+      extension_items_.AppendExtensionItems(extension_key,
+                                            printable_selection_text, &index,
+                                            false);  // is_action_menu
+    }
   }
 }
 
@@ -490,7 +514,7 @@ void RenderViewContextMenu::AppendCurrentExtensionItems() {
   if (extension) {
     // Only add extension items from this extension.
     int index = 0;
-    const MenuItem::ExtensionKey key(
+    MenuItem::ExtensionKey key(
         extension->id(),
         extensions::WebViewGuest::GetViewInstanceId(source_web_contents_));
     extension_items_.AppendExtensionItems(key,
@@ -797,7 +821,7 @@ void RenderViewContextMenu::AppendMediaItems() {
 
 void RenderViewContextMenu::AppendPluginItems() {
   if (params_.page_url == params_.src_url ||
-      extensions::GuestViewBase::IsGuest(source_web_contents_)) {
+      guest_view::GuestViewBase::IsGuest(source_web_contents_)) {
     // Full page plugin, so show page menu items.
     if (params_.link_url.is_empty() && params_.selection_text.empty())
       AppendPageItems();
@@ -1728,7 +1752,7 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
           search_engine_tab_helper->delegate()) {
         base::string16 keyword(TemplateURL::GenerateKeyword(params_.page_url));
         TemplateURLData data;
-        data.short_name = keyword;
+        data.SetShortName(keyword);
         data.SetKeyword(keyword);
         data.SetURL(params_.keyword_url.spec());
         data.favicon_url =

@@ -24,7 +24,6 @@
           '../xvfb.py',
           './browser_tests_launcher.py',
           './browser_test_commands_linux.txt',
-          '<(PRODUCT_DIR)/libffmpegsumo.so',
           '<(PRODUCT_DIR)/libosmesa.so',
           '<(PRODUCT_DIR)/nacl_irt_x86_64.nexe',
           '../../remoting/tools/internal/test-account-host-config.json',
@@ -34,6 +33,7 @@
           '<(PRODUCT_DIR)/nacl_helper',
           '<(PRODUCT_DIR)/nacl_helper_bootstrap',
           '<(PRODUCT_DIR)/pnacl/',
+          '../../remoting/internal/config/',
         ],
       },
     }],
@@ -70,7 +70,6 @@
       'variables': {
         'files': [
           '<(PRODUCT_DIR)/chrome_elf.dll',
-          '<(PRODUCT_DIR)/ffmpegsumo.dll',
           '<(PRODUCT_DIR)/libglesv2.dll',
         ],
       },
@@ -80,11 +79,10 @@
         'files': [
           '<(PRODUCT_DIR)/<(mac_product_name).app/',
           '<(PRODUCT_DIR)/exif.so',
-          '<(PRODUCT_DIR)/ffmpegsumo.so',
         ],
       },
     }],
-    ['OS=="win" or OS=="mac"', {
+    ['OS=="win"', {
       'variables': {
         'command': [
           '../test_env.py',
@@ -96,6 +94,28 @@
           '--extension-name=Chromoting',
           '--accounts-file=../../remoting/tools/internal/test_accounts.json',
           '--account-type=gmail',
+        ],
+      },
+    }],
+    ['OS=="mac"', {
+      'variables': {
+        'command': [
+          '../test_env.py',
+          '<(PRODUCT_DIR)/browser_tests<(EXECUTABLE_SUFFIX)',
+          '--gtest_filter=RemoteDesktopBrowserTest.MANUAL_Launch',
+          '--run-manual',
+          '--ui-test-action-timeout=100000',
+          '--webapp-unpacked=<(PRODUCT_DIR)/remoting/remoting.webapp.v2',
+          '--extension-name=Chromoting',
+          '--accounts-file=../../remoting/tools/internal/test_accounts.json',
+          '--account-type=gmail',
+        ],
+      },
+    }],
+    ['OS=="win" and kasko==1', {
+      'variables': {
+        'files': [
+          '<(PRODUCT_DIR)/kasko.dll',
         ],
       },
     }],

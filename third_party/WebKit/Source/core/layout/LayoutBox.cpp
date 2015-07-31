@@ -50,7 +50,6 @@
 #include "core/layout/LayoutScrollbarPart.h"
 #include "core/layout/LayoutTableCell.h"
 #include "core/layout/LayoutView.h"
-#include "core/layout/PaintInfo.h"
 #include "core/layout/compositing/DeprecatedPaintLayerCompositor.h"
 #include "core/style/ShadowList.h"
 #include "core/page/AutoscrollController.h"
@@ -63,6 +62,7 @@
 #include "platform/geometry/FloatQuad.h"
 #include "platform/geometry/FloatRoundedRect.h"
 #include "platform/geometry/TransformState.h"
+#include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/paint/DisplayItemList.h"
 #include <algorithm>
 #include <math.h>
@@ -87,15 +87,15 @@ static OverrideSizeMap* gExtraBlockOffsetMap = 0;
 static const int autoscrollBeltSize = 20;
 static const unsigned backgroundObscurationTestMaxDepth = 4;
 
-static bool skipBodyBackground(const LayoutBox* bodyElementRenderer)
+static bool skipBodyBackground(const LayoutBox* bodyElementLayoutObject)
 {
-    ASSERT(bodyElementRenderer->isBody());
+    ASSERT(bodyElementLayoutObject->isBody());
     // The <body> only paints its background if the root element has defined a background independent of the body,
-    // or if the <body>'s parent is not the document element's renderer (e.g. inside SVG foreignObject).
-    LayoutObject* documentElementRenderer = bodyElementRenderer->document().documentElement()->layoutObject();
-    return documentElementRenderer
-        && !documentElementRenderer->hasBackground()
-        && (documentElementRenderer == bodyElementRenderer->parent());
+    // or if the <body>'s parent is not the document element's layoutObject (e.g. inside SVG foreignObject).
+    LayoutObject* documentElementLayoutObject = bodyElementLayoutObject->document().documentElement()->layoutObject();
+    return documentElementLayoutObject
+        && !documentElementLayoutObject->hasBackground()
+        && (documentElementLayoutObject == bodyElementLayoutObject->parent());
 }
 
 LayoutBox::LayoutBox(ContainerNode* node)
@@ -112,7 +112,7 @@ DeprecatedPaintLayerType LayoutBox::layerTypeRequired() const
     // hasAutoZIndex only returns true if the element is positioned or a flex-item since
     // position:static elements that are not flex-items get their z-index coerced to auto.
     if (isPositioned() || createsGroup() || hasClipPath() || hasTransformRelatedProperty()
-        || hasHiddenBackface() || hasReflection() || style()->specifiesColumns()
+        || style()->hasCompositorProxy() || hasHiddenBackface() || hasReflection() || style()->specifiesColumns()
         || !style()->hasAutoZIndex() || style()->shouldCompositeForCurrentAnimations())
         return NormalDeprecatedPaintLayer;
 
@@ -186,7 +186,7 @@ void LayoutBox::styleWillChange(StyleDifference diff, const ComputedStyle& newSt
         }
 
         // When a layout hint happens and an object's position style changes, we have to do a layout
-        // to dirty the render tree using the old position value now.
+        // to dirty the layout tree using the old position value now.
         if (diff.needsFullLayout() && parent() && oldStyle->position() != newStyle.position()) {
             markContainerChainForLayout();
             if (oldStyle->position() == StaticPosition)
@@ -458,7 +458,7 @@ void LayoutBox::scrollToOffset(const DoubleSize& offset, ScrollBehavior scrollBe
         layer()->scrollableArea()->scrollToOffset(offset, ScrollOffsetClamped, scrollBehavior);
 }
 
-static inline bool frameElementAndViewPermitScroll(HTMLFrameElementBase* frameElementBase, FrameView* frameView)
+static bool frameElementAndViewPermitScroll(HTMLFrameElementBase* frameElementBase, FrameView* frameView)
 {
     // If scrollbars aren't explicitly forbidden, permit scrolling.
     if (frameElementBase && frameElementBase->scrollingMode() != ScrollbarAlwaysOff)
@@ -493,57 +493,31 @@ void LayoutBox::scrollRectToVisible(const LayoutRect& rect, const ScrollAlignmen
     if (hasOverflowClip() && !restrictedByLineClamp) {
         // Don't scroll to reveal an overflow layer that is restricted by the -webkit-line-clamp property.
         // This will prevent us from revealing text hidden by the slider in Safari RSS.
-        newRect = layer()->scrollableArea()->exposeRect(rect, alignX, alignY);
+        newRect = layer()->scrollableArea()->scrollIntoView(rect, alignX, alignY);
     } else if (!parentBox && canBeProgramaticallyScrolled()) {
         if (FrameView* frameView = this->frameView()) {
             HTMLFrameOwnerElement* ownerElement = document().ownerElement();
+            HTMLFrameElementBase* frameElementBase = nullptr;
 
-            if (ownerElement && ownerElement->layoutObject()) {
-                HTMLFrameElementBase* frameElementBase = isHTMLFrameElementBase(*ownerElement) ? toHTMLFrameElementBase(ownerElement) : 0;
-                if (frameElementAndViewPermitScroll(frameElementBase, frameView)) {
-                    LayoutRect viewRect(frameView->visibleContentRect());
-                    LayoutRect exposeRect = ScrollAlignment::getRectToExpose(viewRect, rect, alignX, alignY);
+            if (ownerElement)
+                frameElementBase = isHTMLFrameElementBase(*ownerElement) ? toHTMLFrameElementBase(ownerElement) : nullptr;
 
-                    double xOffset = exposeRect.x();
-                    double yOffset = exposeRect.y();
-                    // Adjust offsets if they're outside of the allowable range.
-                    xOffset = std::max(0.0, std::min<double>(frameView->contentsWidth(), xOffset));
-                    yOffset = std::max(0.0, std::min<double>(frameView->contentsHeight(), yOffset));
+            // TODO(bokan): Why do we only do the frameElementAndViewPermit scroll check in the subframe case?
+            // Seems dated in any case, we should be checking for scrollability at the ScrollableArea level.
+            bool canScroll = !ownerElement || frameElementAndViewPermitScroll(frameElementBase, frameView);
+            if (canScroll)
+                frameView->scrollableArea()->scrollIntoView(rect, alignX, alignY);
 
-                    frameView->setScrollPosition(DoublePoint(xOffset, yOffset));
-                    if (frameView->safeToPropagateScrollToParent()) {
-                        parentBox = ownerElement->layoutObject()->enclosingBox();
-                        // FIXME: This doesn't correctly convert the rect to
-                        // absolute coordinates in the parent.
-                        newRect.setX(rect.x() - frameView->scrollX() + frameView->x());
-                        newRect.setY(rect.y() - frameView->scrollY() + frameView->y());
-                    } else {
-                        parentBox = 0;
-                    }
+            if (ownerElement && ownerElement->layoutObject() && canScroll) {
+                if (frameView->safeToPropagateScrollToParent()) {
+                    parentBox = ownerElement->layoutObject()->enclosingBox();
+                    // FIXME: This doesn't correctly convert the rect to
+                    // absolute coordinates in the parent.
+                    newRect.setX(rect.x() - frameView->scrollX() + frameView->x());
+                    newRect.setY(rect.y() - frameView->scrollY() + frameView->y());
+                } else {
+                    parentBox = 0;
                 }
-            } else {
-                PinchViewport& pinchViewport = frame()->page()->frameHost().pinchViewport();
-
-                // We want to move the rect into the viewport that excludes the scrollbars so we intersect
-                // the pinch viewport with the scrollbar-excluded frameView content rect. However, we don't
-                // use visibleContentRect directly since it floors the scroll position. Instead, we use
-                // FrameView::scrollPositionDouble and construct a LayoutRect from that (the FrameView size
-                // is always integer sized.
-                LayoutRect frameRect = LayoutRect(
-                    frameView->scrollPositionDouble(),
-                    frameView->visibleContentRect().size());
-                LayoutRect viewRect = intersection(
-                    LayoutRect(pinchViewport.visibleRectInDocument()), frameRect);
-                LayoutRect r = ScrollAlignment::getRectToExpose(viewRect, rect, alignX, alignY);
-
-                // pinchViewport.scrollIntoView will attempt to center the given rect within the viewport
-                // so to prevent it from adjusting r's coordinates the rect must match the viewport's size
-                // i.e. add the subtracted scrollbars from above back in.
-                // FIXME: This is hacky and required because getRectToExpose doesn't naturally account
-                // for the two viewports. crbug.com/449340.
-                r.setSize(LayoutSize(pinchViewport.visibleRectInDocument().size()));
-
-                pinchViewport.scrollIntoView(r);
             }
         }
     }
@@ -588,22 +562,22 @@ LayoutUnit LayoutBox::constrainLogicalHeightByMinMax(LayoutUnit logicalHeight, L
 {
     const ComputedStyle& styleToUse = styleRef();
     if (!styleToUse.logicalMaxHeight().isMaxSizeNone()) {
-        LayoutUnit maxH = computeLogicalHeightUsing(styleToUse.logicalMaxHeight(), intrinsicContentHeight);
+        LayoutUnit maxH = computeLogicalHeightUsing(MaxSize, styleToUse.logicalMaxHeight(), intrinsicContentHeight);
         if (maxH != -1)
             logicalHeight = std::min(logicalHeight, maxH);
     }
-    return std::max(logicalHeight, computeLogicalHeightUsing(styleToUse.logicalMinHeight(), intrinsicContentHeight));
+    return std::max(logicalHeight, computeLogicalHeightUsing(MinSize, styleToUse.logicalMinHeight(), intrinsicContentHeight));
 }
 
 LayoutUnit LayoutBox::constrainContentBoxLogicalHeightByMinMax(LayoutUnit logicalHeight, LayoutUnit intrinsicContentHeight) const
 {
     const ComputedStyle& styleToUse = styleRef();
     if (!styleToUse.logicalMaxHeight().isMaxSizeNone()) {
-        LayoutUnit maxH = computeContentLogicalHeight(styleToUse.logicalMaxHeight(), intrinsicContentHeight);
+        LayoutUnit maxH = computeContentLogicalHeight(MaxSize, styleToUse.logicalMaxHeight(), intrinsicContentHeight);
         if (maxH != -1)
             logicalHeight = std::min(logicalHeight, maxH);
     }
-    return std::max(logicalHeight, computeContentLogicalHeight(styleToUse.logicalMinHeight(), intrinsicContentHeight));
+    return std::max(logicalHeight, computeContentLogicalHeight(MinSize, styleToUse.logicalMinHeight(), intrinsicContentHeight));
 }
 
 void LayoutBox::setLocationAndUpdateOverflowControlsIfNeeded(const LayoutPoint& location)
@@ -789,7 +763,7 @@ void LayoutBox::autoscroll(const IntPoint& positionInRootFrame)
     scrollRectToVisible(LayoutRect(positionInContent, LayoutSize(1, 1)), ScrollAlignment::alignToEdgeIfNeeded, ScrollAlignment::alignToEdgeIfNeeded);
 }
 
-// There are two kinds of renderer that can autoscroll.
+// There are two kinds of layoutObject that can autoscroll.
 bool LayoutBox::canAutoscroll() const
 {
     if (node() && node()->isDocumentNode())
@@ -829,16 +803,16 @@ IntSize LayoutBox::calculateAutoscrollDirection(const IntPoint& pointInRootFrame
     return windowAutoscrollPoint - pointInRootFrame;
 }
 
-LayoutBox* LayoutBox::findAutoscrollable(LayoutObject* renderer)
+LayoutBox* LayoutBox::findAutoscrollable(LayoutObject* layoutObject)
 {
-    while (renderer && !(renderer->isBox() && toLayoutBox(renderer)->canAutoscroll())) {
-        if (!renderer->parent() && renderer->node() == renderer->document() && renderer->document().ownerElement())
-            renderer = renderer->document().ownerElement()->layoutObject();
+    while (layoutObject && !(layoutObject->isBox() && toLayoutBox(layoutObject)->canAutoscroll())) {
+        if (!layoutObject->parent() && layoutObject->node() == layoutObject->document() && layoutObject->document().ownerElement())
+            layoutObject = layoutObject->document().ownerElement()->layoutObject();
         else
-            renderer = renderer->parent();
+            layoutObject = layoutObject->parent();
     }
 
-    return renderer && renderer->isBox() ? toLayoutBox(renderer) : 0;
+    return layoutObject && layoutObject->isBox() ? toLayoutBox(layoutObject) : 0;
 }
 
 static inline int adjustedScrollDelta(int beginningDelta)
@@ -906,10 +880,10 @@ void LayoutBox::scrollByRecursively(const DoubleSize& delta, ScrollOffsetClampin
 
             LocalFrame* frame = this->frame();
             if (frame && frame->page())
-                frame->page()->autoscrollController().updateAutoscrollRenderer();
+                frame->page()->autoscrollController().updateAutoscrollLayoutObject();
         }
     } else if (view()->frameView()) {
-        // If we are here, we were called on a renderer that can be programmatically scrolled, but doesn't
+        // If we are here, we were called on a layoutObject that can be programmatically scrolled, but doesn't
         // have an overflow clip. Which means that it is a document node that can be scrolled.
         // FIXME: Pass in DoubleSize. crbug.com/414283.
         view()->frameView()->scrollBy(flooredIntSize(delta));
@@ -921,7 +895,7 @@ void LayoutBox::scrollByRecursively(const DoubleSize& delta, ScrollOffsetClampin
 
 bool LayoutBox::needsPreferredWidthsRecalculation() const
 {
-    return style()->paddingStart().isPercent() || style()->paddingEnd().isPercent();
+    return style()->paddingStart().hasPercent() || style()->paddingEnd().hasPercent();
 }
 
 IntSize LayoutBox::scrolledContentOffset() const
@@ -985,12 +959,12 @@ LayoutUnit LayoutBox::maxPreferredLogicalWidth() const
     return m_maxPreferredLogicalWidth;
 }
 
-bool LayoutBox::hasOverrideHeight() const
+bool LayoutBox::hasOverrideLogicalContentHeight() const
 {
     return m_rareData && m_rareData->m_overrideLogicalContentHeight != -1;
 }
 
-bool LayoutBox::hasOverrideWidth() const
+bool LayoutBox::hasOverrideLogicalContentWidth() const
 {
     return m_rareData && m_rareData->m_overrideLogicalContentWidth != -1;
 }
@@ -1027,13 +1001,13 @@ void LayoutBox::clearOverrideSize()
 
 LayoutUnit LayoutBox::overrideLogicalContentWidth() const
 {
-    ASSERT(hasOverrideWidth());
+    ASSERT(hasOverrideLogicalContentWidth());
     return m_rareData->m_overrideLogicalContentWidth;
 }
 
 LayoutUnit LayoutBox::overrideLogicalContentHeight() const
 {
-    ASSERT(hasOverrideHeight());
+    ASSERT(hasOverrideLogicalContentHeight());
     return m_rareData->m_overrideLogicalContentHeight;
 }
 
@@ -1377,23 +1351,23 @@ void LayoutBox::imageChanged(WrappedImagePtr image, const IntRect*)
 
 bool LayoutBox::paintInvalidationLayerRectsForImage(WrappedImagePtr image, const FillLayer& layers, bool drawingBackground)
 {
-    Vector<LayoutObject*> layerRenderers;
+    Vector<LayoutObject*> layerLayoutObjects;
 
     // A background of the body or document must extend to the total visible size of the document. This means the union of the
     // view and document bounds, since it can be the case that the view is larger than the document and vice-versa.
     // http://dev.w3.org/csswg/css-backgrounds/#the-background
     if (drawingBackground && (isDocumentElement() || (isBody() && !document().documentElement()->layoutObject()->hasBackground()))) {
-        layerRenderers.append(document().documentElement()->layoutObject());
-        layerRenderers.append(view());
+        layerLayoutObjects.append(document().documentElement()->layoutObject());
+        layerLayoutObjects.append(view());
         if (view()->frameView())
             view()->frameView()->setNeedsFullPaintInvalidation();
     } else {
-        layerRenderers.append(this);
+        layerLayoutObjects.append(this);
     }
     for (const FillLayer* curLayer = &layers; curLayer; curLayer = curLayer->next()) {
         if (curLayer->image() && image == curLayer->image()->data() && curLayer->image()->canRender(*this, style()->effectiveZoom())) {
-            for (LayoutObject* layerRenderer : layerRenderers)
-                layerRenderer->setShouldDoFullPaintInvalidation();
+            for (LayoutObject* layerLayoutObject : layerLayoutObjects)
+                layerLayoutObject->setShouldDoFullPaintInvalidation();
             return true;
         }
     }
@@ -1406,11 +1380,11 @@ PaintInvalidationReason LayoutBox::invalidatePaintIfNeeded(PaintInvalidationStat
 
     // If we are set to do a full paint invalidation that means the LayoutView will be
     // issue paint invalidations. We can then skip issuing of paint invalidations for the child
-    // renderers as they'll be covered by the LayoutView.
+    // layoutObjects as they'll be covered by the LayoutView.
     if (!view()->doingFullPaintInvalidation() && !isFullPaintInvalidationReason(reason)) {
         invalidatePaintForOverflowIfNeeded();
 
-        // Issue paint invalidations for any scrollbars if there is a scrollable area for this renderer.
+        // Issue paint invalidations for any scrollbars if there is a scrollable area for this layoutObject.
         if (ScrollableArea* area = scrollableArea()) {
             // In slimming paint mode, we already invalidated the display item clients of the scrollbars
             // during DeprecatedPaintLayerScrollableArea::invalidateScrollbarRect(). However, for now we still need to
@@ -1524,6 +1498,21 @@ LayoutUnit LayoutBox::shrinkLogicalWidthToAvoidFloats(LayoutUnit childMarginStar
     return width;
 }
 
+LayoutUnit LayoutBox::containingBlockLogicalHeightForGetComputedStyle() const
+{
+    if (hasOverrideContainingBlockLogicalHeight())
+        return overrideContainingBlockContentLogicalHeight();
+
+    if (!isPositioned())
+        return containingBlockLogicalHeightForContent(ExcludeMarginBorderPadding);
+
+    LayoutBoxModelObject* cb = toLayoutBoxModelObject(container());
+    LayoutUnit height = containingBlockLogicalHeightForPositioned(cb);
+    if (styleRef().position() != AbsolutePosition)
+        height -= cb->paddingLogicalHeight();
+    return height;
+}
+
 LayoutUnit LayoutBox::containingBlockLogicalWidthForContent() const
 {
     if (hasOverrideContainingBlockLogicalWidth())
@@ -1556,7 +1545,7 @@ LayoutUnit LayoutBox::perpendicularContainingBlockLogicalHeight() const
         return overrideContainingBlockContentLogicalHeight();
 
     LayoutBlock* cb = containingBlock();
-    if (cb->hasOverrideHeight())
+    if (cb->hasOverrideLogicalContentHeight())
         return cb->overrideLogicalContentHeight();
 
     const ComputedStyle& containingBlockStyle = cb->styleRef();
@@ -1813,7 +1802,7 @@ void LayoutBox::mapRectToPaintInvalidationBacking(const LayoutBoxModelObject* pa
     EPosition position = styleToUse.position();
 
     // We need to inflate the paint invalidation rect before we use paintInvalidationState,
-    // else we would forget to inflate it for the current renderer. FIXME: If these were
+    // else we would forget to inflate it for the current layoutObject. FIXME: If these were
     // included into the visual overflow for repaint, we wouldn't have this issue.
     inflatePaintInvalidationRectForReflectionAndFilter(rect);
 
@@ -1861,7 +1850,7 @@ void LayoutBox::mapRectToPaintInvalidationBacking(const LayoutBoxModelObject* pa
         topLeft += toLayoutInline(o)->offsetForInFlowPositionedInline(*this);
     } else if (styleToUse.hasInFlowPosition() && layer()) {
         // Apply the relative position offset when invalidating a rectangle.  The layer
-        // is translated, but the render box isn't, so we need to do this to get the
+        // is translated, but the layout box isn't, so we need to do this to get the
         // right dirty rect.  Since this is called from LayoutObject::setStyle, the relative position
         // flag on the LayoutObject has been cleared, so use the one on the style().
         topLeft += layer()->offsetForInFlowPosition();
@@ -1924,17 +1913,17 @@ void LayoutBox::updateLogicalWidth()
     setMarginEnd(computedValues.m_margins.m_end);
 }
 
-static float getMaxWidthListMarker(const LayoutBox* renderer)
+static float getMaxWidthListMarker(const LayoutBox* layoutObject)
 {
 #if ENABLE(ASSERT)
-    ASSERT(renderer);
-    Node* parentNode = renderer->generatingNode();
+    ASSERT(layoutObject);
+    Node* parentNode = layoutObject->generatingNode();
     ASSERT(parentNode);
     ASSERT(isHTMLOListElement(parentNode) || isHTMLUListElement(parentNode));
-    ASSERT(renderer->style()->textAutosizingMultiplier() != 1);
+    ASSERT(layoutObject->style()->textAutosizingMultiplier() != 1);
 #endif
     float maxWidth = 0;
-    for (LayoutObject* child = renderer->slowFirstChild(); child; child = child->nextSibling()) {
+    for (LayoutObject* child = layoutObject->slowFirstChild(); child; child = child->nextSibling()) {
         if (!child->isListItem())
             continue;
 
@@ -1973,7 +1962,7 @@ void LayoutBox::computeLogicalWidth(LogicalExtentComputedValues& computedValues)
     // width.  Use the width from the style context.
     // FIXME: Account for writing-mode in flexible boxes.
     // https://bugs.webkit.org/show_bug.cgi?id=46418
-    if (hasOverrideWidth() && parent()->isFlexibleBoxIncludingDeprecated()) {
+    if (hasOverrideLogicalContentWidth() && parent()->isFlexibleBoxIncludingDeprecated()) {
         computedValues.m_extent = overrideLogicalContentWidth() + borderAndPaddingLogicalWidth();
         return;
     }
@@ -1990,6 +1979,14 @@ void LayoutBox::computeLogicalWidth(LogicalExtentComputedValues& computedValues)
     LayoutBlock* cb = containingBlock();
     LayoutUnit containerLogicalWidth = std::max(LayoutUnit(), containingBlockLogicalWidthForContent());
     bool hasPerpendicularContainingBlock = cb->isHorizontalWritingMode() != isHorizontalWritingMode();
+
+    if (parent()->isLayoutGrid() && style()->logicalWidth().isAuto() && style()->minWidth().isAuto() && style()->overflowX() == OVISIBLE) {
+        LayoutUnit minLogicalWidth = minPreferredLogicalWidth();
+        if (containerLogicalWidth < minLogicalWidth) {
+            computedValues.m_extent = constrainLogicalWidthByMinMax(minLogicalWidth, containerLogicalWidth, cb);
+            return;
+        }
+    }
 
     if (isInline() && !isInlineBlockOrInlineTable()) {
         // just calculate margins
@@ -2080,6 +2077,10 @@ LayoutUnit LayoutBox::computeIntrinsicLogicalWidthUsing(const Length& logicalWid
 
 LayoutUnit LayoutBox::computeLogicalWidthUsing(SizeType widthType, const Length& logicalWidth, LayoutUnit availableLogicalWidth, const LayoutBlock* cb) const
 {
+    ASSERT(widthType == MinSize || widthType == MainOrPreferredSize || !logicalWidth.isAuto());
+    if (widthType == MinSize && logicalWidth.isAuto())
+        return adjustBorderBoxLogicalWidthForBoxSizing(0);
+
     if (!logicalWidth.isIntrinsicOrAuto()) {
         // FIXME: If the containing block flow is perpendicular to our direction we need to use the available logical height instead.
         return adjustBorderBoxLogicalWidthForBoxSizing(valueForLength(logicalWidth, availableLogicalWidth));
@@ -2108,7 +2109,7 @@ static bool columnFlexItemHasStretchAlignment(const LayoutObject* flexitem)
     ASSERT(parent->style()->isColumnFlexDirection());
     if (flexitem->style()->marginStart().isAuto() || flexitem->style()->marginEnd().isAuto())
         return false;
-    return flexitem->style()->alignSelf() == ItemPositionStretch || (flexitem->style()->alignSelf() == ItemPositionAuto && parent->style()->alignItems() == ItemPositionStretch);
+    return flexitem->style()->alignSelfPosition() == ItemPositionStretch || (flexitem->style()->alignSelfPosition() == ItemPositionAuto && parent->style()->alignItemsPosition() == ItemPositionStretch);
 }
 
 static bool isStretchingColumnFlexItem(const LayoutObject* flexitem)
@@ -2311,8 +2312,14 @@ void LayoutBox::computeLogicalHeight(LayoutUnit logicalHeight, LayoutUnit logica
         // grab our cached flexible height.
         // FIXME: Account for writing-mode in flexible boxes.
         // https://bugs.webkit.org/show_bug.cgi?id=46418
-        if (hasOverrideHeight() && (parent()->isFlexibleBoxIncludingDeprecated() || parent()->isLayoutGrid())) {
-            h = Length(overrideLogicalContentHeight(), Fixed);
+        if (hasOverrideLogicalContentHeight() && (parent()->isFlexibleBoxIncludingDeprecated() || parent()->isLayoutGrid())) {
+            LayoutUnit contentHeight = overrideLogicalContentHeight();
+            if (parent()->isLayoutGrid() && style()->minHeight().isAuto() && style()->overflowY() == OVISIBLE) {
+                ASSERT(style()->logicalHeight().isAuto());
+                LayoutUnit minContentHeight = computeContentLogicalHeight(MinSize, Length(MinContent), computedValues.m_extent - borderAndPaddingLogicalHeight());
+                contentHeight = std::max(contentHeight, constrainLogicalHeightByMinMax(minContentHeight, computedValues.m_extent - borderAndPaddingLogicalHeight()));
+            }
+            h = Length(contentHeight, Fixed);
         } else if (treatAsReplaced) {
             h = Length(computeReplacedLogicalHeight(), Fixed);
         } else {
@@ -2330,7 +2337,7 @@ void LayoutBox::computeLogicalHeight(LayoutUnit logicalHeight, LayoutUnit logica
 
         LayoutUnit heightResult;
         if (checkMinMaxHeight) {
-            heightResult = computeLogicalHeightUsing(style()->logicalHeight(), computedValues.m_extent - borderAndPaddingLogicalHeight());
+            heightResult = computeLogicalHeightUsing(MainOrPreferredSize, style()->logicalHeight(), computedValues.m_extent - borderAndPaddingLogicalHeight());
             if (heightResult == -1)
                 heightResult = computedValues.m_extent;
             heightResult = constrainLogicalHeightByMinMax(heightResult, computedValues.m_extent - borderAndPaddingLogicalHeight());
@@ -2352,8 +2359,8 @@ void LayoutBox::computeLogicalHeight(LayoutUnit logicalHeight, LayoutUnit logica
     // is specified. When we're printing, we also need this quirk if the body or root has a percentage
     // height since we don't set a height in LayoutView when we're printing. So without this quirk, the
     // height has nothing to be a percentage of, and it ends up being 0. That is bad.
-    bool paginatedContentNeedsBaseHeight = document().printing() && h.isPercent()
-        && (isDocumentElement() || (isBody() && document().documentElement()->layoutObject()->style()->logicalHeight().isPercent())) && !isInline();
+    bool paginatedContentNeedsBaseHeight = document().printing() && h.hasPercent()
+        && (isDocumentElement() || (isBody() && document().documentElement()->layoutObject()->style()->logicalHeight().hasPercent())) && !isInline();
     if (stretchesToViewport() || paginatedContentNeedsBaseHeight) {
         LayoutUnit margins = collapsedMarginBefore() + collapsedMarginAfter();
         LayoutUnit visibleHeight = view()->viewLogicalHeightForPercentages();
@@ -2366,17 +2373,26 @@ void LayoutBox::computeLogicalHeight(LayoutUnit logicalHeight, LayoutUnit logica
     }
 }
 
-LayoutUnit LayoutBox::computeLogicalHeightUsing(const Length& height, LayoutUnit intrinsicContentHeight) const
+LayoutUnit LayoutBox::computeLogicalHeightWithoutLayout() const
 {
-    LayoutUnit logicalHeight = computeContentAndScrollbarLogicalHeightUsing(height, intrinsicContentHeight);
+    // TODO(cbiesinger): We should probably return something other than just border + padding, but for now
+    // we have no good way to do anything else without layout, so we just use that.
+    LogicalExtentComputedValues computedValues;
+    computeLogicalHeight(borderAndPaddingLogicalHeight(), 0, computedValues);
+    return computedValues.m_extent;
+}
+
+LayoutUnit LayoutBox::computeLogicalHeightUsing(SizeType heightType, const Length& height, LayoutUnit intrinsicContentHeight) const
+{
+    LayoutUnit logicalHeight = computeContentAndScrollbarLogicalHeightUsing(heightType, height, intrinsicContentHeight);
     if (logicalHeight != -1)
         logicalHeight = adjustBorderBoxLogicalHeightForBoxSizing(logicalHeight);
     return logicalHeight;
 }
 
-LayoutUnit LayoutBox::computeContentLogicalHeight(const Length& height, LayoutUnit intrinsicContentHeight) const
+LayoutUnit LayoutBox::computeContentLogicalHeight(SizeType heightType, const Length& height, LayoutUnit intrinsicContentHeight) const
 {
-    LayoutUnit heightIncludingScrollbar = computeContentAndScrollbarLogicalHeightUsing(height, intrinsicContentHeight);
+    LayoutUnit heightIncludingScrollbar = computeContentAndScrollbarLogicalHeightUsing(heightType, height, intrinsicContentHeight);
     if (heightIncludingScrollbar == -1)
         return -1;
     return std::max(LayoutUnit(), adjustContentBoxLogicalHeightForBoxSizing(heightIncludingScrollbar) - scrollbarLogicalHeight());
@@ -2399,8 +2415,10 @@ LayoutUnit LayoutBox::computeIntrinsicLogicalContentHeightUsing(const Length& lo
     return 0;
 }
 
-LayoutUnit LayoutBox::computeContentAndScrollbarLogicalHeightUsing(const Length& height, LayoutUnit intrinsicContentHeight) const
+LayoutUnit LayoutBox::computeContentAndScrollbarLogicalHeightUsing(SizeType heightType, const Length& height, LayoutUnit intrinsicContentHeight) const
 {
+    if (height.isAuto())
+        return heightType == MinSize ? 0 : -1;
     // FIXME(cbiesinger): The css-sizing spec is considering changing what min-content/max-content should resolve to.
     // If that happens, this code will have to change.
     if (height.isIntrinsic()) {
@@ -2410,7 +2428,7 @@ LayoutUnit LayoutBox::computeContentAndScrollbarLogicalHeightUsing(const Length&
     }
     if (height.isFixed())
         return height.value();
-    if (height.isPercent())
+    if (height.hasPercent())
         return computePercentageLogicalHeight(height);
     return -1;
 }
@@ -2469,7 +2487,7 @@ LayoutUnit LayoutBox::computePercentageLogicalHeight(const Length& height) const
             // Table cells violate what the CSS spec says to do with heights. Basically we
             // don't care if the cell specified a height or not. We just always make ourselves
             // be a percentage of the cell's current content height.
-            if (!cb->hasOverrideHeight()) {
+            if (!cb->hasOverrideLogicalContentHeight()) {
                 // Normally we would let the cell size intrinsically, but scrolling overflow has to be
                 // treated differently, since WinIE lets scrolled overflow regions shrink as needed.
                 // While we can't get all cases right, we can at least detect when the cell has a specified
@@ -2488,7 +2506,7 @@ LayoutUnit LayoutBox::computePercentageLogicalHeight(const Length& height) const
     } else if (cbstyle.logicalHeight().isFixed()) {
         LayoutUnit contentBoxHeight = cb->adjustContentBoxLogicalHeightForBoxSizing(cbstyle.logicalHeight().value());
         availableHeight = std::max(LayoutUnit(), cb->constrainContentBoxLogicalHeightByMinMax(contentBoxHeight - cb->scrollbarLogicalHeight(), -1));
-    } else if (cbstyle.logicalHeight().isPercent() && !isOutOfFlowPositionedWithSpecifiedHeight) {
+    } else if (cbstyle.logicalHeight().hasPercent() && !isOutOfFlowPositionedWithSpecifiedHeight) {
         // We need to recur and compute the percentage height for our containing block.
         LayoutUnit heightWithScrollbar = cb->computePercentageLogicalHeight(cbstyle.logicalHeight());
         if (heightWithScrollbar != -1) {
@@ -2532,18 +2550,22 @@ LayoutUnit LayoutBox::computePercentageLogicalHeight(const Length& height) const
 
 LayoutUnit LayoutBox::computeReplacedLogicalWidth(ShouldComputePreferred shouldComputePreferred) const
 {
-    return computeReplacedLogicalWidthRespectingMinMaxWidth(computeReplacedLogicalWidthUsing(style()->logicalWidth()), shouldComputePreferred);
+    return computeReplacedLogicalWidthRespectingMinMaxWidth(computeReplacedLogicalWidthUsing(MainOrPreferredSize, style()->logicalWidth()), shouldComputePreferred);
 }
 
 LayoutUnit LayoutBox::computeReplacedLogicalWidthRespectingMinMaxWidth(LayoutUnit logicalWidth, ShouldComputePreferred shouldComputePreferred) const
 {
-    LayoutUnit minLogicalWidth = (shouldComputePreferred == ComputePreferred && style()->logicalMinWidth().isPercent()) || style()->logicalMinWidth().isMaxSizeNone() ? logicalWidth : computeReplacedLogicalWidthUsing(style()->logicalMinWidth());
-    LayoutUnit maxLogicalWidth = (shouldComputePreferred == ComputePreferred && style()->logicalMaxWidth().isPercent()) || style()->logicalMaxWidth().isMaxSizeNone() ? logicalWidth : computeReplacedLogicalWidthUsing(style()->logicalMaxWidth());
+    LayoutUnit minLogicalWidth = (shouldComputePreferred == ComputePreferred && style()->logicalMinWidth().hasPercent()) || style()->logicalMinWidth().isMaxSizeNone() ? logicalWidth : computeReplacedLogicalWidthUsing(MinSize, style()->logicalMinWidth());
+    LayoutUnit maxLogicalWidth = (shouldComputePreferred == ComputePreferred && style()->logicalMaxWidth().hasPercent()) || style()->logicalMaxWidth().isMaxSizeNone() ? logicalWidth : computeReplacedLogicalWidthUsing(MaxSize, style()->logicalMaxWidth());
     return std::max(minLogicalWidth, std::min(logicalWidth, maxLogicalWidth));
 }
 
-LayoutUnit LayoutBox::computeReplacedLogicalWidthUsing(const Length& logicalWidth) const
+LayoutUnit LayoutBox::computeReplacedLogicalWidthUsing(SizeType sizeType, const Length& logicalWidth) const
 {
+    ASSERT(sizeType == MinSize || sizeType == MainOrPreferredSize || !logicalWidth.isAuto());
+    if (sizeType == MinSize && logicalWidth.isAuto())
+        return adjustContentBoxLogicalWidthForBoxSizing(0);
+
     switch (logicalWidth.type()) {
     case Fixed:
         return adjustContentBoxLogicalWidthForBoxSizing(logicalWidth.value());
@@ -2566,7 +2588,7 @@ LayoutUnit LayoutBox::computeReplacedLogicalWidthUsing(const Length& logicalWidt
         // https://bugs.webkit.org/show_bug.cgi?id=91071
         if (logicalWidth.isIntrinsic())
             return computeIntrinsicLogicalWidthUsing(logicalWidth, cw, borderAndPaddingLogicalWidth()) - borderAndPaddingLogicalWidth();
-        if (cw > 0 || (!cw && (containerLogicalWidth.isFixed() || containerLogicalWidth.isPercent())))
+        if (cw > 0 || (!cw && (containerLogicalWidth.isFixed() || containerLogicalWidth.hasPercent())))
             return adjustContentBoxLogicalWidthForBoxSizing(minimumValueForLength(logicalWidth, cw));
         return LayoutUnit();
     }
@@ -2587,7 +2609,7 @@ LayoutUnit LayoutBox::computeReplacedLogicalWidthUsing(const Length& logicalWidt
 
 LayoutUnit LayoutBox::computeReplacedLogicalHeight() const
 {
-    return computeReplacedLogicalHeightRespectingMinMaxHeight(computeReplacedLogicalHeightUsing(style()->logicalHeight()));
+    return computeReplacedLogicalHeightRespectingMinMaxHeight(computeReplacedLogicalHeightUsing(MainOrPreferredSize, style()->logicalHeight()));
 }
 
 bool LayoutBox::logicalHeightComputesAsNone(SizeType sizeType) const
@@ -2610,15 +2632,19 @@ LayoutUnit LayoutBox::computeReplacedLogicalHeightRespectingMinMaxHeight(LayoutU
     // the percentage value is treated as '0' (for 'min-height') or 'none' (for 'max-height').
     LayoutUnit minLogicalHeight;
     if (!logicalHeightComputesAsNone(MinSize))
-        minLogicalHeight = computeReplacedLogicalHeightUsing(style()->logicalMinHeight());
+        minLogicalHeight = computeReplacedLogicalHeightUsing(MinSize, style()->logicalMinHeight());
     LayoutUnit maxLogicalHeight = logicalHeight;
     if (!logicalHeightComputesAsNone(MaxSize))
-        maxLogicalHeight =  computeReplacedLogicalHeightUsing(style()->logicalMaxHeight());
+        maxLogicalHeight =  computeReplacedLogicalHeightUsing(MaxSize, style()->logicalMaxHeight());
     return std::max(minLogicalHeight, std::min(logicalHeight, maxLogicalHeight));
 }
 
-LayoutUnit LayoutBox::computeReplacedLogicalHeightUsing(const Length& logicalHeight) const
+LayoutUnit LayoutBox::computeReplacedLogicalHeightUsing(SizeType sizeType, const Length& logicalHeight) const
 {
+    ASSERT(sizeType == MinSize || sizeType == MainOrPreferredSize || !logicalHeight.isAuto());
+    if (sizeType == MinSize && logicalHeight.isAuto())
+        return adjustContentBoxLogicalHeightForBoxSizing(0);
+
     switch (logicalHeight.type()) {
     case Fixed:
         return adjustContentBoxLogicalHeightForBoxSizing(logicalHeight.value());
@@ -2654,7 +2680,7 @@ LayoutUnit LayoutBox::computeReplacedLogicalHeightUsing(const Length& logicalHei
             // table cells using percentage heights.
             // FIXME: This needs to be made writing-mode-aware. If the cell and image are perpendicular writing-modes, this isn't right.
             // https://bugs.webkit.org/show_bug.cgi?id=46997
-            while (cb && !cb->isLayoutView() && (cb->style()->logicalHeight().isAuto() || cb->style()->logicalHeight().isPercent())) {
+            while (cb && !cb->isLayoutView() && (cb->style()->logicalHeight().isAuto() || cb->style()->logicalHeight().hasPercent())) {
                 if (cb->isTableCell()) {
                     // Don't let table cells squeeze percent-height replaced elements
                     // <http://bugs.webkit.org/show_bug.cgi?id=15359>
@@ -2691,19 +2717,19 @@ LayoutUnit LayoutBox::availableLogicalHeightUsing(const Length& h, AvailableLogi
     // We need to stop here, since we don't want to increase the height of the table
     // artificially.  We're going to rely on this cell getting expanded to some new
     // height, and then when we lay out again we'll use the calculation below.
-    if (isTableCell() && (h.isAuto() || h.isPercent())) {
-        if (hasOverrideHeight())
+    if (isTableCell() && (h.isAuto() || h.hasPercent())) {
+        if (hasOverrideLogicalContentHeight())
             return overrideLogicalContentHeight();
         return logicalHeight() - borderAndPaddingLogicalHeight();
     }
 
-    if (h.isPercent() && isOutOfFlowPositioned()) {
+    if (h.hasPercent() && isOutOfFlowPositioned()) {
         // FIXME: This is wrong if the containingBlock has a perpendicular writing mode.
         LayoutUnit availableHeight = containingBlockLogicalHeightForPositioned(containingBlock());
         return adjustContentBoxLogicalHeightForBoxSizing(valueForLength(h, availableHeight));
     }
 
-    LayoutUnit heightIncludingScrollbar = computeContentAndScrollbarLogicalHeightUsing(h, -1);
+    LayoutUnit heightIncludingScrollbar = computeContentAndScrollbarLogicalHeightUsing(MainOrPreferredSize, h, -1);
     if (heightIncludingScrollbar != -1)
         return std::max(LayoutUnit(), adjustContentBoxLogicalHeightForBoxSizing(heightIncludingScrollbar) - scrollbarLogicalHeight());
 
@@ -2946,7 +2972,7 @@ void LayoutBox::computePositionedLogicalWidth(LogicalExtentComputedValues& compu
     computeInlineStaticDistance(logicalLeftLength, logicalRightLength, this, containerBlock, containerLogicalWidth);
 
     // Calculate constraint equation values for 'width' case.
-    computePositionedLogicalWidthUsing(style()->logicalWidth(), containerBlock, containerDirection,
+    computePositionedLogicalWidthUsing(MainOrPreferredSize, style()->logicalWidth(), containerBlock, containerDirection,
         containerLogicalWidth, bordersPlusPadding,
         logicalLeftLength, logicalRightLength, marginLogicalLeft, marginLogicalRight,
         computedValues);
@@ -2955,7 +2981,7 @@ void LayoutBox::computePositionedLogicalWidth(LogicalExtentComputedValues& compu
     if (!style()->logicalMaxWidth().isMaxSizeNone()) {
         LogicalExtentComputedValues maxValues;
 
-        computePositionedLogicalWidthUsing(style()->logicalMaxWidth(), containerBlock, containerDirection,
+        computePositionedLogicalWidthUsing(MaxSize, style()->logicalMaxWidth(), containerBlock, containerDirection,
             containerLogicalWidth, bordersPlusPadding,
             logicalLeftLength, logicalRightLength, marginLogicalLeft, marginLogicalRight,
             maxValues);
@@ -2972,7 +2998,7 @@ void LayoutBox::computePositionedLogicalWidth(LogicalExtentComputedValues& compu
     if (!style()->logicalMinWidth().isZero() || style()->logicalMinWidth().isIntrinsic()) {
         LogicalExtentComputedValues minValues;
 
-        computePositionedLogicalWidthUsing(style()->logicalMinWidth(), containerBlock, containerDirection,
+        computePositionedLogicalWidthUsing(MinSize, style()->logicalMinWidth(), containerBlock, containerDirection,
             containerLogicalWidth, bordersPlusPadding,
             logicalLeftLength, logicalRightLength, marginLogicalLeft, marginLogicalRight,
             minValues);
@@ -3010,12 +3036,15 @@ LayoutUnit LayoutBox::shrinkToFitLogicalWidth(LayoutUnit availableLogicalWidth, 
     return std::min(std::max(preferredMinLogicalWidth, availableLogicalWidth), preferredLogicalWidth);
 }
 
-void LayoutBox::computePositionedLogicalWidthUsing(Length logicalWidth, const LayoutBoxModelObject* containerBlock, TextDirection containerDirection,
+void LayoutBox::computePositionedLogicalWidthUsing(SizeType widthSizeType, Length logicalWidth, const LayoutBoxModelObject* containerBlock, TextDirection containerDirection,
     LayoutUnit containerLogicalWidth, LayoutUnit bordersPlusPadding,
     const Length& logicalLeft, const Length& logicalRight, const Length& marginLogicalLeft,
     const Length& marginLogicalRight, LogicalExtentComputedValues& computedValues) const
 {
-    if (logicalWidth.isIntrinsic())
+    ASSERT(widthSizeType == MinSize || widthSizeType == MainOrPreferredSize || !logicalWidth.isAuto());
+    if (widthSizeType == MinSize && logicalWidth.isAuto())
+        logicalWidth = Length(0, Fixed);
+    else if (logicalWidth.isIntrinsic())
         logicalWidth = Length(computeIntrinsicLogicalWidthUsing(logicalWidth, containerLogicalWidth, bordersPlusPadding) - bordersPlusPadding, Fixed);
 
     // 'left' and 'right' cannot both be 'auto' because one would of been
@@ -3248,7 +3277,7 @@ void LayoutBox::computePositionedLogicalHeight(LogicalExtentComputedValues& comp
 
     // Calculate constraint equation values for 'height' case.
     LayoutUnit logicalHeight = computedValues.m_extent;
-    computePositionedLogicalHeightUsing(styleToUse.logicalHeight(), containerBlock, containerLogicalHeight, bordersPlusPadding, logicalHeight,
+    computePositionedLogicalHeightUsing(MainOrPreferredSize, styleToUse.logicalHeight(), containerBlock, containerLogicalHeight, bordersPlusPadding, logicalHeight,
         logicalTopLength, logicalBottomLength, marginBefore, marginAfter,
         computedValues);
 
@@ -3259,7 +3288,7 @@ void LayoutBox::computePositionedLogicalHeight(LogicalExtentComputedValues& comp
     if (!styleToUse.logicalMaxHeight().isMaxSizeNone()) {
         LogicalExtentComputedValues maxValues;
 
-        computePositionedLogicalHeightUsing(styleToUse.logicalMaxHeight(), containerBlock, containerLogicalHeight, bordersPlusPadding, logicalHeight,
+        computePositionedLogicalHeightUsing(MaxSize, styleToUse.logicalMaxHeight(), containerBlock, containerLogicalHeight, bordersPlusPadding, logicalHeight,
             logicalTopLength, logicalBottomLength, marginBefore, marginAfter,
             maxValues);
 
@@ -3275,7 +3304,7 @@ void LayoutBox::computePositionedLogicalHeight(LogicalExtentComputedValues& comp
     if (!styleToUse.logicalMinHeight().isZero() || styleToUse.logicalMinHeight().isIntrinsic()) {
         LogicalExtentComputedValues minValues;
 
-        computePositionedLogicalHeightUsing(styleToUse.logicalMinHeight(), containerBlock, containerLogicalHeight, bordersPlusPadding, logicalHeight,
+        computePositionedLogicalHeightUsing(MinSize, styleToUse.logicalMinHeight(), containerBlock, containerLogicalHeight, bordersPlusPadding, logicalHeight,
             logicalTopLength, logicalBottomLength, marginBefore, marginAfter,
             minValues);
 
@@ -3316,11 +3345,15 @@ static void computeLogicalTopPositionedOffset(LayoutUnit& logicalTopPos, const L
     }
 }
 
-void LayoutBox::computePositionedLogicalHeightUsing(Length logicalHeightLength, const LayoutBoxModelObject* containerBlock,
+void LayoutBox::computePositionedLogicalHeightUsing(SizeType heightSizeType, Length logicalHeightLength, const LayoutBoxModelObject* containerBlock,
     LayoutUnit containerLogicalHeight, LayoutUnit bordersPlusPadding, LayoutUnit logicalHeight,
     const Length& logicalTop, const Length& logicalBottom, const Length& marginBefore,
     const Length& marginAfter, LogicalExtentComputedValues& computedValues) const
 {
+    ASSERT(heightSizeType == MinSize || heightSizeType == MainOrPreferredSize || !logicalHeightLength.isAuto());
+    if (heightSizeType == MinSize && logicalHeightLength.isAuto())
+        logicalHeightLength = Length(0, Fixed);
+
     // 'top' and 'bottom' cannot both be 'auto' because 'top would of been
     // converted to the static position in computePositionedLogicalHeight()
     ASSERT(!(logicalTop.isAuto() && logicalBottom.isAuto()));
@@ -3798,7 +3831,7 @@ LayoutRect LayoutBox::localCaretRect(InlineBox* box, int caretOffset, LayoutUnit
 
 PositionWithAffinity LayoutBox::positionForPoint(const LayoutPoint& point)
 {
-    // no children...return this render object's element, if there is one, and offset 0
+    // no children...return this layout object's element, if there is one, and offset 0
     LayoutObject* firstChild = slowFirstChild();
     if (!firstChild)
         return createPositionWithAffinity(nonPseudoNode() ? firstPositionInOrBeforeNode(nonPseudoNode()) : Position());
@@ -3816,7 +3849,7 @@ PositionWithAffinity LayoutBox::positionForPoint(const LayoutPoint& point)
 
     // Pass off to the closest child.
     LayoutUnit minDist = LayoutUnit::max();
-    LayoutBox* closestRenderer = 0;
+    LayoutBox* closestLayoutObject = 0;
     LayoutPoint adjustedPoint = point;
     if (isTableRow())
         adjustedPoint.moveBy(location());
@@ -3829,17 +3862,17 @@ PositionWithAffinity LayoutBox::positionForPoint(const LayoutPoint& point)
         if (!layoutObject->isBox())
             continue;
 
-        LayoutBox* renderer = toLayoutBox(layoutObject);
+        LayoutBox* layoutBox = toLayoutBox(layoutObject);
 
-        LayoutUnit top = renderer->borderTop() + renderer->paddingTop() + (isTableRow() ? LayoutUnit() : renderer->location().y());
-        LayoutUnit bottom = top + renderer->contentHeight();
-        LayoutUnit left = renderer->borderLeft() + renderer->paddingLeft() + (isTableRow() ? LayoutUnit() : renderer->location().x());
-        LayoutUnit right = left + renderer->contentWidth();
+        LayoutUnit top = layoutBox->borderTop() + layoutBox->paddingTop() + (isTableRow() ? LayoutUnit() : layoutBox->location().y());
+        LayoutUnit bottom = top + layoutBox->contentHeight();
+        LayoutUnit left = layoutBox->borderLeft() + layoutBox->paddingLeft() + (isTableRow() ? LayoutUnit() : layoutBox->location().x());
+        LayoutUnit right = left + layoutBox->contentWidth();
 
         if (point.x() <= right && point.x() >= left && point.y() <= top && point.y() >= bottom) {
-            if (renderer->isTableRow())
-                return renderer->positionForPoint(point + adjustedPoint - renderer->locationOffset());
-            return renderer->positionForPoint(point - renderer->locationOffset());
+            if (layoutBox->isTableRow())
+                return layoutBox->positionForPoint(point + adjustedPoint - layoutBox->locationOffset());
+            return layoutBox->positionForPoint(point - layoutBox->locationOffset());
         }
 
         // Find the distance from (x, y) to the box.  Split the space around the box into 8 pieces
@@ -3870,13 +3903,13 @@ PositionWithAffinity LayoutBox::positionForPoint(const LayoutPoint& point)
 
         LayoutUnit dist = difference.width() * difference.width() + difference.height() * difference.height();
         if (dist < minDist) {
-            closestRenderer = renderer;
+            closestLayoutObject = layoutBox;
             minDist = dist;
         }
     }
 
-    if (closestRenderer)
-        return closestRenderer->positionForPoint(adjustedPoint - closestRenderer->locationOffset());
+    if (closestLayoutObject)
+        return closestLayoutObject->positionForPoint(adjustedPoint - closestLayoutObject->locationOffset());
     return createPositionWithAffinity(firstPositionInOrBeforeNode(nonPseudoNode()));
 }
 
@@ -3892,7 +3925,7 @@ bool LayoutBox::shrinkToAvoidFloats() const
 
 static bool isReplacedElement(Node* node)
 {
-    // Checkboxes and radioboxes are not isReplaced() nor do they have their own renderer in which to override avoidFloats().
+    // Checkboxes and radioboxes are not isReplaced() nor do they have their own layoutObject in which to override avoidFloats().
     return node && node->isElementNode() && (toElement(node)->isFormControlElement() || isHTMLImageElement(toElement(node)));
 }
 
@@ -3978,7 +4011,7 @@ void LayoutBox::incrementallyInvalidatePaint(const LayoutBoxModelObject& paintIn
     LayoutSize oldBorderBoxSize = computePreviousBorderBoxSize(oldBounds.size());
     LayoutSize newBorderBoxSize = size();
 
-    // If border box size didn't change, RenderObject's incrementallyInvalidatePaint() is good.
+    // If border box size didn't change, LayoutObject's incrementallyInvalidatePaint() is good.
     if (oldBorderBoxSize == newBorderBoxSize)
         return;
 
@@ -4041,7 +4074,7 @@ void LayoutBox::invalidatePaintRectClippedByOldAndNewBounds(const LayoutBoxModel
 void LayoutBox::markForPaginationRelayoutIfNeeded(SubtreeLayoutScope& layoutScope)
 {
     ASSERT(!needsLayout());
-    // If fragmentation height has changed, we need to lay out. No need to enter the renderer if it
+    // If fragmentation height has changed, we need to lay out. No need to enter the layoutObject if it
     // is childless, though.
     if (view()->layoutState()->pageLogicalHeightChanged() && slowFirstChild())
         layoutScope.setChildNeedsLayout(this);
@@ -4229,7 +4262,7 @@ static bool logicalWidthIsResolvable(const LayoutBox& layoutBox)
         return true;
     if (box->hasOverrideContainingBlockLogicalWidth())
         return box->overrideContainingBlockContentLogicalWidth() != -1;
-    if (box->style()->logicalWidth().isPercent())
+    if (box->style()->logicalWidth().hasPercent())
         return logicalWidthIsResolvable(*box->containingBlock());
 
     return false;
@@ -4279,7 +4312,7 @@ bool LayoutBox::percentageLogicalHeightIsResolvableFromBlock(const LayoutBlock* 
     // height.
     if (cb->style()->logicalHeight().isFixed())
         return true;
-    if (cb->style()->logicalHeight().isPercent() && !isOutOfFlowPositionedWithSpecifiedHeight)
+    if (cb->style()->logicalHeight().hasPercent() && !isOutOfFlowPositionedWithSpecifiedHeight)
         return percentageLogicalHeightIsResolvableFromBlock(cb->containingBlock(), cb->isOutOfFlowPositioned());
     if (cb->isLayoutView() || inQuirksMode || isOutOfFlowPositionedWithSpecifiedHeight)
         return true;
@@ -4322,8 +4355,8 @@ bool LayoutBox::hasUnsplittableScrollingOverflow() const
     // conditions, but it should work out to be good enough for common cases. Paginating overflow
     // with scrollbars present is not the end of the world and is what we used to do in the old model anyway.
     return !style()->logicalHeight().isIntrinsicOrAuto()
-        || (!style()->logicalMaxHeight().isIntrinsicOrAuto() && !style()->logicalMaxHeight().isMaxSizeNone() && (!style()->logicalMaxHeight().isPercent() || percentageLogicalHeightIsResolvable(this)))
-        || (!style()->logicalMinHeight().isIntrinsicOrAuto() && style()->logicalMinHeight().isPositive() && (!style()->logicalMinHeight().isPercent() || percentageLogicalHeightIsResolvable(this)));
+        || (!style()->logicalMaxHeight().isIntrinsicOrAuto() && !style()->logicalMaxHeight().isMaxSizeNone() && (!style()->logicalMaxHeight().hasPercent() || percentageLogicalHeightIsResolvable(this)))
+        || (!style()->logicalMinHeight().isIntrinsicOrAuto() && style()->logicalMinHeight().isPositive() && (!style()->logicalMinHeight().hasPercent() || percentageLogicalHeightIsResolvable(this)));
 }
 
 bool LayoutBox::isUnsplittableForPagination() const
@@ -4513,16 +4546,16 @@ LayoutPoint LayoutBox::topLeftLocation() const
 
 bool LayoutBox::hasRelativeLogicalWidth() const
 {
-    return style()->logicalWidth().isPercent()
-        || style()->logicalMinWidth().isPercent()
-        || style()->logicalMaxWidth().isPercent();
+    return style()->logicalWidth().hasPercent()
+        || style()->logicalMinWidth().hasPercent()
+        || style()->logicalMaxWidth().hasPercent();
 }
 
 bool LayoutBox::hasRelativeLogicalHeight() const
 {
-    return style()->logicalHeight().isPercent()
-        || style()->logicalMinHeight().isPercent()
-        || style()->logicalMaxHeight().isPercent();
+    return style()->logicalHeight().hasPercent()
+        || style()->logicalMinHeight().hasPercent()
+        || style()->logicalMaxHeight().hasPercent();
 }
 
 static void markBoxForRelayoutAfterSplit(LayoutBox* box)
@@ -4648,6 +4681,92 @@ void LayoutBox::logicalExtentAfterUpdatingLogicalWidth(const LayoutUnit& newLogi
     setLogicalLeft(oldLogicalLeft);
     setMarginLeft(oldMarginLeft);
     setMarginRight(oldMarginRight);
+}
+
+inline bool LayoutBox::mustInvalidateFillLayersPaintOnWidthChange(const FillLayer& layer) const
+{
+    // Nobody will use multiple layers without wanting fancy positioning.
+    if (layer.next())
+        return true;
+
+    // Make sure we have a valid image.
+    StyleImage* img = layer.image();
+    if (!img || !img->canRender(*this, style()->effectiveZoom()))
+        return false;
+
+    if (layer.repeatX() != RepeatFill && layer.repeatX() != NoRepeatFill)
+        return true;
+
+    // TODO(alancutter): Make this work correctly for calc lengths.
+    if (layer.xPosition().hasPercent() && !layer.xPosition().isZero())
+        return true;
+
+    if (layer.backgroundXOrigin() != LeftEdge)
+        return true;
+
+    EFillSizeType sizeType = layer.sizeType();
+
+    if (sizeType == Contain || sizeType == Cover)
+        return true;
+
+    if (sizeType == SizeLength) {
+        // TODO(alancutter): Make this work correctly for calc lengths.
+        if (layer.sizeLength().width().hasPercent() && !layer.sizeLength().width().isZero())
+            return true;
+        if (img->isGeneratedImage() && layer.sizeLength().width().isAuto())
+            return true;
+    } else if (img->usesImageContainerSize()) {
+        return true;
+    }
+
+    return false;
+}
+
+bool LayoutBox::mustInvalidateBackgroundOrBorderPaintOnWidthChange() const
+{
+    if (hasMask() && mustInvalidateFillLayersPaintOnWidthChange(style()->maskLayers()))
+        return true;
+
+    // If we don't have a background/border/mask, then nothing to do.
+    if (!hasBoxDecorationBackground())
+        return false;
+
+    if (mustInvalidateFillLayersPaintOnWidthChange(style()->backgroundLayers()))
+        return true;
+
+    // Our fill layers are ok. Let's check border.
+    if (style()->hasBorder() && canRenderBorderImage())
+        return true;
+
+    return false;
+}
+
+bool LayoutBox::mustInvalidateBackgroundOrBorderPaintOnHeightChange() const
+{
+    if (hasMask() && mustInvalidateFillLayersPaintOnHeightChange(style()->maskLayers()))
+        return true;
+
+    // If we don't have a background/border/mask, then nothing to do.
+    if (!hasBoxDecorationBackground())
+        return false;
+
+    if (mustInvalidateFillLayersPaintOnHeightChange(style()->backgroundLayers()))
+        return true;
+
+    // Our fill layers are ok.  Let's check border.
+    if (style()->hasBorder() && canRenderBorderImage())
+        return true;
+
+    return false;
+}
+
+bool LayoutBox::canRenderBorderImage() const
+{
+    if (!style()->hasBorder())
+        return false;
+
+    StyleImage* borderImage = style()->borderImage().image();
+    return borderImage && borderImage->canRender(*this, style()->effectiveZoom()) && borderImage->isLoaded();
 }
 
 } // namespace blink

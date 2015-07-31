@@ -58,7 +58,7 @@ static void interpolateColorCode(SkScalar range, SkScalar* curColor,
     // Figure out how to scale each color component.
     SkScalar multiplier[kColorComponents];
     for (int i = 0; i < kColorComponents; i++) {
-        multiplier[i] = SkScalarDiv(curColor[i] - prevColor[i], range);
+        multiplier[i] = (curColor[i] - prevColor[i]) / range;
     }
 
     // Calculate when we no longer need to keep a copy of the input parameter t.
@@ -283,58 +283,6 @@ static SkString radialCode(const SkShader::GradientInfo& info,
                     "mul "      // y^2 x^2
                     "add "      // y^2+x^2
                     "sqrt\n");  // sqrt(y^2+x^2)
-
-    tileModeCode(info.fTileMode, &function);
-    gradientFunctionCode(info, &function);
-    function.append("}");
-    return function;
-}
-
-/* The math here is all based on the description in Two_Point_Radial_Gradient,
-   with one simplification, the coordinate space has been scaled so that
-   Dr = 1.  This means we don't need to scale the entire equation by 1/Dr^2.
- */
-static SkString twoPointRadialCode(const SkShader::GradientInfo& info,
-                                   const SkMatrix& perspectiveRemover) {
-    SkScalar dx = info.fPoint[0].fX - info.fPoint[1].fX;
-    SkScalar dy = info.fPoint[0].fY - info.fPoint[1].fY;
-    SkScalar sr = info.fRadius[0];
-    SkScalar a = SkScalarMul(dx, dx) + SkScalarMul(dy, dy) - SK_Scalar1;
-    bool posRoot = info.fRadius[1] > info.fRadius[0];
-
-    // We start with a stack of (x y), copy it and then consume one copy in
-    // order to calculate b and the other to calculate c.
-    SkString function("{");
-
-    function.append(apply_perspective_to_coordinates(perspectiveRemover));
-
-    function.append("2 copy ");
-
-    // Calculate -b and b^2.
-    function.appendScalar(dy);
-    function.append(" mul exch ");
-    function.appendScalar(dx);
-    function.append(" mul add ");
-    function.appendScalar(sr);
-    function.append(" sub 2 mul neg dup dup mul\n");
-
-    // Calculate c
-    function.append("4 2 roll dup mul exch dup mul add ");
-    function.appendScalar(SkScalarMul(sr, sr));
-    function.append(" sub\n");
-
-    // Calculate the determinate
-    function.appendScalar(SkScalarMul(SkIntToScalar(4), a));
-    function.append(" mul sub abs sqrt\n");
-
-    // And then the final value of t.
-    if (posRoot) {
-        function.append("sub ");
-    } else {
-        function.append("add ");
-    }
-    function.appendScalar(SkScalarMul(SkIntToScalar(2), a));
-    function.append(" div\n");
 
     tileModeCode(info.fTileMode, &function);
     gradientFunctionCode(info, &function);
@@ -575,21 +523,18 @@ SkPDFObject* SkPDFShader::GetPDFShader(SkPDFCanon* canon,
     return get_pdf_shader_by_state(canon, dpi, &state);
 }
 
-static SkPDFResourceDict* get_gradient_resource_dict(
+static SkPDFDict* get_gradient_resource_dict(
         SkPDFObject* functionShader,
         SkPDFObject* gState) {
-    SkPDFResourceDict* dict = new SkPDFResourceDict();
-
-    if (functionShader != NULL) {
-        dict->insertResourceAsReference(
-                SkPDFResourceDict::kPattern_ResourceType, 0, functionShader);
+    SkTDArray<SkPDFObject*> patterns;
+    if (functionShader) {
+        patterns.push(functionShader);
     }
-    if (gState != NULL) {
-        dict->insertResourceAsReference(
-                SkPDFResourceDict::kExtGState_ResourceType, 0, gState);
+    SkTDArray<SkPDFObject*> graphicStates;
+    if (gState) {
+        graphicStates.push(gState);
     }
-
-    return dict;
+    return SkPDFResourceDict::Create(&graphicStates, &patterns, NULL, NULL);
 }
 
 static void populate_tiling_pattern_dict(SkPDFDict* pattern,
@@ -604,12 +549,12 @@ static void populate_tiling_pattern_dict(SkPDFDict* pattern,
     pattern->insertInt("PatternType", kTiling_PatternType);
     pattern->insertInt("PaintType", kColoredTilingPattern_PaintType);
     pattern->insertInt("TilingType", kConstantSpacing_TilingType);
-    pattern->insert("BBox", SkPDFUtils::RectToArray(bbox))->unref();
+    pattern->insertObject("BBox", SkPDFUtils::RectToArray(bbox));
     pattern->insertScalar("XStep", bbox.width());
     pattern->insertScalar("YStep", bbox.height());
-    pattern->insert("Resources", resources);
+    pattern->insertObject("Resources", SkRef(resources));
     if (!matrix.isIdentity()) {
-        pattern->insert("Matrix", SkPDFUtils::MatrixToArray(matrix))->unref();
+        pattern->insertObject("Matrix", SkPDFUtils::MatrixToArray(matrix));
     }
 }
 
@@ -647,7 +592,7 @@ static SkPDFObject* create_smask_graphic_state(
 
     SkAutoTDelete<SkStream> alphaStream(create_pattern_fill_content(-1, bbox));
 
-    SkAutoTUnref<SkPDFResourceDict>
+    SkAutoTUnref<SkPDFDict>
         resources(get_gradient_resource_dict(luminosityShader, NULL));
 
     SkAutoTUnref<SkPDFFormXObject> alphaMask(
@@ -682,7 +627,7 @@ SkPDFAlphaFunctionShader* SkPDFAlphaFunctionShader::Create(
     SkPDFAlphaFunctionShader* alphaFunctionShader =
             SkNEW_ARGS(SkPDFAlphaFunctionShader, (autoState->detach()));
 
-    SkAutoTUnref<SkPDFResourceDict> resourceDict(
+    SkAutoTUnref<SkPDFDict> resourceDict(
             get_gradient_resource_dict(colorShader.get(), alphaGs.get()));
 
     SkAutoTDelete<SkStream> colorStream(
@@ -758,8 +703,8 @@ static SkPDFStream* make_ps_function(const SkString& psCode,
             SkData::NewWithCopy(psCode.c_str(), psCode.size()));
     SkPDFStream* result = SkNEW_ARGS(SkPDFStream, (funcData.get()));
     result->insertInt("FunctionType", 4);
-    result->insert("Domain", domain);
-    result->insert("Range", rangeObject.get());
+    result->insertObject("Domain", SkRef(domain));
+    result->insertObject("Range", SkRef(rangeObject.get()));
     return result;
 }
 
@@ -785,17 +730,6 @@ SkPDFFunctionShader* SkPDFFunctionShader::Create(
             transformPoints[1].fX += info->fRadius[0];
             codeFunction = &radialCode;
             break;
-        case SkShader::kRadial2_GradientType: {
-            // Bail out if the radii are the same.
-            if (info->fRadius[0] == info->fRadius[1]) {
-                return NULL;
-            }
-            transformPoints[1] = transformPoints[0];
-            SkScalar dr = info->fRadius[1] - info->fRadius[0];
-            transformPoints[1].fX += dr;
-            codeFunction = &twoPointRadialCode;
-            break;
-        }
         case SkShader::kConical_GradientType: {
             transformPoints[1] = transformPoints[0];
             transformPoints[1].fX += SK_Scalar1;
@@ -855,7 +789,7 @@ SkPDFFunctionShader* SkPDFFunctionShader::Create(
     // state.fInfo
     // in translating from x, y coordinates to the t parameter. So, we have
     // to transform the points and radii according to the calculated matrix.
-    if (state.fType == SkShader::kRadial2_GradientType) {
+    if (state.fType == SkShader::kConical_GradientType) {
         SkShader::GradientInfo twoPointRadialInfo = *info;
         SkMatrix inverseMapperMatrix;
         if (!mapperMatrix.invert(&inverseMapperMatrix)) {
@@ -874,21 +808,19 @@ SkPDFFunctionShader* SkPDFFunctionShader::Create(
     SkAutoTUnref<SkPDFDict> pdfShader(new SkPDFDict);
     pdfShader->insertInt("ShadingType", 1);
     pdfShader->insertName("ColorSpace", "DeviceRGB");
-    pdfShader->insert("Domain", domain.get());
+    pdfShader->insertObject("Domain", SkRef(domain.get()));
 
     SkAutoTUnref<SkPDFStream> function(
             make_ps_function(functionCode, domain.get()));
-    pdfShader->insert("Function", new SkPDFObjRef(function))->unref();
-
-    SkAutoTUnref<SkPDFArray> matrixArray(
-            SkPDFUtils::MatrixToArray(finalMatrix));
+    pdfShader->insertObjRef("Function", function.detach());
 
     SkPDFFunctionShader* pdfFunctionShader =
             SkNEW_ARGS(SkPDFFunctionShader, (autoState->detach()));
 
     pdfFunctionShader->insertInt("PatternType", 2);
-    pdfFunctionShader->insert("Matrix", matrixArray.get());
-    pdfFunctionShader->insert("Shading", pdfShader.get());
+    pdfFunctionShader->insertObject("Matrix",
+                                    SkPDFUtils::MatrixToArray(finalMatrix));
+    pdfFunctionShader->insertObject("Shading", pdfShader.detach());
 
     canon->addFunctionShader(pdfFunctionShader);
     return pdfFunctionShader;
@@ -1100,7 +1032,7 @@ SkPDFImageShader* SkPDFImageShader::Create(
             SkNEW_ARGS(SkPDFImageShader, (autoState->detach()));
     imageShader->setData(content.get());
 
-    SkAutoTUnref<SkPDFResourceDict> resourceDict(
+    SkAutoTUnref<SkPDFDict> resourceDict(
             patternDevice->createResourceDict());
     populate_tiling_pattern_dict(imageShader, patternBBox,
                                  resourceDict.get(), finalMatrix);
@@ -1148,7 +1080,6 @@ bool SkPDFShader::State::operator==(const SkPDFShader::State& b) const {
                     return false;
                 }
                 break;
-            case SkShader::kRadial2_GradientType:
             case SkShader::kConical_GradientType:
                 if (fInfo.fPoint[1] != b.fInfo.fPoint[1] ||
                         fInfo.fRadius[0] != b.fInfo.fRadius[0] ||
@@ -1201,7 +1132,7 @@ SkPDFShader::State::State(const SkShader& shader, const SkMatrix& canvasTransfor
             static const SkScalar kMaxBitmapArea = 1024 * 1024;
             SkScalar bitmapArea = rasterScale * bbox.width() * rasterScale * bbox.height();
             if (bitmapArea > kMaxBitmapArea) {
-                rasterScale *= SkScalarSqrt(SkScalarDiv(kMaxBitmapArea, bitmapArea));
+                rasterScale *= SkScalarSqrt(kMaxBitmapArea / bitmapArea);
             }
 
             SkISize size = SkISize::Make(SkScalarRoundToInt(rasterScale * bbox.width()),

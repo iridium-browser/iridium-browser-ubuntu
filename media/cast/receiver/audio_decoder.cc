@@ -8,7 +8,6 @@
 #include "base/bind_helpers.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/memory/ref_counted.h"
 #include "base/sys_byteorder.h"
 #include "media/cast/cast_defines.h"
 #include "third_party/opus/src/include/opus.h"
@@ -115,9 +114,9 @@ class AudioDecoder::OpusImpl : public AudioDecoder::ImplBase {
   }
 
  private:
-  ~OpusImpl() override {}
+  ~OpusImpl() final {}
 
-  void RecoverBecauseFramesWereDropped() override {
+  void RecoverBecauseFramesWereDropped() final {
     // Passing NULL for the input data notifies the decoder of frame loss.
     const opus_int32 result =
         opus_decode_float(
@@ -125,7 +124,7 @@ class AudioDecoder::OpusImpl : public AudioDecoder::ImplBase {
     DCHECK_GE(result, 0);
   }
 
-  scoped_ptr<AudioBus> Decode(uint8* data, int len) override {
+  scoped_ptr<AudioBus> Decode(uint8* data, int len) final {
     scoped_ptr<AudioBus> audio_bus;
     const opus_int32 num_samples_decoded = opus_decode_float(
         opus_decoder_, data, len, buffer_.get(), max_samples_per_frame_, 0);
@@ -174,9 +173,9 @@ class AudioDecoder::Pcm16Impl : public AudioDecoder::ImplBase {
   }
 
  private:
-  ~Pcm16Impl() override {}
+  ~Pcm16Impl() final {}
 
-  scoped_ptr<AudioBus> Decode(uint8* data, int len) override {
+  scoped_ptr<AudioBus> Decode(uint8* data, int len) final {
     scoped_ptr<AudioBus> audio_bus;
     const int num_samples = len / sizeof(int16) / num_channels_;
     if (num_samples <= 0)

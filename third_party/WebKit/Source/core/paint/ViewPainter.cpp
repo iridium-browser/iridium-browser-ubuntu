@@ -8,10 +8,11 @@
 #include "core/frame/FrameView.h"
 #include "core/layout/LayoutBox.h"
 #include "core/layout/LayoutView.h"
-#include "core/layout/PaintInfo.h"
 #include "core/paint/BlockPainter.h"
 #include "core/paint/GraphicsContextAnnotator.h"
 #include "core/paint/LayoutObjectDrawingRecorder.h"
+#include "core/paint/PaintInfo.h"
+#include "platform/RuntimeEnabledFeatures.h"
 
 namespace blink {
 
@@ -25,21 +26,18 @@ void ViewPainter::paint(const PaintInfo& paintInfo, const LayoutPoint& paintOffs
     ANNOTATE_GRAPHICS_CONTEXT(paintInfo, &m_layoutView);
 
     // This avoids painting garbage between columns if there is a column gap.
-    if (m_layoutView.frameView() && m_layoutView.style()->isOverflowPaged()) {
+    // This is legacy WebKit behavior and doesn't work with slimmingpaint. We can remove it once region-based columns are launched.
+    if (!RuntimeEnabledFeatures::regionBasedColumnsEnabled() && m_layoutView.frameView() && m_layoutView.style()->isOverflowPaged()) {
+        ASSERT(!RuntimeEnabledFeatures::slimmingPaintEnabled());
         LayoutRect paintRect(paintInfo.rect);
-        if (RuntimeEnabledFeatures::slimmingPaintEnabled())
-            paintRect = m_layoutView.viewRect();
-
-        LayoutObjectDrawingRecorder recorder(*paintInfo.context, m_layoutView, DisplayItem::ViewBackground, paintRect);
-        if (!recorder.canUseCachedDrawing())
-            paintInfo.context->fillRect(paintRect, m_layoutView.frameView()->baseBackgroundColor());
+        paintInfo.context->fillRect(paintRect, m_layoutView.frameView()->baseBackgroundColor());
     }
 
     m_layoutView.paintObject(paintInfo, paintOffset);
     BlockPainter(m_layoutView).paintOverflowControlsIfNeeded(paintInfo, paintOffset);
 }
 
-static inline bool rendererObscuresBackground(LayoutBox* rootBox)
+static inline bool layoutObjectObscuresBackground(LayoutBox* rootBox)
 {
     ASSERT(rootBox);
     const ComputedStyle& style = rootBox->styleRef();
@@ -52,8 +50,8 @@ static inline bool rendererObscuresBackground(LayoutBox* rootBox)
     if (rootBox->compositingState() == PaintsIntoOwnBacking)
         return false;
 
-    const LayoutObject* rootRenderer = rootBox->rendererForRootBackground();
-    if (rootRenderer->style()->backgroundClip() == TextFillBox)
+    const LayoutObject* rootLayoutObject = rootBox->layoutObjectForRootBackground();
+    if (rootLayoutObject->style()->backgroundClip() == TextFillBox)
         return false;
 
     return true;
@@ -70,7 +68,7 @@ void ViewPainter::paintBoxDecorationBackground(const PaintInfo& paintInfo)
     bool shouldPaintBackground = true;
     Node* documentElement = m_layoutView.document().documentElement();
     if (LayoutBox* rootBox = documentElement ? toLayoutBox(documentElement->layoutObject()) : 0)
-        shouldPaintBackground = !rootFillsViewportBackground(rootBox) || !rendererObscuresBackground(rootBox);
+        shouldPaintBackground = !rootFillsViewportBackground(rootBox) || !layoutObjectObscuresBackground(rootBox);
 
     // If painting will entirely fill the view, no need to fill the background.
     if (!shouldPaintBackground)

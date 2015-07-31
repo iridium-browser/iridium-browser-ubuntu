@@ -21,7 +21,7 @@ namespace testing {
 namespace bwe {
 
 const int kMinBitrateKbps = 150;
-const int kMaxBitrateKbps = 2000;
+const int kMaxBitrateKbps = 3000;
 
 class BweSender : public Module {
  public:
@@ -53,7 +53,8 @@ enum BandwidthEstimatorType {
   kNullEstimator,
   kNadaEstimator,
   kRembEstimator,
-  kFullSendSideEstimator
+  kFullSendSideEstimator,
+  kTcpEstimator
 };
 
 int64_t GetAbsSendTimeInMs(uint32_t abs_send_time);

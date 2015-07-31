@@ -6,9 +6,6 @@
 #define COMPONENTS_DATA_REDUCTION_PROXY_CORE_BROWSER_DATA_REDUCTION_PROXY_BYPASS_STATS_H_
 
 #include "base/callback.h"
-#include "base/prefs/pref_member.h"
-#include "base/single_thread_task_runner.h"
-#include "base/threading/thread_checker.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_headers.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/network_change_notifier.h"
@@ -45,14 +42,12 @@ class DataReductionProxyBypassStats
       bool is_primary,
       const net::HttpResponseHeaders* headers);
 
-  // |params| outlives this class instance. |unreachable_callback| provides a
-  // hook to inform the user that the Data Reduction Proxy is unreachable, which
-  // occurs on the UI thread, hence the |ui_task_runner|.
+  // |config| outlives this class instance. |unreachable_callback| provides a
+  // hook to inform the user that the Data Reduction Proxy is unreachable.
   // |config| must not be null.
   DataReductionProxyBypassStats(
       DataReductionProxyConfig* config,
-      UnreachableCallback unreachable_callback,
-      const scoped_refptr<base::SingleThreadTaskRunner>& ui_task_runner);
+      UnreachableCallback unreachable_callback);
 
   ~DataReductionProxyBypassStats() override;
 
@@ -72,7 +67,7 @@ class DataReductionProxyBypassStats
   // completed URLRequest |request|.
   void RecordBytesHistograms(
       const net::URLRequest& request,
-      const BooleanPrefMember& data_reduction_proxy_enabled,
+      bool data_reduction_proxy_enabled,
       const net::ProxyConfig& data_reduction_proxy_config);
 
   // Called by |ChromeNetworkDelegate| when a proxy is put into the bad proxy
@@ -85,6 +80,14 @@ class DataReductionProxyBypassStats
   void OnConnectComplete(const net::HostPortPair& proxy_server,
                          int net_error);
 
+  // Unconditionally clears counts of successful requests and net errors when
+  // using the Data Reduction Proxy.
+  void ClearRequestCounts();
+
+  // Checks if the availability status of the Data Reduction Proxy has changed,
+  // and calls |unreachable_callback_| if so.
+  void NotifyUnavailabilityIfChanged();
+
  private:
   friend class DataReductionProxyBypassStatsTest;
   FRIEND_TEST_ALL_PREFIXES(DataReductionProxyBypassStatsTest,
@@ -96,6 +99,7 @@ class DataReductionProxyBypassStats
     LOCAL_BYPASS_RULES,       /* Bypass due to client-side bypass rules. */
     PROXY_OVERRIDDEN,         /* Bypass due to a proxy taking precedence. */
     AUDIO_VIDEO,              /* Audio/Video bypass. */
+    APPLICATION_OCTET_STREAM, /* "application/octet-stream" content bypass. */
     TRIGGERING_REQUEST,       /* Triggering request bypass. */
     NETWORK_ERROR,            /* Network error. */
     BYPASSED_BYTES_TYPE_MAX   /* This must always be last.*/
@@ -107,7 +111,7 @@ class DataReductionProxyBypassStats
   // tells us the state of the kDataReductionProxyEnabled preference.
   void RecordBypassedBytesHistograms(
       const net::URLRequest& request,
-      const BooleanPrefMember& data_reduction_proxy_enabled,
+      bool data_reduction_proxy_enabled,
       const net::ProxyConfig& data_reduction_proxy_config);
 
   // Records UMA of the number of response bytes of responses that are expected
@@ -118,17 +122,6 @@ class DataReductionProxyBypassStats
   // NetworkChangeNotifier::NetworkChangeObserver:
   void OnNetworkChanged(
       net::NetworkChangeNotifier::ConnectionType type) override;
-
-  // Clears request counts unconditionally.
-  void ClearRequestCounts();
-
-  // Checks if the availability status of the data reduction proxy has changed,
-  // and notifies the UIThread via NotifyUnavailabilityOnUIThread if so. The
-  // data reduction proxy is considered unavailable if and only if no requests
-  // went through the proxy but some eligible requests were service by other
-  // routes.
-  void NotifyUnavailabilityIfChanged();
-  void NotifyUnavailabilityOnUIThread(bool unavailable);
 
   void RecordBypassedBytes(
       DataReductionProxyBypassType bypass_type,
@@ -144,7 +137,6 @@ class DataReductionProxyBypassStats
   DataReductionProxyBypassType last_bypass_type_;
   // True if the last request triggered the current bypass.
   bool triggering_request_;
-  const scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner_;
 
   // The following 2 fields are used to determine if data reduction proxy is
   // unreachable. We keep a count of requests which should go through
@@ -161,8 +153,6 @@ class DataReductionProxyBypassStats
 
   // Whether or not the data reduction proxy is unavailable.
   bool unavailable_;
-
-  base::ThreadChecker thread_checker_;
 
   DISALLOW_COPY_AND_ASSIGN(DataReductionProxyBypassStats);
 };

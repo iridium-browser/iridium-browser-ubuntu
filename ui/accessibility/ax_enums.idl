@@ -172,7 +172,6 @@
     tab,
     table_header_container,
     table,
-    text_area,
     text_field,
     time,
     timer,
@@ -208,6 +207,7 @@
     indeterminate,
     invisible,
     linked,
+    multiline,
     multiselectable,
     offscreen,
     pressed,
@@ -299,23 +299,35 @@
     title_ui_element,
     activedescendant_id,
 
-    // Color value for AX_ROLE_COLOR_WELL, each component is 0..255
-    color_value_red,
-    color_value_green,
-    color_value_blue,
-
-    // Inline text attributes.
-    text_direction,
-
     // Uniquely identifies an AXTree.
     tree_id,
 
     // Identifies a child tree which this node hosts.
     child_tree_id,
 
+    // Position or Number of items in current set of listitems or treeitems
+    set_size,
+    pos_in_set,
+
+    // In the case of AX_ROLE_COLOR_WELL, specifies the selected color.
+    color_value,
+
+
+    // Text attributes.
+
+    // Foreground and background color in RGBA.
+    background_color,
+    color,
+
     // Indicates if a form control has invalid input or
     // if an element has an aria-invalid attribute.
-    invalid_state
+    invalid_state,
+
+    // Specifies the direction of the text, e.g., right-to-left.
+    text_direction,
+
+    // Bold, italic, underline, etc.
+    text_style
   };
 
   [cpp_enum_prefix_override="ax_attr"] enum AXFloatAttribute {
@@ -325,7 +337,11 @@
     // Range attributes.
     value_for_range,
     min_value_for_range,
-    max_value_for_range
+    max_value_for_range,
+
+    // Text attributes.
+    // Font size is in pixels.
+    font_size
   };
 
   [cpp_enum_prefix_override="ax_attr"] enum AXBoolAttribute {
@@ -405,10 +421,19 @@
   };
 
   [cpp_enum_prefix_override="ax"] enum AXTextDirection {
-    text_direction_lr,
-    text_direction_rl,
-    text_direction_tb,
-    text_direction_bt
+    text_direction_ltr,
+    text_direction_rtl,
+    text_direction_ttb,
+    text_direction_btt
+  };
+
+  // A Java counterpart will be generated for this enum.
+  // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.ui.accessibility
+  [cpp_enum_prefix_override="ax"] enum AXTextStyle {
+    text_style_bold  = 1,
+    text_style_italic = 2,
+    text_style_underline = 4,
+    text_style_line_through = 8
   };
 
   [cpp_enum_prefix_override="ax"] enum AXInvalidState {

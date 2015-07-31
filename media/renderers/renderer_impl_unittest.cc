@@ -49,7 +49,6 @@ class RendererImplTest : public ::testing::Test {
     MOCK_METHOD1(OnError, void(PipelineStatus));
     MOCK_METHOD1(OnUpdateStatistics, void(const PipelineStatistics&));
     MOCK_METHOD1(OnBufferingStateChange, void(BufferingState));
-    MOCK_METHOD1(OnVideoFramePaint, void(const scoped_refptr<VideoFrame>&));
     MOCK_METHOD0(OnWaitingForDecryptionKey, void());
 
    private:
@@ -98,9 +97,9 @@ class RendererImplTest : public ::testing::Test {
   // Sets up expectations to allow the video renderer to initialize.
   void SetVideoRendererInitializeExpectations(PipelineStatus status) {
     EXPECT_CALL(*video_renderer_,
-                Initialize(video_stream_.get(), _, _, _, _, _, _, _, _, _))
+                Initialize(video_stream_.get(), _, _, _, _, _, _, _, _))
         .WillOnce(DoAll(SaveArg<4>(&video_buffering_state_cb_),
-                        SaveArg<6>(&video_ended_cb_), RunCallback<1>(status)));
+                        SaveArg<5>(&video_ended_cb_), RunCallback<1>(status)));
   }
 
   void InitializeAndExpect(PipelineStatus start_status) {
@@ -121,8 +120,6 @@ class RendererImplTest : public ::testing::Test {
         base::Bind(&CallbackHelper::OnUpdateStatistics,
                    base::Unretained(&callbacks_)),
         base::Bind(&CallbackHelper::OnBufferingStateChange,
-                   base::Unretained(&callbacks_)),
-        base::Bind(&CallbackHelper::OnVideoFramePaint,
                    base::Unretained(&callbacks_)),
         base::Bind(&CallbackHelper::OnEnded, base::Unretained(&callbacks_)),
         base::Bind(&CallbackHelper::OnError, base::Unretained(&callbacks_)),
@@ -220,7 +217,7 @@ class RendererImplTest : public ::testing::Test {
     base::RunLoop().RunUntilIdle();
   }
 
-  void SetPlaybackRate(float playback_rate) {
+  void SetPlaybackRate(double playback_rate) {
     EXPECT_CALL(time_source_, SetPlaybackRate(playback_rate));
     renderer_impl_->SetPlaybackRate(playback_rate);
     base::RunLoop().RunUntilIdle();
@@ -230,7 +227,7 @@ class RendererImplTest : public ::testing::Test {
     return renderer_impl_->GetMediaTime().InMilliseconds();
   }
 
-  bool IsMediaTimeAdvancing(float playback_rate) {
+  bool IsMediaTimeAdvancing(double playback_rate) {
     int64 start_time_ms = GetMediaTimeMs();
     const int64 time_to_advance_ms = 100;
 
@@ -245,7 +242,7 @@ class RendererImplTest : public ::testing::Test {
   }
 
   bool IsMediaTimeAdvancing() {
-    return IsMediaTimeAdvancing(1.0f);
+    return IsMediaTimeAdvancing(1.0);
   }
 
   // Fixture members.
@@ -320,6 +317,41 @@ TEST_F(RendererImplTest, StartPlayingFrom) {
   Play();
 }
 
+TEST_F(RendererImplTest, StartPlayingFromWithPlaybackRate) {
+  InitializeWithAudioAndVideo();
+
+  // Play with a zero playback rate shouldn't start time.
+  Play();
+  Mock::VerifyAndClearExpectations(video_renderer_);
+
+  // Positive playback rate when ticking should start time.
+  EXPECT_CALL(*video_renderer_, OnTimeStateChanged(true));
+  SetPlaybackRate(1.0);
+  Mock::VerifyAndClearExpectations(video_renderer_);
+
+  // Double notifications shouldn't be sent.
+  SetPlaybackRate(1.0);
+  Mock::VerifyAndClearExpectations(video_renderer_);
+
+  // Zero playback rate should stop time.
+  EXPECT_CALL(*video_renderer_, OnTimeStateChanged(false));
+  SetPlaybackRate(0.0);
+  Mock::VerifyAndClearExpectations(video_renderer_);
+
+  // Double notifications shouldn't be sent.
+  SetPlaybackRate(0.0);
+  Mock::VerifyAndClearExpectations(video_renderer_);
+
+  // Starting playback and flushing should cause time to stop.
+  EXPECT_CALL(*video_renderer_, OnTimeStateChanged(true));
+  EXPECT_CALL(*video_renderer_, OnTimeStateChanged(false));
+  SetPlaybackRate(1.0);
+  Flush(false);
+
+  // A positive playback rate when playback isn't started should do nothing.
+  SetPlaybackRate(1.0);
+}
+
 TEST_F(RendererImplTest, FlushAfterInitialization) {
   InitializeWithAudioAndVideo();
   Flush(true);
@@ -345,8 +377,8 @@ TEST_F(RendererImplTest, FlushAfterUnderflow) {
 
 TEST_F(RendererImplTest, SetPlaybackRate) {
   InitializeWithAudioAndVideo();
-  SetPlaybackRate(1.0f);
-  SetPlaybackRate(2.0f);
+  SetPlaybackRate(1.0);
+  SetPlaybackRate(2.0);
 }
 
 TEST_F(RendererImplTest, SetVolume) {
@@ -440,10 +472,10 @@ TEST_F(RendererImplTest, ErrorDuringInitialize) {
 
   // Force an audio error to occur during video renderer initialization.
   EXPECT_CALL(*video_renderer_,
-              Initialize(video_stream_.get(), _, _, _, _, _, _, _, _, _))
+              Initialize(video_stream_.get(), _, _, _, _, _, _, _, _))
       .WillOnce(DoAll(AudioError(&audio_error_cb_, PIPELINE_ERROR_DECODE),
                       SaveArg<4>(&video_buffering_state_cb_),
-                      SaveArg<6>(&video_ended_cb_),
+                      SaveArg<5>(&video_ended_cb_),
                       RunCallback<1>(PIPELINE_OK)));
 
   InitializeAndExpect(PIPELINE_ERROR_DECODE);

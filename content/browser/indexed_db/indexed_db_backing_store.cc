@@ -40,7 +40,7 @@
 #include "storage/browser/fileapi/local_file_stream_writer.h"
 #include "storage/common/database/database_identifier.h"
 #include "storage/common/fileapi/file_system_mount_option.h"
-#include "third_party/WebKit/public/platform/WebIDBTypes.h"
+#include "third_party/WebKit/public/platform/modules/indexeddb/WebIDBTypes.h"
 #include "third_party/WebKit/public/web/WebSerializedScriptValueVersion.h"
 #include "third_party/leveldatabase/env_chromium.h"
 
@@ -2242,8 +2242,7 @@ class IndexedDBBackingStore::Transaction::ChainedBlobWriterImpl
       : waiting_for_callback_(false),
         database_id_(database_id),
         backing_store_(backing_store),
-        callback_(callback),
-        aborted_(false) {
+        callback_(callback) {
     blobs_.swap(*blobs);
     iter_ = blobs_.begin();
     backing_store->task_runner()->PostTask(
@@ -2261,8 +2260,8 @@ class IndexedDBBackingStore::Transaction::ChainedBlobWriterImpl
     if (delegate_.get())  // Only present for Blob, not File.
       content::BrowserThread::DeleteSoon(
           content::BrowserThread::IO, FROM_HERE, delegate_.release());
-    if (aborted_) {
-      self_ref_ = NULL;
+    if (aborted_self_ref_.get()) {
+      aborted_self_ref_ = NULL;
       return;
     }
     if (iter_->size() != -1 && iter_->size() != bytes_written)
@@ -2278,38 +2277,36 @@ class IndexedDBBackingStore::Transaction::ChainedBlobWriterImpl
   void Abort() override {
     if (!waiting_for_callback_)
       return;
-    self_ref_ = this;
-    aborted_ = true;
+    aborted_self_ref_ = this;
   }
 
  private:
-  ~ChainedBlobWriterImpl() override {}
+  ~ChainedBlobWriterImpl() override { DCHECK(!waiting_for_callback_); }
 
   void WriteNextFile() {
     DCHECK(!waiting_for_callback_);
-    DCHECK(!aborted_);
+    DCHECK(!aborted_self_ref_.get());
     if (iter_ == blobs_.end()) {
-      DCHECK(!self_ref_.get());
       callback_->Run(true);
       return;
     } else {
+      waiting_for_callback_ = true;
       if (!backing_store_->WriteBlobFile(database_id_, *iter_, this)) {
+        waiting_for_callback_ = false;
         callback_->Run(false);
         return;
       }
-      waiting_for_callback_ = true;
     }
   }
 
   bool waiting_for_callback_;
-  scoped_refptr<ChainedBlobWriterImpl> self_ref_;
+  scoped_refptr<ChainedBlobWriterImpl> aborted_self_ref_;
   WriteDescriptorVec blobs_;
   WriteDescriptorVec::const_iterator iter_;
   int64 database_id_;
   IndexedDBBackingStore* backing_store_;
   scoped_refptr<IndexedDBBackingStore::BlobWriteCallback> callback_;
   scoped_ptr<FileWriterDelegate> delegate_;
-  bool aborted_;
 
   DISALLOW_COPY_AND_ASSIGN(ChainedBlobWriterImpl);
 };
@@ -2362,7 +2359,7 @@ class LocalWriteClosure : public FileWriterDelegate::DelegateWriteCallback,
                                  const GURL& blob_url,
                                  const base::Time& last_modified,
                                  net::URLRequestContext* request_context) {
-    DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+    DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
     scoped_ptr<storage::FileStreamWriter> writer(
         storage::FileStreamWriter::CreateForLocalFile(
             task_runner_.get(),

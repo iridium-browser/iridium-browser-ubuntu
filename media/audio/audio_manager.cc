@@ -13,12 +13,26 @@
 #include "base/message_loop/message_loop.h"
 #include "base/power_monitor/power_monitor.h"
 #include "build/build_config.h"
+#include "media/audio/audio_manager_factory.h"
 #include "media/audio/fake_audio_log_factory.h"
 #include "media/base/media_switches.h"
 
+#if defined(OS_WIN)
+#include "base/win/scoped_com_initializer.h"
+#endif
+
 namespace media {
 namespace {
+
+// The singleton instance of AudioManager. This is set when Create() is called.
 AudioManager* g_last_created = NULL;
+
+// The singleton instance of AudioManagerFactory. This is only set if
+// SetFactory() is called. If it is set when Create() is called, its
+// CreateInstance() function is used to set |g_last_created|. Otherwise, the
+// linked implementation of media::CreateAudioManager is used to set
+// |g_last_created|.
+AudioManagerFactory* g_audio_manager_factory = NULL;
 
 // Maximum number of failed pings to the audio thread allowed. A crash will be
 // issued once this count is reached.  We require at least two pings before
@@ -109,6 +123,14 @@ class AudioManagerHelper : public base::PowerObserver {
 
   AudioLogFactory* fake_log_factory() { return &fake_log_factory_; }
 
+#if defined(OS_WIN)
+  // This should be called before creating an AudioManager in tests to ensure
+  // that the creating thread is COM initialized.
+  void InitializeCOMForTesting() {
+    com_initializer_for_testing_.reset(new base::win::ScopedCOMInitializer());
+  }
+#endif
+
  private:
   FakeAudioLogFactory fake_log_factory_;
 
@@ -120,6 +142,10 @@ class AudioManagerHelper : public base::PowerObserver {
   base::TimeTicks last_audio_thread_timer_tick_;
   int hang_failures_;
 
+#if defined(OS_WIN)
+  scoped_ptr<base::win::ScopedCOMInitializer> com_initializer_for_testing_;
+#endif
+
   DISALLOW_COPY_AND_ASSIGN(AudioManagerHelper);
 };
 
@@ -127,7 +153,7 @@ static bool g_hang_monitor_enabled = false;
 
 static base::LazyInstance<AudioManagerHelper>::Leaky g_helper =
     LAZY_INSTANCE_INITIALIZER;
-}
+}  // namespace
 
 // Forward declaration of the platform specific AudioManager factory function.
 AudioManager* CreateAudioManager(AudioLogFactory* audio_log_factory);
@@ -140,9 +166,29 @@ AudioManager::~AudioManager() {
 }
 
 // static
+void AudioManager::SetFactory(AudioManagerFactory* factory) {
+  CHECK(factory);
+  CHECK(!g_last_created);
+  CHECK(!g_audio_manager_factory);
+  g_audio_manager_factory = factory;
+}
+
+// static
+void AudioManager::ResetFactoryForTesting() {
+  if (g_audio_manager_factory) {
+    delete g_audio_manager_factory;
+    g_audio_manager_factory = nullptr;
+  }
+}
+
+// static
 AudioManager* AudioManager::Create(AudioLogFactory* audio_log_factory) {
   CHECK(!g_last_created);
-  g_last_created = CreateAudioManager(audio_log_factory);
+  if (g_audio_manager_factory)
+    g_last_created = g_audio_manager_factory->CreateInstance(audio_log_factory);
+  else
+    g_last_created = CreateAudioManager(audio_log_factory);
+
   return g_last_created;
 }
 
@@ -161,6 +207,9 @@ AudioManager* AudioManager::CreateWithHangTimer(
 
 // static
 AudioManager* AudioManager::CreateForTesting() {
+#if defined(OS_WIN)
+  g_helper.Pointer()->InitializeCOMForTesting();
+#endif
   return Create(g_helper.Pointer()->fake_log_factory());
 }
 

@@ -159,9 +159,9 @@ RenderWidgetHostImpl::RenderWidgetHostImpl(RenderWidgetHostDelegate* delegate,
                                            int routing_id,
                                            bool hidden)
     : view_(NULL),
-      renderer_initialized_(false),
       hung_renderer_delay_(
           base::TimeDelta::FromMilliseconds(kHungRendererDelayMs)),
+      renderer_initialized_(false),
       delegate_(delegate),
       process_(process),
       routing_id_(routing_id),
@@ -170,7 +170,6 @@ RenderWidgetHostImpl::RenderWidgetHostImpl(RenderWidgetHostDelegate* delegate,
       is_hidden_(hidden),
       repaint_ack_pending_(false),
       resize_ack_pending_(false),
-      screen_info_out_of_date_(false),
       auto_resize_enabled_(false),
       waiting_for_screen_rects_ack_(false),
       needs_repainting_on_restore_(false),
@@ -322,6 +321,13 @@ void RenderWidgetHostImpl::SetView(RenderWidgetHostViewBase* view) {
     view_weak_.reset();
   view_ = view;
 
+  // If the renderer has not yet been initialized, then the surface ID
+  // namespace will be sent during initialization.
+  if (view_ && renderer_initialized_) {
+    Send(new ViewMsg_SetSurfaceIdNamespace(routing_id_,
+                                           view_->GetSurfaceIdNamespace()));
+  }
+
   GpuSurfaceTracker::Get()->SetSurfaceHandle(
       surface_id_, GetCompositingSurface());
 
@@ -415,6 +421,13 @@ void RenderWidgetHostImpl::Init() {
   // Send the ack along with the information on placement.
   Send(new ViewMsg_CreatingNew_ACK(routing_id_));
   GetProcess()->ResumeRequestsForView(routing_id_);
+
+  // If the RWHV has not yet been set, the surface ID namespace will get
+  // passed down by the call to SetView().
+  if (view_) {
+    Send(new ViewMsg_SetSurfaceIdNamespace(routing_id_,
+                                           view_->GetSurfaceIdNamespace()));
+  }
 
   WasResized();
 }
@@ -580,11 +593,7 @@ bool RenderWidgetHostImpl::GetResizeParams(
     ViewMsg_Resize_Params* resize_params) {
   *resize_params = ViewMsg_Resize_Params();
 
-  if (!screen_info_) {
-    screen_info_.reset(new blink::WebScreenInfo);
-    GetWebScreenInfo(screen_info_.get());
-  }
-  resize_params->screen_info = *screen_info_;
+  GetWebScreenInfo(&resize_params->screen_info);
   resize_params->resizer_rect = GetRootWindowResizerRect();
 
   if (view_) {
@@ -594,7 +603,8 @@ bool RenderWidgetHostImpl::GetResizeParams(
     resize_params->top_controls_shrink_blink_size =
         view_->DoTopControlsShrinkBlinkSize();
     resize_params->visible_viewport_size = view_->GetVisibleViewportSize();
-    resize_params->is_fullscreen = IsFullscreen();
+    resize_params->is_fullscreen_granted = IsFullscreenGranted();
+    resize_params->display_mode = GetDisplayMode();
   }
 
   const bool size_changed =
@@ -602,11 +612,13 @@ bool RenderWidgetHostImpl::GetResizeParams(
       old_resize_params_->new_size != resize_params->new_size ||
       (old_resize_params_->physical_backing_size.IsEmpty() &&
        !resize_params->physical_backing_size.IsEmpty());
-  bool dirty =
-      size_changed || screen_info_out_of_date_ ||
+  bool dirty = size_changed ||
+      old_resize_params_->screen_info != resize_params->screen_info ||
       old_resize_params_->physical_backing_size !=
           resize_params->physical_backing_size ||
-      old_resize_params_->is_fullscreen != resize_params->is_fullscreen ||
+      old_resize_params_->is_fullscreen_granted !=
+          resize_params->is_fullscreen_granted ||
+      old_resize_params_->display_mode != resize_params->display_mode ||
       old_resize_params_->top_controls_height !=
           resize_params->top_controls_height ||
       old_resize_params_->top_controls_shrink_blink_size !=
@@ -713,14 +725,15 @@ void RenderWidgetHostImpl::CopyFromBackingStore(
     const gfx::Rect& src_subrect,
     const gfx::Size& accelerated_dst_size,
     ReadbackRequestCallback& callback,
-    const SkColorType color_type) {
+    const SkColorType preferred_color_type) {
   if (view_) {
     TRACE_EVENT0("browser",
         "RenderWidgetHostImpl::CopyFromBackingStore::FromCompositingSurface");
     gfx::Rect accelerated_copy_rect = src_subrect.IsEmpty() ?
         gfx::Rect(view_->GetViewBounds().size()) : src_subrect;
-    view_->CopyFromCompositingSurface(
-        accelerated_copy_rect, accelerated_dst_size, callback, color_type);
+    view_->CopyFromCompositingSurface(accelerated_copy_rect,
+                                      accelerated_dst_size, callback,
+                                      preferred_color_type);
     return;
   }
 
@@ -1134,8 +1147,9 @@ void RenderWidgetHostImpl::GetWebScreenInfo(blink::WebScreenInfo* result) {
     view_->GetScreenInfo(result);
   else
     RenderWidgetHostViewBase::GetDefaultScreenInfo(result);
+  // TODO(sievers): find a way to make this done another way so the method
+  // can be const.
   latency_tracker_.set_device_scale_factor(result->deviceScaleFactor);
-  screen_info_out_of_date_ = false;
 }
 
 const NativeWebKeyboardEvent*
@@ -1150,13 +1164,7 @@ void RenderWidgetHostImpl::NotifyScreenInfoChanged() {
   // The resize message (which may not happen immediately) will carry with it
   // the screen info as well as the new size (if the screen has changed scale
   // factor).
-  InvalidateScreenInfo();
   WasResized();
-}
-
-void RenderWidgetHostImpl::InvalidateScreenInfo() {
-  screen_info_out_of_date_ = true;
-  screen_info_.reset();
 }
 
 void RenderWidgetHostImpl::GetSnapshotFromBrowser(
@@ -1317,8 +1325,12 @@ bool RenderWidgetHostImpl::IsMouseLocked() const {
   return view_ ? view_->IsMouseLocked() : false;
 }
 
-bool RenderWidgetHostImpl::IsFullscreen() const {
+bool RenderWidgetHostImpl::IsFullscreenGranted() const {
   return false;
+}
+
+blink::WebDisplayMode RenderWidgetHostImpl::GetDisplayMode() const {
+  return blink::WebDisplayModeBrowser;
 }
 
 void RenderWidgetHostImpl::SetAutoResize(bool enable,
@@ -1327,13 +1339,6 @@ void RenderWidgetHostImpl::SetAutoResize(bool enable,
   auto_resize_enabled_ = enable;
   min_size_for_auto_resize_ = min_size;
   max_size_for_auto_resize_ = max_size;
-}
-
-void RenderWidgetHostImpl::Cleanup() {
-  if (view_) {
-    view_->Destroy();
-    view_ = nullptr;
-  }
 }
 
 void RenderWidgetHostImpl::Destroy() {
@@ -1783,8 +1788,10 @@ InputEventAckState RenderWidgetHostImpl::FilterInputEvent(
   if (!process_->HasConnection())
     return INPUT_EVENT_ACK_STATE_UNKNOWN;
 
-  if (event.type == WebInputEvent::MouseDown)
+  if (event.type == WebInputEvent::MouseDown ||
+      event.type == WebInputEvent::GestureTapDown) {
     OnUserGesture();
+  }
 
   return view_ ? view_->FilterInputEvent(event)
                : INPUT_EVENT_ACK_STATE_NOT_CONSUMED;
@@ -2118,11 +2125,5 @@ gfx::NativeViewAccessible
   return delegate_ ? delegate_->GetParentNativeViewAccessible() : NULL;
 }
 #endif
-
-SkColorType RenderWidgetHostImpl::PreferredReadbackFormat() {
-  if (view_)
-    return view_->PreferredReadbackFormat();
-  return kN32_SkColorType;
-}
 
 }  // namespace content

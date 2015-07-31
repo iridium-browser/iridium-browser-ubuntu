@@ -64,9 +64,17 @@ GLvoid StubGLBindVertexArray(GLuint array) {
   glBindVertexArrayOES(array);
 }
 
+GLvoid StubGLBlendBarrier() {
+  glBlendBarrierKHR();
+}
+
 GLvoid StubGLBlendColor(GLclampf red, GLclampf green, GLclampf blue,
                         GLclampf alpha) {
   glBlendColor(red, green, blue, alpha);
+}
+
+GLvoid StubGLBlendEquation(GLenum mode) {
+  glBlendEquation(mode);
 }
 
 GLvoid StubGLBlendFunc(GLenum sfactor, GLenum dfactor) {
@@ -669,7 +677,9 @@ GrGLInterface* CreateInProcessSkiaGLBinding() {
   functions->fBindFragDataLocation = StubGLBindFragDataLocation;
   functions->fBindTexture = StubGLBindTexture;
   functions->fBindVertexArray = StubGLBindVertexArray;
+  functions->fBlendBarrier = StubGLBlendBarrier;
   functions->fBlendColor = StubGLBlendColor;
+  functions->fBlendEquation = StubGLBlendEquation;
   functions->fBlendFunc = StubGLBlendFunc;
   functions->fBufferData = StubGLBufferData;
   functions->fBufferSubData = StubGLBufferSubData;

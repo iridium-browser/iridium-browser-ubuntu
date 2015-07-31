@@ -21,10 +21,10 @@
 #include "ppapi/cpp/image_data.h"
 #include "ppapi/cpp/point.h"
 #include "ppapi/cpp/var_array.h"
-#include "third_party/pdfium/fpdfsdk/include/fpdf_dataavail.h"
-#include "third_party/pdfium/fpdfsdk/include/fpdf_progressive.h"
-#include "third_party/pdfium/fpdfsdk/include/fpdfformfill.h"
-#include "third_party/pdfium/fpdfsdk/include/fpdfview.h"
+#include "third_party/pdfium/public/fpdf_dataavail.h"
+#include "third_party/pdfium/public/fpdf_formfill.h"
+#include "third_party/pdfium/public/fpdf_progressive.h"
+#include "third_party/pdfium/public/fpdfview.h"
 
 namespace pp {
 class KeyboardInputEvent;
@@ -192,8 +192,8 @@ class PDFiumEngine : public PDFEngine,
                       unsigned char* buffer, unsigned long size);
 
   // PDFium interface to check is block of data is available.
-  static bool IsDataAvail(FX_FILEAVAIL* param,
-                          size_t offset, size_t size);
+  static FPDF_BOOL IsDataAvail(FX_FILEAVAIL* param,
+                               size_t offset, size_t size);
 
   // PDFium interface to request download of the block of data.
   static void AddSegment(FX_DOWNLOADHINTS* param,

@@ -65,6 +65,20 @@ tv.b.unittest.testSuite(function() {
     }
   };
 
+  function assertArrayShallowEquals(a, b, opt_message) {
+    if (a.length === b.length) {
+      var ok = true;
+      for (var i = 0; i < a.length; i++) {
+        ok &= (a[i] === b[i]);
+      }
+      if (ok)
+        return;
+    }
+
+    var message = opt_message || 'Expected array ' + a + ', got array ' + b;
+    throw new tv.b.unittest.TestError(message);
+  };
+
   test('findControllerNoTimeline', function() {
     var controller = new tv.c.FindController();
     controller.findNext();
@@ -215,22 +229,22 @@ tv.b.unittest.testSuite(function() {
     controller.filterText = 'a';
     var promise = controller.updateFilterHits();
     promise.then(function() {
-      assertArrayEquals([], timeline.selection);
-      assertArrayEquals(t1.sliceGroup.slices, timeline.highlight);
+      assert.deepEqual(timeline.selection, []);
+      assert.deepEqual(timeline.highlight, t1.sliceGroup.slices);
 
       controller.findNext();
-      assertEquals(1, timeline.selection.length);
-      assertEquals(t1.sliceGroup.slices[0], timeline.selection[0]);
+      assert.equal(timeline.selection.length, 1);
+      assert.equal(timeline.selection[0], t1.sliceGroup.slices[0]);
 
       controller.filterText = 'xxx';
       var nextPromise = controller.updateFilterHits();
       nextPromise.then(function() {
-        assertEquals(0, timeline.highlight.length);
-        assertEquals(0, timeline.selection.length);
+        assert.equal(timeline.highlight.length, 0);
+        assert.equal(timeline.selection.length, 0);
         controller.findNext();
-        assertEquals(0, timeline.selection.length);
+        assert.equal(timeline.selection.length, 0);
         controller.findNext();
-        assertEquals(0, timeline.selection.length);
+        assert.equal(timeline.selection.length, 0);
       });
       return nextPromise;
     });
@@ -252,20 +266,37 @@ tv.b.unittest.testSuite(function() {
     timeline.style.maxHeight = '600px';
     this.addHTMLOutput(timeline);
 
+    vp.containerToTrackObj = {
+      getTrackByStableId: function(stableId) {
+        if (stableId === '1.2')
+          return { eventContainer: { stableId: '1.2' } };
+        return undefined;
+      }
+    };
+
     var controller = new tv.c.FindController();
     controller.timeline = timeline;
     controller.filterText = '2000@1.2x7';
 
     var cbCalls = 0;
     timeline.navToPosition = function(uiState) {
-      assertEquals(2000, uiState.location.xWorld);
-      assertEquals('1.2',
-          uiState.location.containingTrack.eventContainer.stableId);
-      assertEquals(7, uiState.scaleX);
+      assert.equal(uiState.location.xWorld, 2000);
+      assert.equal(
+          uiState.location.getContainingTrack(vp).eventContainer.stableId,
+          '1.2');
+      assert.equal(uiState.scaleX, 7);
       cbCalls++;
     };
     controller.updateFilterHits();
-    assertEquals(1, cbCalls);
+    assert.equal(cbCalls, 1);
+
+    cbCalls = 0;
+    timeline.findTextCleared = function() {
+      cbCalls++;
+    };
+    controller.filterText = '';
+    controller.updateFilterHits();
+    assert.equal(cbCalls, 1);
   });
 });
 </script>

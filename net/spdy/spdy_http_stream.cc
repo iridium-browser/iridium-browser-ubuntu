@@ -373,7 +373,7 @@ void SpdyHttpStream::OnClose(int status) {
   }
   stream_.reset();
   bool invoked_callback = false;
-  if (status == net::OK) {
+  if (status == OK) {
     // We need to complete any pending buffered read now.
     invoked_callback = DoBufferedReadCallback();
   }
@@ -517,8 +517,9 @@ void SpdyHttpStream::GetSSLInfo(SSLInfo* ssl_info) {
 
 void SpdyHttpStream::GetSSLCertRequestInfo(
     SSLCertRequestInfo* cert_request_info) {
-  DCHECK(stream_.get());
-  stream_->GetSSLCertRequestInfo(cert_request_info);
+  // A SPDY stream cannot request client certificates. Client authentication may
+  // only occur during the initial SSL handshake.
+  NOTREACHED();
 }
 
 bool SpdyHttpStream::IsSpdyHttpStream() const {

@@ -46,27 +46,27 @@ AudioBasicInspectorHandler::AudioBasicInspectorHandler(NodeType nodeType, AudioN
 void AudioBasicInspectorHandler::pullInputs(size_t framesToProcess)
 {
     // Render input stream - try to render directly into output bus for pass-through processing where process() doesn't need to do anything...
-    input(0)->pull(output(0)->bus(), framesToProcess);
+    input(0).pull(output(0).bus(), framesToProcess);
 }
 
-void AudioBasicInspectorHandler::connect(AudioHandler* destination, unsigned outputIndex, unsigned inputIndex, ExceptionState& exceptionState)
+void AudioBasicInspectorNode::connect(AudioNode* destination, unsigned outputIndex, unsigned inputIndex, ExceptionState& exceptionState)
 {
     ASSERT(isMainThread());
 
     AudioContext::AutoLocker locker(context());
 
-    AudioHandler::connect(destination, outputIndex, inputIndex, exceptionState);
-    updatePullStatus();
+    AudioNode::connect(destination, outputIndex, inputIndex, exceptionState);
+    static_cast<AudioBasicInspectorHandler&>(handler()).updatePullStatus();
 }
 
-void AudioBasicInspectorHandler::disconnect(unsigned outputIndex, ExceptionState& exceptionState)
+void AudioBasicInspectorNode::disconnect(unsigned outputIndex, ExceptionState& exceptionState)
 {
     ASSERT(isMainThread());
 
     AudioContext::AutoLocker locker(context());
 
-    AudioHandler::disconnect(outputIndex, exceptionState);
-    updatePullStatus();
+    AudioNode::disconnect(outputIndex, exceptionState);
+    static_cast<AudioBasicInspectorHandler&>(handler()).updatePullStatus();
 }
 
 void AudioBasicInspectorHandler::checkNumberOfChannelsForInput(AudioNodeInput* input)
@@ -74,15 +74,15 @@ void AudioBasicInspectorHandler::checkNumberOfChannelsForInput(AudioNodeInput* i
     ASSERT(context()->isAudioThread());
     ASSERT(context()->isGraphOwner());
 
-    ASSERT(input == this->input(0));
-    if (input != this->input(0))
+    ASSERT(input == &this->input(0));
+    if (input != &this->input(0))
         return;
 
     unsigned numberOfChannels = input->numberOfChannels();
 
-    if (numberOfChannels != output(0)->numberOfChannels()) {
+    if (numberOfChannels != output(0).numberOfChannels()) {
         // This will propagate the channel count to any nodes connected further downstream in the graph.
-        output(0)->setNumberOfChannels(numberOfChannels);
+        output(0).setNumberOfChannels(numberOfChannels);
     }
 
     AudioHandler::checkNumberOfChannelsForInput(input);
@@ -94,23 +94,23 @@ void AudioBasicInspectorHandler::updatePullStatus()
 {
     ASSERT(context()->isGraphOwner());
 
-    if (output(0)->isConnected()) {
+    if (output(0).isConnected()) {
         // When an AudioBasicInspectorNode is connected to a downstream node, it will get pulled by the
         // downstream node, thus remove it from the context's automatic pull list.
         if (m_needAutomaticPull) {
-            context()->handler().removeAutomaticPullNode(this);
+            context()->deferredTaskHandler().removeAutomaticPullNode(this);
             m_needAutomaticPull = false;
         }
     } else {
-        unsigned numberOfInputConnections = input(0)->numberOfRenderingConnections();
+        unsigned numberOfInputConnections = input(0).numberOfRenderingConnections();
         if (numberOfInputConnections && !m_needAutomaticPull) {
             // When an AudioBasicInspectorNode is not connected to any downstream node while still connected from
             // upstream node(s), add it to the context's automatic pull list.
-            context()->handler().addAutomaticPullNode(this);
+            context()->deferredTaskHandler().addAutomaticPullNode(this);
             m_needAutomaticPull = true;
         } else if (!numberOfInputConnections && m_needAutomaticPull) {
             // The AudioBasicInspectorNode is connected to nothing, remove it from the context's automatic pull list.
-            context()->handler().removeAutomaticPullNode(this);
+            context()->deferredTaskHandler().removeAutomaticPullNode(this);
             m_needAutomaticPull = false;
         }
     }

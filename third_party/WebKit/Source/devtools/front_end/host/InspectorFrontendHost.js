@@ -207,6 +207,24 @@ InspectorFrontendHostAPI.prototype = {
     loadNetworkResource: function(url, headers, streamId, callback) { },
 
     /**
+     * @param {function(!Object<string, string>)} callback
+     */
+    getPreferences: function(callback) { },
+
+    /**
+     * @param {string} name
+     * @param {string} value
+     */
+    setPreference: function(name, value) { },
+
+    /**
+     * @param {string} name
+     */
+    removePreference: function(name) { },
+
+    clearPreferences: function() { },
+
+    /**
      * @param {!FileSystem} fileSystem
      */
     upgradeDraggedFileSystemPermissions: function(fileSystem) { },
@@ -217,14 +235,11 @@ InspectorFrontendHostAPI.prototype = {
     platform: function() { },
 
     /**
+     * @param {string} actionName
      * @param {number} actionCode
+     * @param {number} bucketSize
      */
-    recordActionTaken: function(actionCode) { },
-
-    /**
-     * @param {number} panelCode
-     */
-    recordPanelShown: function(panelCode) { },
+    recordEnumeratedHistogram: function(actionName, actionCode, bucketSize) { },
 
     /**
      * @param {string} message
@@ -450,17 +465,11 @@ WebInspector.InspectorFrontendHostStub.prototype = {
 
     /**
      * @override
+     * @param {string} actionName
      * @param {number} actionCode
+     * @param {number} bucketSize
      */
-    recordActionTaken: function(actionCode)
-    {
-    },
-
-    /**
-     * @override
-     * @param {number} panelCode
-     */
-    recordPanelShown: function(panelCode)
+    recordEnumeratedHistogram: function(actionName, actionCode, bucketSize)
     {
     },
 
@@ -506,7 +515,51 @@ WebInspector.InspectorFrontendHostStub.prototype = {
      */
     loadNetworkResource: function(url, headers, streamId, callback)
     {
-        callback({statusCode : 404});
+        loadResourcePromise(url).then(function(text) {
+            WebInspector.ResourceLoader.streamWrite(streamId, text);
+            callback({statusCode : 200});
+        }).catch(function() {
+            callback({statusCode : 404});
+        });
+    },
+
+    /**
+     * @override
+     * @param {function(!Object<string, string>)} callback
+     */
+    getPreferences: function(callback)
+    {
+        var prefs = {};
+        for (var name in window.localStorage)
+            prefs[name] = window.localStorage[name];
+        callback(prefs);
+    },
+
+    /**
+     * @override
+     * @param {string} name
+     * @param {string} value
+     */
+    setPreference: function(name, value)
+    {
+        window.localStorage[name] = value;
+    },
+
+    /**
+     * @override
+     * @param {string} name
+     */
+    removePreference: function(name)
+    {
+        delete window.localStorage[name];
+    },
+
+    /**
+     * @override
+     */
+    clearPreferences: function()
+    {
+        window.localStorage.clear();
     },
 
     /**
@@ -714,7 +767,7 @@ var InspectorFrontendHost = window.InspectorFrontendHost || null;
          */
         streamWrite: function(id, chunk)
         {
-            WebInspector.Streams.streamWrite(id, chunk);
+            WebInspector.ResourceLoader.streamWrite(id, chunk);
         }
     }
 

@@ -9,7 +9,6 @@
   },
   'target_defaults': {
     'defines': [
-      'SQLITE_CORE',
       'SQLITE_ENABLE_FTS3',
       # New unicode61 tokenizer with built-in tables.
       'SQLITE_DISABLE_FTS3_UNICODE',
@@ -164,12 +163,6 @@
                 '-Wno-pointer-to-int-cast',
               ],
             }],
-            # Enable feedback-directed optimisation for sqlite when building in android.
-            ['android_webview_build == 1', {
-              'aosp_build_settings': {
-                'LOCAL_FDO_SUPPORT': 'true',
-              },
-            }],
           ],
         }],
       ],
@@ -207,6 +200,10 @@
           'dependencies': [
             '../icu/icu.gyp:icui18n',
             '../icu/icu.gyp:icuuc',
+          ],
+          'defines': [
+            # Necessary to statically compile the extension.
+            'SQLITE_CORE',
           ],
           'sources': [
             'src/ext/icu/icu.c',

@@ -12,6 +12,7 @@
 #include "ipc/ipc_sender.h"
 #include "third_party/WebKit/public/web/WebRemoteFrame.h"
 #include "third_party/WebKit/public/web/WebRemoteFrameClient.h"
+#include "url/origin.h"
 
 struct FrameMsg_BuffersSwapped_Params;
 struct FrameMsg_CompositorFrameSwapped_Params;
@@ -100,6 +101,12 @@ class CONTENT_EXPORT RenderFrameProxy
   // RenderFrameProxy's WebRemoteFrame.
   void SetReplicatedState(const FrameReplicationState& state);
 
+  // Navigating a top-level frame cross-process does not swap the WebLocalFrame
+  // for a WebRemoteFrame in the frame tree. In this case, this WebRemoteFrame
+  // is not attached to the frame tree and there is no blink::Frame associated
+  // with it, so it is not in state where most operations on it will succeed.
+  bool IsMainFrameDetachedFromTree() const;
+
   int routing_id() { return routing_id_; }
   RenderViewImpl* render_view() { return render_view_; }
   blink::WebRemoteFrame* web_frame() { return web_frame_; }
@@ -126,12 +133,6 @@ class CONTENT_EXPORT RenderFrameProxy
 
   void Init(blink::WebRemoteFrame* frame, RenderViewImpl* render_view);
 
-  // Navigating a top-level frame cross-process does not swap the WebLocalFrame
-  // for a WebRemoteFrame in the frame tree. In this case, this WebRemoteFrame
-  // is not attached to the frame tree and there is no blink::Frame associated
-  // with it, so it is not in state where most operations on it will succeed.
-  bool IsMainFrameDetachedFromTree() const;
-
   // IPC::Listener
   bool OnMessageReceived(const IPC::Message& msg) override;
 
@@ -144,6 +145,7 @@ class CONTENT_EXPORT RenderFrameProxy
   void OnDidUpdateSandboxFlags(SandboxFlags flags);
   void OnDispatchLoad();
   void OnDidUpdateName(const std::string& name);
+  void OnDidUpdateOrigin(const url::Origin& origin);
 
   // The routing ID by which this RenderFrameProxy is known.
   const int routing_id_;

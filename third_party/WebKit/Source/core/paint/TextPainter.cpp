@@ -103,7 +103,7 @@ void TextPainter::updateGraphicsContext(GraphicsContext* context, const Style& t
     if (textStyle.shadow && !context->printing()) {
         if (!stateSaver.saved())
             stateSaver.save();
-        context->setDrawLooper(textStyle.shadow->createDrawLooper(DrawLooperBuilder::ShadowIgnoresAlpha, horizontal));
+        context->setDrawLooper(textStyle.shadow->createDrawLooper(DrawLooperBuilder::ShadowIgnoresAlpha, textStyle.currentColor, horizontal));
     }
 }
 
@@ -115,20 +115,22 @@ static Color textColorForWhiteBackground(Color textColor)
 }
 
 // static
-TextPainter::Style TextPainter::textPaintingStyle(LayoutObject& renderer, const ComputedStyle& style, bool forceBlackText, bool isPrinting)
+TextPainter::Style TextPainter::textPaintingStyle(LayoutObject& layoutObject, const ComputedStyle& style, bool forceBlackText, bool isPrinting)
 {
     TextPainter::Style textStyle;
 
     if (forceBlackText) {
+        textStyle.currentColor = Color::black;
         textStyle.fillColor = Color::black;
         textStyle.strokeColor = Color::black;
         textStyle.emphasisMarkColor = Color::black;
         textStyle.strokeWidth = style.textStrokeWidth();
         textStyle.shadow = 0;
     } else {
-        textStyle.fillColor = renderer.resolveColor(style, CSSPropertyWebkitTextFillColor);
-        textStyle.strokeColor = renderer.resolveColor(style, CSSPropertyWebkitTextStrokeColor);
-        textStyle.emphasisMarkColor = renderer.resolveColor(style, CSSPropertyWebkitTextEmphasisColor);
+        textStyle.currentColor = style.visitedDependentColor(CSSPropertyColor);
+        textStyle.fillColor = layoutObject.resolveColor(style, CSSPropertyWebkitTextFillColor);
+        textStyle.strokeColor = layoutObject.resolveColor(style, CSSPropertyWebkitTextStrokeColor);
+        textStyle.emphasisMarkColor = layoutObject.resolveColor(style, CSSPropertyWebkitTextEmphasisColor);
         textStyle.strokeWidth = style.textStrokeWidth();
         textStyle.shadow = style.textShadow();
 
@@ -137,7 +139,7 @@ TextPainter::Style TextPainter::textPaintingStyle(LayoutObject& renderer, const 
         if (isPrinting) {
             if (style.printColorAdjust() == PrintColorAdjustEconomy)
                 forceBackgroundToWhite = true;
-            if (renderer.document().settings() && renderer.document().settings()->shouldPrintBackgrounds())
+            if (layoutObject.document().settings() && layoutObject.document().settings()->shouldPrintBackgrounds())
                 forceBackgroundToWhite = false;
         }
         if (forceBackgroundToWhite) {
@@ -154,18 +156,18 @@ TextPainter::Style TextPainter::textPaintingStyle(LayoutObject& renderer, const 
     return textStyle;
 }
 
-TextPainter::Style TextPainter::selectionPaintingStyle(LayoutObject& renderer, bool haveSelection, bool forceBlackText, bool isPrinting, const TextPainter::Style& textStyle)
+TextPainter::Style TextPainter::selectionPaintingStyle(LayoutObject& layoutObject, bool haveSelection, bool forceBlackText, bool isPrinting, const TextPainter::Style& textStyle)
 {
     TextPainter::Style selectionStyle = textStyle;
 
     if (haveSelection) {
         if (!forceBlackText) {
-            selectionStyle.fillColor = renderer.selectionForegroundColor();
-            selectionStyle.emphasisMarkColor = renderer.selectionEmphasisMarkColor();
+            selectionStyle.fillColor = layoutObject.selectionForegroundColor();
+            selectionStyle.emphasisMarkColor = layoutObject.selectionEmphasisMarkColor();
         }
 
-        if (const ComputedStyle* pseudoStyle = renderer.getCachedPseudoStyle(SELECTION)) {
-            selectionStyle.strokeColor = forceBlackText ? Color::black : renderer.resolveColor(*pseudoStyle, CSSPropertyWebkitTextStrokeColor);
+        if (const ComputedStyle* pseudoStyle = layoutObject.getCachedPseudoStyle(SELECTION)) {
+            selectionStyle.strokeColor = forceBlackText ? Color::black : layoutObject.resolveColor(*pseudoStyle, CSSPropertyWebkitTextStrokeColor);
             selectionStyle.strokeWidth = pseudoStyle->textStrokeWidth();
             selectionStyle.shadow = forceBlackText ? 0 : pseudoStyle->textShadow();
         }
@@ -216,7 +218,7 @@ void TextPainter::paintInternal(int startOffset, int endOffset, int truncationPo
 void TextPainter::paintEmphasisMarkForCombinedText()
 {
     ASSERT(m_combinedText);
-    DEFINE_STATIC_LOCAL(TextRun, placeholderTextRun, (&ideographicFullStop, 1));
+    DEFINE_STATIC_LOCAL(TextRun, placeholderTextRun, (&ideographicFullStopCharacter, 1));
     FloatPoint emphasisMarkTextOrigin(m_textBounds.x(), m_textBounds.y() + m_font.fontMetrics().ascent() + m_emphasisMarkOffset);
     TextRunPaintInfo textRunPaintInfo(placeholderTextRun);
     textRunPaintInfo.bounds = m_textBounds;

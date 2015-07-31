@@ -120,6 +120,10 @@ CSSParserValueList::CSSParserValueList(CSSParserTokenRange range, bool& usesRemU
             break;
         }
         case DimensionToken:
+            if (!std::isfinite(token.numericValue())) {
+                destroyAndClear();
+                return;
+            }
             if (!token.unitType()) {
                 if (String(token.value()) == "__qem") {
                     value.setFromNumber(token.numericValue(), CSSParserValue::Q_EMS);
@@ -150,6 +154,10 @@ CSSParserValueList::CSSParserValueList(CSSParserTokenRange range, bool& usesRemU
             // fallthrough
         case NumberToken:
         case PercentageToken:
+            if (!std::isfinite(token.numericValue())) {
+                destroyAndClear();
+                return;
+            }
             value.setFromNumber(token.numericValue(), token.unitType());
             value.isInt = (token.numericValueType() == IntegerValueType);
             break;
@@ -283,8 +291,8 @@ CSSParserSelector::CSSParserSelector()
 {
 }
 
-CSSParserSelector::CSSParserSelector(const QualifiedName& tagQName)
-    : m_selector(adoptPtr(new CSSSelector(tagQName)))
+CSSParserSelector::CSSParserSelector(const QualifiedName& tagQName, bool isImplicit)
+    : m_selector(adoptPtr(new CSSSelector(tagQName, isImplicit)))
 {
 }
 
@@ -353,13 +361,13 @@ void CSSParserSelector::appendTagHistory(CSSSelector::Relation relation, PassOwn
     end->setTagHistory(selector);
 }
 
-void CSSParserSelector::prependTagSelector(const QualifiedName& tagQName, bool tagIsForNamespaceRule)
+void CSSParserSelector::prependTagSelector(const QualifiedName& tagQName, bool isImplicit)
 {
-    OwnPtr<CSSParserSelector> second = adoptPtr(new CSSParserSelector);
+    OwnPtr<CSSParserSelector> second = CSSParserSelector::create();
     second->m_selector = m_selector.release();
     second->m_tagHistory = m_tagHistory.release();
     m_tagHistory = second.release();
-    m_selector = adoptPtr(new CSSSelector(tagQName, tagIsForNamespaceRule));
+    m_selector = adoptPtr(new CSSSelector(tagQName, isImplicit));
 }
 
 bool CSSParserSelector::hasHostPseudoSelector() const

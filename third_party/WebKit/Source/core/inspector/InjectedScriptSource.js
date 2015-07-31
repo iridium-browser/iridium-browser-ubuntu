@@ -371,13 +371,14 @@ InjectedScript.prototype = {
      * @param {?Array.<string>=} columnNames
      * @param {boolean=} isTable
      * @param {boolean=} doNotBind
+     * @param {*=} customObjectConfig
      * @return {!RuntimeAgent.RemoteObject}
      * @suppress {checkTypes}
      */
-    _wrapObject: function(object, objectGroupName, forceValueType, generatePreview, columnNames, isTable, doNotBind)
+    _wrapObject: function(object, objectGroupName, forceValueType, generatePreview, columnNames, isTable, doNotBind, customObjectConfig)
     {
         try {
-            return new InjectedScript.RemoteObject(object, objectGroupName, doNotBind, forceValueType, generatePreview, columnNames, isTable, undefined);
+            return new InjectedScript.RemoteObject(object, objectGroupName, doNotBind, forceValueType, generatePreview, columnNames, isTable, undefined, customObjectConfig);
         } catch (e) {
             try {
                 var description = injectedScript._describe(e);
@@ -447,7 +448,6 @@ InjectedScript.prototype = {
         object = /** @type {!Object} */ (object);
         var descriptors = [];
         var iter = this._propertyDescriptors(object, ownProperties, accessorPropertiesOnly);
-
         // Go over properties, wrap object values.
         for (var descriptor of iter) {
             if ("get" in descriptor)
@@ -729,12 +729,13 @@ InjectedScript.prototype = {
          * @param {boolean=} generatePreview
          * @param {?Array.<string>=} columnNames
          * @param {boolean=} isTable
+         * @param {*=} customObjectConfig
          * @return {!RuntimeAgent.RemoteObject}
          * @this {InjectedScript}
          */
-        function wrap(object, forceValueType, generatePreview, columnNames, isTable)
+        function wrap(object, forceValueType, generatePreview, columnNames, isTable, customObjectConfig)
         {
-            return this._wrapObject(object, objectGroup, forceValueType, generatePreview, columnNames, isTable);
+            return this._wrapObject(object, objectGroup, forceValueType, generatePreview, columnNames, isTable, false, customObjectConfig);
         }
 
         try {
@@ -766,22 +767,31 @@ InjectedScript.prototype = {
      */
     _substituteObjectTagsInCustomPreview: function(objectGroupName, jsonMLObject)
     {
-        if (!isArrayLike(jsonMLObject))
-            return;
+        var maxCustomPreviewRecursionDepth = 20;
+        this._customPreviewRecursionDepth = (this._customPreviewRecursionDepth || 0) + 1
+        try {
+            if (this._customPreviewRecursionDepth >= maxCustomPreviewRecursionDepth)
+                throw new Error("Too deep hierarchy of inlined custom previews");
 
-        var startIndex = 1;
-        if (jsonMLObject[0] === "object") {
-            var attributes = jsonMLObject[1];
-            var originObject = attributes["object"];
-            if (typeof originObject === "undefined")
-                throw "Illegal format: obligatory attribute \"object\" isn't specified";
+            if (!isArrayLike(jsonMLObject))
+                return;
 
-            jsonMLObject[1] = this._wrapObject(originObject, objectGroupName, false, false, null, false);
-            startIndex = 2;
+            if (jsonMLObject[0] === "object") {
+                var attributes = jsonMLObject[1];
+                var originObject = attributes["object"];
+                var config = attributes["config"];
+                if (typeof originObject === "undefined")
+                    throw new Error("Illegal format: obligatory attribute \"object\" isn't specified");
+
+                jsonMLObject[1] = this._wrapObject(originObject, objectGroupName, false, false, null, false, false, config);
+                return;
+            }
+
+            for (var i = 0; i < jsonMLObject.length; ++i)
+                this._substituteObjectTagsInCustomPreview(objectGroupName, jsonMLObject[i]);
+        } finally {
+            this._customPreviewRecursionDepth--;
         }
-
-        for (var i = startIndex; i < jsonMLObject.length; ++i)
-            this._substituteObjectTagsInCustomPreview(objectGroupName, jsonMLObject[i]);
     },
 
     /**
@@ -1241,8 +1251,9 @@ var injectedScript = new InjectedScript();
  * @param {?Array.<string>=} columnNames
  * @param {boolean=} isTable
  * @param {boolean=} skipEntriesPreview
+ * @param {*=} customObjectConfig
  */
-InjectedScript.RemoteObject = function(object, objectGroupName, doNotBind, forceValueType, generatePreview, columnNames, isTable, skipEntriesPreview)
+InjectedScript.RemoteObject = function(object, objectGroupName, doNotBind, forceValueType, generatePreview, columnNames, isTable, skipEntriesPreview, customObjectConfig)
 {
     this.type = typeof object;
     if (this.type === "undefined" && injectedScript._isHTMLAllCollection(object))
@@ -1290,7 +1301,7 @@ InjectedScript.RemoteObject = function(object, objectGroupName, doNotBind, force
         this.preview = this._generatePreview(object, undefined, columnNames, isTable, skipEntriesPreview);
 
     if (injectedScript._customObjectFormatterEnabled) {
-        var customPreview = this._customPreview(object, objectGroupName);
+        var customPreview = this._customPreview(object, objectGroupName, customObjectConfig);
         if (customPreview)
             this.customPreview = customPreview;
     }
@@ -1301,26 +1312,45 @@ InjectedScript.RemoteObject.prototype = {
     /**
      * @param {*} object
      * @param {string=} objectGroupName
+     * @param {*=} customObjectConfig
      * @return {?RuntimeAgent.CustomPreview}
      */
-    _customPreview: function(object, objectGroupName)
+    _customPreview: function(object, objectGroupName, customObjectConfig)
     {
-        try {
-            var formatter = inspectedWindow["devtoolsFormatter"];
-            if (!formatter)
-                return null;
-
-            var formatted = formatter.header(object);
-            if (!formatted)
-                return null;
-
-            var hasBody = formatter.hasBody(object);
-            injectedScript._substituteObjectTagsInCustomPreview(objectGroupName, formatted);
-            return {header: JSON.stringify(formatted), hasBody: !!hasBody};
-        } catch (e) {
-            inspectedWindow.console.error("Custom Formatter Failed: " + e);
-            return null;
+        /**
+         * @param {!Error} error
+         */
+        function logError(error)
+        {
+            Promise.resolve().then(inspectedWindow.console.error.bind(inspectedWindow.console, "Custom Formatter Failed: " + error.message));
         }
+
+        try {
+            var formatters = inspectedWindow["devtoolsFormatters"];
+            if (!formatters || !isArrayLike(formatters))
+                return null;
+
+            for (var i = 0; i < formatters.length; ++i) {
+                try {
+                    var formatted = formatters[i].header(object, customObjectConfig);
+                    if (!formatted)
+                        continue;
+
+                    var hasBody = formatters[i].hasBody(object, customObjectConfig);
+                    injectedScript._substituteObjectTagsInCustomPreview(objectGroupName, formatted);
+                    var formatterObjectId = injectedScript._bind(formatters[i], objectGroupName);
+                    var result = {header: JSON.stringify(formatted), hasBody: !!hasBody, formatterObjectId: formatterObjectId};
+                    if (customObjectConfig)
+                        result["configObjectId"] = injectedScript._bind(customObjectConfig, objectGroupName);
+                    return result;
+                } catch (e) {
+                    logError(e);
+                }
+            }
+        } catch (e) {
+            logError(e);
+        }
+        return null;
     },
 
     /**

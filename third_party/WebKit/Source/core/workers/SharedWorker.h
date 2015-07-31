@@ -32,6 +32,7 @@
 #ifndef SharedWorker_h
 #define SharedWorker_h
 
+#include "core/CoreExport.h"
 #include "core/workers/AbstractWorker.h"
 #include "platform/Supplementable.h"
 #include "platform/heap/Handle.h"
@@ -40,9 +41,9 @@ namespace blink {
 
 class ExceptionState;
 
-class SharedWorker final : public AbstractWorker, public WillBeHeapSupplementable<SharedWorker> {
+class CORE_EXPORT SharedWorker final : public AbstractWorker, public WillBeHeapSupplementable<SharedWorker> {
     DEFINE_WRAPPERTYPEINFO();
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN_NESTED(SharedWorker, AbstractWorker);
+    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(SharedWorker);
 public:
     static PassRefPtrWillBeRawPtr<SharedWorker> create(ExecutionContext*, const String& url, const String& name, ExceptionState&);
     virtual ~SharedWorker();

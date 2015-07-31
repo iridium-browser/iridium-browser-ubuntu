@@ -6,6 +6,7 @@
 
 # Add new suites here before upgrading them to the stable list below.
 EXPERIMENTAL_TEST_SUITES = [
+    'components_browsertests',
     'content_gl_tests',
     'heap_profiler_unittests',
     'devtools_bridge_tests',
@@ -28,9 +29,11 @@ STABLE_TEST_SUITES = [
     'content_unittests',
     'events_unittests',
     'gl_tests',
+    'gl_unittests',
     'gpu_unittests',
     'ipc_tests',
     'media_unittests',
+    'midi_unittests',
     'net_unittests',
     'sandbox_linux_unittests',
     'skia_unittests',

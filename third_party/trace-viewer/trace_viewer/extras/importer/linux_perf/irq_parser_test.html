@@ -24,18 +24,18 @@ tv.b.unittest.testSuite(function() {
         'softirq_exit: vec=9 [action=RCU]'
     ];
     var m = new tv.c.TraceModel(lines.join('\n'), false);
-    assertFalse(m.hasImportWarnings);
+    assert.isFalse(m.hasImportWarnings);
 
     var threads = m.getAllThreads();
-    assertEquals(2, threads.length);
+    assert.equal(threads.length, 2);
 
     var threads = m.findAllThreadsNamed('irqs cpu 1');
-    assertEquals(1, threads.length);
-    assertEquals(1, threads[0].sliceGroup.length);
+    assert.equal(threads.length, 1);
+    assert.equal(threads[0].sliceGroup.length, 1);
 
     var threads = m.findAllThreadsNamed('softirq cpu 0');
-    assertEquals(1, threads.length);
-    assertEquals(1, threads[0].sliceGroup.length);
+    assert.equal(threads.length, 1);
+    assert.equal(threads[0].sliceGroup.length, 1);
   });
 });
 </script>

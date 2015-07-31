@@ -118,6 +118,7 @@ class AudioDeviceTemplate : public AudioDeviceGeneric {
   }
 
   int32_t InitPlayout() override {
+    audio_manager_.SetCommunicationMode(true);
     return output_.InitPlayout();
   }
 
@@ -131,6 +132,7 @@ class AudioDeviceTemplate : public AudioDeviceGeneric {
   }
 
   int32_t InitRecording() override {
+    audio_manager_.SetCommunicationMode(true);
     return input_.InitRecording();
   }
 
@@ -143,7 +145,16 @@ class AudioDeviceTemplate : public AudioDeviceGeneric {
   }
 
   int32_t StopPlayout() override {
-    return output_.StopPlayout();
+    // Avoid using audio manger (JNI/Java cost) if playout was inactive.
+    if (!Playing())
+      return 0;
+    int32_t err = output_.StopPlayout();
+    if (!Recording()) {
+      // Restore initial audio mode since all audio streaming is disabled.
+      // The default mode was stored in Init().
+      audio_manager_.SetCommunicationMode(false);
+    }
+    return err;
   }
 
   bool Playing() const override {
@@ -155,7 +166,16 @@ class AudioDeviceTemplate : public AudioDeviceGeneric {
   }
 
   int32_t StopRecording() override {
-    return input_.StopRecording();
+    // Avoid using audio manger (JNI/Java cost) if recording was inactive.
+    if (!Recording())
+      return 0;
+    int32_t err = input_.StopRecording();
+    if (!Playing()) {
+      // Restore initial audio mode since all audio streaming is disabled.
+      // The default mode was is stored in Init().
+      audio_manager_.SetCommunicationMode(false);
+    }
+    return err;
   }
 
   bool Recording() const override {

@@ -11,12 +11,10 @@ static void indexedPropertyGetter(uint32_t index, const v8::PropertyCallbackInfo
     {% if getter.is_raises_exception %}
     ExceptionState exceptionState(ExceptionState::IndexedGetterContext, "{{interface_name}}", info.Holder(), info.GetIsolate());
     {% endif %}
-    {% if getter.is_call_with_script_state %}
-    ScriptState* scriptState = ScriptState::current(info.GetIsolate());
-    {% endif %}
     {% set getter_name = getter.name or 'anonymousIndexedGetter' %}
     {% set getter_arguments = ['index'] %}
     {% if getter.is_call_with_script_state %}
+    ScriptState* scriptState = ScriptState::current(info.GetIsolate());
     {% set getter_arguments = ['scriptState'] + getter_arguments %}
     {% endif %}
     {% if getter.is_raises_exception %}
@@ -76,12 +74,10 @@ static void indexedPropertySetter(uint32_t index, v8::Local<v8::Value> v8Value, 
         return;
     }
     {% endif %}
-    {% if setter.is_call_with_script_state %}
-    ScriptState* scriptState = ScriptState::current(info.GetIsolate());
-    {% endif %}
     {% set setter_name = setter.name or 'anonymousIndexedSetter' %}
     {% set setter_arguments = ['index', 'propertyValue'] %}
     {% if setter.is_call_with_script_state %}
+    ScriptState* scriptState = ScriptState::current(info.GetIsolate());
     {% set setter_arguments = ['scriptState'] + setter_arguments %}
     {% endif %}
     {% if setter.is_raises_exception %}
@@ -130,12 +126,10 @@ static void indexedPropertyDeleter(uint32_t index, const v8::PropertyCallbackInf
     {% if deleter.is_raises_exception %}
     ExceptionState exceptionState(ExceptionState::IndexedDeletionContext, "{{interface_name}}", info.Holder(), info.GetIsolate());
     {% endif %}
-    {% if deleter.is_call_with_script_state %}
-    ScriptState* scriptState = ScriptState::current(info.GetIsolate());
-    {% endif %}
     {% set deleter_name = deleter.name or 'anonymousIndexedDeleter' %}
     {% set deleter_arguments = ['index'] %}
     {% if deleter.is_call_with_script_state %}
+    ScriptState* scriptState = ScriptState::current(info.GetIsolate());
     {% set deleter_arguments = ['scriptState'] + deleter_arguments %}
     {% endif %}
     {% if deleter.is_raises_exception %}
@@ -302,6 +296,7 @@ static void namedPropertySetterCallback(v8::Local<v8::Name> name, v8::Local<v8::
 {% block named_property_query %}
 {% if named_property_getter and named_property_getter.is_enumerable and
       not named_property_getter.is_custom_property_query %}
+{% set getter = named_property_getter %}
 {# If there is an enumerator, there MUST be a query method to properly
    communicate property attributes. #}
 static void namedPropertyQuery(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Integer>& info)
@@ -310,7 +305,12 @@ static void namedPropertyQuery(v8::Local<v8::Name> name, const v8::PropertyCallb
     AtomicString propertyName = toCoreAtomicString(name.As<v8::String>());
     v8::String::Utf8Value namedProperty(name);
     ExceptionState exceptionState(ExceptionState::GetterContext, *namedProperty, "{{interface_name}}", info.Holder(), info.GetIsolate());
-    bool result = impl->namedPropertyQuery(propertyName, exceptionState);
+    {% set getter_arguments = ['propertyName', 'exceptionState'] %}
+    {% if getter.is_call_with_script_state %}
+    ScriptState* scriptState = ScriptState::current(info.GetIsolate());
+    {% set getter_arguments = ['scriptState'] + getter_arguments %}
+    {% endif %}
+    bool result = impl->namedPropertyQuery({{getter_arguments | join(', ')}});
     if (exceptionState.throwIfNeeded())
         return;
     if (!result)
@@ -409,8 +409,10 @@ static void namedPropertyEnumerator(const v8::PropertyCallbackInfo<v8::Array>& i
     if (exceptionState.throwIfNeeded())
         return;
     v8::Local<v8::Array> v8names = v8::Array::New(info.GetIsolate(), names.size());
-    for (size_t i = 0; i < names.size(); ++i)
-        v8names->Set(v8::Integer::New(info.GetIsolate(), i), v8String(info.GetIsolate(), names[i]));
+    for (size_t i = 0; i < names.size(); ++i) {
+        if (!v8CallBoolean(v8names->Set(info.GetIsolate()->GetCurrentContext(), v8::Integer::New(info.GetIsolate(), i), v8String(info.GetIsolate(), names[i]))))
+            return;
+    }
     v8SetReturnValue(info, v8names);
 }
 
@@ -474,7 +476,7 @@ static void {{cpp_class}}OriginSafeMethodSetterCallback(v8::Local<v8::Name> name
 {% if named_constructor %}
 {% set to_active_dom_object = '%s::toActiveDOMObject' % v8_class
                               if is_active_dom_object else '0' %}
-const WrapperTypeInfo {{v8_class}}Constructor::wrapperTypeInfo = { gin::kEmbedderBlink, {{v8_class}}Constructor::domTemplate, {{v8_class}}::refObject, {{v8_class}}::derefObject, {{v8_class}}::trace, {{to_active_dom_object}}, 0, {{v8_class}}::installConditionallyEnabledMethods, {{v8_class}}::installConditionallyEnabledProperties, "{{interface_name}}", 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::{{wrapper_class_id}}, WrapperTypeInfo::{{event_target_inheritance}}, WrapperTypeInfo::{{lifetime}}, WrapperTypeInfo::{{gc_type}} };
+const WrapperTypeInfo {{v8_class}}Constructor::wrapperTypeInfo = { gin::kEmbedderBlink, {{v8_class}}Constructor::domTemplate, {{v8_class}}::refObject, {{v8_class}}::derefObject, {{v8_class}}::trace, {{to_active_dom_object}}, 0, {{v8_class}}::preparePrototypeObject, {{v8_class}}::installConditionallyEnabledProperties, "{{interface_name}}", 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::{{wrapper_class_id}}, WrapperTypeInfo::{{event_target_inheritance}}, WrapperTypeInfo::{{lifetime}}, WrapperTypeInfo::{{gc_type}} };
 
 {{generate_constructor(named_constructor)}}
 v8::Local<v8::FunctionTemplate> {{v8_class}}Constructor::domTemplate(v8::Isolate* isolate)
@@ -523,13 +525,13 @@ static void constructor(const v8::FunctionCallbackInfo<v8::Value>& info)
         {# Invalid arity, throw error #}
         {# Report full list of valid arities if gaps and above minimum #}
         {% if constructor_overloads.valid_arities %}
-        if (info.Length() >= {{constructor_overloads.minarg}}) {
+        if (info.Length() >= {{constructor_overloads.length}}) {
             throwArityTypeError(exceptionState, "{{constructor_overloads.valid_arities}}", info.Length());
             return;
         }
         {% endif %}
         {# Otherwise just report "not enough arguments" #}
-        exceptionState.throwTypeError(ExceptionMessages::notEnoughArguments({{constructor_overloads.minarg}}, info.Length()));
+        exceptionState.throwTypeError(ExceptionMessages::notEnoughArguments({{constructor_overloads.length}}, info.Length()));
         exceptionState.throwIfNeeded();
         return;
     }
@@ -622,7 +624,7 @@ void {{v8_class}}::visitDOMWrapper(v8::Isolate* isolate, ScriptWrappable* script
     {{set_wrapper_reference_to.cpp_type}} {{set_wrapper_reference_to.name}} = impl->{{set_wrapper_reference_to.name}}();
     if ({{set_wrapper_reference_to.name}}) {
         if (!DOMDataStore::containsWrapper({{set_wrapper_reference_to.name}}, isolate))
-            {{set_wrapper_reference_to.name}}->wrap(creationContext, isolate);
+            {{set_wrapper_reference_to.name}}->wrap(isolate, creationContext);
         DOMDataStore::setWrapperReference(wrapper, {{set_wrapper_reference_to.name}}, isolate);
     }
     {% endfor %}
@@ -906,8 +908,7 @@ void {{v8_class}}::installConditionallyEnabledProperties(v8::Local<v8::Object> i
     v8::Local<v8::Object> prototypeObject = v8::Local<v8::Object>::Cast(instanceObject->GetPrototype());
     ExecutionContext* context = toExecutionContext(prototypeObject->CreationContext());
 
-    {% for attribute in attributes if attribute.per_context_enabled_function or attribute.exposed_test %}
-    {% filter per_context_enabled(attribute.per_context_enabled_function) %}
+    {% for attribute in attributes if attribute.exposed_test %}
     {% filter exposed(attribute.exposed_test) %}
     {% if attribute.is_expose_js_accessors %}
     static const V8DOMConfiguration::AccessorConfiguration accessorConfiguration = {{attribute_configuration(attribute)}};
@@ -917,12 +918,47 @@ void {{v8_class}}::installConditionallyEnabledProperties(v8::Local<v8::Object> i
     V8DOMConfiguration::installAttribute(isolate, instanceObject, prototypeObject, attributeConfiguration);
     {% endif %}
     {% endfilter %}
-    {% endfilter %}
     {% endfor %}
 }
 
 {% endif %}
 {% endblock %}
+
+
+{##############################################################################}
+{% block prepare_prototype_object %}
+{% from 'methods.cpp' import install_conditionally_enabled_methods with context %}
+{% if unscopeables or conditionally_enabled_methods %}
+void {{v8_class}}::preparePrototypeObject(v8::Isolate* isolate, v8::Local<v8::Object> prototypeObject)
+{
+{% if unscopeables %}
+    {{install_unscopeables() | indent}}
+{% endif %}
+{% if conditionally_enabled_methods %}
+    {{install_conditionally_enabled_methods() | indent}}
+{% endif %}
+}
+
+{% endif %}
+{% endblock %}
+
+
+{##############################################################################}
+{% macro install_unscopeables() %}
+v8::Local<v8::Context> v8Context(prototypeObject->CreationContext());
+v8::Local<v8::Name> unscopablesSymbol(v8::Symbol::GetUnscopables(isolate));
+v8::Local<v8::Object> unscopeables;
+if (v8CallBoolean(prototypeObject->HasOwnProperty(v8Context, unscopablesSymbol)))
+    unscopeables = prototypeObject->Get(v8Context, unscopablesSymbol).ToLocalChecked().As<v8::Object>();
+else
+    unscopeables = v8::Object::New(isolate);
+{% for name, runtime_enabled_function in unscopeables %}
+{% filter runtime_enabled(runtime_enabled_function) %}
+unscopeables->ForceSet(v8Context, v8AtomicString(isolate, "{{name}}"), v8::True(isolate)).FromJust();
+{% endfilter %}
+{% endfor %}
+prototypeObject->ForceSet(v8Context, unscopablesSymbol, unscopeables).FromJust();
+{% endmacro %}
 
 
 {##############################################################################}
@@ -1000,11 +1036,11 @@ void {{v8_class}}::derefObject(ScriptWrappable* scriptWrappable)
 {% if has_partial_interface %}
 InstallTemplateFunction {{v8_class}}::install{{v8_class}}TemplateFunction = (InstallTemplateFunction)&{{v8_class}}::install{{v8_class}}Template;
 
-void {{v8_class}}::updateWrapperTypeInfo(InstallTemplateFunction installTemplateFunction, InstallConditionallyEnabledMethodsFunction installConditionallyEnabledMethodsFunction)
+void {{v8_class}}::updateWrapperTypeInfo(InstallTemplateFunction installTemplateFunction, PreparePrototypeObjectFunction preparePrototypeObjectFunction)
 {
     {{v8_class}}::install{{v8_class}}TemplateFunction = installTemplateFunction;
-    if (installConditionallyEnabledMethodsFunction)
-        {{v8_class}}::wrapperTypeInfo.installConditionallyEnabledMethodsFunction = installConditionallyEnabledMethodsFunction;
+    if (preparePrototypeObjectFunction)
+        {{v8_class}}::wrapperTypeInfo.preparePrototypeObjectFunction = preparePrototypeObjectFunction;
 }
 
 {% for method in methods if method.overloads and method.overloads.has_partial_overloads %}

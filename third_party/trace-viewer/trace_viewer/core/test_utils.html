@@ -9,6 +9,7 @@ found in the LICENSE file.
 <link rel="import" href="/core/trace_model/slice.html">
 <link rel="import" href="/core/trace_model/slice_group.html">
 <link rel="import" href="/core/trace_model/stack_frame.html">
+<link rel="import" href="/core/trace_model/thread_time_slice.html">
 
 <script>
 'use strict';
@@ -32,6 +33,52 @@ tv.exportTo('tv.c.test_utils', function() {
     return s;
   }
 
+  function newAsyncSliceEx(options) {
+    if (options.start === undefined)
+      throw new Error('Too little info');
+
+    var title = options.title ? options.title : 'a';
+
+    var colorId = options.colorId ? options.colorId : 0;
+
+    var duration;
+    if (options.duration !== undefined) {
+      if (options.end !== undefined) throw new Error('TMI');
+      duration = options.duration;
+    } else if (options.end !== undefined) {
+      if (options.duration !== undefined) throw new Error('TMI');
+      duration = options.end - options.start;
+    } else {
+      throw new Error('Too little info');
+    }
+
+    var isTopLevel;
+    if (options.isTopLevel !== undefined)
+      isTopLevel = options.isTopLevel;
+    else
+      isTopLevel = false;
+
+    var slice = new tv.c.trace_model.AsyncSlice(
+        options.cat ? options.cat : 'cat',
+        title,
+        colorId,
+        options.start,
+        options.args ? options.args : {},
+        duration, isTopLevel);
+
+    if (options.startStackFrame)
+      slice.startStackFrame = options.startStackFrame;
+    if (options.endStackFrame)
+      slice.endStackFrame = options.endStackFrame;
+    if (options.important)
+      slice.important = options.important;
+    if (options.startThread)
+      slice.startThread = options.startThread;
+    if (options.endThread)
+      slice.endThread = options.endThread;
+    return slice;
+  }
+
   function newCounter(parent) {
     return newCounterNamed(parent, 'a');
   }
@@ -46,12 +93,25 @@ tv.exportTo('tv.c.test_utils', function() {
     return s;
   }
 
+  function newCounterSeries() {
+    var s = new tv.c.trace_model.CounterSeries('a', 0);
+    return s;
+  }
+
   function newSlice(start, duration) {
     return newSliceNamed('a', start, duration);
   }
 
   function newSliceNamed(name, start, duration) {
     var s = new tv.c.trace_model.Slice('', name, 0, start, {}, duration);
+    return s;
+  }
+
+  function newThreadSlice(thread, state, start, duration, opt_cpu) {
+    var s = new tv.c.trace_model.ThreadTimeSlice(
+        thread, state, 'cat', start, {}, duration);
+    if (opt_cpu)
+      s.cpuOnWhichThreadWasRunning = opt_cpu;
     return s;
   }
 
@@ -75,6 +135,56 @@ tv.exportTo('tv.c.test_utils', function() {
     return s;
   }
 
+  function newSliceEx(options) {
+    if (options.start === undefined)
+      throw new Error('Too little info');
+
+    var title = options.title ? options.title : 'a';
+
+    var colorId = options.colorId ? options.colorId : 0;
+
+    var duration;
+    if (options.duration !== undefined) {
+      if (options.end !== undefined) throw new Error('TMI');
+      duration = options.duration;
+    } else if (options.end !== undefined) {
+      if (options.duration !== undefined) throw new Error('TMI');
+      duration = options.end - options.start;
+    } else {
+      throw new Error('Too little info');
+    }
+
+    var cpuStart = options.cpuStart;
+    var cpuDuration;
+    if (options.cpuDuration !== undefined) {
+      if (cpuStart !== undefined) throw new Error('Too little info');
+      if (options.cpuEnd !== undefined) throw new Error('TMI');
+      cpuDuration = options.cpuDuration;
+    } else if (options.cpuEnd !== undefined) {
+      if (cpuStart === undefined) throw new Error('Too little info');
+      if (options.cpuDuration !== undefined) throw new Error('TMI');
+      cpuDuration = options.cpuEnd - cpuStart;
+    }
+
+    var type;
+    if (options.type)
+      type = options.type;
+    else
+      type = tv.c.trace_model.Slice;
+
+    var slice = new type(
+        options.cat ? options.cat : 'cat',
+        title,
+        colorId,
+        options.start,
+        options.args ? options.args : {},
+        duration,
+        cpuStart, cpuDuration);
+
+
+    return slice;
+  }
+
   function newStackTrace(model, category, titles) {
     var frame = undefined;
     for (var i = 0; i < titles.length; i++) {
@@ -95,17 +205,40 @@ tv.exportTo('tv.c.test_utils', function() {
       return undefined;
   }
 
+  function newModel(customizeModelCallback) {
+    var io = new tv.c.ImportOptions();
+    io.customizeModelCallback = customizeModelCallback;
+    io.shiftWorldToZero = false;
+    io.pruneEmptyContainers = false;
+    return new tv.c.TraceModel([], io);
+  }
+
+  function newModelWithAuditor(customizeModelCallback, auditor) {
+    var io = new tv.c.ImportOptions();
+    io.customizeModelCallback = customizeModelCallback;
+    io.shiftWorldToZero = false;
+    io.pruneEmptyContainers = false;
+    io.auditorConstructors = [auditor];
+    return new tv.c.TraceModel([], io);
+  }
+
   return {
     newAsyncSlice: newAsyncSlice,
     newAsyncSliceNamed: newAsyncSliceNamed,
+    newAsyncSliceEx: newAsyncSliceEx,
     newCounter: newCounter,
     newCounterNamed: newCounterNamed,
     newCounterCategory: newCounterCategory,
+    newCounterSeries: newCounterSeries,
     newSlice: newSlice,
+    newThreadSlice: newThreadSlice,
     newSliceNamed: newSliceNamed,
+    newSliceEx: newSliceEx,
     newSampleNamed: newSampleNamed,
     newSliceCategory: newSliceCategory,
     newStackTrace: newStackTrace,
+    newModel: newModel,
+    newModelWithAuditor: newModelWithAuditor,
     findSliceNamed: findSliceNamed
   };
 });

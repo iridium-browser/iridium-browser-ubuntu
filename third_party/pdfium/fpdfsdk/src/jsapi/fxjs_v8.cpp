@@ -28,7 +28,7 @@ static double GetNan()
 }
 
 
-class CJS_PrivateData: public CFX_Object
+class CJS_PrivateData
 {
 public:
 	CJS_PrivateData():ObjDefID(-1), pPrivate(NULL) {}
@@ -37,7 +37,7 @@ public:
 };
 
 
-class CJS_ObjDefintion: public CFX_Object
+class CJS_ObjDefintion
 {
 public:
 	CJS_ObjDefintion(v8::Isolate* isolate, const wchar_t* sObjName, FXJSOBJTYPE eObjType, LP_CONSTRUCTOR pConstructor, LP_DESTRUCTOR pDestructor, unsigned bApplyNew):
@@ -47,7 +47,7 @@ public:
 		  v8::HandleScope handle_scope(isolate);
 
 		  v8::Handle<v8::ObjectTemplate> objTemplate = v8::ObjectTemplate::New(isolate);
-		  objTemplate->SetInternalFieldCount(1);
+		  objTemplate->SetInternalFieldCount(2);
 		  m_objTemplate.Reset(isolate, objTemplate);
 
 		 //Document as the global object.
@@ -80,17 +80,17 @@ int JS_DefineObj(IJS_Runtime* pJSRuntime, const wchar_t* sObjName, FXJSOBJTYPE e
 	v8::Isolate::Scope isolate_scope(isolate);
 	v8::HandleScope handle_scope(isolate);
 	CFX_PtrArray* pArray = (CFX_PtrArray*)isolate->GetData(0);
-	if(!pArray) 
+	if(!pArray)
 	{
-		pArray = FX_NEW CFX_PtrArray();
+		pArray = new CFX_PtrArray();
 		isolate->SetData(0, pArray);
 	}
-	CJS_ObjDefintion* pObjDef = FX_NEW CJS_ObjDefintion(isolate, sObjName, eObjType, pConstructor, pDestructor, bApplyNew);
+	CJS_ObjDefintion* pObjDef = new CJS_ObjDefintion(isolate, sObjName, eObjType, pConstructor, pDestructor, bApplyNew);
 	pArray->Add(pObjDef);
 	return pArray->GetSize()-1;
 }
 
-int JS_DefineObjMethod(IJS_Runtime* pJSRuntime, int nObjDefnID, const wchar_t* sMethodName, v8::FunctionCallback pMethodCall, unsigned nParamNum)
+int JS_DefineObjMethod(IJS_Runtime* pJSRuntime, int nObjDefnID, const wchar_t* sMethodName, v8::FunctionCallback pMethodCall)
 {
 	v8::Isolate* isolate = (v8::Isolate*)pJSRuntime;
 	v8::Isolate::Scope isolate_scope(isolate);
@@ -185,7 +185,7 @@ static v8::Persistent<v8::ObjectTemplate>& _getGlobalObjectTemplate(IJS_Runtime*
 	return gloabalObjectTemplate;
 }
 
-int JS_DefineGlobalMethod(IJS_Runtime* pJSRuntime, const wchar_t* sMethodName, v8::FunctionCallback pMethodCall, unsigned nParamNum)
+int JS_DefineGlobalMethod(IJS_Runtime* pJSRuntime, const wchar_t* sMethodName, v8::FunctionCallback pMethodCall)
 {
 	v8::Isolate* isolate = (v8::Isolate*)pJSRuntime;
 	v8::Isolate::Scope isolate_scope(isolate);
@@ -263,11 +263,10 @@ void JS_InitialRuntime(IJS_Runtime* pJSRuntime,IFXJS_Runtime* pFXRuntime, IFXJS_
 			if(ws.Equal(L"Document"))
 			{
 
-				CJS_PrivateData* pPrivateData = FX_NEW CJS_PrivateData;
+				CJS_PrivateData* pPrivateData = new CJS_PrivateData;
 				pPrivateData->ObjDefID = i;
-				v8::Handle<v8::External> ptr = v8::External::New(isolate, pPrivateData);
 
-				v8Context->Global()->GetPrototype()->ToObject()->SetInternalField(0, ptr); 
+				v8Context->Global()->GetPrototype()->ToObject()->SetAlignedPointerInInternalField(0, pPrivateData);
 
 				if(pObjDef->m_pConstructor)
 					pObjDef->m_pConstructor(context, v8Context->Global()->GetPrototype()->ToObject(), v8Context->Global()->GetPrototype()->ToObject());
@@ -377,14 +376,12 @@ v8::Handle<v8::Object> JS_NewFxDynamicObj(IJS_Runtime* pJSRuntime, IFXJS_Context
 
 	v8::Local<v8::Context> context = isolate->GetCurrentContext();
 	v8::Local<v8::ObjectTemplate> objTemp = v8::Local<v8::ObjectTemplate>::New(isolate, pObjDef->m_objTemplate);
-
 	v8::Local<v8::Object> obj = objTemp->NewInstance();
-	
-	CJS_PrivateData* pPrivateData = FX_NEW CJS_PrivateData;
-	pPrivateData->ObjDefID = nObjDefnID;
-	v8::Handle<v8::External> ptr = v8::External::New(isolate, pPrivateData);
-	obj->SetInternalField(0, ptr); 
 
+	CJS_PrivateData* pPrivateData = new CJS_PrivateData;
+	pPrivateData->ObjDefID = nObjDefnID;
+
+	obj->SetAlignedPointerInInternalField(0, pPrivateData);
 	if(pObjDef->m_pConstructor)
 		pObjDef->m_pConstructor(pJSContext, obj, context->Global()->GetPrototype()->ToObject());
 
@@ -425,8 +422,7 @@ v8::Handle<v8::Object>	JS_GetThisObj(IJS_Runtime * pJSRuntime)
 int	JS_GetObjDefnID(v8::Handle<v8::Object> pObj)
 {
 	if(pObj.IsEmpty() || !pObj->InternalFieldCount()) return -1;
-	v8::Handle<v8::External> field = v8::Handle<v8::External>::Cast(pObj->GetInternalField(0));
-	CJS_PrivateData* pPrivateData = (CJS_PrivateData*)field->Value();
+	CJS_PrivateData* pPrivateData = (CJS_PrivateData*)pObj->GetAlignedPointerFromInternalField(0);
 	if(pPrivateData)
 		return pPrivateData->ObjDefID;
 	return -1;
@@ -509,8 +505,7 @@ void* JS_GetPrivate(v8::Handle<v8::Object> pObj)
 void JS_SetPrivate(IJS_Runtime* pJSRuntime, v8::Handle<v8::Object> pObj, void* p)
 {
 	if(pObj.IsEmpty() || !pObj->InternalFieldCount()) return;
-	v8::Handle<v8::External> ptr = v8::Handle<v8::External>::Cast(pObj->GetInternalField(0));
-	CJS_PrivateData* pPrivateData  = (CJS_PrivateData*)ptr->Value();
+	CJS_PrivateData* pPrivateData  = (CJS_PrivateData*)pObj->GetAlignedPointerFromInternalField(0);
 	if(!pPrivateData) return;
 	pPrivateData->pPrivate = p;
 }
@@ -518,31 +513,30 @@ void JS_SetPrivate(IJS_Runtime* pJSRuntime, v8::Handle<v8::Object> pObj, void* p
 void* JS_GetPrivate(IJS_Runtime* pJSRuntime, v8::Handle<v8::Object> pObj)
 {
 	if(pObj.IsEmpty()) return NULL;
-	v8::Local<v8::Value> value;
+	CJS_PrivateData* pPrivateData  = NULL;
 	if(pObj->InternalFieldCount())
-		value = pObj->GetInternalField(0); 
+                pPrivateData = (CJS_PrivateData*)pObj->GetAlignedPointerFromInternalField(0);
 	else
 	{
 		//It could be a global proxy object.
 		v8::Local<v8::Value> v = pObj->GetPrototype();
 		if(v->IsObject())
-			value = v->ToObject()->GetInternalField(0);
+                        pPrivateData = (CJS_PrivateData*)v->ToObject()->GetAlignedPointerFromInternalField(0);
 	}
-	if(value.IsEmpty() || value->IsUndefined()) return NULL;
-	v8::Handle<v8::External> ptr = v8::Handle<v8::External>::Cast(value);
-	CJS_PrivateData* pPrivateData  = (CJS_PrivateData*)ptr->Value();
 	if(!pPrivateData) return NULL;
 	return pPrivateData->pPrivate;
+}
+
+void JS_FreePrivate(void* pPrivateData)
+{
+        delete (CJS_PrivateData*)pPrivateData;
 }
 
 void JS_FreePrivate(v8::Handle<v8::Object> pObj)
 {
 	if(pObj.IsEmpty() || !pObj->InternalFieldCount()) return;
-	v8::Handle<v8::External> ptr = v8::Handle<v8::External>::Cast(pObj->GetInternalField(0));
-	delete (CJS_PrivateData*)ptr->Value();
-	v8::Local<v8::Context> context = pObj->CreationContext();
-
-	pObj->SetInternalField(0, v8::External::New(context->GetIsolate(), NULL));
+	JS_FreePrivate(pObj->GetAlignedPointerFromInternalField(0));
+	pObj->SetAlignedPointerInInternalField(0, NULL);
 }
 
 
@@ -758,6 +752,13 @@ double _getLocalTZA()
 	time_t t = 0;
 	time(&t);
 	localtime(&t);
+#if _MSC_VER >= 1900
+  // In gcc and in Visual Studio prior to VS 2015 'timezone' is a global
+  // variable declared in time.h. That variable was deprecated and in VS 2015
+  // is removed, with _get_timezone replacing it.
+  long timezone = 0;
+  _get_timezone(&timezone);
+#endif
 	return (double)(-(timezone * 1000));
 }
 

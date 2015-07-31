@@ -18,6 +18,8 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/account_reconcilor_factory.h"
 #include "chrome/browser/signin/account_tracker_service_factory.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/signin/signin_ui_util.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/browser.h"
@@ -29,6 +31,7 @@
 #include "chrome/common/url_constants.h"
 #include "components/signin/core/browser/account_reconcilor.h"
 #include "components/signin/core/browser/account_tracker_service.h"
+#include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/user_metrics.h"
@@ -109,7 +112,7 @@ void OpenBrowserWindowForProfile(
     chrome::HostDesktopType desktop_type,
     Profile* profile,
     Profile::CreateStatus status) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   if (status != Profile::CREATE_STATUS_INITIALIZED)
     return;
@@ -310,7 +313,7 @@ bool HasProfileSwitchTargets(Profile* profile) {
   size_t min_profiles = profile->IsGuestSession() ? 1 : 2;
   size_t number_of_profiles =
       g_browser_process->profile_manager()->GetNumberOfProfiles();
-  return number_of_profiles < min_profiles;
+  return number_of_profiles >= min_profiles;
 }
 
 void CreateAndSwitchToNewProfile(chrome::HostDesktopType desktop_type,
@@ -381,11 +384,9 @@ bool IsLockAvailable(Profile* profile) {
   if (!switches::IsNewProfileManagement())
     return false;
 
-  if (profile->IsGuestSession())
+  if (profile->IsGuestSession() || profile->IsSystemProfile())
     return false;
 
-  const ProfileInfoCache& cache =
-      g_browser_process->profile_manager()->GetProfileInfoCache();
   std::string hosted_domain = profile->GetPrefs()->
       GetString(prefs::kGoogleServicesHostedDomain);
   // TODO(mlerman): After one release remove any hosted_domain reference to the
@@ -393,9 +394,9 @@ bool IsLockAvailable(Profile* profile) {
   if (hosted_domain.empty()) {
     AccountTrackerService* account_tracker =
         AccountTrackerServiceFactory::GetForProfile(profile);
-    int profile_index = cache.GetIndexOfProfileWithPath(profile->GetPath());
-    hosted_domain = account_tracker->FindAccountInfoByEmail(base::UTF16ToUTF8(
-        cache.GetUserNameOfProfileAtIndex(profile_index))).hosted_domain;
+    std::string account_id =
+      SigninManagerFactory::GetForProfile(profile)->GetAuthenticatedAccountId();
+    hosted_domain = account_tracker->GetAccountInfo(account_id).hosted_domain;
   }
   // TODO(mlerman): Prohibit only users who authenticate using SAML. Until then,
   // prohibited users who use hosted domains (aside from google.com).
@@ -404,6 +405,8 @@ bool IsLockAvailable(Profile* profile) {
     return false;
   }
 
+  const ProfileInfoCache& cache =
+      g_browser_process->profile_manager()->GetProfileInfoCache();
   for (size_t i = 0; i < cache.GetNumberOfProfiles(); ++i) {
     if (cache.ProfileIsSupervisedAtIndex(i))
       return true;
@@ -521,6 +524,28 @@ void BubbleViewModeFromAvatarBubbleMode(
     default:
       *bubble_view_mode = profiles::BUBBLE_VIEW_MODE_PROFILE_CHOOSER;
   }
+}
+
+bool ShouldShowWelcomeUpgradeTutorial(
+    Profile* profile, TutorialMode tutorial_mode) {
+  const int show_count = profile->GetPrefs()->GetInteger(
+      prefs::kProfileAvatarTutorialShown);
+  // Do not show the tutorial if user has dismissed it.
+  if (show_count > signin_ui_util::kUpgradeWelcomeTutorialShowMax)
+    return false;
+
+  return tutorial_mode == TUTORIAL_MODE_WELCOME_UPGRADE ||
+         show_count != signin_ui_util::kUpgradeWelcomeTutorialShowMax;
+}
+
+bool ShouldShowRightClickTutorial(Profile* profile) {
+  PrefService* local_state = g_browser_process->local_state();
+  const bool dismissed = local_state->GetBoolean(
+      prefs::kProfileAvatarRightClickTutorialDismissed);
+
+  // Don't show the tutorial if it's already been dismissed or if right-clicking
+  // wouldn't show any targets.
+  return !dismissed && HasProfileSwitchTargets(profile);
 }
 
 }  // namespace profiles

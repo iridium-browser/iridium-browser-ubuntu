@@ -47,6 +47,12 @@ void InitPixelTouchscreen(TouchEventConverterEvdev* device) {
   device->Initialize(devinfo);
 }
 
+void InitEloTouchscreen(TouchEventConverterEvdev* device) {
+  EventDeviceInfo devinfo;
+  EXPECT_TRUE(CapabilitiesToDeviceInfo(kElo_TouchSystems_2700, &devinfo));
+  device->Initialize(devinfo);
+}
+
 }  // namespace
 
 class MockTouchEventConverterEvdev : public TouchEventConverterEvdev {
@@ -168,20 +174,20 @@ class TouchEventConverterEvdevTest : public testing::Test {
     dispatcher_.reset(new ui::MockDeviceEventDispatcherEvdev(
         base::Bind(&TouchEventConverterEvdevTest::DispatchCallback,
                    base::Unretained(this))));
-    device_ = new ui::MockTouchEventConverterEvdev(
+    device_.reset(new ui::MockTouchEventConverterEvdev(
         events_in_, base::FilePath(kTestDevicePath), devinfo,
-        dispatcher_.get());
+        dispatcher_.get()));
     loop_ = new base::MessageLoopForUI;
 
     ui::DeviceDataManager::CreateInstance();
   }
 
   void TearDown() override {
-    delete device_;
+    device_.reset();
     delete loop_;
   }
 
-  ui::MockTouchEventConverterEvdev* device() { return device_; }
+  ui::MockTouchEventConverterEvdev* device() { return device_.get(); }
 
   unsigned size() { return dispatched_events_.size(); }
   const ui::TouchEventParams& dispatched_event(unsigned index) {
@@ -191,9 +197,11 @@ class TouchEventConverterEvdevTest : public testing::Test {
 
   void ClearDispatchedEvents() { dispatched_events_.clear(); }
 
+  void DestroyDevice() { device_.reset(); }
+
  private:
   base::MessageLoop* loop_;
-  ui::MockTouchEventConverterEvdev* device_;
+  scoped_ptr<ui::MockTouchEventConverterEvdev> device_;
   scoped_ptr<ui::MockDeviceEventDispatcherEvdev> dispatcher_;
 
   int events_out_;
@@ -263,7 +271,7 @@ TEST_F(TouchEventConverterEvdevTest, TouchMove) {
             event.timestamp);
   EXPECT_EQ(295, event.location.x());
   EXPECT_EQ(421, event.location.y());
-  EXPECT_EQ(0, event.touch_id);
+  EXPECT_EQ(0, event.slot);
   EXPECT_FLOAT_EQ(58.f, event.radii.x());
   EXPECT_FLOAT_EQ(0.13333334f, event.pressure);
 
@@ -278,7 +286,7 @@ TEST_F(TouchEventConverterEvdevTest, TouchMove) {
             event.timestamp);
   EXPECT_EQ(312, event.location.x());
   EXPECT_EQ(432, event.location.y());
-  EXPECT_EQ(0, event.touch_id);
+  EXPECT_EQ(0, event.slot);
   EXPECT_FLOAT_EQ(50.f, event.radii.x());
   EXPECT_FLOAT_EQ(0.16862745f, event.pressure);
 
@@ -293,7 +301,7 @@ TEST_F(TouchEventConverterEvdevTest, TouchMove) {
             event.timestamp);
   EXPECT_EQ(312, event.location.x());
   EXPECT_EQ(432, event.location.y());
-  EXPECT_EQ(0, event.touch_id);
+  EXPECT_EQ(0, event.slot);
   EXPECT_FLOAT_EQ(50.f, event.radii.x());
   EXPECT_FLOAT_EQ(0.16862745f, event.pressure);
 }
@@ -343,7 +351,7 @@ TEST_F(TouchEventConverterEvdevTest, TwoFingerGesture) {
   EXPECT_EQ(base::TimeDelta::FromMicroseconds(0), ev0.timestamp);
   EXPECT_EQ(40, ev0.location.x());
   EXPECT_EQ(51, ev0.location.y());
-  EXPECT_EQ(0, ev0.touch_id);
+  EXPECT_EQ(0, ev0.slot);
   EXPECT_FLOAT_EQ(0.17647059f, ev0.pressure);
 
   // Press
@@ -351,7 +359,7 @@ TEST_F(TouchEventConverterEvdevTest, TwoFingerGesture) {
   EXPECT_EQ(base::TimeDelta::FromMicroseconds(0), ev1.timestamp);
   EXPECT_EQ(101, ev1.location.x());
   EXPECT_EQ(102, ev1.location.y());
-  EXPECT_EQ(1, ev1.touch_id);
+  EXPECT_EQ(1, ev1.slot);
   EXPECT_FLOAT_EQ(0.17647059f, ev1.pressure);
 
   // Stationary 0, Moves 1.
@@ -367,7 +375,7 @@ TEST_F(TouchEventConverterEvdevTest, TwoFingerGesture) {
   EXPECT_EQ(base::TimeDelta::FromMicroseconds(0), ev1.timestamp);
   EXPECT_EQ(40, ev1.location.x());
   EXPECT_EQ(102, ev1.location.y());
-  EXPECT_EQ(1, ev1.touch_id);
+  EXPECT_EQ(1, ev1.slot);
   EXPECT_FLOAT_EQ(0.17647059f, ev1.pressure);
 
   // Move 0, stationary 1.
@@ -384,7 +392,7 @@ TEST_F(TouchEventConverterEvdevTest, TwoFingerGesture) {
   EXPECT_EQ(base::TimeDelta::FromMicroseconds(0), ev0.timestamp);
   EXPECT_EQ(39, ev0.location.x());
   EXPECT_EQ(51, ev0.location.y());
-  EXPECT_EQ(0, ev0.touch_id);
+  EXPECT_EQ(0, ev0.slot);
   EXPECT_FLOAT_EQ(0.17647059f, ev0.pressure);
 
   // Release 0, move 1.
@@ -402,14 +410,14 @@ TEST_F(TouchEventConverterEvdevTest, TwoFingerGesture) {
   EXPECT_EQ(base::TimeDelta::FromMicroseconds(0), ev0.timestamp);
   EXPECT_EQ(39, ev0.location.x());
   EXPECT_EQ(51, ev0.location.y());
-  EXPECT_EQ(0, ev0.touch_id);
+  EXPECT_EQ(0, ev0.slot);
   EXPECT_FLOAT_EQ(0.17647059f, ev0.pressure);
 
   EXPECT_EQ(ui::ET_TOUCH_MOVED, ev1.type);
   EXPECT_EQ(base::TimeDelta::FromMicroseconds(0), ev1.timestamp);
   EXPECT_EQ(38, ev1.location.x());
   EXPECT_EQ(102, ev1.location.y());
-  EXPECT_EQ(1, ev1.touch_id);
+  EXPECT_EQ(1, ev1.slot);
   EXPECT_FLOAT_EQ(0.17647059f, ev1.pressure);
 
   // Release 1.
@@ -425,7 +433,7 @@ TEST_F(TouchEventConverterEvdevTest, TwoFingerGesture) {
   EXPECT_EQ(base::TimeDelta::FromMicroseconds(0), ev1.timestamp);
   EXPECT_EQ(38, ev1.location.x());
   EXPECT_EQ(102, ev1.location.y());
-  EXPECT_EQ(1, ev1.touch_id);
+  EXPECT_EQ(1, ev1.slot);
   EXPECT_FLOAT_EQ(0.17647059f, ev1.pressure);
 }
 
@@ -495,10 +503,134 @@ TEST_F(TouchEventConverterEvdevTest, ShouldResumeExistingContactsOnStart) {
 
   ui::TouchEventParams ev = dispatched_event(0);
   EXPECT_EQ(ET_TOUCH_PRESSED, ev.type);
-  EXPECT_EQ(0, ev.touch_id);
+  EXPECT_EQ(0, ev.slot);
   EXPECT_FLOAT_EQ(50.f, ev.radii.x());
   EXPECT_FLOAT_EQ(0.f, ev.radii.y());
   EXPECT_FLOAT_EQ(0.50196081f, ev.pressure);
+}
+
+TEST_F(TouchEventConverterEvdevTest, ShouldReleaseContactsOnStop) {
+  ui::MockTouchEventConverterEvdev* dev = device();
+
+  InitPixelTouchscreen(dev);
+
+  // Captured from Chromebook Pixel (Link).
+  timeval time;
+  time = {1429651083, 686882};
+  struct input_event mock_kernel_queue_press[] = {
+      {time, EV_ABS, ABS_MT_TRACKING_ID, 0},
+      {time, EV_ABS, ABS_MT_POSITION_X, 1003},
+      {time, EV_ABS, ABS_MT_POSITION_Y, 749},
+      {time, EV_ABS, ABS_MT_PRESSURE, 50},
+      {time, EV_ABS, ABS_MT_TOUCH_MAJOR, 116},
+      {time, EV_KEY, BTN_TOUCH, 1},
+      {time, EV_ABS, ABS_X, 1003},
+      {time, EV_ABS, ABS_Y, 749},
+      {time, EV_ABS, ABS_PRESSURE, 50},
+      {time, EV_SYN, SYN_REPORT, 0},
+  };
+
+  dev->ConfigureReadMock(mock_kernel_queue_press,
+                         arraysize(mock_kernel_queue_press), 0);
+  dev->ReadNow();
+  EXPECT_EQ(1u, size());
+
+  ui::TouchEventParams ev1 = dispatched_event(0);
+  EXPECT_EQ(ET_TOUCH_PRESSED, ev1.type);
+  EXPECT_EQ(0, ev1.slot);
+
+  DestroyDevice();
+  EXPECT_EQ(2u, size());
+
+  ui::TouchEventParams ev2 = dispatched_event(1);
+  EXPECT_EQ(ET_TOUCH_RELEASED, ev2.type);
+  EXPECT_EQ(0, ev2.slot);
+}
+
+// crbug.com/477695
+TEST_F(TouchEventConverterEvdevTest, ShouldUseLeftButtonIfNoTouchButton) {
+  ui::MockTouchEventConverterEvdev* dev = device();
+
+  InitEloTouchscreen(dev);
+
+  // Captured from Elo TouchSystems 2700.
+  timeval time;
+  time = {1433965490, 837958};
+  struct input_event mock_kernel_queue_press[] = {
+      {time, EV_ABS, ABS_X, 3654},
+      {time, EV_ABS, ABS_Y, 1054},
+      {time, EV_ABS, ABS_MISC, 18},
+      {time, EV_SYN, SYN_REPORT, 0},
+
+      {time, EV_MSC, MSC_SCAN, 90001},
+      {time, EV_KEY, BTN_LEFT, 1},
+      {time, EV_ABS, ABS_Y, 1055},
+      {time, EV_ABS, ABS_MISC, 25},
+      {time, EV_SYN, SYN_REPORT, 0},
+  };
+  time = {1433965491, 1953};
+  struct input_event mock_kernel_queue_move[] = {
+      {time, EV_ABS, ABS_X, 3644},
+      {time, EV_ABS, ABS_Y, 1059},
+      {time, EV_ABS, ABS_MISC, 36},
+      {time, EV_SYN, SYN_REPORT, 0},
+  };
+  time = {1433965491, 225959};
+  struct input_event mock_kernel_queue_release[] = {
+      {time, EV_MSC, MSC_SCAN, 90001},
+      {time, EV_KEY, BTN_LEFT, 0},
+      {time, EV_ABS, ABS_MISC, 0},
+      {time, EV_SYN, SYN_REPORT, 0},
+  };
+
+  // Press.
+  dev->ConfigureReadMock(mock_kernel_queue_press,
+                         arraysize(mock_kernel_queue_press), 0);
+  dev->ReadNow();
+  EXPECT_EQ(1u, size());
+  ui::TouchEventParams event = dispatched_event(0);
+  EXPECT_EQ(ui::ET_TOUCH_PRESSED, event.type);
+  EXPECT_EQ(base::TimeDelta::FromMicroseconds(1433965490837958),
+            event.timestamp);
+  EXPECT_EQ(3654, event.location.x());
+  EXPECT_EQ(1055, event.location.y());
+  EXPECT_EQ(0, event.slot);
+  EXPECT_FLOAT_EQ(0.f, event.radii.x());
+  EXPECT_FLOAT_EQ(0.f, event.pressure);
+
+  // Move.
+  dev->ConfigureReadMock(mock_kernel_queue_move,
+                         arraysize(mock_kernel_queue_move), 0);
+  dev->ReadNow();
+  EXPECT_EQ(2u, size());
+  event = dispatched_event(1);
+  EXPECT_EQ(ui::ET_TOUCH_MOVED, event.type);
+  EXPECT_EQ(base::TimeDelta::FromMicroseconds(1433965491001953),
+            event.timestamp);
+  EXPECT_EQ(3644, event.location.x());
+  EXPECT_EQ(1059, event.location.y());
+  EXPECT_EQ(0, event.slot);
+  EXPECT_FLOAT_EQ(0.f, event.radii.x());
+  EXPECT_FLOAT_EQ(0.f, event.pressure);
+
+  // Release.
+  dev->ConfigureReadMock(mock_kernel_queue_release,
+                         arraysize(mock_kernel_queue_release), 0);
+  dev->ReadNow();
+  EXPECT_EQ(3u, size());
+  event = dispatched_event(2);
+  EXPECT_EQ(ui::ET_TOUCH_RELEASED, event.type);
+  EXPECT_EQ(base::TimeDelta::FromMicroseconds(1433965491225959),
+            event.timestamp);
+  EXPECT_EQ(3644, event.location.x());
+  EXPECT_EQ(1059, event.location.y());
+  EXPECT_EQ(0, event.slot);
+  EXPECT_FLOAT_EQ(0.f, event.radii.x());
+  EXPECT_FLOAT_EQ(0.f, event.pressure);
+
+  // No dispatch on destruction.
+  DestroyDevice();
+  EXPECT_EQ(3u, size());
 }
 
 // crbug.com/407386
@@ -537,12 +669,12 @@ TEST_F(TouchEventConverterEvdevTest,
   ui::TouchEventParams ev0 = dispatched_event(0);
   ui::TouchEventParams ev1 = dispatched_event(1);
 
-  EXPECT_EQ(0, ev0.touch_id);
+  EXPECT_EQ(0, ev0.slot);
   EXPECT_EQ(999, ev0.location.x());
   EXPECT_EQ(888, ev0.location.y());
   EXPECT_FLOAT_EQ(0.21568628f, ev0.pressure);
 
-  EXPECT_EQ(1, ev1.touch_id);
+  EXPECT_EQ(1, ev1.slot);
   EXPECT_EQ(777, ev1.location.x());
   EXPECT_EQ(666, ev1.location.y());
   EXPECT_FLOAT_EQ(0.17254902f, ev1.pressure);

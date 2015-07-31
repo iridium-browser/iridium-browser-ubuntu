@@ -17,7 +17,6 @@
 #include "components/content_settings/core/common/permission_request_id.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
-#include "net/base/net_util.h"
 
 PermissionContextBase::PermissionContextBase(
     Profile* profile,
@@ -105,17 +104,6 @@ void PermissionContextBase::DecidePermission(
     return;
   }
 
-  // The Web MIDI API is not available for origin with non secure schemes.
-  // Access to the MIDI API is blocked.
-  // TODO(crbug.com/362214): Use a standard way to check the secure origin.
-  if (permission_type_ == CONTENT_SETTINGS_TYPE_MIDI_SYSEX &&
-      !requesting_origin.SchemeIsSecure() &&
-      !net::IsLocalhost(requesting_origin.host())) {
-    NotifyPermissionSet(id, requesting_origin, embedding_origin, callback,
-                        false /* persist */, CONTENT_SETTING_BLOCK);
-    return;
-  }
-
   ContentSetting content_setting =
       profile_->GetHostContentSettingsMap()
           ->GetContentSettingAndMaybeUpdateLastUsage(
@@ -184,7 +172,7 @@ void PermissionContextBase::PermissionDecided(
     if (persist) {
       DCHECK(content_setting == CONTENT_SETTING_ALLOW ||
              content_setting == CONTENT_SETTING_BLOCK);
-      if (CONTENT_SETTING_ALLOW)
+      if (content_setting == CONTENT_SETTING_ALLOW)
         PermissionContextUmaUtil::PermissionGranted(permission_type_,
                                                     requesting_origin);
       else

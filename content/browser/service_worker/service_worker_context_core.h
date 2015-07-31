@@ -176,16 +176,24 @@ class CONTENT_EXPORT ServiceWorkerContextCore
   // if any did not succeed.
   void UnregisterServiceWorkers(const GURL& origin,
                                 const UnregistrationCallback& callback);
-  void UpdateServiceWorker(ServiceWorkerRegistration* registration);
+  void UpdateServiceWorker(ServiceWorkerRegistration* registration,
+                           bool force_bypass_cache);
 
   // This class maintains collections of live instances, this class
   // does not own these object or influence their lifetime.
   ServiceWorkerRegistration* GetLiveRegistration(int64 registration_id);
   void AddLiveRegistration(ServiceWorkerRegistration* registration);
   void RemoveLiveRegistration(int64 registration_id);
+  const std::map<int64, ServiceWorkerRegistration*>& GetLiveRegistrations()
+      const {
+    return live_registrations_;
+  }
   ServiceWorkerVersion* GetLiveVersion(int64 version_id);
   void AddLiveVersion(ServiceWorkerVersion* version);
   void RemoveLiveVersion(int64 registration_id);
+  const std::map<int64, ServiceWorkerVersion*>& GetLiveVersions() const {
+    return live_versions_;
+  }
 
   std::vector<ServiceWorkerRegistrationInfo> GetAllLiveRegistrationInfo();
   std::vector<ServiceWorkerVersionInfo> GetAllLiveVersionInfo();

@@ -34,6 +34,7 @@
 #include "core/dom/NodeComputedStyle.h"
 #include "core/dom/NodeRareData.h"
 #include "core/dom/NodeTraversal.h"
+#include "core/dom/NthIndexCache.h"
 #include "core/dom/SelectorQuery.h"
 #include "core/dom/StaticNodeList.h"
 #include "core/dom/StyleEngine.h"
@@ -84,11 +85,8 @@ void ContainerNode::removeDetachedChildren()
 
 void ContainerNode::parserTakeAllChildrenFrom(ContainerNode& oldParent)
 {
-    while (RefPtrWillBeRawPtr<Node> child = oldParent.firstChild()) {
-        oldParent.parserRemoveChild(*child);
-        treeScope().adoptIfNeeded(*child);
+    while (RefPtrWillBeRawPtr<Node> child = oldParent.firstChild())
         parserAppendChild(child.get());
-    }
 }
 
 ContainerNode::~ContainerNode()
@@ -302,6 +300,12 @@ void ContainerNode::parserInsertBefore(PassRefPtrWillBeRawPtr<Node> newChild, No
         return;
 
     RefPtrWillBeRawPtr<Node> protect(this);
+
+    // FIXME: parserRemoveChild can run script which could then insert the
+    // newChild back into the page. Loop until the child is actually removed.
+    // See: fast/parser/execute-script-during-adoption-agency-removal.html
+    while (RefPtrWillBeRawPtr<ContainerNode> parent = newChild->parentNode())
+        parent->parserRemoveChild(*newChild);
 
     if (document() != newChild->document())
         document().adoptNode(newChild.get(), ASSERT_NO_EXCEPTION);
@@ -751,11 +755,16 @@ PassRefPtrWillBeRawPtr<Node> ContainerNode::appendChild(PassRefPtrWillBeRawPtr<N
 void ContainerNode::parserAppendChild(PassRefPtrWillBeRawPtr<Node> newChild)
 {
     ASSERT(newChild);
-    ASSERT(!newChild->parentNode()); // Use appendChild if you need to handle reparenting (and want DOM mutation events).
     ASSERT(!newChild->isDocumentFragment());
     ASSERT(!isHTMLTemplateElement(this));
 
     RefPtrWillBeRawPtr<Node> protect(this);
+
+    // FIXME: parserRemoveChild can run script which could then insert the
+    // newChild back into the page. Loop until the child is actually removed.
+    // See: fast/parser/execute-script-during-adoption-agency-removal.html
+    while (RefPtrWillBeRawPtr<ContainerNode> parent = newChild->parentNode())
+        parent->parserRemoveChild(*newChild);
 
     if (document() != newChild->document())
         document().adoptNode(newChild.get(), ASSERT_NO_EXCEPTION);
@@ -816,15 +825,12 @@ void ContainerNode::notifyNodeRemoved(Node& root)
     ScriptForbiddenScope forbidScript;
     EventDispatchForbiddenScope assertNoEventDispatch;
 
-    Document& document = root.document();
     for (Node& node : NodeTraversal::inclusiveDescendantsOf(root)) {
         // As an optimization we skip notifying Text nodes and other leaf nodes
         // of removal when they're not in the Document tree since the virtual
         // call to removedFrom is not needed.
         if (!node.inDocument() && !node.isContainerNode())
             continue;
-        if (document.cssTarget() == node)
-            document.setCSSTarget(nullptr);
         node.removedFrom(this);
         for (ShadowRoot* shadowRoot = node.youngestShadowRoot(); shadowRoot; shadowRoot = shadowRoot->olderShadowRoot())
             notifyNodeRemoved(*shadowRoot);
@@ -926,10 +932,10 @@ bool ContainerNode::getUpperLeftCorner(FloatPoint& point) const
     return false;
 }
 
-static inline LayoutObject* endOfContinuations(LayoutObject* renderer)
+static inline LayoutObject* endOfContinuations(LayoutObject* layoutObject)
 {
     LayoutObject* prev = nullptr;
-    LayoutObject* cur = renderer;
+    LayoutObject* cur = layoutObject;
 
     if (!cur->isLayoutInline() && !cur->isLayoutBlock())
         return nullptr;
@@ -967,8 +973,8 @@ bool ContainerNode::getLowerRightCorner(FloatPoint& point) const
         } else {
             LayoutObject* prev = nullptr;
             while (!prev) {
-                // Check if the current renderer has contiunation and move the location for finding the renderer
-                // to the end of continuations if there is the continuation.
+                // Check if the current layoutObject has contiunation and move the location for
+                // finding the layoutObject to the end of continuations if there is the continuation.
                 // Skip to check the contiunation on contiunations section
                 if (startContinuation == o) {
                     startContinuation = nullptr;
@@ -979,7 +985,7 @@ bool ContainerNode::getLowerRightCorner(FloatPoint& point) const
                         break;
                     }
                 }
-                // Prevent to overrun out of own render tree
+                // Prevent to overrun out of own layout tree
                 if (o == layoutObject()) {
                     return false;
                 }
@@ -1012,7 +1018,7 @@ bool ContainerNode::getLowerRightCorner(FloatPoint& point) const
 
 // FIXME: This override is only needed for inline anchors without an
 // InlineBox and it does not belong in ContainerNode as it reaches into
-// the render and line box trees.
+// the layout and line box trees.
 // https://code.google.com/p/chromium/issues/detail?id=248354
 LayoutRect ContainerNode::boundingBox() const
 {
@@ -1037,28 +1043,32 @@ LayoutRect ContainerNode::boundingBox() const
 void ContainerNode::focusStateChanged()
 {
     // If we're just changing the window's active state and the focused node has no
-    // renderer we can just ignore the state change.
+    // layoutObject we can just ignore the state change.
     if (!layoutObject())
         return;
 
+    if (isElementNode() && toElement(this)->shadowRoot()) {
+        Element* host = toElement(this);
+        bool newFocused = tabIndex() >= 0 && !host->tabStop() && computedStyle()->affectedByFocus() && shadowHostContainsFocusedElement(host);
+        Node::setFocus(newFocused);
+    }
+
+    handleStyleChangeOnFocusStateChange();
+}
+
+void ContainerNode::handleStyleChangeOnFocusStateChange()
+{
+    ASSERT(layoutObject());
     if (styleChangeType() < SubtreeStyleChange) {
         if (computedStyle()->affectedByFocus() && computedStyle()->hasPseudoStyle(FIRST_LETTER))
             setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::createWithExtraData(StyleChangeReason::PseudoClass, StyleChangeExtraData::Focus));
         else if (isElementNode() && toElement(this)->childrenOrSiblingsAffectedByFocus())
-            document().ensureStyleResolver().ensureUpdatedRuleFeatureSet().scheduleStyleInvalidationForPseudoChange(CSSSelector::PseudoFocus, *toElement(this));
+            document().styleEngine().pseudoStateChangedForElement(CSSSelector::PseudoFocus, *toElement(this));
         else if (computedStyle()->affectedByFocus())
             setNeedsStyleRecalc(LocalStyleChange, StyleChangeReasonForTracing::createWithExtraData(StyleChangeReason::PseudoClass, StyleChangeExtraData::Focus));
     }
 
-    if (layoutObject() && layoutObject()->style()->hasAppearance())
-        LayoutTheme::theme().stateChanged(layoutObject(), FocusControlState);
-
-    // If any of the shadow hosts above has :focus CSS style rule, this focus has to affect the
-    // style of the shadow host.
-    if (isInShadowTree()) {
-        if (Element* host = shadowHost())
-            host->focusStateChanged();
-    }
+    LayoutTheme::theme().controlStateChanged(*layoutObject(), FocusControlState);
 }
 
 void ContainerNode::setFocus(bool received)
@@ -1068,14 +1078,24 @@ void ContainerNode::setFocus(bool received)
 
     Node::setFocus(received);
 
-    focusStateChanged();
+    if (layoutObject())
+        handleStyleChangeOnFocusStateChange();
+
+    // Traverse up shadow trees to mark shadow hosts as focused where appropriate.
+    for (Element* host = shadowHost(); host; host = host->shadowHost()) {
+        bool newFocused = received && host->tabIndex() >= 0 && !host->tabStop();
+        if (host->focused() != newFocused) {
+            host->Node::setFocus(newFocused);
+            host->handleStyleChangeOnFocusStateChange();
+        }
+    }
 
     if (layoutObject() || received)
         return;
 
     // If :focus sets display: none, we lose focus but still need to recalc our style.
     if (isElementNode() && toElement(this)->childrenOrSiblingsAffectedByFocus() && styleChangeType() < SubtreeStyleChange)
-        document().ensureStyleResolver().ensureUpdatedRuleFeatureSet().scheduleStyleInvalidationForPseudoChange(CSSSelector::PseudoFocus, *toElement(this));
+        document().styleEngine().pseudoStateChangedForElement(CSSSelector::PseudoFocus, *toElement(this));
     else
         setNeedsStyleRecalc(LocalStyleChange, StyleChangeReasonForTracing::createWithExtraData(StyleChangeReason::PseudoClass, StyleChangeExtraData::Focus));
 }
@@ -1093,13 +1113,12 @@ void ContainerNode::setActive(bool down)
             if (computedStyle()->affectedByActive() && computedStyle()->hasPseudoStyle(FIRST_LETTER))
                 setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::createWithExtraData(StyleChangeReason::PseudoClass, StyleChangeExtraData::Active));
             else if (isElementNode() && toElement(this)->childrenOrSiblingsAffectedByActive())
-                document().ensureStyleResolver().ensureUpdatedRuleFeatureSet().scheduleStyleInvalidationForPseudoChange(CSSSelector::PseudoActive, *toElement(this));
+                document().styleEngine().pseudoStateChangedForElement(CSSSelector::PseudoActive, *toElement(this));
             else if (computedStyle()->affectedByActive())
                 setNeedsStyleRecalc(LocalStyleChange, StyleChangeReasonForTracing::createWithExtraData(StyleChangeReason::PseudoClass, StyleChangeExtraData::Active));
         }
 
-        if (computedStyle()->hasAppearance())
-            LayoutTheme::theme().stateChanged(layoutObject(), PressedControlState);
+        LayoutTheme::theme().controlStateChanged(*layoutObject(), PressedControlState);
     }
 }
 
@@ -1115,7 +1134,7 @@ void ContainerNode::setHovered(bool over)
         if (over)
             return;
         if (isElementNode() && toElement(this)->childrenOrSiblingsAffectedByHover() && styleChangeType() < SubtreeStyleChange)
-            document().ensureStyleResolver().ensureUpdatedRuleFeatureSet().scheduleStyleInvalidationForPseudoChange(CSSSelector::PseudoHover, *toElement(this));
+            document().styleEngine().pseudoStateChangedForElement(CSSSelector::PseudoHover, *toElement(this));
         else
             setNeedsStyleRecalc(LocalStyleChange, StyleChangeReasonForTracing::createWithExtraData(StyleChangeReason::PseudoClass, StyleChangeExtraData::Hover));
         return;
@@ -1125,13 +1144,12 @@ void ContainerNode::setHovered(bool over)
         if (computedStyle()->affectedByHover() && computedStyle()->hasPseudoStyle(FIRST_LETTER))
             setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::createWithExtraData(StyleChangeReason::PseudoClass, StyleChangeExtraData::Hover));
         else if (isElementNode() && toElement(this)->childrenOrSiblingsAffectedByHover())
-            document().ensureStyleResolver().ensureUpdatedRuleFeatureSet().scheduleStyleInvalidationForPseudoChange(CSSSelector::PseudoHover, *toElement(this));
+            document().styleEngine().pseudoStateChangedForElement(CSSSelector::PseudoHover, *toElement(this));
         else if (computedStyle()->affectedByHover())
             setNeedsStyleRecalc(LocalStyleChange, StyleChangeReasonForTracing::createWithExtraData(StyleChangeReason::PseudoClass, StyleChangeExtraData::Hover));
     }
 
-    if (layoutObject()->style()->hasAppearance())
-        LayoutTheme::theme().stateChanged(layoutObject(), HoverControlState);
+    LayoutTheme::theme().controlStateChanged(*layoutObject(), HoverControlState);
 }
 
 PassRefPtrWillBeRawPtr<HTMLCollection> ContainerNode::children()
@@ -1158,6 +1176,8 @@ PassRefPtrWillBeRawPtr<Element> ContainerNode::querySelector(const AtomicString&
     SelectorQuery* selectorQuery = document().selectorQueryCache().add(selectors, document(), exceptionState);
     if (!selectorQuery)
         return nullptr;
+
+    NthIndexCache nthIndexCache(document());
     return selectorQuery->queryFirst(*this);
 }
 
@@ -1172,6 +1192,7 @@ PassRefPtrWillBeRawPtr<StaticElementList> ContainerNode::querySelectorAll(const 
     if (!selectorQuery)
         return nullptr;
 
+    NthIndexCache nthIndexCache(document());
     return selectorQuery->queryAll(*this);
 }
 
@@ -1262,7 +1283,7 @@ void ContainerNode::recalcChildStyle(StyleRecalcChange change)
     if (change < Force && hasRareData() && childNeedsStyleRecalc())
         checkForChildrenAdjacentRuleChanges();
 
-    // This loop is deliberately backwards because we use insertBefore in the rendering tree, and want to avoid
+    // This loop is deliberately backwards because we use insertBefore in the layout tree, and want to avoid
     // a potentially n^2 loop to find the insertion point while resolving style. Having us start from the last
     // child and work our way back means in the common case, we'll find the insertion point in O(1) time.
     // See crbug.com/288225

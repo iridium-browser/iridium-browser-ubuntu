@@ -5,24 +5,25 @@
 #ifndef Interpolation_h
 #define Interpolation_h
 
+#include "core/CoreExport.h"
 #include "core/animation/InterpolableValue.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
 
-class Interpolation : public RefCountedWillBeGarbageCollectedFinalized<Interpolation> {
-public:
-    static PassRefPtrWillBeRawPtr<Interpolation> create(PassOwnPtrWillBeRawPtr<InterpolableValue> start, PassOwnPtrWillBeRawPtr<InterpolableValue> end)
-    {
-        return adoptRefWillBeNoop(new Interpolation(start, end));
-    }
+class PropertyHandle;
 
+class CORE_EXPORT Interpolation : public RefCountedWillBeGarbageCollectedFinalized<Interpolation> {
+public:
     virtual ~Interpolation();
 
     void interpolate(int iteration, double fraction) const;
 
     virtual bool isStyleInterpolation() const { return false; }
     virtual bool isLegacyStyleInterpolation() const { return false; }
+    virtual bool isSVGInterpolation() const { return false; }
+
+    virtual PropertyHandle property() const = 0;
 
     DECLARE_VIRTUAL_TRACE();
 

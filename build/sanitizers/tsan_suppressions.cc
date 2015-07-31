@@ -101,9 +101,6 @@ char kTSanDefaultSuppressions[] =
 // http://crbug.com/246968
 "race:webrtc::VideoCodingModuleImpl::RegisterPacketRequestCallback\n"
 
-// http://crbug.com/246970
-"race:webrtc::EventPosix::StartTimer\n"
-
 // http://crbug.com/246974
 "race:content::GpuWatchdogThread::CheckArmed\n"
 
@@ -124,6 +121,9 @@ char kTSanDefaultSuppressions[] =
 "race:base::PowerMonitor::AddObserver\n"
 "race:base::PowerMonitor::RemoveObserver\n"
 "race:base::PowerMonitor::IsOnBatteryPower\n"
+
+// http://crbug.com/258935
+"race:base::Thread::StopSoon\n"
 
 // http://crbug.com/268941
 "race:tracked_objects::ThreadData::tls_index_\n"
@@ -156,6 +156,9 @@ char kTSanDefaultSuppressions[] =
 // http://crbug.com/327330
 "race:PrepareTextureMailbox\n"
 "race:cc::LayerTreeHost::PaintLayerContents\n"
+
+// http://crbug.com/476529
+"deadlock:cc::VideoLayerImpl::WillDraw\n"
 
 // http://crbug.com/328826
 "race:gLCDOrder\n"
@@ -238,9 +241,6 @@ char kTSanDefaultSuppressions[] =
 
 // http://crbug.com/363999
 "race:v8::internal::EnterDebugger::*EnterDebugger\n"
-
-// http://crbug.com/364006
-"race:gfx::ImageFamily::~ImageFamily\n"
 
 // https://code.google.com/p/v8/issues/detail?id=3143
 "race:v8::internal::FLAG_track_double_fields\n"

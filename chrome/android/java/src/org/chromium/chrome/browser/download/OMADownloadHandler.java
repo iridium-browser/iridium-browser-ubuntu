@@ -5,7 +5,6 @@
 package org.chromium.chrome.browser.download;
 
 import android.app.Activity;
-import android.app.AlertDialog;
 import android.app.DownloadManager;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -18,6 +17,7 @@ import android.os.Environment;
 import android.os.ParcelFileDescriptor;
 import android.provider.Browser;
 import android.support.v4.util.LongSparseArray;
+import android.support.v7.app.AlertDialog;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -41,7 +41,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
-import java.net.ProtocolException;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -226,14 +225,16 @@ public class OMADownloadHandler {
                     (DownloadManager) mContext.getSystemService(Context.DOWNLOAD_SERVICE);
             try {
                 ParcelFileDescriptor fd = manager.openDownloadedFile(mDownloadId);
-                if (fd == null) return null;
-                omaInfo = parseDownloadDescriptor(new FileInputStream(fd.getFileDescriptor()));
-                fd.close();
+                if (fd != null) {
+                    omaInfo = parseDownloadDescriptor(new FileInputStream(fd.getFileDescriptor()));
+                    fd.close();
+                }
             } catch (FileNotFoundException e) {
                 Log.w(TAG, "File not found.", e);
             } catch (IOException e) {
                 Log.w(TAG, "Cannot read file.", e);
             }
+            manager.remove(mDownloadId);
             return omaInfo;
         }
 
@@ -276,7 +277,7 @@ public class OMADownloadHandler {
      * @param notifyURI The previously saved installNotifyURI attribute.
      */
     public void onDownloadCompleted(DownloadInfo downloadInfo, String notifyURI) {
-        long downloadId = (long) downloadInfo.getDownloadId();
+        long downloadId = downloadInfo.getDownloadId();
         OMAInfo omaInfo = mPendingOMADownloads.get(downloadId);
         if (omaInfo == null) {
             omaInfo = new OMAInfo();
@@ -310,7 +311,7 @@ public class OMADownloadHandler {
             default:
                 break;
         }
-        long downloadId = (long) downloadInfo.getDownloadId();
+        long downloadId = downloadInfo.getDownloadId();
         OMAInfo omaInfo = mPendingOMADownloads.get(downloadId);
         if (omaInfo == null) {
             // Just send the notification in this case.
@@ -387,12 +388,12 @@ public class OMADownloadHandler {
                 if (which == AlertDialog.BUTTON_POSITIVE) {
                     downloadOMAContent(downloadId, downloadInfo, omaInfo);
                 } else {
-                    sendInstallNotificationAndNextStep(
-                            omaInfo, downloadInfo, DOWNLOAD_STATUS_USER_CANCELLED);
+                    sendNotification(omaInfo, downloadInfo, DOWNLOAD_STATUS_USER_CANCELLED);
                 }
             }
         };
-        new AlertDialog.Builder(ApplicationStatus.getLastTrackedFocusedActivity())
+        new AlertDialog.Builder(
+                ApplicationStatus.getLastTrackedFocusedActivity(), R.style.AlertDialogTheme)
                 .setTitle(R.string.proceed_oma_download_message)
                 .setPositiveButton(R.string.ok, clickListener)
                 .setNegativeButton(R.string.cancel, clickListener)
@@ -422,7 +423,8 @@ public class OMADownloadHandler {
                 }
             }
         };
-        new AlertDialog.Builder(ApplicationStatus.getLastTrackedFocusedActivity())
+        new AlertDialog.Builder(
+                ApplicationStatus.getLastTrackedFocusedActivity(), R.style.AlertDialogTheme)
                 .setTitle(titleId)
                 .setPositiveButton(R.string.ok, clickListener)
                 .setCancelable(false)
@@ -439,11 +441,6 @@ public class OMADownloadHandler {
             return;
         }
         final String nextUrl = omaInfo.getValue(OMA_NEXT_URL);
-        LayoutInflater inflater = (LayoutInflater) mContext.getSystemService(
-                Context.LAYOUT_INFLATER_SERVICE);
-        View v = inflater.inflate(R.layout.next_url_post_oma_download, null);
-        TextView textView = (TextView) v.findViewById(R.id.oma_download_next_url);
-        textView.setText(nextUrl);
         final Activity activity = ApplicationStatus.getLastTrackedFocusedActivity();
         DialogInterface.OnClickListener clickListener = new DialogInterface.OnClickListener() {
             @Override
@@ -461,7 +458,7 @@ public class OMADownloadHandler {
                 .setTitle(R.string.open_url_post_oma_download)
                 .setPositiveButton(R.string.ok, clickListener)
                 .setNegativeButton(R.string.cancel, clickListener)
-                .setView(v)
+                .setMessage(nextUrl)
                 .setCancelable(false)
                 .show();
     }
@@ -622,7 +619,7 @@ public class OMADownloadHandler {
      * @return the new download information with the new Id.
      */
     public DownloadInfo updateDownloadInfo(DownloadInfo downloadInfo, long newDownloadId) {
-        long oldDownloadId = (long) downloadInfo.getDownloadId();
+        long oldDownloadId = downloadInfo.getDownloadId();
         OMAInfo omaInfo = mPendingOMADownloads.get(oldDownloadId);
         mPendingOMADownloads.remove(oldDownloadId);
         mPendingOMADownloads.put(newDownloadId, omaInfo);

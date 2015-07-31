@@ -40,27 +40,26 @@ AnalyserHandler::AnalyserHandler(AudioNode& node, float sampleRate)
     initialize();
 }
 
-AnalyserHandler::~AnalyserHandler()
+PassRefPtr<AnalyserHandler> AnalyserHandler::create(AudioNode& node, float sampleRate)
 {
-    ASSERT(!isInitialized());
+    return adoptRef(new AnalyserHandler(node, sampleRate));
 }
 
-void AnalyserHandler::dispose()
+AnalyserHandler::~AnalyserHandler()
 {
     uninitialize();
-    AudioBasicInspectorHandler::dispose();
 }
 
 void AnalyserHandler::process(size_t framesToProcess)
 {
-    AudioBus* outputBus = output(0)->bus();
+    AudioBus* outputBus = output(0).bus();
 
-    if (!isInitialized() || !input(0)->isConnected()) {
+    if (!isInitialized() || !input(0).isConnected()) {
         outputBus->zero();
         return;
     }
 
-    AudioBus* inputBus = input(0)->bus();
+    AudioBus* inputBus = input(0).bus();
 
     // Give the analyser the audio which is passing through this AudioNode.
     m_analyser.writeInput(inputBus, framesToProcess);
@@ -118,14 +117,14 @@ void AnalyserHandler::setSmoothingTimeConstant(double k, ExceptionState& excepti
 // ----------------------------------------------------------------
 
 AnalyserNode::AnalyserNode(AudioContext& context, float sampleRate)
-    : AudioNode(context)
+    : AudioBasicInspectorNode(context)
 {
-    setHandler(new AnalyserHandler(*this, sampleRate));
+    setHandler(AnalyserHandler::create(*this, sampleRate));
 }
 
-AnalyserNode* AnalyserNode::create(AudioContext* context, float sampleRate)
+AnalyserNode* AnalyserNode::create(AudioContext& context, float sampleRate)
 {
-    return new AnalyserNode(*context, sampleRate);
+    return new AnalyserNode(context, sampleRate);
 }
 
 AnalyserHandler& AnalyserNode::analyserHandler() const

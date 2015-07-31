@@ -13,6 +13,8 @@
       ],
       'dependencies': [
         '../base/base.gyp:base',
+        '../base/base.gyp:base_i18n',
+        '../base/base.gyp:base_prefs',
         '../google_apis/google_apis.gyp:google_apis',
         '../net/net.gyp:net',
         '../skia/skia.gyp:skia',
@@ -23,6 +25,7 @@
         '../ui/gfx/gfx.gyp:gfx',
         '../url/url.gyp:url_lib',
         'favicon_base',
+        'history_core_common',
         'keyed_service_core',
         'query_parser',
         'signin_core_browser',
@@ -80,6 +83,8 @@
         'history/core/browser/top_sites_cache.h',
         'history/core/browser/top_sites_database.cc',
         'history/core/browser/top_sites_database.h',
+        'history/core/browser/top_sites_impl.cc',
+        'history/core/browser/top_sites_impl.h',
         'history/core/browser/top_sites_observer.h',
         'history/core/browser/typed_url_syncable_service.cc',
         'history/core/browser/typed_url_syncable_service.h',
@@ -151,8 +156,12 @@
       ],
       'dependencies': [
         '../base/base.gyp:base',
+        '../skia/skia.gyp:skia',
         '../sql/sql.gyp:sql',
+        '../sql/sql.gyp:test_support_sql',
+        '../sync/sync.gyp:sync',
         '../testing/gtest.gyp:gtest',
+        '../ui/gfx/gfx.gyp:gfx',
         '../url/url.gyp:url_lib',
         'history_core_browser',
       ],
@@ -160,12 +169,27 @@
         # Note: sources list duplicated in GN build.
         'history/core/test/database_test_utils.cc',
         'history/core/test/database_test_utils.h',
+        'history/core/test/history_backend_db_base_test.cc',
+        'history/core/test/history_backend_db_base_test.h',
         'history/core/test/history_client_fake_bookmarks.cc',
         'history/core/test/history_client_fake_bookmarks.h',
         'history/core/test/history_unittest_base.cc',
         'history/core/test/history_unittest_base.h',
         'history/core/test/test_history_database.cc',
         'history/core/test/test_history_database.h',
+        'history/core/test/thumbnail-inl.h',
+        'history/core/test/thumbnail.cc',
+        'history/core/test/thumbnail.h',
+        'history/core/test/thumbnail_ios.mm',
+        'history/core/test/wait_top_sites_loaded_observer.cc',
+        'history/core/test/wait_top_sites_loaded_observer.h',
+      ],
+      'conditions': [
+        ['OS=="ios"', {
+          'sources!': [
+            'history/core/test/thumbnail.cc',
+          ],
+        }],
       ],
     },
   ],
@@ -182,6 +206,7 @@
           'dependencies': [
             '../base/base.gyp:base',
             '../content/content.gyp:content_browser',
+            '../url/url.gyp:url_lib',
             'history_core_browser',
             'visitedlink_browser',
           ],
@@ -194,8 +219,33 @@
             'history/content/browser/history_context_helper.h',
             'history/content/browser/history_database_helper.cc',
             'history/content/browser/history_database_helper.h',
+            'history/content/browser/web_contents_top_sites_observer.cc',
+            'history/content/browser/web_contents_top_sites_observer.h',
           ],
         }
+      ],
+    }],
+    ['OS=="ios"', {
+      'targets': [
+        {
+          'target_name': 'history_ios_browser',
+          'type': 'static_library',
+          'include_dirs': [
+            '..',
+          ],
+          'dependencies': [
+            '../base/base.gyp:base',
+            '../ios/web/ios_web.gyp:ios_web',
+            '../url/url.gyp:url_lib',
+            'history_core_browser',
+          ],
+          'sources': [
+            'history/ios/browser/history_database_helper.cc',
+            'history/ios/browser/history_database_helper.h',
+            'history/ios/browser/web_state_top_sites_observer.cc',
+            'history/ios/browser/web_state_top_sites_observer.h',
+          ],
+        },
       ],
     }],
   ],

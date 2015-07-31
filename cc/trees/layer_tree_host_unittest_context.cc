@@ -66,7 +66,7 @@ class LayerTreeHostContextTest : public LayerTreeTest {
         context_should_support_io_surface_(false),
         fallback_context_works_(false),
         async_output_surface_creation_(false) {
-    media::InitializeMediaLibraryForTesting();
+    media::InitializeMediaLibrary();
   }
 
   void LoseContext() {
@@ -580,7 +580,10 @@ class LayerTreeHostContextTestLostContextSucceedsWithContent
     } else {
       FakePictureLayerImpl* picture_impl = static_cast<FakePictureLayerImpl*>(
           host_impl->active_tree()->root_layer()->children()[0]);
-      EXPECT_TRUE(picture_impl->HighResTiling()->TileAt(0, 0)->IsReadyToDraw());
+      EXPECT_TRUE(picture_impl->HighResTiling()
+                      ->TileAt(0, 0)
+                      ->draw_info()
+                      .IsReadyToDraw());
     }
   }
 
@@ -697,7 +700,10 @@ class LayerTreeHostContextTestLostContextAndEvictTextures
     if (impl->settings().impl_side_painting) {
       FakePictureLayerImpl* picture_impl =
           static_cast<FakePictureLayerImpl*>(impl->active_tree()->root_layer());
-      EXPECT_TRUE(picture_impl->HighResTiling()->TileAt(0, 0)->IsReadyToDraw());
+      EXPECT_TRUE(picture_impl->HighResTiling()
+                      ->TileAt(0, 0)
+                      ->draw_info()
+                      .IsReadyToDraw());
     } else {
       FakeContentLayerImpl* content_impl =
           static_cast<FakeContentLayerImpl*>(impl->active_tree()->root_layer());
@@ -1076,15 +1082,15 @@ class LayerTreeHostContextTestDontUseLostResources
     color_video_frame_ = VideoFrame::CreateColorFrame(
         gfx::Size(4, 4), 0x80, 0x80, 0x80, base::TimeDelta());
     hw_video_frame_ = VideoFrame::WrapNativeTexture(
-        make_scoped_ptr(
-            new gpu::MailboxHolder(mailbox, GL_TEXTURE_2D, sync_point)),
+        gpu::MailboxHolder(mailbox, GL_TEXTURE_2D, sync_point),
         media::VideoFrame::ReleaseMailboxCB(), gfx::Size(4, 4),
-        gfx::Rect(0, 0, 4, 4), gfx::Size(4, 4), base::TimeDelta(), false);
+        gfx::Rect(0, 0, 4, 4), gfx::Size(4, 4), base::TimeDelta(),
+        false /* allow_overlay */, true /* has_alpha */);
     scaled_hw_video_frame_ = VideoFrame::WrapNativeTexture(
-        make_scoped_ptr(
-            new gpu::MailboxHolder(mailbox, GL_TEXTURE_2D, sync_point)),
+        gpu::MailboxHolder(mailbox, GL_TEXTURE_2D, sync_point),
         media::VideoFrame::ReleaseMailboxCB(), gfx::Size(4, 4),
-        gfx::Rect(0, 0, 3, 2), gfx::Size(4, 4), base::TimeDelta(), false);
+        gfx::Rect(0, 0, 3, 2), gfx::Size(4, 4), base::TimeDelta(),
+        false /* allow_overlay */, true /* has_alpha */);
 
     color_frame_provider_.set_frame(color_video_frame_);
     hw_frame_provider_.set_frame(hw_video_frame_);

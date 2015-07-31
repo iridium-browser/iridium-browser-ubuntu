@@ -108,7 +108,7 @@ TEST_F(SurfaceLibQuadTest, TextureQuad) {
   gfx::PointF uv_bottom_right(-7.f, 16.3f);
   SkColor background_color = SK_ColorYELLOW;
   float vertex_opacity[4] = {0.1f, 0.5f, 0.4f, 0.8f};
-  bool flipped = false;
+  bool y_flipped = false;
   bool nearest_neighbor = false;
   texture_quad->SetAll(sqs,
                        rect,
@@ -121,7 +121,7 @@ TEST_F(SurfaceLibQuadTest, TextureQuad) {
                        uv_bottom_right,
                        background_color,
                        vertex_opacity,
-                       flipped,
+                       y_flipped,
                        nearest_neighbor);
 
   QuadPtr mojo_quad = Quad::From<cc::DrawQuad>(*texture_quad);
@@ -138,7 +138,7 @@ TEST_F(SurfaceLibQuadTest, TextureQuad) {
   for (size_t i = 0; i < 4; ++i) {
     EXPECT_EQ(vertex_opacity[i], mojo_texture_state->vertex_opacity[i]) << i;
   }
-  EXPECT_EQ(flipped, mojo_texture_state->flipped);
+  EXPECT_EQ(y_flipped, mojo_texture_state->y_flipped);
 }
 
 TEST_F(SurfaceLibQuadTest, TextureQuadEmptyVertexOpacity) {
@@ -148,6 +148,9 @@ TEST_F(SurfaceLibQuadTest, TextureQuadEmptyVertexOpacity) {
   mojo_texture_state->background_color = Color::New();
   mojo_texture_quad->texture_quad_state = mojo_texture_state.Pass();
   PassPtr mojo_pass = Pass::New();
+  mojo_pass->id = RenderPassId::New();
+  mojo_pass->id->layer_id = 1;
+  mojo_pass->id->index = 1;
   mojo_pass->quads.push_back(mojo_texture_quad.Pass());
   SharedQuadStatePtr mojo_sqs = SharedQuadState::New();
   mojo_pass->shared_quad_states.push_back(mojo_sqs.Pass());
@@ -164,6 +167,9 @@ TEST_F(SurfaceLibQuadTest, TextureQuadEmptyBackgroundColor) {
   mojo_texture_state->vertex_opacity = mojo::Array<float>::New(4);
   mojo_texture_quad->texture_quad_state = mojo_texture_state.Pass();
   PassPtr mojo_pass = Pass::New();
+  mojo_pass->id = RenderPassId::New();
+  mojo_pass->id->layer_id = 1;
+  mojo_pass->id->index = 1;
   mojo_pass->quads.push_back(mojo_texture_quad.Pass());
   SharedQuadStatePtr mojo_sqs = SharedQuadState::New();
   mojo_pass->shared_quad_states.push_back(mojo_sqs.Pass());
@@ -269,7 +275,7 @@ TEST(SurfaceLibTest, RenderPass) {
   gfx::PointF uv_bottom_right(-7.f, 16.3f);
   SkColor background_color = SK_ColorYELLOW;
   float vertex_opacity[4] = {0.1f, 0.5f, 0.4f, 0.8f};
-  bool flipped = false;
+  bool y_flipped = false;
   bool nearest_neighbor = false;
   texture_quad->SetAll(sqs,
                        rect,
@@ -282,12 +288,12 @@ TEST(SurfaceLibTest, RenderPass) {
                        uv_bottom_right,
                        background_color,
                        vertex_opacity,
-                       flipped,
+                       y_flipped,
                        nearest_neighbor);
 
   PassPtr mojo_pass = Pass::From(*pass);
   ASSERT_FALSE(mojo_pass.is_null());
-  EXPECT_EQ(6, mojo_pass->id);
+  EXPECT_EQ(6, mojo_pass->id->index);
   EXPECT_EQ(Rect::From(output_rect), mojo_pass->output_rect);
   EXPECT_EQ(Rect::From(damage_rect), mojo_pass->damage_rect);
   EXPECT_EQ(Transform::From(transform_to_root_target),
@@ -356,7 +362,7 @@ TEST(SurfaceLibTest, RenderPass) {
     EXPECT_EQ(vertex_opacity[i], round_trip_texture_quad->vertex_opacity[i])
         << i;
   }
-  EXPECT_EQ(flipped, round_trip_texture_quad->flipped);
+  EXPECT_EQ(y_flipped, round_trip_texture_quad->y_flipped);
 }
 
 TEST(SurfaceLibTest, Mailbox) {

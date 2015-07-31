@@ -40,7 +40,14 @@ class TokenHandleUtil {
   bool HasToken(const user_manager::UserID& user_id);
 
   // Removes token handle for |user_id| from UserManager storage.
-  void DeleteToken(const user_manager::UserID& user_id);
+  void DeleteHandle(const user_manager::UserID& user_id);
+
+  // Marks current handle as invalid, new one should be obtained at next sign
+  // in.
+  void MarkHandleInvalid(const user_manager::UserID& user_id);
+
+  // Indicates if token handle for |user_id| is missing or marked as invalid.
+  bool ShouldObtainHandle(const user_manager::UserID& user_id);
 
   // Performs token handle check for |user_id|. Will call |callback| with
   // corresponding result.
@@ -88,10 +95,12 @@ class TokenHandleUtil {
   user_manager::UserManager* user_manager_;
 
   // Map of pending check operations.
-  base::ScopedPtrHashMap<std::string, TokenDelegate> validation_delegates_;
+  base::ScopedPtrHashMap<std::string, scoped_ptr<TokenDelegate>>
+      validation_delegates_;
 
   // Map of pending obtain operations.
-  base::ScopedPtrHashMap<user_manager::UserID, TokenDelegate> obtain_delegates_;
+  base::ScopedPtrHashMap<user_manager::UserID, scoped_ptr<TokenDelegate>>
+      obtain_delegates_;
 
   // Instance of GAIA Client.
   scoped_ptr<gaia::GaiaOAuthClient> gaia_client_;

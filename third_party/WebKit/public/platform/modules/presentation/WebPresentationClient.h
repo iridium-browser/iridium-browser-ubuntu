@@ -40,6 +40,12 @@ public:
     // The ownership of the |callbacks| argument is transferred to the embedder.
     virtual void joinSession(const WebString& presentationUrl, const WebString& presentationId, WebPresentationSessionClientCallbacks*) = 0;
 
+    // Called when the frame requests to send String message to an existing session.
+    virtual void sendString(const WebString& presentationUrl, const WebString& presentationId, const WebString& message) = 0;
+
+    // Called when the frame requests to send ArrayBuffer/View data to an existing session.
+    virtual void sendArrayBuffer(const WebString& presentationUrl, const WebString& presentationId, const uint8_t* data, size_t length) = 0;
+
     // Called when the frame requests to close an existing session.
     virtual void closeSession(const WebString& url, const WebString& presentationId) = 0;
 };

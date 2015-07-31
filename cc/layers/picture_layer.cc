@@ -7,8 +7,8 @@
 #include "base/auto_reset.h"
 #include "cc/layers/content_layer_client.h"
 #include "cc/layers/picture_layer_impl.h"
-#include "cc/resources/display_list_recording_source.h"
-#include "cc/resources/picture_pile.h"
+#include "cc/playback/display_list_recording_source.h"
+#include "cc/playback/picture_pile.h"
 #include "cc/trees/layer_tree_host.h"
 #include "cc/trees/layer_tree_impl.h"
 #include "third_party/skia/include/core/SkPictureRecorder.h"
@@ -85,22 +85,22 @@ void PictureLayer::SetLayerTreeHost(LayerTreeHost* host) {
   if (!host)
     return;
 
+  const LayerTreeSettings& settings = layer_tree_host()->settings();
   if (!recording_source_) {
-    if (host->settings().use_display_lists) {
+    if (settings.use_display_lists) {
       recording_source_.reset(new DisplayListRecordingSource(
-          host->settings().default_tile_grid_size));
+          settings.default_tile_grid_size,
+          settings.use_cached_picture_in_display_list));
     } else {
-      recording_source_.reset(
-          new PicturePile(host->settings().minimum_contents_scale,
-                          host->settings().default_tile_grid_size));
+      recording_source_.reset(new PicturePile(settings.minimum_contents_scale,
+                                              settings.default_tile_grid_size));
     }
   }
-  recording_source_->DidMoveToNewCompositor();
   recording_source_->SetSlowdownRasterScaleFactor(
       host->debug_state().slow_down_raster_scale_factor);
-  recording_source_->SetGatherPixelRefs(host->settings().gather_pixel_refs);
+  recording_source_->SetGatherPixelRefs(settings.gather_pixel_refs);
 
-  DCHECK(host->settings().raster_enabled);
+  DCHECK(settings.raster_enabled);
 }
 
 void PictureLayer::SetNeedsDisplayRect(const gfx::Rect& layer_rect) {
@@ -186,8 +186,9 @@ skia::RefPtr<SkPicture> PictureLayer::GetPicture() const {
 
   if (settings.use_display_lists) {
     scoped_ptr<RecordingSource> recording_source;
-    recording_source.reset(
-        new DisplayListRecordingSource(settings.default_tile_grid_size));
+    recording_source.reset(new DisplayListRecordingSource(
+        settings.default_tile_grid_size,
+        settings.use_cached_picture_in_display_list));
     Region recording_invalidation;
     recording_source->UpdateAndExpandInvalidation(
         client_, &recording_invalidation, layer_size, gfx::Rect(layer_size),
@@ -206,7 +207,8 @@ skia::RefPtr<SkPicture> PictureLayer::GetPicture() const {
   SkCanvas* canvas = recorder.beginRecording(width, height, nullptr, 0);
   client_->PaintContents(canvas, gfx::Rect(width, height),
                          ContentLayerClient::PAINTING_BEHAVIOR_NORMAL);
-  skia::RefPtr<SkPicture> picture = skia::AdoptRef(recorder.endRecording());
+  skia::RefPtr<SkPicture> picture =
+      skia::AdoptRef(recorder.endRecordingAsPicture());
   return picture;
 }
 

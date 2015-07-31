@@ -25,12 +25,13 @@
 #ifndef LayoutFullScreen_h
 #define LayoutFullScreen_h
 
+#include "core/CoreExport.h"
 #include "core/layout/LayoutFlexibleBox.h"
 #include "core/style/StyleInheritedData.h"
 
 namespace blink {
 
-class LayoutFullScreen final : public LayoutFlexibleBox {
+class CORE_EXPORT LayoutFullScreen final : public LayoutFlexibleBox {
 public:
     static LayoutFullScreen* createAnonymous(Document*);
 
@@ -42,8 +43,8 @@ public:
     void createPlaceholder(PassRefPtr<ComputedStyle>, const LayoutRect& frameRect);
 
 
-    static LayoutObject* wrapRenderer(LayoutObject*, LayoutObject*, Document*);
-    void unwrapRenderer();
+    static LayoutObject* wrapLayoutObject(LayoutObject*, LayoutObject*, Document*);
+    void unwrapLayoutObject();
 
     void updateStyle();
 

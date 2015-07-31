@@ -11,7 +11,9 @@
 #include "content/browser/notifications/notification_database.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/notification_database_data.h"
+#include "content/public/browser/platform_notification_service.h"
 
 using base::DoNothing;
 
@@ -24,8 +26,10 @@ const base::FilePath::CharType kPlatformNotificationsDirectory[] =
 
 PlatformNotificationContextImpl::PlatformNotificationContextImpl(
     const base::FilePath& path,
+    BrowserContext* browser_context,
     const scoped_refptr<ServiceWorkerContextWrapper>& service_worker_context)
     : path_(path),
+      browser_context_(browser_context),
       service_worker_context_(service_worker_context) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 }
@@ -43,6 +47,30 @@ PlatformNotificationContextImpl::~PlatformNotificationContextImpl() {
 
 void PlatformNotificationContextImpl::Initialize() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  PlatformNotificationService* service =
+      GetContentClient()->browser()->GetPlatformNotificationService();
+  if (service) {
+    std::set<std::string> displayed_notifications;
+
+    bool notification_synchronization_supported =
+        service->GetDisplayedPersistentNotifications(browser_context_,
+                                                     &displayed_notifications);
+
+    // Synchronize the notifications stored in the database with the set of
+    // displaying notifications in |displayed_notifications|. This is necessary
+    // because flakiness may cause a platform to inform Chrome of a notification
+    // that has since been closed, or because the platform does not support
+    // notifications that exceed the lifetime of the browser process.
+
+    // TODO(peter): Synchronizing the actual notifications will be done when the
+    // persistent notification ids are stable. For M44 we need to support the
+    // case where there may be no notifications after a Chrome restart.
+    if (notification_synchronization_supported &&
+        !displayed_notifications.size()) {
+      prune_database_on_open_ = true;
+    }
+  }
+
   BrowserThread::PostTask(
       BrowserThread::IO,
       FROM_HERE,
@@ -116,6 +144,58 @@ void PlatformNotificationContextImpl::DoReadNotificationData(
       BrowserThread::IO,
       FROM_HERE,
       base::Bind(callback, false /* success */, NotificationDatabaseData()));
+}
+
+void PlatformNotificationContextImpl::
+    ReadAllNotificationDataForServiceWorkerRegistration(
+    const GURL& origin,
+    int64_t service_worker_registration_id,
+    const ReadAllResultCallback& callback) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  LazyInitialize(
+       base::Bind(&PlatformNotificationContextImpl::
+                      DoReadAllNotificationDataForServiceWorkerRegistration,
+                  this, origin, service_worker_registration_id, callback),
+       base::Bind(callback,
+                  false /* success */,
+                  std::vector<NotificationDatabaseData>()));
+}
+
+void PlatformNotificationContextImpl::
+    DoReadAllNotificationDataForServiceWorkerRegistration(
+    const GURL& origin,
+    int64_t service_worker_registration_id,
+    const ReadAllResultCallback& callback) {
+  DCHECK(task_runner_->RunsTasksOnCurrentThread());
+
+  std::vector<NotificationDatabaseData> notification_datas;
+
+  NotificationDatabase::Status status =
+      database_->ReadAllNotificationDataForServiceWorkerRegistration(
+          origin, service_worker_registration_id, &notification_datas);
+
+  UMA_HISTOGRAM_ENUMERATION("Notifications.Database.ReadForServiceWorkerResult",
+                            status, NotificationDatabase::STATUS_COUNT);
+
+  if (status == NotificationDatabase::STATUS_OK) {
+    BrowserThread::PostTask(BrowserThread::IO,
+                            FROM_HERE,
+                            base::Bind(callback,
+                                       true /* success */,
+                                       notification_datas));
+    return;
+  }
+
+  // Blow away the database if reading data failed due to corruption.
+  if (status == NotificationDatabase::STATUS_ERROR_CORRUPTED)
+    DestroyDatabase();
+
+  BrowserThread::PostTask(
+      BrowserThread::IO,
+      FROM_HERE,
+      base::Bind(callback,
+                 false /* success */,
+                 std::vector<NotificationDatabaseData>()));
 }
 
 void PlatformNotificationContextImpl::WriteNotificationData(
@@ -278,14 +358,28 @@ void PlatformNotificationContextImpl::OpenDatabase(
   UMA_HISTOGRAM_ENUMERATION("Notifications.Database.OpenResult",
                             status, NotificationDatabase::STATUS_COUNT);
 
+  // TODO(peter): Do finer-grained synchronization here.
+  if (prune_database_on_open_) {
+    prune_database_on_open_ = false;
+    DestroyDatabase();
+
+    database_.reset(new NotificationDatabase(GetDatabasePath()));
+    status = database_->Open(true /* create_if_missing */);
+
+    // TODO(peter): Find the appropriate UMA to cover in regards to
+    // synchronizing notifications after the implementation is complete.
+  }
+
   // When the database could not be opened due to corruption, destroy it, blow
   // away the contents of the directory and try re-opening the database.
   if (status == NotificationDatabase::STATUS_ERROR_CORRUPTED) {
     if (DestroyDatabase()) {
+      database_.reset(new NotificationDatabase(GetDatabasePath()));
       status = database_->Open(true /* create_if_missing */);
 
-      // TODO(peter): Record UMA on |status| for re-opening the database after
-      // corruption was detected.
+      UMA_HISTOGRAM_ENUMERATION(
+          "Notifications.Database.OpenAfterCorruptionResult",
+          status, NotificationDatabase::STATUS_COUNT);
     }
   }
 

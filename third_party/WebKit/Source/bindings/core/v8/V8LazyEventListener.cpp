@@ -51,7 +51,7 @@
 
 namespace blink {
 
-V8LazyEventListener::V8LazyEventListener(const AtomicString& functionName, const AtomicString& eventParameterName, const String& code, const String sourceURL, const TextPosition& position, Node* node, v8::Isolate* isolate)
+V8LazyEventListener::V8LazyEventListener(v8::Isolate* isolate, const AtomicString& functionName, const AtomicString& eventParameterName, const String& code, const String sourceURL, const TextPosition& position, Node* node)
     : V8AbstractEventListener(true, DOMWrapperWorld::mainWorld(), isolate)
     , m_functionName(functionName)
     , m_eventParameterName(eventParameterName)
@@ -75,6 +75,7 @@ v8::Local<v8::Object> toObjectWrapper(T* domObject, ScriptState* scriptState)
 
 v8::Local<v8::Value> V8LazyEventListener::callListenerFunction(ScriptState* scriptState, v8::Local<v8::Value> jsEvent, Event* event)
 {
+    ASSERT(!jsEvent.IsEmpty());
     v8::Local<v8::Object> listenerObject = getListenerObject(scriptState->executionContext());
     if (listenerObject.IsEmpty())
         return v8::Local<v8::Value>();
@@ -95,7 +96,10 @@ v8::Local<v8::Value> V8LazyEventListener::callListenerFunction(ScriptState* scri
         return v8::Local<v8::Value>();
 
     v8::Local<v8::Value> parameters[1] = { jsEvent };
-    return frame->script().callFunction(handlerFunction, receiver, WTF_ARRAY_LENGTH(parameters), parameters);
+    v8::Local<v8::Value> result;
+    if (!frame->script().callFunction(handlerFunction, receiver, WTF_ARRAY_LENGTH(parameters), parameters).ToLocal(&result))
+        return v8::Local<v8::Value>();
+    return result;
 }
 
 static void V8LazyEventListenerToString(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -207,7 +211,8 @@ void V8LazyEventListener::prepareListenerObject(ExecutionContext* executionConte
         return;
     String toStringString = "function " + m_functionName + "(" + m_eventParameterName + ") {\n  " + m_code + "\n}";
     V8HiddenValue::setHiddenValue(isolate(), wrappedFunction, V8HiddenValue::toStringString(isolate()), v8String(isolate(), toStringString));
-    wrappedFunction->Set(v8AtomicString(isolate(), "toString"), toStringFunction);
+    if (!v8CallBoolean(wrappedFunction->Set(scriptState->context(), v8AtomicString(isolate(), "toString"), toStringFunction)))
+        return;
     wrappedFunction->SetName(v8String(isolate(), m_functionName));
 
     // FIXME: Remove the following comment-outs.

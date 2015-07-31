@@ -12,7 +12,8 @@
 namespace cc {
 
 template <typename T>
-PropertyTree<T>::PropertyTree() {
+PropertyTree<T>::PropertyTree()
+    : needs_update_(false) {
   nodes_.push_back(T());
   back()->id = 0;
   back()->parent_id = -1;
@@ -32,6 +33,14 @@ int PropertyTree<T>::Insert(const T& tree_node, int parent_id) {
   return node.id;
 }
 
+template <typename T>
+void PropertyTree<T>::clear() {
+  nodes_.clear();
+  nodes_.push_back(T());
+  back()->id = 0;
+  back()->parent_id = -1;
+}
+
 template class PropertyTree<TransformNode>;
 template class PropertyTree<ClipNode>;
 template class PropertyTree<OpacityNode>;
@@ -39,6 +48,7 @@ template class PropertyTree<OpacityNode>;
 TransformNodeData::TransformNodeData()
     : target_id(-1),
       content_target_id(-1),
+      source_node_id(-1),
       needs_local_transform_update(true),
       is_invertible(true),
       ancestors_are_invertible(true),
@@ -54,6 +64,24 @@ TransformNodeData::TransformNodeData()
 TransformNodeData::~TransformNodeData() {
 }
 
+void TransformNodeData::update_pre_local_transform(
+    const gfx::Point3F& transform_origin) {
+  pre_local.MakeIdentity();
+  pre_local.Translate3d(-transform_origin.x(), -transform_origin.y(),
+                        -transform_origin.z());
+}
+
+void TransformNodeData::update_post_local_transform(
+    const gfx::PointF& position,
+    const gfx::Point3F& transform_origin) {
+  post_local.MakeIdentity();
+  post_local.Scale(post_local_scale_factor, post_local_scale_factor);
+  post_local.Translate3d(
+      position.x() + source_offset.x() + transform_origin.x(),
+      position.y() + source_offset.y() + transform_origin.y(),
+      transform_origin.z());
+}
+
 ClipNodeData::ClipNodeData() : transform_id(-1), target_id(-1) {
 }
 
@@ -65,21 +93,41 @@ bool TransformTree::ComputeTransform(int source_id,
   if (source_id == dest_id)
     return true;
 
-  if (source_id > dest_id && IsDescendant(source_id, dest_id))
+  if (source_id > dest_id) {
     return CombineTransformsBetween(source_id, dest_id, transform);
+  }
 
-  if (dest_id > source_id && IsDescendant(dest_id, source_id))
-    return CombineInversesBetween(source_id, dest_id, transform);
+  return CombineInversesBetween(source_id, dest_id, transform);
+}
 
-  int lca = LowestCommonAncestor(source_id, dest_id);
+bool TransformTree::ComputeTransformWithDestinationSublayerScale(
+    int source_id,
+    int dest_id,
+    gfx::Transform* transform) const {
+  bool success = ComputeTransform(source_id, dest_id, transform);
 
-  bool no_singular_matrices_to_lca =
-      CombineTransformsBetween(source_id, lca, transform);
+  const TransformNode* dest_node = Node(dest_id);
+  if (!dest_node->data.needs_sublayer_scale)
+    return success;
 
-  bool no_singular_matrices_from_lca =
-      CombineInversesBetween(lca, dest_id, transform);
+  transform->matrix().postScale(dest_node->data.sublayer_scale.x(),
+                                dest_node->data.sublayer_scale.y(), 1.f);
+  return success;
+}
 
-  return no_singular_matrices_to_lca && no_singular_matrices_from_lca;
+bool TransformTree::ComputeTransformWithSourceSublayerScale(
+    int source_id,
+    int dest_id,
+    gfx::Transform* transform) const {
+  bool success = ComputeTransform(source_id, dest_id, transform);
+
+  const TransformNode* source_node = Node(source_id);
+  if (!source_node->data.needs_sublayer_scale)
+    return success;
+
+  transform->Scale(1.f / source_node->data.sublayer_scale.x(),
+                   1.f / source_node->data.sublayer_scale.y());
+  return success;
 }
 
 bool TransformTree::Are2DAxisAligned(int source_id, int dest_id) const {
@@ -92,7 +140,8 @@ void TransformTree::UpdateTransforms(int id) {
   TransformNode* node = Node(id);
   TransformNode* parent_node = parent(node);
   TransformNode* target_node = Node(node->data.target_id);
-  if (node->data.needs_local_transform_update)
+  if (node->data.needs_local_transform_update ||
+      node->parent_id != node->data.source_node_id)
     UpdateLocalTransform(node);
   UpdateScreenSpaceTransform(node, parent_node, target_node);
   UpdateSublayerScale(node);
@@ -110,30 +159,10 @@ bool TransformTree::IsDescendant(int desc_id, int source_id) const {
   return true;
 }
 
-int TransformTree::LowestCommonAncestor(int a, int b) const {
-  std::set<int> chain_a;
-  std::set<int> chain_b;
-  while (a || b) {
-    if (a) {
-      a = Node(a)->parent_id;
-      if (a > -1 && chain_b.find(a) != chain_b.end())
-        return a;
-      chain_a.insert(a);
-    }
-    if (b) {
-      b = Node(b)->parent_id;
-      if (b > -1 && chain_a.find(b) != chain_a.end())
-        return b;
-      chain_b.insert(b);
-    }
-  }
-  NOTREACHED();
-  return 0;
-}
-
 bool TransformTree::CombineTransformsBetween(int source_id,
                                              int dest_id,
                                              gfx::Transform* transform) const {
+  DCHECK(source_id > dest_id);
   const TransformNode* current = Node(source_id);
   const TransformNode* dest = Node(dest_id);
   // Combine transforms to and from the screen when possible. Since flattening
@@ -147,7 +176,7 @@ bool TransformTree::CombineTransformsBetween(int source_id,
   // flattened(A * R) won't be R^{-1} * A{-1}, so multiplying C's to_screen and
   // A's from_screen will not produce the correct result.
   if (!dest || (dest->data.ancestors_are_invertible &&
-                current->data.node_and_ancestors_are_flat)) {
+                dest->data.node_and_ancestors_are_flat)) {
     transform->ConcatTransform(current->data.to_screen);
     if (dest)
       transform->ConcatTransform(dest->data.from_screen);
@@ -177,6 +206,28 @@ bool TransformTree::CombineTransformsBetween(int source_id,
     // need the unscaled transform.
     combined_transform.Scale(1.0f / dest->data.sublayer_scale.x(),
                              1.0f / dest->data.sublayer_scale.y());
+  } else if (current->id < dest_id) {
+    // We have reached the lowest common ancestor of the source and destination
+    // nodes. This case can occur when we are transforming between a node
+    // corresponding to a fixed-position layer (or its descendant) and the node
+    // corresponding to the layer's render target. For example, consider the
+    // layer tree R->T->S->F where F is fixed-position, S owns a render surface,
+    // and T has a significant transform. This will yield the following
+    // transform tree:
+    //    R
+    //    |
+    //    T
+    //   /|
+    //  S F
+    // In this example, T will have id 2, S will have id 3, and F will have id
+    // 4. When walking up the ancestor chain from F, the first node with a
+    // smaller id than S will be T, the lowest common ancestor of these nodes.
+    // We compute the transform from T to S here, and then from F to T in the
+    // loop below.
+    DCHECK(IsDescendant(dest_id, current->id));
+    CombineInversesBetween(current->id, dest_id, &combined_transform);
+    DCHECK(combined_transform.IsApproximatelyIdentityOrTranslation(
+        SkDoubleToMScalar(1e-4)));
   }
 
   for (int i = source_to_destination.size() - 1; i >= 0; i--) {
@@ -193,6 +244,7 @@ bool TransformTree::CombineTransformsBetween(int source_id,
 bool TransformTree::CombineInversesBetween(int source_id,
                                            int dest_id,
                                            gfx::Transform* transform) const {
+  DCHECK(source_id < dest_id);
   const TransformNode* current = Node(dest_id);
   const TransformNode* dest = Node(source_id);
   // Just as in CombineTransformsBetween, we can use screen space transforms in
@@ -221,8 +273,14 @@ bool TransformTree::CombineInversesBetween(int source_id,
 
 void TransformTree::UpdateLocalTransform(TransformNode* node) {
   gfx::Transform transform = node->data.post_local;
-  transform.Translate(-node->data.scroll_offset.x(),
-                      -node->data.scroll_offset.y());
+  gfx::Vector2dF source_to_parent;
+  if (node->parent_id != node->data.source_node_id) {
+    gfx::Transform to_parent;
+    ComputeTransform(node->data.source_node_id, node->parent_id, &to_parent);
+    source_to_parent = to_parent.To2dTranslation();
+  }
+  transform.Translate(source_to_parent.x() - node->data.scroll_offset.x(),
+                      source_to_parent.y() - node->data.scroll_offset.y());
   transform.PreconcatTransform(node->data.local);
   transform.PreconcatTransform(node->data.pre_local);
   node->data.set_to_parent(transform);
@@ -264,8 +322,8 @@ void TransformTree::UpdateSublayerScale(TransformNode* node) {
 
 void TransformTree::UpdateTargetSpaceTransform(TransformNode* node,
                                                TransformNode* target_node) {
-  node->data.to_target.MakeIdentity();
   if (node->data.needs_sublayer_scale) {
+    node->data.to_target.MakeIdentity();
     node->data.to_target.Scale(node->data.sublayer_scale.x(),
                                node->data.sublayer_scale.y());
   } else {
@@ -273,14 +331,8 @@ void TransformTree::UpdateTargetSpaceTransform(TransformNode* node,
     // In order to include the root transform for the root surface, we walk up
     // to the root of the transform tree in ComputeTransform.
     int target_id = target_is_root_surface ? 0 : target_node->id;
-    if (target_node) {
-      node->data.to_target.Scale(target_node->data.sublayer_scale.x(),
-                                 target_node->data.sublayer_scale.y());
-    }
-
-    gfx::Transform unscaled_target_transform;
-    ComputeTransform(node->id, target_id, &unscaled_target_transform);
-    node->data.to_target.PreconcatTransform(unscaled_target_transform);
+    ComputeTransformWithDestinationSublayerScale(node->id, target_id,
+                                                 &node->data.to_target);
   }
 
   if (!node->data.to_target.GetInverse(&node->data.from_target))
@@ -312,7 +364,8 @@ void TransformTree::UpdateSnapping(TransformNode* node) {
   gfx::Transform delta = node->data.from_target;
   delta *= rounded;
 
-  DCHECK(delta.IsIdentityOr2DTranslation());
+  DCHECK(delta.IsApproximatelyIdentityOrTranslation(SkDoubleToMScalar(1e-4)))
+      << delta.ToString();
 
   gfx::Vector2dF translation = delta.To2dTranslation();
 
@@ -327,6 +380,9 @@ void TransformTree::UpdateSnapping(TransformNode* node) {
                                                 -translation.y(), 0);
 
   node->data.scroll_snap = translation;
+}
+
+PropertyTrees::PropertyTrees() : needs_rebuild(true), sequence_number(0) {
 }
 
 }  // namespace cc

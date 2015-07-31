@@ -81,18 +81,22 @@ bool BrowserAccessibilityAndroid::PlatformIsLeaf() const {
   if (GetRole() == ui::AX_ROLE_DATE || GetRole() == ui::AX_ROLE_TIME)
     return true;
 
-  // Headings with text can drop their children.
-  base::string16 name = GetText();
-  if (GetRole() == ui::AX_ROLE_HEADING && !name.empty())
-    return true;
+  BrowserAccessibilityManagerAndroid* manager_android =
+      static_cast<BrowserAccessibilityManagerAndroid*>(manager());
+  if (manager_android->prune_tree_for_screen_reader()) {
+    // Headings with text can drop their children.
+    base::string16 name = GetText();
+    if (GetRole() == ui::AX_ROLE_HEADING && !name.empty())
+      return true;
 
-  // Focusable nodes with text can drop their children.
-  if (HasState(ui::AX_STATE_FOCUSABLE) && !name.empty())
-    return true;
+    // Focusable nodes with text can drop their children.
+    if (HasState(ui::AX_STATE_FOCUSABLE) && !name.empty())
+      return true;
 
-  // Nodes with only static text as children can drop their children.
-  if (HasOnlyStaticTextChildren())
-    return true;
+    // Nodes with only static text as children can drop their children.
+    if (HasOnlyStaticTextChildren())
+      return true;
+  }
 
   return BrowserAccessibility::PlatformIsLeaf();
 }
@@ -172,8 +176,7 @@ bool BrowserAccessibilityAndroid::IsDismissable() const {
 }
 
 bool BrowserAccessibilityAndroid::IsEditableText() const {
-  return (GetRole() == ui::AX_ROLE_TEXT_AREA ||
-          GetRole() == ui::AX_ROLE_TEXT_FIELD);
+  return GetRole() == ui::AX_ROLE_TEXT_FIELD;
 }
 
 bool BrowserAccessibilityAndroid::IsEnabled() const {
@@ -216,7 +219,7 @@ bool BrowserAccessibilityAndroid::IsLink() const {
 }
 
 bool BrowserAccessibilityAndroid::IsMultiLine() const {
-  return GetRole() == ui::AX_ROLE_TEXT_AREA;
+  return HasState(ui::AX_STATE_MULTILINE);
 }
 
 bool BrowserAccessibilityAndroid::IsPassword() const {
@@ -257,7 +260,6 @@ const char* BrowserAccessibilityAndroid::GetClassName() const {
   switch (GetRole()) {
     case ui::AX_ROLE_SEARCH_BOX:
     case ui::AX_ROLE_SPIN_BUTTON:
-    case ui::AX_ROLE_TEXT_AREA:
     case ui::AX_ROLE_TEXT_FIELD:
       class_name = "android.widget.EditText";
       break;
@@ -345,7 +347,6 @@ base::string16 BrowserAccessibilityAndroid::GetText() const {
     switch (GetRole()) {
       case ui::AX_ROLE_COMBO_BOX:
       case ui::AX_ROLE_POP_UP_BUTTON:
-      case ui::AX_ROLE_TEXT_AREA:
       case ui::AX_ROLE_TEXT_FIELD:
         return value;
     }
@@ -354,9 +355,10 @@ base::string16 BrowserAccessibilityAndroid::GetText() const {
   // For color wells, the color is stored in separate attributes.
   // Perhaps we could return color names in the future?
   if (GetRole() == ui::AX_ROLE_COLOR_WELL) {
-    int red = GetIntAttribute(ui::AX_ATTR_COLOR_VALUE_RED);
-    int green = GetIntAttribute(ui::AX_ATTR_COLOR_VALUE_GREEN);
-    int blue = GetIntAttribute(ui::AX_ATTR_COLOR_VALUE_BLUE);
+    int color = GetIntAttribute(ui::AX_ATTR_COLOR_VALUE);
+    int red = (color >> 16) & 0xFF;
+    int green = (color >> 8) & 0xFF;
+    int blue = color & 0xFF;
     return base::UTF8ToUTF16(
         base::StringPrintf("#%02X%02X%02X", red, green, blue));
   }
@@ -381,7 +383,6 @@ base::string16 BrowserAccessibilityAndroid::GetText() const {
   base::string16 placeholder;
   switch (GetRole()) {
     case ui::AX_ROLE_DATE:
-    case ui::AX_ROLE_TEXT_AREA:
     case ui::AX_ROLE_TEXT_FIELD:
     case ui::AX_ROLE_TIME:
       GetHtmlAttribute("placeholder", &placeholder);
@@ -449,7 +450,7 @@ int BrowserAccessibilityAndroid::GetItemIndex() const {
     case ui::AX_ROLE_LIST_ITEM:
     case ui::AX_ROLE_LIST_BOX_OPTION:
     case ui::AX_ROLE_TREE_ITEM:
-      index = GetIndexInParent();
+      index = GetIntAttribute(ui::AX_ATTR_POS_IN_SET) - 1;
       break;
     case ui::AX_ROLE_SLIDER:
     case ui::AX_ROLE_PROGRESS_INDICATOR: {

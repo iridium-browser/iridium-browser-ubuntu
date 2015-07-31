@@ -6,6 +6,8 @@
 #include <set>
 
 #include "base/command_line.h"
+#include "base/files/file_util.h"
+#include "base/strings/string_split.h"
 #include "tools/gn/commands.h"
 #include "tools/gn/deps_iterator.h"
 #include "tools/gn/filesystem_utils.h"
@@ -34,20 +36,23 @@ void FillDepMap(Setup* setup, DepMap* dep_map) {
 }
 
 // Forward declaration for function below.
-void RecursivePrintTargetDeps(const DepMap& dep_map,
-                              const Target* target,
-                              TargetSet* seen_targets,
-                              int indent_level);
+size_t RecursivePrintTargetDeps(const DepMap& dep_map,
+                               const Target* target,
+                               TargetSet* seen_targets,
+                               int indent_level);
 
 // Prints the target and its dependencies in tree form. If the set is non-null,
 // new targets encountered will be added to the set, and if a ref is in the set
 // already, it will not be recused into. When the set is null, all refs will be
 // printed.
-void RecursivePrintTarget(const DepMap& dep_map,
+//
+// Returns the number of items printed.
+size_t RecursivePrintTarget(const DepMap& dep_map,
                           const Target* target,
                           TargetSet* seen_targets,
                           int indent_level) {
   std::string indent(indent_level * 2, ' ');
+  size_t count = 1;
 
   // Only print the toolchain for non-default-toolchain targets.
   OutputString(indent + target->label().GetUserVisibleName(
@@ -69,22 +74,28 @@ void RecursivePrintTarget(const DepMap& dep_map,
   }
 
   OutputString("\n");
-  if (print_children)
-    RecursivePrintTargetDeps(dep_map, target, seen_targets, indent_level + 1);
+  if (print_children) {
+    count += RecursivePrintTargetDeps(dep_map, target, seen_targets,
+                                      indent_level + 1);
+  }
+  return count;
 }
 
 // Prints refs of the given target (not the target itself). See
 // RecursivePrintTarget.
-void RecursivePrintTargetDeps(const DepMap& dep_map,
+size_t RecursivePrintTargetDeps(const DepMap& dep_map,
                               const Target* target,
                               TargetSet* seen_targets,
                               int indent_level) {
   DepMap::const_iterator dep_begin = dep_map.lower_bound(target);
   DepMap::const_iterator dep_end = dep_map.upper_bound(target);
+  size_t count = 0;
   for (DepMap::const_iterator cur_dep = dep_begin;
        cur_dep != dep_end; cur_dep++) {
-    RecursivePrintTarget(dep_map, cur_dep->second, seen_targets, indent_level);
+    count += RecursivePrintTarget(dep_map, cur_dep->second, seen_targets,
+                                  indent_level);
   }
+  return count;
 }
 
 void RecursiveCollectChildRefs(const DepMap& dep_map,
@@ -179,30 +190,35 @@ void GetTargetsReferencingConfig(Setup* setup,
   }
 }
 
-void DoTreeOutput(const DepMap& dep_map,
-                  const UniqueVector<const Target*>& implicit_target_matches,
-                  const UniqueVector<const Target*>& explicit_target_matches,
-                  bool all) {
+// Returns the number of matches printed.
+size_t DoTreeOutput(const DepMap& dep_map,
+                    const UniqueVector<const Target*>& implicit_target_matches,
+                    const UniqueVector<const Target*>& explicit_target_matches,
+                    bool all) {
   TargetSet seen_targets;
+  size_t count = 0;
 
   // Implicit targets don't get printed themselves.
   for (const Target* target : implicit_target_matches) {
     if (all)
-      RecursivePrintTargetDeps(dep_map, target, nullptr, 0);
+      count += RecursivePrintTargetDeps(dep_map, target, nullptr, 0);
     else
-      RecursivePrintTargetDeps(dep_map, target, &seen_targets, 0);
+      count += RecursivePrintTargetDeps(dep_map, target, &seen_targets, 0);
   }
 
   // Explicit targets appear in the output.
   for (const Target* target : implicit_target_matches) {
     if (all)
-      RecursivePrintTarget(dep_map, target, nullptr, 0);
+      count += RecursivePrintTarget(dep_map, target, nullptr, 0);
     else
-      RecursivePrintTarget(dep_map, target, &seen_targets, 0);
+      count += RecursivePrintTarget(dep_map, target, &seen_targets, 0);
   }
+
+  return count;
 }
 
-void DoAllListOutput(
+// Returns the number of matches printed.
+size_t DoAllListOutput(
     const DepMap& dep_map,
     const UniqueVector<const Target*>& implicit_target_matches,
     const UniqueVector<const Target*>& explicit_target_matches) {
@@ -218,9 +234,11 @@ void DoAllListOutput(
   }
 
   FilterAndPrintTargetSet(false, results);
+  return results.size();
 }
 
-void DoDirectListOutput(
+// Returns the number of matches printed.
+size_t DoDirectListOutput(
     const DepMap& dep_map,
     const UniqueVector<const Target*>& implicit_target_matches,
     const UniqueVector<const Target*>& explicit_target_matches) {
@@ -241,6 +259,7 @@ void DoDirectListOutput(
     results.insert(target);
 
   FilterAndPrintTargetSet(false, results);
+  return results.size();
 }
 
 }  // namespace
@@ -249,7 +268,8 @@ const char kRefs[] = "refs";
 const char kRefs_HelpShort[] =
     "refs: Find stuff referencing a target or file.";
 const char kRefs_Help[] =
-    "gn refs <out_dir> (<label_pattern>|<label>|<file>)* [--all]\n"
+    "gn refs <out_dir> (<label_pattern>|<label>|<file>|@<response_file>)* "
+    "[--all]\n"
     "        [--all-toolchains] [--as=...] [--testonly=...] [--type=...]\n"
     "\n"
     "  Finds reverse dependencies (which targets reference something). The\n"
@@ -269,6 +289,11 @@ const char kRefs_Help[] =
     "     its \"inputs\", \"sources\", \"public\", or \"data\". Any input\n"
     "     that does not contain wildcards and does not match a target or a\n"
     "     config will be treated as a file.\n"
+    "\n"
+    "   - Response file: If the input starts with an \"@\", it will be\n"
+    "     interpreted as a path to a file containing a list of labels or\n"
+    "     file names, one per line. This allows us to handle long lists\n"
+    "     of inputs without worrying about command line limits.\n"
     "\n"
     "Options\n"
     "\n"
@@ -293,6 +318,12 @@ const char kRefs_Help[] =
     "      (potentially with both of their recursive dependencies).\n"
     "\n"
     TARGET_PRINTING_MODE_COMMAND_LINE_HELP
+    "\n"
+    "  -q\n"
+    "     Quiet. If nothing matches, don't print any output. Without this\n"
+    "     option, if there are no matches there will be an informational\n"
+    "     message printed which might interfere with scripts processing the\n"
+    "     output.\n"
     "\n"
     TARGET_TESTONLY_FILTER_COMMAND_LINE_HELP
     "\n"
@@ -347,9 +378,9 @@ const char kRefs_Help[] =
     "      potentially affected by a change to the given file.\n";
 
 int RunRefs(const std::vector<std::string>& args) {
-  if (args.size() != 2) {
+  if (args.size() <= 1) {
     Err(Location(), "You're holding it wrong.",
-        "Usage: \"gn refs <out_dir> (<label_pattern>|<file>)\"")
+        "Usage: \"gn refs <out_dir> (<label_pattern>|<file>)*\"")
         .PrintToStdout();
     return 1;
   }
@@ -365,7 +396,29 @@ int RunRefs(const std::vector<std::string>& args) {
     return 1;
 
   // The inputs are everything but the first arg (which is the build dir).
-  std::vector<std::string> inputs(args.begin() + 1, args.end());
+  std::vector<std::string> inputs;
+  for (size_t i = 1; i < args.size(); i++) {
+    if (args[i][0] == '@') {
+      // The argument is as a path to a response file.
+      std::string contents;
+      std::vector<std::string> lines;
+      bool ret = base::ReadFileToString(UTF8ToFilePath(args[i].substr(1)),
+                                        &contents);
+      if (!ret) {
+        Err(Location(), "Response file " + args[i].substr(1) + " not found.")
+            .PrintToStdout();
+        return 1;
+      }
+      base::SplitString(contents, '\n', &lines);
+      for (const auto& line : lines) {
+        if (!line.empty())
+          inputs.push_back(line);
+      }
+    } else {
+      // The argument is a label or a path.
+      inputs.push_back(args[i]);
+    }
+  }
 
   // Get the matches for the command-line input.
   UniqueVector<const Target*> target_matches;
@@ -394,16 +447,35 @@ int RunRefs(const std::vector<std::string>& args) {
                                 &explicit_target_matches);
   }
 
+  // Tell the user if their input matches no files or labels. We need to check
+  // both that it matched no targets and no configs. File input will already
+  // have been converted to targets at this point. Configs will have been
+  // converted to targets also, but there could be no targets referencing the
+  // config, which is different than no config with that name.
+  bool quiet = cmdline->HasSwitch("q");
+  if (!quiet && config_matches.empty() &&
+      explicit_target_matches.empty() && target_matches.empty()) {
+    OutputString("The input matches no targets, configs, or files.\n",
+                 DECORATION_YELLOW);
+    return 1;
+  }
+
   // Construct the reverse dependency tree.
   DepMap dep_map;
   FillDepMap(setup, &dep_map);
 
+  size_t cnt = 0;
   if (tree)
-    DoTreeOutput(dep_map, target_matches, explicit_target_matches, all);
+    cnt = DoTreeOutput(dep_map, target_matches, explicit_target_matches, all);
   else if (all)
-    DoAllListOutput(dep_map, target_matches, explicit_target_matches);
+    cnt = DoAllListOutput(dep_map, target_matches, explicit_target_matches);
   else
-    DoDirectListOutput(dep_map, target_matches, explicit_target_matches);
+    cnt = DoDirectListOutput(dep_map, target_matches, explicit_target_matches);
+
+  // If you ask for the references of a valid target, but that target has
+  // nothing referencing it, we'll get here without having printed anything.
+  if (!quiet && cnt == 0)
+    OutputString("Nothing references this.\n", DECORATION_YELLOW);
 
   return 0;
 }

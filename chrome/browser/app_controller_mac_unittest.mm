@@ -124,7 +124,7 @@ TEST_F(AppControllerTest, TestSigninMenuItemNoErrors) {
   NSString* alreadySignedIn = l10n_util::GetNSStringFWithFixup(
       IDS_SYNC_MENU_SYNCED_LABEL, base::UTF8ToUTF16(username));
   SigninManager* signin = SigninManagerFactory::GetForProfile(profile_);
-  signin->SetAuthenticatedUsername(username);
+  signin->SetAuthenticatedAccountInfo(username, username);
   ProfileSyncService* sync = ProfileSyncServiceFactory::GetForProfile(profile_);
   sync->SetSyncSetupCompleted();
   [AppController updateSigninItem:syncMenuItem
@@ -144,7 +144,7 @@ TEST_F(AppControllerTest, TestSigninMenuItemAuthError) {
   // Now sign in.
   std::string username = "foo@example.com";
   SigninManager* signin = SigninManagerFactory::GetForProfile(profile_);
-  signin->SetAuthenticatedUsername(username);
+  signin->SetAuthenticatedAccountInfo(username, username);
   ProfileSyncService* sync = ProfileSyncServiceFactory::GetForProfile(profile_);
   sync->SetSyncSetupCompleted();
   // Force an auth error.
@@ -152,7 +152,7 @@ TEST_F(AppControllerTest, TestSigninMenuItemAuthError) {
       SigninErrorControllerFactory::GetForProfile(profile_));
   GoogleServiceAuthError error(
       GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS);
-  provider.SetAuthError("user@gmail.com", "user@gmail.com", error);
+  provider.SetAuthError("user@gmail.com", error);
   [AppController updateSigninItem:syncMenuItem
                        shouldShow:YES
                    currentProfile:profile_];

@@ -39,7 +39,7 @@ WebInspector.StylesPopoverHelper.prototype = {
     },
 
     /**
-     * @param {!WebInspector.View} view
+     * @param {!WebInspector.Widget} view
      * @param {!Element} anchorElement
      * @param {function(boolean)=} hiddenCallback
      */
@@ -250,7 +250,7 @@ WebInspector.ColowSwatchPopoverIcon._colorFormat = function(color)
 {
     const cf = WebInspector.Color.Format;
     var format;
-    var formatSetting = WebInspector.settings.colorFormat.get();
+    var formatSetting = WebInspector.moduleSetting("colorFormat").get();
     if (formatSetting === cf.Original)
         format = cf.Original;
     else if (formatSetting === cf.RGB)

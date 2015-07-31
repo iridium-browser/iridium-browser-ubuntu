@@ -11,6 +11,7 @@
 #include "base/i18n/case_conversion.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/metrics/field_trial.h"
 #include "base/sha1.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -45,6 +46,8 @@ const char kAttributeFieldType[] = "fieldtype";
 const char kAttributeFormSignature[] = "formsignature";
 const char kAttributeName[] = "name";
 const char kAttributeSignature[] = "signature";
+const char kAttributeControlType[] = "type";
+const char kAttributeAutocomplete[] = "autocomplete";
 const char kClientVersion[] = "6.1.1715.1442/en (GGLL)";
 const char kXMLDeclaration[] = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>";
 const char kXMLElementAutofillQuery[] = "autofillquery";
@@ -62,6 +65,13 @@ const char kIgnorePatternInFieldName[] = "\\d{5,}+";
 // A form is considered to have a high prediction mismatch rate if the number of
 // mismatches exceeds this threshold.
 const int kNumberOfMismatchesThreshold = 3;
+
+// Returns whether sending autofill field metadata to the server is enabled.
+bool IsAutofillFieldMetadataEnabled() {
+  const std::string group_name =
+      base::FieldTrialList::FindFullName("AutofillFieldMetadata");
+  return StartsWithASCII(group_name, "Enabled", true);
+}
 
 // Helper for |EncodeUploadRequest()| that creates a bit field corresponding to
 // |available_field_types| and returns the hex representation as a string.
@@ -100,6 +110,27 @@ std::string EncodeFieldTypes(const ServerFieldTypeSet& available_field_types) {
   return data_presence;
 }
 
+// Helper for |EncodeFormRequest()| and |EncodeFieldForUpload| that returns an
+// XmlElement for the given field in query xml, and also add it to the parent
+// XmlElement.
+buzz::XmlElement* EncodeFieldForQuery(const AutofillField& field,
+                                      buzz::XmlElement* parent) {
+  buzz::XmlElement* field_element = new buzz::XmlElement(
+      buzz::QName(kXMLElementField));
+  field_element->SetAttr(buzz::QName(kAttributeSignature),
+                         field.FieldSignature());
+  if (IsAutofillFieldMetadataEnabled()) {
+    if (!field.name.empty()) {
+      field_element->SetAttr(buzz::QName(kAttributeName),
+                             base::UTF16ToUTF8(field.name));
+    }
+    field_element->SetAttr(buzz::QName(kAttributeControlType),
+                           field.form_control_type);
+  }
+  parent->AddElement(field_element);
+  return field_element;
+}
+
 // Helper for |EncodeFormRequest()| that creates XmlElements for the given field
 // in upload xml, and also add them to the parent XmlElement.
 void EncodeFieldForUpload(const AutofillField& field,
@@ -112,26 +143,18 @@ void EncodeFieldForUpload(const AutofillField& field,
   // |types| could be empty in unit-tests only.
   for (ServerFieldTypeSet::iterator field_type = types.begin();
        field_type != types.end(); ++field_type) {
-    buzz::XmlElement *field_element = new buzz::XmlElement(
-        buzz::QName(kXMLElementField));
+    // We use the same field elements as the query and add a few more below.
+    buzz::XmlElement* field_element = EncodeFieldForQuery(field, parent);
 
-    field_element->SetAttr(buzz::QName(kAttributeSignature),
-                           field.FieldSignature());
-    field_element->SetAttr(buzz::QName(kAttributeAutofillType),
-                           base::IntToString(*field_type));
-    parent->AddElement(field_element);
+    if (IsAutofillFieldMetadataEnabled()) {
+      if (!field.autocomplete_attribute.empty()) {
+        field_element->SetAttr(buzz::QName(kAttributeAutocomplete),
+                               field.autocomplete_attribute);
+      }
+      field_element->SetAttr(buzz::QName(kAttributeAutofillType),
+                             base::IntToString(*field_type));
+    }
   }
-}
-
-// Helper for |EncodeFormRequest()| that creates XmlElement for the given field
-// in query xml, and also add it to the parent XmlElement.
-void EncodeFieldForQuery(const AutofillField& field,
-                         buzz::XmlElement* parent) {
-  buzz::XmlElement *field_element = new buzz::XmlElement(
-      buzz::QName(kXMLElementField));
-  field_element->SetAttr(buzz::QName(kAttributeSignature),
-                         field.FieldSignature());
-  parent->AddElement(field_element);
 }
 
 // Helper for |EncodeFormRequest()| that creates XmlElements for the given field
@@ -363,31 +386,26 @@ FormStructure::FormStructure(const FormData& form)
       is_form_tag_(form.is_form_tag) {
   // Copy the form fields.
   std::map<base::string16, size_t> unique_names;
-  for (std::vector<FormFieldData>::const_iterator field =
-           form.fields.begin();
-       field != form.fields.end(); ++field) {
-    if (!ShouldSkipField(*field)) {
+  for (const FormFieldData& field : form.fields) {
+    if (!ShouldSkipField(field)) {
       // Add all supported form fields (including with empty names) to the
       // signature.  This is a requirement for Autofill servers.
       form_signature_field_names_.append("&");
-      form_signature_field_names_.append(StripDigitsIfRequired(field->name));
+      form_signature_field_names_.append(StripDigitsIfRequired(field.name));
 
       ++active_field_count_;
     }
 
-    if (field->form_control_type == "password")
+    if (field.form_control_type == "password")
       has_password_field_ = true;
 
     // Generate a unique name for this field by appending a counter to the name.
     // Make sure to prepend the counter with a non-numeric digit so that we are
     // guaranteed to avoid collisions.
-    if (!unique_names.count(field->name))
-      unique_names[field->name] = 1;
-    else
-      ++unique_names[field->name];
-    base::string16 unique_name = field->name + base::ASCIIToUTF16("_") +
-        base::IntToString16(unique_names[field->name]);
-    fields_.push_back(new AutofillField(*field, unique_name));
+    base::string16 unique_name =
+        field.name + base::ASCIIToUTF16("_") +
+        base::IntToString16(++unique_names[field.name]);
+    fields_.push_back(new AutofillField(field, unique_name));
   }
 }
 

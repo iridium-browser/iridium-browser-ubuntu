@@ -16,6 +16,13 @@ BrowserMainParts* ContentBrowserClient::CreateBrowserMainParts(
   return nullptr;
 }
 
+void ContentBrowserClient::PostAfterStartupTask(
+    const tracked_objects::Location& from_here,
+    const scoped_refptr<base::TaskRunner>& task_runner,
+    const base::Closure& task) {
+  task_runner->PostTask(from_here, task);
+}
+
 WebContentsViewDelegate* ContentBrowserClient::GetWebContentsViewDelegate(
     WebContents* web_contents) {
   return nullptr;
@@ -117,10 +124,11 @@ bool ContentBrowserClient::AllowAppCache(const GURL& manifest_url,
   return true;
 }
 
-bool ContentBrowserClient::AllowServiceWorker(
-    const GURL& scope,
-    const GURL& document_url,
-    content::ResourceContext* context) {
+bool ContentBrowserClient::AllowServiceWorker(const GURL& scope,
+                                              const GURL& document_url,
+                                              content::ResourceContext* context,
+                                              int render_process_id,
+                                              int render_frame_id) {
   return true;
 }
 
@@ -306,13 +314,6 @@ bool ContentBrowserClient::IsPluginAllowedToCallRequestOSFileHandle(
 bool ContentBrowserClient::IsPluginAllowedToUseDevChannelAPIs(
     BrowserContext* browser_context,
     const GURL& url) {
-  return false;
-}
-
-bool ContentBrowserClient::CheckMediaAccessPermission(
-    BrowserContext* browser_context,
-    const GURL& security_origin,
-    MediaStreamType type) {
   return false;
 }
 

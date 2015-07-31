@@ -10,6 +10,7 @@
 #include "base/trace_event/trace_event.h"
 
 namespace media {
+namespace midi {
 
 MidiManager::MidiManager()
     : initialized_(false),
@@ -19,8 +20,8 @@ MidiManager::MidiManager()
 MidiManager::~MidiManager() {
 }
 
-#if !defined(OS_MACOSX) && !defined(OS_WIN) && !defined(USE_ALSA) && \
-    !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
+#if !defined(OS_MACOSX) && !defined(OS_WIN) && \
+    !(defined(USE_ALSA) && defined(USE_UDEV)) && !defined(OS_ANDROID)
 MidiManager* MidiManager::Create() {
   return new MidiManager;
 }
@@ -92,6 +93,15 @@ void MidiManager::EndSession(MidiManagerClient* client) {
   base::AutoLock auto_lock(lock_);
   clients_.erase(client);
   pending_clients_.erase(client);
+}
+
+void MidiManager::AccumulateMidiBytesSent(MidiManagerClient* client, size_t n) {
+  {
+    base::AutoLock auto_lock(lock_);
+    if (clients_.find(client) == clients_.end())
+      return;
+  }
+  client->AccumulateMidiBytesSent(n);
 }
 
 void MidiManager::DispatchSendMidiData(MidiManagerClient* client,
@@ -185,4 +195,5 @@ void MidiManager::AddInitialPorts(MidiManagerClient* client) {
     client->AddOutputPort(info);
 }
 
+}  // namespace midi
 }  // namespace media

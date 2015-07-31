@@ -49,14 +49,15 @@ class PolicyCertVerifier : public net::CertVerifier,
   // Note: |callback| can be null.
   int Verify(net::X509Certificate* cert,
              const std::string& hostname,
+             const std::string& ocsp_response,
              int flags,
              net::CRLSet* crl_set,
              net::CertVerifyResult* verify_result,
              const net::CompletionCallback& callback,
-             RequestHandle* out_req,
+             scoped_ptr<Request>* out_req,
              const net::BoundNetLog& net_log) override;
 
-  void CancelRequest(RequestHandle req) override;
+  bool SupportsOCSPStapling() override;
 
   // CertTrustAnchorProvider:
   const net::CertificateList& GetAdditionalTrustAnchors() override;

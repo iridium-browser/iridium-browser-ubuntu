@@ -401,12 +401,6 @@ public:
     virtual void copySubTextureCHROMIUM(WGC3Denum target, WGC3Duint sourceId,
         WGC3Duint destId, WGC3Dint xoffset, WGC3Dint yoffset) { }
 
-    // TODO(dshwang): Remove methods with |level|. crbug.com/443151
-    virtual void copyTextureCHROMIUM(WGC3Denum target, WGC3Duint sourceId,
-        WGC3Duint destId, WGC3Dint level, WGC3Denum internalFormat, WGC3Denum destType) { }
-    virtual void copySubTextureCHROMIUM(WGC3Denum target, WGC3Duint sourceId,
-        WGC3Duint destId, WGC3Dint level, WGC3Dint xoffset, WGC3Dint yoffset) { }
-
     // GL_CHROMIUM_shallow_flush
     virtual void shallowFlushCHROMIUM() { }
     virtual void shallowFinishCHROMIUM() { }
@@ -505,7 +499,9 @@ public:
     virtual void getActiveUniformBlockName(WebGLId program, WGC3Duint uniformBlockIndex, WGC3Dsizei bufSize, WGC3Dsizei *length, WGC3Dchar *uniformBlockName) { }
     virtual void getActiveUniformBlockiv(WebGLId program, WGC3Duint uniformBlockIndex, WGC3Denum pname, WGC3Dint *params) { }
     virtual void getActiveUniformsiv(WebGLId program, WGC3Dsizei uniformCount, const WGC3Duint *uniformIndices, WGC3Denum pname, WGC3Dint *params) { }
+    virtual void getBufferParameteri64v(WGC3Denum target, WGC3Denum pname, WGC3Dint64 *value) { }
     virtual WGC3Dint getFragDataLocation(WebGLId program, const WGC3Dchar *name) { return -1; }
+    virtual void getInteger64v(WGC3Denum pname, WGC3Dint64 *data) { }
     virtual void getIntegeri_v(WGC3Denum target, WGC3Duint index, WGC3Dint *data) { }
     virtual void getInteger64i_v(WGC3Denum target, WGC3Duint index, WGC3Dint64 *data) { }
     virtual void getInternalformativ(WGC3Denum target, WGC3Denum internalformat, WGC3Denum pname, WGC3Dsizei bufSize, WGC3Dint *params) { }

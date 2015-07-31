@@ -48,9 +48,7 @@ class WallpaperFetcher : public net::URLFetcherDelegate {
   void FetchWallpaper(const GURL& url, FetchCallback callback) {
     CancelPreviousFetch();
     callback_ = callback;
-    url_fetcher_.reset(net::URLFetcher::Create(url,
-                                               net::URLFetcher::GET,
-                                               this));
+    url_fetcher_ = net::URLFetcher::Create(url, net::URLFetcher::GET, this);
     url_fetcher_->SetRequestContext(
         g_browser_process->system_request_context());
     url_fetcher_->SetLoadFlags(net::LOAD_DISABLE_CACHE);
@@ -142,7 +140,7 @@ void WallpaperSetWallpaperFunction::OnWallpaperDecoded(
           GetSequencedTaskRunnerWithShutdownBehavior(sequence_token_,
               base::SequencedWorkerPool::BLOCK_SHUTDOWN);
   wallpaper::WallpaperLayout layout = wallpaper_api_util::GetLayoutEnum(
-      set_wallpaper::Params::Details::ToString(params_->details.layout));
+      extensions::api::wallpaper::ToString(params_->details.layout));
   bool update_wallpaper =
       user_id_ == user_manager::UserManager::Get()->GetActiveUser()->email();
   wallpaper_manager->SetCustomWallpaper(user_id_,

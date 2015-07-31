@@ -92,11 +92,6 @@ class AutofillAgent : public content::RenderFrameObserver,
     // after the last character in the element.
     bool requires_caret_at_end;
 
-    // Specifies that a warning should be displayed to the user if Autofill has
-    // suggestions available, but cannot fill them because it is disabled (e.g.
-    // when trying to fill a credit card form on a non-secure website).
-    bool display_warning_if_disabled;
-
     // Specifies that all of <datalist> suggestions and no autofill suggestions
     // are shown. |autofill_on_empty_values| and |requires_caret_at_end| are
     // ignored if |datalist_only| is true.
@@ -190,7 +185,6 @@ class AutofillAgent : public content::RenderFrameObserver,
   // Queries the browser for Autocomplete and Autofill suggestions for the given
   // |element|.
   void QueryAutofillSuggestions(const blink::WebFormControlElement& element,
-                                bool display_warning_if_disabled,
                                 bool datalist_only);
 
   // Sets the element value to reflect the selected |suggested_value|.
@@ -251,18 +245,12 @@ class AutofillAgent : public content::RenderFrameObserver,
   // The form element currently requesting an interactive autocomplete.
   blink::WebFormElement in_flight_request_form_;
 
-  // Should we display a warning if autofill is disabled?
-  bool display_warning_if_disabled_;
-
   // Was the query node autofilled prior to previewing the form?
   bool was_query_node_autofilled_;
 
   // Have we already shown Autofill suggestions for the field the user is
   // currently editing?  Used to keep track of state for metrics logging.
   bool has_shown_autofill_popup_for_current_edit_;
-
-  // If true we just set the node text so we shouldn't show the popup.
-  bool did_set_node_text_;
 
   // Whether or not to ignore text changes.  Useful for when we're committing
   // a composition when we are defocusing the WebView and we don't want to
@@ -273,6 +261,12 @@ class AutofillAgent : public content::RenderFrameObserver,
   // performance improvement, so that the IPC channel isn't flooded with
   // messages to close the Autofill popup when it can't possibly be showing.
   bool is_popup_possibly_visible_;
+
+  // If the generation popup is possibly visible. This is tracked to prevent
+  // generation UI from displaying at the same time as password manager UI.
+  // This is needed because generation is shown on field focus vs. field click
+  // for the password manager. TODO(gcasto): Have both UIs show on focus.
+  bool is_generation_popup_possibly_visible_;
 
   base::WeakPtrFactory<AutofillAgent> weak_ptr_factory_;
 

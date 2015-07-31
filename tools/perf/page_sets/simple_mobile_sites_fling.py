@@ -3,7 +3,6 @@
 # found in the LICENSE file.
 from page_sets import fling_gesture_supported_shared_state
 
-from telemetry.page import shared_page_state
 from telemetry.page import page as page_module
 from telemetry.page import page_set as page_set_module
 
@@ -25,13 +24,12 @@ class SimpleFlingPage(page_module.Page):
     action_runner.Wait(5)
 
   def RunPageInteractions(self, action_runner):
-    interaction = action_runner.BeginGestureInteraction('FlingAction')
-    # Swiping up induces a downward fling, and 500 pixels of touch scrolling
-    # runway ensures consistent fling velocities.
-    action_runner.SwipePage(direction='up',
-                            distance='500',
-                            speed_in_pixels_per_second=5000)
-    interaction.End()
+    with action_runner.CreateGestureInteraction('FlingAction'):
+      # Swiping up induces a downward fling, and 500 pixels of touch scrolling
+      # runway ensures consistent fling velocities.
+      action_runner.SwipePage(direction='up',
+                              distance='500',
+                              speed_in_pixels_per_second=5000)
 
 class SimpleMobileSitesFlingPageSet(page_set_module.PageSet):
 

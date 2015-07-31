@@ -59,6 +59,11 @@ WebSettingsImpl::WebSettingsImpl(Settings* settings, DevToolsEmulator* devToolsE
     ASSERT(settings);
 }
 
+void WebSettingsImpl::setFromStrings(const WebString& name, const WebString& value)
+{
+    m_settings->setFromStrings(name, value);
+}
+
 void WebSettingsImpl::setStandardFontFamily(const WebString& font, UScriptCode script)
 {
     if (m_settings->genericFontFamilySettings().updateStandard(font, script))
@@ -305,11 +310,6 @@ void WebSettingsImpl::setDOMPasteAllowed(bool enabled)
     m_settings->setDOMPasteAllowed(enabled);
 }
 
-void WebSettingsImpl::setShrinksStandaloneImagesToFit(bool shrinkImages)
-{
-    m_settings->setShrinksStandaloneImagesToFit(shrinkImages);
-}
-
 void WebSettingsImpl::setShrinksViewportContentToFit(bool shrinkViewportContent)
 {
     m_shrinksViewportContentToFit = shrinkViewportContent;
@@ -477,7 +477,8 @@ void WebSettingsImpl::setExperimentalWebGLEnabled(bool enabled)
 
 void WebSettingsImpl::setRegionBasedColumnsEnabled(bool enabled)
 {
-    m_settings->setRegionBasedColumnsEnabled(enabled);
+    // TODO(mstensho): Get rid of this method. Cannot do it yet, because it's still called from the
+    // Chromium side. See crbug.com/350853
 }
 
 void WebSettingsImpl::setOpenGLMultisamplingEnabled(bool enabled)
@@ -651,6 +652,16 @@ void WebSettingsImpl::setEnableTouchAdjustment(bool enabled)
     m_settings->setTouchAdjustmentEnabled(enabled);
 }
 
+bool WebSettingsImpl::multiTargetTapNotificationEnabled()
+{
+    return m_settings->multiTargetTapNotificationEnabled();
+}
+
+void WebSettingsImpl::setMultiTargetTapNotificationEnabled(bool enabled)
+{
+    m_settings->setMultiTargetTapNotificationEnabled(enabled);
+}
+
 int WebSettingsImpl::availablePointerTypes() const
 {
     return m_settings->availablePointerTypes();
@@ -674,6 +685,11 @@ WebSettings::HoverType WebSettingsImpl::primaryHoverType() const
 bool WebSettingsImpl::viewportEnabled() const
 {
     return m_settings->viewportEnabled();
+}
+
+bool WebSettingsImpl::viewportMetaEnabled() const
+{
+    return m_settings->viewportMetaEnabled();
 }
 
 bool WebSettingsImpl::doubleTapToZoomEnabled() const
@@ -750,6 +766,12 @@ void WebSettingsImpl::setSelectionIncludesAltImageText(bool enabled)
 {
     m_settings->setSelectionIncludesAltImageText(enabled);
 }
+
+void WebSettingsImpl::setSelectionStrategy(SelectionStrategyType strategy)
+{
+    m_settings->setSelectionStrategy(static_cast<SelectionStrategy>(strategy));
+}
+
 
 void WebSettingsImpl::setSmartInsertDeleteEnabled(bool enabled)
 {

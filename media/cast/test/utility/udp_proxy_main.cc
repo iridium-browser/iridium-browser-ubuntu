@@ -13,6 +13,8 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "media/cast/test/utility/udp_proxy.h"
 
 class ByteCounter {
@@ -75,7 +77,7 @@ base::LazyInstance<GlobalCounter>::Leaky g_counter =
 class ByteCounterPipe : public media::cast::test::PacketPipe {
  public:
   ByteCounterPipe(ByteCounter* counter) : counter_(counter) {}
-  void Send(scoped_ptr<media::cast::Packet> packet) override {
+  void Send(scoped_ptr<media::cast::Packet> packet) final {
     counter_->Increment(packet->size());
     pipe_->Send(packet.Pass());
   }
@@ -115,7 +117,7 @@ void CheckByteCounters() {
 
     g_counter.Get().last_printout = now;
   }
-  base::MessageLoopProxy::current()->PostDelayedTask(
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&CheckByteCounters),
       base::TimeDelta::FromMilliseconds(100));

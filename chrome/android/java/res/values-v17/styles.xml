@@ -96,7 +96,7 @@
     <style name="ThemeWithActionBar" parent="Theme.AppCompat.Light.DarkActionBar">
         <item name="android:windowBackground">@drawable/action_bar_activity_bg</item>
         <!-- Action bar color -->
-        <item name="colorPrimary">#263238</item>
+        <item name="colorPrimary">@color/dark_action_bar_color</item>
         <!-- Status bar color -->
         <item name="colorPrimaryDark">#161e21</item>
         <!-- Color of checkboxes, switches, buttons, etc. -->
@@ -107,10 +107,9 @@
     <style name="AlertDialogContent">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:paddingStart">15dp</item>
-        <item name="android:paddingEnd">15dp</item>
-        <item name="android:paddingTop">10dp</item>
-        <item name="android:paddingBottom">10dp</item>
+        <item name="android:paddingStart">@dimen/dialog_padding_sides</item>
+        <item name="android:paddingEnd">@dimen/dialog_padding_sides</item>
+        <item name="android:paddingTop">@dimen/dialog_padding_top</item>
     </style>
     <style name="AlertDialogEditTextItem">
         <item name="android:layout_width">match_parent</item>

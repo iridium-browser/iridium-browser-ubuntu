@@ -25,10 +25,6 @@ bool FLAGS_quic_use_bbr_congestion_control = false;
 // connection options.
 bool FLAGS_quic_allow_bbr = false;
 
-// If true, then the source address tokens generated for QUIC connects will
-// store multiple addresses.
-bool FLAGS_quic_use_multiple_address_in_source_tokens = false;
-
 // Time period for which a given connection_id should live in the time-wait
 // state.
 int64 FLAGS_quic_time_wait_list_seconds = 5;
@@ -43,12 +39,9 @@ int64 FLAGS_quic_time_wait_list_seconds = 5;
 // no configured limit.
 int64 FLAGS_quic_time_wait_list_max_connections = 50000;
 
-// Use small QUIC packet sizes by default.
-bool FLAGS_quic_small_default_packet_size = true;
+// Enables server-side support for QUIC stateless rejects.
+bool FLAGS_enable_quic_stateless_reject_support = false;
 
-// Do not retransmit data for streams that have been reset.
-bool FLAGS_quic_do_not_retransmit_for_reset_streams = true;
-
-// If true, use the peer's receive buffer size to set the max CWND used by the
-// send algorithms.
-bool FLAGS_quic_limit_max_cwnd_to_receive_buffer = true;
+// If true, stop processing quic data as soon as the connection is closed rather
+// than processing a full packet.
+bool FLAGS_quic_stop_early = true;

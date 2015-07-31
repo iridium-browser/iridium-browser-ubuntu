@@ -57,7 +57,7 @@ CrashDumpManager::~CrashDumpManager() {
 }
 
 base::File CrashDumpManager::CreateMinidumpFile(int child_process_id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::PROCESS_LAUNCHER));
+  DCHECK_CURRENTLY_ON(BrowserThread::PROCESS_LAUNCHER);
   base::FilePath minidump_path;
   if (!base::CreateTemporaryFile(&minidump_path))
     return base::File();
@@ -126,7 +126,8 @@ void CrashDumpManager::BrowserChildProcessHostDisconnected(
 }
 
 void CrashDumpManager::BrowserChildProcessCrashed(
-    const content::ChildProcessData& data) {
+    const content::ChildProcessData& data,
+    int exit_code) {
   OnChildExit(data.id, data.handle);
 }
 

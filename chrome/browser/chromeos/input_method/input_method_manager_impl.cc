@@ -422,7 +422,8 @@ void InputMethodManagerImpl::StateImpl::ChangeInputMethod(
   // Always change input method even if it is the same.
   // TODO(komatsu): Revisit if this is neccessary.
   if (IsActive())
-    manager_->ChangeInputMethodInternal(*descriptor, show_message, notify_menu);
+    manager_->ChangeInputMethodInternal(*descriptor, profile, show_message,
+                                        notify_menu);
   manager_->RecordInputMethodUsage(current_input_method.id());
 }
 
@@ -445,7 +446,7 @@ void InputMethodManagerImpl::StateImpl::AddInputMethodExtension(
 
   DCHECK(engine);
 
-  manager_->engine_map_[extension_id] = engine;
+  manager_->engine_map_[profile][extension_id] = engine;
 
   bool contain = false;
   for (size_t i = 0; i < descriptors.size(); i++) {
@@ -502,10 +503,10 @@ void InputMethodManagerImpl::StateImpl::RemoveInputMethodExtension(
 
   if (IsActive()) {
     if (IMEBridge::Get()->GetCurrentEngineHandler() ==
-        manager_->engine_map_[extension_id]) {
+        manager_->engine_map_[profile][extension_id]) {
       IMEBridge::Get()->SetCurrentEngineHandler(NULL);
     }
-    manager_->engine_map_.erase(extension_id);
+    manager_->engine_map_[profile].erase(extension_id);
   }
 
   // If |current_input_method| is no longer in |active_input_method_ids|,
@@ -825,9 +826,8 @@ void InputMethodManagerImpl::SetState(
     // Always call ChangeInputMethodInternal even when the input method id
     // remain unchanged, because onActivate event needs to be sent to IME
     // extension to update the current screen type correctly.
-    ChangeInputMethodInternal(state_->current_input_method,
-                              false /* show_message */,
-                              true /* notify_menu */);
+    ChangeInputMethodInternal(state_->current_input_method, state_->profile,
+                              false /* show_message */, true /* notify_menu */);
   }
 }
 
@@ -975,6 +975,7 @@ const InputMethodDescriptor* InputMethodManagerImpl::LookupInputMethod(
 
 void InputMethodManagerImpl::ChangeInputMethodInternal(
     const InputMethodDescriptor& descriptor,
+    Profile* profile,
     bool show_message,
     bool notify_menu) {
   // No need to switch input method when terminating.
@@ -1009,7 +1010,7 @@ void InputMethodManagerImpl::ChangeInputMethodInternal(
       extension_ime_util::GetExtensionIDFromInputMethodID(descriptor.id());
   const std::string& component_id =
       extension_ime_util::GetComponentIDByInputMethodID(descriptor.id());
-  engine = engine_map_[extension_id];
+  engine = engine_map_[profile][extension_id];
 
   IMEBridge::Get()->SetCurrentEngineHandler(engine);
 
@@ -1033,9 +1034,8 @@ void InputMethodManagerImpl::ChangeInputMethodInternal(
   }
 
   // Update input method indicators (e.g. "US", "DV") in Chrome windows.
-  FOR_EACH_OBSERVER(InputMethodManager::Observer,
-                    observers_,
-                    InputMethodChanged(this, show_message));
+  FOR_EACH_OBSERVER(InputMethodManager::Observer, observers_,
+                    InputMethodChanged(this, profile, show_message));
 }
 
 void InputMethodManagerImpl::LoadNecessaryComponentExtensions(

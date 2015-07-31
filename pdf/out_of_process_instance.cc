@@ -54,7 +54,7 @@ const char kAccessibleCopyable[] = "copyable";
 
 // PDF background colors.
 const uint32 kBackgroundColor = 0xFFCCCCCC;
-const uint32 kBackgroundColorMaterial = 0xFFEEEEEE;
+const uint32 kBackgroundColorMaterial = 0xFF424242;
 
 // Constants used in handling postMessage() messages.
 const char kType[] = "type";
@@ -295,6 +295,9 @@ OutOfProcessInstance::OutOfProcessInstance(PP_Instance instance)
 
 OutOfProcessInstance::~OutOfProcessInstance() {
   RemovePerInstanceObject(kPPPPdfInterface, this);
+  // Explicitly reset the PDFEngine during destruction as it may call back into
+  // this object.
+  engine_.reset();
 }
 
 bool OutOfProcessInstance::Init(uint32_t argc,

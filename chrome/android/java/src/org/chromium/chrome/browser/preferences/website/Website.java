@@ -4,8 +4,7 @@
 
 package org.chromium.chrome.browser.preferences.website;
 
-import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ContentSettingsType;
+import org.chromium.chrome.browser.util.MathUtils;
 
 import java.io.Serializable;
 import java.util.ArrayList;
@@ -24,219 +23,19 @@ public class Website implements Serializable {
     static final int MICROPHONE_AND_CAMERA_ACCESS_DENIED = 5;
     static final int MICROPHONE_ACCESS_DENIED = 6;
 
-    /**
-     * A website permission type (e.g. gelocation or popups) and associated data: the title and
-     * icon, and its possible permission states: Allow/Block or Ask/Block, etc.
-     */
-    public static class PermissionDataEntry {
-        /**
-         * The resource id of this permission entry's icon.
-         */
-        public int iconResourceId = 0;
-
-        /**
-         * The resource id of this permission entry's title (short version),
-         * shown on the Site Settings page and in the global toggle at the
-         * top of a Website Settings page.
-         */
-        public int titleResourceId = 0;
-
-        /**
-         * The resource id of this permission entry's title explanation,
-         * shown on the Website Details page.
-         */
-        public int explanationResourceId = 0;
-
-        /**
-         * What ContentSetting the global default is set to when enabled.
-         * Either Ask/Allow. Not required unless this entry describes a settings
-         * that appears on the Site Settings page and has a global toggle.
-         */
-        public ContentSetting defaultEnabledValue = null;
-
-        /**
-         * The ContentSetting for this entry when enabled. Usually Block. Not
-         * required unless this entry describes a settings that appears on the
-         * Site Settings page and has a global toggle.
-         */
-        public ContentSetting defaultDisabledValue = null;
-
-        /**
-         * The resource ID to use when the enabled state should have a custom
-         * summary. When 0 the default string will be used instead.
-         */
-        public int customEnabledSummary = 0;
-
-        /**
-         * The resource ID to use when the disabled state should have a custom
-         * summary. When 0 the default string will be used instead.
-         */
-        public int customDisabledSummary = 0;
-
-        /**
-         * Returns the string resource id for a given ContentSetting to show
-         * with a permission category.
-         * @param value The ContentSetting to convert to string id.
-         */
-        public int contentSettingToResourceIdForCategory(ContentSetting value) {
-            switch (value) {
-                case ALLOW:
-                    return R.string.website_settings_category_allowed;
-                case BLOCK:
-                    return R.string.website_settings_category_blocked;
-                case ASK:
-                    return R.string.website_settings_category_ask;
-            }
-            return 0;
-        }
-
-        /**
-         * Returns the string resource id for a given ContentSetting to show
-         * with a particular website.
-         * @param value The ContentSetting to convert to string id.
-         */
-        public int contentSettingToResourceIdForSite(ContentSetting value) {
-            switch (value) {
-                case ALLOW:
-                    return R.string.website_settings_permissions_allow;
-                case BLOCK:
-                    return R.string.website_settings_permissions_block;
-                case ASK:
-                    return 0;  // We never show Ask as an option on individual permissions.
-            }
-            return 0;
-        }
-
-        /**
-         * Fetches the summary (resource id) to show when the entry is enabled.
-         */
-        public int getEnabledSummaryResourceId() {
-            if (customEnabledSummary != 0) {
-                return customEnabledSummary;
-            } else {
-                return contentSettingToResourceIdForCategory(defaultEnabledValue);
-            }
-        }
-
-        /**
-         * Fetches the summary (resource id) to show when the entry is disabled.
-         */
-        public int getDisabledSummaryResourceId() {
-            if (customDisabledSummary != 0) {
-                return customDisabledSummary;
-            } else {
-                return contentSettingToResourceIdForCategory(defaultDisabledValue);
-            }
-        }
-
-        /**
-         * Returns a PermissionDataEntry for a given ContentSettingsType.
-         * @param type The ContentSettingsType to look up.
-         */
-        public static PermissionDataEntry getPermissionDataEntry(int type) {
-            PermissionDataEntry entry = null;
-            switch (type) {
-                case ContentSettingsType.CONTENT_SETTINGS_TYPE_COOKIES:
-                    entry = new PermissionDataEntry();
-                    entry.iconResourceId = R.drawable.permission_cookie;
-                    entry.titleResourceId = R.string.cookies_title;
-                    entry.explanationResourceId = R.string.cookies_title;
-                    entry.defaultEnabledValue = ContentSetting.ALLOW;
-                    entry.defaultDisabledValue = ContentSetting.BLOCK;
-                    entry.customEnabledSummary = R.string.website_settings_category_cookie_allowed;
-                    entry.customDisabledSummary = R.string.website_settings_category_block_all;
-                    return entry;
-                case ContentSettingsType.CONTENT_SETTINGS_TYPE_POPUPS:
-                    entry = new PermissionDataEntry();
-                    entry.iconResourceId = R.drawable.permission_popups;
-                    entry.titleResourceId = R.string.popup_permission_title;
-                    entry.explanationResourceId = R.string.popup_permission_title;
-                    entry.defaultEnabledValue = ContentSetting.ALLOW;
-                    entry.defaultDisabledValue = ContentSetting.BLOCK;
-                    entry.customDisabledSummary =
-                            R.string.website_settings_category_block_recommended;
-                    return entry;
-                case ContentSettingsType.CONTENT_SETTINGS_TYPE_GEOLOCATION:
-                    entry = new PermissionDataEntry();
-                    entry.iconResourceId = R.drawable.permission_location;
-                    entry.titleResourceId = R.string.website_settings_device_location;
-                    entry.explanationResourceId = R.string.geolocation_permission_title;
-                    entry.defaultEnabledValue = ContentSetting.ASK;
-                    entry.defaultDisabledValue = ContentSetting.BLOCK;
-                    entry.customEnabledSummary =
-                            R.string.website_settings_category_ask_before_accessing;
-                    entry.customDisabledSummary = R.string.website_settings_category_block_all;
-                    return entry;
-                case ContentSettingsType.CONTENT_SETTINGS_TYPE_MEDIASTREAM:
-                    entry = new PermissionDataEntry();
-                    entry.iconResourceId = R.drawable.permission_media;
-                    entry.titleResourceId = R.string.website_settings_use_camera_or_mic;
-                    entry.explanationResourceId = 0;  // Programmatically assigned.
-                    entry.defaultEnabledValue = ContentSetting.ASK;
-                    entry.defaultDisabledValue = ContentSetting.BLOCK;
-                    entry.customEnabledSummary =
-                            R.string.website_settings_category_ask_before_accessing_camera_mic;
-                    return entry;
-                case ContentSettingsType.CONTENT_SETTINGS_TYPE_JAVASCRIPT:
-                    entry = new PermissionDataEntry();
-                    entry.iconResourceId = R.drawable.permission_javascript;
-                    entry.titleResourceId = R.string.javascript_permission_title;
-                    entry.explanationResourceId = R.string.javascript_permission_title;
-                    entry.defaultEnabledValue = ContentSetting.ALLOW;
-                    entry.defaultDisabledValue = ContentSetting.BLOCK;
-                    return entry;
-                case ContentSettingsType.CONTENT_SETTINGS_TYPE_MIDI_SYSEX:
-                    entry = new PermissionDataEntry();
-                    // Midi does not appear as a category on the Site Settings page and
-                    // therefore does not need as detailed values.
-                    entry.iconResourceId = R.drawable.permission_midi;
-                    entry.explanationResourceId = R.string.midi_sysex_permission_title;
-                    return entry;
-                case ContentSettingsType.CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
-                    entry = new PermissionDataEntry();
-                    entry.iconResourceId = R.drawable.permission_push_notification;
-                    entry.titleResourceId = R.string.push_notifications_permission_title;
-                    entry.explanationResourceId = R.string.push_notifications_permission_title;
-                    entry.defaultEnabledValue = ContentSetting.ASK;
-                    entry.defaultDisabledValue = ContentSetting.BLOCK;
-                    entry.customEnabledSummary =
-                            R.string.website_settings_category_ask_before_sending;
-                    return entry;
-                case ContentSettingsType.CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER:
-                    entry = new PermissionDataEntry();
-                    // Protected Content appears only as a category on the Site Settings page
-                    // but does not have a site-list like the others, so it does not need as
-                    // detailed values.
-                    entry.iconResourceId = R.drawable.permission_protected_media;
-                    entry.titleResourceId = org.chromium.chrome.R.string.protected_content;
-                    entry.defaultEnabledValue = ContentSetting.ASK;
-                    entry.defaultDisabledValue = ContentSetting.BLOCK;
-                    return entry;
-                case ContentSettingsType.CONTENT_SETTINGS_TYPE_FULLSCREEN:
-                    entry = new PermissionDataEntry();
-                    entry.iconResourceId = R.drawable.permission_fullscreen;
-                    entry.titleResourceId = R.string.website_settings_fullscreen;
-                    entry.explanationResourceId = R.string.fullscreen_permission_title;
-                    entry.defaultEnabledValue = ContentSetting.ALLOW;
-                    entry.defaultDisabledValue = ContentSetting.ASK;
-                    return entry;
-                default:
-                    return null;
-            }
-        }
-    }
-
     private final WebsiteAddress mAddress;
     private final String mTitle;
     private String mSummary;
+    private CameraInfo mCameraInfo;
     private CookieInfo mCookieInfo;
     private GeolocationInfo mGeolocationInfo;
+    private MicrophoneInfo mMicrophoneInfo;
     private MidiInfo mMidiInfo;
-    private JavaScriptExceptionInfo mJavaScriptExceptionInfo;
-    private PopupExceptionInfo mPopupExceptionInfo;
+    private ContentSettingException mImagesException;
+    private ContentSettingException mJavaScriptException;
+    private ContentSettingException mPopupException;
     private ProtectedMediaIdentifierInfo mProtectedMediaIdentifierInfo;
     private PushNotificationInfo mPushNotificationInfo;
-    private VoiceAndVideoCaptureInfo mVoiceAndVideoCaptureInfo;
     private LocalStorageInfo mLocalStorageInfo;
     private final List<StorageInfo> mStorageInfo = new ArrayList<StorageInfo>();
     private int mStorageInfoCallbacksLeft;
@@ -269,7 +68,7 @@ public class Website implements Serializable {
      */
     public int compareByStorageTo(Website to) {
         if (this == to) return 0;
-        return getTotalUsage() < to.getTotalUsage() ? 1 : -1;
+        return MathUtils.compareLongs(to.getTotalUsage(), getTotalUsage());
     }
 
     /**
@@ -366,45 +165,68 @@ public class Website implements Serializable {
     }
 
     /**
+     * Returns what permission governs Images access.
+     */
+    public ContentSetting getImagesPermission() {
+        return mImagesException != null ? mImagesException.getContentSetting() : null;
+    }
+
+    /**
+     * Configure Images permission access setting for this site.
+     */
+    public void setImagesPermission(ContentSetting value) {
+        if (mImagesException != null) {
+            mImagesException.setContentSetting(value);
+        }
+    }
+
+    /**
+     * Sets the Images exception info for this Website.
+     */
+    public void setImagesException(ContentSettingException exception) {
+        mImagesException = exception;
+    }
+
+    /**
      * Returns what permission governs JavaScript access.
      */
     public ContentSetting getJavaScriptPermission() {
-        return mJavaScriptExceptionInfo != null
-                ? mJavaScriptExceptionInfo.getContentSetting() : null;
+        return mJavaScriptException != null
+                ? mJavaScriptException.getContentSetting() : null;
     }
 
     /**
      * Configure JavaScript permission access setting for this site.
      */
     public void setJavaScriptPermission(ContentSetting value) {
-        if (mJavaScriptExceptionInfo != null) {
-            mJavaScriptExceptionInfo.setContentSetting(value);
+        if (mJavaScriptException != null) {
+            mJavaScriptException.setContentSetting(value);
         }
     }
 
     /**
      * Sets the JavaScript exception info for this Website.
      */
-    public void setJavaScriptExceptionInfo(JavaScriptExceptionInfo info) {
-        mJavaScriptExceptionInfo = info;
+    public void setJavaScriptException(ContentSettingException exception) {
+        mJavaScriptException = exception;
     }
 
     /**
      * Sets the Popup exception info for this Website.
      */
-    public void setPopupExceptionInfo(PopupExceptionInfo info) {
-        mPopupExceptionInfo = info;
+    public void setPopupException(ContentSettingException exception) {
+        mPopupException = exception;
     }
 
-    public PopupExceptionInfo getPopupExceptionInfo() {
-        return mPopupExceptionInfo;
+    public ContentSettingException getPopupException() {
+        return mPopupException;
     }
 
     /**
      * Returns what permission governs Popup permission.
      */
     public ContentSetting getPopupPermission() {
-        if (mPopupExceptionInfo != null) return mPopupExceptionInfo.getContentSetting();
+        if (mPopupException != null) return mPopupException.getContentSetting();
         return null;
     }
 
@@ -412,8 +234,8 @@ public class Website implements Serializable {
      * Configure Popup permission access setting for this site.
      */
     public void setPopupPermission(ContentSetting value) {
-        if (mPopupExceptionInfo != null) {
-            mPopupExceptionInfo.setContentSetting(value);
+        if (mPopupException != null) {
+            mPopupException.setContentSetting(value);
         }
     }
 
@@ -477,85 +299,61 @@ public class Website implements Serializable {
     }
 
     /**
-     * Sets voice and video capture info class.
+     * Sets camera capture info class.
      */
-    public void setVoiceAndVideoCaptureInfo(VoiceAndVideoCaptureInfo info) {
-        mVoiceAndVideoCaptureInfo = info;
+    public void setCameraInfo(CameraInfo info) {
+        mCameraInfo = info;
         WebsiteAddress embedder = WebsiteAddress.create(info.getEmbedder());
         if (embedder != null) {
             mSummary = embedder.getTitle();
         }
     }
 
-    public VoiceAndVideoCaptureInfo getVoiceAndVideoCaptureInfo() {
-        return mVoiceAndVideoCaptureInfo;
+    public CameraInfo getCameraInfo() {
+        return mCameraInfo;
     }
 
     /**
-     * Returns what setting governs voice capture access.
+     * Sets microphone capture info class.
      */
-    public ContentSetting getVoiceCapturePermission() {
-        return mVoiceAndVideoCaptureInfo != null
-                ? mVoiceAndVideoCaptureInfo.getVoiceCapturePermission() : null;
-    }
-
-    /**
-     * Returns what setting governs video capture access.
-     */
-    public ContentSetting getVideoCapturePermission() {
-        return mVoiceAndVideoCaptureInfo != null
-                ? mVoiceAndVideoCaptureInfo.getVideoCapturePermission() : null;
-    }
-
-    /**
-     * Configure voice capture setting for this site.
-     */
-    public void setVoiceCapturePermission(ContentSetting value) {
-        if (mVoiceAndVideoCaptureInfo != null) {
-            mVoiceAndVideoCaptureInfo.setVoiceCapturePermission(value);
+    public void setMicrophoneInfo(MicrophoneInfo info) {
+        mMicrophoneInfo = info;
+        WebsiteAddress embedder = WebsiteAddress.create(info.getEmbedder());
+        if (embedder != null) {
+            mSummary = embedder.getTitle();
         }
     }
 
-    /**
-     * Configure video capture setting for this site.
-     */
-    public void setVideoCapturePermission(ContentSetting value) {
-        if (mVoiceAndVideoCaptureInfo != null) {
-            mVoiceAndVideoCaptureInfo.setVideoCapturePermission(value);
-        }
+    public MicrophoneInfo getMicrophoneInfo() {
+        return mMicrophoneInfo;
     }
 
     /**
-     * Returns the type of media that is being captured (audio/video/both).
+     * Returns what setting governs microphone capture access.
      */
-    public int getMediaAccessType() {
-        ContentSetting voice = getVoiceCapturePermission();
-        ContentSetting video = getVideoCapturePermission();
-        if (video != null) {
-            if (voice == null) {
-                if (video == ContentSetting.ALLOW) {
-                    return CAMERA_ACCESS_ALLOWED;
-                } else {
-                    return CAMERA_ACCESS_DENIED;
-                }
-            } else {
-                if (video != voice) {
-                    return INVALID_CAMERA_OR_MICROPHONE_ACCESS;
-                }
-                if (video == ContentSetting.ALLOW && voice == ContentSetting.ALLOW) {
-                    return MICROPHONE_AND_CAMERA_ACCESS_ALLOWED;
-                } else {
-                    return MICROPHONE_AND_CAMERA_ACCESS_DENIED;
-                }
-            }
-        } else {
-            if (voice == null) return INVALID_CAMERA_OR_MICROPHONE_ACCESS;
-            if (voice == ContentSetting.ALLOW) {
-                return MICROPHONE_ACCESS_ALLOWED;
-            } else {
-                return MICROPHONE_ACCESS_DENIED;
-            }
-        }
+    public ContentSetting getMicrophonePermission() {
+        return mMicrophoneInfo != null ? mMicrophoneInfo.getContentSetting() : null;
+    }
+
+    /**
+     * Returns what setting governs camera capture access.
+     */
+    public ContentSetting getCameraPermission() {
+        return mCameraInfo != null ? mCameraInfo.getContentSetting() : null;
+    }
+
+    /**
+     * Configure microphone capture setting for this site.
+     */
+    public void setMicrophonePermission(ContentSetting value) {
+        if (mMicrophoneInfo != null) mMicrophoneInfo.setContentSetting(value);
+    }
+
+    /**
+     * Configure camera capture setting for this site.
+     */
+    public void setCameraPermission(ContentSetting value) {
+        if (mCameraInfo != null) mCameraInfo.setContentSetting(value);
     }
 
     public void setLocalStorageInfo(LocalStorageInfo info) {

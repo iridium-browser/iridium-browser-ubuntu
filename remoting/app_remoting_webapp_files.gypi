@@ -8,6 +8,7 @@
       'webapp/app_remoting/html/ar_dialog.css',
       'webapp/app_remoting/html/ar_main.css',
       'webapp/app_remoting/html/feedback_consent.css',
+      'webapp/app_remoting/html/loading_window.css',
       'webapp/app_remoting/html/context_menu.css',
       'resources/drag.webp',
       '<@(remoting_webapp_resource_files)',
@@ -26,14 +27,19 @@
     'ar_feedback_consent_html_all_js_files': [
       'webapp/app_remoting/js/feedback_consent.js',
       'webapp/base/js/base.js',
-      'webapp/crd/js/error.js',
-      'webapp/crd/js/identity.js',
-      'webapp/crd/js/oauth2_api.js',
-      'webapp/crd/js/oauth2_api_impl.js',
-      'webapp/crd/js/plugin_settings.js',
-      'webapp/crd/js/l10n.js',
-      'webapp/crd/js/xhr.js',
+      'webapp/base/js/error.js',
+      'webapp/base/js/identity.js',
+      'webapp/base/js/oauth2_api.js',
+      'webapp/base/js/oauth2_api_impl.js',
+      'webapp/base/js/plugin_settings.js',
+      'webapp/base/js/l10n.js',
+      'webapp/base/js/xhr.js',
     ],
+
+    # Variables for loading_window.html. Note that the JS files are the same as
+    # for message_window.html, and are not duplicated here.
+    'ar_loading_window_template':
+      '<(DEPTH)/remoting/webapp/app_remoting/html/template_loading_window.html',
 
     # Variables for main.html.
     # These template files are used to construct the webapp html files.
@@ -48,6 +54,7 @@
       'webapp/app_remoting/js/application_context_menu.js',
       'webapp/app_remoting/js/app_connected_view.js',
       'webapp/app_remoting/js/app_remoting.js',
+      'webapp/app_remoting/js/app_remoting_activity.js',
       'webapp/app_remoting/js/ar_auth_dialog.js',
       'webapp/app_remoting/js/ar_main.js',
       'webapp/app_remoting/js/context_menu_adapter.js',
@@ -63,16 +70,13 @@
       'webapp/base/js/base.js',
       'webapp/base/js/message_window_helper.js',
       'webapp/base/js/message_window_manager.js',
-      '<@(remoting_webapp_js_auth_client2host_files)',
-      '<@(remoting_webapp_js_auth_google_files)',
-      '<@(remoting_webapp_js_cast_extension_files)',
-      '<@(remoting_webapp_js_client_files)',
-      '<@(remoting_webapp_js_core_files)',
-      '<@(remoting_webapp_js_gnubby_auth_files)',
-      '<@(remoting_webapp_js_host_files)',
-      '<@(remoting_webapp_js_logging_files)',
-      '<@(remoting_webapp_js_signaling_files)',
-      '<@(remoting_webapp_js_ui_files)',
+      '<@(remoting_webapp_shared_js_auth_google_files)',
+      '<@(remoting_webapp_shared_js_client_files)',
+      '<@(remoting_webapp_shared_js_core_files)',
+      '<@(remoting_webapp_shared_js_host_files)',
+      '<@(remoting_webapp_shared_js_logging_files)',
+      '<@(remoting_webapp_shared_js_signaling_files)',
+      '<@(remoting_webapp_shared_js_ui_files)',
     ],
 
     'ar_background_js_files': [
@@ -94,6 +98,7 @@
       '<(ar_main_template)',
       '<@(ar_main_template_files)',
       '<(ar_feedback_consent_template)',
+      '<(ar_loading_window_template)',
       '<(remoting_webapp_template_message_window)',
       '<(remoting_webapp_template_wcs_sandbox)',
       '<@(ar_all_js_files)',

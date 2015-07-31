@@ -13,11 +13,11 @@
 #include <algorithm>
 
 #include "webrtc/base/checks.h"
-#include "webrtc/common_video/interface/i420_video_frame.h"
 #include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
 #include "webrtc/system_wrappers/interface/logging.h"
 #include "webrtc/system_wrappers/interface/tick_util.h"
 #include "webrtc/video_engine/vie_defines.h"
+#include "webrtc/video_frame.h"
 
 namespace webrtc {
 
@@ -45,7 +45,7 @@ int ViEFrameProviderBase::Id() const {
   return id_;
 }
 
-void ViEFrameProviderBase::DeliverFrame(I420VideoFrame* video_frame,
+void ViEFrameProviderBase::DeliverFrame(const I420VideoFrame& video_frame,
                                         const std::vector<uint32_t>& csrcs) {
   DCHECK(frame_delivery_thread_checker_.CalledOnValidThread());
 #ifdef DEBUG_
@@ -54,24 +54,9 @@ void ViEFrameProviderBase::DeliverFrame(I420VideoFrame* video_frame,
   CriticalSectionScoped cs(provider_cs_.get());
 
   // Deliver the frame to all registered callbacks.
-  if (frame_callbacks_.size() == 1) {
-    // We don't have to copy the frame.
-    frame_callbacks_.front()->DeliverFrame(id_, video_frame, csrcs);
-  } else {
-    for (ViEFrameCallback* callback : frame_callbacks_) {
-      if (video_frame->native_handle() != NULL) {
-        callback->DeliverFrame(id_, video_frame, csrcs);
-      } else {
-        // Make a copy of the frame for all callbacks.
-        if (!extra_frame_.get()) {
-          extra_frame_.reset(new I420VideoFrame());
-        }
-        // TODO(mflodman): We can get rid of this frame copy.
-        extra_frame_->CopyFrame(*video_frame);
-        callback->DeliverFrame(id_, extra_frame_.get(), csrcs);
-      }
-    }
-  }
+  for (ViEFrameCallback* callback : frame_callbacks_)
+    callback->DeliverFrame(id_, video_frame, csrcs);
+
 #ifdef DEBUG_
   const int process_time =
       static_cast<int>((TickTime::Now() - start_process_time).Milliseconds());

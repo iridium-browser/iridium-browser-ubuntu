@@ -8,13 +8,24 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/message_loop/message_loop_proxy.h"
+#include "base/prefs/pref_service.h"
 #include "base/prefs/testing_pref_service.h"
+#include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/time/time.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_prefs.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_request_options.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_test_utils.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
+
+#include "net/http/http_network_session.h"
 #include "net/log/net_log.h"
+#include "net/proxy/proxy_info.h"
+#include "net/proxy/proxy_service.h"
+#include "net/socket/next_proto.h"
+#include "net/url_request/url_request_context.h"
+#include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_interceptor.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -90,7 +101,22 @@ class DataReductionProxyIODataTest : public testing::Test {
 TEST_F(DataReductionProxyIODataTest, TestConstruction) {
   scoped_ptr<DataReductionProxyIOData> io_data(new DataReductionProxyIOData(
       Client::UNKNOWN, DataReductionProxyParams::kAllowed, net_log(),
-      message_loop_proxy(), message_loop_proxy(), false /* enable_quic */));
+      message_loop_proxy(), message_loop_proxy(), false /* enabled */,
+      false /* enable_quic */, std::string() /* user_agent */));
+
+  // Check that the SimpleURLRequestContextGetter uses vanilla HTTP.
+  net::URLRequestContext* request_context =
+      io_data->basic_url_request_context_getter_.get()->GetURLRequestContext();
+  const net::HttpNetworkSession::Params* http_params =
+      request_context->GetNetworkSessionParams();
+  EXPECT_TRUE(http_params->use_alternate_protocols);
+  EXPECT_FALSE(http_params->enable_quic);
+  net::NextProtoVector expected_protos =
+      net::NextProtosWithSpdyAndQuic(false, false);
+  EXPECT_EQ(expected_protos.size(), http_params->next_protos.size());
+  size_t proto_index = 0;
+  for (const auto& proto : expected_protos)
+    EXPECT_EQ(proto, http_params->next_protos[proto_index++]);
 
   // Check that io_data creates an interceptor. Such an interceptor is
   // thoroughly tested by DataReductionProxyInterceptoTest.
@@ -114,7 +140,7 @@ TEST_F(DataReductionProxyIODataTest, TestConstruction) {
       base::Bind(&DataReductionProxyIODataTest::RequestCallback,
                  base::Unretained(this)), nullptr);
   EXPECT_EQ(1, wrapped_network_delegate->created_requests());
-  EXPECT_EQ(nullptr, io_data->bypass_stats());
+  EXPECT_NE(nullptr, io_data->bypass_stats());
 
   // Creating a second delegate with bypass statistics tracking should result
   // in usage stats being created.
@@ -122,10 +148,51 @@ TEST_F(DataReductionProxyIODataTest, TestConstruction) {
                                  true);
   EXPECT_NE(nullptr, io_data->bypass_stats());
 
-  // The Data Reduction Proxy isn't actually enabled here.
-  io_data->InitOnUIThread(prefs());
-  EXPECT_FALSE(io_data->IsEnabled());
   io_data->ShutdownOnUIThread();
+}
+
+TEST_F(DataReductionProxyIODataTest, TestResetBadProxyListOnDisableDataSaver) {
+  net::TestURLRequestContext context(false);
+  scoped_ptr<DataReductionProxyTestContext> drp_test_context =
+      DataReductionProxyTestContext::Builder()
+          .WithParamsFlags(DataReductionProxyParams::kAllowed |
+                           DataReductionProxyParams::kFallbackAllowed |
+                           DataReductionProxyParams::kPromoAllowed)
+          .WithURLRequestContext(&context)
+          .WithTestConfigurator()
+          .SkipSettingsInitialization()
+          .Build();
+
+  drp_test_context->pref_service()->SetBoolean(
+      prefs::kDataReductionProxyEnabled, true);
+  drp_test_context->InitSettings();
+  DataReductionProxyIOData* io_data = drp_test_context->io_data();
+  std::vector<net::ProxyServer> proxies;
+  proxies.push_back(net::ProxyServer::FromURI("http://foo1.com",
+                                              net::ProxyServer::SCHEME_HTTP));
+  net::ProxyService* proxy_service =
+      io_data->url_request_context_getter_->GetURLRequestContext()
+          ->proxy_service();
+  net::ProxyInfo proxy_info;
+  proxy_info.UseNamedProxy("http://foo2.com");
+  net::BoundNetLog bound_net_log;
+  const net::ProxyRetryInfoMap& bad_proxy_list =
+      proxy_service->proxy_retry_info();
+
+  // Simulate network error to add proxies to the bad proxy list.
+  proxy_service->MarkProxiesAsBadUntil(proxy_info, base::TimeDelta::FromDays(1),
+                                       proxies, bound_net_log);
+  base::RunLoop().RunUntilIdle();
+
+  // Verify that there are 2 proxies in the bad proxies list.
+  EXPECT_EQ(2UL, bad_proxy_list.size());
+
+  // Turn Data Saver off.
+  drp_test_context->settings()->SetDataReductionProxyEnabled(false);
+  base::RunLoop().RunUntilIdle();
+
+  // Verify that bad proxy list is empty.
+  EXPECT_EQ(0UL, bad_proxy_list.size());
 }
 
 }  // namespace data_reduction_proxy

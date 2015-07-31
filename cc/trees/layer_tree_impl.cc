@@ -8,7 +8,6 @@
 #include <limits>
 #include <set>
 
-#include "base/auto_reset.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_event_argument.h"
 #include "cc/animation/keyframed_animation_curve.h"
@@ -71,7 +70,8 @@ LayerTreeImpl::LayerTreeImpl(
 }
 
 LayerTreeImpl::~LayerTreeImpl() {
-  BreakSwapPromises(SwapPromise::SWAP_FAILS);
+  BreakSwapPromises(IsActiveTree() ? SwapPromise::SWAP_FAILS
+                                   : SwapPromise::ACTIVATION_FAILS);
 
   // Need to explicitly clear the tree prior to destroying this so that
   // the LayerTreeImpl pointer is still valid in the LayerImpl dtor.
@@ -193,6 +193,8 @@ void LayerTreeImpl::PushPropertiesTo(LayerTreeImpl* target_tree) {
   // The request queue should have been processed and does not require a push.
   DCHECK_EQ(ui_resource_request_queue_.size(), 0u);
 
+  target_tree->SetPropertyTrees(property_trees_);
+
   if (next_activation_forces_redraw_) {
     target_tree->ForceRedrawNextActivation();
     next_activation_forces_redraw_ = false;
@@ -225,7 +227,7 @@ void LayerTreeImpl::PushPropertiesTo(LayerTreeImpl* target_tree) {
     target_tree->ClearViewportLayers();
   }
 
-  target_tree->RegisterSelection(selection_start_, selection_end_);
+  target_tree->RegisterSelection(selection_);
 
   // This should match the property synchronization in
   // LayerTreeHost::finishCommitOnImplThread().
@@ -500,9 +502,6 @@ void LayerTreeImpl::SetViewportLayersFromIds(
          outer_viewport_scroll_layer_id == Layer::INVALID_ID);
 
   HideInnerViewportScrollbarsIfNearMinimumScale();
-
-  if (!root_layer_scroll_offset_delegate_)
-    return;
 }
 
 void LayerTreeImpl::ClearViewportLayers() {
@@ -543,6 +542,7 @@ bool LayerTreeImpl::UpdateDrawProperties(bool update_lcd_text) {
          DRAW_MODE_RESOURCELESS_SOFTWARE);
 
     ++render_surface_layer_list_id_;
+
     LayerTreeHostCommon::CalcDrawPropsImplInputs inputs(
         root_layer(), DrawViewportSize(),
         layer_tree_host_impl_->DrawTransform(), device_scale_factor(),
@@ -552,8 +552,8 @@ bool LayerTreeImpl::UpdateDrawProperties(bool update_lcd_text) {
         settings().can_use_lcd_text, settings().layers_always_allowed_lcd_text,
         can_render_to_separate_surface,
         settings().layer_transforms_should_scale_layer_contents,
-        settings().verify_property_trees,
-        &render_surface_layer_list_, render_surface_layer_list_id_);
+        settings().verify_property_trees, &render_surface_layer_list_,
+        render_surface_layer_list_id_, &property_trees_);
     LayerTreeHostCommon::CalculateDrawProperties(&inputs);
   }
 
@@ -745,6 +745,8 @@ void LayerTreeImpl::DidBecomeActive() {
         root_layer(), [](LayerImpl* layer) { layer->DidBecomeActive(); });
   }
 
+  for (auto* swap_promise : swap_promise_list_)
+    swap_promise->DidActivate();
   devtools_instrumentation::DidActivateLayerTree(layer_tree_host_impl_->id(),
                                                  source_frame_number_);
 }
@@ -956,8 +958,8 @@ AnimationRegistrar* LayerTreeImpl::GetAnimationRegistrar() const {
   return layer_tree_host_impl_->animation_registrar();
 }
 
-void LayerTreeImpl::GetAllTilesAndPrioritiesForTracing(
-    std::map<const Tile*, TilePriority>* tile_map) const {
+void LayerTreeImpl::GetAllPrioritizedTilesForTracing(
+    std::vector<PrioritizedTile>* prioritized_tiles) const {
   typedef LayerIterator<LayerImpl> LayerIteratorType;
   LayerIteratorType end = LayerIteratorType::End(&render_surface_layer_list_);
   for (LayerIteratorType it =
@@ -967,7 +969,7 @@ void LayerTreeImpl::GetAllTilesAndPrioritiesForTracing(
     if (!it.represents_itself())
       continue;
     LayerImpl* layer_impl = *it;
-    layer_impl->GetAllTilesAndPrioritiesForTracing(tile_map);
+    layer_impl->GetAllPrioritizedTilesForTracing(prioritized_tiles);
   }
 }
 
@@ -991,8 +993,8 @@ void LayerTreeImpl::AsValueInto(base::trace_event::TracedValue* state) const {
   state->EndArray();
 
   state->BeginArray("swap_promise_trace_ids");
-  for (size_t i = 0; i < swap_promise_list_.size(); i++)
-    state->AppendDouble(swap_promise_list_[i]->TraceId());
+  for (auto* swap_promise : swap_promise_list_)
+    state->AppendDouble(swap_promise->TraceId());
   state->EndArray();
 }
 
@@ -1073,20 +1075,20 @@ void LayerTreeImpl::QueueSwapPromise(scoped_ptr<SwapPromise> swap_promise) {
 
 void LayerTreeImpl::PassSwapPromises(
     ScopedPtrVector<SwapPromise>* new_swap_promise) {
-  swap_promise_list_.insert_and_take(swap_promise_list_.end(),
-                                     new_swap_promise);
-  new_swap_promise->clear();
+  // Any left over promises have failed to swap before the next frame.
+  BreakSwapPromises(SwapPromise::SWAP_FAILS);
+  swap_promise_list_.swap(*new_swap_promise);
 }
 
 void LayerTreeImpl::FinishSwapPromises(CompositorFrameMetadata* metadata) {
-  for (size_t i = 0; i < swap_promise_list_.size(); i++)
-    swap_promise_list_[i]->DidSwap(metadata);
+  for (auto* swap_promise : swap_promise_list_)
+    swap_promise->DidSwap(metadata);
   swap_promise_list_.clear();
 }
 
 void LayerTreeImpl::BreakSwapPromises(SwapPromise::DidNotSwapReason reason) {
-  for (size_t i = 0; i < swap_promise_list_.size(); i++)
-    swap_promise_list_[i]->DidNotSwap(reason);
+  for (auto* swap_promise : swap_promise_list_)
+    swap_promise->DidNotSwap(reason);
   swap_promise_list_.clear();
 }
 
@@ -1474,13 +1476,11 @@ LayerImpl* LayerTreeImpl::FindLayerThatIsHitByPointInTouchHandlerRegion(
   return data_for_recursion.closest_match;
 }
 
-void LayerTreeImpl::RegisterSelection(const LayerSelectionBound& start,
-                                      const LayerSelectionBound& end) {
-  selection_start_ = start;
-  selection_end_ = end;
+void LayerTreeImpl::RegisterSelection(const LayerSelection& selection) {
+  selection_ = selection;
 }
 
-static ViewportSelectionBound ComputeViewportSelection(
+static ViewportSelectionBound ComputeViewportSelectionBound(
     const LayerSelectionBound& layer_bound,
     LayerImpl* layer,
     float device_scale_factor) {
@@ -1527,22 +1527,22 @@ static ViewportSelectionBound ComputeViewportSelection(
   return viewport_bound;
 }
 
-void LayerTreeImpl::GetViewportSelection(ViewportSelectionBound* start,
-                                         ViewportSelectionBound* end) {
-  DCHECK(start);
-  DCHECK(end);
+void LayerTreeImpl::GetViewportSelection(ViewportSelection* selection) {
+  DCHECK(selection);
 
-  *start = ComputeViewportSelection(
-      selection_start_,
-      selection_start_.layer_id ? LayerById(selection_start_.layer_id) : NULL,
+  selection->start = ComputeViewportSelectionBound(
+      selection_.start,
+      selection_.start.layer_id ? LayerById(selection_.start.layer_id) : NULL,
       device_scale_factor());
-  if (start->type == SELECTION_BOUND_CENTER ||
-      start->type == SELECTION_BOUND_EMPTY) {
-    *end = *start;
+  selection->is_editable = selection_.is_editable;
+  selection->is_empty_text_form_control = selection_.is_empty_text_form_control;
+  if (selection->start.type == SELECTION_BOUND_CENTER ||
+      selection->start.type == SELECTION_BOUND_EMPTY) {
+    selection->end = selection->start;
   } else {
-    *end = ComputeViewportSelection(
-        selection_end_,
-        selection_end_.layer_id ? LayerById(selection_end_.layer_id) : NULL,
+    selection->end = ComputeViewportSelectionBound(
+        selection_.end,
+        selection_.end.layer_id ? LayerById(selection_.end.layer_id) : NULL,
         device_scale_factor());
   }
 }
@@ -1557,6 +1557,11 @@ bool LayerTreeImpl::SmoothnessTakesPriority() const {
 
 BlockingTaskRunner* LayerTreeImpl::BlockingMainThreadTaskRunner() const {
   return proxy()->blocking_main_thread_task_runner();
+}
+
+VideoFrameControllerClient* LayerTreeImpl::GetVideoFrameControllerClient()
+    const {
+  return layer_tree_host_impl_;
 }
 
 void LayerTreeImpl::SetPendingPageScaleAnimation(

@@ -78,6 +78,7 @@ public:
     void beginFrame(const WebBeginFrameArgs&) override;
     void layout() override;
     void paint(WebCanvas*, const WebRect&) override;
+    void layoutAndPaintAsync(WebLayoutAndPaintAsyncCallback*) override;
     void compositeAndReadbackAsync(WebCompositeAndReadbackAsyncCallback*) override;
     bool isTrackingRepaints() const override;
     void themeChanged() override;
@@ -139,6 +140,8 @@ public:
     // Returns the page object associated with this widget. This may be null when
     // the page is shutting down, but will be valid at all other times.
     Page* page() const { return m_page; }
+
+    WebLayerTreeView* layerTreeView() const { return m_layerTreeView; }
 
     // Returns true if the event leads to scrolling.
     static bool mapKeyCodeForScroll(

@@ -29,14 +29,16 @@
 #include "bindings/core/v8/ExceptionMessages.h"
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/ExceptionCode.h"
+#include "modules/webaudio/AudioBasicProcessorHandler.h"
+#include "modules/webaudio/AudioContext.h"
 #include "wtf/MainThread.h"
 
 namespace blink {
 
-WaveShaperNode::WaveShaperNode(AudioContext* context)
-    : AudioNode(*context)
+WaveShaperNode::WaveShaperNode(AudioContext& context)
+    : AudioNode(context)
 {
-    setHandler(new AudioBasicProcessorHandler(AudioHandler::NodeTypeWaveShaper, *this, context->sampleRate(), adoptPtr(new WaveShaperProcessor(context->sampleRate(), 1))));
+    setHandler(AudioBasicProcessorHandler::create(AudioHandler::NodeTypeWaveShaper, *this, context.sampleRate(), adoptPtr(new WaveShaperProcessor(context.sampleRate(), 1))));
 
     handler().initialize();
 }
@@ -53,7 +55,10 @@ void WaveShaperNode::setCurve(DOMFloat32Array* curve, ExceptionState& exceptionS
     if (curve && curve->length() < 2) {
         exceptionState.throwDOMException(
             InvalidAccessError,
-            "curve length cannot be less than 2: " + String::number(curve->length()));
+            ExceptionMessages::indexExceedsMinimumBound<unsigned>(
+                "curve length",
+                curve->length(),
+                2));
         return;
     }
 

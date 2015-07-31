@@ -37,6 +37,11 @@ const char kDataReductionProxyKey[] = "spdy-proxy-auth-value";
 const char kDataReductionProxySecureProxyCheckURL[] =
     "data-reduction-proxy-secure-proxy-check-url";
 
+// Starts the secure Data Reduction Proxy in the disabled state until the secure
+// proxy check succeeds.
+const char kDataReductionProxyStartSecureDisabled[] =
+    "data-reduction-proxy-secure-proxy-disabled";
+
 // Sets a URL to fetch to warm up the data reduction proxy on startup and
 // network changes.
 const char kDataReductionProxyWarmupURL[] = "data-reduction-proxy-warmup-url";
@@ -73,6 +78,9 @@ const char kClearDataReductionProxyDataSavings[] =
 // Enable the data reduction proxy config client.
 const char kEnableDataReductionProxyConfigClient[] =
     "enable-data-reduction-proxy-config-client";
+
+// The URL from which to retrieve the Data Reduction Proxy configuration.
+const char kDataReductionProxyConfigURL[] = "data-reduction-proxy-config-url";
 
 }  // namespace switches
 }  // namespace data_reduction_proxy

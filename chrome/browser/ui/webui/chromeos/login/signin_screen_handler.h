@@ -20,12 +20,12 @@
 #include "chrome/browser/chromeos/login/signin_specifics.h"
 #include "chrome/browser/chromeos/login/ui/login_display.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/signin/screenlock_bridge.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/network_state_informer.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/browser/ui/webui/chromeos/touch_view_controller_delegate.h"
 #include "chromeos/network/portal_detector/network_portal_detector.h"
+#include "components/proximity_auth/screenlock_bridge.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -88,10 +88,12 @@ class LoginDisplayWebUIHandler {
   virtual void ShowErrorScreen(LoginDisplay::SigninError error_id) = 0;
   virtual void ShowGaiaPasswordChanged(const std::string& username) = 0;
   virtual void ShowSigninUI(const std::string& email) = 0;
-  virtual void ShowPasswordChangedDialog(bool show_password_error) = 0;
+  virtual void ShowPasswordChangedDialog(bool show_password_error,
+                                         const std::string& email) = 0;
   // Show sign-in screen for the given credentials.
   virtual void ShowSigninScreenForCreds(const std::string& username,
                                         const std::string& password) = 0;
+  virtual void ShowWhitelistCheckFailedError() = 0;
   virtual void LoadUsers(const base::ListValue& users_list,
                          bool show_guest) = 0;
  protected:
@@ -187,6 +189,9 @@ class SigninScreenHandlerDelegate {
 
   // Request to (re)load user list.
   virtual void HandleGetUsers() = 0;
+
+  // Runs an OAuth token validation check for user.
+  virtual void CheckUserStatus(const std::string& user_id) = 0;
 
  protected:
   virtual ~SigninScreenHandlerDelegate() {}
@@ -293,10 +298,12 @@ class SigninScreenHandler
                  HelpAppLauncher::HelpTopic help_topic_id) override;
   void ShowGaiaPasswordChanged(const std::string& username) override;
   void ShowSigninUI(const std::string& email) override;
-  void ShowPasswordChangedDialog(bool show_password_error) override;
+  void ShowPasswordChangedDialog(bool show_password_error,
+                                 const std::string& email) override;
   void ShowErrorScreen(LoginDisplay::SigninError error_id) override;
   void ShowSigninScreenForCreds(const std::string& username,
                                 const std::string& password) override;
+  void ShowWhitelistCheckFailedError() override;
   void LoadUsers(const base::ListValue& users_list, bool show_guest) override;
 
   // content::NotificationObserver implementation:
@@ -342,7 +349,7 @@ class SigninScreenHandler
   void HandleSignOutUser();
   void HandleOpenProxySettings();
   void HandleLoginVisible(const std::string& source);
-  void HandleCancelPasswordChangedFlow();
+  void HandleCancelPasswordChangedFlow(const std::string& user_id);
   void HandleCancelUserAdding();
   void HandleMigrateUserData(const std::string& password);
   void HandleResyncUserData();
@@ -360,6 +367,8 @@ class SigninScreenHandler
   void HandleCancelConsumerManagementEnrollment();
   void HandleGetTouchViewState();
   void HandleLogRemoveUserWarningShown();
+  void HandleFirstIncorrectPasswordAttempt(const std::string& email);
+  void HandleMaxIncorrectPasswordAttempts(const std::string& email);
 
   // Sends the list of |keyboard_layouts| available for the |locale| that is
   // currently selected for the public session identified by |user_id|.

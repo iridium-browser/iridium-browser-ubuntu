@@ -56,6 +56,7 @@ class LayerTreeHostImplClient;
 class LayerTreeHostSingleThreadClient;
 class PrioritizedResource;
 class PrioritizedResourceManager;
+class PropertyTrees;
 class Region;
 class RenderingStatsInstrumentation;
 class ResourceProvider;
@@ -67,30 +68,32 @@ class UIResourceRequest;
 struct PendingPageScaleAnimation;
 struct RenderingStats;
 struct ScrollAndScaleSet;
-enum class GpuRasterizationStatus;
 
 class CC_EXPORT LayerTreeHost {
  public:
+  // TODO(sad): InitParams should be a movable type so that it can be
+  // std::move()d to the Create* functions.
+  struct CC_EXPORT InitParams {
+    LayerTreeHostClient* client = nullptr;
+    SharedBitmapManager* shared_bitmap_manager = nullptr;
+    gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager = nullptr;
+    TaskGraphRunner* task_graph_runner = nullptr;
+    LayerTreeSettings const* settings = nullptr;
+    scoped_refptr<base::SingleThreadTaskRunner> main_task_runner;
+    scoped_ptr<BeginFrameSource> external_begin_frame_source;
+
+    InitParams();
+    ~InitParams();
+  };
+
   // The SharedBitmapManager will be used on the compositor thread.
   static scoped_ptr<LayerTreeHost> CreateThreaded(
-      LayerTreeHostClient* client,
-      SharedBitmapManager* shared_bitmap_manager,
-      gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
-      TaskGraphRunner* task_graph_runner,
-      const LayerTreeSettings& settings,
-      scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> impl_task_runner,
-      scoped_ptr<BeginFrameSource> external_begin_frame_source);
+      InitParams* params);
 
   static scoped_ptr<LayerTreeHost> CreateSingleThreaded(
-      LayerTreeHostClient* client,
       LayerTreeHostSingleThreadClient* single_thread_client,
-      SharedBitmapManager* shared_bitmap_manager,
-      gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
-      TaskGraphRunner* task_graph_runner,
-      const LayerTreeSettings& settings,
-      scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
-      scoped_ptr<BeginFrameSource> external_begin_frame_source);
+      InitParams* params);
   virtual ~LayerTreeHost();
 
   void SetLayerTreeHostClientReady();
@@ -152,6 +155,8 @@ class CC_EXPORT LayerTreeHost {
   virtual void SetNeedsUpdateLayers();
   virtual void SetNeedsCommit();
   virtual void SetNeedsFullTreeSync();
+  virtual void SetNeedsMetaInfoRecomputation(
+      bool needs_meta_info_recomputation);
   void SetNeedsRedraw();
   void SetNeedsRedrawRect(const gfx::Rect& damage_rect);
   bool CommitRequested() const;
@@ -181,8 +186,7 @@ class CC_EXPORT LayerTreeHost {
     return outer_viewport_scroll_layer_.get();
   }
 
-  void RegisterSelection(const LayerSelectionBound& start,
-                         const LayerSelectionBound& end);
+  void RegisterSelection(const LayerSelection& selection);
 
   const LayerTreeSettings& settings() const { return settings_; }
 
@@ -193,7 +197,6 @@ class CC_EXPORT LayerTreeHost {
     return has_gpu_rasterization_trigger_;
   }
   void SetHasGpuRasterizationTrigger(bool has_trigger);
-  GpuRasterizationStatus GetGpuRasterizationStatus() const;
 
   void SetViewportSize(const gfx::Size& device_viewport_size);
   void SetTopControlsHeight(float height, bool shrink);
@@ -307,12 +310,19 @@ class CC_EXPORT LayerTreeHost {
 
   void SetAuthoritativeVSyncInterval(const base::TimeDelta& interval);
 
+  PropertyTrees* property_trees() { return &property_trees_; }
+  bool needs_meta_info_recomputation() {
+    return needs_meta_info_recomputation_;
+  }
+
+  // If this is true, only property trees will be used for main thread CDP.
+  // CDP will not be run, and verify_property_trees will be ignored.
+  bool using_only_property_trees() const {
+    return settings().impl_side_painting;
+  }
+
  protected:
-  LayerTreeHost(LayerTreeHostClient* client,
-                SharedBitmapManager* shared_bitmap_manager,
-                gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
-                TaskGraphRunner* task_graph_runner,
-                const LayerTreeSettings& settings);
+  explicit LayerTreeHost(InitParams* params);
   void InitializeThreaded(
       scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> impl_task_runner,
@@ -325,6 +335,17 @@ class CC_EXPORT LayerTreeHost {
   void SetOutputSurfaceLostForTesting(bool is_lost) {
     output_surface_lost_ = is_lost;
   }
+
+  // shared_bitmap_manager(), gpu_memory_buffer_manager(), and
+  // task_graph_runner() return valid values only until the LayerTreeHostImpl is
+  // created in CreateLayerTreeHostImpl().
+  SharedBitmapManager* shared_bitmap_manager() const {
+    return shared_bitmap_manager_;
+  }
+  gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager() const {
+    return gpu_memory_buffer_manager_;
+  }
+  TaskGraphRunner* task_graph_runner() const { return task_graph_runner_; }
 
   MicroBenchmarkController micro_benchmark_controller_;
 
@@ -375,6 +396,7 @@ class CC_EXPORT LayerTreeHost {
 
   bool inside_begin_main_frame_;
   bool needs_full_tree_sync_;
+  bool needs_meta_info_recomputation_;
 
   base::CancelableClosure prepaint_callback_;
 
@@ -440,8 +462,7 @@ class CC_EXPORT LayerTreeHost {
   scoped_refptr<Layer> inner_viewport_scroll_layer_;
   scoped_refptr<Layer> outer_viewport_scroll_layer_;
 
-  LayerSelectionBound selection_start_;
-  LayerSelectionBound selection_end_;
+  LayerSelection selection_;
 
   SharedBitmapManager* shared_bitmap_manager_;
   gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager_;
@@ -449,6 +470,8 @@ class CC_EXPORT LayerTreeHost {
 
   ScopedPtrVector<SwapPromise> swap_promise_list_;
   std::set<SwapPromiseMonitor*> swap_promise_monitor_;
+
+  PropertyTrees property_trees_;
 
   uint32_t surface_id_namespace_;
   uint32_t next_surface_sequence_;

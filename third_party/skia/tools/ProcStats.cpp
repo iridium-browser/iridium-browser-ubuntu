@@ -7,7 +7,7 @@
 
 #include "ProcStats.h"
 
-#if defined(SK_BUILD_FOR_UNIX) || defined(SK_BUILD_FOR_MAC) || defined(SK_BUILD_FOR_ANDROID)
+#if defined(SK_BUILD_FOR_UNIX) || defined(SK_BUILD_FOR_MAC) || defined(SK_BUILD_FOR_IOS) || defined(SK_BUILD_FOR_ANDROID)
     #include <sys/resource.h>
     int sk_tools::getMaxResidentSetSizeMB() {
         struct rusage ru;
@@ -30,7 +30,7 @@
     int sk_tools::getMaxResidentSetSizeMB() { return -1; }
 #endif
 
-#if defined(SK_BUILD_FOR_MAC)
+#if defined(SK_BUILD_FOR_MAC) || defined(SK_BUILD_FOR_IOS)
     #include <mach/mach.h>
     int sk_tools::getCurrResidentSetSizeMB() {
         mach_task_basic_info info;
@@ -46,10 +46,10 @@
     #include <stdio.h>
     int sk_tools::getCurrResidentSetSizeMB() {
         const long pageSize = sysconf(_SC_PAGESIZE);
-        long rssPages = 0;
+        long long rssPages = 0;
         if (FILE* statm = fopen("/proc/self/statm", "r")) {
             // statm contains: program-size rss shared text lib data dirty, all in page counts.
-            int rc = fscanf(statm, "%*d %ld", &rssPages);
+            int rc = fscanf(statm, "%*d %lld", &rssPages);
             fclose(statm);
             if (rc != 1) {
                 return -1;

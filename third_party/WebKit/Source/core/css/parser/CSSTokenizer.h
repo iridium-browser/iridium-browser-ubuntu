@@ -5,6 +5,7 @@
 #ifndef CSSTokenizer_h
 #define CSSTokenizer_h
 
+#include "core/CoreExport.h"
 #include "core/css/parser/CSSParserToken.h"
 #include "core/html/parser/InputStreamPreprocessor.h"
 #include "wtf/text/WTFString.h"
@@ -14,17 +15,21 @@
 namespace blink {
 
 class CSSTokenizerInputStream;
+class CSSParserObserverWrapper;
 struct CSSParserString;
 class CSSParserTokenRange;
 
-class CSSTokenizer {
+class CORE_EXPORT CSSTokenizer {
     WTF_MAKE_NONCOPYABLE(CSSTokenizer);
     WTF_MAKE_FAST_ALLOCATED(CSSTokenizer);
 public:
-    class Scope {
+    class CORE_EXPORT Scope {
     public:
         Scope(const String&);
+        Scope(const String&, CSSParserObserverWrapper&); // For the inspector
+
         CSSParserTokenRange tokenRange();
+        unsigned tokenCount();
 
     private:
         void storeString(const String& string) { m_stringPool.append(string); }
@@ -55,7 +60,7 @@ private:
     void consumeBadUrlRemnants();
     void consumeUntilNonWhitespace();
     void consumeSingleWhitespaceIfNext();
-    bool consumeUntilCommentEndFound();
+    void consumeUntilCommentEndFound();
 
     bool consumeIfNext(UChar);
     CSSParserString consumeName();

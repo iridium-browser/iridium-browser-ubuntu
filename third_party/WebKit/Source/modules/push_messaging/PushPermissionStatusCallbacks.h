@@ -31,7 +31,7 @@ public:
     void onSuccess(WebPushPermissionStatus*) override;
 
     // Called if for some reason the status of the push permission cannot be checked.
-    void onError() override;
+    void onError(WebPushError*) override;
 
 private:
     static WTF::String permissionString(WebPushPermissionStatus);

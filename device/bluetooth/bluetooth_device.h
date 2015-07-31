@@ -97,6 +97,8 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
     ERROR_UNSUPPORTED_DEVICE
   };
 
+  typedef std::vector<BluetoothUUID> UUIDList;
+
   // Interface for negotiating pairing of bluetooth devices.
   class PairingDelegate {
    public:
@@ -254,8 +256,18 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
   // devices this data is collected from both the EIR data and SDP tables,
   // for Low Energy devices this data is collected from AD and GATT primary
   // services, for dual mode devices this may be collected from both./
-  typedef std::vector<BluetoothUUID> UUIDList;
   virtual UUIDList GetUUIDs() const = 0;
+
+  // The received signal strength, in dBm. This field is avaliable and valid
+  // only during discovery. If not during discovery, or RSSI wasn't reported,
+  // this method will return |kUnknownPower|.
+  virtual int16 GetInquiryRSSI() const = 0;
+
+  // The transmitted power level. This field is avaliable only for LE devices
+  // that include this field in AD. It is avaliable and valid only during
+  // discovery. If not during discovery, or TxPower wasn't reported, this
+  // method will return |kUnknownPower|.
+  virtual int16 GetInquiryTxPower() const = 0;
 
   // The ErrorCallback is used for methods that can fail in which case it
   // is called, in the success case the callback is simply not called.

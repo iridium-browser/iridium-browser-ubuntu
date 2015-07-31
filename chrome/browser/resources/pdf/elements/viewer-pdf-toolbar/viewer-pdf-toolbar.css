@@ -14,6 +14,24 @@
   width: 100%;
 }
 
+#title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#pageselector-container {
+  text-align: center;
+  /* The container resizes according to the width of the toolbar. On small
+   * screens with large numbers of pages, overflow page numbers without
+   * wrapping. */
+  white-space: nowrap;
+}
+
+#buttons {
+  text-align: right;
+}
+
 paper-progress {
   height: 56px;
   position: absolute;
@@ -22,7 +40,7 @@ paper-progress {
 }
 
 paper-progress::shadow #activeProgress {
-  background-color: rgb(33, 150, 243);
+  background-color: rgb(27, 168, 243);
 }
 
 paper-progress::shadow #progressContainer {
@@ -30,7 +48,7 @@ paper-progress::shadow #progressContainer {
 }
 
 core-toolbar {
-  background-color: transparent;
+  background-color: rgb(27, 168, 243);
   color: rgb(241, 241, 241);
   font-size: 1.5em;
   height: 56px;

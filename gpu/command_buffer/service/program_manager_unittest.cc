@@ -372,10 +372,10 @@ class ProgramManagerWithShaderTest : public GpuServiceTest {
     EXPECT_TRUE(vshader != NULL && fshader != NULL);
     // Set Status
     TestHelper::SetShaderStates(
-        gl_.get(), vshader, true, NULL, NULL,
+        gl_.get(), vshader, true, NULL, NULL, NULL,
         &vertex_attrib_map, &vertex_uniform_map, &vertex_varying_map, NULL);
     TestHelper::SetShaderStates(
-        gl_.get(), fshader, true, NULL, NULL,
+        gl_.get(), fshader, true, NULL, NULL, NULL,
         &frag_attrib_map, &frag_uniform_map, &frag_varying_map, NULL);
 
     // Set up program
@@ -662,36 +662,38 @@ TEST_F(ProgramManagerWithShaderTest, GetUniformInfoByFakeLocation) {
   EXPECT_EQ(2, array_index);
 }
 
-// Some GL drivers incorrectly return gl_DepthRange and possibly other uniforms
-// that start with "gl_". Our implementation catches these and does not allow
-// them back to client.
+// Ensure that when GL drivers correctly return gl_DepthRange, or other
+// builtin uniforms, our implementation passes them back to the client.
 TEST_F(ProgramManagerWithShaderTest, GLDriverReturnsGLUnderscoreUniform) {
   static const char* kUniform2Name = "gl_longNameWeCanCheckFor";
   static ProgramManagerWithShaderTest::UniformInfo kUniforms[] = {
-    { kUniform1Name,
-      kUniform1Size,
-      kUniform1Type,
-      kUniform1FakeLocation,
-      kUniform1RealLocation,
-      kUniform1DesiredLocation,
-      kUniform1Name,
-    },
-    { kUniform2Name,
-      kUniform2Size,
-      kUniform2Type,
-      kUniform2FakeLocation,
-      kUniform2RealLocation,
-      kUniform2DesiredLocation,
-      kUniform2NameWithArrayIndex,
-    },
-    { kUniform3Name,
-      kUniform3Size,
-      kUniform3Type,
-      kUniform3FakeLocation,
-      kUniform3RealLocation,
-      kUniform3DesiredLocation,
-      kUniform3NameWithArrayIndex,
-    },
+      {
+       kUniform1Name,
+       kUniform1Size,
+       kUniform1Type,
+       kUniform1FakeLocation,
+       kUniform1RealLocation,
+       kUniform1DesiredLocation,
+       kUniform1Name,
+      },
+      {
+       kUniform2Name,
+       kUniform2Size,
+       kUniform2Type,
+       kUniform2FakeLocation,
+       -1,
+       kUniform2DesiredLocation,
+       kUniform2NameWithArrayIndex,
+      },
+      {
+       kUniform3Name,
+       kUniform3Size,
+       kUniform3Type,
+       kUniform3FakeLocation,
+       kUniform3RealLocation,
+       kUniform3DesiredLocation,
+       kUniform3NameWithArrayIndex,
+      },
   };
   const size_t kNumUniforms = arraysize(kUniforms);
   static const GLuint kClientProgramId = 1234;
@@ -720,14 +722,16 @@ TEST_F(ProgramManagerWithShaderTest, GLDriverReturnsGLUnderscoreUniform) {
   GLint value = 0;
   program->GetProgramiv(GL_ACTIVE_ATTRIBUTES, &value);
   EXPECT_EQ(3, value);
-  // Check that we skipped the "gl_" uniform.
+  // Check that we didn't skip the "gl_" uniform.
   program->GetProgramiv(GL_ACTIVE_UNIFORMS, &value);
-  EXPECT_EQ(2, value);
-  // Check that our max length adds room for the array spec and is not as long
-  // as the "gl_" uniform we skipped.
-  // +4u is to account for "gl_" and NULL terminator.
+  EXPECT_EQ(3, value);
+  // Check that our max length adds room for the array spec and is as long
+  // as the "gl_" uniform we did not skip.
   program->GetProgramiv(GL_ACTIVE_UNIFORM_MAX_LENGTH, &value);
-  EXPECT_EQ(strlen(kUniform3Name) + 4u, static_cast<size_t>(value));
+  EXPECT_EQ(strlen(kUniform2Name) + 4, static_cast<size_t>(value));
+  // Verify the uniform has a "real" location of -1
+  const auto* info = program->GetUniformInfo(kUniform2FakeLocation);
+  EXPECT_EQ(-1, info->element_locations[0]);
 }
 
 // Test the bug comparing similar array names is fixed.
@@ -830,13 +834,13 @@ TEST_F(ProgramManagerWithShaderTest, GLDriverReturnsWrongTypeInfo) {
       kVShaderClientId, kVShaderServiceId, GL_VERTEX_SHADER);
   ASSERT_TRUE(vshader != NULL);
   TestHelper::SetShaderStates(
-      gl_.get(), vshader, true, NULL, NULL,
+      gl_.get(), vshader, true, NULL, NULL, NULL,
       &attrib_map, &uniform_map, &varying_map, NULL);
   Shader* fshader = shader_manager_.CreateShader(
       kFShaderClientId, kFShaderServiceId, GL_FRAGMENT_SHADER);
   ASSERT_TRUE(fshader != NULL);
   TestHelper::SetShaderStates(
-      gl_.get(), fshader, true, NULL, NULL,
+      gl_.get(), fshader, true, NULL, NULL, NULL,
       &attrib_map, &uniform_map, &varying_map, NULL);
   static ProgramManagerWithShaderTest::AttribInfo kAttribs[] = {
     { kAttrib1Name, kAttrib1Size, kAttrib1Type, kAttrib1Location, },
@@ -1495,7 +1499,8 @@ TEST_F(ProgramManagerWithShaderTest, BindAttribLocationConflicts) {
   ASSERT_TRUE(vshader != NULL && fshader != NULL);
   // Set Status
   TestHelper::SetShaderStates(
-      gl_.get(), vshader, true, NULL, NULL, &attrib_map, NULL, NULL, NULL);
+      gl_.get(), vshader, true, NULL, NULL, NULL, &attrib_map, NULL, NULL,
+      NULL);
   // Check attrib infos got copied.
   for (AttributeMap::const_iterator it = attrib_map.begin();
        it != attrib_map.end(); ++it) {
@@ -1509,7 +1514,8 @@ TEST_F(ProgramManagerWithShaderTest, BindAttribLocationConflicts) {
     EXPECT_EQ(it->second.name, variable_info->name);
   }
   TestHelper::SetShaderStates(
-      gl_.get(), fshader, true, NULL, NULL, &attrib_map, NULL, NULL, NULL);
+      gl_.get(), fshader, true, NULL, NULL, NULL, &attrib_map, NULL, NULL,
+      NULL);
 
   // Set up program
   const GLuint kClientProgramId = 6666;
@@ -1584,10 +1590,10 @@ TEST_F(ProgramManagerWithShaderTest, UniformsPrecisionMismatch) {
   ASSERT_TRUE(vshader != NULL && fshader != NULL);
   // Set Status
   TestHelper::SetShaderStates(
-      gl_.get(), vshader, true, NULL, NULL, NULL,
+      gl_.get(), vshader, true, NULL, NULL, NULL, NULL,
       &vertex_uniform_map, NULL, NULL);
   TestHelper::SetShaderStates(
-      gl_.get(), fshader, true, NULL, NULL, NULL,
+      gl_.get(), fshader, true, NULL, NULL, NULL, NULL,
       &frag_uniform_map, NULL, NULL);
 
   // Set up program

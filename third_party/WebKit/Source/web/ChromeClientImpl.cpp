@@ -38,6 +38,7 @@
 #include "core/dom/Document.h"
 #include "core/dom/Fullscreen.h"
 #include "core/dom/Node.h"
+#include "core/events/UIEventWithKeyState.h"
 #include "core/frame/Console.h"
 #include "core/frame/FrameHost.h"
 #include "core/frame/FrameView.h"
@@ -48,14 +49,13 @@
 #include "core/html/forms/DateTimeChooser.h"
 #include "core/layout/HitTestResult.h"
 #include "core/layout/LayoutPart.h"
-#include "core/layout/compositing/CompositedSelectionBound.h"
+#include "core/layout/compositing/CompositedSelection.h"
 #include "core/loader/DocumentLoader.h"
 #include "core/loader/FrameLoadRequest.h"
 #include "core/page/Page.h"
 #include "modules/accessibility/AXObject.h"
 #include "platform/Cursor.h"
 #include "platform/FileChooser.h"
-#include "platform/PlatformScreen.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/exported/WrappedResourceRequest.h"
 #include "platform/geometry/IntRect.h"
@@ -64,7 +64,6 @@
 #include "public/platform/Platform.h"
 #include "public/platform/WebCursorInfo.h"
 #include "public/platform/WebRect.h"
-#include "public/platform/WebSelectionBound.h"
 #include "public/platform/WebURLRequest.h"
 #include "public/web/WebAXObject.h"
 #include "public/web/WebAutofillClient.h"
@@ -78,6 +77,7 @@
 #include "public/web/WebNode.h"
 #include "public/web/WebPlugin.h"
 #include "public/web/WebPopupMenuInfo.h"
+#include "public/web/WebSelection.h"
 #include "public/web/WebSettings.h"
 #include "public/web/WebTextDirection.h"
 #include "public/web/WebTouchAction.h"
@@ -114,18 +114,6 @@ static WebAXEvent toWebAXEvent(AXObjectCache::AXNotification notification)
 {
     // These enums have the same values; enforced in AssertMatchingEnums.cpp.
     return static_cast<WebAXEvent>(notification);
-}
-
-static WebSelectionBound toWebSelectionBound(const CompositedSelectionBound& bound)
-{
-    ASSERT(bound.layer);
-
-    // These enums have the same values; enforced in AssertMatchingEnums.cpp.
-    WebSelectionBound result(static_cast<WebSelectionBound::Type>(bound.type));
-    result.layerId = bound.layer->platformLayer()->id();
-    result.edgeTopInLayer = roundedIntPoint(bound.edgeTopInLayer);
-    result.edgeBottomInLayer = roundedIntPoint(bound.edgeBottomInLayer);
-    return result;
 }
 
 ChromeClientImpl::ChromeClientImpl(WebViewImpl* webView)
@@ -225,7 +213,7 @@ Page* ChromeClientImpl::createWindow(LocalFrame* frame, const FrameLoadRequest& 
     WebNavigationPolicy policy = static_cast<WebNavigationPolicy>(navigationPolicy);
     if (policy == WebNavigationPolicyIgnore)
         policy = getNavigationPolicy(features);
-    else if (policy == WebNavigationPolicyNewBackgroundTab && getNavigationPolicy(m_windowFeatures) != WebNavigationPolicyNewBackgroundTab)
+    else if (policy == WebNavigationPolicyNewBackgroundTab && getNavigationPolicy(m_windowFeatures) != WebNavigationPolicyNewBackgroundTab && !UIEventWithKeyState::newTabModifierSetFromIsolatedWorld())
         policy = WebNavigationPolicyNewForegroundTab;
 
     ASSERT(frame->document());
@@ -240,29 +228,38 @@ Page* ChromeClientImpl::createWindow(LocalFrame* frame, const FrameLoadRequest& 
 
 static inline void updatePolicyForEvent(const WebInputEvent* inputEvent, NavigationPolicy* policy)
 {
-    if (!inputEvent || inputEvent->type != WebInputEvent::MouseUp)
+    if (!inputEvent)
         return;
 
-    const WebMouseEvent* mouseEvent = static_cast<const WebMouseEvent*>(inputEvent);
+    unsigned short buttonNumber = 0;
+    if (inputEvent->type == WebInputEvent::MouseUp) {
 
-    unsigned short buttonNumber;
-    switch (mouseEvent->button) {
-    case WebMouseEvent::ButtonLeft:
+        const WebMouseEvent* mouseEvent = static_cast<const WebMouseEvent*>(inputEvent);
+
+        switch (mouseEvent->button) {
+        case WebMouseEvent::ButtonLeft:
+            buttonNumber = 0;
+            break;
+        case WebMouseEvent::ButtonMiddle:
+            buttonNumber = 1;
+            break;
+        case WebMouseEvent::ButtonRight:
+            buttonNumber = 2;
+            break;
+        default:
+            return;
+        }
+    } else if (WebInputEvent::isKeyboardEventType(inputEvent->type) || WebInputEvent::isGestureEventType(inputEvent->type)) {
+        // Keyboard and gesture events can simulate mouse events.
         buttonNumber = 0;
-        break;
-    case WebMouseEvent::ButtonMiddle:
-        buttonNumber = 1;
-        break;
-    case WebMouseEvent::ButtonRight:
-        buttonNumber = 2;
-        break;
-    default:
+    } else {
         return;
     }
-    bool ctrl = mouseEvent->modifiers & WebMouseEvent::ControlKey;
-    bool shift = mouseEvent->modifiers & WebMouseEvent::ShiftKey;
-    bool alt = mouseEvent->modifiers & WebMouseEvent::AltKey;
-    bool meta = mouseEvent->modifiers & WebMouseEvent::MetaKey;
+
+    bool ctrl = inputEvent->modifiers & WebInputEvent::ControlKey;
+    bool shift = inputEvent->modifiers & WebInputEvent::ShiftKey;
+    bool alt = inputEvent->modifiers & WebInputEvent::AltKey;
+    bool meta = inputEvent->modifiers & WebInputEvent::MetaKey;
 
     NavigationPolicy userPolicy = *policy;
     navigationPolicyFromMouseEvent(buttonNumber, ctrl, shift, alt, meta, &userPolicy);
@@ -299,7 +296,7 @@ void ChromeClientImpl::show(NavigationPolicy navigationPolicy)
     WebNavigationPolicy policy = static_cast<WebNavigationPolicy>(navigationPolicy);
     if (policy == WebNavigationPolicyIgnore)
         policy = getNavigationPolicy(m_windowFeatures);
-    else if (policy == WebNavigationPolicyNewBackgroundTab && getNavigationPolicy(m_windowFeatures) != WebNavigationPolicyNewBackgroundTab)
+    else if (policy == WebNavigationPolicyNewBackgroundTab && getNavigationPolicy(m_windowFeatures) != WebNavigationPolicyNewBackgroundTab && !UIEventWithKeyState::newTabModifierSetFromIsolatedWorld())
         policy = WebNavigationPolicyNewForegroundTab;
     m_webView->client()->show(policy);
 }
@@ -540,10 +537,10 @@ void ChromeClientImpl::mouseDidMoveOverElement(const HitTestResult& result)
     // Find out if the mouse is over a link, and if so, let our UI know...
     if (result.isLiveLink() && !result.absoluteLinkURL().string().isEmpty()) {
         url = result.absoluteLinkURL();
-    } else if (result.innerNonSharedNode()
-        && (isHTMLObjectElement(*result.innerNonSharedNode())
-            || isHTMLEmbedElement(*result.innerNonSharedNode()))) {
-        LayoutObject* object = result.innerNonSharedNode()->layoutObject();
+    } else if (result.innerNode()
+        && (isHTMLObjectElement(*result.innerNode())
+            || isHTMLEmbedElement(*result.innerNode()))) {
+        LayoutObject* object = result.innerNode()->layoutObject();
         if (object && object->isLayoutPart()) {
             Widget* widget = toLayoutPart(object)->widget();
             if (widget && widget->isPluginContainer()) {
@@ -677,15 +674,6 @@ String ChromeClientImpl::acceptLanguages()
     return m_webView->client()->acceptLanguages();
 }
 
-bool ChromeClientImpl::paintCustomOverhangArea(GraphicsContext* context, const IntRect& horizontalOverhangArea, const IntRect& verticalOverhangArea, const IntRect& dirtyRect)
-{
-    LocalFrame* frame = m_webView->mainFrameImpl()->frame();
-    WebPluginContainerImpl* pluginContainer = WebLocalFrameImpl::pluginContainerFromFrame(frame);
-    if (pluginContainer)
-        return pluginContainer->paintCustomOverhangArea(context, horizontalOverhangArea, verticalOverhangArea, dirtyRect);
-    return false;
-}
-
 GraphicsLayerFactory* ChromeClientImpl::graphicsLayerFactory() const
 {
     return m_webView->graphicsLayerFactory();
@@ -758,14 +746,14 @@ void ChromeClientImpl::exitFullScreenForElement(Element* element)
     m_webView->exitFullScreenForElement(element);
 }
 
-void ChromeClientImpl::clearCompositedSelectionBounds()
+void ChromeClientImpl::clearCompositedSelection()
 {
-    m_webView->clearCompositedSelectionBounds();
+    m_webView->clearCompositedSelection();
 }
 
-void ChromeClientImpl::updateCompositedSelectionBounds(const CompositedSelectionBound& anchor, const CompositedSelectionBound& focus)
+void ChromeClientImpl::updateCompositedSelection(const CompositedSelection& selection)
 {
-    m_webView->updateCompositedSelectionBounds(toWebSelectionBound(anchor), toWebSelectionBound(focus));
+    m_webView->updateCompositedSelection(WebSelection(selection));
 }
 
 bool ChromeClientImpl::hasOpenedPopup() const

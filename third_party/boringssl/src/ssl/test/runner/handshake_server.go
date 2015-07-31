@@ -97,9 +97,12 @@ func (c *Conn) serverHandshake() error {
 		if err := hs.readFinished(isResume); err != nil {
 			return err
 		}
+		if c.config.Bugs.AlertBeforeFalseStartTest != 0 {
+			c.sendAlert(c.config.Bugs.AlertBeforeFalseStartTest)
+		}
 		if c.config.Bugs.ExpectFalseStart {
 			if err := c.readRecord(recordTypeApplicationData); err != nil {
-				return err
+				return fmt.Errorf("tls: peer did not false start: %s", err)
 			}
 		}
 		if err := hs.sendSessionTicket(); err != nil {
@@ -110,6 +113,9 @@ func (c *Conn) serverHandshake() error {
 		}
 	}
 	c.handshakeComplete = true
+	copy(c.clientRandom[:], hs.clientHello.random)
+	copy(c.serverRandom[:], hs.hello.random)
+	copy(c.masterSecret[:], hs.masterSecret)
 
 	return nil
 }
@@ -209,6 +215,9 @@ func (hs *serverHandshakeState) readClientHello() (isResume bool, err error) {
 
 	supportedCurve := false
 	preferredCurves := config.curvePreferences()
+	if config.Bugs.IgnorePeerCurvePreferences {
+		hs.clientHello.supportedCurves = preferredCurves
+	}
 Curves:
 	for _, curve := range hs.clientHello.supportedCurves {
 		for _, supported := range preferredCurves {
@@ -324,6 +333,12 @@ Curves:
 
 	_, hs.ecdsaOk = hs.cert.PrivateKey.(*ecdsa.PrivateKey)
 
+	// For test purposes, check that the peer never offers a session when
+	// renegotiating.
+	if c.cipherSuite != nil && len(hs.clientHello.sessionId) > 0 && c.config.Bugs.FailIfResumeOnRenego {
+		return false, errors.New("tls: offered resumption on renegotiation")
+	}
+
 	if hs.checkForResumption() {
 		return true, nil
 	}
@@ -372,10 +387,6 @@ Curves:
 // checkForResumption returns true if we should perform resumption on this connection.
 func (hs *serverHandshakeState) checkForResumption() bool {
 	c := hs.c
-
-	if c.config.Bugs.NeverResumeOnRenego && c.cipherSuite != 0 {
-		return false
-	}
 
 	if len(hs.clientHello.sessionTicket) > 0 {
 		if c.config.SessionTicketsDisabled {
@@ -437,6 +448,9 @@ func (hs *serverHandshakeState) doResumeHandshake() error {
 	c := hs.c
 
 	hs.hello.cipherSuite = hs.suite.id
+	if c.config.Bugs.SendCipherSuite != 0 {
+		hs.hello.cipherSuite = c.config.Bugs.SendCipherSuite
+	}
 	// We echo the client's session ID in the ServerHello to let it know
 	// that we're doing a resumption.
 	hs.hello.sessionId = hs.clientHello.sessionId
@@ -509,7 +523,7 @@ func (hs *serverHandshakeState) doFullHandshake() error {
 		}
 	}
 
-	if hs.hello.ocspStapling {
+	if hs.hello.ocspStapling && !c.config.Bugs.SkipCertificateStatus {
 		certStatus := new(certificateStatusMsg)
 		certStatus.statusType = statusTypeOCSP
 		certStatus.response = hs.cert.OCSPStaple
@@ -846,6 +860,9 @@ func (hs *serverHandshakeState) sendFinished() error {
 
 	finished := new(finishedMsg)
 	finished.verifyData = hs.finishedHash.serverSum(hs.masterSecret)
+	if c.config.Bugs.BadFinished {
+		finished.verifyData[0]++
+	}
 	c.serverVerify = append(c.serverVerify[:0], finished.verifyData...)
 	hs.finishedBytes = finished.marshal()
 	hs.writeServerHash(hs.finishedBytes)
@@ -874,7 +891,7 @@ func (hs *serverHandshakeState) sendFinished() error {
 		c.dtlsFlushHandshake()
 	}
 
-	c.cipherSuite = hs.suite.id
+	c.cipherSuite = hs.suite
 
 	return nil
 }

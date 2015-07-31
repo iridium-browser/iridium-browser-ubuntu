@@ -5,6 +5,8 @@ Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
 
+<link rel="import" href="/core/event_presenter.html">
+<link rel="import" href="/core/trace_model/proxy_selectable_item.html">
 <link rel="import" href="/core/tracks/heading_track.html">
 <link rel="import" href="/base/ui/color_scheme.html">
 <link rel="import" href="/base/sorted_array_utils.html">
@@ -19,6 +21,7 @@ found in the LICENSE file.
 'use strict';
 
 tv.exportTo('tv.c.tracks', function() {
+  var EventPresenter = tv.c.EventPresenter;
   var SelectionState = tv.c.trace_model.SelectionState;
 
   /**
@@ -36,10 +39,6 @@ tv.exportTo('tv.c.tracks', function() {
       tv.c.tracks.HeadingTrack.prototype.decorate.call(this, viewport);
       this.classList.add('letter-dot-track');
       this.items_ = undefined;
-    },
-
-    getModelEventFromItem: function(item) {
-      throw new Error('Not implemented.');
     },
 
     get items() {
@@ -67,13 +66,13 @@ tv.exportTo('tv.c.tracks', function() {
       if (this.items_ === undefined)
         return;
       switch (type) {
-        case tv.c.tracks.DrawType.SLICE:
-          this.drawSlices_(viewLWorld, viewRWorld);
+        case tv.c.tracks.DrawType.GENERAL_EVENT:
+          this.drawLetterDots_(viewLWorld, viewRWorld);
           break;
       }
     },
 
-    drawSlices_: function(viewLWorld, viewRWorld) {
+    drawLetterDots_: function(viewLWorld, viewRWorld) {
       var ctx = this.context();
       var pixelRatio = window.devicePixelRatio || 1;
 
@@ -101,57 +100,49 @@ tv.exportTo('tv.c.tracks', function() {
       ctx.strokeStyle = 'rgb(0,0,0)';
       ctx.textBaseline = 'middle';
       ctx.textAlign = 'center';
-      for (var i = loI; i < items.length; ++i) {
-        var item = items[i];
-        var x = item.start;
-        if (x - itemRadiusWorld > viewRWorld)
-          break;
-        var xView = dt.xWorldToView(x);
 
-        if (item.selected)
-          ctx.fillStyle = palette[item.colorId + highlightIdBoost];
-        else
-          ctx.fillStyle = palette[item.colorId];
-        ctx.beginPath();
-        ctx.arc(xView, halfHeight, dumpRadiusView + 0.5, 0, twoPi);
-        ctx.fill();
-        if (item.selected) {
-          ctx.lineWidth = 3;
-          ctx.strokeStyle = 'rgb(100,100,0)';
-          ctx.stroke();
+      var drawItems = function(selected) {
+        for (var i = loI; i < items.length; ++i) {
+          var item = items[i];
+          var x = item.start;
+          if (x - itemRadiusWorld > viewRWorld)
+            break;
+          if (item.selected !== selected)
+            continue;
+          var xView = dt.xWorldToView(x);
 
+          ctx.fillStyle = EventPresenter.getSelectableItemColor(item);
           ctx.beginPath();
-          ctx.arc(xView, halfHeight, dumpRadiusView, 0, twoPi);
-          ctx.lineWidth = 1.5;
-          ctx.strokeStyle = 'rgb(255,255,0)';
-          ctx.stroke();
-        } else {
-          ctx.lineWidth = 1;
-          ctx.strokeStyle = 'rgb(0,0,0)';
-          ctx.stroke();
-        }
+          ctx.arc(xView, halfHeight, dumpRadiusView + 0.5, 0, twoPi);
+          ctx.fill();
+          if (item.selected) {
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = 'rgb(100,100,0)';
+            ctx.stroke();
 
-        ctx.fillStyle = 'rgb(255, 255, 255)';
-        ctx.fillText(item.dotLetter, xView, halfHeight);
-      }
+            ctx.beginPath();
+            ctx.arc(xView, halfHeight, dumpRadiusView, 0, twoPi);
+            ctx.lineWidth = 1.5;
+            ctx.strokeStyle = 'rgb(255,255,0)';
+            ctx.stroke();
+          } else {
+            ctx.lineWidth = 1;
+            ctx.strokeStyle = 'rgb(0,0,0)';
+            ctx.stroke();
+          }
+
+          ctx.fillStyle = 'rgb(255, 255, 255)';
+          ctx.fillText(item.dotLetter, xView, halfHeight);
+        }
+      };
+
+      // Draw unselected items first to make sure they don't occlude selected
+      // items.
+      drawItems(false);
+      drawItems(true);
+
       ctx.lineWidth = 1;
       ctx.font = oldFont;
-
-      // For performance reasons we only check the SelectionState of the first
-      // memory dump. If it's DIMMED we assume that all are DIMMED.
-      // TODO(petrcermak): Allow partial highlight.
-      var selectionState = SelectionState.NONE;
-      if (items.length &&
-          items[0].selectionState === SelectionState.DIMMED) {
-        selectionState = SelectionState.DIMMED;
-      }
-
-      // Dim the track when there is an active highlight.
-      if (selectionState === SelectionState.DIMMED) {
-        var width = bounds.width * pixelRatio;
-        ctx.fillStyle = 'rgba(255,255,255,0.5)';
-        ctx.fillRect(0, 0, width, height);
-      }
     },
 
     addEventsToTrackMap: function(eventToTrackMap) {
@@ -159,9 +150,7 @@ tv.exportTo('tv.c.tracks', function() {
         return;
 
       this.items_.forEach(function(item) {
-        var event = this.getModelEventFromItem(item);
-        if (event)
-          eventToTrackMap.addEvent(event, this);
+        item.addToTrackMap(eventToTrackMap, this);
       }, this);
     },
 
@@ -177,9 +166,7 @@ tv.exportTo('tv.c.tracks', function() {
           function(x) { return 2 * itemRadiusWorld; },
           loWX, hiWX,
           function(item) {
-            var event = this.getModelEventFromItem(item);
-            if (event)
-              selection.push(event);
+            item.addToSelection(selection);
           }.bind(this));
     },
 
@@ -198,12 +185,15 @@ tv.exportTo('tv.c.tracks', function() {
         return;
 
       var items = this.items_;
-      var index = items.indexOf(event);
+      var index = tv.b.findFirstIndexInArray(items, function(item) {
+        return item.modelItem === event;
+      });
+      if (index === -1)
+        return false;
+
       var newIndex = index + offset;
       if (newIndex >= 0 && newIndex < items.length) {
-        var event = this.getModelEventFromItem(items[newIndex]);
-        if (event)
-          selection.push(event);
+        items[newIndex].addToSelection(selection);
         return true;
       }
       return false;
@@ -226,14 +216,30 @@ tv.exportTo('tv.c.tracks', function() {
       if (!item)
         return;
 
-      var event = this.getModelEventFromItem(item);
-      if (event)
-        selection.push(event);
+      item.addToSelection(selection);
     }
   };
 
+  /**
+   * A filled dot with a letter inside it.
+   *
+   * @constructor
+   * @extends {ProxySelectableItem}
+   */
+  function LetterDot(modelItem, dotLetter, colorId, start) {
+    tv.c.trace_model.ProxySelectableItem.call(this, modelItem);
+    this.dotLetter = dotLetter;
+    this.colorId = colorId;
+    this.start = start;
+  };
+
+  LetterDot.prototype = {
+    __proto__: tv.c.trace_model.ProxySelectableItem.prototype
+  };
+
   return {
-    LetterDotTrack: LetterDotTrack
+    LetterDotTrack: LetterDotTrack,
+    LetterDot: LetterDot
   };
 });
 </script>

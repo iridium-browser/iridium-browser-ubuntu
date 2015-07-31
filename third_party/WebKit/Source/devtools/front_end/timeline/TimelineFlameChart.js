@@ -407,24 +407,12 @@ WebInspector.TimelineFlameChartDataProvider.prototype = {
         var openEvents = [];
         var flowEventsEnabled = Runtime.experiments.isEnabled("timelineFlowEvents");
         var blackboxingEnabled = Runtime.experiments.isEnabled("blackboxJSFramesOnTimeline");
-
-        /**
-         * @param {!WebInspector.TracingModel.Event} event
-         * @return {boolean}
-         */
-        function isFlowEvent(event)
-        {
-            return e.phase === WebInspector.TracingModel.Phase.FlowBegin ||
-                   e.phase === WebInspector.TracingModel.Phase.FlowStep ||
-                   e.phase === WebInspector.TracingModel.Phase.FlowEnd;
-        }
-
         var maxStackDepth = 0;
         for (var i = 0; i < events.length; ++i) {
             var e = events[i];
             if (WebInspector.TimelineUIUtils.isMarkerEvent(e))
                 this._markers.push(new WebInspector.TimelineFlameChartMarker(e.startTime, e.startTime - this._model.minimumRecordTime(), WebInspector.TimelineUIUtils.markerStyleForEvent(e)));
-            if (!isFlowEvent(e)) {
+            if (!WebInspector.TracingModel.isFlowPhase(e.phase)) {
                 if (!e.endTime && e.phase !== WebInspector.TracingModel.Phase.Instant)
                     continue;
                 if (WebInspector.TracingModel.isAsyncPhase(e.phase))
@@ -1404,7 +1392,7 @@ WebInspector.TimelineFlameChartView = function(delegate, timelineModel, frameMod
     this._delegate = delegate;
     this._model = timelineModel;
 
-    this._splitView = new WebInspector.SplitView(false, false, "timelineFlamechartMainView", 150);
+    this._splitWidget = new WebInspector.SplitWidget(false, false, "timelineFlamechartMainView", 150);
 
     this._dataProvider = new WebInspector.TimelineFlameChartDataProvider(this._model, frameModel);
     this._mainView = new WebInspector.FlameChart(this._dataProvider, this, true);
@@ -1413,9 +1401,9 @@ WebInspector.TimelineFlameChartView = function(delegate, timelineModel, frameMod
     this._networkView = new WebInspector.FlameChart(this._networkDataProvider, this, true);
 
     if (Runtime.experiments.isEnabled("networkRequestsOnTimeline")) {
-        this._splitView.setMainView(this._mainView);
-        this._splitView.setSidebarView(this._networkView);
-        this._splitView.show(this.element);
+        this._splitWidget.setMainWidget(this._mainView);
+        this._splitWidget.setSidebarWidget(this._networkView);
+        this._splitWidget.show(this.element);
     } else {
         this._mainView.show(this.element);
     }
@@ -1455,7 +1443,7 @@ WebInspector.TimelineFlameChartView.prototype = {
      * @param {number} startTime
      * @param {number} endTime
      */
-    updateBoxSelection: function(startTime, endTime)
+    updateRangeSelection: function(startTime, endTime)
     {
         this._delegate.select(WebInspector.TimelineSelection.fromRange(startTime, endTime));
     },
@@ -1480,7 +1468,7 @@ WebInspector.TimelineFlameChartView.prototype = {
 
     /**
      * @override
-     * @return {!WebInspector.View}
+     * @return {!WebInspector.Widget}
      */
     view: function()
     {
@@ -1517,7 +1505,6 @@ WebInspector.TimelineFlameChartView.prototype = {
     {
         this._mainView.setWindowTimes(startTime, endTime);
         this._networkView.setWindowTimes(startTime, endTime);
-        this._delegate.select(null);
     },
 
     /**
@@ -1578,9 +1565,9 @@ WebInspector.TimelineFlameChartView.prototype = {
     enableNetworkPane: function(enable, animate)
     {
         if (enable)
-            this._splitView.showBoth(animate);
+            this._splitWidget.showBoth(animate);
         else
-            this._splitView.hideSidebar(animate);
+            this._splitWidget.hideSidebar(animate);
     },
 
     _refresh: function()

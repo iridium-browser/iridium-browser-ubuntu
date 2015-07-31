@@ -39,31 +39,31 @@ namespace blink {
 
 class AudioContext;
 
-class MediaStreamAudioSourceHandler final : public AudioHandler, public AudioSourceProviderClient {
-    USING_GARBAGE_COLLECTED_MIXIN(MediaStreamAudioSourceHandler);
+class MediaStreamAudioSourceHandler final : public AudioHandler {
 public:
-    MediaStreamAudioSourceHandler(AudioNode&, MediaStream*, MediaStreamTrack*, PassOwnPtr<AudioSourceProvider>);
+    static PassRefPtr<MediaStreamAudioSourceHandler> create(AudioNode&, MediaStream&, MediaStreamTrack*, PassOwnPtr<AudioSourceProvider>);
     virtual ~MediaStreamAudioSourceHandler();
 
     MediaStream* mediaStream() { return m_mediaStream.get(); }
 
     // AudioHandler
-    virtual void dispose() override;
     virtual void process(size_t framesToProcess) override;
 
-    // AudioSourceProviderClient
-    virtual void setFormat(size_t numberOfChannels, float sampleRate) override;
+    // A helper for AudioSourceProviderClient implementation of
+    // MediaStreamAudioSourceNode.
+    void setFormat(size_t numberOfChannels, float sampleRate);
 
     AudioSourceProvider* audioSourceProvider() const { return m_audioSourceProvider.get(); }
 
-    DECLARE_VIRTUAL_TRACE();
-
 private:
+    MediaStreamAudioSourceHandler(AudioNode&, MediaStream&, MediaStreamTrack*, PassOwnPtr<AudioSourceProvider>);
     // As an audio source, we will never propagate silence.
     virtual bool propagatesSilence() const override { return false; }
 
-    Member<MediaStream> m_mediaStream;
-    Member<MediaStreamTrack> m_audioTrack;
+    // These Persistents don't make reference cycles including the owner
+    // MediaStreamAudioSourceNode.
+    Persistent<MediaStream> m_mediaStream;
+    Persistent<MediaStreamTrack> m_audioTrack;
     OwnPtr<AudioSourceProvider> m_audioSourceProvider;
 
     Mutex m_processLock;
@@ -71,16 +71,21 @@ private:
     unsigned m_sourceNumberOfChannels;
 };
 
-class MediaStreamAudioSourceNode final : public AudioSourceNode {
+class MediaStreamAudioSourceNode final : public AudioSourceNode, public AudioSourceProviderClient {
     DEFINE_WRAPPERTYPEINFO();
+    USING_GARBAGE_COLLECTED_MIXIN(MediaStreamAudioSourceNode);
 public:
-    static MediaStreamAudioSourceNode* create(AudioContext*, MediaStream*, MediaStreamTrack*, PassOwnPtr<AudioSourceProvider>);
+    static MediaStreamAudioSourceNode* create(AudioContext&, MediaStream&, MediaStreamTrack*, PassOwnPtr<AudioSourceProvider>);
+    DECLARE_VIRTUAL_TRACE();
     MediaStreamAudioSourceHandler& mediaStreamAudioSourceHandler() const;
 
     MediaStream* mediaStream() const;
 
+    // AudioSourceProviderClient functions:
+    void setFormat(size_t numberOfChannels, float sampleRate) override;
+
 private:
-    MediaStreamAudioSourceNode(AudioContext&, MediaStream*, MediaStreamTrack*, PassOwnPtr<AudioSourceProvider>);
+    MediaStreamAudioSourceNode(AudioContext&, MediaStream&, MediaStreamTrack*, PassOwnPtr<AudioSourceProvider>);
 };
 
 } // namespace blink

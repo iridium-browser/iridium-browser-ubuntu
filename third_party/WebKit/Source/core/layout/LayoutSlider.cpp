@@ -56,13 +56,13 @@ int LayoutSlider::baselinePosition(FontBaseline, bool /*firstLine*/, LineDirecti
 void LayoutSlider::computeIntrinsicLogicalWidths(LayoutUnit& minLogicalWidth, LayoutUnit& maxLogicalWidth) const
 {
     maxLogicalWidth = defaultTrackLength * style()->effectiveZoom();
-    if (!style()->width().isPercent())
+    if (!style()->width().hasPercent())
         minLogicalWidth = maxLogicalWidth;
 }
 
 inline SliderThumbElement* LayoutSlider::sliderThumbElement() const
 {
-    return toSliderThumbElement(toElement(node())->closedShadowRoot()->getElementById(ShadowElementNames::sliderThumb()));
+    return toSliderThumbElement(toElement(node())->userAgentShadowRoot()->getElementById(ShadowElementNames::sliderThumb()));
 }
 
 void LayoutSlider::layout()

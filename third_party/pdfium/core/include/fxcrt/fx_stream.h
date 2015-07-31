@@ -6,16 +6,19 @@
 
 #ifndef _FX_STREAM_H_
 #define _FX_STREAM_H_
-#ifndef _FX_MEMORY_H_
+
 #include "fx_memory.h"
-#endif
+#include "fx_string.h"
+
 void* FX_OpenFolder(FX_LPCSTR path);
 void* FX_OpenFolder(FX_LPCWSTR path);
 FX_BOOL FX_GetNextFile(void* handle, CFX_ByteString& filename, FX_BOOL& bFolder);
 FX_BOOL FX_GetNextFile(void* handle, CFX_WideString& filename, FX_BOOL& bFolder);
 void FX_CloseFolder(void* handle);
 FX_WCHAR FX_GetFolderSeparator();
-FX_DEFINEHANDLE(FX_HFILE)
+typedef struct FX_HFILE_ {
+    FX_LPVOID pData;
+}* FX_HFILE;
 #if _FXM_PLATFORM_ == _FXM_PLATFORM_WINDOWS_
 #define FX_FILESIZE			FX_INT32
 #else

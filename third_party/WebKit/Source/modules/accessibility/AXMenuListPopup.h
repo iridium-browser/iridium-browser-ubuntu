@@ -42,6 +42,9 @@ public:
     virtual bool isOffScreen() const override;
 
     void didUpdateActiveOption(int optionIndex);
+    void didShow();
+    void didHide();
+    AXObject* activeChild();
 
 private:
     explicit AXMenuListPopup(AXObjectCacheImpl*);
@@ -54,10 +57,11 @@ private:
     virtual bool isVisible() const override;
     virtual bool press() const override;
     virtual void addChildren() override;
-    virtual void childrenChanged() override;
-    virtual bool computeAccessibilityIsIgnored() const override;
+    virtual void updateChildrenIfNecessary() override;
+    virtual bool computeAccessibilityIsIgnored(IgnoredReasons* = nullptr) const override;
 
     AXMenuListOption* menuListOptionAXObject(HTMLElement*) const;
+    int getSelectedIndex() const;
 
     // Note that this may be -1 if nothing is selected.
     int m_activeIndex;

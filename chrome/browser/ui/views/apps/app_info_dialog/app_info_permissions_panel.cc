@@ -19,6 +19,7 @@
 #include "extensions/common/permissions/permissions_data.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/text_constants.h"
 #include "ui/resources/grit/ui_resources.h"
 #include "ui/views/border.h"
 #include "ui/views/controls/button/button.h"
@@ -229,7 +230,8 @@ void AppInfoPermissionsPanel::CreatePermissionsList() {
   // Add regular and host permission messages.
   for (const auto& message : GetActivePermissionMessages()) {
     permissions_list->AddPermissionBullets(
-        message.first, message.second, gfx::ELIDE_MIDDLE, base::Closure());
+        message.message, message.submessages, gfx::ELIDE_MIDDLE,
+        base::Closure());
   }
 
   // Add USB devices, if the app has any.
@@ -259,26 +261,9 @@ bool AppInfoPermissionsPanel::HasActivePermissionMessages() const {
   return !GetActivePermissionMessages().empty();
 }
 
-const std::vector<PermissionStringAndDetailsPair>
+extensions::PermissionMessageStrings
 AppInfoPermissionsPanel::GetActivePermissionMessages() const {
-  std::vector<PermissionStringAndDetailsPair> messages_with_details;
-  std::vector<base::string16> permission_messages =
-      app_->permissions_data()->GetLegacyPermissionMessageStrings();
-  std::vector<base::string16> permission_message_details =
-      app_->permissions_data()->GetLegacyPermissionMessageDetailsStrings();
-  DCHECK_EQ(permission_messages.size(), permission_message_details.size());
-
-  for (size_t i = 0; i < permission_messages.size(); i++) {
-    std::vector<base::string16> details;
-    if (!permission_message_details[i].empty()) {
-      // Make each new line in the details a separate sub-bullet.
-      base::SplitString(
-          permission_message_details[i], base::char16('\n'), &details);
-    }
-    messages_with_details.push_back(
-        PermissionStringAndDetailsPair(permission_messages[i], details));
-  }
-  return messages_with_details;
+  return app_->permissions_data()->GetPermissionMessageStrings();
 }
 
 int AppInfoPermissionsPanel::GetRetainedFileCount() const {
@@ -294,19 +279,8 @@ int AppInfoPermissionsPanel::GetRetainedFileCount() const {
 }
 
 base::string16 AppInfoPermissionsPanel::GetRetainedFileHeading() const {
-  const int kRetainedFilesMessageIDs[6] = {
-      IDS_APPLICATION_INFO_RETAINED_FILES_DEFAULT,
-      IDS_APPLICATION_INFO_RETAINED_FILE_SINGULAR,
-      IDS_APPLICATION_INFO_RETAINED_FILES_ZERO,
-      IDS_APPLICATION_INFO_RETAINED_FILES_TWO,
-      IDS_APPLICATION_INFO_RETAINED_FILES_FEW,
-      IDS_APPLICATION_INFO_RETAINED_FILES_MANY,
-  };
-  std::vector<int> message_ids(
-      kRetainedFilesMessageIDs,
-      kRetainedFilesMessageIDs + arraysize(kRetainedFilesMessageIDs));
-
-  return l10n_util::GetPluralStringFUTF16(message_ids, GetRetainedFileCount());
+  return l10n_util::GetPluralStringFUTF16(
+      IDS_APPLICATION_INFO_RETAINED_FILES, GetRetainedFileCount());
 }
 
 const std::vector<base::string16>
@@ -346,20 +320,8 @@ int AppInfoPermissionsPanel::GetRetainedDeviceCount() const {
 }
 
 base::string16 AppInfoPermissionsPanel::GetRetainedDeviceHeading() const {
-  const int kRetainedDevicesMessageIDs[6] = {
-      IDS_APPLICATION_INFO_RETAINED_DEVICES_DEFAULT,
-      IDS_APPLICATION_INFO_RETAINED_DEVICE_SINGULAR,
-      IDS_APPLICATION_INFO_RETAINED_DEVICES_ZERO,
-      IDS_APPLICATION_INFO_RETAINED_DEVICES_TWO,
-      IDS_APPLICATION_INFO_RETAINED_DEVICES_FEW,
-      IDS_APPLICATION_INFO_RETAINED_DEVICES_MANY,
-  };
-  std::vector<int> message_ids(
-      kRetainedDevicesMessageIDs,
-      kRetainedDevicesMessageIDs + arraysize(kRetainedDevicesMessageIDs));
-
-  return l10n_util::GetPluralStringFUTF16(message_ids,
-                                          GetRetainedDeviceCount());
+  return l10n_util::GetPluralStringFUTF16(
+      IDS_APPLICATION_INFO_RETAINED_DEVICES, GetRetainedDeviceCount());
 }
 
 const std::vector<base::string16> AppInfoPermissionsPanel::GetRetainedDevices()

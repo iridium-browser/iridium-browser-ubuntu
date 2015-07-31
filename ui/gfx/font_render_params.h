@@ -24,6 +24,8 @@ struct GFX_EXPORT FontRenderParams {
     HINTING_SLIGHT,
     HINTING_MEDIUM,
     HINTING_FULL,
+
+    HINTING_MAX = HINTING_FULL,
   };
 
   // Different subpixel orders to be used for subpixel rendering.
@@ -33,6 +35,8 @@ struct GFX_EXPORT FontRenderParams {
     SUBPIXEL_RENDERING_BGR,
     SUBPIXEL_RENDERING_VRGB,
     SUBPIXEL_RENDERING_VBGR,
+
+    SUBPIXEL_RENDERING_MAX = SUBPIXEL_RENDERING_VBGR,
   };
 
   // Antialiasing (grayscale if |subpixel_rendering| is SUBPIXEL_RENDERING_NONE
@@ -67,17 +71,12 @@ struct GFX_EXPORT FontRenderParams {
 
 // A query used to determine the appropriate FontRenderParams.
 struct GFX_EXPORT FontRenderParamsQuery {
-  explicit FontRenderParamsQuery(bool for_web_contents);
+  FontRenderParamsQuery();
   ~FontRenderParamsQuery();
 
   bool is_empty() const {
     return families.empty() && pixel_size <= 0 && point_size <= 0 && style < 0;
   }
-
-  // True if rendering text for the web.
-  // TODO(derat): Remove this once FontRenderParams::subpixel_positioning is
-  // gone: http://crbug.com/396659
-  bool for_web_contents;
 
   // Requested font families, or empty if unset.
   std::vector<std::string> families;

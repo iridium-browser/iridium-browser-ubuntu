@@ -23,11 +23,14 @@ class DownloadNotificationManager : public DownloadUIController::Delegate,
   void OnNewDownloadReady(content::DownloadItem* item) override;
 
   // DownloadNotificationItem::Delegate:
+  void OnCreated(DownloadNotificationItem* item) override;
   void OnDownloadStarted(DownloadNotificationItem* item) override;
   void OnDownloadStopped(DownloadNotificationItem* item) override;
   void OnDownloadRemoved(DownloadNotificationItem* item) override;
 
  private:
+  Profile* profile_;
+
   std::set<DownloadNotificationItem*> downloading_items_;
   std::set<DownloadNotificationItem*> items_;
 

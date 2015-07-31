@@ -83,6 +83,7 @@ _CAPABILITY_FLAGS = [
   {'name': 'stencil_test',
    'state_flag': 'framebuffer_state_.clear_state_dirty'},
   {'name': 'rasterizer_discard', 'es3': True},
+  {'name': 'primitive_restart_fixed_index', 'es3': True},
 ]
 
 _STATES = {
@@ -569,6 +570,19 @@ _NAMED_TYPE_INFO = {
     'valid': [
       'GL_FRAMEBUFFER',
     ],
+    'valid_es3': [
+      'GL_DRAW_FRAMEBUFFER' ,
+      'GL_READ_FRAMEBUFFER' ,
+    ],
+    'invalid': [
+      'GL_RENDERBUFFER',
+    ],
+  },
+  'InvalidateFrameBufferTarget': {
+    'type': 'GLenum',
+    'valid': [
+      'GL_FRAMEBUFFER',
+    ],
     'invalid': [
       'GL_DRAW_FRAMEBUFFER' ,
       'GL_READ_FRAMEBUFFER' ,
@@ -670,13 +684,33 @@ _NAMED_TYPE_INFO = {
       'GL_STATIC_DRAW',
       'GL_DYNAMIC_DRAW',
     ],
-    'invalid': [
+    'valid_es3': [
+      'GL_STREAM_READ',
+      'GL_STREAM_COPY',
       'GL_STATIC_READ',
+      'GL_STATIC_COPY',
+      'GL_DYNAMIC_READ',
+      'GL_DYNAMIC_COPY',
+    ],
+    'invalid': [
+      'GL_NONE',
     ],
   },
   'CompressedTextureFormat': {
     'type': 'GLenum',
     'valid': [
+    ],
+    'valid_es3': [
+      'GL_COMPRESSED_R11_EAC',
+      'GL_COMPRESSED_SIGNED_R11_EAC',
+      'GL_COMPRESSED_RG11_EAC',
+      'GL_COMPRESSED_SIGNED_RG11_EAC',
+      'GL_COMPRESSED_RGB8_ETC2',
+      'GL_COMPRESSED_SRGB8_ETC2',
+      'GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2',
+      'GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2',
+      'GL_COMPRESSED_RGBA8_ETC2_EAC',
+      'GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC',
     ],
   },
   'GLState': {
@@ -735,6 +769,101 @@ _NAMED_TYPE_INFO = {
       'GL_VERTEX_ARRAY_BINDING_OES',
       'GL_VIEWPORT',
     ],
+    'valid_es3': [
+      'GL_COPY_READ_BUFFER_BINDING',
+      'GL_COPY_WRITE_BUFFER_BINDING',
+      'GL_DRAW_BUFFER0',
+      'GL_DRAW_BUFFER1',
+      'GL_DRAW_BUFFER2',
+      'GL_DRAW_BUFFER3',
+      'GL_DRAW_BUFFER4',
+      'GL_DRAW_BUFFER5',
+      'GL_DRAW_BUFFER6',
+      'GL_DRAW_BUFFER7',
+      'GL_DRAW_BUFFER8',
+      'GL_DRAW_BUFFER9',
+      'GL_DRAW_BUFFER10',
+      'GL_DRAW_BUFFER11',
+      'GL_DRAW_BUFFER12',
+      'GL_DRAW_BUFFER13',
+      'GL_DRAW_BUFFER14',
+      'GL_DRAW_BUFFER15',
+      'GL_DRAW_FRAMEBUFFER_BINDING',
+      'GL_FRAGMENT_SHADER_DERIVATIVE_HINT',
+      'GL_MAJOR_VERSION',
+      'GL_MAX_3D_TEXTURE_SIZE',
+      'GL_MAX_ARRAY_TEXTURE_LAYERS',
+      'GL_MAX_COLOR_ATTACHMENTS',
+      'GL_MAX_COMBINED_FRAGMENT_UNIFORM_COMPONENTS',
+      'GL_MAX_COMBINED_UNIFORM_BLOCKS',
+      'GL_MAX_COMBINED_VERTEX_UNIFORM_COMPONENTS',
+      'GL_MAX_DRAW_BUFFERS',
+      'GL_MAX_ELEMENT_INDEX',
+      'GL_MAX_ELEMENTS_INDICES',
+      'GL_MAX_ELEMENTS_VERTICES',
+      'GL_MAX_FRAGMENT_INPUT_COMPONENTS',
+      'GL_MAX_FRAGMENT_UNIFORM_BLOCKS',
+      'GL_MAX_FRAGMENT_UNIFORM_COMPONENTS',
+      'GL_MAX_PROGRAM_TEXEL_OFFSET',
+      'GL_MAX_SAMPLES',
+      'GL_MAX_SERVER_WAIT_TIMEOUT',
+      'GL_MAX_TEXTURE_LOD_BIAS',
+      'GL_MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS',
+      'GL_MAX_TRANSFORM_FEEDBACK_SEPARATE_ATTRIBS',
+      'GL_MAX_TRANSFORM_FEEDBACK_SEPARATE_COMPONENTS',
+      'GL_MAX_UNIFORM_BLOCK_SIZE',
+      'GL_MAX_UNIFORM_BUFFER_BINDINGS',
+      'GL_MAX_VARYING_COMPONENTS',
+      'GL_MAX_VERTEX_OUTPUT_COMPONENTS',
+      'GL_MAX_VERTEX_UNIFORM_BLOCKS',
+      'GL_MAX_VERTEX_UNIFORM_COMPONENTS',
+      'GL_MIN_PROGRAM_TEXEL_OFFSET',
+      'GL_MINOR_VERSION',
+      'GL_NUM_EXTENSIONS',
+      'GL_NUM_PROGRAM_BINARY_FORMATS',
+      'GL_PACK_ROW_LENGTH',
+      'GL_PACK_SKIP_PIXELS',
+      'GL_PACK_SKIP_ROWS',
+      'GL_PIXEL_PACK_BUFFER_BINDING',
+      'GL_PIXEL_UNPACK_BUFFER_BINDING',
+      'GL_PROGRAM_BINARY_FORMATS',
+      'GL_READ_BUFFER',
+      'GL_READ_FRAMEBUFFER_BINDING',
+      'GL_SAMPLER_BINDING',
+      'GL_TEXTURE_BINDING_2D_ARRAY',
+      'GL_TEXTURE_BINDING_3D',
+      'GL_TRANSFORM_FEEDBACK_BINDING',
+      'GL_TRANSFORM_FEEDBACK_ACTIVE',
+      'GL_TRANSFORM_FEEDBACK_BUFFER_BINDING',
+      'GL_TRANSFORM_FEEDBACK_PAUSED',
+      'GL_TRANSFORM_FEEDBACK_BUFFER_SIZE',
+      'GL_TRANSFORM_FEEDBACK_BUFFER_START',
+      'GL_UNIFORM_BUFFER_BINDING',
+      'GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT',
+      'GL_UNIFORM_BUFFER_SIZE',
+      'GL_UNIFORM_BUFFER_START',
+      'GL_UNPACK_IMAGE_HEIGHT',
+      'GL_UNPACK_ROW_LENGTH',
+      'GL_UNPACK_SKIP_IMAGES',
+      'GL_UNPACK_SKIP_PIXELS',
+      'GL_UNPACK_SKIP_ROWS',
+      # GL_VERTEX_ARRAY_BINDING is the same as GL_VERTEX_ARRAY_BINDING_OES
+      # 'GL_VERTEX_ARRAY_BINDING',
+    ],
+    'invalid': [
+      'GL_FOG_HINT',
+    ],
+  },
+  'IndexedGLState': {
+    'type': 'GLenum',
+    'valid': [
+      'GL_TRANSFORM_FEEDBACK_BUFFER_BINDING',
+      'GL_TRANSFORM_FEEDBACK_BUFFER_SIZE',
+      'GL_TRANSFORM_FEEDBACK_BUFFER_START',
+      'GL_UNIFORM_BUFFER_BINDING',
+      'GL_UNIFORM_BUFFER_SIZE',
+      'GL_UNIFORM_BUFFER_START',
+    ],
     'invalid': [
       'GL_FOG_HINT',
     ],
@@ -744,6 +873,10 @@ _NAMED_TYPE_INFO = {
     'valid': [
       'GL_TEXTURE_2D',
       'GL_TEXTURE_CUBE_MAP',
+    ],
+    'valid_es3': [
+      'GL_TEXTURE_2D_ARRAY',
+      'GL_TEXTURE_3D',
     ],
     'invalid': [
       'GL_PROXY_TEXTURE_CUBE_MAP',
@@ -854,9 +987,12 @@ _NAMED_TYPE_INFO = {
       'GL_FUNC_SUBTRACT',
       'GL_FUNC_REVERSE_SUBTRACT',
     ],
-    'invalid': [
+    'valid_es3': [
       'GL_MIN',
       'GL_MAX',
+    ],
+    'invalid': [
+      'GL_NONE',
     ],
   },
   'SrcBlendFactor': {
@@ -931,8 +1067,10 @@ _NAMED_TYPE_INFO = {
       'GL_UNSIGNED_BYTE',
       'GL_UNSIGNED_SHORT',
     ],
-    'invalid': [
+    'valid_es3': [
       'GL_UNSIGNED_INT',
+    ],
+    'invalid': [
       'GL_INT',
     ],
   },
@@ -954,6 +1092,9 @@ _NAMED_TYPE_INFO = {
       'GL_DEPTH_ATTACHMENT',
       'GL_STENCIL_ATTACHMENT',
     ],
+    'valid_es3': [
+      'GL_DEPTH_STENCIL_ATTACHMENT',
+    ],
   },
   'BackbufferAttachment': {
     'type': 'GLenum',
@@ -968,6 +1109,12 @@ _NAMED_TYPE_INFO = {
     'valid': [
       'GL_BUFFER_SIZE',
       'GL_BUFFER_USAGE',
+    ],
+    'valid_es3': [
+      'GL_BUFFER_ACCESS_FLAGS',
+      'GL_BUFFER_MAPPED',
+      'GL_BUFFER_MAP_LENGTH',
+      'GL_BUFFER_MAP_OFFSET',
     ],
     'invalid': [
       'GL_PIXEL_PACK_BUFFER',
@@ -991,6 +1138,17 @@ _NAMED_TYPE_INFO = {
       'GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_LEVEL',
       'GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_CUBE_MAP_FACE',
     ],
+    'valid_es3': [
+      'GL_FRAMEBUFFER_ATTACHMENT_RED_SIZE',
+      'GL_FRAMEBUFFER_ATTACHMENT_GREEN_SIZE',
+      'GL_FRAMEBUFFER_ATTACHMENT_BLUE_SIZE',
+      'GL_FRAMEBUFFER_ATTACHMENT_ALPHA_SIZE',
+      'GL_FRAMEBUFFER_ATTACHMENT_DEPTH_SIZE',
+      'GL_FRAMEBUFFER_ATTACHMENT_STENCIL_SIZE',
+      'GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE',
+      'GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING',
+      'GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_LAYER',
+    ],
   },
   'MatrixMode': {
     'type': 'GLenum',
@@ -1011,6 +1169,16 @@ _NAMED_TYPE_INFO = {
       'GL_ACTIVE_ATTRIBUTE_MAX_LENGTH',
       'GL_ACTIVE_UNIFORMS',
       'GL_ACTIVE_UNIFORM_MAX_LENGTH',
+    ],
+    'valid_es3': [
+      'GL_ACTIVE_UNIFORM_BLOCKS',
+      'GL_ACTIVE_UNIFORM_BLOCK_MAX_NAME_LENGTH',
+      'GL_TRANSFORM_FEEDBACK_BUFFER_MODE',
+      'GL_TRANSFORM_FEEDBACK_VARYINGS',
+      'GL_TRANSFORM_FEEDBACK_VARYING_MAX_LENGTH',
+    ],
+    'invalid': [
+      'GL_PROGRAM_BINARY_RETRIEVABLE_HINT',  # not supported in Chromium.
     ],
   },
   'QueryObjectParameter': {
@@ -1050,6 +1218,16 @@ _NAMED_TYPE_INFO = {
       'GL_RENDERBUFFER_WIDTH',
       'GL_RENDERBUFFER_HEIGHT',
       'GL_RENDERBUFFER_INTERNAL_FORMAT',
+    ],
+    'valid_es3': [
+      'GL_RENDERBUFFER_SAMPLES',
+    ],
+  },
+  'InternalFormatParameter': {
+    'type': 'GLenum',
+    'valid': [
+      'GL_NUM_SAMPLE_COUNTS',
+      'GL_SAMPLES',
     ],
   },
   'SamplerParameter': {
@@ -1110,6 +1288,17 @@ _NAMED_TYPE_INFO = {
       'GL_TEXTURE_WRAP_S',
       'GL_TEXTURE_WRAP_T',
     ],
+    'valid_es3': [
+      'GL_TEXTURE_BASE_LEVEL',
+      'GL_TEXTURE_COMPARE_FUNC',
+      'GL_TEXTURE_COMPARE_MODE',
+      'GL_TEXTURE_IMMUTABLE_FORMAT',
+      'GL_TEXTURE_IMMUTABLE_LEVELS',
+      'GL_TEXTURE_MAX_LEVEL',
+      'GL_TEXTURE_MAX_LOD',
+      'GL_TEXTURE_MIN_LOD',
+      'GL_TEXTURE_WRAP_R',
+    ],
     'invalid': [
       'GL_GENERATE_MIPMAP',
     ],
@@ -1147,6 +1336,26 @@ _NAMED_TYPE_INFO = {
       'GL_LINEAR',
     ],
   },
+  'TextureCompareFunc': {
+    'type': 'GLenum',
+    'valid': [
+      'GL_LEQUAL',
+      'GL_GEQUAL',
+      'GL_LESS',
+      'GL_GREATER',
+      'GL_EQUAL',
+      'GL_NOTEQUAL',
+      'GL_ALWAYS',
+      'GL_NEVER',
+    ],
+  },
+  'TextureCompareMode': {
+    'type': 'GLenum',
+    'valid': [
+      'GL_NONE',
+      'GL_COMPARE_REF_TO_TEXTURE',
+    ],
+  },
   'TextureUsage': {
     'type': 'GLenum',
     'valid': [
@@ -1167,6 +1376,10 @@ _NAMED_TYPE_INFO = {
       'GL_VERTEX_ATTRIB_ARRAY_TYPE',
       'GL_CURRENT_VERTEX_ATTRIB',
     ],
+    'valid_es3': [
+      'GL_VERTEX_ATTRIB_ARRAY_INTEGER',
+      'GL_VERTEX_ATTRIB_ARRAY_DIVISOR',
+    ],
   },
   'VertexPointer': {
     'type': 'GLenum',
@@ -1178,6 +1391,9 @@ _NAMED_TYPE_INFO = {
     'type': 'GLenum',
     'valid': [
       'GL_GENERATE_MIPMAP_HINT',
+    ],
+    'valid_es3': [
+      'GL_FRAGMENT_SHADER_DERIVATIVE_HINT',
     ],
     'invalid': [
       'GL_PERSPECTIVE_CORRECTION_HINT',
@@ -1199,6 +1415,16 @@ _NAMED_TYPE_INFO = {
       'GL_UNPACK_FLIP_Y_CHROMIUM',
       'GL_UNPACK_PREMULTIPLY_ALPHA_CHROMIUM',
       'GL_UNPACK_UNPREMULTIPLY_ALPHA_CHROMIUM',
+    ],
+    'valid_es3': [
+      'GL_PACK_ROW_LENGTH',
+      'GL_PACK_SKIP_PIXELS',
+      'GL_PACK_SKIP_ROWS',
+      'GL_UNPACK_ROW_LENGTH',
+      'GL_UNPACK_IMAGE_HEIGHT',
+      'GL_UNPACK_SKIP_PIXELS',
+      'GL_UNPACK_SKIP_ROWS',
+      'GL_UNPACK_SKIP_IMAGES',
     ],
     'invalid': [
       'GL_PACK_SWAP_BYTES',
@@ -1224,6 +1450,13 @@ _NAMED_TYPE_INFO = {
       'GL_ALPHA',
       'GL_RGB',
       'GL_RGBA',
+    ],
+    'valid_es3': [
+      'GL_RGBA_INTEGER',
+    ],
+    'deprecated_es3': [
+      'GL_ALPHA',
+      'GL_RGB',
     ],
   },
   'PixelType': {
@@ -1262,7 +1495,16 @@ _NAMED_TYPE_INFO = {
     ],
     'invalid': [
       'GL_SHORT',
+    ],
+    'valid_es3': [
+      'GL_UNSIGNED_INT',
       'GL_INT',
+      'GL_FLOAT',
+    ],
+    'deprecated_es3': [
+      'GL_UNSIGNED_SHORT_5_6_5',
+      'GL_UNSIGNED_SHORT_4_4_4_4',
+      'GL_UNSIGNED_SHORT_5_5_5_1',
     ],
   },
   'RenderBufferFormat': {
@@ -1273,6 +1515,37 @@ _NAMED_TYPE_INFO = {
       'GL_RGB5_A1',
       'GL_DEPTH_COMPONENT16',
       'GL_STENCIL_INDEX8',
+    ],
+    'valid_es3': [
+      'GL_R8',
+      'GL_R8UI',
+      'GL_R8I',
+      'GL_R16UI',
+      'GL_R16I',
+      'GL_R32UI',
+      'GL_R32I',
+      'GL_RG8',
+      'GL_RG8UI',
+      'GL_RG8I',
+      'GL_RG16UI',
+      'GL_RG16I',
+      'GL_RG32UI',
+      'GL_RG32I',
+      'GL_RGB8',
+      'GL_RGBA8',
+      'GL_SRGB8_ALPHA8',
+      'GL_RGB10_A2',
+      'GL_RGBA8UI',
+      'GL_RGBA8I',
+      'GL_RGB10_A2UI',
+      'GL_RGBA16UI',
+      'GL_RGBA16I',
+      'GL_RGBA32UI',
+      'GL_RGBA32I',
+      'GL_DEPTH_COMPONENT24',
+      'GL_DEPTH_COMPONENT32F',
+      'GL_DEPTH24_STENCIL8',
+      'GL_DEPTH32F_STENCIL8',
     ],
   },
   'ShaderBinaryFormat': {
@@ -1478,6 +1751,7 @@ _NAMED_TYPE_INFO = {
     'type': 'GLenum',
     'valid': [
       'GL_RGB',
+      'GL_RGB_YUV_420_CHROMIUM',
       'GL_RGBA',
     ],
   },
@@ -1538,10 +1812,32 @@ _NAMED_TYPE_INFO = {
       'GL_UNSIGNED_BYTE',
       'GL_SHORT',
       'GL_UNSIGNED_SHORT',
-    #  'GL_FIXED',  // This is not available on Desktop GL.
+      # 'GL_FIXED',  // This is not available on Desktop GL.
       'GL_FLOAT',
     ],
+    'valid_es3': [
+      'GL_INT',
+      'GL_UNSIGNED_INT',
+      'GL_HALF_FLOAT',
+      'GL_INT_2_10_10_10_REV',
+      'GL_UNSIGNED_INT_2_10_10_10_REV',
+    ],
     'invalid': [
+      'GL_DOUBLE',
+    ],
+  },
+  'VertexAttribIType': {
+    'type': 'GLenum',
+    'valid': [
+      'GL_BYTE',
+      'GL_UNSIGNED_BYTE',
+      'GL_SHORT',
+      'GL_UNSIGNED_SHORT',
+      'GL_INT',
+      'GL_UNSIGNED_INT',
+    ],
+    'invalid': [
+      'GL_FLOAT',
       'GL_DOUBLE',
     ],
   },
@@ -1974,6 +2270,17 @@ _FUNCTION_INFO = {
     'decoder_func': 'DoCopyTexSubImage2D',
     'defer_reads': True,
   },
+  'CompressedTexImage3D': {
+    'type': 'Manual',
+    'data_transfer_methods': ['bucket', 'shm'],
+    'unsafe': True,
+  },
+  'CompressedTexSubImage3D': {
+    'type': 'Data',
+    'data_transfer_methods': ['bucket', 'shm'],
+    'decoder_func': 'DoCompressedTexSubImage3D',
+    'unsafe': True,
+  },
   'CopyTexSubImage3D': {
     'defer_reads': True,
     'unsafe': True,
@@ -2366,11 +2673,30 @@ _FUNCTION_INFO = {
     'gl_test_func': 'glGetFramebufferAttachmentParameterivEXT',
     'result': ['SizedResult<GLint>'],
   },
+  'GetInteger64v': {
+    'type': 'GETn',
+    'result': ['SizedResult<GLint64>'],
+    'client_test': False,
+    'decoder_func': 'DoGetInteger64v',
+    'unsafe': True
+  },
   'GetIntegerv': {
     'type': 'GETn',
     'result': ['SizedResult<GLint>'],
     'decoder_func': 'DoGetIntegerv',
     'client_test': False,
+  },
+  'GetInteger64i_v': {
+    'type': 'GETn',
+    'result': ['SizedResult<GLint64>'],
+    'client_test': False,
+    'unsafe': True
+  },
+  'GetIntegeri_v': {
+    'type': 'GETn',
+    'result': ['SizedResult<GLint>'],
+    'client_test': False,
+    'unsafe': True
   },
   'GetInternalformativ': {
     'type': 'GETn',
@@ -2554,6 +2880,12 @@ _FUNCTION_INFO = {
     'data_transfer_methods': ['shm'],
     'result': ['SizedResult<GLint>'],
   },
+  'GetUniformuiv': {
+    'type': 'Custom',
+    'data_transfer_methods': ['shm'],
+    'result': ['SizedResult<GLuint>'],
+    'unsafe': True,
+  },
   'GetUniformIndices': {
     'type': 'Custom',
     'data_transfer_methods': ['shm'],
@@ -2585,6 +2917,24 @@ _FUNCTION_INFO = {
     'decoder_func': 'DoGetVertexAttribiv',
     'expectation': False,
     'client_test': False,
+  },
+  'GetVertexAttribIiv': {
+    'type': 'GETn',
+    'result': ['SizedResult<GLint>'],
+    'impl_decl': False,
+    'decoder_func': 'DoGetVertexAttribIiv',
+    'expectation': False,
+    'client_test': False,
+    'unsafe': True,
+  },
+  'GetVertexAttribIuiv': {
+    'type': 'GETn',
+    'result': ['SizedResult<GLuint>'],
+    'impl_decl': False,
+    'decoder_func': 'DoGetVertexAttribIuiv',
+    'expectation': False,
+    'client_test': False,
+    'unsafe': True,
   },
   'GetVertexAttribPointerv': {
     'type': 'Custom',
@@ -3123,24 +3473,28 @@ _FUNCTION_INFO = {
   },
   'VertexAttribI4i': {
     'unsafe': True,
+    'decoder_func': 'DoVertexAttribI4i',
   },
   'VertexAttribI4iv': {
     'type': 'PUT',
     'count': 4,
     'unsafe': True,
+    'decoder_func': 'DoVertexAttribI4iv',
   },
   'VertexAttribI4ui': {
     'unsafe': True,
+    'decoder_func': 'DoVertexAttribI4ui',
   },
   'VertexAttribI4uiv': {
     'type': 'PUT',
     'count': 4,
     'unsafe': True,
+    'decoder_func': 'DoVertexAttribI4uiv',
   },
   'VertexAttribIPointer': {
     'type': 'Manual',
     'cmd_args': 'GLuint indx, GLintVertexAttribSize size, '
-                'GLenumVertexAttribType type, GLsizei stride, '
+                'GLenumVertexAttribIType type, GLsizei stride, '
                 'GLuint offset',
     'client_test': False,
     'unsafe': True,
@@ -4409,7 +4763,7 @@ class StateSetHandler(TypeHandler):
         # Make this behavior consistent within Chromium, and avoid leaking GL
         # errors by generating the error in the command buffer instead of
         # letting the GL driver generate it.
-        code.append("base::IsNaN(%s)" % args[ndx].name)
+        code.append("std::isnan(%s)" % args[ndx].name)
       if len(code):
         file.Write("  if (%s) {\n" % " ||\n      ".join(code))
         file.Write(
@@ -4797,7 +5151,8 @@ class ManualHandler(CustomHandler):
 
   def InitFunction(self, func):
     """Overrriden from TypeHandler."""
-    if (func.name == 'CompressedTexImage2DBucket'):
+    if (func.name == 'CompressedTexImage2DBucket' or
+        func.name == 'CompressedTexImage3DBucket'):
       func.cmd_args = func.cmd_args[:-1]
       func.AddCmdArg(Argument('bucket_id', 'GLuint'))
     else:
@@ -4846,14 +5201,15 @@ class ManualHandler(CustomHandler):
 
 
 class DataHandler(TypeHandler):
-  """Handler for glBufferData, glBufferSubData, glTexImage2D, glTexSubImage2D,
-     glCompressedTexImage2D, glCompressedTexImageSub2D."""
+  """Handler for glBufferData, glBufferSubData, glTexImage*D, glTexSubImage*D,
+     glCompressedTexImage*D, glCompressedTexImageSub*D."""
   def __init__(self):
     TypeHandler.__init__(self)
 
   def InitFunction(self, func):
     """Overrriden from TypeHandler."""
-    if func.name == 'CompressedTexSubImage2DBucket':
+    if (func.name == 'CompressedTexSubImage2DBucket' or
+        func.name == 'CompressedTexSubImage3DBucket'):
       func.cmd_args = func.cmd_args[:-1]
       func.AddCmdArg(Argument('bucket_id', 'GLuint'))
 
@@ -4866,9 +5222,12 @@ class DataHandler(TypeHandler):
     if name == 'BufferData' or name == 'BufferSubData':
       file.Write("  uint32_t data_size = size;\n")
     elif (name == 'CompressedTexImage2D' or
-          name == 'CompressedTexSubImage2D'):
+          name == 'CompressedTexSubImage2D' or
+          name == 'CompressedTexImage3D' or
+          name == 'CompressedTexSubImage3D'):
       file.Write("  uint32_t data_size = imageSize;\n")
-    elif (name == 'CompressedTexSubImage2DBucket'):
+    elif (name == 'CompressedTexSubImage2DBucket' or
+          name == 'CompressedTexSubImage3DBucket'):
       file.Write("  Bucket* bucket = GetBucket(c.bucket_id);\n")
       file.Write("  uint32_t data_size = bucket->size();\n")
       file.Write("  GLsizei imageSize = data_size;\n")
@@ -4931,7 +5290,8 @@ class DataHandler(TypeHandler):
 
   def WriteBucketServiceImplementation(self, func, file):
     """Overrriden from TypeHandler."""
-    if not func.name == 'CompressedTexSubImage2DBucket':
+    if ((not func.name == 'CompressedTexSubImage2DBucket') and
+        (not func.name == 'CompressedTexSubImage3DBucket')):
       TypeHandler.WriteBucketServiceImplemenation(self, func, file)
 
 
@@ -6053,17 +6413,18 @@ TEST_F(GLES2ImplementationTest, %(name)s) {
   struct Cmds {
     cmds::%(name)s cmd;
   };
-  typedef cmds::%(name)s::Result Result;
-  Result::Type result = 0;
+  typedef cmds::%(name)s::Result::Type ResultType;
+  ResultType result = 0;
   Cmds expected;
-  ExpectedMemoryInfo result1 = GetExpectedResultMemory(4);
+  ExpectedMemoryInfo result1 = GetExpectedResultMemory(
+      sizeof(uint32_t) + sizeof(ResultType));
   expected.cmd.Init(%(cmd_args)s, result1.id, result1.offset);
   EXPECT_CALL(*command_buffer(), OnFlush())
-      .WillOnce(SetMemory(result1.ptr, SizedResultHelper<Result::Type>(1)))
+      .WillOnce(SetMemory(result1.ptr, SizedResultHelper<ResultType>(1)))
       .RetiresOnSaturation();
   gl_->%(name)s(%(args)s, &result);
   EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
-  EXPECT_EQ(static_cast<Result::Type>(1), result);
+  EXPECT_EQ(static_cast<ResultType>(1), result);
 }
 """
     first_cmd_arg = func.GetCmdArgs()[0].GetValidNonCachedClientSideCmdArg(func)

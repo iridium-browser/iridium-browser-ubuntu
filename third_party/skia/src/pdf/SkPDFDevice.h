@@ -31,7 +31,6 @@ class SkPDFFormXObject;
 class SkPDFGlyphSetMap;
 class SkPDFGraphicState;
 class SkPDFObject;
-class SkPDFResourceDict;
 class SkPDFShader;
 class SkPDFStream;
 class SkRRect;
@@ -139,7 +138,7 @@ public:
 
     /** Create the resource dictionary for this device.
      */
-    SkPDFResourceDict* createResourceDict() const;
+    SkPDFDict* createResourceDict() const;
 
     /** Get the fonts used on this device.
      */
@@ -291,16 +290,14 @@ private:
      */
     void copyContentEntriesToData(ContentEntry* entry, SkWStream* data) const;
 
-#ifdef SK_PDF_USE_PATHOPS
     bool handleInversePath(const SkDraw& d, const SkPath& origPath,
                            const SkPaint& paint, bool pathIsMutable,
                            const SkMatrix* prePathMatrix = NULL);
-#endif
     bool handleRectAnnotation(const SkRect& r, const SkMatrix& matrix,
                               const SkPaint& paint);
     bool handlePointAnnotation(const SkPoint* points, size_t count,
                                const SkMatrix& matrix, const SkPaint& paint);
-    SkPDFDict* createLinkAnnotation(const SkRect& r, const SkMatrix& matrix);
+    void addAnnotation(SkPDFDict*);
     void handleLinkToURL(SkData* urlData, const SkRect& r,
                          const SkMatrix& matrix);
     void handleLinkToNamedDest(SkData* nameData, const SkRect& r,

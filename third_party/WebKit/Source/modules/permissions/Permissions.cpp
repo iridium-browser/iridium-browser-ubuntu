@@ -70,7 +70,7 @@ ScriptPromise Permissions::query(ScriptState* scriptState, const ScriptValue& ra
         type = WebPermissionTypePushNotifications;
     } else if (name == "midi") {
         MidiPermissionDescriptor midiPermission = NativeValueTraits<MidiPermissionDescriptor>::nativeValue(scriptState->isolate(), rawPermission.v8Value(), exceptionState);
-        // Only sysex usage requires a permission for now.
+        // Only sysex usage requires a permission, otherwise it is granted.
         if (!midiPermission.sysex()) {
             resolver->resolve(PermissionStatus::create(scriptState->executionContext(), WebPermissionStatusGranted, WebPermissionTypeMidi));
             return promise;

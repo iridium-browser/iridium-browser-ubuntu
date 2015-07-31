@@ -171,6 +171,7 @@ void HeadsUpDisplayLayerImpl::AppendQuads(
                vertex_opacity,
                flipped,
                nearest_neighbor);
+  ValidateQuadResources(quad);
 }
 
 void HeadsUpDisplayLayerImpl::UpdateHudTexture(
@@ -580,6 +581,10 @@ SkRect HeadsUpDisplayLayerImpl::DrawGpuRasterizationStatus(SkCanvas* canvas,
     case GpuRasterizationStatus::OFF_VIEWPORT:
       status = "off (viewport)";
       color = SK_ColorYELLOW;
+      break;
+    case GpuRasterizationStatus::MSAA_CONTENT:
+      status = "MSAA (content)";
+      color = SK_ColorCYAN;
       break;
     case GpuRasterizationStatus::OFF_CONTENT:
       status = "off (content)";

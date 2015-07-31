@@ -80,7 +80,6 @@
     'command_buffer/service/gles2_cmd_validation_implementation_autogen.h',
     'command_buffer/service/gpu_scheduler.cc',
     'command_buffer/service/gpu_scheduler.h',
-    'command_buffer/service/gpu_scheduler_mock.h',
     'command_buffer/service/gpu_state_tracer.cc',
     'command_buffer/service/gpu_state_tracer.h',
     'command_buffer/service/gpu_switches.cc',
@@ -141,6 +140,15 @@
       'include_dirs': [
         '../third_party/khronos',
       ],
+    }],
+    ['OS=="mac"', {
+      # Required by gles2_cmd_decoder.cc on Mac.
+      'link_settings': {
+        'libraries': [
+          '$(SDKROOT)/System/Library/Frameworks/IOSurface.framework',
+          '$(SDKROOT)/System/Library/Frameworks/OpenGL.framework',
+        ],
+      },
     }],
     ['OS in ("win", "android") or (OS == "linux" and use_x11 == 1)', {
       'sources': [

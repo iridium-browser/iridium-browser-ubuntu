@@ -96,12 +96,12 @@ public:
         return current(returnValue.GetIsolate()).setReturnValueFrom(returnValue, ScriptWrappable::fromNode(node));
     }
 
-    static v8::Handle<v8::Object> getWrapper(ScriptWrappable* object, v8::Isolate* isolate)
+    static v8::Local<v8::Object> getWrapper(ScriptWrappable* object, v8::Isolate* isolate)
     {
         return current(isolate).get(object, isolate);
     }
 
-    static v8::Handle<v8::Object> getWrapper(Node* node, v8::Isolate* isolate)
+    static v8::Local<v8::Object> getWrapper(Node* node, v8::Isolate* isolate)
     {
         if (canUseScriptWrappable(node))
             return ScriptWrappable::fromNode(node)->newLocalWrapper(isolate);
@@ -122,12 +122,12 @@ public:
         current(isolate).setReference(parent, ScriptWrappable::fromNode(child), isolate);
     }
 
-    static void setWrapper(ScriptWrappable* object, v8::Handle<v8::Object> wrapper, v8::Isolate* isolate, const WrapperTypeInfo* wrapperTypeInfo)
+    static void setWrapper(ScriptWrappable* object, v8::Local<v8::Object> wrapper, v8::Isolate* isolate, const WrapperTypeInfo* wrapperTypeInfo)
     {
         return current(isolate).set(object, wrapper, isolate, wrapperTypeInfo);
     }
 
-    static void setWrapper(Node* node, v8::Handle<v8::Object> wrapper, v8::Isolate* isolate, const WrapperTypeInfo* wrapperTypeInfo)
+    static void setWrapper(Node* node, v8::Local<v8::Object> wrapper, v8::Isolate* isolate, const WrapperTypeInfo* wrapperTypeInfo)
     {
         if (canUseScriptWrappable(node)) {
             ScriptWrappable::fromNode(node)->setWrapper(wrapper, isolate, wrapperTypeInfo);
@@ -141,11 +141,11 @@ public:
         return current(isolate).containsWrapper(object);
     }
 
-    v8::Handle<v8::Object> get(ScriptWrappable* object, v8::Isolate* isolate)
+    v8::Local<v8::Object> get(ScriptWrappable* object, v8::Isolate* isolate)
     {
         if (m_isMainWorld)
             return object->newLocalWrapper(isolate);
-        return m_wrapperMap->newLocal(object, isolate);
+        return m_wrapperMap->newLocal(isolate, object);
     }
 
     void setReference(const v8::Persistent<v8::Object>& parent, ScriptWrappable* child, v8::Isolate* isolate)
@@ -154,7 +154,7 @@ public:
             child->setReference(parent, isolate);
             return;
         }
-        m_wrapperMap->setReference(parent, child, isolate);
+        m_wrapperMap->setReference(isolate, parent, child);
     }
 
     bool setReturnValueFrom(v8::ReturnValue<v8::Value> returnValue, ScriptWrappable* object)
@@ -172,7 +172,7 @@ public:
     }
 
 private:
-    void set(ScriptWrappable* object, v8::Handle<v8::Object> wrapper, v8::Isolate* isolate, const WrapperTypeInfo* wrapperTypeInfo)
+    void set(ScriptWrappable* object, v8::Local<v8::Object> wrapper, v8::Isolate* isolate, const WrapperTypeInfo* wrapperTypeInfo)
     {
         ASSERT(object);
         ASSERT(!wrapper.IsEmpty());
@@ -211,14 +211,21 @@ private:
     OwnPtr<DOMWrapperMap<ScriptWrappable>> m_wrapperMap;
 };
 
-template<>
+template <>
 inline void DOMWrapperMap<ScriptWrappable>::PersistentValueMapTraits::Dispose(
     v8::Isolate* isolate,
-    v8::UniquePersistent<v8::Object> value,
+    v8::Global<v8::Object> value,
     ScriptWrappable* key)
 {
     RELEASE_ASSERT(!value.IsEmpty()); // See crbug.com/368095.
-    releaseObject(v8::Local<v8::Object>::New(isolate, value));
+    releaseObject(value);
+}
+
+template <>
+inline void DOMWrapperMap<ScriptWrappable>::PersistentValueMapTraits::DisposeWeak(v8::Isolate* isolate, void* internalFields[v8::kInternalFieldsInWeakCallback], ScriptWrappable* key)
+{
+    auto typeInfo = reinterpret_cast<WrapperTypeInfo*>(internalFields[v8DOMWrapperTypeIndex]);
+    typeInfo->derefObject(key);
 }
 
 } // namespace blink

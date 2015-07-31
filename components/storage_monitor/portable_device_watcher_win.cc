@@ -478,6 +478,12 @@ PortableDeviceWatcherWin::DeviceStorageObject::DeviceStorageObject(
       object_persistent_id(persistent_id) {
 }
 
+PortableDeviceWatcherWin::DeviceDetails::DeviceDetails() {
+}
+
+PortableDeviceWatcherWin::DeviceDetails::~DeviceDetails() {
+}
+
 PortableDeviceWatcherWin::PortableDeviceWatcherWin()
     : notifications_(NULL),
       storage_notifications_(NULL),
@@ -489,7 +495,7 @@ PortableDeviceWatcherWin::~PortableDeviceWatcherWin() {
 }
 
 void PortableDeviceWatcherWin::Init(HWND hwnd) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   notifications_ = RegisterPortableDeviceNotification(hwnd);
   base::SequencedWorkerPool* pool = content::BrowserThread::GetBlockingPool();
   media_task_runner_ = pool->GetSequencedTaskRunnerWithShutdownBehavior(
@@ -499,7 +505,7 @@ void PortableDeviceWatcherWin::Init(HWND hwnd) {
 }
 
 void PortableDeviceWatcherWin::OnWindowMessage(UINT event_type, LPARAM data) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   if (!IsPortableDeviceStructure(data))
     return;
 
@@ -514,7 +520,7 @@ bool PortableDeviceWatcherWin::GetMTPStorageInfoFromDeviceId(
     const std::string& storage_device_id,
     base::string16* device_location,
     base::string16* storage_object_id) const {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK(device_location);
   DCHECK(storage_object_id);
   MTPStorageMap::const_iterator storage_map_iter =
@@ -573,7 +579,7 @@ void PortableDeviceWatcherWin::EjectDevice(
 
 void PortableDeviceWatcherWin::EnumerateAttachedDevices() {
   DCHECK(media_task_runner_.get());
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   Devices* devices = new Devices;
   base::PostTaskAndReplyWithResult(
       media_task_runner_.get(), FROM_HERE,
@@ -584,7 +590,7 @@ void PortableDeviceWatcherWin::EnumerateAttachedDevices() {
 
 void PortableDeviceWatcherWin::OnDidEnumerateAttachedDevices(
     const Devices* devices, const bool result) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK(devices);
   if (!result)
     return;
@@ -597,7 +603,7 @@ void PortableDeviceWatcherWin::OnDidEnumerateAttachedDevices(
 void PortableDeviceWatcherWin::HandleDeviceAttachEvent(
     const base::string16& pnp_device_id) {
   DCHECK(media_task_runner_.get());
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DeviceDetails* device_details = new DeviceDetails;
   base::PostTaskAndReplyWithResult(
       media_task_runner_.get(), FROM_HERE,
@@ -609,7 +615,7 @@ void PortableDeviceWatcherWin::HandleDeviceAttachEvent(
 
 void PortableDeviceWatcherWin::OnDidHandleDeviceAttachEvent(
     const DeviceDetails* device_details, const bool result) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK(device_details);
   if (!result)
     return;
@@ -646,7 +652,7 @@ void PortableDeviceWatcherWin::OnDidHandleDeviceAttachEvent(
 
 void PortableDeviceWatcherWin::HandleDeviceDetachEvent(
     const base::string16& pnp_device_id) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   MTPDeviceMap::iterator device_iter = device_map_.find(pnp_device_id);
   if (device_iter == device_map_.end())
     return;

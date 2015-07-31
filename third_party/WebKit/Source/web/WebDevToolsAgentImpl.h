@@ -32,7 +32,6 @@
 #define WebDevToolsAgentImpl_h
 
 #include "core/inspector/InspectorFrontendChannel.h"
-#include "core/inspector/InspectorInputAgent.h"
 #include "core/inspector/InspectorRuntimeAgent.h"
 #include "core/inspector/InspectorStateClient.h"
 #include "core/inspector/InspectorTracingAgent.h"
@@ -61,6 +60,7 @@ class PlatformTouchEvent;
 class WebDevToolsAgentClient;
 class WebFrameWidgetImpl;
 class WebInputEvent;
+class WebLayerTreeView;
 class WebLocalFrameImpl;
 class WebString;
 class WebViewImpl;
@@ -93,6 +93,7 @@ public:
     bool screencastEnabled();
     void willAddPageOverlay(const GraphicsLayer*);
     void didRemovePageOverlay(const GraphicsLayer*);
+    void layerTreeViewChanged(WebLayerTreeView*);
 
     // WebDevToolsAgent implementation.
     void attach(const WebString& hostId) override;
@@ -102,10 +103,9 @@ public:
     void dispatchOnInspectorBackend(const WebString& message) override;
     void inspectElementAt(const WebPoint&) override;
     void evaluateInWebInspector(long callId, const WebString& script) override;
-    void setLayerTreeId(int) override;
 
 private:
-    WebDevToolsAgentImpl(WebLocalFrameImpl*, WebDevToolsAgentClient*, InspectorOverlay*, PassOwnPtr<InspectorInputAgent::Client>);
+    WebDevToolsAgentImpl(WebLocalFrameImpl*, WebDevToolsAgentClient*, InspectorOverlay*);
 
     // InspectorStateClient implementation.
     void updateInspectorStateCookie(const WTF::String&) override;
@@ -142,7 +142,6 @@ private:
     OwnPtrWillBeMember<InjectedScriptManager> m_injectedScriptManager;
     OwnPtrWillBeMember<InspectorCompositeState> m_state;
     RawPtrWillBeMember<InspectorOverlay> m_overlay;
-    OwnPtr<InspectorInputAgent::Client> m_inputClient;
     OwnPtrWillBeMember<AsyncCallTracker> m_asyncCallTracker;
 
     RawPtrWillBeMember<InspectorInspectorAgent> m_inspectorAgent;

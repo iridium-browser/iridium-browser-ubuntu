@@ -256,11 +256,11 @@ OPENSSL_COMPILE_ASSERT(
     SSL3_RT_MAX_ENCRYPTED_OVERHEAD >= SSL3_RT_SEND_MAX_ENCRYPTED_OVERHEAD,
     max_overheads_are_consistent);
 
+/* SSL3_RT_MAX_COMPRESSED_LENGTH is an alias for
+ * |SSL3_RT_MAX_PLAIN_LENGTH|. Compression is gone, so don't include the
+ * compression overhead. */
+#define SSL3_RT_MAX_COMPRESSED_LENGTH SSL3_RT_MAX_PLAIN_LENGTH
 
-/* If compression isn't used don't include the compression overhead */
-
-#define SSL3_RT_MAX_COMPRESSED_LENGTH \
-  (SSL3_RT_MAX_PLAIN_LENGTH + SSL3_RT_MAX_COMPRESSED_OVERHEAD)
 #define SSL3_RT_MAX_ENCRYPTED_LENGTH \
   (SSL3_RT_MAX_ENCRYPTED_OVERHEAD + SSL3_RT_MAX_COMPRESSED_LENGTH)
 #define SSL3_RT_MAX_PACKET_SIZE \
@@ -358,7 +358,6 @@ typedef struct ssl3_state_st {
 
   /* flags for countermeasure against known-IV weakness */
   int need_record_splitting;
-  int record_split_done;
 
   /* The value of 'extra' when the buffers were initialized */
   int init_extra;
@@ -366,6 +365,10 @@ typedef struct ssl3_state_st {
   /* have_version is true if the connection's final version is known. Otherwise
    * the version has not been negotiated yet. */
   char have_version;
+
+  /* initial_handshake_complete is true if the initial handshake has
+   * completed. */
+  char initial_handshake_complete;
 
   /* sniff_buffer is used by the server in the initial handshake to read a
    * V2ClientHello before the record layer is initialized. */
@@ -410,7 +413,6 @@ typedef struct ssl3_state_st {
    * no more data in the read or write buffers */
   int renegotiate;
   int total_renegotiations;
-  int num_renegotiations;
 
   /* State pertaining to the pending handshake.
    *

@@ -90,13 +90,17 @@ tv.exportTo('tv.c', function() {
       if (event.guid == undefined)
         throw new Error('Event must have a GUID');
 
-      if (this.pushed_guids_[event.guid])
+      if (this.contains(event))
         return event;
 
       this.pushed_guids_[event.guid] = true;
       this[this.length_++] = event;
       this.bounds_dirty_ = true;
       return event;
+    },
+
+    contains: function(event) {
+      return this.pushed_guids_[event.guid];
     },
 
     addSelection: function(selection) {
@@ -139,8 +143,10 @@ tv.exportTo('tv.c', function() {
             maxEventTypeInfo = eventTypeInfo;
           }
         });
-        if (maxEventIndex == -1)
+        if (maxEventIndex == -1) {
+          console.log(event);
           throw new Error('Unrecgonized event type');
+        }
         events[maxEventTypeInfo.metadata.name].push(event);
       });
       if (opt_pruneEmpty) {
@@ -153,6 +159,20 @@ tv.exportTo('tv.c', function() {
       } else {
         return events;
       }
+    },
+
+    getEventsOrganizedByTitle: function() {
+      var eventsByTitle = {};
+      for (var i = 0; i < this.length; i++) {
+        var event = this[i];
+        if (event.title === undefined)
+          throw new Error('An event didn\'t have a title!');
+        if (eventsByTitle[event.title] == undefined) {
+          eventsByTitle[event.title] = [];
+        }
+        eventsByTitle[event.title].push(event);
+      }
+      return eventsByTitle;
     },
 
     enumEventsOfType: function(type, func) {

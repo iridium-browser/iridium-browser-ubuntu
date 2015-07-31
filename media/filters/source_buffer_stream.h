@@ -275,9 +275,12 @@ class MEDIA_EXPORT SourceBufferStream {
   // stream, and "TEXT" for a text stream.
   std::string GetStreamTypeName() const;
 
-  // Returns true if we don't have any ranges or the last range is selected
-  // or there is a pending seek beyond any existing ranges.
-  bool IsEndSelected() const;
+  // Returns true if end of stream has been reached, i.e. the
+  // following conditions are met:
+  // 1. end of stream is marked and there is nothing in the track_buffer.
+  // 2. We don't have any ranges, or the last or no range is selected,
+  //    or there is a pending seek beyond any existing ranges.
+  bool IsEndOfStreamReached() const;
 
   // Deletes the range pointed to by |*itr| and removes it from |ranges_|.
   // If |*itr| points to |selected_range_|, then |selected_range_| is set to
@@ -385,8 +388,8 @@ class MEDIA_EXPORT SourceBufferStream {
   bool last_appended_buffer_is_keyframe_;
 
   // The decode timestamp on the last buffer returned by the most recent
-  // GetNextBuffer() call. Set to kNoTimestamp() if GetNextBuffer() hasn't been
-  // called yet or a seek has happened since the last GetNextBuffer() call.
+  // GetNextBuffer() call. Set to kNoDecodeTimestamp() if GetNextBuffer() hasn't
+  // been called yet or a seek has happened since the last GetNextBuffer() call.
   DecodeTimestamp last_output_buffer_timestamp_;
 
   // Stores the largest distance between two adjacent buffers in this stream.

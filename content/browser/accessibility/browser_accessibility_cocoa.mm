@@ -15,6 +15,7 @@
 #include "content/app/strings/grit/content_strings.h"
 #include "content/browser/accessibility/browser_accessibility_manager.h"
 #include "content/browser/accessibility/browser_accessibility_manager_mac.h"
+#include "content/browser/accessibility/one_shot_accessibility_tree_search.h"
 #include "content/public/common/content_client.h"
 #import "ui/accessibility/platform/ax_platform_node_mac.h"
 
@@ -24,14 +25,19 @@
 extern "C" void NSAccessibilityUnregisterUniqueIdForUIElement(id element);
 
 using ui::AXNodeData;
+using content::AccessibilityMatchPredicate;
 using content::BrowserAccessibility;
 using content::BrowserAccessibilityDelegate;
 using content::BrowserAccessibilityManager;
 using content::BrowserAccessibilityManagerMac;
 using content::ContentClient;
+using content::OneShotAccessibilityTreeSearch;
 typedef ui::AXStringAttribute StringAttribute;
 
 namespace {
+
+// VoiceOver uses -1 to mean "no limit" for AXResultsLimit.
+const int kAXResultsLimitNoLimit = -1;
 
 // Returns an autoreleased copy of the AXNodeData's attribute.
 NSString* NSStringForStringAttribute(
@@ -49,6 +55,281 @@ bool GetState(BrowserAccessibility* accessibility, ui::AXState state) {
 
 // A mapping from an accessibility attribute to its method name.
 NSDictionary* attributeToMethodNameMap = nil;
+
+// Given a search key provided to AXUIElementCountForSearchPredicate or
+// AXUIElementsForSearchPredicate, return a predicate that can be added
+// to OneShotAccessibilityTreeSearch.
+AccessibilityMatchPredicate PredicateForSearchKey(NSString* searchKey) {
+  if ([searchKey isEqualToString:@"AXAnyTypeSearchKey"]) {
+    return [](BrowserAccessibility* start, BrowserAccessibility* current) {
+      return true;
+    };
+  } else if ([searchKey isEqualToString:@"AXBlockquoteSameLevelSearchKey"] ||
+             [searchKey isEqualToString:@"AXBlockquoteSearchKey"]) {
+    return [](BrowserAccessibility* start, BrowserAccessibility* current) {
+      // TODO(dmazzoni): implement the "same level" part.
+      return current->GetRole() == ui::AX_ROLE_BLOCKQUOTE;
+    };
+  } else if ([searchKey isEqualToString:@"AXBoldFontSearchKey"]) {
+    // TODO(dmazzoni): implement this.
+    return nullptr;
+  } else if ([searchKey isEqualToString:@"AXButtonSearchKey"]) {
+    return [](BrowserAccessibility* start, BrowserAccessibility* current) {
+      return (current->GetRole() == ui::AX_ROLE_BUTTON ||
+              current->GetRole() == ui::AX_ROLE_MENU_BUTTON ||
+              current->GetRole() == ui::AX_ROLE_POP_UP_BUTTON ||
+              current->GetRole() == ui::AX_ROLE_SWITCH ||
+              current->GetRole() == ui::AX_ROLE_TOGGLE_BUTTON);
+    };
+  } else if ([searchKey isEqualToString:@"AXCheckBoxSearchKey"]) {
+    return [](BrowserAccessibility* start, BrowserAccessibility* current) {
+      return (current->GetRole() == ui::AX_ROLE_CHECK_BOX ||
+              current->GetRole() == ui::AX_ROLE_MENU_ITEM_CHECK_BOX);
+    };
+  } else if ([searchKey isEqualToString:@"AXControlSearchKey"]) {
+    return [](BrowserAccessibility* start, BrowserAccessibility* current) {
+      if (current->IsControl())
+        return true;
+      if (current->HasState(ui::AX_STATE_FOCUSABLE) &&
+          current->GetRole() != ui::AX_ROLE_IMAGE_MAP_LINK &&
+          current->GetRole() != ui::AX_ROLE_LINK) {
+        return true;
+      }
+      return false;
+    };
+  } else if ([searchKey isEqualToString:@"AXDifferentTypeSearchKey"]) {
+    return [](BrowserAccessibility* start, BrowserAccessibility* current) {
+      return current->GetRole() != start->GetRole();
+    };
+  } else if ([searchKey isEqualToString:@"AXFontChangeSearchKey"]) {
+    // TODO(dmazzoni): implement this.
+    return nullptr;
+  } else if ([searchKey isEqualToString:@"AXFontColorChangeSearchKey"]) {
+    // TODO(dmazzoni): implement this.
+    return nullptr;
+  } else if ([searchKey isEqualToString:@"AXFrameSearchKey"]) {
+    return [](BrowserAccessibility* start, BrowserAccessibility* current) {
+      if (current->IsWebAreaForPresentationalIframe())
+        return false;
+      if (!current->GetParent())
+        return false;
+      return (current->GetRole() == ui::AX_ROLE_WEB_AREA ||
+              current->GetRole() == ui::AX_ROLE_ROOT_WEB_AREA);
+    };
+  } else if ([searchKey isEqualToString:@"AXGraphicSearchKey"]) {
+    return [](BrowserAccessibility* start, BrowserAccessibility* current) {
+      return current->GetRole() == ui::AX_ROLE_IMAGE;
+    };
+  } else if ([searchKey isEqualToString:@"AXHeadingLevel1SearchKey"]) {
+    return [](BrowserAccessibility* start, BrowserAccessibility* current) {
+      return (current->GetRole() == ui::AX_ROLE_HEADING &&
+              current->GetIntAttribute(ui::AX_ATTR_HIERARCHICAL_LEVEL) == 1);
+    };
+  } else if ([searchKey isEqualToString:@"AXHeadingLevel2SearchKey"]) {
+    return [](BrowserAccessibility* start, BrowserAccessibility* current) {
+      return (current->GetRole() == ui::AX_ROLE_HEADING &&
+              current->GetIntAttribute(ui::AX_ATTR_HIERARCHICAL_LEVEL) == 2);
+    };
+  } else if ([searchKey isEqualToString:@"AXHeadingLevel3SearchKey"]) {
+    return [](BrowserAccessibility* start, BrowserAccessibility* current) {
+      return (current->GetRole() == ui::AX_ROLE_HEADING &&
+              current->GetIntAttribute(ui::AX_ATTR_HIERARCHICAL_LEVEL) == 3);
+    };
+  } else if ([searchKey isEqualToString:@"AXHeadingLevel4SearchKey"]) {
+    return [](BrowserAccessibility* start, BrowserAccessibility* current) {
+      return (current->GetRole() == ui::AX_ROLE_HEADING &&
+              current->GetIntAttribute(ui::AX_ATTR_HIERARCHICAL_LEVEL) == 4);
+    };
+  } else if ([searchKey isEqualToString:@"AXHeadingLevel5SearchKey"]) {
+    return [](BrowserAccessibility* start, BrowserAccessibility* current) {
+      return (current->GetRole() == ui::AX_ROLE_HEADING &&
+              current->GetIntAttribute(ui::AX_ATTR_HIERARCHICAL_LEVEL) == 5);
+    };
+  } else if ([searchKey isEqualToString:@"AXHeadingLevel6SearchKey"]) {
+    return [](BrowserAccessibility* start, BrowserAccessibility* current) {
+      return (current->GetRole() == ui::AX_ROLE_HEADING &&
+              current->GetIntAttribute(ui::AX_ATTR_HIERARCHICAL_LEVEL) == 6);
+    };
+  } else if ([searchKey isEqualToString:@"AXHeadingSameLevelSearchKey"]) {
+    return [](BrowserAccessibility* start, BrowserAccessibility* current) {
+      return (current->GetRole() == ui::AX_ROLE_HEADING &&
+              start->GetRole() == ui::AX_ROLE_HEADING &&
+              (current->GetIntAttribute(ui::AX_ATTR_HIERARCHICAL_LEVEL) ==
+               start->GetIntAttribute(ui::AX_ATTR_HIERARCHICAL_LEVEL)));
+    };
+  } else if ([searchKey isEqualToString:@"AXHeadingSearchKey"]) {
+    return [](BrowserAccessibility* start, BrowserAccessibility* current) {
+      return current->GetRole() == ui::AX_ROLE_HEADING;
+    };
+  } else if ([searchKey isEqualToString:@"AXHighlightedSearchKey"]) {
+    // TODO(dmazzoni): implement this.
+    return nullptr;
+  } else if ([searchKey isEqualToString:@"AXItalicFontSearchKey"]) {
+    // TODO(dmazzoni): implement this.
+    return nullptr;
+  } else if ([searchKey isEqualToString:@"AXLandmarkSearchKey"]) {
+    return [](BrowserAccessibility* start, BrowserAccessibility* current) {
+      return (current->GetRole() == ui::AX_ROLE_APPLICATION ||
+              current->GetRole() == ui::AX_ROLE_BANNER ||
+              current->GetRole() == ui::AX_ROLE_COMPLEMENTARY ||
+              current->GetRole() == ui::AX_ROLE_CONTENT_INFO ||
+              current->GetRole() == ui::AX_ROLE_FORM ||
+              current->GetRole() == ui::AX_ROLE_MAIN ||
+              current->GetRole() == ui::AX_ROLE_NAVIGATION ||
+              current->GetRole() == ui::AX_ROLE_SEARCH);
+    };
+  } else if ([searchKey isEqualToString:@"AXLinkSearchKey"]) {
+    return [](BrowserAccessibility* start, BrowserAccessibility* current) {
+      return current->GetRole() == ui::AX_ROLE_LINK;
+    };
+  } else if ([searchKey isEqualToString:@"AXListSearchKey"]) {
+    return [](BrowserAccessibility* start, BrowserAccessibility* current) {
+      return current->GetRole() == ui::AX_ROLE_LIST;
+    };
+  } else if ([searchKey isEqualToString:@"AXLiveRegionSearchKey"]) {
+    return [](BrowserAccessibility* start, BrowserAccessibility* current) {
+      return current->HasStringAttribute(ui::AX_ATTR_LIVE_STATUS);
+    };
+  } else if ([searchKey isEqualToString:@"AXMisspelledWordSearchKey"]) {
+    // TODO(dmazzoni): implement this.
+    return nullptr;
+  } else if ([searchKey isEqualToString:@"AXOutlineSearchKey"]) {
+    return [](BrowserAccessibility* start, BrowserAccessibility* current) {
+      return current->GetRole() == ui::AX_ROLE_TREE;
+    };
+  } else if ([searchKey isEqualToString:@"AXPlainTextSearchKey"]) {
+    // TODO(dmazzoni): implement this.
+    return nullptr;
+  } else if ([searchKey isEqualToString:@"AXRadioGroupSearchKey"]) {
+    return [](BrowserAccessibility* start, BrowserAccessibility* current) {
+      return current->GetRole() == ui::AX_ROLE_RADIO_GROUP;
+    };
+  } else if ([searchKey isEqualToString:@"AXSameTypeSearchKey"]) {
+    return [](BrowserAccessibility* start, BrowserAccessibility* current) {
+      return current->GetRole() == start->GetRole();
+    };
+  } else if ([searchKey isEqualToString:@"AXStaticTextSearchKey"]) {
+    return [](BrowserAccessibility* start, BrowserAccessibility* current) {
+      return current->GetRole() == ui::AX_ROLE_STATIC_TEXT;
+    };
+  } else if ([searchKey isEqualToString:@"AXStyleChangeSearchKey"]) {
+    // TODO(dmazzoni): implement this.
+    return nullptr;
+  } else if ([searchKey isEqualToString:@"AXTableSameLevelSearchKey"]) {
+    return [](BrowserAccessibility* start, BrowserAccessibility* current) {
+      // TODO(dmazzoni): implement the "same level" part.
+      return current->GetRole() == ui::AX_ROLE_GRID ||
+             current->GetRole() == ui::AX_ROLE_TABLE;
+    };
+  } else if ([searchKey isEqualToString:@"AXTableSearchKey"]) {
+    return [](BrowserAccessibility* start, BrowserAccessibility* current) {
+      return current->GetRole() == ui::AX_ROLE_GRID ||
+             current->GetRole() == ui::AX_ROLE_TABLE;
+    };
+  } else if ([searchKey isEqualToString:@"AXTextFieldSearchKey"]) {
+    return [](BrowserAccessibility* start, BrowserAccessibility* current) {
+      return current->GetRole() == ui::AX_ROLE_TEXT_FIELD;
+    };
+  } else if ([searchKey isEqualToString:@"AXUnderlineSearchKey"]) {
+    // TODO(dmazzoni): implement this.
+    return nullptr;
+  } else if ([searchKey isEqualToString:@"AXUnvisitedLinkSearchKey"]) {
+    return [](BrowserAccessibility* start, BrowserAccessibility* current) {
+      return (current->GetRole() == ui::AX_ROLE_LINK &&
+              !current->HasState(ui::AX_STATE_VISITED));
+    };
+  } else if ([searchKey isEqualToString:@"AXVisitedLinkSearchKey"]) {
+    return [](BrowserAccessibility* start, BrowserAccessibility* current) {
+      return (current->GetRole() == ui::AX_ROLE_LINK &&
+              current->HasState(ui::AX_STATE_VISITED));
+    };
+  }
+
+  return nullptr;
+}
+
+// Initialize a OneShotAccessibilityTreeSearch object given the parameters
+// passed to AXUIElementCountForSearchPredicate or
+// AXUIElementsForSearchPredicate. Return true on success.
+bool InitializeAccessibilityTreeSearch(
+    OneShotAccessibilityTreeSearch* search,
+    id parameter) {
+  if (![parameter isKindOfClass:[NSDictionary class]])
+    return false;
+  NSDictionary* dictionary = parameter;
+
+  id startElementParameter = [dictionary objectForKey:@"AXStartElement"];
+  BrowserAccessibility* startNode = nullptr;
+  if ([startElementParameter isKindOfClass:[BrowserAccessibilityCocoa class]]) {
+    BrowserAccessibilityCocoa* startNodeCocoa =
+        (BrowserAccessibilityCocoa*)startElementParameter;
+    startNode = [startNodeCocoa browserAccessibility];
+  }
+
+  bool immediateDescendantsOnly = false;
+  NSNumber *immediateDescendantsOnlyParameter =
+      [dictionary objectForKey:@"AXImmediateDescendantsOnly"];
+  if ([immediateDescendantsOnlyParameter isKindOfClass:[NSNumber class]])
+    immediateDescendantsOnly = [immediateDescendantsOnlyParameter boolValue];
+
+  bool visibleOnly = false;
+  NSNumber *visibleOnlyParameter = [dictionary objectForKey:@"AXVisibleOnly"];
+  if ([visibleOnlyParameter isKindOfClass:[NSNumber class]])
+    visibleOnly = [visibleOnlyParameter boolValue];
+
+  content::OneShotAccessibilityTreeSearch::Direction direction =
+      content::OneShotAccessibilityTreeSearch::FORWARDS;
+  NSString* directionParameter = [dictionary objectForKey:@"AXDirection"];
+  if ([directionParameter isKindOfClass:[NSString class]]) {
+    if ([directionParameter isEqualToString:@"AXDirectionNext"])
+      direction = content::OneShotAccessibilityTreeSearch::FORWARDS;
+    else if ([directionParameter isEqualToString:@"AXDirectionPrevious"])
+      direction = content::OneShotAccessibilityTreeSearch::BACKWARDS;
+  }
+
+  int resultsLimit = kAXResultsLimitNoLimit;
+  NSNumber* resultsLimitParameter = [dictionary objectForKey:@"AXResultsLimit"];
+  if ([resultsLimitParameter isKindOfClass:[NSNumber class]])
+    resultsLimit = [resultsLimitParameter intValue];
+
+  std::string searchText;
+  NSString* searchTextParameter = [dictionary objectForKey:@"AXSearchText"];
+  if ([searchTextParameter isKindOfClass:[NSString class]])
+    searchText = base::SysNSStringToUTF8(searchTextParameter);
+
+  search->SetStartNode(startNode);
+  search->SetDirection(direction);
+  search->SetImmediateDescendantsOnly(immediateDescendantsOnly);
+  search->SetVisibleOnly(visibleOnly);
+  search->SetSearchText(searchText);
+
+  // Mac uses resultsLimit == -1 for unlimited, that that's
+  // the default for OneShotAccessibilityTreeSearch already.
+  // Only set the results limit if it's nonnegative.
+  if (resultsLimit >= 0)
+    search->SetResultLimit(resultsLimit);
+
+  id searchKey = [dictionary objectForKey:@"AXSearchKey"];
+  if ([searchKey isKindOfClass:[NSString class]]) {
+    AccessibilityMatchPredicate predicate =
+        PredicateForSearchKey((NSString*)searchKey);
+    if (predicate)
+      search->AddPredicate(predicate);
+  } else if ([searchKey isKindOfClass:[NSArray class]]) {
+    size_t searchKeyCount = static_cast<size_t>([searchKey count]);
+    for (size_t i = 0; i < searchKeyCount; ++i) {
+      id key = [searchKey objectAtIndex:i];
+      if ([key isKindOfClass:[NSString class]]) {
+        AccessibilityMatchPredicate predicate =
+            PredicateForSearchKey((NSString*)key);
+        if (predicate)
+          search->AddPredicate(predicate);
+      }
+    }
+  }
+
+  return true;
+}
 
 } // namespace
 
@@ -108,6 +389,8 @@ NSDictionary* attributeToMethodNameMap = nil;
     { @"AXARIAAtomic", @"ariaAtomic" },
     { @"AXARIABusy", @"ariaBusy" },
     { @"AXARIALive", @"ariaLive" },
+    { @"AXARIASetSize", @"ariaSetSize" },
+    { @"AXARIAPosInSet", @"ariaPosInSet" },
     { @"AXARIARelevant", @"ariaRelevant" },
     { @"AXDropEffects", @"dropeffect" },
     { @"AXGrabbed", @"grabbed" },
@@ -168,6 +451,16 @@ NSDictionary* attributeToMethodNameMap = nil;
 - (NSString*)ariaRelevant {
   return NSStringForStringAttribute(
       browserAccessibility_, ui::AX_ATTR_LIVE_RELEVANT);
+}
+
+- (NSNumber*)ariaPosInSet {
+  return [NSNumber numberWithInt:
+      browserAccessibility_->GetIntAttribute(ui::AX_ATTR_POS_IN_SET)];
+}
+
+- (NSNumber*)ariaSetSize {
+  return [NSNumber numberWithInt:
+      browserAccessibility_->GetIntAttribute(ui::AX_ATTR_SET_SIZE)];
 }
 
 // Returns an array of BrowserAccessibilityCocoa objects, representing the
@@ -545,6 +838,10 @@ NSDictionary* attributeToMethodNameMap = nil;
       nil;
 }
 
+- (content::BrowserAccessibility*)browserAccessibility {
+  return browserAccessibility_;
+}
+
 - (NSPoint)pointInScreen:(NSPoint)origin
                     size:(NSSize)size {
   if (!browserAccessibility_)
@@ -581,6 +878,10 @@ NSDictionary* attributeToMethodNameMap = nil;
       return NSAccessibilityCheckBoxRole;
     else
       return NSAccessibilityButtonRole;
+  }
+  if (role == ui::AX_ROLE_TEXT_FIELD &&
+      browserAccessibility_->HasState(ui::AX_STATE_MULTILINE)) {
+    return NSAccessibilityTextAreaRole;
   }
 
   // If this is a web area for a presentational iframe, give it a role of
@@ -757,33 +1058,47 @@ NSDictionary* attributeToMethodNameMap = nil;
 
 - (NSArray*)selectedChildren {
   NSMutableArray* ret = [[[NSMutableArray alloc] init] autorelease];
-
   BrowserAccessibilityManager* manager = browserAccessibility_->manager();
-  BrowserAccessibility* focusedChild =
-      manager->GetFocus(browserAccessibility_);
-  if (focusedChild && focusedChild != browserAccessibility_) {
+  BrowserAccessibility* focusedChild = manager->GetFocus(browserAccessibility_);
+
+  // If it's not multiselectable, try to skip iterating over the
+  // children.
+  if (!GetState(browserAccessibility_, ui::AX_STATE_MULTISELECTABLE)) {
     // First try the focused child.
-    [ret addObject:focusedChild->ToBrowserAccessibilityCocoa()];
-  } else {
+    if (focusedChild && focusedChild != browserAccessibility_) {
+      [ret addObject:focusedChild->ToBrowserAccessibilityCocoa()];
+      return ret;
+    }
+
     // Next try the active descendant.
     int activeDescendantId;
     if (browserAccessibility_->GetIntAttribute(
             ui::AX_ATTR_ACTIVEDESCENDANT_ID, &activeDescendantId)) {
       BrowserAccessibility* activeDescendant =
           manager->GetFromID(activeDescendantId);
-      if (activeDescendant)
+      if (activeDescendant) {
         [ret addObject:activeDescendant->ToBrowserAccessibilityCocoa()];
-    } else {
-      // Otherwise return any children with the "selected" state, which
-      // may come from aria-selected.
-      uint32 childCount = browserAccessibility_->PlatformChildCount();
-      for (uint32 index = 0; index < childCount; ++index) {
-        BrowserAccessibility* child =
-            browserAccessibility_->PlatformGetChild(index);
-        if (child->HasState(ui::AX_STATE_SELECTED))
-          [ret addObject:child->ToBrowserAccessibilityCocoa()];
+        return ret;
       }
     }
+  }
+
+  // If it's multiselectable or if the previous attempts failed,
+  // return any children with the "selected" state, which may
+  // come from aria-selected.
+  uint32 childCount = browserAccessibility_->PlatformChildCount();
+  for (uint32 index = 0; index < childCount; ++index) {
+    BrowserAccessibility* child =
+      browserAccessibility_->PlatformGetChild(index);
+    if (child->HasState(ui::AX_STATE_SELECTED))
+      [ret addObject:child->ToBrowserAccessibilityCocoa()];
+  }
+
+  // And if nothing's selected but one has focus, use the focused one.
+  if ([ret count] == 0 &&
+      focusedChild &&
+      focusedChild != browserAccessibility_) {
+    [ret addObject:focusedChild->ToBrowserAccessibilityCocoa()];
   }
 
   return ret;
@@ -940,15 +1255,14 @@ NSDictionary* attributeToMethodNameMap = nil;
       return [NSNumber numberWithFloat:floatValue];
     }
   } else if ([role isEqualToString:NSAccessibilityColorWellRole]) {
-    int r = browserAccessibility_->GetIntAttribute(
-        ui::AX_ATTR_COLOR_VALUE_RED);
-    int g = browserAccessibility_->GetIntAttribute(
-        ui::AX_ATTR_COLOR_VALUE_GREEN);
-    int b = browserAccessibility_->GetIntAttribute(
-        ui::AX_ATTR_COLOR_VALUE_BLUE);
+    int color = browserAccessibility_->GetIntAttribute(
+        ui::AX_ATTR_COLOR_VALUE);
+    int red = (color >> 16) & 0xFF;
+    int green = (color >> 8) & 0xFF;
+    int blue = color & 0xFF;
     // This string matches the one returned by a native Mac color well.
     return [NSString stringWithFormat:@"rgb %7.5f %7.5f %7.5f 1",
-                r / 255., g / 255., b / 255.];
+                red / 255., green / 255., blue / 255.];
   }
 
   return NSStringForStringAttribute(
@@ -1183,6 +1497,26 @@ NSDictionary* attributeToMethodNameMap = nil;
         pointInScreen.x, pointInScreen.y, rect.width(), rect.height());
     return [NSValue valueWithRect:nsrect];
   }
+  if ([attribute isEqualToString:@"AXUIElementCountForSearchPredicate"]) {
+    OneShotAccessibilityTreeSearch search(browserAccessibility_->manager());
+    if (InitializeAccessibilityTreeSearch(&search, parameter))
+      return [NSNumber numberWithInt:search.CountMatches()];
+    return nil;
+  }
+
+  if ([attribute isEqualToString:@"AXUIElementsForSearchPredicate"]) {
+    OneShotAccessibilityTreeSearch search(browserAccessibility_->manager());
+    if (InitializeAccessibilityTreeSearch(&search, parameter)) {
+      size_t count = search.CountMatches();
+      NSMutableArray* result = [NSMutableArray arrayWithCapacity:count];
+      for (size_t i = 0; i < count; ++i) {
+        BrowserAccessibility* match = search.GetMatchAtIndex(i);
+        [result addObject:match->ToBrowserAccessibilityCocoa()];
+      }
+      return result;
+    }
+    return nil;
+  }
 
   // TODO(dtseng): support the following attributes.
   if ([attribute isEqualTo:
@@ -1203,15 +1537,21 @@ NSDictionary* attributeToMethodNameMap = nil;
   if (!browserAccessibility_)
     return nil;
 
+  // General attributes.
+  NSMutableArray* ret = [NSMutableArray arrayWithObjects:
+      @"AXUIElementCountForSearchPredicate",
+      @"AXUIElementsForSearchPredicate",
+      nil];
+
   if ([[self role] isEqualToString:NSAccessibilityTableRole] ||
       [[self role] isEqualToString:NSAccessibilityGridRole]) {
-    return [NSArray arrayWithObjects:
+    [ret addObjectsFromArray:[NSArray arrayWithObjects:
         NSAccessibilityCellForColumnAndRowParameterizedAttribute,
-        nil];
+        nil]];
   }
   if ([[self role] isEqualToString:NSAccessibilityTextFieldRole] ||
       [[self role] isEqualToString:NSAccessibilityTextAreaRole]) {
-    return [NSArray arrayWithObjects:
+    [ret addObjectsFromArray:[NSArray arrayWithObjects:
         NSAccessibilityLineForIndexParameterizedAttribute,
         NSAccessibilityRangeForLineParameterizedAttribute,
         NSAccessibilityStringForRangeParameterizedAttribute,
@@ -1221,14 +1561,14 @@ NSDictionary* attributeToMethodNameMap = nil;
         NSAccessibilityRTFForRangeParameterizedAttribute,
         NSAccessibilityAttributedStringForRangeParameterizedAttribute,
         NSAccessibilityStyleRangeForIndexParameterizedAttribute,
-        nil];
+        nil]];
   }
   if ([self internalRole] == ui::AX_ROLE_STATIC_TEXT) {
-    return [NSArray arrayWithObjects:
+    [ret addObjectsFromArray:[NSArray arrayWithObjects:
         NSAccessibilityBoundsForRangeParameterizedAttribute,
-        nil];
+        nil]];
   }
-  return nil;
+  return ret;
 }
 
 // Returns an array of action names that this object will respond to.
@@ -1241,8 +1581,8 @@ NSDictionary* attributeToMethodNameMap = nil;
   NSString* role = [self role];
   // TODO(dtseng): this should only get set when there's a default action.
   if (![role isEqualToString:NSAccessibilityStaticTextRole] &&
-      ![role isEqualToString:NSAccessibilityTextAreaRole] &&
-      ![role isEqualToString:NSAccessibilityTextFieldRole]) {
+      ![role isEqualToString:NSAccessibilityTextFieldRole] &&
+      ![role isEqualToString:NSAccessibilityTextAreaRole]) {
     [ret addObject:NSAccessibilityPressAction];
   }
 
@@ -1404,6 +1744,18 @@ NSDictionary* attributeToMethodNameMap = nil;
     [ret addObjectsFromArray:[NSArray arrayWithObjects:
         NSAccessibilityURLAttribute,
         nil]];
+  }
+
+  // Position in set and Set size
+  if (browserAccessibility_->HasIntAttribute(ui::AX_ATTR_POS_IN_SET)) {
+    [ret addObjectsFromArray:[NSArray arrayWithObjects:
+         @"AXARIAPosInSet",
+         nil]];
+  }
+  if (browserAccessibility_->HasIntAttribute(ui::AX_ATTR_SET_SIZE)) {
+    [ret addObjectsFromArray:[NSArray arrayWithObjects:
+         @"AXARIASetSize",
+         nil]];
   }
 
   // Live regions.

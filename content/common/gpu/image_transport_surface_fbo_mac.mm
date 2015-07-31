@@ -4,6 +4,7 @@
 
 #include "content/common/gpu/image_transport_surface_fbo_mac.h"
 
+#include "base/trace_event/trace_event.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "content/common/gpu/image_transport_surface_calayer_mac.h"
 #include "content/common/gpu/image_transport_surface_iosurface_mac.h"
@@ -169,6 +170,11 @@ void ImageTransportSurfaceFBO::AdjustBufferAllocation() {
 }
 
 bool ImageTransportSurfaceFBO::SwapBuffers() {
+  TRACE_EVENT0("gpu", "ImageTransportSurfaceFBO::SwapBuffers");
+  return SwapBuffersInternal();
+}
+
+bool ImageTransportSurfaceFBO::SwapBuffersInternal() {
   DCHECK(backbuffer_suggested_allocation_);
   if (!frontbuffer_suggested_allocation_)
     return true;
@@ -176,7 +182,7 @@ bool ImageTransportSurfaceFBO::SwapBuffers() {
 
   // It is the responsibility of the storage provider to send the swap IPC.
   is_swap_buffers_send_pending_ = true;
-  storage_provider_->SwapBuffers(pixel_size_, scale_factor_);
+  storage_provider_->SwapBuffers();
 
   // The call to swapBuffers could potentially result in an immediate draw.
   // Ensure that any changes made to the context's state are restored.
@@ -187,6 +193,7 @@ bool ImageTransportSurfaceFBO::SwapBuffers() {
 void ImageTransportSurfaceFBO::SendSwapBuffers(uint64 surface_handle,
                                                const gfx::Size pixel_size,
                                                float scale_factor) {
+  TRACE_EVENT0("gpu", "ImageTransportSurfaceFBO::SendSwapBuffers");
   GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params params;
   params.surface_handle = surface_handle;
   params.size = pixel_size;
@@ -203,9 +210,8 @@ void ImageTransportSurfaceFBO::SetRendererID(int renderer_id) {
 
 bool ImageTransportSurfaceFBO::PostSubBuffer(
     int x, int y, int width, int height) {
-  // Mac does not support sub-buffer swaps.
-  NOTREACHED();
-  return false;
+  TRACE_EVENT0("gpu", "ImageTransportSurfaceFBO::PostSubBuffer");
+  return SwapBuffersInternal();
 }
 
 bool ImageTransportSurfaceFBO::SupportsPostSubBuffer() {
@@ -226,6 +232,7 @@ void* ImageTransportSurfaceFBO::GetDisplay() {
 
 void ImageTransportSurfaceFBO::OnBufferPresented(
     const AcceleratedSurfaceMsg_BufferPresented_Params& params) {
+  TRACE_EVENT0("gpu", "ImageTransportSurfaceFBO::OnBufferPresented");
   SetRendererID(params.renderer_id);
   storage_provider_->SwapBuffersAckedByBrowser(params.disable_throttling);
 }
@@ -302,8 +309,10 @@ void ImageTransportSurfaceFBO::AllocateOrResizeFramebuffer(
   rounded_pixel_size_ = new_rounded_pixel_size;
   scale_factor_ = new_scale_factor;
 
-  if (!needs_new_storage)
+  if (!needs_new_storage) {
+    storage_provider_->FrameSizeChanged(pixel_size_, scale_factor_);
     return;
+  }
 
   TRACE_EVENT2("gpu", "ImageTransportSurfaceFBO::AllocateOrResizeFramebuffer",
                "width", new_rounded_pixel_size.width(),
@@ -398,6 +407,7 @@ void ImageTransportSurfaceFBO::AllocateOrResizeFramebuffer(
   }
 
   has_complete_framebuffer_ = true;
+  storage_provider_->FrameSizeChanged(pixel_size_, scale_factor_);
 
   glBindTexture(texture_target, previous_texture_id);
   // The FBO remains bound for this GL context.

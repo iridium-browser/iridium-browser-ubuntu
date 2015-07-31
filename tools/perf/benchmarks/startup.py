@@ -60,6 +60,7 @@ class StartupWarmBlankPage(_StartupWarm):
 
 @benchmark.Enabled('has tabs')
 @benchmark.Enabled('win', 'linux', 'mac')
+@benchmark.Disabled('reference', 'android')  # http://crbug.com/481919
 class StartupLargeProfileColdBlankPage(_StartupCold):
   """Measures cold startup time with a large profile."""
   tag = 'cold'
@@ -70,12 +71,16 @@ class StartupLargeProfileColdBlankPage(_StartupCold):
     super(StartupLargeProfileColdBlankPage, self).__init__(max_failures)
     self.generated_profile_archive = "large_profile.zip"
 
+  def CustomizeBrowserOptions(self, options):
+    options.browser_startup_timeout = 10 * 60
+
   @classmethod
   def Name(cls):
     return 'startup.large_profile.cold.blank_page'
 
 @benchmark.Enabled('has tabs')
 @benchmark.Enabled('win', 'linux', 'mac')
+@benchmark.Disabled('reference', 'android')  # http://crbug.com/481919
 class StartupLargeProfileWarmBlankPage(_StartupWarm):
   """Measures warm startup time with a large profile."""
   tag = 'warm'
@@ -85,6 +90,9 @@ class StartupLargeProfileWarmBlankPage(_StartupWarm):
   def __init__(self, max_failures=None):
     super(StartupLargeProfileWarmBlankPage, self).__init__(max_failures)
     self.generated_profile_archive = "large_profile.zip"
+
+  def CustomizeBrowserOptions(self, options):
+    options.browser_startup_timeout = 10 * 60
 
   @classmethod
   def Name(cls):

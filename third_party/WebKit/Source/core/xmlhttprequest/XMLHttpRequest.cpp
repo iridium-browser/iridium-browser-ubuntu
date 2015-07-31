@@ -275,11 +275,11 @@ private:
     bool m_hasGotDidFinishLoading;
 };
 
-class XMLHttpRequest::BlobLoader final : public NoBaseWillBeGarbageCollectedFinalized<XMLHttpRequest::BlobLoader>, public FileReaderLoaderClient {
+class XMLHttpRequest::BlobLoader final : public GarbageCollectedFinalized<XMLHttpRequest::BlobLoader>, public FileReaderLoaderClient {
 public:
-    static PassOwnPtrWillBeRawPtr<BlobLoader> create(XMLHttpRequest* xhr, PassRefPtr<BlobDataHandle> handle)
+    static BlobLoader* create(XMLHttpRequest* xhr, PassRefPtr<BlobDataHandle> handle)
     {
-        return adoptPtrWillBeNoop(new BlobLoader(xhr, handle));
+        return new BlobLoader(xhr, handle);
     }
 
     // FileReaderLoaderClient functions.
@@ -322,12 +322,9 @@ private:
 
 PassRefPtrWillBeRawPtr<XMLHttpRequest> XMLHttpRequest::create(ScriptState* scriptState)
 {
-    RefPtr<SecurityOrigin> securityOrigin;
     ExecutionContext* context = scriptState->executionContext();
-    if (context->isDocument()) {
-        DOMWrapperWorld& world = scriptState->world();
-        securityOrigin = world.isIsolatedWorld() ? world.isolatedWorldSecurityOrigin() : nullptr;
-    }
+    DOMWrapperWorld& world = scriptState->world();
+    RefPtr<SecurityOrigin> securityOrigin = world.isIsolatedWorld() ? world.isolatedWorldSecurityOrigin() : nullptr;
     RefPtrWillBeRawPtr<XMLHttpRequest> xmlHttpRequest = adoptRefWillBeNoop(new XMLHttpRequest(context, securityOrigin));
     xmlHttpRequest->suspendIfNeeded();
 
@@ -668,6 +665,9 @@ void XMLHttpRequest::dispatchReadyStateChangeEvent()
     if (!executionContext())
         return;
 
+    // We need this protection because dispatchReadyStateChangeEvent may
+    // dispatch multiple events.
+    ScopedEventDispatchProtect protect(&m_eventDispatchRecursionLevel);
     if (m_async || (m_state <= OPENED || m_state == DONE)) {
         TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "XHRReadyStateChange", "data", InspectorXhrReadyStateChangeEvent::data(executionContext(), this));
         XMLHttpRequestProgressEventThrottle::DeferredEventAction action = XMLHttpRequestProgressEventThrottle::Ignore;
@@ -678,14 +678,14 @@ void XMLHttpRequest::dispatchReadyStateChangeEvent()
                 action = XMLHttpRequestProgressEventThrottle::Flush;
         }
         m_progressEventThrottle.dispatchReadyStateChangeEvent(Event::create(EventTypeNames::readystatechange), action);
-        TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "UpdateCounters", "data", InspectorUpdateCountersEvent::data());
+        TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "UpdateCounters", TRACE_EVENT_SCOPE_THREAD, "data", InspectorUpdateCountersEvent::data());
     }
 
     if (m_state == DONE && !m_error) {
         TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "XHRLoad", "data", InspectorXhrLoadEvent::data(executionContext(), this));
         dispatchProgressEventFromSnapshot(EventTypeNames::load);
         dispatchProgressEventFromSnapshot(EventTypeNames::loadend);
-        TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "UpdateCounters", "data", InspectorUpdateCountersEvent::data());
+        TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "UpdateCounters", TRACE_EVENT_SCOPE_THREAD, "data", InspectorUpdateCountersEvent::data());
     }
 }
 
@@ -848,7 +848,7 @@ void XMLHttpRequest::send(const ArrayBufferOrArrayBufferViewOrBlobOrDocumentOrSt
     }
 
     if (data.isFormData()) {
-        send(data.getAsFormData().get(), exceptionState);
+        send(data.getAsFormData(), exceptionState);
         return;
     }
 
@@ -931,10 +931,6 @@ void XMLHttpRequest::send(Blob* body, ExceptionState& exceptionState)
             const String& blobType = body->type();
             if (!blobType.isEmpty() && isValidContentType(blobType)) {
                 setRequestHeaderInternal("Content-Type", AtomicString(blobType));
-            } else {
-                // From FileAPI spec, whenever media type cannot be determined,
-                // empty string must be returned.
-                setRequestHeaderInternal("Content-Type", "");
             }
         }
 
@@ -1042,7 +1038,7 @@ void XMLHttpRequest::createRequest(PassRefPtr<FormData> httpBody, ExceptionState
 
     ResourceRequest request(m_url);
     request.setHTTPMethod(m_method);
-    request.setRequestContext(blink::WebURLRequest::RequestContextXMLHttpRequest);
+    request.setRequestContext(WebURLRequest::RequestContextXMLHttpRequest);
     request.setFetchCredentialsMode(m_includeCredentials ? WebURLRequest::FetchCredentialsModeInclude : WebURLRequest::FetchCredentialsModeSameOrigin);
 
     InspectorInstrumentation::willLoadXHR(&executionContext, this, this, m_method, m_url, m_async, httpBody ? httpBody->deepCopy() : nullptr, m_requestHeaders, m_includeCredentials);

@@ -98,6 +98,7 @@ component("ash") {
       "//ui/display/util",
       "//chromeos",
       "//chromeos:power_manager_proto",
+      "//third_party/qcms",
       "//ui/chromeos/resources",
       "//ui/chromeos/strings",
       "//ui/chromeos:ui_chromeos",
@@ -202,6 +203,7 @@ static_library("test_support") {
     deps += [
       "//ipc",
       "//ui/metro_viewer",
+      "//ui/platform_window/win",
       "//win8:metro_viewer",
       "//win8:test_support_win8",
       "//win8:test_registrar",

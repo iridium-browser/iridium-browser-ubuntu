@@ -39,6 +39,7 @@ namespace blink {
 
 class Element;
 class LocalFrame;
+class HTMLAreaElement;
 class HTMLMediaElement;
 class Image;
 class KURL;
@@ -69,7 +70,10 @@ public:
     Node* innerNode() const { return m_innerNode.get(); }
     Node* innerPossiblyPseudoNode() const { return m_innerPossiblyPseudoNode.get(); }
     Element* innerElement() const;
-    Node* innerNonSharedNode() const { return m_innerNonSharedNode.get(); }
+
+    // If innerNode is an image map or image map area, return the associated image node.
+    Node* innerNodeOrImageMapImage() const;
+
     Element* URLElement() const { return m_innerURLElement.get(); }
     Scrollbar* scrollbar() const { return m_scrollbar.get(); }
     bool isOverWidget() const { return m_isOverWidget; }
@@ -88,18 +92,18 @@ public:
 
     // The hit-tested point in the coordinates of the inner node.
     const LayoutPoint& localPoint() const { return m_localPoint; }
-    void setLocalPoint(const LayoutPoint& p) { m_localPoint = p; }
+    void setNodeAndPosition(Node* node, const LayoutPoint& p) { m_localPoint = p; setInnerNode(node); }
 
     PositionWithAffinity position() const;
     LayoutObject* layoutObject() const;
 
-    void setToShadowHostIfInClosedShadowRoot();
+    void setToShadowHostIfInUserAgentShadowRoot();
 
     const HitTestLocation& hitTestLocation() const { return m_hitTestLocation; }
     const HitTestRequest& hitTestRequest() const { return m_hitTestRequest; }
 
     void setInnerNode(Node*);
-    void setInnerNonSharedNode(Node*);
+    HTMLAreaElement* imageAreaForImage() const;
     void setURLElement(Element*);
     void setScrollbar(Scrollbar*);
     void setIsOverWidget(bool b) { m_isOverWidget = b; }
@@ -142,11 +146,10 @@ private:
 
     RefPtrWillBeMember<Node> m_innerNode;
     RefPtrWillBeMember<Node> m_innerPossiblyPseudoNode;
-    RefPtrWillBeMember<Node> m_innerNonSharedNode;
     // FIXME: Nothing changes this to a value different from m_hitTestLocation!
     LayoutPoint m_pointInInnerNodeFrame; // The hit-tested point in innerNode frame coordinates.
-    LayoutPoint m_localPoint; // A point in the local coordinate space of m_innerNonSharedNode's renderer. Allows us to efficiently
-        // determine where inside the renderer we hit on subsequent operations.
+    LayoutPoint m_localPoint; // A point in the local coordinate space of m_innerNode's layoutObject. Allows us to efficiently
+        // determine where inside the layoutObject we hit on subsequent operations.
     RefPtrWillBeMember<Element> m_innerURLElement;
     RefPtrWillBeMember<Scrollbar> m_scrollbar;
     bool m_isOverWidget; // Returns true if we are over a widget (and not in the border/padding area of a LayoutPart for example).

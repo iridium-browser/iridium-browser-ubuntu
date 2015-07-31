@@ -13,15 +13,19 @@ found in the LICENSE file.
 tv.exportTo('tv.b', function() {
   var THIS_DOC = document._currentScript.ownerDocument;
 
-  function getAsync(url, cb) {
+  function getAsync(url) {
     return new Promise(function(resolve, reject) {
       var req = new XMLHttpRequest();
+      var isBinary = /[.]gz$/.test(url) || /[.]zip$/.test(url);
+      req.overrideMimeType('text/plain; charset=x-user-defined');
       req.open('GET', url, true);
+      if (isBinary)
+        req.responseType = 'arraybuffer';
       req.onreadystatechange = function(aEvt) {
         if (req.readyState == 4) {
           window.setTimeout(function() {
             if (req.status == 200) {
-              resolve(req.responseText);
+              resolve(isBinary ? req.response : req.responseText);
             } else {
               reject(new Error('XHR failed with status ' + req.status));
             }

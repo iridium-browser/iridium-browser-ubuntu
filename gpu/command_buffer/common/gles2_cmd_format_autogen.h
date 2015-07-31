@@ -1633,6 +1633,356 @@ static_assert(offsetof(CompressedTexSubImage2D, data_shm_id) == 36,
 static_assert(offsetof(CompressedTexSubImage2D, data_shm_offset) == 40,
               "offset of CompressedTexSubImage2D data_shm_offset should be 40");
 
+struct CompressedTexImage3DBucket {
+  typedef CompressedTexImage3DBucket ValueType;
+  static const CommandId kCmdId = kCompressedTexImage3DBucket;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+  static const uint8 cmd_flags = CMD_FLAG_SET_TRACE_LEVEL(3);
+
+  static uint32_t ComputeSize() {
+    return static_cast<uint32_t>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() { header.SetCmd<ValueType>(); }
+
+  void Init(GLenum _target,
+            GLint _level,
+            GLenum _internalformat,
+            GLsizei _width,
+            GLsizei _height,
+            GLsizei _depth,
+            GLuint _bucket_id) {
+    SetHeader();
+    target = _target;
+    level = _level;
+    internalformat = _internalformat;
+    width = _width;
+    height = _height;
+    depth = _depth;
+    bucket_id = _bucket_id;
+  }
+
+  void* Set(void* cmd,
+            GLenum _target,
+            GLint _level,
+            GLenum _internalformat,
+            GLsizei _width,
+            GLsizei _height,
+            GLsizei _depth,
+            GLuint _bucket_id) {
+    static_cast<ValueType*>(cmd)->Init(_target, _level, _internalformat, _width,
+                                       _height, _depth, _bucket_id);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32_t target;
+  int32_t level;
+  uint32_t internalformat;
+  int32_t width;
+  int32_t height;
+  int32_t depth;
+  uint32_t bucket_id;
+  static const int32_t border = 0;
+};
+
+static_assert(sizeof(CompressedTexImage3DBucket) == 32,
+              "size of CompressedTexImage3DBucket should be 32");
+static_assert(offsetof(CompressedTexImage3DBucket, header) == 0,
+              "offset of CompressedTexImage3DBucket header should be 0");
+static_assert(offsetof(CompressedTexImage3DBucket, target) == 4,
+              "offset of CompressedTexImage3DBucket target should be 4");
+static_assert(offsetof(CompressedTexImage3DBucket, level) == 8,
+              "offset of CompressedTexImage3DBucket level should be 8");
+static_assert(
+    offsetof(CompressedTexImage3DBucket, internalformat) == 12,
+    "offset of CompressedTexImage3DBucket internalformat should be 12");
+static_assert(offsetof(CompressedTexImage3DBucket, width) == 16,
+              "offset of CompressedTexImage3DBucket width should be 16");
+static_assert(offsetof(CompressedTexImage3DBucket, height) == 20,
+              "offset of CompressedTexImage3DBucket height should be 20");
+static_assert(offsetof(CompressedTexImage3DBucket, depth) == 24,
+              "offset of CompressedTexImage3DBucket depth should be 24");
+static_assert(offsetof(CompressedTexImage3DBucket, bucket_id) == 28,
+              "offset of CompressedTexImage3DBucket bucket_id should be 28");
+
+struct CompressedTexImage3D {
+  typedef CompressedTexImage3D ValueType;
+  static const CommandId kCmdId = kCompressedTexImage3D;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+  static const uint8 cmd_flags = CMD_FLAG_SET_TRACE_LEVEL(3);
+
+  static uint32_t ComputeSize() {
+    return static_cast<uint32_t>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() { header.SetCmd<ValueType>(); }
+
+  void Init(GLenum _target,
+            GLint _level,
+            GLenum _internalformat,
+            GLsizei _width,
+            GLsizei _height,
+            GLsizei _depth,
+            GLsizei _imageSize,
+            uint32_t _data_shm_id,
+            uint32_t _data_shm_offset) {
+    SetHeader();
+    target = _target;
+    level = _level;
+    internalformat = _internalformat;
+    width = _width;
+    height = _height;
+    depth = _depth;
+    imageSize = _imageSize;
+    data_shm_id = _data_shm_id;
+    data_shm_offset = _data_shm_offset;
+  }
+
+  void* Set(void* cmd,
+            GLenum _target,
+            GLint _level,
+            GLenum _internalformat,
+            GLsizei _width,
+            GLsizei _height,
+            GLsizei _depth,
+            GLsizei _imageSize,
+            uint32_t _data_shm_id,
+            uint32_t _data_shm_offset) {
+    static_cast<ValueType*>(cmd)->Init(_target, _level, _internalformat, _width,
+                                       _height, _depth, _imageSize,
+                                       _data_shm_id, _data_shm_offset);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32_t target;
+  int32_t level;
+  uint32_t internalformat;
+  int32_t width;
+  int32_t height;
+  int32_t depth;
+  int32_t imageSize;
+  uint32_t data_shm_id;
+  uint32_t data_shm_offset;
+  static const int32_t border = 0;
+};
+
+static_assert(sizeof(CompressedTexImage3D) == 40,
+              "size of CompressedTexImage3D should be 40");
+static_assert(offsetof(CompressedTexImage3D, header) == 0,
+              "offset of CompressedTexImage3D header should be 0");
+static_assert(offsetof(CompressedTexImage3D, target) == 4,
+              "offset of CompressedTexImage3D target should be 4");
+static_assert(offsetof(CompressedTexImage3D, level) == 8,
+              "offset of CompressedTexImage3D level should be 8");
+static_assert(offsetof(CompressedTexImage3D, internalformat) == 12,
+              "offset of CompressedTexImage3D internalformat should be 12");
+static_assert(offsetof(CompressedTexImage3D, width) == 16,
+              "offset of CompressedTexImage3D width should be 16");
+static_assert(offsetof(CompressedTexImage3D, height) == 20,
+              "offset of CompressedTexImage3D height should be 20");
+static_assert(offsetof(CompressedTexImage3D, depth) == 24,
+              "offset of CompressedTexImage3D depth should be 24");
+static_assert(offsetof(CompressedTexImage3D, imageSize) == 28,
+              "offset of CompressedTexImage3D imageSize should be 28");
+static_assert(offsetof(CompressedTexImage3D, data_shm_id) == 32,
+              "offset of CompressedTexImage3D data_shm_id should be 32");
+static_assert(offsetof(CompressedTexImage3D, data_shm_offset) == 36,
+              "offset of CompressedTexImage3D data_shm_offset should be 36");
+
+struct CompressedTexSubImage3DBucket {
+  typedef CompressedTexSubImage3DBucket ValueType;
+  static const CommandId kCmdId = kCompressedTexSubImage3DBucket;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+  static const uint8 cmd_flags = CMD_FLAG_SET_TRACE_LEVEL(3);
+
+  static uint32_t ComputeSize() {
+    return static_cast<uint32_t>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() { header.SetCmd<ValueType>(); }
+
+  void Init(GLenum _target,
+            GLint _level,
+            GLint _xoffset,
+            GLint _yoffset,
+            GLint _zoffset,
+            GLsizei _width,
+            GLsizei _height,
+            GLsizei _depth,
+            GLenum _format,
+            GLuint _bucket_id) {
+    SetHeader();
+    target = _target;
+    level = _level;
+    xoffset = _xoffset;
+    yoffset = _yoffset;
+    zoffset = _zoffset;
+    width = _width;
+    height = _height;
+    depth = _depth;
+    format = _format;
+    bucket_id = _bucket_id;
+  }
+
+  void* Set(void* cmd,
+            GLenum _target,
+            GLint _level,
+            GLint _xoffset,
+            GLint _yoffset,
+            GLint _zoffset,
+            GLsizei _width,
+            GLsizei _height,
+            GLsizei _depth,
+            GLenum _format,
+            GLuint _bucket_id) {
+    static_cast<ValueType*>(cmd)->Init(_target, _level, _xoffset, _yoffset,
+                                       _zoffset, _width, _height, _depth,
+                                       _format, _bucket_id);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32_t target;
+  int32_t level;
+  int32_t xoffset;
+  int32_t yoffset;
+  int32_t zoffset;
+  int32_t width;
+  int32_t height;
+  int32_t depth;
+  uint32_t format;
+  uint32_t bucket_id;
+};
+
+static_assert(sizeof(CompressedTexSubImage3DBucket) == 44,
+              "size of CompressedTexSubImage3DBucket should be 44");
+static_assert(offsetof(CompressedTexSubImage3DBucket, header) == 0,
+              "offset of CompressedTexSubImage3DBucket header should be 0");
+static_assert(offsetof(CompressedTexSubImage3DBucket, target) == 4,
+              "offset of CompressedTexSubImage3DBucket target should be 4");
+static_assert(offsetof(CompressedTexSubImage3DBucket, level) == 8,
+              "offset of CompressedTexSubImage3DBucket level should be 8");
+static_assert(offsetof(CompressedTexSubImage3DBucket, xoffset) == 12,
+              "offset of CompressedTexSubImage3DBucket xoffset should be 12");
+static_assert(offsetof(CompressedTexSubImage3DBucket, yoffset) == 16,
+              "offset of CompressedTexSubImage3DBucket yoffset should be 16");
+static_assert(offsetof(CompressedTexSubImage3DBucket, zoffset) == 20,
+              "offset of CompressedTexSubImage3DBucket zoffset should be 20");
+static_assert(offsetof(CompressedTexSubImage3DBucket, width) == 24,
+              "offset of CompressedTexSubImage3DBucket width should be 24");
+static_assert(offsetof(CompressedTexSubImage3DBucket, height) == 28,
+              "offset of CompressedTexSubImage3DBucket height should be 28");
+static_assert(offsetof(CompressedTexSubImage3DBucket, depth) == 32,
+              "offset of CompressedTexSubImage3DBucket depth should be 32");
+static_assert(offsetof(CompressedTexSubImage3DBucket, format) == 36,
+              "offset of CompressedTexSubImage3DBucket format should be 36");
+static_assert(offsetof(CompressedTexSubImage3DBucket, bucket_id) == 40,
+              "offset of CompressedTexSubImage3DBucket bucket_id should be 40");
+
+struct CompressedTexSubImage3D {
+  typedef CompressedTexSubImage3D ValueType;
+  static const CommandId kCmdId = kCompressedTexSubImage3D;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+  static const uint8 cmd_flags = CMD_FLAG_SET_TRACE_LEVEL(3);
+
+  static uint32_t ComputeSize() {
+    return static_cast<uint32_t>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() { header.SetCmd<ValueType>(); }
+
+  void Init(GLenum _target,
+            GLint _level,
+            GLint _xoffset,
+            GLint _yoffset,
+            GLint _zoffset,
+            GLsizei _width,
+            GLsizei _height,
+            GLsizei _depth,
+            GLenum _format,
+            GLsizei _imageSize,
+            uint32_t _data_shm_id,
+            uint32_t _data_shm_offset) {
+    SetHeader();
+    target = _target;
+    level = _level;
+    xoffset = _xoffset;
+    yoffset = _yoffset;
+    zoffset = _zoffset;
+    width = _width;
+    height = _height;
+    depth = _depth;
+    format = _format;
+    imageSize = _imageSize;
+    data_shm_id = _data_shm_id;
+    data_shm_offset = _data_shm_offset;
+  }
+
+  void* Set(void* cmd,
+            GLenum _target,
+            GLint _level,
+            GLint _xoffset,
+            GLint _yoffset,
+            GLint _zoffset,
+            GLsizei _width,
+            GLsizei _height,
+            GLsizei _depth,
+            GLenum _format,
+            GLsizei _imageSize,
+            uint32_t _data_shm_id,
+            uint32_t _data_shm_offset) {
+    static_cast<ValueType*>(cmd)
+        ->Init(_target, _level, _xoffset, _yoffset, _zoffset, _width, _height,
+               _depth, _format, _imageSize, _data_shm_id, _data_shm_offset);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32_t target;
+  int32_t level;
+  int32_t xoffset;
+  int32_t yoffset;
+  int32_t zoffset;
+  int32_t width;
+  int32_t height;
+  int32_t depth;
+  uint32_t format;
+  int32_t imageSize;
+  uint32_t data_shm_id;
+  uint32_t data_shm_offset;
+};
+
+static_assert(sizeof(CompressedTexSubImage3D) == 52,
+              "size of CompressedTexSubImage3D should be 52");
+static_assert(offsetof(CompressedTexSubImage3D, header) == 0,
+              "offset of CompressedTexSubImage3D header should be 0");
+static_assert(offsetof(CompressedTexSubImage3D, target) == 4,
+              "offset of CompressedTexSubImage3D target should be 4");
+static_assert(offsetof(CompressedTexSubImage3D, level) == 8,
+              "offset of CompressedTexSubImage3D level should be 8");
+static_assert(offsetof(CompressedTexSubImage3D, xoffset) == 12,
+              "offset of CompressedTexSubImage3D xoffset should be 12");
+static_assert(offsetof(CompressedTexSubImage3D, yoffset) == 16,
+              "offset of CompressedTexSubImage3D yoffset should be 16");
+static_assert(offsetof(CompressedTexSubImage3D, zoffset) == 20,
+              "offset of CompressedTexSubImage3D zoffset should be 20");
+static_assert(offsetof(CompressedTexSubImage3D, width) == 24,
+              "offset of CompressedTexSubImage3D width should be 24");
+static_assert(offsetof(CompressedTexSubImage3D, height) == 28,
+              "offset of CompressedTexSubImage3D height should be 28");
+static_assert(offsetof(CompressedTexSubImage3D, depth) == 32,
+              "offset of CompressedTexSubImage3D depth should be 32");
+static_assert(offsetof(CompressedTexSubImage3D, format) == 36,
+              "offset of CompressedTexSubImage3D format should be 36");
+static_assert(offsetof(CompressedTexSubImage3D, imageSize) == 40,
+              "offset of CompressedTexSubImage3D imageSize should be 40");
+static_assert(offsetof(CompressedTexSubImage3D, data_shm_id) == 44,
+              "offset of CompressedTexSubImage3D data_shm_id should be 44");
+static_assert(offsetof(CompressedTexSubImage3D, data_shm_offset) == 48,
+              "offset of CompressedTexSubImage3D data_shm_offset should be 48");
+
 struct CopyBufferSubData {
   typedef CopyBufferSubData ValueType;
   static const CommandId kCmdId = kCopyBufferSubData;
@@ -4050,6 +4400,165 @@ static_assert(offsetof(GetFramebufferAttachmentParameteriv,
               "offset of GetFramebufferAttachmentParameteriv params_shm_offset "
               "should be 20");
 
+struct GetInteger64v {
+  typedef GetInteger64v ValueType;
+  static const CommandId kCmdId = kGetInteger64v;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+  static const uint8 cmd_flags = CMD_FLAG_SET_TRACE_LEVEL(3);
+
+  typedef SizedResult<GLint64> Result;
+
+  static uint32_t ComputeSize() {
+    return static_cast<uint32_t>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() { header.SetCmd<ValueType>(); }
+
+  void Init(GLenum _pname,
+            uint32_t _params_shm_id,
+            uint32_t _params_shm_offset) {
+    SetHeader();
+    pname = _pname;
+    params_shm_id = _params_shm_id;
+    params_shm_offset = _params_shm_offset;
+  }
+
+  void* Set(void* cmd,
+            GLenum _pname,
+            uint32_t _params_shm_id,
+            uint32_t _params_shm_offset) {
+    static_cast<ValueType*>(cmd)
+        ->Init(_pname, _params_shm_id, _params_shm_offset);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32_t pname;
+  uint32_t params_shm_id;
+  uint32_t params_shm_offset;
+};
+
+static_assert(sizeof(GetInteger64v) == 16,
+              "size of GetInteger64v should be 16");
+static_assert(offsetof(GetInteger64v, header) == 0,
+              "offset of GetInteger64v header should be 0");
+static_assert(offsetof(GetInteger64v, pname) == 4,
+              "offset of GetInteger64v pname should be 4");
+static_assert(offsetof(GetInteger64v, params_shm_id) == 8,
+              "offset of GetInteger64v params_shm_id should be 8");
+static_assert(offsetof(GetInteger64v, params_shm_offset) == 12,
+              "offset of GetInteger64v params_shm_offset should be 12");
+
+struct GetIntegeri_v {
+  typedef GetIntegeri_v ValueType;
+  static const CommandId kCmdId = kGetIntegeri_v;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+  static const uint8 cmd_flags = CMD_FLAG_SET_TRACE_LEVEL(3);
+
+  typedef SizedResult<GLint> Result;
+
+  static uint32_t ComputeSize() {
+    return static_cast<uint32_t>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() { header.SetCmd<ValueType>(); }
+
+  void Init(GLenum _pname,
+            GLuint _index,
+            uint32_t _data_shm_id,
+            uint32_t _data_shm_offset) {
+    SetHeader();
+    pname = _pname;
+    index = _index;
+    data_shm_id = _data_shm_id;
+    data_shm_offset = _data_shm_offset;
+  }
+
+  void* Set(void* cmd,
+            GLenum _pname,
+            GLuint _index,
+            uint32_t _data_shm_id,
+            uint32_t _data_shm_offset) {
+    static_cast<ValueType*>(cmd)
+        ->Init(_pname, _index, _data_shm_id, _data_shm_offset);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32_t pname;
+  uint32_t index;
+  uint32_t data_shm_id;
+  uint32_t data_shm_offset;
+};
+
+static_assert(sizeof(GetIntegeri_v) == 20,
+              "size of GetIntegeri_v should be 20");
+static_assert(offsetof(GetIntegeri_v, header) == 0,
+              "offset of GetIntegeri_v header should be 0");
+static_assert(offsetof(GetIntegeri_v, pname) == 4,
+              "offset of GetIntegeri_v pname should be 4");
+static_assert(offsetof(GetIntegeri_v, index) == 8,
+              "offset of GetIntegeri_v index should be 8");
+static_assert(offsetof(GetIntegeri_v, data_shm_id) == 12,
+              "offset of GetIntegeri_v data_shm_id should be 12");
+static_assert(offsetof(GetIntegeri_v, data_shm_offset) == 16,
+              "offset of GetIntegeri_v data_shm_offset should be 16");
+
+struct GetInteger64i_v {
+  typedef GetInteger64i_v ValueType;
+  static const CommandId kCmdId = kGetInteger64i_v;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+  static const uint8 cmd_flags = CMD_FLAG_SET_TRACE_LEVEL(3);
+
+  typedef SizedResult<GLint64> Result;
+
+  static uint32_t ComputeSize() {
+    return static_cast<uint32_t>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() { header.SetCmd<ValueType>(); }
+
+  void Init(GLenum _pname,
+            GLuint _index,
+            uint32_t _data_shm_id,
+            uint32_t _data_shm_offset) {
+    SetHeader();
+    pname = _pname;
+    index = _index;
+    data_shm_id = _data_shm_id;
+    data_shm_offset = _data_shm_offset;
+  }
+
+  void* Set(void* cmd,
+            GLenum _pname,
+            GLuint _index,
+            uint32_t _data_shm_id,
+            uint32_t _data_shm_offset) {
+    static_cast<ValueType*>(cmd)
+        ->Init(_pname, _index, _data_shm_id, _data_shm_offset);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32_t pname;
+  uint32_t index;
+  uint32_t data_shm_id;
+  uint32_t data_shm_offset;
+};
+
+static_assert(sizeof(GetInteger64i_v) == 20,
+              "size of GetInteger64i_v should be 20");
+static_assert(offsetof(GetInteger64i_v, header) == 0,
+              "offset of GetInteger64i_v header should be 0");
+static_assert(offsetof(GetInteger64i_v, pname) == 4,
+              "offset of GetInteger64i_v pname should be 4");
+static_assert(offsetof(GetInteger64i_v, index) == 8,
+              "offset of GetInteger64i_v index should be 8");
+static_assert(offsetof(GetInteger64i_v, data_shm_id) == 12,
+              "offset of GetInteger64i_v data_shm_id should be 12");
+static_assert(offsetof(GetInteger64i_v, data_shm_offset) == 16,
+              "offset of GetInteger64i_v data_shm_offset should be 16");
+
 struct GetIntegerv {
   typedef GetIntegerv ValueType;
   static const CommandId kCmdId = kGetIntegerv;
@@ -5064,6 +5573,61 @@ static_assert(offsetof(GetUniformiv, params_shm_id) == 12,
 static_assert(offsetof(GetUniformiv, params_shm_offset) == 16,
               "offset of GetUniformiv params_shm_offset should be 16");
 
+struct GetUniformuiv {
+  typedef GetUniformuiv ValueType;
+  static const CommandId kCmdId = kGetUniformuiv;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+  static const uint8 cmd_flags = CMD_FLAG_SET_TRACE_LEVEL(3);
+
+  typedef SizedResult<GLuint> Result;
+
+  static uint32_t ComputeSize() {
+    return static_cast<uint32_t>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() { header.SetCmd<ValueType>(); }
+
+  void Init(GLuint _program,
+            GLint _location,
+            uint32_t _params_shm_id,
+            uint32_t _params_shm_offset) {
+    SetHeader();
+    program = _program;
+    location = _location;
+    params_shm_id = _params_shm_id;
+    params_shm_offset = _params_shm_offset;
+  }
+
+  void* Set(void* cmd,
+            GLuint _program,
+            GLint _location,
+            uint32_t _params_shm_id,
+            uint32_t _params_shm_offset) {
+    static_cast<ValueType*>(cmd)
+        ->Init(_program, _location, _params_shm_id, _params_shm_offset);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32_t program;
+  int32_t location;
+  uint32_t params_shm_id;
+  uint32_t params_shm_offset;
+};
+
+static_assert(sizeof(GetUniformuiv) == 20,
+              "size of GetUniformuiv should be 20");
+static_assert(offsetof(GetUniformuiv, header) == 0,
+              "offset of GetUniformuiv header should be 0");
+static_assert(offsetof(GetUniformuiv, program) == 4,
+              "offset of GetUniformuiv program should be 4");
+static_assert(offsetof(GetUniformuiv, location) == 8,
+              "offset of GetUniformuiv location should be 8");
+static_assert(offsetof(GetUniformuiv, params_shm_id) == 12,
+              "offset of GetUniformuiv params_shm_id should be 12");
+static_assert(offsetof(GetUniformuiv, params_shm_offset) == 16,
+              "offset of GetUniformuiv params_shm_offset should be 16");
+
 struct GetUniformIndices {
   typedef GetUniformIndices ValueType;
   static const CommandId kCmdId = kGetUniformIndices;
@@ -5283,6 +5847,116 @@ static_assert(offsetof(GetVertexAttribiv, params_shm_id) == 12,
               "offset of GetVertexAttribiv params_shm_id should be 12");
 static_assert(offsetof(GetVertexAttribiv, params_shm_offset) == 16,
               "offset of GetVertexAttribiv params_shm_offset should be 16");
+
+struct GetVertexAttribIiv {
+  typedef GetVertexAttribIiv ValueType;
+  static const CommandId kCmdId = kGetVertexAttribIiv;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+  static const uint8 cmd_flags = CMD_FLAG_SET_TRACE_LEVEL(3);
+
+  typedef SizedResult<GLint> Result;
+
+  static uint32_t ComputeSize() {
+    return static_cast<uint32_t>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() { header.SetCmd<ValueType>(); }
+
+  void Init(GLuint _index,
+            GLenum _pname,
+            uint32_t _params_shm_id,
+            uint32_t _params_shm_offset) {
+    SetHeader();
+    index = _index;
+    pname = _pname;
+    params_shm_id = _params_shm_id;
+    params_shm_offset = _params_shm_offset;
+  }
+
+  void* Set(void* cmd,
+            GLuint _index,
+            GLenum _pname,
+            uint32_t _params_shm_id,
+            uint32_t _params_shm_offset) {
+    static_cast<ValueType*>(cmd)
+        ->Init(_index, _pname, _params_shm_id, _params_shm_offset);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32_t index;
+  uint32_t pname;
+  uint32_t params_shm_id;
+  uint32_t params_shm_offset;
+};
+
+static_assert(sizeof(GetVertexAttribIiv) == 20,
+              "size of GetVertexAttribIiv should be 20");
+static_assert(offsetof(GetVertexAttribIiv, header) == 0,
+              "offset of GetVertexAttribIiv header should be 0");
+static_assert(offsetof(GetVertexAttribIiv, index) == 4,
+              "offset of GetVertexAttribIiv index should be 4");
+static_assert(offsetof(GetVertexAttribIiv, pname) == 8,
+              "offset of GetVertexAttribIiv pname should be 8");
+static_assert(offsetof(GetVertexAttribIiv, params_shm_id) == 12,
+              "offset of GetVertexAttribIiv params_shm_id should be 12");
+static_assert(offsetof(GetVertexAttribIiv, params_shm_offset) == 16,
+              "offset of GetVertexAttribIiv params_shm_offset should be 16");
+
+struct GetVertexAttribIuiv {
+  typedef GetVertexAttribIuiv ValueType;
+  static const CommandId kCmdId = kGetVertexAttribIuiv;
+  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
+  static const uint8 cmd_flags = CMD_FLAG_SET_TRACE_LEVEL(3);
+
+  typedef SizedResult<GLuint> Result;
+
+  static uint32_t ComputeSize() {
+    return static_cast<uint32_t>(sizeof(ValueType));  // NOLINT
+  }
+
+  void SetHeader() { header.SetCmd<ValueType>(); }
+
+  void Init(GLuint _index,
+            GLenum _pname,
+            uint32_t _params_shm_id,
+            uint32_t _params_shm_offset) {
+    SetHeader();
+    index = _index;
+    pname = _pname;
+    params_shm_id = _params_shm_id;
+    params_shm_offset = _params_shm_offset;
+  }
+
+  void* Set(void* cmd,
+            GLuint _index,
+            GLenum _pname,
+            uint32_t _params_shm_id,
+            uint32_t _params_shm_offset) {
+    static_cast<ValueType*>(cmd)
+        ->Init(_index, _pname, _params_shm_id, _params_shm_offset);
+    return NextCmdAddress<ValueType>(cmd);
+  }
+
+  gpu::CommandHeader header;
+  uint32_t index;
+  uint32_t pname;
+  uint32_t params_shm_id;
+  uint32_t params_shm_offset;
+};
+
+static_assert(sizeof(GetVertexAttribIuiv) == 20,
+              "size of GetVertexAttribIuiv should be 20");
+static_assert(offsetof(GetVertexAttribIuiv, header) == 0,
+              "offset of GetVertexAttribIuiv header should be 0");
+static_assert(offsetof(GetVertexAttribIuiv, index) == 4,
+              "offset of GetVertexAttribIuiv index should be 4");
+static_assert(offsetof(GetVertexAttribIuiv, pname) == 8,
+              "offset of GetVertexAttribIuiv pname should be 8");
+static_assert(offsetof(GetVertexAttribIuiv, params_shm_id) == 12,
+              "offset of GetVertexAttribIuiv params_shm_id should be 12");
+static_assert(offsetof(GetVertexAttribIuiv, params_shm_offset) == 16,
+              "offset of GetVertexAttribIuiv params_shm_offset should be 16");
 
 struct GetVertexAttribPointerv {
   typedef GetVertexAttribPointerv ValueType;

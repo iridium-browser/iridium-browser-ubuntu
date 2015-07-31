@@ -55,6 +55,7 @@ static_library("common") {
     "//chrome/common/safe_browsing:proto",
     "//chrome/installer/util",
     "//components/cloud_devices/common",
+    "//components/component_updater",
     "//components/content_settings/core/common",
     "//components/favicon_base",
     "//components/json_schema",
@@ -109,6 +110,12 @@ static_library("common") {
       "//extensions/strings",
       "//media/cast:net",
     ]
+    if (is_chromeos) {
+      sources +=
+          rebase_path(gypi_values.chrome_common_extensions_chromeos_sources,
+                      ".",
+                      "//chrome")
+    }
   }
 
   if (is_win || is_mac) {
@@ -188,7 +195,10 @@ static_library("common") {
   }
 
   if (is_win) {
-    deps += [ "//third_party/wtl" ]
+    deps += [
+      "//components/dom_distiller/core",  # Needed by chrome_content_client.cc.
+      "//third_party/wtl",
+    ]
   }
 
   if (enable_mdns) {
@@ -226,13 +236,9 @@ static_library("common") {
   }
 
   if (safe_browsing_mode == 1) {
-    defines += [ "FULL_SAFE_BROWSING" ]
     sources += rebase_path(gypi_values.chrome_common_full_safe_browsing_sources,
                            ".",
                            "//chrome")
-  }
-  if (safe_browsing_mode == 2) {
-    defines += [ "MOBILE_SAFE_BROWSING" ]
   }
 }
 
@@ -275,7 +281,6 @@ static_library("constants") {
     "widevine_cdm_constants.cc",
     "widevine_cdm_constants.h",
   ]
-  sources += get_target_outputs(":make_chrome_version")
 
   deps = [
     ":make_chrome_version",

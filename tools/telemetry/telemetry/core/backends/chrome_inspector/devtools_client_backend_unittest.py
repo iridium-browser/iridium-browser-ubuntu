@@ -2,8 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from telemetry.core.backends.chrome_inspector import devtools_client_backend
-from telemetry.core.backends.chrome_inspector import devtools_http
 from telemetry import decorators
 from telemetry.unittest_util import browser_test_case
 
@@ -26,6 +24,7 @@ class DevToolsClientBackendTest(browser_test_case.BrowserTestCase):
     self.assertTrue(self._devtools_client.IsAlive())
 
   @decorators.Enabled('has tabs')
+  @decorators.Disabled('chromeos')  # crbug.com/483212
   def testGetUpdatedInspectableContexts(self):
     self._browser.tabs.New()
     c1 = self._devtools_client.GetUpdatedInspectableContexts()
@@ -60,7 +59,7 @@ class DevToolsClientBackendTest(browser_test_case.BrowserTestCase):
     self.assertEqual(tabs4[0], tabs3[0])
     self.assertEqual(tabs4[1], tabs3[2])
 
-
+  @decorators.Disabled('chromeos')  # crbug.com/483212
   def testGetUpdatedInspectableContextsUpdateContextsData(self):
     c1 = self._devtools_client.GetUpdatedInspectableContexts()
     self.assertEqual(len(c1.contexts), 1)

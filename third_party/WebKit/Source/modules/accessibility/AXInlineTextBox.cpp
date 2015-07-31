@@ -76,12 +76,19 @@ LayoutRect AXInlineTextBox::elementRect() const
     return m_inlineTextBox->bounds();
 }
 
-bool AXInlineTextBox::computeAccessibilityIsIgnored() const
+bool AXInlineTextBox::computeAccessibilityIsIgnored(IgnoredReasons* ignoredReasons) const
 {
-    if (AXObject* parent = parentObject())
-        return parent->accessibilityIsIgnored();
+    AXObject* parent = parentObject();
+    if (!parent)
+        return false;
 
-    return false;
+    if (!parent->accessibilityIsIgnored())
+        return false;
+
+    if (ignoredReasons)
+        parent->computeAccessibilityIsIgnored(ignoredReasons);
+
+    return true;
 }
 
 void AXInlineTextBox::textCharacterOffsets(Vector<int>& offsets) const
@@ -127,27 +134,53 @@ AXObject* AXInlineTextBox::computeParent() const
     if (!m_inlineTextBox || !m_axObjectCache)
         return 0;
 
-    LayoutText* layoutText = m_inlineTextBox->renderText();
+    LayoutText* layoutText = m_inlineTextBox->layoutText();
     return m_axObjectCache->getOrCreate(layoutText);
 }
 
+// In addition to LTR and RTL direction, edit fields also support
+// top to bottom and bottom to top via the CSS writing-mode property.
 AccessibilityTextDirection AXInlineTextBox::textDirection() const
 {
     if (!m_inlineTextBox)
-        return AccessibilityTextDirectionLeftToRight;
+        return AXObject::textDirection();
 
     switch (m_inlineTextBox->direction()) {
     case AbstractInlineTextBox::LeftToRight:
-        return AccessibilityTextDirectionLeftToRight;
+        return AccessibilityTextDirectionLTR;
     case AbstractInlineTextBox::RightToLeft:
-        return AccessibilityTextDirectionRightToLeft;
+        return AccessibilityTextDirectionRTL;
     case AbstractInlineTextBox::TopToBottom:
-        return AccessibilityTextDirectionTopToBottom;
+        return AccessibilityTextDirectionTTB;
     case AbstractInlineTextBox::BottomToTop:
-        return AccessibilityTextDirectionBottomToTop;
+        return AccessibilityTextDirectionBTT;
     }
 
-    return AccessibilityTextDirectionLeftToRight;
+    return AXObject::textDirection();
+}
+
+AXObject* AXInlineTextBox::nextOnLine() const
+{
+    RefPtr<AbstractInlineTextBox> nextOnLine = m_inlineTextBox->nextOnLine();
+    if (nextOnLine)
+        return m_axObjectCache->getOrCreate(nextOnLine.get());
+
+    if (!m_inlineTextBox->isLast())
+        return 0;
+
+    return parentObject()->nextOnLine();
+}
+
+AXObject* AXInlineTextBox::previousOnLine() const
+{
+    RefPtr<AbstractInlineTextBox> previousOnLine = m_inlineTextBox->previousOnLine();
+    if (previousOnLine)
+        return m_axObjectCache->getOrCreate(previousOnLine.get());
+
+    if (!m_inlineTextBox->isFirst())
+        return 0;
+
+    return parentObject()->previousOnLine();
 }
 
 } // namespace blink

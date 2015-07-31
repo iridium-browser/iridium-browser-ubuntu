@@ -7,8 +7,6 @@
 
 #include <string>
 
-#include "base/memory/ref_counted.h"
-#include "base/sequenced_task_runner.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_configurator.h"
 
 namespace net {
@@ -17,15 +15,14 @@ class NetLog;
 
 namespace data_reduction_proxy {
 
-class DataReductionProxyEventStore;
+class DataReductionProxyEventCreator;
 
 class TestDataReductionProxyConfigurator
     : public DataReductionProxyConfigurator {
  public:
   TestDataReductionProxyConfigurator(
-      scoped_refptr<base::SequencedTaskRunner> network_task_runner,
       net::NetLog* net_log,
-      DataReductionProxyEventStore* event_store);
+      DataReductionProxyEventCreator* event_creator);
   ~TestDataReductionProxyConfigurator() override;
 
   // Overrides of DataReductionProxyConfigurator

@@ -23,6 +23,7 @@
 #include "content/renderer/message_delivery_policy.h"
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_sender.h"
+#include "third_party/WebKit/public/platform/WebDisplayMode.h"
 #include "third_party/WebKit/public/platform/WebRect.h"
 #include "third_party/WebKit/public/web/WebCompositionUnderline.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
@@ -123,12 +124,14 @@ class CONTENT_EXPORT RenderWidget
   blink::WebWidget* webwidget() const { return webwidget_; }
   gfx::Size size() const { return size_; }
   bool has_focus() const { return has_focus_; }
-  bool is_fullscreen() const { return is_fullscreen_; }
+  bool is_fullscreen_granted() const { return is_fullscreen_granted_; }
+  blink::WebDisplayMode display_mode() const { return display_mode_; }
   bool is_hidden() const { return is_hidden_; }
   bool handling_input_event() const { return handling_input_event_; }
   // Temporary for debugging purposes...
   bool closing() const { return closing_; }
   bool is_swapped_out() { return is_swapped_out_; }
+  bool for_oopif() { return for_oopif_; }
   ui::MenuSourceType context_menu_source_type() {
     return context_menu_source_type_;
   }
@@ -380,6 +383,7 @@ class CONTENT_EXPORT RenderWidget
   void FlushPendingInputEventAck();
   void DoDeferredClose();
   void DoDeferredSetWindowRect(const blink::WebRect& pos);
+  void NotifyOnClose();
 
   // Resizes the render widget.
   void Resize(const gfx::Size& new_size,
@@ -388,7 +392,8 @@ class CONTENT_EXPORT RenderWidget
               float top_controls_height,
               const gfx::Size& visible_viewport_size,
               const gfx::Rect& resizer_rect,
-              bool is_fullscreen,
+              bool is_fullscreen_granted,
+              blink::WebDisplayMode display_mode,
               ResizeAck resize_ack);
   // Used to force the size of a window when running layout tests.
   void SetWindowRectSynchronously(const gfx::Rect& new_window_rect);
@@ -407,7 +412,7 @@ class CONTENT_EXPORT RenderWidget
   void OnCursorVisibilityChange(bool is_visible);
   void OnMouseCaptureLost();
   virtual void OnSetFocus(bool enable);
-  virtual void OnClose();
+  void OnClose();
   void OnCreatingNewAck();
   virtual void OnResize(const ViewMsg_Resize_Params& params);
   void OnEnableDeviceEmulation(const blink::WebDeviceEmulationParams& params);
@@ -439,6 +444,7 @@ class CONTENT_EXPORT RenderWidget
   void OnUpdateScreenRects(const gfx::Rect& view_screen_rect,
                            const gfx::Rect& window_screen_rect);
   void OnShowImeIfNeeded();
+  void OnSetSurfaceIdNamespace(uint32_t surface_id_namespace);
 
 #if defined(OS_ANDROID)
   // Whenever an IME event that needs an acknowledgement is sent to the browser,
@@ -557,10 +563,6 @@ class CONTENT_EXPORT RenderWidget
   // just handled.
   virtual void DidHandleMouseEvent(const blink::WebMouseEvent& event) {}
 
-  // Called by OnHandleInputEvent() to notify subclasses that a touch event was
-  // just handled.
-  virtual void DidHandleTouchEvent(const blink::WebTouchEvent& event) {}
-
   // Called by OnHandleInputEvent() to forward a mouse wheel event to the
   // compositor thread, to effect the elastic overscroll effect.
   void ObserveWheelEventAndResult(const blink::WebMouseWheelEvent& wheel_event,
@@ -658,8 +660,11 @@ class CONTENT_EXPORT RenderWidget
   // Indicates that we are never visible, so never produce graphical output.
   bool never_visible_;
 
-  // Indicates that we are in fullscreen mode.
-  bool is_fullscreen_;
+  // Indicates whether tab-initiated fullscreen was granted.
+  bool is_fullscreen_granted_;
+
+  // Indicates the display mode.
+  blink::WebDisplayMode display_mode_;
 
   // Indicates whether we have been focused/unfocused by the browser.
   bool has_focus_;
@@ -687,6 +692,11 @@ class CONTENT_EXPORT RenderWidget
   // being rendered by another process.  If all RenderWidgets in a process are
   // swapped out, the process can exit.
   bool is_swapped_out_;
+
+  // TODO(simonhong): Remove this when we enable BeginFrame scheduling for
+  // OOPIF(crbug.com/471411).
+  // Whether this RenderWidget is for an out-of-process iframe or not.
+  bool for_oopif_;
 
   // Indicates if an input method is active in the browser process.
   bool input_method_is_active_;

@@ -41,6 +41,10 @@ class SecurityOrigin;
 
 class PLATFORM_EXPORT SecurityPolicy {
 public:
+    // This must be called during initialization (before we create
+    // other threads).
+    static void init();
+
     // True if the referrer should be omitted according to the
     // ReferrerPolicyNoReferrerWhenDowngrade. If you intend to send a
     // referrer header, you should use generateReferrer instead.
@@ -57,6 +61,9 @@ public:
 
     static bool isAccessWhiteListed(const SecurityOrigin* activeOrigin, const SecurityOrigin* targetOrigin);
     static bool isAccessToURLWhiteListed(const SecurityOrigin* activeOrigin, const KURL&);
+
+    static void addOriginTrustworthyWhiteList(PassRefPtr<SecurityOrigin>);
+    static bool isOriginWhiteListedTrustworthy(const SecurityOrigin&);
 };
 
 } // namespace blink

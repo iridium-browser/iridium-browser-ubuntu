@@ -281,7 +281,6 @@ struct SK_API SkIRect {
         If either rectangle is empty, do nothing and return false.
     */
     bool SK_WARN_UNUSED_RESULT intersect(const SkIRect& r) {
-        SkASSERT(&r);
         return this->intersect(r.fLeft, r.fTop, r.fRight, r.fBottom);
     }
 
@@ -748,11 +747,19 @@ public:
         if (fLeft >= fRight || fTop >= fBottom) {
             *this = r;
         } else {
-            fLeft   = SkMinScalar(fLeft, r.left());
-            fTop    = SkMinScalar(fTop, r.top());
-            fRight  = SkMaxScalar(fRight, r.right());
-            fBottom = SkMaxScalar(fBottom, r.bottom());
+            this->joinPossiblyEmptyRect(r);
         }
+    }
+
+    /**
+     * Joins the rectangle with another without checking if either are empty (may produce unexpected
+     * results if either rect is inverted).
+     */
+    void joinPossiblyEmptyRect(const SkRect& r) {
+        fLeft   = SkMinScalar(fLeft, r.left());
+        fTop    = SkMinScalar(fTop, r.top());
+        fRight  = SkMaxScalar(fRight, r.right());
+        fBottom = SkMaxScalar(fBottom, r.bottom());
     }
 
     /**

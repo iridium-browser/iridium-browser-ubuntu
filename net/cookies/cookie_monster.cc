@@ -54,11 +54,13 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/profiler/scoped_tracker.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/thread_task_runner_handle.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_util.h"
@@ -69,12 +71,11 @@ using base::TimeDelta;
 using base::TimeTicks;
 
 // In steady state, most cookie requests can be satisfied by the in memory
-// cookie monster store.  However, if a request comes in during the initial
-// cookie load, it must be delayed until that load completes. That is done by
-// queueing it on CookieMonster::tasks_pending_ and running it when notification
-// of cookie load completion is received via CookieMonster::OnLoaded. This
-// callback is passed to the persistent store from CookieMonster::InitStore(),
-// which is called on the first operation invoked on the CookieMonster.
+// cookie monster store. If the cookie request cannot be satisfied by the in
+// memory store, the relevant cookies must be fetched from the persistent
+// store. The task is queued in CookieMonster::tasks_pending_ if it requires
+// all cookies to be loaded from the backend, or tasks_pending_for_key_ if it
+// only requires all cookies associated with an eTLD+1.
 //
 // On the browser critical paths (e.g. for loading initial web pages in a
 // session restore) it may take too long to wait for the full load. If a cookie
@@ -91,6 +92,14 @@ using base::TimeTicks;
 // same eTLD+1.
 
 static const int kMinutesInTenYears = 10 * 365 * 24 * 60;
+
+namespace {
+
+const char kFetchWhenNecessaryName[] = "FetchWhenNecessary";
+const char kAlwaysFetchName[] = "AlwaysFetch";
+const char kCookieMonsterFetchStrategyName[] = "CookieMonsterFetchStrategy";
+
+}  // namespace
 
 namespace net {
 
@@ -165,15 +174,14 @@ bool LRACookieSorter(const CookieMonster::CookieMap::iterator& it1,
 
 // Compare cookies using name, domain and path, so that "equivalent" cookies
 // (per RFC 2965) are equal to each other.
-bool PartialDiffCookieSorter(const net::CanonicalCookie& a,
-                             const net::CanonicalCookie& b) {
+bool PartialDiffCookieSorter(const CanonicalCookie& a,
+                             const CanonicalCookie& b) {
   return a.PartialCompare(b);
 }
 
 // This is a stricter ordering than PartialDiffCookieOrdering, where all fields
 // are used.
-bool FullDiffCookieSorter(const net::CanonicalCookie& a,
-                          const net::CanonicalCookie& b) {
+bool FullDiffCookieSorter(const CanonicalCookie& a, const CanonicalCookie& b) {
   return a.FullCompare(b);
 }
 
@@ -329,7 +337,9 @@ void RunAsync(scoped_refptr<base::TaskRunner> proxy,
 CookieMonster::CookieMonster(PersistentCookieStore* store,
                              CookieMonsterDelegate* delegate)
     : initialized_(false),
-      loaded_(false),
+      started_fetching_all_cookies_(false),
+      finished_fetching_all_cookies_(false),
+      fetch_strategy_(kUnknownFetch),
       store_(store),
       last_access_threshold_(
           TimeDelta::FromSeconds(kDefaultAccessUpdateThresholdSeconds)),
@@ -345,7 +355,9 @@ CookieMonster::CookieMonster(PersistentCookieStore* store,
                              CookieMonsterDelegate* delegate,
                              int last_access_threshold_milliseconds)
     : initialized_(false),
-      loaded_(false),
+      started_fetching_all_cookies_(false),
+      finished_fetching_all_cookies_(false),
+      fetch_strategy_(kUnknownFetch),
       store_(store),
       last_access_threshold_(base::TimeDelta::FromMilliseconds(
           last_access_threshold_milliseconds)),
@@ -382,7 +394,7 @@ class CookieMonster::CookieMonsterTask
   friend class base::RefCountedThreadSafe<CookieMonsterTask>;
 
   CookieMonster* cookie_monster_;
-  scoped_refptr<base::MessageLoopProxy> thread_;
+  scoped_refptr<base::SingleThreadTaskRunner> thread_;
 
   DISALLOW_COPY_AND_ASSIGN(CookieMonsterTask);
 };
@@ -390,7 +402,7 @@ class CookieMonster::CookieMonsterTask
 CookieMonster::CookieMonsterTask::CookieMonsterTask(
     CookieMonster* cookie_monster)
     : cookie_monster_(cookie_monster),
-      thread_(base::MessageLoopProxy::current()) {
+      thread_(base::ThreadTaskRunnerHandle::Get()) {
 }
 
 CookieMonster::CookieMonsterTask::~CookieMonsterTask() {
@@ -557,7 +569,7 @@ class CookieMonster::DeleteTask : public CookieMonsterTask {
       : CookieMonsterTask(cookie_monster), callback_(callback) {}
 
   // CookieMonsterTask:
-  virtual void Run() override;
+  void Run() override;
 
  protected:
   ~DeleteTask() override;
@@ -766,10 +778,6 @@ class CookieMonster::SetCookieWithOptionsTask : public CookieMonsterTask {
 };
 
 void CookieMonster::SetCookieWithOptionsTask::Run() {
-  // TODO(pkasting): Remove ScopedTracker below once crbug.com/456373 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION(
-          "456373 CookieMonster::SetCookieWithOptionsTask::Run"));
   bool result = this->cookie_monster()->SetCookieWithOptions(url_, cookie_line_,
                                                              options_);
   if (!callback_.is_null()) {
@@ -848,7 +856,7 @@ class CookieMonster::GetCookiesWithOptionsTask : public CookieMonsterTask {
 };
 
 void CookieMonster::GetCookiesWithOptionsTask::Run() {
-  // TODO(pkasting): Remove ScopedTracker below once crbug.com/456373 is fixed.
+  // TODO(mkwst): Remove ScopedTracker below once crbug.com/456373 is fixed.
   tracked_objects::ScopedTracker tracking_profile(
       FROM_HERE_WITH_EXPLICIT_FUNCTION(
           "456373 CookieMonster::GetCookiesWithOptionsTask::Run"));
@@ -1091,8 +1099,9 @@ void CookieMonster::DoCookieTask(
     const scoped_refptr<CookieMonsterTask>& task_item) {
   {
     base::AutoLock autolock(lock_);
-    InitIfNecessary();
-    if (!loaded_) {
+    MarkCookieStoreAsInitialized();
+    FetchAllCookiesIfNecessary();
+    if (!finished_fetching_all_cookies_ && store_.get()) {
       tasks_pending_.push(task_item);
       return;
     }
@@ -1106,10 +1115,12 @@ void CookieMonster::DoCookieTaskForURL(
     const GURL& url) {
   {
     base::AutoLock autolock(lock_);
-    InitIfNecessary();
+    MarkCookieStoreAsInitialized();
+    if (ShouldFetchAllCookiesWhenFetchingAnyCookie())
+      FetchAllCookiesIfNecessary();
     // If cookies for the requested domain key (eTLD+1) have been loaded from DB
     // then run the task, otherwise load from DB.
-    if (!loaded_) {
+    if (!finished_fetching_all_cookies_ && store_.get()) {
       // Checks if the domain key has been loaded.
       std::string key(
           cookie_util::GetEffectiveDomain(url.scheme(), url.host()));
@@ -1167,11 +1178,13 @@ bool CookieMonster::SetCookieWithDetails(const GURL& url,
 
 bool CookieMonster::ImportCookies(const CookieList& list) {
   base::AutoLock autolock(lock_);
-  InitIfNecessary();
-  for (net::CookieList::const_iterator iter = list.begin(); iter != list.end();
+  MarkCookieStoreAsInitialized();
+  if (ShouldFetchAllCookiesWhenFetchingAnyCookie())
+    FetchAllCookiesIfNecessary();
+  for (CookieList::const_iterator iter = list.begin(); iter != list.end();
        ++iter) {
     scoped_ptr<CanonicalCookie> cookie(new CanonicalCookie(*iter));
-    net::CookieOptions options;
+    CookieOptions options;
     options.set_include_httponly();
     options.set_include_first_party_only();
     if (!SetCanonicalCookie(&cookie, cookie->CreationDate(), options))
@@ -1238,6 +1251,10 @@ CookieList CookieMonster::GetAllCookiesForURL(const GURL& url) {
 }
 
 int CookieMonster::DeleteAll(bool sync_to_store) {
+  // TODO(xiyuan): Remove the log after http://crbug.com/449816.
+  VLOG(kVlogSetCookies) << "CookieMonster::DeleteAll, sync_to_store="
+                        << sync_to_store;
+
   base::AutoLock autolock(lock_);
 
   int num_deleted = 0;
@@ -1256,6 +1273,9 @@ int CookieMonster::DeleteAll(bool sync_to_store) {
 
 int CookieMonster::DeleteAllCreatedBetween(const Time& delete_begin,
                                            const Time& delete_end) {
+  // TODO(xiyuan): Remove the log after http://crbug.com/449816.
+  VLOG(kVlogSetCookies) << "CookieMonster::DeleteAllCreatedBetween";
+
   base::AutoLock autolock(lock_);
 
   int num_deleted = 0;
@@ -1278,6 +1298,9 @@ int CookieMonster::DeleteAllCreatedBetween(const Time& delete_begin,
 int CookieMonster::DeleteAllCreatedBetweenForHost(const Time delete_begin,
                                                   const Time delete_end,
                                                   const GURL& url) {
+  // TODO(xiyuan): Remove the log after http://crbug.com/449816.
+  VLOG(kVlogSetCookies) << "CookieMonster::DeleteAllCreatedBetweenForHost";
+
   base::AutoLock autolock(lock_);
 
   if (!HasCookieableScheme(url))
@@ -1315,6 +1338,9 @@ int CookieMonster::DeleteAllForHost(const GURL& url) {
 }
 
 bool CookieMonster::DeleteCanonicalCookie(const CanonicalCookie& cookie) {
+  // TODO(xiyuan): Remove the log after http://crbug.com/449816.
+  VLOG(kVlogSetCookies) << "CookieMonster::DeleteCanonicalCookie";
+
   base::AutoLock autolock(lock_);
 
   for (CookieMapItPair its = cookies_.equal_range(GetKey(cookie.Domain()));
@@ -1384,6 +1410,9 @@ std::string CookieMonster::GetCookiesWithOptions(const GURL& url,
 
 void CookieMonster::DeleteCookie(const GURL& url,
                                  const std::string& cookie_name) {
+  // TODO(xiyuan): Remove the log after http://crbug.com/449816.
+  VLOG(kVlogSetCookies) << "CookieMonster::DeleteCookie";
+
   base::AutoLock autolock(lock_);
 
   if (!HasCookieableScheme(url))
@@ -1416,6 +1445,9 @@ void CookieMonster::DeleteCookie(const GURL& url,
 }
 
 int CookieMonster::DeleteSessionCookies() {
+  // TODO(xiyuan): Remove the log after http://crbug.com/449816.
+  VLOG(kVlogSetCookies) << "CookieMonster::DeleteSessionCookies";
+
   base::AutoLock autolock(lock_);
 
   int num_deleted = 0;
@@ -1473,13 +1505,47 @@ bool CookieMonster::SetCookieWithCreationTime(const GURL& url,
     return false;
   }
 
-  InitIfNecessary();
+  MarkCookieStoreAsInitialized();
+  if (ShouldFetchAllCookiesWhenFetchingAnyCookie())
+    FetchAllCookiesIfNecessary();
+
   return SetCookieWithCreationTimeAndOptions(url, cookie_line, creation_time,
                                              CookieOptions());
 }
 
-void CookieMonster::InitStore() {
+void CookieMonster::MarkCookieStoreAsInitialized() {
+  initialized_ = true;
+}
+
+void CookieMonster::FetchAllCookiesIfNecessary() {
+  if (store_.get() && !started_fetching_all_cookies_) {
+    started_fetching_all_cookies_ = true;
+    FetchAllCookies();
+  }
+}
+
+bool CookieMonster::ShouldFetchAllCookiesWhenFetchingAnyCookie() {
+  if (fetch_strategy_ == kUnknownFetch) {
+    const std::string group_name =
+        base::FieldTrialList::FindFullName(kCookieMonsterFetchStrategyName);
+    if (group_name == kFetchWhenNecessaryName) {
+      fetch_strategy_ = kFetchWhenNecessary;
+    } else if (group_name == kAlwaysFetchName) {
+      fetch_strategy_ = kAlwaysFetch;
+    } else {
+      // The logic in the conditional is redundant, but it makes trials of
+      // the Finch experiment more explicit.
+      fetch_strategy_ = kAlwaysFetch;
+    }
+  }
+
+  return fetch_strategy_ == kAlwaysFetch;
+}
+
+void CookieMonster::FetchAllCookies() {
   DCHECK(store_.get()) << "Store must exist to initialize";
+  DCHECK(!finished_fetching_all_cookies_)
+      << "All cookies have already been fetched.";
 
   // We bind in the current time so that we can report the wall-clock time for
   // loading cookies.
@@ -1532,6 +1598,12 @@ void CookieMonster::OnKeyLoaded(const std::string& key,
 
 void CookieMonster::StoreLoadedCookies(
     const std::vector<CanonicalCookie*>& cookies) {
+  // TODO(erikwright): Remove ScopedTracker below once crbug.com/457528 is
+  // fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "457528 CookieMonster::StoreLoadedCookies"));
+
   // Initialize the store and sync in any saved persistent cookies.  We don't
   // care if it's expired, insert it so it can be garbage collected, removed,
   // and sync'd.
@@ -1594,7 +1666,7 @@ void CookieMonster::InvokeQueue() {
     {
       base::AutoLock autolock(lock_);
       if (tasks_pending_.empty()) {
-        loaded_ = true;
+        finished_fetching_all_cookies_ = true;
         creation_times_.clear();
         keys_loaded_.clear();
         break;
@@ -1812,7 +1884,7 @@ CookieMonster::CookieMap::iterator CookieMonster::InternalInsertCookie(
     const std::string& key,
     CanonicalCookie* cc,
     bool sync_to_store) {
-  // TODO(pkasting): Remove ScopedTracker below once crbug.com/456373 is fixed.
+  // TODO(mkwst): Remove ScopedTracker below once crbug.com/456373 is fixed.
   tracked_objects::ScopedTracker tracking_profile(
       FROM_HERE_WITH_EXPLICIT_FUNCTION(
           "456373 CookieMonster::InternalInsertCookie"));
@@ -1909,7 +1981,7 @@ bool CookieMonster::SetCanonicalCookie(scoped_ptr<CanonicalCookie>* cc,
 bool CookieMonster::SetCanonicalCookies(const CookieList& list) {
   base::AutoLock autolock(lock_);
 
-  net::CookieOptions options;
+  CookieOptions options;
   options.set_include_httponly();
 
   for (CookieList::const_iterator it = list.begin(); it != list.end(); ++it) {
@@ -1959,7 +2031,9 @@ void CookieMonster::InternalDeleteCookie(CookieMap::iterator it,
     histogram_cookie_deletion_cause_->Add(deletion_cause);
 
   CanonicalCookie* cc = it->second;
-  VLOG(kVlogSetCookies) << "InternalDeleteCookie() cc: " << cc->DebugString();
+  VLOG(kVlogSetCookies) << "InternalDeleteCookie()"
+                        << ", cause:" << deletion_cause
+                        << ", cc: " << cc->DebugString();
 
   if ((cc->IsPersistent() || persist_session_cookies_) && store_.get() &&
       sync_to_store)
@@ -2085,6 +2159,9 @@ int CookieMonster::GarbageCollect(const Time& current, const std::string& key) {
 int CookieMonster::GarbageCollectExpired(const Time& current,
                                          const CookieMapItPair& itpair,
                                          CookieItVector* cookie_its) {
+  // TODO(xiyuan): Remove the log after http://crbug.com/449816.
+  VLOG(kVlogSetCookies) << "CookieMonster::GarbageCollectExpired";
+
   if (keep_expired_cookies_)
     return 0;
 
@@ -2110,6 +2187,9 @@ int CookieMonster::GarbageCollectDeleteRange(const Time& current,
                                              DeletionCause cause,
                                              CookieItVector::iterator it_begin,
                                              CookieItVector::iterator it_end) {
+  // TODO(xiyuan): Remove the log after http://crbug.com/449816.
+  VLOG(kVlogSetCookies) << "CookieMonster::GarbageCollectDeleteRange";
+
   for (CookieItVector::iterator it = it_begin; it != it_end; it++) {
     histogram_evicted_last_access_minutes_->Add(
         (current - (*it)->second->LastAccessDate()).InMinutes());
@@ -2289,8 +2369,8 @@ void CookieMonster::InitializeHistograms() {
       "Cookie.DeletionCause", 1, DELETE_COOKIE_LAST_ENTRY - 1,
       DELETE_COOKIE_LAST_ENTRY, base::Histogram::kUmaTargetedHistogramFlag);
   histogram_cookie_type_ = base::LinearHistogram::FactoryGet(
-      "Cookie.Type", 1, COOKIE_TYPE_LAST_ENTRY - 1, COOKIE_TYPE_LAST_ENTRY,
-      base::Histogram::kUmaTargetedHistogramFlag);
+      "Cookie.Type", 1, (1 << COOKIE_TYPE_LAST_ENTRY) - 1,
+      1 << COOKIE_TYPE_LAST_ENTRY, base::Histogram::kUmaTargetedHistogramFlag);
 
   // From UMA_HISTOGRAM_{CUSTOM_,}TIMES
   histogram_time_blocked_on_load_ = base::Histogram::FactoryTimeGet(
@@ -2349,7 +2429,7 @@ CookieMonster::AddCallbackForCookie(const GURL& gurl,
   if (hook_map_.count(key) == 0)
     hook_map_[key] = make_linked_ptr(new CookieChangedCallbackList());
   return hook_map_[key]->Add(
-      base::Bind(&RunAsync, base::MessageLoopProxy::current(), callback));
+      base::Bind(&RunAsync, base::ThreadTaskRunnerHandle::Get(), callback));
 }
 
 #if defined(OS_ANDROID)

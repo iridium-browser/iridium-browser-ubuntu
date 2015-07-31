@@ -6,6 +6,7 @@
 
 #include "base/base64.h"
 #include "base/strings/stringprintf.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/local_discovery/privet_http.h"
 #include "content/public/test/test_utils.h"
 #include "crypto/hmac.h"
@@ -40,8 +41,8 @@ const char kInfoResponse[] =
 class MockPrivetHTTPClient : public PrivetHTTPClient {
  public:
   MockPrivetHTTPClient() {
-    request_context_ =
-        new net::TestURLRequestContextGetter(base::MessageLoopProxy::current());
+    request_context_ = new net::TestURLRequestContextGetter(
+        base::ThreadTaskRunnerHandle::Get());
   }
 
   MOCK_METHOD0(GetName, const std::string&());
@@ -49,17 +50,17 @@ class MockPrivetHTTPClient : public PrivetHTTPClient {
       CreateInfoOperationPtr,
       PrivetJSONOperation*(const PrivetJSONOperation::ResultCallback&));
 
-  virtual void RefreshPrivetToken(
+  void RefreshPrivetToken(
       const PrivetURLFetcher::TokenCallback& callback) override {
     FAIL();
   }
 
-  virtual scoped_ptr<PrivetJSONOperation> CreateInfoOperation(
+  scoped_ptr<PrivetJSONOperation> CreateInfoOperation(
       const PrivetJSONOperation::ResultCallback& callback) override {
     return make_scoped_ptr(CreateInfoOperationPtr(callback));
   }
 
-  virtual scoped_ptr<PrivetURLFetcher> CreateURLFetcher(
+  scoped_ptr<PrivetURLFetcher> CreateURLFetcher(
       const GURL& url,
       net::URLFetcher::RequestType request_type,
       PrivetURLFetcher::Delegate* delegate) override {
@@ -78,17 +79,22 @@ class PrivetV3SessionTest : public testing::Test {
       : fetcher_factory_(nullptr),
         session_(make_scoped_ptr(new MockPrivetHTTPClient())) {}
 
-  virtual ~PrivetV3SessionTest() {}
+  ~PrivetV3SessionTest() override {}
 
-  MOCK_METHOD2(OnInitialized, void(Result, const std::vector<PairingType>&));
+  void OnInitialized(Result result, const base::DictionaryValue& info) {
+    info_.MergeDictionary(&info);
+    OnInitializedMock(result, info);
+  }
+
+  MOCK_METHOD2(OnInitializedMock, void(Result, const base::DictionaryValue&));
   MOCK_METHOD1(OnPairingStarted, void(Result));
   MOCK_METHOD1(OnCodeConfirmed, void(Result));
-  MOCK_METHOD2(OnMessageSend, void(Result, const base::DictionaryValue& value));
-  MOCK_METHOD1(OnPostData, void(const base::DictionaryValue& data));
+  MOCK_METHOD2(OnMessageSend, void(Result, const base::DictionaryValue&));
+  MOCK_METHOD1(OnPostData, void(const base::DictionaryValue&));
 
  protected:
-  virtual void SetUp() override {
-    EXPECT_CALL(*this, OnInitialized(_, _)).Times(0);
+  void SetUp() override {
+    EXPECT_CALL(*this, OnInitializedMock(_, _)).Times(0);
     EXPECT_CALL(*this, OnPairingStarted(_)).Times(0);
     EXPECT_CALL(*this, OnCodeConfirmed(_)).Times(0);
     EXPECT_CALL(*this, OnMessageSend(_, _)).Times(0);
@@ -97,6 +103,7 @@ class PrivetV3SessionTest : public testing::Test {
         base::Bind(&PrivetV3SessionTest::OnPostData, base::Unretained(this));
   }
 
+  base::DictionaryValue info_;
   base::MessageLoop loop_;
   base::Closure quit_closure_;
   net::FakeURLFetcherFactory fetcher_factory_;
@@ -104,7 +111,8 @@ class PrivetV3SessionTest : public testing::Test {
 };
 
 TEST_F(PrivetV3SessionTest, InitError) {
-  EXPECT_CALL(*this, OnInitialized(Result::STATUS_CONNECTIONERROR, _)).Times(1);
+  EXPECT_CALL(*this, OnInitializedMock(Result::STATUS_CONNECTIONERROR, _))
+      .Times(1);
   fetcher_factory_.SetFakeResponse(GURL("http://host/privet/info"), "",
                                    net::HTTP_OK, net::URLRequestStatus::FAILED);
   session_.Init(
@@ -116,7 +124,8 @@ TEST_F(PrivetV3SessionTest, VersionError) {
   std::string response(kInfoResponse);
   ReplaceFirstSubstringAfterOffset(&response, 0, "3.0", "4.1");
 
-  EXPECT_CALL(*this, OnInitialized(Result::STATUS_SESSIONERROR, _)).Times(1);
+  EXPECT_CALL(*this, OnInitializedMock(Result::STATUS_SESSIONERROR, _))
+      .Times(1);
   fetcher_factory_.SetFakeResponse(GURL("http://host/privet/info"), response,
                                    net::HTTP_OK,
                                    net::URLRequestStatus::SUCCESS);
@@ -129,7 +138,8 @@ TEST_F(PrivetV3SessionTest, ModeError) {
   std::string response(kInfoResponse);
   ReplaceFirstSubstringAfterOffset(&response, 0, "mode", "mode_");
 
-  EXPECT_CALL(*this, OnInitialized(Result::STATUS_SESSIONERROR, _)).Times(1);
+  EXPECT_CALL(*this, OnInitializedMock(Result::STATUS_SESSIONERROR, _))
+      .Times(1);
   fetcher_factory_.SetFakeResponse(GURL("http://host/privet/info"), response,
                                    net::HTTP_OK,
                                    net::URLRequestStatus::SUCCESS);
@@ -139,9 +149,8 @@ TEST_F(PrivetV3SessionTest, ModeError) {
 }
 
 TEST_F(PrivetV3SessionTest, Pairing) {
-  std::vector<PairingType> pairings;
-  EXPECT_CALL(*this, OnInitialized(Result::STATUS_SUCCESS, _))
-      .WillOnce(SaveArg<1>(&pairings));
+  EXPECT_CALL(*this, OnInitializedMock(Result::STATUS_SUCCESS, _))
+      .Times(1);
   fetcher_factory_.SetFakeResponse(GURL("http://host/privet/info"),
                                    kInfoResponse, net::HTTP_OK,
                                    net::URLRequestStatus::SUCCESS);
@@ -150,9 +159,15 @@ TEST_F(PrivetV3SessionTest, Pairing) {
       base::Bind(&PrivetV3SessionTest::OnInitialized, base::Unretained(this)));
   base::RunLoop().RunUntilIdle();
 
-  EXPECT_EQ(2u, pairings.size());
-  EXPECT_EQ(PairingType::PAIRING_TYPE_PINCODE, pairings[0]);
-  EXPECT_EQ(PairingType::PAIRING_TYPE_EMBEDDEDCODE, pairings[1]);
+  const base::ListValue* pairing = nullptr;
+  ASSERT_TRUE(info_.GetList("authentication.pairing", &pairing));
+
+  std::string pairing_string;
+  ASSERT_TRUE(pairing->GetString(0, &pairing_string));
+  EXPECT_EQ("pinCode", pairing_string);
+
+  ASSERT_TRUE(pairing->GetString(1, &pairing_string));
+  EXPECT_EQ("embeddedCode", pairing_string);
 
   crypto::P224EncryptedKeyExchange spake(
       crypto::P224EncryptedKeyExchange::kPeerTypeServer, "testPin");
@@ -254,7 +269,7 @@ TEST_F(PrivetV3SessionTest, Pairing) {
 }
 
 TEST_F(PrivetV3SessionTest, Cancel) {
-  EXPECT_CALL(*this, OnInitialized(Result::STATUS_SUCCESS, _));
+  EXPECT_CALL(*this, OnInitializedMock(Result::STATUS_SUCCESS, _)).Times(1);;
   fetcher_factory_.SetFakeResponse(GURL("http://host/privet/info"),
                                    kInfoResponse, net::HTTP_OK,
                                    net::URLRequestStatus::SUCCESS);

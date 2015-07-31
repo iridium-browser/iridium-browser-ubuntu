@@ -109,11 +109,6 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   // Record time from process startup to present time in an UMA histogram.
   void RecordBrowserStartupTime();
 
-  // Records a time value to an UMA histogram in the context of the
-  // PreReadExperiment field-trial. This also reports to the appropriate
-  // sub-histogram (_PreRead(Enabled|Disabled)).
-  void RecordPreReadExperimentTime(const char* name, base::TimeDelta time);
-
   // Methods for Main Message Loop -------------------------------------------
 
   int PreCreateThreadsImpl();

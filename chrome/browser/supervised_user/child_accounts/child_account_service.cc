@@ -6,11 +6,8 @@
 
 #include "base/callback.h"
 #include "base/command_line.h"
-#include "base/files/file_path.h"
-#include "base/files/file_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
-#include "base/path_service.h"
 #include "base/prefs/pref_service.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
@@ -24,7 +21,6 @@
 #include "chrome/browser/supervised_user/supervised_user_settings_service_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
-#include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
@@ -99,23 +95,24 @@ bool ChildAccountService::IsChildAccountDetectionEnabled() {
 
 void ChildAccountService::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterBooleanPref(
-      prefs::kChildAccountStatusKnown,
-      false,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterBooleanPref(prefs::kChildAccountStatusKnown, false);
 }
 
 void ChildAccountService::SetIsChildAccount(bool is_child_account) {
   PropagateChildStatusToUser(is_child_account);
-  if (profile_->IsChild() == is_child_account)
-    return;
-
-  if (is_child_account) {
-    profile_->GetPrefs()->SetString(prefs::kSupervisedUserId,
-                                    supervised_users::kChildAccountSUID);
-  } else {
-    profile_->GetPrefs()->ClearPref(prefs::kSupervisedUserId);
+  if (profile_->IsChild() != is_child_account) {
+    if (is_child_account) {
+      profile_->GetPrefs()->SetString(prefs::kSupervisedUserId,
+                                      supervised_users::kChildAccountSUID);
+    } else {
+      profile_->GetPrefs()->ClearPref(prefs::kSupervisedUserId);
+    }
   }
+  profile_->GetPrefs()->SetBoolean(prefs::kChildAccountStatusKnown, true);
+
+  for (const auto& callback : status_received_callback_list_)
+    callback.Run();
+  status_received_callback_list_.clear();
 }
 
 void ChildAccountService::Init() {
@@ -181,8 +178,6 @@ bool ChildAccountService::SetActive(bool active) {
         SupervisedUserServiceFactory::GetForProfile(profile_);
     service->AddPermissionRequestCreator(
         PermissionRequestCreatorApiary::CreateWithProfile(profile_));
-
-    EnableExperimentalFiltering();
   } else {
     SupervisedUserSettingsService* settings_service =
         SupervisedUserSettingsServiceFactory::GetForProfile(profile_);
@@ -204,28 +199,6 @@ bool ChildAccountService::SetActive(bool active) {
     sync_service->ReconfigureDatatypeManager();
 
   return true;
-}
-
-base::FilePath ChildAccountService::GetBlacklistPath() const {
-  if (!active_)
-    return base::FilePath();
-  base::FilePath blacklist_path;
-  PathService::Get(chrome::DIR_USER_DATA, &blacklist_path);
-  blacklist_path = blacklist_path.AppendASCII("su-blacklist.bin");
-  return blacklist_path;
-}
-
-GURL ChildAccountService::GetBlacklistURL() const {
-  if (!active_)
-    return GURL();
-  return GURL("https://www.gstatic.com/chrome/supervised_user/"
-              "blacklist-20141001-1k.bin");
-}
-
-std::string ChildAccountService::GetSafeSitesCx() const {
-  if (!active_)
-    return std::string();
-  return "017993620680222980993%3A1wdumejvx5i";
 }
 
 void ChildAccountService::GoogleSigninSucceeded(const std::string& account_id,
@@ -349,16 +322,6 @@ void ChildAccountService::OnFlagsFetched(
       std::find(flags.begin(), flags.end(),
                 kIsChildAccountServiceFlagName) != flags.end();
 
-  bool status_was_known = profile_->GetPrefs()->GetBoolean(
-      prefs::kChildAccountStatusKnown);
-  profile_->GetPrefs()->SetBoolean(prefs::kChildAccountStatusKnown, true);
-
-  if (!status_was_known) {
-    for (auto& callback : status_received_callback_list_)
-      callback.Run();
-    status_received_callback_list_.clear();
-  }
-
   SetIsChildAccount(is_child_account);
 
   ScheduleNextStatusFlagUpdate(
@@ -425,24 +388,4 @@ void ChildAccountService::ClearSecondCustodianPrefs() {
       prefs::kSupervisedUserSecondCustodianProfileURL);
   profile_->GetPrefs()->ClearPref(
       prefs::kSupervisedUserSecondCustodianProfileImageURL);
-}
-
-void ChildAccountService::EnableExperimentalFiltering() {
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-
-  // Static blacklist defaults to enabled.
-  bool has_enable_blacklist =
-      command_line->HasSwitch(switches::kEnableSupervisedUserBlacklist);
-  bool has_disable_blacklist =
-      command_line->HasSwitch(switches::kDisableSupervisedUserBlacklist);
-  if (!has_enable_blacklist && !has_disable_blacklist)
-    command_line->AppendSwitch(switches::kEnableSupervisedUserBlacklist);
-
-  // Query-based filtering also defaults to enabled.
-  bool has_enable_safesites =
-      command_line->HasSwitch(switches::kEnableSupervisedUserSafeSites);
-  bool has_disable_safesites =
-      command_line->HasSwitch(switches::kDisableSupervisedUserSafeSites);
-  if (!has_enable_safesites && !has_disable_safesites)
-    command_line->AppendSwitch(switches::kEnableSupervisedUserSafeSites);
 }

@@ -18,6 +18,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/lock.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/simple_thread.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_checker.h"
@@ -28,7 +29,7 @@
 #include "cc/output/context_provider.h"
 #include "cc/output/output_surface.h"
 #include "cc/output/output_surface_client.h"
-#include "cc/resources/task_graph_runner.h"
+#include "cc/raster/task_graph_runner.h"
 #include "cc/scheduler/begin_frame_source.h"
 #include "cc/surfaces/onscreen_display_client.h"
 #include "cc/surfaces/surface_display_output_surface.h"
@@ -58,7 +59,6 @@
 #include "ui/android/window_android.h"
 #include "ui/gfx/android/device_display_info.h"
 #include "ui/gfx/frame_time.h"
-#include "webkit/common/gpu/context_provider_in_process.h"
 
 namespace content {
 
@@ -421,10 +421,14 @@ void CompositorImpl::CreateLayerTreeHost() {
   // TODO(enne): Update this this compositor to use the scheduler.
   settings.single_thread_proxy_scheduler = false;
 
-  host_ = cc::LayerTreeHost::CreateSingleThreaded(
-      this, this, HostSharedBitmapManager::current(),
-      BrowserGpuMemoryBufferManager::current(), g_task_graph_runner.Pointer(),
-      settings, base::MessageLoopProxy::current(), nullptr);
+  cc::LayerTreeHost::InitParams params;
+  params.client = this;
+  params.shared_bitmap_manager = HostSharedBitmapManager::current();
+  params.gpu_memory_buffer_manager = BrowserGpuMemoryBufferManager::current();
+  params.task_graph_runner = g_task_graph_runner.Pointer();
+  params.main_task_runner = base::ThreadTaskRunnerHandle::Get();
+  params.settings = &settings;
+  host_ = cc::LayerTreeHost::CreateSingleThreaded(this, &params);
   host_->SetRootLayer(root_layer_);
 
   host_->SetVisible(true);
@@ -470,6 +474,11 @@ void CompositorImpl::SetVisible(bool visible) {
     CreateLayerTreeHost();
     ui_resource_provider_.SetLayerTreeHost(host_.get());
   }
+  // TODO(jdduke): Consider using View.onWindowVisibilityChange() to drive
+  // WindowAndroid visibility updates. CompositorImpl::SetVisible changes can
+  // occur while the visibile surface is temporarily changing, e.g., when
+  // transitioning to fullscreen video. See crbug.com/471262.
+  root_window_->OnVisibilityChanged(visible);
 }
 
 void CompositorImpl::setDeviceScaleFactor(float factor) {
@@ -611,7 +620,7 @@ void CompositorImpl::CreateOutputSurface() {
   scoped_refptr<ContextProviderCommandBuffer> context_provider(
       ContextProviderCommandBuffer::Create(
           CreateGpuProcessViewContext(gpu_channel_host, attrs, surface_id_),
-          "BrowserCompositor"));
+          BROWSER_COMPOSITOR_ONSCREEN_CONTEXT));
   DCHECK(context_provider.get());
 
   scoped_ptr<cc::OutputSurface> real_output_surface(

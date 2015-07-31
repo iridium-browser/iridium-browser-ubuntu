@@ -4,7 +4,10 @@
 
 #include "content/public/test/render_view_test.h"
 
+#include <cctype>
+
 #include "base/run_loop.h"
+#include "components/scheduler/renderer/renderer_scheduler.h"
 #include "content/common/dom_storage/dom_storage_types.h"
 #include "content/common/frame_messages.h"
 #include "content/common/input_messages.h"
@@ -21,19 +24,21 @@
 #include "content/renderer/render_view_impl.h"
 #include "content/renderer/renderer_blink_platform_impl.h"
 #include "content/renderer/renderer_main_platform_delegate.h"
-#include "content/renderer/scheduler/renderer_scheduler.h"
 #include "content/test/fake_compositor_dependencies.h"
 #include "content/test/mock_render_process.h"
 #include "content/test/test_content_client.h"
 #include "third_party/WebKit/public/platform/WebScreenInfo.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
+#include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebHistoryItem.h"
+#include "third_party/WebKit/public/web/WebInputElement.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "third_party/WebKit/public/web/WebKit.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebScriptSource.h"
 #include "third_party/WebKit/public/web/WebView.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/events/keycodes/keyboard_codes.h"
 #include "v8/include/v8.h"
 
 #if defined(OS_MACOSX)
@@ -49,12 +54,39 @@ using blink::WebString;
 using blink::WebURLRequest;
 
 namespace {
+
 const int32 kOpenerId = -2;
 const int32 kRouteId = 5;
 const int32 kMainFrameRouteId = 6;
 const int32 kNewWindowRouteId = 7;
 const int32 kNewFrameRouteId = 10;
 const int32 kSurfaceId = 42;
+
+// Converts |ascii_character| into |key_code| and returns true on success.
+// Handles only the characters needed by tests.
+bool GetWindowsKeyCode(char ascii_character, int* key_code) {
+  if (isalnum(ascii_character)) {
+    *key_code = base::ToUpperASCII(ascii_character);
+    return true;
+  }
+
+  switch (ascii_character) {
+    case '@':
+      *key_code = '2';
+      return true;
+    case '_':
+      *key_code = ui::VKEY_OEM_MINUS;
+      return true;
+    case '.':
+      *key_code = ui::VKEY_OEM_PERIOD;
+      return true;
+    case ui::VKEY_BACK:
+      *key_code = ui::VKEY_BACK;
+      return true;
+    default:
+      return false;
+  }
+}
 
 }  // namespace
 
@@ -63,7 +95,8 @@ namespace content {
 class RendererBlinkPlatformImplNoSandboxImpl
     : public RendererBlinkPlatformImpl {
  public:
-  RendererBlinkPlatformImplNoSandboxImpl(RendererScheduler* scheduler)
+  RendererBlinkPlatformImplNoSandboxImpl(
+      scheduler::RendererScheduler* scheduler)
       : RendererBlinkPlatformImpl(scheduler) {}
 
   virtual blink::WebSandboxSupport* sandboxSupport() {
@@ -73,7 +106,7 @@ class RendererBlinkPlatformImplNoSandboxImpl
 
 RenderViewTest::RendererBlinkPlatformImplNoSandbox::
     RendererBlinkPlatformImplNoSandbox() {
-  renderer_scheduler_ = RendererScheduler::Create();
+  renderer_scheduler_ = scheduler::RendererScheduler::Create();
   blink_platform_impl_.reset(
       new RendererBlinkPlatformImplNoSandboxImpl(renderer_scheduler_.get()));
 }
@@ -82,8 +115,14 @@ RenderViewTest::RendererBlinkPlatformImplNoSandbox::
     ~RendererBlinkPlatformImplNoSandbox() {
 }
 
-blink::Platform* RenderViewTest::RendererBlinkPlatformImplNoSandbox::Get() {
+blink::Platform*
+    RenderViewTest::RendererBlinkPlatformImplNoSandbox::Get() const {
   return blink_platform_impl_.get();
+}
+
+scheduler::RendererScheduler*
+    RenderViewTest::RendererBlinkPlatformImplNoSandbox::Scheduler() const {
+  return renderer_scheduler_.get();
 }
 
 RenderViewTest::RenderViewTest()
@@ -110,7 +149,7 @@ bool RenderViewTest::ExecuteJavaScriptAndReturnIntValue(
     const base::string16& script,
     int* int_result) {
   v8::HandleScope handle_scope(v8::Isolate::GetCurrent());
-  v8::Handle<v8::Value> result =
+  v8::Local<v8::Value> result =
       GetMainFrame()->executeScriptAndReturnValue(WebScriptSource(script));
   if (result.IsEmpty() || !result->IsInt32())
     return false;
@@ -125,7 +164,9 @@ void RenderViewTest::LoadHTML(const char* html) {
   std::string url_str = "data:text/html;charset=utf-8,";
   url_str.append(html);
   GURL url(url_str);
-  GetMainFrame()->loadRequest(WebURLRequest(url));
+  WebURLRequest request(url);
+  request.setCheckForBrowserSideNavigation(false);
+  GetMainFrame()->loadRequest(request);
   // The load actually happens asynchronously, so we pump messages to process
   // the pending continuation.
   FrameLoadWaiter(view_->GetMainRenderFrame()).Wait();
@@ -214,7 +255,6 @@ void RenderViewTest::SetUp() {
   // This needs to pass the mock render thread to the view.
   RenderViewImpl* view =
       RenderViewImpl::Create(view_params, compositor_deps_.get(), false);
-  view->AddRef();
   view_ = view;
 }
 
@@ -245,6 +285,7 @@ void RenderViewTest::TearDown() {
   autorelease_pool_.reset(NULL);
 #endif
 
+  blink_platform_impl_.Scheduler()->Shutdown();
   blink::shutdown();
 
   platform_->PlatformUninitialize();
@@ -300,17 +341,17 @@ gfx::Rect RenderViewTest::GetElementBounds(const std::string& element_id) {
 
   v8::Isolate* isolate = v8::Isolate::GetCurrent();
   v8::HandleScope handle_scope(isolate);
-  v8::Handle<v8::Value>  value = GetMainFrame()->executeScriptAndReturnValue(
+  v8::Local<v8::Value>  value = GetMainFrame()->executeScriptAndReturnValue(
       WebScriptSource(WebString::fromUTF8(script)));
   if (value.IsEmpty() || !value->IsArray())
     return gfx::Rect();
 
-  v8::Handle<v8::Array> array = value.As<v8::Array>();
+  v8::Local<v8::Array> array = value.As<v8::Array>();
   if (array->Length() != 4)
     return gfx::Rect();
   std::vector<int> coords;
   for (int i = 0; i < 4; ++i) {
-    v8::Handle<v8::Number> index = v8::Number::New(isolate, i);
+    v8::Local<v8::Number> index = v8::Number::New(isolate, i);
     v8::Local<v8::Value> value = array->Get(index);
     if (value.IsEmpty() || !value->IsInt32())
       return gfx::Rect();
@@ -378,7 +419,7 @@ uint32 RenderViewTest::GetNavigationIPCType() {
 
 void RenderViewTest::Resize(gfx::Size new_size,
                             gfx::Rect resizer_rect,
-                            bool is_fullscreen) {
+                            bool is_fullscreen_granted) {
   ViewMsg_Resize_Params params;
   params.screen_info = blink::WebScreenInfo();
   params.new_size = new_size;
@@ -386,9 +427,59 @@ void RenderViewTest::Resize(gfx::Size new_size,
   params.top_controls_height = 0.f;
   params.top_controls_shrink_blink_size = false;
   params.resizer_rect = resizer_rect;
-  params.is_fullscreen = is_fullscreen;
+  params.is_fullscreen_granted = is_fullscreen_granted;
+  params.display_mode = blink::WebDisplayModeBrowser;
   scoped_ptr<IPC::Message> resize_message(new ViewMsg_Resize(0, params));
   OnMessageReceived(*resize_message);
+}
+
+void RenderViewTest::SimulateUserTypingASCIICharacter(char ascii_character,
+                                                      bool flush_message_loop) {
+  blink::WebKeyboardEvent event;
+  event.text[0] = ascii_character;
+  ASSERT_TRUE(GetWindowsKeyCode(ascii_character, &event.windowsKeyCode));
+  if (isupper(ascii_character) || ascii_character == '@' ||
+      ascii_character == '_') {
+    event.modifiers = blink::WebKeyboardEvent::ShiftKey;
+  }
+
+  event.type = blink::WebKeyboardEvent::RawKeyDown;
+  SendWebKeyboardEvent(event);
+
+  event.type = blink::WebKeyboardEvent::Char;
+  SendWebKeyboardEvent(event);
+
+  event.type = blink::WebKeyboardEvent::KeyUp;
+  SendWebKeyboardEvent(event);
+
+  if (flush_message_loop) {
+    // Processing is delayed because of a Blink bug:
+    // https://bugs.webkit.org/show_bug.cgi?id=16976 See
+    // PasswordAutofillAgent::TextDidChangeInTextField() for details.
+    base::MessageLoop::current()->RunUntilIdle();
+  }
+}
+
+void RenderViewTest::SimulateUserInputChangeForElement(
+    blink::WebInputElement* input,
+    const std::string& new_value) {
+  ASSERT_TRUE(base::IsStringASCII(new_value));
+  while (!input->focused())
+    input->document().frame()->view()->advanceFocus(false);
+
+  size_t previous_length = input->value().length();
+  for (size_t i = 0; i < previous_length; ++i)
+    SimulateUserTypingASCIICharacter(ui::VKEY_BACK, false);
+
+  EXPECT_TRUE(input->value().utf8().empty());
+  for (size_t i = 0; i < new_value.size(); ++i)
+    SimulateUserTypingASCIICharacter(new_value[i], false);
+
+  // Compare only beginning, because autocomplete may have filled out the
+  // form.
+  EXPECT_EQ(new_value, input->value().utf8().substr(0, new_value.length()));
+
+  base::MessageLoop::current()->RunUntilIdle();
 }
 
 bool RenderViewTest::OnMessageReceived(const IPC::Message& msg) {
@@ -449,6 +540,7 @@ void RenderViewTest::GoToOffset(int offset, const PageState& state) {
   RequestNavigationParams request_params;
   request_params.page_state = state;
   request_params.page_id = impl->page_id_ + offset;
+  request_params.nav_entry_id = pending_offset + 1;
   request_params.pending_history_list_offset = pending_offset;
   request_params.current_history_list_offset = impl->history_list_offset_;
   request_params.current_history_list_length = history_list_length;

@@ -25,7 +25,7 @@
 #include "remoting/host/linux/unicode_to_keysym.h"
 #include "remoting/proto/internal.pb.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_geometry.h"
-#include "ui/events/keycodes/dom4/keycode_converter.h"
+#include "ui/events/keycodes/dom/keycode_converter.h"
 
 namespace remoting {
 
@@ -85,6 +85,17 @@ bool FindKeycodeForUnicode(Display* display,
   }
 
   return false;
+}
+
+bool IsModifierKey(int usb_keycode) {
+  return usb_keycode == 0x0700e0 ||  // Left Ctrl
+         usb_keycode == 0x0700e1 ||  // Left Shift
+         usb_keycode == 0x0700e2 ||  // Left Alt
+         usb_keycode == 0x0700e3 ||  // Left OS
+         usb_keycode == 0x0700e4 ||  // Right Ctrl
+         usb_keycode == 0x0700e5 ||  // Right Shift
+         usb_keycode == 0x0700e6 ||  // Right Alt
+         usb_keycode == 0x0700e7;    // Right OS
 }
 
 // Pixel-to-wheel-ticks conversion ratio used by GTK.
@@ -300,6 +311,9 @@ void InputInjectorX11::Core::InjectKeyEvent(const KeyEvent& event) {
 
   if (event.pressed()) {
     if (pressed_keys_.find(keycode) != pressed_keys_.end()) {
+      // Ignore repeats for modifier keys.
+      if (IsModifierKey(event.usb_keycode()))
+        return;
       // Key is already held down, so lift the key up to ensure this repeated
       // press takes effect.
       XTestFakeKeyEvent(display_, keycode, False, CurrentTime);

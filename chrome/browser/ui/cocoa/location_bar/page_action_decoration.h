@@ -67,8 +67,8 @@ class PageActionDecoration : public ImageDecoration,
   void SetToolTip(const base::string16& tooltip);
 
   // Overridden from ToolbarActionViewDelegate:
-  ToolbarActionViewController* GetPreferredPopupViewController() override;
   content::WebContents* GetCurrentWebContents() const override;
+  bool IsMenuRunning() const override;
   void UpdateState() override;
 
   // The location bar view that owns us.

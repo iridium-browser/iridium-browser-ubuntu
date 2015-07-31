@@ -55,6 +55,8 @@
 namespace blink {
 namespace {
 
+const int64_t kInvalidPersistentId = -1;
+
 WebNotificationManager* notificationManager()
 {
     return Platform::current()->notificationManager();
@@ -77,9 +79,15 @@ Notification* Notification::create(ExecutionContext* context, const String& titl
         return nullptr;
     }
 
+    // If options's silent is true, and options's vibrate is present, throw a TypeError exception.
+    if (options.hasVibrate() && options.silent()) {
+        exceptionState.throwTypeError("Silent notifications must not specify vibration patterns.");
+        return nullptr;
+    }
+
     RefPtr<SerializedScriptValue> data;
     if (options.hasData()) {
-        data = SerializedScriptValueFactory::instance().create(options.data(), nullptr, exceptionState, options.data().isolate());
+        data = SerializedScriptValueFactory::instance().create(options.data().isolate(), options.data(), nullptr, exceptionState);
         if (exceptionState.hadException())
             return nullptr;
     }
@@ -90,6 +98,7 @@ Notification* Notification::create(ExecutionContext* context, const String& titl
     notification->setTag(options.tag());
     notification->setLang(options.lang());
     notification->setDir(options.dir());
+    notification->setVibrate(NavigatorVibration::sanitizeVibrationPattern(options.vibrate()));
     notification->setSilent(options.silent());
     notification->setSerializedData(data.release());
     if (options.hasIcon()) {
@@ -99,8 +108,9 @@ Notification* Notification::create(ExecutionContext* context, const String& titl
     }
 
     String insecureOriginMessage;
-    UseCounter::Feature feature = context->securityOrigin()->canAccessFeatureRequiringSecureOrigin(insecureOriginMessage)
-        ? UseCounter::NotificationSecureOrigin : UseCounter::NotificationInsecureOrigin;
+    UseCounter::Feature feature = context->isPrivilegedContext(insecureOriginMessage)
+        ? UseCounter::NotificationSecureOrigin
+        : UseCounter::NotificationInsecureOrigin;
     UseCounter::count(context, feature);
 
     notification->scheduleShow();
@@ -108,7 +118,7 @@ Notification* Notification::create(ExecutionContext* context, const String& titl
     return notification;
 }
 
-Notification* Notification::create(ExecutionContext* context, const String& persistentId, const WebNotificationData& data)
+Notification* Notification::create(ExecutionContext* context, int64_t persistentId, const WebNotificationData& data)
 {
     Notification* notification = new Notification(data.title, context);
 
@@ -122,8 +132,15 @@ Notification* Notification::create(ExecutionContext* context, const String& pers
     if (!data.icon.isEmpty())
         notification->setIconUrl(data.icon);
 
-    if (!data.data.isEmpty()) {
-        notification->setSerializedData(SerializedScriptValueFactory::instance().createFromWire(data.data));
+    if (!data.vibrate.isEmpty()) {
+        NavigatorVibration::VibrationPattern pattern;
+        pattern.appendRange(data.vibrate.begin(), data.vibrate.end());
+        notification->setVibrate(pattern);
+    }
+
+    const WebVector<char>& dataBytes = data.data;
+    if (!dataBytes.isEmpty()) {
+        notification->setSerializedData(SerializedScriptValueFactory::instance().createFromWireBytes(dataBytes.data(), dataBytes.size()));
         notification->serializedData()->registerMemoryAllocatedWithCurrentScriptContext();
     }
 
@@ -137,6 +154,7 @@ Notification::Notification(const String& title, ExecutionContext* context)
     , m_title(title)
     , m_dir("auto")
     , m_silent(false)
+    , m_persistentId(kInvalidPersistentId)
     , m_state(NotificationStateIdle)
     , m_asyncRunner(this, &Notification::show)
 {
@@ -171,8 +189,9 @@ void Notification::show()
 
     // The lifetime and availability of non-persistent notifications is tied to the page
     // they were created by, and thus the data doesn't have to be known to the embedder.
-    String emptyDataAsWireString;
-    WebNotificationData notificationData(m_title, dir, m_lang, m_body, m_tag, m_iconUrl, m_silent, emptyDataAsWireString);
+    Vector<char> emptyDataWireBytes;
+
+    WebNotificationData notificationData(m_title, dir, m_lang, m_body, m_tag, m_iconUrl, m_vibrate, m_silent, emptyDataWireBytes);
     notificationManager()->show(WebSerializedOrigin(*origin), notificationData, this);
 
     m_state = NotificationStateShowing;
@@ -183,7 +202,7 @@ void Notification::close()
     if (m_state != NotificationStateShowing)
         return;
 
-    if (m_persistentId.isEmpty()) {
+    if (m_persistentId == kInvalidPersistentId) {
         // Fire the close event asynchronously.
         executionContext()->postTask(FROM_HERE, createSameThreadTask(&Notification::dispatchCloseEvent, this));
 
@@ -225,6 +244,12 @@ void Notification::dispatchCloseEvent()
 
     m_state = NotificationStateClosed;
     dispatchEvent(Event::create(EventTypeNames::close));
+}
+
+NavigatorVibration::VibrationPattern Notification::vibrate(bool& isNull) const
+{
+    isNull = m_vibrate.isEmpty();
+    return m_vibrate;
 }
 
 TextDirection Notification::direction() const

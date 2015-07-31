@@ -139,7 +139,7 @@ void ColorInputType::createShadowSubtree()
     RefPtrWillBeRawPtr<HTMLDivElement> colorSwatch = HTMLDivElement::create(document);
     colorSwatch->setShadowPseudoId(AtomicString("-webkit-color-swatch", AtomicString::ConstructFromLiteral));
     wrapperElement->appendChild(colorSwatch.release());
-    element().closedShadowRoot()->appendChild(wrapperElement.release());
+    element().userAgentShadowRoot()->appendChild(wrapperElement.release());
 
     element().updateView();
 }
@@ -229,7 +229,7 @@ void ColorInputType::updateView()
 
 HTMLElement* ColorInputType::shadowColorSwatch() const
 {
-    ShadowRoot* shadow = element().closedShadowRoot();
+    ShadowRoot* shadow = element().userAgentShadowRoot();
     return shadow ? toHTMLElement(shadow->firstChild()->firstChild()) : 0;
 }
 

@@ -15,6 +15,7 @@
 #include "base/prefs/pref_service.h"
 #include "base/stl_util.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "chrome/browser/password_manager/password_store_win.h"
 #include "chrome/test/base/testing_profile.h"
@@ -114,7 +115,7 @@ class PasswordStoreWinTest : public testing::Test {
     return true;
   }
 
-  virtual void SetUp() {
+  void SetUp() override {
     ASSERT_TRUE(db_thread_.Start());
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 
@@ -134,7 +135,7 @@ class PasswordStoreWinTest : public testing::Test {
     wds_->Init();
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     if (store_.get())
       store_->Shutdown();
     wds_->ShutdownOnUIThread();
@@ -157,7 +158,7 @@ class PasswordStoreWinTest : public testing::Test {
 
   PasswordStoreWin* CreatePasswordStore() {
     return new PasswordStoreWin(
-        base::MessageLoopProxy::current(),
+        base::ThreadTaskRunnerHandle::Get(),
         BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB),
         make_scoped_ptr(new LoginDatabase(test_login_db_file_path())),
         wds_.get());
@@ -180,7 +181,7 @@ ACTION(STLDeleteElements0) {
 }
 
 ACTION(QuitUIMessageLoop) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   base::MessageLoop::current()->Quit();
 }
 

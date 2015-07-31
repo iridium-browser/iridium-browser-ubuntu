@@ -56,6 +56,19 @@ union StringPointer {
 };
 static_assert(sizeof(StringPointer) == 8, "Bad_sizeof(StringPointer)");
 
+struct Interface_Data {
+  MessagePipeHandle handle;
+  uint32_t version;
+};
+static_assert(sizeof(Interface_Data) == 8, "Bad_sizeof(Interface_Data)");
+
+template <typename T>
+union UnionPointer {
+  uint64_t offset;
+  T* ptr;
+};
+static_assert(sizeof(UnionPointer<char>) == 8, "Bad_sizeof(UnionPointer)");
+
 #pragma pack(pop)
 
 template <typename T>
@@ -74,6 +87,18 @@ T FetchAndReset(T* ptr) {
 template <typename H>
 struct IsHandle {
   enum { value = IsBaseOf<Handle, H>::value };
+};
+
+template <typename T>
+struct IsUnionDataType {
+  template <typename U>
+  static YesType Test(const typename U::MojomUnionDataType*);
+
+  template <typename U>
+  static NoType Test(...);
+
+  static const bool value =
+      sizeof(Test<T>(0)) == sizeof(YesType) && !IsConst<T>::value;
 };
 
 template <typename T, bool move_only = IsMoveOnlyType<T>::value>

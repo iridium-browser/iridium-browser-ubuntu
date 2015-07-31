@@ -11,11 +11,11 @@
 #include "base/bind_helpers.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/message_loop/message_loop.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/test_simple_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/policy/cloud_external_data_store.h"
 #include "components/policy/core/common/cloud/mock_cloud_policy_store.h"
@@ -70,10 +70,11 @@ class FakeURLFetcherFactory : public net::FakeURLFetcherFactory {
   ~FakeURLFetcherFactory() override;
 
   // net::FakeURLFetcherFactory:
-  net::URLFetcher* CreateURLFetcher(int id,
-                                    const GURL& url,
-                                    net::URLFetcher::RequestType request_type,
-                                    net::URLFetcherDelegate* delegate) override;
+  scoped_ptr<net::URLFetcher> CreateURLFetcher(
+      int id,
+      const GURL& url,
+      net::URLFetcher::RequestType request_type,
+      net::URLFetcherDelegate* delegate) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(FakeURLFetcherFactory);
@@ -86,15 +87,16 @@ FakeURLFetcherFactory::FakeURLFetcherFactory()
 FakeURLFetcherFactory::~FakeURLFetcherFactory() {
 }
 
-net::URLFetcher* FakeURLFetcherFactory::CreateURLFetcher(
+scoped_ptr<net::URLFetcher> FakeURLFetcherFactory::CreateURLFetcher(
     int id,
     const GURL& url,
     net::URLFetcher::RequestType request_type,
     net::URLFetcherDelegate* delegate) {
-  net::URLFetcher* fetcher = net::FakeURLFetcherFactory::CreateURLFetcher(
-      id, url, request_type, delegate);
+  scoped_ptr<net::URLFetcher> fetcher =
+      net::FakeURLFetcherFactory::CreateURLFetcher(id, url, request_type,
+                                                   delegate);
   EXPECT_TRUE(fetcher);
-  return fetcher;
+  return fetcher.Pass();
 }
 
 }  // namespace
@@ -168,8 +170,8 @@ void CloudExternalDataManagerBaseTest::SetUp() {
                         crypto::SHA256HashString(k20ByteData)));
   cloud_policy_store_.NotifyStoreLoaded();
 
-  request_content_getter_ = new net::TestURLRequestContextGetter(
-      base::MessageLoopProxy::current());
+  request_content_getter_ =
+      new net::TestURLRequestContextGetter(base::ThreadTaskRunnerHandle::Get());
 
   policy_details_.SetDetails(kStringPolicy, &kPolicyDetails[0]);
   policy_details_.SetDetails(k10BytePolicy, &kPolicyDetails[1]);

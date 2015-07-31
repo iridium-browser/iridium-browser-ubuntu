@@ -171,12 +171,6 @@ TEST(SchedulerStateMachineTest, BeginFrameNeeded) {
   state.SetNeedsAnimateForTest(false);
   EXPECT_FALSE(state.BeginFrameNeeded());
 
-  // Background tick for animations.
-  state.SetVisible(false);
-  state.SetNeedsRedraw(false);
-  state.SetNeedsAnimateForTest(true);
-  EXPECT_TRUE(state.BeginFrameNeeded());
-
   // Proactively request BeginFrames when commit is pending.
   state.SetVisible(true);
   state.SetNeedsRedraw(false);
@@ -247,6 +241,35 @@ TEST(SchedulerStateMachineTest, TestNextActionBeginsMainFrameIfNeeded) {
     state.SetNeedsCommit();
 
     EXPECT_TRUE(state.BeginFrameNeeded());
+
+    // Expect nothing to happen until after OnBeginImplFrame.
+    EXPECT_COMMIT_STATE(SchedulerStateMachine::COMMIT_STATE_IDLE);
+    EXPECT_IMPL_FRAME_STATE(SchedulerStateMachine::BEGIN_IMPL_FRAME_STATE_IDLE);
+    EXPECT_ACTION(SchedulerStateMachine::ACTION_NONE);
+
+    state.OnBeginImplFrame();
+    EXPECT_ACTION_UPDATE_STATE(
+        SchedulerStateMachine::ACTION_SEND_BEGIN_MAIN_FRAME);
+  }
+
+  // If commit requested and can't draw, still begin a main frame.
+  {
+    StateMachine state(default_scheduler_settings);
+    state.SetCommitState(SchedulerStateMachine::COMMIT_STATE_IDLE);
+    state.SetCanStart();
+    state.UpdateState(state.NextAction());
+    state.CreateAndInitializeOutputSurfaceWithActivatedCommit();
+    state.SetNeedsRedraw(false);
+    state.SetVisible(true);
+    state.SetNeedsCommit();
+    state.SetCanDraw(false);
+
+    EXPECT_TRUE(state.BeginFrameNeeded());
+
+    // Expect nothing to happen until after OnBeginImplFrame.
+    EXPECT_COMMIT_STATE(SchedulerStateMachine::COMMIT_STATE_IDLE);
+    EXPECT_IMPL_FRAME_STATE(SchedulerStateMachine::BEGIN_IMPL_FRAME_STATE_IDLE);
+    EXPECT_ACTION(SchedulerStateMachine::ACTION_NONE);
 
     state.OnBeginImplFrame();
     EXPECT_ACTION_UPDATE_STATE(
@@ -1556,6 +1579,25 @@ TEST(SchedulerStateMachineTest,
   EXPECT_ACTION_UPDATE_STATE(SchedulerStateMachine::ACTION_DRAW_AND_SWAP_ABORT);
 }
 
+TEST(SchedulerStateMachineTest, TestNoBeginFrameNeededWhenInvisible) {
+  SchedulerSettings default_scheduler_settings;
+  StateMachine state(default_scheduler_settings);
+  state.SetCanStart();
+  state.UpdateState(state.NextAction());
+  state.CreateAndInitializeOutputSurfaceWithActivatedCommit();
+  state.SetVisible(true);
+
+  EXPECT_FALSE(state.BeginFrameNeeded());
+  state.SetNeedsRedraw(true);
+  EXPECT_TRUE(state.BeginFrameNeeded());
+
+  state.SetVisible(false);
+  EXPECT_FALSE(state.BeginFrameNeeded());
+
+  state.SetVisible(true);
+  EXPECT_TRUE(state.BeginFrameNeeded());
+}
+
 TEST(SchedulerStateMachineTest, TestNoBeginMainFrameWhenInvisible) {
   SchedulerSettings default_scheduler_settings;
   StateMachine state(default_scheduler_settings);
@@ -1565,6 +1607,14 @@ TEST(SchedulerStateMachineTest, TestNoBeginMainFrameWhenInvisible) {
   state.SetVisible(false);
   state.SetNeedsCommit();
   EXPECT_ACTION(SchedulerStateMachine::ACTION_NONE);
+  EXPECT_FALSE(state.BeginFrameNeeded());
+
+  // When become visible again, the needs commit should still be pending.
+  state.SetVisible(true);
+  EXPECT_TRUE(state.BeginFrameNeeded());
+  state.OnBeginImplFrame();
+  EXPECT_ACTION_UPDATE_STATE(
+      SchedulerStateMachine::ACTION_SEND_BEGIN_MAIN_FRAME);
 }
 
 TEST(SchedulerStateMachineTest, TestFinishCommitWhenCommitInProgress) {
@@ -1759,6 +1809,25 @@ TEST(SchedulerStateMachineTest,
   state.DidLoseOutputSurface();
   EXPECT_ACTION_UPDATE_STATE(SchedulerStateMachine::ACTION_NONE);
   // The deadline should be triggered immediately when output surface is lost.
+  EXPECT_TRUE(state.ShouldTriggerBeginImplFrameDeadlineImmediately());
+}
+
+TEST(SchedulerStateMachineTest, TestTriggerDeadlineImmediatelyWhenInvisible) {
+  SchedulerSettings settings;
+  settings.impl_side_painting = true;
+  StateMachine state(settings);
+  SET_UP_STATE(state)
+
+  state.SetNeedsCommit();
+
+  state.OnBeginImplFrame();
+  EXPECT_ACTION_UPDATE_STATE(
+      SchedulerStateMachine::ACTION_SEND_BEGIN_MAIN_FRAME);
+  EXPECT_ACTION_UPDATE_STATE(SchedulerStateMachine::ACTION_NONE);
+  EXPECT_FALSE(state.ShouldTriggerBeginImplFrameDeadlineImmediately());
+
+  state.SetVisible(false);
+  EXPECT_ACTION_UPDATE_STATE(SchedulerStateMachine::ACTION_NONE);
   EXPECT_TRUE(state.ShouldTriggerBeginImplFrameDeadlineImmediately());
 }
 

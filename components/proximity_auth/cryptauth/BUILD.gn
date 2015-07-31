@@ -4,23 +4,51 @@
 
 source_set("cryptauth") {
   sources = [
+    "base64url.cc",
+    "base64url.h",
     "cryptauth_access_token_fetcher.h",
-    "cryptauth_account_token_fetcher.cc",
-    "cryptauth_account_token_fetcher.h",
+    "cryptauth_access_token_fetcher_impl.cc",
+    "cryptauth_access_token_fetcher_impl.h",
     "cryptauth_api_call_flow.cc",
     "cryptauth_api_call_flow.h",
-    "cryptauth_client.cc",
     "cryptauth_client.h",
-    "cryptauth_client_factory.cc",
-    "cryptauth_client_factory.h",
+    "cryptauth_client_impl.cc",
+    "cryptauth_client_impl.h",
+    "cryptauth_enroller.h",
+    "cryptauth_enroller_impl.cc",
+    "cryptauth_enroller_impl.h",
     "cryptauth_enrollment_utils.cc",
     "cryptauth_enrollment_utils.h",
+    "secure_message_delegate.cc",
+    "secure_message_delegate.h",
   ]
 
   deps = [
     "//base",
+    "//components/proximity_auth/logging",
     "//google_apis",
     "//net",
+  ]
+
+  public_deps = [
+    "proto",
+  ]
+}
+
+source_set("test_support") {
+  testonly = true
+
+  sources = [
+    "fake_secure_message_delegate.cc",
+    "fake_secure_message_delegate.h",
+    "mock_cryptauth_client.cc",
+    "mock_cryptauth_client.h",
+  ]
+
+  deps = [
+    ":cryptauth",
+    "//base",
+    "//testing/gmock",
   ]
 
   public_deps = [
@@ -31,13 +59,17 @@ source_set("cryptauth") {
 source_set("unit_tests") {
   testonly = true
   sources = [
-    "cryptauth_account_token_fetcher_unittest.cc",
+    "base64url_unittest.cc",
+    "cryptauth_access_token_fetcher_impl_unittest.cc",
     "cryptauth_api_call_flow_unittest.cc",
-    "cryptauth_client_unittest.cc",
+    "cryptauth_client_impl_unittest.cc",
+    "cryptauth_enroller_impl_unittest.cc",
+    "fake_secure_message_delegate_unittest.cc",
   ]
 
   deps = [
     ":cryptauth",
+    ":test_support",
     "//base/test:test_support",
     "//google_apis:test_support",
     "//net:test_support",

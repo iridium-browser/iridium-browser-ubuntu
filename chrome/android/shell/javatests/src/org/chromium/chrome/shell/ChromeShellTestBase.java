@@ -13,20 +13,17 @@ import android.net.Uri;
 import android.text.TextUtils;
 import android.util.Log;
 
-import org.chromium.base.CommandLine;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.base.test.BaseActivityInstrumentationTestCase;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.chrome.test.util.ApplicationData;
-import org.chromium.content.browser.BrowserStartupController;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.common.ContentSwitches;
 import org.chromium.content_public.browser.LoadUrlParams;
 
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.Callable;
 
 /**
  * Base test class for all ChromeShell based tests.
@@ -41,17 +38,15 @@ public class ChromeShellTestBase extends BaseActivityInstrumentationTestCase<Chr
         super(ChromeShellActivity.class);
     }
 
-    protected static void startChromeBrowserProcessSync(final Context targetContext) {
+    protected static void startChromeBrowserProcessSync(final Context context) {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                CommandLine.initFromFile("/data/local/tmp/chrome-shell-command-line");
                 try {
-                    BrowserStartupController.get(targetContext, LibraryProcessType.PROCESS_BROWSER)
-                            .startBrowserProcessesSync(false);
+                    ((ChromeShellApplication) context.getApplicationContext())
+                            .startBrowserProcessesAndLoadLibrariesSync(true);
                 } catch (ProcessInitException e) {
                     Log.e(TAG, "Unable to load native library.", e);
-                    fail("Unable to load native library");
                 }
             }
         });
@@ -93,26 +88,19 @@ public class ChromeShellTestBase extends BaseActivityInstrumentationTestCase<Chr
         return CriteriaHelper.pollForCriteria(new Criteria() {
             @Override
             public boolean isSatisfied() {
-                try {
-                    final AtomicBoolean isLoaded = new AtomicBoolean(false);
-                    runTestOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            ChromeShellTab tab = activity.getActiveTab();
-                            if (tab != null) {
-                                isLoaded.set(!tab.isLoading()
-                                        && !TextUtils.isEmpty(tab.getContentViewCore()
-                                                .getWebContents().getUrl()));
-                            } else {
-                                isLoaded.set(false);
-                            }
+                return ThreadUtils.runOnUiThreadBlockingNoException(new Callable<Boolean>() {
+                    @Override
+                    public Boolean call() throws Exception {
+                        ChromeShellTab tab = activity.getActiveTab();
+                        if (tab != null) {
+                            return !tab.isLoading()
+                                    && !TextUtils.isEmpty(tab.getContentViewCore()
+                                            .getWebContents().getUrl());
+                        } else {
+                            return false;
                         }
-                    });
-
-                    return isLoaded.get();
-                } catch (Throwable e) {
-                    return false;
-                }
+                    }
+                });
             }
         }, WAIT_FOR_ACTIVE_SHELL_LOADING_TIMEOUT, CriteriaHelper.DEFAULT_POLLING_INTERVAL);
     }

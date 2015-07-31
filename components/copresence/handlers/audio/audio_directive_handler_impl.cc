@@ -30,12 +30,14 @@ namespace {
 
 base::TimeTicks GetEarliestEventTime(AudioDirectiveList* list,
                                      base::TimeTicks event_time) {
-  if (!list->GetActiveDirective())
-    return event_time;
+  scoped_ptr<AudioDirective> active_directive = list->GetActiveDirective();
 
-  return event_time.is_null() ?
-      list->GetActiveDirective()->end_time :
-      std::min(list->GetActiveDirective()->end_time, event_time);
+  if (!active_directive)
+    return event_time;
+  if (event_time.is_null())
+    return active_directive->end_time;
+
+  return std::min(active_directive->end_time, event_time);
 }
 
 void ConvertDirectives(const std::vector<AudioDirective>& in_directives,
@@ -211,12 +213,14 @@ void AudioDirectiveHandlerImpl::ProcessNextInstruction() {
 
   // TODO(crbug.com/436584): Instead of this, store the directives
   // in a single list, and prune them when expired.
-  std::vector<Directive> directives;
-  ConvertDirectives(transmits_lists_[AUDIBLE]->directives(), &directives);
-  ConvertDirectives(transmits_lists_[INAUDIBLE]->directives(), &directives);
-  ConvertDirectives(receives_lists_[AUDIBLE]->directives(), &directives);
-  ConvertDirectives(receives_lists_[INAUDIBLE]->directives(), &directives);
-  update_directives_callback_.Run(directives);
+  if (!update_directives_callback_.is_null()) {
+    std::vector<Directive> directives;
+    ConvertDirectives(transmits_lists_[AUDIBLE]->directives(), &directives);
+    ConvertDirectives(transmits_lists_[INAUDIBLE]->directives(), &directives);
+    ConvertDirectives(receives_lists_[AUDIBLE]->directives(), &directives);
+    ConvertDirectives(receives_lists_[INAUDIBLE]->directives(), &directives);
+    update_directives_callback_.Run(directives);
+  }
 }
 
 bool AudioDirectiveHandlerImpl::GetNextInstructionExpiry(

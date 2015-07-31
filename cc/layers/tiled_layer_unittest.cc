@@ -7,7 +7,10 @@
 #include <limits>
 #include <vector>
 
+#include "base/location.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "cc/resources/bitmap_content_layer_updater.h"
 #include "cc/resources/layer_painter.h"
 #include "cc/resources/prioritized_resource_manager.h"
@@ -51,10 +54,8 @@ class SynchronousOutputSurfaceClient : public FakeLayerTreeHostClient {
       : FakeLayerTreeHostClient(FakeLayerTreeHostClient::DIRECT_3D) {}
 
   bool EnsureOutputSurfaceCreated() {
-    base::MessageLoop::current()->PostDelayedTask(
-        FROM_HERE,
-        run_loop_.QuitClosure(),
-        base::TimeDelta::FromSeconds(5));
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+        FROM_HERE, run_loop_.QuitClosure(), base::TimeDelta::FromSeconds(5));
     run_loop_.Run();
     return output_surface_created_;
   }
@@ -86,22 +87,26 @@ class TiledLayerTest : public testing::Test {
         occlusion_(nullptr) {
     settings_.max_partial_texture_updates = std::numeric_limits<size_t>::max();
     settings_.layer_transforms_should_scale_layer_contents = true;
-    settings_.verify_property_trees = true;
     settings_.impl_side_painting = false;
+    settings_.verify_property_trees = false;
   }
 
   void SetUp() override {
     impl_thread_.Start();
     shared_bitmap_manager_.reset(new TestSharedBitmapManager());
-    layer_tree_host_ = LayerTreeHost::CreateThreaded(
-        &synchonous_output_surface_client_, shared_bitmap_manager_.get(),
-        nullptr, nullptr, settings_, base::MessageLoopProxy::current(),
-        impl_thread_.message_loop_proxy(), nullptr);
-    synchonous_output_surface_client_.SetLayerTreeHost(layer_tree_host_.get());
+    LayerTreeHost::InitParams params;
+    params.client = &synchronous_output_surface_client_;
+    params.shared_bitmap_manager = shared_bitmap_manager_.get();
+    params.settings = &settings_;
+    params.main_task_runner = base::ThreadTaskRunnerHandle::Get();
+
+    layer_tree_host_ =
+        LayerTreeHost::CreateThreaded(impl_thread_.task_runner(), &params);
+    synchronous_output_surface_client_.SetLayerTreeHost(layer_tree_host_.get());
     proxy_ = layer_tree_host_->proxy();
     resource_manager_ = PrioritizedResourceManager::Create(proxy_);
     layer_tree_host_->SetLayerTreeHostClientReady();
-    CHECK(synchonous_output_surface_client_.EnsureOutputSurfaceCreated());
+    CHECK(synchronous_output_surface_client_.EnsureOutputSurfaceCreated());
 
     layer_tree_host_->SetRootLayer(Layer::Create());
 
@@ -180,6 +185,7 @@ class TiledLayerTest : public testing::Test {
     inputs.max_texture_size =
         layer_tree_host_->GetRendererCapabilities().max_texture_size;
     inputs.can_adjust_raster_scales = true;
+    inputs.verify_property_trees = false;
     LayerTreeHostCommon::CalculateDrawProperties(&inputs);
   }
 
@@ -240,7 +246,7 @@ class TiledLayerTest : public testing::Test {
   scoped_ptr<ResourceUpdateQueue> queue_;
   PriorityCalculator priority_calculator_;
   base::Thread impl_thread_;
-  SynchronousOutputSurfaceClient synchonous_output_surface_client_;
+  SynchronousOutputSurfaceClient synchronous_output_surface_client_;
   scoped_ptr<LayerTreeHost> layer_tree_host_;
   scoped_ptr<FakeLayerTreeHostImpl> host_impl_;
   scoped_ptr<PrioritizedResourceManager> resource_manager_;

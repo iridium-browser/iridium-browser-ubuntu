@@ -46,6 +46,8 @@ public:
         , m_shouldSendReferrer(MaybeSendReferrer)
         , m_shouldCheckMainWorldContentSecurityPolicy(CheckContentSecurityPolicy)
     {
+        if (originDocument)
+            m_resourceRequest.setRequestorOrigin(SecurityOrigin::create(originDocument->url()));
     }
 
     FrameLoadRequest(Document* originDocument, const ResourceRequest& resourceRequest)
@@ -56,6 +58,8 @@ public:
         , m_shouldSendReferrer(MaybeSendReferrer)
         , m_shouldCheckMainWorldContentSecurityPolicy(CheckContentSecurityPolicy)
     {
+        if (originDocument)
+            m_resourceRequest.setRequestorOrigin(SecurityOrigin::create(originDocument->url()));
     }
 
     FrameLoadRequest(Document* originDocument, const ResourceRequest& resourceRequest, const AtomicString& frameName)
@@ -67,6 +71,8 @@ public:
         , m_shouldSendReferrer(MaybeSendReferrer)
         , m_shouldCheckMainWorldContentSecurityPolicy(CheckContentSecurityPolicy)
     {
+        if (originDocument)
+            m_resourceRequest.setRequestorOrigin(SecurityOrigin::create(originDocument->url()));
     }
 
     FrameLoadRequest(Document* originDocument, const ResourceRequest& resourceRequest, const AtomicString& frameName, ContentSecurityPolicyDisposition shouldCheckMainWorldContentSecurityPolicy)
@@ -78,6 +84,8 @@ public:
         , m_shouldSendReferrer(MaybeSendReferrer)
         , m_shouldCheckMainWorldContentSecurityPolicy(shouldCheckMainWorldContentSecurityPolicy)
     {
+        if (originDocument)
+            m_resourceRequest.setRequestorOrigin(SecurityOrigin::create(originDocument->url()));
     }
 
     FrameLoadRequest(Document* originDocument, const ResourceRequest& resourceRequest, const SubstituteData& substituteData)
@@ -89,6 +97,8 @@ public:
         , m_shouldSendReferrer(MaybeSendReferrer)
         , m_shouldCheckMainWorldContentSecurityPolicy(CheckContentSecurityPolicy)
     {
+        if (originDocument)
+            m_resourceRequest.setRequestorOrigin(SecurityOrigin::create(originDocument->url()));
     }
 
     Document* originDocument() const { return m_originDocument.get(); }
@@ -110,8 +120,8 @@ public:
     Event* triggeringEvent() const { return m_triggeringEvent.get(); }
     void setTriggeringEvent(PassRefPtrWillBeRawPtr<Event> triggeringEvent) { m_triggeringEvent = triggeringEvent; }
 
-    FormState* formState() const { return m_formState.get(); }
-    void setFormState(PassRefPtrWillBeRawPtr<FormState> formState) { m_formState = formState; }
+    HTMLFormElement* form() const { return m_form.get(); }
+    void setForm(PassRefPtrWillBeRawPtr<HTMLFormElement> form) { m_form = form; }
 
     ShouldSendReferrer shouldSendReferrer() const { return m_shouldSendReferrer; }
     void setShouldSendReferrer(ShouldSendReferrer shouldSendReferrer) { m_shouldSendReferrer = shouldSendReferrer; }
@@ -126,7 +136,7 @@ private:
     bool m_lockBackForwardList;
     ClientRedirectPolicy m_clientRedirect;
     RefPtrWillBeMember<Event> m_triggeringEvent;
-    RefPtrWillBeMember<FormState> m_formState;
+    RefPtrWillBeMember<HTMLFormElement> m_form;
     ShouldSendReferrer m_shouldSendReferrer;
     ContentSecurityPolicyDisposition m_shouldCheckMainWorldContentSecurityPolicy;
 };

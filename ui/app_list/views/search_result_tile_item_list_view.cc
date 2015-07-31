@@ -26,12 +26,14 @@ const int kTopBottomPadding = 8;
 namespace app_list {
 
 SearchResultTileItemListView::SearchResultTileItemListView(
-    views::Textfield* search_box)
+    views::Textfield* search_box,
+    AppListViewDelegate* view_delegate)
     : search_box_(search_box) {
   SetLayoutManager(
       new views::BoxLayout(views::BoxLayout::kHorizontal, 0, 0, kTileSpacing));
   for (size_t i = 0; i < kNumSearchResultTiles; ++i) {
-    SearchResultTileItemView* tile_item = new SearchResultTileItemView(this);
+    SearchResultTileItemView* tile_item =
+        new SearchResultTileItemView(this, view_delegate);
     tile_item->SetParentBackgroundColor(kCardBackgroundColor);
     tile_item->SetBorder(views::Border::CreateEmptyBorder(
         kTopBottomPadding, 0, kTopBottomPadding, 0));
@@ -54,6 +56,15 @@ void SearchResultTileItemListView::OnContainerSelected(
   // select the left-most result even if coming from below.
   bool select_last = from_bottom && !directional_movement;
   SetSelectedIndex(select_last ? num_results() - 1 : 0);
+}
+
+void SearchResultTileItemListView::NotifyFirstResultYIndex(int y_index) {
+  for (size_t i = 0; i < static_cast<size_t>(num_results()); ++i)
+    tile_views_[i]->result()->set_distance_from_origin(i + y_index);
+}
+
+int SearchResultTileItemListView::GetYSize() {
+  return num_results() ? 1 : 0;
 }
 
 int SearchResultTileItemListView::Update() {

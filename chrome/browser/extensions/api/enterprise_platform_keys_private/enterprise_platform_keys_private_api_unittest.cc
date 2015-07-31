@@ -8,14 +8,15 @@
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/stringprintf.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/policy/stub_enterprise_install_attributes.h"
-#include "chrome/browser/chromeos/settings/stub_cros_settings_provider.h"
+#include "chrome/browser/chromeos/settings/scoped_cros_settings_test_helper.h"
 #include "chrome/browser/extensions/extension_function_test_utils.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chromeos/attestation/attestation_constants.h"
@@ -24,7 +25,6 @@
 #include "chromeos/cryptohome/mock_async_method_caller.h"
 #include "chromeos/dbus/dbus_method_call_status.h"
 #include "chromeos/dbus/mock_cryptohome_client.h"
-#include "chromeos/settings/cros_settings_provider.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "extensions/common/test_util.h"
@@ -57,7 +57,7 @@ class FakeBoolDBusMethod {
         value_(value) {}
 
   void operator() (const chromeos::BoolDBusMethodCallback& callback) {
-    base::MessageLoopProxy::current()->PostTask(
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::Bind(callback, status_, value_));
   }
@@ -72,7 +72,7 @@ void RegisterKeyCallbackTrue(
     const std::string& user_id,
     const std::string& key_name,
     const cryptohome::AsyncMethodCaller::Callback& callback) {
-  base::MessageLoopProxy::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::Bind(callback, true, cryptohome::MOUNT_ERROR_NONE));
 }
@@ -82,7 +82,7 @@ void RegisterKeyCallbackFalse(
     const std::string& user_id,
     const std::string& key_name,
     const cryptohome::AsyncMethodCaller::Callback& callback) {
-  base::MessageLoopProxy::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::Bind(callback, false, cryptohome::MOUNT_ERROR_NONE));
 }
@@ -96,7 +96,7 @@ void SignChallengeCallbackTrue(
     chromeos::attestation::AttestationChallengeOptions options,
     const std::string& challenge,
     const cryptohome::AsyncMethodCaller::DataCallback& callback) {
-  base::MessageLoopProxy::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::Bind(callback, true, "response"));
 }
@@ -110,7 +110,7 @@ void SignChallengeCallbackFalse(
     chromeos::attestation::AttestationChallengeOptions options,
     const std::string& challenge,
     const cryptohome::AsyncMethodCaller::DataCallback& callback) {
-  base::MessageLoopProxy::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::Bind(callback, false, ""));
 }
@@ -122,7 +122,7 @@ void GetCertificateCallbackTrue(
     bool force_new_key,
     const chromeos::attestation::AttestationFlow::CertificateCallback&
         callback) {
-  base::MessageLoopProxy::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::Bind(callback, true, "certificate"));
 }
@@ -134,14 +134,15 @@ void GetCertificateCallbackFalse(
     bool force_new_key,
     const chromeos::attestation::AttestationFlow::CertificateCallback&
         callback) {
-  base::MessageLoopProxy::current()->PostTask(
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
       base::Bind(callback, false, ""));
 }
 
 class EPKPChallengeKeyTestBase : public BrowserWithTestWindowTest {
  protected:
-  EPKPChallengeKeyTestBase() : extension_(test_util::CreateEmptyExtension()) {
+  EPKPChallengeKeyTestBase()
+      : settings_helper_(false), extension_(test_util::CreateEmptyExtension()) {
     // Set up the default behavior of mocks.
     ON_CALL(mock_cryptohome_client_, TpmAttestationDoesKeyExist(_, _, _, _))
         .WillByDefault(WithArgs<3>(Invoke(FakeBoolDBusMethod(
@@ -163,28 +164,11 @@ class EPKPChallengeKeyTestBase : public BrowserWithTestWindowTest {
     stub_install_attributes_.SetDeviceId("device_id");
     stub_install_attributes_.SetMode(policy::DEVICE_MODE_ENTERPRISE);
 
-    // Replace the default device setting provider with the stub.
-    device_settings_provider_ = chromeos::CrosSettings::Get()->GetProvider(
-        chromeos::kReportDeviceVersionInfo);
-    EXPECT_TRUE(device_settings_provider_ != NULL);
-    EXPECT_TRUE(chromeos::CrosSettings::Get()->
-                RemoveSettingsProvider(device_settings_provider_));
-    chromeos::CrosSettings::Get()->
-        AddSettingsProvider(&stub_settings_provider_);
-
-    // Set the device settings.
-    stub_settings_provider_.Set(chromeos::kDeviceAttestationEnabled,
-                                base::FundamentalValue(true));
+    settings_helper_.ReplaceProvider(chromeos::kDeviceAttestationEnabled);
+    settings_helper_.SetBoolean(chromeos::kDeviceAttestationEnabled, true);
   }
 
-  virtual ~EPKPChallengeKeyTestBase() {
-    EXPECT_TRUE(chromeos::CrosSettings::Get()->
-                RemoveSettingsProvider(&stub_settings_provider_));
-    chromeos::CrosSettings::Get()->
-        AddSettingsProvider(device_settings_provider_);
-  }
-
-  virtual void SetUp() override {
+  void SetUp() override {
     BrowserWithTestWindowTest::SetUp();
 
     // Set the user preferences.
@@ -200,16 +184,15 @@ class EPKPChallengeKeyTestBase : public BrowserWithTestWindowTest {
   // user in the SigninManager class.
   virtual void SetAuthenticatedUser() {
     SigninManagerFactory::GetForProfile(browser()->profile())->
-        SetAuthenticatedUsername("test@google.com");
+        SetAuthenticatedAccountInfo("12345", "test@google.com");
   }
 
   NiceMock<chromeos::MockCryptohomeClient> mock_cryptohome_client_;
   NiceMock<cryptohome::MockAsyncMethodCaller> mock_async_method_caller_;
   NiceMock<chromeos::attestation::MockAttestationFlow> mock_attestation_flow_;
+  chromeos::ScopedCrosSettingsTestHelper settings_helper_;
   scoped_refptr<extensions::Extension> extension_;
   policy::StubEnterpriseInstallAttributes stub_install_attributes_;
-  chromeos::CrosSettingsProvider* device_settings_provider_;
-  chromeos::StubCrosSettingsProvider stub_settings_provider_;
   PrefService* prefs_;
 };
 
@@ -260,8 +243,7 @@ TEST_F(EPKPChallengeMachineKeyTest, ExtensionNotWhitelisted) {
 }
 
 TEST_F(EPKPChallengeMachineKeyTest, DevicePolicyDisabled) {
-  stub_settings_provider_.Set(chromeos::kDeviceAttestationEnabled,
-                              base::FundamentalValue(false));
+  settings_helper_.SetBoolean(chromeos::kDeviceAttestationEnabled, false);
 
   EXPECT_EQ(EPKPChallengeKeyBase::kDevicePolicyDisabledError,
             utils::RunFunctionAndReturnError(func_.get(), kArgs, browser()));
@@ -397,8 +379,7 @@ TEST_F(EPKPChallengeUserKeyTest, ExtensionNotWhitelisted) {
 }
 
 TEST_F(EPKPChallengeUserKeyTest, DevicePolicyDisabled) {
-  stub_settings_provider_.Set(chromeos::kDeviceAttestationEnabled,
-                              base::FundamentalValue(false));
+  settings_helper_.SetBoolean(chromeos::kDeviceAttestationEnabled, false);
 
   EXPECT_EQ(EPKPChallengeKeyBase::kDevicePolicyDisabledError,
             utils::RunFunctionAndReturnError(func_.get(), kArgs, browser()));
@@ -517,7 +498,7 @@ class EPKPChallengeMachineKeyUnmanagedUserTest
  protected:
   void SetAuthenticatedUser() override {
     SigninManagerFactory::GetForProfile(browser()->profile())->
-        SetAuthenticatedUsername("test@chromium.com");
+        SetAuthenticatedAccountInfo("12345", "test@chromium.com");
   }
 };
 
@@ -530,7 +511,7 @@ class EPKPChallengeUserKeyUnmanagedUserTest : public EPKPChallengeUserKeyTest {
  protected:
   void SetAuthenticatedUser() override {
     SigninManagerFactory::GetForProfile(browser()->profile())->
-        SetAuthenticatedUsername("test@chromium.com");
+        SetAuthenticatedAccountInfo("12345", "test@chromium.com");
   }
 };
 

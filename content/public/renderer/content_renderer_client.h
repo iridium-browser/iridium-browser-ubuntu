@@ -29,6 +29,7 @@ class SingleThreadTaskRunner;
 }
 
 namespace blink {
+class WebAppBannerClient;
 class WebAudioDevice;
 class WebClipboard;
 class WebFrame;
@@ -291,6 +292,19 @@ class CONTENT_EXPORT ContentRendererClient {
   // Returns a user agent override specific for |url|, or empty string if
   // default user agent should be used.
   virtual std::string GetUserAgentOverrideForURL(const GURL& url);
+
+  // Records a sample string to a Rappor privacy-preserving metric.
+  // See: https://www.chromium.org/developers/design-documents/rappor
+  virtual void RecordRappor(const std::string& metric,
+                            const std::string& sample) {}
+
+  // Records a domain and registry of a url to a Rappor privacy-preserving
+  // metric. See: https://www.chromium.org/developers/design-documents/rappor
+  virtual void RecordRapporURL(const std::string& metric, const GURL& url) {}
+
+  // Allows an embedder to provide a blink::WebAppBannerClient.
+  virtual scoped_ptr<blink::WebAppBannerClient> CreateAppBannerClient(
+      RenderFrame* render_frame);
 };
 
 }  // namespace content

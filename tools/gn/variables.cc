@@ -319,9 +319,8 @@ const char kTargetOutDir_Help[] =
     "     the \"deps\" list. This is done recursively. If a config appears\n" \
     "     more than once, only the first occurance will be used.\n" \
     "  6. public_configs pulled from dependencies, in the order of the\n" \
-    "     \"deps\" list. If a dependency has " \
-              "\"forward_dependent_configs_from\",\n" \
-    "     or are public dependencies, they will be applied recursively.\n"
+    "     \"deps\" list. If a dependency is public, they will be applied\n" \
+    "     recursively.\n"
 
 const char kAllDependentConfigs[] = "all_dependent_configs";
 const char kAllDependentConfigs_HelpShort[] =
@@ -511,16 +510,23 @@ const char kData_Help[] =
     "data: Runtime data file dependencies.\n"
     "\n"
     "  Lists files required to run the given target. These are typically\n"
-    "  data files.\n"
+    "  data files. The paths are interpreted as being relative to the current\n"
+    "  build file. Since these are runtime dependencies, they do not affect\n"
+    "  which targets are built or when. To declare input files to a script,\n"
+    "  use \"inputs\".\n"
     "\n"
     "  Appearing in the \"data\" section does not imply any special handling\n"
     "  such as copying them to the output directory. This is just used for\n"
-    "  declaring runtime dependencies. There currently isn't a good use for\n"
-    "  these but it is envisioned that test data can be listed here for use\n"
-    "  running automated tests.\n"
+    "  declaring runtime dependencies. Runtime dependencies can be queried\n"
+    "  using the \"runtime_deps\" category of \"gn desc\" or written during\n"
+    "  build generation via \"--runtime-deps-list-file\".\n"
     "\n"
-    "  See also \"gn help inputs\" and \"gn help data_deps\", both of\n"
-    "  which actually affect the build in concrete ways.\n";
+    "  GN doesn't require data files to exist at build-time. So actions that\n"
+    "  produce files that are in turn runtime dependencies can list those\n"
+    "  generated files both in the \"outputs\" list as well as the \"data\"\n"
+    "  list.\n"
+    "\n"
+    "  See \"gn help runtime_deps\" for how these are used.\n";
 
 const char kDataDeps[] = "data_deps";
 const char kDataDeps_HelpShort[] =
@@ -612,13 +618,16 @@ const char kDeps_Help[] =
     "\n"
     "  See also \"public_deps\" and \"data_deps\".\n";
 
+// TODO(brettw) remove this, deprecated.
 const char kForwardDependentConfigsFrom[] = "forward_dependent_configs_from";
 const char kForwardDependentConfigsFrom_HelpShort[] =
-    "forward_dependent_configs_from: [label list] Forward dependent's configs.";
+    "forward_dependent_configs_from: [label list] DEPRECATED.";
 const char kForwardDependentConfigsFrom_Help[] =
     "forward_dependent_configs_from\n"
     "\n"
     "  A list of target labels.\n"
+    "\n"
+    "  DEPRECATED. Use public_deps instead which will have the same effect.\n"
     "\n"
     "  Exposes the public_configs from a private dependent target as\n"
     "  public_configs of the current one. Each label in this list\n"
@@ -907,14 +916,17 @@ const char kPublicDeps_Help[] =
     "  additionally express that the current target exposes the listed deps\n"
     "  as part of its public API.\n"
     "\n"
-    "  This has two ramifications:\n"
+    "  This has several ramifications:\n"
     "\n"
     "    - public_configs that are part of the dependency are forwarded\n"
-    "      to direct dependents (this is the same as using\n"
-    "      forward_dependent_configs_from).\n"
+    "      to direct dependents.\n"
     "\n"
-    "    - public headers in the dependency are usable by dependents\n"
+    "    - Public headers in the dependency are usable by dependents\n"
     "      (includes do not require a direct dependency or visibility).\n"
+    "\n"
+    "    - If the current target is a shared library, other shared libraries\n"
+    "      that it publicly depends on (directly or indirectly) are\n"
+    "      propagated up the dependency tree to dependents for linking.\n"
     "\n"
     "Discussion\n"
     "\n"

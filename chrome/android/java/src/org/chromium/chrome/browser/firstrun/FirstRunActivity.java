@@ -9,7 +9,7 @@ import android.app.Fragment;
 import android.content.Intent;
 import android.os.Bundle;
 import android.support.v4.view.ViewPager;
-import android.support.v7.app.ActionBarActivity;
+import android.support.v7.app.AppCompatActivity;
 import android.text.TextUtils;
 import android.util.Log;
 
@@ -17,9 +17,9 @@ import org.chromium.base.ApplicationStatus;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.base.metrics.RecordHistogram;
+import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromiumApplication;
-import org.chromium.chrome.browser.metrics.UmaBridge;
 import org.chromium.chrome.browser.profiles.Profile;
 
 import java.lang.ref.WeakReference;
@@ -36,7 +36,7 @@ import java.util.concurrent.Callable;
  *   [Sign-in page]
  * The activity might be run more than once, e.g. 1) for ToS and sign-in, and 2) for intro.
  */
-public class FirstRunActivity extends ActionBarActivity implements FirstRunPageDelegate {
+public class FirstRunActivity extends AppCompatActivity implements FirstRunPageDelegate {
     protected static final String TAG = "FirstRunActivity";
 
     // Incoming parameters:
@@ -56,6 +56,11 @@ public class FirstRunActivity extends ActionBarActivity implements FirstRunPageD
 
     // UMA constants.
     private static final String UMA_SIGNIN_CHOICE = "MobileFre.SignInChoice";
+    private static final String UMA_SIGNIN_CHOICE_ENTRY_MAIN_INTENT = ".MainIntent";
+    private static final String UMA_SIGNIN_CHOICE_ENTRY_VIEW_INTENT = ".ViewIntent";
+    private static final String UMA_SIGNIN_CHOICE_ZERO_ACCOUNTS = ".ZeroAccounts";
+    private static final String UMA_SIGNIN_CHOICE_ONE_ACCOUNT = ".OneAccount";
+    private static final String UMA_SIGNIN_CHOICE_MANY_ACCOUNTS = ".ManyAccounts";
     private static final int SIGNIN_SETTINGS_DEFAULT_ACCOUNT = 0;
     private static final int SIGNIN_SETTINGS_ANOTHER_ACCOUNT = 1;
     private static final int SIGNIN_ACCEPT_DEFAULT_ACCOUNT = 2;
@@ -71,8 +76,7 @@ public class FirstRunActivity extends ActionBarActivity implements FirstRunPageD
     private String mResultSignInAccountName;
     private boolean mResultShowSyncSettings;
 
-    // TODO(aurimas): make this private once all of FirstRunActivity is upstreamed.
-    protected boolean mNativeSideIsInitialized;
+    private boolean mNativeSideIsInitialized;
 
     private ProfileDataCache mProfileDataCache;
     private ViewPager mPager;
@@ -173,11 +177,6 @@ public class FirstRunActivity extends ActionBarActivity implements FirstRunPageD
     }
 
     @Override
-    protected void onResumeFragments() {
-        skipPagesIfNecessary();
-    }
-
-    @Override
     protected void onDestroy() {
         super.onDestroy();
         mProfileDataCache.onDestroy();
@@ -263,6 +262,20 @@ public class FirstRunActivity extends ActionBarActivity implements FirstRunPageD
             }
             RecordHistogram.recordEnumeratedHistogram(
                     UMA_SIGNIN_CHOICE, choice, SIGNIN_OPTION_COUNT);
+
+            String entryType = mFreProperties.getBoolean(FirstRunActivity.COMING_FROM_CHROME_ICON)
+                    ? UMA_SIGNIN_CHOICE_ENTRY_MAIN_INTENT : UMA_SIGNIN_CHOICE_ENTRY_VIEW_INTENT;
+            int numAccounts = sGlue.numberOfAccounts(getApplicationContext());
+            String numAccountsString;
+            if (numAccounts == 0) {
+                numAccountsString = UMA_SIGNIN_CHOICE_ZERO_ACCOUNTS;
+            } else if (numAccounts == 1) {
+                numAccountsString = UMA_SIGNIN_CHOICE_ONE_ACCOUNT;
+            } else {
+                numAccountsString = UMA_SIGNIN_CHOICE_MANY_ACCOUNTS;
+            }
+            RecordHistogram.recordEnumeratedHistogram(
+                    UMA_SIGNIN_CHOICE + entryType + numAccountsString, choice, SIGNIN_OPTION_COUNT);
         }
 
         mFreProperties.putString(RESULT_SIGNIN_ACCOUNT_NAME, mResultSignInAccountName);
@@ -281,7 +294,7 @@ public class FirstRunActivity extends ActionBarActivity implements FirstRunPageD
 
     @Override
     public void onSigninDialogShown() {
-        UmaBridge.freSignInShown();
+        RecordUserAction.record("MobileFre.SignInShown");
     }
 
     @Override
@@ -370,7 +383,7 @@ public class FirstRunActivity extends ActionBarActivity implements FirstRunPageD
         int currentPageIndex = mPager.getCurrentItem();
         while (currentPageIndex < mPagerAdapter.getCount()) {
             FirstRunPage currentPage = (FirstRunPage) mPagerAdapter.getItem(currentPageIndex);
-            if (!currentPage.shouldSkipPageOnResume(getApplicationContext())) return;
+            if (!currentPage.shouldSkipPageOnCreate(getApplicationContext())) return;
             if (!jumpToPage(currentPageIndex + 1, false)) return;
             currentPageIndex = mPager.getCurrentItem();
         }
@@ -384,7 +397,7 @@ public class FirstRunActivity extends ActionBarActivity implements FirstRunPageD
         // and a fragment might depend on the native library.
         try {
             ((ChromiumApplication) getApplication())
-                    .startBrowserProcessesAndLoadLibrariesSync(this, true);
+                    .startBrowserProcessesAndLoadLibrariesSync(true);
             mNativeSideIsInitialized = true;
         } catch (ProcessInitException e) {
             Log.e(TAG, "Unable to load native library.", e);

@@ -54,6 +54,11 @@ class ServiceWorkerControlleeRequestHandlerTest : public testing::Test {
     version_ = new ServiceWorkerVersion(
         registration_.get(), script_url_, 1L, context()->AsWeakPtr());
 
+    std::vector<ServiceWorkerDatabase::ResourceRecord> records;
+    records.push_back(
+        ServiceWorkerDatabase::ResourceRecord(10, version_->script_url(), 100));
+    version_->script_cache_map()->SetResources(records);
+
     // An empty host.
     scoped_ptr<ServiceWorkerProviderHost> host(new ServiceWorkerProviderHost(
         kMockRenderProcessId, MSG_ROUTING_NONE, kMockProviderId,
@@ -91,7 +96,9 @@ class ServiceWorkerTestContentBrowserClient : public TestContentBrowserClient {
   ServiceWorkerTestContentBrowserClient() {}
   bool AllowServiceWorker(const GURL& scope,
                           const GURL& first_party,
-                          content::ResourceContext* context) override {
+                          content::ResourceContext* context,
+                          int render_process_id,
+                          int render_frame_id) override {
     return false;
   }
 };
@@ -103,7 +110,7 @@ TEST_F(ServiceWorkerControlleeRequestHandlerTest, DisallowServiceWorker) {
 
   // Store an activated worker.
   version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
-  registration_->SetActiveVersion(version_.get());
+  registration_->SetActiveVersion(version_);
   context()->storage()->StoreRegistration(
       registration_.get(),
       version_.get(),
@@ -146,7 +153,7 @@ TEST_F(ServiceWorkerControlleeRequestHandlerTest, DisallowServiceWorker) {
 TEST_F(ServiceWorkerControlleeRequestHandlerTest, ActivateWaitingVersion) {
   // Store a registration that is installed but not activated yet.
   version_->SetStatus(ServiceWorkerVersion::INSTALLED);
-  registration_->SetWaitingVersion(version_.get());
+  registration_->SetWaitingVersion(version_);
   context()->storage()->StoreRegistration(
       registration_.get(),
       version_.get(),
@@ -195,7 +202,7 @@ TEST_F(ServiceWorkerControlleeRequestHandlerTest, DeletedProviderHost) {
   // Store a registration so the call to FindRegistrationForDocument will read
   // from the database.
   version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
-  registration_->SetActiveVersion(version_.get());
+  registration_->SetActiveVersion(version_);
   context()->storage()->StoreRegistration(
       registration_.get(),
       version_.get(),

@@ -179,6 +179,11 @@ ImageView.prototype.getZIndex = function() { return -1; };
 ImageView.prototype.draw = function() {
   if (!this.contentCanvas_)  // Do nothing if the image content is not set.
     return;
+  this.setTransform_(
+      this.contentCanvas_,
+      this.viewport_,
+      new ImageView.Effect.None(),
+      ImageView.Effect.DEFAULT_DURATION);
   if ((this.screenImage_ && this.setupDeviceBuffer(this.screenImage_)) ||
       this.displayedContentGeneration_ !== this.contentGeneration_) {
     this.displayedContentGeneration_ = this.contentGeneration_;
@@ -194,12 +199,22 @@ ImageView.prototype.draw = function() {
  * change or offset change) with animation.
  */
 ImageView.prototype.applyViewportChange = function() {
-  if (this.screenImage_) {
+  var zooming = this.viewport_.getZoom() > 1;
+  if (this.contentCanvas_) {
+    // Show full resolution image only for zooming.
+    this.contentCanvas_.style.opacity = zooming ? '1' : '0';
     this.setTransform_(
-        this.screenImage_,
+        this.contentCanvas_,
         this.viewport_,
         new ImageView.Effect.None(),
         ImageView.Effect.DEFAULT_DURATION);
+  }
+  if (this.screenImage_) {
+      this.setTransform_(
+          this.screenImage_,
+          this.viewport_,
+          new ImageView.Effect.None(),
+          ImageView.Effect.DEFAULT_DURATION);
   }
 };
 
@@ -300,16 +315,7 @@ ImageView.prototype.setupDeviceBuffer = function(canvas) {
     canvas.height = deviceRect.height;
     needRepaint = true;
   }
-
-  // Center the image.
-  var imageBounds = this.viewport_.getImageElementBoundsOnScreen();
-  canvas.style.left = imageBounds.left + 'px';
-  canvas.style.top = imageBounds.top + 'px';
-  canvas.style.width = imageBounds.width + 'px';
-  canvas.style.height = imageBounds.height + 'px';
-
   this.setTransform_(canvas, this.viewport_);
-
   return needRepaint;
 };
 
@@ -562,6 +568,8 @@ ImageView.prototype.replaceContent_ = function(
     // Insert the full resolution canvas into DOM so that it can be printed.
     this.container_.appendChild(this.contentCanvas_);
     this.contentCanvas_.classList.add('fullres');
+    this.setTransform_(
+        this.contentCanvas_, this.viewport_, null, 0);
 
     this.contentItem_.contentImage = this.contentCanvas_;
     this.contentItem_.screenImage = this.screenImage_;
@@ -622,7 +630,6 @@ ImageView.prototype.replace = function(
     content, opt_effect, opt_width, opt_height, opt_preview) {
   var oldScreenImage = this.screenImage_;
   var oldViewport = this.viewport_.clone();
-
   this.replaceContent_(content, opt_width, opt_height, opt_preview);
   if (!opt_effect) {
     if (oldScreenImage)
@@ -638,33 +645,47 @@ ImageView.prototype.replace = function(
     ImageUtil.setAttribute(newScreenImage, 'fade', true);
   this.setTransform_(
       newScreenImage, this.viewport_, opt_effect, 0 /* instant */);
+  this.setTransform_(
+      content, this.viewport_, opt_effect, 0 /* instant */);
 
-  setTimeout(function() {
-    this.setTransform_(
-        newScreenImage,
-        this.viewport_,
-        null,
-        opt_effect ? opt_effect.getDuration() : undefined);
-    if (oldScreenImage) {
-      ImageUtil.setAttribute(newScreenImage, 'fade', false);
-      ImageUtil.setAttribute(oldScreenImage, 'fade', true);
-      var reverse = opt_effect.getReverse();
-      if (reverse) {
-        this.setTransform_(oldScreenImage, oldViewport, reverse);
-        setTimeout(function() {
-          if (oldScreenImage.parentNode)
-            oldScreenImage.parentNode.removeChild(oldScreenImage);
-        }, reverse.getSafeInterval());
-      } else {
-        if (oldScreenImage.parentNode)
-          oldScreenImage.parentNode.removeChild(oldScreenImage);
+  // We need to call requestAnimationFrame twice here. The first call is for
+  // commiting the styles of beggining of transition that are assigned above.
+  // The second call is for assigning and commiting the styles of end of
+  // transition, which triggers transition animation.
+  requestAnimationFrame(function() {
+    requestAnimationFrame(function() {
+      this.setTransform_(
+          newScreenImage,
+          this.viewport_,
+          null,
+          opt_effect ? opt_effect.getDuration() : undefined);
+      this.setTransform_(
+          content,
+          this.viewport_,
+          null,
+          opt_effect ? opt_effect.getDuration() : undefined);
+      if (oldScreenImage) {
+        ImageUtil.setAttribute(newScreenImage, 'fade', false);
+        ImageUtil.setAttribute(oldScreenImage, 'fade', true);
+        var reverse = opt_effect.getReverse();
+        if (reverse) {
+          this.setTransform_(oldScreenImage, oldViewport, reverse);
+          setTimeout(function() {
+            if (oldScreenImage.parentNode)
+              oldScreenImage.parentNode.removeChild(oldScreenImage);
+          }, reverse.getSafeInterval());
+        } else {
+            if (oldScreenImage.parentNode)
+              oldScreenImage.parentNode.removeChild(oldScreenImage);
+        }
       }
-    }
-  }.bind(this), 0);
+    }.bind(this));
+  }.bind(this));
 };
 
 /**
- * @param {!HTMLCanvasElement} element The element to transform.
+ * @param {!HTMLCanvasElement|!HTMLImageElement} element The element to
+ *     transform.
  * @param {!Viewport} viewport Viewport to be used for calculating
  *     transformation.
  * @param {ImageView.Effect=} opt_effect The effect to apply.
@@ -677,9 +698,9 @@ ImageView.prototype.setTransform_ = function(
     opt_effect = new ImageView.Effect.None();
   if (typeof opt_duration !== 'number')
     opt_duration = opt_effect.getDuration();
-  element.style.webkitTransitionDuration = opt_duration + 'ms';
-  element.style.webkitTransitionTimingFunction = opt_effect.getTiming();
-  element.style.webkitTransform = opt_effect.transform(element, viewport);
+  element.style.transitionDuration = opt_duration + 'ms';
+  element.style.transitionTimingFunction = opt_effect.getTiming();
+  element.style.transform = opt_effect.transform(element, viewport);
 };
 
 /**
@@ -823,8 +844,8 @@ ImageView.Effect.prototype.getTiming = function() { return this.timing_; };
 
 /**
  * Obtains the CSS transformation string of the effect.
- * @param {!HTMLCanvasElement} element Canvas element to be applied the
- *     transformation.
+ * @param {!HTMLCanvasElement|!HTMLImageElement} element Canvas element to be
+ *     applied the transformation.
  * @param {!Viewport} viewport Current viewport.
  * @return {string} CSS transformation description.
  */
@@ -849,12 +870,10 @@ ImageView.Effect.None = function() {
 ImageView.Effect.None.prototype = { __proto__: ImageView.Effect.prototype };
 
 /**
- * @param {!HTMLCanvasElement} element Element.
- * @param {!Viewport} viewport Current viewport.
- * @return {string} Transform string.
+ * @override
  */
 ImageView.Effect.None.prototype.transform = function(element, viewport) {
-  return viewport.getTransformation();
+  return viewport.getTransformation(element.width, element.height);
 };
 
 /**
@@ -888,7 +907,8 @@ ImageView.Effect.Slide.prototype.getReverse = function() {
  * @override
  */
 ImageView.Effect.Slide.prototype.transform = function(element, viewport) {
-  return viewport.getShiftTransformation(this.shift_);
+  return viewport.getTransformation(
+      element.width, element.height, this.shift_);
 };
 
 /**
@@ -920,8 +940,12 @@ ImageView.Effect.Zoom.prototype = { __proto__: ImageView.Effect.prototype };
  * @override
  */
 ImageView.Effect.Zoom.prototype.transform = function(element, viewport) {
-  return viewport.getInverseTransformForCroppedImage(
-      this.previousImageWidth_, this.previousImageHeight_, this.imageCropRect_);
+  return viewport.getCroppingTransformation(
+      element.width,
+      element.height,
+      this.previousImageWidth_,
+      this.previousImageHeight_,
+      this.imageCropRect_);
 };
 
 /**
@@ -949,7 +973,10 @@ ImageView.Effect.ZoomToScreen.prototype = {
  */
 ImageView.Effect.ZoomToScreen.prototype.transform = function(
     element, viewport) {
-  return viewport.getScreenRectTransformForImage(this.screenRect_);
+  return viewport.getScreenRectTransformation(
+      element.width,
+      element.height,
+      this.screenRect_);
 };
 
 /**
@@ -972,5 +999,6 @@ ImageView.Effect.Rotate.prototype = { __proto__: ImageView.Effect.prototype };
  * @override
  */
 ImageView.Effect.Rotate.prototype.transform = function(element, viewport) {
-  return viewport.getInverseTransformForRotatedImage(this.orientation_);
+  return viewport.getRotatingTransformation(
+      element.width, element.height, this.orientation_ ? -1 : 1);
 };

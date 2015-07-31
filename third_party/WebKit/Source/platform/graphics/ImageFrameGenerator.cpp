@@ -68,9 +68,7 @@ private:
 
 static bool updateYUVComponentSizes(ImageDecoder* decoder, SkISize componentSizes[3], ImageDecoder::SizeType sizeType)
 {
-    // canDecodeToYUV() has to be called AFTER isSizeAvailable(),
-    // otherwise the output color space may not be set in the decoder.
-    if (!decoder->isSizeAvailable() || !decoder->canDecodeToYUV())
+    if (!decoder->canDecodeToYUV())
         return false;
 
     IntSize size = decoder->decodedYUVSize(0, sizeType);
@@ -140,6 +138,7 @@ bool ImageFrameGenerator::decodeAndScale(const SkImageInfo& info, size_t index, 
     ASSERT(bitmap.height() == scaledSize.height());
 
     bool result = true;
+    SkAutoLockPixels bitmapLock(bitmap);
     // Check to see if decoder has written directly to the memory provided
     // by Skia. If not make a copy.
     if (bitmap.getPixels() != pixels)

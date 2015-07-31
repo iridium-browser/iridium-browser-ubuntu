@@ -22,9 +22,9 @@ class IEImporter : public Importer {
   IEImporter();
 
   // Importer:
-  virtual void StartImport(const importer::SourceProfile& source_profile,
-                           uint16 items,
-                           ImporterBridge* bridge) override;
+  void StartImport(const importer::SourceProfile& source_profile,
+                   uint16 items,
+                   ImporterBridge* bridge) override;
 
  private:
   typedef std::vector<ImportedBookmarkEntry> BookmarkVector;
@@ -43,7 +43,7 @@ class IEImporter : public Importer {
 
   FRIEND_TEST_ALL_PREFIXES(ImporterTest, IEImporter);
 
-  virtual ~IEImporter();
+  ~IEImporter() override;
 
   void ImportFavorites();
 

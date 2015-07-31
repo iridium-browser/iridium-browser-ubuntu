@@ -29,12 +29,13 @@ class CONTENT_EXPORT IndexedDBKeyRange {
   bool upper_open() const { return upper_open_; }
 
   bool IsOnlyKey() const;
+  bool IsEmpty() const;
 
  private:
-  IndexedDBKey lower_;
-  IndexedDBKey upper_;
-  bool lower_open_;
-  bool upper_open_;
+  IndexedDBKey lower_ = IndexedDBKey(blink::WebIDBKeyTypeNull);
+  IndexedDBKey upper_ = IndexedDBKey(blink::WebIDBKeyTypeNull);
+  bool lower_open_ = false;
+  bool upper_open_ = false;
 };
 
 }  // namespace content

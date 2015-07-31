@@ -24,14 +24,16 @@
 #ifndef HTMLOptGroupElement_h
 #define HTMLOptGroupElement_h
 
+#include "core/CoreExport.h"
 #include "core/html/HTMLElement.h"
+#include "core/style/ComputedStyle.h"
 
 namespace blink {
 
 class HTMLSelectElement;
 class HTMLDivElement;
 
-class HTMLOptGroupElement final : public HTMLElement {
+class CORE_EXPORT HTMLOptGroupElement final : public HTMLElement {
     DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<HTMLOptGroupElement> create(Document&);
@@ -49,11 +51,11 @@ private:
     virtual void parseAttribute(const QualifiedName&, const AtomicString&) override;
     virtual void childrenChanged(const ChildrenChange&) override;
     virtual void accessKeyAction(bool sendMouseEvents) override;
-    virtual void didAddClosedShadowRoot(ShadowRoot&) override;
+    virtual void didAddUserAgentShadowRoot(ShadowRoot&) override;
     virtual void attach(const AttachContext& = AttachContext()) override;
     virtual void detach(const AttachContext& = AttachContext()) override;
 
-    // <optgroup> might not have a renderer so we manually manage a cached style.
+    // <optgroup> might not have a layoutObject so we manually manage a cached style.
     void updateNonComputedStyle();
     virtual ComputedStyle* nonLayoutObjectComputedStyle() const override;
     virtual PassRefPtr<ComputedStyle> customStyleForLayoutObject() override;

@@ -50,23 +50,6 @@ WebInspector.ObjectPopoverHelper.MaxPopoverTextLength = 10000;
 
 WebInspector.ObjectPopoverHelper.prototype = {
     /**
-     * @param {function(!WebInspector.RemoteObject):string} formatter
-     */
-    setRemoteObjectFormatter: function(formatter)
-    {
-        this._remoteObjectFormatter = formatter;
-    },
-
-    /**
-     * @param {!WebInspector.RemoteObject} object
-     */
-    _formattedObjectDescription: function(object)
-    {
-        var description = (this._remoteObjectFormatter && this._remoteObjectFormatter(object)) || object.description;
-        return description.trimEnd(WebInspector.ObjectPopoverHelper.MaxPopoverTextLength);
-    },
-
-    /**
      * @param {!Element} element
      * @param {!WebInspector.Popover} popover
      */
@@ -153,11 +136,11 @@ WebInspector.ObjectPopoverHelper.prototype = {
             }
             this._objectTarget = result.target();
             var anchorElement = anchorOverride || element;
-            var description = this._formattedObjectDescription(result);
+            var description = result.description.trimEnd(WebInspector.ObjectPopoverHelper.MaxPopoverTextLength);
             var popoverContentElement = null;
             if (result.type !== "object") {
                 popoverContentElement =  createElement("span");
-                popoverContentElement.appendChild(WebInspector.View.createStyleElement("components/objectValue.css"));
+                popoverContentElement.appendChild(WebInspector.Widget.createStyleElement("components/objectValue.css"));
                 var valueElement = popoverContentElement.createChild("span", "monospace object-value-" + result.type);
                 valueElement.style.whiteSpace = "pre";
 
@@ -175,24 +158,26 @@ WebInspector.ObjectPopoverHelper.prototype = {
                 popover.showForAnchor(popoverContentElement, anchorElement);
             } else {
                 if (result.subtype === "node") {
-                    result.target().domModel.highlightObjectAsDOMNode(result);
-                    this._resultHighlightedAsDOM = result;
+                    WebInspector.DOMModel.highlightObjectAsDOMNode(result);
+                    this._resultHighlightedAsDOM = true;
                 }
-                popoverContentElement = createElement("div");
 
-                this._titleElement = popoverContentElement.createChild("div", "monospace");
-                this._titleElement.createChild("span", "source-frame-popover-title").textContent = description;
+                if (result.customPreview()) {
+                    var customPreviewComponent = new WebInspector.CustomPreviewComponent(result);
+                    customPreviewComponent.expandIfPossible();
+                    popoverContentElement = customPreviewComponent.element;
+                } else {
+                    popoverContentElement = createElement("div");
+                    this._titleElement = popoverContentElement.createChild("div", "monospace");
+                    this._titleElement.createChild("span", "source-frame-popover-title").textContent = description;
+                    var section = new WebInspector.ObjectPropertiesSection(result, "");
+                    section.element.classList.add("source-frame-popover-tree");
+                    section.titleLessMode();
+                    popoverContentElement.appendChild(section.element);
 
-                var section = new WebInspector.ObjectPropertiesSection(result);
-
-                section.expand();
-                section.element.classList.add("source-frame-popover-tree");
-                section.headerElement.classList.add("hidden");
-                popoverContentElement.appendChild(section.element);
-
-                if (result.subtype === "generator")
-                    result.generatorObjectDetails(didGetGeneratorObjectDetails.bind(this));
-
+                    if (result.subtype === "generator")
+                        result.generatorObjectDetails(didGetGeneratorObjectDetails.bind(this));
+                }
                 var popoverWidth = 300;
                 var popoverHeight = 250;
                 popover.showForAnchor(popoverContentElement, anchorElement, popoverWidth, popoverHeight);
@@ -205,7 +190,7 @@ WebInspector.ObjectPopoverHelper.prototype = {
     _onHideObjectPopover: function()
     {
         if (this._resultHighlightedAsDOM) {
-            this._resultHighlightedAsDOM.target().domModel.hideDOMNodeHighlight();
+            WebInspector.DOMModel.hideDOMNodeHighlight();
             delete this._resultHighlightedAsDOM;
         }
         if (this._linkifier) {

@@ -26,6 +26,7 @@
 #ifndef Editor_h
 #define Editor_h
 
+#include "core/CoreExport.h"
 #include "core/clipboard/DataTransferAccessPolicy.h"
 #include "core/dom/DocumentMarker.h"
 #include "core/editing/EditAction.h"
@@ -56,7 +57,7 @@ class UndoStack;
 enum EditorCommandSource { CommandFromMenuOrKeyBinding, CommandFromDOM };
 enum EditorParagraphSeparator { EditorParagraphSeparatorIsDiv, EditorParagraphSeparatorIsP };
 
-class Editor final : public NoBaseWillBeGarbageCollectedFinalized<Editor> {
+class CORE_EXPORT Editor final : public NoBaseWillBeGarbageCollectedFinalized<Editor> {
     WTF_MAKE_NONCOPYABLE(Editor);
 public:
     static PassOwnPtrWillBeRawPtr<Editor> create(LocalFrame&);
@@ -119,7 +120,7 @@ public:
     void setShouldStyleWithCSS(bool flag) { m_shouldStyleWithCSS = flag; }
     bool shouldStyleWithCSS() const { return m_shouldStyleWithCSS; }
 
-    class Command {
+    class CORE_EXPORT Command {
         STACK_ALLOCATED();
     public:
         Command();
@@ -199,8 +200,6 @@ public:
     Element* findEventTargetFrom(const VisibleSelection&) const;
 
     bool findString(const String&, FindOptions);
-    // FIXME: Switch callers over to the FindOptions version and retire this one.
-    bool findString(const String&, bool forward, bool caseFlag, bool wrapFlag, bool startInSelection);
 
     PassRefPtrWillBeRawPtr<Range> findStringAndScrollToVisible(const String&, Range*, FindOptions);
 
@@ -279,7 +278,7 @@ private:
 
     SpellChecker& spellChecker() const;
 
-    bool handleEditingKeyboardEvent(blink::KeyboardEvent*);
+    bool handleEditingKeyboardEvent(KeyboardEvent*);
 };
 
 inline void Editor::setStartNewKillRingSequence(bool flag)

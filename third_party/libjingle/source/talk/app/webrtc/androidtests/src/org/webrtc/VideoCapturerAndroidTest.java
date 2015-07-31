@@ -201,9 +201,9 @@ public class VideoCapturerAndroidTest extends ActivityTestCase {
     VideoTrack track = factory.createVideoTrack("dummy", source);
 
     if (HaveTwoCameras())
-      assertTrue(capturer.switchCamera());
+      assertTrue(capturer.switchCamera(null));
     else
-      assertFalse(capturer.switchCamera());
+      assertFalse(capturer.switchCamera(null));
 
     // Wait until the camera have been switched.
     capturer.runCameraThreadUntilIdle();
@@ -260,7 +260,7 @@ public class VideoCapturerAndroidTest extends ActivityTestCase {
       assertTrue(observer.WaitForCapturerToStart());
       observer.WaitForNextCapturedFrame();
       // Check the frame size.
-      assertEquals((format.width*format.height*3)/2, observer.frameSize());
+      assertEquals(format.frameSize(), observer.frameSize());
       capturer.stopCapture();
     }
     capturer.dispose();

@@ -22,10 +22,17 @@ config("sanitizer_options_link_helper") {
 }
 
 source_set("options_sources") {
-  visibility = [ ":deps" ]
+  visibility = [
+    ":deps",
+    "//:gn_visibility",
+  ]
   sources = [
     "//build/sanitizers/sanitizer_options.cc",
   ]
+
+  if (is_asan) {
+    sources += [ "//build/sanitizers/asan_suppressions.cc" ]
+  }
 
   if (is_tsan) {
     sources += [ "//build/sanitizers/tsan_suppressions.cc" ]

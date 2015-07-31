@@ -45,14 +45,20 @@
 #include "core/html/HTMLInputElement.h"
 #include "core/html/HTMLTextAreaElement.h"
 #include "core/layout/LayoutView.h"
+#include "core/loader/DocumentLoader.h"
 #include "core/loader/FrameLoadRequest.h"
 #include "core/page/Chrome.h"
 #include "core/page/Page.h"
 #include "core/paint/DeprecatedPaintLayer.h"
 #include "core/paint/DeprecatedPaintLayerPainter.h"
+#include "core/timing/DOMWindowPerformance.h"
+#include "core/timing/Performance.h"
+#include "core/timing/PerformanceCompositeTiming.h"
 #include "platform/KeyboardCodes.h"
+#include "platform/UserGestureIndicator.h"
 #include "platform/geometry/IntSize.h"
 #include "platform/graphics/Color.h"
+#include "platform/graphics/GraphicsContext.h"
 #include "platform/testing/URLTestHelpers.h"
 #include "platform/testing/UnitTestHelpers.h"
 #include "public/platform/Platform.h"
@@ -65,6 +71,7 @@
 #include "public/web/WebAutofillClient.h"
 #include "public/web/WebContentDetectionResult.h"
 #include "public/web/WebDateTimeChooserCompletion.h"
+#include "public/web/WebDeviceEmulationParams.h"
 #include "public/web/WebDocument.h"
 #include "public/web/WebDragOperation.h"
 #include "public/web/WebElement.h"
@@ -89,6 +96,7 @@
 using namespace blink;
 using blink::FrameTestHelpers::loadFrame;
 using blink::URLTestHelpers::toKURL;
+using blink::URLTestHelpers::registerMockedURLLoad;
 using blink::testing::runPendingTasks;
 
 namespace {
@@ -242,8 +250,9 @@ TEST_F(WebViewTest, SaveImageAt)
 
     std::string url = m_baseURL + "image-with-data-url.html";
     URLTestHelpers::registerMockedURLLoad(toKURL(url), "image-with-data-url.html");
-    WebView* webView = m_webViewHelper.initializeAndLoad(url, true, 0, &client);
+    WebViewImpl* webView = m_webViewHelper.initializeAndLoad(url, true, 0, &client);
     webView->resize(WebSize(400, 400));
+    webView->layout();
 
     client.reset();
     webView->saveImageAt(WebPoint(1, 1));
@@ -254,8 +263,42 @@ TEST_F(WebViewTest, SaveImageAt)
     webView->saveImageAt(WebPoint(1, 2));
     EXPECT_EQ(WebString(), client.result());
 
+    webView->setPageScaleFactor(4);
+    webView->setPinchViewportOffset(WebFloatPoint(1, 1));
+
+    client.reset();
+    webView->saveImageAt(WebPoint(3, 3));
+    EXPECT_EQ(WebString::fromUTF8("data:image/gif;base64"
+        ",R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs="), client.result());
+
     m_webViewHelper.reset(); // Explicitly reset to break dependency on locally scoped client.
 };
+
+TEST_F(WebViewTest, SaveImageWithImageMap)
+{
+    SaveImageFromDataURLWebViewClient client;
+
+    std::string url = m_baseURL + "image-map.html";
+    URLTestHelpers::registerMockedURLLoad(toKURL(url), "image-map.html");
+    WebView* webView = m_webViewHelper.initializeAndLoad(url, true, 0, &client);
+    webView->resize(WebSize(400, 400));
+
+    client.reset();
+    webView->saveImageAt(WebPoint(25, 25));
+    EXPECT_EQ(WebString::fromUTF8("data:image/gif;base64"
+        ",R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs="), client.result());
+
+    client.reset();
+    webView->saveImageAt(WebPoint(75, 25));
+    EXPECT_EQ(WebString::fromUTF8("data:image/gif;base64"
+        ",R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs="), client.result());
+
+    client.reset();
+    webView->saveImageAt(WebPoint(125, 25));
+    EXPECT_EQ(WebString(), client.result());
+
+    m_webViewHelper.reset(); // Explicitly reset to break dependency on locally scoped client.
+}
 
 TEST_F(WebViewTest, CopyImageAt)
 {
@@ -263,7 +306,12 @@ TEST_F(WebViewTest, CopyImageAt)
     URLTestHelpers::registerMockedURLLoad(toKURL(url), "canvas-copy-image.html");
     WebView* webView = m_webViewHelper.initializeAndLoad(url, true, 0);
     webView->resize(WebSize(400, 400));
+
+    uint64_t sequence = Platform::current()->clipboard()->sequenceNumber(WebClipboard::BufferStandard);
+
     webView->copyImageAt(WebPoint(50, 50));
+
+    EXPECT_NE(sequence, Platform::current()->clipboard()->sequenceNumber(WebClipboard::BufferStandard));
 
     WebData data = Platform::current()->clipboard()->readImage(WebClipboard::Buffer());
     WebImage image = WebImage::fromData(data, WebSize());
@@ -271,6 +319,129 @@ TEST_F(WebViewTest, CopyImageAt)
     SkAutoLockPixels autoLock(image.getSkBitmap());
     EXPECT_EQ(SkColorSetARGB(255, 255, 0, 0), image.getSkBitmap().getColor(0, 0));
 };
+
+TEST_F(WebViewTest, CopyImageAtWithPinchZoom)
+{
+    std::string url = m_baseURL + "canvas-copy-image.html";
+    URLTestHelpers::registerMockedURLLoad(toKURL(url), "canvas-copy-image.html");
+    WebViewImpl* webView = m_webViewHelper.initializeAndLoad(url, true, 0);
+    webView->resize(WebSize(400, 400));
+    webView->layout();
+    webView->setPageScaleFactor(2);
+    webView->setPinchViewportOffset(WebFloatPoint(200, 200));
+
+    uint64_t sequence = Platform::current()->clipboard()->sequenceNumber(WebClipboard::BufferStandard);
+
+    webView->copyImageAt(WebPoint(0, 0));
+
+    EXPECT_NE(sequence, Platform::current()->clipboard()->sequenceNumber(WebClipboard::BufferStandard));
+
+    WebData data = Platform::current()->clipboard()->readImage(WebClipboard::Buffer());
+    WebImage image = WebImage::fromData(data, WebSize());
+
+    SkAutoLockPixels autoLock(image.getSkBitmap());
+    EXPECT_EQ(SkColorSetARGB(255, 255, 0, 0), image.getSkBitmap().getColor(0, 0));
+};
+
+TEST_F(WebViewTest, CopyImageWithImageMap)
+{
+    SaveImageFromDataURLWebViewClient client;
+
+    std::string url = m_baseURL + "image-map.html";
+    URLTestHelpers::registerMockedURLLoad(toKURL(url), "image-map.html");
+    WebView* webView = m_webViewHelper.initializeAndLoad(url, true, 0, &client);
+    webView->resize(WebSize(400, 400));
+
+    client.reset();
+    webView->saveImageAt(WebPoint(25, 25));
+    EXPECT_EQ(WebString::fromUTF8("data:image/gif;base64"
+        ",R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs="), client.result());
+
+    client.reset();
+    webView->saveImageAt(WebPoint(75, 25));
+    EXPECT_EQ(WebString::fromUTF8("data:image/gif;base64"
+        ",R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs="), client.result());
+
+    client.reset();
+    webView->saveImageAt(WebPoint(125, 25));
+    EXPECT_EQ(WebString(), client.result());
+
+    m_webViewHelper.reset(); // Explicitly reset to break dependency on locally scoped client.
+}
+
+static bool hitTestIsContentEditable(WebView* view, int x, int y)
+{
+    WebPoint hitPoint(x, y);
+    WebHitTestResult hitTestResult = view->hitTestResultAt(hitPoint);
+    return hitTestResult.isContentEditable();
+}
+
+static std::string hitTestElementId(WebView* view, int x, int y)
+{
+    WebPoint hitPoint(x, y);
+    WebHitTestResult hitTestResult = view->hitTestResultAt(hitPoint);
+    return hitTestResult.node().to<WebElement>().getAttribute("id").utf8();
+}
+
+TEST_F(WebViewTest, HitTestContentEditableImageMaps)
+{
+    std::string url = m_baseURL + "content-editable-image-maps.html";
+    URLTestHelpers::registerMockedURLLoad(toKURL(url), "content-editable-image-maps.html");
+    WebView* webView = m_webViewHelper.initializeAndLoad(url, true, 0);
+    webView->resize(WebSize(500, 500));
+
+    EXPECT_EQ("areaANotEditable", hitTestElementId(webView, 25, 25));
+    EXPECT_FALSE(hitTestIsContentEditable(webView, 25, 25));
+    EXPECT_EQ("imageANotEditable", hitTestElementId(webView, 75, 25));
+    EXPECT_FALSE(hitTestIsContentEditable(webView, 75, 25));
+
+    EXPECT_EQ("areaBNotEditable", hitTestElementId(webView, 25, 125));
+    EXPECT_FALSE(hitTestIsContentEditable(webView, 25, 125));
+    EXPECT_EQ("imageBEditable", hitTestElementId(webView, 75, 125));
+    EXPECT_TRUE(hitTestIsContentEditable(webView, 75, 125));
+
+    EXPECT_EQ("areaCNotEditable", hitTestElementId(webView, 25, 225));
+    EXPECT_FALSE(hitTestIsContentEditable(webView, 25, 225));
+    EXPECT_EQ("imageCNotEditable", hitTestElementId(webView, 75, 225));
+    EXPECT_FALSE(hitTestIsContentEditable(webView, 75, 225));
+
+    EXPECT_EQ("areaDEditable", hitTestElementId(webView, 25, 325));
+    EXPECT_TRUE(hitTestIsContentEditable(webView, 25, 325));
+    EXPECT_EQ("imageDNotEditable", hitTestElementId(webView, 75, 325));
+    EXPECT_FALSE(hitTestIsContentEditable(webView, 75, 325));
+}
+
+static std::string hitTestAbsoluteUrl(WebView* view, int x, int y)
+{
+    WebPoint hitPoint(x, y);
+    WebHitTestResult hitTestResult = view->hitTestResultAt(hitPoint);
+    return hitTestResult.absoluteImageURL().string().utf8();
+}
+
+static WebElement hitTestUrlElement(WebView* view, int x, int y)
+{
+    WebPoint hitPoint(x, y);
+    WebHitTestResult hitTestResult = view->hitTestResultAt(hitPoint);
+    return hitTestResult.urlElement();
+}
+
+TEST_F(WebViewTest, ImageMapUrls)
+{
+    std::string url = m_baseURL + "image-map.html";
+    URLTestHelpers::registerMockedURLLoad(toKURL(url), "image-map.html");
+    WebView* webView = m_webViewHelper.initializeAndLoad(url, true, 0);
+    webView->resize(WebSize(400, 400));
+
+    std::string imageUrl = "data:image/gif;base64,R0lGODlhAQABAIAAAAUEBAAAACwAAAAAAQABAAACAkQBADs=";
+
+    EXPECT_EQ("area", hitTestElementId(webView, 25, 25));
+    EXPECT_EQ("area", hitTestUrlElement(webView, 25, 25).getAttribute("id").utf8());
+    EXPECT_EQ(imageUrl, hitTestAbsoluteUrl(webView, 25, 25));
+
+    EXPECT_EQ("image", hitTestElementId(webView, 75, 25));
+    EXPECT_TRUE(hitTestUrlElement(webView, 75, 25).isNull());
+    EXPECT_EQ(imageUrl, hitTestAbsoluteUrl(webView, 75, 25));
+}
 
 TEST_F(WebViewTest, SetBaseBackgroundColor)
 {
@@ -304,14 +475,19 @@ TEST_F(WebViewTest, SetBaseBackgroundColor)
     EXPECT_EQ(kTransparent, webView->backgroundColor());
 
     LocalFrame* frame = webView->mainFrameImpl()->frame();
+    // The detach() and dispose() calls are a hack to prevent this test
+    // from violating invariants about frame state during navigation/detach.
+    frame->document()->detach();
 
     // Creating a new frame view with the background color having 0 alpha.
     frame->createView(IntSize(1024, 768), Color::transparent, true);
     EXPECT_EQ(kTransparent, frame->view()->baseBackgroundColor());
+    frame->view()->dispose();
 
     Color kTransparentRed(100, 0, 0, 0);
     frame->createView(IntSize(1024, 768), kTransparentRed, true);
     EXPECT_EQ(kTransparentRed, frame->view()->baseBackgroundColor());
+    frame->view()->dispose();
 }
 
 TEST_F(WebViewTest, SetBaseBackgroundColorBeforeMainFrame)
@@ -350,14 +526,14 @@ TEST_F(WebViewTest, SetBaseBackgroundColorAndBlendWithExistingContent)
     SkCanvas canvas(bitmap);
     canvas.clear(kAlphaRed);
 
-    GraphicsContext context(&canvas, nullptr);
+    OwnPtr<GraphicsContext> context = GraphicsContext::deprecatedCreateWithCanvas(&canvas);
 
     // Paint the root of the main frame in the way that CompositedLayerMapping would.
     FrameView* view = m_webViewHelper.webViewImpl()->mainFrameImpl()->frameView();
     DeprecatedPaintLayer* rootLayer = view->layoutView()->layer();
     LayoutRect paintRect(0, 0, kWidth, kHeight);
     DeprecatedPaintLayerPaintingInfo paintingInfo(rootLayer, paintRect, PaintBehaviorNormal, LayoutSize());
-    DeprecatedPaintLayerPainter(*rootLayer).paintLayerContents(&context, paintingInfo, PaintLayerPaintingCompositingAllPhases);
+    DeprecatedPaintLayerPainter(*rootLayer).paintLayerContents(context.get(), paintingInfo, PaintLayerPaintingCompositingAllPhases);
 
     // The result should be a blend of red and green.
     SkColor color = bitmap.getColor(kWidth / 2, kHeight / 2);
@@ -944,6 +1120,30 @@ TEST_F(WebViewTest, IsSelectionAnchorFirst)
     EXPECT_FALSE(webView->isSelectionAnchorFirst());
 }
 
+TEST_F(WebViewTest, ExitingDeviceEmulationResetsPageScale)
+{
+    URLTestHelpers::registerMockedURLFromBaseURL(WebString::fromUTF8(m_baseURL.c_str()), WebString::fromUTF8("200-by-300.html"));
+    WebViewImpl* webViewImpl = m_webViewHelper.initializeAndLoad(m_baseURL + "200-by-300.html");
+    webViewImpl->resize(WebSize(200, 300));
+
+    float pageScaleExpected = webViewImpl->pageScaleFactor();
+
+    WebDeviceEmulationParams params;
+    params.screenPosition = WebDeviceEmulationParams::Desktop;
+    params.deviceScaleFactor = 0;
+    params.fitToView = false;
+    params.offset = WebFloatPoint();
+    params.scale = 1;
+
+    webViewImpl->enableDeviceEmulation(params);
+
+    webViewImpl->setPageScaleFactor(2);
+
+    webViewImpl->disableDeviceEmulation();
+
+    EXPECT_EQ(pageScaleExpected, webViewImpl->pageScaleFactor());
+}
+
 TEST_F(WebViewTest, HistoryResetScrollAndScaleState)
 {
     URLTestHelpers::registerMockedURLFromBaseURL(WebString::fromUTF8(m_baseURL.c_str()), WebString::fromUTF8("200-by-300.html"));
@@ -1391,6 +1591,7 @@ class MockAutofillClient : public WebAutofillClient {
 public:
     MockAutofillClient()
         : m_ignoreTextChanges(false)
+        , m_textChangesFromUserGesture(0)
         , m_textChangesWhileIgnored(0)
         , m_textChangesWhileNotIgnored(0)
         , m_userGestureNotificationsCount(0) { }
@@ -1404,6 +1605,9 @@ public:
             ++m_textChangesWhileIgnored;
         else
             ++m_textChangesWhileNotIgnored;
+
+        if (UserGestureIndicator::processingUserGesture())
+            ++m_textChangesFromUserGesture;
     }
     virtual void firstUserGestureObserved() override { ++m_userGestureNotificationsCount; }
 
@@ -1413,12 +1617,14 @@ public:
         m_textChangesWhileNotIgnored = 0;
     }
 
+    int textChangesFromUserGesture() { return m_textChangesFromUserGesture; }
     int textChangesWhileIgnored() { return m_textChangesWhileIgnored; }
     int textChangesWhileNotIgnored() { return m_textChangesWhileNotIgnored; }
     int getUserGestureNotificationsCount() { return m_userGestureNotificationsCount; }
 
 private:
     bool m_ignoreTextChanges;
+    int m_textChangesFromUserGesture;
     int m_textChangesWhileIgnored;
     int m_textChangesWhileNotIgnored;
     int m_userGestureNotificationsCount;
@@ -1665,7 +1871,7 @@ TEST_F(WebViewTest, DispatchesFocusOutFocusInOnViewToggleFocus)
     webView->setFocus(true);
 
     WebElement element = webView->mainFrame()->document().getElementById("message");
-    EXPECT_STREQ("focusoutfocusin", element.innerText().utf8().data());
+    EXPECT_STREQ("focusoutfocusin", element.textContent().utf8().data());
 }
 
 TEST_F(WebViewTest, DispatchesDomFocusOutDomFocusInOnViewToggleFocus)
@@ -1678,7 +1884,7 @@ TEST_F(WebViewTest, DispatchesDomFocusOutDomFocusInOnViewToggleFocus)
     webView->setFocus(true);
 
     WebElement element = webView->mainFrame()->document().getElementById("message");
-    EXPECT_STREQ("DOMFocusOutDOMFocusIn", element.innerText().utf8().data());
+    EXPECT_STREQ("DOMFocusOutDOMFocusIn", element.textContent().utf8().data());
 }
 
 #if !ENABLE(INPUT_MULTIPLE_FIELDS_UI)
@@ -1779,7 +1985,7 @@ TEST_F(WebViewTest, DispatchesFocusBlurOnViewToggle)
 
     WebElement element = webView->mainFrame()->document().getElementById("message");
     // Expect not to see duplication of events.
-    EXPECT_STREQ("blurfocus", element.innerText().utf8().data());
+    EXPECT_STREQ("blurfocus", element.textContent().utf8().data());
 }
 
 TEST_F(WebViewTest, SmartClipData)
@@ -1810,6 +2016,41 @@ TEST_F(WebViewTest, SmartClipData)
     webView->resize(WebSize(500, 500));
     webView->layout();
     WebRect cropRect(300, 125, 152, 50);
+    webView->extractSmartClipData(cropRect, clipText, clipHtml, clipRect);
+    EXPECT_STREQ(kExpectedClipText, clipText.utf8().c_str());
+    EXPECT_STREQ(kExpectedClipHtml, clipHtml.utf8().c_str());
+}
+
+TEST_F(WebViewTest, SmartClipDataWithPinchZoom)
+{
+    static const char* kExpectedClipText = "\nPrice 10,000,000won";
+    static const char* kExpectedClipHtml =
+        "<div id=\"div4\" style=\"padding: 10px; margin: 10px; border: 2px "
+        "solid rgb(135, 206, 235); float: left; width: 190px; height: 30px; "
+        "color: rgb(0, 0, 0); font-family: myahem; font-size: 8px; font-style: "
+        "normal; font-variant: normal; font-weight: normal; letter-spacing: "
+        "normal; line-height: normal; orphans: auto; text-align: start; "
+        "text-indent: 0px; text-transform: none; white-space: normal; widows: "
+        "1; word-spacing: 0px; -webkit-text-stroke-width: 0px;\">Air "
+        "conditioner</div><div id=\"div5\" style=\"padding: 10px; margin: "
+        "10px; border: 2px solid rgb(135, 206, 235); float: left; width: "
+        "190px; height: 30px; color: rgb(0, 0, 0); font-family: myahem; "
+        "font-size: 8px; font-style: normal; font-variant: normal; "
+        "font-weight: normal; letter-spacing: normal; line-height: normal; "
+        "orphans: auto; text-align: start; text-indent: 0px; text-transform: "
+        "none; white-space: normal; widows: 1; word-spacing: 0px; "
+        "-webkit-text-stroke-width: 0px;\">Price 10,000,000won</div>";
+    WebString clipText;
+    WebString clipHtml;
+    WebRect clipRect;
+    URLTestHelpers::registerMockedURLFromBaseURL(WebString::fromUTF8(m_baseURL.c_str()), WebString::fromUTF8("Ahem.ttf"));
+    URLTestHelpers::registerMockedURLFromBaseURL(WebString::fromUTF8(m_baseURL.c_str()), WebString::fromUTF8("smartclip.html"));
+    WebView* webView = m_webViewHelper.initializeAndLoad(m_baseURL + "smartclip.html");
+    webView->resize(WebSize(500, 500));
+    webView->layout();
+    webView->setPageScaleFactor(1.5);
+    webView->setPinchViewportOffset(WebFloatPoint(167, 100));
+    WebRect cropRect(200, 38, 228, 75);
     webView->extractSmartClipData(cropRect, clipText, clipHtml, clipRect);
     EXPECT_STREQ(kExpectedClipText, clipText.utf8().c_str());
     EXPECT_STREQ(kExpectedClipHtml, clipHtml.utf8().c_str());
@@ -2299,6 +2540,23 @@ TEST_F(WebViewTest, FirstUserGestureObservedGestureTap)
     frame->setAutofillClient(0);
 }
 
+TEST_F(WebViewTest, CompositionIsUserGesture)
+{
+    URLTestHelpers::registerMockedURLFromBaseURL(WebString::fromUTF8(m_baseURL.c_str()), WebString::fromUTF8("input_field_populated.html"));
+    WebView* webView = m_webViewHelper.initializeAndLoad(m_baseURL + "input_field_populated.html");
+    WebLocalFrameImpl* frame = toWebLocalFrameImpl(webView->mainFrame());
+    MockAutofillClient client;
+    frame->setAutofillClient(&client);
+    webView->setInitialFocus(false);
+
+    EXPECT_TRUE(webView->setComposition(WebString::fromUTF8(std::string("hello").c_str()), WebVector<WebCompositionUnderline>(), 3, 3));
+    EXPECT_EQ(1, client.textChangesFromUserGesture());
+    EXPECT_FALSE(UserGestureIndicator::processingUserGesture());
+    EXPECT_TRUE(frame->hasMarkedText());
+
+    frame->setAutofillClient(0);
+}
+
 TEST_F(WebViewTest, CompareSelectAllToContentAsText)
 {
     URLTestHelpers::registerMockedURLFromBaseURL(WebString::fromUTF8(m_baseURL.c_str()), WebString::fromUTF8("longpress_selection.html"));
@@ -2520,6 +2778,248 @@ TEST_F(WebViewTest, ShowUnhandledTapUIIfNeededWithPreventDefault)
     EXPECT_TRUE(client.getWasCalled());
 
     m_webViewHelper.reset(); // Remove dependency on locally scoped client.
+}
+
+// Test 3 frames, all on the same layer (i.e. [1 2 3])
+TEST_F(WebViewTest, TestPushFrameTimingRequestRectsToGraphicsLayer1)
+{
+    std::string url = m_baseURL + "frame_timing_inner.html?100px:100px";
+    registerMockedURLLoad(toKURL(url), "frame_timing_inner.html");
+    url = m_baseURL + "frame_timing_inner.html?200px:200px";
+    registerMockedURLLoad(toKURL(url), "frame_timing_inner.html");
+    url = m_baseURL + "frame_timing_inner.html?300px:300px";
+    registerMockedURLLoad(toKURL(url), "frame_timing_inner.html");
+    url = m_baseURL + "frame_timing_1.html";
+    registerMockedURLLoad(toKURL(url), "frame_timing_1.html");
+
+    WebView* webView = m_webViewHelper.initialize(true);
+    loadFrame(webView->mainFrame(), url);
+
+    webView->resize(WebSize(800, 600));
+    webView->layout();
+
+    WebViewImpl* webViewImpl = toWebViewImpl(webView);
+
+    Frame* frame = webViewImpl->page()->mainFrame();
+    int64_t id = frame->frameID();
+
+    EXPECT_EQ(3u, frame->tree().childCount());
+
+    WebVector<std::pair<int64_t, WebRect>> frameTimingRequests =
+        toLocalFrame(frame)->document()
+        ->layoutView()->enclosingLayer()
+        ->enclosingLayerForPaintInvalidationCrossingFrameBoundaries()
+        ->graphicsLayerBacking()->platformLayer()->frameTimingRequests();
+
+    EXPECT_EQ(4u, frameTimingRequests.size());
+    EXPECT_EQ(id + 0, frameTimingRequests[0].first);
+    EXPECT_EQ(WebRect(0, 0, 800, 600), frameTimingRequests[0].second);
+    EXPECT_EQ(id + 1, frameTimingRequests[1].first);
+    EXPECT_EQ(WebRect(2, 2, 100, 100), frameTimingRequests[1].second);
+    EXPECT_EQ(id + 2, frameTimingRequests[2].first);
+    EXPECT_EQ(WebRect(106, 2, 200, 200), frameTimingRequests[2].second);
+    EXPECT_EQ(id + 3, frameTimingRequests[3].first);
+    EXPECT_EQ(WebRect(310, 2, 300, 300), frameTimingRequests[3].second);
+}
+
+// Test 3 frames, where frame 2 is on a different GraphicsLayer (i.e. [1 2' 3])
+TEST_F(WebViewTest, TestPushFrameTimingRequestRectsToGraphicsLayer2)
+{
+    std::string url = m_baseURL + "frame_timing_inner.html?100px:100px";
+    registerMockedURLLoad(toKURL(url), "frame_timing_inner.html");
+    url = m_baseURL + "frame_timing_inner.html?200px:200px";
+    registerMockedURLLoad(toKURL(url), "frame_timing_inner.html");
+    url = m_baseURL + "frame_timing_inner.html?300px:300px";
+    registerMockedURLLoad(toKURL(url), "frame_timing_inner.html");
+    url = m_baseURL + "frame_timing_2.html";
+    registerMockedURLLoad(toKURL(url), "frame_timing_2.html");
+
+    WebView* webView = m_webViewHelper.initialize(true);
+    loadFrame(webView->mainFrame(), url);
+
+    webView->resize(WebSize(800, 600));
+    webView->layout();
+
+    WebViewImpl* webViewImpl = toWebViewImpl(webView);
+
+    Frame* frame = webViewImpl->page()->mainFrame();
+    int64_t id = frame->frameID();
+
+    EXPECT_EQ(3u, frame->tree().childCount());
+
+    const WebLayer* graphicsLayer1 =
+        toLocalFrame(webViewImpl->page()->mainFrame())->document()
+        ->layoutView()->enclosingLayer()
+        ->enclosingLayerForPaintInvalidationCrossingFrameBoundaries()
+        ->graphicsLayerBacking()->platformLayer();
+    WebVector<std::pair<int64_t, WebRect>> frameTimingRequests1 =
+        graphicsLayer1->frameTimingRequests();
+
+    EXPECT_EQ(3u, frameTimingRequests1.size());
+    EXPECT_EQ(id + 0, frameTimingRequests1[0].first);
+    EXPECT_EQ(WebRect(0, 0, 800, 600), frameTimingRequests1[0].second);
+    EXPECT_EQ(id + 1, frameTimingRequests1[1].first);
+    EXPECT_EQ(WebRect(2, 2, 100, 100), frameTimingRequests1[1].second);
+    EXPECT_EQ(id + 3, frameTimingRequests1[2].first);
+    EXPECT_EQ(WebRect(310, 2, 300, 300), frameTimingRequests1[2].second);
+
+    const WebLayer* graphicsLayer2 = nullptr;
+    for (Frame* frame = webViewImpl->page()->mainFrame(); frame;
+        frame = frame->tree().traverseNext()) {
+        graphicsLayer2 = toLocalFrame(frame)->document()->layoutView()
+            ->enclosingLayer()
+            ->enclosingLayerForPaintInvalidationCrossingFrameBoundaries()
+            ->graphicsLayerBacking()->platformLayer();
+        if (graphicsLayer2 != graphicsLayer1)
+            break;
+    }
+    WebVector<std::pair<int64_t, WebRect>> frameTimingRequests2 =
+        graphicsLayer2->frameTimingRequests();
+    EXPECT_EQ(1u, frameTimingRequests2.size());
+    EXPECT_EQ(id + 2, frameTimingRequests2[0].first);
+    EXPECT_EQ(WebRect(2, 2, 200, 200), frameTimingRequests2[0].second);
+}
+
+
+// Test nested frames (i.e. [1 2'[4 5'] 3])
+TEST_F(WebViewTest, TestPushFrameTimingRequestRectsToGraphicsLayer3)
+{
+    std::string url = m_baseURL + "frame_timing_inner.html?100px:100px";
+    registerMockedURLLoad(toKURL(url), "frame_timing_inner.html");
+    url = m_baseURL + "frame_timing_inner.html?200px:200px";
+    registerMockedURLLoad(toKURL(url), "frame_timing_inner.html");
+    url = m_baseURL + "frame_timing_inner.html?300px:300px";
+    registerMockedURLLoad(toKURL(url), "frame_timing_inner.html");
+    url = m_baseURL + "frame_timing_b.html";
+    registerMockedURLLoad(toKURL(url), "frame_timing_b.html");
+    url = m_baseURL + "frame_timing_3.html";
+    registerMockedURLLoad(toKURL(url), "frame_timing_3.html");
+
+    WebView* webView = m_webViewHelper.initialize(true);
+    loadFrame(webView->mainFrame(), url);
+
+    webView->resize(WebSize(800, 600));
+    webView->layout();
+
+    WebViewImpl* webViewImpl = toWebViewImpl(webView);
+
+    Frame* frame = webViewImpl->page()->mainFrame();
+    int64_t id = frame->frameID();
+
+    EXPECT_EQ(3u, frame->tree().childCount());
+
+    const WebLayer* graphicsLayer1 =
+        toLocalFrame(webViewImpl->page()->mainFrame())->document()
+        ->layoutView()->enclosingLayer()
+        ->enclosingLayerForPaintInvalidationCrossingFrameBoundaries()
+        ->graphicsLayerBacking()->platformLayer();
+    WebVector<std::pair<int64_t, WebRect>> frameTimingRequests1 =
+        graphicsLayer1->frameTimingRequests();
+
+    EXPECT_EQ(3u, frameTimingRequests1.size());
+    EXPECT_EQ(id + 0, frameTimingRequests1[0].first);
+    EXPECT_EQ(WebRect(0, 0, 800, 600), frameTimingRequests1[0].second);
+    EXPECT_EQ(WebRect(2, 2, 100, 100), frameTimingRequests1[1].second);
+    EXPECT_EQ(WebRect(410, 2, 200, 200), frameTimingRequests1[2].second);
+
+    const WebLayer* graphicsLayer2 = nullptr;
+    for (Frame* frame = webViewImpl->page()->mainFrame(); frame;
+        frame = frame->tree().traverseNext()) {
+        graphicsLayer2 = toLocalFrame(frame)->document()->layoutView()
+            ->enclosingLayer()
+            ->enclosingLayerForPaintInvalidationCrossingFrameBoundaries()
+            ->graphicsLayerBacking()->platformLayer();
+        if (graphicsLayer2 != graphicsLayer1)
+            break;
+    }
+    WebVector<std::pair<int64_t, WebRect>> frameTimingRequests2 =
+        graphicsLayer2->frameTimingRequests();
+    EXPECT_EQ(2u, frameTimingRequests2.size());
+    EXPECT_EQ(WebRect(0, 0, 300, 300), frameTimingRequests2[0].second);
+    EXPECT_EQ(WebRect(2, 2, 100, 100), frameTimingRequests2[1].second);
+
+    const WebLayer* graphicsLayer3 = nullptr;
+    for (Frame* frame = webViewImpl->page()->mainFrame(); frame;
+        frame = frame->tree().traverseNext()) {
+        graphicsLayer3 = toLocalFrame(frame)->document()->layoutView()
+            ->enclosingLayer()
+            ->enclosingLayerForPaintInvalidationCrossingFrameBoundaries()
+            ->graphicsLayerBacking()->platformLayer();
+        if (graphicsLayer3 != graphicsLayer1 && graphicsLayer3 != graphicsLayer2)
+            break;
+    }
+    WebVector<std::pair<int64_t, WebRect>> frameTimingRequests3 =
+        graphicsLayer3->frameTimingRequests();
+    EXPECT_EQ(1u, frameTimingRequests3.size());
+    EXPECT_EQ(WebRect(2, 2, 100, 100), frameTimingRequests3[0].second);
+}
+
+// Test 3 frames, all on the same layer (i.e. [1 2 3])
+// Fails on android, see crbug.com/488381.
+#if OS(ANDROID)
+TEST_F(WebViewTest, DISABLED_TestRecordFrameTimingEvents)
+#else
+TEST_F(WebViewTest, TestRecordFrameTimingEvents)
+#endif
+{
+    std::string url = m_baseURL + "frame_timing_inner.html?100px:100px";
+    registerMockedURLLoad(toKURL(url), "frame_timing_inner.html");
+    url = m_baseURL + "frame_timing_inner.html?200px:200px";
+    registerMockedURLLoad(toKURL(url), "frame_timing_inner.html");
+    url = m_baseURL + "frame_timing_inner.html?300px:300px";
+    registerMockedURLLoad(toKURL(url), "frame_timing_inner.html");
+    url = m_baseURL + "frame_timing_1.html";
+    registerMockedURLLoad(toKURL(url), "frame_timing_1.html");
+
+    WebView* webView = m_webViewHelper.initialize(true);
+    loadFrame(webView->mainFrame(), url);
+
+    webView->resize(WebSize(800, 600));
+    webView->layout();
+
+    WebViewImpl* webViewImpl = toWebViewImpl(webView);
+
+    Frame* frame = webViewImpl->page()->mainFrame();
+    int64_t id = frame->frameID();
+
+    std::vector<WebFrameTimingEvent> compositePairs(3);
+    compositePairs[0] = WebFrameTimingEvent(1, 2.0);
+    compositePairs[1] = WebFrameTimingEvent(2, 3.0);
+    compositePairs[2] = WebFrameTimingEvent(3, 4.0);
+    WebVector<WebFrameTimingEvent> compositeEvents(compositePairs);
+    webViewImpl->recordFrameTimingEvent(WebView::CompositeEvent, id, compositeEvents);
+    PerformanceEntryVector composites = DOMWindowPerformance::performance(*frame->domWindow())->getEntriesByType("composite");
+    PerformanceEntryVector renders = DOMWindowPerformance::performance(*frame->domWindow())->getEntriesByType("render");
+    ASSERT_EQ(3ul, composites.size());
+    ASSERT_EQ(0ul, renders.size());
+    for (size_t i = 0; i < composites.size(); ++i) {
+        double docTime = frame->domWindow()->document()->loader()->timing().monotonicTimeToZeroBasedDocumentTime(compositePairs[i].startTime) * 1000.0;
+        ASSERT_EQ(docTime, composites[i]->startTime());
+    }
+
+    // Skip ahead to subframe 2.
+    frame = frame->tree().traverseNext();
+    frame = frame->tree().traverseNext();
+    id += 2;
+
+    std::vector<WebFrameTimingEvent> renderPairs(4);
+    renderPairs[0] = WebFrameTimingEvent(4, 5.0, 6.0);
+    renderPairs[1] =WebFrameTimingEvent(5, 6.0, 7.0);
+    renderPairs[2] =WebFrameTimingEvent(6, 7.0, 8.0);
+    renderPairs[3] =WebFrameTimingEvent(7, 8.0, 9.0);
+    WebVector<WebFrameTimingEvent> renderEvents(renderPairs);
+    webViewImpl->recordFrameTimingEvent(WebView::RenderEvent, id, renderEvents);
+    composites = DOMWindowPerformance::performance(*frame->domWindow())->getEntriesByType("composite");
+    renders = DOMWindowPerformance::performance(*frame->domWindow())->getEntriesByType("render");
+    ASSERT_EQ(0ul, composites.size());
+    ASSERT_EQ(4ul, renders.size());
+    for (size_t i = 0; i < renders.size(); ++i) {
+        double docStartTime = frame->domWindow()->document()->loader()->timing().monotonicTimeToZeroBasedDocumentTime(renderPairs[i].startTime) * 1000.0;
+        ASSERT_DOUBLE_EQ(docStartTime, renders[i]->startTime());
+        double docFinishTime = frame->domWindow()->document()->loader()->timing().monotonicTimeToZeroBasedDocumentTime(renderPairs[i].finishTime) * 1000.0;
+        double docDuration = docFinishTime - docStartTime;
+        ASSERT_DOUBLE_EQ(docDuration, renders[i]->duration());
+    }
 }
 
 } // namespace

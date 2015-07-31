@@ -142,8 +142,11 @@ ScriptValue InjectedScriptBase::callFunctionWithEvalEnabled(ScriptFunctionCall& 
 {
     ASSERT(!isEmpty());
     ExecutionContext* executionContext = m_injectedScriptObject.scriptState()->executionContext();
-    TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "FunctionCall", "data", InspectorFunctionCallEvent::data(executionContext, 0, name(), 1));
-    InspectorInstrumentationCookie cookie = InspectorInstrumentation::willCallFunction(executionContext, DevToolsFunctionInfo(0, name(), 1));
+    ScriptState::Scope scope(m_injectedScriptObject.scriptState());
+    v8::Local<v8::Function> functionObj = function.function();
+    DevToolsFunctionInfo info(functionObj);
+    TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "FunctionCall", "data", InspectorFunctionCallEvent::data(executionContext, info.scriptId(), "InjectedScriptSource.js", info.lineNumber()));
+    InspectorInstrumentationCookie cookie = InspectorInstrumentation::willCallFunction(executionContext, info);
 
     ScriptState* scriptState = m_injectedScriptObject.scriptState();
     bool evalIsDisabled = false;
@@ -160,7 +163,7 @@ ScriptValue InjectedScriptBase::callFunctionWithEvalEnabled(ScriptFunctionCall& 
         scriptState->setEvalEnabled(false);
 
     InspectorInstrumentation::didCallFunction(cookie);
-    TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "UpdateCounters", "data", InspectorUpdateCountersEvent::data());
+    TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "UpdateCounters", TRACE_EVENT_SCOPE_THREAD, "data", InspectorUpdateCountersEvent::data());
     return resultValue;
 }
 
@@ -215,6 +218,22 @@ void InjectedScriptBase::makeEvalCall(ErrorString* errorString, ScriptFunctionCa
     }
     *objectResult = TypeBuilder::Runtime::RemoteObject::runtimeCast(resultObj);
     *wasThrown = wasThrownVal;
+}
+
+void InjectedScriptBase::makeCallWithExceptionDetails(ScriptFunctionCall& function, RefPtr<JSONValue>* result, RefPtr<TypeBuilder::Debugger::ExceptionDetails>* exceptionDetails)
+{
+    ScriptState::Scope scope(injectedScriptObject().scriptState());
+    v8::TryCatch tryCatch;
+    ScriptValue resultValue = function.callWithoutExceptionHandling();
+    if (tryCatch.HasCaught()) {
+        v8::Local<v8::Message> message = tryCatch.Message();
+        String text = !message.IsEmpty() ? toCoreStringWithUndefinedOrNullCheck(message->Get()) : "Internal error";
+        *exceptionDetails = TypeBuilder::Debugger::ExceptionDetails::create().setText(text);
+    } else {
+        *result = toJSONValue(resultValue);
+        if (!*result)
+            *result = JSONString::create(String::format("Object has too long reference chain(must not be longer than %d)", JSONValue::maxDepth));
+    }
 }
 
 } // namespace blink

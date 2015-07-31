@@ -73,10 +73,6 @@ class Browser(app.App):
     return self._browser_backend.supports_tab_control
 
   @property
-  def synthetic_gesture_source_type(self):
-    return self._browser_backend.browser_options.synthetic_gesture_source_type
-
-  @property
   def tabs(self):
     return self._tabs
 
@@ -204,11 +200,6 @@ class Browser(app.App):
     """
     result = self._GetStatsCommon(self._platform_backend.GetCpuStats)
     del result['ProcessCount']
-
-    # FIXME: Renderer process CPU times are impossible to compare correctly.
-    # http://crbug.com/419786#c11
-    if 'Renderer' in result:
-      del result['Renderer']
 
     # We want a single time value, not the sum for all processes.
     cpu_timestamp = self._platform_backend.GetCpuTimestamp()

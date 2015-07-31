@@ -16,6 +16,7 @@
 #include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
+#include "chrome/browser/signin/signin_error_controller_factory.h"
 #include "chrome/browser/signin/signin_header_helper.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/signin_promo.h"
@@ -43,7 +44,7 @@
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/compositor/paint_context.h"
+#include "ui/compositor/clip_transform_recorder.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
@@ -115,26 +116,17 @@ gfx::ImageSkia CreateSquarePlaceholderImage(int size) {
 
 bool HasAuthError(Profile* profile) {
   const SigninErrorController* error =
-      profiles::GetSigninErrorController(profile);
+      SigninErrorControllerFactory::GetForProfile(profile);
   return error && error->HasError();
 }
 
 std::string GetAuthErrorAccountId(Profile* profile) {
   const SigninErrorController* error =
-      profiles::GetSigninErrorController(profile);
+      SigninErrorControllerFactory::GetForProfile(profile);
   if (!error)
     return std::string();
 
   return error->error_account_id();
-}
-
-std::string GetAuthErrorUsername(Profile* profile) {
-  const SigninErrorController* error =
-      profiles::GetSigninErrorController(profile);
-  if (!error)
-    return std::string();
-
-  return error->error_username();
 }
 
 // BackgroundColorHoverButton -------------------------------------------------
@@ -260,7 +252,8 @@ class EditableProfilePhoto : public views::LabelButton {
 
   void PaintChildren(const ui::PaintContext& context) override {
     // Display any children (the "change photo" overlay) as a circle.
-    context.canvas()->ClipPath(circular_mask_, true);
+    ui::ClipTransformRecorder clip_transform_recorder(context);
+    clip_transform_recorder.ClipPathWithAntiAliasing(circular_mask_);
     View::PaintChildren(context);
   }
 
@@ -498,7 +491,7 @@ void ProfileChooserView::ShowBubble(
   // It has to happen here to prevent the view system from creating an empty
   // container.
   if (view_mode == profiles::BUBBLE_VIEW_MODE_FAST_PROFILE_CHOOSER &&
-      profiles::HasProfileSwitchTargets(browser->profile())) {
+      !profiles::HasProfileSwitchTargets(browser->profile())) {
     return;
   }
 
@@ -920,20 +913,7 @@ void ProfileChooserView::PopulateCompleteProfileChooserView(
           item.signed_in && profiles::IsLockAvailable(browser_->profile()));
       current_profile_view = CreateCurrentProfileView(item, false);
       if (IsProfileChooser(view_mode_)) {
-        switch (tutorial_mode_) {
-          case profiles::TUTORIAL_MODE_NONE:
-          case profiles::TUTORIAL_MODE_WELCOME_UPGRADE:
-            tutorial_view = CreateWelcomeUpgradeTutorialViewIfNeeded(
-                tutorial_mode_ == profiles::TUTORIAL_MODE_WELCOME_UPGRADE,
-                item);
-            break;
-          case profiles::TUTORIAL_MODE_CONFIRM_SIGNIN:
-            tutorial_view = CreateSigninConfirmationView();
-            break;
-          case profiles::TUTORIAL_MODE_SHOW_ERROR:
-            tutorial_view = CreateSigninErrorView();
-            break;
-        }
+        tutorial_view = CreateTutorialViewIfNeeded(item);
       } else {
         current_profile_accounts = CreateCurrentProfileAccountsView(item);
       }
@@ -974,13 +954,6 @@ void ProfileChooserView::PopulateCompleteProfileChooserView(
     layout->AddView(CreateSupervisedUserDisclaimerView());
   }
 
-  if (IsProfileChooser(view_mode_)) {
-    layout->StartRow(1, 0);
-    if (switches::IsFastUserSwitching()) {
-      layout->AddView(CreateOtherProfilesView(other_profiles));
-    }
-  }
-
   layout->StartRow(0, 0);
   layout->AddView(new views::Separator(views::Separator::HORIZONTAL));
 
@@ -1010,10 +983,15 @@ views::View* ProfileChooserView::CreateProfileChooserView(
   views::View* view = new views::View();
   views::GridLayout* layout = CreateSingleColumnLayout(view, kFixedMenuWidth);
 
-  if (view_mode_ == profiles::BUBBLE_VIEW_MODE_FAST_PROFILE_CHOOSER)
+  if (view_mode_ == profiles::BUBBLE_VIEW_MODE_FAST_PROFILE_CHOOSER) {
     PopulateMinimalProfileChooserView(layout, avatar_menu);
-  else
+    // The user is using right-click switching, no need to tell them about it.
+    PrefService* local_state = g_browser_process->local_state();
+    local_state->SetBoolean(
+        prefs::kProfileAvatarRightClickTutorialDismissed, true);
+  } else {
     PopulateCompleteProfileChooserView(layout, avatar_menu);
+  }
 
   return view;
 }
@@ -1026,8 +1004,41 @@ void ProfileChooserView::DismissTutorial() {
         signin_ui_util::kUpgradeWelcomeTutorialShowMax + 1);
   }
 
+  if (tutorial_mode_ == profiles::TUTORIAL_MODE_RIGHT_CLICK_SWITCHING) {
+    PrefService* local_state = g_browser_process->local_state();
+    local_state->SetBoolean(
+        prefs::kProfileAvatarRightClickTutorialDismissed, true);
+  }
+
   tutorial_mode_ = profiles::TUTORIAL_MODE_NONE;
   ShowView(profiles::BUBBLE_VIEW_MODE_PROFILE_CHOOSER, avatar_menu_.get());
+}
+
+views::View* ProfileChooserView::CreateTutorialViewIfNeeded(
+    const AvatarMenu::Item& item) {
+  if (tutorial_mode_ == profiles::TUTORIAL_MODE_CONFIRM_SIGNIN)
+    return CreateSigninConfirmationView();
+
+  if (tutorial_mode_ == profiles::TUTORIAL_MODE_SHOW_ERROR)
+    return CreateSigninErrorView();
+
+  if (profiles::ShouldShowWelcomeUpgradeTutorial(
+      browser_->profile(), tutorial_mode_)) {
+    if (tutorial_mode_ != profiles::TUTORIAL_MODE_WELCOME_UPGRADE) {
+      Profile* profile = browser_->profile();
+      const int show_count = profile->GetPrefs()->GetInteger(
+          prefs::kProfileAvatarTutorialShown);
+      profile->GetPrefs()->SetInteger(
+          prefs::kProfileAvatarTutorialShown, show_count + 1);
+    }
+
+    return CreateWelcomeUpgradeTutorialView(item);
+  }
+
+  if (profiles::ShouldShowRightClickTutorial(browser_->profile()))
+    return CreateRightClickTutorialView();
+
+  return nullptr;
 }
 
 views::View* ProfileChooserView::CreateTutorialView(
@@ -1213,7 +1224,7 @@ views::View* ProfileChooserView::CreateCurrentProfileView(
         const gfx::ImageSkia warning_image = *rb->GetImageNamed(
             IDR_ICON_PROFILES_ACCOUNT_BUTTON_ERROR).ToImageSkia();
         auth_error_email_button_ =
-            new RightAlignedIconLabelButton(this, avatar_item.sync_state);
+            new RightAlignedIconLabelButton(this, avatar_item.username);
         auth_error_email_button_->SetElideBehavior(gfx::ELIDE_EMAIL);
         auth_error_email_button_->SetImage(
             views::LabelButton::STATE_NORMAL, warning_image);
@@ -1229,7 +1240,7 @@ views::View* ProfileChooserView::CreateCurrentProfileView(
       } else {
         // Add a small padding between the email button and the profile name.
         layout->StartRowWithPadding(1, 0, 0, 2);
-        views::Label* email_label = new views::Label(avatar_item.sync_state);
+        views::Label* email_label = new views::Label(avatar_item.username);
         email_label->SetElideBehavior(gfx::ELIDE_EMAIL);
         email_label->SetEnabled(false);
         layout->AddView(email_label);
@@ -1290,20 +1301,12 @@ views::View* ProfileChooserView::CreateOtherProfilesView(
     AvatarMenu::GetImageForMenuButton(
         item.profile_path, &item_icon, &is_rectangle);
 
-    base::string16 title = item.name;
-    if (item.legacy_supervised) {
-      title = l10n_util::GetStringFUTF16(IDS_SUPERVISED_USER_NEW_AVATAR_LABEL,
-                                         title);
-    } else if (item.child_account) {
-      title = l10n_util::GetStringFUTF16(IDS_CHILD_AVATAR_LABEL, title);
-    }
-
     gfx::Image image = profiles::GetSizedAvatarIcon(
         item_icon, true, kSmallImageSide, kSmallImageSide);
 
     views::LabelButton* button = new BackgroundColorHoverButton(
         this,
-        title,
+        profiles::GetProfileSwitcherTextForItem(item),
         *image.ToImageSkia());
     open_other_profile_indexes_map_[button] = index;
 
@@ -1496,7 +1499,7 @@ views::View* ProfileChooserView::CreateGaiaSigninView() {
     case profiles::BUBBLE_VIEW_MODE_GAIA_REAUTH: {
       DCHECK(HasAuthError(browser_->profile()));
       url = signin::GetReauthURL(browser_->profile(),
-                                 GetAuthErrorUsername(browser_->profile()));
+                                 GetAuthErrorAccountId(browser_->profile()));
       message_id = IDS_PROFILES_GAIA_REAUTH_TITLE;
       break;
     }
@@ -1587,22 +1590,8 @@ views::View* ProfileChooserView::CreateAccountRemovalView() {
       kFixedAccountRemovalViewWidth);
 }
 
-views::View* ProfileChooserView::CreateWelcomeUpgradeTutorialViewIfNeeded(
-    bool tutorial_shown, const AvatarMenu::Item& avatar_item) {
-  Profile* profile = browser_->profile();
-
-  const int show_count = profile->GetPrefs()->GetInteger(
-      prefs::kProfileAvatarTutorialShown);
-  // Do not show the tutorial if user has dismissed it.
-  if (show_count > signin_ui_util::kUpgradeWelcomeTutorialShowMax)
-    return NULL;
-
-  if (!tutorial_shown) {
-    if (show_count == signin_ui_util::kUpgradeWelcomeTutorialShowMax)
-      return NULL;
-    profile->GetPrefs()->SetInteger(
-        prefs::kProfileAvatarTutorialShown, show_count + 1);
-  }
+views::View* ProfileChooserView::CreateWelcomeUpgradeTutorialView(
+    const AvatarMenu::Item& avatar_item) {
   ProfileMetrics::LogProfileNewAvatarMenuUpgrade(
       ProfileMetrics::PROFILE_AVATAR_MENU_UPGRADE_VIEW);
 
@@ -1656,6 +1645,19 @@ views::View* ProfileChooserView::CreateSigninErrorView() {
       &tutorial_learn_more_link_,
       NULL,
       &tutorial_close_button_);
+}
+
+views::View* ProfileChooserView::CreateRightClickTutorialView() {
+    return CreateTutorialView(
+      profiles::TUTORIAL_MODE_RIGHT_CLICK_SWITCHING,
+      l10n_util::GetStringUTF16(IDS_PROFILES_RIGHT_CLICK_TUTORIAL_TITLE),
+      l10n_util::GetStringUTF16(IDS_PROFILES_RIGHT_CLICK_TUTORIAL_CONTENT_TEXT),
+      base::string16(),
+      l10n_util::GetStringUTF16(IDS_PROFILES_TUTORIAL_OK_BUTTON),
+      false,
+      nullptr,
+      &tutorial_sync_settings_ok_button_,
+      nullptr);
 }
 
 views::View* ProfileChooserView::CreateSwitchUserView() {

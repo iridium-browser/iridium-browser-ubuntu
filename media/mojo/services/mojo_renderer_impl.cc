@@ -11,9 +11,9 @@
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/demuxer_stream_provider.h"
 #include "media/mojo/services/mojo_demuxer_stream_impl.h"
-#include "third_party/mojo/src/mojo/public/cpp/application/connect.h"
+#include "mojo/application/public/cpp/connect.h"
+#include "mojo/application/public/interfaces/service_provider.mojom.h"
 #include "third_party/mojo/src/mojo/public/cpp/bindings/interface_impl.h"
-#include "third_party/mojo/src/mojo/public/interfaces/application/service_provider.mojom.h"
 
 namespace media {
 
@@ -33,14 +33,12 @@ MojoRendererImpl::~MojoRendererImpl() {
   // Connection to |remote_media_renderer_| will error-out here.
 }
 
-// TODO(xhwang): Support |paint_cb| and |waiting_for_decryption_key_cb|,
-// if needed.
+// TODO(xhwang): Support |waiting_for_decryption_key_cb| if needed.
 void MojoRendererImpl::Initialize(
     DemuxerStreamProvider* demuxer_stream_provider,
     const PipelineStatusCB& init_cb,
     const StatisticsCB& statistics_cb,
     const BufferingStateCB& buffering_state_cb,
-    const PaintCB& /* paint_cb */,
     const base::Closure& ended_cb,
     const PipelineStatusCB& error_cb,
     const base::Closure& /* waiting_for_decryption_key_cb */) {
@@ -105,7 +103,7 @@ void MojoRendererImpl::StartPlayingFrom(base::TimeDelta time) {
   remote_media_renderer_->StartPlayingFrom(time.InMicroseconds());
 }
 
-void MojoRendererImpl::SetPlaybackRate(float playback_rate) {
+void MojoRendererImpl::SetPlaybackRate(double playback_rate) {
   DVLOG(2) << __FUNCTION__;
   DCHECK(task_runner_->BelongsToCurrentThread());
   remote_media_renderer_->SetPlaybackRate(playback_rate);

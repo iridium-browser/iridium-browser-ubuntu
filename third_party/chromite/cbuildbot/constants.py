@@ -23,9 +23,12 @@ def _FindSourceRoot():
 
 SOURCE_ROOT = _FindSourceRoot()
 CHROOT_SOURCE_ROOT = '/mnt/host/source'
+CHROOT_WORKSPACE_ROOT = '/mnt/host/workspace'
+CHROOT_CACHE_ROOT = '/var/cache/chromeos-cache'
 
 CROSUTILS_DIR = os.path.join(SOURCE_ROOT, 'src/scripts')
 CHROMITE_DIR = os.path.join(SOURCE_ROOT, 'chromite')
+BOOTSTRAP_DIR = os.path.join(SOURCE_ROOT, 'chromite/bootstrap')
 DEPOT_TOOLS_DIR = os.path.join(SOURCE_ROOT, 'chromium/tools/depot_tools')
 CHROMITE_BIN_SUBDIR = 'chromite/bin'
 CHROMITE_BIN_DIR = os.path.join(SOURCE_ROOT, CHROMITE_BIN_SUBDIR)
@@ -57,9 +60,11 @@ CIDB_KNOWN_WATERFALLS = (WATERFALL_INTERNAL,
                          WATERFALL_EXTERNAL,
                          WATERFALL_TRYBOT,
                          WATERFALL_RELEASE,
-                         WATERFALL_BRANCH)
+                         WATERFALL_BRANCH,
+                         WATERFALL_CHROMIUM,
+                         WATERFALL_CHROME,)
 
-ALL_WATERFALLS = CIDB_KNOWN_WATERFALLS + (WATERFALL_CHROMIUM,)
+ALL_WATERFALLS = CIDB_KNOWN_WATERFALLS
 
 # URLs to the various waterfalls.
 BUILD_DASHBOARD = 'http://build.chromium.org/p/chromiumos'
@@ -222,6 +227,13 @@ INTERNAL_GERRIT_HOST = GOB_HOST % INTERNAL_GERRIT_INSTANCE
 INTERNAL_GOB_URL = 'https://%s' % INTERNAL_GOB_HOST
 INTERNAL_GERRIT_URL = 'https://%s' % INTERNAL_GERRIT_HOST
 
+AOSP_GOB_INSTANCE = 'android'
+AOSP_GERRIT_INSTANCE = 'android-review'
+AOSP_GOB_HOST = GOB_HOST % AOSP_GOB_INSTANCE
+AOSP_GERRIT_HOST = GOB_HOST % AOSP_GERRIT_INSTANCE
+AOSP_GOB_URL = 'https://%s' % AOSP_GOB_HOST
+AOSP_GERRIT_URL = 'https://%s' % AOSP_GERRIT_HOST
+
 GOB_COOKIE_PATH = os.path.expanduser('~/.git-credential-cache/cookie')
 GITCOOKIES_PATH = os.path.expanduser('~/.gitcookies')
 
@@ -249,10 +261,14 @@ MANIFEST_INT_URL = '%s/%s' % (INTERNAL_GERRIT_URL, MANIFEST_INT_PROJECT)
 
 DEFAULT_MANIFEST = 'default.xml'
 OFFICIAL_MANIFEST = 'official.xml'
+PROJECT_MANIFEST = 'project_sdk.xml'
 LATEST_PROJECT_SDK_MANIFEST = 'project-sdk/latest.xml'
 LKGM_MANIFEST = 'LKGM/lkgm.xml'
 
 SHARED_CACHE_ENVVAR = 'CROS_CACHEDIR'
+
+# These projects can be responsible for infra failures.
+INFRA_PROJECTS = (CHROMITE_PROJECT,)
 
 # CrOS remotes specified in the manifests.
 EXTERNAL_REMOTE = 'cros'
@@ -261,10 +277,12 @@ INTERNAL_REMOTE = 'cros-internal'
 KAYLE_INTERNAL_REMOTE = 'kayle-cros-internal'
 CHROMIUM_REMOTE = 'chromium'
 CHROME_REMOTE = 'chrome'
+AOSP_REMOTE = 'aosp'
 
 GERRIT_HOSTS = {
     EXTERNAL_REMOTE: EXTERNAL_GERRIT_HOST,
     INTERNAL_REMOTE: INTERNAL_GERRIT_HOST,
+    AOSP_REMOTE: AOSP_GERRIT_HOST,
 }
 
 # Only remotes listed in CROS_REMOTES are considered branchable.
@@ -273,6 +291,7 @@ CROS_REMOTES = {
     EXTERNAL_REMOTE: EXTERNAL_GOB_URL,
     INTERNAL_REMOTE: INTERNAL_GOB_URL,
     KAYLE_INTERNAL_REMOTE: INTERNAL_GOB_URL,
+    AOSP_REMOTE: AOSP_GOB_URL,
 }
 
 GIT_REMOTES = {
@@ -296,21 +315,43 @@ CHANGE_PREFIX = {
 # List of remotes that are ok to include in the external manifest.
 EXTERNAL_REMOTES = (EXTERNAL_REMOTE, CHROMIUM_REMOTE)
 
-PROJECT_SDK_GROUPS = ('minilayout',)
+PROJECT_SDK_GROUPS = ('project_sdk',)
 
 # Mapping 'remote name' -> regexp that matches names of repositories on that
 # remote that can be branched when creating CrOS branch. Branching script will
 # actually create a new git ref when branching these projects. It won't attempt
 # to create a git ref for other projects that may be mentioned in a manifest.
+# If a remote is missing from this dictionary, all projects on that remote are
+# considered to not be branchable.
 BRANCHABLE_PROJECTS = {
     EXTERNAL_REMOTE: r'chromiumos/(.+)',
     INTERNAL_REMOTE: r'chromeos/(.+)',
     KAYLE_INTERNAL_REMOTE: r'chromeos/(.+)',
 }
 
+# The manifest contains extra attributes in the 'project' nodes to determine our
+# branching strategy for the project.
+#   create: Create a new branch on the project repo for the new CrOS branch.
+#           This is the default.
+#   pin: On the CrOS branch, pin the project to the current revision.
+#   tot: On the CrOS branch, the project still tracks ToT.
+MANIFEST_ATTR_BRANCHING = 'branch-mode'
+MANIFEST_ATTR_BRANCHING_CREATE = 'create'
+MANIFEST_ATTR_BRANCHING_PIN = 'pin'
+MANIFEST_ATTR_BRANCHING_TOT = 'tot'
+MANIFEST_ATTR_BRANCHING_ALL = (
+    MANIFEST_ATTR_BRANCHING_CREATE,
+    MANIFEST_ATTR_BRANCHING_PIN,
+    MANIFEST_ATTR_BRANCHING_TOT,
+)
+
 # TODO(sosa): Move to manifest-versions-external once its created
-MANIFEST_VERSIONS_SUFFIX = '/chromiumos/manifest-versions'
-MANIFEST_VERSIONS_INT_SUFFIX = '/chromeos/manifest-versions'
+MANIFEST_VERSIONS_GOB_URL = EXTERNAL_GOB_URL + '/chromiumos/manifest-versions'
+MANIFEST_VERSIONS_GOB_URL_TEST = MANIFEST_VERSIONS_GOB_URL + '-test'
+
+MANIFEST_VERSIONS_INT_GOB_URL = INTERNAL_GOB_URL + '/chromeos/manifest-versions'
+MANIFEST_VERSIONS_INT_GOB_URL_TEST = MANIFEST_VERSIONS_INT_GOB_URL + '-test'
+
 MANIFEST_VERSIONS_GS_URL = 'gs://chromeos-manifest-versions'
 TRASH_BUCKET = 'gs://chromeos-throw-away-bucket'
 
@@ -386,9 +427,6 @@ PALADIN_TYPE = 'paladin'
 # A builder that kicks off Pre-CQ builders that bless the purest CLs.
 PRE_CQ_LAUNCHER_TYPE = 'priest'
 
-# A builder that cuts and prunes branches.
-CREATE_BRANCH_TYPE = 'gardener'
-
 # Chrome PFQ type.  Incremental build type that builds and validates new
 # versions of Chrome.  Only valid if set with CHROME_REV.  See
 # VALID_CHROME_REVISIONS for more information.
@@ -414,9 +452,6 @@ BRANCH_UTIL_CONFIG = 'branch-util'
 CHROOT_BUILDER_TYPE = 'chroot'
 CHROOT_BUILDER_BOARD = 'amd64-host'
 
-# Build that refreshes the online Portage package status spreadsheet.
-REFRESH_PACKAGES_TYPE = 'refresh_packages'
-
 VALID_BUILD_TYPES = (
     PALADIN_TYPE,
     INCREMENTAL_TYPE,
@@ -427,8 +462,6 @@ VALID_BUILD_TYPES = (
     CHROME_PFQ_TYPE,
     PFQ_TYPE,
     PRE_CQ_LAUNCHER_TYPE,
-    REFRESH_PACKAGES_TYPE,
-    CREATE_BRANCH_TYPE,
     PAYLOADS_TYPE,
     PROJECT_SDK_TYPE,
 )
@@ -446,6 +479,11 @@ PRE_CQ_LAUNCHER_CONFIG = 'pre-cq-launcher'
 # The name of the Pre-CQ launcher on the waterfall.
 PRE_CQ_LAUNCHER_NAME = 'Pre-CQ Launcher'
 
+# The COMMIT-QUEUE.ini and commit message option that overrides pre-cq configs
+# to test with.
+PRE_CQ_CONFIGS_OPTION = 'pre-cq-configs'
+PRE_CQ_CONFIGS_OPTION_REGEX = PRE_CQ_CONFIGS_OPTION + ':'
+
 # Define pool of machines for Hardware tests.
 HWTEST_DEFAULT_NUM = 6
 HWTEST_TRYBOT_NUM = 3
@@ -455,7 +493,7 @@ HWTEST_TOT_PALADIN_POOL = 'tot-cq'
 HWTEST_PFQ_POOL = 'pfq'
 HWTEST_SUITES_POOL = 'suites'
 HWTEST_CHROME_PERF_POOL = 'chromeperf'
-HWTEST_TRYBOT_POOL = 'try-bot'
+HWTEST_TRYBOT_POOL = HWTEST_SUITES_POOL
 
 
 # Master build timeouts in seconds. This is the overall timeout set by the
@@ -485,6 +523,7 @@ HWTEST_COMMIT_SUITE = 'bvt-cq'
 HWTEST_CANARY_SUITE = 'bvt-perbuild'
 HWTEST_AFDO_SUITE = 'AFDO_record'
 HWTEST_MOBLAB_SUITE = 'moblab'
+HWTEST_MOBLAB_QUICK_SUITE = 'moblab_quick'
 HWTEST_SANITY_SUITE = 'sanity'
 HWTEST_PROVISION_SUITE = 'bvt-provision'
 
@@ -658,7 +697,7 @@ CL_ACTION_IRRELEVANT_TO_SLAVE = 'irrelevant_to_slave'
 CL_ACTION_TRYBOT_LAUNCHING = 'trybot_launching'
 
 
-CL_ACTIONS = [CL_ACTION_PICKED_UP,
+CL_ACTIONS = (CL_ACTION_PICKED_UP,
               CL_ACTION_SUBMITTED,
               CL_ACTION_KICKED_OUT,
               CL_ACTION_SUBMIT_FAILED,
@@ -677,7 +716,16 @@ CL_ACTIONS = [CL_ACTION_PICKED_UP,
               CL_ACTION_SPECULATIVE,
               CL_ACTION_FORGIVEN,
               CL_ACTION_PRE_CQ_FULLY_VERIFIED,
-              CL_ACTION_PRE_CQ_RESET]
+              CL_ACTION_PRE_CQ_RESET)
+
+# Actions taken by a builder when making a decision about a CL.
+CL_DECISION_ACTIONS = (
+    CL_ACTION_SUBMITTED,
+    CL_ACTION_KICKED_OUT,
+    CL_ACTION_SUBMIT_FAILED,
+    CL_ACTION_VERIFIED,
+    CL_ACTION_FORGIVEN
+)
 
 # Per-config status strings for a CL.
 CL_PRECQ_CONFIG_STATUS_PENDING = 'pending'
@@ -690,6 +738,12 @@ CL_PRECQ_CONFIG_STATUSES = (CL_PRECQ_CONFIG_STATUS_PENDING,
                             CL_PRECQ_CONFIG_STATUS_INFLIGHT,
                             CL_PRECQ_CONFIG_STATUS_FAILED,
                             CL_PRECQ_CONFIG_STATUS_VERIFIED)
+
+# CL submission, rejection, or forgiven reasons (i.e. strategies).
+STRATEGY_CQ_SUCCESS = 'strategy:cq-success'
+STRATEGY_CQ_PARTIAL = 'strategy:cq-submit-partial-pool'
+STRATEGY_PRECQ_SUBMIT = 'strategy:pre-cq-submit'
+STRATEGY_NONMANIFEST = 'strategy:non-manifest-submit'
 
 # CQ types.
 CQ = 'cq'
@@ -789,6 +843,7 @@ SHERIFF_TYPE_TO_URL = {
 CQ_MASTER = 'master-paladin'
 CANARY_MASTER = 'master-release'
 PFQ_MASTER = 'master-chromium-pfq'
+BINHOST_PRE_CQ = 'binhost-pre-cq'
 
 
 # Email validation regex. Not quite fully compliant with RFC 2822, but good
@@ -810,3 +865,23 @@ EXTRA_BUCKETS_FILES_BLACKLIST = [
 # How long does the AFDO_record autotest have to generate the AFDO perf data.
 AFDO_GENERATE_TIMEOUT = 90 * 60
 
+# Stats dashboard elastic search and statsd constants.
+ELASTIC_SEARCH_HOST = '146.148.70.158'
+ELASTIC_SEARCH_PORT = 9200
+ELASTIC_SEARCH_INDEX = 'metadata_index'
+ELASTIC_SEARCH_UDP_PORT = 9700
+ELASTIC_SEARCH_USE_HTTP = False
+
+STATSD_HOST = '146.148.70.158'
+STATSD_PORT = 8125
+STATSD_PROD_PREFIX = 'chromite'
+STATSD_DEBUG_PREFIX = 'chromite_debug'
+
+# Publication of Project SDK artifacts.
+BRILLO_RELEASE_MANIFESTS_URL = 'gs://brillo-releases/sdk-releases'
+BRILLO_LATEST_RELEASE_URL = os.path.join(BRILLO_RELEASE_MANIFESTS_URL,
+                                         'LATEST')
+
+# Gmail Credentials.
+GMAIL_TOKEN_CACHE_FILE = os.path.expanduser('~/.gmail_credentials')
+GMAIL_TOKEN_JSON_FILE = '/creds/refresh_tokens/chromeos_gmail_alerts'

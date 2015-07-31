@@ -21,6 +21,10 @@
 #include "ui/display/chromeos/display_configurator.h"
 #endif
 
+namespace aura {
+class Window;
+}
+
 namespace gfx {
 class Display;
 class Insets;
@@ -32,7 +36,10 @@ namespace ash {
 class AcceleratorControllerTest;
 class DisplayController;
 class DisplayLayoutStore;
+class MouseWarpController;
 class ScreenAsh;
+
+typedef std::vector<DisplayInfo> DisplayInfoList;
 
 namespace test {
 class AshTestBase;
@@ -54,12 +61,12 @@ class ASH_EXPORT DisplayManager
    public:
     virtual ~Delegate() {}
 
-    // Create or updates the mirroring window with |display_info|.
+    // Create or updates the mirroring window with |display_info_list|.
     virtual void CreateOrUpdateMirroringDisplay(
-        const DisplayInfo& display_info) = 0;
+        const DisplayInfoList& display_info_list) = 0;
 
-    // Closes the mirror window if exists.
-    virtual void CloseMirroringDisplay() = 0;
+    // Closes the mirror window if not necessary.
+    virtual void CloseMirroringDisplayIfNotNecessary() = 0;
 
     // Called before and after the display configuration changes.
     // When |clear_focus| is true, the implementation should
@@ -68,14 +75,21 @@ class ASH_EXPORT DisplayManager
     virtual void PostDisplayConfigurationChange() = 0;
   };
 
+  typedef std::vector<gfx::Display> DisplayList;
+
   // How the second display will be used.
   // 1) EXTENDED mode extends the desktop to the second dislpay.
   // 2) MIRRORING mode copies the content of the primary display to
   //    the 2nd display. (Software Mirroring).
-  enum SecondDisplayMode {
-    EXTENDED,
-    MIRRORING
+  // 3) UNIFIED mode creates single desktop across multiple displays.
+  enum MultiDisplayMode {
+    EXTENDED = 0,
+    MIRRORING,
+    UNIFIED,
   };
+
+  // The display ID for a virtual display assigned to a unified desktop.
+  static int64 kUnifiedDisplayId;
 
   DisplayManager();
 #if defined(OS_CHROMEOS)
@@ -88,13 +102,9 @@ class ASH_EXPORT DisplayManager
     return layout_store_.get();
   }
 
-  gfx::Screen* screen() {
-    return screen_;
-  }
-
   void set_delegate(Delegate* delegate) { delegate_ = delegate; }
 
-  // When set to true, the MonitorManager calls OnDisplayMetricsChanged
+  // When set to true, the DisplayManager calls OnDisplayMetricsChanged
   // even if the display's bounds didn't change. Used to swap primary
   // display.
   void set_force_bounds_changed(bool force_bounds_changed) {
@@ -114,14 +124,6 @@ class ASH_EXPORT DisplayManager
   // Initializes font related params that depends on display
   // configuration.
   void RefreshFontParams();
-
-  // True if the given |display| is currently connected.
-  bool IsActiveDisplay(const gfx::Display& display) const;
-
-  // True if there is an internal display.
-  bool HasInternalDisplay() const;
-
-  bool IsInternalDisplayId(int64 id) const;
 
   // Returns the display layout used for current displays.
   DisplayLayout GetCurrentDisplayLayout();
@@ -240,20 +242,25 @@ class ASH_EXPORT DisplayManager
   // when displays are mirrored.
   size_t GetNumDisplays() const;
 
-  const std::vector<gfx::Display>& displays() const { return displays_; }
+  const DisplayList& active_display_list() const {
+    return active_display_list_;
+  }
 
   // Returns the number of connected displays. This returns 2
   // when displays are mirrored.
   size_t num_connected_displays() const { return num_connected_displays_; }
 
   // Returns the mirroring status.
-  bool IsMirrored() const;
-  int64 mirrored_display_id() const { return mirrored_display_id_; }
-
-  // Returns the display used for software mirrroring.
-  const gfx::Display& mirroring_display() const {
-    return mirroring_display_;
+  bool IsInMirrorMode() const;
+  int64 mirroring_display_id() const { return mirroring_display_id_; }
+  const DisplayList& software_mirroring_display_list() const {
+    return software_mirroring_display_list_;
   }
+  bool IsInUnifiedMode() const;
+
+  // Returns the display used for software mirrroring. Returns invalid
+  // display if not found.
+  const gfx::Display GetMirroringDisplayById(int64 id) const;
 
   // Retuns the display info associated with |display_id|.
   const DisplayInfo& GetDisplayInfo(int64 display_id) const;
@@ -280,15 +287,20 @@ class ASH_EXPORT DisplayManager
   void SetSoftwareMirroring(bool enabled) override;
   bool SoftwareMirroringEnabled() const override;
 #endif
-  bool software_mirroring_enabled() const {
-    return second_display_mode_ == MIRRORING;
-  };
 
-  // Sets/gets second display mode.
-  void SetSecondDisplayMode(SecondDisplayMode mode);
-  SecondDisplayMode second_display_mode() const {
-    return second_display_mode_;
+  // Sets/gets multi display mode.
+  void SetMultiDisplayMode(MultiDisplayMode mode);
+
+  // Sets/gets default multi display mode.
+  void SetDefaultMultiDisplayMode(MultiDisplayMode mode);
+  MultiDisplayMode default_multi_display_mode() const {
+    return default_multi_display_mode_;
   }
+
+  // Reconfigure display configuration using the same
+  // physical display. TODO(oshima): Refactor and move this
+  // impl to |SetDefaultMultiDisplayMode|.
+  void ReconfigureDisplays();
 
   // Update the bounds of the display given by |display_id|.
   bool UpdateDisplayBounds(int64 display_id,
@@ -297,6 +309,12 @@ class ASH_EXPORT DisplayManager
   // Creates mirror window asynchronously if the software mirror mode
   // is enabled.
   void CreateMirrorWindowAsyncIfAny();
+
+  // Creates a MouseWarpController for the current display
+  // configuration. |drag_source| is the window where dragging
+  // started, or nullptr otherwise.
+  scoped_ptr<MouseWarpController> CreateMouseWarpController(
+      aura::Window* drag_source) const;
 
   // Create a screen instance to be used during shutdown.
   void CreateScreenForShutdown() const;
@@ -318,17 +336,25 @@ private:
   friend class test::DisplayManagerTestApi;
   friend class test::SystemGestureEventFilterTest;
 
-  typedef std::vector<gfx::Display> DisplayList;
+  typedef std::vector<DisplayInfo> DisplayInfoList;
+
+  bool software_mirroring_enabled() const {
+    return multi_display_mode_ == MIRRORING;
+  };
 
   void set_change_display_upon_host_resize(bool value) {
     change_display_upon_host_resize_ = value;
   }
 
+  // Creates software mirroring display related information. The display
+  // used to mirror the content is removed from the |display_info_list|.
+  void CreateSoftwareMirroringDisplayInfo(DisplayInfoList* display_info_list);
+
   gfx::Display* FindDisplayForId(int64 id);
 
   // Add the mirror display's display info if the software based
   // mirroring is in use.
-  void AddMirrorDisplayInfoIfAny(std::vector<DisplayInfo>* display_info_list);
+  void AddMirrorDisplayInfoIfAny(DisplayInfoList* display_info_list);
 
   // Inserts and update the DisplayInfo according to the overscan
   // state. Note that The DisplayInfo stored in the |internal_display_info_|
@@ -355,7 +381,7 @@ private:
 
   void CreateMirrorWindowIfAny();
 
-  bool HasSoftwareMirroringDisplay();
+  void RunPendingTasksForTest();
 
   static void UpdateDisplayBoundsForLayout(
       const DisplayLayout& layout,
@@ -364,16 +390,14 @@ private:
 
   Delegate* delegate_;  // not owned.
 
-  scoped_ptr<ScreenAsh> screen_ash_;
-  // This is to have an accessor without ScreenAsh definition.
-  gfx::Screen* screen_;
+  scoped_ptr<ScreenAsh> screen_;
 
   scoped_ptr<DisplayLayoutStore> layout_store_;
 
   int64 first_display_id_;
 
   // List of current active displays.
-  DisplayList displays_;
+  DisplayList active_display_list_;
 
   int num_connected_displays_;
 
@@ -392,9 +416,11 @@ private:
   // on device as well as during the unit tests.
   bool change_display_upon_host_resize_;
 
-  SecondDisplayMode second_display_mode_;
-  int64 mirrored_display_id_;
-  gfx::Display mirroring_display_;
+  MultiDisplayMode multi_display_mode_;
+  MultiDisplayMode default_multi_display_mode_;
+
+  int64 mirroring_display_id_;
+  DisplayList software_mirroring_display_list_;
 
   // User preference for rotation lock of the internal display.
   bool registered_internal_display_rotation_lock_;

@@ -5,6 +5,7 @@
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_tpm_key_manager.h"
 
 #include <cryptohi.h>
+#include <keyhi.h>
 
 #include "base/base64.h"
 #include "base/bind.h"
@@ -22,8 +23,8 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/browser_thread.h"
+#include "crypto/nss_key_util.h"
 #include "crypto/nss_util_internal.h"
-#include "crypto/rsa_private_key.h"
 #include "crypto/scoped_nss_types.h"
 
 namespace {
@@ -32,7 +33,7 @@ namespace {
 const int kKeyModulusLength = 2048;
 
 // Relays |GetSystemSlotOnIOThread| callback to |response_task_runner|.
-void RunCallbackOnThreadRunner(
+void RunCallbackOnTaskRunner(
     const scoped_refptr<base::SingleThreadTaskRunner>& response_task_runner,
     const base::Callback<void(crypto::ScopedPK11Slot)>& callback,
     crypto::ScopedPK11Slot slot) {
@@ -46,7 +47,7 @@ void GetSystemSlotOnIOThread(
     const scoped_refptr<base::SingleThreadTaskRunner>& response_task_runner,
     const base::Callback<void(crypto::ScopedPK11Slot)>& callback) {
   base::Callback<void(crypto::ScopedPK11Slot)> callback_on_origin_thread =
-      base::Bind(&RunCallbackOnThreadRunner, response_task_runner, callback);
+      base::Bind(&RunCallbackOnTaskRunner, response_task_runner, callback);
 
   crypto::ScopedPK11Slot system_slot =
       crypto::GetSystemNSSKeySlot(callback_on_origin_thread);
@@ -54,21 +55,46 @@ void GetSystemSlotOnIOThread(
     callback_on_origin_thread.Run(system_slot.Pass());
 }
 
+// Relays |EnsureUserTpmInitializedOnIOThread| callback to
+// |response_task_runner|, ignoring |slot|.
+void RunCallbackWithoutSlotOnTaskRunner(
+    const scoped_refptr<base::SingleThreadTaskRunner>& response_task_runner,
+    const base::Closure& callback,
+    crypto::ScopedPK11Slot slot) {
+  response_task_runner->PostTask(FROM_HERE, callback);
+}
+
+void EnsureUserTPMInitializedOnIOThread(
+    const std::string& username_hash,
+    const scoped_refptr<base::SingleThreadTaskRunner>& response_task_runner,
+    const base::Closure& callback) {
+  base::Callback<void(crypto::ScopedPK11Slot)> callback_on_origin_thread =
+      base::Bind(&RunCallbackWithoutSlotOnTaskRunner, response_task_runner,
+                 callback);
+
+  crypto::ScopedPK11Slot private_slot = crypto::GetPrivateSlotForChromeOSUser(
+      username_hash, callback_on_origin_thread);
+  if (private_slot)
+    callback_on_origin_thread.Run(private_slot.Pass());
+}
+
 // Checks if a private RSA key associated with |public_key| can be found in
-// |slot|.
+// |slot|. |slot| must be non-null.
 // Must be called on a worker thread.
-scoped_ptr<crypto::RSAPrivateKey> GetPrivateKeyOnWorkerThread(
+crypto::ScopedSECKEYPrivateKey GetPrivateKeyOnWorkerThread(
     PK11SlotInfo* slot,
     const std::string& public_key) {
+  CHECK(slot);
+
   const uint8* public_key_uint8 =
       reinterpret_cast<const uint8*>(public_key.data());
   std::vector<uint8> public_key_vector(
       public_key_uint8, public_key_uint8 + public_key.size());
 
-  scoped_ptr<crypto::RSAPrivateKey> rsa_key(
-      crypto::RSAPrivateKey::FindFromPublicKeyInfo(public_key_vector));
-  if (!rsa_key || rsa_key->key()->pkcs11Slot != slot)
-    return scoped_ptr<crypto::RSAPrivateKey>();
+  crypto::ScopedSECKEYPrivateKey rsa_key(
+      crypto::FindNSSKeyFromPublicKeyInfoInSlot(public_key_vector, slot));
+  if (!rsa_key || SECKEY_GetPrivateKeyType(rsa_key.get()) != rsaKey)
+    return nullptr;
   return rsa_key.Pass();
 }
 
@@ -81,7 +107,7 @@ void SignDataOnWorkerThread(
     const std::string& data,
     const scoped_refptr<base::SingleThreadTaskRunner>& response_task_runner,
     const base::Callback<void(const std::string&)>& callback) {
-  scoped_ptr<crypto::RSAPrivateKey> private_key(
+  crypto::ScopedSECKEYPrivateKey private_key(
       GetPrivateKeyOnWorkerThread(slot.get(), public_key));
   if (!private_key) {
     LOG(ERROR) << "Private key for signing data not found";
@@ -93,8 +119,7 @@ void SignDataOnWorkerThread(
   crypto::ScopedSECItem sign_result(SECITEM_AllocItem(NULL, NULL, 0));
   if (SEC_SignData(sign_result.get(),
                    reinterpret_cast<const unsigned char*>(data.data()),
-                   data.size(),
-                   private_key->key(),
+                   data.size(), private_key.get(),
                    SEC_OID_PKCS1_SHA256_WITH_RSA_ENCRYPTION) != SECSuccess) {
     LOG(ERROR) << "Failed to sign data";
     response_task_runner->PostTask(FROM_HERE,
@@ -123,17 +148,20 @@ void CreateTpmKeyPairOnWorkerThread(
     return;
   }
 
-  scoped_ptr<crypto::RSAPrivateKey> rsa_key(
-      crypto::RSAPrivateKey::CreateSensitive(slot.get(), kKeyModulusLength));
-  if (!rsa_key) {
+  crypto::ScopedSECKEYPublicKey public_key_obj;
+  crypto::ScopedSECKEYPrivateKey private_key_obj;
+  if (!crypto::GenerateRSAKeyPairNSS(slot.get(), kKeyModulusLength,
+                                     true /* permanent */, &public_key_obj,
+                                     &private_key_obj)) {
     LOG(ERROR) << "Failed to create an RSA key.";
     response_task_runner->PostTask(FROM_HERE,
                                    base::Bind(callback, std::string()));
     return;
   }
 
-  std::vector<uint8> created_public_key;
-  if (!rsa_key->ExportPublicKey(&created_public_key)) {
+  crypto::ScopedSECItem public_key_der(
+      SECKEY_EncodeDERSubjectPublicKeyInfo(public_key_obj.get()));
+  if (!public_key_der) {
     LOG(ERROR) << "Failed to export public key.";
     response_task_runner->PostTask(FROM_HERE,
                                    base::Bind(callback, std::string()));
@@ -141,10 +169,9 @@ void CreateTpmKeyPairOnWorkerThread(
   }
 
   response_task_runner->PostTask(
-      FROM_HERE,
-      base::Bind(callback,
-                 std::string(created_public_key.begin(),
-                             created_public_key.end())));
+      FROM_HERE, base::Bind(callback, std::string(reinterpret_cast<const char*>(
+                                                      public_key_der->data),
+                                                  public_key_der->len)));
 }
 
 }  // namespace
@@ -168,9 +195,12 @@ void EasyUnlockTpmKeyManager::ResetLocalStateForUser(
   update->RemoveWithoutPathExpansion(user_id, NULL);
 }
 
-EasyUnlockTpmKeyManager::EasyUnlockTpmKeyManager(const std::string& user_id,
-                                                 PrefService* local_state)
+EasyUnlockTpmKeyManager::EasyUnlockTpmKeyManager(
+    const std::string& user_id,
+    const std::string& username_hash,
+    PrefService* local_state)
     : user_id_(user_id),
+      username_hash_(username_hash),
       local_state_(local_state),
       create_tpm_key_state_(CREATE_TPM_KEY_NOT_STARTED),
       get_tpm_slot_weak_ptr_factory_(this),
@@ -184,6 +214,7 @@ bool EasyUnlockTpmKeyManager::PrepareTpmKey(
     bool check_private_key,
     const base::Closure& callback) {
   CHECK(!user_id_.empty());
+  CHECK(!username_hash_.empty());
 
   if (create_tpm_key_state_ == CREATE_TPM_KEY_DONE)
     return true;
@@ -197,29 +228,24 @@ bool EasyUnlockTpmKeyManager::PrepareTpmKey(
   prepare_tpm_key_callbacks_.push_back(callback);
 
   if (create_tpm_key_state_ == CREATE_TPM_KEY_NOT_STARTED) {
-    create_tpm_key_state_ = CREATE_TPM_KEY_WAITING_FOR_SYSTEM_SLOT;
+    create_tpm_key_state_ = CREATE_TPM_KEY_WAITING_FOR_USER_SLOT;
 
-    base::Callback<void(crypto::ScopedPK11Slot)> create_key_with_system_slot =
-        base::Bind(&EasyUnlockTpmKeyManager::CreateKeyInSystemSlot,
-                   get_tpm_slot_weak_ptr_factory_.GetWeakPtr(),
-                   key);
+    base::Closure on_user_tpm_ready =
+        base::Bind(&EasyUnlockTpmKeyManager::OnUserTPMInitialized,
+                   get_tpm_slot_weak_ptr_factory_.GetWeakPtr(), key);
 
     content::BrowserThread::PostTask(
-        content::BrowserThread::IO,
-        FROM_HERE,
-        base::Bind(&GetSystemSlotOnIOThread,
-                   base::ThreadTaskRunnerHandle::Get(),
-                   create_key_with_system_slot));
+        content::BrowserThread::IO, FROM_HERE,
+        base::Bind(&EnsureUserTPMInitializedOnIOThread, username_hash_,
+                   base::ThreadTaskRunnerHandle::Get(), on_user_tpm_ready));
   }
 
   return false;
 }
 
 bool EasyUnlockTpmKeyManager::StartGetSystemSlotTimeoutMs(size_t timeout_ms) {
-  if (create_tpm_key_state_ == CREATE_TPM_KEY_DONE ||
-      create_tpm_key_state_ == CREATE_TPM_KEY_GOT_SYSTEM_SLOT) {
+  if (StartedCreatingTpmKeys())
     return false;
-  }
 
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE,
@@ -267,6 +293,11 @@ void EasyUnlockTpmKeyManager::SignUsingTpmKey(
                  sign_with_system_slot));
 }
 
+bool EasyUnlockTpmKeyManager::StartedCreatingTpmKeys() const {
+  return create_tpm_key_state_ == CREATE_TPM_KEY_GOT_SYSTEM_SLOT ||
+         create_tpm_key_state_ == CREATE_TPM_KEY_DONE;
+}
+
 void EasyUnlockTpmKeyManager::SetKeyInLocalState(const std::string& user_id,
                                                  const std::string& value) {
   if (!local_state_)
@@ -279,11 +310,24 @@ void EasyUnlockTpmKeyManager::SetKeyInLocalState(const std::string& user_id,
   update->SetStringWithoutPathExpansion(user_id, encoded);
 }
 
+void EasyUnlockTpmKeyManager::OnUserTPMInitialized(
+    const std::string& public_key) {
+  create_tpm_key_state_ = CREATE_TPM_KEY_WAITING_FOR_SYSTEM_SLOT;
+
+  base::Callback<void(crypto::ScopedPK11Slot)> create_key_with_system_slot =
+      base::Bind(&EasyUnlockTpmKeyManager::CreateKeyInSystemSlot,
+                 get_tpm_slot_weak_ptr_factory_.GetWeakPtr(), public_key);
+
+  content::BrowserThread::PostTask(
+      content::BrowserThread::IO, FROM_HERE,
+      base::Bind(&GetSystemSlotOnIOThread, base::ThreadTaskRunnerHandle::Get(),
+                 create_key_with_system_slot));
+}
+
 void EasyUnlockTpmKeyManager::CreateKeyInSystemSlot(
     const std::string& public_key,
     crypto::ScopedPK11Slot system_slot) {
   CHECK(system_slot);
-
   create_tpm_key_state_ = CREATE_TPM_KEY_GOT_SYSTEM_SLOT;
 
   // If there are any delayed tasks posted using |StartGetSystemSlotTimeoutMs|,

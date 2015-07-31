@@ -149,9 +149,6 @@ class FileMediaEngine : public MediaEngineInterface {
                                         MediaProcessorDirection direction) {
     return true;
   }
-  VideoFormat GetStartCaptureFormat() const {
-    return VideoFormat();
-  }
 
   virtual sigslot::repeater2<VideoCapturer*, CaptureState>&
       SignalVideoCaptureStateChange() {
@@ -265,8 +262,8 @@ class FileVideoChannel : public VideoMediaChannel {
       rtc::StreamInterface* output_file_stream,
       rtc::Thread* rtp_sender_thread);
   virtual ~FileVideoChannel();
-
   // Implement pure virtual methods of VideoMediaChannel.
+  void DetachVoiceChannel() override {}
   virtual bool SetRecvCodecs(const std::vector<VideoCodec>& codecs) {
     return true;
   }

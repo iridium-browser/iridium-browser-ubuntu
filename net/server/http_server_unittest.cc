@@ -99,7 +99,7 @@ class TestHttpClient {
     int total_bytes_received = 0;
     message->clear();
     while (total_bytes_received < expected_bytes) {
-      net::TestCompletionCallback callback;
+      TestCompletionCallback callback;
       ReadInternal(callback.callback());
       int bytes_received = callback.WaitForResult();
       if (bytes_received <= 0)
@@ -145,7 +145,7 @@ class TestHttpClient {
       Write();
   }
 
-  void ReadInternal(const net::CompletionCallback& callback) {
+  void ReadInternal(const CompletionCallback& callback) {
     read_buffer_ = new IOBufferWithSize(kMaxExpectedResponseLength);
     int result =
         socket_->Read(read_buffer_.get(), kMaxExpectedResponseLength, callback);
@@ -183,7 +183,7 @@ class HttpServerTest : public testing::Test,
 
   void SetUp() override {
     scoped_ptr<ServerSocket> server_socket(
-        new TCPServerSocket(NULL, net::NetLog::Source()));
+        new TCPServerSocket(NULL, NetLog::Source()));
     server_socket->ListenWithAddressAndPort("127.0.0.1", 0, 1);
     server_.reset(new HttpServer(server_socket.Pass(), this));
     ASSERT_EQ(OK, server_->GetLocalAddress(&server_address_));
@@ -421,11 +421,10 @@ TEST_F(HttpServerTest, RequestWithTooLargeBody) {
 
   scoped_refptr<URLRequestContextGetter> request_context_getter(
       new TestURLRequestContextGetter(base::MessageLoopProxy::current()));
-  scoped_ptr<URLFetcher> fetcher(
+  scoped_ptr<URLFetcher> fetcher =
       URLFetcher::Create(GURL(base::StringPrintf("http://127.0.0.1:%d/test",
                                                  server_address_.port())),
-                         URLFetcher::GET,
-                         &delegate));
+                         URLFetcher::GET, &delegate);
   fetcher->SetRequestContext(request_context_getter.get());
   fetcher->AddExtraRequestHeader(
       base::StringPrintf("content-length:%d", 1 << 30));
@@ -498,6 +497,11 @@ class MockStreamSocket : public StreamSocket {
   bool WasNpnNegotiated() const override { return false; }
   NextProto GetNegotiatedProtocol() const override { return kProtoUnknown; }
   bool GetSSLInfo(SSLInfo* ssl_info) override { return false; }
+  void GetConnectionAttempts(ConnectionAttempts* out) const override {
+    out->clear();
+  }
+  void ClearConnectionAttempts() override {}
+  void AddConnectionAttempts(const ConnectionAttempts& attempts) override {}
 
   // Socket
   int Read(IOBuffer* buf,

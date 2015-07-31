@@ -52,7 +52,6 @@ DevToolsEmulator::DevToolsEmulator(WebViewImpl* webViewImpl)
     , m_emulationAgent(nullptr)
     , m_deviceMetricsEnabled(false)
     , m_emulateMobileEnabled(false)
-    , m_originalViewportEnabled(false)
     , m_isOverlayScrollbarsEnabled(false)
     , m_originalDefaultMinimumPageScaleFactor(0)
     , m_originalDefaultMaximumPageScaleFactor(0)
@@ -142,6 +141,7 @@ void DevToolsEmulator::enableDeviceEmulation(const WebDeviceEmulationParams& par
         m_webViewImpl->setBackgroundColorOverride(Color::darkGray);
         m_webViewImpl->updateShowFPSCounterAndContinuousPainting();
     }
+
     m_webViewImpl->page()->settings().setDeviceScaleAdjustment(calculateDeviceScaleAdjustment(params.viewSize.width, params.viewSize.height, params.deviceScaleFactor));
 
     if (params.screenPosition == WebDeviceEmulationParams::Mobile)
@@ -169,6 +169,7 @@ void DevToolsEmulator::disableDeviceEmulation()
     disableMobileEmulation();
     m_webViewImpl->setCompositorDeviceScaleFactorOverride(0.f);
     m_webViewImpl->setRootLayerTransform(WebSize(0.f, 0.f), 1.f);
+    m_webViewImpl->setPageScaleFactor(1.f);
     if (Document* document = m_webViewImpl->mainFrameImpl()->frame()->document()) {
         document->styleResolverChanged();
         document->mediaQueryAffectingValueChanged();
@@ -182,8 +183,6 @@ void DevToolsEmulator::enableMobileEmulation()
     m_emulateMobileEnabled = true;
     m_isOverlayScrollbarsEnabled = RuntimeEnabledFeatures::overlayScrollbarsEnabled();
     RuntimeEnabledFeatures::setOverlayScrollbarsEnabled(true);
-    m_originalViewportEnabled = RuntimeEnabledFeatures::cssViewportEnabled();
-    RuntimeEnabledFeatures::setCSSViewportEnabled(true);
     m_webViewImpl->enableViewport();
     m_webViewImpl->settings()->setViewportMetaEnabled(true);
     m_webViewImpl->settings()->setShrinksViewportContentToFit(true);
@@ -202,7 +201,6 @@ void DevToolsEmulator::disableMobileEmulation()
     if (!m_emulateMobileEnabled)
         return;
     RuntimeEnabledFeatures::setOverlayScrollbarsEnabled(m_isOverlayScrollbarsEnabled);
-    RuntimeEnabledFeatures::setCSSViewportEnabled(m_originalViewportEnabled);
     m_webViewImpl->disableViewport();
     m_webViewImpl->settings()->setViewportMetaEnabled(false);
     m_webViewImpl->settings()->setShrinksViewportContentToFit(false);

@@ -217,12 +217,23 @@ void WebPopupMenuImpl::paintContents(WebCanvas* canvas, const WebRect& rect, Web
     if (!m_widget)
         return;
 
-    GraphicsContext context(canvas, displayItemList(),
-        paintingControl == PaintingControlSetting::DisplayListConstructionDisabled ? GraphicsContext::FullyDisabled : GraphicsContext::NothingDisabled);
-    m_widget->paint(&context, rect);
+    OwnPtr<GraphicsContext> context;
+    GraphicsContext::DisabledMode disabledMode = GraphicsContext::NothingDisabled;
+    if (paintingControl == PaintingControlSetting::DisplayListPaintingDisabled
+        || paintingControl == PaintingControlSetting::DisplayListConstructionDisabled)
+        disabledMode = GraphicsContext::FullyDisabled;
 
-    if (DisplayItemList* displayItemList = this->displayItemList())
-        displayItemList->commitNewDisplayItems();
+    DisplayItemList* itemList = displayItemList();
+    if (itemList) {
+        context = adoptPtr(new GraphicsContext(itemList, disabledMode));
+        itemList->setDisplayItemConstructionIsDisabled(paintingControl == PaintingControlSetting::DisplayListConstructionDisabled);
+    } else {
+        context = GraphicsContext::deprecatedCreateWithCanvas(canvas, disabledMode);
+    }
+    m_widget->paint(context.get(), rect);
+
+    if (itemList)
+        itemList->commitNewDisplayItems();
 }
 
 void WebPopupMenuImpl::paintContents(WebDisplayItemList* webDisplayItemList, const WebRect& clip, WebContentLayerClient::PaintingControlSetting paintingControl)
@@ -230,12 +241,13 @@ void WebPopupMenuImpl::paintContents(WebDisplayItemList* webDisplayItemList, con
     if (!m_widget)
         return;
 
-    if (paintingControl == WebContentLayerClient::DisplayListCachingDisabled && m_displayItemList)
+    if (paintingControl != WebContentLayerClient::PaintDefaultBehavior && m_displayItemList)
         m_displayItemList->invalidateAll();
 
     paintContents(static_cast<WebCanvas*>(nullptr), clip, paintingControl);
 
-    for (const auto& item : displayItemList()->displayItems())
+    RELEASE_ASSERT(m_displayItemList);
+    for (const auto& item : m_displayItemList->displayItems())
         item->appendToWebDisplayItemList(webDisplayItemList);
 }
 
@@ -245,10 +257,10 @@ void WebPopupMenuImpl::paint(WebCanvas* canvas, const WebRect& rect)
         return;
 
     if (!rect.isEmpty()) {
-        GraphicsContext context(canvas, nullptr);
+        OwnPtr<GraphicsContext> context = GraphicsContext::deprecatedCreateWithCanvas(canvas);
         float scaleFactor = m_client->deviceScaleFactor();
-        context.scale(scaleFactor, scaleFactor);
-        m_widget->paint(&context, rect);
+        context->scale(scaleFactor, scaleFactor);
+        m_widget->paint(context.get(), rect);
     }
 }
 
@@ -401,11 +413,6 @@ IntRect WebPopupMenuImpl::viewportToScreen(const IntRect& rect) const
 {
     notImplemented();
     return IntRect();
-}
-
-WebScreenInfo WebPopupMenuImpl::screenInfo() const
-{
-    return WebScreenInfo();
 }
 
 void WebPopupMenuImpl::popupClosed(PopupContainer* widget)

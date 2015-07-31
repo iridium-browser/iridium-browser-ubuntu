@@ -38,6 +38,7 @@ static const SessionCommand::id_type kCommandWindowClosed = 17;
 static const SessionCommand::id_type kCommandSetTabUserAgentOverride = 18;
 static const SessionCommand::id_type kCommandSessionStorageAssociated = 19;
 static const SessionCommand::id_type kCommandSetActiveWindow = 20;
+static const SessionCommand::id_type kCommandLastActiveTime = 21;
 
 namespace {
 
@@ -89,6 +90,11 @@ struct PinnedStatePayload {
   bool pinned_state;
 };
 
+struct LastActiveTimePayload {
+  SessionID::id_type tab_id;
+  int64 last_active_time;
+};
+
 // Persisted versions of ui::WindowShowState that are written to disk and can
 // never change.
 enum PersistedWindowShowState {
@@ -99,7 +105,8 @@ enum PersistedWindowShowState {
   // SHOW_STATE_INACTIVE (4) never persisted.
   PERSISTED_SHOW_STATE_FULLSCREEN = 5,
   PERSISTED_SHOW_STATE_DETACHED_DEPRECATED = 6,
-  PERSISTED_SHOW_STATE_END = 6
+  PERSISTED_SHOW_STATE_DOCKED = 7,
+  PERSISTED_SHOW_STATE_END = 7
 };
 
 typedef std::map<SessionID::id_type, SessionTab*> IdToSessionTab;
@@ -123,6 +130,8 @@ PersistedWindowShowState ShowStateToPersistedShowState(
       return PERSISTED_SHOW_STATE_MAXIMIZED;
     case ui::SHOW_STATE_FULLSCREEN:
       return PERSISTED_SHOW_STATE_FULLSCREEN;
+    case ui::SHOW_STATE_DOCKED:
+      return PERSISTED_SHOW_STATE_DOCKED;
 
     case ui::SHOW_STATE_DEFAULT:
     case ui::SHOW_STATE_INACTIVE:
@@ -146,6 +155,8 @@ ui::WindowShowState PersistedShowStateToShowState(int state) {
       return ui::SHOW_STATE_MAXIMIZED;
     case PERSISTED_SHOW_STATE_FULLSCREEN:
       return ui::SHOW_STATE_FULLSCREEN;
+    case PERSISTED_SHOW_STATE_DOCKED:
+      return ui::SHOW_STATE_DOCKED;
     case PERSISTED_SHOW_STATE_DETACHED_DEPRECATED:
       return ui::SHOW_STATE_NORMAL;
   }
@@ -553,6 +564,18 @@ bool CreateTabsAndWindows(const ScopedVector<SessionCommand>& data,
         break;
       }
 
+      case kCommandLastActiveTime: {
+        LastActiveTimePayload payload;
+        if (!command->GetPayload(&payload, sizeof(payload))) {
+          DVLOG(1) << "Failed reading command " << command->id();
+          return true;
+        }
+        SessionTab* tab = GetTab(payload.tab_id, tabs);
+        tab->last_active_time =
+            base::TimeTicks::FromInternalValue(payload.last_active_time);
+        break;
+      }
+
       default:
         // TODO(skuhne): This might call back into a callback handler to extend
         // the command set for specific implementations.
@@ -695,6 +718,18 @@ scoped_ptr<SessionCommand> CreateSetActiveWindowCommand(
   payload = window_id.id();
   scoped_ptr<SessionCommand> command(
       new SessionCommand(kCommandSetActiveWindow, sizeof(payload)));
+  memcpy(command->contents(), &payload, sizeof(payload));
+  return command;
+}
+
+scoped_ptr<SessionCommand> CreateLastActiveTimeCommand(
+    const SessionID& tab_id,
+    base::TimeTicks last_active_time) {
+  LastActiveTimePayload payload = {0};
+  payload.tab_id = tab_id.id();
+  payload.last_active_time = last_active_time.ToInternalValue();
+  scoped_ptr<SessionCommand> command(
+      new SessionCommand(kCommandLastActiveTime, sizeof(payload)));
   memcpy(command->contents(), &payload, sizeof(payload));
   return command;
 }

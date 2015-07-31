@@ -5,6 +5,7 @@
 #ifndef COMPONENTS_USER_MANAGER_USER_MANAGER_BASE_H_
 #define COMPONENTS_USER_MANAGER_USER_MANAGER_BASE_H_
 
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -116,8 +117,29 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
   void SetKnownUserStringPref(const UserID& user_id,
                               const std::string& path,
                               const std::string& in_value) override;
+  bool GetKnownUserBooleanPref(const UserID& user_id,
+                               const std::string& path,
+                               bool* out_value) override;
+  void SetKnownUserBooleanPref(const UserID& user_id,
+                               const std::string& path,
+                               const bool in_value) override;
+  bool GetKnownUserIntegerPref(const UserID& user_id,
+                               const std::string& path,
+                               int* out_value) override;
+  void SetKnownUserIntegerPref(const UserID& user_id,
+                               const std::string& path,
+                               const int in_value) override;
   void UpdateGaiaID(const UserID& user_id, const std::string& gaia_id) override;
   bool FindGaiaID(const UserID& user_id, std::string* out_value) override;
+  void UpdateUsingSAML(const std::string& user_id,
+                       const bool using_saml) override;
+  bool FindUsingSAML(const std::string& user_id) override;
+  void SetKnownUserDeviceId(const UserID& user_id,
+                            const std::string& device_id) override;
+  std::string GetKnownUserDeviceId(const UserID& user_id) override;
+  void UpdateReauthReason(const std::string& user_id,
+                          const int reauth_reason) override;
+  bool FindReauthReason(const std::string& user_id, int* out_value) override;
 
   virtual void SetIsCurrentUserNew(bool is_new);
 
@@ -132,14 +154,14 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
                             std::vector<std::string>* users_vector,
                             std::set<std::string>* users_set);
 
+  // Returns true if trusted device policies have successfully been retrieved
+  // and ephemeral users are enabled.
+  virtual bool AreEphemeralUsersEnabled() const = 0;
+
  protected:
   // Adds |user| to users list, and adds it to front of LRU list. It is assumed
   // that there is no user with same id.
   virtual void AddUserRecord(User* user);
-
-  // Returns true if trusted device policies have successfully been retrieved
-  // and ephemeral users are enabled.
-  virtual bool AreEphemeralUsersEnabled() const = 0;
 
   // Returns true if user may be removed.
   virtual bool CanUserBeRemoved(const User* user) const;

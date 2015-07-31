@@ -20,9 +20,7 @@ class HighResolutionTimerManager;
 class MessageLoop;
 class PowerMonitor;
 class SystemMonitor;
-#if defined(OS_CHROMEOS)
-class MemoryPressureObserverChromeOS;
-#endif
+class MemoryPressureMonitor;
 namespace trace_event {
 class TraceMemoryController;
 class TraceEventSystemStatsMonitor;
@@ -31,8 +29,10 @@ class TraceEventSystemStatsMonitor;
 
 namespace media {
 class AudioManager;
-class MidiManager;
 class UserInputMonitor;
+namespace midi {
+class MidiManager;
+}  // namespace midi
 }  // namespace media
 
 namespace net {
@@ -102,7 +102,7 @@ class CONTENT_EXPORT BrowserMainLoop {
   media::UserInputMonitor* user_input_monitor() const {
     return user_input_monitor_.get();
   }
-  media::MidiManager* midi_manager() const { return midi_manager_.get(); }
+  media::midi::MidiManager* midi_manager() const { return midi_manager_.get(); }
   base::Thread* indexed_db_thread() const { return indexed_db_thread_.get(); }
 
   bool is_tracing_startup() const { return is_tracing_startup_; }
@@ -116,12 +116,6 @@ class CONTENT_EXPORT BrowserMainLoop {
 #if defined(OS_MACOSX) && !defined(OS_IOS)
   DeviceMonitorMac* device_monitor_mac() const {
     return device_monitor_mac_.get();
-  }
-#endif
-#if defined(OS_CHROMEOS)
-  // Return the MemoryPressureObserver which might be NULL.
-  base::MemoryPressureObserverChromeOS* memory_pressure_observer() {
-    return memory_pressure_observer_.get();
   }
 #endif
 
@@ -169,7 +163,7 @@ class CONTENT_EXPORT BrowserMainLoop {
   // user_input_monitor_ has to outlive audio_manager_, so declared first.
   scoped_ptr<media::UserInputMonitor> user_input_monitor_;
   scoped_ptr<media::AudioManager> audio_manager_;
-  scoped_ptr<media::MidiManager> midi_manager_;
+  scoped_ptr<media::midi::MidiManager> midi_manager_;
   scoped_ptr<MediaStreamManager> media_stream_manager_;
   // Per-process listener for online state changes.
   scoped_ptr<BrowserOnlineStateObserver> online_state_observer_;
@@ -184,9 +178,11 @@ class CONTENT_EXPORT BrowserMainLoop {
   // Android implementation of ScreenOrientationDelegate
   scoped_ptr<ScreenOrientationDelegate> screen_orientation_delegate_;
 #endif
-#if defined(OS_CHROMEOS)
-  scoped_ptr<base::MemoryPressureObserverChromeOS> memory_pressure_observer_;
-#endif
+
+  // Memory pressure monitor. Created in PreCreateThreads and torn down in
+  // ShutdownThreadsAndCleanUp.
+  scoped_ptr<base::MemoryPressureMonitor> memory_pressure_monitor_;
+
   // The startup task runner is created by CreateStartupTasks()
   scoped_ptr<StartupTaskRunner> startup_task_runner_;
 

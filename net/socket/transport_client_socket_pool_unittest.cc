@@ -16,7 +16,7 @@
 #include "net/base/net_util.h"
 #include "net/base/test_completion_callback.h"
 #include "net/dns/mock_host_resolver.h"
-#include "net/log/capturing_net_log.h"
+#include "net/log/test_net_log.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/socket_test_util.h"
 #include "net/socket/stream_socket.h"
@@ -90,7 +90,7 @@ class TransportClientSocketPoolTest : public testing::Test {
   size_t completion_count() const { return test_base_.completion_count(); }
 
   bool connect_backup_jobs_enabled_;
-  CapturingNetLog net_log_;
+  TestNetLog net_log_;
   scoped_refptr<TransportSocketParams> params_;
   scoped_ptr<MockHostResolver> host_resolver_;
   MockTransportClientSocketFactory client_socket_factory_;
@@ -185,6 +185,7 @@ TEST_F(TransportClientSocketPoolTest, Basic) {
   EXPECT_TRUE(handle.is_initialized());
   EXPECT_TRUE(handle.socket());
   TestLoadTimingInfoConnectedNotReused(handle);
+  EXPECT_EQ(0u, handle.connection_attempts().size());
 }
 
 // Make sure that TransportConnectJob passes on its priority to its
@@ -213,6 +214,9 @@ TEST_F(TransportClientSocketPoolTest, InitHostResolutionFailure) {
             handle.Init("a", dest, kDefaultPriority, callback.callback(),
                         &pool_, BoundNetLog()));
   EXPECT_EQ(ERR_NAME_NOT_RESOLVED, callback.WaitForResult());
+  ASSERT_EQ(1u, handle.connection_attempts().size());
+  EXPECT_TRUE(handle.connection_attempts()[0].endpoint.address().empty());
+  EXPECT_EQ(ERR_NAME_NOT_RESOLVED, handle.connection_attempts()[0].result);
 }
 
 TEST_F(TransportClientSocketPoolTest, InitConnectionFailure) {
@@ -224,12 +228,20 @@ TEST_F(TransportClientSocketPoolTest, InitConnectionFailure) {
             handle.Init("a", params_, kDefaultPriority, callback.callback(),
                         &pool_, BoundNetLog()));
   EXPECT_EQ(ERR_CONNECTION_FAILED, callback.WaitForResult());
+  ASSERT_EQ(1u, handle.connection_attempts().size());
+  EXPECT_EQ("127.0.0.1:80",
+            handle.connection_attempts()[0].endpoint.ToString());
+  EXPECT_EQ(ERR_CONNECTION_FAILED, handle.connection_attempts()[0].result);
 
   // Make the host resolutions complete synchronously this time.
   host_resolver_->set_synchronous_mode(true);
   EXPECT_EQ(ERR_CONNECTION_FAILED,
             handle.Init("a", params_, kDefaultPriority, callback.callback(),
                         &pool_, BoundNetLog()));
+  ASSERT_EQ(1u, handle.connection_attempts().size());
+  EXPECT_EQ("127.0.0.1:80",
+            handle.connection_attempts()[0].endpoint.ToString());
+  EXPECT_EQ(ERR_CONNECTION_FAILED, handle.connection_attempts()[0].result);
 }
 
 TEST_F(TransportClientSocketPoolTest, PendingRequests) {
@@ -764,6 +776,8 @@ TEST_F(TransportClientSocketPoolTest, BackupSocketFailAfterStall) {
   EXPECT_EQ(ERR_CONNECTION_FAILED, callback.WaitForResult());
   EXPECT_FALSE(handle.is_initialized());
   EXPECT_FALSE(handle.socket());
+  ASSERT_EQ(1u, handle.connection_attempts().size());
+  EXPECT_EQ(ERR_CONNECTION_FAILED, handle.connection_attempts()[0].result);
   EXPECT_EQ(0, pool_.IdleSocketCount());
   handle.Reset();
 
@@ -812,6 +826,8 @@ TEST_F(TransportClientSocketPoolTest, BackupSocketFailAfterDelay) {
   EXPECT_EQ(ERR_CONNECTION_FAILED, callback.WaitForResult());
   EXPECT_FALSE(handle.is_initialized());
   EXPECT_FALSE(handle.socket());
+  ASSERT_EQ(1u, handle.connection_attempts().size());
+  EXPECT_EQ(ERR_CONNECTION_FAILED, handle.connection_attempts()[0].result);
   handle.Reset();
 
   // Reset for the next case.
@@ -830,11 +846,11 @@ TEST_F(TransportClientSocketPoolTest, IPv6FallbackSocketIPv4FinishesFirst) {
                                  NULL);
 
   MockTransportClientSocketFactory::ClientSocketType case_types[] = {
-    // This is the IPv6 socket.
-    MockTransportClientSocketFactory::MOCK_STALLED_CLIENT_SOCKET,
-    // This is the IPv4 socket.
-    MockTransportClientSocketFactory::MOCK_PENDING_CLIENT_SOCKET
-  };
+      // This is the IPv6 socket. It stalls, but presents one failed connection
+      // attempt on GetConnectionAttempts.
+      MockTransportClientSocketFactory::MOCK_STALLED_FAILING_CLIENT_SOCKET,
+      // This is the IPv4 socket.
+      MockTransportClientSocketFactory::MOCK_PENDING_CLIENT_SOCKET};
 
   client_socket_factory_.set_client_socket_types(case_types, 2);
 
@@ -856,6 +872,14 @@ TEST_F(TransportClientSocketPoolTest, IPv6FallbackSocketIPv4FinishesFirst) {
   IPEndPoint endpoint;
   handle.socket()->GetLocalAddress(&endpoint);
   EXPECT_EQ(kIPv4AddressSize, endpoint.address().size());
+
+  // Check that the failed connection attempt on the main socket is collected.
+  ConnectionAttempts attempts;
+  handle.socket()->GetConnectionAttempts(&attempts);
+  ASSERT_EQ(1u, attempts.size());
+  EXPECT_EQ(ERR_CONNECTION_FAILED, attempts[0].result);
+  EXPECT_EQ(kIPv6AddressSize, attempts[0].endpoint.address().size());
+
   EXPECT_EQ(2, client_socket_factory_.allocation_count());
 }
 
@@ -872,11 +896,11 @@ TEST_F(TransportClientSocketPoolTest, IPv6FallbackSocketIPv6FinishesFirst) {
                                  NULL);
 
   MockTransportClientSocketFactory::ClientSocketType case_types[] = {
-    // This is the IPv6 socket.
-    MockTransportClientSocketFactory::MOCK_DELAYED_CLIENT_SOCKET,
-    // This is the IPv4 socket.
-    MockTransportClientSocketFactory::MOCK_STALLED_CLIENT_SOCKET
-  };
+      // This is the IPv6 socket.
+      MockTransportClientSocketFactory::MOCK_DELAYED_CLIENT_SOCKET,
+      // This is the IPv4 socket. It stalls, but presents one failed connection
+      // attempt on GetConnectionATtempts.
+      MockTransportClientSocketFactory::MOCK_STALLED_FAILING_CLIENT_SOCKET};
 
   client_socket_factory_.set_client_socket_types(case_types, 2);
   client_socket_factory_.set_delay(base::TimeDelta::FromMilliseconds(
@@ -900,6 +924,15 @@ TEST_F(TransportClientSocketPoolTest, IPv6FallbackSocketIPv6FinishesFirst) {
   IPEndPoint endpoint;
   handle.socket()->GetLocalAddress(&endpoint);
   EXPECT_EQ(kIPv6AddressSize, endpoint.address().size());
+
+  // Check that the failed connection attempt on the fallback socket is
+  // collected.
+  ConnectionAttempts attempts;
+  handle.socket()->GetConnectionAttempts(&attempts);
+  ASSERT_EQ(1u, attempts.size());
+  EXPECT_EQ(ERR_CONNECTION_FAILED, attempts[0].result);
+  EXPECT_EQ(kIPv4AddressSize, attempts[0].endpoint.address().size());
+
   EXPECT_EQ(2, client_socket_factory_.allocation_count());
 }
 
@@ -933,6 +966,7 @@ TEST_F(TransportClientSocketPoolTest, IPv6NoIPv4AddressesToFallbackTo) {
   IPEndPoint endpoint;
   handle.socket()->GetLocalAddress(&endpoint);
   EXPECT_EQ(kIPv6AddressSize, endpoint.address().size());
+  EXPECT_EQ(0u, handle.connection_attempts().size());
   EXPECT_EQ(1, client_socket_factory_.allocation_count());
 }
 
@@ -965,6 +999,7 @@ TEST_F(TransportClientSocketPoolTest, IPv4HasNoFallback) {
   IPEndPoint endpoint;
   handle.socket()->GetLocalAddress(&endpoint);
   EXPECT_EQ(kIPv4AddressSize, endpoint.address().size());
+  EXPECT_EQ(0u, handle.connection_attempts().size());
   EXPECT_EQ(1, client_socket_factory_.allocation_count());
 }
 

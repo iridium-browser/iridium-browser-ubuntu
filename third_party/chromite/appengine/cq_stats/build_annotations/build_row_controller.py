@@ -18,12 +18,17 @@ from django.db.models import query
 
 from build_annotations import models as ba_models
 
+# We need to fake out some system modules before importing chromite modules.
+from cq_stats import fake_system_modules  # pylint: disable=unused-import
+from chromite.lib import clactions
+
 
 class BuildRow(collections.MutableMapping):
   """A database "view" that collects all relevant stats about a build."""
 
   def __init__(self, build_entry, build_stage_entries,
-               cl_action_entries, failure_entries, annotations_qs):
+               cl_action_entries, failure_entries, annotations,
+               costly_annotations_qs):
     """Initialize a BuildRow.
 
     Do not use QuerySets as arguments. All query sets must have been evaluated
@@ -62,6 +67,8 @@ class BuildRow(collections.MutableMapping):
       self['weekday'] = None
     self['chromeos_version'] = self.build_entry.full_version
     self['chrome_version'] = self.build_entry.chrome_version
+    self['waterfall'] = self.build_entry.waterfall
+    self['builder_name'] = self.build_entry.builder_name
 
     failed_stages = [x.name for x in build_stage_entries if
                      x.status == x.FAIL]
@@ -72,10 +79,18 @@ class BuildRow(collections.MutableMapping):
         ba_models.ClActionTable.SUBMITTED)
     self['kicked_out_count'] = self._CountCLActions(
         ba_models.ClActionTable.KICKED_OUT)
+    self['annotation_summary'] = self._SummaryAnnotations(annotations)
+    self._costly_annotations_qs = costly_annotations_qs
 
-    # Annotations are treated specially. They are not availabe via the dict API.
-    self.annotations = annotations_qs
-    self['annotation_summary'] = self._SummaryAnnotations()
+  def GetAnnotationsQS(self):
+    """Return the queryset backing annotations.
+
+    Executing this queryset is costly because there is no way to optimize the
+    query execution.
+    Since this is a related_set queryset, that was further filtered, each item
+    in the queryset causes a db hit.
+    """
+    return self._costly_annotations_qs
 
   def __getitem__(self, *args, **kwargs):
     return self._data.__getitem__(*args, **kwargs)
@@ -96,17 +111,20 @@ class BuildRow(collections.MutableMapping):
     actions = [x for x in self._cl_action_entries if x.action == cl_action]
     return len(actions)
 
-  def _SummaryAnnotations(self):
-    if not self.annotations:
+  def _SummaryAnnotations(self, annotations):
+    if not annotations:
       return ''
 
-    result = '%d annotations: ' % len(self.annotations)
+    result = '%d annotations: ' % len(annotations)
     summaries = []
-    for annotation in self.annotations:
+    for annotation in annotations:
       summary = annotation.failure_category
       failure_message = annotation.failure_message
-      if failure_message is not None:
+      blame_url = annotation.blame_url
+      if failure_message:
         summary += '(%s)' % failure_message[:30]
+      elif blame_url:
+        summary += '(%s)' % blame_url[:30]
       summaries.append(summary)
 
     result += '; '.join(summaries)
@@ -169,10 +187,16 @@ class BuildRowController(object):
       failure_entries = []
       for entry in build_stage_entries:
         failure_entries += [x for x in entry.failuretable_set.all()]
-      annotations_qs = build_entry.annotationstable_set.all()
+      # Filter in python, filter'ing the queryset changes the queryset, and we
+      # end up hitting the database again.
+      annotations = [a for a in build_entry.annotationstable_set.all() if
+                     a.deleted == False]
+      costly_annotations_qs = build_entry.annotationstable_set.filter(
+          deleted=False)
 
       build_row = BuildRow(build_entry, build_stage_entries, cl_action_entries,
-                           failure_entries, annotations_qs)
+                           failure_entries, annotations, costly_annotations_qs)
+
       self._build_rows_map[build_entry.id] = build_row
       build_rows.append(build_row)
 
@@ -181,6 +205,68 @@ class BuildRowController(object):
 
     return build_rows
 
+  def GetHandlingTimeHistogram(self, latest_build_id=None,
+                               num_builds=DEFAULT_NUM_BUILDS,
+                               extra_filter_q=None):
+    """Get CL handling time histogram."""
+    # If we're not given any latest_build_id, we fetch the latest builds
+    if latest_build_id is not None:
+      build_qs = ba_models.BuildTable.objects.filter(id__lte=latest_build_id)
+    else:
+      build_qs = ba_models.BuildTable.objects.all()
+
+    if extra_filter_q is not None:
+      build_qs = build_qs.filter(extra_filter_q)
+    build_qs = build_qs.order_by('-id')
+    build_qs = build_qs[:num_builds]
+
+    # Hit the database.
+    build_entries = list(build_qs)
+    claction_qs = ba_models.ClActionTable.objects.select_related('build_id')
+    claction_qs = claction_qs.filter(
+        build_id__in=set(b.id for b in build_entries))
+    # Hit the database.
+    claction_entries = [c for c in claction_qs]
+
+    claction_history = clactions.CLActionHistory(
+        self._JoinBuildTableClActionTable(build_entries, claction_entries))
+    # Convert times seconds -> minutes.
+    return {k: v / 60.0
+            for k, v in claction_history.GetPatchHandlingTimes().iteritems()}
+
+  def _JoinBuildTableClActionTable(self, build_entries, claction_entries):
+    """Perform the join operation in python.
+
+    Args:
+      build_entries: A list of buildTable entries.
+      claction_entries: A list of claction_entries.
+
+    Returns:
+      A list fo claction.CLAction objects created by joining the list of builds
+      and list of claction entries.
+    """
+    claction_entries_by_build_id = {}
+    for entry in claction_entries:
+      entries = claction_entries_by_build_id.setdefault(entry.build_id.id, [])
+      entries.append(entry)
+
+    claction_list = []
+    for build_entry in build_entries:
+      for claction_entry in claction_entries_by_build_id.get(build_entry.id,
+                                                             []):
+        claction_list.append(clactions.CLAction(
+            id=claction_entry.id,
+            build_id=build_entry.id,
+            action=claction_entry.action,
+            reason=claction_entry.reason,
+            build_config=build_entry.build_config,
+            change_number=claction_entry.change_number,
+            patch_number=claction_entry.patch_number,
+            change_source=claction_entry.change_source,
+            timestamp=claction_entry.timestamp))
+
+    return claction_list
+
   ############################################################################
   # GetQ* methods are intended to be used in nifty search expressions to search
   # for builds.
@@ -188,6 +274,11 @@ class BuildRowController(object):
   def GetQNoAnnotations(cls):
     """Return a Q for builds with no annotations yet."""
     return models.Q(annotationstable__isnull=True)
+
+  @classmethod
+  def GetQRestrictToBuildConfig(cls, build_config):
+    """Return a Q for builds with the given build_config."""
+    return models.Q(build_config=build_config)
 
   @property
   def num_builds(self):

@@ -6,6 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/files/file_path.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
 #include "chrome/common/chrome_switches.h"
@@ -70,6 +71,34 @@ SimpleFeature* CreateFeature() {
   return feature;
 }
 
+// Mirrors chrome::VersionInfo for histograms.
+enum ChromeChannelForHistogram {
+  CHANNEL_UNKNOWN,
+  CHANNEL_CANARY,
+  CHANNEL_DEV,
+  CHANNEL_BETA,
+  CHANNEL_STABLE,
+  NUM_CHANNELS_FOR_HISTOGRAM
+};
+
+ChromeChannelForHistogram GetChromeChannelForHistogram(
+    chrome::VersionInfo::Channel channel) {
+  switch (channel) {
+    case chrome::VersionInfo::CHANNEL_UNKNOWN:
+      return CHANNEL_UNKNOWN;
+    case chrome::VersionInfo::CHANNEL_CANARY:
+      return CHANNEL_CANARY;
+    case chrome::VersionInfo::CHANNEL_DEV:
+      return CHANNEL_DEV;
+    case chrome::VersionInfo::CHANNEL_BETA:
+      return CHANNEL_BETA;
+    case chrome::VersionInfo::CHANNEL_STABLE:
+      return CHANNEL_STABLE;
+  }
+  NOTREACHED() << channel;
+  return CHANNEL_UNKNOWN;
+}
+
 }  // namespace
 
 static base::LazyInstance<ChromeExtensionsClient> g_client =
@@ -103,12 +132,6 @@ void ChromeExtensionsClient::Initialize() {
   // TODO(dmazzoni): remove this once we have an extension API that
   // allows any extension to request read-only access to webui pages.
   scripting_whitelist_.push_back(extension_misc::kChromeVoxExtensionId);
-
-  // Whitelist "Discover DevTools Companion" extension from Google that
-  // needs the ability to script DevTools pages. Companion will assist
-  // online courses and will be needed while the online educational programs
-  // are in place.
-  scripting_whitelist_.push_back("angkfkebojeancgemegoedelbnjgcgme");
 }
 
 const PermissionMessageProvider&
@@ -305,8 +328,16 @@ void ChromeExtensionsClient::RegisterAPISchemaResources(
 }
 
 bool ChromeExtensionsClient::ShouldSuppressFatalErrors() const {
-  // Suppress fatal on all release branches.
-  return GetCurrentChannel() > chrome::VersionInfo::CHANNEL_CANARY;
+  // Suppress fatal everywhere until the cause of bugs like http://crbug/471599
+  // are fixed. This would typically be:
+  // return GetCurrentChannel() > chrome::VersionInfo::CHANNEL_DEV;
+  return true;
+}
+
+void ChromeExtensionsClient::RecordDidSuppressFatalError() {
+  UMA_HISTOGRAM_ENUMERATION("Extensions.DidSuppressJavaScriptException",
+                            GetChromeChannelForHistogram(GetCurrentChannel()),
+                            NUM_CHANNELS_FOR_HISTOGRAM);
 }
 
 std::string ChromeExtensionsClient::GetWebstoreBaseURL() const {

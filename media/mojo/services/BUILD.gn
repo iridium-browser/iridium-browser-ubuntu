@@ -33,7 +33,7 @@ source_set("converters") {
     "//mojo/converters/geometry",
     "//mojo/environment:chromium",
     "//third_party/mojo/src/mojo/public/c/system:for_component",
-    "//third_party/mojo_services/src/geometry/public/interfaces",
+    "//ui/mojo/geometry:interfaces",
   ]
 }
 
@@ -43,9 +43,9 @@ source_set("cdm_proxy") {
     "//base",
     "//media",
     "//media/mojo/interfaces",
+    "//mojo/application/public/interfaces",
     "//mojo/common",
     "//mojo/environment:chromium",
-    "//third_party/mojo/src/mojo/public/interfaces/application",
     "//third_party/mojo/src/mojo/public/c/system:for_component",
   ]
 
@@ -62,9 +62,9 @@ source_set("cdm_service") {
     "//base",
     "//media",
     "//media/mojo/interfaces",
+    "//mojo/application/public/interfaces",
     "//mojo/common",
     "//mojo/environment:chromium",
-    "//third_party/mojo/src/mojo/public/interfaces/application",
     "//third_party/mojo/src/mojo/public/c/system:for_component",
   ]
 
@@ -97,10 +97,10 @@ source_set("renderer_proxy") {
     "//base",
     "//media",
     "//media/mojo/interfaces",
+    "//mojo/application/public/interfaces",
     "//mojo/common",
     "//mojo/environment:chromium",
     "//third_party/mojo/src/mojo/public/c/system:for_component",
-    "//third_party/mojo/src/mojo/public/interfaces/application",
   ]
 }
 

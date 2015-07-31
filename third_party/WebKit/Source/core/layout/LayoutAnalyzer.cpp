@@ -6,6 +6,7 @@
 #include "core/layout/LayoutAnalyzer.h"
 
 #include "core/frame/FrameView.h"
+#include "core/layout/LayoutBlock.h"
 #include "core/layout/LayoutObject.h"
 #include "core/layout/LayoutText.h"
 #include "platform/TracedValue.h"
@@ -16,38 +17,47 @@ LayoutAnalyzer::Scope::Scope(const LayoutObject& o)
     : m_layoutObject(o)
     , m_analyzer(o.frameView()->layoutAnalyzer())
 {
-    if (UNLIKELY(m_analyzer != nullptr))
+    if (m_analyzer)
         m_analyzer->push(o);
 }
 
 LayoutAnalyzer::Scope::~Scope()
 {
-    if (UNLIKELY(m_analyzer != nullptr))
+    if (m_analyzer)
         m_analyzer->pop(m_layoutObject);
+}
+
+LayoutAnalyzer::BlockScope::BlockScope(const LayoutBlock& block)
+    : m_block(block)
+    , m_width(block.frameRect().width())
+    , m_height(block.frameRect().height())
+{
+}
+
+LayoutAnalyzer::BlockScope::~BlockScope()
+{
+    LayoutAnalyzer* analyzer = m_block.frameView()->layoutAnalyzer();
+    if (!analyzer)
+        return;
+    bool changed = false;
+    if (m_width != m_block.frameRect().width()) {
+        analyzer->increment(LayoutBlockWidthChanged);
+        changed = true;
+    }
+    if (m_height != m_block.frameRect().height()) {
+        analyzer->increment(LayoutBlockHeightChanged);
+        changed = true;
+    }
+    analyzer->increment(changed ? LayoutBlockSizeChanged : LayoutBlockSizeDidNotChange);
 }
 
 void LayoutAnalyzer::reset()
 {
-    m_counters.resize(NumCounters);
-    m_counters[LayoutBlockRectangleChanged] = 0;
-    m_counters[LayoutBlockRectangleDidNotChange] = 0;
-    m_counters[LayoutObjectsThatSpecifyColumns] = 0;
-    m_counters[LayoutAnalyzerStackMaximumDepth] = 0;
-    m_counters[LayoutObjectsThatAreFloating] = 0;
-    m_counters[LayoutObjectsThatHaveALayer] = 0;
-    m_counters[LayoutInlineObjectsThatAlwaysCreateLineBoxes] = 0;
-    m_counters[LayoutObjectsThatHadNeverHadLayout] = 0;
-    m_counters[LayoutObjectsThatAreOutOfFlowPositioned] = 0;
-    m_counters[LayoutObjectsThatNeedPositionedMovementLayout] = 0;
-    m_counters[PerformLayoutRootLayoutObjects] = 0;
-    m_counters[LayoutObjectsThatNeedLayoutForThemselves] = 0;
-    m_counters[LayoutObjectsThatNeedSimplifiedLayout] = 0;
-    m_counters[LayoutObjectsThatAreTableCells] = 0;
-    m_counters[LayoutObjectsThatAreTextAndCanNotUseTheSimpleFontCodePath] = 0;
-    m_counters[CharactersInLayoutObjectsThatAreTextAndCanNotUseTheSimpleFontCodePath] = 0;
-    m_counters[LayoutObjectsThatAreTextAndCanUseTheSimpleFontCodePath] = 0;
-    m_counters[CharactersInLayoutObjectsThatAreTextAndCanUseTheSimpleFontCodePath] = 0;
-    m_counters[TotalLayoutObjectsThatWereLaidOut] = 0;
+    m_startMs = currentTimeMS();
+    m_depth = 0;
+    for (size_t i = 0; i < NumCounters; ++i) {
+        m_counters[i] = 0;
+    }
 }
 
 void LayoutAnalyzer::push(const LayoutObject& o)
@@ -82,37 +92,17 @@ void LayoutAnalyzer::push(const LayoutObject& o)
         }
     }
 
-    // This might be a root in a subtree layout, in which case the LayoutObject
-    // has a parent but the stack is empty. If a LayoutObject subclass forgets
-    // to call push() and is a root in a subtree layout, then this
-    // assert would only fail if that LayoutObject instance has any children
-    // that need layout and do call push().
-    // LayoutBlock::layoutPositionedObjects() hoists positioned descendants.
-    // LayoutBlockFlow::layoutInlineChildren() walks through inlines.
-    // LayoutTableSection::layoutRows() walks through rows.
-    if (!o.isPositioned()
-        && !o.isTableCell()
-        && !o.isSVGResourceContainer()
-        && (m_stack.size() != 0)
-        && !(o.parent()->childrenInline()
-            && (o.isReplaced() || o.isFloating() || o.isOutOfFlowPositioned()))) {
-        ASSERT(o.parent() == m_stack.peek());
-    }
-    m_stack.push(&o);
+    ++m_depth;
 
-    // This refers to LayoutAnalyzer depth, not layout tree depth or DOM tree
-    // depth. LayoutAnalyzer depth is generally closer to C++ stack recursion
-    // depth. See above exceptions for when LayoutAnalyzer depth != layout tree
-    // depth.
-    if (m_stack.size() > m_counters[LayoutAnalyzerStackMaximumDepth])
-        m_counters[LayoutAnalyzerStackMaximumDepth] = m_stack.size();
-
+    // This refers to LayoutAnalyzer depth, which is generally closer to C++
+    // stack recursion depth, not layout tree depth or DOM tree depth.
+    m_counters[LayoutAnalyzerStackMaximumDepth] = max(m_counters[LayoutAnalyzerStackMaximumDepth], m_depth);
 }
 
 void LayoutAnalyzer::pop(const LayoutObject& o)
 {
-    ASSERT(m_stack.peek() == &o);
-    m_stack.pop();
+    ASSERT(m_depth > 0);
+    --m_depth;
 }
 
 PassRefPtr<TracedValue> LayoutAnalyzer::toTracedValue()
@@ -128,8 +118,10 @@ PassRefPtr<TracedValue> LayoutAnalyzer::toTracedValue()
 const char* LayoutAnalyzer::nameForCounter(Counter counter) const
 {
     switch (counter) {
-    case LayoutBlockRectangleChanged: return "LayoutBlockRectangleChanged";
-    case LayoutBlockRectangleDidNotChange: return "LayoutBlockRectangleDidNotChange";
+    case LayoutBlockWidthChanged: return "LayoutBlockWidthChanged";
+    case LayoutBlockHeightChanged: return "LayoutBlockHeightChanged";
+    case LayoutBlockSizeChanged: return "LayoutBlockSizeChanged";
+    case LayoutBlockSizeDidNotChange: return "LayoutBlockSizeDidNotChange";
     case LayoutObjectsThatSpecifyColumns: return "LayoutObjectsThatSpecifyColumns";
     case LayoutAnalyzerStackMaximumDepth: return "LayoutAnalyzerStackMaximumDepth";
     case LayoutObjectsThatAreFloating: return "LayoutObjectsThatAreFloating";

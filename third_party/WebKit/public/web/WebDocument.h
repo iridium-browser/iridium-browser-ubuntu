@@ -76,6 +76,7 @@ public:
     BLINK_EXPORT WebURL url() const;
     // Note: Security checks should use the securityOrigin(), not url().
     BLINK_EXPORT WebSecurityOrigin securityOrigin() const;
+    BLINK_EXPORT bool isPrivilegedContext(WebString& errorMessage) const;
 
     BLINK_EXPORT WebString encoding() const;
     BLINK_EXPORT WebString contentLanguage() const;
@@ -100,6 +101,7 @@ public:
     BLINK_EXPORT WebElement body() const;
     BLINK_EXPORT WebElement head();
     BLINK_EXPORT WebString title() const;
+    BLINK_EXPORT WebString contentAsTextForTesting() const;
     BLINK_EXPORT WebElementCollection all();
     BLINK_EXPORT void forms(WebVector<WebFormElement>&) const;
     BLINK_EXPORT void images(WebVector<WebElement>&);

@@ -14,8 +14,8 @@
 #include "content/renderer/webpublicsuffixlist_impl.h"
 #include "device/vibration/vibration_manager.mojom.h"
 #include "third_party/WebKit/public/platform/WebGraphicsContext3D.h"
-#include "third_party/WebKit/public/platform/WebIDBFactory.h"
 #include "third_party/WebKit/public/platform/WebScreenOrientationType.h"
+#include "third_party/WebKit/public/platform/modules/indexeddb/WebIDBFactory.h"
 
 namespace base {
 class MessageLoopProxy;
@@ -37,6 +37,11 @@ class WebGraphicsContext3DProvider;
 class WebServiceWorkerCacheStorage;
 }
 
+namespace scheduler {
+class RendererScheduler;
+class WebThreadImplForRendererScheduler;
+}
+
 namespace content {
 class BatteryStatusDispatcher;
 class DeviceLightEventPump;
@@ -45,18 +50,16 @@ class DeviceOrientationEventPump;
 class PlatformEventObserverBase;
 class QuotaMessageFilter;
 class RendererClipboardDelegate;
-class RendererScheduler;
 class RenderView;
 class ThreadSafeSender;
 class WebClipboardImpl;
 class WebDatabaseObserverImpl;
 class WebFileSystemImpl;
-class WebThreadImplForScheduler;
-class WebSchedulerImpl;
 
 class CONTENT_EXPORT RendererBlinkPlatformImpl : public BlinkPlatformImpl {
  public:
-  explicit RendererBlinkPlatformImpl(RendererScheduler* renderer_scheduler);
+  explicit RendererBlinkPlatformImpl(
+      scheduler::RendererScheduler* renderer_scheduler);
   virtual ~RendererBlinkPlatformImpl();
 
   void set_plugin_refresh_allowed(bool plugin_refresh_allowed) {
@@ -92,6 +95,8 @@ class CONTENT_EXPORT RendererBlinkPlatformImpl : public BlinkPlatformImpl {
       const blink::WebString& vfs_file_name);
   virtual long long databaseGetSpaceAvailableForOrigin(
       const blink::WebString& origin_identifier);
+  virtual bool databaseSetFileSize(
+      const blink::WebString& vfs_file_name, long long size);
   virtual blink::WebString signedPublicKeyAndChallengeString(
       unsigned key_size_index,
       const blink::WebString& challenge,
@@ -155,8 +160,9 @@ class CONTENT_EXPORT RendererBlinkPlatformImpl : public BlinkPlatformImpl {
       blink::WebStorageQuotaCallbacks);
   virtual void vibrate(unsigned int milliseconds);
   virtual void cancelVibration();
-  virtual blink::WebScheduler* scheduler();
   virtual blink::WebThread* currentThread();
+  virtual void recordRappor(const char* metric, const blink::WebString& sample);
+  virtual void recordRapporURL(const char* metric, const blink::WebURL& url);
 
   // Set the PlatformEventObserverBase in |platform_event_observers_| associated
   // with |type| to |observer|. If there was already an observer associated to
@@ -206,8 +212,7 @@ class CONTENT_EXPORT RendererBlinkPlatformImpl : public BlinkPlatformImpl {
   void SendFakeDeviceEventDataForTesting(blink::WebPlatformEventType type);
   device::VibrationManagerPtr& GetConnectedVibrationManagerService();
 
-  scoped_ptr<WebSchedulerImpl> web_scheduler_;
-  scoped_ptr<WebThreadImplForScheduler> main_thread_;
+  scoped_ptr<scheduler::WebThreadImplForRendererScheduler> main_thread_;
 
   scoped_ptr<RendererClipboardDelegate> clipboard_delegate_;
   scoped_ptr<WebClipboardImpl> clipboard_;

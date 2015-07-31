@@ -4,19 +4,14 @@
 
 #include "media/midi/midi_manager_usb.h"
 
-#include "base/callback.h"
 #include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/stringprintf.h"
 #include "media/midi/midi_scheduler.h"
 #include "media/midi/usb_midi_descriptor_parser.h"
-#include "media/midi/usb_midi_device.h"
-#include "media/midi/usb_midi_input_stream.h"
-#include "media/midi/usb_midi_jack.h"
-#include "media/midi/usb_midi_output_stream.h"
 
 namespace media {
+namespace midi {
 
 MidiManagerUsb::MidiManagerUsb(scoped_ptr<UsbMidiDevice::Factory> factory)
     : device_factory_(factory.Pass()) {
@@ -33,7 +28,7 @@ void MidiManagerUsb::StartInitialization() {
 void MidiManagerUsb::Initialize(
     base::Callback<void(MidiResult result)> callback) {
   initialize_callback_ = callback;
-  scheduler_.reset(new MidiScheduler);
+  scheduler_.reset(new MidiScheduler(this));
   // This is safe because EnumerateDevices cancels the operation on destruction.
   device_factory_->EnumerateDevices(
       this,
@@ -74,8 +69,8 @@ void MidiManagerUsb::ReceiveUsbMidiData(UsbMidiDevice* device,
 }
 
 void MidiManagerUsb::OnDeviceAttached(scoped_ptr<UsbMidiDevice> device) {
-  int device_id = devices_.size();
-  devices_.push_back(device.release());
+  int device_id = static_cast<int>(devices_.size());
+  devices_.push_back(device.Pass());
   AddPorts(devices_.back(), device_id);
 }
 
@@ -86,13 +81,13 @@ void MidiManagerUsb::OnDeviceDetached(size_t index) {
   UsbMidiDevice* device = devices_[index];
   for (size_t i = 0; i < output_streams_.size(); ++i) {
     if (output_streams_[i]->jack().device == device) {
-      SetOutputPortState(i, MIDI_PORT_DISCONNECTED);
+      SetOutputPortState(static_cast<uint32>(i), MIDI_PORT_DISCONNECTED);
     }
   }
   const std::vector<UsbMidiJack>& input_jacks = input_stream_->jacks();
   for (size_t i = 0; i < input_jacks.size(); ++i) {
     if (input_jacks[i].device == device) {
-      SetInputPortState(i, MIDI_PORT_DISCONNECTED);
+      SetInputPortState(static_cast<uint32>(i), MIDI_PORT_DISCONNECTED);
     }
   }
 }
@@ -101,7 +96,7 @@ void MidiManagerUsb::OnReceivedData(size_t jack_index,
                                     const uint8* data,
                                     size_t size,
                                     base::TimeTicks time) {
-  ReceiveMidiData(jack_index, data, size, time);
+  ReceiveMidiData(static_cast<uint32>(jack_index), data, size, time);
 }
 
 
@@ -114,7 +109,7 @@ void MidiManagerUsb::OnEnumerateDevicesDone(bool result,
   input_stream_.reset(new UsbMidiInputStream(this));
   devices->swap(devices_);
   for (size_t i = 0; i < devices_.size(); ++i) {
-    if (!AddPorts(devices_[i], i)) {
+    if (!AddPorts(devices_[i], static_cast<int>(i))) {
       initialize_callback_.Run(MIDI_INITIALIZATION_ERROR);
       return;
     }
@@ -124,7 +119,7 @@ void MidiManagerUsb::OnEnumerateDevicesDone(bool result,
 
 bool MidiManagerUsb::AddPorts(UsbMidiDevice* device, int device_id) {
   UsbMidiDescriptorParser parser;
-  std::vector<uint8> descriptor = device->GetDescriptor();
+  std::vector<uint8> descriptor = device->GetDescriptors();
   const uint8* data = descriptor.size() > 0 ? &descriptor[0] : NULL;
   std::vector<UsbMidiJack> jacks;
   bool parse_result = parser.Parse(device,
@@ -134,33 +129,29 @@ bool MidiManagerUsb::AddPorts(UsbMidiDevice* device, int device_id) {
   if (!parse_result)
     return false;
 
+  std::string manufacturer(device->GetManufacturer());
+  std::string product_name(device->GetProductName());
+  std::string version(device->GetDeviceVersion());
+
   for (size_t j = 0; j < jacks.size(); ++j) {
+    // Port ID must be unique in a MIDI manager. This ID setting is
+    // sufficiently unique although there is no user-friendly meaning.
+    // TODO(yhirano): Use a hashed string as ID.
+    std::string id(
+        base::StringPrintf("port-%d-%ld", device_id, static_cast<long>(j)));
     if (jacks[j].direction() == UsbMidiJack::DIRECTION_OUT) {
       output_streams_.push_back(new UsbMidiOutputStream(jacks[j]));
-      // TODO(yhirano): Set appropriate properties.
-      // TODO(yhiran): Port ID should contain product ID / vendor ID.
-      // Port ID must be unique in a MIDI manager. This (and the below) ID
-      // setting is sufficiently unique although there is no user-friendly
-      // meaning.
-      MidiPortInfo port;
-      port.state = MIDI_PORT_OPENED;
-      port.id = base::StringPrintf("port-%d-%ld",
-                                   device_id,
-                                   static_cast<long>(j));
-      AddOutputPort(port);
+      AddOutputPort(MidiPortInfo(id, manufacturer, product_name, version,
+                                 MIDI_PORT_OPENED));
     } else {
       DCHECK_EQ(jacks[j].direction(), UsbMidiJack::DIRECTION_IN);
       input_stream_->Add(jacks[j]);
-      // TODO(yhirano): Set appropriate properties.
-      MidiPortInfo port;
-      port.state = MIDI_PORT_OPENED;
-      port.id = base::StringPrintf("port-%d-%ld",
-                                   device_id,
-                                   static_cast<long>(j));
-      AddInputPort(port);
+      AddInputPort(MidiPortInfo(id, manufacturer, product_name, version,
+                                MIDI_PORT_OPENED));
     }
   }
   return true;
 }
 
+}  // namespace midi
 }  // namespace media

@@ -5,15 +5,10 @@
 #ifndef COMPONENTS_DATA_REDUCTION_PROXY_CORE_BROWSER_DATA_REDUCTION_PROXY_CONFIG_TEST_UTILS_H_
 #define COMPONENTS_DATA_REDUCTION_PROXY_CORE_BROWSER_DATA_REDUCTION_PROXY_CONFIG_TEST_UTILS_H_
 
-#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config.h"
 #include "net/base/net_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
-
-namespace base {
-class SingleThreadTaskRunner;
-}
 
 namespace net {
 class NetLog;
@@ -22,7 +17,7 @@ class NetLog;
 namespace data_reduction_proxy {
 
 class DataReductionProxyConfigurator;
-class DataReductionProxyEventStore;
+class DataReductionProxyEventCreator;
 class DataReductionProxyMutableConfigValues;
 class TestDataReductionProxyParams;
 
@@ -36,20 +31,18 @@ class TestDataReductionProxyConfig : public DataReductionProxyConfig {
   TestDataReductionProxyConfig(
       int params_flags,
       unsigned int params_definitions,
-      scoped_refptr<base::SingleThreadTaskRunner> network_task_runner,
       net::NetLog* net_log,
       DataReductionProxyConfigurator* configurator,
-      DataReductionProxyEventStore* event_store);
+      DataReductionProxyEventCreator* event_creator);
 
   // Creates a |TestDataReductionProxyConfig| with the provided |config_values|.
   // This permits any DataReductionProxyConfigValues to be used (such as
   // DataReductionProxyParams or DataReductionProxyMutableConfigValues).
   TestDataReductionProxyConfig(
       scoped_ptr<DataReductionProxyConfigValues> config_values,
-      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
       net::NetLog* net_log,
       DataReductionProxyConfigurator* configurator,
-      DataReductionProxyEventStore* event_store);
+      DataReductionProxyEventCreator* event_creator);
 
   ~TestDataReductionProxyConfig() override;
 
@@ -72,7 +65,7 @@ class TestDataReductionProxyConfig : public DataReductionProxyConfig {
   // Allows tests to set the internal state.
   void SetStateForTest(bool enabled_by_user,
                        bool alternative_enabled_by_user,
-                       bool restricted_by_carrier);
+                       bool secure_proxy_enabled);
 
   net::NetworkInterfaceList* interfaces() {
     return network_interfaces_.get();
@@ -89,10 +82,9 @@ class MockDataReductionProxyConfig : public TestDataReductionProxyConfig {
   // Creates a |MockDataReductionProxyConfig|.
   MockDataReductionProxyConfig(
       scoped_ptr<DataReductionProxyConfigValues> config_values,
-      scoped_refptr<base::SingleThreadTaskRunner> network_task_runner,
       net::NetLog* net_log,
       DataReductionProxyConfigurator* configurator,
-      DataReductionProxyEventStore* event_store);
+      DataReductionProxyEventCreator* event_creator);
   ~MockDataReductionProxyConfig();
 
   MOCK_METHOD1(RecordSecureProxyCheckFetchResult,
@@ -116,18 +108,18 @@ class MockDataReductionProxyConfig : public TestDataReductionProxyConfig {
                      bool(const net::URLRequest& request,
                           const net::ProxyConfig& data_reduction_proxy_config,
                           base::TimeDelta* min_retry_delay));
+  MOCK_METHOD2(SecureProxyCheck,
+               void(const GURL& secure_proxy_check_url,
+                    FetcherResponseCallback fetcher_callback));
+  MOCK_CONST_METHOD0(IsNetworkBad, bool());
+  MOCK_CONST_METHOD0(IsIncludedInLoFiEnabledFieldTrial, bool());
+  MOCK_CONST_METHOD0(IsIncludedInLoFiControlFieldTrial, bool());
 
   // UpdateConfigurator should always call LogProxyState exactly once.
   void UpdateConfigurator(bool enabled,
                           bool alternative_enabled,
                           bool restricted,
                           bool at_startup) override;
-
-  // HandleSecureProxyCheckResponse should always call
-  // RecordSecureProxyCheckFetchResult exactly once.
-  void HandleSecureProxyCheckResponse(
-      const std::string& response,
-      const net::URLRequestStatus& status) override;
 };
 
 }  // namespace data_reduction_proxy

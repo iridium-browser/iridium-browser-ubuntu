@@ -69,16 +69,15 @@ PushMessagingService* LayoutTestBrowserContext::GetPushMessagingService() {
   return push_messaging_service_.get();
 }
 
-LayoutTestPushMessagingService*
-LayoutTestBrowserContext::GetLayoutTestPushMessagingService() {
-  return static_cast<LayoutTestPushMessagingService*>(
-      GetPushMessagingService());
-}
-
 PermissionManager* LayoutTestBrowserContext::GetPermissionManager() {
   if (!permission_manager_.get())
     permission_manager_.reset(new LayoutTestPermissionManager());
   return permission_manager_.get();
+}
+
+LayoutTestPermissionManager*
+LayoutTestBrowserContext::GetLayoutTestPermissionManager() {
+  return static_cast<LayoutTestPermissionManager*>(GetPermissionManager());
 }
 
 }  // namespace content

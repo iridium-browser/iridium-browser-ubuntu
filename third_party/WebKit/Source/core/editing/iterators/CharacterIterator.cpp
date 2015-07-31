@@ -473,7 +473,11 @@ inline bool SearchBuffer::isWordStartMatch(size_t start, size_t length) const
     size_t wordBreakSearchStart = start + length;
     while (wordBreakSearchStart > start)
         wordBreakSearchStart = findNextWordFromIndex(m_buffer.data(), m_buffer.size(), wordBreakSearchStart, false /* backwards */);
-    return wordBreakSearchStart == start;
+    if (wordBreakSearchStart != start)
+        return false;
+    if (m_options & WholeWord)
+        return static_cast<int>(start + length) == findWordEndBoundary(m_buffer.data(), m_buffer.size(), wordBreakSearchStart);
+    return true;
 }
 
 inline size_t SearchBuffer::search(size_t& start)
@@ -642,7 +646,7 @@ void findPlainText(const Position& inputStart, const Position& inputEnd, const S
 {
     resultStart.clear();
     resultEnd.clear();
-    // CharacterIterator requires renderers to be up-to-date.
+    // CharacterIterator requires layoutObjects to be up-to-date.
     if (!inputStart.inDocument())
         return;
     ASSERT(inputStart.document() == inputEnd.document());

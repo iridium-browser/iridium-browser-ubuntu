@@ -20,6 +20,7 @@
 #include "content/browser/compositor/resize_lock.h"
 #include "content/browser/compositor/test/no_transport_image_transport_factory.h"
 #include "content/browser/frame_host/render_widget_host_view_guest.h"
+#include "content/browser/renderer_host/input/input_router.h"
 #include "content/browser/renderer_host/input/web_input_event_util.h"
 #include "content/browser/renderer_host/overscroll_controller.h"
 #include "content/browser/renderer_host/overscroll_controller_delegate.h"
@@ -59,8 +60,8 @@
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/gesture_detection/gesture_configuration.h"
-#include "ui/events/keycodes/dom3/dom_code.h"
-#include "ui/events/keycodes/dom4/keycode_converter.h"
+#include "ui/events/keycodes/dom/dom_code.h"
+#include "ui/events/keycodes/dom/keycode_converter.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/wm/core/default_activation_client.h"
 #include "ui/wm/core/default_screen_position_client.h"
@@ -223,8 +224,10 @@ class FakeWindowEventDispatcher : public aura::WindowEventDispatcher {
     processed_touch_event_count_++;
   }
 
-  size_t processed_touch_event_count() {
-    return processed_touch_event_count_;
+  size_t GetAndResetProcessedTouchEventCount() {
+    size_t count = processed_touch_event_count_;
+    processed_touch_event_count_ = 0;
+    return count;
   }
 
  private:
@@ -1121,6 +1124,88 @@ TEST_F(RenderWidgetHostViewAuraTest, TouchEventState) {
       base::Time::NowFromSystemTime() - base::Time());
   view_->OnTouchEvent(&release2);
   EXPECT_TRUE(press.synchronous_handling_disabled());
+  EXPECT_EQ(nullptr, view_->touch_event_);
+}
+
+// Checks that touch-event state is maintained correctly for multiple touch
+// points.
+TEST_F(RenderWidgetHostViewAuraTest, MultiTouchPointsStates) {
+  view_->InitAsFullscreen(parent_view_);
+  view_->Show();
+  view_->UseFakeDispatcher();
+  GetSentMessageCountAndResetSink();
+
+  ui::TouchEvent press0(ui::ET_TOUCH_PRESSED, gfx::Point(30, 30), 0,
+                        ui::EventTimeForNow());
+
+  view_->OnTouchEvent(&press0);
+  SendInputEventACK(blink::WebInputEvent::TouchStart,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
+  EXPECT_EQ(blink::WebInputEvent::TouchStart, view_->touch_event_->type);
+  EXPECT_EQ(1U, view_->touch_event_->touchesLength);
+  EXPECT_EQ(1U, view_->dispatcher_->GetAndResetProcessedTouchEventCount());
+
+  ui::TouchEvent move0(ui::ET_TOUCH_MOVED, gfx::Point(20, 20), 0,
+                       ui::EventTimeForNow());
+
+  view_->OnTouchEvent(&move0);
+  SendInputEventACK(blink::WebInputEvent::TouchMove,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
+  EXPECT_EQ(blink::WebInputEvent::TouchMove, view_->touch_event_->type);
+  EXPECT_EQ(1U, view_->touch_event_->touchesLength);
+  EXPECT_EQ(1U, view_->dispatcher_->GetAndResetProcessedTouchEventCount());
+
+  // For the second touchstart, only the state of the second touch point is
+  // StatePressed, the state of the first touch point is StateStationary.
+  ui::TouchEvent press1(ui::ET_TOUCH_PRESSED, gfx::Point(10, 10), 1,
+                        ui::EventTimeForNow());
+
+  view_->OnTouchEvent(&press1);
+  SendInputEventACK(blink::WebInputEvent::TouchStart,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
+  EXPECT_EQ(blink::WebInputEvent::TouchStart, view_->touch_event_->type);
+  EXPECT_EQ(2U, view_->touch_event_->touchesLength);
+  EXPECT_EQ(1U, view_->dispatcher_->GetAndResetProcessedTouchEventCount());
+
+  // For the touchmove of second point, the state of the second touch point is
+  // StateMoved, the state of the first touch point is StateStationary.
+  ui::TouchEvent move1(ui::ET_TOUCH_MOVED, gfx::Point(30, 30), 1,
+                       ui::EventTimeForNow());
+
+  view_->OnTouchEvent(&move1);
+  SendInputEventACK(blink::WebInputEvent::TouchMove,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
+  EXPECT_EQ(blink::WebInputEvent::TouchMove, view_->touch_event_->type);
+  EXPECT_EQ(2U, view_->touch_event_->touchesLength);
+  EXPECT_EQ(1U, view_->dispatcher_->GetAndResetProcessedTouchEventCount());
+
+  // For the touchmove of first point, the state of the first touch point is
+  // StateMoved, the state of the second touch point is StateStationary.
+  ui::TouchEvent move2(ui::ET_TOUCH_MOVED, gfx::Point(10, 10), 0,
+                       ui::EventTimeForNow());
+
+  view_->OnTouchEvent(&move2);
+  SendInputEventACK(blink::WebInputEvent::TouchMove,
+                    INPUT_EVENT_ACK_STATE_CONSUMED);
+  EXPECT_EQ(blink::WebInputEvent::TouchMove, view_->touch_event_->type);
+  EXPECT_EQ(2U, view_->touch_event_->touchesLength);
+  EXPECT_EQ(1U, view_->dispatcher_->GetAndResetProcessedTouchEventCount());
+
+  ui::TouchEvent cancel0(ui::ET_TOUCH_CANCELLED, gfx::Point(10, 10), 0,
+                         ui::EventTimeForNow());
+
+  // For the touchcancel, only the state of the current touch point is
+  // StateCancelled, the state of the other touch point is StateStationary.
+  view_->OnTouchEvent(&cancel0);
+  EXPECT_EQ(blink::WebInputEvent::TouchCancel, view_-> touch_event_->type);
+  EXPECT_EQ(1U, view_->touch_event_->touchesLength);
+  EXPECT_EQ(1U, view_->dispatcher_->GetAndResetProcessedTouchEventCount());
+
+  ui::TouchEvent cancel1(ui::ET_TOUCH_CANCELLED, gfx::Point(30, 30), 1,
+                         ui::EventTimeForNow());
+
+  view_->OnTouchEvent(&cancel1);
+  EXPECT_EQ(1U, view_->dispatcher_->GetAndResetProcessedTouchEventCount());
   EXPECT_EQ(nullptr, view_->touch_event_);
 }
 
@@ -3122,6 +3207,10 @@ TEST_F(RenderWidgetHostViewAuraOverscrollTest,
   EXPECT_TRUE(ScrollStateIsUnknown());
   EXPECT_EQ(0U, sink_->message_count());
 
+  // Dropped flings should neither propagate *nor* indicate that they were
+  // consumed and have triggered a fling animation (as tracked by the router).
+  EXPECT_FALSE(parent_host_->input_router()->HasPendingEvents());
+
   SimulateWheelEvent(-5, 0, 0, true);    // sent directly
   SimulateWheelEvent(-60, 0, 0, true);   // enqueued
   SimulateWheelEvent(-100, 0, 0, true);  // coalesced into previous event
@@ -3146,6 +3235,7 @@ TEST_F(RenderWidgetHostViewAuraOverscrollTest,
   EXPECT_EQ(OVERSCROLL_WEST, overscroll_delegate()->completed_mode());
   EXPECT_TRUE(ScrollStateIsUnknown());
   EXPECT_EQ(0U, sink_->message_count());
+  EXPECT_FALSE(parent_host_->input_router()->HasPendingEvents());
 }
 
 TEST_F(RenderWidgetHostViewAuraOverscrollTest, OverscrollResetsOnBlur) {
@@ -3321,7 +3411,70 @@ TEST_F(RenderWidgetHostViewAuraTest, CorrectNumberOfAcksAreDispatched) {
   SendInputEventACK(blink::WebInputEvent::TouchStart,
                     INPUT_EVENT_ACK_STATE_CONSUMED);
 
-  EXPECT_EQ(2U, view_->dispatcher_->processed_touch_event_count());
+  EXPECT_EQ(2U, view_->dispatcher_->GetAndResetProcessedTouchEventCount());
+}
+
+// Tests that the scroll deltas stored within the overscroll controller get
+// reset at the end of the overscroll gesture even if the overscroll threshold
+// isn't surpassed and the overscroll mode stays OVERSCROLL_NONE.
+TEST_F(RenderWidgetHostViewAuraOverscrollTest, ScrollDeltasResetOnEnd) {
+  SetUpOverscrollEnvironment();
+  // Wheel event scroll ending with mouse move.
+  SimulateWheelEvent(-30, -10, 0, true);    // sent directly
+  SendInputEventACK(WebInputEvent::MouseWheel,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
+  EXPECT_EQ(OVERSCROLL_NONE, overscroll_mode());
+  EXPECT_EQ(-30.f, overscroll_delta_x());
+  EXPECT_EQ(-10.f, overscroll_delta_y());
+  SimulateMouseMove(5, 10, 0);
+  EXPECT_EQ(0.f, overscroll_delta_x());
+  EXPECT_EQ(0.f, overscroll_delta_y());
+
+  // Scroll gesture.
+  SimulateGestureEvent(WebInputEvent::GestureScrollBegin,
+                       blink::WebGestureDeviceTouchscreen);
+  SimulateGestureScrollUpdateEvent(-30, -5, 0);
+  SendInputEventACK(WebInputEvent::GestureScrollUpdate,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
+  EXPECT_EQ(OVERSCROLL_NONE, overscroll_mode());
+  EXPECT_EQ(-30.f, overscroll_delta_x());
+  EXPECT_EQ(-5.f, overscroll_delta_y());
+  SimulateGestureEvent(WebInputEvent::GestureScrollEnd,
+                       blink::WebGestureDeviceTouchscreen);
+  EXPECT_EQ(0.f, overscroll_delta_x());
+  EXPECT_EQ(0.f, overscroll_delta_y());
+
+  // Wheel event scroll ending with a fling.
+  SimulateWheelEvent(5, 0, 0, true);
+  SendInputEventACK(WebInputEvent::MouseWheel,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
+  SimulateWheelEvent(10, -5, 0, true);
+  SendInputEventACK(WebInputEvent::MouseWheel,
+                    INPUT_EVENT_ACK_STATE_NOT_CONSUMED);
+  EXPECT_EQ(OVERSCROLL_NONE, overscroll_mode());
+  EXPECT_EQ(15.f, overscroll_delta_x());
+  EXPECT_EQ(-5.f, overscroll_delta_y());
+  SimulateGestureFlingStartEvent(0.f, 0.1f, blink::WebGestureDeviceTouchpad);
+  EXPECT_EQ(0.f, overscroll_delta_x());
+  EXPECT_EQ(0.f, overscroll_delta_y());
+}
+
+// Tests the RenderWidgetHostImpl sends the correct surface ID namespace to
+// the renderer process.
+TEST_F(RenderWidgetHostViewAuraTest, SurfaceIdNamespaceInitialized) {
+  gfx::Size size(5, 5);
+
+  const IPC::Message* msg =
+      sink_->GetUniqueMessageMatching(ViewMsg_SetSurfaceIdNamespace::ID);
+  EXPECT_TRUE(msg);
+  ViewMsg_SetSurfaceIdNamespace::Param params;
+  ViewMsg_SetSurfaceIdNamespace::Read(msg, &params);
+  view_->InitAsChild(NULL);
+  view_->Show();
+  view_->SetSize(size);
+  view_->OnSwapCompositorFrame(0,
+                               MakeDelegatedFrame(1.f, size, gfx::Rect(size)));
+  EXPECT_EQ(view_->GetSurfaceIdNamespace(), get<0>(params));
 }
 
 }  // namespace content

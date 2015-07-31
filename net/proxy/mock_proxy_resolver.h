@@ -28,11 +28,11 @@ class MockAsyncProxyResolverBase : public ProxyResolver {
     Request(MockAsyncProxyResolverBase* resolver,
             const GURL& url,
             ProxyInfo* results,
-            const net::CompletionCallback& callback);
+            const CompletionCallback& callback);
 
     const GURL& url() const { return url_; }
     ProxyInfo* results() const { return results_; }
-    const net::CompletionCallback& callback() const { return callback_; }
+    const CompletionCallback& callback() const { return callback_; }
 
     void CompleteNow(int rv);
 
@@ -44,7 +44,7 @@ class MockAsyncProxyResolverBase : public ProxyResolver {
     MockAsyncProxyResolverBase* resolver_;
     const GURL url_;
     ProxyInfo* results_;
-    net::CompletionCallback callback_;
+    CompletionCallback callback_;
     base::MessageLoop* origin_loop_;
   };
 
@@ -53,7 +53,7 @@ class MockAsyncProxyResolverBase : public ProxyResolver {
     SetPacScriptRequest(
         MockAsyncProxyResolverBase* resolver,
         const scoped_refptr<ProxyResolverScriptData>& script_data,
-        const net::CompletionCallback& callback);
+        const CompletionCallback& callback);
     ~SetPacScriptRequest();
 
     const ProxyResolverScriptData* script_data() const {
@@ -65,7 +65,7 @@ class MockAsyncProxyResolverBase : public ProxyResolver {
    private:
     MockAsyncProxyResolverBase* resolver_;
     const scoped_refptr<ProxyResolverScriptData> script_data_;
-    net::CompletionCallback callback_;
+    CompletionCallback callback_;
     base::MessageLoop* origin_loop_;
   };
 
@@ -76,13 +76,13 @@ class MockAsyncProxyResolverBase : public ProxyResolver {
   // ProxyResolver implementation.
   int GetProxyForURL(const GURL& url,
                      ProxyInfo* results,
-                     const net::CompletionCallback& callback,
+                     const CompletionCallback& callback,
                      RequestHandle* request_handle,
                      const BoundNetLog& /*net_log*/) override;
   void CancelRequest(RequestHandle request_handle) override;
   LoadState GetLoadState(RequestHandle request_handle) const override;
   int SetPacScript(const scoped_refptr<ProxyResolverScriptData>& script_data,
-                   const net::CompletionCallback& callback) override;
+                   const CompletionCallback& callback) override;
   void CancelSetPacScript() override;
 
   const RequestsList& pending_requests() const {
@@ -124,20 +124,68 @@ class MockAsyncProxyResolverExpectsBytes : public MockAsyncProxyResolverBase {
       : MockAsyncProxyResolverBase(true /*expects_pac_bytes*/) {}
 };
 
-// This factory returns ProxyResolvers that forward all requests to
-// |resolver|. |resolver| must remain so long as any value returned from
-// CreateProxyResolver remains in use.
-class ForwardingProxyResolverFactory : public ProxyResolverFactory {
+// Asynchronous mock proxy resolver factory . All requests complete
+// asynchronously; the user must call Request::CompleteNow() on a pending
+// request to signal it.
+class MockAsyncProxyResolverFactory : public ProxyResolverFactory {
  public:
-  explicit ForwardingProxyResolverFactory(ProxyResolver* resolver);
+  class Request;
+  using RequestsList = std::vector<scoped_refptr<Request>>;
 
-  // ProxyResolverFactory override.
-  scoped_ptr<ProxyResolver> CreateProxyResolver() override;
+  explicit MockAsyncProxyResolverFactory(bool resolvers_expect_pac_bytes);
+  ~MockAsyncProxyResolverFactory() override;
+
+  int CreateProxyResolver(
+      const scoped_refptr<ProxyResolverScriptData>& pac_script,
+      scoped_ptr<ProxyResolver>* resolver,
+      const CompletionCallback& callback,
+      scoped_ptr<ProxyResolverFactory::Request>* request) override;
+
+  const RequestsList& pending_requests() const { return pending_requests_; }
+
+  const RequestsList& cancelled_requests() const { return cancelled_requests_; }
+
+  void RemovePendingRequest(Request* request);
 
  private:
-  ProxyResolver* resolver_;
+  class Job;
+  RequestsList pending_requests_;
+  RequestsList cancelled_requests_;
+};
 
-  DISALLOW_COPY_AND_ASSIGN(ForwardingProxyResolverFactory);
+class MockAsyncProxyResolverFactory::Request
+    : public base::RefCounted<Request> {
+ public:
+  Request(MockAsyncProxyResolverFactory* factory,
+          const scoped_refptr<ProxyResolverScriptData>& script_data,
+          scoped_ptr<ProxyResolver>* resolver,
+          const CompletionCallback& callback);
+
+  const scoped_refptr<ProxyResolverScriptData>& script_data() const {
+    return script_data_;
+  }
+
+  // Completes this request. A ForwardingProxyResolver that forwards to
+  // |resolver| will be returned to the requester. |resolver| must not be
+  // null and must remain as long as the resolver returned by this request
+  // remains in use.
+  void CompleteNowWithForwarder(int rv, ProxyResolver* resolver);
+
+  void CompleteNow(int rv, scoped_ptr<ProxyResolver> resolver);
+
+ private:
+  friend class base::RefCounted<Request>;
+  friend class MockAsyncProxyResolverFactory;
+  friend class MockAsyncProxyResolverFactory::Job;
+
+  ~Request();
+
+  void FactoryDestroyed();
+
+  MockAsyncProxyResolverFactory* factory_;
+  const scoped_refptr<ProxyResolverScriptData> script_data_;
+  scoped_ptr<ProxyResolver>* resolver_;
+  CompletionCallback callback_;
 };
 
 // ForwardingProxyResolver forwards all requests to |impl|. |impl| must remain

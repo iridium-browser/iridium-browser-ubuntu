@@ -16,9 +16,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_android.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
-#include "chrome/browser/undo/bookmark_undo_service.h"
 #include "chrome/browser/undo/bookmark_undo_service_factory.h"
-#include "chrome/browser/undo/undo_manager.h"
 #include "chrome/common/pref_names.h"
 #include "components/bookmarks/browser/bookmark_match.h"
 #include "components/bookmarks/browser/bookmark_model.h"
@@ -27,6 +25,8 @@
 #include "components/bookmarks/common/android/bookmark_type.h"
 #include "components/query_parser/query_parser.h"
 #include "components/signin/core/browser/signin_manager.h"
+#include "components/undo/bookmark_undo_service.h"
+#include "components/undo/undo_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "grit/components_strings.h"
 #include "jni/BookmarksBridge_jni.h"
@@ -66,8 +66,8 @@ class BookmarkTitleComparer {
   bool operator()(const BookmarkNode* lhs, const BookmarkNode* rhs) {
     if (collator_) {
       return base::i18n::CompareString16WithCollator(
-          collator_, bookmarks_bridge_->GetTitle(lhs),
-          bookmarks_bridge_->GetTitle(rhs)) == UCOL_LESS;
+                 *collator_, bookmarks_bridge_->GetTitle(lhs),
+                 bookmarks_bridge_->GetTitle(rhs)) == UCOL_LESS;
     } else {
       return lhs->GetTitle() < rhs->GetTitle();
     }
@@ -548,6 +548,21 @@ void BookmarksBridge::GetBookmarksForFolder(JNIEnv* env,
   }
 }
 
+jint BookmarksBridge::GetBookmarkCountForFolder(JNIEnv* env,
+                                                jobject obj,
+                                                jobject j_folder_id_obj) {
+  DCHECK(IsLoaded());
+  long folder_id = JavaBookmarkIdGetId(env, j_folder_id_obj);
+  int type = JavaBookmarkIdGetType(env, j_folder_id_obj);
+  const BookmarkNode* folder = GetNodeByID(folder_id, type);
+
+  if (!folder || !IsFolderAvailable(folder) || !folder->is_folder()
+      || !IsReachable(folder))
+    return 0;
+
+  return folder->child_count();
+}
+
 void BookmarksBridge::GetCurrentFolderHierarchy(JNIEnv* env,
                                                 jobject obj,
                                                 jobject j_folder_id_obj,
@@ -614,12 +629,10 @@ void BookmarksBridge::DeleteBookmark(JNIEnv* env,
     return;
   }
 
-  if (partner_bookmarks_shim_->IsPartnerBookmark(node)) {
+  if (partner_bookmarks_shim_->IsPartnerBookmark(node))
     partner_bookmarks_shim_->RemoveBookmark(node);
-  } else {
-    const BookmarkNode* parent_node = GetParentNode(node);
-    bookmark_model_->Remove(parent_node, parent_node->GetIndexOf(node));
-  }
+  else
+    bookmark_model_->Remove(node);
 }
 
 void BookmarksBridge::MoveBookmark(JNIEnv* env,

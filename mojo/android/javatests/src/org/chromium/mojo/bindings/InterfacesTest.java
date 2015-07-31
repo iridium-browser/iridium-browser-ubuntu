@@ -16,7 +16,6 @@ import org.chromium.mojo.bindings.test.mojom.sample.Request;
 import org.chromium.mojo.bindings.test.mojom.sample.Response;
 import org.chromium.mojo.system.DataPipe.ConsumerHandle;
 import org.chromium.mojo.system.MessagePipeHandle;
-import org.chromium.mojo.system.MojoException;
 import org.chromium.mojo.system.Pair;
 import org.chromium.mojo.system.impl.CoreImpl;
 
@@ -120,12 +119,12 @@ public class InterfacesTest extends MojoTestCase {
             }
             Response response = new Response();
             response.x = 42;
-
             callback.call(response, "Hello");
         }
 
         @Override
         public void doStuff2(ConsumerHandle pipe, DoStuff2Response callback) {
+            callback.call("World");
         }
 
         @Override
@@ -147,6 +146,22 @@ public class InterfacesTest extends MojoTestCase {
     }
 
     /**
+     * Implementation of DoStuffResponse that keeps track of if the response is called.
+     */
+    public class DoStuffResponseImpl implements Factory.DoStuffResponse {
+        private boolean mResponseCalled = false;
+
+        public boolean wasResponseCalled() {
+            return mResponseCalled;
+        }
+
+        @Override
+        public void call(Response response, String string) {
+            mResponseCalled = true;
+        }
+    }
+
+    /**
      * @see MojoTestCase#tearDown()
      */
     @Override
@@ -160,16 +175,6 @@ public class InterfacesTest extends MojoTestCase {
         super.tearDown();
     }
 
-    private <I extends Interface, P extends Interface.Proxy> P newProxyOverPipe(
-            Interface.Manager<I, P> manager, I impl) {
-        Pair<MessagePipeHandle, MessagePipeHandle> handles =
-                CoreImpl.getInstance().createMessagePipe(null);
-        P proxy = manager.attachProxy(handles.first);
-        mCloseablesToClose.add(proxy);
-        manager.bind(impl, handles.second);
-        return proxy;
-    }
-
     /**
      * Check that the given proxy receives the calls. If |impl| is not null, also check that the
      * calls are forwared to |impl|.
@@ -177,7 +182,7 @@ public class InterfacesTest extends MojoTestCase {
     private void checkProxy(NamedObject.Proxy proxy, MockNamedObjectImpl impl) {
         RecordingGetNameResponse callback = new RecordingGetNameResponse();
         CapturingErrorHandler errorHandler = new CapturingErrorHandler();
-        proxy.setErrorHandler(errorHandler);
+        proxy.getProxyHandler().setErrorHandler(errorHandler);
 
         if (impl != null) {
             assertNull(impl.getLastMojoException());
@@ -226,14 +231,16 @@ public class InterfacesTest extends MojoTestCase {
     @SmallTest
     public void testProxyAndStubOverPipe() {
         MockNamedObjectImpl impl = new MockNamedObjectImpl();
-        NamedObject.Proxy proxy = newProxyOverPipe(NamedObject.MANAGER, impl);
+        NamedObject.Proxy proxy =
+                BindingsTestUtils.newProxyOverPipe(NamedObject.MANAGER, impl, mCloseablesToClose);
 
         checkProxy(proxy, impl);
     }
 
     @SmallTest
     public void testFactoryOverPipe() {
-        Factory.Proxy proxy = newProxyOverPipe(Factory.MANAGER, new MockFactoryImpl());
+        Factory.Proxy proxy = BindingsTestUtils.newProxyOverPipe(
+                Factory.MANAGER, new MockFactoryImpl(), mCloseablesToClose);
         Pair<NamedObject.Proxy, InterfaceRequest<NamedObject>> request =
                 NamedObject.MANAGER.getInterfaceRequest(CoreImpl.getInstance());
         mCloseablesToClose.add(request.first);
@@ -245,7 +252,8 @@ public class InterfacesTest extends MojoTestCase {
     @SmallTest
     public void testInterfaceClosing() {
         MockFactoryImpl impl = new MockFactoryImpl();
-        Factory.Proxy proxy = newProxyOverPipe(Factory.MANAGER, impl);
+        Factory.Proxy proxy =
+                BindingsTestUtils.newProxyOverPipe(Factory.MANAGER, impl, mCloseablesToClose);
 
         assertFalse(impl.isClosed());
 
@@ -253,5 +261,24 @@ public class InterfacesTest extends MojoTestCase {
         runLoopUntilIdle();
 
         assertTrue(impl.isClosed());
+    }
+
+    @SmallTest
+    public void testResponse() {
+        MockFactoryImpl impl = new MockFactoryImpl();
+        Factory.Proxy proxy =
+                BindingsTestUtils.newProxyOverPipe(Factory.MANAGER, impl, mCloseablesToClose);
+        Request request = new Request();
+        request.x = 42;
+        Pair<MessagePipeHandle, MessagePipeHandle> handles =
+                CoreImpl.getInstance().createMessagePipe(null);
+        DoStuffResponseImpl response = new DoStuffResponseImpl();
+        proxy.doStuff(request, handles.first, response);
+
+        assertFalse(response.wasResponseCalled());
+
+        runLoopUntilIdle();
+
+        assertTrue(response.wasResponseCalled());
     }
 }

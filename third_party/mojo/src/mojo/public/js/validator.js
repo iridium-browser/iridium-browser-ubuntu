@@ -16,8 +16,8 @@ define("mojo/public/js/validator", [
     UNEXPECTED_INVALID_HANDLE: 'VALIDATION_ERROR_UNEXPECTED_INVALID_HANDLE',
     ILLEGAL_POINTER: 'VALIDATION_ERROR_ILLEGAL_POINTER',
     UNEXPECTED_NULL_POINTER: 'VALIDATION_ERROR_UNEXPECTED_NULL_POINTER',
-    MESSAGE_HEADER_INVALID_FLAG_COMBINATION:
-        'VALIDATION_ERROR_MESSAGE_HEADER_INVALID_FLAG_COMBINATION',
+    MESSAGE_HEADER_INVALID_FLAGS:
+        'VALIDATION_ERROR_MESSAGE_HEADER_INVALID_FLAGS',
     MESSAGE_HEADER_MISSING_REQUEST_ID:
         'VALIDATION_ERROR_MESSAGE_HEADER_MISSING_REQUEST_ID',
     DIFFERENT_SIZED_ARRAYS_IN_MAP:
@@ -34,8 +34,13 @@ define("mojo/public/js/validator", [
     return cls === codec.Handle || cls === codec.NullableHandle;
   }
 
+  function isInterfaceClass(cls) {
+    return cls === codec.Interface || cls === codec.NullableInterface;
+  }
+
   function isNullable(type) {
     return type === codec.NullableString || type === codec.NullableHandle ||
+        type === codec.NullableInterface ||
         type instanceof codec.NullableArrayOf ||
         type instanceof codec.NullablePointerTo;
   }
@@ -103,6 +108,10 @@ define("mojo/public/js/validator", [
     return validationError.NONE;
   }
 
+  Validator.prototype.validateInterface = function(offset, nullable) {
+    return this.validateHandle(offset, nullable);
+  }
+
   Validator.prototype.validateStructHeader =
       function(offset, minNumBytes, minVersion) {
     if (!codec.isAligned(offset))
@@ -125,7 +134,7 @@ define("mojo/public/js/validator", [
   }
 
   Validator.prototype.validateMessageHeader = function() {
-    var err = this.validateStructHeader(0, codec.kMessageHeaderSize, 2);
+    var err = this.validateStructHeader(0, codec.kMessageHeaderSize, 0);
     if (err != validationError.NONE)
       return err;
 
@@ -133,10 +142,10 @@ define("mojo/public/js/validator", [
     var version = this.message.getHeaderVersion();
 
     var validVersionAndNumBytes =
-        (version == 2 && numBytes == codec.kMessageHeaderSize) ||
-        (version == 3 &&
+        (version == 0 && numBytes == codec.kMessageHeaderSize) ||
+        (version == 1 &&
          numBytes == codec.kMessageWithRequestIDHeaderSize) ||
-        (version > 3 &&
+        (version > 1 &&
          numBytes >= codec.kMessageWithRequestIDHeaderSize);
     if (!validVersionAndNumBytes)
       return validationError.UNEXPECTED_STRUCT_HEADER;
@@ -144,11 +153,11 @@ define("mojo/public/js/validator", [
     var expectsResponse = this.message.expectsResponse();
     var isResponse = this.message.isResponse();
 
-    if (version == 2 && (expectsResponse || isResponse))
+    if (version == 0 && (expectsResponse || isResponse))
       return validationError.MESSAGE_HEADER_MISSING_REQUEST_ID;
 
     if (isResponse && expectsResponse)
-      return validationError.MESSAGE_HEADER_INVALID_FLAG_COMBINATION;
+      return validationError.MESSAGE_HEADER_INVALID_FLAGS;
 
     return validationError.NONE;
   }
@@ -213,7 +222,7 @@ define("mojo/public/js/validator", [
           validationError.NONE : validationError.UNEXPECTED_NULL_POINTER;
 
     var mapEncodedSize = codec.kStructHeaderSize + codec.kMapStructPayloadSize;
-    var err = this.validateStructHeader(structOffset, mapEncodedSize, 2);
+    var err = this.validateStructHeader(structOffset, mapEncodedSize, 0);
     if (err !== validationError.NONE)
         return err;
 
@@ -291,6 +300,9 @@ define("mojo/public/js/validator", [
 
     if (isHandleClass(elementType))
       return this.validateHandleElements(elementsOffset, numElements, nullable);
+    if (isInterfaceClass(elementType))
+      return this.validateInterfaceElements(
+          elementsOffset, numElements, nullable);
     if (isStringClass(elementType))
       return this.validateArrayElements(
           elementsOffset, numElements, codec.Uint8, nullable, [0], 0);
@@ -315,6 +327,18 @@ define("mojo/public/js/validator", [
     for (var i = 0; i < numElements; i++) {
       var elementOffset = offset + i * elementSize;
       var err = this.validateHandle(elementOffset, nullable);
+      if (err != validationError.NONE)
+        return err;
+    }
+    return validationError.NONE;
+  }
+
+  Validator.prototype.validateInterfaceElements =
+      function(offset, numElements, nullable) {
+    var elementSize = codec.Interface.encodedSize;
+    for (var i = 0; i < numElements; i++) {
+      var elementOffset = offset + i * elementSize;
+      var err = this.validateInterface(elementOffset, nullable);
       if (err != validationError.NONE)
         return err;
     }

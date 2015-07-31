@@ -135,9 +135,9 @@ LayoutSize MultiColumnFragmentainerGroup::flowThreadTranslationAtOffset(LayoutUn
     unsigned columnIndex = columnIndexAtOffset(offsetInFlowThread);
     LayoutRect portionRect(flowThreadPortionRectAt(columnIndex));
     m_columnSet.flipForWritingMode(portionRect);
-    LayoutRect columnRect(columnRectAt(columnIndex));
-    m_columnSet.flipForWritingMode(columnRect);
-    return columnRect.location() - portionRect.location();
+    LayoutSize translation(translationAtColumn(columnIndex));
+    // TODO(mstensho): need a rectangle (not a point) to flip for writing mode here, once we get support for multiple rows.
+    return toLayoutPoint(translation) - portionRect.location();
 }
 
 LayoutUnit MultiColumnFragmentainerGroup::columnLogicalTopForOffset(LayoutUnit offsetInFlowThread) const
@@ -196,14 +196,14 @@ void MultiColumnFragmentainerGroup::collectLayerFragments(DeprecatedPaintLayerFr
     bool isHorizontalWritingMode = m_columnSet.isHorizontalWritingMode();
 
     // Put the layer bounds into flow thread-local coordinates by flipping it first. Since we're in
-    // a renderer, most rectangles are represented this way.
+    // a layoutObject, most rectangles are represented this way.
     LayoutRect layerBoundsInFlowThread(layerBoundingBox);
     flowThread->flipForWritingMode(layerBoundsInFlowThread);
 
     // Now we can compare with the flow thread portions owned by each column. First let's
     // see if the rect intersects our flow thread portion at all.
     LayoutRect clippedRect(layerBoundsInFlowThread);
-    clippedRect.intersect(m_columnSet.LayoutRegion::flowThreadPortionOverflowRect()); // FIXME: clean up this mess.
+    clippedRect.intersect(m_columnSet.flowThreadPortionOverflowRect());
     if (clippedRect.isEmpty())
         return;
 
@@ -278,7 +278,7 @@ void MultiColumnFragmentainerGroup::collectLayerFragments(DeprecatedPaintLayerFr
         fragment.paginationOffset = translationOffset;
 
         LayoutRect flippedFlowThreadOverflowPortion(flowThreadOverflowPortion);
-        // Flip it into more a physical (RenderLayer-style) rectangle.
+        // Flip it into more a physical (DeprecatedPaintLayer-style) rectangle.
         flowThread->flipForWritingMode(flippedFlowThreadOverflowPortion);
         fragment.paginationClip = flippedFlowThreadOverflowPortion;
         fragments.append(fragment);
@@ -337,7 +337,7 @@ LayoutUnit MultiColumnFragmentainerGroup::calculateMaxColumnHeight() const
     LayoutUnit availableHeight = m_columnSet.multiColumnFlowThread()->columnHeightAvailable();
     LayoutUnit maxColumnHeight = availableHeight ? availableHeight : LayoutFlowThread::maxLogicalHeight();
     if (!multicolStyle.logicalMaxHeight().isMaxSizeNone()) {
-        LayoutUnit logicalMaxHeight = multicolBlock->computeContentLogicalHeight(multicolStyle.logicalMaxHeight(), -1);
+        LayoutUnit logicalMaxHeight = multicolBlock->computeContentLogicalHeight(MaxSize, multicolStyle.logicalMaxHeight(), -1);
         if (logicalMaxHeight != -1 && maxColumnHeight > logicalMaxHeight)
             maxColumnHeight = logicalMaxHeight;
     }
@@ -438,6 +438,23 @@ LayoutUnit MultiColumnFragmentainerGroup::calculateColumnHeight(BalancedColumnHe
     return m_columnHeight + m_minSpaceShortage;
 }
 
+LayoutSize MultiColumnFragmentainerGroup::translationAtColumn(unsigned columnIndex) const
+{
+    LayoutUnit logicalTopOffset;
+    LayoutUnit logicalLeftOffset;
+    LayoutUnit columnGap = m_columnSet.columnGap();
+    if (m_columnSet.multiColumnFlowThread()->progressionIsInline()) {
+        logicalLeftOffset = columnIndex * (m_columnSet.pageLogicalWidth() + columnGap);
+        if (!m_columnSet.style()->isLeftToRightDirection())
+            logicalLeftOffset = -logicalLeftOffset;
+    } else {
+        logicalTopOffset = columnIndex * (m_columnHeight + columnGap);
+    }
+
+    LayoutSize offset(logicalLeftOffset, logicalTopOffset);
+    return m_columnSet.isHorizontalWritingMode() ? offset : offset.transposedSize();
+}
+
 LayoutRect MultiColumnFragmentainerGroup::columnRectAt(unsigned columnIndex) const
 {
     LayoutUnit columnLogicalWidth = m_columnSet.pageLogicalWidth();
@@ -480,7 +497,6 @@ LayoutRect MultiColumnFragmentainerGroup::flowThreadPortionOverflowRect(const La
     //
     // FIXME: Eventually we will know overflow on a per-column basis, but we can't do this until we have a painting
     // mode that understands not to paint contents from a previous column in the overflow area of a following column.
-    // This problem applies to regions and pages as well and is not unique to columns.
     bool isFirstColumn = !columnIndex;
     bool isLastColumn = columnIndex == columnCount - 1;
     bool isLTR = m_columnSet.style()->isLeftToRightDirection();
@@ -489,7 +505,7 @@ LayoutRect MultiColumnFragmentainerGroup::flowThreadPortionOverflowRect(const La
 
     // Calculate the overflow rectangle, based on the flow thread's, clipped at column logical
     // top/bottom unless it's the first/last column.
-    LayoutRect overflowRect = m_columnSet.overflowRectForFlowThreadPortion(portionRect, isFirstColumn && m_columnSet.isFirstRegion(), isLastColumn && m_columnSet.isLastRegion());
+    LayoutRect overflowRect = m_columnSet.overflowRectForFlowThreadPortion(portionRect, isFirstColumn && !m_columnSet.previousSiblingMultiColumnSet(), isLastColumn && !m_columnSet.nextSiblingMultiColumnSet());
 
     // Avoid overflowing into neighboring columns, by clipping in the middle of adjacent column
     // gaps. Also make sure that we avoid rounding errors.

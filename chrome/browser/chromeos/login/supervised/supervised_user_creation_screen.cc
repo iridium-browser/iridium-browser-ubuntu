@@ -156,7 +156,8 @@ void SupervisedUserCreationScreen::OnPortalDetectionCompleted(
   if (state.status == NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_ONLINE) {
     get_base_screen_delegate()->HideErrorScreen(this);
     histogram_helper_->OnErrorHide();
-  } else {
+  } else if (state.status !=
+             NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_UNKNOWN) {
     on_error_screen_ = true;
     ErrorScreen* screen = get_base_screen_delegate()->GetErrorScreen();
     ConfigureErrorScreen(screen, network, state.status);
@@ -208,6 +209,10 @@ void SupervisedUserCreationScreen::FinishFlow() {
       ->GetSessionManagerClient()
       ->NotifySupervisedUserCreationFinished();
   controller_->FinishCreation();
+}
+
+void SupervisedUserCreationScreen::HideFlow() {
+  Hide();
 }
 
 void SupervisedUserCreationScreen::AuthenticateManager(
@@ -587,7 +592,7 @@ void SupervisedUserCreationScreen::OnGetSupervisedUsers(
 
 void SupervisedUserCreationScreen::OnPhotoTaken(
     const std::string& raw_data) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   user_photo_ = gfx::ImageSkia();
   ImageDecoder::Cancel(this);
   ImageDecoder::Start(this, raw_data);

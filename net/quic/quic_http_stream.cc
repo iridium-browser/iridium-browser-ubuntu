@@ -15,6 +15,7 @@
 #include "net/quic/quic_http_utils.h"
 #include "net/quic/quic_reliable_client_stream.h"
 #include "net/quic/quic_utils.h"
+#include "net/quic/spdy_utils.h"
 #include "net/socket/next_proto.h"
 #include "net/spdy/spdy_frame_builder.h"
 #include "net/spdy/spdy_framer.h"
@@ -62,9 +63,9 @@ int QuicHttpStream::InitializeStream(const HttpRequestInfo* request_info,
 
   stream_net_log.AddEvent(
       NetLog::TYPE_HTTP_STREAM_REQUEST_BOUND_TO_QUIC_SESSION,
-      stream_net_log.source().ToEventParametersCallback());
+      session_->net_log().source().ToEventParametersCallback());
 
-  if (request_info->url.SchemeIsSecure()) {
+  if (request_info->url.SchemeIsCryptographic()) {
     SSLInfo ssl_info;
     bool secure_session =
         session_->GetSSLInfo(&ssl_info) && ssl_info.cert.get();
@@ -132,7 +133,8 @@ int QuicHttpStream::SendRequest(const HttpRequestHeaders& request_headers,
   stream_->set_priority(priority);
   // Store the serialized request headers.
   CreateSpdyHeadersFromHttpRequest(*request_info_, request_headers,
-                                   SPDY3, /*direct=*/true, &request_headers_);
+                                   GetSpdyVersion(),
+                                   /*direct=*/true, &request_headers_);
 
   // Store the request body.
   request_body_stream_ = request_info_->upload_data_stream;
@@ -144,7 +146,8 @@ int QuicHttpStream::SendRequest(const HttpRequestHeaders& request_headers,
     //       request_body_stream_->is_chunked()))
     // Use 10 packets as the body buffer size to give enough space to
     // help ensure we don't often send out partial packets.
-    raw_request_body_buf_ = new IOBufferWithSize(10 * kMaxPacketSize);
+    raw_request_body_buf_ =
+        new IOBufferWithSize(static_cast<size_t>(10 * kMaxPacketSize));
     // The request body buffer is empty at first.
     request_body_buf_ = new DrainableIOBuffer(raw_request_body_buf_.get(), 0);
   }
@@ -528,7 +531,7 @@ int QuicHttpStream::DoSendBodyComplete(int rv) {
 
 int QuicHttpStream::ParseResponseHeaders() {
   size_t read_buf_len = static_cast<size_t>(read_buf_->offset());
-  SpdyFramer framer(SPDY3);
+  SpdyFramer framer(GetSpdyVersion());
   SpdyHeaderBlock headers;
   char* data = read_buf_->StartOfBuffer();
   size_t len = framer.ParseHeaderBlockInBuffer(data, read_buf_->offset(),
@@ -550,12 +553,12 @@ int QuicHttpStream::ParseResponseHeaders() {
       NetLog::TYPE_QUIC_HTTP_STREAM_READ_RESPONSE_HEADERS,
       base::Bind(&SpdyHeaderBlockNetLogCallback, &headers));
 
-  if (!SpdyHeadersToHttpResponse(headers, SPDY3, response_info_)) {
+  if (!SpdyHeadersToHttpResponse(headers, GetSpdyVersion(), response_info_)) {
     DLOG(WARNING) << "Invalid headers";
     return ERR_QUIC_PROTOCOL_ERROR;
   }
   // Put the peer's IP address and port into the response.
-  IPEndPoint address = stream_->GetPeerAddress();
+  IPEndPoint address = session_->peer_address();
   response_info_->socket_address = HostPortPair::FromIPEndPoint(address);
   response_info_->connection_info =
       HttpResponseInfo::CONNECTION_INFO_QUIC1_SPDY3;
@@ -576,6 +579,10 @@ void QuicHttpStream::BufferResponseBody(const char* data, int length) {
   IOBufferWithSize* io_buffer = new IOBufferWithSize(length);
   memcpy(io_buffer->data(), data, length);
   response_body_.push_back(make_scoped_refptr(io_buffer));
+}
+
+SpdyMajorVersion QuicHttpStream::GetSpdyVersion() {
+  return SpdyUtils::GetSpdyVersionForQuicVersion(stream_->version());
 }
 
 }  // namespace net

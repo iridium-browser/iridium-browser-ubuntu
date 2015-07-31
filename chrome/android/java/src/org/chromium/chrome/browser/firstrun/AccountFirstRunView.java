@@ -441,7 +441,7 @@ public class AccountFirstRunView extends FrameLayout
         updateProfileName();
 
         mSpinner.setEnabled(false);
-        ApiCompatibilityUtils.setBackgroundForView(mSpinner, null);
+        mSpinner.setBackground(null);
         mPositiveButton.setText(getResources().getText(R.string.fre_done));
         mPositiveButton.setOnClickListener(new OnClickListener() {
             @Override

@@ -81,20 +81,23 @@ class WidgetTest : public ViewsTestBase {
   WidgetTest();
   ~WidgetTest() override;
 
-  NativeWidget* CreatePlatformNativeWidget(
-      internal::NativeWidgetDelegate* delegate);
-
+  // Create Widgets with |native_widget| in InitParams set to an instance of
+  // test::NativeWidgetCapture.
   Widget* CreateTopLevelPlatformWidget();
-
   Widget* CreateTopLevelFramelessPlatformWidget();
-
   Widget* CreateChildPlatformWidget(gfx::NativeView parent_native_view);
 
+  // Create Widgets initialized without a |native_widget| set in InitParams.
+  // Depending on the test environment, ViewsDelegate::OnBeforeWidgetInit() may
+  // still provide one.
   Widget* CreateTopLevelNativeWidget();
-
   Widget* CreateChildNativeWidgetWithParent(Widget* parent);
-
   Widget* CreateChildNativeWidget();
+
+  // Create a top-level Widget with |native_widget| in InitParams set to an
+  // instance of the "native desktop" type. This is a PlatformNativeWidget on
+  // ChromeOS, and a PlatformDesktopNativeWidget everywhere else.
+  Widget* CreateNativeDesktopWidget();
 
   View* GetMousePressedHandler(internal::RootView* root_view);
 
@@ -111,6 +114,10 @@ class WidgetTest : public ViewsTestBase {
   // Return true if |above| is higher than |below| in the native window Z-order.
   // Both windows must be visible.
   static bool IsWindowStackedAbove(Widget* above, Widget* below);
+
+  // Query the native window system for the minimum size configured for user
+  // initiated window resizes.
+  static gfx::Size GetNativeWidgetMinimumContentSize(Widget* widget);
 
   // Return the event processor for |widget|. On aura platforms, this is an
   // aura::WindowEventDispatcher. Otherwise, it is a bridge to the OS event

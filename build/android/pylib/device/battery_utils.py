@@ -88,6 +88,44 @@ class BatteryUtils(object):
     self._default_retries = default_retries
 
   @decorators.WithTimeoutAndRetriesFromInstance()
+  def GetNetworkData(self, package, timeout=None, retries=None):
+    """ Get network data for specific package.
+
+    Args:
+      package: package name you want network data for.
+      timeout: timeout in seconds
+      retries: number of retries
+
+    Returns:
+      Tuple of (sent_data, recieved_data)
+      None if no network data found
+    """
+    # If device_utils clears cache, cache['uids'] doesn't exist
+    if 'uids' not in self._cache:
+      self._cache['uids'] = {}
+    if package not in self._cache['uids']:
+      self.GetPowerData()
+      if package not in self._cache['uids']:
+        logging.warning('No UID found for %s. Can\'t get network data.',
+                        package)
+        return None
+
+    network_data_path = '/proc/uid_stat/%s/' % self._cache['uids'][package]
+    try:
+      send_data = int(self._device.ReadFile(network_data_path + 'tcp_snd'))
+    # If ReadFile throws exception, it means no network data usage file for
+    # package has been recorded. Return 0 sent and 0 received.
+    except device_errors.AdbShellCommandFailedError:
+      logging.warning('No sent data found for package %s', package)
+      send_data = 0
+    try:
+      recv_data = int(self._device.ReadFile(network_data_path + 'tcp_rcv'))
+    except device_errors.AdbShellCommandFailedError:
+      logging.warning('No received data found for package %s', package)
+      recv_data = 0
+    return (send_data, recv_data)
+
+  @decorators.WithTimeoutAndRetriesFromInstance()
   def GetPowerData(self, timeout=None, retries=None):
     """ Get power data for device.
     Args:
@@ -103,10 +141,11 @@ class BatteryUtils(object):
         },
       }
     """
+    if 'uids' not in self._cache:
+      self._cache['uids'] = {}
     dumpsys_output = self._device.RunShellCommand(
         ['dumpsys', 'batterystats', '-c'], check_return=True)
     csvreader = csv.reader(dumpsys_output)
-    uid_entries = {}
     pwi_entries = collections.defaultdict(list)
     for entry in csvreader:
       if entry[_DUMP_VERSION_INDEX] not in ['8', '9']:
@@ -114,14 +153,16 @@ class BatteryUtils(object):
         raise device_errors.DeviceVersionError(
             'Dumpsys version must be 8 or 9. %s found.'
             % entry[_DUMP_VERSION_INDEX])
-      if _ROW_TYPE_INDEX >= len(entry):
-        continue
-      if entry[_ROW_TYPE_INDEX] == 'uid':
+      if _ROW_TYPE_INDEX < len(entry) and entry[_ROW_TYPE_INDEX] == 'uid':
         current_package = entry[_PACKAGE_NAME_INDEX]
-        if current_package in uid_entries:
+        if (self._cache['uids'].get(current_package)
+            and self._cache['uids'].get(current_package)
+            != entry[_PACKAGE_UID_INDEX]):
           raise device_errors.CommandFailedError(
-              'Package %s found multiple times' % (current_package))
-        uid_entries[current_package] = entry[_PACKAGE_UID_INDEX]
+              'Package %s found multiple times with differnt UIDs %s and %s'
+               % (current_package, self._cache['uids'][current_package],
+               entry[_PACKAGE_UID_INDEX]))
+        self._cache['uids'][current_package] = entry[_PACKAGE_UID_INDEX]
       elif (_PWI_POWER_CONSUMPTION_INDEX < len(entry)
           and entry[_ROW_TYPE_INDEX] == 'pwi'
           and entry[_PWI_AGGREGATION_INDEX] == 'l'):
@@ -129,8 +170,9 @@ class BatteryUtils(object):
             float(entry[_PWI_POWER_CONSUMPTION_INDEX]))
 
     return {p: {'uid': uid, 'data': pwi_entries[uid]}
-            for p, uid in uid_entries.iteritems()}
+            for p, uid in self._cache['uids'].iteritems()}
 
+  @decorators.WithTimeoutAndRetriesFromInstance()
   def GetPackagePowerData(self, package, timeout=None, retries=None):
     """ Get power data for particular package.
 
@@ -147,7 +189,7 @@ class BatteryUtils(object):
     """
     return self.GetPowerData().get(package)
 
-  # TODO(rnephew): Move implementation from device_utils when this is used.
+  @decorators.WithTimeoutAndRetriesFromInstance()
   def GetBatteryInfo(self, timeout=None, retries=None):
     """Gets battery info for the device.
 
@@ -158,9 +200,22 @@ class BatteryUtils(object):
       A dict containing various battery information as reported by dumpsys
       battery.
     """
-    return self._device.GetBatteryInfo(timeout=None, retries=None)
+    result = {}
+    # Skip the first line, which is just a header.
+    for line in self._device.RunShellCommand(
+        ['dumpsys', 'battery'], check_return=True)[1:]:
+      # If usb charging has been disabled, an extra line of header exists.
+      if 'UPDATES STOPPED' in line:
+        logging.warning('Dumpsys battery not receiving updates. '
+                        'Run dumpsys battery reset if this is in error.')
+      elif ':' not in line:
+        logging.warning('Unknown line found in dumpsys battery: "%s"', line)
+      else:
+        k, v = line.split(':', 1)
+        result[k.strip()] = v.strip()
+    return result
 
-  # TODO(rnephew): Move implementation from device_utils when this is used.
+  @decorators.WithTimeoutAndRetriesFromInstance()
   def GetCharging(self, timeout=None, retries=None):
     """Gets the charging state of the device.
 
@@ -170,9 +225,14 @@ class BatteryUtils(object):
     Returns:
       True if the device is charging, false otherwise.
     """
-    return self._device.GetCharging(timeout=None, retries=None)
+    battery_info = self.GetBatteryInfo()
+    for k in ('AC powered', 'USB powered', 'Wireless powered'):
+      if (k in battery_info and
+          battery_info[k].lower() in ('true', '1', 'yes')):
+        return True
+    return False
 
-  # TODO(rnephew): Move implementation from device_utils when this is used.
+  @decorators.WithTimeoutAndRetriesFromInstance()
   def SetCharging(self, enabled, timeout=None, retries=None):
     """Enables or disables charging on the device.
 
@@ -186,10 +246,28 @@ class BatteryUtils(object):
       device_errors.CommandFailedError: If method of disabling charging cannot
         be determined.
     """
-    self._device.SetCharging(enabled, timeout=None, retries=None)
+    if 'charging_config' not in self._cache:
+      for c in _CONTROL_CHARGING_COMMANDS:
+        if self._device.FileExists(c['witness_file']):
+          self._cache['charging_config'] = c
+          break
+      else:
+        raise device_errors.CommandFailedError(
+            'Unable to find charging commands.')
 
-  # TODO(rnephew): Move implementation from device_utils when this is used.
+    if enabled:
+      command = self._cache['charging_config']['enable_command']
+    else:
+      command = self._cache['charging_config']['disable_command']
+
+    def set_and_verify_charging():
+      self._device.RunShellCommand(command, check_return=True)
+      return self.GetCharging() == enabled
+
+    timeout_retry.WaitFor(set_and_verify_charging, wait_period=1)
+
   # TODO(rnephew): Make private when all use cases can use the context manager.
+  @decorators.WithTimeoutAndRetriesFromInstance()
   def DisableBatteryUpdates(self, timeout=None, retries=None):
     """ Resets battery data and makes device appear like it is not
     charging so that it will collect power data since last charge.
@@ -201,19 +279,58 @@ class BatteryUtils(object):
     Raises:
       device_errors.CommandFailedError: When resetting batterystats fails to
         reset power values.
+      device_errors.DeviceVersionError: If device is not L or higher.
     """
-    self._device.DisableBatteryUpdates(timeout=None, retries=None)
+    def battery_updates_disabled():
+      return self.GetCharging() is False
 
-  # TODO(rnephew): Move implementation from device_utils when this is used.
+    if (self._device.build_version_sdk <
+        constants.ANDROID_SDK_VERSION_CODES.LOLLIPOP):
+      raise device_errors.DeviceVersionError('Device must be L or higher.')
+
+    self._device.RunShellCommand(
+        ['dumpsys', 'battery', 'reset'], check_return=True)
+    self._device.RunShellCommand(
+        ['dumpsys', 'batterystats', '--reset'], check_return=True)
+    battery_data = self._device.RunShellCommand(
+        ['dumpsys', 'batterystats', '--charged', '--checkin'],
+        check_return=True)
+    ROW_TYPE_INDEX = 3
+    PWI_POWER_INDEX = 5
+    for line in battery_data:
+      l = line.split(',')
+      if (len(l) > PWI_POWER_INDEX and l[ROW_TYPE_INDEX] == 'pwi'
+          and l[PWI_POWER_INDEX] != 0):
+        raise device_errors.CommandFailedError(
+            'Non-zero pmi value found after reset.')
+    self._device.RunShellCommand(['dumpsys', 'battery', 'set', 'ac', '0'],
+                                 check_return=True)
+    self._device.RunShellCommand(['dumpsys', 'battery', 'set', 'usb', '0'],
+                                 check_return=True)
+    timeout_retry.WaitFor(battery_updates_disabled, wait_period=1)
+
   # TODO(rnephew): Make private when all use cases can use the context manager.
+  @decorators.WithTimeoutAndRetriesFromInstance()
   def EnableBatteryUpdates(self, timeout=None, retries=None):
     """ Restarts device charging so that dumpsys no longer collects power data.
 
     Args:
       timeout: timeout in seconds
       retries: number of retries
+
+    Raises:
+      device_errors.DeviceVersionError: If device is not L or higher.
     """
-    self._device.EnableBatteryUpdates(timeout=None, retries=None)
+    def battery_updates_enabled():
+      return self.GetCharging() is True
+
+    if (self._device.build_version_sdk <
+        constants.ANDROID_SDK_VERSION_CODES.LOLLIPOP):
+      raise device_errors.DeviceVersionError('Device must be L or higher.')
+
+    self._device.RunShellCommand(['dumpsys', 'battery', 'reset'],
+                                 check_return=True)
+    timeout_retry.WaitFor(battery_updates_enabled, wait_period=1)
 
   @contextlib.contextmanager
   def BatteryMeasurement(self, timeout=None, retries=None):
@@ -236,7 +353,7 @@ class BatteryUtils(object):
       retries: number of retries
 
     Raises:
-      device_errors.CommandFailedError: If device is not L or higher.
+      device_errors.DeviceVersionError: If device is not L or higher.
     """
     if (self._device.build_version_sdk <
         constants.ANDROID_SDK_VERSION_CODES.LOLLIPOP):
@@ -246,3 +363,43 @@ class BatteryUtils(object):
       yield
     finally:
       self.EnableBatteryUpdates(timeout=timeout, retries=retries)
+
+  def ChargeDeviceToLevel(self, level, wait_period=60):
+    """Enables charging and waits for device to be charged to given level.
+
+    Args:
+      level: level of charge to wait for.
+      wait_period: time in seconds to wait between checking.
+    """
+    self.SetCharging(True)
+
+    def device_charged():
+      battery_level = self.GetBatteryInfo().get('level')
+      if battery_level is None:
+        logging.warning('Unable to find current battery level.')
+        battery_level = 100
+      else:
+        logging.info('current battery level: %s', battery_level)
+        battery_level = int(battery_level)
+      return battery_level >= level
+
+    timeout_retry.WaitFor(device_charged, wait_period=wait_period)
+
+  def LetBatteryCoolToTemperature(self, target_temp, wait_period=60):
+    """Lets device sit to give battery time to cool down
+    Args:
+      temp: maximum temperature to allow in tenths of degrees c.
+      wait_period: time in seconds to wait between checking.
+    """
+    def cool_device():
+      temp = self.GetBatteryInfo().get('temperature')
+      if temp is None:
+        logging.warning('Unable to find current battery temperature.')
+        temp = 0
+      else:
+        logging.info('Current battery temperature: %s', temp)
+      return int(temp) <= target_temp
+
+    logging.info('Waiting for the device to cool down to %s degrees.',
+                 target_temp)
+    timeout_retry.WaitFor(cool_device, wait_period=wait_period)

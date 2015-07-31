@@ -80,11 +80,11 @@ bool DisableNagle(SOCKET socket, bool disable) {
 // Enable TCP Keep-Alive to prevent NAT routers from timing out TCP
 // connections. See http://crbug.com/27400 for details.
 bool SetTCPKeepAlive(SOCKET socket, BOOL enable, int delay_secs) {
-  int delay = delay_secs * 1000;
+  unsigned delay = delay_secs * 1000;
   struct tcp_keepalive keepalive_vals = {
-    enable ? 1 : 0,  // TCP keep-alive on.
-    delay,  // Delay seconds before sending first TCP keep-alive packet.
-    delay,  // Delay seconds between sending TCP keep-alive packets.
+      enable ? 1u : 0u,  // TCP keep-alive on.
+      delay,  // Delay seconds before sending first TCP keep-alive packet.
+      delay,  // Delay seconds between sending TCP keep-alive packets.
   };
   DWORD bytes_returned = 0xABAB;
   int rv = WSAIoctl(socket, SIO_KEEPALIVE_VALS, &keepalive_vals,
@@ -167,10 +167,10 @@ class TCPSocketWin::Core : public base::RefCounted<Core> {
   class ReadDelegate : public base::win::ObjectWatcher::Delegate {
    public:
     explicit ReadDelegate(Core* core) : core_(core) {}
-    virtual ~ReadDelegate() {}
+    ~ReadDelegate() override {}
 
     // base::ObjectWatcher::Delegate methods:
-    virtual void OnObjectSignaled(HANDLE object);
+    void OnObjectSignaled(HANDLE object) override;
 
    private:
     Core* const core_;
@@ -179,10 +179,10 @@ class TCPSocketWin::Core : public base::RefCounted<Core> {
   class WriteDelegate : public base::win::ObjectWatcher::Delegate {
    public:
     explicit WriteDelegate(Core* core) : core_(core) {}
-    virtual ~WriteDelegate() {}
+    ~WriteDelegate() override {}
 
     // base::ObjectWatcher::Delegate methods:
-    virtual void OnObjectSignaled(HANDLE object);
+    void OnObjectSignaled(HANDLE object) override;
 
    private:
     Core* const core_;
@@ -414,10 +414,6 @@ int TCPSocketWin::Accept(scoped_ptr<TCPSocketWin>* socket,
 
 int TCPSocketWin::Connect(const IPEndPoint& address,
                           const CompletionCallback& callback) {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436634 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION("436634 TCPSocketWin::Connect"));
-
   DCHECK(CalledOnValidThread());
   DCHECK_NE(socket_, INVALID_SOCKET);
   DCHECK(!waiting_connect_);
@@ -781,10 +777,6 @@ void TCPSocketWin::OnObjectSignaled(HANDLE object) {
 }
 
 int TCPSocketWin::DoConnect() {
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436634 is fixed.
-  tracked_objects::ScopedTracker tracking_profile(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION("436634 TCPSocketWin::DoConnect"));
-
   DCHECK_EQ(connect_os_error_, 0);
   DCHECK(!core_.get());
 
@@ -792,10 +784,6 @@ int TCPSocketWin::DoConnect() {
                       CreateNetLogIPEndPointCallback(peer_address_.get()));
 
   core_ = new Core(this);
-
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436634 is fixed.
-  tracked_objects::ScopedTracker tracking_profile1(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION("436634 TCPSocketWin::DoConnect1"));
 
   // WSAEventSelect sets the socket to non-blocking mode as a side effect.
   // Our connect() and recv() calls require that the socket be non-blocking.
@@ -805,15 +793,15 @@ int TCPSocketWin::DoConnect() {
   if (!peer_address_->ToSockAddr(storage.addr, &storage.addr_len))
     return ERR_ADDRESS_INVALID;
 
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436634 is fixed.
-  tracked_objects::ScopedTracker tracking_profile2(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION("436634 TCPSocketWin::DoConnect2"));
+  int result;
+  {
+    // TODO(ricea): Remove ScopedTracker below once crbug.com/436634 is fixed.
+    tracked_objects::ScopedTracker tracking_profile(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION("436634 connect()"));
+    result = connect(socket_, storage.addr, storage.addr_len);
+  }
 
-  if (!connect(socket_, storage.addr, storage.addr_len)) {
-    // TODO(vadimt): Remove ScopedTracker below once crbug.com/436634 is fixed.
-    tracked_objects::ScopedTracker tracking_profile3(
-        FROM_HERE_WITH_EXPLICIT_FUNCTION("436634 TCPSocketWin::DoConnect3"));
-
+  if (!result) {
     // Connected without waiting!
     //
     // The MSDN page for connect says:
@@ -830,11 +818,6 @@ int TCPSocketWin::DoConnect() {
       return OK;
   } else {
     int os_error = WSAGetLastError();
-
-    // TODO(vadimt): Remove ScopedTracker below once crbug.com/436634 is fixed.
-    tracked_objects::ScopedTracker tracking_profile4(
-        FROM_HERE_WITH_EXPLICIT_FUNCTION("436634 TCPSocketWin::DoConnect4"));
-
     if (os_error != WSAEWOULDBLOCK) {
       LOG(ERROR) << "connect failed: " << os_error;
       connect_os_error_ = os_error;
@@ -844,9 +827,9 @@ int TCPSocketWin::DoConnect() {
     }
   }
 
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436634 is fixed.
-  tracked_objects::ScopedTracker tracking_profile5(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION("436634 TCPSocketWin::DoConnect5"));
+  // TODO(ricea): Remove ScopedTracker below once crbug.com/436634 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("436634 WatchForRead()"));
 
   core_->WatchForRead();
   return ERR_IO_PENDING;

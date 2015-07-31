@@ -20,6 +20,7 @@
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/thread.h"
 #include "base/threading/worker_pool.h"
 #include "base/time/default_clock.h"
@@ -40,7 +41,7 @@
 #include "net/http/http_network_session.h"
 #include "net/http/http_server_properties_impl.h"
 #include "net/http/transport_security_state.h"
-#include "net/log/net_log_logger.h"
+#include "net/log/write_to_file_net_log_observer.h"
 #include "net/socket/client_socket_factory.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/ssl/channel_id_service.h"
@@ -146,8 +147,8 @@ class MyTestURLRequestContext : public net::TestURLRequestContext {
 class MyTestURLRequestContextGetter : public net::TestURLRequestContextGetter {
  public:
   explicit MyTestURLRequestContextGetter(
-      const scoped_refptr<base::MessageLoopProxy>& io_message_loop_proxy)
-      : TestURLRequestContextGetter(io_message_loop_proxy) {}
+      const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner)
+      : TestURLRequestContextGetter(io_task_runner) {}
 
   net::TestURLRequestContext* GetURLRequestContext() override {
     // Construct |context_| lazily so it gets constructed on the right
@@ -171,17 +172,14 @@ class MyTestCertVerifier : public net::CertVerifier {
 
   int Verify(net::X509Certificate* cert,
              const std::string& hostname,
+             const std::string& ocsp_response,
              int flags,
              net::CRLSet* crl_set,
              net::CertVerifyResult* verify_result,
              const net::CompletionCallback& callback,
-             RequestHandle* out_req,
+             scoped_ptr<Request>* out_req,
              const net::BoundNetLog& net_log) override {
     return net::OK;
-  }
-
-  void CancelRequest(RequestHandle req) override {
-    // Do nothing.
   }
 };
 
@@ -222,7 +220,7 @@ class MCSProbe {
   // Network state.
   scoped_refptr<net::URLRequestContextGetter> url_request_context_getter_;
   net::NetLog net_log_;
-  scoped_ptr<net::NetLogLogger> logger_;
+  scoped_ptr<net::WriteToFileNetLogObserver> logger_;
   scoped_ptr<net::HostResolver> host_resolver_;
   scoped_ptr<net::CertVerifier> cert_verifier_;
   scoped_ptr<net::ChannelIDService> system_channel_id_service_;
@@ -358,8 +356,9 @@ void MCSProbe::InitializeNetworkState() {
 #endif
   }
   if (log_file.get()) {
-    logger_.reset(new net::NetLogLogger());
-    logger_->set_log_level(net::NetLog::LOG_ALL_BUT_BYTES);
+    logger_.reset(new net::WriteToFileNetLogObserver());
+    logger_->set_capture_mode(
+        net::NetLogCaptureMode::IncludeCookiesAndCredentials());
     logger_->StartObserving(&net_log_, log_file.Pass(), nullptr, nullptr);
   }
 

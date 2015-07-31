@@ -279,7 +279,8 @@ DWORD WINAPI BrokerServicesBase::TargetEventsThread(PVOID param) {
         case JOB_OBJECT_MSG_ABNORMAL_EXIT_PROCESS: {
           {
             AutoLock lock(&broker->lock_);
-            broker->child_process_ids_.erase(reinterpret_cast<DWORD>(ovl));
+            broker->child_process_ids_.erase(
+                static_cast<DWORD>(reinterpret_cast<uintptr_t>(ovl)));
           }
           --target_counter;
           if (0 == target_counter)
@@ -308,8 +309,8 @@ DWORD WINAPI BrokerServicesBase::TargetEventsThread(PVOID param) {
     } else if (THREAD_CTRL_REMOVE_PEER == key) {
       // Remove a process from our list of peers.
       AutoLock lock(&broker->lock_);
-      PeerTrackerMap::iterator it =
-          broker->peer_map_.find(reinterpret_cast<DWORD>(ovl));
+      PeerTrackerMap::iterator it = broker->peer_map_.find(
+          static_cast<DWORD>(reinterpret_cast<uintptr_t>(ovl)));
       DeregisterPeerTracker(it->second);
       broker->peer_map_.erase(it);
     } else if (THREAD_CTRL_QUIT == key) {
@@ -404,6 +405,14 @@ ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
 
   // Initialize the startup information from the policy.
   base::win::StartupInformation startup_info;
+  // The liftime of |mitigations| and |inherit_handle_list| have to be at least
+  // as long as |startup_info| because |UpdateProcThreadAttribute| requires that
+  // its |lpValue| parameter persist until |DeleteProcThreadAttributeList| is
+  // called; StartupInformation's destructor makes such a call.
+  DWORD64 mitigations;
+
+  std::vector<HANDLE> inherited_handle_list;
+
   base::string16 desktop = policy_base->GetAlternateDesktop();
   if (!desktop.empty()) {
     startup_info.startup_info()->lpDesktop =
@@ -411,6 +420,7 @@ ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
   }
 
   bool inherit_handles = false;
+
   if (base::win::GetVersion() >= base::win::VERSION_VISTA) {
     int attribute_count = 0;
     const AppContainerAttributes* app_container =
@@ -418,7 +428,6 @@ ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
     if (app_container)
       ++attribute_count;
 
-    DWORD64 mitigations;
     size_t mitigations_size;
     ConvertProcessMitigationsToPolicy(policy->GetProcessMitigations(),
                                       &mitigations, &mitigations_size);
@@ -427,14 +436,20 @@ ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
 
     HANDLE stdout_handle = policy_base->GetStdoutHandle();
     HANDLE stderr_handle = policy_base->GetStderrHandle();
-    HANDLE inherit_handle_list[2];
-    int inherit_handle_count = 0;
+
     if (stdout_handle != INVALID_HANDLE_VALUE)
-      inherit_handle_list[inherit_handle_count++] = stdout_handle;
+      inherited_handle_list.push_back(stdout_handle);
+
     // Handles in the list must be unique.
     if (stderr_handle != stdout_handle && stderr_handle != INVALID_HANDLE_VALUE)
-      inherit_handle_list[inherit_handle_count++] = stderr_handle;
-    if (inherit_handle_count)
+      inherited_handle_list.push_back(stderr_handle);
+
+    HandleList policy_handle_list = policy_base->GetHandlesBeingShared();
+
+    for (auto handle : policy_handle_list)
+      inherited_handle_list.push_back(handle);
+
+    if (inherited_handle_list.size())
       ++attribute_count;
 
     if (!startup_info.InitializeProcThreadAttributeList(attribute_count))
@@ -454,11 +469,11 @@ ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
       }
     }
 
-    if (inherit_handle_count) {
+    if (inherited_handle_list.size()) {
       if (!startup_info.UpdateProcThreadAttribute(
               PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-              inherit_handle_list,
-              sizeof(inherit_handle_list[0]) * inherit_handle_count)) {
+              &inherited_handle_list[0],
+              sizeof(HANDLE) * inherited_handle_list.size())) {
         return SBOX_ERROR_PROC_THREAD_ATTRIBUTES;
       }
       startup_info.startup_info()->dwFlags |= STARTF_USESTDHANDLES;
@@ -487,6 +502,9 @@ ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
   DWORD win_result = target->Create(exe_path, command_line, inherit_handles,
                                     policy_base->GetLowBoxSid() ? true : false,
                                     startup_info, &process_info);
+
+  policy_base->ClearSharedHandles();
+
   if (ERROR_SUCCESS != win_result) {
     SpawnCleanup(target, win_result);
     return SBOX_ERROR_CREATE_PROCESS;
@@ -517,6 +535,9 @@ ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
     // We can not track the life time of such processes and it is responsibility
     // of the host application to make sure that spawned targets without jobs
     // are terminated when the main application don't need them anymore.
+    // Sandbox policy engine needs to know that these processes are valid
+    // targets for e.g. BrokerDuplicateHandle so track them as peer processes.
+    AddTargetPeer(process_info.process_handle());
   }
 
   *target_info = process_info.Take();
@@ -538,8 +559,9 @@ bool BrokerServicesBase::IsActiveTarget(DWORD process_id) {
 VOID CALLBACK BrokerServicesBase::RemovePeer(PVOID parameter, BOOLEAN timeout) {
   PeerTracker* peer = reinterpret_cast<PeerTracker*>(parameter);
   // Don't check the return code because we this may fail (safely) at shutdown.
-  ::PostQueuedCompletionStatus(peer->job_port, 0, THREAD_CTRL_REMOVE_PEER,
-                               reinterpret_cast<LPOVERLAPPED>(peer->id));
+  ::PostQueuedCompletionStatus(
+      peer->job_port, 0, THREAD_CTRL_REMOVE_PEER,
+      reinterpret_cast<LPOVERLAPPED>(static_cast<uintptr_t>(peer->id)));
 }
 
 ResultCode BrokerServicesBase::AddTargetPeer(HANDLE peer_process) {

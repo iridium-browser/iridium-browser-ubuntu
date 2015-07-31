@@ -25,8 +25,9 @@
 #ifndef NodeComputedStyle_h
 #define NodeComputedStyle_h
 
+#include "core/dom/LayoutTreeBuilderTraversal.h"
 #include "core/dom/Node.h"
-#include "core/dom/NodeRenderingTraversal.h"
+#include "core/dom/shadow/InsertionPoint.h"
 #include "core/html/HTMLOptGroupElement.h"
 #include "core/layout/LayoutObject.h"
 #include "core/style/ComputedStyle.h"
@@ -41,7 +42,7 @@ inline const ComputedStyle* Node::computedStyle() const
 inline ComputedStyle* Node::mutableComputedStyle() const
 {
     if (LayoutObject* layoutObject = this->layoutObject())
-        return const_cast<ComputedStyle*>(layoutObject->style());
+        return layoutObject->mutableStyle();
     // <option> and <optgroup> can be styled even if they don't get layout objects,
     // so they store their style internally and return it through nonLayoutObjectComputedStyle().
     // We check here explicitly to avoid the virtual call in the common case.
@@ -52,7 +53,9 @@ inline ComputedStyle* Node::mutableComputedStyle() const
 
 inline const ComputedStyle* Node::parentComputedStyle() const
 {
-    ContainerNode* parent = NodeRenderingTraversal::parent(*this);
+    if (isActiveInsertionPoint(*this))
+        return 0;
+    ContainerNode* parent = LayoutTreeBuilderTraversal::parent(*this);
     return parent ? parent->computedStyle() : 0;
 }
 

@@ -5,6 +5,7 @@
 #ifndef TextPainter_h
 #define TextPainter_h
 
+#include "core/CoreExport.h"
 #include "core/layout/line/FloatToLayoutUnit.h"
 #include "core/style/ComputedStyleConstants.h"
 #include "platform/fonts/TextBlob.h"
@@ -26,7 +27,7 @@ class ShadowList;
 class TextRun;
 struct TextRunPaintInfo;
 
-class TextPainter {
+class CORE_EXPORT TextPainter {
 public:
     struct Style;
 
@@ -41,6 +42,7 @@ public:
     void paint(int startOffset, int endOffset, int length, const Style&, TextBlobPtr* cachedTextBlob = 0);
 
     struct Style {
+        Color currentColor;
         Color fillColor;
         Color strokeColor;
         Color emphasisMarkColor;
@@ -49,7 +51,8 @@ public:
 
         bool operator==(const Style& other)
         {
-            return fillColor == other.fillColor
+            return currentColor == other.currentColor
+                && fillColor == other.fillColor
                 && strokeColor == other.strokeColor
                 && emphasisMarkColor == other.emphasisMarkColor
                 && strokeWidth == other.strokeWidth

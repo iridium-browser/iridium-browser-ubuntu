@@ -48,8 +48,6 @@ class WebFrame;
 class WebLocalFrame;
 class WebMIDIAccessor;
 class WebMIDIAccessorClient;
-class WebMIDIClient;
-class WebMIDIClientMock;
 class WebNode;
 class WebPlugin;
 class WebRange;
@@ -124,11 +122,10 @@ class WebTestProxyBase {
   void DidCloseChooser();
   bool IsChooserShown();
 
-  void DisplayAsyncThen(const base::Closure& callback);
+  void LayoutAndPaintAsyncThen(const base::Closure& callback);
 
   void GetScreenOrientationForTesting(blink::WebScreenInfo&);
   MockScreenOrientationClient* GetScreenOrientationClientMock();
-  blink::WebMIDIClientMock* GetMIDIClientMock();
   MockWebSpeechRecognizer* GetSpeechRecognizerMock();
   MockCredentialManagerClient* GetCredentialManagerClientMock();
 
@@ -168,7 +165,6 @@ class WebTestProxyBase {
                        const blink::WebContextMenuData& data);
   blink::WebUserMediaClient* GetUserMediaClient();
   void PrintPage(blink::WebLocalFrame* frame);
-  blink::WebMIDIClient* GetWebMIDIClient();
   blink::WebSpeechRecognizer* GetSpeechRecognizer();
   bool RequestPointerLock();
   void RequestPointerUnlock();
@@ -245,8 +241,9 @@ class WebTestProxyBase {
   void CheckDone(blink::WebLocalFrame* frame, CheckDoneReason reason);
   void AnimateNow();
   void DrawSelectionRect(SkCanvas* canvas);
-  void DidCapturePixelsAsync(const base::Callback<void(const SkBitmap&)>& callback, const SkBitmap& bitmap);
-  void DidDisplayAsync(const base::Closure& callback, const SkBitmap& bitmap);
+  void DidCapturePixelsAsync(
+      const base::Callback<void(const SkBitmap&)>& callback,
+      const SkBitmap& bitmap);
 
   blink::WebWidget* web_widget() const { return web_widget_; }
 
@@ -268,7 +265,6 @@ class WebTestProxyBase {
   int chooser_count_;
 
   scoped_ptr<MockCredentialManagerClient> credential_manager_client_;
-  scoped_ptr<blink::WebMIDIClientMock> midi_client_;
   scoped_ptr<MockWebSpeechRecognizer> speech_recognizer_;
   scoped_ptr<MockScreenOrientationClient> screen_orientation_client_;
 

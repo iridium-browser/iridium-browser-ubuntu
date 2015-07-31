@@ -4677,11 +4677,124 @@ static void testRect3(skiatest::Reporter* reporter, const char* filename) {
     testSimplify(reporter, path, filename);
 }
 
+static void testRect4(skiatest::Reporter* reporter, const char* filename) {
+    SkPath path;
+    path.setFillType(SkPath::kEvenOdd_FillType);
+    path.addRect(0, 0, 30, 60, SkPath::kCCW_Direction);
+    path.addRect(10, 0, 40, 30, SkPath::kCCW_Direction);
+    path.addRect(20, 0, 30, 40, SkPath::kCCW_Direction);
+    path.addRect(32, 0, 36, 41, SkPath::kCCW_Direction);
+    testSimplify(reporter, path, filename);
+}
+
+static void testQuads62(skiatest::Reporter* reporter, const char* filename) {
+    SkPath path;
+    path.moveTo(3, 2);
+    path.quadTo(1, 3, 3, 3);
+    path.lineTo(3, 3);
+    path.close();
+    path.moveTo(0, 0);
+    path.lineTo(2, 0);
+    path.quadTo(1, 3, 3, 3);
+    path.close();
+    testSimplify(reporter, path, filename);
+}
+
+static void testQuads63(skiatest::Reporter* reporter,const char* filename) {
+    SkPath path;
+    path.moveTo(3, 0);
+    path.quadTo(0, 1, 1, 2);
+    path.lineTo(3, 3);
+    path.close();
+    path.moveTo(0, 0);
+    path.lineTo(1, 1);
+    path.quadTo(0, 2, 3, 3);
+    path.close();
+    testSimplify(reporter, path, filename);
+}
+
+static void testQuads64(skiatest::Reporter* reporter,const char* filename) {
+    SkPath path;
+    path.moveTo(3, 0);
+    path.quadTo(0, 1, 1, 2);
+    path.lineTo(2, 2);
+    path.close();
+    path.moveTo(1, 0);
+    path.lineTo(1, 1);
+    path.quadTo(0, 2, 3, 3);
+    path.close();
+    testSimplify(reporter, path, filename);
+}
+
+static void testTriangle1(skiatest::Reporter* reporter,const char* filename) {
+    SkPath path;
+    path.moveTo(0, 0);
+    path.lineTo(1, 0);
+    path.lineTo(2, 3);
+    path.close();
+    path.moveTo(0, 0);
+    path.lineTo(1, 2);
+    path.lineTo(1, 0);
+    path.close();
+    testSimplify(reporter, path, filename);
+}
+
+static void testTriangle2(skiatest::Reporter* reporter,const char* filename) {
+    SkPath path;
+    path.moveTo(0, 0);
+    path.lineTo(1, 0);
+    path.lineTo(0, 1);
+    path.close();
+    path.moveTo(2, 0);
+    path.lineTo(0, 2);
+    path.lineTo(2, 2);
+    path.close();
+    testSimplify(reporter, path, filename);
+}
+
+static void testArc(skiatest::Reporter* reporter,const char* filename) {
+    SkRect r = SkRect::MakeWH(150, 100);
+    SkPath path;
+    path.arcTo(r, 0, 0.0025f, false);
+    testSimplify(reporter, path, filename);
+}
+
+static void testIssue3838(skiatest::Reporter* reporter,const char* filename) {
+    SkPath path;
+    path.moveTo(220, 170);
+    path.lineTo(200, 170);
+    path.lineTo(200, 190);
+    path.lineTo(180, 190);
+    path.lineTo(180, 210);
+    path.lineTo(200, 210);
+    path.lineTo(200, 250);
+    path.lineTo(260, 250);
+    path.lineTo(260, 190);
+    path.lineTo(220, 190);
+    path.lineTo(220, 170);
+    path.close();
+    path.moveTo(220, 210);
+    path.lineTo(220, 230);
+    path.lineTo(240, 230);
+    path.lineTo(240, 210);
+    path.lineTo(220, 210);
+    path.close();
+    testSimplify(reporter, path, filename);
+}
+
 static void (*skipTest)(skiatest::Reporter* , const char* filename) = 0;
-static void (*firstTest)(skiatest::Reporter* , const char* filename) = testCubic2;
+static void (*firstTest)(skiatest::Reporter* , const char* filename) = 0;
 static void (*stopTest)(skiatest::Reporter* , const char* filename) = 0;
 
 static TestDesc tests[] = {
+    TEST(testIssue3838),
+    TEST(testArc),
+    TEST(testTriangle2),
+    TEST(testTriangle1),
+    TEST(testQuads64),
+    TEST(testQuads63),
+    TEST(testQuads62),
+    TEST(testRect4),
     TEST(testRect3),
     TEST(testQuadralateral10),
     TEST(testQuads61),

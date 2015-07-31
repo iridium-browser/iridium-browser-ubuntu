@@ -14,6 +14,7 @@
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkImageGenerator.h"
 #include "third_party/skia/include/gpu/GrContext.h"
+#include "third_party/skia/include/gpu/GrTextureProvider.h"
 #include "third_party/skia/include/gpu/SkGrPixelRef.h"
 #include "ui/gfx/skbitmap_operations.h"
 
@@ -105,13 +106,14 @@ bool AllocateSkBitmapTexture(GrContext* gr,
   // Use kRGBA_8888_GrPixelConfig, not kSkia8888_GrPixelConfig, to avoid
   // RGBA to BGRA conversion.
   desc.fConfig = kRGBA_8888_GrPixelConfig;
-  desc.fFlags = kRenderTarget_GrTextureFlagBit | kNoStencil_GrTextureFlagBit;
+  desc.fFlags = kRenderTarget_GrSurfaceFlag;
   desc.fSampleCnt = 0;
   desc.fOrigin = kTopLeft_GrSurfaceOrigin;
   desc.fWidth = size.width();
   desc.fHeight = size.height();
   skia::RefPtr<GrTexture> texture = skia::AdoptRef(
-      gr->refScratchTexture(desc, GrContext::kExact_ScratchTexMatch));
+      gr->textureProvider()->refScratchTexture(
+          desc, GrTextureProvider::kExact_ScratchTexMatch));
   if (!texture.get())
     return false;
 
@@ -170,7 +172,11 @@ class SyncPointClientImpl : public VideoFrame::SyncPointClient {
 // Generates an RGB image from a VideoFrame. Convert YUV to RGB plain on GPU.
 class VideoImageGenerator : public SkImageGenerator {
  public:
-  VideoImageGenerator(const scoped_refptr<VideoFrame>& frame) : frame_(frame) {
+  VideoImageGenerator(const scoped_refptr<VideoFrame>& frame)
+      : SkImageGenerator(
+            SkImageInfo::MakeN32Premul(frame->visible_rect().width(),
+                                       frame->visible_rect().height()))
+      , frame_(frame) {
     DCHECK(frame_.get());
   }
   ~VideoImageGenerator() override {}
@@ -178,14 +184,6 @@ class VideoImageGenerator : public SkImageGenerator {
   void set_frame(const scoped_refptr<VideoFrame>& frame) { frame_ = frame; }
 
  protected:
-  bool onGetInfo(SkImageInfo* info) override {
-    info->fWidth = frame_->visible_rect().width();
-    info->fHeight = frame_->visible_rect().height();
-    info->fColorType = kN32_SkColorType;
-    info->fAlphaType = kPremul_SkAlphaType;
-    return true;
-  }
-
   Result onGetPixels(const SkImageInfo& info,
                      void* pixels,
                      size_t row_bytes,
@@ -607,14 +605,15 @@ void SkCanvasVideoRenderer::CopyVideoFrameTextureToGLTexture(
     bool premultiply_alpha,
     bool flip_y) {
   DCHECK(video_frame && video_frame->format() == VideoFrame::NATIVE_TEXTURE);
-  const gpu::MailboxHolder* mailbox_holder = video_frame->mailbox_holder();
-  DCHECK(mailbox_holder->texture_target == GL_TEXTURE_2D ||
-         mailbox_holder->texture_target == GL_TEXTURE_RECTANGLE_ARB ||
-         mailbox_holder->texture_target == GL_TEXTURE_EXTERNAL_OES);
+  DCHECK_EQ(1u, VideoFrame::NumTextures(video_frame->texture_format()));
+  const gpu::MailboxHolder& mailbox_holder = video_frame->mailbox_holder(0);
+  DCHECK(mailbox_holder.texture_target == GL_TEXTURE_2D ||
+         mailbox_holder.texture_target == GL_TEXTURE_RECTANGLE_ARB ||
+         mailbox_holder.texture_target == GL_TEXTURE_EXTERNAL_OES);
 
-  gl->WaitSyncPointCHROMIUM(mailbox_holder->sync_point);
+  gl->WaitSyncPointCHROMIUM(mailbox_holder.sync_point);
   uint32 source_texture = gl->CreateAndConsumeTextureCHROMIUM(
-      mailbox_holder->texture_target, mailbox_holder->mailbox.name);
+      mailbox_holder.texture_target, mailbox_holder.mailbox.name);
 
   // The video is stored in a unmultiplied format, so premultiply
   // if necessary.

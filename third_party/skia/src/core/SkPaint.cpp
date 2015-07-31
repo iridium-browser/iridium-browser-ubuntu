@@ -116,8 +116,6 @@ SkPaint& SkPaint::operator=(const SkPaint& src) {
 #define COPY(field) field = src.field
 #define REF_COPY(field) SkSafeUnref(field); field = SkSafeRef(src.field)
 
-    SkASSERT(&src);
-
     REF_COPY(fTypeface);
     REF_COPY(fPathEffect);
     REF_COPY(fShader);
@@ -1291,9 +1289,9 @@ static bool justAColor(const SkPaint& paint, SkColor* color) {
     return true;
 }
 
-static SkColor computeLuminanceColor(const SkPaint& paint) {
+SkColor SkPaint::computeLuminanceColor() const {
     SkColor c;
-    if (!justAColor(paint, &c)) {
+    if (!justAColor(*this, &c)) {
         c = SkColorSetRGB(0x7F, 0x80, 0x7F);
     }
     return c;
@@ -1463,7 +1461,7 @@ void SkScalerContext::MakeRec(const SkPaint& paint,
     // these modify fFlags, so do them after assigning fFlags
     rec->setHinting(computeHinting(paint));
 
-    rec->setLuminanceColor(computeLuminanceColor(paint));
+    rec->setLuminanceColor(paint.computeLuminanceColor());
 
     if (NULL == deviceProperties) {
         rec->setDeviceGamma(SK_GAMMA_EXPONENT);
@@ -2139,8 +2137,6 @@ void SkPaint::toString(SkString* str) const {
         str->append(descriptor.getFullName());
         str->append("</dd><dt>Font PS Name:</dt><dd>");
         str->append(descriptor.getPostscriptName());
-        str->append("</dd><dt>Font File Name:</dt><dd>");
-        str->append(descriptor.getFontFileName());
         str->append("</dd>");
     }
 
@@ -2317,7 +2313,7 @@ SkTextToPathIter::SkTextToPathIter( const char text[], size_t length,
         fPaint.setTextSize(SkIntToScalar(SkPaint::kCanonicalTextSizeForPaths));
         fScale = paint.getTextSize() / SkPaint::kCanonicalTextSizeForPaths;
         if (has_thick_frame(fPaint)) {
-            fPaint.setStrokeWidth(SkScalarDiv(fPaint.getStrokeWidth(), fScale));
+            fPaint.setStrokeWidth(fPaint.getStrokeWidth() / fScale);
         }
     } else {
         fScale = SK_Scalar1;

@@ -6,13 +6,13 @@
 
 #include <errno.h>
 #include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -27,6 +27,7 @@
 #include "sandbox/linux/services/syscall_wrappers.h"
 #include "sandbox/linux/services/thread_helpers.h"
 #include "sandbox/linux/system_headers/capability.h"
+#include "sandbox/linux/system_headers/linux_signal.h"
 
 namespace sandbox {
 
@@ -89,9 +90,10 @@ bool ChrootToSafeEmptyDir() {
 #else
 #error "Unsupported architecture"
 #endif
+
   pid = clone(ChrootToSelfFdinfo, stack,
-              CLONE_VM | CLONE_VFORK | CLONE_FS | SIGCHLD, nullptr, nullptr,
-              nullptr, nullptr);
+              CLONE_VM | CLONE_VFORK | CLONE_FS | LINUX_SIGCHLD, nullptr,
+              nullptr, nullptr, nullptr);
   PCHECK(pid != -1);
 
   int status = -1;

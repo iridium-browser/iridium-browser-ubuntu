@@ -32,7 +32,7 @@
 #include "cc/output/filter_operations.h"
 #include "cc/quads/shared_quad_state.h"
 #include "cc/resources/resource_provider.h"
-#include "cc/resources/tile_priority.h"
+#include "cc/tiles/tile_priority.h"
 #include "skia/ext/refptr.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkImageFilter.h"
@@ -59,6 +59,8 @@ class MicroBenchmarkImpl;
 class Occlusion;
 template <typename LayerType>
 class OcclusionTracker;
+class OpacityTree;
+class PrioritizedTile;
 class RenderPass;
 class RenderPassId;
 class Renderer;
@@ -66,6 +68,7 @@ class ScrollbarAnimationController;
 class ScrollbarLayerImplBase;
 class SimpleEnclosedRegion;
 class Tile;
+class TransformTree;
 
 struct AppendQuadsData;
 
@@ -148,6 +151,43 @@ class CC_EXPORT LayerImpl : public LayerAnimationValueObserver,
     return scroll_children_.get();
   }
 
+  void set_property_tree_sequence_number(int sequence_number) {}
+
+  void SetTransformTreeIndex(int index);
+  int transform_tree_index() const { return transform_tree_index_; }
+
+  void SetClipTreeIndex(int index);
+  int clip_tree_index() const { return clip_tree_index_; }
+
+  void SetOpacityTreeIndex(int index);
+  int opacity_tree_index() const { return opacity_tree_index_; }
+
+  void set_offset_to_transform_parent(const gfx::Vector2dF& offset) {
+    offset_to_transform_parent_ = offset;
+    SetNeedsPushProperties();
+  }
+  gfx::Vector2dF offset_to_transform_parent() const {
+    return offset_to_transform_parent_;
+  }
+
+  const gfx::Rect& visible_rect_from_property_trees() const {
+    return visible_rect_from_property_trees_;
+  }
+  void set_visible_rect_from_property_trees(const gfx::Rect& rect) {
+    visible_rect_from_property_trees_ = rect;
+  }
+
+  void set_should_flatten_transform_from_property_tree(bool should_flatten) {
+    should_flatten_transform_from_property_tree_ = should_flatten;
+    SetNeedsPushProperties();
+  }
+  bool should_flatten_transform_from_property_tree() const {
+    return should_flatten_transform_from_property_tree_;
+  }
+
+  // For compatibility with Layer.
+  bool has_render_surface() const { return !!render_surface(); }
+
   void SetNumDescendantsThatDrawContent(int num_descendants);
   void SetClipParent(LayerImpl* ancestor);
 
@@ -202,6 +242,13 @@ class CC_EXPORT LayerImpl : public LayerAnimationValueObserver,
   virtual void AppendQuads(RenderPass* render_pass,
                            AppendQuadsData* append_quads_data) {}
   virtual void DidDraw(ResourceProvider* resource_provider);
+
+  // Verify that the resource ids in the quad are valid.
+  void ValidateQuadResources(DrawQuad* quad) const {
+#if DCHECK_IS_ON()
+    ValidateQuadResourcesInternal(quad);
+#endif
+  }
 
   virtual void GetContentsResourceId(ResourceProvider::ResourceId* resource_id,
                                      gfx::Size* resource_size) const;
@@ -553,8 +600,8 @@ class CC_EXPORT LayerImpl : public LayerAnimationValueObserver,
   virtual scoped_ptr<LayerImpl> CreateLayerImpl(LayerTreeImpl* tree_impl);
   virtual void PushPropertiesTo(LayerImpl* layer);
 
-  virtual void GetAllTilesAndPrioritiesForTracing(
-      std::map<const Tile*, TilePriority>* tile_map) const;
+  virtual void GetAllPrioritizedTilesForTracing(
+      std::vector<PrioritizedTile>* prioritized_tiles) const;
   virtual void AsValueInto(base::trace_event::TracedValue* dict) const;
 
   virtual size_t GPUMemoryUsageInBytes() const;
@@ -625,6 +672,8 @@ class CC_EXPORT LayerImpl : public LayerAnimationValueObserver,
   gfx::Rect GetScaledEnclosingRectInTargetSpace(float scale) const;
 
  private:
+  void ValidateQuadResourcesInternal(DrawQuad* quad) const;
+
   void PushScrollOffset(const gfx::ScrollOffset* scroll_offset);
   // If the new scroll offset is assigned from the root scroll offset delegate,
   // LayerImpl won't inform the root scroll offset delegate about the scroll
@@ -666,6 +715,9 @@ class CC_EXPORT LayerImpl : public LayerAnimationValueObserver,
   gfx::Point3F transform_origin_;
   gfx::Size bounds_;
   LayerImpl* scroll_clip_layer_;
+
+  gfx::Vector2dF offset_to_transform_parent_;
+
   bool scrollable_ : 1;
   bool should_scroll_on_main_thread_ : 1;
   bool have_wheel_event_handlers_ : 1;
@@ -680,6 +732,7 @@ class CC_EXPORT LayerImpl : public LayerAnimationValueObserver,
   // Whether the "back" of this layer should draw.
   bool double_sided_ : 1;
   bool should_flatten_transform_ : 1;
+  bool should_flatten_transform_from_property_tree_ : 1;
 
   // Tracks if drawing-related properties have changed since last redraw.
   bool layer_property_changed_ : 1;
@@ -697,6 +750,7 @@ class CC_EXPORT LayerImpl : public LayerAnimationValueObserver,
 
   // Set for the layer that other layers are fixed to.
   bool is_container_for_fixed_position_layers_ : 1;
+
   Region non_fast_scrollable_region_;
   Region touch_event_handler_region_;
   SkColor background_color_;
@@ -711,6 +765,11 @@ class CC_EXPORT LayerImpl : public LayerAnimationValueObserver,
   gfx::Vector2dF scroll_compensation_adjustment_;
 
   int num_descendants_that_draw_content_;
+
+  gfx::Rect visible_rect_from_property_trees_;
+  int transform_tree_index_;
+  int opacity_tree_index_;
+  int clip_tree_index_;
 
   // The global depth value of the center of the layer. This value is used
   // to sort layers from back to front.

@@ -75,7 +75,7 @@ X11DesktopHandler::~X11DesktopHandler() {
 }
 
 void X11DesktopHandler::ActivateWindow(::Window window) {
-  if (current_window_ == window &&
+  if ((current_window_ == None || current_window_ == window) &&
       current_window_active_state_ == NOT_ACTIVE) {
     // |window| is most likely still active wrt to the X server. Undo the
     // changes made in DeactivateWindow().
@@ -136,10 +136,9 @@ bool X11DesktopHandler::IsActiveWindow(::Window window) const {
 }
 
 void X11DesktopHandler::ProcessXEvent(XEvent* event) {
-  // Ignore focus events in modes other than NotifyNormal (i.e. NotifyGrab), as
-  // they are always sent when the pointer is over our window, even if the
-  // input focus is in a different window.
-  if (event->xfocus.mode != NotifyNormal)
+  // Ignore focus events that are being sent only because the pointer is over
+  // our window, even if the input focus is in a different window.
+  if (event->xfocus.detail == NotifyPointer)
     return;
 
   switch (event->type) {

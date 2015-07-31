@@ -5,6 +5,7 @@
 #include "extensions/browser/api/networking_private/networking_private_event_router.h"
 
 #include "base/json/json_writer.h"
+#include "chromeos/network/device_state.h"
 #include "chromeos/network/network_event_log.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
@@ -20,6 +21,7 @@
 #include "extensions/common/api/networking_private.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
+using chromeos::DeviceState;
 using chromeos::NetworkHandler;
 using chromeos::NetworkPortalDetector;
 using chromeos::NetworkState;
@@ -45,7 +47,9 @@ class NetworkingPrivateEventRouterImpl
 
   // NetworkStateHandlerObserver overrides:
   void NetworkListChanged() override;
+  void DeviceListChanged() override;
   void NetworkPropertiesUpdated(const NetworkState* network) override;
+  void DevicePropertiesUpdated(const DeviceState* device) override;
 
   // NetworkPortalDetector::Observer overrides:
   void OnPortalDetectionCompleted(
@@ -78,6 +82,9 @@ NetworkingPrivateEventRouterImpl::NetworkingPrivateEventRouterImpl(
         this, core_api::networking_private::OnNetworksChanged::kEventName);
     event_router->RegisterObserver(
         this, core_api::networking_private::OnNetworkListChanged::kEventName);
+    event_router->RegisterObserver(
+        this,
+        core_api::networking_private::OnDeviceStateListChanged::kEventName);
     event_router->RegisterObserver(
         this,
         core_api::networking_private::OnPortalDetectionCompleted::kEventName);
@@ -125,6 +132,8 @@ void NetworkingPrivateEventRouterImpl::StartOrStopListeningForNetworkChanges() {
       event_router->HasEventListener(
           core_api::networking_private::OnNetworkListChanged::kEventName) ||
       event_router->HasEventListener(
+          core_api::networking_private::OnDeviceStateListChanged::kEventName) ||
+      event_router->HasEventListener(
           core_api::networking_private::OnPortalDetectionCompleted::kEventName);
 
   if (should_listen && !listening_) {
@@ -143,19 +152,14 @@ void NetworkingPrivateEventRouterImpl::StartOrStopListeningForNetworkChanges() {
 
 void NetworkingPrivateEventRouterImpl::NetworkListChanged() {
   EventRouter* event_router = EventRouter::Get(context_);
-  NetworkStateHandler::NetworkStateList networks;
-  NetworkHandler::Get()->network_state_handler()->GetVisibleNetworkList(
-      &networks);
   if (!event_router->HasEventListener(
           core_api::networking_private::OnNetworkListChanged::kEventName)) {
-    // TODO(stevenjb): Remove logging once crbug.com/256881 is fixed
-    // (or at least reduce to LOG_DEBUG). Same with NET_LOG events below.
-    NET_LOG_EVENT("NetworkingPrivate.NetworkListChanged: No Listeners", "");
     return;
   }
 
-  NET_LOG_EVENT("NetworkingPrivate.NetworkListChanged", "");
-
+  NetworkStateHandler::NetworkStateList networks;
+  NetworkHandler::Get()->network_state_handler()->GetVisibleNetworkList(
+      &networks);
   std::vector<std::string> changes;
   for (NetworkStateHandler::NetworkStateList::const_iterator iter =
            networks.begin();
@@ -168,6 +172,21 @@ void NetworkingPrivateEventRouterImpl::NetworkListChanged() {
   scoped_ptr<Event> extension_event(
       new Event(core_api::networking_private::OnNetworkListChanged::kEventName,
                 args.Pass()));
+  event_router->BroadcastEvent(extension_event.Pass());
+}
+
+void NetworkingPrivateEventRouterImpl::DeviceListChanged() {
+  EventRouter* event_router = EventRouter::Get(context_);
+  if (!event_router->HasEventListener(
+          core_api::networking_private::OnDeviceStateListChanged::kEventName)) {
+    return;
+  }
+
+  scoped_ptr<base::ListValue> args(
+      core_api::networking_private::OnDeviceStateListChanged::Create());
+  scoped_ptr<Event> extension_event(new Event(
+      core_api::networking_private::OnDeviceStateListChanged::kEventName,
+      args.Pass()));
   event_router->BroadcastEvent(extension_event.Pass());
 }
 
@@ -188,6 +207,21 @@ void NetworkingPrivateEventRouterImpl::NetworkPropertiesUpdated(
       new Event(core_api::networking_private::OnNetworksChanged::kEventName,
                 args.Pass()));
   event_router->BroadcastEvent(extension_event.Pass());
+}
+
+void NetworkingPrivateEventRouterImpl::DevicePropertiesUpdated(
+    const DeviceState* device) {
+  // DeviceState changes may affect Cellular networks.
+  if (device->type() != shill::kTypeCellular)
+    return;
+
+  NetworkStateHandler::NetworkStateList cellular_networks;
+  NetworkHandler::Get()->network_state_handler()->GetNetworkListByType(
+      chromeos::NetworkTypePattern::Cellular(), false /* configured_only */,
+      true /* visible_only */, -1 /* default limit */, &cellular_networks);
+  for (const NetworkState* network : cellular_networks) {
+    NetworkPropertiesUpdated(network);
+  }
 }
 
 void NetworkingPrivateEventRouterImpl::OnPortalDetectionCompleted(

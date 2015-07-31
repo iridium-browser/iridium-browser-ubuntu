@@ -4,6 +4,7 @@
 
 package org.chromium.mojo.bindings;
 
+import org.chromium.mojo.bindings.Interface.AbstractProxy.HandlerImpl;
 import org.chromium.mojo.bindings.Struct.DataHeader;
 import org.chromium.mojo.system.Core;
 import org.chromium.mojo.system.Handle;
@@ -251,6 +252,7 @@ public class Encoder {
             Interface.Manager<T, ?> manager) {
         if (v == null) {
             encodeInvalidHandle(offset, nullable);
+            encode(0, offset + BindingsHelper.SERIALIZED_HANDLE_SIZE);
             return;
         }
         if (mEncoderState.core == null) {
@@ -259,10 +261,11 @@ public class Encoder {
         }
         // If the instance is a proxy, pass the proxy's handle instead of creating a new stub.
         if (v instanceof Interface.AbstractProxy) {
-            Interface.AbstractProxy proxy = (Interface.AbstractProxy) v;
-            if (proxy.getMessageReceiver() instanceof HandleOwner) {
-                encode(((HandleOwner<?>) proxy.getMessageReceiver()).passHandle(), offset,
+            HandlerImpl handler = ((Interface.AbstractProxy) v).getProxyHandler();
+            if (handler.getMessageReceiver() instanceof HandleOwner) {
+                encode(((HandleOwner<?>) handler.getMessageReceiver()).passHandle(), offset,
                         nullable);
+                encode(handler.getVersion(), offset + BindingsHelper.SERIALIZED_HANDLE_SIZE);
                 return;
             }
             // If the proxy is not over a message pipe, the default case applies.
@@ -271,6 +274,7 @@ public class Encoder {
                 mEncoderState.core.createMessagePipe(null);
         manager.bind(v, handles.first);
         encode(handles.second, offset, nullable);
+        encode(manager.getVersion(), offset + BindingsHelper.SERIALIZED_HANDLE_SIZE);
     }
 
     /**
@@ -415,9 +419,9 @@ public class Encoder {
             return;
         }
         Encoder e = encoderForArray(
-                BindingsHelper.SERIALIZED_HANDLE_SIZE, v.length, offset, expectedLength);
+                BindingsHelper.SERIALIZED_INTERFACE_SIZE, v.length, offset, expectedLength);
         for (int i = 0; i < v.length; ++i) {
-            e.encode(v[i], DataHeader.HEADER_SIZE + BindingsHelper.SERIALIZED_HANDLE_SIZE * i,
+            e.encode(v[i], DataHeader.HEADER_SIZE + BindingsHelper.SERIALIZED_INTERFACE_SIZE * i,
                     BindingsHelper.isElementNullable(arrayNullability), manager);
         }
     }

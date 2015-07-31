@@ -9,15 +9,12 @@ import android.animation.AnimatorListenerAdapter;
 import android.animation.AnimatorSet;
 import android.animation.ObjectAnimator;
 import android.animation.PropertyValuesHolder;
-import android.annotation.TargetApi;
-import android.os.Build;
 import android.view.View;
 import android.view.ViewTreeObserver;
 import android.view.animation.AccelerateDecelerateInterpolator;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
 
 import java.util.ArrayList;
@@ -122,7 +119,7 @@ public class AnimationHelper implements ViewTreeObserver.OnGlobalLayoutListener 
      */
     @Override
     public void onGlobalLayout() {
-        ApiCompatibilityUtils.removeOnGlobalLayoutListener(mTargetWrapperView, this);
+        mTargetWrapperView.getViewTreeObserver().removeOnGlobalLayoutListener(this);
         continueAnimation();
     }
 
@@ -218,15 +215,13 @@ public class AnimationHelper implements ViewTreeObserver.OnGlobalLayoutListener 
                 mTargetWrapperView.startTransition();
             }
 
-            @TargetApi(Build.VERSION_CODES.JELLY_BEAN)
             @Override
             public void onAnimationEnd(Animator animation) {
                 mTargetWrapperView.finishTransition();
                 mContainer.finishTransition();
 
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN && mToShow != null
-                        && (mAnimationType == ANIMATION_TYPE_SHOW
-                                || mAnimationType == ANIMATION_TYPE_SWAP)) {
+                if (mToShow != null && (mAnimationType == ANIMATION_TYPE_SHOW
+                        || mAnimationType == ANIMATION_TYPE_SWAP)) {
                     TextView messageView = (TextView) mToShow.findViewById(R.id.infobar_message);
                     if (messageView != null) {
                         mToShow.announceForAccessibility(messageView.getText());

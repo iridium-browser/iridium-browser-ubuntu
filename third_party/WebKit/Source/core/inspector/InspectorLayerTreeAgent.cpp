@@ -68,7 +68,7 @@ inline String idForLayer(const GraphicsLayer* graphicsLayer)
     return String::number(graphicsLayer->platformLayer()->id());
 }
 
-static PassRefPtr<TypeBuilder::LayerTree::ScrollRect> buildScrollRect(const blink::WebRect& rect, const TypeBuilder::LayerTree::ScrollRect::Type::Enum& type)
+static PassRefPtr<TypeBuilder::LayerTree::ScrollRect> buildScrollRect(const WebRect& rect, const TypeBuilder::LayerTree::ScrollRect::Type::Enum& type)
 {
     RefPtr<TypeBuilder::DOM::Rect> rectObject = TypeBuilder::DOM::Rect::create()
         .setX(rect.x)
@@ -84,7 +84,7 @@ static PassRefPtr<TypeBuilder::LayerTree::ScrollRect> buildScrollRect(const blin
 static PassRefPtr<TypeBuilder::Array<TypeBuilder::LayerTree::ScrollRect> > buildScrollRectsForLayer(GraphicsLayer* graphicsLayer)
 {
     RefPtr<TypeBuilder::Array<TypeBuilder::LayerTree::ScrollRect> > scrollRects = TypeBuilder::Array<TypeBuilder::LayerTree::ScrollRect>::create();
-    blink::WebLayer* webLayer = graphicsLayer->platformLayer();
+    WebLayer* webLayer = graphicsLayer->platformLayer();
     for (size_t i = 0; i < webLayer->nonFastScrollableRegion().size(); ++i) {
         scrollRects->addItem(buildScrollRect(webLayer->nonFastScrollableRegion()[i], TypeBuilder::LayerTree::ScrollRect::Type::RepaintsOnScroll));
     }
@@ -92,7 +92,7 @@ static PassRefPtr<TypeBuilder::Array<TypeBuilder::LayerTree::ScrollRect> > build
         scrollRects->addItem(buildScrollRect(webLayer->touchEventHandlerRegion()[i], TypeBuilder::LayerTree::ScrollRect::Type::TouchEventHandler));
     }
     if (webLayer->haveWheelEventHandlers()) {
-        blink::WebRect webRect(webLayer->position().x, webLayer->position().y, webLayer->bounds().width, webLayer->bounds().height);
+        WebRect webRect(webLayer->position().x, webLayer->position().y, webLayer->bounds().width, webLayer->bounds().height);
         scrollRects->addItem(buildScrollRect(webRect, TypeBuilder::LayerTree::ScrollRect::Type::WheelEventHandler));
     }
     return scrollRects->length() ? scrollRects.release() : nullptr;
@@ -100,7 +100,7 @@ static PassRefPtr<TypeBuilder::Array<TypeBuilder::LayerTree::ScrollRect> > build
 
 static PassRefPtr<TypeBuilder::LayerTree::Layer> buildObjectForLayer(GraphicsLayer* graphicsLayer, int nodeId)
 {
-    blink::WebLayer* webLayer = graphicsLayer->platformLayer();
+    WebLayer* webLayer = graphicsLayer->platformLayer();
     RefPtr<TypeBuilder::LayerTree::Layer> layerObject = TypeBuilder::LayerTree::Layer::create()
         .setLayerId(idForLayer(graphicsLayer))
         .setOffsetX(webLayer->position().x)
@@ -256,7 +256,7 @@ int InspectorLayerTreeAgent::idForNode(Node* node)
 
 DeprecatedPaintLayerCompositor* InspectorLayerTreeAgent::deprecatedPaintLayerCompositor()
 {
-    LayoutView* layoutView = m_pageAgent->inspectedFrame()->contentRenderer();
+    LayoutView* layoutView = m_pageAgent->inspectedFrame()->contentLayoutObject();
     DeprecatedPaintLayerCompositor* compositor = layoutView ? layoutView->compositor() : nullptr;
     return compositor;
 }
@@ -328,10 +328,10 @@ void InspectorLayerTreeAgent::makeSnapshot(ErrorString* errorString, const Strin
     IntSize size = expandedIntSize(layer->size());
 
     SkPictureRecorder pictureRecorder;
-    GraphicsContext recordingContext(pictureRecorder.beginRecording(size.width(), size.height()), nullptr);
+    OwnPtr<GraphicsContext> recordingContext = GraphicsContext::deprecatedCreateWithCanvas(pictureRecorder.beginRecording(size.width(), size.height()));
 
     {
-        DisplayItemListContextRecorder contextRecorder(recordingContext);
+        DisplayItemListContextRecorder contextRecorder(*recordingContext);
         layer->paint(contextRecorder.context(), IntRect(IntPoint(0, 0), size));
     }
 

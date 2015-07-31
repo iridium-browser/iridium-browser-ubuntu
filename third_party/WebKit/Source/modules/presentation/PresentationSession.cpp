@@ -5,8 +5,12 @@
 #include "config.h"
 #include "modules/presentation/PresentationSession.h"
 
+#include "core/dom/DOMArrayBuffer.h"
+#include "core/dom/DOMArrayBufferView.h"
 #include "core/dom/Document.h"
+#include "core/dom/ExceptionCode.h"
 #include "core/events/Event.h"
+#include "core/events/MessageEvent.h"
 #include "core/frame/LocalFrame.h"
 #include "modules/EventTargetModules.h"
 #include "modules/presentation/Presentation.h"
@@ -34,6 +38,11 @@ const AtomicString& SessionStateToString(WebPresentationSessionState state)
 
     ASSERT_NOT_REACHED();
     return disconnectedValue;
+}
+
+void throwPresentationDisconnectedError(ExceptionState& exceptionState)
+{
+    exceptionState.throwDOMException(InvalidStateError, "Presentation session is disconnected.");
 }
 
 } // namespace
@@ -90,8 +99,46 @@ const AtomicString& PresentationSession::state() const
     return SessionStateToString(m_state);
 }
 
-void PresentationSession::postMessage(const String& message)
+void PresentationSession::send(const String& message, ExceptionState& exceptionState)
 {
+    if (m_state == WebPresentationSessionState::Disconnected) {
+        throwPresentationDisconnectedError(exceptionState);
+        return;
+    }
+
+    PresentationController* controller = presentationController();
+    if (controller)
+        controller->send(m_url, m_id, message);
+}
+
+void PresentationSession::send(PassRefPtr<DOMArrayBuffer> data, ExceptionState& exceptionState)
+{
+    ASSERT(data && data->buffer());
+    sendInternal(static_cast<const uint8_t*>(data->data()), data->byteLength(), exceptionState);
+}
+
+void PresentationSession::send(PassRefPtr<DOMArrayBufferView> data, ExceptionState& exceptionState)
+{
+    ASSERT(data);
+    sendInternal(static_cast<const uint8_t*>(data->baseAddress()), data->byteLength(), exceptionState);
+}
+
+void PresentationSession::sendInternal(const uint8_t* data, size_t size, ExceptionState& exceptionState)
+{
+    ASSERT(data);
+    if (m_state == WebPresentationSessionState::Disconnected) {
+        throwPresentationDisconnectedError(exceptionState);
+        return;
+    }
+
+    PresentationController* controller = presentationController();
+    if (controller)
+        controller->send(m_url, m_id, data, size);
+}
+
+void PresentationSession::didReceiveTextMessage(const String& message)
+{
+    dispatchEvent(MessageEvent::create(message));
 }
 
 void PresentationSession::close()

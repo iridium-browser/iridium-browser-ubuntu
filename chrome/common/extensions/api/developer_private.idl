@@ -105,6 +105,7 @@ namespace developerPrivate {
     boolean fromIncognito;
     DOMString source;
     DOMString message;
+    long id;
     DOMString manifestKey;
     DOMString? manifestSpecific;
   };
@@ -115,6 +116,7 @@ namespace developerPrivate {
     boolean fromIncognito;
     DOMString source;
     DOMString message;
+    long id;
     ErrorLevel severity;
     DOMString contextUrl;
     long occurrences;
@@ -149,39 +151,47 @@ namespace developerPrivate {
   };
 
   dictionary ExtensionInfo {
-    boolean actionButtonHidden;  // enable_show_button
+    boolean actionButtonHidden;
     DOMString? blacklistText;
     DOMString[] dependentExtensions;
     DOMString description;
-    DisableReasons disableReasons;  //suspicious, corrupt, updaterequired
-    AccessModifier errorCollection;  // errorCollectionEd, wantsErrorCollection;
-    AccessModifier fileAccess;  // allowFileAccess, wantsFileAccess
-    HomePage homePage;  // homepageProvided && homepageUrl
-    DOMString iconUrl;  // icon
+    DisableReasons disableReasons;
+    AccessModifier errorCollection;
+    AccessModifier fileAccess;
+    HomePage homePage;
+    DOMString iconUrl;
     DOMString id;
-    AccessModifier incognitoAccess;  // enabled/can be enabled incognito
+    AccessModifier incognitoAccess;
     boolean installedByCustodian;
     DOMString[] installWarnings;
     DOMString? launchUrl;
-    Location location;  // is_unpacked, is from store, allow reload
+    Location location;
     DOMString? locationText;
     ManifestError[] manifestErrors;
-    boolean mustRemainInstalled;  // recommendedInstall
+    boolean mustRemainInstalled;
     DOMString name;
     boolean offlineEnabled;
     OptionsPage? optionsPage;
     DOMString? path;
     DOMString? policyText;
     DOMString? prettifiedPath;
-    AccessModifier runOnAllUrls;  // allowAllUrls, showAllUrls
+    AccessModifier runOnAllUrls;
     RuntimeError[] runtimeErrors;
-    DOMString[] runtimeWarnings;  // warnings
+    DOMString[] runtimeWarnings;
     ExtensionState state;
-    ExtensionType type;  // is_hosted_app, is_platform_app, etc
+    ExtensionType type;
     DOMString updateUrl;
-    boolean userMayModify;  // managed install
+    boolean userMayModify;
     DOMString version;
     ExtensionView[] views;
+  };
+
+  dictionary ProfileInfo {
+    boolean appInfoDialogEnabled;
+    boolean canLoadUnpacked;
+    boolean inDeveloperMode;
+    boolean isIncognitoAvailable;
+    boolean isSupervised;
   };
 
   // DEPRECATED: Prefer ExtensionInfo.
@@ -235,6 +245,10 @@ namespace developerPrivate {
     boolean? showActionButton;
   };
 
+  dictionary ProfileConfigurationUpdate {
+    boolean? inDeveloperMode;
+  };
+
   dictionary ReloadOptions {
     // If false, an alert dialog will show in the event of a reload error.
     // Defaults to false.
@@ -272,7 +286,9 @@ namespace developerPrivate {
     VIEW_REGISTERED,
     // window / view closed.
     VIEW_UNREGISTERED,
-    ERROR_ADDED
+    ERROR_ADDED,
+    ERRORS_REMOVED,
+    PREFS_CHANGED
   };
 
   dictionary PackDirectoryResponse {
@@ -296,6 +312,7 @@ namespace developerPrivate {
   dictionary EventData {
     EventType event_type;
     DOMString item_id;
+    ExtensionInfo? extensionInfo;
   };
 
   dictionary RequestFileSourceProperties {
@@ -374,6 +391,7 @@ namespace developerPrivate {
   callback ExtensionInfosCallback = void (ExtensionInfo[] result);
   callback ExtensionInfoCallback = void (ExtensionInfo result);
   callback ItemsInfoCallback = void (ItemInfo[] result);
+  callback ProfileInfoCallback = void (ProfileInfo info);
   callback GetProjectsInfoCallback = void (ProjectInfo[] result);
   callback PathCallback = void (DOMString path);
   callback PackCallback = void (PackDirectoryResponse response);
@@ -407,6 +425,15 @@ namespace developerPrivate {
         boolean includeDisabled,
         boolean includeTerminated,
         ItemsInfoCallback callback);
+
+    // Returns the current profile's configuration.
+    static void getProfileConfiguration(ProfileInfoCallback callback);
+
+    // Updates the active profile.
+    // |update| : The parameters for updating the profile's configuration.  Any
+    //     properties omitted from |update| will not be changed.
+    static void updateProfileConfiguration(ProfileConfigurationUpdate update,
+                                           optional VoidCallback callback);
 
     // Opens a permissions dialog.
     // |extensionId| : The id of the extension to show permissions for.
@@ -470,10 +497,24 @@ namespace developerPrivate {
                              optional VoidCallback callback);
 
     // Delete reported extension erors.
-    // | properties | : The properties specifying the errors to remove.
+    // |properties| : The properties specifying the errors to remove.
     static void deleteExtensionErrors(
         DeleteExtensionErrorsProperties properties,
         optional VoidCallback callback);
+
+    // Repairs the extension specified.
+    // |extensionId| : The id of the extension to repair.
+    static void repairExtension(DOMString extensionId,
+                                optional VoidCallback callback);
+
+    // Shows the options page for the extension specified.
+    // |extensionId| : The id of the extension to show the options page for.
+    static void showOptions(DOMString extensionId,
+                            optional VoidCallback callback);
+
+    // Shows the path of the extension specified.
+    // |extensionId| : The id of the extension to show the path for.
+    static void showPath(DOMString extensionId, optional VoidCallback callback);
 
     [nocompile, deprecated="Use management.setEnabled"]
         static void enable(DOMString id,

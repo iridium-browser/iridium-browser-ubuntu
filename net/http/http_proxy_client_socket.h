@@ -20,8 +20,6 @@
 #include "net/log/net_log.h"
 #include "net/socket/ssl_client_socket.h"
 
-class GURL;
-
 namespace net {
 
 class AddressList;
@@ -39,7 +37,6 @@ class HttpProxyClientSocket : public ProxyClientSocket {
   // by the time Connect() is called.  If tunnel is true then on Connect()
   // this socket will establish an Http tunnel.
   HttpProxyClientSocket(ClientSocketHandle* transport_socket,
-                        const GURL& request_url,
                         const std::string& user_agent,
                         const HostPortPair& endpoint,
                         const HostPortPair& proxy_server,
@@ -75,6 +72,9 @@ class HttpProxyClientSocket : public ProxyClientSocket {
   bool WasNpnNegotiated() const override;
   NextProto GetNegotiatedProtocol() const override;
   bool GetSSLInfo(SSLInfo* ssl_info) override;
+  void GetConnectionAttempts(ConnectionAttempts* out) const override;
+  void ClearConnectionAttempts() override {}
+  void AddConnectionAttempts(const ConnectionAttempts& attempts) override {}
 
   // Socket implementation.
   int Read(IOBuffer* buf,

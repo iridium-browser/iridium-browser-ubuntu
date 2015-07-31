@@ -237,7 +237,17 @@ void DesktopWindowTreeHostX11::SwapNonClientEventHandler(
   x11_non_client_event_filter_ = handler.Pass();
 }
 
-void DesktopWindowTreeHostX11::CleanUpWindowList() {
+void DesktopWindowTreeHostX11::CleanUpWindowList(
+    void (*func)(aura::Window* window)) {
+  if (!open_windows_)
+    return;
+  while (!open_windows_->empty()) {
+    XID xid = open_windows_->front();
+    func(GetContentWindowForXID(xid));
+    if (!open_windows_->empty() && open_windows_->front() == xid)
+      open_windows_->erase(open_windows_->begin());
+  }
+
   delete open_windows_;
   open_windows_ = NULL;
 }
@@ -368,9 +378,21 @@ void DesktopWindowTreeHostX11::ShowWindowWithState(
   if (!window_mapped_)
     MapWindow(show_state);
 
-  if (show_state == ui::SHOW_STATE_NORMAL ||
-      show_state == ui::SHOW_STATE_MAXIMIZED) {
-    Activate();
+  switch (show_state) {
+    case ui::SHOW_STATE_NORMAL:
+      Activate();
+      break;
+    case ui::SHOW_STATE_MAXIMIZED:
+      Maximize();
+      break;
+    case ui::SHOW_STATE_MINIMIZED:
+      Minimize();
+      break;
+    case ui::SHOW_STATE_FULLSCREEN:
+      SetFullscreen(true);
+      break;
+    default:
+      break;
   }
 
   native_widget_delegate_->AsWidget()->SetInitialFocus(show_state);
@@ -1609,6 +1631,8 @@ void DesktopWindowTreeHostX11::MapWindow(ui::WindowShowState show_state) {
   if (ui::X11EventSource::GetInstance())
     ui::X11EventSource::GetInstance()->BlockUntilWindowMapped(xwindow_);
   window_mapped_ = true;
+
+  UpdateMinAndMaxSize();
 
   // Some WMs only respect maximize hints after the window has been mapped.
   // Check whether we need to re-do a maximization.

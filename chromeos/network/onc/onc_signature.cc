@@ -67,6 +67,7 @@ const OncFieldSignature eap_fields[] = {
     {::onc::eap::kServerCARef, &kStringSignature},
     {::onc::eap::kServerCARefs, &kStringListSignature},
     {::onc::eap::kUseSystemCAs, &kBoolSignature},
+    {::onc::eap::kUseProactiveKeyCaching, &kBoolSignature},
     {NULL}};
 
 const OncFieldSignature ipsec_fields[] = {
@@ -95,9 +96,10 @@ const OncFieldSignature xauth_fields[] = {
 
 const OncFieldSignature l2tp_fields[] = {
     {::onc::kRecommended, &kRecommendedSignature},
-    {::onc::vpn::kPassword, &kStringSignature},
-    {::onc::vpn::kSaveCredentials, &kBoolSignature},
-    {::onc::vpn::kUsername, &kStringSignature},
+    {::onc::l2tp::kPassword, &kStringSignature},
+    {::onc::l2tp::kSaveCredentials, &kBoolSignature},
+    {::onc::l2tp::kUsername, &kStringSignature},
+    {::onc::l2tp::kLcpEchoDisabled, &kBoolSignature},
     {NULL}};
 
 const OncFieldSignature openvpn_fields[] = {
@@ -209,6 +211,7 @@ const OncFieldSignature wifi_fields[] = {
     {::onc::wifi::kHexSSID, &kStringSignature},
     {::onc::wifi::kHiddenSSID, &kBoolSignature},
     {::onc::wifi::kPassphrase, &kStringSignature},
+    {::onc::wifi::kRoamThreshold, &kIntegerSignature},
     {::onc::wifi::kSSID, &kStringSignature},
     {::onc::wifi::kSecurity, &kStringSignature},
     {NULL}};
@@ -228,6 +231,12 @@ const OncFieldSignature wimax_fields[] = {
 
 const OncFieldSignature wimax_with_state_fields[] = {
     {::onc::wimax::kSignalStrength, &kIntegerSignature},
+    {NULL}};
+
+const OncFieldSignature cellular_payment_portal_fields[] = {
+    {::onc::cellular_payment_portal::kMethod, &kStringSignature},
+    {::onc::cellular_payment_portal::kPostData, &kStringSignature},
+    {::onc::cellular_payment_portal::kUrl, &kStringSignature},
     {NULL}};
 
 const OncFieldSignature cellular_provider_fields[] = {
@@ -287,6 +296,7 @@ const OncFieldSignature cellular_with_state_fields[] = {
     {::onc::cellular::kMIN, &kStringSignature},
     {::onc::cellular::kModelID, &kStringSignature},
     {::onc::cellular::kNetworkTechnology, &kStringSignature},
+    {::onc::cellular::kPaymentPortal, &kCellularPaymentPortalSignature},
     {::onc::cellular::kPRLVersion, &kIntegerSignature},
     {::onc::cellular::kRoamingState, &kStringSignature},
     {::onc::cellular::kServingOperator, &kCellularProviderSignature},
@@ -471,6 +481,10 @@ const OncValueSignature kCellularWithStateSignature = {
     cellular_with_state_fields,
     NULL,
     &kCellularSignature};
+const OncValueSignature kCellularPaymentPortalSignature = {
+    base::Value::TYPE_DICTIONARY,
+    cellular_payment_portal_fields,
+    NULL};
 const OncValueSignature kCellularProviderSignature = {
     base::Value::TYPE_DICTIONARY,
     cellular_provider_fields,

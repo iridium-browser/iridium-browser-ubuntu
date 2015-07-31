@@ -114,6 +114,11 @@ class VirtualSocketServer : public SocketServer, public sigslot::has_slots<> {
   // Sets the next port number to use for testing.
   void SetNextPortForTesting(uint16 port);
 
+  // Close a pair of Tcp connections by addresses. Both connections will have
+  // its own OnClose invoked.
+  bool CloseTcpConnections(const SocketAddress& addr_local,
+                           const SocketAddress& addr_remote);
+
  protected:
   // Returns a new IP not used before in this network.
   IPAddress GetNextIP(int family);
@@ -230,7 +235,7 @@ class VirtualSocketServer : public SocketServer, public sigslot::has_slots<> {
   CriticalSection delay_crit_;
 
   double drop_prob_;
-  DISALLOW_EVIL_CONSTRUCTORS(VirtualSocketServer);
+  DISALLOW_COPY_AND_ASSIGN(VirtualSocketServer);
 };
 
 // Implements the socket interface using the virtual network.  Packets are

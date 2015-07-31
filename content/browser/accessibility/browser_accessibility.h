@@ -114,6 +114,14 @@ class CONTENT_EXPORT BrowserAccessibility {
 
   // Searches in the given text and from the given offset until the start of
   // the next or previous word is found and returns its position.
+  // In case there is no word boundary before or after the given offset, it
+  // returns one past the last character, i.e. the text's length.
+  // If the given offset is already at the start of a word, returns the start
+  // of the next word if the search is forwards and the given offset if it is
+  // backwards.
+  // If the start offset is equal to -1 and the search is in the forwards
+  // direction, returns the start boundary of the first word.
+  // Start offsets that are not in the range -1 to text length are invalid.
   int GetWordStartBoundary(
       int start, ui::TextBoundaryDirection direction) const;
 
@@ -164,7 +172,6 @@ class CONTENT_EXPORT BrowserAccessibility {
 
   typedef base::StringPairs HtmlAttributes;
   const HtmlAttributes& GetHtmlAttributes() const;
-
 
   // Returns true if this is a native platform-specific object, vs a
   // cross-platform generic object. Don't call ToBrowserAccessibilityXXX if
@@ -253,6 +260,9 @@ class CONTENT_EXPORT BrowserAccessibility {
 
   // True if this is a web area, and its grandparent is a presentational iframe.
   bool IsWebAreaForPresentationalIframe() const;
+
+  // Is any control, like a button, text field, etc.
+  bool IsControl() const;
 
  protected:
   BrowserAccessibility();

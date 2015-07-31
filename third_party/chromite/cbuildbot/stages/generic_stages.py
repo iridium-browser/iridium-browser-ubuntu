@@ -13,6 +13,7 @@ import os
 import re
 import sys
 import time
+import traceback
 
 # We import mox so that we can identify mox exceptions and pass them through
 # in our exception handling code.
@@ -28,6 +29,7 @@ from chromite.cbuildbot import results_lib
 from chromite.cbuildbot import constants
 from chromite.cbuildbot import repository
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import gs
 from chromite.lib import osutils
 from chromite.lib import parallel
@@ -342,7 +344,7 @@ class BuilderStage(object):
     if issubclass(exc_type, failures_lib.StepFailure):
       return str(exc_value)
     else:
-      return cros_build_lib.FormatDetailedTraceback(exc_info=exc_info)
+      return ''.join(traceback.format_exception(*exc_info))
 
   @classmethod
   def _HandleExceptionAsWarning(cls, exc_info, retrying=False):
@@ -353,7 +355,7 @@ class BuilderStage(object):
     """
     description = cls._StringifyException(exc_info)
     cros_build_lib.PrintBuildbotStepWarnings()
-    cros_build_lib.Warning(description)
+    logging.warning(description)
     return (results_lib.Results.FORGIVEN, description, retrying)
 
   @classmethod
@@ -372,7 +374,7 @@ class BuilderStage(object):
     retrying = False
     description = cls._StringifyException(exc_info)
     cros_build_lib.PrintBuildbotStepFailure()
-    cros_build_lib.Error(description)
+    logging.error(description)
     return (exc_info[1], description, retrying)
 
   def _HandleStageException(self, exc_info):
@@ -400,10 +402,10 @@ class BuilderStage(object):
     try:
       return self._HandleStageException(exc_info)
     except Exception:
-      cros_build_lib.Error(
+      logging.error(
           'An exception was thrown while running _HandleStageException')
-      cros_build_lib.Error('The original exception was:', exc_info=exc_info)
-      cros_build_lib.Error('The new exception is:', exc_info=True)
+      logging.error('The original exception was:', exc_info=exc_info)
+      logging.error('The new exception is:', exc_info=True)
       return self._HandleExceptionAsError(exc_info)
 
   def HandleSkip(self):
@@ -498,7 +500,7 @@ class NonHaltingBuilderStage(BuilderStage):
       super(NonHaltingBuilderStage, self).Run()
     except failures_lib.StepFailure:
       name = self.__class__.__name__
-      cros_build_lib.Error('Ignoring StepFailure in %s', name)
+      logging.error('Ignoring StepFailure in %s', name)
 
 
 class ForgivingBuilderStage(BuilderStage):
@@ -659,7 +661,7 @@ class BoardSpecificBuilderStage(BuilderStage):
     if pretty_name is None:
       pretty_name = board_attr
 
-    cros_build_lib.Info('Waiting up to %s for %s ...', timeout_str, pretty_name)
+    logging.info('Waiting up to %s for %s ...', timeout_str, pretty_name)
     return self.board_runattrs.GetParallel(board_attr, timeout=timeout)
 
   def GetImageDirSymlink(self, pointer='latest-cbuildbot'):
@@ -864,22 +866,21 @@ class ArchivingStageMixin(object):
     metadata_json = os.path.join(self.archive_path, filename)
 
     # Stages may run in parallel, so we have to do atomic updates on this.
-    cros_build_lib.Info('Writing metadata to %s.', metadata_json)
+    logging.info('Writing metadata to %s.', metadata_json)
     osutils.WriteFile(metadata_json, self._run.attrs.metadata.GetJSON(),
                       atomic=True, makedirs=True)
 
     if upload_queue is not None:
-      cros_build_lib.Info('Adding metadata file %s to upload queue.',
-                          metadata_json)
+      logging.info('Adding metadata file %s to upload queue.', metadata_json)
       upload_queue.put([filename])
     else:
-      cros_build_lib.Info('Uploading metadata file %s now.', metadata_json)
+      logging.info('Uploading metadata file %s now.', metadata_json)
       self.UploadArtifact(filename, archive=False)
 
     build_id, db = self._run.GetCIDBHandle()
     if db:
-      cros_build_lib.Info('Writing updated metadata to database for build_id '
-                          '%s.', build_id)
+      logging.info('Writing updated metadata to database for build_id %s.',
+                   build_id)
       db.UpdateMetadata(build_id, self._run.attrs.metadata)
     else:
-      cros_build_lib.Info('Skipping database update, no database or build_id.')
+      logging.info('Skipping database update, no database or build_id.')

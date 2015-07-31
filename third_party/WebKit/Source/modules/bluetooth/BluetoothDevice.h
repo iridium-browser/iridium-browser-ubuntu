@@ -7,12 +7,14 @@
 
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "platform/heap/Heap.h"
-#include "public/platform/WebBluetoothDevice.h"
+#include "public/platform/modules/bluetooth/WebBluetoothDevice.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
 
+class ScriptPromise;
 class ScriptPromiseResolver;
+class ScriptState;
 
 // BluetoothDevice represents a physical bluetooth device in the DOM. See IDL.
 //
@@ -28,6 +30,8 @@ public:
     BluetoothDevice(const WebBluetoothDevice&);
 
     static BluetoothDevice* create(const WebBluetoothDevice&);
+
+    ScriptPromise connectGATT(ScriptState*);
 
     // Interface required by CallbackPromiseAdapter:
     typedef WebBluetoothDevice WebType;
@@ -45,9 +49,8 @@ public:
     unsigned vendorID(bool& isNull);
     unsigned productID(bool& isNull);
     unsigned productVersion(bool& isNull);
-    bool paired(bool& isNull);
-    bool connected(bool& isNull);
-    Vector<String> uuids(bool& isNull);
+    bool paired();
+    Vector<String> uuids();
 
 private:
     WebBluetoothDevice m_webDevice;

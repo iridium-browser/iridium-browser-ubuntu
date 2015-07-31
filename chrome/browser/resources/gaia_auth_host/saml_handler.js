@@ -157,6 +157,16 @@ cr.define('cr.login', function() {
         {urls: ['<all_urls>'], types: ['main_frame', 'xmlhttprequest']},
         ['blocking', 'responseHeaders']);
 
+    this.webview_.addContentScripts([{
+      name: 'samlInjected',
+      matches: ['http://*/*', 'https://*/*'],
+      js: {
+        code: injectedJs
+      },
+      all_frames: true,
+      run_at: 'document_start'
+    }]);
+
     PostMessageChannel.runAsDaemon(this.onConnected_.bind(this));
   }
 
@@ -223,22 +233,6 @@ cr.define('cr.login', function() {
     },
 
     /**
-     * Injects JS code to all frames.
-     * @private
-     */
-    injectJs_: function() {
-      if (!injectedJs)
-        return;
-
-      // TODO(xiyuan): Replace this with webview.addContentScript.
-      this.webview_.executeScript({
-        code: injectedJs,
-        allFrames: true,
-        runAt: 'document_start'
-      });
-    },
-
-    /**
      * Invoked on the webview's contentload event.
      * @private
      */
@@ -273,7 +267,6 @@ cr.define('cr.login', function() {
       }
 
       this.isSamlPage_ = this.pendingIsSamlPage_;
-      this.injectJs_();
     },
 
     /**
@@ -452,14 +445,6 @@ cr.define('cr.login', function() {
     onGetSAMLFlag_: function(channel, msg) {
       return this.isSamlPage_;
     },
-  };
-
-  /**
-   * Sets the saml injected JS code.
-   * @param {string} samlInjectedJs JS code to inejct for Saml.
-   */
-  SamlHandler.setSamlInjectedJs = function(samlInjectedJs) {
-    injectedJs = samlInjectedJs;
   };
 
   return {

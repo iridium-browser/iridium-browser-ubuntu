@@ -24,6 +24,7 @@
 #include "chrome/common/crash_keys.h"
 #include "chrome/common/pepper_flash.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/secure_origin_whitelist.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/common_resources.h"
 #include "components/dom_distiller/core/url_constants.h"
@@ -73,27 +74,6 @@ const char kPDFPluginOutOfProcessMimeType[] =
     "application/x-google-chrome-pdf";
 const uint32 kPDFPluginPermissions = ppapi::PERMISSION_PRIVATE |
                                      ppapi::PERMISSION_DEV;
-
-const char kO1DPluginName[] = "Google Talk Plugin Video Renderer";
-const char kO1DPluginMimeType[] ="application/o1d";
-const char kO1DPluginExtension[] = "";
-const char kO1DPluginDescription[] = "Google Talk Plugin Video Renderer";
-const uint32 kO1DPluginPermissions = ppapi::PERMISSION_PRIVATE |
-                                     ppapi::PERMISSION_DEV;
-
-const char kEffectsPluginName[] = "Google Talk Effects Plugin";
-const char kEffectsPluginMimeType[] ="application/x-ppapi-hangouts-effects";
-const char kEffectsPluginExtension[] = "";
-const char kEffectsPluginDescription[] = "Google Talk Effects Plugin";
-const uint32 kEffectsPluginPermissions = ppapi::PERMISSION_PRIVATE |
-                                         ppapi::PERMISSION_DEV;
-
-const char kGTalkPluginName[] = "Google Talk Plugin";
-const char kGTalkPluginMimeType[] ="application/googletalk";
-const char kGTalkPluginExtension[] = ".googletalk";
-const char kGTalkPluginDescription[] = "Google Talk Plugin";
-const uint32 kGTalkPluginPermissions = ppapi::PERMISSION_PRIVATE |
-                                       ppapi::PERMISSION_DEV;
 
 content::PepperPluginInfo::GetInterfaceFunc g_pdf_get_interface;
 content::PepperPluginInfo::PPP_InitializeModuleFunc g_pdf_initialize_module;
@@ -183,65 +163,6 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
     plugins->push_back(nacl);
   }
 #endif  // !defined(DISABLE_NACL)
-
-  static bool skip_o1d_file_check = false;
-  if (PathService::Get(chrome::FILE_O1D_PLUGIN, &path)) {
-    if (skip_o1d_file_check || base::PathExists(path)) {
-      content::PepperPluginInfo o1d;
-      o1d.path = path;
-      o1d.name = kO1DPluginName;
-      o1d.is_out_of_process = true;
-      o1d.is_sandboxed = false;
-      o1d.permissions = kO1DPluginPermissions;
-      content::WebPluginMimeType o1d_mime_type(kO1DPluginMimeType,
-                                               kO1DPluginExtension,
-                                               kO1DPluginDescription);
-      o1d.mime_types.push_back(o1d_mime_type);
-      plugins->push_back(o1d);
-
-      skip_o1d_file_check = true;
-    }
-  }
-
-  // TODO(vrk): Remove this when NaCl effects plugin replaces the ppapi effects
-  // plugin.
-  static bool skip_effects_file_check = false;
-  if (PathService::Get(chrome::FILE_EFFECTS_PLUGIN, &path)) {
-    if (skip_effects_file_check || base::PathExists(path)) {
-      content::PepperPluginInfo effects;
-      effects.path = path;
-      effects.name = kEffectsPluginName;
-      effects.is_out_of_process = true;
-      effects.is_sandboxed = true;
-      effects.permissions = kEffectsPluginPermissions;
-      content::WebPluginMimeType effects_mime_type(kEffectsPluginMimeType,
-                                                   kEffectsPluginExtension,
-                                                   kEffectsPluginDescription);
-      effects.mime_types.push_back(effects_mime_type);
-      plugins->push_back(effects);
-
-      skip_effects_file_check = true;
-    }
-  }
-
-  static bool skip_gtalk_file_check = false;
-  if (PathService::Get(chrome::FILE_GTALK_PLUGIN, &path)) {
-    if (skip_gtalk_file_check || base::PathExists(path)) {
-      content::PepperPluginInfo gtalk;
-      gtalk.path = path;
-      gtalk.name = kGTalkPluginName;
-      gtalk.is_out_of_process = true;
-      gtalk.is_sandboxed = false;
-      gtalk.permissions = kGTalkPluginPermissions;
-      content::WebPluginMimeType gtalk_mime_type(kGTalkPluginMimeType,
-                                                 kGTalkPluginExtension,
-                                                 kGTalkPluginDescription);
-      gtalk.mime_types.push_back(gtalk_mime_type);
-      plugins->push_back(gtalk);
-
-      skip_gtalk_file_check = true;
-    }
-  }
 
 #if defined(WIDEVINE_CDM_AVAILABLE) && defined(ENABLE_PEPPER_CDMS) && \
     !defined(WIDEVINE_CDM_IS_COMPONENT)
@@ -631,3 +552,12 @@ bool ChromeContentClient::GetSandboxProfileForSandboxType(
   return false;
 }
 #endif
+
+void ChromeContentClient::AddSecureSchemesAndOrigins(
+    std::set<std::string>* schemes,
+    std::set<GURL>* origins) {
+  schemes->insert(content::kChromeUIScheme);
+  schemes->insert(extensions::kExtensionScheme);
+  schemes->insert(extensions::kExtensionResourceScheme);
+  GetSecureOriginWhitelist(origins);
+}

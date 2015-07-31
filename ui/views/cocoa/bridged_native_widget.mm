@@ -21,6 +21,7 @@
 #import "ui/views/cocoa/cocoa_mouse_capture.h"
 #import "ui/views/cocoa/bridged_content_view.h"
 #import "ui/views/cocoa/views_nswindow_delegate.h"
+#import "ui/views/cocoa/widget_owner_nswindow_adapter.h"
 #include "ui/views/widget/native_widget_mac.h"
 #include "ui/views/ime/input_method_bridge.h"
 #include "ui/views/ime/null_input_method.h"
@@ -64,9 +65,30 @@ bool PositionWindowInScreenCoordinates(views::Widget* widget,
   return widget && widget->is_top_level();
 }
 
+// Return the content size for a minimum or maximum widget size.
+gfx::Size GetClientSizeForWindowSize(NSWindow* window,
+                                     const gfx::Size& window_size) {
+  NSRect frame_rect =
+      NSMakeRect(0, 0, window_size.width(), window_size.height());
+  // Note gfx::Size will prevent dimensions going negative. They are allowed to
+  // be zero at this point, because Widget::GetMinimumSize() may later increase
+  // the size.
+  return gfx::Size([window contentRectForFrameRect:frame_rect].size);
+}
+
 }  // namespace
 
 namespace views {
+
+// static
+gfx::Size BridgedNativeWidget::GetWindowSizeForClientSize(
+    NSWindow* window,
+    const gfx::Size& content_size) {
+  NSRect content_rect =
+      NSMakeRect(0, 0, content_size.width(), content_size.height());
+  NSRect frame_rect = [window frameRectForContentRect:content_rect];
+  return gfx::Size(NSWidth(frame_rect), NSHeight(frame_rect));
+}
 
 BridgedNativeWidget::BridgedNativeWidget(NativeWidgetMac* parent)
     : native_widget_mac_(parent),
@@ -134,14 +156,17 @@ void BridgedNativeWidget::Init(base::scoped_nsobject<NSWindow> window,
   if (params.parent) {
     // Disallow creating child windows of views not currently in an NSWindow.
     CHECK([params.parent window]);
-    BridgedNativeWidget* parent =
+    BridgedNativeWidget* bridged_native_widget_parent =
         NativeWidgetMac::GetBridgeForNativeWindow([params.parent window]);
-    // The parent could be an NSWindow without an associated Widget. That could
-    // work by observing NSWindowWillCloseNotification, but for now it's not
-    // supported, and there might not be a use-case for that.
-    CHECK(parent);
-    parent_ = parent;
-    parent->child_windows_.push_back(this);
+    // If the parent is another BridgedNativeWidget, just add to the collection
+    // of child windows it owns and manages. Otherwise, create an adapter to
+    // anchor the child widget and observe when the parent NSWindow is closed.
+    if (bridged_native_widget_parent) {
+      parent_ = bridged_native_widget_parent;
+      bridged_native_widget_parent->child_windows_.push_back(this);
+    } else {
+      parent_ = new WidgetOwnerNSWindowAdapter(this, params.parent);
+    }
   }
 
   // Set a meaningful initial bounds. Note that except for frameless widgets
@@ -187,23 +212,32 @@ void BridgedNativeWidget::SetFocusManager(FocusManager* focus_manager) {
 }
 
 void BridgedNativeWidget::SetBounds(const gfx::Rect& new_bounds) {
+  Widget* widget = native_widget_mac_->GetWidget();
+  // -[NSWindow contentMinSize] is only checked by Cocoa for user-initiated
+  // resizes. This is not what toolkit-views expects, so clamp. Note there is
+  // no check for maximum size (consistent with aura::Window::SetBounds()).
+  gfx::Size clamped_content_size =
+      GetClientSizeForWindowSize(window_, new_bounds.size());
+  clamped_content_size.SetToMax(widget->GetMinimumSize());
+
   // A contentRect with zero width or height is a banned practice in ChromeMac,
   // due to unpredictable OSX treatment.
-  DCHECK(!new_bounds.IsEmpty()) << "Zero-sized windows not supported on Mac";
+  DCHECK(!clamped_content_size.IsEmpty())
+      << "Zero-sized windows not supported on Mac";
 
-  if (native_widget_mac_->GetWidget()->IsModal()) {
-    // Modal dialogs are positioned by Cocoa. Just update the size.
-    [window_
-        setContentSize:NSMakeSize(new_bounds.width(), new_bounds.height())];
+  if (!window_visible_ && widget->IsModal()) {
+    // Window-Modal dialogs (i.e. sheets) are positioned by Cocoa when shown for
+    // the first time. They also have no frame, so just update the content size.
+    [window_ setContentSize:NSMakeSize(clamped_content_size.width(),
+                                       clamped_content_size.height())];
     return;
   }
+  gfx::Rect actual_new_bounds(
+      new_bounds.origin(),
+      GetWindowSizeForClientSize(window_, clamped_content_size));
 
-  gfx::Rect actual_new_bounds(new_bounds);
-
-  if (parent_ &&
-      !PositionWindowInScreenCoordinates(native_widget_mac_->GetWidget(),
-                                         widget_type_))
-    actual_new_bounds.Offset(parent_->GetRestoredBounds().OffsetFromOrigin());
+  if (parent_ && !PositionWindowInScreenCoordinates(widget, widget_type_))
+    actual_new_bounds.Offset(parent_->GetChildWindowOffset());
 
   [window_ setFrame:gfx::ScreenRectToNSRect(actual_new_bounds)
             display:YES
@@ -248,17 +282,13 @@ void BridgedNativeWidget::SetVisibilityState(WindowVisibilityState new_state) {
   }
 
   DCHECK(wants_to_be_visible_);
-
-  // If there's a hidden ancestor, return and wait for it to become visible.
-  for (BridgedNativeWidget* ancestor = parent();
-       ancestor;
-       ancestor = ancestor->parent()) {
-    if (!ancestor->window_visible_)
-      return;
-  }
+  // If the parent (or an ancestor) is hidden, return and wait for it to become
+  // visible.
+  if (parent() && !parent()->IsVisibleParent())
+    return;
 
   if (native_widget_mac_->GetWidget()->IsModal()) {
-    NSWindow* parent_window = parent_->ns_window();
+    NSWindow* parent_window = parent_->GetNSWindow();
     DCHECK(parent_window);
 
     [NSApp beginSheet:window_
@@ -277,8 +307,8 @@ void BridgedNativeWidget::SetVisibilityState(WindowVisibilityState new_state) {
     // parent window. So, if there's a parent, order above that. Otherwise, this
     // will order above all windows at the same level.
     NSInteger parent_window_number = 0;
-    if (parent())
-      parent_window_number = [parent()->ns_window() windowNumber];
+    if (parent_)
+      parent_window_number = [parent_->GetNSWindow() windowNumber];
 
     [window_ orderWindow:NSWindowAbove
               relativeTo:parent_window_number];
@@ -331,8 +361,10 @@ void BridgedNativeWidget::SetCursor(NSCursor* cursor) {
 }
 
 void BridgedNativeWidget::OnWindowWillClose() {
-  if (parent_)
+  if (parent_) {
     parent_->RemoveChildWindow(this);
+    parent_ = nullptr;
+  }
   [window_ setDelegate:nil];
   [[NSNotificationCenter defaultCenter] removeObserver:window_delegate_];
   native_widget_mac_->OnWindowWillClose();
@@ -434,7 +466,7 @@ void BridgedNativeWidget::OnVisibilityChangedTo(bool new_visibility) {
     wants_to_be_visible_ = true;
 
     if (parent_)
-      [parent_->ns_window() addChildWindow:window_ ordered:NSWindowAbove];
+      [parent_->GetNSWindow() addChildWindow:window_ ordered:NSWindowAbove];
   } else {
     mouse_capture_.reset();  // Capture on hidden windows is not permitted.
 
@@ -442,7 +474,7 @@ void BridgedNativeWidget::OnVisibilityChangedTo(bool new_visibility) {
     // list. Cocoa's childWindow management breaks down when child windows are
     // hidden.
     if (parent_)
-      [parent_->ns_window() removeChildWindow:window_];
+      [parent_->GetNSWindow() removeChildWindow:window_];
   }
 
   // TODO(tapted): Investigate whether we want this for Mac. This is what Aura
@@ -634,6 +666,34 @@ void BridgedNativeWidget::AcceleratedWidgetHitError() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// BridgedNativeWidget, BridgedNativeWidgetOwner:
+
+NSWindow* BridgedNativeWidget::GetNSWindow() {
+  return window_;
+}
+
+gfx::Vector2d BridgedNativeWidget::GetChildWindowOffset() const {
+  return gfx::ScreenRectFromNSRect([window_ frame]).OffsetFromOrigin();
+}
+
+bool BridgedNativeWidget::IsVisibleParent() const {
+  return parent_ ? window_visible_ && parent_->IsVisibleParent()
+                 : window_visible_;
+}
+
+void BridgedNativeWidget::RemoveChildWindow(BridgedNativeWidget* child) {
+  auto location = std::find(
+      child_windows_.begin(), child_windows_.end(), child);
+  DCHECK(location != child_windows_.end());
+  child_windows_.erase(location);
+
+  // Note the child is sometimes removed already by AppKit. This depends on OS
+  // version, and possibly some unpredictable reference counting. Removing it
+  // here should be safe regardless.
+  [window_ removeChildWindow:child->window_];
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // BridgedNativeWidget, private:
 
 void BridgedNativeWidget::RemoveOrDestroyChildren() {
@@ -646,19 +706,6 @@ void BridgedNativeWidget::RemoveOrDestroyChildren() {
         [child_windows_.back()->ns_window() retain]);
     [child close];
   }
-}
-
-void BridgedNativeWidget::RemoveChildWindow(BridgedNativeWidget* child) {
-  auto location = std::find(
-      child_windows_.begin(), child_windows_.end(), child);
-  DCHECK(location != child_windows_.end());
-  child_windows_.erase(location);
-  child->parent_ = nullptr;
-
-  // Note the child is sometimes removed already by AppKit. This depends on OS
-  // version, and possibly some unpredictable reference counting. Removing it
-  // here should be safe regardless.
-  [window_ removeChildWindow:child->window_];
 }
 
 void BridgedNativeWidget::NotifyVisibilityChangeDown() {

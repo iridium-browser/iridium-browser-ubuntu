@@ -9,8 +9,10 @@
 
 #include "bindings/core/v8/Dictionary.h"
 #include "bindings/core/v8/ExceptionState.h"
+#include "bindings/core/v8/UnionTypesCore.h"
 #include "bindings/core/v8/V8DOMConfiguration.h"
 #include "bindings/core/v8/V8ObjectConstructor.h"
+#include "bindings/core/v8/V8TestDictionary.h"
 #include "bindings/core/v8/V8TestInterfaceEmpty.h"
 #include "core/dom/ContextFeatures.h"
 #include "core/dom/Document.h"
@@ -23,7 +25,7 @@
 
 namespace blink {
 
-const WrapperTypeInfo V8TestInterfaceConstructor::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceConstructor::domTemplate, V8TestInterfaceConstructor::refObject, V8TestInterfaceConstructor::derefObject, V8TestInterfaceConstructor::trace, 0, 0, V8TestInterfaceConstructor::installConditionallyEnabledMethods, V8TestInterfaceConstructor::installConditionallyEnabledProperties, "TestInterfaceConstructor", 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
+const WrapperTypeInfo V8TestInterfaceConstructor::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceConstructor::domTemplate, V8TestInterfaceConstructor::refObject, V8TestInterfaceConstructor::derefObject, V8TestInterfaceConstructor::trace, 0, 0, V8TestInterfaceConstructor::preparePrototypeObject, V8TestInterfaceConstructor::installConditionallyEnabledProperties, "TestInterfaceConstructor", 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
 
 // This static member must be declared by DEFINE_WRAPPERTYPEINFO in TestInterfaceConstructor.h.
 // For details, see the comment of DEFINE_WRAPPERTYPEINFO in
@@ -57,6 +59,7 @@ static void constructor2(const v8::FunctionCallbackInfo<v8::Value>& info)
     Dictionary dictionaryArg;
     Vector<String> sequenceStringArg;
     Vector<Dictionary> sequenceDictionaryArg;
+    HeapVector<LongOrTestDictionary> sequenceLongOrTestDictionaryArg;
     Dictionary optionalDictionaryArg;
     TestInterfaceEmpty* optionalTestInterfaceEmptyArg;
     {
@@ -75,26 +78,29 @@ static void constructor2(const v8::FunctionCallbackInfo<v8::Value>& info)
         dictionaryArg = Dictionary(info[3], info.GetIsolate(), exceptionState);
         if (exceptionState.throwIfNeeded())
             return;
-        sequenceStringArg = toImplArray<String>(info[4], 5, info.GetIsolate(), exceptionState);
+        sequenceStringArg = toImplArray<Vector<String>>(info[4], 5, info.GetIsolate(), exceptionState);
         if (exceptionState.throwIfNeeded())
             return;
-        sequenceDictionaryArg = toImplArray<Dictionary>(info[5], 6, info.GetIsolate(), exceptionState);
+        sequenceDictionaryArg = toImplArray<Vector<Dictionary>>(info[5], 6, info.GetIsolate(), exceptionState);
         if (exceptionState.throwIfNeeded())
             return;
-        if (!isUndefinedOrNull(info[6]) && !info[6]->IsObject()) {
-            exceptionState.throwTypeError("parameter 7 ('optionalDictionaryArg') is not an object.");
+        sequenceLongOrTestDictionaryArg = toImplArray<HeapVector<LongOrTestDictionary>>(info[6], 7, info.GetIsolate(), exceptionState);
+        if (exceptionState.throwIfNeeded())
+            return;
+        if (!isUndefinedOrNull(info[7]) && !info[7]->IsObject()) {
+            exceptionState.throwTypeError("parameter 8 ('optionalDictionaryArg') is not an object.");
             exceptionState.throwIfNeeded();
             return;
         }
-        optionalDictionaryArg = Dictionary(info[6], info.GetIsolate(), exceptionState);
+        optionalDictionaryArg = Dictionary(info[7], info.GetIsolate(), exceptionState);
         if (exceptionState.throwIfNeeded())
             return;
-        optionalTestInterfaceEmptyArg = V8TestInterfaceEmpty::toImplWithTypeCheck(info.GetIsolate(), info[7]);
+        optionalTestInterfaceEmptyArg = V8TestInterfaceEmpty::toImplWithTypeCheck(info.GetIsolate(), info[8]);
     }
     ScriptState* scriptState = ScriptState::current(info.GetIsolate());
     ExecutionContext* executionContext = currentExecutionContext(info.GetIsolate());
     Document& document = *toDocument(currentExecutionContext(info.GetIsolate()));
-    RefPtr<TestInterfaceConstructor> impl = TestInterfaceConstructor::create(scriptState, executionContext, document, doubleArg, stringArg, testInterfaceEmptyArg, dictionaryArg, sequenceStringArg, sequenceDictionaryArg, optionalDictionaryArg, optionalTestInterfaceEmptyArg, exceptionState);
+    RefPtr<TestInterfaceConstructor> impl = TestInterfaceConstructor::create(scriptState, executionContext, document, doubleArg, stringArg, testInterfaceEmptyArg, dictionaryArg, sequenceStringArg, sequenceDictionaryArg, sequenceLongOrTestDictionaryArg, optionalDictionaryArg, optionalTestInterfaceEmptyArg, exceptionState);
     if (exceptionState.hadException()) {
         exceptionState.throwIfNeeded();
         return;
@@ -177,7 +183,7 @@ static void constructor4(const v8::FunctionCallbackInfo<v8::Value>& info)
 static void constructor(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     ExceptionState exceptionState(ExceptionState::ConstructionContext, "TestInterfaceConstructor", info.Holder(), info.GetIsolate());
-    switch (std::min(8, info.Length())) {
+    switch (std::min(9, info.Length())) {
     case 0:
         if (true) {
             TestInterfaceConstructorV8Internal::constructor1(info);
@@ -202,12 +208,6 @@ static void constructor(const v8::FunctionCallbackInfo<v8::Value>& info)
             return;
         }
         break;
-    case 6:
-        if (true) {
-            TestInterfaceConstructorV8Internal::constructor2(info);
-            return;
-        }
-        break;
     case 7:
         if (true) {
             TestInterfaceConstructorV8Internal::constructor2(info);
@@ -220,9 +220,15 @@ static void constructor(const v8::FunctionCallbackInfo<v8::Value>& info)
             return;
         }
         break;
+    case 9:
+        if (true) {
+            TestInterfaceConstructorV8Internal::constructor2(info);
+            return;
+        }
+        break;
     default:
         if (info.Length() >= 0) {
-            throwArityTypeError(exceptionState, "[0, 1, 2, 3, 6, 7, 8]", info.Length());
+            throwArityTypeError(exceptionState, "[0, 1, 2, 3, 7, 8, 9]", info.Length());
             return;
         }
         exceptionState.throwTypeError(ExceptionMessages::notEnoughArguments(0, info.Length()));
@@ -235,7 +241,7 @@ static void constructor(const v8::FunctionCallbackInfo<v8::Value>& info)
 
 } // namespace TestInterfaceConstructorV8Internal
 
-const WrapperTypeInfo V8TestInterfaceConstructorConstructor::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceConstructorConstructor::domTemplate, V8TestInterfaceConstructor::refObject, V8TestInterfaceConstructor::derefObject, V8TestInterfaceConstructor::trace, 0, 0, V8TestInterfaceConstructor::installConditionallyEnabledMethods, V8TestInterfaceConstructor::installConditionallyEnabledProperties, "TestInterfaceConstructor", 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
+const WrapperTypeInfo V8TestInterfaceConstructorConstructor::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceConstructorConstructor::domTemplate, V8TestInterfaceConstructor::refObject, V8TestInterfaceConstructor::derefObject, V8TestInterfaceConstructor::trace, 0, 0, V8TestInterfaceConstructor::preparePrototypeObject, V8TestInterfaceConstructor::installConditionallyEnabledProperties, "TestInterfaceConstructor", 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
 
 static void V8TestInterfaceConstructorConstructorCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
 {

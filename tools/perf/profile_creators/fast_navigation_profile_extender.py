@@ -4,10 +4,8 @@
 import time
 
 from profile_creators import profile_extender
-from telemetry.core import browser_finder
-from telemetry.core import browser_finder_exceptions
 from telemetry.core import exceptions
-from telemetry.core import platform
+from telemetry.core import util
 
 
 class FastNavigationProfileExtender(profile_extender.ProfileExtender):
@@ -22,23 +20,14 @@ class FastNavigationProfileExtender(profile_extender.ProfileExtender):
       with the number of batches, but does not scale with the size of the
       batch.
   """
-  def __init__(self, maximum_batch_size):
+  def __init__(self, finder_options, maximum_batch_size):
     """Initializer.
 
     Args:
       maximum_batch_size: A positive integer indicating the number of tabs to
       simultaneously perform navigations.
     """
-    super(FastNavigationProfileExtender, self).__init__()
-
-    # The path of the profile that the browser will use while it's running.
-    # This member is initialized during SetUp().
-    self._profile_path = None
-
-    # A reference to the browser that will be performing all of the tab
-    # navigations.
-    # This member is initialized during SetUp().
-    self._browser = None
+    super(FastNavigationProfileExtender, self).__init__(finder_options)
 
     # The instance keeps a list of Tabs that can be navigated successfully.
     # This means that the Tab is not crashed, and is processing JavaScript in a
@@ -48,25 +37,36 @@ class FastNavigationProfileExtender(profile_extender.ProfileExtender):
     # The number of tabs to use.
     self._NUM_TABS = maximum_batch_size
 
-    # The amount of time to wait for a batch of pages to finish loading.
-    self._BATCH_PAGE_LOAD_TIMEOUT_IN_SECONDS = 10
+    # The amount of additional time to wait for a batch of pages to finish
+    # loading for each page in the batch.
+    self._BATCH_TIMEOUT_PER_PAGE_IN_SECONDS = 20
 
-    # The default amount of time to wait for the retrieval of the URL of a tab.
-    self._TAB_URL_RETRIEVAL_TIMEOUT_IN_SECONDS = 1
+    # The amount of time to wait for a page to quiesce. Some pages will never
+    # quiesce.
+    self._TIME_TO_WAIT_FOR_PAGE_TO_QUIESCE_IN_SECONDS = 10
 
-  def Run(self, finder_options):
-    """Extends the profile.
-
-    Args:
-      finder_options: An instance of BrowserFinderOptions that contains the
-      directory of the input profile, the directory to place the output
-      profile, and sufficient information to choose a specific browser binary.
-    """
+  def Run(self):
+    """Superclass override."""
     try:
-      self.SetUp(finder_options)
+      self.SetUpBrowser()
       self._PerformNavigations()
     finally:
-      self.TearDown()
+      self.TearDownBrowser()
+
+    # When there hasn't been an exception, verify that the profile was
+    # correctly extended.
+    # TODO(erikchen): I've intentionally omitted my implementation of
+    # VerifyProfileWasExtended() in small_profile_extender, since the profile
+    # is not being correctly extended. http://crbug.com/484833
+    # http://crbug.com/484880
+    self.VerifyProfileWasExtended()
+
+  def VerifyProfileWasExtended(self):
+    """Verifies that the profile was correctly extended.
+
+    Can be overridden by subclasses.
+    """
+    pass
 
   def GetUrlIterator(self):
     """Gets URLs for the browser to navigate to.
@@ -85,32 +85,6 @@ class FastNavigationProfileExtender(profile_extender.ProfileExtender):
     """
     raise NotImplementedError()
 
-  def SetUp(self, finder_options):
-    """Finds the browser, starts the browser, and opens the requisite number of
-    tabs.
-
-    Can be overridden by subclasses. Subclasses must call the super class
-    implementation.
-    """
-    self._profile_path = finder_options.output_profile_path
-    possible_browser = self._GetPossibleBrowser(finder_options)
-
-    assert possible_browser.supports_tab_control
-    assert (platform.GetHostPlatform().GetOSName() in
-        ["win", "mac", "linux"])
-    self._browser = possible_browser.Create(finder_options)
-
-  def TearDown(self):
-    """Teardown that is guaranteed to be executed before the instance is
-    destroyed.
-
-    Can be overridden by subclasses. Subclasses must call the super class
-    implementation.
-    """
-    if self._browser:
-      self._browser.Close()
-      self._browser = None
-
   def CleanUpAfterBatchNavigation(self):
     """A hook for subclasses to perform cleanup after each batch of
     navigations.
@@ -119,17 +93,13 @@ class FastNavigationProfileExtender(profile_extender.ProfileExtender):
     """
     pass
 
-  @property
-  def profile_path(self):
-    return self._profile_path
-
   def _RefreshNavigationTabs(self):
     """Updates the member self._navigation_tabs to contain self._NUM_TABS
     elements, each of which is not crashed. The crashed tabs are intentionally
     leaked, since Telemetry doesn't have a good way of killing crashed tabs.
 
     It is also possible for a tab to be stalled in an infinite JavaScript loop.
-    These tabs will be in self._browser.tabs, but not in self._navigation_tabs.
+    These tabs will be in self.browser.tabs, but not in self._navigation_tabs.
     There is no way to kill these tabs, so they are also leaked. This method is
     careful to only use tabs in self._navigation_tabs, or newly created tabs.
     """
@@ -141,47 +111,55 @@ class FastNavigationProfileExtender(profile_extender.ProfileExtender):
 
   def _RemoveNavigationTab(self, tab):
     """Removes a tab which is no longer in a useable state from
-    self._navigation_tabs. The tab is not removed from self._browser.tabs,
+    self._navigation_tabs. The tab is not removed from self.browser.tabs,
     since there is no guarantee that the tab can be safely removed."""
     self._navigation_tabs.remove(tab)
 
-  def _GetPossibleBrowser(self, finder_options):
-    """Return a possible_browser with the given options."""
-    possible_browser = browser_finder.FindBrowser(finder_options)
-    if not possible_browser:
-      raise browser_finder_exceptions.BrowserFinderException(
-          'No browser found.\n\nAvailable browsers:\n%s\n' %
-          '\n'.join(browser_finder.GetAllAvailableBrowserTypes(finder_options)))
-    finder_options.browser_options.browser_type = (
-        possible_browser.browser_type)
-
-    return possible_browser
-
   def _RetrieveTabUrl(self, tab, timeout):
     """Retrives the URL of the tab."""
-    try:
-      return tab.EvaluateJavaScript('document.URL', timeout)
-    except exceptions.Error:
-      return None
+    # TODO(erikchen): Use tab.url instead, which talks to the browser process
+    # instead of the renderer process. http://crbug.com/486119
+    return tab.EvaluateJavaScript('document.URL', timeout)
 
-  def _WaitForUrlToChange(self, tab, initial_url, timeout):
-    """Waits for the tab to navigate away from its initial url."""
-    end_time = time.time() + timeout
+  def _WaitForUrlToChange(self, tab, initial_url, end_time):
+    """Waits for the tab to navigate away from its initial url.
+
+    If time.time() is larger than end_time, the function does nothing.
+    Otherwise, the function tries to return no later than end_time.
+    """
     while True:
       seconds_to_wait = end_time - time.time()
-      seconds_to_wait = max(0, seconds_to_wait)
-
-      if seconds_to_wait == 0:
+      if seconds_to_wait <= 0:
         break
 
       current_url = self._RetrieveTabUrl(tab, seconds_to_wait)
-      if current_url != initial_url:
+      if current_url != initial_url and current_url != "":
         break
 
       # Retrieving the current url is a non-trivial operation. Add a small
       # sleep here to prevent this method from contending with the actual
       # navigation.
       time.sleep(0.01)
+
+  def _WaitForTabToBeReady(self, tab, end_time):
+    """Waits for the tab to be ready.
+
+    If time.time() is larger than end_time, the function does nothing.
+    Otherwise, the function tries to return no later than end_time.
+    """
+    seconds_to_wait = end_time - time.time()
+    if seconds_to_wait <= 0:
+      return
+    tab.WaitForDocumentReadyStateToBeComplete(seconds_to_wait)
+
+    # Wait up to 10 seconds for the page to quiesce. If the page hasn't
+    # quiesced in 10 seconds, it will probably never quiesce.
+    seconds_to_wait = end_time - time.time()
+    seconds_to_wait = max(0, seconds_to_wait)
+    try:
+      util.WaitFor(tab.HasReachedQuiescence, seconds_to_wait)
+    except exceptions.TimeoutException:
+      pass
 
   def _BatchNavigateTabs(self, batch):
     """Performs a batch of tab navigations with minimal delay.
@@ -193,21 +171,22 @@ class FastNavigationProfileExtender(profile_extender.ProfileExtender):
       A list of tuples (tab, initial_url). |initial_url| is the url of the
       |tab| prior to a navigation command being sent to it.
     """
-    timeout_in_seconds = 0
+    # Attempting to pass in a timeout of 0 seconds results in a synchronous
+    # socket error from the websocket library. Pass in a very small timeout
+    # instead so that the websocket library raises a Timeout exception. This
+    # prevents the logic from accidentally catching different socket
+    # exceptions.
+    timeout_in_seconds = 0.01
 
     queued_tabs = []
     for tab, url in batch:
-      initial_url = self._RetrieveTabUrl(tab,
-          self._TAB_URL_RETRIEVAL_TIMEOUT_IN_SECONDS)
-
+      initial_url = self._RetrieveTabUrl(tab, 20)
       try:
         tab.Navigate(url, None, timeout_in_seconds)
-      except exceptions.Error:
-        # We expect a time out. It's possible for other problems to arise, but
-        # this method is not responsible for dealing with them. Ignore all
-        # exceptions.
+      except exceptions.TimeoutException:
+        # We expect to receive a timeout exception, since we're not waiting for
+        # the navigation to complete.
         pass
-
       queued_tabs.append((tab, initial_url))
     return queued_tabs
 
@@ -218,30 +197,14 @@ class FastNavigationProfileExtender(profile_extender.ProfileExtender):
       queued_tabs: A list of tuples (tab, initial_url). Each tab is guaranteed
       to have already been sent a navigation command.
     """
-    end_time = time.time() + self._BATCH_PAGE_LOAD_TIMEOUT_IN_SECONDS
+    total_batch_timeout = (len(queued_tabs) *
+        self._BATCH_TIMEOUT_PER_PAGE_IN_SECONDS)
+    end_time = time.time() + total_batch_timeout
     for tab, initial_url in queued_tabs:
-      seconds_to_wait = end_time - time.time()
-      seconds_to_wait = max(0, seconds_to_wait)
-
-      if seconds_to_wait == 0:
-        break
-
-      # Since we don't wait any time for the tab url navigation to commit, it's
+      # Since we didn't wait any time for the tab url navigation to commit, it's
       # possible that the tab hasn't started navigating yet.
-      self._WaitForUrlToChange(tab, initial_url, seconds_to_wait)
-
-      seconds_to_wait = end_time - time.time()
-      seconds_to_wait = max(0, seconds_to_wait)
-
-      try:
-        tab.WaitForDocumentReadyStateToBeComplete(seconds_to_wait)
-      except exceptions.TimeoutException:
-        # Ignore time outs.
-        pass
-      except exceptions.Error:
-        # If any error occurs, remove the tab. it's probably in an
-        # unrecoverable state.
-        self._RemoveNavigationTab(tab)
+      self._WaitForUrlToChange(tab, initial_url, end_time)
+      self._WaitForTabToBeReady(tab, end_time)
 
   def _GetUrlsToNavigate(self, url_iterator):
     """Returns an array of urls to navigate to, given a url_iterator."""

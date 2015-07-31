@@ -48,11 +48,13 @@ class GFX_EXPORT GpuMemoryBuffer {
     DXT1,
     DXT5,
     ETC1,
+    R_8,
     RGBA_8888,
     RGBX_8888,
     BGRA_8888,
+    YUV_420,
 
-    FORMAT_LAST = BGRA_8888
+    FORMAT_LAST = YUV_420
   };
 
   // The usage mode affects how a buffer can be used. Only buffers created with
@@ -78,9 +80,9 @@ class GFX_EXPORT GpuMemoryBuffer {
   // Returns the format for the buffer.
   virtual Format GetFormat() const = 0;
 
-  // Fills the stride in bytes for the each plane of the buffer. The stride of
+  // Fills the stride in bytes for each plane of the buffer. The stride of
   // plane K is stored at index K-1 of the |stride| array.
-  virtual void GetStride(uint32* stride) const = 0;
+  virtual void GetStride(int* stride) const = 0;
 
   // Returns a platform specific handle for this buffer.
   virtual GpuMemoryBufferHandle GetHandle() const = 0;

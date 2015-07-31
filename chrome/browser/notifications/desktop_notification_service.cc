@@ -45,12 +45,8 @@ using message_center::NotifierId;
 // static
 void DesktopNotificationService::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterListPref(
-      prefs::kMessageCenterDisabledExtensionIds,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
-  registry->RegisterListPref(
-      prefs::kMessageCenterDisabledSystemComponentIds,
-      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
+  registry->RegisterListPref(prefs::kMessageCenterDisabledExtensionIds);
+  registry->RegisterListPref(prefs::kMessageCenterDisabledSystemComponentIds);
 }
 
 DesktopNotificationService::DesktopNotificationService(Profile* profile)
@@ -97,7 +93,7 @@ void DesktopNotificationService::RequestNotificationPermission(
     const GURL& requesting_origin,
     bool user_gesture,
     const BrowserPermissionCallback& result_callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
 #if defined(ENABLE_EXTENSIONS)
   extensions::InfoMap* extension_info_map =

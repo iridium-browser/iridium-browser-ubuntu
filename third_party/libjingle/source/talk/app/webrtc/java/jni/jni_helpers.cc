@@ -33,6 +33,8 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
+#include "unicode/unistr.h"
+
 namespace webrtc_jni {
 
 static JavaVM* g_jvm = nullptr;
@@ -101,7 +103,7 @@ jint InitGlobalJniVariables(JavaVM *jvm) {
 // Return thread ID as a string.
 static std::string GetThreadId() {
   char buf[21];  // Big enough to hold a kuint64max plus terminating NULL.
-  CHECK_LT(snprintf(buf, sizeof(buf), "%llu", syscall(__NR_gettid)),
+  CHECK_LT(snprintf(buf, sizeof(buf), "%ld", syscall(__NR_gettid)),
            sizeof(buf))
       << "Thread id is bigger than uint64??";
   return std::string(buf);

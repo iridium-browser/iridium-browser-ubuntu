@@ -62,6 +62,8 @@
             'libANGLE/Context.h',
             'libANGLE/Data.cpp',
             'libANGLE/Data.h',
+            'libANGLE/Device.cpp',
+            'libANGLE/Device.h',
             'libANGLE/Display.cpp',
             'libANGLE/Display.h',
             'libANGLE/Error.cpp',
@@ -78,6 +80,8 @@
             'libANGLE/HandleAllocator.h',
             'libANGLE/ImageIndex.h',
             'libANGLE/ImageIndex.cpp',
+            'libANGLE/IndexRangeCache.cpp',
+            'libANGLE/IndexRangeCache.h',
             'libANGLE/Platform.cpp',
             'libANGLE/Program.cpp',
             'libANGLE/Program.h',
@@ -112,18 +116,19 @@
             'libANGLE/features.h',
             'libANGLE/formatutils.cpp',
             'libANGLE/formatutils.h',
+            'libANGLE/histogram_macros.h',
             'libANGLE/queryconversions.cpp',
             'libANGLE/queryconversions.h',
             'libANGLE/renderer/BufferImpl.h',
             'libANGLE/renderer/CompilerImpl.h',
+            'libANGLE/renderer/DeviceImpl.cpp',
+            'libANGLE/renderer/DeviceImpl.h',
             'libANGLE/renderer/DisplayImpl.cpp',
             'libANGLE/renderer/DisplayImpl.h',
             'libANGLE/renderer/FenceNVImpl.h',
             'libANGLE/renderer/FenceSyncImpl.h',
             'libANGLE/renderer/FramebufferImpl.h',
             'libANGLE/renderer/ImplFactory.h',
-            'libANGLE/renderer/IndexRangeCache.cpp',
-            'libANGLE/renderer/IndexRangeCache.h',
             'libANGLE/renderer/ProgramImpl.cpp',
             'libANGLE/renderer/ProgramImpl.h',
             'libANGLE/renderer/QueryImpl.h',
@@ -158,6 +163,8 @@
             'libANGLE/renderer/d3d/copyimage.cpp',
             'libANGLE/renderer/d3d/copyimage.h',
             'libANGLE/renderer/d3d/copyimage.inl',
+            'libANGLE/renderer/d3d/DeviceD3D.cpp',
+            'libANGLE/renderer/d3d/DeviceD3D.h',
             'libANGLE/renderer/d3d/DisplayD3D.cpp',
             'libANGLE/renderer/d3d/DisplayD3D.h',
             'libANGLE/renderer/d3d/DynamicHLSL.cpp',
@@ -404,6 +411,8 @@
             'libANGLE/renderer/gl/TransformFeedbackGL.h',
             'libANGLE/renderer/gl/VertexArrayGL.cpp',
             'libANGLE/renderer/gl/VertexArrayGL.h',
+            'libANGLE/renderer/gl/formatutilsgl.cpp',
+            'libANGLE/renderer/gl/formatutilsgl.h',
             'libANGLE/renderer/gl/functionsgl_enums.h',
             'libANGLE/renderer/gl/functionsgl_typedefs.h',
             'libANGLE/renderer/gl/renderergl_utils.cpp',
@@ -415,12 +424,27 @@
             'libANGLE/renderer/gl/wgl/DisplayWGL.h',
             'libANGLE/renderer/gl/wgl/FunctionsWGL.cpp',
             'libANGLE/renderer/gl/wgl/FunctionsWGL.h',
+            'libANGLE/renderer/gl/wgl/PbufferSurfaceWGL.cpp',
+            'libANGLE/renderer/gl/wgl/PbufferSurfaceWGL.h',
             'libANGLE/renderer/gl/wgl/WindowSurfaceWGL.cpp',
             'libANGLE/renderer/gl/wgl/WindowSurfaceWGL.h',
             'libANGLE/renderer/gl/wgl/functionswgl_typedefs.h',
             'libANGLE/renderer/gl/wgl/wgl_utils.cpp',
             'libANGLE/renderer/gl/wgl/wgl_utils.h',
             'third_party/khronos/GL/wglext.h',
+        ],
+        'libangle_gl_glx_sources':
+        [
+            'libANGLE/renderer/gl/glx/DisplayGLX.cpp',
+            'libANGLE/renderer/gl/glx/DisplayGLX.h',
+            'libANGLE/renderer/gl/glx/FunctionsGLX.cpp',
+            'libANGLE/renderer/gl/glx/FunctionsGLX.h',
+            'libANGLE/renderer/gl/glx/PbufferSurfaceGLX.cpp',
+            'libANGLE/renderer/gl/glx/PbufferSurfaceGLX.h',
+            'libANGLE/renderer/gl/glx/WindowSurfaceGLX.cpp',
+            'libANGLE/renderer/gl/glx/WindowSurfaceGLX.h',
+            'libANGLE/renderer/gl/glx/functionsglx_typedefs.h',
+            'libANGLE/renderer/gl/glx/platform_glx.h',
         ],
         'libglesv2_sources':
         [
@@ -521,6 +545,16 @@
                         'defines':
                         [
                             'ANGLE_ENABLE_OPENGL',
+                        ],
+                        'conditions':
+                        [
+                            ['use_x11==1',
+                            {
+                                'defines':
+                                [
+                                    'ANGLE_USE_X11',
+                                ]
+                            }],
                         ],
                     }],
                 ],
@@ -632,6 +666,17 @@
                                 '<@(libangle_gl_wgl_sources)',
                             ],
                         }],
+                        ['use_x11==1',
+                        {
+                            'defines':
+                            [
+                                'ANGLE_USE_X11',
+                            ],
+                            'sources':
+                            [
+                                '<@(libangle_gl_glx_sources)',
+                            ],
+                        }],
                     ],
                 }],
                 ['angle_build_winrt==0 and OS=="win"',
@@ -712,6 +757,17 @@
                 ['angle_build_winphone==1',
                 {
                     'msvs_enable_winphone' : '1',
+                }],
+                ['use_x11==1',
+                {
+                    'link_settings': {
+                        'ldflags': [
+                            '<!@(pkg-config --libs-only-L --libs-only-other x11 xi)',
+                        ],
+                        'libraries': [
+                            '<!@(pkg-config --libs-only-l x11 xi)',
+                        ],
+                    },
                 }],
             ],
         },

@@ -266,10 +266,6 @@ class WebFrameTestProxy : public Base {
     return base_proxy_->GetUserMediaClient();
   }
 
-  virtual blink::WebMIDIClient* webMIDIClient() {
-    return base_proxy_->GetWebMIDIClient();
-  }
-
   virtual bool willCheckAndDispatchMessageEvent(
       blink::WebLocalFrame* source_frame,
       blink::WebFrame* target_frame,
@@ -289,8 +285,7 @@ class WebFrameTestProxy : public Base {
 
  private:
 #if defined(ENABLE_WEBRTC)
-  virtual scoped_ptr<MediaStreamRendererFactory> CreateRendererFactory()
-      override {
+  scoped_ptr<MediaStreamRendererFactory> CreateRendererFactory() override {
     return scoped_ptr<MediaStreamRendererFactory>(
         new TestMediaStreamRendererFactory());
   }

@@ -147,8 +147,8 @@ bool HTMLPlugInElement::willRespondToMouseClickEvents()
 void HTMLPlugInElement::removeAllEventListeners()
 {
     HTMLFrameOwnerElement::removeAllEventListeners();
-    if (LayoutPart* renderer = existingLayoutPart()) {
-        if (Widget* widget = renderer->widget())
+    if (LayoutPart* layoutObject = existingLayoutPart()) {
+        if (Widget* widget = layoutObject->widget())
             widget->eventListenersRemoved();
     }
 }
@@ -192,7 +192,7 @@ void HTMLPlugInElement::updateWidget()
     }
 }
 
-void HTMLPlugInElement::requestPluginCreationWithoutRendererIfPossible()
+void HTMLPlugInElement::requestPluginCreationWithoutLayoutObjectIfPossible()
 {
     if (m_serviceType.isEmpty())
         return;
@@ -204,10 +204,10 @@ void HTMLPlugInElement::requestPluginCreationWithoutRendererIfPossible()
     if (layoutObject() && layoutObject()->isLayoutPart())
         return;
 
-    createPluginWithoutRenderer();
+    createPluginWithoutLayoutObject();
 }
 
-void HTMLPlugInElement::createPluginWithoutRenderer()
+void HTMLPlugInElement::createPluginWithoutLayoutObject()
 {
     ASSERT(document().frame()->loader().client()->canCreatePluginWithoutRenderer(m_serviceType));
 
@@ -265,7 +265,7 @@ void HTMLPlugInElement::detach(const AttachContext& context)
 
 LayoutObject* HTMLPlugInElement::createLayoutObject(const ComputedStyle& style)
 {
-    // Fallback content breaks the DOM->Renderer class relationship of this
+    // Fallback content breaks the DOM->layoutObject class relationship of this
     // class and all superclasses because createObject won't necessarily return
     // a LayoutEmbeddedObject or LayoutPart.
     if (useFallbackContent())
@@ -464,7 +464,7 @@ bool HTMLPlugInElement::isImageType()
 
 LayoutEmbeddedObject* HTMLPlugInElement::layoutEmbeddedObject() const
 {
-    // HTMLObjectElement and HTMLEmbedElement may return arbitrary renderers
+    // HTMLObjectElement and HTMLEmbedElement may return arbitrary layoutObjects
     // when using fallback content.
     if (!layoutObject() || !layoutObject()->isEmbeddedObject())
         return nullptr;
@@ -516,16 +516,16 @@ bool HTMLPlugInElement::requestObject(const String& url, const String& mimeType,
     return loadOrRedirectSubframe(completedURL, getNameAttribute(), true);
 }
 
-bool HTMLPlugInElement::loadPlugin(const KURL& url, const String& mimeType, const Vector<String>& paramNames, const Vector<String>& paramValues, bool useFallback, bool requireRenderer)
+bool HTMLPlugInElement::loadPlugin(const KURL& url, const String& mimeType, const Vector<String>& paramNames, const Vector<String>& paramValues, bool useFallback, bool requireLayoutObject)
 {
     LocalFrame* frame = document().frame();
 
     if (!frame->loader().allowPlugins(AboutToInstantiatePlugin))
         return false;
 
-    LayoutEmbeddedObject* renderer = layoutEmbeddedObject();
-    // FIXME: This code should not depend on renderer!
-    if ((!renderer && requireRenderer) || useFallback)
+    LayoutEmbeddedObject* layoutObject = layoutEmbeddedObject();
+    // FIXME: This code should not depend on layoutObject!
+    if ((!layoutObject && requireLayoutObject) || useFallback)
         return false;
 
     WTF_LOG(Plugins, "%p Plugin URL: %s", this, m_url.utf8().data());
@@ -538,14 +538,14 @@ bool HTMLPlugInElement::loadPlugin(const KURL& url, const String& mimeType, cons
         bool loadManually = document().isPluginDocument() && !document().containsPlugins();
         placeholder = frame->loader().client()->createPluginPlaceholder(document(), url, paramNames, paramValues, mimeType, loadManually);
         if (!placeholder) {
-            FrameLoaderClient::DetachedPluginPolicy policy = requireRenderer ? FrameLoaderClient::FailOnDetachedPlugin : FrameLoaderClient::AllowDetachedPlugin;
+            FrameLoaderClient::DetachedPluginPolicy policy = requireLayoutObject ? FrameLoaderClient::FailOnDetachedPlugin : FrameLoaderClient::AllowDetachedPlugin;
             widget = frame->loader().client()->createPlugin(this, url, paramNames, paramValues, mimeType, loadManually, policy);
         }
     }
 
     if (!placeholder && !widget) {
-        if (renderer && !renderer->showsUnavailablePluginIndicator())
-            renderer->setPluginUnavailabilityReason(LayoutEmbeddedObject::PluginMissing);
+        if (layoutObject && !layoutObject->showsUnavailablePluginIndicator())
+            layoutObject->setPluginUnavailabilityReason(LayoutEmbeddedObject::PluginMissing);
         setPlaceholder(nullptr);
         return false;
     }
@@ -555,7 +555,7 @@ bool HTMLPlugInElement::loadPlugin(const KURL& url, const String& mimeType, cons
         return true;
     }
 
-    if (renderer) {
+    if (layoutObject) {
         setWidget(widget);
         setPersistedPluginWidget(nullptr);
     } else {
@@ -595,10 +595,10 @@ void HTMLPlugInElement::setPlaceholder(PassOwnPtrWillBeRawPtr<PluginPlaceholder>
 {
     bool needsLazyReattach = (!placeholder) != (!m_placeholder);
     if (placeholder) {
-        placeholder->loadIntoContainer(ensureClosedShadowRoot());
+        placeholder->loadIntoContainer(ensureUserAgentShadowRoot());
         m_placeholder = placeholder;
     } else {
-        ShadowRoot& shadowRoot = ensureClosedShadowRoot();
+        ShadowRoot& shadowRoot = ensureUserAgentShadowRoot();
         shadowRoot.removeChildren();
         shadowRoot.appendChild(HTMLContentElement::create(document()));
         m_placeholder.clear();
@@ -617,6 +617,9 @@ void HTMLPlugInElement::dispatchErrorEvent()
 
 bool HTMLPlugInElement::pluginIsLoadable(const KURL& url, const String& mimeType)
 {
+    if (url.isEmpty() && mimeType.isEmpty())
+        return false;
+
     LocalFrame* frame = document().frame();
     Settings* settings = frame->settings();
     if (!settings)
@@ -642,12 +645,12 @@ bool HTMLPlugInElement::pluginIsLoadable(const KURL& url, const String& mimeType
         return false;
     }
 
-    return !MixedContentChecker::shouldBlockFetch(frame, WebURLRequest::RequestContextObject, WebURLRequest::FrameTypeNone, url);
+    return (!mimeType.isEmpty() && url.isEmpty()) || !MixedContentChecker::shouldBlockFetch(frame, WebURLRequest::RequestContextObject, WebURLRequest::FrameTypeNone, url);
 }
 
-void HTMLPlugInElement::didAddClosedShadowRoot(ShadowRoot&)
+void HTMLPlugInElement::didAddUserAgentShadowRoot(ShadowRoot&)
 {
-    closedShadowRoot()->appendChild(HTMLContentElement::create(document()));
+    userAgentShadowRoot()->appendChild(HTMLContentElement::create(document()));
 }
 
 void HTMLPlugInElement::willAddFirstOpenShadowRoot()

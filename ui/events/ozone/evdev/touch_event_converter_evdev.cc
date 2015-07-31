@@ -23,11 +23,13 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/trace_event/trace_event.h"
 #include "ui/events/devices/device_data_manager.h"
 #include "ui/events/devices/device_util_linux.h"
 #include "ui/events/event.h"
 #include "ui/events/event_constants.h"
 #include "ui/events/event_switches.h"
+#include "ui/events/event_utils.h"
 #include "ui/events/ozone/evdev/device_event_dispatcher_evdev.h"
 #include "ui/events/ozone/evdev/touch_evdev_types.h"
 #include "ui/events/ozone/evdev/touch_noise/touch_noise_finder.h"
@@ -73,6 +75,8 @@ int32_t AbsCodeToMtCode(int32_t code) {
       return -1;
   }
 }
+
+const int kTrackingIdForUnusedSlot = -1;
 
 }  // namespace
 
@@ -133,6 +137,9 @@ void TouchEventConverterEvdev::Initialize(const EventDeviceInfo& info) {
     current_slot_ = 0;
   }
 
+  quirk_left_mouse_button_ =
+      !has_mt_ && !info.HasKeyEvent(BTN_TOUCH) && info.HasKeyEvent(BTN_LEFT);
+
   // Apply --touch-calibration.
   if (type() == INPUT_DEVICE_INTERNAL) {
     TouchCalibration cal = {};
@@ -154,8 +161,8 @@ void TouchEventConverterEvdev::Initialize(const EventDeviceInfo& info) {
     for (size_t i = 0; i < events_.size(); ++i) {
       events_[i].x = info.GetAbsMtSlotValueWithDefault(ABS_MT_POSITION_X, i, 0);
       events_[i].y = info.GetAbsMtSlotValueWithDefault(ABS_MT_POSITION_Y, i, 0);
-      events_[i].tracking_id =
-          info.GetAbsMtSlotValueWithDefault(ABS_MT_TRACKING_ID, i, -1);
+      events_[i].tracking_id = info.GetAbsMtSlotValueWithDefault(
+          ABS_MT_TRACKING_ID, i, kTrackingIdForUnusedSlot);
       events_[i].touching = (events_[i].tracking_id >= 0);
       events_[i].slot = i;
 
@@ -174,9 +181,10 @@ void TouchEventConverterEvdev::Initialize(const EventDeviceInfo& info) {
     }
   } else {
     // TODO(spang): Add key state to EventDeviceInfo to allow initial contact.
+    // (and make sure to take into account quirk_left_mouse_button_)
     events_[0].x = 0;
     events_[0].y = 0;
-    events_[0].tracking_id = -1;
+    events_[0].tracking_id = kTrackingIdForUnusedSlot;
     events_[0].touching = false;
     events_[0].slot = 0;
     events_[0].radius_x = 0;
@@ -206,7 +214,15 @@ int TouchEventConverterEvdev::GetTouchPoints() const {
   return touch_points_;
 }
 
+void TouchEventConverterEvdev::OnStopped() {
+  ReleaseTouches();
+}
+
 void TouchEventConverterEvdev::OnFileCanReadWithoutBlocking(int fd) {
+  TRACE_EVENT1("evdev",
+               "TouchEventConverterEvdev::OnFileCanReadWithoutBlocking", "fd",
+               fd);
+
   input_event inputs[kNumTouchEvdevSlots * 6 + 1];
   ssize_t read_size = read(fd, inputs, sizeof(inputs));
   if (read_size < 0) {
@@ -247,6 +263,8 @@ void TouchEventConverterEvdev::ProcessMultitouchEvent(
     }
   } else if (input.type == EV_KEY) {
     ProcessKey(input);
+  } else if (input.type == EV_MSC) {
+    // Ignored.
   } else {
     NOTIMPLEMENTED() << "invalid type: " << input.type;
   }
@@ -260,17 +278,22 @@ void TouchEventConverterEvdev::EmulateMultitouchEvent(
     emulated_event.code = AbsCodeToMtCode(event.code);
     if (emulated_event.code >= 0)
       ProcessMultitouchEvent(emulated_event);
-  } else if (event.type == EV_KEY && event.code == BTN_TOUCH) {
-    emulated_event.type = EV_ABS;
-    emulated_event.code = ABS_MT_TRACKING_ID;
-    emulated_event.value = event.value ? NextTrackingId() : -1;
-    ProcessMultitouchEvent(emulated_event);
+  } else if (event.type == EV_KEY) {
+    if (event.code == BTN_TOUCH ||
+        (quirk_left_mouse_button_ && event.code == BTN_LEFT)) {
+      emulated_event.type = EV_ABS;
+      emulated_event.code = ABS_MT_TRACKING_ID;
+      emulated_event.value =
+          event.value ? NextTrackingId() : kTrackingIdForUnusedSlot;
+      ProcessMultitouchEvent(emulated_event);
+    }
   }
 }
 
 void TouchEventConverterEvdev::ProcessKey(const input_event& input) {
   switch (input.code) {
     case BTN_TOUCH:
+    case BTN_LEFT:
       break;
     default:
       NOTIMPLEMENTED() << "invalid code for EV_KEY: " << input.code;
@@ -295,13 +318,7 @@ void TouchEventConverterEvdev::ProcessAbs(const input_event& input) {
       events_[current_slot_].y = input.value;
       break;
     case ABS_MT_TRACKING_ID:
-      if (input.value < 0) {
-        events_[current_slot_].touching = false;
-      } else {
-        events_[current_slot_].touching = true;
-        events_[current_slot_].cancelled = false;
-      }
-      events_[current_slot_].tracking_id = input.value;
+      UpdateTrackingId(current_slot_, input.value);
       break;
     case ABS_MT_PRESSURE:
       events_[current_slot_].pressure = ScalePressure(input.value);
@@ -390,6 +407,27 @@ void TouchEventConverterEvdev::ReportEvents(base::TimeDelta delta) {
     event->was_touching = event->touching;
     event->altered = false;
   }
+}
+
+void TouchEventConverterEvdev::UpdateTrackingId(int slot, int tracking_id) {
+  InProgressTouchEvdev* event = &events_[slot];
+
+  if (event->tracking_id == tracking_id)
+    return;
+
+  event->tracking_id = tracking_id;
+  event->touching = (tracking_id >= 0);
+  event->altered = true;
+
+  if (tracking_id >= 0)
+    event->cancelled = false;
+}
+
+void TouchEventConverterEvdev::ReleaseTouches() {
+  for (size_t slot = 0; slot < events_.size(); slot++)
+    UpdateTrackingId(slot, kTrackingIdForUnusedSlot);
+
+  ReportEvents(EventTimeForNow());
 }
 
 float TouchEventConverterEvdev::ScalePressure(int32_t value) {

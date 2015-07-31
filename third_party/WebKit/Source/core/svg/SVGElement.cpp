@@ -418,12 +418,11 @@ void SVGElement::invalidateRelativeLengthClients(SubtreeLayoutScope* layoutScope
     TemporaryChange<bool> inRelativeLengthClientsInvalidationChange(m_inRelativeLengthClientsInvalidation, true);
 #endif
 
-    LayoutObject* renderer = this->layoutObject();
-    if (renderer && selfHasRelativeLengths()) {
-        if (renderer->isSVGResourceContainer())
-            toLayoutSVGResourceContainer(renderer)->invalidateCacheAndMarkForLayout(layoutScope);
-        else
-            renderer->setNeedsLayoutAndFullPaintInvalidation(LayoutInvalidationReason::Unknown, MarkContainerChain, layoutScope);
+    if (LayoutObject* layoutObject = this->layoutObject()) {
+        if (hasRelativeLengths() && layoutObject->isSVGResourceContainer())
+            toLayoutSVGResourceContainer(layoutObject)->invalidateCacheAndMarkForLayout(layoutScope);
+        else if (selfHasRelativeLengths())
+            layoutObject->setNeedsLayoutAndFullPaintInvalidation(LayoutInvalidationReason::Unknown, MarkContainerChain, layoutScope);
     }
 
     for (SVGElement* element : m_elementsWithRelativeLengths) {
@@ -442,7 +441,7 @@ SVGSVGElement* SVGElement::ownerSVGElement() const
         n = n->parentOrShadowHostNode();
     }
 
-    return 0;
+    return nullptr;
 }
 
 SVGElement* SVGElement::viewportElement() const
@@ -457,7 +456,7 @@ SVGElement* SVGElement::viewportElement() const
         n = n->parentOrShadowHostNode();
     }
 
-    return 0;
+    return nullptr;
 }
 
 SVGDocumentExtensions& SVGElement::accessDocumentSVGExtensions()
@@ -560,10 +559,10 @@ SVGElement* SVGElement::correspondingElement()
 SVGUseElement* SVGElement::correspondingUseElement() const
 {
     if (ShadowRoot* root = containingShadowRoot()) {
-        if (isSVGUseElement(root->host()) && (root->type() == ShadowRoot::ClosedShadowRoot))
+        if (isSVGUseElement(root->host()) && (root->type() == ShadowRoot::UserAgentShadowRoot))
             return toSVGUseElement(root->host());
     }
-    return 0;
+    return nullptr;
 }
 
 void SVGElement::setCorrespondingElement(SVGElement* correspondingElement)
@@ -595,7 +594,6 @@ void SVGElement::parseAttribute(const QualifiedName& name, const AtomicString& v
         SVGParsingError parseError = NoError;
         m_className->setBaseValueAsString(value, parseError);
         reportAttributeParsingError(parseError, name, value);
-    } else if (name.matches(XMLNames::langAttr) || name.matches(XMLNames::spaceAttr)) {
     } else if (name == tabindexAttr) {
         Element::parseAttribute(name, value);
     } else {
@@ -843,7 +841,7 @@ void SVGElement::svgLoadEventTimerFired(Timer<SVGElement>*)
 Timer<SVGElement>* SVGElement::svgLoadEventTimer()
 {
     ASSERT_NOT_REACHED();
-    return 0;
+    return nullptr;
 }
 
 void SVGElement::attributeChanged(const QualifiedName& name, const AtomicString& newValue, AttributeModificationReason)
@@ -911,10 +909,10 @@ PassRefPtr<ComputedStyle> SVGElement::customStyleForLayoutObject()
     if (!correspondingElement())
         return document().ensureStyleResolver().styleForElement(this);
 
-    const ComputedStyle* style = 0;
+    const ComputedStyle* style = nullptr;
     if (Element* parent = parentOrShadowHostElement()) {
-        if (LayoutObject* renderer = parent->layoutObject())
-            style = renderer->style();
+        if (LayoutObject* layoutObject = parent->layoutObject())
+            style = layoutObject->style();
     }
 
     return document().ensureStyleResolver().styleForElement(correspondingElement(), style, DisallowStyleSharing);
@@ -924,7 +922,7 @@ MutableStylePropertySet* SVGElement::animatedSMILStyleProperties() const
 {
     if (hasSVGRareData())
         return svgRareData()->animatedSMILStyleProperties();
-    return 0;
+    return nullptr;
 }
 
 MutableStylePropertySet* SVGElement::ensureAnimatedSMILStyleProperties()
@@ -943,10 +941,10 @@ const ComputedStyle* SVGElement::ensureComputedStyle(PseudoId pseudoElementSpeci
     if (!hasSVGRareData() || !svgRareData()->useOverrideComputedStyle())
         return Element::ensureComputedStyle(pseudoElementSpecifier);
 
-    ComputedStyle* parentStyle = 0;
+    const ComputedStyle* parentStyle = nullptr;
     if (Element* parent = parentOrShadowHostElement()) {
-        if (LayoutObject* renderer = parent->layoutObject())
-            parentStyle = renderer->style();
+        if (LayoutObject* layoutObject = parent->layoutObject())
+            parentStyle = layoutObject->style();
     }
 
     return svgRareData()->overrideComputedStyle(this, parentStyle);
@@ -958,17 +956,14 @@ bool SVGElement::hasFocusEventListeners() const
         || hasEventListeners(EventTypeNames::focus) || hasEventListeners(EventTypeNames::blur);
 }
 
-void SVGElement::markForLayoutAndParentResourceInvalidation(LayoutObject* renderer)
+void SVGElement::markForLayoutAndParentResourceInvalidation(LayoutObject* layoutObject)
 {
-    ASSERT(renderer);
-    LayoutSVGResourceContainer::markForLayoutAndParentResourceInvalidation(renderer, true);
+    ASSERT(layoutObject);
+    LayoutSVGResourceContainer::markForLayoutAndParentResourceInvalidation(layoutObject, true);
 }
 
 void SVGElement::invalidateInstances()
 {
-    if (!inDocument())
-        return;
-
     if (instanceUpdatesBlocked())
         return;
 
@@ -981,14 +976,15 @@ void SVGElement::invalidateInstances()
         instance->setCorrespondingElement(0);
 
         if (SVGUseElement* element = instance->correspondingUseElement()) {
-            ASSERT(element->inDocument());
-            element->invalidateShadowTree();
+            if (element->inDocument())
+                element->invalidateShadowTree();
         }
     }
 
     svgRareData()->elementInstances().clear();
 
-    document().updateRenderTreeIfNeeded();
+    if (inDocument())
+        document().updateLayoutTreeIfNeeded();
 }
 
 SVGElement::InstanceUpdateBlocker::InstanceUpdateBlocker(SVGElement* targetElement)
@@ -1118,7 +1114,7 @@ bool SVGElement::isAnimatableAttribute(const QualifiedName& name) const
 SVGElementSet* SVGElement::setOfIncomingReferences() const
 {
     if (!hasSVGRareData())
-        return 0;
+        return nullptr;
     return &svgRareData()->incomingReferences();
 }
 

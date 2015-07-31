@@ -61,7 +61,8 @@ class CHROMEOS_EXPORT LoginPerformer : public AuthStatusConsumer,
   };
 
   LoginPerformer(scoped_refptr<base::TaskRunner> task_runner,
-                 Delegate* delegate);
+                 Delegate* delegate,
+                 bool disable_client_login);
   ~LoginPerformer() override;
 
   // Performs a login for |user_context|.
@@ -139,6 +140,7 @@ class CHROMEOS_EXPORT LoginPerformer : public AuthStatusConsumer,
   virtual void RunOnlineWhitelistCheck(
       const std::string& user_id,
       bool wildcard_match,
+      const std::string& refresh_token,
       const base::Closure& success_callback,
       const base::Closure& failure_callback) = 0;
 
@@ -224,6 +226,9 @@ class CHROMEOS_EXPORT LoginPerformer : public AuthStatusConsumer,
 
   // Authorization mode type.
   AuthorizationMode auth_mode_;
+
+  // TODO(antrim): remove once we got rid of /ClientLogin.
+  bool disable_client_login_;
 
   base::WeakPtrFactory<LoginPerformer> weak_factory_;
   DISALLOW_COPY_AND_ASSIGN(LoginPerformer);

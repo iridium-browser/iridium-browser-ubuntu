@@ -109,14 +109,14 @@ void LayoutSliderContainer::layout()
         mutableStyleRef().setDirection(LTR);
     }
 
-    Element* thumbElement = input->closedShadowRoot()->getElementById(ShadowElementNames::sliderThumb());
-    Element* trackElement = input->closedShadowRoot()->getElementById(ShadowElementNames::sliderTrack());
+    Element* thumbElement = input->userAgentShadowRoot()->getElementById(ShadowElementNames::sliderThumb());
+    Element* trackElement = input->userAgentShadowRoot()->getElementById(ShadowElementNames::sliderTrack());
     LayoutBox* thumb = thumbElement ? thumbElement->layoutBox() : 0;
     LayoutBox* track = trackElement ? trackElement->layoutBox() : 0;
 
     SubtreeLayoutScope layoutScope(*this);
     // Force a layout to reset the position of the thumb so the code below doesn't move the thumb to the wrong place.
-    // FIXME: Make a custom Render class for the track and move the thumb positioning code there.
+    // FIXME: Make a custom layout class for the track and move the thumb positioning code there.
     if (track)
         layoutScope.setChildNeedsLayout(track);
 

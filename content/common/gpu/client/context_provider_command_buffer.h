@@ -12,15 +12,12 @@
 #include "cc/blink/context_provider_web_context.h"
 #include "cc/output/context_provider.h"
 #include "content/common/content_export.h"
+#include "content/common/gpu/client/command_buffer_metrics.h"
 #include "content/common/gpu/client/webgraphicscontext3d_command_buffer_impl.h"
 
-namespace webkit {
-namespace gpu {
-class GrContextForWebGraphicsContext3D;
-}
-}
-
 namespace content {
+
+class GrContextForWebGraphicsContext3D;
 
 // Implementation of cc::ContextProvider that provides a
 // WebGraphicsContext3DCommandBufferImpl context and a GrContext.
@@ -29,7 +26,7 @@ class CONTENT_EXPORT ContextProviderCommandBuffer
  public:
   static scoped_refptr<ContextProviderCommandBuffer> Create(
       scoped_ptr<WebGraphicsContext3DCommandBufferImpl> context3d,
-      const std::string& debug_name);
+      CommandBufferContextType type);
 
   CommandBufferProxyImpl* GetCommandBufferProxy();
 
@@ -42,6 +39,7 @@ class CONTENT_EXPORT ContextProviderCommandBuffer
   gpu::gles2::GLES2Interface* ContextGL() override;
   gpu::ContextSupport* ContextSupport() override;
   class GrContext* GrContext() override;
+  void InvalidateGrContext(uint32_t state) override;
   void SetupLock() override;
   base::Lock* GetLock() override;
   Capabilities ContextCapabilities() override;
@@ -58,7 +56,7 @@ class CONTENT_EXPORT ContextProviderCommandBuffer
  protected:
   ContextProviderCommandBuffer(
       scoped_ptr<WebGraphicsContext3DCommandBufferImpl> context3d,
-      const std::string& debug_name);
+      CommandBufferContextType type);
   ~ContextProviderCommandBuffer() override;
 
   void OnLostContext();
@@ -71,9 +69,10 @@ class CONTENT_EXPORT ContextProviderCommandBuffer
   base::ThreadChecker context_thread_checker_;
 
   scoped_ptr<WebGraphicsContext3DCommandBufferImpl> context3d_;
-  scoped_ptr<webkit::gpu::GrContextForWebGraphicsContext3D> gr_context_;
+  scoped_ptr<GrContextForWebGraphicsContext3D> gr_context_;
 
   cc::ContextProvider::Capabilities capabilities_;
+  CommandBufferContextType context_type_;
   std::string debug_name_;
 
   LostContextCallback lost_context_callback_;

@@ -159,10 +159,17 @@ WebInspector.NetworkProject = function(target, workspace, networkMapping)
 
     target.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.ResourceAdded, this._resourceAdded, this);
     target.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.MainFrameNavigated, this._mainFrameNavigated, this);
-    target.debuggerModel.addEventListener(WebInspector.DebuggerModel.Events.ParsedScriptSource, this._parsedScriptSource, this);
-    target.debuggerModel.addEventListener(WebInspector.DebuggerModel.Events.FailedToParseScriptSource, this._parsedScriptSource, this);
-    target.cssModel.addEventListener(WebInspector.CSSStyleModel.Events.StyleSheetAdded, this._styleSheetAdded, this);
-    target.cssModel.addEventListener(WebInspector.CSSStyleModel.Events.StyleSheetRemoved, this._styleSheetRemoved, this);
+
+    var debuggerModel = WebInspector.DebuggerModel.fromTarget(target);
+    if (debuggerModel) {
+        debuggerModel.addEventListener(WebInspector.DebuggerModel.Events.ParsedScriptSource, this._parsedScriptSource, this);
+        debuggerModel.addEventListener(WebInspector.DebuggerModel.Events.FailedToParseScriptSource, this._parsedScriptSource, this);
+    }
+    var cssModel = WebInspector.CSSStyleModel.fromTarget(target);
+    if (cssModel) {
+        cssModel.addEventListener(WebInspector.CSSStyleModel.Events.StyleSheetAdded, this._styleSheetAdded, this);
+        cssModel.addEventListener(WebInspector.CSSStyleModel.Events.StyleSheetRemoved, this._styleSheetRemoved, this);
+    }
 }
 
 WebInspector.NetworkProject._networkProjectSymbol = Symbol("networkProject");
@@ -301,7 +308,7 @@ WebInspector.NetworkProject.prototype = {
     _styleSheetAdded: function(event)
     {
         var header = /** @type {!WebInspector.CSSStyleSheetHeader} */ (event.data);
-        if (header.isInline && header.origin !== "inspector")
+        if (header.isInline && !header.hasSourceURL && header.origin !== "inspector")
             return;
 
         this._addFile(header.resourceURL(), header, false);
@@ -313,7 +320,7 @@ WebInspector.NetworkProject.prototype = {
     _styleSheetRemoved: function(event)
     {
         var header = /** @type {!WebInspector.CSSStyleSheetHeader} */ (event.data);
-        if (header.isInline && header.origin !== "inspector")
+        if (header.isInline && !header.hasSourceURL && header.origin !== "inspector")
             return;
 
         this._removeFile(header.resourceURL());
@@ -374,10 +381,16 @@ WebInspector.NetworkProject.prototype = {
         var target = this.target();
         target.resourceTreeModel.removeEventListener(WebInspector.ResourceTreeModel.EventTypes.ResourceAdded, this._resourceAdded, this);
         target.resourceTreeModel.removeEventListener(WebInspector.ResourceTreeModel.EventTypes.MainFrameNavigated, this._mainFrameNavigated, this);
-        target.debuggerModel.removeEventListener(WebInspector.DebuggerModel.Events.ParsedScriptSource, this._parsedScriptSource, this);
-        target.debuggerModel.removeEventListener(WebInspector.DebuggerModel.Events.FailedToParseScriptSource, this._parsedScriptSource, this);
-        target.cssModel.removeEventListener(WebInspector.CSSStyleModel.Events.StyleSheetAdded, this._styleSheetAdded, this);
-        target.cssModel.removeEventListener(WebInspector.CSSStyleModel.Events.StyleSheetRemoved, this._styleSheetRemoved, this);
+        var debuggerModel = WebInspector.DebuggerModel.fromTarget(target);
+        if (debuggerModel) {
+            debuggerModel.removeEventListener(WebInspector.DebuggerModel.Events.ParsedScriptSource, this._parsedScriptSource, this);
+            debuggerModel.removeEventListener(WebInspector.DebuggerModel.Events.FailedToParseScriptSource, this._parsedScriptSource, this);
+        }
+        var cssModel = WebInspector.CSSStyleModel.fromTarget(target);
+        if (cssModel) {
+            cssModel.removeEventListener(WebInspector.CSSStyleModel.Events.StyleSheetAdded, this._styleSheetAdded, this);
+            cssModel.removeEventListener(WebInspector.CSSStyleModel.Events.StyleSheetRemoved, this._styleSheetRemoved, this);
+        }
     },
 
     _reset: function()
@@ -432,7 +445,12 @@ WebInspector.NetworkProject.FallbackResource.prototype = {
          */
         function loadFallbackContent()
         {
-            var scripts = this._resource.target().debuggerModel.scriptsForSourceURL(this._resource.url);
+            var debuggerModel = WebInspector.DebuggerModel.fromTarget(this._resource.target());
+            if (!debuggerModel) {
+                callback(null);
+                return;
+            }
+            var scripts = debuggerModel.scriptsForSourceURL(this._resource.url);
             if (!scripts.length) {
                 callback(null);
                 return;

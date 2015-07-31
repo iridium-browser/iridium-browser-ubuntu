@@ -62,11 +62,13 @@ AvatarFetcherAndroid::AvatarFetcherAndroid(
 
 void AvatarFetcherAndroid::OnFetchComplete(const GURL& url,
                                            const SkBitmap* bitmap) {
-  base::android::ScopedJavaLocalRef<jobject> java_bitmap =
-      gfx::ConvertToJavaBitmap(bitmap);
-  Java_AccountChooserInfoBar_imageFetchComplete(
-      base::android::AttachCurrentThread(), java_infobar_.obj(), index_,
-      java_bitmap.obj());
+  if (bitmap) {
+    base::android::ScopedJavaLocalRef<jobject> java_bitmap =
+        gfx::ConvertToJavaBitmap(bitmap);
+    Java_AccountChooserInfoBar_imageFetchComplete(
+        base::android::AttachCurrentThread(), java_infobar_.obj(), index_,
+        java_bitmap.obj());
+  }
   delete this;
 }
 
@@ -112,8 +114,7 @@ AccountChooserInfoBar::CreateRenderInfoBar(JNIEnv* env) {
       GetDelegate()->local_credentials_forms().size());
   base::android::ScopedJavaGlobalRef<jobject> java_infobar_global;
   java_infobar_global.Reset(Java_AccountChooserInfoBar_show(
-      env, reinterpret_cast<intptr_t>(this), GetEnumeratedIconId(),
-      java_credentials_array.obj()));
+      env, GetEnumeratedIconId(), java_credentials_array.obj()));
   base::android::ScopedJavaLocalRef<jobject> java_infobar(java_infobar_global);
   content::WebContents* web_contents =
       InfoBarService::WebContentsFromInfoBar(this);
@@ -149,6 +150,14 @@ void AccountChooserInfoBar::ProcessButton(int action,
 
 AccountChooserInfoBarDelegateAndroid* AccountChooserInfoBar::GetDelegate() {
   return static_cast<AccountChooserInfoBarDelegateAndroid*>(delegate());
+}
+
+void AccountChooserInfoBar::SetJavaInfoBar(
+    const base::android::JavaRef<jobject>& java_info_bar) {
+  InfoBarAndroid::SetJavaInfoBar(java_info_bar);
+  JNIEnv* env = base::android::AttachCurrentThread();
+  Java_AccountChooserInfoBar_setNativePtr(env, java_info_bar.obj(),
+                                          reinterpret_cast<intptr_t>(this));
 }
 
 bool RegisterAccountChooserInfoBar(JNIEnv* env) {

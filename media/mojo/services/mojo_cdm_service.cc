@@ -12,6 +12,7 @@
 #include "media/mojo/services/mojo_cdm_promise.h"
 #include "mojo/common/common_type_converters.h"
 #include "mojo/common/url_type_converters.h"
+#include "url/gurl.h"
 
 namespace media {
 
@@ -23,7 +24,9 @@ MojoCdmService::MojoCdmService(const mojo::String& key_system)
   base::WeakPtr<MojoCdmService> weak_this = weak_factory_.GetWeakPtr();
 
   if (CanUseAesDecryptor(key_system)) {
+    // TODO(jrummell): Determine proper origin.
     cdm_.reset(new AesDecryptor(
+        GURL::EmptyGURL(),
         base::Bind(&MojoCdmService::OnSessionMessage, weak_this),
         base::Bind(&MojoCdmService::OnSessionClosed, weak_this),
         base::Bind(&MojoCdmService::OnSessionKeysChange, weak_this)));
@@ -44,11 +47,8 @@ void MojoCdmService::SetClient(mojo::ContentDecryptionModuleClientPtr client) {
 void MojoCdmService::SetServerCertificate(
     mojo::Array<uint8_t> certificate_data,
     const mojo::Callback<void(mojo::CdmPromiseResultPtr)>& callback) {
-  const std::vector<uint8_t>& certificate_data_vector =
-      certificate_data.storage();
   cdm_->SetServerCertificate(
-      certificate_data_vector.empty() ? nullptr : &certificate_data_vector[0],
-      certificate_data_vector.size(),
+      certificate_data.storage(),
       scoped_ptr<SimpleCdmPromise>(new SimpleMojoCdmPromise(callback)));
 }
 
@@ -58,12 +58,9 @@ void MojoCdmService::CreateSessionAndGenerateRequest(
     mojo::Array<uint8_t> init_data,
     const mojo::Callback<void(mojo::CdmPromiseResultPtr, mojo::String)>&
         callback) {
-  const std::vector<uint8_t>& init_data_vector = init_data.storage();
   cdm_->CreateSessionAndGenerateRequest(
       static_cast<MediaKeys::SessionType>(session_type),
-      static_cast<EmeInitDataType>(init_data_type),
-      init_data_vector.empty() ? nullptr : &init_data_vector[0],
-      init_data_vector.size(),
+      static_cast<EmeInitDataType>(init_data_type), init_data.storage(),
       scoped_ptr<NewSessionCdmPromise>(new NewSessionMojoCdmPromise(callback)));
 }
 
@@ -82,11 +79,8 @@ void MojoCdmService::UpdateSession(
     const mojo::String& session_id,
     mojo::Array<uint8_t> response,
     const mojo::Callback<void(mojo::CdmPromiseResultPtr)>& callback) {
-  const std::vector<uint8_t>& response_vector = response.storage();
   cdm_->UpdateSession(
-      session_id.To<std::string>(),
-      response_vector.empty() ? nullptr : &response_vector[0],
-      response_vector.size(),
+      session_id.To<std::string>(), response.storage(),
       scoped_ptr<SimpleCdmPromise>(new SimpleMojoCdmPromise(callback)));
 }
 

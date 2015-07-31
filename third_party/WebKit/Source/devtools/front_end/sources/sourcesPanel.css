@@ -36,7 +36,11 @@
     height: 23px;
 }
 
-.scripts-debug-toolbar::shadow .status-bar-item {
+.material .scripts-debug-toolbar {
+    height: 27px;
+}
+
+.scripts-debug-toolbar::shadow .toolbar-item {
     position: relative;
     top: -1px;
 }
@@ -49,6 +53,12 @@
     border-bottom: 1px solid rgb(202, 202, 202);
     background-color: white;
     overflow: hidden;
+}
+
+.material .scripts-debug-toolbar-drawer {
+    flex: 0 0 54px;
+    margin-top: -27px;
+    padding-top: 26px;
 }
 
 .scripts-debug-toolbar-drawer.expanded {
@@ -68,7 +78,7 @@
     margin-right: 36px;
 }
 
-.panel.sources .split-view /deep/ button.scripts-debugger-show-hide-button.right-sidebar-show-hide-button.toggled-hide {
+.panel.sources .split-widget /deep/ button.scripts-debugger-show-hide-button.right-sidebar-show-hide-button.toggled-hide {
     margin-right: 15px;
 }
 
@@ -78,10 +88,14 @@
     right: 0;
     height: 24px;
     width: 16px;
-    background-image: url(Images/statusbarResizerHorizontal.png);
+    background-image: url(Images/toolbarResizerHorizontal.png);
     background-repeat: no-repeat;
     background-position: center;
     z-index: 13;
+}
+
+.material #scripts-debug-sidebar-resizer-widget {
+    height: 28px;
 }
 
 .sources-split-view-vertical #scripts-debug-sidebar-resizer-widget {
@@ -93,7 +107,12 @@
     width: 18px;
 }
 
-.panel.sources .split-view.hbox #scripts-debug-sidebar-resizer-widget {
+.material .sources-split-view-vertical #scripts-debug-sidebar-resizer-widget {
+    right: 23px;
+    bottom: 6px;
+}
+
+.panel.sources .split-widget.hbox #scripts-debug-sidebar-resizer-widget {
     bottom: 0;
 }
 
@@ -172,7 +191,7 @@
     background-color: rgb(255, 255, 194);
 }
 
-.watch-expression .delete-button {
+.watch-expression-delete-button {
     width: 10px;
     height: 10px;
     background-image: url(Images/deleteIcon.png);
@@ -185,11 +204,9 @@
     display: none;
 }
 
-.watch-expression .primitive-value:hover .delete-button,
-.watch-expression .section .header:hover .delete-button {
+.watch-expression-header:hover .watch-expression-delete-button {
     display: inline;
 }
-
 
 .watch-expressions {
     margin-top: 14px;
@@ -206,18 +223,12 @@
     text-overflow: ellipsis;
     overflow: hidden;
     line-height: 12px;
-    padding-top: 1px;
-    padding-bottom: 1px;
-    margin-left: 16px;
+    margin-left: 11px;
 }
 
 .watch-expression {
     position: relative;
-}
-
-.watch-expression .section .header {
-    min-height: 14px;
-    padding-right: 0px;
+    padding: 1px 0px 1px 6px;
 }
 
 .watch-expressions .name {
@@ -228,7 +239,7 @@
     overflow: hidden;
 }
 
-.watch-expressions .separator {
+.watch-expressions-separator {
     flex: none;
 }
 
@@ -245,24 +256,51 @@
     -webkit-user-select: text;
 }
 
-.watch-expression .section > .header::before {
-    margin-top: 0px;
-}
-
-.section .watch-expression-title {
-    margin-left: 11px;
-}
-
 .watch-expression-text-prompt-proxy {
     margin-left: 12px;
 }
 
-.watch-expression .primitive-value:hover,
-.watch-expression .section .header:hover {
+.watch-expression-header:hover {
     background-color: #F0F0F0;
     padding-right: 14px;
 }
 
 .sidebar-pane-stack .watch-expressions {
     margin-top: 0px;
+}
+
+.scope-chain-sidebar-pane-section-subtitle {
+    float: right;
+    margin-left: 5px;
+    max-width: 55%;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.scope-chain-sidebar-pane-section-title {
+    font-weight: normal;
+    word-wrap: break-word;
+    white-space: normal;
+}
+
+.scope-chain-sidebar-pane-section {
+    padding: 2px 4px 2px 4px;
+}
+
+.scope-chain-sidebar-pane-section-subtitle {
+    float: right;
+    margin-left: 5px;
+    max-width: 55%;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
+.scope-chain-sidebar-pane-section-title {
+    font-weight: normal;
+    word-wrap: break-word;
+    white-space: normal;
+}
+
+.scope-chain-sidebar-pane-section {
+    padding: 2px 4px 2px 4px;
 }

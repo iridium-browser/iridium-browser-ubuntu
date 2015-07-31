@@ -5,6 +5,7 @@
 #include "chrome/test/base/chrome_render_view_test.h"
 
 #include "base/debug/leak_annotations.h"
+#include "base/run_loop.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/render_messages.h"
@@ -70,13 +71,15 @@ void ChromeRenderViewTest::SetUp() {
   password_autofill_agent_ =
       new autofill::TestPasswordAutofillAgent(view_->GetMainRenderFrame());
   password_generation_ =
-      new autofill::TestPasswordGenerationAgent(view_->GetMainRenderFrame());
+      new autofill::TestPasswordGenerationAgent(view_->GetMainRenderFrame(),
+                                                password_autofill_agent_);
   autofill_agent_ =
       new AutofillAgent(view_->GetMainRenderFrame(), password_autofill_agent_,
                         password_generation_);
 }
 
 void ChromeRenderViewTest::TearDown() {
+  base::RunLoop().RunUntilIdle();
 #if defined(ENABLE_EXTENSIONS)
   ChromeContentRendererClient* client =
       static_cast<ChromeContentRendererClient*>(content_renderer_client_.get());

@@ -4,13 +4,19 @@
 
 #include "chrome/browser/thumbnails/thumbnail_service_impl.h"
 
+#include "base/bind.h"
 #include "base/memory/ref_counted.h"
+#include "chrome/browser/history/history_utils.h"
 #include "chrome/browser/history/top_sites_factory.h"
-#include "chrome/browser/history/top_sites_impl.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/history/core/browser/top_sites_impl.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-typedef testing::Test ThumbnailServiceTest;
+class ThumbnailServiceTest : public testing::Test {
+  content::TestBrowserThreadBundle thread_bundle_;
+};
 
 namespace {
 
@@ -19,7 +25,11 @@ namespace {
 class MockTopSites : public history::TopSitesImpl {
  public:
   explicit MockTopSites(Profile* profile)
-      : history::TopSitesImpl(profile, history::PrepopulatedPageList()),
+      : history::TopSitesImpl(profile->GetPrefs(),
+                              nullptr,
+                              prefs::kNtpMostVisitedURLsBlacklist,
+                              history::PrepopulatedPageList(),
+                              base::Bind(CanAddURLToHistory)),
         capacity_(1) {}
 
   // history::TopSitesImpl overrides.

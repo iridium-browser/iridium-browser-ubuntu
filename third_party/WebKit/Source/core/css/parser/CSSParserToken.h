@@ -5,6 +5,7 @@
 #ifndef CSSParserToken_h
 #define CSSParserToken_h
 
+#include "core/CoreExport.h"
 #include "core/css/CSSPrimitiveValue.h"
 #include "core/css/parser/CSSParserValues.h"
 
@@ -62,7 +63,7 @@ enum HashTokenType {
     HashTokenUnrestricted,
 };
 
-class CSSParserToken {
+class CORE_EXPORT CSSParserToken {
 public:
     enum BlockType {
         NotBlock,
@@ -100,7 +101,7 @@ public:
     UChar32 unicodeRangeStart() const { ASSERT(m_type == UnicodeRangeToken); return m_unicodeRange.start; }
     UChar32 unicodeRangeEnd() const { ASSERT(m_type == UnicodeRangeToken); return m_unicodeRange.end; }
 
-    CSSPropertyID parseAsCSSPropertyID() const;
+    CSSPropertyID parseAsUnresolvedCSSPropertyID() const;
 
     void serialize(StringBuilder&) const;
 

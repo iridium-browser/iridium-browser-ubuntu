@@ -17,19 +17,23 @@ template <typename Key, typename Value>
 inline size_t GetSerializedSize_(const Map<Key, Value>& input);
 
 template <typename ValidateParams, typename E, typename F>
-inline void SerializeArray_(Array<E> input,
-                            internal::Buffer* buf,
-                            internal::Array_Data<F>** output);
+inline void SerializeArray_(
+    Array<E> input,
+    internal::Buffer* buf,
+    internal::Array_Data<F>** output,
+    const internal::ArrayValidateParams* validate_params);
 
 namespace internal {
 
 template <typename MapType,
           typename DataType,
-          bool kValueIsMoveOnlyType = IsMoveOnlyType<MapType>::value>
+          bool value_is_move_only_type = IsMoveOnlyType<MapType>::value,
+          bool is_union =
+              IsUnionDataType<typename RemovePointer<DataType>::type>::value>
 struct MapSerializer;
 
 template <typename MapType, typename DataType>
-struct MapSerializer<MapType, DataType, false> {
+struct MapSerializer<MapType, DataType, false, false> {
   static size_t GetBaseArraySize(size_t count) {
     return Align(count * sizeof(DataType));
   }
@@ -37,7 +41,7 @@ struct MapSerializer<MapType, DataType, false> {
 };
 
 template <>
-struct MapSerializer<bool, bool, false> {
+struct MapSerializer<bool, bool, false, false> {
   static size_t GetBaseArraySize(size_t count) {
     return Align((count + 7) / 8);
   }
@@ -45,11 +49,11 @@ struct MapSerializer<bool, bool, false> {
 };
 
 template <typename H>
-struct MapSerializer<ScopedHandleBase<H>, H, true> {
+struct MapSerializer<ScopedHandleBase<H>, H, true, false> {
   static size_t GetBaseArraySize(size_t count) {
     return Align(count * sizeof(H));
   }
-  static size_t GetItemSize(const H& item) { return 0; }
+  static size_t GetItemSize(const ScopedHandleBase<H>& item) { return 0; }
 };
 
 // This template must only apply to pointer mojo entity (structs and arrays).
@@ -59,7 +63,8 @@ struct MapSerializer<
     S,
     typename EnableIf<IsPointer<typename WrapperTraits<S>::DataType>::value,
                       typename WrapperTraits<S>::DataType>::type,
-    true> {
+    true,
+    false> {
   typedef
       typename RemovePointer<typename WrapperTraits<S>::DataType>::type S_Data;
   static size_t GetBaseArraySize(size_t count) {
@@ -68,8 +73,18 @@ struct MapSerializer<
   static size_t GetItemSize(const S& item) { return GetSerializedSize_(item); }
 };
 
+template <typename U, typename U_Data>
+struct MapSerializer<U, U_Data*, true, true> {
+  static size_t GetBaseArraySize(size_t count) {
+    return count * sizeof(U_Data);
+  }
+  static size_t GetItemSize(const U& item) {
+    return GetSerializedSize_(item, true);
+  }
+};
+
 template <>
-struct MapSerializer<String, String_Data*, false> {
+struct MapSerializer<String, String_Data*, false, false> {
   static size_t GetBaseArraySize(size_t count) {
     return count * sizeof(StringPointer);
   }
@@ -112,16 +127,18 @@ inline size_t GetSerializedSize_(const Map<MapKey, MapValue>& input) {
          value_data_size;
 }
 
-// We don't need a KeyValidateParams, because we konw exactly what params are
-// needed. (Keys are primitive types or non-nullable strings.)
-template <typename ValueValidateParams,
-          typename MapKey,
+// We don't need an ArrayValidateParams instance for key validation since
+// we can deduce it from the Key type. (which can only be primitive types or
+// non-nullable strings.)
+template <typename MapKey,
           typename MapValue,
           typename DataKey,
           typename DataValue>
-inline void SerializeMap_(Map<MapKey, MapValue> input,
-                          internal::Buffer* buf,
-                          internal::Map_Data<DataKey, DataValue>** output) {
+inline void SerializeMap_(
+    Map<MapKey, MapValue> input,
+    internal::Buffer* buf,
+    internal::Map_Data<DataKey, DataValue>** output,
+    const internal::ArrayValidateParams* value_validate_params) {
   if (input) {
     internal::Map_Data<DataKey, DataValue>* result =
         internal::Map_Data<DataKey, DataValue>::New(buf);
@@ -129,10 +146,11 @@ inline void SerializeMap_(Map<MapKey, MapValue> input,
       Array<MapKey> keys;
       Array<MapValue> values;
       input.DecomposeMapTo(&keys, &values);
-      SerializeArray_<internal::MapKeyValidateParams<DataKey>>(
-          keys.Pass(), buf, &result->keys.ptr);
-      SerializeArray_<ValueValidateParams>(
-          values.Pass(), buf, &result->values.ptr);
+      const internal::ArrayValidateParams* key_validate_params =
+          internal::MapKeyValidateParamsFactory<DataKey>::Get();
+      SerializeArray_(keys.Pass(), buf, &result->keys.ptr, key_validate_params);
+      SerializeArray_(values.Pass(), buf, &result->values.ptr,
+                      value_validate_params);
     }
     *output = result;
   } else {

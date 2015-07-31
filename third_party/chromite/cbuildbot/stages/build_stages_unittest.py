@@ -10,18 +10,18 @@ import contextlib
 import os
 
 from chromite.cbuildbot import cbuildbot_config as config
+from chromite.cbuildbot import cbuildbot_unittest
 from chromite.cbuildbot import commands
 from chromite.cbuildbot import constants
-from chromite.cbuildbot.cbuildbot_unittest import BuilderRunMock
 from chromite.cbuildbot.stages import build_stages
 from chromite.cbuildbot.stages import generic_stages_unittest
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_build_lib_unittest
 from chromite.lib import cros_test_lib
-from chromite.lib import git
 from chromite.lib import parallel
 from chromite.lib import parallel_unittest
 from chromite.lib import partial_mock
+from chromite.lib import path_util
 from chromite.lib import portage_util
 
 from chromite.cbuildbot.stages.generic_stages_unittest import patch
@@ -31,7 +31,7 @@ from chromite.cbuildbot.stages.generic_stages_unittest import patches
 # pylint: disable=too-many-ancestors
 
 
-class InitSDKTest(generic_stages_unittest.RunCommandAbstractStageTest):
+class InitSDKTest(generic_stages_unittest.RunCommandAbstractStageTestCase):
   """Test building the SDK"""
 
   # pylint: disable=protected-access
@@ -83,7 +83,7 @@ class InitSDKTest(generic_stages_unittest.RunCommandAbstractStageTest):
                                enter_chroot=True, extra_env={'USE': 'foo'})
 
 
-class SetupBoardTest(generic_stages_unittest.RunCommandAbstractStageTest):
+class SetupBoardTest(generic_stages_unittest.RunCommandAbstractStageTestCase):
   """Test building the board"""
 
   def ConstructStage(self):
@@ -169,7 +169,7 @@ class SetupBoardTest(generic_stages_unittest.RunCommandAbstractStageTest):
     self.assertCommandContains(['./setup_board', '--skip_chroot_upgrade'])
 
 
-class UprevStageTest(generic_stages_unittest.AbstractStageTest):
+class UprevStageTest(generic_stages_unittest.AbstractStageTestCase):
   """Tests for the UprevStage class."""
 
   def setUp(self):
@@ -193,12 +193,13 @@ class UprevStageTest(generic_stages_unittest.AbstractStageTest):
     self.assertFalse(self.uprev_mock.called)
 
 
-class AllConfigsTestCase(generic_stages_unittest.AbstractStageTest):
+class AllConfigsTestCase(generic_stages_unittest.AbstractStageTestCase,
+                         cros_test_lib.OutputTestCase):
   """Test case for testing against all bot configs."""
 
   def ConstructStage(self):
     """Bypass lint warning"""
-    generic_stages_unittest.AbstractStageTest.ConstructStage(self)
+    generic_stages_unittest.AbstractStageTestCase.ConstructStage(self)
 
   @contextlib.contextmanager
   def RunStageWithConfig(self, mock_configurator=None):
@@ -208,7 +209,7 @@ class AllConfigsTestCase(generic_stages_unittest.AbstractStageTest):
         rc.SetDefaultCmdResult()
         if mock_configurator:
           mock_configurator(rc)
-        with cros_test_lib.OutputCapturer():
+        with self.OutputCapturer():
           with cros_test_lib.LoggingCapturer():
             self.RunStage()
 
@@ -223,11 +224,11 @@ class AllConfigsTestCase(generic_stages_unittest.AbstractStageTest):
     with parallel.BackgroundTaskRunner(task) as queue:
       # Loop through all major configuration types and pick one from each.
       for bot_type in config.CONFIG_TYPE_DUMP_ORDER:
-        for bot_id in config.config:
+        for bot_id in config.GetConfig():
           if bot_id.endswith(bot_type):
             # Skip any config without a board, since those configs do not
             # build packages.
-            cfg = config.config[bot_id]
+            cfg = config.GetConfig()[bot_id]
             if cfg.boards:
               # Skip boards w/out a local overlay.  Like when running a
               # public manifest and testing private-only boards.
@@ -242,12 +243,12 @@ class AllConfigsTestCase(generic_stages_unittest.AbstractStageTest):
               break
 
 
-class BuildPackagesStageTest(AllConfigsTestCase):
+class BuildPackagesStageTest(AllConfigsTestCase,
+                             cbuildbot_unittest.SimpleBuilderTestCase):
   """Tests BuildPackagesStage."""
 
   def setUp(self):
     self._release_tag = None
-    self.StartPatcher(BuilderRunMock())
     self.PatchObject(commands, 'ExtractDependencies', return_value=dict())
 
   def ConstructStage(self):
@@ -297,7 +298,8 @@ class BuildImageStageMock(partial_mock.PartialMock):
       self.backup['_BuildImages'](*args, **kwargs)
 
   def _GenerateAuZip(self, *args, **kwargs):
-    with patch(git, 'ReinterpretPathForChroot', return_value='/chroot/path'):
+    with patch(path_util, 'ToChrootPath',
+               return_value='/chroot/path'):
       self.backup['_GenerateAuZip'](*args, **kwargs)
 
 

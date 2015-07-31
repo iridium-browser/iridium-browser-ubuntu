@@ -32,6 +32,8 @@
 
 namespace blink {
 
+class ExceptionState;
+
 enum AnimationMode {
     NoAnimation,
     FromToAnimation,
@@ -60,9 +62,9 @@ class SVGAnimationElement : public SVGSMILElement {
     DEFINE_WRAPPERTYPEINFO();
 public:
     // SVGAnimationElement
-    float getStartTime() const;
+    float getStartTime(ExceptionState&) const;
     float getCurrentTime() const;
-    float getSimpleDuration() const;
+    float getSimpleDuration(ExceptionState&) const;
 
     void beginElement();
     void beginElementAt(float offset);
@@ -136,7 +138,6 @@ protected:
     void computeCSSPropertyValue(SVGElement*, CSSPropertyID, String& value);
     void determinePropertyValueTypes(const String& from, const String& to);
 
-    bool isSupportedAttribute(const QualifiedName&);
     virtual void parseAttribute(const QualifiedName&, const AtomicString&) override;
     virtual void svgAttributeChanged(const QualifiedName&) override;
 

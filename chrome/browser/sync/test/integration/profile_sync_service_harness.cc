@@ -37,6 +37,10 @@ using syncer::sessions::SyncSessionSnapshot;
 
 namespace {
 
+std::string GetGaiaIdForUsername(const std::string& username) {
+  return "gaia-id-" + username;
+}
+
 bool HasAuthError(ProfileSyncService* service) {
   return service->GetAuthError().state() ==
              GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS ||
@@ -166,10 +170,12 @@ bool ProfileSyncServiceHarness::SetupSync(
     }
   } else if (signin_type_ == SigninType::FAKE_SIGNIN) {
     // Authenticate sync client using GAIA credentials.
-    service()->signin()->SetAuthenticatedUsername(username_);
-    service()->GoogleSigninSucceeded(username_, username_, password_);
+    std::string gaia_id = GetGaiaIdForUsername(username_);
+    service()->signin()->SetAuthenticatedAccountInfo(gaia_id, username_);
+    std::string account_id = service()->signin()->GetAuthenticatedAccountId();
+    service()->GoogleSigninSucceeded(account_id, username_, password_);
     ProfileOAuth2TokenServiceFactory::GetForProfile(profile_)->
-      UpdateCredentials(username_, GenerateFakeOAuth2RefreshTokenString());
+      UpdateCredentials(account_id, GenerateFakeOAuth2RefreshTokenString());
   } else {
     LOG(ERROR) << "Unsupported profile signin type.";
   }

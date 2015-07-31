@@ -19,127 +19,89 @@
 (function() {
   'use strict';
 
-  /**
-   * A list of all pref paths used on all platforms in the UI.
-   * TODO(jlklein): This is a temporary workaround that needs to be removed
-   * once settingsPrivate is implemented with the fetchAll function. We will
-   * not need to tell the settingsPrivate API which prefs to fetch.
-   * @const {!Array<string>}
-   */
-  var PREFS_TO_FETCH = [
-    'download.default_directory',
-    'download.prompt_for_download',
-  ];
+  Polymer({
+    is: 'cr-settings-prefs',
 
-  /**
-   * A list of all CrOS-only pref paths used in the UI.
-   * TODO(jlklein): This is a temporary workaround that needs to be removed
-   * once settingsPrivate is implemented with the fetchAll function. We will
-   * not need to tell the settingsPrivate API which prefs to fetch.
-   * @const {!Array<string>}
-   */
-  var CROS_ONLY_PREFS = [
-    'settings.accessibility',
-    'settings.a11y.autoclick',
-    'settings.a11y.autoclick_delay_ms',
-    'settings.a11y.enable_menu',
-    'settings.a11y.high_contrast_enabled',
-    'settings.a11y.large_cursor_enabled',
-    'settings.a11y.screen_magnifier',
-    'settings.a11y.sticky_keys_enabled',
-    'settings.a11y.virtual_keyboard',
-    'settings.touchpad.enable_tap_dragging',
-  ];
-
-  Polymer('cr-settings-prefs', {
-    publish: {
+    properties: {
       /**
        * Object containing all preferences.
-       *
-       * @attribute settings
-       * @type {Object}
-       * @default null
        */
-      settings: null,
+      prefStore: {
+        type: Object,
+        value: function() { return {}; },
+        notify: true,
+      },
     },
 
     /** @override */
     created: function() {
       CrSettingsPrefs.isInitialized = false;
-      this.settings = {};
-      this.fetchSettings_();
+
+      chrome.settingsPrivate.onPrefsChanged.addListener(
+          this.onPrefsChanged_.bind(this));
+      chrome.settingsPrivate.getAllPrefs(this.onPrefsFetched_.bind(this));
     },
 
     /**
-     * Fetches all settings from settingsPrivate.
-     * TODO(jlklein): Implement using settingsPrivate when it's available.
+     * Called when prefs in the underlying Chrome pref store are changed.
+     * @param {!Array<!chrome.settingsPrivate.PrefObject>} prefs The prefs that
+     *     changed.
      * @private
      */
-    fetchSettings_: function() {
-      // *Sigh* We need to export the function name to global scope. This is
-      // needed the CoreOptionsHandler can only call a function in the global
-      // scope.
-      var callbackName = 'CrSettingsPrefs_onPrefsFetched';
-      window[callbackName] = this.onPrefsFetched_.bind(this);
-      var prefsToFetch = PREFS_TO_FETCH;
-      if (cr.isChromeOS)
-        prefsToFetch.concat(CROS_ONLY_PREFS);
-
-      chrome.send('fetchPrefs', [callbackName].concat(prefsToFetch));
+    onPrefsChanged_: function(prefs) {
+      this.updatePrefs_(prefs, false);
     },
 
     /**
-     * Fetches all settings from settingsPrivate.
-     * @param {!Object} dict Map of fetched property values.
+     * Called when prefs are fetched from settingsPrivate.
+     * @param {!Array<!chrome.settingsPrivate.PrefObject>} prefs
      * @private
      */
-    onPrefsFetched_: function(dict) {
-      this.parsePrefDict_('', dict);
+    onPrefsFetched_: function(prefs) {
+      this.updatePrefs_(prefs, true);
+
       CrSettingsPrefs.isInitialized = true;
       document.dispatchEvent(new Event(CrSettingsPrefs.INITIALIZED));
     },
 
+
     /**
-     * Helper function for parsing the prefs dict and constructing Preference
-     * objects.
-     * @param {string} prefix The namespace prefix of the pref.
-     * @param {!Object} dict Map with preference values.
+     * Updates the settings model with the given prefs.
+     * @param {!Array<!chrome.settingsPrivate.PrefObject>} prefs
+     * @param {boolean} shouldObserve Whether to add an ObjectObserver for each
+     *     of the prefs.
      * @private
      */
-    parsePrefDict_: function(prefix, dict) {
-      for (let prefName in dict) {
-        let prefObj = dict[prefName];
-        if (!this.isPrefObject_(prefObj)) {
-          this.parsePrefDict_(prefix + prefName + '.', prefObj);
-          continue;
+    updatePrefs_: function(prefs, shouldObserve) {
+      prefs.forEach(function(prefObj) {
+        let root = this.prefStore;
+        let tokens = prefObj.key.split('.');
+
+        assert(tokens.length > 0);
+
+        for (let i = 0; i < tokens.length; i++) {
+          let token = tokens[i];
+
+          if (!root.hasOwnProperty(token)) {
+            let path = 'prefStore.' + tokens.slice(0, i + 1).join('.');
+            this.setPathValue(path, {});
+          }
+          root = root[token];
         }
 
-        // prefObj is actually a pref object. Construct the path to pref using
-        // prefix, add the pref to this.settings, and observe changes.
-        let root = this.settings;
-        let pathPieces = prefix.slice(0, -1).split('.');
-        pathPieces.forEach(function(pathPiece) {
-          root[pathPiece] = root[pathPiece] || {};
-          root = root[pathPiece];
-        });
+        // NOTE: Do this copy rather than just a re-assignment, so that the
+        // ObjectObserver fires.
+        for (let objKey in prefObj) {
+          let path = 'prefStore.' + prefObj.key + '.' + objKey;
+          this.setPathValue(path, prefObj[objKey]);
+        }
 
-        root[prefName] = prefObj;
-        let keyObserver = new ObjectObserver(prefObj);
-        keyObserver.open(
-            this.propertyChangeCallback_.bind(this, prefix + prefName));
-      }
-    },
-
-    /**
-     * Determines whether the passed object is a pref object from Chrome.
-     * @param {*} rawPref The object to check.
-     * @return {boolean} True if the passes object is a pref.
-     * @private
-     */
-    isPrefObject_: function(rawPref) {
-      return rawPref && typeof rawPref == 'object' &&
-          rawPref.hasOwnProperty('value') &&
-          rawPref.hasOwnProperty('disabled');
+        if (shouldObserve) {
+          let keyObserver = new ObjectObserver(root);
+          keyObserver.open(
+              this.propertyChangeCallback_.bind(this, prefObj.key));
+        }
+      }, this);
     },
 
     /**
@@ -163,62 +125,12 @@
         let newValue = changed[property];
         assert(newValue !== undefined);
 
-        switch (typeof newValue) {
-          case 'boolean':
-            this.setBooleanPref_(
-                propertyPath, /** @type {boolean} */ (newValue));
-            break;
-          case 'number':
-            this.setNumberPref_(
-                propertyPath, /** @type {number} */ (newValue));
-            break;
-          case 'string':
-            this.setStringPref_(
-                propertyPath, /** @type {string} */ (newValue));
-            break;
-          case 'object':
-            assertInstanceof(newValue, Array);
-            this.setArrayPref_(
-                propertyPath, /** @type {!Array} */ (newValue));
-        }
+        chrome.settingsPrivate.setPref(
+            propertyPath,
+            newValue,
+            /* pageId */ '',
+            /* callback */ function() {});
       }
-    },
-
-    /**
-     * @param {string} propertyPath The full path of the pref.
-     * @param {boolean} value The new value of the pref.
-     * @private
-     */
-    setBooleanPref_: function(propertyPath, value) {
-      chrome.send('setBooleanPref', [propertyPath, value]);
-    },
-
-    /**
-     * @param {string} propertyPath The full path of the pref.
-     * @param {string} value The new value of the pref.
-     * @private
-     */
-    setStringPref_: function(propertyPath, value) {
-      chrome.send('setStringPref', [propertyPath, value]);
-    },
-
-    /**
-     * @param {string} propertyPath The full path of the pref.
-     * @param {number} value The new value of the pref.
-     * @private
-     */
-    setNumberPref_: function(propertyPath, value) {
-      var setFn = value % 1 == 0 ? 'setIntegerPref' : 'setDoublePref';
-      chrome.send(setFn, [propertyPath, value]);
-    },
-
-    /**
-     * @param {string} propertyPath The full path of the pref.
-     * @param {!Array} value The new value of the pref.
-     * @private
-     */
-    setArrayPref_: function(propertyPath, value) {
-      chrome.send('setListPref', [propertyPath, value]);
     },
   });
 })();

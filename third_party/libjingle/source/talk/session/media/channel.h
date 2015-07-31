@@ -522,10 +522,14 @@ class VideoChannel : public BaseChannel {
  public:
   VideoChannel(rtc::Thread* thread, MediaEngineInterface* media_engine,
                VideoMediaChannel* channel, BaseSession* session,
-               const std::string& content_name, bool rtcp,
-               VoiceChannel* voice_channel);
+               const std::string& content_name, bool rtcp);
   ~VideoChannel();
   bool Init();
+
+  // downcasts a MediaChannel
+  virtual VideoMediaChannel* media_channel() const {
+    return static_cast<VideoMediaChannel*>(BaseChannel::media_channel());
+  }
 
   bool SetRenderer(uint32 ssrc, VideoRenderer* renderer);
   bool ApplyViewRequest(const ViewRequest& request);
@@ -559,12 +563,6 @@ class VideoChannel : public BaseChannel {
 
   // Configuration and setting.
   bool SetChannelOptions(const VideoOptions& options);
-
- protected:
-  // downcasts a MediaChannel
-  virtual VideoMediaChannel* media_channel() const {
-    return static_cast<VideoMediaChannel*>(BaseChannel::media_channel());
-  }
 
  private:
   typedef std::map<uint32, VideoCapturer*> ScreencastMap;
@@ -602,7 +600,6 @@ class VideoChannel : public BaseChannel {
   void OnVideoChannelError(uint32 ssrc, VideoMediaChannel::Error error);
   void OnSrtpError(uint32 ssrc, SrtpFilter::Mode mode, SrtpFilter::Error error);
 
-  VoiceChannel* voice_channel_;
   VideoRenderer* renderer_;
   ScreencastMap screencast_capturers_;
   rtc::scoped_ptr<VideoMediaMonitor> media_monitor_;

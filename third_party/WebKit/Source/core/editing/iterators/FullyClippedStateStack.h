@@ -5,18 +5,25 @@
 #ifndef FullyClippedStateStack_h
 #define FullyClippedStateStack_h
 
+#include "core/editing/EditingStrategy.h"
 #include "core/editing/iterators/BitStack.h"
 
 namespace blink {
 
-class FullyClippedStateStack : public BitStack {
+template<typename Strategy>
+class FullyClippedStateStackAlgorithm : public BitStack {
 public:
-    FullyClippedStateStack();
-    ~FullyClippedStateStack();
+    FullyClippedStateStackAlgorithm();
+    ~FullyClippedStateStackAlgorithm();
 
     void pushFullyClippedState(Node*);
     void setUpFullyClippedStack(Node*);
 };
+
+extern template class FullyClippedStateStackAlgorithm<EditingStrategy>;
+extern template class FullyClippedStateStackAlgorithm<EditingInComposedTreeStrategy>;
+
+using FullyClippedStateStack = FullyClippedStateStackAlgorithm<EditingStrategy>;
 
 } // namespace blink
 

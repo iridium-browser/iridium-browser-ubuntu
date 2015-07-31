@@ -5,9 +5,11 @@
 #include "components/password_manager/core/browser/affiliation_backend.h"
 
 #include <stdint.h>
+#include <algorithm>
 
 #include "base/bind.h"
 #include "base/location.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/clock.h"
@@ -30,6 +32,7 @@ AffiliationBackend::AffiliationBackend(
       task_runner_(task_runner),
       clock_(time_source.Pass()),
       tick_clock_(time_tick_source.Pass()),
+      construction_time_(clock_->Now()),
       weak_ptr_factory_(this) {
   DCHECK_LT(base::Time(), clock_->Now());
 }
@@ -96,8 +99,30 @@ void AffiliationBackend::CancelPrefetch(const FacetURI& facet_uri,
 void AffiliationBackend::TrimCache() {
   DCHECK(thread_checker_ && thread_checker_->CalledOnValidThread());
 
-  // TODO(engedy): Implement this. crbug.com/437865.
-  NOTIMPLEMENTED();
+  // Discard all equivalence classes except those that contain >= 1 facet for
+  // which there is a FacetManager claiming that it needs to keep the data.
+  std::vector<AffiliatedFacetsWithUpdateTime> all_affiliations;
+  cache_->GetAllAffiliations(&all_affiliations);
+  for (const auto& affiliation : all_affiliations) {
+    bool can_discard = true;
+    for (const auto& facet_uri : affiliation.facets) {
+      FacetManager* facet_manager = facet_managers_.get(facet_uri);
+      if (facet_manager && !facet_manager->CanCachedDataBeDiscarded()) {
+        can_discard = false;
+        break;
+      }
+    }
+    if (can_discard) {
+      // The database should not be serving empty equivalence classes.
+      CHECK(affiliation.facets.size());
+      cache_->DeleteAffiliationsForFacet(affiliation.facets[0]);
+    }
+  }
+}
+
+// static
+void AffiliationBackend::DeleteCache(const base::FilePath& db_path) {
+  AffiliationDatabase::Delete(db_path);
 }
 
 FacetManager* AffiliationBackend::GetOrCreateFacetManager(
@@ -225,7 +250,26 @@ bool AffiliationBackend::OnCanSendNetworkRequest() {
   fetcher_.reset(AffiliationFetcher::Create(request_context_getter_.get(),
                                             requested_facet_uris, this));
   fetcher_->StartRequest();
+  ReportStatistics(requested_facet_uris.size());
   return true;
+}
+
+void AffiliationBackend::ReportStatistics(size_t requested_facet_uri_count) {
+  UMA_HISTOGRAM_COUNTS_100("PasswordManager.AffiliationBackend.FetchSize",
+                           requested_facet_uri_count);
+
+  if (last_request_time_.is_null()) {
+    base::TimeDelta delay = clock_->Now() - construction_time_;
+    UMA_HISTOGRAM_CUSTOM_TIMES(
+        "PasswordManager.AffiliationBackend.FirstFetchDelay", delay,
+        base::TimeDelta::FromSeconds(1), base::TimeDelta::FromDays(3), 50);
+  } else {
+    base::TimeDelta delay = clock_->Now() - last_request_time_;
+    UMA_HISTOGRAM_CUSTOM_TIMES(
+        "PasswordManager.AffiliationBackend.SubsequentFetchDelay", delay,
+        base::TimeDelta::FromSeconds(1), base::TimeDelta::FromDays(3), 50);
+  }
+  last_request_time_ = clock_->Now();
 }
 
 void AffiliationBackend::SetThrottlerForTesting(

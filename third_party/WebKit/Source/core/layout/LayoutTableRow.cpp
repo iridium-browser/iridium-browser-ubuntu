@@ -31,7 +31,6 @@
 #include "core/layout/LayoutAnalyzer.h"
 #include "core/layout/LayoutTableCell.h"
 #include "core/layout/LayoutView.h"
-#include "core/layout/PaintInfo.h"
 #include "core/layout/SubtreeLayoutScope.h"
 #include "core/style/StyleInheritedData.h"
 #include "core/paint/TableRowPainter.h"
@@ -134,7 +133,7 @@ void LayoutTableRow::addChild(LayoutObject* child, LayoutObject* beforeChild)
             return;
         }
 
-        LayoutTableCell* cell = LayoutTableCell::createAnonymousWithParentRenderer(this);
+        LayoutTableCell* cell = LayoutTableCell::createAnonymousWithParent(this);
         addChild(cell, beforeChild);
         cell->addChild(child);
         return;
@@ -228,12 +227,12 @@ void LayoutTableRow::imageChanged(WrappedImagePtr, const IntRect*)
 
 LayoutTableRow* LayoutTableRow::createAnonymous(Document* document)
 {
-    LayoutTableRow* renderer = new LayoutTableRow(0);
-    renderer->setDocumentForAnonymous(document);
-    return renderer;
+    LayoutTableRow* layoutObject = new LayoutTableRow(0);
+    layoutObject->setDocumentForAnonymous(document);
+    return layoutObject;
 }
 
-LayoutTableRow* LayoutTableRow::createAnonymousWithParentRenderer(const LayoutObject* parent)
+LayoutTableRow* LayoutTableRow::createAnonymousWithParent(const LayoutObject* parent)
 {
     LayoutTableRow* newRow = LayoutTableRow::createAnonymous(&parent->document());
     RefPtr<ComputedStyle> newStyle = ComputedStyle::createAnonymousStyleWithDisplay(parent->styleRef(), TABLE_ROW);

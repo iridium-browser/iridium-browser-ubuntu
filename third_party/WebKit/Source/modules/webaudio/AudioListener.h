@@ -76,8 +76,8 @@ public:
     double speedOfSound() const { return m_speedOfSound; }
 
     Mutex& listenerLock() { return m_listenerLock; }
-    void addPanner(PannerHandler*);
-    void removePanner(PannerHandler*);
+    void addPanner(PannerHandler&);
+    void removePanner(PannerHandler&);
 
     // HRTF DB loader
     HRTFDatabaseLoader* hrtfDatabaseLoader() { return m_hrtfDatabaseLoader.get(); }
@@ -108,7 +108,9 @@ private:
     mutable Mutex m_listenerLock;
     // List for pannerNodes in context. This is updated only in the main thread,
     // and can be referred in audio thread.
-    HeapVector<Member<PannerHandler>> m_panners;
+    // These raw pointers are safe because PannerHandler::uninitialize()
+    // unregisters it from m_panners.
+    HashSet<PannerHandler*> m_panners;
     // HRTF DB loader for panner node.
     RefPtr<HRTFDatabaseLoader> m_hrtfDatabaseLoader;
 };

@@ -223,6 +223,9 @@ class BrowserView : public BrowserWindow,
     return immersive_mode_controller_.get();
   }
 
+  // Returns true if the view has been initialized.
+  bool initialized() const { return initialized_; }
+
   // Restores the focused view. This is also used to set the initial focus
   // when a new browser window is created.
   void RestoreFocus();
@@ -231,10 +234,6 @@ class BrowserView : public BrowserWindow,
   // FullscreenController. This method does any processing which was skipped.
   // Only exiting fullscreen in this way is currently supported.
   void FullscreenStateChanged();
-
-  // Called from BookmarkBarView/DownloadShelfView during their show/hide
-  // animations.
-  void ToolbarSizeChanged(bool is_animating);
 
   // Overridden from BrowserWindow:
   void Show() override;
@@ -293,6 +292,7 @@ class BrowserView : public BrowserWindow,
   void UpdateToolbar(content::WebContents* contents) override;
   void ResetToolbarTabState(content::WebContents* contents) override;
   void FocusToolbar() override;
+  void ToolbarSizeChanged(bool is_animating) override;
   void FocusAppMenu() override;
   void FocusBookmarksToolbar() override;
   void FocusInfobars() override;
@@ -335,7 +335,6 @@ class BrowserView : public BrowserWindow,
       bool app_modal,
       const base::Callback<void(bool)>& callback) override;
   void UserChangedTheme() override;
-  void WebContentsFocused(content::WebContents* contents) override;
   void ShowWebsiteSettings(Profile* profile,
                            content::WebContents* web_contents,
                            const GURL& url,
@@ -345,9 +344,7 @@ class BrowserView : public BrowserWindow,
                               bool* is_keyboard_shortcut) override;
   void HandleKeyboardEvent(
       const content::NativeWebKeyboardEvent& event) override;
-  void Cut() override;
-  void Copy() override;
-  void Paste() override;
+  void CutCopyPaste(int command_id) override;
   WindowOpenDisposition GetDispositionForPopupBounds(
       const gfx::Rect& bounds) override;
   FindBar* CreateFindBar() override;
@@ -552,12 +549,6 @@ class BrowserView : public BrowserWindow,
   // learning about how frequently the top-row keys are used.
   void UpdateAcceleratorMetrics(const ui::Accelerator& accelerator,
                                 int command_id);
-
-  // Calls |method| which is either WebContents::Cut, ::Copy, or ::Paste,
-  // first trying the content WebContents, then the devtools WebContents, and
-  // lastly the Views::Textfield if one is focused.
-  void DoCutCopyPaste(void (content::WebContents::*method)(),
-                      int command_id);
 
   // Calls |method| which is either WebContents::Cut, ::Copy, or ::Paste on
   // the given WebContents, returning true if it consumed the event.

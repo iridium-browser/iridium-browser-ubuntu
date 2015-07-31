@@ -173,7 +173,7 @@ void ElevatedInstallRecoveryComponent(const base::FilePath& installer_path) {
 // There is a global error service monitors this flag and will pop up
 // bubble if the flag is set to true.
 // See chrome/browser/recovery/recovery_install_global_error.cc for details.
-class RecoveryComponentInstaller : public update_client::ComponentInstaller {
+class RecoveryComponentInstaller : public update_client::CrxInstaller {
  public:
   RecoveryComponentInstaller(const Version& version, PrefService* prefs);
 
@@ -203,7 +203,7 @@ void SimulateElevatedRecoveryHelper(PrefService* prefs) {
 }
 
 void RecoveryRegisterHelper(ComponentUpdateService* cus, PrefService* prefs) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   Version version(prefs->GetString(prefs::kRecoveryComponentVersion));
   if (!version.IsValid()) {
     NOTREACHED();
@@ -215,19 +215,19 @@ void RecoveryRegisterHelper(ComponentUpdateService* cus, PrefService* prefs) {
   recovery.installer = new RecoveryComponentInstaller(version, prefs);
   recovery.version = version;
   recovery.pk_hash.assign(kSha2Hash, &kSha2Hash[sizeof(kSha2Hash)]);
-  if (cus->RegisterComponent(recovery) != ComponentUpdateService::kOk) {
+  if (cus->RegisterComponent(recovery) != ComponentUpdateService::Status::kOk) {
     NOTREACHED() << "Recovery component registration failed.";
   }
 }
 
 void RecoveryUpdateVersionHelper(const Version& version, PrefService* prefs) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   prefs->SetString(prefs::kRecoveryComponentVersion, version.GetString());
 }
 
 void SetPrefsForElevatedRecoveryInstall(const base::FilePath& unpack_path,
                                         PrefService* prefs) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   prefs->SetFilePath(prefs::kRecoveryComponentUnpackPath, unpack_path);
   prefs->SetBoolean(prefs::kRecoveryComponentNeedsElevation, true);
 }
@@ -394,7 +394,7 @@ void RegisterPrefsForRecoveryComponent(PrefRegistrySimple* registry) {
 }
 
 void AcceptedElevatedRecoveryInstall(PrefService* prefs) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
 #if defined(OS_WIN)
   ElevatedInstallRecoveryComponent(
@@ -404,7 +404,7 @@ void AcceptedElevatedRecoveryInstall(PrefService* prefs) {
 }
 
 void DeclinedElevatedRecoveryInstall(PrefService* prefs) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   prefs->SetBoolean(prefs::kRecoveryComponentNeedsElevation, false);
 }
 

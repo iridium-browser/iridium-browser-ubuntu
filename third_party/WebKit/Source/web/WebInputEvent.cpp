@@ -43,7 +43,7 @@ struct SameSizeAsWebInputEvent {
 };
 
 struct SameSizeAsWebKeyboardEvent : public SameSizeAsWebInputEvent {
-    int keyboardData[13];
+    int keyboardData[14];
 };
 
 struct SameSizeAsWebMouseEvent : public SameSizeAsWebInputEvent {
@@ -60,7 +60,7 @@ struct SameSizeAsWebGestureEvent : public SameSizeAsWebInputEvent {
 
 struct SameSizeAsWebTouchEvent : public SameSizeAsWebInputEvent {
     WebTouchPoint touchPoints[WebTouchEvent::touchesLengthCap];
-    int touchData[4];
+    int touchData[3];
 };
 
 static_assert(sizeof(WebInputEvent) == sizeof(SameSizeAsWebInputEvent), "WebInputEvent should not have gaps");

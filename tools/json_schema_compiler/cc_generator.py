@@ -148,9 +148,12 @@ class _Generator(object):
 
       real_t = self._type_helper.FollowRef(t)
       if real_t.property_type == PropertyType.ENUM:
-        items.append('%s(%s)' % (
-            prop.unix_name,
-            self._type_helper.GetEnumNoneValue(t)))
+        namespace_prefix = ('%s::' % real_t.namespace.unix_name
+                            if real_t.namespace != self._namespace
+                            else '')
+        items.append('%s(%s%s)' % (prop.unix_name,
+                                   namespace_prefix,
+                                   self._type_helper.GetEnumNoneValue(t)))
       elif prop.optional:
         continue
       elif t.property_type == PropertyType.INTEGER:
@@ -289,9 +292,13 @@ class _Generator(object):
             prop, value_var, dst, 'false')))
       underlying_type = self._type_helper.FollowRef(prop.type_)
       if underlying_type.property_type == PropertyType.ENUM:
+        namespace_prefix = ('%s::' % underlying_type.namespace.unix_name
+                            if underlying_type.namespace != self._namespace
+                            else '')
         (c.Append('} else {')
-          .Append('%%(dst)s->%%(name)s = %s;' %
-              self._type_helper.GetEnumNoneValue(prop.type_)))
+          .Append('%%(dst)s->%%(name)s = %s%s;' %
+             (namespace_prefix,
+              self._type_helper.GetEnumNoneValue(prop.type_))))
       c.Eblock('}')
     else:
       (c.Sblock(
@@ -356,11 +363,16 @@ class _Generator(object):
     for prop in type_.properties.values():
       prop_var = 'this->%s' % prop.unix_name
       if prop.optional:
-        # Optional enum values are generated with a NONE enum value.
         underlying_type = self._type_helper.FollowRef(prop.type_)
         if underlying_type.property_type == PropertyType.ENUM:
-          c.Sblock('if (%s != %s) {' %
+          # Optional enum values are generated with a NONE enum value,
+          # potentially from another namespace.
+          maybe_namespace = ''
+          if underlying_type.namespace != self._namespace:
+            maybe_namespace = '%s::' % underlying_type.namespace.unix_name
+          c.Sblock('if (%s != %s%s) {' %
               (prop_var,
+               maybe_namespace,
                self._type_helper.GetEnumNoneValue(prop.type_)))
         else:
           c.Sblock('if (%s.get()) {' % prop_var)
@@ -766,10 +778,9 @@ class _Generator(object):
                      failure_value,
                      is_ptr=is_ptr))
       else:
-        c.Sblock('if (!%s) {' % self._util_cc_helper.PopulateArrayFromList(
-            'list',
-            dst_var,
-            is_ptr))
+        c.Sblock('if (!%s(%s)) {' % (
+            self._util_cc_helper.PopulateArrayFromListFunction(is_ptr),
+            self._GenerateArgs(('*list', '&%(dst_var)s'))))
         c.Concat(self._GenerateError(
             '"unable to populate array \'%%(parent_key)s\'"'))
         if is_ptr and self._generate_error_messages:
@@ -1027,9 +1038,13 @@ class _Generator(object):
     underlying_type = self._type_helper.FollowRef(prop.type_)
     if (underlying_type.property_type == PropertyType.ENUM and
         prop.optional):
-      c.Append('%s->%s = %s;' % (
+      namespace_prefix = ('%s::' % underlying_type.namespace.unix_name
+                          if underlying_type.namespace != self._namespace
+                          else '')
+      c.Append('%s->%s = %s%s;' % (
         dst,
         prop.unix_name,
+        namespace_prefix,
         self._type_helper.GetEnumNoneValue(prop.type_)))
     return c
 

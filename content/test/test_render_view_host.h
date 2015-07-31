@@ -14,6 +14,7 @@
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/public/common/web_preferences.h"
+#include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_renderer_host.h"
 #include "ui/base/ime/dummy_text_input_client.h"
 #include "ui/base/layout.h"
@@ -39,10 +40,12 @@ class SiteInstance;
 class TestRenderFrameHost;
 class TestWebContents;
 
-// Utility function to initialize ViewHostMsg_NavigateParams_Params
-// with given |page_id|, |url| and |transition_type|.
+// Utility function to initialize FrameHostMsg_DidCommitProvisionalLoad_Params
+// with given parameters.
 void InitNavigateParams(FrameHostMsg_DidCommitProvisionalLoad_Params* params,
                         int page_id,
+                        int nav_entry_id,
+                        bool did_create_new_entry,
                         const GURL& url,
                         ui::PageTransition transition_type);
 
@@ -93,7 +96,6 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   void MovePluginWindows(const std::vector<WebPluginGeometry>& moves) override {
   }
   void Focus() override {}
-  void Blur() override {}
   void SetIsLoading(bool is_loading) override {}
   void UpdateCursor(const WebCursor& cursor) override {}
   void TextInputTypeChanged(ui::TextInputType type,
@@ -110,10 +112,11 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   void SetTooltipText(const base::string16& tooltip_text) override {}
   void SelectionBoundsChanged(
       const ViewHostMsg_SelectionBounds_Params& params) override {}
-  void CopyFromCompositingSurface(const gfx::Rect& src_subrect,
-                                  const gfx::Size& dst_size,
-                                  ReadbackRequestCallback& callback,
-                                  const SkColorType color_type) override;
+  void CopyFromCompositingSurface(
+      const gfx::Rect& src_subrect,
+      const gfx::Size& dst_size,
+      ReadbackRequestCallback& callback,
+      const SkColorType preferred_color_type) override;
   void CopyFromCompositingSurfaceToVideoFrame(
       const gfx::Rect& src_subrect,
       const scoped_refptr<media::VideoFrame>& target,
@@ -134,9 +137,9 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewBase {
   bool LockMouse() override;
   void UnlockMouse() override;
 #if defined(OS_WIN)
-  virtual void SetParentNativeViewAccessible(
+  void SetParentNativeViewAccessible(
       gfx::NativeViewAccessible accessible_parent) override;
-  virtual gfx::NativeViewId GetParentForWindowlessPlugin() const override;
+  gfx::NativeViewId GetParentForWindowlessPlugin() const override;
 #endif
 
   bool is_showing() const { return is_showing_; }
@@ -223,15 +226,11 @@ class TestRenderViewHost
     delete_counter_ = delete_counter;
   }
 
-  // Sets whether the RenderView currently exists or not. This controls the
-  // return value from IsRenderViewLive, which the rest of the system uses to
-  // check whether the RenderView has crashed or not.
-  void set_render_view_created(bool created) {
-    render_view_created_ = created;
-  }
-
   // The opener route id passed to CreateRenderView().
   int opener_route_id() const { return opener_route_id_; }
+
+  // RenderWidgetHost overrides (same value, but in the Mock* type)
+  MockRenderProcessHost* GetProcess() const override;
 
   // RenderViewHost overrides --------------------------------------------------
 
@@ -240,8 +239,7 @@ class TestRenderViewHost
                         int proxy_route_id,
                         int32 max_page_id,
                         bool window_was_created_with_opener) override;
-  bool IsRenderViewLive() const override;
-  bool IsFullscreen() const override;
+  bool IsFullscreenGranted() const override;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(RenderViewHostTest, FilterNavigate);
@@ -261,10 +259,6 @@ class TestRenderViewHost
       const GURL& original_request_url,
       int response_code,
       const base::FilePath* file_path_for_history_item);
-
-  // Tracks if the caller thinks if it created the RenderView. This is so we can
-  // respond to IsRenderViewLive appropriately.
-  bool render_view_created_;
 
   // See set_delete_counter() above. May be NULL.
   int* delete_counter_;

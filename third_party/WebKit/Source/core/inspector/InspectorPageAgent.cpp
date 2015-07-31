@@ -35,9 +35,6 @@
 #include "bindings/core/v8/ScriptController.h"
 #include "bindings/core/v8/ScriptRegexp.h"
 #include "core/HTMLNames.h"
-#include "core/animation/AnimationTimeline.h"
-#include "core/css/StyleSheetContents.h"
-#include "core/css/resolver/StyleResolver.h"
 #include "core/dom/DOMImplementation.h"
 #include "core/dom/Document.h"
 #include "core/fetch/CSSStyleSheetResource.h"
@@ -46,33 +43,24 @@
 #include "core/fetch/MemoryCache.h"
 #include "core/fetch/Resource.h"
 #include "core/fetch/ResourceFetcher.h"
-#include "core/fetch/ScriptResource.h"
-#include "core/frame/FrameHost.h"
-#include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
-#include "core/frame/Settings.h"
 #include "core/html/HTMLFrameOwnerElement.h"
 #include "core/html/VoidCallback.h"
-#include "core/html/imports/HTMLImport.h"
 #include "core/html/imports/HTMLImportLoader.h"
 #include "core/html/imports/HTMLImportsController.h"
 #include "core/html/parser/TextResourceDecoder.h"
 #include "core/inspector/ContentSearchUtils.h"
 #include "core/inspector/DOMPatchSupport.h"
-#include "core/inspector/IdentifiersFactory.h"
-#include "core/inspector/InjectedScriptManager.h"
 #include "core/inspector/InspectorCSSAgent.h"
 #include "core/inspector/InspectorDebuggerAgent.h"
+#include "core/inspector/InspectorIdentifiers.h"
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/inspector/InspectorOverlay.h"
 #include "core/inspector/InspectorResourceContentLoader.h"
 #include "core/inspector/InspectorState.h"
 #include "core/inspector/InstrumentingAgents.h"
-#include "core/loader/CookieJar.h"
 #include "core/loader/DocumentLoader.h"
-#include "core/loader/FrameLoadRequest.h"
 #include "core/loader/FrameLoader.h"
-#include "platform/Cookie.h"
 #include "platform/JSONValues.h"
 #include "platform/MIMETypeRegistry.h"
 #include "platform/PlatformResourceLoader.h"
@@ -101,6 +89,11 @@ KURL urlWithoutFragment(const KURL& url)
     KURL result = url;
     result.removeFragmentIdentifier();
     return result;
+}
+
+String frameId(LocalFrame* frame)
+{
+    return frame ? InspectorIdentifiers<LocalFrame>::identifier(frame) : "";
 }
 
 }
@@ -245,7 +238,7 @@ bool InspectorPageAgent::cachedResourceContent(Resource* cachedResource, String*
     if (cachedResource) {
         switch (cachedResource->type()) {
         case Resource::CSSStyleSheet:
-            *result = toCSSStyleSheetResource(cachedResource)->sheetText(false);
+            *result = toCSSStyleSheetResource(cachedResource)->sheetText();
             return true;
         case Resource::Script:
             *result = cachedResource->resourceBuffer() ? toScriptResource(cachedResource)->decodedText() : toScriptResource(cachedResource)->script();
@@ -286,9 +279,9 @@ bool InspectorPageAgent::dataContent(const char* data, unsigned size, const Stri
     return decodeBuffer(data, size, textEncodingName, result);
 }
 
-PassOwnPtrWillBeRawPtr<InspectorPageAgent> InspectorPageAgent::create(LocalFrame* inspectedFrame, InjectedScriptManager* injectedScriptManager, InspectorOverlay* overlay)
+PassOwnPtrWillBeRawPtr<InspectorPageAgent> InspectorPageAgent::create(LocalFrame* inspectedFrame, InspectorOverlay* overlay)
 {
-    return adoptPtrWillBeNoop(new InspectorPageAgent(inspectedFrame, injectedScriptManager, overlay));
+    return adoptPtrWillBeNoop(new InspectorPageAgent(inspectedFrame, overlay));
 }
 
 void InspectorPageAgent::setDeferredAgents(InspectorDebuggerAgent* debuggerAgent, InspectorCSSAgent* cssAgent)
@@ -376,10 +369,9 @@ TypeBuilder::Page::ResourceType::Enum InspectorPageAgent::cachedResourceTypeJson
     return resourceTypeJson(cachedResourceType(cachedResource));
 }
 
-InspectorPageAgent::InspectorPageAgent(LocalFrame* inspectedFrame, InjectedScriptManager* injectedScriptManager, InspectorOverlay* overlay)
+InspectorPageAgent::InspectorPageAgent(LocalFrame* inspectedFrame, InspectorOverlay* overlay)
     : InspectorBaseAgent<InspectorPageAgent, InspectorFrontend::Page>("Page")
     , m_inspectedFrame(inspectedFrame)
-    , m_injectedScriptManager(injectedScriptManager)
     , m_debuggerAgent(nullptr)
     , m_cssAgent(nullptr)
     , m_overlay(overlay)
@@ -474,33 +466,6 @@ void InspectorPageAgent::navigate(ErrorString*, const String& url, String* outFr
     *outFrameId = frameId(inspectedFrame());
 }
 
-static PassRefPtr<TypeBuilder::Page::Cookie> buildObjectForCookie(const Cookie& cookie)
-{
-    return TypeBuilder::Page::Cookie::create()
-        .setName(cookie.name)
-        .setValue(cookie.value)
-        .setDomain(cookie.domain)
-        .setPath(cookie.path)
-        .setExpires(cookie.expires)
-        .setSize((cookie.name.length() + cookie.value.length()))
-        .setHttpOnly(cookie.httpOnly)
-        .setSecure(cookie.secure)
-        .setSession(cookie.session)
-        .release();
-}
-
-static PassRefPtr<TypeBuilder::Array<TypeBuilder::Page::Cookie> > buildArrayForCookies(ListHashSet<Cookie>& cookiesList)
-{
-    RefPtr<TypeBuilder::Array<TypeBuilder::Page::Cookie> > cookies = TypeBuilder::Array<TypeBuilder::Page::Cookie>::create();
-
-    ListHashSet<Cookie>::iterator end = cookiesList.end();
-    ListHashSet<Cookie>::iterator it = cookiesList.begin();
-    for (int i = 0; it != end; ++it, i++)
-        cookies->addItem(buildObjectForCookie(*it));
-
-    return cookies;
-}
-
 static void cachedResourcesForDocument(Document* document, Vector<Resource*>& result, bool skipXHRs)
 {
     const ResourceFetcher::DocumentResourceMap& allResources = document->fetcher()->allResources();
@@ -558,51 +523,6 @@ static Vector<Resource*> cachedResourcesForFrame(LocalFrame* frame, bool skipXHR
         cachedResourcesForDocument(loaders[i], result, skipXHRs);
 
     return result;
-}
-
-static Vector<KURL> allResourcesURLsForFrame(LocalFrame* frame)
-{
-    Vector<KURL> result;
-
-    result.append(urlWithoutFragment(frame->loader().documentLoader()->url()));
-
-    Vector<Resource*> allResources = cachedResourcesForFrame(frame, false);
-    for (const auto& resource : allResources)
-        result.append(urlWithoutFragment(resource->url()));
-
-    return result;
-}
-
-void InspectorPageAgent::getCookies(ErrorString*, RefPtr<TypeBuilder::Array<TypeBuilder::Page::Cookie> >& cookies)
-{
-    ListHashSet<Cookie> rawCookiesList;
-
-    for (Frame* frame = inspectedFrame(); frame; frame = frame->tree().traverseNext(inspectedFrame())) {
-        if (!frame->isLocalFrame())
-            continue;
-        Document* document = toLocalFrame(frame)->document();
-        Vector<KURL> allURLs = allResourcesURLsForFrame(toLocalFrame(frame));
-        for (const auto& url : allURLs) {
-            Vector<Cookie> docCookiesList;
-            getRawCookies(document, url, docCookiesList);
-            int cookiesSize = docCookiesList.size();
-            for (int i = 0; i < cookiesSize; i++) {
-                if (!rawCookiesList.contains(docCookiesList[i]))
-                    rawCookiesList.add(docCookiesList[i]);
-            }
-        }
-    }
-
-    cookies = buildArrayForCookies(rawCookiesList);
-}
-
-void InspectorPageAgent::deleteCookie(ErrorString*, const String& cookieName, const String& url)
-{
-    KURL parsedURL(ParsedURLString, url);
-    for (Frame* frame = inspectedFrame(); frame; frame = frame->tree().traverseNext(inspectedFrame())) {
-        if (frame->isLocalFrame())
-            blink::deleteCookie(toLocalFrame(frame)->document(), parsedURL, cookieName);
-    }
 }
 
 void InspectorPageAgent::getResourceTree(ErrorString*, RefPtr<TypeBuilder::Page::FrameResourceTree>& object)
@@ -755,12 +675,7 @@ void InspectorPageAgent::frameAttachedToParent(LocalFrame* frame)
 
 void InspectorPageAgent::frameDetachedFromParent(LocalFrame* frame)
 {
-    HashMap<LocalFrame*, String>::iterator iterator = m_frameToIdentifier.find(frame);
-    if (iterator != m_frameToIdentifier.end()) {
-        frontend()->frameDetached(iterator->value);
-        m_identifierToFrame.remove(iterator->value);
-        m_frameToIdentifier.remove(iterator);
-    }
+    frontend()->frameDetached(frameId(frame));
 }
 
 FrameHost* InspectorPageAgent::frameHost()
@@ -770,37 +685,8 @@ FrameHost* InspectorPageAgent::frameHost()
 
 LocalFrame* InspectorPageAgent::frameForId(const String& frameId)
 {
-    return frameId.isEmpty() ? nullptr : m_identifierToFrame.get(frameId);
-}
-
-String InspectorPageAgent::frameId(LocalFrame* frame)
-{
-    if (!frame)
-        return "";
-    String identifier = m_frameToIdentifier.get(frame);
-    if (identifier.isNull()) {
-        identifier = IdentifiersFactory::createIdentifier();
-        m_frameToIdentifier.set(frame, identifier);
-        m_identifierToFrame.set(identifier, frame);
-    }
-    return identifier;
-}
-
-bool InspectorPageAgent::hasIdForFrame(LocalFrame* frame) const
-{
-    return frame && m_frameToIdentifier.contains(frame);
-}
-
-String InspectorPageAgent::loaderId(DocumentLoader* loader)
-{
-    if (!loader)
-        return "";
-    String identifier = m_loaderToIdentifier.get(loader);
-    if (identifier.isNull()) {
-        identifier = IdentifiersFactory::createIdentifier();
-        m_loaderToIdentifier.set(loader, identifier);
-    }
-    return identifier;
+    LocalFrame* frame = InspectorIdentifiers<LocalFrame>::lookup(frameId);
+    return frame && frame->instrumentingAgents() == m_inspectedFrame->instrumentingAgents() ? frame : nullptr;
 }
 
 LocalFrame* InspectorPageAgent::findFrameWithSecurityOrigin(const String& originRawString)
@@ -835,13 +721,6 @@ DocumentLoader* InspectorPageAgent::assertDocumentLoader(ErrorString* errorStrin
     if (!documentLoader)
         *errorString = "No documentLoader for given frame found";
     return documentLoader;
-}
-
-void InspectorPageAgent::loaderDetachedFromFrame(DocumentLoader* loader)
-{
-    HashMap<DocumentLoader*, String>::iterator iterator = m_loaderToIdentifier.find(loader);
-    if (iterator != m_loaderToIdentifier.end())
-        m_loaderToIdentifier.remove(iterator);
 }
 
 void InspectorPageAgent::frameStartedLoading(LocalFrame* frame)
@@ -908,7 +787,7 @@ PassRefPtr<TypeBuilder::Page::Frame> InspectorPageAgent::buildObjectForFrame(Loc
 {
     RefPtr<TypeBuilder::Page::Frame> frameObject = TypeBuilder::Page::Frame::create()
         .setId(frameId(frame))
-        .setLoaderId(loaderId(frame->loader().documentLoader()))
+        .setLoaderId(InspectorIdentifiers<DocumentLoader>::identifier(frame->loader().documentLoader()))
         .setUrl(urlWithoutFragment(frame->document()->url()).string())
         .setMimeType(frame->loader().documentLoader()->responseMIMEType())
         .setSecurityOrigin(frame->document()->securityOrigin()->toRawString());
@@ -929,10 +808,10 @@ PassRefPtr<TypeBuilder::Page::Frame> InspectorPageAgent::buildObjectForFrame(Loc
 PassRefPtr<TypeBuilder::Page::FrameResourceTree> InspectorPageAgent::buildObjectForFrameTree(LocalFrame* frame)
 {
     RefPtr<TypeBuilder::Page::Frame> frameObject = buildObjectForFrame(frame);
-    RefPtr<TypeBuilder::Array<TypeBuilder::Page::FrameResourceTree::Resources> > subresources = TypeBuilder::Array<TypeBuilder::Page::FrameResourceTree::Resources>::create();
+    RefPtr<TypeBuilder::Array<TypeBuilder::Page::FrameResourceTree::Resources>> subresources = TypeBuilder::Array<TypeBuilder::Page::FrameResourceTree::Resources>::create();
     RefPtr<TypeBuilder::Page::FrameResourceTree> result = TypeBuilder::Page::FrameResourceTree::create()
-         .setFrame(frameObject)
-         .setResources(subresources);
+        .setFrame(frameObject)
+        .setResources(subresources);
 
     Vector<Resource*> allResources = cachedResourcesForFrame(frame, true);
     for (Resource* cachedResource : allResources) {
@@ -956,7 +835,7 @@ PassRefPtr<TypeBuilder::Page::FrameResourceTree> InspectorPageAgent::buildObject
         subresources->addItem(resourceObject);
     }
 
-    RefPtr<TypeBuilder::Array<TypeBuilder::Page::FrameResourceTree> > childrenArray;
+    RefPtr<TypeBuilder::Array<TypeBuilder::Page::FrameResourceTree>> childrenArray;
     for (Frame* child = frame->tree().firstChild(); child; child = child->tree().nextSibling()) {
         if (!child->isLocalFrame())
             continue;
@@ -993,7 +872,6 @@ void InspectorPageAgent::setOverlayMessage(ErrorString*, const String* message)
 DEFINE_TRACE(InspectorPageAgent)
 {
     visitor->trace(m_inspectedFrame);
-    visitor->trace(m_injectedScriptManager);
     visitor->trace(m_debuggerAgent);
     visitor->trace(m_cssAgent);
     visitor->trace(m_overlay);

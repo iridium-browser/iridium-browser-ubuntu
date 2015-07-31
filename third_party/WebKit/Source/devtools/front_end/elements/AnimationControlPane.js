@@ -14,11 +14,11 @@ WebInspector.AnimationControlPane = function()
     this.element.createChild("div").createTextChild("Animations");
     var container = this.element.createChild("div", "animations-controls");
 
-    var statusBar = new WebInspector.StatusBar();
-    this._animationsPauseButton = new WebInspector.StatusBarButton("", "pause-status-bar-item");
-    statusBar.appendStatusBarItem(this._animationsPauseButton);
+    var toolbar = new WebInspector.Toolbar();
+    this._animationsPauseButton = new WebInspector.ToolbarButton("", "pause-toolbar-item");
+    toolbar.appendToolbarItem(this._animationsPauseButton);
     this._animationsPauseButton.addEventListener("click", this._pauseButtonHandler.bind(this));
-    container.appendChild(statusBar.element);
+    container.appendChild(toolbar.element);
 
     this._animationsPlaybackSlider = container.createChild("input");
     this._animationsPlaybackSlider.type = "range";
@@ -39,7 +39,7 @@ WebInspector.AnimationControlPane.prototype = {
     _playbackSliderInputHandler: function (event)
     {
         this._animationsPlaybackRate = WebInspector.AnimationsSidebarPane.GlobalPlaybackRates[event.target.value];
-        this._target.animationAgent().setPlaybackRate(this._animationsPaused ? 0 : this._animationsPlaybackRate);
+        this._target.animationModel.setPlaybackRate(this._animationsPaused ? 0 : this._animationsPlaybackRate);
         this._animationsPlaybackLabel.textContent = this._animationsPlaybackRate + "x";
         WebInspector.userMetrics.AnimationsPlaybackRateChanged.record();
     },
@@ -47,10 +47,10 @@ WebInspector.AnimationControlPane.prototype = {
     _pauseButtonHandler: function ()
     {
         this._animationsPaused = !this._animationsPaused;
-        this._target.animationAgent().setPlaybackRate(this._animationsPaused ? 0 : this._animationsPlaybackRate);
+        this._target.animationModel.setPlaybackRate(this._animationsPaused ? 0 : this._animationsPlaybackRate);
         WebInspector.userMetrics.AnimationsPlaybackRateChanged.record();
-        this._animationsPauseButton.element.classList.toggle("pause-status-bar-item");
-        this._animationsPauseButton.element.classList.toggle("play-status-bar-item");
+        this._animationsPauseButton.element.classList.toggle("pause-toolbar-item");
+        this._animationsPauseButton.element.classList.toggle("play-toolbar-item");
     },
 
     /**

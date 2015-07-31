@@ -10,6 +10,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_member.h"
 #include "base/prefs/pref_registry_simple.h"
@@ -18,6 +19,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
 #include "base/task_runner_util.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/worker_pool.h"
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
@@ -421,6 +423,12 @@ void UserSessionManager::StartSession(
   // TODO(nkostylev): Notify UserLoggedIn() after profile is actually
   // ready to be used (http://crbug.com/361528).
   NotifyUserLoggedIn();
+
+  if (!user_context.GetDeviceId().empty()) {
+    user_manager::UserManager::Get()->SetKnownUserDeviceId(
+        user_context.GetUserID(), user_context.GetDeviceId());
+  }
+
   PrepareProfile();
 }
 
@@ -475,12 +483,12 @@ void UserSessionManager::RestoreActiveSessions() {
 }
 
 bool UserSessionManager::UserSessionsRestored() const {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   return user_sessions_restored_;
 }
 
 bool UserSessionManager::UserSessionsRestoreInProgress() const {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   return user_sessions_restore_in_progress_;
 }
 
@@ -608,8 +616,9 @@ bool UserSessionManager::RespectLocalePreference(
   // So input methods should be enabled somewhere.
   const bool enable_layouts =
       user_manager::UserManager::Get()->IsLoggedInAsGuest();
-  locale_util::SwitchLanguage(
-      pref_locale, enable_layouts, false /* login_layouts_only */, callback);
+  locale_util::SwitchLanguage(pref_locale, enable_layouts,
+                              false /* login_layouts_only */, callback,
+                              profile);
 
   return true;
 }
@@ -672,13 +681,13 @@ bool UserSessionManager::CheckEasyUnlockKeyOps(const base::Closure& callback) {
 
 void UserSessionManager::AddSessionStateObserver(
     chromeos::UserSessionStateObserver* observer) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   session_state_observer_list_.AddObserver(observer);
 }
 
 void UserSessionManager::RemoveSessionStateObserver(
     chromeos::UserSessionStateObserver* observer) {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   session_state_observer_list_.RemoveObserver(observer);
 }
 
@@ -759,8 +768,7 @@ void UserSessionManager::OnConnectionTypeChanged(
         pending_signin_restore_sessions_.end();
     OAuth2LoginManager* login_manager =
         OAuth2LoginManagerFactory::GetInstance()->GetForProfile(user_profile);
-    if (login_manager->state() ==
-            OAuth2LoginManager::SESSION_RESTORE_IN_PROGRESS) {
+    if (login_manager->SessionRestoreIsRunning()) {
       // If we come online for the first time after successful offline login,
       // we need to kick off OAuth token verification process again.
       login_manager->ContinueSessionRestore();
@@ -915,15 +923,18 @@ void UserSessionManager::InitProfilePreferences(
                                    supervised_user_sync_id);
   } else if (user_manager::UserManager::Get()->
       IsLoggedInAsUserWithGaiaAccount()) {
-    // Prime the account tracker with this combination of gaia id/display email.
-    // Don't do this unless both email and gaia_id are valid.  They may not
-    // be when simply unlocking the profile.
-    if (!user_context.GetGaiaID().empty() &&
-        !user_context.GetUserID().empty()) {
+    // Get the Gaia ID from the user context.  If it's not available, this may
+    // not be available when unlocking a previously opened profile, or when
+    // creating a supervised users.  However, in these cases the gaia_id should
+    // be already available in the account tracker.
+    std::string gaia_id = user_context.GetGaiaID();
+    if (gaia_id.empty()) {
       AccountTrackerService* account_tracker =
           AccountTrackerServiceFactory::GetForProfile(profile);
-      account_tracker->SeedAccountInfo(user_context.GetGaiaID(),
-                                       user_context.GetUserID());
+      AccountTrackerService::AccountInfo info =
+          account_tracker->FindAccountInfoByEmail(user_context.GetUserID());
+      gaia_id = info.gaia;
+      DCHECK(!gaia_id.empty());
     }
 
     // Make sure that the google service username is properly set (we do this
@@ -931,7 +942,16 @@ void UserSessionManager::InitProfilePreferences(
     // profiles that might not have it set yet).
     SigninManagerBase* signin_manager =
         SigninManagerFactory::GetForProfile(profile);
-    signin_manager->SetAuthenticatedUsername(user_context.GetUserID());
+    signin_manager->SetAuthenticatedAccountInfo(gaia_id,
+                                                user_context.GetUserID());
+
+    // Backfill GAIA ID in user prefs stored in Local State.
+    std::string tmp_gaia_id;
+    user_manager::UserManager* user_manager = user_manager::UserManager::Get();
+    if (!user_manager->FindGaiaID(user_context.GetUserID(), &tmp_gaia_id) &&
+        !gaia_id.empty()) {
+      user_manager->UpdateGaiaID(user_context.GetUserID(), gaia_id);
+    }
   }
 }
 
@@ -983,14 +1003,29 @@ void UserSessionManager::UserProfileInitialized(Profile* profile,
     // empty if |transfer_saml_auth_cookies_on_subsequent_login| is true.
     const bool transfer_auth_cookies_and_channel_ids_on_first_login =
         has_auth_cookies_;
-    ProfileAuthData::Transfer(
-        GetAuthRequestContext(),
-        profile->GetRequestContext(),
-        transfer_auth_cookies_and_channel_ids_on_first_login,
-        transfer_saml_auth_cookies_on_subsequent_login,
-        base::Bind(&UserSessionManager::CompleteProfileCreateAfterAuthTransfer,
-                   AsWeakPtr(),
-                   profile));
+
+    net::URLRequestContextGetter* auth_request_context =
+        GetAuthRequestContext();
+
+    // Authentication request context may be missing especially if user didn't
+    // sign in using GAIA (webview) and webview didn't yet initialize.
+    if (auth_request_context) {
+      ProfileAuthData::Transfer(
+          auth_request_context, profile->GetRequestContext(),
+          transfer_auth_cookies_and_channel_ids_on_first_login,
+          transfer_saml_auth_cookies_on_subsequent_login,
+          base::Bind(
+              &UserSessionManager::CompleteProfileCreateAfterAuthTransfer,
+              AsWeakPtr(), profile));
+    } else {
+      // We need to post task so that OnProfileCreated() caller sends out
+      // NOTIFICATION_PROFILE_CREATED which marks user profile as initialized.
+      base::ThreadTaskRunnerHandle::Get()->PostTask(
+          FROM_HERE,
+          base::Bind(
+              &UserSessionManager::CompleteProfileCreateAfterAuthTransfer,
+              AsWeakPtr(), profile));
+    }
     return;
   }
 
@@ -1019,6 +1054,8 @@ void UserSessionManager::FinalizePrepareProfile(Profile* profile) {
 
   user_manager::UserManager* user_manager = user_manager::UserManager::Get();
   if (user_manager->IsLoggedInAsUserWithGaiaAccount()) {
+    if (user_context_.GetAuthFlow() == UserContext::AUTH_FLOW_GAIA_WITH_SAML)
+      user_manager->UpdateUsingSAML(user_context_.GetUserID(), true);
     SAMLOfflineSigninLimiter* saml_offline_signin_limiter =
         SAMLOfflineSigninLimiterFactory::GetForProfile(profile);
     if (saml_offline_signin_limiter)
@@ -1076,10 +1113,8 @@ void UserSessionManager::InitializeStartUrls() const {
 
   user_manager::UserManager* user_manager = user_manager::UserManager::Get();
 
-  bool can_show_getstarted_guide =
-      user_manager->GetActiveUser()->GetType() ==
-          user_manager::USER_TYPE_REGULAR &&
-      !user_manager->IsCurrentUserNonCryptohomeDataEphemeral();
+  bool can_show_getstarted_guide = user_manager->GetActiveUser()->GetType() ==
+                                   user_manager::USER_TYPE_REGULAR;
 
   // Skip the default first-run behavior for public accounts.
   if (!user_manager->IsLoggedInAsPublicAccount()) {
@@ -1117,7 +1152,7 @@ bool UserSessionManager::InitializeUserSession(Profile* profile) {
   child_service->AddChildStatusReceivedCallback(
       base::Bind(&UserSessionManager::ChildAccountStatusReceivedCallback,
                  weak_factory_.GetWeakPtr(), profile));
-  base::MessageLoopProxy::current()->PostDelayedTask(
+  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE, base::Bind(&UserSessionManager::StopChildStatusObserving,
                             weak_factory_.GetWeakPtr(), profile),
       base::TimeDelta::FromMilliseconds(kFlagsFetchingLoginTimeoutMs));
@@ -1182,8 +1217,6 @@ void UserSessionManager::InitSessionRestoreStrategy() {
 
   if (has_auth_cookies_) {
     session_restore_strategy_ = OAuth2LoginManager::RESTORE_FROM_COOKIE_JAR;
-  } else if (!user_context_.GetAuthCode().empty()) {
-    session_restore_strategy_ = OAuth2LoginManager::RESTORE_FROM_AUTH_CODE;
   } else if (!user_context_.GetRefreshToken().empty()) {
     session_restore_strategy_ =
         OAuth2LoginManager::RESTORE_FROM_PASSED_OAUTH2_REFRESH_TOKEN;
@@ -1214,9 +1247,24 @@ void UserSessionManager::RestoreAuthSessionImpl(
       OAuth2LoginManagerFactory::GetInstance()->GetForProfile(profile);
   login_manager->AddObserver(this);
 
-  login_manager->RestoreSession(
-      GetAuthRequestContext(), session_restore_strategy_,
-      user_context_.GetRefreshToken(), user_context_.GetAuthCode());
+  net::URLRequestContextGetter* auth_request_context = GetAuthRequestContext();
+
+  // Authentication request context may not be available if user was not
+  // signing in with GAIA webview (i.e. webview instance hasn't been
+  // initialized at all). Use fallback request context if authenticator was
+  // provided.
+  // Authenticator instance may not be initialized for session
+  // restore case when Chrome is restarting after crash or to apply custom user
+  // flags. In that case auth_request_context will be nullptr which is accepted
+  // by RestoreSession() for session restore case.
+  if (!auth_request_context &&
+      (authenticator_.get() && authenticator_->authentication_context())) {
+    auth_request_context =
+        authenticator_->authentication_context()->GetRequestContext();
+  }
+  login_manager->RestoreSession(auth_request_context, session_restore_strategy_,
+                                user_context_.GetRefreshToken(),
+                                user_context_.GetAccessToken());
 }
 
 void UserSessionManager::InitRlzImpl(Profile* profile, bool disabled) {
@@ -1405,13 +1453,15 @@ void UserSessionManager::UpdateEasyUnlockKeys(const UserContext& user_context) {
 
 net::URLRequestContextGetter*
 UserSessionManager::GetAuthRequestContext() const {
-  net::URLRequestContextGetter* auth_request_context = NULL;
+  net::URLRequestContextGetter* auth_request_context = nullptr;
 
   if (StartupUtils::IsWebviewSigninEnabled()) {
     // Webview uses different partition storage than iframe. We need to get
     // cookies from the right storage for url request to get auth token into
     // session.
-    auth_request_context = login::GetSigninPartition()->GetURLRequestContext();
+    content::StoragePartition* signin_partition = login::GetSigninPartition();
+    if (signin_partition)
+      auth_request_context = signin_partition->GetURLRequestContext();
   } else if (authenticator_.get() && authenticator_->authentication_context()) {
     auth_request_context =
         authenticator_->authentication_context()->GetRequestContext();
@@ -1462,6 +1512,9 @@ void UserSessionManager::OnEasyUnlockKeyOpsFinished(
 
 void UserSessionManager::ActiveUserChanged(
     const user_manager::User* active_user) {
+  if (!user_manager::UserManager::Get()->IsCurrentUserNew())
+    SendUserPodsMetrics();
+
   Profile* profile = ProfileHelper::Get()->GetProfileByUser(active_user);
   // If profile has not yet been initialized, delay initialization of IME.
   if (!profile)
@@ -1584,6 +1637,68 @@ void UserSessionManager::InjectStubUserContext(
     const UserContext& user_context) {
   injected_user_context_.reset(new UserContext(user_context));
   authenticator_ = NULL;
+}
+
+void UserSessionManager::SendUserPodsMetrics() {
+  bool show_users_on_signin;
+  CrosSettings::Get()->GetBoolean(kAccountsPrefShowUserNamesOnSignIn,
+                                  &show_users_on_signin);
+  bool is_enterprise_managed = g_browser_process->platform_part()
+                                   ->browser_policy_connector_chromeos()
+                                   ->IsEnterpriseManaged();
+  UserPodsDisplay display;
+  if (show_users_on_signin) {
+    if (is_enterprise_managed)
+      display = USER_PODS_DISPLAY_ENABLED_MANAGED;
+    else
+      display = USER_PODS_DISPLAY_ENABLED_REGULAR;
+  } else {
+    if (is_enterprise_managed)
+      display = USER_PODS_DISPLAY_DISABLED_MANAGED;
+    else
+      display = USER_PODS_DISPLAY_DISABLED_REGULAR;
+  }
+  UMA_HISTOGRAM_ENUMERATION("UserSessionManager.UserPodsDisplay", display,
+                            NUM_USER_PODS_DISPLAY);
+}
+
+void UserSessionManager::OnOAuth2TokensFetched(UserContext context) {
+  if (StartupUtils::IsWebviewSigninEnabled() && TokenHandlesEnabled()) {
+    if (!token_handle_util_.get()) {
+      token_handle_util_.reset(
+          new TokenHandleUtil(user_manager::UserManager::Get()));
+    }
+    if (token_handle_util_->ShouldObtainHandle(context.GetUserID())) {
+      token_handle_util_->GetTokenHandle(
+          context.GetUserID(), context.GetAccessToken(),
+          base::Bind(&UserSessionManager::OnTokenHandleObtained,
+                     weak_factory_.GetWeakPtr()));
+    }
+  }
+}
+
+void UserSessionManager::OnTokenHandleObtained(
+    const user_manager::UserID& id,
+    TokenHandleUtil::TokenHandleStatus status) {
+  if (status != TokenHandleUtil::VALID) {
+    LOG(ERROR) << "OAuth2 token handle fetch failed.";
+    return;
+  }
+}
+
+bool UserSessionManager::TokenHandlesEnabled() {
+  bool ephemeral_users_enabled = false;
+  bool show_names_on_signin = true;
+  auto cros_settings = CrosSettings::Get();
+  cros_settings->GetBoolean(kAccountsPrefEphemeralUsersEnabled,
+                            &ephemeral_users_enabled);
+  cros_settings->GetBoolean(kAccountsPrefShowUserNamesOnSignIn,
+                            &show_names_on_signin);
+  return show_names_on_signin && !ephemeral_users_enabled;
+}
+
+void UserSessionManager::Shutdown() {
+  token_handle_util_.reset();
 }
 
 }  // namespace chromeos

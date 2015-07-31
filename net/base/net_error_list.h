@@ -103,6 +103,10 @@ NET_ERROR(BLOCKED_ENROLLMENT_CHECK_PENDING, -24)
 // retry or a redirect, but the upload stream doesn't support that operation.
 NET_ERROR(UPLOAD_STREAM_REWIND_NOT_SUPPORTED, -25)
 
+// The request failed because the URLRequestContext is shutting down, or has
+// been shut down.
+NET_ERROR(CONTEXT_SHUT_DOWN, -26)
+
 // A connection was closed (corresponding to a TCP FIN).
 NET_ERROR(CONNECTION_CLOSED, -100)
 
@@ -636,6 +640,11 @@ NET_ERROR(PROXY_HTTP_1_1_REQUIRED, -366)
 // The PAC script terminated fatally and must be reloaded.
 NET_ERROR(PAC_SCRIPT_TERMINATED, -367)
 
+// The certificate offered by the alternative server is not valid for the
+// origin, a violation of HTTP Alternative Services specification Section 2.1,
+// https://tools.ietf.org/id/draft-ietf-httpbis-alt-svc-06.html#host_auth.
+NET_ERROR(ALTERNATIVE_CERT_NOT_VALID_FOR_ORIGIN, -368)
+
 // The cache does not have the requested entry.
 NET_ERROR(CACHE_MISS, -400)
 
@@ -673,6 +682,10 @@ NET_ERROR(CACHE_CHECKSUM_MISMATCH, -408)
 
 // Internal error code for the HTTP cache. The cache lock timeout has fired.
 NET_ERROR(CACHE_LOCK_TIMEOUT, -409)
+
+// Received a challenge after the transaction has read some data, and the
+// credentials aren't available.  There isn't a way to get them at that point.
+NET_ERROR(CACHE_AUTH_FAILURE_AFTER_READ, -410)
 
 // The server's response was insecure (e.g. there was a cert error).
 NET_ERROR(INSECURE_RESPONSE, -501)

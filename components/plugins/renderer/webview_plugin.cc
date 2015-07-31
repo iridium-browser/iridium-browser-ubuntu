@@ -48,7 +48,9 @@ WebViewPlugin::WebViewPlugin(WebViewPlugin::Delegate* delegate,
       container_(NULL),
       web_view_(WebView::create(this)),
       finished_loading_(false),
-      focused_(false) {
+      focused_(false),
+      // At least one animation must run before any paint.
+      animationNeeded_(true) {
   // ApplyWebPreferences before making a WebLocalFrame so that the frame sees a
   // consistent view of our preferences.
   content::RenderView::ApplyWebPreferences(preferences, web_view_);
@@ -110,6 +112,15 @@ WebPluginContainer* WebViewPlugin::container() const { return container_; }
 bool WebViewPlugin::initialize(WebPluginContainer* container) {
   container_ = container;
   if (container_) {
+    // We must call layout again here to ensure that the container is laid
+    // out before we next try to paint it, which is a requirement of the
+    // document life cycle in Blink. In most cases, needsLayout is set by
+    // scheduleAnimation, but due to timers controlling widget update,
+    // scheduleAnimation may be invoked before this initialize call (which
+    // comes through the widget update process). It doesn't hurt to mark
+    // for layout again, and it does help us in the race-condition situation.
+    scheduleAnimation();
+
     old_title_ = container_->element().getAttribute("title");
 
     // Propagate device scale to inner webview to load the correct resource
@@ -128,13 +139,26 @@ void WebViewPlugin::destroy() {
   base::MessageLoop::current()->DeleteSoon(FROM_HERE, this);
 }
 
-NPObject* WebViewPlugin::scriptableObject() { return NULL; }
+v8::Local<v8::Object> WebViewPlugin::v8ScriptableObject(v8::Isolate* isolate) {
+  if (!delegate_)
+    return v8::Local<v8::Object>();
 
-struct _NPP* WebViewPlugin::pluginNPP() { return NULL; }
+  return delegate_->GetV8ScriptableObject(isolate);
+}
 
-bool WebViewPlugin::getFormValue(WebString& value) { return false; }
+void WebViewPlugin::layoutIfNeeded() {
+  animationNeeded_ = false;
+  web_view_->layout();
+}
 
 void WebViewPlugin::paint(WebCanvas* canvas, const WebRect& rect) {
+  // Do not paint before the container is set (that is, before initialize() has
+  // been called). We will be asked to paint again thanks to the initialize()
+  // method calling setNeedsLayout on the container. Without this check we
+  // may attempt to paint before the WebView's frame has been laid-out.
+  if (animationNeeded_)
+    return;
+
   gfx::Rect paint_rect = gfx::IntersectRects(rect_, rect);
   if (paint_rect.IsEmpty())
     return;
@@ -150,7 +174,6 @@ void WebViewPlugin::paint(WebCanvas* canvas, const WebRect& rect) {
       SkFloatToScalar(1.0 / container_->deviceScaleFactor());
   canvas->scale(inverse_scale, inverse_scale);
 
-  web_view_->layout();
   web_view_->paint(canvas, paint_rect);
 
   canvas->restore();
@@ -180,6 +203,11 @@ bool WebViewPlugin::handleInputEvent(const WebInputEvent& event,
   // For tap events, don't handle them. They will be converted to
   // mouse events later and passed to here.
   if (event.type == WebInputEvent::GestureTap)
+    return false;
+
+  // For LongPress events we return false, since otherwise the context menu will
+  // be suppressed. https://crbug.com/482842
+  if (event.type == WebInputEvent::GestureLongPress)
     return false;
 
   if (event.type == WebInputEvent::ContextMenu) {
@@ -247,8 +275,9 @@ void WebViewPlugin::didChangeCursor(const WebCursorInfo& cursor) {
 }
 
 void WebViewPlugin::scheduleAnimation() {
+  animationNeeded_ = true;
   if (container_)
-    container_->invalidate();
+    container_->setNeedsLayout();
 }
 
 void WebViewPlugin::didClearWindowObject(WebLocalFrame* frame) {

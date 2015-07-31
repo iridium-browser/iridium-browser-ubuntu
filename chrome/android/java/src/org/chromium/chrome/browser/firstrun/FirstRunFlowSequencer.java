@@ -14,7 +14,7 @@ import android.os.Bundle;
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.CommandLine;
 import org.chromium.base.VisibleForTesting;
-import org.chromium.chrome.ChromeSwitches;
+import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ChromeVersionInfo;
 import org.chromium.chrome.browser.ChromiumApplication;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
@@ -139,7 +139,7 @@ public abstract class FirstRunFlowSequencer  {
             // The user can turn it off on the Welcome page.
             // This is controlled by the administrator via a policy on EDU devices.
             if (!ChromeVersionInfo.isStableBuild()) {
-                PrivacyPreferencesManager.getInstance(mActivity).initCrashUploadPreference(true);
+                PrivacyPreferencesManager.getInstance(context).initCrashUploadPreference(true);
             }
 
             // We show the sign-in page if sync is allowed, and this is not an EDU device, and
@@ -217,10 +217,8 @@ public abstract class FirstRunFlowSequencer  {
             return createGenericFirstRunIntent(activity, originalIntent, fromChromeIcon);
         }
 
-        // If Chrome isn't opened via the Chrome icon proceed directly to the intent handling.
-        if (!fromChromeIcon) return null;
-
-        return createGenericFirstRunIntent(activity, originalIntent, fromChromeIcon);
+        // Promo pages are removed, so there is nothing else to show in FRE.
+        return null;
     }
 
     /**

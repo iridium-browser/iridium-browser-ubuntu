@@ -46,6 +46,7 @@ namespace {
 const char* kKnownInvalidKeyboardDeviceNames[] = {"Power Button",
                                                   "Sleep Button",
                                                   "Video Bus",
+                                                  "gpio-keys.5",
                                                   "gpio-keys.12",
                                                   "ROCKCHIP-I2S Headset Jack"};
 
@@ -459,8 +460,10 @@ void X11HotplugEventHandler::OnHotplugEvent() {
                       &bytes_after_return,
                       reinterpret_cast<unsigned char**>(&product_info)) == 0 &&
         product_info) {
-      vendor = product_info[0];
-      product = product_info[1];
+      if (num_items_return == 2) {
+        vendor = product_info[0];
+        product = product_info[1];
+      }
       XFree(product_info);
     }
 

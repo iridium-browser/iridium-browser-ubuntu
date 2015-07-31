@@ -5,20 +5,18 @@
 #include "media/blink/webmediaplayer_impl.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
-#include <string>
-#include <vector>
 
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/callback_helpers.h"
 #include "base/debug/alias.h"
 #include "base/debug/crash_logging.h"
-#include "base/float_util.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/metrics/histogram.h"
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "cc/blink/web_layer_impl.h"
 #include "cc/layers/video_layer.h"
@@ -28,11 +26,8 @@
 #include "media/base/cdm_context.h"
 #include "media/base/limits.h"
 #include "media/base/media_log.h"
-#include "media/base/pipeline.h"
 #include "media/base/text_renderer.h"
 #include "media/base/video_frame.h"
-#include "media/blink/buffered_data_source.h"
-#include "media/blink/encrypted_media_player_support.h"
 #include "media/blink/texttrack_impl.h"
 #include "media/blink/webaudiosourceprovider_impl.h"
 #include "media/blink/webcontentdecryptionmodule_impl.h"
@@ -48,6 +43,8 @@
 #include "third_party/WebKit/public/platform/WebSize.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
+#include "third_party/WebKit/public/web/WebDocument.h"
+#include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebRuntimeFeatures.h"
 #include "third_party/WebKit/public/web/WebSecurityOrigin.h"
@@ -114,18 +111,17 @@ WebMediaPlayerImpl::WebMediaPlayerImpl(
       network_state_(WebMediaPlayer::NetworkStateEmpty),
       ready_state_(WebMediaPlayer::ReadyStateHaveNothing),
       preload_(BufferedDataSource::AUTO),
-      main_task_runner_(base::MessageLoopProxy::current()),
+      main_task_runner_(base::ThreadTaskRunnerHandle::Get()),
       media_task_runner_(params.media_task_runner()),
       media_log_(params.media_log()),
       pipeline_(media_task_runner_, media_log_.get()),
       load_type_(LoadTypeURL),
       opaque_(false),
+      playback_rate_(0.0),
       paused_(true),
       seeking_(false),
-      playback_rate_(0.0f),
       ended_(false),
       pending_seek_(false),
-      pending_seek_seconds_(0.0f),
       should_notify_time_changed_(false),
       client_(client),
       delegate_(delegate),
@@ -133,27 +129,29 @@ WebMediaPlayerImpl::WebMediaPlayerImpl(
       context_3d_cb_(params.context_3d_cb()),
       supports_save_(true),
       chunk_demuxer_(NULL),
-      compositor_task_runner_(params.compositor_task_runner()),
+      // Threaded compositing isn't enabled universally yet.
+      compositor_task_runner_(
+          params.compositor_task_runner()
+              ? params.compositor_task_runner()
+              : base::MessageLoop::current()->task_runner()),
       compositor_(new VideoFrameCompositor(
+          compositor_task_runner_,
           BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::OnNaturalSizeChanged),
           BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::OnOpacityChanged))),
-      encrypted_media_support_(
-          cdm_factory,
-          client,
-          params.media_permission(),
-          base::Bind(&WebMediaPlayerImpl::SetCdm, AsWeakPtr())),
+      encrypted_media_support_(cdm_factory,
+                               client,
+                               params.media_permission(),
+                               base::Bind(&WebMediaPlayerImpl::SetCdm,
+                                          AsWeakPtr(),
+                                          base::Bind(&IgnoreCdmAttached))),
       renderer_factory_(renderer_factory.Pass()) {
-  // Threaded compositing isn't enabled universally yet.
-  if (!compositor_task_runner_.get())
-    compositor_task_runner_ = base::MessageLoopProxy::current();
-
   media_log_->AddEvent(
       media_log_->CreateEvent(MediaLogEvent::WEBMEDIAPLAYER_CREATED));
 
   if (params.initial_cdm()) {
-    SetCdm(
-        ToWebContentDecryptionModuleImpl(params.initial_cdm())->GetCdmContext(),
-        base::Bind(&IgnoreCdmAttached));
+    SetCdm(base::Bind(&IgnoreCdmAttached),
+           ToWebContentDecryptionModuleImpl(params.initial_cdm())
+               ->GetCdmContext());
   }
 
   // TODO(xhwang): When we use an external Renderer, many methods won't work,
@@ -214,7 +212,8 @@ void WebMediaPlayerImpl::DoLoad(LoadType load_type,
   DCHECK(main_task_runner_->BelongsToCurrentThread());
 
   GURL gurl(url);
-  ReportMediaSchemeUma(gurl);
+  ReportMetrics(load_type, gurl,
+                GURL(frame_->document().securityOrigin().toString()));
 
   // Set subresource URL for crash reporting.
   base::debug::SetCrashKeyValue("subresource_url", gurl.spec());
@@ -267,7 +266,7 @@ void WebMediaPlayerImpl::pause() {
 
   const bool was_already_paused = paused_ || playback_rate_ == 0;
   paused_ = true;
-  pipeline_.SetPlaybackRate(0.0f);
+  pipeline_.SetPlaybackRate(0.0);
   if (data_source_)
     data_source_->MediaIsPaused();
   UpdatePausedTime();
@@ -293,13 +292,31 @@ void WebMediaPlayerImpl::seek(double seconds) {
   if (ready_state_ > WebMediaPlayer::ReadyStateHaveMetadata)
     SetReadyState(WebMediaPlayer::ReadyStateHaveMetadata);
 
-  base::TimeDelta seek_time = ConvertSecondsToTimestamp(seconds);
+  base::TimeDelta new_seek_time = ConvertSecondsToTimestamp(seconds);
 
   if (seeking_) {
+    if (new_seek_time == seek_time_) {
+      if (chunk_demuxer_) {
+        if (!pending_seek_) {
+          // If using media source demuxer, only suppress redundant seeks if
+          // there is no pending seek. This enforces that any pending seek that
+          // results in a demuxer seek is preceded by matching
+          // CancelPendingSeek() and StartWaitingForSeek() calls.
+          return;
+        }
+      } else {
+        // Suppress all redundant seeks if unrestricted by media source demuxer
+        // API.
+        pending_seek_ = false;
+        pending_seek_time_ = base::TimeDelta();
+        return;
+      }
+    }
+
     pending_seek_ = true;
-    pending_seek_seconds_ = seconds;
+    pending_seek_time_ = new_seek_time;
     if (chunk_demuxer_)
-      chunk_demuxer_->CancelPendingSeek(seek_time);
+      chunk_demuxer_->CancelPendingSeek(pending_seek_time_);
     return;
   }
 
@@ -310,8 +327,8 @@ void WebMediaPlayerImpl::seek(double seconds) {
   // is completed and generate OnPipelineBufferingStateChanged event to
   // eventually fire seeking and seeked events
   if (paused_) {
-    if (paused_time_ != seek_time) {
-      paused_time_ = seek_time;
+    if (paused_time_ != new_seek_time) {
+      paused_time_ = new_seek_time;
     } else if (old_state == ReadyStateHaveEnoughData) {
       main_task_runner_->PostTask(
           FROM_HERE,
@@ -322,14 +339,14 @@ void WebMediaPlayerImpl::seek(double seconds) {
   }
 
   seeking_ = true;
+  seek_time_ = new_seek_time;
 
   if (chunk_demuxer_)
-    chunk_demuxer_->StartWaitingForSeek(seek_time);
+    chunk_demuxer_->StartWaitingForSeek(seek_time_);
 
   // Kick off the asynchronous seek!
-  pipeline_.Seek(
-      seek_time,
-      BIND_TO_RENDER_LOOP1(&WebMediaPlayerImpl::OnPipelineSeeked, true));
+  pipeline_.Seek(seek_time_, BIND_TO_RENDER_LOOP1(
+                                 &WebMediaPlayerImpl::OnPipelineSeeked, true));
 }
 
 void WebMediaPlayerImpl::setRate(double rate) {
@@ -446,6 +463,14 @@ double WebMediaPlayerImpl::currentTime() const {
   if (ended_)
     return duration();
 
+  // We know the current seek time better than pipeline: pipeline may processing
+  // an earlier seek before a pending seek has been started, or it might not yet
+  // have the current seek time returnable via GetMediaTime().
+  if (seeking()) {
+    return pending_seek_ ? pending_seek_time_.InSecondsF()
+                         : seek_time_.InSecondsF();
+  }
+
   return (paused_ ? paused_time_ : pipeline_.GetMediaTime()).InSecondsF();
 }
 
@@ -484,7 +509,7 @@ blink::WebTimeRanges WebMediaPlayerImpl::seekable() const {
   // Allow a special exception for seeks to zero for streaming sources with a
   // finite duration; this allows looping to work.
   const bool allow_seek_to_zero = data_source_ && data_source_->IsStreaming() &&
-                                  base::IsFinite(seekable_end);
+                                  std::isfinite(seekable_end);
 
   // TODO(dalecurtis): Technically this allows seeking on media which return an
   // infinite duration so long as DataSource::IsStreaming() is false.  While not
@@ -660,8 +685,8 @@ void WebMediaPlayerImpl::setContentDecryptionModule(
     return;
   }
 
-  SetCdm(ToWebContentDecryptionModuleImpl(cdm)->GetCdmContext(),
-         BIND_TO_RENDER_LOOP1(&WebMediaPlayerImpl::OnCdmAttached, result));
+  SetCdm(BIND_TO_RENDER_LOOP1(&WebMediaPlayerImpl::OnCdmAttached, result),
+         ToWebContentDecryptionModuleImpl(cdm)->GetCdmContext());
 }
 
 void WebMediaPlayerImpl::OnEncryptedMediaInitData(
@@ -695,9 +720,11 @@ void WebMediaPlayerImpl::OnWaitingForDecryptionKey() {
   client_->didResumePlaybackBlockedForKey();
 }
 
-void WebMediaPlayerImpl::SetCdm(CdmContext* cdm_context,
-                                const CdmAttachedCB& cdm_attached_cb) {
-  pipeline_.SetCdm(cdm_context, cdm_attached_cb);
+void WebMediaPlayerImpl::SetCdm(const CdmAttachedCB& cdm_attached_cb,
+                                CdmContext* cdm_context) {
+  // If CDM initialization succeeded, tell the pipeline about it.
+  if (cdm_context)
+    pipeline_.SetCdm(cdm_context, cdm_attached_cb);
 }
 
 void WebMediaPlayerImpl::OnCdmAttached(
@@ -718,9 +745,12 @@ void WebMediaPlayerImpl::OnPipelineSeeked(bool time_changed,
   DVLOG(1) << __FUNCTION__ << "(" << time_changed << ", " << status << ")";
   DCHECK(main_task_runner_->BelongsToCurrentThread());
   seeking_ = false;
+  seek_time_ = base::TimeDelta();
   if (pending_seek_) {
+    double pending_seek_seconds = pending_seek_time_.InSecondsF();
     pending_seek_ = false;
-    seek(pending_seek_seconds_);
+    pending_seek_time_ = base::TimeDelta();
+    seek(pending_seek_seconds);
     return;
   }
 
@@ -869,10 +899,6 @@ void WebMediaPlayerImpl::NotifyDownloading(bool is_downloading) {
 void WebMediaPlayerImpl::StartPipeline() {
   DCHECK(main_task_runner_->BelongsToCurrentThread());
 
-  // Keep track if this is a MSE or non-MSE playback.
-  UMA_HISTOGRAM_BOOLEAN("Media.MSE.Playback",
-                        (load_type_ == LoadTypeMediaSource));
-
   LogCB mse_log_cb;
   Demuxer::EncryptedMediaInitDataCB encrypted_media_init_data_cb =
       BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::OnEncryptedMediaInitData);
@@ -901,14 +927,13 @@ void WebMediaPlayerImpl::StartPipeline() {
 
   pipeline_.Start(
       demuxer_.get(),
-      renderer_factory_->CreateRenderer(media_task_runner_,
-                                        audio_source_provider_.get()),
+      renderer_factory_->CreateRenderer(
+          media_task_runner_, audio_source_provider_.get(), compositor_),
       BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::OnPipelineEnded),
       BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::OnPipelineError),
       BIND_TO_RENDER_LOOP1(&WebMediaPlayerImpl::OnPipelineSeeked, false),
       BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::OnPipelineMetadata),
       BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::OnPipelineBufferingStateChanged),
-      base::Bind(&WebMediaPlayerImpl::FrameReady, base::Unretained(this)),
       BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::OnDurationChanged),
       BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::OnAddTextTrack),
       BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::OnWaitingForDecryptionKey));
@@ -979,21 +1004,12 @@ void WebMediaPlayerImpl::OnOpacityChanged(bool opaque) {
     video_weblayer_->setOpaque(opaque_);
 }
 
-void WebMediaPlayerImpl::FrameReady(
-    const scoped_refptr<VideoFrame>& frame) {
-  compositor_task_runner_->PostTask(
-      FROM_HERE,
-      base::Bind(&VideoFrameCompositor::UpdateCurrentFrame,
-                 base::Unretained(compositor_),
-                 frame));
-}
-
 static void GetCurrentFrameAndSignal(
     VideoFrameCompositor* compositor,
     scoped_refptr<VideoFrame>* video_frame_out,
     base::WaitableEvent* event) {
   TRACE_EVENT0("media", "GetCurrentFrameAndSignal");
-  *video_frame_out = compositor->GetCurrentFrame();
+  *video_frame_out = compositor->GetCurrentFrameAndUpdateIfStale();
   event->Signal();
 }
 
@@ -1001,7 +1017,7 @@ scoped_refptr<VideoFrame>
 WebMediaPlayerImpl::GetCurrentFrameFromCompositor() {
   TRACE_EVENT0("media", "WebMediaPlayerImpl::GetCurrentFrameFromCompositor");
   if (compositor_task_runner_->BelongsToCurrentThread())
-    return compositor_->GetCurrentFrame();
+    return compositor_->GetCurrentFrameAndUpdateIfStale();
 
   // Use a posted task and waitable event instead of a lock otherwise
   // WebGL/Canvas can see different content than what the compositor is seeing.

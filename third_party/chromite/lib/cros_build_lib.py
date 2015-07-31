@@ -16,7 +16,6 @@ import functools
 import getpass
 import hashlib
 import inspect
-import logging
 import operator
 import os
 import pprint
@@ -31,12 +30,11 @@ import traceback
 import types
 
 from chromite.cbuildbot import constants
+from chromite.lib import cros_logging as logging
 from chromite.lib import signals
 
 
 STRICT_SUDO = False
-
-logger = logging.getLogger('chromite')
 
 # For use by ShellQuote.  Match all characters that the shell might treat
 # specially.  This means a number of things:
@@ -330,7 +328,8 @@ def _KillChildProcess(proc, int_timeout, kill_timeout, cmd, original_handler,
         # Still doesn't want to die.  Too bad, so sad, time to die.
         proc.kill()
     except EnvironmentError as e:
-      Warning('Ignoring unhandled exception in _KillChildProcess: %s', e)
+      logging.warning('Ignoring unhandled exception in _KillChildProcess: %s',
+                      e)
 
     # Ensure our child process has been reaped.
     proc.wait()
@@ -408,7 +407,8 @@ def RunCommand(cmd, print_cmd=True, error_message=None, redirect_stdout=False,
     redirect_stdout: returns the stdout.
     redirect_stderr: holds stderr output until input is communicated.
     cwd: the working directory to run this cmd.
-    input: input to pipe into this command through stdin.
+    input: The data to pipe into this command through stdin.  If a file object
+      or file descriptor, stdin will be connected directly to that.
     enter_chroot: this command should be run from within the chroot.  If set,
       cwd must point to the scripts directory. If we are already inside the
       chroot, this command will be run as if |enter_chroot| is False.
@@ -466,7 +466,7 @@ def RunCommand(cmd, print_cmd=True, error_message=None, redirect_stdout=False,
   cmd_result = CommandResult()
 
   if mute_output is None:
-    mute_output = logger.getEffectiveLevel() > debug_level
+    mute_output = logging.getLogger().getEffectiveLevel() > debug_level
 
   # Force the timeout to float; in the process, if it's not convertible,
   # a self-explanatory exception will be thrown.
@@ -506,8 +506,13 @@ def RunCommand(cmd, print_cmd=True, error_message=None, redirect_stdout=False,
     sys.stdout.flush()
     sys.stderr.flush()
 
-  if input:
+  # If input is a string, we'll create a pipe and send it through that.
+  # Otherwise we assume it's a file object that can be read from directly.
+  if isinstance(input, basestring):
     stdin = subprocess.PIPE
+  elif input is not None:
+    stdin = input
+    input = None
 
   if isinstance(cmd, basestring):
     if not shell:
@@ -546,9 +551,9 @@ def RunCommand(cmd, print_cmd=True, error_message=None, redirect_stdout=False,
   # Print out the command before running.
   if print_cmd or log_output:
     if cwd:
-      logger.log(debug_level, 'RunCommand: %s in %s', CmdToStr(cmd), cwd)
+      logging.log(debug_level, 'RunCommand: %s in %s', CmdToStr(cmd), cwd)
     else:
-      logger.log(debug_level, 'RunCommand: %s', CmdToStr(cmd))
+      logging.log(debug_level, 'RunCommand: %s', CmdToStr(cmd))
 
   cmd_result.cmd = cmd
 
@@ -597,9 +602,9 @@ def RunCommand(cmd, print_cmd=True, error_message=None, redirect_stdout=False,
 
     if log_output:
       if cmd_result.output:
-        logger.log(debug_level, '(stdout):\n%s', cmd_result.output)
+        logging.log(debug_level, '(stdout):\n%s', cmd_result.output)
       if cmd_result.error:
-        logger.log(debug_level, '(stderr):\n%s', cmd_result.error)
+        logging.log(debug_level, '(stderr):\n%s', cmd_result.error)
 
     if not error_code_ok and proc.returncode:
       msg = ('Failed command "%s", cwd=%s, extra env=%r'
@@ -642,28 +647,26 @@ def Die(message, *args, **kwargs):
   Args:
     message: The message to be emitted before exiting.
   """
-  logger.error(message, *args, **kwargs)
+  logging.error(message, *args, **kwargs)
   raise DieSystemExit(1)
 
 
-def Error(message, *args, **kwargs):
-  """Emits a red warning message using the logging module."""
-  logger.error(message, *args, **kwargs)
+def GetSysrootToolPath(sysroot, tool_name):
+  """Returns the path to the sysroot specific version of a tool.
 
+  Does not check that the tool actually exists.
 
-def Warning(message, *args, **kwargs):  # pylint: disable=redefined-builtin
-  """Emits a warning message using the logging module."""
-  logger.warn(message, *args, **kwargs)
+  Args:
+    sysroot: build root of the system in question.
+    tool_name: string name of tool desired (e.g. 'equery').
 
+  Returns:
+    string path to tool inside the sysroot.
+  """
+  if sysroot == '/':
+    return os.path.join(sysroot, 'usr', 'bin', tool_name)
 
-def Info(message, *args, **kwargs):
-  """Emits an info message using the logging module."""
-  logger.info(message, *args, **kwargs)
-
-
-def Debug(message, *args, **kwargs):
-  """Emits a debugging message using the logging module."""
-  logger.debug(message, *args, **kwargs)
+  return os.path.join(sysroot, 'build', 'bin', tool_name)
 
 
 def PrintBuildbotLink(text, url, handle=None):
@@ -747,10 +750,10 @@ def GetChromeosVersion(str_obj):
   if str_obj is not None:
     match = re.search(r'CHROMEOS_VERSION_STRING=([0-9_.]+)', str_obj)
     if match and match.group(1):
-      Info('CHROMEOS_VERSION_STRING = %s' % match.group(1))
+      logging.info('CHROMEOS_VERSION_STRING = %s' % match.group(1))
       return match.group(1)
 
-  Info('CHROMEOS_VERSION_STRING NOT found')
+  logging.info('CHROMEOS_VERSION_STRING NOT found')
   return None
 
 
@@ -760,8 +763,8 @@ def GetHostName(fully_qualified=False):
   try:
     hostname = socket.gethostbyaddr(hostname)[0]
   except socket.gaierror as e:
-    Warning('please check your /etc/hosts file; resolving your hostname '
-            '(%s) failed: %s', hostname, e)
+    logging.warning('please check your /etc/hosts file; resolving your hostname'
+                    ' (%s) failed: %s', hostname, e)
 
   if fully_qualified:
     return hostname
@@ -1125,7 +1128,7 @@ def BooleanShellValue(sval, default, msg=None):
       return False
 
   if msg is not None:
-    Warning('%s: %r' % (msg, sval))
+    logging.warning('%s: %r', msg, sval)
     return default
   else:
     raise ValueError('Could not decode as a boolean value: %r' % sval)
@@ -1337,7 +1340,7 @@ def GetChrootVersion(chroot=None, buildroot=None):
   try:
     return osutils.ReadFile(ver_path).strip()
   except IOError:
-    Warning('could not read %s', ver_path)
+    logging.warning('could not read %s', ver_path)
     return None
 
 
@@ -1622,8 +1625,8 @@ def GetDefaultBoard():
       default_board = default_board_file.read().strip()
       # Check for user typos like whitespace
       if not re.match('[a-zA-Z0-9-_]*$', default_board):
-        Warning('Noticed invalid default board: |%s|. '
-                'Ignoring this default.', default_board)
+        logging.warning('Noticed invalid default board: |%s|. Ignoring this '
+                        'default.', default_board)
         default_board = None
   except IOError:
     return None
@@ -1658,7 +1661,7 @@ def GetBoard(device_board, override_board=None, force=False):
     if not force and not BooleanPrompt(default=False, prolog=msg):
       Die('Exiting...')
 
-    Warning(msg)
+    logging.warning(msg)
 
   return board
 
@@ -1745,55 +1748,13 @@ def GetIPv4Address(dev=None, global_ip=True):
   matches = re.findall(r'\binet (\d+\.\d+\.\d+\.\d+).*', result.output)
   if matches:
     return matches[0]
-  Warning('Failed to find ip address in %r', result.output)
+  logging.warning('Failed to find ip address in %r', result.output)
   return None
 
 
 def GetSysroot(board=None):
   """Returns the sysroot for |board| or '/' if |board| is None."""
   return '/' if board is None else os.path.join('/build', board)
-
-
-# Chroot helper methods; assume default 'chroot' directory name.
-def ToChrootPath(path):
-  """Reinterprets |path| to be used inside of chroot.
-
-  Returns:
-    A reinterpreted path if currently outside chroot or |path| if
-    inside chroot.
-  """
-  from chromite.lib import osutils
-  from chromite.lib import git
-  full_path = osutils.ExpandPath(path)
-  if IsInsideChroot():
-    return full_path
-
-  try:
-    return git.ReinterpretPathForChroot(full_path)
-  except Exception:
-    raise ValueError('path %s is outside of your source tree' % path)
-
-
-def FromChrootPath(path):
-  """Interprets a chroot |path| to be used inside or outside chroot.
-
-  Returns:
-    If currently outside chroot, returns the reinterpreted |path| to
-    be used outside chroot. Otherwise, returns |path|.
-  """
-  from chromite.lib import osutils
-  full_path = osutils.ExpandPath(path)
-  if IsInsideChroot():
-    return full_path
-
-  # Replace chroot source root with current source root, if applicable.
-  if full_path.startswith(constants.CHROOT_SOURCE_ROOT):
-    return os.path.join(
-        constants.SOURCE_ROOT,
-        full_path[len(constants.CHROOT_SOURCE_ROOT):].strip(os.path.sep))
-  else:
-    return os.path.join(constants.SOURCE_ROOT, constants.DEFAULT_CHROOT_DIR,
-                        path.strip(os.path.sep))
 
 
 def Collection(classname, **kwargs):
@@ -2034,13 +1995,14 @@ def FormatDetailedTraceback(exc_info=None):
           '    Call: %s%s\n' % (fname, inspect.formatargvalues(*args)),
           '    Locals:\n',
       ]
-      keys = sorted(frame.f_locals.keys(), key=str.lower)
-      keylen = max(len(x) for x in keys)
-      typelen = max(len(str(type(x))) for x in frame.f_locals.values())
-      for key in keys:
-        val = frame.f_locals[key]
-        ret += ['      %-*s: %-*s %s\n' %
-                (keylen, key, typelen, type(val), pprint.saferepr(val))]
+      if frame.f_locals:
+        keys = sorted(frame.f_locals.keys(), key=str.lower)
+        keylen = max(len(x) for x in keys)
+        typelen = max(len(str(type(x))) for x in frame.f_locals.values())
+        for key in keys:
+          val = frame.f_locals[key]
+          ret += ['      %-*s: %-*s %s\n' %
+                  (keylen, key, typelen, type(val), pprint.saferepr(val))]
       exc_tb = exc_tb.tb_next
 
     if exc_type:
@@ -2058,7 +2020,7 @@ def PrintDetailedTraceback(exc_info=None, file=None):
   Args:
     exc_info: The exception tuple to format; defaults to sys.exc_info().
       See the help on that function for details on the type.
-   file: The file object to write the details to; defaults to sys.stderr.
+    file: The file object to write the details to; defaults to sys.stderr.
   """
   # We use |file| to match the existing traceback API.
   # pylint: disable=redefined-builtin
@@ -2083,3 +2045,211 @@ def PrintDetailedTraceback(exc_info=None, file=None):
     # Help python with its circular references.
     del exc_info
     del curr_exc_info
+
+
+class _FdCapturer(object):
+  """Helper class to capture output at the file descriptor level.
+
+  This is meant to be used with sys.stdout or sys.stderr. By capturing
+  file descriptors, this will also intercept subprocess output, which
+  reassigning sys.stdout or sys.stderr will not do.
+
+  Output will only be captured, it will no longer be printed while
+  the capturer is active.
+  """
+
+  def __init__(self, source, output=None):
+    """Construct the _FdCapturer object.
+
+    Does not start capturing until Start() is called.
+
+    Args:
+      source: A file object to capture. Typically sys.stdout or
+        sys.stderr, but will work with anything that implements flush()
+        and fileno().
+      output: A file name where the captured output is to be stored. If None,
+        then the output will be stored to a temporary file.
+    """
+    self._source = source
+    self._captured = ''
+    self._saved_fd = None
+    self._tempfile = None
+    self._capturefile = None
+    self._capturefile_reader = None
+    self._capturefile_name = output
+
+  def _SafeCreateTempfile(self, tempfile_obj):
+    """Ensure that the tempfile is created safely.
+
+    (1) Stash away a reference to the tempfile.
+    (2) Unlink the file from the filesystem.
+
+    (2) ensures that if we crash, the file gets deleted. (1) ensures that while
+    we are running, we hold a reference to the file so the system does not close
+    the file.
+
+    Args:
+      tempfile_obj: A tempfile object.
+    """
+    self._tempfile = tempfile_obj
+    os.unlink(tempfile_obj.name)
+
+  def Start(self):
+    """Begin capturing output."""
+    if self._capturefile_name is None:
+      tempfile_obj = tempfile.NamedTemporaryFile(delete=False)
+      self._capturefile = tempfile_obj.file
+      self._capturefile_name = tempfile_obj.name
+      self._capturefile_reader = open(self._capturefile_name)
+      self._SafeCreateTempfile(tempfile_obj)
+    else:
+      # Open file passed in for writing. Set buffering=1 for line level
+      # buffering.
+      self._capturefile = open(self._capturefile_name, 'w', buffering=1)
+      self._capturefile_reader = open(self._capturefile_name)
+    # Save the original fd so we can revert in Stop().
+    self._saved_fd = os.dup(self._source.fileno())
+    os.dup2(self._capturefile.fileno(), self._source.fileno())
+
+  def Stop(self):
+    """Stop capturing output."""
+    self.GetCaptured()
+    if self._saved_fd is not None:
+      os.dup2(self._saved_fd, self._source.fileno())
+      os.close(self._saved_fd)
+      self._saved_fd = None
+    # If capturefile and capturefile_reader exist, close them as they were
+    # opened in self.Start().
+    if self._capturefile_reader is not None:
+      self._capturefile_reader.close()
+      self._capturefile_reader = None
+    if self._capturefile is not None:
+      self._capturefile.close()
+      self._capturefile = None
+
+  def GetCaptured(self):
+    """Return all output captured up to this point.
+
+    Can be used while capturing or after Stop() has been called.
+    """
+    self._source.flush()
+    if self._capturefile_reader is not None:
+      self._captured += self._capturefile_reader.read()
+    return self._captured
+
+  def ClearCaptured(self):
+    """Erase all captured output."""
+    self.GetCaptured()
+    self._captured = ''
+
+
+class OutputCapturer(object):
+  """Class for capturing stdout/stderr output.
+
+  Class is designed as a 'ContextManager'.  Example usage:
+
+  with cros_build_lib.OutputCapturer() as output:
+    # Capturing of stdout/stderr automatically starts now.
+    # Do stuff that sends output to stdout/stderr.
+    # Capturing automatically stops at end of 'with' block.
+
+  # stdout/stderr can be retrieved from the OutputCapturer object:
+  stdout = output.GetStdoutLines() # Or other access methods
+
+  # Some Assert methods are only valid if capturing was used in test.
+  self.AssertOutputContainsError() # Or other related methods
+
+  # OutputCapturer can also be used to capture output to specified files.
+  with self.OutputCapturer(stdout_path='/tmp/stdout.txt') as output:
+    # Do stuff.
+    # stdout will be captured to /tmp/stdout.txt.
+  """
+
+  OPER_MSG_SPLIT_RE = re.compile(r'^\033\[1;.*?\033\[0m$|^[^\n]*$',
+                                 re.DOTALL | re.MULTILINE)
+
+  __slots__ = ['_stdout_capturer', '_stderr_capturer']
+
+  def __init__(self, stdout_path=None, stderr_path=None):
+    """Initalize OutputCapturer with capture files.
+
+    If OutputCapturer is initialized with filenames to capture stdout and stderr
+    to, then those files are used. Otherwise, temporary files are created.
+
+    Args:
+      stdout_path: File to capture stdout to. If None, a temporary file is used.
+      stderr_path: File to capture stderr to. If None, a temporary file is used.
+    """
+    self._stdout_capturer = _FdCapturer(sys.stdout, output=stdout_path)
+    self._stderr_capturer = _FdCapturer(sys.stderr, output=stderr_path)
+
+  def __enter__(self):
+    # This method is called with entering 'with' block.
+    self.StartCapturing()
+    return self
+
+  def __exit__(self, exc_type, exc_val, exc_tb):
+    # This method is called when exiting 'with' block.
+    self.StopCapturing()
+
+    if exc_type:
+      print('Exception during output capturing: %r' % (exc_val,))
+      stdout = self.GetStdout()
+      if stdout:
+        print('Captured stdout was:\n%s' % stdout)
+      else:
+        print('No captured stdout')
+      stderr = self.GetStderr()
+      if stderr:
+        print('Captured stderr was:\n%s' % stderr)
+      else:
+        print('No captured stderr')
+
+  def StartCapturing(self):
+    """Begin capturing stdout and stderr."""
+    self._stdout_capturer.Start()
+    self._stderr_capturer.Start()
+
+  def StopCapturing(self):
+    """Stop capturing stdout and stderr."""
+    self._stdout_capturer.Stop()
+    self._stderr_capturer.Stop()
+
+  def ClearCaptured(self):
+    """Clear any captured stdout/stderr content."""
+    self._stdout_capturer.ClearCaptured()
+    self._stderr_capturer.ClearCaptured()
+
+  def GetStdout(self):
+    """Return captured stdout so far."""
+    return self._stdout_capturer.GetCaptured()
+
+  def GetStderr(self):
+    """Return captured stderr so far."""
+    return self._stderr_capturer.GetCaptured()
+
+  def _GetOutputLines(self, output, include_empties):
+    """Split |output| into lines, optionally |include_empties|.
+
+    Return array of lines.
+    """
+
+    lines = self.OPER_MSG_SPLIT_RE.findall(output)
+    if not include_empties:
+      lines = [ln for ln in lines if ln]
+
+    return lines
+
+  def GetStdoutLines(self, include_empties=True):
+    """Return captured stdout so far as array of lines.
+
+    If |include_empties| is false filter out all empty lines.
+    """
+    return self._GetOutputLines(self.GetStdout(), include_empties)
+
+  def GetStderrLines(self, include_empties=True):
+    """Return captured stderr so far as array of lines.
+
+    If |include_empties| is false filter out all empty lines.
+    """
+    return self._GetOutputLines(self.GetStderr(), include_empties)

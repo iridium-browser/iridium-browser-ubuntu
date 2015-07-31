@@ -4,7 +4,6 @@
 
 package org.chromium.chrome.browser.autofill;
 
-import android.app.AlertDialog;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.res.Resources;
@@ -16,6 +15,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.support.v4.view.MarginLayoutParamsCompat;
 import android.support.v4.view.ViewCompat;
+import android.support.v7.app.AlertDialog;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.LayoutInflater;
@@ -117,11 +117,11 @@ public class CardUnmaskPrompt
         ((ImageView) v.findViewById(R.id.cvc_hint_image)).setImageResource(drawableId);
 
         mDialog = new AlertDialog.Builder(context, R.style.AlertDialogTheme)
-                          .setTitle(title)
-                          .setView(v)
-                          .setNegativeButton(R.string.cancel, null)
-                          .setPositiveButton(R.string.autofill_card_unmask_confirm_button, null)
-                          .create();
+                .setTitle(title)
+                .setView(v)
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.autofill_card_unmask_confirm_button, null)
+                .create();
         mDialog.setOnDismissListener(this);
 
         mShouldRequestExpirationDate = shouldRequestExpirationDate;
@@ -172,8 +172,7 @@ public class CardUnmaskPrompt
         setOverlayVisibility(View.VISIBLE);
         mVerificationProgressBar.setVisibility(View.VISIBLE);
         mVerificationView.setText(R.string.autofill_card_unmask_verification_in_progress);
-        ApiCompatibilityUtils.announceForAccessibility(
-                mVerificationView, mVerificationView.getText());
+        mVerificationView.announceForAccessibility(mVerificationView.getText());
         setInputError(null);
     }
 
@@ -266,7 +265,7 @@ public class CardUnmaskPrompt
         });
         mStoreLocallyTooltipPopup.showAsDropDown(mStoreLocallyCheckbox,
                 ViewCompat.getPaddingStart(mStoreLocallyCheckbox), 0);
-        ApiCompatibilityUtils.announceForAccessibility(text, text.getText());
+        text.announceForAccessibility(text.getText());
     }
 
     private void setInitialFocus() {
@@ -338,7 +337,7 @@ public class CardUnmaskPrompt
         // A null message is passed in during card verification, which also makes an announcement.
         // Announcing twice in a row may cancel the first announcement.
         if (message != null) {
-            ApiCompatibilityUtils.announceForAccessibility(mErrorMessage, message);
+            mErrorMessage.announceForAccessibility(message);
         }
 
         // The rest of this code makes L-specific assumptions about the background being used to
@@ -364,7 +363,7 @@ public class CardUnmaskPrompt
     private void setNoRetryError(String message) {
         mNoRetryErrorMessage.setText(message);
         mNoRetryErrorMessage.setVisibility(View.VISIBLE);
-        ApiCompatibilityUtils.announceForAccessibility(mNoRetryErrorMessage, message);
+        mNoRetryErrorMessage.announceForAccessibility(message);
     }
 
     /**

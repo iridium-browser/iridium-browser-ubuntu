@@ -71,7 +71,7 @@ std::string AccessibilityEventToStringUTF8(int32 event_id) {
 class AccessibilityEventRecorderWin : public AccessibilityEventRecorder {
  public:
   explicit AccessibilityEventRecorderWin(BrowserAccessibilityManager* manager);
-  virtual ~AccessibilityEventRecorderWin();
+  ~AccessibilityEventRecorderWin() override;
 
   // Callback registered by SetWinEventHook. Just calls OnWinEventHook.
   static void CALLBACK WinEventHookThunk(
@@ -205,6 +205,13 @@ void AccessibilityEventRecorderWin::OnWinEventHook(
   base::win::ScopedVariant state;
   iaccessible->get_accState(childid_self, state.Receive());
   int ia_state = V_I4(state.ptr());
+
+  // Avoid flakiness. Events fired on a WINDOW are out of the control
+  // of a test.
+  if (role.type() == VT_I4 && ROLE_SYSTEM_WINDOW == V_I4(role.ptr())) {
+    VLOG(1) << "Ignoring event " << event << " on ROLE_SYSTEM_WINDOW";
+    return;
+  }
 
   // Avoid flakiness. The "offscreen" state depends on whether the browser
   // window is frontmost or not, and "hottracked" depends on whether the

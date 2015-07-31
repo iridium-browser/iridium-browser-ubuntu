@@ -20,6 +20,8 @@
 #include "chromeos/dbus/shill_profile_client.h"
 #include "chromeos/dbus/shill_service_client.h"
 #include "chromeos/login/user_names.h"
+#include "chromeos/network/network_handler.h"
+#include "chromeos/network/network_state_handler.h"
 #include "chromeos/network/onc/onc_utils.h"
 #include "chromeos/network/portal_detector/network_portal_detector.h"
 #include "components/onc/onc_constants.h"
@@ -70,6 +72,7 @@ using extensions::NetworkingPrivateChromeOS;
 namespace {
 
 const char kUser1ProfilePath[] = "/profile/user1/shill";
+const char kEthernetDevicePath[] = "/device/stub_ethernet_device";
 const char kWifiDevicePath[] = "/device/stub_wifi_device1";
 const char kCellularDevicePath[] = "/device/stub_cellular_device1";
 const char kIPConfigPath[] = "/ipconfig/ipconfig1";
@@ -272,6 +275,9 @@ class NetworkingPrivateChromeOSApiTest : public ExtensionApiTest {
     ip_config_test->AddIPConfig(kIPConfigPath, ipconfig);
 
     // Add Devices
+    device_test_->AddDevice(kEthernetDevicePath, shill::kTypeEthernet,
+                            "stub_ethernet_device1");
+
     device_test_->AddDevice(kWifiDevicePath, shill::kTypeWifi,
                             "stub_wifi_device1");
     base::ListValue wifi_ip_configs;
@@ -436,6 +442,20 @@ IN_PROC_BROWSER_TEST_F(NetworkingPrivateChromeOSApiTest,
   EXPECT_TRUE(RunNetworkingSubtest("getVisibleNetworksWifi")) << message_;
 }
 
+IN_PROC_BROWSER_TEST_F(NetworkingPrivateChromeOSApiTest, EnabledNetworkTypes) {
+  EXPECT_TRUE(RunNetworkingSubtest("enabledNetworkTypes")) << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(NetworkingPrivateChromeOSApiTest, GetDeviceStates) {
+  SetupCellular();
+  manager_test_->RemoveTechnology("cellular");
+  manager_test_->AddTechnology("cellular", false /* disabled */);
+  manager_test_->SetTechnologyInitializing("cellular", true);
+  manager_test_->RemoveTechnology("wimax");
+  manager_test_->AddTechnology("wimax", false /* disabled */);
+  EXPECT_TRUE(RunNetworkingSubtest("getDeviceStates")) << message_;
+}
+
 IN_PROC_BROWSER_TEST_F(NetworkingPrivateChromeOSApiTest, RequestNetworkScan) {
   EXPECT_TRUE(RunNetworkingSubtest("requestNetworkScan")) << message_;
 }
@@ -528,6 +548,12 @@ IN_PROC_BROWSER_TEST_F(NetworkingPrivateChromeOSApiTest, GetManagedProperties) {
   EXPECT_TRUE(RunNetworkingSubtest("getManagedProperties")) << message_;
 }
 
+IN_PROC_BROWSER_TEST_F(NetworkingPrivateChromeOSApiTest, GetErrorState) {
+  chromeos::NetworkHandler::Get()->network_state_handler()->SetLastErrorForTest(
+      kWifi1ServicePath, "TestErrorState");
+  EXPECT_TRUE(RunNetworkingSubtest("getErrorState")) << message_;
+}
+
 IN_PROC_BROWSER_TEST_F(NetworkingPrivateChromeOSApiTest,
                        OnNetworksChangedEventConnect) {
   EXPECT_TRUE(RunNetworkingSubtest("onNetworksChangedEventConnect"))
@@ -543,6 +569,12 @@ IN_PROC_BROWSER_TEST_F(NetworkingPrivateChromeOSApiTest,
 IN_PROC_BROWSER_TEST_F(NetworkingPrivateChromeOSApiTest,
                        OnNetworkListChangedEvent) {
   EXPECT_TRUE(RunNetworkingSubtest("onNetworkListChangedEvent")) << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(NetworkingPrivateChromeOSApiTest,
+                       OnDeviceStateListChangedEvent) {
+  EXPECT_TRUE(RunNetworkingSubtest("onDeviceStateListChangedEvent"))
+      << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(NetworkingPrivateChromeOSApiTest, VerifyDestination) {

@@ -59,12 +59,16 @@ MessageCenterNotificationManager::MessageCenterNotificationManager(
 #if defined(OS_WIN)
       first_run_idle_timeout_(
           base::TimeDelta::FromSeconds(kFirstRunIdleDelaySeconds)),
-      weak_factory_(this),
 #endif
       settings_provider_(settings_provider.Pass()),
       system_observer_(this),
       stats_collector_(message_center),
-      google_now_stats_collector_(message_center) {
+      google_now_stats_collector_(message_center)
+#if defined(OS_WIN)
+      ,
+      weak_factory_(this)
+#endif
+{
 #if defined(OS_WIN)
   first_run_pref_.Init(prefs::kMessageCenterShowedFirstRunBalloon, local_state);
 #endif
@@ -233,13 +237,28 @@ MessageCenterNotificationManager::GetAllIdsByProfileAndSourceOrigin(
   // no profile method should be called inside this function.
 
   std::set<std::string> delegate_ids;
-  for (NotificationMap::iterator iter = profile_notifications_.begin();
-       iter != profile_notifications_.end(); iter++) {
-    if ((*iter).second->notification().origin_url() == source &&
-        profile == (*iter).second->profile()) {
-      delegate_ids.insert(iter->second->notification().delegate_id());
+  for (const auto& pair : profile_notifications_) {
+    const Notification& notification = pair.second->notification();
+    if (pair.second->profile() == profile &&
+        notification.origin_url() == source) {
+      delegate_ids.insert(notification.delegate_id());
     }
   }
+
+  return delegate_ids;
+}
+
+std::set<std::string> MessageCenterNotificationManager::GetAllIdsByProfile(
+    Profile* profile) {
+  // The profile pointer can be weak, the instance may have been destroyed, so
+  // no profile method should be called inside this function.
+
+  std::set<std::string> delegate_ids;
+  for (const auto& pair : profile_notifications_) {
+    if (pair.second->profile() == profile)
+      delegate_ids.insert(pair.second->notification().delegate_id());
+  }
+
   return delegate_ids;
 }
 

@@ -4,12 +4,15 @@
 
 #include "media/cdm/key_system_names.h"
 
-#include <string>
 
 namespace media {
 
 const char kClearKey[] = "org.w3.clearkey";
 const char kExternalClearKey[] = "org.chromium.externalclearkey";
+
+bool IsClearKey(const std::string& key_system) {
+  return key_system == kClearKey;
+}
 
 bool IsParentKeySystemOf(const std::string& parent_key_system,
                          const std::string& key_system) {

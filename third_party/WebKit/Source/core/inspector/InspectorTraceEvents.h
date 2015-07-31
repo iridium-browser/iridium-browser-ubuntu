@@ -13,7 +13,7 @@
 #include "wtf/Functional.h"
 
 namespace blink {
-class AnimationPlayer;
+class Animation;
 class CSSStyleSheetResource;
 class DescendantInvalidationSet;
 class Document;
@@ -66,6 +66,7 @@ private:
     TRACE_EVENT_INSTANT1( \
         TRACE_DISABLED_BY_DEFAULT("devtools.timeline.invalidationTracking"), \
         "ScheduleStyleInvalidationTracking", \
+        TRACE_EVENT_SCOPE_THREAD, \
         "data", \
         InspectorScheduleStyleInvalidationTrackingEvent::changeType((element), (invalidationSet), __VA_ARGS__))
 
@@ -98,6 +99,7 @@ private:
     TRACE_EVENT_INSTANT1( \
         TRACE_DISABLED_BY_DEFAULT("devtools.timeline.invalidationTracking"), \
         "StyleInvalidatorInvalidationTracking", \
+        TRACE_EVENT_SCOPE_THREAD, \
         "data", \
         InspectorStyleInvalidatorInvalidateEvent::data((element), (InspectorStyleInvalidatorInvalidateEvent::reason)))
 
@@ -105,6 +107,7 @@ private:
     TRACE_EVENT_INSTANT1( \
         TRACE_DISABLED_BY_DEFAULT("devtools.timeline.invalidationTracking"), \
         "StyleInvalidatorInvalidationTracking", \
+        TRACE_EVENT_SCOPE_THREAD, \
         "data", \
         InspectorStyleInvalidatorInvalidateEvent::selectorPart((element), (InspectorStyleInvalidatorInvalidateEvent::reason), (invalidationSet), (singleSelectorPart)))
 
@@ -158,7 +161,7 @@ public:
 
 class InspectorPaintInvalidationTrackingEvent {
 public:
-    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(const LayoutObject* renderer, const LayoutObject* paintContainer);
+    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(const LayoutObject*, const LayoutObject* paintContainer);
 };
 
 class InspectorScrollInvalidationTrackingEvent {
@@ -219,6 +222,7 @@ public:
 class InspectorParseHtmlEvent {
 public:
     static PassRefPtr<TraceEvent::ConvertableToTraceFormat> beginData(Document*, unsigned startLine);
+    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> endData(unsigned endLine);
 };
 
 class InspectorParseAuthorStyleSheetEvent {
@@ -250,6 +254,7 @@ public:
     TRACE_EVENT_INSTANT1( \
         TRACE_DISABLED_BY_DEFAULT("devtools.timeline.invalidationTracking"), \
         "LayerInvalidationTracking", \
+        TRACE_EVENT_SCOPE_THREAD, \
         "data", \
         InspectorLayerInvalidationTrackingEvent::data((LAYER), (REASON)))
 
@@ -337,12 +342,12 @@ public:
 
 class InspectorAnimationEvent {
 public:
-    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(const AnimationPlayer&);
+    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(const Animation&);
 };
 
 class InspectorAnimationStateEvent {
 public:
-    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(const AnimationPlayer&);
+    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(const Animation&);
 };
 
 } // namespace blink

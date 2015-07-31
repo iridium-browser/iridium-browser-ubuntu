@@ -19,12 +19,18 @@ source_set("android") {
     "demuxer_android.h",
     "demuxer_stream_player_params.cc",
     "demuxer_stream_player_params.h",
+    "media_client_android.cc",
+    "media_client_android.h",
     "media_codec_bridge.cc",
     "media_codec_bridge.h",
+    "media_codec_player.cc",
+    "media_codec_player.h",
     "media_decoder_job.cc",
     "media_decoder_job.h",
     "media_drm_bridge.cc",
     "media_drm_bridge.h",
+    "media_drm_bridge_delegate.cc",
+    "media_drm_bridge_delegate.h",
     "media_jni_registrar.cc",
     "media_jni_registrar.h",
     "media_player_android.cc",
@@ -45,11 +51,13 @@ source_set("android") {
     "webaudio_media_codec_bridge.h",
     "webaudio_media_codec_info.h",
   ]
-  configs += [ "//media:media_config" ]
+  configs += [
+    "//media:media_config",
+    "//media:media_implementation",
+  ]
   deps = [
     ":media_jni_headers",
     "//media:shared_memory_support",
-    "//media/base",
     "//third_party/widevine/cdm:version_h",
     "//ui/gl",
     "//url",
@@ -81,8 +89,6 @@ generate_jni("media_jni_headers") {
     "java/src/org/chromium/media/MediaDrmBridge.java",
     "java/src/org/chromium/media/MediaPlayerBridge.java",
     "java/src/org/chromium/media/MediaPlayerListener.java",
-    "java/src/org/chromium/media/UsbMidiDeviceAndroid.java",
-    "java/src/org/chromium/media/UsbMidiDeviceFactoryAndroid.java",
     "java/src/org/chromium/media/WebAudioMediaCodecBridge.java",
   ]
   jni_package = "media"

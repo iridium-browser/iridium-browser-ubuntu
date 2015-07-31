@@ -17,20 +17,24 @@
 IPC_STRUCT_TRAITS_BEGIN(nacl::NaClStartParams)
   IPC_STRUCT_TRAITS_MEMBER(nexe_file)
   IPC_STRUCT_TRAITS_MEMBER(nexe_file_path_metadata)
-  IPC_STRUCT_TRAITS_MEMBER(prefetched_resource_files)
-  IPC_STRUCT_TRAITS_MEMBER(handles)
+  IPC_STRUCT_TRAITS_MEMBER(imc_bootstrap_handle)
+  IPC_STRUCT_TRAITS_MEMBER(irt_handle)
+#if defined(OS_MACOSX)
+  IPC_STRUCT_TRAITS_MEMBER(mac_shm_fd)
+#endif
+#if defined(OS_POSIX)
   IPC_STRUCT_TRAITS_MEMBER(debug_stub_server_bound_socket)
+#endif
   IPC_STRUCT_TRAITS_MEMBER(validation_cache_enabled)
   IPC_STRUCT_TRAITS_MEMBER(validation_cache_key)
   IPC_STRUCT_TRAITS_MEMBER(version)
   IPC_STRUCT_TRAITS_MEMBER(enable_debug_stub)
   IPC_STRUCT_TRAITS_MEMBER(enable_ipc_proxy)
-  IPC_STRUCT_TRAITS_MEMBER(enable_mojo)
   IPC_STRUCT_TRAITS_MEMBER(process_type)
   IPC_STRUCT_TRAITS_MEMBER(crash_info_shmem_handle)
 IPC_STRUCT_TRAITS_END()
 
-IPC_STRUCT_TRAITS_BEGIN(nacl::NaClResourceFileInfo)
+IPC_STRUCT_TRAITS_BEGIN(nacl::NaClResourcePrefetchResult)
   IPC_STRUCT_TRAITS_MEMBER(file)
   IPC_STRUCT_TRAITS_MEMBER(file_path_metadata)
   IPC_STRUCT_TRAITS_MEMBER(file_key)
@@ -39,7 +43,14 @@ IPC_STRUCT_TRAITS_END()
 //-----------------------------------------------------------------------------
 // NaClProcess messages
 // These are messages sent between the browser and the NaCl process.
-// Tells the NaCl process to start.
+
+// Sends a prefetched resource file to a NaCl loader process. This message
+// can be sent multiple times, but all of them must be done before sending
+// NaClProcessMsg_Start.
+IPC_MESSAGE_CONTROL1(NaClProcessMsg_AddPrefetchedResource,
+                     nacl::NaClResourcePrefetchResult)
+
+// Tells the NaCl process to start. This message can be sent only once.
 IPC_MESSAGE_CONTROL1(NaClProcessMsg_Start,
                      nacl::NaClStartParams /* params */)
 

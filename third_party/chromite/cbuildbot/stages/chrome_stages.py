@@ -19,9 +19,10 @@ from chromite.cbuildbot.stages import artifact_stages
 from chromite.cbuildbot.stages import generic_stages
 from chromite.cbuildbot.stages import sync_stages
 from chromite.lib import cros_build_lib
-from chromite.lib import git
+from chromite.lib import cros_logging as logging
 from chromite.lib import osutils
 from chromite.lib import parallel
+from chromite.lib import path_util
 
 
 class SyncChromeStage(generic_stages.BuilderStage,
@@ -39,8 +40,8 @@ class SyncChromeStage(generic_stages.BuilderStage,
   def HandleSkip(self):
     """Set run.attrs.chrome_version to chrome version in buildroot now."""
     self._run.attrs.chrome_version = self._run.DetermineChromeVersion()
-    cros_build_lib.Debug('Existing chrome version is %s.',
-                         self._run.attrs.chrome_version)
+    logging.debug('Existing chrome version is %s.',
+                  self._run.attrs.chrome_version)
     self._WriteChromeVersionToMetadata()
     super(SyncChromeStage, self).HandleSkip()
 
@@ -55,15 +56,13 @@ class SyncChromeStage(generic_stages.BuilderStage,
       if (self._chrome_rev == constants.CHROME_REV_SPEC and
           self._run.options.chrome_version):
         self.chrome_version = self._run.options.chrome_version
-        cros_build_lib.Info(
-            'Using chrome version from options.chrome_version: %s',
-            self.chrome_version)
+        logging.info('Using chrome version from options.chrome_version: %s',
+                     self.chrome_version)
       else:
         self.chrome_version = self._GetChromeVersionFromMetadata()
         if self.chrome_version:
-          cros_build_lib.Info(
-              'Using chrome version from the metadata dictionary: %s',
-              self.chrome_version)
+          logging.info('Using chrome version from the metadata dictionary: %s',
+                       self.chrome_version)
 
       # Perform chrome uprev.
       chrome_atom_to_build = None
@@ -89,7 +88,7 @@ class SyncChromeStage(generic_stages.BuilderStage,
     if (self._chrome_rev and not chrome_atom_to_build and
         self._run.options.buildbot and
         self._run.config.build_type == constants.CHROME_PFQ_TYPE):
-      cros_build_lib.Info('Chrome already uprevved')
+      logging.info('Chrome already uprevved')
       sys.exit(0)
 
   def _WriteChromeVersionToMetadata(self):
@@ -149,7 +148,7 @@ class ChromeSDKStage(generic_stages.BoardSpecificBuilderStage,
     extra_env = {}
     if self._run.config.useflags:
       extra_env['USE'] = ' '.join(self._run.config.useflags)
-    in_chroot_path = git.ReinterpretPathForChroot(self.archive_path)
+    in_chroot_path = path_util.ToChrootPath(self.archive_path)
     cmd = ['cros_generate_sysroot', '--out-dir', in_chroot_path, '--board',
            self._current_board, '--package', constants.CHROME_CP]
     cros_build_lib.RunCommand(cmd, cwd=self._build_root, enter_chroot=True,
@@ -251,7 +250,7 @@ class ChromeLKGMSyncStage(sync_stages.SyncStage):
     # subclasses) is used later in the flow.
     manifest_manager = manifest_version.BuildSpecsManager(
         source_repo=self.repo,
-        manifest_repo=self._GetManifestVersionsRepoUrl(read_only=False),
+        manifest_repo=self._GetManifestVersionsRepoUrl(),
         build_names=self._run.GetBuilderIds(),
         incr_type='build',
         force=False,

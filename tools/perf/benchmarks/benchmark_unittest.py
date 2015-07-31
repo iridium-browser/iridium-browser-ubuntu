@@ -5,7 +5,6 @@
 """For all the benchmarks that set options, test that the options are valid."""
 
 from collections import defaultdict
-import logging
 import os
 import unittest
 
@@ -63,7 +62,8 @@ def _AddBenchmarkOptionsTests(suite):
   suite.addTest(TestNoBenchmarkNamesDuplication())
 
 
-def load_tests(_, _2, _3):
+def load_tests(loader, standard_tests, pattern):
+  del loader, standard_tests, pattern  # unused
   suite = progress_reporter.TestSuite()
   _AddBenchmarkOptionsTests(suite)
   return suite

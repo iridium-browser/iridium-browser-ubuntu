@@ -25,6 +25,7 @@
         'usb_descriptors.h',
         'usb_device_impl.cc',
         'usb_device_impl.h',
+        'usb_device.cc',
         'usb_device.h',
         'usb_device_filter.cc',
         'usb_device_filter.h',
@@ -75,6 +76,25 @@
           ],
         }],
       ]
+    },
+    {
+      'target_name': 'device_usb_mocks',
+      'type': 'static_library',
+      'include_dirs': [
+        '../..',
+      ],
+      'dependencies': [
+        '../../testing/gmock.gyp:gmock',
+        'device_usb',
+      ],
+      'sources': [
+        'mock_usb_device.cc',
+        'mock_usb_device.h',
+        'mock_usb_device_handle.cc',
+        'mock_usb_device_handle.h',
+        'mock_usb_service.cc',
+        'mock_usb_service.h',
+      ],
     },
   ],
 }

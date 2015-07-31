@@ -37,6 +37,7 @@
 #include "core/dom/ChildListMutationScope.h"
 #include "core/dom/ChildNodeList.h"
 #include "core/dom/DOMImplementation.h"
+#include "core/dom/DOMNodeIds.h"
 #include "core/dom/Document.h"
 #include "core/dom/DocumentFragment.h"
 #include "core/dom/DocumentMarkerController.h"
@@ -45,18 +46,18 @@
 #include "core/dom/ElementRareData.h"
 #include "core/dom/ElementTraversal.h"
 #include "core/dom/ExceptionCode.h"
+#include "core/dom/LayoutTreeBuilderTraversal.h"
 #include "core/dom/LiveNodeList.h"
 #include "core/dom/NodeRareData.h"
-#include "core/dom/NodeRenderingTraversal.h"
 #include "core/dom/NodeTraversal.h"
 #include "core/dom/ProcessingInstruction.h"
 #include "core/dom/Range.h"
 #include "core/dom/StaticNodeList.h"
+#include "core/dom/StyleEngine.h"
 #include "core/dom/TemplateContentDocumentFragment.h"
 #include "core/dom/Text.h"
 #include "core/dom/TreeScopeAdopter.h"
 #include "core/dom/UserActionElementSet.h"
-#include "core/dom/WeakNodeMap.h"
 #include "core/dom/shadow/ComposedTreeTraversal.h"
 #include "core/dom/shadow/ElementShadow.h"
 #include "core/dom/shadow/InsertionPoint.h"
@@ -307,7 +308,7 @@ Node::~Node()
         m_treeScope->guardDeref();
 
     if (getFlag(HasWeakReferencesFlag))
-        WeakNodeMap::notifyNodeDestroyed(this);
+        WeakNodeMap::notifyObjectDestroyed(this);
 
     // clearEventTargetData() must be always done,
     // or eventTargetDataMap() may keep a raw pointer to a deleted object.
@@ -371,12 +372,12 @@ void Node::clearRareData()
     ASSERT(hasRareData());
     ASSERT(!transientMutationObserverRegistry() || transientMutationObserverRegistry()->isEmpty());
 
-    LayoutObject* renderer = m_data.m_rareData->layoutObject();
+    LayoutObject* layoutObject = m_data.m_rareData->layoutObject();
     if (isElementNode())
         delete static_cast<ElementRareData*>(m_data.m_rareData);
     else
         delete static_cast<NodeRareData*>(m_data.m_rareData);
-    m_data.m_layoutObject = renderer;
+    m_data.m_layoutObject = layoutObject;
     clearFlag(HasRareDataFlag);
 }
 #endif
@@ -542,13 +543,13 @@ const AtomicString& Node::namespaceURI() const
 
 bool Node::isContentEditable(UserSelectAllTreatment treatment)
 {
-    document().updateRenderTreeIfNeeded();
+    document().updateLayoutTreeIfNeeded();
     return hasEditableStyle(Editable, treatment);
 }
 
 bool Node::isContentRichlyEditable()
 {
-    document().updateRenderTreeIfNeeded();
+    document().updateLayoutTreeIfNeeded();
     return hasEditableStyle(RichlyEditable, UserSelectAllIsAlwaysNonEditable);
 }
 
@@ -592,9 +593,7 @@ bool Node::isEditableToAccessibility(EditableLevel editableLevel) const
     if (editableLevel == RichlyEditable)
         return false;
 
-    ASSERT(document().settings() && document().settings()->accessibilityEnabled());
-    ASSERT(document().existingAXObjectCache());
-
+    // FIXME(dmazzoni): support ScopedAXObjectCache (crbug/489851).
     if (AXObjectCache* cache = document().existingAXObjectCache())
         return cache->rootAXEditableElement(this);
 
@@ -603,14 +602,14 @@ bool Node::isEditableToAccessibility(EditableLevel editableLevel) const
 
 LayoutBox* Node::layoutBox() const
 {
-    LayoutObject* renderer = this->layoutObject();
-    return renderer && renderer->isBox() ? toLayoutBox(renderer) : nullptr;
+    LayoutObject* layoutObject = this->layoutObject();
+    return layoutObject && layoutObject->isBox() ? toLayoutBox(layoutObject) : nullptr;
 }
 
 LayoutBoxModelObject* Node::layoutBoxModelObject() const
 {
-    LayoutObject* renderer = this->layoutObject();
-    return renderer && renderer->isBoxModelObject() ? toLayoutBoxModelObject(renderer) : nullptr;
+    LayoutObject* layoutObject = this->layoutObject();
+    return layoutObject && layoutObject->isBoxModelObject() ? toLayoutBoxModelObject(layoutObject) : nullptr;
 }
 
 LayoutRect Node::boundingBox() const
@@ -622,7 +621,7 @@ LayoutRect Node::boundingBox() const
 
 bool Node::hasNonEmptyBoundingBox() const
 {
-    // Before calling absoluteRects, check for the common case where the renderer
+    // Before calling absoluteRects, check for the common case where the layoutObject
     // is non-empty, since this is a faster check and almost always returns true.
     LayoutBoxModelObject* box = layoutBoxModelObject();
     if (!box)
@@ -652,11 +651,11 @@ inline static ShadowRoot* oldestShadowRootFor(const Node* node)
 }
 #endif
 
-inline static Node& rootInTreeOfTrees(Node& node)
+inline static Node& rootInTreeOfTrees(const Node& node)
 {
     if (node.inDocument())
         return node.document();
-    Node* root = &node;
+    Node* root = const_cast<Node*>(&node);
     while (Node* host = root->shadowHost())
         root = host;
     while (Node* ancestor = root->parentNode())
@@ -664,6 +663,13 @@ inline static Node& rootInTreeOfTrees(Node& node)
     ASSERT(!root->shadowHost());
     return *root;
 }
+
+#if ENABLE(ASSERT)
+bool Node::needsDistributionRecalc() const
+{
+    return rootInTreeOfTrees(*this).childNeedsDistributionRecalc();
+}
+#endif
 
 void Node::updateDistribution()
 {
@@ -707,14 +713,14 @@ void Node::markAncestorsWithChildNeedsStyleInvalidation()
 {
     for (Node* node = parentOrShadowHostNode(); node && !node->childNeedsStyleInvalidation(); node = node->parentOrShadowHostNode())
         node->setChildNeedsStyleInvalidation();
-    document().scheduleRenderTreeUpdateIfNeeded();
+    document().scheduleLayoutTreeUpdateIfNeeded();
 }
 
 void Node::markAncestorsWithChildNeedsDistributionRecalc()
 {
     for (Node* node = this; node && !node->childNeedsDistributionRecalc(); node = node->parentOrShadowHostNode())
         node->setChildNeedsDistributionRecalc();
-    document().scheduleRenderTreeUpdateIfNeeded();
+    document().scheduleLayoutTreeUpdateIfNeeded();
 }
 
 inline void Node::setStyleChange(StyleChangeType changeType)
@@ -726,7 +732,7 @@ void Node::markAncestorsWithChildNeedsStyleRecalc()
 {
     for (ContainerNode* p = parentOrShadowHostNode(); p && !p->childNeedsStyleRecalc(); p = p->parentOrShadowHostNode())
         p->setChildNeedsStyleRecalc();
-    document().scheduleRenderTreeUpdateIfNeeded();
+    document().scheduleLayoutTreeUpdateIfNeeded();
     document().incStyleVersion();
 }
 
@@ -739,6 +745,7 @@ void Node::setNeedsStyleRecalc(StyleChangeType changeType, const StyleChangeReas
     TRACE_EVENT_INSTANT1(
         TRACE_DISABLED_BY_DEFAULT("devtools.timeline.invalidationTracking"),
         "StyleRecalcInvalidationTracking",
+        TRACE_EVENT_SCOPE_THREAD,
         "data",
         InspectorStyleRecalcInvalidationTrackingEvent::data(this, reason));
 
@@ -782,7 +789,7 @@ bool Node::shouldHaveFocusAppearance() const
 bool Node::isInert() const
 {
     const HTMLDialogElement* dialog = document().activeModalDialog();
-    if (dialog && this != document() && !NodeRenderingTraversal::contains(*dialog, *this))
+    if (dialog && this != document() && (!canParticipateInComposedTree() || !ComposedTreeTraversal::containsIncludingPseudoElement(*dialog, *this)))
         return true;
     return document().ownerElement() && document().ownerElement()->isInert();
 }
@@ -973,8 +980,7 @@ void Node::detach(const AttachContext& context)
     setStyleChange(NeedsReattachStyleChange);
     setChildNeedsStyleRecalc();
 
-    if (StyleResolver* resolver = document().styleResolver())
-        resolver->ruleFeatureSet().styleInvalidator().clearInvalidation(*this);
+    document().styleEngine().styleInvalidator().clearInvalidation(*this);
     clearChildNeedsStyleInvalidation();
     clearNeedsStyleInvalidation();
 
@@ -1807,7 +1813,7 @@ void Node::showTreeForThisAcrossFrame() const
 
 Element* Node::enclosingLinkEventParentOrSelf()
 {
-    for (Node* node = this; node; node = NodeRenderingTraversal::parent(*node)) {
+    for (Node* node = this; node; node = ComposedTreeTraversal::parent(*node)) {
         // For imagemaps, the enclosing link node is the associated area element not the image itself.
         // So we don't let images be the enclosingLinkNode, even though isLink sometimes returns true
         // for them.
@@ -2202,26 +2208,26 @@ void Node::defaultEventHandler(Event* event)
             if (enclosingLinkEventParentOrSelf())
                 return;
 
-            // Avoid that canBeScrolledAndHasScrollableArea changes render tree
+            // Avoid that canBeScrolledAndHasScrollableArea changes layout tree
             // structure.
             // FIXME: We should avoid synchronous layout if possible. We can
             // remove this synchronous layout if we avoid synchronous layout in
             // LayoutTextControlSingleLine::scrollHeight
             document().updateLayoutIgnorePendingStylesheets();
-            LayoutObject* renderer = this->layoutObject();
-            while (renderer && (!renderer->isBox() || !toLayoutBox(renderer)->canBeScrolledAndHasScrollableArea()))
-                renderer = renderer->parent();
+            LayoutObject* layoutObject = this->layoutObject();
+            while (layoutObject && (!layoutObject->isBox() || !toLayoutBox(layoutObject)->canBeScrolledAndHasScrollableArea()))
+                layoutObject = layoutObject->parent();
 
-            if (renderer) {
+            if (layoutObject) {
                 if (LocalFrame* frame = document().frame())
-                    frame->eventHandler().startPanScrolling(renderer);
+                    frame->eventHandler().startPanScrolling(layoutObject);
             }
         }
 #endif
     } else if ((eventType == EventTypeNames::wheel || eventType == EventTypeNames::mousewheel) && event->hasInterface(EventNames::WheelEvent)) {
         WheelEvent* wheelEvent = toWheelEvent(event);
 
-        // If we don't have a renderer, send the wheel event to the first node we find with a renderer.
+        // If we don't have a layoutObject, send the wheel event to the first node we find with a layoutObject.
         // This is needed for <option> and <optgroup> elements so that <select>s get a wheel scroll.
         Node* startNode = this;
         while (startNode && !startNode->layoutObject())
@@ -2344,7 +2350,7 @@ PassRefPtrWillBeRawPtr<StaticNodeList> Node::getDestinationInsertionPoints()
     for (size_t i = 0; i < insertionPoints.size(); ++i) {
         InsertionPoint* insertionPoint = insertionPoints[i];
         ASSERT(insertionPoint->containingShadowRoot());
-        if (insertionPoint->containingShadowRoot()->type() != ShadowRoot::ClosedShadowRoot)
+        if (insertionPoint->containingShadowRoot()->type() != ShadowRoot::UserAgentShadowRoot)
             filteredInsertionPoints.append(insertionPoint);
     }
     return StaticNodeList::adopt(filteredInsertionPoints);
@@ -2453,7 +2459,7 @@ unsigned Node::lengthOfContents() const
     return 0;
 }
 
-v8::Handle<v8::Object> Node::wrap(v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
+v8::Local<v8::Object> Node::wrap(v8::Isolate* isolate, v8::Local<v8::Object> creationContext)
 {
     // It's possible that no one except for the new wrapper owns this object at
     // this moment, so we have to prevent GC to collect this object until the
@@ -2464,7 +2470,7 @@ v8::Handle<v8::Object> Node::wrap(v8::Handle<v8::Object> creationContext, v8::Is
 
     const WrapperTypeInfo* wrapperType = wrapperTypeInfo();
 
-    v8::Handle<v8::Object> wrapper = V8DOMWrapper::createWrapper(isolate, creationContext, wrapperType, this);
+    v8::Local<v8::Object> wrapper = V8DOMWrapper::createWrapper(isolate, creationContext, wrapperType, this);
     if (UNLIKELY(wrapper.IsEmpty()))
         return wrapper;
 
@@ -2472,7 +2478,7 @@ v8::Handle<v8::Object> Node::wrap(v8::Handle<v8::Object> creationContext, v8::Is
     return associateWithWrapper(isolate, wrapperType, wrapper);
 }
 
-v8::Handle<v8::Object> Node::associateWithWrapper(v8::Isolate* isolate, const WrapperTypeInfo* wrapperType, v8::Handle<v8::Object> wrapper)
+v8::Local<v8::Object> Node::associateWithWrapper(v8::Isolate* isolate, const WrapperTypeInfo* wrapperType, v8::Local<v8::Object> wrapper)
 {
     return V8DOMWrapper::associateObjectWithWrapper(isolate, this, wrapperType, wrapper);
 }
@@ -2485,18 +2491,24 @@ void showNode(const blink::Node* node)
 {
     if (node)
         node->showNode("");
+    else
+        fprintf(stderr, "Cannot showNode for (nil)\n");
 }
 
 void showTree(const blink::Node* node)
 {
     if (node)
         node->showTreeForThis();
+    else
+        fprintf(stderr, "Cannot showTree for (nil)\n");
 }
 
 void showNodePath(const blink::Node* node)
 {
     if (node)
         node->showNodePathForThis();
+    else
+        fprintf(stderr, "Cannot showNodePath for (nil)\n");
 }
 
 #endif

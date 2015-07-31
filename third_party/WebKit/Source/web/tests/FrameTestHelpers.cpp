@@ -40,6 +40,7 @@
 #include "public/platform/WebURLRequest.h"
 #include "public/platform/WebURLResponse.h"
 #include "public/platform/WebUnitTestSupport.h"
+#include "public/web/WebRemoteFrame.h"
 #include "public/web/WebSettings.h"
 #include "public/web/WebViewClient.h"
 #include "web/WebLocalFrameImpl.h"
@@ -83,7 +84,7 @@ public:
         if (m_client->isLoading())
             Platform::current()->currentThread()->postTask(FROM_HERE, new ServeAsyncRequestsTask(m_client));
         else
-            Platform::current()->currentThread()->exitRunLoop();
+            Platform::current()->unitTestSupport()->exitRunLoop();
     }
 
 private:
@@ -93,7 +94,7 @@ private:
 void pumpPendingRequests(WebFrame* frame)
 {
     Platform::current()->currentThread()->postTask(FROM_HERE, new ServeAsyncRequestsTask(testClientForFrame(frame)));
-    Platform::current()->currentThread()->enterRunLoop();
+    Platform::current()->unitTestSupport()->enterRunLoop();
 }
 
 class LoadTask : public WebThread::Task {
@@ -270,7 +271,7 @@ WebViewImpl* WebViewHelper::initializeAndLoad(const std::string& url, bool enabl
 void WebViewHelper::reset()
 {
     if (m_webView) {
-        ASSERT(!testClientForFrame(m_webView->mainFrame())->isLoading());
+        ASSERT(m_webView->mainFrame()->isWebRemoteFrame() || !testClientForFrame(m_webView->mainFrame())->isLoading());
         m_webView->close();
         m_webView = 0;
     }
@@ -318,6 +319,18 @@ void TestWebFrameClient::waitForLoadToComplete()
 
         Platform::current()->yieldCurrentThread();
     }
+}
+
+TestWebRemoteFrameClient::TestWebRemoteFrameClient()
+    : m_frame(WebRemoteFrame::create(this))
+{
+}
+
+void TestWebRemoteFrameClient::frameDetached()
+{
+    if (m_frame->parent())
+        m_frame->parent()->removeChild(m_frame);
+    m_frame->close();
 }
 
 void TestWebViewClient::initializeLayerTreeView()

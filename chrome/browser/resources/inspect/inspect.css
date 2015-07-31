@@ -2,12 +2,15 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file. */
 
+* {
+  box-sizing: border-box;
+}
+
 body {
   color: rgb(48, 57, 66);
   font-size: 13px;
   margin: 0;
   min-width: 47em;
-  padding: 20px 20px 65px 0;
 }
 
 .hidden {
@@ -20,7 +23,7 @@ img {
   padding-left: 2px;
   padding-right: 5px;
   vertical-align: top;
-  width: 16px;
+  width: 23px;
 }
 
 #container {
@@ -29,6 +32,7 @@ img {
 }
 
 #navigation {
+  padding-top: 20px;
   width: 150px;
 }
 
@@ -70,14 +74,19 @@ img {
   color: #999;
 }
 
+#content > div {
+  padding: 0 20px 65px 0;
+}
 #content > div:not(.selected) {
   display: none;
 }
 
 .content-header {
+  background: linear-gradient(white, white 40%, rgba(255, 255, 255, 0.92));
   border-bottom: 1px solid #eee;
   font-size: 150%;
-  padding-bottom: 10px;
+  padding: 20px 0 10px 0;
+  z-index: 1;
 }
 
 #devices-help {
@@ -121,11 +130,6 @@ img {
   background-color: rgb(224, 32, 32);
 }
 
-.port-icon.connected {
-  -webkit-transform: scale(1.2);
-  background-color: rgb(0, 255, 0);
-}
-
 .port-icon.transient {
   -webkit-transform: scale(1.2);
   background-color: orange;
@@ -140,7 +144,7 @@ img {
   align-items: center;
   display: flex;
   flex-flow: row wrap;
-  min-height: 23px;
+  min-height: 33px;
   padding-top: 10px;
 }
 
@@ -278,18 +282,6 @@ img {
   margin-left: 15px;
 }
 
-#port-forwarding-overlay {
-  -webkit-box-align: center;
-  -webkit-box-pack: center;
-  background-color: rgba(255, 255, 255, 0.75);
-  bottom: 0;
-  display: -webkit-box;
-  left: 0;
-  position: absolute;
-  right: 0;
-  top: 0;
-}
-
 .warning {
   background-image: -webkit-image-set(url(chrome://theme/IDR_WARNING) 1x,
                                       url(chrome://theme/IDR_WARNING@2x) 2x);
@@ -300,17 +292,22 @@ img {
   padding-left: 25px;
 }
 
-#port-forwarding-overlay:not(.open) {
-  display: none;
+#port-forwarding-config::backdrop {
+  background-color: rgba(255, 255, 255, 0.75);
 }
 
 #port-forwarding-config {
   background: white;
+  border: 0;
   border-radius: 3px;
   box-shadow: 0 4px 23px 5px rgba(0, 0, 0, 0.2), 0 2px 6px rgba(0,0,0,0.15);
   color: #333;
   padding: 17px 17px 12px;
   position: relative;
+}
+
+#port-forwarding-enable {
+  vertical-align: middle;
 }
 
 .close-button {
@@ -408,4 +405,21 @@ img {
 
 #port-forwarding-config-buttons > label {
   flex-grow: 1
+}
+
+@media (max-width: 47em) {
+  #navigation,
+  #content {
+    overflow: visible;
+  }
+}
+@media (min-width: 47em) {
+  #container {
+    height: 100vh;
+  }
+  #navigation,
+  #content {
+    height: 100vh;
+    overflow: auto;
+  }
 }

@@ -13,8 +13,16 @@
 #include "base/task/cancelable_task_tracker.h"
 #include "base/time/time.h"
 #include "chrome/browser/interstitials/security_interstitial_page.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ssl/ssl_cert_reporter.h"
 #include "net/ssl/ssl_info.h"
 #include "url/gurl.h"
+
+// Constants for the HTTPSErrorReporter Finch experiment
+extern const char kHTTPSErrorReporterFinchExperimentName[];
+extern const char kHTTPSErrorReporterFinchGroupShowPossiblySend[];
+extern const char kHTTPSErrorReporterFinchGroupDontShowDontSend[];
+extern const char kHTTPSErrorReporterFinchParamName[];
 
 #if defined(ENABLE_EXTENSIONS)
 namespace extensions {
@@ -22,7 +30,6 @@ class ExperienceSamplingEvent;
 }
 #endif
 
-class SafeBrowsingUIManager;
 class SSLErrorClassification;
 
 // This class is responsible for showing/hiding the interstitial page that is
@@ -59,18 +66,18 @@ class SSLBlockingPage : public SecurityInterstitialPage {
                   const GURL& request_url,
                   int options_mask,
                   const base::Time& time_triggered,
-                  SafeBrowsingUIManager* safe_browsing_ui_manager,
+                  scoped_ptr<SSLCertReporter> ssl_cert_reporter,
                   const base::Callback<void(bool)>& callback);
 
   // InterstitialPageDelegate method:
   InterstitialPageDelegate::TypeID GetTypeForTesting() const override;
 
-  // Returns true if |options_mask| refers to an overridable SSL error.
-  static bool IsOptionsOverridable(int options_mask);
+  // Returns true if |options_mask| refers to an overridable SSL error and
+  // if SSL error overriding is allowed by policy.
+  static bool IsOverridable(int options_mask, const Profile* const profile);
 
-  // Allows tests to be notified when an invalid cert chain report has
-  // been sent (or not sent).
-  void SetCertificateReportCallbackForTesting(const base::Closure& callback);
+  void SetSSLCertReporterForTesting(
+      scoped_ptr<SSLCertReporter> ssl_cert_reporter);
 
  protected:
   // InterstitialPageDelegate implementation.
@@ -94,9 +101,16 @@ class SSLBlockingPage : public SecurityInterstitialPage {
   std::string GetUmaHistogramPrefix() const;
   std::string GetSamplingEventName() const;
 
-  // Send a report about an invalid certificate to the server. Takes
-  // care of calling certificate_report_callback_for_testing_.
+  // Send a report about an invalid certificate to the server.
   void FinishCertCollection();
+
+  // Check whether a checkbox should be shown on the page that allows
+  // the user to opt in to Safe Browsing extended reporting.
+  bool ShouldShowCertificateReporterCheckbox();
+
+  // Returns true if an certificate report should be sent for the SSL
+  // error for this page.
+  bool ShouldReportCertificateError();
 
   base::Callback<void(bool)> callback_;
 
@@ -122,14 +136,8 @@ class SSLBlockingPage : public SecurityInterstitialPage {
   // calculates all times relative to this.
   const base::Time time_triggered_;
 
-  // For reporting invalid SSL certificates as part of Safe Browsing
-  // Extended Reporting.
-  SafeBrowsingUIManager* safe_browsing_ui_manager_;
-
-  // This callback is run when an extended reporting certificate chain
-  // report has been sent, or when it is decided that it should not be
-  // sent (for example, when in incognito mode).
-  base::Closure certificate_report_callback_for_testing_;
+  // Handles reports of invalid SSL certificates.
+  scoped_ptr<SSLCertReporter> ssl_cert_reporter_;
 
   // Which type of interstitial this is.
   enum SSLInterstitialReason {

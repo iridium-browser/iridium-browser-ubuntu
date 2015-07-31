@@ -32,6 +32,7 @@
 
 #include "core/dom/Document.h"
 #include "core/dom/DocumentParser.h"
+#include "core/dom/WeakIdentifierMap.h"
 #include "core/events/Event.h"
 #include "core/fetch/FetchInitiatorTypeNames.h"
 #include "core/fetch/MemoryCache.h"
@@ -73,7 +74,7 @@ namespace blink {
 
 static bool isArchiveMIMEType(const String& mimeType)
 {
-    return mimeType == "multipart/related";
+    return equalIgnoringCase("multipart/related", mimeType);
 }
 
 DocumentLoader::DocumentLoader(LocalFrame* frame, const ResourceRequest& req, const SubstituteData& substituteData)
@@ -107,7 +108,6 @@ ResourceLoader* DocumentLoader::mainResourceLoader() const
 DocumentLoader::~DocumentLoader()
 {
     ASSERT(!m_frame || !isLoading());
-    static_cast<FrameFetchContext&>(m_fetcher->context()).clearDocumentLoader();
     clearMainResourceHandle();
     m_applicationCacheHost->dispose();
 }
@@ -357,7 +357,7 @@ void DocumentLoader::willSendRequest(ResourceRequest& newRequest, const Resource
 
 static bool canShowMIMEType(const String& mimeType, Page* page)
 {
-    if (blink::Platform::current()->mimeRegistry()->supportsMIMEType(mimeType) == blink::WebMimeRegistry::IsSupported)
+    if (Platform::current()->mimeRegistry()->supportsMIMEType(mimeType) == WebMimeRegistry::IsSupported)
         return true;
     PluginData* pluginData = page->pluginData();
     return !mimeType.isEmpty() && pluginData && pluginData->supportsMimeType(mimeType);
@@ -385,7 +385,7 @@ bool DocumentLoader::shouldContinueForResponse() const
         return false;
 
     // Prevent remote web archives from loading because they can claim to be from any domain and thus avoid cross-domain security checks.
-    if (equalIgnoringCase("multipart/related", m_response.mimeType()) && !SchemeRegistry::shouldTreatURLSchemeAsLocal(m_request.url().protocol()))
+    if (isArchiveMIMEType(m_response.mimeType()) && !SchemeRegistry::shouldTreatURLSchemeAsLocal(m_request.url().protocol()))
         return false;
 
     return true;
@@ -458,17 +458,8 @@ void DocumentLoader::responseReceived(Resource* resource, const ResourceResponse
 
     if (m_response.isHTTP()) {
         int status = m_response.httpStatusCode();
-        // FIXME: Fallback content only works if the parent is in the same processs.
-        if ((status < 200 || status >= 300) && m_frame->owner()) {
-            if (!m_frame->deprecatedLocalOwner()) {
-                ASSERT_NOT_REACHED();
-            } else if (m_frame->deprecatedLocalOwner()->isObjectElement()) {
-                m_frame->deprecatedLocalOwner()->renderFallbackContent();
-                // object elements are no longer rendered after we fallback, so don't
-                // keep trying to process data from their load
-                cancelMainResourceLoad(ResourceError::cancelledError(m_request.url()));
-            }
-        }
+        if ((status < 200 || status >= 300) && m_frame->owner())
+            m_frame->owner()->renderFallbackContent();
     }
 }
 
@@ -562,8 +553,9 @@ void DocumentLoader::detachFromFrame()
     // frame have any loads active, so go ahead and kill all the loads.
     stopLoading();
 
+    m_fetcher->clearContext();
     m_applicationCacheHost->setApplicationCache(0);
-    InspectorInstrumentation::loaderDetachedFromFrame(m_frame, this);
+    WeakIdentifierMap<DocumentLoader>::notifyObjectDestroyed(this);
     m_frame = 0;
 }
 
@@ -748,8 +740,8 @@ PassRefPtrWillBeRawPtr<DocumentWriter> DocumentLoader::createWriterFor(const Doc
 {
     LocalFrame* frame = init.frame();
 
-    if (frame->document())
-        frame->document()->prepareForDestruction();
+    ASSERT(!frame->document() || !frame->document()->isActive());
+    ASSERT(frame->tree().childCount() == 0);
 
     if (!init.shouldReuseDefaultView())
         frame->setDOMWindow(LocalDOMWindow::create(*frame));

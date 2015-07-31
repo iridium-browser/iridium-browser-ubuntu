@@ -26,6 +26,7 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.externalnav.ExternalNavigationDelegateImpl;
 import org.chromium.content.browser.DownloadController;
 import org.chromium.content.browser.DownloadInfo;
 
@@ -536,26 +537,18 @@ public class DownloadManagerService extends BroadcastReceiver implements
                 DownloadInfo info = mPendingAutoOpenDownloads.get(downloadId);
                 switch (status) {
                     case DownloadManager.STATUS_SUCCESSFUL:
-                        try {
-                            mPendingAutoOpenDownloads.remove(downloadId);
-                            if (OMADownloadHandler.OMA_DOWNLOAD_DESCRIPTOR_MIME.equalsIgnoreCase(
-                                    info.getMimeType())) {
-                                mOMADownloadHandler.handleOMADownload(
-                                        info, downloadId);
-                                manager.remove(downloadId);
-                                break;
-                            }
-                            Uri uri = manager.getUriForDownloadedFile(downloadId);
-                            Intent launchIntent = new Intent(Intent.ACTION_VIEW);
-
-                            launchIntent.setDataAndType(
-                                    uri, manager.getMimeTypeForDownloadedFile(downloadId));
-                            launchIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-
-                            mContext.startActivity(launchIntent);
-                        } catch (ActivityNotFoundException e) {
-                            Log.w(TAG, "Activity not found.");
+                        mPendingAutoOpenDownloads.remove(downloadId);
+                        if (OMADownloadHandler.OMA_DOWNLOAD_DESCRIPTOR_MIME.equalsIgnoreCase(
+                                info.getMimeType())) {
+                            mOMADownloadHandler.handleOMADownload(info, downloadId);
+                            break;
                         }
+                        Uri uri = manager.getUriForDownloadedFile(downloadId);
+                        Intent launchIntent = new Intent(Intent.ACTION_VIEW);
+                        launchIntent.setDataAndType(
+                                uri, manager.getMimeTypeForDownloadedFile(downloadId));
+                        launchIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        openIntent(mContext, launchIntent, true);
                         break;
                     case DownloadManager.STATUS_FAILED:
                         mPendingAutoOpenDownloads.remove(downloadId);
@@ -728,5 +721,31 @@ public class DownloadManagerService extends BroadcastReceiver implements
     public static boolean isAttachment(String contentDisposition) {
         return contentDisposition != null
                 && contentDisposition.regionMatches(true, 0, "attachment", 0, 10);
+    }
+
+    /**
+     * Launch the best activity for the given intent. If a default activity is provided,
+     * choose the default one. Otherwise, return the Intent picker if there are more than one
+     * capable activities. If the intent is pdf type, return the platform pdf viewer if
+     * it is available so user don't need to choose it from Intent picker.
+     *
+     * @param context Context of the app.
+     * @param intent Intent to open.
+     * @param allowSelfOpen Whether chrome itself is allowed to open the intent.
+     * @return true if an Intent is launched, or false otherwise.
+     */
+    public static boolean openIntent(Context context, Intent intent, boolean allowSelfOpen) {
+        boolean activityResolved = ExternalNavigationDelegateImpl.resolveIntent(
+                context, intent, allowSelfOpen);
+        if (activityResolved) {
+            try {
+                context.startActivity(intent);
+                return true;
+            } catch (ActivityNotFoundException ex) {
+                Log.d(TAG, "activity not found for " + intent.getType()
+                        + " over " + intent.getData().getScheme(), ex);
+            }
+        }
+        return false;
     }
 }

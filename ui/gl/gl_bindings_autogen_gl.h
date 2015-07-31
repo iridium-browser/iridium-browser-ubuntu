@@ -157,6 +157,17 @@ typedef void(GL_BINDING_CALL* glCompressedTexSubImage2DProc)(GLenum target,
                                                              GLenum format,
                                                              GLsizei imageSize,
                                                              const void* data);
+typedef void(GL_BINDING_CALL* glCompressedTexSubImage3DProc)(GLenum target,
+                                                             GLint level,
+                                                             GLint xoffset,
+                                                             GLint yoffset,
+                                                             GLint zoffset,
+                                                             GLsizei width,
+                                                             GLsizei height,
+                                                             GLsizei depth,
+                                                             GLenum format,
+                                                             GLsizei imageSize,
+                                                             const void* data);
 typedef void(GL_BINDING_CALL* glCopyBufferSubDataProc)(GLenum readTarget,
                                                        GLenum writeTarget,
                                                        GLintptr readOffset,
@@ -497,6 +508,9 @@ typedef void(GL_BINDING_CALL* glGetUniformivProc)(GLuint program,
                                                   GLint* params);
 typedef GLint(GL_BINDING_CALL* glGetUniformLocationProc)(GLuint program,
                                                          const char* name);
+typedef void(GL_BINDING_CALL* glGetUniformuivProc)(GLuint program,
+                                                   GLint location,
+                                                   GLuint* params);
 typedef void(GL_BINDING_CALL* glGetVertexAttribfvProc)(GLuint index,
                                                        GLenum pname,
                                                        GLfloat* params);
@@ -697,6 +711,17 @@ typedef void(GL_BINDING_CALL* glTexSubImage2DProc)(GLenum target,
                                                    GLint yoffset,
                                                    GLsizei width,
                                                    GLsizei height,
+                                                   GLenum format,
+                                                   GLenum type,
+                                                   const void* pixels);
+typedef void(GL_BINDING_CALL* glTexSubImage3DProc)(GLenum target,
+                                                   GLint level,
+                                                   GLint xoffset,
+                                                   GLint yoffset,
+                                                   GLint zoffset,
+                                                   GLsizei width,
+                                                   GLsizei height,
+                                                   GLsizei depth,
                                                    GLenum format,
                                                    GLenum type,
                                                    const void* pixels);
@@ -969,6 +994,7 @@ struct ProcsGL {
   glCompressedTexImage2DProc glCompressedTexImage2DFn;
   glCompressedTexImage3DProc glCompressedTexImage3DFn;
   glCompressedTexSubImage2DProc glCompressedTexSubImage2DFn;
+  glCompressedTexSubImage3DProc glCompressedTexSubImage3DFn;
   glCopyBufferSubDataProc glCopyBufferSubDataFn;
   glCopyTexImage2DProc glCopyTexImage2DFn;
   glCopyTexSubImage2DProc glCopyTexSubImage2DFn;
@@ -1087,6 +1113,7 @@ struct ProcsGL {
   glGetUniformIndicesProc glGetUniformIndicesFn;
   glGetUniformivProc glGetUniformivFn;
   glGetUniformLocationProc glGetUniformLocationFn;
+  glGetUniformuivProc glGetUniformuivFn;
   glGetVertexAttribfvProc glGetVertexAttribfvFn;
   glGetVertexAttribivProc glGetVertexAttribivFn;
   glGetVertexAttribPointervProc glGetVertexAttribPointervFn;
@@ -1160,6 +1187,7 @@ struct ProcsGL {
   glTexStorage2DEXTProc glTexStorage2DEXTFn;
   glTexStorage3DProc glTexStorage3DFn;
   glTexSubImage2DProc glTexSubImage2DFn;
+  glTexSubImage3DProc glTexSubImage3DFn;
   glTransformFeedbackVaryingsProc glTransformFeedbackVaryingsFn;
   glUniform1fProc glUniform1fFn;
   glUniform1fvProc glUniform1fvFn;
@@ -1354,6 +1382,17 @@ class GL_EXPORT GLApi {
                                            GLint yoffset,
                                            GLsizei width,
                                            GLsizei height,
+                                           GLenum format,
+                                           GLsizei imageSize,
+                                           const void* data) = 0;
+  virtual void glCompressedTexSubImage3DFn(GLenum target,
+                                           GLint level,
+                                           GLint xoffset,
+                                           GLint yoffset,
+                                           GLint zoffset,
+                                           GLsizei width,
+                                           GLsizei height,
+                                           GLsizei depth,
                                            GLenum format,
                                            GLsizei imageSize,
                                            const void* data) = 0;
@@ -1642,6 +1681,9 @@ class GL_EXPORT GLApi {
                                 GLint location,
                                 GLint* params) = 0;
   virtual GLint glGetUniformLocationFn(GLuint program, const char* name) = 0;
+  virtual void glGetUniformuivFn(GLuint program,
+                                 GLint location,
+                                 GLuint* params) = 0;
   virtual void glGetVertexAttribfvFn(GLuint index,
                                      GLenum pname,
                                      GLfloat* params) = 0;
@@ -1819,6 +1861,17 @@ class GL_EXPORT GLApi {
                                  GLint yoffset,
                                  GLsizei width,
                                  GLsizei height,
+                                 GLenum format,
+                                 GLenum type,
+                                 const void* pixels) = 0;
+  virtual void glTexSubImage3DFn(GLenum target,
+                                 GLint level,
+                                 GLint xoffset,
+                                 GLint yoffset,
+                                 GLint zoffset,
+                                 GLsizei width,
+                                 GLsizei height,
+                                 GLsizei depth,
                                  GLenum format,
                                  GLenum type,
                                  const void* pixels) = 0;
@@ -2038,6 +2091,8 @@ class GL_EXPORT GLApi {
   ::gfx::g_current_gl_context->glCompressedTexImage3DFn
 #define glCompressedTexSubImage2D \
   ::gfx::g_current_gl_context->glCompressedTexSubImage2DFn
+#define glCompressedTexSubImage3D \
+  ::gfx::g_current_gl_context->glCompressedTexSubImage3DFn
 #define glCopyBufferSubData ::gfx::g_current_gl_context->glCopyBufferSubDataFn
 #define glCopyTexImage2D ::gfx::g_current_gl_context->glCopyTexImage2DFn
 #define glCopyTexSubImage2D ::gfx::g_current_gl_context->glCopyTexSubImage2DFn
@@ -2191,6 +2246,7 @@ class GL_EXPORT GLApi {
 #define glGetUniformIndices ::gfx::g_current_gl_context->glGetUniformIndicesFn
 #define glGetUniformiv ::gfx::g_current_gl_context->glGetUniformivFn
 #define glGetUniformLocation ::gfx::g_current_gl_context->glGetUniformLocationFn
+#define glGetUniformuiv ::gfx::g_current_gl_context->glGetUniformuivFn
 #define glGetVertexAttribfv ::gfx::g_current_gl_context->glGetVertexAttribfvFn
 #define glGetVertexAttribiv ::gfx::g_current_gl_context->glGetVertexAttribivFn
 #define glGetVertexAttribPointerv \
@@ -2279,6 +2335,7 @@ class GL_EXPORT GLApi {
 #define glTexStorage2DEXT ::gfx::g_current_gl_context->glTexStorage2DEXTFn
 #define glTexStorage3D ::gfx::g_current_gl_context->glTexStorage3DFn
 #define glTexSubImage2D ::gfx::g_current_gl_context->glTexSubImage2DFn
+#define glTexSubImage3D ::gfx::g_current_gl_context->glTexSubImage3DFn
 #define glTransformFeedbackVaryings \
   ::gfx::g_current_gl_context->glTransformFeedbackVaryingsFn
 #define glUniform1f ::gfx::g_current_gl_context->glUniform1fFn

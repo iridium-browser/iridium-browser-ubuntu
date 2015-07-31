@@ -15,6 +15,7 @@
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/process/launch.h"
+#include "base/rand_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
@@ -27,7 +28,8 @@
 #include "chrome/browser/interstitials/security_interstitial_metrics_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
-#include "chrome/browser/safe_browsing/ui_manager.h"
+#include "chrome/browser/ssl/certificate_error_report.h"
+#include "chrome/browser/ssl/ssl_cert_reporter.h"
 #include "chrome/browser/ssl/ssl_error_classification.h"
 #include "chrome/browser/ssl/ssl_error_info.h"
 #include "chrome/common/chrome_switches.h"
@@ -35,6 +37,7 @@
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/google/core/browser/google_util.h"
+#include "components/variations/variations_associated_data.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cert_store.h"
 #include "content/public/browser/interstitial_page.h"
@@ -77,6 +80,12 @@ using content::InterstitialPage;
 using content::InterstitialPageDelegate;
 using content::NavigationController;
 using content::NavigationEntry;
+
+// Constants for the HTTPSErrorReporter Finch experiment
+const char kHTTPSErrorReporterFinchExperimentName[] = "ReportCertificateErrors";
+const char kHTTPSErrorReporterFinchGroupShowPossiblySend[] =
+    "ShowAndPossiblySend";
+const char kHTTPSErrorReporterFinchParamName[] = "sendingThreshold";
 
 namespace {
 
@@ -228,26 +237,27 @@ InterstitialPageDelegate::TypeID SSLBlockingPage::kTypeForTesting =
 
 // Note that we always create a navigation entry with SSL errors.
 // No error happening loading a sub-resource triggers an interstitial so far.
-SSLBlockingPage::SSLBlockingPage(
-    content::WebContents* web_contents,
-    int cert_error,
-    const net::SSLInfo& ssl_info,
-    const GURL& request_url,
-    int options_mask,
-    const base::Time& time_triggered,
-    SafeBrowsingUIManager* safe_browsing_ui_manager,
-    const base::Callback<void(bool)>& callback)
+SSLBlockingPage::SSLBlockingPage(content::WebContents* web_contents,
+                                 int cert_error,
+                                 const net::SSLInfo& ssl_info,
+                                 const GURL& request_url,
+                                 int options_mask,
+                                 const base::Time& time_triggered,
+                                 scoped_ptr<SSLCertReporter> ssl_cert_reporter,
+                                 const base::Callback<void(bool)>& callback)
     : SecurityInterstitialPage(web_contents, request_url),
       callback_(callback),
       cert_error_(cert_error),
       ssl_info_(ssl_info),
-      overridable_(IsOptionsOverridable(options_mask)),
+      overridable_(IsOverridable(
+          options_mask,
+          Profile::FromBrowserContext(web_contents->GetBrowserContext()))),
       danger_overridable_(true),
       strict_enforcement_((options_mask & STRICT_ENFORCEMENT) != 0),
       expired_but_previously_allowed_(
           (options_mask & EXPIRED_BUT_PREVIOUSLY_ALLOWED) != 0),
       time_triggered_(time_triggered),
-      safe_browsing_ui_manager_(safe_browsing_ui_manager) {
+      ssl_cert_reporter_(ssl_cert_reporter.Pass()) {
   interstitial_reason_ =
       IsErrorDueToBadClock(time_triggered_, cert_error_) ?
       SSL_REASON_BAD_CLOCK : SSL_REASON_SSL;
@@ -455,11 +465,10 @@ void SSLBlockingPage::PopulateInterstitialStrings(
 
 void SSLBlockingPage::PopulateExtendedReportingOption(
     base::DictionaryValue* load_time_data) {
-  // Only show the checkbox if not off-the-record and if the
-  // command-line option is set.
-  const bool show = !web_contents()->GetBrowserContext()->IsOffTheRecord() &&
-                    base::CommandLine::ForCurrentProcess()->HasSwitch(
-                        switches::kEnableInvalidCertCollection);
+  // Only show the checkbox if not off-the-record and if this client is
+  // part of the respective Finch group, and the feature is not disabled
+  // by policy.
+  const bool show = ShouldShowCertificateReporterCheckbox();
 
   load_time_data->SetBoolean(interstitials::kDisplayCheckBox, show);
   if (!show)
@@ -491,9 +500,9 @@ void SSLBlockingPage::OverrideEntry(NavigationEntry* entry) {
   entry->GetSSL().security_bits = ssl_info_.security_bits;
 }
 
-void SSLBlockingPage::SetCertificateReportCallbackForTesting(
-    const base::Closure& callback) {
-  certificate_report_callback_for_testing_ = callback;
+void SSLBlockingPage::SetSSLCertReporterForTesting(
+    scoped_ptr<SSLCertReporter> ssl_cert_reporter) {
+  ssl_cert_reporter_ = ssl_cert_reporter.Pass();
 }
 
 // This handles the commands sent from the interstitial JavaScript.
@@ -642,14 +651,8 @@ std::string SSLBlockingPage::GetSamplingEventName() const {
 }
 
 void SSLBlockingPage::FinishCertCollection() {
-  base::ScopedClosureRunner scoped_callback(
-      certificate_report_callback_for_testing_);
-
-  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableInvalidCertCollection) ||
-      web_contents()->GetBrowserContext()->IsOffTheRecord()) {
+  if (!ShouldShowCertificateReporterCheckbox())
     return;
-  }
 
   const bool enabled =
       IsPrefEnabled(prefs::kSafeBrowsingExtendedReportingEnabled);
@@ -660,15 +663,61 @@ void SSLBlockingPage::FinishCertCollection() {
   metrics_helper()->RecordUserInteraction(
       SecurityInterstitialMetricsHelper::EXTENDED_REPORTING_IS_ENABLED);
 
-  if (certificate_report_callback_for_testing_.is_null())
-    scoped_callback.Reset(base::Bind(&base::DoNothing));
+  if (ShouldReportCertificateError()) {
+    std::string serialized_report;
+    CertificateErrorReport report(request_url().host(), ssl_info_);
 
-  safe_browsing_ui_manager_->ReportInvalidCertificateChain(
-      request_url().host(), ssl_info_, scoped_callback.Release());
+    if (!report.Serialize(&serialized_report)) {
+      LOG(ERROR) << "Failed to serialize certificate report.";
+      return;
+    }
+
+    ssl_cert_reporter_->ReportInvalidCertificateChain(serialized_report);
+  }
+}
+
+bool SSLBlockingPage::ShouldShowCertificateReporterCheckbox() {
+#if defined(OS_IOS)
+  return false;
+#else
+  // Only show the checkbox iff the user is part of the respective Finch group
+  // and the window is not incognito and the feature is not disabled by policy.
+  const bool in_incognito =
+      web_contents()->GetBrowserContext()->IsOffTheRecord();
+  return base::FieldTrialList::FindFullName(
+             kHTTPSErrorReporterFinchExperimentName) ==
+             kHTTPSErrorReporterFinchGroupShowPossiblySend &&
+         !in_incognito &&
+         IsPrefEnabled(prefs::kSafeBrowsingExtendedReportingOptInAllowed);
+#endif
+}
+
+bool SSLBlockingPage::ShouldReportCertificateError() {
+#if !defined(OS_IOS)
+  DCHECK(ShouldShowCertificateReporterCheckbox());
+  // Even in case the checkbox was shown, we don't send error reports
+  // for all of these users. Check the Finch configuration for a sending
+  // threshold and only send reports in case the threshold isn't exceeded.
+  const std::string param =
+      variations::GetVariationParamValue(kHTTPSErrorReporterFinchExperimentName,
+                                         kHTTPSErrorReporterFinchParamName);
+  if (!param.empty()) {
+    double sendingThreshold;
+    if (base::StringToDouble(param, &sendingThreshold)) {
+      if (sendingThreshold >= 0.0 && sendingThreshold <= 1.0)
+        return base::RandDouble() <= sendingThreshold;
+    }
+  }
+#endif
+  return false;
 }
 
 // static
-bool SSLBlockingPage::IsOptionsOverridable(int options_mask) {
-  return (options_mask & SSLBlockingPage::OVERRIDABLE) &&
-         !(options_mask & SSLBlockingPage::STRICT_ENFORCEMENT);
+bool SSLBlockingPage::IsOverridable(int options_mask,
+                                    const Profile* const profile) {
+  const bool is_overridable =
+      (options_mask & SSLBlockingPage::OVERRIDABLE) &&
+      !(options_mask & SSLBlockingPage::STRICT_ENFORCEMENT) &&
+      profile->GetPrefs()->GetBoolean(prefs::kSSLErrorOverrideAllowed);
+  return is_overridable;
 }

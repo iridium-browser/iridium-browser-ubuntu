@@ -396,8 +396,7 @@ LoginDisplayHostImpl::~LoginDisplayHostImpl() {
   if (login_view_ && login_window_)
     login_window_->RemoveRemovalsObserver(this);
 
-  if (login::LoginScrollIntoViewEnabled())
-    ResetKeyboardOverscrollOverride();
+  ResetKeyboardOverscrollOverride();
 
   views::FocusManager::set_arrow_key_traversal_enabled(false);
   ResetLoginWindowAndView();
@@ -487,8 +486,7 @@ AutoEnrollmentController* LoginDisplayHostImpl::GetAutoEnrollmentController() {
 }
 
 void LoginDisplayHostImpl::StartWizard(const std::string& first_screen_name) {
-  if (login::LoginScrollIntoViewEnabled())
-    DisableKeyboardOverscroll();
+  DisableKeyboardOverscroll();
 
   startup_sound_honors_spoken_feedback_ = false;
   TryToPlayStartupSound();
@@ -535,8 +533,7 @@ AppLaunchController* LoginDisplayHostImpl::GetAppLaunchController() {
 
 void LoginDisplayHostImpl::StartUserAdding(
     const base::Closure& completion_callback) {
-  if (login::LoginScrollIntoViewEnabled())
-    DisableKeyboardOverscroll();
+  DisableKeyboardOverscroll();
 
   restore_path_ = RESTORE_ADD_USER_INTO_SESSION;
   completion_callback_ = completion_callback;
@@ -577,8 +574,7 @@ void LoginDisplayHostImpl::StartUserAdding(
 
 void LoginDisplayHostImpl::StartSignInScreen(
     const LoginScreenContext& context) {
-  if (login::LoginScrollIntoViewEnabled())
-    DisableKeyboardOverscroll();
+  DisableKeyboardOverscroll();
 
   startup_sound_honors_spoken_feedback_ = true;
   TryToPlayStartupSound();
@@ -630,22 +626,6 @@ void LoginDisplayHostImpl::StartSignInScreen(
   SetStatusAreaVisible(true);
   existing_user_controller_->Init(users);
 
-  // Validate user OAuth tokens.
-
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableOAuthTokenHandlers)) {
-    token_handle_util_.reset(
-        new TokenHandleUtil(user_manager::UserManager::Get()));
-    for (auto* user : users) {
-      auto user_id = user->GetUserID();
-      if (token_handle_util_->HasToken(user_id)) {
-        token_handle_util_->CheckToken(
-            user_id, base::Bind(&LoginDisplayHostImpl::OnTokenHandlerChecked,
-                                pointer_factory_.GetWeakPtr()));
-      }
-    }
-  }
-
   // We might be here after a reboot that was triggered after OOBE was complete,
   // so check for auto-enrollment again. This might catch a cached decision from
   // a previous oobe flow, or might start a new check with the server.
@@ -670,16 +650,6 @@ void LoginDisplayHostImpl::StartSignInScreen(
                                "WaitForScreenStateInitialize");
   BootTimesRecorder::Get()->RecordCurrentStats(
       "login-wait-for-signin-state-initialize");
-}
-
-void LoginDisplayHostImpl::OnTokenHandlerChecked(
-    const user_manager::UserID& user_id,
-    TokenHandleUtil::TokenHandleStatus token_status) {
-  if (token_status == TokenHandleUtil::INVALID) {
-    user_manager::UserManager::Get()->SaveUserOAuthStatus(
-        user_id, user_manager::User::OAUTH2_TOKEN_STATUS_INVALID);
-    token_handle_util_->DeleteToken(user_id);
-  }
 }
 
 void LoginDisplayHostImpl::OnPreferencesChanged() {
@@ -896,23 +866,19 @@ void LoginDisplayHostImpl::OnVirtualKeyboardStateChanged(bool activated) {
 
 void LoginDisplayHostImpl::OnKeyboardBoundsChanging(
     const gfx::Rect& new_bounds) {
-  if (new_bounds.IsEmpty() && !keyboard_bounds_.IsEmpty()) {
+  if (new_bounds.IsEmpty()) {
     // Keyboard has been hidden.
     if (GetOobeUI()) {
       GetOobeUI()->GetCoreOobeActor()->ShowControlBar(true);
-      if (login::LoginScrollIntoViewEnabled())
-        GetOobeUI()->GetCoreOobeActor()->SetKeyboardState(false, new_bounds);
+      GetOobeUI()->GetCoreOobeActor()->SetKeyboardState(false, new_bounds);
     }
-  } else if (!new_bounds.IsEmpty() && keyboard_bounds_.IsEmpty()) {
+  } else if (!new_bounds.IsEmpty()) {
     // Keyboard has been shown.
     if (GetOobeUI()) {
       GetOobeUI()->GetCoreOobeActor()->ShowControlBar(false);
-      if (login::LoginScrollIntoViewEnabled())
-        GetOobeUI()->GetCoreOobeActor()->SetKeyboardState(true, new_bounds);
+      GetOobeUI()->GetCoreOobeActor()->SetKeyboardState(true, new_bounds);
     }
   }
-
-  keyboard_bounds_ = new_bounds;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1308,8 +1274,8 @@ void ShowLoginWizard(const std::string& first_screen_name) {
       base::Bind(&OnLanguageSwitchedCallback, base::Passed(data.Pass())));
 
   // Load locale keyboards here. Hardware layout would be automatically enabled.
-  locale_util::SwitchLanguage(
-      locale, true, true /* login_layouts_only */, callback);
+  locale_util::SwitchLanguage(locale, true, true /* login_layouts_only */,
+                              callback, ProfileManager::GetActiveUserProfile());
 }
 
 }  // namespace chromeos

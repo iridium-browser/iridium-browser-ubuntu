@@ -22,6 +22,7 @@
 
 #include "core/page/Page.h"
 #include "core/page/PageLifecycleObserver.h"
+#include "modules/ModulesExport.h"
 #include "platform/Timer.h"
 #include "wtf/PassOwnPtr.h"
 #include "wtf/Vector.h"
@@ -30,8 +31,9 @@ namespace blink {
 
 class LocalFrame;
 class Navigator;
+class UnsignedLongOrUnsignedLongSequence;
 
-class NavigatorVibration final
+class MODULES_EXPORT NavigatorVibration final
     : public NoBaseWillBeGarbageCollectedFinalized<NavigatorVibration>
     , public WillBeHeapSupplement<Page>
     , public PageLifecycleObserver {
@@ -53,6 +55,7 @@ public:
     static bool vibrate(Navigator&, unsigned time);
     static bool vibrate(Navigator&, const VibrationPattern&);
     static NavigatorVibration& from(Page&);
+    static VibrationPattern sanitizeVibrationPattern(const UnsignedLongOrUnsignedLongSequence&);
 
     bool isVibrating() const { return m_isVibrating; }
 

@@ -138,6 +138,30 @@ WebInspector.ServiceWorkerManager.prototype = {
     },
 
     /**
+     * @param {string} registrationId
+     */
+    updateRegistration: function(registrationId)
+    {
+        var registration = this._registrations.get(registrationId);
+        if (!registration)
+            return;
+        this._agent.updateRegistration(registration.scopeURL);
+    },
+
+     /**
+      * @param {string} registrationId
+      * @param {string} data
+      */
+    deliverPushMessage: function(registrationId, data)
+    {
+        var registration = this._registrations.get(registrationId);
+        if (!registration)
+            return;
+        var origin = WebInspector.ParsedURL.splitURLIntoPathComponents(registration.scopeURL)[0];
+        this._agent.deliverPushMessage(origin, registrationId, data);
+    },
+
+    /**
      * @param {string} scope
      */
     _unregister: function(scope)
@@ -167,6 +191,14 @@ WebInspector.ServiceWorkerManager.prototype = {
     inspectWorker: function(versionId)
     {
         this._agent.inspectWorker(versionId);
+    },
+
+    /**
+     * @param {string} versionId
+     */
+    skipWaiting: function(versionId)
+    {
+        this._agent.skipWaiting(versionId);
     },
 
     /**
@@ -445,7 +477,7 @@ WebInspector.ServiceWorkerConnection = function(agent, workerId)
 {
     InspectorBackendClass.Connection.call(this);
     //FIXME: remove resourceTreeModel and others from worker targets
-    this.suppressErrorsForDomains(["Worker", "Page", "CSS", "DOM", "DOMStorage", "Database", "Network", "IndexedDB", "ServiceWorkerCache"]);
+    this.suppressErrorsForDomains(["Worker", "Page", "CSS", "DOM", "DOMStorage", "Database", "Network", "IndexedDB"]);
     this._agent = agent;
     this._workerId = workerId;
 }

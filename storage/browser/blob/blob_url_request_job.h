@@ -16,7 +16,7 @@
 #include "storage/browser/storage_browser_export.h"
 
 namespace base {
-class MessageLoopProxy;
+class SingleThreadTaskRunner;
 }
 
 namespace storage {
@@ -40,7 +40,7 @@ class STORAGE_EXPORT BlobURLRequestJob
                     net::NetworkDelegate* network_delegate,
                     scoped_ptr<BlobDataSnapshot> blob_data,
                     storage::FileSystemContext* file_system_context,
-                    base::MessageLoopProxy* resolving_message_loop_proxy);
+                    base::SingleThreadTaskRunner* resolving_thread_task_runner);
 
   // net::URLRequestJob methods.
   void Start() override;
@@ -60,7 +60,7 @@ class STORAGE_EXPORT BlobURLRequestJob
   // For preparing for read: get the size, apply the range and perform seek.
   void DidStart();
   bool AddItemLength(size_t index, int64 item_length);
-  void CountSize();
+  bool CountSize();
   void DidCountSize(int error);
   void DidGetFileItemLength(size_t index, int64 result);
   void Seek(int64 offset);
@@ -90,13 +90,14 @@ class STORAGE_EXPORT BlobURLRequestJob
   FileStreamReader* GetFileStreamReader(size_t index);
 
   // Creates a FileStreamReader for the item at |index| with additional_offset.
-  void CreateFileStreamReader(size_t index, int64 additional_offset);
+  // If failed, then returns false.
+  bool CreateFileStreamReader(size_t index, int64 additional_offset);
 
   scoped_ptr<BlobDataSnapshot> blob_data_;
 
   // Variables for controlling read from |blob_data_|.
   scoped_refptr<storage::FileSystemContext> file_system_context_;
-  scoped_refptr<base::MessageLoopProxy> file_thread_proxy_;
+  scoped_refptr<base::SingleThreadTaskRunner> file_task_runner_;
   std::vector<int64> item_length_list_;
   int64 total_size_;
   int64 remaining_bytes_;

@@ -6,10 +6,10 @@
 #include "core/paint/FieldsetPainter.h"
 
 #include "core/layout/LayoutFieldset.h"
-#include "core/layout/PaintInfo.h"
 #include "core/paint/BoxDecorationData.h"
 #include "core/paint/BoxPainter.h"
 #include "core/paint/LayoutObjectDrawingRecorder.h"
+#include "core/paint/PaintInfo.h"
 
 namespace blink {
 
@@ -40,9 +40,9 @@ void FieldsetPainter::paintBoxDecorationBackground(const PaintInfo& paintInfo, c
     if (recorder.canUseCachedDrawing())
         return;
 
-    BoxDecorationData boxDecorationData(m_layoutFieldset, paintInfo.context);
+    BoxDecorationData boxDecorationData(m_layoutFieldset);
 
-    if (boxDecorationData.bleedAvoidance() == BackgroundBleedNone)
+    if (boxDecorationData.bleedAvoidance == BackgroundBleedNone)
         BoxPainter::paintBoxShadow(paintInfo, paintRect, m_layoutFieldset.styleRef(), Normal);
     BoxPainter(m_layoutFieldset).paintFillLayers(paintInfo, boxDecorationData.backgroundColor, m_layoutFieldset.style()->backgroundLayers(), paintRect);
     BoxPainter::paintBoxShadow(paintInfo, paintRect, m_layoutFieldset.styleRef(), Inset);

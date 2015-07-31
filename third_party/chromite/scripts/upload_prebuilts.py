@@ -32,6 +32,7 @@ from chromite.cbuildbot import commands
 from chromite.lib import binpkg
 from chromite.lib import commandline
 from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import git
 from chromite.lib import gs
 from chromite.lib import osutils
@@ -184,9 +185,6 @@ def _GsUpload(gs_context, acl, local_file, remote_file):
     acl: The ACL to use for uploading the file.
     local_file: The local file to be uploaded.
     remote_file: The remote location to upload to.
-
-  Returns:
-    Return the arg tuple of two if the upload failed
   """
   CANNED_ACLS = ['public-read', 'private', 'bucket-owner-read',
                  'authenticated-read', 'bucket-owner-full-control',
@@ -196,7 +194,17 @@ def _GsUpload(gs_context, acl, local_file, remote_file):
   else:
     # For private uploads we assume that the overlay board is set up properly
     # and a googlestore_acl.xml is present. Otherwise, this script errors.
-    gs_context.Copy(local_file, remote_file, acl='private')
+    # We set version=0 here to ensure that the ACL is set only once (see
+    # http://b/15883752#comment54).
+    try:
+      gs_context.Copy(local_file, remote_file, version=0)
+    except gs.GSContextPreconditionFailed as ex:
+      # If we received a GSContextPreconditionFailed error, we know that the
+      # file exists now, but we don't know whether our specific update
+      # succeeded. See http://b/15883752#comment62
+      logging.warning(
+          'Assuming upload succeeded despite PreconditionFailed errors: %s', ex)
+
     if acl.endswith('.xml'):
       # Apply the passed in ACL xml file to the uploaded object.
       gs_context.SetACL(remote_file, acl=acl)
@@ -240,7 +248,7 @@ def GenerateUploadDict(base_local_path, base_remote_path, pkgs):
   for pkg in pkgs:
     suffix = pkg['CPV'] + '.tbz2'
     local_path = os.path.join(base_local_path, suffix)
-    assert os.path.exists(local_path)
+    assert os.path.exists(local_path), '%s does not exist' % local_path
     upload_files[local_path] = os.path.join(base_remote_path, suffix)
 
     if pkg.get('DEBUG_SYMBOLS') == 'yes':
@@ -255,12 +263,12 @@ def GenerateUploadDict(base_local_path, base_remote_path, pkgs):
 def GetBoardOverlay(build_path, target):
   """Get the path to the board variant.
 
-   Args:
-     build_path: The path to the root of the build directory
-     target: The target board as a BuildTarget object.
+  Args:
+    build_path: The path to the root of the build directory
+    target: The target board as a BuildTarget object.
 
-   Returns:
-     The last overlay configured for the given board as a string.
+  Returns:
+    The last overlay configured for the given board as a string.
   """
   board = target.board_variant
   overlays = portage_util.FindOverlays(constants.BOTH_OVERLAYS, board,
@@ -433,7 +441,7 @@ class PrebuiltUploader(object):
     uploads = pkg_index.ResolveDuplicateUploads(self._pkg_indexes)
     unmatched_pkgs = self._packages - self._found_packages
     if unmatched_pkgs:
-      cros_build_lib.Warning('unable to match packages: %r' % unmatched_pkgs)
+      logging.warning('unable to match packages: %r' % unmatched_pkgs)
 
     # Write Packages file.
     pkg_index.header['TTL'] = _BINPKG_TTL

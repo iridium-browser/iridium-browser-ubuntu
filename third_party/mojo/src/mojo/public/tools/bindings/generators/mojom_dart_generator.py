@@ -4,8 +4,12 @@
 
 """Generates dart source files from a mojom.Module."""
 
+import os
 import re
+import shutil
+import sys
 
+import mojom.generate.constant_resolver as resolver
 import mojom.generate.generator as generator
 import mojom.generate.module as mojom
 import mojom.generate.pack as pack
@@ -328,8 +332,10 @@ def TranslateConstants(token):
 
   return token
 
-def ExpressionToText(value):
-  return TranslateConstants(value)
+def ExpressionToText(token):
+  if isinstance(token, (mojom.EnumValue, mojom.NamedValue)):
+    return str(token.resolved_value)
+  return TranslateConstants(token)
 
 def GetArrayKind(kind, size = None):
   if size is None:
@@ -351,6 +357,11 @@ def IsPointerArrayKind(kind):
   sub_kind = kind.kind
   return mojom.IsObjectKind(sub_kind)
 
+def GetImportUri(module):
+  elements = module.namespace.split('.')
+  elements.append("%s" % module.name)
+  return os.path.join("mojom", *elements)
+
 class Generator(generator.Generator):
 
   dart_filters = {
@@ -360,7 +371,6 @@ class Generator(generator.Generator):
     'default_value': DartDefaultValue,
     'encode_method': EncodeMethod,
     'expression_to_text': ExpressionToText,
-    'is_handle': mojom.IsNonInterfaceHandleKind,
     'is_map_kind': mojom.IsMapKind,
     'is_nullable_kind': mojom.IsNullableKind,
     'is_pointer_array_kind': IsPointerArrayKind,
@@ -369,32 +379,48 @@ class Generator(generator.Generator):
     'dart_type': DartDeclType,
     'name': GetNameForElement,
     'interface_response_name': GetInterfaceResponseName,
-    'response_struct_from_method': generator.GetResponseStructFromMethod,
-    'struct_from_method': generator.GetStructFromMethod,
   }
 
-  def GetParameters(self):
+  def GetParameters(self, args):
     return {
       "namespace": self.module.namespace,
-      "imports": self.GetImports(),
+      "imports": self.GetImports(args),
       "kinds": self.module.kinds,
       "enums": self.module.enums,
-      "module": self.module,
+      "module": resolver.ResolveConstants(self.module, ExpressionToText),
       "structs": self.GetStructs() + self.GetStructsFromMethods(),
-      "interfaces": self.module.interfaces,
+      "interfaces": self.GetInterfaces(),
       "imported_interfaces": self.GetImportedInterfaces(),
       "imported_from": self.ImportedFrom(),
     }
 
   @UseJinja("dart_templates/module.lib.tmpl", filters=dart_filters)
-  def GenerateLibModule(self):
-    return self.GetParameters()
+  def GenerateLibModule(self, args):
+    return self.GetParameters(args)
 
   def GenerateFiles(self, args):
-    self.Write(self.GenerateLibModule(),
-        self.MatchMojomFilePath("%s.dart" % self.module.name))
+    elements = self.module.namespace.split('.')
+    elements.append("%s.dart" % self.module.name)
+    path = os.path.join("dart-gen", "mojom", *elements)
+    self.Write(self.GenerateLibModule(args), path)
+    link = self.MatchMojomFilePath("%s.dart" % self.module.name)
+    if os.path.exists(os.path.join(self.output_dir, link)):
+      os.unlink(os.path.join(self.output_dir, link))
+    try:
+      if sys.platform == "win32":
+        shutil.copy(os.path.join(self.output_dir, path),
+                    os.path.join(self.output_dir, link))
+      else:
+        os.symlink(os.path.join(self.output_dir, path),
+                   os.path.join(self.output_dir, link))
+    except OSError as e:
+      # Errno 17 is file already exists. If the link fails because file already
+      # exists assume another instance of this script tried to create the same
+      # file and continue on.
+      if e.errno != 17:
+        raise e
 
-  def GetImports(self):
+  def GetImports(self, args):
     used_names = set()
     for each_import in self.module.imports:
       simple_name = each_import["module_name"].split(".")[0]
@@ -410,6 +436,8 @@ class Generator(generator.Generator):
       used_names.add(unique_name)
       each_import["unique_name"] = unique_name + '_mojom'
       counter += 1
+
+      each_import["rebased_path"] = GetImportUri(each_import['module'])
     return self.module.imports
 
   def GetImportedInterfaces(self):

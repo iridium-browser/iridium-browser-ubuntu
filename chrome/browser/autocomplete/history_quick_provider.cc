@@ -8,15 +8,14 @@
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
+#include "base/debug/crash_logging.h"
 #include "base/i18n/break_iterator.h"
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
-#include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/time/time.h"
 #include "chrome/browser/autocomplete/chrome_autocomplete_scheme_classifier.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
 #include "chrome/browser/autocomplete/in_memory_url_index.h"
@@ -26,6 +25,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/crash_keys.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/bookmarks/browser/bookmark_model.h"
@@ -73,16 +73,7 @@ void HistoryQuickProvider::Start(const AutocompleteInput& input,
   // someone unloads the history backend, we'll get inconsistent inline
   // autocomplete behavior here.
   if (in_memory_url_index_) {
-    base::TimeTicks start_time = base::TimeTicks::Now();
     DoAutocomplete();
-    if (input.text().length() < 6) {
-      base::TimeTicks end_time = base::TimeTicks::Now();
-      std::string name = "HistoryQuickProvider.QueryIndexTime." +
-          base::IntToString(input.text().length());
-      base::HistogramBase* counter = base::Histogram::FactoryGet(
-          name, 1, 1000, 50, base::Histogram::kUmaTargetedHistogramFlag);
-      counter->Add(static_cast<int>((end_time - start_time).InMilliseconds()));
-    }
   }
 }
 
@@ -258,7 +249,13 @@ AutocompleteMatch HistoryQuickProvider::QuickMatchToACMatch(
 
   // Set |inline_autocompletion| and |allowed_to_be_default_match| if possible.
   if (history_match.can_inline) {
-    DCHECK(!new_matches.empty());
+    base::debug::ScopedCrashKey crash_info(
+        crash_keys::kBug464926CrashKey,
+        info.url().spec().substr(0, 30) + " " +
+        base::UTF16ToUTF8(autocomplete_input_.text()).substr(0, 20) + " " +
+        base::SizeTToString(history_match.url_matches.size()) + " " +
+        base::SizeTToString(offsets.size()));;
+    CHECK(!new_matches.empty());
     size_t inline_autocomplete_offset = new_matches[0].offset +
         new_matches[0].length;
     // |inline_autocomplete_offset| may be beyond the end of the

@@ -14,6 +14,7 @@
 #include "base/logging.h"
 #include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/chrome_utility_printing_messages.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/cloud_devices/common/cloud_device_description.h"
 #include "components/cloud_devices/common/printer_description.h"
 #include "content/public/browser/browser_thread.h"
@@ -23,6 +24,7 @@
 #include "printing/pdf_render_settings.h"
 #include "printing/pwg_raster_settings.h"
 #include "printing/units.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -37,7 +39,7 @@ class FileHandlers {
   FileHandlers() {}
 
   ~FileHandlers() {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+    DCHECK_CURRENTLY_ON(BrowserThread::FILE);
   }
 
   void Init(base::RefCountedMemory* data);
@@ -72,7 +74,7 @@ class FileHandlers {
 };
 
 void FileHandlers::Init(base::RefCountedMemory* data) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  DCHECK_CURRENTLY_ON(BrowserThread::FILE);
 
   if (!temp_dir_.CreateUniqueTempDir()) {
     return;
@@ -154,7 +156,7 @@ PwgUtilityProcessHostClient::~PwgUtilityProcessHostClient() {
 void PwgUtilityProcessHostClient::Convert(
     base::RefCountedMemory* data,
     const PWGRasterConverter::ResultCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   callback_ = callback;
   CHECK(!files_);
   files_.reset(new FileHandlers());
@@ -184,7 +186,7 @@ bool PwgUtilityProcessHostClient::OnMessageReceived(
 }
 
 void PwgUtilityProcessHostClient::OnProcessStarted() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (!utility_process_host_) {
     RunCallbackOnUIThread(false);
     return;
@@ -200,17 +202,17 @@ void PwgUtilityProcessHostClient::OnProcessStarted() {
 }
 
 void PwgUtilityProcessHostClient::OnSucceeded() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   RunCallback(true);
 }
 
 void PwgUtilityProcessHostClient::OnFailed() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   RunCallback(false);
 }
 
 void PwgUtilityProcessHostClient::OnFilesReadyOnUIThread() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (!files_->IsValid()) {
     RunCallbackOnUIThread(false);
     return;
@@ -221,11 +223,13 @@ void PwgUtilityProcessHostClient::OnFilesReadyOnUIThread() {
 }
 
 void PwgUtilityProcessHostClient::StartProcessOnIOThread() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   utility_process_host_ =
       content::UtilityProcessHost::Create(
           this,
           base::MessageLoop::current()->message_loop_proxy())->AsWeakPtr();
+  utility_process_host_->SetName(l10n_util::GetStringUTF16(
+      IDS_UTILITY_PROCESS_PWG_RASTER_CONVERTOR_NAME));
   utility_process_host_->Send(new ChromeUtilityMsg_StartupPing);
 }
 
@@ -237,7 +241,7 @@ void PwgUtilityProcessHostClient::RunCallback(bool success) {
 }
 
 void PwgUtilityProcessHostClient::RunCallbackOnUIThread(bool success) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (!callback_.is_null()) {
     BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
                             base::Bind(callback_, success,

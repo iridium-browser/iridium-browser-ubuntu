@@ -23,12 +23,18 @@
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/sys_info.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
+#include "base/trace_event/memory_dump_manager.h"
 #include "blink/public/resources/grit/blink_image_resources.h"
 #include "blink/public/resources/grit/blink_resources.h"
+#include "components/mime_util/mime_util.h"
+#include "components/scheduler/child/webthread_impl_for_worker_scheduler.h"
 #include "content/app/resources/grit/content_resources.h"
 #include "content/app/strings/grit/content_strings.h"
+#include "content/child/background_sync/background_sync_provider.h"
+#include "content/child/background_sync/background_sync_provider_thread_proxy.h"
 #include "content/child/bluetooth/web_bluetooth_impl.h"
 #include "content/child/child_thread_impl.h"
 #include "content/child/content_child_helpers.h"
@@ -42,25 +48,26 @@
 #include "content/child/push_messaging/push_provider.h"
 #include "content/child/thread_safe_sender.h"
 #include "content/child/web_discardable_memory_impl.h"
+#include "content/child/web_memory_dump_provider_adapter.h"
 #include "content/child/web_url_loader_impl.h"
+#include "content/child/web_url_request_util.h"
 #include "content/child/websocket_bridge.h"
-#include "content/child/webthread_impl.h"
 #include "content/child/worker_task_runner.h"
 #include "content/public/common/content_client.h"
 #include "net/base/data_url.h"
-#include "net/base/mime_util.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "third_party/WebKit/public/platform/WebConvertableToTraceFormat.h"
 #include "third_party/WebKit/public/platform/WebData.h"
 #include "third_party/WebKit/public/platform/WebFloatPoint.h"
+#include "third_party/WebKit/public/platform/WebMemoryDumpProvider.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/platform/WebWaitableEvent.h"
 #include "third_party/WebKit/public/web/WebSecurityOrigin.h"
 #include "ui/base/layout.h"
 #include "ui/events/gestures/blink/web_gesture_curve_impl.h"
-#include "ui/events/keycodes/dom4/keycode_converter.h"
+#include "ui/events/keycodes/dom/keycode_converter.h"
 
 using blink::WebData;
 using blink::WebFallbackThemeEngine;
@@ -143,9 +150,12 @@ class MemoryUsageCache {
 class ConvertableToTraceFormatWrapper
     : public base::trace_event::ConvertableToTraceFormat {
  public:
+  // We move a reference pointer from |convertable| to |convertable_|,
+  // rather than copying, for thread safety. https://crbug.com/478149
   explicit ConvertableToTraceFormatWrapper(
-      const blink::WebConvertableToTraceFormat& convertable)
-      : convertable_(convertable) {}
+      blink::WebConvertableToTraceFormat& convertable) {
+    convertable_.moveFrom(convertable);
+  }
   void AppendAsTraceFormat(std::string* out) const override {
     *out += convertable_.asTraceFormat().utf8();
   }
@@ -447,6 +457,8 @@ void BlinkPlatformImpl::InternalInit() {
     push_dispatcher_ = ChildThreadImpl::current()->push_dispatcher();
     permission_client_.reset(new PermissionDispatcher(
         ChildThreadImpl::current()->service_registry()));
+    sync_provider_.reset(new BackgroundSyncProvider(
+        ChildThreadImpl::current()->service_registry()));
   }
 
   if (main_thread_task_runner_.get()) {
@@ -483,8 +495,8 @@ WebData BlinkPlatformImpl::parseDataURL(const WebURL& url,
                                         WebString& mimetype_out,
                                         WebString& charset_out) {
   std::string mime_type, char_set, data;
-  if (net::DataURL::Parse(url, &mime_type, &char_set, &data)
-      && net::IsSupportedMimeType(mime_type)) {
+  if (net::DataURL::Parse(url, &mime_type, &char_set, &data) &&
+      mime_util::IsSupportedMimeType(mime_type)) {
     mimetype_out = WebString::fromUTF8(mime_type);
     charset_out = WebString::fromUTF8(char_set);
     return data;
@@ -494,7 +506,7 @@ WebData BlinkPlatformImpl::parseDataURL(const WebURL& url,
 
 WebURLError BlinkPlatformImpl::cancelledError(
     const WebURL& unreachableURL) const {
-  return WebURLLoaderImpl::CreateError(unreachableURL, false, net::ERR_ABORTED);
+  return CreateWebURLError(unreachableURL, false, net::ERR_ABORTED);
 }
 
 bool BlinkPlatformImpl::isReservedIPAddress(
@@ -505,8 +517,21 @@ bool BlinkPlatformImpl::isReservedIPAddress(
   return net::IsIPAddressReserved(address);
 }
 
+bool BlinkPlatformImpl::portAllowed(const blink::WebURL& url) const {
+  GURL gurl = GURL(url);
+  if (!gurl.has_port())
+    return true;
+  int port = gurl.IntPort();
+  if (net::IsPortAllowedByOverride(port))
+    return true;
+  if (gurl.SchemeIs("ftp"))
+    return net::IsPortAllowedByFtp(port);
+  return net::IsPortAllowedByDefault(port);
+}
+
 blink::WebThread* BlinkPlatformImpl::createThread(const char* name) {
-  WebThreadImpl* thread = new WebThreadImpl(name);
+  scheduler::WebThreadImplForWorkerScheduler* thread =
+      new scheduler::WebThreadImplForWorkerScheduler(name);
   thread->TaskRunner()->PostTask(
       FROM_HERE, base::Bind(&BlinkPlatformImpl::UpdateWebThreadTLS,
                             base::Unretained(this), thread));
@@ -575,15 +600,18 @@ const unsigned char* BlinkPlatformImpl::getTraceCategoryEnabledFlag(
   return TRACE_EVENT_API_GET_CATEGORY_GROUP_ENABLED(category_group);
 }
 
-long* BlinkPlatformImpl::getTraceSamplingState(
-    const unsigned thread_bucket) {
+blink::Platform::TraceEventAPIAtomicWord*
+BlinkPlatformImpl::getTraceSamplingState(const unsigned thread_bucket) {
   switch (thread_bucket) {
     case 0:
-      return reinterpret_cast<long*>(&TRACE_EVENT_API_THREAD_BUCKET(0));
+      return reinterpret_cast<blink::Platform::TraceEventAPIAtomicWord*>(
+          &TRACE_EVENT_API_THREAD_BUCKET(0));
     case 1:
-      return reinterpret_cast<long*>(&TRACE_EVENT_API_THREAD_BUCKET(1));
+      return reinterpret_cast<blink::Platform::TraceEventAPIAtomicWord*>(
+          &TRACE_EVENT_API_THREAD_BUCKET(1));
     case 2:
-      return reinterpret_cast<long*>(&TRACE_EVENT_API_THREAD_BUCKET(2));
+      return reinterpret_cast<blink::Platform::TraceEventAPIAtomicWord*>(
+          &TRACE_EVENT_API_THREAD_BUCKET(2));
     default:
       NOTREACHED() << "Unknown thread bucket type.";
   }
@@ -629,7 +657,7 @@ blink::Platform::TraceEventHandle BlinkPlatformImpl::addTraceEvent(
     const char** arg_names,
     const unsigned char* arg_types,
     const unsigned long long* arg_values,
-    const blink::WebConvertableToTraceFormat* convertable_values,
+    blink::WebConvertableToTraceFormat* convertable_values,
     unsigned char flags) {
   scoped_refptr<base::trace_event::ConvertableToTraceFormat>
       convertable_wrappers[2];
@@ -671,6 +699,30 @@ void BlinkPlatformImpl::updateTraceEventDuration(
   memcpy(&traceEventHandle, &handle, sizeof(handle));
   TRACE_EVENT_API_UPDATE_TRACE_EVENT_DURATION(
       category_group_enabled, name, traceEventHandle);
+}
+
+void BlinkPlatformImpl::registerMemoryDumpProvider(
+    blink::WebMemoryDumpProvider* wmdp) {
+  WebMemoryDumpProviderAdapter* wmdp_adapter =
+      new WebMemoryDumpProviderAdapter(wmdp);
+  bool did_insert =
+      memory_dump_providers_.add(wmdp, make_scoped_ptr(wmdp_adapter)).second;
+  if (!did_insert)
+    return;
+  wmdp_adapter->set_is_registered(true);
+  base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
+      wmdp_adapter, base::ThreadTaskRunnerHandle::Get());
+}
+
+void BlinkPlatformImpl::unregisterMemoryDumpProvider(
+    blink::WebMemoryDumpProvider* wmdp) {
+  scoped_ptr<WebMemoryDumpProviderAdapter> wmdp_adapter =
+      memory_dump_providers_.take_and_erase(wmdp);
+  if (!wmdp_adapter)
+    return;
+  base::trace_event::MemoryDumpManager::GetInstance()->UnregisterDumpProvider(
+      wmdp_adapter.get());
+  wmdp_adapter->set_is_registered(false);
 }
 
 namespace {
@@ -915,9 +967,6 @@ const DataResource kDataResources[] = {
     {"InspectorOverlayPage.html",
      IDR_INSPECTOR_OVERLAY_PAGE_HTML,
      ui::SCALE_FACTOR_NONE},
-    {"InjectedScriptCanvasModuleSource.js",
-     IDR_INSPECTOR_INJECTED_SCRIPT_CANVAS_MODULE_SOURCE_JS,
-     ui::SCALE_FACTOR_NONE},
     {"InjectedScriptSource.js",
      IDR_INSPECTOR_INJECTED_SCRIPT_SOURCE_JS,
      ui::SCALE_FACTOR_NONE},
@@ -1084,11 +1133,6 @@ void BlinkPlatformImpl::stopSharedTimer() {
   shared_timer_.Stop();
 }
 
-void BlinkPlatformImpl::callOnMainThread(
-    void (*func)(void*), void* context) {
-  main_thread_task_runner_->PostTask(FROM_HERE, base::Bind(func, context));
-}
-
 blink::WebGestureCurve* BlinkPlatformImpl::createFlingAnimationCurve(
     blink::WebGestureDevice device_source,
     const blink::WebFloatPoint& velocity,
@@ -1160,6 +1204,17 @@ blink::WebPermissionClient* BlinkPlatformImpl::permissionClient() {
       main_thread_task_runner_.get(), permission_client_.get());
 }
 
+blink::WebSyncProvider* BlinkPlatformImpl::backgroundSyncProvider() {
+  if (!sync_provider_.get())
+    return nullptr;
+
+  if (IsMainThread())
+    return sync_provider_.get();
+
+  return BackgroundSyncProviderThreadProxy::GetThreadInstance(
+      main_thread_task_runner_.get(), sync_provider_.get());
+}
+
 WebThemeEngine* BlinkPlatformImpl::themeEngine() {
   return &native_theme_engine_;
 }
@@ -1195,6 +1250,11 @@ long long BlinkPlatformImpl::databaseGetFileSize(
 long long BlinkPlatformImpl::databaseGetSpaceAvailableForOrigin(
     const blink::WebString& origin_identifier) {
   return 0;
+}
+
+bool BlinkPlatformImpl::databaseSetFileSize(
+    const blink::WebString& vfs_file_name, long long size) {
+  return false;
 }
 
 blink::WebString BlinkPlatformImpl::signedPublicKeyAndChallengeString(

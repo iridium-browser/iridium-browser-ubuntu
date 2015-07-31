@@ -139,8 +139,9 @@ void ShelfLayoutManager::AutoHideEventFilter::OnMouseEvent(
 
 void ShelfLayoutManager::AutoHideEventFilter::OnGestureEvent(
     ui::GestureEvent* event) {
-  if (shelf_->IsShelfWindow(static_cast<aura::Window*>(event->target()))) {
-    if (gesture_handler_.ProcessGestureEvent(*event))
+  aura::Window* target_window = static_cast<aura::Window*>(event->target());
+  if (shelf_->IsShelfWindow(target_window)) {
+    if (gesture_handler_.ProcessGestureEvent(*event, target_window))
       event->StopPropagation();
   }
 }
@@ -294,12 +295,20 @@ void ShelfLayoutManager::LayoutShelf() {
     // dimension in the other direction.
     shelf_->shelf()->SetShelfViewBounds(
         target_bounds.shelf_bounds_in_shelf);
+    // Update insets in ShelfWindowTargeter when shelf bounds change.
+    FOR_EACH_OBSERVER(ShelfLayoutManagerObserver, observers_,
+                      WillChangeVisibilityState(visibility_state()));
   }
 }
 
 ShelfVisibilityState ShelfLayoutManager::CalculateShelfVisibility() {
   switch(auto_hide_behavior_) {
     case SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS:
+#if defined(OS_WIN)
+      // Disable shelf auto-hide behavior on screen sides in Metro mode.
+      if (GetAlignment() != SHELF_ALIGNMENT_BOTTOM)
+        return SHELF_VISIBLE;
+#endif
       return SHELF_AUTO_HIDE;
     case SHELF_AUTO_HIDE_BEHAVIOR_NEVER:
       return SHELF_VISIBLE;
@@ -735,7 +744,11 @@ void ShelfLayoutManager::AdjustBoundsBasedOnAlignment(int inset,
 void ShelfLayoutManager::CalculateTargetBounds(
     const State& state,
     TargetBounds* target_bounds) {
-  const gfx::Rect available_bounds(root_window_->bounds());
+  gfx::Rect available_bounds =
+      ScreenUtil::GetShelfDisplayBoundsInScreen(root_window_);
+  available_bounds =
+      ScreenUtil::ConvertRectFromScreen(root_window_, available_bounds);
+
   gfx::Rect status_size(
       shelf_->status_area_widget()->GetWindowBoundsInScreen().size());
   int shelf_width = 0, shelf_height = 0;
@@ -1162,13 +1175,13 @@ void ShelfLayoutManager::UpdateShelfVisibilityAfterLoginUIChange() {
 }
 
 bool ShelfLayoutManager::IsAlignmentLocked() const {
-  SessionStateDelegate* session_state_delegate =
-      Shell::GetInstance()->session_state_delegate();
   if (state_.is_screen_locked)
     return true;
   // The session state becomes active at the start of transitioning to a user
   // session, however the session is considered blocked until the full UI is
   // ready. Exit early to allow for proper layout.
+  SessionStateDelegate* session_state_delegate =
+      Shell::GetInstance()->session_state_delegate();
   if (session_state_delegate->GetSessionState() ==
       SessionStateDelegate::SESSION_STATE_ACTIVE) {
     return false;

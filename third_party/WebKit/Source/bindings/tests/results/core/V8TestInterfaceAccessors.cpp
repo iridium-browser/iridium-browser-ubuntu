@@ -19,7 +19,7 @@
 
 namespace blink {
 
-const WrapperTypeInfo V8TestInterfaceAccessors::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceAccessors::domTemplate, V8TestInterfaceAccessors::refObject, V8TestInterfaceAccessors::derefObject, V8TestInterfaceAccessors::trace, 0, 0, V8TestInterfaceAccessors::installConditionallyEnabledMethods, V8TestInterfaceAccessors::installConditionallyEnabledProperties, "TestInterfaceAccessors", &V8TestInterfaceEmpty::wrapperTypeInfo, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
+const WrapperTypeInfo V8TestInterfaceAccessors::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceAccessors::domTemplate, V8TestInterfaceAccessors::refObject, V8TestInterfaceAccessors::derefObject, V8TestInterfaceAccessors::trace, 0, 0, V8TestInterfaceAccessors::preparePrototypeObject, V8TestInterfaceAccessors::installConditionallyEnabledProperties, "TestInterfaceAccessors", &V8TestInterfaceEmpty::wrapperTypeInfo, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
 
 // This static member must be declared by DEFINE_WRAPPERTYPEINFO in TestInterfaceAccessors.h.
 // For details, see the comment of DEFINE_WRAPPERTYPEINFO in
@@ -133,8 +133,8 @@ static const V8DOMConfiguration::AttributeConfiguration V8TestInterfaceAccessors
 };
 
 static const V8DOMConfiguration::AccessorConfiguration V8TestInterfaceAccessorsAccessors[] = {
-    {"noExposeJSAccessorAttribute", TestInterfaceAccessorsV8Internal::noExposeJSAccessorAttributeAttributeGetterCallback, TestInterfaceAccessorsV8Internal::noExposeJSAccessorAttributeAttributeSetterCallback, 0, 0, 0, static_cast<v8::AccessControl>(v8::DEFAULT), static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::ExposedToAllScripts},
-    {"exposeJSAccessorAttribute", TestInterfaceAccessorsV8Internal::exposeJSAccessorAttributeAttributeGetterCallback, TestInterfaceAccessorsV8Internal::exposeJSAccessorAttributeAttributeSetterCallback, 0, 0, 0, static_cast<v8::AccessControl>(v8::DEFAULT), static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::ExposedToAllScripts},
+    {"noExposeJSAccessorAttribute", TestInterfaceAccessorsV8Internal::noExposeJSAccessorAttributeAttributeGetterCallback, TestInterfaceAccessorsV8Internal::noExposeJSAccessorAttributeAttributeSetterCallback, 0, 0, 0, static_cast<v8::AccessControl>(v8::DEFAULT), static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::ExposedToAllScripts, V8DOMConfiguration::CheckHolder},
+    {"exposeJSAccessorAttribute", TestInterfaceAccessorsV8Internal::exposeJSAccessorAttributeAttributeGetterCallback, TestInterfaceAccessorsV8Internal::exposeJSAccessorAttributeAttributeSetterCallback, 0, 0, 0, static_cast<v8::AccessControl>(v8::DEFAULT), static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::ExposedToAllScripts, V8DOMConfiguration::CheckHolder},
 };
 
 static void installV8TestInterfaceAccessorsTemplate(v8::Local<v8::FunctionTemplate> functionTemplate, v8::Isolate* isolate)

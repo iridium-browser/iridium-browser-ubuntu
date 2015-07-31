@@ -64,7 +64,7 @@ class AutomationApiTest : public ExtensionApiTest {
   }
 
  public:
-  virtual void SetUpInProcessBrowserTestFixture() override {
+  void SetUpInProcessBrowserTestFixture() override {
     ExtensionApiTest::SetUpInProcessBrowserTestFixture();
   }
 };
@@ -200,13 +200,13 @@ IN_PROC_BROWSER_TEST_F(AutomationApiTest, Find) {
       << message_;
 }
 
-// Flaky on Linux only. http://crbug.com/467921
-#if defined(OS_LINUX)
+// Flaky on Linux and Windows. http://crbug.com/467921
+#if defined(OS_LINUX) || defined(OS_WIN)
 #define MAYBE_Mixins DISABLED_Mixins
 #else
 #define MAYBE_Mixins Mixins
 #endif
-IN_PROC_BROWSER_TEST_F(AutomationApiTest, DISABLED_Mixins) {
+IN_PROC_BROWSER_TEST_F(AutomationApiTest, MAYBE_Mixins) {
   StartEmbeddedTestServer();
   ASSERT_TRUE(RunExtensionSubtest("automation/tests/tabs", "mixins.html"))
       << message_;

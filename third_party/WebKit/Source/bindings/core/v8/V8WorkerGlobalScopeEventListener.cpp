@@ -64,12 +64,15 @@ void V8WorkerGlobalScopeEventListener::handleEvent(ScriptState* scriptState, Eve
 
     // Get the V8 wrapper for the event object.
     v8::Local<v8::Value> jsEvent = toV8(event, scriptState->context()->Global(), isolate());
+    if (jsEvent.IsEmpty())
+        return;
 
     invokeEventHandler(scriptState, event, v8::Local<v8::Value>::New(isolate(), jsEvent));
 }
 
 v8::Local<v8::Value> V8WorkerGlobalScopeEventListener::callListenerFunction(ScriptState* scriptState, v8::Local<v8::Value> jsEvent, Event* event)
 {
+    ASSERT(!jsEvent.IsEmpty());
     v8::Local<v8::Function> handlerFunction = getListenerFunction(scriptState);
     v8::Local<v8::Object> receiver = getReceiverObject(scriptState, event);
     if (handlerFunction.IsEmpty() || receiver.IsEmpty())
@@ -79,11 +82,14 @@ v8::Local<v8::Value> V8WorkerGlobalScopeEventListener::callListenerFunction(Scri
     InspectorInstrumentationCookie cookie = InspectorInstrumentation::willCallFunction(scriptState->executionContext(), DevToolsFunctionInfo(handlerFunction));
 
     v8::Local<v8::Value> parameters[1] = { jsEvent };
-    v8::Local<v8::Value> result = V8ScriptRunner::callFunction(handlerFunction, scriptState->executionContext(), receiver, WTF_ARRAY_LENGTH(parameters), parameters, isolate());
+    v8::MaybeLocal<v8::Value> maybeResult = V8ScriptRunner::callFunction(handlerFunction, scriptState->executionContext(), receiver, WTF_ARRAY_LENGTH(parameters), parameters, isolate());
 
     InspectorInstrumentation::didCallFunction(cookie);
-    TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "UpdateCounters", "data", InspectorUpdateCountersEvent::data());
+    TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "UpdateCounters", TRACE_EVENT_SCOPE_THREAD, "data", InspectorUpdateCountersEvent::data());
 
+    v8::Local<v8::Value> result;
+    if (!maybeResult.ToLocal(&result))
+        return v8::Local<v8::Value>();
     return result;
 }
 

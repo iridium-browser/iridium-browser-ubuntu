@@ -11,8 +11,8 @@
     'blink_core_output_dir': '<(SHARED_INTERMEDIATE_DIR)/blink/core',
 
     'generated_webcore_testing_idl_files': [
-      '<(blink_core_output_dir)/InternalRuntimeFlags.idl',
-      '<(blink_core_output_dir)/InternalSettingsGenerated.idl',
+      '<(blink_core_output_dir)/testing/InternalRuntimeFlags.idl',
+      '<(blink_core_output_dir)/testing/InternalSettingsGenerated.idl',
     ],
 
     'generated_core_testing_dictionary_files': [
@@ -115,7 +115,6 @@
       '<(blink_core_output_dir)/InspectorTypeBuilder.cpp',
 
       # Additional .cpp files from the inspector_instrumentation_sources list.
-      '<(blink_core_output_dir)/InspectorCanvasInstrumentationInl.h',
       '<(blink_core_output_dir)/InspectorConsoleInstrumentationInl.h',
       '<(blink_core_output_dir)/InspectorInstrumentationInl.h',
       '<(blink_core_output_dir)/InspectorOverridesInl.h',

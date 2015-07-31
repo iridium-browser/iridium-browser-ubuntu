@@ -38,6 +38,7 @@ class EVENTS_OZONE_EVDEV_EXPORT TouchEventConverterEvdev
   bool HasTouchscreen() const override;
   gfx::Size GetTouchscreenSize() const override;
   int GetTouchPoints() const override;
+  void OnStopped() override;
 
   // Unsafe part of initialization.
   virtual void Initialize(const EventDeviceInfo& info);
@@ -65,6 +66,9 @@ class EVENTS_OZONE_EVDEV_EXPORT TouchEventConverterEvdev
                    const base::TimeDelta& delta);
   void ReportEvents(base::TimeDelta delta);
 
+  void UpdateTrackingId(int slot, int tracking_id);
+  void ReleaseTouches();
+
   // Normalize pressure value to [0, 1].
   float ScalePressure(int32_t value);
 
@@ -78,6 +82,9 @@ class EVENTS_OZONE_EVDEV_EXPORT TouchEventConverterEvdev
 
   // Device has multitouch capability.
   bool has_mt_;
+
+  // Use BTN_LEFT instead of BT_TOUCH.
+  bool quirk_left_mouse_button_ = false;
 
   // Pressure values.
   int pressure_min_;

@@ -31,8 +31,8 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/infobars/core/confirm_infobar_delegate.h"
 #include "components/infobars/core/infobar.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/devtools_agent_host.h"
-#include "content/public/browser/devtools_http_handler.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/render_process_host.h"
@@ -54,7 +54,6 @@
 #include "ui/base/l10n/l10n_util.h"
 
 using content::DevToolsAgentHost;
-using content::DevToolsHttpHandler;
 using content::RenderProcessHost;
 using content::RenderViewHost;
 using content::RenderWidgetHost;
@@ -124,7 +123,7 @@ class ExtensionDevToolsClientHost : public content::DevToolsAgentHostClient,
       PendingRequests;
   PendingRequests pending_requests_;
   infobars::InfoBar* infobar_;
-  OnDetach::Reason detach_reason_;
+  api::debugger::DetachReason detach_reason_;
 
   // Listen to extension unloaded notification.
   ScopedObserver<ExtensionRegistry, ExtensionRegistryObserver>
@@ -311,7 +310,7 @@ ExtensionDevToolsClientHost::ExtensionDevToolsClientHost(
       extension_id_(extension_id),
       last_request_id_(0),
       infobar_(infobar),
-      detach_reason_(OnDetach::REASON_TARGET_CLOSED),
+      detach_reason_(api::debugger::DETACH_REASON_TARGET_CLOSED),
       extension_registry_observer_(this) {
   CopyDebuggee(&debuggee_, debuggee);
 
@@ -361,7 +360,7 @@ void ExtensionDevToolsClientHost::AgentHostClosed(
     DevToolsAgentHost* agent_host, bool replaced_with_another_client) {
   DCHECK(agent_host == agent_host_.get());
   if (replaced_with_another_client)
-    detach_reason_ = OnDetach::REASON_REPLACED_WITH_DEVTOOLS;
+    detach_reason_ = api::debugger::DETACH_REASON_REPLACED_WITH_DEVTOOLS;
   SendDetachedEvent();
   delete this;
 }
@@ -391,7 +390,7 @@ void ExtensionDevToolsClientHost::SendMessageToBackend(
 }
 
 void ExtensionDevToolsClientHost::MarkAsDismissed() {
-  detach_reason_ = OnDetach::REASON_CANCELED_BY_USER;
+  detach_reason_ = api::debugger::DETACH_REASON_CANCELED_BY_USER;
 }
 
 void ExtensionDevToolsClientHost::SendDetachedEvent() {
@@ -581,7 +580,7 @@ bool DebuggerAttachFunction::RunAsync() {
   if (!InitAgentHost())
     return false;
 
-  if (!DevToolsHttpHandler::IsSupportedProtocolVersion(
+  if (!DevToolsAgentHost::IsSupportedProtocolVersion(
           params->required_version)) {
     error_ = ErrorUtils::FormatErrorMessage(
         keys::kProtocolVersionNotSupportedError,
@@ -734,8 +733,11 @@ DebuggerGetTargetsFunction::~DebuggerGetTargetsFunction() {
 }
 
 bool DebuggerGetTargetsFunction::RunAsync() {
-  DevToolsTargetImpl::EnumerateAllTargets(
-      base::Bind(&DebuggerGetTargetsFunction::SendTargetList, this));
+  std::vector<DevToolsTargetImpl*> list = DevToolsTargetImpl::EnumerateAll();
+  content::BrowserThread::PostTask(
+      content::BrowserThread::UI,
+      FROM_HERE,
+      base::Bind(&DebuggerGetTargetsFunction::SendTargetList, this, list));
   return true;
 }
 

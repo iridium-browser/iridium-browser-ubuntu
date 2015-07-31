@@ -38,10 +38,9 @@ WebInspector.FilteredItemSelectionDialog = function(delegate)
 {
     WebInspector.DialogDelegate.call(this);
 
-    this.element = createElement("div");
     this.element.className = "filtered-item-list-dialog";
     this.element.addEventListener("keydown", this._onKeyDown.bind(this), false);
-    this.element.appendChild(WebInspector.View.createStyleElement("sources/filteredItemSelectionDialog.css"));
+    this.element.appendChild(WebInspector.Widget.createStyleElement("sources/filteredItemSelectionDialog.css"));
 
     this._promptElement = this.element.createChild("input", "monospace");
     this._promptElement.addEventListener("input", this._onInput.bind(this), false);
@@ -323,14 +322,13 @@ WebInspector.FilteredItemSelectionDialog.prototype = {
     {
         if (!this._filteredItems.length)
             return;
-        var element = this._viewportControl.renderedElementAt(this._selectedIndexInFiltered);
-        if (element)
-            element.classList.remove("selected");
+        if (this._selectedElement)
+            this._selectedElement.classList.remove("selected");
         this._viewportControl.scrollItemIntoView(index, makeLast);
         this._selectedIndexInFiltered = index;
-        element = this._viewportControl.renderedElementAt(index);
-        if (element)
-            element.classList.add("selected");
+        this._selectedElement = this._viewportControl.renderedElementAt(index);
+        if (this._selectedElement)
+            this._selectedElement.classList.add("selected");
     },
 
     _onClick: function(event)
@@ -375,8 +373,6 @@ WebInspector.FilteredItemSelectionDialog.prototype = {
     {
         var delegateIndex = this._filteredItems[index];
         var element = this._createItemElement(delegateIndex);
-        if (index === this._selectedIndexInFiltered)
-            element.classList.add("selected");
         return new WebInspector.StaticViewportElement(element);
     },
 
@@ -541,7 +537,7 @@ WebInspector.JavaScriptOutlineDialog = function(uiSourceCode, selectItemCallback
 }
 
 /**
- * @param {!WebInspector.View} view
+ * @param {!WebInspector.Widget} view
  * @param {!WebInspector.UISourceCode} uiSourceCode
  * @param {function(number, number)} selectItemCallback
  */
@@ -753,15 +749,18 @@ WebInspector.SelectUISourceCodeDialog.prototype = {
     {
         query = this.rewriteQuery(query);
         var uiSourceCode = this._uiSourceCodes[itemIndex];
-        titleElement.textContent = uiSourceCode.displayName() + (this._queryLineNumberAndColumnNumber || "");
-        subtitleElement.textContent = uiSourceCode.fullDisplayName().trimEnd(100);
 
+        var fullDisplayName = uiSourceCode.fullDisplayName();
         var indexes = [];
-        var score = new WebInspector.FilePathScoreFunction(query).score(uiSourceCode.fullDisplayName(), indexes);
-        var fileNameIndex = subtitleElement.textContent.lastIndexOf("/");
+        var score = new WebInspector.FilePathScoreFunction(query).score(fullDisplayName, indexes);
+        var fileNameIndex = fullDisplayName.lastIndexOf("/");
+
+        titleElement.textContent = uiSourceCode.displayName() + (this._queryLineNumberAndColumnNumber || "");
+        subtitleElement.textContent = fullDisplayName.trimEnd(100);
         var ranges = [];
         for (var i = 0; i < indexes.length; ++i)
             ranges.push({offset: indexes[i], length: 1});
+
         if (indexes[0] > fileNameIndex) {
             for (var i = 0; i < ranges.length; ++i)
                 ranges[i].offset -= fileNameIndex + 1;

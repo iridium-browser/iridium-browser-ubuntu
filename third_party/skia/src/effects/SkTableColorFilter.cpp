@@ -1,3 +1,9 @@
+/*
+* Copyright 2015 Google Inc.
+*
+* Use of this source code is governed by a BSD-style license that can be
+* found in the LICENSE file.
+*/
 
 #include "SkBitmap.h"
 #include "SkTableColorFilter.h"
@@ -195,8 +201,8 @@ static const uint8_t gCountNibBits[] = {
 void SkTable_ColorFilter::flatten(SkWriteBuffer& buffer) const {
     uint8_t storage[5*256];
     int count = gCountNibBits[fFlags & 0xF];
-    size_t size = SkPackBits::Pack8(fStorage, count * 256, storage);
-    SkASSERT(size <= sizeof(storage));
+    size_t size = SkPackBits::Pack8(fStorage, count * 256, storage,
+                                    sizeof(storage));
 
     buffer.write32(fFlags);
     buffer.writeByteArray(storage, size);
@@ -217,7 +223,8 @@ SkFlattenable* SkTable_ColorFilter::CreateProc(SkReadBuffer& buffer) {
     }
 
     uint8_t unpackedStorage[4*256];
-    size_t unpackedSize = SkPackBits::Unpack8(packedStorage, packedSize, unpackedStorage);
+    size_t unpackedSize = SkPackBits::Unpack8(packedStorage, packedSize,
+                              unpackedStorage, sizeof(unpackedStorage));
     // now check that we got the size we expected
     if (!buffer.validate(unpackedSize == count*256)) {
         return NULL;
@@ -340,7 +347,7 @@ public:
 
     const char* name() const override { return "ColorTable"; }
 
-    void getGLProcessorKey(const GrGLCaps&, GrProcessorKeyBuilder*) const override;
+    void getGLProcessorKey(const GrGLSLCaps&, GrProcessorKeyBuilder*) const override;
 
     GrGLFragmentProcessor* createGLInstance() const override;
 
@@ -380,7 +387,7 @@ public:
 
     void setData(const GrGLProgramDataManager&, const GrProcessor&) override;
 
-    static void GenKey(const GrProcessor&, const GrGLCaps&, GrProcessorKeyBuilder* b) {}
+    static void GenKey(const GrProcessor&, const GrGLSLCaps&, GrProcessorKeyBuilder* b) {}
 
 private:
     UniformHandle fRGBAYValuesUni;
@@ -421,7 +428,7 @@ void GLColorTableEffect::emitCode(GrGLFPBuilder* builder,
                                           "yoffsets", &yoffsets);
     static const float kColorScaleFactor = 255.0f / 256.0f;
     static const float kColorOffsetFactor = 1.0f / 512.0f;
-    GrGLFPFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+    GrGLFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
     if (NULL == inputColor) {
         // the input color is solid white (all ones).
         static const float kMaxValue = kColorScaleFactor + kColorOffsetFactor;
@@ -501,7 +508,7 @@ ColorTableEffect::~ColorTableEffect() {
     }
 }
 
-void ColorTableEffect::getGLProcessorKey(const GrGLCaps& caps,
+void ColorTableEffect::getGLProcessorKey(const GrGLSLCaps& caps,
                                          GrProcessorKeyBuilder* b) const {
     GLColorTableEffect::GenKey(*this, caps, b);
 }

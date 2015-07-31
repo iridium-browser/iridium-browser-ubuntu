@@ -200,6 +200,8 @@ class ExtensionFunction
   virtual void SetArgs(const base::ListValue* args);
 
   // Sets a single Value as the results of the function.
+  void SetResult(scoped_ptr<base::Value> result);
+  // As above, but deprecated. TODO(estade): remove.
   void SetResult(base::Value* result);
 
   // Sets multiple Values as the results of the function.
@@ -287,6 +289,8 @@ class ExtensionFunction
   // raw pointer for convenience, since callers usually construct the argument
   // to this by hand.
   ResponseValue OneArgument(base::Value* arg);
+  // Success, a single argument |arg| to pass to caller.
+  ResponseValue OneArgument(scoped_ptr<base::Value> arg);
   // Success, two arguments |arg1| and |arg2| to pass to caller. TAKES
   // OWNERSHIP - raw pointers for convenience, since callers usually construct
   // the argument to this by hand. Note that use of this function may imply you

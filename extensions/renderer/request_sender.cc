@@ -10,7 +10,7 @@
 #include "extensions/renderer/dispatcher.h"
 #include "extensions/renderer/script_context.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
-#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebLocalFrame.h"
 #include "third_party/WebKit/public/web/WebScopedUserGesture.h"
 #include "third_party/WebKit/public/web/WebUserGestureIndicator.h"
 #include "third_party/WebKit/public/web/WebUserGestureToken.h"
@@ -93,11 +93,11 @@ void RequestSender::StartRequest(Source* source,
   }
 
   // TODO(koz): See if we can make this a CHECK.
-  if (!dispatcher_->CheckContextAccessToExtensionAPI(name, context))
+  if (!context->HasAccessOrThrowError(name))
     return;
 
   GURL source_url;
-  if (blink::WebFrame* webframe = context->web_frame())
+  if (blink::WebLocalFrame* webframe = context->web_frame())
     source_url = webframe->document().url();
 
   InsertRequest(request_id, new PendingRequest(name, source,

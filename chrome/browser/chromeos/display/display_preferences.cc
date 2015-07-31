@@ -15,6 +15,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
+#include "base/sys_info.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/common/pref_names.h"
@@ -225,14 +226,15 @@ void StoreDisplayLayoutPref(const ash::DisplayIdPair& pair,
 }
 
 void StoreCurrentDisplayLayoutPrefs() {
+  ash::DisplayManager* display_manager = GetDisplayManager();
   if (!UserCanSaveDisplayPreference() ||
-      GetDisplayManager()->num_connected_displays() < 2) {
+      display_manager->num_connected_displays() < 2) {
     return;
   }
 
-  ash::DisplayIdPair pair = GetDisplayManager()->GetCurrentDisplayIdPair();
+  ash::DisplayIdPair pair = display_manager->GetCurrentDisplayIdPair();
   ash::DisplayLayout display_layout =
-      GetDisplayManager()->layout_store()->GetRegisteredDisplayLayout(pair);
+      display_manager->layout_store()->GetRegisteredDisplayLayout(pair);
   StoreDisplayLayoutPref(pair, display_layout);
 }
 
@@ -350,8 +352,7 @@ void StoreDisplayPrefs() {
 }
 
 void StoreDisplayRotationPrefs(bool rotation_lock) {
-  ash::DisplayManager* display_manager = GetDisplayManager();
-  if (!display_manager->HasInternalDisplay())
+  if (!gfx::Display::HasInternalDisplay())
     return;
 
   PrefService* local_state = g_browser_process->local_state();
@@ -359,7 +360,8 @@ void StoreDisplayRotationPrefs(bool rotation_lock) {
   base::DictionaryValue* pref_data = update.Get();
   pref_data->SetBoolean("lock", rotation_lock);
   gfx::Display::Rotation rotation =
-      display_manager->GetDisplayInfo(gfx::Display::InternalDisplayId())
+      GetDisplayManager()
+          ->GetDisplayInfo(gfx::Display::InternalDisplayId())
           .GetRotation(gfx::Display::ROTATION_SOURCE_ACCELEROMETER);
   pref_data->SetInteger("orientation", static_cast<int>(rotation));
 }

@@ -84,13 +84,13 @@ component("net") {
   include_dirs = []
 
   public_deps = [
+    ":net_quic_proto",
     "//crypto",
     "//crypto:platform",
     "//url",
   ]
   deps = [
     ":net_resources",
-    ":net_quic_proto",
     "//base",
     "//base:prefs",
     "//base/third_party/dynamic_annotations",
@@ -194,11 +194,7 @@ component("net") {
       "cert/ct_objects_extractor_nss.cc",
       "cert/jwk_serializer_nss.cc",
       "cert/scoped_nss_types.h",
-      "cert/test_root_certs_nss.cc",
       "cert/x509_util_nss.cc",
-      "cert/x509_util_nss.h",
-      "ocsp/nss_ocsp.cc",
-      "ocsp/nss_ocsp.h",
       "quic/crypto/aead_base_decrypter_nss.cc",
       "quic/crypto/aead_base_encrypter_nss.cc",
       "quic/crypto/aes_128_gcm_12_decrypter_nss.cc",
@@ -214,31 +210,6 @@ component("net") {
       "socket/ssl_server_socket_nss.cc",
       "socket/ssl_server_socket_nss.h",
     ]
-    if (is_chromeos) {
-      sources -= [
-        "cert/nss_cert_database_chromeos.cc",
-        "cert/nss_cert_database_chromeos.h",
-        "cert/nss_profile_filter_chromeos.cc",
-        "cert/nss_profile_filter_chromeos.h",
-      ]
-    }
-    if (is_linux) {
-      # These are always removed for non-Linux cases below.
-      sources -= [
-        "base/crypto_module_nss.cc",
-        "base/keygen_handler_nss.cc",
-        "cert/cert_database_nss.cc",
-        "cert/nss_cert_database.cc",
-        "cert/nss_cert_database.h",
-        "cert/x509_certificate_nss.cc",
-        "third_party/mozilla_security_manager/nsKeygenHandler.cpp",
-        "third_party/mozilla_security_manager/nsKeygenHandler.h",
-        "third_party/mozilla_security_manager/nsNSSCertificateDB.cpp",
-        "third_party/mozilla_security_manager/nsNSSCertificateDB.h",
-        "third_party/mozilla_security_manager/nsPKCS12Blob.cpp",
-        "third_party/mozilla_security_manager/nsPKCS12Blob.h",
-      ]
-    }
     if (is_ios) {
       # Always removed for !ios below.
       sources -= [
@@ -249,9 +220,11 @@ component("net") {
     if (is_win) {
       sources -= [ "cert/sha256_legacy_support_nss_win.cc" ]
     }
+    if (!use_nss_certs && !is_ios) {
+      sources -= [ "cert/x509_util_nss.h" ]
+    }
   } else {
     sources -= [
-      "base/crypto_module_openssl.cc",
       "cert/ct_log_verifier_openssl.cc",
       "cert/ct_objects_extractor_openssl.cc",
       "cert/jwk_serializer_openssl.cc",
@@ -271,11 +244,12 @@ component("net") {
       "socket/ssl_client_socket_openssl.h",
       "socket/ssl_server_socket_openssl.cc",
       "socket/ssl_server_socket_openssl.h",
-      "socket/ssl_session_cache_openssl.cc",
-      "socket/ssl_session_cache_openssl.h",
       "ssl/openssl_platform_key.h",
+      "ssl/openssl_platform_key_nss.cc",
       "ssl/openssl_ssl_util.cc",
       "ssl/openssl_ssl_util.h",
+      "ssl/ssl_client_session_cache_openssl.cc",
+      "ssl/ssl_client_session_cache_openssl.h",
     ]
     if (is_mac) {
       sources -= [ "ssl/openssl_platform_key_mac.cc" ]
@@ -290,6 +264,7 @@ component("net") {
 
   if (!use_openssl_certs) {
     sources -= [
+      "base/crypto_module_openssl.cc",
       "base/keygen_handler_openssl.cc",
       "base/openssl_private_key_store.h",
       "base/openssl_private_key_store_memory.cc",
@@ -321,7 +296,9 @@ component("net") {
 
   if (is_linux) {
     configs += [ "//build/config/linux:libresolv" ]
-  } else {
+  }
+
+  if (!use_nss_certs) {
     sources -= [
       "base/crypto_module_nss.cc",
       "base/keygen_handler_nss.cc",
@@ -329,6 +306,8 @@ component("net") {
       "cert/nss_cert_database.cc",
       "cert/nss_cert_database.h",
       "cert/x509_certificate_nss.cc",
+      "ssl/client_cert_store_nss.cc",
+      "ssl/client_cert_store_nss.h",
       "third_party/mozilla_security_manager/nsKeygenHandler.cpp",
       "third_party/mozilla_security_manager/nsKeygenHandler.h",
       "third_party/mozilla_security_manager/nsNSSCertificateDB.cpp",
@@ -336,38 +315,37 @@ component("net") {
       "third_party/mozilla_security_manager/nsPKCS12Blob.cpp",
       "third_party/mozilla_security_manager/nsPKCS12Blob.h",
     ]
-
-    if (!is_ios && !use_openssl) {
-      # These files are part of the partial implementation of NSS on iOS so
-      # keep them in that case.
-      sources -= [
-        "cert/test_root_certs_nss.cc",
-        "ocsp/nss_ocsp.cc",
-        "ocsp/nss_ocsp.h",
-      ]
-    }
-  }
-
-  if (!use_nss_certs) {
-    sources -= [
-      "ssl/client_cert_store_nss.cc",
-      "ssl/client_cert_store_nss.h",
-    ]
     if (!is_ios) {
       # These files are part of the partial implementation of NSS on iOS so
       # keep them in that case (even though use_nss_certs is not set).
       sources -= [
         "cert/cert_verify_proc_nss.cc",
         "cert/cert_verify_proc_nss.h",
+        "cert/test_root_certs_nss.cc",
+        "cert/x509_util_nss_certs.cc",
+        "cert_net/nss_ocsp.cc",
+        "cert_net/nss_ocsp.h",
       ]
     }
     if (is_chromeos) {
       # These were already removed on non-ChromeOS.
       sources -= [
+        "cert/nss_cert_database_chromeos.cc",
+        "cert/nss_cert_database_chromeos.h",
+        "cert/nss_profile_filter_chromeos.cc",
+        "cert/nss_profile_filter_chromeos.h",
         "ssl/client_cert_store_chromeos.cc",
         "ssl/client_cert_store_chromeos.h",
       ]
     }
+    if (use_openssl) {
+      sources -= [ "ssl/openssl_platform_key_nss.cc" ]
+    }
+  } else if (use_openssl) {
+    # client_cert_store_nss.c requires NSS_CmpCertChainWCANames from NSS's
+    # libssl, but our bundled copy is not built in OpenSSL ports. Pull that file
+    # in directly.
+    sources += [ "third_party/nss/ssl/cmpcert.c" ]
   }
 
   if (!enable_websockets) {
@@ -460,8 +438,8 @@ component("net") {
   }
 
   if (is_ios) {
-    # Add back some sources that were otherwise filtered out. iOS additionally
-    # doesn't set USE_NSS but needs some of the files.
+    # Add back some sources that were otherwise filtered out. iOS needs some Mac
+    # files.
     set_sources_assignment_filter([])
     sources += [
       "base/net_util_mac.cc",
@@ -469,13 +447,6 @@ component("net") {
       "base/network_change_notifier_mac.cc",
       "base/network_config_watcher_mac.cc",
       "base/platform_mime_util_mac.mm",
-      "cert/cert_verify_proc_nss.cc",
-      "cert/cert_verify_proc_nss.h",
-      "cert/test_root_certs_nss.cc",
-      "cert/x509_util_nss.cc",
-      "cert/x509_util_nss.h",
-      "ocsp/nss_ocsp.cc",
-      "ocsp/nss_ocsp.h",
       "proxy/proxy_resolver_mac.cc",
       "proxy/proxy_server_mac.cc",
     ]
@@ -507,10 +478,7 @@ component("net") {
       "base/platform_mime_util_linux.cc",
     ]
     set_sources_assignment_filter(sources_assignment_filter)
-
-    if (!is_android_webview_build) {
-      deps += [ ":net_jni_headers" ]
-    }
+    deps += [ ":net_jni_headers" ]
   }
 
   if (use_icu_alternatives_on_android) {
@@ -542,6 +510,8 @@ grit("net_resources") {
 }
 
 proto_library("net_quic_proto") {
+  visibility = [ "//net" ]  # Part of the net component.
+
   sources = [
     "quic/proto/cached_network_parameters.proto",
     "quic/proto/source_address_token.proto",
@@ -646,12 +616,12 @@ source_set("test_support") {
     "dns/mock_mdns_socket_factory.h",
     "http/http_transaction_test_util.cc",
     "http/http_transaction_test_util.h",
-    "log/captured_net_log_entry.cc",
-    "log/captured_net_log_entry.h",
-    "log/capturing_net_log.cc",
-    "log/capturing_net_log.h",
-    "log/capturing_net_log_observer.cc",
-    "log/capturing_net_log_observer.h",
+    "log/test_net_log.cc",
+    "log/test_net_log.h",
+    "log/test_net_log_entry.cc",
+    "log/test_net_log_entry.h",
+    "log/test_net_log_util.cc",
+    "log/test_net_log_util.h",
     "proxy/mock_proxy_resolver.cc",
     "proxy/mock_proxy_resolver.h",
     "proxy/mock_proxy_script_fetcher.cc",
@@ -693,14 +663,10 @@ source_set("test_support") {
     "test/url_request/url_request_failed_job.h",
     "test/url_request/url_request_mock_data_job.cc",
     "test/url_request/url_request_mock_data_job.h",
-    "test/url_request/url_request_mock_http_job.cc",
-    "test/url_request/url_request_mock_http_job.h",
     "test/url_request/url_request_slow_download_job.cc",
     "test/url_request/url_request_slow_download_job.h",
     "url_request/test_url_fetcher_factory.cc",
     "url_request/test_url_fetcher_factory.h",
-    "url_request/test_url_request_interceptor.cc",
-    "url_request/test_url_request_interceptor.h",
     "url_request/url_request_test_util.cc",
     "url_request/url_request_test_util.h",
   ]
@@ -750,6 +716,15 @@ source_set("test_support") {
   if (!use_nss_certs) {
     sources -= [ "test/cert_test_util_nss.cc" ]
   }
+
+  if (!disable_file_support) {
+    sources += [
+      "test/url_request/url_request_mock_http_job.cc",
+      "test/url_request/url_request_mock_http_job.h",
+      "url_request/test_url_request_interceptor.cc",
+      "url_request/test_url_request_interceptor.h",
+    ]
+  }
 }
 
 source_set("balsa") {
@@ -770,8 +745,8 @@ source_set("balsa") {
     "tools/balsa/split.cc",
     "tools/balsa/split.h",
     "tools/balsa/string_piece_utils.h",
-    "tools/quic/spdy_utils.cc",
-    "tools/quic/spdy_utils.h",
+    "tools/quic/spdy_balsa_utils.cc",
+    "tools/quic/spdy_balsa_utils.h",
   ]
   deps = [
     ":net",
@@ -864,6 +839,12 @@ if (use_v8_in_net && !is_android) {
       "proxy/mojo_proxy_resolver_factory_impl.h",
       "proxy/mojo_proxy_resolver_impl.cc",
       "proxy/mojo_proxy_resolver_impl.h",
+      "proxy/proxy_resolver_error_observer_mojo.cc",
+      "proxy/proxy_resolver_error_observer_mojo.h",
+    ]
+
+    deps = [
+      ":net_with_v8",
     ]
 
     public_deps = [
@@ -1171,7 +1152,6 @@ if (is_linux) {
       ":balsa",
       ":epoll_server",
       ":net",
-      ":net_quic_proto",
       "//base",
       "//base/third_party/dynamic_annotations",
       "//crypto",
@@ -1204,7 +1184,6 @@ if (is_linux) {
       ":epoll_server",
       ":epoll_quic_tools",
       ":net",
-      ":net_quic_proto",
       ":simple_quic_tools",
       "//base",
       "//third_party/boringssl",
@@ -1278,7 +1257,6 @@ source_set("simple_quic_tools") {
   ]
   deps = [
     ":net",
-    ":net_quic_proto",
     "//base",
     "//base/third_party/dynamic_annotations",
     "//url",
@@ -1303,17 +1281,16 @@ executable("quic_server") {
   ]
   deps = [
     ":net",
-    ":net_quic_proto",
     ":simple_quic_tools",
     "//base",
     "//third_party/boringssl",
+    "//third_party/protobuf:protobuf_lite",
   ]
 }
 
 # TODO(GYP) make this compile on Android, we need some native test deps done.
-# TODO(GYP) Also doesn't work on Windows; dependency on boringssl is wrong.
 # TODO(GYP) Also doesn't work on Mac, need to figure out why not.
-if (!is_android && !is_win && !is_mac) {
+if (!is_android && !is_mac) {
   test("net_unittests") {
     sources = gypi_values.net_test_sources
 
@@ -1322,11 +1299,10 @@ if (!is_android && !is_win && !is_mac) {
     defines = []
 
     deps = [
+      ":balsa",
       ":extras",
       ":http_server",
       ":net",
-      ":net_quic_proto",
-      ":epoll_quic_tools",
       ":simple_quic_tools",
       ":test_support",
       "//base",
@@ -1346,6 +1322,9 @@ if (!is_android && !is_win && !is_mac) {
       "//url",
     ]
 
+    if (is_desktop_linux) {
+      deps += [ ":epoll_quic_tools" ]
+    }
     if (is_linux) {
       sources += gypi_values.net_linux_test_sources
       deps += [
@@ -1373,10 +1352,7 @@ if (!is_android && !is_win && !is_mac) {
         # sense.
         "dns/dns_config_service_posix_unittest.cc",
       ]
-      deps += [
-        ":net_javatests",  # FIXME(brettw)
-        ":net_test_jni_headers",
-      ]
+      deps += [ ":net_test_jni_headers" ]
     }
 
     if (v8_use_external_startup_data) {
@@ -1384,9 +1360,16 @@ if (!is_android && !is_win && !is_mac) {
     }
 
     if (!use_nss_certs) {
-      sources -= [ "ssl/client_cert_store_nss_unittest.cc" ]
+      sources -= [
+        "cert/nss_cert_database_unittest.cc",
+        "ssl/client_cert_store_nss_unittest.cc",
+      ]
       if (is_chromeos) {  # Already removed for all non-ChromeOS builds.
-        sources -= [ "ssl/client_cert_store_chromeos_unittest.cc" ]
+        sources -= [
+          "cert/nss_cert_database_chromeos_unittest.cc",
+          "cert/nss_profile_filter_chromeos_unittest.cc",
+          "ssl/client_cert_store_chromeos_unittest.cc",
+        ]
       }
     }
 
@@ -1396,27 +1379,16 @@ if (!is_android && !is_win && !is_mac) {
       # TODO(bulach): Add equivalent tests when the underlying
       #               functionality is ported to OpenSSL.
       sources -= [
-        "cert/nss_cert_database_unittest.cc",
         "cert/x509_util_nss_unittest.cc",
         "quic/test_tools/crypto_test_utils_nss.cc",
       ]
-      if (is_chromeos) {
-        # These were already removed in the non-ChromeOS case.
-        sources -= [
-          "cert/nss_cert_database_chromeos_unittest.cc",
-          "cert/nss_profile_filter_chromeos_unittest.cc",
-        ]
-      }
     } else {
       sources -= [
         "cert/x509_util_openssl_unittest.cc",
         "quic/test_tools/crypto_test_utils_openssl.cc",
         "socket/ssl_client_socket_openssl_unittest.cc",
-        "socket/ssl_session_cache_openssl_unittest.cc",
+        "ssl/ssl_client_session_cache_openssl_unittest.cc",
       ]
-      if (!is_desktop_linux && !is_chromeos) {
-        sources -= [ "cert/nss_cert_database_unittest.cc" ]
-      }
     }
 
     if (use_kerberos) {
@@ -1433,7 +1405,7 @@ if (!is_android && !is_win && !is_mac) {
     if (use_openssl || (!is_desktop_linux && !is_chromeos && !is_ios)) {
       # Only include this test when on Posix and using NSS for
       # cert verification or on iOS (which also uses NSS for certs).
-      sources -= [ "ocsp/nss_ocsp_unittest.cc" ]
+      sources -= [ "cert_net/nss_ocsp_unittest.cc" ]
     }
 
     if (!use_openssl_certs) {
@@ -1523,6 +1495,7 @@ if (!is_android && !is_win && !is_mac) {
         "proxy/load_state_change_coalescer_unittest.cc",
         "proxy/mojo_proxy_resolver_factory_impl_unittest.cc",
         "proxy/mojo_proxy_resolver_impl_unittest.cc",
+        "proxy/proxy_resolver_error_observer_mojo_unittest.cc",
         "proxy/proxy_resolver_mojo_unittest.cc",
         "proxy/proxy_service_mojo_unittest.cc",
       ]
@@ -1567,6 +1540,7 @@ if (!is_android && !is_win && !is_mac) {
         "spdy/fuzzing/hpack_fuzz_util_test.cc",
 
         # Need TestServer.
+        "cert_net/cert_net_fetcher_impl_unittest.cc",
         "proxy/proxy_script_fetcher_impl_unittest.cc",
         "socket/ssl_client_socket_unittest.cc",
         "url_request/url_fetcher_impl_unittest.cc",

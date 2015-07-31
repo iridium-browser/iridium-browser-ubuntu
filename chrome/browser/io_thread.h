@@ -168,19 +168,17 @@ class IOThread : public content::BrowserThreadDelegate {
     Optional<bool> enable_tcp_fast_open_for_ssl;
 
     Optional<size_t> initial_max_spdy_concurrent_streams;
-    Optional<bool> force_spdy_single_domain;
     Optional<bool> enable_spdy_compression;
     Optional<bool> enable_spdy_ping_based_connection_checking;
     Optional<net::NextProto> spdy_default_protocol;
     net::NextProtoVector next_protos;
     Optional<std::string> trusted_spdy_proxy;
-    Optional<bool> force_spdy_over_ssl;
-    Optional<bool> force_spdy_always;
     std::set<net::HostPortPair> forced_spdy_exclusions;
     Optional<bool> use_alternate_protocols;
-    Optional<double> alternate_protocol_probability_threshold;
+    Optional<double> alternative_service_probability_threshold;
 
     Optional<bool> enable_quic;
+    Optional<bool> disable_insecure_quic;
     Optional<bool> enable_quic_for_proxies;
     Optional<bool> enable_quic_port_selection;
     Optional<bool> quic_always_require_handshake_confirmation;
@@ -336,18 +334,17 @@ class IOThread : public content::BrowserThreadDelegate {
       base::StringPiece quic_trial_group,
       bool quic_allowed_by_policy);
 
+  // Returns true if QUIC should be disabled for http:// URLs, as a result
+  // of a field trial.
+  static bool ShouldDisableInsecureQuic(
+      const VariationParameters& quic_trial_params);
+
   // Returns true if the selection of the ephemeral port in bind() should be
   // performed by Chromium, and false if the OS should select the port.  The OS
   // option is used to prevent Windows from posting a security security warning
   // dialog.
   static bool ShouldEnableQuicPortSelection(
       const base::CommandLine& command_line);
-
-  // Returns true if QUIC packet pacing should be negotiated during the
-  // QUIC handshake.
-  static bool ShouldEnableQuicPacing(
-      const base::CommandLine& command_line,
-      const VariationParameters& quic_trial_params);
 
   // Returns true if QUIC should always require handshake confirmation during
   // the QUIC handshake.
@@ -417,9 +414,9 @@ class IOThread : public content::BrowserThreadDelegate {
       const base::CommandLine& command_line,
       const VariationParameters& quic_trial_params);
 
-  // Returns the alternate protocol probability threshold specified by
+  // Returns the alternative service probability threshold specified by
   // any flags in |command_line| or |quic_trial_params|.
-  static double GetAlternateProtocolProbabilityThreshold(
+  static double GetAlternativeProtocolProbabilityThreshold(
       const base::CommandLine& command_line,
       const VariationParameters& quic_trial_params);
 

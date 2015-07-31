@@ -6,7 +6,7 @@
 #define CC_LAYERS_CONTENT_LAYER_CLIENT_H_
 
 #include "cc/base/cc_export.h"
-#include "cc/resources/display_item_list.h"
+#include "cc/playback/display_item_list.h"
 
 class SkCanvas;
 
@@ -22,14 +22,16 @@ class CC_EXPORT ContentLayerClient {
   enum PaintingControlSetting {
     PAINTING_BEHAVIOR_NORMAL,
     DISPLAY_LIST_CONSTRUCTION_DISABLED,
-    DISPLAY_LIST_CACHING_DISABLED
+    DISPLAY_LIST_CACHING_DISABLED,
+    DISPLAY_LIST_PAINTING_DISABLED
   };
 
   virtual void PaintContents(SkCanvas* canvas,
                              const gfx::Rect& clip,
                              PaintingControlSetting painting_status) = 0;
 
-  virtual scoped_refptr<DisplayItemList> PaintContentsToDisplayList(
+  virtual void PaintContentsToDisplayList(
+      DisplayItemList* display_list,
       const gfx::Rect& clip,
       PaintingControlSetting painting_status) = 0;
 

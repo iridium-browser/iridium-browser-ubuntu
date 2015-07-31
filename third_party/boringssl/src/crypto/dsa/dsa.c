@@ -67,11 +67,15 @@
 #include <openssl/err.h>
 #include <openssl/ex_data.h>
 #include <openssl/mem.h>
+#include <openssl/thread.h>
 
 #include "internal.h"
+#include "../internal.h"
 
 
 extern const DSA_METHOD DSA_default_method;
+
+static CRYPTO_EX_DATA_CLASS g_ex_data_class = CRYPTO_EX_DATA_CLASS_INIT;
 
 DSA *DSA_new(void) { return DSA_new_method(NULL); }
 
@@ -96,14 +100,16 @@ DSA *DSA_new_method(const ENGINE *engine) {
   dsa->write_params = 1;
   dsa->references = 1;
 
-  if (!CRYPTO_new_ex_data(CRYPTO_EX_INDEX_DSA, dsa, &dsa->ex_data)) {
+  CRYPTO_MUTEX_init(&dsa->method_mont_p_lock);
+
+  if (!CRYPTO_new_ex_data(&g_ex_data_class, dsa, &dsa->ex_data)) {
     METHOD_unref(dsa->meth);
     OPENSSL_free(dsa);
     return NULL;
   }
 
   if (dsa->meth->init && !dsa->meth->init(dsa)) {
-    CRYPTO_free_ex_data(CRYPTO_EX_INDEX_DSA, dsa, &dsa->ex_data);
+    CRYPTO_free_ex_data(&g_ex_data_class, dsa, &dsa->ex_data);
     METHOD_unref(dsa->meth);
     OPENSSL_free(dsa);
     return NULL;
@@ -126,29 +132,16 @@ void DSA_free(DSA *dsa) {
   }
   METHOD_unref(dsa->meth);
 
-  CRYPTO_free_ex_data(CRYPTO_EX_INDEX_DSA, dsa, &dsa->ex_data);
+  CRYPTO_free_ex_data(&g_ex_data_class, dsa, &dsa->ex_data);
 
-  if (dsa->p != NULL) {
-    BN_clear_free(dsa->p);
-  }
-  if (dsa->q != NULL) {
-    BN_clear_free(dsa->q);
-  }
-  if (dsa->g != NULL) {
-    BN_clear_free(dsa->g);
-  }
-  if (dsa->pub_key != NULL) {
-    BN_clear_free(dsa->pub_key);
-  }
-  if (dsa->priv_key != NULL) {
-    BN_clear_free(dsa->priv_key);
-  }
-  if (dsa->kinv != NULL) {
-    BN_clear_free(dsa->kinv);
-  }
-  if (dsa->r != NULL) {
-    BN_clear_free(dsa->r);
-  }
+  BN_clear_free(dsa->p);
+  BN_clear_free(dsa->q);
+  BN_clear_free(dsa->g);
+  BN_clear_free(dsa->pub_key);
+  BN_clear_free(dsa->priv_key);
+  BN_clear_free(dsa->kinv);
+  BN_clear_free(dsa->r);
+  CRYPTO_MUTEX_cleanup(&dsa->method_mont_p_lock);
   OPENSSL_free(dsa);
 }
 
@@ -191,12 +184,8 @@ void DSA_SIG_free(DSA_SIG *sig) {
     return;
   }
 
-  if (sig->r) {
-    BN_free(sig->r);
-  }
-  if (sig->s) {
-    BN_free(sig->s);
-  }
+  BN_free(sig->r);
+  BN_free(sig->s);
   OPENSSL_free(sig);
 }
 
@@ -275,12 +264,8 @@ int DSA_check_signature(int *out_valid, const uint8_t *digest,
   ret = DSA_do_check_signature(out_valid, digest, digest_len, s, dsa);
 
 err:
-  if (der != NULL) {
-    OPENSSL_free(der);
-  }
-  if (s) {
-    DSA_SIG_free(s);
-  }
+  OPENSSL_free(der);
+  DSA_SIG_free(s);
   return ret;
 }
 
@@ -316,8 +301,12 @@ int DSA_sign_setup(const DSA *dsa, BN_CTX *ctx, BIGNUM **out_kinv,
 
 int DSA_get_ex_new_index(long argl, void *argp, CRYPTO_EX_new *new_func,
                          CRYPTO_EX_dup *dup_func, CRYPTO_EX_free *free_func) {
-  return CRYPTO_get_ex_new_index(CRYPTO_EX_INDEX_DSA, argl, argp, new_func,
-                                 dup_func, free_func);
+  int index;
+  if (!CRYPTO_get_ex_new_index(&g_ex_data_class, &index, argl, argp, new_func,
+                               dup_func, free_func)) {
+    return -1;
+  }
+  return index;
 }
 
 int DSA_set_ex_data(DSA *d, int idx, void *arg) {
@@ -354,8 +343,6 @@ DH *DSA_dup_DH(const DSA *r) {
   return ret;
 
 err:
-  if (ret != NULL) {
-    DH_free(ret);
-  }
+  DH_free(ret);
   return NULL;
 }

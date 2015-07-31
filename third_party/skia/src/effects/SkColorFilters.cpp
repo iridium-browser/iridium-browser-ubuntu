@@ -40,7 +40,7 @@ uint32_t SkModeColorFilter::getFlags() const {
 void SkModeColorFilter::filterSpan(const SkPMColor shader[], int count, SkPMColor result[]) const {
     SkPMColor       color = fPMColor;
     SkXfermodeProc  proc = fProc;
-    
+
     for (int i = 0; i < count; i++) {
         result[i] = proc(color, shader[i]);
     }
@@ -147,7 +147,7 @@ public:
         return true;
     }
 
-    virtual void getGLProcessorKey(const GrGLCaps& caps,
+    virtual void getGLProcessorKey(const GrGLSLCaps& caps,
                                    GrProcessorKeyBuilder* b) const override {
         GLProcessor::GenKey(*this, caps, b);
     }
@@ -191,7 +191,7 @@ public:
                     codeAppendf("\t%s = %s;\n", outputColor, filter.c_str());
         }
 
-        static void GenKey(const GrProcessor& fp, const GrGLCaps&,
+        static void GenKey(const GrProcessor& fp, const GrGLSLCaps&,
                            GrProcessorKeyBuilder* b) {
             const ModeColorFilterEffect& colorModeFilter = fp.cast<ModeColorFilterEffect>();
             // The SL code does not depend on filter color at the moment, so no need to represent it
@@ -394,19 +394,13 @@ private:
 
 class SrcOver_SkModeColorFilter : public SkModeColorFilter {
 public:
-    SrcOver_SkModeColorFilter(SkColor color)
-            : INHERITED(color, SkXfermode::kSrcOver_Mode) {
-        fColor32Proc = SkBlitRow::ColorProcFactory();
-    }
+    SrcOver_SkModeColorFilter(SkColor color) : INHERITED(color, SkXfermode::kSrcOver_Mode) { }
 
     void filterSpan(const SkPMColor shader[], int count, SkPMColor result[]) const override {
-        fColor32Proc(result, shader, count, this->getPMColor());
+        SkBlitRow::Color32(result, shader, count, this->getPMColor());
     }
 
 private:
-
-    SkBlitRow::ColorProc fColor32Proc;
-
     typedef SkModeColorFilter INHERITED;
 };
 

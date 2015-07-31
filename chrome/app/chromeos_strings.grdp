@@ -14,7 +14,7 @@
     Chromebase
   </message>
   <message name="IDS_CHROMEBIT" desc="The localized name for Chromebit">
-    Chromebit  
+    Chromebit
   </message>
   <!-- Idle logout dialog for retail mode -->
   <message name="IDS_IDLE_LOGOUT_TITLE" desc="Dialog title for the idle logout dialog. Used in retail mode only.">
@@ -244,6 +244,9 @@ Press any key to continue exploring.
   <message name="IDS_FILE_BROWSER_FORMAT_DEVICE_BUTTON_LABEL" desc="Title of the action for formatting removable device.">
     Format device
   </message>
+  <message name="IDS_FILE_BROWSER_CONFIGURE_VOLUME_BUTTON_LABEL" desc="Title of the action for configuring the selected volume.">
+    Configure
+  </message>
   <message name="IDS_FILE_BROWSER_UNMOUNT_DEVICE_BUTTON_LABEL" desc="Title of the action for unmounting removable device.">
     Eject device
   </message>
@@ -252,6 +255,9 @@ Press any key to continue exploring.
   </message>
   <message name="IDS_FILE_BROWSER_ADD_NEW_SERVICES_BUTTON_LABEL" desc="Title of the button in the left nav to add new services (file systems) to Files app.">
     Add new services
+  </message>
+  <message name="IDS_FILE_BROWSER_INSTALL_NEW_EXTENSION_LABEL" desc="Title of the menu item for installing new extensions from the web store.">
+    Install new from the webstore
   </message>
   <message name="IDS_FILE_BROWSER_ACTION_VIEW" desc="Title of the action to view (no edit) a file.">
     View
@@ -1025,6 +1031,9 @@ Press any key to continue exploring.
   <message name="IDS_FILE_BROWSER_THUMBNAIL_VIEW_TOOLTIP" desc="Tooltip for the Thumbnail View button.">
     Thumbnail view
   </message>
+  <message name="IDS_FILE_BROWSER_SORT_BUTTON_TOOLTIP" desc="Tooltip for the button which provides sort options in Files.app.">
+    Sort options
+  </message>
   <message name="IDS_FILE_BROWSER_GEAR_BUTTON_TOOLTIP" desc="Tooltip for the gear button in Files.app.">
     Settings
   </message>
@@ -1367,14 +1376,23 @@ Press any key to continue exploring.
   <message name="IDS_SIGNIN_SCREEN_TITLE" desc="Title of OOBE/Add User sign-in screen">
     Sign in
   </message>
+  <message name="IDS_SIGNIN_SCREEN_TITLE_TAB_PROMPT" desc="Title of OOBE/Add User sign-in screen with TAB prompt when ChromeVox is active">
+    Sign in, press the tab key to interact with input elements
+  </message>
   <message name="IDS_SIGNIN_SCREEN_PASSWORD_CHANGED" desc="Title of OOBE/Add User sign-in screen when password was changed">
     You have recently changed the password. Please sign in with the new one.
+  </message>
+  <message name="IDS_LOGIN_GAIA_LOADING_MESSAGE" desc="Message on the OOBE gaia loading screen">
+    Please wait...
   </message>
   <message name="IDS_NETWORK_SELECTION_TITLE" desc="Welcome title shown on network selection screen">
     Let's get started
   </message>
   <message name="IDS_OOBE_LANGUAGE_SELECTION_MSG" desc="Chrome OS OOBE: label for language selection dropdown">
     What is your language?
+  </message>
+  <message name="IDS_OOBE_ASSET_ID_LABEL" desc="Chrome OS OOBE: label for asset identifier.">
+    Asset ID: <ph name="ASSET_ID">$1<ex>None specified</ex></ph>
   </message>
   <message name="IDS_NETWORK_SELECTION_SELECT" desc="Label for network selection dropdown">
     Select a network
@@ -1532,7 +1550,7 @@ Press any key to continue exploring.
   <message name="IDS_LOGIN_PASSWORD_CHANGED_MORE_INFO" desc="Additional information on the password changed dialog">
     Because <ph name="IDS_SHORT_PRODUCT_OS_NAME">$1<ex>Chrome OS</ex></ph> securely encrypts all your local data, you must enter the old password now to unlock that data.
   </message>
-  <message name="IDS_LOGIN_PASSWORD_CHANGED_OLD_PASSWORD_HINT" desc="Old password field hint on the password changed dialog">
+  <message name="IDS_LOGIN_PASSWORD_CHANGED_OLD_PASSWORD_HINT" desc="Old password field hint on the password changed dialog.">
     Enter old password
   </message>
   <message name="IDS_LOGIN_PASSWORD_CHANGED_INCORRECT_OLD_PASSWORD" desc="Error that is shown when incorrect old password was supplied for user cryptohome migration.">
@@ -1547,7 +1565,7 @@ Press any key to continue exploring.
   <message name="IDS_LOGIN_PASSWORD_CHANGED_PROCEED_ANYWAY" desc="Button to proceed without providing old password on the password changed dialog">
     If you cannot remember your password, you may proceed but local data will be lost. Only synced settings and data will be retrieved.
   </message>
-  <message name="IDS_LOGIN_PASSWORD_CHANGED_PROCEED_ANYWAY_BUTTON" desc="Button to proceed without providing old password on the password changed dialog">
+  <message name="IDS_LOGIN_PASSWORD_CHANGED_PROCEED_ANYWAY_BUTTON" desc="Button to proceed without providing old password on the password changed dialog.">
     Proceed anyway
   </message>
   <message name="IDS_LOGIN_PASSWORD_CHANGED_RESET" desc="Reset option of the password changed dialog">
@@ -1557,17 +1575,41 @@ Press any key to continue exploring.
     Migrate all Chrome OS data to the new password
 (requires previous password)
   </message>
+  <message name="IDS_LOGIN_NEWGAIA_PASSWORD_CHANGED_TITLE" desc="Title for the password changed dialog box">
+    To unlock and restore your local data, please enter your old <ph name="DEVICE_TYPE">$1<ex>Chromebook</ex></ph> password.
+  </message>
+  <message name="IDS_LOGIN_NEWGAIA_PASSWORD_CHANGED_FORGOT_PASSWORD" desc="Text of the link that lets user skip old password input on the password changed dialog in the newgaia flow">
+    Forgot your old password?
+  </message>
+  <message name="IDS_LOGIN_NEWGAIA_PASSWORD_CHANGED_PROCEED_ANYWAY" desc="Button to proceed without providing old password on the password changed dialog in the newgaia flow">
+    You may proceed, but only your synced data and settings will be restored. All local data will be lost.
+  </message>
+  <message name="IDS_LOGIN_NEWGAIA_PASSWORD_CHANGED_TRY_AGAIN" desc="Label for the retry button on the proceed anyway step in the newgaia password changed flow">
+    Try again
+  </message>
   <message name="IDS_LOGIN_PREVIOUS_PASSWORD" desc="Password field text on the password changed dialog">
     Previous password
   </message>
   <message name="IDS_LOGIN_SAML_NOTICE" desc="Text message displayed above SAML portal to early indicate that the user is being redirected to another sign-in provider.">
     The sign-in service below is hosted by <ph name="SAML_DOMAIN">$1<ex>saml.com</ex></ph>. Sign in to continue.
   </message>
+  <message name="IDS_LOGIN_SAML_NOTICE_NEW_GAIA_FLOW" desc="Text message displayed above SAML portal to early indicate that the user is being redirected to another sign-in provider. This is the version of the string used in the new GAIA flow.">
+    This sign-in service is hosted by <ph name="SAML_DOMAIN">$1<ex>saml.com</ex></ph>.
+  </message>
   <message name="IDS_LOGIN_CONFIRM_PASSWORD_TITLE" desc="Title for the confirm password dialog.">
     Complete sign-in
   </message>
+  <message name="IDS_LOGIN_CONFIRM_PASSWORD_TITLE_NEW_GAIA_FLOW" desc="Title for the confirm password dialog.">
+    Please re-enter your password to update your Chromebook profile.
+  </message>
   <message name="IDS_LOGIN_CONFIRM_PASSWORD_LABEL" desc="Label for the password field on the confirm password dialog.">
     Please re-enter your password
+  </message>
+  <message name="IDS_LOGIN_CONFIRM_PASSWORD_LABEL_NEW_GAIA_FLOW" desc="Label for the password field on the confirm password dialog.">
+    Confirm your password
+  </message>
+  <message name="IDS_LOGIN_CONFIRM_PASSWORD_INCORRECT_PASSWORD" desc="Error that is shown when incorrect password was supplied.">
+    Incorrect password
   </message>
   <message name="IDS_LOGIN_CONFIRM_PASSWORD_CONFIRM_BUTTON" desc="Label for the confirm button on the confirm password dialog.">
     Confirm
@@ -1577,6 +1619,15 @@ Press any key to continue exploring.
   </message>
   <message name="IDS_LOGIN_CONFIRM_PASSWORD_ERROR_TEXT" desc="Error text to show when the password typed by the user could not be verified.">
     Sorry, your password could not be verified. Please try again.
+  </message>
+  <message name="IDS_LOGIN_ACCOUNT_SETUP_CANCEL_DIALOG_TITLE" desc="Text to show in confirmation cancel dialog.">
+    Cancel account setup?
+  </message>
+  <message name="IDS_LOGIN_ACCOUNT_SETUP_CANCEL_DIALOG_NO" desc="Text to show on button to decline cancelation.">
+    No
+  </message>
+  <message name="IDS_LOGIN_ACCOUNT_SETUP_CANCEL_DIALOG_YES" desc="Text to show on button to accept cancelation.">
+    Yes
   </message>
   <message name="IDS_LOGIN_FATAL_ERROR_NO_ACCOUNT_DETAILS" desc="Message to show when the authentication could not be completed because the user's account details could not be retrieved.">
     Oops, couldn't sign you in. Sign-in failed because your account details could not be retrieved.
@@ -1593,23 +1644,53 @@ Press any key to continue exploring.
   <message name="IDS_LOGIN_FATAL_ERROR_INSTRUCTIONS" desc="Instructions shown below the error message when authentication could not be completed.">
     Please contact your administrator or try again.
   </message>
-  <message name="IDS_LOGIN_OFFLINE_EMAIL" desc="Email field text on the offline login screen. Note: should by the same as the one used on the Gaia sign-in page.">
+  <message name="IDS_LOGIN_OFFLINE_EMAIL" desc="Email field text on the offline login screen. Note: should be the same as the one used on the Gaia sign-in page.">
     Email
   </message>
-  <message name="IDS_LOGIN_OFFLINE_PASSWORD" desc="Password field text on the offline login screen. Note: should by the same as the one used on the Gaia sign-in page.">
+  <message name="IDS_LOGIN_OFFLINE_PASSWORD" desc="Password field text on the offline login screen. Note: should be the same as the one used on the Gaia sign-in page.">
     Password
   </message>
-  <message name="IDS_LOGIN_OFFLINE_SIGNIN" desc="Sign-in text on the offline login screen. Note: should by the same as the one used on the Gaia sign-in page.">
+  <message name="IDS_LOGIN_OFFLINE_SIGNIN" desc="Sign-in text on the offline login screen. Note: should be the same as the one used on the Gaia sign-in page.">
     Sign in
   </message>
-  <message name="IDS_LOGIN_OFFLINE_EMPTY_EMAIL" desc="Alert message about empty email on the offline login screen. Note: should by the same as the one used on the Gaia sign-in page.">
+  <message name="IDS_LOGIN_OFFLINE_EMPTY_EMAIL" desc="Alert message about empty email on the offline login screen. Note: should be the same as the one used on the Gaia sign-in page.">
     Enter your email address.
   </message>
   <message name="IDS_LOGIN_OFFLINE_EMPTY_PASSWORD" desc="Alert message about empty password on the offline login screen.">
     Enter your password.
   </message>
-  <message name="IDS_LOGIN_OFFLINE_ERROR" desc="Error alert message on the offline login screen. Note: should by the same as the one used on the Gaia sign-in page.">
+  <message name="IDS_LOGIN_OFFLINE_ERROR" desc="Error alert message on the offline login screen. Note: should be the same as the one used on the Gaia sign-in page.">
     The username or password you entered is incorrect.
+  </message>
+  <message name="IDS_NEWGAIA_OFFLINE_WELCOME" desc="Message shown during newgaia flow in the beginning of the offline login.">
+    Sign in to your <ph name="DEVICE_TYPE">$1<ex>Chromebook</ex></ph>
+  </message>
+  <message name="IDS_NEWGAIA_OFFLINE_DEVICE_MANAGED_BY_NOTICE" desc="Text for notifications showing that this is managed device.">
+    Managed by <ph name="DOMAIN">$1<ex>acmecorp.com</ex></ph>
+  </message>
+  <message name="IDS_NEWGAIA_OFFLINE_EMAIL" desc="Email field text on the offline login screen. Note: should be the same as the one used on the Gaia sign-in page.">
+    Enter your email
+  </message>
+  <message name="IDS_NEWGAIA_OFFLINE_PASSWORD" desc="Password field text on the offline login screen. Note: should be the same as the one used on the Gaia sign-in page.">
+    Enter your password
+  </message>
+  <message name="IDS_NEWGAIA_OFFLINE_INVALID_EMAIL" desc="Alert message about invalid email on the offline login screen. Note: should be the same as the one used on the Gaia sign-in page.">
+    Please enter a valid email address
+  </message>
+  <message name="IDS_NEWGAIA_OFFLINE_INVALID_PASSWORD" desc="Alert message about mismatching email and password on the device">
+    The email and password you entered don't match
+  </message>
+  <message name="IDS_NEWGAIA_OFFLINE_NEXT_BUTTON_TEXT" desc="Text shown on next button during offline signin flow dialog. Note: should be the same as the one used on the Gaia sign-in page.">
+    Next
+  </message>
+  <message name="IDS_NEWGAIA_OFFLINE_FORGOT_PASSWORD_BUTTON_TEXT" desc="Text shown on forgot password button during offline signin flow. Note: should be the same as the one used on the Gaia sign-in page.">
+    Forgot password?
+  </message>
+  <message name="IDS_NEWGAIA_OFFLINE_FORGOT_PASSWORD_DIALOG_TEXT" desc="Text shown on forgot password dialog during offline signin flow.">
+    To recover your account information, go to: google.com/accounts/recovery
+  </message>
+  <message name="IDS_NEWGAIA_OFFLINE_CLOSE_BUTTON_TEXT" desc="Text shown on forgot password dialog close button during offline signin flow.">
+    Close
   </message>
   <message name="IDS_CREATE_ACCOUNT_BUTTON">
     Create a Google Account now
@@ -1619,6 +1700,12 @@ Press any key to continue exploring.
   </message>
   <message name="IDS_BROWSE_WITHOUT_SIGNING_IN_BUTTON">
     Skip sign-in and browse as Guest
+  </message>
+  <message name="IDS_WHITELIST_ERROR_TRY_AGAIN_BUTTON" desc="The text of the try again button on the whitelist error UI.">
+    Try again
+  </message>
+  <message name="IDS_WHITELIST_ERROR_LEARN_MORE_BUTTON" desc="The text of the learn more link on the whitelist error UI.">
+    Learn more
   </message>
   <message name="IDS_CREATE_ACCOUNT_HTML" desc="Text shown on side of Google sign-in UI.">
     If you don't have a Google Account you can <ph name="LINK_START">$1<ex>&gt;a&lt;</ex></ph>create a Google Account<ph name="LINK_END">$2<ex>&gt;/a&lt;</ex></ph> now.
@@ -1914,7 +2001,7 @@ Press any key to continue exploring.
     Connected
   </message>
   <message name="IDS_CHROMEOS_NETWORK_STATE_CONNECTING" desc="Displayed state for a network when connecting">
-    Not Connected
+    Connecting
   </message>
 
   <message name="IDS_OPTIONS_SETTINGS_NETWORK_DISABLED" desc="Message displayed when a type of network connection is disabled">
@@ -2258,6 +2345,9 @@ Press any key to continue exploring.
   </message>
   <message name="IDS_OPTIONS_SETTINGS_DISPLAY_OPTIONS_MIRRORING_DISPLAY_NAME" desc="The text shown at display name field when mirroring.">
     Mirroring
+  </message>
+  <message name="IDS_OPTIONS_SETTINGS_DISPLAY_OPTIONS_ENABLE_UNIFIED_DESKTOP" desc="The section title for the option to enable unified desktop mode.">
+    Enable Unified Desktop
   </message>
   <message name="IDS_OPTIONS_SETTINGS_DISPLAY_OPTIONS_SET_PRIMARY" desc="Button label to set a display primary.">
     Make primary
@@ -4760,6 +4850,9 @@ Battery full
   <message name="IDS_STATUSBAR_LAYOUT_USA_DVORAK" desc="In the language menu button, this shows the input mode [US Dvorak keyboard].">
     US Dvorak
   </message>
+  <message name="IDS_STATUSBAR_LAYOUT_USA_DVP" desc="In the language menu button, this shows the input mode [US Programmer Dvorak keyboard].">
+    US Programmer Dvorak
+  </message>
   <message name="IDS_STATUSBAR_LAYOUT_USA_COLEMAK" desc="In the language menu button, this shows the input mode [US Colemak keyboard].">
     US Colemak
   </message>
@@ -5045,6 +5138,9 @@ Battery full
   </message>
   <message name="IDS_IME_NAME_KEYBOARD_US_DVORAK" desc="The input method name shows in system tray menu, this shows [US Dvorak keyboard].">
     US Dvorak keyboard
+  </message>
+  <message name="IDS_IME_NAME_KEYBOARD_US_DVP" desc="The input method name shows in system tray menu, this shows [US Programmer Dvorak keyboard].">
+    US Programmer Dvorak keyboard
   </message>
   <message name="IDS_IME_NAME_KEYBOARD_US_EXTENDED" desc="The input method name shows in system tray menu, this shows [US Extended keyboard].">
     US Extended keyboard
@@ -5645,6 +5741,12 @@ All users must sign out to continue.
   <message name="IDS_3G_NOTIFICATION_MESSAGE" desc="Text of the 3G data notification telling that 3G data is enabled.">
     Google Chrome will use mobile data if you're not connected to another network.
   </message>
+  <message name="IDS_3G_DATASAVER_TITLE" desc="Title of the 3G data notification prompting user to install Data Saver.">
+    You are using mobile data
+  </message>
+  <message name="IDS_3G_DATASAVER_MESSAGE" desc="Text of the 3G data notification prompting user to install Data Saver.">
+    Save data and browse faster using Google Data Saver. Click to learn more.
+  </message>
 
   <!-- chrome://mobilesetup strings -->
   <message name="IDS_MOBILE_SETUP_TITLE" desc="ChromeOS mobile device activation page title">
@@ -5897,6 +5999,9 @@ All users must sign out to continue.
   <message name="IDS_ENTERPRISE_ENROLLMENT_STATUS_LOCK_WRONG_USER" desc="Error message to show when the user used to re-enroll the device does not belong to the domain that the device was originally enrolled into.">
     This user account does not belong to the domain that the device is enrolled to.  If you want to enroll to a different domain you need to go through device recovery first.
   </message>
+  <message name="IDS_ENTERPRISE_ENROLLMENT_STATUS_LOCK_WRONG_MODE" desc="Error message to show upon attempting to re-enroll a device that is locked to a different operational mode.">
+    This device is locked in a mode that prevents enterprise enrollment.  If you want to enroll the device you need to go through device recovery first.
+  </message>
   <message name="IDS_ENTERPRISE_ENROLLMENT_STATUS_STORE_ERROR" desc="Error message shown on the enrollment screen when the installation of the policy on the device fails.">
     Failed to install policy settings on the device: <ph name="VALIDATION_ERROR">$1<ex>Policy parsing failed</ex></ph>.
   </message>
@@ -5930,8 +6035,14 @@ All users must sign out to continue.
   <message name="IDS_ENTERPRISE_ENROLLMENT_DOMAIN_MISMATCH_ERROR" desc="Error message shown when the device doesn't belong to the domain the user tried to enroll it to.">
     This device cannot be enrolled to the domain your account belongs to because the device is marked for management by a different domain.
   </message>
+  <message name="IDS_ENTERPRISE_ENROLLMENT_ATTRIBUTE_ERROR" desc="Error message shown when successfully enrolled, but the device attribute update has failed.">
+  Your device has successfully been enrolled for enterprise management, but failed to send its asset and location information. Please manually enter this information from your Admin console for this device.
+  </message>
   <message name="IDS_ENTERPRISE_ENROLLMENT_SCREEN_TITLE" desc="The title on the enterprise enrollment dialog.">
     Enterprise enrollment
+  </message>
+  <message name="IDS_ENTERPRISE_ENROLLMENT_DEVICE_INFORMATION" desc="The subtitle on the device attribute prompt screen.">
+    Device information
   </message>
   <message name="IDS_ENTERPRISE_ENROLLMENT_DESCRIPTION" desc="Short description of enterprise enrollment.">
     Sign in with the username given to you by your organization to enroll your device for enterprise management.
@@ -5951,14 +6062,35 @@ All users must sign out to continue.
   <message name="IDS_ENTERPRISE_ENROLLMENT_DONE" desc="Label for the done button on the success screen in the enterprise enrollment dialog.">
     Done
   </message>
+  <message name="IDS_ENTERPRISE_ENROLLMENT_CONTINUE" desc="Label for the continue button on the device attribute prompt screen in the enterprise enrollment dialog.">
+    Continue
+  </message>
+  <message name="IDS_ENTERPRISE_ENROLLMENT_SKIP" desc="Label for the skip button on the device attribute prompt screen in the enterprise enrollment dialog.">
+    Skip
+  </message>
   <message name="IDS_ENTERPRISE_ENROLLMENT_SUCCESS" desc="Success message to be shown once enterprise enrollment completes.">
     Your device has successfully been enrolled for enterprise management.
+  </message>
+  <message name="IDS_ENTERPRISE_ENROLLMENT_ATTRIBUTES" desc="Device attribute message to be shown when editing the name and location field for a device.">
+    <ph name="BEGIN_BOLD">&lt;strong&gt;</ph>Your account is enabled to provide an Asset ID and Location for this device (optional).<ph name="END_BOLD">&lt;/strong&gt;</ph> <ph name="BEGIN_ITALIC">&lt;i&gt;</ph>You may provide a device identifier and location in the fields below. These details will be displayed for this device on the chrome:policy page in your management console.<ph name="END_ITALIC">&lt;/i&gt;</ph>
+  </message>
+  <message name="IDS_ENTERPRISE_ENROLLMENT_ASSET_ID_LABEL" desc="Label for asset id text box on the device naming screen in the enterprise enrollment dialog.">
+    Asset Identifier
+  </message>
+  <message name="IDS_ENTERPRISE_ENROLLMENT_LOCATION_LABEL" desc="Label for location tex box on the device naming screen in the enterprise enrollment dialog.">
+    Device Location
   </message>
   <message name="IDS_ENTERPRISE_ENROLLMENT_WORKING" desc="Status message to show while enterprise enrollment is underway.">
     Enrolling the device. Please wait...
   </message>
   <message name="IDS_ENTERPRISE_ENROLLMENT_EXPLAIN_LINK" desc="Text on the link to the enterprise enrollment help article.">
     Learn more about Enterprise Enrollment
+  </message>
+  <message name="IDS_ENTERPRISE_ENROLLMENT_ATTRIBUTE_EXPLANATION" desc="Device attribute message to be shown on attribute update prompt screen.">
+    Optional — enter new or update existing information to be associated with this device.
+  </message>
+  <message name="IDS_ENTERPRISE_ENROLLMENT_EXPLAIN_ATTRIBUTE_LINK" desc="Text on the link to the device attribute update help article.">
+    Learn more.
   </message>
 
   <!-- About network UI display strings -->
@@ -6195,12 +6327,6 @@ All users must sign out to continue.
   <message name="IDS_OPTIONS_RESOLVE_TIMEZONE_BY_GEOLOCATION_DESCRIPTION" desc="Label for checkbox to allow automatic timezone update by user geolocation.">
     Set time zone automatically using your location
   </message>
-  <message name="IDS_FLAGS_ENABLE_FIREWALL_HOLE_PUNCHING_NAME" desc="Name of the option to enable punching holes in the Chrome OS firewall.">
-    Enable firewall hole punching.
-  </message>
-  <message name="IDS_FLAGS_ENABLE_FIREWALL_HOLE_PUNCHING_DESCRIPTION" desc="Description of the option to enable punching holes in the Chrome OS firewall.">
-    Enable punching holes in the Chrome OS firewall for Chrome Apps that open a TCP/IP server socket or UDP socket.
-  </message>
   <message name="IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_DIALOG_TITLE" desc="Title of a prompt dialog for granting permissions to a volume (eg. USB drive, SD card, MTP device) with the specified name.">
     Permission requested
   </message>
@@ -6216,17 +6342,37 @@ All users must sign out to continue.
   <message name="IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_DIALOG_DENY_BUTTON" desc="Label on the button to reject permissions.">
     Deny
   </message>
-  <message name="IDS_FLAG_ENABLE_MTP_WRITE_SUPPORT_NAME" desc="Name of the option to enable mtp write support.">
-    Enable MTP write support
+  <message name="IDS_FLAG_DISABLE_MTP_WRITE_SUPPORT_NAME" desc="Name of the option to enable mtp write support.">
+    Disable MTP write support
   </message>
-  <message name="IDS_FLAG_ENABLE_MTP_WRITE_SUPPORT_DESCRIPTION" desc="Description of the option to enable mtp write support.">
-    Enable MTP write support in file manager. Some operations (editing an image on MTP volume) are not supported yet.
+  <message name="IDS_FLAG_DISABLE_MTP_WRITE_SUPPORT_DESCRIPTION" desc="Description of the option to enable mtp write support.">
+    Disable MTP write support in File System API (and file manager). In-place editing operations are not supported.
   </message>
   <message name="IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_NOTIFICATION_MESSAGE" desc="Message in a notification about granted read-only pemissions (read, write, delete, create files and directories) to a volume (eg. USB drive, SD card, MTP device) with the specified name to the extension.">
     Read-only access to <ph name="VOLUME_NAME">$1<ex>FooBar 4GB</ex></ph> has been granted.
   </message>
   <message name="IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_NOTIFICATION_WRITABLE_MESSAGE" desc="Message in a notification about granted full permissions (read, write, delete, create files and directories) to a volume (eg. USB drive, SD card, MTP device) with the specified name to the extension.">
     Read and write access to <ph name="VOLUME_NAME">$1<ex>FooBar 4GB</ex></ph> has been granted.
+  </message>
+
+  <!-- Webstore widget app -->
+  <message name="IDS_WEBSTORE_WIDGET_APP_NAME" desc="App name for Webstore Gallery Widget app. The app shows a filtered list of extensions from Chrome Web Store. Extensions from the list can be installed directly from the app.">
+    Chrome Web Store Gallery
+  </message>
+  <message name="IDS_WEBSTORE_WIDGET_APP_DESC" desc="Description of Chrome Webstore Gallery Widget app.">
+    An app that shows a filtered list of extensions from Chrome Web Store. Extensions in the list can be installed directly from the app.
+  </message>
+  <message name="IDS_WEBSTORE_WIDGET_TITLE_PRINTER_PROVIDERS" desc="Title for Chrome Web Store Gallery Widget which lists all print driver apps from Chrome Web Store for a specific printer.">
+    Select a printer driver app
+  </message>
+  <message name="IDS_WEBSTORE_WIDGET_DEFAULT_ERROR" desc="Default message shown when Chrome Web Store Widget app window content fails to load (e.g. if it fails to load Chrome Web Store Gallery in a webview).">
+    Could not connect to the Chrome Web Store.
+  </message>
+  <message name="IDS_FLAGS_PRINTER_PROVIDER_SEARCH_APP_NAME" desc="Name of the flag used to enable launching Chrome Web Store Gallery widget app for searching for printer provider apps.">
+    Chrome Web Store Gallery app for printer drivers
+  </message>
+  <message name="IDS_FLAGS_PRINTER_PROVIDER_SEARCH_APP_DESCRIPTION" desc="Description of a flag in chrome://flags that enables launching Chrome Web Store Gallery widget app for searching for printer provider apps.">
+    Enables Chrome Web Store Gallery app for printer drivers. The app searches Chrome Web Store for extensions that support printing to a USB printer with specific USB ID.
   </message>
 
 </grit-part>

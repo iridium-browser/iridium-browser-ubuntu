@@ -94,8 +94,7 @@ bool g_default_can_use_cookies = true;
 // completed.
 //
 // This functions fixes both those cases.
-void ConvertRealLoadTimesToBlockingTimes(
-    net::LoadTimingInfo* load_timing_info) {
+void ConvertRealLoadTimesToBlockingTimes(LoadTimingInfo* load_timing_info) {
   DCHECK(!load_timing_info->request_start.is_null());
 
   // Earliest time possible for the request to be blocking on connect events.
@@ -116,7 +115,7 @@ void ConvertRealLoadTimesToBlockingTimes(
 
   // Make sure connection times are after start and proxy times.
 
-  net::LoadTimingInfo::ConnectTiming* connect_timing =
+  LoadTimingInfo::ConnectTiming* connect_timing =
       &load_timing_info->connect_timing;
   if (!connect_timing->dns_start.is_null()) {
     DCHECK(!connect_timing->dns_end.is_null());
@@ -280,17 +279,16 @@ LoadStateWithParam URLRequest::GetLoadState() const {
                             base::string16());
 }
 
-base::Value* URLRequest::GetStateAsValue() const {
-  base::DictionaryValue* dict = new base::DictionaryValue();
+scoped_ptr<base::Value> URLRequest::GetStateAsValue() const {
+  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
   dict->SetString("url", original_url().possibly_invalid_spec());
 
   if (url_chain_.size() > 1) {
-    base::ListValue* list = new base::ListValue();
-    for (std::vector<GURL>::const_iterator url = url_chain_.begin();
-         url != url_chain_.end(); ++url) {
-      list->AppendString(url->possibly_invalid_spec());
+    scoped_ptr<base::ListValue> list(new base::ListValue());
+    for (const GURL& url : url_chain_) {
+      list->AppendString(url.possibly_invalid_spec());
     }
-    dict->Set("url_chain", list);
+    dict->Set("url_chain", list.Pass());
   }
 
   dict->SetInteger("load_flags", load_flags_);
@@ -325,7 +323,7 @@ base::Value* URLRequest::GetStateAsValue() const {
   }
   if (status_.error() != OK)
     dict->SetInteger("net_error", status_.error());
-  return dict;
+  return dict.Pass();
 }
 
 void URLRequest::LogBlockedBy(const char* blocked_by) {
@@ -487,6 +485,10 @@ void URLRequest::set_delegate(Delegate* delegate) {
 }
 
 void URLRequest::Start() {
+  // TODO(pkasting): Remove ScopedTracker below once crbug.com/456327 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("456327 URLRequest::Start"));
+
   // Some values can be NULL, but the job factory must not be.
   DCHECK(context_->job_factory());
 
@@ -503,6 +505,10 @@ void URLRequest::Start() {
 
   // Only notify the delegate for the initial request.
   if (network_delegate_) {
+    // TODO(mmenke): Remove ScopedTracker below once crbug.com/456327 is fixed.
+    tracked_objects::ScopedTracker tracking_profile25(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION("456327 URLRequest::Start 2.5"));
+
     OnCallToDelegate();
     int error = network_delegate_->NotifyBeforeURLRequest(
         this, before_request_callback_, &delegate_redirect_url_);
@@ -512,6 +518,10 @@ void URLRequest::Start() {
       BeforeRequestComplete(error);
     return;
   }
+
+  // TODO(mmenke): Remove ScopedTracker below once crbug.com/456327 is fixed.
+  tracked_objects::ScopedTracker tracking_profile2(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("456327 URLRequest::Start 2"));
 
   StartJob(URLRequestJobManager::GetInstance()->CreateJob(
       this, network_delegate_));
@@ -586,6 +596,10 @@ void URLRequest::BeforeRequestComplete(int error) {
 }
 
 void URLRequest::StartJob(URLRequestJob* job) {
+  // TODO(mmenke): Remove ScopedTracker below once crbug.com/456327 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("456327 URLRequest::StartJob"));
+
   DCHECK(!is_pending_);
   DCHECK(!job_.get());
 
@@ -725,17 +739,9 @@ bool URLRequest::Read(IOBuffer* dest, int dest_size, int* bytes_read) {
     return true;
   }
 
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
-  tracked_objects::ScopedTracker tracking_profile1(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION("423948 URLRequest::Read1"));
-
   bool rv = job_->Read(dest, dest_size, bytes_read);
   // If rv is false, the status cannot be success.
   DCHECK(rv || status_.status() != URLRequestStatus::SUCCESS);
-
-  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
-  tracked_objects::ScopedTracker tracking_profile2(
-      FROM_HERE_WITH_EXPLICIT_FUNCTION("423948 URLRequest::Read2"));
 
   if (rv && *bytes_read <= 0 && status_.is_success())
     NotifyRequestCompleted();
@@ -759,11 +765,6 @@ void URLRequest::NotifyReceivedRedirect(const RedirectInfo& redirect_info,
     RestartWithJob(job);
   } else if (delegate_) {
     OnCallToDelegate();
-
-    // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
-    tracked_objects::ScopedTracker tracking_profile(
-        FROM_HERE_WITH_EXPLICIT_FUNCTION(
-            "423948 URLRequest::Delegate::OnReceivedRedirect"));
     delegate_->OnReceivedRedirect(this, redirect_info, defer_redirect);
     // |this| may be have been destroyed here.
   }
@@ -772,14 +773,7 @@ void URLRequest::NotifyReceivedRedirect(const RedirectInfo& redirect_info,
 void URLRequest::NotifyBeforeNetworkStart(bool* defer) {
   if (delegate_ && !notified_before_network_start_) {
     OnCallToDelegate();
-    {
-      // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is
-      // fixed.
-      tracked_objects::ScopedTracker tracking_profile(
-          FROM_HERE_WITH_EXPLICIT_FUNCTION(
-              "423948 URLRequest::Delegate::OnBeforeNetworkStart"));
-      delegate_->OnBeforeNetworkStart(this, defer);
-    }
+    delegate_->OnBeforeNetworkStart(this, defer);
     if (!*defer)
       OnCallToDelegateComplete();
     notified_before_network_start_ = true;
@@ -820,11 +814,6 @@ void URLRequest::NotifyResponseStarted() {
         NotifyRequestCompleted();
 
       OnCallToDelegate();
-      // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is
-      // fixed.
-      tracked_objects::ScopedTracker tracking_profile(
-          FROM_HERE_WITH_EXPLICIT_FUNCTION(
-              "423948 URLRequest::Delegate::OnResponseStarted"));
       delegate_->OnResponseStarted(this);
       // Nothing may appear below this line as OnResponseStarted may delete
       // |this|.
@@ -883,6 +872,7 @@ void URLRequest::PrepareToRestart() {
 
   status_ = URLRequestStatus();
   is_pending_ = false;
+  proxy_server_ = HostPortPair();
 }
 
 void URLRequest::OrphanJob() {
@@ -902,7 +892,7 @@ void URLRequest::OrphanJob() {
 int URLRequest::Redirect(const RedirectInfo& redirect_info) {
   // Matches call in NotifyReceivedRedirect.
   OnCallToDelegateComplete();
-  if (net_log_.IsLogging()) {
+  if (net_log_.IsCapturing()) {
     net_log_.AddEvent(
         NetLog::TYPE_URL_REQUEST_REDIRECTED,
         NetLog::StringCallback("location",
@@ -1065,14 +1055,8 @@ void URLRequest::NotifyAuthRequiredComplete(
     case NetworkDelegate::AUTH_REQUIRED_RESPONSE_NO_ACTION:
       // Defer to the URLRequest::Delegate, since the NetworkDelegate
       // didn't take an action.
-      if (delegate_) {
-        // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is
-        // fixed.
-        tracked_objects::ScopedTracker tracking_profile(
-            FROM_HERE_WITH_EXPLICIT_FUNCTION(
-                "423948 URLRequest::Delegate::OnAuthRequired"));
+      if (delegate_)
         delegate_->OnAuthRequired(this, auth_info.get());
-      }
       break;
 
     case NetworkDelegate::AUTH_REQUIRED_RESPONSE_SET_AUTH:
@@ -1091,24 +1075,14 @@ void URLRequest::NotifyAuthRequiredComplete(
 
 void URLRequest::NotifyCertificateRequested(
     SSLCertRequestInfo* cert_request_info) {
-  if (delegate_) {
-    // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
-    tracked_objects::ScopedTracker tracking_profile(
-        FROM_HERE_WITH_EXPLICIT_FUNCTION(
-            "423948 URLRequest::Delegate::OnCertificateRequested"));
+  if (delegate_)
     delegate_->OnCertificateRequested(this, cert_request_info);
-  }
 }
 
 void URLRequest::NotifySSLCertificateError(const SSLInfo& ssl_info,
                                            bool fatal) {
-  if (delegate_) {
-    // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
-    tracked_objects::ScopedTracker tracking_profile(
-        FROM_HERE_WITH_EXPLICIT_FUNCTION(
-            "423948 URLRequest::Delegate::OnSSLCertificateError"));
+  if (delegate_)
     delegate_->OnSSLCertificateError(this, ssl_info, fatal);
-  }
 }
 
 bool URLRequest::CanGetCookies(const CookieList& cookie_list) const {
@@ -1149,13 +1123,8 @@ void URLRequest::NotifyReadCompleted(int bytes_read) {
   if (bytes_read > 0 && !was_cached())
     NetworkChangeNotifier::NotifyDataReceived(*this, bytes_read);
 
-  if (delegate_) {
-    // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
-    tracked_objects::ScopedTracker tracking_profile(
-        FROM_HERE_WITH_EXPLICIT_FUNCTION(
-            "423948 URLRequest::Delegate::OnReadCompleted"));
+  if (delegate_)
     delegate_->OnReadCompleted(this, bytes_read);
-  }
 
   // Nothing below this line as OnReadCompleted may delete |this|.
 }
@@ -1219,6 +1188,13 @@ void URLRequest::set_stack_trace(const base::debug::StackTrace& stack_trace) {
 
 const base::debug::StackTrace* URLRequest::stack_trace() const {
   return stack_trace_.get();
+}
+
+void URLRequest::GetConnectionAttempts(ConnectionAttempts* out) const {
+  if (job_)
+    job_->GetConnectionAttempts(out);
+  else
+    out->clear();
 }
 
 }  // namespace net

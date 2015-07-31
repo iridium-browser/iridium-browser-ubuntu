@@ -15,6 +15,7 @@
 #include "gpu/command_buffer/service/gl_utils.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
 #include "gpu/command_buffer/service/texture_definition.h"
+#include "gpu/config/gpu_switches.h"
 #include "ui/gl/gl_fence.h"
 #include "ui/gl/gl_implementation.h"
 
@@ -162,7 +163,8 @@ FeatureInfo::FeatureFlags::FeatureFlags()
       blend_equation_advanced(false),
       blend_equation_advanced_coherent(false),
       ext_texture_rg(false),
-      enable_subscribe_uniform(false) {
+      enable_subscribe_uniform(false),
+      emulate_primitive_restart_fixed_index(false) {
 }
 
 FeatureInfo::Workarounds::Workarounds() :
@@ -198,6 +200,9 @@ void FeatureInfo::InitializeBasicState(const base::CommandLine& command_line) {
 
   feature_flags_.enable_subscribe_uniform =
       command_line.HasSwitch(switches::kEnableSubscribeUniformExtension);
+
+  unsafe_es3_apis_enabled_ =
+      command_line.HasSwitch(switches::kEnableUnsafeES3APIs);
 
   static const GLenum kAlphaTypes[] = {
       GL_UNSIGNED_BYTE,
@@ -1073,7 +1078,9 @@ void FeatureInfo::InitializeFeatures() {
     validators_.texture_format.AddValue(GL_RED_EXT);
     validators_.texture_format.AddValue(GL_RG_EXT);
     validators_.texture_internal_format.AddValue(GL_RED_EXT);
+    validators_.texture_internal_format.AddValue(GL_R8_EXT);
     validators_.texture_internal_format.AddValue(GL_RG_EXT);
+    validators_.texture_internal_format.AddValue(GL_RG8_EXT);
     validators_.read_pixel_format.AddValue(GL_RED_EXT);
     validators_.read_pixel_format.AddValue(GL_RG_EXT);
     validators_.render_buffer_format.AddValue(GL_R8_EXT);
@@ -1091,6 +1098,7 @@ void FeatureInfo::InitializeFeatures() {
       texture_format_validators_[GL_RG_EXT].AddValue(GL_HALF_FLOAT_OES);
     }
   }
+  UMA_HISTOGRAM_BOOLEAN("GPU.TextureRG", feature_flags_.ext_texture_rg);
 
 #if !defined(OS_MACOSX)
   if (workarounds_.ignore_egl_sync_failures) {
@@ -1101,27 +1109,80 @@ void FeatureInfo::InitializeFeatures() {
   if (workarounds_.avoid_egl_image_target_texture_reuse) {
     TextureDefinition::AvoidEGLTargetTextureReuse();
   }
+
+  if (gl_version_info_->IsLowerThanGL(4, 3)) {
+    // crbug.com/481184.
+    // GL_PRIMITIVE_RESTART_FIXED_INDEX is only available on Desktop GL 4.3+,
+    // but we emulate ES 3.0 on top of Desktop GL 4.2+.
+    feature_flags_.emulate_primitive_restart_fixed_index = true;
+  }
 }
 
 bool FeatureInfo::IsES3Capable() const {
-  if (gl_version_info_->IsAtLeastGLES(3, 0))
-    return true;
-  // TODO(zmo): For Desktop GL, with anything lower than 4.2, we need to check
-  // the existence of a few extensions to have full WebGL 2 capabilities.
-  if (gl_version_info_->IsAtLeastGL(4, 2))
-    return true;
-#if defined(OS_MACOSX)
-  // TODO(zmo): For experimentation purpose  on MacOSX with core profile,
-  // allow 3.2 or plus for now.
-  if (gl_version_info_->IsAtLeastGL(3, 2))
-    return true;
-#endif
+  if (!unsafe_es3_apis_enabled_)
+    return false;
+  if (gl_version_info_)
+    return gl_version_info_->IsES3Capable();
   return false;
 }
 
 void FeatureInfo::EnableES3Validators() {
   DCHECK(IsES3Capable());
   validators_.UpdateValuesES3();
+
+  GLint max_color_attachments = 0;
+  glGetIntegerv(GL_MAX_COLOR_ATTACHMENTS, &max_color_attachments);
+  const int kTotalColorAttachmentEnums = 16;
+  const GLenum kColorAttachments[] = {
+    GL_COLOR_ATTACHMENT0,
+    GL_COLOR_ATTACHMENT1,
+    GL_COLOR_ATTACHMENT2,
+    GL_COLOR_ATTACHMENT3,
+    GL_COLOR_ATTACHMENT4,
+    GL_COLOR_ATTACHMENT5,
+    GL_COLOR_ATTACHMENT6,
+    GL_COLOR_ATTACHMENT7,
+    GL_COLOR_ATTACHMENT8,
+    GL_COLOR_ATTACHMENT9,
+    GL_COLOR_ATTACHMENT10,
+    GL_COLOR_ATTACHMENT11,
+    GL_COLOR_ATTACHMENT12,
+    GL_COLOR_ATTACHMENT13,
+    GL_COLOR_ATTACHMENT14,
+    GL_COLOR_ATTACHMENT15,
+  };
+  if (max_color_attachments < kTotalColorAttachmentEnums) {
+    validators_.attachment.RemoveValues(
+        kColorAttachments + max_color_attachments,
+        kTotalColorAttachmentEnums - max_color_attachments);
+  }
+
+  GLint max_draw_buffers = 0;
+  glGetIntegerv(GL_MAX_DRAW_BUFFERS, &max_draw_buffers);
+  const int kTotalDrawBufferEnums = 16;
+  const GLenum kDrawBuffers[] = {
+    GL_DRAW_BUFFER0,
+    GL_DRAW_BUFFER1,
+    GL_DRAW_BUFFER2,
+    GL_DRAW_BUFFER3,
+    GL_DRAW_BUFFER4,
+    GL_DRAW_BUFFER5,
+    GL_DRAW_BUFFER6,
+    GL_DRAW_BUFFER7,
+    GL_DRAW_BUFFER8,
+    GL_DRAW_BUFFER9,
+    GL_DRAW_BUFFER10,
+    GL_DRAW_BUFFER11,
+    GL_DRAW_BUFFER12,
+    GL_DRAW_BUFFER13,
+    GL_DRAW_BUFFER14,
+    GL_DRAW_BUFFER15,
+  };
+  if (max_draw_buffers < kTotalDrawBufferEnums) {
+    validators_.g_l_state.RemoveValues(
+        kDrawBuffers + max_draw_buffers,
+        kTotalDrawBufferEnums - max_draw_buffers);
+  }
 }
 
 void FeatureInfo::AddExtensionString(const char* s) {

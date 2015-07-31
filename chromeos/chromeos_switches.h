@@ -5,7 +5,7 @@
 #ifndef CHROMEOS_CHROMEOS_SWITCHES_H_
 #define CHROMEOS_CHROMEOS_SWITCHES_H_
 
-#include "base/chromeos/memory_pressure_observer_chromeos.h"
+#include "base/chromeos/memory_pressure_monitor.h"
 #include "chromeos/chromeos_export.h"
 
 namespace chromeos {
@@ -42,30 +42,25 @@ CHROMEOS_EXPORT extern const char kDisableDeviceDisabling[];
 CHROMEOS_EXPORT extern const char kDisableGaiaServices[];
 CHROMEOS_EXPORT extern const char kDisableHIDDetectionOnOOBE[];
 CHROMEOS_EXPORT extern const char kDisableLoginAnimations[];
-CHROMEOS_EXPORT extern const char kDisableLoginScrollIntoView[];
 CHROMEOS_EXPORT extern const char kDisableMemoryPressureSystemChromeOS[];
+CHROMEOS_EXPORT extern const char kDisableMtpWriteSupport[];
 CHROMEOS_EXPORT extern const char kDisableNetworkPortalNotification[];
 CHROMEOS_EXPORT extern const char kDisableNewChannelSwitcherUI[];
 CHROMEOS_EXPORT extern const char kDisableNewKioskUI[];
-CHROMEOS_EXPORT extern const char kDisableNewMDInputView[];
 CHROMEOS_EXPORT extern const char kDisableNewZIPUnpacker[];
 CHROMEOS_EXPORT extern const char kDisableOfficeEditingComponentApp[];
 CHROMEOS_EXPORT extern const char kDisablePhysicalKeyboardAutocorrect[];
 CHROMEOS_EXPORT extern const char kDisableRollbackOption[];
-CHROMEOS_EXPORT extern const char kDisableVoiceInput[];
 CHROMEOS_EXPORT extern const char kDisableVolumeAdjustSound[];
 CHROMEOS_EXPORT extern const char kDisableWakeOnWifi[];
 CHROMEOS_EXPORT extern const char kEafeUrl[];
 CHROMEOS_EXPORT extern const char kEafePath[];
-CHROMEOS_EXPORT extern const char kEnableCarrierSwitching[];
 CHROMEOS_EXPORT extern const char kEnableConsumerManagement[];
 CHROMEOS_EXPORT extern const char kEnableExtensionAssetsSharing[];
-CHROMEOS_EXPORT extern const char kEnableFirewallHolePunching[];
 CHROMEOS_EXPORT extern const char kEnableFirstRunUITransitions[];
 CHROMEOS_EXPORT extern const char kEnableKioskMode[];
-CHROMEOS_EXPORT extern const char kEnableMtpWriteSupport[];
 CHROMEOS_EXPORT extern const char kEnableNetworkPortalNotification[];
-CHROMEOS_EXPORT extern const char kEnableNewKoreanIme[];
+CHROMEOS_EXPORT extern const char kDisableNewKoreanIme[];
 CHROMEOS_EXPORT extern const char kEnablePhysicalKeyboardAutocorrect[];
 CHROMEOS_EXPORT extern const char kEnablePrinterAppSearch[];
 CHROMEOS_EXPORT extern const char kEnableRequestTabletSite[];
@@ -88,6 +83,7 @@ CHROMEOS_EXPORT extern const char kHasChromeOSKeyboard[];
 CHROMEOS_EXPORT extern const char kHomedir[];
 CHROMEOS_EXPORT extern const char kHostPairingOobe[];
 CHROMEOS_EXPORT extern const char kIgnoreUserProfileMappingForTests[];
+CHROMEOS_EXPORT extern const char kInternalDisplayColorProfileFile[];
 CHROMEOS_EXPORT extern const char kLoginManager[];
 CHROMEOS_EXPORT extern const char kLoginProfile[];
 CHROMEOS_EXPORT extern const char kLoginUser[];
@@ -110,13 +106,15 @@ CHROMEOS_EXPORT extern const char kTestMetronomeTimer[];
 CHROMEOS_EXPORT extern const char kWakeOnPackets[];
 CHROMEOS_EXPORT extern const char kDisableCaptivePortalBypassProxy[];
 CHROMEOS_EXPORT extern const char kDisableTimeZoneTrackingOption[];
-CHROMEOS_EXPORT extern const char kEnableOAuthTokenHandlers[];
 CHROMEOS_EXPORT extern const char kDisableWebviewSigninFlow[];
+CHROMEOS_EXPORT extern const char kDisableDataSaverPrompt[];
+CHROMEOS_EXPORT extern const char kEnableDataSaverPrompt[];
+CHROMEOS_EXPORT extern const char kDataSaverPromptDemoMode[];
 
 CHROMEOS_EXPORT bool WakeOnWifiEnabled();
 
 CHROMEOS_EXPORT bool MemoryPressureHandlingEnabled();
-CHROMEOS_EXPORT base::MemoryPressureObserverChromeOS::MemoryPressureThresholds
+CHROMEOS_EXPORT base::chromeos::MemoryPressureMonitor::MemoryPressureThresholds
 GetMemoryPressureThresholds();
 
 }  // namespace switches

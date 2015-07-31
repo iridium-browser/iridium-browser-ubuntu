@@ -78,6 +78,9 @@ const Flag<bool> kBoolFlags[] = {
   { "-install-ddos-callback", &TestConfig::install_ddos_callback },
   { "-fail-ddos-callback", &TestConfig::fail_ddos_callback },
   { "-fail-second-ddos-callback", &TestConfig::fail_second_ddos_callback },
+  { "-handshake-never-done", &TestConfig::handshake_never_done },
+  { "-use-export-context", &TestConfig::use_export_context },
+  { "-reject-peer-renegotiations", &TestConfig::reject_peer_renegotiations },
 };
 
 const Flag<std::string> kStringFlags[] = {
@@ -97,6 +100,8 @@ const Flag<std::string> kStringFlags[] = {
   { "-psk-identity", &TestConfig::psk_identity },
   { "-srtp-profiles", &TestConfig::srtp_profiles },
   { "-cipher", &TestConfig::cipher },
+  { "-export-label", &TestConfig::export_label },
+  { "-export-context", &TestConfig::export_context },
 };
 
 const Flag<std::string> kBase64Flags[] = {
@@ -112,6 +117,7 @@ const Flag<int> kIntFlags[] = {
   { "-min-version", &TestConfig::min_version },
   { "-max-version", &TestConfig::max_version },
   { "-mtu", &TestConfig::mtu },
+  { "-export-keying-material", &TestConfig::export_keying_material },
 };
 
 }  // namespace

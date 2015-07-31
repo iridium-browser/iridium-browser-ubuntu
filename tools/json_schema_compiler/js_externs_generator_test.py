@@ -43,6 +43,7 @@ namespace fakeApi {
     Bar obj;
     long? maybe;
     (DOMString or Greek or long[]) choice;
+    object plainObj;
   };
 
   callback VoidCallback = void();
@@ -114,7 +115,8 @@ var Bar;
  *   anythingGoes: !Array<*>,
  *   obj: Bar,
  *   maybe: (number|undefined),
- *   choice: (string|!chrome.fakeApi.Greek|!Array<number>)
+ *   choice: (string|!chrome.fakeApi.Greek|!Array<number>),
+ *   plainObj: Object
  * }}
  * @see https://developer.chrome.com/extensions/fakeApi#type-Baz
  */
@@ -161,6 +163,12 @@ fake_json = """// Copyright 2014 The Chromium Authors. All rights reserved.
   {
     "namespace": "fakeJson",
     "description": "Fake JSON API Stuff",
+    "types": [ {
+      "id": "CrazyEnum",
+      "type": "string",
+      "enum": ["camelCaseEnum", "Non-Characters", "5NumFirst", \
+"3Just-plainOld_MEAN"]
+    } ],
     "functions": [ {
       "name": "funcWithInlineObj",
       "type": "function",
@@ -227,6 +235,17 @@ json_expected = """// Copyright %s The Chromium Authors. All rights reserved.
  * @const
  */
 chrome.fakeJson = {};
+
+/**
+ * @enum {string}
+ * @see https://developer.chrome.com/extensions/fakeJson#type-CrazyEnum
+ */
+chrome.fakeJson.CrazyEnum = {
+  CAMEL_CASE_ENUM: 'camelCaseEnum',
+  NON_CHARACTERS: 'Non-Characters',
+  _5NUM_FIRST: '5NumFirst',
+  _3JUST_PLAIN_OLD_MEAN: '3Just-plainOld_MEAN',
+};
 
 /**
  * @param {{

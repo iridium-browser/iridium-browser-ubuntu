@@ -127,6 +127,15 @@ bool BitmapImage::currentFrameHasSingleSecurityOrigin() const
     return true;
 }
 
+int BitmapImage::totalFrameBytes()
+{
+    const size_t numFrames = frameCount();
+    size_t totalBytes = 0;
+    for (size_t i = 0; i < numFrames; ++i)
+        totalBytes += m_source.frameBytesAtIndex(i);
+    return safeCast<int>(totalBytes);
+}
+
 void BitmapImage::destroyDecodedData(bool destroyAll)
 {
     for (size_t i = 0; i < m_frames.size(); ++i) {
@@ -168,8 +177,8 @@ void BitmapImage::cacheFrame(size_t index)
     if (m_frames.size() < numFrames)
         m_frames.grow(numFrames);
 
-    bool created = m_source.createFrameAtIndex(index, &m_frames[index].m_frame);
-    if (numFrames == 1 && created)
+    int deltaBytes = totalFrameBytes();
+    if (m_source.createFrameAtIndex(index, &m_frames[index].m_frame) && numFrames == 1)
         checkForSolidColor();
 
     m_frames[index].m_orientation = m_source.orientationAtIndex(index);
@@ -184,13 +193,12 @@ void BitmapImage::cacheFrame(size_t index)
     if (frameSize != m_size)
         m_hasUniformFrameSize = false;
 
-    if (created) {
-        int deltaBytes = safeCast<int>(m_frames[index].m_frameBytes);
-        // The fully-decoded frame will subsume the partially decoded data used
-        // to determine image properties.
-        if (imageObserver())
-            imageObserver()->decodedSizeChanged(this, deltaBytes);
-    }
+    // We need to check the total bytes before and after the decode call, not
+    // just the current frame size, because some multi-frame images may require
+    // decoding multiple frames to decode the current frame.
+    deltaBytes = totalFrameBytes() - deltaBytes;
+    if (deltaBytes && imageObserver())
+        imageObserver()->decodedSizeChanged(this, deltaBytes);
 }
 
 void BitmapImage::updateSize() const
@@ -241,12 +249,12 @@ bool BitmapImage::dataChanged(bool allDataReceived)
     // start of the frame data), and any or none of them might be the particular
     // frame affected by appending new data here. Thus we have to clear all the
     // incomplete frames to be safe.
-    unsigned frameBytesCleared = 0;
+    size_t frameBytesCleared = 0;
     for (size_t i = 0; i < m_frames.size(); ++i) {
         // NOTE: Don't call frameIsCompleteAtIndex() here, that will try to
         // decode any uncached (i.e. never-decoded or
         // cleared-on-a-previous-pass) frames!
-        unsigned frameBytes = m_frames[i].m_frameBytes;
+        size_t frameBytes = m_frames[i].m_frameBytes;
         if (m_frames[i].m_haveMetadata && !m_frames[i].m_isComplete)
             frameBytesCleared += (m_frames[i].clear(true) ? frameBytes : 0);
     }
@@ -589,6 +597,14 @@ bool BitmapImage::maybeAnimated()
         return true;
 
     return m_source.repetitionCount() != cAnimationNone;
+}
+
+void BitmapImage::advanceTime(double deltaTimeInSeconds)
+{
+    if (m_desiredFrameStartTime)
+        m_desiredFrameStartTime -= deltaTimeInSeconds;
+    else
+        m_desiredFrameStartTime = monotonicallyIncreasingTime() - deltaTimeInSeconds;
 }
 
 void BitmapImage::advanceAnimation(Timer<BitmapImage>*)

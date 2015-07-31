@@ -21,6 +21,7 @@
 #include "base/timer/timer.h"
 #include "chrome/browser/browser_process.h"
 
+class ChromeChildProcessWatcher;
 class ChromeDeviceClient;
 class ChromeNetLog;
 class ChromeResourceDispatcherHostDelegate;
@@ -138,6 +139,8 @@ class BrowserProcessImpl : public BrowserProcess,
 #endif
   network_time::NetworkTimeTracker* network_time_tracker() override;
   gcm::GCMDriver* gcm_driver() override;
+  ShellIntegration::DefaultWebClientState CachedDefaultWebClientState()
+      override;
 
   static void RegisterPrefs(PrefRegistrySimple* registry);
 
@@ -161,6 +164,8 @@ class BrowserProcessImpl : public BrowserProcess,
   void ApplyAllowCrossOriginAuthPromptPolicy();
   void ApplyDefaultBrowserPolicy();
   void ApplyMetricsReportingPolicy();
+
+  void CacheDefaultWebClientState();
 
   scoped_ptr<MetricsServicesManager> metrics_services_manager_;
 
@@ -301,9 +306,13 @@ class BrowserProcessImpl : public BrowserProcess,
 
   scoped_ptr<gcm::GCMDriver> gcm_driver_;
 
+  scoped_ptr<ChromeChildProcessWatcher> child_process_watcher_;
+
 #if !defined(OS_ANDROID)
   scoped_ptr<ChromeDeviceClient> device_client_;
 #endif
+
+  ShellIntegration::DefaultWebClientState cached_default_web_client_state_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserProcessImpl);
 };

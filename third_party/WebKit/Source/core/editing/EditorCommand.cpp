@@ -267,10 +267,10 @@ static unsigned verticalScrollDistance(LocalFrame& frame)
     Element* focusedElement = frame.document()->focusedElement();
     if (!focusedElement)
         return 0;
-    LayoutObject* renderer = focusedElement->layoutObject();
-    if (!renderer || !renderer->isBox())
+    LayoutObject* layoutObject = focusedElement->layoutObject();
+    if (!layoutObject || !layoutObject->isBox())
         return 0;
-    LayoutBox& layoutBox = toLayoutBox(*renderer);
+    LayoutBox& layoutBox = toLayoutBox(*layoutObject);
     const ComputedStyle* style = layoutBox.style();
     if (!style)
         return 0;
@@ -420,7 +420,7 @@ static bool executeDeleteWordForward(LocalFrame& frame, Event*, EditorCommandSou
 
 static bool executeFindString(LocalFrame& frame, Event*, EditorCommandSource, const String& value)
 {
-    return frame.editor().findString(value, true, false, true, false);
+    return frame.editor().findString(value, CaseInsensitive | WrapAround);
 }
 
 static bool executeFontName(LocalFrame& frame, Event*, EditorCommandSource source, const String& value)
@@ -1737,7 +1737,7 @@ bool Editor::Command::execute(const String& parameter, Event* triggeringEvent) c
             return false;
     }
     frame().document()->updateLayoutIgnorePendingStylesheets();
-    blink::Platform::current()->histogramSparse("WebCore.Editing.Commands", m_command->idForUserMetrics);
+    Platform::current()->histogramSparse("WebCore.Editing.Commands", m_command->idForUserMetrics);
     return m_command->execute(*m_frame, triggeringEvent, m_source, parameter);
 }
 

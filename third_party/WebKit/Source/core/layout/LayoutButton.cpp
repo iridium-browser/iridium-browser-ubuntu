@@ -68,6 +68,8 @@ void LayoutButton::updateAnonymousChildStyle(const LayoutObject& child, Computed
     ASSERT(!m_inner || &child == m_inner);
 
     childStyle.setFlexGrow(1.0f);
+    // min-width: 0; is needed for correct shrinking.
+    childStyle.setMinWidth(Length(0, Fixed));
     // Use margin:auto instead of align-items:center to get safe centering, i.e.
     // when the content overflows, treat it the same as align-items: flex-start.
     childStyle.setMarginTop(Length());
@@ -77,14 +79,6 @@ void LayoutButton::updateAnonymousChildStyle(const LayoutObject& child, Computed
     childStyle.setFlexWrap(style()->flexWrap());
     childStyle.setAlignItems(style()->alignItems());
     childStyle.setAlignContent(style()->alignContent());
-}
-
-bool LayoutButton::canHaveGeneratedChildren() const
-{
-    // Input elements can't have generated children, but button elements can. We'll
-    // write the code assuming any other button types that might emerge in the future
-    // can also have children.
-    return !isHTMLInputElement(*node());
 }
 
 LayoutRect LayoutButton::controlClipRect(const LayoutPoint& additionalOffset) const
@@ -113,4 +107,10 @@ int LayoutButton::baselinePosition(FontBaseline baseline, bool firstLine, LineDi
     return LayoutFlexibleBox::baselinePosition(baseline, firstLine, direction, linePositionMode);
 }
 
+
+// For compatibility with IE/FF we only clip overflow on input elements.
+bool LayoutButton::hasControlClip() const
+{
+    return !isHTMLButtonElement(node());
+}
 } // namespace blink

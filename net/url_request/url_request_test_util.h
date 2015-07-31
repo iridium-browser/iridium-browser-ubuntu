@@ -70,7 +70,8 @@ class TestURLRequestContext : public URLRequestContext {
   }
 
   void set_http_network_session_params(
-      const HttpNetworkSession::Params& params) {
+      scoped_ptr<HttpNetworkSession::Params> params) {
+    http_network_session_params_ = params.Pass();
   }
 
   void SetSdchManager(scoped_ptr<SdchManager> sdch_manager) {
@@ -299,9 +300,9 @@ class TestNetworkDelegate : public NetworkDelegateImpl {
   int OnBeforeSendHeaders(URLRequest* request,
                           const CompletionCallback& callback,
                           HttpRequestHeaders* headers) override;
-  void OnBeforeSendProxyHeaders(net::URLRequest* request,
-                                const net::ProxyInfo& proxy_info,
-                                net::HttpRequestHeaders* headers) override;
+  void OnBeforeSendProxyHeaders(URLRequest* request,
+                                const ProxyInfo& proxy_info,
+                                HttpRequestHeaders* headers) override;
   void OnSendHeaders(URLRequest* request,
                      const HttpRequestHeaders& headers) override;
   int OnHeadersReceived(
@@ -378,31 +379,6 @@ class TestNetworkDelegate : public NetworkDelegateImpl {
   bool first_party_only_cookies_enabled_;               // false by default
   bool cancel_request_with_policy_violating_referrer_;  // false by default
   bool will_be_intercepted_on_next_error_;
-};
-
-// Overrides the host used by the LocalHttpTestServer in
-// url_request_unittest.cc . This is used by the chrome_frame_net_tests due to
-// a mysterious bug when tests execute over the loopback adapter. See
-// http://crbug.com/114369 .
-class ScopedCustomUrlRequestTestHttpHost {
- public:
-  // Sets the host name to be used. The previous hostname will be stored and
-  // restored upon destruction. Note that if the lifetimes of two or more
-  // instances of this class overlap, they must be strictly nested.
-  explicit ScopedCustomUrlRequestTestHttpHost(const std::string& new_value);
-
-  ~ScopedCustomUrlRequestTestHttpHost();
-
-  // Returns the current value to be used by HTTP tests in
-  // url_request_unittest.cc .
-  static const std::string& value();
-
- private:
-  static std::string value_;
-  const std::string old_value_;
-  const std::string new_value_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedCustomUrlRequestTestHttpHost);
 };
 
 //-----------------------------------------------------------------------------

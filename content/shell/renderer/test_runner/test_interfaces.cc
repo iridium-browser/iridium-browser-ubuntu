@@ -6,10 +6,11 @@
 
 #include <string>
 
-#include "base/command_line.h"
+#include "base/json/json_writer.h"
+#include "base/json/string_escape.h"
 #include "base/logging.h"
 #include "base/strings/stringprintf.h"
-#include "content/shell/common/shell_switches.h"
+#include "base/values.h"
 #include "content/shell/renderer/test_runner/accessibility_controller.h"
 #include "content/shell/renderer/test_runner/event_sender.h"
 #include "content/shell/renderer/test_runner/gamepad_controller.h"
@@ -30,10 +31,6 @@ TestInterfaces::TestInterfaces()
       test_runner_(new TestRunner(this)),
       delegate_(0) {
   blink::setLayoutTestMode(true);
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableFontAntialiasing))
-    blink::setFontAntialiasingEnabledForTest(true);
-
   // NOTE: please don't put feature specific enable flags here,
   // instead add them to RuntimeEnabledFeatures.in
 
@@ -118,22 +115,12 @@ void TestInterfaces::ConfigureForTestWithURL(const blink::WebURL& test_url,
     test_runner_->ClearDevToolsLocalStorage();
   if (spec.find("/inspector/") != std::string::npos) {
     // Subfolder name determines default panel to open.
-    std::string settings = "";
     std::string test_path = spec.substr(spec.find("/inspector/") + 11);
-    size_t slash_index = test_path.find("/");
-    std::string test_path_setting = base::StringPrintf(
-        "\"testPath\":\"\\\"%s\\\"\"", spec.c_str());
-
-    // TODO(pfeldman): remove once migrated to testPath.
-    std::string last_active_panel;
-    if (slash_index != std::string::npos) {
-      last_active_panel = base::StringPrintf(
-          ",\"lastActivePanel\":\"\\\"%s\\\"\"",
-          test_path.substr(0, slash_index).c_str());
-    }
-
-    test_runner_->ShowDevTools(base::StringPrintf("{%s%s}",
-        test_path_setting.c_str(), last_active_panel.c_str()), std::string());
+    base::DictionaryValue settings;
+    settings.SetString("testPath", base::GetQuotedJSONString(spec));
+    std::string settings_string;
+    base::JSONWriter::Write(&settings, &settings_string);
+    test_runner_->ShowDevTools(settings_string, std::string());
   }
   if (spec.find("/viewsource/") != std::string::npos) {
     test_runner_->setShouldEnableViewSource(true);

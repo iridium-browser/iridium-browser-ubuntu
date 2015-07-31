@@ -12,6 +12,7 @@
 #include "media/base/decryptor.h"
 #include "media/base/media_export.h"
 #include "media/base/pipeline_status.h"
+#include "media/base/time_source.h"
 
 namespace media {
 
@@ -23,9 +24,6 @@ class MEDIA_EXPORT VideoRenderer {
  public:
   // Used to paint VideoFrame.
   typedef base::Callback<void(const scoped_refptr<VideoFrame>&)> PaintCB;
-
-  // Used to convert a media timestamp into a wall clock timestamp.
-  typedef base::Callback<base::TimeTicks(base::TimeDelta)> WallClockTimeCB;
 
   VideoRenderer();
 
@@ -45,9 +43,6 @@ class MEDIA_EXPORT VideoRenderer {
   // |buffering_state_cb| is executed when video rendering has either run out of
   // data or has enough data to continue playback.
   //
-  // |paint_cb| is executed on the video frame timing thread whenever a new
-  // frame is available for painting. Can be called from any thread.
-  //
   // |ended_cb| is executed when video rendering has reached the end of stream.
   //
   // |error_cb| is executed if an error was encountered after initialization.
@@ -63,10 +58,9 @@ class MEDIA_EXPORT VideoRenderer {
       const SetDecryptorReadyCB& set_decryptor_ready_cb,
       const StatisticsCB& statistics_cb,
       const BufferingStateCB& buffering_state_cb,
-      const PaintCB& paint_cb,
       const base::Closure& ended_cb,
       const PipelineStatusCB& error_cb,
-      const WallClockTimeCB& wall_clock_time_cb,
+      const TimeSource::WallClockTimeCB& wall_clock_time_cb,
       const base::Closure& waiting_for_decryption_key_cb) = 0;
 
   // Discards any video data and stops reading from |stream|, executing
@@ -81,6 +75,11 @@ class MEDIA_EXPORT VideoRenderer {
   //
   // Only valid to call after a successful Initialize() or Flush().
   virtual void StartPlayingFrom(base::TimeDelta timestamp) = 0;
+
+  // Called when time starts or stops moving. Time progresses when a base time
+  // has been set and the playback rate is > 0. If either condition changes,
+  // |time_progressing| will be false.
+  virtual void OnTimeStateChanged(bool time_progressing) = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(VideoRenderer);

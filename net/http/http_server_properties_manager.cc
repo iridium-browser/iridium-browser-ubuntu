@@ -27,7 +27,7 @@ const int64 kUpdateCacheDelayMs = 1000;
 // Time to wait before starting an update the preferences from the
 // http_server_properties_impl_ cache. Scheduling another update during this
 // period will reset the timer.
-const int64 kUpdatePrefsDelayMs = 5000;
+const int64 kUpdatePrefsDelayMs = 60000;
 
 // "version" 0 indicates, http_server_properties doesn't have "version"
 // property.
@@ -155,12 +155,20 @@ bool HttpServerPropertiesManager::SupportsRequestPriority(
   return http_server_properties_impl_->SupportsRequestPriority(server);
 }
 
+bool HttpServerPropertiesManager::GetSupportsSpdy(const HostPortPair& server) {
+  DCHECK(network_task_runner_->RunsTasksOnCurrentThread());
+  return http_server_properties_impl_->GetSupportsSpdy(server);
+}
+
 void HttpServerPropertiesManager::SetSupportsSpdy(const HostPortPair& server,
                                                   bool support_spdy) {
   DCHECK(network_task_runner_->RunsTasksOnCurrentThread());
 
+  bool old_support_spdy = http_server_properties_impl_->GetSupportsSpdy(server);
   http_server_properties_impl_->SetSupportsSpdy(server, support_spdy);
-  ScheduleUpdatePrefsOnNetworkThread();
+  bool new_support_spdy = http_server_properties_impl_->GetSupportsSpdy(server);
+  if (old_support_spdy != new_support_spdy)
+    ScheduleUpdatePrefsOnNetworkThread(SUPPORTS_SPDY);
 }
 
 bool HttpServerPropertiesManager::RequiresHTTP11(const HostPortPair& server) {
@@ -173,7 +181,7 @@ void HttpServerPropertiesManager::SetHTTP11Required(
   DCHECK(network_task_runner_->RunsTasksOnCurrentThread());
 
   http_server_properties_impl_->SetHTTP11Required(server);
-  ScheduleUpdatePrefsOnNetworkThread();
+  ScheduleUpdatePrefsOnNetworkThread(HTTP_11_REQUIRED);
 }
 
 void HttpServerPropertiesManager::MaybeForceHTTP11(const HostPortPair& server,
@@ -193,9 +201,15 @@ void HttpServerPropertiesManager::SetAlternativeService(
     const AlternativeService& alternative_service,
     double alternative_probability) {
   DCHECK(network_task_runner_->RunsTasksOnCurrentThread());
+  AlternativeService old_alternative_service = GetAlternativeService(origin);
   http_server_properties_impl_->SetAlternativeService(
       origin, alternative_service, alternative_probability);
-  ScheduleUpdatePrefsOnNetworkThread();
+  AlternativeService new_alternative_service = GetAlternativeService(origin);
+  // If |alternative_probability| was above the threashold now it is below or
+  // vice versa, then a different alternative_service will be returned from the
+  // old and if so, then persist.
+  if (old_alternative_service != new_alternative_service)
+    ScheduleUpdatePrefsOnNetworkThread(SET_ALTERNATIVE_SERVICE);
 }
 
 void HttpServerPropertiesManager::MarkAlternativeServiceBroken(
@@ -203,7 +217,7 @@ void HttpServerPropertiesManager::MarkAlternativeServiceBroken(
   DCHECK(network_task_runner_->RunsTasksOnCurrentThread());
   http_server_properties_impl_->MarkAlternativeServiceBroken(
       alternative_service);
-  ScheduleUpdatePrefsOnNetworkThread();
+  ScheduleUpdatePrefsOnNetworkThread(MARK_ALTERNATIVE_SERVICE_BROKEN);
 }
 
 void HttpServerPropertiesManager::MarkAlternativeServiceRecentlyBroken(
@@ -211,7 +225,7 @@ void HttpServerPropertiesManager::MarkAlternativeServiceRecentlyBroken(
   DCHECK(network_task_runner_->RunsTasksOnCurrentThread());
   http_server_properties_impl_->MarkAlternativeServiceRecentlyBroken(
       alternative_service);
-  ScheduleUpdatePrefsOnNetworkThread();
+  ScheduleUpdatePrefsOnNetworkThread(MARK_ALTERNATIVE_SERVICE_RECENTLY_BROKEN);
 }
 
 bool HttpServerPropertiesManager::IsAlternativeServiceBroken(
@@ -231,15 +245,28 @@ bool HttpServerPropertiesManager::WasAlternativeServiceRecentlyBroken(
 void HttpServerPropertiesManager::ConfirmAlternativeService(
     const AlternativeService& alternative_service) {
   DCHECK(network_task_runner_->RunsTasksOnCurrentThread());
+  bool old_value = http_server_properties_impl_->IsAlternativeServiceBroken(
+      alternative_service);
   http_server_properties_impl_->ConfirmAlternativeService(alternative_service);
-  ScheduleUpdatePrefsOnNetworkThread();
+  bool new_value = http_server_properties_impl_->IsAlternativeServiceBroken(
+      alternative_service);
+  // For persisting, we only care about the value returned by
+  // IsAlternativeServiceBroken. If that value changes, then call persist.
+  if (old_value != new_value)
+    ScheduleUpdatePrefsOnNetworkThread(CONFIRM_ALTERNATIVE_SERVICE);
 }
 
 void HttpServerPropertiesManager::ClearAlternativeService(
     const HostPortPair& origin) {
   DCHECK(network_task_runner_->RunsTasksOnCurrentThread());
+  const AlternativeServiceMap& map =
+      http_server_properties_impl_->alternative_service_map();
+  size_t old_size = map.size();
   http_server_properties_impl_->ClearAlternativeService(origin);
-  ScheduleUpdatePrefsOnNetworkThread();
+  size_t new_size = map.size();
+  // Persist only if we have deleted an entry.
+  if (old_size != new_size)
+    ScheduleUpdatePrefsOnNetworkThread(CLEAR_ALTERNATIVE_SERVICE);
 }
 
 const AlternativeServiceMap&
@@ -254,10 +281,10 @@ base::Value* HttpServerPropertiesManager::GetAlternativeServiceInfoAsValue()
   return http_server_properties_impl_->GetAlternativeServiceInfoAsValue();
 }
 
-void HttpServerPropertiesManager::SetAlternateProtocolProbabilityThreshold(
+void HttpServerPropertiesManager::SetAlternativeServiceProbabilityThreshold(
     double threshold) {
   DCHECK(network_task_runner_->RunsTasksOnCurrentThread());
-  http_server_properties_impl_->SetAlternateProtocolProbabilityThreshold(
+  http_server_properties_impl_->SetAlternativeServiceProbabilityThreshold(
       threshold);
 }
 
@@ -276,7 +303,7 @@ bool HttpServerPropertiesManager::SetSpdySetting(
   bool persist = http_server_properties_impl_->SetSpdySetting(
       host_port_pair, id, flags, value);
   if (persist)
-    ScheduleUpdatePrefsOnNetworkThread();
+    ScheduleUpdatePrefsOnNetworkThread(SET_SPDY_SETTING);
   return persist;
 }
 
@@ -284,13 +311,13 @@ void HttpServerPropertiesManager::ClearSpdySettings(
     const HostPortPair& host_port_pair) {
   DCHECK(network_task_runner_->RunsTasksOnCurrentThread());
   http_server_properties_impl_->ClearSpdySettings(host_port_pair);
-  ScheduleUpdatePrefsOnNetworkThread();
+  ScheduleUpdatePrefsOnNetworkThread(CLEAR_SPDY_SETTINGS);
 }
 
 void HttpServerPropertiesManager::ClearAllSpdySettings() {
   DCHECK(network_task_runner_->RunsTasksOnCurrentThread());
   http_server_properties_impl_->ClearAllSpdySettings();
-  ScheduleUpdatePrefsOnNetworkThread();
+  ScheduleUpdatePrefsOnNetworkThread(CLEAR_ALL_SPDY_SETTINGS);
 }
 
 const SpdySettingsMap& HttpServerPropertiesManager::spdy_settings_map()
@@ -309,16 +336,29 @@ void HttpServerPropertiesManager::SetSupportsQuic(
     bool used_quic,
     const IPAddressNumber& address) {
   DCHECK(network_task_runner_->RunsTasksOnCurrentThread());
+  IPAddressNumber old_last_quic_addr;
+  http_server_properties_impl_->GetSupportsQuic(&old_last_quic_addr);
   http_server_properties_impl_->SetSupportsQuic(used_quic, address);
-  ScheduleUpdatePrefsOnNetworkThread();
+  IPAddressNumber new_last_quic_addr;
+  http_server_properties_impl_->GetSupportsQuic(&new_last_quic_addr);
+  if (old_last_quic_addr != new_last_quic_addr)
+    ScheduleUpdatePrefsOnNetworkThread(SET_SUPPORTS_QUIC);
 }
 
 void HttpServerPropertiesManager::SetServerNetworkStats(
     const HostPortPair& host_port_pair,
     ServerNetworkStats stats) {
   DCHECK(network_task_runner_->RunsTasksOnCurrentThread());
+  ServerNetworkStats old_stats;
+  const ServerNetworkStats* old_stats_ptr =
+      http_server_properties_impl_->GetServerNetworkStats(host_port_pair);
+  if (http_server_properties_impl_->GetServerNetworkStats(host_port_pair))
+    old_stats = *old_stats_ptr;
   http_server_properties_impl_->SetServerNetworkStats(host_port_pair, stats);
-  ScheduleUpdatePrefsOnNetworkThread();
+  ServerNetworkStats new_stats =
+      *(http_server_properties_impl_->GetServerNetworkStats(host_port_pair));
+  if (old_stats != new_stats)
+    ScheduleUpdatePrefsOnNetworkThread(SET_SERVER_NETWORK_STATS);
 }
 
 const ServerNetworkStats* HttpServerPropertiesManager::GetServerNetworkStats(
@@ -652,18 +692,22 @@ void HttpServerPropertiesManager::UpdateCacheFromPrefsOnNetworkThread(
 
   // Update the prefs with what we have read (delete all corrupted prefs).
   if (detected_corrupted_prefs)
-    ScheduleUpdatePrefsOnNetworkThread();
+    ScheduleUpdatePrefsOnNetworkThread(DETECTED_CORRUPTED_PREFS);
 }
 
 //
 // Update Preferences with data from the cached data.
 //
-void HttpServerPropertiesManager::ScheduleUpdatePrefsOnNetworkThread() {
+void HttpServerPropertiesManager::ScheduleUpdatePrefsOnNetworkThread(
+    Location location) {
   DCHECK(network_task_runner_->RunsTasksOnCurrentThread());
   // Cancel pending updates, if any.
   network_prefs_update_timer_->Stop();
   StartPrefsUpdateTimerOnNetworkThread(
       base::TimeDelta::FromMilliseconds(kUpdatePrefsDelayMs));
+  // TODO(rtenneti): Delete the following histogram after collecting some data.
+  UMA_HISTOGRAM_ENUMERATION("Net.HttpServerProperties.UpdatePrefs", location,
+                            HttpServerPropertiesManager::NUM_LOCATIONS);
 }
 
 void HttpServerPropertiesManager::StartPrefsUpdateTimerOnNetworkThread(

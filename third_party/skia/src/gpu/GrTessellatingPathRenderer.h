@@ -22,21 +22,21 @@ public:
                      const GrPipelineBuilder*,
                      const SkMatrix&,
                      const SkPath&,
-                     const SkStrokeRec&,
+                     const GrStrokeInfo&,
                      bool antiAlias) const override;
 protected:
 
     StencilSupport onGetStencilSupport(const GrDrawTarget*,
                                        const GrPipelineBuilder*,
                                        const SkPath&,
-                                       const SkStrokeRec&) const override;
+                                       const GrStrokeInfo&) const override;
 
     bool onDrawPath(GrDrawTarget*,
                     GrPipelineBuilder*,
                     GrColor,
                     const SkMatrix& viewMatrix,
                     const SkPath&,
-                    const SkStrokeRec&,
+                    const GrStrokeInfo&,
                     bool antiAlias) override;
 
     typedef GrPathRenderer INHERITED;

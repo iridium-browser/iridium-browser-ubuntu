@@ -88,7 +88,9 @@ class ModuleRtpRtcpImpl : public RtpRtcp {
 
   void SetRtxSsrc(uint32_t ssrc) override;
 
-  void SetRtxSendPayloadType(int payload_type) override;
+  void SetRtxSendPayloadType(int payload_type,
+                             int associated_payload_type) override;
+  std::pair<int, int> RtxSendPayloadType() const override;
 
   // Sends kRtcpByeCode when going from true to false.
   int32_t SetSendingStatus(bool sending) override;
@@ -159,7 +161,10 @@ class ModuleRtpRtcpImpl : public RtpRtcp {
 
   // Force a send of an RTCP packet.
   // Normal SR and RR are triggered via the process function.
-  int32_t SendRTCP(uint32_t rtcp_packet_type = kRtcpReport) override;
+  int32_t SendRTCP(RTCPPacketType rtcpPacketType) override;
+
+  int32_t SendCompoundRTCP(
+      const std::set<RTCPPacketType>& rtcpPacketTypes) override;
 
   int32_t ResetSendDataCountersRTP() override;
 
@@ -339,9 +344,6 @@ class ModuleRtpRtcpImpl : public RtpRtcp {
 
   // Get remote SequenceNumber.
   uint16_t RemoteSequenceNumber() const;
-
-  // Only for internal testing.
-  uint32_t LastSendReport(int64_t& last_rtcptime);
 
   RTPSender rtp_sender_;
 

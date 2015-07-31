@@ -32,12 +32,16 @@ public:
     void add(SkOpPtT* coinPtTStart, SkOpPtT* coinPtTEnd, SkOpPtT* oppPtTStart,
              SkOpPtT* oppPtTEnd, SkChunkAlloc* allocator);
     bool addMissing(SkChunkAlloc* allocator);
+    void addMissing(SkCoincidentSpans* check, SkChunkAlloc* allocator);
     bool apply();
     bool contains(SkOpPtT* coinPtTStart, SkOpPtT* coinPtTEnd, SkOpPtT* oppPtTStart,
                   SkOpPtT* oppPtTEnd, bool flipped);
+    void debugShowCoincidence() const;
     void detach(SkCoincidentSpans* );
     void dump() const;
     void expand();
+    bool extend(SkOpPtT* coinPtTStart, SkOpPtT* coinPtTEnd, SkOpPtT* oppPtTStart,
+        SkOpPtT* oppPtTEnd);
     void fixUp(SkOpPtT* deleted, SkOpPtT* kept);
     void mark();
 

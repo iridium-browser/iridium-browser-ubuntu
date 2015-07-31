@@ -32,7 +32,7 @@ void InterpolationEffect::getActiveInterpolations(double fraction, double iterat
         result->shrink(resultIndex);
 }
 
-void InterpolationEffect::addInterpolationsFromKeyframes(CSSPropertyID property, Element* element, const ComputedStyle* baseStyle, Keyframe::PropertySpecificKeyframe& keyframeA, Keyframe::PropertySpecificKeyframe& keyframeB, double applyFrom, double applyTo)
+void InterpolationEffect::addInterpolationsFromKeyframes(PropertyHandle property, Element* element, const ComputedStyle* baseStyle, Keyframe::PropertySpecificKeyframe& keyframeA, Keyframe::PropertySpecificKeyframe& keyframeB, double applyFrom, double applyTo)
 {
     RefPtrWillBeRawPtr<Interpolation> interpolation = keyframeA.maybeCreateInterpolation(property, keyframeB, element, baseStyle);
 
@@ -41,9 +41,6 @@ void InterpolationEffect::addInterpolationsFromKeyframes(CSSPropertyID property,
     } else {
         RefPtrWillBeRawPtr<Interpolation> interpolationA = keyframeA.maybeCreateInterpolation(property, keyframeA, element, baseStyle);
         RefPtrWillBeRawPtr<Interpolation> interpolationB = keyframeB.maybeCreateInterpolation(property, keyframeB, element, baseStyle);
-
-        ASSERT(interpolationA);
-        ASSERT(interpolationB);
 
         Vector<TimingFunction::PartitionRegion> regions = Vector<TimingFunction::PartitionRegion>();
         keyframeA.easing().partition(regions);
@@ -65,8 +62,10 @@ void InterpolationEffect::addInterpolationsFromKeyframes(CSSPropertyID property,
                 continue;
             }
 
-            addInterpolation(interpolation.release(),
-                &keyframeA.easing(), regionStart, regionEnd, regionApplyFrom, regionApplyTo);
+            if (interpolation) {
+                addInterpolation(interpolation.release(),
+                    &keyframeA.easing(), regionStart, regionEnd, regionApplyFrom, regionApplyTo);
+            }
 
             regionIndex++;
         }

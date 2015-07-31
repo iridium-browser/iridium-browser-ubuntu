@@ -46,8 +46,8 @@ void vp9_init_layer_context(VP9_COMP *const cpi) {
                            "Failed to allocate empty frame for multiple frame "
                            "contexts");
 
-      vpx_memset(cpi->svc.empty_frame.img.buffer_alloc, 0x80,
-                 cpi->svc.empty_frame.img.buffer_alloc_sz);
+      memset(cpi->svc.empty_frame.img.buffer_alloc, 0x80,
+             cpi->svc.empty_frame.img.buffer_alloc_sz);
       cpi->svc.empty_frame_width = cpi->common.width;
       cpi->svc.empty_frame_height = cpi->common.height;
     }
@@ -195,7 +195,7 @@ void vp9_update_spatial_layer_framerate(VP9_COMP *const cpi, double framerate) {
                                    oxcf->two_pass_vbrmin_section / 100);
   lrc->max_frame_bandwidth = (int)(((int64_t)lrc->avg_frame_bandwidth *
                                    oxcf->two_pass_vbrmax_section) / 100);
-  vp9_rc_set_gf_max_interval(cpi, lrc);
+  vp9_rc_set_gf_interval_range(cpi, lrc);
 }
 
 void vp9_restore_layer_context(VP9_COMP *const cpi) {

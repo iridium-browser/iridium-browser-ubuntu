@@ -30,7 +30,6 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
-#include "chrome/grit/google_chrome_strings.h"
 #include "components/google/core/browser/google_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
@@ -146,8 +145,7 @@ std::string ReadFCCLabelText() {
 }  // namespace
 
 HelpHandler::HelpHandler()
-    : version_updater_(VersionUpdater::Create(nullptr)),
-      weak_factory_(this) {
+    : weak_factory_(this) {
 }
 
 HelpHandler::~HelpHandler() {
@@ -301,10 +299,7 @@ void HelpHandler::GetLocalizedValues(base::DictionaryValue* localized_strings) {
 }
 
 void HelpHandler::RegisterMessages() {
-#if defined(OS_CHROMEOS)
-  version_updater_.reset(
-      VersionUpdater::Create(web_ui()->GetWebContents()->GetBrowserContext()));
-#endif
+  version_updater_.reset(VersionUpdater::Create(web_ui()->GetWebContents()));
   registrar_.Add(this, chrome::NOTIFICATION_UPGRADE_RECOMMENDED,
                  content::NotificationService::AllSources());
 

@@ -65,11 +65,11 @@ static_library("system_wrappers") {
     "source/critical_section_win.h",
     "source/data_log_c.cc",
     "source/event.cc",
-    "source/event_posix.cc",
-    "source/event_posix.h",
+    "source/event_timer_posix.cc",
+    "source/event_timer_posix.h",
+    "source/event_timer_win.cc",
+    "source/event_timer_win.h",
     "source/event_tracer.cc",
-    "source/event_win.cc",
-    "source/event_win.h",
     "source/file_impl.cc",
     "source/file_impl.h",
     "source/logging.cc",
@@ -224,11 +224,6 @@ if (is_android) {
 
     configs += [ "..:common_config" ]
     public_configs = [ "..:common_inherited_config" ]
-
-    if (is_android_webview_build) {
-      libs += [ "cpufeatures.a" ]
-    } else {
-      deps = [ "//third_party/android_tools:cpu_features" ]
-    }
+    deps = [ "//third_party/android_tools:cpu_features" ]
   }
 }

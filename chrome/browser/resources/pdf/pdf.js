@@ -61,18 +61,17 @@ PDFViewer.MIN_TOOLBAR_OFFSET = 15;
  * Creates a new PDFViewer. There should only be one of these objects per
  * document.
  * @constructor
- * @param {Object} streamDetails The stream object which points to the data
- *     contained in the PDF.
+ * @param {!BrowserApi} browserApi An object providing an API to the browser.
  */
-function PDFViewer(streamDetails) {
-  this.streamDetails_ = streamDetails;
-  this.loaded_ = false;
+function PDFViewer(browserApi) {
+  this.browserApi_ = browserApi;
+  this.loadState_ = LoadState.LOADING;
   this.parentWindow_ = null;
 
   this.delayedScriptingMessages_ = [];
 
-  this.isPrintPreview_ =
-      this.streamDetails_.originalUrl.indexOf('chrome://print') == 0;
+  this.isPrintPreview_ = this.browserApi_.getStreamInfo().originalUrl.indexOf(
+                             'chrome://print') == 0;
   this.isMaterial_ = location.pathname.substring(1) === 'index-material.html';
 
   // The sizer element is placed behind the plugin element to cause scrollbars
@@ -93,7 +92,8 @@ function PDFViewer(streamDetails) {
                                 this.viewportChanged_.bind(this),
                                 this.beforeZoom_.bind(this),
                                 this.afterZoom_.bind(this),
-                                getScrollbarWidth());
+                                getScrollbarWidth(),
+                                this.browserApi_.getDefaultZoom());
 
   // Create the plugin object dynamically so we can set its src. The plugin
   // element is sized to fill the entire window and is set to be fixed
@@ -113,20 +113,23 @@ function PDFViewer(streamDetails) {
   window.addEventListener('message', this.handleScriptingMessage.bind(this),
                           false);
 
-  document.title = getFilenameFromURL(this.streamDetails_.originalUrl);
-  this.plugin_.setAttribute('src', this.streamDetails_.originalUrl);
-  this.plugin_.setAttribute('stream-url', this.streamDetails_.streamUrl);
+  document.title = decodeURIComponent(
+      getFilenameFromURL(this.browserApi_.getStreamInfo().originalUrl));
+  this.plugin_.setAttribute('src',
+                            this.browserApi_.getStreamInfo().originalUrl);
+  this.plugin_.setAttribute('stream-url',
+                            this.browserApi_.getStreamInfo().streamUrl);
   var headers = '';
-  for (var header in this.streamDetails_.responseHeaders) {
+  for (var header in this.browserApi_.getStreamInfo().responseHeaders) {
     headers += header + ': ' +
-        this.streamDetails_.responseHeaders[header] + '\n';
+        this.browserApi_.getStreamInfo().responseHeaders[header] + '\n';
   }
   this.plugin_.setAttribute('headers', headers);
 
   if (this.isMaterial_)
     this.plugin_.setAttribute('is-material', '');
 
-  if (!this.streamDetails_.embedded)
+  if (!this.browserApi_.getStreamInfo().embedded)
     this.plugin_.setAttribute('full-frame', '');
   document.body.appendChild(this.plugin_);
 
@@ -145,17 +148,15 @@ function PDFViewer(streamDetails) {
   }
 
   if (this.isMaterial_) {
-    this.bookmarksPane_ = $('bookmarks-pane');
-
-    this.zoomSelector_ = $('zoom-selector');
-    this.zoomSelector_.zoomMin = Viewport.ZOOM_FACTOR_RANGE.min * 100;
-    this.zoomSelector_.zoomMax = Viewport.ZOOM_FACTOR_RANGE.max * 100;
-    this.zoomSelector_.addEventListener('zoom', function(e) {
+    this.zoomToolbar_ = $('zoom-toolbar');
+    this.zoomToolbar_.zoomMin = Viewport.ZOOM_FACTOR_RANGE.min * 100;
+    this.zoomToolbar_.zoomMax = Viewport.ZOOM_FACTOR_RANGE.max * 100;
+    this.zoomToolbar_.addEventListener('zoom', function(e) {
       this.viewport_.setZoom(e.detail.zoom);
     }.bind(this));
-    this.zoomSelector_.addEventListener('fit-to-width',
+    this.zoomToolbar_.addEventListener('fit-to-width',
         this.viewport_.fitToWidth.bind(this.viewport_));
-    this.zoomSelector_.addEventListener('fit-to-page',
+    this.zoomToolbar_.addEventListener('fit-to-page',
         this.viewport_.fitToPage.bind(this.viewport_));
 
     this.materialToolbar_ = $('material-toolbar');
@@ -164,47 +165,29 @@ function PDFViewer(streamDetails) {
     this.materialToolbar_.addEventListener('print', this.print_.bind(this));
     this.materialToolbar_.addEventListener('rotate-right',
         this.rotateClockwise_.bind(this));
-    this.materialToolbar_.addEventListener('toggle-bookmarks', function() {
-      this.bookmarksPane_.buttonToggle();
-    }.bind(this));
 
     document.body.addEventListener('change-page', function(e) {
       this.viewport_.goToPage(e.detail.page);
     }.bind(this));
 
-    this.uiManager_ = new UiManager(window, this.materialToolbar_,
-                                    [this.bookmarksPane_]);
+    this.uiManager_ =
+        new UiManager(window, this.materialToolbar_, this.zoomToolbar_);
   }
+
+  // Set up the ZoomManager.
+  this.zoomManager_ = new ZoomManager(
+      this.viewport_, this.browserApi_.setZoom.bind(this.browserApi_),
+      this.browserApi_.getDefaultZoom());
+  this.browserApi_.addZoomEventListener(
+      this.zoomManager_.onBrowserZoomChange.bind(this.zoomManager_));
 
   // Setup the keyboard event listener.
   document.onkeydown = this.handleKeyEvent_.bind(this);
 
-  // Set up the zoom API.
-  if (this.shouldManageZoom_()) {
-    chrome.tabs.setZoomSettings(this.streamDetails_.tabId,
-                                {mode: 'manual', scope: 'per-tab'},
-                                this.afterZoom_.bind(this));
-    chrome.tabs.onZoomChange.addListener(function(zoomChangeInfo) {
-      if (zoomChangeInfo.tabId != this.streamDetails_.tabId)
-        return;
-      // If the zoom level is close enough to the current zoom level, don't
-      // change it. This avoids us getting into an infinite loop of zoom changes
-      // due to floating point error.
-      var MIN_ZOOM_DELTA = 0.01;
-      var zoomDelta = Math.abs(this.viewport_.zoom -
-                               zoomChangeInfo.newZoomFactor);
-      // We should not change zoom level when we are responsible for initiating
-      // the zoom. onZoomChange() is called before setZoomComplete() callback
-      // when we initiate the zoom.
-      if ((zoomDelta > MIN_ZOOM_DELTA) && !this.setZoomInProgress_)
-        this.viewport_.setZoom(zoomChangeInfo.newZoomFactor);
-    }.bind(this));
-  }
-
   // Parse open pdf parameters.
   this.paramsParser_ =
       new OpenPDFParamsParser(this.getNamedDestination_.bind(this));
-  this.navigator_ = new Navigator(this.streamDetails_.originalUrl,
+  this.navigator_ = new Navigator(this.browserApi_.getStreamInfo().originalUrl,
                                   this.viewport_, this.paramsParser_,
                                   onNavigateInCurrentTab, onNavigateInNewTab);
   this.viewportScroller_ =
@@ -386,6 +369,20 @@ PDFViewer.prototype = {
 
   /**
    * @private
+   * Sends a 'documentLoaded' message to the PDFScriptingAPI if the document has
+   * finished loading.
+   */
+  sendDocumentLoadedMessage_: function() {
+    if (this.loadState_ == LoadState.LOADING)
+      return;
+    this.sendScriptingMessage_({
+      type: 'documentLoaded',
+      load_state: this.loadState_
+    });
+  },
+
+  /**
+   * @private
    * Handle open pdf parameters. This function updates the viewport as per
    * the parameters mentioned in the url while opening pdf. The order is
    * important as later actions can override the effects of previous actions.
@@ -428,16 +425,17 @@ PDFViewer.prototype = {
         this.passwordScreen_.deny();
         this.passwordScreen_.active = false;
       }
+      this.loadState_ = LoadState.FAILED;
+      this.sendDocumentLoadedMessage_();
     } else if (progress == 100) {
       // Document load complete.
       if (this.lastViewportPosition_)
         this.viewport_.position = this.lastViewportPosition_;
       this.paramsParser_.getViewportFromUrlParams(
-          this.streamDetails_.originalUrl, this.handleURLParams_.bind(this));
-      this.loaded_ = true;
-      this.sendScriptingMessage_({
-        type: 'documentLoaded'
-      });
+          this.browserApi_.getStreamInfo().originalUrl,
+          this.handleURLParams_.bind(this));
+      this.loadState_ = LoadState.SUCCESS;
+      this.sendDocumentLoadedMessage_();
       while (this.delayedScriptingMessages_.length > 0)
         this.handleScriptingMessage(this.delayedScriptingMessages_.shift());
 
@@ -481,7 +479,6 @@ PDFViewer.prototype = {
           this.pageIndicator_.initialFadeIn();
           this.toolbar_.initialFadeIn();
         }
-
         break;
       case 'email':
         var href = 'mailto:' + message.data.to + '?cc=' + message.data.cc +
@@ -573,36 +570,14 @@ PDFViewer.prototype = {
     var position = this.viewport_.position;
     var zoom = this.viewport_.zoom;
     if (this.isMaterial_)
-      this.zoomSelector_.zoomValue = 100 * zoom;
-    if (this.shouldManageZoom_() && !this.setZoomInProgress_) {
-      this.setZoomInProgress_ = true;
-      chrome.tabs.setZoom(this.streamDetails_.tabId, zoom,
-                          this.setZoomComplete_.bind(this, zoom));
-    }
+      this.zoomToolbar_.zoomValue = 100 * zoom;
     this.plugin_.postMessage({
       type: 'viewport',
       zoom: zoom,
       xOffset: position.x,
       yOffset: position.y
     });
-  },
-
-  /**
-   * @private
-   * A callback that's called after chrome.tabs.setZoom is complete. This will
-   * call chrome.tabs.setZoom again if the zoom level has changed since it was
-   * last called.
-   * @param {number} lastZoom the zoom level that chrome.tabs.setZoom was called
-   *     with.
-   */
-  setZoomComplete_: function(lastZoom) {
-    var zoom = this.viewport_.zoom;
-    if (zoom !== lastZoom) {
-      chrome.tabs.setZoom(this.streamDetails_.tabId, zoom,
-                          this.setZoomComplete_.bind(this, zoom));
-    } else {
-      this.setZoomInProgress_ = false;
-    }
+    this.zoomManager_.onPdfZoomChange();
   },
 
   /**
@@ -681,11 +656,8 @@ PDFViewer.prototype = {
     if (this.parentWindow_ != message.source) {
       this.parentWindow_ = message.source;
       // Ensure that we notify the embedder if the document is loaded.
-      if (this.loaded_) {
-        this.sendScriptingMessage_({
-          type: 'documentLoaded'
-        });
-      }
+      if (this.loadState_ != LoadState.LOADING)
+        this.sendDocumentLoadedMessage_();
     }
 
     if (this.handlePrintPreviewScriptingMessage_(message))
@@ -693,7 +665,7 @@ PDFViewer.prototype = {
 
     // Delay scripting messages from users of the scripting API until the
     // document is loaded. This simplifies use of the APIs.
-    if (!this.loaded_) {
+    if (this.loadState_ != LoadState.SUCCESS) {
       this.delayedScriptingMessages_.push(message);
       return;
     }
@@ -723,7 +695,7 @@ PDFViewer.prototype = {
         this.plugin_.postMessage(message.data);
         return true;
       case 'resetPrintPreviewMode':
-        this.loaded_ = false;
+        this.loadState_ = LoadState.LOADING;
         if (!this.inPrintPreviewMode_) {
           this.inPrintPreviewMode_ = true;
           this.viewport_.fitToPage();
@@ -773,16 +745,6 @@ PDFViewer.prototype = {
       this.parentWindow_.postMessage(message, '*');
   },
 
-  /**
-   * @private
-   * Return whether this PDFViewer should manage zoom for its containing page.
-   * @return {boolean} Whether this PDFViewer should manage zoom for its
-   *     containing page.
-   */
-  shouldManageZoom_: function() {
-    return !!(chrome.tabs && !this.streamDetails_.embedded &&
-              this.streamDetails_.tabId != -1);
-  },
 
   /**
    * @type {Viewport} the viewport of the PDF viewer.

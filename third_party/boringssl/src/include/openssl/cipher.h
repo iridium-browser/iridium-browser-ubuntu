@@ -80,15 +80,23 @@ OPENSSL_EXPORT const EVP_CIPHER *EVP_des_ede3_cbc(void);
 OPENSSL_EXPORT const EVP_CIPHER *EVP_aes_128_ecb(void);
 OPENSSL_EXPORT const EVP_CIPHER *EVP_aes_128_cbc(void);
 OPENSSL_EXPORT const EVP_CIPHER *EVP_aes_128_ctr(void);
+OPENSSL_EXPORT const EVP_CIPHER *EVP_aes_128_ofb(void);
 
 OPENSSL_EXPORT const EVP_CIPHER *EVP_aes_256_ecb(void);
 OPENSSL_EXPORT const EVP_CIPHER *EVP_aes_256_cbc(void);
 OPENSSL_EXPORT const EVP_CIPHER *EVP_aes_256_ctr(void);
+OPENSSL_EXPORT const EVP_CIPHER *EVP_aes_256_ofb(void);
 
 /* Deprecated AES-GCM implementations that set |EVP_CIPH_FLAG_CUSTOM_CIPHER|.
  * Use |EVP_aead_aes_128_gcm| and |EVP_aead_aes_256_gcm| instead. */
 OPENSSL_EXPORT const EVP_CIPHER *EVP_aes_128_gcm(void);
 OPENSSL_EXPORT const EVP_CIPHER *EVP_aes_256_gcm(void);
+
+/* Deprecated 192-bit version of AES. */
+OPENSSL_EXPORT const EVP_CIPHER *EVP_aes_192_ecb(void);
+OPENSSL_EXPORT const EVP_CIPHER *EVP_aes_192_cbc(void);
+OPENSSL_EXPORT const EVP_CIPHER *EVP_aes_192_ctr(void);
+OPENSSL_EXPORT const EVP_CIPHER *EVP_aes_192_gcm(void);
 
 /* EVP_enc_null returns a 'cipher' that passes plaintext through as
  * ciphertext. */
@@ -230,7 +238,8 @@ OPENSSL_EXPORT const EVP_CIPHER *EVP_CIPHER_CTX_cipher(
     const EVP_CIPHER_CTX *ctx);
 
 /* EVP_CIPHER_CTX_nid returns a NID identifying the |EVP_CIPHER| underlying
- * |ctx| (e.g. |NID_rc4|). It will crash if no cipher has been configured. */
+ * |ctx| (e.g. |NID_aes_128_gcm|). It will crash if no cipher has been
+ * configured. */
 OPENSSL_EXPORT int EVP_CIPHER_CTX_nid(const EVP_CIPHER_CTX *ctx);
 
 /* EVP_CIPHER_CTX_block_size returns the block size, in bytes, of the cipher
@@ -283,12 +292,8 @@ OPENSSL_EXPORT int EVP_CIPHER_CTX_set_key_length(EVP_CIPHER_CTX *ctx, unsigned k
 /* Cipher accessors. */
 
 /* EVP_CIPHER_nid returns a NID identifing |cipher|. (For example,
- * |NID_rc4|.) */
+ * |NID_aes_128_gcm|.) */
 OPENSSL_EXPORT int EVP_CIPHER_nid(const EVP_CIPHER *cipher);
-
-/* EVP_CIPHER_name returns the short name for |cipher| or NULL if no name is
- * known. */
-OPENSSL_EXPORT const char *EVP_CIPHER_name(const EVP_CIPHER *cipher);
 
 /* EVP_CIPHER_block_size returns the block size, in bytes, for |cipher|, or one
  * if |cipher| is a stream cipher. */
@@ -484,15 +489,41 @@ typedef struct evp_cipher_info_st {
   unsigned char iv[EVP_MAX_IV_LENGTH];
 } EVP_CIPHER_INFO;
 
+struct evp_cipher_st {
+  /* type contains a NID identifing the cipher. (e.g. NID_aes_128_gcm.) */
+  int nid;
 
-/* Android compatibility section.
- *
- * These functions are declared, temporarily, for Android because
- * wpa_supplicant will take a little time to sync with upstream. Outside of
- * Android they'll have no definition. */
+  /* block_size contains the block size, in bytes, of the cipher, or 1 for a
+   * stream cipher. */
+  unsigned block_size;
 
-OPENSSL_EXPORT const EVP_CIPHER *EVP_aes_192_ecb(void);
-OPENSSL_EXPORT const EVP_CIPHER *EVP_aes_192_cbc(void);
+  /* key_len contains the key size, in bytes, for the cipher. If the cipher
+   * takes a variable key size then this contains the default size. */
+  unsigned key_len;
+
+  /* iv_len contains the IV size, in bytes, or zero if inapplicable. */
+  unsigned iv_len;
+
+  /* ctx_size contains the size, in bytes, of the per-key context for this
+   * cipher. */
+  unsigned ctx_size;
+
+  /* flags contains the OR of a number of flags. See |EVP_CIPH_*|. */
+  uint32_t flags;
+
+  /* app_data is a pointer to opaque, user data. */
+  void *app_data;
+
+  int (*init)(EVP_CIPHER_CTX *ctx, const uint8_t *key, const uint8_t *iv,
+              int enc);
+
+  int (*cipher)(EVP_CIPHER_CTX *ctx, uint8_t *out, const uint8_t *in,
+                size_t inl);
+
+  void (*cleanup)(EVP_CIPHER_CTX *);
+
+  int (*ctrl)(EVP_CIPHER_CTX *, int type, int arg, void *ptr);
+};
 
 
 #if defined(__cplusplus)

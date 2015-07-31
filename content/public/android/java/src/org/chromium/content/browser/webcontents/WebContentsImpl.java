@@ -8,11 +8,14 @@ import android.graphics.Color;
 
 import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
+import org.chromium.content_public.browser.AccessibilitySnapshotCallback;
+import org.chromium.content_public.browser.AccessibilitySnapshotNode;
 import org.chromium.content_public.browser.JavaScriptCallback;
 import org.chromium.content_public.browser.NavigationController;
 import org.chromium.content_public.browser.NavigationTransitionDelegate;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContentsObserver;
+import org.chromium.ui.accessibility.AXTextStyle;
 
 /**
  * The WebContentsImpl Java wrapper to allow communicating with the native WebContentsImpl
@@ -191,6 +194,11 @@ import org.chromium.content_public.browser.WebContentsObserver;
     }
 
     @Override
+    public void resumeLoadingCreatedWebContents() {
+        nativeResumeLoadingCreatedWebContents(mNativeWebContentsAndroid);
+    }
+
+    @Override
     public void setHasPendingNavigationTransitionForTesting() {
         nativeSetHasPendingNavigationTransitionForTesting(mNativeWebContentsAndroid);
     }
@@ -329,6 +337,44 @@ import org.chromium.content_public.browser.WebContentsObserver;
     }
 
     @Override
+    public void requestAccessibilitySnapshot(AccessibilitySnapshotCallback callback,
+            float offsetY, float scrollX) {
+        nativeRequestAccessibilitySnapshot(mNativeWebContentsAndroid, callback,
+                offsetY, scrollX);
+    }
+
+    // root node can be null if parsing fails.
+    @CalledByNative
+    private static void onAccessibilitySnapshot(AccessibilitySnapshotNode root,
+            AccessibilitySnapshotCallback callback) {
+        callback.onAccessibilitySnapshot(root);
+    }
+
+    @CalledByNative
+    private static void addAccessibilityNodeAsChild(AccessibilitySnapshotNode parent,
+            AccessibilitySnapshotNode child) {
+        parent.addChild(child);
+    }
+
+    @CalledByNative
+    private static AccessibilitySnapshotNode createAccessibilitySnapshotNode(int x,
+            int y, int scrollX, int scrollY, int width, int height, String text,
+            int color, int bgcolor, float size, int textStyle, String className) {
+
+        AccessibilitySnapshotNode node = new AccessibilitySnapshotNode(x, y, scrollX,
+                scrollY, width, height, text, className);
+        // if size is smaller than 0, then style information does not exist.
+        if (size >= 0.0) {
+            boolean bold = (textStyle & AXTextStyle.text_style_bold) > 0;
+            boolean italic = (textStyle & AXTextStyle.text_style_italic) > 0;
+            boolean underline = (textStyle & AXTextStyle.text_style_underline) > 0;
+            boolean lineThrough = (textStyle & AXTextStyle.text_style_line_through) > 0;
+            node.setStyle(color, bgcolor, size, bold, italic, underline, lineThrough);
+        }
+        return node;
+    }
+
+    @Override
     public void addObserver(WebContentsObserver observer) {
         assert mNativeWebContentsAndroid != 0;
         if (mObserverProxy == null) mObserverProxy = new WebContentsObserverProxy(this);
@@ -370,6 +416,7 @@ import org.chromium.content_public.browser.WebContentsObserver;
     private native String nativeGetLastCommittedURL(long nativeWebContentsAndroid);
     private native boolean nativeIsIncognito(long nativeWebContentsAndroid);
     private native void nativeResumeResponseDeferredAtStart(long nativeWebContentsAndroid);
+    private native void nativeResumeLoadingCreatedWebContents(long nativeWebContentsAndroid);
     private native void nativeSetHasPendingNavigationTransitionForTesting(
             long nativeWebContentsAndroid);
     private native void nativeSetupTransitionView(long nativeWebContentsAndroid,
@@ -390,4 +437,6 @@ import org.chromium.content_public.browser.WebContentsObserver;
     private native boolean nativeHasAccessedInitialDocument(
             long nativeWebContentsAndroid);
     private native int nativeGetThemeColor(long nativeWebContentsAndroid);
+    private native void nativeRequestAccessibilitySnapshot(long nativeWebContentsAndroid,
+            AccessibilitySnapshotCallback callback, float offsetY, float scrollX);
 }

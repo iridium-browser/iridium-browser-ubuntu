@@ -20,31 +20,31 @@ namespace {
 
 class TextPainterTest : public RenderingTest {
 public:
-    TextPainterTest() : m_renderText(nullptr) { }
+    TextPainterTest() : m_layoutText(nullptr) { }
 
 protected:
-    LayoutText* renderText() { return m_renderText; }
+    LayoutText* layoutText() { return m_layoutText; }
 
 private:
     virtual void SetUp() override
     {
         RenderingTest::SetUp();
         setBodyInnerHTML("Hello world");
-        m_renderText = toLayoutText(document().body()->firstChild()->layoutObject());
-        ASSERT_TRUE(m_renderText);
-        ASSERT_EQ("Hello world", m_renderText->text());
+        m_layoutText = toLayoutText(document().body()->firstChild()->layoutObject());
+        ASSERT_TRUE(m_layoutText);
+        ASSERT_EQ("Hello world", m_layoutText->text());
     }
 
-    LayoutText* m_renderText;
+    LayoutText* m_layoutText;
 };
 
 TEST_F(TextPainterTest, TextPaintingStyle_Simple)
 {
     document().body()->setInlineStyleProperty(CSSPropertyColor, CSSValueBlue);
-    document().view()->updateLayoutAndStyleIfNeededRecursive();
+    document().view()->updateLayoutAndStyleForPainting();
 
     TextPainter::Style textStyle = TextPainter::textPaintingStyle(
-        *renderText(), renderText()->styleRef(), false /* forceBlackText */, false /* isPrinting */);
+        *layoutText(), layoutText()->styleRef(), false /* forceBlackText */, false /* isPrinting */);
     EXPECT_EQ(Color(0, 0, 255), textStyle.fillColor);
     EXPECT_EQ(Color(0, 0, 255), textStyle.strokeColor);
     EXPECT_EQ(Color(0, 0, 255), textStyle.emphasisMarkColor);
@@ -59,10 +59,10 @@ TEST_F(TextPainterTest, TextPaintingStyle_AllProperties)
     document().body()->setInlineStyleProperty(CSSPropertyWebkitTextEmphasisColor, CSSValueBlue);
     document().body()->setInlineStyleProperty(CSSPropertyWebkitTextStrokeWidth, 4, CSSPrimitiveValue::CSS_PX);
     document().body()->setInlineStyleProperty(CSSPropertyTextShadow, "1px 2px 3px yellow");
-    document().view()->updateLayoutAndStyleIfNeededRecursive();
+    document().view()->updateLayoutAndStyleForPainting();
 
     TextPainter::Style textStyle = TextPainter::textPaintingStyle(
-        *renderText(), renderText()->styleRef(), false /* forceBlackText */, false /* isPrinting */);
+        *layoutText(), layoutText()->styleRef(), false /* forceBlackText */, false /* isPrinting */);
     EXPECT_EQ(Color(255, 0, 0), textStyle.fillColor);
     EXPECT_EQ(Color(0, 255, 0), textStyle.strokeColor);
     EXPECT_EQ(Color(0, 0, 255), textStyle.emphasisMarkColor);
@@ -72,7 +72,7 @@ TEST_F(TextPainterTest, TextPaintingStyle_AllProperties)
     EXPECT_EQ(1, textStyle.shadow->shadows()[0].x());
     EXPECT_EQ(2, textStyle.shadow->shadows()[0].y());
     EXPECT_EQ(3, textStyle.shadow->shadows()[0].blur());
-    EXPECT_EQ(Color(255, 255, 0), textStyle.shadow->shadows()[0].color());
+    EXPECT_EQ(Color(255, 255, 0), textStyle.shadow->shadows()[0].color().color());
 }
 
 TEST_F(TextPainterTest, TextPaintingStyle_ForceBlackText)
@@ -82,10 +82,10 @@ TEST_F(TextPainterTest, TextPaintingStyle_ForceBlackText)
     document().body()->setInlineStyleProperty(CSSPropertyWebkitTextEmphasisColor, CSSValueBlue);
     document().body()->setInlineStyleProperty(CSSPropertyWebkitTextStrokeWidth, 4, CSSPrimitiveValue::CSS_PX);
     document().body()->setInlineStyleProperty(CSSPropertyTextShadow, "1px 2px 3px yellow");
-    document().view()->updateLayoutAndStyleIfNeededRecursive();
+    document().view()->updateLayoutAndStyleForPainting();
 
     TextPainter::Style textStyle = TextPainter::textPaintingStyle(
-        *renderText(), renderText()->styleRef(), true /* forceBlackText */, false /* isPrinting */);
+        *layoutText(), layoutText()->styleRef(), true /* forceBlackText */, false /* isPrinting */);
     EXPECT_EQ(Color::black, textStyle.fillColor);
     EXPECT_EQ(Color::black, textStyle.strokeColor);
     EXPECT_EQ(Color::black, textStyle.emphasisMarkColor);
@@ -100,10 +100,10 @@ TEST_F(TextPainterTest, TextPaintingStyle_ForceBackgroundToWhite_NoAdjustmentNee
     document().body()->setInlineStyleProperty(CSSPropertyWebkitTextEmphasisColor, CSSValueBlue);
     document().body()->setInlineStyleProperty(CSSPropertyWebkitPrintColorAdjust, CSSValueEconomy);
     document().settings()->setShouldPrintBackgrounds(false);
-    document().view()->updateLayoutAndStyleIfNeededRecursive();
+    document().view()->updateLayoutAndStyleForPainting();
 
     TextPainter::Style textStyle = TextPainter::textPaintingStyle(
-        *renderText(), renderText()->styleRef(), false /* forceBlackText */, true /* isPrinting */);
+        *layoutText(), layoutText()->styleRef(), false /* forceBlackText */, true /* isPrinting */);
     EXPECT_EQ(Color(255, 0, 0), textStyle.fillColor);
     EXPECT_EQ(Color(0, 255, 0), textStyle.strokeColor);
     EXPECT_EQ(Color(0, 0, 255), textStyle.emphasisMarkColor);
@@ -116,10 +116,10 @@ TEST_F(TextPainterTest, TextPaintingStyle_ForceBackgroundToWhite_Darkened)
     document().body()->setInlineStyleProperty(CSSPropertyWebkitTextEmphasisColor, "rgb(220, 220, 255)");
     document().body()->setInlineStyleProperty(CSSPropertyWebkitPrintColorAdjust, CSSValueEconomy);
     document().settings()->setShouldPrintBackgrounds(false);
-    document().view()->updateLayoutAndStyleIfNeededRecursive();
+    document().view()->updateLayoutAndStyleForPainting();
 
     TextPainter::Style textStyle = TextPainter::textPaintingStyle(
-        *renderText(), renderText()->styleRef(), false /* forceBlackText */, true /* isPrinting */);
+        *layoutText(), layoutText()->styleRef(), false /* forceBlackText */, true /* isPrinting */);
     EXPECT_EQ(Color(255, 220, 220).dark(), textStyle.fillColor);
     EXPECT_EQ(Color(220, 255, 220).dark(), textStyle.strokeColor);
     EXPECT_EQ(Color(220, 220, 255).dark(), textStyle.emphasisMarkColor);

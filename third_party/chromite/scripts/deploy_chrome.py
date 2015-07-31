@@ -21,7 +21,6 @@ import collections
 import contextlib
 import functools
 import glob
-import logging
 import multiprocessing
 import os
 import optparse
@@ -31,10 +30,11 @@ import time
 
 from chromite.cbuildbot import constants
 from chromite.cbuildbot import failures_lib
-from chromite.cros.commands import cros_chrome_sdk
+from chromite.cli.cros import cros_chrome_sdk
 from chromite.lib import chrome_util
-from chromite.lib import cros_build_lib
 from chromite.lib import commandline
+from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
 from chromite.lib import gs
 from chromite.lib import osutils
 from chromite.lib import parallel
@@ -250,8 +250,8 @@ class DeployChrome(object):
     dest_path = _CHROME_DIR
     if not self.device.HasRsync():
       raise DeployFailure(
-            'rsync is not found on the device.\n'
-            'Run dev_install on the device to get rsync installed')
+          'rsync is not found on the device.\n'
+          'Run dev_install on the device to get rsync installed')
     self.device.CopyToDevice('%s/' % os.path.abspath(self.staging_dir),
                              self.options.target_dir,
                              inplace=True, debug_level=logging.INFO,
@@ -521,7 +521,7 @@ def _PostParseCheck(options, _args):
     if os.path.isfile(chrome_path):
       deps = lddtree.ParseELF(chrome_path)
       if 'libbase.so' in deps['libs']:
-        cros_build_lib.Warning(
+        logging.warning(
             'Detected a component build of Chrome.  component build is '
             'not working properly for Chrome OS.  See crbug.com/196317.  '
             'Use at your own risk!')

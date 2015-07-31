@@ -180,14 +180,7 @@ bool MutableStylePropertySet::removeShorthandProperty(CSSPropertyID propertyID)
     if (!shorthand.length())
         return false;
 
-    bool ret = removePropertiesInSet(shorthand.properties(), shorthand.length());
-
-    CSSPropertyID prefixingVariant = prefixingVariantForPropertyId(propertyID);
-    if (prefixingVariant == propertyID)
-        return ret;
-
-    StylePropertyShorthand shorthandPrefixingVariant = shorthandForProperty(prefixingVariant);
-    return removePropertiesInSet(shorthandPrefixingVariant.properties(), shorthandPrefixingVariant.length());
+    return removePropertiesInSet(shorthand.properties(), shorthand.length());
 }
 
 bool MutableStylePropertySet::removeProperty(CSSPropertyID propertyID, String* returnText)
@@ -213,17 +206,7 @@ bool MutableStylePropertySet::removeProperty(CSSPropertyID propertyID, String* r
     // and sweeping them when the vector grows too big.
     m_propertyVector.remove(foundPropertyIndex);
 
-    removePrefixedOrUnprefixedProperty(propertyID);
-
     return true;
-}
-
-void MutableStylePropertySet::removePrefixedOrUnprefixedProperty(CSSPropertyID propertyID)
-{
-    int foundPropertyIndex = findPropertyIndex(prefixingVariantForPropertyId(propertyID));
-    if (foundPropertyIndex == -1)
-        return;
-    m_propertyVector.remove(foundPropertyIndex);
 }
 
 bool StylePropertySet::propertyIsImportant(CSSPropertyID propertyID) const
@@ -259,16 +242,16 @@ bool StylePropertySet::isPropertyImplicit(CSSPropertyID propertyID) const
     return propertyAt(foundPropertyIndex).isImplicit();
 }
 
-bool MutableStylePropertySet::setProperty(CSSPropertyID propertyID, const String& value, bool important, StyleSheetContents* contextStyleSheet)
+bool MutableStylePropertySet::setProperty(CSSPropertyID unresolvedProperty, const String& value, bool important, StyleSheetContents* contextStyleSheet)
 {
     // Setting the value to an empty string just removes the property in both IE and Gecko.
     // Setting it to null seems to produce less consistent results, but we treat it just the same.
     if (value.isEmpty())
-        return removeProperty(propertyID);
+        return removeProperty(resolveCSSPropertyID(unresolvedProperty));
 
     // When replacing an existing property value, this moves the property to the end of the list.
     // Firefox preserves the position, and MSIE moves the property to the beginning.
-    return CSSParser::parseValue(this, propertyID, value, important, cssParserMode(), contextStyleSheet);
+    return CSSParser::parseValue(this, unresolvedProperty, value, important, cssParserMode(), contextStyleSheet);
 }
 
 void MutableStylePropertySet::setProperty(CSSPropertyID propertyID, PassRefPtrWillBeRawPtr<CSSValue> prpValue, bool important)
@@ -286,46 +269,19 @@ void MutableStylePropertySet::setProperty(CSSPropertyID propertyID, PassRefPtrWi
         m_propertyVector.append(CSSProperty(shorthand.properties()[i], value, important));
 }
 
-void MutableStylePropertySet::setProperty(const CSSProperty& property, CSSProperty* slot)
+bool MutableStylePropertySet::setProperty(const CSSProperty& property, CSSProperty* slot)
 {
     if (!removeShorthandProperty(property.id())) {
         CSSProperty* toReplace = slot ? slot : findCSSPropertyWithID(property.id());
+        if (toReplace && *toReplace == property)
+            return false;
         if (toReplace) {
             *toReplace = property;
-            setPrefixingVariantProperty(property);
-            return;
+            return true;
         }
     }
-    appendPrefixingVariantProperty(property);
-}
-
-unsigned getIndexInShorthandVectorForPrefixingVariant(const CSSProperty& property, CSSPropertyID prefixingVariant)
-{
-    if (!property.isSetFromShorthand())
-        return 0;
-
-    CSSPropertyID prefixedShorthand = prefixingVariantForPropertyId(property.shorthandID());
-    Vector<StylePropertyShorthand, 4> shorthands;
-    getMatchingShorthandsForLonghand(prefixingVariant, &shorthands);
-    return indexOfShorthandForLonghand(prefixedShorthand, shorthands);
-}
-
-void MutableStylePropertySet::appendPrefixingVariantProperty(const CSSProperty& property)
-{
     m_propertyVector.append(property);
-    CSSPropertyID prefixingVariant = prefixingVariantForPropertyId(property.id());
-    if (prefixingVariant == property.id())
-        return;
-
-    m_propertyVector.append(CSSProperty(prefixingVariant, property.value(), property.isImportant(), property.isSetFromShorthand(), getIndexInShorthandVectorForPrefixingVariant(property, prefixingVariant), property.metadata().m_implicit));
-}
-
-void MutableStylePropertySet::setPrefixingVariantProperty(const CSSProperty& property)
-{
-    CSSPropertyID prefixingVariant = prefixingVariantForPropertyId(property.id());
-    CSSProperty* toReplace = findCSSPropertyWithID(prefixingVariant);
-    if (toReplace && prefixingVariant != property.id())
-        *toReplace = CSSProperty(prefixingVariant, property.value(), property.isImportant(), property.isSetFromShorthand(), getIndexInShorthandVectorForPrefixingVariant(property, prefixingVariant), property.metadata().m_implicit);
+    return true;
 }
 
 bool MutableStylePropertySet::setProperty(CSSPropertyID propertyID, CSSValueID identifier, bool important)
@@ -347,18 +303,21 @@ void MutableStylePropertySet::parseDeclarationList(const String& styleDeclaratio
     CSSParser::parseDeclarationList(context, this, styleDeclaration, 0, contextStyleSheet);
 }
 
-void MutableStylePropertySet::addParsedProperties(const WillBeHeapVector<CSSProperty, 256>& properties)
+bool MutableStylePropertySet::addParsedProperties(const WillBeHeapVector<CSSProperty, 256>& properties)
 {
+    bool changed = false;
     m_propertyVector.reserveCapacity(m_propertyVector.size() + properties.size());
     for (unsigned i = 0; i < properties.size(); ++i)
-        addParsedProperty(properties[i]);
+        changed |= setProperty(properties[i]);
+    return changed;
 }
 
-void MutableStylePropertySet::addParsedProperty(const CSSProperty& property)
+bool MutableStylePropertySet::addRespectingCascade(const CSSProperty& property)
 {
     // Only add properties that have no !important counterpart present
     if (!propertyIsImportant(property.id()) || property.isImportant())
-        setProperty(property);
+        return setProperty(property);
+    return false;
 }
 
 String StylePropertySet::asText() const
@@ -375,7 +334,7 @@ void MutableStylePropertySet::mergeAndOverrideOnConflict(const StylePropertySet*
         if (old)
             setProperty(toMerge.toCSSProperty(), old);
         else
-            appendPrefixingVariantProperty(toMerge.toCSSProperty());
+            m_propertyVector.append(toMerge.toCSSProperty());
     }
 }
 
@@ -455,8 +414,7 @@ bool MutableStylePropertySet::removePropertiesInSet(const CSSPropertyID* set, un
     unsigned newIndex = 0;
     for (unsigned oldIndex = 0; oldIndex < oldSize; ++oldIndex) {
         const CSSProperty& property = properties[oldIndex];
-        // Not quite sure if the isImportant test is needed but it matches the existing behavior.
-        if (!property.isImportant() && containsId(set, length, property.id()))
+        if (containsId(set, length, property.id()))
             continue;
         // Modify m_propertyVector in-place since this method is performance-sensitive.
         properties[newIndex++] = properties[oldIndex];
@@ -561,8 +519,10 @@ int MutableStylePropertySet::findPropertyIndex(CSSPropertyID propertyID) const
 
 DEFINE_TRACE_AFTER_DISPATCH(MutableStylePropertySet)
 {
+#if ENABLE(OILPAN)
     visitor->trace(m_cssomWrapper);
     visitor->trace(m_propertyVector);
+#endif
     StylePropertySet::traceAfterDispatch(visitor);
 }
 
@@ -594,23 +554,5 @@ PassRefPtrWillBeRawPtr<MutableStylePropertySet> MutableStylePropertySet::create(
 {
     return adoptRefWillBeNoop(new MutableStylePropertySet(properties, count));
 }
-
-String StylePropertySet::PropertyReference::cssName() const
-{
-    return getPropertyNameString(id());
-}
-
-String StylePropertySet::PropertyReference::cssText() const
-{
-    StringBuilder result;
-    result.append(cssName());
-    result.appendLiteral(": ");
-    result.append(propertyValue()->cssText());
-    if (isImportant())
-        result.appendLiteral(" !important");
-    result.append(';');
-    return result.toString();
-}
-
 
 } // namespace blink

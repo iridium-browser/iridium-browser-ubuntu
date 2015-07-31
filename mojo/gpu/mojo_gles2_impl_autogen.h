@@ -104,6 +104,26 @@ class MojoGLES2Impl : public gpu::gles2::GLES2Interface {
                                GLenum format,
                                GLsizei imageSize,
                                const void* data) override;
+  void CompressedTexImage3D(GLenum target,
+                            GLint level,
+                            GLenum internalformat,
+                            GLsizei width,
+                            GLsizei height,
+                            GLsizei depth,
+                            GLint border,
+                            GLsizei imageSize,
+                            const void* data) override;
+  void CompressedTexSubImage3D(GLenum target,
+                               GLint level,
+                               GLint xoffset,
+                               GLint yoffset,
+                               GLint zoffset,
+                               GLsizei width,
+                               GLsizei height,
+                               GLsizei depth,
+                               GLenum format,
+                               GLsizei imageSize,
+                               const void* data) override;
   void CopyBufferSubData(GLenum readtarget,
                          GLenum writetarget,
                          GLintptr readoffset,
@@ -234,6 +254,9 @@ class MojoGLES2Impl : public gpu::gles2::GLES2Interface {
                                            GLenum attachment,
                                            GLenum pname,
                                            GLint* params) override;
+  void GetInteger64v(GLenum pname, GLint64* params) override;
+  void GetIntegeri_v(GLenum pname, GLuint index, GLint* data) override;
+  void GetInteger64i_v(GLenum pname, GLuint index, GLint64* data) override;
   void GetIntegerv(GLenum pname, GLint* params) override;
   void GetInternalformativ(GLenum target,
                            GLenum format,
@@ -285,6 +308,7 @@ class MojoGLES2Impl : public gpu::gles2::GLES2Interface {
   GLuint GetUniformBlockIndex(GLuint program, const char* name) override;
   void GetUniformfv(GLuint program, GLint location, GLfloat* params) override;
   void GetUniformiv(GLuint program, GLint location, GLint* params) override;
+  void GetUniformuiv(GLuint program, GLint location, GLuint* params) override;
   void GetUniformIndices(GLuint program,
                          GLsizei count,
                          const char* const* names,
@@ -292,6 +316,8 @@ class MojoGLES2Impl : public gpu::gles2::GLES2Interface {
   GLint GetUniformLocation(GLuint program, const char* name) override;
   void GetVertexAttribfv(GLuint index, GLenum pname, GLfloat* params) override;
   void GetVertexAttribiv(GLuint index, GLenum pname, GLint* params) override;
+  void GetVertexAttribIiv(GLuint index, GLenum pname, GLint* params) override;
+  void GetVertexAttribIuiv(GLuint index, GLenum pname, GLuint* params) override;
   void GetVertexAttribPointerv(GLuint index,
                                GLenum pname,
                                void** pointer) override;

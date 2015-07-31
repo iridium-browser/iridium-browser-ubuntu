@@ -7,11 +7,11 @@
 
 #include "core/layout/LayoutListItem.h"
 #include "core/layout/LayoutListMarker.h"
-#include "core/layout/PaintInfo.h"
 #include "core/layout/TextRunConstructor.h"
 #include "core/paint/BlockPainter.h"
 #include "core/paint/GraphicsContextAnnotator.h"
 #include "core/paint/LayoutObjectDrawingRecorder.h"
+#include "core/paint/PaintInfo.h"
 #include "platform/geometry/LayoutPoint.h"
 #include "platform/graphics/GraphicsContextStateSaver.h"
 #include "wtf/unicode/CharacterNames.h"
@@ -52,7 +52,7 @@ void ListMarkerPainter::paint(const PaintInfo& paintInfo, const LayoutPoint& pai
         if (m_layoutListMarker.selectionState() != LayoutObject::SelectionNone) {
             LayoutRect selRect = m_layoutListMarker.localSelectionRect();
             selRect.moveBy(boxOrigin);
-            context->fillRect(pixelSnappedIntRect(selRect), m_layoutListMarker.selectionBackgroundColor());
+            context->fillRect(pixelSnappedIntRect(selRect), m_layoutListMarker.listItem()->selectionBackgroundColor());
         }
         return;
     }
@@ -60,7 +60,7 @@ void ListMarkerPainter::paint(const PaintInfo& paintInfo, const LayoutPoint& pai
     if (m_layoutListMarker.selectionState() != LayoutObject::SelectionNone) {
         LayoutRect selRect = m_layoutListMarker.localSelectionRect();
         selRect.moveBy(boxOrigin);
-        context->fillRect(pixelSnappedIntRect(selRect), m_layoutListMarker.selectionBackgroundColor());
+        context->fillRect(pixelSnappedIntRect(selRect), m_layoutListMarker.listItem()->selectionBackgroundColor());
     }
 
     const Color color(m_layoutListMarker.resolveColor(CSSPropertyColor));
@@ -200,8 +200,8 @@ void ListMarkerPainter::paint(const PaintInfo& paintInfo, const LayoutPoint& pai
 
         const UChar suffix = m_layoutListMarker.listMarkerSuffix(type, m_layoutListMarker.listItem()->value());
         UChar suffixStr[2] = {
-            m_layoutListMarker.style()->isLeftToRightDirection() ? suffix : ' ',
-            m_layoutListMarker.style()->isLeftToRightDirection() ? ' ' : suffix
+            m_layoutListMarker.style()->isLeftToRightDirection() ? suffix : static_cast<UChar>(' '),
+            m_layoutListMarker.style()->isLeftToRightDirection() ? static_cast<UChar>(' ') : suffix
         };
         TextRun suffixRun = constructTextRun(&m_layoutListMarker, font, suffixStr, 2, m_layoutListMarker.styleRef(), m_layoutListMarker.style()->direction());
         TextRunPaintInfo suffixRunInfo(suffixRun);

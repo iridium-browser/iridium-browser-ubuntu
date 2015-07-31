@@ -54,8 +54,14 @@ EVENT_TYPE(REQUEST_ALIVE)
 //   }
 EVENT_TYPE(HOST_RESOLVER_IMPL_REQUEST)
 
-// This event is logged when IPv6 support is determined via IPv6 connect probe.
-EVENT_TYPE(HOST_RESOLVER_IMPL_IPV6_SUPPORTED)
+// This event is created (in a source of the same name) when the host resolver
+// creates a UDP socket to check for global IPv6 connectivity.
+// It contains the following parameter:
+//
+//   {
+//     "ipv6_available": <True if the probe indicates ipv6 connectivity>,
+//   }
+EVENT_TYPE(HOST_RESOLVER_IMPL_IPV6_REACHABILITY_CHECK)
 
 // This event is logged when a request is handled by a cache entry.
 EVENT_TYPE(HOST_RESOLVER_IMPL_CACHE_HIT)
@@ -553,8 +559,7 @@ EVENT_TYPE(SOCKET_WRITE_ERROR)
 EVENT_TYPE(SOCKET_CLOSED)
 
 // Certificates were received from the SSL server (during a handshake or
-// renegotiation). This event is only present when logging at LOG_ALL.
-// The following parameters are attached to the event:
+// renegotiation). The following parameters are attached to the event:
 //  {
 //    "certificates": <A list of PEM encoded certificates in the order that
 //                     they were sent by the server>,
@@ -1790,6 +1795,75 @@ EVENT_TYPE(APPCACHE_DELIVERING_ERROR_RESPONSE)
 EVENT_TYPE(APPCACHE_DELIVERING_EXECUTABLE_RESPONSE)
 
 // ------------------------------------------------------------------------
+// Service Worker
+// ------------------------------------------------------------------------
+// This event is emitted when Service Worker starts to handle a request.
+EVENT_TYPE(SERVICE_WORKER_START_REQUEST)
+
+// This event is emitted when Service Worker results in a fallback to network
+// response.
+EVENT_TYPE(SERVICE_WORKER_FALLBACK_RESPONSE)
+
+// This event is emitted when Service Worker results in a fallback to network
+// response, and asks the renderer rather than the browser to do the fallback
+// due to CORS.
+EVENT_TYPE(SERVICE_WORKER_FALLBACK_FOR_CORS)
+
+// This event is emitted when Service Worker responds with a headers-only
+// response.
+EVENT_TYPE(SERVICE_WORKER_HEADERS_ONLY_RESPONSE)
+
+// This event is emitted when Service Worker responds with a stream.
+EVENT_TYPE(SERVICE_WORKER_STREAM_RESPONSE)
+
+// This event is emitted when Service Worker responds with a blob.
+EVENT_TYPE(SERVICE_WORKER_BLOB_RESPONSE)
+
+// This event is emitted when Service Worker instructs the browser
+// to respond with a network error.
+EVENT_TYPE(SERVICE_WORKER_ERROR_RESPONSE_STATUS_ZERO)
+
+// This event is emitted when Service Worker attempts to respond with
+// a blob, but it was not readable.
+EVENT_TYPE(SERVICE_WORKER_ERROR_BAD_BLOB)
+
+// This event is emitted when Service Worker fails to respond because
+// the provider host was null.
+EVENT_TYPE(SERVICE_WORKER_ERROR_NO_PROVIDER_HOST)
+
+// This event is emitted when Service Worker fails to respond because
+// the registration had no active version.
+EVENT_TYPE(SERVICE_WORKER_ERROR_NO_ACTIVE_VERSION)
+
+// This event is emitted when Service Worker fails to respond because
+// the underlying request was detached.
+EVENT_TYPE(SERVICE_WORKER_ERROR_NO_REQUEST)
+
+// This event is emitted when Service Worker fails to respond because
+// the fetch event could not be dispatched to the worker.
+EVENT_TYPE(SERVICE_WORKER_ERROR_FETCH_EVENT_DISPATCH)
+
+// This event is emitted when Service Worker fails to respond because
+// of an error when reading the blob response.
+EVENT_TYPE(SERVICE_WORKER_ERROR_BLOB_READ)
+
+// This event is emitted when Service Worker fails to respond because
+// of an error when reading the stream response.
+EVENT_TYPE(SERVICE_WORKER_ERROR_STREAM_ABORTED)
+
+// This event is emitted when Service Worker is destroyed before it
+// responds.
+EVENT_TYPE(SERVICE_WORKER_ERROR_KILLED)
+
+// This event is emitted when Service Worker is destroyed before it
+// finishes responding with a blob.
+EVENT_TYPE(SERVICE_WORKER_ERROR_KILLED_WITH_BLOB)
+
+// This event is emitted when Service Worker is destroyed before it
+// finishes responding with a stream.
+EVENT_TYPE(SERVICE_WORKER_ERROR_KILLED_WITH_STREAM)
+
+// ------------------------------------------------------------------------
 // Global events
 // ------------------------------------------------------------------------
 // These are events which are not grouped by source id, as they have no
@@ -2422,10 +2496,6 @@ EVENT_TYPE(SIMPLE_CACHE_ENTRY_CLOSE_BEGIN)
 // contains no parameters.
 EVENT_TYPE(SIMPLE_CACHE_ENTRY_CLOSE_END)
 
-// This event is created (in a source of the same name) when the internal DNS
-// resolver creates a UDP socket to check for global IPv6 connectivity.
-EVENT_TYPE(IPV6_REACHABILITY_CHECK)
-
 // ------------------------------------------------------------------------
 // SDCH
 // ------------------------------------------------------------------------
@@ -2499,6 +2569,9 @@ EVENT_TYPE(DATA_REDUCTION_PROXY_ENABLED)
 // The END phase contains the following parameters:
 //  {
 //    "net_error": <The net_error of the completion of the canary request>,
+//    "http_response_code": <The HTTP response code of the canary request>,
+//    "check_succeeded": <Whether a secure Data Reduction Proxy can be used or
+//                        not>
 //  }
 EVENT_TYPE(DATA_REDUCTION_PROXY_CANARY_REQUEST)
 
@@ -2529,3 +2602,21 @@ EVENT_TYPE(DATA_REDUCTION_PROXY_BYPASS_REQUESTED)
 //                  can be 0 if the proxy server is explicitly skipped>,
 //  }
 EVENT_TYPE(DATA_REDUCTION_PROXY_FALLBACK)
+
+// The start/end of a config request is sent to the Data Saver Config API
+// service.
+//
+// The BEGIN phase contains the following parameters:
+//  {
+//    "url": <The URL of the service endpoint>,
+//  }
+//
+// The END phase contains the following parameters:
+//  {
+//    "net_error": <The net_error of the completion of the config request>,
+//    "http_response_code": <The HTTP response code of the config request>,
+//    "failure_count": <The number of consecutive config request failures>,
+//    "retry_delay_seconds": <The length of time after which another config
+//                            request will be made>,
+//  }
+EVENT_TYPE(DATA_REDUCTION_PROXY_CONFIG_REQUEST)

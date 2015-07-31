@@ -13,6 +13,7 @@
 #include "base/i18n/rtl.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/process/process.h"
+#include "content/browser/android/overscroll_refresh.h"
 #include "content/browser/renderer_host/render_widget_host_view_android.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/android/content_view_core.h"
@@ -35,6 +36,7 @@ class RenderWidgetHostViewAndroid;
 struct MenuItem;
 
 class ContentViewCoreImpl : public ContentViewCore,
+                            public OverscrollRefreshHandler,
                             public WebContentsObserver {
  public:
   static ContentViewCoreImpl* FromWebContents(WebContents* web_contents);
@@ -54,7 +56,7 @@ class ContentViewCoreImpl : public ContentViewCore,
   void ShowPastePopup(int x, int y) override;
   void GetScaledContentBitmap(
       float scale,
-      SkColorType color_type,
+      SkColorType preferred_color_type,
       gfx::Rect src_subrect,
       ReadbackRequestCallback& result_callback) override;
   float GetDpiScale() const override;
@@ -71,6 +73,8 @@ class ContentViewCoreImpl : public ContentViewCore,
 
   base::android::ScopedJavaLocalRef<jobject> GetWebContentsAndroid(JNIEnv* env,
                                                                    jobject obj);
+  base::android::ScopedJavaLocalRef<jobject> GetJavaWindowAndroid(JNIEnv* env,
+                                                                  jobject obj);
 
   void OnJavaContentViewCoreDestroyed(JNIEnv* env, jobject obj);
 
@@ -237,12 +241,14 @@ class ContentViewCoreImpl : public ContentViewCore,
   void OnBackgroundColorChanged(SkColor color);
 
   bool HasFocus();
+  void RequestDisallowInterceptTouchEvent();
   void OnGestureEventAck(const blink::WebGestureEvent& event,
                          InputEventAckState ack_result);
   bool FilterInputEvent(const blink::WebInputEvent& event);
   void OnSelectionChanged(const std::string& text);
   void OnSelectionEvent(ui::SelectionEventType event,
-                        const gfx::PointF& anchor_position);
+                        const gfx::PointF& selection_anchor,
+                        const gfx::RectF& selection_rect);
   scoped_ptr<ui::TouchHandleDrawable> CreatePopupTouchHandleDrawable();
 
   void StartContentIntent(const GURL& content_url);
@@ -292,6 +298,8 @@ class ContentViewCoreImpl : public ContentViewCore,
 
   void OnShowUnhandledTapUIIfNeeded(int x_dip, int y_dip);
 
+  // returns page density (dpi) X page scale
+  float GetScaleFactor() const;
  private:
   class ContentViewUserData;
 
@@ -303,6 +311,12 @@ class ContentViewCoreImpl : public ContentViewCore,
   void RenderViewHostChanged(RenderViewHost* old_host,
                              RenderViewHost* new_host) override;
   void WebContentsDestroyed() override;
+
+  // OverscrollRefreshHandler implementation.
+  bool PullStart() override;
+  void PullUpdate(float delta) override;
+  void PullRelease(bool allow_refresh) override;
+  void PullReset() override;
 
   // --------------------------------------------------------------------------
   // Other private methods and data
@@ -340,6 +354,9 @@ class ContentViewCoreImpl : public ContentViewCore,
 
   // Device scale factor.
   float dpi_scale_;
+
+  // Page scale factor.
+  float page_scale_;
 
   // The Android view that can be used to add and remove decoration layers
   // like AutofillPopup.

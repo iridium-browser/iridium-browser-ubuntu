@@ -96,9 +96,9 @@ ADDITIONAL_PATHS = (
     os.path.join('tools', 'page_cycler', 'acid3'),
     os.path.join('url', 'third_party', 'mozilla'),
     os.path.join('v8'),
-    # Fake directory so we can include the strongtalk license.
+    # Fake directories to include the strongtalk and fdlibm licenses.
     os.path.join('v8', 'strongtalk'),
-    os.path.join('v8', 'third_party', 'fdlibm'),
+    os.path.join('v8', 'fdlibm'),
 )
 
 
@@ -189,7 +189,7 @@ SPECIAL_CASES = {
         "URL": "http://webkit.org/",
         "License": "BSD and GPL v2",
         # Absolute path here is resolved as relative to the source root.
-        "License File": "/webkit/LICENSE",
+        "License File": "/third_party/WebKit/LICENSE_FOR_ABOUT_CREDITS",
     },
     os.path.join('third_party', 'webpagereplay'): {
         "Name": "webpagereplay",
@@ -221,12 +221,12 @@ SPECIAL_CASES = {
         # Absolute path here is resolved as relative to the source root.
         "License File": "/v8/LICENSE.strongtalk",
     },
-    os.path.join('v8', 'third_party', 'fdlibm'): {
+    os.path.join('v8', 'fdlibm'): {
         "Name": "fdlibm",
         "URL": "http://www.netlib.org/fdlibm/",
         "License": "Freely Distributable",
         # Absolute path here is resolved as relative to the source root.
-        "License File" : "/v8/third_party/fdlibm/LICENSE",
+        "License File" : "/v8/src/third_party/fdlibm/LICENSE",
         "License Android Compatible" : "yes",
     },
     os.path.join('third_party', 'khronos_glcts'): {

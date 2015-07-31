@@ -18,7 +18,7 @@
       'dependencies': [
         'core.gyp:*',
         'giflib.gyp:giflib',
-        'libpng.gyp:libpng',
+        'libjpeg.gyp:libjpeg',
       ],
       'cflags':[
         # FIXME: This gets around a longjmp warning. See
@@ -38,6 +38,9 @@
         '../src/codec/SkCodec_libpng.cpp',
         '../src/codec/SkCodec_wbmp.cpp',
         '../src/codec/SkGifInterlaceIter.cpp',
+        '../src/codec/SkJpegCodec.cpp',
+        '../src/codec/SkJpegDecoderMgr.cpp',
+        '../src/codec/SkJpegUtility.cpp',
         '../src/codec/SkMaskSwizzler.cpp',
         '../src/codec/SkMasks.cpp',
         '../src/codec/SkSwizzler.cpp',
@@ -47,6 +50,21 @@
           '../include/codec',
         ],
       },
+      'conditions': [
+        [ 'skia_android_framework == 1',
+          {
+            # TODO(djsollen): this is a temporary dependency until we can update
+            # the android framework to a more recent version of libpng.
+            'dependencies': [
+              'libpng.gyp:libpng',
+            ],
+          }, {  # !skia_android_framework
+            'dependencies': [
+              'libpng.gyp:libpng_static',
+            ],
+          }
+        ]
+      ]
     },
   ],
 }

@@ -90,7 +90,9 @@ scoped_ptr<NavigationRequest> NavigationRequest::CreateBrowserInitiated(
       BeginNavigationParams(method, headers.ToString(),
                             LoadFlagFromNavigationType(navigation_type), false),
       entry.ConstructRequestNavigationParams(
-          navigation_start, controller->GetIndexOfEntry(&entry),
+          navigation_start,
+          controller->GetPendingEntryIndex() == -1,
+          controller->GetIndexOfEntry(&entry),
           controller->GetLastCommittedEntryIndex(),
           controller->GetEntryCount()),
       request_body, true, &entry));
@@ -203,11 +205,12 @@ void NavigationRequest::OnResponseStarted(
                                                   response.get(), body.Pass());
 }
 
-void NavigationRequest::OnRequestFailed(int net_error) {
+void NavigationRequest::OnRequestFailed(bool has_stale_copy_in_cache,
+                                        int net_error) {
   DCHECK(state_ == STARTED);
   state_ = FAILED;
-  // TODO(davidben): Network failures should display a network error page.
-  NOTIMPLEMENTED() << " where net_error=" << net_error;
+  frame_tree_node_->navigator()->FailedNavigation(
+      frame_tree_node_, has_stale_copy_in_cache, net_error);
 }
 
 void NavigationRequest::OnRequestStarted(base::TimeTicks timestamp) {

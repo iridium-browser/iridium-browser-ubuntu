@@ -32,6 +32,7 @@
 #ifndef DocumentThreadableLoader_h
 #define DocumentThreadableLoader_h
 
+#include "core/CoreExport.h"
 #include "core/fetch/RawResource.h"
 #include "core/fetch/ResourceOwner.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
@@ -52,7 +53,7 @@ class ResourceRequest;
 class SecurityOrigin;
 class ThreadableLoaderClient;
 
-class DocumentThreadableLoader final : public ThreadableLoader, private ResourceOwner<RawResource>  {
+class CORE_EXPORT DocumentThreadableLoader final : public ThreadableLoader, private ResourceOwner<RawResource>  {
     WTF_MAKE_FAST_ALLOCATED(DocumentThreadableLoader);
     public:
         static void loadResourceSynchronously(Document&, const ResourceRequest&, ThreadableLoaderClient&, const ThreadableLoaderOptions&, const ResourceLoaderOptions&);
@@ -133,8 +134,12 @@ class DocumentThreadableLoader final : public ThreadableLoader, private Resource
         bool m_forceDoNotAllowStoredCredentials;
         RefPtr<SecurityOrigin> m_securityOrigin;
 
+        // True while the initial URL and all the URLs of the redirects
+        // this object has followed, if any, are same-origin to
+        // securityOrigin().
         bool m_sameOriginRequest;
-        bool m_simpleRequest;
+        // Set to true if the current request is cross-origin and not simple.
+        bool m_crossOriginNonSimpleRequest;
 
         const bool m_async;
 

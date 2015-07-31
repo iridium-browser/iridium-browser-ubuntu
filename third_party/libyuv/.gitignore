@@ -1,7 +1,8 @@
 .gn
 build
 buildtools
-chromium/.gclient_entries
+chromium/.gclient.tmp
+chromium/.gclient.tmp_entries
 chromium/.last_sync_chromium
 chromium/src/
 google_apis
@@ -13,6 +14,7 @@ third_party/
 tools/android
 tools/clang
 tools/find_depot_tools.py
+tools/generate_library_loader
 tools/gn
 tools/gyp
 tools/memory

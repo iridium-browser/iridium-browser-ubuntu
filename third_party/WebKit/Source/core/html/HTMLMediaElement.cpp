@@ -241,7 +241,7 @@ static bool canLoadURL(const KURL& url, const ContentType& contentType, const St
     // when used with parameters, e.g. "application/octet-stream;codecs=theora", is a type that the user agent knows
     // it cannot render.
     if (contentMIMEType != "application/octet-stream" || contentTypeCodecs.isEmpty()) {
-        WebMimeRegistry::SupportsType supported = blink::Platform::current()->mimeRegistry()->supportsMediaMIMEType(contentMIMEType, contentTypeCodecs, keySystem.lower());
+        WebMimeRegistry::SupportsType supported = Platform::current()->mimeRegistry()->supportsMediaMIMEType(contentMIMEType, contentTypeCodecs, keySystem.lower());
         return supported > WebMimeRegistry::IsNotSupported;
     }
 
@@ -266,7 +266,7 @@ enum AutoplayMetrics {
 
 static void recordAutoplayMetric(AutoplayMetrics metric)
 {
-    blink::Platform::current()->histogramEnumeration("Blink.MediaElement.Autoplay", metric, NumberOfAutoplayMetrics);
+    Platform::current()->histogramEnumeration("Blink.MediaElement.Autoplay", metric, NumberOfAutoplayMetrics);
 }
 
 WebMimeRegistry::SupportsType HTMLMediaElement::supportsType(const ContentType& contentType, const String& keySystem)
@@ -290,7 +290,7 @@ WebMimeRegistry::SupportsType HTMLMediaElement::supportsType(const ContentType& 
     if (type == "application/octet-stream")
         return WebMimeRegistry::IsNotSupported;
 
-    return blink::Platform::current()->mimeRegistry()->supportsMediaMIMEType(type, typeCodecs, system);
+    return Platform::current()->mimeRegistry()->supportsMediaMIMEType(type, typeCodecs, system);
 }
 
 URLRegistry* HTMLMediaElement::s_mediaStreamRegistry = 0;
@@ -2231,7 +2231,7 @@ void HTMLMediaElement::audioTracksTimerFired(Timer<HTMLMediaElement>*)
     webMediaPlayer()->enabledAudioTracksChanged(enabledTrackIds);
 }
 
-WebMediaPlayer::TrackId HTMLMediaElement::addAudioTrack(const String& id, blink::WebMediaPlayerClient::AudioTrackKind kind, const AtomicString& label, const AtomicString& language, bool enabled)
+WebMediaPlayer::TrackId HTMLMediaElement::addAudioTrack(const String& id, WebMediaPlayerClient::AudioTrackKind kind, const AtomicString& label, const AtomicString& language, bool enabled)
 {
     AtomicString kindString = AudioKindToString(kind);
     WTF_LOG(Media, "HTMLMediaElement::addAudioTrack(%p, '%s', '%s', '%s', '%s', %d)",
@@ -2275,7 +2275,7 @@ void HTMLMediaElement::selectedVideoTrackChanged(WebMediaPlayer::TrackId* select
     webMediaPlayer()->selectedVideoTrackChanged(selectedTrackId);
 }
 
-WebMediaPlayer::TrackId HTMLMediaElement::addVideoTrack(const String& id, blink::WebMediaPlayerClient::VideoTrackKind kind, const AtomicString& label, const AtomicString& language, bool selected)
+WebMediaPlayer::TrackId HTMLMediaElement::addVideoTrack(const String& id, WebMediaPlayerClient::VideoTrackKind kind, const AtomicString& label, const AtomicString& language, bool selected)
 {
     AtomicString kindString = VideoKindToString(kind);
     WTF_LOG(Media, "HTMLMediaElement::addVideoTrack(%p, '%s', '%s', '%s', '%s', %d)",
@@ -3170,7 +3170,7 @@ void HTMLMediaElement::willStopBeingFullscreenElement()
         document().layoutView()->compositor()->setNeedsCompositingUpdate(CompositingUpdateRebuildTree);
 }
 
-blink::WebLayer* HTMLMediaElement::platformLayer() const
+WebLayer* HTMLMediaElement::platformLayer() const
 {
     return m_webLayer;
 }
@@ -3216,7 +3216,7 @@ static void assertShadowRootChildren(ShadowRoot& shadowRoot)
 
 TextTrackContainer& HTMLMediaElement::ensureTextTrackContainer()
 {
-    ShadowRoot& shadowRoot = ensureClosedShadowRoot();
+    ShadowRoot& shadowRoot = ensureUserAgentShadowRoot();
     assertShadowRootChildren(shadowRoot);
 
     Node* firstChild = shadowRoot.firstChild();
@@ -3327,7 +3327,7 @@ void HTMLMediaElement::setShouldDelayLoadEvent(bool shouldDelay)
 
 MediaControls* HTMLMediaElement::mediaControls() const
 {
-    if (ShadowRoot* shadowRoot = closedShadowRoot()) {
+    if (ShadowRoot* shadowRoot = userAgentShadowRoot()) {
         Node* lastChild = shadowRoot->lastChild();
         if (lastChild && lastChild->isMediaControls())
             return toMediaControls(lastChild);
@@ -3347,7 +3347,7 @@ void HTMLMediaElement::ensureMediaControls()
     if (isFullscreen())
         mediaControls->enteredFullscreen();
 
-    ShadowRoot& shadowRoot = ensureClosedShadowRoot();
+    ShadowRoot& shadowRoot = ensureUserAgentShadowRoot();
     assertShadowRootChildren(shadowRoot);
 
     // The media controls should be inserted after the text track container,
@@ -3581,7 +3581,7 @@ WebMediaPlayer::CORSMode HTMLMediaElement::corsMode() const
     return WebMediaPlayer::CORSModeAnonymous;
 }
 
-void HTMLMediaElement::mediaPlayerSetWebLayer(blink::WebLayer* webLayer)
+void HTMLMediaElement::mediaPlayerSetWebLayer(WebLayer* webLayer)
 {
     if (webLayer == m_webLayer)
         return;
@@ -3601,7 +3601,7 @@ void HTMLMediaElement::mediaPlayerSetWebLayer(blink::WebLayer* webLayer)
         GraphicsLayer::registerContentsLayer(m_webLayer);
 }
 
-void HTMLMediaElement::mediaPlayerMediaSourceOpened(blink::WebMediaSource* webMediaSource)
+void HTMLMediaElement::mediaPlayerMediaSourceOpened(WebMediaSource* webMediaSource)
 {
     m_mediaSource->setWebMediaSourceAndOpen(adoptPtr(webMediaSource));
 }
@@ -3675,7 +3675,7 @@ void HTMLMediaElement::selectInitialTracksIfNecessary()
 #if ENABLE(WEB_AUDIO)
 void HTMLMediaElement::clearWeakMembers(Visitor* visitor)
 {
-    if (!visitor->isAlive(m_audioSourceNode) && audioSourceProvider())
+    if (!visitor->isHeapObjectAlive(m_audioSourceNode) && audioSourceProvider())
         audioSourceProvider()->setClient(nullptr);
 }
 #endif

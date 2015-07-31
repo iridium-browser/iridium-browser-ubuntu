@@ -12,6 +12,7 @@
 #define WEBRTC_MODULES_REMOTE_BITRATE_ESTIMATOR_TEST_PACKET_SENDER_H_
 
 #include <list>
+#include <limits>
 #include <string>
 
 #include "webrtc/base/constructormagic.h"
@@ -24,19 +25,35 @@ namespace webrtc {
 namespace testing {
 namespace bwe {
 
-class PacketSender : public PacketProcessor, public BitrateObserver {
+class PacketSender : public PacketProcessor {
  public:
-  PacketSender(PacketProcessorListener* listener,
-               VideoSource* source,
-               BandwidthEstimatorType estimator);
-  virtual ~PacketSender();
-
+  PacketSender(PacketProcessorListener* listener, int flow_id)
+      : PacketProcessor(listener, flow_id, kSender),
+        // For Packet::send_time_us() to be comparable with timestamps from
+        // clock_, the clock of the PacketSender and the Source must be aligned.
+        // We assume that both start at time 0.
+        clock_(0) {}
+  virtual ~PacketSender() {}
   // Call GiveFeedback() with the returned interval in milliseconds, provided
   // there is a new estimate available.
   // Note that changing the feedback interval affects the timing of when the
   // output of the estimators is sampled and therefore the baseline files may
   // have to be regenerated.
-  virtual int GetFeedbackIntervalMs() const;
+  virtual int GetFeedbackIntervalMs() const = 0;
+  void SetSenderTimestamps(Packets* in_out);
+
+ protected:
+  SimulatedClock clock_;
+};
+
+class VideoSender : public PacketSender, public BitrateObserver {
+ public:
+  VideoSender(PacketProcessorListener* listener,
+              VideoSource* source,
+              BandwidthEstimatorType estimator);
+  virtual ~VideoSender();
+
+  int GetFeedbackIntervalMs() const override;
   void RunFor(int64_t time_ms, Packets* in_out) override;
 
   virtual VideoSource* source() const { return source_; }
@@ -50,20 +67,17 @@ class PacketSender : public PacketProcessor, public BitrateObserver {
   void ProcessFeedbackAndGeneratePackets(int64_t time_ms,
                                          std::list<FeedbackPacket*>* feedbacks,
                                          Packets* generated);
-  std::list<FeedbackPacket*> GetFeedbackPackets(Packets* in_out,
-                                                int64_t end_time_ms);
 
-  SimulatedClock clock_;
   VideoSource* source_;
   rtc::scoped_ptr<BweSender> bwe_;
   int64_t start_of_run_ms_;
   std::list<Module*> modules_;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(PacketSender);
+  DISALLOW_COPY_AND_ASSIGN(VideoSender);
 };
 
-class PacedVideoSender : public PacketSender, public PacedSender::Callback {
+class PacedVideoSender : public VideoSender, public PacedSender::Callback {
  public:
   PacedVideoSender(PacketProcessorListener* listener,
                    VideoSource* source,
@@ -94,6 +108,61 @@ class PacedVideoSender : public PacketSender, public PacedSender::Callback {
   Packets pacer_queue_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(PacedVideoSender);
+};
+
+class TcpSender : public PacketSender {
+ public:
+  TcpSender(PacketProcessorListener* listener, int flow_id, int64_t offset_ms)
+      : PacketSender(listener, flow_id),
+        cwnd_(10),
+        ssthresh_(std::numeric_limits<int>::max()),
+        ack_received_(false),
+        last_acked_seq_num_(0),
+        next_sequence_number_(0),
+        offset_ms_(offset_ms),
+        last_reduction_time_ms_(-1),
+        last_rtt_ms_(0) {}
+
+  virtual ~TcpSender() {}
+
+  void RunFor(int64_t time_ms, Packets* in_out) override;
+  int GetFeedbackIntervalMs() const override { return 10; }
+
+ private:
+  struct InFlight {
+   public:
+    InFlight(const MediaPacket& packet)
+        : sequence_number(packet.header().sequenceNumber),
+          time_ms(packet.send_time_us() / 1000) {}
+
+    InFlight(uint16_t seq_num, int64_t now_ms)
+        : sequence_number(seq_num), time_ms(now_ms) {}
+
+    bool operator<(const InFlight& rhs) const {
+      return sequence_number < rhs.sequence_number;
+    }
+
+    uint16_t sequence_number;  // Sequence number of a packet in flight, or a
+                               // packet which has just been acked.
+    int64_t time_ms;  // Time of when the packet left the sender, or when the
+                      // ack was received.
+  };
+
+  void SendPackets(Packets* in_out);
+  void UpdateCongestionControl(const FeedbackPacket* fb);
+  int TriggerTimeouts();
+  void HandleLoss();
+  Packets GeneratePackets(size_t num_packets);
+
+  float cwnd_;
+  int ssthresh_;
+  std::set<InFlight> in_flight_;
+  bool ack_received_;
+  uint16_t last_acked_seq_num_;
+  uint16_t next_sequence_number_;
+  int64_t offset_ms_;
+  int64_t last_reduction_time_ms_;
+  int64_t last_rtt_ms_;
 };
 }  // namespace bwe
 }  // namespace testing

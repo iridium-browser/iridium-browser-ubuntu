@@ -307,6 +307,10 @@ bool SSLServerSocketNSS::GetSSLInfo(SSLInfo* ssl_info) {
   return false;
 }
 
+void SSLServerSocketNSS::GetConnectionAttempts(ConnectionAttempts* out) const {
+  out->clear();
+}
+
 int SSLServerSocketNSS::InitializeSSLOptions() {
   // Transport connected, now hook it up to nss
   nss_fd_ = memio_CreateIOLayer(kRecvBufferSize, kSendBufferSize);
@@ -349,7 +353,7 @@ int SSLServerSocketNSS::InitializeSSLOptions() {
     return ERR_NO_SSL_VERSIONS_ENABLED;
   }
 
-  if (ssl_config_.require_forward_secrecy) {
+  if (ssl_config_.require_ecdhe) {
     const PRUint16* const ssl_ciphers = SSL_GetImplementedCiphers();
     const PRUint16 num_ciphers = SSL_GetNumImplementedCiphers();
 
@@ -556,7 +560,7 @@ int SSLServerSocketNSS::BufferSend(void) {
     // The error code itself is ignored, so just return ERR_ABORTED.
     return ERR_ABORTED;
   }
-  const unsigned int len = len1 + len2;
+  const size_t len = len1 + len2;
 
   int rv = 0;
   if (len) {

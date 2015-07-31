@@ -146,21 +146,39 @@ class EBuildTest(cros_test_lib.MoxTestCase):
 class ProjectAndPathTest(cros_test_lib.MoxTempDirTestCase):
   """Project and Path related tests."""
 
-  def _MockParseWorkonVariables(self, fake_projects, _fake_localname,
-                                _fake_subdir, fake_ebuild_contents):
+  def _MockParseWorkonVariables(self, fake_projects, fake_srcpaths,
+                                fake_localnames, fake_subdirs,
+                                fake_ebuild_contents):
     """Mock the necessary calls, start Replay mode, call GetSourcePath()."""
     self.mox.StubOutWithMock(os.path, 'isdir')
     self.mox.StubOutWithMock(MANIFEST, 'FindCheckoutFromPath')
 
+    if not fake_srcpaths:
+      fake_srcpaths = [''] * len(fake_projects)
+    if not fake_projects:
+      fake_projects = [''] * len(fake_srcpaths)
+
     # We need 'chromeos-base' here because it controls default _SUBDIR values.
-    ebuild_path = os.path.join(self.tempdir, 'chromeos-base', 'package',
-                               'package-9999.ebuild')
+    ebuild_path = os.path.join(self.tempdir, 'packages', 'chromeos-base',
+                               'package', 'package-9999.ebuild')
     osutils.WriteFile(ebuild_path, fake_ebuild_contents, makedirs=True)
-    for p in fake_projects:
-      os.path.isdir(mox.IgnoreArg()).AndReturn(False)
-    for p in fake_projects:
-      os.path.isdir(mox.IgnoreArg()).AndReturn(True)
-      MANIFEST.FindCheckoutFromPath(mox.IgnoreArg()).AndReturn({'name': p})
+    if any(fake_srcpaths):
+      os.path.isdir(os.path.join(self.tempdir, 'src')).InAnyOrder(
+          'isdir').AndReturn(True)
+    for project, srcpath, localname, subdir in zip(
+        fake_projects, fake_srcpaths, fake_localnames, fake_subdirs):
+      if srcpath:
+        os.path.isdir(os.path.join(self.tempdir, 'src', srcpath)).InAnyOrder(
+            'isdir').AndReturn(True)
+      else:
+        os.path.isdir(os.path.join(
+            self.tempdir, localname, subdir)).InAnyOrder(
+                'isdir').AndReturn(False)
+        os.path.isdir(os.path.join(
+            self.tempdir, 'platform', localname, subdir)).InAnyOrder(
+                'isdir').AndReturn(True)
+        MANIFEST.FindCheckoutFromPath(mox.IgnoreArg()).AndReturn(
+            {'name': project})
     self.mox.ReplayAll()
 
     ebuild = portage_util.EBuild(ebuild_path)
@@ -179,7 +197,8 @@ CROS_WORKON_LOCALNAME=%s
 CROS_WORKON_SUBDIR=%s
     """ % (fake_project, fake_localname, fake_subdir)
     project, subdir = self._MockParseWorkonVariables(
-        [fake_project], [fake_localname], [fake_subdir], fake_ebuild_contents)
+        [fake_project], [], [fake_localname], [fake_subdir],
+        fake_ebuild_contents)
     self.assertEquals(project, [fake_project])
     self.assertEquals(subdir, [os.path.join(
         self.tempdir, 'platform', '%s/%s' % (fake_localname, fake_subdir))])
@@ -187,8 +206,8 @@ CROS_WORKON_SUBDIR=%s
   def testParseArrayWorkonVariables(self):
     """Tests if ebuilds in an array format are correctly parsed."""
     fake_projects = ['my_project1', 'my_project2', 'my_project3']
-    fake_localname = ['foo', 'bar', 'bas']
-    fake_subdir = ['sub1', 'sub2', 'sub3']
+    fake_localnames = ['foo', 'bar', 'bas']
+    fake_subdirs = ['sub1', 'sub2', 'sub3']
     # The test content is formatted using the same function that
     # formats ebuild output, ensuring that we can parse our own
     # products.
@@ -197,16 +216,53 @@ CROS_WORKON_PROJECT=%s
 CROS_WORKON_LOCALNAME=%s
 CROS_WORKON_SUBDIR=%s
     """ % (portage_util.EBuild.FormatBashArray(fake_projects),
-           portage_util.EBuild.FormatBashArray(fake_localname),
-           portage_util.EBuild.FormatBashArray(fake_subdir))
-    project, subdir = self._MockParseWorkonVariables(
-        fake_projects, fake_localname, fake_subdir, fake_ebuild_contents)
-    self.assertEquals(project, fake_projects)
-    fake_path = ['%s/%s' % (fake_localname[i], fake_subdir[i])
-                 for i in range(0, len(fake_projects))]
-    fake_path = [os.path.realpath(os.path.join(self.tempdir, 'platform', x))
-                 for x in fake_path]
-    self.assertEquals(subdir, fake_path)
+           portage_util.EBuild.FormatBashArray(fake_localnames),
+           portage_util.EBuild.FormatBashArray(fake_subdirs))
+    projects, subdirs = self._MockParseWorkonVariables(
+        fake_projects, [], fake_localnames, fake_subdirs, fake_ebuild_contents)
+    self.assertEquals(projects, fake_projects)
+    fake_paths = [
+        os.path.realpath(os.path.join(
+            self.tempdir, 'platform',
+            '%s/%s' % (fake_localnames[i], fake_subdirs[i])))
+        for i in range(0, len(fake_projects))
+    ]
+    self.assertEquals(subdirs, fake_paths)
+
+  def testParseArrayWorkonVariablesWithSrcpaths(self):
+    """Tests if ebuilds with CROS_WORKON_SRCPATH are handled correctly."""
+    fake_projects = ['my_project1', '', '']
+    fake_srcpaths = ['', 'path/to/src', 'path/to/other/src']
+    fake_localnames = ['foo', 'bar', 'bas']
+    fake_subdirs = ['sub1', 'sub2', 'sub3']
+    # The test content is formatted using the same function that
+    # formats ebuild output, ensuring that we can parse our own
+    # products.
+    fake_ebuild_contents = """
+CROS_WORKON_PROJECT=%s
+CROS_WORKON_SRCPATH=%s
+CROS_WORKON_LOCALNAME=%s
+CROS_WORKON_SUBDIR=%s
+    """ % (portage_util.EBuild.FormatBashArray(fake_projects),
+           portage_util.EBuild.FormatBashArray(fake_srcpaths),
+           portage_util.EBuild.FormatBashArray(fake_localnames),
+           portage_util.EBuild.FormatBashArray(fake_subdirs))
+    projects, subdirs = self._MockParseWorkonVariables(
+        fake_projects, fake_srcpaths, fake_localnames, fake_subdirs,
+        fake_ebuild_contents)
+    self.assertEquals(projects, fake_projects)
+    fake_paths = []
+    for srcpath, localname, subdir in zip(
+        fake_srcpaths, fake_localnames, fake_subdirs):
+      if srcpath:
+        path = os.path.realpath(os.path.join(
+            self.tempdir, 'src', srcpath))
+      else:
+        path = os.path.realpath(os.path.join(
+            self.tempdir, 'platform', '%s/%s' % (localname, subdir)))
+      fake_paths.append(path)
+
+    self.assertEquals(subdirs, fake_paths)
 
 
 class StubEBuild(portage_util.EBuild):
@@ -232,8 +288,12 @@ class StubEBuild(portage_util.EBuild):
       return 'you_lose'
 
 
-class EBuildRevWorkonTest(cros_test_lib.MoxTempDirTestCase):
-  """Tests for EBuildRevWorkon."""
+class EBuildRevWorkonMoxTest(cros_test_lib.MoxTempDirTestCase):
+  """Tests for EBuildRevWorkon.
+
+  Note: This test set is deprecated due to mox usage.  Add new tests to
+  EBuildRevWorkonTest instead.
+  """
   # Lines that we will feed as fake ebuild contents to
   # EBuild.MarAsStable().  This is the minimum content needed
   # to test the various branches in the function's main processing
@@ -404,8 +464,8 @@ class EBuildRevWorkonTest(cros_test_lib.MoxTempDirTestCase):
 
   def testGitRepoHasChanges(self):
     """Tests that GitRepoHasChanges works correctly."""
-    url = 'file://' + os.path.join(constants.SOURCE_ROOT, 'chromite')
-    git.RunGit(self.tempdir, ['clone', '--depth=1', url, self.tempdir])
+    git.RunGit(self.tempdir,
+               ['clone', '--depth=1', constants.CHROMITE_DIR, self.tempdir])
     # No changes yet as we just cloned the repo.
     self.assertFalse(portage_util.EBuild.GitRepoHasChanges(self.tempdir))
     # Update metadata but no real changes.
@@ -414,6 +474,88 @@ class EBuildRevWorkonTest(cros_test_lib.MoxTempDirTestCase):
     # A real change.
     osutils.WriteFile(os.path.join(self.tempdir, 'LICENSE'), 'hi')
     self.assertTrue(portage_util.EBuild.GitRepoHasChanges(self.tempdir))
+
+
+class EBuildRevWorkonTest(cros_test_lib.MockTempDirTestCase):
+  """Tests for EBuildRevWorkon."""
+
+  def setUp(self):
+    self.overlay = '/sources/overlay'
+    package_name = os.path.join(self.overlay,
+                                'category/test_package/test_package-0.0.1')
+    ebuild_path = package_name + '-r1.ebuild'
+    self.m_ebuild = StubEBuild(ebuild_path)
+    self.revved_ebuild_path = package_name + '-r2.ebuild'
+
+  def testNoVersionScript(self):
+    """Verify default behavior with no chromeos-version.sh script."""
+    self.assertEqual('1234', self.m_ebuild.GetVersion(None, None, '1234'))
+
+  def testValidVersionScript(self):
+    """Verify normal behavior with a chromeos-version.sh script."""
+    exists = self.PatchObject(os.path, 'exists', return_value=True)
+    self.PatchObject(portage_util.EBuild, 'GetSourcePath',
+                     return_value=(None, []))
+    self.PatchObject(portage_util.EBuild, '_RunCommand', return_value='1122')
+    self.assertEqual('1122', self.m_ebuild.GetVersion(None, None, '1234'))
+    # Sanity check.
+    self.assertEqual(exists.call_count, 1)
+
+  def testVersionScriptNoOutput(self):
+    """Reject scripts that output nothing."""
+    exists = self.PatchObject(os.path, 'exists', return_value=True)
+    self.PatchObject(portage_util.EBuild, 'GetSourcePath',
+                     return_value=(None, []))
+    run = self.PatchObject(portage_util.EBuild, '_RunCommand')
+
+    # Reject no output.
+    run.return_value = ''
+    self.assertRaises(SystemExit, self.m_ebuild.GetVersion, None, None, '1234')
+    # Sanity check.
+    self.assertEqual(exists.call_count, 1)
+    exists.reset_mock()
+
+    # Reject simple output.
+    run.return_value = '\n'
+    self.assertRaises(SystemExit, self.m_ebuild.GetVersion, None, None, '1234')
+    # Sanity check.
+    self.assertEqual(exists.call_count, 1)
+
+  def testVersionScriptTooHighVersion(self):
+    """Reject scripts that output high version numbers."""
+    exists = self.PatchObject(os.path, 'exists', return_value=True)
+    self.PatchObject(portage_util.EBuild, 'GetSourcePath',
+                     return_value=(None, []))
+    self.PatchObject(portage_util.EBuild, '_RunCommand', return_value='999999')
+    self.assertRaises(ValueError, self.m_ebuild.GetVersion, None, None, '1234')
+    # Sanity check.
+    self.assertEqual(exists.call_count, 1)
+
+  def testVersionScriptInvalidVersion(self):
+    """Reject scripts that output bad version numbers."""
+    exists = self.PatchObject(os.path, 'exists', return_value=True)
+    self.PatchObject(portage_util.EBuild, 'GetSourcePath',
+                     return_value=(None, []))
+    self.PatchObject(portage_util.EBuild, '_RunCommand', return_value='abcd')
+    self.assertRaises(ValueError, self.m_ebuild.GetVersion, None, None, '1234')
+    # Sanity check.
+    self.assertEqual(exists.call_count, 1)
+
+  def testUpdateEBuildRecovery(self):
+    """Make sure UpdateEBuild can be called more than once even w/failures."""
+    ebuild = os.path.join(self.tempdir, 'test.ebuild')
+    content = '# Some data\nVAR=val\n'
+    osutils.WriteFile(ebuild, content)
+
+    # First run: pass in an invalid redirect file to trigger an exception.
+    try:
+      portage_util.EBuild.UpdateEBuild(ebuild, {'VAR': 'a'}, redirect_file=1234)
+      assert False, 'this should have thrown an exception ...'
+    except Exception:
+      pass
+
+    # Second run: it should pass normally.
+    portage_util.EBuild.UpdateEBuild(ebuild, {'VAR': 'b'})
 
 
 class ListOverlaysTest(cros_test_lib.MockTempDirTestCase):
@@ -429,9 +571,9 @@ class ListOverlaysTest(cros_test_lib.MockTempDirTestCase):
 class FindOverlaysTest(cros_test_lib.MockTempDirTestCase):
   """Tests related to finding overlays."""
 
-  FAKE, PUB_PRIV, PUB_PRIV_VARIANT, PUB_ONLY, PUB2_ONLY, PRIV_ONLY = (
+  FAKE, PUB_PRIV, PUB_PRIV_VARIANT, PUB_ONLY, PUB2_ONLY, PRIV_ONLY, BRICK = (
       'fake!board', 'pub-priv-board', 'pub-priv-board_variant',
-      'pub-only-board', 'pub2-only-board', 'priv-only-board',
+      'pub-only-board', 'pub2-only-board', 'priv-only-board', 'brick',
   )
   PRIVATE = constants.PRIVATE_OVERLAYS
   PUBLIC = constants.PUBLIC_OVERLAYS
@@ -464,6 +606,12 @@ class FindOverlaysTest(cros_test_lib.MockTempDirTestCase):
                 D('portage-stable', overlay_files),
             )),
         )),
+        D('projects', (
+            D(self.BRICK, (
+                D('packages', overlay_files),
+                'config.json',
+            )),
+        )),
     )
     cros_test_lib.CreateOnDiskHierarchy(self.tempdir, file_layout)
 
@@ -476,24 +624,30 @@ class FindOverlaysTest(cros_test_lib.MockTempDirTestCase):
                   self.PUB2_ONLY):
       settings = {
           'board': board,
-          'masters': '',
+          'masters': 'portage-stable ',
           'private': '',
           'repo-name': board,
       }
       if '_' in board:
-        settings['masters'] = board.split('_')[0]
+        settings['masters'] += board.split('_')[0]
       osutils.WriteFile(conf_path % settings,
                         conf_data % settings)
+
+    # Seed the brick, with PUB_ONLY overlay as its primary overlay.
+    osutils.WriteFile(os.path.join(self.tempdir, 'projects', self.BRICK,
+                                   'packages', 'metadata', 'layout.conf'),
+                      'repo-name = %s\nmasters = %s' % (self.BRICK,
+                                                        self.PUB_ONLY))
 
     for board in (self.PUB_PRIV, self.PUB_PRIV_VARIANT, self.PRIV_ONLY):
       settings = {
           'board': board,
-          'masters': '',
+          'masters': 'portage-stable ',
           'private': 'private-',
           'repo-name': '%s-private' % board,
       }
       if '_' in board:
-        settings['masters'] = board.split('_')[0]
+        settings['masters'] += board.split('_')[0]
       osutils.WriteFile(conf_path % settings,
                         conf_data % settings)
 
@@ -509,7 +663,7 @@ class FindOverlaysTest(cros_test_lib.MockTempDirTestCase):
     # Now build up the list of overlays that we'll use in tests below.
     self.overlays = {}
     for b in (None, self.FAKE, self.PUB_PRIV, self.PUB_PRIV_VARIANT,
-              self.PUB_ONLY, self.PUB2_ONLY, self.PRIV_ONLY):
+              self.PUB_ONLY, self.PUB2_ONLY, self.PRIV_ONLY, self.BRICK):
       self.overlays[b] = d = {}
       for o in (self.PRIVATE, self.PUBLIC, self.BOTH, None):
         try:
@@ -547,7 +701,7 @@ class FindOverlaysTest(cros_test_lib.MockTempDirTestCase):
     find all public and all private overlays.
     """
     for b, d in self.overlays.items():
-      if b == self.FAKE:
+      if b == self.FAKE or b == self.BRICK:
         continue
       self.assertGreaterEqual(set(d[self.BOTH]), set(d[self.PUBLIC]))
       self.assertGreater(set(d[self.BOTH]), set(d[self.PRIVATE]))
@@ -588,6 +742,13 @@ class FindOverlaysTest(cros_test_lib.MockTempDirTestCase):
                      self.overlays[self.PUB2_ONLY][self.PUBLIC][:-1])
     self.assertNotEqual(self.overlays[self.PUB_ONLY][self.PUBLIC][-1],
                         self.overlays[self.PUB2_ONLY][self.PUBLIC][-1])
+
+  def testBrickPrimaryOverlay(self):
+    """Verify that a brick's stacking correctly picks up its primary overlay."""
+    primary = portage_util.FindPrimaryOverlay(
+        self.BOTH, self.BRICK, self.tempdir)
+    self.assertIn(primary, self.overlays[self.PUB_ONLY][self.BOTH])
+    self.assertEqual(primary, self.overlays[self.PUB_ONLY][self.PUBLIC][-1])
 
   def testReadOverlayFileOrder(self):
     """Verify that the boards are examined in the right order."""

@@ -8,7 +8,6 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.os.Build;
 import android.os.Bundle;
 import android.os.SystemClock;
 import android.preference.PreferenceManager;
@@ -21,9 +20,11 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LibraryProcessType;
-import org.chromium.base.library_loader.LoaderErrors;
 import org.chromium.base.library_loader.ProcessInitException;
+import org.chromium.chrome.browser.child_accounts.ChildAccountFeedbackReporter;
 import org.chromium.chrome.browser.child_accounts.ChildAccountService;
+import org.chromium.chrome.browser.dom_distiller.DomDistillerFeedbackReporter;
+import org.chromium.chrome.browser.externalauth.ExternalAuthUtils;
 import org.chromium.chrome.browser.firstrun.FirstRunActivity;
 import org.chromium.chrome.browser.init.InvalidStartupDialog;
 import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
@@ -31,16 +32,18 @@ import org.chromium.chrome.browser.partnercustomizations.PartnerBrowserCustomiza
 import org.chromium.chrome.browser.preferences.LocationSettings;
 import org.chromium.chrome.browser.preferences.Preferences;
 import org.chromium.chrome.browser.preferences.PreferencesLauncher;
-import org.chromium.chrome.browser.preferences.ProtectedContentPreferences;
 import org.chromium.chrome.browser.preferences.autofill.AutofillPreferences;
 import org.chromium.chrome.browser.preferences.password.ManageSavedPasswordsPreferences;
 import org.chromium.chrome.browser.preferences.privacy.PrivacyPreferences;
 import org.chromium.chrome.browser.preferences.website.SingleWebsitePreferences;
 import org.chromium.chrome.browser.services.AndroidEduOwnerCheckCallback;
+import org.chromium.chrome.browser.smartcard.PKCS11AuthenticationManager;
 import org.chromium.content.app.ContentApplication;
 import org.chromium.content.browser.BrowserStartupController;
-
-import java.util.concurrent.Callable;
+import org.chromium.sync.signin.AccountManagerDelegate;
+import org.chromium.sync.signin.AccountManagerHelper;
+import org.chromium.sync.signin.SystemAccountManagerDelegate;
+import org.chromium.ui.base.ActivityWindowAndroid;
 
 /**
  * Basic application functionality that should be shared among all browser applications that use
@@ -52,6 +55,20 @@ public abstract class ChromiumApplication extends ContentApplication {
     private static final String PREF_BOOT_TIMESTAMP =
             "com.google.android.apps.chrome.ChromeMobileApplication.BOOT_TIMESTAMP";
     private static final long BOOT_TIMESTAMP_MARGIN_MS = 1000;
+
+    /**
+     * This is called once per ChromiumApplication instance, which get created per process
+     * (browser OR renderer).  Don't stick anything in here that shouldn't be called multiple times
+     * during Chrome's lifetime.
+     */
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        // Set the default AccountManagerDelegate to ensure it is always used when the instance
+        // of the AccountManagerHelper is created. Must be done before AccountMangerHelper.get(...)
+        // is called.
+        AccountManagerHelper.setDefaultAccountManagerDelegate(createAccountManagerDelegate());
+    }
 
     /**
      * Returns whether the Activity is being shown in multi-window mode.
@@ -85,16 +102,6 @@ public abstract class ChromiumApplication extends ContentApplication {
      */
     public void openSyncSettings(String accountName) {
         // TODO(aurimas): implement this once SyncCustomizationFragment is upstreamed.
-    }
-
-    /**
-     * Opens a protected content settings page, if available.
-     */
-    @CalledByNative
-    protected void openProtectedContentSettings() {
-        assert Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT;
-        PreferencesLauncher.launchSettingsPage(this,
-                ProtectedContentPreferences.class.getName());
     }
 
     @CalledByNative
@@ -156,53 +163,26 @@ public abstract class ChromiumApplication extends ContentApplication {
 
     /**
      * Loads native Libraries synchronously and starts Chrome browser processes.
-     * Must be called on the main thread.
+     * Must be called on the main thread. Makes sure the process is initialized as a
+     * Browser process instead of a ContentView process.
      *
      * @param initGoogleServicesManager when true the GoogleServicesManager is initialized.
      */
-    public void startBrowserProcessesAndLoadLibrariesSync(
-            Context context, boolean initGoogleServicesManager)
+    public void startBrowserProcessesAndLoadLibrariesSync(boolean initGoogleServicesManager)
             throws ProcessInitException {
         ThreadUtils.assertOnUiThread();
         initCommandLine();
         LibraryLoader.get(LibraryProcessType.PROCESS_BROWSER).ensureInitialized(this, true);
-        startChromeBrowserProcessesSync(initGoogleServicesManager);
-    }
-
-    /**
-     * Make sure the process is initialized as Browser process instead of
-     * ContentView process. If this is not called from the main thread, an event
-     * will be posted and return will be blocked waiting for that event to
-     * complete.
-     * @param initGoogleServicesManager when true the GoogleServicesManager is initialized.
-     */
-    public void startChromeBrowserProcessesSync(final boolean initGoogleServicesManager)
-            throws ProcessInitException {
         final Context context = getApplicationContext();
-        int loadError = ThreadUtils.runOnUiThreadBlockingNoException(new Callable<Integer>() {
-            @Override
-            public Integer call() {
-                try {
-                    // Kick off checking for a child account with an empty callback.
-                    ChildAccountService.getInstance(context).checkHasChildAccount(
-                            new ChildAccountService.HasChildAccountCallback() {
-                                @Override
-                                public void onChildAccountChecked(boolean hasChildAccount) {
-                                }
-                            });
-                    BrowserStartupController.get(context, LibraryProcessType.PROCESS_BROWSER)
-                            .startBrowserProcessesSync(false);
-                    if (initGoogleServicesManager) initializeGoogleServicesManager();
-                    return LoaderErrors.LOADER_ERROR_NORMAL_COMPLETION;
-                } catch (ProcessInitException e) {
-                    Log.e(TAG, "Unable to load native library.", e);
-                    return e.getErrorCode();
-                }
-            }
-        });
-        if (loadError != LoaderErrors.LOADER_ERROR_NORMAL_COMPLETION) {
-            throw new ProcessInitException(loadError);
-        }
+        // Kick off checking for a child account with an empty callback.
+        ChildAccountService.getInstance(context).checkHasChildAccount(
+                new ChildAccountService.HasChildAccountCallback() {
+                    @Override
+                    public void onChildAccountChecked(boolean hasChildAccount) {}
+                });
+        BrowserStartupController.get(context, LibraryProcessType.PROCESS_BROWSER)
+                .startBrowserProcessesSync(false);
+        if (initGoogleServicesManager) initializeGoogleServicesManager();
     }
 
     /**
@@ -222,6 +202,14 @@ public abstract class ChromiumApplication extends ContentApplication {
      */
     protected void initializeGoogleServicesManager() {
         // TODO(yusufo): Make this private when GoogleServicesManager is upstreamed.
+    }
+
+    /**
+     * Creates a new {@link AccountManagerDelegate}.
+     * @return the created {@link AccountManagerDelegate}.
+     */
+    public AccountManagerDelegate createAccountManagerDelegate() {
+        return new SystemAccountManagerDelegate(this);
     }
 
     /**
@@ -320,4 +308,28 @@ public abstract class ChromiumApplication extends ContentApplication {
     private static native void nativeChangeAppStatus(boolean inForeground);
     private static native String nativeGetBrowserUserAgent();
     private static native void nativeFlushPersistentData();
+
+    public org.chromium.chrome.browser.dom_distiller.ExternalFeedbackReporter
+            createDomDistillerFeedbackLauncher() {
+        return new DomDistillerFeedbackReporter.NoOpExternalFeedbackReporter();
+    }
+
+    public org.chromium.chrome.browser.child_accounts.ExternalFeedbackReporter
+            createChildAccountFeedbackLauncher() {
+        return new ChildAccountFeedbackReporter.NoOpExternalFeedbackReporter();
+    }
+
+    /**
+     * @return An instance of ExternalAuthUtils to be installed as a singleton.
+     */
+    public ExternalAuthUtils createExternalAuthUtils() {
+        return new ExternalAuthUtils();
+    }
+
+    /**
+     * @return A new ActivityWindowAndroid instance.
+     */
+    public ActivityWindowAndroid createActivityWindowAndroid(Activity activity) {
+        return new ActivityWindowAndroid(activity, true);
+    }
 }

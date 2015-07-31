@@ -302,6 +302,9 @@ ChromePermissionMessageRule::GetAllRules() {
            IDS_EXTENSION_PROMPT_WARNING_USB_DEVICE_UNKNOWN_PRODUCT),
        {APIPermission::kUsbDeviceUnknownProduct},
        {}},
+      {IDS_EXTENSION_PROMPT_WARNING_USB_DEVICE_UNKNOWN_VENDOR,
+       {APIPermission::kUsbDeviceUnknownVendor},
+       {}},
       {new SimpleListFormatter(IDS_EXTENSION_PROMPT_WARNING_USB_DEVICE_LIST),
        {APIPermission::kUsbDeviceList},
        {}},
@@ -318,10 +321,6 @@ ChromePermissionMessageRule::GetAllRules() {
       {IDS_EXTENSION_PROMPT_WARNING_ACCESSIBILITY_FEATURES_READ_MODIFY,
        {APIPermission::kAccessibilityFeaturesModify,
         APIPermission::kAccessibilityFeaturesRead},
-       {}},
-
-      {IDS_EXTENSION_PROMPT_WARNING_AUDIO_AND_VIDEO_CAPTURE,
-       {APIPermission::kAudioCapture, APIPermission::kVideoCapture},
        {}},
 
       // TODO(sashab): Add the missing combinations of media galleries
@@ -345,9 +344,9 @@ ChromePermissionMessageRule::GetAllRules() {
 
       {IDS_EXTENSION_PROMPT_WARNING_HISTORY_WRITE_AND_SESSIONS,
        {APIPermission::kSessions, APIPermission::kHistory},
-       {APIPermission::kTab,
-        APIPermission::kFavicon,
+       {APIPermission::kFavicon,
         APIPermission::kProcesses,
+        APIPermission::kTab,
         APIPermission::kTopSites,
         APIPermission::kWebNavigation}},
       {IDS_EXTENSION_PROMPT_WARNING_HISTORY_READ_AND_SESSIONS,
@@ -372,8 +371,10 @@ ChromePermissionMessageRule::GetAllRules() {
       {IDS_EXTENSION_PROMPT_WARNING_HISTORY_WRITE,
        {APIPermission::kHistory},
        {APIPermission::kFavicon,
+        APIPermission::kProcesses,
         APIPermission::kTab,
-        APIPermission::kTopSites}},
+        APIPermission::kTopSites,
+        APIPermission::kWebNavigation}},
       // A special hack: If kFileSystemWriteDirectory would be displayed, hide
       // kFileSystemDirectory as the write directory message implies it.
       // TODO(sashab): Remove kFileSystemWriteDirectory; it's no longer needed
@@ -404,7 +405,10 @@ ChromePermissionMessageRule::GetAllRules() {
       // frequently visited sites.
       {IDS_EXTENSION_PROMPT_WARNING_HISTORY_READ,
        {APIPermission::kTab},
-       {APIPermission::kFavicon, APIPermission::kTopSites}},
+       {APIPermission::kFavicon,
+        APIPermission::kProcesses,
+        APIPermission::kTopSites,
+        APIPermission::kWebNavigation}},
 
       // Individual message rules taken from
       // ChromeAPIPermissions::GetAllPermissions():
@@ -494,8 +498,17 @@ ChromePermissionMessageRule::GetAllRules() {
       {IDS_EXTENSION_PROMPT_WARNING_MUSIC_MANAGER_PRIVATE,
        {APIPermission::kMusicManagerPrivate},
        {}},
+      {IDS_EXTENSION_PROMPT_WARNING_SEARCH_ENGINES_PRIVATE,
+       {APIPermission::kSearchEnginesPrivate},
+       {}},
       {IDS_EXTENSION_PROMPT_WARNING_SETTINGS_PRIVATE,
        {APIPermission::kSettingsPrivate},
+       {}},
+      {IDS_EXTENSION_PROMPT_WARNING_AUTOFILL_PRIVATE,
+       {APIPermission::kAutofillPrivate},
+       {}},
+      {IDS_EXTENSION_PROMPT_WARNING_PASSWORDS_PRIVATE,
+       {APIPermission::kPasswordsPrivate},
        {}},
 
       // Platform-app permission messages.
@@ -522,15 +535,8 @@ ChromePermissionMessageRule::GetAllRules() {
        {APIPermission::kInterceptAllKeys},
        {}},
 
-      // Settings override permission messages.
-      {IDS_EXTENSION_PROMPT_WARNING_HOME_PAGE_SETTING_OVERRIDE,
-       {APIPermission::kHomepage},
-       {}},
-      {IDS_EXTENSION_PROMPT_WARNING_SEARCH_SETTINGS_OVERRIDE,
-       {APIPermission::kSearchProvider},
-       {}},
-      {IDS_EXTENSION_PROMPT_WARNING_START_PAGE_SETTING_OVERRIDE,
-       {APIPermission::kStartupPages},
+      {IDS_EXTENSION_PROMPT_WARNING_AUDIO_AND_VIDEO_CAPTURE,
+       {APIPermission::kAudioCapture, APIPermission::kVideoCapture},
        {}},
 
       // Individual message rules taken from
@@ -578,19 +584,17 @@ ChromePermissionMessageRule::GetAllRules() {
 
       // API permission rules:
       // SettingsOverrideAPIPermission:
-      {IDS_EXTENSION_PROMPT_WARNING_HOME_PAGE_SETTING_OVERRIDE,
+      {new SingleParameterFormatter(
+           IDS_EXTENSION_PROMPT_WARNING_HOME_PAGE_SETTING_OVERRIDE),
        {APIPermission::kHomepage},
        {}},
-      {IDS_EXTENSION_PROMPT_WARNING_START_PAGE_SETTING_OVERRIDE,
-       {APIPermission::kStartupPages},
-       {}},
-      {IDS_EXTENSION_PROMPT_WARNING_SEARCH_SETTINGS_OVERRIDE,
+      {new SingleParameterFormatter(
+           IDS_EXTENSION_PROMPT_WARNING_SEARCH_SETTINGS_OVERRIDE),
        {APIPermission::kSearchProvider},
        {}},
-
-      // USBDevicePermission:
-      {IDS_EXTENSION_PROMPT_WARNING_USB_DEVICE_UNKNOWN_VENDOR,
-       {APIPermission::kUsbDeviceUnknownVendor},
+      {new SingleParameterFormatter(
+           IDS_EXTENSION_PROMPT_WARNING_START_PAGE_SETTING_OVERRIDE),
+       {APIPermission::kStartupPages},
        {}},
 
       // Other rules:

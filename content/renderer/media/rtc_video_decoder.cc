@@ -13,13 +13,16 @@
 #include "base/stl_util.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task_runner_util.h"
-#include "content/renderer/media/native_handle_impl.h"
 #include "gpu/command_buffer/common/mailbox_holder.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/renderers/gpu_video_accelerator_factories.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "third_party/webrtc/common_video/interface/i420_video_frame.h"
+#include "third_party/webrtc/base/bind.h"
 #include "third_party/webrtc/system_wrappers/interface/ref_count.h"
+#include "third_party/webrtc/video_frame.h"
+
+static void ReleaseFrame(scoped_refptr<media::VideoFrame> frame) {
+}
 
 namespace content {
 
@@ -212,10 +215,20 @@ int32_t RTCVideoDecoder::Decode(
 
   bool need_to_reset_for_midstream_resize = false;
   if (inputImage._frameType == webrtc::kKeyFrame) {
-    DVLOG(2) << "Got key frame. size=" << inputImage._encodedWidth << "x"
-             << inputImage._encodedHeight;
+    gfx::Size new_frame_size(inputImage._encodedWidth,
+                             inputImage._encodedHeight);
+    DVLOG(2) << "Got key frame. size=" << new_frame_size.ToString();
+
+    if (new_frame_size.width() > max_resolution_.width() ||
+        new_frame_size.width() < min_resolution_.width() ||
+        new_frame_size.height() > max_resolution_.height() ||
+        new_frame_size.height() < min_resolution_.height()) {
+      DVLOG(1) << "Resolution unsupported, falling back to software decode";
+      return WEBRTC_VIDEO_CODEC_FALLBACK_SOFTWARE;
+    }
+
     gfx::Size prev_frame_size = frame_size_;
-    frame_size_.SetSize(inputImage._encodedWidth, inputImage._encodedHeight);
+    frame_size_ = new_frame_size;
     if (!kVDACanHandleMidstreamResize && !prev_frame_size.IsEmpty() &&
         prev_frame_size != frame_size_) {
       need_to_reset_for_midstream_resize = true;
@@ -388,13 +401,13 @@ void RTCVideoDecoder::PictureReady(const media::Picture& picture) {
   DCHECK(inserted);
 
   // Create a WebRTC video frame.
-  webrtc::RefCountImpl<NativeHandleImpl>* handle =
-      new webrtc::RefCountImpl<NativeHandleImpl>(frame);
-  webrtc::I420VideoFrame decoded_image(handle,
+  webrtc::I420VideoFrame decoded_image(frame.get(),
                                        picture.visible_rect().width(),
                                        picture.visible_rect().height(),
                                        timestamp,
-                                       0);
+                                       0,
+                                       webrtc::kVideoRotation_0,
+                                       rtc::Bind(&ReleaseFrame, frame));
 
   // Invoke decode callback. WebRTC expects no callback after Reset or Release.
   {
@@ -417,13 +430,12 @@ scoped_refptr<media::VideoFrame> RTCVideoDecoder::CreateVideoFrame(
   base::TimeDelta timestamp_ms = base::TimeDelta::FromInternalValue(
       base::checked_cast<uint64_t>(timestamp) * 1000 / 90);
   return media::VideoFrame::WrapNativeTexture(
-      make_scoped_ptr(new gpu::MailboxHolder(pb.texture_mailbox(),
-                                             decoder_texture_target_, 0)),
+      gpu::MailboxHolder(pb.texture_mailbox(), decoder_texture_target_, 0),
       media::BindToCurrentLoop(base::Bind(
           &RTCVideoDecoder::ReleaseMailbox, weak_factory_.GetWeakPtr(),
           factories_, picture.picture_buffer_id(), pb.texture_id())),
       pb.size(), visible_rect, visible_rect.size(), timestamp_ms,
-      picture.allow_overlay());
+      picture.allow_overlay(), true /* has_alpha */);
 }
 
 void RTCVideoDecoder::NotifyEndOfBitstreamBuffer(int32 id) {
@@ -653,12 +665,34 @@ void RTCVideoDecoder::ReusePictureBuffer(int64 picture_buffer_id) {
     vda_->ReusePictureBuffer(picture_buffer_id);
 }
 
+bool RTCVideoDecoder::IsProfileSupported(media::VideoCodecProfile profile) {
+  DCheckGpuVideoAcceleratorFactoriesTaskRunnerIsCurrent();
+  media::VideoDecodeAccelerator::SupportedProfiles supported_profiles =
+      factories_->GetVideoDecodeAcceleratorSupportedProfiles();
+
+  for (const auto& supported_profile : supported_profiles) {
+    if (profile == supported_profile.profile) {
+      min_resolution_ = supported_profile.min_resolution;
+      max_resolution_ = supported_profile.max_resolution;
+      return true;
+    }
+  }
+
+  return false;
+}
+
 void RTCVideoDecoder::CreateVDA(media::VideoCodecProfile profile,
                                 base::WaitableEvent* waiter) {
   DCheckGpuVideoAcceleratorFactoriesTaskRunnerIsCurrent();
-  vda_ = factories_->CreateVideoDecodeAccelerator();
-  if (vda_ && !vda_->Initialize(profile, this))
-    vda_.release()->Destroy();
+
+  if (!IsProfileSupported(profile)) {
+    DVLOG(1) << "Unsupported profile " << profile;
+  } else {
+    vda_ = factories_->CreateVideoDecodeAccelerator();
+    if (vda_ && !vda_->Initialize(profile, this))
+      vda_.release()->Destroy();
+  }
+
   waiter->Signal();
 }
 

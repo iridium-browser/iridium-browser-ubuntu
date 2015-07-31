@@ -44,10 +44,8 @@
 #include "core/html/HTMLLinkElement.h"
 #include "core/html/imports/HTMLImportsController.h"
 #include "core/inspector/InspectorInstrumentation.h"
-#include "core/page/InjectedStyleSheets.h"
 #include "core/page/Page.h"
 #include "core/svg/SVGStyleElement.h"
-#include "platform/URLPatternMatcher.h"
 
 namespace blink {
 
@@ -57,7 +55,6 @@ StyleEngine::StyleEngine(Document& document)
     : m_document(&document)
     , m_isMaster(!document.importsController() || document.importsController()->master() == &document)
     , m_pendingStylesheets(0)
-    , m_injectedStyleSheetCacheValid(false)
     , m_documentStyleSheetCollection(DocumentStyleSheetCollection::create(document))
     , m_documentScopeDirty(true)
     , m_usesSiblingRules(false)
@@ -91,8 +88,6 @@ void StyleEngine::detachFromDocument()
     // Cleanup is performed eagerly when the StyleEngine is removed from the
     // document. The StyleEngine is unreachable after this, since only the
     // document has a reference to it.
-    for (unsigned i = 0; i < m_injectedAuthorStyleSheets.size(); ++i)
-        m_injectedAuthorStyleSheets[i]->clearOwnerNode();
     for (unsigned i = 0; i < m_authorStyleSheets.size(); ++i)
         m_authorStyleSheets[i]->clearOwnerNode();
 
@@ -231,51 +226,6 @@ void StyleEngine::resetCSSFeatureFlags(const RuleFeatureSet& features)
     m_maxDirectAdjacentSelectors = features.maxDirectAdjacentSelectors();
 }
 
-const WillBeHeapVector<RefPtrWillBeMember<CSSStyleSheet>>& StyleEngine::injectedAuthorStyleSheets() const
-{
-    updateInjectedStyleSheetCache();
-    return m_injectedAuthorStyleSheets;
-}
-
-void StyleEngine::updateInjectedStyleSheetCache() const
-{
-    if (m_injectedStyleSheetCacheValid)
-        return;
-    m_injectedStyleSheetCacheValid = true;
-    m_injectedAuthorStyleSheets.clear();
-
-    Page* owningPage = document().page();
-    if (!owningPage)
-        return;
-
-    const InjectedStyleSheetEntryVector& entries = InjectedStyleSheets::instance().entries();
-    for (unsigned i = 0; i < entries.size(); ++i) {
-        const InjectedStyleSheetEntry* entry = entries[i].get();
-        if (entry->injectedFrames() == InjectStyleInTopFrameOnly && document().ownerElement())
-            continue;
-        if (!URLPatternMatcher::matchesPatterns(document().url(), entry->whitelist()))
-            continue;
-        RefPtrWillBeRawPtr<CSSStyleSheet> groupSheet = CSSStyleSheet::createInline(m_document, KURL());
-        m_injectedAuthorStyleSheets.append(groupSheet);
-        groupSheet->contents()->parseString(entry->source());
-    }
-}
-
-void StyleEngine::invalidateInjectedStyleSheetCache()
-{
-    m_injectedStyleSheetCacheValid = false;
-    markDocumentDirty();
-    // FIXME: updateInjectedStyleSheetCache is called inside StyleSheetCollection::updateActiveStyleSheets
-    // and batch updates lots of sheets so we can't call addedStyleSheet() or removedStyleSheet().
-    document().styleResolverChanged();
-}
-
-void StyleEngine::compatibilityModeChanged()
-{
-    if (!m_injectedAuthorStyleSheets.isEmpty())
-        invalidateInjectedStyleSheetCache();
-}
-
 void StyleEngine::addAuthorSheet(PassRefPtrWillBeRawPtr<StyleSheetContents> authorSheet)
 {
     m_authorStyleSheets.append(CSSStyleSheet::create(authorSheet, m_document));
@@ -293,7 +243,8 @@ void StyleEngine::removePendingSheet(Node* styleSheetCandidateNode)
 {
     ASSERT(styleSheetCandidateNode);
     TreeScope* treeScope = isStyleElement(*styleSheetCandidateNode) ? &styleSheetCandidateNode->treeScope() : m_document.get();
-    markTreeScopeDirty(*treeScope);
+    if (styleSheetCandidateNode->inDocument())
+        markTreeScopeDirty(*treeScope);
 
     // Make sure we knew this sheet was pending, and that our count isn't out of sync.
     ASSERT(m_pendingStylesheets > 0);
@@ -543,8 +494,6 @@ void StyleEngine::clearResolver()
     for (UnorderedTreeScopeSet::iterator it = m_activeTreeScopes.beginUnordered(); it != m_activeTreeScopes.endUnordered(); ++it)
         (*it)->clearScopedStyleResolver();
 
-    if (m_resolver)
-        document().updateStyleInvalidationIfNeeded();
     m_resolver.clear();
 }
 
@@ -629,6 +578,7 @@ void StyleEngine::markTreeScopeDirty(TreeScope& scope)
         return;
     }
 
+    ASSERT(m_styleSheetCollectionMap.contains(&scope));
     m_dirtyTreeScopes.add(&scope);
 }
 
@@ -734,7 +684,13 @@ void StyleEngine::fontsNeedUpdate(CSSFontSelector*)
 
 void StyleEngine::setFontSelector(PassRefPtrWillBeRawPtr<CSSFontSelector> fontSelector)
 {
+#if !ENABLE(OILPAN)
+    if (m_fontSelector)
+        m_fontSelector->unregisterForInvalidationCallbacks(this);
+#endif
     m_fontSelector = fontSelector;
+    if (m_fontSelector)
+        m_fontSelector->registerForInvalidationCallbacks(this);
 }
 
 void StyleEngine::platformColorsChanged()
@@ -744,15 +700,101 @@ void StyleEngine::platformColorsChanged()
     document().setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::create(StyleChangeReason::PlatformColorChange));
 }
 
+void StyleEngine::classChangedForElement(const SpaceSplitString& changedClasses, Element& element)
+{
+    ASSERT(isMaster());
+    InvalidationSetVector invalidationSets;
+    unsigned changedSize = changedClasses.size();
+    RuleFeatureSet& ruleFeatureSet = ensureResolver().ensureUpdatedRuleFeatureSet();
+    for (unsigned i = 0; i < changedSize; ++i)
+        ruleFeatureSet.collectInvalidationSetsForClass(invalidationSets, element, changedClasses[i]);
+    scheduleInvalidationSetsForElement(invalidationSets, element);
+}
+
+void StyleEngine::classChangedForElement(const SpaceSplitString& oldClasses, const SpaceSplitString& newClasses, Element& element)
+{
+    ASSERT(isMaster());
+    InvalidationSetVector invalidationSets;
+    if (!oldClasses.size()) {
+        classChangedForElement(newClasses, element);
+        return;
+    }
+
+    // Class vectors tend to be very short. This is faster than using a hash table.
+    BitVector remainingClassBits;
+    remainingClassBits.ensureSize(oldClasses.size());
+
+    RuleFeatureSet& ruleFeatureSet = ensureResolver().ensureUpdatedRuleFeatureSet();
+
+    for (unsigned i = 0; i < newClasses.size(); ++i) {
+        bool found = false;
+        for (unsigned j = 0; j < oldClasses.size(); ++j) {
+            if (newClasses[i] == oldClasses[j]) {
+                // Mark each class that is still in the newClasses so we can skip doing
+                // an n^2 search below when looking for removals. We can't break from
+                // this loop early since a class can appear more than once.
+                remainingClassBits.quickSet(j);
+                found = true;
+            }
+        }
+        // Class was added.
+        if (!found)
+            ruleFeatureSet.collectInvalidationSetsForClass(invalidationSets, element, newClasses[i]);
+    }
+
+    for (unsigned i = 0; i < oldClasses.size(); ++i) {
+        if (remainingClassBits.quickGet(i))
+            continue;
+        // Class was removed.
+        ruleFeatureSet.collectInvalidationSetsForClass(invalidationSets, element, oldClasses[i]);
+    }
+
+    scheduleInvalidationSetsForElement(invalidationSets, element);
+}
+
+void StyleEngine::attributeChangedForElement(const QualifiedName& attributeName, Element& element)
+{
+    ASSERT(isMaster());
+    InvalidationSetVector invalidationSets;
+    ensureResolver().ensureUpdatedRuleFeatureSet().collectInvalidationSetsForAttribute(invalidationSets, element, attributeName);
+    scheduleInvalidationSetsForElement(invalidationSets, element);
+}
+
+void StyleEngine::idChangedForElement(const AtomicString& oldId, const AtomicString& newId, Element& element)
+{
+    ASSERT(isMaster());
+    InvalidationSetVector invalidationSets;
+    RuleFeatureSet& ruleFeatureSet = ensureResolver().ensureUpdatedRuleFeatureSet();
+    if (!oldId.isEmpty())
+        ruleFeatureSet.collectInvalidationSetsForId(invalidationSets, element, oldId);
+    if (!newId.isEmpty())
+        ruleFeatureSet.collectInvalidationSetsForId(invalidationSets, element, newId);
+    scheduleInvalidationSetsForElement(invalidationSets, element);
+}
+
+void StyleEngine::pseudoStateChangedForElement(CSSSelector::PseudoType pseudoType, Element& element)
+{
+    ASSERT(isMaster());
+    InvalidationSetVector invalidationSets;
+    ensureResolver().ensureUpdatedRuleFeatureSet().collectInvalidationSetsForPseudoClass(invalidationSets, element, pseudoType);
+    scheduleInvalidationSetsForElement(invalidationSets, element);
+}
+
+void StyleEngine::scheduleInvalidationSetsForElement(const InvalidationSetVector& invalidationSets, Element& element)
+{
+    for (auto invalidationSet : invalidationSets)
+        m_styleInvalidator.scheduleInvalidation(invalidationSet, element);
+}
+
 DEFINE_TRACE(StyleEngine)
 {
 #if ENABLE(OILPAN)
     visitor->trace(m_document);
-    visitor->trace(m_injectedAuthorStyleSheets);
     visitor->trace(m_authorStyleSheets);
     visitor->trace(m_documentStyleSheetCollection);
     visitor->trace(m_styleSheetCollectionMap);
     visitor->trace(m_resolver);
+    visitor->trace(m_styleInvalidator);
     visitor->trace(m_dirtyTreeScopes);
     visitor->trace(m_activeTreeScopes);
     visitor->trace(m_fontSelector);

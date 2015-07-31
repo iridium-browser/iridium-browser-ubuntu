@@ -5,7 +5,9 @@
 #include "cc/output/output_surface.h"
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
+#include "base/location.h"
+#include "base/single_thread_task_runner.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "cc/output/managed_memory_policy.h"
 #include "cc/output/output_surface_client.h"
@@ -97,7 +99,16 @@ void OutputSurface::SetExternalDrawConstraints(
 }
 
 OutputSurface::~OutputSurface() {
-  ResetContext3d();
+  if (context_provider_.get()) {
+    context_provider_->SetLostContextCallback(
+        ContextProvider::LostContextCallback());
+    context_provider_->SetMemoryPolicyChangedCallback(
+        ContextProvider::MemoryPolicyChangedCallback());
+  }
+  if (worker_context_provider_.get()) {
+    worker_context_provider_->SetLostContextCallback(
+        ContextProvider::LostContextCallback());
+  }
 }
 
 bool OutputSurface::HasExternalStencilTest() const {
@@ -111,8 +122,12 @@ bool OutputSurface::BindToClient(OutputSurfaceClient* client) {
 
   if (context_provider_.get()) {
     success = context_provider_->BindToCurrentThread();
-    if (success)
-      SetUpContext3d();
+    if (success) {
+      context_provider_->SetLostContextCallback(base::Bind(
+          &OutputSurface::DidLoseOutputSurface, base::Unretained(this)));
+      context_provider_->SetMemoryPolicyChangedCallback(
+          base::Bind(&OutputSurface::SetMemoryPolicy, base::Unretained(this)));
+    }
   }
 
   if (success && worker_context_provider_.get()) {
@@ -131,78 +146,6 @@ bool OutputSurface::BindToClient(OutputSurfaceClient* client) {
     client_ = NULL;
 
   return success;
-}
-
-bool OutputSurface::InitializeAndSetContext3d(
-    scoped_refptr<ContextProvider> context_provider,
-    scoped_refptr<ContextProvider> worker_context_provider) {
-  DCHECK(!context_provider_.get());
-  DCHECK(context_provider.get());
-  DCHECK(client_);
-
-  bool success = context_provider->BindToCurrentThread();
-  if (success) {
-    context_provider_ = context_provider;
-    SetUpContext3d();
-  }
-  if (success && worker_context_provider.get()) {
-    success = worker_context_provider->BindToCurrentThread();
-    if (success) {
-      worker_context_provider_ = worker_context_provider;
-      // The destructor resets the context lost callback, so base::Unretained
-      // is safe, as long as the worker threads stop using the context before
-      // the output surface is destroyed.
-      worker_context_provider_->SetLostContextCallback(base::Bind(
-          &OutputSurface::DidLoseOutputSurface, base::Unretained(this)));
-    }
-  }
-
-  if (!success)
-    ResetContext3d();
-  else
-    client_->DeferredInitialize();
-
-  return success;
-}
-
-void OutputSurface::ReleaseGL() {
-  DCHECK(client_);
-  DCHECK(context_provider_.get());
-  client_->ReleaseGL();
-  DCHECK(!context_provider_.get());
-}
-
-void OutputSurface::SetUpContext3d() {
-  DCHECK(context_provider_.get());
-  DCHECK(client_);
-
-  context_provider_->SetLostContextCallback(
-      base::Bind(&OutputSurface::DidLoseOutputSurface,
-                 base::Unretained(this)));
-  context_provider_->SetMemoryPolicyChangedCallback(
-      base::Bind(&OutputSurface::SetMemoryPolicy,
-                 base::Unretained(this)));
-}
-
-void OutputSurface::ReleaseContextProvider() {
-  DCHECK(client_);
-  DCHECK(context_provider_.get());
-  ResetContext3d();
-}
-
-void OutputSurface::ResetContext3d() {
-  if (context_provider_.get()) {
-    context_provider_->SetLostContextCallback(
-        ContextProvider::LostContextCallback());
-    context_provider_->SetMemoryPolicyChangedCallback(
-        ContextProvider::MemoryPolicyChangedCallback());
-  }
-  if (worker_context_provider_.get()) {
-    worker_context_provider_->SetLostContextCallback(
-        ContextProvider::LostContextCallback());
-  }
-  context_provider_ = NULL;
-  worker_context_provider_ = NULL;
 }
 
 void OutputSurface::EnsureBackbuffer() {
@@ -241,10 +184,9 @@ void OutputSurface::BindFramebuffer() {
 }
 
 void OutputSurface::PostSwapBuffersComplete() {
-  base::MessageLoop::current()->PostTask(
-      FROM_HERE,
-      base::Bind(&OutputSurface::OnSwapBuffersComplete,
-                 weak_ptr_factory_.GetWeakPtr()));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(&OutputSurface::OnSwapBuffersComplete,
+                            weak_ptr_factory_.GetWeakPtr()));
 }
 
 // We don't post tasks bound to the client directly since they might run
@@ -261,6 +203,10 @@ void OutputSurface::SetMemoryPolicy(const ManagedMemoryPolicy& policy) {
   // is not visible (which the renderer knows better).
   if (policy.bytes_limit_when_visible)
     client_->SetMemoryPolicy(policy);
+}
+
+OverlayCandidateValidator* OutputSurface::GetOverlayCandidateValidator() const {
+  return nullptr;
 }
 
 }  // namespace cc

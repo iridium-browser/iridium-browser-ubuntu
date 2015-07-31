@@ -18,7 +18,6 @@
 #include "webrtc/modules/rtp_rtcp/interface/receive_statistics.h"
 #include "webrtc/modules/rtp_rtcp/interface/rtp_rtcp_defines.h"
 #include "webrtc/typedefs.h"
-#include "webrtc/video_engine/include/vie_network.h"
 #include "webrtc/video_engine/vie_defines.h"
 
 namespace webrtc {
@@ -47,7 +46,7 @@ class ViEReceiver : public RtpData {
   bool RegisterPayload(const VideoCodec& video_codec);
 
   void SetNackStatus(bool enable, int max_nack_reordering_threshold);
-  void SetRtxPayloadType(int payload_type);
+  void SetRtxPayloadType(int payload_type, int associated_payload_type);
   void SetRtxSsrc(uint32_t ssrc);
   bool GetRtxSsrc(uint32_t* ssrc) const;
 
@@ -84,9 +83,6 @@ class ViEReceiver : public RtpData {
   bool OnRecoveredPacket(const uint8_t* packet, size_t packet_length) override;
 
   ReceiveStatistics* GetReceiveStatistics() const;
-
-  void ReceivedBWEPacket(int64_t arrival_time_ms, size_t payload_size,
-                         const RTPHeader& header);
  private:
   int InsertRTPPacket(const uint8_t* rtp_packet, size_t rtp_packet_length,
                       const PacketTime& packet_time);

@@ -1,0 +1,38 @@
+include_rules = [
+  "+ios/chrome/grit",
+
+  "+breakpad/src/client/ios",
+  "+components/autofill/core/browser",
+  "+components/autofill/ios/browser",
+  "+components/data_reduction_proxy/core/common",
+  "+components/dom_distiller/core",
+  "+components/dom_distiller/ios",
+  "+components/infobars/core",
+  "+components/keyed_service/core",
+  "+components/keyed_service/ios",
+  "+components/leveldb_proto",
+  "+components/pref_registry",
+  "+components/suggestions",
+  "+components/sync_driver",
+  "+components/translate/core",
+  "+components/translate/ios",
+  "+components/variations",
+  "+components/web_resource",
+  "+components/webp_transcode",
+  "+ios/net",
+  "+ios/public/provider/chrome",
+  "+ios/web/public",
+  "+net",
+  "+third_party/google_toolbox_for_mac",
+  "+ui",
+
+  # For tests.
+  "+ios/public/test",
+
+  # Only parts of skia are compiled on iOS, so we explicitly list the
+  # files that can be included to avoid bringing in more code.
+  "+skia/ext/skia_utils_ios.h",
+
+  # Generated file for translated strings in components.
+  "+grit/components_strings.h",
+]

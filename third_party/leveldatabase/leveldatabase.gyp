@@ -3,9 +3,6 @@
 # found in the LICENSE file. See the AUTHORS file for names of contributors.
 
 {
-  'variables': {
-    'use_snappy%': 1,
-  },
   'conditions': [
     ['OS=="android"', {
       'targets': [{
@@ -31,34 +28,18 @@
       'src/',
       'src/include/',
     ],
-    'conditions': [
-      ['OS!="win"', {
-        'sources/': [ ['exclude', '_win.(h|cc)$'], ],
-      }],
-      ['use_snappy', {
-        'defines': [
-          'USE_SNAPPY=1',
-        ],
-      }],
-    ],
   },
   'targets': [
     {
       'target_name': 'leveldatabase',
       'type': 'static_library',
       'dependencies': [
-        '../../third_party/re2/re2.gyp:re2',
         '../../base/base.gyp:base',
         # base::LazyInstance is a template that pulls in dynamic_annotations so
         # we need to explictly link in the code for dynamic_annotations.
         '../../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
-      ],
-      'conditions': [
-        ['use_snappy', {
-          'dependencies': [
-            '../../third_party/snappy/snappy.gyp:snappy',
-          ],
-        }],
+        '../../third_party/re2/re2.gyp:re2',
+        '../../third_party/snappy/snappy.gyp:snappy',
       ],
       'direct_dependent_settings': {
         'include_dirs': [
@@ -131,9 +112,6 @@
         'src/include/leveldb/table_builder.h',
         'src/include/leveldb/write_batch.h',
         'src/port/port.h',
-        'src/port/port_example.h',
-        'src/port/port_posix.cc',
-        'src/port/port_posix.h',
         'src/table/block.cc',
         'src/table/block.h',
         'src/table/block_builder.cc',
@@ -169,9 +147,6 @@
         'src/util/options.cc',
         'src/util/random.h',
         'src/util/status.cc',
-      ],
-      'sources/': [
-        ['exclude', '_(example|posix)\\.(h|cc)$'],
       ],
     },
     {

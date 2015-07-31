@@ -42,6 +42,10 @@ WorkerPerformance::WorkerPerformance()
 {
 }
 
+DEFINE_TRACE(WorkerPerformance)
+{
+}
+
 double WorkerPerformance::now(ExecutionContext* context) const
 {
     ASSERT(context);
@@ -50,9 +54,8 @@ double WorkerPerformance::now(ExecutionContext* context) const
     return 1000.0 * (monotonicallyIncreasingTime() - workerGlobalScope->timeOrigin());
 }
 
-PassRefPtrWillBeRawPtr<MemoryInfo> WorkerPerformance::memory() const
+MemoryInfo* WorkerPerformance::memory()
 {
-    // FIXME: We shall not create a new object every time.
     return MemoryInfo::create();
 }
 

@@ -28,22 +28,13 @@ class TimeDelta;
 namespace tracked_objects {
 
 namespace {
-// Flag to compile out almost all of the task tracking code.
-const bool kTrackAllTaskObjects = true;
-
-// TODO(jar): Evaluate the perf impact of enabling this.  If the perf impact is
-// negligible, enable by default.
-// Flag to compile out parent-child link recording.
-const bool kTrackParentChildLinks = false;
-
 // When ThreadData is first initialized, should we start in an ACTIVE state to
 // record all of the startup-time tasks, or should we start up DEACTIVATED, so
 // that we only record after parsing the command line flag --enable-tracking.
 // Note that the flag may force either state, so this really controls only the
-// period of time up until that flag is parsed. If there is no flag seen, then
+// period of time up until that flag is parsed.  If there is no flag seen, then
 // this state may prevail for much or all of the process lifetime.
-const ThreadData::Status kInitialStartupState =
-    ThreadData::PROFILING_CHILDREN_ACTIVE;
+const ThreadData::Status kInitialStartupState = ThreadData::PROFILING_ACTIVE;
 
 // Control whether an alternate time source (Now() function) is supported by
 // the ThreadData class.  This compile time flag should be set to true if we
@@ -64,9 +55,10 @@ enum {
 // State of the profiler timing enabledness.
 base::subtle::Atomic32 g_profiler_timing_enabled = UNDEFINED_TIMING;
 
-// Returns whether profiler timing is enabled. The default is true, but this may
-// be overridden by a command-line flag. Some platforms may programmatically set
-// this command-line flag to the "off" value if it's not specified.
+// Returns whether profiler timing is enabled.  The default is true, but this
+// may be overridden by a command-line flag.  Some platforms may
+// programmatically set this command-line flag to the "off" value if it's not
+// specified.
 // This in turn can be overridden by explicitly calling
 // ThreadData::EnableProfilerTiming, say, based on a field trial.
 inline bool IsProfilerTimingEnabled() {
@@ -95,13 +87,40 @@ inline bool IsProfilerTimingEnabled() {
 //------------------------------------------------------------------------------
 // DeathData tallies durations when a death takes place.
 
-DeathData::DeathData() {
-  Clear();
+DeathData::DeathData()
+    : count_(0),
+      sample_probability_count_(0),
+      run_duration_sum_(0),
+      queue_duration_sum_(0),
+      run_duration_max_(0),
+      queue_duration_max_(0),
+      run_duration_sample_(0),
+      queue_duration_sample_(0),
+      last_phase_snapshot_(nullptr) {
 }
 
-DeathData::DeathData(int count) {
-  Clear();
-  count_ = count;
+DeathData::DeathData(const DeathData& other)
+    : count_(other.count_),
+      sample_probability_count_(other.sample_probability_count_),
+      run_duration_sum_(other.run_duration_sum_),
+      queue_duration_sum_(other.queue_duration_sum_),
+      run_duration_max_(other.run_duration_max_),
+      queue_duration_max_(other.queue_duration_max_),
+      run_duration_sample_(other.run_duration_sample_),
+      queue_duration_sample_(other.queue_duration_sample_),
+      last_phase_snapshot_(nullptr) {
+  // This constructor will be used by std::map when adding new DeathData values
+  // to the map.  At that point, last_phase_snapshot_ is still NULL, so we don't
+  // need to worry about ownership transfer.
+  DCHECK(other.last_phase_snapshot_ == nullptr);
+}
+
+DeathData::~DeathData() {
+  while (last_phase_snapshot_) {
+    const DeathDataPhaseSnapshot* snapshot = last_phase_snapshot_;
+    last_phase_snapshot_ = snapshot->prev;
+    delete snapshot;
+  }
 }
 
 // TODO(jar): I need to see if this macro to optimize branching is worth using.
@@ -120,6 +139,12 @@ void DeathData::RecordDeath(const int32 queue_duration,
   // We'll just clamp at INT_MAX, but we should note this in the UI as such.
   if (count_ < INT_MAX)
     ++count_;
+
+  int sample_probability_count = sample_probability_count_;
+  if (sample_probability_count < INT_MAX)
+    ++sample_probability_count;
+  sample_probability_count_ = sample_probability_count;
+
   queue_duration_sum_ += queue_duration;
   run_duration_sum_ += run_duration;
 
@@ -128,49 +153,54 @@ void DeathData::RecordDeath(const int32 queue_duration,
   if (run_duration_max_ < run_duration)
     run_duration_max_ = run_duration;
 
-  // Take a uniformly distributed sample over all durations ever supplied.
-  // The probability that we (instead) use this new sample is 1/count_.  This
-  // results in a completely uniform selection of the sample (at least when we
-  // don't clamp count_... but that should be inconsequentially likely).
-  // We ignore the fact that we correlated our selection of a sample to the run
-  // and queue times (i.e., we used them to generate random_number).
-  CHECK_GT(count_, 0);
-  if (0 == (random_number % count_)) {
+  // Take a uniformly distributed sample over all durations ever supplied during
+  // the current profiling phase.
+  // The probability that we (instead) use this new sample is
+  // 1/sample_probability_count_. This results in a completely uniform selection
+  // of the sample (at least when we don't clamp sample_probability_count_...
+  // but that should be inconsequentially likely).  We ignore the fact that we
+  // correlated our selection of a sample to the run and queue times (i.e., we
+  // used them to generate random_number).
+  CHECK_GT(sample_probability_count, 0);
+  if (0 == (random_number % sample_probability_count)) {
     queue_duration_sample_ = queue_duration;
     run_duration_sample_ = run_duration;
   }
 }
 
-int DeathData::count() const { return count_; }
+void DeathData::OnProfilingPhaseCompleted(int profiling_phase) {
+  // Snapshotting and storing current state.
+  last_phase_snapshot_ = new DeathDataPhaseSnapshot(
+      profiling_phase, count_, run_duration_sum_, run_duration_max_,
+      run_duration_sample_, queue_duration_sum_, queue_duration_max_,
+      queue_duration_sample_, last_phase_snapshot_);
 
-int32 DeathData::run_duration_sum() const { return run_duration_sum_; }
-
-int32 DeathData::run_duration_max() const { return run_duration_max_; }
-
-int32 DeathData::run_duration_sample() const {
-  return run_duration_sample_;
-}
-
-int32 DeathData::queue_duration_sum() const {
-  return queue_duration_sum_;
-}
-
-int32 DeathData::queue_duration_max() const {
-  return queue_duration_max_;
-}
-
-int32 DeathData::queue_duration_sample() const {
-  return queue_duration_sample_;
-}
-
-void DeathData::Clear() {
-  count_ = 0;
-  run_duration_sum_ = 0;
+  // Not touching fields for which a delta can be computed by comparing with a
+  // snapshot from the previous phase. Resetting other fields.  Sample values
+  // will be reset upon next death recording because sample_probability_count_
+  // is set to 0.
+  // We avoid resetting to 0 in favor of deltas whenever possible.  The reason
+  // is that for incrementable fields, resetting to 0 from the snapshot thread
+  // potentially in parallel with incrementing in the death thread may result in
+  // significant data corruption that has a potential to grow with time.  Not
+  // resetting incrementable fields and using deltas will cause any
+  // off-by-little corruptions to be likely fixed at the next snapshot.
+  // The max values are not incrementable, and cannot be deduced using deltas
+  // for a given phase. Hence, we have to reset them to 0.  But the potential
+  // damage is limited to getting the previous phase's max to apply for the next
+  // phase, and the error doesn't have a potential to keep growing with new
+  // resets.
+  // sample_probability_count_ is incrementable, but must be reset to 0 at the
+  // phase end, so that we start a new uniformly randomized sample selection
+  // after the reset.  Corruptions due to race conditions are possible, but the
+  // damage is limited to selecting a wrong sample, which is not something that
+  // can cause accumulating or cascading effects.
+  // If there were no corruptions caused by race conditions, we never send a
+  // sample for the previous phase in the next phase's snapshot because
+  // ThreadData::SnapshotExecutedTasks doesn't send deltas with 0 count.
+  sample_probability_count_ = 0;
   run_duration_max_ = 0;
-  run_duration_sample_ = 0;
-  queue_duration_sum_ = 0;
   queue_duration_max_ = 0;
-  queue_duration_sample_ = 0;
 }
 
 //------------------------------------------------------------------------------
@@ -184,18 +214,32 @@ DeathDataSnapshot::DeathDataSnapshot()
       queue_duration_sample(-1) {
 }
 
-DeathDataSnapshot::DeathDataSnapshot(
-    const tracked_objects::DeathData& death_data)
-    : count(death_data.count()),
-      run_duration_sum(death_data.run_duration_sum()),
-      run_duration_max(death_data.run_duration_max()),
-      run_duration_sample(death_data.run_duration_sample()),
-      queue_duration_sum(death_data.queue_duration_sum()),
-      queue_duration_max(death_data.queue_duration_max()),
-      queue_duration_sample(death_data.queue_duration_sample()) {
+DeathDataSnapshot::DeathDataSnapshot(int count,
+                                     int32 run_duration_sum,
+                                     int32 run_duration_max,
+                                     int32 run_duration_sample,
+                                     int32 queue_duration_sum,
+                                     int32 queue_duration_max,
+                                     int32 queue_duration_sample)
+    : count(count),
+      run_duration_sum(run_duration_sum),
+      run_duration_max(run_duration_max),
+      run_duration_sample(run_duration_sample),
+      queue_duration_sum(queue_duration_sum),
+      queue_duration_max(queue_duration_max),
+      queue_duration_sample(queue_duration_sample) {
 }
 
 DeathDataSnapshot::~DeathDataSnapshot() {
+}
+
+DeathDataSnapshot DeathDataSnapshot::Delta(
+    const DeathDataSnapshot& older) const {
+  return DeathDataSnapshot(count - older.count,
+                           run_duration_sum - older.run_duration_sum,
+                           run_duration_max, run_duration_sample,
+                           queue_duration_sum - older.queue_duration_sum,
+                           queue_duration_max, queue_duration_sample);
 }
 
 //------------------------------------------------------------------------------
@@ -209,8 +253,7 @@ BirthOnThread::BirthOnThread(const Location& location,
 BirthOnThreadSnapshot::BirthOnThreadSnapshot() {
 }
 
-BirthOnThreadSnapshot::BirthOnThreadSnapshot(
-    const tracked_objects::BirthOnThread& birth)
+BirthOnThreadSnapshot::BirthOnThreadSnapshot(const BirthOnThread& birth)
     : location(birth.location()),
       thread_name(birth.birth_thread()->thread_name()) {
 }
@@ -241,9 +284,9 @@ NowFunction* ThreadData::now_function_ = NULL;
 // static
 bool ThreadData::now_function_is_time_ = false;
 
-// A TLS slot which points to the ThreadData instance for the current thread. We
-// do a fake initialization here (zeroing out data), and then the real in-place
-// construction happens when we call tls_index_.Initialize().
+// A TLS slot which points to the ThreadData instance for the current thread.
+// We do a fake initialization here (zeroing out data), and then the real
+// in-place construction happens when we call tls_index_.Initialize().
 // static
 base::ThreadLocalStorage::StaticSlot ThreadData::tls_index_ = TLS_INITIALIZER;
 
@@ -291,7 +334,8 @@ ThreadData::ThreadData(int thread_number)
   PushToHeadOfList();  // Which sets real incarnation_count_for_pool_.
 }
 
-ThreadData::~ThreadData() {}
+ThreadData::~ThreadData() {
+}
 
 void ThreadData::PushToHeadOfList() {
   // Toss in a hint of randomness (atop the uniniitalized value).
@@ -318,8 +362,7 @@ ThreadData* ThreadData::next() const { return next_; }
 
 // static
 void ThreadData::InitializeThreadContext(const std::string& suggested_name) {
-  if (!Initialize())  // Always initialize if needed.
-    return;
+  Initialize();
   ThreadData* current_thread_data =
       reinterpret_cast<ThreadData*>(tls_index_.Get());
   if (current_thread_data)
@@ -364,10 +407,8 @@ ThreadData* ThreadData::Get() {
 // static
 void ThreadData::OnThreadTermination(void* thread_data) {
   DCHECK(thread_data);  // TLS should *never* call us with a NULL.
-  // We must NOT do any allocations during this callback. There is a chance
+  // We must NOT do any allocations during this callback.  There is a chance
   // that the allocator is no longer active on this thread.
-  if (!kTrackAllTaskObjects)
-    return;  // Not compiled in.
   reinterpret_cast<ThreadData*>(thread_data)->OnThreadTerminationCleanup();
 }
 
@@ -390,9 +431,54 @@ void ThreadData::OnThreadTerminationCleanup() {
 }
 
 // static
-void ThreadData::Snapshot(ProcessDataSnapshot* process_data_snapshot) {
-  ThreadData::SnapshotCurrentPhase(
-      &process_data_snapshot->phased_process_data_snapshots[0]);
+void ThreadData::Snapshot(int current_profiling_phase,
+                          ProcessDataSnapshot* process_data_snapshot) {
+  // Get an unchanging copy of a ThreadData list.
+  ThreadData* my_list = ThreadData::first();
+
+  // Gather data serially.
+  // This hackish approach *can* get some slightly corrupt tallies, as we are
+  // grabbing values without the protection of a lock, but it has the advantage
+  // of working even with threads that don't have message loops.  If a user
+  // sees any strangeness, they can always just run their stats gathering a
+  // second time.
+  BirthCountMap birth_counts;
+  for (ThreadData* thread_data = my_list; thread_data;
+       thread_data = thread_data->next()) {
+    thread_data->SnapshotExecutedTasks(current_profiling_phase,
+                                       &process_data_snapshot->phased_snapshots,
+                                       &birth_counts);
+  }
+
+  // Add births that are still active -- i.e. objects that have tallied a birth,
+  // but have not yet tallied a matching death, and hence must be either
+  // running, queued up, or being held in limbo for future posting.
+  auto* current_phase_tasks =
+      &process_data_snapshot->phased_snapshots[current_profiling_phase].tasks;
+  for (const auto& birth_count : birth_counts) {
+    if (birth_count.second > 0) {
+      current_phase_tasks->push_back(
+          TaskSnapshot(BirthOnThreadSnapshot(*birth_count.first),
+                       DeathDataSnapshot(birth_count.second, 0, 0, 0, 0, 0, 0),
+                       "Still_Alive"));
+    }
+  }
+}
+
+// static
+void ThreadData::OnProfilingPhaseCompleted(int profiling_phase) {
+  // Get an unchanging copy of a ThreadData list.
+  ThreadData* my_list = ThreadData::first();
+
+  // Add snapshots for all instances of death data in all threads serially.
+  // This hackish approach *can* get some slightly corrupt tallies, as we are
+  // grabbing values without the protection of a lock, but it has the advantage
+  // of working even with threads that don't have message loops.  Any corruption
+  // shouldn't cause "cascading damage" to anything else (in later phases).
+  for (ThreadData* thread_data = my_list; thread_data;
+       thread_data = thread_data->next()) {
+    thread_data->OnProfilingPhaseCompletedOnThread(profiling_phase);
+  }
 }
 
 Births* ThreadData::TallyABirth(const Location& location) {
@@ -409,22 +495,10 @@ Births* ThreadData::TallyABirth(const Location& location) {
     birth_map_[location] = child;
   }
 
-  if (kTrackParentChildLinks && status_ > PROFILING_ACTIVE &&
-      !parent_stack_.empty()) {
-    const Births* parent = parent_stack_.top();
-    ParentChildPair pair(parent, child);
-    if (parent_child_set_.find(pair) == parent_child_set_.end()) {
-      // Lock since the map may get relocated now, and other threads sometimes
-      // snapshot it (but they lock before copying it).
-      base::AutoLock lock(map_lock_);
-      parent_child_set_.insert(pair);
-    }
-  }
-
   return child;
 }
 
-void ThreadData::TallyADeath(const Births& birth,
+void ThreadData::TallyADeath(const Births& births,
                              int32 queue_duration,
                              const TaskStopwatch& stopwatch) {
   int32 run_duration = stopwatch.RunDurationMs();
@@ -433,9 +507,9 @@ void ThreadData::TallyADeath(const Births& birth,
   const uint32 kSomePrimeNumber = 2147483647;
   random_number_ += queue_duration + run_duration + kSomePrimeNumber;
   // An address is going to have some randomness to it as well ;-).
-  random_number_ ^= static_cast<uint32>(&birth - reinterpret_cast<Births*>(0));
+  random_number_ ^= static_cast<uint32>(&births - reinterpret_cast<Births*>(0));
 
-  // We don't have queue durations without OS timer. OS timer is automatically
+  // We don't have queue durations without OS timer.  OS timer is automatically
   // used for task-post-timing, so the use of an alternate timer implies all
   // queue times are invalid, unless it was explicitly said that we can trust
   // the alternate timer.
@@ -445,29 +519,19 @@ void ThreadData::TallyADeath(const Births& birth,
     queue_duration = 0;
   }
 
-  DeathMap::iterator it = death_map_.find(&birth);
+  DeathMap::iterator it = death_map_.find(&births);
   DeathData* death_data;
   if (it != death_map_.end()) {
     death_data = &it->second;
   } else {
     base::AutoLock lock(map_lock_);  // Lock as the map may get relocated now.
-    death_data = &death_map_[&birth];
+    death_data = &death_map_[&births];
   }  // Release lock ASAP.
   death_data->RecordDeath(queue_duration, run_duration, random_number_);
-
-  if (!kTrackParentChildLinks)
-    return;
-  if (!parent_stack_.empty()) {  // We might get turned off.
-    DCHECK_EQ(parent_stack_.top(), &birth);
-    parent_stack_.pop();
-  }
 }
 
 // static
 Births* ThreadData::TallyABirthIfActive(const Location& location) {
-  if (!kTrackAllTaskObjects)
-    return NULL;  // Not compiled in.
-
   if (!TrackingStatus())
     return NULL;
   ThreadData* current_thread_data = Get();
@@ -480,14 +544,11 @@ Births* ThreadData::TallyABirthIfActive(const Location& location) {
 void ThreadData::TallyRunOnNamedThreadIfTracking(
     const base::TrackingInfo& completed_task,
     const TaskStopwatch& stopwatch) {
-  if (!kTrackAllTaskObjects)
-    return;  // Not compiled in.
-
   // Even if we have been DEACTIVATED, we will process any pending births so
   // that our data structures (which counted the outstanding births) remain
   // consistent.
-  const Births* birth = completed_task.birth_tally;
-  if (!birth)
+  const Births* births = completed_task.birth_tally;
+  if (!births)
     return;
   ThreadData* current_thread_data = stopwatch.GetThreadData();
   if (!current_thread_data)
@@ -496,7 +557,7 @@ void ThreadData::TallyRunOnNamedThreadIfTracking(
   // Watch out for a race where status_ is changing, and hence one or both
   // of start_of_run or end_of_run is zero.  In that case, we didn't bother to
   // get a time value since we "weren't tracking" and we were trying to be
-  // efficient by not calling for a genuine time value. For simplicity, we'll
+  // efficient by not calling for a genuine time value.  For simplicity, we'll
   // use a default zero duration when we can't calculate a true value.
   TrackedTime start_of_run = stopwatch.StartTime();
   int32 queue_duration = 0;
@@ -504,21 +565,18 @@ void ThreadData::TallyRunOnNamedThreadIfTracking(
     queue_duration = (start_of_run - completed_task.EffectiveTimePosted())
         .InMilliseconds();
   }
-  current_thread_data->TallyADeath(*birth, queue_duration, stopwatch);
+  current_thread_data->TallyADeath(*births, queue_duration, stopwatch);
 }
 
 // static
 void ThreadData::TallyRunOnWorkerThreadIfTracking(
-    const Births* birth,
+    const Births* births,
     const TrackedTime& time_posted,
     const TaskStopwatch& stopwatch) {
-  if (!kTrackAllTaskObjects)
-    return;  // Not compiled in.
-
   // Even if we have been DEACTIVATED, we will process any pending births so
   // that our data structures (which counted the outstanding births) remain
   // consistent.
-  if (!birth)
+  if (!births)
     return;
 
   // TODO(jar): Support the option to coalesce all worker-thread activity under
@@ -526,7 +584,7 @@ void ThreadData::TallyRunOnWorkerThreadIfTracking(
   // reduce memory (making it provably bounded), but run incrementally slower
   // (since we'll use locks on TallyABirth and TallyADeath).  The good news is
   // that the locks on TallyADeath will be *after* the worker thread has run,
-  // and hence nothing will be waiting for the completion (... besides some
+  // and hence nothing will be waiting for the completion (...  besides some
   // other thread that might like to run).  Also, the worker threads tasks are
   // generally longer, and hence the cost of the lock may perchance be amortized
   // over the long task's lifetime.
@@ -539,20 +597,17 @@ void ThreadData::TallyRunOnWorkerThreadIfTracking(
   if (!start_of_run.is_null()) {
     queue_duration = (start_of_run - time_posted).InMilliseconds();
   }
-  current_thread_data->TallyADeath(*birth, queue_duration, stopwatch);
+  current_thread_data->TallyADeath(*births, queue_duration, stopwatch);
 }
 
 // static
 void ThreadData::TallyRunInAScopedRegionIfTracking(
-    const Births* birth,
+    const Births* births,
     const TaskStopwatch& stopwatch) {
-  if (!kTrackAllTaskObjects)
-    return;  // Not compiled in.
-
   // Even if we have been DEACTIVATED, we will process any pending births so
   // that our data structures (which counted the outstanding births) remain
   // consistent.
-  if (!birth)
+  if (!births)
     return;
 
   ThreadData* current_thread_data = stopwatch.GetThreadData();
@@ -560,96 +615,74 @@ void ThreadData::TallyRunInAScopedRegionIfTracking(
     return;
 
   int32 queue_duration = 0;
-  current_thread_data->TallyADeath(*birth, queue_duration, stopwatch);
-}
-
-// static
-void ThreadData::SnapshotAllExecutedTasks(
-    ProcessDataPhaseSnapshot* process_data_phase,
-    BirthCountMap* birth_counts) {
-  if (!kTrackAllTaskObjects)
-    return;  // Not compiled in.
-
-  // Get an unchanging copy of a ThreadData list.
-  ThreadData* my_list = ThreadData::first();
-
-  // Gather data serially.
-  // This hackish approach *can* get some slighly corrupt tallies, as we are
-  // grabbing values without the protection of a lock, but it has the advantage
-  // of working even with threads that don't have message loops.  If a user
-  // sees any strangeness, they can always just run their stats gathering a
-  // second time.
-  for (ThreadData* thread_data = my_list;
-       thread_data;
-       thread_data = thread_data->next()) {
-    thread_data->SnapshotExecutedTasks(process_data_phase, birth_counts);
-  }
-}
-
-// static
-void ThreadData::SnapshotCurrentPhase(
-    ProcessDataPhaseSnapshot* process_data_phase) {
-  // Add births that have run to completion to |collected_data|.
-  // |birth_counts| tracks the total number of births recorded at each location
-  // for which we have not seen a death count.
-  BirthCountMap birth_counts;
-  ThreadData::SnapshotAllExecutedTasks(process_data_phase, &birth_counts);
-
-  // Add births that are still active -- i.e. objects that have tallied a birth,
-  // but have not yet tallied a matching death, and hence must be either
-  // running, queued up, or being held in limbo for future posting.
-  for (const auto& birth_count : birth_counts) {
-    if (birth_count.second > 0) {
-      process_data_phase->tasks.push_back(TaskSnapshot(
-          *birth_count.first, DeathData(birth_count.second), "Still_Alive"));
-    }
-  }
+  current_thread_data->TallyADeath(*births, queue_duration, stopwatch);
 }
 
 void ThreadData::SnapshotExecutedTasks(
-    ProcessDataPhaseSnapshot* process_data_phase,
+    int current_profiling_phase,
+    PhasedProcessDataSnapshotMap* phased_snapshots,
     BirthCountMap* birth_counts) {
   // Get copy of data, so that the data will not change during the iterations
   // and processing.
-  ThreadData::BirthMap birth_map;
-  ThreadData::DeathMap death_map;
-  ThreadData::ParentChildSet parent_child_set;
-  SnapshotMaps(&birth_map, &death_map, &parent_child_set);
-
-  for (const auto& death : death_map) {
-    process_data_phase->tasks.push_back(
-        TaskSnapshot(*death.first, death.second, thread_name()));
-    (*birth_counts)[death.first] -= death.first->birth_count();
-  }
+  BirthMap birth_map;
+  DeathsSnapshot deaths;
+  SnapshotMaps(current_profiling_phase, &birth_map, &deaths);
 
   for (const auto& birth : birth_map) {
     (*birth_counts)[birth.second] += birth.second->birth_count();
   }
 
-  if (!kTrackParentChildLinks)
-    return;
+  for (const auto& death : deaths) {
+    (*birth_counts)[death.first] -= death.first->birth_count();
 
-  for (const auto& parent_child : parent_child_set) {
-    process_data_phase->descendants.push_back(
-        ParentChildPairSnapshot(parent_child));
+    // For the current death data, walk through all its snapshots, starting from
+    // the current one, then from the previous profiling phase etc., and for
+    // each snapshot calculate the delta between the snapshot and the previous
+    // phase, if any.  Store the deltas in the result.
+    for (const DeathDataPhaseSnapshot* phase = &death.second; phase;
+         phase = phase->prev) {
+      const DeathDataSnapshot& death_data =
+          phase->prev ? phase->death_data.Delta(phase->prev->death_data)
+                      : phase->death_data;
+
+      if (death_data.count > 0) {
+        (*phased_snapshots)[phase->profiling_phase].tasks.push_back(
+            TaskSnapshot(BirthOnThreadSnapshot(*death.first), death_data,
+                         thread_name()));
+      }
+    }
   }
 }
 
 // This may be called from another thread.
-void ThreadData::SnapshotMaps(BirthMap* birth_map,
-                              DeathMap* death_map,
-                              ParentChildSet* parent_child_set) {
+void ThreadData::SnapshotMaps(int profiling_phase,
+                              BirthMap* birth_map,
+                              DeathsSnapshot* deaths) {
   base::AutoLock lock(map_lock_);
+
   for (const auto& birth : birth_map_)
     (*birth_map)[birth.first] = birth.second;
-  for (const auto& death : death_map_)
-    (*death_map)[death.first] = death.second;
 
-  if (!kTrackParentChildLinks)
-    return;
+  for (const auto& death : death_map_) {
+    deaths->push_back(std::make_pair(
+        death.first,
+        DeathDataPhaseSnapshot(profiling_phase, death.second.count(),
+                               death.second.run_duration_sum(),
+                               death.second.run_duration_max(),
+                               death.second.run_duration_sample(),
+                               death.second.queue_duration_sum(),
+                               death.second.queue_duration_max(),
+                               death.second.queue_duration_sample(),
+                               death.second.last_phase_snapshot())));
+  }
+}
 
-  for (const auto& parent_child : parent_child_set_)
-    parent_child_set->insert(parent_child);
+void ThreadData::OnProfilingPhaseCompletedOnThread(int profiling_phase) {
+  base::AutoLock lock(map_lock_);
+
+  for (auto& death : death_map_) {
+    death.second.OnProfilingPhaseCompleted(profiling_phase);
+  }
 }
 
 static void OptionallyInitializeAlternateTimer() {
@@ -658,11 +691,9 @@ static void OptionallyInitializeAlternateTimer() {
     ThreadData::SetAlternateTimeSource(alternate_time_source);
 }
 
-bool ThreadData::Initialize() {
-  if (!kTrackAllTaskObjects)
-    return false;  // Not compiled in.
+void ThreadData::Initialize() {
   if (status_ >= DEACTIVATED)
-    return true;  // Someone else did the initialization.
+    return;  // Someone else did the initialization.
   // Due to racy lazy initialization in tests, we'll need to recheck status_
   // after we acquire the lock.
 
@@ -671,7 +702,7 @@ bool ThreadData::Initialize() {
   // initialization.
   base::AutoLock lock(*list_lock_.Pointer());
   if (status_ >= DEACTIVATED)
-    return true;  // Someone raced in here and beat us.
+    return;  // Someone raced in here and beat us.
 
   // Put an alternate timer in place if the environment calls for it, such as
   // for tracking TCMalloc allocations.  This insertion is idempotent, so we
@@ -685,8 +716,7 @@ bool ThreadData::Initialize() {
   if (!tls_index_.initialized()) {  // Testing may have initialized this.
     DCHECK_EQ(status_, UNINITIALIZED);
     tls_index_.Initialize(&ThreadData::OnThreadTermination);
-    if (!tls_index_.initialized())
-      return false;
+    DCHECK(tls_index_.initialized());
   } else {
     // TLS was initialzed for us earlier.
     DCHECK_EQ(status_, DORMANT_DURING_TESTS);
@@ -696,29 +726,23 @@ bool ThreadData::Initialize() {
   // never again change in this process.
   ++incarnation_counter_;
 
-  // The lock is not critical for setting status_, but it doesn't hurt. It also
+  // The lock is not critical for setting status_, but it doesn't hurt.  It also
   // ensures that if we have a racy initialization, that we'll bail as soon as
   // we get the lock earlier in this method.
   status_ = kInitialStartupState;
-  if (!kTrackParentChildLinks &&
-      kInitialStartupState == PROFILING_CHILDREN_ACTIVE)
-    status_ = PROFILING_ACTIVE;
   DCHECK(status_ != UNINITIALIZED);
-  return true;
 }
 
 // static
-bool ThreadData::InitializeAndSetTrackingStatus(Status status) {
+void ThreadData::InitializeAndSetTrackingStatus(Status status) {
   DCHECK_GE(status, DEACTIVATED);
-  DCHECK_LE(status, PROFILING_CHILDREN_ACTIVE);
+  DCHECK_LE(status, PROFILING_ACTIVE);
 
-  if (!Initialize())  // No-op if already initialized.
-    return false;  // Not compiled in.
+  Initialize();  // No-op if already initialized.
 
-  if (!kTrackParentChildLinks && status > DEACTIVATED)
+  if (status > DEACTIVATED)
     status = PROFILING_ACTIVE;
   status_ = status;
-  return true;
 }
 
 // static
@@ -729,20 +753,6 @@ ThreadData::Status ThreadData::status() {
 // static
 bool ThreadData::TrackingStatus() {
   return status_ > DEACTIVATED;
-}
-
-// static
-bool ThreadData::TrackingParentChildStatus() {
-  return status_ >= PROFILING_CHILDREN_ACTIVE;
-}
-
-// static
-void ThreadData::PrepareForStartOfRun(const Births* parent) {
-  if (kTrackParentChildLinks && parent && status_ > PROFILING_ACTIVE) {
-    ThreadData* current_thread_data = Get();
-    if (current_thread_data)
-      current_thread_data->parent_stack_.push(parent);
-  }
 }
 
 // static
@@ -761,7 +771,7 @@ void ThreadData::EnableProfilerTiming() {
 TrackedTime ThreadData::Now() {
   if (kAllowAlternateTimeSourceHandling && now_function_)
     return TrackedTime::FromMilliseconds((*now_function_)());
-  if (kTrackAllTaskObjects && IsProfilerTimingEnabled() && TrackingStatus())
+  if (IsProfilerTimingEnabled() && TrackingStatus())
     return TrackedTime::Now();
   return TrackedTime();  // Super fast when disabled, or not compiled.
 }
@@ -786,8 +796,8 @@ void ThreadData::ShutdownSingleThreadedCleanup(bool leak) {
   // This is only called from test code, where we need to cleanup so that
   // additional tests can be run.
   // We must be single threaded... but be careful anyway.
-  if (!InitializeAndSetTrackingStatus(DEACTIVATED))
-    return;
+  InitializeAndSetTrackingStatus(DEACTIVATED);
+
   ThreadData* thread_data_list;
   {
     base::AutoLock lock(*list_lock_.Pointer());
@@ -931,11 +941,37 @@ ThreadData* TaskStopwatch::GetThreadData() const {
 }
 
 //------------------------------------------------------------------------------
+// DeathDataPhaseSnapshot
+
+DeathDataPhaseSnapshot::DeathDataPhaseSnapshot(
+    int profiling_phase,
+    int count,
+    int32 run_duration_sum,
+    int32 run_duration_max,
+    int32 run_duration_sample,
+    int32 queue_duration_sum,
+    int32 queue_duration_max,
+    int32 queue_duration_sample,
+    const DeathDataPhaseSnapshot* prev)
+    : profiling_phase(profiling_phase),
+      death_data(count,
+                 run_duration_sum,
+                 run_duration_max,
+                 run_duration_sample,
+                 queue_duration_sum,
+                 queue_duration_max,
+                 queue_duration_sample),
+      prev(prev) {
+}
+
+//------------------------------------------------------------------------------
+// TaskSnapshot
+
 TaskSnapshot::TaskSnapshot() {
 }
 
-TaskSnapshot::TaskSnapshot(const BirthOnThread& birth,
-                           const DeathData& death_data,
+TaskSnapshot::TaskSnapshot(const BirthOnThreadSnapshot& birth,
+                           const DeathDataSnapshot& death_data,
                            const std::string& death_thread_name)
     : birth(birth),
       death_data(death_data),
@@ -943,21 +979,6 @@ TaskSnapshot::TaskSnapshot(const BirthOnThread& birth,
 }
 
 TaskSnapshot::~TaskSnapshot() {
-}
-
-//------------------------------------------------------------------------------
-// ParentChildPairSnapshot
-
-ParentChildPairSnapshot::ParentChildPairSnapshot() {
-}
-
-ParentChildPairSnapshot::ParentChildPairSnapshot(
-    const ThreadData::ParentChildPair& parent_child)
-    : parent(*parent_child.first),
-      child(*parent_child.second) {
-}
-
-ParentChildPairSnapshot::~ParentChildPairSnapshot() {
 }
 
 //------------------------------------------------------------------------------

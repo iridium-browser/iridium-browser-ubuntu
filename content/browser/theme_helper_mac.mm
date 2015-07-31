@@ -15,15 +15,6 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/content_switches.h"
 
-// Declare notification names from the 10.7 SDK.
-#if !defined(MAC_OS_X_VERSION_10_7) || \
-    MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_7
-
-NSString* NSPreferredScrollerStyleDidChangeNotification =
-    @"NSPreferredScrollerStyleDidChangeNotification";
-
-#endif
-
 @interface ScrollbarPrefsObserver : NSObject
 
 + (void)registerAsObserver;
@@ -72,7 +63,7 @@ suspensionBehavior:NSNotificationSuspensionBehaviorCoalesce];
 }
 
 + (void)notifyPrefsChangedWithRedraw:(BOOL)redraw {
-  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
   [defaults synchronize];
 

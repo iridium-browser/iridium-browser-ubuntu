@@ -43,6 +43,35 @@ namespace blink {
 
 using namespace HTMLNames;
 
+class FirstSummarySelectFilter final : public HTMLContentSelectFilter {
+public:
+    virtual ~FirstSummarySelectFilter() { }
+
+    static PassOwnPtrWillBeRawPtr<FirstSummarySelectFilter> create()
+    {
+        return adoptPtrWillBeNoop(new FirstSummarySelectFilter());
+    }
+
+    bool canSelectNode(const WillBeHeapVector<RawPtrWillBeMember<Node>, 32>& siblings, int nth) const override
+    {
+        if (!siblings[nth]->hasTagName(HTMLNames::summaryTag))
+            return false;
+        for (int i = nth - 1; i >= 0; --i) {
+            if (siblings[i]->hasTagName(HTMLNames::summaryTag))
+                return false;
+        }
+        return true;
+    }
+
+    DEFINE_INLINE_VIRTUAL_TRACE()
+    {
+        HTMLContentSelectFilter::trace(visitor);
+    }
+
+private:
+    FirstSummarySelectFilter() { }
+};
+
 static DetailsEventSender& detailsToggleEventSender()
 {
     DEFINE_STATIC_LOCAL(DetailsEventSender, sharedToggleEventSender, (EventTypeNames::toggle));
@@ -52,7 +81,7 @@ static DetailsEventSender& detailsToggleEventSender()
 PassRefPtrWillBeRawPtr<HTMLDetailsElement> HTMLDetailsElement::create(Document& document)
 {
     RefPtrWillBeRawPtr<HTMLDetailsElement> details = adoptRefWillBeNoop(new HTMLDetailsElement(document));
-    details->ensureClosedShadowRoot();
+    details->ensureUserAgentShadowRoot();
     return details.release();
 }
 
@@ -80,16 +109,13 @@ LayoutObject* HTMLDetailsElement::createLayoutObject(const ComputedStyle&)
     return new LayoutBlockFlow(this);
 }
 
-void HTMLDetailsElement::didAddClosedShadowRoot(ShadowRoot& root)
+void HTMLDetailsElement::didAddUserAgentShadowRoot(ShadowRoot& root)
 {
-    DEFINE_STATIC_LOCAL(const AtomicString, summarySelector, ("summary:first-of-type", AtomicString::ConstructFromLiteral));
-
     RefPtrWillBeRawPtr<HTMLSummaryElement> defaultSummary = HTMLSummaryElement::create(document());
-    defaultSummary->appendChild(Text::create(document(), locale().queryString(blink::WebLocalizedString::DetailsLabel)));
+    defaultSummary->appendChild(Text::create(document(), locale().queryString(WebLocalizedString::DetailsLabel)));
 
-    RefPtrWillBeRawPtr<HTMLContentElement> summary = HTMLContentElement::create(document());
+    RefPtrWillBeRawPtr<HTMLContentElement> summary = HTMLContentElement::create(document(), FirstSummarySelectFilter::create());
     summary->setIdAttribute(ShadowElementNames::detailsSummary());
-    summary->setAttribute(selectAttr, summarySelector);
     summary->appendChild(defaultSummary);
     root.appendChild(summary.release());
 
@@ -105,7 +131,7 @@ Element* HTMLDetailsElement::findMainSummary() const
     if (HTMLSummaryElement* summary = Traversal<HTMLSummaryElement>::firstChild(*this))
         return summary;
 
-    HTMLContentElement* content = toHTMLContentElement(closedShadowRoot()->firstChild());
+    HTMLContentElement* content = toHTMLContentElement(userAgentShadowRoot()->firstChild());
     ASSERT(content->firstChild() && isHTMLSummaryElement(*content->firstChild()));
     return toElement(content->firstChild());
 }
@@ -122,7 +148,7 @@ void HTMLDetailsElement::parseAttribute(const QualifiedName& name, const AtomicS
         detailsToggleEventSender().cancelEvent(this);
         detailsToggleEventSender().dispatchEventSoon(this);
 
-        Element* content = ensureClosedShadowRoot().getElementById(ShadowElementNames::detailsContent());
+        Element* content = ensureUserAgentShadowRoot().getElementById(ShadowElementNames::detailsContent());
         ASSERT(content);
         if (m_isOpen)
             content->removeInlineStyleProperty(CSSPropertyDisplay);

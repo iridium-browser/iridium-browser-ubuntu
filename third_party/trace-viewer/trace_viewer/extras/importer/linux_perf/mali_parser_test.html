@@ -184,20 +184,20 @@ tv.b.unittest.testSuite(function() { // @suppress longLineCheck
         new tv.c.TraceModel(linesNoThread.join('\n'), false);
     var traceWithThread =
         new tv.c.TraceModel(linesWithThread.join('\n'), false);
-    assertFalse(traceNoThread.hasImportWarnings);
-    assertFalse(traceWithThread.hasImportWarnings);
+    assert.isFalse(traceNoThread.hasImportWarnings);
+    assert.isFalse(traceWithThread.hasImportWarnings);
 
     var threadsNoThread = traceNoThread.getAllThreads();
     var threadsWithThread = traceWithThread.getAllThreads();
-    assertEquals(1, threadsNoThread.length);
-    assertEquals(1, threadsWithThread.length);
+    assert.equal(threadsNoThread.length, 1);
+    assert.equal(threadsWithThread.length, 1);
 
     var maliThreadNoThread = threadsNoThread[0];
     var maliThreadWithThread = threadsWithThread[0];
-    assertEquals('mali', maliThreadNoThread.tid);
-    assertEquals('mali-1878934320', maliThreadWithThread.tid);
-    assertEquals(9, maliThreadNoThread.sliceGroup.length);
-    assertEquals(9, maliThreadWithThread.sliceGroup.length);
+    assert.equal(maliThreadNoThread.tid, 'mali');
+    assert.equal(maliThreadWithThread.tid, 'mali-1878934320');
+    assert.equal(maliThreadNoThread.sliceGroup.length, 9);
+    assert.equal(maliThreadWithThread.sliceGroup.length, 9);
   });
 
   test('DVFSFrequencyImport', function() {
@@ -208,14 +208,14 @@ tv.b.unittest.testSuite(function() { // @suppress longLineCheck
                      'frequency=400'
     ];
     var m = new tv.c.TraceModel(lines.join('\n'), false);
-    assertFalse(m.hasImportWarnings);
+    assert.isFalse(m.hasImportWarnings);
 
     var counters = m.getAllCounters();
-    assertEquals(1, counters.length);
+    assert.equal(counters.length, 1);
 
     var c0 = counters[0];
-    assertEquals(c0.name, 'DVFS Frequency');
-    assertEquals(2, c0.series[0].samples.length);
+    assert.equal(c0.name, 'DVFS Frequency');
+    assert.equal(c0.series[0].samples.length, 2);
   });
 
   test('DVFSVoltageImport', function() {
@@ -226,14 +226,14 @@ tv.b.unittest.testSuite(function() { // @suppress longLineCheck
                      'voltage=1100000'
     ];
     var m = new tv.c.TraceModel(lines.join('\n'), false);
-    assertFalse(m.hasImportWarnings);
+    assert.isFalse(m.hasImportWarnings);
 
     var counters = m.getAllCounters();
-    assertEquals(1, counters.length);
+    assert.equal(counters.length, 1);
 
     var c0 = counters[0];
-    assertEquals(c0.name, 'DVFS Voltage');
-    assertEquals(2, c0.series[0].samples.length);
+    assert.equal(c0.name, 'DVFS Voltage');
+    assert.equal(c0.series[0].samples.length, 2);
   });
 
   test('DVFSUtilizationImport', function() {
@@ -244,14 +244,14 @@ tv.b.unittest.testSuite(function() { // @suppress longLineCheck
                      'utilization=37'
     ];
     var m = new tv.c.TraceModel(lines.join('\n'), false);
-    assertFalse(m.hasImportWarnings);
+    assert.isFalse(m.hasImportWarnings);
 
     var counters = m.getAllCounters();
-    assertEquals(1, counters.length);
+    assert.equal(counters.length, 1);
 
     var c0 = counters[0];
-    assertEquals(c0.name, 'DVFS Utilization');
-    assertEquals(2, c0.series[0].samples.length);
+    assert.equal(c0.name, 'DVFS Utilization');
+    assert.equal(c0.series[0].samples.length, 2);
   });
 
   test('maliHWCImport', function() {
@@ -464,15 +464,15 @@ tv.b.unittest.testSuite(function() { // @suppress longLineCheck
                      'mali_hwc_VCACHE_MISS: val=70'
     ];
     var m = new tv.c.TraceModel(lines.join('\n'), false);
-    assertFalse(m.hasImportWarnings);
+    assert.isFalse(m.hasImportWarnings);
 
     var counters = m.getAllCounters();
-    assertEquals(103, counters.length);
+    assert.equal(counters.length, 103);
 
     // all counters should have 1 sample
     for (var tI = 0; tI < counters.length; tI++) {
       var counter = counters[tI];
-      assertEquals(1, counter.series[0].samples.length);
+      assert.equal(counter.series[0].samples.length, 1);
     }
     // TODO(sleffler) verify counter names? (not sure if it's worth the effort)
   });

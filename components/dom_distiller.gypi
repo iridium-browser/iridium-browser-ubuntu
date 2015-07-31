@@ -82,12 +82,19 @@
         'dom_distiller/core/dom_distiller_model.cc',
         'dom_distiller/core/dom_distiller_model.h',
         'dom_distiller/core/dom_distiller_observer.h',
+        'dom_distiller/core/dom_distiller_request_view_base.cc',
+        'dom_distiller/core/dom_distiller_request_view_base.h',
         'dom_distiller/core/dom_distiller_service.cc',
         'dom_distiller/core/dom_distiller_service.h',
         'dom_distiller/core/dom_distiller_service_android.cc',
         'dom_distiller/core/dom_distiller_service_android.h',
         'dom_distiller/core/dom_distiller_store.cc',
         'dom_distiller/core/dom_distiller_store.h',
+        'dom_distiller/core/dom_distiller_switches.cc',
+        'dom_distiller/core/dom_distiller_switches.h',
+        'dom_distiller/core/experiments.cc',
+        'dom_distiller/core/experiments.h',
+        'dom_distiller/core/external_feedback_reporter.h',
         'dom_distiller/core/feedback_reporter.cc',
         'dom_distiller/core/feedback_reporter.h',
         'dom_distiller/core/font_family_list.h',
@@ -178,12 +185,22 @@
           'sources': [
             'dom_distiller/content/distillable_page_utils.cc',
             'dom_distiller/content/distillable_page_utils.h',
+            'dom_distiller/content/distillable_page_utils_android.cc',
+            'dom_distiller/content/distillable_page_utils_android.h',
             'dom_distiller/content/distiller_page_web_contents.cc',
             'dom_distiller/content/distiller_page_web_contents.h',
             'dom_distiller/content/dom_distiller_viewer_source.cc',
             'dom_distiller/content/dom_distiller_viewer_source.h',
             'dom_distiller/content/web_contents_main_frame_observer.cc',
             'dom_distiller/content/web_contents_main_frame_observer.h',
+          ],
+          'conditions': [
+            ['OS == "android"', {
+              'dependencies': [
+                'dom_distiller_content_jni_headers',
+                'dom_distiller_core_jni_headers',
+              ],
+            }],
           ],
         },
       ],
@@ -213,13 +230,22 @@
     ['OS=="android"', {
       'targets': [
         {
-          # GN: //components/dom_distiller/android:dom_distiller_core_java
+          # TODO(cjhopman): remove this when it is rolled downstream.
           'target_name': 'dom_distiller_core_java',
+          'type': 'none',
+          'dependencies': [
+            'dom_distiller_java',
+          ],
+        },
+        {
+          # GN: //components/dom_distiller/android:dom_distiller_java
+          'target_name': 'dom_distiller_java',
           'type': 'none',
           'dependencies': [
             'dom_distiller_core_font_family_java',
             'dom_distiller_core_theme_java',
             '../base/base.gyp:base',
+            '../content/content.gyp:content_java',
           ],
           'variables': {
             'java_in_dir': 'dom_distiller/android/java',
@@ -238,6 +264,18 @@
             'template_deps': ['dom_distiller/core/font_family_list.h'],
           },
           'includes': [ '../build/android/java_cpp_template.gypi' ],
+        },
+        {
+          # GN: //components/dom_distiller/content:jni_headers
+          'target_name': 'dom_distiller_content_jni_headers',
+          'type': 'none',
+          'sources': [
+            'dom_distiller/android/java/src/org/chromium/components/dom_distiller/content/DistillablePageUtils.java',
+          ],
+          'variables': {
+            'jni_gen_package': 'dom_distiller_content',
+          },
+          'includes': [ '../build/jni_generator.gypi' ],
         },
         {
           # GN: //components/dom_distiller/core:jni_headers
