@@ -1,3 +1,9 @@
+iridium-browser (44.0.2403.125-0iridium44.0+1) precise; urgency=low
+
+  * Updated iridium-browser patch to 44.0
+
+ -- Joachim Bauch <bauch@struktur.de>  Tue, 11 Aug 2015 09:51:53 +0200
+
 iridium-browser (44.0.2403.125-0iridium44.0rc1+3) precise; urgency=low
 
   * Update building of FFmpeg to still by dynamically linked (is static starting with Chromium 44).
