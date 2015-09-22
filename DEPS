@@ -84,9 +84,9 @@ deps = {
   'src/testing/gtest':
     (Var("chromium_git")) + '/external/googletest.git@23574bf2333f834ff665f894c97bef8a5b33a0a9',
   'src/third_party/WebKit':
-    (Var("chromium_git")) + '/chromium/blink.git@7f53d895aa137f17528d92583de0ecffa6e6aebf',
+    (Var("chromium_git")) + '/chromium/blink.git@35997cdedc0ee157adfff78fe124d4227c58f973',
   'src/third_party/angle':
-    (Var("chromium_git")) + '/angle/angle.git@fa9744b09e2478c75a25fd1b497469d429e81591',
+    (Var("chromium_git")) + '/angle/angle.git@709dc46cbd06c98b7450d702ade3210eef831a70',
   'src/third_party/bidichecker':
     (Var("chromium_git")) + '/external/bidichecker/lib.git@97f2aa645b74c28c57eca56992235c79850fa9e0',
   'src/third_party/boringssl/src':
@@ -154,7 +154,7 @@ deps = {
   'src/third_party/sfntly/cpp/src':
     (Var("chromium_git")) + '/external/sfntly/cpp/src.git@1bdaae8fc788a5ac8936d68bf24f37d977a13dac',
   'src/third_party/skia':
-    (Var("chromium_git")) + '/skia.git@21518b1ea326e93676131b1936fcb06a7da53f64',
+    (Var("chromium_git")) + '/skia.git@4d5906855ab3aa195841d92b7810c02c57b5b50a',
   'src/third_party/smhasher/src':
     (Var("chromium_git")) + '/external/smhasher.git@e87738e57558e0ec472b2fc3a643b838e5b6e88f',
   'src/third_party/snappy/src':
@@ -184,7 +184,7 @@ deps = {
   'src/tools/swarming_client':
     (Var("chromium_git")) + '/external/swarming.client.git@b39a448d8522392389b28f6997126a6ab04bfe87',
   'src/v8':
-    (Var("chromium_git")) + '/v8/v8.git@f2469f248ac14c8fc9b6b2870b75bfbc15ea011f'
+    (Var("chromium_git")) + '/v8/v8.git@5dbf1f70f4ea251a5f4aaddbd3440b1d6c1d1c7b'
 }
 
 deps_os = {
@@ -192,7 +192,7 @@ deps_os = {
     'src/third_party/android_protobuf/src':
       (Var("chromium_git")) + '/external/android_protobuf.git@94f522f907e3f34f70d9e7816b947e62fddbb267',
     'src/third_party/android_tools':
-      (Var("chromium_git")) + '/android_tools.git@c07c18af096f86cdcc9657ee856f26f56eaf1130',
+      (Var("chromium_git")) + '/android_tools.git@e0ab396314ac4f2fdbb5538597914a0fd3cb447d',
     'src/third_party/apache-mime4j':
       (Var("chromium_git")) + '/chromium/deps/apache-mime4j.git@28cb1108bff4b6cf0a2e86ff58b3d025934ebe3a',
     'src/third_party/appurify-python/src':
