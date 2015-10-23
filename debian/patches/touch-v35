@@ -4,16 +4,12 @@ Forwarded: yes
 
 --- a/ui/events/devices/x11/touch_factory_x11.cc
 +++ b/ui/events/devices/x11/touch_factory_x11.cc
-@@ -128,8 +128,11 @@
-           XITouchClassInfo* tci =
-               reinterpret_cast<XITouchClassInfo*>(xiclassinfo);
+@@ -129,6 +129,8 @@
            // Only care direct touch device (such as touch screen) right now
--          if (tci->mode == XIDirectTouch)
-+          if (tci->mode == XIDirectTouch) {
+           if (tci->mode == XIDirectTouch) {
              CacheTouchscreenIds(devinfo.deviceid);
 +            touch_device_lookup_[devinfo.deviceid] = true;
 +            touch_device_list_[devinfo.deviceid] = true;
-+          }
-         }
-       }
-     }
+             if (devinfo.use == XISlavePointer) {
+               device_master_id_list_[devinfo.deviceid] = devinfo.attachment;
+               // If the slave device is direct touch device, we also set its

@@ -1,7 +1,7 @@
 
 --- a/tools/find_depot_tools.py
 +++ b/tools/find_depot_tools.py
-@@ -40,6 +40,3 @@ def add_depot_tools_to_path():
+@@ -40,6 +40,3 @@
    return None
  
  add_depot_tools_to_path()
